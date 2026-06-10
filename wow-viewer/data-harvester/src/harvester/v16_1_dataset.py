@@ -58,6 +58,36 @@ def _downsample_256_to_16(x: np.ndarray) -> np.ndarray:
     return reshaped.mean(axis=(1, 3)).astype(np.float32, copy=False)
 
 
+def compose_terrain_valid_mask_257(
+    *,
+    normal_mask_257: np.ndarray,
+    object_presence_257: np.ndarray,
+    liquid_mask_256: np.ndarray,
+    object_roof_weight_257: np.ndarray | None = None,
+    what_plate: bool = False,
+) -> np.ndarray:
+    terrain_valid_257 = normal_mask_257.astype(np.float32, copy=True)
+    terrain_valid_257 *= 1.0 - np.clip(object_presence_257.astype(np.float32, copy=False), 0.0, 1.0)
+    if object_roof_weight_257 is not None:
+        terrain_valid_257 *= np.clip(object_roof_weight_257.astype(np.float32, copy=False), 0.0, 1.0)
+    liquid_mask_257 = np.pad(liquid_mask_256.astype(np.float32, copy=False), ((0, 1), (0, 1)), mode="edge")
+    terrain_valid_257 *= 1.0 - (0.85 * np.clip(liquid_mask_257, 0.0, 1.0))
+    if what_plate:
+        terrain_valid_257[...] = 0.0
+    return terrain_valid_257
+
+
+def compose_object_loss_weights_257(
+    *,
+    object_presence_257: np.ndarray,
+    object_roof_weight_257: np.ndarray | None = None,
+) -> np.ndarray:
+    weight_257 = 1.0 - np.clip(object_presence_257.astype(np.float32, copy=False), 0.0, 1.0)
+    if object_roof_weight_257 is not None:
+        weight_257 *= np.clip(object_roof_weight_257.astype(np.float32, copy=False), 0.0, 1.0)
+    return weight_257.astype(np.float32, copy=False)
+
+
 def _interpolate_checkerboard_normals(normals: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Fill MCNR checkerboard gaps by averaging valid cardinal neighbors.
 
@@ -119,6 +149,7 @@ class V161Dataset(Dataset):
         curation_manifest: str | Path | None = None,
         height_channel: bool = False,
         object_roof_channel: bool = False,
+        lightweight_object_gating: bool = False,
         curation_min_terrain_validity: float = 0.0,
         curation_min_minimap_usefulness: float = 0.0,
         curation_reject_what_plate: bool = False,
@@ -127,6 +158,7 @@ class V161Dataset(Dataset):
         self.augment = augment and split == "train"
         self.height_channel = bool(height_channel)
         self.object_roof_channel = bool(object_roof_channel)
+        self.lightweight_object_gating = bool(lightweight_object_gating)
         self._rng = np.random.RandomState(seed)
         self._stores: dict[str, zarr.Group] = {}
         self._index_entries: list[dict] = []
@@ -219,16 +251,6 @@ class V161Dataset(Dataset):
         mcnk_flags_16 = root["mcnk_flags_16"][tile_id].astype(np.int32) if "mcnk_flags_16" in root else np.zeros((16, 16), dtype=np.int32)
         liquid_type_16, liquid_type_valid_16 = _flags_to_liquid_type(mcnk_flags_16)
 
-        # Prefer precise mask (rasterized WMO mesh) over filtered (coarse AABB)
-        if "object_precise_mask" in root:
-            object_filtered = root["object_precise_mask"][tile_id].astype(np.float32)
-        elif "object_filtered_mask" in root:
-            object_filtered = root["object_filtered_mask"][tile_id].astype(np.float32)
-        else:
-            object_filtered = root["object_mask"][tile_id].astype(np.float32)
-        weight_257 = 1.0 - np.clip(object_filtered, 0.0, 1.0)
-        weight_256 = _crop_257_to_256(weight_257)
-        weight_16 = _downsample_256_to_16(weight_256)
         mddf_mask = root["mddf_mask"][tile_id].astype(np.float32) if "mddf_mask" in root else np.zeros((257, 257), dtype=np.float32)
         modf_mask = root["modf_mask"][tile_id].astype(np.float32) if "modf_mask" in root else np.zeros((257, 257), dtype=np.float32)
         object_presence_257 = np.maximum(mddf_mask, modf_mask).astype(np.float32, copy=False)
@@ -238,6 +260,21 @@ class V161Dataset(Dataset):
         object_roof_weight_256 = 1.0 - object_roof_mask_256
         object_roof_weight_257 = np.pad(object_roof_weight_256, ((0, 1), (0, 1)), mode="edge")
         object_roof_source = str(entry.get("object_roof_mask_source", "none"))
+        # Focused height/normal runs do not need the heavy precise object mask.
+        if self.lightweight_object_gating:
+            object_filtered = 1.0 - compose_object_loss_weights_257(
+                object_presence_257=object_presence_257,
+                object_roof_weight_257=object_roof_weight_257,
+            )
+        elif "object_precise_mask" in root:
+            object_filtered = root["object_precise_mask"][tile_id].astype(np.float32)
+        elif "object_filtered_mask" in root:
+            object_filtered = root["object_filtered_mask"][tile_id].astype(np.float32)
+        else:
+            object_filtered = root["object_mask"][tile_id].astype(np.float32)
+        weight_257 = 1.0 - np.clip(object_filtered, 0.0, 1.0)
+        weight_256 = _crop_257_to_256(weight_257)
+        weight_16 = _downsample_256_to_16(weight_256)
         alpha_painted_256 = alpha_painted(alpha).astype(np.float32, copy=False)
         alpha_painted_cov = float((alpha_painted_256 >= 0.05).mean())
         mcly_cov = mcly_painted_coverage(mcly_mask)
@@ -252,10 +289,13 @@ class V161Dataset(Dataset):
                 object_cov=object_cov,
             )
         )
-        terrain_valid_mask_257 = normal_mask * (1.0 - np.clip(object_presence_257, 0.0, 1.0))
-        terrain_valid_mask_257 *= (1.0 - np.clip(np.pad(liquid_mask, ((0, 1), (0, 1)), mode="edge"), 0.0, 1.0) * 0.85)
-        if what_plate_flag > 0.5:
-            terrain_valid_mask_257[...] = 0.0
+        terrain_valid_mask_257 = compose_terrain_valid_mask_257(
+            normal_mask_257=normal_mask,
+            object_presence_257=object_presence_257,
+            liquid_mask_256=liquid_mask,
+            object_roof_weight_257=object_roof_weight_257,
+            what_plate=what_plate_flag > 0.5,
+        )
         mcly_any_16 = (mcly_mask.max(axis=2) > 0.05).astype(np.float32, copy=False)
 
         if self.augment:

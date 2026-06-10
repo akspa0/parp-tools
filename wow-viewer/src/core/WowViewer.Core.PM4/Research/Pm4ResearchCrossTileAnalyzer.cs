@@ -31,6 +31,7 @@ public static class Pm4ResearchCrossTileAnalyzer
             IReadOnlyList<Pm4MslkEntry> mslk = doc.KnownChunks.Mslk;
             IReadOnlyList<Pm4MprlEntry> mprl = doc.KnownChunks.Mprl;
             int mscnCount = doc.KnownChunks.Mscn?.Count ?? 0;
+            uint field04 = doc.KnownChunks.Mshd?.Field04 ?? 0;
 
             int ck24GroupsInTile = 0;
             Dictionary<uint, int> tileCk24SurfaceCounts = new();
@@ -49,6 +50,7 @@ public static class Pm4ResearchCrossTileAnalyzer
                 }
 
                 accum.TileCoordinates.Add(tileCoord);
+                accum.Field04Values.Add(field04);
                 accum.SurfaceCount++;
 
                 int mscnRef = (int)surface._0x18;
@@ -61,7 +63,6 @@ public static class Pm4ResearchCrossTileAnalyzer
 
             ck24GroupsInTile = tileCk24SurfaceCounts.Count;
 
-            var mshd = doc.KnownChunks.Mshd;
             tileAccum[tileCoord] = new Pm4CrossTileTileAccum(
                 tileCoord,
                 ck24GroupsInTile,
@@ -69,25 +70,32 @@ public static class Pm4ResearchCrossTileAnalyzer
                 mslk?.Count ?? 0,
                 mscnCount,
                 mprl?.Count ?? 0,
-                mshd?.Field00 ?? 0,
-                mshd?.Field04 ?? 0,
-                mshd?.Field08 ?? 0);
+                doc.KnownChunks.Mshd?.Field00 ?? 0,
+                field04,
+                doc.KnownChunks.Mshd?.Field08 ?? 0);
         }
 
         int totalDistinctCk24 = ck24Accum.Count;
         int crossTileCk24Count = 0;
+        int crossTileCk24MultiField04Count = 0;
         List<Pm4CrossTileCk24Record> crossTileRecords = new();
 
         foreach (Pm4CrossTileCk24Accum accum in ck24Accum.Values.OrderByDescending(a => a.TileCoordinates.Count).ThenByDescending(a => a.SurfaceCount))
         {
             if (accum.TileCoordinates.Count > 1)
+            {
                 crossTileCk24Count++;
+                if (accum.Field04Values.Count > 1)
+                    crossTileCk24MultiField04Count++;
+            }
 
             crossTileRecords.Add(new Pm4CrossTileCk24Record(
                 accum.Ck24,
                 accum.Ck24Type,
                 accum.Ck24ObjectId,
                 accum.TileCoordinates.OrderBy(c => c).ToList(),
+                accum.Field04Values.Count,
+                accum.Field04Values.OrderBy(static value => value).ToList(),
                 accum.SurfaceCount,
                 accum.MscnRefCount,
                 0));
@@ -111,6 +119,7 @@ public static class Pm4ResearchCrossTileAnalyzer
         List<string> notes = new();
         notes.Add($"'{totalDistinctCk24}' distinct CK24 values across '{nonEmptyFiles}' non-empty tiles.");
         notes.Add($"'{crossTileCk24Count}' CK24 values span 2+ tiles ({(crossTileCk24Count * 100.0 / Math.Max(1, totalDistinctCk24)):F1}%).");
+        notes.Add($"'{crossTileCk24MultiField04Count}' cross-tile CK24 values span multiple MSHD.Field04 buckets, so the same WMO/M2 candidate can bridge more than one Field04 value.");
         notes.Add($"Top cross-tile CK24 spans '{crossTileRecords.FirstOrDefault()?.TileCoordinates.Count ?? 0}' tiles.");
         notes.Add($"This report reads all PM4 tiles as a single map object — cross-tile CK24 tracking shows which objects span tile boundaries.");
         notes.Add($"No ADT correlation attempted — ADT files in this corpus are not valid/populated.");
@@ -122,6 +131,7 @@ public static class Pm4ResearchCrossTileAnalyzer
             0,
             totalDistinctCk24,
             crossTileCk24Count,
+            crossTileCk24MultiField04Count,
             0,
             crossTileRecords.Take(40).ToList(),
             tileSummaries,
@@ -142,6 +152,7 @@ public static class Pm4ResearchCrossTileAnalyzer
         public byte Ck24Type { get; }
         public ushort Ck24ObjectId { get; }
         public HashSet<string> TileCoordinates { get; } = new(StringComparer.Ordinal);
+        public HashSet<uint> Field04Values { get; } = [];
         public int SurfaceCount { get; set; }
         public int MscnRefCount { get; set; }
 

@@ -1,655 +1,335 @@
-# ACTIVE CONTEXT — wow-viewer
+# Active Context
 
-## Branch
-- `v0.5.0-dev`
+## Workspace Guardrails
 
-## Primary Live Lane
-- V16 terrain dataset + training is the current execution path.
-- New V18 direction is now explicitly spec'd as a dataset-refinement-first lane:
-  - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/spec.md`
-  - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/plan.md`
-  - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/tasks.md`
-  - key shift: detect/mined pastes on stitched map canvases (multi-tile), then cross-build dedupe into canonical paste families, then build refined manifests for model training
-  - rationale: tile-local mining/training overcounts copy-pasted motifs and fragments large authored regions
-  - latest refinement captured in spec pack:
-    - paste library is now a first-class metadata contract (stable IDs, canonical names, aliases, role/shape tags)
-    - alpha-layer-aware signatures are required for dedupe/variant separation
-    - MCNK AreaID overlap/distribution is required for macro-zone composition grouping
-    - auto-naming + confidence + review/lock workflow is now planned as a dedicated phase
-    - family-balanced manifest generation is now explicit (balance by paste family, not raw row frequency)
-- **Spec 009 landed (2026-05-22):** 2,650-line comprehensive design specification at
-  `wow-viewer/specs/009-full-project-reimplementation-spec/spec.md`.
-  Covers all 28 sections: binary format specs, rendering pipeline, ML pipeline,
-  CLI tools, PM4 research, WMO portals, terrain edge cases, M2 animation, GLSL
-  shaders, converters, liquid system, object masking, world rendering, legacy
-  renderer. Sufficient for full from-scratch reimplementation. This is now the
-  master design reference for the project.
-- `wow-viewer/specs/012-real-validation-batch-extraction/` now has bounded wow-viewer GPU proof on both staged anchors: `0_5_3_3368 / Azeroth_30_48` and `3_3_5_12340 / Azeroth_30_48`. `ValidationWorldSceneAdapter` now owns the hidden-window OpenGL render/readback path behind `IValidationWorldSceneAdapter`, and `WowViewer.Tool.ValidationCapture capture --gpu-viewer-style` completes `4/4` variants on both anchors. The same bounded runs now also emit compatible `images/<tile>_object_visibility_mask.png` and `images/<tile>_no_objects.png` outputs under the dataset root, so the first Phase 5 artifact handoff is landed for the proof surface. This still bypasses `WowViewerWorldScenePlanner` preview framing, but it continues to reuse `WorldGpuPreviewRenderer` as a temporary backend; the next open step is broader automation cutover plus longer-range renderer extraction.
-- V16.1.1 is now the named next bounded implementation slice on top of the
-  landed V16.1 base:
-  - normal-first again, not a fresh family reset
-  - smarter curated manifests, not blind full-pool replay
-  - difficulty buckets: `easy`, `medium`, `hard`, `pathological`
-  - bucket-aware epoch sampling for short scouting runs
-  - stronger hard-region weighting inside the normal loss
-  - optional uncertainty-guided normal training if the simpler weighting lane
-    proves insufficient
-  - target fresh-chat spec pack:
-    - `wow-viewer/specs/007-v16-1-1-curated-normal-acceleration/`
-  - the first implementation slice is now landed:
-    - curation profile:
-      - `normal_terrain_v16_1_1`
-    - manifest fields:
-      - usefulness scoring
-      - difficulty buckets
-      - scouting recipe metadata
-    - trainer seam:
-      - `--bucket-sampling-profile v16_1_1_normal`
-      - `evidence/train_epoch_bucket_usage.jsonl`
-    - hard-region weighting now includes:
-      - height gradients
-      - local normal variation
-      - painted alpha transitions
-      - MCLY transitions
-      - terrain-valid masking remains authoritative
-  - focused proof now exists at:
-    - `wow-viewer/output/datasets/v16/curation/smoke_v16_1_1_curation_335/`
-    - `wow-viewer/models/v16_1/normal/runs/smoke_v16_1_1_bucket_cpu/`
-    - `wow-viewer/models/v16_1/normal/runs/smoke_v16_1_1_bucket_rotation_cpu/`
-  - first longer GPU normal run now exists at:
-    - `wow-viewer/models/v16_1/normal/runs/v16_1_1_normal_pool800_epoch256_autotune12_compile/`
-  - current operator truth:
-    - the first longer V16.1.1 normal run finished, but it still needs more epochs
-    - V16.1.x normal training resumes with `--resume-checkpoint`, not `--resume-from auto`
-    - `--epochs` remains the total run ceiling, so the continuation command must raise that ceiling above the completed checkpoint epoch
-    - the shared V16.1 trainer now extends the cosine scheduler when resuming to a higher total epoch ceiling, so resume is no longer pinned to the original scheduler `T_max`
-- V16.1.3 height-channel normal model is now the active normal-lane iteration:
-  - adds `height_norm` as a 4th input channel to the normal model
-  - single model, clean gradient flow — no separate refiner, no distillation loops
-  - `V161NormalHeightModel` in `v16_1_models.py`: 3,549,955 params, Conv2d(4,64) first layer
-  - CLI: `--height-channel` flag on `train_v16_1_normal.py`
-  - smoke proof: 10 epochs, val_loss dropped from 2.01 to 0.54
-  - 1000-epoch long run now training at `v16_1_3_height_normal_pool4000` with 12GB autotune
-  - autotune selected batch-size=48, torch.compile enabled, ~172s/epoch
-  - V16.1.2 refiner approach was attempted but failed due to detached computation graph; V16.1.3 replaces it
-  - spec: `wow-viewer/specs/016-v16-1-3-height-channel-normal-model/`
-- V16.1 is now the named next architecture lane for terrain models:
-  - one independent model per target family
-  - `minimap -> height`
-  - `minimap -> normal`
-  - `minimap -> holes`
-  - `minimap -> liquid footprint + liquid type`
-  - `minimap -> MCLY/MCAL decomposition + recomposition`
-  - shared object-mask loss gating stays available across appropriate trainers
-  - linked together into resulting terrain outputs after per-family prediction
-- V16 stays as the baseline/reference trainer until V16.1 lands smoke proof.
-- The first V16.1 implementation slice is now landed in code:
-  - `v16_curation.py`
-  - `v16_1_dataset.py`
-  - `v16_1_models.py`
-  - `build_v16_curation_manifest.py`
-  - `train_v16_1_common.py`
-  - `train_v16_1_height.py`
-  - `train_v16_1_normal.py`
-  - `train_v16_1_holes.py`
-  - `train_v16_1_liquid.py`
-  - `train_v16_1_texcomp.py`
-  - `infer_v16_1.py`
-- Focused proof that is already real:
-  - normal-oriented curation manifest:
-    - `wow-viewer/output/datasets/v16/curation/smoke_normal_curation_335/`
-  - normal-only curated CPU smoke run:
-    - `wow-viewer/models/v16_1/normal/runs/smoke_normal_curated_cpu/`
-  - normal-only CPU smoke run:
-    - `wow-viewer/models/v16_1/normal/runs/smoke_normal_cpu/`
-  - height-only CPU smoke run:
-    - `wow-viewer/models/v16_1/height/runs/smoke_height_cpu/`
-  - stitched inference smoke from the normal checkpoint:
-    - `wow-viewer/output/datasets/v16_1_inference/smoke_infer_normal/3_3_5_12340.pred.zarr`
-  - stitched inference smoke from the height checkpoint:
-    - `wow-viewer/output/datasets/v16_1_inference/smoke_infer_height/3_3_5_12340.pred.zarr`
-- Current V16.1 liquid typing is a coarse `16x16` five-class grid derived from
-  `mcnk_flags_16`: `none`, `water`, `ocean`, `magma`, `slime`.
-- Current V16.1 normal-loss focus now explicitly combines:
-  - `normal_mask`
-  - object-filter-derived terrain weighting
-  - `mddf_mask` / `modf_mask`
-  - `liquid_mask`
-  - deformation-aware detail steering from target height gradients plus local
-    normal variation
-  - operator knob: `--normal-detail-boost`
-  - raw supervision guidance channels:
-    - `terrain_valid_mask_257`
-    - `object_presence_257`
-    - `alpha_painted_256`
-    - `mcly_any_16`
-    - `what_plate_flag`
-- Current object-mask correction state:
-  - archive-backed ADT harvest now attempts geometry-derived WMO footprints in
-    `AdtTensorPackBuilder` before falling back to projected MODF bounds
-  - the new path is wired through `WowViewer.Tool.Harvest` via archive asset
-    reads, so LK/Cata/V16 rebuilds can stop depending only on coarse WMO AABBs
-  - MDDF loss gating is no longer just filename regex plus a fake scale-based
-    height guess; archive-backed harvest now resolves doodad model bounds and
-    filters tree or clutter assets plus tiny/tall doodads out of
-    `object_filtered_mask_257`
-  - `inspect_v16_harvest_samples.py` can now run raw-only without any finalized
-    `.zarr` store, so object-mask QA can happen before dataset mutation
-  - `inspect_v16_harvest_samples.py` now renders raw `mddf`, raw `modf`, and
-    `object_filtered_mask_257` explicitly, so preview QA shows the real terrain
-    loss gate instead of only the merged raw object channel
-  - MdxViewer validation capture now also emits renderer-truth
-    `object_visibility_mask` / `no_object_minimap` artifacts from the live
-    primary/noobjects/objectsonly families instead of depending only on the
-    harvester-side approximate object masks
-  - capture overrides now keep doodads visible with world objects, so MDX/M2
-    silhouettes flow into the same renderer-truth object-mask path as WMOs
-  - startup automation can now queue a bounded validation batch directly with:
-    - `--validation-dataset-root`
-    - `--validation-output`
-    - `--validation-resolution`
-    - `--force-validation-regeneration`
-    - `--exit-after-validation`
-  - object-mask artifact generation is now build-aware:
-    - `0.x` builds prefer the direct `objectsonly` silhouette so early
-      underground-object bleed-through is preserved
-    - later builds prefer `primary` vs `noobjects` diffs so terrain occlusion
-      wins over terrain-hidden silhouettes
-  - **Capture batch tuning hotfix (2026-05-28):**
-    - hardcoded settle throttles replaced with plan-level configurable fields:
-      - `RequiredSettledFrames` default `12` (was `48`)
-      - `MaxFramesBeforeCapture` default `480` (was `2400`)
-      - `BatchSettledFrames` default `2` (new)
-      - `FastSettleAfterBatchReady` default `true` (new)
-    - batch-fast-settle: after first tile in a batch settles successfully,
-      subsequent tiles use `BatchSettledFrames` instead of
-      `RequiredSettledFrames`, dramatically reducing per-tile settle wait in
-      multi-tile batched sessions
-    - per-tile capture metadata JSON now emitted alongside each PNG:
-      `{baseName}_capture_metadata.json` with build, map, tile, variant,
-      settledFrames, totalFrames, timedOut status
-    - wow-viewer `ValidationCaptureCommand` CLI now exposes:
-      `--settled-frames`, `--max-frames`, `--batch-settled-frames`
-    - stub-scene test: 4/4 variants passed with new fast-settle defaults
-    - unit tests: 33/33 pass including 3 new batch-fast-settle tests
-  - Zarr-mutating `build_v16_dataset.py` commands now require
-    `--allow-zarr-write`; preview-first is the enforced operator path
-  - current proof level:
-    - `dotnet build wow-viewer/tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harvest.csproj -c Debug`
-    - raw harvest preview rerun for `3_3_5_12340 / Azeroth` succeeded after the
-      MDDF filter and inspector changes
-    - `dotnet build gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug`
-      succeeded after the renderer-truth doodad/mask policy hotfix
-    - bounded renderer-truth validation runs now exist at:
-      - `output/tmp/mdxviewer_validation_smoke/0_5_3_3368_Azeroth_30_48`
-      - `output/tmp/mdxviewer_validation_smoke/3_3_5_12340_Azeroth_30_48`
-        - `output/tmp/mdxviewer_validation_smoke_fix_wmo/3_3_5_12340_Azeroth_30_48`
-        - `output/tmp/mdxviewer_validation_smoke_heightfilter/3_3_5_12340_Azeroth_30_48`
-      - fresh bounded rerun after the policy hotfix succeeded on staged
-        `0_5_3_3368 / Azeroth / 30_48` with proof owner still `MdxViewer`
-        validation capture:
-        - primary proof image:
-          `output/tmp/mdxviewer_validation_smoke/0_5_3_3368_Azeroth_30_48/viewer_validation_minimaps/Azeroth_30_48_viewer_validation.png`
-        - regenerated object-mask proof artifact:
-          `output/tmp/mdxviewer_validation_smoke/0_5_3_3368_Azeroth_30_48/images/Azeroth_30_48_object_visibility_mask.png`
-    - the `0.5.3.3368` exported mask matched the direct `objectsonly`
-      silhouette exactly on `Azeroth_30_48`
-    - the `3.3.5.12340` exported mask diverged from the direct
-      `objectsonly` silhouette on the same tile, proving the later-build
-      occluded diff path was the one used at runtime
-      - `WmoRenderer` now carries a bounded near-camera visibility hotfix so
-        large nearby WMO roots no longer collapse to a single visible group in
-        the validation captures
-      - validation capture batches now wait longer before capture and can hide
-        very tall MDX clutter through a bounds-height threshold during the batch
-      - current real renderer-truth proof still covers only:
-        - `0_5_3_3368`
-        - `3_3_5_12340`
-      - current throughput risk is still open:
-        - the bounded single-tile `MdxViewer` validation rerun took a little
-          over 3 minutes for one tile, which is too slow for broad proof or
-          patch workflows
-        - next operational pressure point is batching multiple tiles per loaded
-          world session instead of paying this cost one tile at a time
-      - remaining build proof is still open for:
-        - `0_5_5_3494`
-        - `0_7_0_3694`
-        - `3_0_1_8303`
-        - `4_0_0_11927`
-      - active `V16.2` direction is now sidecar-first:
-        - keep finalized base V16 stores intact
-        - stage renderer-truth and richer precise-mask signals into separate
-          sidecar stores first
-        - only consider merge-back after broader cross-build validation exists
-      - renderer-truth capture pipeline is now integrated into the V16 build:
-        - `build_v16_dataset.py generate-viewer-stubs` reads index.parquet and
-          writes per-tile JSON stubs for MdxViewer tile discovery
-        - `generate_all_renderer_truth_captures.bat` runs MdxViewer batches per build
-        - `build_v16_dataset.py patch-renderer-truth` patches captured PNGs into Zarr
-        - all 20,627 stubs generated across 6 builds as of 2026-05-22
-      - MdxViewer CLI requires: --game-path, --build, --listfile, --world,
-        --validation-dataset-root, --validation-output, --validation-resolution,
-        --force-validation-regeneration, --exit-after-validation
-      - harvest stream produces all core terrain signals (height, normals, alpha,
-        holes, liquid, object masks, minimap, shadow, MCLY/MCAL, placements)
-      - viewer produces only renderer-truth overlay: object_visibility_mask and
-        no_object_minimap (diff of primary vs noobjects capture families)
-      - future direction: wow-viewer reads terrain geometry from Zarr stores
-        directly instead of game client archives (Zarr is compact and fast
-        compared to MPQ)
-  - remaining open issue: the shared harvester-side raw WMO/MODF preview is
-    still approximate; the precise renderer-truth path currently lives in
-    MdxViewer validation capture artifacts instead
-- The shared V16.1 trainer now has real gradient accumulation through
-  `--grad-accum-steps`; this is the intended path for the 4070 Ti SUPER instead
-  of pretending large micro-batches fit in VRAM.
-- The shared V16.1 trainer now also carries forward the useful V16 runtime
-  seams:
-  - `torch.compile`
-  - `--num-workers -1` auto resolution
-  - `--persistent-workers`
-  - `--prefetch-factor`
-- Focused proof exists at:
-  - `wow-viewer/models/v16_1/normal/runs/smoke_normal_compile_gpu/`
-  - GPU smoke completed with `torch.compile: enabled`
-- Current V16.1 direction is to treat normals as the first terrain-signal proof
-  lane and let that inform later height-lane shaping.
-- V16.1 now has a separate reusable curation layer between Zarr and trainers.
-  - trainer consumption path: `--curation-manifest`
-  - first profile: `normal_terrain_v1`
-  - curation builder now supports multi-process tile auditing:
-    - `--workers`
-    - `--chunk-size`
-  - rule direction: all future model families should train from curated
-    manifests, not raw tile rows
-  - current blank-genesis rule:
-    - reject `blank_what_plate_tile` before normal training
-- Canonical short docs were rewritten and should now be the first read for this lane:
-  - `wow-viewer/README.md`
-  - `wow-viewer/data-harvester/README.md`
-  - `wow-viewer/docs/architecture/v16-terrain-model-spec-2026-05-16.md`
-- The README surfaces now explicitly document the curation-first V16.1 normal
-  workflow:
-  - build `normal_terrain_v16_1_1` manifest
-  - train via `--curation-manifest`
-  - preferred current operator launch:
-    - curation: `--workers -1 --chunk-size 128`
-    - train: `--batch-size 16 --grad-accum-steps 1`
-    - small scouting pool: `--train-max-tiles 400 --train-epoch-tiles 128 --val-max-tiles 48`
-  - current VRAM truth on the 16 GB card:
-    - if `8 x 1` sits under about `5 GB`, it is too conservative
-    - prefer raising micro-batch before adding accumulation
-- The shared V16.1 trainer now also preserves the useful V16 small-run seam:
-  - bounded persistent train/val pools:
-    - `--train-max-tiles`
-    - `--val-max-tiles`
-  - rotating per-epoch train subsets:
-    - `--train-epoch-tiles`
-  - proof root:
-    - `wow-viewer/models/v16_1/normal/runs/smoke_normal_curated_epoch_rotation_cpu/`
-  - evidence files:
-    - `evidence/train_pool_summary.json`
-    - `evidence/val_pool_summary.json`
-    - `evidence/train_epoch_orders.jsonl`
- - The shared V16.1 trainer now explicitly tracks:
-   - `best_val`
-   - `best_epoch`
-- V16.1 validation preview writing is best-gated again:
-  - previews write only on new best checkpoints
-  - output path:
-    - `validation/best_epoch_XXXX.png`
-- Validation previews are no longer single-sample lies:
-  - the shared V16.1 preview path now renders up to `8` samples from the
-     selected validation batch per artifact instead of only batch item `0`
-- Validation previews now draw labels again:
-  - panel labels such as `input`, `normal_gt`, `normal_pred`, `train_mask`
-  - per-row sample headers with build/map/tile metadata
-- Full-map debug-signal quilts are now scriptable from the same normal-loss math:
-  - script: `wow-viewer/data-harvester/scripts/quilt_v16_1_debug_signals.py`
-  - outputs stitched `hard_region` / `transition` (local+global) and `train_mask` PNG quilts per `build/map`
-  - supports optional `--curation-manifest`, map/build filters, and tile caps for bounded dataset slices
-- Paste/prefab mining now has a first script surface in `wow-viewer`:
-  - script: `wow-viewer/data-harvester/scripts/mine_v17_pastes.py`
-  - current scope: candidate extraction from normal guidance signals + optional grid-cell library seeds
-  - supports cross-build perceptual-hash dedupe (`--dedupe`) and emits brush/cell library seed manifests
-- Spec 024 Phase 1 canvas mining is now landed:
-  - script: `wow-viewer/data-harvester/scripts/mine_v18_pastes_canvas.py`
-  - stitched canvas candidates now emit `canvas_bbox` and `tile_coverage`
-  - evidence artifacts now include `summary.json`, `candidates.jsonl`, `canvas_summary.json`, and `config.snapshot.json`
-  - bounded proof run:
-    - command: `uv run python -u scripts/mine_v18_pastes_canvas.py --builds 3_3_5_12340 --maps Azeroth --max-tiles 1024 --seed 42 --component-threshold 0.28 --out-dir ../output/tmp/v18_canvas_smoke_dense`
-    - result: `candidates=24`, `multi_tile_candidates=6`, `multi_tile_ratio=0.25`
-- Spec 024 Phase 2 dedupe is now landed in the same script:
-  - deterministic candidate fingerprinting: `rgb_fingerprint`
-  - tile coverage now includes `tile_id` per covered tile for trainer-manifest projection
-  - alpha-layer-aware metadata: `layer_means`, `layer_coverage`, `dominant_layers`, `alpha_layer_signature`
-  - cluster lineage metadata per candidate: `cluster_id`, `canonical_id`, `variant_rank`, `cluster_size`, `is_canonical`
-  - dedupe outputs: `candidates_deduped.jsonl`, `cluster_summary.jsonl`, `dedupe_stats.json`
-  - cluster QA outputs: `cluster_atlas/*.png` and `clusters_canonical_top_atlas.png`
-  - deterministic rerun proof (same command/seed twice) produced identical:
-    - `selection_hash=999c2e6880225c24fd979b70538f1353d60f8187b51ba2abfe5c43b40cefabe0`
-    - `cluster_hash=4dc8ffa09cac92cd3c07ede9f8ad88aec91167c99837ffc418ec438622db14a8`
-    - byte-identical `cluster_summary.jsonl`
-- Spec 024 Phase 3 refined manifest generation is now landed:
-  - script: `wow-viewer/data-harvester/scripts/build_v18_refined_manifest.py`
-  - consumes deduped canvas candidates and emits trainer-compatible manifest rows:
-    - `kept_tiles.parquet`
-    - `tiles.parquet`
-    - `tiles.jsonl`
-  - normal-aware gating + cluster-balancing controls:
-    - `--min-score-mean`
-    - `--min-transition-mean`
-    - `--min-hard-mean`
-    - `--min-train-mask-mean`
-    - `--max-clusters`
-    - `--max-variants-per-cluster`
-    - `--max-tiles`
-  - evidence outputs include:
-    - `summary.json` with `selection_hash`, cluster distribution, duplicate-ratio metrics, bucket/build counts
-    - `selected_candidates.jsonl`
-    - `config.snapshot.json`
-  - trainer load proof:
-    - command: `uv run python -u scripts/train_v16_1_normal.py --builds 0_5_3_3368 3_3_5_12340 --curation-manifest ../output/tmp/v18_refined_manifest_phase3_smoke --device cpu --epochs 1 --batch-size 2 --train-max-tiles 24 --train-epoch-tiles 8 --val-max-tiles 8 --rotate-val-tiles --val-epoch-tiles 4 --num-workers 0 --no-compile --run-name v18_refined_manifest_load_smoke`
-    - result: run completed (`train=24`, `val=3`), confirming manifest/trainer seam compatibility
-- Spec 024 Phase 4 composition graph layer is now landed:
-  - script: `wow-viewer/data-harvester/scripts/build_v18_composition_graph.py`
-  - composition outputs:
-    - `composition_candidates.jsonl` (candidate-level `area_id_coverage`, `dominant_area_ids`, `composition_family_id`)
-    - `composition_nodes.jsonl` (cluster nodes + area distribution)
-    - `composition_edges.jsonl` (adjacency/co-occurrence edges with stable counts/distances)
-    - `composition_families.jsonl` (stable `composition_family_id` macro groups)
-  - AreaID behavior:
-    - supports optional external `--area-id-map` for tile-level labels
-    - soft-label fallback to `unknown` when AreaID data is absent
-  - deterministic graph proof:
-    - run1: `../output/tmp/v18_composition_phase4_run1`
-    - run2: `../output/tmp/v18_composition_phase4_run2`
-    - identical hashes:
-      - `graph_hash=eccd70abda63f7e5dcbabe2528f2809b62aed7455780c2cef125291a7333c09a`
-      - `family_hash=800a2029757e7988f736d70dc787087d8b4f72e692c3007e32fa4bdbdd8c2771`
-    - byte-identical `composition_edges.jsonl`
-- Phase 4 metadata integration into refined manifests is now landed:
-  - `build_v18_refined_manifest.py` accepts `--composition-graph`
-  - refined rows now carry:
-    - `source_composition_family_ids`
-    - `source_composition_family_count`
-    - `composition_balance_weight_mean`
-  - summary now includes composition-family distribution evidence
-- Spec 024 Phase 5 auto-naming + paste-library catalog is now landed:
-  - script: `wow-viewer/data-harvester/scripts/build_v18_paste_library_catalog.py`
-  - deterministic naming from role/shape/layer/family descriptors with stable `paste_id`
-  - metadata fields include:
-    - `canonical_name`
-    - `aliases`
-    - `name_confidence`
-    - `review_state` (auto)
-    - `review_required`
-  - catalog outputs:
-    - `paste_library_catalog.json`
-    - `paste_library_catalog.jsonl`
-  - deterministic stability proof:
-    - rerun output at `../output/tmp/v18_paste_library_phase5_run2`
-    - byte-identical `paste_library_catalog.jsonl` vs run1
-    - stable hash: `1ae9a2d2900a24aba4f7b34c260f747bd683527317278abdb2a22a783f372a2f`
-- Spec 024 Phase 6 baseline launch contract is now landed:
-  - script: `wow-viewer/data-harvester/scripts/run_v18_baseline_contract.py`
-  - defines profile contract (`small` / `medium` / `large`) in `baseline_profiles.json`
-  - executes bounded refined baseline run + non-ref comparison run
-  - writes comparison artifacts:
-    - `comparison_report.json`
-    - `comparison_report.md`
-  - bounded proof root:
-    - `../output/tmp/v18_baseline_contract_phase6`
-- Spec 025 bounded continuation now spans Phases 1-4 proof surfaces:
-  - Phase 1 roof-library build+validation remains green on staged `3_3_5_12340`:
-    - `output/datasets/object_roof_library/smoke_spec025_phase1_335/`
-    - `validate_v18_object_roof_library.py` status: `pass`
-  - Phase 2 learned fallback + mask validation landed:
-    - `scripts/infer_v18_object_roof_masks.py`
-    - `scripts/validate_v18_object_roof_masks.py`
-    - bounded anchor proof: `output/tmp/v18_object_roof_infer_smoke_335_30_53/`
-      - `tiles_non_empty=1`, validator status: `pass`
-  - Phase 2 patch/report lane now writes side artifacts outside `.zarr` by default:
-    - report root: `output/tmp/object_roof_patch_reports/`
-    - bounded report: `output/tmp/object_roof_patch_reports/smoke_spec025_patch_335/3_3_5_12340/object_roof_patch_report.json`
-    - label contract artifact: `.../object_roof_label_contract.json`
-  - Phase 3 training integration landed for normal lane:
-    - variant: `v18_object_roof_aux`
-    - dataset/model/trainer consume `object_roof_mask_256` and `object_roof_weight_257`
-    - bounded CUDA aux run: `models/v18/normal/runs/v18_oroof_smoke_spec025_v18_oroof_aux_cuda/`
-    - bounded same-pool baseline run: `models/v18/normal/runs/smoke_spec025_v18_baseline_samepool_cuda/`
-  - task closure state in spec checklist:
-    - `wow-viewer/specs/025-object-roof-mask-library-and-minimap-sieve/tasks.md`
-    - complete: `T001`, `T003`-`T022`
-    - open by design: `T002` (MdxViewer one-at-a-time asset capture seam)
-- Spec 025 T002 object-capture audit + first wow-viewer slice is now landed:
-  - architecture note:
-    - `wow-viewer/docs/architecture/spec025-t002-object-capture-audit-2026-05-26.md`
-  - implemented seam closure (bounded):
-    - `ValidationCaptureScenePolicy` now carries explicit capture culling-override flags
-    - `ValidationWorldScenePolicyApplier` propagates those flags into policy state
-    - `ValidationWorldSceneAdapter.BuildFrameRequest(...)` forwards fog/object-streaming/MDX-height/culling knobs into runtime request
-    - `WowViewerWorldRuntimeFrameRequest` and `WowViewerWorldRuntimeBridge` now route those knobs into `WorldObjectVisibilityContext`
-    - `WorldObjectVisibilityCollector` now honors capture override toggles and MDX max-bounds-height suppression via shared runtime context
-  - bounded proof:
-    - focused tests passed (`ValidationCaptureScenePolicyTests`, `ValidationWorldScenePolicyApplierTests`, `ValidationWorldSceneAdapterTests`, `WorldObjectVisibilityCollectorTests`)
-    - staged real-scene dry-run passed for `3_3_5_12340 / Azeroth_30_48` at staged client root `output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft`
-  - T002 status after this slice:
-    - policy-propagation and culling-hook gap is closed in wow-viewer
-    - full dedicated object-render backend parity and one-at-a-time asset-pose capture orchestration remain open follow-up work
-- Spec 025 T002 second bounded automation slice is now landed in `wow-viewer`:
-  - `WowViewer.Tool.ValidationCapture` now supports `capture-batch` with ledger input (`--ledger-path`) for manifest-driven multi-tile batch execution
-  - batch path reads `manifest_capture_ledger.json`, skips `captured_complete`, expands each pending tile into 4 variant requests, and reuses the same default scene/variant policy composition as single-tile `capture`
-  - `build_v16_dataset.py generate-viewer-stubs` guidance now points to `capture-batch` as primary capture lane (legacy MdxViewer scripts retained only for compatibility comparison)
-  - focused command test proof passed (`ValidationCaptureCommandTests`, `5/5`)
-  - T002 status after automation cutover slice:
-    - manifest/ledger automation is now wow-viewer-owned
-    - dedicated object-render backend parity + per-asset pose-capture orchestration still remain for full T002 closure
-- Spec 025 T002 third bounded automation bridge slice is now landed in `wow-viewer/data-harvester`:
-  - `build_v16_dataset.py` now includes `capture-renderer-truth`
-  - the command discovers `WowViewer.Tool.ValidationCapture.exe` and invokes `capture-batch` per build/map ledger group
-  - it reads `manifest_capture_ledger.json`, skips `captured_complete`, groups pending tiles by map, emits temp per-map ledgers, and forwards mode flags/resolution/build label into wow-viewer capture
-  - focused proof:
-    - `uv run python scripts/build_v16_dataset.py --help` now lists `capture-renderer-truth`
-    - bounded dry-run for `3_3_5_12340` resolved tool + root and cleanly skipped missing ledger with exit `0`
-  - T002 status after this bridge slice:
-    - end-to-end batch orchestration from data-harvester into wow-viewer capture is now wired
-    - dedicated object-render backend parity + one-at-a-time per-asset pose-capture seam still remain for full T002 completion
-- Spec 025 T002 fourth bounded pose-metadata slice is now landed:
-  - `capture-batch` now accepts optional pose metadata fields from ledger rows (`asset_path`, `instance_type`, `unique_id`, `rot_x`, `rot_y`, `rot_z`, `scale`)
-  - render-mode `capture-batch` runs now emit per-tile pose artifacts at:
-    - `<dataset-root>/pose-metadata/<tile_name>_pose.json`
-  - `build_v16_dataset.py generate-viewer-stubs` now enriches ledger rows from real `<build>.zarr/placements.parquet` data (prefers `modf`, then `mddf`) so pose metadata is no longer dependent on bogus stub JSON
-  - focused proof:
-    - `ValidationCaptureCommandTests` now include pose-artifact assertion and pass (`6/6`)
-    - bounded `capture-renderer-truth --stub-scene` run produced non-null pose metadata in:
-      - `output/tmp/mdxviewer_validation_smoke/3_3_5_12340/pose-metadata/AhnQiraj_46_27_pose.json`
-- Spec 025 T002 fifth bounded per-tile placement-resolution slice is now landed:
-  - `build_v16_dataset.py generate-viewer-stubs` now materializes all placement rows per tile into ledger payload:
-    - `object_instance_count`
-    - `object_instances[]`
-  - `WowViewer.Tool.ValidationCapture capture-batch` pose artifact outputs now preserve those full fields per tile.
-  - focused parity proof against dataset truth (`3_3_5_12340`):
-    - regenerated ledger rows: `5134`
-    - `placements.parquet` rows: `1,015,470`
-    - mismatches between ledger per-tile counts and `placements.parquet` per-tile counts: `0`
-    - multi-instance samples confirmed (e.g. `Northrend_21_23=3580`, `Northrend_22_22=3437`, `Azeroth_32_39=3015`).
-  - this closes the first-instance-only gap for ledger pose/placement coverage.
-- V18 raw-blob datastore sketch is now documented for undecoded payload preservation:
-  - `wow-viewer/docs/architecture/v18-undecoded-blob-datastore-sketch-2026-05-27.md`
-  - defines sidecar `raw_blobs` manifest + content-addressed payload layout, phased migration path, and validation contract without rewriting current readers.
-- New canonical dataset-build requirement from latest user direction is now reflected in implementation:
-  - one script (`build_v16_dataset.py`) must produce complete dataset signals and decoded metadata coverage without depending on patch/fixup scripts.
-  - build flow now writes `decoded_metadata.parquet` with one decoded metadata row per harvested tile and validates parity against `index.parquet`.
-  - merge flow now carries `decoded_metadata.parquet` forward and validates merged parity.
-  - validation flow now checks both signal coverage and decoded metadata table integrity.
-- V17.1 normal trainer behavior adjustments landed during this session:
-  - `v17_1_normals` no longer enables refiner/distillation by default
-  - `height_supervision_weight` default for `v17_1_normals` restored to `1.0`
-  - explicit startup guard now fails if `v17_1_normals` runs with height supervision disabled
-  - invalid-region neutral normal loss added (`--invalid-neutral-weight`) to suppress object-region leakage in predicted normals
-  - batch autotune probing now uses warmup+measured steps with configurable safety/probe controls, and `v17_1_normals` loader defaults are more conservative on host RAM
-- The shared V16.1 trainer now supports startup VRAM autotune:
-  - `--target-vram-gb`
-  - `--autotune-batch-size`
-  - `--autotune-batch-candidates`
-  - `--autotune-keep-epoch-steps`
-  - evidence path:
-    - `evidence/batch_autotune.json`
-  - per-epoch CUDA memory guidance prints are back too
-- Canonical flow:
-  - `WowViewer.Tool.Harvest harvest-stream --stream-profile v16`
-  - `inspect_v16_harvest_samples.py` raw preview before any store write
-  - `build_v16_dataset.py build --allow-zarr-write`
-  - `validate_v16_training_ready.py`
-  - `train_v16.py`
-- Current real-run trainer shape:
-  - train pool: `--train-max-tiles 4000`
-  - epoch budget: `--train-epoch-tiles 1350`
-  - val budget: `--val-max-tiles 150`
-  - batch size: `72`
-  - GPU throttle: `--gpu-duty-cycle 100`
-- `wow-viewer` is the implementation owner. `gillijimproject_refactor` is reference/continuity/validation only.
+- `gillijimproject_refactor` stays read-only reference code except bounded continuity/doc updates.
+- all new code lands in `wow-viewer`.
+- staged clients under `I:/parp/parp-tools/output/tmp/wowarchive-clients/` are the only trusted client roots.
 
-## Current V16 Corpus Truth
-- Finalized stores exist for:
+## 046 Status (2026-06-08 Checkpoint - End of Session)
+
+- **26/42 tasks complete** — All C# library code + inspect commands + tests + match-report writer done; segment builder rewritten (4110→18 segments); scorer rewritten for type-profile matching; WMO sub-part bounds extraction added; cache version bumped for TypeFlags; TypeFlags color mode + CK24Type-vs-TypeFlags mismatch mode + 3px neon lines added; GroupKey vs TypeFlags cross-reference in overlay tab; raw MSLK/MSHD fields displayed; Mdos→MscnRef rename complete; Choose Target picker fixed; Export Report button (writes to Desktop); PM4 Info docked panel; tool windows extracted (UniqueId Archaeology, Taxi, Weak Signal); consolidated right sidebar tabs; Scene Inspector panel
+- **16 tasks remaining** — Python/Zarr tooling (T002, T013, T014, T017, T019), schema validation (T034), known-tile validation (T024), doc updates (T032, T033), polish (T015, T027, T028, T031), focused asset corpus (T038), viewer TypeFlags filter improvements (T037), Obj export fix (T039)
+- **Biggest unproven gap**: Python/Zarr corpus lane is completely unimplemented
+- **Out of scope**: viewer-side review surface, direct map writeback, old manual matcher rescue
+
+## Current wow-viewer Lanes
+
+- PM4 research remains library-first in `wow-viewer/src/core/WowViewer.Core.PM4`.
+- `MSHD.Field04` is no longer treated as packed tile `XX_YY`.
+- current PM4 evidence says `Field04` is a reusable scene/group bucket:
+  - `0/502` direct packed `TileX/TileY` matches in the development corpus
+  - `73` distinct `Field04` values are reused across multiple tiles
+  - `204/266` cross-tile `CK24` values bridge multiple `Field04` buckets
+- treat `Field04` as useful debug/group metadata, not the primary cross-tile stitch key.
+- current PM4 `MSLK.TypeFlags` partial semantics from guided real-data inspection:
+  - `0x03` = M2 top surfaces
+  - `0x10` = interior WMO floors
+  - `0x12` = exterior WMO solid surfaces
+- keep `MSLK.TypeFlags` distinct from `MSLK.GroupObjectId`.
+
+## Planned PM4 Follow-Ups (see 046 checkpoint above)
+
+- spec `046-pm4-asset-matching` now owns the future PM4 automation lane:
+  - replace freeze-prone `Export PM4 Obj Set`
+  - export deterministic PM4 object segments
+  - use Zarr-backed PM4 and staged-asset signal corpora
+  - automate WMO/M2 candidate ranking
+  - synthesize proposal-grade replacement placements for missing development tiles
+- first `046` foundational code now lives under `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`:
+  - stable `Pm4ObjectSegment` / signal / candidate / proposal contracts
+  - deterministic single-file `Pm4ObjectSegmentBuilder`
+  - `Pm4SegmentSignalExtractor`
+  - shared `WowViewer.Tools.Shared/Pm4Matching` report models matching the current schema
+- `046` now also has the first automation host:
+  - `Pm4SegmentExportService` aggregates deterministic segment exports from a PM4 file or directory
+  - `WowViewer.Tool.Inspect pm4 export-segments --input <file|directory> [--output <report.json>]` is now live
+  - exported segment rows now carry usable PM4 matching evidence instead of only identity:
+    - predicted asset kind (`wmo` / `m2` when matchable)
+    - bounds, footprint hull, footprint area, height stats
+    - anchor signals, surface-family histogram, coordinate-mode metadata
+    - explicit confidence flags and rationale
+- first `046` US2 scoring slice now also lives in the same owner surface:
+  - `Pm4AssetMatchScorer` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`
+  - synthetic scorer tests cover matched / ambiguous / ineligible status handling
+  - `WowViewer.Tool.Inspect pm4 match-assets --input <file.pm4> [--asset-corpus <corpus.json> | --archive-root <staged client> [--placements <tile_obj0.adt>]] [--max-candidates <n>] [--output <report.json>]` is now live
+  - the current inspect-side asset-reference builder is validation-tile scoped:
+    - reads one `_obj0.adt`
+    - resolves WMO/M2 bounds from staged assets when possible
+    - falls back to placement bounds when asset geometry cannot be opened
+  - the first missing-ADT durable-corpus path now also exists:
+    - `WowViewer.Tool.Inspect pm4 export-asset-signals --archive-root <staged client root> [--seed-placements <tile_obj0.adt|directory>] [--kind all|wmo|m2] [--path-filter <text>] [--limit <n>] [--output <corpus.json>]`
+    - current proof used the actual staged client root `i:/parp/parp-tools/output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft`
+    - current first broad smoke exported `102` durable asset records to `wow-viewer/output/tmp/pm4-asset-signals-smoke.json`
+    - the current stronger missing-ADT corpus path seeds durable asset identities from nearby or directory-wide placement files without using placement `UniqueID` as the asset key
+    - current seeded smoke exported `2101` durable asset records to `wow-viewer/output/tmp/pm4-asset-signals-seeded-smoke.json`
+    - current seeded missing-ADT smoke scored `4110` PM4 segments against that corpus with no `_obj0.adt` file for the target PM4 itself:
+      - `168 matched`
+      - `161 ambiguous`
+      - `3766 unresolved`
+      - `15 ineligible`
+    - current gap is no longer basic command ownership; it is match quality, corpus filtering, and later placement synthesis
+- current proof owner for `046` is now library + inspect CLI:
+  - focused tests cover deterministic IDs on the real `development_00_00.pm4` tile
+  - synthetic tests cover zero-CK24 connectivity splitting and low16 reuse flags
+  - synthetic scorer tests now cover deterministic ranking plus unresolved and ambiguous states, including durable-corpus shape-only scoring
+  - bounded export-service tests cover single-file and copied-directory stability
+  - bounded real-data CLI smoke wrote `wow-viewer/output/tmp/pm4-export-segments-smoke.json` from `development_00_00.pm4`
+  - bounded real-data CLI smoke now also wrote:
+    - `wow-viewer/output/tmp/pm4-export-segments-rich-smoke.json`
+    - `wow-viewer/output/tmp/pm4-match-assets-smoke.json`
+    - `wow-viewer/output/tmp/pm4-asset-signals-smoke.json`
+    - `wow-viewer/output/tmp/pm4-match-assets-corpus-smoke.json`
+    - `wow-viewer/output/tmp/pm4-asset-signals-seeded-smoke.json`
+    - `wow-viewer/output/tmp/pm4-match-assets-seeded-smoke.json`
+    - `wow-viewer/output/tmp/pm4-synthesize-placements-seeded-smoke.json`
+  - current validation match smoke scored `4110` PM4 segments against `25` `_obj0.adt`-backed WMO/M2 references
+  - first placement-synthesis owner now also exists:
+    - `Pm4ReplacementPlacementSynthesizer` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`
+    - `WowViewer.Tool.Inspect pm4 synthesize-placements --input <file.pm4> --target-tiles <x_y[,x_y...]> [--asset-corpus <corpus.json> | --archive-root <staged client> [--placements <tile_obj0.adt>]] [--max-candidates <n>] [--output <report.json>]`
+    - current seeded smoke synthesized `329` placement proposals from `development_00_00.pm4` against the `2101`-asset seeded durable corpus
+    - match reports now also carry proposal records per segment when synthesis succeeds
+  - directory-scale corpus export is now CLI-owned, but durable Zarr writing, stronger corpus filtering/ranking, and known-tile synthesis validation are still open
+- broken manual PM4 matching UI is explicitly not the workflow owner for that lane.
+
+## Viewer Shell / UI
+
+- spec `044-viewer-shell-usability` owns the dockable shell cleanup and menu/sidebar fixes.
+- spec `045-scene-graph-workbench` owns the future Blender-style scene outliner for terrain, objects, and PM4.
+
+## M2 / Runtime Continuity
+
+- standalone classic `MDLX` / chunked M2 support is tracked under spec `043` (now strictly the 0.5.3 / 0.7.0 / 0.8.0 chunked-MDX lane — 1.12.1 moved to spec `048`).
+- bad runtime animation selections now fail soft instead of crashing the viewer.
+- pre-release `3.0.1.8303` embedded-profile M2 no-draw was reduced to the layer-0 missing-texture fallback seam and fixed in the viewer path.
+- **2026-06-05 Ghidra trace against WoW 1.12.1 (Build 5875) Win32**: 1.12.1 `.mdx` files are NOT chunked `MDLX` — they use the `MD20` magic (flat pointer-table format) with the legacy `.mdx` extension. The native cache loader normalizes `.mdl`/`.mdx`/`.m2` to `.m2` and dispatches to the same `MD20` parser regardless. The 1.12.1 `MD20` header layout, view table offset (`0x3c/0x40` instead of `0x44/0x48`), and per-record strides (sequence `0x6c`, light `0xc`, camera `0x2c`, ribbon `0x7c`, particle `0xdc`, light `0xc`) are all different from 3.3.5. The current `M2ModelReaderDispatcher` routes 1.12.1 `.mdx` to the 3.3.5 `M2ModelReader`, which silently misreads the strides. The chunked `M2Chunked` reader is therefore currently a dead branch for 1.12.1 (correctly) but the M2 path is the actual bug. Research doc: `wow-viewer/docs/architecture/m2-mdx-1121-native-trace-2026-06-05.md`.
+- **2026-06-05 spec 048 implemented**: era-aware MD20 reader ships in `wow-viewer/src/core/WowViewer.Core.IO/M2Era1121/`. The dispatcher (`M2ModelReaderDispatcher.DetectEra`) checks the version field (`0x100`/`0x101` = 1.12.1, `0x108` = 3.3.5, `MDLX` = chunked, `0x104` = 2.x TBC → rejected with "see spec 049"). 7 unit tests pass on the real 1.12.1 `Bear.mdx` fixture from the staged 1.12.1 client. Pre-existing 3.3.5 tests unchanged. Spec 043 is revised to defer 1.12.1 to spec 048. The trace doc and the earlier 2026-03-31 research doc both have cross-references to spec 048. 2.x TBC remains a follow-up spec (049).
+
+## Data Harvester / Training Continuity
+
+- V16.1.1 remains a bounded normal-terrain lane.
+- prefer startup autotune and larger batch ladders when VRAM headroom allows.
+- validation artifacts are only authoritative when regenerated after behavior changes.
+
+## V18 Focused Two-Build Terrain Reconstruction System (spec 047)
+
+- spec `047-v18-distill-corpus-open-source-loop` remains the active owner for the focused 0.5.3 + 3.3.5 V18 lane, but the contract is now the final terrain-system design rather than the earlier smoke-only framing.
+- architecture doc: `wow-viewer/docs/architecture/v18-distill-corpus-open-source-loop-2026-06-04.md`.
+- active design owner:
+  - focused corpus only: `0_5_3_3368` and `3_3_5_12340`
+  - build a focused curation manifest from the V18 Zarr stores
+  - train `minimap_rgb -> normalized height_257`
+  - train `minimap_rgb -> normal_xyz`
+  - keep quilt-level stitching and later ADT writeback as downstream follow-through
+- explicitly out of scope for the active iteration:
+  - renderer-truth capture as training truth
+  - precise object-mask / roof-mask loss lanes
+  - liquid-derived weighted loss stacks
+  - synthesized-input generation
+  - distillation
+  - open-source student release
+- focused corpus boundary remains:
   - `0_5_3_3368`
-  - `0_5_5_3494`
-  - `0_7_0_3694`
-  - `3_0_1_8303`
   - `3_3_5_12340`
-  - `4_0_0_11927`
-- All six current `signal_validation.json` files pass.
-- Human-eye QA artifacts exist for all six under:
-  - `wow-viewer/output/datasets/v16/inspection/`
-- Only standing allowed warning in the current corpus:
-  - `0_7_0_3694` has `has_holes_16 = 0`
-
-## Current Trainer Contract
-- Dataset loader: `wow-viewer/data-harvester/src/harvester/v16_dataset.py`
-- Current terrain model host: `wow-viewer/data-harvester/src/harvester/v15_model.py`
-- Current supervised terrain heads:
-  - height
-  - normals
-  - alpha
-  - holes
-  - liquid mask
-  - MCLY logits
-- `liquid_height` stays in the dataset contract but is deferred from the current terrain trainer/inference path.
-- Terrain loss weighting uses `object_filtered_mask`.
-- `object_instance_mask` is readable but not yet used by the terrain trainer.
-- Validation snapshot alpha QA now uses a painted-layer composite (`max(ch1..3)` with fallback) instead of raw `alpha[...,0]`, because channel `0` is commonly the implicit base layer and was producing false-black GT panels.
-- `train-max-tiles` is now the persistent run-level train pool, while `train-epoch-tiles` can rotate a fresh per-epoch subset from that pool.
-- CUDA-oriented loader defaults are less conservative now: `--num-workers=-1` auto-resolves a worker count and `persistent_workers` defaults on when workers are active.
-- Trainer curation now has a basic quality gate by default: it drops obviously low-signal flat tiles and writes `train_quality_audit.json` / `val_quality_audit.json`.
-- Every new best `val_h` epoch now writes a fresh random validation snapshot set under `validation/best_epoch_XXXX/`, separate from the normal interval snapshots.
-- Current conclusion from the long V16 run: the shared-head trainer is not the
-  long-range architecture owner. Future model work should target the V16.1
-  dense-correlation family instead of adding more complexity to the V16 monolith.
-- Liquids are no longer treated as "mask only" in the next architecture lane;
-  V16.1 should carry liquid type as a first-class prediction surface.
-- Alpha is no longer treated as a standalone generic mask head in the next
-  architecture lane; V16.1 should handle it as a dedicated MCLY/MCAL
-  decomposition + recomposition family.
-- That decomposition family is not greenfield: existing `train_d1.py` /
-  `D1UNet` / `D1Dataset` work should be migrated onto the V16 Zarr-quality
-  signals and current loss-gating contract.
-
-## Harvest / Dataset Truth
-- Stream format is lean `ARRY`, not legacy `NPZB`.
-- Archive-backed ADT families now route through the in-memory byte path.
-- Default dataset compression is Blosc `lz4` / level `1` / `shuffle`.
-- `repair-index` is the fast fix for coordinate-only damage.
-- `patch-liquids` can rewrite only liquid arrays + liquid provenance flags in-place.
-- `inspect_v16_dataset.py` is the human-eye QA surface.
-- Operator routing is intentionally simpler now:
-  - root README = repo + workflow orientation
-  - data-harvester README = commands + outputs
-  - V16 spec = contract and boundaries
-
-## Critical Recent Fixes
-- Mixed Cataclysm archive tiles can carry inline root `MCLY` / `MCAL` without `_tex0`.
-  - `AdtTensorPackBuilder.ReadTextureDataFromBytes(...)` now falls back to inline root texture parsing when `_tex0` bytes are absent.
-  - Focused proof on staged `4_0_0_11927 / AhnQiraj / (27,46)` restored `mcly_texture_ids`, `mcly_layer_mask`, and `mcal_alpha_pack_256`.
-- Alpha placeholder `map=memory` metadata was fixed at the harvest / repair-index seam.
-- Liquid derivation now prefers explicit `mh2o_presence_mask` / `mclq_presence_mask`; WL* remains last-resort fallback.
-
-## Known Nuance
-- WL* liquid coverage still does not always fill the whole chunk footprint that the raw data spans.
-- This is currently treated as a downstream loader / trainer semantic issue, not a harvest-corruption issue.
-- The corpus is now considered consistent enough for training work.
-
-## Inference Direction
-- Keep the paired contract:
-  - input: `wow-viewer/output/datasets/v16/<build>.zarr`
-  - output: `wow-viewer/output/datasets/v16_inference/<run>/<build>.pred.zarr`
-- Current `infer_v16.py` emits:
-  - `<build>.pred.zarr`
-  - per-tile `inference_summary.json`
-  - `predicted_height_257.npy`
-  - `predicted_liquid_mask_256.npy`
-- Downstream patch/export path remains:
-  - `terrain-patch-adt`
-  - `convert-lk-to-alpha`
-  - `convert-alpha-to-lk`
-
-## Focused Proof Pointers
-- Trainer-readiness proof:
-  - `wow-viewer/output/datasets/v16/validation/3_3_5_12340.training_readiness.json`
-  - `wow-viewer/output/datasets/v16/validation/all-builds.training_readiness.json`
-- Visual QA root:
-  - `wow-viewer/output/datasets/v16/inspection/`
-- Current per-build summaries:
-  - `<build>.summary.json`
-  - `<build>.samples.json`
-  - `<build>.validation_audit_overview.png`
-- Multi-build training smoke run:
-  - `wow-viewer/models/v16/runs/smoke_v16_full_corpus_post_fix/`
-  - 1 epoch on CPU completed cleanly against curated tiles from the finalized six-build corpus
-- Alpha-validation snapshot fix proof:
-  - `wow-viewer/models/v16/runs/smoke_alpha_validation_fix/validation/epoch_0001/tile_00/alpha_gt_painted_max.png`
-  - `alpha_gt_painted_max.png` now carries nonzero GT intensity; the prior false-black symptom was a channel-selection issue, not a corpus-alpha loss issue
-- Epoch-rotation proof:
-  - `wow-viewer/models/v16/runs/smoke_epoch_rotation/evidence/train_epoch_orders.jsonl`
-  - epoch `1` selected positions `[7,4,2,0]`; epoch `2` selected `[5,6,4,2]`, proving fresh epoch subsets from a larger curated pool
-- Current production-oriented launch contract:
-  - run name: `v16_full_corpus_epoch_rotation`
-  - command uses `train-max-tiles 4000`, `train-epoch-tiles 1350`, `val-max-tiles 150`, `batch-size 72`, `gpu-duty-cycle 100`
-- Immediate next planning truth:
-  - do not widen into a giant new foundation-model rewrite
-  - use V16.1.1 to harden the normal lane first through curation intelligence
-    and training-efficiency improvements
-  - treat a mixed `400`-tile scouting pool as the first proof surface before
-    any longer rerun
-  - the current longer-run continuation path is a resume, not a fresh launch
-    from scratch
-- Alpha/minimap alignment audit:
-  - `wow-viewer/output/datasets/v16/validation/alpha_minimap_alignment/alpha_minimap_alignment.summary.json`
-  - sampled corpus result: `edge_f1_mean≈0.54`, `median≈0.64`, but `p10=0.0`, confirming a real zero-match bad tail
-- Quality-curation proof:
-  - `wow-viewer/models/v16/runs/smoke_quality_curation/evidence/train_quality_audit.json`
-  - basic gate dropped `196` obviously low-signal flat train tiles from the `3_3_5_12340` smoke candidate pool (`4621 -> 4425`)
-
-## Next Likely Slice
-- Run smoke proof for V16.1 liquid, texcomp, and holes trainers using the
-  current V16 corpus as the dataset contract.
-- Extend the curation layer with additional target-aware profiles after the
-  normal lane:
-  - height
-  - liquid
-  - texture decomposition
-- Re-launch the first real normal run with `batch-size 1` or `2` plus
-  accumulation instead of high micro-batch counts that trigger WDDM offload.
-- Preferred current launch contract after the runaway-process cleanup:
-  - start normal training at `8 x 1`
-  - fall back to `4 x 2`, `2 x 4`, then `1 x 8` only if VRAM forces it
-- Write the short note on what the normal lane teaches the height lane, then
-  tighten the height loss around that terrain-only framing.
-- Tighten the stitched-output contract so the final V16.1 `.pred.zarr` bundle
-  consistently carries all per-family signals plus provenance.
-- Reuse the existing D1 tileset/decomposition lane as the starting point for
-  V16.1 texture decomposition instead of redesigning it from scratch.
-- Treat `v16_full_corpus_epoch_rotation*` as baseline evidence, not as the main
-  future architecture investment surface.
-- If WL* chunk-fill behavior matters to loss semantics, handle it in the loader/trainer, not by reopening harvest.
-- PM4 follow-up now has a library-owned `MSHD.Field04` region-id seam feeding `MdxViewer` overlay coloring/debug/export, selected-region peer summaries, and LLM-oriented visible-overlay evidence bundles; broader PM4 object-mapping work can build on that without reintroducing viewer-owned decode logic.
+  - other four build stores stay in place but are out of scope
+- landed in the 2026-06-04 simplification pass:
+  - `wow-viewer/data-harvester/scripts/train_v16_1_common.py`
+    - height loss is plain `F.l1_loss(pred, target)`
+    - normal loss is masked cosine only
+    - default normal route is `v16_1_1_base`
+    - default normal contract logs as `minimap_rgb -> normals_xyz`
+  - `wow-viewer/data-harvester/scripts/train_v18.py`
+    - now defaults `--dataset-dir` to `wow-viewer/output/datasets/v18`
+    - active V18 entrypoint no longer quietly falls back to the V16 dataset root
+  - focused renderer-truth state stays explicitly non-authoritative:
+    - both focused stores remain cleared to `has_object_visibility_mask = 0`
+    - both focused stores remain cleared to `has_no_object_minimap = 0`
+    - carry-over PNG trees are not active signoff evidence
+- landed in the 2026-06-05 final-design/operator pass:
+  - spec pack was rewritten in place:
+    - `wow-viewer/specs/047-v18-distill-corpus-open-source-loop/spec.md`
+    - `plan.md`
+    - `tasks.md`
+    - `research.md`
+    - `data-model.md`
+    - `quickstart.md`
+    - `contracts/`
+  - focused wrappers now exist:
+    - `wow-viewer/data-harvester/scripts/build_v18_curation_manifest.py`
+      - defaults to `wow-viewer/output/datasets/v18`
+      - defaults to builds `0_5_3_3368` + `3_3_5_12340`
+      - writes under `wow-viewer/output/datasets/v18/curation/<run-name>/`
+    - `wow-viewer/data-harvester/scripts/train_v18_focus.py`
+      - defaults to `wow-viewer/output/datasets/v18`
+      - defaults to builds `0_5_3_3368` + `3_3_5_12340`
+      - auto-picks the latest focused `kept_tiles.parquet` when present
+  - `.specify/feature.json` still points at stale spec `011`; use the `047` directory directly until that pointer is explicitly reopened
+  - bounded proof now exists:
+    - height smoke run: `wow-viewer/models/v18/height/runs/v18_height_focus_minimap_smoke_20260604_r2/`
+      - 1 epoch, batch size 4, 32 train tiles, 8 val tiles
+      - `val_loss = 0.6626`
+    - normal smoke run: `wow-viewer/models/v18/normal/runs/v18_normal_focus_minimap_smoke_20260604_r2/`
+      - 1 epoch, batch size 4, 32 train tiles, 8 val tiles
+      - `val_loss = 0.2251`
+    - focused curation manifest: `wow-viewer/output/datasets/v18/curation/v18_focus_terrain_v1/`
+      - audited rows: `6763`
+      - kept rows: `4096`
+      - keep ratio: `0.6056`
+      - dominant reject causes:
+        - `blank_minimap_blank_normals = 2396`
+        - `blank_what_plate_tile = 221`
+        - `normal_minimap_edge_mismatch = 36`
+        - `wmo_loss_wipeout_tile = 14`
+      - kept difficulty mix:
+        - `easy = 8`
+        - `medium = 30`
+        - `hard = 3070`
+        - `pathological = 988`
+  - one leftover seam was exposed and fixed during that proof:
+    - `_preview_normal(...)` still expected old weighted-loss tensors and crashed after a successful epoch
+    - it now falls back cleanly to simplified-lane preview tensors (`base_mask`, `train_mask`, `invalid_mask`)
+- landed in the 2026-06-05 focused-mask/tuning pass:
+  - the earlier simplification had gone too far for active focused training:
+    - curation and dataset tensors still carried liquid/terrain-valid context
+    - but active `height` used full-tile `L1`
+    - and active `normal` used cosine over `normal_mask` only
+  - active focused loss path is now terrain-valid again in `wow-viewer/data-harvester/scripts/train_v16_1_common.py`:
+    - `_height_loss(...)` now masks `abs(pred-target)` by `terrain_valid_mask_257`
+    - `_normal_loss(...)` now masks cosine by `normal_mask * terrain_valid_mask_257`
+    - this keeps liquid-hidden and object-hidden regions out of the loss without restoring a large auxiliary liquid-weight stack
+  - one more terrain-valid seam was then reopened and fixed:
+    - harvested `object_roof_mask_256` / `object_roof_weight_257` already existed
+    - but active `terrain_valid_mask_257`, focused curation `trainable_cov`, and the height preview still ignored that roof/top-geometry layer
+    - `wow-viewer/data-harvester/src/harvester/v16_1_dataset.py`
+      - now composes terrain-valid masks through a shared helper that includes roof/top-geometry occlusion
+    - `wow-viewer/data-harvester/scripts/build_v16_curation_manifest.py`
+      - now uses the same roof-aware terrain-valid logic for `terrain_valid_cov` / `trainable_cov`
+      - now records `roof_cov`
+    - `wow-viewer/data-harvester/scripts/train_v16_1_common.py`
+      - height preview now shows the actual combined masked weight, not the stale basement-only `weight_257`
+      - height/normal preview outputs can surface `object_roof_weight`
+  - focused curation is now stricter in `wow-viewer/data-harvester/scripts/build_v16_curation_manifest.py`:
+    - rows with `trainable_cov < 0.20` are rejected as `insufficient_trainable_terrain`
+    - this catches liquid-hidden wipeout rows even when they are not WMO-dominated
+  - focused wrapper/operator defaults are now pointed at the actual 8 GB lane:
+    - `wow-viewer/data-harvester/scripts/train_v18_focus.py`
+      - defaults `--target-vram-gb 8`
+      - defaults startup `--autotune-batch-size`
+      - defaults `--strict-build-balance`
+  - focused sampling is now explicitly corrected:
+    - prior `build_balanced=True` behavior was only approximate and could still let the 3.3.5 pool dominate
+    - `wow-viewer/data-harvester/scripts/train_v16_1_common.py`
+      - now supports strict near-equal per-build balancing without replacement
+      - oversized pool/epoch requests auto-cap to the largest feasible balanced subset
+      - focused epoch logging/config now records the effective balanced epoch size
+    - this is the active owner fix for the discovered `700` vs `2636` train skew in the focused `v2` manifest/run
+  - landed in the 2026-06-06 rotating-epoch pass:
+    - full-pool replay every epoch is no longer the only focused operator lane
+    - `wow-viewer/data-harvester/scripts/train_v16_1_common.py`
+      - now accepts `--train-bucket-rotation-fraction`
+      - when enabled, the train sampler partitions each available build/bucket stratum into deterministic epoch chunks
+      - each epoch trains on a restrained fraction of every available stratum instead of replaying the whole train pool
+      - very small strata can complete their coverage cycle sooner than larger strata; this is intentional
+      - `--train-epoch-tiles` is now rejected when combined with the rotation fraction so the owner surface stays explicit
+      - startup batch autotune no longer rescales epoch size when rotation-fraction mode is active
+      - run config and epoch evidence now record rotation fraction / cycle length
+    - `wow-viewer/data-harvester/scripts/train_v18_focus.py`
+      - now defaults to `--train-bucket-rotation-fraction 0.10` when the user does not explicitly request fixed-count epochs
+      - now defaults focused bucket weighting to `uniform` when that rotation mode is active
+    - proof:
+      - `uv run python -m py_compile wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/scripts/train_v18_focus.py wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
+      - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py -q` → `8 passed`
+      - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/train_v18_focus.py normal --help` shows the new flag on the focused entrypoint
+  - landed in the 2026-06-06 validation-contract split:
+    - the focused base model input path was already honest:
+      - `wow-viewer/data-harvester/src/harvester/v16_1_dataset.py`
+      - `input` is minimap RGB only unless the operator explicitly opts into `height_channel` or `object_roof_channel`
+    - the actual bug was contract drift:
+      - trainer `val_loss` / preview images were being talked about like deployment-surface validation
+      - but they are offline supervised eval that can still use hidden truth/mask tensors for scoring
+    - `wow-viewer/data-harvester/scripts/train_v16_1_common.py`
+      - now records `validation_contract = offline_supervised_eval_with_truth_targets`
+      - now records `deployment_proof_surface = infer_v18_focus.py`
+      - startup logs now say focused height/normal val is supervised eval, not runtime proof
+    - new focused runtime-proof wrapper:
+      - `wow-viewer/data-harvester/scripts/infer_v18_focus.py`
+      - defaults dataset root to `wow-viewer/output/datasets/v18`
+      - defaults output root to `wow-viewer/output/datasets/v18_inference`
+      - reuses the existing minimap-only forward path from `infer_v16_1.py`
+    - spec/doc continuity now distinguishes the two surfaces:
+      - trainer val = offline supervised eval
+      - `infer_v18_focus.py` = minimap-only deployment proof
+    - proof:
+      - `uv run python -m py_compile wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/scripts/train_v18_focus.py wow-viewer/data-harvester/scripts/infer_v18_focus.py`
+      - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/infer_v18_focus.py --help`
+  - landed in the 2026-06-06 super-tiny focused-manifest pass:
+    - user direction shifted again from "10% rotating epochs over a still-large pool" to "try a genuinely tiny corpus first"
+    - new explicit operator utility:
+      - `wow-viewer/data-harvester/scripts/build_v18_tiny_manifest.py`
+      - derives a tiny manifest from an existing focused `kept_tiles.parquet`
+      - defaults source manifest to `wow-viewer/output/datasets/v18/curation/v18_focus_terrain_v1/`
+      - caps each build/difficulty bucket to `3` rows by default
+      - prefers map round-robin inside each build/bucket stratum so the tiny subset is not single-map collapse
+    - the focused trainer default resolver was intentionally left alone:
+      - tiny runs must pass `--curation-manifest` explicitly
+      - tiny-manifest runs should also pass `--train-bucket-rotation-fraction 1.0` because the manifest itself is already the throttle
+    - real tiny manifest proof now exists:
+      - `wow-viewer/output/datasets/v18/curation/v18_focus_tiny_v1/`
+      - selected rows: `21`
+      - source kept rows: `4096`
+      - selected bucket counts:
+        - `easy = 5`
+        - `medium = 4`
+        - `hard = 6`
+        - `pathological = 6`
+      - reason it is `21` instead of theoretical `24`:
+        - build `0_5_3_3368` only had `2 easy` rows and `1 medium` row in the source kept pool
+    - targeted proof:
+      - `uv run python -m py_compile wow-viewer/data-harvester/scripts/build_v18_tiny_manifest.py wow-viewer/data-harvester/src/harvester/test_v18_tiny_manifest.py`
+      - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_tiny_manifest.py -q` → `3 passed`
+      - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/build_v18_tiny_manifest.py --help`
+      - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/build_v18_tiny_manifest.py --source-manifest wow-viewer/output/datasets/v18/curation/v18_focus_terrain_v1 --samples-per-bucket-per-build 3 --run-name v18_focus_tiny_v1`
+  - landed in the 2026-06-06 focused early-stop pass:
+    - user reported a real operator failure mode:
+      - best checkpoint could appear at epoch `4`
+      - later epochs only decayed LR with no further improvement
+    - `wow-viewer/data-harvester/scripts/train_v16_1_common.py`
+      - now supports `--early-stop-patience`
+      - now supports `--early-stop-min-improvement`
+      - run state/checkpoints now record `non_best_val_epochs`
+      - config now records `early_stop_triggered` and `last_completed_epoch`
+      - focused logs now print plateau status when val stops improving
+    - `wow-viewer/data-harvester/scripts/train_v18_focus.py`
+      - now defaults focused runs to `--early-stop-patience 8` unless the operator overrides it
+      - `--epochs` is now a ceiling for focused runs rather than an expected full-budget replay
+    - targeted proof:
+      - `uv run python -m py_compile wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/scripts/train_v18_focus.py wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
+      - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py -q` → `9 passed`
+      - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/train_v18_focus.py normal --help`
+  - focused docs now steer away from the earlier smoke budget:
+    - quickstart/README examples now use larger tile pools and `40` epochs instead of `20`
+  - targeted Python proof now exists:
+      - `wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
+      - proves height loss ignores non-trainable regions
+      - proves normal loss honors terrain-valid masking
+      - proves terrain-valid composition includes roof/top-geometry masks
+      - proves curation rejects low-trainable tiles
+      - proves strict build-balance equalizes/caps focused subsets as designed
+  - landed in the 2026-06-06 focused loader-pressure/doc-sync pass:
+    - active supervision contract stays on `object_precise_mask`
+    - `wow-viewer/data-harvester/scripts/train_v16_1_common.py`
+      - now applies a narrower safer loader profile only when the focused base lane is left on auto loader tuning
+      - explicit `--num-workers`, `--prefetch-factor`, and `--persistent-workers` choices remain untouched
+      - run config/startup logs now record the loader-pressure decision
+    - targeted proof:
+      - `uv run python -m py_compile wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
+      - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py -q` → `13 passed`
+    - focused docs now treat the full focused-manifest runs as primary:
+      - height: `train_v18_focus.py height --curation-manifest ../output/datasets/v18/curation/v18_focus_terrain_v1 --train-bucket-rotation-fraction 0.10 --epochs 40 --val-max-tiles 32 --val-interval 1 --run-name v18_height_focus_full_v1`
+      - normal: `train_v18_focus.py normal --curation-manifest ../output/datasets/v18/curation/v18_focus_terrain_v1 --train-bucket-rotation-fraction 0.10 --epochs 40 --val-max-tiles 32 --val-interval 1 --run-name v18_normal_focus_full_v1`
+- the next real proof is:
+  - launch the current documented full focused height and normal runs through the `10%` rotating bucket-coverage default
+  - run `infer_v18_focus.py` on the resulting checkpoints so the active proof owner is the minimap-only deployment surface, not trainer val logs
+  - inspect `train_epoch_bucket_usage.jsonl` and `config.json` for the derived epoch size / cycle length
+  - confirm the loader-pressure profile prevents the old worker-side `MemoryError` without changing `object_precise_mask` supervision
+  - confirm live losses improve without returning to full-pool-per-epoch wall time

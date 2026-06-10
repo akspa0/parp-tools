@@ -678,7 +678,7 @@ internal static class LkToAlphaCommand
     {
         List<string> candidates =
         [
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MdxViewer", "community-listfile-withcapitals.csv"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WoWViewer", "community-listfile-withcapitals.csv"),
             Path.Combine(AppContext.BaseDirectory, "community-listfile-withcapitals.csv"),
             Path.Combine(AppContext.BaseDirectory, "listfile.csv"),
         ];

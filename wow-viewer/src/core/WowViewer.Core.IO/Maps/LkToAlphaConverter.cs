@@ -542,10 +542,7 @@ public static class LkToAlphaConverter
 
     private static byte ClassifyLkLiquid(int flags)
     {
-        if ((flags & 0x04) != 0) return 1;
-        if ((flags & 0x08) != 0) return 1;
-        int bits = (flags >> 4) & 3;
-        return bits switch { 1 => 1, 2 => 2, 3 => 3, _ => 0 };
+        return (byte)McnkFlagDecoder.Decode((uint)flags);
     }
 
     private static AlphaLiquidChunk? BuildAlphaLiquidChunk(LkMcnkData chunk, int cx, int cy)
@@ -599,7 +596,7 @@ public static class LkToAlphaConverter
                     continue;
 
                 if (layer.TileExists(x, y))
-                    tileFlags[(globalY * 8) + globalX] = 0;
+                    tileFlags[(globalY * 8) + globalX] = AlphaLiquidTypeCodec.GetWriterTileTypeNibble(layer.BasicType);
             }
         }
 

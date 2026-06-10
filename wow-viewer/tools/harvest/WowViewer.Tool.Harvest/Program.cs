@@ -1417,7 +1417,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             }
         }
 
-        // Fallback candidates matching MdxViewer EnumerateTileCandidates
+        // Fallback candidates matching WoWViewer EnumerateTileCandidates
         string[] candidates =
         [
             canonicalPath.Replace('/', '\\'),                                        // textures\minimap\azeroth\map32_32.blp

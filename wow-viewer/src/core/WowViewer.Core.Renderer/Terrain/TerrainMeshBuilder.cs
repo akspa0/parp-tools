@@ -282,11 +282,36 @@ public sealed class TerrainMeshBuilder
         }
     }
 
-    private static void GetVertexPosition(int i, out int row, out int col, out bool isInner)
+    private static void GetVertexPosition(int index, out int row, out int col, out bool isInner)
     {
-        row = i / 17;
-        col = i % 17;
-        isInner = (row % 2) == 1;
+        int remaining = index;
+        row = 0;
+        col = 0;
+        isInner = false;
+
+        for (int currentRow = 0; currentRow < 17; currentRow++)
+        {
+            int rowSize = (currentRow % 2 == 0) ? 9 : 8;
+            if (remaining < rowSize)
+            {
+                row = currentRow;
+                col = remaining;
+                isInner = (currentRow % 2) != 0;
+                return;
+            }
+
+            remaining -= rowSize;
+        }
+    }
+
+    private static int OuterIndex(int outerRow, int outerCol)
+    {
+        return outerRow * 17 + outerCol;
+    }
+
+    private static int InnerIndex(int innerRow, int innerCol)
+    {
+        return innerRow * 17 + 9 + innerCol;
     }
 
     private static Vector3 ComputeDefaultNormal()
@@ -297,25 +322,32 @@ public sealed class TerrainMeshBuilder
     private static int[] BuildIndices(ushort holeMask)
     {
         var result = new List<int>(768);
-        for (int cell = 0; cell < 64; cell++)
+        for (int cellY = 0; cellY < 8; cellY++)
         {
-            int cx = cell & 7;
-            int cy = cell >> 3;
+            for (int cellX = 0; cellX < 8; cellX++)
+            {
+                if (holeMask != 0)
+                {
+                    int holeX = cellX / 2;
+                    int holeY = cellY / 2;
+                    int holeBit = 1 << ((holeY * 4) + holeX);
+                    if ((holeMask & holeBit) != 0)
+                        continue;
+                }
 
-            if (((holeMask >> (cell / 4)) & 1) != 0)
-                continue;
+                int tl = OuterIndex(cellY, cellX);
+                int tr = OuterIndex(cellY, cellX + 1);
+                int bl = OuterIndex(cellY + 1, cellX);
+                int br = OuterIndex(cellY + 1, cellX + 1);
+                int center = InnerIndex(cellY, cellX);
 
-            int rowA = cy * 2;
-            int rowB = cy * 2 + 1;
-
-            int i0 = rowA * 17 + cx;
-            int i1 = rowA * 17 + cx + 1;
-            int i2 = rowB * 17 + cx;
-            int i3 = rowB * 17 + cx + 1;
-
-            result.Add(i0); result.Add(i2); result.Add(i1);
-            result.Add(i1); result.Add(i2); result.Add(i3);
+                result.Add(center); result.Add(tr); result.Add(tl);
+                result.Add(center); result.Add(br); result.Add(tr);
+                result.Add(center); result.Add(bl); result.Add(br);
+                result.Add(center); result.Add(tl); result.Add(bl);
+            }
         }
+
         return result.ToArray();
     }
 

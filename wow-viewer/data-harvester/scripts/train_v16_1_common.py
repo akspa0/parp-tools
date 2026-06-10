@@ -140,6 +140,67 @@ def _resolve_persistent_workers(requested: bool | None, num_workers: int) -> boo
     return bool(requested)
 
 
+def _resolve_loader_pressure_profile(
+    args: argparse.Namespace,
+    *,
+    task_name: str,
+    normal_variant: str,
+    resolved_height_channel: bool,
+    resolved_refiner_enabled: bool,
+    resolved_object_roof_channel: bool,
+) -> str | None:
+    dataset_dir = Path(getattr(args, "dataset_dir", "")).as_posix().lower()
+    is_v18_dataset = dataset_dir.endswith("/output/datasets/v18") or dataset_dir.endswith("/datasets/v18")
+    is_base_minimap_only_lane = (
+        not bool(resolved_height_channel)
+        and not bool(resolved_refiner_enabled)
+        and not bool(resolved_object_roof_channel)
+    )
+    if (
+        is_v18_dataset
+        and getattr(args, "curation_manifest", None) is not None
+        and is_base_minimap_only_lane
+        and (task_name == "height" or (task_name == "normal" and normal_variant == "v16_1_1_base"))
+    ):
+        return "focused_object_precise_mask_safe_defaults"
+    return None
+
+
+def _apply_loader_pressure_defaults(
+    args: argparse.Namespace,
+    *,
+    profile_name: str | None,
+) -> dict[str, Any] | None:
+    if profile_name is None:
+        return None
+
+    original_num_workers = int(args.num_workers)
+    original_prefetch_factor = int(args.prefetch_factor)
+    original_persistent_workers = args.persistent_workers
+
+    if original_num_workers < 0:
+        args.num_workers = 2
+        if int(args.prefetch_factor) > 1:
+            args.prefetch_factor = 1
+        if args.persistent_workers is None:
+            args.persistent_workers = False
+
+    changed = (
+        int(args.num_workers) != original_num_workers
+        or int(args.prefetch_factor) != original_prefetch_factor
+        or args.persistent_workers is not original_persistent_workers
+    )
+    return {
+        "profile_name": profile_name,
+        "applied": bool(changed),
+        "num_workers": int(args.num_workers),
+        "prefetch_factor": int(args.prefetch_factor),
+        "persistent_workers": (
+            None if args.persistent_workers is None else bool(args.persistent_workers)
+        ),
+    }
+
+
 def _resolve_autotune_batch_candidates(base_batch_size: int, requested: list[int] | None) -> list[int]:
     raw = list(requested) if requested else list(_DEFAULT_AUTOTUNE_BATCH_CANDIDATES)
     raw.append(int(base_batch_size))
@@ -172,8 +233,10 @@ class _DeterministicEpochSampler(Sampler[int]):
         epoch_size: int | None = None,
         build_labels: list[str] | None = None,
         build_balanced: bool = False,
+        strict_build_balance: bool = False,
         bucket_labels: list[str] | None = None,
         bucket_sampling_profile: str | None = None,
+        bucket_rotation_fraction: float = 0.0,
         sample_rows: list[dict[str, Any]] | None = None,
     ) -> None:
         self._n = int(n)
@@ -184,32 +247,78 @@ class _DeterministicEpochSampler(Sampler[int]):
         self._epoch_size = None if epoch_size is None or int(epoch_size) <= 0 else min(int(epoch_size), self._n)
         self._build_labels = list(build_labels) if build_labels is not None else None
         self._build_balanced = bool(build_balanced)
+        self._strict_build_balance = bool(strict_build_balance)
         self._bucket_labels = [_normalize_bucket_label(label) for label in bucket_labels] if bucket_labels is not None else None
         self._bucket_sampling_profile = bucket_sampling_profile
         self._bucket_sampling_weights = _bucket_sampling_weights(bucket_sampling_profile)
+        self._bucket_rotation_fraction = max(float(bucket_rotation_fraction), 0.0)
         self._sample_rows = [dict(row) for row in sample_rows] if sample_rows is not None else None
+        self._selected_cache_epoch: int | None = None
+        self._selected_cache: list[int] | None = None
+        if self._bucket_rotation_fraction > 0.0 and self._bucket_labels is not None and len(self._bucket_labels) == self._n:
+            self._effective_epoch_size = _resolve_rotating_bucket_epoch_size(
+                self._n,
+                epoch=1,
+                seed=self._seed,
+                build_labels=self._build_labels,
+                build_balanced=self._build_balanced,
+                bucket_labels=self._bucket_labels,
+                bucket_rotation_fraction=self._bucket_rotation_fraction,
+            )
+        else:
+            requested_take = self._n if self._epoch_size is None else int(self._epoch_size)
+            self._effective_epoch_size = _resolve_effective_sample_take(
+                self._n,
+                requested_take,
+                build_labels=self._build_labels,
+                build_balanced=self._build_balanced,
+                strict_build_balance=self._strict_build_balance,
+            )
 
     def set_epoch(self, epoch: int) -> None:
         self._epoch = int(epoch)
+        self._selected_cache_epoch = None
+        self._selected_cache = None
 
     def _sample_subset(self, rng: np.random.RandomState) -> list[int]:
         if self._n <= 0:
             return []
-        if self._epoch_size is None or self._epoch_size >= self._n:
+        if self._bucket_rotation_fraction > 0.0 and self._bucket_labels is not None and len(self._bucket_labels) == self._n:
+            return _sample_rotating_bucket_positions(
+                self._n,
+                epoch=max(int(self._epoch), 1),
+                seed=self._seed,
+                build_labels=self._build_labels,
+                build_balanced=self._build_balanced,
+                bucket_labels=self._bucket_labels,
+                bucket_rotation_fraction=self._bucket_rotation_fraction,
+            )
+        if (
+            (self._epoch_size is None or self._epoch_size >= self._n)
+            and not (self._build_balanced and self._strict_build_balance and self._build_labels and len(self._build_labels) == self._n)
+        ):
             return list(range(self._n))
         return _sample_positions(
             self._n,
             seed=self._seed + self._epoch,
-            take=self._epoch_size,
+            take=self._effective_epoch_size,
             build_labels=self._build_labels,
             build_balanced=self._build_balanced,
+            strict_build_balance=self._strict_build_balance,
             bucket_labels=self._bucket_labels,
             bucket_sampling_weights=self._bucket_sampling_weights,
         )
 
+    def _selected_positions(self) -> list[int]:
+        if self._selected_cache_epoch != self._epoch or self._selected_cache is None:
+            rng = np.random.RandomState(self._seed + self._epoch)
+            self._selected_cache = list(self._sample_subset(rng))
+            self._selected_cache_epoch = self._epoch
+        return list(self._selected_cache)
+
     def __iter__(self):
         rng = np.random.RandomState(self._seed + self._epoch)
-        selected = self._sample_subset(rng)
+        selected = self._selected_positions()
         order = list(selected)
         rng.shuffle(order)
         available_bucket_counts = _bucket_counts(self._bucket_labels or [])
@@ -224,6 +333,15 @@ class _DeterministicEpochSampler(Sampler[int]):
                 "epoch_size": len(order),
                 "bucket_sampling_profile": self._bucket_sampling_profile,
                 "bucket_sampling_weights": self._bucket_sampling_weights,
+                "bucket_rotation_fraction": self._bucket_rotation_fraction,
+                "bucket_rotation_cycle_length": _resolve_rotating_bucket_cycle_length(
+                    self._n,
+                    seed=self._seed,
+                    build_labels=self._build_labels,
+                    build_balanced=self._build_balanced,
+                    bucket_labels=self._bucket_labels,
+                    bucket_rotation_fraction=self._bucket_rotation_fraction,
+                ),
                 "available_bucket_counts": available_bucket_counts,
                 "selected_bucket_counts": _bucket_counts(selected_bucket_labels),
                 "ordered_bucket_counts": _bucket_counts(ordered_bucket_labels),
@@ -243,6 +361,15 @@ class _DeterministicEpochSampler(Sampler[int]):
                 "epoch_size": len(order),
                 "bucket_sampling_profile": self._bucket_sampling_profile,
                 "bucket_sampling_weights": self._bucket_sampling_weights,
+                "bucket_rotation_fraction": self._bucket_rotation_fraction,
+                "bucket_rotation_cycle_length": _resolve_rotating_bucket_cycle_length(
+                    self._n,
+                    seed=self._seed,
+                    build_labels=self._build_labels,
+                    build_balanced=self._build_balanced,
+                    bucket_labels=self._bucket_labels,
+                    bucket_rotation_fraction=self._bucket_rotation_fraction,
+                ),
                 "available_bucket_counts": available_bucket_counts,
                 "selected_bucket_counts": _bucket_counts(selected_bucket_labels),
                 "selected_build_counts": _count_string_values([row.get("build", "unknown") for row in selected_rows] if selected_rows is not None else []),
@@ -252,7 +379,9 @@ class _DeterministicEpochSampler(Sampler[int]):
         return iter(order)
 
     def __len__(self) -> int:
-        return self._epoch_size if self._epoch_size is not None else self._n
+        if self._bucket_rotation_fraction > 0.0:
+            return len(self._selected_positions())
+        return self._effective_epoch_size
 
 
 def _sample_positions(
@@ -261,6 +390,7 @@ def _sample_positions(
     take: int,
     build_labels: list[str] | None = None,
     build_balanced: bool = True,
+    strict_build_balance: bool = False,
     bucket_labels: list[str] | None = None,
     bucket_sampling_weights: dict[str, float] | None = None,
 ) -> list[int]:
@@ -285,6 +415,41 @@ def _sample_positions(
 
     build_order = sorted(by_build.keys())
     rng.shuffle(build_order)
+    if strict_build_balance:
+        effective_take = _resolve_effective_sample_take(
+            n,
+            take,
+            build_labels=build_labels,
+            build_balanced=build_balanced,
+            strict_build_balance=True,
+        )
+        if effective_take <= 0:
+            return []
+        base_quota = effective_take // len(build_order)
+        remainder = effective_take % len(build_order)
+        extra_builds = [
+            build
+            for build in build_order
+            if len(by_build[build]) >= (base_quota + 1)
+        ][:remainder]
+        extra_set = set(extra_builds)
+        out: list[int] = []
+        for build in build_order:
+            quota = base_quota + (1 if build in extra_set else 0)
+            if quota <= 0:
+                continue
+            out.extend(
+                _sample_weighted_positions(
+                    by_build[build],
+                    take=quota,
+                    rng=rng,
+                    bucket_labels=bucket_labels,
+                    bucket_sampling_weights=bucket_sampling_weights,
+                )
+            )
+        rng.shuffle(out)
+        return out[:effective_take]
+
     out: list[int] = []
     while len(out) < take:
         progressed = False
@@ -328,6 +493,39 @@ def _sample_positions(
     return out[:take]
 
 
+def _resolve_effective_sample_take(
+    n: int,
+    requested_take: int,
+    *,
+    build_labels: list[str] | None = None,
+    build_balanced: bool = False,
+    strict_build_balance: bool = False,
+) -> int:
+    if n <= 0:
+        return 0
+    take = min(max(int(requested_take), 0), int(n))
+    if take <= 0:
+        return 0
+    if not strict_build_balance or not build_balanced or not build_labels or len(build_labels) != n:
+        return take
+
+    build_counts = sorted(_count_string_values(build_labels).values())
+    if not build_counts:
+        return take
+    build_count = len(build_counts)
+    for candidate in range(take, 0, -1):
+        base_quota = candidate // build_count
+        remainder = candidate % build_count
+        if base_quota <= 0:
+            return candidate
+        if build_counts[0] < base_quota:
+            continue
+        extra_eligible = sum(1 for count in build_counts if count >= (base_quota + 1))
+        if extra_eligible >= remainder:
+            return candidate
+    return 0
+
+
 def _count_string_values(values: list[str]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for value in values:
@@ -339,6 +537,153 @@ def _count_string_values(values: list[str]) -> dict[str, int]:
 def _bucket_counts(bucket_labels: list[str]) -> dict[str, int]:
     counts = _count_string_values([_normalize_bucket_label(label) for label in bucket_labels if str(label or "").strip()])
     return {bucket: counts.get(bucket, 0) for bucket in _DIFFICULTY_BUCKETS if counts.get(bucket, 0) > 0}
+
+
+def _rotation_cycle_length(bucket_rotation_fraction: float) -> int:
+    fraction = min(max(float(bucket_rotation_fraction), 0.0), 1.0)
+    if fraction <= 0.0:
+        return 0
+    return max(1, int(math.ceil(1.0 / fraction)))
+
+
+def _resolve_bucket_rotation_quota(group_size: int, bucket_rotation_fraction: float) -> int:
+    if group_size <= 0:
+        return 0
+    fraction = min(max(float(bucket_rotation_fraction), 0.0), 1.0)
+    if fraction <= 0.0:
+        return 0
+    return max(1, min(int(group_size), int(round(group_size * fraction))))
+
+
+def _rotation_group_seed(seed: int, key: tuple[str, str]) -> int:
+    digest = hashlib.sha256(f"{int(seed)}::{key[0]}::{key[1]}".encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "little", signed=False)
+
+
+def _bucket_rotation_groups(
+    n: int,
+    *,
+    seed: int,
+    build_labels: list[str] | None = None,
+    build_balanced: bool = False,
+    bucket_labels: list[str] | None = None,
+) -> list[tuple[tuple[str, str], list[int]]]:
+    if n <= 0 or bucket_labels is None or len(bucket_labels) != n:
+        return []
+
+    by_group: dict[tuple[str, str], list[int]] = {}
+    use_build_dimension = bool(build_balanced and build_labels and len(build_labels) == n)
+    for pos in range(n):
+        build_key = str(build_labels[pos]) if use_build_dimension and build_labels is not None else "*"
+        bucket_key = _normalize_bucket_label(bucket_labels[pos])
+        by_group.setdefault((build_key, bucket_key), []).append(pos)
+
+    grouped: list[tuple[tuple[str, str], list[int]]] = []
+    for key in sorted(by_group.keys()):
+        positions = list(by_group[key])
+        rng = np.random.RandomState(_rotation_group_seed(seed, key))
+        rng.shuffle(positions)
+        grouped.append((key, positions))
+    return grouped
+
+
+def _sample_rotating_bucket_positions(
+    n: int,
+    *,
+    epoch: int,
+    seed: int,
+    build_labels: list[str] | None = None,
+    build_balanced: bool = False,
+    bucket_labels: list[str] | None = None,
+    bucket_rotation_fraction: float = 0.0,
+) -> list[int]:
+    if n <= 0:
+        return []
+    cycle_length = _rotation_cycle_length(bucket_rotation_fraction)
+    if cycle_length <= 0:
+        return []
+
+    grouped = _bucket_rotation_groups(
+        n,
+        seed=seed,
+        build_labels=build_labels,
+        build_balanced=build_balanced,
+        bucket_labels=bucket_labels,
+    )
+    if not grouped:
+        return []
+
+    cycle_index = (max(int(epoch), 1) - 1) % cycle_length
+    selected: list[int] = []
+    for _key, positions in grouped:
+        quota = _resolve_bucket_rotation_quota(len(positions), bucket_rotation_fraction)
+        if quota <= 0:
+            continue
+        group_cycle = max(1, int(math.ceil(len(positions) / quota)))
+        group_index = cycle_index % group_cycle
+        start = group_index * quota
+        stop = min(start + quota, len(positions))
+        selected.extend(int(pos) for pos in positions[start:stop])
+
+    rng = np.random.RandomState(int(seed) + max(int(epoch), 1) + 99173)
+    rng.shuffle(selected)
+    return selected
+
+
+def _resolve_rotating_bucket_epoch_size(
+    n: int,
+    *,
+    epoch: int,
+    seed: int,
+    build_labels: list[str] | None = None,
+    build_balanced: bool = False,
+    bucket_labels: list[str] | None = None,
+    bucket_rotation_fraction: float = 0.0,
+) -> int:
+    return len(
+        _sample_rotating_bucket_positions(
+            n,
+            epoch=epoch,
+            seed=seed,
+            build_labels=build_labels,
+            build_balanced=build_balanced,
+            bucket_labels=bucket_labels,
+            bucket_rotation_fraction=bucket_rotation_fraction,
+        )
+    )
+
+
+def _is_new_best_val(current_val: float, best_val: float, min_improvement: float) -> bool:
+    if not np.isfinite(current_val):
+        return False
+    if not np.isfinite(best_val):
+        return True
+    return float(current_val) < float(best_val) - max(float(min_improvement), 0.0)
+
+
+def _resolve_rotating_bucket_cycle_length(
+    n: int,
+    *,
+    seed: int,
+    build_labels: list[str] | None = None,
+    build_balanced: bool = False,
+    bucket_labels: list[str] | None = None,
+    bucket_rotation_fraction: float = 0.0,
+) -> int:
+    grouped = _bucket_rotation_groups(
+        n,
+        seed=seed,
+        build_labels=build_labels,
+        build_balanced=build_balanced,
+        bucket_labels=bucket_labels,
+    )
+    cycle_length = 0
+    for _key, positions in grouped:
+        quota = _resolve_bucket_rotation_quota(len(positions), bucket_rotation_fraction)
+        if quota <= 0:
+            continue
+        cycle_length = max(cycle_length, int(math.ceil(len(positions) / quota)))
+    return cycle_length
 
 
 def _sample_weighted_positions(
@@ -403,6 +748,7 @@ def _apply_dataset_pool(
     seed: int,
     evidence_dir: Path,
     build_balanced: bool = True,
+    strict_build_balance: bool = False,
 ) -> dict[str, Any]:
     available = len(ds._indices)
     build_labels = [
@@ -413,13 +759,17 @@ def _apply_dataset_pool(
         _normalize_bucket_label(ds._index_entries[global_idx].get("_curation_difficulty_bucket", ""))
         for global_idx in ds._indices
     ]
-    selected_positions = _sample_positions(
-        available,
-        seed=seed,
-        take=max_tiles if max_tiles > 0 else available,
-        build_labels=build_labels,
-        build_balanced=build_balanced,
-    )
+    if max_tiles > 0:
+        selected_positions = _sample_positions(
+            available,
+            seed=seed,
+            take=max_tiles,
+            build_labels=build_labels,
+            build_balanced=build_balanced,
+            strict_build_balance=strict_build_balance,
+        )
+    else:
+        selected_positions = list(range(available))
     selected_global_indices = [ds._indices[pos] for pos in selected_positions]
     ds._indices = selected_global_indices
 
@@ -453,6 +803,7 @@ def _apply_dataset_pool(
         "selected_tiles": int(len(ds._indices)),
         "requested_max_tiles": int(max_tiles),
         "build_balanced": bool(build_balanced),
+        "strict_build_balance": bool(strict_build_balance),
         "seed": int(seed),
         "selected_positions_sha256": hashlib.sha256(
             np.asarray(selected_positions, dtype=np.int32).tobytes()
@@ -634,7 +985,8 @@ def _autotune_batch_size(
     tuned_epoch_tiles = int(args.train_epoch_tiles)
     original_epoch_tiles = int(args.train_epoch_tiles)
     original_batch_size = int(base_batch_size)
-    if bool(getattr(args, "autotune_keep_epoch_steps", True)) and original_epoch_tiles > 0 and original_batch_size > 0:
+    keep_epoch_steps = bool(getattr(args, "autotune_keep_epoch_steps", True)) and float(getattr(args, "train_bucket_rotation_fraction", 0.0)) <= 0.0
+    if keep_epoch_steps and original_epoch_tiles > 0 and original_batch_size > 0:
         original_steps = max(1, math.ceil(original_epoch_tiles / original_batch_size))
         tuned_epoch_tiles = min(len(train_ds), chosen_batch_size * original_steps)
 
@@ -648,7 +1000,7 @@ def _autotune_batch_size(
         "chosen_batch_size": int(chosen_batch_size),
         "original_train_epoch_tiles": int(original_epoch_tiles),
         "tuned_train_epoch_tiles": int(tuned_epoch_tiles),
-        "keep_epoch_steps": bool(getattr(args, "autotune_keep_epoch_steps", True)),
+        "keep_epoch_steps": keep_epoch_steps,
         "candidate_results": results,
     }
     (evidence_dir / "batch_autotune.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -795,10 +1147,29 @@ def _height_loss(
 ) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
     inp = batch["input"].to(device, non_blocking=True)
     target = batch["height_norm"].to(device, non_blocking=True)
-    weight = batch["weight_257"].to(device, non_blocking=True)
+    terrain_valid_mask = batch["terrain_valid_mask_257"].to(device, non_blocking=True)
     pred = model(inp)
-    loss = _weighted_l1(pred, target, weight)
-    return loss, {"height": float(loss.item())}, {"pred": pred, "target": target, "weight": weight}
+    train_mask = terrain_valid_mask.clamp(0.0, 1.0)
+    invalid_mask = (1.0 - train_mask).clamp(0.0, 1.0)
+    loss = _masked_mean((pred - target).abs(), train_mask)
+    object_roof_weight = batch.get("object_roof_weight_257")
+    return loss, {
+        "height": float(loss.item()),
+        "height_mask_cov": float(train_mask.mean().item()),
+    }, {
+        "pred": pred,
+        "target": target,
+        "weight": train_mask,
+        "train_mask": train_mask,
+        "invalid_mask": invalid_mask,
+        "base_mask": train_mask,
+        "terrain_valid_mask": train_mask,
+        "object_roof_weight": (
+            object_roof_weight.to(device, non_blocking=True)
+            if isinstance(object_roof_weight, torch.Tensor)
+            else None
+        ),
+    }
 
 
 def _gradient_magnitude_257(x: torch.Tensor) -> torch.Tensor:
@@ -869,95 +1240,32 @@ def _normal_loss(
 ) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
     inp = batch["input"].to(device, non_blocking=True)
     target = batch["normals"].to(device, non_blocking=True)
-    height_raw = batch["height_raw"].to(device, non_blocking=True)
-    height_norm = batch["height_norm"].to(device, non_blocking=True)
     normal_mask = batch["normal_mask"].to(device, non_blocking=True)
     terrain_valid_mask = batch["terrain_valid_mask_257"].to(device, non_blocking=True)
-    object_weight = batch["weight_257"].to(device, non_blocking=True)
-    object_roof_weight = batch.get("object_roof_weight_257", batch["weight_257"]).to(device, non_blocking=True)
-    mddf_mask = batch["mddf_mask"].to(device, non_blocking=True)
-    modf_mask = batch["modf_mask"].to(device, non_blocking=True)
-    liquid_mask = batch["liquid_mask"].to(device, non_blocking=True)
-    what_plate_flag = batch["what_plate_flag"].to(device, non_blocking=True).view(-1, 1, 1, 1)
-    alpha_painted_cov = batch["alpha_painted_cov"].to(device, non_blocking=True)
-    mcly_cov = batch["mcly_cov"].to(device, non_blocking=True)
-    alpha_painted_256 = batch["alpha_painted_256"].to(device, non_blocking=True)
-    mcly_any_16 = batch["mcly_any_16"].to(device, non_blocking=True)
+    object_roof_weight = batch.get("object_roof_weight_257")
     pred = model(inp)
     pred_n = F.normalize(pred, dim=1, eps=1e-6)
     target_n = F.normalize(target, dim=1, eps=1e-6)
     cosine = 1.0 - (pred_n * target_n).sum(dim=1, keepdim=True)
-    liquid_mask_257 = _resize_weight(liquid_mask, target_n.shape[-2:])
-    object_presence = torch.maximum(mddf_mask, modf_mask)
-    liquid_weight = 1.0 - (0.85 * liquid_mask_257)
-    instance_weight = 1.0 - (0.75 * object_presence)
-    base_mask = normal_mask * terrain_valid_mask * object_weight * object_roof_weight * liquid_weight * instance_weight
-    base_mask = base_mask * (1.0 - what_plate_flag)
-    hard_region_weight, hard_region_debug = _hard_region_weight_from_targets(
-        height_raw=height_raw,
-        target_normals=target_n,
-        alpha_painted_256=alpha_painted_256,
-        mcly_any_16=mcly_any_16,
-        terrain_valid_mask=terrain_valid_mask,
-        base_mask=base_mask,
-        detail_boost=float(args.normal_detail_boost),
-    )
-    train_mask = base_mask * hard_region_weight
-    vec_l1 = (pred_n - target_n).abs().mean(dim=1, keepdim=True)
-    nz_l2 = (pred_n[:, 2:3] - target_n[:, 2:3]) ** 2
-    loss_cos = _masked_mean(cosine, train_mask)
-    loss_vec = _masked_mean(vec_l1, train_mask)
-    loss_nz = _masked_mean(nz_l2, train_mask)
-    loss = loss_cos + (0.35 * loss_vec) + (0.15 * loss_nz)
-
-    # Neutralize masked/invalid regions so object-heavy areas do not leak into
-    # predicted normals when they are excluded from terrain supervision.
+    train_mask = (normal_mask * terrain_valid_mask).clamp(0.0, 1.0)
     invalid_mask = (1.0 - train_mask).clamp(0.0, 1.0)
-    up = torch.zeros_like(pred_n)
-    up[:, 2:3, :, :] = 1.0
-    loss_invalid_neutral = _masked_mean(1.0 - (pred_n * up).sum(dim=1, keepdim=True), invalid_mask)
-    invalid_neutral_weight = float(getattr(args, "invalid_neutral_weight", 0.0))
-    if invalid_neutral_weight > 0.0:
-        loss = loss + (invalid_neutral_weight * loss_invalid_neutral)
-
-    height_sup_weight = float(getattr(args, "height_supervision_weight", 0.0))
-    if str(getattr(args, "resolved_normal_variant", "")) == "v17_1_normals" and height_sup_weight > 0.0:
-        height_teacher = _normals_from_height(height_norm)
-        loss_height_sup = _masked_mean(1.0 - (pred_n * height_teacher).sum(dim=1, keepdim=True), train_mask)
-        loss = loss + (height_sup_weight * loss_height_sup)
-    else:
-        loss_height_sup = torch.zeros((), device=device, dtype=loss.dtype)
+    loss = _masked_mean(cosine, train_mask)
     return loss, {
         "normal": float(loss.item()),
-        "normal_cos": float(loss_cos.item()),
-        "normal_vec": float(loss_vec.item()),
-        "normal_nz": float(loss_nz.item()),
-        "normal_mask_cov": float(base_mask.mean().item()),
-        "object_roof_cov": float((1.0 - object_roof_weight).mean().item()),
-        "normal_detail_mean": float(_masked_mean(hard_region_weight, base_mask).item()),
-        "normal_hard_region_mean": float(_masked_mean(hard_region_debug["hard_region_signal"], base_mask).item()),
-        "normal_transition_mean": float(_masked_mean(hard_region_debug["transition_signal"], base_mask).item()),
-        "normal_height_sup": float(loss_height_sup.item()),
-        "normal_height_sup_weight": float(height_sup_weight),
-        "normal_invalid_neutral": float(loss_invalid_neutral.item()),
-        "normal_invalid_neutral_weight": float(invalid_neutral_weight),
-        "what_plate_rate": float(what_plate_flag.mean().item()),
-        "alpha_painted_cov": float(alpha_painted_cov.mean().item()),
-        "mcly_cov": float(mcly_cov.mean().item()),
+        "normal_cos": float(loss.item()),
+        "normal_mask_cov": float(train_mask.mean().item()),
     }, {
         "pred": pred_n,
         "target": target_n,
         "train_mask": train_mask,
         "invalid_mask": invalid_mask,
-        "base_mask": base_mask,
-        "detail_weight": hard_region_weight,
-        "hard_region_signal": hard_region_debug["hard_region_signal"],
-        "transition_signal": hard_region_debug["transition_signal"],
+        "base_mask": train_mask,
         "terrain_valid_mask": terrain_valid_mask,
-        "object_weight": object_weight,
-        "object_roof_weight": object_roof_weight,
-        "liquid_mask": liquid_mask_257,
-        "instance_weight": instance_weight,
+        "object_roof_weight": (
+            object_roof_weight.to(device, non_blocking=True)
+            if isinstance(object_roof_weight, torch.Tensor)
+            else None
+        ),
     }
 
 
@@ -970,60 +1278,24 @@ def _combined_loss(
     inp = batch["input"].to(device, non_blocking=True)
     target_normals = batch["normals"].to(device, non_blocking=True)
     target_height = batch["height_norm"].to(device, non_blocking=True)
-    height_raw = batch["height_raw"].to(device, non_blocking=True)
     normal_mask = batch["normal_mask"].to(device, non_blocking=True)
-    terrain_valid_mask = batch["terrain_valid_mask_257"].to(device, non_blocking=True)
-    object_weight = batch["weight_257"].to(device, non_blocking=True)
-    mddf_mask = batch["mddf_mask"].to(device, non_blocking=True)
-    modf_mask = batch["modf_mask"].to(device, non_blocking=True)
-    liquid_mask = batch["liquid_mask"].to(device, non_blocking=True)
-    alpha_painted_256 = batch["alpha_painted_256"].to(device, non_blocking=True)
-    mcly_any_16 = batch["mcly_any_16"].to(device, non_blocking=True)
-    what_plate_flag = batch["what_plate_flag"].to(device, non_blocking=True).view(-1, 1, 1, 1)
 
     pred_normals, pred_height = model(inp)
     pred_n = F.normalize(pred_normals, dim=1, eps=1e-6)
     target_n = F.normalize(target_normals, dim=1, eps=1e-6)
 
-    # ── Normal loss (same as _normal_loss) ──
     cosine = 1.0 - (pred_n * target_n).sum(dim=1, keepdim=True)
-    liquid_mask_257 = _resize_weight(liquid_mask, target_n.shape[-2:])
-    object_presence = torch.maximum(mddf_mask, modf_mask)
-    liquid_weight = 1.0 - (0.85 * liquid_mask_257)
-    instance_weight = 1.0 - (0.75 * object_presence)
-    base_mask = normal_mask * terrain_valid_mask * object_weight * liquid_weight * instance_weight
-    base_mask = base_mask * (1.0 - what_plate_flag)
+    train_mask = normal_mask
+    normal_loss = _masked_mean(cosine, train_mask)
+    height_loss = F.l1_loss(pred_height, target_height)
 
-    hard_region_weight, _hard_debug = _hard_region_weight_from_targets(
-        height_raw=height_raw,
-        target_normals=target_n,
-        alpha_painted_256=alpha_painted_256,
-        mcly_any_16=mcly_any_16,
-        terrain_valid_mask=terrain_valid_mask,
-        base_mask=base_mask,
-        detail_boost=float(args.normal_detail_boost),
-    )
-    train_mask = base_mask * hard_region_weight
-    vec_l1 = (pred_n - target_n).abs().mean(dim=1, keepdim=True)
-    nz_l2 = (pred_n[:, 2:3] - target_n[:, 2:3]) ** 2
-    loss_cos = _masked_mean(cosine, train_mask)
-    loss_vec = _masked_mean(vec_l1, train_mask)
-    loss_nz = _masked_mean(nz_l2, train_mask)
-    normal_loss = loss_cos + (0.35 * loss_vec) + (0.15 * loss_nz)
-
-    # ── Height loss (weighted L1) ──
-    height_loss = _weighted_l1(pred_height, target_height, object_weight)
-
-    # ── Combined ──
     w_normal = float(getattr(args, "normal_weight", 1.0))
     w_height = float(getattr(args, "height_weight", 1.0))
     loss = (w_normal * normal_loss) + (w_height * height_loss)
 
     return loss, {
         "normal": float(normal_loss.item()),
-        "normal_cos": float(loss_cos.item()),
-        "normal_vec": float(loss_vec.item()),
-        "normal_nz": float(loss_nz.item()),
+        "normal_cos": float(normal_loss.item()),
         "height": float(height_loss.item()),
         "combined": float(loss.item()),
     }, {
@@ -1190,22 +1462,31 @@ def _preview_height(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out
     row_titles = []
     for idx in range(n):
         row_titles.append(_preview_row_title(batch, idx))
-        rows.append(
-            [
-                ("input", batch["input"][idx]),
-                ("height_gt", batch["height_norm"][idx]),
-                ("height_pred", outputs["pred"][idx]),
-                ("weight", batch["weight_257"][idx]),
-            ]
-        )
+        panels: list[tuple[str, torch.Tensor]] = [
+            ("input", batch["input"][idx]),
+            ("height_gt", batch["height_norm"][idx]),
+            ("height_pred", outputs["pred"][idx]),
+            ("weight", outputs["weight"][idx]),
+        ]
+        if "object_roof_weight" in outputs and outputs["object_roof_weight"] is not None:
+            panels.append(("object_roof_weight", outputs["object_roof_weight"][idx]))
+        rows.append(panels)
     _save_preview_grid(rows, out_path, row_titles=row_titles)
 
 
-def _preview_normal(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out_path: Path) -> None:
+def _preview_normal(batch: dict[str, Any], outputs: dict[str, Any], out_path: Path) -> None:
     n = min(int(batch["input"].shape[0]), 8)
     rows = []
     row_titles = []
     has_refined = "refined_normals" in outputs
+
+    def _normalized_panel(key: str, label: str) -> tuple[str, torch.Tensor] | None:
+        if key not in outputs:
+            return None
+        tensor = outputs[key][idx]
+        peak = tensor.max().clamp_min(1e-6)
+        return (label, tensor / peak)
+
     for idx in range(n):
         row_titles.append(_preview_row_title(batch, idx))
         panels: list[tuple[str, torch.Tensor]] = [
@@ -1215,16 +1496,32 @@ def _preview_normal(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out
         ]
         if has_refined:
             panels.append(("refiner_teacher_pred", _normals_to_rgb(outputs["refined_normals"][idx])))
-        panels.extend([
-            ("terrain_valid", outputs["terrain_valid_mask"][idx]),
-            ("base_mask", outputs["base_mask"][idx]),
-            ("hard_region", outputs["hard_region_signal"][idx] / outputs["hard_region_signal"][idx].max().clamp_min(1e-6)),
-            ("transition", outputs["transition_signal"][idx] / outputs["transition_signal"][idx].max().clamp_min(1e-6)),
-            ("detail_weight", outputs["detail_weight"][idx] / outputs["detail_weight"][idx].max().clamp_min(1e-6)),
-            ("train_mask", outputs["train_mask"][idx] / outputs["train_mask"][idx].max().clamp_min(1e-6)),
-            ("liquid_mask", outputs["liquid_mask"][idx]),
-            ("object_weight", outputs["object_weight"][idx]),
-        ])
+        if "terrain_valid_mask" in outputs:
+            panels.append(("terrain_valid", outputs["terrain_valid_mask"][idx]))
+            if "base_mask" in outputs:
+                panels.append(("base_mask", outputs["base_mask"][idx]))
+            for optional_key, optional_label in (
+                ("hard_region_signal", "hard_region"),
+                ("transition_signal", "transition"),
+                ("detail_weight", "detail_weight"),
+                ("liquid_mask", "liquid_mask"),
+                ("object_weight", "object_weight"),
+            ):
+                panel = _normalized_panel(optional_key, optional_label)
+                if panel is not None:
+                    panels.append(panel)
+            if "train_mask" in outputs:
+                train_mask_peak = outputs["train_mask"][idx].max().clamp_min(1e-6)
+                panels.append(("train_mask", outputs["train_mask"][idx] / train_mask_peak))
+        else:
+            for optional_key, optional_label in (
+                ("base_mask", "base_mask"),
+                ("train_mask", "train_mask"),
+                ("invalid_mask", "invalid_mask"),
+            ):
+                panel = _normalized_panel(optional_key, optional_label)
+                if panel is not None:
+                    panels.append(panel)
         if "object_roof_weight" in outputs:
             panels.append(("object_roof_weight", outputs["object_roof_weight"][idx]))
         rows.append(panels)
@@ -1319,13 +1616,13 @@ TASKS: dict[str, TaskSpec] = {
 
 
 def _parse_args(task_name: str) -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=f"Train V16.1 {task_name} model")
+    p = argparse.ArgumentParser(description=f"Train terrain {task_name} model")
     p.add_argument("--dataset-dir", type=Path, default=_DATASET_ROOT)
     p.add_argument(
         "--curation-manifest",
         type=Path,
         default=None,
-        help="Optional curation manifest directory/file produced by build_v16_curation_manifest.py",
+        help="Optional curation manifest directory/file produced by the terrain curation manifest builder",
     )
     p.add_argument("--builds", nargs="+", default=["3_3_5_12340"])
     p.add_argument("--batch-size", type=int, default=8)
@@ -1379,10 +1676,22 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         help="Balance per-epoch train sampling across builds when possible.",
     )
     p.add_argument(
+        "--strict-build-balance",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enforce near-equal per-build subsets without replacement when build balancing is enabled; oversized requests are capped to the largest feasible balanced subset.",
+    )
+    p.add_argument(
         "--bucket-sampling-profile",
         choices=sorted(_BUCKET_SAMPLING_PROFILES.keys()),
         default=("v16_1_1_normal" if task_name == "normal" else "uniform"),
         help="Per-epoch difficulty-bucket sampling profile used when curated manifests carry bucket metadata.",
+    )
+    p.add_argument(
+        "--train-bucket-rotation-fraction",
+        type=float,
+        default=0.0,
+        help="If >0, partition each available train build/bucket stratum into a deterministic epoch cycle and train on roughly this fraction of every stratum per epoch so the full bucketed pool is covered over repeated epochs.",
     )
     p.add_argument(
         "--val-max-tiles",
@@ -1433,7 +1742,19 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         "--val-preview-interval",
         type=int,
         default=1,
-        help="If >0, write a validation preview only when a new best checkpoint is found. 0 disables preview writes.",
+        help="If >0, write a supervised-eval preview only when a new best checkpoint is found. 0 disables preview writes.",
+    )
+    p.add_argument(
+        "--early-stop-patience",
+        type=int,
+        default=0,
+        help="If >0, stop after this many consecutive validation epochs without a new best val_loss. Use 0 to disable.",
+    )
+    p.add_argument(
+        "--early-stop-min-improvement",
+        type=float,
+        default=0.0,
+        help="Minimum val_loss improvement required to reset early-stop patience.",
     )
     p.add_argument("--run-name", type=str, default=None)
     p.add_argument("--resume-checkpoint", type=Path, default=None)
@@ -1532,8 +1853,8 @@ def _parse_args(task_name: str) -> argparse.Namespace:
     p.add_argument(
         "--invalid-neutral-weight",
         type=float,
-        default=0.20,
-        help="Weight for neutralizing masked/invalid normal regions toward up-vector (normal task only).",
+        default=0.0,
+        help="Legacy normal-loss term weight. The simplified minimap-only lane leaves this at 0.",
     )
     p.add_argument(
         "--height-channel",
@@ -1550,8 +1871,8 @@ def _parse_args(task_name: str) -> argparse.Namespace:
     p.add_argument(
         "--normal-variant",
         choices=list(_NORMAL_VARIANTS),
-        default="v17_1_normals",
-        help="Explicit normal-trainer variant contract. Use v17_1_normals for minimap->normals with height supervisor-only.",
+        default="v16_1_1_base",
+        help="Explicit normal-trainer variant contract. The active simple lane uses v16_1_1_base for minimap->normals.",
     )
     p.add_argument(
         "--normal-weight",
@@ -1587,6 +1908,16 @@ def run_task(task_name: str) -> None:
         raise RuntimeError("--train-epoch-tiles must be >= 0")
     if args.val_epoch_tiles < 0:
         raise RuntimeError("--val-epoch-tiles must be >= 0")
+    if args.train_bucket_rotation_fraction < 0.0 or args.train_bucket_rotation_fraction > 1.0:
+        raise RuntimeError("--train-bucket-rotation-fraction must be in [0.0, 1.0]")
+    if args.train_bucket_rotation_fraction > 0.0 and args.train_epoch_tiles > 0:
+        raise RuntimeError(
+            "--train-bucket-rotation-fraction cannot be combined with --train-epoch-tiles; omit --train-epoch-tiles and let the rotation fraction derive the per-epoch subset size."
+        )
+    if args.early_stop_patience < 0:
+        raise RuntimeError("--early-stop-patience must be >= 0")
+    if args.early_stop_min_improvement < 0.0:
+        raise RuntimeError("--early-stop-min-improvement must be >= 0.0")
     if args.refiner_probe_plateau_epochs < 1:
         raise RuntimeError("--refiner-probe-plateau-epochs must be >= 1")
 
@@ -1629,6 +1960,19 @@ def run_task(task_name: str) -> None:
                 args.prefetch_factor = 2
             if args.persistent_workers is None:
                 args.persistent_workers = False
+
+    loader_pressure_profile = _resolve_loader_pressure_profile(
+        args,
+        task_name=task_name,
+        normal_variant=normal_variant,
+        resolved_height_channel=bool(resolved_height_channel),
+        resolved_refiner_enabled=bool(resolved_refiner_enabled),
+        resolved_object_roof_channel=bool(resolved_object_roof_channel),
+    )
+    loader_pressure_result = _apply_loader_pressure_defaults(
+        args,
+        profile_name=loader_pressure_profile,
+    )
 
     args.resolved_height_channel = bool(resolved_height_channel)
     args.resolved_refiner_enabled = bool(resolved_refiner_enabled)
@@ -1724,6 +2068,7 @@ def run_task(task_name: str) -> None:
         seed=curation_seed + 101,
         evidence_dir=evidence_dir,
         build_balanced=True,
+        strict_build_balance=bool(args.strict_build_balance),
     )
     val_pool = _apply_dataset_pool(
         val_ds,
@@ -1732,17 +2077,10 @@ def run_task(task_name: str) -> None:
         seed=curation_seed + 202,
         evidence_dir=evidence_dir,
         build_balanced=True,
+        strict_build_balance=bool(args.strict_build_balance),
     )
     _apply_dataset_limit(train_ds, int(args.max_train_samples))
     _apply_dataset_limit(val_ds, int(args.max_val_samples))
-    autotune_result = _autotune_batch_size(
-        task=task,
-        task_name=task_name,
-        train_ds=train_ds,
-        device=device,
-        args=args,
-        evidence_dir=evidence_dir,
-    )
     train_build_labels = [
         str(train_ds._index_entries[global_idx].get("_build", "unknown"))
         for global_idx in train_ds._indices
@@ -1751,6 +2089,28 @@ def run_task(task_name: str) -> None:
         _normalize_bucket_label(train_ds._index_entries[global_idx].get("_curation_difficulty_bucket", ""))
         for global_idx in train_ds._indices
     ]
+    if float(args.train_bucket_rotation_fraction) > 0.0:
+        if not _bucket_counts(train_bucket_labels):
+            raise RuntimeError(
+                "--train-bucket-rotation-fraction requires a curated manifest with difficulty_bucket metadata in the active train pool."
+            )
+        args.train_epoch_tiles = _resolve_rotating_bucket_epoch_size(
+            len(train_ds),
+            epoch=1,
+            seed=int(args.seed),
+            build_labels=train_build_labels,
+            build_balanced=bool(args.train_epoch_build_balanced),
+            bucket_labels=train_bucket_labels,
+            bucket_rotation_fraction=float(args.train_bucket_rotation_fraction),
+        )
+    autotune_result = _autotune_batch_size(
+        task=task,
+        task_name=task_name,
+        train_ds=train_ds,
+        device=device,
+        args=args,
+        evidence_dir=evidence_dir,
+    )
     train_sample_rows = [
         _pool_row(train_ds._index_entries[global_idx], subset_pos=idx, split_pos=idx)
         for idx, global_idx in enumerate(train_ds._indices)
@@ -1765,8 +2125,10 @@ def run_task(task_name: str) -> None:
         epoch_size=int(args.train_epoch_tiles),
         build_labels=train_build_labels,
         build_balanced=bool(args.train_epoch_build_balanced),
+        strict_build_balance=bool(args.strict_build_balance),
         bucket_labels=train_bucket_labels,
         bucket_sampling_profile=args.bucket_sampling_profile,
+        bucket_rotation_fraction=float(args.train_bucket_rotation_fraction),
         sample_rows=train_sample_rows,
     )
     val_sampler: _DeterministicEpochSampler | None = None
@@ -1791,6 +2153,7 @@ def run_task(task_name: str) -> None:
             epoch_size=int(args.val_epoch_tiles),
             build_labels=val_build_labels,
             build_balanced=True,
+            strict_build_balance=bool(args.strict_build_balance),
             bucket_labels=val_bucket_labels,
             bucket_sampling_profile=args.bucket_sampling_profile,
             sample_rows=val_sample_rows,
@@ -1831,8 +2194,11 @@ def run_task(task_name: str) -> None:
     refiner_active = False
     best_val = float("inf")
     best_epoch: int | None = None
+    non_best_val_epochs = 0
     start_epoch = 1
     log_entries: list[dict[str, Any]] = []
+    last_completed_epoch = 0
+    early_stop_triggered = False
 
     if args.resume_checkpoint is not None:
         ckpt = torch.load(args.resume_checkpoint, map_location=device)
@@ -1866,6 +2232,7 @@ def run_task(task_name: str) -> None:
         start_epoch = int(ckpt["epoch"]) + 1
         best_val = float(ckpt.get("best_val", float("inf")))
         best_epoch = int(ckpt["best_epoch"]) if ckpt.get("best_epoch") is not None else None
+        non_best_val_epochs = int(ckpt.get("non_best_val_epochs", 0) or 0)
         if refiner is not None and "refiner_state_dict" in ckpt:
             refiner.load_state_dict(ckpt["refiner_state_dict"])
             refiner_active = bool(ckpt.get("refiner_active", False))
@@ -1885,6 +2252,8 @@ def run_task(task_name: str) -> None:
         "persistent_workers": args.persistent_workers,
         "resolved_persistent_workers": resolved_persistent_workers,
         "prefetch_factor": args.prefetch_factor,
+        "loader_pressure_profile": (loader_pressure_result or {}).get("profile_name"),
+        "loader_pressure_profile_applied": bool((loader_pressure_result or {}).get("applied", False)),
         "epochs": args.epochs,
         "lr": args.lr,
         "weight_decay": args.weight_decay,
@@ -1896,6 +2265,8 @@ def run_task(task_name: str) -> None:
         "val_fraction": args.val_fraction,
         "target_vram_gb": args.target_vram_gb,
         "autotune_batch_size": args.autotune_batch_size,
+        "early_stop_patience": int(args.early_stop_patience),
+        "early_stop_min_improvement": float(args.early_stop_min_improvement),
         "autotune_batch_candidates": list(args.autotune_batch_candidates) if args.autotune_batch_candidates else None,
         "autotune_keep_epoch_steps": args.autotune_keep_epoch_steps,
         "autotune_safety_factor": args.autotune_safety_factor,
@@ -1904,11 +2275,25 @@ def run_task(task_name: str) -> None:
         "train_max_tiles": args.train_max_tiles,
         "train_epoch_tiles": args.train_epoch_tiles,
         "train_epoch_build_balanced": args.train_epoch_build_balanced,
+        "strict_build_balance": bool(args.strict_build_balance),
+        "effective_train_epoch_tiles": len(train_sampler),
+        "epoch_sampling_mode": ("bucket_rotation_fraction" if float(args.train_bucket_rotation_fraction) > 0.0 else "fixed_epoch_tiles"),
         "bucket_sampling_profile": args.bucket_sampling_profile,
         "bucket_sampling_weights": _bucket_sampling_weights(args.bucket_sampling_profile),
+        "train_bucket_rotation_fraction": float(args.train_bucket_rotation_fraction),
+        "epoch_sampling_fraction": (float(args.train_bucket_rotation_fraction) if float(args.train_bucket_rotation_fraction) > 0.0 else None),
+        "train_bucket_rotation_cycle_length": _resolve_rotating_bucket_cycle_length(
+            len(train_ds),
+            seed=int(args.seed),
+            build_labels=train_build_labels,
+            build_balanced=bool(args.train_epoch_build_balanced),
+            bucket_labels=train_bucket_labels,
+            bucket_rotation_fraction=float(args.train_bucket_rotation_fraction),
+        ),
         "val_max_tiles": args.val_max_tiles,
         "rotate_val_tiles": bool(args.rotate_val_tiles),
         "val_epoch_tiles": int(args.val_epoch_tiles),
+        "effective_val_epoch_tiles": (len(val_sampler) if val_sampler is not None else len(val_ds)),
         "max_train_samples": args.max_train_samples,
         "max_val_samples": args.max_val_samples,
         "normal_detail_boost": args.normal_detail_boost,
@@ -1920,10 +2305,14 @@ def run_task(task_name: str) -> None:
         "resolved_refiner_enabled": bool(resolved_refiner_enabled),
         "resolved_input_contract": (
             "minimap_rgb"
-            if task_name == "normal" and normal_variant == "v17_1_normals"
-            else ("minimap_rgb+object_roof_mask" if task_name == "normal" and normal_variant == "v18_object_roof_aux" else "variant_defined")
+            if task_name == "normal" and not bool(resolved_height_channel) and not bool(resolved_object_roof_channel)
+            else ("minimap_rgb+height_norm" if task_name == "normal" and bool(resolved_height_channel)
+                  else ("minimap_rgb+object_roof_mask" if task_name == "normal" and bool(resolved_object_roof_channel) else "variant_defined"))
         ),
         "resolved_output_contract": ("normals_xyz" if task_name == "normal" else "task_defined"),
+        "validation_contract": "offline_supervised_eval_with_truth_targets",
+        "validation_preview_contract": "offline_supervised_eval_preview",
+        "deployment_proof_surface": "infer_v18_focus.py",
         "height_supervision_only": bool(task_name == "normal" and normal_variant == "v17_1_normals"),
         "model_params": sum(p.numel() for p in model.parameters() if p.requires_grad),
         "refiner_enabled": refiner is not None,
@@ -1955,16 +2344,26 @@ def run_task(task_name: str) -> None:
             f"height_supervision_weight={float(getattr(args, 'height_supervision_weight', 0.0)):.3f}",
             flush=True,
         )
-        if normal_variant == "v17_1_normals":
+        if not bool(resolved_height_channel) and not bool(resolved_object_roof_channel):
             print(
-                "Normal contract: input=minimap_rgb -> output=normals_xyz | height_supervision_only=true",
+                "Normal contract: input=minimap_rgb -> output=normals_xyz | simplified_loss=true",
                 flush=True,
             )
-        if normal_variant == "v18_object_roof_aux":
+        if bool(resolved_height_channel):
             print(
-                "Normal contract: input=minimap_rgb+object_roof_mask -> output=normals_xyz | terrain_targets_authoritative=true",
+                "Normal contract: input=minimap_rgb+height_norm -> output=normals_xyz",
                 flush=True,
             )
+        if bool(resolved_object_roof_channel):
+            print(
+                "Normal contract: input=minimap_rgb+object_roof_mask -> output=normals_xyz",
+                flush=True,
+            )
+    if task_name in {"height", "normal"}:
+        print(
+            "Supervised eval contract: val loss/previews use offline target and mask tensors for scoring only; deployment-surface proof should run infer_v18_focus.py with the model input contract only.",
+            flush=True,
+        )
     print(f"Device: {device}", flush=True)
     print(f"Run dir: {run_dir}", flush=True)
     print(f"Dataset: train={len(train_ds)} val={len(val_ds)}", flush=True)
@@ -1985,6 +2384,11 @@ def run_task(task_name: str) -> None:
     )
     print(f"Curated build mix (train): {train_pool.get('build_tile_counts', {})}", flush=True)
     print(f"Curated build mix (val): {val_pool.get('build_tile_counts', {})}", flush=True)
+    if bool(args.strict_build_balance):
+        print(
+            "Build balancing: strict near-equal per-build subsets without replacement; oversized pool/epoch requests auto-cap to the largest feasible balanced subset.",
+            flush=True,
+        )
     if train_pool.get("selected_bucket_counts"):
         print(f"Curated difficulty mix (train): {train_pool.get('selected_bucket_counts', {})}", flush=True)
         print(f"Available difficulty mix (train): {train_pool.get('available_bucket_counts', {})}", flush=True)
@@ -1992,15 +2396,26 @@ def run_task(task_name: str) -> None:
         print(f"Curated difficulty mix (val): {val_pool.get('selected_bucket_counts', {})}", flush=True)
     if bool(args.rotate_val_tiles) and int(args.val_epoch_tiles) > 0:
         print(
-            f"Validation rotation: val_epoch_tiles={min(int(args.val_epoch_tiles), len(val_ds))}/{len(val_ds)}",
+            f"Validation rotation: val_epoch_tiles={len(val_sampler) if val_sampler is not None else min(int(args.val_epoch_tiles), len(val_ds))}/{len(val_ds)}",
             flush=True,
         )
     if args.train_epoch_tiles > 0:
+        rotation_cycle_length = _resolve_rotating_bucket_cycle_length(
+            len(train_ds),
+            seed=int(args.seed),
+            build_labels=train_build_labels,
+            build_balanced=bool(args.train_epoch_build_balanced),
+            bucket_labels=train_bucket_labels,
+            bucket_rotation_fraction=float(args.train_bucket_rotation_fraction),
+        )
         print(
             "Epoch sampling: "
-            f"train_epoch_tiles={min(int(args.train_epoch_tiles), len(train_ds))}/{len(train_ds)} "
+            f"train_epoch_tiles={len(train_sampler)}/{len(train_ds)} "
             f"build_balanced={bool(args.train_epoch_build_balanced)} "
-            f"bucket_profile={args.bucket_sampling_profile}",
+            f"strict_build_balance={bool(args.strict_build_balance)} "
+            f"bucket_profile={args.bucket_sampling_profile} "
+            f"bucket_rotation_fraction={float(args.train_bucket_rotation_fraction):.2f} "
+            f"bucket_rotation_cycle={rotation_cycle_length}",
             flush=True,
         )
     print(
@@ -2009,6 +2424,16 @@ def run_task(task_name: str) -> None:
         f"prefetch_factor={(args.prefetch_factor if resolved_num_workers > 0 else 'n/a')}",
         flush=True,
     )
+    if loader_pressure_result is not None:
+        print(
+            "DataLoader pressure profile: "
+            f"{loader_pressure_result['profile_name']} "
+            f"applied={loader_pressure_result['applied']} "
+            f"workers={loader_pressure_result['num_workers']} "
+            f"persistent_workers={loader_pressure_result['persistent_workers']} "
+            f"prefetch_factor={loader_pressure_result['prefetch_factor']}",
+            flush=True,
+        )
     print(
         f"Batching: micro={args.batch_size} accum={args.grad_accum_steps} "
         f"effective={args.batch_size * args.grad_accum_steps}",
@@ -2029,6 +2454,12 @@ def run_task(task_name: str) -> None:
     if args.resume_checkpoint is not None:
         print(f"Resume checkpoint: {args.resume_checkpoint}", flush=True)
         print(f"Resume scheduler T_max: {getattr(scheduler, 'T_max', 'n/a')}", flush=True)
+    if int(args.early_stop_patience) > 0:
+        print(
+            f"Early stop: patience={int(args.early_stop_patience)} "
+            f"min_improvement={float(args.early_stop_min_improvement):.6f}",
+            flush=True,
+        )
 
     for epoch in range(start_epoch, args.epochs + 1):
         train_sampler.set_epoch(epoch)
@@ -2172,11 +2603,16 @@ def run_task(task_name: str) -> None:
                 entry[f"val_{key}"] = value / n_val
             print(f"        val | loss={entry['val_loss']:.4f}", flush=True)
             is_new_best = False
-            if entry["val_loss"] < best_val:
+            if _is_new_best_val(
+                float(entry["val_loss"]),
+                float(best_val),
+                float(args.early_stop_min_improvement),
+            ):
                 best_val = float(entry["val_loss"])
                 best_epoch = int(epoch)
                 is_new_best = True
                 entry["is_new_best"] = True
+                non_best_val_epochs = 0
 
                 ckpt_payload: dict[str, Any] = {
                     "epoch": epoch,
@@ -2186,6 +2622,7 @@ def run_task(task_name: str) -> None:
                     "scaler_state_dict": scaler.state_dict(),
                     "best_val": best_val,
                     "best_epoch": best_epoch,
+                    "non_best_val_epochs": int(non_best_val_epochs),
                     "task": task_name,
                 }
 
@@ -2242,6 +2679,15 @@ def run_task(task_name: str) -> None:
 
                 torch.save(ckpt_payload, ckpt_dir / f"v16_1_{task_name}_best.pt")
                 print(f"        *** new best val_loss={best_val:.4f}", flush=True)
+            else:
+                non_best_val_epochs += 1
+                entry["non_best_val_epochs"] = int(non_best_val_epochs)
+                if best_epoch is not None:
+                    print(
+                        f"        plateau | best_epoch={best_epoch} "
+                        f"best_val={best_val:.4f} stale_val_epochs={non_best_val_epochs}",
+                        flush=True,
+                    )
             if (
                 is_new_best
                 and preview_batch is not None
@@ -2251,6 +2697,7 @@ def run_task(task_name: str) -> None:
                 task.save_preview(preview_batch, preview_outputs, val_dir / f"best_epoch_{epoch:04d}.png")
 
         log_entries.append(entry)
+        last_completed_epoch = int(epoch)
         last_ckpt: dict[str, Any] = {
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
@@ -2259,6 +2706,7 @@ def run_task(task_name: str) -> None:
             "scaler_state_dict": scaler.state_dict(),
             "best_val": best_val,
             "best_epoch": best_epoch,
+            "non_best_val_epochs": int(non_best_val_epochs),
             "task": task_name,
         }
         if refiner is not None:
@@ -2266,19 +2714,30 @@ def run_task(task_name: str) -> None:
             last_ckpt["refiner_active"] = bool(refiner_active)
         torch.save(last_ckpt, ckpt_dir / f"v16_1_{task_name}_last.pt")
         (run_dir / "training_log.json").write_text(json.dumps(log_entries, indent=2), encoding="utf-8")
+        if int(args.early_stop_patience) > 0 and non_best_val_epochs >= int(args.early_stop_patience):
+            early_stop_triggered = True
+            print(
+                f"        early-stop | no new best for {non_best_val_epochs} validation epochs; "
+                f"stopping at epoch {epoch}",
+                flush=True,
+            )
+            break
 
     config["best_val"] = best_val if np.isfinite(best_val) else None
     config["best_epoch"] = best_epoch
+    config["early_stop_triggered"] = bool(early_stop_triggered)
+    config["last_completed_epoch"] = int(last_completed_epoch)
     config["finished_at"] = datetime.now(timezone.utc).isoformat()
     (run_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
     final_ckpt: dict[str, Any] = {
-        "epoch": args.epochs,
+        "epoch": int(last_completed_epoch),
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict(),
         "scaler_state_dict": scaler.state_dict(),
         "best_val": best_val,
         "best_epoch": best_epoch,
+        "non_best_val_epochs": int(non_best_val_epochs),
         "task": task_name,
     }
     if refiner is not None:

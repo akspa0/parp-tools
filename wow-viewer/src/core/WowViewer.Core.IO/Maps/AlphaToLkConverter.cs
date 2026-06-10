@@ -517,7 +517,7 @@ public static class AlphaToLkConverter
             if (liquidChunk.IndexX != cx || liquidChunk.IndexY != cy)
                 continue;
 
-            AdtLiquidBasicType basicType = ResolveLiquidBasicType(liquidChunk.McnkFlags);
+            AdtLiquidBasicType basicType = AlphaLiquidTypeCodec.ResolveBasicType(liquidChunk.TileFlags, liquidChunk.McnkFlags);
             float[] heights = liquidChunk.Heights is { Length: >= 81 }
                 ? [.. liquidChunk.Heights]
                 : CreateFlatLiquidHeights((liquidChunk.MinHeight + liquidChunk.MaxHeight) * 0.5f);
@@ -546,15 +546,7 @@ public static class AlphaToLkConverter
 
     private static AdtLiquidBasicType ResolveLiquidBasicType(uint mcnkFlags)
     {
-        if ((mcnkFlags & 0x08) != 0)
-            return AdtLiquidBasicType.Ocean;
-
-        return ((mcnkFlags >> 4) & 0x3) switch
-        {
-            2 => AdtLiquidBasicType.Magma,
-            3 => AdtLiquidBasicType.Slime,
-            _ => AdtLiquidBasicType.Water,
-        };
+        return McnkFlagDecoder.Decode(mcnkFlags);
     }
 
     private static ushort MapLiquidTypeId(AdtLiquidBasicType basicType)

@@ -63,6 +63,7 @@ public sealed class M2ModelDocument
         BoundsRadius = boundsRadius;
         EmbeddedSkinProfileCount = embeddedSkinProfileCount;
         EmbeddedSkinProfileOffset = embeddedSkinProfileOffset;
+        InlineEra1121Geometry = null;
     }
 
     public M2ModelIdentity Identity { get; }
@@ -110,6 +111,8 @@ public sealed class M2ModelDocument
     public uint EmbeddedSkinProfileCount { get; }
 
     public uint EmbeddedSkinProfileOffset { get; }
+
+    public M2Era1121Geometry? InlineEra1121Geometry { get; set; }
 
     public int GlobalLoopCount => GlobalLoops.Count;
 

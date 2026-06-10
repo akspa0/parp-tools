@@ -40,8 +40,8 @@ public static class Pm4ResearchLinkageAnalyzer
 
         Dictionary<string, int> mismatchTypeCounts = new(StringComparer.Ordinal);
         Dictionary<string, int> mismatchSubtypeCounts = new(StringComparer.Ordinal);
-        Dictionary<string, int> badMdosTypeCounts = new(StringComparer.Ordinal);
-        Dictionary<string, int> badMdosSurfaceCounts = new(StringComparer.Ordinal);
+        Dictionary<string, int> badMscnRefTypeCounts = new(StringComparer.Ordinal);
+        Dictionary<string, int> badMscnRefSurfaceCounts = new(StringComparer.Ordinal);
         Dictionary<string, int> objectIdReuseCounts = new(StringComparer.Ordinal);
         Dictionary<string, int> objectIdTypeFanoutCounts = new(StringComparer.Ordinal);
 
@@ -51,7 +51,7 @@ public static class Pm4ResearchLinkageAnalyzer
         int reusedObjectIdGroupCount = 0;
         int reusedAcrossTypeGroupCount = 0;
 
-        List<Pm4BadMdosCluster> badMdosClusters = new();
+        List<Pm4BadMscnRefCluster> badMscnRefClusters = new();
         List<Pm4Ck24ObjectIdReuseCase> reuseCases = new();
         Dictionary<string, MismatchFamilyAccumulator> mismatchFamilies = new(StringComparer.Ordinal);
 
@@ -128,8 +128,8 @@ public static class Pm4ResearchLinkageAnalyzer
             foreach (IGrouping<uint, Pm4MsurEntry> ck24Group in msur.GroupBy(static surface => surface.Ck24))
             {
                 List<Pm4MsurEntry> surfaces = ck24Group.ToList();
-                int validMdosCount = 0;
-                int invalidMdosCount = 0;
+                int validMscnRefCount = 0;
+                int invalidMscnRefCount = 0;
                 HashSet<uint> distinctValid = new();
                 HashSet<uint> distinctInvalid = new();
                 HashSet<uint> meshVertexIndices = new();
@@ -138,12 +138,12 @@ public static class Pm4ResearchLinkageAnalyzer
                 {
                     if (surface.MscnRefIndex < mscnCount)
                     {
-                        validMdosCount++;
+                        validMscnRefCount++;
                         distinctValid.Add(surface.MscnRefIndex);
                     }
                     else
                     {
-                        invalidMdosCount++;
+                        invalidMscnRefCount++;
                         distinctInvalid.Add(surface.MscnRefIndex);
                     }
 
@@ -159,13 +159,13 @@ public static class Pm4ResearchLinkageAnalyzer
                     }
                 }
 
-                if (invalidMdosCount > 0)
+                if (invalidMscnRefCount > 0)
                 {
                     Pm4MsurEntry first = surfaces[0];
-                    AddCount(badMdosTypeCounts, $"0x{first.Ck24Type:X2}");
-                    AddCount(badMdosSurfaceCounts, surfaces.Count.ToString());
+                    AddCount(badMscnRefTypeCounts, $"0x{first.Ck24Type:X2}");
+                    AddCount(badMscnRefSurfaceCounts, surfaces.Count.ToString());
 
-                    badMdosClusters.Add(new Pm4BadMdosCluster(
+                    badMscnRefClusters.Add(new Pm4BadMscnRefCluster(
                         file.SourcePath,
                         tileX,
                         tileY,
@@ -173,8 +173,8 @@ public static class Pm4ResearchLinkageAnalyzer
                         first.Ck24Type,
                         first.Ck24ObjectId,
                         surfaces.Count,
-                        invalidMdosCount,
-                        validMdosCount,
+                        invalidMscnRefCount,
+                        validMscnRefCount,
                         distinctInvalid.Count,
                         distinctValid.Count,
                         meshVertexIndices.Count));
@@ -282,8 +282,8 @@ public static class Pm4ResearchLinkageAnalyzer
         [
             BuildDistribution("RefIndexMismatch.TypeFlags", mismatchTypeCounts, null, "Mismatch-heavy MSLK link type flags."),
             BuildDistribution("RefIndexMismatch.Subtype", mismatchSubtypeCounts, null, "Mismatch-heavy MSLK link subtype values."),
-            BuildDistribution("BadMdos.Ck24Type", badMdosTypeCounts, null, "CK24 type bytes for groups carrying invalid MSCN node references."),
-            BuildDistribution("BadMdos.SurfaceCount", badMdosSurfaceCounts, null, "Surface counts for CK24 groups with invalid MSCN node references."),
+            BuildDistribution("BadMscnRef.Ck24Type", badMscnRefTypeCounts, null, "CK24 type bytes for groups carrying invalid MSCN node references."),
+            BuildDistribution("BadMscnRef.SurfaceCount", badMscnRefSurfaceCounts, null, "Surface counts for CK24 groups with invalid MSCN node references."),
             BuildDistribution("Ck24ObjectId.ReuseCountPerFile", objectIdReuseCounts, null, "How many distinct full CK24 values share one non-zero low16 object id inside a file."),
             BuildDistribution("Ck24ObjectId.TypeFanoutPerFile", objectIdTypeFanoutCounts, null, "How many distinct CK24 type bytes share one non-zero low16 object id inside a file.")
         ];
@@ -295,8 +295,8 @@ public static class Pm4ResearchLinkageAnalyzer
             .Select(static family => family.ToReport())
             .ToList();
 
-        IReadOnlyList<Pm4BadMdosCluster> topBadMdosClusters = badMdosClusters
-            .OrderByDescending(static cluster => cluster.InvalidMdosCount)
+        IReadOnlyList<Pm4BadMscnRefCluster> topBadMscnRefClusters = badMscnRefClusters
+            .OrderByDescending(static cluster => cluster.InvalidMscnRefCount)
             .ThenByDescending(static cluster => cluster.SurfaceCount)
             .ThenBy(static cluster => cluster.SourcePath)
             .Take(32)
@@ -320,7 +320,7 @@ public static class Pm4ResearchLinkageAnalyzer
             identitySummary,
             distributions,
             topMismatchFamilies,
-            topBadMdosClusters,
+            topBadMscnRefClusters,
             notes);
     }
 

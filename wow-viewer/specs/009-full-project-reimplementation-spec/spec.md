@@ -64,7 +64,7 @@ This specification is organized as a layered reference. Sections 1–12 define t
 
 These sections capture what only exists in working code. Documentation is often wrong or outdated; the codebase is the authoritative source. Each deep-dive extracts exact algorithms, constants, edge cases, and open questions from the implementation.
 
-**§13 Deep-Dive: PM4 Format (Practically Unknown)** — The pathmap format that took years of research to partially decode. 16 recognized chunks with binary record layouts and field-level confidence ratings (Known/Partial/Open). The 4-level hierarchy model: Region (MSHD.Field04) → Object (CK24) → Sub-object (MSLK.GroupObjectId) → Surfaces (MSUR) + Positions (MPRL). CK24 type classification (nav mesh, M2 interior/exterior, WMO). Cross-tile merge via MSCN connector keys with Union-Find. Coordinate transforms (3 axis conventions, 2 coordinate modes, planar transform scoring). Verified vs partial linkages. 10 open research questions ranked by impact. This section is a living research document — not a solved spec.
+**§13 Deep-Dive: PM4 Format (Practically Unknown)** — The pathmap format that took years of research to partially decode. 16 recognized chunks with binary record layouts and field-level confidence ratings (Known/Partial/Open). The 4-level hierarchy model: Region (MSHD.Field04) → Object (CK24) → Sub-object (MSLK.GroupObjectId) → Surfaces (MSUR) + Positions (MPRL). CK24 type classification (nav mesh, M2 interior/exterior, WMO). `MSLK.TypeFlags` now has first partial family buckets from real-data inspection (`0x03` M2 top surfaces, `0x10` interior WMO floors, `0x12` exterior WMO solid surfaces), but grouping ownership is still not fully closed. Cross-tile merge via MSCN connector keys with Union-Find. Coordinate transforms (3 axis conventions, 2 coordinate modes, planar transform scoring). Verified vs partial linkages. 10 open research questions ranked by impact. This section is a living research document — not a solved spec.
 
 **§14 Deep-Dive: WMO Portal Visibility (BFS Flood-Fill)** — The algorithm that determines which WMO interior groups are visible. BFS from camera through portal adjacency graph. Two early-out paths (camera inside root → all visible; no exterior groups → frustum only). Portal reveal distances (exterior: 1024, interior: 3072). Traversal depth limits (exterior: 1, interior: 4). Known simplifications: portal plane-side test not used, BSP tree not traversed.
 
@@ -1524,10 +1524,10 @@ PackedParams decoding: `Ck24 = (PackedParams >> 8) & 0x00FF_FFFF`, `Ck24Type = (
 **MSLK Entry (24 bytes):**
 ```
 Offset  Type   Field              Status
-0x00    byte   TypeFlags          OPEN
+0x00    byte   TypeFlags          PARTIAL - observed surface-family buckets: 0x03=M2 tops, 0x10=interior WMO floors, 0x12=exterior WMO solids
 0x01    byte   Subtype            OPEN — often floor/layer-like
 0x02    ushort Padding
-0x04    uint   GroupObjectId      LOW — NOT confirmed as full-object identity
+0x04    uint   GroupObjectId      LOW — NOT confirmed as full-object identity; keep distinct from TypeFlags surface-family buckets
 0x08    int    MspiFirstIndex     First index into MSPI path stream
 0x0C    byte   MspiIndexCount     OPEN — indices vs triangles ambiguity
 0x10    uint   LinkId             PARTIAL — sentinel tiles decoded
@@ -1554,6 +1554,7 @@ Offset  Type   Field     Status
 Level 0: MSHD.Field04 (Region) — spans multiple ADT tiles
   Level 1: CK24 (Object) — WMO or M2 collision mesh
     Level 2: MSLK.GroupObjectId (Sub-object) — linked surface sets
+             note: do not conflate with MSLK.TypeFlags, which now looks more like per-surface family classification
       Level 3: Individual MSUR surfaces + MPRL positions
 ```
 
@@ -1620,7 +1621,7 @@ A 3-phase grouping system (`Pm4RegionObjectGrouper`) decomposes PM4 data into a 
 
 **Phase 2: Object grouping** — Within each region, group MSUR surfaces by CK24 value (derived from `MSUR.PackedParams >> 8 & 0x00FF_FFFF`). Each CK24 group becomes a `Pm4RegionObject` with multi-tile tracking.
 
-**Phase 3: Sub-object partitioning** — Within each object, partition surfaces by `MSLK.GroupObjectId` using Union-Find. Each partition becomes a `Pm4SubObject` containing surfaces, position refs, bounds, and average height.
+**Phase 3: Sub-object partitioning** — Within each object, partition surfaces by `MSLK.GroupObjectId` using Union-Find. Each partition becomes a `Pm4SubObject` containing surfaces, position refs, bounds, and average height. Keep `MSLK.TypeFlags` as a parallel classification signal, not as the partition key, until field ownership is fully proven.
 
 **Output types:**
 - `Pm4SubObject`: surfaces + position refs + bounds + average height
@@ -1639,6 +1640,7 @@ A 3-phase grouping system (`Pm4RegionObjectGrouper`) decomposes PM4 data into a 
 1. MSCN coordinate transform: Is swapped-XY correct?
 2. CK24ObjectId identity mapping: Real UniqueID or sub-identifier?
 3. MSLK.RefIndex final semantics: What are non-MSUR target domains?
+4. MSLK.TypeFlags/Subtype final semantics: extend or falsify the current partial buckets (`0x03` M2 tops, `0x10` interior WMO floors, `0x12` exterior WMO solids), then close how Subtype refines them
 4. MSHD.Field00/Field08 relationship to Field04
 5. MSLK.MspiIndexCount: Indices or triangles?
 6. MPRR.Value1/Value2 full semantics

@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\core\WowViewer.Core.PM4\WowViewer.Core.PM4.csproj" />
+    <ProjectReference Include="..\..\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj" />
   </ItemGroup>
 
 </Project>

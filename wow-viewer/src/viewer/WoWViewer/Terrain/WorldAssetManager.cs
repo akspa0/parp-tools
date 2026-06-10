@@ -1,0 +1,1771 @@
+using System.Diagnostics;
+using System.Numerics;
+using WowViewer.Core.IO.Mdx;
+using WoWViewer.DataSources;
+using WoWViewer.Logging;
+using WoWViewer.Rendering;
+using Silk.NET.OpenGL;
+using WowViewer.Core.IO.Mdx;
+using WowViewer.Core.Runtime.M2;
+using WowViewer.Core.IO.Converters;
+
+namespace WoWViewer.Terrain;
+
+public readonly record struct WorldAssetReadStats(
+    long ReadRequests,
+    long FileCacheHits,
+    long ResolvedPathCacheHits,
+    long PathProbeAttempts,
+    long PathProbeResolutions,
+    long PathProbeMisses,
+    int ResolvedPathCacheCount);
+
+public readonly record struct WmoMeshSummary(
+    int Version,
+    int GroupCount,
+    int VertexCount,
+    int IndexCount,
+    int TriangleCount,
+    int BatchCount,
+    Vector3 BoundsMin,
+    Vector3 BoundsMax,
+    Vector3[] FootprintSampleVertices,
+    WmoGroupMeshSummary[] GroupSummaries)
+{
+    public int FootprintSampleCount => FootprintSampleVertices?.Length ?? 0;
+}
+
+public readonly record struct WmoGroupMeshSummary(
+    int GroupIndex,
+    int VertexCount,
+    int IndexCount,
+    int TriangleCount,
+    Vector3 BoundsMin,
+    Vector3 BoundsMax,
+    Vector3[] FootprintSampleVertices)
+{
+    public int FootprintSampleCount => FootprintSampleVertices?.Length ?? 0;
+}
+
+public readonly record struct MdxCollisionMeshSummary(
+    int VertexCount,
+    int TriangleIndexCount,
+    int TriangleCount,
+    Vector3 BoundsMin,
+    Vector3 BoundsMax,
+    Vector3[] FootprintSampleVertices)
+{
+    public int FootprintSampleCount => FootprintSampleVertices?.Length ?? 0;
+}
+
+/// <summary>
+/// Centralized asset manager for world scene rendering.
+/// Ensures each model and texture is loaded exactly once into GPU memory,
+/// then instanced via transforms for all placements.
+/// 
+/// Ownership: WorldAssetManager owns all GPU resources (renderers, textures).
+/// WorldScene owns the instance lists (transforms) and delegates rendering here.
+/// </summary>
+public class WorldAssetManager : IDisposable
+{
+    private readonly GL _gl;
+    private readonly IDataSource? _dataSource;
+    private readonly ReplaceableTextureResolver? _texResolver;
+    private string? _buildVersion;
+    private bool _enableRuntimeWmoGroupVisibility = true;
+    private bool _enableRuntimeWmoGroupLiquids = true;
+    private bool _objectWireframeEnabled;
+
+    // ── Shared caches ──────────────────────────────────────────────────
+
+    // Model path (normalized) → loaded renderer (null = load attempted but failed)
+    private readonly Dictionary<string, IModelRenderer?> _mdxModels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, WmoRenderer?> _wmoModels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, WmoMeshSummary> _wmoMeshSummaries = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, MdxCollisionMeshSummary?> _mdxCollisionSummaries = new(StringComparer.OrdinalIgnoreCase);
+
+    // LRU tracking — keys ordered by last access time (most recent at end)
+    private readonly LinkedList<string> _mdxLru = new();
+    private readonly Dictionary<string, LinkedListNode<string>> _mdxLruMap = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LinkedList<string> _wmoLru = new();
+    private readonly Dictionary<string, LinkedListNode<string>> _wmoLruMap = new(StringComparer.OrdinalIgnoreCase);
+    // World placements keep instance references long after the initial tile-load callback.
+    // Bounded renderer eviction causes placed objects to disappear until the tile reloads,
+    // so renderer residency defaults to unlimited while the raw file-data cache stays bounded.
+    private static readonly int MaxMdxCached = 0; // 0 = unlimited
+    private static readonly int MaxWmoCached = 0; // 0 = unlimited
+
+    // Raw file data cache — avoids re-reading the same file from MPQ multiple times
+    private readonly Dictionary<string, byte[]?> _fileDataCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LinkedList<string> _fileLru = new();
+    private readonly Dictionary<string, LinkedListNode<string>> _fileLruMap = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _resolvedReadPathCache = new(StringComparer.OrdinalIgnoreCase);
+    private const int MaxFileCached = 1000; // Max raw file entries cached
+
+    // Deferred world-asset loading keeps tile streaming responsive.
+    private readonly Queue<string> _priorityMdxLoads = new();
+    private readonly Queue<string> _pendingMdxLoads = new();
+    private readonly HashSet<string> _queuedMdxLoads = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _priorityQueuedMdxLoads = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Queue<string> _priorityWmoLoads = new();
+    private readonly Queue<string> _pendingWmoLoads = new();
+    private readonly HashSet<string> _queuedWmoLoads = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _priorityQueuedWmoLoads = new(StringComparer.OrdinalIgnoreCase);
+    private bool _preferWmoNext;
+    private readonly Dictionary<string, string?> _bestSkinPathCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _knownMissingM2SkinPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _loggedMissingM2SkinPaths = new(StringComparer.OrdinalIgnoreCase);
+
+// M2 route decision tracking
+    private readonly Dictionary<string, M2RouteDecision?> _mdxRouteDecisions = new(StringComparer.OrdinalIgnoreCase);
+
+    // Stats
+    public int MdxModelsLoaded => _mdxModels.Count(kv => kv.Value != null);
+    public int MdxModelsFailed => _mdxModels.Count(kv => kv.Value == null);
+    public int WmoModelsLoaded => _wmoModels.Count(kv => kv.Value != null);
+    public int WmoModelsFailed => _wmoModels.Count(kv => kv.Value == null);
+    public int FileCacheCount => _fileDataCache.Count;
+    public int PendingAssetLoadCount => _queuedMdxLoads.Count + _queuedWmoLoads.Count;
+public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer => renderer?.PendingDoodadModelLoadCount ?? 0);
+    public int KnownMissingM2SkinCount => _knownMissingM2SkinPaths.Count;
+    public long SuppressedFailedMdxRetryCount => _suppressedFailedMdxRetryCount;
+
+    public M2RouteDecision? GetRouteDecision(string normalizedKey)
+        => _mdxRouteDecisions.TryGetValue(normalizedKey, out var decision) ? decision : null;
+    public long SuppressedMissingM2SkinLogCount => _suppressedMissingM2SkinLogCount;
+
+    private long _fileReadRequests;
+    private long _fileReadCacheHits;
+    private long _resolvedPathCacheHits;
+    private long _pathProbeAttempts;
+    private long _pathProbeResolutions;
+    private long _pathProbeMisses;
+    private long _suppressedFailedMdxRetryCount;
+    private long _suppressedMissingM2SkinLogCount;
+
+    public WorldAssetManager(GL gl, IDataSource? dataSource, ReplaceableTextureResolver? texResolver = null, string? buildVersion = null)
+    {
+        _gl = gl;
+        _dataSource = dataSource;
+        _texResolver = texResolver;
+        _buildVersion = buildVersion;
+    }
+
+    public void SetBuildVersion(string? buildVersion)
+    {
+        _buildVersion = buildVersion;
+    }
+
+    public bool EnableRuntimeWmoGroupVisibility
+    {
+        get => _enableRuntimeWmoGroupVisibility;
+        set
+        {
+            if (_enableRuntimeWmoGroupVisibility == value)
+                return;
+
+            _enableRuntimeWmoGroupVisibility = value;
+
+            foreach (var renderer in _wmoModels.Values)
+                renderer?.SetRuntimeGroupVisibilityEnabled(value);
+        }
+    }
+
+    public bool EnableRuntimeWmoGroupLiquids
+    {
+        get => _enableRuntimeWmoGroupLiquids;
+        set
+        {
+            if (_enableRuntimeWmoGroupLiquids == value)
+                return;
+
+            _enableRuntimeWmoGroupLiquids = value;
+
+            foreach (var renderer in _wmoModels.Values)
+                renderer?.SetRuntimeGroupLiquidsVisible(value);
+        }
+    }
+
+    public bool ObjectWireframeEnabled => _objectWireframeEnabled;
+
+    public void SetObjectWireframeEnabled(bool enabled)
+    {
+        if (_objectWireframeEnabled == enabled)
+            return;
+
+        _objectWireframeEnabled = enabled;
+
+        foreach (IModelRenderer? renderer in _mdxModels.Values)
+            renderer?.ToggleWireframe();
+
+        foreach (WmoRenderer? renderer in _wmoModels.Values)
+            renderer?.ToggleWireframe();
+    }
+
+    private void ApplyObjectWireframePreference(ISceneRenderer? renderer)
+    {
+        if (_objectWireframeEnabled && renderer != null)
+            renderer.ToggleWireframe();
+    }
+
+    public void ApplyTextureSamplingSettings()
+    {
+        foreach (var renderer in _mdxModels.Values)
+            renderer?.ApplyTextureSamplingSettings();
+
+        foreach (var renderer in _wmoModels.Values)
+            renderer?.ApplyTextureSamplingSettings();
+    }
+
+    public WorldAssetReadStats GetReadStats()
+        => new(
+            _fileReadRequests,
+            _fileReadCacheHits,
+            _resolvedPathCacheHits,
+            _pathProbeAttempts,
+            _pathProbeResolutions,
+            _pathProbeMisses,
+            _resolvedReadPathCache.Count);
+
+    /// <summary>
+    /// Pre-register all model names referenced by the map so we know the full asset set.
+    /// Does NOT load anything yet — just prepares the manifest.
+    /// </summary>
+    public AssetManifest BuildManifest(IReadOnlyList<string> mdxNames, IReadOnlyList<string> wmoNames,
+        IReadOnlyList<MddfPlacement> mddfPlacements, IReadOnlyList<ModfPlacement> modfPlacements)
+    {
+        var manifest = new AssetManifest();
+
+        // Collect unique MDX models actually referenced by placements
+        foreach (var p in mddfPlacements)
+        {
+            if (p.NameIndex >= 0 && p.NameIndex < mdxNames.Count)
+                manifest.ReferencedMdx.Add(NormalizeKey(mdxNames[p.NameIndex]));
+        }
+
+        // Collect unique WMO models actually referenced by placements
+        foreach (var p in modfPlacements)
+        {
+            if (p.NameIndex >= 0 && p.NameIndex < wmoNames.Count)
+                manifest.ReferencedWmo.Add(NormalizeKey(wmoNames[p.NameIndex]));
+        }
+
+        ViewerLog.Important(ViewerLog.Category.General, $"Manifest: {manifest.ReferencedMdx.Count} unique MDX, {manifest.ReferencedWmo.Count} unique WMO");
+        ViewerLog.Info(ViewerLog.Category.General, $"Name tables: {mdxNames.Count} MDX names, {wmoNames.Count} WMO names");
+        ViewerLog.Info(ViewerLog.Category.General, $"Placements: {mddfPlacements.Count} MDDF, {modfPlacements.Count} MODF");
+        if (modfPlacements.Count > 0)
+        {
+            var p = modfPlacements[0];
+            string name = p.NameIndex >= 0 && p.NameIndex < wmoNames.Count ? wmoNames[p.NameIndex] : $"BAD_INDEX({p.NameIndex})";
+            ViewerLog.Debug(ViewerLog.Category.Wmo, $"First MODF: nameIdx={p.NameIndex} name=\"{name}\" key=\"{NormalizeKey(name)}\"");
+        }
+        if (mddfPlacements.Count > 0)
+        {
+            var p = mddfPlacements[0];
+            string name = p.NameIndex >= 0 && p.NameIndex < mdxNames.Count ? mdxNames[p.NameIndex] : $"BAD_INDEX({p.NameIndex})";
+            ViewerLog.Debug(ViewerLog.Category.Mdx, $"First MDDF: nameIdx={p.NameIndex} name=\"{name}\" key=\"{NormalizeKey(name)}\"");
+        }
+        return manifest;
+    }
+
+    /// <summary>
+    /// Load all models in the manifest. Each model is loaded exactly once.
+    /// </summary>
+    public void LoadManifest(AssetManifest manifest)
+    {
+        int mdxOk = 0, mdxFail = 0;
+        foreach (var key in manifest.ReferencedMdx)
+        {
+            if (_mdxModels.ContainsKey(key)) continue;
+            var renderer = LoadMdxModel(key);
+            _mdxModels[key] = renderer;
+            if (renderer != null) mdxOk++; else mdxFail++;
+        }
+
+        int wmoOk = 0, wmoFail = 0;
+        foreach (var key in manifest.ReferencedWmo)
+        {
+            if (_wmoModels.ContainsKey(key)) continue;
+            var renderer = LoadWmoModel(key);
+            _wmoModels[key] = renderer;
+            if (renderer != null) wmoOk++; else wmoFail++;
+        }
+
+        ViewerLog.Important(ViewerLog.Category.General, $"Loaded: MDX {mdxOk} ok / {mdxFail} failed, WMO {wmoOk} ok / {wmoFail} failed");
+    }
+
+    /// <summary>
+    /// Ensure an MDX model is loaded (lazy load on first reference).
+    /// </summary>
+    public void EnsureMdxLoaded(string normalizedKey)
+    {
+        if (_mdxModels.TryGetValue(normalizedKey, out var cachedRenderer))
+        {
+            if (cachedRenderer != null)
+                TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
+            else
+                _suppressedFailedMdxRetryCount++;
+
+            return;
+        }
+
+        var renderer = LoadMdxModel(normalizedKey);
+        _mdxModels[normalizedKey] = renderer;
+        ApplyObjectWireframePreference(renderer);
+        if (renderer != null)
+            TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
+        EvictMdxIfNeeded();
+    }
+
+    /// <summary>
+    /// Ensure a WMO model is loaded (lazy load on first reference).
+    /// </summary>
+    public void EnsureWmoLoaded(string normalizedKey)
+    {
+        if (_wmoModels.TryGetValue(normalizedKey, out var cachedRenderer) && cachedRenderer != null)
+        {
+            TouchLru(_wmoLru, _wmoLruMap, normalizedKey);
+            return;
+        }
+
+        if (_wmoModels.ContainsKey(normalizedKey))
+            return;
+
+        var renderer = LoadWmoModel(normalizedKey);
+        _wmoModels[normalizedKey] = renderer;
+        ApplyObjectWireframePreference(renderer);
+        TouchLru(_wmoLru, _wmoLruMap, normalizedKey);
+        EvictWmoIfNeeded();
+    }
+
+    /// <summary>
+    /// Get a loaded MDX renderer by normalized key. Returns null if not loaded or failed.
+    /// </summary>
+    public IModelRenderer? GetMdx(string normalizedKey)
+    {
+        if (_mdxModels.TryGetValue(normalizedKey, out var r))
+        {
+            if (r != null)
+                TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
+            return r;
+        }
+
+        EnsureMdxLoaded(normalizedKey);
+        return _mdxModels.TryGetValue(normalizedKey, out r) ? r : null;
+    }
+
+    /// <summary>
+    /// Get the model-space bounding box for a loaded MDX model.
+    /// Returns false if the model is not loaded.
+    /// </summary>
+    public bool TryGetMdxBounds(string normalizedKey, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        if (_mdxModels.TryGetValue(normalizedKey, out var r) && r != null)
+        {
+            boundsMin = r.BoundsMin;
+            boundsMax = r.BoundsMax;
+            return true;
+        }
+        boundsMin = boundsMax = Vector3.Zero;
+        return false;
+    }
+
+    /// <summary>
+    /// Get the bounding box center for a loaded MDX model.
+    /// MDX geometry is offset from origin — the BB center is the effective pivot.
+    /// Returns false if the model is not loaded.
+    /// </summary>
+    public bool TryGetMdxPivotOffset(string normalizedKey, out Vector3 pivotOffset)
+    {
+        if (_mdxModels.TryGetValue(normalizedKey, out var r) && r != null)
+        {
+            pivotOffset = (r.BoundsMin + r.BoundsMax) * 0.5f;
+            return true;
+        }
+        pivotOffset = Vector3.Zero;
+        return false;
+    }
+
+    /// <summary>
+    /// Get the MOHD bounding box for a loaded WMO model (local space).
+    /// Returns false if the model is not loaded.
+    /// </summary>
+    public bool TryGetWmoBounds(string normalizedKey, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        if (_wmoModels.TryGetValue(normalizedKey, out var r) && r != null)
+        {
+            boundsMin = r.BoundsMin;
+            boundsMax = r.BoundsMax;
+            return true;
+        }
+        boundsMin = boundsMax = Vector3.Zero;
+        return false;
+    }
+
+    /// <summary>
+    /// Get geometry-tight local bounds for a WMO model.
+    /// Prefers the mesh-summary bounds derived from group vertices and falls back
+    /// to raw MOHD root bounds if the geometry summary is unavailable.
+    /// </summary>
+    public bool TryGetWmoPlacementBounds(string normalizedKey, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        normalizedKey = NormalizeKey(normalizedKey);
+
+        if (TryGetWmoMeshSummary(normalizedKey, out var summary))
+        {
+            boundsMin = summary.BoundsMin;
+            boundsMax = summary.BoundsMax;
+            return true;
+        }
+
+        return TryGetWmoBounds(normalizedKey, out boundsMin, out boundsMax);
+    }
+
+    public bool TryGetWmoMeshSummary(string normalizedKey, out WmoMeshSummary summary)
+    {
+        normalizedKey = NormalizeKey(normalizedKey);
+
+        if (_wmoMeshSummaries.TryGetValue(normalizedKey, out summary))
+            return true;
+
+        WmoV14ToV17Converter.WmoV14Data? wmo = LoadWmoDataModel(normalizedKey);
+        if (wmo == null)
+        {
+            summary = default;
+            return false;
+        }
+
+        summary = BuildWmoMeshSummary(wmo);
+        _wmoMeshSummaries[normalizedKey] = summary;
+        return true;
+    }
+
+    public bool TryGetMdxCollisionSummary(string normalizedKey, out MdxCollisionMeshSummary summary)
+    {
+        normalizedKey = NormalizeKey(normalizedKey);
+
+        if (_mdxCollisionSummaries.TryGetValue(normalizedKey, out MdxCollisionMeshSummary? cachedSummary))
+        {
+            if (cachedSummary.HasValue)
+            {
+                summary = cachedSummary.Value;
+                return true;
+            }
+
+            summary = default;
+            return false;
+        }
+
+        string resolvedModelPath = ResolveCanonicalModelPath(normalizedKey);
+        byte[]? data = ReadFileData(resolvedModelPath);
+        if ((data == null || data.Length == 0) && !resolvedModelPath.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
+            data = ReadFileData(normalizedKey);
+
+        if (data == null || data.Length < 4 || WarcraftNetM2Adapter.IsMd20(data) || WarcraftNetM2Adapter.IsMd21(data))
+        {
+            _mdxCollisionSummaries[normalizedKey] = null;
+            summary = default;
+            return false;
+        }
+
+        if (!(data[0] == (byte)'M' && data[1] == (byte)'D' && data[2] == (byte)'L' && data[3] == (byte)'X'))
+        {
+            _mdxCollisionSummaries[normalizedKey] = null;
+            summary = default;
+            return false;
+        }
+
+        try
+        {
+            using var stream = new MemoryStream(data, writable: false);
+            var collisionFile = MdxCollisionReader.Read(stream, resolvedModelPath);
+            if (collisionFile.Collision is null)
+            {
+                _mdxCollisionSummaries[normalizedKey] = null;
+                summary = default;
+                return false;
+            }
+
+            Vector3 boundsMin = collisionFile.Collision.BoundsMin ?? Vector3.Zero;
+            Vector3 boundsMax = collisionFile.Collision.BoundsMax ?? Vector3.Zero;
+            if (collisionFile.Collision.VertexCount > 0 && collisionFile.Collision.BoundsMin is null)
+                ComputeVectorBounds(collisionFile.Collision.Vertices, out boundsMin, out boundsMax);
+
+            summary = new MdxCollisionMeshSummary(
+                collisionFile.Collision.VertexCount,
+                collisionFile.Collision.TriangleIndexCount,
+                collisionFile.Collision.TriangleCount,
+                boundsMin,
+                boundsMax,
+                BuildSampleVertices(collisionFile.Collision.Vertices, 256));
+            _mdxCollisionSummaries[normalizedKey] = summary;
+            return true;
+        }
+        catch
+        {
+            _mdxCollisionSummaries[normalizedKey] = null;
+            summary = default;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Get a loaded WMO renderer by normalized key. Returns null if not loaded or failed.
+    /// </summary>
+    public WmoRenderer? GetWmo(string normalizedKey)
+    {
+        if (_wmoModels.TryGetValue(normalizedKey, out var r))
+        {
+            if (r != null)
+                TouchLru(_wmoLru, _wmoLruMap, normalizedKey);
+            return r;
+        }
+
+        EnsureWmoLoaded(normalizedKey);
+        return _wmoModels.TryGetValue(normalizedKey, out r) ? r : null;
+    }
+
+    public bool TryGetLoadedMdx(string normalizedKey, out IModelRenderer? renderer)
+    {
+        if (_mdxModels.TryGetValue(normalizedKey, out renderer) && renderer != null)
+        {
+            TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
+            return true;
+        }
+
+        renderer = null;
+        return false;
+    }
+
+    public bool TryGetLoadedWmo(string normalizedKey, out WmoRenderer? renderer)
+    {
+        if (_wmoModels.TryGetValue(normalizedKey, out renderer) && renderer != null)
+        {
+            TouchLru(_wmoLru, _wmoLruMap, normalizedKey);
+            return true;
+        }
+
+        renderer = null;
+        return false;
+    }
+
+    public void QueueMdxLoad(string normalizedKey)
+    {
+        normalizedKey = NormalizeKey(normalizedKey);
+
+        if (_mdxModels.TryGetValue(normalizedKey, out var cachedRenderer))
+        {
+            if (cachedRenderer == null)
+                _suppressedFailedMdxRetryCount++;
+
+            return;
+        }
+
+        if (_queuedMdxLoads.Add(normalizedKey))
+        {
+            PrefetchModelBytes(normalizedKey);
+            _pendingMdxLoads.Enqueue(normalizedKey);
+        }
+    }
+
+    public void PrioritizeMdxLoad(string normalizedKey)
+    {
+        normalizedKey = NormalizeKey(normalizedKey);
+
+        if (_mdxModels.TryGetValue(normalizedKey, out var cachedRenderer))
+        {
+            if (cachedRenderer == null)
+                _suppressedFailedMdxRetryCount++;
+
+            return;
+        }
+
+        if (_queuedMdxLoads.Add(normalizedKey))
+            PrefetchModelBytes(normalizedKey);
+
+        if (_priorityQueuedMdxLoads.Add(normalizedKey))
+            _priorityMdxLoads.Enqueue(normalizedKey);
+    }
+
+    public void QueueWmoLoad(string normalizedKey)
+    {
+        normalizedKey = NormalizeKey(normalizedKey);
+
+        if (_wmoModels.ContainsKey(normalizedKey))
+            return;
+
+        if (_queuedWmoLoads.Add(normalizedKey))
+        {
+            PrefetchModelBytes(normalizedKey);
+            _pendingWmoLoads.Enqueue(normalizedKey);
+        }
+    }
+
+    public void PrioritizeWmoLoad(string normalizedKey)
+    {
+        normalizedKey = NormalizeKey(normalizedKey);
+
+        if (_wmoModels.ContainsKey(normalizedKey))
+            return;
+
+        if (_queuedWmoLoads.Add(normalizedKey))
+            PrefetchModelBytes(normalizedKey);
+
+        if (_priorityQueuedWmoLoads.Add(normalizedKey))
+            _priorityWmoLoads.Enqueue(normalizedKey);
+    }
+
+    public int ProcessPendingLoads(int maxLoads = 2, double maxBudgetMs = 6.0)
+    {
+        if (maxLoads <= 0 || maxBudgetMs <= 0)
+            return 0;
+
+        var stopwatch = Stopwatch.StartNew();
+        int loadsCompleted = 0;
+
+        while (loadsCompleted < maxLoads && stopwatch.Elapsed.TotalMilliseconds < maxBudgetMs)
+        {
+            if (!TryDequeuePendingLoad(out bool isMdx, out string? key) || string.IsNullOrWhiteSpace(key))
+                break;
+
+            if (isMdx)
+            {
+                if (_mdxModels.TryGetValue(key, out var cachedRenderer))
+                {
+                    if (cachedRenderer == null && _mdxModels.ContainsKey(key))
+                        _suppressedFailedMdxRetryCount++;
+
+                    loadsCompleted++;
+                    continue;
+                }
+
+                var renderer = LoadMdxModel(key);
+                _mdxModels[key] = renderer;
+                ApplyObjectWireframePreference(renderer);
+                if (renderer != null)
+                {
+                    TouchLru(_mdxLru, _mdxLruMap, key);
+                }
+                EvictMdxIfNeeded();
+            }
+            else
+            {
+                if (!_wmoModels.TryGetValue(key, out var cachedRenderer))
+                {
+                    var renderer = LoadWmoModel(key);
+                    _wmoModels[key] = renderer;
+                    ApplyObjectWireframePreference(renderer);
+                    if (renderer != null)
+                    {
+                        TouchLru(_wmoLru, _wmoLruMap, key);
+                    }
+                    EvictWmoIfNeeded();
+                }
+            }
+
+            loadsCompleted++;
+        }
+
+        return loadsCompleted;
+    }
+
+    /// <summary>
+    /// Read file data from the data source, with caching to avoid duplicate MPQ reads.
+    /// </summary>
+    public byte[]? ReadFileData(string virtualPath)
+    {
+        string key = NormalizeKey(virtualPath);
+        _fileReadRequests++;
+        if (_fileDataCache.TryGetValue(key, out var cached))
+        {
+            _fileReadCacheHits++;
+            return cached;
+        }
+
+        byte[]? data = null;
+        string? resolvedPath = null;
+
+        if (_resolvedReadPathCache.TryGetValue(key, out string? cachedResolvedPath))
+        {
+            _resolvedPathCacheHits++;
+            data = TryReadCandidate(cachedResolvedPath, out resolvedPath);
+        }
+
+        if (data == null)
+        {
+            foreach (string candidate in EnumerateReadCandidates(key))
+            {
+                if (!string.IsNullOrWhiteSpace(cachedResolvedPath) && candidate.Equals(cachedResolvedPath, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                data = TryReadCandidate(candidate, out resolvedPath);
+                if (data != null)
+                    break;
+            }
+        }
+
+        if (data != null && !string.IsNullOrWhiteSpace(resolvedPath))
+            _resolvedReadPathCache[key] = NormalizeKey(resolvedPath);
+        else if (data == null)
+            _pathProbeMisses++;
+
+        _fileDataCache[key] = data;
+        TouchLru(_fileLru, _fileLruMap, key);
+        EvictFileCacheIfNeeded();
+        return data;
+    }
+
+    public static string NormalizeKey(string path) => path.Replace('/', '\\').ToLowerInvariant();
+
+    private static string? SwapMdlMdxExtension(string path)
+    {
+        if (path.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
+            return path[..^4] + ".mdx";
+        if (path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+            return path[..^4] + ".mdl";
+        // 3.x+ clients may reference .m2 while some archives/listfiles still expose .mdx.
+        if (path.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+            return path[..^3] + ".mdx";
+        return null;
+    }
+
+    private static IEnumerable<string> GetAlternateModelPaths(string path)
+    {
+        string? swapped = SwapMdlMdxExtension(path);
+        if (!string.IsNullOrWhiteSpace(swapped))
+            yield return swapped;
+
+        if (path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+            yield return path[..^4] + ".m2";
+        else if (path.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
+            yield return path[..^4] + ".m2";
+        else if (path.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+            yield return path[..^3] + ".mdl";
+    }
+
+    private static bool IsClassicModelRequest(string path)
+    {
+        string extension = Path.GetExtension(path);
+        return extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsModelRequest(string path)
+    {
+        string extension = Path.GetExtension(path);
+        return extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".m2", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> EnumeratePreferredClassicModelPaths(string normalizedPath)
+    {
+        yield return normalizedPath;
+
+        string? swapped = SwapMdlMdxExtension(normalizedPath);
+        if (!string.IsNullOrWhiteSpace(swapped)
+            && !swapped.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return swapped;
+        }
+    }
+
+    private string? TryResolveFromFileSet(string normalizedPath)
+    {
+        if (_dataSource is not MpqDataSource mpqDataSource)
+            return null;
+
+        foreach (var candidate in BuildFileSetCandidates(normalizedPath))
+        {
+            var found = mpqDataSource.FindInFileSet(candidate);
+            if (!string.IsNullOrWhiteSpace(found))
+                return found;
+        }
+
+        string baseName = Path.GetFileNameWithoutExtension(normalizedPath);
+        if (string.IsNullOrWhiteSpace(baseName) || !IsModelRequest(normalizedPath))
+            return null;
+
+        var indexedMatch = mpqDataSource.FindByBaseName(baseName, GetLikelyModelExtensions(normalizedPath));
+        if (!string.IsNullOrWhiteSpace(indexedMatch))
+            return NormalizeKey(indexedMatch);
+
+        return null;
+    }
+
+    private static IEnumerable<string> BuildFileSetCandidates(string normalizedPath)
+    {
+        yield return normalizedPath;
+
+        foreach (string alternate in GetAlternateModelPaths(normalizedPath))
+            yield return alternate;
+
+        string fileName = Path.GetFileName(normalizedPath);
+        if (!string.IsNullOrWhiteSpace(fileName) && !fileName.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return fileName;
+
+            foreach (string alternate in GetAlternateModelPaths(fileName))
+                yield return alternate;
+        }
+
+        string baseName = Path.GetFileNameWithoutExtension(normalizedPath);
+        if (!string.IsNullOrWhiteSpace(baseName))
+        {
+            yield return $"Creature\\{baseName}\\{baseName}.mdx";
+            yield return $"Creature\\{baseName}\\{baseName}.m2";
+            yield return $"Creature\\{baseName}\\{baseName}.mdl";
+        }
+    }
+
+    private static IEnumerable<string> GetLikelyModelExtensions(string normalizedPath)
+    {
+        string ext = Path.GetExtension(normalizedPath);
+        if (ext.Equals(".m2", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return ".m2";
+            yield return ".mdx";
+            yield return ".mdl";
+            yield break;
+        }
+
+        if (ext.Equals(".mdl", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return ".mdl";
+            yield return ".mdx";
+            yield return ".m2";
+            yield break;
+        }
+
+        yield return ".mdx";
+        yield return ".mdl";
+        yield return ".m2";
+    }
+
+    private byte[]? TryReadCandidate(string candidate, out string? resolvedPath)
+    {
+        resolvedPath = candidate;
+        _pathProbeAttempts++;
+
+        byte[]? data = _dataSource?.ReadFile(candidate);
+        if (data != null)
+        {
+            _pathProbeResolutions++;
+            return data;
+        }
+
+        resolvedPath = null;
+        return null;
+    }
+
+    private byte[]? TryReadExactCandidate(string candidate, out string? resolvedPath)
+    {
+        resolvedPath = NormalizeKey(candidate);
+        _pathProbeAttempts++;
+
+        byte[]? data = _dataSource?.ReadFile(resolvedPath);
+        if (data != null)
+        {
+            _pathProbeResolutions++;
+            return data;
+        }
+
+        if (_dataSource is MpqDataSource mpqDataSource)
+        {
+            string? found = mpqDataSource.FindInFileSet(resolvedPath);
+            if (!string.IsNullOrWhiteSpace(found))
+            {
+                string normalizedFound = NormalizeKey(found);
+                if (!normalizedFound.Equals(resolvedPath, StringComparison.OrdinalIgnoreCase))
+                    data = _dataSource.ReadFile(normalizedFound);
+
+                if (data != null)
+                {
+                    resolvedPath = normalizedFound;
+                    _pathProbeResolutions++;
+                    return data;
+                }
+            }
+        }
+
+        resolvedPath = null;
+        return null;
+    }
+
+    private bool TryReadPreferredClassicModelData(string normalizedKey, out string resolvedPath, out byte[]? data)
+    {
+        resolvedPath = normalizedKey;
+        data = null;
+
+        if (!IsClassicModelRequest(normalizedKey))
+            return false;
+
+        foreach (string candidate in EnumeratePreferredClassicModelPaths(normalizedKey))
+        {
+            data = TryReadExactCandidate(candidate, out string? exactResolvedPath);
+            if (data == null || data.Length == 0 || string.IsNullOrWhiteSpace(exactResolvedPath))
+                continue;
+
+            resolvedPath = NormalizeKey(exactResolvedPath);
+            return true;
+        }
+
+        data = null;
+        resolvedPath = normalizedKey;
+        return false;
+    }
+
+    private IEnumerable<string> EnumerateReadCandidates(string normalizedPath)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        bool TryYield(string? candidate, out string yielded)
+        {
+            yielded = string.Empty;
+            if (string.IsNullOrWhiteSpace(candidate))
+                return false;
+
+            string normalizedCandidate = NormalizeKey(candidate);
+            if (!seen.Add(normalizedCandidate))
+                return false;
+
+            yielded = normalizedCandidate;
+            return true;
+        }
+
+        if (TryYield(normalizedPath, out string exactPath))
+            yield return exactPath;
+
+        string? resolvedFileSetPath = TryResolveFromFileSet(normalizedPath);
+        if (TryYield(resolvedFileSetPath, out string resolvedExactPath))
+            yield return resolvedExactPath;
+
+        foreach (string alternatePath in GetAlternateModelPaths(normalizedPath))
+        {
+            if (TryYield(alternatePath, out string yieldedAlternatePath))
+                yield return yieldedAlternatePath;
+
+            string? resolvedAlternatePath = TryResolveFromFileSet(alternatePath);
+            if (TryYield(resolvedAlternatePath, out string yieldedResolvedAlternatePath))
+                yield return yieldedResolvedAlternatePath;
+        }
+
+        string fileName = Path.GetFileName(normalizedPath);
+        if (!string.IsNullOrWhiteSpace(fileName) && !fileName.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryYield(fileName, out string yieldedFileName))
+                yield return yieldedFileName;
+
+            string? resolvedFileName = TryResolveFromFileSet(fileName);
+            if (TryYield(resolvedFileName, out string yieldedResolvedFileName))
+                yield return yieldedResolvedFileName;
+
+            string[] prefixes = { "Creature\\", "World\\", "Environment\\" };
+            foreach (string prefix in prefixes)
+            {
+                if (normalizedPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (TryYield(prefix + normalizedPath, out string yieldedPrefixedPath))
+                    yield return yieldedPrefixedPath;
+
+                if (TryYield(prefix + fileName, out string yieldedPrefixedFileName))
+                    yield return yieldedPrefixedFileName;
+            }
+        }
+    }
+
+    private bool TryDequeuePendingLoad(out bool isMdx, out string? key)
+    {
+        bool tryWmoFirst = _preferWmoNext;
+        _preferWmoNext = !_preferWmoNext;
+
+        if (tryWmoFirst)
+        {
+            if (TryDequeueWmo(out key))
+            {
+                isMdx = false;
+                return true;
+            }
+
+            if (TryDequeueMdx(out key))
+            {
+                isMdx = true;
+                return true;
+            }
+        }
+        else
+        {
+            if (TryDequeueMdx(out key))
+            {
+                isMdx = true;
+                return true;
+            }
+
+            if (TryDequeueWmo(out key))
+            {
+                isMdx = false;
+                return true;
+            }
+        }
+
+        key = null;
+        isMdx = false;
+        return false;
+    }
+
+    private bool TryDequeueMdx(out string? key)
+    {
+        while (_priorityMdxLoads.TryDequeue(out key))
+        {
+            _priorityQueuedMdxLoads.Remove(key);
+
+            if (_mdxModels.TryGetValue(key, out var renderer))
+            {
+                _queuedMdxLoads.Remove(key);
+
+                if (renderer == null)
+                    _suppressedFailedMdxRetryCount++;
+
+                continue;
+            }
+
+            _queuedMdxLoads.Remove(key);
+            return true;
+        }
+
+        while (_pendingMdxLoads.TryDequeue(out key))
+        {
+            if (_mdxModels.TryGetValue(key, out var renderer))
+            {
+                _queuedMdxLoads.Remove(key);
+
+                if (renderer == null)
+                    _suppressedFailedMdxRetryCount++;
+
+                continue;
+            }
+
+            _queuedMdxLoads.Remove(key);
+            return true;
+        }
+
+        key = null;
+        return false;
+    }
+
+    private bool TryDequeueWmo(out string? key)
+    {
+        while (_priorityWmoLoads.TryDequeue(out key))
+        {
+            _priorityQueuedWmoLoads.Remove(key);
+
+            if (_wmoModels.TryGetValue(key, out var renderer) && renderer != null)
+            {
+                _queuedWmoLoads.Remove(key);
+                continue;
+            }
+
+            _queuedWmoLoads.Remove(key);
+            return true;
+        }
+
+        while (_pendingWmoLoads.TryDequeue(out key))
+        {
+            if (_wmoModels.TryGetValue(key, out var renderer) && renderer != null)
+            {
+                _queuedWmoLoads.Remove(key);
+                continue;
+            }
+
+            _queuedWmoLoads.Remove(key);
+            return true;
+        }
+
+        key = null;
+        return false;
+    }
+
+    // ── Private loading ────────────────────────────────────────────────
+
+private int _mdxLoadFailCount = 0;
+    private IModelRenderer? LoadMdxModel(string normalizedKey)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            string resolvedModelPath = ResolveCanonicalModelPath(normalizedKey);
+            string buildProfileId = FormatProfileRegistry.ResolveModelProfile(_buildVersion)?.ProfileId ?? "unknown";
+            byte[]? data;
+
+            if (!TryReadPreferredClassicModelData(normalizedKey, out string preferredClassicPath, out data))
+            {
+                data = ReadFileData(resolvedModelPath);
+                if ((data == null || data.Length == 0) && !resolvedModelPath.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
+                    data = ReadFileData(normalizedKey);
+            }
+            else
+            {
+                resolvedModelPath = preferredClassicPath;
+            }
+
+            if (data == null || data.Length == 0)
+            {
+                if (_mdxLoadFailCount++ < 5)
+                    ViewerLog.Important(ViewerLog.Category.Mdx, $"MDX data null for: \"{normalizedKey}\"");
+                return null;
+            }
+
+            bool isM2Family = WarcraftNetM2Adapter.IsM2FamilyContainer(data);
+
+            // Match the final main-branch behavior first: adapt M2 + skin directly into the runtime model.
+            // Keep byte-level conversion only as a fallback when the direct adapter path fails.
+            if (isM2Family)
+            {
+                WarcraftNetM2Adapter.ValidateModelProfile(data, resolvedModelPath, _buildVersion);
+
+                var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
+                if (_dataSource != null)
+                {
+                    var bestSkinPath = ResolveBestSkinPath(resolvedModelPath);
+                    if (!string.IsNullOrWhiteSpace(bestSkinPath))
+                        candidatePaths.Add(bestSkinPath);
+                }
+
+                Exception? lastSkinError = null;
+                bool anySkinFound = false;
+
+                foreach (var skinPath in candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    var skinBytes = ReadFileData(skinPath);
+                    if (skinBytes == null || skinBytes.Length == 0)
+                        continue;
+
+                    anySkinFound = true;
+                    _knownMissingM2SkinPaths.Remove(resolvedModelPath);
+
+                    try
+                    {
+                        ViewerLog.Trace($"[M2] Trying skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
+                        M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(data, skinBytes, resolvedModelPath, skinPath);
+                        var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, skinBytes, resolvedModelPath, _buildVersion);
+
+                        var route = M2RouteDecision.Create(normalizedKey, buildProfileId, M2RouteType.AdapterSkin, M2RouteType.AdapterSkin, skinPath);
+                        _mdxRouteDecisions[normalizedKey] = route;
+                        M2RouteDiagnostics.LogRouteDecision(route);
+
+                        ViewerLog.Info(ViewerLog.Category.Mdx,
+                            $"[M2] Selected skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
+                        return WowViewerM2RuntimeBridge.CreateRenderer(
+                            _gl,
+                            runtimeModel,
+                            adapted,
+                            Path.GetDirectoryName(resolvedModelPath),
+                            _dataSource,
+                            _texResolver,
+                            _buildVersion,
+                            resolvedModelPath,
+                            deferInitialTextureLoads: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        lastSkinError = ex;
+                        ViewerLog.Debug(ViewerLog.Category.Mdx,
+                            $"[M2] Skin candidate failed for {Path.GetFileName(normalizedKey)}: {skinPath} ({ex.Message})");
+                    }
+                }
+
+                if (!anySkinFound)
+                {
+                    if (string.Equals(FormatProfileRegistry.ResolveModelProfile(_buildVersion)?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
+                    {
+                        try
+                        {
+                            var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, null, resolvedModelPath, _buildVersion);
+                            string adaptedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
+
+                            var route = M2RouteDecision.Create(normalizedKey, buildProfileId, M2RouteType.AdapterEmbeddedProfile, M2RouteType.AdapterEmbeddedProfile, fallbackReason: "No external .skin resolved, using embedded root-profile");
+                            _mdxRouteDecisions[normalizedKey] = route;
+                            M2RouteDiagnostics.LogRouteDecision(route);
+
+                            ViewerLog.Info(ViewerLog.Category.Mdx,
+                                $"[M2] Loaded embedded root-profile geometry for {Path.GetFileName(normalizedKey)} after no external .skin resolved");
+                            return new M2Renderer(
+                                new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion, deferInitialTextureLoads: true),
+                                resolvedModelPath);
+                        }
+                        catch (Exception ex)
+                        {
+                            lastSkinError = ex;
+                            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                                $"[M2] Embedded root-profile world fallback failed for {Path.GetFileName(normalizedKey)}: {ex.Message}");
+                        }
+                    }
+
+                    RememberMissingM2SkinPath(resolvedModelPath, normalizedKey);
+                }
+
+                if (WarcraftNetM2Adapter.IsMd20(data))
+                {
+                    var convertedBytes = ConvertM2ToMdx(data, resolvedModelPath);
+                    if (convertedBytes != null && convertedBytes.Length > 0)
+                    {
+                        try
+                        {
+                            using var convertedStream = new MemoryStream(convertedBytes);
+                            var convertedMdx = MdxFile.Load(convertedStream);
+                            if (WarcraftNetM2Adapter.HasRenderableGeometry(convertedMdx))
+                            {
+                                string convertedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
+
+                                var route = M2RouteDecision.Create(normalizedKey, buildProfileId, M2RouteType.AdapterSkin, M2RouteType.ConversionFallback, fallbackReason: "Adapter/skin path failed, fell back to M2->MDX conversion");
+                                _mdxRouteDecisions[normalizedKey] = route;
+                                M2RouteDiagnostics.LogRouteDecision(route);
+
+                                ViewerLog.Info(ViewerLog.Category.Mdx,
+                                    $"[M2] Falling back to M2->MDX conversion for {Path.GetFileName(normalizedKey)} after adapter failure");
+                                return new M2Renderer(
+                                    new MdxRenderer(_gl, convertedMdx, convertedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion, deferInitialTextureLoads: true),
+                                    resolvedModelPath);
+                            }
+
+                            lastSkinError = new InvalidDataException(
+                                $"M2->MDX fallback produced no renderable geometry for {Path.GetFileName(normalizedKey)} ({WarcraftNetM2Adapter.SummarizeGeometry(convertedMdx)})");
+                            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                                $"[M2] Rejecting converted world fallback for {Path.GetFileName(normalizedKey)}: {WarcraftNetM2Adapter.SummarizeGeometry(convertedMdx)}");
+                        }
+                        catch (Exception ex)
+                        {
+                            lastSkinError = ex;
+                            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                                $"[M2] Converted world fallback load failed for {Path.GetFileName(normalizedKey)}: {ex.Message}");
+                        }
+                    }
+                }
+
+                if (lastSkinError != null)
+                    throw new InvalidDataException($"All .skin candidates failed for M2: {Path.GetFileName(normalizedKey)}", lastSkinError);
+
+                return null;
+            }
+
+            using var ms = new MemoryStream(data);
+            var mdx = MdxFile.Load(ms);
+            string modelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
+
+            var mdxRoute = M2RouteDecision.Create(normalizedKey, buildProfileId, M2RouteType.MdxDirect, M2RouteType.MdxDirect);
+            _mdxRouteDecisions[normalizedKey] = mdxRoute;
+            M2RouteDiagnostics.LogRouteDecision(mdxRoute);
+
+            return new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver, resolvedModelPath, buildVersion: _buildVersion, deferInitialTextureLoads: true);
+        }
+        catch (Exception ex)
+        {
+            if (_mdxLoadFailCount++ < 20)
+                ViewerLog.Important(ViewerLog.Category.Mdx, $"MDX failed [{_mdxLoadFailCount}]: {normalizedKey}\n{ex.Message}");
+            return null;
+        }
+        finally
+        {
+            if (stopwatch.Elapsed.TotalMilliseconds >= 50)
+            {
+                ViewerLog.Info(
+                    ViewerLog.Category.Mdx,
+                    $"[MODEL-LOAD] {normalizedKey}: total {stopwatch.Elapsed.TotalMilliseconds:F1} ms");
+            }
+        }
+    }
+
+    private byte[]? ConvertM2ToMdx(byte[] m2Bytes, string normalizedKey)
+    {
+        try
+        {
+            byte[]? skinBytes = null;
+            foreach (var skinPath in WarcraftNetM2Adapter.BuildSkinCandidates(normalizedKey).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                skinBytes = ReadFileData(skinPath);
+                if (skinBytes != null && skinBytes.Length > 0)
+                {
+                    ViewerLog.Trace($"[M2] Loaded skin for {Path.GetFileName(normalizedKey)} via converter: {skinPath} ({skinBytes.Length} bytes)");
+                    break;
+                }
+            }
+
+            var converter = new WoWViewer.Transfer.M2ToMdxConverter();
+            byte[] mdxBytes = converter.ConvertToBytes(m2Bytes, skinBytes, _buildVersion);
+            ViewerLog.Trace($"[M2] Converted {Path.GetFileName(normalizedKey)}: {m2Bytes.Length} -> {mdxBytes.Length} bytes");
+            return mdxBytes;
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] M2->MDX converter fallback failed for {Path.GetFileName(normalizedKey)}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private string ResolveCanonicalModelPath(string normalizedKey)
+    {
+        string? resolved = TryResolveFromFileSet(normalizedKey);
+        if (!string.IsNullOrWhiteSpace(resolved))
+            return NormalizeKey(resolved);
+
+        string? swapped = SwapMdlMdxExtension(normalizedKey);
+        if (!string.IsNullOrWhiteSpace(swapped))
+        {
+            resolved = TryResolveFromFileSet(swapped);
+            if (!string.IsNullOrWhiteSpace(resolved))
+                return NormalizeKey(resolved);
+        }
+
+        return normalizedKey;
+    }
+
+    private string? ResolveBestSkinPath(string resolvedModelPath)
+    {
+        if (_bestSkinPathCache.TryGetValue(resolvedModelPath, out var cachedPath))
+            return cachedPath;
+
+        string? resolvedPath = WarcraftNetM2Adapter.FindSkinInFileList(resolvedModelPath, _dataSource?.GetFileList(".skin") ?? Array.Empty<string>());
+        _bestSkinPathCache[resolvedModelPath] = resolvedPath;
+        return resolvedPath;
+    }
+
+    private void PrefetchModelBytes(string normalizedKey)
+    {
+        if (_dataSource is not MpqDataSource mpqDataSource)
+            return;
+
+        string canonicalModelPath = ResolveCanonicalModelPath(normalizedKey);
+        mpqDataSource.PrefetchFile(canonicalModelPath);
+
+        if (canonicalModelPath.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (string alternatePath in GetAlternateModelPaths(normalizedKey))
+            {
+                string resolvedAlternatePath = ResolveCanonicalModelPath(alternatePath);
+                if (!resolvedAlternatePath.Equals(canonicalModelPath, StringComparison.OrdinalIgnoreCase))
+                    mpqDataSource.PrefetchFile(resolvedAlternatePath);
+            }
+        }
+
+        string? bestSkinPath = ResolveBestSkinPath(canonicalModelPath);
+        if (!string.IsNullOrWhiteSpace(bestSkinPath))
+        {
+            mpqDataSource.PrefetchFile(bestSkinPath);
+            return;
+        }
+
+        if (_knownMissingM2SkinPaths.Contains(canonicalModelPath))
+            return;
+
+        foreach (string skinCandidate in WarcraftNetM2Adapter.BuildSkinCandidates(canonicalModelPath).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            mpqDataSource.PrefetchFile(skinCandidate);
+        }
+    }
+
+    private WmoRenderer? LoadWmoModel(string normalizedKey)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            WmoV14ToV17Converter.WmoV14Data? wmo = LoadWmoDataModel(normalizedKey);
+            if (wmo == null)
+                return null;
+
+            string modelDir = Path.GetDirectoryName(normalizedKey) ?? "";
+            WmoRenderer renderer = new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _buildVersion,
+                deferInitialDoodadLoads: true,
+                deferInitialMaterialTextureLoads: true,
+                enableRuntimeGroupVisibility: _enableRuntimeWmoGroupVisibility);
+            renderer.SetRuntimeGroupLiquidsVisible(_enableRuntimeWmoGroupLiquids);
+            return renderer;
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Error(ViewerLog.Category.Wmo, $"WMO failed: {Path.GetFileName(normalizedKey)}\n{ex}");
+            return null;
+        }
+        finally
+        {
+            if (stopwatch.Elapsed.TotalMilliseconds >= 50)
+            {
+                ViewerLog.Info(
+                    ViewerLog.Category.Wmo,
+                    $"[WMO-LOAD] {normalizedKey}: total {stopwatch.Elapsed.TotalMilliseconds:F1} ms");
+            }
+        }
+    }
+
+    private WmoV14ToV17Converter.WmoV14Data? LoadWmoDataModel(string normalizedKey)
+    {
+        byte[]? data = ReadFileData(normalizedKey);
+        if (data == null || data.Length == 0)
+        {
+            if (_wmoModels.Count < 3)
+                ViewerLog.Debug(ViewerLog.Category.Wmo, $"WMO data null for: \"{normalizedKey}\"");
+            return null;
+        }
+
+        if (_wmoModels.Count < 3)
+            ViewerLog.Debug(ViewerLog.Category.Wmo, $"WMO data found for: \"{normalizedKey}\" ({data.Length} bytes)");
+
+        int version = DetectWmoVersion(data);
+        if (version >= 17)
+        {
+            var v17Parser = new WmoV17ToV14Converter();
+            WmoV14ToV17Converter.WmoV14Data wmo = v17Parser.ParseV17ToModel(data, LoadWmoGroupBytes(normalizedKey));
+            ViewerLog.Trace($"[WMO] Parsed v{version} direct: {Path.GetFileName(normalizedKey)} ({wmo.Groups.Count} groups)");
+            return wmo;
+        }
+
+        string tmpPath = Path.Combine(Path.GetTempPath(), $"wmo_{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllBytes(tmpPath, data);
+            var converter = new WmoV14ToV17Converter();
+            WmoV14ToV17Converter.WmoV14Data wmo = converter.ParseWmoV14(tmpPath);
+
+            if (wmo.Groups.Count == 0 && wmo.GroupCount > 0 && _dataSource != null)
+            {
+                string wmoDir = Path.GetDirectoryName(normalizedKey)?.Replace('/', '\\') ?? "";
+                string wmoBase = Path.GetFileNameWithoutExtension(normalizedKey);
+                for (int gi = 0; gi < wmo.GroupCount; gi++)
+                {
+                    string groupName = $"{wmoBase}_{gi:D3}.wmo";
+                    string groupPath = string.IsNullOrEmpty(wmoDir) ? groupName : $"{wmoDir}\\{groupName}";
+                    byte[]? groupBytes = ReadFileData(groupPath);
+                    if (groupBytes != null && groupBytes.Length > 0)
+                        converter.ParseGroupFile(groupBytes, wmo, gi);
+                }
+
+                for (int gi = 0; gi < wmo.Groups.Count; gi++)
+                {
+                    if (wmo.Groups[gi].Name == null)
+                        wmo.Groups[gi].Name = $"group_{gi}";
+                }
+            }
+
+            return wmo;
+        }
+        finally
+        {
+            try { File.Delete(tmpPath); } catch { }
+        }
+    }
+
+    private List<byte[]> LoadWmoGroupBytes(string normalizedKey)
+    {
+        string directory = Path.GetDirectoryName(normalizedKey)?.Replace('/', '\\') ?? "";
+        string baseName = Path.GetFileNameWithoutExtension(normalizedKey);
+        var groupBytesList = new List<byte[]>();
+
+        for (int gi = 0; gi < 512; gi++)
+        {
+            string groupName = $"{baseName}_{gi:D3}.wmo";
+            string groupPath = string.IsNullOrEmpty(directory) ? groupName : $"{directory}\\{groupName}";
+            byte[]? groupBytes = ReadFileData(groupPath);
+            if (groupBytes == null || groupBytes.Length == 0)
+                break;
+
+            groupBytesList.Add(groupBytes);
+        }
+
+        return groupBytesList;
+    }
+
+    private static WmoMeshSummary BuildWmoMeshSummary(WmoV14ToV17Converter.WmoV14Data wmo)
+    {
+        int vertexCount = 0;
+        int indexCount = 0;
+        int batchCount = 0;
+        Vector3[] footprintSampleVertices = BuildWmoFootprintSamples(wmo.Groups);
+        WmoGroupMeshSummary[] groupSummaries = BuildWmoGroupMeshSummaries(wmo.Groups);
+        ComputeWmoGeometryBounds(wmo, out Vector3 boundsMin, out Vector3 boundsMax);
+
+        foreach (WmoV14ToV17Converter.WmoGroupData group in wmo.Groups)
+        {
+            vertexCount += group.Vertices.Count;
+            indexCount += group.Indices.Count;
+            batchCount += group.Batches.Count;
+        }
+
+        return new WmoMeshSummary(
+            Version: (int)wmo.Version,
+            GroupCount: wmo.Groups.Count,
+            VertexCount: vertexCount,
+            IndexCount: indexCount,
+            TriangleCount: indexCount / 3,
+            BatchCount: batchCount,
+            BoundsMin: boundsMin,
+            BoundsMax: boundsMax,
+            FootprintSampleVertices: footprintSampleVertices,
+            GroupSummaries: groupSummaries);
+    }
+
+    private static WmoGroupMeshSummary[] BuildWmoGroupMeshSummaries(IReadOnlyList<WmoV14ToV17Converter.WmoGroupData> groups)
+    {
+        if (groups.Count == 0)
+            return Array.Empty<WmoGroupMeshSummary>();
+
+        var summaries = new WmoGroupMeshSummary[groups.Count];
+        for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
+        {
+            WmoV14ToV17Converter.WmoGroupData group = groups[groupIndex];
+            ComputeVectorBounds(group.Vertices, out Vector3 boundsMin, out Vector3 boundsMax);
+            summaries[groupIndex] = new WmoGroupMeshSummary(
+                GroupIndex: groupIndex,
+                VertexCount: group.Vertices.Count,
+                IndexCount: group.Indices.Count,
+                TriangleCount: group.Indices.Count / 3,
+                BoundsMin: boundsMin,
+                BoundsMax: boundsMax,
+                FootprintSampleVertices: BuildSampleVertices(group.Vertices, 128));
+        }
+
+        return summaries;
+    }
+
+    private static void ComputeWmoGeometryBounds(WmoV14ToV17Converter.WmoV14Data wmo, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        bool hasBounds = false;
+        Vector3 min = new(float.MaxValue);
+        Vector3 max = new(float.MinValue);
+
+        foreach (WmoV14ToV17Converter.WmoGroupData group in wmo.Groups)
+        {
+            List<Vector3> vertices = group.Vertices;
+            for (int vertexIndex = 0; vertexIndex < vertices.Count; vertexIndex++)
+            {
+                Vector3 vertex = vertices[vertexIndex];
+                min = Vector3.Min(min, vertex);
+                max = Vector3.Max(max, vertex);
+                hasBounds = true;
+            }
+        }
+
+        if (hasBounds)
+        {
+            boundsMin = min;
+            boundsMax = max;
+            return;
+        }
+
+        boundsMin = wmo.BoundsMin;
+        boundsMax = wmo.BoundsMax;
+    }
+
+    private static Vector3[] BuildWmoFootprintSamples(IReadOnlyList<WmoV14ToV17Converter.WmoGroupData> groups)
+    {
+        int totalVertexCount = 0;
+        for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
+            totalVertexCount += groups[groupIndex].Vertices.Count;
+
+        if (totalVertexCount <= 0)
+            return Array.Empty<Vector3>();
+
+        const int maxSamples = 256;
+        int stride = Math.Max(1, totalVertexCount / maxSamples);
+        var samples = new List<Vector3>(Math.Min(totalVertexCount, maxSamples));
+        int globalVertexIndex = 0;
+
+        for (int groupIndex = 0; groupIndex < groups.Count && samples.Count < maxSamples; groupIndex++)
+        {
+            List<Vector3> vertices = groups[groupIndex].Vertices;
+            for (int vertexIndex = 0; vertexIndex < vertices.Count && samples.Count < maxSamples; vertexIndex++, globalVertexIndex++)
+            {
+                if (globalVertexIndex % stride == 0)
+                    samples.Add(vertices[vertexIndex]);
+            }
+        }
+
+        if (samples.Count == 0)
+        {
+            for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
+            {
+                List<Vector3> vertices = groups[groupIndex].Vertices;
+                if (vertices.Count > 0)
+                {
+                    samples.Add(vertices[0]);
+                    break;
+                }
+            }
+        }
+
+        return samples.ToArray();
+    }
+
+    private static Vector3[] BuildSampleVertices(IReadOnlyList<Vector3> vertices, int maxSamples)
+    {
+        if (vertices.Count == 0 || maxSamples <= 0)
+            return Array.Empty<Vector3>();
+
+        int stride = Math.Max(1, vertices.Count / maxSamples);
+        var samples = new List<Vector3>(Math.Min(vertices.Count, maxSamples));
+        for (int index = 0; index < vertices.Count && samples.Count < maxSamples; index += stride)
+            samples.Add(vertices[index]);
+
+        return samples.ToArray();
+    }
+
+    private static void ComputeVectorBounds(IReadOnlyList<Vector3> vertices, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        if (vertices.Count == 0)
+        {
+            boundsMin = Vector3.Zero;
+            boundsMax = Vector3.Zero;
+            return;
+        }
+
+        Vector3 min = new(float.MaxValue);
+        Vector3 max = new(float.MinValue);
+        for (int index = 0; index < vertices.Count; index++)
+        {
+            Vector3 vertex = vertices[index];
+            min = Vector3.Min(min, vertex);
+            max = Vector3.Max(max, vertex);
+        }
+
+        boundsMin = min;
+        boundsMax = max;
+    }
+
+    /// <summary>
+    /// Detect WMO version from raw bytes. Returns 14 for Alpha (MOMO container), version number for v17+, or 0.
+    /// </summary>
+    private static int DetectWmoVersion(byte[] data)
+    {
+        if (data.Length < 12) return 0;
+        string magic = System.Text.Encoding.ASCII.GetString(data, 0, 4);
+        string reversed = new string(magic.Reverse().ToArray());
+
+        // v14 Alpha: starts with MOMO container
+        if (magic == "MOMO" || reversed == "MOMO") return 14;
+
+        // v17+: starts with MVER chunk
+        if (magic == "MVER" || reversed == "MVER")
+        {
+            uint size = BitConverter.ToUInt32(data, 4);
+            if (size >= 4 && data.Length >= 12)
+                return (int)BitConverter.ToUInt32(data, 8);
+        }
+        return 0;
+    }
+
+    // ── LRU helpers ─────────────────────────────────────────────────────
+
+    private static void TouchLru(LinkedList<string> lru, Dictionary<string, LinkedListNode<string>> map, string key)
+    {
+        if (map.TryGetValue(key, out var node))
+        {
+            lru.Remove(node);
+            lru.AddLast(node);
+        }
+        else
+        {
+            var newNode = lru.AddLast(key);
+            map[key] = newNode;
+        }
+    }
+
+    private void RememberMissingM2SkinPath(string resolvedModelPath, string normalizedKey)
+    {
+        _knownMissingM2SkinPaths.Add(resolvedModelPath);
+
+        if (_loggedMissingM2SkinPaths.Add(resolvedModelPath))
+        {
+            ViewerLog.Important(ViewerLog.Category.Mdx, $"[M2] Missing companion .skin for: {Path.GetFileName(normalizedKey)}");
+            return;
+        }
+
+        _suppressedMissingM2SkinLogCount++;
+    }
+
+    private void EvictMdxIfNeeded()
+    {
+        if (MaxMdxCached <= 0)
+            return;
+
+        while (_mdxModels.Count > MaxMdxCached && _mdxLru.Count > 0)
+        {
+            string oldest = _mdxLru.First!.Value;
+            _mdxLru.RemoveFirst();
+            _mdxLruMap.Remove(oldest);
+            if (_mdxModels.TryGetValue(oldest, out var r))
+            {
+                r?.Dispose();
+                _mdxModels.Remove(oldest);
+            }
+        }
+    }
+
+    private void EvictWmoIfNeeded()
+    {
+        if (MaxWmoCached <= 0)
+            return;
+
+        while (_wmoModels.Count > MaxWmoCached && _wmoLru.Count > 0)
+        {
+            string oldest = _wmoLru.First!.Value;
+            _wmoLru.RemoveFirst();
+            _wmoLruMap.Remove(oldest);
+            if (_wmoModels.TryGetValue(oldest, out var r))
+            {
+                r?.Dispose();
+                _wmoModels.Remove(oldest);
+            }
+        }
+    }
+
+    private void EvictFileCacheIfNeeded()
+    {
+        while (_fileDataCache.Count > MaxFileCached && _fileLru.Count > 0)
+        {
+            string oldest = _fileLru.First!.Value;
+            _fileLru.RemoveFirst();
+            _fileLruMap.Remove(oldest);
+            _fileDataCache.Remove(oldest);
+        }
+    }
+
+    public void Dispose()
+    {
+        foreach (var r in _mdxModels.Values)
+            r?.Dispose();
+        _mdxModels.Clear();
+        _mdxLru.Clear();
+        _mdxLruMap.Clear();
+
+        foreach (var r in _wmoModels.Values)
+            r?.Dispose();
+        _wmoModels.Clear();
+        _wmoLru.Clear();
+        _wmoLruMap.Clear();
+
+        _fileDataCache.Clear();
+        _fileLru.Clear();
+        _fileLruMap.Clear();
+
+        _pendingMdxLoads.Clear();
+        _queuedMdxLoads.Clear();
+        _priorityQueuedMdxLoads.Clear();
+        _priorityWmoLoads.Clear();
+        _pendingWmoLoads.Clear();
+        _queuedWmoLoads.Clear();
+        _priorityQueuedWmoLoads.Clear();
+        _bestSkinPathCache.Clear();
+        _knownMissingM2SkinPaths.Clear();
+        _loggedMissingM2SkinPaths.Clear();
+        _priorityMdxLoads.Clear();
+    }
+}
+
+/// <summary>
+/// Describes the set of unique assets referenced by a map.
+/// Built before loading so we know the full scope.
+/// </summary>
+public class AssetManifest
+{
+    public HashSet<string> ReferencedMdx { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<string> ReferencedWmo { get; } = new(StringComparer.OrdinalIgnoreCase);
+}

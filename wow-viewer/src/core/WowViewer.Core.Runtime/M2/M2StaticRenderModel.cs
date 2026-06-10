@@ -253,7 +253,7 @@ public sealed class M2StaticRenderMaterial
 
     public M2EffectRecipe EffectRecipe { get; }
 
-    public bool IsTransparent => BlendMode != M2BlendMode.Opaque;
+    public bool IsTransparent => BlendMode != M2BlendMode.Opaque && BlendMode != M2BlendMode.AlphaKey;
 
     public bool IsUnshaded => (RenderFlags & 0x1) != 0;
 

@@ -3330,7 +3330,7 @@ def cmd_generate_viewer_stubs(args: argparse.Namespace) -> None:
             tile_y = int(table.column("tile_y")[i].as_py())
             if not map_name:
                 continue
-            tile_name = f"{map_name}_{tile_y}_{tile_x}"
+            tile_name = f"{map_name}_{tile_x}_{tile_y}"
             json_path = dataset_dir / f"{tile_name}.json"
             stub = {
                 "image": f"images/{tile_name}.png",

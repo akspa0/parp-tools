@@ -18,7 +18,7 @@ public sealed class M2RuntimeTests
     }
 
     [Fact]
-    public void TrackSampler_ReadsCompressedQuaternionTrack_WithM2ComponentRemap()
+    public void TrackSampler_ReadsCompressedQuaternionTrack_WithDirectComponentOrder()
     {
         SyntheticTrackPayloadBuilder payload = new();
         M2TrackDefinition<M2CompQuaternion> rotationTrack = payload.AddTrack(
@@ -31,6 +31,23 @@ public sealed class M2RuntimeTests
         Quaternion sampled = M2TrackSampler.SampleCompressedQuaternion(payload.ToArray(), model, 0, 0, rotationTrack, Quaternion.Identity);
 
         AssertQuaternionNear(Quaternion.Identity, sampled, 0.0001f);
+    }
+
+    [Fact]
+    public void TrackSampler_ReadsCompressedQuaternionTrack_WithDistinctComponents()
+    {
+        SyntheticTrackPayloadBuilder payload = new();
+        Quaternion expected = Quaternion.Normalize(new Quaternion(0.2f, -0.3f, 0.4f, 0.8f));
+        M2TrackDefinition<M2CompQuaternion> rotationTrack = payload.AddTrack(
+            M2TrackInterpolation.None,
+            -1,
+            [0u],
+            [ToCompQuaternion(expected)]);
+        M2ModelDocument model = CreateModel(payload.ToArray);
+
+        Quaternion sampled = M2TrackSampler.SampleCompressedQuaternion(payload.ToArray(), model, 0, 0, rotationTrack, Quaternion.Identity);
+
+        AssertQuaternionNear(expected, sampled, 0.0001f);
     }
 
     [Fact]
@@ -152,6 +169,62 @@ public sealed class M2RuntimeTests
         Assert.Equal(new Vector3(0.0f, 0.5f, 0.0f), pose.Bones[1].Translation);
         Assert.Single(skinned.Sections);
         AssertVectorNear(new Vector3(1.0f, 0.5f, 0.0f), skinned.Sections[0].Vertices[0].Position, 0.001f);
+    }
+
+    [Fact]
+    public void SkinnedRenderModelBuilder_PrefersSkinBoneEntriesOverRawVertexBoneIndices()
+    {
+        M2ModelDocument model = CreateModel(
+            () => [],
+            bones:
+            [
+                new M2BoneDefinition(0, -1, 0, -1, 0, 0, EmptyVectorTrack(), EmptyCompressedRotationTrack(), EmptyVectorTrack(), Vector3.Zero),
+                new M2BoneDefinition(1, -1, 0, -1, 0, 0, EmptyVectorTrack(), EmptyCompressedRotationTrack(), EmptyVectorTrack(), Vector3.Zero),
+            ]);
+
+        M2GeometryDocument geometry = new(
+            model,
+            [new M2GeometryVertex(Vector3.Zero, Vector3.UnitZ, Vector2.Zero, Vector2.Zero, new Vector4(0, 0, 0, 0), new Vector4(1, 0, 0, 0))],
+            [],
+            [new M2GeometryRenderFlag(0, 0)],
+            [],
+            [],
+            [],
+            [],
+            [new M2GeometryBoneLookup(0), new M2GeometryBoneLookup(1)]);
+        M2SkinDocument skin = new(
+            sourcePath: "Creature\\Synthetic\\Synthetic00.skin",
+            signature: "SKIN",
+            vertexLookup: [0],
+            vertexLookupOffset: 0,
+            triangleIndices: [0, 0, 0],
+            triangleIndexOffset: 0,
+            boneEntries: [new M2SkinBoneEntry(1, 0, 0, 0)],
+            boneEntryOffset: 0,
+            submeshes: [new M2SkinSubmesh(1, 0, 0, 1, 0, 3, boneCount: 2, boneComboIndex: 0, boneInfluences: 1, centerBoneIndex: 0)],
+            submeshOffset: 0,
+            batches: [new M2SkinBatch(0, 0, 0, 0, 0, -1, 0, 0, 0, 0, ushort.MaxValue, ushort.MaxValue, ushort.MaxValue)],
+            batchOffset: 0,
+            globalVertexOffset: 0,
+            shadowBatchCount: 0,
+            shadowBatchOffset: 0);
+
+        M2StaticRenderModel renderModel = M2StaticRenderModelBuilder.Build(geometry, M2SkinProfileRuntime.Initialize(M2SkinProfileRuntime.Load(M2SkinProfileRuntime.Choose(model), skin)));
+        M2BonePoseState pose = new(
+            requestedSequenceIndex: 0,
+            resolvedSequenceIndex: 0,
+            timeMs: 0,
+            usesExternalPayload: false,
+            bones:
+            [
+                new M2BonePose(0, -1, Vector3.Zero, Vector3.Zero, Quaternion.Identity, Vector3.One, Matrix4x4.Identity, Matrix4x4.Identity),
+                new M2BonePose(1, -1, Vector3.Zero, new Vector3(2.0f, 0.0f, 0.0f), Quaternion.Identity, Vector3.One, Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f), Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f)),
+            ]);
+
+        M2SkinnedRenderModel skinned = M2SkinnedRenderModelBuilder.ApplyPose(renderModel, pose);
+
+        Assert.Equal(new Vector4(1, 0, 0, 0), renderModel.StructuredSections[0].Vertices[0].BoneIndices);
+        AssertVectorNear(new Vector3(2.0f, 0.0f, 0.0f), skinned.Sections[0].Vertices[0].Position, 0.001f);
     }
 
     [Fact]
@@ -713,7 +786,12 @@ public sealed class M2RuntimeTests
             vertexLookupOffset: 0,
             triangleIndices: [0, 1, 2],
             triangleIndexOffset: 0,
-            boneEntries: [new M2SkinBoneEntry(0, 1, 0, 0)],
+            boneEntries:
+            [
+                new M2SkinBoneEntry(1, 0, 0, 0),
+                new M2SkinBoneEntry(1, 0, 0, 0),
+                new M2SkinBoneEntry(1, 0, 0, 0),
+            ],
             boneEntryOffset: 0,
             submeshes: [new M2SkinSubmesh(1, 0, 0, 3, 0, 3, boneCount: 2, boneComboIndex: 0, boneInfluences: 1, centerBoneIndex: 1)],
             submeshOffset: 0,
@@ -1121,8 +1199,8 @@ public sealed class M2RuntimeTests
                     WriteUInt16(uint16Value);
                     break;
                 case M2CompQuaternion quaternionValue:
+                    WriteInt16(quaternionValue.X);
                     WriteInt16(quaternionValue.Y);
-                    WriteInt16((short)-quaternionValue.X);
                     WriteInt16(quaternionValue.Z);
                     WriteInt16(quaternionValue.W);
                     break;

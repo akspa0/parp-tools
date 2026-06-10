@@ -77,8 +77,26 @@ public sealed class ValidationCaptureArtifactBuilderTests
                 objectsOnlyRgbaPixels: null),
             CreatePolicy());
 
-        Assert.Equal(ValidationObjectMaskStrategy.DirectObjectsOnlySilhouette, outputs.MaskStrategy);
+        Assert.Equal(ValidationObjectMaskStrategy.PrimaryVsNoObjectsDiff, outputs.MaskStrategy);
         Assert.Equal([255], outputs.ObjectVisibilityMaskL8Pixels);
+    }
+
+    [Fact]
+    public void Build_LaterBuild_WithBlankObjectsOnlyAndValidDiff_PrefersDiffMask()
+    {
+        ValidationCaptureArtifactOutputs outputs = ValidationCaptureArtifactBuilder.Build(
+            new ValidationCaptureArtifactInputs(
+                tileName: "Azeroth_30_48",
+                buildLabel: "3.3.5.12340",
+                width: 2,
+                height: 1,
+                primaryRgbaPixels: [0, 0, 0, 255, 20, 0, 0, 255],
+                noObjectsRgbaPixels: [0, 0, 0, 255, 0, 0, 0, 255],
+                objectsOnlyRgbaPixels: [0, 0, 0, 255, 0, 0, 0, 255]),
+            CreatePolicy());
+
+        Assert.Equal(ValidationObjectMaskStrategy.PrimaryVsNoObjectsDiff, outputs.MaskStrategy);
+        Assert.Equal([0, 255], outputs.ObjectVisibilityMaskL8Pixels);
     }
 
     [Fact]

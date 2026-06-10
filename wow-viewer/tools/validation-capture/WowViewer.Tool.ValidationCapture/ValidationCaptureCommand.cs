@@ -53,7 +53,7 @@ internal static class ValidationCaptureCommand
         int? maxFrames = GetIntOption(args, "--max-frames");
         int? batchSettledFrames = GetIntOption(args, "--batch-settled-frames");
         bool dryRun = HasFlag(args, "--dry-run");
-        bool gpuViewerStyle = HasFlag(args, "--gpu-viewer-style");
+        bool gpuViewerStyle = HasFlag(args, "--renderer", "--gpu-viewer-style");
         bool realSceneDryRun = HasFlag(args, "--real-scene-dry-run");
         bool nativeRenderer = HasFlag(args, "--native-renderer");
         bool stubScene = HasFlag(args, "--stub-scene");
@@ -80,7 +80,8 @@ internal static class ValidationCaptureCommand
             outputRoot,
             resolution,
             buildLabel,
-            [new CaptureTileInput(tileName, tileX.Value, tileY.Value, null, null, null, null, null, null, null, null, null)]);
+            [new CaptureTileInput(tileName, tileX.Value, tileY.Value, null, null, null, null, null, null, null, null, null)],
+            ParseVariantsFlag(null));
 
         ValidationCaptureScenePolicy scenePolicy = CreateDefaultScenePolicy(resolution,
             settledFramesOverride: settledFrames,
@@ -130,7 +131,7 @@ internal static class ValidationCaptureCommand
             using ValidationWorldSceneAdapter adapter = new();
             ValidationCaptureBatchResult result = HeadlessValidationCaptureRunner.Run(session, adapter);
             EmitDerivedArtifacts(session);
-            Console.WriteLine($"Validation capture gpu-viewer-style run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
+            Console.WriteLine($"Validation capture renderer run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
             return result.FailedVariantCount == 0 ? 0 : 2;
         }
 
@@ -139,7 +140,7 @@ internal static class ValidationCaptureCommand
             using NativeValidationWorldSceneAdapter adapter = new();
             ValidationCaptureBatchResult result = HeadlessValidationCaptureRunner.Run(session, adapter);
             EmitDerivedArtifacts(session);
-            Console.WriteLine($"Validation capture native-renderer run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
+            Console.WriteLine($"Validation capture renderer run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
             return result.FailedVariantCount == 0 ? 0 : 2;
         }
 
@@ -177,10 +178,12 @@ int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
         int? maxFrames = GetIntOption(args, "--max-frames");
         int? batchSettledFrames = GetIntOption(args, "--batch-settled-frames");
         bool dryRun = HasFlag(args, "--dry-run");
-        bool gpuViewerStyle = HasFlag(args, "--gpu-viewer-style");
+        bool gpuViewerStyle = HasFlag(args, "--renderer", "--gpu-viewer-style");
         bool realSceneDryRun = HasFlag(args, "--real-scene-dry-run");
         bool nativeRenderer = HasFlag(args, "--native-renderer");
         bool stubScene = HasFlag(args, "--stub-scene");
+        string? variantsArg = GetOption(args, "--variants");
+        HashSet<ValidationCaptureVariant> enabledVariants = ParseVariantsFlag(variantsArg);
 
         if (string.IsNullOrWhiteSpace(clientRoot)
             || string.IsNullOrWhiteSpace(mapInput)
@@ -236,7 +239,7 @@ int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
             return 0;
         }
 
-        ValidationCaptureBatchPlan batchPlan = BuildBatchPlan(datasetRoot, mapName, outputRoot, resolution, buildLabel, tiles);
+        ValidationCaptureBatchPlan batchPlan = BuildBatchPlan(datasetRoot, mapName, outputRoot, resolution, buildLabel, tiles, enabledVariants);
         ValidationCaptureScenePolicy scenePolicy = CreateDefaultScenePolicy(resolution,
             settledFramesOverride: settledFrames,
             maxFramesOverride: maxFrames,
@@ -286,7 +289,7 @@ int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
             ValidationCaptureBatchResult result = HeadlessValidationCaptureRunner.Run(session, adapter);
             EmitDerivedArtifacts(session);
             WritePoseMetadataArtifacts(session, tiles);
-            Console.WriteLine($"Validation capture batch gpu-viewer-style run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
+            Console.WriteLine($"Validation capture batch renderer run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
             return result.FailedVariantCount == 0 ? 0 : 2;
         }
 
@@ -296,7 +299,7 @@ int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
             ValidationCaptureBatchResult result = HeadlessValidationCaptureRunner.Run(session, adapter);
             EmitDerivedArtifacts(session);
             WritePoseMetadataArtifacts(session, tiles);
-            Console.WriteLine($"Validation capture batch native-renderer run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
+            Console.WriteLine($"Validation capture batch renderer run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
             return result.FailedVariantCount == 0 ? 0 : 2;
         }
 
@@ -310,7 +313,7 @@ int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
             return result.FailedVariantCount == 0 ? 0 : 2;
         }
 
-        Console.Error.WriteLine("Error: the validation-capture batch runner requires one of --dry-run, --real-scene-dry-run, --gpu-viewer-style, --native-renderer, or --stub-scene.");
+        Console.Error.WriteLine("Error: the validation-capture batch runner requires one of --dry-run, --real-scene-dry-run, --renderer, --native-renderer, or --stub-scene.");
         return 2;
     }
 
@@ -320,20 +323,33 @@ int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
         string outputRoot,
         int resolution,
         string? buildLabel,
-        IReadOnlyList<CaptureTileInput> tiles)
+        IReadOnlyList<CaptureTileInput> tiles,
+        HashSet<ValidationCaptureVariant> enabledVariants)
     {
         string primaryDirectory = Path.Combine(outputRoot, "primary");
         string noLiquidsDirectory = Path.Combine(outputRoot, "noliquids");
         string noObjectsDirectory = Path.Combine(outputRoot, "noobjects");
         string objectsOnlyDirectory = Path.Combine(outputRoot, "objectsonly");
 
-        List<ValidationCaptureTileRequest> requests = new(capacity: tiles.Count * 4);
+        List<ValidationCaptureTileRequest> requests = new(capacity: tiles.Count * enabledVariants.Count);
         foreach (CaptureTileInput tile in tiles)
         {
-            requests.Add(new ValidationCaptureTileRequest(tile.TileName, tile.TileX, tile.TileY, ValidationCaptureVariant.Primary, Path.Combine(primaryDirectory, $"{tile.TileName}_viewer_validation.png")));
-            requests.Add(new ValidationCaptureTileRequest(tile.TileName, tile.TileX, tile.TileY, ValidationCaptureVariant.NoLiquids, Path.Combine(noLiquidsDirectory, $"{tile.TileName}_viewer_validation.png")));
-            requests.Add(new ValidationCaptureTileRequest(tile.TileName, tile.TileX, tile.TileY, ValidationCaptureVariant.NoObjects, Path.Combine(noObjectsDirectory, $"{tile.TileName}_viewer_validation.png")));
-            requests.Add(new ValidationCaptureTileRequest(tile.TileName, tile.TileX, tile.TileY, ValidationCaptureVariant.ObjectsOnly, Path.Combine(objectsOnlyDirectory, $"{tile.TileName}_viewer_validation.png")));
+            if (enabledVariants.Contains(ValidationCaptureVariant.Primary))
+            {
+                requests.Add(new ValidationCaptureTileRequest(tile.TileName, tile.TileX, tile.TileY, ValidationCaptureVariant.Primary, Path.Combine(primaryDirectory, $"{tile.TileName}_viewer_validation.png")));
+            }
+            if (enabledVariants.Contains(ValidationCaptureVariant.NoLiquids))
+            {
+                requests.Add(new ValidationCaptureTileRequest(tile.TileName, tile.TileX, tile.TileY, ValidationCaptureVariant.NoLiquids, Path.Combine(noLiquidsDirectory, $"{tile.TileName}_viewer_validation.png")));
+            }
+            if (enabledVariants.Contains(ValidationCaptureVariant.NoObjects))
+            {
+                requests.Add(new ValidationCaptureTileRequest(tile.TileName, tile.TileX, tile.TileY, ValidationCaptureVariant.NoObjects, Path.Combine(noObjectsDirectory, $"{tile.TileName}_viewer_validation.png")));
+            }
+            if (enabledVariants.Contains(ValidationCaptureVariant.ObjectsOnly))
+            {
+                requests.Add(new ValidationCaptureTileRequest(tile.TileName, tile.TileX, tile.TileY, ValidationCaptureVariant.ObjectsOnly, Path.Combine(objectsOnlyDirectory, $"{tile.TileName}_viewer_validation.png")));
+            }
         }
 
         return new ValidationCaptureBatchPlan(
@@ -346,6 +362,62 @@ int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
             resolution,
             buildLabel,
             requests);
+    }
+
+    private static HashSet<ValidationCaptureVariant> ParseVariantsFlag(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return new HashSet<ValidationCaptureVariant>
+            {
+                ValidationCaptureVariant.Primary,
+                ValidationCaptureVariant.NoLiquids,
+                ValidationCaptureVariant.NoObjects,
+                ValidationCaptureVariant.ObjectsOnly,
+            };
+        }
+
+        string normalized = raw.Trim().ToLowerInvariant();
+        if (normalized == "all")
+        {
+            return new HashSet<ValidationCaptureVariant>
+            {
+                ValidationCaptureVariant.Primary,
+                ValidationCaptureVariant.NoLiquids,
+                ValidationCaptureVariant.NoObjects,
+                ValidationCaptureVariant.ObjectsOnly,
+            };
+        }
+
+        HashSet<ValidationCaptureVariant> result = new();
+        foreach (string token in normalized.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            switch (token)
+            {
+                case "primary":
+                    result.Add(ValidationCaptureVariant.Primary);
+                    break;
+                case "no-liquids":
+                case "noliquids":
+                    result.Add(ValidationCaptureVariant.NoLiquids);
+                    break;
+                case "no-objects":
+                case "noobjects":
+                    result.Add(ValidationCaptureVariant.NoObjects);
+                    break;
+                case "objects-only":
+                case "objectsonly":
+                    result.Add(ValidationCaptureVariant.ObjectsOnly);
+                    break;
+                default:
+                    throw new ArgumentException($"Unknown --variants token '{token}'. Expected one of: primary, no-liquids, no-objects, objects-only, all.");
+            }
+        }
+        if (result.Count == 0)
+        {
+            throw new ArgumentException("--variants resolved to an empty set. Provide at least one of: primary, no-liquids, no-objects, objects-only, all.");
+        }
+        return result;
     }
 
 private static ValidationCaptureScenePolicy CreateDefaultScenePolicy(int resolution,
@@ -457,24 +529,35 @@ private static ValidationCaptureScenePolicy CreateDefaultScenePolicy(int resolut
         string imagesDirectory = Path.Combine(session.BatchPlan.DatasetRoot, "images");
         Directory.CreateDirectory(imagesDirectory);
 
-        var requestsByVariant = session.BatchPlan.TileRequests.ToDictionary(request => request.Variant);
+        ILookup<ValidationCaptureVariant, ValidationCaptureTileRequest> requestsByVariant =
+            session.BatchPlan.TileRequests.ToLookup(static request => request.Variant);
         foreach (IGrouping<string, ValidationCaptureTileRequest> tileGroup in session.BatchPlan.TileRequests.GroupBy(static request => request.TileName, StringComparer.OrdinalIgnoreCase))
         {
-            ValidationCaptureTileRequest primary = tileGroup.Single(request => request.Variant == ValidationCaptureVariant.Primary);
-            ValidationCaptureTileRequest noObjects = tileGroup.Single(request => request.Variant == ValidationCaptureVariant.NoObjects);
             ValidationCaptureTileRequest? objectsOnly = tileGroup.SingleOrDefault(request => request.Variant == ValidationCaptureVariant.ObjectsOnly);
-
-            byte[] primaryRgba = HeadlessValidationFramebufferExporter.ReadRgbaImage(primary.OutputPath, out int width, out int height);
-            byte[] noObjectsRgba = HeadlessValidationFramebufferExporter.ReadRgbaImage(noObjects.OutputPath, out int noObjectsWidth, out int noObjectsHeight);
-            if (noObjectsWidth != width || noObjectsHeight != height)
-                throw new InvalidOperationException($"No-objects capture dimensions for '{tileGroup.Key}' do not match the primary capture.");
-
-            byte[]? objectsOnlyRgba = null;
-            if (objectsOnly is not null && File.Exists(objectsOnly.OutputPath))
+            if (objectsOnly is null || !File.Exists(objectsOnly.OutputPath))
             {
-                objectsOnlyRgba = HeadlessValidationFramebufferExporter.ReadRgbaImage(objectsOnly.OutputPath, out int objectsOnlyWidth, out int objectsOnlyHeight);
-                if (objectsOnlyWidth != width || objectsOnlyHeight != height)
-                    throw new InvalidOperationException($"Objects-only capture dimensions for '{tileGroup.Key}' do not match the primary capture.");
+                Console.Error.WriteLine($"EmitDerivedArtifacts: skipping tile '{tileGroup.Key}' (no ObjectsOnly capture).");
+                continue;
+            }
+
+            byte[] objectsOnlyRgba = HeadlessValidationFramebufferExporter.ReadRgbaImage(objectsOnly.OutputPath, out int width, out int height);
+
+            byte[]? primaryRgba = null;
+            ValidationCaptureTileRequest? primaryReq = requestsByVariant[ValidationCaptureVariant.Primary].FirstOrDefault(r => r.TileName == tileGroup.Key);
+            if (primaryReq is not null && File.Exists(primaryReq.OutputPath))
+            {
+                primaryRgba = HeadlessValidationFramebufferExporter.ReadRgbaImage(primaryReq.OutputPath, out int primaryWidth, out int primaryHeight);
+                if (primaryWidth != width || primaryHeight != height)
+                    throw new InvalidOperationException($"Primary capture dimensions for '{tileGroup.Key}' do not match the ObjectsOnly capture.");
+            }
+
+            byte[]? noObjectsRgba = null;
+            ValidationCaptureTileRequest? noObjectsReq = requestsByVariant[ValidationCaptureVariant.NoObjects].FirstOrDefault(r => r.TileName == tileGroup.Key);
+            if (noObjectsReq is not null && File.Exists(noObjectsReq.OutputPath))
+            {
+                noObjectsRgba = HeadlessValidationFramebufferExporter.ReadRgbaImage(noObjectsReq.OutputPath, out int noObjectsWidth, out int noObjectsHeight);
+                if (noObjectsWidth != width || noObjectsHeight != height)
+                    throw new InvalidOperationException($"No-objects capture dimensions for '{tileGroup.Key}' do not match the ObjectsOnly capture.");
             }
 
             ValidationCaptureArtifactOutputs outputs = ValidationCaptureArtifactBuilder.Build(
@@ -483,16 +566,19 @@ private static ValidationCaptureScenePolicy CreateDefaultScenePolicy(int resolut
                     session.BuildLabel,
                     width,
                     height,
-                    primaryRgba,
-                    noObjectsRgba,
+                    primaryRgba ?? objectsOnlyRgba,
+                    noObjectsRgba ?? objectsOnlyRgba,
                     objectsOnlyRgba),
                 session.ScenePolicy.ArtifactPolicy);
 
             string objectMaskPath = Path.Combine(imagesDirectory, $"{tileGroup.Key}{session.ScenePolicy.ArtifactPolicy.ObjectVisibilityMaskFileSuffix}");
-            string noObjectMinimapPath = Path.Combine(imagesDirectory, $"{tileGroup.Key}{session.ScenePolicy.ArtifactPolicy.NoObjectMinimapFileSuffix}");
 
             HeadlessValidationFramebufferExporter.WriteMaskImage(objectMaskPath, width, height, outputs.ObjectVisibilityMaskL8Pixels);
-            HeadlessValidationFramebufferExporter.WriteImage(noObjectMinimapPath, width, height, outputs.NoObjectMinimapRgbaPixels, sourceOriginBottomLeft: false);
+            if (primaryRgba is not null && noObjectsRgba is not null)
+            {
+                string noObjectMinimapPath = Path.Combine(imagesDirectory, $"{tileGroup.Key}{session.ScenePolicy.ArtifactPolicy.NoObjectMinimapFileSuffix}");
+                HeadlessValidationFramebufferExporter.WriteImage(noObjectMinimapPath, width, height, outputs.NoObjectMinimapRgbaPixels, sourceOriginBottomLeft: false);
+            }
         }
     }
 
@@ -570,7 +656,8 @@ private static void ShowCaptureUsage()
               --max-frames <int>     Max frames before capture timeout (default: 480)
               --batch-settled-frames <int>  Fast-settle frames after first tile settles (default: 2)
               --dry-run               Build the shared-runtime session and print a summary
-                            --gpu-viewer-style      Render bounded captures with wow-viewer GPU output using validation camera frames
+              --renderer             Run bounded captures through the existing WoWViewer renderer
+                            --gpu-viewer-style      Back-compat alias for --renderer
                             --real-scene-dry-run    Build real runtime-frame snapshots without framebuffer rendering
               --stub-scene            Run the host loop against a clearly synthetic scene adapter
             """);
@@ -597,7 +684,8 @@ private static void ShowCaptureUsage()
               --max-frames <int>     Max frames before capture timeout (default: 480)
               --batch-settled-frames <int>  Fast-settle frames after first tile settles (default: 2)
               --dry-run               Build session + tile plan summary without rendering
-              --gpu-viewer-style      Render bounded captures with wow-viewer GPU output using validation camera frames
+              --renderer             Run bounded captures through the existing WoWViewer renderer
+              --gpu-viewer-style      Back-compat alias for --renderer
               --real-scene-dry-run    Build real runtime-frame snapshots without framebuffer rendering
               --native-renderer       Run bounded captures through NativeValidationWorldSceneAdapter
               --stub-scene            Run the host loop against a clearly synthetic scene adapter

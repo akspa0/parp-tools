@@ -37,7 +37,7 @@ internal sealed record Pm4ObjectMatch(
     int LinkedPositionRefCount,
     byte DominantGroupKey,
     byte DominantAttributeMask,
-    uint DominantMdosIndex,
+    uint DominantMscnRefIndex,
     float AverageSurfaceHeight,
     float FootprintArea,
     int AnchorPointCount,
@@ -58,7 +58,7 @@ internal sealed record Pm4ObjectSurfaceData(
     byte IndexCount,
     float Height,
     uint MsviFirstIndex,
-    uint MdosIndex,
+    uint MscnRefIndex,
     uint PackedParams0x1C,
     uint Ck24,
     byte Ck24Type,
@@ -111,7 +111,7 @@ internal sealed record Pm4PlacementMatchCandidate(
     int LinkedPositionRefCount,
     byte DominantGroupKey,
     byte DominantAttributeMask,
-    uint DominantMdosIndex,
+    uint DominantMscnRefIndex,
     float AverageSurfaceHeight,
     float AnchorPlanarGap,
     float PlanarGap,
@@ -153,7 +153,7 @@ internal static class Pm4MatchSupport
         List<string> notes =
         [
             $"Primary output is PM4-object-centered nearby-candidate search within a {searchRange:F1} unit range, not exact PM4-to-placement identity.",
-            "MSCN is actively used here through MSUR.MdosIndex-backed connector keys when grouping PM4 candidates.",
+            "MSCN is actively used here through MSUR.MscnRefIndex-backed connector keys when grouping PM4 candidates.",
             "MPRR is not used for placement matching in this command yet; it remains research-only in the current shared PM4 stack.",
             "Candidate ranking uses existing footprint-overlap scoring first, then linked MPRL anchor proximity when an object carries placement refs.",
             "MPRL heading is exported only as supporting evidence; the per-object artifact keeps the selected MSUR surface slice and raw PackedParams (0x1C) for later reconstruction work.",
@@ -303,7 +303,7 @@ internal static class Pm4MatchSupport
             .ThenBy(static match => match.PossibleMatches.Count > 0 ? match.PossibleMatches[0].CenterDistance : float.MaxValue)
             .Take(Math.Min(10, objectMatches.Count)))
         {
-            Console.WriteLine($"  ck24=0x{objectMatch.Ck24:X6} part={objectMatch.ObjectPartId} nearby={objectMatch.NearbyCandidateCount} groupKey={objectMatch.DominantGroupKey} attr=0x{objectMatch.DominantAttributeMask:X2} mdos={objectMatch.DominantMdosIndex}");
+            Console.WriteLine($"  ck24=0x{objectMatch.Ck24:X6} part={objectMatch.ObjectPartId} nearby={objectMatch.NearbyCandidateCount} groupKey={objectMatch.DominantGroupKey} attr=0x{objectMatch.DominantAttributeMask:X2} mscnRef={objectMatch.DominantMscnRefIndex}");
             foreach (Pm4ObjectPlacementCandidate placement in objectMatch.PossibleMatches.Take(Math.Min(3, objectMatch.PossibleMatches.Count)))
             {
                 Console.WriteLine($"    {placement.Kind} {placement.ModelPath} uid={placement.UniqueId} resolved={placement.AssetResolved} center={placement.CenterDistance:F1} anchorGap={placement.AnchorPlanarGap:F1} planarGap={placement.PlanarGap:F1} footprint={placement.FootprintOverlapRatio:F3}");
@@ -570,16 +570,16 @@ internal static class Pm4MatchSupport
                 Pm4CoordinateModeResolution linkedModeResolution = Pm4PlacementMath.ResolveCoordinateMode(meshVertices, meshIndices, linkedSurfaces, linkedRefs, linkedRefs, tileX, tileY, axisConvention, coordinateModeResolution.CoordinateMode);
                 Pm4PlacementSolution linkedPlacement = Pm4PlacementMath.ResolvePlacementSolution(meshVertices, meshIndices, linkedSurfaces, linkedRefs, linkedRefs, tileX, tileY, linkedModeResolution.CoordinateMode, axisConvention);
 
-                List<List<Pm4MsurEntry>> mdosGroups = !seedGroup.RequiresConnectivitySeedSplit
+                List<List<Pm4MsurEntry>> mscnRefGroups = !seedGroup.RequiresConnectivitySeedSplit
                     ? linkedSurfaces.GroupBy(static surface => surface.MscnRefIndex).Select(static group => group.ToList()).ToList()
                     : [linkedSurfaces];
 
-                foreach (List<Pm4MsurEntry> mdosGroup in mdosGroups)
+                foreach (List<Pm4MsurEntry> mscnRefGroup in mscnRefGroups)
                 {
-                    List<IndexedSurface> matchingIndexed = linkedGroup.Where(surface => mdosGroup.Contains(surface.Surface)).ToList();
+                    List<IndexedSurface> matchingIndexed = linkedGroup.Where(surface => mscnRefGroup.Contains(surface.Surface)).ToList();
                     List<List<Pm4MsurEntry>> components = !seedGroup.RequiresConnectivitySeedSplit
                         ? SplitByConnectivity(document, matchingIndexed).Select(static component => component.Select(static indexed => indexed.Surface).ToList()).ToList()
-                        : [mdosGroup];
+                        : [mscnRefGroup];
 
                     foreach (List<Pm4MsurEntry> component in components)
                     {

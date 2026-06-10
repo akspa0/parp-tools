@@ -1,0 +1,419 @@
+using System.Numerics;
+using ImGuiNET;
+using WoWViewer.Rendering;
+using WoWViewer.Terrain;
+
+namespace WoWViewer;
+
+/// <summary>
+/// Partial class containing viewer/editor workspace shell helpers.
+/// </summary>
+public partial class ViewerApp
+{
+    private static string GetWorkspaceModeLabel(WorkspaceMode mode)
+    {
+        return mode == WorkspaceMode.Viewer ? "Viewer" : "Editor";
+    }
+
+    private static string GetEditorWorkspaceTaskLabel(EditorWorkspaceTask task)
+    {
+        return task switch
+        {
+            EditorWorkspaceTask.Terrain => "Terrain",
+            EditorWorkspaceTask.Objects => "Objects",
+            EditorWorkspaceTask.Pm4Evidence => "PM4 Evidence",
+            EditorWorkspaceTask.Inspect => "Inspect",
+            EditorWorkspaceTask.Publish => "Publish",
+            _ => "Unknown",
+        };
+    }
+
+    private void SetWorkspaceMode(WorkspaceMode mode)
+    {
+        _workspaceMode = mode;
+        _showLeftSidebar = true;
+        _showRightSidebar = true;
+
+        if (mode == WorkspaceMode.Editor && !HasWorldEditingContext())
+            _editorWorkspaceTask = EditorWorkspaceTask.Inspect;
+    }
+
+    private void SetEditorWorkspaceTask(EditorWorkspaceTask task)
+    {
+        if (_workspaceMode != WorkspaceMode.Editor)
+            SetWorkspaceMode(WorkspaceMode.Editor);
+
+        _editorWorkspaceTask = task;
+        _activeBottomDrawerTab = task switch
+        {
+            EditorWorkspaceTask.Terrain => FixedBottomDrawerTab.Terrain,
+            EditorWorkspaceTask.Objects => FixedBottomDrawerTab.World,
+            EditorWorkspaceTask.Pm4Evidence => FixedBottomDrawerTab.Pm4,
+            EditorWorkspaceTask.Inspect => FixedBottomDrawerTab.Workspace,
+            EditorWorkspaceTask.Publish => FixedBottomDrawerTab.Diagnostics,
+            _ => _activeBottomDrawerTab,
+        };
+        _pendingRightSidebarSection = _activeBottomDrawerTab;
+    }
+
+    private bool HasWorldEditingContext()
+    {
+        return _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
+    }
+
+    private bool HasTerrainEditingContext()
+    {
+        return _terrainManager != null || _vlmTerrainManager != null;
+    }
+
+    private bool IsEditorTaskAvailable(EditorWorkspaceTask task)
+    {
+        return task switch
+        {
+            EditorWorkspaceTask.Terrain => HasTerrainEditingContext(),
+            EditorWorkspaceTask.Objects => _worldScene != null,
+            EditorWorkspaceTask.Pm4Evidence => _worldScene != null,
+            EditorWorkspaceTask.Inspect => true,
+            EditorWorkspaceTask.Publish => HasWorldEditingContext() || _renderer != null,
+            _ => false,
+        };
+    }
+
+    private void DrawWorkspaceToolbarControls()
+    {
+        ImGui.TextDisabled("Unified workspace");
+        ImGui.TextWrapped(GetWorkspaceTargetSummary());
+        ImGui.TextDisabled(GetWorkspaceSaveStatusSummary());
+    }
+
+    private void DrawEditorWorkspaceNavigator(bool hasWorldLoaded)
+    {
+        ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+        if (ImGui.CollapsingHeader("Editor Workspace", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.TextDisabled("One app, shared services, explicit editor tasks.");
+            ImGui.TextDisabled($"Current task: {GetEditorWorkspaceTaskLabel(_editorWorkspaceTask)}");
+            ImGui.TextDisabled($"Target: {GetWorkspaceTargetSummary()}");
+            ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
+            ImGui.Separator();
+
+            foreach (EditorWorkspaceTask task in Enum.GetValues<EditorWorkspaceTask>())
+            {
+                bool isAvailable = IsEditorTaskAvailable(task);
+                if (!isAvailable)
+                    ImGui.BeginDisabled();
+
+                bool isSelected = task == _editorWorkspaceTask;
+                if (ImGui.Selectable(GetEditorWorkspaceTaskLabel(task), isSelected))
+                    SetEditorWorkspaceTask(task);
+
+                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.TextDisabled(GetEditorWorkspaceTooltip(task));
+                    ImGui.EndTooltip();
+                }
+
+                if (!isAvailable)
+                    ImGui.EndDisabled();
+            }
+        }
+
+        if (hasWorldLoaded)
+        {
+            ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+            if (ImGui.CollapsingHeader("World Overview", ImGuiTreeNodeFlags.DefaultOpen))
+                DrawWorldOverviewContent();
+        }
+
+        ImGui.SetNextItemOpen(!hasWorldLoaded || _editorWorkspaceTask == EditorWorkspaceTask.Inspect, ImGuiCond.Once);
+        if (_showFileBrowser && ImGui.CollapsingHeader("Map / Assets"))
+            DrawFileBrowserContent();
+
+        if (_autoOpenWorldMapsPanel)
+            ImGui.SetNextItemOpen(true, ImGuiCond.Always);
+        else
+            ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
+
+        if (_discoveredMaps.Count > 0 && ImGui.CollapsingHeader("World Maps"))
+            DrawMapDiscoveryContent();
+    }
+
+    private void DrawEditorWorkspaceInspector()
+    {
+        switch (_editorWorkspaceTask)
+        {
+            case EditorWorkspaceTask.Terrain:
+                DrawEditorTerrainWorkspace();
+                break;
+            case EditorWorkspaceTask.Objects:
+                DrawEditorObjectsWorkspace();
+                break;
+            case EditorWorkspaceTask.Pm4Evidence:
+                DrawEditorPm4Workspace();
+                break;
+            case EditorWorkspaceTask.Inspect:
+                DrawEditorInspectWorkspace();
+                break;
+            case EditorWorkspaceTask.Publish:
+                DrawEditorPublishWorkspace();
+                break;
+        }
+    }
+
+    private void DrawEditorTerrainWorkspace()
+    {
+        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (renderer == null)
+        {
+            ImGui.TextWrapped("Load a terrain-backed world to use terrain editing tools.");
+            return;
+        }
+
+        ImGui.TextWrapped("Terrain actions are live-scene only in the current viewer. Use this workspace to make target and save status explicit.");
+
+        if (ImGui.CollapsingHeader("Chunk Clipboard", ImGuiTreeNodeFlags.DefaultOpen))
+            DrawChunkClipboardContent(renderer);
+
+        ImGui.Separator();
+        ImGui.Text("Terrain Import / Export");
+        if (ImGui.Button("Export Alpha Atlas"))
+        {
+            _terrainExportKind = TerrainExportKind.AlphaCurrentTileAtlas;
+            _wantTerrainExport = true;
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Export Heightmap"))
+        {
+            _terrainExportKind = TerrainExportKind.Heightmap257CurrentTilePerTile;
+            _wantTerrainExport = true;
+        }
+
+        if (ImGui.Button("Import Alpha Folder"))
+        {
+            _terrainImportKind = TerrainImportKind.AlphaFolder;
+            _wantTerrainImport = true;
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Import Heightmaps"))
+        {
+            _terrainImportKind = TerrainImportKind.Heightmap257Folder;
+            _wantTerrainImport = true;
+        }
+
+        ImGui.Separator();
+        DrawTerrainControlsContent();
+    }
+
+    private void DrawEditorObjectsWorkspace()
+    {
+        if (_worldScene == null)
+        {
+            ImGui.TextWrapped("Load a world scene to inspect object selection, archaeology, and world-population tools.");
+            return;
+        }
+
+        ImGui.TextWrapped("This is the first regrouping slice. The current world-object tools still come from the existing inspector surface, but they now live under an explicit object task.");
+        DrawWorldObjectsContentCore();
+    }
+
+    private void DrawEditorPm4Workspace()
+    {
+        if (_worldScene == null)
+        {
+            ImGui.TextWrapped("Load a world scene to inspect PM4 overlay, matches, and correlation.");
+            return;
+        }
+
+        ImGui.TextWrapped("PM4 stays evidence-first here. This workspace groups overlay tuning, selected-object inspection, graph, and correlation without implying save ownership.");
+        ImGui.Separator();
+        DrawPm4WorkbenchInspector();
+    }
+
+    private void DrawEditorInspectWorkspace()
+    {
+        ImGui.TextWrapped("Use Navigator for map and asset browse. This task keeps selection details, loaded-asset inspection, camera, and utility panels together.");
+        DrawVisualInvestigationToolbox(showWorldObjectRangeControls: _worldScene != null);
+        ImGui.Separator();
+        DrawTerrainChunkInvestigationPanel(defaultOpen: _visualInvestigationMode == VisualInvestigationMode.Adt);
+
+        if (_worldScene != null)
+        {
+            ImGui.Separator();
+            DrawWlLiquidInvestigationPanel(defaultOpen: _worldScene.WlLoader?.HasData == true);
+
+            ImGui.Separator();
+            DrawLitInvestigationPanel(defaultOpen: _worldScene.LitLoader?.HasData == true || _worldScene.UseLitFogOverride);
+        }
+
+        if (_terrainManager != null || _vlmTerrainManager != null)
+            ImGui.Separator();
+
+        if (DrawSelectedObjectInspectorSection())
+        {
+            ImGui.Separator();
+        }
+
+        ImGui.SetNextItemOpen(!string.IsNullOrEmpty(_modelInfo), ImGuiCond.Once);
+        if (_showModelInfo && ImGui.CollapsingHeader("Model Info", ImGuiTreeNodeFlags.DefaultOpen))
+            DrawModelInfoContent();
+
+        ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+        if (ImGui.CollapsingHeader("Camera", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 1f, 500f, "%.0f");
+            ImGui.Text("Hold Shift for 5x boost");
+            ImGui.SliderFloat("FOV", ref _fovDegrees, 20f, 90f, "%.0f°");
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Utility Panels");
+        if (ImGui.Button(_showMinimapWindow ? "Hide Minimap" : "Show Minimap"))
+            _showMinimapWindow = !_showMinimapWindow;
+
+        ImGui.SameLine();
+        if (ImGui.Button(_showLogViewer ? "Hide Log Viewer" : "Show Log Viewer"))
+            _showLogViewer = !_showLogViewer;
+
+        if (ImGui.Button(_showPerfWindow ? "Hide Perf" : "Show Perf"))
+            _showPerfWindow = !_showPerfWindow;
+
+        ImGui.SameLine();
+        if (ImGui.Button(_showRenderQualityWindow ? "Hide Render Quality" : "Show Render Quality"))
+            _showRenderQualityWindow = !_showRenderQualityWindow;
+    }
+
+    private void DrawEditorPublishWorkspace()
+    {
+        ImGui.TextWrapped("Save and publish are explicit here. Current WoWViewer support is still narrow: translation-only saves for staged existing ADT object placement moves, grouped by source ADT, plus export and capture. Saves now default into timestamped project output folders instead of overwriting source files. General map save and terrain persistence are still not implemented.");
+        ImGui.TextDisabled(GetWorkspaceSaveStatusSummary());
+        ImGui.Separator();
+        ImGui.Text("Project Output");
+        ImGui.TextDisabled("Editor saves and map conversions write into timestamped project folders under this root.");
+        ImGui.SetNextItemWidth(-80);
+        if (ImGui.InputText("##projectOutputRoot", ref _projectOutputRootDir, 512))
+            HandleProjectOutputRootChanged();
+        ImGui.SameLine();
+        if (ImGui.Button("Browse##projectOutputRoot"))
+        {
+            string? picked = ShowFolderDialogSTA("Select project output root", GetProjectOutputRootDirectory(), showNewFolderButton: true);
+            if (!string.IsNullOrWhiteSpace(picked))
+            {
+                _projectOutputRootDir = picked;
+                HandleProjectOutputRootChanged();
+            }
+        }
+
+        ImGui.TextWrapped($"Current project folder: {DescribeEditorProjectOutputDirectory()}");
+        if (ImGui.Button("New Project Folder##publish"))
+            StartNewEditorProjectOutputDirectory();
+
+        DrawPlacementSaveQueueActions(includeCurrentSourceSave: false);
+        ImGui.Separator();
+
+        if (ImGui.Button("Capture Current (No UI)"))
+            QueueCurrentCameraCapture(includeUi: false);
+
+        ImGui.SameLine();
+        if (ImGui.Button("Capture Current (With UI)"))
+            QueueCurrentCameraCapture(includeUi: true);
+
+        if (ImGui.Button("Open Capture Automation"))
+            _showCaptureAutomationWindow = true;
+
+        ImGui.Separator();
+        ImGui.Text("Export");
+        if (ImGui.Button("Export GLB"))
+            _wantExportGlb = true;
+
+        ImGui.SameLine();
+        if (ImGui.Button("Export GLB Collision"))
+            _wantExportGlbCollision = true;
+
+        if (HasTerrainEditingContext())
+        {
+            if (ImGui.Button("Export Terrain Alpha"))
+            {
+                _terrainExportKind = TerrainExportKind.AlphaCurrentTileAtlas;
+                _wantTerrainExport = true;
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Export Terrain Heightmap"))
+            {
+                _terrainExportKind = TerrainExportKind.Heightmap257CurrentTilePerTile;
+                _wantTerrainExport = true;
+            }
+        }
+    }
+
+    private static string GetEditorWorkspaceTooltip(EditorWorkspaceTask task)
+    {
+        return task switch
+        {
+            EditorWorkspaceTask.Terrain => "Chunk clipboard, terrain import/export, and live terrain controls.",
+            EditorWorkspaceTask.Objects => "Selection, archaeology, world population, and object-facing scene tools.",
+            EditorWorkspaceTask.Pm4Evidence => "Overlay tuning, selected PM4 object inspection, graph, and correlation.",
+            EditorWorkspaceTask.Inspect => "Read-only model, camera, map, and utility inspection tools.",
+            EditorWorkspaceTask.Publish => "Capture and export surfaces. No map save pipeline yet.",
+            _ => string.Empty,
+        };
+    }
+
+    private string GetWorkspaceTargetSummary()
+    {
+        if (_worldScene?.HasSelectedPm4Object == true && _worldScene.SelectedPm4ObjectKey.HasValue)
+        {
+            var selectedPm4 = _worldScene.SelectedPm4ObjectKey.Value;
+            return $"PM4 CK24 0x{selectedPm4.ck24:X6} part {selectedPm4.objectPart}";
+        }
+
+        if (!string.IsNullOrEmpty(_selectedObjectType) && _selectedObjectIndex >= 0)
+            return $"{_selectedObjectType} #{_selectedObjectIndex}";
+
+        if (_selectedChunks.Count > 0)
+            return $"{_selectedChunks.Count} selected chunk(s)";
+
+        if (_terrainManager != null || _vlmTerrainManager != null || _worldScene != null)
+        {
+            int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
+            int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize);
+            return $"Camera tile ({tileX}, {tileY})";
+        }
+
+        if (!string.IsNullOrWhiteSpace(_loadedFileName))
+            return _loadedFileName!;
+
+        return "No active target";
+    }
+
+    private string GetWorkspaceSaveStatusSummary()
+    {
+        int pendingEditCount = GetPendingPlacementEditCount();
+        if (pendingEditCount > 0)
+        {
+            int pendingSourceCount = GetPendingPlacementSourceCount();
+            int missingTargets = GetPendingPlacementSourceCountMissingTargets();
+            string pendingSummary = $"{pendingEditCount} pending placement move(s) across {pendingSourceCount} ADT source(s) in {DescribeEditorProjectOutputDirectory()}.";
+            return missingTargets > 0
+                ? $"{pendingSummary} {missingTargets} source(s) still need an output .adt path."
+                : pendingSummary;
+        }
+
+        if (HasWorldEditingContext() && !string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath))
+            return $"Staged placement save target: {_selectedPlacementSaveTargetPath}. Source files stay untouched.";
+
+        if (HasWorldEditingContext() && GetChunkToolDirtyTileCount() > 0)
+            return $"Chunk tool has {GetChunkToolDirtyChunkCount()} edited chunk(s) across {GetChunkToolDirtyTileCount()} tile(s). Heightmap outputs can be written into {DescribeEditorProjectOutputDirectory()}. General terrain ADT save is still not implemented.";
+
+        if (HasWorldEditingContext())
+            return $"Staged placement saves are available for translation-only ADT object moves in {DescribeEditorProjectOutputDirectory()}. No general map save pipeline yet.";
+
+        if (_renderer != null || _dataSource != null)
+            return "Inspection only. Load a world scene to stage placement saves.";
+
+        return "No active world save target.";
+    }
+}

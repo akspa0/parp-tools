@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Buffers.Binary;
 using System.Numerics;
 using System.Text.Json;
 using WowViewer.Core.Audio;
@@ -11,6 +12,8 @@ using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Lit;
 using WowViewer.Core.IO.M2;
+using WowViewer.Core.IO.M2Chunked;
+using WowViewer.Core.IO.M2Era1121;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.IO.Wmo;
@@ -19,12 +22,14 @@ using WowViewer.Core.M2;
 using WowViewer.Core.Mdx;
 using WowViewer.Core.Maps;
 using WowViewer.Core.PM4;
+using WowViewer.Core.PM4.Matching;
 using WowViewer.Core.PM4.Models;
 using WowViewer.Core.PM4.Research;
 using WowViewer.Core.PM4.Services;
 using WowViewer.Core.Runtime;
 using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Wmo;
+using WowViewer.Tools.Shared.Pm4Matching;
 
 if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
 {
@@ -287,23 +292,12 @@ static void RunM2Inspect(string[] args)
 	}
 
 	byte[]? TryReadExactSkinBytes(string companionPath)
-	{
-		if (!string.IsNullOrWhiteSpace(archiveRoot))
-		{
-			try
-			{
-				return ArchiveVirtualFileReader.ReadVirtualFile(companionPath, [archiveRoot], archiveBootstrapOptions);
-			}
-			catch (FileNotFoundException)
-			{
-				return null;
-			}
-		}
-
-		return File.Exists(companionPath) ? File.ReadAllBytes(companionPath) : null;
-	}
+		=> TryReadExactCompanionBytes(companionPath);
 
 	byte[]? TryReadExactAnimBytes(string companionPath)
+		=> TryReadExactCompanionBytes(companionPath);
+
+	byte[]? TryReadExactCompanionBytes(string companionPath)
 	{
 		if (!string.IsNullOrWhiteSpace(archiveRoot))
 		{
@@ -321,28 +315,62 @@ static void RunM2Inspect(string[] args)
 	}
 
 	byte[] modelBytes = ReadInputBytes();
+	bool isChunkedMdx = modelBytes.Length >= sizeof(uint)
+		&& BinaryPrimitives.ReadUInt32LittleEndian(modelBytes.AsSpan(0, sizeof(uint))) == MdxMagic.Mdlx;
+	M2ChunkedReadResult? chunkedRead = null;
 	M2ModelDocument model;
-	using (MemoryStream stream = new(modelBytes, writable: false))
-		model = M2ModelReader.Read(stream, sourceLabel);
-
 	M2GeometryDocument? geometry = null;
 	string? geometryError = null;
-	try
+	M2Era1121EraTag detectedEra;
+
+	if (isChunkedMdx)
 	{
 		using MemoryStream stream = new(modelBytes, writable: false);
-		geometry = M2GeometryReader.Read(stream, sourceLabel);
+		chunkedRead = M2ChunkedModelReader.ReadDetailed(stream, sourceLabel, TryReadExactCompanionBytes);
+		model = chunkedRead.Model;
+		detectedEra = M2Era1121EraTag.Mdlx;
+
+		try
+		{
+			using MemoryStream geometryStream = new(chunkedRead.Conversion.ModelBytes, writable: false);
+			geometry = M2GeometryReader.Read(geometryStream, chunkedRead.Conversion.ModelPath);
+		}
+		catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException)
+		{
+			geometryError = ex.Message;
+		}
 	}
-	catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException)
+	else
 	{
-		geometryError = ex.Message;
+		using MemoryStream dispatchStream = new(modelBytes, writable: false);
+		M2DispatchResult dispatch = M2ModelReaderDispatcher.ReadDetailed(dispatchStream, sourceLabel, TryReadExactCompanionBytes);
+		model = dispatch.Document;
+		detectedEra = dispatch.Era;
+
+		try
+		{
+			using MemoryStream geometryStream = new(modelBytes, writable: false);
+			geometry = M2GeometryReader.Read(geometryStream, sourceLabel);
+		}
+		catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException)
+		{
+			geometryError = ex.Message;
+		}
 	}
 
 	M2SkinProfileRuntimeState state = M2SkinProfileRuntime.Choose(model, profileIndex);
-	byte[]? skinBytes = TryReadExactSkinBytes(state.Selection.CompanionPath);
+	byte[]? skinBytes = chunkedRead is not null
+		&& string.Equals(state.Selection.CompanionPath, chunkedRead.Conversion.SkinPath, StringComparison.OrdinalIgnoreCase)
+		? chunkedRead.Conversion.SkinBytes
+		: TryReadExactSkinBytes(state.Selection.CompanionPath);
 	if (skinBytes is not null)
 	{
 		using MemoryStream skinStream = new(skinBytes, writable: false);
-		M2SkinDocument skin = M2SkinReader.Read(skinStream, state.Selection.CompanionPath);
+		string skinPath = chunkedRead is not null
+			&& string.Equals(state.Selection.CompanionPath, chunkedRead.Conversion.SkinPath, StringComparison.OrdinalIgnoreCase)
+			? chunkedRead.Conversion.SkinPath
+			: state.Selection.CompanionPath;
+		M2SkinDocument skin = M2SkinReader.Read(skinStream, skinPath);
 		state = M2SkinProfileRuntime.Load(state, skin);
 		state = M2SkinProfileRuntime.Initialize(state);
 	}
@@ -438,7 +466,10 @@ static void RunM2Inspect(string[] args)
 		}
 	}
 
+	Console.WriteLine($"ERA: {detectedEra.ToDisplayString()}");
 	PrintM2Summary(model, state, geometry, geometryError, renderModel, externalAnimationState, externalAnimationError, animatedRenderState, animatedRenderError, bonePoseState, bonePoseError, skinnedRenderModel, renderConsumerState, effectRuntimeState, sceneSubmissionPlan, renderFrame, visualSnapshot, goldenFrame);
+	if (chunkedRead is not null)
+		PrintChunkedM2ConversionSummary(chunkedRead);
 }
 
 static void RunMdx(string[] args)
@@ -599,6 +630,17 @@ static void PrintM2Summary(M2ModelDocument model, M2SkinProfileRuntimeState stat
 		PrintExternalAnimationSummary(externalAnimationState, externalAnimationError);
 
 	PrintM2RuntimeConsumers(animatedRenderState, animatedRenderError, bonePoseState, bonePoseError, skinnedRenderModel, renderConsumerState, effectRuntimeState, sceneSubmissionPlan, renderFrame, visualSnapshot, goldenFrame);
+}
+
+static void PrintChunkedM2ConversionSummary(M2ChunkedReadResult result)
+{
+	Console.WriteLine($"CHUNKED.MDX: sourceSignature={result.Summary.Signature} version={result.Summary.Version} chunks={result.Chunks.Count} materials={result.Summary.MaterialCount} sequences={result.Summary.SequenceCount} geosets={result.Geometry.GeosetCount} vertices={result.VertexCount} triangles={result.TriangleCount} convertedModelPath={result.Conversion.ModelPath} convertedSkinPath={result.Conversion.SkinPath}");
+	for (int index = 0; index < result.Chunks.Count; index++)
+	{
+		M2ChunkedChunkHeader chunk = result.Chunks[index];
+		string truncation = chunk.IsTruncated ? " truncated=true" : string.Empty;
+		Console.WriteLine($"CHUNK[{index:D2}]: fourCC={chunk.FourCC} size=0x{chunk.Size:X} offset=0x{chunk.Offset:X}{truncation}");
+	}
 }
 
 static void PrintM2RuntimeConsumers(M2AnimatedRenderState? animatedRenderState, string? animatedRenderError, M2BonePoseState? bonePoseState, string? bonePoseError, M2SkinnedRenderModel? skinnedRenderModel, M2RenderConsumerFrameState? renderConsumerState, M2EffectRuntimeState? effectRuntimeState, M2SceneSubmissionPlan? sceneSubmissionPlan, M2RenderFrame? renderFrame, M2SoftwareVisualSnapshot? visualSnapshot, M2RuntimeGoldenFrame? goldenFrame)
@@ -1647,9 +1689,21 @@ static void RunPm4(string[] args)
 		case "inspect":
 			RunPm4Inspect(tail);
 			break;
-		case "match":
-			RunPm4Match(tail);
-			break;
+	case "export-segments":
+		RunPm4ExportSegments(tail);
+		break;
+	case "export-asset-signals":
+		RunPm4ExportAssetSignals(tail);
+		break;
+	case "match-assets":
+		RunPm4MatchAssets(tail);
+		break;
+	case "synthesize-placements":
+		RunPm4SynthesizePlacements(tail);
+		break;
+	case "match":
+		RunPm4Match(tail);
+		break;
 			case "hierarchy":
 				RunPm4Hierarchy(tail);
 				break;
@@ -1713,7 +1767,7 @@ static void RunWmo(string[] args)
 static void RunPm4Match(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
-	string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "--adt-obj", "-a");
+string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "--adt-obj", "-a");
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
 	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
 		return;
@@ -1798,6 +1852,354 @@ static void RunPm4Match(string[] args)
 		return;
 
 	Pm4MatchSupport.Print(result);
+}
+
+static void RunPm4MatchAssets(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "--adt-obj", "-a");
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? assetCorpus = GetOption(args, "--asset-corpus", "-c");
+	string? output = GetOption(args, "--output", "-o");
+	string? maxCandidatesText = GetOption(args, "--max-candidates", "-n");
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	int maxCandidates = 10;
+	if (!string.IsNullOrWhiteSpace(maxCandidatesText) && (!int.TryParse(maxCandidatesText, out maxCandidates) || maxCandidates <= 0))
+	{
+		Console.Error.WriteLine("Error: --max-candidates must be a positive integer.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 file is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!File.Exists(input))
+	{
+		Console.Error.WriteLine($"Error: PM4 input '{input}' does not exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!string.IsNullOrWhiteSpace(assetCorpus) && !string.IsNullOrWhiteSpace(placements))
+	{
+		Console.Error.WriteLine("Error: choose either --asset-corpus <report.json> or --placements <tile_obj0.adt>, not both.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!string.IsNullOrWhiteSpace(assetCorpus) && !File.Exists(assetCorpus))
+	{
+		Console.Error.WriteLine($"Error: asset corpus '{assetCorpus}' does not exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(assetCorpus) && string.IsNullOrWhiteSpace(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root is required for pm4 match-assets so WMO/M2 assets can be read from the staged client.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!Pm4CoordinateService.TryParseTileCoordinates(input, out int tileX, out int tileY))
+	{
+		Console.Error.WriteLine("Error: could not derive tile coordinates from the PM4 filename.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(assetCorpus) && string.IsNullOrWhiteSpace(placements))
+	{
+		string fileName = Path.GetFileNameWithoutExtension(input);
+		int lastUnderscore = fileName.LastIndexOf('_');
+		int previousUnderscore = lastUnderscore > 0 ? fileName.LastIndexOf('_', lastUnderscore - 1) : -1;
+		string mapName = previousUnderscore > 0 ? fileName[..previousUnderscore] : fileName;
+		placements = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(input)) ?? string.Empty, $"{mapName}_{tileX}_{tileY}_obj0.adt");
+	}
+
+	if (string.IsNullOrWhiteSpace(assetCorpus) && !File.Exists(placements))
+	{
+		Console.Error.WriteLine($"Error: placement source '{placements}' does not exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	try
+	{
+		Pm4SegmentExportRun exportRun = Pm4SegmentExportService.Export(input);
+		Pm4SegmentExportFile file = AssertSinglePm4ExportFile(exportRun, input);
+		Pm4AssetReferenceBuildResult assetBuild;
+		string assetReferenceSource;
+		if (!string.IsNullOrWhiteSpace(assetCorpus))
+		{
+			assetBuild = Pm4AssetSignalCorpusSupport.LoadFromManifest(assetCorpus);
+			assetReferenceSource = assetCorpus;
+		}
+		else
+		{
+			assetBuild = Pm4AssetReferenceSupport.BuildFromPlacements(placements!, archiveRoot!, archiveBootstrapOptions, tileX, tileY);
+			assetReferenceSource = placements!;
+		}
+
+		IReadOnlyList<Pm4SegmentMatchResult> matchResults = Pm4AssetMatchScorer.ScoreSegments(file.Segments, assetBuild.Assets, maxCandidates);
+		IReadOnlyList<Pm4ReplacementPlacementProposal> placementProposals = Pm4ReplacementPlacementSynthesizer.Synthesize(matchResults, assetBuild.Assets);
+		Pm4MatchRunManifest manifest = BuildPm4AssetMatchManifest(
+			exportRun,
+			matchResults,
+			placementProposals,
+			assetReferenceSource,
+			assetBuild.Warnings,
+			"match-assets");
+
+		if (!string.IsNullOrWhiteSpace(output))
+		{
+			string outputPath = Path.GetFullPath(output);
+			WritePm4Report(manifest, outputPath);
+			Console.WriteLine($"Matched {manifest.SegmentCount} PM4 segments against {assetBuild.Assets.Count} validation asset references.");
+			Console.WriteLine($"Synthesized {placementProposals.Count} placement proposals from the ranked candidates.");
+			return;
+		}
+
+		PrintPm4AssetMatchRun(manifest, assetBuild.Assets.Count);
+	}
+	catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or DirectoryNotFoundException)
+	{
+		Console.Error.WriteLine($"Error: {ex.Message}");
+		Environment.ExitCode = 1;
+	}
+}
+
+static void RunPm4SynthesizePlacements(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "--adt-obj", "-a");
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? assetCorpus = GetOption(args, "--asset-corpus", "-c");
+	string? output = GetOption(args, "--output", "-o");
+	string? targetTilesText = GetOption(args, "--target-tiles", "-t");
+	string? maxCandidatesText = GetOption(args, "--max-candidates", "-n");
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	int maxCandidates = 10;
+	if (!string.IsNullOrWhiteSpace(maxCandidatesText) && (!int.TryParse(maxCandidatesText, out maxCandidates) || maxCandidates <= 0))
+	{
+		Console.Error.WriteLine("Error: --max-candidates must be a positive integer.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	IReadOnlyList<string> targetTiles = ParseCsvOption(targetTilesText);
+	if (targetTiles.Count == 0)
+	{
+		Console.Error.WriteLine("Error: provide at least one tile in --target-tiles <x_y[,x_y...]>");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 file is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!File.Exists(input))
+	{
+		Console.Error.WriteLine($"Error: PM4 input '{input}' does not exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!string.IsNullOrWhiteSpace(assetCorpus) && !string.IsNullOrWhiteSpace(placements))
+	{
+		Console.Error.WriteLine("Error: choose either --asset-corpus <report.json> or --placements <tile_obj0.adt>, not both.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!string.IsNullOrWhiteSpace(assetCorpus) && !File.Exists(assetCorpus))
+	{
+		Console.Error.WriteLine($"Error: asset corpus '{assetCorpus}' does not exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(assetCorpus) && string.IsNullOrWhiteSpace(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root is required for pm4 synthesize-placements so WMO/M2 assets can be read from the staged client.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!Pm4CoordinateService.TryParseTileCoordinates(input, out int tileX, out int tileY))
+	{
+		Console.Error.WriteLine("Error: could not derive tile coordinates from the PM4 filename.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(assetCorpus) && string.IsNullOrWhiteSpace(placements))
+	{
+		string fileName = Path.GetFileNameWithoutExtension(input);
+		int lastUnderscore = fileName.LastIndexOf('_');
+		int previousUnderscore = lastUnderscore > 0 ? fileName.LastIndexOf('_', lastUnderscore - 1) : -1;
+		string mapName = previousUnderscore > 0 ? fileName[..previousUnderscore] : fileName;
+		placements = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(input)) ?? string.Empty, $"{mapName}_{tileX}_{tileY}_obj0.adt");
+	}
+
+	if (string.IsNullOrWhiteSpace(assetCorpus) && !File.Exists(placements))
+	{
+		Console.Error.WriteLine($"Error: placement source '{placements}' does not exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	try
+	{
+		Pm4SegmentExportRun exportRun = Pm4SegmentExportService.Export(input);
+		Pm4SegmentExportFile file = AssertSinglePm4ExportFile(exportRun, input);
+		Pm4AssetReferenceBuildResult assetBuild;
+		string assetReferenceSource;
+		if (!string.IsNullOrWhiteSpace(assetCorpus))
+		{
+			assetBuild = Pm4AssetSignalCorpusSupport.LoadFromManifest(assetCorpus);
+			assetReferenceSource = assetCorpus;
+		}
+		else
+		{
+			assetBuild = Pm4AssetReferenceSupport.BuildFromPlacements(placements!, archiveRoot!, archiveBootstrapOptions, tileX, tileY);
+			assetReferenceSource = placements!;
+		}
+
+		IReadOnlyList<Pm4SegmentMatchResult> matchResults = Pm4AssetMatchScorer.ScoreSegments(file.Segments, assetBuild.Assets, maxCandidates);
+		IReadOnlyList<Pm4ReplacementPlacementProposal> placementProposals = Pm4ReplacementPlacementSynthesizer.Synthesize(matchResults, assetBuild.Assets, targetTiles);
+		Pm4MatchRunManifest manifest = BuildPm4AssetMatchManifest(
+			exportRun,
+			matchResults,
+			placementProposals,
+			assetReferenceSource,
+			assetBuild.Warnings,
+			"synthesize-placements");
+
+		if (!string.IsNullOrWhiteSpace(output))
+		{
+			string outputPath = Path.GetFullPath(output);
+			WritePm4Report(manifest, outputPath);
+			Console.WriteLine($"Synthesized {placementProposals.Count} placement proposals from {manifest.SegmentCount} PM4 segments using {assetBuild.Assets.Count} asset references.");
+			return;
+		}
+
+		PrintPm4AssetMatchRun(manifest, assetBuild.Assets.Count);
+	}
+	catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or DirectoryNotFoundException)
+	{
+		Console.Error.WriteLine($"Error: {ex.Message}");
+		Environment.ExitCode = 1;
+	}
+}
+
+static void RunPm4ExportAssetSignals(string[] args)
+{
+	string? archiveRoot = GetOption(args, "--archive-root", "-r") ?? GetFirstPositionalArgument(args);
+	string? output = GetOption(args, "--output", "-o");
+	string? kind = GetOption(args, "--kind", "-k");
+	string? pathFilter = GetOption(args, "--path-filter", "-f");
+	string? seedPlacements = GetOption(args, "--seed-placements", "-s");
+	string? limitText = GetOption(args, "--limit", "-n");
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	if (string.IsNullOrWhiteSpace(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!Directory.Exists(archiveRoot))
+	{
+		Console.Error.WriteLine($"Error: archive root '{archiveRoot}' does not exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	int? limit = null;
+	if (!string.IsNullOrWhiteSpace(limitText))
+	{
+		if (!int.TryParse(limitText, out int parsedLimit) || parsedLimit <= 0)
+		{
+			Console.Error.WriteLine("Error: --limit must be a positive integer.");
+			Environment.ExitCode = 1;
+			return;
+		}
+
+		limit = parsedLimit;
+	}
+
+	try
+	{
+		Pm4AssetSignalCorpusManifest manifest = Pm4AssetSignalCorpusSupport.BuildFromArchive(archiveRoot, archiveBootstrapOptions, kind, pathFilter, limit, seedPlacements);
+
+		if (!string.IsNullOrWhiteSpace(output))
+		{
+			string outputPath = Path.GetFullPath(output);
+			string? directory = Path.GetDirectoryName(outputPath);
+			if (!string.IsNullOrWhiteSpace(directory))
+				Directory.CreateDirectory(directory);
+
+			File.WriteAllText(outputPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
+			Console.WriteLine($"Wrote {outputPath}");
+			Console.WriteLine($"Exported {manifest.AssetCount} durable asset signals from {manifest.ClientBuild}.");
+			return;
+		}
+
+		PrintPm4AssetSignalCorpus(manifest);
+	}
+	catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or DirectoryNotFoundException or ArgumentOutOfRangeException)
+	{
+		Console.Error.WriteLine($"Error: {ex.Message}");
+		Environment.ExitCode = 1;
+	}
+}
+
+static void RunPm4ExportSegments(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 file or directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	try
+	{
+		Pm4SegmentExportRun exportRun = Pm4SegmentExportService.Export(input);
+		if (!string.IsNullOrWhiteSpace(output))
+		{
+			string outputPath = Path.GetFullPath(output);
+			Pm4MatchRunManifest manifest = BuildPm4SegmentExportManifest(exportRun);
+			WritePm4Report(manifest, outputPath);
+			Console.WriteLine($"Exported {exportRun.SegmentCount} PM4 segments from {exportRun.FileCount} file(s).");
+			return;
+		}
+
+		PrintPm4SegmentExportRun(exportRun);
+	}
+	catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or DirectoryNotFoundException)
+	{
+		Console.Error.WriteLine($"Error: {ex.Message}");
+		Environment.ExitCode = 1;
+	}
 }
 
 static void RunWmoInspect(string[] args)
@@ -2924,13 +3326,13 @@ static void PrintPm4MscnReport(Pm4MscnRelationshipReport report)
 			Console.WriteLine($"    {value.Value} -> {value.Count}");
 	}
 
-	if (report.TopInvalidMdosClusters.Count > 0)
+	if (report.TopInvalidMscnRefClusters.Count > 0)
 	{
 		Console.WriteLine();
-		Console.WriteLine("Top invalid-MDOS clusters:");
-		foreach (Pm4MscnClusterExample cluster in report.TopInvalidMdosClusters.Take(8))
+		Console.WriteLine("Top invalid-MSCN-ref clusters:");
+		foreach (Pm4MscnClusterExample cluster in report.TopInvalidMscnRefClusters.Take(8))
 		{
-			Console.WriteLine($"  tile={cluster.TileX}_{cluster.TileY} ck24=0x{cluster.Ck24:X6} type=0x{cluster.Ck24Type:X2} obj={cluster.Ck24ObjectId} invalidMdos={cluster.InvalidMdosRefCount} distinctMscnRef={cluster.DistinctMscnRefCount} align={cluster.AlignmentMode}");
+			Console.WriteLine($"  tile={cluster.TileX}_{cluster.TileY} ck24=0x{cluster.Ck24:X6} type=0x{cluster.Ck24Type:X2} obj={cluster.Ck24ObjectId} invalidMscnRef={cluster.InvalidMscnRefCount} distinctMscnRef={cluster.DistinctMscnRefCount} align={cluster.AlignmentMode}");
 		}
 	}
 
@@ -3018,6 +3420,22 @@ static void PrintPm4MshdReport(Pm4MshdReport report)
 	Console.WriteLine("Relationships:");
 	foreach (Pm4MshdRelationshipSummary relationship in report.Relationships)
 		Console.WriteLine($"  {relationship.Relationship}: {relationship.MatchCount}/{relationship.FileCount} ({relationship.Notes})");
+
+	if (report.TilePackingHypotheses.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("Tile-coordinate hypotheses:");
+		foreach (Pm4MshdTilePackingSummary hypothesis in report.TilePackingHypotheses)
+			Console.WriteLine($"  {hypothesis.Hypothesis}: {hypothesis.MatchCount}/{hypothesis.FileCount} ({hypothesis.Notes})");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine($"Tile reuse: filesWithCoords={report.TileReuse.FilesWithTileCoordinates} distinctTiles={report.TileReuse.DistinctTileCount} distinctField04={report.TileReuse.DistinctField04Count} singleTileValues={report.TileReuse.SingleTileField04Count} multiTileValues={report.TileReuse.MultiTileField04Count}");
+	if (report.TileReuse.TopMultiTileField04Values.Count > 0)
+	{
+		foreach (Pm4MshdField04TileReuseCase reuseCase in report.TileReuse.TopMultiTileField04Values.Take(6))
+			Console.WriteLine($"  Field04={reuseCase.Field04} spans {reuseCase.TileCount} tiles: {string.Join(", ", reuseCase.TileCoordinates)}");
+	}
 
 	if (report.Notes.Count > 0)
 	{
@@ -3842,6 +4260,10 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect wmo inspect --input <file.wmo> [--dump-lights]");
 	Console.WriteLine("  wowviewer-inspect wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]");
 	Console.WriteLine("  wowviewer-inspect pm4 inspect --input <file.pm4>");
+	Console.WriteLine("  wowviewer-inspect pm4 export-segments --input <file.pm4|directory> [--output <report.json>]");
+	Console.WriteLine("  wowviewer-inspect pm4 export-asset-signals --archive-root <staged client dir> [--seed-placements <tile_obj0.adt|directory>] [--kind all|wmo|m2] [--path-filter <text>] [--limit <n>] [--listfile <listfile.txt>] [--output <corpus.json>]");
+	Console.WriteLine("  wowviewer-inspect pm4 match-assets --input <file.pm4> [--asset-corpus <corpus.json> | --archive-root <staged client dir> [--placements <tile_obj0.adt>]] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
+	Console.WriteLine("  wowviewer-inspect pm4 synthesize-placements --input <file.pm4> --target-tiles <x_y[,x_y...]> [--asset-corpus <corpus.json> | --archive-root <staged client dir> [--placements <tile_obj0.adt>]] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 linkage --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 mscn --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 unknowns --input <directory> [--output <report.json>]");
@@ -3849,6 +4271,359 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect pm4 audit --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 audit-directory --input <directory>");
 	Console.WriteLine("  wowviewer-inspect pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
+}
+
+static Pm4SegmentExportFile AssertSinglePm4ExportFile(Pm4SegmentExportRun exportRun, string input)
+{
+	if (exportRun.Files.Count != 1)
+		throw new InvalidOperationException($"Expected a single PM4 export file for '{input}', but found {exportRun.Files.Count}.");
+
+	return exportRun.Files[0];
+}
+
+static Pm4MatchRunManifest BuildPm4SegmentExportManifest(Pm4SegmentExportRun exportRun)
+{
+	List<Pm4MatchReportSegment> segments = exportRun.Files
+		.SelectMany(static file => file.Segments)
+		.OrderBy(static segment => segment.Segment.TileCoordinates[0], StringComparer.Ordinal)
+		.ThenBy(static segment => segment.Segment.SegmentId, StringComparer.Ordinal)
+		.Select(segment => BuildPm4MatchReportSegment(segment, null, null))
+		.ToList();
+
+	int ineligibleCount = segments.Count(static segment => string.IsNullOrWhiteSpace(segment.ExpectedAssetKind));
+
+	return new Pm4MatchRunManifest(
+		exportRun.RunId,
+		exportRun.InputPath,
+		exportRun.SegmentCount,
+		segments,
+		AssetReferenceCorpus: null,
+		SegmentSignalCorpus: Pm4SegmentSignalExtractor.CurrentSignalVersion,
+		MatchedCount: 0,
+		AmbiguousCount: 0,
+		UnresolvedCount: 0,
+		IneligibleCount: ineligibleCount,
+		Warnings: exportRun.Warnings);
+}
+
+static Pm4MatchRunManifest BuildPm4AssetMatchManifest(
+	Pm4SegmentExportRun exportRun,
+	IReadOnlyList<Pm4SegmentMatchResult> matchResults,
+	IReadOnlyList<Pm4ReplacementPlacementProposal> placementProposals,
+	string assetReferenceCorpus,
+	IReadOnlyList<string> warnings,
+	string commandName)
+{
+	Dictionary<string, Pm4ReplacementPlacementProposal> placementBySegmentId = placementProposals
+		.GroupBy(static proposal => proposal.SegmentId, StringComparer.Ordinal)
+		.ToDictionary(static group => group.Key, static group => group.First(), StringComparer.Ordinal);
+	List<Pm4MatchReportSegment> segments = matchResults
+		.OrderBy(static result => result.Segment.Segment.TileCoordinates[0], StringComparer.Ordinal)
+		.ThenBy(static result => result.Segment.Segment.SegmentId, StringComparer.Ordinal)
+		.Select(result => BuildPm4MatchReportSegment(
+			result.Segment,
+			result,
+			placementBySegmentId.TryGetValue(result.Segment.Segment.SegmentId, out Pm4ReplacementPlacementProposal? proposal) ? proposal : null))
+		.ToList();
+
+	List<string> allWarnings = exportRun.Warnings.Concat(warnings).ToList();
+	return new Pm4MatchRunManifest(
+		$"{exportRun.RunId}:{commandName}:{Path.GetFileNameWithoutExtension(assetReferenceCorpus)}",
+		exportRun.InputPath,
+		segments.Count,
+		segments,
+		Path.GetFullPath(assetReferenceCorpus),
+		Pm4SegmentSignalExtractor.CurrentSignalVersion,
+		segments.Count(static segment => string.Equals(segment.Status, "matched", StringComparison.Ordinal)),
+		segments.Count(static segment => string.Equals(segment.Status, "ambiguous", StringComparison.Ordinal)),
+		segments.Count(static segment => string.Equals(segment.Status, "unresolved", StringComparison.Ordinal)),
+	segments.Count(static segment => string.Equals(segment.Status, "ineligible", StringComparison.Ordinal)),
+	allWarnings);
+}
+
+static Pm4MatchReportSegment BuildPm4MatchReportSegment(
+	Pm4BuiltObjectSegment segment,
+	Pm4SegmentMatchResult? matchResult,
+	Pm4ReplacementPlacementProposal? placementProposal)
+{
+	IReadOnlyList<string> linkGroupIds = segment.Segment.LinkGroupIds
+		.Select(static groupId => $"0x{groupId:X}")
+		.ToList();
+	IReadOnlyList<string> confidenceFlags = FormatConfidenceFlags(segment.Segment.ConfidenceFlags);
+	string? expectedAssetKind = matchResult?.ExpectedAssetKind ?? PredictAssetKind(segment.Segment.Ck24Type);
+	IReadOnlyList<Pm4MatchReportCandidate> candidates = matchResult is null
+		? Array.Empty<Pm4MatchReportCandidate>()
+		: matchResult.Candidates.Select(ToReportCandidate).ToList();
+
+	return new Pm4MatchReportSegment(
+		segment.Segment.SegmentId,
+		$"0x{segment.Segment.Ck24:X6}",
+		segment.Segment.Ck24Type,
+		segment.Segment.Ck24ObjectId,
+		segment.Segment.TileCoordinates,
+		segment.Segment.Field04Values,
+		expectedAssetKind,
+		matchResult is null ? null : FormatMatchStatus(matchResult.Status),
+		matchResult?.ReviewRequired ?? segment.Segment.ConfidenceFlags != Pm4SegmentConfidenceFlags.None,
+		matchResult?.Rationale ?? BuildExportRationale(segment, expectedAssetKind),
+		confidenceFlags.Count > 0 ? confidenceFlags : null,
+		segment.Segment.SurfaceCount,
+		segment.Segment.TotalIndexCount,
+		linkGroupIds.Count > 0 ? linkGroupIds : null,
+		segment.Segment.DominantLinkGroupId != 0u ? $"0x{segment.Segment.DominantLinkGroupId:X}" : null,
+		segment.CoordinateMode.ToString(),
+		segment.AxisConvention.ToString(),
+		segment.FrameYawDegrees,
+		ToReportBounds(segment.Signal.Bounds),
+		ToReportVector3(segment.CorrelationState.Center),
+		segment.Signal.FootprintHull.Select(static point => new Pm4MatchVector2(point.X, point.Y)).ToList(),
+		segment.CorrelationState.FootprintArea,
+		new Pm4MatchReportHeightStats(
+			segment.Signal.HeightStats.MinimumPlaneDistance,
+			segment.Signal.HeightStats.MaximumPlaneDistance,
+			segment.Signal.HeightStats.AveragePlaneDistance),
+		new Pm4MatchReportTopologyStats(
+			segment.Signal.TopologyStats.SurfaceCount,
+			segment.Signal.TopologyStats.TotalIndexCount,
+			segment.Signal.TopologyStats.AnchorPointCount,
+			segment.Signal.TopologyStats.AnchorNormalCount),
+		new Pm4MatchReportAnchorSignals(
+			segment.Signal.AnchorSignals.LinkedPositionRefCount,
+			segment.Signal.AnchorSignals.NormalHeadingCount,
+			segment.Signal.AnchorSignals.TerminatorCount,
+			segment.Signal.AnchorSignals.FloorMinimum,
+			segment.Signal.AnchorSignals.FloorMaximum,
+			segment.Signal.AnchorSignals.HeadingMinimumDegrees,
+			segment.Signal.AnchorSignals.HeadingMaximumDegrees,
+			segment.Signal.AnchorSignals.HeadingMeanDegrees),
+		segment.Signal.SurfaceFamilyHistogram,
+		candidates,
+		placementProposal is null ? null : ToReportPlacementProposal(placementProposal));
+}
+
+static void WritePm4Report(Pm4MatchRunManifest manifest, string outputPath)
+{
+	string ext = Path.GetExtension(outputPath) ?? "";
+	if (string.Equals(ext, ".json", StringComparison.OrdinalIgnoreCase))
+	{
+		Pm4MatchReportWriter.WriteToFile(manifest, outputPath);
+		Console.WriteLine($"Wrote {outputPath}");
+		string markdownPath = Path.ChangeExtension(outputPath, ".md");
+		Pm4MatchReportFormatter.WriteMarkdownToFile(manifest, markdownPath);
+		Console.WriteLine($"Wrote {markdownPath}");
+	}
+	else
+	{
+		if (!string.Equals(ext, ".md", StringComparison.OrdinalIgnoreCase))
+			outputPath = Path.ChangeExtension(outputPath, ".md");
+		Pm4MatchReportFormatter.WriteMarkdownToFile(manifest, outputPath);
+		Console.WriteLine($"Wrote {outputPath}");
+	}
+}
+
+static void PrintPm4SegmentExportRun(Pm4SegmentExportRun exportRun)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 segment export");
+	Console.WriteLine($"Input: {exportRun.InputPath}");
+	Console.WriteLine($"RunId: {exportRun.RunId}");
+	Console.WriteLine($"Files: {exportRun.FileCount} Segments: {exportRun.SegmentCount} Warnings: {exportRun.Warnings.Count}");
+
+	foreach (Pm4SegmentExportFile file in exportRun.Files.Take(8))
+	{
+		Console.WriteLine($"  tile={file.TileX}_{file.TileY} segments={file.SegmentCount} source={Path.GetFileName(file.SourcePath)}");
+		foreach (Pm4BuiltObjectSegment segment in file.Segments.Take(4))
+		{
+			string? expectedAssetKind = PredictAssetKind(segment.Segment.Ck24Type);
+			string flagText = segment.Segment.ConfidenceFlags == Pm4SegmentConfidenceFlags.None
+				? "none"
+				: string.Join(",", FormatConfidenceFlags(segment.Segment.ConfidenceFlags));
+			Console.WriteLine(
+				$"    {segment.Segment.SegmentId} kind={expectedAssetKind ?? "ineligible"} ck24=0x{segment.Segment.Ck24:X6} area={segment.CorrelationState.FootprintArea:F1} bounds={FormatVector(segment.CorrelationState.BoundsMin)}..{FormatVector(segment.CorrelationState.BoundsMax)} anchors={segment.Signal.AnchorSignals.LinkedPositionRefCount} flags={flagText}");
+		}
+	}
+
+	if (exportRun.Warnings.Count > 0)
+	{
+		foreach (string warning in exportRun.Warnings)
+			Console.WriteLine($"Warning: {warning}");
+	}
+}
+
+static void PrintPm4AssetSignalCorpus(Pm4AssetSignalCorpusManifest manifest)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 durable asset corpus");
+	Console.WriteLine($"Archive root: {manifest.ArchiveRoot}");
+	Console.WriteLine($"Client build: {manifest.ClientBuild}");
+	Console.WriteLine($"RunId: {manifest.RunId}");
+	Console.WriteLine($"Assets: {manifest.AssetCount} warnings={manifest.Warnings.Count}");
+
+	foreach (Pm4AssetReferenceSignalRecord asset in manifest.Assets.Take(12))
+	{
+		Vector3 span = asset.Bounds is null
+			? Vector3.Zero
+			: asset.Bounds.Max - asset.Bounds.Min;
+		Console.WriteLine($"  {asset.AssetKind} {asset.AssetPath} span=({span.X:F1},{span.Y:F1},{span.Z:F1}) area={asset.FootprintArea:F1}");
+	}
+
+	if (manifest.Warnings.Count > 0)
+	{
+		foreach (string warning in manifest.Warnings.Take(12))
+			Console.WriteLine($"Warning: {warning}");
+	}
+}
+
+static void PrintPm4AssetMatchRun(Pm4MatchRunManifest manifest, int assetReferenceCount)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 asset match report");
+	Console.WriteLine($"PM4: {manifest.InputPm4Root}");
+	Console.WriteLine($"Asset references: {manifest.AssetReferenceCorpus}");
+	Console.WriteLine($"RunId: {manifest.RunId}");
+	Console.WriteLine($"Segments: {manifest.SegmentCount} Assets: {assetReferenceCount} matched={manifest.MatchedCount ?? 0} ambiguous={manifest.AmbiguousCount ?? 0} unresolved={manifest.UnresolvedCount ?? 0} ineligible={manifest.IneligibleCount ?? 0} proposals={manifest.Segments.Count(static segment => segment.PlacementProposal is not null)}");
+
+	foreach (Pm4MatchReportSegment segment in manifest.Segments
+		.Where(static segment => !string.Equals(segment.Status, "ineligible", StringComparison.Ordinal))
+		.OrderBy(static segment => segment.Status, StringComparer.Ordinal)
+		.ThenBy(static segment => segment.SegmentId, StringComparer.Ordinal)
+		.Take(12))
+	{
+		Console.WriteLine($"  {segment.SegmentId} kind={segment.ExpectedAssetKind ?? "n/a"} status={segment.Status ?? "exported"} area={segment.FootprintArea ?? 0d:F1} flags={(segment.ConfidenceFlags is { Count: > 0 } ? string.Join(",", segment.ConfidenceFlags) : "none")}");
+		foreach (Pm4MatchReportCandidate candidate in segment.Candidates.Take(3))
+			Console.WriteLine($"    rank={candidate.Rank} score={candidate.OverallScore:F3} {candidate.AssetKind} {candidate.AssetPath}");
+		if (segment.PlacementProposal is not null)
+			Console.WriteLine($"    proposal={segment.PlacementProposal.ProposalId} pos={FormatMatchVector3(segment.PlacementProposal.WorldPosition)} scale={segment.PlacementProposal.WorldScale?.ToString("F2", CultureInfo.InvariantCulture) ?? "n/a"} review={segment.PlacementProposal.ReviewRequired}");
+	}
+
+	if (manifest.Warnings is { Count: > 0 })
+	{
+		foreach (string warning in manifest.Warnings)
+			Console.WriteLine($"Warning: {warning}");
+	}
+}
+
+static Pm4MatchReportCandidate ToReportCandidate(Pm4AssetMatchCandidate candidate)
+{
+	return new Pm4MatchReportCandidate(
+		candidate.AssetId,
+		candidate.AssetPath,
+		candidate.AssetKind,
+		candidate.Rank,
+		candidate.OverallScore,
+		FormatMatchStatus(candidate.Status),
+		candidate.ScoreBreakdown,
+		candidate.Rationale);
+}
+
+static Pm4MatchReportPlacementProposal ToReportPlacementProposal(Pm4ReplacementPlacementProposal proposal)
+{
+	return new Pm4MatchReportPlacementProposal(
+		proposal.ProposalId,
+		proposal.AssetId,
+		proposal.TargetTileCoordinates,
+		proposal.WorldPosition is null ? null : ToReportVector3(proposal.WorldPosition.Value),
+		proposal.WorldRotation is null ? null : ToReportRotation(proposal.WorldRotation.Value),
+		proposal.WorldScale,
+		proposal.Confidence,
+		proposal.ReviewRequired,
+		proposal.Provenance);
+}
+
+static Pm4MatchReportBounds? ToReportBounds(Pm4Bounds3? bounds)
+{
+	return bounds is null
+		? null
+		: new Pm4MatchReportBounds(ToReportVector3(bounds.Min), ToReportVector3(bounds.Max));
+}
+
+static Pm4MatchVector3 ToReportVector3(Vector3 value)
+{
+	return new Pm4MatchVector3(value.X, value.Y, value.Z);
+}
+
+static Pm4MatchRotation ToReportRotation(Vector3 rotationDegrees)
+{
+	return new Pm4MatchRotation(rotationDegrees.Z, rotationDegrees.X, rotationDegrees.Y);
+}
+
+static IReadOnlyList<string> BuildExportRationale(Pm4BuiltObjectSegment segment, string? expectedAssetKind)
+{
+	List<string> rationale =
+	[
+		$"segment exported from PM4 with {segment.Segment.SurfaceCount} surfaces and {segment.Segment.TotalIndexCount} indices.",
+	];
+
+	if (expectedAssetKind is null)
+		rationale.Add($"ck24Type 0x{segment.Segment.Ck24Type:X2} is not currently classified as WMO/M2-matchable.");
+	else
+		rationale.Add($"ck24Type 0x{segment.Segment.Ck24Type:X2} is currently treated as {expectedAssetKind}-matchable.");
+
+	if (segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.ZeroCk24Seed))
+		rationale.Add("segment came from the zero-CK24 fallback seed path.");
+	if (segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.UsedConnectivityFallback))
+		rationale.Add("segment required connectivity fallback splitting.");
+	if (segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.MissingPositionRefs))
+		rationale.Add("segment is missing linked position refs.");
+	if (segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.MultipleLinkGroupIds))
+		rationale.Add("segment spans multiple link-group ids.");
+	if (segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.ReusedLow16ObjectId))
+		rationale.Add("segment reuses a low16 object id across multiple CK24 families.");
+
+	return rationale;
+}
+
+static IReadOnlyList<string> FormatConfidenceFlags(Pm4SegmentConfidenceFlags flags)
+{
+	if (flags == Pm4SegmentConfidenceFlags.None)
+		return Array.Empty<string>();
+
+	List<string> values = [];
+	foreach (Pm4SegmentConfidenceFlags flag in Enum.GetValues<Pm4SegmentConfidenceFlags>())
+	{
+		if (flag == Pm4SegmentConfidenceFlags.None || !flags.HasFlag(flag))
+			continue;
+
+		values.Add(flag switch
+		{
+			Pm4SegmentConfidenceFlags.ZeroCk24Seed => "zero-ck24-seed",
+			Pm4SegmentConfidenceFlags.UsedConnectivityFallback => "connectivity-fallback",
+			Pm4SegmentConfidenceFlags.MultipleLinkGroupIds => "multiple-link-groups",
+			Pm4SegmentConfidenceFlags.MissingPositionRefs => "missing-position-refs",
+			Pm4SegmentConfidenceFlags.ReusedLow16ObjectId => "reused-low16-object-id",
+			Pm4SegmentConfidenceFlags.SpansMultipleField04Values => "multiple-field04",
+			Pm4SegmentConfidenceFlags.HasUnlinkedSurfaces => "unlinked-surfaces",
+			_ => flag.ToString(),
+		});
+	}
+
+	return values;
+}
+
+static string FormatMatchStatus(Pm4AssetMatchStatus status)
+{
+	return status switch
+	{
+		Pm4AssetMatchStatus.Matched => "matched",
+		Pm4AssetMatchStatus.Ambiguous => "ambiguous",
+		Pm4AssetMatchStatus.Unresolved => "unresolved",
+		Pm4AssetMatchStatus.Ineligible => "ineligible",
+		_ => status.ToString().ToLowerInvariant(),
+	};
+}
+
+static string? PredictAssetKind(byte ck24Type)
+{
+	return ck24Type switch
+	{
+		0x42 or 0x43 => "wmo",
+		0x40 or 0x41 or 0xC0 or 0xC1 or 0xC2 or 0xC3 => "m2",
+		_ => null,
+	};
+}
+
+static string FormatMatchVector3(Pm4MatchVector3? value)
+{
+	return value is null
+		? "n/a"
+		: $"({value.X:F2},{value.Y:F2},{value.Z:F2})";
 }
 
 static void ShowAudioUsage()
@@ -3985,6 +4760,10 @@ static void ShowPm4Usage()
 {
 	Console.WriteLine("PM4 commands:");
 	Console.WriteLine("  pm4 inspect --input <file.pm4>");
+	Console.WriteLine("  pm4 export-segments --input <file.pm4|directory> [--output <report.json>]");
+	Console.WriteLine("  pm4 export-asset-signals --archive-root <staged client dir> [--seed-placements <tile_obj0.adt|directory>] [--kind all|wmo|m2] [--path-filter <text>] [--limit <n>] [--listfile <listfile.txt>] [--output <corpus.json>]");
+	Console.WriteLine("  pm4 match-assets --input <file.pm4> [--asset-corpus <corpus.json> | --archive-root <staged client dir> [--placements <tile_obj0.adt>]] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
+	Console.WriteLine("  pm4 synthesize-placements --input <file.pm4> --target-tiles <x_y[,x_y...]> [--asset-corpus <corpus.json> | --archive-root <staged client dir> [--placements <tile_obj0.adt>]] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
 	Console.WriteLine("  pm4 match --input <file.pm4> --archive-root <game|data dir> [--placements <tile_obj0.adt>] [--listfile <listfile.txt>] [--max-matches <n>] [--search-range <units>] [--output <report.json>] [--object-output-dir <directory>]");
 	Console.WriteLine("  pm4 hierarchy --input <file.pm4> [--output <report.json>]");
 	Console.WriteLine("  pm4 linkage --input <directory> [--output <report.json>]");
@@ -4032,13 +4811,14 @@ static void PrintPm4CrossTileReport(Pm4CrossTileReport report)
 	Console.WriteLine($"Files: {report.TotalFiles} total, {report.NonEmptyFiles} non-empty");
 	Console.WriteLine($"Distinct CK24 values: {report.TotalDistinctCk24}");
 	Console.WriteLine($"Cross-tile CK24 (span 2+ tiles): {report.CrossTileCk24Count} ({report.CrossTileCk24Count * 100.0 / Math.Max(1, report.TotalDistinctCk24):F1}%)");
+	Console.WriteLine($"Cross-tile CK24 spanning multiple Field04 buckets: {report.CrossTileCk24MultiField04Count}");
 	Console.WriteLine();
 
 	Console.WriteLine("Top cross-tile CK24 objects:");
-	Console.WriteLine("  CK24     Type  ObjectId  Tiles  Surfaces  MSCNrefs");
+	Console.WriteLine("  CK24     Type  ObjectId  Tiles  F04s  Surfaces  MSCNrefs");
 	foreach (Pm4CrossTileCk24Record row in report.TopCrossTileCk24.Where(r => r.TileCoordinates.Count > 1).Take(25))
 	{
-		Console.WriteLine($"  0x{row.Ck24:X6}  0x{row.Ck24Type:X2}   {row.Ck24ObjectId,-8} {row.TileCoordinates.Count,-5}  {row.TotalSurfaces,-8}  {row.TotalMscnRefs,-8}");
+		Console.WriteLine($"  0x{row.Ck24:X6}  0x{row.Ck24Type:X2}   {row.Ck24ObjectId,-8} {row.TileCoordinates.Count,-5}  {row.DistinctField04Count,-4}  {row.TotalSurfaces,-8}  {row.TotalMscnRefs,-8}");
 	}
 
 	Console.WriteLine();

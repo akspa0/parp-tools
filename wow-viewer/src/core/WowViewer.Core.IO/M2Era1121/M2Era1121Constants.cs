@@ -1,0 +1,134 @@
+namespace WowViewer.Core.IO.M2Era1121;
+
+public static class M2Era1121Constants
+{
+    public const uint Md20Magic = 0x3032444Du;
+
+    public const int SignatureSizeBytes = 4;
+    public const int VersionFieldSizeBytes = 4;
+    public const int DispatchHeaderSizeBytes = SignatureSizeBytes + VersionFieldSizeBytes;
+
+    public const int MinimumHeaderSizeBytes = 0x144;
+
+    public const int VersionOffset = 0x04;
+    public const int NameCountOffset = 0x08;
+    public const int NameOffsetOffset = 0x0C;
+    public const int FlagsOffset = 0x10;
+    public const int GlobalLoopCountOffset = 0x14;
+    public const int GlobalLoopOffsetOffset = 0x18;
+    public const int SequenceCountOffset = 0x1C;
+    public const int SequenceOffsetOffset = 0x20;
+    public const int SequenceLookupCountOffset = 0x24;
+    public const int SequenceLookupOffsetOffset = 0x28;
+    public const int TexAnimCountOffset = 0x2C;
+    public const int TexAnimOffsetOffset = 0x30;
+    public const int BoneCountOffset = 0x34;
+    public const int BoneOffsetOffset = 0x38;
+    public const int ViewCountOffset = 0x3C;
+    public const int ViewOffsetOffset = 0x40;
+    public const int ColorCountOffset = 0x44;
+    public const int ColorOffsetOffset = 0x48;
+    public const int TextureCountOffset = 0x4C;
+    public const int TextureOffsetOffset = 0x50;
+    public const int TexWeightCountOffset = 0x54;
+    public const int TexWeightOffsetOffset = 0x58;
+    public const int TexLookupCountOffset = 0x5C;
+    public const int TexLookupOffsetOffset = 0x60;
+    public const int TexUnitLookupCountOffset = 0x64;
+    public const int TexUnitLookupOffsetOffset = 0x68;
+    public const int TexReplaceableLookupCountOffset = 0x6C;
+    public const int TexReplaceableLookupOffsetOffset = 0x70;
+    public const int TexFlagLookupCountOffset = 0x74;
+    public const int TexFlagLookupOffsetOffset = 0x78;
+    public const int BoundingTriCountOffset = 0x7C;
+    public const int BoundingTriOffsetOffset = 0x80;
+    public const int BoundingVertCountOffset = 0x84;
+    public const int BoundingVertOffsetOffset = 0x88;
+    public const int RenderFlagCountOffset = 0x8C;
+    public const int RenderFlagOffsetOffset = 0x90;
+    public const int LodTableCountOffset = 0x94;
+    public const int LodTableOffsetOffset = 0x98;
+    public const int CollisionCountOffset = 0x9C;
+    public const int CollisionOffsetOffset = 0xA0;
+    public const int AttachCountOffset = 0xA4;
+    public const int AttachOffsetOffset = 0xA8;
+    public const int LightCountOffset = 0xAC;
+    public const int LightOffsetOffset = 0xB0;
+
+    public const int VertexCountOffset = 0xEC;
+    public const int VertexOffsetOffset = 0xF0;
+    public const int PositionCountOffset = 0xF4;
+    public const int PositionOffsetOffset = 0xF8;
+    public const int NormalCountOffset = 0xFC;
+    public const int NormalOffsetOffset = 0x100;
+    public const int UvCountOffset = 0x104;
+    public const int UvOffsetOffset = 0x108;
+    public const int TriangleCountOffset = 0x10C;
+    public const int TriangleOffsetOffset = 0x110;
+    public const int BatchCountOffset = 0x114;
+    public const int BatchOffsetOffset = 0x118;
+    public const int Extra0CountOffset = 0x11C;
+    public const int Extra0OffsetOffset = 0x120;
+    public const int Extra1CountOffset = 0x124;
+    public const int Extra1OffsetOffset = 0x128;
+    public const int Extra2CountOffset = 0x12C;
+    public const int Extra2OffsetOffset = 0x130;
+
+    public const int HeaderSizeV100 = 0x144;
+    public const int HeaderSizeV101 = 0x144;
+
+    public const int SequenceStride = 0x6C;
+    public const int SequenceLookupStride = 0x02;
+    public const int TexAnimStride = 0x02;
+    public const int BoneStridePlaceholder = 0x00;
+    public const int ViewStride = 0x2C;
+    public const int ColorStride = 0x1C;
+    public const int TextureStride = 0x1C;
+    public const int TexWeightStride = 0x08;
+    public const int TexLookupStride = 0x04;
+    public const int TexUnitLookupStride = 0x02;
+    public const int TexReplaceableLookupStride = 0x02;
+    public const int TexFlagLookupStride = 0x02;
+    public const int BoundingTriStride = 0x0C;
+    public const int BoundingVertStride = 0x0C;
+    public const int RenderFlagStride = 0x10;
+    public const int LodTableStride = 0x38;
+    public const int CollisionStride = 0x02;
+    public const int AttachStride = 0x0C;
+    public const int LightStride = 0x0C;
+    public const int VertexIndexStride = 0x04;
+    public const int PositionStride = 0x0C;
+    public const int NormalStride = 0x0C;
+    public const int UvStride = 0x08;
+    public const int TriangleStride = 0x02;
+    public const int BatchStride = 0x1C;
+    public const int Extra0Stride = 0x02;
+    public const int Extra1Stride = 0x1F8;
+    public const int Extra1SubTableCount = 29;
+    public const int Extra2Stride = 0x02;
+    public const int GlobalLoopStride = 0x04;
+    public const int NameStride = 0x01;
+
+    public const int BoundsOffset = 0xA0;
+    public const int BoundsRadiusOffset = 0xB8;
+
+    public const int CameraCountOffset = Extra0CountOffset;
+    public const int CameraOffsetOffset = Extra0OffsetOffset;
+    public const int CameraStride = 0x2C;
+    public const int CameraPerFrameCountOffset = Extra0CountOffset;
+    public const int CameraPerFrameOffsetOffset = Extra0OffsetOffset;
+    public const int CameraPerFrameStride = 0xD4;
+    public const int RibbonCountOffset = Extra0CountOffset;
+    public const int RibbonOffsetOffset = Extra0OffsetOffset;
+    public const int RibbonStride = 0x7C;
+    public const int ParticleCountOffset = Extra0CountOffset;
+    public const int ParticleOffsetOffset = Extra0OffsetOffset;
+    public const int ParticleStride = 0xDC;
+    public const int UnkV101Extra0CountOffset = Extra0CountOffset;
+    public const int UnkV101Extra0OffsetOffset = Extra0OffsetOffset;
+    public const int UnkV101Extra0Stride = 0x02;
+    public const int UnkV101Extra1CountOffset = Extra1CountOffset;
+    public const int UnkV101Extra1OffsetOffset = Extra1OffsetOffset;
+    public const int UnkV101Extra1Stride = 0x1F8;
+    public const int UnkV101Extra1SubTableCount = 29;
+}

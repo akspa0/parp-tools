@@ -124,8 +124,60 @@ public sealed class Pm4ResearchIntegrationTests
         Pm4MshdRelationshipSummary field00EqualsField08 = Assert.Single(report.Relationships, static relationship => relationship.Relationship == "Field00 == Field08");
         Assert.InRange(field00EqualsField08.MatchCount, 200, 260);
 
+        Pm4MshdTilePackingSummary packedXy = Assert.Single(report.TilePackingHypotheses, static summary => summary.Hypothesis == "Field04 == (TileX << 8) | TileY");
+        Pm4MshdTilePackingSummary packedYx = Assert.Single(report.TilePackingHypotheses, static summary => summary.Hypothesis == "Field04 == (TileY << 8) | TileX");
+        Pm4MshdTilePackingSummary lowByteX = Assert.Single(report.TilePackingHypotheses, static summary => summary.Hypothesis == "Field04 low byte == TileX");
+        Pm4MshdTilePackingSummary lowByteY = Assert.Single(report.TilePackingHypotheses, static summary => summary.Hypothesis == "Field04 low byte == TileY");
+        Pm4MshdTilePackingSummary highByteX = Assert.Single(report.TilePackingHypotheses, static summary => summary.Hypothesis == "Field04 high byte == TileX");
+        Pm4MshdTilePackingSummary highByteY = Assert.Single(report.TilePackingHypotheses, static summary => summary.Hypothesis == "Field04 high byte == TileY");
+
+        Assert.Equal(0, packedXy.MatchCount);
+        Assert.Equal(0, packedYx.MatchCount);
+        Assert.Equal(1, lowByteX.MatchCount);
+        Assert.Equal(1, lowByteY.MatchCount);
+        Assert.Equal(3, highByteX.MatchCount);
+        Assert.Equal(6, highByteY.MatchCount);
+
+        Assert.Equal(502, report.TileReuse.FilesWithTileCoordinates);
+        Assert.Equal(502, report.TileReuse.DistinctTileCount);
+        Assert.Equal(227, report.TileReuse.DistinctField04Count);
+        Assert.Equal(154, report.TileReuse.SingleTileField04Count);
+        Assert.Equal(73, report.TileReuse.MultiTileField04Count);
+
+        Pm4MshdField04TileReuseCase field04_3262 = Assert.Single(report.TileReuse.TopMultiTileField04Values, static reuse => reuse.Field04 == 3262u);
+        Assert.Equal(13, field04_3262.TileCount);
+        Assert.Contains("35_42", field04_3262.TileCoordinates);
+        Assert.Contains("47_51", field04_3262.TileCoordinates);
+
         Assert.Contains(report.Notes, static note => note.Contains("all zero", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(report.Notes, static note => note.Contains("strong exact-match or high-correlation signal", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(report.Notes, static note => note.Contains("does not behave like a one-value-per-tile key", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void CrossTileDirectory_DevelopmentCorpus_ShowsMostCrossTileCk24ObjectsBridgeMultipleField04Buckets()
+    {
+        Pm4CrossTileReport report = Pm4ResearchCrossTileAnalyzer.AnalyzeDirectory(Pm4TestPaths.DevelopmentDirectoryPath);
+
+        Assert.Equal(616, report.TotalFiles);
+        Assert.Equal(309, report.NonEmptyFiles);
+        Assert.Equal(1229, report.TotalDistinctCk24);
+        Assert.Equal(266, report.CrossTileCk24Count);
+        Assert.Equal(204, report.CrossTileCk24MultiField04Count);
+
+        Pm4CrossTileCk24Record terrain = Assert.Single(report.TopCrossTileCk24, static row => row.Ck24 == 0x000000u);
+        Assert.Equal(291, terrain.TileCoordinates.Count);
+        Assert.Equal(196, terrain.DistinctField04Count);
+
+        Pm4CrossTileCk24Record wmoBridge = Assert.Single(report.TopCrossTileCk24, static row => row.Ck24 == 0x42CBEAu);
+        Assert.Equal(8, wmoBridge.TileCoordinates.Count);
+        Assert.Equal(5, wmoBridge.DistinctField04Count);
+
+        Pm4CrossTileCk24Record singleField04Bridge = Assert.Single(report.TopCrossTileCk24, static row => row.Ck24 == 0x42A89Fu);
+        Assert.Equal(4, singleField04Bridge.TileCoordinates.Count);
+        Assert.Equal(1, singleField04Bridge.DistinctField04Count);
+
+        Assert.Contains(report.Notes, static note => note.Contains("span multiple MSHD.Field04 buckets", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -933,8 +985,8 @@ public sealed class Pm4ResearchIntegrationTests
         Assert.Equal(10, report.Relationships[4].Fits);
         Assert.Equal(1, report.CoordinateSpace.FilesTileLocalDominant);
         Assert.Equal(615, report.CoordinateSpace.FilesNoDominant);
-        Assert.Equal("raw-only", report.TopInvalidMdosClusters[0].AlignmentMode);
-        Assert.Contains(report.Notes, note => note.Contains("MSUR.MdosIndex", StringComparison.Ordinal));
+        Assert.Equal("raw-only", report.TopInvalidMscnRefClusters[0].AlignmentMode);
+        Assert.Contains(report.Notes, note => note.Contains("MSUR._0x18", StringComparison.Ordinal));
     }
 
     [Fact]

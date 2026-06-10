@@ -39,7 +39,7 @@ public static class Pm4ResearchMscnAnalyzer
         int mslkGroupLow16Misses = 0;
         int mslkGroupLow24Fits = 0;
         int mslkGroupLow24Misses = 0;
-        int groupsWithSharedMdosNodes = 0;
+        int groupsWithSharedMscnNodes = 0;
 
         int swappedWorldTileFitCount = 0;
         int rawWorldTileFitCount = 0;
@@ -56,7 +56,7 @@ public static class Pm4ResearchMscnAnalyzer
         Dictionary<string, int> ck24MeshVertexCount = new(StringComparer.Ordinal);
         Dictionary<string, int> ck24AlignmentMode = new(StringComparer.Ordinal);
         List<Pm4MscnClusterExample> clusterExamples = new();
-        List<Pm4MscnClusterExample> invalidMdosExamples = new();
+        List<Pm4MscnClusterExample> invalidMscnRefExamples = new();
 
         foreach (Pm4ResearchDocument file in files)
         {
@@ -164,21 +164,21 @@ public static class Pm4ResearchMscnAnalyzer
             foreach (IGrouping<uint, Pm4MsurEntry> group in msur.GroupBy(static surface => surface.Ck24))
             {
                 List<Pm4MsurEntry> surfaces = group.ToList();
-                HashSet<uint> distinctValidMdos = new();
+                HashSet<uint> distinctValidMscnRefs = new();
                 HashSet<uint> meshVertexIndices = new();
-                int validMdosRefCount = 0;
-                int invalidMdosRefCount = 0;
+                int validMscnRefCount = 0;
+                int invalidMscnRefCount = 0;
 
                 foreach (Pm4MsurEntry surface in surfaces)
                 {
                     if (surface.MscnRefIndex < mscn.Count)
                     {
-                        validMdosRefCount++;
-                        distinctValidMdos.Add(surface.MscnRefIndex);
+                        validMscnRefCount++;
+                        distinctValidMscnRefs.Add(surface.MscnRefIndex);
                     }
                     else
                     {
-                        invalidMdosRefCount++;
+                        invalidMscnRefCount++;
                     }
 
                     for (int index = 0; index < surface.IndexCount; index++)
@@ -194,10 +194,10 @@ public static class Pm4ResearchMscnAnalyzer
                 }
 
                 AddCount(ck24SurfaceCount, surfaces.Count.ToString());
-                AddCount(ck24DistinctMscnRefCount, distinctValidMdos.Count.ToString());
+                AddCount(ck24DistinctMscnRefCount, distinctValidMscnRefs.Count.ToString());
                 AddCount(ck24MeshVertexCount, meshVertexIndices.Count.ToString());
 
-                bool hasMscn = distinctValidMdos.Count > 0;
+                bool hasMscn = distinctValidMscnRefs.Count > 0;
                 bool hasMesh = meshVertexIndices.Count > 0;
                 if (hasMscn)
                     ck24GroupsWithMscn++;
@@ -211,14 +211,14 @@ public static class Pm4ResearchMscnAnalyzer
                 else if (hasMesh)
                     ck24GroupsMeshOnly++;
 
-                if (validMdosRefCount > distinctValidMdos.Count && distinctValidMdos.Count > 0)
-                    groupsWithSharedMdosNodes++;
+                if (validMscnRefCount > distinctValidMscnRefs.Count && distinctValidMscnRefs.Count > 0)
+                    groupsWithSharedMscnNodes++;
 
                 string alignmentMode = hasMscn && hasMesh
                     ? ClassifyAlignment(
                         BuildBounds(meshVertexIndices.Select(index => msvt[(int)index])),
-                        BuildBounds(distinctValidMdos.Select(index => mscn[(int)index])),
-                        BuildBounds(distinctValidMdos.Select(index => SwapXY(mscn[(int)index]))),
+                        BuildBounds(distinctValidMscnRefs.Select(index => mscn[(int)index])),
+                        BuildBounds(distinctValidMscnRefs.Select(index => SwapXY(mscn[(int)index]))),
                         ref ck24RawOverlapFits,
                         ref ck24RawOverlapMisses,
                         ref ck24SwappedOverlapFits,
@@ -242,15 +242,15 @@ public static class Pm4ResearchMscnAnalyzer
                         first.Ck24Type,
                         first.Ck24ObjectId,
                         surfaces.Count,
-                        validMdosRefCount,
-                        distinctValidMdos.Count,
-                        invalidMdosRefCount,
+                        validMscnRefCount,
+                        distinctValidMscnRefs.Count,
+                        invalidMscnRefCount,
                         meshVertexIndices.Count,
                         alignmentMode);
 
                     clusterExamples.Add(example);
-                    if (invalidMdosRefCount > 0)
-                        invalidMdosExamples.Add(example);
+                    if (invalidMscnRefCount > 0)
+                        invalidMscnRefExamples.Add(example);
                 }
             }
         }
@@ -302,8 +302,8 @@ public static class Pm4ResearchMscnAnalyzer
             .Take(12)
             .ToList();
 
-        IReadOnlyList<Pm4MscnClusterExample> topInvalidMdosClusters = invalidMdosExamples
-            .OrderByDescending(static cluster => cluster.InvalidMdosRefCount)
+        IReadOnlyList<Pm4MscnClusterExample> topInvalidMscnRefClusters = invalidMscnRefExamples
+            .OrderByDescending(static cluster => cluster.InvalidMscnRefCount)
             .ThenByDescending(static cluster => cluster.SurfaceCount)
             .ThenBy(static cluster => cluster.SourcePath)
             .Take(24)
@@ -313,7 +313,7 @@ public static class Pm4ResearchMscnAnalyzer
         [
             "This report keeps treating MSUR._0x18 as the main bridge into MSCN scene-node data.",
             "It is intended to test whether MSCN behaves like a missing ownership or collision layer, not to declare MSCN authoritative for final viewer reconstruction by itself.",
-            $"CK24 groups reusing MSCN nodes: {groupsWithSharedMdosNodes}.",
+            $"CK24 groups reusing MSCN nodes: {groupsWithSharedMscnNodes}.",
             "If swapped XY overlap consistently beats raw overlap, MSCN remains more plausible as an axis-swapped companion stream than as raw mesh-space truth."
         ];
 
@@ -328,7 +328,7 @@ public static class Pm4ResearchMscnAnalyzer
             distributions,
             topNonZeroClusters,
             topZeroClusters,
-            topInvalidMdosClusters,
+            topInvalidMscnRefClusters,
             notes);
     }
 

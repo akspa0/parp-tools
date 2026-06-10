@@ -107,6 +107,12 @@ public static class AlphaTensorPackBuilder
             MclqSurfaceHeight = mclqSurfaceHeight257,
             MclqTypeMask = mclqTypeMask257,
             MclqPresenceMask = mclqPresenceMask257,
+            LiquidBasicType257 = LiquidBasicTypePackBuilder.Build(
+                mh2oPresence: null,
+                mh2oType: null,
+                mclqPresence: mclqPresenceMask257,
+                mclqType: mclqTypeMask257,
+                mcnkFlags16: null),
             HoleMask16 = holeMask16,
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
@@ -216,10 +222,7 @@ public static class AlphaTensorPackBuilder
 
     private static int McnkFlagsToLiquidType(float minH, float maxH, uint mcnkFlags)
     {
-        if ((mcnkFlags & 0x08u) != 0)
-            return 1;
-        int liquidBits = (int)((mcnkFlags >> 4) & 3u);
-        return liquidBits;
+        return (int)McnkFlagDecoder.Decode(mcnkFlags);
     }
 
     private static float[,]? DownsampleHeightmap(float[,]? source, int targetSize)

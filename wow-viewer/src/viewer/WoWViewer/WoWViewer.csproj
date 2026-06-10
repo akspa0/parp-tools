@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>ParpToolsWoWViewer</AssemblyName>
+    <RootNamespace>WoWViewer</RootNamespace>
+    <Version>0.5.0</Version>
+    <AssemblyVersion>0.5.0</AssemblyVersion>
+    <FileVersion>0.5.0</FileVersion>
+    <InformationalVersion>0.5.0</InformationalVersion>
+    <Product>parp-tools WoW Viewer</Product>
+    <Description>parp-tools WoW Viewer for WoW Alpha 0.5.3 through Cataclysm 4.0.0.11927</Description>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Silk.NET" />
+    <PackageReference Include="Silk.NET.OpenGL" />
+    <PackageReference Include="Silk.NET.Windowing" />
+    <PackageReference Include="Silk.NET.Input" />
+    <PackageReference Include="SixLabors.ImageSharp" />
+    <PackageReference Include="SharpGLTF.Toolkit" />
+    <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\libs\WoW-Tools\MDX-L_Tool\MDX-L_Tool.csproj" />
+    <ProjectReference Include="..\..\..\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj" />
+    <ProjectReference Include="..\..\..\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj" />
+    <ProjectReference Include="..\..\..\src\core\WowViewer.Core.PM4\WowViewer.Core.PM4.csproj" />
+    <ProjectReference Include="..\..\..\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
+    <ProjectReference Include="..\..\..\libs\WoW-Tools\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
+    <ProjectReference Include="..\..\..\libs\WoW-Tools\GillijimProject\gillijimproject-csharp.csproj" />
+    <ProjectReference Include="..\..\..\libs\wowdev\DBCD\DBCD\DBCD.csproj" />
+    <ProjectReference Include="..\..\..\libs\wowdev\DBCD\DBCD.IO\DBCD.IO.csproj" />
+
+  </ItemGroup>
+
+  <!-- Bundle WoWDBDefs definitions with the output (required for DBC parsing via DBCD) -->
+  <ItemGroup>
+    <Content Include="..\..\..\libs\wowdev\WoWDBDefs\definitions\**\*.dbd" Link="definitions\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- No StormLib needed — pure C# NativeMpqService handles all MPQ access -->
+
+</Project>
+

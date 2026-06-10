@@ -1,8 +1,22 @@
 # Native M2 Client Research - Mar 31, 2026
 
+**See also**: [M2 Render Parity Recovery](../../specs/035-m2-render-parity-recovery/plan.md) — deterministic world route contract and parity evidence for 3.3.5 world M2 rendering.
+**See also (1.12.1)**: [`m2-mdx-1121-native-trace-2026-06-05.md`](m2-mdx-1121-native-trace-2026-06-05.md) — the dedicated 1.12.1 MD20-era native trace. Spec `048-m2-1121-era-aware-md20-reader` ships the 1.12.1 reader on top of that evidence.
+
 Implementation-facing readers should start with `docs/architecture/m2/`.
 
 This file remains the raw native evidence log and build-by-build behavior notebook behind that consolidated doc set.
+
+## 1.12.1 Coverage Note - Jun 5, 2026
+
+The 1.12.1 (Vanilla / Build 5875) native contract is documented separately in [`m2-mdx-1121-native-trace-2026-06-05.md`](m2-mdx-1121-native-trace-2026-06-05.md) and the implementation slice is spec `048-m2-1121-era-aware-md20-reader` (in `wow-viewer/specs/048-m2-1121-era-aware-md20-reader/`). Key findings:
+
+- 1.12.1 models use `MD20` magic (same as 3.0.1+) with version `0x100` or `0x101`; they are NOT chunked-MDX.
+- The view table, sequence stride, light stride, camera stride, ribbon stride, particle stride, and bone layout all differ from 3.3.5. The 3.3.5 reader silently misreads 1.12.1 files.
+- The 048 dispatcher (`M2ModelReaderDispatcher.DetectEra`) checks the version field, not the file extension, and routes `0x100`/`0x101` to the new `M2Era1121ModelReader`.
+- 2.x TBC-era MD20 (e.g. `0x104`) is rejected with "see spec 049" by the 048 dispatcher.
+
+This doc continues to own the 3.3.5 (and earlier 3.0.1+ / 2.0.0) research surface; the 1.12.1 surface is owned by the new trace doc.
 
 ## Scope
 
@@ -20,6 +34,50 @@ The current confirmed findings now come from three native/reverse-engineering pa
 - Do not treat `MdxViewer` as the canonical implementation target for new M2 semantics.
 - Any future parser, skin, section, or render-state work derived from this note should land in `wow-viewer` first, with `MdxViewer` only as an optional compatibility consumer.
 
+## Migration Parity Note - Jun 1, 2026
+
+The last known-good pre-migration world M2 route in `MdxViewer` was narrower than the current `wow-viewer` worktree had become.
+
+- successful world and WMO doodad `.skin` loads went through `WowViewerM2RuntimeBridge.BuildStaticRenderModel(...)`
+- those loads then went through `WowViewerM2RuntimeBridge.CreateRenderer(...)`, not a direct `new M2Renderer(new MdxRenderer(...))` bypass
+- `WowViewerM2RuntimeBridge.PreferNativeStaticRenderer` defaulted to `true` when `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER` was unset
+- `M2Renderer.RequiresUnbatchedWorldRender` was effectively `true` for the world path
+
+Implication for parity recovery:
+
+- if `wow-viewer` bypasses the bridge or flips the bridge default to compatibility-first, it is no longer running the same default world M2 route that existed in the pre-migration renderer
+- if the native runtime renderer is restored as the default world route, it must keep the unbatched world-pass contract or world M2s can disappear by falling into a batched path they do not currently drive
+
+## 3.3.5 Rotation Track Order Note - Jun 1, 2026
+
+Observed during `wow-viewer` parity recovery on staged `3.3.5.12340`:
+
+- native runtime M2 bone rotation sampling had drifted away from the converter-backed compatibility path
+- `M2TrackSampler.ReadCompQuaternionValue(...)` was byte-swizzling `M2CompQuaternion` reads as `(y, -x, z, w)` instead of consuming the on-disk `int16 x, y, z, w` order directly
+- `M2ToMdxConverter` and the compatibility route were already reading the same payload as direct little-endian `x, y, z, w`
+- this mismatch is a credible source of the "wrong axis" symptom where animated 3.3.5 world M2s appear to tumble around the wrong local axis even though general animation playback is active
+
+Implication for `wow-viewer`:
+
+- `M2CompQuaternion` payload reads should stay centralized and shared between runtime and converter paths
+- future M2 animation parity work should treat component-order drift as a first-check seam before changing higher-level bone composition
+- pose-compare proof remains limited because the current adapted MDX comparison path is not yet returning a like-for-like bone-count surface for all runtime models
+
+## 3.3.5 Skin Bone-Entry Note - Jun 1, 2026
+
+Observed during follow-up investigation after the wrong-axis fix:
+
+- some animated `3.3.5.12340` world doodads now rotate around the correct axis, but visually independent sections still appear to move as one
+- the runtime path was carrying raw M2 vertex bone indices straight into skinned render sections
+- the `.skin` bone-entry table was parsed but never consumed by the runtime builder
+- wowdev notes for `M2.skin` line up with native expectations here: per-skin vertex bone indices are scoped through `submesh.boneComboIndex` and can override the raw M2 vertex bone-index payload
+
+Implication for `wow-viewer`:
+
+- `M2StaticRenderModelBuilder` should prefer `skin.BoneEntries[localSkinVertexIndex]` over raw `M2Vertex.bone_indices` when constructing runtime render vertices
+- section-local bone remap is a first-class native seam, not optional metadata
+- this is a plausible owner for cases where stationary illusion planes and rotating wheel geometry become incorrectly coupled
+
 ## Early 2.0.0.5610 Boundary
 
 The later native-client `%02d.skin` findings in this note are not universal across every M2 era.
@@ -35,6 +93,35 @@ Implication for `wow-viewer`:
 
 - the exact numbered `%02d.skin` ownership model remains correct for the confirmed later native passes in this note
 - early beta `MD20 0x100` clients need a separate embedded-root-profile path instead of inheriting the later `.skin` rule by default
+
+## Deferred 3.0.1.8303 Boundary
+
+There is now a separate unresolved build-profile boundary in staged `3.0.1.8303` data.
+
+Observed in current `wow-viewer` runtime validation:
+
+- some Northrend world `.mdx` assets fail both numbered `.skin` handling and M2-to-MDX compatibility fallback
+- recent viewer logs show repeated patterns such as:
+  - `.skin` candidate failures against paths under `world\\expansion02\\...`
+  - converter fallback rejection with `geosets=0, validGeosets=0, vertices=0, triangles=0`
+  - occasional converter-side texture range failures
+- this suggests at least some `3.0.1.8303` `.mdx` assets may actually belong to a prototype `MD20` / `Model2` family boundary rather than to the later stable Wrath-era M2 route or the older classic MDX route
+
+Current interpretation:
+
+- do not assume every `3.0.1.8303` `.mdx` is a normal MDX render path
+- do not assume later numbered `.skin` semantics are automatically valid for this build
+- treat this as a deferred research target, not as something to paper over with the current `3.3.5.12340` parity rules
+
+Future investigation owner:
+
+- load the staged `3.0.1.8303` `wow.exe` into Ghidra and trace the model bootstrap path for `MD20` and `.mdx` requests
+- search the repo for older prototype `MD20` handling or `3.0.1.8303`-specific model-path logic before inventing a new parser path
+
+Implication for `wow-viewer`:
+
+- broad cross-build renderer signoff is still blocked until `3.0.1.8303` model-family ownership is understood
+- dataset-building downstream should treat `3.0.1.8303` model visibility as a known renderer-risk area until this boundary is resolved
 
 ## Confirmed Native Pipeline Findings
 

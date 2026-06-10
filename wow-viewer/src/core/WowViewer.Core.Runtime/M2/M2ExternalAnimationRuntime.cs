@@ -4,6 +4,26 @@ namespace WowViewer.Core.Runtime.M2;
 
 public static class M2ExternalAnimationRuntime
 {
+    public static bool TryChoose(
+        M2ModelDocument model,
+        int sequenceIndex,
+        out M2ExternalAnimationRuntimeState? state,
+        out string? error)
+    {
+        try
+        {
+            state = Choose(model, sequenceIndex);
+            error = null;
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidDataException)
+        {
+            state = null;
+            error = ex.Message;
+            return false;
+        }
+    }
+
     public static M2ExternalAnimationRuntimeState Choose(M2ModelDocument model, int sequenceIndex)
     {
         ArgumentNullException.ThrowIfNull(model);

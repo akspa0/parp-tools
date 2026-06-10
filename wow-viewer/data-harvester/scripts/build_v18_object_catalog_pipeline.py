@@ -85,7 +85,6 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--all-angles", action="store_true", default=True)
     parser.add_argument("--skip-capture", action="store_true", default=False)
     parser.add_argument("--skip-pack", action="store_true", default=False)
-    parser.add_argument("--pack-only", action="store_true", default=False)
     parser.add_argument("--dry-run", action="store_true", default=False)
     parser.add_argument("--allow-zarr-write", action="store_true", default=False)
     parser.add_argument("--roof-only", action="store_true", default=False)
@@ -243,13 +242,6 @@ def _load_angle_image(
     captured_dir: Path, asset_path: str, angle_name: str
 ) -> np.ndarray | None:
     safe_name = _sanitize_path_component(Path(asset_path).stem)
-    png_path = captured_dir / safe_name / f"{angle_name}.png"
-    if png_path.exists():
-        try:
-            img = Image.open(png_path).convert("RGB")
-            return np.asarray(img, dtype=np.uint8)
-        except Exception:
-            return None
     jpg_path = captured_dir / safe_name / f"{angle_name}.jpg"
     if not jpg_path.exists():
         return None
@@ -430,21 +422,6 @@ def step3_pack_object_store(
                 handle.write(json.dumps(row) + "\n")
 
 
-def _build_object_visual_attrs_from_angles(angle_meta: dict, n: int, build_codes: list[str], crop_size: int) -> dict:
-    return {}
-
-
-# Camera angles matching ScreenshotRenderer.CameraAngles
-Catalog_ScreenshotRenderer_CameraAngles = [
-    ("front", 0.0, 15.0),
-    ("back", 180.0, 15.0),
-    ("left", 90.0, 15.0),
-    ("right", 270.0, 15.0),
-    ("top", 0.0, 80.0),
-    ("three_quarter", 35.0, 25.0),
-]
-
-
 def main() -> None:
     args = _parse_args()
     builds = _resolve_builds(args)
@@ -458,30 +435,18 @@ def main() -> None:
     print(f"Output: {run_dir}")
     print()
 
-    # Step 1: asset lists (always emit unless pack-only)
-    if not args.pack_only:
-        asset_lists = step1_emit_asset_lists(
-            dataset_dir=Path(args.dataset_dir),
-            output_dir=run_dir,
-            builds=builds,
-            roof_only=bool(args.roof_only),
-            include_modf=True,
-            include_mddf=True,
-        )
+    # Step 1: asset lists
+    asset_lists = step1_emit_asset_lists(
+        dataset_dir=Path(args.dataset_dir),
+        output_dir=run_dir,
+        builds=builds,
+        roof_only=bool(args.roof_only),
+        include_modf=True,
+        include_mddf=True,
+    )
 
-        if args.dry_run:
-            print("\n=== DRY RUN COMPLETE ===")
-            return
-
-    if args.pack_only:
-        print("\n=== PACK-ONLY MODE ===")
-        step3_pack_object_store(
-            output_dir=run_dir,
-            builds=builds,
-            crop_size=128,
-            allow_zarr_write=bool(args.allow_zarr_write),
-        )
-        print("\n=== PACK-ONLY COMPLETE ===")
+    if args.dry_run:
+        print("\n=== DRY RUN COMPLETE ===")
         return
 
     # Step 2: MdxViewer capture

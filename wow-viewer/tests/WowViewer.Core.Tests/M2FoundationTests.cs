@@ -317,6 +317,53 @@ public sealed class M2FoundationTests
     }
 
     [Fact]
+    public void ExternalAnimationRuntime_TryChooseReturnsFalseForInvalidAliasTarget()
+    {
+        M2ModelDocument model = M2ModelReader.Read(new MemoryStream(CreateMd20Bytes(
+            version: 0x109u,
+            modelName: "SyntheticAnim",
+            boundsMin: Vector3.Zero,
+            boundsMax: new Vector3(1.0f, 1.0f, 1.0f),
+            boundsRadius: 3.0f,
+            embeddedSkinProfileCount: 0,
+            embeddedSkinProfileOffset: 0,
+            sequences:
+            [
+                new SyntheticSequence(AnimationId: 12, VariationIndex: 1, Duration: 1000u, MoveSpeed: 0f, Flags: (uint)M2SequenceFlags.Alias, Frequency: 0, ReplayMinimum: 0u, ReplayMaximum: 0u, BlendTimeIn: 0, BlendTimeOut: 0, BoundsMin: Vector3.Zero, BoundsMax: Vector3.One, BoundsRadius: 1.0f, VariationNext: -1, AliasNext: 9),
+            ])), "Creature\\SyntheticAnim\\SyntheticAnim.m2");
+
+        bool ok = M2ExternalAnimationRuntime.TryChoose(model, 0, out M2ExternalAnimationRuntimeState? state, out string? error);
+
+        Assert.False(ok);
+        Assert.Null(state);
+        Assert.Contains("invalid sequence index", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ExternalAnimationRuntime_TryChooseReturnsFalseForAliasLoop()
+    {
+        M2ModelDocument model = M2ModelReader.Read(new MemoryStream(CreateMd20Bytes(
+            version: 0x109u,
+            modelName: "SyntheticAnim",
+            boundsMin: Vector3.Zero,
+            boundsMax: new Vector3(1.0f, 1.0f, 1.0f),
+            boundsRadius: 3.0f,
+            embeddedSkinProfileCount: 0,
+            embeddedSkinProfileOffset: 0,
+            sequences:
+            [
+                new SyntheticSequence(AnimationId: 12, VariationIndex: 1, Duration: 1000u, MoveSpeed: 0f, Flags: (uint)M2SequenceFlags.Alias, Frequency: 0, ReplayMinimum: 0u, ReplayMaximum: 0u, BlendTimeIn: 0, BlendTimeOut: 0, BoundsMin: Vector3.Zero, BoundsMax: Vector3.One, BoundsRadius: 1.0f, VariationNext: -1, AliasNext: 1),
+                new SyntheticSequence(AnimationId: 12, VariationIndex: 2, Duration: 1000u, MoveSpeed: 0f, Flags: (uint)M2SequenceFlags.Alias, Frequency: 0, ReplayMinimum: 0u, ReplayMaximum: 0u, BlendTimeIn: 0, BlendTimeOut: 0, BoundsMin: Vector3.Zero, BoundsMax: Vector3.One, BoundsRadius: 1.0f, VariationNext: -1, AliasNext: 0),
+            ])), "Creature\\SyntheticAnim\\SyntheticAnim.m2");
+
+        bool ok = M2ExternalAnimationRuntime.TryChoose(model, 0, out M2ExternalAnimationRuntimeState? state, out string? error);
+
+        Assert.False(ok);
+        Assert.Null(state);
+        Assert.Contains("loops", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ExternalAnimationRuntime_LoadMarksAliasChainReady()
     {
         M2ModelDocument model = M2ModelReader.Read(new MemoryStream(CreateMd20Bytes(
@@ -361,6 +408,26 @@ public sealed class M2FoundationTests
         Assert.True(document.IsChunkedContainer);
         Assert.Equal("AFM2", document.ContainerSignature);
         Assert.Equal([9, 8, 7, 6], document.Payload);
+    }
+
+    [Fact]
+    public void AnimationReader_TryReadReturnsFalseForInvalidAfm2PayloadSize()
+    {
+        byte[] bytes = new byte[12];
+        Encoding.ASCII.GetBytes("AFM2").CopyTo(bytes, 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4, 4), 0x20u);
+        bytes[8] = 1;
+        bytes[9] = 2;
+        bytes[10] = 3;
+        bytes[11] = 4;
+
+        using MemoryStream stream = new(bytes);
+
+        bool ok = M2AnimationReader.TryRead(stream, "Creature\\SyntheticAnim\\SyntheticAnim0012-01.anim", out M2ExternalAnimationDocument? document, out string? error);
+
+        Assert.False(ok);
+        Assert.Null(document);
+        Assert.Contains("invalid AFM2 payload size", error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

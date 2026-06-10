@@ -396,11 +396,7 @@ public static class M2TrackSampler
 
     private static Quaternion ReadCompQuaternionValue(byte[] payload, int offset)
     {
-        M2CompQuaternion value = new(
-            (short)-BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan(offset + 0x02, sizeof(short))),
-            BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan(offset + 0x00, sizeof(short))),
-            BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan(offset + 0x04, sizeof(short))),
-            BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan(offset + 0x06, sizeof(short))));
+        M2CompQuaternion value = M2CompQuaternion.FromRawLittleEndian(payload.AsSpan(offset, sizeof(short) * 4));
         return value.ToQuaternion();
     }
 

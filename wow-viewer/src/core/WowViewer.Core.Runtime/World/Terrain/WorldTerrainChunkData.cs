@@ -31,10 +31,12 @@ public sealed class WorldTerrainChunkData
         Flags = flags;
         DeclaredLayerCount = layerCount;
         HoleMask = holeMask;
+        HoleMaskState = new WorldTerrainHoleMask(holeMask);
         HasLiquidFlags = hasLiquidFlags;
         HasVertexColors = hasVertexColors;
         Heights = heights;
         TextureLayers = textureLayers ?? [];
+        CellGrid = WorldTerrainCellGrid.CreateDefault(holeMask);
     }
 
     public int ChunkIndex { get; }
@@ -55,6 +57,8 @@ public sealed class WorldTerrainChunkData
 
     public bool HasHoles => HoleMask != 0;
 
+    public WorldTerrainHoleMask HoleMaskState { get; }
+
     public bool HasLiquidFlags { get; }
 
     public bool HasVertexColors { get; }
@@ -66,4 +70,6 @@ public sealed class WorldTerrainChunkData
     public IReadOnlyList<AdtTextureChunkLayer> TextureLayers { get; }
 
     public bool HasTextureLayers => TextureLayers.Count > 0;
+
+    public WorldTerrainCellGrid CellGrid { get; }
 }

@@ -18,8 +18,6 @@ public sealed record Pm4ObjectHypothesis(
     Pm4Bounds3? Bounds,
     Pm4MprlFootprintSummary MprlFootprint)
 {
-    // Compatibility alias for older consumer code that has not finished the MdosIndex -> MscnIndex rename.
-    public IReadOnlyList<uint> MdosIndices => MscnRefIndices;
 }
 
 public sealed record Pm4TileObjectHypothesisReport(

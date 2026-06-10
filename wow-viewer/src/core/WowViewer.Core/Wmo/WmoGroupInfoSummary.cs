@@ -2,6 +2,12 @@ using System.Numerics;
 
 namespace WowViewer.Core.Wmo;
 
+public sealed record WmoGroupInfoEntry(
+    uint Flags,
+    Vector3 BoundsMin,
+    Vector3 BoundsMax,
+    int NameOffset);
+
 public sealed class WmoGroupInfoSummary
 {
     public WmoGroupInfoSummary(
@@ -15,7 +21,8 @@ public sealed class WmoGroupInfoSummary
         int minNameOffset,
         int maxNameOffset,
         Vector3 boundsMin,
-        Vector3 boundsMax)
+        Vector3 boundsMax,
+        IReadOnlyList<WmoGroupInfoEntry>? entries = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentOutOfRangeException.ThrowIfNegative(payloadSizeBytes);
@@ -35,6 +42,7 @@ public sealed class WmoGroupInfoSummary
         MaxNameOffset = maxNameOffset;
         BoundsMin = boundsMin;
         BoundsMax = boundsMax;
+        Entries = entries ?? Array.Empty<WmoGroupInfoEntry>();
     }
 
     public string SourcePath { get; }
@@ -58,4 +66,6 @@ public sealed class WmoGroupInfoSummary
     public Vector3 BoundsMin { get; }
 
     public Vector3 BoundsMax { get; }
+
+    public IReadOnlyList<WmoGroupInfoEntry> Entries { get; }
 }

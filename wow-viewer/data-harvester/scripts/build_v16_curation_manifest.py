@@ -36,21 +36,25 @@ from harvester.v16_curation import (
     normal_relief,
     write_rows_parquet,
 )
+from harvester.v16_1_dataset import compose_terrain_valid_mask_257
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _DATASET_ROOT = _PROJECT_ROOT / "output" / "datasets" / "v16"
 _OUTPUT_ROOT = _DATASET_ROOT / "curation"
 _PANEL_SIZE = 256
+_PROFILE_ALIASES = {
+    "v18_focus_terrain_v1": "normal_terrain_v16_1_1",
+}
 
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Build a reusable V16 dataset curation manifest.")
+    p = argparse.ArgumentParser(description="Build a reusable terrain dataset curation manifest.")
     p.add_argument("--dataset-dir", type=Path, default=_DATASET_ROOT)
     p.add_argument("--build", type=str)
     p.add_argument("--builds", nargs="+")
     p.add_argument(
         "--profile",
-        choices=["basic_v1", "normal_terrain_v1", "normal_terrain_v16_1_1"],
+        choices=["basic_v1", "normal_terrain_v1", "normal_terrain_v16_1_1", "v18_focus_terrain_v1"],
         default="normal_terrain_v16_1_1",
     )
     p.add_argument("--sample-seed", type=int, default=42)
@@ -85,6 +89,12 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         default=0.75,
         help="Require WMOs to dominate the loss gate by at least this fraction before the wipeout filter can reject a tile.",
+    )
+    p.add_argument(
+        "--min-trainable-cov",
+        type=float,
+        default=0.20,
+        help="Reject a tile when the surviving terrain-valid training area falls below this coverage.",
     )
     p.add_argument("--dilate-radius", type=int, default=2)
     p.add_argument("--worst-k", type=int, default=12)
@@ -143,6 +153,7 @@ def _build_row_meta(table, row_idx: int) -> dict[str, Any]:
         "has_alpha": bool(_row_get(table, row_idx, "has_alpha_256", False)),
         "has_liquid": bool(_row_get(table, row_idx, "has_liquid_mask", False)),
         "has_mcly": bool(_row_get(table, row_idx, "has_mcly_texture_ids", False)),
+        "has_object_roof": bool(_row_get(table, row_idx, "has_object_roof_mask", False)),
         "height_std": float(_row_get(table, row_idx, "height_std", 0.0) or 0.0),
         "n_mddf": int(_row_get(table, row_idx, "n_mddf", 0) or 0),
         "n_modf": int(_row_get(table, row_idx, "n_modf", 0) or 0),
@@ -203,7 +214,7 @@ def _score_row_v16_1_1(row: dict[str, Any]) -> dict[str, float | str]:
     normal_coverage = _clamp01((row["normal_cov"] - 0.20) / 0.60)
     terrain_validity = _clamp01(
         (0.80 * min(row["terrain_valid_cov"] / 0.75, 1.25))
-        + (0.20 * (1.0 - min((row["object_cov"] + (0.85 * row["liquid_cov"])) / 0.75, 1.0)))
+        + (0.20 * (1.0 - min((row["object_cov"] + row["roof_cov"] + (0.85 * row["liquid_cov"])) / 0.75, 1.0)))
     )
     painted_signal = _clamp01(max(row["alpha_cov"] / 0.60, row["mcly_cov"] / 0.60))
     minimap_target_usefulness = _clamp01(
@@ -228,7 +239,7 @@ def _score_row_v16_1_1(row: dict[str, Any]) -> dict[str, float | str]:
     pathology_pressure = _clamp01(
         max(0.0, 0.40 - terrain_validity) * 1.6
         + max(0.0, 0.32 - minimap_target_usefulness) * 1.2
-        + max(0.0, row["object_cov"] + row["liquid_cov"] - 0.55) * 1.5
+        + max(0.0, row["object_cov"] + row["roof_cov"] + row["liquid_cov"] - 0.55) * 1.5
     )
 
     if pathology_pressure >= 0.22 and difficulty_score >= 0.35:
@@ -292,6 +303,14 @@ def _compute_row(
         liquid_mask_256 = root["liquid_mask"][tile_id].astype(np.float32)
         liquid_cov = float(liquid_mask_256.mean())
 
+    object_roof_mask_256 = np.zeros((256, 256), dtype=np.float32)
+    roof_cov = 0.0
+    if bool(row_meta["has_object_roof"]) and "object_roof_mask" in root:
+        object_roof_mask_256 = root["object_roof_mask"][tile_id].astype(np.float32)
+        object_roof_mask_256 = np.clip(object_roof_mask_256, 0.0, 1.0)
+        roof_cov = float(object_roof_mask_256.mean())
+    object_roof_weight_257 = np.pad(1.0 - object_roof_mask_256, ((0, 1), (0, 1)), mode="edge")
+
     mddf_mask = root["mddf_mask"][tile_id].astype(np.float32) if "mddf_mask" in root else np.zeros((257, 257), dtype=np.float32)
     modf_mask = root["modf_mask"][tile_id].astype(np.float32) if "modf_mask" in root else np.zeros((257, 257), dtype=np.float32)
     object_presence_257 = np.maximum(mddf_mask, modf_mask).astype(np.float32, copy=False)
@@ -322,14 +341,20 @@ def _compute_row(
         liquid_cov=liquid_cov,
         object_cov=object_cov,
     )
-    liquid_mask_257 = np.pad(liquid_mask_256, ((0, 1), (0, 1)), mode="edge")
-    terrain_valid_257 = normal_mask * (1.0 - np.clip(object_presence_257, 0.0, 1.0))
-    terrain_valid_257 *= 1.0 - (0.85 * np.clip(liquid_mask_257, 0.0, 1.0))
-    trainable_257 = normal_mask * (1.0 - np.clip(loss_gate_mask_257, 0.0, 1.0))
-    trainable_257 *= 1.0 - (0.85 * np.clip(liquid_mask_257, 0.0, 1.0))
-    if what_plate:
-        terrain_valid_257[...] = 0.0
-        trainable_257[...] = 0.0
+    terrain_valid_257 = compose_terrain_valid_mask_257(
+        normal_mask_257=normal_mask,
+        object_presence_257=object_presence_257,
+        liquid_mask_256=liquid_mask_256,
+        object_roof_weight_257=object_roof_weight_257,
+        what_plate=what_plate,
+    )
+    trainable_257 = compose_terrain_valid_mask_257(
+        normal_mask_257=normal_mask * (1.0 - np.clip(loss_gate_mask_257, 0.0, 1.0)),
+        object_presence_257=np.zeros_like(object_presence_257, dtype=np.float32),
+        liquid_mask_256=liquid_mask_256,
+        object_roof_weight_257=object_roof_weight_257,
+        what_plate=what_plate,
+    )
     terrain_valid_cov = float(_crop_257_to_256(terrain_valid_257).mean())
     trainable_cov = float(_crop_257_to_256(trainable_257).mean())
     painted_signal_cov = float(max(alpha_cov, mcly_cov))
@@ -355,6 +380,7 @@ def _compute_row(
         "mcly_cov": mcly_cov,
         "liquid_cov": liquid_cov,
         "object_cov": object_cov,
+        "roof_cov": roof_cov,
         "mddf_cov": mddf_cov,
         "modf_cov": modf_cov,
         "loss_gate_cov": loss_gate_cov,
@@ -418,7 +444,10 @@ def _evaluate_profile(row: dict[str, Any], args: argparse.Namespace) -> tuple[bo
     ):
         return False, {"quality_score": 0.0, "reject_reason": "wmo_loss_wipeout_tile"}
 
-    if args.profile == "normal_terrain_v16_1_1":
+    if row["trainable_cov"] < float(args.min_trainable_cov):
+        return False, {"quality_score": 0.0, "reject_reason": "insufficient_trainable_terrain"}
+
+    if args.profile in {"normal_terrain_v16_1_1", "v18_focus_terrain_v1"}:
         payload = _score_row_v16_1_1(row)
         payload["reject_reason"] = None
         return True, payload
@@ -459,7 +488,8 @@ def _process_chunk(
         for row_meta in row_chunk:
             row = _compute_row(build=build, row_meta=row_meta, root=root, args_dict=args_dict)
             keep, evaluation = _evaluate_profile(row, argparse.Namespace(**args_dict))
-            row["profile"] = args_dict["profile"]
+            row["profile"] = str(args_dict.get("requested_profile", args_dict["profile"]))
+            row["canonical_profile"] = str(args_dict["profile"])
             row["keep"] = bool(keep)
             row.update(evaluation)
             row["quality_score"] = float(row.get("quality_score", 0.0) or 0.0)
@@ -477,6 +507,7 @@ def _process_chunk(
 
 def main() -> None:
     args = _parse_args()
+    canonical_profile = _PROFILE_ALIASES.get(str(args.profile), str(args.profile))
     builds = args.builds or ([args.build] if args.build else [])
     if not builds:
         raise SystemExit("Provide --build or --builds")
@@ -486,8 +517,11 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     resolved_workers = _resolve_workers(int(args.workers))
     args_dict = vars(args).copy()
+    args_dict["profile"] = canonical_profile
+    args_dict["requested_profile"] = str(args.profile)
     print(
-        f"Curation: profile={args.profile} workers={resolved_workers} chunk_size={max(1, int(args.chunk_size))}",
+        f"Curation: profile={args.profile} canonical_profile={canonical_profile} "
+        f"workers={resolved_workers} chunk_size={max(1, int(args.chunk_size))}",
         flush=True,
     )
 
@@ -548,6 +582,7 @@ def main() -> None:
 
     summary = {
         "profile": args.profile,
+        "canonical_profile": canonical_profile,
         "builds": builds,
         "dataset_dir": str(args.dataset_dir),
         "sample_seed": int(args.sample_seed),
@@ -564,6 +599,7 @@ def main() -> None:
         "trainable_cov_mean_kept": float(np.mean([row["trainable_cov"] for row in kept])) if kept else 0.0,
         "loss_gate_cov_mean_kept": float(np.mean([row["loss_gate_cov"] for row in kept])) if kept else 0.0,
         "modf_cov_mean_kept": float(np.mean([row["modf_cov"] for row in kept])) if kept else 0.0,
+        "roof_cov_mean_kept": float(np.mean([row["roof_cov"] for row in kept])) if kept else 0.0,
         "reject_reason_counts": {},
         "difficulty_bucket_counts": {},
         "difficulty_bucket_examples": {},

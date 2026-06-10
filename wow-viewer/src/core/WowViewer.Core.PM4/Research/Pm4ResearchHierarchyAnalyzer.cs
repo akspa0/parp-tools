@@ -17,12 +17,12 @@ public static partial class Pm4ResearchHierarchyAnalyzer
     [
         new("ck24", Array.Empty<SurfaceSplitter>()),
         new("ck24_mslk_refindex", [SplitByMslkRefIndex]),
-        new("ck24_mdos", [SplitByMdos]),
+        new("ck24_mscnRef", [SplitByMscnRef]),
+        new("ck24_mslk_refindex", [SplitByMslkRefIndex]),
+        new("ck24_mslk_refindex_mscnRef", [SplitByMslkRefIndex, SplitByMscnRef]),
         new("ck24_connectivity", [SplitByConnectivity]),
-        new("ck24_mslk_refindex_mdos", [SplitByMslkRefIndex, SplitByMdos]),
-        new("ck24_mslk_refindex_connectivity", [SplitByMslkRefIndex, SplitByConnectivity]),
-        new("ck24_mdos_connectivity", [SplitByMdos, SplitByConnectivity]),
-        new("ck24_mslk_refindex_mdos_connectivity", [SplitByMslkRefIndex, SplitByMdos, SplitByConnectivity])
+        new("ck24_mscnRef_connectivity", [SplitByMscnRef, SplitByConnectivity]),
+        new("ck24_mslk_refindex_mscnRef_connectivity", [SplitByMslkRefIndex, SplitByMscnRef, SplitByConnectivity])
     ];
 
     public static Pm4TileObjectHypothesisReport Analyze(Pm4ResearchDocument document)
@@ -363,7 +363,7 @@ public static partial class Pm4ResearchHierarchyAnalyzer
         return groups.Count > 0 ? groups : [surfaces.ToList()];
     }
 
-    private static List<List<IndexedSurface>> SplitByMdos(Pm4ResearchDocument document, IReadOnlyList<IndexedSurface> surfaces)
+    private static List<List<IndexedSurface>> SplitByMscnRef(Pm4ResearchDocument document, IReadOnlyList<IndexedSurface> surfaces)
     {
         if (surfaces.Count <= 1)
             return [surfaces.ToList()];
