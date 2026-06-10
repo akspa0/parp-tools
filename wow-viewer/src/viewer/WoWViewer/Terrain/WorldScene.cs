@@ -989,7 +989,6 @@ public class WorldScene : ISceneRenderer
     private int _pm4DroppedShortIndexCount;
     private int _pm4DroppedOutOfRangeMsviCount;
     private int _pm4DroppedEmptyComponentCount;
-    private int _pm4ZeroCk24SplitComponentCount;
     private float _pm4MinObjectZ;
     private float _pm4MaxObjectZ;
     private int _pm4CameraTileRadius = Pm4MinCameraTileRadius;
@@ -4673,7 +4672,6 @@ public class WorldScene : ISceneRenderer
         _pm4DroppedShortIndexCount = 0;
         _pm4DroppedOutOfRangeMsviCount = 0;
         _pm4DroppedEmptyComponentCount = 0;
-        _pm4ZeroCk24SplitComponentCount = 0;
         _pm4MinObjectZ = float.MaxValue;
         _pm4MaxObjectZ = float.MinValue;
 

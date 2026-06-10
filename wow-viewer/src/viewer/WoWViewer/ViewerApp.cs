@@ -266,7 +266,6 @@ public partial class ViewerApp : IDisposable
     // Mouse state
     private float _lastMouseX, _lastMouseY;
     private bool _mouseDown;
-    private bool _mouseOverViewport;
     private float _pendingSceneMouseWheelDelta;
 
     // UI state
@@ -274,9 +273,7 @@ public partial class ViewerApp : IDisposable
     private bool _showModelInfo = true;
     private bool _showTerrainControls = false;
     private bool _showWorkspaceBarsPanel = true;
-    private bool _showBottomDrawer;
     private bool _hideUiChrome;
-    private bool _showDemoWindow = false;
     private bool _showLogViewer = false;
     private bool _showMinimapWindow = false;
     private bool _showPerfWindow = false;
@@ -445,7 +442,6 @@ public partial class ViewerApp : IDisposable
     private bool _terrainWeakSignalRestoreAllLoadedTiles = true;
     private bool _terrainWeakSignalRestoreUseTextureSubdivisions = true;
     private bool _terrainWeakSignalRestoreUseAutoFactor = true;
-    private bool _terrainWeakSignalRestoreUseShadowHeuristic;
     private float _terrainWeakSignalRestoreManualFactor = 16f;
     private float _terrainWeakSignalRestoreCandidateMinHeight = TerrainWeakSignalRestoreDefaultMinZ;
     private float _terrainWeakSignalRestoreCandidateMaxHeight = TerrainWeakSignalRestoreDefaultMaxZ;
@@ -617,7 +613,6 @@ public partial class ViewerApp : IDisposable
     private bool _suppressLeftSidebarForLayout;
     private bool _suppressRightSidebarForLayout;
     private bool _suppressMinimapForLayout;
-    private bool _suppressBottomDrawerForLayout;
     private const float MenuBarHeight = 22f;
     private const float ToolbarHeight = 32f;
     private const float StatusBarHeight = 24f;
@@ -757,7 +752,6 @@ public partial class ViewerApp : IDisposable
     private string _buildSelectionFilter = "";
     private string? _buildSelectionHint;
     private bool _showListfileInput = false;
-    private string _listfileInputBuf = "";
     private string _lastGameFolderPath = "";
     private string _lastLooseOverlayPath = "";
     private List<KnownGoodClientPath> _knownGoodClientPaths = new();
@@ -821,13 +815,8 @@ public partial class ViewerApp : IDisposable
     private string _mkHarvestViewerValidationOutputDir = "";
     private bool _mlFinalizeAfterExport = true;
     private bool _pendingMlFinalizeAfterExport = false;
-    private bool _mkHarvestGenerateReferenceMinimaps = false;
-    private bool _mkHarvestForceReferenceRegeneration = false;
     private bool _mkHarvestGenerateViewerValidationMinimaps = true;
     private bool _mkHarvestForceViewerValidationRegeneration = false;
-    private bool _mkHarvestApplyShadows = true;
-    private bool _mkHarvestInvertAlpha = true;
-    private float _mkHarvestShadowIntensity = 0.5f;
     private int _mkHarvestViewerValidationResolution = 512;
     private bool _mkHarvestRunning = false;
     private readonly List<string> _mkHarvestLog = new();
@@ -13974,7 +13963,6 @@ void main() {
         _showLeftSidebar = true;
         _showRightSidebar = true;
         _showTerrainControls = false;
-        _showBottomDrawer = false;
         _leftSidebarWidth = DefaultSidebarWidth;
         _rightSidebarWidth = DefaultSidebarWidth;
         _bottomDrawerHeight = DefaultBottomDrawerHeight;
@@ -14558,12 +14546,10 @@ void main() {
             _showLeftSidebar = settings.ShowLeftSidebar;
             _showRightSidebar = settings.ShowRightSidebar;
             _showWorkspaceBarsPanel = settings.ShowWorkspaceBarsPanel;
-            _showBottomDrawer = false;
             _terrainWeakSignalRestoreEnabled = false;
             _terrainWeakSignalRestoreAllLoadedTiles = false;
             _terrainWeakSignalRestoreUseTextureSubdivisions = true;
             _terrainWeakSignalRestoreUseAutoFactor = settings.EnableWeakSignalTerrainRestoreAutoFactor;
-            _terrainWeakSignalRestoreUseShadowHeuristic = false;
             _terrainWeakSignalRestoreManualFactor = float.IsFinite(settings.WeakSignalTerrainRestoreManualFactor)
                 ? Math.Clamp(settings.WeakSignalTerrainRestoreManualFactor, 1f, TerrainWeakSignalRestoreMaxFactor)
                 : 16f;
