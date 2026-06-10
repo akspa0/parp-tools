@@ -779,7 +779,7 @@ public class TerrainManager : ISceneRenderer
     }
 
     public bool GetSubObjectVisible(int index) => true; // All tiles always visible for now
-    public void SetSubObjectVisible(int index, bool visible) { } // TODO: per-tile visibility
+    public void SetSubObjectVisible(int index, bool visible) { } // per-tile visibility is a future feature; tracked but not yet specced
 
     public void Dispose()
     {
