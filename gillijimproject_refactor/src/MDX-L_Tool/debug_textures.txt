@@ -1,0 +1,6 @@
+Texture Count: 5
+Texture[0]: World\Generic\NightElf\Passive Doodads\MagicalImplements\glow.blp (ID: 0)
+Texture[1]: World\SkillActivated\Containers\Sparkle.blp (ID: 0)
+Texture[2]: World\SkillActivated\TradeskillNodes\silver.blp (ID: 0)
+Texture[3]: World\SkillActivated\TradeskillNodes\BindstoneReflect.blp (ID: 0)
+Texture[4]: World\SkillActivated\TradeskillNodes\baseore.blp (ID: 0)

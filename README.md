@@ -94,21 +94,18 @@ dotnet test wow-viewer/tests/WowViewer.Core.PM4.Tests/ -c Debug --filter "FullyQ
 
 ## Legacy: `gillijimproject_refactor/`
 
-**Read-only reference.** This subtree contains the earlier `MdxViewer`, `WoWMapConverter`, and related codebases that served as the foundation for the current `wow-viewer/` project. No new code, features, or bugfixes should be written here.
+**Read-only reference.** This subtree contains the earlier `MdxViewer` and `WoWMapConverter` codebases that served as the foundation for the current `wow-viewer/` project. No new code, features, or bugfixes should be written here.
 
 What `gillijimproject_refactor` is good for:
 
-- **Reference implementation**: How the legacy viewer loaded terrain, WMOs, and MDX models — the source code is the reference, not the documentation
-- **Test data**: `test_data/development/`, `test_data/0.5.3/` — development map split ADTs, PM4 files, and Alpha assets
-- **Ghidra analysis**: Reverse-engineering documents for WoW client binaries across versions 0.5.3 through 4.0.0
-- **Libs**: External submodules (`Warcraft.NET`, `WoWDBDefs`, `DBCD`, `SereniaBLPLib`, `noggit-red`, `wow-mdx-viewer`, etc.)
+- **Reference implementation**: How the legacy viewer loaded terrain, WMOs, and MDX models
+- **Test data**: `test_data/development/` — development map split ADTs and PM4 files
 - **Memory bank (archived)**: Historical context at `gillijimproject_refactor/memory-bank/` — the active memory bank has moved to `wow-viewer/memory-bank/`
 
 What `gillijimproject_refactor` is NOT:
 
 - A development target: all active work is in `wow-viewer/`
 - A place for new code: see RULE 1 in `AGENTS.md`
-- A source of documentation: all non-Ghidra project docs have been removed; the code is the defacto reference
 
 ---
 
