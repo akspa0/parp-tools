@@ -626,3 +626,14 @@ opencode.jsonc
 wow-viewer/data-harvester/checkpoints/*
 wow-viewer/data-harvester/*.zip
 wow-viewer/data-harvester/test_zarr_api/zarr.json
+
+# Root-level working directories
+runs/
+datasets/
+publish/
+maps/
+.symdex/
+.venv*/
+.uv-cache/
+__pycache__/
+*.pyc
