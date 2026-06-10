@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems> <!-- Explicitly include files -->
+
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.2" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Reference the project being tested -->
+    <ProjectReference Include="..\WoWToolbox.MSCNExplorer\WoWToolbox.MSCNExplorer.csproj" />
+    <!-- Reference Core as it likely contains needed types (PM4File, MeshData) -->
+    <ProjectReference Include="..\WoWToolbox.Core\WoWToolbox.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Include the test file explicitly -->
+    <Compile Include="Pm4MeshExtractorTests.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Copy test data to output directory -->
+    <Content Include="..\..\test_data\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>test_data\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
+  </ItemGroup>
+
+</Project> 

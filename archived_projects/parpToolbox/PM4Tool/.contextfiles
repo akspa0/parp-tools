@@ -1,0 +1,18 @@
+# Include all C# files in the src directory and subdirectories
+src/**/*.cs
+src/**/*.csproj
+src/**/*.sln
+
+# Include the main config file at the root of the project
+/config.json
+
+# Include all markdown files anywhere
+*.md
+
+# Exclude any test data directories found anywhere
+!**/test_data/
+!**/output/
+!**/*.yaml
+!test*/*.json
+!**/*.zip
+!**/*.7z

@@ -1,0 +1,48 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.3" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\WoWToolbox.Core\WoWToolbox.Core.csproj" />
+    <ProjectReference Include="..\..\src\WoWToolbox.PM4Parsing\WoWToolbox.PM4Parsing.csproj" />
+    <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
+    <ProjectReference Include="..\..\src\WoWToolbox.MSCNExplorer\WoWToolbox.MSCNExplorer.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\..\test_data\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>test_data\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Navigation/PM4/PD4FileTests.cs" />
+    <Compile Include="Navigation/PM4/PM4FileTests.cs" />
+    <Compile Include="PM4Parsing/BuildingExtractionTests.cs" />
+    <Compile Include="WMO/WmoGroupMeshTests.cs" />
+    <Compile Include="WMO/WmoBatchObjExportTests.cs" />
+    <Compile Include="ADT/AdtServiceTests.cs" />
+    <Compile Include="Analysis/ComparisonTests.cs" />
+  </ItemGroup>
+
+</Project>

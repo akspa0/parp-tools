@@ -1,0 +1,194 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Numerics;
+using ParpToolbox.Formats.P4.Chunks.Common;
+using ParpToolbox.Formats.PM4;
+
+namespace ParpToolbox.Services.PM4
+{
+    /// <summary>
+    /// Provides methods for testing different grouping strategies for PM4 geometry export.
+    /// </summary>
+    public static class Pm4GroupingTester
+    {
+        // [Existing code will be copied here]
+        
+        /// <summary>
+        /// Exports geometry grouped by MPRR sentinel values to identify object boundaries.
+        /// Uses the 65535 (0xFFFF) sentinel values in MPRR to define section boundaries.
+        /// </summary>
+        public static void ExportByMprrSections(Pm4Scene scene, string outputDir, bool writeFaces = true)
+        {
+            if (scene.Surfaces.Count == 0 || scene.Properties.Count == 0)
+            {
+                Console.WriteLine("[ExportByMprrSections] Scene has incomplete data - cannot analyze MPRR sections.");
+                return;
+            }
+
+            Directory.CreateDirectory(outputDir);
+            
+            // Step 1: Find all sentinel values (65535 = 0xFFFF) in MPRR and create object sections
+            var sections = new List<(int Start, int End)>();
+            int lastSentinel = -1;
+            
+            // Process MPRR entries to identify sections based on sentinel values
+            for (int i = 0; i < scene.Properties.Count; i++)
+            {
+                if (scene.Properties[i].Value1 == 65535) // Sentinel value
+                {
+                    // If we've seen a previous sentinel, create a section
+                    if (lastSentinel >= 0)
+                    {
+                        sections.Add((lastSentinel, i));
+                    }
+                    lastSentinel = i;
+                }
+            }
+            
+            // Add the final section if needed
+            if (lastSentinel >= 0 && lastSentinel < scene.Properties.Count - 1)
+            {
+                sections.Add((lastSentinel, scene.Properties.Count - 1));
+            }
+            
+            Console.WriteLine($"[ExportByMprrSections] Found {sections.Count} sections separated by sentinel values.");
+            
+            // Step 2: Try to map MPRR sections to MSUR/MSLK entries based on overlapping index ranges
+            // This is experimental and may need refinement
+            var sectionGroups = new Dictionary<int, List<(int A, int B, int C)>>();
+            var usedVertsPerSection = new Dictionary<int, HashSet<int>>();
+            
+            // Create a mapping between MPRR sections and surfaces
+            for (int sectionIdx = 0; sectionIdx < sections.Count; sectionIdx++)
+            {
+                var (start, end) = sections[sectionIdx];
+                int sectionSize = end - start;
+                
+                // Skip very small sections (might be noise)
+                if (sectionSize < 2) continue;
+                
+                sectionGroups[sectionIdx] = new List<(int A, int B, int C)>();
+                usedVertsPerSection[sectionIdx] = new HashSet<int>();
+                
+                // Calculate section proportion to determine index range allocation
+                double proportion = (double)sectionSize / scene.Properties.Count;
+                int estimatedSurfaceCount = (int)(scene.Surfaces.Count * proportion);
+                
+                // Calculate the likely index range for this section
+                int sectionStartIndex = (int)(scene.Indices.Count * ((double)start / scene.Properties.Count));
+                int sectionEndIndex = (int)(scene.Indices.Count * ((double)end / scene.Properties.Count));
+                
+                // Find all surfaces that overlap with this estimated index range
+                foreach (var surf in scene.Surfaces)
+                {
+                    int surfStart = (int)surf.MsviFirstIndex;
+                    int surfEnd = surfStart + surf.IndexCount - 1;
+                    
+                    // Check if the surface overlaps with the estimated section range
+                    if (surfStart <= sectionEndIndex && surfEnd >= sectionStartIndex)
+                    {
+                        // Add triangles from this surface to the section group
+                        int first = surfStart;
+                        int count = surf.IndexCount;
+                        
+                        if (first < 0 || first + count > scene.Indices.Count)
+                            continue; // Invalid range
+                        
+                        int triCount = count / 3;
+                        for (int i = 0; i < triCount; i++)
+                        {
+                            int ia = first + i * 3;
+                            int ib = first + i * 3 + 1;
+                            int ic = first + i * 3 + 2;
+                            
+                            if (ia < 0 || ia >= scene.Indices.Count ||
+                                ib < 0 || ib >= scene.Indices.Count ||
+                                ic < 0 || ic >= scene.Indices.Count)
+                                continue;
+                            
+                            int a = scene.Indices[ia];
+                            int b = scene.Indices[ib];
+                            int c = scene.Indices[ic];
+                            
+                            sectionGroups[sectionIdx].Add((a, b, c));
+                            usedVertsPerSection[sectionIdx].Add(a);
+                            usedVertsPerSection[sectionIdx].Add(b);
+                            usedVertsPerSection[sectionIdx].Add(c);
+                        }
+                    }
+                }
+            }
+            
+            // Step 3: Export each section as a separate OBJ
+            Console.WriteLine($"[ExportByMprrSections] Exporting {sectionGroups.Count} sections as OBJ files...");
+            foreach (var kv in sectionGroups)
+            {
+                int sectionIdx = kv.Key;
+                var triangles = kv.Value;
+                var usedVerts = usedVertsPerSection[sectionIdx];
+                
+                if (triangles.Count == 0)
+                    continue; // Skip empty sections
+                
+                // Create a vertex remap so we only save used verts
+                var remap = new Dictionary<int, int>();
+                int nextIndex = 1; // OBJ indices are 1-based
+                foreach (var idx in usedVerts.OrderBy(i => i))
+                {
+                    remap[idx] = nextIndex++;
+                }
+                
+                string objPath = Path.Combine(outputDir, $"MPRR_Section_{sectionIdx}.obj");
+                string mtlPath = Path.Combine(outputDir, $"MPRR_Section_{sectionIdx}.mtl");
+                
+                using (var sw = new StreamWriter(objPath))
+                {
+                    sw.WriteLine("# Generated by parpToolbox - ExportByMprrSections");
+                    sw.WriteLine("# MPRR section: " + sectionIdx);
+                    sw.WriteLine($"# Section range: {sections[sectionIdx].Start}-{sections[sectionIdx].End}");
+                    sw.WriteLine($"mtllib {Path.GetFileName(mtlPath)}");
+                    sw.WriteLine("usemtl default");
+                    
+                    // Write vertices
+                    foreach (var vIdx in usedVerts)
+                    {
+                        if (vIdx >= 0 && vIdx < scene.Vertices.Count)
+                        {
+                            var v = scene.Vertices[vIdx];
+                            sw.WriteLine($"v {v.X} {v.Y} {v.Z}");
+                        }
+                    }
+                    
+                    // Write faces or points
+                    if (writeFaces && triangles.Count > 0)
+                    {
+                        foreach (var (a, b, c) in triangles)
+                        {
+                            int ra = remap.TryGetValue(a, out var va) ? va : -1;
+                            int rb = remap.TryGetValue(b, out var vb) ? vb : -1;
+                            int rc = remap.TryGetValue(c, out var vc) ? vc : -1;
+                            
+                            if (ra > 0 && rb > 0 && rc > 0)
+                            {
+                                sw.WriteLine($"f {ra} {rb} {rc}");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        foreach (var vIdx in usedVerts)
+                        {
+                            if (remap.TryGetValue(vIdx, out var rp))
+                                sw.WriteLine($"p {rp}");
+                        }
+                    }
+                }
+                
+                File.WriteAllText(mtlPath, "newmtl default\nKd 0.8 0.8 0.8\n");
+                Console.WriteLine($"  Wrote {objPath} (verts {usedVerts.Count}, faces {triangles.Count})");
+            }
+        }
+    }
+}
