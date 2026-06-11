@@ -1594,6 +1594,13 @@ public class WorldScene : ISceneRenderer
                             ck24 = obj.Ck24,
                             ck24Type = obj.Ck24Type,
                             ck24ObjectId = obj.Ck24ObjectId,
+                            // Byte-decomposed view of the 24-bit ck24. Ck24ObjectId
+                            // above is the lossy flattening of these two bytes into
+                            // a single 16-bit ID. See Pm4OverlayObject.Ck24HighByte /
+                            // Ck24LowByte for the model. Additive - existing readers
+                            // ignore the new fields.
+                            ck24HighByte = obj.Ck24HighByte,
+                            ck24LowByte = obj.Ck24LowByte,
                             objectPartId = obj.ObjectPartId,
                             mshd = new
                             {
@@ -12562,6 +12569,18 @@ internal sealed class Pm4OverlayObject
     public uint Ck24 { get; }
     public byte Ck24Type { get; }
     public ushort Ck24ObjectId => (ushort)(Ck24 & 0xFFFF);
+
+    // Byte-decomposed view of the 24-bit Ck24. The 32-bit MSUR._0x1C
+    // (a.k.a. PackedParams) is interpreted as [0xAA type] [0xBB high]
+    // [0xCC low] [0x00 pad] per the user's session-derived model
+    // (spec 058). The low byte of the 32-bit word is observed to be
+    // zero in our data; treat it as a padding trailer, not identity.
+    // Ck24ObjectId above is the lossy flattening of these two bytes
+    // into a single 16-bit ID. These two byte fields are pure getters
+    // - no new state - so the change is purely additive.
+    public byte Ck24HighByte => (byte)((Ck24 >> 8) & 0xFF);
+    public byte Ck24LowByte => (byte)(Ck24 & 0xFF);
+
     public int ObjectPartId { get; }
     public uint LinkGroupObjectId { get; }
     public int LinkedPositionRefCount { get; }

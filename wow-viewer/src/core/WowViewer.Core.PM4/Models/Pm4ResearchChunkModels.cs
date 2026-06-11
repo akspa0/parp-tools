@@ -73,6 +73,16 @@ public sealed record Pm4MsurEntry(
     public byte Ck24Type => (byte)((PackedParams >> 24) & 0xFF);
 
     public ushort Ck24ObjectId => (ushort)(Ck24 & 0xFFFF);
+
+    // Byte-decomposed view of the 24-bit Ck24. The 32-bit PackedParams
+    // is interpreted as [0xAA type] [0xBB high] [0xCC low] [0x00 pad] per
+    // the user's session-derived model (spec 058). The low byte of the
+    // 32-bit word is observed to be zero in our data; treat it as a
+    // padding trailer, not identity. Ck24ObjectId above is the
+    // lossy flattening of these two bytes into a single 16-bit ID.
+    public byte Ck24HighByte => (byte)((Ck24 >> 8) & 0xFF);
+
+    public byte Ck24LowByte => (byte)(Ck24 & 0xFF);
 }
 
 public sealed record Pm4MprlEntry(
