@@ -9438,14 +9438,34 @@ void main() {
         if (cameraPosition == null)
             return;
 
+        // Probe the *new* data source for the WDT before any fallback. The previous-client
+        // local cache (if any) was written by the prior data source; loading it through the
+        // new data source can hang the viewer when the StandardTerrainAdapter then queries
+        // ADTs that the new source does not have. Capture the result up front so the
+        // status message at the end can tell the user which case they hit.
+        bool newSourceHasWdt = !string.IsNullOrWhiteSpace(virtualPath)
+            && _dataSource is MpqDataSource probe
+            && probe.FileExists(virtualPath);
+
         if (!string.IsNullOrWhiteSpace(virtualPath) && _dataSource != null)
             LoadFileFromDataSource(virtualPath);
 
-        if (_worldScene == null && !string.IsNullOrWhiteSpace(localPath) && File.Exists(localPath))
+        if (_worldScene == null
+            && !string.IsNullOrWhiteSpace(localPath)
+            && File.Exists(localPath)
+            && newSourceHasWdt)
+        {
             LoadWdtTerrain(localPath);
+        }
 
         if (_worldScene == null)
+        {
+            string missingMapName = Path.GetFileNameWithoutExtension(virtualPath ?? localPath ?? string.Empty);
+            _statusMessage = !newSourceHasWdt && !string.IsNullOrWhiteSpace(virtualPath)
+                ? $"Map \"{missingMapName}\" not present in the new client; previous world cleared."
+                : $"Previous world could not be restored after client switch (data source: {_dataSource?.Name ?? "unknown"}).";
             return;
+        }
 
         _camera.Position = cameraPosition.Value;
         _camera.Yaw = cameraYaw;
