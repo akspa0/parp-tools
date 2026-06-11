@@ -48,6 +48,7 @@
 2. Any new work should start with `$speckit-specify` if no spec exists yet
 3. 2026-06-10 small-wins follow-through: launch a focused `WowViewer.Tools.Shared` test project so the new `Pm4MatchRunOptions.Validator` and the rest of the shared lib gain regression coverage
 4. 2026-06-10 small-wins follow-through: spec the per-tile visibility work in `TerrainManager` (currently the no-op stub) so the deferred seam is tracked properly
+5. 2026-06-10 spec 058 task #3 (CK24 byte decomposition) is shipped: `Ck24HighByte` and `Ck24LowByte` are now exposed on `Pm4MsurEntry` and `Pm4OverlayObject`, and the bulk JSON export includes them. The bond hypothesis is now testable. Next spec 058 follow-up: re-run the export on the development corpus and see whether any CK24 has surfaces with **different** `(Ck24HighByte, Ck24LowByte)` pairs - if so, the hypothesis is worth pursuing; if not, it's moot.
 
 ## Known Issues
 
