@@ -13412,11 +13412,15 @@ void main() {
         float ndcY = 1f - (localY / vpH) * 2f; // flip Y
 
         var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
-        bool hasPm4Hit = _worldScene.TryPickPm4ObjectByRay(rayOrigin, rayDir, out var pm4HitKey, out var _, out _);
         var hoveredPm4Key = _worldScene.ShowPm4Overlay ? _worldScene.HoveredAssetInfo?.Pm4ObjectKey : null;
 
         if (addPm4ToCollection)
         {
+            // Only the Shift+LMB collection branch needs the ray PM4 pick;
+            // the normal-click path picks PM4 inside TryHandleSceneClickSelection
+            // (a duplicate outer pick here doubled the per-click cost on dense maps).
+            _worldScene.TryPickPm4ObjectByRay(rayOrigin, rayDir, out var pm4HitKey, out var _, out _);
+
             ClearPendingClickSelection();
             _worldScene.ClearTaxiSelection();
             _worldScene.ClearSelection();
