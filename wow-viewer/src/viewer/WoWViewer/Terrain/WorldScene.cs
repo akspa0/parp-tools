@@ -998,6 +998,56 @@ public class WorldScene : ISceneRenderer
     private Pm4SelectedObjectGraphInfo? _pm4GraphInfoCacheValue;
     private bool _pm4GraphInfoCacheSplitByMscnRef;
     private bool _pm4GraphInfoCacheSplitByConnectivity;
+
+    // Click-freeze / per-frame instrumentation. Toggle via the static
+    // Pm4Profiling.Enabled flag. Counts and cumulative milliseconds per hot spot.
+    // Logged on a coarser cadence than every call so we don't drown the log.
+    private static readonly System.Diagnostics.Stopwatch s_pm4PickSw = new();
+    private static long s_pm4PickCallCount;
+    private static long s_pm4PickAabbHitCount;
+    private static double s_pm4PickTotalMs;
+    private static double s_pm4PickMaxMs;
+    private static long s_pm4PickReportCount;
+
+    private static readonly System.Diagnostics.Stopwatch s_pm4ResearchSw = new();
+    private static long s_pm4ResearchCallCount;
+    private static double s_pm4ResearchTotalMs;
+    private static double s_pm4ResearchMaxMs;
+    private static long s_pm4ResearchReportCount;
+
+    private static readonly System.Diagnostics.Stopwatch s_pm4GraphBuildSw = new();
+    private static long s_pm4GraphBuildCallCount;
+    private static double s_pm4GraphBuildTotalMs;
+    private static double s_pm4GraphBuildMaxMs;
+    private static long s_pm4GraphBuildReportCount;
+    private static long s_pm4GraphBuildLastObjectCount;
+    private static long s_pm4GraphBuildLastRegionCount;
+
+    /// <summary>
+    /// Receiver for per-frame graph-build timings reported by the viewer-app
+    /// side. Centralises the per-section log so all PM4 hot-spot reports
+    /// share one cadence and one tag.
+    /// </summary>
+    public static class Pm4ProfilingAccumulator
+    {
+        public static void RecordGraphBuild(double elapsedMs, int walkedObjectCount, int regionCount)
+        {
+            if (!Pm4Profiling.Enabled) return;
+            s_pm4GraphBuildCallCount++;
+            s_pm4GraphBuildTotalMs += elapsedMs;
+            if (elapsedMs > s_pm4GraphBuildMaxMs) s_pm4GraphBuildMaxMs = elapsedMs;
+            s_pm4GraphBuildLastObjectCount = walkedObjectCount;
+            s_pm4GraphBuildLastRegionCount = regionCount;
+            s_pm4GraphBuildReportCount++;
+            if (elapsedMs >= 50.0 || s_pm4GraphBuildReportCount >= 200)
+            {
+                ViewerLog.Info(ViewerLog.Category.Terrain,
+                    $"[PM4-PROFILE] DrawPm4SceneGraph.Build: call={s_pm4GraphBuildCallCount} last={elapsedMs:0.0}ms max={s_pm4GraphBuildMaxMs:0.0}ms avg={s_pm4GraphBuildTotalMs / s_pm4GraphBuildCallCount:0.0}ms walked={walkedObjectCount} regions={regionCount}");
+                s_pm4GraphBuildReportCount = 0;
+            }
+        }
+    }
+
     private readonly HashSet<(int tileX, int tileY)> _pm4KnownMapTiles = new();
     private readonly HashSet<(int tileX, int tileY)> _pm4CoveredMapTiles = new();
     private Task<Pm4OverlayAsyncLoadResult>? _pm4LoadTask;
@@ -10332,6 +10382,11 @@ public class WorldScene : ISceneRenderer
         objectGroupKey = null;
         distance = float.MaxValue;
 
+        bool profile = Pm4Profiling.Enabled;
+        System.Diagnostics.Stopwatch sw = profile ? s_pm4PickSw : null;
+        long beforeTicks = profile ? sw.ElapsedTicks : 0;
+        int aabbHits = 0;
+
         if (!_showPm4Overlay || _pm4TileObjects.Count == 0)
             return false;
 
@@ -10361,6 +10416,8 @@ public class WorldScene : ISceneRenderer
                     TransformBounds(bmin, bmax, objectTransform, out bmin, out bmax);
 
                 float t = RayAABBIntersect(rayOrigin, rayDir, bmin - padding, bmax + padding);
+                if (t >= 0f)
+                    aabbHits++;
                 if (t >= 0f && t < bestT && IsHoverPickDistanceAllowed(t))
                 {
                     bestT = t;
@@ -10371,7 +10428,26 @@ public class WorldScene : ISceneRenderer
         }
 
         distance = bestT;
-        return objectKey.HasValue;
+        bool hit = objectKey.HasValue;
+
+        if (profile)
+        {
+            long afterTicks = sw.ElapsedTicks;
+            double elapsedMs = (afterTicks - beforeTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            s_pm4PickCallCount++;
+            s_pm4PickAabbHitCount += aabbHits;
+            s_pm4PickTotalMs += elapsedMs;
+            if (elapsedMs > s_pm4PickMaxMs) s_pm4PickMaxMs = elapsedMs;
+            s_pm4PickReportCount++;
+            if (elapsedMs >= 50.0 || s_pm4PickReportCount >= 200)
+            {
+                ViewerLog.Info(ViewerLog.Category.Terrain,
+                    $"[PM4-PROFILE] TryPickPm4ObjectByRay: call={s_pm4PickCallCount} last={elapsedMs:0.0}ms max={s_pm4PickMaxMs:0.0}ms avg={s_pm4PickTotalMs / s_pm4PickCallCount:0.0}ms aabbHits(last)={aabbHits} totalHits={s_pm4PickAabbHitCount} hit={hit}");
+                s_pm4PickReportCount = 0;
+            }
+        }
+
+        return hit;
     }
 
     public void ClearSelection()
@@ -10537,6 +10613,9 @@ public class WorldScene : ISceneRenderer
         if (!_selectedPm4ObjectKey.HasValue)
             return false;
 
+        bool profile = Pm4Profiling.Enabled;
+        long researchStartTicks = profile ? s_pm4ResearchSw.ElapsedTicks : 0;
+
         var objectKey = _selectedPm4ObjectKey.Value;
         if (!_pm4ObjectLookup.TryGetValue(objectKey, out Pm4OverlayObject? obj))
             return false;
@@ -10616,6 +10695,24 @@ public class WorldScene : ISceneRenderer
             allMatches.Take(8).ToList(),
             mshdRawFields,
             mslkRawEntries);
+
+        if (profile)
+        {
+            long afterTicks = s_pm4ResearchSw.ElapsedTicks;
+            double elapsedMs = (afterTicks - researchStartTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            s_pm4ResearchCallCount++;
+            s_pm4ResearchTotalMs += elapsedMs;
+            if (elapsedMs > s_pm4ResearchMaxMs) s_pm4ResearchMaxMs = elapsedMs;
+            s_pm4ResearchReportCount++;
+            int mslkLines = mslkRawEntries?.Count ?? 0;
+            int matchesCount = allMatches.Count;
+            if (elapsedMs >= 50.0 || s_pm4ResearchReportCount >= 200)
+            {
+                ViewerLog.Info(ViewerLog.Category.Terrain,
+                    $"[PM4-PROFILE] TryGetSelectedPm4ObjectResearchInfo: call={s_pm4ResearchCallCount} last={elapsedMs:0.0}ms max={s_pm4ResearchMaxMs:0.0}ms avg={s_pm4ResearchTotalMs / s_pm4ResearchCallCount:0.0}ms matches={matchesCount} mslkLines={mslkLines} mslkTotal={context.RawDocument?.KnownChunks.Mslk.Count ?? 0}");
+                s_pm4ResearchReportCount = 0;
+            }
+        }
 
         return true;
     }

@@ -13414,64 +13414,92 @@ void main() {
     {
         if (_worldScene == null) return;
 
-        if (!TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
-            return;
+        System.Diagnostics.Stopwatch clickSw = WoWViewer.Logging.Pm4Profiling.Enabled
+            ? System.Diagnostics.Stopwatch.StartNew() : null;
+        long clickPickStartTicks = 0;
+        long clickSelectionStartTicks = 0;
+        double clickPickMs = 0;
+        double clickSelectionMs = 0;
 
-        if (mouseX < vpX || mouseX > vpX + vpW || mouseY < vpY || mouseY > vpY + vpH)
-            return;
-
-        float aspect = vpW / Math.Max(vpH, 1f);
-        var view = _camera.GetViewMatrix();
-        float farPlane = GetSceneFarPlane();
-        var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
-
-        // Convert viewport-local mouse coords to NDC (-1..1)
-        float localX = mouseX - vpX;
-        float localY = mouseY - vpY;
-        float ndcX = (localX / vpW) * 2f - 1f;
-        float ndcY = 1f - (localY / vpH) * 2f; // flip Y
-
-        var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
-        var hoveredPm4Key = _worldScene.ShowPm4Overlay ? _worldScene.HoveredAssetInfo?.Pm4ObjectKey : null;
-
-        if (addPm4ToCollection)
+        try
         {
-            // Only the Shift+LMB collection branch needs the ray PM4 pick;
-            // the normal-click path picks PM4 inside TryHandleSceneClickSelection
-            // (a duplicate outer pick here doubled the per-click cost on dense maps).
-            _worldScene.TryPickPm4ObjectByRay(rayOrigin, rayDir, out var pm4HitKey, out var _, out _);
+            if (!TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
+                return;
+
+            if (mouseX < vpX || mouseX > vpX + vpW || mouseY < vpY || mouseY > vpY + vpH)
+                return;
+
+            float aspect = vpW / Math.Max(vpH, 1f);
+            var view = _camera.GetViewMatrix();
+            float farPlane = GetSceneFarPlane();
+            var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
+
+            // Convert viewport-local mouse coords to NDC (-1..1)
+            float localX = mouseX - vpX;
+            float localY = mouseY - vpY;
+            float ndcX = (localX / vpW) * 2f - 1f;
+            float ndcY = 1f - (localY / vpH) * 2f; // flip Y
+
+            var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
+            var hoveredPm4Key = _worldScene.ShowPm4Overlay ? _worldScene.HoveredAssetInfo?.Pm4ObjectKey : null;
+
+            if (addPm4ToCollection)
+            {
+                // Only the Shift+LMB collection branch needs the ray PM4 pick;
+                // the normal-click path picks PM4 inside TryHandleSceneClickSelection
+                // (a duplicate outer pick here doubled the per-click cost on dense maps).
+                if (clickSw != null) clickPickStartTicks = clickSw.ElapsedTicks;
+                _worldScene.TryPickPm4ObjectByRay(rayOrigin, rayDir, out var pm4HitKey, out var _, out _);
+                if (clickSw != null) clickPickMs = (clickSw.ElapsedTicks - clickPickStartTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+
+                ClearPendingClickSelection();
+                _worldScene.ClearTaxiSelection();
+                _worldScene.ClearSelection();
+                ClearSelectedAreaPoiInfo();
+
+                var collectionPm4Key = hoveredPm4Key ?? pm4HitKey;
+                if (collectionPm4Key.HasValue && _worldScene.SelectPm4Object(collectionPm4Key.Value))
+                {
+                    TogglePm4ObjectCollectionMembership(collectionPm4Key.Value, reportStatus: true);
+                    UpdateSelectedPm4ObjectInfo(collectionPm4Key);
+                }
+                else
+                {
+                    _statusMessage = "Shift+LMB PM4 add failed: no PM4 object was hit under the cursor. Use the PM4 graph Collect buttons when overlaps are dense.";
+                }
+
+                return;
+            }
+
+            if (clickSw != null) clickSelectionStartTicks = clickSw.ElapsedTicks;
+            bool handledBySelection = TryHandleSceneClickSelection(mouseX, mouseY, localX, localY, vpW, vpH, view, proj, rayOrigin, rayDir);
+            if (clickSw != null) clickSelectionMs = (clickSw.ElapsedTicks - clickSelectionStartTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            if (handledBySelection)
+                return;
 
             ClearPendingClickSelection();
-            _worldScene.ClearTaxiSelection();
+            ClearSelectedWlLiquidBody(clearListIsolation: true);
             _worldScene.ClearSelection();
+            _worldScene.ClearTaxiSelection();
+            _worldScene.ClearPm4ObjectSelection();
             ClearSelectedAreaPoiInfo();
-
-            var collectionPm4Key = hoveredPm4Key ?? pm4HitKey;
-            if (collectionPm4Key.HasValue && _worldScene.SelectPm4Object(collectionPm4Key.Value))
-            {
-                TogglePm4ObjectCollectionMembership(collectionPm4Key.Value, reportStatus: true);
-                UpdateSelectedPm4ObjectInfo(collectionPm4Key);
-            }
-            else
-            {
-                _statusMessage = "Shift+LMB PM4 add failed: no PM4 object was hit under the cursor. Use the PM4 graph Collect buttons when overlaps are dense.";
-            }
-
-            return;
+            _selectedObjectIndex = -1;
+            _selectedObjectType = "";
+            _selectedObjectInfo = "";
         }
-
-        if (TryHandleSceneClickSelection(mouseX, mouseY, localX, localY, vpW, vpH, view, proj, rayOrigin, rayDir))
-            return;
-
-        ClearPendingClickSelection();
-        ClearSelectedWlLiquidBody(clearListIsolation: true);
-        _worldScene.ClearSelection();
-        _worldScene.ClearTaxiSelection();
-        _worldScene.ClearPm4ObjectSelection();
-        ClearSelectedAreaPoiInfo();
-        _selectedObjectIndex = -1;
-        _selectedObjectType = "";
-        _selectedObjectInfo = "";
+        finally
+        {
+            if (clickSw != null)
+            {
+                clickSw.Stop();
+                double totalMs = clickSw.ElapsedMilliseconds;
+                if (totalMs >= 50.0)
+                {
+                    ViewerLog.Info(ViewerLog.Category.Terrain,
+                        $"[PM4-PROFILE] PickObjectAtMouse: total={totalMs:0.0}ms pick={clickPickMs:0.0}ms selection={clickSelectionMs:0.0}ms shift={addPm4ToCollection}");
+                }
+            }
+        }
     }
 
     private void UpdateSelectedPm4ObjectInfo((int tileX, int tileY, uint ck24, int objectPart)? pm4ObjectKey)

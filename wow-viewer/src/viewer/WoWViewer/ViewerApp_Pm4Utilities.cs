@@ -3602,12 +3602,18 @@ public partial class ViewerApp
         if (!ImGui.CollapsingHeader("Scene Graph"))
             return;
 
+        System.Diagnostics.Stopwatch graphSw = WoWViewer.Logging.Pm4Profiling.Enabled
+            ? System.Diagnostics.Stopwatch.StartNew() : null;
+        long graphStartTicks = graphSw?.ElapsedTicks ?? 0;
+
         // Region(tile) → GroupKey(surface type) → ObjectId → count
         var regionTiles = new Dictionary<uint, HashSet<(int, int)>>();
         var byRegion = new Dictionary<uint, Dictionary<byte, Dictionary<ushort, int>>>();
 
+        int walkedObjectCount = 0;
         foreach (var (tx, ty, ck24, objId, region, mslk, gk, part) in _worldScene.GetPm4ObjectHierarchy())
         {
+            walkedObjectCount++;
             if (!regionTiles.TryGetValue(region, out var rt)) regionTiles[region] = rt = new();
             rt.Add((tx, ty));
             ushort oid = (ushort)(ck24 & 0xFFFF);
@@ -3654,6 +3660,13 @@ public partial class ViewerApp
         }
         if (total == 0)
             ImGui.TextDisabled("No PM4 objects loaded.");
+
+        if (graphSw != null)
+        {
+            graphSw.Stop();
+            double elapsedMs = (graphSw.ElapsedTicks - graphStartTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            WorldScene.Pm4ProfilingAccumulator.RecordGraphBuild(elapsedMs, walkedObjectCount, byRegion.Count);
+        }
     }
 
     private void ExportPm4OverlayReport()
