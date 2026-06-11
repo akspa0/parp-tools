@@ -994,6 +994,10 @@ public class WorldScene : ISceneRenderer
     private int _pm4CameraTileRadius = Pm4MinCameraTileRadius;
     private double _pm4AverageLoadMs = -1.0;
     private (int minTileX, int minTileY, int maxTileX, int maxTileY)? _pm4LoadedCameraWindow;
+    private ((int tileX, int tileY, uint ck24, int objectPart) key, (int tileX, int tileY, uint ck24) group)? _pm4GraphInfoCacheKey;
+    private Pm4SelectedObjectGraphInfo? _pm4GraphInfoCacheValue;
+    private bool _pm4GraphInfoCacheSplitByMscnRef;
+    private bool _pm4GraphInfoCacheSplitByConnectivity;
     private readonly HashSet<(int tileX, int tileY)> _pm4KnownMapTiles = new();
     private readonly HashSet<(int tileX, int tileY)> _pm4CoveredMapTiles = new();
     private Task<Pm4OverlayAsyncLoadResult>? _pm4LoadTask;
@@ -11159,6 +11163,21 @@ public class WorldScene : ISceneRenderer
                 if (!_pm4ObjectLookup.TryGetValue(selectedObjectKey, out Pm4OverlayObject? selectedObject))
                     return false;
 
+                // Cache by (selection, group, split flags). Rebuilding this on every ImGui
+                // frame walked the full _pm4TileObjects dictionary plus a 3-level GroupBy LINQ
+                // chain — for a multi-instance container that was 30s per click.
+                if (_pm4GraphInfoCacheValue.HasValue
+                    && _pm4GraphInfoCacheKey.HasValue
+                    && _pm4GraphInfoCacheKey.Value.key == selectedObjectKey
+                    && _pm4GraphInfoCacheKey.Value.group == selectedGroupKey
+                    && _pm4GraphInfoCacheSplitByMscnRef == _pm4SplitCk24ByMscnRef
+                    && _pm4GraphInfoCacheSplitByConnectivity == _pm4SplitCk24ByConnectivity)
+                {
+                    info = _pm4GraphInfoCacheValue.Value;
+                    return true;
+                }
+
+
                 var groupObjects = new List<((int tileX, int tileY, uint ck24, int objectPart) key, Pm4OverlayObject obj)>();
                 foreach (KeyValuePair<(int tileX, int tileY), List<Pm4OverlayObject>> tileEntry in _pm4TileObjects)
                 {
@@ -11257,6 +11276,11 @@ public class WorldScene : ISceneRenderer
                     groupObjects.Select(static entry => entry.obj.DominantAttributeMask).Distinct().Count(),
                     groupObjects.Select(static entry => entry.obj.DominantGroupKey).Distinct().Count(),
                     linkGroups);
+
+                _pm4GraphInfoCacheKey = (selectedObjectKey, selectedGroupKey);
+                _pm4GraphInfoCacheValue = info;
+                _pm4GraphInfoCacheSplitByMscnRef = _pm4SplitCk24ByMscnRef;
+                _pm4GraphInfoCacheSplitByConnectivity = _pm4SplitCk24ByConnectivity;
 
                 return true;
             }
