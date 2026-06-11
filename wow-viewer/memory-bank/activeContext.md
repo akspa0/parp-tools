@@ -49,6 +49,8 @@
 3. 2026-06-10 small-wins follow-through: launch a focused `WowViewer.Tools.Shared` test project so the new `Pm4MatchRunOptions.Validator` and the rest of the shared lib gain regression coverage
 4. 2026-06-10 small-wins follow-through: spec the per-tile visibility work in `TerrainManager` (currently the no-op stub) so the deferred seam is tracked properly
 5. 2026-06-10 spec 058 task #3 (CK24 byte decomposition) is shipped: `Ck24HighByte` and `Ck24LowByte` are now exposed on `Pm4MsurEntry` and `Pm4OverlayObject`, and the bulk JSON export includes them. The bond hypothesis is now testable. Next spec 058 follow-up: re-run the export on the development corpus and see whether any CK24 has surfaces with **different** `(Ck24HighByte, Ck24LowByte)` pairs - if so, the hypothesis is worth pursuing; if not, it's moot.
+6. **2026-06-11 click-freeze investigation**: timing instrumentation shipped in `30461a1d`. User to run viewer with `WOWVIEWER_PM4_PROFILE=1` + `--verbose` and report the `[PM4-PROFILE]` log lines so we can see whether the freeze is in the pick, the per-frame research-info walk, or the post-click panel rebuild. **No fix code lands until the user reports numbers.**
+7. **2026-06-11 MSCN+MSPV research finding**: trees have MSCN+MSPV, WMOs get ~50% of mesh as MSCN+MSPV (invisible containment walls), M2 models carry only top-of-model collision. Growth-potion "weak spots" are explained by containment being object-relative. **This rewrites the PM4 writer and matching-tool design.** The three-mode MSUR strategy and the MSCN+MSPV weighting must be added to spec 058 before any writer/matcher spec slice begins.
 
 ## Known Issues
 
