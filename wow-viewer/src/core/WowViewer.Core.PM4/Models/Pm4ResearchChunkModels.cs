@@ -576,3 +576,50 @@ public sealed record Pm4MshdReport(
     IReadOnlyList<Pm4MshdTilePackingSummary> TilePackingHypotheses,
     Pm4MshdTileReuseSummary TileReuse,
     IReadOnlyList<string> Notes);
+
+public sealed record Pm4BondStatsPerFileEntry(
+    string SourcePath,
+    int? TileX,
+    int? TileY,
+    int SurfaceCount,
+    int DistinctCk24Types,
+    IReadOnlyList<Pm4ValueFrequency> HighByteReuseDistribution,
+    IReadOnlyList<Pm4ValueFrequency> LowByteReuseDistribution,
+    IReadOnlyList<Pm4ValueFrequency> CombinedReuseDistribution,
+    IReadOnlyList<Pm4BondStatsTypeBucketEntry> TypeBucketBreakdown);
+
+public sealed record Pm4BondStatsTypeBucketEntry(
+    byte Ck24Type,
+    string TypeLabel,
+    int SurfaceCount,
+    int DistinctHighBytes,
+    int DistinctLowBytes,
+    int DistinctCombinedIds,
+    IReadOnlyList<Pm4ValueFrequency> TopHighByteValues,
+    IReadOnlyList<Pm4ValueFrequency> TopLowByteValues);
+
+public sealed record Pm4BondStatsCrossTabulation(
+    int TotalPairs,
+    int DistinctHighByteValues,
+    int DistinctLowByteValues,
+    IReadOnlyList<Pm4BondStatsBytePair> TopPairsByCount,
+    IReadOnlyList<Pm4BondStatsBytePair> TopPairsByHighByte,
+    IReadOnlyList<Pm4BondStatsBytePair> TopPairsByLowByte);
+
+public sealed record Pm4BondStatsBytePair(
+    byte HighByte,
+    byte LowByte,
+    int SurfaceCount,
+    int FileCount,
+    IReadOnlyList<byte> AssociatedCk24Types);
+
+public sealed record Pm4BondStatsReport(
+    string InputDirectory,
+    int FileCount,
+    int TotalSurfaceCount,
+    int ZeroCk24SurfaceCount,
+    int DistinctCk24Values,
+    int DistinctCk24Types,
+    Pm4BondStatsCrossTabulation CrossTabulation,
+    IReadOnlyList<Pm4BondStatsPerFileEntry> PerFileEntries,
+    IReadOnlyList<string> Notes);

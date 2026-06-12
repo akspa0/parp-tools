@@ -1731,6 +1731,9 @@ static void RunPm4(string[] args)
 		case "export-json":
 			RunPm4ExportJson(tail);
 			break;
+		case "bond-stats":
+			RunPm4BondStats(tail);
+			break;
 		default:
 			Console.Error.WriteLine($"Unknown pm4 command '{command}'.");
 			ShowPm4Usage();
@@ -2577,6 +2580,33 @@ static void RunPm4Linkage(string[] args)
 	}
 
 	PrintPm4LinkageReport(report);
+}
+
+static void RunPm4BondStats(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4BondStatsReport report = Pm4BondStatsAnalyzer.AnalyzeDirectory(input);
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	PrintPm4BondStatsReport(report);
 }
 
 static void RunPm4Hierarchy(string[] args)
@@ -3435,6 +3465,62 @@ static void PrintPm4MshdReport(Pm4MshdReport report)
 	{
 		foreach (Pm4MshdField04TileReuseCase reuseCase in report.TileReuse.TopMultiTileField04Values.Take(6))
 			Console.WriteLine($"  Field04={reuseCase.Field04} spans {reuseCase.TileCount} tiles: {string.Join(", ", reuseCase.TileCoordinates)}");
+	}
+
+	if (report.Notes.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("Notes:");
+		foreach (string note in report.Notes)
+			Console.WriteLine($"  {note}");
+	}
+}
+
+static void PrintPm4BondStatsReport(Pm4BondStatsReport report)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 bond-stats report");
+	Console.WriteLine($"Input directory: {report.InputDirectory}");
+	Console.WriteLine($"Files: {report.FileCount}");
+	Console.WriteLine($"Total non-zero surfaces: {report.TotalSurfaceCount}");
+	Console.WriteLine($"Zero-CK24 surfaces excluded: {report.ZeroCk24SurfaceCount}");
+	Console.WriteLine($"Distinct CK24 values: {report.DistinctCk24Values}");
+	Console.WriteLine($"Distinct CK24 types: {report.DistinctCk24Types}");
+	Console.WriteLine();
+	Console.WriteLine("Cross-tabulation:");
+	Console.WriteLine($"  Total (high,low) pairs: {report.CrossTabulation.TotalPairs}");
+	Console.WriteLine($"  Distinct high-byte values: {report.CrossTabulation.DistinctHighByteValues}");
+	Console.WriteLine($"  Distinct low-byte values: {report.CrossTabulation.DistinctLowByteValues}");
+	Console.WriteLine();
+	Console.WriteLine("Top (high,low) pairs by surface count:");
+	foreach (var pair in report.CrossTabulation.TopPairsByCount.Take(12))
+	{
+		string types = string.Join(",", pair.AssociatedCk24Types.Select(t => $"0x{t:X2}"));
+		Console.WriteLine($"  (0x{pair.HighByte:X2}, 0x{pair.LowByte:X2}) surfaces={pair.SurfaceCount} files={pair.FileCount} types=[{types}]");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine("Per-file summaries:");
+	foreach (var entry in report.PerFileEntries)
+	{
+		string tileText = entry.TileX.HasValue && entry.TileY.HasValue
+			? $"{entry.TileX}_{entry.TileY}"
+			: Path.GetFileNameWithoutExtension(entry.SourcePath);
+		Console.WriteLine($"  {tileText}: surfaces={entry.SurfaceCount} types={entry.DistinctCk24Types}");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine("Type bucket breakdown:");
+	foreach (var entry in report.PerFileEntries)
+	{
+		if (entry.TypeBucketBreakdown.Count == 0)
+			continue;
+		string tileText = entry.TileX.HasValue && entry.TileY.HasValue
+			? $"{entry.TileX}_{entry.TileY}"
+			: Path.GetFileNameWithoutExtension(entry.SourcePath);
+		foreach (var bucket in entry.TypeBucketBreakdown)
+		{
+			Console.WriteLine($"  {tileText} type=0x{bucket.Ck24Type:X2} ({bucket.TypeLabel}): surfaces={bucket.SurfaceCount} distinctHigh={bucket.DistinctHighBytes} distinctLow={bucket.DistinctLowBytes} distinctCombined={bucket.DistinctCombinedIds}");
+		}
 	}
 
 	if (report.Notes.Count > 0)
@@ -4773,6 +4859,7 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 audit --input <file.pm4>");
 	Console.WriteLine("  pm4 audit-directory --input <directory>");
 	Console.WriteLine("  pm4 cross-tile --input <directory> [--output <report.json>]");
+	Console.WriteLine("  pm4 bond-stats --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
 }
 
