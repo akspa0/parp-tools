@@ -1033,6 +1033,9 @@ public partial class ViewerApp
             case ShellPanelId.Pm4Info:
                 DrawPm4InfoPanelContent();
                 break;
+            case ShellPanelId.Pm4SceneGraph:
+                DrawPm4SceneGraphPanelContent();
+                break;
         }
     }
 

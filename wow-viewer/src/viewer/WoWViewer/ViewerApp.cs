@@ -72,6 +72,7 @@ public partial class ViewerApp : IDisposable
         WorkspaceBars,
         SceneInspector,
         Pm4Info,
+        Pm4SceneGraph,
     }
 
     private enum ShellPanelLane
@@ -334,11 +335,12 @@ public partial class ViewerApp : IDisposable
         new(ShellPanelId.WorkspaceBars, "Workspace Bars", ShellPanelLane.Left, 360f, 280f, 240f, 520f),
         new(ShellPanelId.SceneInspector, "Scene Inspector", ShellPanelLane.Right, 420f, 300f, 220f, SidebarMaxWidth),
         new(ShellPanelId.Pm4Info, "PM4 Info", ShellPanelLane.Right, 400f, 280f, 200f, SidebarMaxWidth),
+        new(ShellPanelId.Pm4SceneGraph, "PM4 Scene Graph", ShellPanelLane.Right, 420f, 300f, 220f, SidebarMaxWidth),
     };
 
     private static readonly ShellPanelId[] TopLeftQuadrantPanels = { ShellPanelId.Navigator };
     private static readonly ShellPanelId[] TopRightQuadrantPanels = { ShellPanelId.Inspector, ShellPanelId.WorldObjects, ShellPanelId.ModelInfo, ShellPanelId.RuntimeStats };
-    private static readonly ShellPanelId[] BottomRightQuadrantPanels = { ShellPanelId.Pm4Workbench, ShellPanelId.Pm4Info, ShellPanelId.TerrainControls };
+    private static readonly ShellPanelId[] BottomRightQuadrantPanels = { ShellPanelId.Pm4Workbench, ShellPanelId.Pm4Info, ShellPanelId.TerrainControls, ShellPanelId.Pm4SceneGraph };
     private static readonly ShellPanelId[] BottomLeftQuadrantPanels = { ShellPanelId.Minimap };
 
     private DockPanelState _navigatorDockState;
@@ -730,6 +732,7 @@ public partial class ViewerApp : IDisposable
     private bool _showTaxiWindow;
     private bool _showWeakSignalWindow;
     private bool _showSceneInspector;
+    private bool _showPm4SceneGraph = true;
 
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;
@@ -1779,6 +1782,8 @@ void main() {
                 if (ImGui.MenuItem("PM4 Workbench", "", false, hasWorld))
                     OpenPm4Workbench(Pm4WorkbenchTab.Selection);
                 if (ImGui.MenuItem("PM4 Info", "", ref _showRightSidebar))
+                    _forceApplyShellPanelLayout = true;
+                if (ImGui.MenuItem("PM4 Scene Graph", "", ref _showPm4SceneGraph, hasWorld))
                     _forceApplyShellPanelLayout = true;
                 ImGui.Separator();
 
@@ -13889,6 +13894,7 @@ void main() {
             ShellPanelId.WorkspaceBars => false,
             ShellPanelId.SceneInspector => _showSceneInspector && _worldScene != null,
             ShellPanelId.Pm4Info => _showRightSidebar && _worldScene != null,
+            ShellPanelId.Pm4SceneGraph => _showPm4SceneGraph && _worldScene != null,
             _ => false,
         };
     }
@@ -13903,6 +13909,7 @@ void main() {
             ShellPanelId.WorkspaceBars => _suppressLeftSidebarForLayout,
             ShellPanelId.SceneInspector => _suppressRightSidebarForLayout,
             ShellPanelId.Pm4Info => _suppressRightSidebarForLayout,
+            ShellPanelId.Pm4SceneGraph => _suppressRightSidebarForLayout,
             _ => false,
         };
     }
@@ -13978,6 +13985,9 @@ void main() {
                 case ShellPanelId.Pm4Info:
                     _showRightSidebar = true;
                     return;
+                case ShellPanelId.Pm4SceneGraph:
+                    _showPm4SceneGraph = true;
+                    return;
             }
         }
 
@@ -14026,6 +14036,7 @@ void main() {
         _bottomDrawerHeight = DefaultBottomDrawerHeight;
         _activeBottomDrawerTab = FixedBottomDrawerTab.Workspace;
         _useDockspaceUi = true;
+        _showPm4SceneGraph = true;
         _forceApplyShellPanelLayout = true;
         SaveViewerSettings();
     }

@@ -3688,6 +3688,64 @@ public partial class ViewerApp
         }
     }
 
+    private void DrawPm4SceneGraphPanelContent()
+    {
+        if (_worldScene == null)
+        {
+            ImGui.TextDisabled("No world scene loaded.");
+            return;
+        }
+
+        if (!_worldScene.TryGetSelectedPm4ObjectGraphInfo(out Pm4SelectedObjectGraphInfo graph))
+        {
+            ImGui.TextDisabled("Select a PM4 object to view its scene graph.");
+            return;
+        }
+
+        var typeBuckets = graph.TypeBuckets;
+        if (typeBuckets.Count == 0)
+        {
+            ImGui.TextDisabled("No type buckets in scene graph.");
+            return;
+        }
+
+        ImGui.PushTextWrapPos();
+        foreach (var bucket in typeBuckets)
+        {
+            string bucketLabel = bucket.TypeLabel;
+            if (ImGui.TreeNodeEx($"##TB_{bucket.Ck24Type:X2}",
+                    ImGuiTreeNodeFlags.DefaultOpen,
+                    $"0x{bucket.Ck24Type:X2} ({bucket.TypeLabel}) [{bucket.LinkGroupCount} groups, {bucket.SurfaceCount} surfaces]"))
+            {
+                foreach (var linkGroup in bucket.LinkGroups)
+                {
+                    if (ImGui.TreeNodeEx($"##LG_{bucket.Ck24Type:X2}_{linkGroup.LinkGroupObjectId}",
+                            ImGuiTreeNodeFlags.None,
+                            $"LinkGroup {linkGroup.LinkGroupObjectId} [{linkGroup.MscnRefGroups.Count} mscnRefs, {linkGroup.SurfaceCount} surfaces]"))
+                    {
+                        foreach (var mscnRefGroup in linkGroup.MscnRefGroups)
+                        {
+                            if (ImGui.TreeNodeEx($"##MR_{mscnRefGroup.MscnRefIndex}",
+                                    ImGuiTreeNodeFlags.None,
+                                    $"MscnRef {mscnRefGroup.MscnRefIndex} [{mscnRefGroup.PartCount} parts, {mscnRefGroup.SurfaceCount} surfaces]"))
+                            {
+                                foreach (var part in mscnRefGroup.Parts)
+                                {
+                                    string selected = part.IsSelected ? " [SELECTED]" : "";
+                                    ImGui.TextDisabled($"  Part {part.ObjectPartId} @ {part.TileX}_{part.TileY}{selected}  ({part.SurfaceCount} surfs, {part.TotalIndexCount} idx)");
+                                }
+                                ImGui.TreePop();
+                            }
+                        }
+                        ImGui.TreePop();
+                    }
+                }
+                ImGui.TreePop();
+            }
+        }
+        ImGui.PopTextWrapPos();
+    }
+
     private void ExportPm4OverlayReport()
     {
         if (_worldScene == null) return;
