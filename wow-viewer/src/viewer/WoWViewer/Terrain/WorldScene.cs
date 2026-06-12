@@ -11247,9 +11247,7 @@ public class WorldScene : ISceneRenderer
             Pm4OverlayColorMode.GroupKey => ColorFromSeed(obj.DominantGroupKey),
             Pm4OverlayColorMode.AttributeMask => ColorFromSeed(obj.DominantAttributeMask),
             Pm4OverlayColorMode.Height => ColorFromHeight(obj.Center.Z),
-            Pm4OverlayColorMode.TypeFlags => obj.DistinctTypeFlags != 0
-                ? GetTypeFlagColor(PickPrimaryTypeFlag(obj.DistinctTypeFlags))
-                : new Vector3(0.25f, 0.25f, 0.25f),
+            Pm4OverlayColorMode.TypeFlags => BlendTypeFlagColors(obj.DistinctTypeFlags),
             Pm4OverlayColorMode.Ck24TypeVsTypeFlags => GetCk24TypeVsTypeFlagsColor(obj.Ck24Type, obj.DistinctTypeFlags),
             _ => GetPm4TypeColor(obj.Ck24Type)
         };
@@ -11942,6 +11940,22 @@ public class WorldScene : ISceneRenderer
             0x12 => new Vector3(0.80f, 0.45f, 0.45f),   // dark pastel rose    (exterior solid)
             _    => HsvToRgb((typeFlag * 0.19f) % 1.0f, 0.45f, 0.75f),  // desaturated for unknown
         };
+    }
+
+    private static Vector3 BlendTypeFlagColors(uint typeFlagsMask)
+    {
+        if (typeFlagsMask == 0)
+            return new Vector3(0.25f, 0.25f, 0.25f); // gray — no TypeFlags bits set anywhere on this object
+
+        Vector3 sum = Vector3.Zero;
+        int count = 0;
+        for (int bit = 1; bit < 32; bit++)
+        {
+            if ((typeFlagsMask & (1u << bit)) == 0) continue;
+            sum += GetTypeFlagColor((byte)(1u << bit));
+            count++;
+        }
+        return sum / count; // equal-weight additive blend — bit count stays visible
     }
 
     private static Vector3 GetCk24TypeVsTypeFlagsColor(byte ck24Type, uint typeFlagsMask)
