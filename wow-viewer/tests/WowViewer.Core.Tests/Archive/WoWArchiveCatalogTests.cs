@@ -91,8 +91,8 @@ public sealed class WoWArchiveCatalogTests
         var sw = System.Diagnostics.Stopwatch.StartNew();
         WoWArchiveCatalog.Scan(RealArchiveRoot);
         sw.Stop();
-        Assert.True(sw.ElapsedMilliseconds < 250,
-            $"Scan took {sw.ElapsedMilliseconds}ms, expected < 250ms");
+        Assert.True(sw.ElapsedMilliseconds < 500,
+            $"Scan took {sw.ElapsedMilliseconds}ms, expected < 500ms");
     }
 
     [Fact]

@@ -571,6 +571,11 @@
 - T012 build verified green: `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug` -> 0 errors, 163 pre-existing warnings (none from 044 code).
 - US4 (cursor-as-model) remains explicitly deferred P2 and tracked as T009-T011 in `wow-viewer/specs/044-viewer-shell-usability/tasks.md`. It is a real runtime seam, not a non-model substitute; ownership stays with 044 until reopened.
 - spec 049 (`049-viewer-ui-consolidation`) is the live continuation lane for categorized Tools menu, floating window sticky behavior, and right sidebar consolidation. 044 is intentionally closed at the dockable-shell + menu-declutter boundary.
+
+- **059 M2 v0x109 (2026-06-11)**: Ghidra+inspect confirmed 4.0.0.11927 .m2 files use v0x109; era tag Md20_4X_V109 added to dispatch; M2Profile40xUnknown.MaxSupportedVersion bumped 0x108->0x109; cameras gracefully skipped for >=0x109; 11/11 tests pass + 2 new synthetic 0x109/0x10A tests
+- **057 archive catalog scanner (2026-06-11)**: WoWArchiveCatalog.Scan() in Core.IO/Archive parses Clients_*.txt without mounting; resolves MountLive/Staged/Available; 10 tests pass (62ms)
+- **058 PM4 Scene Graph dockable panel (2026-06-11)**: ShellPanelId.Pm4SceneGraph in BottomRight quadrant, default-visible, type-bucketed tree using cached graph info; mesh preview cut (PM4 rendering already drops FPS from 140 to 12)
+- **057 swap cancellation (2026-06-11)**: generation counter prevents stale RestoreWorldAfterDataSourceReload from running after a newer swap starts
 - missing spec-template artifacts on 044 (no `plan.md`, no `data-model.md`/quickstart/contracts) are accepted for this spec because 044 is small-bounded (8 implementation tasks, 9 FRs) and the actual planning was tracked through tasks.md + 049's plan.md. Reopen if 044 expands (e.g., when T009-T011 ship).
 
 ## Next Likely Steps
