@@ -9,6 +9,7 @@ public static class M2ModelReader
 {
     private const int SignatureSizeBytes = 4;
     private const int MinimumHeaderSizeBytes = 0x110;
+    private const uint CataVersionThreshold = 0x109u;
     private const int VersionOffset = 0x04;
     private const int NameCountOffset = 0x08;
     private const int NameOffsetOffset = 0x0C;
@@ -493,6 +494,9 @@ public static class M2ModelReader
 
     private static List<M2CameraDefinition> ReadCameras(byte[] data, int globalLoopCount, uint version, string sourcePath)
     {
+        if (version >= CataVersionThreshold)
+            return [];
+
         if (!TryReadUInt32At(data, CameraCountOffset, out uint count)
             || !TryReadUInt32At(data, CameraOffsetOffset, out uint offset)
             || count == 0)
