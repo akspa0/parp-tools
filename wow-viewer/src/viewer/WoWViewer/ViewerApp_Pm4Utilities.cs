@@ -3505,6 +3505,25 @@ public partial class ViewerApp
                     }).ToList(),
                 }).ToList(),
             }).ToList(),
+            typeBuckets = graph.TypeBuckets.Select(static bucket => new
+            {
+                ck24Type = bucket.Ck24Type,
+                typeLabel = bucket.TypeLabel,
+                linkGroupCount = bucket.LinkGroupCount,
+                surfaceCount = bucket.SurfaceCount,
+                linkGroups = bucket.LinkGroups.Select(static linkGroup => new
+                {
+                    linkGroupObjectId = linkGroup.LinkGroupObjectId,
+                    partCount = linkGroup.PartCount,
+                    surfaceCount = linkGroup.SurfaceCount,
+                    totalIndexCount = linkGroup.TotalIndexCount,
+                    linkedPositionRefCount = linkGroup.LinkedPositionRefCount,
+                    linkedPositionRefSummary = BuildJsonSafeLinkedPositionRefSummary(linkGroup.LinkedPositionRefSummary),
+                    mscnRefIndices = linkGroup.MscnRefIndices,
+                    attributeMasks = linkGroup.AttributeMasks,
+                    groupKeys = linkGroup.GroupKeys,
+                }).ToList(),
+            }).ToList(),
         };
     }
 

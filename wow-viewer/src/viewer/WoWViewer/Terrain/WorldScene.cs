@@ -610,6 +610,29 @@ public readonly struct Pm4SelectedObjectGraphLinkNode
     public IReadOnlyList<Pm4SelectedObjectGraphMscnRefNode> MscnRefGroups { get; }
 }
 
+public readonly struct Pm4SelectedObjectGraphTypeBucket
+{
+    public Pm4SelectedObjectGraphTypeBucket(
+        byte ck24Type,
+        string typeLabel,
+        int linkGroupCount,
+        int surfaceCount,
+        IReadOnlyList<Pm4SelectedObjectGraphLinkNode> linkGroups)
+    {
+        Ck24Type = ck24Type;
+        TypeLabel = typeLabel;
+        LinkGroupCount = linkGroupCount;
+        SurfaceCount = surfaceCount;
+        LinkGroups = linkGroups;
+    }
+
+    public byte Ck24Type { get; }
+    public string TypeLabel { get; }
+    public int LinkGroupCount { get; }
+    public int SurfaceCount { get; }
+    public IReadOnlyList<Pm4SelectedObjectGraphLinkNode> LinkGroups { get; }
+}
+
 public readonly struct Pm4SelectedObjectGraphInfo
 {
     public Pm4SelectedObjectGraphInfo(
@@ -629,7 +652,8 @@ public readonly struct Pm4SelectedObjectGraphInfo
         int totalIndexCount,
         int attributeMaskCount,
         int groupKeyCount,
-        IReadOnlyList<Pm4SelectedObjectGraphLinkNode> linkGroups)
+        IReadOnlyList<Pm4SelectedObjectGraphLinkNode> linkGroups,
+        IReadOnlyList<Pm4SelectedObjectGraphTypeBucket> typeBuckets)
     {
         SelectedTileX = selectedTileX;
         SelectedTileY = selectedTileY;
@@ -648,6 +672,7 @@ public readonly struct Pm4SelectedObjectGraphInfo
         AttributeMaskCount = attributeMaskCount;
         GroupKeyCount = groupKeyCount;
         LinkGroups = linkGroups;
+        TypeBuckets = typeBuckets;
     }
 
     public int SelectedTileX { get; }
@@ -667,6 +692,7 @@ public readonly struct Pm4SelectedObjectGraphInfo
     public int AttributeMaskCount { get; }
     public int GroupKeyCount { get; }
     public IReadOnlyList<Pm4SelectedObjectGraphLinkNode> LinkGroups { get; }
+    public IReadOnlyList<Pm4SelectedObjectGraphTypeBucket> TypeBuckets { get; }
 }
 
 internal readonly record struct Pm4ConnectorKey(int X, int Y, int Z);
@@ -11377,7 +11403,8 @@ public class WorldScene : ISceneRenderer
                     groupObjects.Sum(static entry => entry.obj.TotalIndexCount),
                     groupObjects.Select(static entry => entry.obj.DominantAttributeMask).Distinct().Count(),
                     groupObjects.Select(static entry => entry.obj.DominantGroupKey).Distinct().Count(),
-                    linkGroups);
+                    linkGroups,
+                    BuildTypeBuckets(groupObjects, linkGroups));
 
                 _pm4GraphInfoCacheKey = (selectedObjectKey, selectedGroupKey);
                 _pm4GraphInfoCacheValue = info;
@@ -11385,6 +11412,51 @@ public class WorldScene : ISceneRenderer
                 _pm4GraphInfoCacheSplitByConnectivity = _pm4SplitCk24ByConnectivity;
 
                 return true;
+            }
+
+            private static IReadOnlyList<Pm4SelectedObjectGraphTypeBucket> BuildTypeBuckets(
+                List<((int tileX, int tileY, uint ck24, int objectPart) key, Pm4OverlayObject obj)> groupObjects,
+                List<Pm4SelectedObjectGraphLinkNode> linkGroups)
+            {
+                var linkGroupByObjectId = linkGroups.ToDictionary(lg => lg.LinkGroupObjectId);
+
+                var objectsByType = groupObjects
+                    .GroupBy(entry => entry.obj.Ck24Type)
+                    .OrderBy(g => g.Key);
+
+                var typeBuckets = new List<Pm4SelectedObjectGraphTypeBucket>();
+                foreach (var typeGroup in objectsByType)
+                {
+                    byte ck24Type = typeGroup.Key;
+                    var typeLinkGroupIds = typeGroup
+                        .Select(e => e.obj.LinkGroupObjectId)
+                        .Distinct()
+                        .OrderBy(id => id);
+
+                    var typeLinkGroups = new List<Pm4SelectedObjectGraphLinkNode>();
+                    foreach (uint linkGroupId in typeLinkGroupIds)
+                    {
+                        if (linkGroupByObjectId.TryGetValue(linkGroupId, out var linkGroupNode))
+                            typeLinkGroups.Add(linkGroupNode);
+                    }
+
+                    string typeLabel = ck24Type switch
+                    {
+                        0x03 => "M2 top",
+                        0x10 => "interior WMO floor",
+                        0x12 => "exterior WMO solid",
+                        _ => $"0x{ck24Type:X2}",
+                    };
+
+                    typeBuckets.Add(new Pm4SelectedObjectGraphTypeBucket(
+                        ck24Type,
+                        typeLabel,
+                        typeLinkGroups.Count,
+                        typeGroup.Sum(e => e.obj.SurfaceCount),
+                        typeLinkGroups));
+                }
+
+                return typeBuckets;
             }
 
             public Pm4ColorLegendInfo GetPm4ColorLegend(int maxEntries = 32)
