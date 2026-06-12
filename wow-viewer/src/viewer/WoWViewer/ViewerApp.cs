@@ -354,6 +354,7 @@ public partial class ViewerApp : IDisposable
     private DockPanelState _workspaceBarsDockState;
     private DockPanelState _sceneInspectorDockState;
     private DockPanelState _pm4InfoDockState;
+    private DockPanelState _pm4SceneGraphDockState;
     private readonly Dictionary<ShellPanelId, SavedShellPanelLayout> _savedShellPanelLayouts = new();
     private readonly HashSet<ShellPanelId> _pendingShellPanelLayoutRestore = new();
     private bool _forceApplyShellPanelLayout;
@@ -13874,6 +13875,8 @@ void main() {
                 return ref _sceneInspectorDockState;
             case ShellPanelId.Pm4Info:
                 return ref _pm4InfoDockState;
+            case ShellPanelId.Pm4SceneGraph:
+                return ref _pm4SceneGraphDockState;
             default:
                 throw new ArgumentOutOfRangeException(nameof(panelId), panelId, null);
         }
