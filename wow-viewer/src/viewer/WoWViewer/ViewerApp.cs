@@ -191,6 +191,8 @@ public partial class ViewerApp : IDisposable
     private Vector3? _pendingDataSourceWorldReloadCameraPosition;
     private float _pendingDataSourceWorldReloadCameraYaw = 180f;
     private float _pendingDataSourceWorldReloadCameraPitch = -20f;
+    private int _activeDataSourceReloadGeneration;
+    private int _pendingDataSourceReloadGeneration;
     private readonly Dictionary<string, Dictionary<int, string>> _savedTaxiActorModelOverridesByMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, SavedObjectPathFilterMap> _savedObjectPathFiltersByMap = new(StringComparer.OrdinalIgnoreCase);
 
@@ -9105,6 +9107,7 @@ void main() {
 
     private void LoadMpqDataSource(string gamePath, string? listfilePath, string? explicitBuildVersion = null, bool deferWorldReload = false)
     {
+        _pendingDataSourceReloadGeneration = ++_activeDataSourceReloadGeneration;
         try
         {
             string? resolvedListfilePath = ResolveListfilePath(listfilePath);
@@ -9425,6 +9428,9 @@ void main() {
 
     private void RestoreWorldAfterDataSourceReload()
     {
+        if (_pendingDataSourceReloadGeneration != _activeDataSourceReloadGeneration)
+            return;
+
         string? virtualPath = _pendingDataSourceWorldReloadVirtualPath;
         string? localPath = _pendingDataSourceWorldReloadLocalPath;
         Vector3? cameraPosition = _pendingDataSourceWorldReloadCameraPosition;

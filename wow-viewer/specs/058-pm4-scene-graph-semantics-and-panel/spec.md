@@ -177,7 +177,7 @@ As a viewer user, I want the scene graph to group entries by `Ck24Type` first, s
 - **FR-004**: The PM4 Scene Graph panel MUST group entries by `Ck24Type` first, with the existing link-group hierarchy nested under each type bucket.
 - **FR-005**: The PM4 Scene Graph panel MUST show an image preview of the selected object's resolved M2 or WMO mesh. When the mesh cannot be resolved, it MUST show a placeholder.
 - **FR-006**: The image preview MUST be cached per selection, using the same selection-key cache as the graph itself. Selecting a new object MUST update the preview without rebuilding the panel layout.
-- **FR-007**: The PM4 data model in the research lib (`WowViewer.Core.PM4.Models.Pm4MslkEntry`) MUST gain two new derived fields: `Ck24HighByte` and `Ck24LowByte`. The existing `Ck24ObjectId` field MUST be retained for backward compatibility but MUST be relabeled in its `///` XML doc as "the low 16 bits of the 24-bit CK24; not an independent identity".
+- **FR-007** (SHIPPED — `fe8ed85d`): The PM4 data model in the research lib (`WowViewer.Core.PM4.Models.Pm4MsurEntry`) gained two new derived fields: `Ck24HighByte` and `Ck24LowByte`. The existing `Ck24ObjectId` field is retained for backward compatibility but relabeled in its `///` XML doc as "the low 16 bits of the 24-bit CK24; not an independent identity". The original spec referenced `Pm4MslkEntry` by mistake; the correct type is `Pm4MsurEntry`.
 - **FR-008**: The `WowViewer.Core.PM4.Research.Pm4ResearchLinkageAnalyzer` MUST gain new metrics `Ck24HighByte.ReuseCountPerFile` and `Ck24LowByte.ReuseCountPerFile`, computed analogously to the existing `Ck24ObjectId.ReuseCountPerFile`.
 - **FR-009**: A new `WowViewer.Tool.Inspect pm4 bond-stats` subcommand MUST be added (or `pm4 forensics` MUST be extended — TBD on which is cleaner) that emits the cross-tabulation of high-byte vs low-byte reuse and the correlation with unknowns/subtype field indices.
 - **FR-010**: The PM4 Scene Graph panel MUST be reachable through the existing shell-panel infrastructure (`ShellPanelId`, `ShellPanelLane`) so the user can dock it alongside the existing Navigator, Inspector, and PM4 Workbench panels.
@@ -186,7 +186,7 @@ As a viewer user, I want the scene graph to group entries by `Ck24Type` first, s
 
 ### Key Entities
 
-- **CK24 byte pair** (research lib): the new `Ck24HighByte` and `Ck24LowByte` derived fields on `Pm4MslkEntry`. No new storage; pure getters on `PackedParams`.
+- **CK24 byte pair** (research lib): `Ck24HighByte` and `Ck24LowByte` derived fields on `Pm4MsurEntry` (SHIPPED — `fe8ed85d`). Pure getters on `PackedParams`; zero new storage.
 - **BondStatsReport** (research lib): the per-file output of the new bond-stats analyzer. Lists per-file `Ck24HighByte` and `Ck24LowByte` reuse distributions, a high×low cross-tabulation, and the unknowns/subtype correlation table.
 - **Pm4SceneGraphPanel** (viewer): the new dockable panel, reachable as a `ShellPanelId` and rendered with cached data only.
 - **Pm4MeshPreviewCache** (viewer): a small per-selection cache of the resolved mesh preview texture. Cleared on selection change.
