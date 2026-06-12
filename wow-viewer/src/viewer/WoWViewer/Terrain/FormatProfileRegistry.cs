@@ -418,7 +418,7 @@ public static class FormatProfileRegistry
         RequiredRootMagic = ModelRootMagic.MD20,
         AllowMd21Container = true,
         MinSupportedVersion = 0x108,
-        MaxSupportedVersion = 0x108,
+        MaxSupportedVersion = 0x109,
         UseTypedOffsetCountTable = true,
         StrictSpanValidation = true,
         VersionSplitThreshold = 0x108,
