@@ -133,6 +133,30 @@ public sealed class M2Era1121ModelReaderTests
     }
 
     [Fact]
+    public void Dispatcher_4X_Version_GoesToCataTag()
+    {
+        byte[] md20_4x = CreateSyntheticMd20_4X("Synthetic4X");
+
+        using MemoryStream stream = new(md20_4x, writable: false);
+        M2DispatchResult result = M2ModelReaderDispatcher.ReadDetailed(stream, "Creature\\Synthetic4X\\Synthetic4X.m2");
+
+        Assert.Equal(M2Era1121EraTag.Md20_4X_V109, result.Era);
+        Assert.Equal("MD20", result.Document.Signature);
+        Assert.Equal(0x109u, result.Document.Version);
+    }
+
+    [Fact]
+    public void Dispatcher_10A_Version_AlsoGoesToCataTag()
+    {
+        byte[] md20_10a = CreateSyntheticMd20_4X("Synthetic10A", version: 0x10Au);
+
+        using MemoryStream stream = new(md20_10a, writable: false);
+        M2DispatchResult result = M2ModelReaderDispatcher.ReadDetailed(stream, "Creature\\Synthetic10A\\Synthetic10A.m2");
+
+        Assert.Equal(M2Era1121EraTag.Md20_4X_V109, result.Era);
+    }
+
+    [Fact]
     public void M2Era1121ModelReader_RejectsBadMagic()
     {
         byte[] bad = new byte[0x100];
@@ -191,6 +215,20 @@ public sealed class M2Era1121ModelReaderTests
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x04, 4), 0x104u);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x08, 4), (uint)nameBytes.Length);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x0C, 4), (uint)nameOffset);
+        nameBytes.CopyTo(data, nameOffset);
+        return data;
+    }
+
+    private static byte[] CreateSyntheticMd20_4X(string modelName, uint version = 0x109u)
+    {
+        byte[] nameBytes = Encoding.UTF8.GetBytes(modelName + "\0");
+        int nameOffset = 0x180;
+        byte[] data = new byte[nameOffset + nameBytes.Length];
+        Encoding.ASCII.GetBytes("MD20").CopyTo(data, 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x04, 4), version);
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x08, 4), (uint)nameBytes.Length);
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x0C, 4), (uint)nameOffset);
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x44, 4), 1u);
         nameBytes.CopyTo(data, nameOffset);
         return data;
     }

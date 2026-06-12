@@ -70,8 +70,11 @@ public static class M2ModelReaderDispatcher
             if (eraVersion.Is1121())
                 return eraVersion == M2Era1121Version.V101 ? M2Era1121EraTag.Md20_1X_V101 : M2Era1121EraTag.Md20_1X_V100;
 
-            if (version >= 0x108u)
+            if (version == 0x108u)
                 return M2Era1121EraTag.Md20_3X_V108;
+
+            if (version >= 0x109u)
+                return M2Era1121EraTag.Md20_4X_V109;
 
             throw new NotSupportedException(
                 $"MD20 v0x{version:X} is the 2.x TBC era, which is not yet supported. Tracked under spec 049.");
@@ -95,7 +98,7 @@ public static class M2ModelReaderDispatcher
             M2Era1121EraTag.Md20_1X_V100 or M2Era1121EraTag.Md20_1X_V101 => new M2DispatchResult(
                 M2Era1121ModelReader.Read(dispatchStream, sourcePath),
                 era),
-            M2Era1121EraTag.Md20_3X_V108 => new M2DispatchResult(
+            M2Era1121EraTag.Md20_3X_V108 or M2Era1121EraTag.Md20_4X_V109 => new M2DispatchResult(
                 M2ModelReader.Read(dispatchStream, sourcePath),
                 era),
             _ => throw new InvalidDataException(
