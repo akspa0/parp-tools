@@ -478,13 +478,6 @@ public partial class ViewerApp
 
         if (_discoveredMaps.Count > 0 && ImGui.CollapsingHeader("World Maps"))
             DrawMapDiscoveryContent();
-
-        if (hasWorldLoaded)
-        {
-            ImGui.SetNextItemOpen(true, ImGuiCond.Once);
-            if (ImGui.CollapsingHeader("Runtime Stats", ImGuiTreeNodeFlags.DefaultOpen))
-                DrawRuntimeStatsPanelContent();
-        }
     }
 
     private void DrawWorldOverviewContent()
@@ -794,7 +787,7 @@ public partial class ViewerApp
     {
         if (_worldScene != null)
         {
-            string[] tabs = ["Selection", "World", "Model", "Stats", "Settings", "PM4"];
+            string[] tabs = ["Selection", "World", "Model", "Settings", "PM4"];
             int current = _activeInspectorTab;
             if (current < 0 || current >= tabs.Length)
                 current = 0;
@@ -811,9 +804,8 @@ public partial class ViewerApp
                             case 0: DrawUnifiedSelectionSidebarContent(); break;
                             case 1: DrawWorldObjectsPanelContent(); break;
                             case 2: DrawModelInfoPanelContent(); break;
-                            case 3: DrawRuntimeStatsPanelContent(); break;
-                            case 4: DrawUnifiedViewerSettingsSidebarContent(); break;
-                            case 5: DrawPm4WorkbenchInspector(); break;
+                            case 3: DrawUnifiedViewerSettingsSidebarContent(); break;
+                            case 4: DrawPm4WorkbenchInspector(); break;
                         }
                         ImGui.EndTabItem();
                     }
@@ -1043,7 +1035,7 @@ public partial class ViewerApp
 
     private void DrawSceneInspectorPanelContent()
     {
-        string[] tabs = ["Selection", "World", "Model", "Stats", "Terrain"];
+        string[] tabs = ["Selection", "World", "Model", "Terrain"];
         int currentTab = _activeSceneInspectorTab;
         if (currentTab < 0 || currentTab >= tabs.Length)
             currentTab = 0;
@@ -1059,8 +1051,7 @@ public partial class ViewerApp
                     case 0: DrawSceneInspectorSelectionTab(); break;
                     case 1: DrawSceneInspectorWorldTab(); break;
                     case 2: DrawSceneInspectorModelTab(); break;
-                    case 3: DrawSceneInspectorStatsTab(); break;
-                    case 4: DrawSceneInspectorTerrainTab(); break;
+                    case 3: DrawSceneInspectorTerrainTab(); break;
                 }
                 ImGui.EndTabItem();
             }
@@ -1081,11 +1072,6 @@ public partial class ViewerApp
     private void DrawSceneInspectorModelTab()
     {
         DrawModelInfoPanelContent();
-    }
-
-    private void DrawSceneInspectorStatsTab()
-    {
-        DrawRuntimeStatsPanelContent();
     }
 
     private void DrawSceneInspectorTerrainTab()
@@ -2866,9 +2852,6 @@ public partial class ViewerApp
         if (lighting == null || renderer == null) return;
 
         DrawTerrainControlsAdjustmentContent();
-
-        ImGui.Separator();
-        DrawRuntimeStatsPanelContent();
 
         ImGui.Separator();
         ImGui.TextDisabled("Open Terrain Tools, Chunk Clipboard, Terrain Analysis, and MCNK Explorer from the Tools menu.");
