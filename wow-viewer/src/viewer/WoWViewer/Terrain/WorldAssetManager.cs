@@ -1148,7 +1148,16 @@ private int _mdxLoadFailCount = 0;
                     {
                         ViewerLog.Trace($"[M2] Trying skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
                         M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(data, skinBytes, resolvedModelPath, skinPath);
-                        var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, skinBytes, resolvedModelPath, _buildVersion);
+                        MdxFile? adapted = null;
+                        try
+                        {
+                            adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, skinBytes, resolvedModelPath, _buildVersion);
+                        }
+                        catch (Exception adapterEx)
+                        {
+                            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                                $"[M2] M2->MDX adapter fallback failed for {Path.GetFileName(resolvedModelPath)}: {adapterEx.Message} (native renderer will be used)");
+                        }
 
                         var route = M2RouteDecision.Create(normalizedKey, buildProfileId, M2RouteType.AdapterSkin, M2RouteType.AdapterSkin, skinPath);
                         _mdxRouteDecisions[normalizedKey] = route;

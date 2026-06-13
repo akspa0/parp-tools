@@ -1972,7 +1972,16 @@ private IModelRenderer? LoadM2DoodadRenderer(string originalModelPath, string re
             {
                 ViewerLog.Trace($"[M2] Trying WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
                 M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(modelData, skinBytes, resolvedModelPath, skinPath);
-                var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, skinBytes, resolvedModelPath, _buildVersion);
+                MdxFile? adapted = null;
+                try
+                {
+                    adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, skinBytes, resolvedModelPath, _buildVersion);
+                }
+                catch (Exception adapterEx)
+                {
+                    ViewerLog.Debug(ViewerLog.Category.Mdx,
+                        $"[M2] M2->MDX adapter fallback failed for {Path.GetFileName(resolvedModelPath)}: {adapterEx.Message} (native renderer will be used)");
+                }
 
                 var route = M2RouteDecision.Create(originalModelPath, buildProfileId, M2RouteType.AdapterSkin, M2RouteType.AdapterSkin, skinPath);
                 _doodadRouteDecisions[NormalizeDoodadPath(originalModelPath)] = route;

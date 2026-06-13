@@ -10607,8 +10607,17 @@ void main() {
                 {
                     ViewerLog.Trace($"[M2] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
                     M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(m2Bytes, skinBytes, resolvedModelPath, skinPath);
-                        var adaptedMdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, skinBytes, resolvedModelPath, _dbcBuild);
-                        LoadM2RuntimeModel(runtimeModel, adaptedMdx, dir, resolvedModelPath);
+                    MdxFile? adaptedMdx = null;
+                    try
+                    {
+                        adaptedMdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, skinBytes, resolvedModelPath, _dbcBuild);
+                    }
+                    catch (Exception adapterEx)
+                    {
+                        ViewerLog.Debug(ViewerLog.Category.Mdx,
+                            $"[M2] M2->MDX adapter fallback failed for {Path.GetFileName(resolvedModelPath)}: {adapterEx.Message} (native renderer will be used)");
+                    }
+                    LoadM2RuntimeModel(runtimeModel, adaptedMdx, dir, resolvedModelPath);
                     CaptureWorldReturnState();
                     ViewerLog.Info(ViewerLog.Category.Mdx,
                         $"[M2] Selected skin for {Path.GetFileName(originalPath)}: {skinPath} ({skinBytes.Length} bytes)");
