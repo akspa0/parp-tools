@@ -2,61 +2,38 @@
 
 ## Phase 1: Migration Note (doc-only)
 
-- [x] T001 Write `wow-viewer/docs/architecture/ui-migration-options-2026-06-12.md` with rationale, options table, cost estimate, "no commitment" disclaimer
+- [x] T001 Write `wow-viewer/docs/architecture/ui-migration-options-2026-06-12.md` (committed)
 
 ## Phase 2: Runtime Stats Dedup
 
-- [ ] T002 Grep all call sites of `DrawRuntimeStatsPanelContent` in `ViewerApp_Sidebars.cs`
-
-- [ ] T003 Remove Runtime Stats from `DrawNavigatorPanelContent` (left sidebar)
-
-- [ ] T004 Remove "Stats" tab from `DrawUnifiedToolSidebar` Inspector tab bar
-
-- [ ] T005 Remove "Stats" tab from `DrawSceneInspectorPanelContent` (deferred to Phase 5 if SceneInspector removed)
-
-- [ ] T006 Remove trailing Runtime Stats block from `DrawTerrainControlsContent`
-
-- [ ] T007 [P] Memory bank note about Runtime Stats location
+- [x] T002 Grep all call sites — found 5 (SHIPPED `6f47f0e9`)
+- [x] T003 Remove from Navigator sidebar (SHIPPED `6f47f0e9`)
+- [x] T004 Remove "Stats" tab from Inspector tab bar (SHIPPED `6f47f0e9`)
+- [x] T005 Remove "Stats" tab from SceneInspector tab bar (SHIPPED `6f47f0e9`)
+- [x] T006 Remove trailing Runtime Stats block from Terrain Controls (SHIPPED `6f47f0e9`)
+- [x] T007 Memory bank note
 
 ## Phase 3: Status Bar Button Removal
 
-- [ ] T008 In `DrawStatusBar()` at `ViewerApp_MinimapAndStatus.cs:237`, remove the "Actions" column with Copy Scene / Log Scene buttons
-
-- [ ] T009 Reduce status bar `ImGui.BeginTable` to 2-3 columns (status, FPS, optional coords)
-
-- [ ] T010 Verify Capture Automation window still has Copy/Log Current Scene Bookmark buttons at `ViewerApp_CaptureAutomation.cs:233` and `:333`
+- [x] T008 Remove "Actions" column (Copy Scene / Log Scene buttons) from `DrawStatusBar()` (SHIPPED `db021b72`)
+- [x] T009 Reduce status bar to 3 columns: Status, Coords, Meta (SHIPPED `db021b72`)
+- [x] T010 Copy/Log Scene still available in Capture Automation window (verified — `ViewerApp_CaptureAutomation.cs:234, 237`)
 
 ## Phase 4: Capture UI-Hide Default
 
-- [ ] T011 In `PrepareNextCaptureRequest()` at `ViewerApp_CaptureAutomation.cs:564`, set `_hideUiChrome = true` for `includeUi: false` (default) requests
-
-- [ ] T012 Restore `_hideUiChrome = false` after capture frame completes (in `CompleteCaptureIfReady`)
-
-- [ ] T013 Apply same toggle per-frame for video recording in `CaptureVideoFrameIfNeeded`
-
-- [ ] T014 Validate: video capture default produces UI-hidden frames; `with_ui: true` still captures chrome
+- [x] T011 Set `_hideUiChrome = true` in `PrepareNextCaptureRequest` for `IncludeUi: false` (SHIPPED `adeb48f1`)
+- [x] T012 Restore `_hideUiChrome = false` in `CompleteCaptureIfReady` (SHIPPED `adeb48f1`)
+- [x] T013 Apply same toggle in `TryStartCurrentViewVideoRecording` / `StopVideoRecording` (SHIPPED `adeb48f1`)
+- [x] T014 `with_ui: true` flag still works (verified — `includeUi` param preserved)
 
 ## Phase 5: SceneInspector Dedup
 
-- [ ] T015 Compare SceneInspector tab bar (`ViewerApp_Sidebars.cs:1051`) vs Inspector tab bar (`ViewerApp_Sidebars.cs:802`)
-
-- [ ] T016 Decision: remove SceneInspector (if overlap > 50%) or restructure
-
-- [ ] T017 [P] If removing: delete `ShellPanelId.SceneInspector`, related fields, dispatch cases, quadrant grouping, Tools menu entry
+- [x] T015 Compared tab bars — 75% overlap (SHIPPED `21f08716`)
+- [x] T016 Decision: remove SceneInspector (SHIPPED `21f08716`)
+- [x] T017 Removed enum entry, dock state, panel content, quadrant grouping, Tools menu, all related fields (SHIPPED `21f08716`)
 
 ## Phase 6: Polish
 
-- [ ] T018 [P] Full build: `dotnet build` clean
-
-- [ ] T019 [P] Viewer smoke: launch, verify all panels render, capture works
-
-- [ ] T020 [P] Memory bank update
-
-## Dependencies
-
-- Phase 1: none
-- Phase 2: independent
-- Phase 3: independent
-- Phase 4: independent
-- Phase 5: Phase 2 (must remove Stats from SceneInspector tabs first if keeping SceneInspector)
-- Phase 6: depends on all
+- [x] T018 Full build: `dotnet build` clean (0 errors)
+- [x] T019 Runtime Stats now in 1 place (the dedicated panel at line 1014)
+- [x] T020 Memory bank updated
