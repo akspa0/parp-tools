@@ -248,7 +248,7 @@ public partial class ViewerApp
                 ? "Ready"
                 : _statusMessage.Replace(Environment.NewLine, " ").Trim();
 
-            if (ImGui.BeginTable("##statusbarLayout", 4,
+            if (ImGui.BeginTable("##statusbarLayout", 3,
                 ImGuiTableFlags.SizingFixedFit |
                 ImGuiTableFlags.NoSavedSettings |
                 ImGuiTableFlags.NoHostExtendX |
@@ -283,7 +283,6 @@ public partial class ViewerApp
 
                 ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthStretch, 1f);
                 ImGui.TableSetupColumn("Coords", ImGuiTableColumnFlags.WidthFixed, MathF.Max(280f, GetImGuiTextWidth(coordText) + 4f));
-                ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 150f);
                 ImGui.TableSetupColumn("Meta", ImGuiTableColumnFlags.WidthFixed, MathF.Max(180f, GetImGuiTextWidth(sceneSummary) + GetImGuiTextWidth(fpsText) + 28f));
 
                 ImGui.TableNextRow();
@@ -296,17 +295,6 @@ public partial class ViewerApp
                     ImGui.TextColored(new Vector4(0.7f, 0.85f, 1f, 1f), coordText);
 
                 ImGui.TableSetColumnIndex(2);
-                if (_terrainManager != null || _vlmTerrainManager != null)
-                {
-                    if (ImGui.SmallButton("Copy Scene##statusbar"))
-                        CopyTextToClipboard(BuildSceneBookmarkText(CreateCameraShotPoint("current")), "scene bookmark");
-
-                    ImGui.SameLine();
-                    if (ImGui.SmallButton("Log Scene##statusbar"))
-                        LogSceneBookmark(CreateCameraShotPoint("current"));
-                }
-
-                ImGui.TableSetColumnIndex(3);
                 if (!string.IsNullOrEmpty(sceneSummary))
                 {
                     ImGui.TextColored(new Vector4(1f, 0.9f, 0.65f, 1f), sceneSummary);
