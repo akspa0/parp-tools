@@ -444,6 +444,7 @@ public partial class ViewerApp : IDisposable
     private bool _terrainWeakSignalRestoreAllLoadedTiles = true;
     private bool _terrainWeakSignalRestoreUseTextureSubdivisions = true;
     private bool _terrainWeakSignalRestoreUseAutoFactor = true;
+    private bool _terrainWeakSignalSkipOutOfBandChunks = true;
     private float _terrainWeakSignalRestoreManualFactor = 16f;
     private float _terrainWeakSignalRestoreCandidateMinHeight = TerrainWeakSignalRestoreDefaultMinZ;
     private float _terrainWeakSignalRestoreCandidateMaxHeight = TerrainWeakSignalRestoreDefaultMaxZ;
@@ -4373,10 +4374,18 @@ void main() {
 
         float anchorHeight = tileHeightmap.MinHeight < 0f ? tileHeightmap.MinHeight : 0f;
         bool preserveNegativeFloor = anchorHeight < 0f;
+        GetTerrainWeakSignalRestoreCandidateRange(out float candidateMin, out float candidateMax);
         float[] restoredHeightmap = new float[tileHeightmap.Heights.Length];
         for (int index = 0; index < tileHeightmap.Heights.Length; index++)
         {
             float sourceHeight = tileHeightmap.Heights[index];
+            if (_terrainWeakSignalSkipOutOfBandChunks
+                && (sourceHeight < candidateMin || sourceHeight > candidateMax))
+            {
+                restoredHeightmap[index] = sourceHeight;
+                continue;
+            }
+
             float restoredHeight = anchorHeight + ((sourceHeight - anchorHeight) * factor);
             if (!preserveNegativeFloor && restoredHeight < 0f)
                 restoredHeight = 0f;

@@ -3145,6 +3145,15 @@ public partial class ViewerApp
                 ImGui.InputFloat("Restore Scale", ref _terrainWeakSignalRestoreManualFactor, 0.5f, 8f);
             }
 
+            bool skipOutOfBand = _terrainWeakSignalSkipOutOfBandChunks;
+            if (ImGui.Checkbox("Skip Out-of-Band Chunks", ref skipOutOfBand))
+            {
+                _terrainWeakSignalSkipOutOfBandChunks = skipOutOfBand;
+                MarkTerrainWeakSignalRestoreDirty();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("When enabled, chunks that contain any height outside the candidate range are left unmodified. Only chunks fully within the band are amplified.");
+
             if (!string.IsNullOrWhiteSpace(_terrainWeakSignalRestoreStatus))
                 ImGui.TextDisabled(_terrainWeakSignalRestoreStatus);
         }
