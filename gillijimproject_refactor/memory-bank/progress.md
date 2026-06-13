@@ -576,6 +576,7 @@
 - **057 archive catalog scanner (2026-06-11)**: WoWArchiveCatalog.Scan() in Core.IO/Archive parses Clients_*.txt without mounting; resolves MountLive/Staged/Available; 10 tests pass (62ms)
 - **058 PM4 Scene Graph dockable panel (2026-06-11)**: ShellPanelId.Pm4SceneGraph in BottomRight quadrant, default-visible, type-bucketed tree using cached graph info; mesh preview cut (PM4 rendering already drops FPS from 140 to 12)
 - **057 swap cancellation (2026-06-11)**: generation counter prevents stale RestoreWorldAfterDataSourceReload from running after a newer swap starts
+- **060 UI cleanup + ImGui migration note (2026-06-12)**: spec written for 5 user-visible UI fixes (Runtime Stats dedup from 5 call sites, status bar button removal, capture UI-hide default, SceneInspector dedup, migration note). Avalonia/MAUI migration captured as a deferred note at wow-viewer/docs/architecture/ui-migration-options-2026-06-12.md — no commitment, 2-3 month cost estimate
 - missing spec-template artifacts on 044 (no `plan.md`, no `data-model.md`/quickstart/contracts) are accepted for this spec because 044 is small-bounded (8 implementation tasks, 9 FRs) and the actual planning was tracked through tasks.md + 049's plan.md. Reopen if 044 expands (e.g., when T009-T011 ship).
 
 ## Next Likely Steps
