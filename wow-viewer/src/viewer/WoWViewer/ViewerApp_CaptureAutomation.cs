@@ -569,6 +569,9 @@ public partial class ViewerApp
         PendingCaptureRequest request = _captureQueue.Dequeue();
         _activeCaptureRequest = request;
 
+        if (!request.IncludeUi)
+            _hideUiChrome = true;
+
         ApplyCameraShotPoint(request.Shot);
         ApplyCaptureRequestSceneOverrides(request);
         request.Applied = true;
@@ -621,6 +624,9 @@ public partial class ViewerApp
 
         bool ok = TryCaptureFramebufferToPng(request.OutputPath, includeUi);
         _activeCaptureRequest = null;
+
+        if (!includeUi)
+            _hideUiChrome = false;
 
         _statusMessage = ok
             ? $"Captured shot: {request.OutputPath}"
@@ -1525,6 +1531,9 @@ public partial class ViewerApp
             return false;
         }
 
+        if (!includeUi)
+            _hideUiChrome = true;
+
         if (!TryGetCaptureRegion(includeUi, out _, out _, out int width, out int height))
         {
             _statusMessage = includeUi
@@ -1629,7 +1638,11 @@ public partial class ViewerApp
             return;
 
         ActiveVideoRecording recording = _activeVideoRecording;
+        bool wasNoUi = !recording.IncludeUi;
         _activeVideoRecording = null;
+
+        if (wasNoUi)
+            _hideUiChrome = false;
 
         bool success = false;
         string statusMessage = statusOverride ?? $"Saved video: {recording.OutputPath}";
