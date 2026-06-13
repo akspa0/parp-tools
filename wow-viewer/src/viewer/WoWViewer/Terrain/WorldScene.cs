@@ -1099,6 +1099,7 @@ public class WorldScene : ISceneRenderer
     private readonly Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Pm4OverlayObject> _pm4ObjectLookup = new();
     private readonly HashSet<(int tileX, int tileY, uint ck24, int objectPart)> _highlightedPm4ObjectKeys = new();
     private readonly Dictionary<(int tileX, int tileY, uint ck24), (int tileX, int tileY, uint ck24)> _pm4MergedObjectGroupKeys = new();
+    private readonly Dictionary<(int tileX, int tileY, uint ck24), List<(int tileX, int tileY, uint ck24, int objectPart)>> _pm4GroupToObjectKeys = new();
     private readonly Dictionary<(int tileX, int tileY, uint ck24), (Vector3 min, Vector3 max)> _pm4ObjectGroupBounds = new();
     private readonly Dictionary<(int tileX, int tileY, uint ck24), (Vector3 min, Vector3 max)> _pm4TileCk24Bounds = new();
     private readonly Dictionary<(int tileX, int tileY, uint ck24), Vector3> _pm4ObjectTranslations = new();
@@ -1431,7 +1432,7 @@ public class WorldScene : ISceneRenderer
         uint groupKey = objectKey.ck24 != 0
             ? objectKey.ck24
             : Pm4SyntheticZeroCk24GroupMask | (uint)objectKey.objectPart;
-        return (objectKey.tileX, objectKey.tileY, groupKey);
+        return (0, 0, groupKey);
     }
 
     private (int tileX, int tileY, uint ck24) ResolvePm4ObjectGroupKey((int tileX, int tileY, uint ck24, int objectPart) objectKey)
@@ -4074,6 +4075,7 @@ public class WorldScene : ISceneRenderer
         _pm4ResearchUnavailablePaths.Clear();
         _pm4ObjectLookup.Clear();
         _pm4MergedObjectGroupKeys.Clear();
+        _pm4GroupToObjectKeys.Clear();
         _pm4ObjectGroupBounds.Clear();
         _pm4TotalFiles = 0;
         _pm4LoadedFiles = 0;
@@ -4400,6 +4402,13 @@ public class WorldScene : ISceneRenderer
                     cachedObject.ConnectorKeys.ToList());
                 objects.Add(restored);
                 _pm4ObjectLookup[(tile.TileX, tile.TileY, restored.Ck24, restored.ObjectPartId)] = restored;
+                var groupKey = BuildPm4BaseObjectGroupKey((tile.TileX, tile.TileY, restored.Ck24, restored.ObjectPartId));
+                if (!_pm4GroupToObjectKeys.TryGetValue(groupKey, out var groupObjectKeys))
+                {
+                    groupObjectKeys = new List<(int, int, uint, int)>();
+                    _pm4GroupToObjectKeys[groupKey] = groupObjectKeys;
+                }
+                groupObjectKeys.Add((tile.TileX, tile.TileY, restored.Ck24, restored.ObjectPartId));
             }
 
             _pm4TileObjects[tileKey] = objects;
@@ -11307,15 +11316,12 @@ public class WorldScene : ISceneRenderer
 
 
                 var groupObjects = new List<((int tileX, int tileY, uint ck24, int objectPart) key, Pm4OverlayObject obj)>();
-                foreach (KeyValuePair<(int tileX, int tileY), List<Pm4OverlayObject>> tileEntry in _pm4TileObjects)
+                if (_pm4GroupToObjectKeys.TryGetValue(selectedGroupKey, out var objectKeys))
                 {
-                    List<Pm4OverlayObject> objects = tileEntry.Value;
-                    for (int i = 0; i < objects.Count; i++)
+                    foreach (var objectKey in objectKeys)
                     {
-                        Pm4OverlayObject candidate = objects[i];
-                        var candidateKey = (tileEntry.Key.tileX, tileEntry.Key.tileY, candidate.Ck24, candidate.ObjectPartId);
-                        if (ResolvePm4ObjectGroupKey(candidateKey) == selectedGroupKey)
-                            groupObjects.Add((candidateKey, candidate));
+                        if (_pm4ObjectLookup.TryGetValue(objectKey, out Pm4OverlayObject? obj))
+                            groupObjects.Add((objectKey, obj));
                     }
                 }
 
@@ -12515,6 +12521,7 @@ public class WorldScene : ISceneRenderer
         _pm4ObjectLookup.Clear();
         _highlightedPm4ObjectKeys.Clear();
         _pm4MergedObjectGroupKeys.Clear();
+        _pm4GroupToObjectKeys.Clear();
         _pm4ObjectGroupBounds.Clear();
         _pm4TileCk24Bounds.Clear();
         _pm4ObjectTranslations.Clear();
