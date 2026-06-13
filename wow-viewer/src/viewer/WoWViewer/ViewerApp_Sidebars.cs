@@ -1019,9 +1019,6 @@ public partial class ViewerApp
             case ShellPanelId.ModelInfo:
                 DrawModelInfoPanelContent();
                 break;
-            case ShellPanelId.SceneInspector:
-                DrawSceneInspectorPanelContent();
-                break;
             case ShellPanelId.Pm4Info:
                 DrawPm4InfoPanelContent();
                 break;
@@ -1031,53 +1028,6 @@ public partial class ViewerApp
         }
     }
 
-    private int _activeSceneInspectorTab;
-
-    private void DrawSceneInspectorPanelContent()
-    {
-        string[] tabs = ["Selection", "World", "Model", "Terrain"];
-        int currentTab = _activeSceneInspectorTab;
-        if (currentTab < 0 || currentTab >= tabs.Length)
-            currentTab = 0;
-
-        ImGui.BeginTabBar("##SceneInspectorTabs");
-        for (int i = 0; i < tabs.Length; i++)
-        {
-            if (ImGui.BeginTabItem(tabs[i]))
-            {
-                _activeSceneInspectorTab = i;
-                switch (i)
-                {
-                    case 0: DrawSceneInspectorSelectionTab(); break;
-                    case 1: DrawSceneInspectorWorldTab(); break;
-                    case 2: DrawSceneInspectorModelTab(); break;
-                    case 3: DrawSceneInspectorTerrainTab(); break;
-                }
-                ImGui.EndTabItem();
-            }
-        }
-        ImGui.EndTabBar();
-    }
-
-    private void DrawSceneInspectorSelectionTab()
-    {
-        DrawSelectionPanelContent();
-    }
-
-    private void DrawSceneInspectorWorldTab()
-    {
-        DrawWorldObjectsPanelContent();
-    }
-
-    private void DrawSceneInspectorModelTab()
-    {
-        DrawModelInfoPanelContent();
-    }
-
-    private void DrawSceneInspectorTerrainTab()
-    {
-        DrawTerrainControlsPanelContent();
-    }
 
     private void DrawSelectionPanelContent()
     {

@@ -70,7 +70,6 @@ public partial class ViewerApp : IDisposable
         ModelInfo,
         Minimap,
         WorkspaceBars,
-        SceneInspector,
         Pm4Info,
         Pm4SceneGraph,
     }
@@ -333,7 +332,6 @@ public partial class ViewerApp : IDisposable
         new(ShellPanelId.ModelInfo, "Model Info", ShellPanelLane.Right, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
         new(ShellPanelId.Minimap, "Minimap", ShellPanelLane.Floating, 360f, 300f, 260f, 520f),
         new(ShellPanelId.WorkspaceBars, "Workspace Bars", ShellPanelLane.Left, 360f, 280f, 240f, 520f),
-        new(ShellPanelId.SceneInspector, "Scene Inspector", ShellPanelLane.Right, 420f, 300f, 220f, SidebarMaxWidth),
         new(ShellPanelId.Pm4Info, "PM4 Info", ShellPanelLane.Right, 400f, 280f, 200f, SidebarMaxWidth),
         new(ShellPanelId.Pm4SceneGraph, "PM4 Scene Graph", ShellPanelLane.Right, 420f, 300f, 220f, SidebarMaxWidth),
     };
@@ -352,7 +350,6 @@ public partial class ViewerApp : IDisposable
     private DockPanelState _modelInfoDockState;
     private DockPanelState _minimapDockState;
     private DockPanelState _workspaceBarsDockState;
-    private DockPanelState _sceneInspectorDockState;
     private DockPanelState _pm4InfoDockState;
     private DockPanelState _pm4SceneGraphDockState;
     private readonly Dictionary<ShellPanelId, SavedShellPanelLayout> _savedShellPanelLayouts = new();
@@ -732,7 +729,6 @@ public partial class ViewerApp : IDisposable
     private bool _showUniqueIdArchaeologyWindow;
     private bool _showTaxiWindow;
     private bool _showWeakSignalWindow;
-    private bool _showSceneInspector;
     private bool _showPm4SceneGraph = true;
 
     // Camera speed (adjustable via UI)
@@ -13871,8 +13867,6 @@ void main() {
                 return ref _minimapDockState;
             case ShellPanelId.WorkspaceBars:
                 return ref _workspaceBarsDockState;
-            case ShellPanelId.SceneInspector:
-                return ref _sceneInspectorDockState;
             case ShellPanelId.Pm4Info:
                 return ref _pm4InfoDockState;
             case ShellPanelId.Pm4SceneGraph:
@@ -13895,7 +13889,6 @@ void main() {
             ShellPanelId.ModelInfo => _showRightSidebar && _showModelInfo && !string.IsNullOrWhiteSpace(_modelInfo),
             ShellPanelId.Minimap => _showMinimapWindow,
             ShellPanelId.WorkspaceBars => false,
-            ShellPanelId.SceneInspector => _showSceneInspector && _worldScene != null,
             ShellPanelId.Pm4Info => _showRightSidebar && _worldScene != null,
             ShellPanelId.Pm4SceneGraph => _showPm4SceneGraph && _worldScene != null,
             _ => false,
@@ -13910,7 +13903,6 @@ void main() {
             ShellPanelId.Inspector => _suppressRightSidebarForLayout,
             ShellPanelId.Minimap => _suppressMinimapForLayout,
             ShellPanelId.WorkspaceBars => _suppressLeftSidebarForLayout,
-            ShellPanelId.SceneInspector => _suppressRightSidebarForLayout,
             ShellPanelId.Pm4Info => _suppressRightSidebarForLayout,
             ShellPanelId.Pm4SceneGraph => _suppressRightSidebarForLayout,
             _ => false,
@@ -13981,9 +13973,6 @@ void main() {
                     return;
                 case ShellPanelId.Minimap:
                     _showMinimapWindow = true;
-                    return;
-                case ShellPanelId.SceneInspector:
-                    _showSceneInspector = true;
                     return;
                 case ShellPanelId.Pm4Info:
                     _showRightSidebar = true;
@@ -14175,7 +14164,6 @@ void main() {
             || panelId == ShellPanelId.Minimap;
         bool isTopQuadrant = panelId == ShellPanelId.Navigator
             || panelId == ShellPanelId.Inspector
-            || panelId == ShellPanelId.SceneInspector
             || panelId == ShellPanelId.RuntimeStats
             || panelId == ShellPanelId.ModelInfo;
 
