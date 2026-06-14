@@ -16,7 +16,7 @@
 
 **Goal**: Keep old data/conversion tools reachable without presenting them as primary file-load actions.
 
-- [x] T006 [US3] Remove `Open MK Dataset...` and `Open Zarr Dataset...` from the `File` menu.
+- [x] T006 [US3] Remove `Open MK Dataset...` from the `File` menu (dead code). `Open Zarr Dataset...` moved to `Tools > Offline Data / Conversion`.
 - [x] T007 [US3] Add a dedicated `Tools > Offline Data / Conversion` submenu for MK/Zarr, dataset build, training, texture transfer, and map/WMO conversion utilities.
 - [x] T008 [US1] Expose a `View > Dockable Shell Panels` toggle so the shell mode is controllable and persisted.
 

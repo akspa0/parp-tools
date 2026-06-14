@@ -2,13 +2,13 @@
 
 **Feature Branch**: `041-mh2o-mclq-liquid-type-determination-fix`
 **Created**: 2026-06-02
-**Status**: Draft (Implementation Slice)
+**Status**: Draft (Implementation Slice — core helpers exist, unit tests missing)
 **Predecessor**: `specs/040-mh2o-mclq-liquid-type-determination/` (Research Slice, approved)
 **Input**: User description: "write spec 041 (liquid type fix)" — closing the loop on the "lava for everything" rendering bug in 1.x+ data. The 3.3.5 Ghidra evidence and wow-viewer bug catalog are in spec 040's `research.md`.
 
 ## Status Notice
 
-This is the **implementation slice** for spec 040. It targets exactly the 5 files in spec 040's "Files to Fix" table plus 2 new helper types, validates against real 1.x/2.x/3.x data from `output/tmp/wowarchive-clients/`, and ships an inspection command for empirical proof. It honors spec 040's `FR-009` and the protected surfaces from RULE 10 + spec 037.
+This is the **implementation slice** for spec 040. NOTE: `McnkFlagDecoder.cs` and `DbcLiquidTypeTable.cs` exist in src/ but their claimed unit tests (`McnkFlagDecoderTests.cs`, `DbcLiquidTypeTableTests.cs`) do NOT exist on disk. The spec status has been updated to reflect this gap. It targets exactly the 5 files in spec 040's "Files to Fix" table plus 2 new helper types, validates against real 1.x/2.x/3.x data from `output/tmp/wowarchive-clients/`, and ships an inspection command for empirical proof. It honors spec 040's `FR-009` and the protected surfaces from RULE 10 + spec 037.
 
 ## User Scenarios & Testing
 
