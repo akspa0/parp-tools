@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wow-viewer/specs/036-renderer-improvements/contracts/renderer-validation-scenario.schema.json",
+  "title": "RendererValidationScenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "buildProfile",
+    "clientRoot",
+    "mapContext",
+    "subsystems",
+    "evidenceType",
+    "passCriteria"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "buildProfile": {
+      "type": "string",
+      "minLength": 1
+    },
+    "clientRoot": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mapContext": {
+      "type": "string",
+      "minLength": 1
+    },
+    "subsystems": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidenceType": {
+      "type": "string",
+      "enum": [
+        "screenshot",
+        "trace-log",
+        "probe-output",
+        "render-comparison"
+      ]
+    },
+    "passCriteria": {
+      "type": "string",
+      "minLength": 1
+    },
+    "blockedBy": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

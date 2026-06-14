@@ -7,7 +7,7 @@ description: "Task list for spec 043 — 1.x Classic MDX (chunked, MDLX magic) m
 **Input**: `specs/043-m2-chunked-mdx-classic-support/spec.md`
 **Prerequisites**: `spec.md` (written). `plan.md` deliberately skipped — spec is detailed enough; the file paths below are explicit.
 
-**Status (2026-06-03)**: Active implementation lane. The foundational `M2Chunked` reader/dispatcher, staged smoke tests, viewer standalone open-file runtime route, and `WowViewer.Tool.Inspect m2 inspect` chunked-MDX support are landed. Still open against the full draft: companion `.skin` / `.anim` ingestion inside `M2ChunkedModelReader`, richer multi-profile handling beyond the generated conversion skin, and any 2.x pre-`2.0.0` research.
+**Status (2026-06-14)**: Foundational chunked MDLX reader landed for 0.5.3/0.7.0/0.8.0. Note: 1.12.1 .mdx uses MD20 (not MDLX) — see archived spec 048. The task list below predates this discovery and describes the old unified plan. Tasks T001-T027 are superseded by the actual shipped code in `WowViewer.Core.IO/M2Chunked/`. Re-open this spec for chunked-MDLX-only work when 0.5.3+ MDX rendering is the focus. Clean task breakdown will be needed at that point — this list is stale.
 
 **Tests**: Tests are explicitly required (SC-001, SC-002, SC-005, SC-006). Write them FIRST per the constitution. Mark with `[USn]`.
 

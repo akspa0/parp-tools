@@ -26,6 +26,12 @@ Specs moved here are obsolete (superseded by later work, replaced by refactored 
 | 050 | PM4 WMO group matching — consolidated into 046 |
 | 052 | PM4 signature matcher — consolidated into 046 |
 
+| 005 | PM4 workbench cleanup — targets legacy MdxViewer; all PM4 work now in wow-viewer specs (046/058) |
+| 020 | Renderer culling — subsumed by 056 (GPU/LOD modernization) |
+| 026 | Capture batch tuning — no tasks defined; concerns owned by 056 / validation-capture |
+| 036 | Renderer improvements — explicitly superseded by 056 (GPU/LOD modernization) |
+| 059 | M2 MD20 v109 Cata support — implemented 2026-06-11; Cataclysm M2 objects verified working |
+
 ## Completed specs (referenced from archive, available in active specs directory)
 
-Specs 012, 014, 024, 025, 034, 047, 048 are fully complete and live in the active specs directory.
+Specs 012, 014, 024, 025, 034, 047, 048, 059, 060 are fully complete and live in the active specs directory (or archived after completion).

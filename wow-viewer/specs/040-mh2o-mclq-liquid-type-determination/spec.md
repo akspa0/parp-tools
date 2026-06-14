@@ -2,7 +2,7 @@
 
 **Feature Branch**: `040-mh2o-mclq-liquid-type-determination`
 **Created**: 2026-06-02
-**Status**: Research Slice (no implementation)
+**Status**: Research complete — consumed by spec 041 (liquid type fix)
 **Input**: User description: "we do not handle liquids from MH2O chunks properly. I think we just aren't using the MCNK chunk flags in conjunction with the MCLQ or MH2O data properly, to determine what is meant to render from the data. the renderer just draws lava for everything in 1.x+ version data, for some reason, even after adding liquidType dbc lookups to try and resolve the issue."
 
 ## Status Notice

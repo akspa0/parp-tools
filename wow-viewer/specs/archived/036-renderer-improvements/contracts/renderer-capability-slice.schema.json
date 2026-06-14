@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wow-viewer/specs/036-renderer-improvements/contracts/renderer-capability-slice.schema.json",
+  "title": "RendererCapabilitySlice",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "sourceSpec",
+    "subsystem",
+    "description",
+    "canonicalOwnerLayer",
+    "convergencePhaseId",
+    "validationExpectation"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sourceSpec": {
+      "type": "string",
+      "enum": [
+        "030",
+        "031",
+        "032"
+      ]
+    },
+    "subsystem": {
+      "type": "string",
+      "enum": [
+        "Terrain",
+        "WMO",
+        "Lighting",
+        "Fog",
+        "Sky",
+        "Liquid",
+        "Viewer"
+      ]
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "canonicalOwnerLayer": {
+      "type": "string",
+      "enum": [
+        "Core.IO",
+        "Core.Runtime",
+        "WowViewer.App"
+      ]
+    },
+    "prerequisites": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "convergencePhaseId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "validationExpectation": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

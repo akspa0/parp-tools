@@ -2,7 +2,7 @@
 
 **Feature Branch**: `038-m2-301-renderer-perf-research`
 **Created**: 2026-06-02
-**Status**: Research Slice (Draft, no implementation)
+**Status**: Research complete — consumed by spec 056
 **Input**: User description: "Dig deep with Ghidra on WoW.exe 3.0.1, uncover all aspects of the engine's renderer in this version, as it includes many improvements that our renderer does not handle properly. We must improve our renderer's performance by baking in stuff that the real engine does that we don't do, especially LOD and lighting."
 
 ## Scope Note: Research Only

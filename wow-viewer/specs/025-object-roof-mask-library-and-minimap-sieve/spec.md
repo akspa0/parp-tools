@@ -4,7 +4,7 @@
 
 **Created**: 2026-05-26
 
-**Status**: Draft
+**Status**: Complete
 
 **Input**: User request: build a curation library that harvests object top-view images tied to asset metadata, then uses that library to generate an on-the-fly object-roof mask for minimap inputs so training can safely ignore buildings and other object families even when placement metadata is absent at inference time.
 

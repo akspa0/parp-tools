@@ -2,7 +2,7 @@
 
 **Feature Branch**: `060-ui-cleanup-and-migration-notes`
 **Created**: 2026-06-12
-**Status**: Draft
+**Status**: Complete
 **Owner**: wow-viewer (viewer shell)
 **Related**: spec 049 (Viewer UI Consolidation), spec 044 (Viewer Shell Usability)
 

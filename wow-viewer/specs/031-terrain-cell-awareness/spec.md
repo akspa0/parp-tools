@@ -4,7 +4,7 @@
 
 **Created**: 2026-05-30
 
-**Status**: Draft
+**Status**: Research complete — consumed by spec 056
 
 **Input**: Ghidra RE of wowclient.exe build 3368 reveals the complete terrain chunk vertex layout, sub-chunk (cell) grid, face plane system, hole mask, and collision addressing scheme. The current tooling treats terrain chunks as flat 9x9 vertex grids without inner vertices, has no cell-level structure, applies hole masks as a viewer overlay rather than at the cell granularity the native client uses, and uses a CPU-bound renderer that processes all chunks at full detail. Understanding and implementing the native cell system is key to efficient terrain rendering and correct spatial queries.
 

@@ -4,7 +4,7 @@
 
 **Created**: 2026-05-30
 
-**Status**: Draft
+**Status**: Research complete — consumed by spec 056
 
 **Input**: Ghidra RE of wowclient.exe build 3368 reveals the complete WMO group rendering pipeline, including the render mode dispatch, batch structure, per-batch material flags, interior/exterior lighting split, liquid rendering, lightmap UV handling, and portal-walk visibility. The current `WmoRenderer.cs` in MdxViewer implements a simplified 4-pass system that does not match the native client's dispatch logic, producing incorrect lighting, missing render passes, and broken interior fog. This spec captures the Ghidra-confirmed architecture as documentation and prescribes the fixes needed for `WowViewer.Core.Runtime` to implement WMO rendering correctly.
 

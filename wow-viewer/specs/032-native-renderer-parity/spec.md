@@ -4,7 +4,7 @@
 
 **Created**: 2026-05-30
 
-**Status**: Draft
+**Status**: Research complete — consumed by spec 056
 
 **Input**: Ghidra RE of wowclient.exe build 3368 reveals the complete terrain rendering pipeline, WMO render pass dispatch, water/liquid system, lighting model, LOD strategy, and debug toggle system. The current wow-viewer renderer (via MdxViewer) is a simplified CPU-bound implementation that lacks inner vertices, per-batch material flags, interior/exterior split, interior fog, liquid type dispatch, lightmap pass split, distance-based LOD, per-chunk light selection, animated liquid textures, shadow overlay, and low-detail far terrain. This spec captures every rendering gap and prescribes the work needed for `WowViewer.Core.Runtime` to achieve visual parity with the native client.
 
