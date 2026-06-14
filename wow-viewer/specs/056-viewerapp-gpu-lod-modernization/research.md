@@ -149,10 +149,7 @@ This file is the Phase 0 research that the plan's Phase 0 step "lock the contrac
 
 | Plan / spec | Section | Mapped to phase |
 |---|---|---|
-| `wow-engine-modernization-plan-2026-05-14.md` | Pillar C (Backend Separation) | All phases. |
-| `wow-engine-modernization-plan-2026-05-14.md` | Phase E2 (Vulkan baseline) | **Out of scope**, follow-on spec. |
-| `wow-engine-modernization-plan-2026-05-14.md` | Phase E3 (OpenGL fallback) | Phase 1-5 (this spec is the OpenGL-fallback work, with modernized path). |
-| `wow-engine-modernization-plan-2026-05-14.md` | Phase E4 (World Rendering Closure) | Phase 2, 3, 4, 5. |
+| `wow-engine-modernization-plan-2026-05-14.md` | viewer-first, UE bridge. Replaced 2026-06-14. | This spec supersedes the old engine-phases framing. OpenGL modernization is viewer-internal — no Vulkan, no UE backend here. |
 | `wow-engine-editor-and-interop-plan-2026-05-14.md` | Renderer Layer Model | Phase 1 (Contracts). |
 | `game-viewer-plan-pack-2026-05-14/gv-14-render-layer-contracts.md` | Render layer contracts | Phase 1 (Contracts). |
 | `game-viewer-plan-pack-2026-05-14/gv-15-terrain-and-liquid-render-packets.md` | Terrain + liquid render packets | Phase 2 + 4. |

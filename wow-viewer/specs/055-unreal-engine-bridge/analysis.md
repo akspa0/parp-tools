@@ -76,7 +76,7 @@
 
 ## Gap Analysis vs Existing Plans
 
-### Conflicts with `wow-engine-modernization-plan-2026-05-14.md`
+### Relation to `wow-engine-modernization-plan-2026-05-14.md`
 - That plan calls Vulkan as primary backend, OpenGL as fallback. This spec replaces that with UE. **Resolution**: the spec acknowledges this in "Impact on Existing Plans" — that plan must be amended to recognize UE as primary.
 - That plan has 10 phases (E0-E9). This spec's bridge work overlaps with E1 (Runtime Contracts), E2 (Vulkan Backend), and E3 (OpenGL Fallback). **Resolution**: the bridge spec supersedes E2 and most of E3; the OpenGL path in `WowViewer.App` becomes a headless-only diagnostic surface.
 

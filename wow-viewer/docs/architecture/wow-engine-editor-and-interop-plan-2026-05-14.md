@@ -5,7 +5,7 @@
 - status: active
 - date: 2026-05-14
 - owner: `wow-viewer`
-- parent: `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md`
+- parent: `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` (replaced 2026-06-14 — viewer-first, UE bridge; this doc remains active as editor sub-plan)
 - intent: define the editor/tool identity of the engine, with import/export-first UX, multi-game compatibility layers, and metadata-driven feature gating
 
 ## Thesis

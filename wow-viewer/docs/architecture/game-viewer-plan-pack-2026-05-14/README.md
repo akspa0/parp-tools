@@ -5,7 +5,7 @@
 - status: active
 - date: 2026-05-14
 - working-label: `museum-explorer`
-- parent: `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md`
+- parent: `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` (replaced 2026-06-14 — viewer-first, UE bridge)
 - host-plan: `wow-viewer/docs/architecture/game-viewer-host-plan-2026-05-13.md`
 - editor-plan: `wow-viewer/docs/architecture/wow-engine-editor-and-interop-plan-2026-05-14.md`
 

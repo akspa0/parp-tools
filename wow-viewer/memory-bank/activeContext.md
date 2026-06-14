@@ -1,10 +1,16 @@
 # Active Context — wow-viewer
 
-**Branch**: `v0.5.0-dev` | **Date**: 2026-06-10
+**Branch**: `v0.5.0-dev` | **Date**: 2026-06-14
+
+## Direction Change
+
+The old `wow-engine-modernization-plan-2026-05-14.md` (engine program, Vulkan-first, museum-explorer, repo extraction) has been replaced. **This is a WoW viewer.** The libraries we build for the viewer serve as the tooling that bridges to Unreal Engine. No Vulkan, no WebGL, no Museums, no BASE repo extraction.
+
+OpenGL/Silk.NET is the viewer rendering path. The UE bridge (spec 055) consumes `Core.*` libraries from C#/C++ interop.
 
 ## Current Focus
 
-**Spec 056 — ViewerApp Refactor + GPU Acceleration + LOD Modernization.** New spec, plan, research, data-model, contracts, quickstart, and 80-task breakdown written 2026-06-10. Target: shrink `ViewerApp.cs` (621k bytes) by promoting viewer-app `Rendering/*` (28+ files) into a real shared `WowViewer.Core.Renderer` library, modernize OpenGL via Silk.NET (retained-mode VBO/IBO/UBO + instanced rendering + frustum culling), and add the full LOD matrix (terrain mesh LOD, object LOD, water LOD, light LOD, WDL far horizon, BLP mipmaps). 9 phases (0-8), max 10 tasks each. Supersedes `specs/036-renderer-improvements`. Vulkan primary, compute shaders, async streaming, and the Unreal bridge are explicit out-of-scope follow-ons.
+**Spec 056 — ViewerApp Refactor + GPU Acceleration + LOD Modernization.** Target: shrink `ViewerApp.cs` (621k bytes) by promoting viewer-app `Rendering/*` (28+ files) into a real shared `WowViewer.Core.Renderer` library, modernize OpenGL via Silk.NET (retained-mode VBO/IBO/UBO + instanced rendering + frustum culling), and add the full LOD matrix (terrain mesh LOD, object LOD, water LOD, light LOD, WDL far horizon, BLP mipmaps). 9 phases (0-8), max 10 tasks each. Supersedes `specs/036-renderer-improvements`. Unreal Engine bridge is spec 055 — separate lane.
 
 ## Active Specs (by priority)
 

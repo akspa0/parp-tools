@@ -1,9 +1,8 @@
 # wow-viewer Complete Porting Roadmap
 
-Top-level direction note:
+Top-level direction: WoW viewer; libraries bridge to Unreal Engine. See `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md`.
 
-- `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` is now the primary architectural framing for the program.
-- This roadmap remains the porting and capability roadmap for the current `wow-viewer` codebase underneath that broader engine direction.
+This roadmap is the porting and capability roadmap for the current `wow-viewer` codebase.
 
 **Version**: 1.4 — 2026-05-09
 **Status**: Active — Phase C (Converters) IN PROGRESS — AlphaToLk validated, LkToAlpha landed with focused regression proof; NPZ interchange promoted, archival-grade ADT regeneration from shards not yet complete

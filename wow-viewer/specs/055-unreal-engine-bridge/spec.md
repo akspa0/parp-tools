@@ -63,7 +63,7 @@ This spec defines a bridge layer that leaves all data ownership in the existing 
 
 3. **Unreal plugin owns UE-native conversion** — The C++ UE module translates flat C structs (arrays of vertices, indices, UVs, bone weights) into UE-native types (`UStaticMesh`, `USkeletalMesh`, `UTexture2D`, `UWorld`, `ALandscapeProxy`, etc.). This keeps UE-specific code in UE land.
 
-4. **Backend strategy changed** — This spec supersedes the Vulkan-first backend direction in `wow-engine-modernization-plan-2026-05-14.md`. Unreal Engine becomes the primary rendering backend. The OpenGL/Silk.NET path in `WowViewer.App` remains as a headless/diagnostic fallback for validation captures.
+4. **Backend strategy** — Unreal Engine is the bridge target. The OpenGL/Silk.NET viewer remains the primary diagnostic/inspection surface. The old `wow-engine-modernization-plan-2026-05-14.md` (Vulkan-first) was replaced 2026-06-14.
 
 ## User Scenarios & Testing
 
@@ -215,7 +215,7 @@ The bridge exposes DBC/DB2 table data as UE DataTable assets, allowing Blueprint
 
 ## Impact on Existing Plans
 
-1. **`wow-engine-modernization-plan-2026-05-14.md`** — The Vulkan-first backend strategy is superseded by Unreal Engine as the primary rendering backend. OpenGL/Silk.NET remains as headless/diagnostic fallback. The engine-runtime contracts (Pillar B) still apply but now target the UE bridge surface.
+1. **`wow-engine-modernization-plan-2026-05-14.md`** — Replaced 2026-06-14. Viewer-first, libraries bridge to UE. The UE bridge consumes `Core.*`/`Core.IO.*`/`Core.PM4.*`/etc. from C#/C++ interop.
 2. **`game-viewer-host-plan-2026-05-13.md`** — `WowViewer.App` becomes a diagnostic/compatibility host. The "game-viewer" product identity may merge with or be superseded by the UE editor workflow.
 3. **`wow-viewer-library-completeness-plan-2026-05-06.md`** — The c rendering gap column becomes less urgent since UE handles rendering.
 4. **Constitution** — The `Silk.NET.OpenGL` line in the Technology Stack section is superseded by Unreal Engine. `.NET AOT` is added as a delivery mechanism.

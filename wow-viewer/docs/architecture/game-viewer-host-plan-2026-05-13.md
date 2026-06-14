@@ -1,10 +1,6 @@
 # game-viewer Host Plan
 
-Superseded as the top-level direction by:
-
-- `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md`
-
-This file remains active as the **app-host and viewer migration sub-plan** inside the broader engine program.
+This file is the **app-host and viewer migration sub-plan** for the WoW viewer.
 
 ## Status
 

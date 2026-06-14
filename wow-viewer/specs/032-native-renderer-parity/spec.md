@@ -715,6 +715,6 @@ Alpha terrain has a critical difference from LK terrain that the renderer must h
 
 - **Implements rendering for**: `030-wmo-render-pass-architecture` — this spec implements the WMO render passes documented there.
 - **Implements rendering for**: `031-terrain-cell-awareness` — this spec implements the 145-vertex mesh rendering documented there.
-- **Extends**: `wow-engine-modernization-plan-2026-05-14.md` — renderer parity is a core engine milestone.
+- **Extends**: `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` (viewer-first + UE bridge; this spec drives OpenGL renderer parity within the viewer)
 - **Depends on**: `030` and `031` data structures being available before rendering implementation begins.
 - **Informs**: `020-renderer-culling-and-tile-capture` — correct rendering + LOD + culling enables efficient tile capture.

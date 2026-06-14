@@ -14,15 +14,14 @@ Define the future extraction boundary where the engine becomes its own repositor
 ## Touched Surfaces
 
 - future top-level repo layout docs
-- `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md`
+- `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` (replaced 2026-06-14 — no repo extraction; this stays a WoW viewer)
 - `wow-viewer/docs/architecture/game-viewer-host-plan-2026-05-13.md`
 - plan-pack index and follow-up micro-plans
 
 ## Inputs And Assumptions
 
-- `wow-viewer` remains the current development host because the new repo does not exist yet
-- once `v0.5.0` is complete, the engine will be extracted and the last legacy `MdxViewer` binary will stay with the old repo
-- `wow-viewer` should survive that extraction as a supported profile/library family, not as the whole product definition
+- `wow-viewer` is the development host — no engine repo extraction planned
+- `v0.5.0` completes the viewer migration; libraries bridge to Unreal Engine
 
 ## Outputs
 

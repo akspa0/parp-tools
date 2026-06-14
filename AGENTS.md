@@ -1,7 +1,7 @@
 # Codex Workspace Instructions — v0.5.0 Branch (Engine Reset)
 
 
-**Top-level plan: `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md`.**
+**Program direction: `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` (WoW viewer; libraries bridge to Unreal Engine).**
 
 ---
 

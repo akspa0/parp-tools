@@ -203,7 +203,7 @@ description: "Task list for the Unreal Engine bridge feature"
 
 - [ ] T078 [P] [Polish] Create `wow-viewer/scripts/build-bridge.ps1` — produces the AOT DLL and copies it into `wow-viewer/external/ue-bridge/ThirdParty/wowviewer_bridge/`
 - [ ] T079 [P] [Polish] Create `wow-viewer/scripts/test-bridge.ps1` — CI script that loads each (client, map) pair from `contracts/test-maps.md` and reports success/failure
-- [ ] T080 [Polish] Update `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` — reflect UE as primary backend, OpenGL/Silk.NET as headless/diagnostic fallback
+- [x] T080 [Polish] `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` — replaced 2026-06-14: viewer-first, libraries bridge to UE. No Vulkan, no WebGL, no Museums.
 - [ ] T081 [P] [Polish] Update `wow-viewer/docs/architecture/game-viewer-host-plan-2026-05-13.md` — reflect that `WowViewer.App` is now a CLI/diagnostic host
 - [ ] T082 [P] [Polish] Update `wow-viewer/docs/architecture/wow-viewer-library-completeness-plan-2026-05-06.md` — mark renderer gaps as deprecated
 - [ ] T083 [P] [Polish] Update memory bank: `wow-viewer/memory-bank/activeContext.md` and `progress.md` with bridge status, phase count, current state

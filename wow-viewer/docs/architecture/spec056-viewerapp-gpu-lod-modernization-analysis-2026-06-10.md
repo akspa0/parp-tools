@@ -6,7 +6,7 @@
 - proposed feature id: `056`
 - owner: `wow-viewer`
 - branch: `v0.5.0-dev`
-- parents: `wow-engine-modernization-plan-2026-05-14.md`, `wow-engine-editor-and-interop-plan-2026-05-14.md`, `game-viewer-host-plan-2026-05-13.md`, `wow-viewer-full-porting-roadmap.md`, `wow-viewer-library-completeness-plan-2026-05-06.md`
+- parents: `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` (replaced 2026-06-14 — viewer-first, UE bridge; this spec is viewer-internal OpenGL modernization), `wow-engine-editor-and-interop-plan-2026-05-14.md`, `game-viewer-host-plan-2026-05-13.md`, `wow-viewer-full-porting-roadmap.md`, `wow-viewer-library-completeness-plan-2026-05-06.md`
 
 > Tiny context check (RULE 11A):
 > - target surface: `wow-viewer/src/viewer/WoWViewer/ViewerApp*.cs` size + render pipeline modernization (GPU/LOD)
@@ -92,7 +92,7 @@ The current state is essentially "we have the foundation files for a renderer li
 
 | Doc / Spec | Scope overlap | Decision |
 |---|---|---|
-| `wow-engine-modernization-plan-2026-05-14.md` | Defines the **Vulkan-first** backend, **OpenGL fallback** approach, and the `WowViewer.Core.Runtime` engine center | Use as the top-level direction; this spec should sit *under* it as the GPU/LOD sub-effort. |
+| `wow-engine-modernization-plan-2026-05-14.md` | Replaced 2026-06-14 — viewer-first, UE bridge. OpenGL is the viewer rendering path; no Vulkan. | This spec IS the OpenGL modernization effort for the viewer. |
 | `wow-engine-editor-and-interop-plan-2026-05-14.md` | Defines the editor + interop shell | Indirectly affected (the viewer app will become a host of the engine). |
 | `game-viewer-host-plan-2026-05-13.md` (slices 3, 4, 5, 6) | World session closure, terrain/liquid shader baseline, skybox + lighting, standalone asset consumer | **Direct overlap** with the "renderer modernization" half. Slices 3-6 are basically the same effort framed differently. |
 | `wow-viewer-full-porting-roadmap.md` (Phase I, Priority 5) | Lists "OpenGL renderer port" + "Vulkan renderer primary backend" + "Map editor" as a long-range Priority 5 | The user is now asking for this lane to be pulled forward. |

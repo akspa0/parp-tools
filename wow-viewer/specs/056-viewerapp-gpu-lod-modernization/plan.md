@@ -5,7 +5,7 @@
 **Input**: Feature specification from `specs/056-viewerapp-gpu-lod-modernization/spec.md`. Locked decisions D1–D7 are in the spec.
 
 **Parents**:
-- `docs/architecture/wow-engine-modernization-plan-2026-05-14.md` (Pillar C — backend separation)
+- `docs/architecture/wow-engine-modernization-plan-2026-05-14.md` (viewer-first, UE bridge; this spec is viewer-internal OpenGL modernization)
 - `docs/architecture/spec056-viewerapp-gpu-lod-modernization-analysis-2026-06-10.md` (audit)
 - `wow-viewer-library-completeness-plan-2026-05-06.md` Section 2.3 + Phase F (now this spec)
 - `game-viewer-host-plan-2026-05-13.md` slices 3-6 (now this spec)

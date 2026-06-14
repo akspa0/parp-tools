@@ -15,7 +15,7 @@ Make audio a first-class engine subsystem beside rendering rather than a late ap
 ## Touched Surfaces
 
 - `wow-viewer/docs/architecture/audio-engine-plan-2026-04-21.md`
-- `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md`
+- `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` (replaced 2026-06-14 — viewer-first, UE bridge; audio is a viewer subsystem)
 - future `BASE/Audio` ownership docs
 - future runtime/audio contracts
 

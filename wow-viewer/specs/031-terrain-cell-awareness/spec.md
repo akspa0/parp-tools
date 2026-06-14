@@ -191,4 +191,4 @@ The terrain mesh builder generates triangles using the full 145-vertex layout wi
 - **Informs**: `029-wmo-minimap-signal` — cell-level addressing enables correlating WMO footprint positions with terrain minimap tiles.
 - **Informs**: `025-object-roof-mask-library-and-minimap-sieve` — cell awareness improves the minimap sieve's spatial precision.
 - **Informs**: `020-renderer-culling-and-tile-capture` — cell-level culling is a prerequisite for efficient terrain capture.
-- **Extends**: `wow-engine-modernization-plan-2026-05-14.md` — terrain cell awareness is a core engine data structure.
+- **Extends**: `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` (viewer-first + UE bridge)

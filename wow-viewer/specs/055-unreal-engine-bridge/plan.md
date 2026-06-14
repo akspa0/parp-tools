@@ -8,7 +8,7 @@
 
 Replace the Silk.NET OpenGL viewer in `WowViewer.App` with an Unreal Engine 5.x plugin that consumes the existing C# format/data libraries through a .NET 10 Native AOT-compiled C API. All format parsing stays in `WowViewer.Core` / `WowViewer.Core.IO` / `WowViewer.Core.Runtime`. The UE plugin owns the conversion from flat C data structures to UE-native types (UStaticMesh, USkeletalMesh, UTexture2D, ALandscapeProxy, etc.) and the engine-native workflow surface (Blueprint nodes, console commands, asset import actions, editor settings).
 
-This plan supersedes the Vulkan-first backend direction in `wow-engine-modernization-plan-2026-05-14.md` (Phase E2 and most of E3). The OpenGL/Silk.NET path becomes a headless/diagnostic fallback for validation captures only.
+This plan defines the Unreal Engine bridge for `wow-viewer` libraries. The old `wow-engine-modernization-plan-2026-05-14.md` (Vulkan-first) was replaced 2026-06-14 — viewer-first with UE bridge, not a custom engine stack.
 
 ## Technical Context
 
@@ -393,7 +393,7 @@ The plan is decomposed into 9 phases. Each phase ends with a real-data validatio
 **Tasks**:
 - 9.1: Build pipeline automation — `scripts/build-bridge.ps1` that produces the AOT DLL and copies it into the UE plugin's `ThirdParty/wowviewer_bridge/`
 - 9.2: Test map matrix execution — CI script that loads each (client, map) pair from `contracts/test-maps.md` and reports success/failure
-- 9.3: Update `wow-engine-modernization-plan-2026-05-14.md` to reflect UE as primary backend
+- 9.3: Reference the updated `wow-engine-modernization-plan-2026-05-14.md` (viewer-first + UE bridge, replaced 2026-06-14)
 - 9.4: Update `game-viewer-host-plan-2026-05-13.md` to reflect that `WowViewer.App` is now a CLI/diagnostic host
 - 9.5: Update `wow-viewer-library-completeness-plan-2026-05-06.md` to mark renderer gaps as deprecated
 - 9.6: Update memory bank (`activeContext.md`, `progress.md`) with bridge status

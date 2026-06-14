@@ -243,6 +243,6 @@ A viewer user inside a dungeon WMO sees interior fog that matches the native cli
 ## Relationship to Other Specs
 
 - **Informs**: `029-wmo-minimap-signal` — correct WMO rendering is needed for the GPU-rendered top-down capture path that complements the BLP harvest.
-- **Extends**: `wow-engine-modernization-plan-2026-05-14.md` — WMO rendering is a core engine runtime capability.
+- **Extends**: `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` (viewer-first + UE bridge; WMO rendering serves the viewer and the UE bridge equally)
 - **Complements**: `031-terrain-cell-awareness` — terrain and WMO are the two primary world rendering subsystems.
 - **Replaces**: The ad-hoc WMO rendering knowledge previously scattered across chat sessions and `WmoRenderer.cs` comments.

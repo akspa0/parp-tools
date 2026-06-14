@@ -48,8 +48,8 @@
 - **2026-06-09 MSCN/MSPV lazy guard fix**: The `EnsurePm4MscnData` / `EnsurePm4MspvData` lazy extractors at `WorldScene.cs:10680` and 10703 had an inverted early-return: `if (_pm4TileMscnPoints.Count > 0 || _pm4TileObjects.Count == 0) return;` bailed out as soon as ANY tile was populated, so subsequent camera shifts that added new tiles never got their MSCN/MSPV points extracted. The fix drops the `Count > 0` short-circuit and trusts the inner per-tile `ContainsKey` guard. **The "MSCN/MSPV nodes require clicking Reload PM4" symptom is resolved.** This is a pure correctness fix, not a cache fix; it does not change the cache architecture.
 - **2026-06-09 Spec consolidation + memory bank merge**: Consolidated 52 specs → 25 active + 19 archived. Archived obsolete V16/V17 model specs, merged 050/052 into 046. Decommissioned `gillijimproject_refactor/memory-bank/` in favor of `wow-viewer/memory-bank/`. Created new wow-viewer memory-bank files: projectbrief, techContext, systemPatterns, dataPaths, codingStandards. Wrote WoWViewer README.md, CLI-TOOLS.md advanced guide, and PLANS-OVERVIEW.md. Updated activeContext.md to current state.
 
-## MotherShip Direction
-Long-range: `theMothership/game-engine/` — universal game engine with WoW plugin. See `wow-engine-modernization-plan-2026-05-14.md`.
+## Direction
+WoW viewer. Libraries bridge to Unreal Engine. No custom engine stack. See `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` (replaced 2026-06-14).
 
 ## Spec 056 — ViewerApp + GPU + LOD Modernization (NEW 2026-06-10)
 
