@@ -9,9 +9,7 @@ WoW viewer. Libraries bridge to Unreal Engine. No Vulkan/WebGL/Museums/BASE.
 
 | Spec | State | Next |
 |------|-------|------|
-| **056 GPU/LOD modernization** | 0/81 — top priority | Phase 0: test project + baselines |
-| **033 MdxViewer migration** | 0/49 — critical | Scope down to bite-sized slices |
-| **046 PM4 asset matching** | ~26/42 — C# done | Python/Zarr corpus lane |
+| **046 PM4 asset matching** | **Current focus** — C# done, Python unstarted | Build Zarr signal-store lane |
 | **058 PM4 scene graph** | ~18/22 — polish | T020/T028/T029 |
 | **061 Weak signal detect** | 15/21 | Verification checklist |
 | **062 Weak signal tile patcher** | 13/20 | Cross-tile seam blending, perf |

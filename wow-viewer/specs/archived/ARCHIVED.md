@@ -30,6 +30,7 @@ Specs moved here are obsolete (superseded by later work, replaced by refactored 
 | 020 | Renderer culling — subsumed by 056 (GPU/LOD modernization) |
 | 026 | Capture batch tuning — no tasks defined; concerns owned by 056 / validation-capture |
 | 036 | Renderer improvements — explicitly superseded by 056 (GPU/LOD modernization) |
+| 033 | MdxViewer migration — complete per user 2026-06-14. All viewer/renderer work now in wow-viewer; gillijimproject_refactor is read-only reference. |
 | 059 | M2 MD20 v109 Cata support — implemented 2026-06-11; Cataclysm M2 objects verified working |
 
 ## Completed specs (referenced from archive, available in active specs directory)
