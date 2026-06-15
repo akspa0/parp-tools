@@ -31,8 +31,11 @@ Specs moved here are obsolete (superseded by later work, replaced by refactored 
 | 026 | Capture batch tuning — no tasks defined; concerns owned by 056 / validation-capture |
 | 036 | Renderer improvements — explicitly superseded by 056 (GPU/LOD modernization) |
 | 033 | MdxViewer migration — complete per user 2026-06-14. All viewer/renderer work now in wow-viewer; gillijimproject_refactor is read-only reference. |
+| 037 | M2 3.0.1 embedded-views adapter — implemented per user. |
+| 041 | MH2O/MCLQ liquid type fix — implemented per user (McnkFlagDecoder + tests exist). |
+| 043 | M2 chunked MDX classic support — implemented per user (MDLX reader/dispatcher landed). |
 | 059 | M2 MD20 v109 Cata support — implemented 2026-06-11; Cataclysm M2 objects verified working |
 
 ## Completed specs (referenced from archive, available in active specs directory)
 
-Specs 012, 014, 024, 025, 034, 047, 048, 059, 060 are fully complete and live in the active specs directory (or archived after completion).
+Specs 012, 014, 024, 025, 033, 034, 037, 041, 043, 047, 048, 059, 060 are fully complete and live in the active specs directory (or archived after completion).
