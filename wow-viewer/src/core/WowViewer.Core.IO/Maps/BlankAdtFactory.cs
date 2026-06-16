@@ -12,7 +12,7 @@ public static class BlankAdtFactory
     private const int ChunksPerSide = 16;
     private const int TotalChunks = ChunksPerSide * ChunksPerSide;
 
-    public static LkAdtData CreateBlank(string mapName, int tileX, int tileY)
+    public static LkAdtData CreateBlank(string mapName, int tileX, int tileY, string l0Texture = "tileset\\ocean\\westfallseafloor.blp")
     {
         ArgumentNullException.ThrowIfNull(mapName);
         ArgumentOutOfRangeException.ThrowIfNegative(tileX);
@@ -63,7 +63,7 @@ public static class BlankAdtFactory
             MapName = mapName,
             TileX = tileX,
             TileY = tileY,
-            TextureNames = ["tileset\\generic\\black.blp"],
+            TextureNames = [l0Texture],
             ModelNames = [],
             WorldModelNames = [],
             ModelPlacements = [],
@@ -96,7 +96,7 @@ public static class BlankAdtFactory
         return new WdlHeightTile(tileX, tileY, outerHeights, innerHeights);
     }
 
-    public static AlphaTileData CreateBlankAlphaTile(int tileX, int tileY)
+    public static AlphaTileData CreateBlankAlphaTile(int tileX, int tileY, string l0Texture = "tileset\\ocean\\westfallseafloor.blp")
     {
         const int TileSize = 257;
         const int ChunksPerSide = 16;
@@ -128,7 +128,7 @@ public static class BlankAdtFactory
             mclyTextureIds: mclyTextureIds,
             mclyLayerMask: mclyLayerMask,
             holeMask: holeMask,
-            textureNames: ["tileset\\generic\\black.blp"],
+            textureNames: [l0Texture],
             modelPlacements: [],
             worldModelPlacements: [],
             liquidChunks: []);

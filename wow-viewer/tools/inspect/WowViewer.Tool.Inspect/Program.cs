@@ -1682,6 +1682,7 @@ static void RunMapGenerateBlank(string[] args)
 	string? tileXText = GetOption(args, "--tile-x", "-x");
 	string? tileYText = GetOption(args, "--tile-y", "-y");
 	string? outputDir = GetOption(args, "--output-dir", "-o");
+	string? textureName = GetOption(args, "--texture", "-t");
 
 	string format = formatText ?? "lk";
 	if (format != "lk" && format != "alpha")
@@ -1694,7 +1695,7 @@ static void RunMapGenerateBlank(string[] args)
 	if (string.IsNullOrWhiteSpace(tileXText) || string.IsNullOrWhiteSpace(tileYText))
 	{
 		Console.Error.WriteLine("Error: --tile-x and --tile-y are required.");
-		Console.Error.WriteLine("Usage: map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--format lk|alpha] [--output-dir <dir>]");
+		Console.Error.WriteLine("Usage: map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--format lk|alpha] [--texture <path>] [--output-dir <dir>]");
 		Environment.ExitCode = 1;
 		return;
 	}
@@ -1715,28 +1716,29 @@ static void RunMapGenerateBlank(string[] args)
 
 	string resolvedMapName = mapName ?? "testing";
 	string resolvedOutputDir = outputDir ?? ".";
+	string resolvedTexture = textureName ?? "tileset\\ocean\\westfallseafloor.blp";
 	string mapDir = Path.Combine(resolvedOutputDir, "World", "Maps", resolvedMapName);
 	Directory.CreateDirectory(mapDir);
 
 	if (format == "alpha")
 	{
-		AlphaTileData tileData = BlankAdtFactory.CreateBlankAlphaTile(tileX, tileY);
+		AlphaTileData tileData = BlankAdtFactory.CreateBlankAlphaTile(tileX, tileY, resolvedTexture);
 		var tiles = new Dictionary<(int, int), AlphaTileData> { [(tileX, tileY)] = tileData };
 		byte[] wdtBytes = AlphaWdtWriter.Build(resolvedMapName, tiles);
 		string wdtPath = Path.Combine(mapDir, $"{resolvedMapName}.wdt");
 		File.WriteAllBytes(wdtPath, wdtBytes);
 		Console.WriteLine($"Wrote Alpha WDT: {Path.GetFullPath(wdtPath)}");
 		Console.WriteLine($"  Map: {resolvedMapName}, Tile: ({tileX}, {tileY})");
-		Console.WriteLine($"  256 inline MCNK chunks, 1 texture (L0 base layer), flat height = 0");
+		Console.WriteLine($"  256 inline MCNK chunks, 1 texture ({resolvedTexture}), flat height = 0");
 	}
 	else
 	{
-		LkAdtData adtData = BlankAdtFactory.CreateBlank(resolvedMapName, tileX, tileY);
+		LkAdtData adtData = BlankAdtFactory.CreateBlank(resolvedMapName, tileX, tileY, resolvedTexture);
 		string adtPath = Path.Combine(mapDir, $"{resolvedMapName}_{tileX}_{tileY}.adt");
 		LkAdtWriter.Write(adtPath, adtData);
 		Console.WriteLine($"Wrote ADT: {Path.GetFullPath(adtPath)}");
 		Console.WriteLine($"  Map: {resolvedMapName}, Tile: ({tileX}, {tileY})");
-		Console.WriteLine($"  256 MCNK chunks, 0 placements, 1 texture (L0 base layer)");
+		Console.WriteLine($"  256 MCNK chunks, 0 placements, 1 texture ({resolvedTexture})");
 
 		HashSet<(int, int)> tileSet = [(tileX, tileY)];
 		LkWdtWriteOptions wdtOptions = BlankAdtFactory.CreateBlankWdtOptions();
@@ -4728,7 +4730,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect mdx-render --input <file.mdx> --output <bmp> [--width <n>] [--height <n>] [--sequence <n>] [--time <ms>] [--bones]");
 	Console.WriteLine("  wowviewer-inspect mdx-render --archive-root <dir> --virtual-path <path/to/file.mdx> --output <bmp> [--width <n>] [--height <n>] [--sequence <n>] [--time <ms>] [--bones]");
 	Console.WriteLine("  wowviewer-inspect map inspect --input <file.wdt|file.adt|file.error>");
-	Console.WriteLine("  wowviewer-inspect map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--format lk|alpha] [--output-dir <dir>]");
+	Console.WriteLine("  wowviewer-inspect map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--format lk|alpha] [--texture <path>] [--output-dir <dir>]");
 	Console.WriteLine("  wowviewer-inspect lit inspect --input <lights.lit>");
 	Console.WriteLine("  wowviewer-inspect lit inspect --archive-root <game|data dir> --virtual-path <world/.../lights.lit> [--listfile <listfile.txt>]");
 	Console.WriteLine("  wowviewer-inspect wmo inspect --input <file.wmo> [--dump-lights]");
@@ -5235,7 +5237,7 @@ static void ShowMapUsage()
 	Console.WriteLine("  map inspect --input <file.wdt|file.adt|file.error> [--dump-tex-chunks]");
 	Console.WriteLine("  map uniqueid-filter --input <report.json> [--min-uniqueid <n>] [--max-uniqueid <n>] [--build <label[,label...]>] [--kind all|m2|wmo] [--invert] [--output <report.json>]");
 	Console.WriteLine("  map uniqueid-report --input <file.wdt|file.adt|directory> [--input <second-source> ...] [--build <label>] [--output <report.json>]");
-	Console.WriteLine("  map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--format lk|alpha] [--output-dir <dir>]");
+	Console.WriteLine("  map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--format lk|alpha] [--texture <path>] [--output-dir <dir>]");
 }
 
 static void ShowPm4Usage()
