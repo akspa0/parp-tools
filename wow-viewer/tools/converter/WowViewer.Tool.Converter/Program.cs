@@ -94,6 +94,9 @@ string[] tail = args.Skip(1).ToArray();
 	case "terrain-patch-adt":
 		TerrainPatchAdtCommand.Run(tail);
 		break;
+	case "terrain-weak-signal-patch":
+		TerrainWeakSignalPatchCommand.Run(tail);
+		break;
 	case "export-tex-json":
 		RunExportTexJson(tail);
 		break;

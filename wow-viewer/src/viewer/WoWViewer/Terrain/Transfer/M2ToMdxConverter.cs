@@ -93,6 +93,9 @@ public class M2ToMdxConverter
             && data.Version >= 0x104
             && data.Version <= 0x108;
 
+        bool useEra1121Layout = data.Version == 0x100u || data.Version == 0x101u;
+        uint boneStride = useEra1121Layout ? 0x04u : 0x58u;
+
         // Name
         var nameLen = reader.ReadUInt32();
         var nameOfs = reader.ReadUInt32();
@@ -264,7 +267,7 @@ public class M2ToMdxConverter
 
         if (!usePreRelease301Layout && boneCount > 0 && boneOfs > 0)
         {
-            ValidateTableRange("bones", boneCount, boneOfs, 0x58, reader.BaseStream.Length);
+            ValidateTableRange("bones", boneCount, boneOfs, boneStride, reader.BaseStream.Length);
             reader.BaseStream.Position = boneOfs;
             data.Bones = new M2Bone[boneCount];
             for (int i = 0; i < boneCount; i++)

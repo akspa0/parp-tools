@@ -89,9 +89,9 @@ internal static class Pm4AssetSignalCorpusSupport
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
 
-        string fullPath = Path.GetFullPath(manifestPath);
-        string json = File.ReadAllText(fullPath);
-        Pm4AssetSignalCorpusManifest? manifest = JsonSerializer.Deserialize<Pm4AssetSignalCorpusManifest>(json);
+		string fullPath = Path.GetFullPath(manifestPath);
+		string json = File.ReadAllText(fullPath);
+		Pm4AssetSignalCorpusManifest? manifest = JsonSerializer.Deserialize<Pm4AssetSignalCorpusManifest>(json, Pm4MatchSupport.CreateJsonOptions());
         if (manifest is null)
             throw new InvalidDataException($"Asset signal corpus '{fullPath}' could not be deserialized.");
 

@@ -94,6 +94,7 @@ wow-viewer/
 | Document | What It Covers |
 |----------|----------------|
 | [CLI Tools Guide](../docs/CLI-TOOLS.md) | Full reference for all CLI tools with workflow recipes |
+| [PM4 ADT Restoration](../docs/PM4-ADT-RESTORATION.md) | PM4 → ADT placement writing workflow |
 | [Plans Overview](../docs/PLANS-OVERVIEW.md) | Summary of all 25 remaining active specs |
 | [Memory Bank](memory-bank/activeContext.md) | Current focus, spec status, known issues |
 | [Data Paths](memory-bank/data-paths.md) | Game client and test data locations, with env-var overrides |

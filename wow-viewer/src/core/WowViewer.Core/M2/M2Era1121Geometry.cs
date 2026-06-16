@@ -2,6 +2,32 @@ using System.Numerics;
 
 namespace WowViewer.Core.M2;
 
+public sealed class M2Era1121Texture
+{
+    public M2Era1121Texture(uint type, uint flags, string filename)
+    {
+        Type = type;
+        Flags = flags;
+        Filename = filename;
+    }
+
+    public uint Type { get; }
+    public uint Flags { get; }
+    public string Filename { get; }
+}
+
+public sealed class M2Era1121RenderFlag
+{
+    public M2Era1121RenderFlag(ushort flags, ushort blendMode)
+    {
+        Flags = flags;
+        BlendMode = blendMode;
+    }
+
+    public ushort Flags { get; }
+    public ushort BlendMode { get; }
+}
+
 public sealed class M2Era1121Geometry
 {
     public M2Era1121Geometry(
@@ -10,7 +36,10 @@ public sealed class M2Era1121Geometry
         IReadOnlyList<Vector3> normals,
         IReadOnlyList<Vector2> uvs,
         IReadOnlyList<ushort> triangles,
-        IReadOnlyList<M2Era1121Batch> batches)
+        IReadOnlyList<M2Era1121Batch> batches,
+        IReadOnlyList<M2Era1121Texture> textures,
+        IReadOnlyList<M2Era1121RenderFlag> renderFlags,
+        IReadOnlyList<ushort> textureLookup)
     {
         ArgumentNullException.ThrowIfNull(vertices);
         ArgumentNullException.ThrowIfNull(positions);
@@ -18,6 +47,9 @@ public sealed class M2Era1121Geometry
         ArgumentNullException.ThrowIfNull(uvs);
         ArgumentNullException.ThrowIfNull(triangles);
         ArgumentNullException.ThrowIfNull(batches);
+        ArgumentNullException.ThrowIfNull(textures);
+        ArgumentNullException.ThrowIfNull(renderFlags);
+        ArgumentNullException.ThrowIfNull(textureLookup);
 
         Vertices = vertices;
         Positions = positions;
@@ -25,6 +57,9 @@ public sealed class M2Era1121Geometry
         Uvs = uvs;
         Triangles = triangles;
         Batches = batches;
+        Textures = textures;
+        RenderFlags = renderFlags;
+        TextureLookup = textureLookup;
     }
 
     public IReadOnlyList<M2Era1121VertexIndex> Vertices { get; }
@@ -33,6 +68,9 @@ public sealed class M2Era1121Geometry
     public IReadOnlyList<Vector2> Uvs { get; }
     public IReadOnlyList<ushort> Triangles { get; }
     public IReadOnlyList<M2Era1121Batch> Batches { get; }
+    public IReadOnlyList<M2Era1121Texture> Textures { get; }
+    public IReadOnlyList<M2Era1121RenderFlag> RenderFlags { get; }
+    public IReadOnlyList<ushort> TextureLookup { get; }
 }
 
 public readonly record struct M2Era1121VertexIndex(ushort PositionIndex, ushort NormalIndex);

@@ -275,7 +275,7 @@ Even for exceptions, you should still read the relevant spec if one exists.
 - For new `wow-viewer` library or tool work, prefer `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` and `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`.
 - For legacy parser and format-library work that still explicitly targets `gillijimproject_refactor`, prefer `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug`.
 - For viewer work, use `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`.
-- For `wow-viewer` PM4 inspect or report slices, validate against `gillijimproject_refactor/test_data/development/World/Maps/development` with `WowViewer.Tool.Inspect` commands when the slice changes analyzer or report output.
+- For `wow-viewer` PM4 inspect or report slices, validate against `wow-viewer/test_data/development/World/Maps/development` with `WowViewer.Tool.Inspect` commands when the slice changes analyzer or report output.
 - Only build `gillijimproject_refactor/src/MdxViewer/MdxViewer.sln` for `wow-viewer` work when the task explicitly changes consumer compatibility or the user asks for that compatibility check.
 - Do not describe a `wow-viewer` build, test pass, or optional active-viewer compile as real viewer runtime signoff.
 - Prefer real-data validation using the fixed paths in `gillijimproject_refactor/memory-bank/data-paths.md`. Do not ask the user for alternate paths unless those fixed paths are missing.

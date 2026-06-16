@@ -47,27 +47,29 @@ public static class M2Era1121ModelReader
 
     private static M2ModelDocument ParseM2(byte[] data, string sourcePath, M2Era1121Version version)
     {
+        M2Era1121Layout layout = new(version);
+
         uint flags = ReadUInt32At(data, M2Era1121Constants.FlagsOffset);
-        uint viewCount = ReadUInt32At(data, M2Era1121Constants.ViewCountOffset);
+        uint viewCount = ReadUInt32At(data, layout.CameraCountOffset >= 0 ? layout.CameraCountOffset - 0x78 : M2Era1121Constants.ViewCountOffset); // viewCount is always 0x3C in both V100/V101
         string? modelName = TryReadName(data, sourcePath);
         List<uint> globalLoops = ReadUInt32Table(data, sourcePath, "globalLoops",
             M2Era1121Constants.GlobalLoopCountOffset, M2Era1121Constants.GlobalLoopOffsetOffset);
 
         M2ModelIdentity identity = M2ModelIdentity.FromPath(sourcePath);
-        IReadOnlyList<M2SequenceDefinition> sequences = ReadSequences(data, sourcePath);
+        IReadOnlyList<M2SequenceDefinition> sequences = ReadSequences(data, sourcePath, layout);
         IReadOnlyList<short> sequenceLookup = ReadInt16Table(data, sourcePath, "sequenceLookup",
             M2Era1121Constants.SequenceLookupCountOffset, M2Era1121Constants.SequenceLookupOffsetOffset);
         IReadOnlyList<M2ColorDefinition> colors = ReadColors(data, globalLoops.Count, sourcePath);
         IReadOnlyList<M2TextureWeightDefinition> textureWeights = ReadTextureWeights(data, globalLoops.Count, sourcePath);
         IReadOnlyList<M2TextureTransformDefinition> textureTransforms = ReadTextureTransforms(data, globalLoops.Count, sourcePath);
         IReadOnlyList<M2LightDefinition> lights = ReadLights(data, globalLoops.Count, sourcePath);
-        IReadOnlyList<M2CameraDefinition>? cameras = ReadCameras(data, globalLoops.Count, sourcePath);
-        IReadOnlyList<M2RibbonDefinition> ribbons = ReadRibbons(data, globalLoops.Count, sourcePath);
-        IReadOnlyList<M2ParticleDefinition> particles = ReadParticles(data, globalLoops.Count, sourcePath);
+        IReadOnlyList<M2CameraDefinition>? cameras = ReadCameras(data, globalLoops.Count, sourcePath, layout);
+        IReadOnlyList<M2RibbonDefinition> ribbons = ReadRibbons(data, globalLoops.Count, sourcePath, layout);
+        IReadOnlyList<M2ParticleDefinition> particles = ReadParticles(data, globalLoops.Count, sourcePath, layout);
 
-        Vector3 boundsMin = ReadFiniteVector3At(data, M2Era1121Constants.BoundsOffset, sourcePath, "boundsMin");
-        Vector3 boundsMax = ReadFiniteVector3At(data, M2Era1121Constants.BoundsOffset + 0x0C, sourcePath, "boundsMax");
-        float boundsRadius = ReadFiniteSingleAt(data, M2Era1121Constants.BoundsRadiusOffset, sourcePath, "boundsRadius");
+        Vector3 boundsMin = ReadFiniteVector3At(data, layout.BoundsOffset, sourcePath, "boundsMin");
+        Vector3 boundsMax = ReadFiniteVector3At(data, layout.BoundsOffset + 0x0C, sourcePath, "boundsMax");
+        float boundsRadius = ReadFiniteSingleAt(data, layout.BoundsRadiusOffset, sourcePath, "boundsRadius");
 
         M2ModelDocument document = new(
             identity,
@@ -94,22 +96,37 @@ public static class M2Era1121ModelReader
             ribbons: ribbons,
             particles: particles);
 
-        IReadOnlyList<M2Era1121VertexIndex> vertexIndices = ReadVertexIndices(data, sourcePath);
-        IReadOnlyList<Vector3> positions = ReadPositions(data, sourcePath);
-        IReadOnlyList<Vector3> normals = ReadNormals(data, sourcePath);
-        IReadOnlyList<Vector2> uvs = ReadUvs(data, sourcePath);
-        IReadOnlyList<ushort> triangles = ReadTriangles(data, sourcePath);
-        IReadOnlyList<M2Era1121Batch> batches = ReadBatches(data, sourcePath);
-
-        if (vertexIndices.Count > 0 && positions.Count > 0 && triangles.Count > 0)
+        try
         {
-            document.InlineEra1121Geometry = new M2Era1121Geometry(
-                vertexIndices,
-                positions,
-                normals,
-                uvs,
-                triangles,
-                batches);
+            IReadOnlyList<M2Era1121VertexIndex> vertexIndices = ReadVertexIndices(data, sourcePath, layout);
+            IReadOnlyList<Vector3> positions = ReadPositions(data, sourcePath, layout);
+            IReadOnlyList<Vector3> normals = ReadNormals(data, sourcePath, layout);
+            IReadOnlyList<Vector2> uvs = ReadUvs(data, sourcePath, layout);
+            IReadOnlyList<ushort> triangles = ReadTriangles(data, sourcePath, layout);
+            IReadOnlyList<M2Era1121Batch> batches = ReadBatches(data, sourcePath, layout);
+            IReadOnlyList<M2Era1121Texture> textures = ReadTextures(data, sourcePath);
+            IReadOnlyList<M2Era1121RenderFlag> renderFlags = ReadRenderFlags(data, sourcePath);
+            IReadOnlyList<ushort> textureLookup = ReadTextureLookup(data, sourcePath);
+
+            if (vertexIndices.Count > 0 && positions.Count > 0 && triangles.Count > 0)
+            {
+                document.InlineEra1121Geometry = new M2Era1121Geometry(
+                    vertexIndices,
+                    positions,
+                    normals,
+                    uvs,
+                    triangles,
+                    batches,
+                    textures,
+                    renderFlags,
+                    textureLookup);
+            }
+        }
+        catch (InvalidDataException)
+        {
+            // Geometry table offsets are speculative for 1.12.1 format.
+            // If extraction fails, return document with null geometry so
+            // the caller can fall through to other parsing strategies.
         }
 
         return document;
@@ -134,16 +151,16 @@ public static class M2Era1121ModelReader
         return length == 0 ? null : Encoding.UTF8.GetString(bytes[..length]);
     }
 
-    private static IReadOnlyList<M2SequenceDefinition> ReadSequences(byte[] data, string sourcePath)
+    private static IReadOnlyList<M2SequenceDefinition> ReadSequences(byte[] data, string sourcePath, M2Era1121Layout layout)
     {
         uint count = ReadUInt32At(data, M2Era1121Constants.SequenceCountOffset);
         uint offset = ReadUInt32At(data, M2Era1121Constants.SequenceOffsetOffset);
-        ValidateSpan(count, offset, M2Era1121Constants.SequenceStride, data.Length, sourcePath, "sequences");
+        ValidateSpan(count, offset, layout.SequenceStride, data.Length, sourcePath, "sequences");
 
         List<M2SequenceDefinition> values = new(checked((int)count));
         for (int index = 0; index < count; index++)
         {
-            int entryOffset = checked((int)offset + (index * M2Era1121Constants.SequenceStride));
+            int entryOffset = checked((int)offset + (index * layout.SequenceStride));
             values.Add(new M2SequenceDefinition(
                 index,
                 ReadUInt16At(data, entryOffset + 0x00),
@@ -234,34 +251,39 @@ public static class M2Era1121ModelReader
         {
             int entryOffset = checked((int)offset + (index * M2Era1121Constants.LightStride));
             Vector3 position = ReadFiniteVector3At(data, entryOffset, sourcePath, $"lights[{index}].position");
-            M2TrackDefinition<Vector3> ambientColor = ReadTrackDefinition<Vector3>(data, entryOffset, globalLoopCount, sourcePath, $"lights[{index}].ambientColor");
-            M2TrackDefinition<float> ambientIntensity = ReadTrackDefinition<float>(data, entryOffset, globalLoopCount, sourcePath, $"lights[{index}].ambientIntensity");
-            M2TrackDefinition<Vector3> diffuseColor = ReadTrackDefinition<Vector3>(data, entryOffset, globalLoopCount, sourcePath, $"lights[{index}].diffuseColor");
-            M2TrackDefinition<float> diffuseIntensity = ReadTrackDefinition<float>(data, entryOffset, globalLoopCount, sourcePath, $"lights[{index}].diffuseIntensity");
-            M2TrackDefinition<float> attenuationStart = ReadTrackDefinition<float>(data, entryOffset, globalLoopCount, sourcePath, $"lights[{index}].attenuationStart");
-            M2TrackDefinition<float> attenuationEnd = ReadTrackDefinition<float>(data, entryOffset, globalLoopCount, sourcePath, $"lights[{index}].attenuationEnd");
-            M2TrackDefinition<byte> visibility = ReadTrackDefinition<byte>(data, entryOffset, globalLoopCount, sourcePath, $"lights[{index}].visibility");
             values.Add(new M2LightDefinition(
                 index,
                 0,
                 0,
                 position,
-                ambientColor,
-                ambientIntensity,
-                diffuseColor,
-                diffuseIntensity,
-                attenuationStart,
-                attenuationEnd,
-                visibility));
+                CreateDummyTrack<Vector3>(),
+                CreateDummyTrack<float>(),
+                CreateDummyTrack<Vector3>(),
+                CreateDummyTrack<float>(),
+                CreateDummyTrack<float>(),
+                CreateDummyTrack<float>(),
+                CreateDummyTrack<byte>()));
         }
 
         return values;
     }
 
-    private static IReadOnlyList<M2CameraDefinition>? ReadCameras(byte[] data, int globalLoopCount, string sourcePath)
+    private static M2TrackDefinition<T> CreateDummyTrack<T>() where T : struct
     {
-        if (!TryReadUInt32At(data, M2Era1121Constants.CameraCountOffset, out uint count)
-            || !TryReadUInt32At(data, M2Era1121Constants.CameraOffsetOffset, out uint offset)
+        return new M2TrackDefinition<T>(
+            M2TrackInterpolation.Linear,
+            -1,
+            new M2TrackArrayReference(0u, 0u),
+            new M2TrackArrayReference(0u, 0u));
+    }
+
+    private static IReadOnlyList<M2CameraDefinition>? ReadCameras(byte[] data, int globalLoopCount, string sourcePath, M2Era1121Layout layout)
+    {
+        if (layout.CameraCountOffset < 0 || layout.CameraOffsetOffset < 0)
+            return [];
+
+        if (!TryReadUInt32At(data, layout.CameraCountOffset, out uint count)
+            || !TryReadUInt32At(data, layout.CameraOffsetOffset, out uint offset)
             || count == 0
             || count > 16
             || offset == 0
@@ -297,10 +319,13 @@ public static class M2Era1121ModelReader
         return values;
     }
 
-    private static IReadOnlyList<M2RibbonDefinition> ReadRibbons(byte[] data, int globalLoopCount, string sourcePath)
+    private static IReadOnlyList<M2RibbonDefinition> ReadRibbons(byte[] data, int globalLoopCount, string sourcePath, M2Era1121Layout layout)
     {
-        if (!TryReadUInt32At(data, M2Era1121Constants.RibbonCountOffset, out uint count)
-            || !TryReadUInt32At(data, M2Era1121Constants.RibbonOffsetOffset, out uint offset)
+        if (layout.RibbonCountOffset < 0 || layout.RibbonOffsetOffset < 0)
+            return [];
+
+        if (!TryReadUInt32At(data, layout.RibbonCountOffset, out uint count)
+            || !TryReadUInt32At(data, layout.RibbonOffsetOffset, out uint offset)
             || count == 0
             || count > 16
             || offset == 0
@@ -347,10 +372,13 @@ public static class M2Era1121ModelReader
         return values;
     }
 
-    private static IReadOnlyList<M2ParticleDefinition> ReadParticles(byte[] data, int globalLoopCount, string sourcePath)
+    private static IReadOnlyList<M2ParticleDefinition> ReadParticles(byte[] data, int globalLoopCount, string sourcePath, M2Era1121Layout layout)
     {
-        if (!TryReadUInt32At(data, M2Era1121Constants.ParticleCountOffset, out uint count)
-            || !TryReadUInt32At(data, M2Era1121Constants.ParticleOffsetOffset, out uint offset)
+        if (layout.ParticleCountOffset < 0 || layout.ParticleOffsetOffset < 0)
+            return [];
+
+        if (!TryReadUInt32At(data, layout.ParticleCountOffset, out uint count)
+            || !TryReadUInt32At(data, layout.ParticleOffsetOffset, out uint offset)
             || count == 0
             || count > 256
             || offset == 0
@@ -409,17 +437,15 @@ public static class M2Era1121ModelReader
         return values;
     }
 
-    private static IReadOnlyList<M2Era1121VertexIndex> ReadVertexIndices(byte[] data, string sourcePath)
+    private static IReadOnlyList<M2Era1121VertexIndex> ReadVertexIndices(byte[] data, string sourcePath, M2Era1121Layout layout)
     {
-        if (!TryReadUInt32At(data, M2Era1121Constants.VertexCountOffset, out uint count)
-            || !TryReadUInt32At(data, M2Era1121Constants.VertexOffsetOffset, out uint offset)
-            || count == 0
-            || count > 100000
-            || offset == 0
-            || offset >= (uint)data.Length)
-        {
+        if (layout.VertexCountOffset < 0 || layout.VertexOffsetOffset < 0)
             return [];
-        }
+
+        uint count = ReadUInt32At(data, layout.VertexCountOffset);
+        uint offset = ReadUInt32At(data, layout.VertexOffsetOffset);
+        if (count == 0 || count > 100000 || offset == 0 || offset >= (uint)data.Length)
+            return [];
 
         ValidateSpan(count, offset, M2Era1121Constants.VertexIndexStride, data.Length, sourcePath, "vertexIndices");
 
@@ -436,17 +462,15 @@ public static class M2Era1121ModelReader
         return values;
     }
 
-    private static IReadOnlyList<Vector3> ReadPositions(byte[] data, string sourcePath)
+    private static IReadOnlyList<Vector3> ReadPositions(byte[] data, string sourcePath, M2Era1121Layout layout)
     {
-        if (!TryReadUInt32At(data, M2Era1121Constants.PositionCountOffset, out uint count)
-            || !TryReadUInt32At(data, M2Era1121Constants.PositionOffsetOffset, out uint offset)
-            || count == 0
-            || count > 100000
-            || offset == 0
-            || offset >= (uint)data.Length)
-        {
+        if (layout.PositionCountOffset < 0 || layout.PositionOffsetOffset < 0)
             return [];
-        }
+
+        uint count = ReadUInt32At(data, layout.PositionCountOffset);
+        uint offset = ReadUInt32At(data, layout.PositionOffsetOffset);
+        if (count == 0 || count > 100000 || offset == 0 || offset >= (uint)data.Length)
+            return [];
 
         ValidateSpan(count, offset, M2Era1121Constants.PositionStride, data.Length, sourcePath, "positions");
 
@@ -460,17 +484,15 @@ public static class M2Era1121ModelReader
         return values;
     }
 
-    private static IReadOnlyList<Vector3> ReadNormals(byte[] data, string sourcePath)
+    private static IReadOnlyList<Vector3> ReadNormals(byte[] data, string sourcePath, M2Era1121Layout layout)
     {
-        if (!TryReadUInt32At(data, M2Era1121Constants.NormalCountOffset, out uint count)
-            || !TryReadUInt32At(data, M2Era1121Constants.NormalOffsetOffset, out uint offset)
-            || count == 0
-            || count > 100000
-            || offset == 0
-            || offset >= (uint)data.Length)
-        {
+        if (layout.NormalCountOffset < 0 || layout.NormalOffsetOffset < 0)
             return [];
-        }
+
+        uint count = ReadUInt32At(data, layout.NormalCountOffset);
+        uint offset = ReadUInt32At(data, layout.NormalOffsetOffset);
+        if (count == 0 || count > 100000 || offset == 0 || offset >= (uint)data.Length)
+            return [];
 
         ValidateSpan(count, offset, M2Era1121Constants.NormalStride, data.Length, sourcePath, "normals");
 
@@ -484,17 +506,15 @@ public static class M2Era1121ModelReader
         return values;
     }
 
-    private static IReadOnlyList<Vector2> ReadUvs(byte[] data, string sourcePath)
+    private static IReadOnlyList<Vector2> ReadUvs(byte[] data, string sourcePath, M2Era1121Layout layout)
     {
-        if (!TryReadUInt32At(data, M2Era1121Constants.UvCountOffset, out uint count)
-            || !TryReadUInt32At(data, M2Era1121Constants.UvOffsetOffset, out uint offset)
-            || count == 0
-            || count > 100000
-            || offset == 0
-            || offset >= (uint)data.Length)
-        {
+        if (layout.UvCountOffset < 0 || layout.UvOffsetOffset < 0)
             return [];
-        }
+
+        uint count = ReadUInt32At(data, layout.UvCountOffset);
+        uint offset = ReadUInt32At(data, layout.UvOffsetOffset);
+        if (count == 0 || count > 100000 || offset == 0 || offset >= (uint)data.Length)
+            return [];
 
         ValidateSpan(count, offset, M2Era1121Constants.UvStride, data.Length, sourcePath, "uvs");
 
@@ -510,17 +530,15 @@ public static class M2Era1121ModelReader
         return values;
     }
 
-    private static IReadOnlyList<ushort> ReadTriangles(byte[] data, string sourcePath)
+    private static IReadOnlyList<ushort> ReadTriangles(byte[] data, string sourcePath, M2Era1121Layout layout)
     {
-        if (!TryReadUInt32At(data, M2Era1121Constants.TriangleCountOffset, out uint count)
-            || !TryReadUInt32At(data, M2Era1121Constants.TriangleOffsetOffset, out uint offset)
-            || count == 0
-            || count > 100000
-            || offset == 0
-            || offset >= (uint)data.Length)
-        {
+        if (layout.TriangleCountOffset < 0 || layout.TriangleOffsetOffset < 0)
             return [];
-        }
+
+        uint count = ReadUInt32At(data, layout.TriangleCountOffset);
+        uint offset = ReadUInt32At(data, layout.TriangleOffsetOffset);
+        if (count == 0 || count > 100000 || offset == 0 || offset >= (uint)data.Length)
+            return [];
 
         ValidateSpan(count, offset, M2Era1121Constants.TriangleStride, data.Length, sourcePath, "triangles");
 
@@ -534,17 +552,15 @@ public static class M2Era1121ModelReader
         return values;
     }
 
-    private static IReadOnlyList<M2Era1121Batch> ReadBatches(byte[] data, string sourcePath)
+    private static IReadOnlyList<M2Era1121Batch> ReadBatches(byte[] data, string sourcePath, M2Era1121Layout layout)
     {
-        if (!TryReadUInt32At(data, M2Era1121Constants.BatchCountOffset, out uint count)
-            || !TryReadUInt32At(data, M2Era1121Constants.BatchOffsetOffset, out uint offset)
-            || count == 0
-            || count > 10000
-            || offset == 0
-            || offset >= (uint)data.Length)
-        {
+        if (layout.BatchCountOffset < 0 || layout.BatchOffsetOffset < 0)
             return [];
-        }
+
+        uint count = ReadUInt32At(data, layout.BatchCountOffset);
+        uint offset = ReadUInt32At(data, layout.BatchOffsetOffset);
+        if (count == 0 || count > 10000 || offset == 0 || offset >= (uint)data.Length)
+            return [];
 
         ValidateSpan(count, offset, M2Era1121Constants.BatchStride, data.Length, sourcePath, "batches");
 
@@ -568,6 +584,66 @@ public static class M2Era1121ModelReader
                 ReadUInt16At(data, entryOffset + 0x18),
                 ReadUInt16At(data, entryOffset + 0x1A),
                 ReadUInt16At(data, entryOffset + 0x1C)));
+        }
+
+        return values;
+    }
+
+    private static IReadOnlyList<M2Era1121Texture> ReadTextures(byte[] data, string sourcePath)
+    {
+        uint count = ReadUInt32At(data, M2Era1121Constants.TextureCountOffset);
+        uint offset = ReadUInt32At(data, M2Era1121Constants.TextureOffsetOffset);
+        const int stride = 16;
+        ValidateSpan(count, offset, stride, data.Length, sourcePath, "textures");
+
+        List<M2Era1121Texture> values = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * stride));
+            uint type = ReadUInt32At(data, entryOffset + 0x00);
+            uint flags = ReadUInt32At(data, entryOffset + 0x04);
+            uint nameLen = ReadUInt32At(data, entryOffset + 0x08);
+            uint nameOff = ReadUInt32At(data, entryOffset + 0x0C);
+
+            string? filename = TryReadStringAt(data, sourcePath, $"textures[{index}].filename", nameLen, nameOff);
+            values.Add(new M2Era1121Texture(type, flags, filename ?? string.Empty));
+        }
+
+        return values;
+    }
+
+    private static IReadOnlyList<M2Era1121RenderFlag> ReadRenderFlags(byte[] data, string sourcePath)
+    {
+        uint count = ReadUInt32At(data, M2Era1121Constants.RenderFlagCountOffset);
+        uint offset = ReadUInt32At(data, M2Era1121Constants.RenderFlagOffsetOffset);
+        const int stride = 16;
+        ValidateSpan(count, offset, stride, data.Length, sourcePath, "renderFlags");
+
+        List<M2Era1121RenderFlag> values = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * stride));
+            ushort flags = ReadUInt16At(data, entryOffset + 0x00);
+            ushort blendMode = ReadUInt16At(data, entryOffset + 0x02);
+            values.Add(new M2Era1121RenderFlag(flags, blendMode));
+        }
+
+        return values;
+    }
+
+    private static IReadOnlyList<ushort> ReadTextureLookup(byte[] data, string sourcePath)
+    {
+        uint count = ReadUInt32At(data, M2Era1121Constants.TexLookupCountOffset);
+        uint offset = ReadUInt32At(data, M2Era1121Constants.TexLookupOffsetOffset);
+        const int stride = 4;
+        ValidateSpan(count, offset, stride, data.Length, sourcePath, "textureLookup");
+
+        List<ushort> values = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * stride));
+            uint val = ReadUInt32At(data, entryOffset);
+            values.Add((ushort)val);
         }
 
         return values;

@@ -1701,8 +1701,17 @@ static void RunPm4(string[] args)
 	case "synthesize-placements":
 		RunPm4SynthesizePlacements(tail);
 		break;
+	case "dump-collision":
+		Pm4CollisionDumper.Run(tail);
+		break;
 	case "match":
 		RunPm4Match(tail);
+		break;
+	case "write-adt":
+		RunPm4WriteAdt(tail);
+		break;
+	case "manifest":
+		RunPm4Manifest(tail);
 		break;
 			case "hierarchy":
 				RunPm4Hierarchy(tail);
@@ -1855,6 +1864,245 @@ string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "-
 		return;
 
 	Pm4MatchSupport.Print(result);
+}
+
+static void RunPm4WriteAdt(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "--adt-obj", "-a");
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? output = GetOption(args, "--output", "-o");
+	string? mapName = GetOption(args, "--map-name", "-m");
+		string? adtSourceDir = GetOption(args, "--adt-dir", "-u");
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 file is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root is required for pm4 write-adt so WMO/M2 assets can be read from game archives.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(placements))
+	{
+		if (!Pm4CoordinateService.TryParseTileCoordinates(input, out int tileX, out int tileY))
+		{
+			Console.Error.WriteLine("Error: could not derive tile coordinates from the PM4 filename; provide --placements <tile_obj0.adt> explicitly.");
+			Environment.ExitCode = 1;
+			return;
+		}
+
+		string fileName = Path.GetFileNameWithoutExtension(input);
+		int lastUnderscore = fileName.LastIndexOf('_');
+		int previousUnderscore = lastUnderscore > 0 ? fileName.LastIndexOf('_', lastUnderscore - 1) : -1;
+		string derivedMapName = previousUnderscore > 0 ? fileName[..previousUnderscore] : fileName;
+		placements = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(input)) ?? string.Empty, $"{derivedMapName}_{tileX}_{tileY}_obj0.adt");
+	}
+
+	if (!File.Exists(placements))
+	{
+		Console.Error.WriteLine($"Error: placement source '{placements}' does not exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!Pm4CoordinateService.TryParseTileCoordinates(input, out int tX, out int tY))
+	{
+		Console.Error.WriteLine("Error: could not parse tile coordinates from PM4 filename.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4MatchResult result = Pm4MatchSupport.Run(input, placements, archiveRoot, archiveBootstrapOptions, 8, 128f);
+	string resolvedMapName = mapName ?? "pm4restored";
+
+	List<Pm4AdtM2Placement> m2Placements = result.M2Placements
+		.Select(static p => new Pm4AdtM2Placement(p.UniqueId, p.ModelPath, p.PlacementPosition, p.PlacementRotation, p.PlacementScale))
+		.ToList();
+	List<Pm4AdtWmoPlacement> wmoPlacements = result.WmoPlacements
+		.Select(static p => new Pm4AdtWmoPlacement(p.UniqueId, p.ModelPath, p.PlacementPosition, p.PlacementRotation, p.WorldBoundsMin, p.WorldBoundsMax))
+		.ToList();
+
+	// Read WoWMuseum ADT and patch placements in-place
+	string resolvedOutput = output ?? Path.Combine(
+		Path.GetDirectoryName(Path.GetFullPath(input)) ?? ".",
+		$"development_{tX}_{tY}.adt");
+
+	string? baseAdtPath = FindBaseAdtPath(input, tX, tY, adtSourceDir);
+	if (baseAdtPath == null || !File.Exists(baseAdtPath))
+	{
+		Console.Error.WriteLine($"Error: no base ADT found for tile ({tX},{tY}).");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	byte[] sourceBytes = File.ReadAllBytes(baseAdtPath);
+	byte[] resultBytes = Pm4BinaryAdtPatcher.Patch(sourceBytes, tX, tY, m2Placements);
+
+	string? outDir = Path.GetDirectoryName(resolvedOutput);
+	if (!string.IsNullOrWhiteSpace(outDir))
+		Directory.CreateDirectory(outDir);
+	File.WriteAllBytes(resolvedOutput, resultBytes);
+
+	Console.WriteLine($"Wrote {resolvedOutput}");
+	Console.WriteLine($"  M2 placements (MDDF): {m2Placements.Count}");
+	Console.WriteLine($"  WMO placements (MODF): {wmoPlacements.Count}");
+	Console.WriteLine($"  Map: {resolvedMapName} tile ({tX},{tY})");
+	Console.WriteLine($"  Source ADT: {baseAdtPath}");
+}
+
+static void RunPm4Manifest(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "--adt-obj", "-a");
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? outputDir = GetOption(args, "--output", "-o");
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 file or directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string resolvedOutputDir = outputDir ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(input)) ?? ".", "manifests");
+	Directory.CreateDirectory(resolvedOutputDir);
+
+	string[] pm4Files = File.Exists(input)
+		? [input]
+		: Directory.GetFiles(input, "*.pm4", SearchOption.TopDirectoryOnly);
+
+	int ok = 0, err = 0;
+	foreach (string pm4File in pm4Files.OrderBy(Path.GetFileName))
+	{
+		if (!Pm4CoordinateService.TryParseTileCoordinates(pm4File, out int tileX, out int tileY))
+		{
+			err++;
+			continue;
+		}
+
+		string fileName = Path.GetFileNameWithoutExtension(pm4File);
+		int lastUnderscore = fileName.LastIndexOf('_');
+		int prevUnderscore = lastUnderscore > 0 ? fileName.LastIndexOf('_', lastUnderscore - 1) : -1;
+		string mapName = prevUnderscore > 0 ? fileName[..prevUnderscore] : fileName;
+		string resolvedPlacements = placements ?? Path.Combine(
+			Path.GetDirectoryName(Path.GetFullPath(pm4File)) ?? ".",
+			$"{mapName}_{tileX}_{tileY}_obj0.adt");
+
+		if (!File.Exists(resolvedPlacements))
+		{
+			err++;
+			continue;
+		}
+
+		Pm4MatchResult match = Pm4MatchSupport.Run(pm4File, resolvedPlacements, archiveRoot, archiveBootstrapOptions, 8, 128f);
+
+		var manifest = new
+		{
+			tile = $"{tileX}_{tileY}",
+			source = Path.GetFileName(pm4File),
+			placementSource = Path.GetFileName(resolvedPlacements),
+			pm4ObjectCount = match.Pm4ObjectCount,
+			wmoPlacementCount = match.WmoPlacementCount,
+			m2PlacementCount = match.M2PlacementCount,
+			searchRange = match.SearchRange,
+			pm4Objects = match.Pm4ObjectMatches.Select(o => new
+			{
+				ck24 = $"0x{o.Ck24:X6}",
+				ck24Type = $"0x{o.Ck24Type:X2}",
+				ck24ObjectId = o.Ck24ObjectId,
+				surfaceCount = o.SurfaceCount,
+				linkGroupObjectId = o.LinkGroupObjectId,
+				boundsMin = new { x = o.BoundsMin.X, y = o.BoundsMin.Y, z = o.BoundsMin.Z },
+				boundsMax = new { x = o.BoundsMax.X, y = o.BoundsMax.Y, z = o.BoundsMax.Z },
+				nearbyCandidateCount = o.NearbyCandidateCount,
+				topCandidates = o.PossibleMatches.Take(3).Select(c => new
+				{
+					kind = c.Kind,
+					modelPath = c.ModelPath,
+					uniqueId = c.UniqueId,
+					assetResolved = c.AssetResolved,
+					centerDistance = c.CenterDistance,
+					footprintOverlap = c.FootprintOverlapRatio,
+					anchorPlanarGap = c.AnchorPlanarGap,
+				})
+			}),
+			m2Placements = match.M2Placements.Select(p => new
+			{
+				modelPath = p.ModelPath,
+				uniqueId = p.UniqueId,
+				assetResolved = p.AssetResolved,
+				candidateCount = p.CandidateCount,
+				position = new { x = p.PlacementPosition.X, y = p.PlacementPosition.Y, z = p.PlacementPosition.Z },
+				rotation = new { x = p.PlacementRotation.X, y = p.PlacementRotation.Y, z = p.PlacementRotation.Z },
+				scale = p.PlacementScale,
+				worldBoundsMin = new { x = p.WorldBoundsMin.X, y = p.WorldBoundsMin.Y, z = p.WorldBoundsMin.Z },
+				worldBoundsMax = new { x = p.WorldBoundsMax.X, y = p.WorldBoundsMax.Y, z = p.WorldBoundsMax.Z },
+				topPm4Candidates = p.Matches.Take(3).Select(m => new
+				{
+					ck24 = $"0x{m.Ck24:X6}",
+					ck24Type = $"0x{m.Ck24Type:X2}",
+					centerDistance = m.CenterDistance,
+					planarOverlap = m.PlanarOverlapRatio,
+					volumeOverlap = m.VolumeOverlapRatio,
+					verticalGap = m.VerticalGap,
+				})
+			}),
+			wmoPlacements = match.WmoPlacements.Select(p => new
+			{
+				modelPath = p.ModelPath,
+				uniqueId = p.UniqueId,
+				assetResolved = p.AssetResolved,
+				candidateCount = p.CandidateCount,
+			}),
+			notes = match.Notes,
+		};
+
+		string json = System.Text.Json.JsonSerializer.Serialize(manifest, new System.Text.Json.JsonSerializerOptions
+		{
+			WriteIndented = true,
+			IncludeFields = true
+		});
+
+		string outPath = Path.Combine(resolvedOutputDir, $"{mapName}_{tileX}_{tileY}_manifest.json");
+		File.WriteAllText(outPath, json);
+		ok++;
+	}
+
+	Console.WriteLine($"Manifests: {ok} written, {err} skipped (no _obj0.adt).");
+	Console.WriteLine($"Output: {resolvedOutputDir}");
+}
+
+static string? FindBaseAdtPath(string pm4Path, int tileX, int tileY, string? adtSourceDir = null)
+{
+	string dir;
+	if (!string.IsNullOrWhiteSpace(adtSourceDir))
+		dir = adtSourceDir;
+	else
+		dir = Path.GetDirectoryName(pm4Path) ?? ".";
+	string pm4Name = Path.GetFileNameWithoutExtension(pm4Path);
+	int lastUnderscore = pm4Name.LastIndexOf('_');
+	int prevUnderscore = lastUnderscore > 0 ? pm4Name.LastIndexOf('_', lastUnderscore - 1) : -1;
+	string baseName = prevUnderscore > 0 ? pm4Name[..prevUnderscore] : pm4Name;
+	string adtPath = Path.Combine(dir, $"{baseName}_{tileX}_{tileY}.adt");
+	return File.Exists(adtPath) ? adtPath : null;
 }
 
 static void RunPm4MatchAssets(string[] args)
@@ -2158,7 +2406,7 @@ static void RunPm4ExportAssetSignals(string[] args)
 			if (!string.IsNullOrWhiteSpace(directory))
 				Directory.CreateDirectory(directory);
 
-			File.WriteAllText(outputPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
+			File.WriteAllText(outputPath, JsonSerializer.Serialize(manifest, Pm4MatchSupport.CreateJsonOptions()));
 			Console.WriteLine($"Wrote {outputPath}");
 			Console.WriteLine($"Exported {manifest.AssetCount} durable asset signals from {manifest.ClientBuild}.");
 			return;
@@ -4441,6 +4689,12 @@ static Pm4MatchReportSegment BuildPm4MatchReportSegment(
 		? Array.Empty<Pm4MatchReportCandidate>()
 		: matchResult.Candidates.Select(ToReportCandidate).ToList();
 
+	IReadOnlyDictionary<string, Pm4MatchReportBounds>? typedBounds = segment.Signal.TypedBounds is { Count: > 0 }
+		? segment.Signal.TypedBounds.ToDictionary(
+			static kv => $"0x{kv.Key:X2}",
+			static kv => ToReportBounds(kv.Value)!)!
+		: null;
+
 	return new Pm4MatchReportSegment(
 		segment.Segment.SegmentId,
 		$"0x{segment.Segment.Ck24:X6}",
@@ -4483,6 +4737,7 @@ static Pm4MatchReportSegment BuildPm4MatchReportSegment(
 			segment.Signal.AnchorSignals.HeadingMaximumDegrees,
 			segment.Signal.AnchorSignals.HeadingMeanDegrees),
 		segment.Signal.SurfaceFamilyHistogram,
+		typedBounds,
 		candidates,
 		placementProposal is null ? null : ToReportPlacementProposal(placementProposal));
 }
@@ -4851,6 +5106,8 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 match-assets --input <file.pm4> [--asset-corpus <corpus.json> | --archive-root <staged client dir> [--placements <tile_obj0.adt>]] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
 	Console.WriteLine("  pm4 synthesize-placements --input <file.pm4> --target-tiles <x_y[,x_y...]> [--asset-corpus <corpus.json> | --archive-root <staged client dir> [--placements <tile_obj0.adt>]] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
 	Console.WriteLine("  pm4 match --input <file.pm4> --archive-root <game|data dir> [--placements <tile_obj0.adt>] [--listfile <listfile.txt>] [--max-matches <n>] [--search-range <units>] [--output <report.json>] [--object-output-dir <directory>]");
+	Console.WriteLine("  pm4 write-adt --input <file.pm4> --archive-root <game|data dir> [--placements <tile_obj0.adt>] [--output <output.adt>] [--map-name <name>] [--adt-dir <directory>]");
+	Console.WriteLine("  pm4 manifest --input <file.pm4|directory> --archive-root <game|data dir> [--placements <tile_obj0.adt>] [--output <output-dir>]");
 	Console.WriteLine("  pm4 hierarchy --input <file.pm4> [--output <report.json>]");
 	Console.WriteLine("  pm4 linkage --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 mscn --input <directory> [--output <report.json>]");

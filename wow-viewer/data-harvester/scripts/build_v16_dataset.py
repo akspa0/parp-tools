@@ -3565,6 +3565,116 @@ def cmd_capture_renderer_truth(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def cmd_repair_heights(args: argparse.Namespace) -> None:
+    if not args.dry_run:
+        _require_explicit_zarr_write(args, "repair-heights")
+
+    builds = args.builds or [args.build]
+    mismatch_path = Path(args.mismatch_report)
+    if not mismatch_path.exists():
+        raise RuntimeError(f"Mismatch report not found: {mismatch_path}")
+
+    mismatch_table = pq.read_table(str(mismatch_path))
+    mismatch_rows = mismatch_table.to_pylist()
+    by_build: dict[str, list[dict]] = {}
+    for r in mismatch_rows:
+        by_build.setdefault(str(r["build"]), []).append(r)
+
+    sidecar_root = Path(args.sidecar_repair)
+
+    for build in builds:
+        if build not in by_build:
+            print(f"SKIP {build}: no mismatched tiles in report")
+            continue
+
+        output_path = _DATASET_ROOT / f"{build}.zarr"
+        if not output_path.exists():
+            print(f"SKIP {build}: no final store at {output_path}")
+            continue
+
+        sidecar_build = sidecar_root / build
+        if not sidecar_build.exists():
+            print(f"SKIP {build}: no sidecar repair at {sidecar_build}")
+            continue
+
+        idx_path = output_path / "index.parquet"
+        if not idx_path.exists():
+            raise RuntimeError(f"Build {build} has no index.parquet to patch.")
+
+        index_rows = _read_index_rows(output_path)
+        build_tiles = by_build[build]
+
+        already_corrected = set()
+        for i, row in enumerate(index_rows):
+            if row.get("height_corrected"):
+                already_corrected.add(int(row["tile_id"]))
+
+        tiles_to_fix = [t for t in build_tiles if int(t["tile_id"]) not in already_corrected]
+        if not tiles_to_fix:
+            print(f"  {build}: all {len(build_tiles)} mismatch tiles already corrected (idempotent skip)")
+            continue
+
+        print(f"  {build}: repairing {len(tiles_to_fix)} tiles ({len(already_corrected)} already corrected)")
+
+        if args.dry_run:
+            for t in tiles_to_fix:
+                print(f"    [DRY RUN] would repair tile_id={t['tile_id']} "
+                      f"({t.get('map','?')} {t.get('tile_x','?')}_{t.get('tile_y','?')}) "
+                      f"severity={t.get('mismatch_severity','?')}")
+            continue
+
+        sstore = zarr.storage.LocalStore(str(sidecar_build), read_only=True)
+        try:
+            corrected_arr = zarr.open_array(sstore, path="height_corrected_257")
+        except Exception as e:
+            raise RuntimeError(f"Failed to open sidecar height_corrected_257 in {sidecar_build}: {e}")
+
+        store = zarr.storage.LocalStore(str(output_path), read_only=False)
+        root = zarr.open_group(store=store, mode="a")
+        height_arr = root["height_257"]
+
+        if not args.no_backup:
+            if "height_uncorrected_257" not in root:
+                print(f"    backing up height_257 to height_uncorrected_257...")
+                uncorrected = zarr.create_array(
+                    store,
+                    name="height_uncorrected_257",
+                    shape=height_arr.shape,
+                    dtype=np.float32,
+                    chunks=height_arr.metadata.chunk_grid.shape_caster.chunk_shape,
+                    fill_value=np.nan,
+                )
+                uncorrected[:] = height_arr[:]
+            else:
+                uncorrected = root["height_uncorrected_257"]
+                for t in tiles_to_fix:
+                    tid = int(t["tile_id"])
+                    if np.all(np.isnan(uncorrected[tid])):
+                        uncorrected[tid] = height_arr[tid]
+
+        fixes_applied = 0
+        for t in tiles_to_fix:
+            tid = int(t["tile_id"])
+            corrected_heights = corrected_arr[tid]
+            if np.all(np.isnan(corrected_heights)):
+                print(f"    SKIP tile_id={tid}: corrected heights are all NaN (uncorrectable normals)")
+                continue
+            height_arr[tid] = corrected_heights
+            fixes_applied += 1
+
+        store.close()
+
+        for row in index_rows:
+            tid = int(row["tile_id"])
+            if tid in (int(t["tile_id"]) for t in tiles_to_fix):
+                row["height_corrected"] = True
+        _write_index(index_rows, output_path)
+
+        print(f"    {build}: applied {fixes_applied} height repairs, skipped {len(tiles_to_fix) - fixes_applied}")
+
+    print("repair-heights complete")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build V16 consolidated Zarr dataset")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -3638,6 +3748,13 @@ def main() -> None:
     capture_rt_p.add_argument("--native-renderer", action=argparse.BooleanOptionalAction, default=False, help="Use validation-capture native-renderer mode")
     capture_rt_p.add_argument("--stub-scene", action=argparse.BooleanOptionalAction, default=False, help="Use validation-capture stub-scene mode")
 
+    repair_ht_p = sub.add_parser("repair-heights", parents=[common], help="Patch height_257 arrays from a sidecar repair store for mismatched tiles")
+    repair_ht_p.add_argument("--mismatch-report", type=str, required=True, help="Path to mismatch report parquet")
+    repair_ht_p.add_argument("--sidecar-repair", type=str, required=True, help="Path to sidecar repair Zarr store root (contains per-build subdirs)")
+    repair_ht_p.add_argument("--no-backup", action="store_true", help="Skip creating height_uncorrected_257 backup array")
+    repair_ht_p.add_argument("--allow-zarr-write", action="store_true", help="Required confirmation flag before mutating any V16 Zarr store")
+    repair_ht_p.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=False, help="Report what would be changed without writing")
+
     args = parser.parse_args()
 
     if args.command == "build":
@@ -3660,6 +3777,8 @@ def main() -> None:
         cmd_patch_renderer_truth(args)
     elif args.command == "capture-renderer-truth":
         cmd_capture_renderer_truth(args)
+    elif args.command == "repair-heights":
+        cmd_repair_heights(args)
 
 
 if __name__ == "__main__":

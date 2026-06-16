@@ -73,6 +73,7 @@ public sealed record Pm4MatchReportSegment(
     Pm4MatchReportTopologyStats? TopologyStats,
     Pm4MatchReportAnchorSignals? AnchorSignals,
     IReadOnlyDictionary<string, int>? SurfaceFamilyHistogram,
+    IReadOnlyDictionary<string, Pm4MatchReportBounds>? TypedBounds,
     IReadOnlyList<Pm4MatchReportCandidate> Candidates,
     Pm4MatchReportPlacementProposal? PlacementProposal);
 

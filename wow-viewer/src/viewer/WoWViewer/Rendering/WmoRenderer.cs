@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Text;
 using WowViewer.Core.IO.Mdx;
+using WowViewer.Core.IO.M2Chunked;
+using WowViewer.Core.IO.M2Era1121;
 using WoWViewer.DataSources;
 using WoWViewer.Logging;
 using WoWViewer.Terrain;
@@ -2031,6 +2033,32 @@ private IModelRenderer? LoadM2DoodadRenderer(string originalModelPath, string re
                     lastSkinError = ex;
                     ViewerLog.Debug(ViewerLog.Category.Mdx,
                         $"[M2] Embedded root-profile WMO doodad fallback failed for {Path.GetFileName(originalModelPath)}: {ex.Message}");
+                }
+            }
+
+            M2Era1121EraTag detectedEra = M2ModelReaderDispatcher.DetectEra(modelData.AsSpan(), resolvedModelPath);
+            if (detectedEra is M2Era1121EraTag.Md20_1X_V100 or M2Era1121EraTag.Md20_1X_V101)
+            {
+                try
+                {
+                    var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, null, resolvedModelPath, _buildVersion);
+                    string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
+
+                    var route = M2RouteDecision.Create(originalModelPath, buildProfileId, M2RouteType.AdapterEmbeddedProfile, M2RouteType.AdapterEmbeddedProfile, fallbackReason: $"1.12.1 WMO doodad (era={detectedEra.ToDisplayString()}), no external .skin needed");
+                    _doodadRouteDecisions[NormalizeDoodadPath(originalModelPath)] = route;
+                    M2RouteDiagnostics.LogRouteDecision(route);
+
+                    ViewerLog.Info(ViewerLog.Category.Mdx,
+                        $"[M2] Loaded embedded 1.12.1 geometry for WMO doodad {Path.GetFileName(originalModelPath)} (era={detectedEra.ToDisplayString()})");
+                    return new M2Renderer(
+                        new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion),
+                        resolvedModelPath);
+                }
+                catch (Exception ex)
+                {
+                    lastSkinError = ex;
+                    ViewerLog.Debug(ViewerLog.Category.Mdx,
+                        $"[M2] Embedded 1.12.1 WMO doodad fallback failed for {Path.GetFileName(originalModelPath)}: {ex.Message}");
                 }
             }
 

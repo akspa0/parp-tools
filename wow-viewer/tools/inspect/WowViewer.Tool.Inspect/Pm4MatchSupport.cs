@@ -644,7 +644,7 @@ internal static class Pm4MatchSupport
         return $"object_{objectMatch.ObjectPartId:D5}_{ck24Text}.json";
     }
 
-    private static JsonSerializerOptions CreateJsonOptions()
+    internal static JsonSerializerOptions CreateJsonOptions()
     {
         JsonSerializerOptions options = new()
         {

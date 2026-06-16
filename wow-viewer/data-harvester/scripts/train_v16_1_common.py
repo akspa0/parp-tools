@@ -1139,6 +1139,23 @@ class TaskSpec:
     save_preview: Callable[[dict[str, Any], dict[str, torch.Tensor], Path], None]
 
 
+def _unnorm_height(
+    height_norm: torch.Tensor,
+    batch: dict[str, Any],
+    device: torch.device,
+) -> torch.Tensor:
+    h_mean = batch.get("height_mean")
+    h_std = batch.get("height_std")
+    if isinstance(h_mean, torch.Tensor) and isinstance(h_std, torch.Tensor):
+        h_mean = h_mean.to(device, non_blocking=True)
+        h_std = h_std.to(device, non_blocking=True)
+        while h_mean.ndim < height_norm.ndim:
+            h_mean = h_mean.unsqueeze(-1)
+            h_std = h_std.unsqueeze(-1)
+        return height_norm * h_std + h_mean
+    return height_norm
+
+
 def _height_loss(
     model: torch.nn.Module,
     batch: dict[str, Any],
@@ -1152,11 +1169,27 @@ def _height_loss(
     train_mask = terrain_valid_mask.clamp(0.0, 1.0)
     invalid_mask = (1.0 - train_mask).clamp(0.0, 1.0)
     loss = _masked_mean((pred - target).abs(), train_mask)
-    object_roof_weight = batch.get("object_roof_weight_257")
-    return loss, {
+    metrics: dict[str, float] = {
         "height": float(loss.item()),
         "height_mask_cov": float(train_mask.mean().item()),
-    }, {
+    }
+
+    nc_weight = float(getattr(args, "normal_consistency_weight", 0.0))
+    nc_loss_val = 0.0
+    if nc_weight > 0.0 and "normals" in batch:
+        target_normals_gt = batch["normals"].to(device, non_blocking=True)
+        pred_height_unnorm = _unnorm_height(pred, batch, device)
+        pred_normals = _normals_from_height(pred_height_unnorm)
+        target_n = F.normalize(target_normals_gt, dim=1, eps=1e-6)
+        pred_n = F.normalize(pred_normals, dim=1, eps=1e-6)
+        cosine = 1.0 - (pred_n * target_n).sum(dim=1, keepdim=True)
+        nc_loss = _masked_mean(cosine, train_mask)
+        nc_loss_val = float(nc_loss.item())
+        loss = loss + (nc_weight * nc_loss)
+        metrics["height_nc_loss"] = nc_loss_val
+
+    object_roof_weight = batch.get("object_roof_weight_257")
+    return loss, metrics, {
         "pred": pred,
         "target": target,
         "weight": train_mask,
@@ -1765,6 +1798,12 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         type=float,
         default=1.0,
         help="Extra weight placed on high-deformation normal targets relative to broad flat terrain.",
+    )
+    p.add_argument(
+        "--normal-consistency-weight",
+        type=float,
+        default=0.0,
+        help="Weight for auxiliary normal-consistency loss on height training (penalizes divergence between height-derived normals and ground-truth normals). 0.0 disables.",
     )
     p.add_argument(
         "--no-compile",

@@ -3,8 +3,24 @@
 ## Direction
 WoW viewer. Libraries bridge to Unreal Engine. No Vulkan/WebGL/Museums/BASE.
 
-## Current Focus: Spec 046 — PM4 Asset Matching
-C# matching library is complete. Next: build the Python/Zarr signal-store lane so the matcher can score against durable asset corpora without requiring a staged client or _obj0.adt files.
+## Session Dirtied — Needs Fresh Start
+
+This session accumulated too many wrong turns and hallucinated assumptions. Memory bank is updated with deliverables but the reasoning path is contaminated. Start fresh in next session. Key real deliverables:
+
+- `pm4 dump-collision` CLI command in inspect tool (reads PM4 surfaces + WMO/M2 collision data)
+- WMO collision comparison works and validated on 40 OIDs
+- Python scorer validated (65/65 match C#)
+- Vector3 serialization bug fixed in asset corpus export
+- `TypedBounds` added to segment export JSON
+
+Everything else from this session should be re-validated from scratch.
+
+## 2026-06-15 — PM4 → ADT writing pipeline (wow-viewer)
+- Built `Pm4AdtWriter` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`
+- Added `pm4 write-adt` CLI command to `WowViewer.Tool.Inspect`
+- Pipeline: PM4 → segment extraction → placement matching → LK ADT output (MDDF/MODF)
+- Tested: 10 M2 + 15 WMO placements from development_00_00.pm4 written to valid ADT
+- M2 CK24 types: 0x40/0x41 = m2, 0x42/0x43 = wmo, TypeFlags 0x03 = M2 top surfaces
 
 ## What's Done
 012, 014, 024, 025, 033, 037, 041, 043, 044 (P1), 048, 054, 058, 059, 060, 061, 062

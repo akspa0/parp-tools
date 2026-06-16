@@ -21,8 +21,34 @@ public sealed class M2Era1121ModelReaderTests
                 out string sourcePath,
                 out _))
         {
+            Assert.Fail("Could not locate staged 1.12.1 bear.mdx test fixture!");
             return;
         }
+
+        Console.WriteLine($"--- BEAR.MDX HEADER DUMP (Length: {bytes.Length} bytes) ---");
+        uint magic = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(0, 4));
+        uint version = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(4, 4));
+        Console.WriteLine($"Magic: {(char)(magic & 0xFF)}{(char)((magic >> 8) & 0xFF)}{(char)((magic >> 16) & 0xFF)}{(char)((magic >> 24) & 0xFF)} (0x{magic:X8})");
+        Console.WriteLine($"Version: 0x{version:X8}");
+        
+        Console.WriteLine($"--- BEAR.MDX TEXTURES STRIDE 16 TEST ---");
+        int texOffset = 329136; // 0x505B0
+        for (int t = 0; t < 4; t++)
+        {
+            int start = texOffset + (t * 16);
+            uint type = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(start, 4));
+            uint flags = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(start + 4, 4));
+            uint nameLen = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(start + 8, 4));
+            uint nameOff = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(start + 12, 4));
+            
+            string filename = "";
+            if (nameLen > 0 && nameOff > 0 && nameOff + nameLen <= bytes.Length)
+            {
+                filename = Encoding.UTF8.GetString(bytes, (int)nameOff, (int)nameLen).TrimEnd('\0');
+            }
+            Console.WriteLine($"Texture {t} at 0x{start:X5}: type = {type}, flags = {flags}, nameLen = {nameLen}, nameOff = 0x{nameOff:X5}, file = '{filename}'");
+        }
+        Console.WriteLine("------------------------------------------");
 
         using MemoryStream stream = new(bytes, writable: false);
         M2ModelDocument document = M2Era1121ModelReader.Read(stream, sourcePath);

@@ -8,6 +8,8 @@ using Silk.NET.OpenGL;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.IO.Converters;
+using WowViewer.Core.IO.M2Chunked;
+using WowViewer.Core.IO.M2Era1121;
 
 namespace WoWViewer.Terrain;
 
@@ -1208,6 +1210,32 @@ private int _mdxLoadFailCount = 0;
                             lastSkinError = ex;
                             ViewerLog.Debug(ViewerLog.Category.Mdx,
                                 $"[M2] Embedded root-profile world fallback failed for {Path.GetFileName(normalizedKey)}: {ex.Message}");
+                        }
+                    }
+
+                    M2Era1121EraTag detectedEra = M2ModelReaderDispatcher.DetectEra(data.AsSpan(), resolvedModelPath);
+                    if (detectedEra is M2Era1121EraTag.Md20_1X_V100 or M2Era1121EraTag.Md20_1X_V101)
+                    {
+                        try
+                        {
+                            var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, null, resolvedModelPath, _buildVersion);
+                            string adaptedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
+
+                            var route = M2RouteDecision.Create(normalizedKey, buildProfileId, M2RouteType.AdapterEmbeddedProfile, M2RouteType.AdapterEmbeddedProfile, fallbackReason: $"1.12.1 MD20 model (era={detectedEra.ToDisplayString()}), no external .skin needed");
+                            _mdxRouteDecisions[normalizedKey] = route;
+                            M2RouteDiagnostics.LogRouteDecision(route);
+
+                            ViewerLog.Info(ViewerLog.Category.Mdx,
+                                $"[M2] Loaded embedded 1.12.1 geometry for {Path.GetFileName(normalizedKey)} (era={detectedEra.ToDisplayString()})");
+                            return new M2Renderer(
+                                new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion, deferInitialTextureLoads: true),
+                                resolvedModelPath);
+                        }
+                        catch (Exception ex)
+                        {
+                            lastSkinError = ex;
+                            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                                $"[M2] Embedded 1.12.1 world fallback failed for {Path.GetFileName(normalizedKey)}: {ex.Message}");
                         }
                     }
 
