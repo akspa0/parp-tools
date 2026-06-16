@@ -1706,10 +1706,11 @@ static void RunMapGenerateBlank(string[] args)
 
 	string resolvedMapName = mapName ?? "test";
 	string resolvedOutputDir = outputDir ?? ".";
-	Directory.CreateDirectory(resolvedOutputDir);
+	string mapDir = Path.Combine(resolvedOutputDir, "World", "Maps", resolvedMapName);
+	Directory.CreateDirectory(mapDir);
 
 	LkAdtData adtData = BlankAdtFactory.CreateBlank(resolvedMapName, tileX, tileY);
-	string adtPath = Path.Combine(resolvedOutputDir, $"{resolvedMapName}_{tileX}_{tileY}.adt");
+	string adtPath = Path.Combine(mapDir, $"{resolvedMapName}_{tileX}_{tileY}.adt");
 	LkAdtWriter.Write(adtPath, adtData);
 	Console.WriteLine($"Wrote ADT: {Path.GetFullPath(adtPath)}");
 	Console.WriteLine($"  Map: {resolvedMapName}, Tile: ({tileX}, {tileY})");
@@ -1717,13 +1718,13 @@ static void RunMapGenerateBlank(string[] args)
 
 	HashSet<(int, int)> tiles = [(tileX, tileY)];
 	LkWdtWriteOptions wdtOptions = BlankAdtFactory.CreateBlankWdtOptions();
-	string wdtPath = Path.Combine(resolvedOutputDir, $"{resolvedMapName}.wdt");
+	string wdtPath = Path.Combine(mapDir, $"{resolvedMapName}.wdt");
 	LkWdtWriter.Write(wdtPath, tiles, wdtOptions);
 	Console.WriteLine($"Wrote WDT: {Path.GetFullPath(wdtPath)}");
 	Console.WriteLine($"  WDT flags: MPHD=0x00000000 (no MCCV/big-alpha/MTXF/MAID/MCLV flags), tile ({tileX},{tileY}) flagged as HasAdt");
 
 	WdlHeightTile wdlTile = BlankAdtFactory.CreateBlankWdlTile(tileX, tileY);
-	string wdlPath = Path.Combine(resolvedOutputDir, $"{resolvedMapName}.wdl");
+	string wdlPath = Path.Combine(mapDir, $"{resolvedMapName}.wdl");
 	WdlWriter.Write(wdlPath, [wdlTile]);
 	Console.WriteLine($"Wrote WDL: {Path.GetFullPath(wdlPath)}");
 	Console.WriteLine($"  Flat height = 0 for tile ({tileX},{tileY})");
