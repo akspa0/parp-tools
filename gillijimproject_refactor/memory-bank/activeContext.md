@@ -15,12 +15,11 @@ This session accumulated too many wrong turns and hallucinated assumptions. Memo
 
 Everything else from this session should be re-validated from scratch.
 
-## 2026-06-15 — PM4 → ADT writing pipeline (wow-viewer)
-- Built `Pm4AdtWriter` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`
-- Added `pm4 write-adt` CLI command to `WowViewer.Tool.Inspect`
-- Pipeline: PM4 → segment extraction → placement matching → LK ADT output (MDDF/MODF)
-- Tested: 10 M2 + 15 WMO placements from development_00_00.pm4 written to valid ADT
-- M2 CK24 types: 0x40/0x41 = m2, 0x42/0x43 = wmo, TypeFlags 0x03 = M2 top surfaces
+## 2026-06-16 — ADT writing removed from PM4 matcher
+- Removed `Pm4AdtWriter`, `Pm4BinaryAdtPatcher` — they corrupted output ADTs
+- Replaced `pm4 write-adt` with `pm4 match-report` (markdown output only)
+- `LkAdtWriter` was never modified; it's clean
+- ADT patching is out of scope for the PM4 matcher
 
 ## What's Done
 012, 014, 024, 025, 033, 037, 041, 043, 044 (P1), 048, 054, 058, 059, 060, 061, 062

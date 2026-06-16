@@ -1,6 +1,6 @@
-# Implementation Plan: 046 — PM4 Asset Matching + ADT Restoration
+# Implementation Plan: 046 — PM4 Asset Matching
 
-**Branch**: `v0.5.0-dev` | **Date**: 2026-06-15 | **Spec**: [spec.md](spec.md)
+**Branch**: `v0.5.0-dev` | **Date**: 2026-06-16 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `/specs/046-pm4-asset-matching/spec.md`
 
@@ -8,43 +8,35 @@
 
 Two-lane PM4 asset matching system:
 
-1. **C# lane** (done): PM4 segment extraction, TypeFlags-based matching, LK ADT writing
+1. **C# lane** (done): PM4 segment extraction, TypeFlags-based matching, human-readable match reports
 2. **Python/Zarr lane** (done): signal store, scorer, placement synthesizer, validation
 
-The end-to-end pipeline: PM4 file → segment extraction → placement matching → LK ADT output → viewer playback.
+The end-to-end pipeline: PM4 file → segment extraction → placement matching → markdown report output.
 
-## ADT Restoration Pipeline (Phase 6 — Landed 2026-06-15)
+## Match Report (Phase 6 — Revised 2026-06-16)
 
 ### What it does
 
-Takes PM4 files + _obj0.adt placement catalogs from a staged game client, matches PM4 collision surfaces to M2/WMO placements, and writes a new LK ADT file with those placements restored.
-
-### Files
-
-| File | Purpose |
-|------|---------|
-| `Core.PM4/Matching/Pm4AdtWriter.cs` | Converts match results to `LkAdtData` |
-| `Core.IO/Maps/LkAdtWriter.cs` | Writes complete LK ADT binary |
-| `Core/Maps/LkAdtData.cs` | Data model for LK ADT |
-| `tools/inspect/Program.cs` | `pm4 write-adt` CLI command |
+Takes PM4 files + _obj0.adt placement catalogs from a staged game client, matches PM4 collision surfaces to M2/WMO placements, and outputs a single human-readable markdown file per PM4 tile.
 
 ### CLI
 
 ```powershell
-pm4 write-adt --input <file.pm4> --archive-root <client> [--placements <obj0.adt>] [--output <out.adt>] [--map-name <name>]
+pm4 match-report --input <file.pm4> --archive-root <client> [--placements <obj0.adt>] [--max-matches <n>] [--search-range <units>] [--output <report.md>]
 ```
 
-### Batch workflow (all tiles)
+### Output
 
-See `docs/PM4-ADT-RESTORATION.md` for the full guide.
+A markdown file containing:
+- Tile metadata (coordinates, archive root, object counts, search range)
+- PM4 object match summary table (CK24, type, part ID, surface count, footprint area, candidate counts)
+- WMO placement table (uniqueID, model path, position, rotation, bounds, asset resolution, candidate count)
+- M2 placement table (uniqueID, model path, position, rotation, scale, bounds, asset resolution, candidate count)
+- Per-placement PM4 candidate detail tables (CK24, type, gaps, overlaps, distances)
 
-```powershell
-# For each PM4 file in a directory:
-Get-ChildItem *.pm4 | ForEach-Object {
-    $tile = $_.BaseName -replace '.*_(\d+)_(\d+)$', '$1_$2'
-    dotnet run ... -- pm4 write-adt --input $_.FullName --archive-root <client> --output "output_$tile.adt"
-}
-```
+### Removed: ADT Patching (2026-06-16)
+
+`Pm4AdtWriter`, `Pm4BinaryAdtPatcher`, `Pm4AdtM2Placement`, `Pm4AdtWmoPlacement`, and the `pm4 write-adt` CLI command were removed. These produced corrupted ADT files by incorrectly patching placement chunks. The matcher now produces human-readable markdown reports — ADT writing is a separate concern that must not touch `LkAdtWriter`.
 
 ## Python/Zarr Lane (Phases 1-5 — Complete)
 
@@ -129,45 +121,19 @@ wow-viewer/data-harvester/src/harvester/
 
 ## Implementation Phases
 
-### Phase 1: Data Models and JSON Import
+### Phase 1: Data Models and JSON Import ✅
 
-**Goal**: Python data models that mirror the C# `Pm4MatchingModels` records, plus JSON import functions that deserialize C# export files into these models.
+### Phase 2: Zarr Signal Store ✅
 
-**Approach**: Define dataclasses for `Pm4SegmentSignalRecord`, `Pm4AssetReferenceSignalRecord`, `Pm4SegmentMatchResult`, `Pm4ReplacementPlacementProposal`. Write JSON import that handles the exact schema C# exports (camelCase keys, nested objects).
+### Phase 3: Python Scorer ✅
 
-**Validation**: Round-trip test — import a C# JSON export, verify all fields match expected values.
+### Phase 4: Placement Synthesizer ✅
 
-### Phase 2: Zarr Signal Store
+### Phase 5: Validation Script and Known-Tile Proof ✅
 
-**Goal**: Read/write segment signals and asset reference signals to Zarr stores, keyed by segment ID or asset ID.
+### Phase 6: Match Report CLI ✅ (revised from ADT writing)
 
-**Approach**: Extend existing `zarr_io.py` patterns. Each store contains: segment/asset ID array (string), bounds (float32 [N,2,3]), footprint hulls (variable-length), height stats (float32 [N,3]), surface family histograms (int32 sparse), topology stats (int32 [N,4]), anchor signals (float32 [N,8]). Store metadata as JSON attrs.
-
-**Validation**: Write a store, read it back, compare all fields to original data.
-
-### Phase 3: Python Scorer
-
-**Goal**: Port the C# `Pm4AssetMatchScorer.ScoreSegment` logic to Python, producing identical scores for the same inputs.
-
-**Approach**: Implement typed-overlap (35%) + type-profile (15%) + shape (50%) scoring. Key functions: `compute_bounds_overlap_ratio`, `score_ratio`, `score_distance`, `evaluate_typed_candidate`. Must handle TypeFlags profile matching and sub-part bounds.
-
-**Validation**: Import C# match report JSON, re-score in Python, verify scores match to 0.001 tolerance.
-
-### Phase 4: Placement Synthesizer
-
-**Goal**: Port `Pm4ReplacementPlacementSynthesizer.Synthesize` to Python.
-
-**Approach**: For each matched segment, build a placement proposal with provenance. Must produce identical proposal IDs for the same inputs (SHA256-based).
-
-**Validation**: Import C# proposal JSON, re-synthesize in Python, verify proposal IDs match.
-
-### Phase 5: Validation Script and Known-Tile Proof
-
-**Goal**: End-to-end validation script that imports C# exports, runs Python scorer, and compares results against C# ground truth.
-
-**Approach**: `pm4_validate_proposals.py` takes segment JSON + asset corpus JSON + C# match report JSON, runs Python scorer, reports pass/fail with diff details. Use dev tile (33_32) as primary validation target.
-
-**Validation**: Script passes on dev tile data. All matched/ambiguous/unresolved statuses match C# output.
+Replaced `pm4 write-adt` (ADT binary patching, removed 2026-06-16) with `pm4 match-report` (human-readable markdown output).
 
 ## Complexity Tracking
 

@@ -1,5 +1,11 @@
 # Progress
 
+## 2026-06-16 — PM4 ADT writing reverted, replaced with match-report
+- Deleted Pm4AdtWriter, Pm4BinaryAdtPatcher — ADT patching was corrupting output
+- Replaced `pm4 write-adt` with `pm4 match-report` (human-readable markdown)
+- LkAdtWriter untouched — not part of PM4 matcher work
+- Checkpoint commit: 5133bfe3
+
 ## 2026-06-14 — Spec consolidation + tool fixes
 - Replaced engine-program plan with viewer-first + UE bridge (509→35 lines)
 - Archived 005, 020, 026, 033, 036, 059 (done/dead)

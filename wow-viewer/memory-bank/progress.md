@@ -1,5 +1,15 @@
 # Progress — wow-viewer
 
+## 2026-06-16 — PM4 ADT writing removed, replaced with match-report
+- Deleted `Pm4AdtWriter`, `Pm4BinaryAdtPatcher`, `Pm4AdtM2Placement`, `Pm4AdtWmoPlacement` — ADT patching was corrupting output ADTs
+- Removed `pm4 write-adt` CLI command; replaced with `pm4 match-report` (markdown output)
+- Added `FormatPm4MatchReport` and `WritePlacementSection` helpers in Program.cs
+- Removed `FindBaseAdtPath` helper (only used by write-adt)
+- Deleted `docs/PM4-ADT-RESTORATION.md`
+- Updated spec 046: goal changed from ADT restoration to human-readable match reports
+- Committed checkpoint before revert (5133bfe3)
+- `LkAdtWriter` was never modified — it's clean
+
 ## 2026-06-15 — PM4 → ADT writing pipeline landed
 - Built `Pm4AdtWriter` in `Core.PM4/Matching/` — converts PM4 match results to `LkAdtData`
 - Added `pm4 write-adt` CLI command to inspect tool

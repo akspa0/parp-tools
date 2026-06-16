@@ -1707,8 +1707,8 @@ static void RunPm4(string[] args)
 	case "match":
 		RunPm4Match(tail);
 		break;
-	case "write-adt":
-		RunPm4WriteAdt(tail);
+	case "match-report":
+		RunPm4MatchReport(tail);
 		break;
 	case "manifest":
 		RunPm4Manifest(tail);
@@ -1866,16 +1866,31 @@ string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "-
 	Pm4MatchSupport.Print(result);
 }
 
-static void RunPm4WriteAdt(string[] args)
+static void RunPm4MatchReport(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
 	string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "--adt-obj", "-a");
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
 	string? output = GetOption(args, "--output", "-o");
-	string? mapName = GetOption(args, "--map-name", "-m");
-		string? adtSourceDir = GetOption(args, "--adt-dir", "-u");
+	string? maxMatchesText = GetOption(args, "--max-matches", "-n");
+	string? searchRangeText = GetOption(args, "--search-range", "-s");
 	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
 		return;
+
+	int maxMatches = 8;
+	float searchRange = 128f;
+	if (!string.IsNullOrWhiteSpace(maxMatchesText) && (!int.TryParse(maxMatchesText, out maxMatches) || maxMatches <= 0))
+	{
+		Console.Error.WriteLine("Error: --max-matches must be a positive integer.");
+		Environment.ExitCode = 1;
+		return;
+	}
+	if (!string.IsNullOrWhiteSpace(searchRangeText) && (!float.TryParse(searchRangeText, out searchRange) || searchRange <= 0f))
+	{
+		Console.Error.WriteLine("Error: --search-range must be a positive number.");
+		Environment.ExitCode = 1;
+		return;
+	}
 
 	if (string.IsNullOrWhiteSpace(input))
 	{
@@ -1886,7 +1901,7 @@ static void RunPm4WriteAdt(string[] args)
 
 	if (string.IsNullOrWhiteSpace(archiveRoot))
 	{
-		Console.Error.WriteLine("Error: --archive-root is required for pm4 write-adt so WMO/M2 assets can be read from game archives.");
+		Console.Error.WriteLine("Error: --archive-root is required for pm4 match-report so WMO/M2 assets can be read from game archives.");
 		Environment.ExitCode = 1;
 		return;
 	}
@@ -1914,49 +1929,105 @@ static void RunPm4WriteAdt(string[] args)
 		return;
 	}
 
-	if (!Pm4CoordinateService.TryParseTileCoordinates(input, out int tX, out int tY))
+	Pm4MatchResult result = Pm4MatchSupport.Run(input, placements, archiveRoot, archiveBootstrapOptions, maxMatches, searchRange);
+	string markdown = FormatPm4MatchReport(result);
+
+	if (!string.IsNullOrWhiteSpace(output))
 	{
-		Console.Error.WriteLine("Error: could not parse tile coordinates from PM4 filename.");
-		Environment.ExitCode = 1;
-		return;
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+		File.WriteAllText(outputPath, markdown);
+		Console.WriteLine($"Wrote {outputPath}");
+	}
+	else
+	{
+		Console.Write(markdown);
+	}
+}
+
+static string FormatPm4MatchReport(Pm4MatchResult result)
+{
+	var sb = new System.Text.StringBuilder();
+	sb.AppendLine($"# PM4 Match Report: {Path.GetFileName(result.Pm4Path)}");
+	sb.AppendLine();
+	sb.AppendLine($"- **PM4**: `{result.Pm4Path}`");
+	sb.AppendLine($"- **Placements**: `{result.PlacementPath}`");
+	sb.AppendLine($"- **Archive**: `{result.ArchiveRoot}`");
+	sb.AppendLine($"- **Tile**: ({result.TileX}, {result.TileY})");
+	sb.AppendLine($"- **PM4 Objects**: {result.Pm4ObjectCount}");
+	sb.AppendLine($"- **WMO Placements**: {result.WmoPlacementCount}");
+	sb.AppendLine($"- **M2 Placements**: {result.M2PlacementCount}");
+	sb.AppendLine($"- **Search Range**: {result.SearchRange} units");
+	sb.AppendLine();
+
+	if (result.Notes.Count > 0)
+	{
+		sb.AppendLine("## Notes");
+		foreach (string note in result.Notes)
+			sb.AppendLine($"- {note}");
+		sb.AppendLine();
 	}
 
-	Pm4MatchResult result = Pm4MatchSupport.Run(input, placements, archiveRoot, archiveBootstrapOptions, 8, 128f);
-	string resolvedMapName = mapName ?? "pm4restored";
-
-	List<Pm4AdtM2Placement> m2Placements = result.M2Placements
-		.Select(static p => new Pm4AdtM2Placement(p.UniqueId, p.ModelPath, p.PlacementPosition, p.PlacementRotation, p.PlacementScale))
-		.ToList();
-	List<Pm4AdtWmoPlacement> wmoPlacements = result.WmoPlacements
-		.Select(static p => new Pm4AdtWmoPlacement(p.UniqueId, p.ModelPath, p.PlacementPosition, p.PlacementRotation, p.WorldBoundsMin, p.WorldBoundsMax))
-		.ToList();
-
-	// Read WoWMuseum ADT and patch placements in-place
-	string resolvedOutput = output ?? Path.Combine(
-		Path.GetDirectoryName(Path.GetFullPath(input)) ?? ".",
-		$"development_{tX}_{tY}.adt");
-
-	string? baseAdtPath = FindBaseAdtPath(input, tX, tY, adtSourceDir);
-	if (baseAdtPath == null || !File.Exists(baseAdtPath))
+	if (result.Pm4ObjectMatches.Count > 0)
 	{
-		Console.Error.WriteLine($"Error: no base ADT found for tile ({tX},{tY}).");
-		Environment.ExitCode = 1;
-		return;
+		sb.AppendLine("## PM4 Object Matches");
+		sb.AppendLine();
+		sb.AppendLine("| # | CK24 | Type | Part | Surface Count | Footprint Area | Candidate Count | Exported |");
+		sb.AppendLine("|---|------|------|------|---------------|-----------------|-----------------|----------|");
+		for (int i = 0; i < result.Pm4ObjectMatches.Count; i++)
+		{
+			Pm4ObjectMatch obj = result.Pm4ObjectMatches[i];
+			sb.AppendLine($"| {i + 1} | 0x{obj.Ck24:X8} | {obj.Ck24Type} | {obj.ObjectPartId} | {obj.SurfaceCount} | {obj.FootprintArea:F1} | {obj.NearbyCandidateCount} | {obj.ExportedCandidateCount} |");
+		}
+		sb.AppendLine();
 	}
 
-	byte[] sourceBytes = File.ReadAllBytes(baseAdtPath);
-	byte[] resultBytes = Pm4BinaryAdtPatcher.Patch(sourceBytes, tX, tY, m2Placements);
+	WritePlacementSection(sb, "WMO Placements (MODF)", result.WmoPlacements);
+	WritePlacementSection(sb, "M2 Placements (MDDF)", result.M2Placements);
 
-	string? outDir = Path.GetDirectoryName(resolvedOutput);
-	if (!string.IsNullOrWhiteSpace(outDir))
-		Directory.CreateDirectory(outDir);
-	File.WriteAllBytes(resolvedOutput, resultBytes);
+	return sb.ToString();
+}
 
-	Console.WriteLine($"Wrote {resolvedOutput}");
-	Console.WriteLine($"  M2 placements (MDDF): {m2Placements.Count}");
-	Console.WriteLine($"  WMO placements (MODF): {wmoPlacements.Count}");
-	Console.WriteLine($"  Map: {resolvedMapName} tile ({tX},{tY})");
-	Console.WriteLine($"  Source ADT: {baseAdtPath}");
+static void WritePlacementSection(System.Text.StringBuilder sb, string title, IReadOnlyList<Pm4PlacementMatchPlacement> placements)
+{
+	if (placements.Count == 0)
+		return;
+
+	sb.AppendLine($"## {title}");
+	sb.AppendLine();
+	sb.AppendLine("| # | UniqueID | Model Path | Position | Rotation | Scale | Bounds Min | Bounds Max | Asset | Candidates |");
+	sb.AppendLine("|---|---------|------------|----------|----------|-------|------------|------------|-------|------------|");
+
+	for (int i = 0; i < placements.Count; i++)
+	{
+		Pm4PlacementMatchPlacement p = placements[i];
+		string assetCol = p.AssetResolved ? (p.AssetSource ?? "yes") : "not found";
+		sb.AppendLine($"| {i + 1} | {p.UniqueId} | `{p.ModelPath}` | ({p.PlacementPosition.X:F1}, {p.PlacementPosition.Y:F1}, {p.PlacementPosition.Z:F1}) | ({p.PlacementRotation.X:F1}, {p.PlacementRotation.Y:F1}, {p.PlacementRotation.Z:F1}) | {p.PlacementScale:F3} | ({p.WorldBoundsMin.X:F1}, {p.WorldBoundsMin.Y:F1}, {p.WorldBoundsMin.Z:F1}) | ({p.WorldBoundsMax.X:F1}, {p.WorldBoundsMax.Y:F1}, {p.WorldBoundsMax.Z:F1}) | {assetCol} | {p.CandidateCount} |");
+	}
+
+	sb.AppendLine();
+
+	for (int i = 0; i < placements.Count; i++)
+	{
+		Pm4PlacementMatchPlacement p = placements[i];
+		if (p.Matches.Count == 0)
+			continue;
+
+		sb.AppendLine($"### Placement {i + 1}: `{p.ModelPath}` (UID {p.UniqueId}) — PM4 Candidates");
+		sb.AppendLine();
+		sb.AppendLine("| # | CK24 | Type | Part | Surfaces | Height | Planar Gap | Vert Gap | Center Dist | Footprint Dist | Overlap |");
+		sb.AppendLine("|---|------|------|------|----------|--------|------------|----------|-------------|-----------------|---------|");
+
+		for (int j = 0; j < p.Matches.Count; j++)
+		{
+			Pm4PlacementMatchCandidate c = p.Matches[j];
+			sb.AppendLine($"| {j + 1} | 0x{c.Ck24:X8} | {c.Ck24Type} | {c.ObjectPartId} | {c.SurfaceCount} | {c.AverageSurfaceHeight:F1} | {c.PlanarGap:F1} | {c.VerticalGap:F1} | {c.CenterDistance:F1} | {c.FootprintDistance:F1} | {c.FootprintOverlapRatio:P0} |");
+		}
+
+		sb.AppendLine();
+	}
 }
 
 static void RunPm4Manifest(string[] args)
@@ -2090,20 +2161,7 @@ static void RunPm4Manifest(string[] args)
 	Console.WriteLine($"Output: {resolvedOutputDir}");
 }
 
-static string? FindBaseAdtPath(string pm4Path, int tileX, int tileY, string? adtSourceDir = null)
-{
-	string dir;
-	if (!string.IsNullOrWhiteSpace(adtSourceDir))
-		dir = adtSourceDir;
-	else
-		dir = Path.GetDirectoryName(pm4Path) ?? ".";
-	string pm4Name = Path.GetFileNameWithoutExtension(pm4Path);
-	int lastUnderscore = pm4Name.LastIndexOf('_');
-	int prevUnderscore = lastUnderscore > 0 ? pm4Name.LastIndexOf('_', lastUnderscore - 1) : -1;
-	string baseName = prevUnderscore > 0 ? pm4Name[..prevUnderscore] : pm4Name;
-	string adtPath = Path.Combine(dir, $"{baseName}_{tileX}_{tileY}.adt");
-	return File.Exists(adtPath) ? adtPath : null;
-}
+
 
 static void RunPm4MatchAssets(string[] args)
 {
@@ -5106,7 +5164,7 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 match-assets --input <file.pm4> [--asset-corpus <corpus.json> | --archive-root <staged client dir> [--placements <tile_obj0.adt>]] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
 	Console.WriteLine("  pm4 synthesize-placements --input <file.pm4> --target-tiles <x_y[,x_y...]> [--asset-corpus <corpus.json> | --archive-root <staged client dir> [--placements <tile_obj0.adt>]] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
 	Console.WriteLine("  pm4 match --input <file.pm4> --archive-root <game|data dir> [--placements <tile_obj0.adt>] [--listfile <listfile.txt>] [--max-matches <n>] [--search-range <units>] [--output <report.json>] [--object-output-dir <directory>]");
-	Console.WriteLine("  pm4 write-adt --input <file.pm4> --archive-root <game|data dir> [--placements <tile_obj0.adt>] [--output <output.adt>] [--map-name <name>] [--adt-dir <directory>]");
+	Console.WriteLine("  pm4 match-report --input <file.pm4> --archive-root <game|data dir> [--placements <tile_obj0.adt>] [--max-matches <n>] [--search-range <units>] [--output <report.md>]");
 	Console.WriteLine("  pm4 manifest --input <file.pm4|directory> --archive-root <game|data dir> [--placements <tile_obj0.adt>] [--output <output-dir>]");
 	Console.WriteLine("  pm4 hierarchy --input <file.pm4> [--output <report.json>]");
 	Console.WriteLine("  pm4 linkage --input <directory> [--output <report.json>]");
