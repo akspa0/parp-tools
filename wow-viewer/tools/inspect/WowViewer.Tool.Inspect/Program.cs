@@ -1462,6 +1462,9 @@ static void RunMap(string[] args)
 		case "uniqueid-report":
 			RunMapUniqueIdReport(tail);
 			break;
+		case "generate-blank":
+			RunMapGenerateBlank(tail);
+			break;
 		default:
 			Console.Error.WriteLine($"Unknown map command '{command}'.");
 			ShowMapUsage();
@@ -1670,6 +1673,60 @@ static void RunMapUniqueIdFilter(string[] args)
 		Console.Error.WriteLine($"Error: {ex.Message}");
 		Environment.ExitCode = 1;
 	}
+}
+
+static void RunMapGenerateBlank(string[] args)
+{
+	string? mapName = GetOption(args, "--map-name", "-m");
+	string? tileXText = GetOption(args, "--tile-x", "-x");
+	string? tileYText = GetOption(args, "--tile-y", "-y");
+	string? outputDir = GetOption(args, "--output-dir", "-o");
+
+	if (string.IsNullOrWhiteSpace(tileXText) || string.IsNullOrWhiteSpace(tileYText))
+	{
+		Console.Error.WriteLine("Error: --tile-x and --tile-y are required.");
+		Console.Error.WriteLine("Usage: map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--output-dir <dir>]");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!int.TryParse(tileXText, out int tileX) || tileX < 0 || tileX >= 64)
+	{
+		Console.Error.WriteLine("Error: --tile-x must be an integer in [0, 63].");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!int.TryParse(tileYText, out int tileY) || tileY < 0 || tileY >= 64)
+	{
+		Console.Error.WriteLine("Error: --tile-y must be an integer in [0, 63].");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string resolvedMapName = mapName ?? "blanktest";
+	string resolvedOutputDir = outputDir ?? ".";
+	Directory.CreateDirectory(resolvedOutputDir);
+
+	LkAdtData adtData = BlankAdtFactory.CreateBlank(resolvedMapName, tileX, tileY);
+	string adtPath = Path.Combine(resolvedOutputDir, $"{resolvedMapName}_{tileX}_{tileY}.adt");
+	LkAdtWriter.Write(adtPath, adtData);
+	Console.WriteLine($"Wrote ADT: {Path.GetFullPath(adtPath)}");
+	Console.WriteLine($"  Map: {resolvedMapName}, Tile: ({tileX}, {tileY})");
+	Console.WriteLine($"  256 MCNK chunks, 0 placements, 0 textures");
+
+	HashSet<(int, int)> tiles = [(tileX, tileY)];
+	LkWdtWriteOptions wdtOptions = BlankAdtFactory.CreateBlankWdtOptions();
+	string wdtPath = Path.Combine(resolvedOutputDir, $"{resolvedMapName}.wdt");
+	LkWdtWriter.Write(wdtPath, tiles, wdtOptions);
+	Console.WriteLine($"Wrote WDT: {Path.GetFullPath(wdtPath)}");
+	Console.WriteLine($"  WDT flags: MPHD=0x00000000 (no MCCV/big-alpha/MTXF/MAID/MCLV flags), tile ({tileX},{tileY}) flagged as HasAdt");
+
+	WdlHeightTile wdlTile = BlankAdtFactory.CreateBlankWdlTile(tileX, tileY);
+	string wdlPath = Path.Combine(resolvedOutputDir, $"{resolvedMapName}.wdl");
+	WdlWriter.Write(wdlPath, [wdlTile]);
+	Console.WriteLine($"Wrote WDL: {Path.GetFullPath(wdlPath)}");
+	Console.WriteLine($"  Flat height = 0 for tile ({tileX},{tileY})");
 }
 
 static void RunPm4(string[] args)
@@ -4647,6 +4704,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect mdx-render --input <file.mdx> --output <bmp> [--width <n>] [--height <n>] [--sequence <n>] [--time <ms>] [--bones]");
 	Console.WriteLine("  wowviewer-inspect mdx-render --archive-root <dir> --virtual-path <path/to/file.mdx> --output <bmp> [--width <n>] [--height <n>] [--sequence <n>] [--time <ms>] [--bones]");
 	Console.WriteLine("  wowviewer-inspect map inspect --input <file.wdt|file.adt|file.error>");
+	Console.WriteLine("  wowviewer-inspect map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--output-dir <dir>]");
 	Console.WriteLine("  wowviewer-inspect lit inspect --input <lights.lit>");
 	Console.WriteLine("  wowviewer-inspect lit inspect --archive-root <game|data dir> --virtual-path <world/.../lights.lit> [--listfile <listfile.txt>]");
 	Console.WriteLine("  wowviewer-inspect wmo inspect --input <file.wmo> [--dump-lights]");
@@ -5153,6 +5211,7 @@ static void ShowMapUsage()
 	Console.WriteLine("  map inspect --input <file.wdt|file.adt|file.error> [--dump-tex-chunks]");
 	Console.WriteLine("  map uniqueid-filter --input <report.json> [--min-uniqueid <n>] [--max-uniqueid <n>] [--build <label[,label...]>] [--kind all|m2|wmo] [--invert] [--output <report.json>]");
 	Console.WriteLine("  map uniqueid-report --input <file.wdt|file.adt|directory> [--input <second-source> ...] [--build <label>] [--output <report.json>]");
+	Console.WriteLine("  map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--output-dir <dir>]");
 }
 
 static void ShowPm4Usage()
