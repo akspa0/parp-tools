@@ -1704,7 +1704,7 @@ static void RunMapGenerateBlank(string[] args)
 		return;
 	}
 
-	string resolvedMapName = mapName ?? "test";
+	string resolvedMapName = mapName ?? "testing";
 	string resolvedOutputDir = outputDir ?? ".";
 	string mapDir = Path.Combine(resolvedOutputDir, "World", "Maps", resolvedMapName);
 	Directory.CreateDirectory(mapDir);
