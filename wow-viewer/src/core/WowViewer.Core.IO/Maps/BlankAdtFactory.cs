@@ -100,6 +100,39 @@ public static class BlankAdtFactory
             modfPlacements.Add(new LkModfEntry(nameId, p.UniqueId, p.Position, p.Rotation, p.BoundsMin, p.BoundsMax, Flags: 0, DoodadSet: 0, NameSet: 0, Scale: 1.0f));
         }
 
+        var mddfByChunk = AssignMddfToChunks(baseAdt, mddfPlacements);
+        var modfByChunk = AssignModfToChunks(baseAdt, modfPlacements);
+
+        var patchedChunks = new LkMcnkData[baseAdt.Chunks.Count];
+        for (int i = 0; i < baseAdt.Chunks.Count; i++)
+        {
+            var c = baseAdt.Chunks[i];
+            patchedChunks[i] = new LkMcnkData
+            {
+                IndexX = c.IndexX,
+                IndexY = c.IndexY,
+                Flags = c.Flags,
+                AreaId = c.AreaId,
+                NLayers = c.NLayers,
+                HoleMask = c.HoleMask,
+                BaseHeight = c.BaseHeight,
+                Heights = c.Heights,
+                Normals = c.Normals,
+                ShadowMap = c.ShadowMap,
+                AlphaMapData = c.AlphaMapData,
+                AlphaMapSize = c.AlphaMapSize,
+                Layers = c.Layers,
+                DoodadRefs = mddfByChunk.TryGetValue(i, out var mddfRefs) ? mddfRefs : [],
+                WorldModelRefs = modfByChunk.TryGetValue(i, out var modfRefs) ? modfRefs : [],
+                LiquidData = c.LiquidData,
+                MccvColors = c.MccvColors,
+                MclvLighting = c.MclvLighting,
+                PosX = c.PosX,
+                PosY = c.PosY,
+                PosZ = c.PosZ,
+            };
+        }
+
         return new LkAdtData
         {
             MapName = baseAdt.MapName,
@@ -110,10 +143,64 @@ public static class BlankAdtFactory
             WorldModelNames = worldModelNames,
             ModelPlacements = mddfPlacements,
             WorldModelPlacements = modfPlacements,
-            Chunks = baseAdt.Chunks,
+            Chunks = patchedChunks,
             MhdrFlags = baseAdt.MhdrFlags,
             MfboFlightBounds = baseAdt.MfboFlightBounds,
         };
+    }
+
+    private static Dictionary<int, List<int>> AssignMddfToChunks(LkAdtData adt, IReadOnlyList<LkMddfEntry> placements)
+    {
+        var result = new Dictionary<int, List<int>>();
+        for (int p = 0; p < placements.Count; p++)
+        {
+            int chunkIdx = FindChunkForPosition(adt, placements[p].Position);
+            if (chunkIdx >= 0)
+            {
+                if (!result.TryGetValue(chunkIdx, out var list))
+                {
+                    list = [];
+                    result[chunkIdx] = list;
+                }
+                list.Add(p);
+            }
+        }
+        return result;
+    }
+
+    private static Dictionary<int, List<int>> AssignModfToChunks(LkAdtData adt, IReadOnlyList<LkModfEntry> placements)
+    {
+        var result = new Dictionary<int, List<int>>();
+        for (int p = 0; p < placements.Count; p++)
+        {
+            int chunkIdx = FindChunkForPosition(adt, placements[p].Position);
+            if (chunkIdx >= 0)
+            {
+                if (!result.TryGetValue(chunkIdx, out var list))
+                {
+                    list = [];
+                    result[chunkIdx] = list;
+                }
+                list.Add(p);
+            }
+        }
+        return result;
+    }
+
+    private static int FindChunkForPosition(LkAdtData adt, Vector3 position)
+    {
+        for (int i = 0; i < adt.Chunks.Count; i++)
+        {
+            var c = adt.Chunks[i];
+            float minX = c.PosX;
+            float minY = c.PosY - ChunkSize;
+            float maxX = c.PosX + ChunkSize;
+            float maxY = c.PosY;
+
+            if (position.X >= minX && position.X < maxX && position.Y >= minY && position.Y < maxY)
+                return i;
+        }
+        return -1;
     }
 
     public static LkWdtWriteOptions CreateBlankWdtOptions() => new()
