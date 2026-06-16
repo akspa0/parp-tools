@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: We need to generate valid blank ADT/WDT files that load in the viewer and game engine, as a prerequisite for understanding every iota of the ADT and alphaWDT file formats. These files are relational databases (tables, indices, foreign keys) compressed into binary. We must treat them as such — and use Zarr as an intermediate datastore that respects this structure.
+**Input**: We need to generate valid blank ADT/WDT files that load in the viewer and game engine, as a prerequisite for understanding every iota of the ADT and alphaWDT file formats. These files are relational databases (tables, indices, foreign keys) compressed into binary. We must treat them as such — using the same pattern we already use for DBC/DB2 files via DBCD + WoWDBDefs — and use Zarr as an intermediate datastore that respects this structure.
 
 ## Background
 
@@ -15,7 +15,41 @@ WoW's ADT, WDT, and PM4 file formats are highly optimized relational databases. 
 - **Indices**: MCIN offsets point into MCNK, MCRF references into MDDF/MODF, MMID/MWID reference into MMDX/MWMO, MCLY references into MTEX
 - **Foreign keys**: Alpha offsets reference into MCAL, texture layers reference MTEX entries, placement references cross-reference MDDF↔MMDX and MODF↔MWMO
 
-The current approach (hand-coded binary readers/writers, opaque patchers) treats these as opaque blobs. It fails because it doesn't respect the relational structure. The right approach is to model these as tables in a Zarr datastore and build readers/writers that understand the schema.
+The current approach (hand-coded binary readers/writers, opaque patchers) treats these as opaque blobs. It fails because it doesn't respect the relational structure. The right approach is to model these as tables the same way we already model DBC/DB2 files:
+
+### The DBC Pattern (Already Working)
+
+We already have a working pattern for this exact problem. DBC/DB2 files are literally SQL tables dumped to binary. Our codebase handles them correctly because we use:
+
+1. **WoWDBDefs** (`wow-viewer/libs/wowdev/WoWDBDefs/definitions/*.dbd`) — schema definitions that are the equivalent of `CREATE TABLE` statements. Hundreds of `.dbd` files define column names, types, build-specific layouts, and foreign key relationships.
+2. **DBCD** — a generic reader that takes a `.dbc` (binary data) + `.dbd` (schema) and produces a typed `IDBCDStorage` object you can query by column name.
+3. **Typed accessors** — `AreaIdMapper`, `LightService`, `MapDiscoveryService`, `ReplaceableTextureResolver`, etc. use DBCD to read specific tables with known schemas.
+
+This is **exactly the pattern we need for ADT/WDT/PM4**. The `.dbd` files are schema definitions. DBCD is the generic reader. The difference is that ADT/WDT/PM4 have **nested** tables (chunks within chunks) and **inter-file** foreign keys (WDT → ADT, _obj0.adt → PM4), while DBC tables are flat single-file tables. But the relational model is the same.
+
+### The Right Approach: DBD-Style Schema Definitions for ADT/WDT
+
+Instead of hand-coding binary offsets and sizes in C# (which is what killed the Pm4AdtWriter — it hallucinated byte offsets), we should define ADT/WDT schemas in a declarative format similar to `.dbd`:
+
+```
+# ADT schema (proto-.dbd style)
+TABLE MHDR:
+  col: flags          UINT32   offset 0x00
+  col: ofsMcin        UINT32   offset 0x04   FK→MCIN
+  col: nMtex          UINT32   offset 0x08   count(MTEX entries)
+  col: ofsMtex        UINT32   offset 0x0C   FK→MTEX
+  ...etc
+
+TABLE MCNK (256 rows, PK=MCIN[i].offset):
+  col: flags          UINT32   offset 0x00
+  col: indexX         INT32    offset 0x04
+  ...etc
+  sub-tables: MCVT, MCNR, MCLY, MCRF, MCAL, MCSH, MCLQ, MCCV, MCLV
+```
+
+This is what Phase 2 of this spec produces — not just documentation, but a **machine-readable schema** that drives reading and writing the same way `.dbd` drives DBC reading.
+
+The Zarr datastore (Phase 3) then becomes the natural runtime representation: one Zarr group per table, with columns as arrays, exactly like a column-oriented SQL database.
 
 Before we can write proper ADTs from PM4 data, we must first prove we can generate **valid blank maps** — ADT + WDT + WDL files with flat white terrain, zero placements, and no textures — that the viewer and game engine can load without errors.
 
@@ -127,7 +161,8 @@ A developer can read an LK ADT into a Zarr-backed relational store (one Zarr gro
 - **LkAdtData**: Domain model for LK 3.3.5 ADT (already exists in `WowViewer.Core/Maps/LkAdtData.cs`). Extended with factory methods for blank generation.
 - **BlankAdtFactory**: New static class that constructs `LkAdtData` with flat terrain defaults for any tile coordinate.
 - **BlankWdtFactory**: New static class that constructs WDT data with tile existence flags.
-- **ADT Relational Schema**: Architecture document describing every ADT chunk as a database table with columns, types, primary keys, and foreign keys.
+- **ADT Relational Schema**: Architecture document describing every ADT chunk as a database table with columns, types, primary keys, and foreign keys — modeled after the `.dbd` schema pattern we already use for DBC/DB2 files.
+- **DBCD Pattern**: Our existing infrastructure for DBC/DB2 (WoWDBDefs `.dbd` definitions + DBCD generic reader + typed accessors). The ADT/WDT schema work should follow this same pattern: declarative schema → generic reader/writer → typed accessors.
 
 ## Success Criteria
 
@@ -148,6 +183,7 @@ A developer can read an LK ADT into a Zarr-backed relational store (one Zarr gro
 - Zarr datastore work (Story 5) is a stretch goal and should not block P1/P2 delivery
 - The relational schema documentation is a reference artifact — it informs future work but doesn't block P1/P2
 - Existing `LkAdtWriter.Build()` already writes full ADT structure; the gap is constructing a valid `LkAdtData` with correct default values for a blank tile
+- **The DBC/DB2 pattern (WoWDBDefs + DBCD) is the proven model for this work**. We have hundreds of `.dbd` schema files and a generic DBCD reader. ADT/WDT schemas should follow the same declarative approach: define the tables, columns, types, and foreign keys, then drive reading/writing from the schema rather than hand-coding binary offsets.
 
 ## Phasing
 
