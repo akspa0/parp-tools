@@ -163,7 +163,7 @@ This rule exists because the pattern has been: see the whole mountain → try to
 - DO NOT change architecture mid-phase "because I had a better idea."
 - DO NOT skip validation and call something done.
 - If you have a better idea, write it down. Implement it later. Not now.
-- Every phase ends with validation against ground truth (MdxViewer renders, raw game file data). If validation fails, the phase is not done. Fix it. Do not move on.
+- Every phase ends with validation against ground truth (WowViewer.App renders, raw game file data). If validation fails, the phase is not done. Fix it. Do not move on.
 - The full execution guardrails are in `wow-viewer/docs/architecture/v14-model-and-refactor-plan-2026-05-06.md` Section 9.
 
 ---
@@ -274,10 +274,9 @@ Even for exceptions, you should still read the relevant spec if one exists.
 
 - For new `wow-viewer` library or tool work, prefer `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` and `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`.
 - For legacy parser and format-library work that still explicitly targets `gillijimproject_refactor`, prefer `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug`.
-- For viewer work, use `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`.
+- For viewer runtime testing, use `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` and run `WowViewer.App`. Do NOT use MdxViewer for testing — it is READ-ONLY reference code only.
 - For `wow-viewer` PM4 inspect or report slices, validate against `wow-viewer/test_data/development/World/Maps/development` with `WowViewer.Tool.Inspect` commands when the slice changes analyzer or report output.
-- Only build `gillijimproject_refactor/src/MdxViewer/MdxViewer.sln` for `wow-viewer` work when the task explicitly changes consumer compatibility or the user asks for that compatibility check.
-- Do not describe a `wow-viewer` build, test pass, or optional active-viewer compile as real viewer runtime signoff.
+- Only build `gillijimproject_refactor/src/MdxViewer/MdxViewer.sln` when the task explicitly changes consumer compatibility or the user asks for that compatibility check.
 - Prefer real-data validation using the fixed paths in `gillijimproject_refactor/memory-bank/data-paths.md`. Do not ask the user for alternate paths unless those fixed paths are missing.
 - For Python work, use `cd wow-viewer/data-harvester && uv run <script>` — never `python script.py` directly.
 
