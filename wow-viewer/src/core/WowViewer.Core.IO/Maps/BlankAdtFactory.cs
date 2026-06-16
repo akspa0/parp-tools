@@ -96,6 +96,44 @@ public static class BlankAdtFactory
         return new WdlHeightTile(tileX, tileY, outerHeights, innerHeights);
     }
 
+    public static AlphaTileData CreateBlankAlphaTile(int tileX, int tileY)
+    {
+        const int TileSize = 257;
+        const int ChunksPerSide = 16;
+        const float BaseHeight = 0.0f;
+
+        var heightmap = new float[TileSize, TileSize];
+        for (int y = 0; y < TileSize; y++)
+            for (int x = 0; x < TileSize; x++)
+                heightmap[y, x] = BaseHeight;
+
+        var mclyTextureIds = new int[ChunksPerSide, ChunksPerSide, 4];
+        var mclyLayerMask = new bool[ChunksPerSide, ChunksPerSide, 4];
+        var holeMask = new bool[ChunksPerSide, ChunksPerSide];
+
+        for (int cy = 0; cy < ChunksPerSide; cy++)
+        {
+            for (int cx = 0; cx < ChunksPerSide; cx++)
+            {
+                mclyTextureIds[cx, cy, 0] = 0;
+                mclyLayerMask[cx, cy, 0] = true;
+                holeMask[cx, cy] = false;
+            }
+        }
+
+        return new AlphaTileData(
+            sourcePath: $"blank_alpha_{tileX}_{tileY}",
+            heightmap: heightmap,
+            mcalAlphaPack: null,
+            mclyTextureIds: mclyTextureIds,
+            mclyLayerMask: mclyLayerMask,
+            holeMask: holeMask,
+            textureNames: ["tileset\\generic\\black.blp"],
+            modelPlacements: [],
+            worldModelPlacements: [],
+            liquidChunks: []);
+    }
+
     private static float[] CreateFlatHeights(float height)
     {
         var heights = new float[McvtFloatCount];

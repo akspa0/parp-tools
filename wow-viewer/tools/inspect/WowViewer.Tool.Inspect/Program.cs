@@ -1678,14 +1678,23 @@ static void RunMapUniqueIdFilter(string[] args)
 static void RunMapGenerateBlank(string[] args)
 {
 	string? mapName = GetOption(args, "--map-name", "-m");
+	string? formatText = GetOption(args, "--format", "-f");
 	string? tileXText = GetOption(args, "--tile-x", "-x");
 	string? tileYText = GetOption(args, "--tile-y", "-y");
 	string? outputDir = GetOption(args, "--output-dir", "-o");
 
+	string format = formatText ?? "lk";
+	if (format != "lk" && format != "alpha")
+	{
+		Console.Error.WriteLine("Error: --format must be 'lk' or 'alpha'.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
 	if (string.IsNullOrWhiteSpace(tileXText) || string.IsNullOrWhiteSpace(tileYText))
 	{
 		Console.Error.WriteLine("Error: --tile-x and --tile-y are required.");
-		Console.Error.WriteLine("Usage: map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--output-dir <dir>]");
+		Console.Error.WriteLine("Usage: map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--format lk|alpha] [--output-dir <dir>]");
 		Environment.ExitCode = 1;
 		return;
 	}
@@ -1709,25 +1718,39 @@ static void RunMapGenerateBlank(string[] args)
 	string mapDir = Path.Combine(resolvedOutputDir, "World", "Maps", resolvedMapName);
 	Directory.CreateDirectory(mapDir);
 
-	LkAdtData adtData = BlankAdtFactory.CreateBlank(resolvedMapName, tileX, tileY);
-	string adtPath = Path.Combine(mapDir, $"{resolvedMapName}_{tileX}_{tileY}.adt");
-	LkAdtWriter.Write(adtPath, adtData);
-	Console.WriteLine($"Wrote ADT: {Path.GetFullPath(adtPath)}");
-	Console.WriteLine($"  Map: {resolvedMapName}, Tile: ({tileX}, {tileY})");
-	Console.WriteLine($"  256 MCNK chunks, 0 placements, 1 texture (L0 base layer)");
+	if (format == "alpha")
+	{
+		AlphaTileData tileData = BlankAdtFactory.CreateBlankAlphaTile(tileX, tileY);
+		var tiles = new Dictionary<(int, int), AlphaTileData> { [(tileX, tileY)] = tileData };
+		byte[] wdtBytes = AlphaWdtWriter.Build(resolvedMapName, tiles);
+		string wdtPath = Path.Combine(mapDir, $"{resolvedMapName}.wdt");
+		File.WriteAllBytes(wdtPath, wdtBytes);
+		Console.WriteLine($"Wrote Alpha WDT: {Path.GetFullPath(wdtPath)}");
+		Console.WriteLine($"  Map: {resolvedMapName}, Tile: ({tileX}, {tileY})");
+		Console.WriteLine($"  256 inline MCNK chunks, 1 texture (L0 base layer), flat height = 0");
+	}
+	else
+	{
+		LkAdtData adtData = BlankAdtFactory.CreateBlank(resolvedMapName, tileX, tileY);
+		string adtPath = Path.Combine(mapDir, $"{resolvedMapName}_{tileX}_{tileY}.adt");
+		LkAdtWriter.Write(adtPath, adtData);
+		Console.WriteLine($"Wrote ADT: {Path.GetFullPath(adtPath)}");
+		Console.WriteLine($"  Map: {resolvedMapName}, Tile: ({tileX}, {tileY})");
+		Console.WriteLine($"  256 MCNK chunks, 0 placements, 1 texture (L0 base layer)");
 
-	HashSet<(int, int)> tiles = [(tileX, tileY)];
-	LkWdtWriteOptions wdtOptions = BlankAdtFactory.CreateBlankWdtOptions();
-	string wdtPath = Path.Combine(mapDir, $"{resolvedMapName}.wdt");
-	LkWdtWriter.Write(wdtPath, tiles, wdtOptions);
-	Console.WriteLine($"Wrote WDT: {Path.GetFullPath(wdtPath)}");
-	Console.WriteLine($"  WDT flags: MPHD=0x00000000 (no MCCV/big-alpha/MTXF/MAID/MCLV flags), tile ({tileX},{tileY}) flagged as HasAdt");
+		HashSet<(int, int)> tileSet = [(tileX, tileY)];
+		LkWdtWriteOptions wdtOptions = BlankAdtFactory.CreateBlankWdtOptions();
+		string wdtPath = Path.Combine(mapDir, $"{resolvedMapName}.wdt");
+		LkWdtWriter.Write(wdtPath, tileSet, wdtOptions);
+		Console.WriteLine($"Wrote WDT: {Path.GetFullPath(wdtPath)}");
+		Console.WriteLine($"  WDT flags: MPHD=0x00000000 (no MCCV/big-alpha/MTXF/MAID/MCLV flags), tile ({tileX},{tileY}) flagged as HasAdt");
 
-	WdlHeightTile wdlTile = BlankAdtFactory.CreateBlankWdlTile(tileX, tileY);
-	string wdlPath = Path.Combine(mapDir, $"{resolvedMapName}.wdl");
-	WdlWriter.Write(wdlPath, [wdlTile]);
-	Console.WriteLine($"Wrote WDL: {Path.GetFullPath(wdlPath)}");
-	Console.WriteLine($"  Flat height = 0 for tile ({tileX},{tileY})");
+		WdlHeightTile wdlTile = BlankAdtFactory.CreateBlankWdlTile(tileX, tileY);
+		string wdlPath = Path.Combine(mapDir, $"{resolvedMapName}.wdl");
+		WdlWriter.Write(wdlPath, [wdlTile]);
+		Console.WriteLine($"Wrote WDL: {Path.GetFullPath(wdlPath)}");
+		Console.WriteLine($"  Flat height = 0 for tile ({tileX},{tileY})");
+	}
 }
 
 static void RunPm4(string[] args)
@@ -4705,7 +4728,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect mdx-render --input <file.mdx> --output <bmp> [--width <n>] [--height <n>] [--sequence <n>] [--time <ms>] [--bones]");
 	Console.WriteLine("  wowviewer-inspect mdx-render --archive-root <dir> --virtual-path <path/to/file.mdx> --output <bmp> [--width <n>] [--height <n>] [--sequence <n>] [--time <ms>] [--bones]");
 	Console.WriteLine("  wowviewer-inspect map inspect --input <file.wdt|file.adt|file.error>");
-	Console.WriteLine("  wowviewer-inspect map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--output-dir <dir>]");
+	Console.WriteLine("  wowviewer-inspect map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--format lk|alpha] [--output-dir <dir>]");
 	Console.WriteLine("  wowviewer-inspect lit inspect --input <lights.lit>");
 	Console.WriteLine("  wowviewer-inspect lit inspect --archive-root <game|data dir> --virtual-path <world/.../lights.lit> [--listfile <listfile.txt>]");
 	Console.WriteLine("  wowviewer-inspect wmo inspect --input <file.wmo> [--dump-lights]");
@@ -5212,7 +5235,7 @@ static void ShowMapUsage()
 	Console.WriteLine("  map inspect --input <file.wdt|file.adt|file.error> [--dump-tex-chunks]");
 	Console.WriteLine("  map uniqueid-filter --input <report.json> [--min-uniqueid <n>] [--max-uniqueid <n>] [--build <label[,label...]>] [--kind all|m2|wmo] [--invert] [--output <report.json>]");
 	Console.WriteLine("  map uniqueid-report --input <file.wdt|file.adt|directory> [--input <second-source> ...] [--build <label>] [--output <report.json>]");
-	Console.WriteLine("  map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--output-dir <dir>]");
+	Console.WriteLine("  map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--format lk|alpha] [--output-dir <dir>]");
 }
 
 static void ShowPm4Usage()
