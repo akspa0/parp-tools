@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-**Last updated**: 2026-06-16 | **Focus**: Spec 046 — PM4 match report (ADT writing removed)
+**Last updated**: 2026-06-16 | **Focus**: Spec 064 — Blank map generation + relational ADT understanding
 
 ## Direction
 WoW viewer. Libraries bridge to Unreal Engine.
@@ -8,23 +8,29 @@ WoW viewer. Libraries bridge to Unreal Engine.
 ## Done
 012, 014, 024, 025, 033, 037, 041, 043, 044 (P1), 048, 054, 058, 059, 060, 061, 062
 
-## Current: 046 — PM4 Asset Matching → Match Reports
+## Current: 064 — Blank Map Generation
 
-### What works end-to-end
-- `Pm4ObjectSegmentBuilder` — groups MSUR surfaces by CK24, builds typed segments
-- `Pm4AssetMatchScorer` — scores segments against asset references (shape, TypeFlags, footprint)
-- `Pm4MatchSupport.Run` — full PM4→placement matching pipeline (M2 + WMO)
-- CLI: `pm4 match-report --input <pm4> --archive-root <client> --placements <obj0.adt> --output <report.md>`
+### Why this matters
+ADT/WDT/PM4 files are compressed relational databases. We must understand them as tables with indices and foreign keys before we can write correct ADTs. Step 1: generate valid blank ADT/WDT/WDL files that load in the viewer.
 
-### What was removed (2026-06-16)
-- `Pm4AdtWriter`, `Pm4BinaryAdtPatcher`, `Pm4AdtM2Placement`, `Pm4AdtWmoPlacement` — all deleted
-- `pm4 write-adt` CLI command — replaced by `pm4 match-report`
-- `docs/PM4-ADT-RESTORATION.md` — deleted
-- ADT writing is out of scope for the PM4 matcher. `LkAdtWriter` is untouched.
+### What exists
+- `LkAdtWriter` — writes full LK ADT from `LkAdtData` (working)
+- `LkAdtReader` — reads LK ADT into `LkAdtData` (working)
+- `LkWdtWriter`, `WdlWriter` — write WDT/WDL (working)
+- `AlphaWdtWriter` — frozen (Rule 10)
+- `AdtTerrainWriter` — patches MCVT+MCNR in existing ADT (working)
+- `AdtPlacementWriter` — patches MDDF+MODF in existing ADT (working)
+
+### Key gap
+No blank factory — we can write `LkAdtData` but have no reusable way to construct one with valid blank defaults. Need `BlankAdtFactory`.
+
+### Previous work reverted
+- Pm4AdtWriter, Pm4BinaryAdtPatcher, write-adt CLI — all deleted (corrupted output)
+- Replaced with `pm4 match-report` (markdown output only)
+- LkAdtWriter untouched — not responsible for the broken patching
 
 ### Key data paths
 - PM4 test data: `gillijimproject_refactor/test_data/NOT THE RIGHT FOLDER/World/Maps/development/`
-- _obj0.adt placements: same directory
 - Staged clients: `output/tmp/wowarchive-clients/`
 
 ## That's it

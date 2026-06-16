@@ -1,14 +1,15 @@
 # Progress — wow-viewer
 
-## 2026-06-16 — PM4 ADT writing removed, replaced with match-report
-- Deleted `Pm4AdtWriter`, `Pm4BinaryAdtPatcher`, `Pm4AdtM2Placement`, `Pm4AdtWmoPlacement` — ADT patching was corrupting output ADTs
-- Removed `pm4 write-adt` CLI command; replaced with `pm4 match-report` (markdown output)
-- Added `FormatPm4MatchReport` and `WritePlacementSection` helpers in Program.cs
-- Removed `FindBaseAdtPath` helper (only used by write-adt)
-- Deleted `docs/PM4-ADT-RESTORATION.md`
-- Updated spec 046: goal changed from ADT restoration to human-readable match reports
-- Committed checkpoint before revert (5133bfe3)
-- `LkAdtWriter` was never modified — it's clean
+## 2026-06-16 — PM4 ADT patching reverted, spec 064 written for blank map generation
+- Deleted Pm4AdtWriter, Pm4BinaryAdtPatcher — ADT patching was corrupting output
+- Replaced `pm4 write-adt` with `pm4 match-report` (human-readable markdown)
+- LkAdtWriter untouched — not part of PM4 matcher work
+- Checkpoint commit: 5133bfe3, revert commit: 83d15801
+- Wrote spec 064 (blank map generation + relational ADT understanding)
+  - Phase 1: generate valid blank LK ADT/WDT/WDL that loads in viewer
+  - Phase 2: document ADT as relational schema, prove lossless round-trip
+  - Phase 3: Zarr ADT datastore (stretch)
+- Key insight: ADT/WDT/PM4 are compressed relational databases. Must treat them as such.
 
 ## 2026-06-15 — PM4 → ADT writing pipeline landed
 - Built `Pm4AdtWriter` in `Core.PM4/Matching/` — converts PM4 match results to `LkAdtData`
