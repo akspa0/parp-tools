@@ -1465,6 +1465,9 @@ static void RunMap(string[] args)
 		case "generate-blank":
 			RunMapGenerateBlank(tail);
 			break;
+		case "patch-blank":
+			RunMapPatchBlank(tail);
+			break;
 		default:
 			Console.Error.WriteLine($"Unknown map command '{command}'.");
 			ShowMapUsage();
@@ -1753,6 +1756,81 @@ static void RunMapGenerateBlank(string[] args)
 		Console.WriteLine($"Wrote WDL: {Path.GetFullPath(wdlPath)}");
 		Console.WriteLine($"  Flat height = 0 for tile ({tileX},{tileY})");
 	}
+}
+
+static void RunMapPatchBlank(string[] args)
+{
+	string? obj0Path = GetOption(args, "--placements", "-p");
+	string? mapName = GetOption(args, "--map-name", "-m");
+	string? tileXText = GetOption(args, "--tile-x", "-x");
+	string? tileYText = GetOption(args, "--tile-y", "-y");
+	string? outputDir = GetOption(args, "--output-dir", "-o");
+	string? textureName = GetOption(args, "--texture", "-t");
+
+	if (string.IsNullOrWhiteSpace(obj0Path))
+	{
+		Console.Error.WriteLine("Error: --placements <obj0.adt> is required.");
+		Console.Error.WriteLine("Usage: map patch-blank --placements <obj0.adt> --tile-x <n> --tile-y <n> [--map-name <name>] [--texture <path>] [--output-dir <dir>]");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(tileXText) || string.IsNullOrWhiteSpace(tileYText))
+	{
+		Console.Error.WriteLine("Error: --tile-x and --tile-y are required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!int.TryParse(tileXText, out int tileX) || tileX < 0 || tileX >= 64)
+	{
+		Console.Error.WriteLine("Error: --tile-x must be an integer in [0, 63].");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!int.TryParse(tileYText, out int tileY) || tileY < 0 || tileY >= 64)
+	{
+		Console.Error.WriteLine("Error: --tile-y must be an integer in [0, 63].");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!File.Exists(obj0Path))
+	{
+		Console.Error.WriteLine($"Error: placement source '{obj0Path}' does not exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string resolvedMapName = mapName ?? "testing";
+	string resolvedOutputDir = outputDir ?? ".";
+	string resolvedTexture = textureName ?? "tileset\\ocean\\westfallseafloor.blp";
+	string mapDir = Path.Combine(resolvedOutputDir, "World", "Maps", resolvedMapName);
+	Directory.CreateDirectory(mapDir);
+
+	AdtPlacementCatalog catalog = AdtPlacementReader.Read(obj0Path);
+
+	LkAdtData blankAdt = BlankAdtFactory.CreateBlank(resolvedMapName, tileX, tileY, resolvedTexture);
+	LkAdtData patchedAdt = BlankAdtFactory.WithPlacements(blankAdt, catalog);
+
+	string adtPath = Path.Combine(mapDir, $"{resolvedMapName}_{tileX}_{tileY}.adt");
+	LkAdtWriter.Write(adtPath, patchedAdt);
+	Console.WriteLine($"Wrote patched ADT: {Path.GetFullPath(adtPath)}");
+	Console.WriteLine($"  Map: {resolvedMapName}, Tile: ({tileX}, {tileY})");
+	Console.WriteLine($"  M2 placements: {patchedAdt.ModelPlacements.Count}, WMO placements: {patchedAdt.WorldModelPlacements.Count}");
+	Console.WriteLine($"  M2 names: {patchedAdt.ModelNames.Count}, WMO names: {patchedAdt.WorldModelNames.Count}");
+
+	HashSet<(int, int)> tileSet = [(tileX, tileY)];
+	LkWdtWriteOptions wdtOptions = BlankAdtFactory.CreateBlankWdtOptions();
+	string wdtPath = Path.Combine(mapDir, $"{resolvedMapName}.wdt");
+	LkWdtWriter.Write(wdtPath, tileSet, wdtOptions);
+	Console.WriteLine($"Wrote WDT: {Path.GetFullPath(wdtPath)}");
+
+	WdlHeightTile wdlTile = BlankAdtFactory.CreateBlankWdlTile(tileX, tileY);
+	string wdlPath = Path.Combine(mapDir, $"{resolvedMapName}.wdl");
+	WdlWriter.Write(wdlPath, [wdlTile]);
+	Console.WriteLine($"Wrote WDL: {Path.GetFullPath(wdlPath)}");
 }
 
 static void RunPm4(string[] args)
@@ -5238,6 +5316,7 @@ static void ShowMapUsage()
 	Console.WriteLine("  map uniqueid-filter --input <report.json> [--min-uniqueid <n>] [--max-uniqueid <n>] [--build <label[,label...]>] [--kind all|m2|wmo] [--invert] [--output <report.json>]");
 	Console.WriteLine("  map uniqueid-report --input <file.wdt|file.adt|directory> [--input <second-source> ...] [--build <label>] [--output <report.json>]");
 	Console.WriteLine("  map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--format lk|alpha] [--texture <path>] [--output-dir <dir>]");
+	Console.WriteLine("  map patch-blank --placements <obj0.adt> --tile-x <n> --tile-y <n> [--map-name <name>] [--texture <path>] [--output-dir <dir>]");
 }
 
 static void ShowPm4Usage()

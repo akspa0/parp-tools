@@ -1,3 +1,4 @@
+using System.Numerics;
 using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Maps;
@@ -71,6 +72,47 @@ public static class BlankAdtFactory
             Chunks = chunks,
             MhdrFlags = 0,
             MfboFlightBounds = null,
+        };
+    }
+
+    public static LkAdtData WithPlacements(LkAdtData baseAdt, AdtPlacementCatalog catalog)
+    {
+        ArgumentNullException.ThrowIfNull(baseAdt);
+        ArgumentNullException.ThrowIfNull(catalog);
+
+        var modelNames = baseAdt.ModelNames.Concat(catalog.ModelNames).Distinct().OrderBy(static n => n).ToList();
+        var worldModelNames = baseAdt.WorldModelNames.Concat(catalog.WorldModelNames).Distinct().OrderBy(static n => n).ToList();
+
+        var modelNameIndex = modelNames.Select((n, i) => (n, i)).ToDictionary(static p => p.n, static p => p.i);
+        var wmoNameIndex = worldModelNames.Select((n, i) => (n, i)).ToDictionary(static n => n.n, static n => n.i);
+
+        var mddfPlacements = new List<LkMddfEntry>();
+        foreach (var p in catalog.ModelPlacements)
+        {
+            int nameId = modelNameIndex.TryGetValue(p.ModelPath, out int idx) ? idx : 0;
+            mddfPlacements.Add(new LkMddfEntry(nameId, p.UniqueId, p.Position, p.Rotation, p.Scale));
+        }
+
+        var modfPlacements = new List<LkModfEntry>();
+        foreach (var p in catalog.WorldModelPlacements)
+        {
+            int nameId = wmoNameIndex.TryGetValue(p.ModelPath, out int idx) ? idx : 0;
+            modfPlacements.Add(new LkModfEntry(nameId, p.UniqueId, p.Position, p.Rotation, p.BoundsMin, p.BoundsMax, Flags: 0, DoodadSet: 0, NameSet: 0, Scale: 1.0f));
+        }
+
+        return new LkAdtData
+        {
+            MapName = baseAdt.MapName,
+            TileX = baseAdt.TileX,
+            TileY = baseAdt.TileY,
+            TextureNames = baseAdt.TextureNames,
+            ModelNames = modelNames,
+            WorldModelNames = worldModelNames,
+            ModelPlacements = mddfPlacements,
+            WorldModelPlacements = modfPlacements,
+            Chunks = baseAdt.Chunks,
+            MhdrFlags = baseAdt.MhdrFlags,
+            MfboFlightBounds = baseAdt.MfboFlightBounds,
         };
     }
 
