@@ -62,7 +62,7 @@ public static class LkAdtWriter
         long mhdrPosition = ms.Position;
         WriteChunk(bw, "MHDR", MhdrDataSize, w => w.Write(new byte[MhdrDataSize]));
 
-        long mcinStart = ms.Position + ChunkHeaderSize;
+        long mcinStart = ms.Position;
         WriteChunk(bw, "MCIN", McinDataSize, w => w.Write(new byte[McinDataSize]));
 
         long currentOffset = ms.Position;
@@ -136,7 +136,7 @@ public static class LkAdtWriter
             (int)(modfOffset - ChunkHeaderSize),
             mh2oRelativeOffset);
 
-        PatchMcin(result, (int)mcinStart, mcnkOffsets, mcnkSizes);
+        PatchMcin(result, (int)mcinStart + ChunkHeaderSize, mcnkOffsets, mcnkSizes);
 
         return result;
     }
