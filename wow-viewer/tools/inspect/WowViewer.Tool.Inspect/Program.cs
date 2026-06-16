@@ -1713,7 +1713,7 @@ static void RunMapGenerateBlank(string[] args)
 	LkAdtWriter.Write(adtPath, adtData);
 	Console.WriteLine($"Wrote ADT: {Path.GetFullPath(adtPath)}");
 	Console.WriteLine($"  Map: {resolvedMapName}, Tile: ({tileX}, {tileY})");
-	Console.WriteLine($"  256 MCNK chunks, 0 placements, 0 textures");
+	Console.WriteLine($"  256 MCNK chunks, 0 placements, 1 texture (L0 base layer)");
 
 	HashSet<(int, int)> tiles = [(tileX, tileY)];
 	LkWdtWriteOptions wdtOptions = BlankAdtFactory.CreateBlankWdtOptions();
