@@ -2017,6 +2017,9 @@ case "fingerprint-scan":
 	case "match-fingerprints":
 		RunPm4MatchFingerprints(tail);
 		break;
+	case "validate-matches":
+		RunPm4ValidateMatches(tail);
+		break;
 		default:
 			Console.Error.WriteLine($"Unknown pm4 command '{command}'.");
 			ShowPm4Usage();
@@ -6707,6 +6710,7 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 build-wmo-fingerprint-db --archive-root <staged client dir> [--listfile <listfile.txt>] [--limit <n>] [--output <db.json>]");
 	Console.WriteLine("  pm4 extract-pm4-fingerprints --input <directory> [--output <fp.json>] [--tiles <x_y[,x_y...]>]");
 	Console.WriteLine("  pm4 match-fingerprints --pm4-fingerprints <fp.json> --wmo-db <db.json> [--min-score <0.0-1.0>] [--max-candidates <n>] [--output <matches.json>]");
+	Console.WriteLine("  pm4 validate-matches --matches <matches.json> --adt-dir <directory> [--output <report.json>]");
 }
 
 static void RunPm4CrossTile(string[] args)
@@ -7635,6 +7639,245 @@ static void RunPm4MatchFingerprints(string[] args)
 	}
 }
 
+static void RunPm4ValidateMatches(string[] args)
+{
+	string? matchesPath = GetOption(args, "--matches", "-m");
+	string? adtDir = GetOption(args, "--adt-dir", "-a");
+	string? output = GetOption(args, "--output", "-o");
+
+	if (string.IsNullOrWhiteSpace(matchesPath) || !File.Exists(matchesPath))
+	{
+		Console.Error.WriteLine("Error: --matches <path> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(adtDir) || !Directory.Exists(adtDir))
+	{
+		Console.Error.WriteLine("Error: --adt-dir <directory> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Console.WriteLine($"Loading match results from: {Path.GetFullPath(matchesPath)}");
+	string matchesJson = File.ReadAllText(matchesPath);
+	Pm4FingerprintMatchOutput? matchOutput = JsonSerializer.Deserialize<Pm4FingerprintMatchOutput>(matchesJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+	if (matchOutput is null || matchOutput.Results is null || matchOutput.Results.Count == 0)
+	{
+		Console.Error.WriteLine("Error: match file contains no results.");
+		Environment.ExitCode = 1;
+		return;
+	}
+	Console.WriteLine($"Loaded {matchOutput.Results.Count} match results.");
+
+	Dictionary<string, HashSet<string>> tileToWmoPaths = new(StringComparer.OrdinalIgnoreCase);
+	string[] adtFiles = Directory.GetFiles(adtDir, "*_obj0.adt", SearchOption.TopDirectoryOnly);
+	Console.WriteLine($"Reading WMO placements from {adtFiles.Length} ADT obj0 files...");
+
+	foreach (string adtFile in adtFiles)
+	{
+		string fileName = Path.GetFileNameWithoutExtension(adtFile);
+		string tileKey = ExtractTileKeyFromAdtName(fileName);
+		if (string.IsNullOrEmpty(tileKey))
+			continue;
+
+		try
+		{
+			AdtPlacementCatalog placements = AdtPlacementReader.Read(adtFile);
+			HashSet<string> wmoPaths = new(StringComparer.OrdinalIgnoreCase);
+			foreach (AdtWorldModelPlacement wmo in placements.WorldModelPlacements)
+			{
+				string normalized = wmo.ModelPath.Replace('\\', '/').TrimStart('/').ToLowerInvariant();
+				wmoPaths.Add(normalized);
+			}
+			if (wmoPaths.Count > 0)
+				tileToWmoPaths[tileKey] = wmoPaths;
+		}
+		catch (Exception ex)
+		{
+			Console.Error.WriteLine($"  Error reading {Path.GetFileName(adtFile)}: {ex.Message}");
+		}
+	}
+
+	Console.WriteLine($"Loaded ADT placements for {tileToWmoPaths.Count} tiles.");
+
+	int totalEvaluated = 0;
+	int totalWithAdt = 0;
+	int precisionAt1 = 0;
+	int precisionAt3 = 0;
+	int totalMatched = 0;
+	int totalAmbiguous = 0;
+	int totalUnresolved = 0;
+	int totalIneligible = 0;
+
+	Dictionary<string, int> failureCategories = new()
+	{
+		["no_adt_for_tile"] = 0,
+		["no_candidates"] = 0,
+		["top1_not_in_adt"] = 0,
+		["top3_not_in_adt"] = 0,
+		["ambiguous_not_in_adt"] = 0,
+		["ineligible"] = 0,
+	};
+
+	List<(string pm4Id, string tile, string status, string topMatch, string adtWmos, bool correct)> detailRows = new();
+
+	foreach (Pm4FingerprintMatchResult result in matchOutput.Results)
+	{
+		totalEvaluated++;
+
+		if (result.Status == Pm4FingerprintMatchStatus.Ineligible)
+		{
+			totalIneligible++;
+			failureCategories["ineligible"]++;
+			continue;
+		}
+
+		string tileKey = ExtractTileKeyFromPm4Id(result.Pm4FingerprintId);
+		if (string.IsNullOrEmpty(tileKey) || !tileToWmoPaths.TryGetValue(tileKey, out HashSet<string>? adtWmos))
+		{
+			failureCategories["no_adt_for_tile"]++;
+			continue;
+		}
+
+		totalWithAdt++;
+
+		if (result.Candidates.Count == 0)
+		{
+			failureCategories["no_candidates"]++;
+			totalUnresolved++;
+			continue;
+		}
+
+		string adtWmosStr = string.Join("|", adtWmos.Take(5));
+		bool top1InAdt = false;
+		bool top3InAdt = false;
+
+		for (int i = 0; i < Math.Min(3, result.Candidates.Count); i++)
+		{
+			string candidatePath = result.Candidates[i].Candidate.AssetPath.Replace('\\', '/').TrimStart('/').ToLowerInvariant();
+			if (adtWmos.Contains(candidatePath))
+			{
+				if (i == 0) top1InAdt = true;
+				top3InAdt = true;
+			}
+		}
+
+		switch (result.Status)
+		{
+			case Pm4FingerprintMatchStatus.Matched:
+				totalMatched++;
+				if (top1InAdt) precisionAt1++;
+				else failureCategories["top1_not_in_adt"]++;
+				if (top3InAdt) precisionAt3++;
+				else if (!top1InAdt) failureCategories["top3_not_in_adt"]++;
+				detailRows.Add((result.Pm4FingerprintId, tileKey, "Matched", result.Candidates[0].Candidate.AssetPath, adtWmosStr, top1InAdt));
+				break;
+			case Pm4FingerprintMatchStatus.Ambiguous:
+				totalAmbiguous++;
+				if (top1InAdt) precisionAt1++;
+				if (top3InAdt) precisionAt3++;
+				if (!top3InAdt) failureCategories["ambiguous_not_in_adt"]++;
+				detailRows.Add((result.Pm4FingerprintId, tileKey, "Ambiguous", result.Candidates[0].Candidate.AssetPath, adtWmosStr, top1InAdt));
+				break;
+			case Pm4FingerprintMatchStatus.Unresolved:
+				totalUnresolved++;
+				if (top3InAdt) precisionAt3++;
+				failureCategories["top1_not_in_adt"]++;
+				detailRows.Add((result.Pm4FingerprintId, tileKey, "Unresolved", result.Candidates.Count > 0 ? result.Candidates[0].Candidate.AssetPath : "none", adtWmosStr, top1InAdt));
+				break;
+		}
+	}
+
+	double p1 = totalWithAdt > 0 ? (double)precisionAt1 / totalWithAdt : 0;
+	double p3 = totalWithAdt > 0 ? (double)precisionAt3 / totalWithAdt : 0;
+
+	Console.WriteLine($"\n=== Validation Report ===");
+	Console.WriteLine($"Total match results: {totalEvaluated}");
+	Console.WriteLine($"  Matched: {totalMatched}, Ambiguous: {totalAmbiguous}, Unresolved: {totalUnresolved}, Ineligible: {totalIneligible}");
+	Console.WriteLine($"Tiles with ADT ground truth: {tileToWmoPaths.Count}");
+	Console.WriteLine($"Results with ADT ground truth: {totalWithAdt}");
+	Console.WriteLine();
+	Console.WriteLine($"=== Precision ===");
+	Console.WriteLine($"  Precision@1 (top-1 in ADT placement list): {precisionAt1}/{totalWithAdt} = {p1:P1}");
+	Console.WriteLine($"  Precision@3 (top-3 in ADT placement list): {precisionAt3}/{totalWithAdt} = {p3:P1}");
+	Console.WriteLine();
+	Console.WriteLine($"=== Failure Categories ===");
+	foreach (var kv in failureCategories.OrderByDescending(static kv => kv.Value))
+		if (kv.Value > 0)
+			Console.WriteLine($"  {kv.Key}: {kv.Value}");
+	Console.WriteLine();
+	Console.WriteLine($"=== Sample Correct Matches (top 15) ===");
+	Console.WriteLine($"  {"PM4 Id",-35} {"Tile",-8} {"Status",-10} {"Top Match",-50} {"Correct",-7}");
+	foreach (var row in detailRows.Where(static r => r.correct).Take(15))
+	{
+		string shortPm4 = row.pm4Id.Length > 33 ? "..." + row.pm4Id[^32..] : row.pm4Id;
+		string shortMatch = row.topMatch.Length > 48 ? "..." + row.topMatch[^47..] : row.topMatch;
+		Console.WriteLine($"  {shortPm4,-35} {row.tile,-8} {row.status,-10} {shortMatch,-50} {"YES",-7}");
+	}
+	Console.WriteLine();
+	Console.WriteLine($"=== Sample Incorrect Matches (top 15) ===");
+	Console.WriteLine($"  {"PM4 Id",-35} {"Tile",-8} {"Status",-10} {"Top Match",-50} {"ADT WMOs",-50}");
+	foreach (var row in detailRows.Where(static r => !r.correct && r.status == "Matched").Take(15))
+	{
+		string shortPm4 = row.pm4Id.Length > 33 ? "..." + row.pm4Id[^32..] : row.pm4Id;
+		string shortMatch = row.topMatch.Length > 48 ? "..." + row.topMatch[^47..] : row.topMatch;
+		Console.WriteLine($"  {shortPm4,-35} {row.tile,-8} {row.status,-10} {shortMatch,-50} {row.adtWmos,-50}");
+	}
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? dir = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(dir))
+			Directory.CreateDirectory(dir);
+
+		var outputModel = new
+		{
+			ValidationDate = DateTime.UtcNow.ToString("o"),
+			TotalResults = totalEvaluated,
+			ResultsWithAdt = totalWithAdt,
+			PrecisionAt1 = p1,
+			PrecisionAt3 = p3,
+			PrecisionAt1Count = precisionAt1,
+			PrecisionAt3Count = precisionAt3,
+			FailureCategories = failureCategories,
+			DetailRows = detailRows,
+		};
+
+		string json = JsonSerializer.Serialize(outputModel, new JsonSerializerOptions { WriteIndented = true });
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"\nWrote validation report to {outputPath}");
+	}
+}
+
+static string ExtractTileKeyFromPm4Id(string pm4FingerprintId)
+{
+	int tileStart = pm4FingerprintId.IndexOf("tile", StringComparison.OrdinalIgnoreCase);
+	if (tileStart < 0)
+		return string.Empty;
+
+	int ck24Start = pm4FingerprintId.IndexOf("_ck24_", StringComparison.OrdinalIgnoreCase);
+	if (ck24Start < 0)
+		return string.Empty;
+
+	return pm4FingerprintId.Substring(tileStart + 4, ck24Start - tileStart - 4);
+}
+
+static string ExtractTileKeyFromAdtName(string fileNameWithoutExtension)
+{
+	int obj0Index = fileNameWithoutExtension.IndexOf("_obj0", StringComparison.OrdinalIgnoreCase);
+	if (obj0Index <= 0)
+		return string.Empty;
+
+	string prefix = fileNameWithoutExtension[..obj0Index];
+	string[] parts = prefix.Split('_');
+	if (parts.Length < 3)
+		return string.Empty;
+
+	return $"{parts[^2]}_{parts[^1]}";
+}
+
 sealed record TerrainPatchReportEntry(
 	string? SummaryPath,
 	string? TileName,
@@ -7679,3 +7922,14 @@ sealed record Pm4FingerprintExtractOutput(
 	int ProcessedFiles,
 	int TotalFingerprints,
 	IReadOnlyList<Pm4FingerprintRecord> Fingerprints);
+
+sealed record Pm4FingerprintMatchOutput(
+	string MatchDate,
+	int Pm4FingerprintCount,
+	int WmoFingerprintCount,
+	double MinScore,
+	int Matched,
+	int Ambiguous,
+	int Unresolved,
+	int Ineligible,
+	IReadOnlyList<Pm4FingerprintMatchResult> Results);
