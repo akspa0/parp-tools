@@ -2014,6 +2014,9 @@ case "fingerprint-scan":
 	case "extract-pm4-fingerprints":
 		RunPm4ExtractPm4Fingerprints(tail);
 		break;
+	case "match-fingerprints":
+		RunPm4MatchFingerprints(tail);
+		break;
 		default:
 			Console.Error.WriteLine($"Unknown pm4 command '{command}'.");
 			ShowPm4Usage();
@@ -6703,6 +6706,7 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 generate-from-wmo --wmo-root <file.wmo> --position <x,y,z> --rotation <rx,ry,rz> --tile <x,y> --archive-root <dir> [--output <out.pm4>]");
 	Console.WriteLine("  pm4 build-wmo-fingerprint-db --archive-root <staged client dir> [--listfile <listfile.txt>] [--limit <n>] [--output <db.json>]");
 	Console.WriteLine("  pm4 extract-pm4-fingerprints --input <directory> [--output <fp.json>] [--tiles <x_y[,x_y...]>]");
+	Console.WriteLine("  pm4 match-fingerprints --pm4-fingerprints <fp.json> --wmo-db <db.json> [--min-score <0.0-1.0>] [--max-candidates <n>] [--output <matches.json>]");
 }
 
 static void RunPm4CrossTile(string[] args)
@@ -7516,6 +7520,121 @@ static List<string> EnumerateWmoRoots(
 	return wmoPaths.OrderBy(static f => f, StringComparer.OrdinalIgnoreCase).ToList();
 }
 
+static void RunPm4MatchFingerprints(string[] args)
+{
+	string? pm4Path = GetOption(args, "--pm4-fingerprints", "-p");
+	string? wmoDbPath = GetOption(args, "--wmo-db", "-w");
+	string? minScoreText = GetOption(args, "--min-score", "-s");
+	string? maxCandidatesText = GetOption(args, "--max-candidates", "-m");
+	string? output = GetOption(args, "--output", "-o");
+
+	if (string.IsNullOrWhiteSpace(pm4Path) || !File.Exists(pm4Path))
+	{
+		Console.Error.WriteLine("Error: --pm4-fingerprints <path> is required and must exist.");
+		Console.Error.WriteLine("  Run 'pm4 extract-pm4-fingerprints --input <dir> --output <file.json>' first.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(wmoDbPath) || !File.Exists(wmoDbPath))
+	{
+		Console.Error.WriteLine("Error: --wmo-db <path> is required and must exist.");
+		Console.Error.WriteLine("  Run 'pm4 build-wmo-fingerprint-db --archive-root <dir> --output <file.json>' first.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	double minScore = 0.45;
+	if (!string.IsNullOrWhiteSpace(minScoreText) && !double.TryParse(minScoreText, out minScore))
+	{
+		Console.Error.WriteLine("Error: --min-score must be a number between 0 and 1.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	int maxCandidates = 10;
+	if (!string.IsNullOrWhiteSpace(maxCandidatesText))
+		int.TryParse(maxCandidatesText, out maxCandidates);
+
+	Console.WriteLine($"Loading PM4 fingerprints from: {Path.GetFullPath(pm4Path)}");
+	string pm4Json = File.ReadAllText(pm4Path);
+	Pm4FingerprintExtractOutput? pm4Output = JsonSerializer.Deserialize<Pm4FingerprintExtractOutput>(pm4Json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+	if (pm4Output is null || pm4Output.Fingerprints is null || pm4Output.Fingerprints.Count == 0)
+	{
+		Console.Error.WriteLine("Error: PM4 fingerprint file contains no entries.");
+		Environment.ExitCode = 1;
+		return;
+	}
+	Console.WriteLine($"Loaded {pm4Output.Fingerprints.Count} PM4 fingerprints.");
+
+	Console.WriteLine($"Loading WMO fingerprint database from: {Path.GetFullPath(wmoDbPath)}");
+	string wmoJson = File.ReadAllText(wmoDbPath);
+	Pm4FingerprintDatabase? wmoDb = JsonSerializer.Deserialize<Pm4FingerprintDatabase>(wmoJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+	if (wmoDb is null || wmoDb.Records.Count == 0)
+	{
+		Console.Error.WriteLine("Error: WMO fingerprint database contains no entries.");
+		Environment.ExitCode = 1;
+		return;
+	}
+	Console.WriteLine($"Loaded {wmoDb.WmoCount} WMO roots, {wmoDb.Records.Count} total fingerprints.");
+
+	Pm4FingerprintMatchOptions options = new(MinScore: minScore, MaxCandidates: maxCandidates);
+	Console.WriteLine($"\nMatching {pm4Output.Fingerprints.Count} PM4 fingerprints against {wmoDb.WmoRecords.Count} WMO fingerprints (minScore={minScore:F2})...");
+
+	IReadOnlyList<Pm4FingerprintMatchResult> results = Pm4FingerprintMatcher.Match(
+		pm4Output.Fingerprints,
+		wmoDb,
+		options);
+
+	int matched = results.Count(static r => r.Status == Pm4FingerprintMatchStatus.Matched);
+	int ambiguous = results.Count(static r => r.Status == Pm4FingerprintMatchStatus.Ambiguous);
+	int unresolved = results.Count(static r => r.Status == Pm4FingerprintMatchStatus.Unresolved);
+	int ineligible = results.Count(static r => r.Status == Pm4FingerprintMatchStatus.Ineligible);
+
+	Console.WriteLine($"\nResults: {matched} matched, {ambiguous} ambiguous, {unresolved} unresolved, {ineligible} ineligible");
+
+	var matchedResults = results.Where(static r => r.Status == Pm4FingerprintMatchStatus.Matched).Take(20).ToList();
+	if (matchedResults.Count > 0)
+	{
+		Console.WriteLine("\nTop 20 matched:");
+		Console.WriteLine($"  {"PM4 Fingerprint",-40} {"Dims",-18} {"WMO Candidate",-50} {"Score",-8} {"FP Overlap",-10}");
+		foreach (Pm4FingerprintMatchResult r in matchedResults)
+		{
+			if (r.Candidates.Count == 0)
+				continue;
+			Pm4FingerprintMatchCandidate c = r.Candidates[0];
+			string shortPm4 = r.Pm4FingerprintId.Length > 38 ? "..." + r.Pm4FingerprintId[^37..] : r.Pm4FingerprintId;
+			string shortWmo = c.Candidate.AssetPath.Length > 48 ? "..." + c.Candidate.AssetPath[^47..] : c.Candidate.AssetPath;
+			Console.WriteLine($"  {shortPm4,-40} {r.SortedDim0,5:F0}x{r.SortedDim1,5:F0}x{r.SortedDim2,5:F0}  {shortWmo,-50} {c.OverallScore,8:F3} {c.FootprintOverlapRatio,10:F3}");
+		}
+	}
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? dir = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(dir))
+			Directory.CreateDirectory(dir);
+
+		var outputModel = new
+		{
+			MatchDate = DateTime.UtcNow.ToString("o"),
+			Pm4FingerprintCount = pm4Output.Fingerprints.Count,
+			WmoFingerprintCount = wmoDb.Records.Count,
+			MinScore = minScore,
+			Matched = matched,
+			Ambiguous = ambiguous,
+			Unresolved = unresolved,
+			Ineligible = ineligible,
+			Results = results,
+		};
+
+		string json = JsonSerializer.Serialize(outputModel, new JsonSerializerOptions { WriteIndented = true });
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"\nWrote {results.Count} match results to {outputPath}");
+	}
+}
+
 sealed record TerrainPatchReportEntry(
 	string? SummaryPath,
 	string? TileName,
@@ -7552,3 +7671,11 @@ sealed record TerrainPatchReportSummary(
 sealed record TerrainPatchStatusCount(string Status, int Count);
 
 sealed record TerrainPatchMissingExample(string TileName, string Status);
+
+sealed record Pm4FingerprintExtractOutput(
+	string BuildDate,
+	string SourceDirectory,
+	int TotalFiles,
+	int ProcessedFiles,
+	int TotalFingerprints,
+	IReadOnlyList<Pm4FingerprintRecord> Fingerprints);
