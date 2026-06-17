@@ -9,9 +9,11 @@ WoW viewer. Libraries bridge to Unreal Engine. No Vulkan/WebGL/Museums/BASE.
 
 **Pipeline**: WMO collision geometry (MOVT/MOVI) → PCA-normalized convex hull fingerprint → DB. PM4 CK24 groups (MSVT/MSVI/MSUR) → same fingerprint. Match via `Pm4CorrelationMath.EvaluateMetrics` with 4-flip axis enumeration. No ADT for matching.
 
-**Real-data results** (1604 PM4 vs 2790 WMO fingerprints, minScore=0.30):
-- 50 matched, 1203 ambiguous (dimension collisions — many WMOs share dims), 78 unresolved, 273 ineligible (M2/unknown)
-- Top matches: Ironforge 0.94 score/0.999 footprint overlap, Stormwind Harbor 0.92/0.98, Darnassis 0.95/0.99, Thousand Needles Elevator 0.96/0.97
+**Real-data results** (1604 PM4 vs 2790 WMO fingerprints, minScore=0.30, v3 tuning):
+- 751 matched, 502 ambiguous, 78 unresolved, 273 ineligible (M2/unknown)
+- Progression: v1 50 matched → v2 392 (surface/vertex+dedup) → v3 751 (index count + tighter window)
+- Top matches: Ironforge 0.999 overlap, Darnassis 1.000, Stormwind 0.975, BlackTemple 0.966
+- Remaining ambiguity: Stormwind vs StormwindHarbor (136 cases, margin=0.000) — genuinely identical architecture in two WMO files. Correctly flagged.
 
 **Code**: `Pm4FingerprintExtractor` (PCA + hull), `Pm4FingerprintMatcher` (prefilter + EvaluateMetrics + flip), `Pm4FingerprintBuildSupport` (WMO DB builder), CLI: `build-wmo-fingerprint-db`, `extract-pm4-fingerprints`, `match-fingerprints`. 15 unit tests pass.
 
