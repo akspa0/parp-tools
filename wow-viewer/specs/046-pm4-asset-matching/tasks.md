@@ -33,7 +33,25 @@
 - [x] T015: Create `pm4_validate_proposals.py`
 - [x] T016: Run end-to-end validation on dev tile (48_37)
 
-## Completion Checklist ✅
+## Phase 7: Fix Broken Matching Pipeline (P1 blockers)
+
+- [ ] T022: Fix coordinate mismatch in `Pm4MatchSupport` — convert PM4 object world coordinates to WoW world coordinates (or ADT placements to raw-ADT) before spatial comparison in `BuildPm4ObjectMatches` and `BuildMatches`
+- [ ] T023: Validate T022 on tile 0_0 — `pm4 match-report` shows non-zero candidate counts for ≥5 placements (coordinate conversion verified in correlate-models)
+- [ ] T024: Add CK24-grouped scoring mode to `Pm4AssetMatchScorer` — merge all segments sharing same CK24 into one combined shape before scoring against asset references
+- [ ] T025: Validate T024 on tile 0_0 — at least 1 WMO placement scores ≥0.45 via `pm4 match-assets` with CK24 grouping
+- [ ] T026: Build CK24 identity table on tile 0_0 — correlate known placements to PM4 CK24 groups, output (CK24, type, objectId) → (model path, confidence)
+- [ ] T027: Validate on tile 22_18 — `pm4 match-report` shows non-zero candidates; `pm4 match-assets` with corpus produces top-3 candidate that includes snowball-fort WMO for at least 1 CK24 group
+
+## Phase 8: Correlation Research (P1 — NEW)
+
+- [x] T028: Add `pm4 correlate-models` CLI command — reads WMO/M2 collision geometry from archive, transforms to world space, computes volumetric overlap against PM4 CK24 group bounds
+- [x] T029: Run correlate-models on development tile 0_0 — **HIT**: CK24 0x421809 ↔ ND_IRONDWARF_LARGEBUILDING.WMO at 61.8% overlap
+- [x] T030: Run correlate-models on development tiles 22_18, 14_36, 0_1 — **0 correlations**: ADT placements don't overlap PM4 geometry (B4: PM4 contains objects not in MODF)
+- [ ] T031: Run correlate-models on additional tiles to expand correlation dataset — target ≥5 tiles with ≥1 correlation each
+- [ ] T032: Investigate CK24 types 0x3E/0x3F/0xC0/0xC1/0xC2 — determine what asset types they represent and how to match them
+- [ ] T033: Fix M2 collision vertex reading (currently returns 0) — use M2 collision mesh bounds instead of falling back to placement position ±2
+- [ ] T034: Research M2 top-surface geometry in PM4 — determine how M2 collision surfaces map to PM4 surfaces (elevated/offset from placement position)
+- [ ] T035: Document CK24→material/group mapping — compare PM4 surface attributes (MSUR flags, MSLK TypeFlags) against WMO/M2 material properties to find correlation
 
 - [x] All 48 unit tests pass
 - [x] Scorer produces identical scores to C# on dev tile — 65/65 segments match within 0.005
