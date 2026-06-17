@@ -248,7 +248,7 @@ public static class Pm4CorrelationMath
         return points;
     }
 
-    private static Vector2[] BuildConvexHull(IReadOnlyList<Vector2> points)
+    public static Vector2[] BuildConvexHull(IReadOnlyList<Vector2> points)
     {
         if (points.Count == 0)
             return [];
