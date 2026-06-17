@@ -1,5 +1,16 @@
 # Progress
 
+## 2026-06-17 — Spec 065 revised: fingerprint-database approach (route change)
+
+### What changed
+- ADT-based PM4→WMO matching ABANDONED. `correlate-models`/`sweep-correlate` need ADT anchors (222 PM4-only tiles have none). `identify-models` is bounding-box-only (too coarse). `match-assets` has ADT-dependent `sameTileBonus` (dead on PM4-only tiles).
+- New approach: fingerprint database from WMO collision geometry (MOVT/MOVI) via `Pm4CorrelationMath` convex-hull footprint + PCA normalization. Match PM4 CK24 fingerprints against WMO DB. No ADT for matching.
+- Spec 065 rewritten: spec.md, plan.md, tasks.md all revised. 6 phases: fingerprint extraction library → WMO DB → PM4 fingerprints → matching → ADT validation → generator (downstream).
+- Legacy commands kept for validation ground truth, not as primary matchers.
+
+### Key insight
+- The right correlation approach (`Pm4CorrelationMath`: convex hull footprint overlap, symmetric footprint distance, planar gap) already exists but was never used to build a fingerprint database. Instead, we relied on ADT placements for position info. The fix: use the correlation math to extract rotation-invariant fingerprints from WMO collision geometry directly, store to DB, match PM4 against it.
+
 ## 2026-06-16 — PM4 matcher is broken; spec 065 written
 
 ### Root cause diagnosis

@@ -3,31 +3,19 @@
 ## Direction
 WoW viewer. Libraries bridge to Unreal Engine. No Vulkan/WebGL/Museums/BASE.
 
-## 2026-06-17 — PM4 fingerprint→WMO identity matching proven
+## 2026-06-17 — Spec 065 revised: ADT-based correlation ABANDONED, fingerprint-database approach adopted
 
-**`pm4 identify-models` command built and validated.** Matches PM4 fingerprint groups against WMO archive local bounds (MOHD BoundsMin/BoundsMax) using sorted-dimension similarity.
+**Route change.** ADT-based PM4→WMO matching is wrong: 222 PM4-only tiles have no ADT, `correlate-models` produces 0 correlations on those tiles, `identify-models` is bounding-box-only (too coarse — dozens of WMOs share ~33×35×53), `match-assets` has ADT-dependent `sameTileBonus` that's dead on PM4-only tiles.
 
-**Results from 616 PM4s vs 506 WMO roots**: 1223 matches (score >= 0.30), 545 matches (score >= 0.95), 972 matches (score >= 0.90). Top match: GoldshireInn.wmo at 0.996 score — exact 30x32x60 dimension match.
+**New approach (spec 065 revised)**: Build a fingerprint database from WMO collision geometry (MOVT/MOVI) using `Pm4CorrelationMath`'s convex-hull footprint extraction with PCA normalization. Extract same fingerprints from PM4 CK24 groups. Match via `EvaluateMetrics` + `CompareCandidateScores`. No ADT for matching — ADT used only for validation ground truth.
 
-**Key discoveries**:
-- Sorted dimension ratio matching works — WMO local AABB dimensions are rotation-invariant identifiers
-- Type pairs confirmed: 0x40/0x41 = same M2 (collision+visual), 0x42/0x43 = same WMO (exterior+interior)
-- 0xC0/0xC1/0xC2/0xC3 also match WMOs — navmesh/interior collision variants sharing same model bounds
-- Multi-tile objects need separate handling — fingerprint changes per tile for same OID
-- 506/1985 WMOs scanned — archive enumeration missed ~75%. Need listfile-based enumeration for full coverage.
-- 304 unique WMOs matched across all types
+**Prior work retained as reference**:
+- `pm4 identify-models` (sorted-dimension-only) — KEPT for comparison, not primary matcher. 545 matches at ≥0.95 from 506 WMOs.
+- `pm4 fingerprint-scan` — 1604 CK24 groups extracted. 611/616 PM4s use world-space coords. 272 OIDs span 2+ tiles.
+- CK24 type pairs: 0x40/0x41=M2, 0x42/0x43=WMO, 0xC0-0xC3=WMO nav. Ck24ObjectId is global across tiles.
+- 506/1985 WMOs scanned — archive enumeration missed ~75%. Need listfile-based enumeration (Task 2.2).
 
-**Ck24ObjectId is a global object identifier spanning tiles.** Same ObjectId on multiple tiles = same physical object (OID 52202 on 8 tiles = one large WMO). Different ObjectIds with the same (surfaces, indices, vertices) fingerprint = different instances of the same model.
-
-**`pm4 fingerprint-scan` command added.** Reads all 616 development PM4s, extracts 1604 CK24 groups with fingerprints. Key discovery:
-- **611/616 PM4s use WorldSpace (absolute) coordinates** — only 5 use TileLocal. `Pm4PlacementMath.IsLikelyTileLocal()` detects this correctly.
-- **1162 distinct fingerprints** across all groups. Most common: `(35, 144, 90)` appears 97 times (common WMO wall segment).
-- **272 ObjectIds appear on 2+ tiles**. Top: OID 52202 spans 8 tiles, OID 43196 spans 8, OID 44166 spans 7.
-- **Multi-tile reconstruction**: combining per-tile bounding boxes across tiles reconstructs the full model bounds.
-
-**CK24 type distribution (616 PM4s)**: 0x40(M2-a)=80, 0x41(M2-b)=161, 0x42(WMO-a)=584, 0x43(WMO-b)=466, 0xC0=77, 0xC1=100, 0xC2=66, 0xC3=38, 0x3E=5, 0x3F=10, plus rare 0x3D/0xB6/0xBD/0xBE/0xBF.
-
-**Next step**: Match fingerprint groups against WMO archive by local bounding box dimensions (sorted, rotation-invariant). Same model at different placements produces same fingerprint + same sorted dimensions.
+**Spec 065 phases**: P1 fingerprint extraction library (PCA + hull + contracts), P2 WMO fingerprint DB, P3 PM4 fingerprint extraction, P4 matching (no ADT), P5 validation against ADT ground truth, P6 generator (downstream, existing).
 
 ## What's Done
 012, 014, 024, 025, 033, 037, 041, 043, 044 (P1), 048, 054, 058, 059, 060, 061, 062
@@ -44,7 +32,6 @@ Only `output/tmp/wowarchive-clients/` paths are valid.
 ## Known Issues
 - Viewer click-freeze on dense PM4 (timing shipped, numbers pending)
 - Some 0.5.3 Alpha `.wdt.MPQ` fail to parse
-- pm4 identify-models only scans 506/1985 WMO roots — archive enumeration misses ~75% of WMOs
-- pm4 correlate-models only produces hits on tiles where ADT placements overlap PM4 geometry (1/50 tiles)
+- WMO archive enumeration misses ~75% of WMOs (506/1985) — need listfile-based enumeration (spec 065 Task 2.2)
 - Alpha WDT write fails on placement-heavy tiles (>14999 bytes)
 - 14 pre-existing test failures (stale ChunkedFileReader fixtures)
