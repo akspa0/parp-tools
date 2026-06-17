@@ -98,7 +98,7 @@ public sealed record Pm4FingerprintMatchResult(
 
 public sealed record Pm4FingerprintMatchOptions(
     double MinScore = 0.45,
-    double AmbiguousWindow = 0.03,
+    double AmbiguousWindow = 0.015,
     float DimPrefilterTolerance = 0.25f,
     int MaxCandidates = 10)
 {

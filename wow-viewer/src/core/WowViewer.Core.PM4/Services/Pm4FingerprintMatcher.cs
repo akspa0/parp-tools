@@ -73,6 +73,12 @@ public static class Pm4FingerprintMatcher
 
         evaluations.Sort(static (a, b) => b.OverallScore.CompareTo(a.OverallScore));
 
+        List<CandidateEvaluation> deduped = DeduplicateRootAndGroup(evaluations);
+        int dedupedCount = evaluations.Count - deduped.Count;
+        if (dedupedCount > 0)
+            rationale.Add($"root/group dedup: removed {dedupedCount} duplicate candidates (kept most specific per WMO root).");
+        evaluations = deduped;
+
         int resolvedMaxCandidates = Math.Max(1, options.MaxCandidates);
         List<Pm4FingerprintMatchCandidate> candidates = new(Math.Min(evaluations.Count, resolvedMaxCandidates));
 
@@ -118,6 +124,62 @@ public static class Pm4FingerprintMatcher
 
         bool reviewRequired = status != Pm4FingerprintMatchStatus.Matched;
         return BuildResult(pm4Fingerprint, status, reviewRequired, rationale, candidates);
+    }
+
+    private static List<CandidateEvaluation> DeduplicateRootAndGroup(List<CandidateEvaluation> sortedEvals)
+    {
+        if (sortedEvals.Count <= 1)
+            return sortedEvals;
+
+        Dictionary<string, CandidateEvaluation> bestPerRoot = new(StringComparer.OrdinalIgnoreCase);
+        List<CandidateEvaluation> nonWmo = new();
+
+        foreach (CandidateEvaluation eval in sortedEvals)
+        {
+            string assetId = eval.Candidate.AssetId;
+            string wmoRoot = ExtractWmoRootPath(assetId);
+
+            if (string.IsNullOrEmpty(wmoRoot))
+            {
+                nonWmo.Add(eval);
+                continue;
+            }
+
+            if (!bestPerRoot.TryGetValue(wmoRoot, out CandidateEvaluation existing))
+            {
+                bestPerRoot[wmoRoot] = eval;
+            }
+            else
+            {
+                bool incomingIsGroup = assetId.Contains('#');
+                bool existingIsGroup = existing.Candidate.AssetId.Contains('#');
+
+                if (incomingIsGroup && !existingIsGroup)
+                {
+                    bestPerRoot[wmoRoot] = eval;
+                }
+                else if (!incomingIsGroup && existingIsGroup)
+                {
+                    // keep existing group
+                }
+                else if (eval.OverallScore > existing.OverallScore)
+                {
+                    bestPerRoot[wmoRoot] = eval;
+                }
+            }
+        }
+
+        List<CandidateEvaluation> result = new(bestPerRoot.Values.Count + nonWmo.Count);
+        result.AddRange(bestPerRoot.Values);
+        result.AddRange(nonWmo);
+        result.Sort(static (a, b) => b.OverallScore.CompareTo(a.OverallScore));
+        return result;
+    }
+
+    private static string ExtractWmoRootPath(string assetId)
+    {
+        int hashIndex = assetId.IndexOf('#');
+        return hashIndex >= 0 ? assetId[..hashIndex] : assetId;
     }
 
     private static List<Pm4FingerprintRecord> PrefilterByDimensions(
@@ -210,12 +272,15 @@ public static class Pm4FingerprintMatcher
 
     private static double ComputeOverallScore(Pm4CorrelationMetrics metrics, Pm4FingerprintRecord pm4Fp, Pm4FingerprintRecord wmoFp)
     {
-        double footprintWeight = 0.45;
-        double volumeWeight = 0.20;
-        double areaWeight = 0.15;
-        double distanceWeight = 0.10;
-        double planarWeight = 0.05;
-        double verticalWeight = 0.05;
+        double footprintWeight = 0.36;
+        double volumeWeight = 0.13;
+        double areaWeight = 0.09;
+        double distanceWeight = 0.07;
+        double planarWeight = 0.03;
+        double verticalWeight = 0.03;
+        double surfaceCountWeight = 0.10;
+        double vertexCountWeight = 0.09;
+        double indexCountWeight = 0.10;
 
         double footprintScore = metrics.FootprintOverlapRatio;
         double volumeScore = metrics.VolumeOverlapRatio;
@@ -223,13 +288,28 @@ public static class Pm4FingerprintMatcher
         double distanceScore = ScoreDistance(metrics.FootprintDistance);
         double planarScore = ScoreOverlap(metrics.PlanarOverlapRatio);
         double verticalScore = 1f - Math.Clamp(metrics.VerticalGap / Math.Max(1f, pm4Fp.SortedDim2), 0f, 1f);
+        double surfaceCountScore = ScoreCountRatio(pm4Fp.SurfaceCount, wmoFp.SurfaceCount);
+        double vertexCountScore = ScoreCountRatio(pm4Fp.VertexCount, wmoFp.VertexCount);
+        double indexCountScore = ScoreCountRatio(pm4Fp.IndexCount, wmoFp.IndexCount);
 
         return footprintScore * footprintWeight
             + volumeScore * volumeWeight
             + areaScore * areaWeight
             + distanceScore * distanceWeight
             + planarScore * planarWeight
-            + verticalScore * verticalWeight;
+            + verticalScore * verticalWeight
+            + surfaceCountScore * surfaceCountWeight
+            + vertexCountScore * vertexCountWeight
+            + indexCountScore * indexCountWeight;
+    }
+
+    private static double ScoreCountRatio(int pm4Count, int wmoCount)
+    {
+        if (pm4Count <= 0 || wmoCount <= 0)
+            return 0d;
+
+        double ratio = (double)Math.Min(pm4Count, wmoCount) / Math.Max(pm4Count, wmoCount);
+        return ratio;
     }
 
     private static double ScoreDistance(float distance)
