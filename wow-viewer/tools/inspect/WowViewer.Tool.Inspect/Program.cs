@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Buffers.Binary;
 using System.Numerics;
@@ -65,6 +66,9 @@ switch (area)
 		break;
 	case "pm4":
 		RunPm4(tail);
+		break;
+	case "pd4":
+		RunPd4(tail);
 		break;
 	case "wmo":
 		RunWmo(tail);
@@ -1932,6 +1936,9 @@ static void RunPm4(string[] args)
 	case "correlate-models":
 		RunPm4CorrelateModels(tail);
 		break;
+	case "sweep-correlate":
+		RunPm4SweepCorrelate(tail);
+		break;
 	case "match":
 		RunPm4Match(tail);
 		break;
@@ -1977,11 +1984,140 @@ case "fingerprint-scan":
 	case "identify-models":
 		RunPm4IdentifyModels(tail);
 		break;
+	case "tile-reports":
+		RunPm4TileReports(tail);
+		break;
+	case "generate-from-wmo":
+		RunPm4GenerateFromWmo(tail);
+		break;
+	case "validate-generator":
+		RunPm4ValidateGenerator(tail);
+		break;
+	case "extract-wmo-cache":
+		RunPm4ExtractWmoCache(tail);
+		break;
+	case "match-groups-to-wmos":
+		RunPm4MatchGroupsToWmos(tail);
+		break;
+	case "extract-wmo-pattern":
+		RunPm4ExtractWmoPattern(tail);
+		break;
+	case "test-generator":
+		RunPm4TestGenerator();
+		break;
+	case "analyze-simplification":
+		RunPm4AnalyzeSimplification(tail);
+		break;
+	case "build-wmo-fingerprint-db":
+		RunPm4BuildWmoFingerprintDb(tail);
+		break;
+	case "extract-pm4-fingerprints":
+		RunPm4ExtractPm4Fingerprints(tail);
+		break;
 		default:
 			Console.Error.WriteLine($"Unknown pm4 command '{command}'.");
 			ShowPm4Usage();
 			Environment.ExitCode = 1;
 			break;
+	}
+}
+
+static void RunPd4(string[] args)
+{
+	if (args.Length == 0)
+	{
+		ShowPd4Usage();
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string command = args[0].ToLowerInvariant();
+	string[] tail = args.Skip(1).ToArray();
+
+	switch (command)
+	{
+		case "inspect":
+			RunPd4Inspect(tail);
+			break;
+		default:
+			Console.Error.WriteLine($"Unknown pd4 command '{command}'.");
+			ShowPd4Usage();
+			Environment.ExitCode = 1;
+			break;
+	}
+}
+
+static void ShowPd4Usage()
+{
+	Console.WriteLine("PD4 commands:");
+	Console.WriteLine("  pd4 inspect --input <file.pd4>");
+}
+
+static void RunPd4Inspect(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i");
+	string? positionalInput = GetFirstPositionalArgument(args);
+	input = input ?? positionalInput
+		?? throw new InvalidOperationException("--input <file.pd4> is required.");
+
+	if (!File.Exists(input))
+	{
+		Console.Error.WriteLine($"Error: file not found: {input}");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	var doc = Pd4ResearchReader.ReadFile(input);
+
+	Console.WriteLine("PD4 Report");
+	Console.WriteLine($"Input: {doc.SourcePath ?? input}");
+	Console.WriteLine($"Version: {doc.Version}");
+	Console.WriteLine($"MCRC: 0x{doc.Mcrc:X8}");
+	Console.WriteLine($"Chunks: {doc.Chunks.Count}");
+	Console.WriteLine($"Unknown chunks: {string.Join(", ", doc.Chunks
+		.Where(c => c.Signature is not ("MVER" or "MCRC" or "MSHD" or "MSPV" or "MSPI" or "MSCN" or "MSLK" or "MSVT" or "MSVI" or "MSUR"))
+		.Select(c => $"{c.Signature}:{c.Size}"))}");
+
+	Console.WriteLine($"\nMSPV: count={doc.KnownChunks.Mspv.Count}");
+	Console.WriteLine($"MSPI: count={doc.KnownChunks.Mspi.Count}");
+	Console.WriteLine($"MSCN: count={doc.KnownChunks.Mscn.Count}");
+	Console.WriteLine($"MSLK: count={doc.KnownChunks.Mslk.Count}");
+	Console.WriteLine($"MSVI: count={doc.KnownChunks.Msvi.Count}");
+
+	var msvt = doc.KnownChunks.Msvt;
+	Console.WriteLine($"\nMSVT: count={msvt.Count}");
+	if (msvt.Count > 0)
+	{
+		var min = new Vector3(msvt.Min(v => v.X), msvt.Min(v => v.Y), msvt.Min(v => v.Z));
+		var max = new Vector3(msvt.Max(v => v.X), msvt.Max(v => v.Y), msvt.Max(v => v.Z));
+		var ctr = (min + max) * 0.5f;
+		Console.WriteLine($"  bounds min=({min.X:F2}, {min.Y:F2}, {min.Z:F2}) max=({max.X:F2}, {max.Y:F2}, {max.Z:F2})");
+		Console.WriteLine($"  centroid=({ctr.X:F2}, {ctr.Y:F2}, {ctr.Z:F2})");
+	}
+
+	var msur = doc.KnownChunks.Msur;
+	Console.WriteLine($"\nMSUR: count={msur.Count}");
+	if (msur.Count > 0)
+	{
+		var flags = msur.GroupBy(e => e.Flags).OrderByDescending(g => g.Count()).Take(5);
+		Console.WriteLine($"  Top flags: {string.Join(", ", flags.Select(g => $"0x{g.Key:X2}×{g.Count()}"))}");
+		var indexCounts = msur.GroupBy(e => e.IndexCount).OrderByDescending(g => g.Count()).Take(5);
+		Console.WriteLine($"  Top indexCounts: {string.Join(", ", indexCounts.Select(g => $"{g.Key}×{g.Count()}"))}");
+		var zeroCount = msur.Count(e => e.Zero != 0);
+		Console.WriteLine($"  Non-zero _0x1C fields: {zeroCount}/{msur.Count}");
+		var refDistinct = msur.Select(e => e.RefIndex).Distinct().Count();
+		Console.WriteLine($"  Distinct RefIndex values: {refDistinct}");
+
+		Console.WriteLine($"\nFirst 5 MSUR entries:");
+		for (int i = 0; i < Math.Min(5, msur.Count); i++)
+			Console.WriteLine($"  [{i}] {msur[i]}");
+	}
+
+	if (doc.Diagnostics.Count > 0)
+	{
+		Console.WriteLine($"\nDiagnostics ({doc.Diagnostics.Count}):");
+		foreach (var d in doc.Diagnostics)
+			Console.WriteLine($"  {d}");
 	}
 }
 
@@ -2525,19 +2661,24 @@ static void RunPm4CorrelateModels(string[] args)
 	string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "--adt-obj", "-a");
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
 	string? output = GetOption(args, "--output", "-o");
+	string? pm4VPath = GetOption(args, "--pm4-vpath", "-pv");
+	string? adtVPath = GetOption(args, "--adt-vpath", "-av");
 	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
 		return;
 
-	if (string.IsNullOrWhiteSpace(input) || !File.Exists(input))
+	bool inputIsFile = !string.IsNullOrWhiteSpace(input) && File.Exists(input);
+	bool placementsIsFile = !string.IsNullOrWhiteSpace(placements) && File.Exists(placements);
+
+	if (!inputIsFile && string.IsNullOrWhiteSpace(pm4VPath))
 	{
-		Console.Error.WriteLine("Error: --input <file.pm4> is required and must exist.");
+		Console.Error.WriteLine("Error: --input <file.pm4> must exist, or provide --pm4-vpath <archive-path>.");
 		Environment.ExitCode = 1;
 		return;
 	}
 
-	if (string.IsNullOrWhiteSpace(placements) || !File.Exists(placements))
+	if (!placementsIsFile && string.IsNullOrWhiteSpace(adtVPath))
 	{
-		Console.Error.WriteLine("Error: --placements <file.adt> is required and must exist.");
+		Console.Error.WriteLine("Error: --placements <file.adt> must exist, or provide --adt-vpath <archive-path>.");
 		Environment.ExitCode = 1;
 		return;
 	}
@@ -2551,7 +2692,8 @@ static void RunPm4CorrelateModels(string[] args)
 
 	try
 	{
-		Pm4CorrelateModelsResult result = Pm4CorrelateModelsSupport.Correlate(input, placements, archiveRoot!, archiveBootstrapOptions);
+		Pm4CorrelateModelsResult result = Pm4CorrelateModelsSupport.Correlate(
+			input!, placements!, archiveRoot!, archiveBootstrapOptions, pm4VPath, adtVPath);
 
 		Console.WriteLine($"PM4 Correlation Report: {Path.GetFileName(input)}");
 		Console.WriteLine($"Tile: ({result.TileX}, {result.TileY})");
@@ -2613,7 +2755,10 @@ static void RunPm4CorrelateModels(string[] args)
 		if (!string.IsNullOrWhiteSpace(output))
 		{
 			string outputPath = Path.GetFullPath(output);
-			Console.WriteLine($"Writing JSON to {outputPath}");
+			Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+			string json = JsonSerializer.Serialize(result, Pm4MatchSupport.CreateJsonOptions());
+			File.WriteAllText(outputPath, json);
+			Console.WriteLine($"Wrote JSON to {outputPath}");
 		}
 	}
 	catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or DirectoryNotFoundException)
@@ -2621,6 +2766,905 @@ static void RunPm4CorrelateModels(string[] args)
 		Console.Error.WriteLine($"Error: {ex.Message}");
 		Environment.ExitCode = 1;
 	}
+}
+
+static void RunPm4SweepCorrelate(string[] args)
+{
+	string? mapDir = GetOption(args, "--map-dir", "-d");
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? output = GetOption(args, "--output", "-o");
+	string? limitText = GetOption(args, "--limit", "-n");
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	int limit = int.MaxValue;
+	if (!string.IsNullOrWhiteSpace(limitText) && (!int.TryParse(limitText, out limit) || limit <= 0))
+	{
+		Console.Error.WriteLine("Error: --limit must be a positive integer.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(mapDir) || !Directory.Exists(mapDir))
+	{
+		Console.Error.WriteLine("Error: --map-dir <directory> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(archiveRoot) || !Directory.Exists(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root <dir> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string[] pm4Files = Directory.GetFiles(mapDir, "*.pm4");
+	Array.Sort(pm4Files, StringComparer.OrdinalIgnoreCase);
+
+	List<string> csvLines = [];
+	csvLines.Add("tileX,tileY,pm4Path,pm4Bytes,ck24Groups,placements,correlations,topModelPath,topOverlap,topDist");
+
+	int processed = 0;
+	int skippedNoData = 0;
+	int skippedNoAdt = 0;
+	int failed = 0;
+	Stopwatch sw = Stopwatch.StartNew();
+
+	for (int i = 0; i < pm4Files.Length && processed < limit; i++)
+	{
+		string pm4Path = pm4Files[i];
+		FileInfo fi = new(pm4Path);
+		if (fi.Length == 0)
+		{
+			skippedNoData++;
+			continue;
+		}
+
+		if (!Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int tileX, out int tileY))
+			continue;
+
+		string baseName = Path.GetFileNameWithoutExtension(pm4Path);
+		string adtPath = Path.Combine(mapDir, baseName + "_obj0.adt");
+		if (!File.Exists(adtPath))
+		{
+			skippedNoAdt++;
+			continue;
+		}
+
+		try
+		{
+			Pm4CorrelateModelsResult result = Pm4CorrelateModelsSupport.Correlate(
+				pm4Path, adtPath, archiveRoot, archiveBootstrapOptions, null, null);
+
+			string topModel = "";
+			double topOverlap = 0;
+			double topDist = 0;
+			if (result.Correlations.Count > 0)
+			{
+				Pm4CorrelationEntry top = result.Correlations[0];
+				topModel = Path.GetFileName(top.ModelPath);
+				topOverlap = top.WowBoundsOverlap;
+				topDist = top.WowCenterDistance;
+			}
+
+			csvLines.Add($"{tileX},{tileY},{baseName},{fi.Length},{result.Ck24Groups.Count},{result.PlacementSummaries.Count},{result.Correlations.Count},\"{topModel}\",{topOverlap:F4},{topDist:F1}");
+			processed++;
+
+			if (processed % 20 == 0 || processed == 1)
+			{
+				double elapsed = sw.Elapsed.TotalSeconds;
+				double rate = processed / elapsed;
+				int remaining = Math.Min(pm4Files.Length - i - 1, limit - processed);
+				Console.Error.WriteLine($"  [{processed}/{limit}] tile ({tileX},{tileY}) ck24={result.Ck24Groups.Count} corr={result.Correlations.Count} ... {rate:F1}/s, ~{remaining / rate:F0}s remaining");
+			}
+		}
+		catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+		{
+			failed++;
+			csvLines.Add($"{tileX},{tileY},{baseName},{fi.Length},ERROR,\"{ex.Message}\"");
+		}
+	}
+
+	sw.Stop();
+	double totalSec = sw.Elapsed.TotalSeconds;
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+		File.WriteAllLines(outputPath, csvLines);
+		Console.WriteLine($"Wrote sweep CSV to {outputPath}");
+	}
+
+	Console.WriteLine($"Sweep complete: {processed} tiles processed, {skippedNoData} skipped (0-byte), {skippedNoAdt} skipped (no _obj0.adt), {failed} failed, {totalSec:F1}s ({processed / totalSec:F1}/s)");
+
+	if (processed > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("## Summary Stats");
+		Console.WriteLine($"  Tiles with correlations: {csvLines.Skip(1).Count(l => l.Split(',').Length >= 7 && int.TryParse(l.Split(',')[6], out int c) && c > 0)}");
+		Console.WriteLine($"  Total correlations: {csvLines.Skip(1).Sum(l => l.Split(',').Length >= 7 ? (int.TryParse(l.Split(',')[6], out int c) ? c : 0) : 0)}");
+	}
+}
+
+static void RunPm4ExtractWmoCache(string[] args)
+{
+	string? mapDir = GetOption(args, "--map-dir", "-d");
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? cacheDir = GetOption(args, "--cache-dir", "-c") ?? Path.Combine(Path.GetDirectoryName(mapDir) ?? ".", "wmo-cache");
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	if (string.IsNullOrWhiteSpace(mapDir) || !Directory.Exists(mapDir))
+	{
+		Console.Error.WriteLine("Error: --map-dir <dir> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+	if (string.IsNullOrWhiteSpace(archiveRoot) || !Directory.Exists(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root <dir> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Directory.CreateDirectory(cacheDir);
+	HashSet<string> neededWmos = new(StringComparer.OrdinalIgnoreCase);
+
+	// Scan all ADTs for WMO placements
+	string[] adtFiles = Directory.GetFiles(mapDir, "*.adt");
+	int scannedAdts = 0;
+	Stopwatch sw = Stopwatch.StartNew();
+
+	foreach (string adtPath in adtFiles)
+	{
+		string name = Path.GetFileName(adtPath);
+		if (name.Contains("_obj0") || name.Contains("_tex0") || name.Contains("_lod")) continue;
+
+		try
+		{
+			var placements = AdtPlacementReader.Read(adtPath);
+			foreach (var wmo in placements.WorldModelPlacements)
+			{
+				string normalized = wmo.ModelPath.Replace('\\', '/').Trim().TrimStart('/').ToLowerInvariant();
+				if (!string.IsNullOrWhiteSpace(normalized))
+					neededWmos.Add(normalized);
+			}
+			scannedAdts++;
+		}
+		catch { }
+	}
+
+	Console.WriteLine($"Scanned {scannedAdts} ADTs, found {neededWmos.Count} unique WMO root paths.");
+
+	// Extract each WMO
+	int extracted = 0;
+	int failed = 0;
+	int total = neededWmos.Count;
+
+	foreach (string wmoVPath in neededWmos.OrderBy(static p => p))
+	{
+		try
+		{
+			byte[] rootBytes = ArchiveVirtualFileReader.ReadVirtualFile(
+				wmoVPath, [archiveRoot], archiveBootstrapOptions);
+
+			string cachePath = Path.Combine(cacheDir, wmoVPath.Replace('/', '\\'));
+			string? cacheDirPart = Path.GetDirectoryName(cachePath);
+			if (!string.IsNullOrWhiteSpace(cacheDirPart))
+				Directory.CreateDirectory(cacheDirPart);
+			File.WriteAllBytes(cachePath, rootBytes);
+
+			// Extract group files
+			using MemoryStream ms = new(rootBytes, writable: false);
+			var summary = WmoSummaryReader.Read(ms, wmoVPath);
+			string rootStem = Path.Combine(
+				Path.GetDirectoryName(cachePath) ?? "",
+				Path.GetFileNameWithoutExtension(cachePath));
+
+			for (int gi = 0; gi < summary.ReportedGroupCount; gi++)
+			{
+				string groupVPath = wmoVPath.Replace(".wmo", $"_{gi:D3}.wmo", StringComparison.OrdinalIgnoreCase);
+				try
+				{
+					byte[] groupBytes = ArchiveVirtualFileReader.ReadVirtualFile(
+						groupVPath, [archiveRoot], archiveBootstrapOptions);
+					string groupCachePath = Path.Combine(cacheDir, groupVPath.Replace('/', '\\'));
+					string? groupDirPart = Path.GetDirectoryName(groupCachePath);
+					if (!string.IsNullOrWhiteSpace(groupDirPart))
+						Directory.CreateDirectory(groupDirPart);
+					File.WriteAllBytes(groupCachePath, groupBytes);
+				}
+				catch { }
+			}
+
+			extracted++;
+		}
+		catch (Exception ex)
+		{
+			failed++;
+		}
+
+		if (extracted % 50 == 0)
+		{
+			double elapsed = sw.Elapsed.TotalSeconds;
+			Console.WriteLine($"  [{extracted}/{total}] extracted, {failed} failed, {elapsed:F1}s, ~{(double)(total - extracted) / (extracted / elapsed):F0}s remaining");
+		}
+	}
+
+	sw.Stop();
+	Console.WriteLine($"Extraction complete: {extracted} WMOs extracted, {failed} failed, {sw.Elapsed.TotalSeconds:F1}s");
+	Console.WriteLine($"Cache directory: {Path.GetFullPath(cacheDir)}");
+}
+
+static void RunPm4ExtractWmoPattern(string[] args)
+{
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? cacheDir = GetOption(args, "--cache-dir", "-c");
+	string? pattern = GetOption(args, "--pattern", "-p");
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	if (string.IsNullOrWhiteSpace(archiveRoot) || !Directory.Exists(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root <dir> is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+	if (string.IsNullOrWhiteSpace(pattern))
+	{
+		Console.Error.WriteLine("Error: --pattern <substring> is required (e.g., 'ulduar').");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	var session = ArchiveCatalogSessionCache.GetOrCreate([archiveRoot], archiveBootstrapOptions);
+	var allFiles = session.ArchiveCatalog.GetAllKnownFiles();
+	string lowerPattern = pattern.ToLowerInvariant();
+
+	var matchingWmos = allFiles
+		.Where(f => f.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase)
+			&& f.Contains(lowerPattern, StringComparison.OrdinalIgnoreCase))
+		.OrderBy(static f => f)
+		.ToList();
+
+	Console.WriteLine($"Found {matchingWmos.Count} WMOs matching '{pattern}'.");
+
+	if (!string.IsNullOrWhiteSpace(cacheDir))
+		Directory.CreateDirectory(cacheDir);
+
+	int extracted = 0, failed = 0;
+	Stopwatch sw = Stopwatch.StartNew();
+	object lockObj = new();
+
+	Parallel.ForEach(matchingWmos, wmoVPath =>
+	{
+		try
+		{
+			byte[] bytes = ArchiveVirtualFileReader.ReadVirtualFile(
+				wmoVPath.Replace('\\', '/').ToLowerInvariant(),
+				[archiveRoot], archiveBootstrapOptions);
+
+			if (!string.IsNullOrWhiteSpace(cacheDir))
+			{
+				string cachePath = Path.Combine(cacheDir, wmoVPath.Replace('/', '\\'));
+				string? dir = Path.GetDirectoryName(cachePath);
+				if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+				File.WriteAllBytes(cachePath, bytes);
+			}
+
+			lock (lockObj) { extracted++; }
+		}
+		catch
+		{
+			lock (lockObj) { failed++; }
+		}
+	});
+
+	sw.Stop();
+	Console.WriteLine($"Extracted {extracted} WMOs ({failed} failed) in {sw.Elapsed.TotalSeconds:F1}s");
+}
+
+static void RunPm4MatchGroupsToWmos(string[] args)
+{
+	string? pm4Path = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? wmoCacheDir = GetOption(args, "--wmo-cache", "-w");
+	string? output = GetOption(args, "--output", "-o");
+
+	if (string.IsNullOrWhiteSpace(pm4Path) || !File.Exists(pm4Path))
+	{
+		Console.Error.WriteLine("Error: --input <file.pm4> is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+	if (string.IsNullOrWhiteSpace(wmoCacheDir) || !Directory.Exists(wmoCacheDir))
+	{
+		Console.Error.WriteLine("Error: --wmo-cache <dir> is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	var doc = Pm4ResearchReader.ReadFile(pm4Path);
+	var msvt = doc.KnownChunks.Msvt;
+	var msvi = doc.KnownChunks.Msvi;
+
+	List<Dictionary<string, object?>> groups = [];
+	foreach (var ck24Group in doc.KnownChunks.Msur
+		.Where(static s => s.Ck24 != 0 && s.IndexCount >= 3)
+		.GroupBy(static s => s.Ck24))
+	{
+		uint ck24 = ck24Group.Key;
+		var surfaces = ck24Group.ToList();
+		byte type = surfaces[0].Ck24Type;
+		ushort objId = surfaces[0].Ck24ObjectId;
+		int totalIndices = surfaces.Sum(static s => s.IndexCount);
+
+		Vector3 pm4Min = new(float.MaxValue), pm4Max = new(float.MinValue, float.MinValue, float.MinValue);
+		foreach (var s in surfaces)
+		{
+			int first = checked((int)s.MsviFirstIndex);
+			int end = Math.Min(first + s.IndexCount, msvi.Count);
+			for (int i = first; i < end; i++)
+			{
+				int vi = checked((int)msvi[i]);
+				if ((uint)vi < (uint)msvt.Count)
+				{
+					pm4Min = Vector3.Min(pm4Min, msvt[vi]);
+					pm4Max = Vector3.Max(pm4Max, msvt[vi]);
+				}
+			}
+		}
+
+		Vector3 size = pm4Max - pm4Min;
+		float[] dims = [size.X, size.Y, size.Z];
+		Array.Sort(dims);
+
+		groups.Add(new Dictionary<string, object?>
+		{
+			["ck24"] = $"0x{ck24:X6}",
+			["type"] = $"0x{type:X2}",
+			["objId"] = (int)objId,
+			["surfaces"] = surfaces.Count,
+			["verts"] = 0,
+			["indices"] = totalIndices,
+			["size"] = new double[] { Math.Round(dims[0], 1), Math.Round(dims[1], 1), Math.Round(dims[2], 1) },
+			["pm4Bounds"] = new { min = new double[] { Math.Round(pm4Min.X, 1), Math.Round(pm4Min.Y, 1), Math.Round(pm4Min.Z, 1) }, max = new double[] { Math.Round(pm4Max.X, 1), Math.Round(pm4Max.Y, 1), Math.Round(pm4Max.Z, 1) } },
+		});
+	}
+
+	groups.Sort((a, b) => ((int)b["surfaces"]!).CompareTo((int)a["surfaces"]!));
+
+	Console.WriteLine($"\n=== PM4 Groups on {Path.GetFileName(pm4Path)} ===");
+	Console.WriteLine($"Total CK24 groups: {groups.Count}");
+	Console.WriteLine($"\n{"CK24",-12} {"Type",-6} {"ObjID",-6} {"Surf",-6} {"Indices",-8} {"Size (sorted)",-20} {"PM4 Bounds"}");
+	Console.WriteLine(new string('-', 100));
+	foreach (var g in groups)
+	{
+		var s = (double[])g["size"]!;
+		var b = (dynamic)g["pm4Bounds"]!;
+		Console.WriteLine($"{g["ck24"],-12} {g["type"],-6} {g["objId"],-6} {g["surfaces"],-6} {g["indices"],-8} ({s[0],-6:F1}x{s[1],-6:F1}x{s[2],-6:F1}) ({b.min[0]:F1},{b.min[1]:F1},{b.min[2]:F1})-({b.max[0]:F1},{b.max[1]:F1},{b.max[2]:F1})");
+	}
+
+	// Scan WMO cache for matching local bounds
+	Console.WriteLine($"\n=== Scanning WMO cache for matching bounds ===");
+	var wmoRoots = Directory.GetFiles(wmoCacheDir, "*.wmo", SearchOption.AllDirectories)
+		.Where(f => !System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileNameWithoutExtension(f), @"_\d{3}$"))
+		.ToArray();
+	Console.WriteLine($"WMO roots in cache: {wmoRoots.Length}");
+
+	List<Dictionary<string, object?>> wmoEntries = [];
+	int scanned = 0;
+	Stopwatch sw = Stopwatch.StartNew();
+	object scanLock = new();
+
+	Parallel.ForEach(wmoRoots, wmoPath =>
+	{
+		try
+		{
+			using FileStream fs = File.OpenRead(wmoPath);
+			var summary = WmoSummaryReader.Read(fs, wmoPath);
+			Vector3 size = summary.BoundsMax - summary.BoundsMin;
+			float[] dims = [size.X, size.Y, size.Z];
+			Array.Sort(dims);
+
+			lock (scanLock)
+			{
+				wmoEntries.Add(new Dictionary<string, object?>
+				{
+					["path"] = wmoPath,
+					["groups"] = summary.ReportedGroupCount,
+					["size"] = new double[] { Math.Round(dims[0], 1), Math.Round(dims[1], 1), Math.Round(dims[2], 1) },
+				});
+				scanned++;
+				if (scanned % 100 == 0)
+					Console.Error.Write($"\r  Scanned {scanned}/{wmoRoots.Length} WMOs...");
+			}
+		}
+		catch { }
+	});
+	sw.Stop();
+	Console.Error.WriteLine($"\r  Scanned {scanned}/{wmoRoots.Length} WMOs in {sw.Elapsed.TotalSeconds:F1}s");
+
+	// For each PM4 group, find the top 5 WMO matches by sorted dimension similarity
+	Console.WriteLine($"\n=== Top WMO matches for each PM4 group ===");
+	Console.WriteLine($"\n{"CK24",-12} {"Surf",-6} {"Size",-22} {"Best WMO Match",-60} {"WMO Size",-22} {"Score",-6}");
+	Console.WriteLine(new string('-', 130));
+	foreach (var g in groups)
+	{
+		var pm4Size = (double[])g["size"]!;
+		double bestScore = 0;
+		string bestWmo = "";
+
+		foreach (var w in wmoEntries)
+		{
+			var wSize = (double[])w["size"]!;
+			double r0 = Math.Min(pm4Size[0], wSize[0]) / (double)Math.Max(pm4Size[0], wSize[0]);
+			double r1 = Math.Min(pm4Size[1], wSize[1]) / (double)Math.Max(pm4Size[1], wSize[1]);
+			double r2 = Math.Min(pm4Size[2], wSize[2]) / (double)Math.Max(pm4Size[2], wSize[2]);
+			double score = (r0 + r1 + r2) / 3.0;
+			if (score > bestScore)
+			{
+				bestScore = score;
+				bestWmo = (string)w["path"]!;
+			}
+		}
+
+		string shortPath = bestWmo.Length > 55 ? "..." + bestWmo[^52..] : bestWmo;
+		Console.WriteLine($"{g["ck24"],-12} {g["surfaces"],-6} ({pm4Size[0],-6:F1}x{pm4Size[1],-6:F1}x{pm4Size[2],-6:F1}) {shortPath,-60} {bestScore,-6:F3}");
+	}
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+		var result = new Dictionary<string, object?> { ["groups"] = groups, ["wmoMatches"] = wmoEntries };
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"\nWrote {outputPath}");
+	}
+}
+
+static void RunPm4ValidateGenerator(string[] args)
+{
+	string? mapDir = GetOption(args, "--map-dir", "-d");
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? output = GetOption(args, "--output", "-o");
+	string? wmoCacheDir = GetOption(args, "--wmo-cache", "-w");
+	int? limit = TryParseInt(GetOption(args, "--limit", "-n"));
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	if (string.IsNullOrWhiteSpace(mapDir) || !Directory.Exists(mapDir))
+	{
+		Console.Error.WriteLine("Error: --map-dir <dir> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(archiveRoot) || !Directory.Exists(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root <dir> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string[] pm4Files = Directory.GetFiles(mapDir, "*.pm4");
+	Array.Sort(pm4Files, StringComparer.OrdinalIgnoreCase);
+
+	List<Dictionary<string, object?>> tileResults = [];
+	int processed = 0;
+	int skippedNoData = 0;
+	int skippedNoAdt = 0;
+	int skippedNoPlacements = 0;
+	int failed = 0;
+	Stopwatch sw = Stopwatch.StartNew();
+
+	for (int i = 0; i < pm4Files.Length; i++)
+	{
+		if (limit.HasValue && processed >= limit.Value) break;
+
+		string pm4Path = pm4Files[i];
+		FileInfo fi = new(pm4Path);
+		if (fi.Length == 0) { skippedNoData++; continue; }
+
+		string pm4Name = Path.GetFileNameWithoutExtension(pm4Path);
+		if (!Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int tileX, out int tileY))
+			continue;
+
+		string adtPath = Path.Combine(mapDir, $"development_{tileX}_{tileY}.adt");
+		if (!File.Exists(adtPath))
+		{
+			skippedNoAdt++;
+			continue;
+		}
+
+		try
+		{
+			var doc = Pm4ResearchReader.ReadFile(pm4Path);
+			bool hasCk24Surfaces = doc.KnownChunks.Msur.Any(s => s.Ck24 != 0 && s.IndexCount >= 3);
+			if (!hasCk24Surfaces) { skippedNoPlacements++; continue; }
+
+			var placements = AdtPlacementReader.Read(adtPath);
+			if (placements.WorldModelPlacements.Count == 0) { skippedNoPlacements++; continue; }
+
+			List<Dictionary<string, object?>> placementResults = [];
+			int genTotalSurfaces = 0;
+			int genTotalVerts = 0;
+			int matchedPlacements = 0;
+
+			foreach (var wmoPlacement in placements.WorldModelPlacements)
+			{
+				try
+				{
+					string normalizedPath = wmoPlacement.ModelPath.Replace('\\', '/').TrimStart('/').ToLowerInvariant();
+
+					byte[] rootBytes;
+					if (!string.IsNullOrWhiteSpace(wmoCacheDir))
+					{
+						string cachePath = Path.Combine(wmoCacheDir, normalizedPath.Replace('/', '\\'));
+						if (File.Exists(cachePath))
+							rootBytes = File.ReadAllBytes(cachePath);
+						else
+							rootBytes = ArchiveVirtualFileReader.ReadVirtualFile(normalizedPath, [archiveRoot], archiveBootstrapOptions);
+					}
+					else
+					{
+						rootBytes = ArchiveVirtualFileReader.ReadVirtualFile(normalizedPath, [archiveRoot], archiveBootstrapOptions);
+					}
+
+					using MemoryStream ms = new(rootBytes, writable: false);
+					var summary = WmoSummaryReader.Read(ms, wmoPlacement.ModelPath);
+
+					Func<string, byte[]?> readGroupBytes = vp =>
+					{
+						if (!string.IsNullOrWhiteSpace(wmoCacheDir))
+						{
+							string cachePath = Path.Combine(wmoCacheDir, vp.Replace('/', '\\'));
+							if (File.Exists(cachePath))
+								return File.ReadAllBytes(cachePath);
+						}
+						try { return ArchiveVirtualFileReader.ReadVirtualFile(vp, [archiveRoot], archiveBootstrapOptions); }
+						catch { return null; }
+					};
+
+					List<Vector3> allVerts = [];
+					List<ushort> allIndices = [];
+					string rootDir = Path.GetDirectoryName(wmoPlacement.ModelPath.Replace('\\', '/')) ?? "";
+					string rootStem = Path.GetFileNameWithoutExtension(wmoPlacement.ModelPath);
+
+					for (int gi = 0; gi < summary.ReportedGroupCount; gi++)
+					{
+						string groupVPath = Path.Combine(rootDir, $"{rootStem}_{gi:D3}.wmo").Replace('\\', '/');
+						byte[]? groupBytes = readGroupBytes(groupVPath);
+						if (groupBytes is null) continue;
+
+						try
+						{
+							using MemoryStream groupMs = new(groupBytes, writable: false);
+							var meshDetail = WmoGroupMeshDetailReader.Read(groupMs, groupVPath);
+							int baseIdx = allVerts.Count;
+							foreach (var v in meshDetail.Vertices)
+								allVerts.Add(v);
+							foreach (var idx in meshDetail.Indices)
+								allIndices.Add((ushort)(idx + baseIdx));
+						}
+						catch { }
+					}
+
+					if (allVerts.Count == 0 || allIndices.Count < 3) continue;
+
+					matchedPlacements++;
+
+					Pm4GenerationData genData = Pm4Generator.GenerateFromCollisionMesh(
+						allVerts, allIndices,
+						wmoPlacement.Position,
+						wmoPlacement.Rotation,
+						1f,
+						ck24Type: 0x43,
+						ck24ObjectId: (ushort)(matchedPlacements & 0xFFFF));
+
+					genTotalSurfaces += genData.Msur.Count;
+					genTotalVerts += genData.Msvt.Count;
+
+					int wmoFaceCount = allIndices.Count / 3;
+					placementResults.Add(new Dictionary<string, object?>
+					{
+						["uid"] = wmoPlacement.UniqueId,
+						["model"] = Path.GetFileName(wmoPlacement.ModelPath),
+						["wmoFaces"] = wmoFaceCount,
+						["genSurfaces"] = genData.Msur.Count,
+						["genVerts"] = genData.Msvt.Count,
+						["genIndices"] = genData.Msvi.Count,
+					});
+				}
+				catch (FileNotFoundException) { continue; }
+				catch (InvalidDataException) { continue; }
+			}
+
+			int realSurfaces = doc.KnownChunks.Msur.Count(s => s.Ck24 != 0 && s.IndexCount >= 3);
+			if (matchedPlacements > 0)
+			{
+				tileResults.Add(new Dictionary<string, object?>
+				{
+					["tileX"] = tileX,
+					["tileY"] = tileY,
+					["pm4File"] = Path.GetFileName(pm4Path),
+					["adtFile"] = Path.GetFileName(adtPath),
+					["realSurfaces"] = realSurfaces,
+					["genTotalSurfaces"] = genTotalSurfaces,
+					["genTotalVerts"] = genTotalVerts,
+					["matchedPlacements"] = matchedPlacements,
+					["totalPlacements"] = placements.WorldModelPlacements.Count,
+					["surfacesMatchPct"] = realSurfaces > 0
+						? Math.Round((double)Math.Min(genTotalSurfaces, realSurfaces) / Math.Max(genTotalSurfaces, realSurfaces) * 100, 2)
+						: 0.0,
+					["placements"] = placementResults,
+				});
+			}
+
+			processed++;
+			if (processed % 10 == 0 || processed == 1)
+				Console.Error.WriteLine($"  [{processed}] tile ({tileX},{tileY}) realSurfaces={realSurfaces} genSurfaces={genTotalSurfaces} matched={matchedPlacements}");
+		}
+		catch (Exception ex)
+		{
+			failed++;
+		}
+	}
+
+	sw.Stop();
+
+	double avgMatch = tileResults.Count > 0 ? tileResults.Average(static t => (double)t["surfacesMatchPct"]!) : 0;
+	int totalReal = tileResults.Sum(static t => (int)t["realSurfaces"]!);
+	int totalGen = tileResults.Sum(static t => (int)t["genTotalSurfaces"]!);
+	int totalPlacements = tileResults.Sum(static t => (int)t["matchedPlacements"]!);
+
+	Console.WriteLine($"\n=== Generator Validation Complete ===");
+	Console.WriteLine($"Tiles processed: {processed}");
+	Console.WriteLine($"Tiles with matches: {tileResults.Count}");
+	Console.WriteLine($"Skipped (0-byte PM4): {skippedNoData}");
+	Console.WriteLine($"Skipped (no ADT): {skippedNoAdt}");
+	Console.WriteLine($"Skipped (no placements): {skippedNoPlacements}");
+	Console.WriteLine($"Failed: {failed}");
+	Console.WriteLine($"Total real surfaces across all tiles: {totalReal}");
+	Console.WriteLine($"Total generated surfaces: {totalGen}");
+	Console.WriteLine($"Total matched WMO placements: {totalPlacements}");
+	Console.WriteLine($"Average surface count match: {avgMatch:F1}%");
+	Console.WriteLine($"Overall surface ratio (gen/real): {(totalReal > 0 ? (double)totalGen / totalReal : 0):F3}");
+	Console.WriteLine($"Time: {sw.Elapsed.TotalSeconds:F1}s");
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? dir = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(new Dictionary<string, object?>
+		{
+			["summary"] = new Dictionary<string, object>
+			{
+				["tilesProcessed"] = processed,
+				["tilesWithMatches"] = tileResults.Count,
+				["totalRealSurfaces"] = totalReal,
+				["totalGenSurfaces"] = totalGen,
+				["totalMatchedPlacements"] = totalPlacements,
+				["avgMatchPct"] = Math.Round(avgMatch, 1),
+				["overallRatio"] = Math.Round(totalReal > 0 ? (double)totalGen / totalReal : 0, 3),
+				["timeSeconds"] = Math.Round(sw.Elapsed.TotalSeconds, 1),
+			},
+			["tiles"] = tileResults,
+		}, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+	}
+}
+
+static void RunPm4GenerateFromWmo(string[] args)
+{
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	string? wmoPath = GetOption(args, "--wmo-path", "-w") ?? GetOption(args, "--wmo-root");
+	string? positionText = GetOption(args, "--position", "-p");
+	string? rotationText = GetOption(args, "--rotation", "-r");
+	string? tileText = GetOption(args, "--tile", "-t");
+	string? archiveRoot = GetOption(args, "--archive-root", "-a");
+	string? output = GetOption(args, "--output", "-o");
+
+	if (string.IsNullOrWhiteSpace(wmoPath))
+	{
+		Console.Error.WriteLine("Error: --wmo-path <virtual-wmo-path> is required (e.g. World/wmo/northrend/wintergrasp/buildings/guardtower/guardtower_intact.wmo).");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(positionText))
+	{
+		Console.Error.WriteLine("Error: --position <x,y,z> is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root <dir> is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!TryParseVector3(positionText, out Vector3 position))
+	{
+		Console.Error.WriteLine("Error: --position must be three comma-separated floats <x,y,z>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Vector3 rotation = Vector3.Zero;
+	if (!string.IsNullOrWhiteSpace(rotationText) && !TryParseVector3(rotationText, out rotation))
+	{
+		Console.Error.WriteLine("Error: --rotation must be three comma-separated floats <rx,ry,rz>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	int tileX = 0, tileY = 0;
+	if (!string.IsNullOrWhiteSpace(tileText))
+	{
+		string[] parts = tileText.Split(',', 'x');
+		if (parts.Length != 2 || !int.TryParse(parts[0], out tileX) || !int.TryParse(parts[1], out tileY))
+		{
+			Console.Error.WriteLine("Error: --tile must be <x,y>.");
+			Environment.ExitCode = 1;
+			return;
+		}
+	}
+
+	try
+	{
+		string normalizedPath = wmoPath.Replace('\\', '/').Trim().TrimStart('/').ToLowerInvariant();
+		byte[] wmoBytes = ArchiveVirtualFileReader.ReadVirtualFile(
+			normalizedPath, [archiveRoot], archiveBootstrapOptions);
+
+		Func<string, byte[]?> assetReader = virtualPath =>
+		{
+			try
+			{
+				return ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], archiveBootstrapOptions);
+			}
+			catch { return null; }
+		};
+
+		WmoRenderDocument renderDoc = WmoRenderDocumentReader.Read(
+			new MemoryStream(wmoBytes, writable: false), normalizedPath, assetReader);
+
+		List<Vector3> allVerts = new();
+		List<ushort> allIndices = new();
+		int vertOffset = 0;
+
+		foreach (WmoEmbeddedGroupMeshDetail group in renderDoc.Groups)
+		{
+			foreach (Vector3 v in group.Mesh.Vertices)
+				allVerts.Add(v);
+
+			foreach (ushort idx in group.Mesh.Indices)
+				allIndices.Add((ushort)(idx + vertOffset));
+
+			vertOffset += group.Mesh.Vertices.Count;
+		}
+
+		if (allVerts.Count == 0 || allIndices.Count < 3)
+		{
+			Console.Error.WriteLine("Error: WMO has no collision geometry.");
+			Environment.ExitCode = 1;
+			return;
+		}
+
+		Pm4GenerationData genData = Pm4Generator.GenerateFromCollisionMesh(
+			allVerts, allIndices, position, rotation, scale: 1f,
+			ck24Type: 0x43, ck24ObjectId: 1, regionId: 0);
+
+		byte[] pm4Bytes = Pm4BinaryWriter.Write(genData);
+
+		if (!string.IsNullOrWhiteSpace(output))
+		{
+			Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
+			File.WriteAllBytes(output, pm4Bytes);
+			Console.WriteLine($"Wrote PM4 ({pm4Bytes.Length} bytes) to {output}");
+		}
+		else
+		{
+			string defaultName = Path.GetFileNameWithoutExtension(wmoPath) + ".pm4";
+			string defaultPath = Path.Combine(Directory.GetCurrentDirectory(), defaultName);
+			File.WriteAllBytes(defaultPath, pm4Bytes);
+			Console.WriteLine($"Wrote PM4 ({pm4Bytes.Length} bytes) to {defaultPath}");
+		}
+
+		Console.WriteLine($"  Vertices: {genData.Msvt.Count}");
+		Console.WriteLine($"  Indices: {genData.Msvi.Count}");
+		Console.WriteLine($"  Surfaces: {genData.Msur.Count}");
+	}
+	catch (Exception ex) when (ex is not NullReferenceException)
+	{
+		Console.Error.WriteLine($"Error: {ex.Message}");
+		Environment.ExitCode = 1;
+	}
+}
+
+static void RunPm4TestGenerator()
+{
+	var verts = new List<Vector3>
+	{
+		new(100, 100, 0),
+		new(200, 100, 10),
+		new(150, 200, 20),
+		new(100, 100, 30),
+	};
+	var indices = new List<ushort> { 0, 1, 2, 0, 2, 3 };
+
+	var genData = Pm4Generator.GenerateFromCollisionMesh(
+		verts, indices,
+		placementPosition: Vector3.Zero,
+		placementRotationDegrees: Vector3.Zero,
+		scale: 1f,
+		ck24Type: 0x43, ck24ObjectId: 1,
+		regionId: 0);
+
+	byte[] pm4Bytes = Pm4BinaryWriter.Write(genData);
+	Console.WriteLine($"Generated PM4: {pm4Bytes.Length} bytes");
+	Console.WriteLine($"  Vertices: {genData.Msvt.Count}");
+	Console.WriteLine($"  Indices: {genData.Msvi.Count}");
+	Console.WriteLine($"  Surfaces: {genData.Msur.Count}");
+
+	var doc = Pm4ResearchReader.Read(pm4Bytes, "generated.pm4");
+	Console.WriteLine($"\nRead back: version={doc.Version}, chunks={doc.Chunks.Count}");
+	Console.WriteLine($"  MSVT: {doc.KnownChunks.Msvt.Count} vertices");
+	Console.WriteLine($"  MSVI: {doc.KnownChunks.Msvi.Count} indices");
+	Console.WriteLine($"  MSUR: {doc.KnownChunks.Msur.Count} surfaces");
+	Console.WriteLine($"  MSCN: {doc.KnownChunks.Mscn.Count} points");
+	Console.WriteLine($"  MPRL: {doc.KnownChunks.Mprl.Count} entries");
+	Console.WriteLine($"  MSLK: {doc.KnownChunks.Mslk.Count} links");
+
+	if (doc.KnownChunks.Msur.Count > 0)
+	{
+		var first = doc.KnownChunks.Msur[0];
+		Console.WriteLine($"\nFirst MSUR: Ck24=0x{first.Ck24:X6} Type=0x{first.Ck24Type:X2} ObjID={first.Ck24ObjectId} IndexCount={first.IndexCount}");
+	}
+
+	if (doc.Diagnostics.Count > 0)
+	{
+		Console.WriteLine($"\nDiagnostics ({doc.Diagnostics.Count}):");
+		foreach (var d in doc.Diagnostics)
+			Console.WriteLine($"  {d}");
+	}
+	else
+	{
+		Console.WriteLine("\nNo diagnostics — clean round-trip!");
+	}
+}
+
+static bool TryParseVector3(string text, out Vector3 result)
+{
+	result = Vector3.Zero;
+	if (string.IsNullOrWhiteSpace(text))
+		return false;
+
+	string[] parts = text.Split(',');
+	if (parts.Length != 3)
+		return false;
+
+	if (!float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float x) ||
+		!float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float y) ||
+		!float.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float z))
+		return false;
+
+	result = new Vector3(x, y, z);
+	return true;
+}
+
+static int? TryParseInt(string? text)
+{
+	if (string.IsNullOrWhiteSpace(text)) return null;
+	if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
+		return value;
+	return null;
 }
 
 static void RunPm4SynthesizePlacements(string[] args)
@@ -3157,6 +4201,140 @@ static void RunWmoInspect(string[] args)
 	Environment.ExitCode = 1;
 }
 
+static void RunPm4AnalyzeSimplification(string[] args)
+{
+	string? pm4Path = GetOption(args, "--pm4", "-p") ?? GetFirstPositionalArgument(args);
+	string? adtPath = GetOption(args, "--adt", "-a");
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? output = GetOption(args, "--output", "-o");
+	bool includeFullGeometry = HasOption(args, "--full-geometry");
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	if (string.IsNullOrWhiteSpace(pm4Path) || !File.Exists(pm4Path))
+	{
+		Console.Error.WriteLine("Error: --pm4 <file.pm4> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+	if (string.IsNullOrWhiteSpace(adtPath) || !File.Exists(adtPath))
+	{
+		Console.Error.WriteLine("Error: --adt <file.adt> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+	if (string.IsNullOrWhiteSpace(archiveRoot) || !Directory.Exists(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root <dir> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	try
+	{
+		Pm4CorrelateModelsResult correlation = Pm4CorrelateModelsSupport.Correlate(
+			pm4Path, adtPath, archiveRoot, archiveBootstrapOptions, null, null);
+
+		Pm4ResearchDocument document = Pm4ResearchReader.ReadFile(pm4Path);
+		List<Dictionary<string, object?>> comparisons = [];
+
+		var strongCorrelations = correlation.Correlations
+			.Where(c => c.WowBoundsOverlap > 0.8 && c.AssetKind == "wmo")
+			.ToList();
+
+		Console.WriteLine($"Strong correlations (WoW overlap > 0.8): {strongCorrelations.Count}");
+
+		var wmoPlacements = AdtPlacementReader.Read(adtPath).WorldModelPlacements;
+
+		foreach (Pm4CorrelationEntry corr in strongCorrelations)
+		{
+			var placement = wmoPlacements.FirstOrDefault(p => p.UniqueId == corr.UniqueId);
+			if (placement is null) continue;
+
+			Pm4Ck24GeometryExport pm4Geo = Pm4CorrelateModelsSupport.ExportCk24GroupGeometry(
+				document, corr.Ck24);
+			Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int tileX, out int tileY);
+			WmoMeshInPm4Space wmoGeo = Pm4CorrelateModelsSupport.ReadWmoInPm4Space(
+				placement, archiveRoot, archiveBootstrapOptions, tileX, tileY);
+
+			double vertRatio = pm4Geo.VertexCount > 0
+				? (double)wmoGeo.WmoPm4Verts.Count / pm4Geo.VertexCount : 0;
+			double faceRatio = pm4Geo.SurfaceCount > 0
+				? (double)wmoGeo.FaceMaterials.Count / pm4Geo.SurfaceCount : 0;
+
+			var indexCountDist = pm4Geo.Pm4IndexCounts
+				.GroupBy(static c => c)
+				.Select(static g => new { indexCount = (int)g.Key, count = g.Count() })
+				.OrderByDescending(static x => x.count)
+				.ToList();
+
+			Dictionary<string, object?> entry = new()
+			{
+				["ck24"] = $"0x{corr.Ck24:X6}",
+				["ck24Type"] = $"0x{corr.Ck24Type:X2}",
+				["ck24ObjectId"] = (int)(corr.Ck24 & 0xFFFF),
+				["uniqueId"] = corr.UniqueId,
+				["modelPath"] = corr.ModelPath,
+				["wowOverlap"] = corr.WowBoundsOverlap,
+				["pm4Surfaces"] = pm4Geo.SurfaceCount,
+				["pm4Vertices"] = pm4Geo.VertexCount,
+				["pm4IndexCountDist"] = indexCountDist,
+				["wmoFaces"] = wmoGeo.FaceMaterials.Count,
+				["wmoVertices"] = wmoGeo.WmoPm4Verts.Count,
+				["wmoGroups"] = wmoGeo.GroupCount,
+				["vertRatio"] = Math.Round(vertRatio, 3),
+				["faceRatio"] = Math.Round(faceRatio, 3),
+			};
+
+			if (includeFullGeometry)
+			{
+				entry["pm4Vertices"] = pm4Geo.Pm4Vertices.Select(v => new[] { v.X, v.Y, v.Z }).ToList();
+				entry["pm4Indices"] = pm4Geo.Pm4CornerIndices.ToList();
+				entry["wmoPm4Verts"] = wmoGeo.WmoPm4Verts.Select(v => new[] { v.X, v.Y, v.Z }).ToList();
+				entry["wmoIndices"] = wmoGeo.Indices.ToList();
+				entry["wmoFaceFlags"] = wmoGeo.FaceMaterials.Select(f => new { f.FaceIndex, f.Flags, f.MaterialId }).ToList();
+			}
+
+			comparisons.Add(entry);
+		}
+
+		Dictionary<string, object?> summary = new()
+		{
+			["pm4File"] = Path.GetFileName(pm4Path),
+			["adtFile"] = Path.GetFileName(adtPath),
+			["tile"] = new { x = correlation.TileX, y = correlation.TileY },
+			["totalCk24Groups"] = correlation.Ck24Groups.Count,
+			["totalPlacements"] = correlation.PlacementSummaries.Count,
+			["warnings"] = correlation.Warnings.ToList(),
+			["comparisons"] = comparisons,
+		};
+
+		string json = JsonSerializer.Serialize(summary, new JsonSerializerOptions
+		{
+			WriteIndented = true,
+			IncludeFields = true,
+		});
+
+		if (!string.IsNullOrWhiteSpace(output))
+		{
+			string outputPath = Path.GetFullPath(output);
+			string? dir = Path.GetDirectoryName(outputPath);
+			if (!string.IsNullOrWhiteSpace(dir))
+				Directory.CreateDirectory(dir);
+			File.WriteAllText(outputPath, json);
+			Console.WriteLine($"Wrote {outputPath}");
+			return;
+		}
+
+		Console.WriteLine(json);
+	}
+	catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or DirectoryNotFoundException or FileNotFoundException)
+	{
+		Console.Error.WriteLine($"Error: {ex.Message}");
+		Environment.ExitCode = 1;
+	}
+}
+
 static void RunPm4Inspect(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
@@ -3420,12 +4598,12 @@ static bool TryParseUInt32Flexible(string value, out uint parsed)
 	return uint.TryParse(value, out parsed);
 }
 
-static string? GetOption(string[] args, string longName, string shortName)
+static string? GetOption(string[] args, string longName, string? shortName = null)
 {
 	for (int index = 0; index < args.Length - 1; index++)
 	{
 		if (string.Equals(args[index], longName, StringComparison.OrdinalIgnoreCase)
-			|| string.Equals(args[index], shortName, StringComparison.OrdinalIgnoreCase))
+			|| (shortName is not null && string.Equals(args[index], shortName, StringComparison.OrdinalIgnoreCase)))
 		{
 			return args[index + 1];
 		}
@@ -5517,9 +6695,14 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 cross-tile --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 bond-stats --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
-	Console.WriteLine("  pm4 correlate-models --input <file.pm4> --placements <file.adt> --archive-root <dir> [--output <report.json>]");
+	Console.WriteLine("  pm4 correlate-models --input <file.pm4> --placements <file.adt> --archive-root <dir> [--output <report.json>] [--pm4-vpath <archive-path>] [--adt-vpath <archive-path>]");
+	Console.WriteLine("  pm4 sweep-correlate --map-dir <directory> --archive-root <dir> [--output <summary.csv>] [--limit <n>]");
 	Console.WriteLine("  pm4 fingerprint-scan --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 identify-models --fingerprints <fingerprints.json> --archive-root <staged client dir> [--min-score <0.0-1.0>] [--max-matches <n>] [--output <report.json>]");
+	Console.WriteLine("  pm4 tile-reports --fingerprints <fingerprints.json> --identity <identity.json> --pm4-dir <directory> [--output-dir <dir>] [--tiles <x_y[,x_y...]>]");
+	Console.WriteLine("  pm4 generate-from-wmo --wmo-root <file.wmo> --position <x,y,z> --rotation <rx,ry,rz> --tile <x,y> --archive-root <dir> [--output <out.pm4>]");
+	Console.WriteLine("  pm4 build-wmo-fingerprint-db --archive-root <staged client dir> [--listfile <listfile.txt>] [--limit <n>] [--output <db.json>]");
+	Console.WriteLine("  pm4 extract-pm4-fingerprints --input <directory> [--output <fp.json>] [--tiles <x_y[,x_y...]>]");
 }
 
 static void RunPm4CrossTile(string[] args)
@@ -5816,6 +6999,521 @@ static void RunPm4IdentifyModels(string[] args)
 		File.WriteAllText(outputPath, outputJson);
 		Console.WriteLine($"\nWrote {matches.Count} matches to {outputPath}");
 	}
+}
+
+static string? GetJsonString(Dictionary<string, JsonElement> dict, string key)
+{
+	foreach (var kv in dict)
+	{
+		if (string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase) && kv.Value.ValueKind == JsonValueKind.String)
+			return kv.Value.GetString();
+	}
+	return null;
+}
+
+static int GetJsonInt(Dictionary<string, JsonElement> dict, string key, int defaultValue = 0)
+{
+	foreach (var kv in dict)
+	{
+		if (string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase) && kv.Value.ValueKind == JsonValueKind.Number)
+			return kv.Value.GetInt32();
+	}
+	return defaultValue;
+}
+
+static double GetJsonDouble(Dictionary<string, JsonElement> dict, string key, double defaultValue = 0)
+{
+	foreach (var kv in dict)
+	{
+		if (string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase) && kv.Value.ValueKind == JsonValueKind.Number)
+			return kv.Value.GetDouble();
+	}
+	return defaultValue;
+}
+
+static void RunPm4TileReports(string[] args)
+{
+	string? fingerprintsPath = GetOption(args, "--fingerprints", "-f");
+	string? identityPath = GetOption(args, "--identity", "-d");
+	string? pm4Dir = GetOption(args, "--pm4-dir", "-p");
+	string? outputDir = GetOption(args, "--output-dir", "-o");
+	string? tilesFilter = GetOption(args, "--tiles", "-t");
+
+	if (string.IsNullOrWhiteSpace(fingerprintsPath) || !File.Exists(fingerprintsPath))
+	{
+		Console.Error.WriteLine("Error: --fingerprints <path> is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(identityPath) || !File.Exists(identityPath))
+	{
+		Console.Error.WriteLine("Error: --identity <path> is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(pm4Dir) || !Directory.Exists(pm4Dir))
+	{
+		Console.Error.WriteLine("Error: --pm4-dir <directory> is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	outputDir ??= Path.Combine(Directory.GetCurrentDirectory(), "pm4-tile-reports");
+	Directory.CreateDirectory(outputDir);
+
+	HashSet<string>? tileFilter = null;
+	if (!string.IsNullOrWhiteSpace(tilesFilter))
+	{
+		tileFilter = new HashSet<string>(tilesFilter.Split(',', StringSplitOptions.RemoveEmptyEntries), StringComparer.OrdinalIgnoreCase);
+		Console.WriteLine($"Filtering to {tileFilter.Count} tiles: {string.Join(", ", tileFilter.Take(10))}{(tileFilter.Count > 10 ? "..." : "")}");
+	}
+
+	Console.WriteLine($"Loading fingerprints from: {Path.GetFullPath(fingerprintsPath)}");
+	string fingerprintsJson = File.ReadAllText(fingerprintsPath);
+	List<Dictionary<string, JsonElement>>? rawFingerprints = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(fingerprintsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+	if (rawFingerprints is null || rawFingerprints.Count == 0)
+	{
+		Console.Error.WriteLine("Error: fingerprint file contains no entries.");
+		Environment.ExitCode = 1;
+		return;
+	}
+	Console.WriteLine($"Loaded {rawFingerprints.Count} fingerprint entries.");
+
+	Console.WriteLine($"Loading identity matches from: {Path.GetFullPath(identityPath)}");
+	string identityJson = File.ReadAllText(identityPath);
+	using JsonDocument identityDoc = JsonDocument.Parse(identityJson);
+	List<Dictionary<string, JsonElement>>? rawIdentity = identityDoc.RootElement.TryGetProperty("Matches", out JsonElement matchesElem) ? matchesElem.EnumerateArray().Select(e => e.EnumerateObject().ToDictionary(p => p.Name, p => p.Value)).ToList() : null;
+	if (rawIdentity is null || rawIdentity.Count == 0)
+	{
+		Console.Error.WriteLine("Warning: identity file contains no matches. Reports will lack WMO identifications.");
+		rawIdentity = new List<Dictionary<string, JsonElement>>();
+	}
+	Console.WriteLine($"Loaded {rawIdentity.Count} identity matches.");
+
+	Dictionary<string, List<Dictionary<string, JsonElement>>> fingerprintsByTile = new(StringComparer.OrdinalIgnoreCase);
+	foreach (Dictionary<string, JsonElement> entry in rawFingerprints)
+	{
+		string? tile = GetJsonString(entry, "Tile");
+		if (tile is null) continue;
+		if (tileFilter is not null && !tileFilter.Contains(tile))
+			continue;
+		if (!fingerprintsByTile.ContainsKey(tile))
+			fingerprintsByTile[tile] = new List<Dictionary<string, JsonElement>>();
+		fingerprintsByTile[tile].Add(entry);
+	}
+
+	Console.WriteLine($"Generating reports for {fingerprintsByTile.Count} tiles...");
+
+	// Build identity lookup using fingerprint as key (case-insensitive)
+	Dictionary<string, List<Dictionary<string, JsonElement>>> identityByFingerprint = new(StringComparer.OrdinalIgnoreCase);
+	foreach (Dictionary<string, JsonElement> entry in rawIdentity)
+	{
+		string? fp = GetJsonString(entry, "Fingerprint");
+		if (fp is null) continue;
+		if (!identityByFingerprint.ContainsKey(fp))
+			identityByFingerprint[fp] = new List<Dictionary<string, JsonElement>>();
+		identityByFingerprint[fp].Add(entry);
+	}
+
+	int reportCount = 0;
+	foreach (KeyValuePair<string, List<Dictionary<string, JsonElement>>> tileEntry in fingerprintsByTile.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+	{
+		string tile = tileEntry.Key;
+		List<Dictionary<string, JsonElement>> entries = tileEntry.Value;
+
+		int totalCk24 = entries.Count;
+		int matched = entries.Count(e =>
+		{
+			int s = GetJsonInt(e, "Surfaces"), i = GetJsonInt(e, "Indices"), v = GetJsonInt(e, "Vertices");
+			string t = GetJsonString(e, "Type") ?? "0";
+			string fp = $"{s}_{i}_{v}_{t.TrimStart("0x".AsSpan())}";
+			return identityByFingerprint.ContainsKey(fp);
+		});
+
+		Dictionary<string, int> typeCounts = new();
+		foreach (Dictionary<string, JsonElement> e in entries)
+		{
+			string? typeStr = GetJsonString(e, "Type");
+			if (typeStr is not null)
+			{
+				typeCounts[typeStr] = typeCounts.GetValueOrDefault(typeStr, 0) + 1;
+			}
+		}
+
+		List<(string Fingerprint, string Type, int Surfaces, int Indices, int Vertices, string? WmoPath, double Score)> unmatchedGroups = new();
+		List<(string Fingerprint, string Type, int Surfaces, int Indices, int Vertices, string WmoPath, double Score)> matchedGroups = new();
+
+		foreach (Dictionary<string, JsonElement> e in entries)
+		{
+			int surf = GetJsonInt(e, "Surfaces");
+			int idx = GetJsonInt(e, "Indices");
+			int vert = GetJsonInt(e, "Vertices");
+			string type = GetJsonString(e, "Type") ?? "?";
+			string fp = $"{surf}_{idx}_{vert}_{type.TrimStart("0x".AsSpan())}";
+
+			if (identityByFingerprint.TryGetValue(fp, out List<Dictionary<string, JsonElement>>? matches) && matches.Count > 0)
+			{
+				string wmoPath = GetJsonString(matches[0], "WmoPath") ?? "unknown";
+				double score = GetJsonDouble(matches[0], "Score");
+				matchedGroups.Add((fp, type, surf, idx, vert, wmoPath, score));
+			}
+			else
+			{
+				unmatchedGroups.Add((fp, type, surf, idx, vert, null, 0));
+			}
+		}
+
+		string reportPath = Path.Combine(outputDir, $"tile_{tile}.md");
+		using (StreamWriter sw = new StreamWriter(reportPath))
+		{
+			sw.WriteLine($"# PM4 Tile Report: {tile}");
+			sw.WriteLine();
+			sw.WriteLine($"- **Total CK24 groups**: {totalCk24}");
+			sw.WriteLine($"- **Matched to WMO**: {matched} ({(totalCk24 > 0 ? matched * 100.0 / totalCk24 : 0):F1}%)");
+			sw.WriteLine($"- **Unmatched**: {totalCk24 - matched}");
+			sw.WriteLine();
+
+			sw.WriteLine("## Type Distribution");
+			sw.WriteLine();
+			sw.WriteLine("| Type | Count |");
+			sw.WriteLine("|------|-------|");
+			foreach (KeyValuePair<string, int> tc in typeCounts.OrderByDescending(k => k.Value))
+				sw.WriteLine($"| {tc.Key} | {tc.Value} |");
+			sw.WriteLine();
+
+			if (matchedGroups.Count > 0)
+			{
+				sw.WriteLine("## Matched Models (WMO)");
+				sw.WriteLine();
+				sw.WriteLine("| Fingerprint | Type | S/I/V | WMO Path | Score |");
+				sw.WriteLine("|-------------|------|-------|----------|-------|");
+				foreach (var m in matchedGroups.OrderByDescending(m => m.Score))
+					sw.WriteLine($"| {m.Fingerprint} | {m.Type} | {m.Surfaces}/{m.Indices}/{m.Vertices} | {m.WmoPath} | {m.Score:F3} |");
+				sw.WriteLine();
+			}
+
+			if (unmatchedGroups.Count > 0)
+			{
+				sw.WriteLine("## Unmatched Groups");
+				sw.WriteLine();
+				sw.WriteLine("| Fingerprint | Type | S/I/V |");
+				sw.WriteLine("|-------------|------|-------|");
+				foreach (var u in unmatchedGroups.OrderByDescending(u => u.Surfaces))
+					sw.WriteLine($"| {u.Fingerprint} | {u.Type} | {u.Surfaces}/{u.Indices}/{u.Vertices} |");
+				sw.WriteLine();
+			}
+
+			sw.WriteLine("---");
+			sw.WriteLine($"*Generated from pm4-fingerprints-full.json + pm4-model-identity-full.json*");
+		}
+
+		reportCount++;
+		if (reportCount % 20 == 0)
+			Console.WriteLine($"  Generated {reportCount} reports...");
+	}
+
+	Console.WriteLine($"\nWrote {reportCount} tile reports to: {Path.GetFullPath(outputDir)}");
+}
+
+static void RunPm4BuildWmoFingerprintDb(string[] args)
+{
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? listfilePath = GetOption(args, "--listfile", "-l");
+	string? limitText = GetOption(args, "--limit", "-n");
+	string? output = GetOption(args, "--output", "-o");
+
+	if (string.IsNullOrWhiteSpace(archiveRoot) || !Directory.Exists(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root <staged client dir> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions bootstrapOptions))
+		return;
+
+	int limit = 0;
+	if (!string.IsNullOrWhiteSpace(limitText))
+		int.TryParse(limitText, out limit);
+
+	Console.WriteLine($"Building WMO fingerprint database from: {Path.GetFullPath(archiveRoot)}");
+
+	List<string> wmoPaths = EnumerateWmoRoots(archiveRoot, bootstrapOptions, listfilePath);
+
+	if (limit > 0 && wmoPaths.Count > limit)
+	{
+		Console.WriteLine($"Limiting to first {limit} WMOs (of {wmoPaths.Count} found).");
+		wmoPaths = wmoPaths.Take(limit).ToList();
+	}
+
+	Console.WriteLine($"Found {wmoPaths.Count} WMO root files.");
+	if (wmoPaths.Count == 0)
+	{
+		Console.Error.WriteLine("Error: no WMO root files found. Try --listfile <path> for listfile-based enumeration.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4FingerprintDatabase database = Pm4FingerprintBuildSupport.BuildDatabase(
+		archiveRoot,
+		bootstrapOptions,
+		wmoPaths,
+		progress: static msg => Console.WriteLine(msg));
+
+	Console.WriteLine($"\nDatabase built: {database.WmoCount} WMO roots, {database.Records.Count} total fingerprints (root + group).");
+
+	int rootCount = database.Records.Count(static r => r.SourceLabel == "wmo-root-merged");
+	int groupCount = database.Records.Count(static r => r.SourceLabel.StartsWith("wmo-group-"));
+	Console.WriteLine($"  Root fingerprints: {rootCount}");
+	Console.WriteLine($"  Group fingerprints: {groupCount}");
+
+	IReadOnlyList<Pm4FingerprintRecord> sortedByDim = database.Records
+		.Where(static r => r.SortedDim2 > 0)
+		.OrderByDescending(static r => r.SortedDim2)
+		.Take(10)
+		.ToList();
+	Console.WriteLine("\nTop 10 fingerprints by largest dimension:");
+	Console.WriteLine($"  {"Path",-50} {"Dims",-18} {"Hull",-6} {"Area",-10}");
+	foreach (Pm4FingerprintRecord r in sortedByDim)
+	{
+		string shortPath = r.AssetPath.Length > 48 ? "..." + r.AssetPath[^45..] : r.AssetPath;
+		Console.WriteLine($"  {shortPath,-50} {r.SortedDim0,5:F0}x{r.SortedDim1,5:F0}x{r.SortedDim2,5:F0}  {r.NormalizedFootprintHull.Count,-6} {r.FootprintArea,8:F0}");
+	}
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? dir = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(dir))
+			Directory.CreateDirectory(dir);
+
+		string json = JsonSerializer.Serialize(database, new JsonSerializerOptions { WriteIndented = true });
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"\nWrote fingerprint database to {outputPath}");
+	}
+}
+
+static void RunPm4ExtractPm4Fingerprints(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? output = GetOption(args, "--output", "-o");
+	string? tilesFilter = GetOption(args, "--tiles", "-t");
+
+	if (string.IsNullOrWhiteSpace(input) || !Directory.Exists(input))
+	{
+		Console.Error.WriteLine("Error: --input <directory> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	HashSet<string>? filterTiles = null;
+	if (!string.IsNullOrWhiteSpace(tilesFilter))
+		filterTiles = new HashSet<string>(tilesFilter.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+	string resolvedDirectory = Pm4CoordinateService.ResolveMapDirectory(input);
+	string[] pm4Files = Directory.GetFiles(resolvedDirectory, "*.pm4", SearchOption.TopDirectoryOnly);
+	Console.WriteLine($"Scanning {pm4Files.Length} PM4 files...");
+
+	List<Pm4FingerprintRecord> fingerprints = [];
+	int processed = 0;
+	int groupsFound = 0;
+	int skipped = 0;
+
+	foreach (string pm4File in pm4Files.OrderBy(Path.GetFileName))
+	{
+		if (!Pm4CoordinateService.TryParseTileCoordinates(pm4File, out int tileX, out int tileY))
+		{
+			skipped++;
+			continue;
+		}
+
+		if (filterTiles is not null && !filterTiles.Contains($"{tileX}_{tileY}"))
+			continue;
+
+		try
+		{
+			Pm4ResearchDocument doc = Pm4ResearchReader.ReadFile(pm4File);
+			IReadOnlyList<Pm4MsurEntry> msur = doc.KnownChunks.Msur;
+			IReadOnlyList<uint> msvi = doc.KnownChunks.Msvi;
+			IReadOnlyList<Vector3> msvt = doc.KnownChunks.Msvt;
+
+			var groups = msur
+				.Where(static s => s.Ck24 != 0 && s.IndexCount >= 3)
+				.GroupBy(static s => s.Ck24)
+				.OrderByDescending(static g => g.Sum(static s => s.IndexCount));
+
+			foreach (IGrouping<uint, Pm4MsurEntry> group in groups)
+			{
+				List<Pm4MsurEntry> surfaces = group.ToList();
+				HashSet<int> vertexIndices = [];
+				foreach (Pm4MsurEntry surface in surfaces)
+				{
+					int first = checked((int)surface.MsviFirstIndex);
+					int end = Math.Min(first + surface.IndexCount, msvi.Count);
+					for (int i = first; i < end; i++)
+					{
+						int vi = checked((int)msvi[i]);
+						if ((uint)vi < (uint)msvt.Count)
+							vertexIndices.Add(vi);
+					}
+				}
+
+				if (vertexIndices.Count < 3)
+					continue;
+
+				List<Vector3> verts = new(vertexIndices.Count);
+				List<int> indices = [];
+				Dictionary<int, int> globalToLocal = [];
+
+				foreach (int vi in vertexIndices.OrderBy(static i => i))
+				{
+					globalToLocal[vi] = verts.Count;
+					verts.Add(msvt[vi]);
+				}
+
+				foreach (Pm4MsurEntry surface in surfaces)
+				{
+					int first = checked((int)surface.MsviFirstIndex);
+					int end = Math.Min(first + surface.IndexCount, msvi.Count);
+					for (int i = first; i < end; i++)
+					{
+						int vi = checked((int)msvi[i]);
+						if (globalToLocal.TryGetValue(vi, out int localIdx))
+							indices.Add(localIdx);
+					}
+				}
+
+				Dictionary<byte, int> typeFlags = [];
+				foreach (Pm4MsurEntry s in surfaces)
+				{
+					if (typeFlags.ContainsKey(s.GroupKey))
+						typeFlags[s.GroupKey]++;
+					else
+						typeFlags[s.GroupKey] = 1;
+				}
+
+				byte ck24Type = surfaces[0].Ck24Type;
+				uint ck24 = group.Key;
+				string assetId = $"tile{tileX}_{tileY}_ck24_0x{ck24:X6}";
+				string assetPath = Path.GetFileName(pm4File);
+
+				Pm4FingerprintRecord? fp = Pm4FingerprintExtractor.ExtractFromGeometry(
+					verts,
+					indices,
+					surfaceCount: surfaces.Count,
+					ck24Type: ck24Type,
+					typeFlagsProfile: typeFlags,
+					assetId: assetId,
+					assetPath: assetPath,
+					assetKind: ck24Type switch
+					{
+						0x42 or 0x43 or 0xC0 or 0xC1 or 0xC2 or 0xC3 => "wmo",
+						0x40 or 0x41 => "m2",
+						_ => "unknown",
+					},
+					groupCount: 1,
+					sourceLabel: $"pm4-tile-{tileX}_{tileY}");
+
+				if (fp is not null)
+				{
+					fingerprints.Add(fp);
+					groupsFound++;
+				}
+			}
+
+			processed++;
+			if (processed % 100 == 0)
+				Console.WriteLine($"  Processed {processed}/{pm4Files.Length}...");
+		}
+		catch (Exception ex)
+		{
+			Console.Error.WriteLine($"Error reading {Path.GetFileName(pm4File)}: {ex.Message}");
+			skipped++;
+		}
+	}
+
+	Console.WriteLine($"\nProcessed {processed} PM4 files, {groupsFound} CK24 group fingerprints extracted, {skipped} skipped.");
+
+	var byType = fingerprints.GroupBy(static f => f.Ck24Type)
+		.Select(static g => (Type: g.Key, Count: g.Count()))
+		.OrderByDescending(static x => x.Count)
+		.ToList();
+	Console.WriteLine("\nFingerprints by CK24 type:");
+	foreach (var t in byType)
+		Console.WriteLine($"  0x{t.Type:X2}: {t.Count}");
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? dir = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(dir))
+			Directory.CreateDirectory(dir);
+
+		var outputModel = new
+		{
+			BuildDate = DateTime.UtcNow.ToString("o"),
+			SourceDirectory = resolvedDirectory,
+			TotalFiles = pm4Files.Length,
+			ProcessedFiles = processed,
+			TotalFingerprints = fingerprints.Count,
+			Fingerprints = fingerprints,
+		};
+
+		string json = JsonSerializer.Serialize(outputModel, new JsonSerializerOptions { WriteIndented = true });
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"\nWrote {fingerprints.Count} fingerprints to {outputPath}");
+	}
+}
+
+static List<string> EnumerateWmoRoots(
+	string archiveRoot,
+	ArchiveCatalogBootstrapOptions bootstrapOptions,
+	string? listfilePath)
+{
+	HashSet<string> wmoPaths = new(StringComparer.OrdinalIgnoreCase);
+
+	try
+	{
+		ArchiveCatalogSession session = ArchiveCatalogSessionCache.GetOrCreate([archiveRoot], bootstrapOptions);
+		IReadOnlyList<string> allFiles = session.ArchiveCatalog.GetAllKnownFiles();
+		foreach (string f in allFiles)
+		{
+			if (f.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase) && !f.Contains('_'))
+				wmoPaths.Add(f.Replace('\\', '/').TrimStart('/').ToLowerInvariant());
+		}
+		Console.WriteLine($"  Archive catalog found {wmoPaths.Count} WMO roots.");
+	}
+	catch (Exception ex)
+	{
+		Console.WriteLine($"  Archive catalog enumeration failed: {ex.Message}");
+	}
+
+	if (!string.IsNullOrWhiteSpace(listfilePath) && File.Exists(listfilePath))
+	{
+		int listfileCount = 0;
+		foreach (string line in File.ReadLines(listfilePath))
+		{
+			string trimmed = line.Trim();
+			if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('#') || trimmed.StartsWith("//"))
+				continue;
+
+			string normalized = trimmed.Replace('\\', '/').TrimStart('/').ToLowerInvariant();
+			if (normalized.EndsWith(".wmo") && !normalized.Contains('_'))
+			{
+				if (wmoPaths.Add(normalized))
+					listfileCount++;
+			}
+		}
+		Console.WriteLine($"  Listfile added {listfileCount} new WMO roots (total: {wmoPaths.Count}).");
+	}
+	else if (wmoPaths.Count < 500 && string.IsNullOrWhiteSpace(listfilePath))
+	{
+		Console.WriteLine("  Warning: archive catalog found <500 WMOs. Consider providing --listfile for full coverage.");
+	}
+
+	return wmoPaths.OrderBy(static f => f, StringComparer.OrdinalIgnoreCase).ToList();
 }
 
 sealed record TerrainPatchReportEntry(
