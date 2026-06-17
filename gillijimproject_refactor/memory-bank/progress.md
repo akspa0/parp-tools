@@ -8,6 +8,13 @@
 - Phase 3: CLI `extract-pm4-fingerprints`. 1604 CK24 group fingerprints from 616 dev PM4s. Type distribution matches: 0x42=584, 0x43=466, 0x41=161, 0xC1=100.
 - Phase 4: `Pm4FingerprintMatcher` (sorted-dim prefilter + EvaluateMetrics + 4-flip PCA). CLI `match-fingerprints`. 6 unit tests. Real-data: 50 matched, 1203 ambiguous, 78 unresolved, 273 ineligible. Top: Ironforge 0.94/0.999, Stormwind Harbor 0.92/0.98.
 
+### Phase 5: ADT validation — DONE (commit 4974a5cc)
+- CLI `pm4 validate-matches`: reads ADT obj0 placements, checks fingerprint-DB top-1/top-3 against ADT WMO placement list.
+- Results: 138/616 tiles have ADT, 913 CK24 groups with ground truth. P@1=1.8%, P@3=4.5%.
+- Correct matches prove approach works: nightelfmoonwell, stormwindharbor, magetower, arathistonebridge.
+- Low precision driven by: WMO DB coverage (503/1985), dev map ADT unreliability, geometric similarity between city WMO groups.
+- Next: expand WMO coverage with listfile, validate on real game map (not dev).
+
 ### Commits
 - fe7a304e: spec 065 pivot
 - e8d4f1d5: Phase 1 fingerprint extraction library

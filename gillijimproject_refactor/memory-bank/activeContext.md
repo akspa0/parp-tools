@@ -26,7 +26,9 @@ WoW viewer. Libraries bridge to Unreal Engine. No Vulkan/WebGL/Museums/BASE.
 001, 029, 030/031/032 (research), 038/040 (research), 042, 045, 049, 053, 055, 056, 057
 
 ## Biggest Unproven Gap (046)
-Full WMO enumeration (1985 WMOs instead of 506) to improve identity coverage. Multi-tile OID tracking to reconstruct full model bounds from per-tile fragments. M2 type (0x40/0x41) collision vertex reading.
+1. WMO DB coverage: 503/1985 WMOs — archive enumeration misses 75%. Need listfile for full coverage. This is the #1 driver of low ADT validation precision (1.8% P@1).
+2. Dev map ADT unreliability: dev map mixes WMOs from all zones, ADT placements are sparse. Need validation on a real game map (Elwynn, Darnassus, etc.).
+3. Remaining ambiguity: 502/1604 — mostly Stormwind vs StormwindHarbor (genuinely identical architecture). May need CK24 ObjectId mapping or tile context to resolve.
 
 ## Staged Clients
 Only `output/tmp/wowarchive-clients/` paths are valid.
