@@ -127,13 +127,13 @@ public static class LkAdtWriter
 
         PatchMhdr(result, (int)mhdrPosition, adt.MhdrFlags,
             (int)(mcinStart - mhdrPosition - ChunkHeaderSize),
-            (int)(mtexOffset - ChunkHeaderSize),
-            (int)(mmdxOffset - ChunkHeaderSize),
-            (int)(mmidOffset - ChunkHeaderSize),
-            (int)(mwmoOffset - ChunkHeaderSize),
-            (int)(mwidOffset - ChunkHeaderSize),
-            (int)(mddfOffset - ChunkHeaderSize),
-            (int)(modfOffset - ChunkHeaderSize),
+            (int)mtexOffset,
+            (int)mmdxOffset,
+            (int)mmidOffset,
+            (int)mwmoOffset,
+            (int)mwidOffset,
+            (int)mddfOffset,
+            (int)modfOffset,
             mh2oRelativeOffset);
 
         PatchMcin(result, (int)mcinStart + ChunkHeaderSize, mcnkOffsets, mcnkSizes);

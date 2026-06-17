@@ -75,7 +75,14 @@ public static class BlankAdtFactory
         };
     }
 
+    private const int SyntheticUniqueIdBase = 12_000_000;
+
     public static LkAdtData WithPlacements(LkAdtData baseAdt, AdtPlacementCatalog catalog)
+    {
+        return WithPlacements(baseAdt, catalog, UniqueIdSource.PreserveFromCatalog);
+    }
+
+    public static LkAdtData WithPlacements(LkAdtData baseAdt, AdtPlacementCatalog catalog, UniqueIdSource uniqueIdSource)
     {
         ArgumentNullException.ThrowIfNull(baseAdt);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -86,18 +93,45 @@ public static class BlankAdtFactory
         var modelNameIndex = modelNames.Select((n, i) => (n, i)).ToDictionary(static p => p.n, static p => p.i);
         var wmoNameIndex = worldModelNames.Select((n, i) => (n, i)).ToDictionary(static n => n.n, static n => n.i);
 
+        var usedIds = new HashSet<int>();
+        if (uniqueIdSource == UniqueIdSource.PreserveFromCatalog)
+        {
+            foreach (var p in catalog.ModelPlacements)
+                usedIds.Add(p.UniqueId);
+            foreach (var p in catalog.WorldModelPlacements)
+                usedIds.Add(p.UniqueId);
+        }
+
+        int nextSyntheticId = SyntheticUniqueIdBase;
+        while (usedIds.Contains(nextSyntheticId))
+            nextSyntheticId++;
+
+        int AllocateId(int catalogId)
+        {
+            if (uniqueIdSource == UniqueIdSource.PreserveFromCatalog)
+                return catalogId;
+
+            int id = nextSyntheticId++;
+            while (usedIds.Contains(id))
+                id = nextSyntheticId++;
+            usedIds.Add(id);
+            return id;
+        }
+
         var mddfPlacements = new List<LkMddfEntry>();
         foreach (var p in catalog.ModelPlacements)
         {
             int nameId = modelNameIndex.TryGetValue(p.ModelPath, out int idx) ? idx : 0;
-            mddfPlacements.Add(new LkMddfEntry(nameId, p.UniqueId, p.Position, p.Rotation, p.Scale));
+            int uid = AllocateId(p.UniqueId);
+            mddfPlacements.Add(new LkMddfEntry(nameId, uid, p.Position, p.Rotation, p.Scale));
         }
 
         var modfPlacements = new List<LkModfEntry>();
         foreach (var p in catalog.WorldModelPlacements)
         {
             int nameId = wmoNameIndex.TryGetValue(p.ModelPath, out int idx) ? idx : 0;
-            modfPlacements.Add(new LkModfEntry(nameId, p.UniqueId, p.Position, p.Rotation, p.BoundsMin, p.BoundsMax, Flags: 0, DoodadSet: 0, NameSet: 0, Scale: 1.0f));
+            int uid = AllocateId(p.UniqueId);
+            modfPlacements.Add(new LkModfEntry(nameId, uid, p.Position, p.Rotation, p.BoundsMin, p.BoundsMax, Flags: 0, DoodadSet: 0, NameSet: 0, Scale: 1.0f));
         }
 
         var mddfByChunk = AssignMddfToChunks(baseAdt, mddfPlacements);
@@ -285,4 +319,10 @@ public static class BlankAdtFactory
         }
         return normals;
     }
+}
+
+public enum UniqueIdSource
+{
+    PreserveFromCatalog,
+    SyntheticSequential,
 }
