@@ -1,5 +1,24 @@
 # Progress
 
+## 2026-06-17 — Fingerprint-database PM4→WMO matching implemented (Phases 1-4)
+
+### What landed
+- Phase 1: `Pm4FingerprintExtractor` (PCA normalization + convex hull), `Pm4FingerprintContracts` (serializable records). 9 unit tests.
+- Phase 2: `Pm4FingerprintBuildSupport` (WMO collision → fingerprint DB). CLI `build-wmo-fingerprint-db`. 503 root + 2287 group = 2790 fingerprints from 506 staged 3.3.5 WMOs.
+- Phase 3: CLI `extract-pm4-fingerprints`. 1604 CK24 group fingerprints from 616 dev PM4s. Type distribution matches: 0x42=584, 0x43=466, 0x41=161, 0xC1=100.
+- Phase 4: `Pm4FingerprintMatcher` (sorted-dim prefilter + EvaluateMetrics + 4-flip PCA). CLI `match-fingerprints`. 6 unit tests. Real-data: 50 matched, 1203 ambiguous, 78 unresolved, 273 ineligible. Top: Ironforge 0.94/0.999, Stormwind Harbor 0.92/0.98.
+
+### Commits
+- fe7a304e: spec 065 pivot
+- e8d4f1d5: Phase 1 fingerprint extraction library
+- 4db79689: Phase 2-3 WMO DB + PM4 extraction CLI
+- c7239549: Phase 4 fingerprint matcher
+
+### Next
+- Phase 5: validate against ADT ground truth (precision@1/@3)
+- Reduce ambiguous count: add surface/vertex count ratio, TypeFlags profile, per-group matching
+- WMO enumeration: 506/1985 — need listfile for full coverage
+
 ## 2026-06-17 — Spec 065 revised: fingerprint-database approach (route change)
 
 ### What changed

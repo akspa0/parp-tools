@@ -3,19 +3,19 @@
 ## Direction
 WoW viewer. Libraries bridge to Unreal Engine. No Vulkan/WebGL/Museums/BASE.
 
-## 2026-06-17 — Spec 065 revised: ADT-based correlation ABANDONED, fingerprint-database approach adopted
+## 2026-06-17 — Fingerprint-database PM4→WMO matching implemented + validated
 
-**Route change.** ADT-based PM4→WMO matching is wrong: 222 PM4-only tiles have no ADT, `correlate-models` produces 0 correlations on those tiles, `identify-models` is bounding-box-only (too coarse — dozens of WMOs share ~33×35×53), `match-assets` has ADT-dependent `sameTileBonus` that's dead on PM4-only tiles.
+**Phases 1-4 of spec 065 DONE (commits fe7a304e, e8d4f1d5, 4db79689, c7239549).**
 
-**New approach (spec 065 revised)**: Build a fingerprint database from WMO collision geometry (MOVT/MOVI) using `Pm4CorrelationMath`'s convex-hull footprint extraction with PCA normalization. Extract same fingerprints from PM4 CK24 groups. Match via `EvaluateMetrics` + `CompareCandidateScores`. No ADT for matching — ADT used only for validation ground truth.
+**Pipeline**: WMO collision geometry (MOVT/MOVI) → PCA-normalized convex hull fingerprint → DB. PM4 CK24 groups (MSVT/MSVI/MSUR) → same fingerprint. Match via `Pm4CorrelationMath.EvaluateMetrics` with 4-flip axis enumeration. No ADT for matching.
 
-**Prior work retained as reference**:
-- `pm4 identify-models` (sorted-dimension-only) — KEPT for comparison, not primary matcher. 545 matches at ≥0.95 from 506 WMOs.
-- `pm4 fingerprint-scan` — 1604 CK24 groups extracted. 611/616 PM4s use world-space coords. 272 OIDs span 2+ tiles.
-- CK24 type pairs: 0x40/0x41=M2, 0x42/0x43=WMO, 0xC0-0xC3=WMO nav. Ck24ObjectId is global across tiles.
-- 506/1985 WMOs scanned — archive enumeration missed ~75%. Need listfile-based enumeration (Task 2.2).
+**Real-data results** (1604 PM4 vs 2790 WMO fingerprints, minScore=0.30):
+- 50 matched, 1203 ambiguous (dimension collisions — many WMOs share dims), 78 unresolved, 273 ineligible (M2/unknown)
+- Top matches: Ironforge 0.94 score/0.999 footprint overlap, Stormwind Harbor 0.92/0.98, Darnassis 0.95/0.99, Thousand Needles Elevator 0.96/0.97
 
-**Spec 065 phases**: P1 fingerprint extraction library (PCA + hull + contracts), P2 WMO fingerprint DB, P3 PM4 fingerprint extraction, P4 matching (no ADT), P5 validation against ADT ground truth, P6 generator (downstream, existing).
+**Code**: `Pm4FingerprintExtractor` (PCA + hull), `Pm4FingerprintMatcher` (prefilter + EvaluateMetrics + flip), `Pm4FingerprintBuildSupport` (WMO DB builder), CLI: `build-wmo-fingerprint-db`, `extract-pm4-fingerprints`, `match-fingerprints`. 15 unit tests pass.
+
+**Next**: Phase 5 (validate against ADT ground truth), reduce ambiguous count (add surface/vertex count signals, per-group matching, tune thresholds). WMO enumeration still 506/1985 (listfile needed).
 
 ## What's Done
 012, 014, 024, 025, 033, 037, 041, 043, 044 (P1), 048, 054, 058, 059, 060, 061, 062
