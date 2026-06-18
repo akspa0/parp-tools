@@ -50,6 +50,13 @@
 - [x] T023: Rebuilt, rematched, validated with placement-invariant bins enabled (`--normal-alignment-bin-size 0.1 --planar-offset-bin-size 1.0`). Result: 0 matched, 0 ambiguous, P@3=10.1% (vs. 25.3% for area-only). The extra descriptors make the key too specific and do not recover P@1.
 - [x] T024: Added `pm4 validate-generator-geometry --pm4 <file> --adt <obj0.adt> --archive-root <staged>` to directly validate `Pm4Generator.cs`. It generates PM4 from each ADT WMO placement and compares generated surface histograms to real PM4 CK24 groups in the same coordinate space.
 - [x] T025: Ran generator validation on tile 16_37 (development): mean symmetric score 0.004, no groups matched. Generated PM4 surfaces do not reproduce real PM4 surfaces. This confirms `Pm4Generator.cs` needs significant rework (collision mesh source, simplification, or coordinate transform).
+- [x] T026: Switched `Pm4Generator` source geometry to WMO collision faces (`MOPY` flags `0x08`/`0x20`, exclude `0x04`).
+- [x] T027: Fixed `MSVI` first-index bug (byte offset → raw uint index) and `WorldToPm4Raw` X/Y swap.
+- [x] T028: Added vertex welding + coplanar boundary-polygon merging to match real PM4 surface granularity.
+- [x] T029: Validated on `development_29_18` (correct WMO tile with 48 CK24 groups): mean score 0.051, 0/48 matched; generated farm bounds overlap real group `0x43C689`.
+- [ ] T030: Resolve WMO local-axis / rotation convention so generated surface normals match real PM4 normals.
+- [ ] T031: Standardize generated surface winding so upward-facing surfaces have positive Z normals.
+- [ ] T032: Re-validate `development_29_18` and reach at least one group with symmetric score >= 0.50.
 
 ## Phase 8: Fix WMO Enumeration via Listfile
 

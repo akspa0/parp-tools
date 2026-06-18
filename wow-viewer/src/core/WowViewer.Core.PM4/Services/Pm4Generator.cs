@@ -1,9 +1,20 @@
 using System.Numerics;
+using WowViewer.Core.Wmo;
 
 namespace WowViewer.Core.PM4.Services;
 
 public static class Pm4Generator
 {
+    // WMO MOPY face flags. Collision-only faces are marked with FlagCollisionFace (0x08).
+    // Render faces (0x20) are collidable unless the no-collide bit (0x04) is set.
+    private const byte WmoMopyNoCamCollide = 0x02;
+    private const byte WmoMopyNoCollide = 0x04;
+    private const byte WmoMopyCollisionFace = 0x08;
+    private const byte WmoMopyRenderFace = 0x20;
+
+    private static bool IsWmoCollisionFace(byte flags) => (flags & WmoMopyCollisionFace) != 0;
+    private static bool IsWmoRenderCollidableFace(byte flags) => (flags & (WmoMopyRenderFace | WmoMopyNoCollide)) == WmoMopyRenderFace;
+    private static bool IsWmoCollidableFace(byte flags) => IsWmoCollisionFace(flags) || IsWmoRenderCollidableFace(flags);
     private const float MapOrigin = 17066.666f;
     private const float TileSize = 533.333f;
 
@@ -29,7 +40,11 @@ public static class Pm4Generator
         for (int i = 0; i < worldVertices.Count; i++)
             pm4Vertices.Add(WorldToPm4Raw(worldVertices[i]));
 
-        var (simplifiedVerts, simplifiedIndices, polyCounts) = SimplifyByPlaneClustering(pm4Vertices, indices);
+        // Weld duplicate positions so seams with split vertex indices still merge.
+        var (weldedVertices, weldedIndices) = WeldVertices(pm4Vertices, indices, tolerance: 0.001f);
+
+        // Merge coplanar connected triangles into boundary polygons, matching real PM4 surface granularity.
+        var (simplifiedVerts, simplifiedIndices, polyCounts) = SimplifyByPlaneClustering(weldedVertices, weldedIndices);
         var (uniqueVertices, remappedIndices32) = DeduplicateVertices(simplifiedVerts, simplifiedIndices);
 
         Vector3 centroid = ComputeCentroid(uniqueVertices);
@@ -73,7 +88,7 @@ public static class Pm4Generator
                 Padding: 0,
                 Normal: normal,
                 Height: height,
-                MsviFirstIndex: (uint)(indexCursor * 4),
+                MsviFirstIndex: (uint)indexCursor,
                 MscnRefIndex: 0,
                 PackedParams: packedParams));
 
@@ -133,6 +148,76 @@ public static class Pm4Generator
             Mdbf: Array.Empty<Pm4GenerationMdbf>(),
             Mdos: Array.Empty<Pm4GenerationMdos>(),
             Mdsf: Array.Empty<Pm4GenerationMdsf>());
+    }
+
+    public static Pm4GenerationData GenerateFromWmo(
+        WmoRenderDocument renderDoc,
+        Vector3 placementPosition,
+        Vector3 placementRotationDegrees,
+        float scale,
+        uint ck24Type = 0x43,
+        ushort ck24ObjectId = 1,
+        uint regionId = 0)
+    {
+        ArgumentNullException.ThrowIfNull(renderDoc);
+
+        ExtractCollisionGeometry(renderDoc, out List<Vector3> localVertices, out List<ushort> indices);
+        return GenerateFromCollisionMesh(
+            localVertices,
+            indices,
+            placementPosition,
+            placementRotationDegrees,
+            scale,
+            ck24Type,
+            ck24ObjectId,
+            regionId);
+    }
+
+    private static void ExtractCollisionGeometry(
+        WmoRenderDocument renderDoc,
+        out List<Vector3> localVertices,
+        out List<ushort> indices)
+    {
+        localVertices = [];
+        indices = [];
+
+        int vertexOffset = 0;
+        foreach (WmoEmbeddedGroupMeshDetail group in renderDoc.Groups)
+        {
+            WmoGroupMeshDetail mesh = group.Mesh;
+            if (mesh.Vertices.Count == 0 || mesh.Indices.Count < 3)
+                continue;
+
+            int faceCount = mesh.Indices.Count / 3;
+            if (mesh.FaceMaterials.Count == 0)
+                continue;
+
+            foreach (Vector3 v in mesh.Vertices)
+                localVertices.Add(v);
+
+            for (int faceIndex = 0; faceIndex < faceCount; faceIndex++)
+            {
+                if (faceIndex >= mesh.FaceMaterials.Count)
+                    continue;
+
+                byte flags = mesh.FaceMaterials[faceIndex].Flags;
+                if (!IsWmoCollidableFace(flags))
+                    continue;
+
+                int i0 = mesh.Indices[faceIndex * 3];
+                int i1 = mesh.Indices[faceIndex * 3 + 1];
+                int i2 = mesh.Indices[faceIndex * 3 + 2];
+
+                if (i0 >= mesh.Vertices.Count || i1 >= mesh.Vertices.Count || i2 >= mesh.Vertices.Count)
+                    continue;
+
+                indices.Add((ushort)(i0 + vertexOffset));
+                indices.Add((ushort)(i1 + vertexOffset));
+                indices.Add((ushort)(i2 + vertexOffset));
+            }
+
+            vertexOffset += mesh.Vertices.Count;
+        }
     }
 
     private static Vector3 ComputeFaceNormal(Vector3 a, Vector3 b, Vector3 c)
@@ -320,13 +405,27 @@ public static class Pm4Generator
         return (a.X - o.X) * (b.Y - o.Y) - (a.Y - o.Y) * (b.X - o.X);
     }
 
+    private static Vector2 ProjectToPlaneDominantAxes(Vector3 v, Vector3 normal)
+    {
+        int dominantAxis = Math.Abs(normal.X) >= Math.Abs(normal.Y)
+            ? (Math.Abs(normal.X) >= Math.Abs(normal.Z) ? 0 : 2)
+            : (Math.Abs(normal.Y) >= Math.Abs(normal.Z) ? 1 : 2);
+
+        int ax0 = dominantAxis == 0 ? 1 : 0;
+        int ax1 = dominantAxis == 2 ? 1 : 2;
+
+        return new Vector2(
+            ax0 == 0 ? v.X : ax0 == 1 ? v.Y : v.Z,
+            ax1 == 0 ? v.X : ax1 == 1 ? v.Y : v.Z);
+    }
+
     private static PlanarSimplifyResult SimplifyByPlaneClustering(
         IReadOnlyList<Vector3> vertices,
         IReadOnlyList<ushort> indices)
     {
-        List<int> globalToHull = new(vertices.Count);
+        List<int> globalToOutput = new(vertices.Count);
         for (int i = 0; i < vertices.Count; i++)
-            globalToHull.Add(-1);
+            globalToOutput.Add(-1);
 
         List<Vector3> outputVerts = [];
         List<ushort> outputIndices = [];
@@ -336,90 +435,180 @@ public static class Pm4Generator
 
         foreach (FacePlane cluster in clusters)
         {
-            HashSet<int> vertexSet = [];
-            for (int i = 0; i < cluster.Indices.Count; i++)
-                vertexSet.Add(cluster.Indices[i]);
+            List<FacePlane> components = SplitByConnectivity(cluster, indices);
 
-            if (vertexSet.Count < 3)
-                continue;
-
-            Vector3 normal = cluster.Normal;
-            int dominantAxis = Math.Abs(normal.X) >= Math.Abs(normal.Y)
-                ? (Math.Abs(normal.X) >= Math.Abs(normal.Z) ? 0 : 2)
-                : (Math.Abs(normal.Y) >= Math.Abs(normal.Z) ? 1 : 2);
-
-            int ax0 = dominantAxis == 0 ? 1 : 0;
-            int ax1 = dominantAxis == 2 ? 1 : 2;
-
-            List<Vector2> projected = new(vertexSet.Count);
-            List<int> projectedVertIndices = new(vertexSet.Count);
-            foreach (int vi in vertexSet)
+            foreach (FacePlane component in components)
             {
-                Vector3 v = vertices[vi];
-                projected.Add(new Vector2(
-                    ax0 == 0 ? v.X : ax0 == 1 ? v.Y : v.Z,
-                    ax1 == 0 ? v.X : ax1 == 1 ? v.Y : v.Z));
-                projectedVertIndices.Add(vi);
-            }
+                // A single triangle is the smallest real PM4 surface; keep them.
+                if (component.Indices.Count < 3)
+                    continue;
 
-            List<Vector2> hull2d = ComputeConvexHull2D(projected).Select(p => new Vector2(p.X, p.Y)).ToList();
-            if (hull2d.Count < 3)
-                continue;
+                Vector3 normal = component.Normal;
 
-            // Remove collinear hull vertices
-            hull2d = SimplifyCollinear2D(hull2d, 0.01f);
-
-            if (hull2d.Count < 3)
-                continue;
-
-            foreach (Vector2 hp in hull2d)
-            {
-                float bestDist = float.MaxValue;
-                int bestVi = -1;
-                Vector3 bestVert = Vector3.Zero;
-                for (int j = 0; j < projected.Count; j++)
+                // Build boundary edges of this connected, coplanar component.
+                Dictionary<(int A, int B), int> edgeCounts = new(component.Indices.Count);
+                for (int i = 0; i + 2 < component.Indices.Count; i += 3)
                 {
-                    float dx = projected[j].X - hp.X;
-                    float dy = projected[j].Y - hp.Y;
-                    float d = dx * dx + dy * dy;
-                    if (d < bestDist)
+                    int i0 = component.Indices[i];
+                    int i1 = component.Indices[i + 1];
+                    int i2 = component.Indices[i + 2];
+
+                    void AddEdge(int a, int b)
                     {
-                        bestDist = d;
-                        bestVi = projectedVertIndices[j];
-                        bestVert = vertices[bestVi];
+                        if (a == b) return;
+                        int min = Math.Min(a, b);
+                        int max = Math.Max(a, b);
+                        var key = (min, max);
+                        edgeCounts[key] = edgeCounts.TryGetValue(key, out int c) ? c + 1 : 1;
                     }
+
+                    AddEdge(i0, i1);
+                    AddEdge(i1, i2);
+                    AddEdge(i2, i0);
                 }
 
-                if (globalToHull[bestVi] >= 0)
+                // Trace every boundary loop (outer + holes) and emit a surface per loop.
+                List<(int A, int B)> remainingEdges = edgeCounts
+                    .Where(static kv => kv.Value == 1)
+                    .Select(static kv => kv.Key)
+                    .ToList();
+
+                while (remainingEdges.Count >= 3)
                 {
-                    outputIndices.Add((ushort)globalToHull[bestVi]);
-                }
-                else
-                {
-                    globalToHull[bestVi] = outputVerts.Count;
-                    outputIndices.Add((ushort)outputVerts.Count);
-                    outputVerts.Add(bestVert);
+                    var loop = TraceBoundaryLoop(remainingEdges);
+                    if (loop.Count < 3)
+                        break;
+
+                    // Build 2D polygon using the dominant-axis projection.
+                    List<(Vector2 P, int Vi)> projectedLoop = new(loop.Count);
+                    foreach (int vi in loop)
+                        projectedLoop.Add((ProjectToPlaneDominantAxes(vertices[vi], normal), vi));
+
+                    // Remove near-duplicate and collinear vertices.
+                    projectedLoop = SimplifyCollinear2D(projectedLoop, 0.01f);
+                    if (projectedLoop.Count < 3)
+                    {
+                        // Remove the used outer edges so we don't get stuck.
+                        remainingEdges = RemoveUsedEdges(remainingEdges, loop);
+                        continue;
+                    }
+
+                    foreach (int vi in projectedLoop.Select(x => x.Vi))
+                    {
+                        if (globalToOutput[vi] >= 0)
+                        {
+                            outputIndices.Add((ushort)globalToOutput[vi]);
+                        }
+                        else
+                        {
+                            globalToOutput[vi] = outputVerts.Count;
+                            outputIndices.Add((ushort)outputVerts.Count);
+                            outputVerts.Add(vertices[vi]);
+                        }
+                    }
+
+                    polyVertexCounts.Add(projectedLoop.Count);
+
+                    remainingEdges = RemoveUsedEdges(remainingEdges, loop);
                 }
             }
-
-            polyVertexCounts.Add(hull2d.Count);
         }
 
         return new PlanarSimplifyResult(outputVerts, outputIndices, polyVertexCounts);
     }
 
-    private static List<Vector2> SimplifyCollinear2D(List<Vector2> polygon, float angleTolerance)
+    private static List<int> TraceBoundaryLoop(List<(int A, int B)> edges)
+    {
+        Dictionary<int, List<int>> adjacency = new(edges.Count * 2);
+        foreach ((int a, int b) in edges)
+        {
+            if (!adjacency.TryGetValue(a, out List<int>? listA))
+            {
+                listA = [];
+                adjacency[a] = listA;
+            }
+            listA.Add(b);
+
+            if (!adjacency.TryGetValue(b, out List<int>? listB))
+            {
+                listB = [];
+                adjacency[b] = listB;
+            }
+            listB.Add(a);
+        }
+
+        int start = adjacency.FirstOrDefault(static kv => kv.Value.Count == 2).Key;
+        if (start == 0 && !adjacency.ContainsKey(0))
+            start = adjacency.Keys.First();
+
+        List<int> loop = [start];
+        int previous = -1;
+        int current = start;
+
+        while (true)
+        {
+            if (!adjacency.TryGetValue(current, out List<int>? neighbors) || neighbors.Count == 0)
+                break;
+
+            int next = -1;
+            foreach (int candidate in neighbors)
+            {
+                if (candidate != previous)
+                {
+                    next = candidate;
+                    break;
+                }
+            }
+
+            if (next < 0)
+                break;
+
+            if (next == start)
+            {
+                loop.Add(start);
+                break;
+            }
+
+            if (loop.Contains(next))
+                break;
+
+            loop.Add(next);
+            previous = current;
+            current = next;
+        }
+
+        return loop;
+    }
+
+    private static List<(int A, int B)> RemoveUsedEdges(List<(int A, int B)> edges, IReadOnlyList<int> loop)
+    {
+        HashSet<(int, int)> used = new(loop.Count);
+        for (int i = 0; i < loop.Count - 1; i++)
+        {
+            int a = loop[i];
+            int b = loop[i + 1];
+            used.Add(a < b ? (a, b) : (b, a));
+        }
+
+        return edges.Where(e =>
+        {
+            int a = e.A, b = e.B;
+            return !used.Contains(a < b ? (a, b) : (b, a));
+        }).ToList();
+    }
+
+    private static List<(Vector2 P, int Vi)> SimplifyCollinear2D(List<(Vector2 P, int Vi)> polygon, float angleTolerance)
     {
         if (polygon.Count <= 3) return polygon;
 
-        List<Vector2> result = new(polygon.Count);
+        List<(Vector2 P, int Vi)> result = new(polygon.Count);
         int n = polygon.Count;
 
         for (int i = 0; i < n; i++)
         {
-            Vector2 prev = polygon[(i - 1 + n) % n];
-            Vector2 curr = polygon[i];
-            Vector2 next = polygon[(i + 1) % n];
+            Vector2 prev = polygon[(i - 1 + n) % n].P;
+            Vector2 curr = polygon[i].P;
+            Vector2 next = polygon[(i + 1) % n].P;
 
             Vector2 e1 = curr - prev;
             Vector2 e2 = next - curr;
@@ -434,7 +623,7 @@ public static class Pm4Generator
             float area = cross / (len1 * len2);
 
             if (area > angleTolerance)
-                result.Add(curr);
+                result.Add(polygon[i]);
         }
 
         return result.Count >= 3 ? result : polygon;
@@ -486,14 +675,58 @@ public static class Pm4Generator
     private static Vector3 WorldToPm4Raw(Vector3 worldPos)
     {
         return new Vector3(
-            MapOrigin - worldPos.Y,
             MapOrigin - worldPos.X,
+            MapOrigin - worldPos.Y,
             worldPos.Z);
     }
 
     private static Vector3 WorldToMprlPosition(Vector3 worldPos)
     {
         return new Vector3(worldPos.X, worldPos.Z, worldPos.Y);
+    }
+
+    private static (List<Vector3> UniqueVertices, List<ushort> RemappedIndices) WeldVertices(
+        IReadOnlyList<Vector3> vertices,
+        IReadOnlyList<ushort> originalIndices,
+        float tolerance)
+    {
+        float tolSq = tolerance * tolerance;
+        List<Vector3> unique = new(vertices.Count);
+        int[] map = new int[vertices.Count];
+        Array.Fill(map, -1);
+
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            Vector3 v = vertices[i];
+            int match = -1;
+            for (int j = 0; j < unique.Count; j++)
+            {
+                if (Vector3.DistanceSquared(v, unique[j]) <= tolSq)
+                {
+                    match = j;
+                    break;
+                }
+            }
+
+            if (match < 0)
+            {
+                match = unique.Count;
+                unique.Add(v);
+            }
+
+            map[i] = match;
+        }
+
+        List<ushort> remapped = new(originalIndices.Count);
+        for (int i = 0; i < originalIndices.Count; i++)
+        {
+            int src = originalIndices[i];
+            if (src < 0 || src >= map.Length)
+                continue;
+            remapped.Add((ushort)map[src]);
+        }
+
+        return (unique, remapped);
     }
 
     private static (List<Vector3> UniqueVertices, List<uint> RemappedIndices) DeduplicateVertices(

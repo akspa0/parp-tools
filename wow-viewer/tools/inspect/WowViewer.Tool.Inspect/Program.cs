@@ -3330,9 +3330,6 @@ static void RunPm4ValidateGenerator(string[] args)
 						rootBytes = ArchiveVirtualFileReader.ReadVirtualFile(normalizedPath, [archiveRoot], archiveBootstrapOptions);
 					}
 
-					using MemoryStream ms = new(rootBytes, writable: false);
-					var summary = WmoSummaryReader.Read(ms, wmoPlacement.ModelPath);
-
 					Func<string, byte[]?> readGroupBytes = vp =>
 					{
 						if (!string.IsNullOrWhiteSpace(wmoCacheDir))
@@ -3345,46 +3342,26 @@ static void RunPm4ValidateGenerator(string[] args)
 						catch { return null; }
 					};
 
-					List<Vector3> allVerts = [];
-					List<ushort> allIndices = [];
-					string rootDir = Path.GetDirectoryName(wmoPlacement.ModelPath.Replace('\\', '/')) ?? "";
-					string rootStem = Path.GetFileNameWithoutExtension(wmoPlacement.ModelPath);
-
-					for (int gi = 0; gi < summary.ReportedGroupCount; gi++)
-					{
-						string groupVPath = Path.Combine(rootDir, $"{rootStem}_{gi:D3}.wmo").Replace('\\', '/');
-						byte[]? groupBytes = readGroupBytes(groupVPath);
-						if (groupBytes is null) continue;
-
-						try
-						{
-							using MemoryStream groupMs = new(groupBytes, writable: false);
-							var meshDetail = WmoGroupMeshDetailReader.Read(groupMs, groupVPath);
-							int baseIdx = allVerts.Count;
-							foreach (var v in meshDetail.Vertices)
-								allVerts.Add(v);
-							foreach (var idx in meshDetail.Indices)
-								allIndices.Add((ushort)(idx + baseIdx));
-						}
-						catch { }
-					}
-
-					if (allVerts.Count == 0 || allIndices.Count < 3) continue;
+					using MemoryStream ms = new(rootBytes, writable: false);
+					WmoRenderDocument renderDoc = WmoRenderDocumentReader.Read(ms, wmoPlacement.ModelPath, readGroupBytes);
 
 					matchedPlacements++;
 
-					Pm4GenerationData genData = Pm4Generator.GenerateFromCollisionMesh(
-						allVerts, allIndices,
+					Pm4GenerationData genData = Pm4Generator.GenerateFromWmo(
+						renderDoc,
 						wmoPlacement.Position,
 						wmoPlacement.Rotation,
 						1f,
 						ck24Type: 0x43,
 						ck24ObjectId: (ushort)(matchedPlacements & 0xFFFF));
 
+					if (genData.Msur.Count == 0)
+						continue;
+
 					genTotalSurfaces += genData.Msur.Count;
 					genTotalVerts += genData.Msvt.Count;
 
-					int wmoFaceCount = allIndices.Count / 3;
+					int wmoFaceCount = renderDoc.Groups.Sum(static g => g.Mesh.Indices.Count / 3);
 					placementResults.Add(new Dictionary<string, object?>
 					{
 						["uid"] = wmoPlacement.UniqueId,
@@ -3633,31 +3610,16 @@ static void RunPm4GenerateFromWmo(string[] args)
 		WmoRenderDocument renderDoc = WmoRenderDocumentReader.Read(
 			new MemoryStream(wmoBytes, writable: false), normalizedPath, assetReader);
 
-		List<Vector3> allVerts = new();
-		List<ushort> allIndices = new();
-		int vertOffset = 0;
+		Pm4GenerationData genData = Pm4Generator.GenerateFromWmo(
+			renderDoc, position, rotation, scale: 1f,
+			ck24Type: 0x43, ck24ObjectId: 1, regionId: 0);
 
-		foreach (WmoEmbeddedGroupMeshDetail group in renderDoc.Groups)
-		{
-			foreach (Vector3 v in group.Mesh.Vertices)
-				allVerts.Add(v);
-
-			foreach (ushort idx in group.Mesh.Indices)
-				allIndices.Add((ushort)(idx + vertOffset));
-
-			vertOffset += group.Mesh.Vertices.Count;
-		}
-
-		if (allVerts.Count == 0 || allIndices.Count < 3)
+		if (genData.Msur.Count == 0)
 		{
 			Console.Error.WriteLine("Error: WMO has no collision geometry.");
 			Environment.ExitCode = 1;
 			return;
 		}
-
-		Pm4GenerationData genData = Pm4Generator.GenerateFromCollisionMesh(
-			allVerts, allIndices, position, rotation, scale: 1f,
-			ck24Type: 0x43, ck24ObjectId: 1, regionId: 0);
 
 		byte[] pm4Bytes = Pm4BinaryWriter.Write(genData);
 

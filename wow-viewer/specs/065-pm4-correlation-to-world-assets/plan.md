@@ -140,11 +140,18 @@ The first attempt to add absolute MSUR.Normal/MSUR.Height failed because WMO-loc
 - Result: 0 matched, 0 ambiguous, P@3=10.1% (down from 25.3% area-only). The descriptors make the key too specific and do not recover recall.
 - Conclusion: surface histogram matching is unlikely to reach high P@1 without additional signal (e.g., WMO enumeration, placement-derived spatial filtering, or a different matcher).
 
-**7c. Generator validation**:
+**7c. Generator validation and first fix pass**:
 - Added `pm4 validate-generator-geometry` to directly test `Pm4Generator.cs`.
 - For a given PM4 tile and its `_obj0.adt`, the command reads each WMO placement, reads the WMO render mesh, applies the ADT placement transform, runs `Pm4Generator.GenerateFromCollisionMesh`, and compares the generated PM4 surface histogram to the real PM4 CK24 groups.
-- Initial run on `development_16_37`: mean symmetric score 0.004, 0/4 matched placements. Generated PM4 surfaces do not reproduce real PM4 surfaces.
-- Next step: determine whether the mismatch is due to wrong source geometry (visible mesh vs. collision mesh), over-aggressive plane clustering/convex-hull simplification, or coordinate-transform differences. This becomes the Phase 9 generator-rework workstream.
+- Initial run on `development_16_37`: mean symmetric score 0.004, 0/4 matched placements. `development_16_37` has only M2 groups, so it is not a valid WMO validation tile.
+- Correct validation tile: `development_29_18` with 48 real CK24 WMO groups and 48 ADT WMO placements.
+- Fixed in this pass:
+  - Source geometry: use WMO collision faces (`MOPY` flags `0x08`/`0x20`, exclude `0x04`).
+  - `MSVI` first index: write raw uint index, not byte offset.
+  - `WorldToPm4Raw`: use `MapOrigin - X`, `MapOrigin - Y`, `Z` (no X/Y swap).
+  - Added vertex welding + coplanar boundary-polygon merging to match real PM4's merged polygons.
+- Latest result on `development_29_18`: mean symmetric score 0.051, 0/48 groups >= 0.50. Generated farm bounds exactly overlap real group `0x43C689`, but surface normals/tessellation still mismatch.
+- Next step: resolve WMO local-axis/rotation convention and surface winding orientation.
 
 ### Phase 8: Fix WMO Enumeration via Listfile
 
@@ -172,8 +179,9 @@ Use trusted surface matches and PM4 geometry to recover MODF/MDDF placements for
 - Write synthetic ADT files with recovered placements for PM4-only tiles.
 - Validate on tiles where ADT exists by comparing recovered placements to original ADT MODF/MDDF entries.
 
-**9c. Generator revisit**:
-- If correlation findings reveal a vertex-level transform between WMO collision and generated PM4, update `Pm4Generator.cs` accordingly.
+**9c. Generator revisit** (in progress as part of Phase 7c):
+- `Pm4Generator.cs` now uses WMO collision geometry, writes correct MSVI indices, and uses the correct world→PM4 coordinate transform.
+- Remaining: resolve WMO local-axis/rotation convention and surface winding so generated surface normals/tessellation match real PM4 CK24 groups.
 
 ## Phases Ordered by Execution
 
@@ -185,7 +193,7 @@ Use trusted surface matches and PM4 geometry to recover MODF/MDDF placements for
 | 4 | Surface matching (no ADT) | 2, 3 | `matches.json` — CK24→WMO candidates |
 | 5 | Validation against ADT ground truth | 4 | precision@1/@3 report |
 | 6 | Add triangle area to histogram key | 5 | reduced false positives / ambiguous count |
-| 7 | Add normal + height to histogram key | 6 | further improved P@3 |
+| 7 | Placement-invariant descriptors + generator validation/fix | 6 | generator geometry validated, coordinate/source bugs fixed |
 | 8 | Fix WMO enumeration via listfile | 7 | ≥1900 WMO root fingerprints |
 | 9 | Placement recovery / ADT regeneration | 8 | synthetic ADT for PM4-only tiles |
 

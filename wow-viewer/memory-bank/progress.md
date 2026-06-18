@@ -45,6 +45,25 @@
 - Generator validation on `development_16_37`: mean symmetric score 0.004, 0/4 placements matched. Generated PM4 surfaces do not reproduce real PM4 surfaces.
 - Conclusion: surface histogram matching is capped; next leverage is WMO enumeration (Phase 8) and generator rework.
 
+## 2026-06-18 — Generator fix pass (in progress)
+
+### What landed
+- `Pm4Generator.cs` now reads WMO collision faces via `MOPY` flags (`0x08` collision, `0x20` render collidable, exclude `0x04` no-collide) instead of all faces.
+- Fixed `MSVI` first-index bug: generator wrote byte offsets; now writes raw uint index.
+- Fixed `WorldToPm4Raw`: removed X/Y swap; now `MapOrigin - X`, `MapOrigin - Y`, `Z`.
+- Added vertex welding and coplanar boundary-polygon merging to approximate real PM4's merged polygons (3–7 indices per surface).
+- `Pm4GeneratorValidationSupport.cs` filters real fingerprints to CK24 type `0x43` and uses collision geometry.
+- Determined `development_29_18` is the correct WMO validation tile (48 CK24 WMO groups); `development_16_37` has only M2 groups.
+- Found generated farm bounds match real group `0x43C689` exactly.
+
+### Validation
+- `pm4 validate-generator-geometry` on `development_29_18`: mean symmetric score 0.051, 0/48 groups >= 0.50.
+- Per-group test (farm placement pos=<7050.836,1463.489,397.076> rot=-312 vs real group `0x43C689`):
+  - Raw triangles: 24/210 real triangles matched.
+  - Boundary-merged surfaces: 11/210 matched.
+  - Boundary-merged + normal-Z flip for consistent winding: 14/210 matched.
+- Remaining gap: WMO local-axis/rotation convention and surface winding orientation.
+
 ## 2026-06-17 — Hull fingerprint matcher (ABANDONED — false positives)
 - Built PCA-normalized convex hull fingerprint matcher. 751 matched but mostly false positives.
 - Ironforge/Darnassis at 0.999 overlap despite NOT being on dev map. Hull throws away surface structure.

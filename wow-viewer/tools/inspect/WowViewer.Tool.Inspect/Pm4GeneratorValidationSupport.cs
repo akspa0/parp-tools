@@ -51,7 +51,7 @@ internal static class Pm4GeneratorValidationSupport
 
         Pm4ResearchDocument realDoc = Pm4ResearchReader.ReadFile(pm4Path);
         IReadOnlyList<SurfaceFingerprint> realFingerprints = ExtractPm4Fingerprints(
-            realDoc, edgeBinSize, areaBinSize, normalBinSize, heightBinSize);
+            realDoc, 0x43, edgeBinSize, areaBinSize, normalBinSize, heightBinSize);
 
         progress?.Invoke($"Real PM4: {realFingerprints.Count} CK24 groups, {realFingerprints.Sum(static f => f.TriangleCount)} triangles.");
 
@@ -158,26 +158,8 @@ internal static class Pm4GeneratorValidationSupport
         WmoRenderDocument renderDoc = WmoRenderDocumentReader.Read(
             new MemoryStream(wmoBytes, writable: false), normalizedPath, assetReader);
 
-        List<Vector3> allVerts = [];
-        List<ushort> allIndices = [];
-        int vertOffset = 0;
-
-        foreach (WmoEmbeddedGroupMeshDetail group in renderDoc.Groups)
-        {
-            foreach (Vector3 v in group.Mesh.Vertices)
-                allVerts.Add(v);
-
-            foreach (ushort idx in group.Mesh.Indices)
-                allIndices.Add((ushort)(idx + vertOffset));
-
-            vertOffset += group.Mesh.Vertices.Count;
-        }
-
-        if (allVerts.Count == 0 || allIndices.Count < 3)
-            return null;
-
-        Pm4GenerationData genData = Pm4Generator.GenerateFromCollisionMesh(
-            allVerts, allIndices, placement.Position, placement.Rotation, scale: 1f,
+        Pm4GenerationData genData = Pm4Generator.GenerateFromWmo(
+            renderDoc, placement.Position, placement.Rotation, scale: 1f,
             ck24Type: 0x43, ck24ObjectId: 1, regionId: 0);
 
         if (genData.Msur.Count == 0)
@@ -186,7 +168,7 @@ internal static class Pm4GeneratorValidationSupport
         List<TriangleFeature> triangles = [];
         foreach (Pm4GenerationMsur surface in genData.Msur)
         {
-            int first = (int)surface.MsviFirstIndex / 4;
+            int first = (int)surface.MsviFirstIndex;
             int count = surface.IndexCount;
             if (first + count > genData.Msvi.Count)
                 continue;
@@ -216,6 +198,7 @@ internal static class Pm4GeneratorValidationSupport
 
     private static IReadOnlyList<SurfaceFingerprint> ExtractPm4Fingerprints(
         Pm4ResearchDocument doc,
+        byte filterCk24Type,
         float edgeBinSize,
         float areaBinSize,
         float normalBinSize,
@@ -228,7 +211,7 @@ internal static class Pm4GeneratorValidationSupport
         List<SurfaceFingerprint> fingerprints = [];
 
         var groups = msur
-            .Where(static s => s.Ck24 != 0 && s.IndexCount >= 3)
+            .Where(s => s.Ck24 != 0 && s.IndexCount >= 3 && s.Ck24Type == filterCk24Type)
             .GroupBy(static s => s.Ck24);
 
         foreach (IGrouping<uint, Pm4MsurEntry> group in groups)
