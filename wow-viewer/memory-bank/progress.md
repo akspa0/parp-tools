@@ -9,11 +9,11 @@
 - CLI: `build-wmo-surface-db` (2790 fingerprints, 13M triangles), `extract-pm4-surfaces` (1604 fingerprints, 604K triangles), `match-surfaces`, `validate-matches`.
 - WMO surface DB: 503 roots, 11MB JSON. PM4 surfaces: 1604 groups, 3MB JSON.
 
-### Validation
+### Validation — MATCHER STILL PRODUCES FALSE POSITIVES
 - P@1=1.3%, P@3=10.3% (vs hull P@1=1.8%, P@3=4.5%). P@3 improved 2.3x.
-- NO false positives — Ironforge/Darnassis eliminated.
-- 12 correct top-1: GoldshireInn (0.86 coverage tiles 0_2/1_1), classicalelfruins, arathistonebridge, orchut.
-- GoldshireInn on tiles 0_2/1_2: PM4 says it's there at 0.86 coverage, ADT doesn't list it. PM4 is right — ADT is incomplete (THIS IS THE POINT OF THE WORK).
+- Surface correlation eliminated worst hull false positives (Ironforge/Darnassis) BUT produces its own false positives.
+- GoldshireInn matched to tile 0_2 at 0.86 PM4 coverage. User confirmed: NO GoldshireInn exists in PM4 data on tile 0_2. It's a histogram collision — edge-length bins match across different geometry with similarly-sized triangles.
+- DO NOT claim matches are correct without verification. Both hull and surface approaches produced false positives.
 
 ### What needs doing next (fresh chat)
 - Fix WMO enumeration (503/1985 — archive catalog probe bug or need listfile)

@@ -8,31 +8,38 @@
 
 **PM4 data IS the source of truth for what objects are actually placed on a tile.** The PM4 contains the collision surfaces, scene graph placements, and pathing data for every object the game client placed there — including objects the ADT doesn't list.
 
-**We are matching PM4 CK24 objects to WMO assets so we can REGENERATE placement data (MODF/MDDF entries) for tiles where ADT is missing or incomplete.** When surface correlation says GoldshireInn is on tile 0_2 at 0.86 triangle coverage but ADT doesn't list it, the MATCHER IS RIGHT and the ADT is what's missing.
+**We are matching PM4 CK24 objects to WMO assets so we can REGENERATE placement data (MODF/MDDF entries) for tiles where ADT is missing or incomplete.** The GOAL is producing placement data for tiles where ADT doesn't exist.
 
 **Do NOT frame ADT incompleteness as a "limitation of the matcher" or a "validation gap."** It is the entire reason this work exists. Validate against ADT where ADT exists (to confirm the algorithm works), but the GOAL is producing placement data for tiles where ADT doesn't exist.
 
-## Current approach: Surface triangle correlation
+## CRITICAL: The matcher is STILL producing false positives
+
+Both approaches tried so far produce false positives:
+
+1. **Hull footprint matching (ABANDONED)**: Ironforge/Darnassis at 0.999 overlap despite NOT being on dev map. Convex hull throws away surface structure.
+
+2. **Surface edge-length histogram (current, STILL WRONG)**: GoldshireInn matched to tile 0_2 at 0.86 PM4 coverage. User confirmed: **NO GoldshireInn exists in PM4 data on tile 0_2. It does not exist there.** The 0.86 coverage is a histogram collision — edge-length bins match across completely different geometry with similarly-sized triangles. Different wall/floor triangles from different WMOs have similar edge lengths and bin identically.
+
+**Edge-length-only histograms are TOO COARSE.** They are a necessary but insufficient signal. Do NOT claim matches are correct without ground truth verification. The matcher has produced false positives in BOTH approaches. Verify before claiming.
+
+## Current approach: Surface triangle correlation (needs improvement)
 
 PM4 MSUR surfaces → triangulated fans → per-triangle sorted edge lengths binned to integers (transform-invariant geometric hash) → histogram intersection against WMO MOVI/MOVT collision triangle histograms.
 
-**Why hull footprints failed:** Convex hull throws away internal surface structure. A 12×12×48 box matches Ironforge, Darnassis, and dozens of other WMOs equally — all have similarly-sized structural groups. Hull matching produced 0.999 overlap false positives for WMOs that are NOT on the map. Surface triangle correlation eliminated these false positives.
+**Why hull footprints failed:** Convex hull throws away internal surface structure. A 12×12×48 box matches Ironforge, Darnassis, and dozens of other WMOs equally. Surface triangle correlation eliminated the WORST hull false positives but still produces its own false positives via histogram collisions.
 
-## What works (surface correlation, commit 21aa0064)
+## What needs work (FRESH CHAT — start here)
 
-- 217 matched, 956 ambiguous, 158 unresolved, 273 ineligible (1604 PM4 vs 2790 WMO fingerprints)
-- P@3 = 10.3% (2.3x improvement over hull P@3=4.5%)
-- NO false positives — Ironforge/Darnassis eliminated
-- 12 correct top-1: GoldshireInn (0.86 PM4 triangle coverage on tiles 0_2/1_1), classicalelfruins, arathistonebridge, orchut
-- GoldshireInn matches tiles 0_2/1_1 at 0.86 coverage — PM4 says it's there, ADT doesn't list it → PM4 is right, ADT is incomplete (this is the whole point)
+The matcher needs a stronger geometric signal. Options to explore:
+- Add triangle area to histogram key (not just edge lengths)
+- Use surface normal + plane distance (PM4 MSUR has Normal + Height fields) as additional histogram dimensions
+- Use exact vertex positions after transform alignment (not just edge lengths)
+- Match at the surface level (PM4 MSUR surface = WMO MOPY face group) not just individual triangles
+- Use the full PM4 surface structure: normal + height + edge lengths + vertex count per surface
+- Fix WMO enumeration (503/1985 — archive catalog probe bug or need listfile)
+- 956 ambiguous still high — need stronger disambiguation
 
-## What needs work
-
-- WMO DB coverage: archive catalog finds 503/1985 WMOs. Need to fix enumeration (listfile or archive catalog probe bug).
-- Edge bin size (1.0 unit) may need tuning
-- Histogram key only has edge lengths — triangle area could add discrimination
-- 956 ambiguous still high — need stronger disambiguation signals
-- The full pipeline: surface match → identify WMO → extract placement transform from PM4 → write MODF entry → regenerate ADT
+**The full pipeline (end goal)**: surface match → identify WMO → extract placement transform from PM4 → write MODF entry → regenerate ADT for tiles without one.
 
 ## Tooling
 
@@ -50,4 +57,4 @@ PM4 MSUR surfaces → triangulated fans → per-triangle sorted edge lengths bin
 - `src/core/WowViewer.Core.PM4/Services/Pm4SurfaceCorrelationMatcher.cs` — histogram intersection + F1
 - `tools/inspect/WowViewer.Tool.Inspect/Pm4SurfaceBuildSupport.cs` — WMO surface DB builder + PM4 extraction
 - `src/core/WowViewer.Core.PM4/Services/Pm4Generator.cs` — PM4 generator from WMO collision (plane clustering)
-- `specs/065-pm4-correlation-to-world-assets/` — spec (needs updating: surface correlation is now primary, hull is abandoned)
+- `specs/065-pm4-correlation-to-world-assets/` — spec (needs updating: surface correlation is primary, hull abandoned, matcher still produces false positives)
