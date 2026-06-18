@@ -3,17 +3,22 @@
 ## Direction
 WoW viewer. Libraries bridge to Unreal Engine. No Vulkan/WebGL/Museums/BASE.
 
-## 2026-06-17 — Fingerprint-database PM4→WMO matching implemented + validated
+## 2026-06-17 — Surface correlation matcher — PIVOT from hull to per-triangle matching
 
-**Phases 1-4 of spec 065 DONE (commits fe7a304e, e8d4f1d5, 4db79689, c7239549).**
+**Hull footprint matching ABANDONED.** Produced false positives (Ironforge/Darnassis at 0.999 overlap despite NOT being in dev map). User confirmed: "how in the fuck are we still using footprints to figure out what objects are?! use the fucking correlation of surfaces in pm4's to real wmo objects!"
 
-**Pipeline**: WMO collision geometry (MOVT/MOVI) → PCA-normalized convex hull fingerprint → DB. PM4 CK24 groups (MSVT/MSVI/MSUR) → same fingerprint. Match via `Pm4CorrelationMath.EvaluateMetrics` with 4-flip axis enumeration. No ADT for matching.
+**Surface correlation implemented (commit 21aa0064).** PM4 MSUR surfaces triangulated → per-triangle sorted edge lengths binned to integers (transform-invariant hash) → histogram intersection matching against WMO MOVI/MOVT collision triangles.
 
-**Real-data results** (1604 PM4 vs 2790 WMO fingerprints, minScore=0.30, v3 tuning):
-- 751 matched, 502 ambiguous, 78 unresolved, 273 ineligible (M2/unknown)
-- Progression: v1 50 matched → v2 392 (surface/vertex+dedup) → v3 751 (index count + tighter window)
-- Top matches: Ironforge 0.999 overlap, Darnassis 1.000, Stormwind 0.975, BlackTemple 0.966
-- Remaining ambiguity: Stormwind vs StormwindHarbor (136 cases, margin=0.000) — genuinely identical architecture in two WMO files. Correctly flagged.
+**Results (1604 PM4 vs 2790 WMO surface fingerprints):**
+- 217 matched, 956 ambiguous, 158 unresolved, 273 ineligible
+- P@1=1.3%, P@3=10.3% (2.3x improvement over hull P@3=4.5%)
+- NO false positives — Ironforge/Darnassis eliminated
+- 12 correct top-1: GoldshireInn (0.86 PM4 coverage), classicalelfruins, arathistonebridge, orchut
+- GoldshireInn matches tiles 0_2/1_1 at 0.86 coverage but ADT doesn't list it — likely ADT gap, not matcher error
+
+**Code**: `Pm4SurfaceCorrelationExtractor` (triangulate + histogram), `Pm4SurfaceCorrelationMatcher` (histogram intersection + F1), CLI: `build-wmo-surface-db`, `extract-pm4-surfaces`, `match-surfaces`.
+
+**Remaining gaps**: WMO DB coverage (503/1985), dev map ADT unreliability, edge bin size (1.0 may be too coarse), no triangle area in histogram key.
 
 **Code**: `Pm4FingerprintExtractor` (PCA + hull), `Pm4FingerprintMatcher` (prefilter + EvaluateMetrics + flip), `Pm4FingerprintBuildSupport` (WMO DB builder), CLI: `build-wmo-fingerprint-db`, `extract-pm4-fingerprints`, `match-fingerprints`. 15 unit tests pass.
 
