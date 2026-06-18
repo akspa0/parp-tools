@@ -94,6 +94,54 @@ public static class Pm4SurfaceCorrelationExtractor
         float normalAlignmentBinSize = 0.0f,
         float planarOffsetBinSize = 0.0f)
     {
+        return ExtractFromWmoGroupWithFilter(
+            movt, movi, faceMaterials, groupIndex, wmoPath,
+            edgeBinSize, areaBinSize, normalAlignmentBinSize, planarOffsetBinSize,
+            static _ => true);
+    }
+
+    public static SurfaceCorrelationFingerprint? ExtractFromWmoCollisionGroup(
+        IReadOnlyList<Vector3> movt,
+        IReadOnlyList<ushort> movi,
+        IReadOnlyList<WmoGroupFaceMaterialDetail>? faceMaterials,
+        int groupIndex,
+        string wmoPath,
+        float edgeBinSize = 1.0f,
+        float areaBinSize = 1.0f,
+        float normalAlignmentBinSize = 0.0f,
+        float planarOffsetBinSize = 0.0f)
+    {
+        return ExtractFromWmoGroupWithFilter(
+            movt, movi, faceMaterials, groupIndex, wmoPath,
+            edgeBinSize, areaBinSize, normalAlignmentBinSize, planarOffsetBinSize,
+            IsCollidableFace);
+    }
+
+    private static bool IsCollidableFace(WmoGroupFaceMaterialDetail? material)
+    {
+        if (material is null)
+            return false;
+
+        const byte CollisionFace = 0x08;
+        const byte RenderFace = 0x20;
+        const byte NoCollide = 0x04;
+
+        byte flags = material.Flags;
+        return (flags & CollisionFace) != 0 || ((flags & RenderFace) != 0 && (flags & NoCollide) == 0);
+    }
+
+    private static SurfaceCorrelationFingerprint? ExtractFromWmoGroupWithFilter(
+        IReadOnlyList<Vector3> movt,
+        IReadOnlyList<ushort> movi,
+        IReadOnlyList<WmoGroupFaceMaterialDetail>? faceMaterials,
+        int groupIndex,
+        string wmoPath,
+        float edgeBinSize,
+        float areaBinSize,
+        float normalAlignmentBinSize,
+        float planarOffsetBinSize,
+        Func<WmoGroupFaceMaterialDetail?, bool> faceFilter)
+    {
         ArgumentNullException.ThrowIfNull(movt);
         ArgumentNullException.ThrowIfNull(movi);
 
@@ -106,6 +154,9 @@ public static class Pm4SurfaceCorrelationExtractor
 
         for (int i = 0; i < triangleCount; i++)
         {
+            if (faceMaterials is not null && i < faceMaterials.Count && !faceFilter(faceMaterials[i]))
+                continue;
+
             int i0 = movi[i * 3];
             int i1 = movi[i * 3 + 1];
             int i2 = movi[i * 3 + 2];

@@ -49,7 +49,7 @@ internal static class Pm4SurfaceBuildSupport
 
         foreach (WmoEmbeddedGroupMeshDetail group in renderDoc.Groups)
         {
-            SurfaceCorrelationFingerprint? groupFp = Pm4SurfaceCorrelationExtractor.ExtractFromWmoGroup(
+            SurfaceCorrelationFingerprint? groupFp = Pm4SurfaceCorrelationExtractor.ExtractFromWmoCollisionGroup(
                 group.Mesh.Vertices,
                 group.Mesh.Indices,
                 group.Mesh.FaceMaterials,
@@ -63,7 +63,7 @@ internal static class Pm4SurfaceBuildSupport
             if (groupFp is not null)
                 groupFingerprints.Add(groupFp);
             else
-                warnings.Add($"Group {group.GroupIndex} surface extraction failed (degenerate geometry).");
+                warnings.Add($"Group {group.GroupIndex} collision surface extraction failed (no collidable geometry).");
         }
 
         SurfaceCorrelationFingerprint? rootFp = Pm4SurfaceCorrelationExtractor.MergeWmoGroups(groupFingerprints, wmoPath, edgeBinSize);
