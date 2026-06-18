@@ -43,11 +43,13 @@
   - area-bin-size=10.0: GoldshireInn tile 0_2 false positive returns; ambiguous 371; P@3=11.3%; P@1=0.0%.
   - Conclusion: fine area bin (1.0) eliminates the known false positive and boosts P@3, but is too strict for P@1. Phase 7 (normal + height) needed to recover recall.
 
-## Phase 7: Add Surface Normal + MSUR Height to Histogram Key
+## Phase 7: Placement-Invariant Geometry + Generator Validation
 
-- [ ] T021: Quantize PM4 MSUR.Normal and MSUR.Height; quantize WMO face normal + centroid height.
-- [ ] T022: Extend histogram key to `(edges, area, normal, height)`.
-- [ ] T023: Rebuild, rematch, validate; target ambiguous count < 400 and P@3 toward 60%.
+- [x] T021: Replaced absolute normal/height with placement-invariant descriptors: triangle normal alignment to the group's area-weighted dominant normal, and planar offset from the group's area-weighted centroid. These are rigid-invariant and comparable between WMO-local and PM4-world geometry.
+- [x] T022: Extended `TriangleFeature`/`TriangleKey` to optionally include normal-alignment and planar-offset bins; defaults are 0 so the baseline area-aware key is unchanged.
+- [x] T023: Rebuilt, rematched, validated with placement-invariant bins enabled (`--normal-alignment-bin-size 0.1 --planar-offset-bin-size 1.0`). Result: 0 matched, 0 ambiguous, P@3=10.1% (vs. 25.3% for area-only). The extra descriptors make the key too specific and do not recover P@1.
+- [x] T024: Added `pm4 validate-generator-geometry --pm4 <file> --adt <obj0.adt> --archive-root <staged>` to directly validate `Pm4Generator.cs`. It generates PM4 from each ADT WMO placement and compares generated surface histograms to real PM4 CK24 groups in the same coordinate space.
+- [x] T025: Ran generator validation on tile 16_37 (development): mean symmetric score 0.004, no groups matched. Generated PM4 surfaces do not reproduce real PM4 surfaces. This confirms `Pm4Generator.cs` needs significant rework (collision mesh source, simplification, or coordinate transform).
 
 ## Phase 8: Fix WMO Enumeration via Listfile
 

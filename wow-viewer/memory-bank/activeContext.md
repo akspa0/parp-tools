@@ -30,14 +30,11 @@ PM4 MSUR surfaces → triangulated fans → per-triangle sorted edge lengths bin
 
 ## What needs work (FRESH CHAT — start here)
 
-The matcher needs a stronger geometric signal. Options to explore:
-- Add triangle area to histogram key (not just edge lengths)
-- Use surface normal + plane distance (PM4 MSUR has Normal + Height fields) as additional histogram dimensions
-- Use exact vertex positions after transform alignment (not just edge lengths)
-- Match at the surface level (PM4 MSUR surface = WMO MOPY face group) not just individual triangles
-- Use the full PM4 surface structure: normal + height + edge lengths + vertex count per surface
-- Fix WMO enumeration (503/1985 — archive catalog probe bug or need listfile)
-- 956 ambiguous still high — need stronger disambiguation
+Surface histogram matching has hit a ceiling. Area-only gives the best result so far (P@3=25.3%, P@1=0%). Placement-invariant normal/offset descriptors made it worse. The next workstreams are:
+
+1. **Fix WMO enumeration** (Phase 8): the DB only has 503/1985 WMO roots. Many correct WMOs are simply not in the candidate pool. This is the highest-leverage next step.
+2. **Revisit `Pm4Generator.cs`**: `pm4 validate-generator-geometry` shows generated PM4 surfaces do not match real PM4 surfaces (score ~0.004). The generator likely uses the wrong source mesh, wrong simplification, or wrong transform. This is the user's stated concern.
+3. **Spatial/placement filtering**: once a WMO candidate is identified, use ADT-style placement bounds or CK24 group location to disambiguate, rather than relying solely on histogram scores.
 
 **The full pipeline (end goal)**: surface match → identify WMO → extract placement transform from PM4 → write MODF entry → regenerate ADT for tiles without one.
 
@@ -58,5 +55,10 @@ The matcher needs a stronger geometric signal. Options to explore:
 - `tools/inspect/WowViewer.Tool.Inspect/Pm4SurfaceBuildSupport.cs` — WMO surface DB builder + PM4 extraction
 - `src/core/WowViewer.Core.PM4/Services/Pm4Generator.cs` — PM4 generator from WMO collision (plane clustering)
 - `specs/065-pm4-correlation-to-world-assets/` — spec updated 2026-06-17: surface triangle correlation is primary, hull/footprint approach abandoned, legacy commands kept for reference.
-- Phase 6 (add triangle area to histogram key) complete 2026-06-18: area-bin-size=1.0 eliminates GoldshireInn tile 0_2 false positive and boosts P@3 10.3%→25.3%, but P@1 drops to 0%; Phase 7 (normal + height) needed to recover recall.
+- Phase 6 (add triangle area to histogram key) complete 2026-06-18: area-bin-size=1.0 eliminates GoldshireInn tile 0_2 false positive and boosts P@3 10.3%→25.3%, but P@1 drops to 0%.
+- Phase 7 (placement-invariant descriptors + generator validation) complete 2026-06-18:
+  - Added optional normal-alignment and planar-offset bins; defaults are 0 to preserve the area-only baseline.
+  - Validation with bins enabled: 0 matched, 0 ambiguous, P@3=10.1% (worse than area-only 25.3%).
+  - Added `pm4 validate-generator-geometry` to directly test `Pm4Generator.cs` against real PM4 tiles.
+  - Generator validation on `development_16_37`: mean symmetric score 0.004, 0/4 matched placements. Generated PM4 does not reproduce real PM4 surfaces.
 - `pm4 validate-matches` fixed to deserialize `Pm4SurfaceMatchOutput` (surface match format), not the old fingerprint-match format.

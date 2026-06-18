@@ -35,6 +35,16 @@
 - Fixed `pm4 validate-matches` to read `Pm4SurfaceMatchOutput` (surface match JSON format) instead of old fingerprint-match format.
 - Conclusion: area alone improves precision but is too strict for recall; Phase 7 (normal + height) needed.
 
+## 2026-06-18 — Phase 7: placement-invariant descriptors + generator validation
+- Redesigned Phase 7 away from absolute MSUR.Normal/MSUR.Height (coordinate mismatch WMO-local vs PM4-world) to placement-invariant descriptors:
+  - Normal alignment: `dot(triNormal, groupDominantNormal)`.
+  - Planar offset: `dot(triCentroid - groupCentroid, groupDominantNormal)`.
+- Added optional `--normal-alignment-bin-size` and `--planar-offset-bin-size` to `build-wmo-surface-db` and `extract-pm4-surfaces`; defaults are 0 to preserve area-only baseline.
+- Validation with bins enabled (`0.1` and `1.0`): 0 matched, 0 ambiguous, P@3=10.1% (worse than area-only 25.3%). Descriptors make the key too specific and do not recover recall.
+- Added `pm4 validate-generator-geometry --pm4 <file> --adt <obj0.adt> --archive-root <staged>` to directly validate `Pm4Generator.cs`.
+- Generator validation on `development_16_37`: mean symmetric score 0.004, 0/4 placements matched. Generated PM4 surfaces do not reproduce real PM4 surfaces.
+- Conclusion: surface histogram matching is capped; next leverage is WMO enumeration (Phase 8) and generator rework.
+
 ## 2026-06-17 — Hull fingerprint matcher (ABANDONED — false positives)
 - Built PCA-normalized convex hull fingerprint matcher. 751 matched but mostly false positives.
 - Ironforge/Darnassis at 0.999 overlap despite NOT being on dev map. Hull throws away surface structure.

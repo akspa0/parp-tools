@@ -125,19 +125,26 @@ Reduce edge-length-only histogram collisions by adding triangle area to the geom
 - `area-bin-size=10.0`: GoldshireInn false positive returns; ambiguous 371; P@3=11.3%; P@1=0.0%.
 - Conclusion: fine area bin improves precision but is too strict for recall. Phase 7 (normal + height) is needed to recover P@1. Phase 6 is complete.
 
-### Phase 7: Add Surface Normal + MSUR Height to Histogram Key
+### Phase 7: Placement-Invariant Geometry + Generator Validation
 
-Further reduce ambiguity by incorporating surface orientation and vertical plane position.
+The first attempt to add absolute MSUR.Normal/MSUR.Height failed because WMO-local and PM4-world coordinate spaces are not comparable. Phase 7 was redesigned around placement-invariant descriptors and direct generator validation.
 
-**7a. Extend the histogram key**:
-- Add PM4 MSUR.Normal (as a quantized direction) and MSUR.Height to the key.
-- For WMO triangles, compute a face normal and a representative height (e.g., centroid Z).
-- The histogram key becomes `(edge lengths, area, normal bucket, height bucket)`.
+**7a. Placement-invariant descriptors**:
+- Compute each group's area-weighted dominant normal and centroid.
+- Add two optional bins: triangle normal alignment (`dot(triNormal, groupDominantNormal)`) and planar offset (`dot(triCentroid - groupCentroid, groupDominantNormal)`).
+- These descriptors are rigid-invariant, so they can be compared between WMO-local and placed PM4-world geometry.
+- Defaults are 0 (disabled) so the validated area-only baseline is unchanged.
 
-**7b. Validate**:
-- Re-run the full pipeline.
-- Target: P@3 improves toward 60%.
-- Target: ambiguous group count < 400.
+**7b. Validate descriptor improvement**:
+- Re-run with `--normal-alignment-bin-size 0.1 --planar-offset-bin-size 1.0`.
+- Result: 0 matched, 0 ambiguous, P@3=10.1% (down from 25.3% area-only). The descriptors make the key too specific and do not recover recall.
+- Conclusion: surface histogram matching is unlikely to reach high P@1 without additional signal (e.g., WMO enumeration, placement-derived spatial filtering, or a different matcher).
+
+**7c. Generator validation**:
+- Added `pm4 validate-generator-geometry` to directly test `Pm4Generator.cs`.
+- For a given PM4 tile and its `_obj0.adt`, the command reads each WMO placement, reads the WMO render mesh, applies the ADT placement transform, runs `Pm4Generator.GenerateFromCollisionMesh`, and compares the generated PM4 surface histogram to the real PM4 CK24 groups.
+- Initial run on `development_16_37`: mean symmetric score 0.004, 0/4 matched placements. Generated PM4 surfaces do not reproduce real PM4 surfaces.
+- Next step: determine whether the mismatch is due to wrong source geometry (visible mesh vs. collision mesh), over-aggressive plane clustering/convex-hull simplification, or coordinate-transform differences. This becomes the Phase 9 generator-rework workstream.
 
 ### Phase 8: Fix WMO Enumeration via Listfile
 

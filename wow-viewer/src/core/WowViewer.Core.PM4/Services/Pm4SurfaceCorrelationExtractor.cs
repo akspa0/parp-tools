@@ -16,7 +16,9 @@ public static class Pm4SurfaceCorrelationExtractor
         string assetPath,
         string assetKind,
         float edgeBinSize = 1.0f,
-        float areaBinSize = 1.0f)
+        float areaBinSize = 1.0f,
+        float normalAlignmentBinSize = 0.0f,
+        float planarOffsetBinSize = 0.0f)
     {
         ArgumentNullException.ThrowIfNull(msvt);
         ArgumentNullException.ThrowIfNull(msvi);
@@ -65,14 +67,11 @@ public static class Pm4SurfaceCorrelationExtractor
         if (triangles.Count == 0)
             return null;
 
-        Dictionary<string, int> histogram = new();
-        float totalArea = 0;
-        foreach (TriangleFeature t in triangles)
-        {
-            string key = t.Key(edgeBinSize, areaBinSize).HistogramKey;
-            histogram[key] = histogram.TryGetValue(key, out int v) ? v + 1 : 1;
-            totalArea += t.Area;
-        }
+        (Vector3 dominantNormal, Vector3 centroid) = ComputeGroupFrame(triangles);
+
+        Dictionary<string, int> histogram = BuildHistogram(
+            triangles, dominantNormal, centroid, edgeBinSize, areaBinSize, normalAlignmentBinSize, planarOffsetBinSize);
+        float totalArea = triangles.Sum(static t => t.Area);
 
         return new SurfaceCorrelationFingerprint(
             assetId, assetPath, assetKind, ck24Type,
@@ -91,7 +90,9 @@ public static class Pm4SurfaceCorrelationExtractor
         int groupIndex,
         string wmoPath,
         float edgeBinSize = 1.0f,
-        float areaBinSize = 1.0f)
+        float areaBinSize = 1.0f,
+        float normalAlignmentBinSize = 0.0f,
+        float planarOffsetBinSize = 0.0f)
     {
         ArgumentNullException.ThrowIfNull(movt);
         ArgumentNullException.ThrowIfNull(movi);
@@ -137,14 +138,11 @@ public static class Pm4SurfaceCorrelationExtractor
 
         int surfaceCount = faceMaterials?.Count ?? triangleCount;
 
-        Dictionary<string, int> histogram = new();
-        float totalArea = 0;
-        foreach (TriangleFeature t in triangles)
-        {
-            string key = t.Key(edgeBinSize, areaBinSize).HistogramKey;
-            histogram[key] = histogram.TryGetValue(key, out int v) ? v + 1 : 1;
-            totalArea += t.Area;
-        }
+        (Vector3 dominantNormal, Vector3 centroid) = ComputeGroupFrame(triangles);
+
+        Dictionary<string, int> histogram = BuildHistogram(
+            triangles, dominantNormal, centroid, edgeBinSize, areaBinSize, normalAlignmentBinSize, planarOffsetBinSize);
+        float totalArea = triangles.Sum(static t => t.Area);
 
         return new SurfaceCorrelationFingerprint(
             $"{wmoPath}#group{groupIndex}",
@@ -200,5 +198,48 @@ public static class Pm4SurfaceCorrelationExtractor
             TotalTriangleArea = totalArea,
             MeanTriangleArea = totalArea / totalTriangles,
         };
+    }
+
+    private static (Vector3 DominantNormal, Vector3 Centroid) ComputeGroupFrame(IReadOnlyList<TriangleFeature> triangles)
+    {
+        Vector3 normalSum = Vector3.Zero;
+        Vector3 centroidSum = Vector3.Zero;
+        float weightSum = 0;
+
+        foreach (TriangleFeature t in triangles)
+        {
+            normalSum += t.Normal * t.Area;
+            centroidSum += t.Centroid * t.Area;
+            weightSum += t.Area;
+        }
+
+        Vector3 dominantNormal = normalSum.LengthSquared() > 0.0001f
+            ? Vector3.Normalize(normalSum)
+            : Vector3.UnitZ;
+
+        Vector3 centroid = weightSum > 0.0001f
+            ? centroidSum / weightSum
+            : Vector3.Zero;
+
+        return (dominantNormal, centroid);
+    }
+
+    private static Dictionary<string, int> BuildHistogram(
+        IReadOnlyList<TriangleFeature> triangles,
+        Vector3 dominantNormal,
+        Vector3 centroid,
+        float edgeBinSize,
+        float areaBinSize,
+        float normalAlignmentBinSize,
+        float planarOffsetBinSize)
+    {
+        Dictionary<string, int> histogram = new();
+        foreach (TriangleFeature t in triangles)
+        {
+            string key = t.Key(dominantNormal, centroid, edgeBinSize, areaBinSize, normalAlignmentBinSize, planarOffsetBinSize).HistogramKey;
+            histogram[key] = histogram.TryGetValue(key, out int v) ? v + 1 : 1;
+        }
+
+        return histogram;
     }
 }

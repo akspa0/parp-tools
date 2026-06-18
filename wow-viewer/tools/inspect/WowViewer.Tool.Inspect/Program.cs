@@ -1993,6 +1993,9 @@ case "fingerprint-scan":
 	case "validate-generator":
 		RunPm4ValidateGenerator(tail);
 		break;
+	case "validate-generator-geometry":
+		RunPm4ValidateGeneratorGeometry(tail);
+		break;
 	case "extract-wmo-cache":
 		RunPm4ExtractWmoCache(tail);
 		break;
@@ -3469,6 +3472,86 @@ static void RunPm4ValidateGenerator(string[] args)
 			["tiles"] = tileResults,
 		}, new JsonSerializerOptions { WriteIndented = true }));
 		Console.WriteLine($"Wrote {outputPath}");
+	}
+}
+
+static void RunPm4ValidateGeneratorGeometry(string[] args)
+{
+	string? pm4Path = GetOption(args, "--pm4", "-p") ?? GetFirstPositionalArgument(args);
+	string? adtPath = GetOption(args, "--adt", "-a");
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? output = GetOption(args, "--output", "-o");
+
+	if (string.IsNullOrWhiteSpace(pm4Path) || !File.Exists(pm4Path))
+	{
+		Console.Error.WriteLine("Error: --pm4 <file.pm4> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(adtPath) || !File.Exists(adtPath))
+	{
+		Console.Error.WriteLine("Error: --adt <tile_obj0.adt> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(archiveRoot) || !Directory.Exists(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root <staged client dir> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions bootstrapOptions))
+		return;
+
+	Console.WriteLine($"Validating PM4 generator geometry for: {Path.GetFullPath(pm4Path)}");
+	Console.WriteLine($"  ADT placements: {Path.GetFullPath(adtPath)}");
+	Console.WriteLine($"  Archive root: {Path.GetFullPath(archiveRoot)}");
+
+	Pm4GeneratorValidationResult result = Pm4GeneratorValidationSupport.ValidateTile(
+		pm4Path, adtPath, archiveRoot, bootstrapOptions,
+		progress: msg => Console.WriteLine($"  {msg}"));
+
+	Console.WriteLine($"\n=== Generator Geometry Validation Report ===");
+	Console.WriteLine($"Real CK24 groups: {result.RealCk24GroupCount}");
+	Console.WriteLine($"ADT WMO placements: {result.AdtWmoPlacementCount}");
+	Console.WriteLine($"Generated groups with geometry: {result.GeneratedGroupCount}");
+	Console.WriteLine($"Matched groups (score >= 0.50): {result.MatchedGroupCount}");
+	Console.WriteLine($"Mean symmetric score: {result.MeanSymmetricScore:F3}");
+	Console.WriteLine($"Mean PM4 coverage: {result.MeanPm4Coverage:F3}");
+	Console.WriteLine($"Mean WMO coverage: {result.MeanWmoCoverage:F3}");
+
+	Console.WriteLine($"\nTop 20 matched/subthreshold validations:");
+	Console.WriteLine($"  {"WMO",-50} {"GenTris",-8} {"RealCK24",-10} {"Score",-8} {"PM4Cov",-8} {"WMOCov",-8} {"Status",-12}");
+	foreach (Pm4GeneratorGroupValidation g in result.GroupValidations
+		.Where(static g => g.Status is "matched" or "subthreshold")
+		.OrderByDescending(static g => g.SymmetricScore ?? 0)
+		.Take(20))
+	{
+		string shortWmo = g.WmoPath.Length > 48 ? "..." + g.WmoPath[^47..] : g.WmoPath;
+		string ck24 = g.MatchedRealCk24.HasValue ? $"0x{g.MatchedRealCk24.Value:X6}" : "n/a";
+		Console.WriteLine($"  {shortWmo,-50} {g.GeneratedTriangleCount,8} {ck24,-10} {g.SymmetricScore ?? 0,8:F3} {g.Pm4Coverage ?? 0,8:F3} {g.WmoCoverage ?? 0,8:F3} {g.Status,-12}");
+	}
+
+	if (result.Warnings.Count > 0)
+	{
+		Console.WriteLine($"\nWarnings ({result.Warnings.Count}):");
+		foreach (string warning in result.Warnings.Take(20))
+			Console.WriteLine($"  {warning}");
+	}
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? dir = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(dir))
+			Directory.CreateDirectory(dir);
+
+		string json = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"\nWrote validation report to {outputPath}");
 	}
 }
 
@@ -6716,12 +6799,13 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 identify-models --fingerprints <fingerprints.json> --archive-root <staged client dir> [--min-score <0.0-1.0>] [--max-matches <n>] [--output <report.json>]");
 	Console.WriteLine("  pm4 tile-reports --fingerprints <fingerprints.json> --identity <identity.json> --pm4-dir <directory> [--output-dir <dir>] [--tiles <x_y[,x_y...]>]");
 	Console.WriteLine("  pm4 generate-from-wmo --wmo-root <file.wmo> --position <x,y,z> --rotation <rx,ry,rz> --tile <x,y> --archive-root <dir> [--output <out.pm4>]");
+	Console.WriteLine("  pm4 validate-generator-geometry --pm4 <file.pm4> --adt <tile_obj0.adt> --archive-root <staged client dir> [--output <report.json>]");
 	Console.WriteLine("  pm4 build-wmo-fingerprint-db --archive-root <staged client dir> [--listfile <listfile.txt>] [--limit <n>] [--output <db.json>]");
 	Console.WriteLine("  pm4 extract-pm4-fingerprints --input <directory> [--output <fp.json>] [--tiles <x_y[,x_y...]>]");
 	Console.WriteLine("  pm4 match-fingerprints --pm4-fingerprints <fp.json> --wmo-db <db.json> [--min-score <0.0-1.0>] [--max-candidates <n>] [--output <matches.json>]");
 	Console.WriteLine("  pm4 validate-matches --matches <matches.json> --adt-dir <directory> [--output <report.json>]");
-	Console.WriteLine("  pm4 build-wmo-surface-db --archive-root <staged client dir> [--listfile <listfile.txt>] [--bin-size <1.0>] [--area-bin-size <1.0>] [--limit <n>] [--output <db.json>]");
-	Console.WriteLine("  pm4 extract-pm4-surfaces --input <directory> [--bin-size <1.0>] [--area-bin-size <1.0>] [--output <fp.json>]");
+	Console.WriteLine("  pm4 build-wmo-surface-db --archive-root <staged client dir> [--listfile <listfile.txt>] [--bin-size <1.0>] [--area-bin-size <1.0>] [--normal-alignment-bin-size <0.1>] [--planar-offset-bin-size <1.0>] [--limit <n>] [--output <db.json>]");
+	Console.WriteLine("  pm4 extract-pm4-surfaces --input <directory> [--bin-size <1.0>] [--area-bin-size <1.0>] [--normal-alignment-bin-size <0.1>] [--planar-offset-bin-size <1.0>] [--output <fp.json>]");
 	Console.WriteLine("  pm4 match-surfaces --pm4-surfaces <fp.json> --wmo-surface-db <db.json> [--min-score <0.0-1.0>] [--output <matches.json>]");
 }
 
@@ -7896,6 +7980,8 @@ static void RunPm4BuildWmoSurfaceDb(string[] args)
 	string? listfilePath = GetOption(args, "--listfile", "-l");
 	string? binSizeText = GetOption(args, "--bin-size", "-b");
 	string? areaBinSizeText = GetOption(args, "--area-bin-size", "-ab");
+	string? normalAlignmentBinSizeText = GetOption(args, "--normal-alignment-bin-size", "-na");
+	string? planarOffsetBinSizeText = GetOption(args, "--planar-offset-bin-size", "-po");
 	string? limitText = GetOption(args, "--limit", "-n");
 	string? output = GetOption(args, "--output", "-o");
 
@@ -7917,11 +8003,19 @@ static void RunPm4BuildWmoSurfaceDb(string[] args)
 	if (!string.IsNullOrWhiteSpace(areaBinSizeText))
 		float.TryParse(areaBinSizeText, out areaBinSize);
 
+	float normalAlignmentBinSize = 0.0f;
+	if (!string.IsNullOrWhiteSpace(normalAlignmentBinSizeText))
+		float.TryParse(normalAlignmentBinSizeText, out normalAlignmentBinSize);
+
+	float planarOffsetBinSize = 0.0f;
+	if (!string.IsNullOrWhiteSpace(planarOffsetBinSizeText))
+		float.TryParse(planarOffsetBinSizeText, out planarOffsetBinSize);
+
 	int limit = 0;
 	if (!string.IsNullOrWhiteSpace(limitText))
 		int.TryParse(limitText, out limit);
 
-	Console.WriteLine($"Building WMO surface correlation database from: {Path.GetFullPath(archiveRoot)} (binSize={binSize}, areaBinSize={areaBinSize})");
+	Console.WriteLine($"Building WMO surface correlation database from: {Path.GetFullPath(archiveRoot)} (binSize={binSize}, areaBinSize={areaBinSize}, normalAlignmentBinSize={normalAlignmentBinSize}, planarOffsetBinSize={planarOffsetBinSize})");
 
 	List<string> wmoPaths = EnumerateWmoRoots(archiveRoot, bootstrapOptions, listfilePath);
 
@@ -7931,7 +8025,7 @@ static void RunPm4BuildWmoSurfaceDb(string[] args)
 	Console.WriteLine($"Found {wmoPaths.Count} WMO root files.");
 
 	SurfaceCorrelationDatabase database = Pm4SurfaceBuildSupport.BuildSurfaceDatabase(
-		archiveRoot, bootstrapOptions, wmoPaths, binSize, areaBinSize,
+		archiveRoot, bootstrapOptions, wmoPaths, binSize, areaBinSize, normalAlignmentBinSize, planarOffsetBinSize,
 		progress: static msg => Console.WriteLine(msg));
 
 	Console.WriteLine($"\nDatabase: {database.WmoCount} WMO roots, {database.Records.Count} surface fingerprints.");
@@ -7956,6 +8050,8 @@ static void RunPm4ExtractPm4Surfaces(string[] args)
 	string? output = GetOption(args, "--output", "-o");
 	string? binSizeText = GetOption(args, "--bin-size", "-b");
 	string? areaBinSizeText = GetOption(args, "--area-bin-size", "-ab");
+	string? normalAlignmentBinSizeText = GetOption(args, "--normal-alignment-bin-size", "-na");
+	string? planarOffsetBinSizeText = GetOption(args, "--planar-offset-bin-size", "-po");
 
 	if (string.IsNullOrWhiteSpace(input) || !Directory.Exists(input))
 	{
@@ -7972,8 +8068,16 @@ static void RunPm4ExtractPm4Surfaces(string[] args)
 	if (!string.IsNullOrWhiteSpace(areaBinSizeText))
 		float.TryParse(areaBinSizeText, out areaBinSize);
 
+	float normalAlignmentBinSize = 0.0f;
+	if (!string.IsNullOrWhiteSpace(normalAlignmentBinSizeText))
+		float.TryParse(normalAlignmentBinSizeText, out normalAlignmentBinSize);
+
+	float planarOffsetBinSize = 0.0f;
+	if (!string.IsNullOrWhiteSpace(planarOffsetBinSizeText))
+		float.TryParse(planarOffsetBinSizeText, out planarOffsetBinSize);
+
 	List<SurfaceCorrelationFingerprint> fingerprints = Pm4SurfaceBuildSupport.ExtractPm4SurfaceFingerprints(
-		input, binSize, areaBinSize, progress: static msg => Console.WriteLine(msg));
+		input, binSize, areaBinSize, normalAlignmentBinSize, planarOffsetBinSize, progress: static msg => Console.WriteLine(msg));
 
 	Console.WriteLine($"\nTotal: {fingerprints.Count} PM4 surface fingerprints.");
 	int totalTriangles = fingerprints.Sum(static f => f.TriangleCount);
@@ -7999,6 +8103,8 @@ static void RunPm4ExtractPm4Surfaces(string[] args)
 			BuildDate = DateTime.UtcNow.ToString("o"),
 			BinSize = binSize,
 			AreaBinSize = areaBinSize,
+			NormalAlignmentBinSize = normalAlignmentBinSize,
+			PlanarOffsetBinSize = planarOffsetBinSize,
 			TotalFingerprints = fingerprints.Count,
 			TotalTriangles = totalTriangles,
 			Fingerprints = fingerprints,
@@ -8178,6 +8284,8 @@ sealed record Pm4SurfaceExtractOutput(
 	string BuildDate,
 	float BinSize,
 	float AreaBinSize,
+	float NormalAlignmentBinSize,
+	float PlanarOffsetBinSize,
 	int TotalFingerprints,
 	int TotalTriangles,
 	IReadOnlyList<SurfaceCorrelationFingerprint> Fingerprints);

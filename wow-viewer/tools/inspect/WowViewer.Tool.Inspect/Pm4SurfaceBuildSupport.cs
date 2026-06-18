@@ -20,7 +20,9 @@ internal static class Pm4SurfaceBuildSupport
         byte[] rootBytes,
         Func<string, byte[]?> assetReader,
         float edgeBinSize = 1.0f,
-        float areaBinSize = 1.0f)
+        float areaBinSize = 1.0f,
+        float normalAlignmentBinSize = 0.0f,
+        float planarOffsetBinSize = 0.0f)
     {
         List<string> warnings = [];
 
@@ -54,7 +56,9 @@ internal static class Pm4SurfaceBuildSupport
                 group.GroupIndex,
                 wmoPath,
                 edgeBinSize,
-                areaBinSize);
+                areaBinSize,
+                normalAlignmentBinSize,
+                planarOffsetBinSize);
 
             if (groupFp is not null)
                 groupFingerprints.Add(groupFp);
@@ -73,6 +77,8 @@ internal static class Pm4SurfaceBuildSupport
         IReadOnlyList<string> wmoPaths,
         float edgeBinSize = 1.0f,
         float areaBinSize = 1.0f,
+        float normalAlignmentBinSize = 0.0f,
+        float planarOffsetBinSize = 0.0f,
         Action<string>? progress = null)
     {
         List<SurfaceCorrelationFingerprint> records = [];
@@ -98,7 +104,7 @@ internal static class Pm4SurfaceBuildSupport
                 byte[] rootBytes = ArchiveVirtualFileReader.ReadVirtualFile(
                     normalizedPath, [archiveRoot], bootstrapOptions);
 
-                WmoSurfaceBuildResult result = BuildWmoSurfaceFingerprints(wmoPath, rootBytes, assetReader, edgeBinSize, areaBinSize);
+                WmoSurfaceBuildResult result = BuildWmoSurfaceFingerprints(wmoPath, rootBytes, assetReader, edgeBinSize, areaBinSize, normalAlignmentBinSize, planarOffsetBinSize);
 
                 if (result.RootFingerprint is not null)
                 {
@@ -125,6 +131,8 @@ internal static class Pm4SurfaceBuildSupport
             succeeded,
             edgeBinSize,
             areaBinSize,
+            normalAlignmentBinSize,
+            planarOffsetBinSize,
             records);
     }
 
@@ -132,6 +140,8 @@ internal static class Pm4SurfaceBuildSupport
         string pm4Dir,
         float edgeBinSize = 1.0f,
         float areaBinSize = 1.0f,
+        float normalAlignmentBinSize = 0.0f,
+        float planarOffsetBinSize = 0.0f,
         Action<string>? progress = null)
     {
         string resolvedDirectory = Pm4CoordinateService.ResolveMapDirectory(pm4Dir);
@@ -172,7 +182,7 @@ internal static class Pm4SurfaceBuildSupport
                     };
 
                     SurfaceCorrelationFingerprint? fp = Pm4SurfaceCorrelationExtractor.ExtractFromPm4Group(
-                        msvt, msvi, surfaces, ck24, ck24Type, assetId, assetPath, assetKind, edgeBinSize, areaBinSize);
+                        msvt, msvi, surfaces, ck24, ck24Type, assetId, assetPath, assetKind, edgeBinSize, areaBinSize, normalAlignmentBinSize, planarOffsetBinSize);
 
                     if (fp is not null)
                     {
