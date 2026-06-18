@@ -19,7 +19,8 @@ internal static class Pm4SurfaceBuildSupport
         string wmoPath,
         byte[] rootBytes,
         Func<string, byte[]?> assetReader,
-        float binSize = 1.0f)
+        float edgeBinSize = 1.0f,
+        float areaBinSize = 1.0f)
     {
         List<string> warnings = [];
 
@@ -52,7 +53,8 @@ internal static class Pm4SurfaceBuildSupport
                 group.Mesh.FaceMaterials,
                 group.GroupIndex,
                 wmoPath,
-                binSize);
+                edgeBinSize,
+                areaBinSize);
 
             if (groupFp is not null)
                 groupFingerprints.Add(groupFp);
@@ -60,7 +62,7 @@ internal static class Pm4SurfaceBuildSupport
                 warnings.Add($"Group {group.GroupIndex} surface extraction failed (degenerate geometry).");
         }
 
-        SurfaceCorrelationFingerprint? rootFp = Pm4SurfaceCorrelationExtractor.MergeWmoGroups(groupFingerprints, wmoPath, binSize);
+        SurfaceCorrelationFingerprint? rootFp = Pm4SurfaceCorrelationExtractor.MergeWmoGroups(groupFingerprints, wmoPath, edgeBinSize);
 
         return new WmoSurfaceBuildResult(wmoPath, groupCount, rootFp, groupFingerprints, warnings);
     }
@@ -69,7 +71,8 @@ internal static class Pm4SurfaceBuildSupport
         string archiveRoot,
         ArchiveCatalogBootstrapOptions bootstrapOptions,
         IReadOnlyList<string> wmoPaths,
-        float binSize = 1.0f,
+        float edgeBinSize = 1.0f,
+        float areaBinSize = 1.0f,
         Action<string>? progress = null)
     {
         List<SurfaceCorrelationFingerprint> records = [];
@@ -95,7 +98,7 @@ internal static class Pm4SurfaceBuildSupport
                 byte[] rootBytes = ArchiveVirtualFileReader.ReadVirtualFile(
                     normalizedPath, [archiveRoot], bootstrapOptions);
 
-                WmoSurfaceBuildResult result = BuildWmoSurfaceFingerprints(wmoPath, rootBytes, assetReader, binSize);
+                WmoSurfaceBuildResult result = BuildWmoSurfaceFingerprints(wmoPath, rootBytes, assetReader, edgeBinSize, areaBinSize);
 
                 if (result.RootFingerprint is not null)
                 {
@@ -120,12 +123,15 @@ internal static class Pm4SurfaceBuildSupport
             archiveRoot,
             DateTime.UtcNow.ToString("o"),
             succeeded,
+            edgeBinSize,
+            areaBinSize,
             records);
     }
 
     public static List<SurfaceCorrelationFingerprint> ExtractPm4SurfaceFingerprints(
         string pm4Dir,
-        float binSize = 1.0f,
+        float edgeBinSize = 1.0f,
+        float areaBinSize = 1.0f,
         Action<string>? progress = null)
     {
         string resolvedDirectory = Pm4CoordinateService.ResolveMapDirectory(pm4Dir);
@@ -166,7 +172,7 @@ internal static class Pm4SurfaceBuildSupport
                     };
 
                     SurfaceCorrelationFingerprint? fp = Pm4SurfaceCorrelationExtractor.ExtractFromPm4Group(
-                        msvt, msvi, surfaces, ck24, ck24Type, assetId, assetPath, assetKind, binSize);
+                        msvt, msvi, surfaces, ck24, ck24Type, assetId, assetPath, assetKind, edgeBinSize, areaBinSize);
 
                     if (fp is not null)
                     {

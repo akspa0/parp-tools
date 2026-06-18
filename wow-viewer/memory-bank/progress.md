@@ -20,7 +20,20 @@
 - Tune edge bin size, add triangle area to histogram key
 - Reduce 956 ambiguous
 - Full pipeline: surface match → identify WMO → extract placement transform from PM4 → write MODF → regenerate ADT for tiles without one
-- Update spec 065 to reflect surface correlation as primary approach (hull is abandoned)
+- ✅ Update spec 065 to reflect surface correlation as primary approach (hull is abandoned)
+
+## 2026-06-17 — Spec 065 rewritten for surface correlation
+- Rewrote `specs/065-pm4-correlation-to-world-assets/spec.md`, `plan.md`, `tasks.md`.
+- Documented abandoned hull/footprint approach; documented surface triangle edge-length histogram as primary.
+- Phases 1–5 marked DONE; Phase 6 (add triangle area to histogram key) is the active next step.
+
+## 2026-06-18 — Phase 6: triangle area added to histogram key
+- Added `AreaBin` to `TriangleKey`; added `--area-bin-size` CLI option to `build-wmo-surface-db` and `extract-pm4-surfaces`.
+- Rebuilt WMO + PM4 surface DBs; tested `area-bin-size=1.0` and `10.0`.
+- Results (`area-bin-size=1.0`): 11 matched, 199 ambiguous, 1121 unresolved; P@1=0.0%, P@3=25.3%; GoldshireInn tile 0_2 false positive eliminated.
+- Results (`area-bin-size=10.0`): 43 matched, 371 ambiguous, 917 unresolved; P@1=0.0%, P@3=11.3%; GoldshireInn tile 0_2 false positive returns.
+- Fixed `pm4 validate-matches` to read `Pm4SurfaceMatchOutput` (surface match JSON format) instead of old fingerprint-match format.
+- Conclusion: area alone improves precision but is too strict for recall; Phase 7 (normal + height) needed.
 
 ## 2026-06-17 — Hull fingerprint matcher (ABANDONED — false positives)
 - Built PCA-normalized convex hull fingerprint matcher. 751 matched but mostly false positives.

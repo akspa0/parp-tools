@@ -6720,8 +6720,8 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 extract-pm4-fingerprints --input <directory> [--output <fp.json>] [--tiles <x_y[,x_y...]>]");
 	Console.WriteLine("  pm4 match-fingerprints --pm4-fingerprints <fp.json> --wmo-db <db.json> [--min-score <0.0-1.0>] [--max-candidates <n>] [--output <matches.json>]");
 	Console.WriteLine("  pm4 validate-matches --matches <matches.json> --adt-dir <directory> [--output <report.json>]");
-	Console.WriteLine("  pm4 build-wmo-surface-db --archive-root <staged client dir> [--listfile <listfile.txt>] [--bin-size <1.0>] [--limit <n>] [--output <db.json>]");
-	Console.WriteLine("  pm4 extract-pm4-surfaces --input <directory> [--bin-size <1.0>] [--output <fp.json>]");
+	Console.WriteLine("  pm4 build-wmo-surface-db --archive-root <staged client dir> [--listfile <listfile.txt>] [--bin-size <1.0>] [--area-bin-size <1.0>] [--limit <n>] [--output <db.json>]");
+	Console.WriteLine("  pm4 extract-pm4-surfaces --input <directory> [--bin-size <1.0>] [--area-bin-size <1.0>] [--output <fp.json>]");
 	Console.WriteLine("  pm4 match-surfaces --pm4-surfaces <fp.json> --wmo-surface-db <db.json> [--min-score <0.0-1.0>] [--output <matches.json>]");
 }
 
@@ -7673,7 +7673,7 @@ static void RunPm4ValidateMatches(string[] args)
 
 	Console.WriteLine($"Loading match results from: {Path.GetFullPath(matchesPath)}");
 	string matchesJson = File.ReadAllText(matchesPath);
-	Pm4FingerprintMatchOutput? matchOutput = JsonSerializer.Deserialize<Pm4FingerprintMatchOutput>(matchesJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+	Pm4SurfaceMatchOutput? matchOutput = JsonSerializer.Deserialize<Pm4SurfaceMatchOutput>(matchesJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 	if (matchOutput is null || matchOutput.Results is null || matchOutput.Results.Count == 0)
 	{
 		Console.Error.WriteLine("Error: match file contains no results.");
@@ -7734,11 +7734,11 @@ static void RunPm4ValidateMatches(string[] args)
 
 	List<(string pm4Id, string tile, string status, string topMatch, string adtWmos, bool correct)> detailRows = new();
 
-	foreach (Pm4FingerprintMatchResult result in matchOutput.Results)
+	foreach (SurfaceMatchResult result in matchOutput.Results)
 	{
 		totalEvaluated++;
 
-		if (result.Status == Pm4FingerprintMatchStatus.Ineligible)
+		if (result.Status == "Ineligible")
 		{
 			totalIneligible++;
 			failureCategories["ineligible"]++;
@@ -7777,7 +7777,7 @@ static void RunPm4ValidateMatches(string[] args)
 
 		switch (result.Status)
 		{
-			case Pm4FingerprintMatchStatus.Matched:
+			case "Matched":
 				totalMatched++;
 				if (top1InAdt) precisionAt1++;
 				else failureCategories["top1_not_in_adt"]++;
@@ -7785,14 +7785,14 @@ static void RunPm4ValidateMatches(string[] args)
 				else if (!top1InAdt) failureCategories["top3_not_in_adt"]++;
 				detailRows.Add((result.Pm4FingerprintId, tileKey, "Matched", result.Candidates[0].Candidate.AssetPath, adtWmosStr, top1InAdt));
 				break;
-			case Pm4FingerprintMatchStatus.Ambiguous:
+			case "Ambiguous":
 				totalAmbiguous++;
 				if (top1InAdt) precisionAt1++;
 				if (top3InAdt) precisionAt3++;
 				if (!top3InAdt) failureCategories["ambiguous_not_in_adt"]++;
 				detailRows.Add((result.Pm4FingerprintId, tileKey, "Ambiguous", result.Candidates[0].Candidate.AssetPath, adtWmosStr, top1InAdt));
 				break;
-			case Pm4FingerprintMatchStatus.Unresolved:
+			case "Unresolved":
 				totalUnresolved++;
 				if (top3InAdt) precisionAt3++;
 				failureCategories["top1_not_in_adt"]++;
@@ -7895,6 +7895,7 @@ static void RunPm4BuildWmoSurfaceDb(string[] args)
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
 	string? listfilePath = GetOption(args, "--listfile", "-l");
 	string? binSizeText = GetOption(args, "--bin-size", "-b");
+	string? areaBinSizeText = GetOption(args, "--area-bin-size", "-ab");
 	string? limitText = GetOption(args, "--limit", "-n");
 	string? output = GetOption(args, "--output", "-o");
 
@@ -7912,11 +7913,15 @@ static void RunPm4BuildWmoSurfaceDb(string[] args)
 	if (!string.IsNullOrWhiteSpace(binSizeText))
 		float.TryParse(binSizeText, out binSize);
 
+	float areaBinSize = 1.0f;
+	if (!string.IsNullOrWhiteSpace(areaBinSizeText))
+		float.TryParse(areaBinSizeText, out areaBinSize);
+
 	int limit = 0;
 	if (!string.IsNullOrWhiteSpace(limitText))
 		int.TryParse(limitText, out limit);
 
-	Console.WriteLine($"Building WMO surface correlation database from: {Path.GetFullPath(archiveRoot)} (binSize={binSize})");
+	Console.WriteLine($"Building WMO surface correlation database from: {Path.GetFullPath(archiveRoot)} (binSize={binSize}, areaBinSize={areaBinSize})");
 
 	List<string> wmoPaths = EnumerateWmoRoots(archiveRoot, bootstrapOptions, listfilePath);
 
@@ -7926,7 +7931,7 @@ static void RunPm4BuildWmoSurfaceDb(string[] args)
 	Console.WriteLine($"Found {wmoPaths.Count} WMO root files.");
 
 	SurfaceCorrelationDatabase database = Pm4SurfaceBuildSupport.BuildSurfaceDatabase(
-		archiveRoot, bootstrapOptions, wmoPaths, binSize,
+		archiveRoot, bootstrapOptions, wmoPaths, binSize, areaBinSize,
 		progress: static msg => Console.WriteLine(msg));
 
 	Console.WriteLine($"\nDatabase: {database.WmoCount} WMO roots, {database.Records.Count} surface fingerprints.");
@@ -7950,6 +7955,7 @@ static void RunPm4ExtractPm4Surfaces(string[] args)
 	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
 	string? output = GetOption(args, "--output", "-o");
 	string? binSizeText = GetOption(args, "--bin-size", "-b");
+	string? areaBinSizeText = GetOption(args, "--area-bin-size", "-ab");
 
 	if (string.IsNullOrWhiteSpace(input) || !Directory.Exists(input))
 	{
@@ -7962,8 +7968,12 @@ static void RunPm4ExtractPm4Surfaces(string[] args)
 	if (!string.IsNullOrWhiteSpace(binSizeText))
 		float.TryParse(binSizeText, out binSize);
 
+	float areaBinSize = 1.0f;
+	if (!string.IsNullOrWhiteSpace(areaBinSizeText))
+		float.TryParse(areaBinSizeText, out areaBinSize);
+
 	List<SurfaceCorrelationFingerprint> fingerprints = Pm4SurfaceBuildSupport.ExtractPm4SurfaceFingerprints(
-		input, binSize, progress: static msg => Console.WriteLine(msg));
+		input, binSize, areaBinSize, progress: static msg => Console.WriteLine(msg));
 
 	Console.WriteLine($"\nTotal: {fingerprints.Count} PM4 surface fingerprints.");
 	int totalTriangles = fingerprints.Sum(static f => f.TriangleCount);
@@ -7988,6 +7998,7 @@ static void RunPm4ExtractPm4Surfaces(string[] args)
 		{
 			BuildDate = DateTime.UtcNow.ToString("o"),
 			BinSize = binSize,
+			AreaBinSize = areaBinSize,
 			TotalFingerprints = fingerprints.Count,
 			TotalTriangles = totalTriangles,
 			Fingerprints = fingerprints,
@@ -8166,6 +8177,18 @@ sealed record Pm4FingerprintMatchOutput(
 sealed record Pm4SurfaceExtractOutput(
 	string BuildDate,
 	float BinSize,
+	float AreaBinSize,
 	int TotalFingerprints,
 	int TotalTriangles,
 	IReadOnlyList<SurfaceCorrelationFingerprint> Fingerprints);
+
+sealed record Pm4SurfaceMatchOutput(
+	string MatchDate,
+	int Pm4FingerprintCount,
+	int WmoFingerprintCount,
+	double MinScore,
+	int Matched,
+	int Ambiguous,
+	int Unresolved,
+	int Ineligible,
+	IReadOnlyList<SurfaceMatchResult> Results);

@@ -1,127 +1,128 @@
-# Feature Specification: PM4 Correlation to World Assets & Generator
+# Feature Specification: PM4 Surface Correlation to World Assets & Generator
 
 **Feature Branch**: `065-pm4-correlation-to-world-assets`
 
 **Created**: 2026-06-17
 
-**Status**: Active (revised 2026-06-17 — pivoted from ADT-based correlation to fingerprint-database correlation)
+**Status**: Active (revised 2026-06-17 — hull/footprint approach abandoned; surface triangle correlation is primary)
 
 ## The Problem
 
 We have 616 PM4 files with 1604 CK24 groups (collision surface clusters). The PM4 format encodes surface mesh, pathing, and placement data that the WoW game client uses for AI navigation, collision queries, and scene graph placement. We do not know which WMO or M2 asset each CK24 group corresponds to.
 
-Previous approach (ABANDONED): correlate CK24 groups to ADT MODF/MDDF placement records via geometric overlap. This is wrong because:
-- 222 PM4-only tiles have no ADT — no placement anchors exist.
-- `pm4 correlate-models` compares PM4 world bounds vs ADT placement world bounds (3D IoU) — dead on PM4-only tiles.
-- `pm4 identify-models` uses sorted-dimension AABB matching only — too coarse, dozens of WMOs share ~33×35×53.
-- `pm4 match-assets` has a `sameTileBonus` and typed world-space overlap that depend on ADT-derived `ReferencePosition`/`TileCoordinates` — dead on PM4-only tiles.
+**Previous approaches (ABANDONED):**
 
-The right approach: build a **fingerprint database** from WMO collision geometry directly, using the rotation-invariant convex-hull footprint correlation math we already built (`Pm4CorrelationMath`). Match PM4 CK24 groups against this DB. No ADT, no world position, no bounding-box-only shortcut.
+1. **ADT-based correlation** — correlate CK24 groups to ADT MODF/MDDF placements via geometric overlap. Wrong because:
+   - 222 PM4-only tiles have no ADT — no placement anchors exist.
+   - Many ADTs that exist are missing placements that PM4 contains.
+   - PM4 data is more comprehensive than ADT placement tables.
 
-The eventual goal: given any WMO or M2 asset, **generate its PM4 collision/pathing data** so we can produce complete terrain tiles (ADT + PM4 + textures) without needing game client PM4 files.
+2. **Convex-hull footprint matching** — PCA-normalized convex hull + sorted-dimension prefilter. Abandoned because:
+   - Produced false positives: Ironforge and Darnassis scored 0.999 footprint overlap despite NOT being on the development map.
+   - Convex hull throws away internal surface structure; a 12×12×48 box matches dozens of unrelated WMOs.
+
+**Current approach: surface triangle correlation.** PM4 MSUR convex polygon surfaces are triangulated into fans; WMO MOVI independent triangles are read directly. Each triangle is reduced to a transform-invariant geometric hash: sorted edge lengths binned to integers. A histogram of these hashes is built per CK24 group and per WMO/group. Matching is histogram intersection → coverage ratios → symmetric F1 score.
+
+**Results to date (1604 PM4 groups vs 2790 WMO surface fingerprints):**
+- 217 matched, 956 ambiguous, 158 unresolved, 273 ineligible
+- P@1=1.3%, P@3=10.3% (2.3× improvement over hull P@3=4.5%)
+- Ironforge/Darnassis false positives eliminated
+- 12 correct top-1 matches (GoldshireInn, classicalelfruins, arathistonebridge, orchut, etc.)
+- Remaining false positives: GoldshireInn matched tile 0_2 at 0.86 PM4 coverage but no GoldshireInn exists there — edge-length histograms collide across different geometry with similarly-sized triangles.
+
+**The eventual goal**: given any WMO or M2 asset, generate its PM4 collision/pathing data and recover placement transforms so we can produce complete terrain tiles (ADT + PM4 + textures) for tiles where ADT is missing or incomplete.
 
 ## What This Spec Covers
 
-**Phase 1 — Fingerprint database.** Extract rotation-invariant geometric fingerprints from:
-- WMO collision geometry (MOVT/MOVI from WMO group files via `WmoGroupMeshDetailReader`/`WmoRenderDocumentReader`) — one fingerprint per WMO root (merged across groups) and optionally per group.
-- PM4 CK24 groups (MSVT/MSVI/MSUR per CK24 group) — one fingerprint per CK24 group.
+**Phase 1 — Surface triangle fingerprint database.** Extract transform-invariant surface triangle histograms from:
+- WMO collision geometry (MOVT/MOVI from WMO group files via `WmoGroupMeshDetailReader`/`WmoRenderDocumentReader`) — one histogram per WMO root (merged across groups) and optionally per group.
+- PM4 CK24 groups (MSVT/MSVI/MSUR per CK24 group) — one histogram per CK24 group.
 
-Fingerprint signals (extracted via `Pm4CorrelationMath.BuildObjectStatesFromGeometry`):
-- Convex hull footprint (XY projection), PCA-normalized for rotation invariance.
-- Bounds (sorted dimensions as fast prefilter, full AABB for overlap).
-- Footprint area, volume, diagonal, height, aspect ratio.
-- Surface count, total index count, vertex count (topology fingerprint).
-- TypeFlags profile (semantic fingerprint: 0x03=M2 top, 0x10=interior floor, 0x12=exterior wall).
-- CK24 type byte (0x40/0x41=M2, 0x42/0x43=WMO, 0xC0-0xC3=WMO nav variants).
+**Phase 2 — Matching.** Match PM4 CK24 surface histograms against WMO surface histograms using histogram intersection + F1 scoring. No ADT input. No world position. No bounding-box shortcut.
 
-**Phase 2 — Matching.** Match PM4 CK24 fingerprints against WMO fingerprints using `Pm4CorrelationMath.EvaluateMetrics` + `CompareCandidateScores`:
-- Sorted-dimension prefilter (fast rejection of dimensionally-incompatible WMOs).
-- PCA-normalized convex hull footprint overlap (`ComputeConvexFootprintOverlapRatio`).
-- Symmetric footprint distance (`ComputeSymmetricFootprintDistance`).
-- Planar gap, vertical gap, center distance (all computed in normalized local space).
-- TypeFlags profile consistency check.
+**Phase 3 — Validation.** Validate matches on tiles where ADT ground truth exists, but use ADT only for validation, never as a matching input. Report precision@1, precision@3, coverage, and failure categorization.
 
-**Phase 3 — Validation.** Validate matches on tiles where ADT ground truth EXISTS (280+ tiles) — but use ADT only for validation, never as a matching input. Compare fingerprint-DB match results against ADT-derived ground truth pairs.
+**Phase 4 — Stronger disambiguation.** Reduce the 956 ambiguous cases by adding stronger geometric signals to the histogram key (triangle area, surface normal + height, surface-level structure). Triage between genuine ambiguity (e.g., Stormwind vs StormwindHarbor share architecture) and resolvable collisions.
 
-**Phase 4 — Generator.** Take any WMO/M2 asset and produce PM4 chunks from its collision geometry. (Already partially done — `Pm4Generator.cs` exists. Kept as downstream phase.)
+**Phase 5 — Placement recovery / generator (downstream).** Take identified WMO/M2 assets and produce MODF/MDDF placement entries from PM4 surface transforms. (`Pm4Generator.cs` exists for PM4 chunk generation; placement writing is a separate, later phase.)
 
 ## User Stories
 
-### User Story 1 — WMO Collision Fingerprint Database (P1)
+### User Story 1 — WMO Surface Triangle Database (P1)
 
 **As a** PM4 researcher,
-**I want** a precomputed fingerprint database covering all WMOs in the staged client archive, with each WMO's collision geometry reduced to a rotation-invariant convex-hull footprint + topology fingerprint,
+**I want** a precomputed surface triangle database covering all WMOs in the staged client archive,
 **So that** I can match PM4 CK24 groups against this database without needing any ADT placement data.
 
-**Why P1**: The fingerprint DB is the prerequisite for all matching. Without it, every match attempt falls back to ADT-dependent or bounding-box-only approaches, both of which are proven broken.
+**Why P1**: The surface DB is the prerequisite for all matching. Without it, every match attempt falls back to ADT-dependent or bounding-box-only approaches, both of which are proven broken.
 
-**Independent Test**: Build the DB from the staged 3.3.5 client. Verify GoldshireInn.wmo produces a fingerprint with sorted dimensions ~30×32×60 and a convex hull footprint matching its known L-shaped plan. Verify ≥500 WMO roots have valid fingerprints (non-degenerate hulls, non-zero footprint area).
+**Independent Test**: Build the DB from the staged 3.3.5 client. Verify GoldshireInn.wmo produces a surface histogram that matches the PM4 CK24 group for GoldshireInn. Verify ≥500 WMO roots have valid surface fingerprints (≥1 triangle).
 
 **Acceptance Scenarios**:
 
 1. **Given** the staged client at `output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft`,
-   **When** I run `pm4 build-wmo-fingerprint-db --archive-root <staged> --output <db.json>`,
-   **Then** the output DB contains ≥500 WMO root fingerprints, each with: convex hull footprint (PCA-normalized), sorted dimensions, bounds, footprint area, surface count, vertex count, group count.
+   **When** I run `pm4 build-wmo-surface-db --archive-root <staged> --output <db.json>`,
+   **Then** the output DB contains ≥500 WMO root fingerprints, each with: edge-length + area histogram, triangle count, vertex count, group count, and source WMO path.
 
 2. **Given** a WMO with multiple groups (e.g., ND_IRONDWARF_LARGEBUILDING with 4 groups),
-   **When** the fingerprint DB is built,
+   **When** the surface DB is built,
    **Then** the DB contains both a merged root fingerprint AND per-group fingerprints, so multi-group WMOs can be matched at either granularity.
 
 3. **Given** a WMO with empty collision geometry (no MOVT),
-   **When** the fingerprint DB is built,
+   **When** the surface DB is built,
    **Then** the WMO is skipped with a warning, and the DB entry count reflects only WMOs with valid collision geometry.
 
 ---
 
-### User Story 2 — PM4 CK24 Fingerprint Extraction (P1)
+### User Story 2 — PM4 CK24 Surface Triangle Extraction (P1)
 
 **As a** PM4 researcher,
-**I want** to extract the same rotation-invariant fingerprint from each PM4 CK24 group,
+**I want** to extract the same transform-invariant surface triangle histogram from each PM4 CK24 group,
 **So that** PM4 fingerprints and WMO fingerprints are directly comparable via the same correlation math.
 
-**Why P1**: The fingerprint extraction must be symmetric — PM4 and WMO must produce fingerprints in the same signal space for `EvaluateMetrics` to produce meaningful scores.
+**Why P1**: The extraction must be symmetric — PM4 and WMO must produce fingerprints in the same signal space for matching to produce meaningful scores.
 
-**Independent Test**: Extract fingerprints from all 616 development PM4s. Verify the 1604 CK24 groups produce fingerprints with non-degenerate convex hulls. Verify OID 52202 (spans 8 tiles) produces per-tile fingerprints whose PCA-normalized hulls are approximately identical across tiles (confirming rotation invariance).
+**Independent Test**: Extract fingerprints from all 616 development PM4s. Verify the 1604 CK24 groups produce non-empty histograms. Verify OID 52202 (spans 8 tiles) produces per-tile histograms that are approximately identical across tiles (confirming transform invariance).
 
 **Acceptance Scenarios**:
 
 1. **Given** the 616 development PM4 files at `test_data/development/World/Maps/development`,
-   **When** I run `pm4 extract-pm4-fingerprints --input <dir> --output <fingerprints.json>`,
-   **Then** the output contains one fingerprint per CK24 group (1604 entries), each with: PCA-normalized convex hull footprint, sorted dimensions, bounds, footprint area, surface count, vertex count, CK24 type, CK24 object ID.
+   **When** I run `pm4 extract-pm4-surfaces --input <dir> --output <fp.json>`,
+   **Then** the output contains one fingerprint per CK24 group (1604 entries), each with: edge-length + area histogram, triangle count, vertex count, CK24 type, CK24 object ID.
 
 2. **Given** a CK24 group that spans multiple tiles (same OID on different tiles),
-   **When** I compare the PCA-normalized hulls from each tile,
-   **Then** the hull overlap ratio is ≥0.90 (confirming the normalization is rotation-invariant and the same object produces the same fingerprint regardless of tile placement).
+   **When** I compare the histograms from each tile,
+   **Then** the histogram intersection is ≥0.90 (confirming the same object produces the same fingerprint regardless of tile placement).
 
-3. **Given** a CK24 group with <3 vertices or degenerate geometry,
-   **When** fingerprint extraction runs,
+3. **Given** a CK24 group with <3 vertices or no surfaces,
+   **When** surface extraction runs,
    **Then** the group is skipped with a warning, not crashing the batch.
 
 ---
 
-### User Story 3 — Fingerprint Matching Without ADT (P1)
+### User Story 3 — Surface Histogram Matching Without ADT (P1)
 
 **As a** PM4 researcher,
-**I want** to match PM4 CK24 fingerprints against the WMO fingerprint database using `Pm4CorrelationMath.EvaluateMetrics` + `CompareCandidateScores`, with no ADT input,
+**I want** to match PM4 CK24 surface histograms against the WMO surface database using histogram intersection + F1 scoring, with no ADT input,
 **So that** I can identify which WMO each CK24 group corresponds to on ALL 616 tiles, including the 222 PM4-only tiles.
 
 **Why P1**: This is the core deliverable. The matching must work without ADT. ADT is only used for validation (User Story 4).
 
-**Independent Test**: Run matching on tile `development_24_35` (known Goldshire area). Verify GoldshireInn.wmo is the top-1 match for the CK24 group with sorted dimensions ~30×32×60, with footprint overlap ≥0.80 and a clear margin over the second-best candidate.
+**Independent Test**: Run matching on the development corpus. Verify GoldshireInn.wmo is a top-3 match for the Goldshire CK24 group on tile 24_35. Verify no Ironforge/Darnassis false positives appear on tiles where those WMOs are not placed.
 
 **Acceptance Scenarios**:
 
-1. **Given** a PM4 fingerprint file and a WMO fingerprint DB,
-   **When** I run `pm4 match-fingerprints --pm4-fingerprints <fp.json> --wmo-db <db.json> --output <matches.json>`,
-   **Then** each CK24 group gets a ranked list of WMO candidates with `Pm4CorrelationMetrics` (footprint overlap, footprint distance, planar gap, vertical gap, center distance) and a match status (Matched/Ambiguous/Unresolved).
+1. **Given** a PM4 surface fingerprint file and a WMO surface DB,
+   **When** I run `pm4 match-surfaces --pm4-fingerprints <fp.json> --wmo-db <db.json> --output <matches.json>`,
+   **Then** each CK24 group gets a ranked list of WMO candidates with histogram intersection, PM4 coverage, WMO coverage, symmetric F1 score, and a match status (Matched/Ambiguous/Unresolved).
 
 2. **Given** a CK24 group of type 0x42/0x43 (WMO),
    **When** matching runs,
-   **Then** only WMO fingerprints are considered as candidates (type-filtered), and the top candidate has footprint overlap ≥0.45 OR is flagged Ambiguous if the top-2 are within 0.03.
+   **Then** only WMO fingerprints are considered as candidates (type-filtered), and the top candidate has F1 ≥ a tunable threshold OR is flagged Ambiguous if the top-2 are within the ambiguity window.
 
 3. **Given** a CK24 group of type 0x40/0x41 (M2),
    **When** matching runs,
-   **Then** M2 fingerprints are considered (if M2 fingerprint extraction is implemented) or the group is flagged as `Ineligible` with a clear rationale (if M2 fingerprints are not yet in the DB).
+   **Then** M2 fingerprints are considered (if M2 surface extraction is implemented) or the group is flagged as `Ineligible` with a clear rationale (if M2 fingerprints are not yet in the DB).
 
 4. **Given** the 222 PM4-only tiles (no ADT),
    **When** matching runs on all 616 tiles,
@@ -132,96 +133,118 @@ Fingerprint signals (extracted via `Pm4CorrelationMath.BuildObjectStatesFromGeom
 ### User Story 4 — Validation Against ADT Ground Truth (P2)
 
 **As a** PM4 researcher,
-**I want** to validate fingerprint-DB matches on tiles where ADT ground truth exists,
-**So that** I can measure match accuracy and tune the scoring thresholds.
+**I want** to validate surface-DB matches on tiles where ADT ground truth exists,
+**So that** I can measure match accuracy, detect false positives, and tune the scoring thresholds.
 
 **Why P2**: Validation requires the matching to work first (P1). ADT is used ONLY as ground truth, never as a matching input.
 
-**Independent Test**: On tile `development_00_00`, compare fingerprint-DB top-1 matches against ADT MODF/MDDF placement overlaps. Report precision@1, precision@3, and coverage.
+**Independent Test**: On tiles with ADT placements, compare surface-DB top-1/top-3 matches against ADT MODF/MDDF placement overlaps. Report precision@1, precision@3, and coverage.
 
 **Acceptance Scenarios**:
 
-1. **Given** fingerprint-DB matches for tile 00_00 and ADT ground truth placements for tile 00_00,
-   **When** I run `pm4 validate-matches --matches <matches.json> --adt-ground-truth <tile.adt>`,
+1. **Given** surface-DB matches for the development corpus and ADT ground truth for ADT-backed tiles,
+   **When** I run `pm4 validate-matches --matches <matches.json> --pm4-dir <dir> --archive-root <staged> --output <report.json>`,
    **Then** a report is produced with: precision@1, precision@3, coverage, and per-CK24-group match-vs-ground-truth comparison.
 
-2. **Given** the validation report shows precision@1 < 0.50,
+2. **Given** the validation report shows false positives (e.g., a WMO matched to a tile where it is not placed),
    **When** I examine the failures,
-   **Then** the failure cases are categorized (dimension collision, PCA axis flip, wrong type filter, degenerate hull) so the scoring can be tuned.
+   **Then** the failure cases are categorized (histogram collision, missing WMO in DB, multi-group WMO, degenerate geometry) so the scoring can be tuned.
 
 ---
 
-### User Story 5 — PM4 Generator for Any WMO (P3)
+### User Story 5 — Stronger Disambiguation Signals (P2)
 
-**As a** terrain pipeline developer,
-**I want** a CLI tool that takes a WMO file path and produces a valid PM4 file,
-**So that** I can generate PM4 collision data for any WMO without needing game client PM4 files.
+**As a** PM4 researcher,
+**I want** to add triangle area, surface normal, and MSUR plane height to the histogram key,
+**So that** edge-length histogram collisions (e.g., GoldshireInn on tile 0_2) are reduced and the 956 ambiguous cases are resolved.
 
-**Why P3**: This is the end goal. It depends on the correlation analysis from P1/P2 confirming the geometric relationship between PM4 and WMO collision. (Already partially implemented — `Pm4Generator.cs` exists.)
+**Why P2**: Edge-length-only histograms are too coarse. Different WMOs with similarly-sized triangles collide. Adding area, normal, and surface structure distinguishes them.
 
-**Independent Test**: Generate PM4 for ND_IRONDWARF_LARGEBUILDING.WMO, then verify the output PM4 has the same surface count, vertex count, and CK24 structure as the game client's original PM4 data for that WMO.
+**Independent Test**: After adding area to the histogram key, re-run matching. Verify the GoldshireInn false positive on tile 0_2 is eliminated or downranked, while true GoldshireInn matches remain high.
 
 **Acceptance Scenarios**:
 
-1. **Given** a WMO file with known collision geometry,
-   **When** I run `pm4 generate --wmo path/to/wmo.wmo --output out.pm4`,
-   **Then** the output file is a valid PM4 with MSVT/MSVI/MSUR/MSCN/MSLK chunks.
+1. **Given** a surface match run with edge-length-only histograms,
+   **When** I re-run with `(edge lengths, triangle area)` as the histogram key,
+   **Then** the number of ambiguous groups decreases and the number of known false positives decreases.
 
-2. **Given** generated PM4 data for a WMO,
-   **When** I overlay it with the original game client PM4 for the same WMO,
-   **Then** the vertex positions match within ≤0.1 unit tolerance.
+2. **Given** PM4 MSUR surfaces with Normal + Height fields,
+   **When** the histogram key includes `(normal, height, edge lengths, area)`,
+   **Then** floor vs wall vs ceiling surfaces are distinguishable, reducing mismatches between buildings with similar footprints but different vertical structure.
+
+---
+
+### User Story 6 — Placement Recovery for ADT-Less Tiles (P3)
+
+**As a** terrain pipeline developer,
+**I want** to take a matched WMO/M2 asset and the PM4 surfaces that matched it, and recover a MODF/MDDF placement entry,
+**So that** I can regenerate ADT placement data for tiles where ADT does not exist.
+
+**Why P3**: This is the end goal. It depends on the correlation analysis from P1/P2 confirming the geometric relationship between PM4 and WMO collision, and on disambiguation (P2) being strong enough to trust matches.
+
+**Independent Test**: For a tile where ADT exists, run the full pipeline: surface match → identify WMO → extract placement transform from PM4 → write MODF entry → compare to the original ADT MODF entry. Position/rotation should match within a small tolerance.
+
+**Acceptance Scenarios**:
+
+1. **Given** a trusted surface match between a PM4 CK24 group and a WMO,
+   **When** I run placement recovery,
+   **Then** the output MODF entry contains the correct model path, position, rotation, and scale derived from the PM4 surface geometry.
+
+2. **Given** a PM4-only tile (no ADT),
+   **When** the full pipeline runs,
+   **Then** the output is a synthetic ADT with MODF/MDDF entries for all matched assets, ready for manual review or further processing.
 
 ## Requirements
 
 ### Functional Requirements
 
-- **FR-001**: System MUST read WMO collision geometry (MOVT/MOVI/MOPY) from WMO root and group files via `WmoRenderDocumentReader` / `WmoGroupMeshDetailReader` and compute a per-WMO-root merged fingerprint AND per-group fingerprints.
-- **FR-002**: System MUST read PM4 CK24 groups (MSVT/MSVI/MSUR) and compute one fingerprint per CK24 group.
-- **FR-003**: Fingerprint extraction MUST use `Pm4CorrelationMath.BuildObjectStatesFromGeometry` (or equivalent) to compute: convex hull footprint, bounds, footprint area, center.
-- **FR-004**: Fingerprint extraction MUST PCA-normalize the geometry (center at centroid, align to principal axes) before hull extraction, so footprints are rotation-invariant. Both PCA axis flip candidates must be tried for near-symmetric shapes.
-- **FR-005**: Fingerprint MUST include topology signals: surface count, total index count, vertex count, CK24 type byte, TypeFlags profile.
-- **FR-006**: Fingerprint MUST include sorted dimensions (rotation-invariant AABB span) as a fast prefilter signal.
-- **FR-007**: System MUST serialize the WMO fingerprint database to a JSON file on disk, loadable by the matching command without re-reading WMO files.
-- **FR-008**: System MUST serialize PM4 fingerprints to a JSON file on disk, loadable by the matching command.
-- **FR-009**: Matching MUST use `Pm4CorrelationMath.EvaluateMetrics` to compute `Pm4CorrelationMetrics` (planar gap, vertical gap, center distance, planar overlap ratio, volume overlap ratio, footprint overlap ratio, footprint area ratio, footprint distance) for each PM4↔WMO fingerprint pair.
-- **FR-010**: Matching MUST use `Pm4CorrelationMath.CompareCandidateScores` to rank WMO candidates per PM4 CK24 group.
-- **FR-011**: Matching MUST type-filter candidates: 0x42/0x43/0xC0-0xC3 CK24 groups match against WMO fingerprints only; 0x40/0x41 match against M2 fingerprints (when available) or are flagged Ineligible.
-- **FR-012**: Matching MUST apply a sorted-dimension prefilter (reject WMOs whose sorted dimensions differ by >25% on any axis) before computing full footprint overlap, for performance.
-- **FR-013**: Matching MUST NOT use ADT placement data, world position, `ReferencePosition`, `TileCoordinates`, or any position-dependent signal as a scoring input. ADT is ONLY used in validation (FR-014).
-- **FR-014**: Validation MUST compare fingerprint-DB matches against ADT MODF/MDDF ground truth on tiles where ADT exists, and report precision@1, precision@3, coverage, and failure categorization.
+- **FR-001**: System MUST read WMO collision geometry (MOVT/MOVI/MOPY) from WMO root and group files via `WmoRenderDocumentReader` / `WmoGroupMeshDetailReader` and compute a per-WMO-root merged surface histogram AND per-group surface histograms.
+- **FR-002**: System MUST read PM4 CK24 groups (MSVT/MSVI/MSUR) and compute one surface histogram per CK24 group.
+- **FR-003**: Surface extraction MUST triangulate PM4 MSUR convex polygon surfaces into triangle fans, and read WMO MOVI indices as independent triangles.
+- **FR-004**: Surface extraction MUST compute a transform-invariant geometric hash per triangle from sorted edge lengths (binned to integers). Triangles with zero area MUST be skipped.
+- **FR-005**: Surface extraction MUST aggregate per-triangle hashes into a histogram per CK24 group / per WMO root / per WMO group.
+- **FR-006**: Surface fingerprint MUST include topology signals: triangle count, total index count, vertex count, CK24 type byte, TypeFlags profile.
+- **FR-007**: Matching MUST use histogram intersection between PM4 and WMO histograms, producing PM4 coverage, WMO coverage, and symmetric F1 score.
+- **FR-008**: Matching MUST type-filter candidates: 0x42/0x43/0xC0-0xC3 CK24 groups match against WMO fingerprints only; 0x40/0x41 match against M2 fingerprints (when available) or are flagged Ineligible.
+- **FR-009**: Matching MUST NOT use ADT placement data, world position, `ReferencePosition`, `TileCoordinates`, or any position-dependent signal as a scoring input. ADT is ONLY used in validation (FR-014).
+- **FR-010**: System MUST serialize the WMO surface database to a JSON file on disk, loadable by the matching command without re-reading WMO files.
+- **FR-011**: System MUST serialize PM4 surface fingerprints to a JSON file on disk, loadable by the matching command.
+- **FR-012**: Matching MUST classify each CK24 group as Matched, Ambiguous, Unresolved, or Ineligible based on tunable score and ambiguity-window thresholds.
+- **FR-013**: Validation MUST compare surface-DB matches against ADT MODF/MDDF ground truth on tiles where ADT exists, and report precision@1, precision@3, coverage, and failure categorization.
+- **FR-014**: Stronger-disambiguation iteration MUST support extending the histogram key with additional per-triangle signals (area, normal, MSUR height) without rewriting the matching core.
 - **FR-015**: System MUST generate PM4 from WMO collision data: MSVT from MOVT, MSVI from MOVI, MSUR from triangulated groups, MSCN from placement origin, MSLK from edge connectivity. (Downstream — already partially implemented.)
 - **FR-016**: System MUST assign correct CK24 keys (type byte + object ID convention) to generated PM4 groups.
 
 ### Key Entities
 
-- **WMO Fingerprint**: Rotation-invariant geometric signature of a WMO's collision geometry. Computed from MOVT/MOVI via PCA normalization + convex hull. Stored in fingerprint DB.
-- **PM4 Fingerprint**: Same signature computed from a PM4 CK24 group's MSVT/MSVI/MSUR. Directly comparable to WMO fingerprints.
-- **CK24 Group**: A cluster of collision surfaces in the PM4. Keyed by a 24-bit value: high byte = type (0x40/0x41=M2, 0x42/0x43=WMO, 0xC0-C3=WMO nav), low 16 bits = object ID.
-- **PCA Normalization**: Center geometry at centroid, align principal axes via PCA on XY-projected points. Produces a canonical rotation-invariant local frame. Both axis-flip candidates are tried for near-symmetric shapes.
-- **Convex Hull Footprint**: The convex hull of the XY-projected geometry points after PCA normalization. Used for `ComputeConvexFootprintOverlapRatio` (convex polygon clipping intersection) and `ComputeSymmetricFootprintDistance` (nearest-neighbor hull distance).
-- **Sorted Dimensions**: The three AABB spans (dx, dy, dz) sorted ascending. Rotation-invariant. Used as a fast prefilter.
-- **TypeFlags Profile**: Distribution of MSLK.TypeFlags values (0x03=M2 top, 0x10=interior floor, 0x12=exterior solid) across surfaces in a CK24 group. Semantic fingerprint for type consistency checking.
+- **WMO Surface Fingerprint**: Transform-invariant geometric signature of a WMO's collision triangles. Computed from MOVT/MOVI via edge-length histograms. Stored in surface DB.
+- **PM4 Surface Fingerprint**: Same signature computed from a PM4 CK24 group's triangulated MSUR surfaces. Directly comparable to WMO fingerprints.
+- **CK24 Group**: A cluster of collision surfaces in the PM4. Keyed by a 24-bit value: high byte = type (0x40/0x41=M2, 0x42/0x43=WMO, 0xC0-C3=WMO nav variants), low 16 bits = object ID.
+- **Triangle Hash**: Sorted edge lengths of a triangle, binned to integers. Transform-invariant under translation, rotation, and scale (scale invariance comes from binning ratios, or absolute lengths if scale is preserved).
+- **Histogram Intersection**: Sum of min(PM4 bin count, WMO bin count) normalized by total bin count. Measures how much of the WMO's triangle repertoire is present in the PM4 group.
+- **Symmetric F1**: Harmonic mean of PM4 coverage and WMO coverage. Penalizes both missing PM4 triangles and missing WMO triangles.
 - **MOVT/MOVI**: WMO group collision vertices and indices. The raw collision mesh of a WMO group.
-- **MSVT/MSVI/MSUR**: PM4 collision vertices, indices, and surface records. The raw collision mesh of a CK24 group.
+- **MSVT/MSVI/MSUR**: PM4 collision vertices, indices, and surface records. MSUR surfaces are convex polygons (3–12 indices) that must be fan-triangulated.
 
 ## Success Criteria
 
 ### Measurable Outcomes
 
-- **SC-001**: WMO fingerprint DB contains ≥500 WMO root fingerprints with valid (non-degenerate) convex hull footprints.
-- **SC-002**: PM4 fingerprint extraction produces 1604 CK24 group fingerprints with non-degenerate hulls.
-- **SC-003**: On tile 24_35 (Goldshire), GoldshireInn.wmo is the top-1 match for the ~30×32×60 CK24 group with footprint overlap ≥0.80.
+- **SC-001**: WMO surface DB contains ≥500 WMO root fingerprints with valid (non-empty) triangle histograms. Stretch: ≥1900 after fixing archive enumeration / listfile gap.
+- **SC-002**: PM4 surface extraction produces 1604 CK24 group fingerprints with non-empty histograms.
+- **SC-003**: No false positives on known-negative cases: Ironforge and Darnassis do not appear as top-3 matches on development tiles where they are not placed.
 - **SC-004**: On PM4-only tiles (no ADT), matching produces the same match rate as ADT-backed tiles (no degradation from missing ADT).
-- **SC-005**: Validation on ADT-backed tiles shows precision@1 ≥ 0.40 and precision@3 ≥ 0.60 (baseline; to be tuned).
-- **SC-006**: Multi-tile OID (e.g., 52202 spanning 8 tiles) produces PCA-normalized hulls with cross-tile overlap ≥0.90, confirming rotation invariance.
-- **SC-007**: Matching the full 616-PM4 corpus against the WMO DB completes in <60 seconds (sorted-dimension prefilter + footprint overlap on survivors only).
+- **SC-005**: Validation on ADT-backed tiles shows P@3 ≥ 10% as a baseline for edge-length-only histograms; area-only improves P@3 to ~25% with fine binning (area-bin-size=1.0) at the cost of P@1; full P@3 ≥ 60% requires Phase 7 (area + normal + height).
+- **SC-006**: Multi-tile OID (e.g., 52202 spanning 8 tiles) produces cross-tile histogram overlap ≥0.90, confirming transform invariance.
+- **SC-007**: Matching the full 616-PM4 corpus against the WMO DB completes in <60 seconds.
+- **SC-008**: Ambiguous group count is reduced from 956 to <400 by stronger disambiguation signals. With area-bin-size=1.0 ambiguous drops to 199; with area-bin-size=10.0 ambiguous is 371.
 
 ## Assumptions
 
-- PM4 vertices are in world space for 611/616 files; 5 use tile-local. PCA normalization makes this irrelevant — both world-space and tile-local geometries are normalized to the same canonical frame.
-- WMO collision vertices (MOVT) are in the WMO's local coordinate space. PCA normalization makes this comparable to PM4 fingerprints.
-- PCA normalization handles arbitrary yaw rotation. For near-symmetric shapes (e.g., square buildings), both principal-axis flip candidates are tried and the best match is kept.
-- Sorted dimensions serve as a fast prefilter: WMOs with >25% dimension mismatch on any axis are rejected before the expensive convex-hull overlap computation.
+- PM4 vertices are in world space for 611/616 files; 5 use tile-local. Triangle edge lengths and area are invariant to coordinate mode, so normalization is unnecessary.
+- WMO collision vertices (MOVT) are in the WMO's local coordinate space. Edge-length histograms are invariant to the local frame.
+- Edge-length histograms are a necessary but insufficient signal. They eliminate the worst hull false positives but still produce collisions; future iterations add area, normal, and height.
+- Sorted dimensions / bounding box may be used as a fast prefilter, but not as the primary matching signal.
 - Staged client root: `output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft`.
 - Reference: `gillijimproject_refactor` is read-only; code is ported/mirrored, never modified in place.
 - ADT is used ONLY for validation ground truth, never as a matching input.
@@ -229,20 +252,28 @@ Fingerprint signals (extracted via `Pm4CorrelationMath.BuildObjectStatesFromGeom
 ## Edge Cases
 
 - What happens when a WMO has no collision geometry (empty MOVT)? Skip the WMO, warn, exclude from DB.
-- What happens when a CK24 group has <3 vertices or degenerate geometry (zero-area hull)? Skip the group, warn, exclude from matching.
-- What happens when PCA produces a near-degenerate principal axis (e.g., perfectly circular footprint)? Fall back to sorted-dimension-only matching for that pair, flag as low-confidence.
-- What happens when the top-2 WMO candidates are within 0.03 score? Flag as Ambiguous, report both.
+- What happens when a CK24 group has no surfaces or <3 vertices? Skip the group, warn, exclude from matching.
+- What happens when two different WMOs produce identical edge-length histograms? Flag as Ambiguous; stronger signals (area, normal, height) are required to resolve.
+- What happens when the top-2 WMO candidates are within the ambiguity window? Flag as Ambiguous, report both.
 - What happens when a CK24 type is not 0x40/0x41/0x42/0x43/0xC0-0xC3? Flag as Ineligible, exclude from matching.
-- What happens when M2 fingerprints are not yet in the DB? 0x40/0x41 CK24 groups are flagged Ineligible with rationale "M2 fingerprint DB not yet built."
+- What happens when M2 fingerprints are not yet in the DB? 0x40/0x41 CK24 groups are flagged Ineligible with rationale "M2 surface DB not yet built."
+- What happens when a PM4 MSUR surface is a quad or n-gon (IndexCount > 3)? Fan-triangulate from the first vertex; warn if the polygon is non-convex.
+- What happens when a matched CK24 group spans multiple tiles? Each tile's partial surface set is matched independently; multi-tile ObjectIds may need merging before placement recovery.
 
 ## Cross-References
 
 - `wow-viewer/docs/architecture/pm4-chunk-semantics.md` — authoritative chunk-by-chunk semantics
 - `wow-viewer/docs/architecture/pm4-region-aware-object-grouping-2026-05-21.md` — CK24 grouping and MSHD.Field04
-- `wow-viewer/src/core/WowViewer.Core.PM4/Services/Pm4CorrelationMath.cs` — THE correlation math (fingerprint extraction + matching)
-- `wow-viewer/src/core/WowViewer.Core.PM4/Models/Pm4CorrelationContracts.cs` — correlation contracts (ObjectState, Metrics, CandidateScore)
-- `wow-viewer/src/core/WowViewer.Core.PM4/Matching/Pm4AssetMatchScorer.cs` — existing scorer (to be refactored: remove ADT-dependent signals, use Pm4CorrelationMath matching)
+- `wow-viewer/src/core/WowViewer.Core.PM4/Services/Pm4SurfaceCorrelationExtractor.cs` — surface triangulation + histogram extraction
+- `wow-viewer/src/core/WowViewer.Core.PM4/Services/Pm4SurfaceCorrelationMatcher.cs` — histogram intersection + F1 scoring
+- `wow-viewer/src/core/WowViewer.Core.PM4/Models/Pm4SurfaceCorrelationContracts.cs` — surface correlation data models
+- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Pm4SurfaceBuildSupport.cs` — WMO surface DB builder + PM4 extraction CLI support
+- `wow-viewer/src/core/WowViewer.Core.PM4/Services/Pm4Generator.cs` — downstream PM4 generator from WMO collision
 - `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupMeshDetailReader.cs` — WMO group MOVT/MOVI reader
 - `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoRenderDocumentReader.cs` — WMO root + embedded group reader
-- `wow-viewer/src/core/WowViewer.Core.PM4/Services/Pm4PlacementMath.cs` — coordinate conversion (still needed for generator, NOT for matching)
-- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Pm4CorrelateModelsSupport.cs` — legacy ADT-based support (to be superseded, not deleted — kept for validation ground truth)
+- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Pm4CorrelateModelsSupport.cs` — legacy ADT-based support (kept for validation ground truth)
+
+## Legacy / Abandoned Approaches
+
+- **Hull/footprint matching (`Pm4FingerprintExtractor`, `Pm4FingerprintMatcher`)**: Abandoned due to false positives. Code kept as reference but superseded by surface correlation.
+- **ADT-based correlation (`pm4 correlate-models`, `sweep-correlate`, `match-assets`)**: Kept for validation ground truth only. Not used as primary matchers.

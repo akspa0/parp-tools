@@ -15,7 +15,8 @@ public static class Pm4SurfaceCorrelationExtractor
         string assetId,
         string assetPath,
         string assetKind,
-        float binSize = 1.0f)
+        float edgeBinSize = 1.0f,
+        float areaBinSize = 1.0f)
     {
         ArgumentNullException.ThrowIfNull(msvt);
         ArgumentNullException.ThrowIfNull(msvi);
@@ -68,7 +69,7 @@ public static class Pm4SurfaceCorrelationExtractor
         float totalArea = 0;
         foreach (TriangleFeature t in triangles)
         {
-            string key = t.Key(binSize).HistogramKey;
+            string key = t.Key(edgeBinSize, areaBinSize).HistogramKey;
             histogram[key] = histogram.TryGetValue(key, out int v) ? v + 1 : 1;
             totalArea += t.Area;
         }
@@ -89,7 +90,8 @@ public static class Pm4SurfaceCorrelationExtractor
         IReadOnlyList<WmoGroupFaceMaterialDetail>? faceMaterials,
         int groupIndex,
         string wmoPath,
-        float binSize = 1.0f)
+        float edgeBinSize = 1.0f,
+        float areaBinSize = 1.0f)
     {
         ArgumentNullException.ThrowIfNull(movt);
         ArgumentNullException.ThrowIfNull(movi);
@@ -139,7 +141,7 @@ public static class Pm4SurfaceCorrelationExtractor
         float totalArea = 0;
         foreach (TriangleFeature t in triangles)
         {
-            string key = t.Key(binSize).HistogramKey;
+            string key = t.Key(edgeBinSize, areaBinSize).HistogramKey;
             histogram[key] = histogram.TryGetValue(key, out int v) ? v + 1 : 1;
             totalArea += t.Area;
         }

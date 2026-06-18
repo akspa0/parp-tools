@@ -57,4 +57,6 @@ The matcher needs a stronger geometric signal. Options to explore:
 - `src/core/WowViewer.Core.PM4/Services/Pm4SurfaceCorrelationMatcher.cs` — histogram intersection + F1
 - `tools/inspect/WowViewer.Tool.Inspect/Pm4SurfaceBuildSupport.cs` — WMO surface DB builder + PM4 extraction
 - `src/core/WowViewer.Core.PM4/Services/Pm4Generator.cs` — PM4 generator from WMO collision (plane clustering)
-- `specs/065-pm4-correlation-to-world-assets/` — spec (needs updating: surface correlation is primary, hull abandoned, matcher still produces false positives)
+- `specs/065-pm4-correlation-to-world-assets/` — spec updated 2026-06-17: surface triangle correlation is primary, hull/footprint approach abandoned, legacy commands kept for reference.
+- Phase 6 (add triangle area to histogram key) complete 2026-06-18: area-bin-size=1.0 eliminates GoldshireInn tile 0_2 false positive and boosts P@3 10.3%→25.3%, but P@1 drops to 0%; Phase 7 (normal + height) needed to recover recall.
+- `pm4 validate-matches` fixed to deserialize `Pm4SurfaceMatchOutput` (surface match format), not the old fingerprint-match format.

@@ -1,15 +1,17 @@
-# Implementation Plan: PM4 Correlation to World Assets & Generator
+# Implementation Plan: PM4 Surface Correlation to World Assets & Generator
 
 **Branch**: `065-pm4-correlation-to-world-assets` | **Date**: 2026-06-17 (revised) | **Spec**: `specs/065-pm4-correlation-to-world-assets/spec.md`
 
 ## Summary
 
-Build a rotation-invariant fingerprint database from WMO collision geometry (MOVT/MOVI) using `Pm4CorrelationMath`'s convex-hull footprint extraction with PCA normalization. Extract the same fingerprints from PM4 CK24 groups. Match PM4 fingerprints against the WMO DB using `EvaluateMetrics` + `CompareCandidateScores`. No ADT dependency for matching — ADT is used only for validation ground truth.
+Build a transform-invariant surface triangle database from WMO collision geometry (MOVT/MOVI) by triangulating independent triangles and hashing each triangle by sorted edge lengths. Extract the same surface triangle histograms from PM4 CK24 groups by fan-triangulating MSUR convex polygons. Match PM4 surface histograms against the WMO DB using histogram intersection + symmetric F1. No ADT dependency for matching — ADT is used only for validation ground truth.
 
-**Approach**: Fingerprint DB. Three tracks converge:
-- Track A — WMO fingerprints: read MOVT/MOVI from all WMOs in staged archive, PCA-normalize, extract convex hull + topology, serialize to DB JSON.
-- Track B — PM4 fingerprints: read MSVT/MSVI/MSUR per CK24 group, PCA-normalize, extract same signals, serialize to JSON.
-- Track C — matching: load both JSONs, sorted-dimension prefilter, `EvaluateMetrics` on survivors, `CompareCandidateScores` for ranking.
+**Current state**: Phases 1–5 are implemented and validated against the staged 3.3.5 client and development PM4 corpus. The matcher produces no hull-style false positives but still collides on edge-length-only histograms. Phase 6 is the active next step.
+
+**Approach**: Surface histogram matching. Three tracks converge:
+- Track A — WMO surface fingerprints: read MOVT/MOVI from all WMOs in staged archive, triangulate, build edge-length histograms, serialize to DB JSON.
+- Track B — PM4 surface fingerprints: read MSVT/MSVI/MSUR per CK24 group, fan-triangulate MSUR surfaces, build same histograms, serialize to JSON.
+- Track C — matching: load both JSONs, type-filter, histogram intersection → PM4 coverage, WMO coverage, symmetric F1 → rank candidates.
 
 ## Technical Context
 
@@ -23,8 +25,8 @@ Build a rotation-invariant fingerprint database from WMO collision geometry (MOV
 ## Constitution Check
 
 - **Repo independence**: all code in `wow-viewer/`. No cross-repo .csproj refs. ✓
-- **Library-first**: fingerprint extraction + PCA normalization + matching in Core.PM4, CLI in Tool.Inspect. ✓
-- **Real-data validation**: every phase validated against `output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft`. ✓
+- **Library-first**: surface extraction + histogram matching in Core.PM4, CLI in Tool.Inspect. ✓
+- **Real-data validation**: every phase validated against `output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft` and `test_data/development/World/Maps/development`. ✓
 - **No H:\CLIENTS**: clean. ✓
 - **gillijimproject_refactor is read-only**: no writes. Reference only. ✓
 - **No ADT for matching**: ADT used only in Phase 5 validation. ✓
@@ -39,107 +41,147 @@ wow-viewer/
 │   └── tasks.md
 ├── src/core/WowViewer.Core.PM4/
 │   ├── Services/
-│   │   ├── Pm4CorrelationMath.cs          # EXISTING — the right correlation math
-│   │   ├── Pm4FingerprintExtractor.cs     # NEW — PCA normalize + hull + topology signals
-│   │   ├── Pm4FingerprintMatcher.cs       # NEW — sorted-dim prefilter + EvaluateMetrics + rank
-│   │   └── Pm4Generator.cs               # EXISTING — downstream generator (Phase 6)
+│   │   ├── Pm4SurfaceCorrelationExtractor.cs   # EXISTING — triangulate + histogram
+│   │   ├── Pm4SurfaceCorrelationMatcher.cs     # EXISTING — histogram intersection + F1
+│   │   └── Pm4Generator.cs                     # EXISTING — downstream generator
 │   └── Models/
-│       ├── Pm4CorrelationContracts.cs     # EXISTING — ObjectState, Metrics, CandidateScore
-│       └── Pm4FingerprintContracts.cs     # NEW — FingerprintRecord, FingerprintDB, MatchResult
+│       └── Pm4SurfaceCorrelationContracts.cs   # EXISTING — surface correlation data models
 ├── src/core/WowViewer.Core.IO/
 │   └── Wmo/
-│       └── WmoGroupMeshDetailReader.cs    # EXISTING — MOVT/MOVI reader (used as-is)
+│       ├── WmoGroupMeshDetailReader.cs         # EXISTING — MOVT/MOVI reader
+│       └── WmoRenderDocumentReader.cs          # EXISTING — WMO root + embedded group reader
 ├── tools/inspect/WowViewer.Tool.Inspect/
-│   ├── Program.cs                          # EXTEND: pm4 build-wmo-fingerprint-db, extract-pm4-fingerprints, match-fingerprints, validate-matches
-│   └── Pm4CorrelateModelsSupport.cs        # KEEP for validation ground truth (ADT-based)
+│   ├── Program.cs                              # EXTEND: pm4 build-wmo-surface-db, extract-pm4-surfaces, match-surfaces, validate-matches
+│   └── Pm4SurfaceBuildSupport.cs               # EXISTING — WMO DB builder + PM4 extraction
 └── tests/
-    └── WowViewer.Core.PM4.Tests/           # EXTEND: fingerprint extraction + matching tests
+    └── WowViewer.Core.PM4.Tests/               # EXTEND: surface extraction + matching tests
 ```
 
 ## Implementation Phases
 
-### Phase 1: Fingerprint Extraction Library (P0 — prerequisite)
+### Phase 1: Surface Extraction Library (DONE)
 
-Build `Pm4FingerprintExtractor` and `Pm4FingerprintContracts` in Core.PM4.
+Built `Pm4SurfaceCorrelationExtractor`, `Pm4SurfaceCorrelationMatcher`, and `Pm4SurfaceCorrelationContracts` in Core.PM4.
 
-**1a. Pm4FingerprintContracts.cs** — data models:
-- `Pm4FingerprintRecord`: AssetId, AssetPath, AssetKind, Ck24Type, SortedDim0/1/2, Bounds, Center, FootprintHull (PCA-normalized), FootprintArea, SurfaceCount, VertexCount, IndexCount, TypeFlagsProfile, GroupCount, SourceLabel.
-- `Pm4FingerprintDatabase`: list of records + metadata (build date, archive root, WMO count).
-- `Pm4FingerprintMatchResult`: CK24 group info + ranked candidates with `Pm4CorrelationMetrics` + status.
+**What landed**:
+- `Pm4SurfaceCorrelationContracts.cs` — `SurfaceCorrelationFingerprint`, `SurfaceMatchCandidate`, `SurfaceMatchResult`.
+- `Pm4SurfaceCorrelationExtractor.cs` — fan-triangulate PM4 MSUR surfaces, read WMO MOVI triangles, build edge-length histograms.
+- `Pm4SurfaceCorrelationMatcher.cs` — histogram intersection, PM4 coverage, WMO coverage, symmetric F1.
+- Unit tests for triangulation and histogram invariance.
 
-**1b. Pm4FingerprintExtractor.cs** — extraction logic:
-- `ExtractFromTriangles(List<Vector3> vertices, List<ushort> indices, ...)` → `Pm4FingerprintRecord`.
-- PCA normalization: center at centroid, compute covariance of XY-projected points, eigenvectors → principal axes, rotate to align. Try both flip candidates for near-symmetric shapes.
-- Use `Pm4CorrelationMath.BuildFootprintHull` on PCA-normalized points.
-- Compute sorted dimensions from AABB.
-- Compute topology signals (surface count, vertex count, index count).
+### Phase 2: WMO Surface Database (DONE)
 
-**1c. Unit tests** — synthetic geometry (known box, known L-shape, rotated copy) → verify PCA normalization produces identical hulls regardless of input rotation.
+Built the WMO surface DB from the staged archive.
 
-### Phase 2: WMO Fingerprint Database (P1)
+**What landed**:
+- `Pm4SurfaceBuildSupport.BuildWmoSurfaceDatabaseAsync` reads WMO roots + groups via `WmoRenderDocumentReader`, merges group geometry for root fingerprints, and extracts per-group fingerprints.
+- CLI `pm4 build-wmo-surface-db --archive-root <staged> [--bin-size <1.0>] [--area-bin-size <1.0>] --output <db.json>`.
+- Validated: 503 WMO roots + 2287 groups = 2790 fingerprints, 13M triangles, 11MB JSON.
 
-Build the WMO fingerprint DB from the staged archive.
+**Known gap**: archive enumeration via `GetAllKnownFiles()` finds only 503/1985 WMO roots. This is deferred to Phase 8.
 
-**2a. WMO collision geometry loader** — use `WmoRenderDocumentReader` to read each WMO root + embedded groups. Collect MOVT vertices + MOVI indices across all groups. Produce merged root fingerprint + per-group fingerprints.
+### Phase 3: PM4 Surface Extraction (DONE)
 
-**2b. CLI command** `pm4 build-wmo-fingerprint-db --archive-root <staged> --output <db.json>`:
-- Enumerate WMO roots via archive catalog (fix the 506/1985 enumeration gap — use listfile-based enumeration if archive catalog misses WMOs).
-- For each WMO: read collision geometry, extract fingerprint via `Pm4FingerprintExtractor`, add to DB.
-- Serialize DB to JSON.
+Extracted surface fingerprints from all 616 development PM4s.
 
-**2c. Validate** — run on staged 3.3.5 client. Verify ≥500 WMO fingerprints. Verify GoldshireInn.wmo fingerprint has sorted dims ~30×32×60. Report build time.
+**What landed**:
+- `Pm4SurfaceBuildSupport.BuildPm4SurfaceDatabaseAsync` groups MSUR by CK24, collects MSVT/MSVI per group, and extracts fingerprints.
+- CLI `pm4 extract-pm4-surfaces --input <dir> [--bin-size <1.0>] [--area-bin-size <1.0>] --output <fp.json>`.
+- Validated: 1604 CK24 group fingerprints, 604K triangles, 3MB JSON.
 
-### Phase 3: PM4 Fingerprint Extraction (P1)
+### Phase 4: Surface Matching (DONE)
 
-Extract fingerprints from all 616 development PM4s.
+Matched PM4 surface fingerprints against WMO DB.
 
-**3a. CLI command** `pm4 extract-pm4-fingerprints --input <dir> --output <fp.json>`:
-- Read each PM4, group MSUR by CK24, collect MSVT/MSVI per group.
-- Extract fingerprint via `Pm4FingerprintExtractor` for each CK24 group.
-- Serialize to JSON.
+**What landed**:
+- `Pm4SurfaceCorrelationMatcher.Match` type-filters candidates, computes histogram intersection + F1, ranks candidates, and assigns status.
+- CLI `pm4 match-surfaces --pm4-fingerprints <fp.json> --wmo-db <db.json> --output <matches.json>`.
+- Validated: 217 matched, 956 ambiguous, 158 unresolved, 273 ineligible.
 
-**3b. Validate** — run on 616 development PM4s. Verify 1604 fingerprints. Verify multi-tile OID 52202 produces cross-tile hull overlap ≥0.90 (PCA rotation invariance proof).
+### Phase 5: Validation Against ADT Ground Truth (DONE)
 
-### Phase 4: Fingerprint Matching (P1)
+Validated matches on ADT-backed tiles.
 
-Match PM4 fingerprints against WMO DB.
+**What landed**:
+- CLI `pm4 validate-matches --matches <matches.json> --pm4-dir <dir> --archive-root <staged> --output <report.json>`.
+- Reads ADT obj0 placements, computes ground-truth CK24↔WMO pairs via legacy ADT-based support, compares surface-DB top-1/top-3.
+- Results: P@1=1.3%, P@3=10.3%. Ironforge/Darnassis false positives eliminated.
 
-**4a. Pm4FingerprintMatcher.cs** — matching logic:
-- Load WMO DB + PM4 fingerprints.
-- Type-filter: 0x42/0x43/0xC0-0xC3 → WMO candidates; 0x40/0x41 → M2 candidates (or Ineligible).
-- Sorted-dimension prefilter: reject candidates with >25% dim mismatch on any axis.
-- For survivors: `Pm4CorrelationMath.EvaluateMetrics` on PCA-normalized hulls + bounds.
-- `Pm4CorrelationMath.CompareCandidateScores` for ranking.
-- Status: Matched (top score ≥0.45, margin >0.03), Ambiguous (margin ≤0.03), Unresolved (<0.45).
+### Phase 6: Add Triangle Area to Histogram Key (NEXT)
 
-**4b. CLI command** `pm4 match-fingerprints --pm4-fingerprints <fp.json> --wmo-db <db.json> --output <matches.json>`:
-- Run matcher, serialize results.
+Reduce edge-length-only histogram collisions by adding triangle area to the geometric hash.
 
-**4c. Validate** — run on tile 24_35. Verify GoldshireInn.wmo is top-1 for the ~30×32×60 group with footprint overlap ≥0.80. Run on all 616 tiles. Report match rate.
+**6a. Extend the histogram key**:
+- Change triangle hash from `(int edge0, int edge1, int edge2)` to `(int edge0, int edge1, int edge2, int areaBin)`.
+- Bin area to a small integer (e.g., `int areaBin = (int)Math.Round(area / areaBinSize)`).
+- Update `Pm4SurfaceCorrelationExtractor` to compute triangle area during triangulation.
+- Add `--area-bin-size` CLI option to `build-wmo-surface-db` and `extract-pm4-surfaces`.
+- Update `Pm4SurfaceCorrelationMatcher` to use the new histogram key.
 
-### Phase 5: Validation Against ADT Ground Truth (P2)
+**6b. Validate**:
+- Re-run `build-wmo-surface-db --area-bin-size <value>`, `extract-pm4-surfaces --area-bin-size <value>`, `match-surfaces`, `validate-matches`.
+- Tested `area-bin-size=1.0` and `area-bin-size=10.0`.
+- `area-bin-size=1.0`: GoldshireInn false positive on tile 0_2 eliminated; ambiguous drops from 956→199; P@3 improves 10.3%→25.3%; P@1 drops 1.3%→0.0%.
+- `area-bin-size=10.0`: GoldshireInn false positive returns; ambiguous 371; P@3=11.3%; P@1=0.0%.
+- Conclusion: fine area bin improves precision but is too strict for recall. Phase 7 (normal + height) is needed to recover P@1. Phase 6 is complete.
 
-Validate matches on ADT-backed tiles.
+### Phase 7: Add Surface Normal + MSUR Height to Histogram Key
 
-**5a. CLI command** `pm4 validate-matches --matches <matches.json> --adt-ground-truth <tile.adt> --archive-root <staged>`:
-- Read ADT MODF/MDDF placements.
-- Compute ground-truth CK24↔WMO pairs via existing `Pm4CorrelateModelsSupport.Correlate` (ADT-based, used ONLY here).
-- Compare fingerprint-DB top-1/top-3 against ground truth.
-- Report precision@1, precision@3, coverage, failure categorization.
+Further reduce ambiguity by incorporating surface orientation and vertical plane position.
 
-**5b. Tune** — if precision@1 < 0.40, examine failures, adjust prefilter threshold / PCA flip handling / scoring weights.
+**7a. Extend the histogram key**:
+- Add PM4 MSUR.Normal (as a quantized direction) and MSUR.Height to the key.
+- For WMO triangles, compute a face normal and a representative height (e.g., centroid Z).
+- The histogram key becomes `(edge lengths, area, normal bucket, height bucket)`.
 
-### Phase 6: PM4 Generator (P3 — downstream, partially done)
+**7b. Validate**:
+- Re-run the full pipeline.
+- Target: P@3 improves toward 60%.
+- Target: ambiguous group count < 400.
 
-Already implemented: `Pm4Generator.cs`, `pm4 generate-from-wmo`. Kept as-is unless correlation findings require updates. Not blocking Phases 1-5.
+### Phase 8: Fix WMO Enumeration via Listfile
 
-## Phases ordered by execution
+Expand WMO DB coverage from 503 to ≥1900 WMO roots.
+
+**8a. Listfile-based enumeration**:
+- Add `--listfile <path>` option to `pm4 build-wmo-surface-db`.
+- Read `componentfile.txt` or a provided listfile, filter `.wmo` entries that are root files (no `_` in basename).
+- Merge archive catalog results with listfile results, deduplicate.
+
+**8b. Validate**:
+- Re-run `build-wmo-surface-db` with listfile.
+- Target: ≥1900 WMO root fingerprints.
+- Re-run matching and validation; ensure P@3 does not regress due to increased candidate pool.
+
+### Phase 9: Placement Recovery / ADT Regeneration (Downstream)
+
+Use trusted surface matches and PM4 geometry to recover MODF/MDDF placements for ADT-less tiles.
+
+**9a. Placement transform recovery**:
+- Given a matched CK24 group and its WMO fingerprint, compute the rigid transform (translation, rotation, scale) that aligns WMO collision triangles to PM4 surfaces.
+- Output MODF/MDDF entry candidates.
+
+**9b. ADT regeneration**:
+- Write synthetic ADT files with recovered placements for PM4-only tiles.
+- Validate on tiles where ADT exists by comparing recovered placements to original ADT MODF/MDDF entries.
+
+**9c. Generator revisit**:
+- If correlation findings reveal a vertex-level transform between WMO collision and generated PM4, update `Pm4Generator.cs` accordingly.
+
+## Phases Ordered by Execution
 
 | Phase | What | Depends on | Outcome |
 |-------|------|-----------|---------|
-| 1 | Fingerprint extraction library (PCA + hull + contracts) | nothing | `Pm4FingerprintExtractor` + contracts + unit tests |
-| 2 | WMO fingerprint DB from staged archive | 1 | `wmo-fingerprint-db.json` with ≥500 entries |
-| 3 | PM4 fingerprint extraction from 616 files | 1 | `pm4-fingerprints.json` with 1604 entries |
-| 4 | Fingerprint matching (no ADT) | 2, 3 | `matches.json` — CK24→WMO identity table |
-| 5 | Validation against ADT ground truth | 4 | precision@1/@3 report + tuning |
-| 6 | PM4 generator (downstream) | 5 | already done; revisit if needed |
+| 1 | Surface extraction library (triangulate + histogram) | nothing | `Pm4SurfaceCorrelationExtractor` + `Matcher` + contracts + tests |
+| 2 | WMO surface DB from staged archive | 1 | `wmo-surface-db.json` with 503+ entries |
+| 3 | PM4 surface extraction from 616 files | 1 | `pm4-surfaces.json` with 1604 entries |
+| 4 | Surface matching (no ADT) | 2, 3 | `matches.json` — CK24→WMO candidates |
+| 5 | Validation against ADT ground truth | 4 | precision@1/@3 report |
+| 6 | Add triangle area to histogram key | 5 | reduced false positives / ambiguous count |
+| 7 | Add normal + height to histogram key | 6 | further improved P@3 |
+| 8 | Fix WMO enumeration via listfile | 7 | ≥1900 WMO root fingerprints |
+| 9 | Placement recovery / ADT regeneration | 8 | synthetic ADT for PM4-only tiles |
+
+## Notes on Abandoned Hull Approach
+
+The previous `Pm4FingerprintExtractor` / `Pm4FingerprintMatcher` hull/PCA approach is superseded. The corresponding CLI commands (`build-wmo-fingerprint-db`, `extract-pm4-fingerprints`, `match-fingerprints`) are kept as legacy references but are not the primary matcher. Do not invest new work in hull-based matching unless validation proves it outperforms surface correlation after disambiguation improvements.

@@ -22,18 +22,19 @@ public readonly record struct TriangleFeature(
         return new TriangleFeature(sorted[0], sorted[1], sorted[2], area);
     }
 
-    public TriangleKey Key(float binSize = 1.0f)
+    public TriangleKey Key(float edgeBinSize = 1.0f, float areaBinSize = 1.0f)
     {
         return new TriangleKey(
-            (int)MathF.Round(Edge0 / binSize),
-            (int)MathF.Round(Edge1 / binSize),
-            (int)MathF.Round(Edge2 / binSize));
+            (int)MathF.Round(Edge0 / edgeBinSize),
+            (int)MathF.Round(Edge1 / edgeBinSize),
+            (int)MathF.Round(Edge2 / edgeBinSize),
+            (int)MathF.Round(Area / areaBinSize));
     }
 }
 
-public readonly record struct TriangleKey(int Edge0Bin, int Edge1Bin, int Edge2Bin)
+public readonly record struct TriangleKey(int Edge0Bin, int Edge1Bin, int Edge2Bin, int AreaBin)
 {
-    public string HistogramKey => $"{Edge0Bin}_{Edge1Bin}_{Edge2Bin}";
+    public string HistogramKey => $"{Edge0Bin}_{Edge1Bin}_{Edge2Bin}_{AreaBin}";
 }
 
 public sealed record SurfaceCorrelationFingerprint(
@@ -55,6 +56,8 @@ public sealed record SurfaceCorrelationDatabase(
     string ArchiveRoot,
     string BuildDate,
     int WmoCount,
+    float EdgeBinSize,
+    float AreaBinSize,
     IReadOnlyList<SurfaceCorrelationFingerprint> Records);
 
 public sealed record SurfaceMatchCandidate(
@@ -86,6 +89,7 @@ public sealed record SurfaceMatchOptions(
     double MinScore = 0.50,
     double AmbiguousWindow = 0.03,
     float EdgeBinSize = 1.0f,
+    float AreaBinSize = 1.0f,
     int MaxCandidates = 10)
 {
     public static SurfaceMatchOptions Default => new();
