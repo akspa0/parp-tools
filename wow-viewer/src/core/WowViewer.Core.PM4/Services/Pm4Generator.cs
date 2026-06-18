@@ -40,37 +40,26 @@ public static class Pm4Generator
         for (int i = 0; i < worldVertices.Count; i++)
             pm4Vertices.Add(WorldToPm4Raw(worldVertices[i]));
 
-        // Weld duplicate positions so seams with split vertex indices still merge.
-        var (weldedVertices, weldedIndices) = WeldVertices(pm4Vertices, indices, tolerance: 0.001f);
-
-        // Merge coplanar connected triangles into boundary polygons, matching real PM4 surface granularity.
-        var (simplifiedVerts, simplifiedIndices, polyCounts) = SimplifyByPlaneClustering(weldedVertices, weldedIndices);
-        var (uniqueVertices, remappedIndices32) = DeduplicateVertices(simplifiedVerts, simplifiedIndices);
+        // Emit collision triangles as-is. For fingerprint matching we do not need to reproduce
+        // real PM4's exact merged polygons; we only need a comparable triangle histogram.
+        var (uniqueVertices, remappedIndices32) = DeduplicateVertices(pm4Vertices, indices);
 
         Vector3 centroid = ComputeCentroid(uniqueVertices);
 
         uint ck24 = ((uint)ck24Type << 16) | ck24ObjectId;
         uint packedParams = ((uint)ck24Type << 24) | ((uint)ck24ObjectId << 8);
 
-        List<Pm4GenerationMsur> msurEntries = new();
-        int indexCursor = 0;
-        foreach (int polyVertexCount in polyCounts)
+        List<Pm4GenerationMsur> msurEntries = new(remappedIndices32.Count / 3);
+        for (int i = 0; i + 2 < remappedIndices32.Count; i += 3)
         {
-            if (polyVertexCount < 3 || indexCursor + polyVertexCount > remappedIndices32.Count)
-            {
-                indexCursor += polyVertexCount;
-                continue;
-            }
-
-            uint i0 = remappedIndices32[indexCursor];
-            uint i1 = remappedIndices32[indexCursor + 1];
-            uint i2 = remappedIndices32[indexCursor + 2];
+            uint i0 = remappedIndices32[i];
+            uint i1 = remappedIndices32[i + 1];
+            uint i2 = remappedIndices32[i + 2];
 
             if (i0 >= (uint)uniqueVertices.Count ||
                 i1 >= (uint)uniqueVertices.Count ||
                 i2 >= (uint)uniqueVertices.Count)
             {
-                indexCursor += polyVertexCount;
                 continue;
             }
 
@@ -83,16 +72,14 @@ public static class Pm4Generator
 
             msurEntries.Add(new Pm4GenerationMsur(
                 GroupKey: 0,
-                IndexCount: (byte)polyVertexCount,
+                IndexCount: 3,
                 AttributeMask: 0,
                 Padding: 0,
                 Normal: normal,
                 Height: height,
-                MsviFirstIndex: (uint)indexCursor,
+                MsviFirstIndex: (uint)i,
                 MscnRefIndex: 0,
                 PackedParams: packedParams));
-
-            indexCursor += polyVertexCount;
         }
 
         if (msurEntries.Count == 0)

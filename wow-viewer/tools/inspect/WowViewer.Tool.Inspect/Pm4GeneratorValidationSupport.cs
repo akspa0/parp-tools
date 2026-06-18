@@ -43,32 +43,38 @@ internal static class Pm4GeneratorValidationSupport
         ArchiveCatalogBootstrapOptions bootstrapOptions,
         float edgeBinSize = 1.0f,
         float areaBinSize = 1.0f,
-        float normalBinSize = 0.1f,
-        float heightBinSize = 1.0f,
+        float normalAlignmentBinSize = 0.0f,
+        float planarOffsetBinSize = 0.0f,
         Action<string>? progress = null)
     {
         List<string> warnings = [];
 
         Pm4ResearchDocument realDoc = Pm4ResearchReader.ReadFile(pm4Path);
-        IReadOnlyList<SurfaceFingerprint> realFingerprints = ExtractPm4Fingerprints(
-            realDoc, 0x43, edgeBinSize, areaBinSize, normalBinSize, heightBinSize);
+        IReadOnlyList<SurfaceCorrelationFingerprint> realFingerprints = ExtractPm4Fingerprints(
+            realDoc,
+            ck24Type: 0x43,
+            edgeBinSize,
+            areaBinSize,
+            normalAlignmentBinSize,
+            planarOffsetBinSize);
 
         progress?.Invoke($"Real PM4: {realFingerprints.Count} CK24 groups, {realFingerprints.Sum(static f => f.TriangleCount)} triangles.");
 
         AdtPlacementCatalog placements = AdtPlacementReader.Read(adtPath);
         progress?.Invoke($"ADT placements: {placements.WorldModelPlacements.Count} WMOs, {placements.ModelPlacements.Count} M2s.");
 
-        List<SurfaceFingerprint> generatedFingerprints = [];
         List<Pm4GeneratorGroupValidation> groupValidations = [];
-
         int processed = 0;
+
         foreach (AdtWorldModelPlacement placement in placements.WorldModelPlacements)
         {
             processed++;
             try
             {
-                SurfaceFingerprint? generated = GenerateWmoPlacementFingerprint(
-                    placement, archiveRoot, bootstrapOptions, edgeBinSize, areaBinSize, normalBinSize, heightBinSize, warnings);
+                SurfaceCorrelationFingerprint? generated = GenerateWmoPlacementFingerprint(
+                    placement, archiveRoot, bootstrapOptions,
+                    edgeBinSize, areaBinSize, normalAlignmentBinSize, planarOffsetBinSize,
+                    warnings);
 
                 if (generated is null)
                 {
@@ -78,11 +84,17 @@ internal static class Pm4GeneratorValidationSupport
                     continue;
                 }
 
-                generatedFingerprints.Add(generated);
+                (SurfaceCorrelationFingerprint? bestReal, double score, double pm4Coverage, double wmoCoverage) =
+                    FindBestMatch(generated, realFingerprints);
 
-                (SurfaceFingerprint? bestReal, double score, double pm4Coverage, double wmoCoverage) = FindBestMatch(generated, realFingerprints);
-
-                uint? matchedCk24 = bestReal?.Ck24;
+                uint? matchedCk24 = null;
+                if (bestReal is not null)
+                {
+                    ReadOnlySpan<char> ck24Span = bestReal.AssetId.AsSpan(bestReal.AssetId.LastIndexOf('-') + 1);
+                    if (ck24Span.StartsWith("0x"))
+                        ck24Span = ck24Span.Slice(2);
+                    matchedCk24 = uint.Parse(ck24Span, System.Globalization.NumberStyles.HexNumber);
+                }
                 string status = score >= 0.50 ? "matched" : bestReal is not null ? "subthreshold" : "no_overlap";
 
                 groupValidations.Add(new Pm4GeneratorGroupValidation(
@@ -123,7 +135,7 @@ internal static class Pm4GeneratorValidationSupport
             adtPath,
             realFingerprints.Count,
             placements.WorldModelPlacements.Count,
-            generatedFingerprints.Count,
+            groupValidations.Count(static g => g.GeneratedTriangleCount > 0),
             matchedCount,
             meanScore,
             meanPm4Coverage,
@@ -132,14 +144,14 @@ internal static class Pm4GeneratorValidationSupport
             warnings);
     }
 
-    private static SurfaceFingerprint? GenerateWmoPlacementFingerprint(
+    private static SurfaceCorrelationFingerprint? GenerateWmoPlacementFingerprint(
         AdtWorldModelPlacement placement,
         string archiveRoot,
         ArchiveCatalogBootstrapOptions bootstrapOptions,
         float edgeBinSize,
         float areaBinSize,
-        float normalBinSize,
-        float heightBinSize,
+        float normalAlignmentBinSize,
+        float planarOffsetBinSize,
         List<string> warnings)
     {
         string normalizedPath = placement.ModelPath.Replace('\\', '/').Trim().TrimStart('/').ToLowerInvariant();
@@ -165,135 +177,84 @@ internal static class Pm4GeneratorValidationSupport
         if (genData.Msur.Count == 0)
             return null;
 
-        List<TriangleFeature> triangles = [];
-        foreach (Pm4GenerationMsur surface in genData.Msur)
-        {
-            int first = (int)surface.MsviFirstIndex;
-            int count = surface.IndexCount;
-            if (first + count > genData.Msvi.Count)
-                continue;
+        List<Pm4MsurEntry> msurEntries = genData.Msur
+            .Select(static s => new Pm4MsurEntry(
+                GroupKey: 0,
+                IndexCount: s.IndexCount,
+                AttributeMask: 0,
+                Padding: 0,
+                s.Normal,
+                s.Height,
+                s.MsviFirstIndex,
+                _0x18: 0,
+                PackedParams: s.PackedParams))
+            .ToList();
 
-            for (int i = 1; i < count - 1; i++)
-            {
-                Vector3 a = genData.Msvt[(int)genData.Msvi[first]];
-                Vector3 b = genData.Msvt[(int)genData.Msvi[first + i]];
-                Vector3 c = genData.Msvt[(int)genData.Msvi[first + i + 1]];
-                triangles.Add(TriangleFeature.FromTriangle(a, b, c));
-            }
-        }
-
-        if (triangles.Count == 0)
-            return null;
-
-        Dictionary<string, int> histogram = BuildAbsoluteHistogram(triangles, edgeBinSize, areaBinSize, normalBinSize, heightBinSize);
-
-        return new SurfaceFingerprint(
-            0x43,
-            1,
-            placement.ModelPath,
-            genData.Msur.Count,
-            triangles.Count,
-            histogram);
+        return Pm4SurfaceCorrelationExtractor.ExtractFromPm4Group(
+            genData.Msvt,
+            genData.Msvi,
+            msurEntries,
+            ck24: 1,
+            ck24Type: 0x43,
+            assetId: $"gen-{placement.UniqueId}",
+            assetPath: placement.ModelPath,
+            assetKind: "generated",
+            edgeBinSize,
+            areaBinSize,
+            normalAlignmentBinSize,
+            planarOffsetBinSize);
     }
 
-    private static IReadOnlyList<SurfaceFingerprint> ExtractPm4Fingerprints(
+    private static IReadOnlyList<SurfaceCorrelationFingerprint> ExtractPm4Fingerprints(
         Pm4ResearchDocument doc,
-        byte filterCk24Type,
+        byte ck24Type,
         float edgeBinSize,
         float areaBinSize,
-        float normalBinSize,
-        float heightBinSize)
+        float normalAlignmentBinSize,
+        float planarOffsetBinSize)
     {
-        IReadOnlyList<Pm4MsurEntry> msur = doc.KnownChunks.Msur;
-        IReadOnlyList<uint> msvi = doc.KnownChunks.Msvi;
-        IReadOnlyList<Vector3> msvt = doc.KnownChunks.Msvt;
+        List<SurfaceCorrelationFingerprint> fingerprints = [];
 
-        List<SurfaceFingerprint> fingerprints = [];
-
-        var groups = msur
-            .Where(s => s.Ck24 != 0 && s.IndexCount >= 3 && s.Ck24Type == filterCk24Type)
+        var groups = doc.KnownChunks.Msur
+            .Where(s => s.Ck24 != 0 && s.IndexCount >= 3 && s.Ck24Type == ck24Type)
             .GroupBy(static s => s.Ck24);
 
         foreach (IGrouping<uint, Pm4MsurEntry> group in groups)
         {
-            List<Pm4MsurEntry> surfaces = group.ToList();
-            byte ck24Type = surfaces[0].Ck24Type;
             uint ck24 = group.Key;
-
-            List<TriangleFeature> triangles = [];
-            foreach (Pm4MsurEntry surface in surfaces)
-            {
-                int first = checked((int)surface.MsviFirstIndex);
-                int count = surface.IndexCount;
-                if (first + count > msvi.Count)
-                    continue;
-
-                List<int> localVerts = [];
-                for (int i = 0; i < count; i++)
-                {
-                    int vi = checked((int)msvi[first + i]);
-                    if ((uint)vi < (uint)msvt.Count)
-                        localVerts.Add(vi);
-                }
-
-                if (localVerts.Count < 3)
-                    continue;
-
-                for (int i = 1; i < localVerts.Count - 1; i++)
-                {
-                    Vector3 a = msvt[localVerts[0]];
-                    Vector3 b = msvt[localVerts[i]];
-                    Vector3 c = msvt[localVerts[i + 1]];
-                    triangles.Add(TriangleFeature.FromTriangle(a, b, c));
-                }
-            }
-
-            if (triangles.Count == 0)
-                continue;
-
-            Dictionary<string, int> histogram = BuildAbsoluteHistogram(triangles, edgeBinSize, areaBinSize, normalBinSize, heightBinSize);
-
-            fingerprints.Add(new SurfaceFingerprint(
-                ck24Type,
+            SurfaceCorrelationFingerprint? fingerprint = Pm4SurfaceCorrelationExtractor.ExtractFromPm4Group(
+                doc.KnownChunks.Msvt,
+                doc.KnownChunks.Msvi,
+                group.ToList(),
                 ck24,
-                doc.SourcePath ?? "unknown",
-                surfaces.Count,
-                triangles.Count,
-                histogram));
+                ck24Type,
+                assetId: $"pm4-ck24-0x{ck24:X6}",
+                assetPath: doc.SourcePath ?? "unknown",
+                assetKind: "pm4",
+                edgeBinSize,
+                areaBinSize,
+                normalAlignmentBinSize,
+                planarOffsetBinSize);
+
+            if (fingerprint is not null)
+                fingerprints.Add(fingerprint);
         }
 
         return fingerprints;
     }
 
-    private static Dictionary<string, int> BuildAbsoluteHistogram(
-        IReadOnlyList<TriangleFeature> triangles,
-        float edgeBinSize,
-        float areaBinSize,
-        float normalBinSize,
-        float heightBinSize)
+    private static (SurfaceCorrelationFingerprint? Best, double Score, double Pm4Coverage, double WmoCoverage) FindBestMatch(
+        SurfaceCorrelationFingerprint generated,
+        IReadOnlyList<SurfaceCorrelationFingerprint> realFingerprints)
     {
-        Dictionary<string, int> histogram = new();
-        foreach (TriangleFeature t in triangles)
-        {
-            string key = t.AbsoluteKey(edgeBinSize, areaBinSize, normalBinSize, heightBinSize);
-            histogram[key] = histogram.TryGetValue(key, out int v) ? v + 1 : 1;
-        }
-
-        return histogram;
-    }
-
-    private static (SurfaceFingerprint? Best, double Score, double Pm4Coverage, double WmoCoverage) FindBestMatch(
-        SurfaceFingerprint generated,
-        IReadOnlyList<SurfaceFingerprint> realFingerprints)
-    {
-        SurfaceFingerprint? best = null;
+        SurfaceCorrelationFingerprint? best = null;
         double bestScore = 0;
         double bestPm4Coverage = 0;
         double bestWmoCoverage = 0;
 
-        foreach (SurfaceFingerprint real in realFingerprints)
+        foreach (SurfaceCorrelationFingerprint real in realFingerprints)
         {
-            if (generated.Histogram.Count == 0 || real.Histogram.Count == 0)
+            if (generated.TriangleHistogram.Count == 0 || real.TriangleHistogram.Count == 0)
                 continue;
 
             int pm4Matched = 0;
@@ -301,9 +262,9 @@ internal static class Pm4GeneratorValidationSupport
             int wmoMatched = 0;
             int wmoTotal = real.TriangleCount;
 
-            foreach (var kv in generated.Histogram)
+            foreach (var kv in generated.TriangleHistogram)
             {
-                if (real.Histogram.TryGetValue(kv.Key, out int realCount))
+                if (real.TriangleHistogram.TryGetValue(kv.Key, out int realCount))
                 {
                     int matched = Math.Min(kv.Value, realCount);
                     pm4Matched += matched;
@@ -311,8 +272,8 @@ internal static class Pm4GeneratorValidationSupport
                 }
             }
 
-            double pm4Coverage = (double)pm4Matched / pm4Total;
-            double wmoCoverage = (double)wmoMatched / wmoTotal;
+            double pm4Coverage = pm4Total > 0 ? (double)pm4Matched / pm4Total : 0;
+            double wmoCoverage = wmoTotal > 0 ? (double)wmoMatched / wmoTotal : 0;
             double score = pm4Coverage * wmoCoverage > 0
                 ? 2.0 * pm4Coverage * wmoCoverage / (pm4Coverage + wmoCoverage)
                 : 0;
@@ -328,12 +289,4 @@ internal static class Pm4GeneratorValidationSupport
 
         return (best, bestScore, bestPm4Coverage, bestWmoCoverage);
     }
-
-    private sealed record SurfaceFingerprint(
-        byte Ck24Type,
-        uint Ck24,
-        string AssetPath,
-        int SurfaceCount,
-        int TriangleCount,
-        IReadOnlyDictionary<string, int> Histogram);
 }

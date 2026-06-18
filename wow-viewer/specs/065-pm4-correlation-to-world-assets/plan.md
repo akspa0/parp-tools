@@ -140,18 +140,18 @@ The first attempt to add absolute MSUR.Normal/MSUR.Height failed because WMO-loc
 - Result: 0 matched, 0 ambiguous, P@3=10.1% (down from 25.3% area-only). The descriptors make the key too specific and do not recover recall.
 - Conclusion: surface histogram matching is unlikely to reach high P@1 without additional signal (e.g., WMO enumeration, placement-derived spatial filtering, or a different matcher).
 
-**7c. Generator validation and first fix pass**:
+**7c. Generator validation and fix pass (pivot to fingerprints)**:
 - Added `pm4 validate-generator-geometry` to directly test `Pm4Generator.cs`.
-- For a given PM4 tile and its `_obj0.adt`, the command reads each WMO placement, reads the WMO render mesh, applies the ADT placement transform, runs `Pm4Generator.GenerateFromCollisionMesh`, and compares the generated PM4 surface histogram to the real PM4 CK24 groups.
+- For a given PM4 tile and its `_obj0.adt`, the command reads each WMO placement, reads the WMO render mesh, applies the ADT placement transform, runs `Pm4Generator.GenerateFromCollisionMesh`, and compares the generated collision fingerprint to the real PM4 CK24 groups.
 - Initial run on `development_16_37`: mean symmetric score 0.004, 0/4 matched placements. `development_16_37` has only M2 groups, so it is not a valid WMO validation tile.
 - Correct validation tile: `development_29_18` with 48 real CK24 WMO groups and 48 ADT WMO placements.
 - Fixed in this pass:
   - Source geometry: use WMO collision faces (`MOPY` flags `0x08`/`0x20`, exclude `0x04`).
   - `MSVI` first index: write raw uint index, not byte offset.
   - `WorldToPm4Raw`: use `MapOrigin - X`, `MapOrigin - Y`, `Z` (no X/Y swap).
-  - Added vertex welding + coplanar boundary-polygon merging to match real PM4's merged polygons.
-- Latest result on `development_29_18`: mean symmetric score 0.051, 0/48 groups >= 0.50. Generated farm bounds exactly overlap real group `0x43C689`, but surface normals/tessellation still mismatch.
-- Next step: resolve WMO local-axis/rotation convention and surface winding orientation.
+  - Validation uses `Pm4SurfaceCorrelationExtractor` group-relative edge+area fingerprints, not exact polygon comparison.
+- Latest result on `development_29_18` (area-only bins edge=1, area=1): mean symmetric score **0.462**, **36/48** groups matched, all farm placements correlate to real group `0x43C510`.
+- Insight: we do not need to reproduce real PM4 polygons exactly. The generator only needs to produce a comparable collision-shape fingerprint.
 
 ### Phase 8: Fix WMO Enumeration via Listfile
 

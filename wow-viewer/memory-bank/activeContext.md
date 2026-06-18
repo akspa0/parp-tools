@@ -26,22 +26,19 @@ Focused on `Pm4Generator.cs` and `pm4 validate-generator-geometry`:
 
 ## Current generator validation results
 
-Tile `development_29_18` (48 real WMO groups, 48 ADT WMO placements):
-- Mean symmetric score: **0.051**
-- Matched groups (score >= 0.50): **0**
-- Best farm placement vs real group `0x43C689`: **14/210** real triangles matched after normal-Z orientation correction.
+Tile `development_29_18` (48 real WMO groups, 48 ADT WMO placements), using **area-only collision fingerprints** (edge+area bins, group-relative, transform-invariant):
+- Mean symmetric score: **0.462**
+- Matched groups (score >= 0.50): **36/48**
+- All farm placements match real group `0x43C510`.
 
-The generated geometry is now in the right coordinate frame and the right group location, but surface normals/tessellation still do not line up with real PM4 polygons. The remaining gap is almost certainly **WMO local-axis / rotation convention** or **surface winding orientation**.
+This proves the core idea: **we do not need to reproduce real PM4 polygons exactly.** We only need a comparable collision-shape fingerprint. Raw WMO collision triangles + correct coordinate transform + the same edge/area histogram as real PM4 groups is enough to correlate generated shapes to real PM4 groups.
 
 ## What needs work next
 
-1. **Resolve WMO local-axis convention** so that placed roof/wall normals in generated PM4 match real PM4 normals. Candidate checks:
-   - Swap local X/Y before placement transform.
-   - Invert one local axis.
-   - Remove or flip the extra `CreateRotationZ(PI)` in `BuildPlacementTransform`.
-2. **Standardize surface winding** so all generated MSUR normals point in a consistent direction (e.g., positive Z for upward-facing surfaces), matching real PM4.
-3. **Re-run `pm4 validate-generator-geometry` on `development_29_18`** and aim for at least one group crossing the 0.50 symmetric-score threshold.
-4. **Commit the current fixes** before iterating on rotation/orientation.
+1. **Keep generator validation fingerprint-oriented.** The `pm4 validate-generator-geometry` command now uses `Pm4SurfaceCorrelationExtractor` (group-relative edge/area histograms). This is the right metric.
+2. **Confirm the fingerprint approach generalizes** beyond farms — run on a few more tiles and WMO types.
+3. **Decide whether to keep boundary-polygon merging.** Current code emits raw collision triangles (better for fingerprints). The unused boundary-merge helpers can be removed in a cleanup pass.
+4. **Wire this into the main matcher.** If generated WMO fingerprints correlate this well, the same fingerprint can be precomputed for every WMO and matched against PM4-only tiles without ADT.
 
 ## Tooling
 

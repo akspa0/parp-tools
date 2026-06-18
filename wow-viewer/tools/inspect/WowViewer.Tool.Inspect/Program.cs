@@ -3458,6 +3458,10 @@ static void RunPm4ValidateGeneratorGeometry(string[] args)
 	string? adtPath = GetOption(args, "--adt", "-a");
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
 	string? output = GetOption(args, "--output", "-o");
+	string? binSizeText = GetOption(args, "--bin-size", "-b");
+	string? areaBinSizeText = GetOption(args, "--area-bin-size", "-ab");
+	string? normalAlignmentBinSizeText = GetOption(args, "--normal-alignment-bin-size", "-na");
+	string? planarOffsetBinSizeText = GetOption(args, "--planar-offset-bin-size", "-po");
 
 	if (string.IsNullOrWhiteSpace(pm4Path) || !File.Exists(pm4Path))
 	{
@@ -3483,12 +3487,19 @@ static void RunPm4ValidateGeneratorGeometry(string[] args)
 	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions bootstrapOptions))
 		return;
 
+	float binSize = float.TryParse(binSizeText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float bs) ? bs : 1.0f;
+	float areaBinSize = float.TryParse(areaBinSizeText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float absv) ? absv : 1.0f;
+	float normalAlignmentBinSize = float.TryParse(normalAlignmentBinSizeText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float nas) ? nas : 0.0f;
+	float planarOffsetBinSize = float.TryParse(planarOffsetBinSizeText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float pos) ? pos : 0.0f;
+
 	Console.WriteLine($"Validating PM4 generator geometry for: {Path.GetFullPath(pm4Path)}");
 	Console.WriteLine($"  ADT placements: {Path.GetFullPath(adtPath)}");
 	Console.WriteLine($"  Archive root: {Path.GetFullPath(archiveRoot)}");
+	Console.WriteLine($"  Bins: edge={binSize}, area={areaBinSize}, normalAlign={normalAlignmentBinSize}, planarOffset={planarOffsetBinSize}");
 
 	Pm4GeneratorValidationResult result = Pm4GeneratorValidationSupport.ValidateTile(
 		pm4Path, adtPath, archiveRoot, bootstrapOptions,
+		binSize, areaBinSize, normalAlignmentBinSize, planarOffsetBinSize,
 		progress: msg => Console.WriteLine($"  {msg}"));
 
 	Console.WriteLine($"\n=== Generator Geometry Validation Report ===");
@@ -6761,7 +6772,7 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 identify-models --fingerprints <fingerprints.json> --archive-root <staged client dir> [--min-score <0.0-1.0>] [--max-matches <n>] [--output <report.json>]");
 	Console.WriteLine("  pm4 tile-reports --fingerprints <fingerprints.json> --identity <identity.json> --pm4-dir <directory> [--output-dir <dir>] [--tiles <x_y[,x_y...]>]");
 	Console.WriteLine("  pm4 generate-from-wmo --wmo-root <file.wmo> --position <x,y,z> --rotation <rx,ry,rz> --tile <x,y> --archive-root <dir> [--output <out.pm4>]");
-	Console.WriteLine("  pm4 validate-generator-geometry --pm4 <file.pm4> --adt <tile_obj0.adt> --archive-root <staged client dir> [--output <report.json>]");
+	Console.WriteLine("  pm4 validate-generator-geometry --pm4 <file.pm4> --adt <tile_obj0.adt> --archive-root <staged client dir> [--bin-size <1.0>] [--area-bin-size <1.0>] [--normal-alignment-bin-size <0.0>] [--planar-offset-bin-size <0.0>] [--output <report.json>]");
 	Console.WriteLine("  pm4 build-wmo-fingerprint-db --archive-root <staged client dir> [--listfile <listfile.txt>] [--limit <n>] [--output <db.json>]");
 	Console.WriteLine("  pm4 extract-pm4-fingerprints --input <directory> [--output <fp.json>] [--tiles <x_y[,x_y...]>]");
 	Console.WriteLine("  pm4 match-fingerprints --pm4-fingerprints <fp.json> --wmo-db <db.json> [--min-score <0.0-1.0>] [--max-candidates <n>] [--output <matches.json>]");
