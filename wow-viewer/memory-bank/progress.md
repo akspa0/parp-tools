@@ -1,29 +1,35 @@
 # Progress — wow-viewer
 
-## 2026-06-16 — Blank map generation lands, MHDR offset fix, PM4 match patching planned
-- Created `BlankAdtFactory` with `CreateBlank()`, `CreateBlankWdtOptions()`, `CreateBlankWdlTile()`, `CreateBlankAlphaTile()`
-- `map generate-blank` CLI: `--format lk|alpha --texture <path> --tile-x --tile-y --map-name --output-dir`
-- Default map name: `testing` (in Map.dbc across all versions)
-- Default L0 texture: `tileset\ocean\westfallseafloor.blp` (configurable via `--texture`)
-- Output directory: `World/Maps/<name>/` (viewer can discover from client root)
-- **Critical fix**: MHDR ofsMCIN pointed to MCIN data instead of MCIN header in `LkAdtWriter` — viewer failed with `sig='?'`
-- Alpha WDT generation works — `AlphaWdtWriter.Build()` with blank tile data produces valid inline MCNK WDT
-- Viewer confirms LK blank ADT+WDT loads without errors (MCNK signatures valid, MCIN offsets correct)
-- Committed: 713b78f2, b421ee9d, ffc97f62, 09244cbf, 94c77776, 83d15801 (revert), d393fb57 (AGENTS.md), fe3462dc (MHDR fix), 3fc9f357 (testing map name), d0de83b5 (World/Maps dir), 1db3620d (alpha WDT), 438f55a7 (texture param)
-- AGENTS.md updated: WowViewer.App is the test viewer (not MdxViewer), validation target is WowViewer.App renders
-- Next: PM4 match patching onto blank tiles — inject PM4 object placements into fresh blank ADTs
+## 2026-06-17 — Surface correlation matcher implemented (commit 21aa0064)
 
-## 2026-06-15 — PM4 → ADT writing pipeline landed
-- Built `Pm4AdtWriter` in `Core.PM4/Matching/` — converts PM4 match results to `LkAdtData`
-- Added `pm4 write-adt` CLI command to inspect tool
-- Pipeline: PM4 file → segment extraction → placement matching → LK ADT output
-- Tested on development_00_00.pm4: 10 M2 (MDDF) + 15 WMO (MODF) placements written
-- Output ADT verified valid with `map inspect` (version 18, 256 MCNK, correct chunk structure)
-- M2 asset resolution from MPQ archives not yet tested (dev data uses loose file references)
+### What landed
+- Pivoted from hull footprint matching (false positives: Ironforge/Darnassis at 0.999 overlap, NOT on dev map) to per-triangle edge-length histogram correlation.
+- `Pm4SurfaceCorrelationExtractor`: triangulates PM4 MSUR fans + WMO MOVI independent tris, builds edge-length histograms (transform-invariant, binned to integers).
+- `Pm4SurfaceCorrelationMatcher`: histogram intersection → pm4Coverage, wmoCoverage, symmetric F1 score.
+- CLI: `build-wmo-surface-db` (2790 fingerprints, 13M triangles), `extract-pm4-surfaces` (1604 fingerprints, 604K triangles), `match-surfaces`, `validate-matches`.
+- WMO surface DB: 503 roots, 11MB JSON. PM4 surfaces: 1604 groups, 3MB JSON.
 
-## 2026-06-14 — Consolidation + weak signal tooling
-- Replaced engine-program plan with viewer-first + UE bridge
-- Archived 005, 020, 026, 033, 036, 059 (done/dead)
-- Fixed stale status: 025/060→Complete, 043→stale noted
-- Research specs 030/031/032/038/040 → consumed by 056
-- Fixed 044 T006: removed dead MK Dataset from File menu + GUI
+### Validation
+- P@1=1.3%, P@3=10.3% (vs hull P@1=1.8%, P@3=4.5%). P@3 improved 2.3x.
+- NO false positives — Ironforge/Darnassis eliminated.
+- 12 correct top-1: GoldshireInn (0.86 coverage tiles 0_2/1_1), classicalelfruins, arathistonebridge, orchut.
+- GoldshireInn on tiles 0_2/1_2: PM4 says it's there at 0.86 coverage, ADT doesn't list it. PM4 is right — ADT is incomplete (THIS IS THE POINT OF THE WORK).
+
+### What needs doing next (fresh chat)
+- Fix WMO enumeration (503/1985 — archive catalog probe bug or need listfile)
+- Tune edge bin size, add triangle area to histogram key
+- Reduce 956 ambiguous
+- Full pipeline: surface match → identify WMO → extract placement transform from PM4 → write MODF → regenerate ADT for tiles without one
+- Update spec 065 to reflect surface correlation as primary approach (hull is abandoned)
+
+## 2026-06-17 — Hull fingerprint matcher (ABANDONED — false positives)
+- Built PCA-normalized convex hull fingerprint matcher. 751 matched but mostly false positives.
+- Ironforge/Darnassis at 0.999 overlap despite NOT being on dev map. Hull throws away surface structure.
+- User: "how in the fuck are we still using footprints to figure out what objects are?!"
+- Hull code kept for reference but surface correlation is primary.
+
+## 2026-06-17 — PM4 simplification algorithm reverse-engineered and implemented
+- PM4 surfaces are variable-size convex polygons (IndexCount 3-12). 43% quads, 43% triangles.
+- Simplification: plane clustering + 2D convex hull. Generator produces valid PM4 (954 vs 896 real surfaces).
+- WMO cache: 277 roots from ADT + 184 Ulduar + 114 Titan.
+- PD4 format: separate per-WMO collision (version 48, quads, YXZ, 24-byte MSLK).

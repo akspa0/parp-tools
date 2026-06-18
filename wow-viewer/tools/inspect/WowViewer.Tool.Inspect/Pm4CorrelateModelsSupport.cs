@@ -11,6 +11,30 @@ using WowViewer.Core.PM4.Research;
 using WowViewer.Core.PM4.Services;
 using WowViewer.Core.Wmo;
 
+internal sealed record Pm4Ck24GeometryExport(
+    uint Ck24,
+    byte Ck24Type,
+    ushort Ck24ObjectId,
+    int SurfaceCount,
+    int VertexCount,
+    Vector3 Pm4BoundsMin,
+    Vector3 Pm4BoundsMax,
+    IReadOnlyList<Vector3> Pm4Vertices,
+    IReadOnlyList<uint> Pm4CornerIndices,
+    IReadOnlyList<byte> Pm4IndexCounts);
+
+internal sealed record WmoMeshInPm4Space(
+    int UniqueId,
+    string ModelPath,
+    Vector3 Position,
+    Vector3 Rotation,
+    int GroupCount,
+    IReadOnlyList<Vector3> WmoLocalVerts,
+    IReadOnlyList<Vector3> WmoWorldVerts,
+    IReadOnlyList<Vector3> WmoPm4Verts,
+    IReadOnlyList<ushort> Indices,
+    IReadOnlyList<WmoGroupFaceMaterialDetail> FaceMaterials);
+
 internal sealed record Pm4CorrelateModelsResult(
     string Pm4Path,
     string PlacementsPath,
@@ -116,19 +140,55 @@ internal static class Pm4CorrelateModelsSupport
         string pm4Path,
         string placementsPath,
         string archiveRoot,
-        ArchiveCatalogBootstrapOptions bootstrapOptions)
+        ArchiveCatalogBootstrapOptions bootstrapOptions,
+        string? pm4ArchiveVirtualPath = null,
+        string? adtArchiveVirtualPath = null)
     {
-        if (!Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int tileX, out int tileY))
+        string coordPath = pm4ArchiveVirtualPath ?? pm4Path;
+        if (!Pm4CoordinateService.TryParseTileCoordinates(coordPath, out int tileX, out int tileY))
             throw new InvalidOperationException("Could not parse tile coordinates from PM4 path.");
 
-        Pm4ResearchDocument document = Pm4ResearchReader.ReadFile(pm4Path);
+        Pm4ResearchDocument document;
+        if (File.Exists(pm4Path))
+        {
+            document = Pm4ResearchReader.ReadFile(pm4Path);
+        }
+        else if (pm4ArchiveVirtualPath is not null)
+        {
+            byte[] pm4Bytes = ArchiveVirtualFileReader.ReadVirtualFile(
+                pm4ArchiveVirtualPath, [archiveRoot], bootstrapOptions);
+            document = Pm4ResearchReader.Read(pm4Bytes, pm4ArchiveVirtualPath);
+        }
+        else
+        {
+            throw new FileNotFoundException($"PM4 file not found: {pm4Path}");
+        }
+
         IReadOnlyList<Vector3> meshVertices = document.KnownChunks.Msvt;
         IReadOnlyList<uint> meshIndices = document.KnownChunks.Msvi;
         List<string> warnings = [];
 
-        List<Pm4Ck24GroupSummary> ck24Groups = BuildCk24GroupSummaries(document, meshVertices, meshIndices, tileX, tileY);
+        bool isTileLocal = Pm4PlacementMath.IsLikelyTileLocal(meshVertices);
+        List<Pm4Ck24GroupSummary> ck24Groups = BuildCk24GroupSummaries(document, meshVertices, meshIndices, tileX, tileY, isTileLocal);
 
-        AdtPlacementCatalog placements = AdtPlacementReader.Read(placementsPath);
+        AdtPlacementCatalog placements;
+        if (File.Exists(placementsPath))
+        {
+            placements = AdtPlacementReader.Read(placementsPath);
+        }
+        else if (adtArchiveVirtualPath is not null)
+        {
+            byte[] adtBytes = ArchiveVirtualFileReader.ReadVirtualFile(
+                adtArchiveVirtualPath, [archiveRoot], bootstrapOptions);
+            using MemoryStream adtStream = new(adtBytes);
+            MapFileSummary adtSummary = MapFileSummaryReader.Read(adtStream, adtArchiveVirtualPath);
+            adtStream.Position = 0;
+            placements = AdtPlacementReader.Read(adtStream, adtSummary);
+        }
+        else
+        {
+            throw new FileNotFoundException($"ADT file not found: {placementsPath}");
+        }
         List<Pm4PlacementCollisionSummary> placementSummaries = [];
 
         foreach (AdtWorldModelPlacement wmoPlacement in placements.WorldModelPlacements)
@@ -154,7 +214,8 @@ internal static class Pm4CorrelateModelsSupport
         Pm4ResearchDocument document,
         IReadOnlyList<Vector3> meshVertices,
         IReadOnlyList<uint> meshIndices,
-        int tileX, int tileY)
+        int tileX, int tileY,
+        bool isTileLocal)
     {
         List<Pm4Ck24GroupSummary> groups = [];
 
@@ -195,15 +256,30 @@ internal static class Pm4CorrelateModelsSupport
                 pm4Max = Vector3.Max(pm4Max, v);
             }
 
-            Vector3 wowMin = ConvertRawAdtToWowWorld(pm4Min, tileX, tileY);
-            Vector3 wowMax = ConvertRawAdtToWowWorld(pm4Max, tileX, tileY);
-            Vector3 wowBoundsMin = Vector3.Min(wowMin, wowMax);
-            Vector3 wowBoundsMax = Vector3.Max(wowMin, wowMax);
+            Vector3 wowMin, wowMax;
+            if (isTileLocal)
+            {
+                Vector3 swappedMin = new(pm4Min.Y, pm4Min.X, pm4Min.Z);
+                Vector3 swappedMax = new(pm4Max.Y, pm4Max.X, pm4Max.Z);
+                Vector3 rawMin = ConvertRawAdtToWowWorld(swappedMin, tileX, tileY);
+                Vector3 rawMax = ConvertRawAdtToWowWorld(swappedMax, tileX, tileY);
+                wowMin = Vector3.Min(rawMin, rawMax);
+                wowMax = Vector3.Max(rawMin, rawMax);
+            }
+            else
+            {
+                float minWorldX = MapOrigin - pm4Max.X;
+                float minWorldY = MapOrigin - pm4Max.Y;
+                float maxWorldX = MapOrigin - pm4Min.X;
+                float maxWorldY = MapOrigin - pm4Min.Y;
+                wowMin = new Vector3(minWorldX, minWorldY, pm4Min.Z);
+                wowMax = new Vector3(maxWorldX, maxWorldY, pm4Max.Z);
+            }
 
             groups.Add(new Pm4Ck24GroupSummary(
                 ck24, ck24Type, ck24ObjectId,
                 surfaceCount, totalIndexCount, vertexIndices.Count,
-                pm4Min, pm4Max, wowBoundsMin, wowBoundsMax));
+                pm4Min, pm4Max, wowMin, wowMax));
         }
 
         return groups;
@@ -298,7 +374,7 @@ internal static class Pm4CorrelateModelsSupport
 
             using MemoryStream stream = new(bytes, writable: false);
             var summary = MdxSummaryReader.Read(stream, placement.ModelPath);
-            if (summary.Collision is not null)
+            if (summary.Collision is not null && summary.Collision.VertexCount > 0)
             {
                 var c = summary.Collision;
                 totalVertices = c.VertexCount;
@@ -306,10 +382,15 @@ internal static class Pm4CorrelateModelsSupport
                 localMin = c.BoundsMin ?? summary.BoundsMin ?? (placement.Position - new Vector3(2f));
                 localMax = c.BoundsMax ?? summary.BoundsMax ?? (placement.Position + new Vector3(2f));
             }
+            else if (summary.BoundsMin is not null && summary.BoundsMax is not null)
+            {
+                localMin = summary.BoundsMin.Value;
+                localMax = summary.BoundsMax.Value;
+            }
             else
             {
-                localMin = summary.BoundsMin ?? (placement.Position - new Vector3(2f));
-                localMax = summary.BoundsMax ?? (placement.Position + new Vector3(2f));
+                localMin = placement.Position - new Vector3(2f);
+                localMax = placement.Position + new Vector3(2f);
             }
         }
         catch (Exception ex) when (ex is FileNotFoundException or InvalidDataException or IOException)
@@ -385,12 +466,10 @@ internal static class Pm4CorrelateModelsSupport
 
     private static Vector3 ConvertRawAdtToWowWorld(Vector3 rawAdt, int tileX, int tileY)
     {
-        float mappedU = rawAdt.Y;
-        float mappedV = rawAdt.X;
         float localUp = rawAdt.Z;
 
-        float rawAdtX = tileX * TileSize + mappedV;
-        float rawAdtY = tileY * TileSize + mappedU;
+        float rawAdtX = tileX * TileSize + rawAdt.X;
+        float rawAdtY = tileY * TileSize + rawAdt.Y;
 
         return new Vector3(MapOrigin - rawAdtY, MapOrigin - rawAdtX, localUp);
     }
@@ -634,5 +713,138 @@ internal static class Pm4CorrelateModelsSupport
     private static string NormalizeVirtualPath(string modelPath)
     {
         return modelPath.Replace('\\', '/').Trim().TrimStart('/').ToLowerInvariant();
+    }
+
+    public static Pm4Ck24GeometryExport ExportCk24GroupGeometry(
+        Pm4ResearchDocument document,
+        uint targetCk24)
+    {
+        IReadOnlyList<Vector3> msvt = document.KnownChunks.Msvt;
+        IReadOnlyList<uint> msvi = document.KnownChunks.Msvi;
+        List<Pm4MsurEntry> groupSurfaces = document.KnownChunks.Msur
+            .Where(s => s.Ck24 == targetCk24 && s.IndexCount >= 3)
+            .ToList();
+
+        if (groupSurfaces.Count == 0)
+            throw new InvalidOperationException($"No surfaces found for CK24=0x{targetCk24:X6}");
+
+        byte ck24Type = groupSurfaces[0].Ck24Type;
+        ushort ck24ObjectId = groupSurfaces[0].Ck24ObjectId;
+
+        HashSet<int> vertexIndexSet = [];
+        List<byte> indexCounts = [];
+        foreach (Pm4MsurEntry surface in groupSurfaces)
+        {
+            indexCounts.Add(surface.IndexCount);
+            int first = checked((int)surface.MsviFirstIndex);
+            int end = Math.Min(first + surface.IndexCount, msvi.Count);
+            for (int i = first; i < end; i++)
+            {
+                int vii = checked((int)msvi[i]);
+                if ((uint)vii < (uint)msvt.Count)
+                    vertexIndexSet.Add(vii);
+            }
+        }
+
+        List<int> sortedVerts = vertexIndexSet.OrderBy(static i => i).ToList();
+        Dictionary<int, uint> globalToLocal = new(sortedVerts.Count);
+        List<Vector3> verts = new(sortedVerts.Count);
+        for (int i = 0; i < sortedVerts.Count; i++)
+        {
+            globalToLocal[sortedVerts[i]] = (uint)i;
+            verts.Add(msvt[sortedVerts[i]]);
+        }
+
+        List<uint> localCornerIndices = [];
+        foreach (Pm4MsurEntry surface in groupSurfaces)
+        {
+            int first = checked((int)surface.MsviFirstIndex);
+            int end = Math.Min(first + surface.IndexCount, msvi.Count);
+            for (int i = first; i < end; i++)
+            {
+                uint globalIdx = msvi[i];
+                if (globalToLocal.TryGetValue(checked((int)globalIdx), out uint localIdx))
+                    localCornerIndices.Add(localIdx);
+            }
+        }
+
+        Vector3 pm4Min = new(float.MaxValue, float.MaxValue, float.MaxValue);
+        Vector3 pm4Max = new(float.MinValue, float.MinValue, float.MinValue);
+        foreach (Vector3 v in verts)
+        {
+            pm4Min = Vector3.Min(pm4Min, v);
+            pm4Max = Vector3.Max(pm4Max, v);
+        }
+
+        return new Pm4Ck24GeometryExport(
+            targetCk24, ck24Type, ck24ObjectId,
+            groupSurfaces.Count, vertexIndexSet.Count,
+            pm4Min, pm4Max, verts, localCornerIndices, indexCounts);
+    }
+
+    public static WmoMeshInPm4Space ReadWmoInPm4Space(
+        AdtWorldModelPlacement placement,
+        string archiveRoot,
+        ArchiveCatalogBootstrapOptions bootstrapOptions,
+        int tileX, int tileY)
+    {
+        byte[] rootBytes = ArchiveVirtualFileReader.ReadVirtualFile(
+            NormalizeVirtualPath(placement.ModelPath),
+            [archiveRoot], bootstrapOptions);
+
+        using MemoryStream rootStream = new(rootBytes, writable: false);
+        WmoSummary summary = WmoSummaryReader.Read(rootStream, placement.ModelPath);
+
+        Func<string, byte[]?> assetReader = virtualPath =>
+        {
+            try { return ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], bootstrapOptions); }
+            catch { return null; }
+        };
+
+        rootStream.Position = 0;
+        WmoRenderDocument renderDoc = WmoRenderDocumentReader.Read(
+            rootStream, placement.ModelPath, assetReader);
+
+        float rx = placement.Rotation.X * MathF.PI / 180f;
+        float ry = placement.Rotation.Y * MathF.PI / 180f;
+        float rz = placement.Rotation.Z * MathF.PI / 180f;
+        Matrix4x4 worldTransform = Matrix4x4.CreateRotationZ(MathF.PI)
+            * Matrix4x4.CreateRotationX(rx)
+            * Matrix4x4.CreateRotationY(ry)
+            * Matrix4x4.CreateRotationZ(rz)
+            * Matrix4x4.CreateTranslation(placement.Position);
+
+        List<Vector3> allLocalVerts = [];
+        List<Vector3> allWorldVerts = [];
+        List<Vector3> allPm4Verts = [];
+        List<ushort> allIndices = [];
+        List<WmoGroupFaceMaterialDetail> allFaceMaterials = [];
+        int indexOffset = 0;
+
+        foreach (WmoEmbeddedGroupMeshDetail group in renderDoc.Groups)
+        {
+            foreach (Vector3 v in group.Mesh.Vertices)
+            {
+                allLocalVerts.Add(v);
+                Vector3 world = Vector3.Transform(v, worldTransform);
+                allWorldVerts.Add(world);
+                float pm4X = MapOrigin - world.X;
+                float pm4Y = MapOrigin - world.Y;
+                float pm4Z = world.Z;
+                allPm4Verts.Add(new Vector3(pm4X, pm4Y, pm4Z));
+            }
+            foreach (ushort idx in group.Mesh.Indices)
+                allIndices.Add((ushort)(idx + indexOffset));
+            indexOffset += group.Mesh.Vertices.Count;
+            foreach (WmoGroupFaceMaterialDetail fm in group.Mesh.FaceMaterials)
+                allFaceMaterials.Add(fm);
+        }
+
+        return new WmoMeshInPm4Space(
+            placement.UniqueId, placement.ModelPath,
+            placement.Position, placement.Rotation,
+            renderDoc.Groups.Count,
+            allLocalVerts, allWorldVerts, allPm4Verts,
+            allIndices, allFaceMaterials);
     }
 }
