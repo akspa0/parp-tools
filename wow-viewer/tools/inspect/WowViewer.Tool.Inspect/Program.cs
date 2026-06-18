@@ -2020,6 +2020,15 @@ case "fingerprint-scan":
 	case "validate-matches":
 		RunPm4ValidateMatches(tail);
 		break;
+	case "build-wmo-surface-db":
+		RunPm4BuildWmoSurfaceDb(tail);
+		break;
+	case "extract-pm4-surfaces":
+		RunPm4ExtractPm4Surfaces(tail);
+		break;
+	case "match-surfaces":
+		RunPm4MatchSurfaces(tail);
+		break;
 		default:
 			Console.Error.WriteLine($"Unknown pm4 command '{command}'.");
 			ShowPm4Usage();
@@ -6711,6 +6720,9 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 extract-pm4-fingerprints --input <directory> [--output <fp.json>] [--tiles <x_y[,x_y...]>]");
 	Console.WriteLine("  pm4 match-fingerprints --pm4-fingerprints <fp.json> --wmo-db <db.json> [--min-score <0.0-1.0>] [--max-candidates <n>] [--output <matches.json>]");
 	Console.WriteLine("  pm4 validate-matches --matches <matches.json> --adt-dir <directory> [--output <report.json>]");
+	Console.WriteLine("  pm4 build-wmo-surface-db --archive-root <staged client dir> [--listfile <listfile.txt>] [--bin-size <1.0>] [--limit <n>] [--output <db.json>]");
+	Console.WriteLine("  pm4 extract-pm4-surfaces --input <directory> [--bin-size <1.0>] [--output <fp.json>]");
+	Console.WriteLine("  pm4 match-surfaces --pm4-surfaces <fp.json> --wmo-surface-db <db.json> [--min-score <0.0-1.0>] [--output <matches.json>]");
 }
 
 static void RunPm4CrossTile(string[] args)
@@ -7878,6 +7890,223 @@ static string ExtractTileKeyFromAdtName(string fileNameWithoutExtension)
 	return $"{parts[^2]}_{parts[^1]}";
 }
 
+static void RunPm4BuildWmoSurfaceDb(string[] args)
+{
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? listfilePath = GetOption(args, "--listfile", "-l");
+	string? binSizeText = GetOption(args, "--bin-size", "-b");
+	string? limitText = GetOption(args, "--limit", "-n");
+	string? output = GetOption(args, "--output", "-o");
+
+	if (string.IsNullOrWhiteSpace(archiveRoot) || !Directory.Exists(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root <staged client dir> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions bootstrapOptions))
+		return;
+
+	float binSize = 1.0f;
+	if (!string.IsNullOrWhiteSpace(binSizeText))
+		float.TryParse(binSizeText, out binSize);
+
+	int limit = 0;
+	if (!string.IsNullOrWhiteSpace(limitText))
+		int.TryParse(limitText, out limit);
+
+	Console.WriteLine($"Building WMO surface correlation database from: {Path.GetFullPath(archiveRoot)} (binSize={binSize})");
+
+	List<string> wmoPaths = EnumerateWmoRoots(archiveRoot, bootstrapOptions, listfilePath);
+
+	if (limit > 0 && wmoPaths.Count > limit)
+		wmoPaths = wmoPaths.Take(limit).ToList();
+
+	Console.WriteLine($"Found {wmoPaths.Count} WMO root files.");
+
+	SurfaceCorrelationDatabase database = Pm4SurfaceBuildSupport.BuildSurfaceDatabase(
+		archiveRoot, bootstrapOptions, wmoPaths, binSize,
+		progress: static msg => Console.WriteLine(msg));
+
+	Console.WriteLine($"\nDatabase: {database.WmoCount} WMO roots, {database.Records.Count} surface fingerprints.");
+	int totalTriangles = database.Records.Sum(static r => r.TriangleCount);
+	Console.WriteLine($"  Total triangles across all fingerprints: {totalTriangles}");
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? dir = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(dir))
+			Directory.CreateDirectory(dir);
+		string json = JsonSerializer.Serialize(database, new JsonSerializerOptions { WriteIndented = true });
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"\nWrote surface database to {outputPath} ({new FileInfo(outputPath).Length / 1024 / 1024:F1} MB)");
+	}
+}
+
+static void RunPm4ExtractPm4Surfaces(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? output = GetOption(args, "--output", "-o");
+	string? binSizeText = GetOption(args, "--bin-size", "-b");
+
+	if (string.IsNullOrWhiteSpace(input) || !Directory.Exists(input))
+	{
+		Console.Error.WriteLine("Error: --input <directory> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	float binSize = 1.0f;
+	if (!string.IsNullOrWhiteSpace(binSizeText))
+		float.TryParse(binSizeText, out binSize);
+
+	List<SurfaceCorrelationFingerprint> fingerprints = Pm4SurfaceBuildSupport.ExtractPm4SurfaceFingerprints(
+		input, binSize, progress: static msg => Console.WriteLine(msg));
+
+	Console.WriteLine($"\nTotal: {fingerprints.Count} PM4 surface fingerprints.");
+	int totalTriangles = fingerprints.Sum(static f => f.TriangleCount);
+	Console.WriteLine($"  Total triangles: {totalTriangles}");
+
+	var byType = fingerprints.GroupBy(static f => f.Ck24Type)
+		.Select(static g => (Type: g.Key, Count: g.Count(), Triangles: g.Sum(static f => f.TriangleCount)))
+		.OrderByDescending(static x => x.Count)
+		.ToList();
+	Console.WriteLine("\nBy CK24 type:");
+	foreach (var t in byType)
+		Console.WriteLine($"  0x{t.Type:X2}: {t.Count} fingerprints, {t.Triangles} triangles");
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? dir = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(dir))
+			Directory.CreateDirectory(dir);
+
+		var outputModel = new
+		{
+			BuildDate = DateTime.UtcNow.ToString("o"),
+			BinSize = binSize,
+			TotalFingerprints = fingerprints.Count,
+			TotalTriangles = totalTriangles,
+			Fingerprints = fingerprints,
+		};
+
+		string json = JsonSerializer.Serialize(outputModel, new JsonSerializerOptions { WriteIndented = true });
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"\nWrote {fingerprints.Count} surface fingerprints to {outputPath} ({new FileInfo(outputPath).Length / 1024 / 1024:F1} MB)");
+	}
+}
+
+static void RunPm4MatchSurfaces(string[] args)
+{
+	string? pm4Path = GetOption(args, "--pm4-surfaces", "-p");
+	string? wmoDbPath = GetOption(args, "--wmo-surface-db", "-w");
+	string? minScoreText = GetOption(args, "--min-score", "-s");
+	string? output = GetOption(args, "--output", "-o");
+
+	if (string.IsNullOrWhiteSpace(pm4Path) || !File.Exists(pm4Path))
+	{
+		Console.Error.WriteLine("Error: --pm4-surfaces <path> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(wmoDbPath) || !File.Exists(wmoDbPath))
+	{
+		Console.Error.WriteLine("Error: --wmo-surface-db <path> is required and must exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	double minScore = 0.50;
+	if (!string.IsNullOrWhiteSpace(minScoreText))
+		double.TryParse(minScoreText, out minScore);
+
+	Console.WriteLine($"Loading PM4 surface fingerprints from: {Path.GetFullPath(pm4Path)}");
+	string pm4Json = File.ReadAllText(pm4Path);
+	Pm4SurfaceExtractOutput? pm4Output = JsonSerializer.Deserialize<Pm4SurfaceExtractOutput>(pm4Json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+	if (pm4Output is null || pm4Output.Fingerprints is null || pm4Output.Fingerprints.Count == 0)
+	{
+		Console.Error.WriteLine("Error: PM4 surface file contains no entries.");
+		Environment.ExitCode = 1;
+		return;
+	}
+	Console.WriteLine($"Loaded {pm4Output.Fingerprints.Count} PM4 surface fingerprints ({pm4Output.TotalTriangles} total triangles).");
+
+	Console.WriteLine($"Loading WMO surface database from: {Path.GetFullPath(wmoDbPath)}");
+	string wmoJson = File.ReadAllText(wmoDbPath);
+	SurfaceCorrelationDatabase? wmoDb = JsonSerializer.Deserialize<SurfaceCorrelationDatabase>(wmoJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+	if (wmoDb is null || wmoDb.Records.Count == 0)
+	{
+		Console.Error.WriteLine("Error: WMO surface database contains no entries.");
+		Environment.ExitCode = 1;
+		return;
+	}
+	Console.WriteLine($"Loaded {wmoDb.WmoCount} WMO roots, {wmoDb.Records.Count} surface fingerprints.");
+
+	int wmoTotalTriangles = wmoDb.Records.Sum(static r => r.TriangleCount);
+	Console.WriteLine($"  WMO total triangles: {wmoTotalTriangles}");
+
+	SurfaceMatchOptions options = new(MinScore: minScore);
+	Console.WriteLine($"\nMatching {pm4Output.Fingerprints.Count} PM4 surfaces against {wmoDb.Records.Count} WMO surfaces (minScore={minScore:F2})...");
+
+	IReadOnlyList<SurfaceMatchResult> results = Pm4SurfaceCorrelationMatcher.Match(
+		pm4Output.Fingerprints, wmoDb, options);
+
+	int matched = results.Count(static r => r.Status == "Matched");
+	int ambiguous = results.Count(static r => r.Status == "Ambiguous");
+	int unresolved = results.Count(static r => r.Status == "Unresolved");
+	int ineligible = results.Count(static r => r.Status == "Ineligible");
+
+	Console.WriteLine($"\nResults: {matched} matched, {ambiguous} ambiguous, {unresolved} unresolved, {ineligible} ineligible");
+
+	var topMatches = results.Where(static r => r.Status == "Matched")
+		.OrderByDescending(static r => r.Candidates.Count > 0 ? r.Candidates[0].SymmetricScore : 0)
+		.Take(30)
+		.ToList();
+
+	if (topMatches.Count > 0)
+	{
+		Console.WriteLine($"\nTop 30 matched:");
+		Console.WriteLine($"  {"PM4 Id",-35} {"Tris",-6} {"WMO Candidate",-50} {"Score",-8} {"PM4 Cov",-8} {"WMO Cov",-8}");
+		foreach (SurfaceMatchResult r in topMatches)
+		{
+			if (r.Candidates.Count == 0) continue;
+			SurfaceMatchCandidate c = r.Candidates[0];
+			string shortPm4 = r.Pm4FingerprintId.Length > 33 ? "..." + r.Pm4FingerprintId[^32..] : r.Pm4FingerprintId;
+			string shortWmo = c.Candidate.AssetPath.Length > 48 ? "..." + c.Candidate.AssetPath[^47..] : c.Candidate.AssetPath;
+			Console.WriteLine($"  {shortPm4,-35} {r.TriangleCount,6} {shortWmo,-50} {c.SymmetricScore,8:F3} {c.Pm4Coverage,8:F2} {c.WmoCoverage,8:F2}");
+		}
+	}
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? dir = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(dir))
+			Directory.CreateDirectory(dir);
+
+		var outputModel = new
+		{
+			MatchDate = DateTime.UtcNow.ToString("o"),
+			Pm4FingerprintCount = pm4Output.Fingerprints.Count,
+			WmoFingerprintCount = wmoDb.Records.Count,
+			MinScore = minScore,
+			Matched = matched,
+			Ambiguous = ambiguous,
+			Unresolved = unresolved,
+			Ineligible = ineligible,
+			Results = results,
+		};
+
+		string json = JsonSerializer.Serialize(outputModel, new JsonSerializerOptions { WriteIndented = true });
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"\nWrote {results.Count} match results to {outputPath}");
+	}
+}
+
 sealed record TerrainPatchReportEntry(
 	string? SummaryPath,
 	string? TileName,
@@ -7933,3 +8162,10 @@ sealed record Pm4FingerprintMatchOutput(
 	int Unresolved,
 	int Ineligible,
 	IReadOnlyList<Pm4FingerprintMatchResult> Results);
+
+sealed record Pm4SurfaceExtractOutput(
+	string BuildDate,
+	float BinSize,
+	int TotalFingerprints,
+	int TotalTriangles,
+	IReadOnlyList<SurfaceCorrelationFingerprint> Fingerprints);
