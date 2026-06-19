@@ -56,9 +56,11 @@
 - [x] T029: Validated on `development_29_18` (correct WMO tile with 48 CK24 groups): mean score 0.051, 0/48 matched; generated farm bounds overlap real group `0x43C689`.
 - [x] T030: Pivoted generator validation from exact surface reproduction to **collision fingerprints** using `Pm4SurfaceCorrelationExtractor`.
 - [x] T031: Re-validated `development_29_18` with area-only (edge+area) fingerprints: mean score 0.462, 36/48 groups matched.
-- [ ] T032: Confirm fingerprint approach generalizes across other WMO types / tiles.
-- [ ] T033: Decide whether to keep or remove unused boundary-polygon merge code in `Pm4Generator.cs`.
-- [ ] T034: Integrate precomputed WMO collision fingerprints into the main PM4→WMO matcher so it works on ADT-less tiles.
+- [x] T032: Confirmed fingerprint approach generalizes: built full-corpus collision WMO DB and matched all 616 dev PM4s.
+- [x] T033: Integrated precomputed WMO collision fingerprints into the main PM4→WMO matcher (`pm4 match-surfaces` + `pm4 validate-matches`).
+- [ ] T034: Decide whether to keep or remove unused boundary-polygon merge code in `Pm4Generator.cs`.
+- [ ] T035: Add spatial/placement disambiguation so candidate WMO sets resolve to correct top-1 matches (P@1 is currently 1.2%).
+- [ ] T036: Expand WMO root enumeration beyond the ~502 roots exposed by archive catalog listfiles.
 
 ## Phase 8: Fix WMO Enumeration via Listfile
 

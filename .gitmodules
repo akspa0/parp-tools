@@ -41,3 +41,9 @@
 [submodule "external/alpha-core"]
 	path = gillijimproject_refactor/external/alpha-core
 	url = https://github.com/The-Alpha-Project/alpha-core
+[submodule "dirac"]
+	path = dirac
+	url = https://github.com/dirac-run/dirac.git
+[submodule "headroom"]
+	path = headroom
+	url = https://github.com/chopratejas/headroom.git

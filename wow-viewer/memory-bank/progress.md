@@ -62,6 +62,19 @@
   - All farm placements correlate to real group `0x43C510`.
 - This confirms we do not need perfect fake PM4 polygons; we only need comparable collision-shape fingerprints.
 
+## 2026-06-18 — Collision-only WMO surface DB and full-corpus match
+
+### What landed
+- Added `ExtractFromWmoCollisionGroup` to `Pm4SurfaceCorrelationExtractor`.
+- Switched `pm4 build-wmo-surface-db` to collision-only fingerprints.
+- Built `wow-viewer/output/datasets/wmo_collision_surface_db_335.json` (502 roots, 2749 fingerprints, 5.5M triangles).
+- Built `wow-viewer/output/datasets/pm4_surface_fps_dev.json` (1604 fingerprints, 604K triangles).
+
+### Validation
+- `pm4 match-surfaces`: 30 matched, 195 ambiguous, 1106 unresolved, 273 ineligible.
+- `pm4 validate-matches` against ADT ground truth: P@1=1.2%, P@3=28.5%.
+- Collision fingerprints produce good candidate sets, but top-1 is unreliable because many WMOs share box-like collision shapes.
+
 ## 2026-06-17 — Hull fingerprint matcher (ABANDONED — false positives)
 - Built PCA-normalized convex hull fingerprint matcher. 751 matched but mostly false positives.
 - Ironforge/Darnassis at 0.999 overlap despite NOT being on dev map. Hull throws away surface structure.

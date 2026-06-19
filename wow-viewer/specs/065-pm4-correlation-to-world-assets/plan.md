@@ -153,6 +153,14 @@ The first attempt to add absolute MSUR.Normal/MSUR.Height failed because WMO-loc
 - Latest result on `development_29_18` (area-only bins edge=1, area=1): mean symmetric score **0.462**, **36/48** groups matched, all farm placements correlate to real group `0x43C510`.
 - Insight: we do not need to reproduce real PM4 polygons exactly. The generator only needs to produce a comparable collision-shape fingerprint.
 
+**7d. Full-corpus collision WMO DB and matching**:
+- Added `ExtractFromWmoCollisionGroup` and switched `build-wmo-surface-db` to collision-only fingerprints.
+- Built `wmo_collision_surface_db_335.json` from staged 3.3.5: 502 WMO roots, 2749 fingerprints, 5.5M collision triangles.
+- Extracted `pm4_surface_fps_dev.json` from 616 dev PM4s: 1604 fingerprints, 604K triangles.
+- `pm4 match-surfaces`: 30 matched, 195 ambiguous, 1106 unresolved, 273 ineligible.
+- `pm4 validate-matches` against ADT ground truth: P@1=1.2%, P@3=28.5%.
+- Collision fingerprints produce good candidate sets, but top-1 is unreliable because many unrelated WMOs share simple box-like collision shapes. The correct asset often appears in top-3 or in the unresolved candidate list.
+
 ### Phase 8: Fix WMO Enumeration via Listfile
 
 Expand WMO DB coverage from 503 to ≥1900 WMO roots.
@@ -193,8 +201,9 @@ Use trusted surface matches and PM4 geometry to recover MODF/MDDF placements for
 | 4 | Surface matching (no ADT) | 2, 3 | `matches.json` — CK24→WMO candidates |
 | 5 | Validation against ADT ground truth | 4 | precision@1/@3 report |
 | 6 | Add triangle area to histogram key | 5 | reduced false positives / ambiguous count |
-| 7 | Placement-invariant descriptors + generator validation/fix | 6 | generator geometry validated, coordinate/source bugs fixed |
-| 8 | Fix WMO enumeration via listfile | 7 | ≥1900 WMO root fingerprints |
+| 7 | Placement-invariant descriptors + generator validation/fix + collision DB | 6 | generator fingerprints match 36/48 groups; full-corpus DB improves P@3 to 28.5% |
+| 8 | WMO candidate disambiguation (spatial/placement filters) | 7 | P@1 improvement over 1.2% |
+| 9 | Fix WMO enumeration via listfile | 8 | ≥1900 WMO root fingerprints |
 | 9 | Placement recovery / ADT regeneration | 8 | synthetic ADT for PM4-only tiles |
 
 ## Notes on Abandoned Hull Approach

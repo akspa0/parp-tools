@@ -24,21 +24,28 @@ Focused on `Pm4Generator.cs` and `pm4 validate-generator-geometry`:
 6. **Identified the correct validation tile**: `development_29_18` has 48 WMO CK24 groups; `development_16_37` has only M2 groups and is unsuitable for WMO generator validation.
 7. **Found the matching real group for a generated farm**: generated farm bounds overlap real group `0x43C689` exactly (min/max within 1 unit).
 
-## Current generator validation results
+## Current results
 
-Tile `development_29_18` (48 real WMO groups, 48 ADT WMO placements), using **area-only collision fingerprints** (edge+area bins, group-relative, transform-invariant):
+### Generator validation (per-placement WMO → PM4 correlation)
+
+Tile `development_29_18` (48 real WMO groups, 48 ADT WMO placements), using **area-only collision fingerprints**:
 - Mean symmetric score: **0.462**
 - Matched groups (score >= 0.50): **36/48**
 - All farm placements match real group `0x43C510`.
 
-This proves the core idea: **we do not need to reproduce real PM4 polygons exactly.** We only need a comparable collision-shape fingerprint. Raw WMO collision triangles + correct coordinate transform + the same edge/area histogram as real PM4 groups is enough to correlate generated shapes to real PM4 groups.
+### Full-corpus PM4 → WMO matching (collision-only DB)
+
+Built `wmo_collision_surface_db_335.json` from the staged 3.3.5 client (502 WMO roots, 2749 fingerprints, 5.5M collision triangles) and matched all 616 dev PM4s:
+- `pm4 match-surfaces`: **30 matched**, **195 ambiguous**, 1106 unresolved, 273 ineligible.
+- `pm4 validate-matches` against ADT ground truth: **P@1 = 1.2%**, **P@3 = 28.5%**.
+
+The collision fingerprints are strong enough to produce candidate sets, but **top-1 is unreliable** because many unrelated WMOs share simple box-like collision shapes. The correct asset often appears in the top-3 or in the unresolved candidate list.
 
 ## What needs work next
 
-1. **Keep generator validation fingerprint-oriented.** The `pm4 validate-generator-geometry` command now uses `Pm4SurfaceCorrelationExtractor` (group-relative edge/area histograms). This is the right metric.
-2. **Confirm the fingerprint approach generalizes** beyond farms — run on a few more tiles and WMO types.
-3. **Decide whether to keep boundary-polygon merging.** Current code emits raw collision triangles (better for fingerprints). The unused boundary-merge helpers can be removed in a cleanup pass.
-4. **Wire this into the main matcher.** If generated WMO fingerprints correlate this well, the same fingerprint can be precomputed for every WMO and matched against PM4-only tiles without ADT.
+1. **Disambiguation via spatial/placement constraints.** Once a WMO candidate set is identified, use tile bounds, CK24 group location, or adjacent groups to pick the right one instead of relying solely on histogram score.
+2. **WMO enumeration gap.** The DB still only has ~502 roots because the archive catalog only exposes named listfile entries. A real full-client listfile would widen coverage.
+3. **Cleanup.** Remove the unused boundary-polygon merge helpers in `Pm4Generator.cs`; raw collision triangles are the right output for fingerprints.
 
 ## Tooling
 
