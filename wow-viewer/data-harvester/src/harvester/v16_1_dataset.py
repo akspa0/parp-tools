@@ -149,15 +149,20 @@ class V161Dataset(Dataset):
         curation_manifest: str | Path | None = None,
         height_channel: bool = False,
         object_roof_channel: bool = False,
+        v21_height_channel: bool = False,
+        v21_coarse_channel: bool = False,
         lightweight_object_gating: bool = False,
         curation_min_terrain_validity: float = 0.0,
         curation_min_minimap_usefulness: float = 0.0,
+        curation_max_liquid_coverage: float = 1.0,
         curation_reject_what_plate: bool = False,
     ) -> None:
         self.dataset_dir = Path(dataset_dir)
         self.augment = augment and split == "train"
         self.height_channel = bool(height_channel)
         self.object_roof_channel = bool(object_roof_channel)
+        self.v21_height_channel = bool(v21_height_channel)
+        self.v21_coarse_channel = bool(v21_coarse_channel)
         self.lightweight_object_gating = bool(lightweight_object_gating)
         self._rng = np.random.RandomState(seed)
         self._stores: dict[str, zarr.Group] = {}
@@ -165,6 +170,7 @@ class V161Dataset(Dataset):
         self._curation_manifest = Path(curation_manifest) if curation_manifest is not None else None
         self._curation_min_terrain_validity = float(curation_min_terrain_validity)
         self._curation_min_minimap_usefulness = float(curation_min_minimap_usefulness)
+        self._curation_max_liquid_coverage = float(curation_max_liquid_coverage)
         self._curation_reject_what_plate = bool(curation_reject_what_plate)
         curation_index = load_curation_index(self._curation_manifest) if self._curation_manifest is not None else None
 
@@ -206,10 +212,13 @@ class V161Dataset(Dataset):
                     row["_curation_terrain_valid_cov"] = float(curation_row.get("terrain_valid_cov", 0.0) or 0.0)
                     row["_curation_minimap_gray_std"] = float(curation_row.get("minimap_gray_std", 0.0) or 0.0)
                     row["_curation_what_plate"] = bool(curation_row.get("what_plate", False))
+                    row["_curation_liquid_cov"] = float(curation_row.get("liquid_cov", 0.0) or 0.0)
 
                     if row["_curation_score_terrain_validity"] < self._curation_min_terrain_validity:
                         continue
                     if row["_curation_score_minimap_target_usefulness"] < self._curation_min_minimap_usefulness:
+                        continue
+                    if row["_curation_liquid_cov"] > self._curation_max_liquid_coverage:
                         continue
                     if self._curation_reject_what_plate and row["_curation_what_plate"]:
                         continue
@@ -293,7 +302,7 @@ class V161Dataset(Dataset):
             normal_mask_257=normal_mask,
             object_presence_257=object_presence_257,
             liquid_mask_256=liquid_mask,
-            object_roof_weight_257=object_roof_weight_257,
+            object_roof_weight_257=weight_257,
             what_plate=what_plate_flag > 0.5,
         )
         mcly_any_16 = (mcly_mask.max(axis=2) > 0.05).astype(np.float32, copy=False)
@@ -388,7 +397,25 @@ class V161Dataset(Dataset):
                 object_roof_weight_257 = np.rot90(object_roof_weight_257, k=1)
 
         minimap_t = torch.from_numpy(minimap.copy()).permute(2, 0, 1)
-        if self.height_channel:
+        if self.v21_height_channel:
+            # 9 channels: minimap(3) + alpha(4) + liquid_mask(1) + object_filtered(1)
+            alpha_t = torch.from_numpy(alpha.copy()).permute(2, 0, 1)  # 4ch
+            liquid_t = torch.from_numpy(liquid_mask.copy()).unsqueeze(0)  # 1ch
+            obj_t = (1.0 - torch.from_numpy(weight_257[:256, :256].copy())).unsqueeze(0)  # 1ch object_filtered
+            input_tensor = torch.cat([minimap_t, alpha_t, liquid_t, obj_t], dim=0)
+        elif self.v21_coarse_channel:
+            # 10 channels: V21 9ch + coarse_height_prior (upsampled 16x16 height)
+            alpha_t = torch.from_numpy(alpha.copy()).permute(2, 0, 1)  # 4ch
+            liquid_t = torch.from_numpy(liquid_mask.copy()).unsqueeze(0)  # 1ch
+            obj_t = (1.0 - torch.from_numpy(weight_257[:256, :256].copy())).unsqueeze(0)  # 1ch object_filtered
+            # Coarse height prior: downsample height_257 to 16x16, upsample to 256x256
+            coarse_h = height_raw  # 257x257
+            coarse_16 = coarse_h[::16, ::16][:16, :16]  # 16x16
+            # Simple upsample: repeat
+            coarse_up = np.repeat(np.repeat(coarse_16, 16, axis=0), 16, axis=1)[:256, :256]
+            coarse_t = torch.from_numpy(coarse_up.copy()).unsqueeze(0)  # 1ch
+            input_tensor = torch.cat([minimap_t, alpha_t, liquid_t, obj_t, coarse_t], dim=0)
+        elif self.height_channel:
             height_norm_t = torch.from_numpy(height_norm[:256, :256].copy()).unsqueeze(0)
             input_tensor = torch.cat([minimap_t, height_norm_t], dim=0)
         elif self.object_roof_channel:

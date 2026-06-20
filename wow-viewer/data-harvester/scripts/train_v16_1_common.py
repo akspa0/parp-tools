@@ -31,6 +31,7 @@ from harvester.v16_1_dataset import V161Dataset  # noqa: E402
 from harvester.paste_dataset import PasteAwareDataset  # noqa: E402
 from harvester.v16_1_models import (  # noqa: E402
     V161HeightModel,
+    V21HeightModel,
     V161HolesModel,
     V161LiquidModel,
     V161NormalObjectRoofModel,
@@ -1164,29 +1165,57 @@ def _height_loss(
 ) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
     inp = batch["input"].to(device, non_blocking=True)
     target = batch["height_norm"].to(device, non_blocking=True)
-    terrain_valid_mask = batch["terrain_valid_mask_257"].to(device, non_blocking=True)
+    filtered_loss_mask = batch["weight_257"].to(device, non_blocking=True)
+    liquid_mask = batch["liquid_mask"].to(device, non_blocking=True)
+    liquid_mask_257 = F.pad(liquid_mask, (0, 1, 0, 1), mode="replicate")
     pred = model(inp)
-    train_mask = terrain_valid_mask.clamp(0.0, 1.0)
+    train_mask = (filtered_loss_mask * (1.0 - liquid_mask_257)).clamp(0.0, 1.0)
     invalid_mask = (1.0 - train_mask).clamp(0.0, 1.0)
-    loss = _masked_mean((pred - target).abs(), train_mask)
+
+    # Multi-scale L1 loss: 257, 128, 64, 32, 16
+    ms_weight = float(getattr(args, "multiscale_weight", 1.0))
+    if ms_weight > 0.0:
+        loss = 0.0
+        ms_scales = [257, 128, 64, 32, 16]
+        for scale in ms_scales:
+            if scale == 257:
+                p = pred
+                t = target
+                m = train_mask
+            else:
+                p = F.interpolate(pred, size=(scale, scale), mode="bilinear", align_corners=False)
+                t = F.interpolate(target, size=(scale, scale), mode="bilinear", align_corners=False)
+                m = F.interpolate(train_mask, size=(scale, scale), mode="nearest")
+            loss = loss + ms_weight * _masked_mean((p - t).abs(), m)
+    else:
+        loss = _masked_mean((pred - target).abs(), train_mask)
+
     metrics: dict[str, float] = {
         "height": float(loss.item()),
         "height_mask_cov": float(train_mask.mean().item()),
     }
 
-    nc_weight = float(getattr(args, "normal_consistency_weight", 0.0))
-    nc_loss_val = 0.0
-    if nc_weight > 0.0 and "normals" in batch:
-        target_normals_gt = batch["normals"].to(device, non_blocking=True)
+    # Gradient (Sobel) loss
+    grad_weight = float(getattr(args, "gradient_weight", 0.05))
+    if grad_weight > 0.0:
+        pred_grad = _gradient_magnitude_257(pred)
+        target_grad = _gradient_magnitude_257(target)
+        grad_loss = _masked_mean((pred_grad - target_grad).abs(), train_mask)
+        loss = loss + grad_weight * grad_loss
+        metrics["grad_loss"] = float(grad_loss.item())
+
+    # Self-supervised normal consistency (pred height -> pred normals, encourage smoothness)
+    nc_weight = float(getattr(args, "normal_consistency_weight", 0.05))
+    if nc_weight > 0.0:
         pred_height_unnorm = _unnorm_height(pred, batch, device)
         pred_normals = _normals_from_height(pred_height_unnorm)
-        target_n = F.normalize(target_normals_gt, dim=1, eps=1e-6)
+        # Smoothness: encourage normals to be consistent with local surface
         pred_n = F.normalize(pred_normals, dim=1, eps=1e-6)
-        cosine = 1.0 - (pred_n * target_n).sum(dim=1, keepdim=True)
-        nc_loss = _masked_mean(cosine, train_mask)
-        nc_loss_val = float(nc_loss.item())
-        loss = loss + (nc_weight * nc_loss)
-        metrics["height_nc_loss"] = nc_loss_val
+        # Cosine similarity with z-up (flat terrain prior)
+        flatness = 1.0 - pred_n[:, 2:3].abs()  # penalize deviation from z-up
+        nc_loss = _masked_mean(flatness, train_mask)
+        loss = loss + nc_weight * nc_loss
+        metrics["nc_loss"] = float(nc_loss.item())
 
     object_roof_weight = batch.get("object_roof_weight_257")
     return loss, metrics, {
@@ -1196,13 +1225,98 @@ def _height_loss(
         "train_mask": train_mask,
         "invalid_mask": invalid_mask,
         "base_mask": train_mask,
-        "terrain_valid_mask": train_mask,
+        "filtered_loss_mask": train_mask,
         "object_roof_weight": (
             object_roof_weight.to(device, non_blocking=True)
             if isinstance(object_roof_weight, torch.Tensor)
             else None
         ),
     }
+
+
+def _spectral_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+) -> torch.Tensor:
+    pred_masked = pred * mask
+    target_masked = target * mask
+    spec_pred = torch.fft.rfft2(pred_masked)
+    spec_target = torch.fft.rfft2(target_masked)
+    power_pred = spec_pred.abs().square()
+    power_target = spec_target.abs().square()
+    eps = 1e-8
+    log_pred = (power_pred + eps).log()
+    log_target = (power_target + eps).log()
+    return F.mse_loss(log_pred, log_target)
+
+
+def _fractal_dim_target(
+    height: torch.Tensor,
+    mask: torch.Tensor,
+    patch_size: int = 16,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    B, C, H, W = height.shape
+    height = height[:, :, :256, :256]
+    m = mask[:, :, :256, :256]
+    diff_x1 = (height[:, :, :, :-1] - height[:, :, :, 1:]).pow(2)
+    diff_y1 = (height[:, :, :-1, :] - height[:, :, 1:, :]).pow(2)
+    m_x1 = m[:, :, :, :-1] * m[:, :, :, 1:]
+    m_y1 = m[:, :, :-1, :] * m[:, :, 1:, :]
+    gamma1 = 0.5 * (diff_x1[:, :, :255, :] * m_x1[:, :, :255, :] + diff_y1[:, :, :, :255] * m_y1[:, :, :, :255])
+    m_g1 = 0.5 * (m_x1[:, :, :255, :] + m_y1[:, :, :, :255])
+    diff_x2 = (height[:, :, :, :-2] - height[:, :, :, 2:]).pow(2)
+    diff_y2 = (height[:, :, :-2, :] - height[:, :, 2:, :]).pow(2)
+    m_x2 = m[:, :, :, :-2] * m[:, :, :, 2:]
+    m_y2 = m[:, :, :-2, :] * m[:, :, 2:, :]
+    gamma2 = 0.5 * (diff_x2[:, :, :254, :] * m_x2[:, :, :254, :] + diff_y2[:, :, :, :254] * m_y2[:, :, :, :254])
+    m_g2 = 0.5 * (m_x2[:, :, :254, :] + m_y2[:, :, :, :254])
+    gamma1 = F.pad(gamma1, (0, 1, 0, 1))
+    gamma2 = F.pad(gamma2, (0, 2, 0, 2))
+    m_g1 = F.pad(m_g1, (0, 1, 0, 1))
+    m_g2 = F.pad(m_g2, (0, 2, 0, 2))
+    pool = F.avg_pool2d
+    g1_pooled = pool(gamma1, patch_size, stride=patch_size)
+    g2_pooled = pool(gamma2, patch_size, stride=patch_size)
+    count1 = pool(m_g1, patch_size, stride=patch_size).clamp(min=1e-8)
+    count2 = pool(m_g2, patch_size, stride=patch_size).clamp(min=1e-8)
+    g1_mean = g1_pooled / count1
+    g2_mean = g2_pooled / count2
+    eps = 1e-8
+    H = 0.5 * torch.log((g2_mean + eps) / (g1_mean + eps)) / math.log(2)
+    H = H.clamp(0.1, 0.9)
+    patch_coverage = pool(m, patch_size, stride=patch_size)
+    patch_weight = (patch_coverage >= 0.5).float()
+    return H, patch_weight
+
+
+def _v21_height_loss(
+    model: torch.nn.Module,
+    batch: dict[str, Any],
+    device: torch.device,
+    args: argparse.Namespace,
+) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
+    """V21.5 loss: L1 + Sobel gradient + self-supervised normal consistency + spectral + fractal dim."""
+    loss, metrics, log_vars = _height_loss(model, batch, device, args)
+    spectral_weight = float(getattr(args, "spectral_weight", 0.1))
+    if spectral_weight > 0.0:
+        target = log_vars["target"]
+        pred = log_vars["pred"]
+        train_mask = log_vars["train_mask"]
+        raw_spec_loss = _spectral_loss(pred, target, train_mask)
+        loss = loss + spectral_weight * raw_spec_loss
+        metrics["spectral_loss"] = float(raw_spec_loss.item())
+    fd_weight = float(getattr(args, "fractal_dim_weight", 0.05))
+    if fd_weight > 0.0:
+        target = log_vars["target"]
+        train_mask = log_vars["train_mask"]
+        fd_pred = model.fd_head(model._pooled16)
+        fd_target, fd_weight_map = _fractal_dim_target(target, train_mask)
+        fd_loss = F.l1_loss(fd_pred, fd_target, reduction="none")
+        fd_loss = (fd_loss * fd_weight_map).mean()
+        loss = loss + fd_weight * fd_loss
+        metrics["fd_loss"] = float(fd_loss.item())
+    return loss, metrics, log_vars
 
 
 def _gradient_magnitude_257(x: torch.Tensor) -> torch.Tensor:
@@ -1495,14 +1609,22 @@ def _preview_height(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out
     row_titles = []
     for idx in range(n):
         row_titles.append(_preview_row_title(batch, idx))
+        # Show only minimap RGB (first 3 channels) for visualization
+        input_vis = batch["input"][idx][:3]
         panels: list[tuple[str, torch.Tensor]] = [
-            ("input", batch["input"][idx]),
+            ("input", input_vis),
             ("height_gt", batch["height_norm"][idx]),
             ("height_pred", outputs["pred"][idx]),
-            ("weight", outputs["weight"][idx]),
+            ("weight(1-filtered)", outputs["weight"][idx]),
         ]
         if "object_roof_weight" in outputs and outputs["object_roof_weight"] is not None:
-            panels.append(("object_roof_weight", outputs["object_roof_weight"][idx]))
+            panels.append(("coarse_roof(old)", outputs["object_roof_weight"][idx]))
+        if "liquid_mask" in batch:
+            panels.append(("liquid_mask", batch["liquid_mask"][idx]))
+        if "object_presence_257" in batch:
+            panels.append(("obj_presence", batch["object_presence_257"][idx]))
+        if "terrain_valid_mask_257" in batch:
+            panels.append(("terrain_valid", batch["terrain_valid_mask_257"][idx]))
         rows.append(panels)
     _save_preview_grid(rows, out_path, row_titles=row_titles)
 
@@ -1640,6 +1762,8 @@ def _preview_combined(batch: dict[str, Any], outputs: dict[str, torch.Tensor], o
 
 TASKS: dict[str, TaskSpec] = {
     "height": TaskSpec("height", V161HeightModel, _height_loss, _preview_height),
+    "v21": TaskSpec("v21", lambda: V21HeightModel(in_channels=9), _v21_height_loss, _preview_height),
+    "v21c": TaskSpec("v21c", lambda: V21HeightModel(in_channels=10), _v21_height_loss, _preview_height),
     "normal": TaskSpec("normal", V161NormalModel, _normal_loss, _preview_normal),
     "holes": TaskSpec("holes", V161HolesModel, _holes_loss, _preview_holes),
     "liquid": TaskSpec("liquid", V161LiquidModel, _liquid_loss, _preview_liquid),
@@ -1763,10 +1887,46 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         help="Drop manifest tiles below this minimap-target-usefulness score.",
     )
     p.add_argument(
+        "--curation-max-liquid-coverage",
+        type=float,
+        default=0.05,
+        help="Drop manifest tiles above this liquid coverage fraction (0.0-1.0). Default 0.05 = reject tiles with >5%% water. Set to 1.0 to disable.",
+    )
+    p.add_argument(
+        "--gradient-weight",
+        type=float,
+        default=0.05,
+        help="Weight for Sobel gradient loss on height.",
+    )
+    p.add_argument(
+        "--normal-consistency-weight",
+        type=float,
+        default=0.05,
+        help="Weight for self-supervised normal consistency loss on predicted height.",
+    )
+    p.add_argument(
+        "--multiscale-weight",
+        type=float,
+        default=0.0,
+        help="Weight for multi-scale L1 loss (257,128,64,32,16). 0 disables. Only used by v21/v21c tasks.",
+    )
+    p.add_argument(
+        "--spectral-weight",
+        type=float,
+        default=0.1,
+        help="Weight for radial power spectrum (FFT) loss on height. 0 disables. Only used by v21/v21c tasks.",
+    )
+    p.add_argument(
+        "--fractal-dim-weight",
+        type=float,
+        default=0.05,
+        help="Weight for fractal dimension (Hurst exponent) aux head loss. 0 disables. Only used by v21/v21c tasks.",
+    )
+    p.add_argument(
         "--curation-reject-what-plate",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Reject manifest tiles flagged as what-plate/noise tiles.",
+        help="Reject manifest tiles flagged as whiteplate/noise tiles.",
     )
     p.add_argument("--max-train-samples", type=int, default=0)
     p.add_argument("--max-val-samples", type=int, default=0)
@@ -1798,12 +1958,6 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         type=float,
         default=1.0,
         help="Extra weight placed on high-deformation normal targets relative to broad flat terrain.",
-    )
-    p.add_argument(
-        "--normal-consistency-weight",
-        type=float,
-        default=0.0,
-        help="Weight for auxiliary normal-consistency loss on height training (penalizes divergence between height-derived normals and ground-truth normals). 0.0 disables.",
     )
     p.add_argument(
         "--no-compile",
@@ -2000,6 +2154,17 @@ def run_task(task_name: str) -> None:
             if args.persistent_workers is None:
                 args.persistent_workers = False
 
+    if args.curation_manifest is not None:
+        if float(args.curation_max_liquid_coverage) > 0.05:
+            args.curation_max_liquid_coverage = 0.05
+        if not bool(args.curation_reject_what_plate):
+            args.curation_reject_what_plate = True
+        if task_name in ("height", "v21", "v21c"):
+            if float(args.curation_min_terrain_validity) <= 0.0:
+                args.curation_min_terrain_validity = 0.20
+            if float(args.curation_min_minimap_usefulness) <= 0.0:
+                args.curation_min_minimap_usefulness = 0.10
+
     loader_pressure_profile = _resolve_loader_pressure_profile(
         args,
         task_name=task_name,
@@ -2027,18 +2192,26 @@ def run_task(task_name: str) -> None:
     run_name = args.run_name or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     height_channel_enabled = bool(resolved_height_channel)
     object_roof_channel_enabled = bool(resolved_object_roof_channel)
+    v21_height_channel_enabled = bool(task_name == "v21")
+    v21_coarse_channel_enabled = bool(task_name == "v21c")
     refiner_enabled_for_task = bool(task_name == "normal" and resolved_refiner_enabled)
     if task_name == "normal" and normal_variant == "v17_hybrid":
         if not run_name.startswith("v17_"):
             run_name = f"v17_{run_name}"
-    elif task_name == "normal" and normal_variant == "v17_1_normals":
+    elif task_name == "normal" and normal_variant == "v17_1_7_1_normals":
         if not run_name.startswith("v17_1_"):
             run_name = f"v17_1_{run_name}"
     elif task_name == "normal" and normal_variant == "v18_object_roof_aux":
         if not run_name.startswith("v18_oroof_"):
             run_name = f"v18_oroof_{run_name}"
+    elif v21_coarse_channel_enabled and not run_name.startswith("v21c_"):
+        run_name = f"v21c_{run_name}"
+    elif v21_height_channel_enabled and not run_name.startswith("v21_"):
+        run_name = f"v21_{run_name}"
     elif height_channel_enabled and not run_name.startswith("v16_1_3"):
         run_name = f"v16_1_3_{run_name}"
+    elif v21_height_channel_enabled and not run_name.startswith("v21_"):
+        run_name = f"v21_{run_name}"
     elif refiner_enabled_for_task and not run_name.startswith("v16_1_2"):
         run_name = f"v16_1_2_{run_name}"
     run_dir = _MODELS_ROOT / task_name / "runs" / run_name
@@ -2059,8 +2232,11 @@ def run_task(task_name: str) -> None:
         curation_manifest=args.curation_manifest,
         height_channel=bool(resolved_height_channel),
         object_roof_channel=bool(resolved_object_roof_channel),
+        v21_height_channel=v21_height_channel_enabled,
+        v21_coarse_channel=v21_coarse_channel_enabled,
         curation_min_terrain_validity=float(args.curation_min_terrain_validity),
         curation_min_minimap_usefulness=float(args.curation_min_minimap_usefulness),
+        curation_max_liquid_coverage=float(args.curation_max_liquid_coverage),
         curation_reject_what_plate=bool(args.curation_reject_what_plate),
     )
     val_ds: V161Dataset | PasteAwareDataset = V161Dataset(
@@ -2073,8 +2249,11 @@ def run_task(task_name: str) -> None:
         curation_manifest=args.curation_manifest,
         height_channel=bool(resolved_height_channel),
         object_roof_channel=bool(resolved_object_roof_channel),
+        v21_height_channel=v21_height_channel_enabled,
+        v21_coarse_channel=v21_coarse_channel_enabled,
         curation_min_terrain_validity=float(args.curation_min_terrain_validity),
         curation_min_minimap_usefulness=float(args.curation_min_minimap_usefulness),
+        curation_max_liquid_coverage=float(args.curation_max_liquid_coverage),
         curation_reject_what_plate=bool(args.curation_reject_what_plate),
     )
     if args.paste_dir is not None:
@@ -2095,8 +2274,11 @@ def run_task(task_name: str) -> None:
                 curation_manifest=args.curation_manifest,
                 height_channel=bool(resolved_height_channel),
                 object_roof_channel=bool(resolved_object_roof_channel),
+                v21_height_channel=v21_height_channel_enabled,
+                v21_coarse_channel=v21_coarse_channel_enabled,
                 curation_min_terrain_validity=float(args.curation_min_terrain_validity),
                 curation_min_minimap_usefulness=float(args.curation_min_minimap_usefulness),
+                curation_max_liquid_coverage=float(args.curation_max_liquid_coverage),
                 curation_reject_what_plate=bool(args.curation_reject_what_plate),
             )
     curation_seed = int(args.curation_seed) if args.curation_seed is not None else int(args.seed)
@@ -2412,6 +2594,7 @@ def run_task(task_name: str) -> None:
             "Curation gates: "
             f"terrain_validity>={float(args.curation_min_terrain_validity):.2f} "
             f"minimap_usefulness>={float(args.curation_min_minimap_usefulness):.2f} "
+            f"liquid_coverage<={float(args.curation_max_liquid_coverage):.2f} "
             f"reject_what_plate={bool(args.curation_reject_what_plate)}",
             flush=True,
         )
@@ -2577,6 +2760,13 @@ def run_task(task_name: str) -> None:
             f"lr={entry['lr']:.2e} opt_steps={optimizer_steps} {entry['elapsed_s']:.1f}s",
             flush=True,
         )
+        sub_losses = []
+        for k in ("height", "grad_loss", "nc_loss", "spectral_loss", "fd_loss"):
+            v = entry.get(f"train_{k}")
+            if v is not None:
+                sub_losses.append(f"{k}={v:.4f}")
+        if sub_losses:
+            print(f"        terms | {' '.join(sub_losses)}", flush=True)
         if task_name == "normal" and "train_normal_height_sup" in entry:
             print(
                 f"        height_sup | loss={entry['train_normal_height_sup']:.4f} "
@@ -2641,6 +2831,13 @@ def run_task(task_name: str) -> None:
             for key, value in val_metric_sums.items():
                 entry[f"val_{key}"] = value / n_val
             print(f"        val | loss={entry['val_loss']:.4f}", flush=True)
+            val_sub = []
+            for k in ("height", "grad_loss", "nc_loss", "spectral_loss", "fd_loss"):
+                v = entry.get(f"val_{k}")
+                if v is not None:
+                    val_sub.append(f"{k}={v:.4f}")
+            if val_sub:
+                print(f"        terms | {' '.join(val_sub)}", flush=True)
             is_new_best = False
             if _is_new_best_val(
                 float(entry["val_loss"]),

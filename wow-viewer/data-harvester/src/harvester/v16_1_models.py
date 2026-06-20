@@ -122,6 +122,48 @@ class V161HeightModel(nn.Module):
         return self.head(d0)
 
 
+class _FractalDimHead(nn.Module):
+    """16x16 patch-level fractal dimension (Hurst exponent) auxiliary head.
+
+    Takes pooled16 bottleneck features and regresses a scalar H per 16x16 patch.
+    """
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv1 = nn.Conv2d(32, 8, kernel_size=3, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(8)
+        self.conv2 = nn.Conv2d(8, 1, kernel_size=1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = F.relu(x, inplace=True)
+        x = self.conv2(x)
+        return self.sigmoid(x)
+
+
+class V21HeightModel(nn.Module):
+    """V21.5: 9-channel input (minimap + alpha + liquid + object) -> height_257.
+
+    fd_head is always created (~500 params) but only used when loss weight > 0.
+    """
+    def __init__(self, in_channels: int = 9) -> None:
+        super().__init__()
+        self.backbone = _UNetBackbone(in_channels)
+        self.head = nn.Sequential(
+            nn.Conv2d(32, 32, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Upsample(size=(257, 257), mode="bilinear", align_corners=True),
+            nn.Conv2d(32, 1, 1),
+        )
+        self.fd_head = _FractalDimHead()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        d0, pooled16 = self.backbone(x)
+        self._pooled16 = pooled16
+        return self.head(d0)
+
+
 class V161NormalModel(nn.Module):
     def __init__(self) -> None:
         super().__init__()
