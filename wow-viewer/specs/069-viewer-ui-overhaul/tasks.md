@@ -103,6 +103,45 @@
 - [x] T078 Skipped (no separate ui-architecture.md exists; new doc covers it).
 - [x] T079 Build clean. All 8 phases done. UI overhaul complete (v1).
 
+## Phase 9: Critical fixes (per user feedback)
+
+- [x] T080 Added `World > Source` sub-tab with file browser + map discovery + workspace bars.
+- [x] T081 Removed `ImGui.Begin("##TopTabContent")` debug window wrap.
+- [x] T082 Emptied Tools menu (only modal/dialog entries remain).
+- [x] T083 Reordered tab render: top tab bar → context → 3D viewport → bottom tab bar → popouts.
+
+## Phase 10: 3D viewport fix
+
+- [x] T084 `TryGetSceneViewportRect` returns full middle area when `_useTabUi=true`
+  (no dockspace/sidebar insets). 3D world now fills the full available area
+  instead of being clipped to a small dockspace rect.
+
+## Phase 11: Popout positioning
+
+- [x] T085 `DrawSubTabWindow` supports `dockRight` / `dockLeft` positioning.
+- [x] T086 Source popout docks on right edge, Quick Controls docks on left edge.
+
+## Phase 12: Quick Controls + per-sub-tab popouts
+
+- [x] T087 Quick Controls popout: Camera Speed, FOV, ADT Detail Tiles, Time of Day,
+  Fog Start/End, Layer toggles, Overlay toggles, Reset Camera, Toggle Wireframe.
+  Opens by default on left side. This is the populated "Debug window".
+- [x] T088 Per-sub-tab popouts: Source, Placements, Tiles, Overlays, Selection,
+  Camera, Themes, Settings, Layers, Range, Playback, Capture, Log, Perf.
+  Each has its own popout window, opens/closes independently.
+
+## Phase 13: Toggle + indicator
+
+- [x] T089 Click sub-tab to TOGGLE its popout (was: open only).
+- [x] T090 Open popouts show `●` indicator in bottom tab bar.
+- [x] T091 `IsSubTabPopoutOpen()` / `ToggleSubTabPopoutByIndex()` per sub-tab.
+
+## Build state
+
+- Build: 0 errors on every commit.
+- 8+ phases complete, all on `069-viewer-ui-overhaul` branch.
+- Pulled by user, tested in real viewer.
+
 ## Notes
 
 - Each phase = one PR. Don't merge phases.
