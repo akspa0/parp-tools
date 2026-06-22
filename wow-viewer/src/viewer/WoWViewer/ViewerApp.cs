@@ -1691,7 +1691,7 @@ void main() {
                 if (_showRenderQualityWindow)
                     DrawRenderQualityWindow();
 
-                if (_showTerrainToolsWindow && (_terrainManager != null || _vlmTerrainManager != null))
+                if (_showTerrainToolsWindow && (_terrainManager != null || _vlmTerrainManager != null) && !_useTabUi)
                     DrawTerrainToolsWindow();
 
                 // Chunk Clipboard (floating window)

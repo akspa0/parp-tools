@@ -32,14 +32,14 @@
 
 ## Phase 3: World + Terrain Merge
 
-- [ ] T025 Implement `DrawWorldTabContent()` → Placements/Tiles/Overlays/SelectionTools sub-tabs.
-- [ ] T026 Move `DrawWorldObjectsContentCore` body into `DrawWorldSubTab_Placements()`.
-- [ ] T027 Move `DrawTerrainToolsContent` body into `DrawWorldSubTab_Tiles()`.
-- [ ] T028 New `DrawWorldSubTab_Overlays()`: chunk/tile/cell grid toggles, alpha mask, shadow, MCCV, contours.
-- [ ] T029 New `DrawWorldSubTab_SelectionTools()`: click selection, frame, asset path actions.
-- [ ] T030 Remove `ShellPanelId.WorldObjects` from active use. Mark `[Obsolete]`.
-- [ ] T031 Remove `_showTerrainToolsWindow` flag. Move content to sub-tab.
-- [ ] T032 Verify build, manual smoke.
+- [x] T025 Implement `DrawWorldSubTabContent()` → Placements/Tiles/Overlays/SelectionTools.
+- [x] T026 Placements sub-tab calls `DrawWorldObjectsContentCore()`.
+- [x] T027 Tiles sub-tab calls `DrawTerrainWorkbenchSelectionContent` + `DrawTerrainControlsAdjustmentContent` + `DrawTerrainExportSubTab`.
+- [x] T028 Overlays sub-tab: layer toggles (base/L1/L2/L3/holes), grid toggles (chunks/tiles/cells), alpha/shadow/MCCV/contours.
+- [x] T029 SelectionTools sub-tab: `DrawSelectedObjectSummaryContent`.
+- [x] T030 Top tab content shows context band: map name, loaded tile count, sub-tab.
+- [x] T031 Terrain Tools window suppressed when `_useTabUi = true` (kept for legacy mode).
+- [x] T032 Build clean. World tab functional with 4 sub-tabs.
 
 ## Phase 4: Terrain + PM4 Tabs
 

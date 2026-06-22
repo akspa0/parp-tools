@@ -3234,23 +3234,108 @@ public partial class ViewerApp
             ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings |
             ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoBringToFrontOnFocus))
         {
-            // Top tab content hosts the "primary" view for the active top tab.
-            // For now, this is a slim band that shows the active top tab's name
-            // and any always-visible controls (e.g., world overview for World tab,
-            // current map summary for PM4 tab). Sub-tab content goes below.
-            string label = _activeTopTab switch
+            // Each top tab shows a slim context band: scene + camera + world status.
+            switch (_activeTopTab)
             {
-                TopTab.Scene => "Scene — selection summary + camera target",
-                TopTab.World => "World — placements + tiles + overlays + selection tools",
-                TopTab.Terrain => "Terrain — layers + clipboard + analysis + MCNK + weak signal + export",
-                TopTab.Pm4 => "PM4 — overlay + selection + correlation + info + match + alignment",
-                TopTab.Archeology => "Archeology — uniqueId range + layers + playback + capture",
-                TopTab.Utilities => "Utilities — minimap + log + perf + render quality + taxi + capture + asset catalog + runtime stats",
-                _ => "—",
-            };
-            ImGui.TextDisabled(label);
+                case TopTab.Scene:
+                    DrawTopTabSceneSummary();
+                    break;
+                case TopTab.World:
+                    DrawTopTabWorldSummary();
+                    break;
+                case TopTab.Terrain:
+                    DrawTopTabTerrainSummary();
+                    break;
+                case TopTab.Pm4:
+                    DrawTopTabPm4Summary();
+                    break;
+                case TopTab.Archeology:
+                    DrawTopTabArcheologySummary();
+                    break;
+                case TopTab.Utilities:
+                    DrawTopTabUtilitiesSummary();
+                    break;
+            }
         }
         ImGui.End();
+    }
+
+    private void DrawTopTabSceneSummary()
+    {
+        ImGui.TextDisabled("Scene — selection, camera, settings, themes");
+        ImGui.SameLine();
+        ImGui.TextDisabled($"  |  Target: {GetWorkspaceTargetSummary()}");
+    }
+
+    private void DrawTopTabWorldSummary()
+    {
+        string mapName = _terrainManager?.MapName
+            ?? _vlmTerrainManager?.MapName
+            ?? "—";
+        int loadedTiles = _terrainManager?.LoadedTileCount
+            ?? _vlmTerrainManager?.LoadedTileCount
+            ?? 0;
+
+        ImGui.TextDisabled($"World — {mapName}  |  Loaded tiles: {loadedTiles}  |  Sub-tab: {(WorldBottomTab)_activeBottomTabIndex}");
+    }
+
+    private void DrawTopTabTerrainSummary()
+    {
+        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (renderer == null)
+        {
+            ImGui.TextDisabled("Terrain — no terrain loaded");
+            return;
+        }
+        int chunkCount = renderer.LoadedChunkCount;
+        ImGui.TextDisabled($"Terrain — {chunkCount} chunks loaded  |  Sub-tab: {(TerrainBottomTab)_activeBottomTabIndex}");
+    }
+
+    private void DrawTopTabPm4Summary()
+    {
+        if (_worldScene == null)
+        {
+            ImGui.TextDisabled("PM4 — no world loaded");
+            return;
+        }
+        ImGui.TextDisabled($"PM4 — {_worldScene.Pm4ObjectCount} objects  |  Visible: {_worldScene.Pm4VisibleObjectCount}  |  Sub-tab: {(Pm4BottomTab)_activeBottomTabIndex}");
+    }
+
+    private void DrawTopTabArcheologySummary()
+    {
+        if (_worldScene == null)
+        {
+            ImGui.TextDisabled("Archeology — no world loaded");
+            return;
+        }
+        if (_worldScene.TryGetUniqueIdFilterRange(out int minId, out int maxId, out int count))
+        {
+            string filterStatus = _worldScene.UniqueIdFilterEnabled
+                ? $"filter ON {_worldScene.UniqueIdFilterMin}..{_worldScene.UniqueIdFilterMax}"
+                : "filter off";
+            ImGui.TextDisabled($"Archeology — {count} placements, range {minId}..{maxId}  |  {filterStatus}");
+        }
+        else
+        {
+            ImGui.TextDisabled("Archeology — no scoped placements");
+        }
+    }
+
+    private void DrawTopTabUtilitiesSummary()
+    {
+        string label = (UtilitiesBottomTab)_activeBottomTabIndex switch
+        {
+            UtilitiesBottomTab.Minimap => "Minimap",
+            UtilitiesBottomTab.Log => "Log Viewer",
+            UtilitiesBottomTab.Perf => "Performance",
+            UtilitiesBottomTab.RenderQuality => "Render Quality",
+            UtilitiesBottomTab.Taxi => "Taxi",
+            UtilitiesBottomTab.CaptureAutomation => "Capture Automation",
+            UtilitiesBottomTab.AssetCatalog => "Asset Catalog",
+            UtilitiesBottomTab.RuntimeStats => "Runtime Stats",
+            _ => "—",
+        };
+        ImGui.TextDisabled($"Utilities — {label}");
     }
 
     private void DrawBottomTabContent()
@@ -3274,10 +3359,12 @@ public partial class ViewerApp
             case TopTab.Scene:
                 DrawSceneSubTabContent();
                 break;
+            case TopTab.World:
+                DrawWorldSubTabContent();
+                break;
             case TopTab.Utilities:
                 DrawUtilitiesSubTabContent();
                 break;
-            case TopTab.World:
             case TopTab.Terrain:
             case TopTab.Pm4:
             case TopTab.Archeology:
@@ -3289,6 +3376,173 @@ public partial class ViewerApp
     }
 
     // ── Scene sub-tab content ──────────────────────────────────────────────
+    private void DrawWorldSubTabContent()
+    {
+        switch ((WorldBottomTab)_activeBottomTabIndex)
+        {
+            case WorldBottomTab.Placements:
+                DrawWorldPlacementsSubTab();
+                break;
+            case WorldBottomTab.Tiles:
+                DrawWorldTilesSubTab();
+                break;
+            case WorldBottomTab.Overlays:
+                DrawWorldOverlaysSubTab();
+                break;
+            case WorldBottomTab.SelectionTools:
+                DrawWorldSelectionToolsSubTab();
+                break;
+        }
+    }
+
+    private void DrawWorldPlacementsSubTab()
+    {
+        // Reuses the full World Objects body (MDDF/MODF/WMO list + filters).
+        DrawWorldObjectsContentCore();
+    }
+
+    private void DrawWorldTilesSubTab()
+    {
+        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (renderer == null)
+        {
+            ImGui.TextDisabled("Load a terrain-backed world to target tiles and chunks in the world tab.");
+            return;
+        }
+
+        ImGui.TextDisabled("Selection map + chunk targeting + live restore tuning + heightmap saves.");
+        ImGui.Separator();
+        DrawTerrainWorkbenchSelectionContent(renderer);
+        ImGui.Separator();
+        DrawTerrainControlsAdjustmentContent();
+        ImGui.Separator();
+        DrawTerrainExportSubTab(renderer);
+    }
+
+    private void DrawTerrainExportSubTab(TerrainRenderer renderer)
+    {
+        ImGui.Text("Terrain Export Scope");
+        DrawTerrainTileScopeSelector("WorldTabExport", includeCurrentTile: true);
+        var scopedTiles = GetTileScopeList(_terrainTileScope);
+        ImGui.TextDisabled($"Resolved export scope: {scopedTiles.Count} tile(s).");
+
+        ImGui.Separator();
+        ImGui.Text("Scoped Export");
+        ImGui.TextDisabled("Use Current tile, Loaded tiles, Whole map, Custom list, or a row/column rectangle before exporting partial ADT data.");
+        if (ImGui.Button("Export Alpha"))
+        {
+            if (_terrainTileScope == TerrainTileScope.CurrentTile)
+                ExportAlphaCurrentTileChunksFolder();
+            else
+                ExportAlphaTilesFolder(_terrainTileScope);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Export Heightmap"))
+        {
+            if (_terrainTileScope == TerrainTileScope.CurrentTile)
+                ExportHeightmap257CurrentTilePerTile();
+            else
+                ExportHeightmap257TilesFolderPerTile(_terrainTileScope);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Export MCCV"))
+        {
+            if (_terrainTileScope == TerrainTileScope.CurrentTile)
+                ExportMccvCurrentTilePng();
+            else
+                ExportMccvTilesFolder(_terrainTileScope);
+        }
+    }
+
+    private void DrawWorldOverlaysSubTab()
+    {
+        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (renderer == null)
+        {
+            ImGui.TextDisabled("Load a terrain-backed world to use overlays.");
+            return;
+        }
+
+        ImGui.Text("Grid Overlays");
+        ImGui.Separator();
+
+        bool l0 = renderer.ShowLayer0;
+        if (ImGui.Checkbox("Base layer", ref l0)) renderer.ShowLayer0 = l0;
+        ImGui.SameLine();
+        bool l1 = renderer.ShowLayer1;
+        if (ImGui.Checkbox("L1", ref l1)) renderer.ShowLayer1 = l1;
+        ImGui.SameLine();
+        bool l2 = renderer.ShowLayer2;
+        if (ImGui.Checkbox("L2", ref l2)) renderer.ShowLayer2 = l2;
+        ImGui.SameLine();
+        bool l3 = renderer.ShowLayer3;
+        if (ImGui.Checkbox("L3", ref l3)) renderer.ShowLayer3 = l3;
+
+        ImGui.SameLine();
+        bool terrainHolesEnabled = !(_terrainManager?.IgnoreTerrainHolesGlobally
+            ?? _vlmTerrainManager?.IgnoreTerrainHolesGlobally
+            ?? false);
+        if (ImGui.Checkbox("Holes", ref terrainHolesEnabled))
+        {
+            if (SetIgnoreTerrainHolesGlobally(!terrainHolesEnabled))
+            {
+                _statusMessage = terrainHolesEnabled
+                    ? "Terrain hole masking enabled."
+                    : "Terrain hole masking disabled.";
+            }
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Grid Lines");
+
+        bool chunkGrid = renderer.ShowChunkGrid;
+        if (ImGui.Checkbox("Chunks (16x16 per chunk, half-cell)", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
+        ImGui.SameLine();
+        bool tileGrid = renderer.ShowTileGrid;
+        if (ImGui.Checkbox("Tiles (16x16 per tile, chunk boundary)", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
+        ImGui.SameLine();
+        bool cellGrid = renderer.ShowCellGrid;
+        if (ImGui.Checkbox("Cells (8x8 per chunk)", ref cellGrid)) renderer.ShowCellGrid = cellGrid;
+
+        ImGui.Separator();
+        ImGui.Text("Surface Overlays");
+
+        bool alphaMask = renderer.ShowAlphaMask;
+        if (ImGui.Checkbox("Alpha mask", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
+        if (alphaMask)
+        {
+            int channel = renderer.AlphaMaskChannel;
+            if (ImGui.SliderInt("Alpha channel", ref channel, 1, 3)) renderer.AlphaMaskChannel = channel;
+        }
+
+        ImGui.SameLine();
+        bool shadowMap = renderer.ShowShadowMap;
+        if (ImGui.Checkbox("Shadow map", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
+
+        ImGui.SameLine();
+        bool useMccv = renderer.UseMccv;
+        if (ImGui.Checkbox("MCCV vertex colors", ref useMccv)) renderer.UseMccv = useMccv;
+
+        ImGui.SameLine();
+        bool contours = renderer.ShowContours;
+        if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
+
+        if (contours)
+        {
+            float interval = renderer.ContourInterval;
+            if (ImGui.SliderFloat("Contour interval (units)", ref interval, 0.5f, 10f)) renderer.ContourInterval = interval;
+        }
+    }
+
+    private void DrawWorldSelectionToolsSubTab()
+    {
+        ImGui.TextDisabled("Click selection, frame, asset path actions for world objects.");
+        ImGui.Separator();
+        DrawSelectedObjectSummaryContent();
+    }
+
     private void DrawSceneSubTabContent()
     {
         switch ((SceneBottomTab)_activeBottomTabIndex)
