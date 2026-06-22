@@ -1,35 +1,55 @@
 # Active Context — wow-viewer
 
-**Last updated**: 2026-06-20 | **Focus**: Spec 068 — training failed, need to debug loss landscape
+**Last updated**: 2026-06-21 | **Focus**: Spec 069 — Viewer UI overhaul (tab system → workbench panel)
 
 ## Current State
 
-All code for spec 068 is implemented and smoke-tested:
-- Spectral loss (FFT radial power spectrum MSE)
-- Fractal dim aux head (16×16 Hurst via variogram)  
-- Curation hardening (mask precedence, liquid filter defaults)
+Viewer UI in flux. Spec 049 (sidebar consolidation) abandoned as wrong approach. Spec 060 (cleanup) marked complete. Spec 069 (tab system) in progress on branch `069-viewer-ui-overhaul`.
 
-### Training Result — FAILED
+### UI direction
+**Top + bottom tab bars (master window chrome) → FAILED.** Looked like a "Debug window" overlay, tabs popped new popouts (window sprawl). User hated it.
 
-V21c full run with all losses: **val loss 5.66**, stalled immediately, never converged. Baseline 3-channel model achieved 0.69.
+**Current approach (Phase 14): single Workbench panel** — one resizable popout on the right side of the master window, with internal top tabs + sub-tabs. No more window sprawl. All data inside one panel.
 
-### Suspected Root Causes
+### What works in 069
+- Cells overlay (8x8 per chunk, 66.666 units, green)
+- Tab data model (TopTab/WorldBottomTab/SceneBottomTab/etc enums)
+- Per-top-tab sub-tab content methods (DrawWorldSourceSubTab, DrawArcheologyRangeSubTab, etc)
+- Archeology playback (UpdateArcheologyPlayback, Play/Pause/Stop, capture integration)
+- Sticky archeology settings (ViewerSettings.Archeology* fields)
+- 3D viewport full size when tab system on (TryGetSceneViewportRect early-return)
+- World > Source sub-tab (file browser + map discovery + workspace bars)
+- Scene > Quick sub-tab (camera/lighting/layer controls)
 
-1. **Spectral weight=0.1 too high** — log-MSE between random init (flat spectrum) and terrain (1/f spectrum) is O(10-50), dominating loss gradient
-2. **Multi-scale L1 at weight=1.0 inflates total** — 5 scales sum to ~5x single-scale L1
-3. **No per-component val metrics** — can't distinguish L1 vs spectral vs fd contribution
-4. **V21c 10-channel model may need different LR or more data**
+### What still missing/broken
+- Native multi-window (per-map workbench windows) — spec'd in 070, not built
+- Sidebar support still tied to legacy shell panel system (marked [Obsolete] but present)
 
-### Next Session Plan
+### Next
+- 070 workbench window spec: each loaded map = native window, multiple workbenches, master becomes launcher
+- 070 is a real architectural rewrite (per-map state, render, UI)
 
-1. Add per-component loss metrics to validation output
-2. Run bare V21c baseline (no extra losses) to get comparable val L1
-3. Lower spectral weight to 0.01 and re-run
-4. Remove multi-scale L1 or lower its weight to 0.2
-5. Only add fractal losses back once baseline is stable
+### Branch state
+- `069-viewer-ui-overhaul` is the active dev branch
+- 14 phases of commits, all pushed
+- Build clean on every commit
 
-### Files Changed (uncommitted)
+## Open Questions
 
-- `data-harvester/scripts/train_v16_1_common.py`
-- `data-harvester/src/harvester/v16_1_models.py`
-- `data-harvester/src/harvester/v16_1_dataset.py`
+1. Should torn-off workbench windows be fully independent processes (070)?
+2. Per-workbench state: persist per-map-path or per-build-version?
+3. Multi-map: tabs in master or fully separate OS windows?
+
+## Files Touched Recently
+
+- `src/viewer/WoWViewer/ViewerApp.cs` — TopTab enums, fields, _useTabUi flag, _workbenchOpen
+- `src/viewer/WoWViewer/ViewerApp_Sidebars.cs` — DrawWorkbenchPopout, DrawQuickControlsContent, per-top-tab sub-tab dispatch
+- `src/viewer/WoWViewer/ViewerApp_MinimapAndStatus.cs` — DrawMinimapContent (headless)
+- `src/viewer/WoWViewer/ViewerApp_CaptureAutomation.cs` — ApplyArcheologyPlayback fields
+- `specs/069-viewer-ui-overhaul/{spec,plan,tasks}.md` — 14 phases
+- `specs/070-map-workbench-window/spec.md` — workbench window spec (draft)
+
+## Test Data
+
+- `wow-viewer/test_data/development/World/Maps/development/` — primary test map set
+- See `memory-bank/data-paths.md` for full list

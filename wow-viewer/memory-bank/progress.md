@@ -1,28 +1,116 @@
 # Progress — wow-viewer
 
-## 2026-06-20 — Spec 068: fractal-aware height loss + curation hardening
+## 2026-06-21 — Spec 069: Viewer UI overhaul (tab system → workbench)
 
 ### What landed
 
-**Spectral Loss (Phase 1)**:
-- `_spectral_loss()`: masked height → `torch.fft.rfft2` → log-log MSE of radial power spectra
-- `--spectral-weight 0.1` CLI flag, wired into `_v21_height_loss`
+**Cells overlay (Phase 0)**:
+- `ShowCellGrid` property on `TerrainRenderer` (8x8 per chunk, 66.666 world units, green)
+- `uShowCellGrid` uniform in both per-chunk + tile shaders
+- Cells checkbox in toolbar + workspace bars sidebar
+- Commit `a086a29d`
 
-**Fractal Dim Aux Head (Phase 2)**:
-- `_FractalDimHead`: tiny 32→8→1 conv head on backbone pooled16 → H per 16×16 patch
-- `V21HeightModel` always creates fd_head, stores `_pooled16` during forward
-- `_fractal_dim_target()`: Matheron variogram at lags 1/2, clamp H ∈ [0.1, 0.9], patch weight from mask coverage
-- `--fractal-dim-weight 0.05` CLI flag
+**Tab system foundation (Phase 1)**:
+- `TopTab` enum (Scene/World/Terrain/PM4/Archeology/Utilities)
+- 6 per-top-tab `*BottomTab` enums
+- `_useTabUi` bool (default `true`), `_activeTopTab`, `_activeBottomTabIndex` fields
+- `DrawTopTabBar`, `DrawBottomTabBar`, `DrawMainViewport`, `DrawTopTabContent`, `DrawBottomTabContent` stubs
+- Commit `41420ed4`
 
-**Curation Hardening (Phase 3)** — critical fix:
-- Fixed mask precedence in `v16_1_dataset.py:278-283`: `object_precise_mask` now checked before `object_filtered_mask` (was reversed, training used coarse AABB instead of precise mesh)
-- `--curation-max-liquid-coverage` default 1.0 → 0.05
-- Auto-enforced sensible curation defaults for height/v21 tasks when manifest provided
-- Added `liquid_coverage` to curation gate logging
+**Scene + Utilities tabs (Phase 2)**:
+- Scene sub-tabs: Selection/Camera/Settings/Themes
+- Utilities sub-tabs: Minimap/Log/Perf/RenderQuality/Taxi/CaptureAutomation/AssetCatalog/RuntimeStats
+- All call existing draw methods (headless `DrawMinimapContent` extracted)
+- View > Tab System toggle (legacy mode)
+- Commit `42cdcb38`
 
-### Previous progress (June 18-19)
-- V20 Multi-Modal Chained Terrain Intent — segmentor training setup
-- V19 minimal-signal height regressor — dataset patching, model, loss functions
-- PM4 surface correlation matcher — collision fingerprints, generator validation, WMO surface DB
-- Hull fingerprint matcher (ABANDONED — false positives)
+**World + Terrain merge (Phase 3)**:
+- World sub-tabs: Source/Placements/Tiles/Overlays/SelectionTools
+- Tiles sub-tab calls `DrawTerrainWorkbenchSelectionContent` + `DrawTerrainControlsAdjustmentContent`
+- Overlays sub-tab: layer/grid/shadow/MCCV/contour toggles
+- Commit `b8d735fc`
+
+**Terrain + PM4 tabs (Phase 4)**:
+- Terrain sub-tabs: Layers/Clipboard/Analysis/MCNK/WeakSignal/Export
+- PM4 sub-tabs: Overlay/Selection/Correlation/Info/Match/Alignment
+- Archeology stub: Range/Layers/Playback/Capture
+- Commit `497a8155`
+
+**Archeology tab + sticky settings (Phases 5+6)**:
+- Split `DrawUniqueIdArchaeologyContent` into per-sub-tab methods
+- Sticky range + scope persistence in ViewerSettings
+- `UseTabUi`/`ActiveTopTab`/`ActiveBottomTab` persisted
+- Commit `4ec074bb`
+
+**Archeology playback (Phase 7)**:
+- `_archeologyPlaybackActive`/`Speed`/`Loop` fields
+- `UpdateArcheologyPlayback` advances UniqueIdFilterMax per frame
+- Slider touch pauses playback
+- Capture integration: `PendingCaptureRequest.ApplyArcheologyPlayback`, `ActiveVideoRecording.ApplyArcheologyPlayback`
+- Video recording starts/stops playback real-time
+- Commit `a54e4481`
+
+**Cleanup + doc (Phase 8)**:
+- `ShellPanelId` marked `[Obsolete]`
+- New doc: `docs/architecture/viewer-ui-tab-system-2026-06-21.md`
+- Commit `a16c6058`
+
+**Critical fixes (Phase 9-10)**:
+- World > Source sub-tab with file browser + map discovery + workspace bars
+- Removed "Debug window" wrap in `DrawTopTabContent`
+- Emptied Tools menu (only modal/dialog entries)
+- 3D viewport full size fix in `TryGetSceneViewportRect`
+- Commit `69966d3c`, `3f6e918e`
+
+**Popout positioning (Phase 11)**:
+- Source popout docks on right edge of master
+- Commit `6471a7bb`
+
+**Quick Controls + per-sub-tab popouts (Phase 12-13)**:
+- Quick Controls popout: camera/lighting/layer/overlay/reset
+- Per-sub-tab popouts: 14 sub-tab popouts
+- Click sub-tab to toggle popout, `●` indicator
+- Commit `4600f9f1`, `929bfd36`
+
+**Single Workbench panel (Phase 14)**:
+- All sub-tab popouts collapsed into ONE big Workbench popout
+- Workbench has internal top tab bar + sub-tab bar + content area
+- No more window sprawl
+- Added Scene > Quick sub-tab (replaces standalone Quick Controls popout)
+- Removed per-sub-tab popout state fields
+- Commit `4d00f2af`
+
+### What we learned
+
+1. **Tab bars at top/bottom of master = wrong.** Looked like a debug overlay. User wanted workbench-feel.
+2. **One popout per sub-tab = wrong.** Window sprawl. User wanted single panel.
+3. **Correct: one Workbench panel with internal tabs.** Single resizable window. All data inside.
+4. **Spec 049 (sidebar consolidation) was wrong approach from the start.** Should have gone to 070 (workbench windows) directly.
+
+### Spec 070 (next)
+
+Per-map workbench windows. Each loaded map = its own window with its own 3D viewport, tab UI, minimap. Master becomes thin launcher.
+
+Estimated: 2-3 weeks focused work, multi-session.
+
+## Previous progress (June 18-20)
+- Spec 068: fractal-aware height loss + curation hardening (V21c)
+- Spec 067: V20 multi-modal terrain intent
+- Spec 066: V19 minimal-signal height regressor
+- PM4 surface correlation matcher (collision fingerprints)
 - PM4 simplification algorithm reverse-engineered
+- V20 Multi-Modal Chained Terrain Intent — segmentor training
+
+## Branch summary
+
+- `069-viewer-ui-overhaul` — 14 commits, all pushed, active dev
+- Build: 0 errors on every commit
+- 14 phases of UI iteration
+- Salvaged: tab data model, archeology playback, sticky settings
+- Pending: 070 workbench window rewrite
+
+## Out-of-Phase Work (Future Specs)
+
+- 070: Per-map workbench windows
+- Per-workbench capture automation (capture is per-workbench)
+- Per-workbench minimap state persistence
