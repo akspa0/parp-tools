@@ -1,19 +1,28 @@
-# Spec 069: Viewer UI Overhaul — Top/Bottom Tab Bands, Archeology Window, Playback, World+Terrain Merge
+# Spec 069: Viewer UI Overhaul — Workbench Panel + Tab System + Archeology Playback
 
 **Branch**: `069-viewer-ui-overhaul`
-**Status**: Draft
+**Status**: In progress (Phase 15 — memory bank + spec sync)
 **Owner**: wow-viewer (viewer shell)
 **Builds on**: 044 (shell usability), 049 (UI consolidation), 060 (UI cleanup)
+**Predecessor**: 070 (workbench window rewrite, drafted, not yet built)
 
 ## Context
 
-Viewer UI grew organic. 12+ shell panels + 15 floating windows. User wants structural rebuild:
+Viewer UI grew organic. 12+ shell panels + 15 floating windows. User wanted structural rebuild but refused the "Debug window" approach (top+bottom tab bars in master window looked like a debug overlay). User refused the "window per sub-tab" approach (window sprawl when clicking sub-tabs).
 
-1. **Top tabs + bottom tabs** instead of left/right sidebars. Two horizontal bands, each with its own tab set. Sidebars removed.
-2. **6 top-level tabs**: Scene | World | Terrain | PM4 | Archeology | Utilities.
-3. **Archeology as first-class top-level tab** with uniqueId filtering, range sliders, sticky persistence, playback.
-4. **World + Terrain merged** into single "World" tab with sub-tabs for placements, tiles, overlays.
-5. **Minimap** lives in Utilities tab, resizable, shares code with fullscreen.
+**Current direction (Phase 14, settled):**
+1. **One Workbench popout** on the right side of the master window. Resizable. Single panel.
+2. **Workbench has internal top tab bar + sub-tab bar**. No window spawn on click.
+3. **6 top-level tabs**: Scene | World | Terrain | PM4 | Archeology | Utilities.
+4. **Archeology as first-class top-level tab** with uniqueId filtering, range sliders, sticky persistence, playback.
+5. **World > Source sub-tab** for file browser + map discovery.
+6. **Scene > Quick sub-tab** for camera/lighting/layer/overlay/reset controls.
+7. **3D viewport** fills the full area not covered by the Workbench.
+
+**What this spec evolved through (lessons learned):**
+- Original: top+bottom tab bars in master window. Looked like a debug overlay. Abandoned.
+- Iteration: one popout per sub-tab. Window sprawl. Abandoned.
+- Current: single Workbench panel with internal tabs. Accepted.
 
 ## User Scenarios
 
