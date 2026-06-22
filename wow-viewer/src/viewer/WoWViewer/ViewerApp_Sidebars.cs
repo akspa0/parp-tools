@@ -3156,4 +3156,84 @@ public partial class ViewerApp
                 ImGui.TextDisabled(_terrainWeakSignalRestoreStatus);
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 069 Phase 1: Tab system stubs. Off by default; no behavior change yet.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    private void DrawTopTabBar()
+    {
+        if (ImGui.BeginTabBar("##TopTabs", ImGuiTabBarFlags.None))
+        {
+            DrawTopTabButton(TopTab.Scene, "Scene");
+            DrawTopTabButton(TopTab.World, "World");
+            DrawTopTabButton(TopTab.Terrain, "Terrain");
+            DrawTopTabButton(TopTab.Pm4, "PM4");
+            DrawTopTabButton(TopTab.Archeology, "Archeology");
+            DrawTopTabButton(TopTab.Utilities, "Utilities");
+            ImGui.EndTabBar();
+        }
+    }
+
+    private void DrawTopTabButton(TopTab tab, string label)
+    {
+        bool selected = _activeTopTab == tab;
+        if (ImGui.TabItemButton(label, selected ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+        {
+            _activeTopTab = tab;
+            _activeBottomTabIndex = 0;
+        }
+    }
+
+    private void DrawBottomTabBar()
+    {
+        string[] labels = GetBottomTabLabels(_activeTopTab);
+        if (labels.Length == 0)
+            return;
+
+        if (_activeBottomTabIndex < 0 || _activeBottomTabIndex >= labels.Length)
+            _activeBottomTabIndex = 0;
+
+        if (ImGui.BeginTabBar("##BottomTabs", ImGuiTabBarFlags.None))
+        {
+            for (int i = 0; i < labels.Length; i++)
+            {
+                bool selected = _activeBottomTabIndex == i;
+                if (ImGui.TabItemButton(labels[i], selected ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+                    _activeBottomTabIndex = i;
+            }
+            ImGui.EndTabBar();
+        }
+    }
+
+    private static string[] GetBottomTabLabels(TopTab top)
+    {
+        return top switch
+        {
+            TopTab.Scene => new[] { "Selection", "Camera", "Settings", "Themes" },
+            TopTab.World => new[] { "Placements", "Tiles", "Overlays", "Selection Tools" },
+            TopTab.Terrain => new[] { "Layers", "Clipboard", "Analysis", "MCNK", "Weak Signal", "Export" },
+            TopTab.Pm4 => new[] { "Overlay", "Selection", "Correlation", "Info", "Match", "Alignment" },
+            TopTab.Archeology => new[] { "Range", "Layers", "Playback", "Capture" },
+            TopTab.Utilities => new[] { "Minimap", "Log", "Perf", "Render Quality", "Taxi", "Capture Automation", "Asset Catalog", "Runtime Stats" },
+            _ => Array.Empty<string>(),
+        };
+    }
+
+    private void DrawMainViewport()
+    {
+        // Phase 1 stub: nothing to do here yet. The 3D render happens
+        // outside the ImGui frame; this region just reserves space.
+    }
+
+    private void DrawTopTabContent()
+    {
+        // Phase 1 stub: no top tab content yet. Each top tab's sub-tabs
+        // will be wired in later phases.
+    }
+
+    private void DrawBottomTabContent()
+    {
+        // Phase 1 stub: no bottom tab content yet.
+    }
 }

@@ -2,14 +2,14 @@
 
 ## Phase 1: Tab System Foundation
 
-- [ ] T001 Add `TopTab` enum: Scene, World, Terrain, PM4, Archeology, Utilities. (ViewerApp.cs)
-- [ ] T002 Add per-top-tab `BottomTab` enums: `SceneBottomTab`, `WorldBottomTab`, `TerrainBottomTab`, `Pm4BottomTab`, `ArcheologyBottomTab`, `UtilitiesBottomTab`.
-- [ ] T003 Add `_useTabUi` bool (default false), `_activeTopTab`, `_activeBottomTab` fields.
-- [ ] T004 Add `DrawTopTabBar()` (renders 6 buttons, sets `_activeTopTab` on click).
-- [ ] T005 Add `DrawBottomTabBar(TopTab activeTop)` (renders sub-tab buttons for active top).
-- [ ] T006 Add `DrawTopTabContent(TopTab tab)` stub. Add `DrawBottomTabContent(TopTab top, BottomTab tab)` stub.
-- [ ] T007 In `DrawUI()`: if `_useTabUi`, call `DrawTopTabBar` → `DrawMainViewport` → `DrawBottomTabBar` → `DrawTopTabContent` → `DrawBottomTabContent`. Else fall through to old sidebar path.
-- [ ] T008 Verify build. Verify viewer launches with `_useTabUi=false` (default, no behavior change).
+- [x] T001 Add `TopTab` enum: Scene, World, Terrain, PM4, Archeology, Utilities. (ViewerApp.cs)
+- [x] T002 Add per-top-tab `BottomTab` enums: `SceneBottomTab`, `WorldBottomTab`, `TerrainBottomTab`, `Pm4BottomTab`, `ArcheologyBottomTab`, `UtilitiesBottomTab`.
+- [x] T003 Add `_useTabUi` bool (default false), `_activeTopTab`, `_activeBottomTabIndex` fields.
+- [x] T004 Add `DrawTopTabBar()` (renders 6 buttons, sets `_activeTopTab` on click).
+- [x] T005 Add `DrawBottomTabBar()` (renders sub-tab buttons for active top).
+- [x] T006 Add `DrawMainViewport`, `DrawTopTabContent`, `DrawBottomTabContent` stubs.
+- [x] T007 In `DrawUI()`: if `_useTabUi`, call tab render. Else fall through to old sidebar path.
+- [x] T008 Verify build. Build clean (0 errors, 162 pre-existing warnings). Viewer behavior unchanged at `_useTabUi=false`.
 
 ## Phase 2: Scene + Utilities Tabs
 

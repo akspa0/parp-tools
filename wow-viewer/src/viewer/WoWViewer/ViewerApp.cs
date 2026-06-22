@@ -75,6 +75,76 @@ public partial class ViewerApp : IDisposable
         Pm4SceneGraph,
     }
 
+    // ── 069 Tab System (Phase 1) ────────────────────────────────────────────
+    // Top-level tab categories. Replaces ShellPanelId for new tab-driven UI.
+    // Sidebars/panels still exist behind _useTabUi = false during migration.
+    internal enum TopTab
+    {
+        Scene = 0,
+        World = 1,
+        Terrain = 2,
+        Pm4 = 3,
+        Archeology = 4,
+        Utilities = 5,
+    }
+
+    // Per-top-tab sub-tab enums. Each top tab has its own bottom tab set.
+    internal enum SceneBottomTab
+    {
+        Selection = 0,
+        Camera = 1,
+        Settings = 2,
+        Themes = 3,
+    }
+
+    internal enum WorldBottomTab
+    {
+        Placements = 0,
+        Tiles = 1,
+        Overlays = 2,
+        SelectionTools = 3,
+    }
+
+    internal enum TerrainBottomTab
+    {
+        Layers = 0,
+        Clipboard = 1,
+        Analysis = 2,
+        Mcnk = 3,
+        WeakSignal = 4,
+        Export = 5,
+    }
+
+    internal enum Pm4BottomTab
+    {
+        Overlay = 0,
+        Selection = 1,
+        Correlation = 2,
+        Info = 3,
+        Match = 4,
+        Alignment = 5,
+    }
+
+    internal enum ArcheologyBottomTab
+    {
+        Range = 0,
+        Layers = 1,
+        Playback = 2,
+        Capture = 3,
+    }
+
+    internal enum UtilitiesBottomTab
+    {
+        Minimap = 0,
+        Log = 1,
+        Perf = 2,
+        RenderQuality = 3,
+        Taxi = 4,
+        CaptureAutomation = 5,
+        AssetCatalog = 6,
+        RuntimeStats = 7,
+    }
+
     private enum ShellPanelLane
     {
         Left,
@@ -287,6 +357,11 @@ public partial class ViewerApp : IDisposable
     private FixedBottomDrawerTab _activeBottomDrawerTab = FixedBottomDrawerTab.Workspace;
     private FixedBottomDrawerTab? _pendingRightSidebarSection;
     private bool _useDockspaceUi = true;
+
+    // 069 Phase 1: tab system state. Off by default; old sidebar system still active.
+    private bool _useTabUi = false;
+    private TopTab _activeTopTab = TopTab.Scene;
+    private int _activeBottomTabIndex = 0;
     private bool _autoOpenWorldMapsPanel;
     private Vector2 _dockspaceHostPosition;
     private Vector2 _dockspaceHostSize;
@@ -1546,8 +1621,21 @@ void main() {
 
             DrawToolbar();
 
-            if (_useDockspaceUi)
+            // 069 Phase 1: tab system. Off by default; old sidebars still active.
+            // When enabled, replaces DrawDockspaceHost + DrawLeftSidebar + DrawRightSidebar
+            // with top tab bar + bottom tab bar + central content area.
+            if (_useTabUi)
+            {
+                DrawTopTabBar();
+                DrawMainViewport();
+                DrawBottomTabBar();
+                DrawTopTabContent();
+                DrawBottomTabContent();
+            }
+            else if (_useDockspaceUi)
+            {
                 DrawDockspaceHost();
+            }
 
             if (HasAnyShellPanelsInLane(ShellPanelLane.Left))
                 DrawLeftSidebar();
