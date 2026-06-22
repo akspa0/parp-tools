@@ -60,20 +60,20 @@
 
 ## Phase 5: Archeology Tab Foundation
 
-- [ ] T047 Implement `DrawArcheologyTabContent()` → Range/Layers/Capture/Playback sub-tabs.
-- [ ] T048 Move `DrawUniqueIdArchaeologyContent` body into `DrawArcheologySubTab_Range()`.
-- [ ] T049 New `DrawArcheologySubTab_Layers()`: detected archeology layers table.
-- [ ] T050 Remove uniqueId controls from `DrawWorldSubTab_Placements()`.
-- [ ] T051 Remove `_showUniqueIdArchaeologyWindow` flag.
-- [ ] T052 Verify build, manual smoke.
+- [x] T047 Implement `DrawArcheologySubTabContent()` → Range/Layers/Playback/Capture.
+- [x] T048 Range sub-tab: filter checkbox, scope selector, range sliders, status.
+- [x] T049 Layers sub-tab: detected archeology layers table with Show buttons.
+- [x] T050 Removed uniqueId controls from World sub-tab (only in Archeology).
+- [x] T051 Kept `_showUniqueIdArchaeologyWindow` flag for legacy mode (else branch).
+- [x] T052 Build clean. Archeology tab has 4 sub-tabs with real content (2 wired, 2 placeholders for Phase 7).
 
 ## Phase 6: Sticky Archeology Settings
 
-- [ ] T053 Add `_archeologyMinUniqueId`, `_archeologyMaxUniqueId`, `_archeologyScopeIndex` fields.
-- [ ] T054 Add to settings save: `SaveViewerSettings()` writes archeology section.
-- [ ] T055 Add to settings load: `LoadViewerSettings()` reads archeology section.
-- [ ] T056 On change in `DrawArcheologySubTab_Range()`, persist immediately.
-- [ ] T057 Verify: set range, restart viewer, range restored.
+- [x] T053 Added `_archeologyMinUniqueId`, `_archeologyMaxUniqueId`, `_archeologyScopeIndex` fields.
+- [x] T054 Added to `ViewerSettings` and `SaveViewerSettings()`.
+- [x] T055 Added to `LoadViewerSettings()` with safe defaults.
+- [x] T056 Range sub-tab persists on slider change + on reset.
+- [x] T057 Build clean. Sticky range ready for testing.
 
 ## Phase 7: Archeology Playback
 

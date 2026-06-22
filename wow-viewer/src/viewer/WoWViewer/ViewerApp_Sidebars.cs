@@ -3043,74 +3043,166 @@ public partial class ViewerApp
 
     private void DrawUniqueIdArchaeologyContent()
     {
-        // Extracted from DrawUnifiedViewerSettingsSidebarContent (ViewerApp.cs ~line 8368)
+        // Legacy entry point (was used by the floating window). Now delegates
+        // to the per-sub-tab dispatch. Kept so the floating window still works
+        // when _useTabUi = false.
         if (_worldScene == null)
             return;
-
-        ImGui.TextDisabled("Scopes UniqueId placement data into layers by consecutive gap analysis.");
-        ImGui.Spacing();
 
         int cameraTileX = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
         int cameraTileY = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize);
         _worldScene.SetUniqueIdFilterTile(cameraTileX, cameraTileY);
 
-        bool uniqueIdFilterEnabled = _worldScene.UniqueIdFilterEnabled;
-        bool uniqueIdFilterChanged = false;
+        DrawArcheologyRangeSubTab();
+        ImGui.Separator();
+        DrawArcheologyLayersSubTab();
+    }
+
+    private void DrawArcheologyRangeSubTab()
+    {
+        ImGui.TextDisabled("Filter by UniqueId range. The 'Camera Tile' scope uses the tile the camera is currently in.");
+        ImGui.Spacing();
+
+        bool uniqueIdFilterEnabled = _worldScene!.UniqueIdFilterEnabled;
         if (ImGui.Checkbox("Filter UniqueId Range", ref uniqueIdFilterEnabled))
         {
             _worldScene.UniqueIdFilterEnabled = uniqueIdFilterEnabled;
-            uniqueIdFilterChanged = true;
+            SaveViewerSettings();
         }
+
         ImGui.SameLine();
         UniqueIdVisibilityScope currentScope = _worldScene.UniqueIdVisibilityScope;
-        if (ImGui.BeginCombo("##UniqueIdScope", currentScope == UniqueIdVisibilityScope.PerMap ? "Per-Map" : "Camera Tile"))
+        string scopeLabel = currentScope == UniqueIdVisibilityScope.PerMap ? "Per-Map" : "Camera Tile";
+        if (ImGui.BeginCombo("##UniqueIdScope", scopeLabel))
         {
             if (ImGui.Selectable("Per-Map", currentScope == UniqueIdVisibilityScope.PerMap))
+            {
                 _worldScene.UniqueIdVisibilityScope = UniqueIdVisibilityScope.PerMap;
+                _archeologyScopeIndex = 0;
+                SaveViewerSettings();
+            }
             if (ImGui.Selectable("Camera Tile", currentScope == UniqueIdVisibilityScope.CameraTile))
+            {
                 _worldScene.UniqueIdVisibilityScope = UniqueIdVisibilityScope.CameraTile;
+                _archeologyScopeIndex = 1;
+                SaveViewerSettings();
+            }
             ImGui.EndCombo();
         }
 
-        ImGui.Spacing();
-        IReadOnlyList<UniqueIdArchaeologyLayer> detectedLayers = _worldScene.GetUniqueIdArchaeologyLayers();
-        if (detectedLayers.Count == 0)
+        // On world load, apply sticky range if set.
+        if (_archeologyMinUniqueId >= 0 && _archeologyMaxUniqueId >= _archeologyMinUniqueId)
         {
-            ImGui.TextDisabled("No UniqueId data available for the current scope.");
-        }
-        else
-        {
-            if (ImGui.BeginTable("##UniqueIdLayers", 4, ImGuiTableFlags.BordersV | ImGuiTableFlags.RowBg))
+            if (_worldScene.UniqueIdFilterMin != _archeologyMinUniqueId || _worldScene.UniqueIdFilterMax != _archeologyMaxUniqueId)
             {
-                ImGui.TableSetupColumn("Layer");
-                ImGui.TableSetupColumn("Range");
-                ImGui.TableSetupColumn("Summary");
-                ImGui.TableSetupColumn("");
-                ImGui.TableHeadersRow();
-
-                for (int i = 0; i < detectedLayers.Count; i++)
-                {
-                    UniqueIdArchaeologyLayer layer = detectedLayers[i];
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted($"Layer {layer.LayerNumber}");
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted($"{layer.MinUniqueId}  —  {layer.MaxUniqueId}");
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted($"{layer.PlacementCount} placements ({layer.WmoCount} WMO, {layer.MdxCount} M2)");
-                    ImGui.TableNextColumn();
-                    if (ImGui.SmallButton($"Show##uid_layer_{i}"))
-                    {
-                        _worldScene.SetUniqueIdFilterRange(layer.MinUniqueId, layer.MaxUniqueId);
-                        _worldScene.UniqueIdFilterEnabled = true;
-                        uniqueIdFilterChanged = true;
-                    }
-                }
-                ImGui.EndTable();
+                _worldScene.SetUniqueIdFilterRange(_archeologyMinUniqueId, _archeologyMaxUniqueId);
             }
         }
 
-        // Clear filter handled by enable/disable toggle above
+        if (_worldScene.TryGetUniqueIdFilterRange(out int minUniqueId, out int maxUniqueId, out int instanceCount))
+        {
+            ImGui.Spacing();
+            int configuredMin = _worldScene.UniqueIdFilterMin;
+            int configuredMax = _worldScene.UniqueIdFilterMax;
+            int visibleMin = configuredMin >= minUniqueId ? Math.Min(configuredMin, maxUniqueId) : minUniqueId;
+            int visibleMax = configuredMax >= minUniqueId ? Math.Max(configuredMin, configuredMax) : maxUniqueId;
+
+            bool changed = false;
+            if (ImGui.SliderInt("Visible Range Start", ref visibleMin, minUniqueId, maxUniqueId))
+            {
+                _worldScene.SetUniqueIdFilterRange(visibleMin, visibleMax);
+                _worldScene.UniqueIdFilterEnabled = true;
+                changed = true;
+            }
+
+            if (ImGui.SliderInt("Visible Range End", ref visibleMax, minUniqueId, maxUniqueId))
+            {
+                _worldScene.SetUniqueIdFilterRange(visibleMin, visibleMax);
+                _worldScene.UniqueIdFilterEnabled = true;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                _archeologyMinUniqueId = visibleMin;
+                _archeologyMaxUniqueId = visibleMax;
+                SaveViewerSettings();
+            }
+
+            string status = _worldScene.UniqueIdFilterEnabled
+                ? $"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  Visible range: {visibleMin}..{visibleMax}"
+                : $"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  Selected visible range: {visibleMin}..{visibleMax} (filter off)";
+            ImGui.TextDisabled(status);
+        }
+        else
+        {
+            ImGui.TextDisabled("No scoped placements with positive UniqueIds are currently available.");
+        }
+
+        if (ImGui.SmallButton("Reset UniqueId Filter"))
+        {
+            _worldScene.ResetUniqueIdFilter();
+            _archeologyMinUniqueId = -1;
+            _archeologyMaxUniqueId = -1;
+            SaveViewerSettings();
+        }
+    }
+
+    private void DrawArcheologyLayersSubTab()
+    {
+        ImGui.TextDisabled("Detected layers (consecutive gap analysis of uniqueId sequence).");
+        ImGui.Spacing();
+
+        IReadOnlyList<UniqueIdArchaeologyLayer> detectedLayers = _worldScene!.GetUniqueIdArchaeologyLayers();
+        if (detectedLayers.Count == 0)
+        {
+            ImGui.TextDisabled("No UniqueId data available for the current scope.");
+            return;
+        }
+
+        if (ImGui.BeginTable("##UniqueIdArcheologyLayers", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollX))
+        {
+            ImGui.TableSetupColumn("Layer", ImGuiTableColumnFlags.WidthFixed, 64f);
+            ImGui.TableSetupColumn("Range", ImGuiTableColumnFlags.WidthFixed, 180f);
+            ImGui.TableSetupColumn("Summary", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 80f);
+            ImGui.TableHeadersRow();
+
+            for (int i = 0; i < detectedLayers.Count; i++)
+            {
+                UniqueIdArchaeologyLayer layer = detectedLayers[i];
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                ImGui.TextUnformatted($"#{layer.LayerNumber}");
+                ImGui.TableNextColumn();
+                ImGui.TextUnformatted($"{layer.MinUniqueId}..{layer.MaxUniqueId}");
+                ImGui.TableNextColumn();
+                ImGui.TextUnformatted($"{layer.PlacementCount} placements ({layer.WmoCount} WMO, {layer.MdxCount} M2)");
+                ImGui.TableNextColumn();
+                if (ImGui.SmallButton($"Show##uid_layer_{i}"))
+                {
+                    _worldScene.SetUniqueIdFilterRange(layer.MinUniqueId, layer.MaxUniqueId);
+                    _worldScene.UniqueIdFilterEnabled = true;
+                }
+            }
+            ImGui.EndTable();
+        }
+    }
+
+    private void DrawArcheologyPlaybackSubTab()
+    {
+        ImGui.TextDisabled("Playback animates 'Visible Range End' from min to max at the configured speed.");
+        ImGui.TextDisabled("Phase 7 will wire this up with capture automation integration.");
+        ImGui.Spacing();
+        ImGui.TextDisabled("Coming soon: play/pause/stop + speed slider + loop + capture integration.");
+    }
+
+    private void DrawArcheologyCaptureSubTab()
+    {
+        ImGui.TextDisabled("Apply archeology playback to next capture / video recording.");
+        ImGui.TextDisabled("Phase 7 will wire this up with capture automation integration.");
+        ImGui.Spacing();
+        ImGui.TextDisabled("Coming soon: 'apply to next capture' checkbox + 'apply to video recording' speed.");
     }
 
     private void DrawTerrainControlsAdjustmentWeakSignalContent()
@@ -3538,7 +3630,7 @@ public partial class ViewerApp
         }
     }
 
-    // ── Archeology sub-tab content (Phase 5 placeholder) ───────────────────
+    // ── Archeology sub-tab content ──────────────────────────────────────────
     private void DrawArcheologySubTabContent()
     {
         if (_worldScene == null)
@@ -3549,10 +3641,16 @@ public partial class ViewerApp
         switch ((ArcheologyBottomTab)_activeBottomTabIndex)
         {
             case ArcheologyBottomTab.Range:
+                DrawArcheologyRangeSubTab();
+                break;
             case ArcheologyBottomTab.Layers:
+                DrawArcheologyLayersSubTab();
+                break;
             case ArcheologyBottomTab.Playback:
+                DrawArcheologyPlaybackSubTab();
+                break;
             case ArcheologyBottomTab.Capture:
-                DrawUniqueIdArchaeologyContent();
+                DrawArcheologyCaptureSubTab();
                 break;
         }
     }

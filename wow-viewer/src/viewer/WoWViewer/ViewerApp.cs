@@ -362,6 +362,11 @@ public partial class ViewerApp : IDisposable
     private bool _useTabUi = true;
     private TopTab _activeTopTab = TopTab.Scene;
     private int _activeBottomTabIndex = 0;
+
+    // 069 Phase 6: sticky archeology settings (persist across viewer restarts).
+    private int _archeologyMinUniqueId = -1; // -1 = unset (use first detected value)
+    private int _archeologyMaxUniqueId = -1; // -1 = unset
+    private int _archeologyScopeIndex = 0;   // 0 = PerMap, 1 = CameraTile
     private bool _autoOpenWorldMapsPanel;
     private Vector2 _dockspaceHostPosition;
     private Vector2 _dockspaceHostSize;
@@ -14645,6 +14650,15 @@ void main() {
             _useDockspaceUi = settings.ShellPanelLayoutVersion < CurrentShellPanelLayoutVersion
                 ? true
                 : settings.UseDockspaceUi;
+
+            // 069 Phase 6: sticky archeology + tab system persistence
+            _archeologyMinUniqueId = settings.ArcheologyMinUniqueId;
+            _archeologyMaxUniqueId = settings.ArcheologyMaxUniqueId;
+            _archeologyScopeIndex = settings.ArcheologyScopeIndex;
+            _useTabUi = settings.UseTabUi;
+            if (Enum.IsDefined(typeof(TopTab), settings.ActiveTopTab))
+                _activeTopTab = (TopTab)settings.ActiveTopTab;
+            _activeBottomTabIndex = Math.Max(0, settings.ActiveBottomTab);
             _showLeftSidebar = settings.ShowLeftSidebar;
             _showRightSidebar = settings.ShowRightSidebar;
             _showWorkspaceBarsPanel = settings.ShowWorkspaceBarsPanel;
@@ -14931,7 +14945,13 @@ void main() {
                         NormalizedWidth = layout.NormalizedWidth,
                         NormalizedHeight = layout.NormalizedHeight,
                     })
-                    .ToList()
+                    .ToList(),
+                ArcheologyMinUniqueId = _archeologyMinUniqueId,
+                ArcheologyMaxUniqueId = _archeologyMaxUniqueId,
+                ArcheologyScopeIndex = _archeologyScopeIndex,
+                UseTabUi = _useTabUi,
+                ActiveTopTab = (int)_activeTopTab,
+                ActiveBottomTab = _activeBottomTabIndex
             };
 
             string json = JsonSerializer.Serialize(settings, new JsonSerializerOptions
@@ -15147,6 +15167,16 @@ void main() {
         public List<SavedPm4ObjectMatchSelection> Pm4ObjectMatchSelections { get; set; } = new();
         public List<SavedObjectPathFilterMap> ObjectPathFilters { get; set; } = new();
         public List<SavedShellPanelLayout> ShellPanelLayouts { get; set; } = new();
+
+        // 069 Phase 6: sticky archeology settings
+        public int ArcheologyMinUniqueId { get; set; } = -1;
+        public int ArcheologyMaxUniqueId { get; set; } = -1;
+        public int ArcheologyScopeIndex { get; set; }
+
+        // 069 tab system persistence
+        public bool UseTabUi { get; set; } = true;
+        public int ActiveTopTab { get; set; }
+        public int ActiveBottomTab { get; set; }
     }
 
     private sealed class SavedTaxiActorOverride
