@@ -55,12 +55,19 @@ public partial class ViewerApp
 
     private void DrawRenderQualityWindow()
     {
+        // 069 Phase 16: wrapper keeps legacy floating-window behavior.
+        // Workbench sub-tab uses DrawRenderQualityContent directly.
         if (!ImGui.Begin("Render Quality", ref _showRenderQualityWindow, ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.End();
             return;
         }
+        DrawRenderQualityContent();
+        ImGui.End();
+    }
 
+    private void DrawRenderQualityContent()
+    {
         if (ImGui.BeginCombo("Texture Filtering", RenderQualitySettings.GetLabel(_textureFilteringMode)))
         {
             foreach (TextureFilteringMode mode in Enum.GetValues(typeof(TextureFilteringMode)))
@@ -125,7 +132,5 @@ public partial class ViewerApp
             ApplyRenderQualitySettings(refreshTextures: true);
 
         ImGui.TextDisabled("Applies live to standalone MDX, standalone WMO, terrain, and world object renderer caches.");
-
-        ImGui.End();
     }
 }

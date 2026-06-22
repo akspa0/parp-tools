@@ -3023,22 +3023,36 @@ public partial class ViewerApp
 
     private void DrawTaxiWindow()
     {
+        // 069 Phase 16: wrapper keeps legacy floating-window behavior.
+        // Workbench sub-tab uses DrawTaxiContent directly.
         ImGui.SetNextWindowSize(new Vector2(460f, 500f), ImGuiCond.FirstUseEver);
         if (ImGui.Begin("Taxi Panel", ref _showTaxiWindow))
         {
-            DrawSelectedTaxiControls();
+            DrawTaxiContent();
         }
         ImGui.End();
     }
 
+    private void DrawTaxiContent()
+    {
+        DrawSelectedTaxiControls();
+    }
+
     private void DrawWeakSignalWindow()
     {
+        // 069 Phase 16: wrapper keeps legacy floating-window behavior.
+        // Workbench sub-tab uses DrawWeakSignalContent directly.
         ImGui.SetNextWindowSize(new Vector2(400f, 480f), ImGuiCond.FirstUseEver);
         if (ImGui.Begin("Weak Signal Amplifier", ref _showWeakSignalWindow))
         {
-            DrawTerrainControlsAdjustmentWeakSignalContent();
+            DrawWeakSignalContent();
         }
         ImGui.End();
+    }
+
+    private void DrawWeakSignalContent()
+    {
+        DrawTerrainControlsAdjustmentWeakSignalContent();
     }
 
     private void DrawUniqueIdArchaeologyContent()
@@ -3734,17 +3748,35 @@ public partial class ViewerApp
 
     private void DrawTerrainAnalysisSubTab()
     {
-        DrawTerrainAnalysisWindow();
+        // 069 Phase 16: call headless variant so no nested window opens
+        // inside the workbench. The legacy DrawTerrainAnalysisWindow
+        // wrapper still exists for users who toggle the old menu item.
+        if (_terrainManager == null && _vlmTerrainManager == null)
+        {
+            ImGui.TextDisabled("Load a terrain-backed world to use Terrain Analysis.");
+            return;
+        }
+        DrawTerrainAnalysisContent();
     }
 
     private void DrawTerrainMcnkSubTab()
     {
-        DrawMcnkExplorerWindow();
+        if (_terrainManager == null && _vlmTerrainManager == null)
+        {
+            ImGui.TextDisabled("Load a terrain-backed world to use MCNK Explorer.");
+            return;
+        }
+        DrawMcnkExplorerContent();
     }
 
     private void DrawTerrainWeakSignalSubTab()
     {
-        DrawWeakSignalWindow();
+        if (_terrainManager == null && _vlmTerrainManager == null)
+        {
+            ImGui.TextDisabled("Load a terrain-backed world to use Weak Signal.");
+            return;
+        }
+        DrawWeakSignalContent();
     }
 
     // ── PM4 sub-tab content ────────────────────────────────────────────────
@@ -4164,26 +4196,29 @@ public partial class ViewerApp
     // ── Utilities sub-tab content ──────────────────────────────────────────
     private void DrawUtilitiesSubTabContent()
     {
+        // 069 Phase 16: use headless variants (Draw*Content) so no nested
+        // window opens inside the workbench. The legacy Draw*Window
+        // wrappers still work for users who toggle the old menu items.
         switch ((UtilitiesBottomTab)_activeBottomTabIndex)
         {
             case UtilitiesBottomTab.Minimap:
                 DrawUtilitiesMinimap();
                 break;
             case UtilitiesBottomTab.Log:
-                DrawLogViewer();
+                DrawLogViewerContent();
                 break;
             case UtilitiesBottomTab.Perf:
-                DrawPerfWindow();
+                DrawPerfContent();
                 break;
             case UtilitiesBottomTab.RenderQuality:
-                DrawRenderQualityWindow();
+                DrawRenderQualityContent();
                 break;
             case UtilitiesBottomTab.Taxi:
-                if (_worldScene != null) DrawTaxiWindow();
+                if (_worldScene != null) DrawTaxiContent();
                 else ImGui.TextDisabled("Load a world to enable taxi tools.");
                 break;
             case UtilitiesBottomTab.CaptureAutomation:
-                DrawCaptureAutomationWindow();
+                DrawCaptureAutomationContent();
                 break;
             case UtilitiesBottomTab.AssetCatalog:
                 _catalogView?.Draw();

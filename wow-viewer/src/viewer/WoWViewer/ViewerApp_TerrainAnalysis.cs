@@ -13,17 +13,13 @@ public partial class ViewerApp
 {
     private void DrawTerrainAnalysisWindow()
     {
+        // 069 Phase 16: wrapper keeps legacy floating-window behavior.
+        // Workbench sub-tab uses DrawTerrainAnalysisContent directly.
         if (_terrainManager == null && _vlmTerrainManager == null)
         {
             _showTerrainAnalysisWindow = false;
             return;
         }
-
-        EnsureTerrainAnalysisTextures();
-
-        var cameraTile = GetCameraTile();
-        if (_terrainAnalysisFollowCameraTile && (!_terrainAnalysisPreviewTile.HasValue || _terrainAnalysisPreviewTile.Value != cameraTile))
-            RefreshTerrainAnalysisCurrentTile(cameraTile);
 
         ImGui.SetNextWindowSize(new Vector2(980f, 860f), ImGuiCond.FirstUseEver);
         if (!ImGui.Begin("Terrain Analysis", ref _showTerrainAnalysisWindow, ImGuiWindowFlags.NoCollapse))
@@ -31,6 +27,17 @@ public partial class ViewerApp
             ImGui.End();
             return;
         }
+        DrawTerrainAnalysisContent();
+        ImGui.End();
+    }
+
+    private void DrawTerrainAnalysisContent()
+    {
+        EnsureTerrainAnalysisTextures();
+
+        var cameraTile = GetCameraTile();
+        if (_terrainAnalysisFollowCameraTile && (!_terrainAnalysisPreviewTile.HasValue || _terrainAnalysisPreviewTile.Value != cameraTile))
+            RefreshTerrainAnalysisCurrentTile(cameraTile);
 
         ImGui.Text($"Camera Tile: ({cameraTile.tileX}, {cameraTile.tileY})");
         if (_terrainAnalysisPreviewTile.HasValue)
@@ -109,8 +116,6 @@ public partial class ViewerApp
 
         ImGui.Separator();
         DrawHiddenTerrainCandidatesSection();
-
-        ImGui.End();
     }
 
     private void DrawHiddenTerrainCandidatesSection()

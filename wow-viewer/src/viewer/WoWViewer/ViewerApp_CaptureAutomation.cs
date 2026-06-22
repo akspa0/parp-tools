@@ -226,12 +226,19 @@ public partial class ViewerApp
 
     private void DrawCaptureAutomationWindow()
     {
+        // 069 Phase 16: wrapper keeps legacy floating-window behavior.
+        // Workbench sub-tab uses DrawCaptureAutomationContent directly.
         if (!ImGui.Begin("Capture Automation", ref _showCaptureAutomationWindow))
         {
             ImGui.End();
             return;
         }
+        DrawCaptureAutomationContent();
+        ImGui.End();
+    }
 
+    private void DrawCaptureAutomationContent()
+    {
         ImGui.TextDisabled(BuildSceneBookmarkText(CreateCameraShotPoint("current")));
 
         if (ImGui.Button("Copy Current Scene Bookmark"))
@@ -375,8 +382,6 @@ public partial class ViewerApp
             LoadCameraShotPoints();
 
         ImGui.TextDisabled($"Queued captures: {_captureQueue.Count + (_activeCaptureRequest != null ? 1 : 0)}");
-
-        ImGui.End();
     }
 
     private static (float wowX, float wowY, float wowZ) GetWowCoordinates(float positionX, float positionY, float positionZ)

@@ -254,6 +254,8 @@ public partial class ViewerApp
 
     private void DrawMcnkExplorerWindow()
     {
+        // 069 Phase 16: wrapper keeps legacy floating-window behavior.
+        // Workbench sub-tab uses DrawMcnkExplorerContent directly.
         if (_terrainManager == null && _vlmTerrainManager == null)
         {
             _showMcnkExplorerWindow = false;
@@ -266,12 +268,16 @@ public partial class ViewerApp
             ImGui.End();
             return;
         }
+        DrawMcnkExplorerContent();
+        ImGui.End();
+    }
 
+    private void DrawMcnkExplorerContent()
+    {
         ImGui.TextDisabled("Inspect the hovered or camera chunk, raw MCNK flags, layer stack, alpha usage, and weak-corner overlays.");
         ImGui.TextDisabled("Uses the hovered chunk when available and falls back to the camera chunk.");
         ImGui.Separator();
         DrawTerrainChunkInvestigationContent();
-        ImGui.End();
     }
 
     private void DrawWlLiquidInvestigationPanel(bool defaultOpen)

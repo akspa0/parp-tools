@@ -781,25 +781,28 @@ public partial class ViewerApp
 
     private void DrawPerfWindow()
     {
+        // 069 Phase 16: wrapper keeps legacy floating-window behavior.
+        // Workbench sub-tab uses DrawPerfContent directly.
         ImGui.SetNextWindowSize(new Vector2(360, 0), ImGuiCond.FirstUseEver);
         if (!ImGui.Begin("Perf", ref _showPerfWindow, ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.End();
             return;
         }
+        DrawPerfContent();
+        ImGui.End();
+    }
 
+    private void DrawPerfContent()
+    {
         var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
         if (terrainRenderer == null)
         {
             ImGui.Text("No terrain loaded.");
-            ImGui.End();
             return;
         }
-
         ImGui.Text($"Chunks: {terrainRenderer.ChunksRendered} rendered, {terrainRenderer.ChunksCulled} culled");
         ImGui.TextDisabled("Stats are for the last terrain Render() call.");
-
-        ImGui.End();
     }
 
     private void DrawPm4AlignmentWindow()
