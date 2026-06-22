@@ -367,6 +367,7 @@ public partial class ViewerApp : IDisposable
 
     // Sub-tab popout window visibility (069 Phase 9: content in popout, not in middle)
     private bool _subTabSourceOpen = true; // Source sub-tab opens by default so user can load a map
+    private int _popoutDockFrame = -1; // frame counter when popout was last docked
 
     // 069 Phase 6: sticky archeology settings (persist across viewer restarts).
     private int _archeologyMinUniqueId = -1; // -1 = unset (use first detected value)

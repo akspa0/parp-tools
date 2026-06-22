@@ -3547,27 +3547,39 @@ public partial class ViewerApp
 
     private void DrawSubTabContentPopout()
     {
-        // 069 Phase 9 fix: sub-tab content lives in a popout window, not in
+        // 069 Phase 9: sub-tab content lives in a popout window, not in
         // a child region in the middle. The 3D world keeps the full middle
         // area. Click a sub-tab to open its popout. Click again (or X) to close.
+        // The popout positions itself on the right side of the screen.
 
-        // Use a 1:1 state model: each sub-tab has its own visibility flag.
-        // The active sub-tab is the default visible one.
         if (!_useTabUi) return;
-        if (_activeTopTab == TopTab.World && (WorldBottomTab)_activeBottomTabIndex == WorldBottomTab.Source)
-        {
-            DrawSubTabWindow("Source##069", "World — Source", DrawWorldSourceSubTab, ref _subTabSourceOpen);
-        }
-        // For all other sub-tabs, the sub-tab bar just navigates. The popout
-        // opens via the Draw*Window methods (which are the legacy floating
-        // windows, still wired through the if-else in DrawUI).
+
+        // Source popout: opens by default so user can load a map on startup.
+        DrawSubTabWindow("Source##069", "World — Source", DrawWorldSourceSubTab, ref _subTabSourceOpen, dockRight: true);
     }
 
-    private void DrawSubTabWindow(string id, string title, Action body, ref bool isOpen)
+    private void DrawSubTabWindow(string id, string title, Action body, ref bool isOpen, bool dockRight = false)
     {
         if (!isOpen) return;
 
-        ImGui.SetNextWindowSize(new Vector2(420f, 360f), ImGuiCond.FirstUseEver);
+        var io = ImGui.GetIO();
+        if (dockRight && ImGui.GetFrameCount() == _popoutDockFrame)
+        {
+            // Position on right side of screen, just below menu/toolbar.
+            float topOffset = MenuBarHeight + ToolbarHeight + 30f; // 30 = top tab bar
+            float rightMargin = 20f;
+            float width = 440f;
+            float height = io.DisplaySize.Y - topOffset - StatusBarHeight - 50f; // 50 = bottom tab bar
+            ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - width - rightMargin, topOffset), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSize(new Vector2(width, height), ImGuiCond.FirstUseEver);
+        }
+        else if (dockRight)
+        {
+            // Reposition when first shown this session
+            float topOffset = MenuBarHeight + ToolbarHeight + 30f;
+            ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - 460f, topOffset), ImGuiCond.Appearing);
+        }
+
         if (ImGui.Begin(title, ref isOpen))
         {
             body();
