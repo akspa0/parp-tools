@@ -60,6 +60,7 @@ public partial class ViewerApp : IDisposable
         Editor,
     }
 
+    [Obsolete("Shell panel system deprecated in 069. Use tab system (View > Tab System). Will be removed in 070.")]
     private enum ShellPanelId
     {
         Navigator,
