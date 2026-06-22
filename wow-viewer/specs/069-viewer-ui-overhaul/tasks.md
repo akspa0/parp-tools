@@ -136,11 +136,29 @@
 - [x] T090 Open popouts show `●` indicator in bottom tab bar.
 - [x] T091 `IsSubTabPopoutOpen()` / `ToggleSubTabPopoutByIndex()` per sub-tab.
 
+## Phase 14: Single Workbench panel (window sprawl fix)
+
+- [x] T092 All sub-tab popouts collapsed into ONE big "Workbench" popout window.
+- [x] T093 Master window no longer draws top/bottom tab bars (workbench has its own).
+- [x] T094 Workbench contains: top tab bar + sub-tab bar + content area in a
+  single resizable window.
+- [x] T095 Added Scene > Quick sub-tab (index 0) for camera/lighting/layer controls.
+- [x] T096 Removed per-sub-tab popout state fields (single `_workbenchOpen` flag).
+- [x] T097 Removed dead code: DrawBottomTabBar, IsSubTabPopoutOpen, ToggleSubTabPopoutByIndex, OpenSubTabPopoutByIndex, DrawSubTabWindow, DrawQuickControlsPopoutBody, GetTerrainRendererSafe.
+
+## Phase 15: Memory bank + spec sync
+
+- [x] T098 Updated `memory-bank/activeContext.md` for Phase 14.
+- [x] T099 Updated `memory-bank/progress.md` with 14-phase history + lessons learned.
+- [x] T100 (this file) tasks.md updated to reflect current state.
+
 ## Build state
 
 - Build: 0 errors on every commit.
-- 8+ phases complete, all on `069-viewer-ui-overhaul` branch.
-- Pulled by user, tested in real viewer.
+- 15 phases complete, all on `069-viewer-ui-overhaul` branch.
+- Phase 14 = single Workbench panel (replaces 14 separate popouts).
+- Phase 15 = memory bank + spec sync.
+- Next: 070 workbench window rewrite (per-map windows, real native feel).
 
 ## Notes
 
