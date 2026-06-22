@@ -152,12 +152,27 @@
 - [x] T099 Updated `memory-bank/progress.md` with 14-phase history + lessons learned.
 - [x] T100 (this file) tasks.md updated to reflect current state.
 
+## Phase 16: Headless content variants (sub-tab X-button fix)
+
+- [x] T101 Refactored `DrawLogViewer` → `DrawLogViewerContent` (headless).
+- [x] T102 Refactored `DrawPerfWindow` → `DrawPerfContent`.
+- [x] T103 Refactored `DrawRenderQualityWindow` → `DrawRenderQualityContent`.
+- [x] T104 Refactored `DrawCaptureAutomationWindow` → `DrawCaptureAutomationContent`.
+- [x] T105 Refactored `DrawTaxiWindow` → `DrawTaxiContent`.
+- [x] T106 Refactored `DrawWeakSignalWindow` → `DrawWeakSignalContent`.
+- [x] T107 Refactored `DrawTerrainAnalysisWindow` → `DrawTerrainAnalysisContent`.
+- [x] T108 Refactored `DrawMcnkExplorerWindow` → `DrawMcnkExplorerContent`.
+- [x] T109 Sub-tab dispatchers now call headless variants (no nested windows in workbench).
+- [x] T110 Legacy `Draw*Window` wrappers still work for View menu items.
+- [x] T111 Memory bank + spec/plan/tasks updated.
+
 ## Build state
 
-- Build: 0 errors on every commit.
-- 15 phases complete, all on `069-viewer-ui-overhaul` branch.
+- Build: 0 errors, 0 warnings on every commit.
+- 16 phases complete, all on `069-viewer-ui-overhaul` branch.
 - Phase 14 = single Workbench panel (replaces 14 separate popouts).
 - Phase 15 = memory bank + spec sync.
+- Phase 16 = headless content variants (no nested windows).
 - Next: 070 workbench window rewrite (per-map windows, real native feel).
 
 ## Notes

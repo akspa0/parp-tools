@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-**Last updated**: 2026-06-21 | **Focus**: Spec 069 — Viewer UI overhaul (tab system → workbench panel)
+**Last updated**: 2026-06-21 | **Focus**: Spec 069 Phase 16 — workbench sub-tabs use headless content variants (no nested windows)
 
 ## Current State
 
@@ -9,7 +9,9 @@ Viewer UI in flux. Spec 049 (sidebar consolidation) abandoned as wrong approach.
 ### UI direction
 **Top + bottom tab bars (master window chrome) → FAILED.** Looked like a "Debug window" overlay, tabs popped new popouts (window sprawl). User hated it.
 
-**Current approach (Phase 14): single Workbench panel** — one resizable popout on the right side of the master window, with internal top tabs + sub-tabs. No more window sprawl. All data inside one panel.
+**Sub-tab popouts (one per sub-tab) → FAILED.** Window sprawl. User hated the X buttons that didn't work.
+
+**Current approach (Phase 14-16): single Workbench panel** — one resizable popout on the right side of the master window, with internal top tabs + sub-tabs. All data inside one panel. Sub-tab content uses headless Draw*Content variants (no nested ImGui windows).
 
 ### What works in 069
 - Cells overlay (8x8 per chunk, 66.666 units, green)
@@ -42,12 +44,17 @@ Viewer UI in flux. Spec 049 (sidebar consolidation) abandoned as wrong approach.
 
 ## Files Touched Recently
 
-- `src/viewer/WoWViewer/ViewerApp.cs` — TopTab enums, fields, _useTabUi flag, _workbenchOpen
-- `src/viewer/WoWViewer/ViewerApp_Sidebars.cs` — DrawWorkbenchPopout, DrawQuickControlsContent, per-top-tab sub-tab dispatch
-- `src/viewer/WoWViewer/ViewerApp_MinimapAndStatus.cs` — DrawMinimapContent (headless)
-- `src/viewer/WoWViewer/ViewerApp_CaptureAutomation.cs` — ApplyArcheologyPlayback fields
-- `specs/069-viewer-ui-overhaul/{spec,plan,tasks}.md` — 14 phases
-- `specs/070-map-workbench-window/spec.md` — workbench window spec (draft)
+- `src/viewer/WoWViewer/ViewerApp.cs` - TopTab enums, fields, _useTabUi flag, _workbenchOpen
+- `src/viewer/WoWViewer/ViewerApp_Sidebars.cs` - DrawWorkbenchPopout, DrawQuickControlsContent, per-top-tab sub-tab dispatch
+- `src/viewer/WoWViewer/ViewerApp_MinimapAndStatus.cs` - DrawMinimapContent (headless)
+- `src/viewer/WoWViewer/ViewerApp_CaptureAutomation.cs` - ApplyArcheologyPlayback fields, DrawCaptureAutomationContent
+- `src/viewer/WoWViewer/ViewerApp_Investigation.cs` - DrawMcnkExplorerContent
+- `src/viewer/WoWViewer/ViewerApp_LogViewer.cs` - DrawLogViewerContent
+- `src/viewer/WoWViewer/ViewerApp_Pm4Utilities.cs` - DrawPerfContent
+- `src/viewer/WoWViewer/ViewerApp_RenderQuality.cs` - DrawRenderQualityContent
+- `src/viewer/WoWViewer/ViewerApp_TerrainAnalysis.cs` - DrawTerrainAnalysisContent
+- `specs/069-viewer-ui-overhaul/{spec,plan,tasks}.md` - 16 phases
+- `specs/070-map-workbench-window/spec.md` - workbench window spec (draft)
 
 ## Test Data
 
