@@ -3413,9 +3413,61 @@ public partial class ViewerApp
             {
                 bool selected = _activeBottomTabIndex == i;
                 if (ImGui.TabItemButton(labels[i], selected ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+                {
                     _activeBottomTabIndex = i;
+                    // 069 Phase 12: clicking a sub-tab opens its popout.
+                    OpenSubTabPopoutByIndex(_activeTopTab, i);
+                }
             }
             ImGui.EndTabBar();
+        }
+    }
+
+    private void OpenSubTabPopoutByIndex(TopTab top, int bottomIndex)
+    {
+        if (top == TopTab.World)
+        {
+            switch ((WorldBottomTab)bottomIndex)
+            {
+                case WorldBottomTab.Source: _subTabSourceOpen = true; break;
+                case WorldBottomTab.Placements: _subTabPlacementsOpen = true; break;
+                case WorldBottomTab.Tiles: _subTabTilesOpen = true; break;
+                case WorldBottomTab.Overlays: _subTabOverlaysOpen = true; break;
+            }
+        }
+        else if (top == TopTab.Scene)
+        {
+            switch ((SceneBottomTab)bottomIndex)
+            {
+                case SceneBottomTab.Selection: _subTabSelectionOpen = true; break;
+                case SceneBottomTab.Camera: _subTabCameraOpen = true; break;
+                case SceneBottomTab.Themes: _subTabThemesOpen = true; break;
+                case SceneBottomTab.Settings: _subTabSettingsOpen = true; break;
+            }
+        }
+        else if (top == TopTab.Terrain)
+        {
+            switch ((TerrainBottomTab)bottomIndex)
+            {
+                case TerrainBottomTab.Layers: _subTabLayersOpen = true; break;
+            }
+        }
+        else if (top == TopTab.Archeology)
+        {
+            switch ((ArcheologyBottomTab)bottomIndex)
+            {
+                case ArcheologyBottomTab.Range: _subTabRangeOpen = true; break;
+                case ArcheologyBottomTab.Playback: _subTabPlaybackOpen = true; break;
+                case ArcheologyBottomTab.Capture: _subTabArcheoCaptureOpen = true; break;
+            }
+        }
+        else if (top == TopTab.Utilities)
+        {
+            switch ((UtilitiesBottomTab)bottomIndex)
+            {
+                case UtilitiesBottomTab.Log: _subTabLogOpen = true; break;
+                case UtilitiesBottomTab.Perf: _subTabPerfOpen = true; break;
+            }
         }
     }
 
@@ -3554,30 +3606,176 @@ public partial class ViewerApp
 
         if (!_useTabUi) return;
 
+        // Set dock frame on first call so SetNextWindowPos FirstUseEver works.
+        if (_popoutDockFrame < 0)
+            _popoutDockFrame = ImGui.GetFrameCount();
+
         // Source popout: opens by default so user can load a map on startup.
         DrawSubTabWindow("Source##069", "World — Source", DrawWorldSourceSubTab, ref _subTabSourceOpen, dockRight: true);
+
+        // Quick Controls popout: opens by default with the most-used controls
+        // (camera speed, fog, layer toggles). This is the "Debug window" the
+        // user asked for — but populated and useful. Positioned to the LEFT
+        // of the Source popout so both are visible at once.
+        DrawSubTabWindow("Quick##069", "Quick Controls", DrawQuickControlsPopoutBody, ref _subTabQuickOpen, dockRight: false, dockLeft: true);
+
+        // Other sub-tab popouts: opened by clicking the sub-tab in the bar.
+        // Each popout is independent. Click the X or the sub-tab again to close.
+        DrawSubTabWindow("Placements##069", "World — Placements", DrawWorldPlacementsSubTab, ref _subTabPlacementsOpen, dockRight: false);
+        DrawSubTabWindow("Tiles##069", "World — Tiles", DrawWorldTilesSubTab, ref _subTabTilesOpen, dockRight: false);
+        DrawSubTabWindow("Overlays##069", "World — Overlays", DrawWorldOverlaysSubTab, ref _subTabOverlaysOpen, dockRight: false);
+        DrawSubTabWindow("Selection##069", "Scene — Selection", () => DrawSelectedObjectSummaryContent(), ref _subTabSelectionOpen, dockRight: false);
+        DrawSubTabWindow("Camera##069", "Scene — Camera", DrawCameraControlsContent, ref _subTabCameraOpen, dockRight: false);
+        DrawSubTabWindow("Themes##069", "Scene — Themes", DrawUiThemeSettingsContent, ref _subTabThemesOpen, dockRight: false);
+        DrawSubTabWindow("Settings##069", "Scene — Settings", DrawSceneSettingsContent, ref _subTabSettingsOpen, dockRight: false);
+        DrawSubTabWindow("Layers##069", "Terrain — Layers", () => DrawTerrainLayersSubTab(GetTerrainRendererSafe()), ref _subTabLayersOpen, dockRight: false);
+        DrawSubTabWindow("Range##069", "Archeology — Range", DrawArcheologyRangeSubTab, ref _subTabRangeOpen, dockRight: false);
+        DrawSubTabWindow("Playback##069", "Archeology — Playback", DrawArcheologyPlaybackSubTab, ref _subTabPlaybackOpen, dockRight: false);
+        DrawSubTabWindow("Capture##069", "Archeology — Capture", DrawArcheologyCaptureSubTab, ref _subTabArcheoCaptureOpen, dockRight: false);
+        DrawSubTabWindow("Log##069", "Utilities — Log", DrawLogViewer, ref _subTabLogOpen, dockRight: false);
+        DrawSubTabWindow("Perf##069", "Utilities — Perf", DrawPerfWindow, ref _subTabPerfOpen, dockRight: false);
     }
 
-    private void DrawSubTabWindow(string id, string title, Action body, ref bool isOpen, bool dockRight = false)
+    private TerrainRenderer? GetTerrainRendererSafe()
+        => _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+
+    private void DrawQuickControlsPopoutBody()
+    {
+        // 1. Camera controls
+        ImGui.Text("Camera");
+        ImGui.Separator();
+        ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 1f, 500f, "%.0f");
+        ImGui.TextDisabled("Hold Shift for 5x boost");
+        ImGui.SliderFloat("FOV", ref _fovDegrees, 20f, 90f, "%.0f°");
+
+        if (_terrainManager != null && !_terrainManager.Adapter.IsWmoBased)
+        {
+            ImGui.Spacing();
+            bool autoAdtBudget = _terrainManager.DetailedTileCountOverride <= 0;
+            int adtDetailTiles = autoAdtBudget
+                ? _terrainManager.EffectiveDetailedTileCount
+                : _terrainManager.DetailedTileCountOverride;
+            if (ImGui.SliderInt("ADT Detail Tiles", ref adtDetailTiles, 1, TerrainManager.MaxManualDetailedTileCount))
+            {
+                _terrainManager.DetailedTileCountOverride = adtDetailTiles;
+                _savedDetailedAdtTileCountOverride = _terrainManager.DetailedTileCountOverride;
+            }
+            if (ImGui.IsItemDeactivatedAfterEdit())
+                SaveViewerSettings();
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Auto"))
+            {
+                _terrainManager.DetailedTileCountOverride = 0;
+                _savedDetailedAdtTileCountOverride = 0;
+                SaveViewerSettings();
+            }
+        }
+
+        // 2. Lighting / fog
+        TerrainLighting? lighting = _terrainManager?.Lighting ?? _vlmTerrainManager?.Lighting;
+        if (lighting != null)
+        {
+            ImGui.Spacing();
+            ImGui.Text("Lighting");
+            ImGui.Separator();
+            float gameTime = lighting.GameTime;
+            if (ImGui.SliderFloat("Time of Day", ref gameTime, 0f, 1f, "%.2f"))
+                lighting.GameTime = gameTime;
+            string timeLabel = gameTime switch
+            {
+                < 0.15f => "Night",
+                < 0.25f => "Dawn",
+                < 0.35f => "Morning",
+                < 0.65f => "Day",
+                < 0.75f => "Evening",
+                < 0.85f => "Dusk",
+                _ => "Night"
+            };
+            ImGui.SameLine();
+            ImGui.Text(timeLabel);
+
+            float fogStart = Math.Clamp(lighting.FogStart, 0f, MaxTerrainFogDistance - 1f);
+            float fogEnd = Math.Clamp(lighting.FogEnd, 100f, MaxTerrainFogDistance);
+            bool fogStartChanged = ImGui.SliderFloat("Fog Start", ref fogStart, 0f, MaxTerrainFogDistance - 1f);
+            bool fogEndChanged = ImGui.SliderFloat("Fog End", ref fogEnd, 100f, MaxTerrainFogDistance);
+            if (fogStartChanged || fogEndChanged)
+            {
+                if (fogEnd <= fogStart)
+                {
+                    if (fogEndChanged && !fogStartChanged)
+                        fogStart = Math.Max(0f, fogEnd - 1f);
+                    else
+                        fogEnd = Math.Min(MaxTerrainFogDistance, fogStart + 1f);
+                }
+                lighting.FogStart = fogStart;
+                lighting.FogEnd = fogEnd;
+            }
+        }
+
+        // 3. Layer toggles (if terrain loaded)
+        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (renderer != null)
+        {
+            ImGui.Spacing();
+            ImGui.Text("Layers");
+            ImGui.Separator();
+            bool l0 = renderer.ShowLayer0;
+            if (ImGui.Checkbox("Base", ref l0)) renderer.ShowLayer0 = l0;
+            ImGui.SameLine();
+            bool l1 = renderer.ShowLayer1;
+            if (ImGui.Checkbox("L1", ref l1)) renderer.ShowLayer1 = l1;
+            ImGui.SameLine();
+            bool l2 = renderer.ShowLayer2;
+            if (ImGui.Checkbox("L2", ref l2)) renderer.ShowLayer2 = l2;
+            ImGui.SameLine();
+            bool l3 = renderer.ShowLayer3;
+            if (ImGui.Checkbox("L3", ref l3)) renderer.ShowLayer3 = l3;
+
+            ImGui.Spacing();
+            ImGui.Text("Overlays");
+            ImGui.Separator();
+            bool alphaMask = renderer.ShowAlphaMask;
+            if (ImGui.Checkbox("Alpha", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
+            ImGui.SameLine();
+            bool shadowMap = renderer.ShowShadowMap;
+            if (ImGui.Checkbox("Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
+            ImGui.SameLine();
+            bool useMccv = renderer.UseMccv;
+            if (ImGui.Checkbox("MCCV", ref useMccv)) renderer.UseMccv = useMccv;
+            ImGui.SameLine();
+            bool contours = renderer.ShowContours;
+            if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
+        }
+
+        // 4. Reset view
+        ImGui.Spacing();
+        if (ImGui.Button("Reset Camera"))
+            ResetCamera();
+        ImGui.SameLine();
+        if (ImGui.Button("Toggle Wireframe"))
+            _renderer?.ToggleWireframe();
+    }
+
+    private void DrawSubTabWindow(string id, string title, Action body, ref bool isOpen, bool dockRight = false, bool dockLeft = false)
     {
         if (!isOpen) return;
 
         var io = ImGui.GetIO();
+        float topOffset = MenuBarHeight + ToolbarHeight + 30f;
+        float width = 440f;
+        float height = io.DisplaySize.Y - topOffset - StatusBarHeight - 50f;
+
         if (dockRight && ImGui.GetFrameCount() == _popoutDockFrame)
         {
-            // Position on right side of screen, just below menu/toolbar.
-            float topOffset = MenuBarHeight + ToolbarHeight + 30f; // 30 = top tab bar
             float rightMargin = 20f;
-            float width = 440f;
-            float height = io.DisplaySize.Y - topOffset - StatusBarHeight - 50f; // 50 = bottom tab bar
             ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - width - rightMargin, topOffset), ImGuiCond.FirstUseEver);
             ImGui.SetNextWindowSize(new Vector2(width, height), ImGuiCond.FirstUseEver);
         }
-        else if (dockRight)
+        else if (dockLeft && ImGui.GetFrameCount() == _popoutDockFrame)
         {
-            // Reposition when first shown this session
-            float topOffset = MenuBarHeight + ToolbarHeight + 30f;
-            ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - 460f, topOffset), ImGuiCond.Appearing);
+            float leftMargin = 20f;
+            ImGui.SetNextWindowPos(new Vector2(leftMargin, topOffset), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSize(new Vector2(width, height), ImGuiCond.FirstUseEver);
         }
 
         if (ImGui.Begin(title, ref isOpen))
