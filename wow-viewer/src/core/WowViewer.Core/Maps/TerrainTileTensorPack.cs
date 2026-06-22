@@ -95,6 +95,9 @@ public sealed class TerrainTileTensorPack
     /// <summary>257×257 × 3 XYZ per-vertex normals (MCNR).</summary>
     public float[,,]? McnrNormalXyz { get; init; }
 
+    /// <summary>257×257 bool mask: true where MCNR had original data (x%2 == y%2).</summary>
+    public bool[,]? McnrMask257 { get; init; }
+
     // ── Liquid data ────────────────────────────────────────────────────────
 
     /// <summary>16×16 per-chunk MCNK header flags. Bits 2-5 indicate liquid type.</summary>

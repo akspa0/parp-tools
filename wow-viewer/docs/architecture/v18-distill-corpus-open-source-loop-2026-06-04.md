@@ -63,7 +63,7 @@ The first full focused curation run was completed on 2026-06-05:
 - kept rows: `4096` (`keep_ratio = 0.6056`)
 - dominant reject causes:
   - `blank_minimap_blank_normals = 2396`
-  - `blank_what_plate_tile = 221`
+  - `blank_what_plate_tile = 221` (blank whiteplate tiles)
   - `normal_minimap_edge_mismatch = 36`
   - `wmo_loss_wipeout_tile = 14`
 - kept difficulty mix:

@@ -27,7 +27,7 @@
   - `hard`
   - `pathological`
 - [x] **2.3** Preserve hard rejection for blank genesis and other known garbage
-  - keep `blank_what_plate_tile` explicit
+  - keep `blank_what_plate_tile` (blank whiteplate) explicit
 - [x] **2.4** Publish bounded scouting-manifest guidance
   - mixed `400`-tile train pool
   - smaller validation pool

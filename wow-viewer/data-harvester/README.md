@@ -515,7 +515,7 @@ What it checks per tile:
 - **blank/low-signal minimaps** — reject flat featureless tiles
 - **normal coverage** — does the tile have valid normals?
 - **minimap-vs-normal edge agreement** — do edges in the minimap match normal edges?
-- **what-plate tiles** — explicit blank genesis tiles
+- **whiteplate tiles** — explicit blank genesis tiles
 - **deformation richness** — how much terrain shape variation?
 - **terrain-valid coverage** — how much of the tile is real terrain vs object/liquid?
 - **painted alpha / MCLY presence** — does the tile have texture painting?
@@ -891,6 +891,34 @@ uv run python -u scripts/infer_v16_1.py `
 ```
 
 (Namespace migration in progress — infer script will be renamed to `infer_v18.py`.)
+
+---
+
+## V20 Multi-Modal Chained Pipeline Quickstart
+
+The V20 pipeline reconstructs clean ground height maps ("Terrain Intent") and object placement layouts by chain-linking focused models.
+
+Ensure you have run the Zarr store patching first before starting training:
+```powershell
+uv run python scripts/patch_v20_signals.py --dataset-dir output/datasets/v18
+```
+
+### Model 1: Minimap Semantic Segmentor (V20-MSS)
+
+Train Model 1 to predict liquid class semantic grids, precise object footprints, and alpha blend texture weights:
+```powershell
+uv run python scripts/train_v20_segmentor.py `
+  --dataset-dir ../output/datasets/v18 `
+  --builds 0_5_3_3368 3_3_5_12340 `
+  --epochs 50 `
+  --batch-size 16 `
+  --lr 2e-4 `
+  --workers 4 `
+  --device cuda `
+  --out-dir ../output/ml-training/v20_segmentor
+```
+
+Checkpoints and histories are stored under `wow-viewer/output/ml-training/v20_segmentor/`.
 
 ---
 

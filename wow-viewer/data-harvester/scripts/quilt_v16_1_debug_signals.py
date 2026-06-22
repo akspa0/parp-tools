@@ -310,7 +310,7 @@ def main() -> None:
     parser.add_argument("--curation-manifest", type=str, default=None, help="Optional curation manifest root/file")
     parser.add_argument("--curation-min-terrain-validity", type=float, default=0.0, help="Optional curation terrain validity threshold")
     parser.add_argument("--curation-min-minimap-usefulness", type=float, default=0.0, help="Optional curation minimap usefulness threshold")
-    parser.add_argument("--curation-reject-what-plate", action="store_true", help="Drop what-plate tiles at dataset-filter stage")
+    parser.add_argument("--curation-reject-what-plate", action="store_true", help="Drop whiteplate tiles at dataset-filter stage")
     parser.add_argument("--normal-detail-boost", type=float, default=1.5, help="Detail boost used in hard-region weighting")
     parser.add_argument("--quilt-tile-size", type=int, default=64, help="Output tile size per ADT tile in quilt (e.g., 64/128/256)")
     parser.add_argument("--output-dir", type=str, default="../output/validation/quilt_debug", help="Output directory for stitched PNGs")

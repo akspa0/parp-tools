@@ -63,7 +63,7 @@
   - detail-weighted terrain-only normal loss
   - `normal_detail_mean` proof
 - [x] **2.8** Add raw supervision guidance channels
-  - blank `what plate` rejection in curation
+  - blank `whiteplate` rejection in curation
   - terrain-valid/object-aware trainer masks
   - raw-supervision metric proof
 

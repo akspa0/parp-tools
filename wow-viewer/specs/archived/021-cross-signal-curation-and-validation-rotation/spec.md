@@ -10,7 +10,7 @@
 
 ## Problem Statement
 
-The V16 curation manifest (`normal_terrain_full_corpus_v16_1_1`) checks individual signal health — minimap variance, normal edge coverage, alpha coverage, etc. — and rejects clearly bad tiles (empty minimap, empty normals, what-plate flats). But it never checks whether signals *agree with each other* within the same tile.
+The V16 curation manifest (`normal_terrain_full_corpus_v16_1_1`) checks individual signal health — minimap variance, normal edge coverage, alpha coverage, etc. — and rejects clearly bad tiles (empty minimap, empty normals, whiteplate flats). But it never checks whether signals *agree with each other* within the same tile.
 
 This allows three classes of bad tiles through:
 

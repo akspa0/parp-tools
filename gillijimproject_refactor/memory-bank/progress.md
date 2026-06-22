@@ -1,5 +1,46 @@
 # Progress
 
+## 2026-06-19 — V21 TERRAIN-MESH-ONLY PIVOT (V19/V20 abandoned)
+
+### What landed (uncommitted)
+- Diagnosed why validation looked wrong: three stacked bugs ignored `object_filtered_mask` (the mask the user explicitly wanted — WMOs + player objects, NO trees).
+  1. `v16_1_dataset.py` mask precedence: `object_precise_mask` (includes trees) shadowed `object_filtered_mask` — filtered unreachable.
+  2. Filtered result → `weight_257`; but `terrain_valid_mask_257` built separately from coarse `object_roof_mask` rectangles.
+  3. `_height_loss` in `train_v16_1_common.py` read `terrain_valid_mask_257` (coarse), never `weight_257` (filtered).
+- Fix 1: flipped precedence in `v16_1_dataset.py:269` — `object_filtered_mask` now wins over `object_precise_mask`.
+- Fix 2: `_height_loss` in `train_v16_1_common.py:1167` now uses `batch["weight_257"]` (filtered) instead of `batch["terrain_valid_mask_257"]` (coarse).
+- Verified on tile 600: `weight_257 == 1 - object_filtered_mask` (exact). Differs from precise by 10.7% (trees kept as training signal — correct, terrain under trees is valid).
+- Smoke run: `train_v18.py height` on 3_3_5_12340, 64 train/16 val, 1 epoch, val loss 0.7395, 2.2GB VRAM. Preview at `models/v18/height/runs/v21_smoke/best_epoch_0001.png`.
+
+### V21 contract (simple, what user wanted all along)
+- Model: `V161HeightModel` (3.5M params, 3ch minimap → 1ch height_257, single head). NO new model.
+- Trainer: `train_v18.py height` (stable, efficient, proven). NO new trainer.
+- Loss: masked L1 on height, gated by `weight_257` = `1 - object_filtered_mask`.
+- Normals: OFF (separate minimap→normals model later).
+- Liquids: ignored. Water = flat plane later. `height_257` target includes terrain under water.
+- V19 (dead bounds head + duplicate height head) and V20 (4-model pile) both abandoned.
+
+### Next
+- Full training run on V18 dataset (0_5_3_3368 + 3_3_5_12340) with filtered-mask loss.
+- Terrain mesh export from trained checkpoint.
+- Commit the two-file fix once full run validates.
+
+## 2026-06-19 — V20 Precise Object Mask & Inpainting Target Correction [ABANDONED — see V21 pivot]
+
+### What landed
+- Modified [v20_dataset.py](file:///i:/parp/parp-tools/wow-viewer/data-harvester/src/harvester/v20_dataset.py) to load `object_precise_mask` (contains precise 3D silhouettes/polygons) directly from Zarr. Added edge padding crop/pad logic to correctly map it to the `object_precise_mask_256` and `object_precise_mask_257` loader targets instead of falling back to bounding-box rectangles (`object_roof_mask`).
+- Modified [patch_v20_signals.py](file:///i:/parp/parp-tools/wow-viewer/data-harvester/scripts/patch_v20_signals.py) to prioritize `object_precise_mask` for inpainting, and dynamically pad 256-width mask arrays to 257.
+- Simplified loss calculations and Autocast blocks in `train_v20_segmentor.py`.
+- Verified pathway executing dry runs on both patching and training components.
+- **Abandoned**: V20's 4 models (segmentor/brush-classifier/inpainter/placement-restorer) are not terrain mesh reconstruction. User wants simple terrain meshes, not years-of-honing asset recovery.
+
+## 2026-06-19 — V19 Minimal-Signal Height Regressor and Dataset Refactoring [ABANDONED — see V21 pivot]
+
+### What landed
+- Refactored `V19Dataset` (in `v19_dataset.py`) to subclass `V161Dataset`, gaining direct compatibility with all of the unified trainer's data pipeline features (difficulty bucket sampling, rotating determinism, etc.).
+- Created a specialized standalone training script `train_v19.py` containing the advanced training loop (mixed precision, autotuning, early stopping, and compiles).
+- Custom Sobel edge loss and input channel toggling (3 or 6) implemented and validated in a local dry run.
+
 ## 2026-06-17 — Fingerprint-database PM4→WMO matching implemented (Phases 1-4)
 
 ### What landed

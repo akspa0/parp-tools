@@ -54,7 +54,7 @@ wow-viewer/data-harvester/src/harvester/
 
 ### Phase 4: Curation/Mismatch Gate Tightening (Bounded)
 
-7. Add bounded curation-threshold gates for V16.1 dataset loading using manifest metadata (terrain validity + minimap usefulness + what-plate).
+7. Add bounded curation-threshold gates for V16.1 dataset loading using manifest metadata (terrain validity + minimap usefulness + whiteplate).
 8. Surface selected/rejected counts in run evidence for reproducibility.
 
 ### Phase 5: Validation

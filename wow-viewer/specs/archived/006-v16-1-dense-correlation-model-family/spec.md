@@ -247,7 +247,7 @@ writes a single combined output bundle.
   tiles and MUST support minimap-vs-target alignment metrics for the target
   family being trained.
 - **FR-006E1**: The curation layer MUST explicitly detect genesis blank
-  "what plate" tiles where terrain height is effectively all zero and terrain
+  "whiteplate" tiles where terrain height is effectively all zero and terrain
   texturing/liquid/object truth is absent, and MUST keep those out of terrain
   signal training pools.
 - **FR-006F**: The V16.1 normal lane MUST support manifest-driven filtering from
@@ -357,8 +357,8 @@ writes a single combined output bundle.
   `train_normal_detail_mean` / `val_normal_detail_mean`, and a smoke run
   completes with deformation-aware steering active.
 - **SC-003F**: The normal-oriented curation pass can now reject
-  `blank_what_plate_tile`, and a V16.1 normal smoke run logs
-  `what_plate_rate`, `alpha_painted_cov`, and `mcly_cov` from the raw
+  `blank_what_plate_tile` (blank whiteplate tile), and a V16.1 normal smoke run logs
+  `what_plate_rate` (whiteplate rate), `alpha_painted_cov`, and `mcly_cov` from the raw
   supervision seam.
 - **SC-004**: The liquid trainer emits both footprint and liquid-type evidence.
 - **SC-005**: The texture-decomposition trainer emits both decomposition outputs

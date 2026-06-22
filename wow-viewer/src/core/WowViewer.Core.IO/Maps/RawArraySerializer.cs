@@ -59,6 +59,7 @@ public static class RawArraySerializer
         WriteArray(outputStream, "mcly_layer_mask", pack.MclyLayerMask);
         WriteArray(outputStream, "mcal_alpha_pack_256", pack.McalAlphaPack256);
         WriteArray(outputStream, "mcnr_normal_xyz", pack.McnrNormalXyz);
+        WriteArray(outputStream, "mcnr_mask_257", pack.McnrMask257);
         WriteArray(outputStream, "mcnk_flags_16", pack.McnkFlags16);
         WriteArray(outputStream, "mh2o_surface_height", pack.Mh2oSurfaceHeight);
         WriteArray(outputStream, "mh2o_depth", pack.Mh2oDepth);
@@ -101,6 +102,7 @@ public static class RawArraySerializer
         WriteArray(outputStream, "mccv_rgb", pack.MccvRgb);
         WriteArray(outputStream, "mclv_lighting_bytes", pack.MclvLightingBytes);
         WriteArray(outputStream, "mcnr_normal_xyz", pack.McnrNormalXyz);
+        WriteArray(outputStream, "mcnr_mask_257", pack.McnrMask257);
         WriteArray(outputStream, "mfbo_flight_bounds", pack.MfboFlightBounds);
         WriteArray(outputStream, "mcnk_flags_16", pack.McnkFlags16);
         WriteArray(outputStream, "mh2o_surface_height", pack.Mh2oSurfaceHeight);

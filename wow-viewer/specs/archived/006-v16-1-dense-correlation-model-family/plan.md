@@ -92,8 +92,8 @@ smoke run logs nontrivial `normal_detail_mean` metrics.
 ### Step 2.7 — Add raw supervision guidance channels
 Carry blank-plate, object-aware terrain-validity, and texturing-presence truth
 through the V16.1 dataset/trainer seam before more normal training proceeds.
-**Validation**: curation can reject `blank_what_plate_tile`, and a normal smoke
-run logs raw-supervision metrics such as `what_plate_rate`.
+**Validation**: curation can reject `blank_what_plate_tile` (blank whiteplate), and a normal smoke
+run logs raw-supervision metrics such as `what_plate_rate` (whiteplate rate).
 
 ## Phase 3: Height Follow-On
 

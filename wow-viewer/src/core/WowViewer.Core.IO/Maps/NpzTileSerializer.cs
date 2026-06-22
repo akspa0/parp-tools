@@ -49,6 +49,7 @@ public static class NpzTileSerializer
         WriteArray(zip, "mccv_rgb", pack.MccvRgb, "<f4");
         WriteArray(zip, "mclv_lighting_bytes", pack.MclvLightingBytes, "|u1");
         WriteArray(zip, "mcnr_normal_xyz", pack.McnrNormalXyz, "<f4");
+        WriteArray(zip, "mcnr_mask_257", pack.McnrMask257, "|b1");
         WriteArray(zip, "mfbo_flight_bounds", pack.MfboFlightBounds, "<i4");
         WriteArray(zip, "mh2o_surface_height", pack.Mh2oSurfaceHeight, "<f4");
         WriteArray(zip, "mh2o_depth", pack.Mh2oDepth, "<f4");

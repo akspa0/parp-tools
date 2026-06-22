@@ -37,7 +37,7 @@ surface.
 bucket that survived.
 
 ### Step 2.3 — Keep blank genesis rejection hard
-Preserve hard rejection for `blank_what_plate_tile` and other proven garbage
+Preserve hard rejection for `blank_what_plate_tile` (blank whiteplate) and other proven garbage
 cases before bucket assignment.
 **Validation**: rejected outputs still classify blank genesis tiles separately.
 

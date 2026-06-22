@@ -3,6 +3,7 @@
 Usage:
     uv run python -u scripts/train_v18.py normal [--batch-size 8 ...]
     uv run python -u scripts/train_v18.py height [...]
+    uv run python -u scripts/train_v18.py v21 [...]
     uv run python -u scripts/train_v18.py holes [...]
     uv run python -u scripts/train_v18.py liquid [...]
     uv run python -u scripts/train_v18.py texcomp [...]
@@ -27,11 +28,11 @@ def _ensure_v18_dataset_dir() -> None:
 def main() -> None:
     if len(sys.argv) < 2 or sys.argv[1].startswith("-"):
         print("Usage: train_v18.py <task> [args...]", file=sys.stderr)
-        print("  task: normal | height | holes | liquid | texcomp", file=sys.stderr)
+        print("  task: normal | height | v21 | holes | liquid | texcomp", file=sys.stderr)
         sys.exit(1)
 
     task_name = sys.argv.pop(1)
-    valid_tasks = {"normal", "height", "holes", "liquid", "texcomp"}
+    valid_tasks = {"normal", "height", "v21", "v21c", "holes", "liquid", "texcomp"}
     if task_name not in valid_tasks:
         print(f"Unknown task: {task_name}", file=sys.stderr)
         print(f"Valid: {', '.join(sorted(valid_tasks))}", file=sys.stderr)

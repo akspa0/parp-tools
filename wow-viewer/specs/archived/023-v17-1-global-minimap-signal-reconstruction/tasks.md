@@ -36,7 +36,7 @@
 - [ ] T008 Add V16.1 dataset curation threshold gates
   - Min terrain-validity score
   - Min minimap-target-usefulness score
-  - Optional reject-what-plate flag
+  - Optional reject-whiteplate flag
 
 - [ ] T009 Expose threshold controls in `train_v16_1_common.py`
   - Pass threshold settings into `V161Dataset`

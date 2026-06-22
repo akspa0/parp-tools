@@ -999,7 +999,7 @@ loss = masked_mean(cosine, train_mask)
       + 0.15 * masked_mean(nz_l2, train_mask)
 ```
 
-Where `train_mask = normal_mask * terrain_valid_mask * object_weight * liquid_weight * instance_weight * (1 - what_plate_flag) * hard_region_weight`.
+Where `train_mask = normal_mask * terrain_valid_mask * object_weight * liquid_weight * instance_weight * (1 - what_plate_flag)` (whiteplate flag) `* hard_region_weight`.
 
 `hard_region_signal = clamp(0.50 * height_grad + 0.25 * normal_grad + 0.25 * max(alpha_grad, mcly_grad), 0, 4) * terrain_valid_mask`.
 
@@ -1049,7 +1049,7 @@ Enriched dataset for V16.1 trainers with curation manifest integration:
 **Terrain valid mask:**
 ```
 terrain_valid_mask = normal_mask * (1 - clip(object_presence, 0, 1)) * (1 - clip(liquid_mask * 0.85, 0, 1))
-zeroed entirely if what_plate_flag > 0.5
+zeroed entirely if `what_plate_flag` (whiteplate) > 0.5
 ```
 
 **Weight maps at 3 scales:**
@@ -1057,7 +1057,7 @@ zeroed entirely if what_plate_flag > 0.5
 - `weight_256 = crop_257_to_256(weight_257)`
 - `weight_16 = downsample_256_to_16(weight_256)`
 
-**Output keys (35+ tensors):** `input`, `height_raw`, `height_norm`, `height_mean`, `height_std`, `normals`, `normal_mask`, `alpha`, `holes`, `liquid_mask`, `liquid_height`, `liquid_type_16`, `liquid_type_valid_16`, `mcly_ids`, `mcly_mask`, `mcnk_flags_16`, `weight_257/256/16`, `mddf_mask`, `modf_mask`, `object_presence_257`, `alpha_painted_256`, `terrain_valid_mask_257`, `mcly_any_16`, `what_plate_flag`, `curation_*` scores, `has_normals`, `has_alpha`, and more.
+**Output keys (35+ tensors):** `input`, `height_raw`, `height_norm`, `height_mean`, `height_std`, `normals`, `normal_mask`, `alpha`, `holes`, `liquid_mask`, `liquid_height`, `liquid_type_16`, `liquid_type_valid_16`, `mcly_ids`, `mcly_mask`, `mcnk_flags_16`, `weight_257/256/16`, `mddf_mask`, `modf_mask`, `object_presence_257`, `alpha_painted_256`, `terrain_valid_mask_257`, `mcly_any_16`, `what_plate_flag` (whiteplate flag), `curation_*` scores, `has_normals`, `has_alpha`, and more.
 
 ### 5.7 Training Configuration
 

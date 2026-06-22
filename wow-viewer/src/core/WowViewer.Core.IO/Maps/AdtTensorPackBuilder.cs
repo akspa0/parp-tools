@@ -53,7 +53,7 @@ public static class AdtTensorPackBuilder
         float[,]? height257 = AssembleHeightmap(stream, terrainChunks, availableSignals);
 
         // ── Assemble normals (MCNR) ─────────────────────────────────────────
-        float[,,]? mcnrNormalXyz = AssembleNormals(stream, terrainChunks, availableSignals);
+        (float[,,]? mcnrNormalXyz, bool[,]? mcnrMask257) = AssembleNormals(stream, terrainChunks, availableSignals);
 
         // ── Assemble vertex colors (MCCV) ────────────────────────────────────
         float[,,]? mccvRgb = AssembleMccv(stream, terrainChunks, availableSignals);
@@ -152,6 +152,7 @@ public static class AdtTensorPackBuilder
             MccvRgb = mccvRgb,
             MclvLightingBytes = mclvLightingBytes,
             McnrNormalXyz = mcnrNormalXyz,
+            McnrMask257 = mcnrMask257,
             MfboFlightBounds = mfboFlightBounds,
             McnkFlags16 = mcnkFlags16,
             Mh2oSurfaceHeight = mh2oHeight,
@@ -233,7 +234,7 @@ public static class AdtTensorPackBuilder
 
         List<MapChunkLocation> terrainChunks = ResolveTerrainChunkLocations(stream, fileSummary);
         float[,]? height257 = AssembleHeightmap(stream, terrainChunks, availableSignals);
-        float[,,]? mcnrNormalXyz = AssembleNormals(stream, terrainChunks, availableSignals);
+        (float[,,]? mcnrNormalXyz, bool[,]? mcnrMask257) = AssembleNormals(stream, terrainChunks, availableSignals);
         float[,,]? mccvRgb = AssembleMccv(stream, terrainChunks, availableSignals);
         byte[,,]? mclvLightingBytes = AssembleMclv(stream, terrainChunks, availableSignals);
         int[,,]? mfboFlightBounds = ReadMfbo(stream, fileSummary, availableSignals);
@@ -330,6 +331,7 @@ public static class AdtTensorPackBuilder
             MccvRgb = mccvRgb,
             MclvLightingBytes = mclvLightingBytes,
             McnrNormalXyz = mcnrNormalXyz,
+            McnrMask257 = mcnrMask257,
             MfboFlightBounds = mfboFlightBounds,
             McnkFlags16 = mcnkFlags16,
             Mh2oSurfaceHeight = mh2oHeight,
@@ -441,6 +443,7 @@ public static class AdtTensorPackBuilder
             MccvRgb = null,
             MclvLightingBytes = null,
             McnrNormalXyz = null,
+            McnrMask257 = null,
             MfboFlightBounds = null,
             Mh2oSurfaceHeight = null,
             Mh2oDepth = null,
@@ -550,12 +553,13 @@ public static class AdtTensorPackBuilder
     // Normal assembly (MCNR)
     // ═══════════════════════════════════════════════════════════════════════
 
-    private static float[,,]? AssembleNormals(Stream stream, List<MapChunkLocation> chunks, HashSet<string> signals)
+    private static (float[,,]? normals, bool[,]? mask) AssembleNormals(Stream stream, List<MapChunkLocation> chunks, HashSet<string> signals)
     {
         if (chunks.Count == 0)
-            return null;
+            return (null, null);
 
         float[, ,] normals = new float[TileHeightmapSize, TileHeightmapSize, 3];
+        bool[,] mask = new bool[TileHeightmapSize, TileHeightmapSize];
         bool any = false;
 
         foreach (MapChunkLocation chunk in chunks)
@@ -585,52 +589,17 @@ public static class AdtTensorPackBuilder
                 normals[sampleY, sampleX, 0] = nx;
                 normals[sampleY, sampleX, 1] = ny;
                 normals[sampleY, sampleX, 2] = nz;
+                mask[sampleY, sampleX] = true;
             }
         }
 
         if (!any)
-            return null;
+            return (null, null);
 
         signals.Add("mcnr_normal_xyz");
+        signals.Add("mcnr_mask_257");
 
-        // Fill MCNR checkerboard gaps by averaging valid cardinal neighbors
-        for (int y = 0; y < TileHeightmapSize; y++)
-        {
-            for (int x = 0; x < TileHeightmapSize; x++)
-            {
-                if (Math.Abs(normals[y, x, 0]) > 1e-6f ||
-                    Math.Abs(normals[y, x, 1]) > 1e-6f ||
-                    Math.Abs(normals[y, x, 2]) > 1e-6f)
-                {
-                    continue; // Already has data
-                }
-
-                float sx = 0f, sy = 0f, sz = 0f;
-                int count = 0;
-
-                if (y > 0 && (Math.Abs(normals[y - 1, x, 0]) > 1e-6f || Math.Abs(normals[y - 1, x, 1]) > 1e-6f || Math.Abs(normals[y - 1, x, 2]) > 1e-6f))
-                { sx += normals[y - 1, x, 0]; sy += normals[y - 1, x, 1]; sz += normals[y - 1, x, 2]; count++; }
-                if (y < TileHeightmapSize - 1 && (Math.Abs(normals[y + 1, x, 0]) > 1e-6f || Math.Abs(normals[y + 1, x, 1]) > 1e-6f || Math.Abs(normals[y + 1, x, 2]) > 1e-6f))
-                { sx += normals[y + 1, x, 0]; sy += normals[y + 1, x, 1]; sz += normals[y + 1, x, 2]; count++; }
-                if (x > 0 && (Math.Abs(normals[y, x - 1, 0]) > 1e-6f || Math.Abs(normals[y, x - 1, 1]) > 1e-6f || Math.Abs(normals[y, x - 1, 2]) > 1e-6f))
-                { sx += normals[y, x - 1, 0]; sy += normals[y, x - 1, 1]; sz += normals[y, x - 1, 2]; count++; }
-                if (x < TileHeightmapSize - 1 && (Math.Abs(normals[y, x + 1, 0]) > 1e-6f || Math.Abs(normals[y, x + 1, 1]) > 1e-6f || Math.Abs(normals[y, x + 1, 2]) > 1e-6f))
-                { sx += normals[y, x + 1, 0]; sy += normals[y, x + 1, 1]; sz += normals[y, x + 1, 2]; count++; }
-
-                if (count > 0)
-                {
-                    float mag = MathF.Sqrt(sx * sx + sy * sy + sz * sz);
-                    if (mag > 1e-6f)
-                    {
-                        normals[y, x, 0] = sx / mag;
-                        normals[y, x, 1] = sy / mag;
-                        normals[y, x, 2] = sz / mag;
-                    }
-                }
-            }
-        }
-
-        return normals;
+        return (normals, mask);
     }
 
     private static float DecodeNormalComponent(byte value)
