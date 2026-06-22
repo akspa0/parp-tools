@@ -100,10 +100,11 @@ public partial class ViewerApp : IDisposable
 
     internal enum WorldBottomTab
     {
-        Placements = 0,
-        Tiles = 1,
-        Overlays = 2,
-        SelectionTools = 3,
+        Source = 0,
+        Placements = 1,
+        Tiles = 2,
+        Overlays = 3,
+        SelectionTools = 4,
     }
 
     internal enum TerrainBottomTab
@@ -1683,9 +1684,9 @@ void main() {
             if (_useTabUi)
             {
                 DrawTopTabBar();
+                DrawTopTabContent();
                 DrawMainViewport();
                 DrawBottomTabBar();
-                DrawTopTabContent();
                 DrawBottomTabContent();
             }
             else if (_useDockspaceUi)
@@ -1941,59 +1942,8 @@ void main() {
 
             if (ImGui.BeginMenu("Tools"))
             {
-                bool hasTerr = _terrainManager != null || _vlmTerrainManager != null;
-                bool hasWorld = _worldScene != null;
-                bool hasTerrRend = _terrainManager?.Renderer != null || _vlmTerrainManager?.Renderer != null;
-
-                ImGui.TextDisabled("Scene");
-                if (ImGui.MenuItem("Scene Inspector", "", ref _showRightSidebar))
-                    _forceApplyShellPanelLayout = true;
-                if (ImGui.MenuItem("PM4 Workbench", "", false, hasWorld))
-                    OpenPm4Workbench(Pm4WorkbenchTab.Selection);
-                if (ImGui.MenuItem("PM4 Info", "", ref _showRightSidebar))
-                    _forceApplyShellPanelLayout = true;
-                if (ImGui.MenuItem("PM4 Scene Graph", "", ref _showPm4SceneGraph, hasWorld))
-                    _forceApplyShellPanelLayout = true;
-                ImGui.Separator();
-
-                ImGui.TextDisabled("PM4");
-                if (ImGui.MenuItem("PM4 Object Match", "", ref _showPm4ObjectMatchWindow, hasWorld))
-                    _showPm4ObjectMatchWindow = _showPm4ObjectMatchWindow;
-                if (ImGui.MenuItem("PM4 Correlation", "", ref _showPm4WmoCorrelationWindow, hasWorld))
-                    _showPm4WmoCorrelationWindow = _showPm4WmoCorrelationWindow;
-                if (ImGui.MenuItem("PM4 Alignment", "", ref _showPm4AlignmentWindow))
-                    _showPm4AlignmentWindow = _showPm4AlignmentWindow;
-                ImGui.Separator();
-
-                ImGui.TextDisabled("Terrain");
-                if (ImGui.MenuItem("Terrain Tools", "", ref _showTerrainToolsWindow, hasTerr))
-                    _showTerrainToolsWindow = _showTerrainToolsWindow;
-                if (ImGui.MenuItem("Chunk Clipboard", "", ref _showChunkClipboardWindow, hasTerrRend))
-                    _showChunkClipboardWindow = _showChunkClipboardWindow;
-                if (ImGui.MenuItem("Terrain Analysis", "", ref _showTerrainAnalysisWindow, hasTerr))
-                    _showTerrainAnalysisWindow = _showTerrainAnalysisWindow;
-                if (ImGui.MenuItem("MCNK Explorer", "", ref _showMcnkExplorerWindow, hasTerr))
-                    _showMcnkExplorerWindow = _showMcnkExplorerWindow;
-                if (ImGui.MenuItem("Weak Signal Amplifier", "", ref _showWeakSignalWindow, hasTerr))
-                    _showWeakSignalWindow = _showWeakSignalWindow;
-                ImGui.Separator();
-
-                ImGui.TextDisabled("Utilities");
-                if (ImGui.MenuItem("UniqueId Archaeology", "", ref _showUniqueIdArchaeologyWindow, hasWorld))
-                    _showUniqueIdArchaeologyWindow = _showUniqueIdArchaeologyWindow;
-                if (ImGui.MenuItem("Taxi Panel", "", ref _showTaxiWindow, hasWorld))
-                    _showTaxiWindow = _showTaxiWindow;
-                if (ImGui.MenuItem("Minimap", "", ref _showMinimapWindow))
-                    _showMinimapWindow = _showMinimapWindow;
-                if (ImGui.MenuItem("Log Viewer", "", ref _showLogViewer))
-                    _showLogViewer = _showLogViewer;
-                if (ImGui.MenuItem("Perf", "", ref _showPerfWindow))
-                    _showPerfWindow = _showPerfWindow;
-                if (ImGui.MenuItem("Render Quality", "", ref _showRenderQualityWindow))
-                    _showRenderQualityWindow = _showRenderQualityWindow;
-                if (ImGui.MenuItem("Capture Automation..."))
-                    _showCaptureAutomationWindow = true;
-                ImGui.Separator();
+                // 069 Phase 9 fix: floating-window toggles removed. Every tool
+                // lives in a tab. Only modal/dialog entries remain.
 
                 if (ImGui.BeginMenu("Offline Data / Conversion"))
                 {

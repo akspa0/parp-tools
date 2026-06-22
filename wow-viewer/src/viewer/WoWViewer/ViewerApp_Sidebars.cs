@@ -3424,7 +3424,7 @@ public partial class ViewerApp
         return top switch
         {
             TopTab.Scene => new[] { "Selection", "Camera", "Settings", "Themes" },
-            TopTab.World => new[] { "Placements", "Tiles", "Overlays", "Selection Tools" },
+            TopTab.World => new[] { "Source", "Placements", "Tiles", "Overlays", "Selection Tools" },
             TopTab.Terrain => new[] { "Layers", "Clipboard", "Analysis", "MCNK", "Weak Signal", "Export" },
             TopTab.Pm4 => new[] { "Overlay", "Selection", "Correlation", "Info", "Match", "Alignment" },
             TopTab.Archeology => new[] { "Range", "Layers", "Playback", "Capture" },
@@ -3441,36 +3441,30 @@ public partial class ViewerApp
 
     private void DrawTopTabContent()
     {
-        // 069 Phase 2: top tab content region sits between top tab bar and bottom tab bar.
-        // Renders the active top tab's primary panel area (above the sub-tab bar).
-        if (ImGui.Begin("##TopTabContent", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
-            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings |
-            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoBringToFrontOnFocus))
+        // 069 Phase 9 fix: no more "Debug window" wrap. Render the context
+        // summary directly between the top tab bar and the sub-tab bar.
+        // The summary is a small line of text (status, current sub-tab, etc).
+        switch (_activeTopTab)
         {
-            // Each top tab shows a slim context band: scene + camera + world status.
-            switch (_activeTopTab)
-            {
-                case TopTab.Scene:
-                    DrawTopTabSceneSummary();
-                    break;
-                case TopTab.World:
-                    DrawTopTabWorldSummary();
-                    break;
-                case TopTab.Terrain:
-                    DrawTopTabTerrainSummary();
-                    break;
-                case TopTab.Pm4:
-                    DrawTopTabPm4Summary();
-                    break;
-                case TopTab.Archeology:
-                    DrawTopTabArcheologySummary();
-                    break;
-                case TopTab.Utilities:
-                    DrawTopTabUtilitiesSummary();
-                    break;
-            }
+            case TopTab.Scene:
+                DrawTopTabSceneSummary();
+                break;
+            case TopTab.World:
+                DrawTopTabWorldSummary();
+                break;
+            case TopTab.Terrain:
+                DrawTopTabTerrainSummary();
+                break;
+            case TopTab.Pm4:
+                DrawTopTabPm4Summary();
+                break;
+            case TopTab.Archeology:
+                DrawTopTabArcheologySummary();
+                break;
+            case TopTab.Utilities:
+                DrawTopTabUtilitiesSummary();
+                break;
         }
-        ImGui.End();
     }
 
     private void DrawTopTabSceneSummary()
@@ -3780,6 +3774,9 @@ public partial class ViewerApp
     {
         switch ((WorldBottomTab)_activeBottomTabIndex)
         {
+            case WorldBottomTab.Source:
+                DrawWorldSourceSubTab();
+                break;
             case WorldBottomTab.Placements:
                 DrawWorldPlacementsSubTab();
                 break;
@@ -3792,6 +3789,36 @@ public partial class ViewerApp
             case WorldBottomTab.SelectionTools:
                 DrawWorldSelectionToolsSubTab();
                 break;
+        }
+    }
+
+    private void DrawWorldSourceSubTab()
+    {
+        // Source sub-tab: file browser + map discovery + workspace bars.
+        // This is the user's primary entry point for loading a world.
+        DrawWorkspaceBarsPanelContent();
+        ImGui.Separator();
+
+        // File browser
+        ImGui.Text("File Browser");
+        if (!_showFileBrowser)
+        {
+            if (ImGui.SmallButton("Show File Browser"))
+                _showFileBrowser = true;
+        }
+        if (_showFileBrowser)
+            DrawFileBrowserContent(0f);
+        ImGui.Separator();
+
+        // Map discovery
+        if (_discoveredMaps.Count > 0)
+        {
+            ImGui.Text("World Maps");
+            DrawMapDiscoveryContent();
+        }
+        else
+        {
+            ImGui.TextDisabled("No maps discovered. Load a game folder first.");
         }
     }
 
