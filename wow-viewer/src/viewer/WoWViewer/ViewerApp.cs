@@ -92,10 +92,11 @@ public partial class ViewerApp : IDisposable
     // Per-top-tab sub-tab enums. Each top tab has its own bottom tab set.
     internal enum SceneBottomTab
     {
-        Selection = 0,
-        Camera = 1,
-        Settings = 2,
-        Themes = 3,
+        Quick = 0,
+        Selection = 1,
+        Camera = 2,
+        Settings = 3,
+        Themes = 4,
     }
 
     internal enum WorldBottomTab
@@ -365,25 +366,9 @@ public partial class ViewerApp : IDisposable
     private TopTab _activeTopTab = TopTab.Scene;
     private int _activeBottomTabIndex = 0;
 
-    // Sub-tab popout window visibility (069 Phase 9: content in popout, not in middle)
-    private bool _subTabSourceOpen = true; // Source sub-tab opens by default so user can load a map
-    private bool _subTabQuickOpen = true;  // Quick Controls (camera, fog, layers) opens by default
+    // Workbench popout (069 Phase 14: single resizable panel, no window sprawl)
+    private bool _workbenchOpen = true;
     private int _popoutDockFrame = -1; // frame counter when popout was last docked
-
-    // Per-sub-tab popout flags (toggled by clicking the sub-tab in the bar)
-    private bool _subTabPlacementsOpen = false;
-    private bool _subTabTilesOpen = false;
-    private bool _subTabOverlaysOpen = false;
-    private bool _subTabSelectionOpen = false;
-    private bool _subTabCameraOpen = false;
-    private bool _subTabThemesOpen = false;
-    private bool _subTabSettingsOpen = false;
-    private bool _subTabLayersOpen = false;
-    private bool _subTabRangeOpen = false;
-    private bool _subTabPlaybackOpen = false;
-    private bool _subTabArcheoCaptureOpen = false;
-    private bool _subTabLogOpen = false;
-    private bool _subTabPerfOpen = false;
 
     // 069 Phase 6: sticky archeology settings (persist across viewer restarts).
     private int _archeologyMinUniqueId = -1; // -1 = unset (use first detected value)
@@ -1703,14 +1688,10 @@ void main() {
             // with top tab bar + bottom tab bar + central content area.
             if (_useTabUi)
             {
-                // 069 Phase 9 fix: tab system is chrome only. 3D world takes the
-                // full middle area between top tab bar and bottom tab bar.
-                // Sub-tab content opens in popout windows, not in a child
-                // region in the middle (which would shrink/cover the world).
-                DrawTopTabBar();
-                DrawTopTabContent();
-                DrawBottomTabBar();
-                DrawSubTabContentPopout();
+                // 069 Phase 14: tab bars at top of master are hidden (the
+                // workbench has its own). Master just shows the 3D world +
+                // the workbench popout docked to the right edge.
+                DrawWorkbenchPopout();
             }
             else if (_useDockspaceUi)
             {
