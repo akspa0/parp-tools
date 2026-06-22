@@ -3112,6 +3112,7 @@ public partial class ViewerApp
             {
                 _worldScene.SetUniqueIdFilterRange(visibleMin, visibleMax);
                 _worldScene.UniqueIdFilterEnabled = true;
+                if (_archeologyPlaybackActive) _archeologyPlaybackActive = false;
                 changed = true;
             }
 
@@ -3119,6 +3120,7 @@ public partial class ViewerApp
             {
                 _worldScene.SetUniqueIdFilterRange(visibleMin, visibleMax);
                 _worldScene.UniqueIdFilterEnabled = true;
+                if (_archeologyPlaybackActive) _archeologyPlaybackActive = false;
                 changed = true;
             }
 
@@ -3191,18 +3193,137 @@ public partial class ViewerApp
 
     private void DrawArcheologyPlaybackSubTab()
     {
+        if (_worldScene == null)
+        {
+            ImGui.TextDisabled("Load a world to use playback.");
+            return;
+        }
+
         ImGui.TextDisabled("Playback animates 'Visible Range End' from min to max at the configured speed.");
-        ImGui.TextDisabled("Phase 7 will wire this up with capture automation integration.");
         ImGui.Spacing();
-        ImGui.TextDisabled("Coming soon: play/pause/stop + speed slider + loop + capture integration.");
+
+        // Capture speed reference
+        if (ImGui.SliderFloat("Speed (uniqueIds/sec)", ref _archeologyPlaybackSpeed, 1f, 5000f, "%.0f"))
+            SaveViewerSettings();
+
+        ImGui.SameLine();
+        if (ImGui.Checkbox("Loop", ref _archeologyPlaybackLoop))
+            SaveViewerSettings();
+
+        ImGui.Spacing();
+
+        // Play / Pause / Stop buttons
+        if (_archeologyPlaybackActive)
+        {
+            if (ImGui.Button("Pause##archeology"))
+            {
+                _archeologyPlaybackActive = false;
+                _statusMessage = "Archeology playback paused.";
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Stop##archeology"))
+            {
+                StopArcheologyPlayback(restoreRange: true);
+            }
+        }
+        else
+        {
+            if (ImGui.Button("Play##archeology"))
+            {
+                StartArcheologyPlayback();
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Stop##archeology"))
+            {
+                StopArcheologyPlayback(restoreRange: true);
+            }
+        }
+
+        ImGui.Spacing();
+
+        // Status
+        if (_worldScene.TryGetUniqueIdFilterRange(out int minId, out int maxId, out int count))
+        {
+            int currentMax = _worldScene.UniqueIdFilterMax;
+            int remaining = Math.Max(0, maxId - currentMax);
+            float secondsAtCurrentSpeed = _archeologyPlaybackSpeed > 0
+                ? remaining / _archeologyPlaybackSpeed
+                : float.PositiveInfinity;
+
+            string status = _archeologyPlaybackActive
+                ? $"Playing — end advancing at {_archeologyPlaybackSpeed:F0}/s. Remaining: {remaining} uniqueIds (~{secondsAtCurrentSpeed:F1}s)."
+                : $"Stopped. End at {currentMax}, max {maxId}. Range: {minId}..{maxId}.";
+            ImGui.TextDisabled(status);
+        }
+        else
+        {
+            ImGui.TextDisabled("No scoped placements to play.");
+        }
+    }
+
+    private void StartArcheologyPlayback()
+    {
+        if (_worldScene == null) return;
+        if (!_worldScene.TryGetUniqueIdFilterRange(out int minId, out int maxId, out _)) return;
+
+        // Save current state so Stop can restore.
+        _archeologyPlaybackRestoreMin = _worldScene.UniqueIdFilterMin;
+        _archeologyPlaybackRestoreMax = _worldScene.UniqueIdFilterMax;
+        _archeologyPlaybackRestoreFilter = _worldScene.UniqueIdFilterEnabled;
+        _archeologyPlaybackAccumulator = 0;
+        _archeologyPlaybackActive = true;
+        _worldScene.UniqueIdFilterEnabled = true;
+        _statusMessage = "Archeology playback started.";
+    }
+
+    private void StopArcheologyPlayback(bool restoreRange)
+    {
+        _archeologyPlaybackActive = false;
+        _archeologyPlaybackAccumulator = 0;
+        if (restoreRange && _worldScene != null && _archeologyPlaybackRestoreMin >= 0)
+        {
+            _worldScene.SetUniqueIdFilterRange(_archeologyPlaybackRestoreMin, _archeologyPlaybackRestoreMax);
+            _worldScene.UniqueIdFilterEnabled = _archeologyPlaybackRestoreFilter;
+        }
+        _archeologyPlaybackRestoreMin = -1;
+        _archeologyPlaybackRestoreMax = -1;
+        _statusMessage = "Archeology playback stopped.";
     }
 
     private void DrawArcheologyCaptureSubTab()
     {
+        if (_worldScene == null)
+        {
+            ImGui.TextDisabled("Load a world to use capture integration.");
+            return;
+        }
         ImGui.TextDisabled("Apply archeology playback to next capture / video recording.");
-        ImGui.TextDisabled("Phase 7 will wire this up with capture automation integration.");
         ImGui.Spacing();
-        ImGui.TextDisabled("Coming soon: 'apply to next capture' checkbox + 'apply to video recording' speed.");
+        ImGui.TextWrapped("Capture automation integration: when 'Apply to next capture' is enabled, the next capture batch will advance 'Visible Range End' per shot. When 'Apply to video recording' is enabled, the video recording session will start playback and capture progression at real-time speed.");
+        ImGui.Spacing();
+
+        bool applyToNextCapture = _archeologyApplyToNextCapture;
+        if (ImGui.Checkbox("Apply to next capture", ref applyToNextCapture))
+        {
+            _archeologyApplyToNextCapture = applyToNextCapture;
+            SaveViewerSettings();
+        }
+
+        bool applyToVideo = _archeologyApplyToVideoRecording;
+        if (ImGui.Checkbox("Apply to video recording", ref applyToVideo))
+        {
+            _archeologyApplyToVideoRecording = applyToVideo;
+            SaveViewerSettings();
+        }
+
+        if (_archeologyApplyToVideoRecording)
+        {
+            ImGui.SliderFloat("Video playback speed##archeology", ref _archeologyPlaybackSpeed, 1f, 5000f, "%.0f");
+        }
+
+        ImGui.Spacing();
+        ImGui.TextDisabled($"Next capture: {(_archeologyApplyToNextCapture ? "playback active" : "no playback")}");
+        ImGui.TextDisabled($"Video recording: {(_archeologyApplyToVideoRecording ? $"playback @ {_archeologyPlaybackSpeed:F0}/s" : "no playback")}");
     }
 
     private void DrawTerrainControlsAdjustmentWeakSignalContent()

@@ -367,6 +367,19 @@ public partial class ViewerApp : IDisposable
     private int _archeologyMinUniqueId = -1; // -1 = unset (use first detected value)
     private int _archeologyMaxUniqueId = -1; // -1 = unset
     private int _archeologyScopeIndex = 0;   // 0 = PerMap, 1 = CameraTile
+
+    // 069 Phase 7: archeology playback (animate Visible Range End over time).
+    private bool _archeologyPlaybackActive = false;
+    private float _archeologyPlaybackSpeed = 50f; // uniqueIds per second
+    private bool _archeologyPlaybackLoop = false;
+    private double _archeologyPlaybackAccumulator = 0.0; // for fractional uniqueId advancement
+    private int _archeologyPlaybackRestoreMin = -1; // saved on Play, restored on Stop
+    private int _archeologyPlaybackRestoreMax = -1;
+    private bool _archeologyPlaybackRestoreFilter = false;
+
+    // 069 Phase 7: capture integration flags
+    private bool _archeologyApplyToNextCapture = false;
+    private bool _archeologyApplyToVideoRecording = false;
     private bool _autoOpenWorldMapsPanel;
     private Vector2 _dockspaceHostPosition;
     private Vector2 _dockspaceHostSize;
@@ -1162,11 +1175,48 @@ public partial class ViewerApp : IDisposable
         HandleSceneMouseWheelInput();
         HandleKeyboardInput((float)dt);
         UpdateTaxiRideCamera();
+        UpdateArcheologyPlayback(dt);
         _minimapRenderer?.ProcessPendingLoads(
             maxLoads: (_fullscreenMinimap || _showMinimapWindow) ? 4 : 1,
             maxBudgetMs: (_fullscreenMinimap || _showMinimapWindow) ? 6.0 : 1.5);
         UpdateSqlSpawnStreaming();
         UpdateTerrainWeakSignalRestoreForCamera();
+    }
+
+    private void UpdateArcheologyPlayback(double dt)
+    {
+        if (!_archeologyPlaybackActive || _worldScene == null) return;
+        if (!_worldScene.TryGetUniqueIdFilterRange(out int minId, out int maxId, out _))
+            return;
+
+        _archeologyPlaybackAccumulator += dt * _archeologyPlaybackSpeed;
+        int advance = (int)Math.Floor(_archeologyPlaybackAccumulator);
+        if (advance <= 0) return;
+        _archeologyPlaybackAccumulator -= advance;
+
+        int currentMax = _worldScene.UniqueIdFilterMax;
+        int newMax = currentMax + advance;
+        if (newMax >= maxId)
+        {
+            if (_archeologyPlaybackLoop)
+            {
+                // Loop: snap back to min
+                int restoreMin = _archeologyPlaybackRestoreMin >= 0 ? _archeologyPlaybackRestoreMin : minId;
+                _worldScene.SetUniqueIdFilterRange(restoreMin, restoreMin);
+                _archeologyPlaybackAccumulator = 0;
+            }
+            else
+            {
+                _worldScene.UniqueIdFilterMax = maxId;
+                _archeologyPlaybackActive = false;
+                _archeologyPlaybackAccumulator = 0;
+                _statusMessage = "Archeology playback reached end of range.";
+            }
+        }
+        else
+        {
+            _worldScene.UniqueIdFilterMax = newMax;
+        }
     }
 
     private void UpdateSqlSpawnStreaming()
@@ -14655,6 +14705,12 @@ void main() {
             _archeologyMinUniqueId = settings.ArcheologyMinUniqueId;
             _archeologyMaxUniqueId = settings.ArcheologyMaxUniqueId;
             _archeologyScopeIndex = settings.ArcheologyScopeIndex;
+            _archeologyPlaybackSpeed = float.IsFinite(settings.ArcheologyPlaybackSpeed)
+                ? Math.Clamp(settings.ArcheologyPlaybackSpeed, 1f, 5000f)
+                : 50f;
+            _archeologyPlaybackLoop = settings.ArcheologyPlaybackLoop;
+            _archeologyApplyToNextCapture = settings.ArcheologyApplyToNextCapture;
+            _archeologyApplyToVideoRecording = settings.ArcheologyApplyToVideoRecording;
             _useTabUi = settings.UseTabUi;
             if (Enum.IsDefined(typeof(TopTab), settings.ActiveTopTab))
                 _activeTopTab = (TopTab)settings.ActiveTopTab;
@@ -14949,6 +15005,10 @@ void main() {
                 ArcheologyMinUniqueId = _archeologyMinUniqueId,
                 ArcheologyMaxUniqueId = _archeologyMaxUniqueId,
                 ArcheologyScopeIndex = _archeologyScopeIndex,
+                ArcheologyPlaybackSpeed = _archeologyPlaybackSpeed,
+                ArcheologyPlaybackLoop = _archeologyPlaybackLoop,
+                ArcheologyApplyToNextCapture = _archeologyApplyToNextCapture,
+                ArcheologyApplyToVideoRecording = _archeologyApplyToVideoRecording,
                 UseTabUi = _useTabUi,
                 ActiveTopTab = (int)_activeTopTab,
                 ActiveBottomTab = _activeBottomTabIndex
@@ -15172,6 +15232,12 @@ void main() {
         public int ArcheologyMinUniqueId { get; set; } = -1;
         public int ArcheologyMaxUniqueId { get; set; } = -1;
         public int ArcheologyScopeIndex { get; set; }
+
+        // 069 Phase 7: archeology playback + capture integration
+        public float ArcheologyPlaybackSpeed { get; set; } = 50f;
+        public bool ArcheologyPlaybackLoop { get; set; }
+        public bool ArcheologyApplyToNextCapture { get; set; }
+        public bool ArcheologyApplyToVideoRecording { get; set; }
 
         // 069 tab system persistence
         public bool UseTabUi { get; set; } = true;

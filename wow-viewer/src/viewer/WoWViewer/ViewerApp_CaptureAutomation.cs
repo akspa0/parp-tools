@@ -92,6 +92,8 @@ public partial class ViewerApp
         public bool HideTerrainLiquids { get; set; }
         public bool HideObjects { get; set; }
         public bool HideTerrain { get; set; }
+        // 069 Phase 7: archeology playback per-shot
+        public bool ApplyArcheologyPlayback { get; set; }
     }
 
     private sealed class CaptureQueueOptions
@@ -213,6 +215,8 @@ public partial class ViewerApp
         public required double FrameIntervalSeconds { get; init; }
         public double FrameAccumulatorSeconds { get; set; }
         public byte[] FrameBuffer { get; set; } = Array.Empty<byte>();
+        // 069 Phase 7: archeology playback
+        public bool ApplyArcheologyPlayback { get; set; }
     }
 
     private sealed class CameraShotPointDocument
@@ -555,7 +559,12 @@ public partial class ViewerApp
             HideTerrainLiquids = options?.HideTerrainLiquids == true,
             HideObjects = options?.HideObjects == true,
             HideTerrain = options?.HideTerrain == true,
+            ApplyArcheologyPlayback = _archeologyApplyToNextCapture,
         });
+
+        // 069 Phase 7: auto-start playback on first queued capture when enabled.
+        if (_archeologyApplyToNextCapture && !_archeologyPlaybackActive && _worldScene != null)
+            StartArcheologyPlayback();
 
         string mode = includeUi ? "with_ui" : "no_ui";
         _statusMessage = $"Queued capture '{shot.Name}' ({mode}).";
@@ -574,6 +583,17 @@ public partial class ViewerApp
 
         ApplyCameraShotPoint(request.Shot);
         ApplyCaptureRequestSceneOverrides(request);
+
+        // 069 Phase 7: advance archeology playback one step per shot.
+        if (request.ApplyArcheologyPlayback && _worldScene != null
+            && _worldScene.TryGetUniqueIdFilterRange(out int minId, out int maxId, out _))
+        {
+            int stepSize = Math.Max(1, (maxId - minId) / 32);
+            int newMax = Math.Min(maxId, _worldScene.UniqueIdFilterMax + stepSize);
+            _worldScene.UniqueIdFilterMax = newMax;
+            _worldScene.UniqueIdFilterEnabled = true;
+        }
+
         request.Applied = true;
         _activeCaptureRequest = request;
     }
@@ -1534,6 +1554,10 @@ public partial class ViewerApp
         if (!includeUi)
             _hideUiChrome = true;
 
+        // 069 Phase 7: if archeology playback to video is enabled, start playback.
+        if (_archeologyApplyToVideoRecording && !_archeologyPlaybackActive)
+            StartArcheologyPlayback();
+
         if (!TryGetCaptureRegion(includeUi, out _, out _, out int width, out int height))
         {
             _statusMessage = includeUi
@@ -1620,6 +1644,7 @@ public partial class ViewerApp
                 FrameIntervalSeconds = 1.0 / Math.Max(1, _videoCaptureFps),
                 FrameAccumulatorSeconds = 0.0,
                 FrameBuffer = new byte[width * height * 4],
+                ApplyArcheologyPlayback = _archeologyApplyToVideoRecording,
             };
 
             _statusMessage = $"Started video recording: {outputPath}";
@@ -1640,6 +1665,10 @@ public partial class ViewerApp
         ActiveVideoRecording recording = _activeVideoRecording;
         bool wasNoUi = !recording.IncludeUi;
         _activeVideoRecording = null;
+
+        // 069 Phase 7: stop archeology playback if it was started for video.
+        if (recording.ApplyArcheologyPlayback && _archeologyPlaybackActive)
+            StopArcheologyPlayback(restoreRange: true);
 
         if (wasNoUi)
             _hideUiChrome = false;

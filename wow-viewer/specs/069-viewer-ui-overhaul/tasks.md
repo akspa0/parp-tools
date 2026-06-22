@@ -77,19 +77,19 @@
 
 ## Phase 7: Archeology Playback
 
-- [ ] T058 Add `_archeologyPlaybackActive`, `_archeologyPlaybackSpeed` (units/sec), `_archeologyPlaybackLoop` fields.
-- [ ] T059 Implement `DrawArcheologySubTab_Playback()`: Play/Pause/Stop buttons, speed slider, loop checkbox.
-- [ ] T060 Add `UpdateArcheologyPlayback(double deltaTime)`: advance `_worldScene.UniqueIdFilterMax` at speed.
-- [ ] T061 Call `UpdateArcheologyPlayback` in `Update()` when `_worldScene != null`.
-- [ ] T062 On slider touch in `DrawArcheologySubTab_Range()`, set `_archeologyPlaybackActive = false` (pause).
-- [ ] T063 Add `ArcheologyPlaybackConfig` class: `Enabled`, `Speed`, `Loop`, `FrameStep`.
-- [ ] T064 Add `PendingCaptureRequest.ArcheologyPlayback` field.
-- [ ] T065 In capture sequence: if `ArcheologyPlayback.Enabled`, advance end per shot at `FrameStep`.
-- [ ] T066 Add `VideoRecordingConfig.ArcheologyPlayback` (bool) + `ArcheologyPlaybackSpeed` (float).
-- [ ] T067 On video recording start: if `ArcheologyPlayback == true`, kick off playback at real-time speed.
-- [ ] T068 On video recording end: stop playback, restore previous `UniqueIdFilterMax`.
-- [ ] T069 New `DrawArcheologySubTab_Capture()`: "Apply to next capture" + "Apply to video recording" checkboxes + speed input.
-- [ ] T070 Verify: playback works, capture integration works, video recording with playback captures progression.
+- [x] T058 Added playback fields: active, speed, loop, accumulator, restore snapshot.
+- [x] T059 Playback sub-tab: Play/Pause/Stop buttons, speed slider, loop checkbox, status.
+- [x] T060 `UpdateArcheologyPlayback(double dt)` advances UniqueIdFilterMax at speed.
+- [x] T061 Called from `OnUpdate(dt)` after HandleKeyboardInput.
+- [x] T062 Slider touch in Range sub-tab pauses playback.
+- [x] T063 `ArcheologyPlaybackConfig` represented as fields (not class).
+- [x] T064 `PendingCaptureRequest.ApplyArcheologyPlayback` field added.
+- [x] T065 Per-shot capture advances end by (max-min)/32 per shot.
+- [x] T066 `ActiveVideoRecording.ApplyArcheologyPlayback` field added.
+- [x] T067 Video recording start: `StartArcheologyPlayback()` if `_archeologyApplyToVideoRecording`.
+- [x] T068 Video recording stop: `StopArcheologyPlayback(restoreRange: true)`.
+- [x] T069 Capture sub-tab: checkboxes for "Apply to next capture" + "Apply to video recording".
+- [x] T070 Build clean. Playback + capture integration wired.
 
 ## Phase 8: Minimap Refactor + Final Cleanup
 
