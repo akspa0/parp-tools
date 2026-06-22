@@ -3412,61 +3412,111 @@ public partial class ViewerApp
             for (int i = 0; i < labels.Length; i++)
             {
                 bool selected = _activeBottomTabIndex == i;
-                if (ImGui.TabItemButton(labels[i], selected ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+                bool popoutOpen = IsSubTabPopoutOpen(_activeTopTab, i);
+                string label = popoutOpen ? $"● {labels[i]}" : labels[i];
+                if (ImGui.TabItemButton(label, selected ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
                 {
                     _activeBottomTabIndex = i;
-                    // 069 Phase 12: clicking a sub-tab opens its popout.
-                    OpenSubTabPopoutByIndex(_activeTopTab, i);
+                    // 069 Phase 12: clicking a sub-tab toggles its popout.
+                    ToggleSubTabPopoutByIndex(_activeTopTab, i);
                 }
             }
             ImGui.EndTabBar();
         }
     }
 
-    private void OpenSubTabPopoutByIndex(TopTab top, int bottomIndex)
+    private bool IsSubTabPopoutOpen(TopTab top, int bottomIndex)
+    {
+        if (top == TopTab.World)
+        {
+            return (WorldBottomTab)bottomIndex switch
+            {
+                WorldBottomTab.Source => _subTabSourceOpen,
+                WorldBottomTab.Placements => _subTabPlacementsOpen,
+                WorldBottomTab.Tiles => _subTabTilesOpen,
+                WorldBottomTab.Overlays => _subTabOverlaysOpen,
+                _ => false
+            };
+        }
+        if (top == TopTab.Scene)
+        {
+            return (SceneBottomTab)bottomIndex switch
+            {
+                SceneBottomTab.Selection => _subTabSelectionOpen,
+                SceneBottomTab.Camera => _subTabCameraOpen,
+                SceneBottomTab.Themes => _subTabThemesOpen,
+                SceneBottomTab.Settings => _subTabSettingsOpen,
+                _ => false
+            };
+        }
+        if (top == TopTab.Terrain)
+            return (TerrainBottomTab)bottomIndex == TerrainBottomTab.Layers && _subTabLayersOpen;
+        if (top == TopTab.Archeology)
+        {
+            return (ArcheologyBottomTab)bottomIndex switch
+            {
+                ArcheologyBottomTab.Range => _subTabRangeOpen,
+                ArcheologyBottomTab.Playback => _subTabPlaybackOpen,
+                ArcheologyBottomTab.Capture => _subTabArcheoCaptureOpen,
+                _ => false
+            };
+        }
+        if (top == TopTab.Utilities)
+        {
+            return (UtilitiesBottomTab)bottomIndex switch
+            {
+                UtilitiesBottomTab.Log => _subTabLogOpen,
+                UtilitiesBottomTab.Perf => _subTabPerfOpen,
+                _ => false
+            };
+        }
+        return false;
+    }
+
+    private void ToggleSubTabPopoutByIndex(TopTab top, int bottomIndex)
     {
         if (top == TopTab.World)
         {
             switch ((WorldBottomTab)bottomIndex)
             {
-                case WorldBottomTab.Source: _subTabSourceOpen = true; break;
-                case WorldBottomTab.Placements: _subTabPlacementsOpen = true; break;
-                case WorldBottomTab.Tiles: _subTabTilesOpen = true; break;
-                case WorldBottomTab.Overlays: _subTabOverlaysOpen = true; break;
+                case WorldBottomTab.Source: _subTabSourceOpen = !_subTabSourceOpen; break;
+                case WorldBottomTab.Placements: _subTabPlacementsOpen = !_subTabPlacementsOpen; break;
+                case WorldBottomTab.Tiles: _subTabTilesOpen = !_subTabTilesOpen; break;
+                case WorldBottomTab.Overlays: _subTabOverlaysOpen = !_subTabOverlaysOpen; break;
             }
         }
         else if (top == TopTab.Scene)
         {
             switch ((SceneBottomTab)bottomIndex)
             {
-                case SceneBottomTab.Selection: _subTabSelectionOpen = true; break;
-                case SceneBottomTab.Camera: _subTabCameraOpen = true; break;
-                case SceneBottomTab.Themes: _subTabThemesOpen = true; break;
-                case SceneBottomTab.Settings: _subTabSettingsOpen = true; break;
+                case SceneBottomTab.Selection: _subTabSelectionOpen = !_subTabSelectionOpen; break;
+                case SceneBottomTab.Camera: _subTabCameraOpen = !_subTabCameraOpen; break;
+                case SceneBottomTab.Themes: _subTabThemesOpen = !_subTabThemesOpen; break;
+                case SceneBottomTab.Settings: _subTabSettingsOpen = !_subTabSettingsOpen; break;
             }
         }
         else if (top == TopTab.Terrain)
         {
             switch ((TerrainBottomTab)bottomIndex)
             {
-                case TerrainBottomTab.Layers: _subTabLayersOpen = true; break;
+                case TerrainBottomTab.Layers: _subTabLayersOpen = !_subTabLayersOpen; break;
             }
         }
         else if (top == TopTab.Archeology)
         {
             switch ((ArcheologyBottomTab)bottomIndex)
             {
-                case ArcheologyBottomTab.Range: _subTabRangeOpen = true; break;
-                case ArcheologyBottomTab.Playback: _subTabPlaybackOpen = true; break;
-                case ArcheologyBottomTab.Capture: _subTabArcheoCaptureOpen = true; break;
+                case ArcheologyBottomTab.Range: _subTabRangeOpen = !_subTabRangeOpen; break;
+                case ArcheologyBottomTab.Playback: _subTabPlaybackOpen = !_subTabPlaybackOpen; break;
+                case ArcheologyBottomTab.Capture: _subTabArcheoCaptureOpen = !_subTabArcheoCaptureOpen; break;
             }
         }
         else if (top == TopTab.Utilities)
         {
             switch ((UtilitiesBottomTab)bottomIndex)
             {
-                case UtilitiesBottomTab.Log: _subTabLogOpen = true; break;
-                case UtilitiesBottomTab.Perf: _subTabPerfOpen = true; break;
+                case UtilitiesBottomTab.Log: _subTabLogOpen = !_subTabLogOpen; break;
+                case UtilitiesBottomTab.Perf: _subTabPerfOpen = !_subTabPerfOpen; break;
             }
         }
     }
