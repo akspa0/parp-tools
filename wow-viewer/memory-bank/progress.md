@@ -1,5 +1,29 @@
 # Progress — wow-viewer
 
+## 2026-06-21 — Spec 071: left/right sidebar split + Model Viewer mode (drafted)
+
+### What landed
+
+**Spec + plan + tasks** at `specs/071-left-right-sidebar-split/`:
+- Two-side layout: left sidebar (file browser + maps), right sidebar (workbench)
+- 3 top tabs: Model / World / Tools (collapses 069's 6)
+- Model Viewer mode: Info / Animations / Actions / LOD sub-tabs
+- All Tools menu items become tab switchers (no floating windows)
+- 8 phases A-H, branch `071-left-right-sidebar-split` cut from `069-viewer-ui-overhaul`
+
+### User feedback driving 071
+- File browser / World Maps should be in a separate LEFT sidebar
+- Right sidebar = workbench
+- No useful model inspection panels in 069 workbench when loading a model
+- All popups should be tabs
+
+### Salvaged from 069
+- Tab data model + dispatch
+- Sub-tab content methods (Draw*Content variants)
+- Archeology playback, sticky settings
+- Headless content variants (no nested ImGui windows)
+- Single workbench panel concept
+
 ## 2026-06-21 — Spec 069: Viewer UI overhaul (tab system → workbench)
 
 ### What landed
