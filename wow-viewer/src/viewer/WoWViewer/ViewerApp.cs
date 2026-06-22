@@ -365,6 +365,9 @@ public partial class ViewerApp : IDisposable
     private TopTab _activeTopTab = TopTab.Scene;
     private int _activeBottomTabIndex = 0;
 
+    // Sub-tab popout window visibility (069 Phase 9: content in popout, not in middle)
+    private bool _subTabSourceOpen = true; // Source sub-tab opens by default so user can load a map
+
     // 069 Phase 6: sticky archeology settings (persist across viewer restarts).
     private int _archeologyMinUniqueId = -1; // -1 = unset (use first detected value)
     private int _archeologyMaxUniqueId = -1; // -1 = unset
@@ -1683,11 +1686,14 @@ void main() {
             // with top tab bar + bottom tab bar + central content area.
             if (_useTabUi)
             {
+                // 069 Phase 9 fix: tab system is chrome only. 3D world takes the
+                // full middle area between top tab bar and bottom tab bar.
+                // Sub-tab content opens in popout windows, not in a child
+                // region in the middle (which would shrink/cover the world).
                 DrawTopTabBar();
                 DrawTopTabContent();
-                DrawMainViewport();
                 DrawBottomTabBar();
-                DrawBottomTabContent();
+                DrawSubTabContentPopout();
             }
             else if (_useDockspaceUi)
             {
@@ -14470,6 +14476,16 @@ void main() {
         y = topOffset;
         width = io.DisplaySize.X;
         height = io.DisplaySize.Y - topOffset - StatusBarHeight;
+
+        // 069 tab system: when active, viewport is full middle area
+        // (no dockspace insets, no sidebars). Tab content overlays the world
+        // in a popout panel rather than squeezing it.
+        if (_useTabUi)
+        {
+            width = MathF.Max(width, 0f);
+            height = MathF.Max(height, 0f);
+            return width > 10f && height > 10f;
+        }
 
         if (_useDockspaceUi && _dockspaceHostSize.X > 10f && _dockspaceHostSize.Y > 10f)
         {

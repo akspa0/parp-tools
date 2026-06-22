@@ -3545,45 +3545,34 @@ public partial class ViewerApp
         ImGui.TextDisabled($"Utilities — {label}");
     }
 
-    private void DrawBottomTabContent()
+    private void DrawSubTabContentPopout()
     {
-        // 069 Phase 2: bottom tab content region below the sub-tab bar.
-        // Renders the active sub-tab's full body, sized to fill the remaining viewport.
-        Vector2 avail = ImGui.GetContentRegionAvail();
-        if (avail.X < 32f || avail.Y < 32f)
-            return;
+        // 069 Phase 9 fix: sub-tab content lives in a popout window, not in
+        // a child region in the middle. The 3D world keeps the full middle
+        // area. Click a sub-tab to open its popout. Click again (or X) to close.
 
-        if (!ImGui.BeginChild("##BottomTabContent", avail, false,
-            ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
-            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
+        // Use a 1:1 state model: each sub-tab has its own visibility flag.
+        // The active sub-tab is the default visible one.
+        if (!_useTabUi) return;
+        if (_activeTopTab == TopTab.World && (WorldBottomTab)_activeBottomTabIndex == WorldBottomTab.Source)
         {
-            ImGui.EndChild();
-            return;
+            DrawSubTabWindow("Source##069", "World — Source", DrawWorldSourceSubTab, ref _subTabSourceOpen);
         }
+        // For all other sub-tabs, the sub-tab bar just navigates. The popout
+        // opens via the Draw*Window methods (which are the legacy floating
+        // windows, still wired through the if-else in DrawUI).
+    }
 
-        switch (_activeTopTab)
+    private void DrawSubTabWindow(string id, string title, Action body, ref bool isOpen)
+    {
+        if (!isOpen) return;
+
+        ImGui.SetNextWindowSize(new Vector2(420f, 360f), ImGuiCond.FirstUseEver);
+        if (ImGui.Begin(title, ref isOpen))
         {
-            case TopTab.Scene:
-                DrawSceneSubTabContent();
-                break;
-            case TopTab.World:
-                DrawWorldSubTabContent();
-                break;
-            case TopTab.Terrain:
-                DrawTerrainSubTabContent();
-                break;
-            case TopTab.Pm4:
-                DrawPm4SubTabContent();
-                break;
-            case TopTab.Utilities:
-                DrawUtilitiesSubTabContent();
-                break;
-            case TopTab.Archeology:
-                DrawArcheologySubTabContent();
-                break;
+            body();
         }
-
-        ImGui.EndChild();
+        ImGui.End();
     }
 
     // ── Scene sub-tab content ──────────────────────────────────────────────
