@@ -13,22 +13,22 @@
 
 ## Phase 2: Scene + Utilities Tabs
 
-- [ ] T009 Implement `DrawSceneTabContent()` → `DrawSceneSubTab_Selection()`, `DrawSceneSubTab_Camera()`, `DrawSceneSubTab_Settings()`, `DrawSceneSubTab_Themes()`.
-- [ ] T010 Move content from `DrawUnifiedSelectionSidebarContent` into `DrawSceneSubTab_Selection()`.
-- [ ] T011 Move `DrawCameraControlsContent` into `DrawSceneSubTab_Camera()`.
-- [ ] T012 Move `DrawUiThemeSettingsContent` (ViewerApp_Themes.cs) into `DrawSceneSubTab_Themes()`.
-- [ ] T013 Move workspace/target/save summary into `DrawSceneSubTab_Settings()`.
-- [ ] T014 Implement `DrawUtilitiesTabContent()` → sub-tabs Minimap/Log/Perf/Render Quality/Taxi/Capture Automation/Asset Catalog/Runtime Stats.
-- [ ] T015 Move `_showLogViewer` flag content into `DrawUtilitiesSubTab_Log()`.
-- [ ] T016 Move `_showPerfWindow` content into `DrawUtilitiesSubTab_Perf()`.
-- [ ] T017 Move `_showRenderQualityWindow` content into `DrawUtilitiesSubTab_RenderQuality()`.
-- [ ] T018 Move `_showTaxiWindow` content into `DrawUtilitiesSubTab_Taxi()`.
-- [ ] T019 Move `_showCaptureAutomationWindow` content into `DrawUtilitiesSubTab_CaptureAutomation()`.
-- [ ] T020 Move runtime stats draw into `DrawUtilitiesSubTab_RuntimeStats()`.
-- [ ] T021 Move asset catalog/file browser into `DrawUtilitiesSubTab_AssetCatalog()`.
-- [ ] T022 Minimap sub-tab: call `DrawInteractiveMinimapSurface` with sub-tab content size.
-- [ ] T023 Set `_useTabUi = true` default. Remove old sidebar `_showFlag` wiring for Utilities.
-- [ ] T024 Verify build, manual smoke.
+- [x] T009 Implement `DrawSceneTabContent()` → `DrawSceneSubTabContent()` → Selection/Camera/Settings/Themes.
+- [x] T010 Selection sub-tab calls `DrawSelectionPanelContent()`.
+- [x] T011 Camera sub-tab calls `DrawCameraControlsContent()`.
+- [x] T012 Themes sub-tab calls `DrawUiThemeSettingsContent()`.
+- [x] T013 Settings sub-tab has hide-UI-chrome toggle + camera controls.
+- [x] T014 Implement `DrawUtilitiesSubTabContent()` → Minimap/Log/Perf/RenderQuality/Taxi/CaptureAutomation/AssetCatalog/RuntimeStats.
+- [x] T015 Log sub-tab calls `DrawLogViewer()`.
+- [x] T016 Perf sub-tab calls `DrawPerfWindow()`.
+- [x] T017 RenderQuality sub-tab calls `DrawRenderQualityWindow()`.
+- [x] T018 Taxi sub-tab calls `DrawTaxiWindow()`.
+- [x] T019 CaptureAutomation sub-tab calls `DrawCaptureAutomationWindow()`.
+- [x] T020 RuntimeStats sub-tab calls `DrawRuntimeStatsPanelContent()`.
+- [x] T021 AssetCatalog sub-tab calls `_catalogView?.Draw()`.
+- [x] T022 Minimap sub-tab uses new headless `DrawMinimapContent()`.
+- [x] T023 `_useTabUi = true` default. Old sidebars/windows suppressed when tab system active.
+- [x] T024 Build clean. Tab system is the default UI.
 
 ## Phase 3: World + Terrain Merge
 

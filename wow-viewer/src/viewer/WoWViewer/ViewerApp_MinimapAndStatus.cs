@@ -350,7 +350,18 @@ public partial class ViewerApp
         if (_useDockspaceUi)
             CaptureDockPanelState(ShellPanelId.Minimap);
 
-        if (!hasWorldLoaded)
+        DrawMinimapContent(loadedTileCount, mapName, existingTiles, isTileLoaded);
+        ImGui.End();
+    }
+
+    /// <summary>
+    /// Headless minimap body (no Begin/End). Call from any container that already
+    /// has an ImGui context active: docked panel, floating window, tab content
+    /// region, fullscreen overlay. Caller manages the surrounding ImGui window.
+    /// </summary>
+    private void DrawMinimapContent(int loadedTileCount, string? mapName, List<(int tx, int ty)> existingTiles, Func<int, int, bool> isTileLoaded)
+    {
+        if (existingTiles == null || isTileLoaded == null)
         {
             ImGui.TextWrapped("Load a world map or MK dataset project to activate the minimap.");
             ImGui.Spacing();
@@ -374,8 +385,6 @@ public partial class ViewerApp
                 if (_discoveredMaps.Count > 0)
                     ImGui.TextDisabled($"Discovered maps: {_discoveredMaps.Count}");
             }
-
-            ImGui.End();
             return;
         }
 
@@ -427,8 +436,6 @@ public partial class ViewerApp
             out _);
 
         ImGui.SetCursorPosY(controlsHeight + mapSize + 2f);
-
-        ImGui.End();
     }
 
     private void DrawFullscreenMinimap()

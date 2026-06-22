@@ -358,8 +358,8 @@ public partial class ViewerApp : IDisposable
     private FixedBottomDrawerTab? _pendingRightSidebarSection;
     private bool _useDockspaceUi = true;
 
-    // 069 Phase 1: tab system state. Off by default; old sidebar system still active.
-    private bool _useTabUi = false;
+    // 069 Phase 1: tab system state. On by default; can toggle off via View > Legacy Sidebar UI.
+    private bool _useTabUi = true;
     private TopTab _activeTopTab = TopTab.Scene;
     private int _activeBottomTabIndex = 0;
     private bool _autoOpenWorldMapsPanel;
@@ -1637,66 +1637,89 @@ void main() {
                 DrawDockspaceHost();
             }
 
-            if (HasAnyShellPanelsInLane(ShellPanelLane.Left))
-                DrawLeftSidebar();
-            if (HasAnyShellPanelsInLane(ShellPanelLane.Right))
-                DrawRightSidebar();
+            if (!_useTabUi)
+            {
+                if (HasAnyShellPanelsInLane(ShellPanelLane.Left))
+                    DrawLeftSidebar();
+                if (HasAnyShellPanelsInLane(ShellPanelLane.Right))
+                    DrawRightSidebar();
 
-            DrawFixedSidebarSplitters();
+                DrawFixedSidebarSplitters();
+            }
 
             DrawStatusBar();
 
-            // Asset Catalog (floating window)
-            _catalogView?.Draw();
+            // Floating windows: when tab system is active, only the tools that
+            // aren't yet routed into a sub-tab render as floating windows.
+            // Phase 2 routes Scene + Utilities; later phases route the rest.
+            if (_useTabUi)
+            {
+                if (_showWdlPreview)
+                    DrawWdlPreviewDialog();
+                if (_fullscreenMinimap)
+                    DrawFullscreenMinimap();
+                // The following tools still need tab sub-tab routing in later phases:
+                if (_showPm4AlignmentWindow)
+                    DrawPm4AlignmentWindow();
+                if (_showPm4ObjectMatchWindow)
+                    DrawPm4ObjectMatchWindow();
+                if (_showPm4WmoCorrelationWindow)
+                    DrawPm4WmoCorrelationWindow();
+            }
+            else
+            {
+                // Asset Catalog (floating window)
+                _catalogView?.Draw();
 
-            // Log Viewer (floating window)
-            if (_showLogViewer)
-                DrawLogViewer();
+                // Log Viewer (floating window)
+                if (_showLogViewer)
+                    DrawLogViewer();
 
-            // WDL Preview (floating window)
-            if (_showWdlPreview)
-                DrawWdlPreviewDialog();
+                // WDL Preview (floating window)
+                if (_showWdlPreview)
+                    DrawWdlPreviewDialog();
 
-            // Minimap panel
-            if (IsShellPanelActive(ShellPanelId.Minimap) && !_fullscreenMinimap)
-                DrawMinimapWindow();
+                // Minimap panel
+                if (IsShellPanelActive(ShellPanelId.Minimap) && !_fullscreenMinimap)
+                    DrawMinimapWindow();
 
-            // Perf (floating window)
-            if (_showPerfWindow)
-                DrawPerfWindow();
+                // Perf (floating window)
+                if (_showPerfWindow)
+                    DrawPerfWindow();
 
-            // Render quality (floating window)
-            if (_showRenderQualityWindow)
-                DrawRenderQualityWindow();
+                // Render quality (floating window)
+                if (_showRenderQualityWindow)
+                    DrawRenderQualityWindow();
 
-            if (_showTerrainToolsWindow && (_terrainManager != null || _vlmTerrainManager != null))
-                DrawTerrainToolsWindow();
+                if (_showTerrainToolsWindow && (_terrainManager != null || _vlmTerrainManager != null))
+                    DrawTerrainToolsWindow();
 
-            // Chunk Clipboard (floating window)
-            if (_showChunkClipboardWindow && (_terrainManager?.Renderer != null || _vlmTerrainManager?.Renderer != null))
-                DrawChunkClipboardWindow();
+                // Chunk Clipboard (floating window)
+                if (_showChunkClipboardWindow && (_terrainManager?.Renderer != null || _vlmTerrainManager?.Renderer != null))
+                    DrawChunkClipboardWindow();
 
-            if (_showTerrainAnalysisWindow && (_terrainManager != null || _vlmTerrainManager != null))
-                DrawTerrainAnalysisWindow();
+                if (_showTerrainAnalysisWindow && (_terrainManager != null || _vlmTerrainManager != null))
+                    DrawTerrainAnalysisWindow();
 
-            if (_showMcnkExplorerWindow && (_terrainManager != null || _vlmTerrainManager != null))
-                DrawMcnkExplorerWindow();
+                if (_showMcnkExplorerWindow && (_terrainManager != null || _vlmTerrainManager != null))
+                    DrawMcnkExplorerWindow();
 
-            if (_showCaptureAutomationWindow)
-                DrawCaptureAutomationWindow();
+                if (_showCaptureAutomationWindow)
+                    DrawCaptureAutomationWindow();
 
-            // PM4 alignment (advanced fallback)
-            if (_showPm4AlignmentWindow)
-                DrawPm4AlignmentWindow();
+                // PM4 alignment (advanced fallback)
+                if (_showPm4AlignmentWindow)
+                    DrawPm4AlignmentWindow();
 
-            // Tool windows extracted from right sidebar
-            if (_showUniqueIdArchaeologyWindow && _worldScene != null)
-                DrawUniqueIdArchaeologyWindow();
+                // Tool windows extracted from right sidebar
+                if (_showUniqueIdArchaeologyWindow && _worldScene != null)
+                    DrawUniqueIdArchaeologyWindow();
 
-            if (_showTaxiWindow && _worldScene != null)
-                DrawTaxiWindow();
+                if (_showTaxiWindow && _worldScene != null)
+                    DrawTaxiWindow();
+            }
 
-            if (_showWeakSignalWindow && (_terrainManager != null || _vlmTerrainManager != null))
+            if (!_useTabUi && _showWeakSignalWindow && (_terrainManager != null || _vlmTerrainManager != null))
                 DrawWeakSignalWindow();
 
         }
@@ -1824,13 +1847,21 @@ void main() {
 
                 ImGui.Separator();
 
+                if (ImGui.MenuItem("Tab System (069)", "", ref _useTabUi))
+                {
+                    // Save preference so it sticks across restarts.
+                    SaveViewerSettings();
+                }
+
                 bool useDockspaceUi = _useDockspaceUi;
+                if (_useTabUi) ImGui.BeginDisabled();
                 if (ImGui.MenuItem("Dockable Shell Panels", "", ref useDockspaceUi))
                 {
                     _useDockspaceUi = useDockspaceUi;
                     _forceApplyShellPanelLayout = _useDockspaceUi;
                     SaveViewerSettings();
                 }
+                if (_useTabUi) ImGui.EndDisabled();
 
                 ImGui.MenuItem("Left Sidebar", "", ref _showLeftSidebar);
                 ImGui.MenuItem("Right Sidebar", "I", ref _showRightSidebar);

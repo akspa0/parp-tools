@@ -3228,12 +3228,142 @@ public partial class ViewerApp
 
     private void DrawTopTabContent()
     {
-        // Phase 1 stub: no top tab content yet. Each top tab's sub-tabs
-        // will be wired in later phases.
+        // 069 Phase 2: top tab content region sits between top tab bar and bottom tab bar.
+        // Renders the active top tab's primary panel area (above the sub-tab bar).
+        if (ImGui.Begin("##TopTabContent", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings |
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoBringToFrontOnFocus))
+        {
+            // Top tab content hosts the "primary" view for the active top tab.
+            // For now, this is a slim band that shows the active top tab's name
+            // and any always-visible controls (e.g., world overview for World tab,
+            // current map summary for PM4 tab). Sub-tab content goes below.
+            string label = _activeTopTab switch
+            {
+                TopTab.Scene => "Scene — selection summary + camera target",
+                TopTab.World => "World — placements + tiles + overlays + selection tools",
+                TopTab.Terrain => "Terrain — layers + clipboard + analysis + MCNK + weak signal + export",
+                TopTab.Pm4 => "PM4 — overlay + selection + correlation + info + match + alignment",
+                TopTab.Archeology => "Archeology — uniqueId range + layers + playback + capture",
+                TopTab.Utilities => "Utilities — minimap + log + perf + render quality + taxi + capture + asset catalog + runtime stats",
+                _ => "—",
+            };
+            ImGui.TextDisabled(label);
+        }
+        ImGui.End();
     }
 
     private void DrawBottomTabContent()
     {
-        // Phase 1 stub: no bottom tab content yet.
+        // 069 Phase 2: bottom tab content region below the sub-tab bar.
+        // Renders the active sub-tab's full body, sized to fill the remaining viewport.
+        Vector2 avail = ImGui.GetContentRegionAvail();
+        if (avail.X < 32f || avail.Y < 32f)
+            return;
+
+        if (!ImGui.BeginChild("##BottomTabContent", avail, false,
+            ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
+        {
+            ImGui.EndChild();
+            return;
+        }
+
+        switch (_activeTopTab)
+        {
+            case TopTab.Scene:
+                DrawSceneSubTabContent();
+                break;
+            case TopTab.Utilities:
+                DrawUtilitiesSubTabContent();
+                break;
+            case TopTab.World:
+            case TopTab.Terrain:
+            case TopTab.Pm4:
+            case TopTab.Archeology:
+                ImGui.TextDisabled($"{_activeTopTab} sub-tabs wire up in later phases.");
+                break;
+        }
+
+        ImGui.EndChild();
+    }
+
+    // ── Scene sub-tab content ──────────────────────────────────────────────
+    private void DrawSceneSubTabContent()
+    {
+        switch ((SceneBottomTab)_activeBottomTabIndex)
+        {
+            case SceneBottomTab.Selection:
+                DrawSelectionPanelContent();
+                break;
+            case SceneBottomTab.Camera:
+                DrawCameraControlsContent();
+                break;
+            case SceneBottomTab.Settings:
+                DrawSceneSettingsContent();
+                break;
+            case SceneBottomTab.Themes:
+                DrawUiThemeSettingsContent();
+                break;
+        }
+    }
+
+    private void DrawSceneSettingsContent()
+    {
+        ImGui.TextDisabled($"Target: {GetWorkspaceTargetSummary()}");
+        ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
+        ImGui.Separator();
+
+        bool hideUi = _hideUiChrome;
+        if (ImGui.Checkbox("Hide UI Chrome (Tab key)", ref hideUi))
+            _hideUiChrome = hideUi;
+
+        ImGui.Separator();
+        DrawCameraControlsContent();
+    }
+
+    // ── Utilities sub-tab content ──────────────────────────────────────────
+    private void DrawUtilitiesSubTabContent()
+    {
+        switch ((UtilitiesBottomTab)_activeBottomTabIndex)
+        {
+            case UtilitiesBottomTab.Minimap:
+                DrawUtilitiesMinimap();
+                break;
+            case UtilitiesBottomTab.Log:
+                DrawLogViewer();
+                break;
+            case UtilitiesBottomTab.Perf:
+                DrawPerfWindow();
+                break;
+            case UtilitiesBottomTab.RenderQuality:
+                DrawRenderQualityWindow();
+                break;
+            case UtilitiesBottomTab.Taxi:
+                if (_worldScene != null) DrawTaxiWindow();
+                else ImGui.TextDisabled("Load a world to enable taxi tools.");
+                break;
+            case UtilitiesBottomTab.CaptureAutomation:
+                DrawCaptureAutomationWindow();
+                break;
+            case UtilitiesBottomTab.AssetCatalog:
+                _catalogView?.Draw();
+                break;
+            case UtilitiesBottomTab.RuntimeStats:
+                DrawRuntimeStatsPanelContent();
+                break;
+        }
+    }
+
+    private void DrawUtilitiesMinimap()
+    {
+        if (TryGetActiveMinimapState(out var existingTiles, out var isTileLoaded, out int loadedTileCount, out string? mapName))
+        {
+            DrawMinimapContent(loadedTileCount, mapName, existingTiles, isTileLoaded);
+        }
+        else
+        {
+            DrawMinimapContent(0, null, null!, null!);
+        }
     }
 }
