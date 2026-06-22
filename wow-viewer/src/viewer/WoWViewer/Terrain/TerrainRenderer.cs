@@ -61,6 +61,7 @@ public class TerrainRenderer : IDisposable
     public bool UseWorldUvForDiffuse { get; set; } = true;
     public bool ShowChunkGrid { get; set; }
     public bool ShowTileGrid { get; set; }
+    public bool ShowCellGrid { get; set; }
     public bool ShowAlphaMask { get; set; }
     public int AlphaMaskChannel { get; set; } = 1;
     public bool ShowShadowMap { get; set; }
@@ -504,6 +505,7 @@ public class TerrainRenderer : IDisposable
 
         _shader.SetInt("uShowChunkGrid", ShowChunkGrid ? 1 : 0);
         _shader.SetInt("uShowTileGrid", ShowTileGrid ? 1 : 0);
+        _shader.SetInt("uShowCellGrid", ShowCellGrid ? 1 : 0);
         _shader.SetInt("uShowAlphaMask", ShowAlphaMask ? 1 : 0);
         _shader.SetInt("uShowShadowMap", ShowShadowMap ? 1 : 0);
         _shader.SetInt("uShowContours", ShowContours ? 1 : 0);
@@ -677,6 +679,7 @@ public class TerrainRenderer : IDisposable
 
         _tileShader.SetInt("uShowChunkGrid", ShowChunkGrid ? 1 : 0);
         _tileShader.SetInt("uShowTileGrid", ShowTileGrid ? 1 : 0);
+        _tileShader.SetInt("uShowCellGrid", ShowCellGrid ? 1 : 0);
         _tileShader.SetInt("uShowAlphaMask", ShowAlphaMask ? 1 : 0);
         _tileShader.SetInt("uShowShadowMap", ShowShadowMap ? 1 : 0);
         _tileShader.SetInt("uShowContours", ShowContours ? 1 : 0);
@@ -1427,15 +1430,16 @@ uniform int uHasAlpha3;
 uniform int uImplicitAlpha1;
 uniform int uImplicitAlpha2;
 uniform int uImplicitAlpha3;
-uniform int uHasShadowMap;
-uniform int uShowLayer0;
-uniform int uShowLayer1;
-uniform int uShowLayer2;
-uniform int uShowLayer3;
-uniform int uShowChunkGrid;
-uniform int uShowTileGrid;
-uniform int uShowAlphaMask;
-uniform int uShowShadowMap;
+    uniform int uHasShadowMap;
+    uniform int uShowLayer0;
+    uniform int uShowLayer1;
+    uniform int uShowLayer2;
+    uniform int uShowLayer3;
+    uniform int uShowChunkGrid;
+    uniform int uShowTileGrid;
+    uniform int uShowCellGrid;
+    uniform int uShowAlphaMask;
+    uniform int uShowShadowMap;
 uniform int uShowContours;
 uniform float uContourInterval;
 uniform vec3 uLightDir;
@@ -1548,6 +1552,14 @@ void main() {
             chunkLine = clamp(chunkLine, 0.0, 1.0);
             finalColor = mix(finalColor, vec3(0.0, 1.0, 1.0), chunkLine * 0.6);
         }
+        if (uShowCellGrid == 1) {
+            float cellSize = 66.666;
+            vec2 cellFrac = fract(vWorldPos.xy / cellSize);
+            float cellLine = step(cellFrac.x, 0.003) + step(1.0 - cellFrac.x, 0.003)
+                           + step(cellFrac.y, 0.003) + step(1.0 - cellFrac.y, 0.003);
+            cellLine = clamp(cellLine, 0.0, 1.0);
+            finalColor = mix(finalColor, vec3(0.0, 1.0, 0.0), cellLine * 0.5);
+        }
         if (uShowTileGrid == 1) {
             float tileSize = 533.333;
             vec2 tileFrac = fract(vWorldPos.xy / tileSize);
@@ -1636,11 +1648,12 @@ uniform int uAlphaDebugChannel;
 uniform int uShowLayer0;
 uniform int uShowLayer1;
 uniform int uShowLayer2;
-uniform int uShowLayer3;
-uniform int uShowChunkGrid;
-uniform int uShowTileGrid;
-uniform int uShowAlphaMask;
-uniform int uShowShadowMap;
+    uniform int uShowLayer3;
+    uniform int uShowChunkGrid;
+    uniform int uShowTileGrid;
+    uniform int uShowCellGrid;
+    uniform int uShowAlphaMask;
+    uniform int uShowShadowMap;
 uniform int uShowContours;
 uniform float uContourInterval;
 uniform vec3 uLightDir;
@@ -1753,6 +1766,14 @@ void main() {
                             + step(chunkFrac.y, 0.005) + step(1.0 - chunkFrac.y, 0.005);
             chunkLine = clamp(chunkLine, 0.0, 1.0);
             finalColor = mix(finalColor, vec3(0.0, 1.0, 1.0), chunkLine * 0.6);
+        }
+        if (uShowCellGrid == 1) {
+            float cellSize = 66.666;
+            vec2 cellFrac = fract(vWorldPos.xy / cellSize);
+            float cellLine = step(cellFrac.x, 0.003) + step(1.0 - cellFrac.x, 0.003)
+                           + step(cellFrac.y, 0.003) + step(1.0 - cellFrac.y, 0.003);
+            cellLine = clamp(cellLine, 0.0, 1.0);
+            finalColor = mix(finalColor, vec3(0.0, 1.0, 0.0), cellLine * 0.5);
         }
         if (uShowTileGrid == 1) {
             float tileSize = 533.333;

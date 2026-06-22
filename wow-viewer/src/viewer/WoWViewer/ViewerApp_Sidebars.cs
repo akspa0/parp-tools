@@ -76,6 +76,7 @@ public partial class ViewerApp
         width += MeasureToolbarSeparatorWidth();
         width += MeasureToolbarCheckboxWidth("Chunks");
         width += MeasureToolbarCheckboxWidth("Tiles");
+        width += MeasureToolbarCheckboxWidth("Cells");
         width += MeasureToolbarSeparatorWidth();
         width += MeasureToolbarCheckboxWidth("Alpha");
         width += MeasureToolbarCheckboxWidth("Shadows");
@@ -136,6 +137,9 @@ public partial class ViewerApp
         ImGui.SameLine();
         bool tileGrid = renderer.ShowTileGrid;
         if (ImGui.Checkbox("Tiles", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
+        ImGui.SameLine();
+        bool cellGrid = renderer.ShowCellGrid;
+        if (ImGui.Checkbox("Cells", ref cellGrid)) renderer.ShowCellGrid = cellGrid;
 
         ImGui.SameLine();
         ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
@@ -376,6 +380,9 @@ public partial class ViewerApp
         ImGui.SameLine();
         bool tileGrid = renderer.ShowTileGrid;
         if (ImGui.Checkbox("Tiles", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
+        ImGui.SameLine();
+        bool cellGrid = renderer.ShowCellGrid;
+        if (ImGui.Checkbox("Cells", ref cellGrid)) renderer.ShowCellGrid = cellGrid;
 
         ImGui.Spacing();
         ImGui.TextDisabled("Overlays");
