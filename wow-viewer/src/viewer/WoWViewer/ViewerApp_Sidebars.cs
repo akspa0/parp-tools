@@ -3362,13 +3362,17 @@ public partial class ViewerApp
             case TopTab.World:
                 DrawWorldSubTabContent();
                 break;
+            case TopTab.Terrain:
+                DrawTerrainSubTabContent();
+                break;
+            case TopTab.Pm4:
+                DrawPm4SubTabContent();
+                break;
             case TopTab.Utilities:
                 DrawUtilitiesSubTabContent();
                 break;
-            case TopTab.Terrain:
-            case TopTab.Pm4:
             case TopTab.Archeology:
-                ImGui.TextDisabled($"{_activeTopTab} sub-tabs wire up in later phases.");
+                DrawArcheologySubTabContent();
                 break;
         }
 
@@ -3376,6 +3380,183 @@ public partial class ViewerApp
     }
 
     // ── Scene sub-tab content ──────────────────────────────────────────────
+    private void DrawTerrainSubTabContent()
+    {
+        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (renderer == null && !HasTerrainOrWorldLoaded())
+        {
+            ImGui.TextDisabled("Load a terrain-backed world to use the Terrain tab.");
+            return;
+        }
+
+        switch ((TerrainBottomTab)_activeBottomTabIndex)
+        {
+            case TerrainBottomTab.Layers:
+                DrawTerrainLayersSubTab(renderer);
+                break;
+            case TerrainBottomTab.Clipboard:
+                DrawTerrainClipboardSubTab(renderer);
+                break;
+            case TerrainBottomTab.Analysis:
+                DrawTerrainAnalysisSubTab();
+                break;
+            case TerrainBottomTab.Mcnk:
+                DrawTerrainMcnkSubTab();
+                break;
+            case TerrainBottomTab.WeakSignal:
+                DrawTerrainWeakSignalSubTab();
+                break;
+            case TerrainBottomTab.Export:
+                DrawTerrainExportSubTab(renderer!);
+                break;
+        }
+    }
+
+    private bool HasTerrainOrWorldLoaded() => _terrainManager != null || _vlmTerrainManager != null || _worldScene != null;
+
+    private void DrawTerrainLayersSubTab(TerrainRenderer? renderer)
+    {
+        if (renderer == null)
+        {
+            ImGui.TextDisabled("Terrain renderer not available.");
+            return;
+        }
+
+        ImGui.Text("Texture Layers");
+        ImGui.Separator();
+        bool l0 = renderer.ShowLayer0;
+        if (ImGui.Checkbox("Base (L0)", ref l0)) renderer.ShowLayer0 = l0;
+        bool l1 = renderer.ShowLayer1;
+        if (ImGui.Checkbox("Alpha L1", ref l1)) renderer.ShowLayer1 = l1;
+        bool l2 = renderer.ShowLayer2;
+        if (ImGui.Checkbox("Alpha L2", ref l2)) renderer.ShowLayer2 = l2;
+        bool l3 = renderer.ShowLayer3;
+        if (ImGui.Checkbox("Alpha L3", ref l3)) renderer.ShowLayer3 = l3;
+
+        ImGui.Separator();
+        ImGui.Text("Surface Overlays");
+        bool alphaMask = renderer.ShowAlphaMask;
+        if (ImGui.Checkbox("Alpha mask", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
+        if (alphaMask)
+        {
+            int channel = renderer.AlphaMaskChannel;
+            if (ImGui.SliderInt("Alpha channel", ref channel, 1, 3)) renderer.AlphaMaskChannel = channel;
+        }
+        bool shadowMap = renderer.ShowShadowMap;
+        if (ImGui.Checkbox("Shadow map", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
+        bool useMccv = renderer.UseMccv;
+        if (ImGui.Checkbox("MCCV vertex colors", ref useMccv)) renderer.UseMccv = useMccv;
+        bool contours = renderer.ShowContours;
+        if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
+        if (contours)
+        {
+            float interval = renderer.ContourInterval;
+            if (ImGui.SliderFloat("Contour interval (units)", ref interval, 0.5f, 10f)) renderer.ContourInterval = interval;
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Grid Lines");
+        bool chunkGrid = renderer.ShowChunkGrid;
+        if (ImGui.Checkbox("Chunks (16x16 half-cell)", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
+        bool tileGrid = renderer.ShowTileGrid;
+        if (ImGui.Checkbox("Tiles (chunk boundary)", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
+        bool cellGrid = renderer.ShowCellGrid;
+        if (ImGui.Checkbox("Cells (8x8 per chunk)", ref cellGrid)) renderer.ShowCellGrid = cellGrid;
+
+        ImGui.Separator();
+        ImGui.Text("Hole Masking");
+        bool terrainHolesEnabled = !(_terrainManager?.IgnoreTerrainHolesGlobally
+            ?? _vlmTerrainManager?.IgnoreTerrainHolesGlobally
+            ?? false);
+        if (ImGui.Checkbox("Enable hole masking", ref terrainHolesEnabled))
+        {
+            if (SetIgnoreTerrainHolesGlobally(!terrainHolesEnabled))
+            {
+                _statusMessage = terrainHolesEnabled
+                    ? "Terrain hole masking enabled."
+                    : "Terrain hole masking disabled.";
+            }
+        }
+    }
+
+    private void DrawTerrainClipboardSubTab(TerrainRenderer? renderer)
+    {
+        if (renderer == null)
+        {
+            ImGui.TextDisabled("Terrain renderer not available for clipboard.");
+            return;
+        }
+        ImGui.TextDisabled("Chunk copy/paste + heightmap save (moved from Chunk Clipboard window).");
+        ImGui.Separator();
+        DrawChunkClipboardContent(renderer);
+    }
+
+    private void DrawTerrainAnalysisSubTab()
+    {
+        DrawTerrainAnalysisWindow();
+    }
+
+    private void DrawTerrainMcnkSubTab()
+    {
+        DrawMcnkExplorerWindow();
+    }
+
+    private void DrawTerrainWeakSignalSubTab()
+    {
+        DrawWeakSignalWindow();
+    }
+
+    // ── PM4 sub-tab content ────────────────────────────────────────────────
+    private void DrawPm4SubTabContent()
+    {
+        if (_worldScene == null)
+        {
+            ImGui.TextDisabled("Load a world to use the PM4 tab.");
+            return;
+        }
+
+        switch ((Pm4BottomTab)_activeBottomTabIndex)
+        {
+            case Pm4BottomTab.Overlay:
+                DrawPm4OverlayWorkbenchContent();
+                break;
+            case Pm4BottomTab.Selection:
+                DrawPm4SelectionWorkbenchContent();
+                break;
+            case Pm4BottomTab.Correlation:
+                DrawPm4WmoCorrelationWindow();
+                break;
+            case Pm4BottomTab.Info:
+                DrawPm4InfoPanelContent();
+                break;
+            case Pm4BottomTab.Match:
+                DrawPm4ObjectMatchWindow();
+                break;
+            case Pm4BottomTab.Alignment:
+                DrawPm4AlignmentWindow();
+                break;
+        }
+    }
+
+    // ── Archeology sub-tab content (Phase 5 placeholder) ───────────────────
+    private void DrawArcheologySubTabContent()
+    {
+        if (_worldScene == null)
+        {
+            ImGui.TextDisabled("Load a world to use the Archeology tab.");
+            return;
+        }
+        switch ((ArcheologyBottomTab)_activeBottomTabIndex)
+        {
+            case ArcheologyBottomTab.Range:
+            case ArcheologyBottomTab.Layers:
+            case ArcheologyBottomTab.Playback:
+            case ArcheologyBottomTab.Capture:
+                DrawUniqueIdArchaeologyContent();
+                break;
+        }
+    }
+
     private void DrawWorldSubTabContent()
     {
         switch ((WorldBottomTab)_activeBottomTabIndex)

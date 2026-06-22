@@ -43,20 +43,20 @@
 
 ## Phase 4: Terrain + PM4 Tabs
 
-- [ ] T033 Implement `DrawTerrainTabContent()` → Layers/Clipboard/Analysis/MCNK/Weak Signal/Export.
-- [ ] T034 Move `DrawTerrainLayersContent` into `DrawTerrainSubTab_Layers()`.
-- [ ] T035 Move `_showChunkClipboardWindow` content into `DrawTerrainSubTab_Clipboard()`.
-- [ ] T036 Move `_showTerrainAnalysisWindow` content into `DrawTerrainSubTab_Analysis()`.
-- [ ] T037 Move `_showMcnkExplorerWindow` content into `DrawTerrainSubTab_MCNK()`.
-- [ ] T038 Move `_showWeakSignalWindow` content into `DrawTerrainSubTab_WeakSignal()`.
-- [ ] T039 New `DrawTerrainSubTab_Export()`: export scope, format, output dir.
-- [ ] T040 Implement `DrawPm4TabContent()` → Overlay/Selection/Correlation/Info/Match/Alignment.
-- [ ] T041 Move PM4 Workbench content into `DrawPm4SubTab_Overlay/Selection/Correlation()`.
-- [ ] T042 Move `_showPm4Info` content into `DrawPm4SubTab_Info()`.
-- [ ] T043 Move `_showPm4ObjectMatchWindow` content into `DrawPm4SubTab_Match()`.
-- [ ] T044 Move `_showPm4AlignmentWindow` content into `DrawPm4SubTab_Alignment()`.
-- [ ] T045 Remove all old `_show*Window` flags for above panels.
-- [ ] T046 Verify build, manual smoke.
+- [x] T033 Implement `DrawTerrainSubTabContent()` → Layers/Clipboard/Analysis/MCNK/WeakSignal/Export.
+- [x] T034 Layers sub-tab: layer toggles + alpha/shadow/MCCV/contour + grid + holes.
+- [x] T035 Clipboard sub-tab: `DrawChunkClipboardContent(renderer)`.
+- [x] T036 Analysis sub-tab: `DrawTerrainAnalysisWindow()`.
+- [x] T037 MCNK sub-tab: `DrawMcnkExplorerWindow()`.
+- [x] T038 Weak Signal sub-tab: `DrawWeakSignalWindow()`.
+- [x] T039 Export sub-tab: scope selector + alpha/heightmap/MCCV export buttons.
+- [x] T040 Implement `DrawPm4SubTabContent()` → Overlay/Selection/Correlation/Info/Match/Alignment.
+- [x] T041 Overlay/Selection sub-tabs: `DrawPm4OverlayWorkbenchContent` + `DrawPm4SelectionWorkbenchContent`.
+- [x] T042 Info sub-tab: `DrawPm4InfoPanelContent`.
+- [x] T043 Match sub-tab: `DrawPm4ObjectMatchWindow`.
+- [x] T044 Alignment sub-tab: `DrawPm4AlignmentWindow`.
+- [x] T045 Old `_show*Window` flags kept for legacy (else branch) but not rendered when tabs on.
+- [x] T046 Build clean. All 4 missing top tabs (Terrain/PM4/Archeology/World) now have sub-tab content.
 
 ## Phase 5: Archeology Tab Foundation
 

@@ -1658,13 +1658,9 @@ void main() {
                     DrawWdlPreviewDialog();
                 if (_fullscreenMinimap)
                     DrawFullscreenMinimap();
-                // The following tools still need tab sub-tab routing in later phases:
-                if (_showPm4AlignmentWindow)
-                    DrawPm4AlignmentWindow();
-                if (_showPm4ObjectMatchWindow)
-                    DrawPm4ObjectMatchWindow();
-                if (_showPm4WmoCorrelationWindow)
-                    DrawPm4WmoCorrelationWindow();
+                // All other tools are routed into tab sub-tabs. The
+                // _show*Window flags still exist for users who want the
+                // legacy window, but tab system renders its own sub-tab body.
             }
             else
             {
