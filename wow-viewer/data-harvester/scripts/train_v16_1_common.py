@@ -1951,31 +1951,6 @@ def _parse_args(task_name: str) -> argparse.Namespace:
     )
     p.add_argument("--run-name", type=str, default=None)
     p.add_argument("--resume-checkpoint", type=Path, default=None)
-    p.add_argument(
-        "--fresh-optimizer",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="When set with --resume-checkpoint, load only model weights; skip optimizer/scheduler/scaler restore and start fresh with --lr.",
-    )
-    p.add_argument(
-        "--scheduler",
-        type=str,
-        default="cosine",
-        choices=["cosine", "warmrestart", "plateau"],
-        help="LR scheduler: cosine (CosineAnnealingLR), warmrestart (CosineAnnealingWarmRestarts T_0=25), plateau (ReduceLROnPlateau patience=5).",
-    )
-    p.add_argument(
-        "--scheduler-warmrestart-period",
-        type=int,
-        default=25,
-        help="Restart period (T_0) for warmrestart scheduler in epochs.",
-    )
-    p.add_argument(
-        "--normal-channels",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Append 2 normal tangent channels (nx, ny) as input guidance.",
-    )
     p.add_argument("--no-augment", action="store_true")
     p.add_argument("--no-amp", action="store_true")
     p.add_argument(
@@ -2190,20 +2165,6 @@ def run_task(task_name: str) -> None:
             if float(args.curation_min_minimap_usefulness) <= 0.0:
                 args.curation_min_minimap_usefulness = 0.10
 
-    resolved_normal_channels = bool(getattr(args, "normal_channels", False))
-    if resolved_normal_channels:
-        if task_name in ("v21", "v21c"):
-            base_ch = 9 if task_name == "v21" else 10
-            total_ch = base_ch + 2
-            task = TaskSpec(
-                task_name,
-                lambda ch=total_ch: V21HeightModel(in_channels=ch),
-                _v21_height_loss,
-                _preview_height,
-            )
-        else:
-            print(f"warning: --normal-channels only supported for v21/v21c tasks (task={task_name}), ignoring")
-
     loader_pressure_profile = _resolve_loader_pressure_profile(
         args,
         task_name=task_name,
@@ -2273,7 +2234,6 @@ def run_task(task_name: str) -> None:
         object_roof_channel=bool(resolved_object_roof_channel),
         v21_height_channel=v21_height_channel_enabled,
         v21_coarse_channel=v21_coarse_channel_enabled,
-        extra_normal_channels=resolved_normal_channels,
         curation_min_terrain_validity=float(args.curation_min_terrain_validity),
         curation_min_minimap_usefulness=float(args.curation_min_minimap_usefulness),
         curation_max_liquid_coverage=float(args.curation_max_liquid_coverage),
@@ -2291,7 +2251,6 @@ def run_task(task_name: str) -> None:
         object_roof_channel=bool(resolved_object_roof_channel),
         v21_height_channel=v21_height_channel_enabled,
         v21_coarse_channel=v21_coarse_channel_enabled,
-        extra_normal_channels=resolved_normal_channels,
         curation_min_terrain_validity=float(args.curation_min_terrain_validity),
         curation_min_minimap_usefulness=float(args.curation_min_minimap_usefulness),
         curation_max_liquid_coverage=float(args.curation_max_liquid_coverage),
@@ -2317,7 +2276,6 @@ def run_task(task_name: str) -> None:
                 object_roof_channel=bool(resolved_object_roof_channel),
                 v21_height_channel=v21_height_channel_enabled,
                 v21_coarse_channel=v21_coarse_channel_enabled,
-                extra_normal_channels=resolved_normal_channels,
                 curation_min_terrain_validity=float(args.curation_min_terrain_validity),
                 curation_min_minimap_usefulness=float(args.curation_min_minimap_usefulness),
                 curation_max_liquid_coverage=float(args.curation_max_liquid_coverage),
@@ -2449,14 +2407,7 @@ def run_task(task_name: str) -> None:
     else:
         compile_status = "disabled"
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler_type = str(getattr(args, "scheduler", "cosine"))
-    if scheduler_type == "warmrestart":
-        T_0 = max(int(getattr(args, "scheduler_warmrestart_period", 25)), 1)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=T_0, T_mult=1)
-    elif scheduler_type == "plateau":
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=5, factor=0.5)
-    else:
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(args.epochs, 1))
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(args.epochs, 1))
     scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda" and not args.no_amp))
     refiner: torch.nn.Module | None = (
         V161NormalRefiner().to(device) if refiner_enabled_for_task else None
@@ -2481,29 +2432,25 @@ def run_task(task_name: str) -> None:
         elif ckpt_has_prefix and not model_has_prefix:
             ckpt_state = {k.removeprefix("_orig_mod."): v for k, v in ckpt_state.items()}
         model.load_state_dict(ckpt_state)
-        if not bool(getattr(args, "fresh_optimizer", False)):
-            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-            if "scheduler_state_dict" in ckpt:
-                scheduler.load_state_dict(ckpt["scheduler_state_dict"])
-                completed_epoch = int(ckpt["epoch"])
-                loaded_t_max = int(getattr(scheduler, "T_max", max(args.epochs, 1)))
-                requested_t_max = max(int(args.epochs), 1)
-                if requested_t_max > loaded_t_max:
-                    scheduler.T_max = requested_t_max
-                    eta_min = float(getattr(scheduler, "eta_min", 0.0))
-                    resumed_lrs = [
-                        eta_min + (base_lr - eta_min) * (1.0 + math.cos(math.pi * completed_epoch / requested_t_max)) / 2.0
-                        for base_lr in scheduler.base_lrs
-                    ]
-                    for param_group, resumed_lr in zip(optimizer.param_groups, resumed_lrs):
-                        param_group["lr"] = float(resumed_lr)
-                    scheduler._last_lr = [float(lr) for lr in resumed_lrs]
-            if "scaler_state_dict" in ckpt:
-                scaler.load_state_dict(ckpt["scaler_state_dict"])
-            start_epoch = int(ckpt["epoch"]) + 1
-        else:
-            print(f"        fresh_optimizer | loaded model weights only; fresh optimizer at lr={args.lr}", flush=True)
-            start_epoch = 1
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        if "scheduler_state_dict" in ckpt:
+            scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+            completed_epoch = int(ckpt["epoch"])
+            loaded_t_max = int(getattr(scheduler, "T_max", max(args.epochs, 1)))
+            requested_t_max = max(int(args.epochs), 1)
+            if requested_t_max > loaded_t_max:
+                scheduler.T_max = requested_t_max
+                eta_min = float(getattr(scheduler, "eta_min", 0.0))
+                resumed_lrs = [
+                    eta_min + (base_lr - eta_min) * (1.0 + math.cos(math.pi * completed_epoch / requested_t_max)) / 2.0
+                    for base_lr in scheduler.base_lrs
+                ]
+                for param_group, resumed_lr in zip(optimizer.param_groups, resumed_lrs):
+                    param_group["lr"] = float(resumed_lr)
+                scheduler._last_lr = [float(lr) for lr in resumed_lrs]
+        if "scaler_state_dict" in ckpt:
+            scaler.load_state_dict(ckpt["scaler_state_dict"])
+        start_epoch = int(ckpt["epoch"]) + 1
         best_val = float(ckpt.get("best_val", float("inf")))
         best_epoch = int(ckpt["best_epoch"]) if ckpt.get("best_epoch") is not None else None
         non_best_val_epochs = int(ckpt.get("non_best_val_epochs", 0) or 0)
@@ -2786,7 +2733,7 @@ def run_task(task_name: str) -> None:
             train_loss_sum += float(loss.item())
             for key, value in metrics.items():
                 metric_sums[key] = metric_sums.get(key, 0.0) + float(value)
-        if optimizer_steps > 0 and scheduler_type != "plateau":
+        if optimizer_steps > 0:
             scheduler.step()
 
         n_train = max(len(train_loader), 1)
@@ -2984,9 +2931,6 @@ def run_task(task_name: str) -> None:
                 and args.val_preview_interval > 0
             ):
                 task.save_preview(preview_batch, preview_outputs, val_dir / f"best_epoch_{epoch:04d}.png")
-
-        if scheduler_type == "plateau":
-            scheduler.step(entry["val_loss"])
 
         log_entries.append(entry)
         last_completed_epoch = int(epoch)
