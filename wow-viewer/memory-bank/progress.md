@@ -1,5 +1,29 @@
 # Progress — wow-viewer
 
+## 2026-06-22 — Spec 071 Phase H: Memory bank + spec sync + final build (complete)
+
+### What landed
+
+- Updated `specs/071-left-right-sidebar-split/spec.md` to match implementation: `WorkbenchTab.Model`, typed `OpenWorkbenchTab` overloads, timeline slider in scope, LOD placeholder out-of-scope note removed.
+- Updated `memory-bank/activeContext.md` and `memory-bank/progress.md` with full 8-phase history and current state.
+- Final `dotnet build src/viewer/WoWViewer/WoWViewer.csproj -c Debug`: 0 errors, 286 pre-existing warnings.
+- Commit `TBD` pushed to `071-left-right-sidebar-split`.
+
+### Status
+
+Spec 071 complete. Branch `071-left-right-sidebar-split` contains all 8 phases A-H and is ready for merge or follow-up work.
+
+## 2026-06-22 — Spec 071 Phase G: Model Viewer Actions + LOD + selected-object wiring (complete)
+
+### What landed
+
+- Split model info into `DrawModelInfoCoreContent` (info + visibility) and `DrawModelInfoContent` (core + legacy action controls for other callers).
+- Model > Info sub-tab now calls `DrawModelInfoCoreContent`; Model > Actions sub-tab has Auto-frame toggle, Frame Model button, and WMO doodad set selector.
+- Model > LOD sub-tab is a best-effort placeholder pointing users to Tools > Render Quality and showing renderer/animation sequence counts.
+- Selecting an MDX/WMO object in the world auto-switches the workbench to Model > Info and displays the selected object summary there.
+- Build: 0 errors.
+- Commit `56792e44` pushed to `071-left-right-sidebar-split`.
+
 ## 2026-06-22 — Spec 071 Phase F: Model Viewer Animations sub-tab (complete)
 
 ### What landed
@@ -11,10 +35,6 @@
 - Removed animation controls from Info sub-tab.
 - Build: 0 errors.
 - Commit `749ffea7` pushed to `071-left-right-sidebar-split`.
-
-### Next
-
-- Phase G: Model Viewer Actions + LOD sub-tabs, and selected-object → Model tab wiring.
 
 ## 2026-06-22 — Spec 071 Phase E: Model Viewer Info sub-tab (complete)
 

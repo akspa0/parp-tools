@@ -47,7 +47,7 @@
 - **Actions**: Frame Model, Auto-frame toggle, WMO doodad set selector (if WMO)
 - **LOD**: level-of-detail controls (if available)
 
-**Acceptance**: New `ModelViewerTopTab` in workbench. Reuses `DrawModelInfoContent` + `DrawSelectedSqlGameObjectAnimationControls` + MdxRenderer/M2Renderer.Animation APIs.
+**Acceptance**: `WorkbenchTab.Model` top tab with `ModelBottomTab` sub-tabs (Info/Animations/Actions/LOD). Reuses `DrawModelInfoContent` + `DrawSelectedSqlGameObjectAnimationControls` + MdxRenderer/M2Renderer.Animation APIs.
 
 ### US4 — All popups are tabs (P1)
 **Given** user clicks any menu item that previously opened a floating window (Log Viewer, Perf, Render Quality, Capture Automation, Taxi, Asset Catalog),
@@ -82,11 +82,11 @@
 - 3D viewport calculation excludes this width too
 
 ### FR-003: Model Viewer mode
-- New `TopTab.Model` (or sub-tab under Model top tab)
-- Sub-tabs: Info / Animations / Actions / LOD
-- Animations sub-tab reuses `DrawSelectedSqlGameObjectAnimationControls` + adds explicit Play/Pause/Stop buttons + frame slider
+- New `WorkbenchTab.Model` top tab
+- Sub-tabs: Info / Animations / Actions / LOD via `ModelBottomTab`
+- Animations sub-tab reuses `DrawSelectedSqlGameObjectAnimationControls` + adds explicit Play/Pause/Stop buttons + frame slider + loop checkbox + speed buttons (0.25x/0.5x/1x/2x)
 - Model currently loaded = `_renderer` (MdxRenderer or WmoRenderer or M2Renderer)
-- Selected model = `_selectedObject` (when user clicks object in world)
+- Selected world model = `_worldScene.SelectedInstance` (MDX/WMO); selecting one auto-switches to Model > Info
 
 ### FR-004: Three top tabs (Model / World / Tools)
 - Replace `TopTab` enum with 3 values: Model, World, Tools
@@ -94,8 +94,8 @@
 - Sub-tab sets are exhaustive: all current Tools menu items become Tools sub-tabs
 
 ### FR-005: Tools menu integration
-- `Tools > Log Viewer` → `OpenWorkbenchTab(WorkbenchTab.Log)` (no _show*Window)
-- Same for Perf, Render Quality, Capture Automation, Taxi, Asset Catalog, etc
+- `Tools > Log Viewer` → `OpenWorkbenchTab(ToolsBottomTab.Utilities)` with `UtilitiesBottomTab.Log` sub-tab (no _show*Window)
+- Same for Perf, Render Quality, Capture Automation, Taxi, Asset Catalog, etc., using typed `OpenWorkbenchTab` overloads
 - Legacy `_show*Window` flags preserved for users who toggle View > Legacy Windows
 
 ### FR-006: Per-tab persistence
@@ -105,8 +105,8 @@
 ## Out of Scope
 
 - Per-workbench native windows (deferred to 070)
-- Model viewer LOD details (basic only for v1)
-- Per-frame animation scrubbing (step buttons, not timeline)
+- Model viewer LOD details (basic placeholder only for v1)
+- Native per-workbench windows (deferred to 070)
 
 ## Success Criteria
 

@@ -32,7 +32,11 @@ Viewer UI in flux. 069 (tab system) hit 16 phases. User feedback on 069:
 
 **Phase F (done)**: Extracted animation controls from Info into new `DrawModelAnimationControls` method used by Model > Animations sub-tab. Added `PlaybackSpeed` and `Loop` to `IAnimationController`, implemented in `MdxAnimator` and `M2RuntimeAnimator`. Animations tab now has sequence combo, large Play/Pause/Stop buttons, Previous/Next Key, Loop checkbox, speed buttons (0.25x/0.5x/1x/2x), timeline slider, and debug tree. SQL GameObject animation controls reused at the bottom when a SQL-spawned MDX object is selected.
 
-**Next**: Phase G — Model Viewer Actions + LOD sub-tabs, plus selected-object → Model tab wiring.
+**Phase G (done)**: Split Info/Actions content. Added `DrawModelInfoCoreContent` for pure info; `DrawModelInfoContent` keeps full legacy behavior for other callers. Model > Actions sub-tab has Auto-frame toggle, Frame Model button, and WMO doodad set selector. Model > LOD sub-tab shows placeholder guidance and renderer stats. Selecting an MDX/WMO object in the world now auto-switches to Model > Info and displays `_selectedObjectInfo` there.
+
+**Phase H (done)**: Updated `spec.md` to reflect actual implementation (`WorkbenchTab.Model`, typed `OpenWorkbenchTab` overloads, timeline slider in scope, LOD placeholder). Updated `activeContext.md` and `progress.md` with full 8-phase history. Final build clean, all commits pushed to `071-left-right-sidebar-split`.
+
+**Status**: Spec 071 complete. Branch `071-left-right-sidebar-split` ready for merge or next work.
 
 **Cut branch:** `071-left-right-sidebar-split` from `069-viewer-ui-overhaul`.
 

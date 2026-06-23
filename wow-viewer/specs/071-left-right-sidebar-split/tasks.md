@@ -54,10 +54,10 @@
 
 ## Phase H: Memory bank + spec sync
 
-- [ ] T032 Update `memory-bank/activeContext.md` for Phase A-G completion.
-- [ ] T033 Update `memory-bank/progress.md` with 8-phase history.
-- [ ] T034 Update `specs/071-left-right-sidebar-split/spec.md` if any design changes during build.
-- [ ] T035 Final build + commit.
+- [x] T032 Update `memory-bank/activeContext.md` for Phase A-G completion.
+- [x] T033 Update `memory-bank/progress.md` with 8-phase history.
+- [x] T034 Update `specs/071-left-right-sidebar-split/spec.md` if any design changes during build.
+- [x] T035 Final build + commit.
 
 ## Build State
 
