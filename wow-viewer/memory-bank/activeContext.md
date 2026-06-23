@@ -37,6 +37,8 @@ End-to-end height regression from minimap was not converging despite identical c
 - Rectangle-page detection landed: `detect_rectangle_pages()` finds solid axis-aligned rectangular alpha pages (extent >= 0.85). Full Azeroth 0.5.3 produced 72 rectangle_page regions.
 - Single-map runs are smoke/proof shortcuts; real validation must run `--maps all` across every map present in each build index.
 - Contact-sheet visualizer `visualize_fractal_raw_patterns.py` renders repeated exact-pattern pages (200 patterns / 5 pages proven).
+- Near-duplicate cluster contact-sheet visualizer added: `scripts/visualize_fractal_near_patterns.py`; rendered 100 repeated clusters across 10 pages for full Azeroth 0.5.3.
+- Analyzer now writes a top-level `index.html` summarizing every processed target and linking per-map overlays plus cross-map dedupe/near catalogs.
 - No canonical decoded terrain tileset/BLP fingerprint dataset exists yet under `data-harvester` or `wow-viewer/output`; BLP source matching remains a bounded follow-up.
 - Known gap: rectangle-page thresholds need visual review; some detected rectangles may be roads/rivers rather than authored paste pages.
 - Training remains blocked until near-duplicate cluster review and rectangle-page tuning produce usable brush families and Phase 5 model targets are approved.

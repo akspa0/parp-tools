@@ -413,6 +413,14 @@ pages: 10
 
 Each row shows the representative/members of one near-duplicate cluster. Border colors indicate the alpha layer index.
 
+After any analyzer run, open the top-level index for a cross-map summary:
+
+```text
+<output-root>/index.html
+```
+
+The index links per-map canvases, overlays, exact-pattern and near-cluster Parquet catalogs, and contact-sheet pages.
+
 ## Phase 3 Smoke
 
 Run from `wow-viewer/data-harvester/` after the Phase 2 smoke:

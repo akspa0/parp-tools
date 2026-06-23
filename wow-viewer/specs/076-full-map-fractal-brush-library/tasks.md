@@ -90,6 +90,7 @@
 - [x] T042 [US2] Add a contact-sheet visualizer for near-duplicate clusters with the representative crop and up to N member examples.
 - [ ] T043 [US2] Tune near-dedupe thumbnail size and Hamming radius against human review of cluster quality across all maps.
 - [x] T044 [US2] Add rectangle/canvas-page boundary detection to separate obvious authored paste areas from connected alpha islands.
+- [x] T046 [US2] Add a top-level HTML index (`index.html`) for --maps all runs, linking per-map canvases, overlays, and cross-map dedupe/near catalogs.
 - [ ] T045 [US2] Validate rectangle-page thresholds against full-map overlays and contact sheets across all maps; tune min_area, min_extent, and max_aspect_ratio.
 
 **Checkpoint**: Every map in each selected build index can be analyzed in strips and produces global-canvas region metadata; exact dedupe is replaced/augmented by near-dedupe before model target selection.

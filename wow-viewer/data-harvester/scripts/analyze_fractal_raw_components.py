@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import sys
 from collections import Counter
@@ -235,6 +236,9 @@ def main() -> None:
     if bool(args.visualize_near):
         _run_near_visualizer(out_root, args)
 
+    if target_summaries:
+        _write_analysis_index(out_root, summary)
+
 
 def _run_visualizer(out_root: Path, args: argparse.Namespace) -> None:
     import subprocess
@@ -280,6 +284,67 @@ def _run_near_visualizer(out_root: Path, args: argparse.Namespace) -> None:
         cmd.append("--repeated-only")
     print("Rendering near-duplicate cluster contact sheets...", flush=True)
     subprocess.run(cmd, check=True)
+
+
+def _write_analysis_index(out_root: Path, summary: dict[str, Any]) -> None:
+    """Write a human-readable HTML index for an --maps all analysis run."""
+    targets = summary.get("targets", [])
+    dedupe = summary.get("dedupe", {})
+    near = summary.get("near_dedupe") or {}
+    rows: list[str] = [
+        "<!doctype html><html><head><meta charset='utf-8'><title>076 Raw Analysis Index</title></head><body>",
+        "<h1>Spec 076 Full-Map Raw Component Analysis</h1>",
+        f"<p>Output root: <code>{html.escape(str(out_root))}</code></p>",
+        "<h2>Cross-Map Summary</h2><ul>",
+        f"<li>Targets processed: {int(summary.get('target_count', 0))}</li>",
+        f"<li>Raw components: {int(dedupe.get('raw_component_count', 0))}</li>",
+        f"<li>Exact patterns: {int(dedupe.get('exact_pattern_count', 0))}</li>",
+        f"<li>Exact duplicates: {int(dedupe.get('duplicate_pattern_count', 0))}</li>",
+    ]
+    if near:
+        rows.extend(
+            [
+                f"<li>Near clusters: {int(near.get('cluster_count', 0))}</li>",
+                f"<li>Near duplicate clusters: {int(near.get('duplicate_cluster_count', 0))}</li>",
+                f"<li>Near max cluster size: {int(near.get('max_cluster_size', 0))}</li>",
+            ]
+        )
+    rows.append("</ul>")
+
+    rows.append("<h2>Catalogs</h2><ul>")
+    rows.append(f"<li><a href='{html.escape(str(out_root / 'dedupe' / 'exact_patterns.parquet'))}'>exact_patterns.parquet</a></li>")
+    if near:
+        rows.append(f"<li><a href='{html.escape(str(out_root / 'dedupe' / 'near' / 'near_patterns.parquet'))}'>near_patterns.parquet</a></li>")
+    if (out_root / "contact_sheets").exists():
+        rows.append("<li><a href='contact_sheets/index.html'>Exact-pattern contact sheets</a></li>")
+    if (out_root / "contact_sheets_near").exists():
+        rows.append("<li><a href='contact_sheets_near/index.html'>Near-duplicate cluster contact sheets</a></li>")
+    rows.append("</ul>")
+
+    rows.append("<h2>Per-Map Artifacts</h2><table border='1' cellpadding='6'>")
+    rows.append("<tr><th>Build</th><th>Map</th><th>Tiles</th><th>Regions</th><th>Curation counts</th><th>Canvas</th><th>Overlays</th></tr>")
+    for target in targets:
+        build = html.escape(str(target.get("build", "")))
+        map_name = html.escape(str(target.get("map", "")))
+        tile_count = int(target.get("tile_count", 0))
+        region_count = int(target.get("region_count", 0))
+        curation_counts = html.escape(json.dumps(target.get("curation_counts", {}), sort_keys=True))
+        canvas_dir = Path(str(target.get("canvas_dir", "")))
+        segments_dir = Path(str(target.get("segments_dir", "")))
+        overlay_dir = segments_dir / "overlays"
+        links: list[str] = []
+        if overlay_dir.exists():
+            for png in sorted(overlay_dir.glob("*.png")):
+                rel = html.escape(str(png.relative_to(out_root).as_posix()))
+                links.append(f"<a href='{rel}'>{html.escape(png.name)}</a>")
+        rows.append(
+            f"<tr><td>{build}</td><td>{map_name}</td><td>{tile_count}</td><td>{region_count}</td>"
+            f"<td>{curation_counts}</td><td><code>{html.escape(str(canvas_dir))}</code></td>"
+            f"<td>{'<br>'.join(links)}</td></tr>"
+        )
+    rows.append("</table></body></html>")
+
+    (out_root / "index.html").write_text("\n".join(rows), encoding="utf-8")
 
 
 def process_map_in_strips(
