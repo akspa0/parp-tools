@@ -58,12 +58,13 @@
 
 ### Raw two-build analysis runner
 
-- Added `src/harvester/fractal_raw_analysis.py`, `scripts/analyze_fractal_raw_components.py`, and `scripts/visualize_fractal_raw_patterns.py`.
+- Added `src/harvester/fractal_raw_analysis.py`, `src/harvester/fractal_near_dedupe.py`, `scripts/analyze_fractal_raw_components.py`, and `scripts/visualize_fractal_raw_patterns.py`.
 - The runner processes each build/map sequentially, writes per-target `canvas/` and `segments_raw/`, then writes cross-target exact dedupe under `dedupe/`. It supports `--maps all`.
 - Validated two-build Azeroth run: 7,317 raw components, 3,957 exact patterns, 233 duplicate patterns under `two_build_test1`.
 - Footprint correction to 8x8 alpha pixels: 2,025 raw components, 2,002 exact patterns, 17 duplicates under `two_build_test2`.
-- Full-map strip processing: `--tile-limit 0` loads every tile, writes tile-chunked Zarr canvas, segments horizontal strips, offsets bboxes to global coords, dedupes strip overlaps. Full Azeroth 0.5.3 (622 tiles) produced 12,906 raw components, 12,163 exact patterns, 566 exact duplicates under `full_map_smoke`.
-- Added `tests/test_analyze_fractal_raw_components.py`; pytest passes.
+- Full-map strip processing: `--tile-limit 0` loads every tile, writes tile-chunked Zarr canvas, segments horizontal strips, offsets bboxes to global coords, dedupes strip overlaps. Full Azeroth 0.5.3 (622 tiles) produced 12,906 raw components, 12,163 exact patterns, 566 exact duplicates under `full_map_Azeroth_0_5_3_3368`.
+- Near-duplicate clustering: groups raw components by translation/mirror/rotation-invariant normalized binary thumbnails. Full Azeroth 0.5.3 collapsed to 11,976 clusters (668 duplicate clusters, max size 40) with a 16x16 thumbnail and radius 0.
+- Added `tests/test_analyze_fractal_raw_components.py` and `tests/test_fractal_near_dedupe.py`; pytest passes.
 - Contact-sheet visualizer renders repeated exact-pattern pages from the dedupe catalog (200 patterns / 5 pages proven).
 - Use these for broad inspection; they still detect connected alpha/fractal components, not obvious rectangular paste/canvas-page boundaries.
 
@@ -86,7 +87,7 @@
 
 ### Next
 
-- Implement near-duplicate clustering for raw components; exact alpha-shape dedupe is too brittle (only ~4% duplicates on full Azeroth 0.5.3).
+- Add a contact-sheet visualizer for near-duplicate clusters so cluster quality can be reviewed.
 - Implement rectangle/canvas-page boundary detection; the current raw/curated segmenters still detect connected alpha/fractal components, not obvious pasted rectangular authoring pages.
 
 ## 2026-06-23 — Spec 075 V21 scar-mask segmentation Phase 1 complete

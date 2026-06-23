@@ -188,7 +188,7 @@ def classify_region(
 
 
 def save_regions(path: str | Path, regions: list[FractalRegion]) -> None:
-    rows = [_json_ready(asdict(region)) for region in regions]
+    rows = [_region_to_parquet_row(region) for region in regions]
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(pa.Table.from_pylist(rows), output_path)
@@ -200,6 +200,14 @@ def save_regions_jsonl(path: str | Path, regions: list[FractalRegion]) -> None:
     with output_path.open("w", encoding="utf-8") as handle:
         for region in regions:
             handle.write(json.dumps(_json_ready(asdict(region)), sort_keys=True) + "\n")
+
+
+def _region_to_parquet_row(region: FractalRegion) -> dict[str, Any]:
+    row = _json_ready(asdict(region))
+    provenance = row.get("provenance")
+    if isinstance(provenance, dict):
+        row["provenance"] = json.dumps(provenance, sort_keys=True) if provenance else None
+    return row
 
 
 def render_region_overlay(

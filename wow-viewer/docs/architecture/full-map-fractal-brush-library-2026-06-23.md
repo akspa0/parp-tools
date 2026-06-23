@@ -63,7 +63,7 @@ A valid terrain-art primitive is not an alpha mask alone. It is a coupled reusab
 
 - Phase 1 strict-gate Azeroth smoke: `0_5_3_3368`, 16-tile row window, alpha `(256,4096,4)`, height `(257,4097)`, MCLY `(16,256,4)`.
 - Phase 1 full-map strip smoke: `0_5_3_3368` Azeroth (622 tiles), processed in horizontal strips of 8 ADT tiles with 1-tile overlap; full chunked canvas written to `wow-viewer/output/analysis/full-map-fractal-brush-library/full_map_smoke/0_5_3_3368_Azeroth_tilefull/canvas.zarr`.
-- Phase 2 full-map strip smoke: 12,906 raw components on full Azeroth 0.5.3; exact dedupe produced 12,163 unique patterns and 566 duplicates. Exact matching is too brittle, so near-duplicate clustering is required before brush family definition.
+- Phase 2 full-map strip smoke: 12,906 raw components on full Azeroth 0.5.3; exact dedupe produced 12,163 unique patterns and 566 duplicates. Near-duplicate clustering (translation/mirror/rotation-invariant normalized thumbnails, size 16, radius 0) reduced this to 11,976 clusters with 668 duplicate clusters and a max cluster size of 40. Exact matching is too brittle; near-duplicate clustering is required before brush family definition.
 - Phase 2 strict-gate smoke: 961 regions, with 11 accepted candidates, 24 fractal members, 1 composite chonker, 2 one-off details, and 923 too-small rows. The too-small rows are preserved for review but excluded from default atomic samples.
 - Phase 3 strict-gate smoke: 35 trainable default atomic samples, 926 rejected/review rows, split counts `train=26`, `val=8`, `test=1`; loader read 32 samples with no rejected labels.
 - Phase 3 output: `wow-viewer/output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/`.
@@ -74,6 +74,7 @@ A valid terrain-art primitive is not an alpha mask alone. It is a coupled reusab
 - Tiny connected components inside or near composite regions should not automatically become accepted atomic samples.
 - Default atomic samples currently require at least an `8x8` alpha-pixel footprint, the smallest authoring block size for the data we care about.
 - Exact alpha-shape dedupe is too strict; most repeated motifs are near-duplicates (translated, mirrored, or slightly varied), not pixel-identical bitmaps.
+- Near-duplicate clustering uses translation/mirror/rotation-invariant normalized binary thumbnails to group raw components into candidate brush families.
 
 ## Training Rule
 

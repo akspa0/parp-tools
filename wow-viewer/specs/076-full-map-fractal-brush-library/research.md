@@ -55,6 +55,5 @@ Use existing BLP decode/tooling surfaces only. Do not rewrite BLP readers.
 - `--tile-limit 0` loads every tile for a map and processes the map in horizontal strips of configurable ADT-tile width/overlap.
 - Exact dedupe hashes thresholded alpha crops by shape and bitmap. It is intentionally strict.
 - Full-map Azeroth 0.5.3 produced 12,906 raw components, 12,163 exact patterns, and only 566 exact duplicates. Exact matching is therefore too brittle; most repeated motifs are near-duplicates (translated, mirrored, or slightly varied), not pixel-identical bitmaps.
+- Near-duplicate clustering groups raw components by translation/mirror/rotation-invariant normalized binary thumbnails. With a 16x16 thumbnail and radius 0, full Azeroth 0.5.3 collapsed to 11,976 clusters (668 duplicate clusters, max size 40).
 - The missing next concept is a rectangle/canvas-page detector that finds obvious authored paste/page boundaries separately from connected alpha islands.
-
-

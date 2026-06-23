@@ -86,7 +86,10 @@
 - [x] T038 [US1/US2] Implement horizontal strip segmentation in `analyze_fractal_raw_components.py` with configurable strip width and overlap, translating strip-local bboxes back to global canvas coordinates.
 - [x] T039 [US1/US2] Add strip-overlap region deduplication by bounding-box IoU.
 - [x] T040 [P] Add unit tests for strip processing, bbox offset, and overlap dedupe.
-- [ ] T041 [US2] Implement near-duplicate clustering (translation/rotation/mirror invariant) after exact dedupe, because exact matching is too brittle (only ~566 duplicates out of 12,906 raw components on full Azeroth 0.5.3).
+- [x] T041 [US2] Implement near-duplicate clustering (translation/rotation/mirror invariant) after exact dedupe, because exact matching is too brittle (only ~566 duplicates out of 12,906 raw components on full Azeroth 0.5.3).
+- [ ] T042 [US2] Add a contact-sheet visualizer for near-duplicate clusters with the representative crop and up to N member examples.
+- [ ] T043 [US2] Tune near-dedupe thumbnail size and Hamming radius against human review of cluster quality.
+- [ ] T044 [US2] Add rectangle/canvas-page boundary detection to separate obvious authored paste areas from connected alpha islands.
 
 **Checkpoint**: A full map can be analyzed in strips and produces global-canvas region metadata; exact dedupe is replaced/augmented by near-dedupe before model target selection.
 

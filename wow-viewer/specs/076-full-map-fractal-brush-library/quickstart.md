@@ -275,6 +275,49 @@ This is equivalent to running `analyze_fractal_raw_components.py` followed by `v
 <output-root>/contact_sheets/
 ```
 
+## Near-Duplicate Clustering
+
+Exact alpha-shape dedupe is too brittle. The analyzer can also group raw components by translation/mirror/rotation-invariant normalized binary thumbnails:
+
+```powershell
+uv run python scripts/analyze_fractal_raw_components.py `
+  --builds 0_5_3_3368 `
+  --maps Azeroth `
+  --tile-limit 0 `
+  --strip-tiles 8 `
+  --strip-overlap-alpha-tiles 1 `
+  --threshold 0.05 `
+  --min-area 64 `
+  --min-footprint-px 8 `
+  --max-regions-per-layer 5000 `
+  --output-root ../output/analysis/full-map-fractal-brush-library/full_map_Azeroth_0_5_3_3368 `
+  --no-overlay `
+  --near-dedupe `
+  --near-dedupe-size 16 `
+  --near-dedupe-radius 0
+```
+
+Validated local run (full Azeroth 0.5.3, thumbnail size 16, radius 0):
+
+```text
+raw_components: 12906
+exact_patterns: 12163
+exact_duplicates: 566
+near_clusters: 11976
+near_duplicate_clusters: 668
+near_max_cluster_size: 40
+```
+
+Key artifacts:
+
+```text
+<output-root>/dedupe/near/near_patterns.parquet
+<output-root>/dedupe/near/near_pattern_members.parquet
+<output-root>/dedupe/near/near_summary.json
+```
+
+Use `--near-dedupe-radius 1` to allow small thumbnail bit differences (slower, more clusters).
+
 ## Visualizing Raw Exact Patterns Separately
 
 If you already ran analysis, render contact sheets with:

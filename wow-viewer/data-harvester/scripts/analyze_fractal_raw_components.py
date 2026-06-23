@@ -33,6 +33,10 @@ from harvester.fractal_canvas import (  # noqa: E402
     write_debug_overlay,
     write_tile_to_canvas,
 )
+from harvester.fractal_near_dedupe import (  # noqa: E402
+    cluster_near_duplicates,
+    write_near_dedupe_outputs,
+)
 from harvester.fractal_raw_analysis import (  # noqa: E402
     fingerprint_raw_regions,
     write_raw_dedupe_outputs,
@@ -70,6 +74,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-patterns", type=int, default=200)
     parser.add_argument("--max-per-pattern", type=int, default=6)
     parser.add_argument("--repeated-only", action="store_true")
+    parser.add_argument("--near-dedupe", action="store_true", help="Run translation/mirror/rotation-invariant near-duplicate clustering after exact dedupe.")
+    parser.add_argument("--near-dedupe-size", type=int, default=32, help="Normalized thumbnail edge length for near-dedupe.")
+    parser.add_argument("--near-dedupe-radius", type=int, default=0, help="Hamming-radius for thumbnail matching (0 = exact invariant match).")
     return parser.parse_args()
 
 
@@ -166,10 +173,29 @@ def main() -> None:
             print(f"  regions={len(regions)}", flush=True)
 
     dedupe_summary = write_raw_dedupe_outputs(out_root / "dedupe", all_fingerprints)
+    near_summary: dict[str, Any] | None = None
+    if bool(args.near_dedupe):
+        print("Running near-duplicate clustering...", flush=True)
+        near_clusters = cluster_near_duplicates(
+            all_fingerprints,
+            canvas,
+            threshold=float(args.threshold),
+            size=int(args.near_dedupe_size),
+            radius=int(args.near_dedupe_radius),
+        )
+        near_summary = write_near_dedupe_outputs(out_root / "dedupe" / "near", near_clusters)
+        print(
+            f"  near_clusters: {near_summary['cluster_count']} "
+            f"dupe_clusters: {near_summary['duplicate_cluster_count']} "
+            f"max_size: {near_summary['max_cluster_size']}",
+            flush=True,
+        )
+
     summary = {
         "target_count": int(len(target_summaries)),
         "targets": target_summaries,
         "dedupe": dedupe_summary,
+        "near_dedupe": near_summary,
     }
     (out_root / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     print("Raw two-build analysis complete", flush=True)
