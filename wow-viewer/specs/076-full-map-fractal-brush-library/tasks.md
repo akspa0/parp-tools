@@ -89,7 +89,8 @@
 - [x] T041 [US2] Implement near-duplicate clustering (translation/rotation/mirror invariant) after exact dedupe, because exact matching is too brittle (only ~566 duplicates out of 12,906 raw components on full Azeroth 0.5.3).
 - [ ] T042 [US2] Add a contact-sheet visualizer for near-duplicate clusters with the representative crop and up to N member examples.
 - [ ] T043 [US2] Tune near-dedupe thumbnail size and Hamming radius against human review of cluster quality.
-- [ ] T044 [US2] Add rectangle/canvas-page boundary detection to separate obvious authored paste areas from connected alpha islands.
+- [x] T044 [US2] Add rectangle/canvas-page boundary detection to separate obvious authored paste areas from connected alpha islands.
+- [ ] T045 [US2] Validate rectangle-page thresholds against full-map overlays and contact sheets; tune min_area, min_extent, and max_aspect_ratio.
 
 **Checkpoint**: A full map can be analyzed in strips and produces global-canvas region metadata; exact dedupe is replaced/augmented by near-dedupe before model target selection.
 

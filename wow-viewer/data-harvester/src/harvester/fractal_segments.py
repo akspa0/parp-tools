@@ -151,6 +151,102 @@ def segment_canvas_regions(
     return regions
 
 
+def detect_rectangle_pages(
+    canvas: zarr.Group,
+    *,
+    threshold: float = 0.05,
+    min_area: int = 256,
+    min_extent: float = 0.85,
+    max_aspect_ratio: float = 8.0,
+    max_regions_per_layer: int | None = 1000,
+) -> list[FractalRegion]:
+    """Detect axis-aligned rectangular alpha pages independently of fractal segmentation.
+
+    A rectangle page is an authored paste/boundary region whose binary alpha mask
+    fills its bounding box almost completely. These are detected as separate regions
+    because connected-component segmentation can split a page into many internal
+    brush strokes.
+    """
+    alpha = canvas["alpha_256"][:].astype(np.float32)
+    tile_id_256 = canvas["tile_id_256"][:].astype(np.int32)
+    height = canvas["height_257"][:].astype(np.float32) if "height_257" in canvas else None
+    normals = canvas["normal_xyz"][:].astype(np.float32) if "normal_xyz" in canvas else None
+    mcly_ids = canvas["mcly_texture_ids"][:].astype(np.int32) if "mcly_texture_ids" in canvas else None
+    mcly_mask = canvas["mcly_layer_mask"][:].astype(np.float32) if "mcly_layer_mask" in canvas else None
+    layer_indices = canvas["alpha_layer_indices"][:].astype(np.int32).tolist() if "alpha_layer_indices" in canvas else list(range(alpha.shape[2]))
+    layout = dict(canvas.attrs.get("layout", {}))
+    build = str(layout.get("build", ""))
+    map_name = str(layout.get("map_name", ""))
+
+    regions: list[FractalRegion] = []
+    for layer_slot in range(alpha.shape[2]):
+        layer_idx = int(layer_indices[layer_slot]) if layer_slot < len(layer_indices) else int(layer_slot)
+        binary = alpha[:, :, layer_slot] > float(threshold)
+        labeled, count = label(binary, structure=np.ones((3, 3), dtype=np.uint8))
+        if count == 0:
+            continue
+        areas = nd_sum(binary, labeled, range(1, count + 1))
+        objects = find_objects(labeled)
+        candidates: list[tuple[int, int, tuple[slice, slice]]] = []
+        for label_idx, raw_area in enumerate(areas, start=1):
+            area = int(raw_area)
+            if area < int(min_area):
+                continue
+            bounds = objects[label_idx - 1]
+            if bounds is None:
+                continue
+            candidates.append((label_idx, area, bounds))
+        candidates.sort(key=lambda item: item[1], reverse=True)
+        if max_regions_per_layer is not None:
+            candidates = candidates[: max(0, int(max_regions_per_layer))]
+        for label_idx, area, (slice_y, slice_x) in candidates:
+            x0, x1 = int(slice_x.start), int(slice_x.stop)
+            y0, y1 = int(slice_y.start), int(slice_y.stop)
+            width = x1 - x0
+            height_box = y1 - y0
+            bbox_area = max(1, width * height_box)
+            extent = float(area) / float(bbox_area)
+            if extent < float(min_extent):
+                continue
+            aspect = max(width, height_box) / max(1, min(width, height_box))
+            if aspect > float(max_aspect_ratio):
+                continue
+            bbox = (x0, y0, width, height_box)
+            region_mask = labeled[y0:y1, x0:x1] == label_idx
+            alpha_crop = alpha[y0:y1, x0:x1, layer_slot]
+            tile_coverage = _tile_coverage(tile_id_256[y0:y1, x0:x1], region_mask)
+            height_stats = _height_stats(height, bbox) if height is not None else (None, None, None)
+            normal_mean = _normal_mean(normals, bbox) if normals is not None else None
+            texture_ids, active_layers = _mcly_summary(mcly_ids, mcly_mask, bbox)
+            region_id = _region_id(build, map_name, layer_idx, bbox, area)
+            regions.append(
+                FractalRegion(
+                    region_id=region_id,
+                    build=build,
+                    map_name=map_name,
+                    layer_slot=int(layer_slot),
+                    layer_idx=layer_idx,
+                    bbox_xywh=bbox,
+                    area=area,
+                    tile_coverage_count=len(tile_coverage),
+                    tile_coverage=tile_coverage,
+                    alpha_mean=float(alpha_crop[region_mask].mean()) if region_mask.any() else 0.0,
+                    alpha_max=float(alpha_crop[region_mask].max()) if region_mask.any() else 0.0,
+                    height_mean=height_stats[0],
+                    height_std=height_stats[1],
+                    height_range=height_stats[2],
+                    normal_mean_xyz=normal_mean,
+                    mcly_texture_ids=texture_ids,
+                    mcly_active_layers=active_layers,
+                    curation_label="rectangle_page",
+                    rejection_reason=None,
+                    linked_component_ids=[],
+                    provenance={"extent": round(extent, 4), "aspect_ratio": round(aspect, 4)},
+                )
+            )
+    return regions
+
+
 def classify_region(
     *,
     bbox_xywh: tuple[int, int, int, int],

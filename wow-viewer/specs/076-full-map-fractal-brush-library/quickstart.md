@@ -275,6 +275,49 @@ This is equivalent to running `analyze_fractal_raw_components.py` followed by `v
 <output-root>/contact_sheets/
 ```
 
+## Rectangle / Canvas-Page Detection
+
+The raw segmenter finds connected alpha islands. A separate detector looks for solid axis-aligned rectangular alpha pages that are likely authored paste/boundary regions:
+
+```powershell
+uv run python scripts/analyze_fractal_raw_components.py `
+  --builds 0_5_3_3368 `
+  --maps Azeroth `
+  --tile-limit 0 `
+  --strip-tiles 8 `
+  --strip-overlap-alpha-tiles 1 `
+  --threshold 0.05 `
+  --min-area 64 `
+  --min-footprint-px 8 `
+  --max-regions-per-layer 5000 `
+  --output-root ../output/analysis/full-map-fractal-brush-library/full_map_Azeroth_0_5_3_3368_rectangles `
+  --detect-rectangle-pages `
+  --rectangle-page-min-area 256 `
+  --rectangle-page-min-extent 0.85 `
+  --rectangle-page-max-aspect 8.0 `
+  --no-overlay `
+  --near-dedupe `
+  --near-dedupe-size 16 `
+  --near-dedupe-radius 0
+```
+
+Validated local run (full Azeroth 0.5.3):
+
+```text
+raw_components: 12978
+exact_patterns: 12163
+exact_duplicates: 597
+near_clusters: 11976
+near_duplicate_clusters: 688
+near_max_cluster_size: 76
+```
+
+Rectangle-page regions are labeled `rectangle_page` and are included in the region outputs and near-dedupe clustering. The rectangle-page overlay is always written when the detector is enabled:
+
+```text
+<output-root>/<build>_<map>_tilefull/segments_raw/overlays/rectangle_pages_overlay.png
+```
+
 ## Near-Duplicate Clustering
 
 Exact alpha-shape dedupe is too brittle. The analyzer can also group raw components by translation/mirror/rotation-invariant normalized binary thumbnails:

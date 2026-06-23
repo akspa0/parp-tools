@@ -33,12 +33,13 @@ End-to-end height regression from minimap was not converging despite identical c
 - Validated two-build Azeroth run: 7,317 raw components, 3,957 exact patterns, 233 duplicate patterns under `two_build_test1`.
 - Footprint correction landed: default minimum atomic footprint is `8x8` alpha pixels; corrected two-build Azeroth run produced 2,025 raw components, 2,002 exact patterns, 17 duplicates under `two_build_test2`.
 - Full-map strip processing landed: `--tile-limit 0` loads every tile for a map, writes a tile-chunked canvas, segments horizontal strips, offsets bboxes to global canvas coordinates, and dedupes strip overlaps. Full Azeroth 0.5.3 (622 tiles) produced 12,906 raw components, 12,163 exact patterns, 566 exact duplicates under `full_map_Azeroth_0_5_3_3368`.
-- Near-duplicate clustering landed: `fractal_near_dedupe.py` groups raw components by translation/mirror/rotation-invariant normalized binary thumbnails. Full Azeroth 0.5.3 collapsed to 11,976 clusters (668 duplicate clusters, max size 40) with a 16x16 thumbnail and radius 0.
+- Near-duplicate clustering landed: `fractal_near_dedupe.py` groups raw components by translation/mirror/rotation-invariant normalized binary thumbnails. Full Azeroth 0.5.3 collapsed to 11,976 clusters (688 duplicate clusters after rectangle pages added, max size 76) with a 16x16 thumbnail and radius 0.
+- Rectangle-page detection landed: `detect_rectangle_pages()` finds solid axis-aligned rectangular alpha pages (extent >= 0.85). Full Azeroth 0.5.3 produced 72 rectangle_page regions.
 - Contact-sheet visualizer `visualize_fractal_raw_patterns.py` renders repeated exact-pattern pages (200 patterns / 5 pages proven).
 - No canonical decoded terrain tileset/BLP fingerprint dataset exists yet under `data-harvester` or `wow-viewer/output`; BLP source matching remains a bounded follow-up.
-- Known gap: raw/curated segmenters still detect connected alpha/fractal components, not obvious rectangular paste/canvas-page boundaries visible in overlays.
-- Training remains blocked until near-duplicate cluster review and rectangle-page detection produce usable brush families and Phase 5 model targets are approved.
-- Immediate next slice: add near-duplicate cluster contact-sheet visualizer, then rectangle/canvas-page boundary detection.
+- Known gap: rectangle-page thresholds need visual review; some detected rectangles may be roads/rivers rather than authored paste pages.
+- Training remains blocked until near-duplicate cluster review and rectangle-page tuning produce usable brush families and Phase 5 model targets are approved.
+- Immediate next slice: add near-duplicate cluster contact-sheet visualizer, then tune rectangle-page thresholds against real overlays.
 
 ## Historical Evidence: 074 Alpha Brush Library
 
@@ -99,6 +100,7 @@ End-to-end height regression from minimap was not converging despite identical c
 - `wow-viewer/data-harvester/src/harvester/fractal_segments.py`
 - `wow-viewer/data-harvester/tests/test_analyze_fractal_raw_components.py`
 - `wow-viewer/data-harvester/tests/test_fractal_near_dedupe.py`
+- `wow-viewer/data-harvester/tests/test_fractal_segments_rectangle.py`
 - `wow-viewer/docs/architecture/full-map-fractal-brush-library-2026-06-23.md`
 - `wow-viewer/data-harvester/src/harvester/fractal_canvas.py`
 - `wow-viewer/data-harvester/src/harvester/fractal_segments.py`

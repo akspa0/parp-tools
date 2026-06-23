@@ -43,6 +43,7 @@ from harvester.fractal_raw_analysis import (  # noqa: E402
 )
 from harvester.fractal_segments import (  # noqa: E402
     FractalRegion,
+    detect_rectangle_pages,
     render_region_overlay,
     save_regions,
     save_regions_jsonl,
@@ -77,6 +78,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--near-dedupe", action="store_true", help="Run translation/mirror/rotation-invariant near-duplicate clustering after exact dedupe.")
     parser.add_argument("--near-dedupe-size", type=int, default=32, help="Normalized thumbnail edge length for near-dedupe.")
     parser.add_argument("--near-dedupe-radius", type=int, default=0, help="Hamming-radius for thumbnail matching (0 = exact invariant match).")
+    parser.add_argument("--detect-rectangle-pages", action="store_true", help="Detect solid rectangular alpha pages separately from fractal components.")
+    parser.add_argument("--rectangle-page-min-area", type=int, default=256, help="Minimum area for a rectangle page candidate.")
+    parser.add_argument("--rectangle-page-min-extent", type=float, default=0.85, help="Minimum area / bbox_area for a rectangle page candidate.")
+    parser.add_argument("--rectangle-page-max-aspect", type=float, default=8.0, help="Maximum aspect ratio for a rectangle page candidate.")
     return parser.parse_args()
 
 
@@ -155,6 +160,23 @@ def main() -> None:
                     render_region_overlay(zarr.open_group(str(canvas_dir / "canvas.zarr"), mode="r"), regions, segments_dir / "overlays" / "fractal_regions_overlay.png")
 
             canvas = zarr.open_group(str(canvas_dir / "canvas.zarr"), mode="r")
+            if bool(args.detect_rectangle_pages):
+                rectangle_regions = detect_rectangle_pages(
+                    canvas,
+                    threshold=float(args.threshold),
+                    min_area=int(args.rectangle_page_min_area),
+                    min_extent=float(args.rectangle_page_min_extent),
+                    max_aspect_ratio=float(args.rectangle_page_max_aspect),
+                    max_regions_per_layer=int(args.max_regions_per_layer),
+                )
+                regions.extend(rectangle_regions)
+                if not bool(args.no_overlay):
+                    render_region_overlay(
+                        canvas,
+                        rectangle_regions,
+                        segments_dir / "overlays" / "rectangle_pages_overlay.png",
+                    )
+
             fingerprints = fingerprint_raw_regions(canvas, regions, threshold=float(args.threshold))
             all_fingerprints.extend(fingerprints)
 
