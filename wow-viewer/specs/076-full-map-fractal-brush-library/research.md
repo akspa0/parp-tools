@@ -44,7 +44,7 @@ Use existing BLP decode/tooling surfaces only. Do not rewrite BLP readers.
 
 - `composite_chonker` is a review/composite harvest label, not a synonym for invalid data. Many such regions may be correct when the intended target is a composite terrain canvas instead of an atomic brush.
 - The smaller sub-segments inside a composite can be over-segmented artifacts and should not automatically become accepted atomic samples.
-- Default atomic samples now require a minimum `64x64` alpha-pixel footprint, matching `4x4` current MCLY canvas cells in the Phase 1 dense canvas. This is the current bounded proxy for ADT-addressable terrain-art scale.
+- Default atomic samples now require a minimum `8x8` alpha-pixel footprint, the smallest authoring block size for the data we care about.
 - If later validation proves that the correct lower-level unit is an `8x8` set of cells within a chunk, update the footprint constant and rerun the Phase 2/3 smoke gates before training.
 
 ## Raw Analysis Mode

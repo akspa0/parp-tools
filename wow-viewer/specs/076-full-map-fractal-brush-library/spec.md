@@ -153,7 +153,7 @@ As a trainer, I want model targets derived from the curated library, so every mo
 - **Brush Candidate**: Candidate reusable unit derived after full-map segmentation, not from tile-local connected components alone.
 - **Fractal Member**: Local part of a larger fractal region; can become a training sample but is not independently a complete brush family.
 - **Composite Chonker**: Large connected or high-coverage region likely composed of many smaller brush placements; this can be a valid composite harvest target, but not a default atomic brush sample.
-- **Minimum Atomic Footprint**: Default atomic brush samples must span a physically meaningful ADT-addressable footprint. In the current 256px tile canvas this defaults to at least `64x64` alpha pixels, equivalent to `4x4` current MCLY canvas cells, until a lower-level chunk-cell contract is proven.
+- **Minimum Atomic Footprint**: Default atomic brush samples must span a physically meaningful ADT-addressable footprint. In the current 256px tile canvas this defaults to at least `8x8` alpha pixels, the smallest authoring block size for the data we care about.
 - **One-Off Detail**: Hand-painted road/detail/retouch that may be valid art but lacks repeatability as a reusable brush family.
 - **Tileset Variant Evidence**: Texture-family/variant signals that explain minimap appearance beyond alpha placement.
 - **BLP Source Candidate**: Decoded client BLP texture, often transparent or effect-like, that may be the original brush/decal/effect source later painted into alpha layers.

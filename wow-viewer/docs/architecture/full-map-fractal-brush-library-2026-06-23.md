@@ -70,7 +70,7 @@ A valid terrain-art primitive is not an alpha mask alone. It is a coupled reusab
 
 - `composite_chonker` does not mean invalid. It means the region is likely a composite canvas made of smaller placements and should be preserved for composite-specific harvesting.
 - Tiny connected components inside or near composite regions should not automatically become accepted atomic samples.
-- Default atomic samples currently require at least a `64x64` alpha-pixel footprint, equivalent to `4x4` current MCLY canvas cells. This is the current proxy for ADT-addressable authoring scale until an `8x8` chunk-cell contract is proven.
+- Default atomic samples currently require at least an `8x8` alpha-pixel footprint, the smallest authoring block size for the data we care about.
 
 ## Training Rule
 

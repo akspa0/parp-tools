@@ -41,8 +41,8 @@ def test_classify_region_identifies_multi_tile_members() -> None:
 
 def test_classify_region_rejects_tiny_slivers_before_atomic_training() -> None:
     label, reason = classify_region(
-        bbox_xywh=(240, 8, 96, 20),
-        area=1200,
+        bbox_xywh=(240, 8, 6, 6),
+        area=36,
         total_pixels=512 * 256,
         tile_coverage_count=2,
         alpha_mean=0.4,

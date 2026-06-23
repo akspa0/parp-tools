@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--threshold", type=float, default=0.05)
     parser.add_argument("--min-area", type=int, default=16)
-    parser.add_argument("--min-atomic-footprint-px", type=int, default=64, help="Minimum bbox width and height for default atomic samples.")
+    parser.add_argument("--min-atomic-footprint-px", type=int, default=8, help="Minimum bbox width and height for default atomic samples (8x8 alpha pixels).")
     parser.add_argument("--curation-mode", choices=("default", "raw"), default="default", help="Use raw to emit all regions as analysis components without curation labels.")
     parser.add_argument("--max-regions-per-layer", type=int, default=200)
     parser.add_argument("--chonker-area-fraction", type=float, default=0.18)

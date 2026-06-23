@@ -41,12 +41,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Analyze raw alpha/fractal components across builds/maps and dedupe exact shapes.")
     parser.add_argument("--dataset-dir", type=Path, default=_DEFAULT_DATASET_DIR)
     parser.add_argument("--builds", nargs="+", default=["0_5_3_3368", "3_3_5_12340"])
-    parser.add_argument("--maps", nargs="+", required=True, help="Map names to process for each build. Missing maps are skipped by default.")
+    parser.add_argument("--maps", nargs="+", required=True, help="Map names to process for each build, or 'all' for every map in each build index. Missing maps are skipped by default.")
     parser.add_argument("--output-root", type=Path, default=_DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--layers", default="0,1,2,3")
     parser.add_argument("--tile-limit", type=int, default=64)
     parser.add_argument("--threshold", type=float, default=0.05)
-    parser.add_argument("--min-area", type=int, default=1)
+    parser.add_argument("--min-area", type=int, default=64, help="Minimum component area in alpha pixels (8x8).")
+    parser.add_argument("--min-footprint-px", type=int, default=8, help="Minimum bbox width and height for raw components (8x8 alpha pixels).")
     parser.add_argument("--max-regions-per-layer", type=int, default=5000)
     parser.add_argument("--skip-missing-maps", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--no-overlay", action="store_true")
@@ -66,7 +67,8 @@ def main() -> None:
         if not zarr_path.exists():
             raise FileNotFoundError(f"Build Zarr not found: {zarr_path}")
         available_maps = _available_maps(zarr_path)
-        for map_name in args.maps:
+        target_maps = resolve_target_maps(args.maps, available_maps)
+        for map_name in target_maps:
             if map_name not in available_maps:
                 if bool(args.skip_missing_maps):
                     print(f"Skipping missing map build={build} map={map_name}", flush=True)
@@ -95,6 +97,7 @@ def main() -> None:
                 canvas,
                 threshold=float(args.threshold),
                 min_area=int(args.min_area),
+                min_atomic_footprint_px=int(args.min_footprint_px),
                 curation_mode="raw",
                 max_regions_per_layer=int(args.max_regions_per_layer),
             )
@@ -137,6 +140,12 @@ def main() -> None:
 def _available_maps(zarr_path: Path) -> list[str]:
     table = pq.read_table(zarr_path / "index.parquet", columns=["map"])
     return sorted({str(value.as_py()) for value in table.column("map")})
+
+
+def resolve_target_maps(requested_maps: list[str], available_maps: list[str]) -> list[str]:
+    if any(str(item).lower() == "all" for item in requested_maps):
+        return list(available_maps)
+    return list(requested_maps)
 
 
 if __name__ == "__main__":

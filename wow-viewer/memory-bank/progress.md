@@ -26,7 +26,7 @@
 - Lint passed: `uv run ruff check src/harvester/fractal_segments.py tests/test_fractal_segments.py scripts/segment_full_map_fractals.py`.
 - Real-data strict-footprint smoke passed on the Phase 1 tile16 compact canvas: 961 regions; 11 accepted candidates, 24 fractal members, 1 composite chonker, 2 one-off details, 923 too-small rows.
 - Segment output: `wow-viewer/output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/segments/`.
-- Curation correction: `composite_chonker` is preserved as a composite-canvas harvest target, while default atomic samples require a `64x64` alpha-pixel minimum footprint.
+- Curation correction: `composite_chonker` is preserved as a composite-canvas harvest target, while default atomic samples require an `8x8` alpha-pixel minimum footprint.
 
 ### Phase 2 status
 
@@ -58,10 +58,11 @@
 
 ### Raw two-build analysis runner
 
-- Added `src/harvester/fractal_raw_analysis.py` and `scripts/analyze_fractal_raw_components.py` for one-shot raw component analysis across selected builds/maps.
-- The runner processes each build/map sequentially, writes per-target `canvas/` and `segments_raw/`, then writes cross-target exact dedupe under `dedupe/`.
-- Tiny smoke passed on `0_5_3_3368` + `3_3_5_12340` Azeroth with `tile-limit 2`: 239 raw components, 228 exact patterns, 1 duplicate pattern.
-- Use this runner for broad inspection; it still detects connected alpha/fractal components, not obvious rectangular paste/canvas-page boundaries.
+- Added `src/harvester/fractal_raw_analysis.py`, `scripts/analyze_fractal_raw_components.py`, and `scripts/visualize_fractal_raw_patterns.py`.
+- The runner processes each build/map sequentially, writes per-target `canvas/` and `segments_raw/`, then writes cross-target exact dedupe under `dedupe/`. It supports `--maps all`.
+- Validated two-build Azeroth run: 7,317 raw components, 3,957 exact patterns, 233 duplicate patterns under `two_build_test1`.
+- Contact-sheet visualizer renders repeated exact-pattern pages from the dedupe catalog (200 patterns / 5 pages proven).
+- Use these for broad inspection; they still detect connected alpha/fractal components, not obvious rectangular paste/canvas-page boundaries.
 
 ### What landed
 

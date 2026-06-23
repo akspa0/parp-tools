@@ -53,7 +53,7 @@ Expected test result: `4 passed`.
 - Phase 2 segmentation is implemented for bounded canvas outputs and emits region metadata plus a review overlay.
 - Phase 3 writes fixed-size accepted sample tensors plus source crop/provenance metadata; Phase 4 texture/BLP evidence is not joined yet.
 - `composite_chonker` rows are preserved as composite-canvas harvest targets. They are not assumed to be wrong, but default atomic brush splits exclude them until a composite-specific target exists.
-- Default atomic brush samples require at least a `64x64` alpha-pixel footprint, corresponding to `4x4` current MCLY canvas cells. Smaller slivers are preserved as review evidence, not default accepted samples.
+- Default atomic brush samples require at least an `8x8` alpha-pixel footprint, the smallest authoring block size for the data we care about. Smaller slivers are preserved as review evidence, not default accepted samples.
 - The earlier 4-tile smoke is still useful for coordinate proof, but it does not contain enough minimum-footprint atomic candidates for the 32-sample library loader gate.
 
 ## Phase 2 Smoke
@@ -140,6 +140,29 @@ uv run python scripts/analyze_fractal_raw_components.py `
   --output-root ../output/analysis/full-map-fractal-brush-library/raw_two_build_Azeroth_Northrend_tile64
 ```
 
+To analyze every map present in each build index with `--maps all`:
+
+```powershell
+uv run python scripts/analyze_fractal_raw_components.py `
+  --builds 0_5_3_3368 3_3_5_12340 `
+  --maps all `
+  --tile-limit 64 `
+  --threshold 0.05 `
+  --min-area 1 `
+  --max-regions-per-layer 5000 `
+  --output-root ../output/analysis/full-map-fractal-brush-library/two_build_all_maps_tile64
+```
+
+Validated real run on two builds (Azeroth only):
+
+```text
+output_root: ..\output\analysis\full-map-fractal-brush-library\two_build_test1
+targets: 2
+raw_components: 7317
+exact_patterns: 3957
+duplicate_patterns: 233
+```
+
 Validated tiny smoke:
 
 ```text
@@ -165,6 +188,38 @@ Per-build/map artifacts are written under:
 <output-root>/<build>_<map>_tile<N>/canvas/
 <output-root>/<build>_<map>_tile<N>/segments_raw/
 ```
+
+## Visualizing Raw Exact Patterns
+
+Render contact sheets for the cross-build exact-dedupe catalog:
+
+```powershell
+uv run python scripts/visualize_fractal_raw_patterns.py `
+  --analysis-root ../output/analysis/full-map-fractal-brush-library/two_build_test1 `
+  --output-dir ../output/analysis/full-map-fractal-brush-library/two_build_test1/contact_sheets `
+  --max-patterns 200 `
+  --max-per-pattern 6 `
+  --repeated-only
+```
+
+Validated on `two_build_test1`:
+
+```text
+patterns_rendered: 200
+pages: 5
+```
+
+Key artifacts:
+
+```text
+<output-root>/contact_sheets/raw_exact_patterns_page_001.png
+<output-root>/contact_sheets/raw_exact_patterns_page_002.png
+...
+<output-root>/contact_sheets/index.html
+<output-root>/contact_sheets/summary.json
+```
+
+Use `--min-members N` to require patterns with at least N raw-component members, or omit `--repeated-only` to render unique patterns too.
 
 ## Phase 3 Smoke
 
