@@ -152,6 +152,7 @@ class V161Dataset(Dataset):
         v21_height_channel: bool = False,
         v21_coarse_channel: bool = False,
         lightweight_object_gating: bool = False,
+        extra_normal_channels: bool = False,
         curation_min_terrain_validity: float = 0.0,
         curation_min_minimap_usefulness: float = 0.0,
         curation_max_liquid_coverage: float = 1.0,
@@ -164,6 +165,7 @@ class V161Dataset(Dataset):
         self.v21_height_channel = bool(v21_height_channel)
         self.v21_coarse_channel = bool(v21_coarse_channel)
         self.lightweight_object_gating = bool(lightweight_object_gating)
+        self.extra_normal_channels = bool(extra_normal_channels)
         self._rng = np.random.RandomState(seed)
         self._stores: dict[str, zarr.Group] = {}
         self._index_entries: list[dict] = []
@@ -423,6 +425,11 @@ class V161Dataset(Dataset):
             input_tensor = torch.cat([minimap_t, object_roof_t], dim=0)
         else:
             input_tensor = minimap_t
+
+        if self.extra_normal_channels:
+            normal_nxny = torch.from_numpy(normals[:256, :256, :2].copy()).permute(2, 0, 1)
+            input_tensor = torch.cat([input_tensor, normal_nxny], dim=0)
+
         return {
             "input": input_tensor,
             "height_raw": torch.from_numpy(height_raw.copy()).unsqueeze(0),

@@ -2,9 +2,9 @@
 
 ## Phase A: 3D viewport math
 
-- [x] T001 Update `TryGetSceneViewportRect` to subtract both `_leftSidebarWidth` and `_rightSidebarWidth` when both sidebars are visible.
-- [x] T002 Verify `UpdateShellLayout` and `ClampFixedSidebarLayout` work with the new two-sidebar math.
-- [x] T003 Build clean, no regression in legacy mode.
+- [ ] T001 Update `TryGetSceneViewportRect` to subtract both `_leftSidebarWidth` and `_rightSidebarWidth` when both sidebars are visible.
+- [ ] T002 Verify `UpdateShellLayout` and `ClampFixedSidebarLayout` work with the new two-sidebar math.
+- [ ] T003 Build clean, no regression in legacy mode.
 
 ## Phase B: Left sidebar
 
