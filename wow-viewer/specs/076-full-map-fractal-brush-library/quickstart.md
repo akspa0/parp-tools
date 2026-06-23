@@ -96,6 +96,22 @@ uv run pytest tests/test_fractal_segments.py
 
 Expected test result: `4 passed`.
 
+## Raw Component Analysis
+
+Use raw mode when inspecting all detected alpha components without applying atomic/composite curation labels:
+
+```powershell
+uv run python scripts/segment_full_map_fractals.py `
+  --canvas-dir <canvas-output-dir> `
+  --output-dir <analysis-output-dir>/segments_raw `
+  --threshold 0.05 `
+  --min-area 1 `
+  --curation-mode raw `
+  --max-regions-per-layer 2000
+```
+
+Raw mode still computes bbox, tile coverage, height/normal stats, MCLY texture summaries, and overlays; it only changes the curation label to `raw_component` for every emitted region.
+
 ## Phase 3 Smoke
 
 Run from `wow-viewer/data-harvester/` after the Phase 2 smoke:

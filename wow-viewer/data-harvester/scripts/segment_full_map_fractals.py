@@ -30,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--threshold", type=float, default=0.05)
     parser.add_argument("--min-area", type=int, default=16)
     parser.add_argument("--min-atomic-footprint-px", type=int, default=64, help="Minimum bbox width and height for default atomic samples.")
+    parser.add_argument("--curation-mode", choices=("default", "raw"), default="default", help="Use raw to emit all regions as analysis components without curation labels.")
     parser.add_argument("--max-regions-per-layer", type=int, default=200)
     parser.add_argument("--chonker-area-fraction", type=float, default=0.18)
     parser.add_argument("--one-off-min-area", type=int, default=4096)
@@ -48,6 +49,7 @@ def main() -> None:
         threshold=float(args.threshold),
         min_area=int(args.min_area),
         min_atomic_footprint_px=int(args.min_atomic_footprint_px),
+        curation_mode=str(args.curation_mode),
         chonker_area_fraction=float(args.chonker_area_fraction),
         one_off_min_area=int(args.one_off_min_area),
         max_regions_per_layer=int(args.max_regions_per_layer),
@@ -65,6 +67,7 @@ def main() -> None:
         "threshold": float(args.threshold),
         "min_area": int(args.min_area),
         "min_atomic_footprint_px": int(args.min_atomic_footprint_px),
+        "curation_mode": str(args.curation_mode),
         "catalog_rows_loaded": int(len(catalog_rows)),
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")

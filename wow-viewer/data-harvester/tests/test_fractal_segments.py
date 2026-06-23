@@ -87,3 +87,18 @@ def test_segment_canvas_regions_emits_tile_coverage_and_spatial_stats(tmp_path: 
     assert region.normal_mean_xyz == (0.0, 0.0, 1.0)
     assert 3 in region.mcly_texture_ids
     assert region.mcly_active_layers == [1]
+
+
+def test_segment_canvas_regions_raw_mode_bypasses_curation(tmp_path: Path) -> None:
+    root = zarr.open_group(str(tmp_path / "canvas.zarr"), mode="w")
+    alpha = np.zeros((64, 64, 1), dtype=np.float32)
+    alpha[4:8, 4:8, 0] = 0.8
+    root.create_array("alpha_256", data=alpha)
+    root.create_array("tile_id_256", data=np.ones((64, 64), dtype=np.int32))
+    root.attrs["layout"] = {"build": "test", "map_name": "Map"}
+
+    regions = segment_canvas_regions(root, threshold=0.05, min_area=1, curation_mode="raw")
+
+    assert len(regions) == 1
+    assert regions[0].curation_label == "raw_component"
+    assert regions[0].rejection_reason is None

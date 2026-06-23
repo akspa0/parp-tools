@@ -46,3 +46,9 @@ Use existing BLP decode/tooling surfaces only. Do not rewrite BLP readers.
 - The smaller sub-segments inside a composite can be over-segmented artifacts and should not automatically become accepted atomic samples.
 - Default atomic samples now require a minimum `64x64` alpha-pixel footprint, matching `4x4` current MCLY canvas cells in the Phase 1 dense canvas. This is the current bounded proxy for ADT-addressable terrain-art scale.
 - If later validation proves that the correct lower-level unit is an `8x8` set of cells within a chunk, update the footprint constant and rerun the Phase 2/3 smoke gates before training.
+
+## Raw Analysis Mode
+
+- `segment_full_map_fractals.py --curation-mode raw` emits every detected region as `raw_component`.
+- Raw mode is for inspection and broad analysis only. It does not decide whether a region is atomic, composite, too small, or trainable.
+- The missing next concept is a rectangle/canvas-page detector that finds obvious authored paste/page boundaries separately from connected alpha islands.

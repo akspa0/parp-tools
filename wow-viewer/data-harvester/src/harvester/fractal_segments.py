@@ -56,6 +56,7 @@ def segment_canvas_regions(
     threshold: float = 0.05,
     min_area: int = 16,
     min_atomic_footprint_px: int = 64,
+    curation_mode: str = "default",
     chonker_area_fraction: float = 0.18,
     one_off_min_area: int = 4096,
     max_regions_per_layer: int | None = None,
@@ -107,16 +108,19 @@ def segment_canvas_regions(
             height_stats = _height_stats(height, bbox) if height is not None else (None, None, None)
             normal_mean = _normal_mean(normals, bbox) if normals is not None else None
             texture_ids, active_layers = _mcly_summary(mcly_ids, mcly_mask, bbox)
-            curation_label, rejection_reason = classify_region(
-                bbox_xywh=bbox,
-                area=area,
-                total_pixels=total_pixels,
-                tile_coverage_count=len(tile_coverage),
-                alpha_mean=float(alpha_crop[region_mask].mean()) if region_mask.any() else 0.0,
-                min_atomic_footprint_px=min_atomic_footprint_px,
-                chonker_area_fraction=chonker_area_fraction,
-                one_off_min_area=one_off_min_area,
-            )
+            if str(curation_mode) == "raw":
+                curation_label, rejection_reason = "raw_component", None
+            else:
+                curation_label, rejection_reason = classify_region(
+                    bbox_xywh=bbox,
+                    area=area,
+                    total_pixels=total_pixels,
+                    tile_coverage_count=len(tile_coverage),
+                    alpha_mean=float(alpha_crop[region_mask].mean()) if region_mask.any() else 0.0,
+                    min_atomic_footprint_px=min_atomic_footprint_px,
+                    chonker_area_fraction=chonker_area_fraction,
+                    one_off_min_area=one_off_min_area,
+                )
             linked_ids = _linked_component_ids(catalog_index, layer_idx, bbox, tile_coverage)
             region_id = _region_id(build, map_name, layer_idx, bbox, area)
             regions.append(
@@ -215,6 +219,7 @@ def render_region_overlay(
         "one_off_detail": (255, 190, 60),
         "too_small_unique": (180, 180, 180),
         "rejected_unknown": (220, 80, 220),
+        "raw_component": (80, 220, 80),
     }
     for region in sorted(regions, key=lambda item: item.area, reverse=True)[: max(0, int(max_regions))]:
         x, y, w, h = region.bbox_xywh
