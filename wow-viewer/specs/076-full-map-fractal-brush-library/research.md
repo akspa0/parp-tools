@@ -51,4 +51,6 @@ Use existing BLP decode/tooling surfaces only. Do not rewrite BLP readers.
 
 - `segment_full_map_fractals.py --curation-mode raw` emits every detected region as `raw_component`.
 - Raw mode is for inspection and broad analysis only. It does not decide whether a region is atomic, composite, too small, or trainable.
+- `analyze_fractal_raw_components.py` runs canvas assembly, raw segmentation, and exact binary-shape dedupe across selected builds/maps in one command.
+- Exact dedupe currently hashes thresholded alpha crops by shape and bitmap. It is intentionally strict; near-duplicate/translated/scaled matching remains a later step.
 - The missing next concept is a rectangle/canvas-page detector that finds obvious authored paste/page boundaries separately from connected alpha islands.

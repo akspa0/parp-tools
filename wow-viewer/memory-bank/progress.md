@@ -56,6 +56,13 @@
 - No canonical decoded terrain tileset/BLP fingerprint artifact was found in `data-harvester` or `wow-viewer/output`; object-roof fingerprints are useful prior art only.
 - Next route: add a bounded decoded terrain texture/BLP evidence extractor or join a canonical fingerprint artifact when one exists.
 
+### Raw two-build analysis runner
+
+- Added `src/harvester/fractal_raw_analysis.py` and `scripts/analyze_fractal_raw_components.py` for one-shot raw component analysis across selected builds/maps.
+- The runner processes each build/map sequentially, writes per-target `canvas/` and `segments_raw/`, then writes cross-target exact dedupe under `dedupe/`.
+- Tiny smoke passed on `0_5_3_3368` + `3_3_5_12340` Azeroth with `tile-limit 2`: 239 raw components, 228 exact patterns, 1 duplicate pattern.
+- Use this runner for broad inspection; it still detects connected alpha/fractal components, not obvious rectangular paste/canvas-page boundaries.
+
 ### What landed
 
 - Added `specs/076-full-map-fractal-brush-library/{spec,plan,tasks}.md`.
@@ -69,13 +76,13 @@
 - Assemble full-map alpha/MCLY/height/normal canvases before segmentation.
 - Segment fractal/virtual-canvas structures in map coordinates, not ADT-tile-local coordinates.
 - Treat mesh, alpha masks, MCLY texture/layer assignments, and possible source BLP/decal/effect stamps as one coupled ZBrush-like terrain-art primitive.
-- Reject chonkers, one-off roads/details, tiny unique strokes, and low-repeatability noise from default training manifests.
+- Preserve chonkers as composite-canvas harvest targets; exclude one-off roads/details, tiny unique strokes, and low-repeatability noise from default atomic training manifests.
 - Preserve provenance and build a Zarr/Parquet trainable library before any new model training.
 - Phase 4 should also investigate likely transparent/effect BLP source assets (`textures\BloodSplats`, FX/environment/weather/decal/particle-style textures) as possible original brush sources for alpha/fractal motifs.
 
 ### Next
 
-- Implement only 076 Phase 4 next: inventory reusable tileset/texture/fingerprint outputs, then join MCLY texture evidence and likely transparent/effect BLP candidates where canonical data exists.
+- Implement rectangle/canvas-page boundary detection next; the current raw/curated segmenters still detect connected alpha/fractal components, not obvious pasted rectangular authoring pages.
 
 ## 2026-06-23 — Spec 075 V21 scar-mask segmentation Phase 1 complete
 

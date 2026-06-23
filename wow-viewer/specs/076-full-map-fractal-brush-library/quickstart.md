@@ -112,6 +112,60 @@ uv run python scripts/segment_full_map_fractals.py `
 
 Raw mode still computes bbox, tile coverage, height/normal stats, MCLY texture summaries, and overlays; it only changes the curation label to `raw_component` for every emitted region.
 
+## One-Shot Raw Two-Build Dedupe
+
+Run raw component analysis for the two target builds and write one exact-shape dedupe catalog:
+
+```powershell
+uv run python scripts/analyze_fractal_raw_components.py `
+  --builds 0_5_3_3368 3_3_5_12340 `
+  --maps Azeroth `
+  --tile-limit 64 `
+  --threshold 0.05 `
+  --min-area 1 `
+  --max-regions-per-layer 5000 `
+  --output-root ../output/analysis/full-map-fractal-brush-library/raw_two_build_Azeroth_tile64
+```
+
+To include LK Northrend in the same run while skipping maps absent from 0.5.3:
+
+```powershell
+uv run python scripts/analyze_fractal_raw_components.py `
+  --builds 0_5_3_3368 3_3_5_12340 `
+  --maps Azeroth Northrend `
+  --tile-limit 64 `
+  --threshold 0.05 `
+  --min-area 1 `
+  --max-regions-per-layer 5000 `
+  --output-root ../output/analysis/full-map-fractal-brush-library/raw_two_build_Azeroth_Northrend_tile64
+```
+
+Validated tiny smoke:
+
+```text
+uv run python scripts/analyze_fractal_raw_components.py --builds 0_5_3_3368 3_3_5_12340 --maps Azeroth --tile-limit 2 --threshold 0.05 --min-area 1 --max-regions-per-layer 100 --output-root ../output/analysis/full-map-fractal-brush-library/smoke_two_build_raw_dedupe_tile2 --no-overlay
+raw_components: 239
+exact_patterns: 228
+duplicate_patterns: 1
+```
+
+Key dedupe artifacts:
+
+```text
+<output-root>/dedupe/raw_components.parquet
+<output-root>/dedupe/raw_components.jsonl
+<output-root>/dedupe/exact_patterns.parquet
+<output-root>/dedupe/exact_patterns.jsonl
+<output-root>/dedupe/summary.json
+```
+
+Per-build/map artifacts are written under:
+
+```text
+<output-root>/<build>_<map>_tile<N>/canvas/
+<output-root>/<build>_<map>_tile<N>/segments_raw/
+```
+
 ## Phase 3 Smoke
 
 Run from `wow-viewer/data-harvester/` after the Phase 2 smoke:

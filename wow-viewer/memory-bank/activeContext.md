@@ -29,9 +29,12 @@ End-to-end height regression from minimap was not converging despite identical c
 - Phase 3 trainable library landed: `fractal_library.py`, `build_fractal_brush_library.py`, and `tests/test_fractal_library.py`.
 - Library smoke output: `wow-viewer/output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/`, 35 default atomic samples, 926 review/rejected rows, loader read 32 samples with no rejected labels.
 - Phase 4 T025/T026 landed: `research.md` inventories texture/fingerprint surfaces; `fractal_library.py` now records MCLY texture counts, dominant texture ID, and active-layer coverage per sample.
+- One-shot raw analysis landed: `analyze_fractal_raw_components.py` runs selected builds/maps sequentially and writes cross-target exact alpha-shape dedupe under `dedupe/`.
+- Tiny two-build smoke on Azeroth `tile-limit 2`: 239 raw components, 228 exact patterns, 1 duplicate pattern.
 - No canonical decoded terrain tileset/BLP fingerprint dataset exists yet under `data-harvester` or `wow-viewer/output`; BLP source matching remains a bounded follow-up.
+- Known gap: raw/curated segmenters still detect connected alpha/fractal components, not obvious rectangular paste/canvas-page boundaries visible in overlays. Next useful slice is a rectangle/canvas-page detector.
 - Training remains blocked until Phase 4 texture/variant/BLP evidence is checked and Phase 5 model targets are approved.
-- Immediate next slice: create a bounded decoded texture/BLP evidence extractor or provide canonical texture-fingerprint input, prioritizing `textures\BloodSplats`, FX/environment/weather/decal/particle-style assets.
+- Immediate next slice: add rectangle/canvas-page boundary detection, then use raw dedupe outputs for cross-build grouping.
 
 ## Historical Evidence: 074 Alpha Brush Library
 
@@ -66,7 +69,7 @@ End-to-end height regression from minimap was not converging despite identical c
 
 1. Which bounded build/map should be the first 076 Phase 1 validation target? Teldrassil/root-heavy regions are preferred if present.
 2. Which existing tileset/texture/BLP effect fingerprint output is canonical enough to join in Phase 4, especially for paths like `textures\BloodSplats`?
-3. Should accepted samples store copied tensors or source-array references plus crop metadata?
+3. What minimum rectangle/page evidence should promote an obvious authored paste area above connected-component/fractal crops?
 
 ## Files Touched Recently
 
