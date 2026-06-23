@@ -39,7 +39,7 @@ End-to-end height regression from minimap was not converging despite identical c
 - No canonical decoded terrain tileset/BLP fingerprint dataset exists yet under `data-harvester` or `wow-viewer/output`; BLP source matching remains a bounded follow-up.
 - Known gap: rectangle-page thresholds need visual review; some detected rectangles may be roads/rivers rather than authored paste pages.
 - Training remains blocked until near-duplicate cluster review and rectangle-page tuning produce usable brush families and Phase 5 model targets are approved.
-- Immediate next slice: add near-duplicate cluster contact-sheet visualizer, then tune rectangle-page thresholds against real overlays.
+- Immediate next slice: tune near-dedupe and rectangle-page thresholds against contact-sheet review; no model training until Phase 5 targets are approved.
 
 ## Historical Evidence: 074 Alpha Brush Library
 
@@ -94,6 +94,7 @@ End-to-end height regression from minimap was not converging despite identical c
 - `wow-viewer/docs/architecture/full-map-fractal-brush-library-2026-06-23.md`
 - `wow-viewer/data-harvester/scripts/analyze_fractal_raw_components.py`
 - `wow-viewer/data-harvester/scripts/visualize_fractal_raw_patterns.py`
+- `wow-viewer/data-harvester/scripts/visualize_fractal_near_patterns.py`
 - `wow-viewer/data-harvester/src/harvester/fractal_raw_analysis.py`
 - `wow-viewer/data-harvester/src/harvester/fractal_near_dedupe.py`
 - `wow-viewer/data-harvester/src/harvester/fractal_canvas.py`

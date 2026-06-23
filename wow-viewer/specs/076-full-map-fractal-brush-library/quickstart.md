@@ -383,6 +383,29 @@ pages: 1
 
 Use `--min-members N` to require patterns with at least N raw-component members, or omit `--repeated-only` to render unique patterns too.
 
+## Visualizing Near-Duplicate Clusters Separately
+
+If you already ran analysis with `--near-dedupe`, render near-duplicate cluster contact sheets with:
+
+```powershell
+uv run python scripts/visualize_fractal_near_patterns.py `
+  --analysis-root ../output/analysis/full-map-fractal-brush-library/full_map_Azeroth_0_5_3_3368_rectangles `
+  --output-dir ../output/analysis/full-map-fractal-brush-library/full_map_Azeroth_0_5_3_3368_rectangles/contact_sheets_near `
+  --max-clusters 100 `
+  --max-per-cluster 6 `
+  --clusters-per-page 10 `
+  --repeated-only
+```
+
+Validated on `full_map_Azeroth_0_5_3_3368_rectangles`:
+
+```text
+clusters_rendered: 100
+pages: 10
+```
+
+Each row shows the representative/members of one near-duplicate cluster. Border colors indicate the alpha layer index.
+
 ## Phase 3 Smoke
 
 Run from `wow-viewer/data-harvester/` after the Phase 2 smoke:

@@ -67,6 +67,7 @@
 - Rectangle-page detection: `detect_rectangle_pages()` finds solid axis-aligned rectangular alpha pages (extent >= 0.85). Full Azeroth 0.5.3 produced 72 rectangle_page regions; with rectangles included near-duplicates became 688 clusters, max size 76.
 - Added `tests/test_analyze_fractal_raw_components.py`, `tests/test_fractal_near_dedupe.py`, and `tests/test_fractal_segments_rectangle.py`; pytest passes.
 - Contact-sheet visualizer renders repeated exact-pattern pages from the dedupe catalog (200 patterns / 5 pages proven).
+- Near-duplicate cluster contact-sheet visualizer added: `scripts/visualize_fractal_near_patterns.py`; rendered 100 repeated clusters across 10 pages for full Azeroth 0.5.3.
 - Use these for broad inspection; they still detect connected alpha/fractal components, not obvious rectangular paste/canvas-page boundaries.
 
 ### What landed
@@ -88,7 +89,7 @@
 
 ### Next
 
-- Add a contact-sheet visualizer for near-duplicate clusters so cluster quality can be reviewed.
+- Tune near-dedupe thumbnail size and Hamming radius against contact-sheet review.
 - Tune rectangle-page thresholds against real overlays; some detected rectangles may be roads/rivers rather than authored paste pages.
 
 ## 2026-06-23 — Spec 075 V21 scar-mask segmentation Phase 1 complete

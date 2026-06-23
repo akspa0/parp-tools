@@ -71,7 +71,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--strip-overlap-alpha-tiles", type=int, default=1, help="Overlap between horizontal strips in alpha tiles.")
     parser.add_argument("--skip-missing-maps", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--no-overlay", action="store_true")
-    parser.add_argument("--visualize", action="store_true", help="Render contact sheets for the dedupe catalog after analysis.")
+    parser.add_argument("--visualize", action="store_true", help="Render contact sheets for the exact dedupe catalog after analysis.")
+    parser.add_argument("--visualize-near", action="store_true", help="Render contact sheets for the near-duplicate cluster catalog after analysis.")
+    parser.add_argument("--max-clusters", type=int, default=200)
+    parser.add_argument("--max-per-cluster", type=int, default=6)
     parser.add_argument("--max-patterns", type=int, default=200)
     parser.add_argument("--max-per-pattern", type=int, default=6)
     parser.add_argument("--repeated-only", action="store_true")
@@ -229,6 +232,8 @@ def main() -> None:
 
     if bool(args.visualize):
         _run_visualizer(out_root, args)
+    if bool(args.visualize_near):
+        _run_near_visualizer(out_root, args)
 
 
 def _run_visualizer(out_root: Path, args: argparse.Namespace) -> None:
@@ -250,7 +255,30 @@ def _run_visualizer(out_root: Path, args: argparse.Namespace) -> None:
     ]
     if bool(args.repeated_only):
         cmd.append("--repeated-only")
-    print("Rendering contact sheets...", flush=True)
+    print("Rendering exact-pattern contact sheets...", flush=True)
+    subprocess.run(cmd, check=True)
+
+
+def _run_near_visualizer(out_root: Path, args: argparse.Namespace) -> None:
+    import subprocess
+
+    script = Path(__file__).resolve().parent / "visualize_fractal_near_patterns.py"
+    contact_dir = out_root / "contact_sheets_near"
+    cmd = [
+        sys.executable,
+        str(script),
+        "--analysis-root",
+        str(out_root),
+        "--output-dir",
+        str(contact_dir),
+        "--max-clusters",
+        str(int(args.max_clusters)),
+        "--max-per-cluster",
+        str(int(args.max_per_cluster)),
+    ]
+    if bool(args.repeated_only):
+        cmd.append("--repeated-only")
+    print("Rendering near-duplicate cluster contact sheets...", flush=True)
     subprocess.run(cmd, check=True)
 
 
