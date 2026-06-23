@@ -1,5 +1,20 @@
 # Progress — wow-viewer
 
+## 2026-06-22 — Spec 071 Phase C: Right sidebar / workbench (complete)
+
+### What landed
+
+- Renamed `DrawWorkbenchPopout` → `DrawRightSidebar`; anchored at `x = displayWidth - _rightSidebarWidth`, full viewport height, width `_rightSidebarWidth`.
+- Added `DefaultRightSidebarWidth = 480f`; wired into `_rightSidebarWidth` init, `ResetShellLayoutToDefaults`, `LoadViewerSettings`, and `ViewerSettings.RightSidebarWidth`.
+- Renamed legacy shell-panel right sidebar to `DrawLegacyRightSidebar()` and gated it to `!_useTabUi`.
+- Removed unused `_popoutDockFrame` field.
+- Build: 0 errors.
+- Commit `be92b40f` pushed to `071-left-right-sidebar-split`.
+
+### Next
+
+- Phase D: collapse `TopTab` to Model/World/Tools, remap sub-tabs, route Tools menu to tab switches.
+
 ## 2026-06-22 — Spec 071 Phase B: Left sidebar (complete)
 
 ### What landed

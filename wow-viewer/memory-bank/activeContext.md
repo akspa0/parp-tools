@@ -29,7 +29,9 @@ Viewer UI in flux. 069 (tab system) hit 16 phases. User feedback on 069:
 
 **Phase B (done)**: New `DrawLeftSidebar()` renders a fixed left panel in tab mode with `DrawWorkspaceBarsPanelContent`, `DrawFileBrowserContent`, and `DrawMapDiscoveryContent`. The legacy shell-panel left sidebar was renamed to `DrawLegacyLeftSidebar()` and is only used in legacy/dockspace mode.
 
-**Next**: Phase C — rename `DrawWorkbenchPopout` → `DrawRightSidebar`, anchor it to the right edge using `_rightSidebarWidth`, and update the default width to ~480px.
+**Phase C (done)**: `DrawWorkbenchPopout` renamed to `DrawRightSidebar`; anchored to right edge at `x = displayWidth - _rightSidebarWidth`, full viewport height, width clamped via `ClampFixedSidebarWidth`. Added `DefaultRightSidebarWidth = 480f` and wired it through init/reset/load/save. Legacy shell-panel right sidebar renamed to `DrawLegacyRightSidebar()`. Removed unused `_popoutDockFrame`.
+
+**Next**: Phase D — collapse `TopTab` from 6 values to 3 (Model/World/Tools), remap sub-tabs, and route Tools menu items to tab switches.
 
 **Salvage from 069:**
 - Tab data model + dispatch
