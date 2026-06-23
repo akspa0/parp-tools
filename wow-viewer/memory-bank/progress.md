@@ -32,6 +32,21 @@
 - Phase 2 is implemented and validated for the bounded compact canvas.
 - Next route: inspect `fractal_regions_overlay.png` and metadata before starting Phase 3 trainable library construction.
 
+### Phase 3 implementation
+
+- Added `src/harvester/fractal_library.py` for terrain-art sample schema, stable IDs, deterministic splits, accepted/rejected filtering, Zarr tensor output, Parquet metadata output, and a smoke loader.
+- Added `scripts/build_fractal_brush_library.py` CLI.
+- Added `tests/test_fractal_library.py`; `uv run pytest tests/test_fractal_library.py` -> `3 passed`.
+- Lint passed: `uv run ruff check src/harvester/fractal_library.py tests/test_fractal_library.py scripts/build_fractal_brush_library.py`.
+- Real-data smoke passed on the Phase 2 compact segments: 37 default trainable samples, 1 rejected review row, split counts `train=30`, `val=3`, `test=4`.
+- Smoke loader read 32 samples and returned only `accepted_candidate`/`fractal_member` labels.
+- Library output: `wow-viewer/output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/`.
+
+### Phase 3 status
+
+- Phase 3 is implemented and validated for the bounded compact canvas.
+- Next route: Phase 4 texture/variant/BLP source-evidence inventory and joins. Do not start model training yet.
+
 ### What landed
 
 - Added `specs/076-full-map-fractal-brush-library/{spec,plan,tasks}.md`.
@@ -51,7 +66,7 @@
 
 ### Next
 
-- Implement only 076 Phase 1 first: `fractal_canvas.py`, `build_full_map_fractal_canvas.py`, coordinate/provenance tests, and one bounded real-data validation.
+- Implement only 076 Phase 4 next: inventory reusable tileset/texture/fingerprint outputs, then join MCLY texture evidence and likely transparent/effect BLP candidates where canonical data exists.
 
 ## 2026-06-23 — Spec 075 V21 scar-mask segmentation Phase 1 complete
 

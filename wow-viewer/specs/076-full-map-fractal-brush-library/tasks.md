@@ -49,13 +49,13 @@
 
 **Purpose**: Turn validated regions into a Zarr/Parquet training dataset with provenance.
 
-- [ ] T018 [US3] Create `wow-viewer/data-harvester/src/harvester/fractal_library.py` with trainable terrain-art primitive sample schema, stable ID generation, and curation-label filters.
-- [ ] T019 [P] [US3] Add `wow-viewer/data-harvester/tests/test_fractal_library.py` covering accepted/rejected filtering, stable IDs, split assignment, and provenance retention.
-- [ ] T020 [US3] Create `wow-viewer/data-harvester/scripts/build_fractal_brush_library.py` that consumes `fractal_regions.parquet` and source canvases.
-- [ ] T021 [US3] Write `samples.parquet`, `rejected.parquet`, `split.parquet`, and `summary.json` with explicit rejection reasons and source lineage.
-- [ ] T022 [US3] Write accepted sample tensors or source-reference crop metadata into `samples.zarr` without including rejected labels in default training splits.
-- [ ] T023 [US3] Implement a smoke dataset loader in `fractal_library.py` returning coupled alpha, height, normals, MCLY context, minimap/object context, optional source-BLP evidence where available, and provenance.
-- [ ] T024 [US3] Run a smoke loader over at least 32 accepted samples and document counts in `quickstart.md`.
+- [x] T018 [US3] Create `wow-viewer/data-harvester/src/harvester/fractal_library.py` with trainable terrain-art primitive sample schema, stable ID generation, and curation-label filters.
+- [x] T019 [P] [US3] Add `wow-viewer/data-harvester/tests/test_fractal_library.py` covering accepted/rejected filtering, stable IDs, split assignment, and provenance retention.
+- [x] T020 [US3] Create `wow-viewer/data-harvester/scripts/build_fractal_brush_library.py` that consumes `fractal_regions.parquet` and source canvases.
+- [x] T021 [US3] Write `samples.parquet`, `rejected.parquet`, `split.parquet`, and `summary.json` with explicit rejection reasons and source lineage.
+- [x] T022 [US3] Write accepted sample tensors or source-reference crop metadata into `samples.zarr` without including rejected labels in default training splits.
+- [x] T023 [US3] Implement a smoke dataset loader in `fractal_library.py` returning coupled alpha, height, normals, MCLY context, minimap/object context, optional source-BLP evidence where available, and provenance.
+- [x] T024 [US3] Run a smoke loader over at least 32 accepted samples and document counts in `quickstart.md`.
 
 **Checkpoint**: The trainable library is loadable and default samples exclude chonkers/one-off details.
 

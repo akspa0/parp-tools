@@ -1,13 +1,13 @@
 # Active Context — wow-viewer
 
-**Last updated**: 2026-06-23 | **Focus**: 076 full-map fractal brush library planning
+**Last updated**: 2026-06-23 | **Focus**: 076 full-map fractal brush library Phase 4 prep
 
 ## Current State
 
 - **Spec 071 `071-left-right-sidebar-split`**: complete and committed. User is now testing/validating the viewer build.
 - **Spec 074 `074-alpha-brush-library`**: deprecated as primary direction. Outputs remain useful candidate/evidence rows only; tile-local connected components are not authoritative brush labels.
 - **Spec 075 `075-scar-mask-segmentation`**: deprecated as primary direction. The trainer is a coarse diagnostic baseline only; do not continue it as the brush-family route unless explicitly reopened.
-- **Spec 076 `076-full-map-fractal-brush-library`**: new active plan. Assemble full-map alpha/MCLY/height/normal canvases, segment fractal regions in map coordinates, reject chonkers/one-off details, join texture/variant evidence, then build a trainable provenance-preserving library.
+- **Spec 076 `076-full-map-fractal-brush-library`**: active plan. Phases 1-3 are implemented for the bounded compact Azeroth proof; Phase 4 texture/variant/BLP evidence join is next.
 - **V21/V21c height training**: paused. Multiple runs (with and without scheduler/normal/fractal changes, restored to d0929e2 baseline) failed to reproduce the earlier 0.3126 convergence; model stalls at ~0.83 height L1. Pivoting to a deconstruction-first approach.
 
 ## Why the Pivot
@@ -25,8 +25,10 @@ End-to-end height regression from minimap was not converging despite identical c
 - Smoke output: `wow-viewer/output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/` with alpha shape `(256,1024,4)`, height shape `(257,1025)`, MCLY shape `(16,64,4)`.
 - Phase 2 bounded segmentation landed: `fractal_segments.py`, `segment_full_map_fractals.py`, and `tests/test_fractal_segments.py`.
 - Segment smoke output: `.../smoke_0_5_3_3368_Azeroth_tile4_compact/segments/`, 38 regions: 34 accepted candidates, 3 fractal members, 1 composite chonker.
-- Training remains blocked until Phase 3 curated trainable library is validated.
-- Immediate next slice: review Phase 2 overlay/metadata, then start Phase 3 trainable library only if region labels look sane.
+- Phase 3 trainable library landed: `fractal_library.py`, `build_fractal_brush_library.py`, and `tests/test_fractal_library.py`.
+- Library smoke output: `wow-viewer/output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/`, 37 default samples, 1 rejected row, loader read 32 samples with no rejected labels.
+- Training remains blocked until Phase 4 texture/variant/BLP evidence is checked and Phase 5 model targets are approved.
+- Immediate next slice: Phase 4 inventory of reusable tileset/texture/fingerprint outputs and likely transparent/effect BLP candidates such as `textures\BloodSplats`.
 
 ## Historical Evidence: 074 Alpha Brush Library
 
@@ -80,10 +82,13 @@ End-to-end height regression from minimap was not converging despite identical c
 - `wow-viewer/docs/architecture/full-map-fractal-brush-library-2026-06-23.md`
 - `wow-viewer/data-harvester/src/harvester/fractal_canvas.py`
 - `wow-viewer/data-harvester/src/harvester/fractal_segments.py`
+- `wow-viewer/data-harvester/src/harvester/fractal_library.py`
 - `wow-viewer/data-harvester/scripts/build_full_map_fractal_canvas.py`
 - `wow-viewer/data-harvester/scripts/segment_full_map_fractals.py`
+- `wow-viewer/data-harvester/scripts/build_fractal_brush_library.py`
 - `wow-viewer/data-harvester/tests/test_fractal_canvas.py`
 - `wow-viewer/data-harvester/tests/test_fractal_segments.py`
+- `wow-viewer/data-harvester/tests/test_fractal_library.py`
 - `wow-viewer/data-harvester/src/harvester/{v21_scar_dataset,v21_scar_model,test_v21_scar_mask}.py`
 - `wow-viewer/data-harvester/scripts/train_v21_scar_mask.py`
 - `wow-viewer/data-harvester/tests/test_alpha_brush.py`

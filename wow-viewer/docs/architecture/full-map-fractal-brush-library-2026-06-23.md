@@ -1,6 +1,6 @@
 # Full-Map Fractal Brush Library
 
-**Status**: Draft replacement architecture for 074/075 terrain brush work.
+**Status**: Phases 1-3 implemented for bounded compact-map proof; Phase 4 texture/BLP evidence join remains open.
 
 ## Decision
 
@@ -53,11 +53,18 @@ A valid terrain-art primitive is not an alpha mask alone. It is a coupled reusab
 
 ## Phasing
 
-1. Assemble full-map signal canvases with provenance.
-2. Segment alpha/fractal regions in full-map coordinates and link 074 components as evidence.
-3. Build a trainable Zarr/Parquet library of accepted candidates and rejected review rows.
+1. Assemble full-map signal canvases with provenance. Implemented for bounded dense canvases.
+2. Segment alpha/fractal regions in full-map coordinates and link 074 components as evidence. Implemented for bounded canvas outputs.
+3. Build a trainable Zarr/Parquet library of accepted candidates and rejected review rows. Implemented with fixed-size sample tensors, stable IDs, splits, rejected metadata, and a smoke loader.
 4. Join tileset texture/variant evidence and likely BLP brush/effect source candidates.
 5. Only then define the first model target.
+
+## Current Proof
+
+- Phase 1 compact Azeroth smoke: `0_5_3_3368`, 4-tile row window, alpha `(256,1024,4)`, height `(257,1025)`, MCLY `(16,64,4)`.
+- Phase 2 compact smoke: 38 regions, with 34 accepted candidates, 3 fractal members, and 1 composite chonker.
+- Phase 3 compact smoke: 37 trainable default samples, 1 rejected review row, split counts `train=30`, `val=3`, `test=4`; loader read 32 samples with no rejected labels.
+- Phase 3 output: `wow-viewer/output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/`.
 
 ## Training Rule
 
