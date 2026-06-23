@@ -260,8 +260,6 @@ public partial class ViewerApp
         if (ImGui.Begin("##Toolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
             ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
         {
-            DrawWorkspaceToolbarControls();
-
             TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
             LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
 
@@ -276,8 +274,7 @@ public partial class ViewerApp
                 {
                     ImGui.TextDisabled("Welcome");
                     ImGui.SameLine();
-                    ImGui.Text("Start with File > Open Game Folder (MPQ). Standalone Open File is mainly for direct model/WMO inspection.");
-                    ImGui.SameLine();
+                    ImGui.Text("Open a game folder or file from the left sidebar or File menu.");
                 }
                 else
                 {
@@ -295,29 +292,6 @@ public partial class ViewerApp
                                         ? "World scene"
                                         : "Loaded";
                     ImGui.Text(sceneLabel);
-                    ImGui.SameLine();
-                }
-
-                if (ImGui.Button("Open Game Folder..."))
-                {
-                    _showFolderInput = true;
-                    _folderInputBuf = string.IsNullOrWhiteSpace(_lastGameFolderPath) ? "" : _lastGameFolderPath;
-                }
-
-                ImGui.SameLine();
-                if (ImGui.Button("Open File..."))
-                    _wantOpenFile = true;
-
-                if (_dataSource != null)
-                {
-                    ImGui.SameLine();
-                    ImGui.TextColored(new Vector4(0.7f, 0.78f, 0.88f, 1f), $"Source ready: {_dataSource.Name}");
-
-                    if (_discoveredMaps.Count > 0)
-                    {
-                        ImGui.SameLine();
-                        ImGui.TextColored(new Vector4(0.65f, 0.82f, 0.68f, 1f), $"Maps: {_discoveredMaps.Count}");
-                    }
                 }
             }
         }
