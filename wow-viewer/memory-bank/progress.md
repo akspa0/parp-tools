@@ -62,7 +62,7 @@
 - The runner processes each build/map sequentially, writes per-target `canvas/` and `segments_raw/`, then writes cross-target exact dedupe under `dedupe/`. It supports `--maps all`.
 - Validated two-build Azeroth run: 7,317 raw components, 3,957 exact patterns, 233 duplicate patterns under `two_build_test1`.
 - Footprint correction to 8x8 alpha pixels: 2,025 raw components, 2,002 exact patterns, 17 duplicates under `two_build_test2`.
-- Full-map strip processing: `--tile-limit 0` loads every tile, writes tile-chunked Zarr canvas, segments horizontal strips, offsets bboxes to global coords, dedupes strip overlaps. Full Azeroth 0.5.3 (622 tiles) produced 12,906 raw components, 12,163 exact patterns, 566 exact duplicates under `full_map_Azeroth_0_5_3_3368`.
+- Full-map strip processing: `--tile-limit 0` loads every tile for each selected map, writes tile-chunked Zarr canvases, segments horizontal strips, offsets bboxes to global coords, dedupes strip overlaps. Full Azeroth 0.5.3 (622 tiles) produced 12,906 raw components, 12,163 exact patterns, 566 exact duplicates under `full_map_Azeroth_0_5_3_3368`. Canonical validation runs use `--maps all`.
 - Near-duplicate clustering: groups raw components by translation/mirror/rotation-invariant normalized binary thumbnails. Full Azeroth 0.5.3 collapsed to 11,976 clusters (668 duplicate clusters, max size 40) with a 16x16 thumbnail and radius 0.
 - Rectangle-page detection: `detect_rectangle_pages()` finds solid axis-aligned rectangular alpha pages (extent >= 0.85). Full Azeroth 0.5.3 produced 72 rectangle_page regions; with rectangles included near-duplicates became 688 clusters, max size 76.
 - Added `tests/test_analyze_fractal_raw_components.py`, `tests/test_fractal_near_dedupe.py`, and `tests/test_fractal_segments_rectangle.py`; pytest passes.
@@ -89,8 +89,9 @@
 
 ### Next
 
-- Tune near-dedupe thumbnail size and Hamming radius against contact-sheet review.
-- Tune rectangle-page thresholds against real overlays; some detected rectangles may be roads/rivers rather than authored paste pages.
+- Run canonical `--maps all` validation across both builds and review the resulting cross-map contact sheets/overlays.
+- Tune near-dedupe thumbnail size and Hamming radius against cross-map contact-sheet review.
+- Tune rectangle-page thresholds against cross-map overlays; some detected rectangles may be roads/rivers rather than authored paste pages.
 
 ## 2026-06-23 — Spec 075 V21 scar-mask segmentation Phase 1 complete
 

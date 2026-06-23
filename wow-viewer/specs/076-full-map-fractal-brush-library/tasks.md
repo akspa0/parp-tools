@@ -88,17 +88,17 @@
 - [x] T040 [P] Add unit tests for strip processing, bbox offset, and overlap dedupe.
 - [x] T041 [US2] Implement near-duplicate clustering (translation/rotation/mirror invariant) after exact dedupe, because exact matching is too brittle (only ~566 duplicates out of 12,906 raw components on full Azeroth 0.5.3).
 - [x] T042 [US2] Add a contact-sheet visualizer for near-duplicate clusters with the representative crop and up to N member examples.
-- [ ] T043 [US2] Tune near-dedupe thumbnail size and Hamming radius against human review of cluster quality.
+- [ ] T043 [US2] Tune near-dedupe thumbnail size and Hamming radius against human review of cluster quality across all maps.
 - [x] T044 [US2] Add rectangle/canvas-page boundary detection to separate obvious authored paste areas from connected alpha islands.
-- [ ] T045 [US2] Validate rectangle-page thresholds against full-map overlays and contact sheets; tune min_area, min_extent, and max_aspect_ratio.
+- [ ] T045 [US2] Validate rectangle-page thresholds against full-map overlays and contact sheets across all maps; tune min_area, min_extent, and max_aspect_ratio.
 
-**Checkpoint**: A full map can be analyzed in strips and produces global-canvas region metadata; exact dedupe is replaced/augmented by near-dedupe before model target selection.
+**Checkpoint**: Every map in each selected build index can be analyzed in strips and produces global-canvas region metadata; exact dedupe is replaced/augmented by near-dedupe before model target selection.
 
 ## Phase 5: Model Target Handoff
 
 **Purpose**: Define correct future model targets from the curated library, without training yet.
 
-- [ ] T032 [US5] Create `wow-viewer/specs/076-full-map-fractal-brush-library/model-targets.md` listing separate one-output future targets and required input signals.
+- [ ] T032 [US5] Create `wow-viewer/specs/076-full-map-fractal-brush-library/model-targets.md` listing separate one-output future targets and required input signals, based on cross-map near-duplicate clusters and rectangle-page review.
 - [ ] T033 [US5] Mark `wow-viewer/specs/075-scar-mask-segmentation/tasks.md` Phase 2/3 as deprecated unless explicitly reopened for coarse diagnostics.
 - [ ] T034 [US5] Update `wow-viewer/docs/architecture/full-map-fractal-brush-library-2026-06-23.md` with validation evidence and approved first model target.
 - [ ] T035 [US5] Update `wow-viewer/memory-bank/activeContext.md` and `wow-viewer/memory-bank/progress.md` after validation.

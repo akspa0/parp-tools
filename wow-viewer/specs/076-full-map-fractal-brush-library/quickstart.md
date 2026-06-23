@@ -114,35 +114,7 @@ Raw mode still computes bbox, tile coverage, height/normal stats, MCLY texture s
 
 ## One-Shot Raw Two-Build Dedupe
 
-Run raw component analysis for the two target builds and write one exact-shape dedupe catalog:
-
-```powershell
-uv run python scripts/analyze_fractal_raw_components.py `
-  --builds 0_5_3_3368 3_3_5_12340 `
-  --maps Azeroth `
-  --tile-limit 64 `
-  --threshold 0.05 `
-  --min-area 64 `
-  --min-footprint-px 8 `
-  --max-regions-per-layer 5000 `
-  --output-root ../output/analysis/full-map-fractal-brush-library/raw_two_build_Azeroth_tile64
-```
-
-To include LK Northrend in the same run while skipping maps absent from 0.5.3:
-
-```powershell
-uv run python scripts/analyze_fractal_raw_components.py `
-  --builds 0_5_3_3368 3_3_5_12340 `
-  --maps Azeroth Northrend `
-  --tile-limit 64 `
-  --threshold 0.05 `
-  --min-area 64 `
-  --min-footprint-px 8 `
-  --max-regions-per-layer 5000 `
-  --output-root ../output/analysis/full-map-fractal-brush-library/raw_two_build_Azeroth_Northrend_tile64
-```
-
-To analyze every map present in each build index with `--maps all`:
+The canonical full run analyzes **every map present in each build index** with `--maps all`. Per-map canvases are still assembled independently, but the dedupe/near catalogs are cross-map.
 
 ```powershell
 uv run python scripts/analyze_fractal_raw_components.py `
@@ -156,7 +128,23 @@ uv run python scripts/analyze_fractal_raw_components.py `
   --output-root ../output/analysis/full-map-fractal-brush-library/two_build_all_maps_tile64
 ```
 
-Validated real run on two builds (Azeroth only, `--tile-limit 64`, before 8x8 footprint correction):
+Use `--skip-missing-maps` (default true) so maps absent from one build are skipped instead of erroring.
+
+Bounded single-map smoke for fast iteration (still uses full-map strip processing for that one map if `--tile-limit 0`):
+
+```powershell
+uv run python scripts/analyze_fractal_raw_components.py `
+  --builds 0_5_3_3368 `
+  --maps Azeroth `
+  --tile-limit 64 `
+  --threshold 0.05 `
+  --min-area 64 `
+  --min-footprint-px 8 `
+  --max-regions-per-layer 5000 `
+  --output-root ../output/analysis/full-map-fractal-brush-library/smoke_Azeroth_tile64
+```
+
+Validated real runs on two builds (Azeroth only, `--tile-limit 64`, used for quick smoke proof):
 
 ```text
 output_root: ..\output\analysis\full-map-fractal-brush-library\two_build_test1
@@ -165,8 +153,6 @@ raw_components: 7317
 exact_patterns: 3957
 duplicate_patterns: 233
 ```
-
-Validated real run on two builds (Azeroth only, `--tile-limit 64`, after 8x8 footprint correction):
 
 ```text
 output_root: ..\output\analysis\full-map-fractal-brush-library\two_build_test2
@@ -204,7 +190,24 @@ Per-build/map artifacts are written under:
 
 ## Full-Map Strip Processing
 
-`--tile-limit 0` loads every tile for the selected map and processes the map in horizontal strips so memory stays bounded. The canvas is written as tile-chunked Zarr arrays; each strip is segmented independently, bboxes are translated back to global canvas coordinates, and strip-overlap duplicates are removed by bounding-box IoU.
+`--tile-limit 0` loads every tile for each selected map and processes every map in horizontal strips so memory stays bounded. Each map's canvas is written as tile-chunked Zarr arrays; each strip is segmented independently, bboxes are translated back to global canvas coordinates, and strip-overlap duplicates are removed by bounding-box IoU. Use `--maps all` to run every map in the build index.
+
+```powershell
+uv run python scripts/analyze_fractal_raw_components.py `
+  --builds 0_5_3_3368 3_3_5_12340 `
+  --maps all `
+  --tile-limit 0 `
+  --strip-tiles 8 `
+  --strip-overlap-alpha-tiles 1 `
+  --threshold 0.05 `
+  --min-area 64 `
+  --min-footprint-px 8 `
+  --max-regions-per-layer 5000 `
+  --output-root ../output/analysis/full-map-fractal-brush-library/full_two_build_all_maps `
+  --no-overlay
+```
+
+Single-map smoke for fast validation (Azeroth, 0.5.3.3368, 622 tiles, strip width 8):
 
 ```powershell
 uv run python scripts/analyze_fractal_raw_components.py `
@@ -221,7 +224,7 @@ uv run python scripts/analyze_fractal_raw_components.py `
   --no-overlay
 ```
 
-Validated local run (Azeroth, 0.5.3.3368, 622 tiles, strip width 8):
+Validated local single-map run (Azeroth, 0.5.3.3368, 622 tiles, strip width 8):
 
 ```text
 Analyzing build=0_5_3_3368 map=Azeroth
@@ -233,7 +236,7 @@ Analyzing build=0_5_3_3368 map=Azeroth
   strip 5: x_tiles=56..63 records=6
   regions=12906
 Raw two-build analysis complete
-  output_root: ..\output\analysis\full-map-fractal-brush-library\full_map_smoke
+  output_root: ..\output\analysis\full-map-fractal-brush-library\full_map_Azeroth_0_5_3_3368
   targets: 1
   raw_components: 12906
   exact_patterns: 12163
@@ -301,7 +304,7 @@ uv run python scripts/analyze_fractal_raw_components.py `
   --near-dedupe-radius 0
 ```
 
-Validated local run (full Azeroth 0.5.3):
+Validated local single-map run (full Azeroth 0.5.3):
 
 ```text
 raw_components: 12978
@@ -311,6 +314,8 @@ near_clusters: 11976
 near_duplicate_clusters: 688
 near_max_cluster_size: 76
 ```
+
+Use `--maps all` to detect rectangle pages across every map in each build index.
 
 Rectangle-page regions are labeled `rectangle_page` and are included in the region outputs and near-dedupe clustering. The rectangle-page overlay is always written when the detector is enabled:
 
@@ -340,16 +345,18 @@ uv run python scripts/analyze_fractal_raw_components.py `
   --near-dedupe-radius 0
 ```
 
-Validated local run (full Azeroth 0.5.3, thumbnail size 16, radius 0):
+Validated local single-map run (full Azeroth 0.5.3, thumbnail size 16, radius 0):
 
 ```text
 raw_components: 12906
 exact_patterns: 12163
 exact_duplicates: 566
 near_clusters: 11976
-near_duplicate_clusters: 668
-near_max_cluster_size: 40
+near_duplicate_clusters: 688
+near_max_cluster_size: 76
 ```
+
+Run `--maps all` to produce a cross-map near-cluster catalog. Per-map outputs are written under `<output-root>/<build>_<map>_tilefull/`, and the combined catalog lives under `<output-root>/dedupe/near/`.
 
 Key artifacts:
 

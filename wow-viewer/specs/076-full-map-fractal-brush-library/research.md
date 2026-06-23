@@ -57,3 +57,5 @@ Use existing BLP decode/tooling surfaces only. Do not rewrite BLP readers.
 - Full-map Azeroth 0.5.3 produced 12,906 raw components, 12,163 exact patterns, and only 566 exact duplicates. Exact matching is therefore too brittle; most repeated motifs are near-duplicates (translated, mirrored, or slightly varied), not pixel-identical bitmaps.
 - Near-duplicate clustering groups raw components by translation/mirror/rotation-invariant normalized binary thumbnails. With a 16x16 thumbnail and radius 0, full Azeroth 0.5.3 collapsed to 11,976 clusters (668 duplicate clusters, max size 40).
 - Rectangle-page detection finds solid axis-aligned rectangular alpha pages (extent >= 0.85) likely to be authored paste/boundary regions, separately from fractal connected components. Full Azeroth 0.5.3 produced 72 rectangle_page regions.
+- Canonical validation runs use `--maps all` to cover every map present in each selected build index; single-map numbers are smoke/proof points only.
+

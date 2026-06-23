@@ -16,7 +16,7 @@ Build the corrected terrain-art decomposition pipeline: assemble full-map signal
 
 **Storage**: Existing `wow-viewer/output/datasets/v18/<build>.zarr/` inputs. New outputs under `wow-viewer/output/analysis/full-map-fractal-brush-library/` and optionally a curated trainable store under `wow-viewer/output/datasets/fractal-brush-library/`.
 
-**Testing**: Unit tests for coordinate/provenance transforms and smoke CLI tests on bounded real V18 stores. Visual validation via overlays/contact sheets is required before training.
+**Testing**: Unit tests for coordinate/provenance transforms and smoke CLI tests on bounded real V18 stores. Visual validation via overlays/contact sheets is required before training; canonical validation runs cover all maps present in each build index (`--maps all`).
 
 **Target Platform**: Windows/PowerShell workstation with optional CUDA for signal precomputation.
 
@@ -110,7 +110,7 @@ wow-viewer/output/datasets/fractal-brush-library/<run-name>/
 6. Write `canvas_index.parquet` mapping tile extents and provenance metadata.
 7. Render debug overlays for tile seams and cross-tile continuity.
 
-**Validation Gate**: One bounded build/map canvas proves cross-tile continuity and provenance for valid tiles. Full-map strip processing proves the same for an entire continent without loading the full dense canvas into memory.
+**Validation Gate**: One bounded build/map canvas proves cross-tile continuity and provenance for valid tiles. Full validation runs across all maps present in each selected build index (`--maps all`). Full-map strip processing proves the same for an entire continent without loading the full dense canvas into memory.
 
 ### Phase 2 — Full-Map Fractal Segmentation And 074 Linkage
 
@@ -125,7 +125,7 @@ wow-viewer/output/datasets/fractal-brush-library/<run-name>/
 6. Write `fractal_regions.parquet` and `fractal_region_members.parquet`.
 7. Render review overlays by layer and curation label.
 
-**Validation Gate**: Review overlays show at least one preserved cross-tile structure and clearly separate chonkers/one-offs from accepted candidates. Full-map strip segmentation produces global-canvas bboxes and removes strip-overlap duplicates.
+**Validation Gate**: Review overlays show at least one preserved cross-tile structure and clearly separate chonkers/one-offs from accepted candidates. Full-map strip segmentation produces global-canvas bboxes and removes strip-overlap duplicates. Canonical runs cover every map in each build index.
 
 ### Phase 3 — Trainable Library Contract
 
