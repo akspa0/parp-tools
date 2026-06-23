@@ -1833,7 +1833,7 @@ public partial class ViewerApp
         return true;
     }
 
-    private void DrawModelInfoContent()
+    private void DrawModelInfoCoreContent()
     {
         if (string.IsNullOrEmpty(_modelInfo))
         {
@@ -1842,6 +1842,19 @@ public partial class ViewerApp
         }
 
         ImGui.TextWrapped(_modelInfo);
+
+        if (_renderer != null && _renderer.SubObjectCount > 0)
+        {
+            ImGui.Separator();
+            ImGui.Text("Visibility:");
+
+            DrawRendererVisibilityControls(_renderer, "standalone");
+        }
+    }
+
+    private void DrawModelInfoContent()
+    {
+        DrawModelInfoCoreContent();
 
         if (_renderer is IModelRenderer || _renderer is WmoRenderer)
         {
@@ -1902,14 +1915,6 @@ public partial class ViewerApp
         if (_renderer is MdxRenderer standaloneMdxRenderer)
         {
             DrawStandaloneCharacterVariationControls(standaloneMdxRenderer);
-        }
-
-        if (_renderer != null && _renderer.SubObjectCount > 0)
-        {
-            ImGui.Separator();
-            ImGui.Text("Visibility:");
-
-            DrawRendererVisibilityControls(_renderer, "standalone");
         }
     }
 
@@ -3602,12 +3607,22 @@ public partial class ViewerApp
     {
         ImGui.TextDisabled("Model Viewer — Info");
         ImGui.Separator();
-        if (string.IsNullOrWhiteSpace(_modelInfo))
+
+        // If a world model object is selected, show its details in the Model tab.
+        if (_worldScene?.SelectedInstance.HasValue == true
+            && _worldScene.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo
+            && !string.IsNullOrWhiteSpace(_selectedObjectInfo))
         {
-            ImGui.TextWrapped("No model loaded. Open a model file (M2/MDX/WMO) to see details here.");
+            ImGui.TextWrapped(_selectedObjectInfo);
             return;
         }
-        DrawModelInfoPanelContent();
+
+        if (string.IsNullOrWhiteSpace(_modelInfo))
+        {
+            ImGui.TextWrapped("No model loaded. Open a model file (M2/MDX/WMO) or select a world object to see details here.");
+            return;
+        }
+        DrawModelInfoCoreContent();
     }
 
     private void DrawModelAnimationsSubTab()
@@ -3629,14 +3644,62 @@ public partial class ViewerApp
     {
         ImGui.TextDisabled("Model Viewer — Actions");
         ImGui.Separator();
-        ImGui.TextWrapped("Frame Model, Auto-frame, and WMO doodad set controls will land in Phase G.");
+
+        if (_renderer == null || (!(_renderer is IModelRenderer) && !(_renderer is WmoRenderer)))
+        {
+            ImGui.TextDisabled("No model actions are available. Load a model (M2/MDX/WMO) first.");
+            return;
+        }
+
+        ImGui.Checkbox("Auto-frame on load", ref _autoFrameModelOnLoad);
+
+        if (ImGui.Button("Frame Model", new Vector2(120, 0)))
+            FrameCurrentModel();
+
+        if (_renderer is WmoRenderer wmoR && wmoR.DoodadSetCount > 0)
+        {
+            ImGui.Separator();
+            ImGui.Text("Doodad Set:");
+            int activeSet = wmoR.ActiveDoodadSet;
+            string currentSetName = wmoR.GetDoodadSetName(activeSet);
+            ImGui.SetNextItemWidth(-1);
+            if (ImGui.BeginCombo("##ActionsDoodadSet", currentSetName))
+            {
+                for (int s = 0; s < wmoR.DoodadSetCount; s++)
+                {
+                    bool selected = s == activeSet;
+                    if (ImGui.Selectable(wmoR.GetDoodadSetName(s), selected))
+                        wmoR.SetActiveDoodadSet(s);
+                    if (selected) ImGui.SetItemDefaultFocus();
+                }
+                ImGui.EndCombo();
+            }
+        }
     }
 
     private void DrawModelLodSubTab()
     {
         ImGui.TextDisabled("Model Viewer — LOD");
         ImGui.Separator();
-        ImGui.TextWrapped("LOD controls will land in Phase G.");
+
+        if (_renderer == null)
+        {
+            ImGui.TextDisabled("No model loaded.");
+            return;
+        }
+
+        ImGui.TextWrapped("Model-level LOD controls are not yet exposed. Use the global Render Quality window (Tools > Render Quality) for texture sampling and effect quality settings.");
+
+        ImGui.Separator();
+        ImGui.TextDisabled("Renderer");
+        ImGui.Text(_renderer.GetType().Name);
+
+        if (_renderer is IModelRenderer modelRenderer && modelRenderer.Animator != null)
+        {
+            var animator = modelRenderer.Animator;
+            ImGui.TextDisabled("Animation sequences");
+            ImGui.Text($"{animator.Sequences.Count} sequences");
+        }
     }
 
     private void DrawToolsSubTabContent()

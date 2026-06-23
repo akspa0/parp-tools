@@ -12436,6 +12436,10 @@ void main() {
 
         _selectedObjectType = type;
         _selectedObjectIndex = idx;
+
+        if (_useTabUi && _worldScene.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo)
+            OpenWorkbenchTab(ModelBottomTab.Info);
+
         _selectedObjectInfo = $"{type} [{idx}] {inst.ModelName}\n" +
             $"Path: {inst.ModelPath}\n" +
             $"UniqueId: {inst.UniqueId}\n" +

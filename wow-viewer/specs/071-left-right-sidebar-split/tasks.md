@@ -48,9 +48,9 @@
 
 ## Phase G: Model Viewer — Actions + LOD sub-tabs
 
-- [ ] T029 Actions sub-tab: Frame Model button, Auto-frame toggle, WMO doodad set selector.
-- [ ] T030 LOD sub-tab: distance/quality controls (best-effort, defer if too complex).
-- [ ] T031 Wire selected object → model viewer: when user clicks a model in the world, Model > Info tab auto-shows that model.
+- [x] T029 Actions sub-tab: Frame Model button, Auto-frame toggle, WMO doodad set selector.
+- [x] T030 LOD sub-tab: distance/quality controls (best-effort, defer if too complex).
+- [x] T031 Wire selected object → model viewer: when user clicks a model in the world, Model > Info tab auto-shows that model.
 
 ## Phase H: Memory bank + spec sync
 
