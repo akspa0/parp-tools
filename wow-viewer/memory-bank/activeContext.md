@@ -30,7 +30,9 @@ Viewer UI in flux. 069 (tab system) hit 16 phases. User feedback on 069:
 
 **Phase E (done)**: Model > Info sub-tab reuses `DrawModelInfoPanelContent` → `DrawModelInfoContent`. Added `Path:` line to `_modelInfo` for MDX, M2 runtime, WMO, and M2 camera path loads. Info panel shows type, version, name, vertices/triangles, materials/textures, plus existing animation/WMO controls. Placeholder shown when no model is loaded.
 
-**Next**: Phase F — Model Viewer Animations sub-tab.
+**Phase F (done)**: Extracted animation controls from Info into new `DrawModelAnimationControls` method used by Model > Animations sub-tab. Added `PlaybackSpeed` and `Loop` to `IAnimationController`, implemented in `MdxAnimator` and `M2RuntimeAnimator`. Animations tab now has sequence combo, large Play/Pause/Stop buttons, Previous/Next Key, Loop checkbox, speed buttons (0.25x/0.5x/1x/2x), timeline slider, and debug tree. SQL GameObject animation controls reused at the bottom when a SQL-spawned MDX object is selected.
+
+**Next**: Phase G — Model Viewer Actions + LOD sub-tabs, plus selected-object → Model tab wiring.
 
 **Cut branch:** `071-left-right-sidebar-split` from `069-viewer-ui-overhaul`.
 

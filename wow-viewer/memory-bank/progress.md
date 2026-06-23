@@ -1,5 +1,21 @@
 # Progress — wow-viewer
 
+## 2026-06-22 — Spec 071 Phase F: Model Viewer Animations sub-tab (complete)
+
+### What landed
+
+- Extracted animation controls from Info into new `DrawModelAnimationControls` method, called by Model > Animations sub-tab.
+- Added `PlaybackSpeed` and `Loop` to `IAnimationController`; implemented in `MdxAnimator` and `M2RuntimeAnimator`.
+- Animations tab: sequence combo, large Play/Pause/Stop, Previous/Next Key, Loop checkbox, speed buttons (0.25x/0.5x/1x/2x), timeline slider, duration, debug tree.
+- Reused `DrawSelectedSqlGameObjectAnimationControls` for SQL-spawned selected game objects.
+- Removed animation controls from Info sub-tab.
+- Build: 0 errors.
+- Commit `749ffea7` pushed to `071-left-right-sidebar-split`.
+
+### Next
+
+- Phase G: Model Viewer Actions + LOD sub-tabs, and selected-object → Model tab wiring.
+
 ## 2026-06-22 — Spec 071 Phase E: Model Viewer Info sub-tab (complete)
 
 ### What landed
@@ -10,10 +26,6 @@
 - Placeholder shown when no model loaded.
 - Build: 0 errors.
 - Commit `63cfcd8b` pushed to `071-left-right-sidebar-split`.
-
-### Next
-
-- Phase F: Model Viewer Animations sub-tab.
 
 ## 2026-06-22 — Spec 071 Phase D: 3 top tabs Model/World/Tools (complete)
 
