@@ -14,6 +14,7 @@ The V16.1/V17.1 files are implementation details. All public surfaces use V18 na
 Detailed command coverage lives in:
 - `docs/advanced-v16-workflows.md` — V16 dataset build/patch/validate commands
 - `specs/024-v18-canvas-paste-refinement-layer/` — full V18 spec
+- `../specs/074-alpha-brush-library/quickstart.md` — alpha-brush extraction and catalog guide
 
 ## V18 Dataset Builder Transition
 
@@ -86,6 +87,25 @@ V18 Model Training  (train_v18.py normal/height/holes/liquid/texcomp)
 cd wow-viewer/data-harvester
 uv sync
 ```
+
+## Alpha Brush Library Quickstart
+
+Spec `074-alpha-brush-library` extracts reusable MCAL alpha-mask brush components from existing V18 Zarr stores and writes a DINOv2-clustered JSONL catalog.
+
+Run a bounded two-build smoke:
+
+```powershell
+uv run python scripts/extract_alpha_brush_catalog.py `
+  --builds 0_5_3_3368 3_3_5_12340 `
+  --tile-limit 2 `
+  --fallback-k 16 `
+  --batch-size 32 `
+  --output-dir ../output/analysis/alpha-brush-library/phase2-two-build-smoke
+```
+
+Full operator guide: `../specs/074-alpha-brush-library/quickstart.md`.
+
+Schema reference: `../specs/074-alpha-brush-library/data-model.md`.
 
 ## Focused V18 Quickstart
 

@@ -4,7 +4,9 @@
 
 **Created**: 2026-06-20
 
-**Status**: Draft
+**Status**: Paused; superseded for current route by dataset-first `076-full-map-fractal-brush-library`
+
+> Pause note (2026-06-23): Fractal-aware height loss is not the next step. The immediate problem is dataset truth: full-map fractal/brush decomposition with alpha, height, normals, MCLY, and texture provenance. Resume height-loss work only after 076 validates a curated training library.
 
 **Input**: User request: "add spectral loss and fractal dimension aux head to V21 loss for fractal terrain priors"
 

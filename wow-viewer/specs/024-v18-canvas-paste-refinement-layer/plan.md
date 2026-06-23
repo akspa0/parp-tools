@@ -1,5 +1,7 @@
 # Implementation Plan: V18 Canvas Paste Refinement Layer
 
+> Historical plan note (2026-06-23): This plan remains useful prior art for paste mining, dedupe, composition graphs, and refined manifests. It is not the active brush-library plan. Current work must follow `wow-viewer/specs/076-full-map-fractal-brush-library/plan.md`, which adds full-map alpha fractal segmentation, 074 evidence linkage, chonker/one-off rejection, and tileset-variant provenance before model training.
+
 **Feature**: `024-v18-canvas-paste-refinement-layer`  
 **Spec**: `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/spec.md`
 

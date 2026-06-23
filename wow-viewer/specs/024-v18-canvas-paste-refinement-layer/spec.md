@@ -4,7 +4,9 @@
 
 **Created**: 2026-05-25
 
-**Status**: Implemented (Phase 1-6 complete)
+**Status**: Implemented historical surface; superseded for current brush-library direction by `076-full-map-fractal-brush-library`
+
+> Supersession note (2026-06-23): V18 paste mining remains useful prior art and comparison input. It is not the final brush-library truth because it does not fully solve full-map alpha fractal segmentation, 074 component linkage, tileset variant evidence, and curated rejection of chonkers/one-off details.
 
 ## Problem Statement
 

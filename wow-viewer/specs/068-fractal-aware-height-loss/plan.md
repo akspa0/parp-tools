@@ -1,5 +1,7 @@
 # Implementation Plan: Fractal-Aware Height Loss
 
+> Paused plan note (2026-06-23): Do not resume this as the next terrain-model step. The immediate blocker is dataset truth, now specified in `wow-viewer/specs/076-full-map-fractal-brush-library/plan.md`. Height-loss work can only resume after a curated full-map brush/fractal library is validated.
+
 **Branch**: `068-fractal-aware-height-loss` | **Date**: 2026-06-20 | **Spec**: `specs/068-fractal-aware-height-loss/spec.md`
 
 ## Summary
