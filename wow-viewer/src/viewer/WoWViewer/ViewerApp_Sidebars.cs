@@ -1,6 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
 using WoWViewer.DataSources;
+using WoWViewer.Workbench;
 using WoWViewer.Logging;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
@@ -3421,160 +3422,6 @@ public partial class ViewerApp
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // 069 Phase 1: Tab system stubs. Off by default; no behavior change yet.
-    // ═══════════════════════════════════════════════════════════════════════
-
-    private void DrawTopTabBar()
-    {
-        if (ImGui.BeginTabBar("##TopTabs", ImGuiTabBarFlags.None))
-        {
-            DrawTopTabButton(TopTab.Scene, "Scene");
-            DrawTopTabButton(TopTab.World, "World");
-            DrawTopTabButton(TopTab.Terrain, "Terrain");
-            DrawTopTabButton(TopTab.Pm4, "PM4");
-            DrawTopTabButton(TopTab.Archeology, "Archeology");
-            DrawTopTabButton(TopTab.Utilities, "Utilities");
-            ImGui.EndTabBar();
-        }
-    }
-
-    private void DrawTopTabButton(TopTab tab, string label)
-    {
-        bool selected = _activeTopTab == tab;
-        if (ImGui.TabItemButton(label, selected ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
-        {
-            _activeTopTab = tab;
-            _activeBottomTabIndex = 0;
-        }
-    }
-
-    private static string[] GetBottomTabLabels(TopTab top)
-    {
-        return top switch
-        {
-            TopTab.Scene => new[] { "Quick", "Selection", "Camera", "Settings", "Themes" },
-            TopTab.World => new[] { "Source", "Placements", "Tiles", "Overlays", "Selection Tools" },
-            TopTab.Terrain => new[] { "Layers", "Clipboard", "Analysis", "MCNK", "Weak Signal", "Export" },
-            TopTab.Pm4 => new[] { "Overlay", "Selection", "Correlation", "Info", "Match", "Alignment" },
-            TopTab.Archeology => new[] { "Range", "Layers", "Playback", "Capture" },
-            TopTab.Utilities => new[] { "Minimap", "Log", "Perf", "Render Quality", "Taxi", "Capture Automation", "Asset Catalog", "Runtime Stats" },
-            _ => Array.Empty<string>(),
-        };
-    }
-
-    private void DrawMainViewport()
-    {
-        // Phase 1 stub: nothing to do here yet. The 3D render happens
-        // outside the ImGui frame; this region just reserves space.
-    }
-
-    private void DrawTopTabContent()
-    {
-        // 069 Phase 9 fix: no more "Debug window" wrap. Render the context
-        // summary directly between the top tab bar and the sub-tab bar.
-        // The summary is a small line of text (status, current sub-tab, etc).
-        switch (_activeTopTab)
-        {
-            case TopTab.Scene:
-                DrawTopTabSceneSummary();
-                break;
-            case TopTab.World:
-                DrawTopTabWorldSummary();
-                break;
-            case TopTab.Terrain:
-                DrawTopTabTerrainSummary();
-                break;
-            case TopTab.Pm4:
-                DrawTopTabPm4Summary();
-                break;
-            case TopTab.Archeology:
-                DrawTopTabArcheologySummary();
-                break;
-            case TopTab.Utilities:
-                DrawTopTabUtilitiesSummary();
-                break;
-        }
-    }
-
-    private void DrawTopTabSceneSummary()
-    {
-        ImGui.TextDisabled("Scene — selection, camera, settings, themes");
-        ImGui.SameLine();
-        ImGui.TextDisabled($"  |  Target: {GetWorkspaceTargetSummary()}");
-    }
-
-    private void DrawTopTabWorldSummary()
-    {
-        string mapName = _terrainManager?.MapName
-            ?? _vlmTerrainManager?.MapName
-            ?? "—";
-        int loadedTiles = _terrainManager?.LoadedTileCount
-            ?? _vlmTerrainManager?.LoadedTileCount
-            ?? 0;
-
-        ImGui.TextDisabled($"World — {mapName}  |  Loaded tiles: {loadedTiles}  |  Sub-tab: {(WorldBottomTab)_activeBottomTabIndex}");
-    }
-
-    private void DrawTopTabTerrainSummary()
-    {
-        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-        if (renderer == null)
-        {
-            ImGui.TextDisabled("Terrain — no terrain loaded");
-            return;
-        }
-        int chunkCount = renderer.LoadedChunkCount;
-        ImGui.TextDisabled($"Terrain — {chunkCount} chunks loaded  |  Sub-tab: {(TerrainBottomTab)_activeBottomTabIndex}");
-    }
-
-    private void DrawTopTabPm4Summary()
-    {
-        if (_worldScene == null)
-        {
-            ImGui.TextDisabled("PM4 — no world loaded");
-            return;
-        }
-        ImGui.TextDisabled($"PM4 — {_worldScene.Pm4ObjectCount} objects  |  Visible: {_worldScene.Pm4VisibleObjectCount}  |  Sub-tab: {(Pm4BottomTab)_activeBottomTabIndex}");
-    }
-
-    private void DrawTopTabArcheologySummary()
-    {
-        if (_worldScene == null)
-        {
-            ImGui.TextDisabled("Archeology — no world loaded");
-            return;
-        }
-        if (_worldScene.TryGetUniqueIdFilterRange(out int minId, out int maxId, out int count))
-        {
-            string filterStatus = _worldScene.UniqueIdFilterEnabled
-                ? $"filter ON {_worldScene.UniqueIdFilterMin}..{_worldScene.UniqueIdFilterMax}"
-                : "filter off";
-            ImGui.TextDisabled($"Archeology — {count} placements, range {minId}..{maxId}  |  {filterStatus}");
-        }
-        else
-        {
-            ImGui.TextDisabled("Archeology — no scoped placements");
-        }
-    }
-
-    private void DrawTopTabUtilitiesSummary()
-    {
-        string label = (UtilitiesBottomTab)_activeBottomTabIndex switch
-        {
-            UtilitiesBottomTab.Minimap => "Minimap",
-            UtilitiesBottomTab.Log => "Log Viewer",
-            UtilitiesBottomTab.Perf => "Performance",
-            UtilitiesBottomTab.RenderQuality => "Render Quality",
-            UtilitiesBottomTab.Taxi => "Taxi",
-            UtilitiesBottomTab.CaptureAutomation => "Capture Automation",
-            UtilitiesBottomTab.AssetCatalog => "Asset Catalog",
-            UtilitiesBottomTab.RuntimeStats => "Runtime Stats",
-            _ => "—",
-        };
-        ImGui.TextDisabled($"Utilities — {label}");
-    }
-
     private void DrawRightSidebar()
     {
         // 071: right sidebar = workbench. Fixed position, full height.
@@ -3616,20 +3463,17 @@ public partial class ViewerApp
 
     private void DrawWorkbenchContent()
     {
-        // Top tab bar inside the workbench
+        // Top tab bar inside the workbench (071: Model / World / Tools)
         if (ImGui.BeginTabBar("##WorkbenchTopTabs", ImGuiTabBarFlags.None))
         {
-            DrawTopTabButton(TopTab.Scene, "Scene");
-            DrawTopTabButton(TopTab.World, "World");
-            DrawTopTabButton(TopTab.Terrain, "Terrain");
-            DrawTopTabButton(TopTab.Pm4, "PM4");
-            DrawTopTabButton(TopTab.Archeology, "Archeology");
-            DrawTopTabButton(TopTab.Utilities, "Utilities");
+            DrawTopTabButton(WorkbenchTab.Model, "Model");
+            DrawTopTabButton(WorkbenchTab.World, "World");
+            DrawTopTabButton(WorkbenchTab.Tools, "Tools");
             ImGui.EndTabBar();
         }
 
         // Sub-tab bar inside the workbench
-        string[] labels = GetBottomTabLabels(_activeTopTab);
+        string[] labels = WorkbenchNavigator.GetBottomTabLabels(_activeTopTab);
         if (labels.Length == 0) return;
 
         if (_activeBottomTabIndex < 0 || _activeBottomTabIndex >= labels.Length)
@@ -3654,27 +3498,120 @@ public partial class ViewerApp
         {
             switch (_activeTopTab)
             {
-                case TopTab.Scene:
-                    DrawSceneSubTabContent();
+                case WorkbenchTab.Model:
+                    DrawModelSubTabContent();
                     break;
-                case TopTab.World:
+                case WorkbenchTab.World:
                     DrawWorldSubTabContent();
                     break;
-                case TopTab.Terrain:
-                    DrawTerrainSubTabContent();
-                    break;
-                case TopTab.Pm4:
-                    DrawPm4SubTabContent();
-                    break;
-                case TopTab.Utilities:
-                    DrawUtilitiesSubTabContent();
-                    break;
-                case TopTab.Archeology:
-                    DrawArcheologySubTabContent();
+                case WorkbenchTab.Tools:
+                    DrawToolsSubTabContent();
                     break;
             }
         }
         ImGui.EndChild();
+    }
+
+    private void DrawTopTabButton(WorkbenchTab tab, string label)
+    {
+        bool selected = _activeTopTab == tab;
+        if (ImGui.TabItemButton(label, selected ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+        {
+            _activeTopTab = tab;
+            _activeBottomTabIndex = 0;
+        }
+    }
+
+    private void OpenWorkbenchTab(WorkbenchTab topTab, int bottomIndex = 0)
+    {
+        if (!_useTabUi)
+            return;
+
+        _activeTopTab = topTab;
+        string[] labels = WorkbenchNavigator.GetBottomTabLabels(topTab);
+        _activeBottomTabIndex = labels.Length > 0
+            ? Math.Clamp(bottomIndex, 0, labels.Length - 1)
+            : 0;
+        _showRightSidebar = true;
+        _workbenchOpen = true;
+    }
+
+    private void OpenWorkbenchTab(ModelBottomTab tab) => OpenWorkbenchTab(WorkbenchTab.Model, (int)tab);
+    private void OpenWorkbenchTab(WorldBottomTab tab) => OpenWorkbenchTab(WorkbenchTab.World, (int)tab);
+    private void OpenWorkbenchTab(ToolsBottomTab tab) => OpenWorkbenchTab(WorkbenchTab.Tools, (int)tab);
+
+    private void DrawModelSubTabContent()
+    {
+        switch ((ModelBottomTab)_activeBottomTabIndex)
+        {
+            case ModelBottomTab.Info:
+                DrawModelInfoSubTab();
+                break;
+            case ModelBottomTab.Animations:
+                DrawModelAnimationsSubTab();
+                break;
+            case ModelBottomTab.Actions:
+                DrawModelActionsSubTab();
+                break;
+            case ModelBottomTab.Lod:
+                DrawModelLodSubTab();
+                break;
+        }
+    }
+
+    private void DrawModelInfoSubTab()
+    {
+        ImGui.TextDisabled("Model Viewer — Info");
+        ImGui.Separator();
+        if (string.IsNullOrWhiteSpace(_modelInfo))
+        {
+            ImGui.TextWrapped("No model loaded. Open a model file (M2/MDX/WMO) to see details here.");
+            return;
+        }
+        DrawModelInfoPanelContent();
+    }
+
+    private void DrawModelAnimationsSubTab()
+    {
+        ImGui.TextDisabled("Model Viewer — Animations");
+        ImGui.Separator();
+        ImGui.TextWrapped("Animation controls will land in Phase F.");
+    }
+
+    private void DrawModelActionsSubTab()
+    {
+        ImGui.TextDisabled("Model Viewer — Actions");
+        ImGui.Separator();
+        ImGui.TextWrapped("Frame Model, Auto-frame, and WMO doodad set controls will land in Phase G.");
+    }
+
+    private void DrawModelLodSubTab()
+    {
+        ImGui.TextDisabled("Model Viewer — LOD");
+        ImGui.Separator();
+        ImGui.TextWrapped("LOD controls will land in Phase G.");
+    }
+
+    private void DrawToolsSubTabContent()
+    {
+        switch ((ToolsBottomTab)_activeBottomTabIndex)
+        {
+            case ToolsBottomTab.Quick:
+                DrawQuickControlsContent();
+                break;
+            case ToolsBottomTab.Archeology:
+                DrawArcheologySubTabContent();
+                break;
+            case ToolsBottomTab.Pm4:
+                DrawPm4SubTabContent();
+                break;
+            case ToolsBottomTab.Terrain:
+                DrawTerrainSubTabContent();
+                break;
+            case ToolsBottomTab.Utilities:
+                DrawUtilitiesSubTabContent();
+                break;
+        }
     }
 
     // (DrawQuickControlsPopoutBody removed — replaced by DrawQuickControlsContent in Scene > Quick sub-tab)
@@ -4080,28 +4017,6 @@ public partial class ViewerApp
         ImGui.TextDisabled("Click selection, frame, asset path actions for world objects.");
         ImGui.Separator();
         DrawSelectedObjectSummaryContent();
-    }
-
-    private void DrawSceneSubTabContent()
-    {
-        switch ((SceneBottomTab)_activeBottomTabIndex)
-        {
-            case SceneBottomTab.Quick:
-                DrawQuickControlsContent();
-                break;
-            case SceneBottomTab.Selection:
-                DrawSelectionPanelContent();
-                break;
-            case SceneBottomTab.Camera:
-                DrawCameraControlsContent();
-                break;
-            case SceneBottomTab.Settings:
-                DrawSceneSettingsContent();
-                break;
-            case SceneBottomTab.Themes:
-                DrawUiThemeSettingsContent();
-                break;
-        }
     }
 
     private void DrawQuickControlsContent()

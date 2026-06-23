@@ -33,6 +33,7 @@ using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 using WowViewer.Core.IO.Converters;
 using WowViewer.Core.IO.Maps;
 using WoWViewer.Terrain.Vlm;
+using WoWViewer.Workbench;
 using CoreMdxCollisionSummary = WowViewer.Core.Mdx.MdxCollisionSummary;
 using CoreMdxGeometryFile = WowViewer.Core.Mdx.MdxGeometryFile;
 using CoreMdxSummary = WowViewer.Core.Mdx.MdxSummary;
@@ -76,77 +77,7 @@ public partial class ViewerApp : IDisposable
         Pm4SceneGraph,
     }
 
-    // ── 069 Tab System (Phase 1) ────────────────────────────────────────────
-    // Top-level tab categories. Replaces ShellPanelId for new tab-driven UI.
-    // Sidebars/panels still exist behind _useTabUi = false during migration.
-    internal enum TopTab
-    {
-        Scene = 0,
-        World = 1,
-        Terrain = 2,
-        Pm4 = 3,
-        Archeology = 4,
-        Utilities = 5,
-    }
 
-    // Per-top-tab sub-tab enums. Each top tab has its own bottom tab set.
-    internal enum SceneBottomTab
-    {
-        Quick = 0,
-        Selection = 1,
-        Camera = 2,
-        Settings = 3,
-        Themes = 4,
-    }
-
-    internal enum WorldBottomTab
-    {
-        Source = 0,
-        Placements = 1,
-        Tiles = 2,
-        Overlays = 3,
-        SelectionTools = 4,
-    }
-
-    internal enum TerrainBottomTab
-    {
-        Layers = 0,
-        Clipboard = 1,
-        Analysis = 2,
-        Mcnk = 3,
-        WeakSignal = 4,
-        Export = 5,
-    }
-
-    internal enum Pm4BottomTab
-    {
-        Overlay = 0,
-        Selection = 1,
-        Correlation = 2,
-        Info = 3,
-        Match = 4,
-        Alignment = 5,
-    }
-
-    internal enum ArcheologyBottomTab
-    {
-        Range = 0,
-        Layers = 1,
-        Playback = 2,
-        Capture = 3,
-    }
-
-    internal enum UtilitiesBottomTab
-    {
-        Minimap = 0,
-        Log = 1,
-        Perf = 2,
-        RenderQuality = 3,
-        Taxi = 4,
-        CaptureAutomation = 5,
-        AssetCatalog = 6,
-        RuntimeStats = 7,
-    }
 
     private enum ShellPanelLane
     {
@@ -363,7 +294,7 @@ public partial class ViewerApp : IDisposable
 
     // 069 Phase 1: tab system state. On by default; can toggle off via View > Legacy Sidebar UI.
     private bool _useTabUi = true;
-    private TopTab _activeTopTab = TopTab.Scene;
+    private WorkbenchTab _activeTopTab = WorkbenchTab.World;
     private int _activeBottomTabIndex = 0;
 
     // Workbench popout (069 Phase 14: single resizable panel, no window sprawl)
@@ -1945,8 +1876,8 @@ void main() {
 
             if (ImGui.BeginMenu("Tools"))
             {
-                // 069 Phase 9 fix: floating-window toggles removed. Every tool
-                // lives in a tab. Only modal/dialog entries remain.
+                // 071: floating-window toggles removed. Every tool lives in a
+                // workbench tab under Tools > Panels or the relevant top tab.
 
                 if (ImGui.BeginMenu("Offline Data / Conversion"))
                 {
@@ -1987,6 +1918,53 @@ void main() {
                         PrepareWmoConverterDialogInputs();
                         _showWmoConverterDialog = true;
                     }
+
+                    ImGui.EndMenu();
+                }
+
+                ImGui.Separator();
+
+                if (ImGui.BeginMenu("Panels"))
+                {
+                    bool hasTerrain = _terrainManager != null || _vlmTerrainManager != null;
+                    bool hasWorld = _worldScene != null;
+
+                    if (ImGui.MenuItem("Model Info"))
+                        OpenWorkbenchTab(ModelBottomTab.Info);
+
+                    ImGui.Separator();
+
+                    if (ImGui.MenuItem("Log Viewer"))
+                        OpenWorkbenchTab(ToolsBottomTab.Utilities);
+                    if (ImGui.MenuItem("Perf"))
+                        OpenWorkbenchTab(ToolsBottomTab.Utilities);
+                    if (ImGui.MenuItem("Render Quality"))
+                        OpenWorkbenchTab(ToolsBottomTab.Utilities);
+
+                    ImGui.Separator();
+
+                    if (ImGui.MenuItem("Asset Catalog"))
+                        OpenWorkbenchTab(ToolsBottomTab.Utilities);
+                    if (ImGui.MenuItem("Capture Automation"))
+                        OpenWorkbenchTab(ToolsBottomTab.Utilities);
+                    if (ImGui.MenuItem("Taxi", hasWorld))
+                        OpenWorkbenchTab(ToolsBottomTab.Utilities);
+
+                    ImGui.Separator();
+
+                    if (ImGui.MenuItem("UniqueId Archeology", hasWorld))
+                        OpenWorkbenchTab(ToolsBottomTab.Archeology);
+
+                    ImGui.Separator();
+
+                    if (ImGui.MenuItem("Chunk Clipboard", hasTerrain))
+                        OpenWorkbenchTab(ToolsBottomTab.Terrain);
+                    if (ImGui.MenuItem("Terrain Analysis", hasTerrain))
+                        OpenWorkbenchTab(ToolsBottomTab.Terrain);
+                    if (ImGui.MenuItem("MCNK Explorer", hasTerrain))
+                        OpenWorkbenchTab(ToolsBottomTab.Terrain);
+                    if (ImGui.MenuItem("Weak Signal", hasTerrain))
+                        OpenWorkbenchTab(ToolsBottomTab.Terrain);
 
                     ImGui.EndMenu();
                 }
@@ -14685,8 +14663,8 @@ void main() {
             _archeologyApplyToNextCapture = settings.ArcheologyApplyToNextCapture;
             _archeologyApplyToVideoRecording = settings.ArcheologyApplyToVideoRecording;
             _useTabUi = settings.UseTabUi;
-            if (Enum.IsDefined(typeof(TopTab), settings.ActiveTopTab))
-                _activeTopTab = (TopTab)settings.ActiveTopTab;
+            if (Enum.IsDefined(typeof(WorkbenchTab), settings.ActiveTopTab))
+                _activeTopTab = (WorkbenchTab)settings.ActiveTopTab;
             _activeBottomTabIndex = Math.Max(0, settings.ActiveBottomTab);
             _showLeftSidebar = settings.ShowLeftSidebar;
             _showRightSidebar = settings.ShowRightSidebar;

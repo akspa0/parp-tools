@@ -23,12 +23,12 @@
 
 ## Phase D: 3 top tabs (Model/World/Tools)
 
-- [ ] T013 Replace `TopTab` enum (6 values) with 3 values: `Model`, `World`, `Tools`.
-- [ ] T014 Update `GetBottomTabLabels` to return sub-tab sets per new top tab.
-- [ ] T015 Map old 6-tab enums to new 3-tab. World tab gets: Source, Placements, Tiles, Overlays, Selection Tools. Tools tab gets: Quick, Archeology (range/layers/playback/capture), PM4 (overlay/selection/correlation/info/match/alignment), Terrain (layers/clipboard/analysis/MCNK/weak signal/export), Utilities (minimap/log/perf/render quality/taxi/capture automation/asset catalog/runtime stats). Model tab gets: Info, Animations, Actions, LOD.
-- [ ] T016 Update `DrawTopTabButton` and related dispatch.
-- [ ] T017 Update `DrawWorkbenchContent` sub-tab dispatch (now per new top tab).
-- [ ] T018 Tools menu integration: clicking Tools > Log Viewer calls `OpenWorkbenchTab(WorkbenchTab.Log)` instead of `_showLogViewer = true`. Same for Perf, Render Quality, Capture Automation, Taxi, Asset Catalog, UniqueIdArcheology, ChunkClipboard, TerrainAnalysis, McnkExplorer, WeakSignal, ModelInfo.
+- [x] T013 Replace `TopTab` enum (6 values) with 3 values: `Model`, `World`, `Tools`.
+- [x] T014 Update `GetBottomTabLabels` to return sub-tab sets per new top tab.
+- [x] T015 Map old 6-tab enums to new 3-tab. World tab gets: Source, Placements, Tiles, Overlays, Selection Tools. Tools tab gets: Quick, Archeology (range/layers/playback/capture), PM4 (overlay/selection/correlation/info/match/alignment), Terrain (layers/clipboard/analysis/MCNK/weak signal/export), Utilities (minimap/log/perf/render quality/taxi/capture automation/asset catalog/runtime stats). Model tab gets: Info, Animations, Actions, LOD.
+- [x] T016 Update `DrawTopTabButton` and related dispatch.
+- [x] T017 Update `DrawWorkbenchContent` sub-tab dispatch (now per new top tab).
+- [x] T018 Tools menu integration: clicking Tools > Log Viewer calls `OpenWorkbenchTab(ToolsBottomTab.Utilities)` instead of `_showLogViewer = true`. Same for Perf, Render Quality, Capture Automation, Taxi, Asset Catalog, UniqueIdArcheology, ChunkClipboard, TerrainAnalysis, McnkExplorer, WeakSignal, ModelInfo.
 
 ## Phase E: Model Viewer — Info sub-tab
 
