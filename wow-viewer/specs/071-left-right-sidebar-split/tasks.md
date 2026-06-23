@@ -8,11 +8,11 @@
 
 ## Phase B: Left sidebar
 
-- [ ] T004 Add `DrawLeftSidebar()` method in `ViewerApp_Sidebars.cs`.
-- [ ] T005 Position: x=0, y=topOffset, width=_leftSidebarWidth, height=viewport_height.
-- [ ] T006 Content: `DrawWorkspaceBarsPanelContent` + `DrawFileBrowserContent` + `DrawMapDiscoveryContent`.
-- [ ] T007 Call from `DrawUI()` before `DrawRightSidebar` (or current workbench popout).
-- [ ] T008 Suppress old DrawLeftSidebar logic (it was for the shell-panel sidebar system).
+- [x] T004 Add `DrawLeftSidebar()` method in `ViewerApp_Sidebars.cs`.
+- [x] T005 Position: x=0, y=topOffset, width=_leftSidebarWidth, height=viewport_height.
+- [x] T006 Content: `DrawWorkspaceBarsPanelContent` + `DrawFileBrowserContent` + `DrawMapDiscoveryContent`.
+- [x] T007 Call from `DrawUI()` before `DrawRightSidebar` (or current workbench popout).
+- [x] T008 Suppress old DrawLeftSidebar logic (it was for the shell-panel sidebar system).
 
 ## Phase C: Right sidebar (rename workbench)
 

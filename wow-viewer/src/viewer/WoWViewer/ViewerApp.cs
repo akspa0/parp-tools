@@ -1688,9 +1688,8 @@ void main() {
             // with top tab bar + bottom tab bar + central content area.
             if (_useTabUi)
             {
-                // 069 Phase 14: tab bars at top of master are hidden (the
-                // workbench has its own). Master just shows the 3D world +
-                // the workbench popout docked to the right edge.
+                // 071: left sidebar + right workbench squeeze the 3D viewport.
+                DrawLeftSidebar();
                 DrawWorkbenchPopout();
             }
             else if (_useDockspaceUi)
@@ -1701,7 +1700,7 @@ void main() {
             if (!_useTabUi)
             {
                 if (HasAnyShellPanelsInLane(ShellPanelLane.Left))
-                    DrawLeftSidebar();
+                    DrawLegacyLeftSidebar();
                 if (HasAnyShellPanelsInLane(ShellPanelLane.Right))
                     DrawRightSidebar();
 

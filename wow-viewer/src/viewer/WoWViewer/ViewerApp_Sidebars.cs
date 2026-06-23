@@ -435,6 +435,43 @@ public partial class ViewerApp
 
     private void DrawLeftSidebar()
     {
+        if (!_useTabUi)
+            return;
+
+        var io = ImGui.GetIO();
+        float topOffset = GetTopChromeHeight();
+        float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
+
+        _leftSidebarWidth = ClampFixedSidebarWidth(_leftSidebarWidth, isLeftSidebar: true, io.DisplaySize.X);
+        ImGui.SetNextWindowPos(new Vector2(0, topOffset), ImGuiCond.Always);
+        ImGui.SetNextWindowSize(new Vector2(_leftSidebarWidth, sidebarHeight), ImGuiCond.Always);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
+        if (ImGui.Begin("##LeftSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
+        {
+            DrawFixedSidebarWidthControl(
+                "Left Sidebar Width",
+                ref _leftSidebarWidth,
+                isLeftSidebar: true,
+                io.DisplaySize.X,
+                "Resize the left sidebar.");
+
+            ImGui.Separator();
+            DrawWorkspaceBarsPanelContent();
+
+            ImGui.Separator();
+            bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
+            DrawFileBrowserContent(hasWorldLoaded ? 260f : 0f);
+
+            ImGui.Separator();
+            if (_discoveredMaps.Count > 0)
+                DrawMapDiscoveryContent();
+        }
+        ImGui.End();
+        ImGui.PopStyleVar();
+    }
+
+    private void DrawLegacyLeftSidebar()
+    {
         if (!HasAnyShellPanelsInLane(ShellPanelLane.Left))
             return;
 
@@ -451,7 +488,7 @@ public partial class ViewerApp
         ImGui.SetNextWindowPos(new Vector2(0, topOffset), ImGuiCond.Always);
         ImGui.SetNextWindowSize(new Vector2(_leftSidebarWidth, sidebarHeight), ImGuiCond.Always);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
-        if (ImGui.Begin("##LeftSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
+        if (ImGui.Begin("##LegacyLeftSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
         {
             DrawFixedSidebarWidthControl(
                 "Navigator Width",
