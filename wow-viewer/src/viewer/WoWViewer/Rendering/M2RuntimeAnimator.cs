@@ -49,6 +49,10 @@ internal sealed class M2RuntimeAnimator : IAnimationController
 
     public bool IsPlaying { get; set; } = true;
 
+    public float PlaybackSpeed { get; set; } = 1.0f;
+
+    public bool Loop { get; set; } = true;
+
     public void SetSequence(int index)
     {
         if ((uint)index >= (uint)_sequences.Length)
@@ -101,9 +105,17 @@ internal sealed class M2RuntimeAnimator : IAnimationController
             return;
         }
 
-        _currentFrame += Math.Clamp(deltaMs, 0.0f, 100.0f);
+        _currentFrame += Math.Clamp(deltaMs, 0.0f, 100.0f) * Math.Clamp(PlaybackSpeed, 0.0f, 10.0f);
         if (_currentFrame > duration)
-            _currentFrame %= duration;
+        {
+            if (Loop)
+                _currentFrame %= duration;
+            else
+            {
+                _currentFrame = duration;
+                IsPlaying = false;
+            }
+        }
     }
 
     public int GetCurrentTimeMs()

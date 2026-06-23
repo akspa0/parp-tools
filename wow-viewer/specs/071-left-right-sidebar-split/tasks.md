@@ -39,12 +39,12 @@
 
 ## Phase F: Model Viewer — Animations sub-tab
 
-- [ ] T023 Add animation list view (sequence names from MdxAnimator/M2Animator).
-- [ ] T024 Add Play/Pause/Stop buttons (large, prominent).
-- [ ] T025 Add frame slider (current frame / total frames).
-- [ ] T026 Add speed control (0.25x, 0.5x, 1x, 2x).
-- [ ] T027 Reuse `DrawSelectedSqlGameObjectAnimationControls` for SQL-spawned objects.
-- [ ] T028 Add loop checkbox.
+- [x] T023 Add animation list view (sequence names from MdxAnimator/M2Animator).
+- [x] T024 Add Play/Pause/Stop buttons (large, prominent).
+- [x] T025 Add frame slider (current frame / total frames).
+- [x] T026 Add speed control (0.25x, 0.5x, 1x, 2x).
+- [x] T027 Reuse `DrawSelectedSqlGameObjectAnimationControls` for SQL-spawned objects.
+- [x] T028 Add loop checkbox.
 
 ## Phase G: Model Viewer — Actions + LOD sub-tabs
 

@@ -1904,111 +1904,150 @@ public partial class ViewerApp
             DrawStandaloneCharacterVariationControls(standaloneMdxRenderer);
         }
 
-        if (_renderer is IModelRenderer modelRenderer && modelRenderer.Animator != null && modelRenderer.Animator.Sequences.Count > 0)
-        {
-            ImGui.Separator();
-            ImGui.Text("Animation:");
-
-            var animator = modelRenderer.Animator;
-            int currentSeq = animator.CurrentSequence;
-            string currentSeqName = currentSeq >= 0 && currentSeq < animator.Sequences.Count
-                ? animator.Sequences[currentSeq].Name
-                : "None";
-
-            if (ImGui.BeginCombo("##AnimSequence", currentSeqName))
-            {
-                for (int s = 0; s < animator.Sequences.Count; s++)
-                {
-                    bool selected = s == currentSeq;
-                    string seqName = animator.Sequences[s].Name;
-                    if (string.IsNullOrEmpty(seqName))
-                        seqName = $"Sequence {s}";
-
-                    if (ImGui.Selectable(seqName, selected))
-                        animator.SetSequence(s);
-                    if (selected) ImGui.SetItemDefaultFocus();
-                }
-                ImGui.EndCombo();
-            }
-
-            if (currentSeq >= 0 && currentSeq < animator.Sequences.Count)
-            {
-                var seq = animator.Sequences[currentSeq];
-                float seqStart = seq.Time.Start;
-                float seqEnd = seq.Time.End;
-                float duration = seqEnd - seqStart;
-                float currentAbs = animator.CurrentFrame;
-                float currentRel = currentAbs - seqStart;
-
-                bool isPlaying = animator.IsPlaying;
-                DrawToolbarPopupButton("Animation Actions", isPlaying ? "playing" : "paused", "##AnimationActionsPopup", () =>
-                {
-                    if (ImGui.Button(isPlaying ? "Pause" : "Play"))
-                    {
-                        animator.IsPlaying = !isPlaying;
-                        ImGui.CloseCurrentPopup();
-                    }
-
-                    if (ImGui.Button("Previous Key"))
-                    {
-                        animator.IsPlaying = false;
-                        animator.StepToPrevKeyframe();
-                        ImGui.CloseCurrentPopup();
-                    }
-
-                    if (ImGui.Button("Next Key"))
-                    {
-                        animator.IsPlaying = false;
-                        animator.StepToNextKeyframe();
-                        ImGui.CloseCurrentPopup();
-                    }
-                });
-
-                ImGui.SetNextItemWidth(-1);
-                if (ImGui.SliderFloat("##Timeline", ref currentRel, 0, duration, $"Frame: {currentAbs:F0} / {seqEnd:F0}"))
-                {
-                    animator.IsPlaying = false;
-                    animator.CurrentFrame = seqStart + currentRel;
-                }
-
-                ImGui.Text($"Duration: {duration:F0}ms ({duration / 1000.0f:F2}s)");
-
-                if (ImGui.TreeNode("Animation Debug"))
-                {
-                    ImGui.Text($"Current Seq: {currentSeq}");
-                    ImGui.Text($"Current Abs Frame: {currentAbs:F2}");
-                    ImGui.Text($"Seq Range: [{seqStart}, {seqEnd}]");
-
-                    var stats = animator.GetTrackDebugStatsForCurrentSequence();
-                    ImGui.Text($"T keys total/in-range: {stats.TranslationKeysTotal}/{stats.TranslationKeysInSequence}");
-                    ImGui.Text($"R keys total/in-range: {stats.RotationKeysTotal}/{stats.RotationKeysInSequence}");
-                    ImGui.Text($"S keys total/in-range: {stats.ScalingKeysTotal}/{stats.ScalingKeysInSequence}");
-
-                    string minKey = stats.MinKeyTime?.ToString() ?? "n/a";
-                    string maxKey = stats.MaxKeyTime?.ToString() ?? "n/a";
-                    ImGui.Text($"All key range: [{minKey}, {maxKey}]");
-
-                    ImGui.Separator();
-                    ImGui.Text("Sequences (first 12):");
-                    int previewCount = Math.Min(12, animator.Sequences.Count);
-                    for (int i = 0; i < previewCount; i++)
-                    {
-                        var s = animator.Sequences[i];
-                        string name = string.IsNullOrWhiteSpace(s.Name) ? "<empty>" : s.Name;
-                        ImGui.Text($"{i}: {name} [{s.Time.Start}-{s.Time.End}]");
-                    }
-
-                    ImGui.TreePop();
-                }
-            }
-        }
-
         if (_renderer != null && _renderer.SubObjectCount > 0)
         {
             ImGui.Separator();
             ImGui.Text("Visibility:");
 
             DrawRendererVisibilityControls(_renderer, "standalone");
+        }
+    }
+
+    private void DrawModelAnimationControls()
+    {
+        if (_renderer is not IModelRenderer modelRenderer || modelRenderer.Animator == null)
+        {
+            ImGui.TextDisabled("No animatable model is loaded.");
+            return;
+        }
+
+        var animator = modelRenderer.Animator;
+        if (!animator.HasAnimation || animator.Sequences.Count == 0)
+        {
+            ImGui.TextDisabled("The loaded model has no animation sequences.");
+            return;
+        }
+
+        int currentSeq = animator.CurrentSequence;
+        string currentSeqName = currentSeq >= 0 && currentSeq < animator.Sequences.Count
+            ? animator.Sequences[currentSeq].Name
+            : "None";
+
+        ImGui.Text("Sequence");
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.BeginCombo("##AnimSequence", currentSeqName))
+        {
+            for (int s = 0; s < animator.Sequences.Count; s++)
+            {
+                bool selected = s == currentSeq;
+                string seqName = animator.Sequences[s].Name;
+                if (string.IsNullOrEmpty(seqName))
+                    seqName = $"Sequence {s}";
+
+                if (ImGui.Selectable(seqName, selected))
+                    animator.SetSequence(s);
+                if (selected) ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+
+        if (currentSeq < 0 || currentSeq >= animator.Sequences.Count)
+            return;
+
+        var seq = animator.Sequences[currentSeq];
+        float seqStart = seq.Time.Start;
+        float seqEnd = seq.Time.End;
+        float duration = seqEnd - seqStart;
+        float currentAbs = Math.Clamp(animator.CurrentFrame, seqStart, seqEnd);
+        float currentRel = currentAbs - seqStart;
+
+        bool isPlaying = animator.IsPlaying;
+
+        ImGui.Separator();
+        ImGui.Text("Playback");
+
+        // Large prominent Play / Pause / Stop buttons
+        if (ImGui.Button(isPlaying ? "Pause" : "Play", new Vector2(80, 0)))
+            animator.IsPlaying = !isPlaying;
+        ImGui.SameLine();
+        if (ImGui.Button("Stop", new Vector2(80, 0)))
+        {
+            animator.IsPlaying = false;
+            animator.CurrentFrame = seqStart;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Previous Key"))
+        {
+            animator.IsPlaying = false;
+            animator.StepToPrevKeyframe();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Next Key"))
+        {
+            animator.IsPlaying = false;
+            animator.StepToNextKeyframe();
+        }
+
+        // Loop checkbox
+        bool loop = animator.Loop;
+        if (ImGui.Checkbox("Loop", ref loop))
+            animator.Loop = loop;
+
+        // Speed control
+        ImGui.SameLine();
+        float speed = animator.PlaybackSpeed;
+        string[] speedLabels = { "0.25x", "0.5x", "1x", "2x" };
+        float[] speedValues = { 0.25f, 0.5f, 1.0f, 2.0f };
+        ImGui.Text("Speed");
+        for (int i = 0; i < speedValues.Length; i++)
+        {
+            ImGui.SameLine();
+            bool selected = Math.Abs(speed - speedValues[i]) < 0.001f;
+            if (selected)
+                ImGui.PushStyleColor(ImGuiCol.Button, ImGui.GetColorU32(ImGuiCol.ButtonActive));
+            if (ImGui.Button(speedLabels[i]))
+                animator.PlaybackSpeed = speedValues[i];
+            if (selected)
+                ImGui.PopStyleColor();
+        }
+
+        // Timeline slider
+        ImGui.Separator();
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.SliderFloat("##Timeline", ref currentRel, 0, duration, $"Frame: {currentAbs:F0} / {seqEnd:F0}"))
+        {
+            animator.IsPlaying = false;
+            animator.CurrentFrame = seqStart + currentRel;
+        }
+
+        ImGui.Text($"Duration: {duration:F0}ms ({duration / 1000.0f:F2}s)");
+
+        if (ImGui.TreeNode("Animation Debug"))
+        {
+            ImGui.Text($"Current Seq: {currentSeq}");
+            ImGui.Text($"Current Abs Frame: {currentAbs:F2}");
+            ImGui.Text($"Seq Range: [{seqStart}, {seqEnd}]");
+
+            var stats = animator.GetTrackDebugStatsForCurrentSequence();
+            ImGui.Text($"T keys total/in-range: {stats.TranslationKeysTotal}/{stats.TranslationKeysInSequence}");
+            ImGui.Text($"R keys total/in-range: {stats.RotationKeysTotal}/{stats.RotationKeysInSequence}");
+            ImGui.Text($"S keys total/in-range: {stats.ScalingKeysTotal}/{stats.ScalingKeysInSequence}");
+
+            string minKey = stats.MinKeyTime?.ToString() ?? "n/a";
+            string maxKey = stats.MaxKeyTime?.ToString() ?? "n/a";
+            ImGui.Text($"All key range: [{minKey}, {maxKey}]");
+
+            ImGui.Separator();
+            ImGui.Text("Sequences (first 12):");
+            int previewCount = Math.Min(12, animator.Sequences.Count);
+            for (int i = 0; i < previewCount; i++)
+            {
+                var s = animator.Sequences[i];
+                string name = string.IsNullOrWhiteSpace(s.Name) ? "<empty>" : s.Name;
+                ImGui.Text($"{i}: {name} [{s.Time.Start}-{s.Time.End}]");
+            }
+
+            ImGui.TreePop();
         }
     }
 
@@ -3575,7 +3614,15 @@ public partial class ViewerApp
     {
         ImGui.TextDisabled("Model Viewer — Animations");
         ImGui.Separator();
-        ImGui.TextWrapped("Animation controls will land in Phase F.");
+
+        DrawModelAnimationControls();
+
+        // If a SQL-spawned game object is selected in the world, expose its animation controls too.
+        if (_worldScene?.SelectedInstance.HasValue == true && _worldScene.SelectedObjectType == Terrain.ObjectType.Mdx)
+        {
+            ImGui.Separator();
+            DrawSelectedSqlGameObjectAnimationControls();
+        }
     }
 
     private void DrawModelActionsSubTab()

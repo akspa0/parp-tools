@@ -53,6 +53,12 @@ public class MdxAnimator : IAnimationController
     /// <summary>Whether animation is currently playing</summary>
     public bool IsPlaying { get; set; } = true;
 
+    /// <summary>Playback speed multiplier. 1.0 = normal speed.</summary>
+    public float PlaybackSpeed { get; set; } = 1.0f;
+
+    /// <summary>When true, the current sequence loops.</summary>
+    public bool Loop { get; set; } = true;
+
     public static bool HasAnimationData(MdxFile mdx)
     {
         if (mdx.Bones.Any(b =>
@@ -361,26 +367,32 @@ public class MdxAnimator : IAnimationController
             return;
         }
 
+        float scaledDelta = deltaMs * Math.Clamp(PlaybackSpeed, 0.0f, 10.0f);
+
         if (_mdx.Sequences.Count > 0)
         {
             var seq = _mdx.Sequences[_sequenceIndex];
-            _currentFrame += deltaMs;
+            _currentFrame += scaledDelta;
 
-            // Loop animation
             if (_currentFrame > seq.Time.End)
             {
                 float duration = seq.Time.End - seq.Time.Start;
-                if (duration > 0)
+                if (Loop && duration > 0)
+                {
                     _currentFrame = seq.Time.Start + ((_currentFrame - seq.Time.Start) % duration);
+                }
                 else
-                    _currentFrame = seq.Time.Start;
+                {
+                    _currentFrame = seq.Time.End;
+                    IsPlaying = false;
+                }
             }
         }
 
         // Update global sequences
         for (int i = 0; i < _globalSeqFrames.Length; i++)
         {
-            _globalSeqFrames[i] += deltaMs;
+            _globalSeqFrames[i] += scaledDelta;
             float gsDuration = _mdx.GlobalSequences[i];
             if (gsDuration > 0 && _globalSeqFrames[i] > gsDuration)
                 _globalSeqFrames[i] %= gsDuration;
