@@ -1,5 +1,20 @@
 # Progress — wow-viewer
 
+## 2026-06-22 — Spec 071 Phase B: Left sidebar (complete)
+
+### What landed
+
+- New tab-mode `DrawLeftSidebar()` in `ViewerApp_Sidebars.cs`: fixed window at x=0, full viewport height, width `_leftSidebarWidth`.
+- Content: `DrawWorkspaceBarsPanelContent` (source + open buttons), `DrawFileBrowserContent`, `DrawMapDiscoveryContent`.
+- Legacy shell-panel left sidebar renamed to `DrawLegacyLeftSidebar()` and gated to `!_useTabUi`.
+- `DrawUI()` now calls `DrawLeftSidebar()` before `DrawWorkbenchPopout()` when `_useTabUi` is active.
+- Build: 0 errors.
+- Commit `78ec3275` pushed to `071-left-right-sidebar-split`.
+
+### Next
+
+- Phase C: rename `DrawWorkbenchPopout` → `DrawRightSidebar`, anchor to right edge with `_rightSidebarWidth`.
+
 ## 2026-06-22 — Spec 071 Phase A: 3D viewport math (complete)
 
 ### What landed

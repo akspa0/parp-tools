@@ -27,7 +27,9 @@ Viewer UI in flux. 069 (tab system) hit 16 phases. User feedback on 069:
 
 **Phase A (done)**: `TryGetSceneViewportRect` now subtracts `_leftSidebarWidth` and `_rightSidebarWidth` when `_useTabUi` is active and the sidebars are visible. Legacy (`!_useTabUi`) viewport math unchanged.
 
-**Next**: Phase B — add `DrawLeftSidebar` in `ViewerApp_Sidebars.cs` with workspace bars + file browser + world maps content.
+**Phase B (done)**: New `DrawLeftSidebar()` renders a fixed left panel in tab mode with `DrawWorkspaceBarsPanelContent`, `DrawFileBrowserContent`, and `DrawMapDiscoveryContent`. The legacy shell-panel left sidebar was renamed to `DrawLegacyLeftSidebar()` and is only used in legacy/dockspace mode.
+
+**Next**: Phase C — rename `DrawWorkbenchPopout` → `DrawRightSidebar`, anchor it to the right edge using `_rightSidebarWidth`, and update the default width to ~480px.
 
 **Salvage from 069:**
 - Tab data model + dispatch
