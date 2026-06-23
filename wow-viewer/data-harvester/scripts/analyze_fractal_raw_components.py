@@ -51,6 +51,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-regions-per-layer", type=int, default=5000)
     parser.add_argument("--skip-missing-maps", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--no-overlay", action="store_true")
+    parser.add_argument("--visualize", action="store_true", help="Render contact sheets for the dedupe catalog after analysis.")
+    parser.add_argument("--max-patterns", type=int, default=200)
+    parser.add_argument("--max-per-pattern", type=int, default=6)
+    parser.add_argument("--repeated-only", action="store_true")
     return parser.parse_args()
 
 
@@ -135,6 +139,32 @@ def main() -> None:
     print(f"  raw_components: {dedupe_summary['raw_component_count']}", flush=True)
     print(f"  exact_patterns: {dedupe_summary['exact_pattern_count']}", flush=True)
     print(f"  duplicate_patterns: {dedupe_summary['duplicate_pattern_count']}", flush=True)
+
+    if bool(args.visualize):
+        _run_visualizer(out_root, args)
+
+
+def _run_visualizer(out_root: Path, args: argparse.Namespace) -> None:
+    import subprocess
+
+    script = Path(__file__).resolve().parent / "visualize_fractal_raw_patterns.py"
+    contact_dir = out_root / "contact_sheets"
+    cmd = [
+        sys.executable,
+        str(script),
+        "--analysis-root",
+        str(out_root),
+        "--output-dir",
+        str(contact_dir),
+        "--max-patterns",
+        str(int(args.max_patterns)),
+        "--max-per-pattern",
+        str(int(args.max_per_pattern)),
+    ]
+    if bool(args.repeated_only):
+        cmd.append("--repeated-only")
+    print("Rendering contact sheets...", flush=True)
+    subprocess.run(cmd, check=True)
 
 
 def _available_maps(zarr_path: Path) -> list[str]:

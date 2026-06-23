@@ -189,34 +189,51 @@ Per-build/map artifacts are written under:
 <output-root>/<build>_<map>_tile<N>/segments_raw/
 ```
 
-## Visualizing Raw Exact Patterns
+## One-Command Analysis + Visualization
 
-Render contact sheets for the cross-build exact-dedupe catalog:
+Run the full two-build raw analysis and render contact sheets in one command:
+
+```powershell
+uv run python scripts/analyze_fractal_raw_components.py `
+  --builds 0_5_3_3368 3_3_5_12340 `
+  --maps Azeroth `
+  --tile-limit 64 `
+  --threshold 0.05 `
+  --min-area 64 `
+  --min-footprint-px 8 `
+  --max-regions-per-layer 5000 `
+  --output-root ../output/analysis/full-map-fractal-brush-library/two_build_Azeroth_visualized `
+  --visualize `
+  --repeated-only
+```
+
+This is equivalent to running `analyze_fractal_raw_components.py` followed by `visualize_fractal_raw_patterns.py`. Artifacts are written under:
+
+```text
+<output-root>/dedupe/
+<output-root>/<build>_<map>_tile<N>/canvas/
+<output-root>/<build>_<map>_tile<N>/segments_raw/
+<output-root>/contact_sheets/
+```
+
+## Visualizing Raw Exact Patterns Separately
+
+If you already ran analysis, render contact sheets with:
 
 ```powershell
 uv run python scripts/visualize_fractal_raw_patterns.py `
-  --analysis-root ../output/analysis/full-map-fractal-brush-library/two_build_test1 `
-  --output-dir ../output/analysis/full-map-fractal-brush-library/two_build_test1/contact_sheets `
+  --analysis-root ../output/analysis/full-map-fractal-brush-library/two_build_test2 `
+  --output-dir ../output/analysis/full-map-fractal-brush-library/two_build_test2/contact_sheets `
   --max-patterns 200 `
   --max-per-pattern 6 `
   --repeated-only
 ```
 
-Validated on `two_build_test1`:
+Validated on `two_build_test2`:
 
 ```text
-patterns_rendered: 200
-pages: 5
-```
-
-Key artifacts:
-
-```text
-<output-root>/contact_sheets/raw_exact_patterns_page_001.png
-<output-root>/contact_sheets/raw_exact_patterns_page_002.png
-...
-<output-root>/contact_sheets/index.html
-<output-root>/contact_sheets/summary.json
+patterns_rendered: 17
+pages: 1
 ```
 
 Use `--min-members N` to require patterns with at least N raw-component members, or omit `--repeated-only` to render unique patterns too.
