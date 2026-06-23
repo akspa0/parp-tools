@@ -11639,7 +11639,8 @@ void main() {
             : "MDX (Alpha 0.5.3)";
         string statusTypeLabel = isM2AdapterModel ? "M2" : "MDX";
 
-        _modelInfo = $"Type: {typeLabel}\n" +
+        _modelInfo = $"Path: {virtualPath ?? _loadedFileName ?? "<unknown>"}\n" +
+                     $"Type: {typeLabel}\n" +
                      $"Version: {versionLabel}\n" +
                      $"Name: {modelName}\n\n" +
                      $"Geosets: {geosetCount} ({validGeosets} valid)\n" +
@@ -11720,7 +11721,8 @@ void main() {
             ? "M2 (wow-viewer static renderer in WoWViewer)"
             : "M2 (wow-viewer runtime + legacy draw backend)";
 
-        _modelInfo = $"Type: {runtimeTypeLabel}\n" +
+        _modelInfo = $"Path: {virtualPath ?? runtimeModel.Model.Identity.CanonicalModelPath}\n" +
+                     $"Type: {runtimeTypeLabel}\n" +
                      $"Version: {runtimeModel.Model.Version}\n" +
                      $"Name: {runtimeModel.Model.ModelName ?? Path.GetFileNameWithoutExtension(runtimeModel.Model.Identity.CanonicalModelPath)}\n\n" +
                      $"Sections: {sectionCount}\n" +
@@ -11761,6 +11763,7 @@ void main() {
             FrameCurrentModel();
 
         var info = new StringBuilder();
+        info.AppendLine($"Path: {virtualPath}");
         info.AppendLine("Type: M2 camera path");
         info.AppendLine($"Version: {cameraModel.Version}");
         info.AppendLine($"Name: {cameraModel.ModelName ?? Path.GetFileNameWithoutExtension(cameraModel.Identity.CanonicalModelPath)}");
@@ -11861,7 +11864,8 @@ void main() {
         _camera.Yaw = 180f;
         _camera.Pitch = -10f;
 
-        _modelInfo = $"Type: WMO v{wmo.Version}\n\n" +
+        _modelInfo = $"Path: {_loadedFileName ?? "<unknown>"}\n" +
+                     $"Type: WMO v{wmo.Version}\n\n" +
                      $"Groups: {wmo.Groups.Count}\n" +
                      $"Vertices: {totalVerts:N0}\n" +
                      $"Triangles: {totalTris:N0}\n\n" +

@@ -32,10 +32,10 @@
 
 ## Phase E: Model Viewer — Info sub-tab
 
-- [ ] T019 Add `ModelBottomTab` enum (Info, Animations, Actions, LOD).
-- [ ] T020 Reuse `DrawModelInfoContent` for Info sub-tab.
-- [ ] T021 Show model path, type, vertex/triangle count, materials, textures.
-- [ ] T022 If no model loaded: show "No model loaded" placeholder.
+- [x] T019 Add `ModelBottomTab` enum (Info, Animations, Actions, LOD).
+- [x] T020 Reuse `DrawModelInfoContent` for Info sub-tab.
+- [x] T021 Show model path, type, vertex/triangle count, materials, textures.
+- [x] T022 If no model loaded: show "No model loaded" placeholder.
 
 ## Phase F: Model Viewer — Animations sub-tab
 
