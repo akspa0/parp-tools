@@ -14,9 +14,9 @@
 
 ### Phase 1 status
 
-- Phase 1 is implemented and validated for a bounded compact tile window.
-- Full-continent chunk streaming is intentionally deferred until the coordinate/provenance proof is reviewed.
-- Next route: review Phase 1 artifacts, then start Phase 2 full-map fractal segmentation if accepted.
+- Phase 1 is implemented and validated for bounded compact tile windows and full-map strip processing.
+- Full-continent chunk streaming is now implemented via tile-chunked Zarr writes and horizontal strip segmentation.
+- Next route: review full-map strip artifacts, then improve dedupe/clustering before Phase 5 model target selection.
 
 ### Phase 2 implementation
 
@@ -30,8 +30,8 @@
 
 ### Phase 2 status
 
-- Phase 2 is implemented and validated for the bounded compact canvas.
-- Next route: inspect `fractal_regions_overlay.png` and metadata before starting Phase 3 trainable library construction.
+- Phase 2 is implemented and validated for bounded compact canvases and full-map strip views.
+- Next route: inspect `fractal_regions_overlay.png` and metadata; add near-duplicate clustering because exact dedupe is too brittle.
 
 ### Phase 3 implementation
 
@@ -61,6 +61,9 @@
 - Added `src/harvester/fractal_raw_analysis.py`, `scripts/analyze_fractal_raw_components.py`, and `scripts/visualize_fractal_raw_patterns.py`.
 - The runner processes each build/map sequentially, writes per-target `canvas/` and `segments_raw/`, then writes cross-target exact dedupe under `dedupe/`. It supports `--maps all`.
 - Validated two-build Azeroth run: 7,317 raw components, 3,957 exact patterns, 233 duplicate patterns under `two_build_test1`.
+- Footprint correction to 8x8 alpha pixels: 2,025 raw components, 2,002 exact patterns, 17 duplicates under `two_build_test2`.
+- Full-map strip processing: `--tile-limit 0` loads every tile, writes tile-chunked Zarr canvas, segments horizontal strips, offsets bboxes to global coords, dedupes strip overlaps. Full Azeroth 0.5.3 (622 tiles) produced 12,906 raw components, 12,163 exact patterns, 566 exact duplicates under `full_map_smoke`.
+- Added `tests/test_analyze_fractal_raw_components.py`; pytest passes.
 - Contact-sheet visualizer renders repeated exact-pattern pages from the dedupe catalog (200 patterns / 5 pages proven).
 - Use these for broad inspection; they still detect connected alpha/fractal components, not obvious rectangular paste/canvas-page boundaries.
 
@@ -83,7 +86,8 @@
 
 ### Next
 
-- Implement rectangle/canvas-page boundary detection next; the current raw/curated segmenters still detect connected alpha/fractal components, not obvious pasted rectangular authoring pages.
+- Implement near-duplicate clustering for raw components; exact alpha-shape dedupe is too brittle (only ~4% duplicates on full Azeroth 0.5.3).
+- Implement rectangle/canvas-page boundary detection; the current raw/curated segmenters still detect connected alpha/fractal components, not obvious pasted rectangular authoring pages.
 
 ## 2026-06-23 — Spec 075 V21 scar-mask segmentation Phase 1 complete
 
@@ -269,7 +273,7 @@ All phases built clean and pushed to `071-left-right-sidebar-split`.
 - `069-viewer-ui-overhaul` — legacy tab UI work, salvageable concepts extracted into 071.
 - `074-alpha-brush-library` — implemented candidate/evidence extraction, deprecated as primary brush truth.
 - `075-scar-mask-segmentation` — diagnostic baseline only, deprecated as primary model route.
-- `076-full-map-fractal-brush-library` — active dataset-truth plan; next implementation starts with Phase 1 canvas/provenance only.
+- `076-full-map-fractal-brush-library` — active dataset-truth plan; Phase 1-3 and full-map strip processing are implemented.
 
 ## Out-of-Phase Work
 

@@ -77,6 +77,19 @@
 
 ---
 
+## Phase 4B: Full-Map Strip Processing And Near-Dedupe
+
+**Purpose**: Remove the artificial `--tile-limit` bound and process entire maps in memory-bounded strips.
+
+- [x] T036 [US1/US2] Add chunked full-map canvas writer (`create_chunked_canvas_group`, `write_tile_to_canvas`) in `fractal_canvas.py` so entire continents can be assembled without dense in-memory arrays.
+- [x] T037 [US1/US2] Add `--tile-limit 0` support to `analyze_fractal_raw_components.py`, loading every tile for a map from the build index.
+- [x] T038 [US1/US2] Implement horizontal strip segmentation in `analyze_fractal_raw_components.py` with configurable strip width and overlap, translating strip-local bboxes back to global canvas coordinates.
+- [x] T039 [US1/US2] Add strip-overlap region deduplication by bounding-box IoU.
+- [x] T040 [P] Add unit tests for strip processing, bbox offset, and overlap dedupe.
+- [ ] T041 [US2] Implement near-duplicate clustering (translation/rotation/mirror invariant) after exact dedupe, because exact matching is too brittle (only ~566 duplicates out of 12,906 raw components on full Azeroth 0.5.3).
+
+**Checkpoint**: A full map can be analyzed in strips and produces global-canvas region metadata; exact dedupe is replaced/augmented by near-dedupe before model target selection.
+
 ## Phase 5: Model Target Handoff
 
 **Purpose**: Define correct future model targets from the curated library, without training yet.

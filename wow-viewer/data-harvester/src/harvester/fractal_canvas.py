@@ -106,7 +106,7 @@ def load_tile_records(
             )
         )
     rows.sort(key=lambda record: (record.map_name, record.tile_y, record.tile_x, record.tile_id))
-    if tile_limit is not None:
+    if tile_limit is not None and int(tile_limit) > 0:
         rows = compact_tile_limit(rows, max(0, int(tile_limit)))
     return rows
 
@@ -292,6 +292,67 @@ def write_canvas_outputs(
         "arrays": {name: {"shape": list(array.shape), "dtype": str(array.dtype)} for name, array in arrays.items()},
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def create_chunked_canvas_group(
+    output_dir: str | Path,
+    layout: CanvasLayout,
+    *,
+    layers: tuple[int, ...] = (0, 1, 2, 3),
+) -> zarr.Group:
+    """Create empty tile-chunked canvas arrays for memory-bounded full-map writes."""
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    group = zarr.open_group(str(out / "canvas.zarr"), mode="w")
+    alpha_h, alpha_w = layout.alpha_shape
+    height_h, height_w = layout.height_shape
+    mcly_h, mcly_w = layout.mcly_shape
+    n_layers = len(layers)
+    group.create_array("alpha_256", shape=(alpha_h, alpha_w, n_layers), chunks=(ALPHA_TILE_SIZE, ALPHA_TILE_SIZE, 1), dtype=np.float32, fill_value=0.0)
+    group.create_array("tile_id_256", shape=(alpha_h, alpha_w), chunks=(ALPHA_TILE_SIZE, ALPHA_TILE_SIZE), dtype=np.int32, fill_value=-1)
+    group.create_array("height_257", shape=(height_h, height_w), chunks=(HEIGHT_TILE_SIZE, HEIGHT_TILE_SIZE), dtype=np.float32, fill_value=0.0)
+    group.create_array("normal_xyz", shape=(height_h, height_w, 3), chunks=(HEIGHT_TILE_SIZE, HEIGHT_TILE_SIZE, 3), dtype=np.float32, fill_value=0.0)
+    group.create_array("tile_id_257", shape=(height_h, height_w), chunks=(HEIGHT_TILE_SIZE, HEIGHT_TILE_SIZE), dtype=np.int32, fill_value=-1)
+    group.create_array("mcly_texture_ids", shape=(mcly_h, mcly_w, 4), chunks=(MCLY_TILE_SIZE, MCLY_TILE_SIZE, 4), dtype=np.int32, fill_value=-1)
+    group.create_array("mcly_layer_mask", shape=(mcly_h, mcly_w, 4), chunks=(MCLY_TILE_SIZE, MCLY_TILE_SIZE, 4), dtype=np.float32, fill_value=0.0)
+    group.create_array("tile_id_16", shape=(mcly_h, mcly_w), chunks=(MCLY_TILE_SIZE, MCLY_TILE_SIZE), dtype=np.int32, fill_value=-1)
+    group.create_array("alpha_layer_indices", data=np.asarray(layers, dtype=np.int32))
+    group.attrs.update({"layout": _json_ready(asdict(layout))})
+    return group
+
+
+def write_tile_to_canvas(
+    group: zarr.Group,
+    record: CanvasTileRecord,
+    layout: CanvasLayout,
+    source_root: zarr.Group,
+    *,
+    layer_indices: tuple[int, ...] = (0, 1, 2, 3),
+) -> None:
+    """Write one tile's signals into a chunked canvas group."""
+    ax, ay = alpha_origin(record, layout)
+    hx, hy = height_origin(record, layout)
+    mx, my = mcly_origin(record, layout)
+    tile_id = int(record.tile_id)
+
+    if record.has_alpha_256 and "alpha_256" in source_root:
+        alpha = np.clip(source_root["alpha_256"][tile_id].astype(np.float32), 0.0, 1.0)
+        group["alpha_256"][ay : ay + ALPHA_TILE_SIZE, ax : ax + ALPHA_TILE_SIZE, :] = alpha[:, :, layer_indices]
+        group["tile_id_256"][ay : ay + ALPHA_TILE_SIZE, ax : ax + ALPHA_TILE_SIZE] = tile_id
+    if record.has_height_257 and "height_257" in source_root:
+        group["height_257"][hy : hy + HEIGHT_TILE_SIZE, hx : hx + HEIGHT_TILE_SIZE] = source_root["height_257"][tile_id].astype(np.float32)
+    if record.has_normal_xyz and "normal_xyz" in source_root:
+        group["normal_xyz"][hy : hy + HEIGHT_TILE_SIZE, hx : hx + HEIGHT_TILE_SIZE, :] = source_root["normal_xyz"][tile_id].astype(np.float32)
+    if record.has_height_257 or record.has_normal_xyz:
+        if "height_257" in source_root or "normal_xyz" in source_root:
+            group["tile_id_257"][hy : hy + HEIGHT_TILE_SIZE, hx : hx + HEIGHT_TILE_SIZE] = tile_id
+    if record.has_mcly_texture_ids and "mcly_texture_ids" in source_root:
+        group["mcly_texture_ids"][my : my + MCLY_TILE_SIZE, mx : mx + MCLY_TILE_SIZE, :] = source_root["mcly_texture_ids"][tile_id].astype(np.int32)
+    if record.has_mcly_layer_mask and "mcly_layer_mask" in source_root:
+        group["mcly_layer_mask"][my : my + MCLY_TILE_SIZE, mx : mx + MCLY_TILE_SIZE, :] = source_root["mcly_layer_mask"][tile_id].astype(np.float32)
+    if record.has_mcly_texture_ids or record.has_mcly_layer_mask:
+        if "mcly_texture_ids" in source_root or "mcly_layer_mask" in source_root:
+            group["tile_id_16"][my : my + MCLY_TILE_SIZE, mx : mx + MCLY_TILE_SIZE] = tile_id
 
 
 def write_debug_overlay(output_dir: str | Path, layout: CanvasLayout, alpha_canvas: np.ndarray, *, layer_slot: int = 0) -> Path:

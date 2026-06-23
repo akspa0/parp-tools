@@ -22,11 +22,11 @@ Build the corrected terrain-art decomposition pipeline: assemble full-map signal
 
 **Project Type**: Data-harvester library + CLI workflow + documentation. No model training in initial phases.
 
-**Performance Goals**: Bounded one-map run completes in minutes; full-build map assembly can be chunked and resumed without loading all maps into memory at once.
+**Performance Goals**: Bounded one-map run completes in minutes; full-map assembly is implemented as tile-chunked Zarr writes and horizontal strip segmentation so entire continents do not need to fit in memory as dense arrays.
 
 **Constraints**: No parser rewrites. Use only existing staged/Zarr dataset paths. No training until curated-library validation gates pass. Preserve one-output model rule for future model specs. Do not treat alpha-only, minimap-only, or tile-local component labels as training truth.
 
-**Scale/Scope**: Full maps can be up to 64x64 ADT tiles; layer canvases may be up to 16384x16384 pixels per layer. Implementation must support windowed/chunked Zarr writes.
+**Scale/Scope**: Full maps can be up to 64x64 ADT tiles; layer canvases may be up to 16384x16384 pixels per layer. Implementation supports windowed/chunked Zarr writes and horizontal strip segmentation for memory-bounded full-continent analysis.
 
 ## Constitution Check
 
@@ -110,7 +110,7 @@ wow-viewer/output/datasets/fractal-brush-library/<run-name>/
 6. Write `canvas_index.parquet` mapping tile extents and provenance metadata.
 7. Render debug overlays for tile seams and cross-tile continuity.
 
-**Validation Gate**: One bounded build/map canvas proves cross-tile continuity and provenance for valid tiles.
+**Validation Gate**: One bounded build/map canvas proves cross-tile continuity and provenance for valid tiles. Full-map strip processing proves the same for an entire continent without loading the full dense canvas into memory.
 
 ### Phase 2 — Full-Map Fractal Segmentation And 074 Linkage
 
@@ -125,7 +125,7 @@ wow-viewer/output/datasets/fractal-brush-library/<run-name>/
 6. Write `fractal_regions.parquet` and `fractal_region_members.parquet`.
 7. Render review overlays by layer and curation label.
 
-**Validation Gate**: Review overlays show at least one preserved cross-tile structure and clearly separate chonkers/one-offs from accepted candidates.
+**Validation Gate**: Review overlays show at least one preserved cross-tile structure and clearly separate chonkers/one-offs from accepted candidates. Full-map strip segmentation produces global-canvas bboxes and removes strip-overlap duplicates.
 
 ### Phase 3 — Trainable Library Contract
 

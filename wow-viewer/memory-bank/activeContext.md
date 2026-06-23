@@ -7,7 +7,7 @@
 - **Spec 071 `071-left-right-sidebar-split`**: complete and committed. User is now testing/validating the viewer build.
 - **Spec 074 `074-alpha-brush-library`**: deprecated as primary direction. Outputs remain useful candidate/evidence rows only; tile-local connected components are not authoritative brush labels.
 - **Spec 075 `075-scar-mask-segmentation`**: deprecated as primary direction. The trainer is a coarse diagnostic baseline only; do not continue it as the brush-family route unless explicitly reopened.
-- **Spec 076 `076-full-map-fractal-brush-library`**: active plan. Phases 1-3 are implemented for the bounded compact Azeroth proof; Phase 4 texture/variant/BLP evidence join is next.
+- **Spec 076 `076-full-map-fractal-brush-library`**: active plan. Phases 1-3 are implemented for bounded compact and full-map strip proofs; Phase 4 texture/variant/BLP evidence join is next, but near-duplicate clustering is the immediate gap.
 - **V21/V21c height training**: paused. Multiple runs (with and without scheduler/normal/fractal changes, restored to d0929e2 baseline) failed to reproduce the earlier 0.3126 convergence; model stalls at ~0.83 height L1. Pivoting to a deconstruction-first approach.
 
 ## Why the Pivot
@@ -31,11 +31,14 @@ End-to-end height regression from minimap was not converging despite identical c
 - Phase 4 T025/T026 landed: `research.md` inventories texture/fingerprint surfaces; `fractal_library.py` now records MCLY texture counts, dominant texture ID, and active-layer coverage per sample.
 - One-shot raw analysis landed: `analyze_fractal_raw_components.py` runs selected builds/maps sequentially (supports `--maps all`) and writes cross-target exact alpha-shape dedupe under `dedupe/`.
 - Validated two-build Azeroth run: 7,317 raw components, 3,957 exact patterns, 233 duplicate patterns under `two_build_test1`.
+- Footprint correction landed: default minimum atomic footprint is `8x8` alpha pixels; corrected two-build Azeroth run produced 2,025 raw components, 2,002 exact patterns, 17 duplicates under `two_build_test2`.
+- Full-map strip processing landed: `--tile-limit 0` loads every tile for a map, writes a tile-chunked canvas, segments horizontal strips, offsets bboxes to global canvas coordinates, and dedupes strip overlaps. Full Azeroth 0.5.3 (622 tiles) produced 12,906 raw components, 12,163 exact patterns, 566 exact duplicates under `full_map_smoke`.
 - Contact-sheet visualizer `visualize_fractal_raw_patterns.py` renders repeated exact-pattern pages (200 patterns / 5 pages proven).
 - No canonical decoded terrain tileset/BLP fingerprint dataset exists yet under `data-harvester` or `wow-viewer/output`; BLP source matching remains a bounded follow-up.
-- Known gap: raw/curated segmenters still detect connected alpha/fractal components, not obvious rectangular paste/canvas-page boundaries visible in overlays. Next useful slice is a rectangle/canvas-page detector.
-- Training remains blocked until Phase 4 texture/variant/BLP evidence is checked and Phase 5 model targets are approved.
-- Immediate next slice: add rectangle/canvas-page boundary detection, then use raw dedupe outputs for cross-build grouping.
+- Known gap 1: exact alpha-shape dedupe is too brittle; most repeated motifs are near-duplicates (translated/mirrored/varied), not pixel-identical.
+- Known gap 2: raw/curated segmenters still detect connected alpha/fractal components, not obvious rectangular paste/canvas-page boundaries visible in overlays.
+- Training remains blocked until near-duplicate clustering / rectangle-page detection produce usable brush families and Phase 5 model targets are approved.
+- Immediate next slice: add near-duplicate clustering to raw components, then rectangle/canvas-page boundary detection.
 
 ## Historical Evidence: 074 Alpha Brush Library
 
@@ -70,7 +73,8 @@ End-to-end height regression from minimap was not converging despite identical c
 
 1. Which bounded build/map should be the first 076 Phase 1 validation target? Teldrassil/root-heavy regions are preferred if present.
 2. Which existing tileset/texture/BLP effect fingerprint output is canonical enough to join in Phase 4, especially for paths like `textures\BloodSplats`?
-3. What minimum rectangle/page evidence should promote an obvious authored paste area above connected-component/fractal crops?
+3. What near-duplicate distance and invariants best group raw components into real brush families?
+4. What minimum rectangle/page evidence should promote an obvious authored paste area above connected-component/fractal crops?
 
 ## Files Touched Recently
 
@@ -86,10 +90,13 @@ End-to-end height regression from minimap was not converging despite identical c
 - `wow-viewer/specs/075-scar-mask-segmentation/{spec,plan,tasks}.md`
 - `wow-viewer/specs/076-full-map-fractal-brush-library/{spec,plan,tasks,quickstart}.md`
 - `wow-viewer/specs/076-full-map-fractal-brush-library/research.md`
-- `wow-viewer/docs/architecture/v21-scar-mask-segmentation-2026-06-23.md`
+- `wow-viewer/docs/architecture/full-map-fractal-brush-library-2026-06-23.md`
 - `wow-viewer/data-harvester/scripts/analyze_fractal_raw_components.py`
 - `wow-viewer/data-harvester/scripts/visualize_fractal_raw_patterns.py`
 - `wow-viewer/data-harvester/src/harvester/fractal_raw_analysis.py`
+- `wow-viewer/data-harvester/src/harvester/fractal_canvas.py`
+- `wow-viewer/data-harvester/src/harvester/fractal_segments.py`
+- `wow-viewer/data-harvester/tests/test_analyze_fractal_raw_components.py`
 - `wow-viewer/docs/architecture/full-map-fractal-brush-library-2026-06-23.md`
 - `wow-viewer/data-harvester/src/harvester/fractal_canvas.py`
 - `wow-viewer/data-harvester/src/harvester/fractal_segments.py`

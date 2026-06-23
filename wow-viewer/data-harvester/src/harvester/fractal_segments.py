@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +39,7 @@ class FractalRegion:
     curation_label: str
     rejection_reason: str | None
     linked_component_ids: list[str]
+    provenance: dict[str, Any] = field(default_factory=dict)
 
 
 def load_canvas_group(canvas_dir: str | Path) -> zarr.Group:

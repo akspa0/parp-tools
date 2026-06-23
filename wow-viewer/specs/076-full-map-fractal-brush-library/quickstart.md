@@ -48,9 +48,9 @@ Expected test result: `4 passed`.
 
 ## Current Limits
 
-- Phase 1 writes dense bounded canvases. Full-continent chunk streaming is a future optimization after coordinate/provenance proof is accepted.
-- `--tile-limit` selects a compact same-row tile window for smoke/proof runs instead of raw index order.
-- Phase 2 segmentation is implemented for bounded canvas outputs and emits region metadata plus a review overlay.
+- Phase 1 writes dense bounded canvases for `--tile-limit > 0`. Full-continent strip processing is implemented for `--tile-limit 0`.
+- `--tile-limit` selects a compact same-row tile window for smoke/proof runs; `--tile-limit 0` or any non-positive value loads every tile for the selected map from the build index.
+- Phase 2 segmentation is implemented for bounded canvas outputs and full-map strip views, and emits region metadata plus a review overlay.
 - Phase 3 writes fixed-size accepted sample tensors plus source crop/provenance metadata; Phase 4 texture/BLP evidence is not joined yet.
 - `composite_chonker` rows are preserved as composite-canvas harvest targets. They are not assumed to be wrong, but default atomic brush splits exclude them until a composite-specific target exists.
 - Default atomic brush samples require at least an `8x8` alpha-pixel footprint, the smallest authoring block size for the data we care about. Smaller slivers are preserved as review evidence, not default accepted samples.
@@ -122,7 +122,8 @@ uv run python scripts/analyze_fractal_raw_components.py `
   --maps Azeroth `
   --tile-limit 64 `
   --threshold 0.05 `
-  --min-area 1 `
+  --min-area 64 `
+  --min-footprint-px 8 `
   --max-regions-per-layer 5000 `
   --output-root ../output/analysis/full-map-fractal-brush-library/raw_two_build_Azeroth_tile64
 ```
@@ -135,7 +136,8 @@ uv run python scripts/analyze_fractal_raw_components.py `
   --maps Azeroth Northrend `
   --tile-limit 64 `
   --threshold 0.05 `
-  --min-area 1 `
+  --min-area 64 `
+  --min-footprint-px 8 `
   --max-regions-per-layer 5000 `
   --output-root ../output/analysis/full-map-fractal-brush-library/raw_two_build_Azeroth_Northrend_tile64
 ```
@@ -148,12 +150,13 @@ uv run python scripts/analyze_fractal_raw_components.py `
   --maps all `
   --tile-limit 64 `
   --threshold 0.05 `
-  --min-area 1 `
+  --min-area 64 `
+  --min-footprint-px 8 `
   --max-regions-per-layer 5000 `
   --output-root ../output/analysis/full-map-fractal-brush-library/two_build_all_maps_tile64
 ```
 
-Validated real run on two builds (Azeroth only):
+Validated real run on two builds (Azeroth only, `--tile-limit 64`, before 8x8 footprint correction):
 
 ```text
 output_root: ..\output\analysis\full-map-fractal-brush-library\two_build_test1
@@ -163,10 +166,20 @@ exact_patterns: 3957
 duplicate_patterns: 233
 ```
 
+Validated real run on two builds (Azeroth only, `--tile-limit 64`, after 8x8 footprint correction):
+
+```text
+output_root: ..\output\analysis\full-map-fractal-brush-library\two_build_test2
+targets: 2
+raw_components: 2025
+exact_patterns: 2002
+duplicate_patterns: 17
+```
+
 Validated tiny smoke:
 
 ```text
-uv run python scripts/analyze_fractal_raw_components.py --builds 0_5_3_3368 3_3_5_12340 --maps Azeroth --tile-limit 2 --threshold 0.05 --min-area 1 --max-regions-per-layer 100 --output-root ../output/analysis/full-map-fractal-brush-library/smoke_two_build_raw_dedupe_tile2 --no-overlay
+uv run python scripts/analyze_fractal_raw_components.py --builds 0_5_3_3368 3_3_5_12340 --maps Azeroth --tile-limit 2 --threshold 0.05 --min-area 64 --min-footprint-px 8 --max-regions-per-layer 100 --output-root ../output/analysis/full-map-fractal-brush-library/smoke_two_build_raw_dedupe_tile2 --no-overlay
 raw_components: 239
 exact_patterns: 228
 duplicate_patterns: 1
@@ -189,6 +202,50 @@ Per-build/map artifacts are written under:
 <output-root>/<build>_<map>_tile<N>/segments_raw/
 ```
 
+## Full-Map Strip Processing
+
+`--tile-limit 0` loads every tile for the selected map and processes the map in horizontal strips so memory stays bounded. The canvas is written as tile-chunked Zarr arrays; each strip is segmented independently, bboxes are translated back to global canvas coordinates, and strip-overlap duplicates are removed by bounding-box IoU.
+
+```powershell
+uv run python scripts/analyze_fractal_raw_components.py `
+  --builds 0_5_3_3368 `
+  --maps Azeroth `
+  --tile-limit 0 `
+  --strip-tiles 8 `
+  --strip-overlap-alpha-tiles 1 `
+  --threshold 0.05 `
+  --min-area 64 `
+  --min-footprint-px 8 `
+  --max-regions-per-layer 5000 `
+  --output-root ../output/analysis/full-map-fractal-brush-library/full_map_Azeroth_0_5_3_3368 `
+  --no-overlay
+```
+
+Validated local run (Azeroth, 0.5.3.3368, 622 tiles, strip width 8):
+
+```text
+Analyzing build=0_5_3_3368 map=Azeroth
+  strip 0: x_tiles=1..8 records=1
+  strip 1: x_tiles=21..29 records=93
+  strip 2: x_tiles=28..36 records=255
+  strip 3: x_tiles=35..43 records=180
+  strip 4: x_tiles=42..50 records=7
+  strip 5: x_tiles=56..63 records=6
+  regions=12906
+Raw two-build analysis complete
+  output_root: ..\output\analysis\full-map-fractal-brush-library\full_map_smoke
+  targets: 1
+  raw_components: 12906
+  exact_patterns: 12163
+  duplicate_patterns: 566
+```
+
+Notes:
+
+- `--strip-tiles` is the strip width in ADT tiles. `--strip-overlap-alpha-tiles` is the overlap in ADT tiles.
+- The output directory tag becomes `_tilefull` when `--tile-limit 0` is used.
+- Zarr writes are forced to synchronous concurrency (`zarr.config.set({"async.concurrency": 1})`) to avoid Windows file-rename races during chunked writes.
+
 ## One-Command Analysis + Visualization
 
 Run the full two-build raw analysis and render contact sheets in one command:
@@ -207,12 +264,14 @@ uv run python scripts/analyze_fractal_raw_components.py `
   --repeated-only
 ```
 
+Use `--tile-limit 0` and `--strip-tiles N` to analyze the full map in one command.
+
 This is equivalent to running `analyze_fractal_raw_components.py` followed by `visualize_fractal_raw_patterns.py`. Artifacts are written under:
 
 ```text
 <output-root>/dedupe/
-<output-root>/<build>_<map>_tile<N>/canvas/
-<output-root>/<build>_<map>_tile<N>/segments_raw/
+<output-root>/<build>_<map>_tilefull/canvas/
+<output-root>/<build>_<map>_tilefull/segments_raw/
 <output-root>/contact_sheets/
 ```
 
