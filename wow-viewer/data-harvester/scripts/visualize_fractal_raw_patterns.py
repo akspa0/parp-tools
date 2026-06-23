@@ -242,7 +242,7 @@ def _draw_legend(draw: ImageDraw.ImageDraw, width: int, font: ImageFont.ImageFon
     draw.rectangle((0, 0, width - 1, 70), fill=(20, 20, 24), outline=(58, 58, 64), width=1)
     draw.text((10, 8), "Spec 076 Raw Exact Pattern Dedupe", fill=(245, 245, 245), font=font)
     draw.text((10, 25), "Each row is one exact thresholded alpha-shape pattern. Cells are examples from the raw component catalog.", fill=(190, 190, 195), font=font)
-    draw.text((10, 42), "This visualizes connected components, not the still-missing rectangular paste/canvas-page detector.", fill=(255, 190, 110), font=font)
+    draw.text((10, 42), "This visualizes exact connected-component shapes; rectangle pages and near-clusters are shown in separate sheets.", fill=(255, 190, 110), font=font)
     x = 760
     for layer_idx, color in _LAYER_COLORS.items():
         draw.rectangle((x, 12, x + 18, 30), fill=color, outline=(255, 255, 255))
