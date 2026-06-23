@@ -1,5 +1,20 @@
 # Progress — wow-viewer
 
+## 2026-06-22 — Spec 071 Phase A: 3D viewport math (complete)
+
+### What landed
+
+- `TryGetSceneViewportRect` updated to squeeze the 3D viewport between the left and right sidebars when `_useTabUi` is active.
+- Uses existing `_showLeftSidebar` / `_showRightSidebar` flags and `_leftSidebarWidth` / `_rightSidebarWidth`.
+- Legacy (`!_useTabUi`) path unchanged — no regression in dockable shell-panel mode.
+- Build: 0 errors (`dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug`).
+- Commit `94b25e52` pushed to `071-left-right-sidebar-split`.
+
+### Next
+
+- Phase B: add `DrawLeftSidebar` with workspace bars + file browser + world maps.
+- Phase C: rename `DrawWorkbenchPopout` → `DrawRightSidebar` and anchor to right edge.
+
 ## 2026-06-21 — Spec 071: left/right sidebar split + Model Viewer mode (drafted)
 
 ### What landed

@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-**Last updated**: 2026-06-21 | **Focus**: Spec 071 — left/right sidebar split + Model Viewer mode (new branch)
+**Last updated**: 2026-06-22 | **Focus**: Spec 071 — left/right sidebar split + Model Viewer mode (Phase A done)
 
 ## Current State
 
@@ -15,7 +15,7 @@ Viewer UI in flux. 069 (tab system) hit 16 phases. User feedback on 069:
 - 16 phases committed, pushed to `069-viewer-ui-overhaul`
 - Headless content variants prevent nested ImGui windows
 
-### Next: Spec 071 (new branch `071-left-right-sidebar-split`)
+### Spec 071 (branch `071-left-right-sidebar-split`)
 
 **Goal:** Two-side layout + Model Viewer mode. 8 phases A-H.
 
@@ -24,6 +24,10 @@ Viewer UI in flux. 069 (tab system) hit 16 phases. User feedback on 069:
 - **Center**: 3D viewport (full size, no chrome overlap)
 - **Model Viewer mode**: Info / Animations / Actions / LOD sub-tabs
 - All Tools menu items become tab switchers
+
+**Phase A (done)**: `TryGetSceneViewportRect` now subtracts `_leftSidebarWidth` and `_rightSidebarWidth` when `_useTabUi` is active and the sidebars are visible. Legacy (`!_useTabUi`) viewport math unchanged.
+
+**Next**: Phase B — add `DrawLeftSidebar` in `ViewerApp_Sidebars.cs` with workspace bars + file browser + world maps content.
 
 **Salvage from 069:**
 - Tab data model + dispatch
