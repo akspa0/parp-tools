@@ -14475,11 +14475,20 @@ void main() {
         width = io.DisplaySize.X;
         height = io.DisplaySize.Y - topOffset - StatusBarHeight;
 
-        // 069 tab system: when active, viewport is full middle area
-        // (no dockspace insets, no sidebars). Tab content overlays the world
-        // in a popout panel rather than squeezing it.
+        // 071: tab system uses fixed left/right sidebars; viewport is the
+        // middle area between them. Sidebars auto-hide when the window is
+        // too small (see UpdateShellLayout suppression logic).
         if (_useTabUi)
         {
+            if (_showLeftSidebar)
+            {
+                x += _leftSidebarWidth;
+                width -= _leftSidebarWidth;
+            }
+
+            if (_showRightSidebar)
+                width -= _rightSidebarWidth;
+
             width = MathF.Max(width, 0f);
             height = MathF.Max(height, 0f);
             return width > 10f && height > 10f;
