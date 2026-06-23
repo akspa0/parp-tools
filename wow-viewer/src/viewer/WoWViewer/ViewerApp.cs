@@ -1612,8 +1612,6 @@ void main() {
         {
             DrawMenuBar();
 
-            DrawToolbar();
-
             // 069 Phase 1: tab system. Off by default; old sidebars still active.
             // When enabled, replaces DrawDockspaceHost + DrawLeftSidebar + DrawRightSidebar
             // with top tab bar + bottom tab bar + central content area.
@@ -1634,9 +1632,12 @@ void main() {
                     DrawLegacyLeftSidebar();
                 if (HasAnyShellPanelsInLane(ShellPanelLane.Right))
                     DrawLegacyRightSidebar();
-
-                DrawFixedSidebarSplitters();
             }
+
+            DrawFixedSidebarSplitters();
+
+            // Toolbar is drawn after sidebars so it stays on top of any edge overlap.
+            DrawToolbar();
 
             DrawStatusBar();
 

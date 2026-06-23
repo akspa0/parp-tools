@@ -245,8 +245,16 @@ public partial class ViewerApp
     private void DrawToolbar()
     {
         var io = ImGui.GetIO();
-        ImGui.SetNextWindowPos(new Vector2(0, MenuBarHeight));
-        ImGui.SetNextWindowSize(new Vector2(io.DisplaySize.X, ToolbarHeight));
+        float toolbarX = 0f;
+        float toolbarWidth = io.DisplaySize.X;
+        if (TryGetSceneViewportRect(out float viewportX, out _, out float viewportWidth, out _))
+        {
+            toolbarX = viewportX;
+            toolbarWidth = viewportWidth;
+        }
+
+        ImGui.SetNextWindowPos(new Vector2(toolbarX, MenuBarHeight));
+        ImGui.SetNextWindowSize(new Vector2(toolbarWidth, ToolbarHeight));
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8, 6));
         ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(6, 0));
         if (ImGui.Begin("##Toolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
@@ -449,14 +457,6 @@ public partial class ViewerApp
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
         if (ImGui.Begin("##LeftSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
         {
-            DrawFixedSidebarWidthControl(
-                "Left Sidebar Width",
-                ref _leftSidebarWidth,
-                isLeftSidebar: true,
-                io.DisplaySize.X,
-                "Resize the left sidebar.");
-
-            ImGui.Separator();
             DrawWorkspaceBarsPanelContent();
 
             ImGui.Separator();
@@ -1707,16 +1707,16 @@ public partial class ViewerApp
         if (_useDockspaceUi)
             return;
 
-        if (!IsShellPanelActive(ShellPanelId.Navigator) && !IsShellPanelActive(ShellPanelId.Inspector))
-            return;
-
         var io = ImGui.GetIO();
         float topOffset = GetTopChromeHeight();
         float panelHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
         if (panelHeight <= 0f)
             return;
 
-        if (IsShellPanelActive(ShellPanelId.Navigator))
+        bool hasLeft = _useTabUi || IsShellPanelActive(ShellPanelId.Navigator);
+        bool hasRight = _useTabUi || IsShellPanelActive(ShellPanelId.Inspector);
+
+        if (hasLeft)
         {
             float splitterX = _leftSidebarWidth - SidebarSplitterWidth * 0.5f;
             DrawFixedSidebarSplitterWindow(
@@ -1729,7 +1729,7 @@ public partial class ViewerApp
                 io.DisplaySize.X);
         }
 
-        if (IsShellPanelActive(ShellPanelId.Inspector))
+        if (hasRight)
         {
             float splitterX = io.DisplaySize.X - _rightSidebarWidth - SidebarSplitterWidth * 0.5f;
             DrawFixedSidebarSplitterWindow(
@@ -3489,15 +3489,6 @@ public partial class ViewerApp
             ImGui.PopStyleVar();
             return;
         }
-
-        DrawFixedSidebarWidthControl(
-            "Right Sidebar Width",
-            ref _rightSidebarWidth,
-            isLeftSidebar: false,
-            io.DisplaySize.X,
-            "Resize the right sidebar (workbench).");
-
-        ImGui.Separator();
 
         DrawWorkbenchContent();
 
