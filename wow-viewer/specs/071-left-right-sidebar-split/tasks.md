@@ -16,10 +16,10 @@
 
 ## Phase C: Right sidebar (rename workbench)
 
-- [ ] T009 Rename `DrawWorkbenchPopout` → `DrawRightSidebar` throughout.
-- [ ] T010 Position: x=displayWidth - _rightSidebarWidth, y=topOffset, width=_rightSidebarWidth, height=viewport_height.
-- [ ] T011 Update 3D viewport rect to subtract both sidebars.
-- [ ] T012 Suppress old `DrawWorkbenchPopout` shell-window flags.
+- [x] T009 Rename `DrawWorkbenchPopout` → `DrawRightSidebar` throughout.
+- [x] T010 Position: x=displayWidth - _rightSidebarWidth, y=topOffset, width=_rightSidebarWidth, height=viewport_height.
+- [x] T011 Update 3D viewport rect to subtract both sidebars.
+- [x] T012 Suppress old `DrawWorkbenchPopout` shell-window flags.
 
 ## Phase D: 3 top tabs (Model/World/Tools)
 

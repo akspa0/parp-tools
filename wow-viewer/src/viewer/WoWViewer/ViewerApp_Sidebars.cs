@@ -792,7 +792,7 @@ public partial class ViewerApp
             : extensionFilter;
     }
 
-    private void DrawRightSidebar()
+    private void DrawLegacyRightSidebar()
     {
         if (!HasAnyShellPanelsInLane(ShellPanelLane.Right))
             return;
@@ -810,7 +810,7 @@ public partial class ViewerApp
         ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - _rightSidebarWidth, topOffset), ImGuiCond.Always);
         ImGui.SetNextWindowSize(new Vector2(_rightSidebarWidth, sidebarHeight), ImGuiCond.Always);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
-        if (ImGui.Begin("##RightSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
+        if (ImGui.Begin("##LegacyRightSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
         {
             DrawFixedSidebarWidthControl(
                 "Inspector Width",
@@ -3575,34 +3575,43 @@ public partial class ViewerApp
         ImGui.TextDisabled($"Utilities — {label}");
     }
 
-    private void DrawWorkbenchPopout()
+    private void DrawRightSidebar()
     {
-        // 069 Phase 14: ONE big workbench panel. No more window sprawl.
-        // Single resizable window on the right side. Internal top tabs +
-        // bottom sub-tabs re-render content in the same window.
-        if (!_useTabUi) return;
-        if (_popoutDockFrame < 0)
-            _popoutDockFrame = ImGui.GetFrameCount();
+        // 071: right sidebar = workbench. Fixed position, full height.
+        if (!_useTabUi || !_showRightSidebar)
+            return;
 
-        // Position + size on first use: docked to right edge, full height.
         var io = ImGui.GetIO();
-        float topOffset = MenuBarHeight + ToolbarHeight + 30f + 28f; // tab bars
-        float bottomOffset = StatusBarHeight + 28f;
-        float width = 480f;
-        float height = io.DisplaySize.Y - topOffset - bottomOffset;
-        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - width - 20f, topOffset), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Vector2(width, height), ImGuiCond.FirstUseEver);
+        float topOffset = GetTopChromeHeight();
+        float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
 
-        if (!ImGui.Begin("Workbench##069", ref _workbenchOpen,
+        _rightSidebarWidth = ClampFixedSidebarWidth(_rightSidebarWidth, isLeftSidebar: false, io.DisplaySize.X);
+        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - _rightSidebarWidth, topOffset), ImGuiCond.Always);
+        ImGui.SetNextWindowSize(new Vector2(_rightSidebarWidth, sidebarHeight), ImGuiCond.Always);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
+
+        if (!ImGui.Begin("##RightSidebar", ref _workbenchOpen,
+            ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize |
             ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
         {
             ImGui.End();
+            ImGui.PopStyleVar();
             return;
         }
+
+        DrawFixedSidebarWidthControl(
+            "Right Sidebar Width",
+            ref _rightSidebarWidth,
+            isLeftSidebar: false,
+            io.DisplaySize.X,
+            "Resize the right sidebar (workbench).");
+
+        ImGui.Separator();
 
         DrawWorkbenchContent();
 
         ImGui.End();
+        ImGui.PopStyleVar();
     }
 
     private void DrawWorkbenchContent()

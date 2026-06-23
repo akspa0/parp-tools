@@ -368,7 +368,6 @@ public partial class ViewerApp : IDisposable
 
     // Workbench popout (069 Phase 14: single resizable panel, no window sprawl)
     private bool _workbenchOpen = true;
-    private int _popoutDockFrame = -1; // frame counter when popout was last docked
 
     // 069 Phase 6: sticky archeology settings (persist across viewer restarts).
     private int _archeologyMinUniqueId = -1; // -1 = unset (use first detected value)
@@ -697,6 +696,7 @@ public partial class ViewerApp : IDisposable
     private bool _showLeftSidebar = true;
     private bool _showRightSidebar = true;
     private const float DefaultSidebarWidth = 360f;
+    private const float DefaultRightSidebarWidth = 480f;
     private const float SidebarMinWidth = 260f;
     private const float SidebarCompactMinWidth = 180f;
     private const float SidebarMaxWidth = 1080f;
@@ -711,7 +711,7 @@ public partial class ViewerApp : IDisposable
     private const float SceneViewportPreferredMinHeight = 280f;
     private const float SceneViewportHardMinHeight = 160f;
     private float _leftSidebarWidth = DefaultSidebarWidth;
-    private float _rightSidebarWidth = DefaultSidebarWidth;
+    private float _rightSidebarWidth = DefaultRightSidebarWidth;
     private float _bottomDrawerHeight = DefaultBottomDrawerHeight;
     private bool _suppressLeftSidebarForLayout;
     private bool _suppressRightSidebarForLayout;
@@ -1690,7 +1690,7 @@ void main() {
             {
                 // 071: left sidebar + right workbench squeeze the 3D viewport.
                 DrawLeftSidebar();
-                DrawWorkbenchPopout();
+                DrawRightSidebar();
             }
             else if (_useDockspaceUi)
             {
@@ -1702,7 +1702,7 @@ void main() {
                 if (HasAnyShellPanelsInLane(ShellPanelLane.Left))
                     DrawLegacyLeftSidebar();
                 if (HasAnyShellPanelsInLane(ShellPanelLane.Right))
-                    DrawRightSidebar();
+                    DrawLegacyRightSidebar();
 
                 DrawFixedSidebarSplitters();
             }
@@ -14075,7 +14075,7 @@ void main() {
         _showRightSidebar = true;
         _showTerrainControls = false;
         _leftSidebarWidth = DefaultSidebarWidth;
-        _rightSidebarWidth = DefaultSidebarWidth;
+        _rightSidebarWidth = DefaultRightSidebarWidth;
         _bottomDrawerHeight = DefaultBottomDrawerHeight;
         _activeBottomDrawerTab = FixedBottomDrawerTab.Workspace;
         _useDockspaceUi = true;
@@ -14710,7 +14710,7 @@ void main() {
                 : DefaultSidebarWidth;
             _rightSidebarWidth = float.IsFinite(settings.RightSidebarWidth)
                 ? settings.RightSidebarWidth
-                : DefaultSidebarWidth;
+                : DefaultRightSidebarWidth;
             _bottomDrawerHeight = float.IsFinite(settings.BottomDrawerHeight)
                 ? settings.BottomDrawerHeight
                 : DefaultBottomDrawerHeight;
@@ -15175,7 +15175,7 @@ void main() {
         public float WeakSignalTerrainRestoreCandidateMaxHeight { get; set; } = TerrainWeakSignalRestoreDefaultMaxZ;
         public int ShellPanelLayoutVersion { get; set; } = CurrentShellPanelLayoutVersion;
         public float LeftSidebarWidth { get; set; } = DefaultSidebarWidth;
-        public float RightSidebarWidth { get; set; } = DefaultSidebarWidth;
+        public float RightSidebarWidth { get; set; } = DefaultRightSidebarWidth;
         public float BottomDrawerHeight { get; set; } = DefaultBottomDrawerHeight;
         public float MinimapZoom { get; set; } = 4f;
         public float MinimapPanOffsetX { get; set; }
