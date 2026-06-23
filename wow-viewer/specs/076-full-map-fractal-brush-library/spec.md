@@ -27,7 +27,7 @@ WoW terrain is a structured 3D digital painting over a terrain mesh, not a set o
 - Height and normals are part of the same brush identity because terrain sculpting and alpha/texture painting were authored together.
 - Tileset textures, decal-like textures, and effect textures may themselves contain source stamps or visual references that later appear as painted/sculpted terrain motifs.
 - Candidate source BLP categories include FX/environment/weather/decal/particle textures and explicit brush-like paths such as `textures\BloodSplats`.
-- A tile-local connected component can be a true atomic brush, a fragment of a larger fractal, a composite/chonker made of many brush placements, or a one-off hand-painted road/detail.
+- A tile-local connected component can be a true atomic brush, a fragment of a larger fractal, a composite/chonker made of many brush placements, or a one-off hand-painted road/detail. Composite/chonker regions are not inherently wrong; they can be valid harvest targets when treated as composite canvases rather than atomic brush samples.
 
 The goal is a trainable terrain-art primitive library built from real art signals with full provenance, not a JSONL dump of arbitrary connected components. A valid primitive may bundle source BLP/decal/effect evidence, alpha imprint, MCLY texture/layer assignment, height/normal sculpt response, and repeated placement lineage.
 
@@ -60,7 +60,7 @@ As a researcher, I want full-map alpha layers segmented into fractal regions and
 
 1. **Given** full-map alpha layer canvases, **When** fractal segmentation runs, **Then** output regions preserve multi-tile bounding boxes and tile coverage.
 2. **Given** a region made of repeated fractal motifs, **When** members are emitted, **Then** the members link to their source 074 component IDs where overlaps exist.
-3. **Given** large random connected swaths or one-off road strokes, **When** curation labels are assigned, **Then** those entries are marked `composite_chonker` or `one_off_detail` and excluded from default training manifests.
+3. **Given** large connected swaths or one-off road strokes, **When** curation labels are assigned, **Then** one-off rows are excluded from default training manifests and composite/chonker rows are preserved as composite-canvas harvest targets.
 
 ---
 
@@ -115,7 +115,7 @@ As a trainer, I want model targets derived from the curated library, so every mo
 - Alpha regions can cross ADT tile boundaries and chunk boundaries.
 - One ADT tile can contain multiple virtual artist canvases or unrelated pasted blocks.
 - Roads and other one-off hand-painted details can be large and visually meaningful but not reusable brush families.
-- Large chonkers can contain real motifs but are not themselves accepted atomic training units.
+- Large chonkers can contain real motifs and can be valid composite-canvas harvest targets, but they are not themselves accepted atomic brush units unless a composite-specific target is selected.
 - Some useful fractals may have weak alpha repetition but strong height/normal repetition.
 - Texture IDs can change between builds while visual texture variants remain related.
 - Some alpha/fractal brush shapes may originate from small transparent BLP source assets, especially FX, environment, weather, decal, particle, `textures\BloodSplats`, or similar brush-like textures.
@@ -131,7 +131,8 @@ As a trainer, I want model targets derived from the curated library, so every mo
 - **FR-004**: System MUST segment alpha/fractal regions in full-map coordinates before deciding brush identity.
 - **FR-005**: System MUST link full-map regions back to 074 component IDs when overlaps exist.
 - **FR-006**: System MUST classify candidates at minimum as `accepted_candidate`, `fractal_member`, `composite_chonker`, `one_off_detail`, `too_small_unique`, or `rejected_unknown`.
-- **FR-007**: System MUST exclude `composite_chonker`, `one_off_detail`, and `too_small_unique` rows from default training manifests while preserving them for review.
+- **FR-007**: System MUST exclude `one_off_detail` and `too_small_unique` rows from default atomic training manifests while preserving them for review.
+- **FR-007A**: System MUST preserve `composite_chonker` rows as composite-canvas harvest targets, not invalid data; default atomic brush manifests MAY exclude them until a composite-specific target exists.
 - **FR-008**: System MUST compute spatial signatures from height and normals for each accepted or reviewable candidate.
 - **FR-009**: System MUST record MCLY texture ID and layer-mask context for each candidate.
 - **FR-010**: System MUST support joining available tileset texture/variant fingerprints to candidate metadata without rewriting BLP or format readers.
@@ -151,7 +152,8 @@ As a trainer, I want model targets derived from the curated library, so every mo
 - **Terrain-Art Primitive**: Reusable sculpt-and-paint unit bundling alpha imprint, height/normal response, MCLY texture/layer context, optional BLP/decal/effect source evidence, and placement lineage.
 - **Brush Candidate**: Candidate reusable unit derived after full-map segmentation, not from tile-local connected components alone.
 - **Fractal Member**: Local part of a larger fractal region; can become a training sample but is not independently a complete brush family.
-- **Composite Chonker**: Large connected or high-coverage region likely composed of multiple unrelated brush placements.
+- **Composite Chonker**: Large connected or high-coverage region likely composed of many smaller brush placements; this can be a valid composite harvest target, but not a default atomic brush sample.
+- **Minimum Atomic Footprint**: Default atomic brush samples must span a physically meaningful ADT-addressable footprint. In the current 256px tile canvas this defaults to at least `64x64` alpha pixels, equivalent to `4x4` current MCLY canvas cells, until a lower-level chunk-cell contract is proven.
 - **One-Off Detail**: Hand-painted road/detail/retouch that may be valid art but lacks repeatability as a reusable brush family.
 - **Tileset Variant Evidence**: Texture-family/variant signals that explain minimap appearance beyond alpha placement.
 - **BLP Source Candidate**: Decoded client BLP texture, often transparent or effect-like, that may be the original brush/decal/effect source later painted into alpha layers.

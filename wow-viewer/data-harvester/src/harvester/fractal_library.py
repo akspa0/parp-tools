@@ -41,7 +41,12 @@ class TerrainArtSample:
     height_range: float | None
     normal_mean_xyz: tuple[float, float, float] | None
     mcly_texture_ids: list[int]
+    mcly_texture_id_counts: dict[str, int]
+    dominant_mcly_texture_id: int | None
     mcly_active_layers: list[int]
+    mcly_active_layer_coverage: dict[str, float]
+    texture_variant_evidence: list[dict[str, Any]]
+    optional_source_blp_evidence: list[dict[str, Any]]
     linked_component_ids: list[str]
     tensor_index: int
     tensor_store: str
@@ -220,6 +225,8 @@ def _materialize_samples(
         _copy_2d_or_3d(mcly_mask, tensors["mcly_layer_mask"][tensor_index], mx, my, fill=0.0)
 
         sample_id = stable_sample_id(str(row.get("region_id", "")), bbox, int(row.get("layer_idx", -1)))
+        mcly_texture_counts = _texture_id_counts(tensors["mcly_texture_ids"][tensor_index])
+        mcly_layer_coverage = _active_layer_coverage(tensors["mcly_layer_mask"][tensor_index])
         samples.append(
             TerrainArtSample(
                 sample_id=sample_id,
@@ -243,7 +250,12 @@ def _materialize_samples(
                 height_range=_optional_float(row.get("height_range")),
                 normal_mean_xyz=_optional_xyz(row.get("normal_mean_xyz")),
                 mcly_texture_ids=[int(value) for value in row.get("mcly_texture_ids", [])],
+                mcly_texture_id_counts=mcly_texture_counts,
+                dominant_mcly_texture_id=_dominant_texture_id(mcly_texture_counts),
                 mcly_active_layers=[int(value) for value in row.get("mcly_active_layers", [])],
+                mcly_active_layer_coverage=mcly_layer_coverage,
+                texture_variant_evidence=[],
+                optional_source_blp_evidence=[],
                 linked_component_ids=[str(value) for value in row.get("linked_component_ids", [])],
                 tensor_index=int(tensor_index),
                 tensor_store=str(output_dir / "samples.zarr"),
@@ -309,6 +321,26 @@ def _missing_signal_counts(tensors: dict[str, np.ndarray]) -> dict[str, int]:
         "mcly_texture_ids": int(np.count_nonzero(tensors["mcly_texture_ids"].reshape(tensors["mcly_texture_ids"].shape[0], -1).max(axis=1) < 0)),
         "mcly_layer_mask": int(np.count_nonzero(tensors["mcly_layer_mask"].reshape(tensors["mcly_layer_mask"].shape[0], -1).max(axis=1) <= 0.0)),
     }
+
+
+def _texture_id_counts(values: np.ndarray) -> dict[str, int]:
+    ids, counts = np.unique(values.astype(np.int32), return_counts=True)
+    rows = [(int(texture_id), int(count)) for texture_id, count in zip(ids.tolist(), counts.tolist(), strict=True) if int(texture_id) >= 0]
+    rows.sort(key=lambda item: (-item[1], item[0]))
+    return {str(texture_id): int(count) for texture_id, count in rows[:32]}
+
+
+def _dominant_texture_id(counts: dict[str, int]) -> int | None:
+    if not counts:
+        return None
+    return int(next(iter(counts.keys())))
+
+
+def _active_layer_coverage(mask: np.ndarray) -> dict[str, float]:
+    if mask.size == 0:
+        return {}
+    active = mask.astype(np.float32) > 0.05
+    return {str(layer): float(active[:, :, layer].mean()) for layer in range(active.shape[2]) if bool(active[:, :, layer].any())}
 
 
 def _crop_window_for_bbox(bbox: tuple[int, int, int, int], *, canvas_w: int, canvas_h: int, crop_size: int) -> tuple[int, int, int, int]:

@@ -61,10 +61,16 @@ A valid terrain-art primitive is not an alpha mask alone. It is a coupled reusab
 
 ## Current Proof
 
-- Phase 1 compact Azeroth smoke: `0_5_3_3368`, 4-tile row window, alpha `(256,1024,4)`, height `(257,1025)`, MCLY `(16,64,4)`.
-- Phase 2 compact smoke: 38 regions, with 34 accepted candidates, 3 fractal members, and 1 composite chonker.
-- Phase 3 compact smoke: 37 trainable default samples, 1 rejected review row, split counts `train=30`, `val=3`, `test=4`; loader read 32 samples with no rejected labels.
-- Phase 3 output: `wow-viewer/output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/`.
+- Phase 1 strict-gate Azeroth smoke: `0_5_3_3368`, 16-tile row window, alpha `(256,4096,4)`, height `(257,4097)`, MCLY `(16,256,4)`.
+- Phase 2 strict-gate smoke: 961 regions, with 11 accepted candidates, 24 fractal members, 1 composite chonker, 2 one-off details, and 923 too-small rows. The too-small rows are preserved for review but excluded from default atomic samples.
+- Phase 3 strict-gate smoke: 35 trainable default atomic samples, 926 rejected/review rows, split counts `train=26`, `val=8`, `test=1`; loader read 32 samples with no rejected labels.
+- Phase 3 output: `wow-viewer/output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/`.
+
+## Curation Correction
+
+- `composite_chonker` does not mean invalid. It means the region is likely a composite canvas made of smaller placements and should be preserved for composite-specific harvesting.
+- Tiny connected components inside or near composite regions should not automatically become accepted atomic samples.
+- Default atomic samples currently require at least a `64x64` alpha-pixel footprint, equivalent to `4x4` current MCLY canvas cells. This is the current proxy for ADT-addressable authoring scale until an `8x8` chunk-cell contract is proven.
 
 ## Training Rule
 

@@ -65,8 +65,8 @@
 
 **Purpose**: Add texture/variant/effects evidence before any minimap-based model target is selected.
 
-- [ ] T025 [P] [US4] Inventory existing tileset/texture/fingerprint outputs in `wow-viewer/data-harvester/` and document reusable inputs in `research.md`.
-- [ ] T026 [US4] Add texture-ID summary fields to `fractal_library.py` from `mcly_texture_ids` and `mcly_layer_mask` provenance.
+- [x] T025 [P] [US4] Inventory existing tileset/texture/fingerprint outputs in `wow-viewer/data-harvester/` and document reusable inputs in `research.md`.
+- [x] T026 [US4] Add texture-ID summary fields to `fractal_library.py` from `mcly_texture_ids` and `mcly_layer_mask` provenance.
 - [ ] T027 [US4] Add optional texture/variant fingerprint join fields when decoded texture evidence is available.
 - [ ] T028 [US4] Add a read-only BLP source-candidate inventory plan that uses existing BLP decode/tooling and prioritizes FX, environment, weather, decal, particle, `textures\BloodSplats`, and transparent alpha-bearing paths.
 - [ ] T029 [US4] Add optional BLP source-candidate fingerprint join fields with asset path, fingerprint ID, similarity score, and review state.

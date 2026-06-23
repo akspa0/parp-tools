@@ -42,6 +42,9 @@ def test_build_trainable_library_filters_rejected_and_loads_samples(tmp_path: Pa
     assert sample["normal"].shape == (33, 33, 3)
     assert sample["mcly_texture_ids"].shape == (2, 2, 4)
     assert sample["metadata"]["curation_label"] in {"accepted_candidate", "fractal_member"}
+    assert sample["metadata"]["dominant_mcly_texture_id"] == 7
+    assert sample["metadata"]["mcly_texture_id_counts"]["7"] > 0
+    assert sample["metadata"]["mcly_active_layer_coverage"]["1"] == 1.0
     assert sample["provenance"]["source_region_id"]
 
 

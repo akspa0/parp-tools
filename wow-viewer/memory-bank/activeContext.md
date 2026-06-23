@@ -24,11 +24,14 @@ End-to-end height regression from minimap was not converging despite identical c
 - Phase 1 canvas/provenance proof landed: `fractal_canvas.py`, `build_full_map_fractal_canvas.py`, and `tests/test_fractal_canvas.py`.
 - Smoke output: `wow-viewer/output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/` with alpha shape `(256,1024,4)`, height shape `(257,1025)`, MCLY shape `(16,64,4)`.
 - Phase 2 bounded segmentation landed: `fractal_segments.py`, `segment_full_map_fractals.py`, and `tests/test_fractal_segments.py`.
-- Segment smoke output: `.../smoke_0_5_3_3368_Azeroth_tile4_compact/segments/`, 38 regions: 34 accepted candidates, 3 fractal members, 1 composite chonker.
+- Strict curation correction: `composite_chonker` can be a valid composite-canvas harvest target, while default atomic brush samples require a minimum `64x64` alpha-pixel footprint (`4x4` current MCLY canvas cells).
+- Segment smoke output: `.../smoke_0_5_3_3368_Azeroth_tile16_compact/segments/`, 961 regions: 11 accepted candidates, 24 fractal members, 1 composite chonker, 2 one-off details, 923 too-small rows.
 - Phase 3 trainable library landed: `fractal_library.py`, `build_fractal_brush_library.py`, and `tests/test_fractal_library.py`.
-- Library smoke output: `wow-viewer/output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/`, 37 default samples, 1 rejected row, loader read 32 samples with no rejected labels.
+- Library smoke output: `wow-viewer/output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/`, 35 default atomic samples, 926 review/rejected rows, loader read 32 samples with no rejected labels.
+- Phase 4 T025/T026 landed: `research.md` inventories texture/fingerprint surfaces; `fractal_library.py` now records MCLY texture counts, dominant texture ID, and active-layer coverage per sample.
+- No canonical decoded terrain tileset/BLP fingerprint dataset exists yet under `data-harvester` or `wow-viewer/output`; BLP source matching remains a bounded follow-up.
 - Training remains blocked until Phase 4 texture/variant/BLP evidence is checked and Phase 5 model targets are approved.
-- Immediate next slice: Phase 4 inventory of reusable tileset/texture/fingerprint outputs and likely transparent/effect BLP candidates such as `textures\BloodSplats`.
+- Immediate next slice: create a bounded decoded texture/BLP evidence extractor or provide canonical texture-fingerprint input, prioritizing `textures\BloodSplats`, FX/environment/weather/decal/particle-style assets.
 
 ## Historical Evidence: 074 Alpha Brush Library
 
@@ -78,6 +81,7 @@ End-to-end height regression from minimap was not converging despite identical c
 - `wow-viewer/data-harvester/scripts/visualize_alpha_brush_pattern_neighbors.py`
 - `wow-viewer/specs/075-scar-mask-segmentation/{spec,plan,tasks}.md`
 - `wow-viewer/specs/076-full-map-fractal-brush-library/{spec,plan,tasks,quickstart}.md`
+- `wow-viewer/specs/076-full-map-fractal-brush-library/research.md`
 - `wow-viewer/docs/architecture/v21-scar-mask-segmentation-2026-06-23.md`
 - `wow-viewer/docs/architecture/full-map-fractal-brush-library-2026-06-23.md`
 - `wow-viewer/data-harvester/src/harvester/fractal_canvas.py`

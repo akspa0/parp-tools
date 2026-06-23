@@ -55,6 +55,7 @@ def segment_canvas_regions(
     *,
     threshold: float = 0.05,
     min_area: int = 16,
+    min_atomic_footprint_px: int = 64,
     chonker_area_fraction: float = 0.18,
     one_off_min_area: int = 4096,
     max_regions_per_layer: int | None = None,
@@ -112,6 +113,7 @@ def segment_canvas_regions(
                 total_pixels=total_pixels,
                 tile_coverage_count=len(tile_coverage),
                 alpha_mean=float(alpha_crop[region_mask].mean()) if region_mask.any() else 0.0,
+                min_atomic_footprint_px=min_atomic_footprint_px,
                 chonker_area_fraction=chonker_area_fraction,
                 one_off_min_area=one_off_min_area,
             )
@@ -151,10 +153,16 @@ def classify_region(
     total_pixels: int,
     tile_coverage_count: int,
     alpha_mean: float,
+    min_atomic_footprint_px: int = 64,
     chonker_area_fraction: float = 0.18,
     one_off_min_area: int = 4096,
 ) -> tuple[str, str | None]:
-    """Assign conservative curation labels for review-safe training gates."""
+    """Assign conservative curation labels for review-safe training gates.
+
+    Chonkers are preserved for composite-canvas harvesting, but default atomic
+    samples must span a physically meaningful ADT footprint instead of tiny
+    connected alpha slivers.
+    """
     _x, _y, width, height = bbox_xywh
     bbox_area = max(1, int(width) * int(height))
     area_fraction = float(area) / float(max(1, total_pixels))
@@ -163,6 +171,8 @@ def classify_region(
         return "too_small_unique", "area_below_minimum"
     if area_fraction >= float(chonker_area_fraction) or (width >= 768 and height >= 768):
         return "composite_chonker", "large_full_map_region"
+    if width < int(min_atomic_footprint_px) or height < int(min_atomic_footprint_px):
+        return "too_small_unique", "below_minimum_adt_footprint"
     if tile_coverage_count <= 1 and area >= int(one_off_min_area) and fill_fraction < 0.35:
         return "one_off_detail", "large_sparse_single_tile_region"
     if tile_coverage_count > 1:

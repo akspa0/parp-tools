@@ -24,8 +24,9 @@
 - Added `scripts/segment_full_map_fractals.py` CLI.
 - Added `tests/test_fractal_segments.py`; `uv run pytest tests/test_fractal_segments.py` -> `3 passed`.
 - Lint passed: `uv run ruff check src/harvester/fractal_segments.py tests/test_fractal_segments.py scripts/segment_full_map_fractals.py`.
-- Real-data smoke passed on the Phase 1 compact canvas: 38 regions; 34 accepted candidates, 3 fractal members, 1 composite chonker.
-- Segment output: `wow-viewer/output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/segments/`.
+- Real-data strict-footprint smoke passed on the Phase 1 tile16 compact canvas: 961 regions; 11 accepted candidates, 24 fractal members, 1 composite chonker, 2 one-off details, 923 too-small rows.
+- Segment output: `wow-viewer/output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/segments/`.
+- Curation correction: `composite_chonker` is preserved as a composite-canvas harvest target, while default atomic samples require a `64x64` alpha-pixel minimum footprint.
 
 ### Phase 2 status
 
@@ -38,14 +39,22 @@
 - Added `scripts/build_fractal_brush_library.py` CLI.
 - Added `tests/test_fractal_library.py`; `uv run pytest tests/test_fractal_library.py` -> `3 passed`.
 - Lint passed: `uv run ruff check src/harvester/fractal_library.py tests/test_fractal_library.py scripts/build_fractal_brush_library.py`.
-- Real-data smoke passed on the Phase 2 compact segments: 37 default trainable samples, 1 rejected review row, split counts `train=30`, `val=3`, `test=4`.
+- Real-data smoke passed on the Phase 2 tile16 strict-footprint segments: 35 default trainable atomic samples, 926 review/rejected rows, split counts `train=26`, `val=8`, `test=1`.
 - Smoke loader read 32 samples and returned only `accepted_candidate`/`fractal_member` labels.
-- Library output: `wow-viewer/output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/`.
+- Library output: `wow-viewer/output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/`.
 
 ### Phase 3 status
 
 - Phase 3 is implemented and validated for the bounded compact canvas.
 - Next route: Phase 4 texture/variant/BLP source-evidence inventory and joins. Do not start model training yet.
+
+### Phase 4 initial inventory
+
+- Added `specs/076-full-map-fractal-brush-library/research.md` documenting reusable texture evidence and gaps.
+- Confirmed reusable-now evidence is MCLY texture IDs/layer masks already present in V18 Zarr, Phase 1 canvas, Phase 2 region metadata, and Phase 3 sample tensors.
+- Added per-sample Phase 4 fields in `fractal_library.py`: `mcly_texture_id_counts`, `dominant_mcly_texture_id`, and `mcly_active_layer_coverage`.
+- No canonical decoded terrain tileset/BLP fingerprint artifact was found in `data-harvester` or `wow-viewer/output`; object-roof fingerprints are useful prior art only.
+- Next route: add a bounded decoded terrain texture/BLP evidence extractor or join a canonical fingerprint artifact when one exists.
 
 ### What landed
 

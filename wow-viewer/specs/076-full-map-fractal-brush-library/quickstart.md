@@ -10,9 +10,9 @@ Run from `wow-viewer/data-harvester/`:
 uv run python scripts/build_full_map_fractal_canvas.py `
   --build 0_5_3_3368 `
   --map Azeroth `
-  --tile-limit 4 `
+  --tile-limit 16 `
   --layers 0,1,2,3 `
-  --output-dir ../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact
+  --output-dir ../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact
 ```
 
 Validated local output:
@@ -21,20 +21,20 @@ Validated local output:
 Full-map fractal canvas built
   build: 0_5_3_3368
   map: Azeroth
-  tiles: 4
-  alpha_shape: (256, 1024, 4)
-  height_shape: (257, 1025)
-  mcly_shape: (16, 64, 4)
-  output_dir: ..\output\analysis\full-map-fractal-brush-library\smoke_0_5_3_3368_Azeroth_tile4_compact
+  tiles: 16
+  alpha_shape: (256, 4096, 4)
+  height_shape: (257, 4097)
+  mcly_shape: (16, 256, 4)
+  output_dir: ..\output\analysis\full-map-fractal-brush-library\smoke_0_5_3_3368_Azeroth_tile16_compact
 ```
 
 Key artifacts:
 
 ```text
-../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/canvas.zarr
-../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/canvas_index.parquet
-../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/summary.json
-../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/overlays/alpha_layer_slot_0_tile_seams.png
+../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/canvas.zarr
+../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/canvas_index.parquet
+../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/summary.json
+../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/overlays/alpha_layer_slot_0_tile_seams.png
 ```
 
 ## Validation
@@ -52,6 +52,9 @@ Expected test result: `4 passed`.
 - `--tile-limit` selects a compact same-row tile window for smoke/proof runs instead of raw index order.
 - Phase 2 segmentation is implemented for bounded canvas outputs and emits region metadata plus a review overlay.
 - Phase 3 writes fixed-size accepted sample tensors plus source crop/provenance metadata; Phase 4 texture/BLP evidence is not joined yet.
+- `composite_chonker` rows are preserved as composite-canvas harvest targets. They are not assumed to be wrong, but default atomic brush splits exclude them until a composite-specific target exists.
+- Default atomic brush samples require at least a `64x64` alpha-pixel footprint, corresponding to `4x4` current MCLY canvas cells. Smaller slivers are preserved as review evidence, not default accepted samples.
+- The earlier 4-tile smoke is still useful for coordinate proof, but it does not contain enough minimum-footprint atomic candidates for the 32-sample library loader gate.
 
 ## Phase 2 Smoke
 
@@ -59,28 +62,29 @@ Run from `wow-viewer/data-harvester/` after the Phase 1 smoke:
 
 ```powershell
 uv run python scripts/segment_full_map_fractals.py `
-  --canvas-dir ../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact `
-  --output-dir ../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/segments `
+  --canvas-dir ../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact `
+  --output-dir ../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/segments `
   --threshold 0.05 `
   --min-area 16 `
-  --max-regions-per-layer 200
+  --min-atomic-footprint-px 64 `
+  --max-regions-per-layer 500
 ```
 
 Validated local output:
 
 ```text
 Full-map fractal segmentation complete
-  regions: 38
-  curation_counts: {'accepted_candidate': 34, 'composite_chonker': 1, 'fractal_member': 3}
+  regions: 961
+  curation_counts: {'accepted_candidate': 11, 'composite_chonker': 1, 'fractal_member': 24, 'one_off_detail': 2, 'too_small_unique': 923}
 ```
 
 Key artifacts:
 
 ```text
-../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/segments/fractal_regions.parquet
-../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/segments/fractal_regions.jsonl
-../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/segments/summary.json
-../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/segments/overlays/fractal_regions_overlay.png
+../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/segments/fractal_regions.parquet
+../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/segments/fractal_regions.jsonl
+../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/segments/summary.json
+../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/segments/overlays/fractal_regions_overlay.png
 ```
 
 Additional validation:
@@ -90,7 +94,7 @@ uv run ruff check src/harvester/fractal_segments.py tests/test_fractal_segments.
 uv run pytest tests/test_fractal_segments.py
 ```
 
-Expected test result: `3 passed`.
+Expected test result: `4 passed`.
 
 ## Phase 3 Smoke
 
@@ -98,9 +102,9 @@ Run from `wow-viewer/data-harvester/` after the Phase 2 smoke:
 
 ```powershell
 uv run python scripts/build_fractal_brush_library.py `
-  --canvas-dir ../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact `
-  --regions ../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/segments `
-  --output-dir ../output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact `
+  --canvas-dir ../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact `
+  --regions ../output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/segments `
+  --output-dir ../output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact `
   --crop-size 128 `
   --smoke-count 32
 ```
@@ -109,20 +113,20 @@ Validated local output:
 
 ```text
 Full-map fractal brush library built
-  sample_count: 37
-  rejected_count: 1
-  split_counts: {'test': 4, 'train': 30, 'val': 3}
-  smoke: {"dataset_size": 37, "labels": {"accepted_candidate": 30, "fractal_member": 2}, "loaded": 32, "requested": 32}
+  sample_count: 35
+  rejected_count: 926
+  split_counts: {'test': 1, 'train': 26, 'val': 8}
+  smoke: {"dataset_size": 35, "labels": {"accepted_candidate": 9, "fractal_member": 23}, "loaded": 32, "requested": 32}
 ```
 
 Key artifacts:
 
 ```text
-../output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/samples.zarr
-../output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/samples.parquet
-../output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/rejected.parquet
-../output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/split.parquet
-../output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/summary.json
+../output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/samples.zarr
+../output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/samples.parquet
+../output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/rejected.parquet
+../output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/split.parquet
+../output/datasets/fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile16_compact/summary.json
 ```
 
 Additional validation:

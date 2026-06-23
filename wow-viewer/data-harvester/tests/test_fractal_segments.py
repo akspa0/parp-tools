@@ -28,8 +28,8 @@ def test_classify_region_rejects_chonkers() -> None:
 
 def test_classify_region_identifies_multi_tile_members() -> None:
     label, reason = classify_region(
-        bbox_xywh=(240, 8, 48, 20),
-        area=900,
+        bbox_xywh=(240, 8, 96, 80),
+        area=2400,
         total_pixels=512 * 256,
         tile_coverage_count=2,
         alpha_mean=0.4,
@@ -39,10 +39,23 @@ def test_classify_region_identifies_multi_tile_members() -> None:
     assert reason is None
 
 
+def test_classify_region_rejects_tiny_slivers_before_atomic_training() -> None:
+    label, reason = classify_region(
+        bbox_xywh=(240, 8, 96, 20),
+        area=1200,
+        total_pixels=512 * 256,
+        tile_coverage_count=2,
+        alpha_mean=0.4,
+    )
+
+    assert label == "too_small_unique"
+    assert reason == "below_minimum_adt_footprint"
+
+
 def test_segment_canvas_regions_emits_tile_coverage_and_spatial_stats(tmp_path: Path) -> None:
     root = zarr.open_group(str(tmp_path / "canvas.zarr"), mode="w")
     alpha = np.zeros((256, 512, 2), dtype=np.float32)
-    alpha[20:60, 240:288, 1] = 0.8
+    alpha[20:100, 240:320, 1] = 0.8
     tile_id_256 = np.full((256, 512), -1, dtype=np.int32)
     tile_id_256[:, :256] = 10
     tile_id_256[:, 256:] = 11
