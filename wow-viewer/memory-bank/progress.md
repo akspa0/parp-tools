@@ -2,6 +2,22 @@
 
 ## 2026-06-23 — Spec 076 replaces 074/075 brush-model direction
 
+### Phase 1 implementation
+
+- Added `src/harvester/fractal_canvas.py` for tile-local to map-canvas transforms, compact tile-window selection, dense bounded canvas assembly, Zarr/Parquet output, and seam overlay rendering.
+- Added `scripts/build_full_map_fractal_canvas.py` CLI.
+- Added `tests/test_fractal_canvas.py`; `uv run pytest tests/test_fractal_canvas.py` -> `4 passed`.
+- Lint passed: `uv run ruff check src/harvester/fractal_canvas.py tests/test_fractal_canvas.py scripts/build_full_map_fractal_canvas.py`.
+- Real-data smoke passed on V18 Zarr `0_5_3_3368`/`Azeroth`, tile-limit 4.
+- Smoke output: `wow-viewer/output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/`.
+- Output shapes: alpha `(256,1024,4)`, height `(257,1025)`, MCLY `(16,64,4)`.
+
+### Phase 1 status
+
+- Phase 1 is implemented and validated for a bounded compact tile window.
+- Full-continent chunk streaming is intentionally deferred until the coordinate/provenance proof is reviewed.
+- Next route: review Phase 1 artifacts, then start Phase 2 full-map fractal segmentation if accepted.
+
 ### What landed
 
 - Added `specs/076-full-map-fractal-brush-library/{spec,plan,tasks}.md`.

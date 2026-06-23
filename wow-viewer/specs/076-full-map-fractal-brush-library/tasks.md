@@ -14,15 +14,15 @@
 
 **Purpose**: Replace ADT-tile-local processing with full-map ZBrush-like signal canvases and exact provenance.
 
-- [ ] T001 [US1] Create `wow-viewer/data-harvester/src/harvester/fractal_canvas.py` with tile-local to map-canvas coordinate transforms for 256x256 alpha/minimap pixels, 257x257 height/normal vertices, and 16x16 MCLY cells.
-- [ ] T002 [P] [US1] Add `wow-viewer/data-harvester/tests/test_fractal_canvas.py` covering coordinate transforms, tile seam adjacency, and chunk/cell provenance on synthetic map layouts.
-- [ ] T003 [US1] Create `wow-viewer/data-harvester/scripts/build_full_map_fractal_canvas.py` with CLI args for `--dataset-dir`, `--build`, `--map`, `--output-dir`, `--tile-limit`, and `--layers`.
-- [ ] T004 [US1] Implement alpha canvas assembly in `fractal_canvas.py` from V18 `alpha_256`, writing chunked Zarr arrays per layer or a compact multi-layer canvas.
-- [ ] T005 [US1] Implement aligned height/normal/MCLY provenance summaries in `fractal_canvas.py` without duplicating full source arrays when references are sufficient.
-- [ ] T006 [US1] Add coupled terrain-art provenance fields so alpha, height, normals, MCLY context, and later source-BLP matches can be joined by canvas coordinates.
-- [ ] T007 [US1] Write `canvas_index.parquet` with build, map, tile_id, tile_x, tile_y, canvas extents, source array availability, and provenance hash.
-- [ ] T008 [US1] Add seam/debug overlay output to `build_full_map_fractal_canvas.py` showing tile boundaries and alpha/height/normal continuity.
-- [ ] T009 [US1] Run a bounded real-data smoke command and record output paths/counts in `wow-viewer/specs/076-full-map-fractal-brush-library/quickstart.md`.
+- [x] T001 [US1] Create `wow-viewer/data-harvester/src/harvester/fractal_canvas.py` with tile-local to map-canvas coordinate transforms for 256x256 alpha/minimap pixels, 257x257 height/normal vertices, and 16x16 MCLY cells.
+- [x] T002 [P] [US1] Add `wow-viewer/data-harvester/tests/test_fractal_canvas.py` covering coordinate transforms, tile seam adjacency, and chunk/cell provenance on synthetic map layouts.
+- [x] T003 [US1] Create `wow-viewer/data-harvester/scripts/build_full_map_fractal_canvas.py` with CLI args for `--dataset-dir`, `--build`, `--map`, `--output-dir`, `--tile-limit`, and `--layers`.
+- [x] T004 [US1] Implement alpha canvas assembly in `fractal_canvas.py` from V18 `alpha_256`, writing chunked Zarr arrays per layer or a compact multi-layer canvas.
+- [x] T005 [US1] Implement aligned height/normal/MCLY provenance summaries in `fractal_canvas.py` without duplicating full source arrays when references are sufficient.
+- [x] T006 [US1] Add coupled terrain-art provenance fields so alpha, height, normals, MCLY context, and later source-BLP matches can be joined by canvas coordinates.
+- [x] T007 [US1] Write `canvas_index.parquet` with build, map, tile_id, tile_x, tile_y, canvas extents, source array availability, and provenance hash.
+- [x] T008 [US1] Add seam/debug overlay output to `build_full_map_fractal_canvas.py` showing tile boundaries and alpha/height/normal continuity.
+- [x] T009 [US1] Run a bounded real-data smoke command and record output paths/counts in `wow-viewer/specs/076-full-map-fractal-brush-library/quickstart.md`.
 
 **Checkpoint**: One build/map canvas exists and proves cross-tile continuity plus provenance.
 

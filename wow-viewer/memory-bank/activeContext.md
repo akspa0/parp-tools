@@ -21,8 +21,10 @@ End-to-end height regression from minimap was not converging despite identical c
 - Purpose: recover real reusable brush/fractal/paste terrain-art primitives from the full map canvas, not per-ADT-tile connected components.
 - Conceptual model: each map is a stack of ZBrush-like sculpt-and-paint documents/layers; terrain mesh, alpha masks, MCLY texture/layer assignments, and possible source BLP/decal/effect stamps are one coupled unit.
 - Required signals: `alpha_256`, `height_257`, `normal_xyz`, `mcly_texture_ids`, `mcly_layer_mask`, minimap/object/liquid/shadow context where available, plus likely transparent/effect BLP source candidates when decoded/fingerprinted.
-- Training is blocked until Phase 1 full-map canvas and Phase 3 curated trainable library are validated.
-- Immediate next slice: Phase 1 only, `fractal_canvas.py` + `build_full_map_fractal_canvas.py` + coordinate/provenance tests.
+- Phase 1 canvas/provenance proof landed: `fractal_canvas.py`, `build_full_map_fractal_canvas.py`, and `tests/test_fractal_canvas.py`.
+- Smoke output: `wow-viewer/output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/` with alpha shape `(256,1024,4)`, height shape `(257,1025)`, MCLY shape `(16,64,4)`.
+- Training remains blocked until Phase 2 full-map segmentation and Phase 3 curated trainable library are validated.
+- Immediate next slice: review Phase 1 artifacts, then start Phase 2 only if canvas/provenance is accepted.
 
 ## Historical Evidence: 074 Alpha Brush Library
 
@@ -71,7 +73,12 @@ End-to-end height regression from minimap was not converging despite identical c
 - `wow-viewer/data-harvester/scripts/dedupe_alpha_brush_patterns.py`
 - `wow-viewer/data-harvester/scripts/visualize_alpha_brush_pattern_neighbors.py`
 - `wow-viewer/specs/075-scar-mask-segmentation/{spec,plan,tasks}.md`
+- `wow-viewer/specs/076-full-map-fractal-brush-library/{spec,plan,tasks,quickstart}.md`
 - `wow-viewer/docs/architecture/v21-scar-mask-segmentation-2026-06-23.md`
+- `wow-viewer/docs/architecture/full-map-fractal-brush-library-2026-06-23.md`
+- `wow-viewer/data-harvester/src/harvester/fractal_canvas.py`
+- `wow-viewer/data-harvester/scripts/build_full_map_fractal_canvas.py`
+- `wow-viewer/data-harvester/tests/test_fractal_canvas.py`
 - `wow-viewer/data-harvester/src/harvester/{v21_scar_dataset,v21_scar_model,test_v21_scar_mask}.py`
 - `wow-viewer/data-harvester/scripts/train_v21_scar_mask.py`
 - `wow-viewer/data-harvester/tests/test_alpha_brush.py`
