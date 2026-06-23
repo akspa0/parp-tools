@@ -1,5 +1,20 @@
 # Progress — wow-viewer
 
+## 2026-06-22 — Spec 071 Phase E: Model Viewer Info sub-tab (complete)
+
+### What landed
+
+- Model > Info sub-tab dispatches through `DrawModelInfoSubTab` → `DrawModelInfoPanelContent` → `DrawModelInfoContent`.
+- Added `Path:` line to `_modelInfo` for MDX, M2 runtime, WMO, and M2 camera path loads.
+- Info panel already displays type, version, name, vertices/triangles, materials/textures, plus WMO doodad set selector and animation combo when applicable.
+- Placeholder shown when no model loaded.
+- Build: 0 errors.
+- Commit `63cfcd8b` pushed to `071-left-right-sidebar-split`.
+
+### Next
+
+- Phase F: Model Viewer Animations sub-tab.
+
 ## 2026-06-22 — Spec 071 Phase D: 3 top tabs Model/World/Tools (complete)
 
 ### What landed
@@ -12,10 +27,6 @@
 - Removed obsolete `SceneBottomTab`; Quick controls now live under Tools > Quick.
 - Build: 0 errors.
 - Commit `60d0bf88` pushed to `071-left-right-sidebar-split`.
-
-### Next
-
-- Phase E: Model Viewer Info sub-tab.
 
 ## 2026-06-22 — Spec 071 Phase C: Right sidebar / workbench (complete)
 

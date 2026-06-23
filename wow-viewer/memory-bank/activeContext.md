@@ -28,7 +28,9 @@ Viewer UI in flux. 069 (tab system) hit 16 phases. User feedback on 069:
 
 **Phase D (done)**: Replaced 069's 6-value `TopTab` with 3-value `WorkbenchTab` (Model/World/Tools) in new `WoWViewer.Workbench` namespace. Added `WorkbenchNavigator` with sub-tab enums and labels. World tab has Source/Placements/Tiles/Overlays/Selection Tools. Tools tab has Quick/Archeology/PM4/Terrain/Utilities. Model tab has Info/Animations/Actions/LOD. Tools menu items now call typed `OpenWorkbenchTab` overloads. Old `SceneBottomTab` removed; Quick controls live under Tools > Quick.
 
-**Next**: Phase E — Model Viewer Info sub-tab.
+**Phase E (done)**: Model > Info sub-tab reuses `DrawModelInfoPanelContent` → `DrawModelInfoContent`. Added `Path:` line to `_modelInfo` for MDX, M2 runtime, WMO, and M2 camera path loads. Info panel shows type, version, name, vertices/triangles, materials/textures, plus existing animation/WMO controls. Placeholder shown when no model is loaded.
+
+**Next**: Phase F — Model Viewer Animations sub-tab.
 
 **Cut branch:** `071-left-right-sidebar-split` from `069-viewer-ui-overhaul`.
 
