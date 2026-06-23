@@ -6,7 +6,8 @@
 
 - **Spec 071 complete** on branch `071-left-right-sidebar-split`: two-side layout (left = file/maps/workspace, right = workbench), 3 top tabs (Model/World/Tools), Model Viewer sub-tabs (Info/Animations/Actions/LOD).
 - **072 complete**: fixed tab-mode sidebar resize sliders jumping with the moving window by moving resize to edge splitters; toolbar now spans viewport width only and draws after sidebars for correct z-order. Build clean, committed `bcdcb752`.
-- User wants **serious rework and deduplication** next, plus leaner workflow (compressed memory bank, read only active slice + one code file, sub-plans >10 tasks get fresh chat).
+- **073a complete**: deduplicated toolbar / left sidebar controls; toolbar now scene-only, left sidebar owns source/workspace controls. Build clean, committed `b11dd518`.
+- **073b ready**: Tools tab converter integration spec'd at `specs/073b-tools-tab-converters/tasks.md`. Implementation is a separate sub-plan; start in fresh chat.
 
 ## What Works
 - Tab UI with left/right sidebars and workbench.

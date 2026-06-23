@@ -1,5 +1,19 @@
 # Progress — wow-viewer
 
+## 2026-06-22 — 073a: Toolbar / left sidebar dedup and alignment (complete)
+
+### What landed
+
+- Removed `DrawWorkspaceToolbarControls`, "Open Game Folder", and "Open File" from `DrawToolbar`.
+- Toolbar now shows only scene status + centered terrain controls.
+- Source/workspace controls remain in the left sidebar (`DrawWorkspaceBarsPanelContent`).
+- Legacy mode preserved.
+- Build: 0 errors, 284 pre-existing warnings.
+- Commit `b11dd518` pushed to `071-left-right-sidebar-split`.
+
+### Status
+073a complete. 073b (Tools tab converter integration) spec'd and ready for implementation in fresh chat.
+
 ## 2026-06-22 — 072: Sidebar resize + toolbar layout hotfix (complete)
 
 ### What landed
@@ -12,7 +26,7 @@
 - Commit `bcdcb752` pushed to `071-left-right-sidebar-split`.
 
 ### Status
-072 hotfix complete. Next: audit/dedup scope with user.
+072 hotfix complete.
 
 ## 2026-06-22 — Spec 071 Phase H: Memory bank + spec sync + final build (complete)
 
