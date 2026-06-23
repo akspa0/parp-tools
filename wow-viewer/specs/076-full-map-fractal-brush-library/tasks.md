@@ -32,14 +32,14 @@
 
 **Purpose**: Segment real map-canvas structures and demote 074 components to evidence rather than truth.
 
-- [ ] T010 [US2] Create `wow-viewer/data-harvester/src/harvester/fractal_segments.py` with region dataclasses/schema helpers for full-map regions, members, terrain-art primitives, and curation labels.
-- [ ] T011 [P] [US2] Add `wow-viewer/data-harvester/tests/test_fractal_segments.py` covering cross-tile component merging, chonker classification, one-off labeling, and 074 overlap joins on synthetic canvases.
-- [ ] T012 [US2] Create `wow-viewer/data-harvester/scripts/segment_full_map_fractals.py` with CLI args for canvas dir, 074 catalog dir, thresholds, output dir, and max regions.
-- [ ] T013 [US2] Implement full-map per-layer segmentation that ignores tile seams and emits canvas-space bboxes plus tile coverage.
-- [ ] T014 [US2] Implement region feature extraction: alpha coverage/gradient, tile coverage count, layer profile, height/normal sculpt response, MCLY layer/texture summary.
-- [ ] T015 [US2] Implement overlap linkage from full-map regions to 074 `component_id` rows using build/map/tile/layer/bbox provenance.
-- [ ] T016 [US2] Implement curation labels and rejection reasons: `accepted_candidate`, `fractal_member`, `composite_chonker`, `one_off_detail`, `too_small_unique`, `rejected_unknown`.
-- [ ] T017 [US2] Render layer-separated review overlays/contact sheets by curation label, with source build/map/tile spans and 074 linkage counts.
+- [x] T010 [US2] Create `wow-viewer/data-harvester/src/harvester/fractal_segments.py` with region dataclasses/schema helpers for full-map regions, members, terrain-art primitives, and curation labels.
+- [x] T011 [P] [US2] Add `wow-viewer/data-harvester/tests/test_fractal_segments.py` covering cross-tile component merging, chonker classification, one-off labeling, and 074 overlap joins on synthetic canvases.
+- [x] T012 [US2] Create `wow-viewer/data-harvester/scripts/segment_full_map_fractals.py` with CLI args for canvas dir, 074 catalog dir, thresholds, output dir, and max regions.
+- [x] T013 [US2] Implement full-map per-layer segmentation that ignores tile seams and emits canvas-space bboxes plus tile coverage.
+- [x] T014 [US2] Implement region feature extraction: alpha coverage/gradient, tile coverage count, layer profile, height/normal sculpt response, MCLY layer/texture summary.
+- [x] T015 [US2] Implement overlap linkage from full-map regions to 074 `component_id` rows using build/map/tile/layer/bbox provenance.
+- [x] T016 [US2] Implement curation labels and rejection reasons: `accepted_candidate`, `fractal_member`, `composite_chonker`, `one_off_detail`, `too_small_unique`, `rejected_unknown`.
+- [x] T017 [US2] Render layer-separated review overlays/contact sheets by curation label, with source build/map/tile spans and 074 linkage counts.
 
 **Checkpoint**: Review overlays show cross-tile fractal structures and rejected chonkers/one-offs separately from accepted candidates.
 

@@ -18,6 +18,20 @@
 - Full-continent chunk streaming is intentionally deferred until the coordinate/provenance proof is reviewed.
 - Next route: review Phase 1 artifacts, then start Phase 2 full-map fractal segmentation if accepted.
 
+### Phase 2 implementation
+
+- Added `src/harvester/fractal_segments.py` for full-map alpha region extraction, region stats, curation labels, optional 074 catalog linkage, Parquet/JSONL output, and overlay rendering.
+- Added `scripts/segment_full_map_fractals.py` CLI.
+- Added `tests/test_fractal_segments.py`; `uv run pytest tests/test_fractal_segments.py` -> `3 passed`.
+- Lint passed: `uv run ruff check src/harvester/fractal_segments.py tests/test_fractal_segments.py scripts/segment_full_map_fractals.py`.
+- Real-data smoke passed on the Phase 1 compact canvas: 38 regions; 34 accepted candidates, 3 fractal members, 1 composite chonker.
+- Segment output: `wow-viewer/output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/segments/`.
+
+### Phase 2 status
+
+- Phase 2 is implemented and validated for the bounded compact canvas.
+- Next route: inspect `fractal_regions_overlay.png` and metadata before starting Phase 3 trainable library construction.
+
 ### What landed
 
 - Added `specs/076-full-map-fractal-brush-library/{spec,plan,tasks}.md`.

@@ -23,8 +23,10 @@ End-to-end height regression from minimap was not converging despite identical c
 - Required signals: `alpha_256`, `height_257`, `normal_xyz`, `mcly_texture_ids`, `mcly_layer_mask`, minimap/object/liquid/shadow context where available, plus likely transparent/effect BLP source candidates when decoded/fingerprinted.
 - Phase 1 canvas/provenance proof landed: `fractal_canvas.py`, `build_full_map_fractal_canvas.py`, and `tests/test_fractal_canvas.py`.
 - Smoke output: `wow-viewer/output/analysis/full-map-fractal-brush-library/smoke_0_5_3_3368_Azeroth_tile4_compact/` with alpha shape `(256,1024,4)`, height shape `(257,1025)`, MCLY shape `(16,64,4)`.
-- Training remains blocked until Phase 2 full-map segmentation and Phase 3 curated trainable library are validated.
-- Immediate next slice: review Phase 1 artifacts, then start Phase 2 only if canvas/provenance is accepted.
+- Phase 2 bounded segmentation landed: `fractal_segments.py`, `segment_full_map_fractals.py`, and `tests/test_fractal_segments.py`.
+- Segment smoke output: `.../smoke_0_5_3_3368_Azeroth_tile4_compact/segments/`, 38 regions: 34 accepted candidates, 3 fractal members, 1 composite chonker.
+- Training remains blocked until Phase 3 curated trainable library is validated.
+- Immediate next slice: review Phase 2 overlay/metadata, then start Phase 3 trainable library only if region labels look sane.
 
 ## Historical Evidence: 074 Alpha Brush Library
 
@@ -77,8 +79,11 @@ End-to-end height regression from minimap was not converging despite identical c
 - `wow-viewer/docs/architecture/v21-scar-mask-segmentation-2026-06-23.md`
 - `wow-viewer/docs/architecture/full-map-fractal-brush-library-2026-06-23.md`
 - `wow-viewer/data-harvester/src/harvester/fractal_canvas.py`
+- `wow-viewer/data-harvester/src/harvester/fractal_segments.py`
 - `wow-viewer/data-harvester/scripts/build_full_map_fractal_canvas.py`
+- `wow-viewer/data-harvester/scripts/segment_full_map_fractals.py`
 - `wow-viewer/data-harvester/tests/test_fractal_canvas.py`
+- `wow-viewer/data-harvester/tests/test_fractal_segments.py`
 - `wow-viewer/data-harvester/src/harvester/{v21_scar_dataset,v21_scar_model,test_v21_scar_mask}.py`
 - `wow-viewer/data-harvester/scripts/train_v21_scar_mask.py`
 - `wow-viewer/data-harvester/tests/test_alpha_brush.py`
