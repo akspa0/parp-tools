@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-**Last updated**: 2026-06-22 | **Focus**: Spec 071 — left/right sidebar split + Model Viewer mode (Phase A done)
+**Last updated**: 2026-06-22 | **Focus**: Spec 071 — left/right sidebar split + Model Viewer mode (Phase D done, Phase E next)
 
 ## Current State
 
@@ -9,11 +9,6 @@ Viewer UI in flux. 069 (tab system) hit 16 phases. User feedback on 069:
 - Right sidebar = workbench (existing single panel)
 - **No useful model inspection panels** when loading a model (M2/MDX/WMO). Need Model Viewer mode with info, animation list, Play/Pause/Stop
 - All popups should be tabs in the workbench, not floating windows
-
-### UI direction (069 final state)
-- 6 top tabs in single workbench (Scene/World/Terrain/PM4/Archeology/Utilities) — too many, all crammed
-- 16 phases committed, pushed to `069-viewer-ui-overhaul`
-- Headless content variants prevent nested ImGui windows
 
 ### Spec 071 (branch `071-left-right-sidebar-split`)
 
@@ -25,19 +20,15 @@ Viewer UI in flux. 069 (tab system) hit 16 phases. User feedback on 069:
 - **Model Viewer mode**: Info / Animations / Actions / LOD sub-tabs
 - All Tools menu items become tab switchers
 
-**Phase A (done)**: `TryGetSceneViewportRect` now subtracts `_leftSidebarWidth` and `_rightSidebarWidth` when `_useTabUi` is active and the sidebars are visible. Legacy (`!_useTabUi`) viewport math unchanged.
+**Phase A (done)**: `TryGetSceneViewportRect` now subtracts `_leftSidebarWidth` and `_rightSidebarWidth` when `_useTabUi` is active.
 
-**Phase B (done)**: New `DrawLeftSidebar()` renders a fixed left panel in tab mode with `DrawWorkspaceBarsPanelContent`, `DrawFileBrowserContent`, and `DrawMapDiscoveryContent`. The legacy shell-panel left sidebar was renamed to `DrawLegacyLeftSidebar()` and is only used in legacy/dockspace mode.
+**Phase B (done)**: New `DrawLeftSidebar()` renders a fixed left panel in tab mode with `DrawWorkspaceBarsPanelContent`, `DrawFileBrowserContent`, and `DrawMapDiscoveryContent`. Legacy shell-panel left sidebar renamed to `DrawLegacyLeftSidebar()`.
 
-**Phase C (done)**: `DrawWorkbenchPopout` renamed to `DrawRightSidebar`; anchored to right edge at `x = displayWidth - _rightSidebarWidth`, full viewport height, width clamped via `ClampFixedSidebarWidth`. Added `DefaultRightSidebarWidth = 480f` and wired it through init/reset/load/save. Legacy shell-panel right sidebar renamed to `DrawLegacyRightSidebar()`. Removed unused `_popoutDockFrame`.
+**Phase C (done)**: `DrawWorkbenchPopout` renamed to `DrawRightSidebar`; anchored to right edge with `_rightSidebarWidth`. Added `DefaultRightSidebarWidth = 480f` and wired it through init/reset/load/save. Legacy shell-panel right sidebar renamed to `DrawLegacyRightSidebar()`.
 
-**Next**: Phase D — collapse `TopTab` from 6 values to 3 (Model/World/Tools), remap sub-tabs, and route Tools menu items to tab switches.
+**Phase D (done)**: Replaced 069's 6-value `TopTab` with 3-value `WorkbenchTab` (Model/World/Tools) in new `WoWViewer.Workbench` namespace. Added `WorkbenchNavigator` with sub-tab enums and labels. World tab has Source/Placements/Tiles/Overlays/Selection Tools. Tools tab has Quick/Archeology/PM4/Terrain/Utilities. Model tab has Info/Animations/Actions/LOD. Tools menu items now call typed `OpenWorkbenchTab` overloads. Old `SceneBottomTab` removed; Quick controls live under Tools > Quick.
 
-**Salvage from 069:**
-- Tab data model + dispatch
-- Sub-tab content methods (Draw*Content variants)
-- Archeology playback, sticky settings
-- Headless content variants (no nested windows)
+**Next**: Phase E — Model Viewer Info sub-tab.
 
 **Cut branch:** `071-left-right-sidebar-split` from `069-viewer-ui-overhaul`.
 

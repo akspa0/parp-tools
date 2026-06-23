@@ -1,5 +1,22 @@
 # Progress — wow-viewer
 
+## 2026-06-22 — Spec 071 Phase D: 3 top tabs Model/World/Tools (complete)
+
+### What landed
+
+- Replaced 069's 6-value `TopTab` with `WorkbenchTab` enum (`Model`, `World`, `Tools`) in new `WoWViewer.Workbench` namespace.
+- Added `WorkbenchNavigator` helper with `ModelBottomTab`, `WorldBottomTab`, `ToolsBottomTab`, `UtilitiesBottomTab`, `TerrainBottomTab`, `Pm4BottomTab`, `ArcheologyBottomTab` enums and label lookup.
+- Mapped old top tabs into new structure: World tab = Source/Placements/Tiles/Overlays/Selection Tools; Tools tab = Quick/Archeology/PM4/Terrain/Utilities; Model tab = Info/Animations/Actions/LOD.
+- Updated `DrawTopTabButton` dispatch and `DrawWorkbenchContent` to switch on `WorkbenchTab`.
+- Routed Tools menu items through typed `OpenWorkbenchTab` overloads; legacy standalone toggles removed for items now living in the workbench.
+- Removed obsolete `SceneBottomTab`; Quick controls now live under Tools > Quick.
+- Build: 0 errors.
+- Commit `60d0bf88` pushed to `071-left-right-sidebar-split`.
+
+### Next
+
+- Phase E: Model Viewer Info sub-tab.
+
 ## 2026-06-22 — Spec 071 Phase C: Right sidebar / workbench (complete)
 
 ### What landed
@@ -10,10 +27,6 @@
 - Removed unused `_popoutDockFrame` field.
 - Build: 0 errors.
 - Commit `be92b40f` pushed to `071-left-right-sidebar-split`.
-
-### Next
-
-- Phase D: collapse `TopTab` to Model/World/Tools, remap sub-tabs, route Tools menu to tab switches.
 
 ## 2026-06-22 — Spec 071 Phase B: Left sidebar (complete)
 
