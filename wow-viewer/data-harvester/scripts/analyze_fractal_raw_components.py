@@ -364,7 +364,7 @@ def process_map_in_strips(
 ) -> list[FractalRegion]:
     """Process a full map in horizontal strips to keep memory bounded."""
     full_layout = build_canvas_layout(records)
-    full_group = create_chunked_canvas_group(canvas_dir, full_layout, layers=layers)
+    full_group = create_chunked_canvas_group(canvas_dir, full_layout, layers=layers, aux_arrays=False)
     _write_all_tiles(full_group, root, records, full_layout, layers, canvas_dir)
 
     min_tile_x = int(full_layout.min_tile_x)

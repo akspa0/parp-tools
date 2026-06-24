@@ -299,23 +299,33 @@ def create_chunked_canvas_group(
     layout: CanvasLayout,
     *,
     layers: tuple[int, ...] = (0, 1, 2, 3),
+    aux_arrays: bool = True,
 ) -> zarr.Group:
-    """Create empty tile-chunked canvas arrays for memory-bounded full-map writes."""
+    """Create empty tile-chunked canvas arrays for memory-bounded full-map writes.
+
+    Parameters
+    ----------
+    aux_arrays:
+        If False, only create alpha_256 and tile_id_256. This avoids writing
+        height/normal/MCLY arrays that are not needed for raw alpha analysis and
+        avoids Windows async-file-rename races on overlapping vertex/cell chunks.
+    """
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     group = zarr.open_group(str(out / "canvas.zarr"), mode="w")
     alpha_h, alpha_w = layout.alpha_shape
-    height_h, height_w = layout.height_shape
-    mcly_h, mcly_w = layout.mcly_shape
     n_layers = len(layers)
     group.create_array("alpha_256", shape=(alpha_h, alpha_w, n_layers), chunks=(ALPHA_TILE_SIZE, ALPHA_TILE_SIZE, 1), dtype=np.float32, fill_value=0.0)
     group.create_array("tile_id_256", shape=(alpha_h, alpha_w), chunks=(ALPHA_TILE_SIZE, ALPHA_TILE_SIZE), dtype=np.int32, fill_value=-1)
-    group.create_array("height_257", shape=(height_h, height_w), chunks=(HEIGHT_TILE_SIZE, HEIGHT_TILE_SIZE), dtype=np.float32, fill_value=0.0)
-    group.create_array("normal_xyz", shape=(height_h, height_w, 3), chunks=(HEIGHT_TILE_SIZE, HEIGHT_TILE_SIZE, 3), dtype=np.float32, fill_value=0.0)
-    group.create_array("tile_id_257", shape=(height_h, height_w), chunks=(HEIGHT_TILE_SIZE, HEIGHT_TILE_SIZE), dtype=np.int32, fill_value=-1)
-    group.create_array("mcly_texture_ids", shape=(mcly_h, mcly_w, 4), chunks=(MCLY_TILE_SIZE, MCLY_TILE_SIZE, 4), dtype=np.int32, fill_value=-1)
-    group.create_array("mcly_layer_mask", shape=(mcly_h, mcly_w, 4), chunks=(MCLY_TILE_SIZE, MCLY_TILE_SIZE, 4), dtype=np.float32, fill_value=0.0)
-    group.create_array("tile_id_16", shape=(mcly_h, mcly_w), chunks=(MCLY_TILE_SIZE, MCLY_TILE_SIZE), dtype=np.int32, fill_value=-1)
+    if aux_arrays:
+        height_h, height_w = layout.height_shape
+        mcly_h, mcly_w = layout.mcly_shape
+        group.create_array("height_257", shape=(height_h, height_w), chunks=(HEIGHT_TILE_SIZE, HEIGHT_TILE_SIZE), dtype=np.float32, fill_value=0.0)
+        group.create_array("normal_xyz", shape=(height_h, height_w, 3), chunks=(HEIGHT_TILE_SIZE, HEIGHT_TILE_SIZE, 3), dtype=np.float32, fill_value=0.0)
+        group.create_array("tile_id_257", shape=(height_h, height_w), chunks=(HEIGHT_TILE_SIZE, HEIGHT_TILE_SIZE), dtype=np.int32, fill_value=-1)
+        group.create_array("mcly_texture_ids", shape=(mcly_h, mcly_w, 4), chunks=(MCLY_TILE_SIZE, MCLY_TILE_SIZE, 4), dtype=np.int32, fill_value=-1)
+        group.create_array("mcly_layer_mask", shape=(mcly_h, mcly_w, 4), chunks=(MCLY_TILE_SIZE, MCLY_TILE_SIZE, 4), dtype=np.float32, fill_value=0.0)
+        group.create_array("tile_id_16", shape=(mcly_h, mcly_w), chunks=(MCLY_TILE_SIZE, MCLY_TILE_SIZE), dtype=np.int32, fill_value=-1)
     group.create_array("alpha_layer_indices", data=np.asarray(layers, dtype=np.int32))
     group.attrs.update({"layout": _json_ready(asdict(layout))})
     return group
@@ -339,18 +349,18 @@ def write_tile_to_canvas(
         alpha = np.clip(source_root["alpha_256"][tile_id].astype(np.float32), 0.0, 1.0)
         group["alpha_256"][ay : ay + ALPHA_TILE_SIZE, ax : ax + ALPHA_TILE_SIZE, :] = alpha[:, :, layer_indices]
         group["tile_id_256"][ay : ay + ALPHA_TILE_SIZE, ax : ax + ALPHA_TILE_SIZE] = tile_id
-    if record.has_height_257 and "height_257" in source_root:
+    if "height_257" in group and record.has_height_257 and "height_257" in source_root:
         group["height_257"][hy : hy + HEIGHT_TILE_SIZE, hx : hx + HEIGHT_TILE_SIZE] = source_root["height_257"][tile_id].astype(np.float32)
-    if record.has_normal_xyz and "normal_xyz" in source_root:
+    if "normal_xyz" in group and record.has_normal_xyz and "normal_xyz" in source_root:
         group["normal_xyz"][hy : hy + HEIGHT_TILE_SIZE, hx : hx + HEIGHT_TILE_SIZE, :] = source_root["normal_xyz"][tile_id].astype(np.float32)
-    if record.has_height_257 or record.has_normal_xyz:
+    if "tile_id_257" in group and (record.has_height_257 or record.has_normal_xyz):
         if "height_257" in source_root or "normal_xyz" in source_root:
             group["tile_id_257"][hy : hy + HEIGHT_TILE_SIZE, hx : hx + HEIGHT_TILE_SIZE] = tile_id
-    if record.has_mcly_texture_ids and "mcly_texture_ids" in source_root:
+    if "mcly_texture_ids" in group and record.has_mcly_texture_ids and "mcly_texture_ids" in source_root:
         group["mcly_texture_ids"][my : my + MCLY_TILE_SIZE, mx : mx + MCLY_TILE_SIZE, :] = source_root["mcly_texture_ids"][tile_id].astype(np.int32)
-    if record.has_mcly_layer_mask and "mcly_layer_mask" in source_root:
+    if "mcly_layer_mask" in group and record.has_mcly_layer_mask and "mcly_layer_mask" in source_root:
         group["mcly_layer_mask"][my : my + MCLY_TILE_SIZE, mx : mx + MCLY_TILE_SIZE, :] = source_root["mcly_layer_mask"][tile_id].astype(np.float32)
-    if record.has_mcly_texture_ids or record.has_mcly_layer_mask:
+    if "tile_id_16" in group and (record.has_mcly_texture_ids or record.has_mcly_layer_mask):
         if "mcly_texture_ids" in source_root or "mcly_layer_mask" in source_root:
             group["tile_id_16"][my : my + MCLY_TILE_SIZE, mx : mx + MCLY_TILE_SIZE] = tile_id
 
