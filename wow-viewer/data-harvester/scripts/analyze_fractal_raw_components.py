@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 import pyarrow.parquet as pq
 import zarr
+from PIL import Image, ImageDraw, ImageFont
 
 zarr.config.set({"async.concurrency": 1})
 
@@ -48,7 +49,9 @@ from harvester.fractal_segments import (  # noqa: E402
     render_region_overlay,
     save_regions,
     save_regions_jsonl,
+    segment_blocky_pastes,
     segment_canvas_regions,
+    segment_macro_pastes,
 )
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -86,6 +89,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rectangle-page-min-area", type=int, default=256, help="Minimum area for a rectangle page candidate.")
     parser.add_argument("--rectangle-page-min-extent", type=float, default=0.85, help="Minimum area / bbox_area for a rectangle page candidate.")
     parser.add_argument("--rectangle-page-max-aspect", type=float, default=8.0, help="Maximum aspect ratio for a rectangle page candidate.")
+    parser.add_argument("--macro-pastes", action="store_true", help="Segment macro paste/scar objects via morphological closing instead of individual brush strokes.")
+    parser.add_argument("--macro-close-radius", type=int, default=32, help="Morphological closing radius in alpha pixels (merges strokes within this distance).")
+    parser.add_argument("--macro-min-area", type=int, default=4096, help="Minimum area for a macro paste candidate (64x64 alpha pixels = 4096).")
+    parser.add_argument("--macro-min-footprint", type=int, default=64, help="Minimum bbox width/height for a macro paste candidate.")
+    parser.add_argument("--macro-max-aspect", type=float, default=12.0, help="Maximum aspect ratio for a macro paste candidate.")
+    parser.add_argument("--macro-downsample-factor", type=int, default=8, help="Max-pool alpha by this factor before macro closing for full-map speed.")
+    parser.add_argument("--blocky-pastes", action="store_true", help="Segment middle-scale dense blocky paste/scar children instead of giant parent zones.")
+    parser.add_argument("--block-size", type=int, default=16, help="Alpha-pixel block size for blocky paste coverage grid.")
+    parser.add_argument("--block-min-coverage", type=float, default=0.08, help="Minimum painted coverage per block for blocky paste segmentation.")
+    parser.add_argument("--block-close-radius", type=int, default=1, help="Closing radius in block units for blocky paste segmentation.")
+    parser.add_argument("--block-min-area", type=int, default=512, help="Minimum original alpha pixels for a blocky paste region.")
+    parser.add_argument("--block-min-footprint", type=int, default=16, help="Minimum bbox width/height in alpha pixels for blocky paste regions.")
+    parser.add_argument("--block-max-footprint", type=int, default=0, help="Optional maximum bbox width/height in alpha pixels for blocky paste regions (0 = unlimited).")
+    parser.add_argument("--block-max-aspect", type=float, default=12.0, help="Maximum aspect ratio for blocky paste regions.")
+    parser.add_argument("--visualize-macro", action="store_true", help="Render macro paste overview/contact sheets even when --no-overlay is set.")
+    parser.add_argument("--visualize-composite-signal", action="store_true", help="Render V18-style composite hard-region overview for macro paste review.")
+    parser.add_argument("--macro-max-preview-side", type=int, default=4096, help="Maximum side length for macro full-map overview image.")
+    parser.add_argument("--macro-max-contact-regions", type=int, default=120, help="Maximum macro paste regions to include in contact sheets per target.")
+    parser.add_argument("--macro-contact-per-page", type=int, default=24, help="Macro paste contact-sheet rows per page.")
     return parser.parse_args()
 
 
@@ -142,6 +164,7 @@ def main() -> None:
                     strip_tiles=int(args.strip_tiles),
                     overlap_alpha_tiles=int(args.strip_overlap_alpha_tiles),
                     no_overlay=bool(args.no_overlay),
+                    skip_raw_segments=bool(args.macro_pastes) or bool(args.blocky_pastes),
                 )
             else:
                 from harvester.fractal_canvas import assemble_full_map_canvas
@@ -164,6 +187,54 @@ def main() -> None:
                     render_region_overlay(zarr.open_group(str(canvas_dir / "canvas.zarr"), mode="r"), regions, segments_dir / "overlays" / "fractal_regions_overlay.png")
 
             canvas = zarr.open_group(str(canvas_dir / "canvas.zarr"), mode="r")
+            if bool(args.macro_pastes) or bool(args.blocky_pastes):
+                if bool(args.blocky_pastes):
+                    regions = segment_blocky_pastes(
+                        canvas,
+                        threshold=float(args.threshold),
+                        block_size=int(args.block_size),
+                        min_block_coverage=float(args.block_min_coverage),
+                        block_close_radius=int(args.block_close_radius),
+                        min_area=int(args.block_min_area),
+                        min_footprint_px=int(args.block_min_footprint),
+                        max_footprint_px=int(args.block_max_footprint) if int(args.block_max_footprint) > 0 else None,
+                        max_aspect_ratio=float(args.block_max_aspect),
+                        max_regions_per_layer=int(args.max_regions_per_layer),
+                    )
+                else:
+                    regions = segment_macro_pastes(
+                        canvas,
+                        threshold=float(args.threshold),
+                        close_radius=int(args.macro_close_radius),
+                        min_area=int(args.macro_min_area),
+                        min_footprint_px=int(args.macro_min_footprint),
+                        max_aspect_ratio=float(args.macro_max_aspect),
+                        max_regions_per_layer=int(args.max_regions_per_layer),
+                        downsample_factor=int(args.macro_downsample_factor),
+                    )
+                save_regions(segments_dir / "fractal_regions.parquet", regions)
+                save_regions_jsonl(segments_dir / "fractal_regions.jsonl", regions)
+                if bool(args.visualize_macro) or not bool(args.no_overlay):
+                    review_dir = segments_dir / "macro_review"
+                    if bool(args.visualize_composite_signal):
+                        _write_composite_signal_review(
+                            root,
+                            records,
+                            canvas,
+                            regions,
+                            review_dir,
+                            max_preview_side=int(args.macro_max_preview_side),
+                        )
+                    _write_macro_review(
+                        canvas,
+                        regions,
+                        review_dir,
+                        max_preview_side=int(args.macro_max_preview_side),
+                        max_contact_regions=int(args.macro_max_contact_regions),
+                        contact_per_page=int(args.macro_contact_per_page),
+                        threshold=float(args.threshold),
+                    )
+                print(f"  {'blocky_pastes' if bool(args.blocky_pastes) else 'macro_pastes'}={len(regions)}", flush=True)
             if bool(args.detect_rectangle_pages):
                 rectangle_regions = detect_rectangle_pages(
                     canvas,
@@ -286,6 +357,350 @@ def _run_near_visualizer(out_root: Path, args: argparse.Namespace) -> None:
     subprocess.run(cmd, check=True)
 
 
+_MACRO_LAYER_COLORS = {
+    0: (180, 180, 180),
+    1: (80, 170, 255),
+    2: (100, 230, 120),
+    3: (255, 185, 70),
+}
+
+
+def _write_macro_review(
+    canvas: zarr.Group,
+    regions: list[FractalRegion],
+    output_dir: Path,
+    *,
+    max_preview_side: int,
+    max_contact_regions: int,
+    contact_per_page: int,
+    threshold: float,
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    selected = sorted(regions, key=lambda item: item.area, reverse=True)[: max(0, int(max_contact_regions))]
+    overview_path = output_dir / "macro_paste_overview.png"
+    scale, overview = _render_macro_overview(canvas, selected, overview_path, max_preview_side=max_preview_side)
+    pages = _render_macro_contact_sheets(canvas, selected, output_dir, contact_per_page=contact_per_page, threshold=threshold)
+    summary = {
+        "region_count": int(len(regions)),
+        "regions_rendered": int(len(selected)),
+        "overview_path": str(overview_path),
+        "overview_scale": float(scale),
+        "overview_size": list(overview.size),
+        "contact_pages": [str(path) for path in pages],
+    }
+    (output_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    _write_macro_review_index(output_dir, overview_path, pages, selected, summary)
+
+
+def _render_macro_overview(
+    canvas: zarr.Group,
+    regions: list[FractalRegion],
+    output_path: Path,
+    *,
+    max_preview_side: int,
+) -> tuple[float, Image.Image]:
+    scale, image = _stream_alpha_overview(canvas, max_preview_side=max_preview_side)
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    for idx, region in enumerate(regions, start=1):
+        x, y, w, h = region.bbox_xywh
+        sx0 = int(round(x * scale))
+        sy0 = int(round(y * scale))
+        sx1 = max(sx0 + 1, int(round((x + w) * scale)))
+        sy1 = max(sy0 + 1, int(round((y + h) * scale)))
+        color = _MACRO_LAYER_COLORS.get(int(region.layer_idx), (255, 255, 255))
+        width = 4 if idx <= 20 else 2
+        draw.rectangle((sx0, sy0, sx1, sy1), outline=color, width=width)
+        if idx <= 60:
+            label = f"{idx}:L{region.layer_idx} {w}x{h}"
+            draw.text((sx0 + 3, sy0 + 3), label, fill=color, font=font)
+    _draw_macro_legend(draw, font, image.size, regions)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(output_path)
+    return scale, image
+
+
+def _stream_alpha_overview(canvas: zarr.Group, *, max_preview_side: int) -> tuple[float, Image.Image]:
+    alpha = canvas["alpha_256"]
+    h, w = int(alpha.shape[0]), int(alpha.shape[1])
+    factor = max(1, int(np.ceil(max(h, w) / max(1, int(max_preview_side)))))
+    out_h = (h + factor - 1) // factor
+    out_w = (w + factor - 1) // factor
+    out = np.zeros((out_h, out_w), dtype=np.float32)
+    block_rows = max(factor, factor * max(1, 512 // factor))
+    for y0 in range(0, h, block_rows):
+        y1 = min(h, y0 + block_rows)
+        block = alpha[y0:y1, :, :].astype(np.float32)
+        composite = np.clip(block.max(axis=2), 0.0, 1.0)
+        pad_h = (-composite.shape[0]) % factor
+        pad_w = (-composite.shape[1]) % factor
+        if pad_h or pad_w:
+            composite = np.pad(composite, ((0, pad_h), (0, pad_w)), mode="constant", constant_values=0.0)
+        pooled = composite.reshape(composite.shape[0] // factor, factor, composite.shape[1] // factor, factor).max(axis=(1, 3))
+        ds_y0 = y0 // factor
+        out[ds_y0 : ds_y0 + pooled.shape[0], : pooled.shape[1]] = pooled[:, :out_w]
+    image = Image.fromarray((np.clip(out, 0.0, 1.0) * 255.0).astype(np.uint8), mode="L").convert("RGB")
+    return 1.0 / float(factor), image
+
+
+def _write_composite_signal_review(
+    root: zarr.Group,
+    records: list[CanvasTileRecord],
+    canvas: zarr.Group,
+    regions: list[FractalRegion],
+    output_dir: Path,
+    *,
+    max_preview_side: int,
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    layout = build_canvas_layout(records)
+    signal, scale = _build_composite_signal_overview(root, records, layout, max_preview_side=max_preview_side)
+    image = Image.fromarray((np.clip(signal, 0.0, 1.0) * 255.0).astype(np.uint8), mode="L").convert("RGB")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    for idx, region in enumerate(sorted(regions, key=lambda item: item.area, reverse=True), start=1):
+        x, y, w, h = region.bbox_xywh
+        sx0 = int(round(x * scale))
+        sy0 = int(round(y * scale))
+        sx1 = max(sx0 + 1, int(round((x + w) * scale)))
+        sy1 = max(sy0 + 1, int(round((y + h) * scale)))
+        color = _MACRO_LAYER_COLORS.get(int(region.layer_idx), (255, 255, 255))
+        draw.rectangle((sx0, sy0, sx1, sy1), outline=color, width=3 if idx <= 20 else 2)
+        if idx <= 60:
+            draw.text((sx0 + 3, sy0 + 3), f"{idx}:L{region.layer_idx}", fill=color, font=font)
+    _draw_composite_legend(draw, font, image.size, len(records), len(regions))
+    output_path = output_dir / "composite_signal_overview.png"
+    image.save(output_path)
+    (output_dir / "composite_signal_summary.json").write_text(
+        json.dumps(
+            {
+                "output_path": str(output_path),
+                "tile_count": int(len(records)),
+                "region_count": int(len(regions)),
+                "overview_scale": float(scale),
+                "overview_size": list(image.size),
+                "signals": ["height_gradient", "normal_gradient", "alpha_gradient", "mcly_gradient", "normal_mask", "object_masks", "liquid_mask"],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _build_composite_signal_overview(
+    root: zarr.Group,
+    records: list[CanvasTileRecord],
+    layout: CanvasLayout,
+    *,
+    max_preview_side: int,
+) -> tuple[np.ndarray, float]:
+    alpha_h, alpha_w = layout.alpha_shape
+    factor = max(1, int(np.ceil(max(alpha_h, alpha_w) / max(1, int(max_preview_side)))))
+    out_h = (alpha_h + factor - 1) // factor
+    out_w = (alpha_w + factor - 1) // factor
+    out = np.zeros((out_h, out_w), dtype=np.float32)
+    for record in records:
+        tile_id = int(record.tile_id)
+        score = _tile_composite_signal(root, tile_id)
+        if score is None:
+            continue
+        tile_img = Image.fromarray((np.clip(score, 0.0, 1.0) * 255.0).astype(np.uint8), mode="L")
+        tile_w = max(1, int(np.ceil(ALPHA_TILE_SIZE / factor)))
+        tile_img = tile_img.resize((tile_w, tile_w), Image.Resampling.BILINEAR)
+        tile_arr = np.asarray(tile_img, dtype=np.float32) / 255.0
+        ax, ay = alpha_origin(record, layout)
+        dx, dy = int(ax // factor), int(ay // factor)
+        y1 = min(out_h, dy + tile_arr.shape[0])
+        x1 = min(out_w, dx + tile_arr.shape[1])
+        out[dy:y1, dx:x1] = np.maximum(out[dy:y1, dx:x1], tile_arr[: y1 - dy, : x1 - dx])
+    return out, 1.0 / float(factor)
+
+
+def _tile_composite_signal(root: zarr.Group, tile_id: int) -> np.ndarray | None:
+    if "height_257" not in root or "alpha_256" not in root:
+        return None
+    height = root["height_257"][tile_id].astype(np.float32)
+    alpha = root["alpha_256"][tile_id].astype(np.float32)
+    height_grad = _crop_257_to_256(_gradient_magnitude(height))
+    alpha_grad = _gradient_magnitude(alpha.max(axis=2))
+    normal_grad = np.zeros((256, 256), dtype=np.float32)
+    if "normal_xyz" in root:
+        normals = root["normal_xyz"][tile_id].astype(np.float32)
+        normal_grad = _crop_257_to_256(np.mean([_gradient_magnitude(normals[:, :, axis]) for axis in range(3)], axis=0))
+    mcly_grad = np.zeros((256, 256), dtype=np.float32)
+    if "mcly_layer_mask" in root:
+        mcly_any = root["mcly_layer_mask"][tile_id].astype(np.float32).max(axis=2)
+        mcly_grad = _gradient_magnitude(np.kron(mcly_any, np.ones((16, 16), dtype=np.float32)))[:256, :256]
+    transition = np.maximum(alpha_grad, mcly_grad)
+    base_mask = np.ones((256, 256), dtype=np.float32)
+    if "normal_mask" in root:
+        base_mask *= _crop_257_to_256(root["normal_mask"][tile_id].astype(np.float32))
+    if "liquid_mask" in root:
+        base_mask *= 1.0 - 0.85 * np.clip(_as_256(root["liquid_mask"][tile_id].astype(np.float32)), 0.0, 1.0)
+    object_mask = np.zeros((256, 256), dtype=np.float32)
+    for key in ("mddf_mask", "modf_mask", "object_mask", "object_precise_mask"):
+        if key in root:
+            object_mask = np.maximum(object_mask, np.clip(_as_256(root[key][tile_id].astype(np.float32)), 0.0, 1.0))
+    base_mask *= 1.0 - 0.75 * object_mask
+    score = (0.50 * _masked_norm(height_grad, base_mask)) + (0.25 * _masked_norm(normal_grad, base_mask)) + (0.25 * _masked_norm(transition, base_mask))
+    score = np.clip(score * np.clip(base_mask, 0.0, 1.0), 0.0, 4.0)
+    max_value = float(score.max())
+    return (score / max_value).astype(np.float32) if max_value > 1e-6 else score.astype(np.float32)
+
+
+def _gradient_magnitude(x: np.ndarray) -> np.ndarray:
+    dx = np.diff(x, axis=1, append=x[:, -1:])
+    dy = np.diff(x, axis=0, append=x[-1:, :])
+    return np.sqrt((dx * dx) + (dy * dy) + 1e-8).astype(np.float32)
+
+
+def _crop_257_to_256(x: np.ndarray) -> np.ndarray:
+    return x[:256, :256].astype(np.float32, copy=False)
+
+
+def _as_256(x: np.ndarray) -> np.ndarray:
+    if x.shape[:2] == (256, 256):
+        return x.astype(np.float32, copy=False)
+    return x[:256, :256].astype(np.float32, copy=False)
+
+
+def _masked_norm(x: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    denom = float((x * mask).sum() / max(1e-6, float(mask.sum())))
+    if denom <= 1e-6:
+        return np.zeros_like(x, dtype=np.float32)
+    return np.clip(x / denom, 0.0, 4.0).astype(np.float32)
+
+
+def _render_macro_contact_sheets(
+    canvas: zarr.Group,
+    regions: list[FractalRegion],
+    output_dir: Path,
+    *,
+    contact_per_page: int,
+    threshold: float,
+) -> list[Path]:
+    pages: list[Path] = []
+    per_page = max(1, int(contact_per_page))
+    columns = 4
+    cell_w, cell_h = 260, 238
+    legend_h = 82
+    font = ImageFont.load_default()
+    for page_idx, start in enumerate(range(0, len(regions), per_page), start=1):
+        page_regions = regions[start : start + per_page]
+        rows = max(1, int(np.ceil(len(page_regions) / columns)))
+        image = Image.new("RGB", (columns * cell_w, legend_h + rows * cell_h), color=(14, 14, 18))
+        draw = ImageDraw.Draw(image)
+        _draw_contact_legend(draw, font, image.size)
+        for idx, region in enumerate(page_regions, start=start + 1):
+            local = idx - start - 1
+            col = local % columns
+            row = local // columns
+            cell = _render_macro_region_cell(canvas, region, rank=idx, threshold=threshold, cell_size=180)
+            x = col * cell_w
+            y = legend_h + row * cell_h
+            image.paste(cell, (x + 8, y + 8))
+        page_path = output_dir / f"macro_paste_contact_sheet_{page_idx:03d}.png"
+        image.save(page_path)
+        pages.append(page_path)
+    return pages
+
+
+def _render_macro_region_cell(canvas: zarr.Group, region: FractalRegion, *, rank: int, threshold: float, cell_size: int) -> Image.Image:
+    x, y, w, h = region.bbox_xywh
+    step = max(1, int(np.ceil(max(w, h) / 512)))
+    alpha = canvas["alpha_256"][y : y + h : step, x : x + w : step, int(region.layer_slot)].astype(np.float32)
+    if alpha.size == 0:
+        alpha = np.zeros((1, 1), dtype=np.float32)
+    alpha = np.where(alpha > float(threshold), alpha, 0.0)
+    alpha_img = Image.fromarray((np.clip(alpha, 0.0, 1.0) * 255.0).astype(np.uint8), mode="L")
+    alpha_img.thumbnail((cell_size, cell_size), Image.Resampling.BILINEAR)
+    cell = Image.new("RGB", (244, 222), color=(20, 20, 24))
+    px = (cell_size - alpha_img.width) // 2 + 8
+    py = (cell_size - alpha_img.height) // 2 + 8
+    cell.paste(Image.merge("RGB", (alpha_img, alpha_img, alpha_img)), (px, py))
+    draw = ImageDraw.Draw(cell)
+    font = ImageFont.load_default()
+    color = _MACRO_LAYER_COLORS.get(int(region.layer_idx), (255, 255, 255))
+    draw.rectangle((0, 0, cell.width - 1, cell.height - 1), outline=color, width=3)
+    extent = region.provenance.get("extent") if isinstance(region.provenance, dict) else None
+    label_lines = [
+        f"#{rank} {region.region_id[:12]}",
+        f"{region.build} / {region.map_name}",
+        f"L{region.layer_idx} box {w}x{h} area {region.area}",
+        f"xy {x},{y} tiles {region.tile_coverage_count} extent {extent}",
+    ]
+    draw.rectangle((4, 184, cell.width - 5, cell.height - 5), fill=(0, 0, 0))
+    for line_idx, text in enumerate(label_lines):
+        draw.text((8, 187 + line_idx * 8), text, fill=color if line_idx == 2 else (235, 235, 235), font=font)
+    return cell
+
+
+def _draw_macro_legend(draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont, image_size: tuple[int, int], regions: list[FractalRegion]) -> None:
+    width, _height = image_size
+    draw.rectangle((0, 0, min(width - 1, 860), 72), fill=(0, 0, 0), outline=(80, 80, 88))
+    draw.text((10, 8), "Spec 076 Macro/Blocky Paste-Scar Overview", fill=(245, 245, 245), font=font)
+    draw.text((10, 25), "Boxes are paste/scar regions over max alpha composite. Numbers match contact sheets.", fill=(210, 210, 215), font=font)
+    draw.text((10, 42), f"Rendered regions: {len(regions)}. Border colors show alpha layer.", fill=(255, 205, 120), font=font)
+    x = 620
+    for layer_idx, color in _MACRO_LAYER_COLORS.items():
+        draw.rectangle((x, 18, x + 16, 34), fill=color, outline=(255, 255, 255))
+        draw.text((x + 20, 20), f"L{layer_idx}", fill=(235, 235, 235), font=font)
+        x += 56
+
+
+def _draw_composite_legend(draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont, image_size: tuple[int, int], tile_count: int, region_count: int) -> None:
+    width, _height = image_size
+    draw.rectangle((0, 0, min(width - 1, 1040), 72), fill=(0, 0, 0), outline=(80, 80, 88))
+    draw.text((10, 8), "Spec 076 Composite Hard-Region Overview", fill=(245, 245, 245), font=font)
+    draw.text((10, 25), "Base image = height/normal gradients + alpha/MCLY transitions, masked by normal/object/liquid signals.", fill=(210, 210, 215), font=font)
+    draw.text((10, 42), f"Tiles: {tile_count}. Macro boxes: {region_count}. Use this to judge whether alpha-only macro boxes match terrain-art signal.", fill=(255, 205, 120), font=font)
+
+
+def _draw_contact_legend(draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont, image_size: tuple[int, int]) -> None:
+    width, _height = image_size
+    draw.rectangle((0, 0, width - 1, 76), fill=(20, 20, 24), outline=(70, 70, 78))
+    draw.text((10, 8), "Spec 076 Macro/Blocky Paste-Scar Contact Sheet", fill=(245, 245, 245), font=font)
+    draw.text((10, 26), "Each cell is one paste/scar alpha crop. This is block/macro scale, not raw brush-dot scale.", fill=(205, 205, 210), font=font)
+    draw.text((10, 44), "Review box size, location, layer, tile span, and whether grouping is too coarse/fine.", fill=(255, 205, 120), font=font)
+
+
+def _write_macro_review_index(output_dir: Path, overview_path: Path, pages: list[Path], regions: list[FractalRegion], summary: dict[str, Any]) -> None:
+    rows = [
+        "<!doctype html><html><head><meta charset='utf-8'><title>Paste/Scar Review</title></head><body>",
+        "<h1>Spec 076 Macro/Blocky Paste-Scar Review</h1>",
+        f"<p>Regions rendered: {int(summary.get('regions_rendered', 0))} / {int(summary.get('region_count', 0))}</p>",
+        f"<p><a href='{html.escape(overview_path.name)}'>Macro overview PNG</a></p>",
+        f"<img src='{html.escape(overview_path.name)}' style='max-width:100%; image-rendering: pixelated;'>",
+    ]
+    composite_path = output_dir / "composite_signal_overview.png"
+    if composite_path.exists():
+        rows.extend(
+            [
+                "<h2>Composite Signal Overview</h2>",
+                f"<p><a href='{html.escape(composite_path.name)}'>Composite hard-region overview PNG</a></p>",
+                f"<img src='{html.escape(composite_path.name)}' style='max-width:100%; image-rendering: pixelated;'>",
+            ]
+        )
+    rows.extend(
+        [
+        "<h2>Contact Sheets</h2>",
+        ]
+    )
+    for page in pages:
+        rows.append(f"<h3>{html.escape(page.name)}</h3><img src='{html.escape(page.name)}' style='max-width:100%; image-rendering: pixelated;'>")
+    rows.append("<h2>Largest Regions</h2><table border='1' cellpadding='4'>")
+    rows.append("<tr><th>Rank</th><th>ID</th><th>Layer</th><th>BBox</th><th>Area</th><th>Tiles</th><th>Extent</th></tr>")
+    for rank, region in enumerate(regions[:100], start=1):
+        extent = region.provenance.get("extent") if isinstance(region.provenance, dict) else ""
+        rows.append(
+            f"<tr><td>{rank}</td><td>{html.escape(region.region_id)}</td><td>{region.layer_idx}</td>"
+            f"<td>{html.escape(str(region.bbox_xywh))}</td><td>{region.area}</td><td>{region.tile_coverage_count}</td><td>{extent}</td></tr>"
+        )
+    rows.append("</table></body></html>")
+    (output_dir / "index.html").write_text("\n".join(rows), encoding="utf-8")
+
+
 def _write_analysis_index(out_root: Path, summary: dict[str, Any]) -> None:
     """Write a human-readable HTML index for an --maps all analysis run."""
     targets = summary.get("targets", [])
@@ -332,11 +747,15 @@ def _write_analysis_index(out_root: Path, summary: dict[str, Any]) -> None:
         canvas_dir = Path(str(target.get("canvas_dir", "")))
         segments_dir = Path(str(target.get("segments_dir", "")))
         overlay_dir = segments_dir / "overlays"
+        macro_review_dir = segments_dir / "macro_review"
         links: list[str] = []
         if overlay_dir.exists():
             for png in sorted(overlay_dir.glob("*.png")):
                 rel = html.escape(str(png.relative_to(out_root).as_posix()))
                 links.append(f"<a href='{rel}'>{html.escape(png.name)}</a>")
+        if macro_review_dir.exists():
+            rel = html.escape(str((macro_review_dir / "index.html").relative_to(out_root).as_posix()))
+            links.append(f"<a href='{rel}'>macro_review</a>")
         rows.append(
             f"<tr><td>{build}</td><td>{map_name}</td><td>{tile_count}</td><td>{region_count}</td>"
             f"<td>{curation_counts}</td><td><code>{html.escape(str(canvas_dir))}</code></td>"
@@ -361,6 +780,7 @@ def process_map_in_strips(
     strip_tiles: int,
     overlap_alpha_tiles: int,
     no_overlay: bool,
+    skip_raw_segments: bool = False,
 ) -> list[FractalRegion]:
     """Process a full map in horizontal strips to keep memory bounded."""
     full_layout = build_canvas_layout(records)
@@ -372,6 +792,11 @@ def process_map_in_strips(
     width_tiles = int(full_layout.tile_count_x)
 
     all_regions: list[FractalRegion] = []
+    if skip_raw_segments:
+        save_regions(segments_dir / "fractal_regions.parquet", all_regions)
+        save_regions_jsonl(segments_dir / "fractal_regions.jsonl", all_regions)
+        return all_regions
+
     strip_id = 0
     step = max(1, strip_tiles - overlap_alpha_tiles)
     for start_tile_x in range(0, width_tiles, step):

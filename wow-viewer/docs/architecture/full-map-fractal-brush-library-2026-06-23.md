@@ -1,6 +1,6 @@
 # Full-Map Fractal Brush Library
 
-**Status**: Phases 1-3 implemented for bounded compact-map proof and full-map strip processing; Phase 4 texture/BLP evidence join remains open. Near-duplicate clustering is the next unproven gap.
+**Status**: Phases 1-3 implemented for bounded compact-map proof and full-map strip processing. Macro paste/scar grouping now supersedes raw-stroke connected components as the active review target. Phase 4 texture/BLP evidence join remains open.
 
 ## Decision
 
@@ -63,7 +63,10 @@ A valid terrain-art primitive is not an alpha mask alone. It is a coupled reusab
 
 - Phase 1 strict-gate Azeroth smoke: `0_5_3_3368`, 16-tile row window, alpha `(256,4096,4)`, height `(257,4097)`, MCLY `(16,256,4)`.
 - Phase 1 full-map strip smoke: `0_5_3_3368` Azeroth (622 tiles), processed in horizontal strips of 8 ADT tiles with 1-tile overlap; full chunked canvas written to `wow-viewer/output/analysis/full-map-fractal-brush-library/full_map_smoke/0_5_3_3368_Azeroth_tilefull/canvas.zarr`.
-- Phase 2 full-map strip smoke on one map (Azeroth 0.5.3): 12,906 raw components; exact dedupe produced 12,163 unique patterns and 566 duplicates. Near-duplicate clustering (translation/mirror/rotation-invariant normalized thumbnails, size 16, radius 0) reduced this to 11,976 clusters with 668 duplicate clusters and a max cluster size of 40.
+- Phase 2 full-map strip smoke on one map (Azeroth 0.5.3): 12,906 raw components; exact dedupe produced 12,163 unique patterns and 566 duplicates. Near-duplicate clustering (translation/mirror/rotation-invariant normalized thumbnails, size 16, radius 0) reduced this to 11,976 clusters with 668 duplicate clusters and a max cluster size of 40. This raw-stroke path is diagnostic evidence, not the final paste/scar target.
+- Macro paste/scar grouping mode (`--macro-pastes`) groups nearby alpha strokes by streamed max-pooling, coarse-grid dilation, full-resolution bbox reprojection, and original-alpha area filtering. Bounded real-data smoke on `0_5_3_3368` Azeroth tile-limit 16 produced 7 `macro_paste` regions. Small full-map visual proof on `0_7_0_3694` `PVPZone02` produced 4 `macro_paste` regions under `wow-viewer/output/analysis/full-map-fractal-brush-library/macro_visual_composite_pvpzone02_close8_area1024` with `macro_paste_overview.png`, `macro_paste_contact_sheet_001.png`, and `composite_signal_overview.png`.
+- Macro visual sweep output exists at `wow-viewer/output/analysis/full-map-fractal-brush-library/macro_sweep_pvpzone02_r8_16_32_area1024_4096/index.html`; close radius 8/16/32 and min-area 1024/4096 still produced only 3-4 regions on `PVPZone02`, proving alpha-only macro grouping is broad/layer-wide on this map.
+- Blocky paste/scar grouping mode (`--blocky-pastes`) now emits dense middle-scale child regions inside broad macro parent canvases. Visual proof on `0_7_0_3694` `PVPZone02` with `--block-size 16 --block-min-coverage 0.45 --block-close-radius 0 --block-max-footprint 160` produced 10 `blocky_paste` regions under `wow-viewer/output/analysis/full-map-fractal-brush-library/blocky_visual_pvpzone02_b16_cov045_close0_max160`, removing the large parent remnants while keeping the internal blocky chunks.
 - Rectangle-page detection (solid axis-aligned alpha pages with extent >= 0.85) found 72 additional rectangle_page regions on full Azeroth 0.5.3, bringing total regions to 12,978 and near-duplicate clusters to 11,976 with 688 duplicate clusters and a max cluster size of 76.
 - Canonical validation runs use `--maps all` to analyze every map present in each selected build index; single-map runs are smoke/proof shortcuts only.
 - Phase 2 strict-gate smoke: 961 regions, with 11 accepted candidates, 24 fractal members, 1 composite chonker, 2 one-off details, and 923 too-small rows. The too-small rows are preserved for review but excluded from default atomic samples.
@@ -76,8 +79,10 @@ A valid terrain-art primitive is not an alpha mask alone. It is a coupled reusab
 - Tiny connected components inside or near composite regions should not automatically become accepted atomic samples.
 - Default atomic samples currently require at least an `8x8` alpha-pixel footprint, the smallest authoring block size for the data we care about.
 - Exact alpha-shape dedupe is too strict; most repeated motifs are near-duplicates (translated, mirrored, or slightly varied), not pixel-identical bitmaps.
-- Near-duplicate clustering uses translation/mirror/rotation-invariant normalized binary thumbnails to group raw components into candidate brush families.
+- Near-duplicate clustering over raw components is now diagnostic only unless fed macro regions; raw brush dots/strokes are not the primary training target.
 - Rectangle-page detection finds solid axis-aligned rectangular alpha regions that are likely authored paste/boundary areas, separately from fractal connected components.
+- Macro paste/scar grouping now means parent canvas context. The current candidate-unit review lane is `blocky_paste`: dense 16x16-ish child chunks inside those broader detections.
+- Composite hard-region overview is now the required visual cross-check: it overlays the same macro boxes on height-gradient, normal-gradient, alpha-transition, MCLY-transition, object-mask, and liquid-mask signals derived from the V18 Zarr source.
 
 ## Training Rule
 

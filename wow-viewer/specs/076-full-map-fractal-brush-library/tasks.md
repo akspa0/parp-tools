@@ -91,6 +91,13 @@
 - [ ] T043 [US2] Tune near-dedupe thumbnail size and Hamming radius against human review of cluster quality across all maps.
 - [x] T044 [US2] Add rectangle/canvas-page boundary detection to separate obvious authored paste areas from connected alpha islands.
 - [x] T046 [US2] Add a top-level HTML index (`index.html`) for --maps all runs, linking per-map canvases, overlays, and cross-map dedupe/near catalogs.
+- [x] T047 [US2] Add macro paste/scar grouping mode (`--macro-pastes`) that merges nearby alpha strokes into paste-scale regions instead of treating raw brush dots as the primary output.
+- [x] T048 [US2] Validate macro paste grouping on bounded and small full-map real-data runs, and keep raw-stroke exact/near dedupe as diagnostic evidence only.
+- [x] T049 [US2] Add macro paste visual review outputs: full-map alpha overview, macro crop contact sheets, HTML review index, and top-level run index links.
+- [x] T050 [US2] Add composite hard-region overview visualization using V18-style height/normal/alpha/MCLY/object/liquid signals under the same macro boxes.
+- [x] T051 [US2] Add macro visual sweep CLI for comparing close-radius/min-area settings with linked review pages.
+- [x] T052 [US2] Add middle-scale `blocky_paste` segmentation so dense authored chunks inside giant parent zones are emitted separately from zone-sized macro canvases.
+- [x] T053 [US2] Add blocky paste visual proof and footprint cap (`--block-max-footprint`) to suppress oversized parent remnants while retaining blocky child chunks.
 - [ ] T045 [US2] Validate rectangle-page thresholds against full-map overlays and contact sheets across all maps; tune min_area, min_extent, and max_aspect_ratio.
 
 **Checkpoint**: Every map in each selected build index can be analyzed in strips and produces global-canvas region metadata; exact dedupe is replaced/augmented by near-dedupe before model target selection.

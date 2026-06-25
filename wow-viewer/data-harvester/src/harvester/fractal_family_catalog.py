@@ -239,7 +239,15 @@ def write_family_outputs(
     if tensor.shape[0] > 0:
         group = zarr.open_group(str(out / "families.zarr"), mode="w")
         group.create_array("alpha_crop", data=tensor)
-        group.create_array("family_ids", data=np.asarray([f.family_id for f in families], dtype=object))
+        encoded_ids = [f.family_id.encode("utf-8") for f in families]
+        max_len = max((len(item) for item in encoded_ids), default=1)
+        family_id_bytes = np.zeros((len(encoded_ids), max_len), dtype=np.uint8)
+        family_id_lengths = np.zeros((len(encoded_ids),), dtype=np.int16)
+        for idx, encoded in enumerate(encoded_ids):
+            family_id_bytes[idx, : len(encoded)] = np.frombuffer(encoded, dtype=np.uint8)
+            family_id_lengths[idx] = len(encoded)
+        group.create_array("family_id_utf8", data=family_id_bytes)
+        group.create_array("family_id_lengths", data=family_id_lengths)
 
     summary = {
         "family_count": int(len(families)),

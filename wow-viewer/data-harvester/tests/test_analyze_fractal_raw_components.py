@@ -109,3 +109,32 @@ def test_process_map_in_strips_dedupes_across_overlap(tmp_path: Path) -> None:
     assert len(regions) == 1
     assert regions[0].bbox_xywh[0] == 256 + 200
     assert regions[0].bbox_xywh[1] == 100
+
+
+def test_process_map_in_strips_can_skip_raw_segmentation_for_macro_mode(tmp_path: Path) -> None:
+    records = [_record(0, 0, 0), _record(1, 1, 0)]
+    source = _make_source_zarr(tmp_path, records)
+    source["alpha_256"][0, 50:100, 200:256, 0] = 1.0
+    source["alpha_256"][1, 50:100, 0:56, 0] = 1.0
+
+    canvas_dir = tmp_path / "canvas"
+    segments_dir = tmp_path / "segments"
+    regions = process_map_in_strips(
+        source,
+        records,
+        (0, 1, 2, 3),
+        canvas_dir,
+        segments_dir,
+        threshold=0.5,
+        min_area=64,
+        min_footprint_px=8,
+        max_regions_per_layer=1000,
+        strip_tiles=2,
+        overlap_alpha_tiles=1,
+        no_overlay=True,
+        skip_raw_segments=True,
+    )
+
+    assert regions == []
+    assert (canvas_dir / "canvas.zarr").exists()
+    assert (segments_dir / "fractal_regions.jsonl").exists()

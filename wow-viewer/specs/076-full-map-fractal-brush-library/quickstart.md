@@ -249,6 +249,77 @@ Notes:
 - The output directory tag becomes `_tilefull` when `--tile-limit 0` is used.
 - Zarr writes are forced to synchronous concurrency (`zarr.config.set({"async.concurrency": 1})`) to avoid Windows file-rename races during chunked writes.
 
+## Macro And Blocky Paste / Scar Grouping
+
+Raw connected alpha components are diagnostic evidence only. Giant macro boxes are parent canvases/context, not accepted paste/scar units. For current 076 review, use blocky grouping to segment dense authored chunks inside those larger regions:
+
+```powershell
+uv run python scripts/analyze_fractal_raw_components.py `
+  --builds 0_7_0_3694 `
+  --maps PVPZone02 `
+  --tile-limit 0 `
+  --strip-tiles 8 `
+  --strip-overlap-alpha-tiles 1 `
+  --threshold 0.05 `
+  --blocky-pastes `
+  --block-size 16 `
+  --block-min-coverage 0.45 `
+  --block-close-radius 0 `
+  --block-min-area 512 `
+  --block-min-footprint 16 `
+  --block-max-footprint 160 `
+  --max-regions-per-layer 1000 `
+  --output-root ../output/analysis/full-map-fractal-brush-library/blocky_visual_pvpzone02_b16_cov045_close0_max160 `
+  --no-overlay `
+  --visualize-macro `
+  --visualize-composite-signal
+```
+
+Validated blocky proof:
+
+```text
+output_root: ..\output\analysis\full-map-fractal-brush-library\blocky_visual_pvpzone02_b16_cov045_close0_max160
+target: 0_7_0_3694 / PVPZone02 / tilefull
+blocky_pastes: 10
+```
+
+`--blocky-pastes` uses a block-coverage grid: `--block-size 16` groups painted coverage at 16x16 alpha-pixel scale, `--block-min-coverage` keeps dense blocks, `--block-close-radius 0` avoids merging nearby child chunks back into giant parent zones, and `--block-max-footprint` filters parent remnants.
+
+Broad parent macro context can still be rendered for comparison, but it should not be treated as the final paste/scar unit:
+
+```powershell
+uv run python scripts/analyze_fractal_raw_components.py `
+  --builds 0_7_0_3694 `
+  --maps PVPZone02 `
+  --tile-limit 0 `
+  --strip-tiles 8 `
+  --strip-overlap-alpha-tiles 1 `
+  --threshold 0.05 `
+  --macro-pastes `
+  --macro-close-radius 8 `
+  --macro-min-area 1024 `
+  --macro-min-footprint 64 `
+  --macro-downsample-factor 8 `
+  --max-regions-per-layer 500 `
+  --output-root ../output/analysis/full-map-fractal-brush-library/macro_visual_composite_pvpzone02_close8_area1024 `
+  --no-overlay `
+  --visualize-macro `
+  --visualize-composite-signal
+```
+
+Review artifacts are written under each target's `segments_raw/macro_review/` directory:
+
+```text
+<output-root>/<build>_<map>_tilefull/segments_raw/macro_review/index.html
+<output-root>/<build>_<map>_tilefull/segments_raw/macro_review/macro_paste_overview.png
+<output-root>/<build>_<map>_tilefull/segments_raw/macro_review/composite_signal_overview.png
+<output-root>/<build>_<map>_tilefull/segments_raw/macro_review/macro_paste_contact_sheet_001.png
+```
+
+Use `macro_paste_overview.png` to inspect alpha/block grouping, `composite_signal_overview.png` to compare the same boxes against V18-style height/normal/alpha/MCLY/object/liquid hard-region signal, and the contact sheet to inspect each crop at block/macro scale.
+
+Current visual finding: broad alpha-only macro grouping on `PVPZone02` is too large. Blocky grouping with `block-size=16`, `block-min-coverage=0.45`, `block-close-radius=0`, and `block-max-footprint=160` captures the denser child chunks inside those parent zones.
+
 ## One-Command Analysis + Visualization
 
 Run the full two-build raw analysis and render contact sheets in one command:

@@ -1,5 +1,33 @@
 # Progress — wow-viewer
 
+## 2026-06-24 — Spec 076 macro paste/scar grouping correction
+
+### What landed
+
+- Added `segment_macro_pastes()` in `src/harvester/fractal_segments.py` for macro authored-region grouping. It streams/max-pools alpha, dilates on the coarse grid to merge nearby strokes, reprojects bboxes to full map coordinates, and filters by original alpha area.
+- Added analyzer flags: `--macro-pastes`, `--macro-close-radius`, `--macro-min-area`, `--macro-min-footprint`, `--macro-max-aspect`, and `--macro-downsample-factor`.
+- Added analyzer visual review flags: `--visualize-macro` writes macro alpha overview, crop contact sheets, summary, and HTML index; `--visualize-composite-signal` writes V18-style hard-region overview under the same macro boxes.
+- Added `scripts/sweep_macro_paste_visuals.py` to compare close-radius/min-area settings and produce a linked sweep `index.html`.
+- Added `segment_blocky_pastes()` plus analyzer `--blocky-pastes` for dense middle-scale child chunks inside giant macro parent zones. Supports `--block-size`, `--block-min-coverage`, `--block-close-radius`, and `--block-max-footprint`.
+- Added macro segmentation tests for merging nearby strokes and filtering tiny strokes.
+- Fixed WIP family-catalog Zarr output to store family IDs as numeric UTF-8 byte arrays plus lengths instead of unstable object/string arrays.
+
+### Validation
+
+- `uv run ruff check src/harvester/fractal_segments.py src/harvester/fractal_family_catalog.py scripts/analyze_fractal_raw_components.py tests/test_fractal_segments.py` -> passed.
+- `uv run pytest tests/test_fractal_canvas.py tests/test_fractal_segments.py tests/test_fractal_segments_rectangle.py tests/test_fractal_library.py tests/test_fractal_raw_analysis.py tests/test_analyze_fractal_raw_components.py tests/test_fractal_near_dedupe.py tests/test_fractal_family_catalog.py -q` -> 38 passed.
+- Bounded real-data smoke: `0_5_3_3368` Azeroth, `--tile-limit 16`, `--macro-pastes` -> 7 macro regions under `wow-viewer/output/analysis/full-map-fractal-brush-library/macro_smoke_tile16/`.
+- Small full-map visual proof: `0_7_0_3694` `PVPZone02`, `--tile-limit 0`, close-radius 8/min-area 1024, `--macro-pastes --visualize-macro --visualize-composite-signal` -> 4 macro regions under `wow-viewer/output/analysis/full-map-fractal-brush-library/macro_visual_composite_pvpzone02_close8_area1024/`.
+- Sweep proof: `macro_sweep_pvpzone02_r8_16_32_area1024_4096/index.html` compares close radius 8/16/32 and min-area 1024/4096; all settings produced 3-4 macro regions.
+- Blocky proof: `0_7_0_3694` `PVPZone02`, `--blocky-pastes --block-size 16 --block-min-coverage 0.45 --block-close-radius 0 --block-max-footprint 160` -> 10 child regions under `wow-viewer/output/analysis/full-map-fractal-brush-library/blocky_visual_pvpzone02_b16_cov045_close0_max160/`.
+
+### Status
+
+- Raw connected alpha components and near-dedupe contact sheets are diagnostic evidence only, not the primary brush/paste target.
+- Visual finding: broad macro boxes are parent canvases/context; `blocky_paste` regions are now closer to the desired internal authored chunks.
+- Next route: tune blocky child segmentation against composite hard-region overview on more maps, then run canonical `--maps all` validation.
+- Training remains blocked until macro paste/scar outputs are visually validated and Phase 5 one-signal model targets are approved.
+
 ## 2026-06-23 — Spec 076 replaces 074/075 brush-model direction
 
 ### Phase 1 implementation

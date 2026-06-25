@@ -13,7 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import zarr
 from PIL import Image, ImageDraw
-from scipy.ndimage import find_objects, label
+from scipy.ndimage import binary_closing, binary_dilation, find_objects, label
 from scipy.ndimage import sum as nd_sum
 
 
@@ -242,6 +242,291 @@ def detect_rectangle_pages(
                     rejection_reason=None,
                     linked_component_ids=[],
                     provenance={"extent": round(extent, 4), "aspect_ratio": round(aspect, 4)},
+                )
+            )
+    return regions
+
+
+def _downsample_alpha_layer_binary(
+    alpha: Any,
+    *,
+    layer_slot: int,
+    threshold: float,
+    factor: int,
+    block_rows: int = 1024,
+) -> np.ndarray:
+    """Max-pool one alpha layer into a coarse binary mask without dense full-map reads."""
+    h_full, w_full = int(alpha.shape[0]), int(alpha.shape[1])
+    factor = max(1, int(factor))
+    h_ds = (h_full + factor - 1) // factor
+    w_ds = (w_full + factor - 1) // factor
+    out = np.zeros((h_ds, w_ds), dtype=bool)
+    block_rows = factor * max(1, int(block_rows) // factor)
+    for y0 in range(0, h_full, block_rows):
+        y1 = min(h_full, y0 + block_rows)
+        block = alpha[y0:y1, :, layer_slot].astype(np.float32) > float(threshold)
+        pad_h = (-block.shape[0]) % factor
+        pad_w = (-block.shape[1]) % factor
+        if pad_h or pad_w:
+            block = np.pad(block, ((0, pad_h), (0, pad_w)), mode="constant", constant_values=False)
+        pooled = block.reshape(block.shape[0] // factor, factor, block.shape[1] // factor, factor).max(axis=(1, 3))
+        ds_y0 = y0 // factor
+        out[ds_y0 : ds_y0 + pooled.shape[0], : pooled.shape[1]] = pooled
+    return out
+
+
+def _downsample_alpha_layer_coverage(
+    alpha: Any,
+    *,
+    layer_slot: int,
+    threshold: float,
+    factor: int,
+    block_rows: int = 1024,
+) -> np.ndarray:
+    """Average painted coverage per block for middle-scale paste detection."""
+    h_full, w_full = int(alpha.shape[0]), int(alpha.shape[1])
+    factor = max(1, int(factor))
+    h_ds = (h_full + factor - 1) // factor
+    w_ds = (w_full + factor - 1) // factor
+    out = np.zeros((h_ds, w_ds), dtype=np.float32)
+    block_rows = factor * max(1, int(block_rows) // factor)
+    for y0 in range(0, h_full, block_rows):
+        y1 = min(h_full, y0 + block_rows)
+        block = alpha[y0:y1, :, layer_slot].astype(np.float32) > float(threshold)
+        pad_h = (-block.shape[0]) % factor
+        pad_w = (-block.shape[1]) % factor
+        if pad_h or pad_w:
+            block = np.pad(block, ((0, pad_h), (0, pad_w)), mode="constant", constant_values=False)
+        pooled = block.reshape(block.shape[0] // factor, factor, block.shape[1] // factor, factor).mean(axis=(1, 3))
+        ds_y0 = y0 // factor
+        out[ds_y0 : ds_y0 + pooled.shape[0], : pooled.shape[1]] = pooled
+    return out
+
+
+def segment_blocky_pastes(
+    canvas: zarr.Group,
+    *,
+    threshold: float = 0.05,
+    block_size: int = 16,
+    min_block_coverage: float = 0.08,
+    block_close_radius: int = 1,
+    min_area: int = 512,
+    min_footprint_px: int = 16,
+    max_footprint_px: int | None = None,
+    max_aspect_ratio: float = 12.0,
+    max_regions_per_layer: int | None = 1000,
+) -> list[FractalRegion]:
+    """Segment dense blocky child paste/scar regions inside larger macro zones.
+
+    This is the middle scale between raw brush-dot components and giant zone-sized
+    parent canvases. It detects connected components on a block-coverage grid,
+    then reprojects those components back to alpha-pixel coordinates.
+    """
+    alpha = canvas["alpha_256"]
+    tile_id_256 = canvas["tile_id_256"]
+    layer_indices = canvas["alpha_layer_indices"][:].astype(np.int32).tolist() if "alpha_layer_indices" in canvas else list(range(alpha.shape[2]))
+    layout = dict(canvas.attrs.get("layout", {}))
+    build = str(layout.get("build", ""))
+    map_name = str(layout.get("map_name", ""))
+    factor = max(1, int(block_size))
+    close_radius = max(0, int(block_close_radius))
+    struct = np.ones((close_radius * 2 + 1, close_radius * 2 + 1), dtype=np.uint8)
+    h_full, w_full = int(alpha.shape[0]), int(alpha.shape[1])
+
+    regions: list[FractalRegion] = []
+    for layer_slot in range(alpha.shape[2]):
+        layer_idx = int(layer_indices[layer_slot]) if layer_slot < len(layer_indices) else int(layer_slot)
+        coverage = _downsample_alpha_layer_coverage(alpha, layer_slot=layer_slot, threshold=float(threshold), factor=factor)
+        binary = coverage >= float(min_block_coverage)
+        if close_radius > 0:
+            binary = binary_closing(binary, structure=struct, border_value=0)
+        if not binary.any():
+            continue
+        labeled, count = label(binary, structure=np.ones((3, 3), dtype=np.uint8))
+        if count == 0:
+            continue
+        areas = nd_sum(coverage, labeled, range(1, count + 1))
+        objects = find_objects(labeled)
+        candidates: list[tuple[int, int, tuple[slice, slice]]] = []
+        for label_idx, coverage_area in enumerate(areas, start=1):
+            area = int(float(coverage_area) * factor * factor)
+            if area < int(min_area):
+                continue
+            bounds = objects[label_idx - 1]
+            if bounds is None:
+                continue
+            candidates.append((label_idx, area, bounds))
+        candidates.sort(key=lambda item: item[1], reverse=True)
+        if max_regions_per_layer is not None:
+            candidates = candidates[: max(0, int(max_regions_per_layer))]
+        for label_idx, _coverage_area, (slice_y, slice_x) in candidates:
+            x0 = int(slice_x.start) * factor
+            y0 = int(slice_y.start) * factor
+            x1 = min(w_full, int(slice_x.stop) * factor)
+            y1 = min(h_full, int(slice_y.stop) * factor)
+            width = x1 - x0
+            height_box = y1 - y0
+            if width < int(min_footprint_px) or height_box < int(min_footprint_px):
+                continue
+            if max_footprint_px is not None and max(width, height_box) > int(max_footprint_px):
+                continue
+            aspect = max(width, height_box) / max(1, min(width, height_box))
+            if aspect > float(max_aspect_ratio):
+                continue
+            bbox = (x0, y0, width, height_box)
+            alpha_crop = alpha[y0:y1, x0:x1, layer_slot].astype(np.float32)
+            region_mask = alpha_crop > float(threshold)
+            raw_area = int(np.count_nonzero(region_mask))
+            if raw_area < int(min_area):
+                continue
+            tile_coverage = _tile_coverage(tile_id_256[y0:y1, x0:x1].astype(np.int32), region_mask)
+            texture_ids, active_layers = _mcly_summary(
+                canvas["mcly_texture_ids"][:].astype(np.int32) if "mcly_texture_ids" in canvas else None,
+                canvas["mcly_layer_mask"][:].astype(np.float32) if "mcly_layer_mask" in canvas else None,
+                bbox,
+            )
+            block_mask = labeled[slice_y, slice_x] == label_idx
+            block_extent = float(block_mask.mean()) if block_mask.size else 0.0
+            region_id = _region_id(build, map_name, layer_idx, bbox, raw_area)
+            regions.append(
+                FractalRegion(
+                    region_id=region_id,
+                    build=build,
+                    map_name=map_name,
+                    layer_slot=int(layer_slot),
+                    layer_idx=layer_idx,
+                    bbox_xywh=bbox,
+                    area=raw_area,
+                    tile_coverage_count=len(tile_coverage),
+                    tile_coverage=tile_coverage,
+                    alpha_mean=float(alpha_crop[region_mask].mean()) if region_mask.any() else 0.0,
+                    alpha_max=float(alpha_crop[region_mask].max()) if region_mask.any() else 0.0,
+                    height_mean=None,
+                    height_std=None,
+                    height_range=None,
+                    normal_mean_xyz=None,
+                    mcly_texture_ids=texture_ids,
+                    mcly_active_layers=active_layers,
+                    curation_label="blocky_paste",
+                    rejection_reason=None,
+                    linked_component_ids=[],
+                    provenance={
+                        "block_size": int(factor),
+                        "min_block_coverage": float(min_block_coverage),
+                        "block_close_radius": int(close_radius),
+                        "block_extent": round(block_extent, 4),
+                    },
+                )
+            )
+    return regions
+
+
+def segment_macro_pastes(
+    canvas: zarr.Group,
+    *,
+    threshold: float = 0.05,
+    close_radius: int = 32,
+    min_area: int = 4096,
+    min_footprint_px: int = 64,
+    max_aspect_ratio: float = 12.0,
+    max_regions_per_layer: int | None = 500,
+    downsample_factor: int = 8,
+) -> list[FractalRegion]:
+    """Segment macro paste/scar objects by proximity grouping of alpha.
+
+    This merges nearby brush strokes into paste-sized blobs, producing
+    zone-sized macro objects rather than individual brush strokes. The
+    closing radius controls how far apart strokes can be to still merge.
+
+    The binary alpha is max-pooled by ``downsample_factor`` before dilation
+    to keep the morphological operation fast on full-map canvases. Bboxes
+    are scaled back to full resolution.
+    """
+    alpha = canvas["alpha_256"]
+    tile_id_256 = canvas["tile_id_256"]
+    layer_indices = canvas["alpha_layer_indices"][:].astype(np.int32).tolist() if "alpha_layer_indices" in canvas else list(range(alpha.shape[2]))
+    layout = dict(canvas.attrs.get("layout", {}))
+    build = str(layout.get("build", ""))
+    map_name = str(layout.get("map_name", ""))
+
+    factor = max(1, int(downsample_factor))
+    ds_close_radius = max(1, int(close_radius) // factor)
+    struct = np.ones((ds_close_radius * 2 + 1, ds_close_radius * 2 + 1), dtype=np.uint8)
+
+    regions: list[FractalRegion] = []
+    for layer_slot in range(alpha.shape[2]):
+        layer_idx = int(layer_indices[layer_slot]) if layer_slot < len(layer_indices) else int(layer_slot)
+        ds_binary = _downsample_alpha_layer_binary(alpha, layer_slot=layer_slot, threshold=float(threshold), factor=factor)
+        if not ds_binary.any():
+            continue
+
+        h_full, w_full = int(alpha.shape[0]), int(alpha.shape[1])
+
+        grouped_binary = binary_dilation(ds_binary, structure=struct) if ds_close_radius > 0 else ds_binary
+
+        labeled, count = label(grouped_binary, structure=np.ones((3, 3), dtype=np.uint8))
+        if count == 0:
+            continue
+        areas = nd_sum(grouped_binary, labeled, range(1, count + 1))
+        objects = find_objects(labeled)
+        candidates: list[tuple[int, int, tuple[slice, slice]]] = []
+        for label_idx, raw_area in enumerate(areas, start=1):
+            area = int(raw_area) * factor * factor
+            bounds = objects[label_idx - 1]
+            if bounds is None:
+                continue
+            candidates.append((label_idx, area, bounds))
+        candidates.sort(key=lambda item: item[1], reverse=True)
+        if max_regions_per_layer is not None:
+            candidates = candidates[: max(0, int(max_regions_per_layer))]
+        for _label_idx, _group_area, (slice_y, slice_x) in candidates:
+            x0 = int(slice_x.start) * factor
+            y0 = int(slice_y.start) * factor
+            x1 = min(w_full, int(slice_x.stop) * factor)
+            y1 = min(h_full, int(slice_y.stop) * factor)
+            width = x1 - x0
+            height_box = y1 - y0
+            if width < int(min_footprint_px) or height_box < int(min_footprint_px):
+                continue
+            aspect = max(width, height_box) / max(1, min(width, height_box))
+            if aspect > float(max_aspect_ratio):
+                continue
+            bbox = (x0, y0, width, height_box)
+            alpha_crop = alpha[y0:y1, x0:x1, layer_slot].astype(np.float32)
+            region_mask = alpha_crop > float(threshold)
+            raw_area = int(np.count_nonzero(region_mask))
+            if raw_area < int(min_area):
+                continue
+            tile_coverage = _tile_coverage(tile_id_256[y0:y1, x0:x1].astype(np.int32), region_mask)
+            texture_ids, active_layers = _mcly_summary(
+                canvas["mcly_texture_ids"][:].astype(np.int32) if "mcly_texture_ids" in canvas else None,
+                canvas["mcly_layer_mask"][:].astype(np.float32) if "mcly_layer_mask" in canvas else None,
+                bbox,
+            )
+            region_id = _region_id(build, map_name, layer_idx, bbox, raw_area)
+            regions.append(
+                FractalRegion(
+                    region_id=region_id,
+                    build=build,
+                    map_name=map_name,
+                    layer_slot=int(layer_slot),
+                    layer_idx=layer_idx,
+                    bbox_xywh=bbox,
+                    area=raw_area,
+                    tile_coverage_count=len(tile_coverage),
+                    tile_coverage=tile_coverage,
+                    alpha_mean=float(alpha_crop[region_mask].mean()) if region_mask.any() else 0.0,
+                    alpha_max=float(alpha_crop[region_mask].max()) if region_mask.any() else 0.0,
+                    height_mean=None,
+                    height_std=None,
+                    height_range=None,
+                    normal_mean_xyz=None,
+                    mcly_texture_ids=texture_ids,
+                    mcly_active_layers=active_layers,
+                    curation_label="macro_paste",
+                    rejection_reason=None,
+                    linked_component_ids=[],
+                    provenance={"close_radius": int(close_radius), "downsample": int(factor), "extent": round(float(raw_area) / float(max(1, width * height_box)), 4)},
                 )
             )
     return regions
