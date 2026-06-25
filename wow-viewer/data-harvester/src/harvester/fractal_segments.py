@@ -729,6 +729,175 @@ def _region_id(build: str, map_name: str, layer_idx: int, bbox: tuple[int, int, 
     return "fr_" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
+def segment_height_discontinuities(
+    canvas: zarr.Group,
+    *,
+    threshold: float = 0.05,
+    height_jump_threshold: float = 8.0,
+    min_area: int = 1024,
+    min_footprint_px: int = 32,
+    max_aspect_ratio: float = 12.0,
+    max_regions_per_layer: int | None = 500,
+) -> list[FractalRegion]:
+    """Segment regions based on heightmap discontinuities at tile boundaries.
+
+    This detects prefabricated terrain boundaries by finding large height jumps
+    between adjacent tiles. The height_257 array has one extra row/col per tile,
+    so tile boundaries align with every 256th pixel (plus the shared edge).
+
+    Args:
+        canvas: Full-map canvas with height_257 array
+        threshold: Alpha threshold for masking (only analyze painted areas)
+        height_jump_threshold: Minimum height difference to flag as discontinuity
+        min_area: Minimum region area in alpha pixels
+        min_footprint_px: Minimum bbox width/height
+        max_aspect_ratio: Maximum aspect ratio
+        max_regions_per_layer: Max regions per layer
+
+    Returns:
+        List of FractalRegion objects with curation_label="height_discontinuity"
+    """
+    alpha = canvas["alpha_256"]
+    height = canvas["height_257"][:].astype(np.float32) if "height_257" in canvas else None
+    tile_id_256 = canvas["tile_id_256"]
+    layer_indices = canvas["alpha_layer_indices"][:].astype(np.int32).tolist() if "alpha_layer_indices" in canvas else list(range(alpha.shape[2]))
+    layout = dict(canvas.attrs.get("layout", {}))
+    build = str(layout.get("build", ""))
+    map_name = str(layout.get("map_name", ""))
+
+    if height is None:
+        return []
+
+    h_alpha, w_alpha = int(alpha.shape[0]), int(alpha.shape[1])
+    h_height, w_height = int(height.shape[0]), int(height.shape[1])
+
+    # Height array is 257x257 per tile, alpha is 256x256 per tile.
+    # Crop height to match alpha dimensions for gradient computation.
+    # The extra row/col in height is the shared vertex edge between tiles.
+    height_cropped = height[:h_alpha, :w_alpha]
+
+    # Compute height gradients (finite differences) on cropped height
+    # dy: vertical gradient (height change going down)
+    # dx: horizontal gradient (height change going right)
+    dy = np.abs(np.diff(height_cropped, axis=0, prepend=height_cropped[:1, :]))
+    dx = np.abs(np.diff(height_cropped, axis=1, prepend=height_cropped[:, :1]))
+
+    # Gradient magnitude
+    grad_mag = np.sqrt(dx * dx + dy * dy)
+
+    # Mask by alpha (only care about painted terrain)
+    alpha_max = alpha[:].max(axis=2).astype(np.float32)
+    alpha_mask = alpha_max > float(threshold)
+    grad_mag = np.where(alpha_mask, grad_mag, 0.0)
+
+    # Binary mask of significant height jumps
+    jump_binary = grad_mag >= float(height_jump_threshold)
+
+    # Dilate slightly to connect nearby jump pixels into regions
+    struct = np.ones((3, 3), dtype=np.uint8)
+    jump_binary = binary_dilation(jump_binary, structure=struct, border_value=0)
+
+    regions: list[FractalRegion] = []
+    for layer_slot in range(alpha.shape[2]):
+        layer_idx = int(layer_indices[layer_slot]) if layer_slot < len(layer_indices) else int(layer_slot)
+        layer_alpha = alpha[:, :, layer_slot].astype(np.float32)
+        layer_binary = layer_alpha > float(threshold)
+
+        # Intersect height jumps with this layer's painted area
+        combined_binary = jump_binary & layer_binary
+        if not combined_binary.any():
+            continue
+
+        labeled, count = label(combined_binary, structure=np.ones((3, 3), dtype=np.uint8))
+        if count == 0:
+            continue
+
+        areas = nd_sum(combined_binary, labeled, range(1, count + 1))
+        objects = find_objects(labeled)
+        candidates: list[tuple[int, int, tuple[slice, slice]]] = []
+        for label_idx, raw_area in enumerate(areas, start=1):
+            area = int(raw_area)
+            if area < int(min_area):
+                continue
+            bounds = objects[label_idx - 1]
+            if bounds is None:
+                continue
+            candidates.append((label_idx, area, bounds))
+
+        candidates.sort(key=lambda item: item[1], reverse=True)
+        if max_regions_per_layer is not None:
+            candidates = candidates[: max(0, int(max_regions_per_layer))]
+
+        for label_idx, area, (slice_y, slice_x) in candidates:
+            x0, x1 = int(slice_x.start), int(slice_x.stop)
+            y0, y1 = int(slice_y.start), int(slice_y.stop)
+            width = x1 - x0
+            height_box = y1 - y0
+            if width < int(min_footprint_px) or height_box < int(min_footprint_px):
+                continue
+            aspect = max(width, height_box) / max(1, min(width, height_box))
+            if aspect > float(max_aspect_ratio):
+                continue
+
+            bbox = (x0, y0, width, height_box)
+            alpha_crop = layer_alpha[y0:y1, x0:x1]
+            region_mask = combined_binary[y0:y1, x0:x1]
+            raw_area = int(np.count_nonzero(region_mask))
+            if raw_area < int(min_area):
+                continue
+
+            tile_coverage = _tile_coverage(tile_id_256[y0:y1, x0:x1].astype(np.int32), region_mask)
+
+            # Height stats for this region
+            height_crop = height[y0:y1+1, x0:x1+1]
+            height_mean = float(height_crop.mean()) if height_crop.size else None
+            height_std = float(height_crop.std()) if height_crop.size else None
+            height_range = float(height_crop.max() - height_crop.min()) if height_crop.size else None
+
+            texture_ids, active_layers = _mcly_summary(
+                canvas["mcly_texture_ids"][:].astype(np.int32) if "mcly_texture_ids" in canvas else None,
+                canvas["mcly_layer_mask"][:].astype(np.float32) if "mcly_layer_mask" in canvas else None,
+                bbox,
+            )
+
+            # Compute max gradient within region as provenance
+            grad_crop = grad_mag[y0:y1, x0:x1]
+            max_grad = float(grad_crop.max()) if grad_crop.size else 0.0
+            mean_grad = float(grad_crop[region_mask].mean()) if region_mask.any() else 0.0
+
+            region_id = _region_id(build, map_name, layer_idx, bbox, raw_area)
+            regions.append(
+                FractalRegion(
+                    region_id=region_id,
+                    build=build,
+                    map_name=map_name,
+                    layer_slot=int(layer_slot),
+                    layer_idx=layer_idx,
+                    bbox_xywh=bbox,
+                    area=raw_area,
+                    tile_coverage_count=len(tile_coverage),
+                    tile_coverage=tile_coverage,
+                    alpha_mean=float(alpha_crop[region_mask].mean()) if region_mask.any() else 0.0,
+                    alpha_max=float(alpha_crop[region_mask].max()) if region_mask.any() else 0.0,
+                    height_mean=height_mean,
+                    height_std=height_std,
+                    height_range=height_range,
+                    normal_mean_xyz=None,
+                    mcly_texture_ids=texture_ids,
+                    mcly_active_layers=active_layers,
+                    curation_label="height_discontinuity",
+                    rejection_reason=None,
+                    linked_component_ids=[],
+                    provenance={
+                        "height_jump_threshold": float(height_jump_threshold),
+                        "max_gradient": round(max_grad, 4),
+                        "mean_gradient": round(mean_grad, 4),
+                    },
+                )
+            )
+    return regions
+
+
 def _json_ready(value: Any) -> Any:
     if isinstance(value, np.ndarray):
         return value.tolist()

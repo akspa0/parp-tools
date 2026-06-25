@@ -51,6 +51,7 @@ from harvester.fractal_segments import (  # noqa: E402
     save_regions_jsonl,
     segment_blocky_pastes,
     segment_canvas_regions,
+    segment_height_discontinuities,
     segment_macro_pastes,
 )
 
@@ -103,6 +104,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--block-min-footprint", type=int, default=16, help="Minimum bbox width/height in alpha pixels for blocky paste regions.")
     parser.add_argument("--block-max-footprint", type=int, default=0, help="Optional maximum bbox width/height in alpha pixels for blocky paste regions (0 = unlimited).")
     parser.add_argument("--block-max-aspect", type=float, default=12.0, help="Maximum aspect ratio for blocky paste regions.")
+    parser.add_argument("--height-discontinuities", action="store_true", help="Segment regions based on heightmap discontinuities at tile boundaries (prefab detection).")
+    parser.add_argument("--height-jump-threshold", type=float, default=8.0, help="Minimum height difference to flag as discontinuity.")
+    parser.add_argument("--height-min-area", type=int, default=1024, help="Minimum area for a height discontinuity region.")
+    parser.add_argument("--height-min-footprint", type=int, default=32, help="Minimum bbox width/height for height discontinuity regions.")
+    parser.add_argument("--height-max-aspect", type=float, default=12.0, help="Maximum aspect ratio for height discontinuity regions.")
     parser.add_argument("--visualize-macro", action="store_true", help="Render macro paste overview/contact sheets even when --no-overlay is set.")
     parser.add_argument("--visualize-composite-signal", action="store_true", help="Render V18-style composite hard-region overview for macro paste review.")
     parser.add_argument("--macro-max-preview-side", type=int, default=4096, help="Maximum side length for macro full-map overview image.")
@@ -164,7 +170,8 @@ def main() -> None:
                     strip_tiles=int(args.strip_tiles),
                     overlap_alpha_tiles=int(args.strip_overlap_alpha_tiles),
                     no_overlay=bool(args.no_overlay),
-                    skip_raw_segments=bool(args.macro_pastes) or bool(args.blocky_pastes),
+                    skip_raw_segments=bool(args.macro_pastes) or bool(args.blocky_pastes) or bool(args.height_discontinuities),
+                    include_aux_arrays=bool(args.height_discontinuities),
                 )
             else:
                 from harvester.fractal_canvas import assemble_full_map_canvas
@@ -250,6 +257,24 @@ def main() -> None:
                         canvas,
                         rectangle_regions,
                         segments_dir / "overlays" / "rectangle_pages_overlay.png",
+                    )
+
+            if bool(args.height_discontinuities):
+                height_regions = segment_height_discontinuities(
+                    canvas,
+                    threshold=float(args.threshold),
+                    height_jump_threshold=float(args.height_jump_threshold),
+                    min_area=int(args.height_min_area),
+                    min_footprint_px=int(args.height_min_footprint),
+                    max_aspect_ratio=float(args.height_max_aspect),
+                    max_regions_per_layer=int(args.max_regions_per_layer),
+                )
+                regions.extend(height_regions)
+                if not bool(args.no_overlay):
+                    render_region_overlay(
+                        canvas,
+                        height_regions,
+                        segments_dir / "overlays" / "height_discontinuities_overlay.png",
                     )
 
             fingerprints = fingerprint_raw_regions(canvas, regions, threshold=float(args.threshold))
@@ -781,10 +806,11 @@ def process_map_in_strips(
     overlap_alpha_tiles: int,
     no_overlay: bool,
     skip_raw_segments: bool = False,
+    include_aux_arrays: bool = False,
 ) -> list[FractalRegion]:
     """Process a full map in horizontal strips to keep memory bounded."""
     full_layout = build_canvas_layout(records)
-    full_group = create_chunked_canvas_group(canvas_dir, full_layout, layers=layers, aux_arrays=False)
+    full_group = create_chunked_canvas_group(canvas_dir, full_layout, layers=layers, aux_arrays=include_aux_arrays)
     _write_all_tiles(full_group, root, records, full_layout, layers, canvas_dir)
 
     min_tile_x = int(full_layout.min_tile_x)
