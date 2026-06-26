@@ -1,8 +1,71 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "instructions": ["AGENTS.md"],
+  "plugin": [
+    "opencode-agy-auth@latest",
+    "opencode-agent-memory@latest",
+    "opencode-morph-fast-apply@latest",
+    "opencode-quota@latest",
+    "opencode-notify@latest",
+    "opencode-worktree@latest",
+    "opencode-type-inject@latest",
+    "opencode-skillful@latest",
+    "opencode-devcontainers@latest",
+    "opencode-background-agents@latest",
+    "tokenscope@latest",
+    "dynamic-context-pruning@latest"
+  ],
   "skills": {
     "paths": [".opencode/skills", ".codex/skills"]
+  },
+  "provider": {
+    "google": {
+      "models": {
+        "antigravity-gemini-3.5-flash": {
+          "name": "Gemini 3.5 Flash (Antigravity)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "minimal": { "thinkingLevel": "minimal" },
+            "low": { "thinkingLevel": "low" },
+            "medium": { "thinkingLevel": "medium" },
+            "high": { "thinkingLevel": "high" }
+          }
+        },
+        "antigravity-gemini-3-pro": {
+          "name": "Gemini 3 Pro (Antigravity)",
+          "limit": { "context": 1048576, "output": 65535 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "low": { "thinkingLevel": "low" },
+            "high": { "thinkingLevel": "high" }
+          }
+        },
+        "antigravity-claude-sonnet-4-6": {
+          "name": "Claude Sonnet 4.6 (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "antigravity-claude-sonnet-4-6-thinking": {
+          "name": "Claude Sonnet 4.6 Thinking (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
+            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+          }
+        },
+        "antigravity-claude-opus-4-6-thinking": {
+          "name": "Claude Opus 4.6 Thinking (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
+            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+          }
+        }
+      }
+    }
   },
   "mcp": {
     "ghidra": {
@@ -16,7 +79,6 @@
       "environment": {},
       "enabled": true
     },
-
     "puppeteer": {
       "type": "local",
       "command": [
@@ -27,7 +89,6 @@
       "environment": {},
       "enabled": true
     },
-
     "x64dbg": {
       "type": "local",
       "command": [
