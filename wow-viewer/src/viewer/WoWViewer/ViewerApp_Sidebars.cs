@@ -431,10 +431,20 @@ public partial class ViewerApp
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
         if (ImGui.Begin("##LeftSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
         {
+            bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
+
             DrawWorkspaceBarsPanelContent();
 
             ImGui.Separator();
-            bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
+
+            if (hasWorldLoaded)
+            {
+                ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+                if (ImGui.CollapsingHeader("World Overview", ImGuiTreeNodeFlags.DefaultOpen))
+                    DrawWorldOverviewContent();
+                ImGui.Separator();
+            }
+
             DrawFileBrowserContent(hasWorldLoaded ? 260f : 0f);
 
             ImGui.Separator();
@@ -4213,20 +4223,23 @@ public partial class ViewerApp
         ImGui.SameLine();
         if (ImGui.Button("Toggle Wireframe"))
             _renderer?.ToggleWireframe();
-    }
 
-    private void DrawSceneSettingsContent()
-    {
+        // 5. Scene info + UI settings
+        ImGui.Spacing();
+        ImGui.Text("Scene");
+        ImGui.Separator();
         ImGui.TextDisabled($"Target: {GetWorkspaceTargetSummary()}");
         ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
-        ImGui.Separator();
+        ImGui.Spacing();
 
         bool hideUi = _hideUiChrome;
         if (ImGui.Checkbox("Hide UI Chrome (Tab key)", ref hideUi))
             _hideUiChrome = hideUi;
 
+        ImGui.Spacing();
+        ImGui.Text("UI Theme");
         ImGui.Separator();
-        DrawCameraControlsContent();
+        DrawUiThemeSettingsContent();
     }
 
     // ── Utilities sub-tab content ──────────────────────────────────────────
