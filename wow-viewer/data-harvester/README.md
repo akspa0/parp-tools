@@ -1,4 +1,7 @@
-# wow-viewer data-harvester — V18 Terrain System
+# wow-viewer data-harvester — V18 Terrain System / 076 Fractal Brush Library
+
+> **Current direction (June 2026): Spec 076 — Full-Map Fractal Brush Library.**
+> End-to-end height regression from minimap (V21) is **paused** after failing to converge. The working hypothesis is the model must first understand terrain as a layered composition — MCAL alpha masks + tileset layers + fractal brush stamps — before predicting height. The 076 pipeline recovers artist primitives from full-map canvas alpha/height/normal/MCLY signals. V18 remains the stable dataset substrate; V20/V21 are abandoned/diagnostic-only.
 
 Operator guide for the V18 terrain system: training pipeline, dataset
 curation, and model inference.
@@ -88,7 +91,9 @@ cd wow-viewer/data-harvester
 uv sync
 ```
 
-## Alpha Brush Library Quickstart
+## Alpha Brush Library Quickstart (Deprecated)
+
+**Spec 074 is deprecated as a primary training direction.** Its outputs (connected components, DINOv2 clusters, exact scar dedupes) are **evidence rows only** — they feed into 076 linkage/review, not direct model training.
 
 Spec `074-alpha-brush-library` extracts reusable MCAL alpha-mask brush components from existing V18 Zarr stores and writes a DINOv2-clustered JSONL catalog.
 
@@ -228,6 +233,84 @@ Notes:
   occlusion is also folded into the active terrain-valid mask and the height
   preview weight panel.
 - The active focused lane keeps height and normal as separate model runs.
+
+---
+
+## Spec 076 — Full-Map Fractal Brush Library (Active)
+
+**076 is the current active track.** It recovers reusable brush/fractal/paste terrain-art primitives from the full map canvas — not per-ADT-tile connected components.
+
+Conceptual model: each map is a stack of ZBrush-like sculpt-and-paint documents; terrain mesh, alpha masks, MCLY texture/layer assignments, and source BLP stamps are one coupled unit.
+
+### Pipeline
+
+```
+V18 Zarr Stores  (stable substrate)
+      │
+      ▼
+Phase 1: Full-Map Canvas Assembly  (build_full_map_fractal_canvas.py)
+  tile-chunked Zarr canvases, compact tile windows, horizontal strips
+      │
+      ▼
+Phase 2: Segmentation  (segment_full_map_fractals.py)
+  raw alpha components, rectangle-page detection, near-duplicate clustering,
+  macro paste/scar grouping, blocky child segmentation
+      │
+      ▼
+Phase 3: Trainable Library  (build_fractal_brush_library.py)
+  Zarr/Parquet sample store, stable IDs, deterministic splits,
+  accepted/rejected filtering, metadata (MCLY texture IDs, dominant texture)
+      │
+      ▼
+Phase 4: Texture/Variant/BLP Inventory  (research phase)
+  MCLY texture ID joins, BLP fingerprint evidence, source-decal matching
+      │
+      ▼
+Phase 5: Model Training  (NOT STARTED — blocked until library validated)
+```
+
+### Quickstart
+
+```powershell
+# Phase 1: Build full-map canvas (compact 4-tile window)
+uv run python scripts/build_full_map_fractal_canvas.py `
+  --build 0_5_3_3368 --map Azeroth --tile-limit 4 --mode compact `
+  --output-dir ../output/analysis/full-map-fractal-brush-library/smoke
+
+# Phase 2: Segment
+uv run python scripts/segment_full_map_fractals.py `
+  --input-dir <canvas-dir> --macro-pastes --visualize-macro
+
+# Phase 3: Build trainable library
+uv run python scripts/build_fractal_brush_library.py `
+  --input-dir <segment-dir> --output-dir ../output/datasets/fractal-brush-library
+
+# Full-map analysis (raw components + dedupe + macro + blocky)
+uv run python scripts/analyze_fractal_raw_components.py `
+  --builds 0_5_3_3368 3_3_5_12340 --maps all --tile-limit 0 `
+  --macro-pastes --blocky-pastes
+```
+
+### Key Outputs
+
+| Artifact | Path |
+|----------|------|
+| Full-map canvases | `output/analysis/full-map-fractal-brush-library/<run>/` |
+| Raw components + dedupe | `.../dedupe/` (exact + near clusters) |
+| Macro paste visual review | `.../macro_review/index.html` |
+| Blocky child regions | `.../blocky_visual_*/` |
+| Trainable library | `output/datasets/fractal-brush-library/<run>/` |
+
+### Status
+
+- Phases 1-3 implemented and validated on bounded tile windows and full-map strips.
+- Full Azeroth 0.5.3 (622 tiles): 12,906 raw components → 12,163 exact patterns → 11,976 near-duplicate clusters (16x16 thumbnail, radius 0).
+- Macro paste grouping: detects large authored regions via dilated alpha strokes.
+- Blocky child segmentation: recovers middle-scale chunks inside giant parent zones.
+- Phase 4 (BLP/texture fingerprint inventory) in progress.
+- Model training is blocked until macro paste/scar outputs are visually validated at all-map scale and Phase 5 targets are approved.
+
+See `specs/076-full-map-fractal-brush-library/` for the full spec, plan, and tasks. Architecture doc: `docs/architecture/full-map-fractal-brush-library-2026-06-23.md`.
 
 ---
 
@@ -914,9 +997,11 @@ uv run python -u scripts/infer_v16_1.py `
 
 ---
 
-## V20 Multi-Modal Chained Pipeline Quickstart
+## V20 Multi-Modal Chained Pipeline Quickstart (Abandoned)
 
-The V20 pipeline reconstructs clean ground height maps ("Terrain Intent") and object placement layouts by chain-linking focused models.
+**V20 is abandoned.** Its 4-model pile (segmentor/brush-classifier/inpainter/placement-restorer) over-engineers terrain mesh reconstruction. Do not use this path. The V21 pivot (simple V18 height model + filtered-mask loss) is also paused pending 076 library validation.
+
+V20 pipeline details preserved for reference only:
 
 Ensure you have run the Zarr store patching first before starting training:
 ```powershell

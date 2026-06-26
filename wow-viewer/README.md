@@ -4,7 +4,7 @@
 
 A 3D world viewer, format analysis toolkit, and ML dataset pipeline for World of Warcraft game client data. This is the sole active development target in the `parp-tools` monorepo — the legacy `MdxViewer` in `gillijimproject_refactor/` is read-only reference.
 
-**Support range**: Alpha 0.5.3 through LK 3.3.5 (with partial Cataclysm-era PM4 and terrain paths).
+**Support range**: Alpha 0.5.3 through LK 3.3.5 (with partial Cataclysm-era PM4 and terrain paths). We effectively support versions of WoW from 0.5.3 through 4.0.0, with varying levels of format support, due to the vast array of changes in each version of every client. We've chosen to do piecemeal for now, on key versions of the game, since no software fully supports the file formats due to the vast amount of micro-changes done to them over time.
 
 ## Features
 
@@ -31,24 +31,21 @@ A 3D world viewer, format analysis toolkit, and ML dataset pipeline for World of
 ## Quick Start
 
 ### Prerequisites
-
-- .NET 10 SDK
-- A staged game client in `output/tmp/wowarchive-clients/` (see [Data Paths](memory-bank/data-paths.md) for the authoritative list of paths and override environment variables)
+- `.NET 10 SDK`
+- A staged game client in a temporary directory
+- OpenGL 3.3 capable GPU
 
 ### Build
-
 ```powershell
 dotnet build wow-viewer/WowViewer.slnx -c Debug
 ```
 
 ### Run Viewer
-
 ```powershell
 dotnet run --project src/viewer/WoWViewer/WoWViewer.csproj -c Debug -- <client-root> <map-name>
 ```
 
 ### Run CLI Tools
-
 ```powershell
 # Inspect an M2 model
 dotnet run --project tools/inspect/WowViewer.Tool.Inspect -c Debug -- m2 inspect --input <path/to/model.m2>
@@ -66,7 +63,7 @@ dotnet run --project tools/animfarm/WowViewer.Tool.AnimFarm -c Debug -- dump --i
 dotnet run --project tools/converter/WowViewer.Tool.Converter -c Debug -- alpha-to-lk --input <wdt> --output <dir>
 ```
 
-See [the CLI tools guide](../docs/CLI-TOOLS.md) for full usage and common workflows.
+See `docs/CLI-TOOLS.md` for full usage and common workflows.
 
 ## Project Structure
 
@@ -93,25 +90,31 @@ wow-viewer/
 
 | Document | What It Covers |
 |----------|----------------|
-| [CLI Tools Guide](../docs/CLI-TOOLS.md) | Full reference for all CLI tools with workflow recipes |
-| [PM4 ADT Restoration](../docs/PM4-ADT-RESTORATION.md) | PM4 → ADT placement writing workflow |
-| [Plans Overview](../docs/PLANS-OVERVIEW.md) | Summary of all 25 remaining active specs |
+| [CLI Tools Guide](docs/CLI-TOOLS.md) | Full reference for all CLI tools with workflow recipes |
+| [PM4 ADT Restoration](docs/PM4-ADT-RESTORATION.md) | PM4 → ADT placement writing workflow |
+| [Plans Overview](docs/PLANS-OVERVIEW.md) | Summary of all 25 remaining active specs |
 | [Memory Bank](memory-bank/activeContext.md) | Current focus, spec status, known issues |
 | [Data Paths](memory-bank/data-paths.md) | Game client and test data locations, with env-var overrides |
 | [Coding Standards](memory-bank/coding_standards.md) | Project layout, C#/Python conventions, tests, commits |
-| [Architecture Docs](../docs/architecture/) | PM4 semantics, render plans, model specs |
+| [Architecture Docs](docs/architecture/) | PM4 semantics, render plans, model specs |
 | Feature Specs (`specs/`) | Per-feature spec/plan/tasks (Spec Kit) |
 
-## Key Specs (In Progress)
+## Key Specs
 
 | Spec | What | Status |
 |------|------|--------|
-| 046 | PM4 asset matching — WMO group matching + signature matcher | 22/39 done |
+| 046 | PM4 asset matching — surface correlation and fingerprint matching | 217/1604 matched, ADT validation at P@1=1.8% |
 | 051 | PM4 MSCN/MSPV visualization and signature extraction | 15/33 done |
 | 053 | M2 animation pose farm — BVH + pose clip extraction | 20/105 done (Phase 0-1) |
 | 054 | PM4 camera window cache — in-memory + on-disk per-file cache | 17/18 done |
+| 071 | Left-right sidebar split — viewer UI overhaul with workbench tabs | **Complete** |
+| 076 | Full-map fractal brush library — terrain artist primitive recovery | **Active** — Phases 1-3 done, Phase 4 (BLP/texture inventory) in progress |
+| 074 | Alpha brush library — MCAL connected component extraction | **Deprecated** — outputs are evidence rows for 076 |
+| 075 | Scar mask segmentation — whole-tile scar-mask model | **Deprecated** — diagnostic baseline only |
 
 ## Game Version Support
+
+We support versions of WoW from 0.5.3 through 4.0.0, with varying levels of format support, due to the vast array of changes in each version of every client. We've chosen to do piecemeal for now, on key versions of the game, since no software fully supports the file formats due to the vast amount of micro-changes done to them over time.
 
 | Version | Era | Status |
 |---------|-----|--------|
