@@ -399,7 +399,7 @@ public partial class ViewerApp
         float wowForwardX = -rendererForwardY;
         float wowForwardY = -rendererForwardX;
 
-        float degrees = MathF.Atan2(-wowForwardY, wowForwardX) * 180f / MathF.PI;
+        float degrees = MathF.Atan2(-wowForwardY, wowForwardX) * 180f / MathF.PI + 90f;
         if (degrees < 0f)
             degrees += 360f;
 

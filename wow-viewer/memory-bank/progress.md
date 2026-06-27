@@ -1,5 +1,24 @@
 # Progress — wow-viewer
 
+## 2026-06-26 — WMO doodad-group selection and panel details
+
+### What landed
+
+- Added `TryGetDoodadDef`, `GetDoodadDefName`, `GetRenderGroupsForDoodadDef`, `GetDoodadCountForRenderGroup`, `DoodadDefCount` to `WmoRenderer` for public access to raw DoodadDef data and group-doodad linkage.
+- Enhanced `DrawWmoDoodadInspector` to show detailed doodad info: MODN name, full model path, position, scale, Euler rotation, hex color (BGRA), and list of referencing groups.
+- Added group filter combo to the doodad inspector to filter doodads by WMO group membership.
+- Added `_standaloneWmoDoodadGroupFilter` / `_worldWmoDoodadGroupFilter` fields.
+- Added "Show Doodads" button to group controls linking group selection to doodad filter.
+- Added `QuaternionToEulerDegrees` helper.
+- Group controls now show doodad count per selected group and total DoodadDef count.
+
+### Files changed
+
+- `wow-viewer/src/viewer/WoWViewer/Rendering/WmoRenderer.cs` — 5 new public methods
+- `wow-viewer/src/viewer/WoWViewer/ViewerApp.cs` — 2 new fields
+- `wow-viewer/src/viewer/WoWViewer/ViewerApp_Sidebars.cs` — enhanced doodad inspector, added helper
+- `wow-viewer/src/viewer/WoWViewer/ViewerApp_WmoGroups.cs` — doodad count in group details, Show Doodads button
+
 ## 2026-06-24 — Spec 076 macro paste/scar grouping correction
 
 ### What landed

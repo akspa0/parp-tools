@@ -244,70 +244,42 @@ public partial class ViewerApp
         if (ImGui.Begin("##statusbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
             ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
         {
-            string leftStatusText = string.IsNullOrWhiteSpace(_statusMessage)
+            string rightStatusText = string.IsNullOrWhiteSpace(_statusMessage)
                 ? "Ready"
                 : _statusMessage.Replace(Environment.NewLine, " ").Trim();
 
-            if (ImGui.BeginTable("##statusbarLayout", 3,
-                ImGuiTableFlags.SizingFixedFit |
-                ImGuiTableFlags.NoSavedSettings |
-                ImGuiTableFlags.NoHostExtendX |
-                ImGuiTableFlags.PadOuterX))
+            string leftText = string.Empty;
+            if (_terrainManager != null || _vlmTerrainManager != null)
             {
-                string coordText = string.Empty;
-                if (_terrainManager != null || _vlmTerrainManager != null)
-                {
-                    var pos = _camera.Position;
-                    float wowX = WoWConstants.MapOrigin - pos.Y;
-                    float wowY = WoWConstants.MapOrigin - pos.X;
-                    float wowZ = pos.Z;
-                    float facingDegrees = GetWorldFacingDegrees(_camera.Yaw);
-                    string facingLabel = GetWorldFacingLabel(facingDegrees);
-                    coordText = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})  Facing: {facingDegrees:F1}° {facingLabel ?? string.Empty}";
-                }
-
-                string sceneSummary = string.Empty;
-                if (_worldScene != null || _terrainManager != null || _vlmTerrainManager != null)
-                {
-                    string targetSummary = GetWorkspaceTargetSummary();
-                    sceneSummary = $"Target: {targetSummary}";
-                    if (!string.IsNullOrWhiteSpace(_currentAreaName))
-                        sceneSummary = $"{sceneSummary}  |  Area: {_currentAreaName}";
-                }
-                else if (!string.IsNullOrWhiteSpace(_currentAreaName))
-                {
-                    sceneSummary = $"Area: {_currentAreaName}";
-                }
-
-                string fpsText = $"{_currentFps:F0} FPS  {_frameTimeMs:F1} ms";
-
-                ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthStretch, 1f);
-                ImGui.TableSetupColumn("Coords", ImGuiTableColumnFlags.WidthFixed, MathF.Max(280f, GetImGuiTextWidth(coordText) + 4f));
-                ImGui.TableSetupColumn("Meta", ImGuiTableColumnFlags.WidthFixed, MathF.Max(180f, GetImGuiTextWidth(sceneSummary) + GetImGuiTextWidth(fpsText) + 28f));
-
-                ImGui.TableNextRow();
-
-                ImGui.TableSetColumnIndex(0);
-                ImGui.TextUnformatted(leftStatusText);
-
-                ImGui.TableSetColumnIndex(1);
-                if (!string.IsNullOrEmpty(coordText))
-                    ImGui.TextColored(new Vector4(0.7f, 0.85f, 1f, 1f), coordText);
-
-                ImGui.TableSetColumnIndex(2);
-                if (!string.IsNullOrEmpty(sceneSummary))
-                {
-                    ImGui.TextColored(new Vector4(1f, 0.9f, 0.65f, 1f), sceneSummary);
-                    ImGui.SameLine();
-                }
-
-                var fpsColor = _currentFps >= 30 ? new Vector4(0.4f, 1f, 0.4f, 1f)
-                             : _currentFps >= 15 ? new Vector4(1f, 1f, 0.4f, 1f)
-                             : new Vector4(1f, 0.4f, 0.4f, 1f);
-                ImGui.TextColored(fpsColor, fpsText);
-
-                ImGui.EndTable();
+                var pos = _camera.Position;
+                float wowX = WoWConstants.MapOrigin - pos.Y;
+                float wowY = WoWConstants.MapOrigin - pos.X;
+                float wowZ = pos.Z;
+                float facingDegrees = GetWorldFacingDegrees(_camera.Yaw);
+                string facingLabel = GetWorldFacingLabel(facingDegrees);
+                leftText = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})  Facing: {facingDegrees:F1}° {facingLabel ?? string.Empty}";
+                if (!string.IsNullOrWhiteSpace(_currentAreaName))
+                    leftText = $"{leftText}  |  Area: {_currentAreaName}";
             }
+            else if (!string.IsNullOrWhiteSpace(_currentAreaName))
+            {
+                leftText = $"Area: {_currentAreaName}";
+            }
+
+            float leftWidth = string.IsNullOrEmpty(leftText) ? 0f : GetImGuiTextWidth(leftText) + 8f;
+            float rightWidth = GetImGuiTextWidth(rightStatusText) + 8f;
+
+            if (!string.IsNullOrEmpty(leftText))
+                ImGui.TextUnformatted(leftText);
+
+            // Push right text to the right edge
+            float pad = io.DisplaySize.X - rightWidth - 16f;
+            if (pad > 0f)
+            {
+                ImGui.SameLine();
+                ImGui.SetCursorPosX(pad);
+            }
+            ImGui.TextUnformatted(rightStatusText);
         }
         ImGui.End();
         ImGui.PopStyleVar();

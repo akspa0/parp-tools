@@ -15,6 +15,7 @@ For the day-to-day how-to (C#/Python conventions, project layout, tests, commits
 - All new implementation work lives in `wow-viewer/`. Do not add new code in `gillijimproject_refactor/` unless explicitly requested.
 - The top-level `../AGENTS.md` is the authoritative workspace policy for scope, safety, and repo boundaries. When guidance here and there conflict, the top-level file wins.
 - Game client data is read only from `output/tmp/wowarchive-clients/`. Any reference to `H:\CLIENTS` in code, scripts, tests, or documentation is a bug. Replace it with a staged path or remove the reference.
+- MDX files (MDLX container) must use the legacy `MdxRenderer` (GPU skinning via bone matrix uniforms), never the M2 runtime. Do not route `.mdx` files through `LoadChunkedMdxFromBytes` or any M2 conversion pipeline for rendering. The M2 CPU skinning path (`M2Renderer` + `M2RuntimeAnimator` + `M2SkinnedRenderModelBuilder`) produces incorrect animation for converted MDX data. World instances already use `MdxRenderer` directly at `WorldAssetManager.cs:1297`; standalone loading must do the same at `LoadModelFromBytesWithContainerProbe`.
 
 ## Spec Kit
 

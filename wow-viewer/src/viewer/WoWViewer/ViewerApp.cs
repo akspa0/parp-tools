@@ -294,7 +294,7 @@ public partial class ViewerApp : IDisposable
 
     // 069 Phase 1: tab system state. On by default; can toggle off via View > Legacy Sidebar UI.
     private bool _useTabUi = true;
-    private WorkbenchTab _activeTopTab = WorkbenchTab.World;
+    private WorkbenchTab _activeTopTab = WorkbenchTab.Tools;
     private int _activeBottomTabIndex = 0;
 
     // Workbench popout (069 Phase 14: single resizable panel, no window sprawl)
@@ -518,6 +518,8 @@ public partial class ViewerApp : IDisposable
     private int _selectedStandaloneWmoGroupIndex = -1;
     private int _selectedStandaloneWmoDoodadIndex = -1;
     private int _selectedWorldWmoDoodadIndex = -1;
+    private int _standaloneWmoDoodadGroupFilter = -1;
+    private int _worldWmoDoodadGroupFilter = -1;
     private readonly HashSet<int> _highlightedStandaloneWmoGroupIndices = new();
 
     private sealed class HeightmapMetadata
@@ -649,6 +651,7 @@ public partial class ViewerApp : IDisposable
     private bool _suppressMinimapForLayout;
     private const float MenuBarHeight = 22f;
     private const float ToolbarHeight = 32f;
+    private const float BottomBarHeight = 36f;
     private const float StatusBarHeight = 24f;
 
     private float GetActiveToolbarHeight()
@@ -1638,6 +1641,8 @@ void main() {
 
             // Toolbar is drawn after sidebars so it stays on top of any edge overlap.
             DrawToolbar();
+
+            DrawBottomBar();
 
             DrawStatusBar();
 
@@ -10886,17 +10891,9 @@ void main() {
                     ViewerLog.Important(ViewerLog.Category.Mdx,
                         $"[ModelRouting] Extension/container mismatch: '{ext}' with MDLX root. Routing as MDX: {Path.GetFileName(sourcePath)}");
 
-                try
-                {
-                    LoadChunkedMdxFromBytes(modelBytes, sourcePath, dir);
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    ViewerLog.Important(ViewerLog.Category.Mdx,
-                        $"[ModelRouting] Chunked MDX runtime route failed for {Path.GetFileName(sourcePath)}; falling back to legacy MDX renderer: {DescribeExceptionChain(ex)}");
-                }
-
+                // Use the legacy MDX renderer for .mdx files. The chunked MDX-to-M2
+                // runtime conversion path produces incorrect animation for converted
+                // MDX data (M2 CPU skinning doesn't properly handle Alpha-era models).
                 MdxRuntimeSharedInfo? sharedRuntimeInfo = TryReadSharedMdxRuntimeInfo(sourcePath, modelBytes);
 
                 using (var ms = new MemoryStream(modelBytes))
@@ -14459,7 +14456,7 @@ void main() {
         x = 0f;
         y = topOffset;
         width = io.DisplaySize.X;
-        height = io.DisplaySize.Y - topOffset - StatusBarHeight;
+        height = io.DisplaySize.Y - topOffset - BottomBarHeight - StatusBarHeight;
 
         // 071: tab system uses fixed left/right sidebars; viewport is the
         // middle area between them. Sidebars auto-hide when the window is

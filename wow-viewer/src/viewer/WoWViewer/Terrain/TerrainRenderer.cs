@@ -63,7 +63,7 @@ public class TerrainRenderer : IDisposable
     public bool ShowTileGrid { get; set; }
     public bool ShowCellGrid { get; set; }
     public bool ShowAlphaMask { get; set; }
-    public int AlphaMaskChannel { get; set; } = 1;
+    public int AlphaMaskChannel { get; set; } = 0;
     public bool ShowShadowMap { get; set; }
     public bool UseMccv { get; set; } = true;
 
@@ -1472,18 +1472,21 @@ void main() {
     float a2 = (uShowLayer2 == 1) ? a2Raw : 0.0;
     float a3 = (uShowLayer3 == 1) ? a3Raw : 0.0;
 
+    float alphaDbg = -1.0;
     if (uShowAlphaMask == 1) {
-        float dbg = 1.0;
-        if (uAlphaDebugChannel == 1) dbg = a1Raw;
-        else if (uAlphaDebugChannel == 2) dbg = a2Raw;
-        else if (uAlphaDebugChannel == 3) dbg = a3Raw;
+        alphaDbg = 1.0;
+        if (uAlphaDebugChannel == 1) alphaDbg = (uShowLayer1 == 1) ? a1Raw : 0.0;
+        else if (uAlphaDebugChannel == 2) alphaDbg = (uShowLayer2 == 1) ? a2Raw : 0.0;
+        else if (uAlphaDebugChannel == 3) alphaDbg = (uShowLayer3 == 1) ? a3Raw : 0.0;
         else {
-            if (uShowLayer1 == 1) dbg = a1Raw;
-            else if (uShowLayer2 == 1) dbg = a2Raw;
-            else if (uShowLayer3 == 1) dbg = a3Raw;
+            float sum = 0.0;
+            int count = 0;
+            if (uShowLayer1 == 1) { sum += a1Raw; count++; }
+            if (uShowLayer2 == 1) { sum += a2Raw; count++; }
+            if (uShowLayer3 == 1) { sum += a3Raw; count++; }
+            if (count > 0) alphaDbg = sum / float(count);
+            else alphaDbg = 0.0;
         }
-        FragColor = vec4(dbg, dbg, dbg, 1.0);
-        return;
     }
 
     vec3 norm = normalize(vNormal);
@@ -1543,6 +1546,10 @@ void main() {
         finalColor = mix(finalColor, majorColor, majorLine);
     }
 
+    if (uShowAlphaMask == 1 && alphaDbg >= 0.0) {
+        finalColor = vec3(alphaDbg);
+    }
+
     if (uShowLayer0 == 1) {
         if (uShowChunkGrid == 1) {
             float chunkSize = 33.333;
@@ -1553,12 +1560,12 @@ void main() {
             finalColor = mix(finalColor, vec3(0.0, 1.0, 1.0), chunkLine * 0.6);
         }
         if (uShowCellGrid == 1) {
-            float cellSize = 66.666;
+            float cellSize = 2.0833125; // 33.333 / 16 (each chunk subdivided into 16x16 cells)
             vec2 cellFrac = fract(vWorldPos.xy / cellSize);
             float cellLine = step(cellFrac.x, 0.003) + step(1.0 - cellFrac.x, 0.003)
                            + step(cellFrac.y, 0.003) + step(1.0 - cellFrac.y, 0.003);
             cellLine = clamp(cellLine, 0.0, 1.0);
-            finalColor = mix(finalColor, vec3(0.0, 1.0, 0.0), cellLine * 0.5);
+            finalColor = mix(finalColor, vec3(0.3, 1.0, 0.3), cellLine * 0.85);
         }
         if (uShowTileGrid == 1) {
             float tileSize = 533.333;
@@ -1687,18 +1694,21 @@ void main() {
     float a2 = (uShowLayer2 == 1 && has2) ? a2Raw : 0.0;
     float a3 = (uShowLayer3 == 1 && has3) ? a3Raw : 0.0;
 
+    float alphaDbg = -1.0;
     if (uShowAlphaMask == 1) {
-        float dbg = 1.0;
-        if (uAlphaDebugChannel == 1) dbg = a1Raw;
-        else if (uAlphaDebugChannel == 2) dbg = a2Raw;
-        else if (uAlphaDebugChannel == 3) dbg = a3Raw;
+        alphaDbg = 1.0;
+        if (uAlphaDebugChannel == 1) alphaDbg = (uShowLayer1 == 1 && has1) ? a1Raw : 0.0;
+        else if (uAlphaDebugChannel == 2) alphaDbg = (uShowLayer2 == 1 && has2) ? a2Raw : 0.0;
+        else if (uAlphaDebugChannel == 3) alphaDbg = (uShowLayer3 == 1 && has3) ? a3Raw : 0.0;
         else {
-            if (uShowLayer1 == 1 && has1) dbg = a1Raw;
-            else if (uShowLayer2 == 1 && has2) dbg = a2Raw;
-            else if (uShowLayer3 == 1 && has3) dbg = a3Raw;
+            float sum = 0.0;
+            int count = 0;
+            if (uShowLayer1 == 1 && has1) { sum += a1Raw; count++; }
+            if (uShowLayer2 == 1 && has2) { sum += a2Raw; count++; }
+            if (uShowLayer3 == 1 && has3) { sum += a3Raw; count++; }
+            if (count > 0) alphaDbg = sum / float(count);
+            else alphaDbg = 0.0;
         }
-        FragColor = vec4(dbg, dbg, dbg, 1.0);
-        return;
     }
 
     vec3 norm = normalize(vNormal);
@@ -1758,6 +1768,10 @@ void main() {
         finalColor = mix(finalColor, majorColor, majorLine);
     }
 
+    if (uShowAlphaMask == 1 && alphaDbg >= 0.0) {
+        finalColor = vec3(alphaDbg);
+    }
+
     if (uShowLayer0 == 1) {
         if (uShowChunkGrid == 1) {
             float chunkSize = 33.333;
@@ -1768,12 +1782,12 @@ void main() {
             finalColor = mix(finalColor, vec3(0.0, 1.0, 1.0), chunkLine * 0.6);
         }
         if (uShowCellGrid == 1) {
-            float cellSize = 66.666;
+            float cellSize = 2.0833125; // 33.333 / 16 (each chunk subdivided into 16x16 cells)
             vec2 cellFrac = fract(vWorldPos.xy / cellSize);
             float cellLine = step(cellFrac.x, 0.003) + step(1.0 - cellFrac.x, 0.003)
                            + step(cellFrac.y, 0.003) + step(1.0 - cellFrac.y, 0.003);
             cellLine = clamp(cellLine, 0.0, 1.0);
-            finalColor = mix(finalColor, vec3(0.0, 1.0, 0.0), cellLine * 0.5);
+            finalColor = mix(finalColor, vec3(0.3, 1.0, 0.3), cellLine * 0.85);
         }
         if (uShowTileGrid == 1) {
             float tileSize = 533.333;

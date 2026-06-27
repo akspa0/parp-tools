@@ -17,7 +17,7 @@ public partial class ViewerApp
         ImGui.Text("WMO Group Overlay:");
         ImGui.Checkbox("Show group boxes", ref _standaloneWmoGroupOverlayEnabled);
         ImGui.Checkbox("Include hidden groups", ref _standaloneWmoOverlayIncludeHiddenGroups);
-        ImGui.TextDisabled($"Rendered groups: {wmoRenderer.GroupRenderCount}");
+        ImGui.TextDisabled($"Rendered groups: {wmoRenderer.GroupRenderCount}  Doodad defs: {wmoRenderer.DoodadDefCount}");
 
         int inspectionGroup = _selectedStandaloneWmoGroupIndex >= 0
             ? _selectedStandaloneWmoGroupIndex
@@ -77,6 +77,18 @@ public partial class ViewerApp
         ImGui.SameLine();
         if (ImGui.SmallButton("Frame Group"))
             FrameBounds(boundsMin, boundsMax, mdxMirrorX: false);
+
+        int groupDoodadCount = wmoRenderer.GetDoodadCountForRenderGroup(inspectionGroup);
+        if (groupDoodadCount > 0)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Show Doodads"))
+            {
+                _standaloneWmoDoodadGroupFilter = inspectionGroup;
+                _statusMessage = $"Filtered doodad inspector to {groupDoodadCount} doodads in group [{inspectionGroup}].";
+            }
+            ImGui.TextDisabled($"Doodads in this group: {groupDoodadCount}");
+        }
 
         ImGui.TextDisabled("The selected group gets a big label immediately. Highlighted groups keep big labels pinned.");
     }

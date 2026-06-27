@@ -224,6 +224,16 @@ public partial class ViewerApp
         ImGui.TextDisabled($"Alpha maps: {chunkData.AlphaMaps.Count}  Shadow: {(chunkData.ShadowMap != null ? "yes" : "no")}  MCCV: {(chunkData.MccvColors != null ? "yes" : "no")}");
         ImGui.TextDisabled($"World origin: ({chunkData.WorldPosition.X:F1}, {chunkData.WorldPosition.Y:F1}, {chunkData.WorldPosition.Z:F1})");
 
+        {
+            Vector3 chunkOrigin = chunkData.WorldPosition;
+            float cellSize = 2.0833125f;
+            float localX = (_camera.Position.X - chunkOrigin.X) / cellSize;
+            float localY = (_camera.Position.Y - chunkOrigin.Y) / cellSize;
+            int cellX = Math.Clamp((int)MathF.Floor(localX), 0, 15);
+            int cellY = Math.Clamp((int)MathF.Floor(localY), 0, 15);
+            ImGui.TextDisabled($"Camera cell ({cellX}, {cellY}) at local ({_camera.Position.X - chunkOrigin.X:F1}, {_camera.Position.Y - chunkOrigin.Y:F1})");
+        }
+
         if (TryBuildTerrainWeakSignalTextureGuidance(chunkData, out var textureGuidance) && textureGuidance != null)
         {
             ImGui.TextDisabled($"Weak sub-cells: {textureGuidance.SelectedCellCount} ({textureGuidance.BorderSelectedCellCount} border cells)  range {textureGuidance.ObservedMinHeight:F1}..{textureGuidance.ObservedMaxHeight:F1}");

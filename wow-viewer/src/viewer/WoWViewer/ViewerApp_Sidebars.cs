@@ -7,6 +7,7 @@ using WoWViewer.Rendering;
 using WoWViewer.Terrain;
 using WowViewer.Core.Runtime.World;
 using WowViewer.Core.Runtime.World.Visibility;
+using WoWViewer.Population;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 
 namespace WoWViewer;
@@ -26,6 +27,26 @@ public partial class ViewerApp
         }
 
         return count;
+    }
+
+    private static Vector3 QuaternionToEulerDegrees(Quaternion q)
+    {
+        float sinR = 2f * (q.W * q.X + q.Y * q.Z);
+        float cosR = 1f - 2f * (q.X * q.X + q.Y * q.Y);
+        float roll = MathF.Atan2(sinR, cosR);
+
+        float sinP = 2f * (q.W * q.Y - q.Z * q.X);
+        sinP = Math.Clamp(sinP, -1f, 1f);
+        float pitch = MathF.Asin(sinP);
+
+        float sinY = 2f * (q.W * q.Z + q.X * q.Y);
+        float cosY = 1f - 2f * (q.Y * q.Y + q.Z * q.Z);
+        float yaw = MathF.Atan2(sinY, cosY);
+
+        return new Vector3(
+            roll * (180f / MathF.PI),
+            pitch * (180f / MathF.PI),
+            yaw * (180f / MathF.PI));
     }
 
     private static float MeasureToolbarCheckboxWidth(string label)
@@ -74,30 +95,11 @@ public partial class ViewerApp
         width += MeasureToolbarCheckboxWidth("L2");
         width += MeasureToolbarCheckboxWidth("L3");
         width += MeasureToolbarCheckboxWidth("Holes");
-        width += MeasureToolbarSeparatorWidth();
-        width += MeasureToolbarCheckboxWidth("Chunks");
-        width += MeasureToolbarCheckboxWidth("Tiles");
-        width += MeasureToolbarCheckboxWidth("Cells");
-        width += MeasureToolbarSeparatorWidth();
-        width += MeasureToolbarCheckboxWidth("Alpha");
-        width += MeasureToolbarCheckboxWidth("Shadows");
-        width += MeasureToolbarCheckboxWidth("MCCV");
-        width += MeasureToolbarCheckboxWidth("Contours");
-
-        if (liquidRenderer != null || _worldScene != null)
+        if (_worldScene != null)
         {
             width += MeasureToolbarSeparatorWidth();
-            if (liquidRenderer != null)
-                width += MeasureToolbarCheckboxWidth("Liquid");
-            if (_worldScene != null)
-            {
-                width += MeasureToolbarCheckboxWidth("WL*");
-                width += MeasureToolbarCheckboxWidth("WDL");
-                width += MeasureToolbarCheckboxWidth("BBs");
-                width += MeasureToolbarCheckboxWidth("PM4");
-            }
+            width += MeasureToolbarCheckboxWidth("WDL");
         }
-
         return width;
     }
 
@@ -130,86 +132,118 @@ public partial class ViewerApp
         }
 
         ImGui.SameLine();
-        ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
-        ImGui.SameLine();
-
-        bool chunkGrid = renderer.ShowChunkGrid;
-        if (ImGui.Checkbox("Chunks", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
-        ImGui.SameLine();
-        bool tileGrid = renderer.ShowTileGrid;
-        if (ImGui.Checkbox("Tiles", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
-        ImGui.SameLine();
-        bool cellGrid = renderer.ShowCellGrid;
-        if (ImGui.Checkbox("Cells", ref cellGrid)) renderer.ShowCellGrid = cellGrid;
-
-        ImGui.SameLine();
-        ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
-        ImGui.SameLine();
-
-        bool alphaMask = renderer.ShowAlphaMask;
-        if (ImGui.Checkbox("Alpha", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
-        ImGui.SameLine();
-        bool shadowMap = renderer.ShowShadowMap;
-        if (ImGui.Checkbox("Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
-        ImGui.SameLine();
-        bool useMccv = renderer.UseMccv;
-        if (ImGui.Checkbox("MCCV", ref useMccv)) renderer.UseMccv = useMccv;
-        ImGui.SameLine();
-        bool contours = renderer.ShowContours;
-        if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
-
-        if (liquidRenderer != null || _worldScene != null)
-        {
-            ImGui.SameLine();
-            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
-            ImGui.SameLine();
-        }
-
-        if (liquidRenderer != null)
-        {
-            bool showLiquid = liquidRenderer.ShowLiquid;
-            if (ImGui.Checkbox("Liquid", ref showLiquid))
-                liquidRenderer.ShowLiquid = showLiquid;
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip($"Liquid terrain meshes: {liquidRenderer.MeshCount}");
-        }
-
+        ImGui.Spacing();
         if (_worldScene != null)
         {
-            if (liquidRenderer != null)
-                ImGui.SameLine();
-
-            int wlCount = liquidRenderer?.WlMeshCount ?? 0;
-            bool showWlTop = _worldScene.ShowWlLiquids;
-            if (ImGui.Checkbox("WL*", ref showWlTop))
-                _worldScene.ShowWlLiquids = showWlTop;
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip($"World liquid overlays: {wlCount}");
-
             ImGui.SameLine();
             bool showWdl = _worldScene.ShowWdlTerrain;
             if (ImGui.Checkbox("WDL", ref showWdl))
                 _worldScene.ShowWdlTerrain = showWdl;
-
-            ImGui.SameLine();
-            bool showBB = _worldScene.ShowBoundingBoxes;
-            if (ImGui.Checkbox("BBs", ref showBB))
-                _worldScene.ShowBoundingBoxes = showBB;
-
-            ImGui.SameLine();
-            bool showPm4 = _worldScene.ShowPm4Overlay;
-            if (ImGui.Checkbox("PM4", ref showPm4))
-                _worldScene.ShowPm4Overlay = showPm4;
-            if (_worldScene.IsPm4Loading)
-            {
-                ImGui.SameLine();
-                ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), "loading");
-            }
-            else if (_worldScene.ShowPm4Overlay && ImGui.IsItemHovered())
-            {
-                ImGui.SetTooltip(_worldScene.Pm4Status);
-            }
         }
+    }
+
+    private void DrawBottomBar()
+    {
+        var io = ImGui.GetIO();
+        float bottomBarY = io.DisplaySize.Y - BottomBarHeight - StatusBarHeight;
+
+        ImGui.SetNextWindowPos(new Vector2(0, bottomBarY));
+        ImGui.SetNextWindowSize(new Vector2(io.DisplaySize.X, BottomBarHeight));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8, 6));
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(6, 0));
+        if (ImGui.Begin("##BottomBar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
+        {
+            TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+            LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
+
+            if (renderer != null)
+            {
+                // Grid toggles
+                bool chunkGrid = renderer.ShowChunkGrid;
+                if (ImGui.Checkbox("Chunks", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
+                ImGui.SameLine();
+                bool tileGrid = renderer.ShowTileGrid;
+                if (ImGui.Checkbox("Tiles", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
+                ImGui.SameLine();
+                bool cellGrid = renderer.ShowCellGrid;
+                if (ImGui.Checkbox("Cells", ref cellGrid)) renderer.ShowCellGrid = cellGrid;
+
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+                ImGui.SameLine();
+
+                // Overlay toggles
+                bool alphaMask = renderer.ShowAlphaMask;
+                if (ImGui.Checkbox("Alpha", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
+                ImGui.SameLine();
+                bool shadowMap = renderer.ShowShadowMap;
+                if (ImGui.Checkbox("Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
+                ImGui.SameLine();
+                bool useMccv = renderer.UseMccv;
+                if (ImGui.Checkbox("MCCV", ref useMccv)) renderer.UseMccv = useMccv;
+                ImGui.SameLine();
+                bool contours = renderer.ShowContours;
+                if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
+
+                if (liquidRenderer != null || _worldScene != null)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+                    ImGui.SameLine();
+                }
+
+                if (liquidRenderer != null)
+                {
+                    bool showLiquid = liquidRenderer.ShowLiquid;
+                    if (ImGui.Checkbox("Liquid", ref showLiquid))
+                        liquidRenderer.ShowLiquid = showLiquid;
+                }
+
+                if (_worldScene != null)
+                {
+                    if (liquidRenderer != null)
+                        ImGui.SameLine();
+
+                    bool showWlTop = _worldScene.ShowWlLiquids;
+                    if (ImGui.Checkbox("WL*", ref showWlTop))
+                        _worldScene.ShowWlLiquids = showWlTop;
+
+                    ImGui.SameLine();
+                    bool showBB = _worldScene.ShowBoundingBoxes;
+                    if (ImGui.Checkbox("BBs", ref showBB))
+                        _worldScene.ShowBoundingBoxes = showBB;
+
+                    ImGui.SameLine();
+                    bool showPm4 = _worldScene.ShowPm4Overlay;
+                    if (ImGui.Checkbox("PM4", ref showPm4))
+                        _worldScene.ShowPm4Overlay = showPm4;
+                    if (_worldScene.IsPm4Loading)
+                    {
+                        ImGui.SameLine();
+                        ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), "loading");
+                    }
+                    else if (_worldScene.ShowPm4Overlay && ImGui.IsItemHovered())
+                    {
+                        ImGui.SetTooltip(_worldScene.Pm4Status);
+                    }
+                }
+            }
+
+            // Right-align chunk and perf stats
+            ImGui.SameLine();
+            ImGui.Spacing();
+            ImGui.SameLine(io.DisplaySize.X - 200);
+            string fps = _currentFps > 0
+                ? $"{_currentFps:F0} FPS"
+                : "";
+            string chunkInfo = renderer != null
+                ? $"  Chunks: {renderer.ChunksRendered}/{renderer.ChunksCulled}"
+                : "";
+            ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f), $"{fps}{chunkInfo}");
+        }
+        ImGui.End();
+        ImGui.PopStyleVar(2);
     }
 
     private void DrawCenteredTerrainToolbarWindow(TerrainRenderer renderer, LiquidRenderer? liquidRenderer)
@@ -247,11 +281,6 @@ public partial class ViewerApp
         var io = ImGui.GetIO();
         float toolbarX = 0f;
         float toolbarWidth = io.DisplaySize.X;
-        if (TryGetSceneViewportRect(out float viewportX, out _, out float viewportWidth, out _))
-        {
-            toolbarX = viewportX;
-            toolbarWidth = viewportWidth;
-        }
 
         ImGui.SetNextWindowPos(new Vector2(toolbarX, MenuBarHeight));
         ImGui.SetNextWindowSize(new Vector2(toolbarWidth, ToolbarHeight));
@@ -260,12 +289,23 @@ public partial class ViewerApp
         if (ImGui.Begin("##Toolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
             ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
         {
+            DrawVisualInvestigationModeButton(VisualInvestigationMode.Auto, "\u25CE Auto", "Follow the current hovered visual target.");
+            ImGui.SameLine();
+            DrawVisualInvestigationModeButton(VisualInvestigationMode.Adt, "\u25A6 ADT", "Inspect terrain chunks, layers, alpha, and assigned MTEX textures.");
+            ImGui.SameLine();
+            DrawVisualInvestigationModeButton(VisualInvestigationMode.Wmo, "\u25A3 WMO", "Limit hover inspection to WMO placements.");
+            ImGui.SameLine();
+            DrawVisualInvestigationModeButton(VisualInvestigationMode.M2, "\u25C7 M2", "Limit hover inspection to MDX/M2 doodad placements.");
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+            ImGui.SameLine();
+
             TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
             LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
 
             if (renderer != null)
             {
-                DrawCenteredTerrainToolbarWindow(renderer, liquidRenderer);
+                DrawDirectTerrainToolbarControls(renderer, liquidRenderer);
             }
             else
             {
@@ -418,17 +458,18 @@ public partial class ViewerApp
 
     private void DrawLeftSidebar()
     {
-        if (!_useTabUi)
+        if (!_useTabUi || !_showLeftSidebar)
             return;
 
         var io = ImGui.GetIO();
         float topOffset = GetTopChromeHeight();
-        float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
+        float sidebarHeight = io.DisplaySize.Y - topOffset - BottomBarHeight - StatusBarHeight;
 
         _leftSidebarWidth = ClampFixedSidebarWidth(_leftSidebarWidth, isLeftSidebar: true, io.DisplaySize.X);
         ImGui.SetNextWindowPos(new Vector2(0, topOffset), ImGuiCond.Always);
         ImGui.SetNextWindowSize(new Vector2(_leftSidebarWidth, sidebarHeight), ImGuiCond.Always);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.08f, 0.08f, 0.10f, 0.85f));
         if (ImGui.Begin("##LeftSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
         {
             bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
@@ -452,6 +493,7 @@ public partial class ViewerApp
                 DrawMapDiscoveryContent();
         }
         ImGui.End();
+        ImGui.PopStyleColor();
         ImGui.PopStyleVar();
     }
 
@@ -462,7 +504,7 @@ public partial class ViewerApp
 
         var io = ImGui.GetIO();
         float topOffset = GetTopChromeHeight();
-        float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
+        float sidebarHeight = io.DisplaySize.Y - topOffset - BottomBarHeight - StatusBarHeight;
         if (_useDockspaceUi)
         {
             DrawDockedShellPanelsForLane(ShellPanelLane.Left, sidebarHeight);
@@ -784,7 +826,7 @@ public partial class ViewerApp
 
         var io = ImGui.GetIO();
         float topOffset = GetTopChromeHeight();
-        float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
+        float sidebarHeight = io.DisplaySize.Y - topOffset - BottomBarHeight - StatusBarHeight;
         if (_useDockspaceUi)
         {
             DrawDockedShellPanelsForLane(ShellPanelLane.Right, sidebarHeight);
@@ -1142,7 +1184,7 @@ public partial class ViewerApp
         return true;
     }
 
-    private void DrawWmoDoodadInspector(WmoRenderer wmoRenderer, ref int selectedDoodadIndex, string idSuffix, Func<WmoDoodadInfo, bool>? frameDoodad)
+    private void DrawWmoDoodadInspector(WmoRenderer wmoRenderer, ref int selectedDoodadIndex, string idSuffix, Func<WmoDoodadInfo, bool>? frameDoodad, ref int groupFilterIndex)
     {
         ImGui.Separator();
         ImGui.Text("WMO Doodad Inspector");
@@ -1159,7 +1201,27 @@ public partial class ViewerApp
             selectedDoodadIndex = -1;
 
         ImGui.TextDisabled($"Active set: {wmoRenderer.GetDoodadSetName(wmoRenderer.ActiveDoodadSet)}");
-        ImGui.TextDisabled($"Doodads: {doodadCount}");
+        ImGui.TextDisabled($"Doodads: {doodadCount}  Defs: {wmoRenderer.DoodadDefCount}");
+
+        if (wmoRenderer.GroupRenderCount > 0)
+        {
+            if (ImGui.BeginCombo($"Filter by Group##{idSuffix}", groupFilterIndex < 0 ? "All Groups" : wmoRenderer.GetRenderGroupName(groupFilterIndex)))
+            {
+                if (ImGui.Selectable("All Groups", groupFilterIndex < 0))
+                    groupFilterIndex = -1;
+                for (int gi = 0; gi < wmoRenderer.GroupRenderCount; gi++)
+                {
+                    int dc = wmoRenderer.GetDoodadCountForRenderGroup(gi);
+                    string gn = $"{wmoRenderer.GetRenderGroupName(gi)} ({dc} refs)";
+                    bool gs = gi == groupFilterIndex;
+                    if (ImGui.Selectable(gn, gs))
+                        groupFilterIndex = gi;
+                    if (gs)
+                        ImGui.SetItemDefaultFocus();
+                }
+                ImGui.EndCombo();
+            }
+        }
 
         float listHeight = MathF.Min(220f, MathF.Max(110f, GetUniformListRowHeight() * Math.Min(doodadCount, 7)));
         if (ImGui.BeginChild($"##WmoDoodadInspector_{idSuffix}", new Vector2(0, listHeight), true))
@@ -1168,6 +1230,13 @@ public partial class ViewerApp
             {
                 if (!wmoRenderer.TryGetDoodadInfo(doodadIndex, out WmoDoodadInfo doodad))
                     continue;
+
+                if (groupFilterIndex >= 0)
+                {
+                    var rGroups = wmoRenderer.GetRenderGroupsForDoodadDef(doodad.DoodadDefIndex);
+                    if (!rGroups.Contains(groupFilterIndex))
+                        continue;
+                }
 
                 string label = $"[{doodadIndex}] {Path.GetFileNameWithoutExtension(doodad.ModelPath)}";
                 if (!doodad.IsLoaded)
@@ -1195,9 +1264,46 @@ public partial class ViewerApp
             frameDoodad(selectedDoodad);
 
         DrawAssetPathActions("Doodad Asset", selectedDoodad.ModelPath, $"{idSuffix}_DoodadAsset");
+
+        ImGui.Separator();
+        ImGui.TextDisabled("Doodad Details");
         ImGui.TextDisabled($"Def Index: {selectedDoodad.DoodadDefIndex}");
+
+        string doodadDefName = wmoRenderer.GetDoodadDefName(selectedDoodad.DoodadDefIndex);
+        if (!string.IsNullOrEmpty(doodadDefName))
+            ImGui.TextWrapped($"MODN Name: {doodadDefName}");
+
+        ImGui.TextDisabled($"Path: {selectedDoodad.ModelPath}");
+
         ImGui.TextDisabled($"Visible: {(selectedDoodad.Visible ? "yes" : "no")}  Loaded: {(selectedDoodad.IsLoaded ? "yes" : "no")}");
-        ImGui.TextDisabled($"Local: ({selectedDoodad.LocalPosition.X:F1}, {selectedDoodad.LocalPosition.Y:F1}, {selectedDoodad.LocalPosition.Z:F1})");
+
+        if (wmoRenderer.TryGetDoodadDef(selectedDoodad.DoodadDefIndex, out var doodadDef))
+        {
+            ImGui.TextDisabled($"Position: ({doodadDef.Position.X:F3}, {doodadDef.Position.Y:F3}, {doodadDef.Position.Z:F3})");
+            ImGui.TextDisabled($"Scale: {doodadDef.Scale:F3}");
+
+            var euler = QuaternionToEulerDegrees(doodadDef.Orientation);
+            ImGui.TextDisabled($"Rotation (deg): ({euler.X:F1}, {euler.Y:F1}, {euler.Z:F1})");
+
+            uint color = doodadDef.Color;
+            byte a = (byte)((color >> 24) & 0xFF);
+            byte r = (byte)((color >> 16) & 0xFF);
+            byte g = (byte)((color >> 8) & 0xFF);
+            byte b = (byte)(color & 0xFF);
+            ImGui.TextDisabled($"Color: #{r:X2}{g:X2}{b:X2}{a:X2} (BGRA)");
+
+            var groups = wmoRenderer.GetRenderGroupsForDoodadDef(selectedDoodad.DoodadDefIndex);
+            if (groups.Count > 0)
+            {
+                ImGui.TextDisabled($"Referenced by {groups.Count} group(s):");
+                string groupList = string.Join(", ", groups.Select(g => $"[{g}] {wmoRenderer.GetRenderGroupName(g)}"));
+                ImGui.TextWrapped(groupList);
+            }
+            else
+            {
+                ImGui.TextDisabled("Not referenced by any loaded group.");
+            }
+        }
     }
 
     private void DrawObjectPathFilterControls()
@@ -1893,7 +1999,8 @@ public partial class ViewerApp
                 standaloneWmoRenderer,
                 ref _selectedStandaloneWmoDoodadIndex,
                 "StandaloneWmo",
-                doodad => TryFrameStandaloneWmoDoodad(standaloneWmoRenderer, doodad));
+                doodad => TryFrameStandaloneWmoDoodad(standaloneWmoRenderer, doodad),
+                ref _standaloneWmoDoodadGroupFilter);
         }
 
         if (_renderer is MdxRenderer standaloneMdxRenderer)
@@ -1906,7 +2013,17 @@ public partial class ViewerApp
     {
         if (_renderer is not IModelRenderer modelRenderer || modelRenderer.Animator == null)
         {
-            ImGui.TextDisabled("No animatable model is loaded.");
+            string rendererType = _renderer?.GetType().Name ?? "null";
+            if (_renderer != null && _renderer is IModelRenderer mr && mr.Animator == null)
+            {
+                ImGui.TextDisabled($"Model loaded, but Animator is null. Renderer: {rendererType}");
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("The renderer exists but has no animation controller. Try loading a model with skeletal animation data.");
+            }
+            else
+            {
+                ImGui.TextDisabled("No animatable model is loaded.");
+            }
             return;
         }
 
@@ -2555,7 +2672,8 @@ public partial class ViewerApp
             wmoRenderer,
             ref _selectedWorldWmoDoodadIndex,
             "SelectedWmo",
-            doodad => TryFrameSelectedWorldWmoDoodad(wmoRenderer, doodad));
+            doodad => TryFrameSelectedWorldWmoDoodad(wmoRenderer, doodad),
+            ref _worldWmoDoodadGroupFilter);
     }
 
     private void DrawRendererVisibilityControls(ISceneRenderer renderer, string idSuffix)
@@ -3458,18 +3576,20 @@ public partial class ViewerApp
 
         var io = ImGui.GetIO();
         float topOffset = GetTopChromeHeight();
-        float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
+        float sidebarHeight = io.DisplaySize.Y - topOffset - BottomBarHeight - StatusBarHeight;
 
         _rightSidebarWidth = ClampFixedSidebarWidth(_rightSidebarWidth, isLeftSidebar: false, io.DisplaySize.X);
         ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - _rightSidebarWidth, topOffset), ImGuiCond.Always);
         ImGui.SetNextWindowSize(new Vector2(_rightSidebarWidth, sidebarHeight), ImGuiCond.Always);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.08f, 0.08f, 0.10f, 0.85f));
 
         if (!ImGui.Begin("##RightSidebar", ref _workbenchOpen,
             ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize |
             ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
         {
             ImGui.End();
+            ImGui.PopStyleColor();
             ImGui.PopStyleVar();
             return;
         }
@@ -3477,6 +3597,7 @@ public partial class ViewerApp
         DrawWorkbenchContent();
 
         ImGui.End();
+        ImGui.PopStyleColor();
         ImGui.PopStyleVar();
     }
 
@@ -3607,11 +3728,102 @@ public partial class ViewerApp
 
         DrawModelAnimationControls();
 
-        // If a SQL-spawned game object is selected in the world, expose its animation controls too.
         if (_worldScene?.SelectedInstance.HasValue == true && _worldScene.SelectedObjectType == Terrain.ObjectType.Mdx)
         {
             ImGui.Separator();
             DrawSelectedSqlGameObjectAnimationControls();
+
+            // Also show animation controls for non-SQL world MDX instances
+            var inst = _worldScene.SelectedInstance.Value;
+            if (!HasSqlGameObjectForSelectedInstance())
+            {
+                var mdxRenderer = _worldScene.Assets.GetMdx(inst.ModelKey);
+                if (mdxRenderer?.Animator != null && mdxRenderer.Animator.HasAnimation && mdxRenderer.Animator.Sequences.Count > 0)
+                {
+                    DrawWorldMdxAnimationControls(mdxRenderer.Animator);
+                }
+            }
+        }
+    }
+
+    private bool HasSqlGameObjectForSelectedInstance()
+    {
+        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+            return false;
+        if (_worldScene.SelectedObjectType != Terrain.ObjectType.Mdx)
+            return false;
+        if (_sqlMapSpawnsCache == null || _sqlMapSpawnsCacheMapId != _currentMapId)
+            return false;
+
+        var inst = _worldScene.SelectedInstance.Value;
+        return _sqlMapSpawnsCache.Any(s =>
+            s.SpawnType == WorldSpawnType.GameObject &&
+            s.SpawnId == inst.UniqueId &&
+            (string.IsNullOrEmpty(s.ModelPath) || string.Equals(Path.GetFileName(s.ModelPath), inst.ModelName, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private void DrawWorldMdxAnimationControls(IAnimationController animator)
+    {
+        if (!animator.HasAnimation || animator.Sequences.Count == 0)
+            return;
+
+        ImGui.Separator();
+        ImGui.TextColored(new Vector4(0.85f, 1f, 0.85f, 1f), "World MDX Animation");
+
+        int currentSeq = animator.CurrentSequence;
+        string currentSeqName = currentSeq >= 0 && currentSeq < animator.Sequences.Count
+            ? animator.Sequences[currentSeq].Name
+            : "None";
+        if (string.IsNullOrWhiteSpace(currentSeqName))
+            currentSeqName = $"Sequence {currentSeq}";
+
+        if (ImGui.BeginCombo("##world_mdx_anim_seq", currentSeqName))
+        {
+            for (int s = 0; s < animator.Sequences.Count; s++)
+            {
+                bool selected = s == currentSeq;
+                string seqName = animator.Sequences[s].Name;
+                if (string.IsNullOrEmpty(seqName))
+                    seqName = $"Sequence {s}";
+
+                if (ImGui.Selectable(seqName, selected))
+                    animator.SetSequence(s);
+                if (selected) ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+
+        bool isPlaying = animator.IsPlaying;
+        if (ImGui.Button(isPlaying ? "Pause" : "Play", new Vector2(80, 0)))
+            animator.IsPlaying = !isPlaying;
+        ImGui.SameLine();
+        if (ImGui.Button("Stop", new Vector2(80, 0)))
+        {
+            animator.IsPlaying = false;
+            if (currentSeq >= 0 && currentSeq < animator.Sequences.Count)
+                animator.CurrentFrame = animator.Sequences[currentSeq].Time.Start;
+        }
+
+        bool loop = animator.Loop;
+        ImGui.SameLine();
+        if (ImGui.Checkbox("Loop", ref loop))
+            animator.Loop = loop;
+
+        float speed = animator.PlaybackSpeed;
+        ImGui.SameLine();
+        ImGui.Text("Speed");
+        float[] speedValues = { 0.25f, 0.5f, 1.0f, 2.0f };
+        string[] speedLabels = { "0.25x", "0.5x", "1x", "2x" };
+        for (int i = 0; i < speedValues.Length; i++)
+        {
+            ImGui.SameLine();
+            bool selected = Math.Abs(speed - speedValues[i]) < 0.001f;
+            if (selected)
+                ImGui.PushStyleColor(ImGuiCol.Button, ImGui.GetColorU32(ImGuiCol.ButtonActive));
+            if (ImGui.Button(speedLabels[i]))
+                animator.PlaybackSpeed = speedValues[i];
+            if (selected)
+                ImGui.PopStyleColor();
         }
     }
 
@@ -3763,7 +3975,7 @@ public partial class ViewerApp
         if (alphaMask)
         {
             int channel = renderer.AlphaMaskChannel;
-            if (ImGui.SliderInt("Alpha channel", ref channel, 1, 3)) renderer.AlphaMaskChannel = channel;
+            if (ImGui.SliderInt("Alpha channel", ref channel, 0, 3)) renderer.AlphaMaskChannel = channel;
         }
         bool shadowMap = renderer.ShowShadowMap;
         if (ImGui.Checkbox("Shadow map", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
@@ -3784,7 +3996,7 @@ public partial class ViewerApp
         bool tileGrid = renderer.ShowTileGrid;
         if (ImGui.Checkbox("Tiles (chunk boundary)", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
         bool cellGrid = renderer.ShowCellGrid;
-        if (ImGui.Checkbox("Cells (8x8 per chunk)", ref cellGrid)) renderer.ShowCellGrid = cellGrid;
+        if (ImGui.Checkbox("Cells (16x16 per chunk)", ref cellGrid)) renderer.ShowCellGrid = cellGrid;
 
         ImGui.Separator();
         ImGui.Text("Hole Masking");
@@ -4065,7 +4277,7 @@ public partial class ViewerApp
         if (ImGui.Checkbox("Tiles (16x16 per tile, chunk boundary)", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
         ImGui.SameLine();
         bool cellGrid = renderer.ShowCellGrid;
-        if (ImGui.Checkbox("Cells (8x8 per chunk)", ref cellGrid)) renderer.ShowCellGrid = cellGrid;
+        if (ImGui.Checkbox("Cells (16x16 per chunk)", ref cellGrid)) renderer.ShowCellGrid = cellGrid;
 
         ImGui.Separator();
         ImGui.Text("Surface Overlays");
@@ -4075,7 +4287,7 @@ public partial class ViewerApp
         if (alphaMask)
         {
             int channel = renderer.AlphaMaskChannel;
-            if (ImGui.SliderInt("Alpha channel", ref channel, 1, 3)) renderer.AlphaMaskChannel = channel;
+            if (ImGui.SliderInt("Alpha channel", ref channel, 0, 3)) renderer.AlphaMaskChannel = channel;
         }
 
         ImGui.SameLine();

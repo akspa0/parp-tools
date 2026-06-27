@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-**Last updated**: 2026-06-24 | **Focus**: 076 macro paste/scar segmentation correction
+**Last updated**: 2026-06-26 | **Focus**: WMO doodad-group selection and panel detail enhancement
 
 ## Current State
 

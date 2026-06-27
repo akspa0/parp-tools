@@ -311,6 +311,7 @@ public class WmoRenderer : ISceneRenderer
     public int DoodadSetCount => _wmo.DoodadSets.Count;
     public int ActiveDoodadSet => _activeDoodadSet;
     public int DoodadInstanceCount => _doodadInstances.Count;
+    public int DoodadDefCount => _wmo.DoodadDefs.Count;
     public string GetDoodadSetName(int index) =>
         index < _wmo.DoodadSets.Count ? (_wmo.DoodadSets[index].Name ?? $"Set {index}") : "";
 
@@ -353,6 +354,51 @@ public class WmoRenderer : ISceneRenderer
 
         boundsMin = boundsMax = Vector3.Zero;
         return false;
+    }
+
+    public bool TryGetDoodadDef(int doodadDefIndex, out WmoV14ToV17Converter.WmoDoodadDef def)
+    {
+        if (doodadDefIndex >= 0 && doodadDefIndex < _wmo.DoodadDefs.Count)
+        {
+            def = _wmo.DoodadDefs[doodadDefIndex];
+            return true;
+        }
+        def = default;
+        return false;
+    }
+
+    public string GetDoodadDefName(int doodadDefIndex)
+    {
+        if (doodadDefIndex >= 0 && doodadDefIndex < _wmo.DoodadDefs.Count)
+        {
+            var def = _wmo.DoodadDefs[doodadDefIndex];
+            return GetDoodadName(def.NameIndex);
+        }
+        return "";
+    }
+
+    public List<int> GetRenderGroupsForDoodadDef(int doodadDefIndex)
+    {
+        var result = new List<int>();
+        if (doodadDefIndex < 0 || doodadDefIndex >= _wmo.DoodadDefs.Count)
+            return result;
+        for (int renderGroupIndex = 0; renderGroupIndex < _groups.Count; renderGroupIndex++)
+        {
+            int groupIndex = _groups[renderGroupIndex].GroupIndex;
+            if (groupIndex >= 0 && groupIndex < _wmo.Groups.Count && _wmo.Groups[groupIndex].DoodadRefs.Contains((ushort)doodadDefIndex))
+                result.Add(renderGroupIndex);
+        }
+        return result;
+    }
+
+    public int GetDoodadCountForRenderGroup(int renderGroupIndex)
+    {
+        if (renderGroupIndex < 0 || renderGroupIndex >= _groups.Count)
+            return 0;
+        int groupIndex = _groups[renderGroupIndex].GroupIndex;
+        if (groupIndex < 0 || groupIndex >= _wmo.Groups.Count)
+            return 0;
+        return _wmo.Groups[groupIndex].DoodadRefs.Count;
     }
 
     public void SetActiveDoodadSet(int index)
