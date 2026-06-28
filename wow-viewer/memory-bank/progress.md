@@ -1,6 +1,31 @@
 # Progress — wow-viewer
 
-## 2026-06-26 — WMO doodad-group selection and panel details
+## 2026-06-28 - Spec 077 minimap deconstruction engine planned
+
+### What landed
+
+- Added new Spec Kit planning surface under `wow-viewer/specs/077-minimap-deconstruction-engine/`:
+  - `spec.md`
+  - `plan.md`
+  - `tasks.md`
+  - `research.md`
+  - `data-model.md`
+- Added architecture note `wow-viewer/docs/architecture/minimap-deconstruction-engine-2026-06-28.md`.
+- Locked the new execution order:
+  1. per-object capture library from existing C# harvester/capture seams,
+  2. ADT-backed teacher deconstruction priors,
+  3. tiny height-only terrain model,
+  4. later minimap-only object explanation for development-map inference,
+  5. normals only as a separate follow-on lane.
+- Explicitly rejected the old bad route of giant joint models or a duplicate object-pipeline stack.
+
+### Status
+
+- This is a planning/documentation landing only. No code for spec 077 is implemented yet.
+- Spec 025 remains historical context only; spec 077 is the active execution surface for object-library plus deconstruction-first terrain work.
+- The next implementation slice should begin with the per-object capture-library contract and one-object-at-a-time capture path.
+
+## 2026-06-26 - WMO doodad-group selection and panel details
 
 ### What landed
 

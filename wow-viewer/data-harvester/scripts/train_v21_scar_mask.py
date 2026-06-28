@@ -19,6 +19,7 @@ if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 from harvester.v21_scar_dataset import V21ScarMaskDataset  # noqa: E402
+from harvester.v21_scar_crop_dataset import V21ScarFilteredDataset  # noqa: E402
 from harvester.v21_scar_model import V21ScarMaskModel  # noqa: E402
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -39,6 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--threshold", type=float, default=0.05)
     parser.add_argument("--layers", default="1,2,3")
@@ -50,6 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-interval", type=int, default=25)
     parser.add_argument("--preview-every-epoch", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--resume", type=Path, default=None, help="Resume from latest.pt/best.pt checkpoint.")
+    parser.add_argument("--scar-dir", type=Path, default=None, help="Path to pre-mined scar index (enables crop-based training).")
     return parser.parse_args()
 
 
@@ -65,7 +68,11 @@ def _device(name: str) -> torch.device:
 
 def scar_loss(logits: torch.Tensor, target: torch.Tensor) -> tuple[torch.Tensor, dict[str, float]]:
     target = target.float()
-    bce = torch_f.binary_cross_entropy_with_logits(logits, target)
+    pos_frac = target.mean() + 1e-6
+    scale = (1.0 - pos_frac) / pos_frac
+    bce = torch_f.binary_cross_entropy_with_logits(
+        logits, target, pos_weight=torch.tensor([scale], device=logits.device)
+    )
     probs = torch.sigmoid(logits)
     intersection = (probs * target).sum(dim=(1, 2, 3))
     denom = probs.sum(dim=(1, 2, 3)) + target.sum(dim=(1, 2, 3))
@@ -229,12 +236,19 @@ def main() -> None:
     print(f"  previews: {out_dir / 'preview_best.png'}, {out_dir / 'preview_latest.png'}, {out_dir / 'previews'}", flush=True)
     print(f"  metrics: {out_dir / 'metrics.json'}", flush=True)
     print(f"  target: alpha layers {','.join(str(layer) for layer in layers)} > {float(args.threshold):.3f}", flush=True)
+    print(f"  mode: {'filtered' if args.scar_dir else 'full-tile'}", flush=True)
+    if args.scar_dir:
+        print(f"  scar_dir: {args.scar_dir}", flush=True)
     print(f"  device: {device}", flush=True)
     print("Building datasets...", flush=True)
-    train_ds = V21ScarMaskDataset(args.dataset_dir, args.builds, "train", threshold=args.threshold, layers=layers, max_tiles=args.max_tiles, augment=True, seed=args.seed)
-    val_ds = V21ScarMaskDataset(args.dataset_dir, args.builds, "val", threshold=args.threshold, layers=layers, max_tiles=args.max_tiles, augment=False, seed=args.seed)
-    train_loader = DataLoader(train_ds, batch_size=int(args.batch_size), shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_ds, batch_size=int(args.batch_size), shuffle=False, num_workers=0)
+    if args.scar_dir:
+        train_ds = V21ScarFilteredDataset(args.dataset_dir, args.scar_dir, args.builds, "train", augment=True, seed=args.seed, alpha_threshold=args.threshold)
+        val_ds = V21ScarFilteredDataset(args.dataset_dir, args.scar_dir, args.builds, "val", augment=False, seed=args.seed, alpha_threshold=args.threshold)
+    else:
+        train_ds = V21ScarMaskDataset(args.dataset_dir, args.builds, "train", threshold=args.threshold, layers=layers, max_tiles=args.max_tiles, augment=True, seed=args.seed)
+        val_ds = V21ScarMaskDataset(args.dataset_dir, args.builds, "val", threshold=args.threshold, layers=layers, max_tiles=args.max_tiles, augment=False, seed=args.seed)
+    train_loader = DataLoader(train_ds, batch_size=int(args.batch_size), shuffle=True, num_workers=int(args.num_workers))
+    val_loader = DataLoader(val_ds, batch_size=int(args.batch_size), shuffle=False, num_workers=int(args.num_workers))
     model = V21ScarMaskModel(base_channels=int(args.base_channels)).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(args.lr))
     start_epoch = 1

@@ -1,0 +1,121 @@
+# Minimap Deconstruction Engine
+
+**Date:** 2026-06-28
+
+**Status:** Draft architecture for the current deconstruction-first terrain route
+
+**Spec owner:** `wow-viewer/specs/077-minimap-deconstruction-engine/`
+
+## Purpose
+
+Define the current small-model execution order for terrain reconstruction from minimap imagery.
+
+This note replaces the earlier assumption that a single terrain model can learn directly from the fully baked minimap or that a large multi-model stack should be built all at once.
+
+## Core Idea
+
+The minimap is a baked composite image. The engine must unbake it into simpler parts:
+
+1. explain the object layer,
+2. suppress the object layer to reveal a terrain-focused prior,
+3. predict terrain height from that prior,
+4. optionally refine normals later,
+5. optionally restore objects afterward.
+
+## Mandatory Constraints
+
+- No one-model-does-everything architecture
+- No shared-weight terrain-plus-object mega model
+- Reuse the existing C# harvester/capture/placement surfaces
+- Height-only terrain proof before normals
+- ADT-backed teacher generation for training, ADT-free minimap-only inference later
+
+## Stage Order
+
+### Stage A - Per-Object Capture Library
+
+Input:
+
+- staged client assets
+- harvested placement name tables and observations
+
+Output:
+
+- per-object image capture
+- per-object precise mask
+- original asset-path metadata
+- capture review state
+
+Owner surfaces:
+
+- `AdtPlacementReader`
+- `TerrainTileTensorPack` placement tables
+- existing validation-capture lanes
+
+### Stage B - Teacher Object Suppression
+
+Input:
+
+- V18 raw minimap
+- filtered precise/object-filtered teacher masks
+- optional object-library lookups for review/debugging
+
+Output:
+
+- teacher object mask
+- teacher object confidence
+- processed minimap prior
+
+This is still ADT-backed and used for supervised dataset generation.
+
+### Stage C - Height-Only Terrain Model
+
+Input:
+
+- processed minimap prior
+
+Output:
+
+- `height_257`
+
+This stage is intentionally tiny and single-purpose. It does not own normals, liquids, or object reconstruction.
+
+### Stage D - Minimap-Only Object Explanation
+
+Input:
+
+- raw minimap
+- object library
+- optional PM4 context
+
+Output:
+
+- predicted object mask
+- asset candidates
+- XY and yaw
+- processed minimap prior without ADT teacher data
+
+This is the development-map deployment path.
+
+### Stage E - Optional Normal Follow-On
+
+Baseline:
+
+- derive normals analytically from predicted height
+
+Only if needed:
+
+- add a separate normal-refinement model with its own dataset, trainer, checkpoint, and validation
+
+## Why This Route
+
+- It matches the existing repo's one-model-one-signal philosophy.
+- It makes the terrain problem smaller before trying to solve it.
+- It preserves ADT-backed teacher supervision while allowing ADT-free deployment.
+- It makes development-map reconstruction possible without pretending hidden ADT truth is available at inference time.
+
+## Relationship to Earlier Docs
+
+- `multi-model-terrain-reconstruction-2026-05-16.md` remains useful historical thinking, but its model breakdown is too large and too optimistic for the current route.
+- `025-object-roof-mask-library-and-minimap-sieve` is historical context, not the active execution plan.
+- `077-minimap-deconstruction-engine` is the active planning surface for this route.

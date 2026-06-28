@@ -1,9 +1,10 @@
 # Active Context — wow-viewer
 
-**Last updated**: 2026-06-26 | **Focus**: WMO doodad-group selection and panel detail enhancement
+**Last updated**: 2026-06-28 | **Focus**: deconstruction-first terrain planning and object-library route
 
 ## Current State
 
+- **Spec 077 `077-minimap-deconstruction-engine`**: new draft planning surface. Current direction is to stop treating the minimap as a monolithic terrain signal and instead build a per-object capture library, generate ADT-backed teacher deconstruction priors, train a tiny height-only terrain model on those priors, and only later add minimap-only object explanation plus optional normal refinement. This supersedes the old execution assumptions in spec 025 for current work.
 - **Spec 071 `071-left-right-sidebar-split`**: complete and committed. User is now testing/validating the viewer build.
 - **Spec 074 `074-alpha-brush-library`**: deprecated as primary direction. Outputs remain useful candidate/evidence rows only; tile-local connected components are not authoritative brush labels.
 - **Spec 075 `075-scar-mask-segmentation`**: deprecated as primary direction. The trainer is a coarse diagnostic baseline only; do not continue it as the brush-family route unless explicitly reopened.
@@ -12,7 +13,13 @@
 
 ## Why the Pivot
 
-End-to-end height regression from minimap was not converging despite identical code/data to the earlier baseline. The working hypothesis is that the model needs to understand terrain as a **layered Photoshop-style composition** — MCAL alpha masks + tileset layers + fractal brush stamps — before it can predict height. The alpha masks contain the unadulterated brushwork; identifying and cataloging those brushes is the prerequisite.
+End-to-end height regression from minimap was not converging despite identical code/data to the earlier baseline. The working hypothesis is now stricter: the minimap is a baked composite of terrain, objects, and shadows, so the pipeline must first explain and suppress object layers before terrain prediction. The current planned execution order is:
+
+1. build a reusable per-object capture library from existing harvester/capture seams,
+2. generate ADT-backed teacher object suppression priors,
+3. train a tiny height-only terrain model on those priors,
+4. only later add minimap-only object explanation for development-map and PM4-first inference,
+5. keep normals as a separate optional follow-on lane.
 
 ## Active Work: 076 Full-Map Fractal Brush Library
 
@@ -80,6 +87,10 @@ End-to-end height regression from minimap was not converging despite identical c
 
 ## Open Questions
 
+1. Which bounded proof build/map should seed the first per-object capture library run for spec 077?
+2. Which existing capture-tool surface should own one-object-at-a-time orchestration: `WowViewer.Tool.ValidationCapture`, `WowViewer.Tool.Harvest`, or a thin wrapper over both?
+3. What is the smallest processed-prior channel contract that still gives the height-only model enough context?
+4. Which development-map tile subset is the first ADT-free proof target for minimap-only object explanation?
 1. Which bounded build/map should be the first 076 Phase 1 validation target? Teldrassil/root-heavy regions are preferred if present.
 2. Which existing tileset/texture/BLP effect fingerprint output is canonical enough to join in Phase 4, especially for paths like `textures\BloodSplats`?
 3. What macro-close radius/downsample/min-area settings best match human-visible paste/scar objects across all maps?
