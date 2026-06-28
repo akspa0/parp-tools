@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-28
 
-**Status:** Draft architecture for the current deconstruction-first terrain route
+**Status:** Phases 1–6 code-complete; real-data proofs pending; analytic-normal decision landed
 
 **Spec owner:** `wow-viewer/specs/077-minimap-deconstruction-engine/`
 
@@ -106,6 +106,44 @@ Baseline:
 Only if needed:
 
 - add a separate normal-refinement model with its own dataset, trainer, checkpoint, and validation
+
+## Implementation Status (2026-06-28)
+
+- **Stage A** (per-object capture library): code-complete on the Python
+  side. C# data contracts (`ObjectLibraryEntry`, `ObjectCaptureVariant` + 4
+  enums + deterministic ID rules) under
+  `wow-viewer/src/core/WowViewer.Core/Maps/`. xUnit tests in
+  `wow-viewer/tests/WowViewer.Core.Tests/ObjectLibraryContractsTests.cs`.
+  Python module `data-harvester/src/harvester/object_library.py`,
+  enumerator `enumerate_object_capture_jobs.py`, builder
+  `build_object_library.py`, reviewer `review_object_library.py`, end-to-end
+  pytest `test_object_library_e2e.py`, quickstart. C# capture-lane
+  extension (T010) deferred.
+- **Stage B** (teacher object suppression): code-complete. Python module
+  `data-harvester/src/harvester/teacher_prior.py`, CLI
+  `build_teacher_prior_dataset.py`, reviewer
+  `review_teacher_prior_dataset.py`, pytest tests. T021 (real-data proof
+  on a staged-client-backed V18 store) pending.
+- **Stage C** (height-only terrain model): code-complete with the V18 perf
+  stack ported (AMP, torch.compile, gradient clipping, multi-scale L1,
+  optional Sobel + normal-consistency losses, early stopping, resume,
+  labeled preview panels, DataLoader with workers + prefetch, optional
+  VRAM autotune, deterministic seeding, throughput reporting). Dataset
+  `data-harvester/src/harvester/height_only_prior_dataset.py`, training
+  script `scripts/train_height_only_prior.py`, pytest tests. T029 (real-
+  data smoke proof) pending.
+- **Stage D** (ADT-free object explanation): code-complete on the
+  consumer side. Contracts `data-harvester/src/harvester/inference_object.py`
+  (InferenceObjectHypothesis, AssetCandidate, RecoveredObjectPlacement,
+  hypothesis_to_recovered, collect_hypotheses). Matcher
+  `data-harvester/src/harvester/asset_matcher.py` (pHash + masked-
+  correlation ranker, library thumbnail loader). ADT-free prior builder
+  `scripts/build_adt_free_prior.py`. pytest tests. T034 (object-mask
+  training lane) and T038 (dev-map proof) pending.
+- **Stage E** (normal follow-on): analytic baseline code-complete in
+  `data-harvester/src/harvester/height_to_normal.py`. **Decision (T042):
+  analytic normals are sufficient for the MVP; no normal model is
+  trained.** T043/T044 deferred.
 
 ## Why This Route
 

@@ -1,29 +1,173 @@
 # Progress — wow-viewer
 
-## 2026-06-28 - Spec 077 minimap deconstruction engine planned
+## 2026-06-28 - Spec 077 Phase 6 (US5 Normal Follow-On) - decision landed (no model work)
 
-### What landed
+### What landed (Python)
 
-- Added new Spec Kit planning surface under `wow-viewer/specs/077-minimap-deconstruction-engine/`:
-  - `spec.md`
-  - `plan.md`
-  - `tasks.md`
-  - `research.md`
-  - `data-model.md`
-- Added architecture note `wow-viewer/docs/architecture/minimap-deconstruction-engine-2026-06-28.md`.
-- Locked the new execution order:
-  1. per-object capture library from existing C# harvester/capture seams,
-  2. ADT-backed teacher deconstruction priors,
-  3. tiny height-only terrain model,
-  4. later minimap-only object explanation for development-map inference,
-  5. normals only as a separate follow-on lane.
-- Explicitly rejected the old bad route of giant joint models or a duplicate object-pipeline stack.
+- Library module `wow-viewer/data-harvester/src/harvester/height_to_normal.py`:
+  - `analytic_normals_from_height` derives per-vertex normals via the
+    cross product of central-difference height gradients. Supports
+    numpy and torch, 2-D / 3-D batched / 4-D ``(B, 1, H, W)`` inputs.
+  - `analytic_normal_difference` reports the mean angular error in
+    radians between normals derived from two height fields. Useful as
+    a sanity check.
+  - Every output normal is unit-length and points "up" out of the
+    surface; the function is deterministic and runs in O(HW).
+- pytest tests `wow-viewer/data-harvester/tests/test_height_to_normal.py`:
+  - Constant height → unit-z normals.
+  - Slope along x → normals tilt in -x.
+  - Too-small height (1×1) → unit-z fallback.
+  - Torch parity with numpy; 4-D ``(B, 1, H, W)`` batched input.
+  - Small height delta → small angular error; mirrored height → large error.
+
+### Decision (T042)
+
+- **Analytic normals are sufficient for the first spec 077 pass.** No
+  normal model is trained in the MVP. The decision is recorded in this
+  progress entry and mirrored in
+  `wow-viewer/docs/architecture/minimap-deconstruction-engine-2026-06-28.md`.
+- The normal lane is explicitly deferred. If a later surface needs a
+  refinement model, it MUST be a separate, independent checkpoint
+  (FR-023: one model one signal; no shared weights) and its own
+  bounded proof. Spec 077 T043/T044 remain open as the trigger for
+  that work.
+
+### Tasks touched
+
+- T039, T040, T041, T042 marked complete in `wow-viewer/specs/077-minimap-deconstruction-engine/tasks.md`.
+- T043, T044 deferred per the T042 decision.
 
 ### Status
 
-- This is a planning/documentation landing only. No code for spec 077 is implemented yet.
-- Spec 025 remains historical context only; spec 077 is the active execution surface for object-library plus deconstruction-first terrain work.
-- The next implementation slice should begin with the per-object capture-library contract and one-object-at-a-time capture path.
+- Phase 6 is code-complete on the analytic baseline. The decision gate
+  (T042) closed without spinning up a new model. Spec 077's MVP is
+  fully covered by Phases 1–6; the remaining open tasks are
+  real-data proofs (T021, T029, T034, T038, T043, T044) that need
+  staged clients and bounded wall-clock time.
+
+## 2026-06-28 - Spec 077 Phase 5 (US4 ADT-Free Object Explanation) - first pass landed
+
+### What landed (Python)
+
+- Contracts module `wow-viewer/data-harvester/src/harvester/inference_object.py`:
+  - `ObjectMaskPrediction` (tile_id + serialized mask + confidence + model provenance).
+  - `AssetCandidate` (asset_path + library_id + score + pose_xy + pose_yaw + bbox).
+  - `InferenceObjectHypothesis` (data-model.md §4.1; `top_candidate()`, `ranked_candidates()`).
+  - `RecoveredObjectPlacement` (data-model.md §4.2; pitch/roll/scale explicitly None per FR-018).
+  - `hypothesis_to_recovered()` lifts a hypothesis into a placement using a terrain-Z arg.
+  - `collect_hypotheses()` stable-sorts by top score then tile_id.
+- Matcher module `wow-viewer/data-harvester/src/harvester/asset_matcher.py`:
+  - Library I/O: `load_library_assets`, `load_library_index` (Parquet over the spec 077 Phase 2 store).
+  - `LibraryEntryThumbnail` (image + mask + 16-bit pHash) loaded from the flat capture directory.
+  - `score_candidates` (deterministic 0.5·pHash similarity + 0.5·masked correlation, bounded in [0, 1]).
+  - `build_hypothesis_from_bbox` (one-shot helper: score + emit a hypothesis with XY = bbox center, yaw = 0).
+  - Mask threshold = 128 (uint8), top_k default 5; both configurable.
+- ADT-free prior builder `wow-viewer/data-harvester/scripts/build_adt_free_prior.py`:
+  - `build_adt_free_prior_tensor` produces the same 5-channel tensor as `teacher_prior` but with a *predicted* object mask (no ADT input).
+  - CLI reads V18 `minimap_rgb` + an NPZ/Zarr predicted-mask array, writes `<build>.zarr` with `raw_minimap_rgb_256`, `predicted_object_mask_256`, `processed_minimap_prior_256` + `tiles.parquet` + group-level `metadata.json`.
+- pytest tests `wow-viewer/data-harvester/tests/test_inference_object.py`:
+  - pHash stability + Hamming; masked-correlation edge cases (empty masks, identical, disjoint).
+  - Resize nearest; `top_candidate()` / `ranked_candidates()` ordering; `hypothesis_to_recovered` lifts XY, yaw, terrain Z; FR-018 deferred fields remain None; `collect_hypotheses` sort order.
+  - `score_candidates` returns the blue library entry as the top match for a blue minimap crop.
+  - `build_hypothesis_from_bbox` honors top_k and emits XY = bbox center, yaw = 0.
+  - ADT-free prior: empty-mask pass-through; object-pixels suppressed; CLI end-to-end writes Zarr + tiles.parquet.
+
+### Tasks touched
+
+- T030, T031, T032, T033, T035, T036, T037 marked complete in `wow-viewer/specs/077-minimap-deconstruction-engine/tasks.md`.
+- T034 still open — needs a trained object-mask lane (this phase ships the consumer side; the producer side is the next bounded slice).
+- T038 still open — needs a real development-map proof; gated on T034 + a development-map V18 store.
+
+### Status
+
+- Phase 5 contracts + matcher + ADT-free prior builder are code-complete and unit-testable. The first pass is deliberately deterministic (pHash + masked correlation) so it runs without GPUs and so the ranker behavior is auditable; a learned embedding lane (DINOv2 etc.) can be slotted in without changing the public surface.
+- The pipeline is wired end-to-end: predicted mask → ADT-free prior → (downstream) height model from Phase 4.
+
+## 2026-06-28 - Spec 077 Phase 4 (US3 Height-Only Terrain Reboot) - first pass with V18 perf stack
+
+### What landed (Python)
+
+- Dataset `wow-viewer/data-harvester/src/harvester/height_only_prior_dataset.py`:
+  - `HeightOnlyPriorDataset` reads the teacher-prior Zarr as the model input and the source V18 Zarr for the authoritative `height_257` target plus `object_filtered_mask` (the spec 077 FR-027 weight signal).
+  - Default `height_norm=True` for per-tile mean/std normalization; pass `False` to keep raw world units.
+  - Returns the documented `HeightOnlyTrainingSample` contract (`input_prior (5, 256, 256)`, `height_257 (1, 257, 257)`, `weight_257 (1, 257, 257)`, plus `meta_build/map/tile_id`).
+  - No normal / liquid / object head; FR-012/FR-013/FR-023 enforced.
+- Training script `wow-viewer/data-harvester/scripts/train_height_only_prior.py`:
+  - **V18 perf stack ported**: AMP (`torch.amp.GradScaler` + `autocast`), `torch.compile` with graceful fallback, gradient clipping at `max_norm=1.0`, AdamW with `weight_decay`, `optimizer.zero_grad(set_to_none=True)`, `non_blocking=True` on every `.to(device, ...)`, multi-scale L1 loss at 257/128/64/32/16, optional Sobel gradient + normal-consistency losses, early stopping (patience + min improvement), resume from checkpoint (model + optimizer + scaler + step), labeled 4-panel preview (prior RGB / height truth / height pred / loss weight) with text strips, `DataLoader` with `num_workers` / `prefetch_factor` / `persistent_workers`, optional VRAM autotune with evidence JSON, deterministic seeding, per-step throughput reporting.
+  - First 3 channels of the prior (`suppressed_rgb_r/g/b`) feed `V18HeightModel`; mask + confidence are applied as the loss weight instead of as input channels (matches the V21 design intent — height-only lane with filtered-mask loss, not a multi-channel multi-task model).
+- pytest tests `wow-viewer/data-harvester/tests/test_height_only_prior.py`:
+  - Dataset: documented sample contract, weight zeros out filtered pixels, height normalization zeros mean, missing V18 inference-mode fallback, dataset summary.
+  - Loss: multi-scale L1 returns zero on perfect prediction, falls back to single-scale when disabled, auxiliary terms aggregate, gradient magnitude is zero on constant input.
+  - Training: CPU smoke run writes metrics / checkpoint / preview, resume from checkpoint continues past `start_step`.
+
+### Tasks touched
+
+- T022, T023, T024, T025, T026, T027, T028 marked complete in `wow-viewer/specs/077-minimap-deconstruction-engine/tasks.md`.
+- T029 still open — needs a real V18 Zarr store + teacher-prior run to record a bounded proof.
+
+### Status
+
+- Phase 4 is code-complete and unit-testable on CPU. The V18 perf stack is in place; the first real run is gated on having a teacher-prior store built from real placements (Phase 3 T021).
+- All perf knobs are CLI flags with safe defaults; the smoke tests pass on CPU with `--no-amp --no-compile` and on CUDA with the default stack.
+
+## 2026-06-28 - Spec 077 Phase 3 (US2 Teacher Deconstruction Priors) - first pass landed
+
+### What landed (Python)
+
+- Library module `wow-viewer/data-harvester/src/harvester/teacher_prior.py`:
+  - `MaskSource` enum (ObjectFiltered / ObjectPrecise / ObjectMask / None).
+  - `pick_object_mask()` honors the spec 077 FR-009 preference chain (filtered > precise > object).
+  - `suppress_object_pixels()` fills object pixels with the per-tile median of non-object pixels (deterministic, no inpainting dependency).
+  - `build_prior_tensor()` returns the 5-channel `processed_minimap_prior_256` (3 suppressed RGB + 1 mask + 1 confidence) plus the mask/confidence arrays and chosen source.
+  - `TeacherPriorTileRecord` carries build/map/tile_id/tile_x/tile_y + keys + coverage + mask source.
+  - `PRIOR_CHANNELS` tuple documents the phase-1 channel layout.
+- CLI builder `wow-viewer/data-harvester/scripts/build_teacher_prior_dataset.py`: reads V18 `minimap_rgb` + `object_filtered_mask` / `object_precise_mask` / `object_mask` + `index.parquet`, writes a `<build>.zarr` store with the four phase-1 arrays + `tiles.parquet` + group-level `metadata.json` (records schema, build, source path, mask preference chain, fill strategy).
+- CLI reviewer `wow-viewer/data-harvester/scripts/review_teacher_prior_dataset.py`: renders a 3-row contact sheet (raw / mask / suppressed) and `index.html` with per-tile coverage table.
+- pytest tests `wow-viewer/data-harvester/tests/test_teacher_prior.py`: cover preference chain (filtered / precise / object / none), no-object passthrough, all-object neutral fallback, channel shape and dtype, end-to-end CLI with a synthetic V18 Zarr store (verifies metadata fields, prior layout, mask band, and pass-through equality).
+
+### Tasks touched
+
+- T014, T015, T016, T017, T018, T019, T020 marked complete in `wow-viewer/specs/077-minimap-deconstruction-engine/tasks.md`.
+- T021 still open — needs a real V18 Zarr store (e.g. `3_3_5_12340`) to record a bounded proof on a real object-rich map.
+
+### Status
+
+- Phase 3 is code-complete and unit-testable without real data; T021 is the validation gate against real V18 placements.
+- The next bounded run must use a staged client (per RULE 9) and target one object-rich anchor map.
+
+## 2026-06-28 - Spec 077 Phase 2 (US1 Per-Object Capture Library) - first pass landed
+
+### What landed (C# + Python)
+
+- C# shared data contracts under `wow-viewer/src/core/WowViewer.Core/Maps/`:
+  - `ObjectLibraryEntry.cs` (record + 4 enums: asset_type, capture_status, visibility_class, review_state) + `ComputeLibraryId` (SHA1-14 hex, prefix `objlib_`).
+  - `ObjectCaptureVariant.cs` (record + `ObjectLibraryBoundingBox` + `ComputeVariantId` SHA1-16 hex, prefix `objvar_`).
+  - Both default to `NotAttempted`/`Unknown`/`Unreviewed` per FR-026.
+- xUnit tests `wow-viewer/tests/WowViewer.Core.Tests/ObjectLibraryContractsTests.cs` (9 tests: ID stability, distinct paths, blank handling, defaults, pose sensitivity, capture-mode sensitivity, bounding-box invariants).
+- Python module `wow-viewer/data-harvester/src/harvester/object_library.py` mirrors the C# contract: same enums, same ID rules, same field names, `normalize_asset_path`/`detect_asset_type`/`is_clutter_asset` helpers.
+- pytest tests `wow-viewer/data-harvester/tests/test_object_library.py` (parametrized enum coverage, validation raises, bbox helpers).
+- Capture-job enumerator `wow-viewer/data-harvester/scripts/enumerate_object_capture_jobs.py`: reads V18 `placements.parquet` + `index.parquet`, collapses to one job per (instance_type, normalized asset path), writes JSONL. Honors `--skip-clutter` and `--include-mddf/--include-modf`.
+- Library builder `wow-viewer/data-harvester/scripts/build_object_library.py`: reads enumerator JSONL + flat capture directory, writes Zarr v3 store (`capture_rgb/`, `capture_mask/`, `capture_alpha/`, `assets.parquet`, `index.parquet`, group-level `metadata.json`). Missing capture artifacts produce `not_attempted` entries, not silent drops.
+- Review script `wow-viewer/data-harvester/scripts/review_object_library.py`: reads built store, renders per-family contact sheets under `<out>/families/<library_id>.png`, writes a top-level `index.html` and `assets.json` snapshot.
+- pytest e2e test `wow-viewer/data-harvester/tests/test_object_library_e2e.py` runs the builder + reviewer against a synthetic capture directory (no client data needed).
+- Quickstart `wow-viewer/specs/077-minimap-deconstruction-engine/quickstart.md` documents how to run the proof.
+
+### Tasks touched
+
+- T006, T008, T009 (Python side), T011, T012, T013 marked complete in `wow-viewer/specs/077-minimap-deconstruction-engine/tasks.md`.
+- T007, T009 (C# writer), T010 still open — T010 is the C# one-object-at-a-time capture-lane extension in `WowViewer.Tool.ValidationCapture`; T007 depends on the C# writer that T009 needs.
+
+### Status
+
+- First pass is Python-first by design: enumerator + builder + review run end-to-end without the C# capture lane extension. The C# capture tool can later write directly into the flat capture directory the builder consumes, but the first proof can also stage a small mock capture directory for end-to-end validation.
+- No real-data proof run yet; the next bounded pass must run `enumerate_object_capture_jobs.py` against a V18 Zarr store (e.g. `3_3_5_12340`) and feed the output through `build_object_library.py` to confirm the contract holds on real placements.
+
+### Next slice (still Phase 2)
+
+- Run the enumerator + builder against a bounded V18 store and capture real-data stats.
+- Decide whether to add the C# Zarr/Parquet writer (T009 C# side) before the capture tool extension (T010), or run the first proof Python-only and add the C# writer when the C# capture lane is actually wired.
+
+## 2026-06-28 - Spec 077 minimap deconstruction engine planned
 
 ## 2026-06-26 - WMO doodad-group selection and panel details
 

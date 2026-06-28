@@ -1,10 +1,10 @@
 # Active Context — wow-viewer
 
-**Last updated**: 2026-06-28 | **Focus**: deconstruction-first terrain planning and object-library route
+**Last updated**: 2026-06-28 | **Focus**: spec 077 Phases 1–6 code-complete; MVP closed; real-data proofs pending
 
 ## Current State
 
-- **Spec 077 `077-minimap-deconstruction-engine`**: new draft planning surface. Current direction is to stop treating the minimap as a monolithic terrain signal and instead build a per-object capture library, generate ADT-backed teacher deconstruction priors, train a tiny height-only terrain model on those priors, and only later add minimap-only object explanation plus optional normal refinement. This supersedes the old execution assumptions in spec 025 for current work.
+- **Spec 077 `077-minimap-deconstruction-engine`**: Phases 1–6 of the plan are code-complete in the data-harvester (Phases 1–6 of the plan.md map to the spec's US1–US5). C# data contracts + xUnit tests in `wow-viewer/src/core/WowViewer.Core/Maps/` and `wow-viewer/tests/WowViewer.Core.Tests/`. Python contract, enumerator, builder, review, pytest tests, dataset, height-only training script with the V18 perf stack, teacher prior builder + review, ADT-free object explanation contracts + matcher + prior builder, analytic normals utility. Open: T007 (writer xUnit), T009 C# side, T010 (one-object-at-a-time capture lane extension), T021 / T029 / T034 / T038 (real-data proofs), T043 / T044 (deferred normal-refinement lane; T042 decision closed them as not-required for MVP).
 - **Spec 071 `071-left-right-sidebar-split`**: complete and committed. User is now testing/validating the viewer build.
 - **Spec 074 `074-alpha-brush-library`**: deprecated as primary direction. Outputs remain useful candidate/evidence rows only; tile-local connected components are not authoritative brush labels.
 - **Spec 075 `075-scar-mask-segmentation`**: deprecated as primary direction. The trainer is a coarse diagnostic baseline only; do not continue it as the brush-family route unless explicitly reopened.
@@ -87,8 +87,8 @@ End-to-end height regression from minimap was not converging despite identical c
 
 ## Open Questions
 
-1. Which bounded proof build/map should seed the first per-object capture library run for spec 077?
-2. Which existing capture-tool surface should own one-object-at-a-time orchestration: `WowViewer.Tool.ValidationCapture`, `WowViewer.Tool.Harvest`, or a thin wrapper over both?
+1. Which bounded proof build/map should seed the first real-data per-object capture library run for spec 077? (Enumerated but not yet run.)
+2. Is the C# Zarr/Parquet writer (T009 C# side) worth doing before the capture tool extension (T010), or is the Python-only path good enough for the first proof?
 3. What is the smallest processed-prior channel contract that still gives the height-only model enough context?
 4. Which development-map tile subset is the first ADT-free proof target for minimap-only object explanation?
 1. Which bounded build/map should be the first 076 Phase 1 validation target? Teldrassil/root-heavy regions are preferred if present.
@@ -136,3 +136,11 @@ End-to-end height regression from minimap was not converging despite identical c
 - `wow-viewer/data-harvester/tests/test_alpha_brush.py`
 - `wow-viewer/memory-bank/{activeContext,progress}.md`
 - `wow-viewer/data-harvester/scripts/train_v16_1_common.py` (reverted to d0929e2 baseline during debugging)
+- `wow-viewer/src/core/WowViewer.Core/Maps/{ObjectLibraryEntry,ObjectCaptureVariant}.cs`
+- `wow-viewer/tests/WowViewer.Core.Tests/ObjectLibraryContractsTests.cs`
+- `wow-viewer/data-harvester/src/harvester/object_library.py`
+- `wow-viewer/data-harvester/tests/test_object_library.py`
+- `wow-viewer/data-harvester/scripts/enumerate_object_capture_jobs.py`
+- `wow-viewer/data-harvester/scripts/build_object_library.py`
+- `wow-viewer/data-harvester/scripts/review_object_library.py`
+- `wow-viewer/specs/077-minimap-deconstruction-engine/tasks.md` (T006, T008, T009 (Python), T011, T012, T013 marked complete)
