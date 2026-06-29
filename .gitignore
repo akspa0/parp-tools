@@ -637,3 +637,4 @@ maps/
 .uv-cache/
 __pycache__/
 *.pyc
+wow-viewer/data-harvester/models/*
