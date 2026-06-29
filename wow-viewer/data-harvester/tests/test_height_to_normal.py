@@ -58,6 +58,20 @@ def test_analytic_normals_slope_along_x_points_negative_x() -> None:
     assert sample[2] > 0.0
 
 
+def test_analytic_normals_numpy_batch_is_channel_first_and_unit_length() -> None:
+    x = np.linspace(0, 1, 16, dtype=np.float32)
+    h = np.stack([
+        np.broadcast_to(x[None, :], (16, 16)),
+        np.zeros((16, 16), dtype=np.float32),
+    ], axis=0)
+    n = analytic_normals_from_height(h)
+    assert n.shape == (2, 3, 16, 16)
+    norms = np.linalg.norm(n, axis=1)
+    np.testing.assert_allclose(norms, 1.0, atol=1e-5)
+    assert n[0, 0, 8, 8] < 0.0
+    np.testing.assert_allclose(n[1, :, 8, 8], [0.0, 0.0, 1.0], atol=1e-5)
+
+
 def test_analytic_normals_too_small_height_returns_unit_z() -> None:
     h = np.zeros((1, 1), dtype=np.float32)
     n = analytic_normals_from_height(h)
@@ -97,9 +111,16 @@ def test_analytic_normal_difference_small_for_small_height_delta() -> None:
 
 
 def test_analytic_normal_difference_large_for_inverted_height() -> None:
-    h = np.linspace(0, 1, 32, dtype=np.float32)
+    h = np.linspace(0, 16, 32, dtype=np.float32)
     h = np.broadcast_to(h[None, :], (32, 32)).copy()
     h_inv = h[:, ::-1].copy()  # mirror x
     diff = analytic_normal_difference(h, h_inv)
     # Mirror should produce a much larger angular error.
     assert diff > 0.5
+
+
+def test_analytic_normal_difference_supports_torch_4d_channel_first() -> None:
+    h = torch.zeros(2, 1, 16, 16)
+    h[:, :, :, 4:] = 1.0
+    diff = analytic_normal_difference(h, h.clone())
+    assert diff == pytest.approx(0.0, abs=1e-5)

@@ -63,7 +63,7 @@ class TestLibraryId:
         second = library_id_from_asset_path("world/wmo/azeroth/stormwind.wmo")
         assert first == second
         assert first.startswith("objlib_")
-        assert len(first) == 20
+        assert len(first) == 21
 
     def test_differs_for_distinct_paths(self) -> None:
         a = library_id_from_asset_path("world/wmo/azeroth/stormwind.wmo")
@@ -115,7 +115,7 @@ class TestMakeVariantId:
         )
         assert a == b
         assert a.startswith("objvar_")
-        assert len(a) == 22
+        assert len(a) == 23
 
     def test_differs_for_distinct_pose(self) -> None:
         a = make_variant_id(

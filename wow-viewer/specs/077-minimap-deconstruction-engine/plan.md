@@ -149,16 +149,18 @@ wow-viewer/data-harvester/
 
 1. Define the teacher-prior dataset contract and its arrays.
 2. Implement a shared prior-construction policy using raw minimap plus teacher object mask/confidence.
-3. Build a Python dataset-generation script that reads V18 Zarr plus the object library and writes the teacher-prior dataset.
-4. Emit side-by-side review artifacts for raw minimap, teacher mask, processed prior, and source metadata.
-5. Keep the phase-1 prior channels explicit and minimal; document them.
-6. Add tests for pass-through no-object tiles and object-heavy tiles.
-7. Run a bounded proof on at least one building-heavy map.
+3. Build a Python dataset-generation script that reads V18 Zarr and writes the teacher-prior dataset.
+4. Prefer `object_precise_mask` for the first teacher pass, with explicit CLI override for filtered/object-mask ablations.
+5. Emit side-by-side review artifacts for raw minimap, teacher mask, source masks, processed prior, and source metadata.
+6. Audit mask/minimap visibility mismatches and write a second-stage `kept_tiles.parquet` curation manifest.
+7. Keep the phase-1 prior channels explicit and minimal; document them.
+8. Add tests for pass-through no-object tiles, object-heavy tiles, compact-row alignment, and visibility buckets.
+9. Run a bounded proof on at least one building-heavy map.
 
 **Validation**:
 
 - The teacher-prior dataset exists with documented arrays.
-- Review artifacts clearly show object suppression behavior.
+- Review artifacts clearly show object suppression behavior and identify weak/mismatched mask rows before training.
 
 ## Phase 3 - Height-Only Terrain Reboot
 
@@ -168,9 +170,12 @@ wow-viewer/data-harvester/
 2. Implement a dedicated processed-prior dataset reader for height-only training.
 3. Add or adapt a height-only trainer that predicts only `height_257`.
 4. Preserve the authoritative height truth and filtered terrain-valid weighting path.
-5. Add preview artifacts that show processed prior, predicted height, and ground truth.
-6. Run a bounded smoke training pass.
-7. Run a bounded comparison against the raw-minimap baseline if the baseline is cheap enough to reproduce.
+5. Train from the visibility-audited teacher-prior manifest so weak/mismatched object-mask rows are excluded.
+6. Add optional normal guidance as an auxiliary loss by deriving normals from predicted height and comparing to V18 `normal_xyz`; do not add a normal output head.
+7. Use validation loss as a training control signal for LR plateau scheduling and best-checkpoint selection; do not backpropagate validation data.
+8. Add preview artifacts that show raw minimap, teacher mask, processed prior, predicted height, ground truth, error, and loss weight.
+9. Run a bounded smoke training pass.
+10. Run a bounded comparison against the raw-minimap baseline if the baseline is cheap enough to reproduce.
 
 **Validation**:
 

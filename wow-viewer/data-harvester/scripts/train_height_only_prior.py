@@ -1,9 +1,10 @@
 """Spec 077 Phase 4 (US3) height-only training script.
 
 Tiny training entry point that loads the teacher-prior dataset, runs
-``V161HeightModel`` (= ``V18HeightModel``) for a bounded number of
-steps, and writes previews showing the prior input, the predicted
-height, the ground truth, and the loss weight.
+``V161HeightModel`` (= ``V18HeightModel``) for epoch-based training, and
+writes previews showing the prior input, the predicted height, the
+ground truth, and the loss weight. ``--steps`` is retained only as an
+optional smoke/resume cap; ``--epochs`` is the real training contract.
 
 Optimizations ported from ``train_v16_1_common.py`` (the V18 "chef's
 kiss" stack):
@@ -24,11 +25,17 @@ kiss" stack):
   explicit weights (default 0 so the first proof is a pure height
   lane; FR-013 forbids joint training, but auxiliary smoothness on the
   height head is allowed by FR-014).
-* **Early stopping** with patience + min-improvement.
-* **Resume support** that reloads model + optimizer + scaler + step
-  counter from a checkpoint.
-* **Labeled preview panels** with text strips (prior / truth /
-  pred / weight) instead of the 4-row free-form preview.
+* **Optional V18 normal guidance** that derives normals from predicted
+  height and compares them to `normal_xyz`; this is an auxiliary loss,
+  not a normal output head.
+* **Early stopping** with epoch patience + min-improvement.
+* **Resume support** that reloads model + optimizer + scaler + epoch +
+  step counters from a checkpoint.
+* **Latest/best checkpointing** via ``*_latest.pt`` and ``*_best.pt``;
+  ``*_model.pt`` is kept as a compatibility alias to latest.
+* **Labeled preview panels** with text strips. Per-epoch validation
+  previews show raw minimap, object mask/confidence, object-suppressed
+  prior, truth, prediction, error, and loss weight.
 * **DataLoader** with ``num_workers`` / ``prefetch_factor`` /
   ``persistent_workers`` for overlap of I/O with compute.
 * **Optional VRAM autotune** that probes a batch-size ladder against
@@ -55,7 +62,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image, ImageDraw
-from torch.utils.data import DataLoader, default_collate
+from torch.utils.data import ConcatDataset, DataLoader, Subset, default_collate
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _SRC_DIR = _SCRIPT_DIR.parent / "src"
@@ -63,6 +70,8 @@ if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 from harvester.height_only_prior_dataset import HeightOnlyPriorDataset  # noqa: E402
+from harvester.height_to_normal import analytic_normals_from_height  # noqa: E402
+from harvester.v16_curation import load_curation_keys  # noqa: E402
 from harvester.v18_models import V18HeightModel  # noqa: E402
 
 _PANEL_SIZE = 256
@@ -101,6 +110,11 @@ def _resolve_device(name: str) -> torch.device:
 def _resolve_num_workers(requested: int, device: torch.device) -> int:
     if requested >= 0:
         return int(requested)
+    if sys.platform.startswith("win"):
+        # Windows DataLoader workers use spawn and must pickle the dataset.
+        # This trainer keeps large Zarr-backed arrays in memory, so auto
+        # multiprocessing can fail with truncated pickle data.
+        return 0
     if device.type != "cuda":
         return 0
     cpu_count = os.cpu_count() or 4
@@ -156,6 +170,78 @@ def _compose_horizontal_panel(panels: list[tuple[str, torch.Tensor]]) -> Image.I
 
 def _save_horizontal_panel(panels: list[tuple[str, torch.Tensor]], out_path: Path) -> None:
     _compose_horizontal_panel(panels).save(out_path)
+
+
+def _compose_panel_grid(rows: list[list[tuple[str, torch.Tensor]]]) -> Image.Image:
+    row_images = [_compose_horizontal_panel(row) for row in rows if row]
+    if not row_images:
+        return Image.new("RGB", (_PANEL_SIZE, _PANEL_SIZE + _PANEL_LABEL_HEIGHT), color=(0, 0, 0))
+    width = max(img.width for img in row_images)
+    height = sum(img.height for img in row_images)
+    canvas = Image.new("RGB", (width, height), color=(0, 0, 0))
+    y = 0
+    for img in row_images:
+        canvas.paste(img, (0, y))
+        y += img.height
+    return canvas
+
+
+def _norm_for_display(x: torch.Tensor, *, lo: float | None = None, hi: float | None = None) -> torch.Tensor:
+    x = x.detach().float().cpu()
+    x_lo = float(x.min()) if lo is None else float(lo)
+    x_hi = float(x.max()) if hi is None else float(hi)
+    if x_hi - x_lo < 1e-8:
+        return torch.zeros_like(x)
+    return ((x - x_lo) / (x_hi - x_lo)).clamp(0.0, 1.0)
+
+
+def _gray3(x: torch.Tensor) -> torch.Tensor:
+    x = x.detach().float().cpu()
+    if x.ndim == 3 and x.shape[0] == 1:
+        x = x.squeeze(0)
+    if x.ndim == 2:
+        return x.unsqueeze(0).repeat(3, 1, 1)
+    if x.ndim == 3 and x.shape[0] == 3:
+        return x
+    raise ValueError(f"Cannot convert tensor with shape {tuple(x.shape)} to display RGB")
+
+
+def _save_deconstruction_preview(
+    *,
+    batch: dict,
+    pred: torch.Tensor,
+    out_path: Path,
+    max_samples: int,
+) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    rows: list[list[tuple[str, torch.Tensor]]] = []
+    sample_count = min(int(max_samples), int(batch["input_prior"].shape[0]))
+    tile_ids = batch.get("meta_tile_id")
+    for idx in range(sample_count):
+        tile_id = int(tile_ids[idx]) if torch.is_tensor(tile_ids) else int(tile_ids[idx] if isinstance(tile_ids, (list, tuple)) else tile_ids)
+        raw = batch.get("raw_minimap_rgb", batch["input_prior"][:, :3])[idx].cpu()
+        prior = batch["input_prior"][idx, :3].cpu()
+        mask = batch.get("teacher_object_mask", batch["input_prior"][:, 3:4])[idx].cpu()
+        confidence = batch.get("teacher_object_confidence", batch["input_prior"][:, 4:5])[idx].cpu()
+        truth = batch["height_257"][idx].cpu()
+        pred_i = pred[idx].detach().cpu()
+        weight = batch["weight_257"][idx].cpu()
+        lo = min(float(truth.min()), float(pred_i.min()))
+        hi = max(float(truth.max()), float(pred_i.max()))
+        error = (pred_i - truth).abs()
+        rows.append(
+            [
+                (f"raw tile {tile_id}", raw),
+                ("object mask", _gray3(mask.clamp(0.0, 1.0))),
+                ("confidence", _gray3(confidence.clamp(0.0, 1.0))),
+                ("suppressed prior", prior),
+                ("height truth", _gray3(_norm_for_display(truth.squeeze(0), lo=lo, hi=hi))),
+                ("height pred", _gray3(_norm_for_display(pred_i.squeeze(0), lo=lo, hi=hi))),
+                ("abs error", _gray3(_norm_for_display(error.squeeze(0)))),
+                ("loss weight", _gray3(_norm_for_display(weight.squeeze(0), lo=0.0, hi=1.0))),
+            ]
+        )
+    _compose_panel_grid(rows).save(out_path)
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +301,13 @@ def compute_height_loss(
     ms_weight: float,
     grad_weight: float,
     nc_weight: float,
+    normal_guidance_weight: float = 0.0,
+    target_normals: torch.Tensor | None = None,
+    normal_guidance_mask: torch.Tensor | None = None,
+    normal_guidance_spacing: float = 1.0,
+    hard_error_weight: float = 0.0,
+    hard_error_power: float = 1.0,
+    hard_error_max_multiplier: float = 4.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Aggregate the height-only loss with optional auxiliary smoothness terms.
 
@@ -239,6 +332,30 @@ def compute_height_loss(
         nc_loss = _masked_mean(flatness, weight)
         loss = loss + nc_weight * nc_loss
         metrics["nc_loss"] = float(nc_loss.item())
+    if normal_guidance_weight > 0.0 and target_normals is not None:
+        pred_normals = analytic_normals_from_height(pred, spacing=float(normal_guidance_spacing))
+        target_normals = F.normalize(target_normals, dim=1, eps=1e-8)
+        cos = (pred_normals * target_normals).sum(dim=1, keepdim=True).clamp(-1.0, 1.0)
+        if normal_guidance_mask is None:
+            guidance_mask = weight
+        else:
+            guidance_mask = normal_guidance_mask * weight
+        normal_loss = _masked_mean(1.0 - cos, guidance_mask)
+        loss = loss + normal_guidance_weight * normal_loss
+        metrics["normal_guidance_loss"] = float(normal_loss.item())
+        metrics["normal_guidance_mask_cov"] = float(guidance_mask.mean().item())
+    if hard_error_weight > 0.0:
+        abs_err = (pred - target).abs()
+        with torch.no_grad():
+            mean_err = _masked_mean(abs_err.detach(), weight).clamp_min(1e-8)
+            hard_multiplier = (abs_err.detach() / mean_err).clamp_min(0.0).pow(float(hard_error_power))
+            hard_multiplier = hard_multiplier.clamp(1.0, float(hard_error_max_multiplier))
+            hard_mask = weight * hard_multiplier
+        hard_loss = _masked_mean(abs_err, hard_mask)
+        loss = loss + hard_error_weight * hard_loss
+        metrics["hard_error_loss"] = float(hard_loss.item())
+        metrics["hard_error_weight_mean"] = float(hard_multiplier.mean().item())
+        metrics["hard_error_weight_max"] = float(hard_multiplier.max().item())
     return loss, metrics
 
 
@@ -248,7 +365,7 @@ def compute_height_loss(
 
 def _autotune_batch_size(
     *,
-    train_ds: HeightOnlyPriorDataset,
+    train_ds,
     device: torch.device,
     args: argparse.Namespace,
     evidence_dir: Path,
@@ -266,7 +383,8 @@ def _autotune_batch_size(
         return None
 
     base_batch_size = int(args.batch_size)
-    candidates = list(getattr(args, "autotune_batch_candidates", _DEFAULT_AUTOTUNE_BATCH_CANDIDATES)) or list(_DEFAULT_AUTOTUNE_BATCH_CANDIDATES)
+    requested_candidates = getattr(args, "autotune_batch_candidates", None)
+    candidates = list(requested_candidates or _DEFAULT_AUTOTUNE_BATCH_CANDIDATES)
     candidates = sorted({c for c in candidates if int(c) >= 1})
 
     safety_factor = float(getattr(args, "autotune_safety_factor", 0.0))
@@ -331,21 +449,27 @@ def _autotune_batch_size(
                 prior = probe_batch["input_prior"].to(device, non_blocking=True)[:, :3, :, :]
                 target = probe_batch["height_257"].to(device, non_blocking=True)
                 weight = probe_batch["weight_257"].to(device, non_blocking=True)
+                target_normals = probe_batch["normal_xyz"].to(device, non_blocking=True) if "normal_xyz" in probe_batch else None
+                normal_mask = probe_batch["normal_mask"].to(device, non_blocking=True) if "normal_mask" in probe_batch else None
                 probe_optimizer.zero_grad(set_to_none=True)
                 with torch.amp.autocast("cuda", enabled=use_amp):
                     pred = probe_model(prior)
-                    loss, _, _ = compute_height_loss(
+                    loss, _ = compute_height_loss(
                         pred, target, weight,
                         ms_weight=args.multiscale_weight,
                         grad_weight=args.gradient_weight,
                         nc_weight=args.normal_consistency_weight,
+                        normal_guidance_weight=args.normal_guidance_weight,
+                        target_normals=target_normals,
+                        normal_guidance_mask=normal_mask,
+                        normal_guidance_spacing=args.normal_guidance_spacing,
                     )
                 probe_scaler.scale(loss).backward()
                 probe_scaler.unscale_(probe_optimizer)
                 torch.nn.utils.clip_grad_norm_(probe_model.parameters(), max_norm=1.0)
                 probe_scaler.step(probe_optimizer)
                 probe_scaler.update()
-                del probe_batch, prior, target, weight, pred, loss
+                del probe_batch, prior, target, weight, target_normals, normal_mask, pred, loss
 
                 torch.cuda.synchronize(device)
                 current_alloc_gb = torch.cuda.max_memory_allocated(device) / (1024.0 ** 3)
@@ -429,21 +553,48 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Spec 077 height-only terrain training on teacher priors."
     )
-    parser.add_argument("--prior", type=Path, required=True,
-                        help="Path to <build>.zarr teacher-prior store.")
-    parser.add_argument("--v18", type=Path, default=None,
-                        help="Path to the source <build>.zarr V18 store for height_257 target.")
+    parser.add_argument("--prior", type=Path, nargs="+", required=True,
+                        help="One or more <build>.zarr teacher-prior stores.")
+    parser.add_argument("--v18", type=Path, nargs="*", default=None,
+                        help="Matching source <build>.zarr V18 stores for height_257 targets.")
     parser.add_argument("--output-dir", type=Path, required=True,
                         help="Directory for checkpoints, metrics, and preview PNGs.")
     parser.add_argument("--run-name", type=str, default="height_only_prior_smoke")
-    parser.add_argument("--steps", type=int, default=4)
-    parser.add_argument("--val-steps", type=int, default=1)
+    parser.add_argument("--epochs", type=int, default=20,
+                        help="Number of full dataset epochs. Use this for real training.")
+    parser.add_argument("--steps", type=int, default=0,
+                        help="Optional total optimizer-step cap for smoke/backcompat. 0 = run --epochs.")
+    parser.add_argument("--steps-per-epoch", type=int, default=0,
+                        help="Optional train batches per epoch cap. 0 = full train split.")
+    parser.add_argument("--val-steps", type=int, default=0,
+                        help="Optional validation batches per epoch. 0 = full validation split.")
+    parser.add_argument("--val-fraction", type=float, default=0.10,
+                        help="Deterministic validation fraction cut from the curated dataset.")
+    parser.add_argument("--log-interval", type=int, default=25)
+    parser.add_argument("--preview-every-epochs", type=int, default=1,
+                        help="Write validation deconstruction preview every N epochs. 0 disables epoch previews.")
+    parser.add_argument("--preview-samples", type=int, default=2,
+                        help="Number of validation samples per deconstruction preview grid.")
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
+    parser.add_argument("--resume-learning-rate", type=float, default=0.0,
+                        help="If >0, override optimizer LR after loading --resume-checkpoint.")
     parser.add_argument("--weight-decay", type=float, default=1e-5)
+    parser.add_argument("--lr-plateau-patience", type=int, default=8,
+                        help="Reduce LR after N validation epochs without improvement. 0 disables.")
+    parser.add_argument("--lr-plateau-factor", type=float, default=0.5,
+                        help="Multiplicative LR decay used by validation plateau scheduler.")
+    parser.add_argument("--lr-plateau-min-delta", type=float, default=1e-4,
+                        help="Minimum validation-loss improvement for plateau scheduler.")
+    parser.add_argument("--min-learning-rate", type=float, default=1e-6,
+                        help="Lower bound for validation plateau LR scheduler.")
     parser.add_argument("--device", type=str, default="auto")
-    parser.add_argument("--max-tiles", type=int, default=64,
-                        help="Cap dataset size to keep smoke runs bounded.")
+    parser.add_argument("--max-tiles", type=int, default=0,
+                        help="Optional combined dataset cap. 0 means use all curated tiles; set this for smoke runs.")
+    parser.add_argument("--min-train-tiles", type=int, default=0,
+                        help="Fail fast if the final combined dataset has fewer than this many tiles.")
+    parser.add_argument("--curation-manifest", type=Path, default=None,
+                        help="Optional V18 curation manifest directory/file; only kept (build,tile_id) rows are trained.")
     parser.add_argument("--no-weight", action="store_true", default=False,
                         help="Disable terrain-valid weighting (use a constant 1.0).")
     parser.add_argument("--seed", type=int, default=42)
@@ -463,8 +614,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Weight for the Sobel gradient loss term. Default 0 (off).")
     parser.add_argument("--normal-consistency-weight", type=float, default=0.0,
                         help="Weight for the height-flatness (normal-consistency proxy) term. Default 0 (off).")
+    parser.add_argument("--normal-guidance-weight", type=float, default=0.0,
+                        help="Weight for auxiliary V18 normal guidance. No normal head is predicted; normals are derived from predicted height.")
+    parser.add_argument("--normal-guidance-spacing", type=float, default=1.0,
+                        help="Spacing used when deriving analytic normals from predicted height for normal guidance.")
+    parser.add_argument("--hard-error-weight", type=float, default=0.0,
+                        help="Auxiliary training-only focal L1 weight that emphasizes high absolute-error height pixels. Validation loss never uses this.")
+    parser.add_argument("--hard-error-power", type=float, default=1.0,
+                        help="Exponent for training-only hard-error pixel weights.")
+    parser.add_argument("--hard-error-max-multiplier", type=float, default=4.0,
+                        help="Clamp for training-only hard-error pixel weights.")
     parser.add_argument("--early-stop-patience", type=int, default=0,
-                        help="Stop training if val loss does not improve for N steps. 0 disables.")
+                        help="Stop training if val loss does not improve for N epochs. 0 disables.")
     parser.add_argument("--early-stop-min-improvement", type=float, default=1e-4)
     parser.add_argument("--resume-checkpoint", type=Path, default=None)
     parser.add_argument("--autotune-batch-size", action="store_true", default=False)
@@ -477,24 +638,26 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def _build_dataloader(
-    dataset: HeightOnlyPriorDataset,
+    dataset,
     batch_size: int,
     num_workers: int,
     prefetch_factor: int,
     persistent_workers: bool,
+    *,
+    shuffle: bool,
 ) -> DataLoader:
     if num_workers <= 0:
         return DataLoader(
             dataset,
             batch_size=batch_size,
-            shuffle=False,
+            shuffle=shuffle,
             num_workers=0,
             pin_memory=torch.cuda.is_available(),
         )
     return DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=False,
+        shuffle=shuffle,
         num_workers=num_workers,
         prefetch_factor=prefetch_factor,
         persistent_workers=persistent_workers,
@@ -502,13 +665,199 @@ def _build_dataloader(
     )
 
 
+def _resolve_v18_paths(prior_paths: list[Path], v18_paths: list[Path] | None) -> list[Path | None] | None:
+    if not v18_paths:
+        return [None] * len(prior_paths)
+    if len(v18_paths) != len(prior_paths):
+        return None
+    return list(v18_paths)
+
+
+def _build_training_dataset(args: argparse.Namespace) -> ConcatDataset | HeightOnlyPriorDataset | None:
+    prior_paths = list(args.prior)
+    v18_paths = _resolve_v18_paths(prior_paths, args.v18)
+    if v18_paths is None:
+        print(
+            f"--v18 must provide exactly one path per --prior path; got {len(args.v18 or [])} v18 paths for {len(prior_paths)} priors.",
+            file=sys.stderr,
+        )
+        return None
+
+    curation_keys = load_curation_keys(args.curation_manifest) if args.curation_manifest is not None else None
+    remaining = int(args.max_tiles) if args.max_tiles else None
+    datasets: list[HeightOnlyPriorDataset] = []
+    for prior_path, v18_path in zip(prior_paths, v18_paths, strict=True):
+        build = prior_path.stem.replace(".zarr", "")
+        tile_filter = None
+        if curation_keys is not None:
+            tile_filter = sorted(tile_id for key_build, tile_id in curation_keys if key_build == build)
+            if not tile_filter:
+                print(f"Curation manifest has no kept rows for build {build}: {args.curation_manifest}", file=sys.stderr)
+                continue
+        ds = HeightOnlyPriorDataset(
+            prior_path=prior_path,
+            v18_path=v18_path,
+            tile_filter=tile_filter,
+            include_weight=not args.no_weight,
+            height_norm=True,
+        )
+        if remaining is not None:
+            if remaining <= 0:
+                break
+            if len(ds) > remaining:
+                ds = HeightOnlyPriorDataset(
+                    prior_path=prior_path,
+                    v18_path=v18_path,
+                    tile_filter=[int(ds.tile_meta[i].get("tile_id", i)) for i in range(remaining)] if getattr(ds, "tile_meta", None) else list(range(remaining)),
+                    include_weight=not args.no_weight,
+                    height_norm=True,
+                )
+            remaining -= len(ds)
+        datasets.append(ds)
+
+    if not datasets:
+        return None
+    if len(datasets) == 1:
+        return datasets[0]
+    return ConcatDataset(datasets)
+
+
+def _dataset_source_summaries(dataset: ConcatDataset | HeightOnlyPriorDataset) -> list[dict[str, object]]:
+    sources = list(dataset.datasets) if isinstance(dataset, ConcatDataset) else [dataset]
+    summaries: list[dict[str, object]] = []
+    for ds in sources:
+        tile_ids: list[int] = []
+        if getattr(ds, "tile_meta", None):
+            tile_ids = [int(row.get("tile_id", idx)) for idx, row in enumerate(ds.tile_meta)]
+        summaries.append(
+            {
+                "prior_path": str(getattr(ds, "prior_path", "")),
+                "v18_path": str(getattr(ds, "v18_path", "")),
+                "tile_count": len(ds),
+                "first_tile_ids": tile_ids[:8],
+                "last_tile_ids": tile_ids[-8:] if tile_ids else [],
+            }
+        )
+    return summaries
+
+
+def _split_train_val(dataset, *, val_fraction: float, seed: int) -> tuple[Subset, Subset]:
+    n = len(dataset)
+    if n <= 1:
+        return Subset(dataset, list(range(n))), Subset(dataset, list(range(n)))
+    val_count = int(round(n * max(0.0, min(0.9, float(val_fraction)))))
+    val_count = max(1, min(n - 1, val_count))
+    generator = torch.Generator().manual_seed(int(seed))
+    perm = torch.randperm(n, generator=generator).tolist()
+    val_indices = perm[:val_count]
+    train_indices = perm[val_count:]
+    return Subset(dataset, train_indices), Subset(dataset, val_indices)
+
+
+def _mean_metric(rows: list[dict[str, float]], key: str) -> float | None:
+    vals = [float(row[key]) for row in rows if key in row]
+    return float(sum(vals) / len(vals)) if vals else None
+
+
+def _extract_first_tile_id(batch: dict) -> int:
+    value = batch["meta_tile_id"]
+    if torch.is_tensor(value):
+        return int(value[0])
+    if isinstance(value, (list, tuple)):
+        return int(value[0])
+    return int(value)
+
+
+def _model_state_dict(model: torch.nn.Module) -> dict:
+    return model._orig_mod.state_dict() if hasattr(model, "_orig_mod") else model.state_dict()
+
+
+def _load_model_state_dict(model: torch.nn.Module, state_dict: dict) -> None:
+    target = model._orig_mod if hasattr(model, "_orig_mod") else model
+    target.load_state_dict(state_dict)
+
+
+def _current_lr(optimizer: torch.optim.Optimizer) -> float:
+    return float(optimizer.param_groups[0].get("lr", 0.0)) if optimizer.param_groups else 0.0
+
+
+def _save_checkpoint(
+    path: Path,
+    *,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scaler: torch.amp.GradScaler,
+    use_amp: bool,
+    epoch: int,
+    global_step: int,
+    best_val: float,
+    args: argparse.Namespace,
+    history: list[dict],
+    scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau | None = None,
+) -> Path:
+    state = {
+        "state_dict": _model_state_dict(model),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scaler_state_dict": scaler.state_dict() if use_amp else None,
+        "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
+        "epoch": int(epoch),
+        "step": int(global_step),
+        "best_val": float(best_val),
+        "history": history,
+        "args": {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.{int(time.time() * 1000)}.tmp")
+    torch.save(state, tmp_path)
+    last_error: OSError | None = None
+    for attempt in range(8):
+        try:
+            os.replace(tmp_path, path)
+            return path
+        except OSError as ex:
+            last_error = ex
+            # Windows can transiently lock recently-read .pt files with
+            # ERROR_USER_MAPPED_FILE (1224) or sharing violations. Keep the
+            # run alive and retry before falling back to a step checkpoint.
+            if getattr(ex, "winerror", None) not in (5, 32, 1224):
+                break
+            time.sleep(0.25 * (attempt + 1))
+
+    fallback_path = path.with_name(
+        f"{path.stem}_epoch{int(epoch):04d}_step{int(global_step):07d}_{int(time.time())}{path.suffix}"
+    )
+    try:
+        os.replace(tmp_path, fallback_path)
+        print(
+            f"Checkpoint warning: could not replace {path} ({last_error}); wrote fallback {fallback_path}",
+            flush=True,
+        )
+        return fallback_path
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
 def main_with_args(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    if not args.prior.exists():
-        print(f"Prior store not found: {args.prior}", file=sys.stderr)
-        return 2
-    if args.v18 is not None and not args.v18.exists():
-        print(f"V18 store not found: {args.v18}", file=sys.stderr)
+    for prior_path in args.prior:
+        if not prior_path.exists():
+            print(f"Prior store not found: {prior_path}", file=sys.stderr)
+            return 2
+    for v18_path in args.v18 or []:
+        if not v18_path.exists():
+            print(f"V18 store not found: {v18_path}", file=sys.stderr)
+            return 2
+
+    v18_paths = _resolve_v18_paths(list(args.prior), args.v18)
+    if v18_paths is None:
+        print(
+            f"--v18 must provide exactly one path per --prior path; got {len(args.v18 or [])} v18 paths for {len(args.prior)} priors.",
+            file=sys.stderr,
+        )
         return 2
 
     _seed_all(args.seed)
@@ -517,44 +866,81 @@ def main_with_args(argv: list[str] | None = None) -> int:
 
     # Optional VRAM autotune needs a model on the device; build dataset first
     # so the probe can index into it.
-    dataset = HeightOnlyPriorDataset(
-        prior_path=args.prior,
-        v18_path=args.v18,
-        include_weight=not args.no_weight,
-        height_norm=True,
-    )
-    if args.max_tiles and len(dataset) > args.max_tiles:
-        keep = list(range(args.max_tiles))
-        dataset = HeightOnlyPriorDataset(
-            prior_path=args.prior,
-            v18_path=args.v18,
-            tile_filter=keep,
-            include_weight=not args.no_weight,
-            height_norm=True,
-        )
-    if len(dataset) == 0:
+    dataset = _build_training_dataset(args)
+    if dataset is None or len(dataset) == 0:
         print("Dataset is empty; nothing to train.", file=sys.stderr)
         return 2
+    source_summaries = _dataset_source_summaries(dataset)
+    print(f"Dataset: combined_tile_count={len(dataset)} source_count={len(source_summaries)}", flush=True)
+    for idx, summary in enumerate(source_summaries, start=1):
+        print(
+            f"  source {idx}: tiles={summary['tile_count']} prior={summary['prior_path']} "
+            f"first_tile_ids={summary['first_tile_ids']} last_tile_ids={summary['last_tile_ids']}",
+            flush=True,
+        )
+    if int(args.min_train_tiles) > 0 and len(dataset) < int(args.min_train_tiles):
+        print(
+            f"Dataset has only {len(dataset)} tiles, below --min-train-tiles {args.min_train_tiles}. "
+            "Check curation manifest and teacher-prior tile counts.",
+            file=sys.stderr,
+        )
+        return 2
+
+    train_dataset, val_dataset = _split_train_val(dataset, val_fraction=args.val_fraction, seed=args.seed)
+    if len(train_dataset) <= 0 or len(val_dataset) <= 0:
+        print("Train/validation split is empty; nothing to train.", file=sys.stderr)
+        return 2
+
+    full_steps_per_epoch = int(math.ceil(len(train_dataset) / max(1, int(args.batch_size))))
+    train_batches_per_epoch = full_steps_per_epoch
+    if int(args.steps_per_epoch) > 0:
+        train_batches_per_epoch = min(train_batches_per_epoch, int(args.steps_per_epoch))
+    val_batches_per_epoch = int(math.ceil(len(val_dataset) / max(1, int(args.batch_size))))
+    if int(args.val_steps) > 0:
+        val_batches_per_epoch = min(val_batches_per_epoch, int(args.val_steps))
+    print(
+        f"Split: train_tiles={len(train_dataset)} val_tiles={len(val_dataset)} "
+        f"steps_per_epoch={train_batches_per_epoch}/{full_steps_per_epoch} "
+        f"val_batches={val_batches_per_epoch}",
+        flush=True,
+    )
 
     if args.autotune_batch_size:
         _autotune_batch_size(
-            train_ds=dataset,
+            train_ds=train_dataset,
             device=device,
             args=args,
             evidence_dir=args.output_dir,
         )
+
+        full_steps_per_epoch = int(math.ceil(len(train_dataset) / max(1, int(args.batch_size))))
+        train_batches_per_epoch = full_steps_per_epoch
+        if int(args.steps_per_epoch) > 0:
+            train_batches_per_epoch = min(train_batches_per_epoch, int(args.steps_per_epoch))
+        val_batches_per_epoch = int(math.ceil(len(val_dataset) / max(1, int(args.batch_size))))
+        if int(args.val_steps) > 0:
+            val_batches_per_epoch = min(val_batches_per_epoch, int(args.val_steps))
 
     num_workers = _resolve_num_workers(args.num_workers, device)
     persistent_workers = _resolve_persistent_workers(args.persistent_workers, num_workers)
     if num_workers > 0 and args.prefetch_factor < 1:
         raise RuntimeError("--prefetch-factor must be >= 1")
 
-    loader = _build_dataloader(
-        dataset,
+    train_loader = _build_dataloader(
+        train_dataset,
         batch_size=args.batch_size,
         num_workers=num_workers,
         prefetch_factor=args.prefetch_factor,
         persistent_workers=persistent_workers,
+        shuffle=True,
+    )
+    val_loader = _build_dataloader(
+        val_dataset,
+        batch_size=args.batch_size,
+        num_workers=num_workers,
+        prefetch_factor=args.prefetch_factor,
+        persistent_workers=persistent_workers,
+        shuffle=False,
     )
 
     model = V18HeightModel().to(device)
@@ -572,26 +958,49 @@ def main_with_args(argv: list[str] | None = None) -> int:
         lr=args.learning_rate,
         weight_decay=args.weight_decay,
     )
+    scheduler = None
+    if int(args.lr_plateau_patience) > 0:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=float(args.lr_plateau_factor),
+            patience=int(args.lr_plateau_patience),
+            threshold=float(args.lr_plateau_min_delta),
+            threshold_mode="abs",
+            min_lr=float(args.min_learning_rate),
+        )
     use_amp = bool(device.type == "cuda" and not args.no_amp)
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     start_step = 0
+    start_epoch = 0
     best_val = float("inf")
+    history: list[dict] = []
     early_stop_counter = 0
     early_stop_triggered = False
     if args.resume_checkpoint is not None:
-        ckpt = torch.load(args.resume_checkpoint, map_location=device)
+        # This checkpoint is produced by this script and includes CLI args
+        # containing pathlib.Path values. PyTorch 2.6 defaults to
+        # weights_only=True, which rejects those metadata objects.
+        ckpt = torch.load(args.resume_checkpoint, map_location=device, weights_only=False)
         if "state_dict" in ckpt:
-            model.load_state_dict(ckpt["state_dict"])
+            _load_model_state_dict(model, ckpt["state_dict"])
         elif "model_state_dict" in ckpt:
-            model.load_state_dict(ckpt["model_state_dict"])
+            _load_model_state_dict(model, ckpt["model_state_dict"])
         if "optimizer_state_dict" in ckpt:
             optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        if float(args.resume_learning_rate) > 0.0:
+            for group in optimizer.param_groups:
+                group["lr"] = float(args.resume_learning_rate)
         if "scaler_state_dict" in ckpt and use_amp:
             scaler.load_state_dict(ckpt["scaler_state_dict"])
+        if scheduler is not None and ckpt.get("scheduler_state_dict") is not None:
+            scheduler.load_state_dict(ckpt["scheduler_state_dict"])
         start_step = int(ckpt.get("step", 0))
+        start_epoch = int(ckpt.get("epoch", 0))
         best_val = float(ckpt.get("best_val", float("inf")))
-        print(f"Resume: loaded {args.resume_checkpoint} from step {start_step}", flush=True)
+        history = list(ckpt.get("history", []))
+        print(f"Resume: loaded {args.resume_checkpoint} from epoch {start_epoch} step {start_step}", flush=True)
 
     print(f"torch.compile: {compile_status}", flush=True)
     print(
@@ -604,6 +1013,8 @@ def main_with_args(argv: list[str] | None = None) -> int:
         prior = batch["input_prior"].to(device, non_blocking=True)[:, :3, :, :]
         target = batch["height_257"].to(device, non_blocking=True)
         weight = batch["weight_257"].to(device, non_blocking=True)
+        target_normals = batch["normal_xyz"].to(device, non_blocking=True) if "normal_xyz" in batch else None
+        normal_mask = batch["normal_mask"].to(device, non_blocking=True) if "normal_mask" in batch else None
         if args.no_weight:
             weight = torch.ones_like(weight)
         optimizer.zero_grad(set_to_none=True)
@@ -616,6 +1027,10 @@ def main_with_args(argv: list[str] | None = None) -> int:
                 ms_weight=args.multiscale_weight,
                 grad_weight=args.gradient_weight,
                 nc_weight=args.normal_consistency_weight,
+                normal_guidance_weight=args.normal_guidance_weight,
+                target_normals=target_normals,
+                normal_guidance_mask=normal_mask,
+                normal_guidance_spacing=args.normal_guidance_spacing,
             )
         if use_amp:
             scaler.scale(loss).backward()
@@ -635,6 +1050,8 @@ def main_with_args(argv: list[str] | None = None) -> int:
         prior = batch["input_prior"].to(device, non_blocking=True)[:, :3, :, :]
         target = batch["height_257"].to(device, non_blocking=True)
         weight = batch["weight_257"].to(device, non_blocking=True)
+        target_normals = batch["normal_xyz"].to(device, non_blocking=True) if "normal_xyz" in batch else None
+        normal_mask = batch["normal_mask"].to(device, non_blocking=True) if "normal_mask" in batch else None
         if args.no_weight:
             weight = torch.ones_like(weight)
         with torch.no_grad():
@@ -645,87 +1062,239 @@ def main_with_args(argv: list[str] | None = None) -> int:
                     ms_weight=args.multiscale_weight,
                     grad_weight=args.gradient_weight,
                     nc_weight=args.normal_consistency_weight,
+                    normal_guidance_weight=args.normal_guidance_weight,
+                    target_normals=target_normals,
+                    normal_guidance_mask=normal_mask,
+                    normal_guidance_spacing=args.normal_guidance_spacing,
                 )
         return loss, metrics
 
     metrics_log: list[dict] = []
     val_log: list[dict] = []
     preview_batch = None
-    train_state = _make_epoch_iterator(loader)
-    model.train()
+    validation_preview_dir = args.output_dir / f"{args.run_name}_validation_previews"
+    validation_preview_paths: list[str] = []
+    latest_path = args.output_dir / f"{args.run_name}_latest.pt"
+    best_path = args.output_dir / f"{args.run_name}_best.pt"
+    compat_model_path = args.output_dir / f"{args.run_name}_model.pt"
+    latest_checkpoint_written_path = latest_path
+    best_checkpoint_written_path = best_path
+    compat_checkpoint_written_path = compat_model_path
+    global_step = int(start_step)
+    requested_additional_steps = int(args.steps)
+    step_limit = (start_step + requested_additional_steps) if requested_additional_steps > 0 else None
+    extra_epochs_for_step_cap = int(math.ceil(requested_additional_steps / max(1, train_batches_per_epoch))) + 1
+    effective_epochs = int(args.epochs)
+    if step_limit is not None:
+        effective_epochs = max(effective_epochs, int(start_epoch) + extra_epochs_for_step_cap)
+
     t0 = time.perf_counter()
     tiles_seen = 0
-    for step in range(start_step, start_step + args.steps):
-        batch = _next_batch_or_reset(train_state, loader)
-        if batch is None:
+    val_tiles_seen = 0
+    val_elapsed_total = 0.0
+
+    for epoch_idx in range(int(start_epoch), effective_epochs):
+        if step_limit is not None and global_step >= step_limit:
             break
-        loss, metrics = _train_one_batch(batch, model)
-        tiles_seen += int(batch["input_prior"].shape[0])
-        elapsed = time.perf_counter() - t0
-        rate = tiles_seen / max(elapsed, 1e-9)
-        entry = {
-            "step": step,
-            "loss": float(loss.detach().cpu()),
-            "tiles_per_sec": rate,
-            "tile_id": int(batch["meta_tile_id"][0]) if torch.is_tensor(batch["meta_tile_id"]) else int(batch["meta_tile_id"]),
+
+        epoch_number = epoch_idx + 1
+        epoch_train_rows: list[dict[str, float]] = []
+        model.train()
+        for batch_idx, batch in enumerate(train_loader, start=1):
+            if batch_idx > train_batches_per_epoch:
+                break
+            if step_limit is not None and global_step >= step_limit:
+                break
+            loss, metrics = _train_one_batch(batch, model)
+            batch_size = int(batch["input_prior"].shape[0])
+            tiles_seen += batch_size
+            elapsed = time.perf_counter() - t0
+            rate = tiles_seen / max(elapsed, 1e-9)
+            entry = {
+                "epoch": epoch_number,
+                "batch": batch_idx,
+                "step": global_step,
+                "loss": float(loss.detach().cpu()),
+                "tiles_per_sec": rate,
+                "batch_size": batch_size,
+                "tile_id": _extract_first_tile_id(batch),
+            }
+            for k, v in metrics.items():
+                entry[k] = float(v)
+            metrics_log.append(entry)
+            epoch_train_rows.append(entry)
+            if global_step == start_step or (int(args.log_interval) > 0 and global_step % int(args.log_interval) == 0):
+                print(
+                    f"epoch {epoch_number}/{effective_epochs} batch {batch_idx}/{train_batches_per_epoch} "
+                    f"step {global_step}: loss={float(loss.detach()):.4f} "
+                    f"tiles/s={rate:.2f} first_tile_id={entry['tile_id']}",
+                    flush=True,
+                )
+            if preview_batch is None:
+                preview_batch = batch
+            global_step += 1
+
+        model.eval()
+        epoch_val_rows: list[dict[str, float]] = []
+        epoch_preview_batch = None
+        val_t0 = time.perf_counter()
+        with torch.no_grad():
+            for val_batch_idx, batch in enumerate(val_loader, start=1):
+                if val_batch_idx > val_batches_per_epoch:
+                    break
+                if epoch_preview_batch is None:
+                    epoch_preview_batch = batch
+                loss, metrics = _validate_batch(batch, model)
+                batch_size = int(batch["input_prior"].shape[0])
+                val_tiles_seen += batch_size
+                entry = {
+                    "epoch": epoch_number,
+                    "batch": val_batch_idx,
+                    "step": global_step,
+                    "val_loss": float(loss.detach().cpu()),
+                    "batch_size": batch_size,
+                    "tile_id": _extract_first_tile_id(batch),
+                }
+                for k, val in metrics.items():
+                    entry[k] = float(val)
+                val_log.append(entry)
+                epoch_val_rows.append(entry)
+        val_elapsed_total += time.perf_counter() - val_t0
+
+        preview_path_for_epoch = None
+        if (
+            int(args.preview_every_epochs) > 0
+            and epoch_preview_batch is not None
+            and epoch_number % int(args.preview_every_epochs) == 0
+        ):
+            with torch.no_grad():
+                with torch.amp.autocast(device.type, enabled=use_amp):
+                    preview_pred = model(epoch_preview_batch["input_prior"].to(device, non_blocking=True)[:, :3, :, :])
+            preview_path_for_epoch = validation_preview_dir / f"epoch_{epoch_number:04d}.png"
+            _save_deconstruction_preview(
+                batch=epoch_preview_batch,
+                pred=preview_pred,
+                out_path=preview_path_for_epoch,
+                max_samples=max(1, int(args.preview_samples)),
+            )
+            validation_preview_paths.append(str(preview_path_for_epoch))
+
+        epoch_train_loss = _mean_metric(epoch_train_rows, "loss")
+        epoch_val_loss = _mean_metric(epoch_val_rows, "val_loss")
+        lr_before = _current_lr(optimizer)
+        improved = False
+        if epoch_val_loss is not None:
+            improved = epoch_val_loss < (best_val - float(args.early_stop_min_improvement))
+            if improved:
+                best_val = float(epoch_val_loss)
+                early_stop_counter = 0
+            elif int(args.early_stop_patience) > 0:
+                early_stop_counter += 1
+            if scheduler is not None:
+                scheduler.step(float(epoch_val_loss))
+        lr_after = _current_lr(optimizer)
+
+        epoch_record = {
+            "epoch": epoch_number,
+            "global_step": global_step,
+            "train_loss": epoch_train_loss,
+            "val_loss": epoch_val_loss,
+            "learning_rate": lr_after,
+            "learning_rate_before_scheduler": lr_before,
+            "learning_rate_changed": bool(abs(lr_after - lr_before) > 1e-12),
+            "train_batches": len(epoch_train_rows),
+            "val_batches": len(epoch_val_rows),
+            "best_val": best_val if best_val != float("inf") else None,
+            "improved": improved,
+            "preview_path": str(preview_path_for_epoch) if preview_path_for_epoch is not None else None,
         }
-        for k, v in metrics.items():
-            entry[k] = float(v)
-        metrics_log.append(entry)
+        history.append(epoch_record)
+        latest_checkpoint_written_path = _save_checkpoint(
+            latest_path,
+            model=model,
+            optimizer=optimizer,
+            scaler=scaler,
+            use_amp=use_amp,
+            epoch=epoch_number,
+            global_step=global_step,
+            best_val=best_val,
+            args=args,
+            history=history,
+            scheduler=scheduler,
+        )
+        compat_checkpoint_written_path = _save_checkpoint(
+            compat_model_path,
+            model=model,
+            optimizer=optimizer,
+            scaler=scaler,
+            use_amp=use_amp,
+            epoch=epoch_number,
+            global_step=global_step,
+            best_val=best_val,
+            args=args,
+            history=history,
+            scheduler=scheduler,
+        )
+        if improved or not best_path.exists():
+            best_checkpoint_written_path = _save_checkpoint(
+                best_path,
+                model=model,
+                optimizer=optimizer,
+                scaler=scaler,
+                use_amp=use_amp,
+                epoch=epoch_number,
+                global_step=global_step,
+                best_val=best_val,
+                args=args,
+                history=history,
+                scheduler=scheduler,
+            )
         print(
-            f"step {step}: loss={float(loss):.4f} "
-            f"tiles/s={rate:.2f} tile_id={entry['tile_id']}",
+            f"epoch {epoch_number}: train_loss={epoch_train_loss if epoch_train_loss is not None else 'n/a'} "
+            f"val_loss={epoch_val_loss if epoch_val_loss is not None else 'n/a'} "
+            f"best_val={best_val if best_val != float('inf') else 'n/a'} "
+            f"lr={lr_after:.3e} step={global_step} preview={preview_path_for_epoch if preview_path_for_epoch is not None else 'n/a'}",
             flush=True,
         )
-        if preview_batch is None:
-            preview_batch = batch
 
-    # Validation pass
-    val_tiles_seen = 0
-    val_t0 = time.perf_counter()
-    model.eval()
-    val_state = _make_epoch_iterator(loader)
-    with torch.no_grad():
-        for v in range(args.val_steps):
-            batch = _next_batch_or_reset(val_state, loader)
-            if batch is None:
-                break
-            loss, metrics = _validate_batch(batch, model)
-            val_tiles_seen += int(batch["input_prior"].shape[0])
-            entry = {
-                "step": v,
-                "val_loss": float(loss.detach().cpu()),
-                "tile_id": int(batch["meta_tile_id"][0]) if torch.is_tensor(batch["meta_tile_id"]) else int(batch["meta_tile_id"]),
-            }
-            for k, val in metrics.items():
-                entry[k] = float(val)
-            val_log.append(entry)
-            current_val = float(loss.detach().cpu())
-            improved = current_val < (best_val - args.early_stop_min_improvement)
-            if improved:
-                best_val = current_val
-                early_stop_counter = 0
-            elif args.early_stop_patience > 0:
-                early_stop_counter += 1
-                if early_stop_counter >= args.early_stop_patience:
-                    early_stop_triggered = True
-                    print(
-                        f"Early stop: no val improvement for {early_stop_counter} steps",
-                        flush=True,
-                    )
-                    break
-            print(
-                f"val {v}: val_loss={current_val:.4f} tile_id={entry['tile_id']} "
-                f"best_val={best_val:.4f}",
-                flush=True,
-            )
-    val_elapsed = time.perf_counter() - val_t0
-    val_rate = val_tiles_seen / max(val_elapsed, 1e-9)
+        if int(args.early_stop_patience) > 0 and early_stop_counter >= int(args.early_stop_patience):
+            early_stop_triggered = True
+            print(f"Early stop: no val improvement for {early_stop_counter} epochs", flush=True)
+            break
+
+    if not latest_path.exists():
+        latest_checkpoint_written_path = _save_checkpoint(
+            latest_path,
+            model=model,
+            optimizer=optimizer,
+            scaler=scaler,
+            use_amp=use_amp,
+            epoch=int(start_epoch),
+            global_step=global_step,
+            best_val=best_val,
+            args=args,
+            history=history,
+            scheduler=scheduler,
+        )
+        compat_checkpoint_written_path = _save_checkpoint(
+            compat_model_path,
+            model=model,
+            optimizer=optimizer,
+            scaler=scaler,
+            use_amp=use_amp,
+            epoch=int(start_epoch),
+            global_step=global_step,
+            best_val=best_val,
+            args=args,
+            history=history,
+            scheduler=scheduler,
+        )
+    val_rate = val_tiles_seen / max(val_elapsed_total, 1e-9)
 
     # Preview: use the first captured batch; render a labeled 4-panel image.
     preview_path = args.output_dir / f"{args.run_name}_preview.png"
     if preview_batch is not None:
-        prior_chw = preview_batch["input_prior"][:3].cpu()
+        prior_chw = preview_batch["input_prior"][0, :3].cpu()
         truth = preview_batch["height_257"][0].cpu()
         weight = preview_batch["weight_257"][0].cpu()
         with torch.no_grad():
@@ -740,9 +1309,9 @@ def main_with_args(argv: list[str] | None = None) -> int:
             if hi - lo < 1e-8:
                 return torch.zeros_like(x)
             return (x - lo) / (hi - lo)
-        truth_disp = _norm(truth[None, :, :]).squeeze(0)
-        pred_disp = _norm(pred_chw[0:1]).squeeze(0)
-        weight_disp = _norm(weight[None, :, :]).squeeze(0)
+        truth_disp = _norm(truth.squeeze(0))
+        pred_disp = _norm(pred_chw.squeeze(0))
+        weight_disp = _norm(weight.squeeze(0))
         # Replicate single-channel to 3ch for the panel composer
         truth_rgb = truth_disp.unsqueeze(0).repeat(3, 1, 1)
         pred_rgb = pred_disp.unsqueeze(0).repeat(3, 1, 1)
@@ -766,11 +1335,34 @@ def main_with_args(argv: list[str] | None = None) -> int:
     metrics_payload = {
         "run_name": args.run_name,
         "schema": "spec-077-height-only-prior",
-        "step_count": args.steps,
-        "val_step_count": args.val_steps,
+        "epoch_count": len(history),
+        "requested_epochs": int(args.epochs),
+        "requested_steps": int(args.steps),
+        "step_count": len(metrics_log),
+        "global_step": int(global_step),
+        "val_step_count": len(val_log),
+        "steps_per_epoch": int(train_batches_per_epoch),
+        "full_steps_per_epoch": int(full_steps_per_epoch),
+        "val_batches_per_epoch": int(val_batches_per_epoch),
         "learning_rate": args.learning_rate,
+        "resume_learning_rate": float(args.resume_learning_rate),
+        "current_learning_rate": _current_lr(optimizer),
+        "lr_plateau_enabled": scheduler is not None,
+        "lr_plateau_patience": int(args.lr_plateau_patience),
+        "lr_plateau_factor": float(args.lr_plateau_factor),
+        "lr_plateau_min_delta": float(args.lr_plateau_min_delta),
+        "min_learning_rate": float(args.min_learning_rate),
         "weight_decay": args.weight_decay,
         "batch_size": args.batch_size,
+        "source_count": len(args.prior),
+        "prior_paths": [str(path) for path in args.prior],
+        "v18_paths": [str(path) if path is not None else None for path in v18_paths],
+        "curation_manifest": str(args.curation_manifest) if args.curation_manifest is not None else None,
+        "dataset_tile_count": len(dataset),
+        "train_tile_count": len(train_dataset),
+        "val_tile_count": len(val_dataset),
+        "val_fraction": float(args.val_fraction),
+        "dataset_sources": source_summaries,
         "device": str(device),
         "compile_status": compile_status,
         "amp_enabled": use_amp,
@@ -778,6 +1370,8 @@ def main_with_args(argv: list[str] | None = None) -> int:
         "multiscale_weight": float(args.multiscale_weight),
         "gradient_weight": float(args.gradient_weight),
         "normal_consistency_weight": float(args.normal_consistency_weight),
+        "normal_guidance_weight": float(args.normal_guidance_weight),
+        "normal_guidance_spacing": float(args.normal_guidance_spacing),
         "early_stop_patience": int(args.early_stop_patience),
         "early_stop_triggered": early_stop_triggered,
         "best_val": best_val if best_val != float("inf") else None,
@@ -785,56 +1379,26 @@ def main_with_args(argv: list[str] | None = None) -> int:
         "num_workers": num_workers,
         "prefetch_factor": args.prefetch_factor,
         "persistent_workers": persistent_workers,
+        "history": history,
         "train_metrics": metrics_log,
         "val_metrics": val_log,
         "val_tiles_per_sec": val_rate,
         "preview_path": str(preview_path),
+        "validation_preview_dir": str(validation_preview_dir),
+        "validation_preview_paths": validation_preview_paths,
+        "latest_checkpoint_path": str(latest_checkpoint_written_path),
+        "best_checkpoint_path": str(best_checkpoint_written_path),
+        "compat_checkpoint_path": str(compat_checkpoint_written_path),
+        "preferred_latest_checkpoint_path": str(latest_path),
+        "preferred_best_checkpoint_path": str(best_path),
+        "preferred_compat_checkpoint_path": str(compat_model_path),
         "seed": args.seed,
     }
     metrics_path = args.output_dir / f"{args.run_name}_metrics.json"
     metrics_path.write_text(json.dumps(metrics_payload, indent=2, sort_keys=True), encoding="utf-8")
 
-    ckpt_path = args.output_dir / f"{args.run_name}_model.pt"
-    state = {
-        "state_dict": model._orig_mod.state_dict() if hasattr(model, "_orig_mod") else model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "scaler_state_dict": scaler.state_dict() if use_amp else None,
-        "step": start_step + args.steps,
-        "best_val": best_val,
-        "args": vars(args),
-    }
-    torch.save(state, ckpt_path)
-    print(f"Wrote smoke training output to {args.output_dir}", flush=True)
+    print(f"Wrote height-only training output to {args.output_dir}", flush=True)
     return 0
-
-
-def _make_epoch_iterator(loader: DataLoader) -> list:
-    """Return a one-cell list whose slot holds the active loader iterator.
-
-    The cell is mutable so callers can transparently recycle the iterator
-    on epoch boundaries without rebuilding the persistent DataLoader
-    workers. The companion helper is :func:`_next_batch_or_reset`.
-    """
-    return [iter(loader)]
-
-
-def _next_batch_or_reset(state: list, loader: DataLoader) -> dict | None:
-    """Pop the next batch from *state*; rebuild the iterator on exhaustion.
-
-    Returns ``None`` only when the loader itself is empty.
-    """
-    while True:
-        try:
-            return next(state[0])
-        except StopIteration:
-            # Generator is closed; create a fresh one. This still reuses
-            # the underlying DataLoader workers when ``persistent_workers``
-            # is enabled, because PyTorch reuses the worker pool.
-            try:
-                state[0] = iter(loader)
-            except StopIteration:
-                return None
-
 
 if __name__ == "__main__":
     sys.exit(main_with_args())

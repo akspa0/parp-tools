@@ -169,9 +169,9 @@ def test_builder_writes_zarr_and_parquet_end_to_end() -> None:
 
         # Read back the store and verify shape/content.
         store = zarr.storage.LocalStore(str(store_path), read_only=True)
-        root = zarr.open_group(store, mode="r")
-        rgb = np.asarray(root["capture_rgb"][:])
-        mask = np.asarray(root["capture_mask"][:])
+        zarr_root = zarr.open_group(store, mode="r")
+        rgb = np.asarray(zarr_root["capture_rgb"][:])
+        mask = np.asarray(zarr_root["capture_mask"][:])
         assert rgb.shape == (3, 64, 64, 3), rgb.shape
         assert mask.shape == (3, 64, 64), mask.shape
         # Captured entries should have non-zero masks; uncaptured should be all zero.
@@ -198,4 +198,4 @@ def test_builder_writes_zarr_and_parquet_end_to_end() -> None:
         assert exit_code == 0
         assert (review_dir / "index.html").exists()
         family_sheets = list((review_dir / "families").glob("*.png"))
-        assert len(family_sheets) == 2, [p.name for p in family_sheets]
+        assert len(family_sheets) == 3, [p.name for p in family_sheets]

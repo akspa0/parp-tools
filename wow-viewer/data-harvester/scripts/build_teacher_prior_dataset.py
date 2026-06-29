@@ -27,11 +27,13 @@ if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 from harvester.teacher_prior import (  # noqa: E402
+    DEFAULT_MASK_PRIORITY,
     PRIOR_CHANNELS,
     MaskSource,
     build_prior_tensor,
     make_tile_record,
 )
+from harvester.v16_curation import load_curation_keys  # noqa: E402
 
 DEFAULT_CODEC = zarr.codecs.BloscCodec(cname="zstd", clevel=5, shuffle="bitshuffle")
 
@@ -134,6 +136,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Optional cap on number of tiles processed.")
     parser.add_argument("--start-tile-id", type=int, default=0,
                         help="Skip tiles with tile_id < this value.")
+    parser.add_argument("--curation-manifest", type=Path, default=None,
+                        help="Optional V18 curation manifest directory/file; only kept (build,tile_id) rows are written.")
+    parser.add_argument(
+        "--mask-priority",
+        type=str,
+        nargs="+",
+        default=list(DEFAULT_MASK_PRIORITY),
+        choices=[source.value for source in (MaskSource.ObjectPrecise, MaskSource.ObjectFiltered, MaskSource.ObjectMask)],
+        help="Teacher mask source priority. Default prefers object_precise_mask before filtered/object fallback.",
+    )
     return parser.parse_args(argv)
 
 
@@ -144,6 +156,16 @@ def main_with_args(argv: list[str] | None = None) -> int:
         return 2
 
     build = args.v18_path.stem.replace(".zarr", "")
+    curation_keys = None
+    if args.curation_manifest is not None:
+        curation_keys = load_curation_keys(args.curation_manifest)
+        build_key_count = sum(1 for key_build, _ in curation_keys if key_build == build)
+        if build_key_count <= 0:
+            print(
+                f"Curation manifest has no kept rows for build {build}: {args.curation_manifest}",
+                file=sys.stderr,
+            )
+            return 2
     index_rows = _load_index_rows(args.v18_path)
     if not index_rows:
         print(f"No index.parquet under {args.v18_path}", file=sys.stderr)
@@ -171,6 +193,8 @@ def main_with_args(argv: list[str] | None = None) -> int:
             break
         if tile_id >= len(index_rows):
             break
+        if curation_keys is not None and (build, tile_id) not in curation_keys:
+            continue
         index_row = index_rows[tile_id]
         tile_x = int(index_row.get("tile_x") or 0)
         tile_y = int(index_row.get("tile_y") or 0)
@@ -182,6 +206,7 @@ def main_with_args(argv: list[str] | None = None) -> int:
             obj_filtered[tile_id] if obj_filtered is not None else None,
             obj_precise[tile_id] if obj_precise is not None else None,
             obj_mask[tile_id] if obj_mask is not None else None,
+            mask_priority=tuple(args.mask_priority),
         )
         records.append(
             make_tile_record(
@@ -219,12 +244,9 @@ def main_with_args(argv: list[str] | None = None) -> int:
         "source_v18_path": str(args.v18_path),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "tile_count": len(rows),
+        "curation_manifest": str(args.curation_manifest) if args.curation_manifest is not None else None,
         "phase1_prior_channels": list(PRIOR_CHANNELS),
-        "mask_preference_chain": [
-            "object_filtered_mask",
-            "object_precise_mask",
-            "object_mask",
-        ],
+        "mask_preference_chain": list(args.mask_priority),
         "fill_strategy": "per_tile_median_of_non_object_pixels",
     }
     _write_zarr(output_path, raw_arr, mask_arr, conf_arr, prior_arr, metadata)

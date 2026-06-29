@@ -328,7 +328,7 @@ def test_build_adt_free_prior_tensor_suppresses_object_pixels() -> None:
     assert int(out[200, 100, 0]) > 100
     assert int(out[200, 100, 2]) < 100
     # Top half unchanged.
-    np.testing.assert_array_equal(out[:128, :, :], minimap[:128, :, :])
+    np.testing.assert_array_equal(out[:128, :, :3], minimap[:128, :, :])
 
 
 def test_build_adt_free_prior_cli_writes_zarr_and_tiles_parquet() -> None:

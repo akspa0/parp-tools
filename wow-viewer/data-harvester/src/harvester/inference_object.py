@@ -72,7 +72,7 @@ class InferenceObjectHypothesis:
     def top_candidate(self) -> AssetCandidate | None:
         if not self.asset_candidate_paths:
             return None
-        idx = 0
+        idx = max(range(len(self.asset_candidate_paths)), key=lambda i: self.asset_candidate_scores[i])
         return AssetCandidate(
             asset_path=self.asset_candidate_paths[idx],
             library_id=self.asset_candidate_library_ids[idx] if self.asset_candidate_library_ids else "",
@@ -84,12 +84,12 @@ class InferenceObjectHypothesis:
 
     def ranked_candidates(self) -> list[AssetCandidate]:
         ranked = sorted(
-            zip(self.asset_candidate_paths, self.asset_candidate_scores, strict=False),
-            key=lambda pair: pair[1],
+            range(len(self.asset_candidate_paths)),
+            key=lambda i: self.asset_candidate_scores[i],
             reverse=True,
         )
         out: list[AssetCandidate] = []
-        for i, (path, score) in enumerate(ranked):
+        for i in ranked:
             lib_id = (
                 self.asset_candidate_library_ids[i]
                 if i < len(self.asset_candidate_library_ids)
@@ -97,9 +97,9 @@ class InferenceObjectHypothesis:
             )
             out.append(
                 AssetCandidate(
-                    asset_path=path,
+                    asset_path=self.asset_candidate_paths[i],
                     library_id=lib_id,
-                    score=float(score),
+                    score=float(self.asset_candidate_scores[i]),
                     pose_xy=self.pose_xy,
                     pose_yaw=self.pose_yaw,
                     bbox_xyxy=self.mask_bbox,
@@ -166,7 +166,7 @@ def collect_hypotheses(
     items = list(hypotheses)
     items.sort(
         key=lambda h: (
-            -float(h.asset_candidate_scores[0]) if h.asset_candidate_scores else 0.0,
+            -float(max(h.asset_candidate_scores)) if h.asset_candidate_scores else 0.0,
             int(h.tile_id),
             int(h.instance_id),
         )

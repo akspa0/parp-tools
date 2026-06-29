@@ -18,7 +18,7 @@ public sealed class ObjectLibraryContractsTests
 
         Assert.Equal(first, second);
         Assert.StartsWith("objlib_", first);
-        Assert.Equal(20, first.Length);
+        Assert.Equal(21, first.Length);
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public sealed class ObjectLibraryContractsTests
 
         Assert.Equal(a, b);
         Assert.StartsWith("objvar_", a);
-        Assert.Equal(22, a.Length);
+        Assert.Equal(23, a.Length);
     }
 
     [Fact]

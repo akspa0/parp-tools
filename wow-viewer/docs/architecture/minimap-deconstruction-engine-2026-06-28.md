@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-28
 
-**Status:** Phases 1–6 code-complete; real-data proofs pending; analytic-normal decision landed
+**Status:** Phases 1–6 code-complete; static-review fixes landed; real-data proofs pending; analytic-normal decision landed
 
 **Spec owner:** `wow-viewer/specs/077-minimap-deconstruction-engine/`
 
@@ -119,16 +119,38 @@ Only if needed:
   `build_object_library.py`, reviewer `review_object_library.py`, end-to-end
   pytest `test_object_library_e2e.py`, quickstart. C# capture-lane
   extension (T010) deferred.
+- Static-review correction: C# and Python object IDs now share the same
+  SHA1-14-hex `objlib_` and SHA1-16-hex `objvar_` truncation rules, and
+  variant payloads use spec-string capture modes plus single-precision `G9`
+  pose formatting on both sides.
 - **Stage B** (teacher object suppression): code-complete. Python module
   `data-harvester/src/harvester/teacher_prior.py`, CLI
   `build_teacher_prior_dataset.py`, reviewer
   `review_teacher_prior_dataset.py`, pytest tests. T021 (real-data proof
-  on a staged-client-backed V18 store) pending.
+  on a staged-client-backed V18 store) pending. This stage currently uses
+  aggregate V18 tile masks, not per-object capture-library masks. The
+  default teacher priority is `object_precise_mask`, then
+  `object_filtered_mask`, then `object_mask`; older generated
+  teacher-prior stores may have used filtered-first and should be rebuilt.
+  The reviewer can render a targeted `--tile-id` with source V18 masks
+  beside the teacher mask to diagnose missing ships/buildings. The
+  visibility audit `scripts/audit_teacher_prior_visibility.py` scores
+  whether each aggregate object mask is visibly represented in the raw
+  minimap, buckets rows as `visible`, `weak`, `tiny`, or `empty`, and
+  writes a `kept_tiles.parquet` manifest so weak/mismatched object-mask
+  rows can be excluded from height training.
 - **Stage C** (height-only terrain model): code-complete with the V18 perf
   stack ported (AMP, torch.compile, gradient clipping, multi-scale L1,
-  optional Sobel + normal-consistency losses, early stopping, resume,
-  labeled preview panels, DataLoader with workers + prefetch, optional
-  VRAM autotune, deterministic seeding, throughput reporting). Dataset
+  optional Sobel + normal-consistency losses, optional V18 normal-guidance
+  loss derived from predicted height, labeled preview panels,
+  DataLoader with workers + prefetch, optional VRAM autotune,
+  deterministic seeding, throughput reporting). The trainer now uses
+  epoch-based training with deterministic train/validation split,
+  epoch-level validation, resume from epoch + step state, and
+  `*_latest.pt` / `*_best.pt` checkpoints (`*_model.pt` remains a latest
+  compatibility alias). `--steps` is only a smoke/resume cap; `--epochs`
+  is the production training contract. Normal guidance does not add a
+  normal head; the model still predicts only `height_257`. Dataset
   `data-harvester/src/harvester/height_only_prior_dataset.py`, training
   script `scripts/train_height_only_prior.py`, pytest tests. T029 (real-
   data smoke proof) pending.
@@ -143,7 +165,16 @@ Only if needed:
 - **Stage E** (normal follow-on): analytic baseline code-complete in
   `data-harvester/src/harvester/height_to_normal.py`. **Decision (T042):
   analytic normals are sufficient for the MVP; no normal model is
-  trained.** T043/T044 deferred.
+  trained.** T043/T044 deferred. Static review fixed batched numpy/torch
+  channel-axis normalization and angular-difference reduction.
+
+## Operator Guide
+
+- Full PowerShell-first commands live in
+  `wow-viewer/specs/077-minimap-deconstruction-engine/user-guide.md`.
+- The guide covers validation commands, object-library build/review,
+  teacher-prior build/review, height-only CPU/CUDA smoke runs, ADT-free
+  prior generation, expected outputs, and troubleshooting.
 
 ## Why This Route
 

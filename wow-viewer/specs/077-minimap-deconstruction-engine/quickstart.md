@@ -1,5 +1,9 @@
 # Spec 077 Quickstart — Per-Object Capture Library
 
+For the full PowerShell-first operator path across object library,
+teacher-prior generation, height-only training, ADT-free prior generation,
+and analytic normals, see `user-guide.md` in this directory.
+
 This quickstart walks through the first end-to-end run of the spec 077
 per-object capture library. It is intentionally Python-first: the
 enumerator, builder, and reviewer all run from the data-harvester and
@@ -10,8 +14,8 @@ the CI integration test).
 
 - `uv` is installed and the harvester environment is bootstrapped:
 
-  ```bash
-  cd wow-viewer/data-harvester
+  ```powershell
+  Set-Location -LiteralPath "I:\parp\parp-tools\wow-viewer\data-harvester"
   uv sync
   ```
 
@@ -24,12 +28,9 @@ the CI integration test).
 
 1. **Enumerate capture jobs** from a V18 build:
 
-   ```bash
-   cd wow-viewer/data-harvester
-   uv run python scripts/enumerate_object_capture_jobs.py \
-       --build 3_3_5_12340 \
-       --include-modf \
-       --output ../../output/datasets/object-library/jobs_3_3_5_12340.jsonl
+   ```powershell
+   Set-Location -LiteralPath "I:\parp\parp-tools\wow-viewer\data-harvester"
+   uv run python scripts/enumerate_object_capture_jobs.py --build "3_3_5_12340" --include-modf --output "..\output\datasets\object-library\jobs_3_3_5_12340.jsonl"
    ```
 
    This reads `output/datasets/v18/3_3_5_12340.zarr/placements.parquet`
@@ -46,14 +47,9 @@ the CI integration test).
 
 3. **Build the library**:
 
-   ```bash
-   cd wow-viewer/data-harvester
-   uv run python scripts/build_object_library.py \
-       --jobs ../../output/datasets/object-library/jobs_3_3_5_12340.jsonl \
-       --captures-dir /path/to/captures \
-       --output-root ../../output/datasets/object-library \
-       --run-name smoke_3_3_5_12340 \
-       --target-size 128
+   ```powershell
+   Set-Location -LiteralPath "I:\parp\parp-tools\wow-viewer\data-harvester"
+   uv run python scripts/build_object_library.py --jobs "..\output\datasets\object-library\jobs_3_3_5_12340.jsonl" --captures-dir "..\output\datasets\object-library\captures_3_3_5_12340" --output-root "..\output\datasets\object-library" --run-name "smoke_3_3_5_12340" --target-size 128
    ```
 
    This writes
@@ -65,11 +61,9 @@ the CI integration test).
 
 4. **Render review artifacts**:
 
-   ```bash
-   cd wow-viewer/data-harvester
-   uv run python scripts/review_object_library.py \
-       --library ../../output/datasets/object-library/smoke_3_3_5_12340.zarr \
-       --output-dir ../../output/analysis/object-library/smoke_3_3_5_12340
+   ```powershell
+   Set-Location -LiteralPath "I:\parp\parp-tools\wow-viewer\data-harvester"
+   uv run python scripts/review_object_library.py --library "..\output\datasets\object-library\smoke_3_3_5_12340.zarr" --output-dir "..\output\analysis\object-library\smoke_3_3_5_12340"
    ```
 
    Open `wow-viewer/output/analysis/object-library/smoke_3_3_5_12340/index.html`
@@ -77,8 +71,8 @@ the CI integration test).
 
 ## CI integration test (no client data required)
 
-```bash
-cd wow-viewer/data-harvester
+```powershell
+Set-Location -LiteralPath "I:\parp\parp-tools\wow-viewer\data-harvester"
 uv run pytest tests/test_object_library.py tests/test_object_library_e2e.py -q
 ```
 

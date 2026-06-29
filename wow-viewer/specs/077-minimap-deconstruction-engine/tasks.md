@@ -59,14 +59,17 @@
 
 - [x] T014 [P] [US2] Add pytest coverage for no-object pass-through and object-heavy suppression behavior in `wow-viewer/data-harvester/tests/`.
 - [x] T015 [P] [US2] Add tests for metadata/index parity between source V18 tiles and generated teacher-prior rows.
+- [x] T015a [P] [US2] Add tests for precise-first mask priority, compact-row review, and mask/minimap visibility audit bucketing.
 
 ### Implementation for User Story 2
 
 - [x] T016 [US2] Add a Python library module for teacher-prior generation under `wow-viewer/data-harvester/src/harvester/`.
 - [x] T017 [US2] Add a CLI script under `wow-viewer/data-harvester/scripts/` that reads V18 Zarr stores and writes the teacher-prior dataset.
-- [x] T018 [US2] Make the prior generator explicitly prefer filtered precise/object-filtered masks over coarse rectangle roof masks where available.
+- [x] T018 [US2] Make the prior generator explicitly prefer `object_precise_mask`, with `object_filtered_mask` and `object_mask` as documented fallbacks/ablations.
 - [x] T019 [US2] Add processed-prior review-artifact rendering under `wow-viewer/data-harvester/scripts/`.
 - [x] T020 [US2] Document the exact phase-1 prior channels in the generated dataset metadata.
+- [x] T020a [US2] Add targeted teacher-prior review by original `tile_id` and compact `row_index`, including source V18 masks.
+- [x] T020b [US2] Add mask/minimap visibility audit outputting `visibility_audit.parquet`, `summary.json`, and `kept_tiles.parquet` for second-stage curation.
 - [ ] T021 [US2] Run and record a bounded proof on one object-rich anchor map using staged-client-backed V18 data.
 
 **Checkpoint**: A reusable teacher-prior dataset exists and is auditable tile by tile.
@@ -91,6 +94,10 @@
 - [x] T026 [US3] Add or adapt a height-only training script under `wow-viewer/data-harvester/scripts/` that predicts only `height_257`.
 - [x] T027 [US3] Preserve existing filtered terrain-valid weighting and authoritative raw height targets in the new lane.
 - [x] T028 [US3] Emit preview artifacts showing processed prior, prediction, and ground truth.
+- [x] T028a [US3] Emit validation preview grids showing raw minimap, teacher mask/confidence, processed prior, prediction, truth, error, and loss weight.
+- [x] T028b [US3] Train from visibility-audited curation manifests so weak/mismatched teacher-mask rows can be excluded.
+- [x] T028c [US3] Add optional V18 normal-guidance loss derived from predicted height, without adding a normal output head.
+- [x] T028d [US3] Use validation loss for LR plateau scheduling, resume LR override, and best-checkpoint selection without backpropagating validation data.
 - [ ] T029 [US3] Run a bounded smoke training proof and record the outputs in the spec or architecture note.
 
 **Checkpoint**: The first terrain proof is a tiny height-only lane, not a combined terrain model.

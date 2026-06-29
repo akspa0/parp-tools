@@ -1,5 +1,101 @@
 # Progress — wow-viewer
 
+## 2026-06-28 - Spec 077 teacher-prior mask diagnostics and alignment fixes
+
+### What landed
+
+- Corrected teacher-prior default mask priority to `object_precise_mask`, then `object_filtered_mask`, then `object_mask`.
+- Added `build_teacher_prior_dataset.py --mask-priority` so filtered-first can still be run intentionally for ablation.
+- Clarified that current teacher masks are aggregate V18 tile masks, not per-object capture-library masks.
+- Fixed `HeightOnlyPriorDataset` curated-row alignment: prior arrays use compact teacher-prior row indices, while V18 `height_257` / `object_filtered_mask` must be read by original `tile_id`.
+- Added trainer validation preview grids with raw minimap, object mask/confidence, suppressed prior, truth, prediction, error, and loss weight.
+- Enhanced `review_teacher_prior_dataset.py` contact sheets: labels now show compact row + real `tile_id`, plus raw, teacher mask, overlay, suppressed prior, and changed-pixel diff.
+- Added targeted review support: `--tile-id` selects original tile IDs, and `--v18-path` renders source `object_precise_mask`, `object_filtered_mask`, and `object_mask` next to the teacher mask.
+- Added `--row-index` to reproduce old contact-sheet row labels after curation compaction.
+- Added `scripts/audit_teacher_prior_visibility.py` to bucket aggregate teacher masks by raw-minimap support (`visible`, `weak`, `tiny`, `empty`) and write `visibility_audit.parquet`, `summary.json`, and `kept_tiles.parquet` for second-stage curation.
+- The audit accepts multiple `--library` stores and can write one combined manifest for two-build training.
+- Updated Spec Kit plan/tasks: Phase 2 now explicitly includes precise-first masks, source-mask review, and visibility-audit curation; Phase 3 trains from the visibility-audited manifest and emits validation preview grids.
+- Updated user guide with the canonical operator sequence and visibility-audited training commands. Full CUDA route uses `--curation-manifest "..\output\analysis\teacher-prior\visibility-audit\two_build"` and run name `cuda_visibility_audited_two_build`.
+- Added optional height-only normal guidance: `HeightOnlyPriorDataset` now exposes V18 `normal_xyz` / `normal_mask`, and `train_height_only_prior.py --normal-guidance-weight` derives normals from predicted height and compares them to V18 normals as an auxiliary loss. This does not add a normal output head.
+- Recommended first CUDA route now includes `--normal-guidance-weight 0.10` because earlier normal guidance materially improved fine detail and training speed.
+- Hardened checkpoint writes on Windows: checkpoints now save to a unique temp file, retry atomic replacement, and fall back to a timestamped `*_epoch####_step#######.pt` file instead of crashing on locked `*.pt` targets such as error code `1224`.
+- Added validation-loss-driven ReduceLROnPlateau scheduling (`--lr-plateau-patience`, `--lr-plateau-factor`, `--min-learning-rate`) and `--resume-learning-rate` to lower optimizer LR after resuming from a plateau. Validation loss controls LR and best checkpoint selection; it is not backpropagated.
+
+### Validation
+
+- Added tests for precise-first priority, filtered-first ablation, dataset provenance fields, targeted teacher-prior review output, compact-row review, visibility-audit bucketing, dataset normal fields, normal-guidance loss contribution, LR scheduler metrics, and locked-checkpoint fallback.
+- Direct test execution remains blocked in this IDE shell by `The "path" argument must be of type string. Received undefined`.
+- Required local command: `uv run pytest tests/test_teacher_prior.py tests/test_height_only_prior.py -q` from `wow-viewer/data-harvester`.
+
+## 2026-06-28 - Spec 077 height-only trainer epoch/checkpoint refactor
+
+### What landed
+
+- `scripts/train_height_only_prior.py` now uses epoch-based training as the real contract (`--epochs`).
+- `--steps` remains only as an optional smoke/resume cap; resumed runs add that many steps after the loaded checkpoint step.
+- The trainer now builds a deterministic train/validation split, reports train/val tile counts, computes `steps_per_epoch`, and validates each epoch.
+- Checkpoint outputs are now `*_latest.pt` and `*_best.pt`; `*_model.pt` remains a compatibility alias to latest.
+- Resume now reloads model, optimizer, scaler, epoch, step, best validation, and history state; compiled and non-compiled model state dict loading share one helper.
+- Metrics JSON now records requested epochs/steps, global step, split sizes, epoch history, checkpoint paths, and existing per-batch metrics.
+- `user-guide.md` and `minimap-deconstruction-engine-2026-06-28.md` now describe epoch training and latest/best checkpoints.
+
+### Validation
+
+- Added focused pytest assertions for latest/best checkpoint outputs and epoch-mode metrics.
+- Direct test execution is blocked in this IDE shell by `The "path" argument must be of type string. Received undefined`.
+- Required user/local command: `uv run pytest tests/test_height_only_prior.py tests/test_teacher_prior.py -q` from `wow-viewer/data-harvester`.
+
+## 2026-06-28 - Spec 077 height-only trainer multi-source inputs
+
+### What landed
+
+- `scripts/train_height_only_prior.py` now accepts multiple `--prior` paths and matching multiple `--v18` paths in a single run.
+- The trainer builds one `HeightOnlyPriorDataset` per source pair and concatenates them with `ConcatDataset`.
+- `--max-tiles` now caps the combined run across sources, preserving bounded smoke behavior.
+- Metrics now record `source_count`, `prior_paths`, and `v18_paths`.
+- Added pytest coverage for a two-source CPU smoke run.
+- Updated Spec 077 user guide commands to use both `0_5_3_3368` and `3_3_5_12340`.
+- Follow-up curation enforcement landed: `build_teacher_prior_dataset.py` and `train_height_only_prior.py` both accept `--curation-manifest`; `HeightOnlyPriorDataset` tile filtering now preserves original tensor-row mapping so tile metadata cannot silently pair with the wrong tensor row.
+- Follow-up safety fix: height-only trainer no longer defaults to `--max-tiles 64`; full runs now use all curated tiles unless an explicit smoke cap is supplied.
+
+### Validation
+
+- Pending user rerun after the multi-source patch.
+
+## 2026-06-28 - Spec 077 static review and operator guide
+
+### What landed
+
+- Fixed cross-language object-library ID rules:
+  - C# `ComputeLibraryId` now truncates SHA1 to 14 hex characters, matching Python.
+  - C# `ComputeVariantId` now truncates SHA1 to 16 hex characters, matching Python and quickstart wording.
+  - C# variant payload now uses spec strings (`orthographic_topdown`, `geometry_projection`, `hybrid`, `unknown`) instead of enum display names.
+  - Python variant pose floats now use single-precision `G9` formatting to match C# payload generation.
+- Fixed `train_height_only_prior.py` static bugs:
+  - VRAM autotune now unpacks `compute_height_loss` as `(loss, metrics)`.
+  - Preview generation now selects the first batch item and normalizes 2-D display tensors correctly.
+- Fixed `height_to_normal.py` batched math:
+  - numpy gradients operate on the last two axes.
+  - batched numpy/torch normal outputs normalize across the XYZ channel axis.
+  - angular difference now reduces along the correct channel axis for HWC and BCHW normals.
+- Added `wow-viewer/specs/077-minimap-deconstruction-engine/user-guide.md` with PowerShell-first validation and operator commands.
+
+### Validation status
+
+- Static review completed for the touched bug patterns.
+- Direct local execution remains blocked in this IDE shell; user-run commands in `user-guide.md` are the proof path.
+
+### Files touched
+
+- `wow-viewer/src/core/WowViewer.Core/Maps/{ObjectLibraryEntry,ObjectCaptureVariant}.cs`
+- `wow-viewer/tests/WowViewer.Core.Tests/ObjectLibraryContractsTests.cs`
+- `wow-viewer/data-harvester/src/harvester/{object_library,height_to_normal}.py`
+- `wow-viewer/data-harvester/scripts/train_height_only_prior.py`
+- `wow-viewer/data-harvester/tests/{test_object_library,test_height_to_normal}.py`
+- `wow-viewer/specs/077-minimap-deconstruction-engine/{quickstart,user-guide}.md`
+- `wow-viewer/docs/architecture/minimap-deconstruction-engine-2026-06-28.md`
+- `wow-viewer/memory-bank/{activeContext,progress}.md`
+
 ## 2026-06-28 - Spec 077 Phase 6 (US5 Normal Follow-On) - decision landed (no model work)
 
 ### What landed (Python)

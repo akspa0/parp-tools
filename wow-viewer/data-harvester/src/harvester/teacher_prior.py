@@ -17,10 +17,10 @@ Phase 1 channels
   - ``[..., 3]``   = ``teacher_object_mask_256`` (uint8)
   - ``[..., 4]``   = ``teacher_object_confidence_256`` (uint8)
 
-The mask preference chain (spec 077 FR-009) is:
+The default mask preference chain is:
 
-1. ``object_filtered_mask``  (preferred: WMOs + filtered doodads, no trees)
-2. ``object_precise_mask``   (fallback: precise silhouettes incl. trees)
+1. ``object_precise_mask``   (fuller object footprint/silhouette proxy)
+2. ``object_filtered_mask``  (filtered terrain gate: WMOs + non-clutter doodads)
 3. ``object_mask``           (last resort: bounding-box footprint)
 
 The confidence channel is a constant 255 for the chosen mask band. A
@@ -51,6 +51,12 @@ PRIOR_CHANNELS: tuple[str, ...] = (
     "teacher_object_confidence",
 )
 
+DEFAULT_MASK_PRIORITY: tuple[str, ...] = (
+    MaskSource.ObjectPrecise.value,
+    MaskSource.ObjectFiltered.value,
+    MaskSource.ObjectMask.value,
+)
+
 
 @dataclass(frozen=True)
 class TeacherPriorTileRecord:
@@ -74,21 +80,43 @@ def pick_object_mask(
     object_precise_mask: np.ndarray | None,
     object_mask: np.ndarray | None,
     threshold: float = 0.5,
+    mask_priority: tuple[str, ...] = DEFAULT_MASK_PRIORITY,
 ) -> tuple[np.ndarray, MaskSource]:
-    """Return ``(binary_mask_256, source)`` honoring the spec 077 preference chain.
+    """Return ``(binary_mask_256, source)`` honoring the requested preference chain.
 
     Each candidate is treated as a soft mask in ``[0, 1]``; a pixel is
     considered an object pixel when ``value >= threshold``. The first
     non-null candidate wins. A fully empty result means no teacher
     objects were observable on this tile.
     """
-    if object_filtered_mask is not None and float(object_filtered_mask.max(initial=0.0)) > 0.0:
-        return (object_filtered_mask >= threshold).astype(np.uint8), MaskSource.ObjectFiltered
-    if object_precise_mask is not None and float(object_precise_mask.max(initial=0.0)) > 0.0:
-        return (object_precise_mask >= threshold).astype(np.uint8), MaskSource.ObjectPrecise
-    if object_mask is not None and float(object_mask.max(initial=0.0)) > 0.0:
-        return (object_mask >= threshold).astype(np.uint8), MaskSource.ObjectMask
+    candidates = {
+        MaskSource.ObjectFiltered.value: (object_filtered_mask, MaskSource.ObjectFiltered),
+        MaskSource.ObjectPrecise.value: (object_precise_mask, MaskSource.ObjectPrecise),
+        MaskSource.ObjectMask.value: (object_mask, MaskSource.ObjectMask),
+    }
+    for source_name in mask_priority:
+        if source_name not in candidates:
+            raise ValueError(f"Unknown mask source in priority chain: {source_name}")
+        candidate, source = candidates[source_name]
+        if candidate is not None and float(candidate.max(initial=0.0)) > 0.0:
+            return (candidate >= threshold).astype(np.uint8), source
     return (np.zeros((256, 256), dtype=np.uint8), MaskSource.None_)
+
+
+def _resize_mask_nearest(mask: np.ndarray | None, shape: tuple[int, int]) -> np.ndarray | None:
+    if mask is None:
+        return None
+    if mask.shape == shape:
+        return mask
+    if mask.ndim != 2:
+        raise ValueError(f"Expected 2-D object mask; got {mask.shape}")
+    target_h, target_w = shape
+    src_h, src_w = mask.shape
+    if target_h <= 0 or target_w <= 0 or src_h <= 0 or src_w <= 0:
+        raise ValueError(f"Invalid mask resize from {mask.shape} to {shape}")
+    ys = np.linspace(0, src_h - 1, target_h).astype(np.int64)
+    xs = np.linspace(0, src_w - 1, target_w).astype(np.int64)
+    return mask[np.ix_(ys, xs)]
 
 
 def suppress_object_pixels(
@@ -124,6 +152,8 @@ def build_prior_tensor(
     object_filtered_mask: np.ndarray | None,
     object_precise_mask: np.ndarray | None,
     object_mask: np.ndarray | None,
+    *,
+    mask_priority: tuple[str, ...] = DEFAULT_MASK_PRIORITY,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, MaskSource]:
     """Build the (suppressed, mask, confidence, source) tuple for one tile.
 
@@ -131,10 +161,15 @@ def build_prior_tensor(
     described at the top of this module. The returned mask and
     confidence arrays are 256×256 uint8 for direct Zarr storage.
     """
+    mask_shape = minimap_rgb.shape[:2]
+    object_filtered_mask = _resize_mask_nearest(object_filtered_mask, mask_shape)
+    object_precise_mask = _resize_mask_nearest(object_precise_mask, mask_shape)
+    object_mask = _resize_mask_nearest(object_mask, mask_shape)
     mask_uint8, source = pick_object_mask(
         object_filtered_mask=object_filtered_mask,
         object_precise_mask=object_precise_mask,
         object_mask=object_mask,
+        mask_priority=mask_priority,
     )
     suppressed = suppress_object_pixels(minimap_rgb, mask_uint8)
     confidence = np.full(mask_uint8.shape, 255, dtype=np.uint8)

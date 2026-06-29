@@ -15,9 +15,11 @@ visibility class materially change the top-down appearance.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Iterable
+
+import numpy as np
 
 # ---- Enum-like string sets ------------------------------------------------
 #
@@ -109,6 +111,11 @@ def variant_id_from_parts(parts: Iterable[object]) -> str:
     payload = "|".join(str(part) for part in parts)
     digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()
     return f"objvar_{digest[:16]}"
+
+
+def _format_single_g9(value: float) -> str:
+    """Format a value like C# ``float.ToString("G9", InvariantCulture)``."""
+    return format(float(np.float32(value)), ".9g")
 
 
 @dataclass(frozen=True)
@@ -204,8 +211,8 @@ def make_variant_id(
 ) -> str:
     """Build a deterministic variant id matching the C# contract.
 
-    The pose floats are formatted with ``R`` (round-trip) for stability on
-    every platform.
+    The pose floats are formatted as single-precision ``G9`` values to match
+    the C# ``ObjectCaptureVariant.ComputeVariantId`` payload exactly.
     """
     if not library_id:
         return ""
@@ -214,10 +221,10 @@ def make_variant_id(
             library_id,
             capture_build or "",
             capture_mode,
-            f"{float(rot_x):R}",
-            f"{float(rot_y):R}",
-            f"{float(rot_z):R}",
-            f"{float(scale):R}",
+            _format_single_g9(rot_x),
+            _format_single_g9(rot_y),
+            _format_single_g9(rot_z),
+            _format_single_g9(scale),
         )
     )
 

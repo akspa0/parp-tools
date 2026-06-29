@@ -47,38 +47,84 @@ def _read_tiles_parquet(path: Path) -> list[dict]:
     ]
 
 
+def _resize_mask_nearest(mask: np.ndarray, target_h: int = 256, target_w: int = 256) -> np.ndarray:
+    if mask.shape == (target_h, target_w):
+        return mask
+    if mask.ndim != 2:
+        raise ValueError(f"Expected 2-D mask for resize; got {mask.shape}")
+    ys = np.linspace(0, mask.shape[0] - 1, target_h).astype(np.int64)
+    xs = np.linspace(0, mask.shape[1] - 1, target_w).astype(np.int64)
+    return mask[np.ix_(ys, xs)]
+
+
+def _mask_to_rgb(mask: np.ndarray) -> np.ndarray:
+    arr = mask.astype(np.float32, copy=False)
+    if float(arr.max(initial=0.0)) <= 1.0:
+        arr = arr * 255.0
+    return np.stack([arr.clip(0, 255).astype(np.uint8)] * 3, axis=-1)
+
+
 def _render_contact_sheet(
     raw: np.ndarray,
     mask: np.ndarray,
     prior: np.ndarray,
+    tiles: list[dict],
     indices: list[int],
     output_path: Path,
     *,
+    source_masks: dict[str, np.ndarray] | None = None,
     cell_size: int = 128,
     cols: int = 4,
 ) -> None:
     rows = max(1, (len(indices) + cols - 1) // cols)
-    sheet = Image.new("RGB", (cols * cell_size, rows * cell_size * 3), (24, 24, 24))
+    has_sources = bool(source_masks)
+    bands = 8 if has_sources else 5
+    sheet = Image.new("RGB", (cols * cell_size, rows * cell_size * bands), (24, 24, 24))
     draw = ImageDraw.Draw(sheet)
     for i, idx in enumerate(indices):
         row = i // cols
         col = i % cols
-        for band in range(3):
+        tile = tiles[idx] if idx < len(tiles) else {}
+        tile_id = int(tile.get("tile_id", idx))
+        mask_rgb = _mask_to_rgb(mask[idx])
+        raw_rgb = raw[idx].astype(np.uint8, copy=False)
+        prior_rgb = prior[idx][:, :, :3].astype(np.uint8, copy=False)
+        overlay = raw_rgb.copy()
+        mask_bool = mask[idx] > 0
+        overlay[mask_bool, 0] = 255
+        overlay[mask_bool, 1] = (overlay[mask_bool, 1] * 0.25).astype(np.uint8)
+        overlay[mask_bool, 2] = (overlay[mask_bool, 2] * 0.25).astype(np.uint8)
+        diff = np.abs(raw_rgb.astype(np.int16) - prior_rgb.astype(np.int16)).max(axis=2).astype(np.uint8)
+        diff_rgb = np.stack([diff] * 3, axis=-1)
+        panels = [
+            ("raw", raw_rgb),
+            ("teacher mask", mask_rgb.astype(np.uint8, copy=False)),
+        ]
+        if source_masks:
+            source_tile_id = int(tile.get("tile_id", idx))
+            for name in ("object_precise_mask", "object_filtered_mask", "object_mask"):
+                source_arr = source_masks.get(name)
+                if source_arr is not None and source_tile_id < source_arr.shape[0]:
+                    panels.append((name, _mask_to_rgb(_resize_mask_nearest(source_arr[source_tile_id]))))
+                else:
+                    panels.append((name, np.zeros_like(raw_rgb)))
+        panels.extend([
+            ("overlay", overlay),
+            ("suppressed", prior_rgb),
+            ("changed", diff_rgb),
+        ])
+        for band, (label, arr) in enumerate(panels):
             if band == 0:
-                arr = raw[idx]
-            elif band == 1:
-                arr = np.stack([mask[idx]] * 3, axis=-1) * 255
+                text = f"row {idx} tile {tile_id} raw"
             else:
-                arr = prior[idx][:, :, :3]
+                text = label
             if arr.dtype != np.uint8:
                 arr = arr.astype(np.uint8)
             img = Image.fromarray(arr).resize((cell_size, cell_size), Image.NEAREST)
-            sheet.paste(img, (col * cell_size, row * cell_size * 3 + band * cell_size))
-        draw.text(
-            (col * cell_size + 4, row * cell_size * 3 + 4),
-            f"tile {idx}",
-            fill=(255, 255, 0),
-        )
+            y = row * cell_size * bands + band * cell_size
+            sheet.paste(img, (col * cell_size, y))
+            draw.rectangle((col * cell_size, y, col * cell_size + cell_size - 1, y + 11), fill=(0, 0, 0))
+            draw.text((col * cell_size + 4, y + 1), text, fill=(255, 255, 0))
     sheet.save(output_path)
 
 
@@ -92,8 +138,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Directory under which index.html / contact_sheet.png are written.")
     parser.add_argument("--max-tiles", type=int, default=16,
                         help="Number of tiles to render in the contact sheet.")
-    parser.add_argument("--prefer-mask-source", type=str, default="object_filtered_mask",
+    parser.add_argument("--prefer-mask-source", type=str, default="object_precise_mask",
                         help="Filter rendered tiles to those using the given mask source.")
+    parser.add_argument("--tile-id", type=int, nargs="*", default=None,
+                        help="Render specific original tile_id values instead of the first preferred rows.")
+    parser.add_argument("--row-index", type=int, nargs="*", default=None,
+                        help="Render specific compact teacher-prior row indices. Use this to reproduce old contact-sheet labels.")
+    parser.add_argument("--v18-path", type=Path, default=None,
+                        help="Optional source V18 store. When provided, render object_precise/filter/object masks beside the teacher mask.")
     return parser.parse_args(argv)
 
 
@@ -114,17 +166,36 @@ def main_with_args(argv: list[str] | None = None) -> int:
     source_counts = Counter(str(t.get("filtered_mask_source", "")) for t in tiles)
     coverage = np.array([t.get("teacher_object_cov", 0.0) for t in tiles], dtype=np.float32)
 
-    preferred_indices = [
-        i for i, t in enumerate(tiles)
-        if t.get("filtered_mask_source") == args.prefer_mask_source
-    ]
+    if args.row_index:
+        preferred_indices = [
+            int(row_index) for row_index in args.row_index
+            if 0 <= int(row_index) < len(tiles)
+        ]
+    elif args.tile_id:
+        requested = set(int(tile_id) for tile_id in args.tile_id)
+        preferred_indices = [
+            i for i, t in enumerate(tiles)
+            if int(t.get("tile_id", -1)) in requested
+        ]
+    else:
+        preferred_indices = [
+            i for i, t in enumerate(tiles)
+            if t.get("filtered_mask_source") == args.prefer_mask_source
+        ]
     if not preferred_indices:
         preferred_indices = list(range(len(tiles)))
     selected = preferred_indices[: args.max_tiles]
 
+    source_masks: dict[str, np.ndarray] = {}
+    if args.v18_path is not None:
+        for key in ("object_precise_mask", "object_filtered_mask", "object_mask"):
+            arr = _open_zarr_array(args.v18_path, key)
+            if arr is not None:
+                source_masks[key] = arr
+
     args.output_dir.mkdir(parents=True, exist_ok=True)
     contact_path = args.output_dir / "contact_sheet.png"
-    _render_contact_sheet(raw, mask, prior, selected, contact_path)
+    _render_contact_sheet(raw, mask, prior, tiles, selected, contact_path, source_masks=source_masks or None)
 
     summary = {
         "build": args.library.stem.replace(".zarr", ""),
@@ -134,6 +205,12 @@ def main_with_args(argv: list[str] | None = None) -> int:
         "coverage_median": float(np.median(coverage)) if coverage.size else 0.0,
         "coverage_max": float(coverage.max()) if coverage.size else 0.0,
         "preferred_mask_source": args.prefer_mask_source,
+        "requested_row_indices": [int(row_index) for row_index in args.row_index] if args.row_index else None,
+        "requested_tile_ids": [int(tile_id) for tile_id in args.tile_id] if args.tile_id else None,
+        "selected_tile_ids": [int(tiles[i].get("tile_id", i)) for i in selected],
+        "selected_rows": [int(i) for i in selected],
+        "source_v18_path": str(args.v18_path) if args.v18_path is not None else None,
+        "source_mask_arrays": sorted(source_masks),
         "contact_sheet_path": str(contact_path),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }

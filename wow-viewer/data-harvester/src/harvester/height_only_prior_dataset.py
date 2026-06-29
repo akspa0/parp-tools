@@ -8,7 +8,11 @@ The dataset returns the exact ``HeightOnlyTrainingSample`` contract from
 spec 077 data-model.md §3.1:
 
   * ``input_prior`` ``(C, 256, 256)`` float32 — suppressed RGB + mask + confidence
+  * ``raw_minimap_rgb`` ``(3, 256, 256)`` float32 — unsuppressed minimap RGB for review
+  * ``teacher_object_mask`` / ``teacher_object_confidence`` ``(1, 256, 256)`` float32 — deconstruction review bands
   * ``height_257`` ``(1, 257, 257)``  float32 — per-vertex terrain height
+  * ``normal_xyz`` ``(3, 257, 257)`` float32 — optional V18 normal guidance target
+  * ``normal_mask`` ``(1, 257, 257)`` float32 — optional normal-guidance validity mask
   * ``weight_257`` ``(1, 257, 257)``  float32 — terrain-valid weight (1.0 on
     terrain, 0.0 on object/filtered pixels)
   * ``meta_build`` / ``meta_map`` / ``meta_tile_id`` — provenance
@@ -126,11 +130,19 @@ class HeightOnlyPriorDataset(Dataset):
 
         teacher_mask = _load_zarr_array(self.prior_path, "teacher_object_mask_256")
         self.teacher_mask = teacher_mask  # (N, 256, 256) uint8, may be None
+        teacher_confidence = _load_zarr_array(self.prior_path, "teacher_object_confidence_256")
+        self.teacher_confidence = teacher_confidence  # (N, 256, 256) uint8, may be None
+        raw_minimap = _load_zarr_array(self.prior_path, "raw_minimap_rgb_256")
+        self.raw_minimap = raw_minimap  # (N, 256, 256, 3) uint8, may be None
 
         self.height_257 = None
+        self.normal_xyz = None
+        self.normal_mask = None
         self.weight_257 = None
         if self.v18_path is not None and self.v18_path.exists():
             self.height_257 = _load_zarr_array(self.v18_path, "height_257")
+            self.normal_xyz = _load_zarr_array(self.v18_path, "normal_xyz")
+            self.normal_mask = _load_zarr_array(self.v18_path, "normal_mask")
             if include_weight:
                 filtered = _load_zarr_array(self.v18_path, "object_filtered_mask")
                 if filtered is not None and filtered.size:
@@ -140,16 +152,17 @@ class HeightOnlyPriorDataset(Dataset):
                         self.height_257, dtype=np.float32
                     ) if self.height_257 is not None else None
 
-        self.tile_meta = _load_tiles_parquet(self.prior_path / "tiles.parquet")
-        if tile_filter is not None:
-            keep = set(int(t) for t in tile_filter)
-            self.tile_meta = [t for t in self.tile_meta if int(t.get("tile_id", -1)) in keep]
         # Build a tile_id -> prior-row-index lookup. The teacher-prior Zarr
         # was written in the same order as the V18 index, so the row index
         # equals the source tile_id unless a start-tile-id offset was used.
+        all_tile_meta = _load_tiles_parquet(self.prior_path / "tiles.parquet")
         self._tile_id_to_index: dict[int, int] = {}
-        for i, row in enumerate(self.tile_meta):
+        for i, row in enumerate(all_tile_meta):
             self._tile_id_to_index[int(row.get("tile_id", i))] = i
+        self.tile_meta = all_tile_meta
+        if tile_filter is not None:
+            keep = set(int(t) for t in tile_filter)
+            self.tile_meta = [t for t in self.tile_meta if int(t.get("tile_id", -1)) in keep]
 
     def __len__(self) -> int:
         return len(self.tile_meta) if self.tile_meta else self.prior_tensor.shape[0]
@@ -164,11 +177,31 @@ class HeightOnlyPriorDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         prior_index, row = self._resolve_index(idx)
+        source_tile_id = int(row.get("tile_id", prior_index))
         prior = self.prior_tensor[prior_index]  # (256, 256, 5) uint8
         prior_chw = np.transpose(prior.astype(np.float32) / 255.0, (2, 0, 1))  # (5, 256, 256)
+        if self.raw_minimap is not None and prior_index < self.raw_minimap.shape[0]:
+            raw = self.raw_minimap[prior_index].astype(np.float32) / 255.0
+            raw_chw = np.transpose(raw, (2, 0, 1))
+        else:
+            raw_chw = prior_chw[:3].copy()
 
-        if self.height_257 is not None and prior_index < self.height_257.shape[0]:
-            h = self.height_257[prior_index].astype(np.float32)  # (257, 257)
+        if self.teacher_mask is not None and prior_index < self.teacher_mask.shape[0]:
+            teacher_mask = self.teacher_mask[prior_index].astype(np.float32)[None, :, :]
+            if float(teacher_mask.max(initial=0.0)) > 1.0:
+                teacher_mask = teacher_mask / 255.0
+        else:
+            teacher_mask = prior_chw[3:4].copy()
+
+        if self.teacher_confidence is not None and prior_index < self.teacher_confidence.shape[0]:
+            teacher_confidence = self.teacher_confidence[prior_index].astype(np.float32)[None, :, :]
+            if float(teacher_confidence.max(initial=0.0)) > 1.0:
+                teacher_confidence = teacher_confidence / 255.0
+        else:
+            teacher_confidence = prior_chw[4:5].copy()
+
+        if self.height_257 is not None and source_tile_id < self.height_257.shape[0]:
+            h = self.height_257[source_tile_id].astype(np.float32)  # (257, 257)
             if self.height_norm:
                 h_mean = float(h.mean())
                 h_std = float(h.std()) + 1e-6
@@ -177,19 +210,48 @@ class HeightOnlyPriorDataset(Dataset):
         else:
             height = np.zeros((1, 257, 257), dtype=np.float32)
 
-        if self.weight_257 is not None and prior_index < self.weight_257.shape[0]:
-            w = self.weight_257[prior_index]  # (257, 257)
+        if self.normal_xyz is not None and source_tile_id < self.normal_xyz.shape[0]:
+            n = self.normal_xyz[source_tile_id].astype(np.float32)  # (257, 257, 3)
+            if n.ndim == 3 and n.shape[-1] == 3:
+                norm = np.linalg.norm(n, axis=2, keepdims=True)
+                normal = np.transpose(n / np.clip(norm, 1e-8, None), (2, 0, 1))
+            else:
+                normal = np.zeros((3, 257, 257), dtype=np.float32)
+        else:
+            normal = np.zeros((3, 257, 257), dtype=np.float32)
+
+        if self.normal_mask is not None and source_tile_id < self.normal_mask.shape[0]:
+            nm = np.clip(self.normal_mask[source_tile_id].astype(np.float32), 0.0, 1.0)
+            normal_mask = nm[None, :, :]
+        elif self.normal_xyz is not None and source_tile_id < self.normal_xyz.shape[0]:
+            normal_mask = np.ones((1, 257, 257), dtype=np.float32)
+        else:
+            normal_mask = np.zeros((1, 257, 257), dtype=np.float32)
+
+        if self.weight_257 is not None and source_tile_id < self.weight_257.shape[0]:
+            w = self.weight_257[source_tile_id]  # (257, 257)
             weight = w[None, :, :]
+        elif self.height_257 is None:
+            # In inference-only mode there is no authoritative target and no
+            # valid loss surface, so emit a zero weight map.
+            weight = np.zeros((1, 257, 257), dtype=np.float32)
         else:
             weight = np.ones((1, 257, 257), dtype=np.float32)
 
         return {
             "input_prior": torch.from_numpy(prior_chw),
+            "raw_minimap_rgb": torch.from_numpy(raw_chw),
+            "teacher_object_mask": torch.from_numpy(teacher_mask),
+            "teacher_object_confidence": torch.from_numpy(teacher_confidence),
             "height_257": torch.from_numpy(height),
+            "normal_xyz": torch.from_numpy(normal),
+            "normal_mask": torch.from_numpy(normal_mask),
             "weight_257": torch.from_numpy(weight),
             "meta_build": str(row.get("build", self.prior_path.stem)),
             "meta_map": str(row.get("map_name", row.get("map", ""))),
-            "meta_tile_id": int(row.get("tile_id", prior_index)),
+            "meta_tile_id": source_tile_id,
+            "meta_prior_row": prior_index,
+            "meta_v18_row": source_tile_id,
         }
 
 

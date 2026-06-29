@@ -207,12 +207,12 @@ def _masked_correlation(
     b: np.ndarray,
     b_mask: np.ndarray,
 ) -> float:
-    """Normalized cross-correlation on the union of two binary masks.
+    """Color/texture similarity on the intersection of two binary masks.
 
     Returns 0.0 when masks do not overlap enough to compute a stable
-    statistic; otherwise returns ``(a·b) / (||a|| * ||b||)`` over the
-    intersection of the two masks. Used as a coarse shape similarity
-    score; later lanes can swap in a learned embedding.
+    statistic; otherwise returns a similarity score in ``[0, 1]`` over the
+    intersection of the two masks. Constant-color masked regions fall back
+    to mean RGB distance so solid-color captures still rank correctly.
     """
     a_mask = (a_mask > 127).astype(np.float32)
     b_mask = (b_mask > 127).astype(np.float32)
@@ -230,8 +230,11 @@ def _masked_correlation(
     a_norm = float((a_centered ** 2).sum())
     b_norm = float((b_centered ** 2).sum())
     if a_norm < 1e-6 or b_norm < 1e-6:
-        return 0.0
-    return float((a_centered * b_centered).sum() / math.sqrt(a_norm * b_norm))
+        max_dist = math.sqrt(3.0 * 255.0 * 255.0)
+        dist = float(np.linalg.norm(a_mean - b_mean))
+        return max(0.0, min(1.0, 1.0 - dist / max_dist))
+    corr = float((a_centered * b_centered).sum() / math.sqrt(a_norm * b_norm))
+    return max(0.0, min(1.0, (corr + 1.0) * 0.5))
 
 
 def score_candidates(
@@ -265,9 +268,7 @@ def score_candidates(
         corr = _masked_correlation(
             crop_resized_rgb, crop_resized_mask, thumb_resized, thumb_mask_resized
         )
-        # Map correlation [-1, 1] -> [0, 1] so the blend is bounded.
-        corr_norm = max(0.0, min(1.0, (corr + 1.0) * 0.5))
-        score = 0.5 * phash_sim + 0.5 * corr_norm
+        score = 0.5 * phash_sim + 0.5 * corr
         scored.append(
             AssetCandidate(
                 asset_path=thumb.asset_path,
