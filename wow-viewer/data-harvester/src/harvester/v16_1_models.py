@@ -33,16 +33,45 @@ _TEXTURE_PALETTE_16 = torch.tensor(
 )
 
 
+def _make_norm(channels: int, norm: str) -> nn.Module:
+    if norm == "batch":
+        return nn.BatchNorm2d(channels)
+    if norm == "group":
+        for groups in (16, 8, 4, 2):
+            if channels % groups == 0:
+                return nn.GroupNorm(groups, channels)
+        return nn.GroupNorm(1, channels)
+    raise ValueError(f"Unsupported norm: {norm}")
+
+
+def _resize(x: torch.Tensor, *, scale_factor: int | None = None, size: tuple[int, int] | None = None, mode: str) -> torch.Tensor:
+    if mode == "nearest":
+        return F.interpolate(x, scale_factor=scale_factor, size=size, mode="nearest")
+    if mode == "bilinear":
+        return F.interpolate(x, scale_factor=scale_factor, size=size, mode="bilinear", align_corners=True)
+    raise ValueError(f"Unsupported upsample mode: {mode}")
+
+
+class _ResizeTo(nn.Module):
+    def __init__(self, size: tuple[int, int], mode: str) -> None:
+        super().__init__()
+        self.size = size
+        self.mode = mode
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return _resize(x, size=self.size, mode=self.mode)
+
+
 class _ConvBlock(nn.Module):
-    def __init__(self, in_ch: int, out_ch: int, mid_ch: int | None = None) -> None:
+    def __init__(self, in_ch: int, out_ch: int, mid_ch: int | None = None, norm: str = "batch") -> None:
         super().__init__()
         mid_ch = mid_ch or out_ch
         self.block = nn.Sequential(
             nn.Conv2d(in_ch, mid_ch, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(mid_ch),
+            _make_norm(mid_ch, norm),
             nn.ReLU(inplace=True),
             nn.Conv2d(mid_ch, out_ch, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(out_ch),
+            _make_norm(out_ch, norm),
             nn.ReLU(inplace=True),
         )
 
@@ -51,43 +80,43 @@ class _ConvBlock(nn.Module):
 
 
 class _DownBlock(nn.Module):
-    def __init__(self, in_ch: int, out_ch: int) -> None:
+    def __init__(self, in_ch: int, out_ch: int, norm: str = "batch") -> None:
         super().__init__()
         self.pool = nn.MaxPool2d(2)
-        self.conv = _ConvBlock(in_ch, out_ch)
+        self.conv = _ConvBlock(in_ch, out_ch, norm=norm)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.conv(self.pool(x))
 
 
 class _UpBlock(nn.Module):
-    def __init__(self, in_ch: int, skip_ch: int, out_ch: int) -> None:
+    def __init__(self, in_ch: int, skip_ch: int, out_ch: int, norm: str = "batch", upsample_mode: str = "bilinear") -> None:
         super().__init__()
-        self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
+        self.upsample_mode = upsample_mode
         self.up_conv = nn.Conv2d(in_ch, out_ch, kernel_size=1, bias=False)
-        self.conv = _ConvBlock(out_ch + skip_ch, out_ch)
+        self.conv = _ConvBlock(out_ch + skip_ch, out_ch, norm=norm)
 
     def forward(self, x: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
-        x = self.up(x)
+        x = _resize(x, scale_factor=2, mode=self.upsample_mode)
         x = self.up_conv(x)
         if x.shape[2:] != skip.shape[2:]:
-            x = F.interpolate(x, size=skip.shape[2:], mode="bilinear", align_corners=True)
+            x = _resize(x, size=skip.shape[2:], mode=self.upsample_mode)
         x = torch.cat([skip, x], dim=1)
         return self.conv(x)
 
 
 class _UNetBackbone(nn.Module):
-    def __init__(self, in_channels: int = 3) -> None:
+    def __init__(self, in_channels: int = 3, norm: str = "batch", upsample_mode: str = "bilinear") -> None:
         super().__init__()
-        self.enc0 = _ConvBlock(in_channels, 64)
-        self.enc1 = _DownBlock(64, 96)
-        self.enc2 = _DownBlock(96, 160)
-        self.enc3 = _DownBlock(160, 224)
-        self.bottleneck = _ConvBlock(224, 224)
-        self.dec3 = _UpBlock(224, 224, 160)
-        self.dec2 = _UpBlock(160, 160, 96)
-        self.dec1 = _UpBlock(96, 96, 64)
-        self.dec0 = _UpBlock(64, 64, 32)
+        self.enc0 = _ConvBlock(in_channels, 64, norm=norm)
+        self.enc1 = _DownBlock(64, 96, norm=norm)
+        self.enc2 = _DownBlock(96, 160, norm=norm)
+        self.enc3 = _DownBlock(160, 224, norm=norm)
+        self.bottleneck = _ConvBlock(224, 224, norm=norm)
+        self.dec3 = _UpBlock(224, 224, 160, norm=norm, upsample_mode=upsample_mode)
+        self.dec2 = _UpBlock(160, 160, 96, norm=norm, upsample_mode=upsample_mode)
+        self.dec1 = _UpBlock(96, 96, 64, norm=norm, upsample_mode=upsample_mode)
+        self.dec0 = _UpBlock(64, 64, 32, norm=norm, upsample_mode=upsample_mode)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         e0 = self.enc0(x)
@@ -107,13 +136,24 @@ class _UNetBackbone(nn.Module):
 
 
 class V161HeightModel(nn.Module):
-    def __init__(self) -> None:
+    """U-Net height model.
+
+    ``in_channels`` defaults to 3 (suppressed minimap RGB) for backward
+    compatibility with existing checkpoints. Pass a larger value (e.g. 6
+    for ``cat(suppressed_rgb, albedo_rgb)``) to consume the spec 077
+    albedo guidance channel.
+    """
+
+    def __init__(self, in_channels: int = 3, norm: str = "batch", decoder_upsample: str = "bilinear") -> None:
         super().__init__()
-        self.backbone = _UNetBackbone()
+        self.in_channels = int(in_channels)
+        self.norm = str(norm)
+        self.decoder_upsample = str(decoder_upsample)
+        self.backbone = _UNetBackbone(self.in_channels, norm=self.norm, upsample_mode=self.decoder_upsample)
         self.head = nn.Sequential(
             nn.Conv2d(32, 32, 3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Upsample(size=(257, 257), mode="bilinear", align_corners=True),
+            _ResizeTo((257, 257), self.decoder_upsample),
             nn.Conv2d(32, 1, 1),
         )
 

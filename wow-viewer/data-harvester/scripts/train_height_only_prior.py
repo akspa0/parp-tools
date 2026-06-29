@@ -35,7 +35,7 @@ kiss" stack):
   ``*_model.pt`` is kept as a compatibility alias to latest.
 * **Labeled preview panels** with text strips. Per-epoch validation
   previews show raw minimap, object mask/confidence, object-suppressed
-  prior, truth, prediction, error, and loss weight.
+  prior, optional albedo input, truth, prediction, error, and loss weight.
 * **DataLoader** with ``num_workers`` / ``prefetch_factor`` /
   ``persistent_workers`` for overlap of I/O with compute.
 * **Optional VRAM autotune** that probes a batch-size ladder against
@@ -71,12 +71,25 @@ if str(_SRC_DIR) not in sys.path:
 
 from harvester.height_only_prior_dataset import HeightOnlyPriorDataset  # noqa: E402
 from harvester.height_to_normal import analytic_normals_from_height  # noqa: E402
+from harvester.terrain_augment import (  # noqa: E402
+    ALL_TRANSFORMS,
+    SHADOW_SAFE_TRANSFORMS,
+    TransformId,
+)
 from harvester.v16_curation import load_curation_keys  # noqa: E402
-from harvester.v18_models import V18HeightModel  # noqa: E402
+from harvester.v18_models import (  # noqa: E402
+    V18HeightModel,
+    V18_HEIGHT_DEFAULT_IN_CHANNELS,
+    V18_HEIGHT_ALBEDO_IN_CHANNELS,
+)
 
 _PANEL_SIZE = 256
 _PANEL_LABEL_HEIGHT = 18
 _DEFAULT_AUTOTUNE_BATCH_CANDIDATES = (8, 12, 16, 20, 24, 32, 40, 48, 56, 64)
+_AUGMENT_POLICY_TRANSFORMS: dict[str, tuple[TransformId, ...]] = {
+    "shadow-safe": SHADOW_SAFE_TRANSFORMS,
+    "d4": ALL_TRANSFORMS,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +225,7 @@ def _save_deconstruction_preview(
     pred: torch.Tensor,
     out_path: Path,
     max_samples: int,
+    expect_albedo: bool = False,
 ) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     rows: list[list[tuple[str, torch.Tensor]]] = []
@@ -229,18 +243,23 @@ def _save_deconstruction_preview(
         lo = min(float(truth.min()), float(pred_i.min()))
         hi = max(float(truth.max()), float(pred_i.max()))
         error = (pred_i - truth).abs()
-        rows.append(
-            [
-                (f"raw tile {tile_id}", raw),
-                ("object mask", _gray3(mask.clamp(0.0, 1.0))),
-                ("confidence", _gray3(confidence.clamp(0.0, 1.0))),
-                ("suppressed prior", prior),
-                ("height truth", _gray3(_norm_for_display(truth.squeeze(0), lo=lo, hi=hi))),
-                ("height pred", _gray3(_norm_for_display(pred_i.squeeze(0), lo=lo, hi=hi))),
-                ("abs error", _gray3(_norm_for_display(error.squeeze(0)))),
-                ("loss weight", _gray3(_norm_for_display(weight.squeeze(0), lo=0.0, hi=1.0))),
-            ]
-        )
+        panels = [
+            (f"raw tile {tile_id}", raw),
+            ("object mask", _gray3(mask.clamp(0.0, 1.0))),
+            ("confidence", _gray3(confidence.clamp(0.0, 1.0))),
+            ("suppressed prior", prior),
+        ]
+        if "albedo_rgb" in batch:
+            panels.append(("albedo input", batch["albedo_rgb"][idx].cpu()))
+        elif expect_albedo:
+            panels.append(("albedo MISSING", torch.zeros_like(prior)))
+        panels.extend([
+            ("height truth", _gray3(_norm_for_display(truth.squeeze(0), lo=lo, hi=hi))),
+            ("height pred", _gray3(_norm_for_display(pred_i.squeeze(0), lo=lo, hi=hi))),
+            ("abs error", _gray3(_norm_for_display(error.squeeze(0)))),
+            ("loss weight", _gray3(_norm_for_display(weight.squeeze(0), lo=0.0, hi=1.0))),
+        ])
+        rows.append(panels)
     _compose_panel_grid(rows).save(out_path)
 
 
@@ -426,7 +445,13 @@ def _autotune_batch_size(
         fits_target = False
         _cleanup()
         try:
-            probe_model = V18HeightModel().to(device)
+            probe_use_albedo = bool(getattr(args, "albedo", False))
+            probe_in_ch = V18_HEIGHT_ALBEDO_IN_CHANNELS if probe_use_albedo else V18_HEIGHT_DEFAULT_IN_CHANNELS
+            probe_model = V18HeightModel(
+                in_channels=probe_in_ch,
+                norm=str(args.model_norm),
+                decoder_upsample=str(args.decoder_upsample),
+            ).to(device)
             if bool(hasattr(torch, "compile") and not args.no_compile):
                 try:
                     probe_model = torch.compile(probe_model)
@@ -447,6 +472,9 @@ def _autotune_batch_size(
                     [train_ds[(step * probe_batch_size + idx) % len(train_ds)] for idx in range(probe_batch_size)]
                 )
                 prior = probe_batch["input_prior"].to(device, non_blocking=True)[:, :3, :, :]
+                if probe_use_albedo and "albedo_rgb" in probe_batch:
+                    albedo = probe_batch["albedo_rgb"].to(device, non_blocking=True)
+                    prior = torch.cat([prior, albedo], dim=1)
                 target = probe_batch["height_257"].to(device, non_blocking=True)
                 weight = probe_batch["weight_257"].to(device, non_blocking=True)
                 target_normals = probe_batch["normal_xyz"].to(device, non_blocking=True) if "normal_xyz" in probe_batch else None
@@ -560,6 +588,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="One or more <build>.zarr teacher-prior stores.")
     parser.add_argument("--v18", type=Path, nargs="*", default=None,
                         help="Matching source <build>.zarr V18 stores for height_257 targets.")
+    parser.add_argument("--albedo-path", type=Path, nargs="*", default=None,
+                        help="Optional matching precomputed albedo <build>.zarr stores containing albedo_rgb_256. "
+                             "Requires one path per --prior when provided; preferred over lazy alpha_256/MCLY compositing.")
     parser.add_argument("--output-dir", type=Path, required=True,
                         help="Directory for checkpoints, metrics, and preview PNGs.")
     parser.add_argument("--run-name", type=str, default="height_only_prior_smoke")
@@ -579,12 +610,31 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "map = hold out entire maps so val tiles are never spatial "
                              "neighbors of train tiles; diagnostic for the val plateau.")
     parser.add_argument("--augment", action="store_true", default=False,
-                        help="Apply random D4 flip/rotate augmentation to the TRAIN split only. "
-                             "Geometrically exact for terrain height and tracks the "
-                             "[-dh/dx, -dh/dy, +1] normal convention. Validation is never "
-                             "augmented, so val loss stays deterministic.")
+                        help="Enable train-split augmentation using --augment-policy. "
+                             "Default policy is shadow-safe (identity only) because baked "
+                             "minimap lighting/shadows are orientation-sensitive. Validation "
+                             "is never augmented, so val loss stays deterministic.")
+    parser.add_argument("--augment-policy", type=str, default="shadow-safe",
+                        choices=sorted(_AUGMENT_POLICY_TRANSFORMS.keys()),
+                        help="Augmentation transform policy. shadow-safe = identity only for "
+                             "fixed-direction minimap shadows; d4 = explicit flip/rotate "
+                             "ablation for orientation-free inputs.")
     parser.add_argument("--augment-seed", type=int, default=0,
                         help="Seed for the per-sample augmentation RNG. Ignored without --augment.")
+    parser.add_argument("--albedo", action="store_true", default=False,
+                        help="Append a 3-channel albedo guidance signal (cat suppressed_rgb, albedo_rgb) "
+                             "to the model input, widening it from 3 to 6 channels. The albedo is "
+                             "preferably loaded from --albedo-path sidecars built from V18 alpha_256 "
+                             "and mcly_texture_ids. Orthogonal to the suppressed minimap RGB: encodes "
+                             "terrain texture identity, not appearance.")
+    parser.add_argument("--model-norm", type=str, default="batch",
+                        choices=["batch", "group"],
+                        help="Normalization inside the height model. batch preserves legacy checkpoints; "
+                             "group is an opt-in anti-eval-drift candidate for fresh runs.")
+    parser.add_argument("--decoder-upsample", type=str, default="bilinear",
+                        choices=["bilinear", "nearest"],
+                        help="Decoder upsampling mode. bilinear preserves legacy behavior; nearest is an "
+                             "opt-in anti-grid candidate for fresh runs.")
     parser.add_argument("--log-interval", type=int, default=25)
     parser.add_argument("--preview-every-epochs", type=int, default=1,
                         help="Write validation deconstruction preview every N epochs. 0 disables epoch previews.")
@@ -688,6 +738,14 @@ def _resolve_v18_paths(prior_paths: list[Path], v18_paths: list[Path] | None) ->
     return list(v18_paths)
 
 
+def _resolve_albedo_paths(prior_paths: list[Path], albedo_paths: list[Path] | None) -> list[Path | None] | None:
+    if not albedo_paths:
+        return [None] * len(prior_paths)
+    if len(albedo_paths) != len(prior_paths):
+        return None
+    return list(albedo_paths)
+
+
 def _build_training_dataset(args: argparse.Namespace) -> ConcatDataset | HeightOnlyPriorDataset | None:
     prior_paths = list(args.prior)
     v18_paths = _resolve_v18_paths(prior_paths, args.v18)
@@ -697,11 +755,19 @@ def _build_training_dataset(args: argparse.Namespace) -> ConcatDataset | HeightO
             file=sys.stderr,
         )
         return None
+    albedo_paths = _resolve_albedo_paths(prior_paths, getattr(args, "albedo_path", None))
+    if albedo_paths is None:
+        print(
+            f"--albedo-path must provide exactly one path per --prior path when provided; "
+            f"got {len(getattr(args, 'albedo_path', None) or [])} albedo paths for {len(prior_paths)} priors.",
+            file=sys.stderr,
+        )
+        return None
 
     curation_keys = load_curation_keys(args.curation_manifest) if args.curation_manifest is not None else None
     remaining = int(args.max_tiles) if args.max_tiles else None
     datasets: list[HeightOnlyPriorDataset] = []
-    for prior_path, v18_path in zip(prior_paths, v18_paths, strict=True):
+    for prior_path, v18_path, albedo_path in zip(prior_paths, v18_paths, albedo_paths, strict=True):
         build = prior_path.stem.replace(".zarr", "")
         tile_filter = None
         if curation_keys is not None:
@@ -712,9 +778,11 @@ def _build_training_dataset(args: argparse.Namespace) -> ConcatDataset | HeightO
         ds = HeightOnlyPriorDataset(
             prior_path=prior_path,
             v18_path=v18_path,
+            albedo_path=albedo_path,
             tile_filter=tile_filter,
             include_weight=not args.no_weight,
             height_norm=True,
+            include_albedo=bool(getattr(args, "albedo", False)),
         )
         if remaining is not None:
             if remaining <= 0:
@@ -723,9 +791,15 @@ def _build_training_dataset(args: argparse.Namespace) -> ConcatDataset | HeightO
                 ds = HeightOnlyPriorDataset(
                     prior_path=prior_path,
                     v18_path=v18_path,
-                    tile_filter=[int(ds.tile_meta[i].get("tile_id", i)) for i in range(remaining)] if getattr(ds, "tile_meta", None) else list(range(remaining)),
+                    albedo_path=albedo_path,
+                    tile_filter=(
+                        [int(ds.tile_meta[i].get("tile_id", i)) for i in range(remaining)]
+                        if getattr(ds, "tile_meta", None)
+                        else list(range(remaining))
+                    ),
                     include_weight=not args.no_weight,
                     height_norm=True,
+                    include_albedo=bool(getattr(args, "albedo", False)),
                 )
             remaining -= len(ds)
         datasets.append(ds)
@@ -748,6 +822,7 @@ def _dataset_source_summaries(dataset: ConcatDataset | HeightOnlyPriorDataset) -
             {
                 "prior_path": str(getattr(ds, "prior_path", "")),
                 "v18_path": str(getattr(ds, "v18_path", "")),
+                "albedo_path": str(getattr(ds, "albedo_path", "")),
                 "tile_count": len(ds),
                 "first_tile_ids": tile_ids[:8],
                 "last_tile_ids": tile_ids[-8:] if tile_ids else [],
@@ -786,16 +861,18 @@ class _AugmentGuardSubset(Dataset):
                     c.augment = p
 
 
-def _enable_augment_on_base(dataset, seed: int) -> None:
+def _enable_augment_on_base(dataset, seed: int, transforms: tuple[TransformId, ...]) -> None:
     """Turn on augmentation on every HeightOnlyPriorDataset under a ConcatDataset."""
     if isinstance(dataset, ConcatDataset):
         for i, child in enumerate(dataset.datasets):
             if hasattr(child, "augment"):
                 child.augment = True
                 child._augment_rng = np.random.default_rng(int(seed) + i)
+                child.augment_transforms = transforms
     elif hasattr(dataset, "augment"):
         dataset.augment = True
         dataset._augment_rng = np.random.default_rng(int(seed))
+        dataset.augment_transforms = transforms
 
 
 def _split_train_val(dataset, *, val_fraction: float, seed: int) -> tuple[Subset, Subset]:
@@ -1003,11 +1080,23 @@ def main_with_args(argv: list[str] | None = None) -> int:
         if not v18_path.exists():
             print(f"V18 store not found: {v18_path}", file=sys.stderr)
             return 2
+    for albedo_path in args.albedo_path or []:
+        if not albedo_path.exists():
+            print(f"Albedo store not found: {albedo_path}", file=sys.stderr)
+            return 2
 
     v18_paths = _resolve_v18_paths(list(args.prior), args.v18)
     if v18_paths is None:
         print(
             f"--v18 must provide exactly one path per --prior path; got {len(args.v18 or [])} v18 paths for {len(args.prior)} priors.",
+            file=sys.stderr,
+        )
+        return 2
+    albedo_paths = _resolve_albedo_paths(list(args.prior), args.albedo_path)
+    if albedo_paths is None:
+        print(
+            f"--albedo-path must provide exactly one path per --prior path when provided; "
+            f"got {len(args.albedo_path or [])} albedo paths for {len(args.prior)} priors.",
             file=sys.stderr,
         )
         return 2
@@ -1027,6 +1116,7 @@ def main_with_args(argv: list[str] | None = None) -> int:
     for idx, summary in enumerate(source_summaries, start=1):
         print(
             f"  source {idx}: tiles={summary['tile_count']} prior={summary['prior_path']} "
+            f"albedo={summary['albedo_path']} "
             f"first_tile_ids={summary['first_tile_ids']} last_tile_ids={summary['last_tile_ids']}",
             flush=True,
         )
@@ -1047,18 +1137,35 @@ def main_with_args(argv: list[str] | None = None) -> int:
             dataset, val_fraction=args.val_fraction, seed=args.seed
         )
     if args.augment:
-        _enable_augment_on_base(dataset, seed=int(args.augment_seed))
+        augment_transforms = _AUGMENT_POLICY_TRANSFORMS[str(args.augment_policy)]
+        _enable_augment_on_base(
+            dataset,
+            seed=int(args.augment_seed),
+            transforms=augment_transforms,
+        )
         # Val must never be augmented even though it shares the base dataset.
         val_dataset = _AugmentGuardSubset(val_subset)
         train_dataset = train_subset
+        transform_names = ",".join(augment_transforms)
         print(
-            f"Augmentation: enabled on train split (seed={args.augment_seed}); "
+            f"Augmentation: enabled on train split (policy={args.augment_policy}, "
+            f"transforms={transform_names}, seed={args.augment_seed}); "
             "validation is guarded and never augmented.",
             flush=True,
         )
     else:
         train_dataset = train_subset
         val_dataset = val_subset
+    if bool(getattr(args, "albedo", False)):
+        print(
+            "Albedo: enabled — model input widened to 6 channels "
+            "(cat suppressed_rgb, albedo_rgb from MCAL alpha).",
+            flush=True,
+        )
+    print(
+        f"Height model: norm={args.model_norm} decoder_upsample={args.decoder_upsample}",
+        flush=True,
+    )
     if len(train_dataset) <= 0 or len(val_dataset) <= 0:
         print("Train/validation split is empty; nothing to train.", file=sys.stderr)
         return 2
@@ -1115,7 +1222,13 @@ def main_with_args(argv: list[str] | None = None) -> int:
         shuffle=False,
     )
 
-    model = V18HeightModel().to(device)
+    use_albedo = bool(getattr(args, "albedo", False))
+    model_in_channels = V18_HEIGHT_ALBEDO_IN_CHANNELS if use_albedo else V18_HEIGHT_DEFAULT_IN_CHANNELS
+    model = V18HeightModel(
+        in_channels=model_in_channels,
+        norm=str(args.model_norm),
+        decoder_upsample=str(args.decoder_upsample),
+    ).to(device)
     compile_status = "disabled"
     can_compile = hasattr(torch, "compile") and not args.no_compile and device.type == "cuda"
     if can_compile:
@@ -1181,8 +1294,21 @@ def main_with_args(argv: list[str] | None = None) -> int:
         flush=True,
     )
 
-    def _train_one_batch(batch: dict, model: torch.nn.Module) -> tuple[torch.Tensor, dict[str, float]]:
+    def _build_model_input(batch: dict) -> torch.Tensor:
+        """Build the model input tensor from a batch.
+
+        When ``--albedo`` is enabled, concatenates the suppressed RGB
+        prior (channels 0:3) with the albedo guidance channel (3 channels)
+        for a 6-channel input. Otherwise uses the legacy 3-channel prior.
+        """
         prior = batch["input_prior"].to(device, non_blocking=True)[:, :3, :, :]
+        if use_albedo and "albedo_rgb" in batch:
+            albedo = batch["albedo_rgb"].to(device, non_blocking=True)
+            return torch.cat([prior, albedo], dim=1)
+        return prior
+
+    def _train_one_batch(batch: dict, model: torch.nn.Module) -> tuple[torch.Tensor, dict[str, float]]:
+        prior = _build_model_input(batch)
         target = batch["height_257"].to(device, non_blocking=True)
         weight = batch["weight_257"].to(device, non_blocking=True)
         target_normals = batch["normal_xyz"].to(device, non_blocking=True) if "normal_xyz" in batch else None
@@ -1222,7 +1348,7 @@ def main_with_args(argv: list[str] | None = None) -> int:
         return loss, metrics
 
     def _validate_batch(batch: dict, model: torch.nn.Module) -> tuple[torch.Tensor, dict[str, float]]:
-        prior = batch["input_prior"].to(device, non_blocking=True)[:, :3, :, :]
+        prior = _build_model_input(batch)
         target = batch["height_257"].to(device, non_blocking=True)
         weight = batch["weight_257"].to(device, non_blocking=True)
         target_normals = batch["normal_xyz"].to(device, non_blocking=True) if "normal_xyz" in batch else None
@@ -1345,13 +1471,17 @@ def main_with_args(argv: list[str] | None = None) -> int:
         ):
             with torch.no_grad():
                 with torch.amp.autocast(device.type, enabled=use_amp):
-                    preview_pred = model(epoch_preview_batch["input_prior"].to(device, non_blocking=True)[:, :3, :, :])
+                    epoch_preview_input = epoch_preview_batch["input_prior"].to(device, non_blocking=True)[:, :3, :, :]
+                    if use_albedo and "albedo_rgb" in epoch_preview_batch:
+                        epoch_preview_input = torch.cat([epoch_preview_input, epoch_preview_batch["albedo_rgb"].to(device, non_blocking=True)], dim=1)
+                    preview_pred = model(epoch_preview_input)
             preview_path_for_epoch = validation_preview_dir / f"epoch_{epoch_number:04d}.png"
             _save_deconstruction_preview(
                 batch=epoch_preview_batch,
                 pred=preview_pred,
                 out_path=preview_path_for_epoch,
                 max_samples=max(1, int(args.preview_samples)),
+                expect_albedo=use_albedo,
             )
             validation_preview_paths.append(str(preview_path_for_epoch))
 
@@ -1467,45 +1597,22 @@ def main_with_args(argv: list[str] | None = None) -> int:
         )
     val_rate = val_tiles_seen / max(val_elapsed_total, 1e-9)
 
-    # Preview: use the first captured batch; render a labeled 4-panel image.
+    # Preview: use the first captured batch; render the same labeled
+    # deconstruction grid as epoch validation previews.
     preview_path = args.output_dir / f"{args.run_name}_preview.png"
     if preview_batch is not None:
-        prior_chw = preview_batch["input_prior"][0, :3].cpu()
-        truth = preview_batch["height_257"][0].cpu()
-        weight = preview_batch["weight_257"][0].cpu()
+        preview_input = preview_batch["input_prior"].to(device, non_blocking=True)[:, :3, :, :]
+        if use_albedo and "albedo_rgb" in preview_batch:
+            preview_input = torch.cat([preview_input, preview_batch["albedo_rgb"].to(device, non_blocking=True)], dim=1)
         with torch.no_grad():
             with torch.amp.autocast(device.type, enabled=use_amp):
-                pred = model(preview_batch["input_prior"].to(device, non_blocking=True)[:, :3, :, :])
-        pred_chw = pred[0].cpu()
-        prior_rgb = (prior_chw * 255).clamp(0, 255).numpy().transpose(1, 2, 0).astype(np.uint8)
-        # Normalize truth/pred/weight to [0,1] for display
-        def _norm(x: torch.Tensor) -> torch.Tensor:
-            x = x.float()
-            lo, hi = float(x.min()), float(x.max())
-            if hi - lo < 1e-8:
-                return torch.zeros_like(x)
-            return (x - lo) / (hi - lo)
-        truth_disp = _norm(truth.squeeze(0))
-        pred_disp = _norm(pred_chw.squeeze(0))
-        weight_disp = _norm(weight.squeeze(0))
-        # Replicate single-channel to 3ch for the panel composer
-        truth_rgb = truth_disp.unsqueeze(0).repeat(3, 1, 1)
-        pred_rgb = pred_disp.unsqueeze(0).repeat(3, 1, 1)
-        weight_rgb = weight_disp.unsqueeze(0).repeat(3, 1, 1)
-        prior_t = torch.from_numpy(prior_rgb).permute(2, 0, 1).float() / 255.0
-        # Resize to panel size
-        prior_t = F.interpolate(prior_t.unsqueeze(0), size=(_PANEL_SIZE, _PANEL_SIZE), mode="bilinear", align_corners=False).squeeze(0)
-        truth_rgb = F.interpolate(truth_rgb.unsqueeze(0), size=(_PANEL_SIZE, _PANEL_SIZE), mode="bilinear", align_corners=False).squeeze(0)
-        pred_rgb = F.interpolate(pred_rgb.unsqueeze(0), size=(_PANEL_SIZE, _PANEL_SIZE), mode="bilinear", align_corners=False).squeeze(0)
-        weight_rgb = F.interpolate(weight_rgb.unsqueeze(0), size=(_PANEL_SIZE, _PANEL_SIZE), mode="bilinear", align_corners=False).squeeze(0)
-        _save_horizontal_panel(
-            [
-                ("prior RGB", prior_t),
-                ("height truth", truth_rgb),
-                ("height pred", pred_rgb),
-                ("loss weight", weight_rgb),
-            ],
-            preview_path,
+                pred = model(preview_input)
+        _save_deconstruction_preview(
+            batch=preview_batch,
+            pred=pred,
+            out_path=preview_path,
+            max_samples=1,
+            expect_albedo=use_albedo,
         )
 
     metrics_payload = {
@@ -1533,6 +1640,7 @@ def main_with_args(argv: list[str] | None = None) -> int:
         "source_count": len(args.prior),
         "prior_paths": [str(path) for path in args.prior],
         "v18_paths": [str(path) if path is not None else None for path in v18_paths],
+        "albedo_paths": [str(path) if path is not None else None for path in albedo_paths],
         "curation_manifest": str(args.curation_manifest) if args.curation_manifest is not None else None,
         "dataset_tile_count": len(dataset),
         "train_tile_count": len(train_dataset),
@@ -1540,7 +1648,13 @@ def main_with_args(argv: list[str] | None = None) -> int:
         "val_fraction": float(args.val_fraction),
         "split_mode": str(args.split_mode),
         "augment": bool(args.augment),
+        "augment_policy": str(args.augment_policy),
+        "augment_transforms": list(_AUGMENT_POLICY_TRANSFORMS[str(args.augment_policy)]),
         "augment_seed": int(args.augment_seed),
+        "albedo": bool(getattr(args, "albedo", False)),
+        "model_in_channels": int(model_in_channels),
+        "model_norm": str(args.model_norm),
+        "decoder_upsample": str(args.decoder_upsample),
         "dataset_sources": source_summaries,
         "device": str(device),
         "compile_status": compile_status,

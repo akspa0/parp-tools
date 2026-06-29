@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-**Last updated**: 2026-06-29 | **Focus**: spec 077 height-only val-plateau diagnosis landed (augmentation + map-grouped split); real-data proof pending
+**Last updated**: 2026-06-29 | **Focus**: spec 077 cloud training on RunPod — `cuda_albedo_group_nearest` running successfully with GroupNorm + nearest-decoder, network-volume persistence, cost-target GPU selection
 
 ## Current State
 
@@ -9,8 +9,8 @@
 - **Spec 074 `074-alpha-brush-library`**: deprecated as primary direction. Outputs remain useful candidate/evidence rows only; tile-local connected components are not authoritative brush labels.
 - **Spec 075 `075-scar-mask-segmentation`**: deprecated as primary direction. The trainer is a coarse diagnostic baseline only; do not continue it as the brush-family route unless explicitly reopened.
 - **Spec 076 `076-full-map-fractal-brush-library`**: active plan. Phases 1-3 are implemented for bounded compact and full-map strip proofs. Raw connected-component/near-dedupe outputs are diagnostic only; active review target is macro paste/scar/digital-painting regions via `--macro-pastes`.
-- **V21/V21c height training**: paused. Multiple runs (with and without scheduler/normal/fractal changes, restored to d0929e2 baseline) failed to reproduce the earlier 0.3126 convergence; model stalls at ~0.83 height L1. Pivoting to a deconstruction-first approach.
-- **Spec 077 height-only val plateau (2026-06-29)**: the fresh hard-error CUDA run reached train ~0.33 / val ~0.56 by epoch 90 with LR at 1.25e-05. Val is stuck at 0.54-0.56 across runs — a generalization gap, not a gradient/hyperparameter issue. Diagnosed three causes: zero augmentation on a small corpus, a spatially-leaky flat random split, and per-tile height normalization. Landed geometrically-exact D4 augmentation (`terrain_augment.py`, `--augment`, train-only with a val guard) and a map-grouped split diagnostic (`--split-mode map`). Next: run with `--augment` from a fresh checkpoint; if the plateau persists, try an albedo guidance channel (feasible via `compositor.py` + MCAL/MCLY, deferred to a separate slice). See `progress.md` 2026-06-29 entry.
+- **V21/V21c height training**: paused. Multiple runs (restored to d0929e2 baseline) failed to reproduce earlier 0.3126 convergence; model stalls at ~0.83 height L1. Pivoted to deconstruction-first approach.
+- **Spec 077 cloud training on RunPod (2026-06-29)**: D4 flip/rotate augmentation invalid for baked minimap RGB (fixed-direction lighting/shadows); `--augment` defaults to identity-only `shadow-safe`. Albedo precomputed as texture-identity pseudo-colour sidecar; stale flat-cyan ones need `--overwrite` rebuild. `cuda_albedo_shadow_safe` plateaued at epoch 240 — do not resume. Fresh `cuda_albedo_group_nearest` running on RunPod: `--albedo --model-norm group --decoder-upsample nearest`, default network-volume storage, cost-target ($1/hr, 12GB VRAM, 24GB RAM, community cloud, no datacenter GPUs). RunPod integration spec (079) written with all lessons learned (minimal REST payload, cost-target GPU exclusion, COMMUNITY default, network-volume datacenter filtering, `runpodctl` v2.x positional-arg syntax, SSH key requirement, web UI fallback).
 
 ## Why the Pivot
 
@@ -85,63 +85,28 @@ End-to-end height regression from minimap was not converging despite identical c
 ## In Validation
 
 - `071-left-right-sidebar-split` branch: user testing the viewer UI with left/right sidebars, Model Viewer sub-tabs, and toolbar layout.
+- `cuda_albedo_group_nearest` running on RunPod (RTX 4000 Ada, network volume `/workspace`). Initial training signals expected within hours.
 
 ## Open Questions
 
-1. Which bounded proof build/map should seed the first real-data per-object capture library run for spec 077? (Enumerated but not yet run.)
-2. Is the C# Zarr/Parquet writer (T009 C# side) worth doing before the capture tool extension (T010), or is the Python-only path good enough for the first proof?
-3. What is the smallest processed-prior channel contract that still gives the height-only model enough context?
+### Spec 077
+1. Which bounded proof build/map should seed the first real-data per-object capture library run?
+2. Is the C# Zarr/Parquet writer (T009 C# side) worth doing before the capture tool extension (T010), or is Python-only path enough for first proof?
+3. What is the smallest processed-prior channel contract that gives the height-only model enough context?
 4. Which development-map tile subset is the first ADT-free proof target for minimap-only object explanation?
-1. Which bounded build/map should be the first 076 Phase 1 validation target? Teldrassil/root-heavy regions are preferred if present.
-2. Which existing tileset/texture/BLP effect fingerprint output is canonical enough to join in Phase 4, especially for paths like `textures\BloodSplats`?
+5. Does `cuda_albedo_group_nearest` on RunPod converge to good broad shape? If yes, should T029b (MCLY-guided `height_delta_257` residual-refinement lane) be opened?
+
+### Spec 076
+1. Which bounded build/map should be the first Phase 1 validation target? Teldrassil/root-heavy regions preferred.
+2. Which existing tileset/texture/BLP effect fingerprint output is canonical enough to join in Phase 4?
 3. What macro-close radius/downsample/min-area settings best match human-visible paste/scar objects across all maps?
 4. Which V18 composite signals should gate or split `blocky_paste` child regions before all-map validation?
 
 ## Files Touched Recently
 
-- `wow-viewer/specs/074-alpha-brush-library/{spec,plan,tasks}.md`
-- `wow-viewer/specs/074-alpha-brush-library/research.md`
-- `wow-viewer/specs/074-alpha-brush-library/{data-model,quickstart,visualization_notes}.md`
-- `wow-viewer/data-harvester/scripts/_research_alpha_components.py`
-- `wow-viewer/data-harvester/src/harvester/alpha_brush.py`
-- `wow-viewer/data-harvester/scripts/extract_alpha_brush_catalog.py`
-- `wow-viewer/data-harvester/scripts/visualize_alpha_brush_catalog.py`
-- `wow-viewer/data-harvester/scripts/dedupe_alpha_brush_patterns.py`
-- `wow-viewer/data-harvester/scripts/visualize_alpha_brush_pattern_neighbors.py`
-- `wow-viewer/specs/075-scar-mask-segmentation/{spec,plan,tasks}.md`
-- `wow-viewer/specs/076-full-map-fractal-brush-library/{spec,plan,tasks,quickstart}.md`
-- `wow-viewer/specs/076-full-map-fractal-brush-library/research.md`
-- `wow-viewer/docs/architecture/full-map-fractal-brush-library-2026-06-23.md`
-- `wow-viewer/data-harvester/scripts/analyze_fractal_raw_components.py`
-- `wow-viewer/data-harvester/scripts/visualize_fractal_raw_patterns.py`
-- `wow-viewer/data-harvester/scripts/visualize_fractal_near_patterns.py`
-- `wow-viewer/data-harvester/src/harvester/fractal_raw_analysis.py`
-- `wow-viewer/data-harvester/src/harvester/fractal_near_dedupe.py`
-- `wow-viewer/data-harvester/src/harvester/fractal_canvas.py`
-- `wow-viewer/data-harvester/src/harvester/fractal_segments.py`
-- `wow-viewer/data-harvester/tests/test_analyze_fractal_raw_components.py`
-- `wow-viewer/data-harvester/tests/test_fractal_near_dedupe.py`
-- `wow-viewer/data-harvester/tests/test_fractal_segments_rectangle.py`
-- `wow-viewer/docs/architecture/full-map-fractal-brush-library-2026-06-23.md`
-- `wow-viewer/data-harvester/src/harvester/fractal_canvas.py`
-- `wow-viewer/data-harvester/src/harvester/fractal_segments.py`
-- `wow-viewer/data-harvester/src/harvester/fractal_library.py`
-- `wow-viewer/data-harvester/scripts/build_full_map_fractal_canvas.py`
-- `wow-viewer/data-harvester/scripts/segment_full_map_fractals.py`
-- `wow-viewer/data-harvester/scripts/build_fractal_brush_library.py`
-- `wow-viewer/data-harvester/tests/test_fractal_canvas.py`
-- `wow-viewer/data-harvester/tests/test_fractal_segments.py`
-- `wow-viewer/data-harvester/tests/test_fractal_library.py`
-- `wow-viewer/data-harvester/src/harvester/{v21_scar_dataset,v21_scar_model,test_v21_scar_mask}.py`
-- `wow-viewer/data-harvester/scripts/train_v21_scar_mask.py`
-- `wow-viewer/data-harvester/tests/test_alpha_brush.py`
+- `wow-viewer/specs/079-runpod-integration-guide/{spec,plan,tasks}.md`
+- `wow-viewer/data-harvester/scripts/setup_spec077_runpod.py`
+- `wow-viewer/data-harvester/scripts/package_spec077_runpod.py`
+- `wow-viewer/data-harvester/tests/test_package_spec077_runpod.py`
 - `wow-viewer/memory-bank/{activeContext,progress}.md`
-- `wow-viewer/data-harvester/scripts/train_v16_1_common.py` (reverted to d0929e2 baseline during debugging)
-- `wow-viewer/src/core/WowViewer.Core/Maps/{ObjectLibraryEntry,ObjectCaptureVariant}.cs`
-- `wow-viewer/tests/WowViewer.Core.Tests/ObjectLibraryContractsTests.cs`
-- `wow-viewer/data-harvester/src/harvester/object_library.py`
-- `wow-viewer/data-harvester/tests/test_object_library.py`
-- `wow-viewer/data-harvester/scripts/enumerate_object_capture_jobs.py`
-- `wow-viewer/data-harvester/scripts/build_object_library.py`
-- `wow-viewer/data-harvester/scripts/review_object_library.py`
-- `wow-viewer/specs/077-minimap-deconstruction-engine/tasks.md` (T006, T008, T009 (Python), T011, T012, T013 marked complete)
+- `wow-viewer/specs/077-minimap-deconstruction-engine/{tasks,user-guide}.md`

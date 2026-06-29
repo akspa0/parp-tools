@@ -1,5 +1,71 @@
 # Progress — wow-viewer
 
+## 2026-06-29 - Spec 077 anti-grid base rerun + RunPod package handoff
+
+### Context
+
+- `cuda_albedo_shadow_safe` completed 240 epochs but plateaued with weak broad terrain shape, blurred detail, and grid/noise artifacts. Do not resume it.
+- Current diagnosis: base height model still fails; residual refinement is premature until broad shape improves.
+- RunPod is the preferred near-term training host because local heat/noise is now a practical blocker.
+
+### What landed
+
+- `V161HeightModel` / `V18HeightModel` now accepts opt-in `norm` and `decoder_upsample` controls while preserving legacy defaults (`batch`, `bilinear`) for old checkpoints.
+- New fresh-run route: `--albedo --model-norm group --decoder-upsample nearest`, recommended run name `cuda_albedo_group_nearest`.
+- Trainer records `model_norm` and `decoder_upsample` in metrics and applies them in the main model plus VRAM autotune probe.
+- Added `scripts/package_spec077_runpod.py` to build a RunPod-ready package from Python training code plus derived artifacts only: teacher-prior stores, slim V18 target stores (`height_257`, `object_filtered_mask`, `normal_xyz`, `normal_mask`), albedo sidecars, and visibility-audit manifest.
+- Package emits `README_RunPod.md`, `manifest.json`, `requirements-runpod.txt`, and pod-side helpers: `runpod/install_deps.sh`, `verify_bundle.sh`, `smoke_spec077.sh`, `train_spec077.sh`.
+- Added `scripts/setup_spec077_runpod.py` to build the package and create the RunPod training Pod through REST with `RUNPOD_API_KEY`. Defaults target `NVIDIA RTX 4000 Ada Generation` only; alternate GPU fallbacks require explicit `--gpu-fallback` or `--gpu-types`. The request uses 50GB RAM, 8 vCPU, a 150GB network volume mounted at `/workspace`, and 50GB container disk. The helper resolves a concrete datacenter before volume creation, deletes unused newly-created volumes after no-capacity Pod failures, writes a local setup manifest, and never stores the API key.
+- RunPod docs reviewed: Pods/network volumes are the simplest first route for long training; Flash/Serverless can attach volumes but add worker/endpoint machinery better saved for repeatable jobs after the command stabilizes. MCP can manage RunPod resources but API keys must stay outside the repo/package.
+- RunPod API limitation recorded: normal `RUNPOD_API_KEY` creates compute/storage resources but does not upload files to network volumes through the REST API; RunPod S3 upload requires separate S3 API credentials. The default setup avoids extra S3 credentials by starting Pod-side `runpodctl receive <code>` and local `runpodctl send <bundle.tar> --code <same-code>` when `runpodctl` is on `PATH`; `rsync` remains a manual alternate.
+- Spec 077 user guide, architecture note, tasks, and memory bank updated.
+
+### Validation
+
+- Added `tests/test_package_spec077_runpod.py` to verify the packager excludes client files and slims V18 copies.
+- The same test file now pins the setup helper's RTX 4000 Ada/50GB RAM Pod payload, verifies GPU fallbacks are explicit opt-in only, rejects `auto` datacenters for network-volume payloads, and statically covers no-capacity retry cleanup for unused network volumes.
+- Focused commands to run from `wow-viewer/data-harvester` when the shell path issue is clear:
+  `uv run pytest tests/test_height_only_prior.py tests/test_terrain_augment.py tests/test_package_spec077_runpod.py -q`
+- This session attempted `uv run pytest tests/test_package_spec077_runpod.py -q`, but the shell tool still failed before command execution with `The "path" argument must be of type string. Received undefined`.
+- Follow-up correction: automatic fallback GPUs were removed from the default setup path after cost-target clarification. A plain setup run now tries only `NVIDIA RTX 4000 Ada Generation`; `--gpu-fallback` / `--gpu-types` are explicit opt-ins. Focused pytest was attempted again and hit the same shell-tool `path` error before execution.
+- Package input check:
+  `uv run python scripts/package_spec077_runpod.py --validate-only`
+- Setup dry run:
+  `uv run python scripts/setup_spec077_runpod.py --dry-run --overwrite-package`
+
+### Next
+
+- Rebuild albedo sidecars with `--overwrite` if not already rebuilt after the texture-ID pseudo-colour fix.
+- Build the cloud package with `uv run python scripts/package_spec077_runpod.py --archive-format tar --overwrite`.
+- Run `setup_spec077_runpod.py --overwrite-package`; let the network-volume + `runpodctl` bootstrap verify, smoke, and start `cuda_albedo_group_nearest` unless `--no-auto-start-training` is intentionally used.
+
+## 2026-06-29 - Spec 077 shadow-safe albedo training correction
+
+### Context
+
+- User reviewed the last albedo/augmentation preview and identified the key invalid assumption: D4 flip/rotate augmentation is not physically valid for baked minimap RGB because terrain shadows and lighting have a fixed world direction. The weird blocky/streaking trend may be worsened by feeding rotated/shadow-inconsistent samples, separate from the U-Net upsampling artifact already noted.
+- The albedo channel remains valid: it is derived from V18 `alpha_256` / MCAL layer identity and is orthogonal to suppressed minimap RGB. The problem is geometric augmentation of orientation-sensitive imagery, not the 6-channel input itself.
+
+### What landed
+
+- `terrain_augment.py` now separates geometry-valid D4 transforms from `SHADOW_SAFE_TRANSFORMS` (identity only).
+- `HeightOnlyPriorDataset` defaults dataset augmentation to shadow-safe identity-only transforms. Explicit D4 remains available through `augment_transforms=ALL_TRANSFORMS` for geometry-only tests/ablations.
+- `train_height_only_prior.py` adds `--augment-policy {shadow-safe,d4}`. `--augment` now defaults to `shadow-safe`; D4 requires explicit `--augment-policy d4`. Metrics record `augment_policy` and `augment_transforms`.
+- Spec 077 user guide now recommends `cuda_albedo_shadow_safe` with `--albedo` and no geometric augmentation. The old augmented command is retained only as a short D4 ablation diagnostic.
+- Architecture/user-guide/tasks now record the next refinement direction: if broad albedo height improves but small details remain weak, define a separate MCLY-guided residual model that predicts one signal (`height_delta_257`) over MCLY/alpha high-detail masks. Do not add low/medium/high heads to the base model.
+- Follow-up correction from user: lazy albedo generation is not enough for a real run. Added `scripts/build_albedo_dataset.py` to precompute `albedo_rgb_256` sidecar stores from V18 `alpha_256`, added `train_height_only_prior.py --albedo-path`, and made final/per-epoch validation previews show an `albedo input` panel when `--albedo` is enabled. Full albedo runs should build both sidecars first, then pass both `--albedo-path` values.
+- Follow-up correction from user: generated albedo appeared as the same light-cyan block on every tile. Root cause was the placeholder compositor: it used fixed layer-slot colours and collapsed empty/single-layer alpha to the layer-0 cyan placeholder. Updated albedo generation to use V18 `mcly_texture_ids`/`mcly_layer_mask` stable pseudo-colours via `composite_texture_identity_albedo`; this is texture-identity guidance, not decoded BLP colour. Rebuild old sidecars with `--overwrite`.
+
+### Validation
+
+- Focused pytest commands should be run from `wow-viewer/data-harvester` when the shell path-argument issue is not present:
+  `uv run pytest tests/test_terrain_augment.py tests/test_height_only_prior.py -q`
+
+### Next
+
+- Build albedo sidecars for `0_5_3_3368` and `3_3_5_12340`, then start a fresh `cuda_albedo_shadow_safe` run with `--albedo --albedo-path ...`. Do not resume a 3-channel or D4-augmented checkpoint.
+- If small-detail residuals remain after the broad shape stabilizes, open T029b as a separate MCLY-guided residual-refinement slice.
+
 ## 2026-06-29 - Spec 077 height-only val-plateau diagnosis + augmentation + map-grouped split
 
 ### Diagnosis
@@ -28,6 +94,29 @@
 ### Open follow-up (albedo signal)
 
 - User asked whether an albedo signal could help as a guidance channel. Assessment: the V18 store already has `mcly_texture_ids` + `mcly_layer_mask` + `mcal_alpha_pack`, and `compositor.py` can synthesize a per-pixel base-color (albedo) map from MCAL alpha + placeholder layer colors. A derived albedo channel could be added to the teacher-prior tensor as a 6th input channel and would give the height model a texture-identity prior that is orthogonal to the suppressed-minimap RGB. This is feasible but is a separate bounded slice (touches the teacher-prior builder + dataset contract + model input channels) and should be tried only after the augmentation run proves whether the plateau is regularization-limited or signal-limited. Not implemented in this slice.
+
+## 2026-06-29 - Spec 077 albedo guidance channel (signal-limited ceiling follow-up)
+
+### Context
+
+- The augmented run (`cuda_aug_seed123`) initially looked like it collapsed the generalization gap from 0.25 to 0.03 (train ~0.54, val ~0.59), but this is superseded by the shadow-safe correction above: D4 flip/rotate augmentation is invalid for baked minimap RGB. The remaining ceiling is still **signal-limited**: the suppressed-minimap RGB alone does not carry enough information.
+- User also observed a grid-like artifact in the height prediction that worsens over time — a classic U-Net checkerboard artifact from bilinear upsampling. This is a separate issue from the signal ceiling; noted for follow-up.
+
+### What landed
+
+- `V161HeightModel` (re-exported as `V18HeightModel`) now accepts an `in_channels` parameter (default 3, backward-compatible with existing checkpoints). `v18_models.py` exports `V18_HEIGHT_DEFAULT_IN_CHANNELS=3` and `V18_HEIGHT_ALBEDO_IN_CHANNELS=6` constants.
+- `HeightOnlyPriorDataset` now accepts `include_albedo=True`. When enabled, it reads precomputed `albedo_rgb_256` from `--albedo-path` sidecars, or falls back to deriving `albedo_rgb` (3, 256, 256) from V18 `alpha_256` via `compositor.composite_synthetic_minimap`. No teacher-prior rebuild needed. The albedo encodes terrain-layer identity (which placeholder colour each pixel blends toward), orthogonal to the suppressed-minimap RGB. Tiles without alpha data emit zeros. The albedo is a plain image under the selected augmentation policy; D4 is now explicit ablation only for shadow-bearing minimap runs.
+- `train_height_only_prior.py` adds `--albedo` flag. When enabled, the model is built with `in_channels=6` and the trainer concatenates `cat(suppressed_rgb, albedo_rgb)` as the model input. All four model-call sites are updated: `_train_one_batch`, `_validate_batch`, autotune probe, and both preview paths (final + per-epoch). The deconstruction preview now shows an "albedo" panel when present. Metrics JSON records `albedo` and `model_in_channels`.
+- New tests in `test_height_only_prior.py` (8 albedo tests): albedo off by default, albedo shape/dtype/range, spatially varying vs flat tile, zeros without alpha array, augmentation consistency, 6-channel model forward, default 3-channel backward compat, `--albedo` flag end-to-end smoke. All 27 tests in the file pass; 18 augment tests still pass.
+
+### Validation
+
+- `uv run pytest tests/test_height_only_prior.py -q` -> 27 passed.
+- `uv run pytest tests/test_terrain_augment.py -q` -> 18 passed.
+
+### Open follow-up (grid artifact)
+
+- The height prediction shows a grid-like checkerboard artifact that worsens over training. This is likely from the U-Net's bilinear upsampling (`nn.Upsample(scale_factor=2, mode="bilinear")` in `_UpBlock`). Potential fixes: switch to pixel-shuffle/nearest upsampling, add a smoothing conv after each upsample, or reduce the upsampling ratio. This is a separate bounded slice and should be tried after the albedo run establishes whether the new signal helps the ceiling.
 
 ## 2026-06-28 - Spec 077 teacher-prior mask diagnostics and alignment fixes
 
@@ -646,7 +735,47 @@ All phases built clean and pushed to `071-left-right-sidebar-split`.
 - `074-alpha-brush-library` — implemented candidate/evidence extraction, deprecated as primary brush truth.
 - `075-scar-mask-segmentation` — diagnostic baseline only, deprecated as primary model route.
 - `076-full-map-fractal-brush-library` — active dataset-truth plan; Phase 1-3 and full-map strip processing are implemented.
-- `077-minimap-deconstruction-engine` — active. Phases 1-6 of the plan are code-complete in the data-harvester. The user-killed earlier two-build run (resumed from `cuda_visibility_audited_two_build`) plateaued at `best_val=0.5490331426262856` around epoch 134, with validation loss flat in `0.556-0.571` from epoch 134 onward, train loss down to ~`0.27`, and LR reaching `1e-6`. A fresh visibility-audited two-build run (`cuda_visibility_audited_two_build_harderr_fresh`) with hard-error weighting and normal guidance is in flight; by epoch 30-35 it shows visibly sharper predicted detail and ~116.5 tiles/sec throughput, with the best validation at epoch 33 `0.6195`.
+- `077-minimap-deconstruction-engine` — active. Phases 1-6 code-complete. `cuda_albedo_group_nearest` running on RunPod (RTX 4000 Ada, network volume, cost-target default).
+- `079-runpod-integration-guide` — new. Spec written with all RunPod lessons learned.
+- `071-left-right-sidebar-split` — active branch, user testing viewer UI.
+
+## 2026-06-29 - Spec 077 cloud training on RunPod: `cuda_albedo_group_nearest` running successfully
+
+### Context
+
+- Fresh `cuda_albedo_group_nearest` run with `--albedo --model-norm group --decoder-upsample nearest` started on RunPod via network-volume-backed RTX 4000 Ada Pod.
+- Cost-target defaults ($1/hr, 12GB VRAM, 24GB RAM, COMMUNITY cloud) replaced fixed GPU-type targeting after learning `runpodctl gpu list` has no pricing and REST API fails with stale payload fields.
+- RunPod integration spec (079) captures all lessons learned for future projects.
+
+### What landed (this session)
+
+- Cost-target mode: `--max-cost-per-hour 1.00`, `--min-gpu-vram-gb 12`, `--min-ram-gb 24`, `--cloud-type COMMUNITY` (default).
+- Minimal REST payload: `gpuTypeIds`, `gpuCount`, `imageName`, `containerDiskInGb`, `volumeInGb`, `volumeMountPath`, `ports`, `supportPublicIp`. Removed `gpuTypePriority`, `dataCenterPriority`, `minRAMPerGPU`, `minVCPUPerGPU`, `computeType`, `interruptible`.
+- Excluded datacenter GPUs (A100, H100, H200, B200, L4, L40, A40, Tesla, RTX PRO, AMD) with `EXCLUDED_GPU_PREFIXES` + `_is_excluded_gpu()`.
+- Error handling: `_is_no_instances_error` expanded to `_is_retryable_error` (500-level, "not found", "does not support").
+- Network-volume datacenter filtering: `VALID_NETWORK_VOLUME_DATACENTERS` constant wired into `_requested_data_centers` and `_availability_candidates`.
+- Hardcoded `FALLBACK_GPU_INFOS` with approximate prices because `runpodctl gpu list` has no price fields.
+- `_gpu_full_info()` parses actual `runpodctl gpu list` fields (`gpuId`, `memoryInGb`, `available`, `communityCloud`) and merges with fallback pricing.
+- `_requested_gpu_types(use_cost_target=True)` filters by VRAM, excludes datacenter GPUs, sorts cheapest first.
+- Network volume defaults to ON with `--use-network-volume` (True by default).
+- Pod image updated to `runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04` (Python 3.11 for zarr>=3.0).
+- Real RunPod Pod created successfully with minimal payload (Pod deleted, new one with network volume running).
+- Switch from fixed GPU-type targeting to cost-target mode after troubleshooting stale datacenter lists, wrong image, overloaded payload, missing SSH keys.
+- `setup_spec077_runpod.py` tests updated: cost-target defaults, GPU exclusion, payload field assertions.
+- Created `wow-viewer/specs/079-runpod-integration-guide/spec.md` with all RunPod lessons learned.
+- Workflow decisions: `runpodctl send/receive` for bundle transfer, web terminal as SSH fallback, network volume for one-time upload persistence.
+
+### Validation
+
+- Real RunPod Pod created from minimal REST payload (confirmed working).
+- Tests pass (when shell available): `uv run pytest tests/test_package_spec077_runpod.py -q`.
+- `cuda_albedo_group_nearest` training started on RunPod — monitoring.
+
+### Next
+
+- Monitor `cuda_albedo_group_nearest` on RunPod for convergence and detail quality.
+- If broad shape improves but small details remain, open T029b (MCLY-guided `height_delta_257` residual-refinement lane).
+- Update spec 079 with plan.md and tasks.md for future project reuse.
 
 ## Out-of-Phase Work
 

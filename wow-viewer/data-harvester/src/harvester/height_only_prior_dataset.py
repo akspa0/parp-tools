@@ -15,6 +15,11 @@ spec 077 data-model.md §3.1:
   * ``normal_mask`` ``(1, 257, 257)`` float32 — optional normal-guidance validity mask
   * ``weight_257`` ``(1, 257, 257)``  float32 — terrain-valid weight (1.0 on
     terrain, 0.0 on object/filtered pixels)
+  * ``albedo_rgb`` ``(3, 256, 256)`` float32 — optional texture-identity
+    guidance channel derived from MCAL alpha via the compositor. Present
+    only when ``include_albedo=True``. Orthogonal to the suppressed-minimap
+    RGB: it encodes which terrain layer each pixel belongs to, not the
+    appearance. A plain image under the selected augmentation policy.
   * ``meta_build`` / ``meta_map`` / ``meta_tile_id`` — provenance
 
 Non-goals (spec 077 FR-013, FR-014, FR-023):
@@ -36,7 +41,13 @@ from torch.utils.data import Dataset
 import zarr
 import zarr.storage
 
-from harvester.terrain_augment import augment_sample, sample_transform
+from harvester.compositor import composite_texture_identity_albedo
+from harvester.terrain_augment import (
+    SHADOW_SAFE_TRANSFORMS,
+    TransformId,
+    augment_sample,
+    sample_transform,
+)
 
 
 @dataclass(frozen=True)
@@ -70,6 +81,13 @@ def _load_tiles_parquet(path: Path) -> list[dict]:
 
 
 def _nearest_resize(arr: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
+    if arr.ndim == 3 and arr.shape[-1] <= 16:
+        h, w = arr.shape[0], arr.shape[1]
+        if h == target_h and w == target_w:
+            return arr
+        ys = np.linspace(0, h - 1, target_h).astype(np.int64)
+        xs = np.linspace(0, w - 1, target_w).astype(np.int64)
+        return arr[ys[:, None], xs[None, :], :]
     h, w = arr.shape[-2], arr.shape[-1]
     if h == target_h and w == target_w:
         return arr
@@ -95,6 +113,10 @@ class HeightOnlyPriorDataset(Dataset):
         authoritative ``height_257`` target and the
         ``object_filtered_mask`` weight. May be ``None`` for inference-only
         mode that only emits the prior inputs (target arrays are zeros).
+    albedo_path:
+        Optional sidecar ``<build>.zarr`` store containing precomputed
+        ``albedo_rgb_256``. When supplied with ``include_albedo=True``, this
+        is preferred over lazy compositing from V18 ``alpha_256``.
     tile_filter:
         Optional iterable of ``tile_id`` values to restrict to. When
         ``None`` all available tiles are used.
@@ -105,33 +127,62 @@ class HeightOnlyPriorDataset(Dataset):
         If ``True`` (default), normalize ``height_257`` by its per-tile
         mean/std. The de-normalization is the caller's responsibility.
     augment:
-        If ``True``, apply a random D4 (flip/rotate) transform to every
-        spatial array in the returned sample. This is geometrically exact
-        for terrain height (a scalar field) and tracks the
-        ``[-dh/dx, -dh/dy, +1]`` normal convention so the normal-guidance
-        target stays consistent. Intended for the train split only; leave
+        If ``True``, sample from ``augment_transforms`` and apply that
+        transform to every spatial array in the returned sample. The default
+        transform set is shadow-safe identity only. Explicit D4 transforms
+        are geometrically exact for terrain height (a scalar field) and track
+        the ``[-dh/dx, -dh/dy, +1]`` normal convention, but are not canonical
+        for baked minimap RGB. Intended for the train split only; leave
         ``False`` for validation so val loss is deterministic.
     augment_seed:
         Seed for the per-sample augmentation RNG. Ignored when
         ``augment`` is ``False``.
+    augment_transforms:
+        Allowed geometric transforms when ``augment`` is ``True``. Defaults
+        to ``SHADOW_SAFE_TRANSFORMS`` (identity only) because baked minimap
+        RGB has fixed-direction terrain lighting/shadows; D4 augmentation is
+        available only when explicitly supplied by experiments that do not
+        rely on orientation-sensitive appearance.
+    include_albedo:
+        If ``True``, include a per-tile ``albedo_rgb`` ``(3, 256, 256)``
+        guidance channel. Precomputed ``albedo_rgb_256`` from
+        ``albedo_path`` is preferred; otherwise the dataset falls back to
+        deriving albedo from V18 ``alpha_256`` plus MCLY texture IDs via
+        ``compositor.composite_texture_identity_albedo``. The albedo encodes
+        terrain-layer identity and is orthogonal to the suppressed-minimap
+        RGB. Tiles without precomputed albedo or alpha data emit zeros. The
+        channel follows the selected augmentation transform like any other
+        image.
     """
 
     def __init__(
         self,
         prior_path: str | Path,
         v18_path: str | Path | None = None,
+        albedo_path: str | Path | None = None,
         tile_filter: list[int] | None = None,
         include_weight: bool = True,
         height_norm: bool = True,
         augment: bool = False,
         augment_seed: int = 0,
+        augment_transforms: tuple[TransformId, ...] | None = None,
+        include_albedo: bool = False,
     ) -> None:
         self.prior_path = Path(prior_path)
         self.v18_path = Path(v18_path) if v18_path is not None else None
+        self.albedo_path = Path(albedo_path) if albedo_path is not None else None
         self.include_weight = include_weight
         self.height_norm = height_norm
         self.augment = bool(augment)
         self._augment_rng = np.random.default_rng(int(augment_seed))
+        self.augment_transforms = (
+            tuple(augment_transforms)
+            if augment_transforms is not None
+            else SHADOW_SAFE_TRANSFORMS
+        )
+        if not self.augment_transforms:
+            raise ValueError("augment_transforms must contain at least one transform")
+        self.include_albedo = bool(include_albedo)
 
         prior_tensor = _load_zarr_array(self.prior_path, "processed_minimap_prior_256")
         if prior_tensor is None or prior_tensor.size == 0:
@@ -155,6 +206,18 @@ class HeightOnlyPriorDataset(Dataset):
         self.normal_xyz = None
         self.normal_mask = None
         self.weight_257 = None
+        self.alpha_256 = None
+        self.mcly_texture_ids = None
+        self.mcly_layer_mask = None
+        self.albedo_rgb_256 = None
+        if self.include_albedo and self.albedo_path is not None and self.albedo_path.exists():
+            self.albedo_rgb_256 = _load_zarr_array(self.albedo_path, "albedo_rgb_256")
+            if self.albedo_rgb_256 is None:
+                print(
+                    f"include_albedo=True but no albedo_rgb_256 array under {self.albedo_path}; "
+                    "falling back to V18 alpha_256 if available.",
+                    flush=True,
+                )
         if self.v18_path is not None and self.v18_path.exists():
             self.height_257 = _load_zarr_array(self.v18_path, "height_257")
             self.normal_xyz = _load_zarr_array(self.v18_path, "normal_xyz")
@@ -167,6 +230,27 @@ class HeightOnlyPriorDataset(Dataset):
                     self.weight_257 = np.ones_like(
                         self.height_257, dtype=np.float32
                     ) if self.height_257 is not None else None
+            if self.include_albedo and self.albedo_rgb_256 is None:
+                precomputed_in_v18 = _load_zarr_array(self.v18_path, "albedo_rgb_256")
+                if precomputed_in_v18 is not None:
+                    self.albedo_rgb_256 = precomputed_in_v18
+            if self.include_albedo and self.albedo_rgb_256 is None:
+                self.alpha_256 = _load_zarr_array(self.v18_path, "alpha_256")
+                self.mcly_texture_ids = _load_zarr_array(self.v18_path, "mcly_texture_ids")
+                self.mcly_layer_mask = _load_zarr_array(self.v18_path, "mcly_layer_mask")
+                if self.alpha_256 is not None:
+                    # Normalize to [0, 1] float32 if stored as uint8 or >1.
+                    if self.alpha_256.dtype != np.float32:
+                        self.alpha_256 = self.alpha_256.astype(np.float32)
+                    if float(self.alpha_256.max(initial=0.0)) > 1.5:
+                        self.alpha_256 = self.alpha_256 / 255.0
+                    self.alpha_256 = np.clip(self.alpha_256, 0.0, 1.0)
+                else:
+                    print(
+                        f"include_albedo=True but no alpha_256 array under {self.v18_path}; "
+                        "albedo_rgb will be zeros.",
+                        flush=True,
+                    )
 
         # Build a tile_id -> prior-row-index lookup. The teacher-prior Zarr
         # was written in the same order as the V18 index, so the row index
@@ -254,6 +338,33 @@ class HeightOnlyPriorDataset(Dataset):
         else:
             weight = np.ones((1, 257, 257), dtype=np.float32)
 
+        albedo_chw = None
+        if self.include_albedo:
+            if self.albedo_rgb_256 is not None and source_tile_id < self.albedo_rgb_256.shape[0]:
+                albedo_tile = self.albedo_rgb_256[source_tile_id].astype(np.float32)
+                if albedo_tile.shape[0] != 256 or albedo_tile.shape[1] != 256:
+                    albedo_tile = _nearest_resize(albedo_tile, 256, 256)
+                if float(albedo_tile.max(initial=0.0)) > 1.5:
+                    albedo_tile = albedo_tile / 255.0
+                albedo_tile = np.clip(albedo_tile, 0.0, 1.0)
+                albedo_chw = np.transpose(albedo_tile, (2, 0, 1)).astype(np.float32)
+            elif self.alpha_256 is not None and source_tile_id < self.alpha_256.shape[0]:
+                alpha_tile = self.alpha_256[source_tile_id].astype(np.float32)
+                # alpha_256 is stored at (256, 256, 4) or (128, 128, 4).
+                # Resize to 256x256 if needed, then composite.
+                if alpha_tile.shape[0] != 256 or alpha_tile.shape[1] != 256:
+                    alpha_tile = _nearest_resize(alpha_tile, 256, 256)
+                tex_tile = None
+                layer_mask_tile = None
+                if self.mcly_texture_ids is not None and source_tile_id < self.mcly_texture_ids.shape[0]:
+                    tex_tile = self.mcly_texture_ids[source_tile_id].astype(np.int32)
+                if self.mcly_layer_mask is not None and source_tile_id < self.mcly_layer_mask.shape[0]:
+                    layer_mask_tile = self.mcly_layer_mask[source_tile_id].astype(np.float32)
+                albedo_hwc = composite_texture_identity_albedo(alpha_tile, tex_tile, layer_mask_tile)  # (256, 256, 3)
+                albedo_chw = np.transpose(albedo_hwc, (2, 0, 1)).astype(np.float32)
+            else:
+                albedo_chw = np.zeros((3, 256, 256), dtype=np.float32)
+
         sample = {
             "input_prior": prior_chw,
             "raw_minimap_rgb": raw_chw,
@@ -269,10 +380,12 @@ class HeightOnlyPriorDataset(Dataset):
             "meta_prior_row": prior_index,
             "meta_v18_row": source_tile_id,
         }
+        if albedo_chw is not None:
+            sample["albedo_rgb"] = albedo_chw
         if self.augment:
-            transform = sample_transform(self._augment_rng)
+            transform = sample_transform(self._augment_rng, self.augment_transforms)
             sample = augment_sample(sample, transform)
-        return {
+        out = {
             "input_prior": torch.from_numpy(np.ascontiguousarray(sample["input_prior"])),
             "raw_minimap_rgb": torch.from_numpy(np.ascontiguousarray(sample["raw_minimap_rgb"])),
             "teacher_object_mask": torch.from_numpy(np.ascontiguousarray(sample["teacher_object_mask"])),
@@ -287,6 +400,9 @@ class HeightOnlyPriorDataset(Dataset):
             "meta_prior_row": sample["meta_prior_row"],
             "meta_v18_row": sample["meta_v18_row"],
         }
+        if "albedo_rgb" in sample:
+            out["albedo_rgb"] = torch.from_numpy(np.ascontiguousarray(sample["albedo_rgb"]))
+        return out
 
 
 def dataset_summary(prior_path: str | Path) -> dict:

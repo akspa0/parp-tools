@@ -100,6 +100,12 @@
 - [x] T028d [US3] Use validation loss for LR plateau scheduling, resume LR override, and best-checkpoint selection without backpropagating validation data.
 - [x] T028e [US3] Add optional training-batch hard-error weighting from detached absolute height residuals; keep validation abs-error diagnostic only.
 - [x] T029 [US3] Run a bounded smoke training proof and record the outputs in the spec or architecture note.
+- [x] T029a [US3] Correct the augmentation contract for baked minimap RGB: default to shadow-safe identity-only augmentation, keep D4 only as an explicit ablation, and update operator docs.
+- [x] T029c [US3] Add a precomputed albedo guidance sidecar builder and train-time `--albedo-path` consumption so full albedo runs use reviewed fixed inputs.
+- [x] T029d [US3] Add opt-in anti-grid base-model controls (`--model-norm group`, `--decoder-upsample nearest`) after the albedo run plateaued, while preserving legacy defaults for old checkpoints.
+- [x] T029e [US3] Add a RunPod cloud-training package builder that copies Python training code plus derived teacher-prior/V18/albedo/curation artifacts only, excluding game-client roots.
+- [x] T029f [US3] Add a RunPod REST setup helper for the RTX 4000 Ada training Pod, default network-volume storage, and `runpodctl` send/receive bootstrap using `RUNPOD_API_KEY` only for compute/volume creation; GPU fallbacks are opt-in only.
+- [ ] T029b [US3] If base albedo training still misses small detail, define a separate MCLY-guided `height_delta_257` residual-refinement dataset/trainer instead of adding heads to the base model.
 
 **Checkpoint**: The first terrain proof is a tiny height-only lane, not a combined terrain model.
 

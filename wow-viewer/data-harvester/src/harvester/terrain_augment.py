@@ -1,12 +1,17 @@
 """Spec 077 height-only terrain augmentation.
 
-Geometrically-exact flip/rotate augmentation for the height-only training
-sample. Terrain height is a scalar field, so the dihedral group D4 (identity,
-hflip, vflip, hflip+vflip, rot90/180/270) is an exact symmetry of the
-height target. The minimap prior, weight mask, and normal mask transform as
-plain images. The only non-trivial part is the ``normal_xyz`` target, whose
-x/y gradient channels must be negated and/or swapped to stay consistent with
-the transformed height field.
+Geometrically-exact flip/rotate helpers for height-only training samples.
+Terrain height is a scalar field, so the dihedral group D4 (identity, hflip,
+vflip, hflip+vflip, rot90/180/270) is an exact symmetry of the height target.
+That is only true for orientation-free inputs. Baked minimap RGB is not
+orientation-free: terrain lighting and shadows have a fixed world direction,
+so production minimap-to-height runs should use the shadow-safe identity-only
+policy unless they intentionally ablate with ``--augment-policy d4``.
+
+For transforms that are explicitly requested, the minimap prior, weight mask,
+and normal mask transform as plain images. The only non-trivial part is the
+``normal_xyz`` target, whose x/y gradient channels must be negated and/or
+swapped to stay consistent with the transformed height field.
 
 Normal convention (see ``harvester.height_to_normal.analytic_normals_from_height``):
 ``n = normalize([-dh/dx, -dh/dy, +1])``. Under a spatial transform of the
@@ -31,7 +36,16 @@ import numpy as np
 
 # Transform ids for the D4 dihedral group. ``rot90`` is counter-clockwise in
 # numpy/image coordinates (rows = y, cols = x), matching ``np.rot90``.
-TransformId = Literal["identity", "hflip", "vflip", "hflip_vflip", "rot90", "rot180", "rot270", "transpose"]
+TransformId = Literal[
+    "identity",
+    "hflip",
+    "vflip",
+    "hflip_vflip",
+    "rot90",
+    "rot180",
+    "rot270",
+    "transpose",
+]
 
 ALL_TRANSFORMS: tuple[TransformId, ...] = (
     "identity",
@@ -44,11 +58,18 @@ ALL_TRANSFORMS: tuple[TransformId, ...] = (
     "transpose",
 )
 
+SHADOW_SAFE_TRANSFORMS: tuple[TransformId, ...] = ("identity",)
 
-def sample_transform(rng: np.random.Generator) -> TransformId:
-    """Pick a uniformly random D4 transform id."""
-    idx = int(rng.integers(0, len(ALL_TRANSFORMS)))
-    return ALL_TRANSFORMS[idx]
+
+def sample_transform(
+    rng: np.random.Generator,
+    transforms: tuple[TransformId, ...] = ALL_TRANSFORMS,
+) -> TransformId:
+    """Pick a uniformly random transform id from an allowed transform set."""
+    if not transforms:
+        raise ValueError("At least one augmentation transform is required.")
+    idx = int(rng.integers(0, len(transforms)))
+    return transforms[idx]
 
 
 def _spatial_flip(arr: np.ndarray, hflip: bool, vflip: bool) -> np.ndarray:

@@ -5,7 +5,8 @@ Covers:
   * Augmented normals match normals re-derived from the augmented height
     field, for every transform (the critical normal-convention check).
   * Augmentation preserves array shapes and does not mutate the input.
-  * Augmentation is off by default and on when requested on the dataset.
+  * Shadow-safe augmentation is identity-only by default for baked minimap RGB.
+  * Explicit D4 augmentation still works for geometry-only ablations.
   * Validation is never augmented even when the base dataset has augment on
     (the _AugmentGuardSubset contract).
   * Map-grouped split holds out entire maps and falls back to random when
@@ -37,6 +38,7 @@ for _entry in (_REPO_ROOT, _SRC_DIR, _SCRIPTS_DIR):
 
 from harvester.terrain_augment import (  # noqa: E402
     ALL_TRANSFORMS,
+    SHADOW_SAFE_TRANSFORMS,
     augment_sample,
     sample_transform,
 )
@@ -137,8 +139,15 @@ def test_sample_transform_covers_all_d4() -> None:
     rng = np.random.default_rng(4)
     seen = set()
     for _ in range(200):
-        seen.add(sample_transform(rng))
+        seen.add(sample_transform(rng, ALL_TRANSFORMS))
     assert seen == set(ALL_TRANSFORMS)
+
+
+def test_shadow_safe_transform_set_is_identity_only() -> None:
+    """Baked minimap shadows have fixed direction, so default augmentation cannot rotate/flip."""
+    rng = np.random.default_rng(5)
+    seen = {sample_transform(rng, SHADOW_SAFE_TRANSFORMS) for _ in range(20)}
+    assert seen == {"identity"}
 
 
 # --- dataset augment flag -------------------------------------------------
@@ -198,8 +207,8 @@ def test_dataset_augment_off_by_default_is_deterministic() -> None:
         np.testing.assert_array_equal(s0["height_257"].numpy(), s1["height_257"].numpy())
 
 
-def test_dataset_augment_on_changes_sample(tmp_path: Path) -> None:
-    # Use a spatially-varying prior so flips/rotations are detectable.
+def test_dataset_augment_default_shadow_safe_is_identity(tmp_path: Path) -> None:
+    """Dataset-level augmentation defaults to shadow-safe identity for minimap RGB."""
     prior_path = tmp_path / "prior.zarr"
     v18_path = tmp_path / "v18.zarr"
     if prior_path.exists():
@@ -234,7 +243,45 @@ def test_dataset_augment_on_changes_sample(tmp_path: Path) -> None:
         augment=True, augment_seed=123,
     )
     ds_plain = HeightOnlyPriorDataset(prior_path=prior_path, v18_path=v18_path, height_norm=False)
-    # A non-identity transform on a spatially-varying prior must differ.
+    for _ in range(20):
+        np.testing.assert_array_equal(ds[0]["input_prior"].numpy(), ds_plain[0]["input_prior"].numpy())
+
+
+def test_dataset_augment_d4_policy_changes_sample(tmp_path: Path) -> None:
+    # Use a spatially-varying prior so explicit D4 flips/rotations are detectable.
+    prior_path = tmp_path / "prior.zarr"
+    v18_path = tmp_path / "v18.zarr"
+    if prior_path.exists():
+        import shutil
+        shutil.rmtree(prior_path)
+    store = zarr.storage.LocalStore(str(prior_path), read_only=False)
+    root = zarr.group(store=store)
+    n_tiles = 3
+    prior = np.zeros((n_tiles, 256, 256, 5), dtype=np.uint8)
+    yy, xx = np.meshgrid(np.arange(256), np.arange(256), indexing="ij")
+    for i in range(n_tiles):
+        prior[i, :, :, 0] = (xx * (i + 1) % 255).astype(np.uint8)
+        prior[i, :, :, 1] = (yy * (i + 1) % 255).astype(np.uint8)
+    mask = np.zeros((n_tiles, 256, 256), dtype=np.uint8)
+    root.create_array("processed_minimap_prior_256", data=prior, chunks=(n_tiles, 256, 256, 5), compressors=CODEC)
+    root.create_array("teacher_object_mask_256", data=mask, chunks=(n_tiles, 256, 256), compressors=CODEC)
+    root.attrs.update({"schema": "spec-077-teacher-prior", "build": "test_build"})
+    table = pa.table({
+        "build": ["test_build"] * n_tiles,
+        "map_name": ["Test"] * n_tiles,
+        "map": ["Test"] * n_tiles,
+        "tile_id": list(range(n_tiles)),
+        "tile_x": list(range(n_tiles)),
+        "tile_y": list(range(n_tiles)),
+    })
+    pq.write_table(table, str(prior_path / "tiles.parquet"))
+    _make_v18_store(v18_path, n_tiles=n_tiles)
+
+    ds = HeightOnlyPriorDataset(
+        prior_path=prior_path, v18_path=v18_path, height_norm=False,
+        augment=True, augment_seed=123, augment_transforms=ALL_TRANSFORMS,
+    )
+    ds_plain = HeightOnlyPriorDataset(prior_path=prior_path, v18_path=v18_path, height_norm=False)
     changed = False
     for _ in range(20):
         aug = ds[0]["input_prior"].numpy()
@@ -242,7 +289,7 @@ def test_dataset_augment_on_changes_sample(tmp_path: Path) -> None:
         if not np.array_equal(aug, plain):
             changed = True
             break
-    assert changed, "augmentation never produced a different sample"
+    assert changed, "explicit D4 augmentation never produced a different sample"
 
 
 # --- _AugmentGuardSubset --------------------------------------------------
@@ -256,7 +303,7 @@ def test_augment_guard_subset_disables_augment_during_getitem() -> None:
         _make_v18_store(v18_path, n_tiles=4)
         base = HeightOnlyPriorDataset(
             prior_path=prior_path, v18_path=v18_path, height_norm=False,
-            augment=True, augment_seed=999,
+            augment=True, augment_seed=999, augment_transforms=ALL_TRANSFORMS,
         )
         train_sub, val_sub = _split_train_val(base, val_fraction=0.5, seed=0)
         guarded = _AugmentGuardSubset(val_sub)

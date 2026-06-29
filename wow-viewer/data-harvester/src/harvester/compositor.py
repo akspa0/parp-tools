@@ -68,6 +68,107 @@ def composite_synthetic_minimap(
     return synthetic.clip(0.0, 1.0).astype(np.float32)
 
 
+def _resize_hwc_nearest(arr: NDArray, target_h: int, target_w: int) -> NDArray:
+    """Nearest-neighbor resize for HWC arrays."""
+    h, w = arr.shape[0], arr.shape[1]
+    if h == target_h and w == target_w:
+        return arr
+    ys = np.linspace(0, h - 1, target_h).astype(np.int64)
+    xs = np.linspace(0, w - 1, target_w).astype(np.int64)
+    return arr[ys[:, None], xs[None, :], :]
+
+
+def texture_id_palette(texture_ids: NDArray[np.int32]) -> NDArray[np.float32]:
+    """Map terrain texture file-data IDs to deterministic display colours.
+
+    These are not decoded BLP average colours. They are stable pseudo-colours
+    that encode terrain texture identity, so two different MCLY texture IDs do
+    not collapse to the same placeholder layer colour.
+    """
+    ids = np.asarray(texture_ids, dtype=np.int64)
+    u = np.maximum(ids, 0).astype(np.uint64, copy=False)
+    r = ((u * np.uint64(1103515245) + np.uint64(12345)) >> np.uint64(16)) & np.uint64(255)
+    g = ((u * np.uint64(1664525) + np.uint64(1013904223)) >> np.uint64(16)) & np.uint64(255)
+    b = ((u * np.uint64(22695477) + np.uint64(1)) >> np.uint64(16)) & np.uint64(255)
+    rgb = np.stack([r, g, b], axis=-1).astype(np.float32) / 255.0
+    # Keep colours away from black/white extremes so preview panels stay readable.
+    rgb = 0.20 + 0.70 * rgb
+    return np.where(ids[..., None] >= 0, rgb, 0.0).astype(np.float32)
+
+
+def compute_identity_albedo_weights(
+    alpha_pack: NDArray[np.float32],
+    mcly_layer_mask: NDArray[np.float32] | None = None,
+) -> NDArray[np.float32]:
+    """Return per-layer weights for texture-identity albedo previews.
+
+    V18 documents ``alpha_256`` as per-layer blend weights. For rows where the
+    alpha pack is empty (common on single-layer terrain), fall back to the
+    first active MCLY layer, or layer 0 when no mask exists.
+    """
+    alpha = np.clip(np.asarray(alpha_pack, dtype=np.float32), 0.0, 1.0)
+    if alpha.ndim != 3 or alpha.shape[-1] != 4:
+        raise ValueError(f"alpha_pack must be HxWx4, got {alpha.shape}")
+    h, w = alpha.shape[0], alpha.shape[1]
+    weights = alpha.copy()
+
+    active = None
+    if mcly_layer_mask is not None:
+        active = np.asarray(mcly_layer_mask, dtype=np.float32)
+        if active.ndim == 3 and active.shape[-1] == 4:
+            active = _resize_hwc_nearest(active, h, w) > 0.0
+            if active.any():
+                weights = np.where(active, weights, 0.0)
+        else:
+            active = None
+
+    total = weights.sum(axis=-1, keepdims=True)
+    weights = np.where(total > 1e-6, weights / np.where(total > 1e-6, total, 1.0), 0.0)
+
+    empty = weights.sum(axis=-1) <= 1e-6
+    if np.any(empty):
+        fallback_layer = np.zeros((h, w), dtype=np.int64)
+        if active is not None:
+            has_active = active.any(axis=-1)
+            fallback_layer = np.argmax(active, axis=-1).astype(np.int64)
+            fallback_layer = np.where(has_active, fallback_layer, 0)
+        weights[empty] = 0.0
+        yy, xx = np.nonzero(empty)
+        weights[yy, xx, fallback_layer[yy, xx]] = 1.0
+    return weights.astype(np.float32)
+
+
+def composite_texture_identity_albedo(
+    alpha_pack: NDArray[np.float32],
+    mcly_texture_ids: NDArray[np.int32] | None = None,
+    mcly_layer_mask: NDArray[np.float32] | None = None,
+) -> NDArray[np.float32]:
+    """Composite a texture-identity albedo preview from V18 terrain layers.
+
+    Uses `alpha_256` for per-pixel layer weights and MCLY texture IDs for the
+    layer colours. If texture IDs are unavailable, falls back to the old fixed
+    placeholder colours.
+    """
+    alpha = np.clip(np.asarray(alpha_pack, dtype=np.float32), 0.0, 1.0)
+    weights = compute_identity_albedo_weights(alpha, mcly_layer_mask)
+    h, w = alpha.shape[0], alpha.shape[1]
+
+    if mcly_texture_ids is not None:
+        tex = np.asarray(mcly_texture_ids, dtype=np.int32)
+        if tex.ndim == 3 and tex.shape[-1] == 4:
+            tex = _resize_hwc_nearest(tex, h, w)
+            colours = texture_id_palette(tex)
+            fallback = np.broadcast_to(PLACEHOLDER_COLORS, colours.shape)
+            colours = np.where(tex[..., None] >= 0, colours, fallback)
+        else:
+            colours = np.broadcast_to(PLACEHOLDER_COLORS, (h, w, 4, 3))
+    else:
+        colours = np.broadcast_to(PLACEHOLDER_COLORS, (h, w, 4, 3))
+
+    albedo = (weights[..., None] * colours).sum(axis=2)
+    return albedo.clip(0.0, 1.0).astype(np.float32)
+
+
 def compute_residual(
     real_minimap: NDArray[np.float32],
     synthetic_minimap: NDArray[np.float32],

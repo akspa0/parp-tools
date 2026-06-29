@@ -14,6 +14,8 @@ public partial class ViewerApp
     private bool _enableWmoBackfaceCulling;
     private int _sampleBufferCount;
     private int _sampleCount;
+    private float _defaultFogStart = 200f;
+    private float _defaultFogEnd = 1500f;
 
     private bool SupportsRuntimeMultisampleToggle => _sampleBufferCount > 0 && _sampleCount > 0;
 

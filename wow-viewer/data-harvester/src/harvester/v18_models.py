@@ -24,6 +24,11 @@ from harvester.v16_1_models import (
     compute_compositor_weights_torch,
 )
 
+# Default input channel count for the height model when no albedo guidance
+# channel is appended. Kept here so the trainer and tests share one constant.
+V18_HEIGHT_DEFAULT_IN_CHANNELS = 3
+V18_HEIGHT_ALBEDO_IN_CHANNELS = 6
+
 __all__ = [
     "V18HeightModel",
     "V18NormalModel",
@@ -35,4 +40,6 @@ __all__ = [
     "V18TexcompModel",
     "recompose_from_mcly_alpha",
     "compute_compositor_weights_torch",
+    "V18_HEIGHT_DEFAULT_IN_CHANNELS",
+    "V18_HEIGHT_ALBEDO_IN_CHANNELS",
 ]

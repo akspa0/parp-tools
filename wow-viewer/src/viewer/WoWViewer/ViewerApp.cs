@@ -1684,6 +1684,10 @@ void main() {
                 if (_showRenderQualityWindow)
                     DrawRenderQualityWindow();
 
+                // Settings (global configuration window)
+                if (_showSettingsWindow)
+                    DrawSettingsWindow();
+
                 if (_showTerrainToolsWindow && (_terrainManager != null || _vlmTerrainManager != null) && !_useTabUi)
                     DrawTerrainToolsWindow();
 
@@ -1884,6 +1888,11 @@ void main() {
             {
                 // 071: floating-window toggles removed. Every tool lives in a
                 // workbench tab under Tools > Panels or the relevant top tab.
+
+                if (ImGui.MenuItem("Settings..."))
+                    _showSettingsWindow = true;
+
+                ImGui.Separator();
 
                 if (ImGui.BeginMenu("Offline Data / Conversion"))
                 {
@@ -14653,6 +14662,12 @@ void main() {
             _enableWmoBackfaceCulling = settings.EnableWmoBackfaceCulling;
             RenderQualitySettings.EnableTerrainBackfaceCulling = _enableTerrainBackfaceCulling;
             RenderQualitySettings.EnableWmoBackfaceCulling = _enableWmoBackfaceCulling;
+            _defaultFogStart = float.IsFinite(settings.DefaultFogStart)
+                ? Math.Clamp(settings.DefaultFogStart, 0f, 5000f)
+                : 200f;
+            _defaultFogEnd = float.IsFinite(settings.DefaultFogEnd)
+                ? Math.Clamp(settings.DefaultFogEnd, 100f, 6000f)
+                : 1500f;
             _showMinimapWindow = settings.ShowMinimapWindow;
             _useDockspaceUi = settings.ShellPanelLayoutVersion < CurrentShellPanelLayoutVersion
                 ? true
@@ -14875,6 +14890,8 @@ void main() {
                 EnableMultisample = _enableMultisample,
                 EnableTerrainBackfaceCulling = _enableTerrainBackfaceCulling,
                 EnableWmoBackfaceCulling = _enableWmoBackfaceCulling,
+                DefaultFogStart = _defaultFogStart,
+                DefaultFogEnd = _defaultFogEnd,
                 KnownGoodClientPaths = _knownGoodClientPaths,
                 ShowMinimapWindow = _showMinimapWindow,
                 UseDockspaceUi = _useDockspaceUi,
@@ -15200,6 +15217,10 @@ void main() {
         public bool UseTabUi { get; set; } = true;
         public int ActiveTopTab { get; set; }
         public int ActiveBottomTab { get; set; }
+
+        // Global fog defaults
+        public float DefaultFogStart { get; set; } = 200f;
+        public float DefaultFogEnd { get; set; } = 1500f;
     }
 
     private sealed class SavedTaxiActorOverride
