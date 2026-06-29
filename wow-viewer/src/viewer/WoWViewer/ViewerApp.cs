@@ -11980,6 +11980,7 @@ void main() {
 
             _terrainManager = _worldScene.Terrain;
             _terrainManager.DetailedTileCountOverride = _savedDetailedAdtTileCountOverride;
+            ApplyGlobalFogDefaults(_terrainManager.Lighting);
             RefreshTerrainWeakSignalRestoreHooks();
             RefreshTerrainWeakSignalRestoreForLoadedTiles();
             _renderer = _worldScene;
@@ -12227,6 +12228,7 @@ void main() {
         try
         {
             _vlmTerrainManager = new VlmTerrainManager(_gl, projectRoot);
+            ApplyGlobalFogDefaults(_vlmTerrainManager.Lighting);
             RefreshTerrainWeakSignalRestoreHooks();
             RefreshTerrainWeakSignalRestoreForLoadedTiles();
             _renderer = _vlmTerrainManager;
