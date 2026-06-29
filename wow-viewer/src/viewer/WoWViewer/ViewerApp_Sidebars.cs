@@ -981,7 +981,7 @@ public partial class ViewerApp
             ImGui.TextWrapped(_worldScene.RendererOptimizationHint);
 
         ImGui.Text("Utility Panels");
-        DrawToolbarPopupButton("Utility Windows", $"{CountEnabled(_showMinimapWindow, _showLogViewer, _showPerfWindow, _showRenderQualityWindow)} open", "##UtilityWindowsPopup", () =>
+        DrawToolbarPopupButton("Utility Windows", $"{CountEnabled(_showMinimapWindow, _showLogViewer, _showPerfWindow, _showSettingsWindow)} open", "##UtilityWindowsPopup", () =>
         {
             if (ImGui.Button(_showMinimapWindow ? "Hide Minimap" : "Show Minimap"))
             {
@@ -1001,9 +1001,9 @@ public partial class ViewerApp
                 ImGui.CloseCurrentPopup();
             }
 
-            if (ImGui.Button(_showRenderQualityWindow ? "Hide Render Quality" : "Show Render Quality"))
+            if (ImGui.Button("Settings..."))
             {
-                _showRenderQualityWindow = !_showRenderQualityWindow;
+                _showSettingsWindow = true;
                 ImGui.CloseCurrentPopup();
             }
         });
@@ -2785,6 +2785,9 @@ public partial class ViewerApp
 
             lighting.FogStart = fogStart;
             lighting.FogEnd = fogEnd;
+            _defaultFogStart = fogStart;
+            _defaultFogEnd = fogEnd;
+            SaveViewerSettings();
         }
 
         if (_worldScene != null)
@@ -4390,6 +4393,9 @@ public partial class ViewerApp
                 }
                 lighting.FogStart = fogStart;
                 lighting.FogEnd = fogEnd;
+                _defaultFogStart = fogStart;
+                _defaultFogEnd = fogEnd;
+                SaveViewerSettings();
             }
         }
 

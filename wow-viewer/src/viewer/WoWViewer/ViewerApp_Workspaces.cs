@@ -281,8 +281,8 @@ public partial class ViewerApp
             _showPerfWindow = !_showPerfWindow;
 
         ImGui.SameLine();
-        if (ImGui.Button(_showRenderQualityWindow ? "Hide Render Quality" : "Show Render Quality"))
-            _showRenderQualityWindow = !_showRenderQualityWindow;
+        if (ImGui.Button("Settings..."))
+            _showSettingsWindow = true;
     }
 
     private void DrawEditorPublishWorkspace()

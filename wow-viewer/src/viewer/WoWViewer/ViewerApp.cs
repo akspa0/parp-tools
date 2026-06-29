@@ -1953,8 +1953,8 @@ void main() {
                         OpenWorkbenchTab(ToolsBottomTab.Utilities);
                     if (ImGui.MenuItem("Perf"))
                         OpenWorkbenchTab(ToolsBottomTab.Utilities);
-                    if (ImGui.MenuItem("Render Quality"))
-                        OpenWorkbenchTab(ToolsBottomTab.Utilities);
+                    if (ImGui.MenuItem("Settings..."))
+                        _showSettingsWindow = true;
 
                     ImGui.Separator();
 
