@@ -98,7 +98,8 @@
 - [x] T028b [US3] Train from visibility-audited curation manifests so weak/mismatched teacher-mask rows can be excluded.
 - [x] T028c [US3] Add optional V18 normal-guidance loss derived from predicted height, without adding a normal output head.
 - [x] T028d [US3] Use validation loss for LR plateau scheduling, resume LR override, and best-checkpoint selection without backpropagating validation data.
-- [ ] T029 [US3] Run a bounded smoke training proof and record the outputs in the spec or architecture note.
+- [x] T028e [US3] Add optional training-batch hard-error weighting from detached absolute height residuals; keep validation abs-error diagnostic only.
+- [x] T029 [US3] Run a bounded smoke training proof and record the outputs in the spec or architecture note.
 
 **Checkpoint**: The first terrain proof is a tiny height-only lane, not a combined terrain model.
 

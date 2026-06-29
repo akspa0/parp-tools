@@ -463,6 +463,9 @@ def _autotune_batch_size(
                         target_normals=target_normals,
                         normal_guidance_mask=normal_mask,
                         normal_guidance_spacing=args.normal_guidance_spacing,
+                        hard_error_weight=args.hard_error_weight,
+                        hard_error_power=args.hard_error_power,
+                        hard_error_max_multiplier=args.hard_error_max_multiplier,
                     )
                 probe_scaler.scale(loss).backward()
                 probe_scaler.unscale_(probe_optimizer)
@@ -1031,6 +1034,9 @@ def main_with_args(argv: list[str] | None = None) -> int:
                 target_normals=target_normals,
                 normal_guidance_mask=normal_mask,
                 normal_guidance_spacing=args.normal_guidance_spacing,
+                hard_error_weight=args.hard_error_weight,
+                hard_error_power=args.hard_error_power,
+                hard_error_max_multiplier=args.hard_error_max_multiplier,
             )
         if use_amp:
             scaler.scale(loss).backward()
@@ -1066,6 +1072,7 @@ def main_with_args(argv: list[str] | None = None) -> int:
                     target_normals=target_normals,
                     normal_guidance_mask=normal_mask,
                     normal_guidance_spacing=args.normal_guidance_spacing,
+                    hard_error_weight=0.0,
                 )
         return loss, metrics
 
@@ -1372,6 +1379,9 @@ def main_with_args(argv: list[str] | None = None) -> int:
         "normal_consistency_weight": float(args.normal_consistency_weight),
         "normal_guidance_weight": float(args.normal_guidance_weight),
         "normal_guidance_spacing": float(args.normal_guidance_spacing),
+        "hard_error_weight": float(args.hard_error_weight),
+        "hard_error_power": float(args.hard_error_power),
+        "hard_error_max_multiplier": float(args.hard_error_max_multiplier),
         "early_stop_patience": int(args.early_stop_patience),
         "early_stop_triggered": early_stop_triggered,
         "best_val": best_val if best_val != float("inf") else None,

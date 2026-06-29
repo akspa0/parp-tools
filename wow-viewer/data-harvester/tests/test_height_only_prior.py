@@ -267,6 +267,29 @@ def test_compute_height_loss_can_use_normal_guidance() -> None:
     assert guided_metrics["normal_guidance_loss"] > 0.0
 
 
+def test_compute_height_loss_can_use_hard_error_weighting() -> None:
+    pred = torch.zeros(1, 1, 4, 4)
+    target = torch.zeros(1, 1, 4, 4)
+    target[:, :, 0, 0] = 10.0
+    target[:, :, 1:, 1:] = 1.0
+    weight = torch.ones(1, 1, 4, 4)
+    base, base_metrics = compute_height_loss(
+        pred, target, weight,
+        ms_weight=0.0, grad_weight=0.0, nc_weight=0.0,
+    )
+    hard, hard_metrics = compute_height_loss(
+        pred, target, weight,
+        ms_weight=0.0, grad_weight=0.0, nc_weight=0.0,
+        hard_error_weight=0.5,
+        hard_error_power=1.0,
+        hard_error_max_multiplier=4.0,
+    )
+    assert hard.item() > base.item()
+    assert "hard_error_loss" in hard_metrics
+    assert hard_metrics["hard_error_weight_max"] <= 4.0
+    assert "hard_error_loss" not in base_metrics
+
+
 def test_gradient_magnitude_257_zero_for_constant_input() -> None:
     x = torch.zeros(1, 1, 257, 257)
     g = _gradient_magnitude_257(x)

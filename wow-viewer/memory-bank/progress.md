@@ -20,10 +20,36 @@
 - Recommended first CUDA route now includes `--normal-guidance-weight 0.10` because earlier normal guidance materially improved fine detail and training speed.
 - Hardened checkpoint writes on Windows: checkpoints now save to a unique temp file, retry atomic replacement, and fall back to a timestamped `*_epoch####_step#######.pt` file instead of crashing on locked `*.pt` targets such as error code `1224`.
 - Added validation-loss-driven ReduceLROnPlateau scheduling (`--lr-plateau-patience`, `--lr-plateau-factor`, `--min-learning-rate`) and `--resume-learning-rate` to lower optimizer LR after resuming from a plateau. Validation loss controls LR and best checkpoint selection; it is not backpropagated.
+- Added optional training-only hard-error weighting (`--hard-error-weight`, `--hard-error-power`, `--hard-error-max-multiplier`) using detached absolute height residuals from the current training batch. Validation abs-error remains a held-out detail/residual barometer and is not used for gradients.
 
 ### Validation
 
-- Added tests for precise-first priority, filtered-first ablation, dataset provenance fields, targeted teacher-prior review output, compact-row review, visibility-audit bucketing, dataset normal fields, normal-guidance loss contribution, LR scheduler metrics, and locked-checkpoint fallback.
+- Added tests for precise-first priority, filtered-first ablation, dataset provenance fields, targeted teacher-prior review output, compact-row review, visibility-audit bucketing, dataset normal fields, normal-guidance loss contribution, hard-error weighting, LR scheduler metrics, and locked-checkpoint fallback.
+- Direct test execution remains blocked in this IDE shell by `The "path" argument must be of type string. Received undefined`.
+- Required local command: `uv run pytest tests/test_teacher_prior.py tests/test_height_only_prior.py -q` from `wow-viewer/data-harvester`.
+
+## 2026-06-28 - Spec 077 fresh hard-error CUDA training run (early-epoch signal)
+
+### What landed
+
+- A fresh visibility-audited two-build CUDA run was started from epoch 0 with hard-error weighting enabled.
+- Run name: `cuda_visibility_audited_two_build_harderr_fresh`.
+- Output dir: `models/spec077/height-only/cuda_visibility_audited_two_build_harderr_fresh/`.
+- Flags in effect: `--normal-guidance-weight 0.10 --hard-error-weight 0.05 --hard-error-power 1.0 --hard-error-max-multiplier 4.0 --autotune-batch-size --target-vram-gb 12 --num-workers 0 --no-persistent-workers --epochs 240`.
+- Gradients verified present in `scripts/train_height_only_prior.py`: `optimizer.zero_grad(set_to_none=True)` -> `loss.backward()` / `scaler.scale(loss).backward()` -> `optimizer.step()` / `scaler.step(optimizer)`, with optional grad-clip. Validation runs under `torch.no_grad()`.
+
+### Early-epoch signal observed (epochs 30-35)
+
+- Throughput: ~116.3-116.6 tiles/sec, materially higher than the killed run's ~104 tiles/sec.
+- Train loss at epoch 30: `0.5964603126049042`; epoch 35 batch 14: `loss=0.5690`.
+- Validation loss: epoch 30 `0.6234492436051369` (best so far), epoch 31 `0.6236338838934898`, epoch 32 `0.6268422901630402`, epoch 33 `0.6195146515965462` (new best), epoch 34 `0.6207380220293999`.
+- Best validation at epoch 35: `0.6195146515965462`.
+- This is much higher than the killed run's plateaus (~`0.549-0.571`) at much later epochs, but the gap to ground truth is closing quickly and predicted-height detail is visibly sharper from epoch 30.
+- Per the user's question, gradients are present and active. The improved early-epoch quality and speed are likely from the combination of (1) training against object-suppressed teacher priors rather than raw baked minimap, (2) V18 normal-guidance as a high-frequency regularizer, (3) visibility-audited curation removing object-vs-minimap mismatch rows, and (4) hard-error mining on the current training batch.
+
+### Validation
+
+- Real-data proof T029 now substantively demonstrated via this fresh run; will be marked complete once the run reaches a real plateau.
 - Direct test execution remains blocked in this IDE shell by `The "path" argument must be of type string. Received undefined`.
 - Required local command: `uv run pytest tests/test_teacher_prior.py tests/test_height_only_prior.py -q` from `wow-viewer/data-harvester`.
 
@@ -591,6 +617,7 @@ All phases built clean and pushed to `071-left-right-sidebar-split`.
 - `074-alpha-brush-library` — implemented candidate/evidence extraction, deprecated as primary brush truth.
 - `075-scar-mask-segmentation` — diagnostic baseline only, deprecated as primary model route.
 - `076-full-map-fractal-brush-library` — active dataset-truth plan; Phase 1-3 and full-map strip processing are implemented.
+- `077-minimap-deconstruction-engine` — active. Phases 1-6 of the plan are code-complete in the data-harvester. The user-killed earlier two-build run (resumed from `cuda_visibility_audited_two_build`) plateaued at `best_val=0.5490331426262856` around epoch 134, with validation loss flat in `0.556-0.571` from epoch 134 onward, train loss down to ~`0.27`, and LR reaching `1e-6`. A fresh visibility-audited two-build run (`cuda_visibility_audited_two_build_harderr_fresh`) with hard-error weighting and normal guidance is in flight; by epoch 30-35 it shows visibly sharper predicted detail and ~116.5 tiles/sec throughput, with the best validation at epoch 33 `0.6195`.
 
 ## Out-of-Phase Work
 

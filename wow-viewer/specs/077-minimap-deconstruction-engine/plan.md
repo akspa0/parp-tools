@@ -173,9 +173,9 @@ wow-viewer/data-harvester/
 5. Train from the visibility-audited teacher-prior manifest so weak/mismatched object-mask rows are excluded.
 6. Add optional normal guidance as an auxiliary loss by deriving normals from predicted height and comparing to V18 `normal_xyz`; do not add a normal output head.
 7. Use validation loss as a training control signal for LR plateau scheduling and best-checkpoint selection; do not backpropagate validation data.
-8. Add preview artifacts that show raw minimap, teacher mask, processed prior, predicted height, ground truth, error, and loss weight.
-9. Run a bounded smoke training pass.
-10. Run a bounded comparison against the raw-minimap baseline if the baseline is cheap enough to reproduce.
+8. Optionally emphasize hard training pixels with detached absolute-error weighting on the current training batch; validation abs-error remains diagnostic only.
+9. Add preview artifacts that show raw minimap, teacher mask, processed prior, predicted height, ground truth, error, and loss weight.
+10. Run a bounded smoke training pass.
 
 **Validation**:
 
