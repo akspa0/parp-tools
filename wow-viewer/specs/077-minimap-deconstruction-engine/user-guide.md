@@ -134,7 +134,30 @@ Set-Location -LiteralPath "I:\parp\parp-tools\wow-viewer\data-harvester"
 uv run python scripts/train_height_only_prior.py --prior "..\output\datasets\teacher-prior\0_5_3_3368.zarr" "..\output\datasets\teacher-prior\3_3_5_12340.zarr" --v18 "..\output\datasets\v18\0_5_3_3368.zarr" "..\output\datasets\v18\3_3_5_12340.zarr" --curation-manifest "..\output\analysis\teacher-prior\visibility-audit\two_build" --output-dir "models\spec077\height-only\cuda_visibility_audited_two_build" --run-name "cuda_visibility_audited_two_build" --resume-checkpoint "models\spec077\height-only\cuda_visibility_audited_two_build\cuda_visibility_audited_two_build_latest.pt" --epochs 260 --val-steps 0 --batch-size 8 --device cuda --normal-guidance-weight 0.10 --hard-error-weight 0.05 --hard-error-power 1.0 --hard-error-max-multiplier 4.0 --resume-learning-rate 3e-5 --lr-plateau-patience 6 --lr-plateau-factor 0.5 --min-learning-rate 1e-6 --num-workers 0 --no-persistent-workers
 ```
 
-Review `*_metrics.json`, `*_latest.pt`, `*_best.pt`, `*_model.pt`, and `*_preview.png` in the output directory. The model predicts only `height_257`; it does not predict normals, liquids, or objects. `--normal-guidance-weight` is an auxiliary training loss: it derives normals from predicted height and compares them to V18 `normal_xyz` for sharper/faster height convergence, without adding a normal output head. `--hard-error-weight` is training-only online hard-pixel mining from detached absolute height residuals; validation abs-error remains a held-out diagnostic map and is not backpropagated.
+### Validation plateau diagnosis and regularization
+
+If validation loss plateaus around 0.54-0.56 while train loss keeps falling (a generalization gap), the most likely causes are (1) no data augmentation on a small corpus and (2) a flat random split that lets val tiles be spatial neighbors of train tiles. Two new flags address this:
+
+- `--augment` applies random D4 flip/rotate augmentation to the **train split only**. Terrain height is a scalar field, so the dihedral group is an exact symmetry; the augmentation also tracks the `[-dh/dx, -dh/dy, +1]` normal convention so the normal-guidance target stays consistent. Validation is never augmented (an internal guard forces `augment=False` during val getitems), so val loss stays deterministic. This is an 8x effective-data regularizer at near-zero cost.
+- `--split-mode map` holds out entire maps so val tiles are never spatial neighbors of train tiles. This is a **diagnostic**: if val loss jumps well above the random-split plateau, the old flat split was masking spatial leakage. If it stays near the plateau, the ceiling is genuinely shape-difficulty, not leakage. Falls back to random if no map metadata is present.
+
+Recommended next run with augmentation (start fresh, do not resume from a non-augmented checkpoint):
+
+```powershell
+Set-Location -LiteralPath "I:\parp\parp-tools\wow-viewer\data-harvester"
+uv run python scripts/train_height_only_prior.py --prior "..\output\datasets\teacher-prior\0_5_3_3368.zarr" "..\output\datasets\teacher-prior\3_3_5_12340.zarr" --v18 "..\output\datasets\v18\0_5_3_3368.zarr" "..\output\datasets\v18\3_3_5_12340.zarr" --curation-manifest "..\output\analysis\teacher-prior\visibility-audit\two_build" --output-dir "models\spec077\height-only\cuda_aug_two_build" --run-name "cuda_aug_two_build" --epochs 240 --val-steps 0 --batch-size 8 --device cuda --normal-guidance-weight 0.10 --hard-error-weight 0.05 --hard-error-power 1.0 --hard-error-max-multiplier 4.0 --augment --augment-seed 0 --autotune-batch-size --target-vram-gb 12 --num-workers 0 --no-persistent-workers
+```
+
+One-off map-grouped split diagnostic (short run, just to measure the leakage contribution):
+
+```powershell
+Set-Location -LiteralPath "I:\parp\parp-tools\wow-viewer\data-harvester"
+uv run python scripts/train_height_only_prior.py --prior "..\output\datasets\teacher-prior\0_5_3_3368.zarr" "..\output\datasets\teacher-prior\3_3_5_12340.zarr" --v18 "..\output\datasets\v18\0_5_3_3368.zarr" "..\output\datasets\v18\3_3_5_12340.zarr" --curation-manifest "..\output\analysis\teacher-prior\visibility-audit\two_build" --output-dir "models\spec077\height-only\diag_map_split" --run-name "diag_map_split" --epochs 40 --val-steps 0 --batch-size 8 --device cuda --normal-guidance-weight 0.10 --split-mode map --autotune-batch-size --target-vram-gb 12 --num-workers 0 --no-persistent-workers
+```
+
+Compare `diag_map_split` val loss against the random-split plateau. A large jump confirms spatial leakage; a small change confirms the ceiling is shape-difficulty and augmentation is the right lever.
+
+Review `*_metrics.json`, `*_latest.pt`, `*_best.pt`, `*_model.pt`, and `*_preview.png` in the output directory. The model predicts only `height_257`; it does not predict normals, liquids, or objects. `--normal-guidance-weight` is an auxiliary training loss: it derives normals from predicted height and compares them to V18 `normal_xyz` for sharper/faster height convergence, without adding a normal output head. `--hard-error-weight` is training-only online hard-pixel mining from detached absolute height residuals; validation abs-error remains a held-out diagnostic map and is not backpropagated. `--augment` and `--split-mode` are recorded in `*_metrics.json` under `augment`, `augment_seed`, and `split_mode`.
 
 For full training, leave `--max-tiles` unset or set it to `0`. Use `--max-tiles` only for smoke runs. `--steps` is only a smoke/resume cap; use `--epochs` for real runs. `--val-steps 0` means validate the full deterministic validation split each epoch.
 

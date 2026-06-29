@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-**Last updated**: 2026-06-28 | **Focus**: spec 077 precise-first teacher priors + visibility-audited height training; real-data proof pending
+**Last updated**: 2026-06-29 | **Focus**: spec 077 height-only val-plateau diagnosis landed (augmentation + map-grouped split); real-data proof pending
 
 ## Current State
 
@@ -10,6 +10,7 @@
 - **Spec 075 `075-scar-mask-segmentation`**: deprecated as primary direction. The trainer is a coarse diagnostic baseline only; do not continue it as the brush-family route unless explicitly reopened.
 - **Spec 076 `076-full-map-fractal-brush-library`**: active plan. Phases 1-3 are implemented for bounded compact and full-map strip proofs. Raw connected-component/near-dedupe outputs are diagnostic only; active review target is macro paste/scar/digital-painting regions via `--macro-pastes`.
 - **V21/V21c height training**: paused. Multiple runs (with and without scheduler/normal/fractal changes, restored to d0929e2 baseline) failed to reproduce the earlier 0.3126 convergence; model stalls at ~0.83 height L1. Pivoting to a deconstruction-first approach.
+- **Spec 077 height-only val plateau (2026-06-29)**: the fresh hard-error CUDA run reached train ~0.33 / val ~0.56 by epoch 90 with LR at 1.25e-05. Val is stuck at 0.54-0.56 across runs — a generalization gap, not a gradient/hyperparameter issue. Diagnosed three causes: zero augmentation on a small corpus, a spatially-leaky flat random split, and per-tile height normalization. Landed geometrically-exact D4 augmentation (`terrain_augment.py`, `--augment`, train-only with a val guard) and a map-grouped split diagnostic (`--split-mode map`). Next: run with `--augment` from a fresh checkpoint; if the plateau persists, try an albedo guidance channel (feasible via `compositor.py` + MCAL/MCLY, deferred to a separate slice). See `progress.md` 2026-06-29 entry.
 
 ## Why the Pivot
 

@@ -36,6 +36,8 @@ from torch.utils.data import Dataset
 import zarr
 import zarr.storage
 
+from harvester.terrain_augment import augment_sample, sample_transform
+
 
 @dataclass(frozen=True)
 class HeightOnlyPriorSample:
@@ -102,6 +104,16 @@ class HeightOnlyPriorDataset(Dataset):
     height_norm:
         If ``True`` (default), normalize ``height_257`` by its per-tile
         mean/std. The de-normalization is the caller's responsibility.
+    augment:
+        If ``True``, apply a random D4 (flip/rotate) transform to every
+        spatial array in the returned sample. This is geometrically exact
+        for terrain height (a scalar field) and tracks the
+        ``[-dh/dx, -dh/dy, +1]`` normal convention so the normal-guidance
+        target stays consistent. Intended for the train split only; leave
+        ``False`` for validation so val loss is deterministic.
+    augment_seed:
+        Seed for the per-sample augmentation RNG. Ignored when
+        ``augment`` is ``False``.
     """
 
     def __init__(
@@ -111,11 +123,15 @@ class HeightOnlyPriorDataset(Dataset):
         tile_filter: list[int] | None = None,
         include_weight: bool = True,
         height_norm: bool = True,
+        augment: bool = False,
+        augment_seed: int = 0,
     ) -> None:
         self.prior_path = Path(prior_path)
         self.v18_path = Path(v18_path) if v18_path is not None else None
         self.include_weight = include_weight
         self.height_norm = height_norm
+        self.augment = bool(augment)
+        self._augment_rng = np.random.default_rng(int(augment_seed))
 
         prior_tensor = _load_zarr_array(self.prior_path, "processed_minimap_prior_256")
         if prior_tensor is None or prior_tensor.size == 0:
@@ -238,20 +254,38 @@ class HeightOnlyPriorDataset(Dataset):
         else:
             weight = np.ones((1, 257, 257), dtype=np.float32)
 
-        return {
-            "input_prior": torch.from_numpy(prior_chw),
-            "raw_minimap_rgb": torch.from_numpy(raw_chw),
-            "teacher_object_mask": torch.from_numpy(teacher_mask),
-            "teacher_object_confidence": torch.from_numpy(teacher_confidence),
-            "height_257": torch.from_numpy(height),
-            "normal_xyz": torch.from_numpy(normal),
-            "normal_mask": torch.from_numpy(normal_mask),
-            "weight_257": torch.from_numpy(weight),
+        sample = {
+            "input_prior": prior_chw,
+            "raw_minimap_rgb": raw_chw,
+            "teacher_object_mask": teacher_mask,
+            "teacher_object_confidence": teacher_confidence,
+            "height_257": height,
+            "normal_xyz": normal,
+            "normal_mask": normal_mask,
+            "weight_257": weight,
             "meta_build": str(row.get("build", self.prior_path.stem)),
             "meta_map": str(row.get("map_name", row.get("map", ""))),
             "meta_tile_id": source_tile_id,
             "meta_prior_row": prior_index,
             "meta_v18_row": source_tile_id,
+        }
+        if self.augment:
+            transform = sample_transform(self._augment_rng)
+            sample = augment_sample(sample, transform)
+        return {
+            "input_prior": torch.from_numpy(np.ascontiguousarray(sample["input_prior"])),
+            "raw_minimap_rgb": torch.from_numpy(np.ascontiguousarray(sample["raw_minimap_rgb"])),
+            "teacher_object_mask": torch.from_numpy(np.ascontiguousarray(sample["teacher_object_mask"])),
+            "teacher_object_confidence": torch.from_numpy(np.ascontiguousarray(sample["teacher_object_confidence"])),
+            "height_257": torch.from_numpy(np.ascontiguousarray(sample["height_257"])),
+            "normal_xyz": torch.from_numpy(np.ascontiguousarray(sample["normal_xyz"])),
+            "normal_mask": torch.from_numpy(np.ascontiguousarray(sample["normal_mask"])),
+            "weight_257": torch.from_numpy(np.ascontiguousarray(sample["weight_257"])),
+            "meta_build": sample["meta_build"],
+            "meta_map": sample["meta_map"],
+            "meta_tile_id": sample["meta_tile_id"],
+            "meta_prior_row": sample["meta_prior_row"],
+            "meta_v18_row": sample["meta_v18_row"],
         }
 
 

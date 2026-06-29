@@ -62,7 +62,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image, ImageDraw
-from torch.utils.data import ConcatDataset, DataLoader, Subset, default_collate
+from torch.utils.data import ConcatDataset, DataLoader, Dataset, Subset, default_collate
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _SRC_DIR = _SCRIPT_DIR.parent / "src"
@@ -573,6 +573,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Optional validation batches per epoch. 0 = full validation split.")
     parser.add_argument("--val-fraction", type=float, default=0.10,
                         help="Deterministic validation fraction cut from the curated dataset.")
+    parser.add_argument("--split-mode", type=str, default="random",
+                        choices=["random", "map"],
+                        help="random = flat torch.randperm split (legacy, spatially leaky). "
+                             "map = hold out entire maps so val tiles are never spatial "
+                             "neighbors of train tiles; diagnostic for the val plateau.")
+    parser.add_argument("--augment", action="store_true", default=False,
+                        help="Apply random D4 flip/rotate augmentation to the TRAIN split only. "
+                             "Geometrically exact for terrain height and tracks the "
+                             "[-dh/dx, -dh/dy, +1] normal convention. Validation is never "
+                             "augmented, so val loss stays deterministic.")
+    parser.add_argument("--augment-seed", type=int, default=0,
+                        help="Seed for the per-sample augmentation RNG. Ignored without --augment.")
     parser.add_argument("--log-interval", type=int, default=25)
     parser.add_argument("--preview-every-epochs", type=int, default=1,
                         help="Write validation deconstruction preview every N epochs. 0 disables epoch previews.")
@@ -744,6 +756,48 @@ def _dataset_source_summaries(dataset: ConcatDataset | HeightOnlyPriorDataset) -
     return summaries
 
 
+class _AugmentGuardSubset(Dataset):
+    """Wraps a Subset and forces ``augment=False`` on the base dataset during getitem.
+
+    The train and val splits share the same base dataset (via ``Subset``), so
+    when augmentation is enabled on the base for training, validation must
+    explicitly disable it per-getitem. This is safe because DataLoader
+    getitems are sequential within a single worker process.
+    """
+
+    def __init__(self, subset: Subset) -> None:
+        self.subset = subset
+
+    def __len__(self) -> int:
+        return len(self.subset)
+
+    def __getitem__(self, idx: int):
+        base = self.subset.dataset
+        children = base.datasets if isinstance(base, ConcatDataset) else [base]
+        prev = [getattr(c, "augment", None) for c in children]
+        for c in children:
+            if hasattr(c, "augment"):
+                c.augment = False
+        try:
+            return self.subset[idx]
+        finally:
+            for c, p in zip(children, prev):
+                if p is not None and hasattr(c, "augment"):
+                    c.augment = p
+
+
+def _enable_augment_on_base(dataset, seed: int) -> None:
+    """Turn on augmentation on every HeightOnlyPriorDataset under a ConcatDataset."""
+    if isinstance(dataset, ConcatDataset):
+        for i, child in enumerate(dataset.datasets):
+            if hasattr(child, "augment"):
+                child.augment = True
+                child._augment_rng = np.random.default_rng(int(seed) + i)
+    elif hasattr(dataset, "augment"):
+        dataset.augment = True
+        dataset._augment_rng = np.random.default_rng(int(seed))
+
+
 def _split_train_val(dataset, *, val_fraction: float, seed: int) -> tuple[Subset, Subset]:
     n = len(dataset)
     if n <= 1:
@@ -754,6 +808,101 @@ def _split_train_val(dataset, *, val_fraction: float, seed: int) -> tuple[Subset
     perm = torch.randperm(n, generator=generator).tolist()
     val_indices = perm[:val_count]
     train_indices = perm[val_count:]
+    return Subset(dataset, train_indices), Subset(dataset, val_indices)
+
+
+def _split_train_val_by_map(
+    dataset,
+    *,
+    val_fraction: float,
+    seed: int,
+) -> tuple[Subset, Subset]:
+    """Hold out entire maps so val tiles are never spatial neighbors of train tiles.
+
+    Groups dataset rows by their ``meta_map`` provenance, then assigns whole
+    maps to train or val until the val fraction is met. This is a diagnostic
+    split: if val loss jumps well above the random-split plateau, the old
+    flat split was masking spatial leakage. If it stays near the plateau,
+    the ceiling is genuinely shape-difficulty, not leakage.
+
+    Falls back to a flat random split if no map metadata is available.
+    """
+    n = len(dataset)
+    if n <= 1:
+        return Subset(dataset, list(range(n))), Subset(dataset, list(range(n)))
+
+    # Collect per-index map label. ConcatDataset exposes its child datasets
+    # via .datasets; each HeightOnlyPriorDataset carries tile_meta rows with
+    # a map_name/map field. A plain HeightOnlyPriorDataset is handled too.
+    map_of_index: list[str] = []
+    if isinstance(dataset, ConcatDataset):
+        offset = 0
+        for child in dataset.datasets:
+            child_len = len(child)
+            tile_meta = getattr(child, "tile_meta", None)
+            for i in range(child_len):
+                if tile_meta and i < len(tile_meta):
+                    row = tile_meta[i]
+                    label = str(row.get("map_name", row.get("map", "")))
+                else:
+                    label = ""
+                map_of_index.append(label)
+            offset += child_len
+    else:
+        tile_meta = getattr(dataset, "tile_meta", None)
+        for i in range(n):
+            if tile_meta and i < len(tile_meta):
+                row = tile_meta[i]
+                label = str(row.get("map_name", row.get("map", "")))
+            else:
+                label = ""
+            map_of_index.append(label)
+
+    # If every label is empty, we cannot group by map; fall back to random.
+    if not any(label for label in map_of_index):
+        print("split-mode=map: no map metadata found; falling back to random split.", flush=True)
+        return _split_train_val(dataset, val_fraction=val_fraction, seed=seed)
+
+    # Group indices by map label.
+    groups: dict[str, list[int]] = {}
+    for idx, label in enumerate(map_of_index):
+        groups.setdefault(label, []).append(idx)
+
+    # Shuffle map labels deterministically, then greedily assign whole maps
+    # to val until the val fraction is met. Largest maps first so a single
+    # huge map does not blow past the target fraction.
+    rng = random.Random(int(seed))
+    map_labels = sorted(groups.keys())
+    rng.shuffle(map_labels)
+    map_labels.sort(key=lambda label: len(groups[label]), reverse=True)
+
+    target_val = int(round(n * max(0.0, min(0.9, float(val_fraction)))))
+    target_val = max(1, min(n - 1, target_val))
+
+    val_indices: list[int] = []
+    train_indices: list[int] = []
+    for label in map_labels:
+        indices = groups[label]
+        if len(val_indices) < target_val:
+            val_indices.extend(indices)
+        else:
+            train_indices.extend(indices)
+
+    # Guard against an empty side if the greedy assignment was lopsided.
+    if not val_indices:
+        val_indices = [train_indices.pop()]
+    if not train_indices:
+        train_indices = [val_indices.pop()]
+
+    val_indices.sort()
+    train_indices.sort()
+    val_maps = sorted({map_of_index[i] for i in val_indices})
+    train_maps = sorted({map_of_index[i] for i in train_indices})
+    print(
+        f"split-mode=map: train_maps={train_maps} val_maps={val_maps} "
+        f"train_tiles={len(train_indices)} val_tiles={len(val_indices)}",
+        flush=True,
+    )
     return Subset(dataset, train_indices), Subset(dataset, val_indices)
 
 
@@ -889,7 +1038,27 @@ def main_with_args(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    train_dataset, val_dataset = _split_train_val(dataset, val_fraction=args.val_fraction, seed=args.seed)
+    if args.split_mode == "map":
+        train_subset, val_subset = _split_train_val_by_map(
+            dataset, val_fraction=args.val_fraction, seed=args.seed
+        )
+    else:
+        train_subset, val_subset = _split_train_val(
+            dataset, val_fraction=args.val_fraction, seed=args.seed
+        )
+    if args.augment:
+        _enable_augment_on_base(dataset, seed=int(args.augment_seed))
+        # Val must never be augmented even though it shares the base dataset.
+        val_dataset = _AugmentGuardSubset(val_subset)
+        train_dataset = train_subset
+        print(
+            f"Augmentation: enabled on train split (seed={args.augment_seed}); "
+            "validation is guarded and never augmented.",
+            flush=True,
+        )
+    else:
+        train_dataset = train_subset
+        val_dataset = val_subset
     if len(train_dataset) <= 0 or len(val_dataset) <= 0:
         print("Train/validation split is empty; nothing to train.", file=sys.stderr)
         return 2
@@ -1369,6 +1538,9 @@ def main_with_args(argv: list[str] | None = None) -> int:
         "train_tile_count": len(train_dataset),
         "val_tile_count": len(val_dataset),
         "val_fraction": float(args.val_fraction),
+        "split_mode": str(args.split_mode),
+        "augment": bool(args.augment),
+        "augment_seed": int(args.augment_seed),
         "dataset_sources": source_summaries,
         "device": str(device),
         "compile_status": compile_status,

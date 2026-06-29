@@ -1,5 +1,34 @@
 # Progress — wow-viewer
 
+## 2026-06-29 - Spec 077 height-only val-plateau diagnosis + augmentation + map-grouped split
+
+### Diagnosis
+
+- The fresh hard-error CUDA run (`cuda_visibility_audited_two_build_harderr_fresh`) reached train_loss ~0.33 / val_loss ~0.56 by epoch 90, with LR already decayed to 1.25e-05 (plateau scheduler fired ~3x). Train keeps dropping; val is stuck at 0.54-0.56 across runs.
+- Root cause is a generalization gap, not a missing gradient or hyperparameter issue. Gradients are present and active (verified in `train_height_only_prior.py` `_train_one_batch`). The speed stack (AMP, torch.compile, set_to_none, non_blocking, autotune) is fully wired.
+- Three structural causes identified: (1) zero data augmentation on a small (~600 train tile) corpus, (2) a flat `torch.randperm` split that lets val tiles be spatial neighbors of train tiles, (3) per-tile height normalization (shape-only learning). The hard-error term is train-only by design, so ~0.02-0.03 of the 0.22 gap is definitional; the rest is real.
+- LR decay cannot raise the generalization ceiling; the 0.54-0.56 floor is the model's limit under the current regularization regime.
+
+### What landed
+
+- New module `wow-viewer/data-harvester/src/harvester/terrain_augment.py`: geometrically-exact D4 (identity, hflip, vflip, hflip+vflip, rot90/180/270, transpose) augmentation for the height-only sample. Terrain height is a scalar field so D4 is an exact symmetry. The critical part is the normal convention: `[-dh/dx, -dh/dy, +1]` (from `height_to_normal.py`) is tracked exactly under every transform so the normal-guidance target stays consistent. Verified: augmented normals match normals re-derived from augmented height to float32 noise (worst 2.4e-7) for all 8 transforms.
+- `HeightOnlyPriorDataset` now accepts `augment` + `augment_seed`; augmentation is applied in `__getitem__` only when enabled, with a per-dataset RNG.
+- `train_height_only_prior.py` adds `--augment` / `--augment-seed` and `--split-mode {random,map}`. Augmentation is enabled on the train base dataset only; validation is wrapped in `_AugmentGuardSubset` which forces `augment=False` during val getitems so val loss stays deterministic even though train and val share the base dataset via `Subset`.
+- New `_split_train_val_by_map` holds out entire maps so val tiles are never spatial neighbors of train tiles. This is a diagnostic: a large val-loss jump vs the random-split plateau confirms spatial leakage; a small change confirms the ceiling is shape-difficulty. Falls back to random if no map metadata is present.
+- Metrics JSON now records `split_mode`, `augment`, `augment_seed`.
+- New tests `tests/test_terrain_augment.py` (18 tests): D4 normal-convention exactness for all 8 transforms, shape preservation, identity no-op, input non-mutation, hflip axis check, dataset augment on/off, `_AugmentGuardSubset` val-never-augmented contract, map-grouped split holds out entire maps, fallback to random without metadata. All pass; existing `test_height_only_prior.py` + `test_height_to_normal.py` (28 tests) still pass.
+- `user-guide.md` updated with a "Validation plateau diagnosis and regularization" section, the recommended augmented CUDA run command, and the one-off map-grouped split diagnostic command.
+
+### Validation
+
+- `uv run pytest tests/test_terrain_augment.py -q` -> 18 passed.
+- `uv run pytest tests/test_height_only_prior.py tests/test_height_to_normal.py -q` -> 28 passed (no regressions).
+- Direct test execution in this IDE shell remains blocked by the path-arg error; the above commands are the proof path.
+
+### Open follow-up (albedo signal)
+
+- User asked whether an albedo signal could help as a guidance channel. Assessment: the V18 store already has `mcly_texture_ids` + `mcly_layer_mask` + `mcal_alpha_pack`, and `compositor.py` can synthesize a per-pixel base-color (albedo) map from MCAL alpha + placeholder layer colors. A derived albedo channel could be added to the teacher-prior tensor as a 6th input channel and would give the height model a texture-identity prior that is orthogonal to the suppressed-minimap RGB. This is feasible but is a separate bounded slice (touches the teacher-prior builder + dataset contract + model input channels) and should be tried only after the augmentation run proves whether the plateau is regularization-limited or signal-limited. Not implemented in this slice.
+
 ## 2026-06-28 - Spec 077 teacher-prior mask diagnostics and alignment fixes
 
 ### What landed
