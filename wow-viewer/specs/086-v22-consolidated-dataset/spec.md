@@ -168,10 +168,12 @@ V22 stores the **complete** parsed model document for every unique M2 and WMO, n
 
 ### Dataset contract
 
-- **FR-025**: The V22 tile record MUST include: all 20 V18 signal arrays, `mcnr_mask_257`, `liquid_type_256`, `ground_intent_height_257`, `mddf_placement_data`, `modf_placement_data`, `mddf_count`, `modf_count`, `mddf_unique_ids`, `modf_unique_ids`, `mddf_model_ids`, `modf_model_ids`, `mcly_tileset_ids`.
+- **FR-025**: The V22 tile record MUST include: all 20 V18 signal arrays, `mcnr_mask_257`, `liquid_type_256`, `ground_intent_height_257`, `model_focus_mask`, `model_above_terrain_mask`, `mddf_placement_data`, `modf_placement_data`, `mddf_count`, `modf_count`, `mddf_unique_ids`, `modf_unique_ids`, `mddf_model_ids`, `modf_model_ids`, `mcly_tileset_ids`.
 - **FR-026**: The V22 dataset contract MUST expose model entries addressable as `{model_id: {vertices, triangles, normals, bounds}}`.
 - **FR-027**: The V22 dataset contract MUST expose tileset entries addressable as `{tileset_id: texture_rgb}`.
 - **FR-028**: Renderer-truth promotion (`object_visibility_mask`, `no_object_minimap`) MUST be integrated into the base build, not a separate step.
+- **FR-029**: V22 MUST derive `model_above_terrain_mask` by comparing each placement's world Z against the heightmap at the projected tile pixel. Placements whose Z is below the terrain height by more than 1.0 world unit are underground and must not appear in the mask, since they are invisible on the minimap.
+- **FR-030**: V22 MUST emit `model_focus_mask` as the renamed successor to `object_filtered_mask`. The old name is kept for backward compatibility; `model_focus_mask` is the canonical V22 signal.
 
 ### Key Entities
 

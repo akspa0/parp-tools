@@ -44,6 +44,8 @@ output/datasets/v22/<build>.zarr/        # Python Zarr store (canonical cache/lo
 |-- mddf_mask/                    # float32  (N, 257, 257)
 |-- modf_mask/                    # float32  (N, 257, 257)
 |-- object_filtered_mask/         # float32  (N, 257, 257)
+|-- model_focus_mask/            # float32  (N, 257, 257)
+|-- model_above_terrain_mask/    # float32  (N, 257, 257)
 |-- object_roof_mask/             # float32  (N, 256, 256)
 |-- object_roof_confidence/       # float32  (N, 256, 256)
 |-- minimap_rgb/                  # uint8    (N, 256, 256, 3)
@@ -92,7 +94,9 @@ The 20 V18 base arrays are still present and keep their existing shapes, dtypes,
 | `mcnk_flags_16` | 16x16 | int32 | 0 | MCNK header flags |
 | `mddf_mask` | 257x257 | float32 | 0 | doodad footprint |
 | `modf_mask` | 257x257 | float32 | 0 | WMO footprint |
-| `object_filtered_mask` | 257x257 | float32 | 0 | training loss gate object mask |
+| `object_filtered_mask` | 257x257 | float32 | 0 | deprecated — centroid-based object footprint pointer |
+| `model_focus_mask` | 257x257 | float32 | 0 | renamed from object_filtered_mask; centroid-based footprint pointer |
+| `model_above_terrain_mask` | 257x257 | float32 | 0 | placements with Z above terrain height; 0 = underground (not on minimap) |
 | `object_roof_mask` | 256x256 | float32 | 0 | roof/structure overhead mask |
 | `object_roof_confidence` | 256x256 | float32 | 0 | roof confidence |
 | `minimap_rgb` | 256x256x3 | uint8 | 0 | baked minimap RGB |

@@ -59,6 +59,8 @@ public sealed class RawArraySerializerTests
         Assert.Contains("holes_16", arrays.Keys);
         Assert.Contains("liquid_type_256", arrays.Keys);
         Assert.Contains("ground_intent_height_257", arrays.Keys);
+        Assert.Contains("model_focus_mask", arrays.Keys);
+        Assert.Contains("model_above_terrain_mask", arrays.Keys);
         Assert.Contains("mddf_placement_data", arrays.Keys);
         Assert.Contains("modf_placement_data", arrays.Keys);
         Assert.Contains("mddf_model_ids", arrays.Keys);
@@ -70,6 +72,8 @@ public sealed class RawArraySerializerTests
         Assert.Equal([256, 256], arrays["liquid_type_256"].Shape);
         Assert.Equal("|u1", arrays["liquid_type_256"].Dtype);
         Assert.Equal("<f4", arrays["mcly_layer_mask"].Dtype);
+        Assert.Equal([257, 257], arrays["model_focus_mask"].Shape);
+        Assert.Equal([257, 257], arrays["model_above_terrain_mask"].Shape);
         Assert.Equal([2, 2, 3], arrays["tileset_texture_rgb_0"].Shape);
         Assert.Contains("\"mtex_texture_paths\":[\"Tileset/Test/Test.blp\"]", metadata, StringComparison.Ordinal);
         Assert.Contains("\"placement_mddf_asset_paths\":[\"World/Generic/PassiveDoodads/Test/Test.m2\"]", metadata, StringComparison.Ordinal);

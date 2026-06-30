@@ -38,6 +38,8 @@ def _synthetic_record(tile_id: int, build: str, map_name: str, x: int, y: int) -
     per_tile["mddf_mask"] = np.zeros((257, 257), dtype=np.float32)
     per_tile["modf_mask"] = np.zeros((257, 257), dtype=np.float32)
     per_tile["object_filtered_mask"] = np.zeros((257, 257), dtype=np.float32)
+    per_tile["model_focus_mask"] = np.zeros((257, 257), dtype=np.float32)
+    per_tile["model_above_terrain_mask"] = np.full((257, 257), 1.0, dtype=np.float32)
     per_tile["object_roof_mask"] = np.zeros((256, 256), dtype=np.float32)
     per_tile["object_roof_confidence"] = np.zeros((256, 256), dtype=np.float32)
     per_tile["minimap_rgb"] = np.zeros((256, 256, 3), dtype=np.uint8)

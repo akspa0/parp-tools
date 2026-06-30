@@ -17,6 +17,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -26,16 +27,18 @@ sys.path.insert(0, str(PROJECT_ROOT / "data-harvester"))
 from harvester.v22_zarr_io import (  # noqa: E402  (sys.path inserted above)
     V22ZarrWriter,
     V22TileRecord,
-    V22_PER_TILE_SPECS,
 )
 
 
 def _parse_stream(stream_path: Path) -> list[V22TileRecord]:
     """Parse a binary V22 stream into tile records.
 
-    The wire format matches ``RawArraySerializer.StreamProfile.V22``: each
-    tile is wrapped by an 8-byte ARRY header followed by metadata and per-tile
-    arrays. Tiles are separated by ENDS markers.
+    The stream has outer ARRY+length wrappers from ``WriteHarvestStreamBlob``
+    and inner blobs from ``RawArraySerializer.StreamProfile.V22``::
+
+        ARRY <blob_len> [ARRY <meta_len> <meta_json> <arrays> ENDS]  # tile 0
+        ARRY <blob_len> [ARRY <meta_len> <meta_json> <arrays> ENDS]  # tile 1
+        ENDS <4 zero bytes>                                          # terminator
     """
     records: list[V22TileRecord] = []
     data = stream_path.read_bytes()
@@ -47,42 +50,64 @@ def _parse_stream(stream_path: Path) -> list[V22TileRecord]:
         if data[offset:offset + 4] != b"ARRY":
             break
         offset += 4
-        meta_len = int.from_bytes(data[offset:offset + 4], "little")
+        blob_len = int.from_bytes(data[offset:offset + 4], "little")
         offset += 4
-        meta = json.loads(data[offset:offset + meta_len].decode("utf-8"))
-        offset += meta_len
+        blob = data[offset:offset + blob_len]
+        offset += blob_len
+        _parse_tile_blob(blob, records, tile_id)
+        tile_id += 1
+    return records
 
-        per_tile: dict[str, np.ndarray] = {}
-        while offset + 4 <= len(data):
-            magic = data[offset:offset + 4]
-            if magic == b"ENDS":
-                offset += 4
-                break
-            name_len = int.from_bytes(data[offset:offset + 4], "little")
-            offset += 4
-            name = data[offset:offset + name_len].decode("utf-8")
-            offset += name_len
-            rank = int.from_bytes(data[offset:offset + 4], "little")
-            offset += 4
-            shape = tuple(int.from_bytes(data[offset + 4 * i:offset + 4 * (i + 1)], "little") for i in range(rank))
-            offset += 4 * rank
-            dtype = data[offset:offset + 8].rstrip(b"\x00").decode("ascii")
-            offset += 8
-            data_len = int.from_bytes(data[offset:offset + 8], "little")
-            offset += 8
-            payload = data[offset:offset + data_len]
-            offset += data_len
-            if dtype in {"<f4", "<f8"}:
-                arr = np.frombuffer(payload, dtype=dtype).reshape(shape) if shape else np.asarray(0, dtype=dtype)
-            elif dtype in {"<i4", "<u4"}:
-                arr = np.frombuffer(payload, dtype=dtype).reshape(shape) if shape else np.asarray(0, dtype=dtype)
-            elif dtype == "|u1":
-                arr = np.frombuffer(payload, dtype=np.uint8).reshape(shape) if shape else np.asarray(0, dtype=np.uint8)
-            elif dtype == "|b1":
-                arr = np.frombuffer(payload, dtype=bool).reshape(shape) if shape else np.asarray(False, dtype=bool)
-            else:
-                arr = np.frombuffer(payload, dtype=dtype).reshape(shape) if shape else np.asarray(0, dtype=dtype)
-            per_tile[name] = arr
+
+def _ensure_str_list(val: Any) -> tuple[str, ...]:
+    if val is None:
+        return ()
+    if isinstance(val, list):
+        return tuple(str(v) for v in val)
+    return tuple(str(s).strip('"') for s in str(val).strip("[]").split(",") if s.strip())
+
+
+def _parse_tile_blob(blob: bytes, records: list[V22TileRecord], tile_id: int) -> None:
+    pos = 0
+    if blob[pos:pos + 4] != b"ARRY":
+        return
+    pos += 4
+    meta_len = int.from_bytes(blob[pos:pos + 4], "little")
+    pos += 4
+    meta = json.loads(blob[pos:pos + meta_len].decode("utf-8"))
+    pos += meta_len
+
+    per_tile: dict[str, np.ndarray] = {}
+    while pos + 4 <= len(blob):
+        magic = blob[pos:pos + 4]
+        if magic == b"ENDS":
+            pos += 4
+            break
+        name_len = int.from_bytes(blob[pos:pos + 4], "little")
+        pos += 4
+        name = blob[pos:pos + name_len].decode("utf-8")
+        pos += name_len
+        rank = int.from_bytes(blob[pos:pos + 4], "little")
+        pos += 4
+        shape = tuple(int.from_bytes(blob[pos + 4 * i:pos + 4 * (i + 1)], "little") for i in range(rank))
+        pos += 4 * rank
+        dtype = blob[pos:pos + 8].rstrip(b"\x00").decode("ascii")
+        pos += 8
+        data_len = int.from_bytes(blob[pos:pos + 8], "little")
+        pos += 8
+        payload = blob[pos:pos + data_len]
+        pos += data_len
+        if dtype in {"<f4", "<f8"}:
+            arr = np.frombuffer(payload, dtype=dtype).reshape(shape) if shape else np.asarray(0, dtype=dtype)
+        elif dtype in {"<i4", "<u4"}:
+            arr = np.frombuffer(payload, dtype=dtype).reshape(shape) if shape else np.asarray(0, dtype=dtype)
+        elif dtype == "|u1":
+            arr = np.frombuffer(payload, dtype=np.uint8).reshape(shape) if shape else np.asarray(0, dtype=np.uint8)
+        elif dtype == "|b1":
+            arr = np.frombuffer(payload, dtype=bool).reshape(shape) if shape else np.asarray(False, dtype=bool)
+        else:
+            arr = np.frombuffer(payload, dtype=dtype).reshape(shape) if shape else np.asarray(0, dtype=dtype)
+        per_tile[name] = arr
 
         record = V22TileRecord(
             tile_id=tile_id,
@@ -93,9 +118,9 @@ def _parse_stream(stream_path: Path) -> list[V22TileRecord]:
             per_tile=per_tile,
             placement_mddf=per_tile.get("mddf_placement_data"),
             placement_modf=per_tile.get("modf_placement_data"),
-            mddf_asset_paths=tuple(json.loads(meta.get("placement_mddf_asset_paths", "[]"))),
-            modf_asset_paths=tuple(json.loads(meta.get("placement_modf_asset_paths", "[]"))),
-            mtex_texture_paths=tuple(json.loads(meta.get("mtex_texture_paths", "[]"))),
+            mddf_asset_paths=_ensure_str_list(meta.get("placement_mddf_asset_paths")),
+            modf_asset_paths=_ensure_str_list(meta.get("placement_modf_asset_paths")),
+            mtex_texture_paths=_ensure_str_list(meta.get("mtex_texture_paths")),
         )
         records.append(record)
         tile_id += 1

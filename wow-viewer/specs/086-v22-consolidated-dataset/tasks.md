@@ -23,7 +23,7 @@
 **Purpose**: Make `WowViewer.Tool.Harvest` emit every V22 input in one pass without post-build patch scripts.
 
 - [x] T006 Add `RawArraySerializer.StreamProfile.V22` for V22 tile records without changing existing V16/full stream semantics.
-- [x] T007 Emit C#-derived V22 tile arrays for `mcnr_mask_257`, `liquid_type_256`, and `ground_intent_height_257` in the V22 stream profile; renderer-truth arrays remain pending until the Python writer owns capture ingestion.
+- [x] T007 Emit C#-derived V22 tile arrays for `mcnr_mask_257`, `liquid_type_256`, `ground_intent_height_257`, `model_focus_mask` (renamed from `object_filtered_mask`), and `model_above_terrain_mask` (Z-level culled) in the V22 stream profile; renderer-truth arrays remain pending until the Python writer owns capture ingestion.
 - [x] T008 Emit MDDF and MODF placement rows, unique IDs, count arrays, provisional model-id arrays, explicit per-placement asset paths, and tile-local MTEX texture paths in the V22 stream profile.
 - [ ] T009 Emit unique M2 model payloads once per build session, including geometry, skin triangles, render flags, blend modes, texture references, bone lookups, bounds, and load-error markers.
 - [ ] T010 Emit unique WMO model payloads once per build session, including merged geometry, group offsets, materials, portals, doodad-set paths, bounds, flags, version, and load-error markers.

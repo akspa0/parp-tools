@@ -186,6 +186,7 @@ public static class RawArraySerializer
         WriteArray(outputStream, "mddf_mask", pack.MddfMask257);
         WriteArray(outputStream, "modf_mask", pack.ModfMask257);
         WriteArray(outputStream, "object_filtered_mask", pack.ObjectFilteredMask257);
+        WriteArray(outputStream, "model_focus_mask", pack.ObjectFilteredMask257);
         WriteArray(outputStream, "object_roof_mask", pack.ObjectRoofMask256);
         WriteArray(outputStream, "object_roof_confidence", pack.ObjectRoofConfidence256);
         WriteArray(outputStream, "minimap_rgb", pack.MinimapRgb256);
@@ -201,8 +202,11 @@ public static class RawArraySerializer
         WriteArray(outputStream, "modf_unique_ids", ExtractPlacementColumnAsInt(pack.PlacementModfData, 1));
         WriteArray(outputStream, "mddf_model_ids", ExtractPlacementColumnAsInt(pack.PlacementMddfData, 0));
         WriteArray(outputStream, "modf_model_ids", ExtractPlacementColumnAsInt(pack.PlacementModfData, 0));
-        WriteArray(outputStream, "mddf_count", new[] { pack.PlacementMddfCount });
+WriteArray(outputStream, "mddf_count", new[] { pack.PlacementMddfCount });
         WriteArray(outputStream, "modf_count", new[] { pack.PlacementModfCount });
+        WriteArray(outputStream, "model_above_terrain_mask",
+            BuildModelAboveTerrainMask(pack.PlacementMddfData, pack.PlacementModfData, pack.Height257,
+                pack.TileX ?? 0, pack.TileY ?? 0));
 
         if (pack.MclyTexturePixels is { Count: > 0 } pixels)
         {
@@ -523,6 +527,82 @@ public static class RawArraySerializer
 
     private static float GetPlacementValue(float[,] source, int row, int columns, int column)
         => column >= 0 && column < columns ? source[row, column] : 0f;
+
+    private static float[,]? BuildModelAboveTerrainMask(
+        float[,]? mddfData, float[,]? modfData, float[,]? height257, int tileX, int tileY)
+    {
+        if (height257 is null) return null;
+        if (mddfData is null && modfData is null) return null;
+
+        const int tileSize = 257;
+        const float mapOrigin = 17066.666f;
+        const float tileWorldSize = 533.33333f;
+        const float epsilon = 1.0f;
+
+        int mddfCount = mddfData?.GetLength(0) ?? 0;
+        int modfCount = modfData?.GetLength(0) ?? 0;
+
+        float[,] mask = new float[tileSize, tileSize];
+
+        bool TryProjectToPixel(float posX, float posY, float posZ, out int px, out int py)
+        {
+            px = 0; py = 0;
+            (float U, float V)[] candidates =
+            [
+                ((posX / tileWorldSize) - tileX, (posZ / tileWorldSize) - tileY),
+                (((mapOrigin - posZ) / tileWorldSize) - tileX, ((mapOrigin - posX) / tileWorldSize) - tileY),
+                ((posX / tileWorldSize) - tileX, (posY / tileWorldSize) - tileY),
+                (((mapOrigin - posY) / tileWorldSize) - tileX, ((mapOrigin - posX) / tileWorldSize) - tileY),
+            ];
+
+            float bestOverflow = float.PositiveInfinity;
+            (float U, float V) best = default;
+            bool found = false;
+
+            foreach ((float U, float V) candidate in candidates)
+            {
+                float overflow =
+                    MathF.Max(0f, -candidate.U) + MathF.Max(0f, candidate.U - 1f) +
+                    MathF.Max(0f, -candidate.V) + MathF.Max(0f, candidate.V - 1f);
+                if (overflow < bestOverflow)
+                {
+                    bestOverflow = overflow;
+                    best = candidate;
+                    found = true;
+                    if (overflow <= 0.000001f)
+                        break;
+                }
+            }
+
+            if (!found) return false;
+
+            px = (int)(best.U * (tileSize - 1));
+            py = (int)(best.V * (tileSize - 1));
+            return px >= 0 && px < tileSize && py >= 0 && py < tileSize;
+        }
+
+        void ProcessPlacement(float[,] data, int row)
+        {
+            int cols = data.GetLength(1);
+            float posX = data[row, 2];
+            float posY = data[row, 3];
+            float posZ = data[row, 4];
+
+            if (!TryProjectToPixel(posX, posY, posZ, out int px, out int py))
+                return;
+
+            float terrainZ = height257[py, px];
+            if (posZ >= terrainZ - epsilon)
+                mask[py, px] = 1.0f;
+        }
+
+        for (int i = 0; i < mddfCount; i++)
+            ProcessPlacement(mddfData!, i);
+        for (int i = 0; i < modfCount; i++)
+            ProcessPlacement(modfData!, i);
+
+        return mask;
+    }
 
     private static string BuildMetadataJson(TerrainTileTensorPack pack)
     {
