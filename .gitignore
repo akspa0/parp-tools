@@ -639,3 +639,4 @@ __pycache__/
 *.pyc
 wow-viewer/data-harvester/models/*
 wow-viewer/from_cloud/*
+*.npz
