@@ -1,6 +1,6 @@
 # V22 Dataset Signal And Store Contract
 
-> Canonical schema freeze for Spec 086. V22 replaces V18 plus patch scripts, placement side paths, live MPQ asset reparsing, and decoded-texture sidecars with one C#-owned dataset contract.
+> Canonical schema freeze for Spec 086. V22 replaces V18 plus patch scripts, placement side paths, live MPQ asset reparsing, and decoded-texture sidecars with one Zarr-backed dataset. The C# harvester pre-decodes signals into a binary V22 stream; the Python Zarr package writes and reads the canonical dataset. Consumers load decoded data from Zarr instead of the client.
 
 ## Scope
 
@@ -11,17 +11,16 @@ V22 owns four training surfaces in one store:
 3. a per-build decoded model library,
 4. a per-build decoded tileset library.
 
-Index, placement, decoded metadata, and asset inventory outputs are audit mirrors only. A downstream consumer must be able to read core semantics from the C# dataset contract without opening MPQs or relying on sidecar-only data.
+Index, placement, decoded metadata, and asset inventory outputs are audit mirrors only. A downstream consumer must be able to read core semantics from the Zarr dataset without opening MPQs or relying on sidecar-only data.
 
 Client scope is intentionally limited to `0_5_3_3368`, `3_3_5_12340`, and `4_0_0_11927`. `4_0_0_11927` is included because the development map references Cata-only assets and existing object decode/render support covers that era. Other staged clients are not V22 targets unless Spec 086 is explicitly reopened.
 
-Implementation status: Phase 2 now has a C# `RawArraySerializer.StreamProfile.V22` tile-record profile. It emits final V22 tile key names from `TerrainTileTensorPack`, derives `liquid_type_256` in C#, converts `mcly_layer_mask` to float32, emits MDDF/MODF placement data under V22 names, emits explicit per-placement asset path metadata, and expands legacy 14-column MODF rows to the V22 17-column layout with zero-filled fields when the source format does not carry flags/doodadSet/nameSet.
+Implementation status: Phase 2 has a C# `RawArraySerializer.StreamProfile.V22` tile-record profile. It emits final V22 tile key names from `TerrainTileTensorPack`, derives `liquid_type_256` and `ground_intent_height_257`, converts `mcly_layer_mask` to float32, emits MDDF/MODF placement data under V22 names, emits explicit per-placement asset path metadata, emits tile-local MTEX texture path metadata, and expands legacy 14-column MODF rows to the V22 17-column layout with zero-filled fields when the source format does not carry flags/doodadSet/nameSet. The Python Zarr writer and reader are the next phase.
 
 ## Record Layout
 
 ```text
-output/datasets/v22/<build>/
-|-- tile records                  # C# raw array stream records during Phase 2
+output/datasets/v22/<build>.zarr/        # Python Zarr store (canonical cache/load surface)
 |-- index report                  # audit mirror and tile metadata
 |-- placements report             # audit mirror of placement arrays
 |-- decoded_metadata report       # audit mirror of decoded ADT metadata
@@ -76,7 +75,7 @@ output/datasets/v22/<build>/
 
 ## Root Signal Arrays
 
-The 20 V18 base arrays are still present and keep their existing shapes, dtypes, and meanings. V22 changes their build contract, not their semantic names: every V22 record writes them during C# preprocessing, and missing source data is represented by documented fill values rather than absent arrays.
+The 20 V18 base arrays are still present and keep their existing shapes, dtypes, and meanings. V22 changes their build contract, not their semantic names: every V22 record writes them during C# preprocessing, and missing source data is represented by documented fill values rather than absent arrays. The Python Zarr writer is responsible for putting them on disk.
 
 | Array | Shape | Dtype | Fill | Source |
 |-------|-------|-------|------|--------|
@@ -179,7 +178,7 @@ Asset paths are required, not optional. `nameId` alone is not enough for V22 con
 
 ## Model Library
 
-The model library is a per-build group. Entries are keyed by integer model id, and `model_paths` maps id to canonical normalized path. Model payloads are emitted as separate C# messages and stored once per build, not duplicated per tile.
+The model library is a per-build group. Entries are keyed by integer model id, and `model_paths` maps id to canonical normalized path. Model payloads are emitted as separate C# V22 stream messages and stored once per build by the Python Zarr writer, not duplicated per tile.
 
 ```text
 models/
@@ -236,7 +235,7 @@ Unloadable models still get a `model_paths` entry with `load_error=1` and zero-l
 
 ## Tileset Library
 
-The tileset library is a per-build group. Entries are keyed by integer tileset id, and `tileset_paths` maps id to canonical normalized BLP path. Tileset payloads are separate C# messages and stored once per build.
+The tileset library is a per-build group. Entries are keyed by integer tileset id, and `tileset_paths` maps id to canonical normalized BLP path. Tileset payloads are separate C# V22 stream messages and stored once per build by the Python Zarr writer.
 
 ```text
 tilesets/
@@ -259,11 +258,11 @@ V22 has three message classes:
 - **Model-library messages**: one per unique canonical M2/WMO path per build session. These contain the full parsed model payload and load-error status.
 - **Tileset-library messages**: one per unique canonical terrain texture path per build session. These contain decoded BLP RGB and load-error status.
 
-The C# writer owns id assignment. A path table is complete only after all stream messages for a build are consumed. A placement id is valid if it indexes `models/model_paths`; `-1` is allowed only when the placement source path is absent and must be counted in the asset inventory report.
+The C# harvester owns id assignment in the V22 stream. A path table is complete only after all stream messages for a build are consumed. A placement id is valid if it indexes `models/model_paths`; `-1` is allowed only when the placement source path is absent and must be counted in the asset inventory report.
 
 ## Dataset Read Contract
 
-The C# V22 reader returns a fixed-key tile record for every tile. Required tile keys are all root signal arrays listed above plus:
+The V22 Zarr reader returns a fixed-key tile record for every tile. Required tile keys are all root signal arrays listed above plus:
 
 - `mddf_placement_data`: float32 `(tile_mddf_count, 9)`
 - `modf_placement_data`: float32 `(tile_modf_count, 17)`
@@ -277,7 +276,7 @@ The C# V22 reader returns a fixed-key tile record for every tile. Required tile 
 
 Empty placement tiles return zero-length arrays with the correct second dimension, never `None`. Missing optional source data returns the documented fill array. Missing model or tileset payloads are represented by valid ids whose library entry has `load_error=1`.
 
-The C# V22 reader exposes a cached mapping from model id to the decoded entry summary and payload arrays, plus a cached mapping from tileset id to decoded texture payloads. The cache is read-only after first load.
+The V22 Zarr reader exposes a cached mapping from model id to the decoded entry summary and payload arrays, plus a cached mapping from tileset id to decoded texture payloads. The cache is read-only after first load.
 
 ## Validation Gates
 

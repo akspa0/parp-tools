@@ -10,14 +10,14 @@ V22 replaces the current V18 + patch-script sprawl with one dataset contract tha
 2. native placement arrays in the store,
 3. native per-build model library with the full parsed M2/WMO data needed for masking and identity learning,
 4. native per-build tileset library with decoded BLP RGB,
-5. C# consumer contracts that expose all of that without side-path IO,
+5. Zarr consumer contract that downstream Python code reads, without sidecar or MPQ IO,
 6. validation and ablation gates aimed specifically at preventing another "dataset got richer but the model still plateaus early" failure.
 
 The plan is not just data plumbing. It is a proof plan for whether the richer store actually improves supervision quality, observability, and model learnability.
 
 ## Technical Context
 
-**Language/Version**: C# / .NET 10
+**Language/Version**: C# (.NET 10) for harvest/stream + Python for Zarr writer/reader
 
 **Primary Dependencies**:
 - `wow-viewer/tools/harvest/WowViewer.Tool.Harvest`
@@ -25,9 +25,9 @@ The plan is not just data plumbing. It is a proof plan for whether the richer st
 - `WowViewer.Core.IO.Wmo` (`WmoRenderDocumentReader`)
 - existing BLP decode path already used for `mcly_texture_pixels_*`
 
-**Storage**: Canonical Zarr dataset cache via the Python Zarr package. Phase 2 uses the existing C# raw array stream with a V22 profile as a builder seam; later phases write/read canonical Zarr through the Python package, not a C# Zarr implementation.
+**Storage**: Canonical Zarr dataset cache via the Python package. Phase 2 uses the existing C# raw array stream with a V22 profile as a builder seam. C# does not implement Zarr; Python does the Zarr I/O.
 
-**Testing**: xUnit unit tests, bounded real-data build proofs, dataset contract checks, signal parity checks, and downstream C# read smoke proofs.
+**Testing**: xUnit unit tests for C# preprocessing, pytest unit tests for Python Zarr writer/reader, bounded real-data build proofs, dataset contract checks, signal parity checks, and downstream Python read smoke proofs.
 
 **Target Platform**: staged `0_5_3_3368`, `3_3_5_12340`, and `4_0_0_11927` clients under `output/tmp/wowarchive-clients/`. `4_0_0_11927` is included only because development-map assets require it and existing object decode/render support covers that era. Other staged clients are out of scope for V22 unless this spec is explicitly reopened.
 
@@ -38,7 +38,7 @@ The plan is not just data plumbing. It is a proof plan for whether the richer st
 | Principle | Status | Notes |
 |-----------|--------|-------|
 | Repo Independence | PASS | All work remains inside `wow-viewer/` |
-| Library-First | PASS | New logic lives in C# shared readers/serializers and `WowViewer.Tool.Harvest` |
+| Library-First | PASS | New logic lives in C# shared readers/serializers for the binary stream and in `wow-viewer/data-harvester/` for the Python Zarr writer/reader |
 | Real-Data Validation | REQUIRED | Two-build bounded proof before broad rebuild |
 | No `H:\CLIENTS` | PASS | Only staged clients are allowed |
 | One Phase at a Time | REQUIRED | Do not broaden beyond the three scoped builds before bounded proof and learnability gates pass |
@@ -111,7 +111,7 @@ Plan response:
 Risk: one consumer reads tile records, another reads sidecars, another reparses assets from MPQ; contracts drift.
 
 Plan response:
-- the C# V22 dataset contract is canonical,
+- the Zarr dataset contract is canonical,
 - sidecar reports stay for audits only,
 - all training-facing data must be reachable from the store alone.
 
@@ -145,18 +145,14 @@ Plan response:
 
 ```text
 wow-viewer/src/core/WowViewer.Core.IO/Maps/
-|-- RawArraySerializer.cs        # V22 raw tile profile and C# preprocessing aliases
-|-- future stream payload types   # C# preprocessing and decoded payload contracts only
+`-- RawArraySerializer.cs        # V22 raw tile profile and C# preprocessing aliases
 
 wow-viewer/tools/harvest/WowViewer.Tool.Harvest/
-`-- Program.cs                   # stream/store contract expanded with V22 profile and asset library blobs
-
-wow-viewer/tests/WowViewer.Core.Tests/
-`-- RawArraySerializerTests.cs   # V22 raw stream contract tests
+`-- Program.cs                   # stream contract expanded with V22 profile and asset library blobs
 
 wow-viewer/data-harvester/
-|-- scripts/build_v22_dataset.py # Python Zarr writer, fed decoded C# payloads
-`-- src/harvester/v22_dataset.py # downstream Zarr reader/contract
+|-- scripts/build_v22_dataset.py # Python Zarr writer fed by decoded C# V22 stream
+`-- src/harvester/v22_dataset.py # Zarr reader/contract used by downstream consumers
 ```
 
 ## Implementation Phases
@@ -170,24 +166,24 @@ Deliverables:
 - final `models/` layout,
 - final `tilesets/` layout,
 - explicit field list for placement arrays,
-- explicit C# read contract for V22 records.
+- explicit read contract for V22 records (Python reads Zarr, no client IO),
 
 Validation:
 - write `v22-dataset-signals` architecture doc before implementation,
 - confirm every currently used downstream signal has a place in V22,
-- confirm every side-path artifact we care about is either promoted into the C# dataset contract or explicitly left audit-only.
+- confirm every side-path artifact we care about is either promoted into the Zarr dataset contract or explicitly left audit-only.
 
 Exit criteria:
 - no unresolved "maybe store X elsewhere" questions,
 - store schema stable enough for tests to pin.
 
-### Phase 2: Stream Contract Expansion In C#
+### Phase 2: V22 Stream Contract Expansion (C#)
 
 Goal: make the harvester emit everything V22 needs in one pass.
 
 Work:
 - keep existing tile signal emission,
-- emit integrated versions of patched signals directly from C#,
+- emit integrated versions of patched signals directly from the C# stream,
 - emit placement arrays and per-placement model ids,
 - emit unique-model payloads once per build session,
 - emit unique-tileset payloads once per build session,
@@ -203,12 +199,12 @@ Validation:
 
 ### Phase 3: Python Zarr Writer And Store Layout
 
-Goal: write the expanded C# decoded stream into a stable Zarr dataset layout using the Python package.
+Goal: the C# harvester emits a decoded binary V22 stream and the Python writer flushes a stable Zarr dataset layout.
 
 Work:
 - add Python Zarr asset-library accumulators for models and tilesets,
 - add placement offset writers,
-- consume the decoded C# stream without reparsing the client,
+- consume the decoded C# V22 stream and write Zarr without reparsing the client,
 - write canonical Zarr arrays/groups/metadata keys,
 - keep sidecar reports as audit mirrors only,
 - add resumability rules for partial library writes.
@@ -279,7 +275,7 @@ Goal: rebuild the three scoped V22 stores and migrate consumers off V18 for thos
 
 Work:
 - rebuild `0_5_3_3368`, `3_3_5_12340`, and `4_0_0_11927`,
-- switch selected downstream consumers from legacy dataset contracts to the C# V22 contract,
+- switch selected downstream consumers from legacy dataset contracts to the V22 Zarr contract,
 - deprecate patch scripts and old promotion flow,
 - publish migration notes in architecture docs.
 
@@ -311,7 +307,7 @@ The dataset is not done when it builds. It is done when these checks pass.
 
 ### Consumer-Level
 
-- C# V22 reader fixed keys
+- V22 reader fixed keys
 - collate helper handles empty placements
 - models/tilesets cache stable under multi-worker DataLoader use
 

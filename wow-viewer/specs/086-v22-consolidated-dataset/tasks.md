@@ -6,24 +6,24 @@
 
 ## Phase 1: Schema Freeze And Inventory Proof
 
-**Purpose**: Lock the exact V22 store surface before touching the C# harvester, C# writer, or dataset consumer code.
+**Purpose**: Lock the exact V22 store surface before touching the C# harvester or Python Zarr writer.
 
 - [x] T001 Create `docs/architecture/v22-dataset-signals-2026-06-30.md` with the final root-array list, model-library layout, tileset-library layout, placement-array fields, metadata/audit tables, and dataset read contract.
 - [x] T002 Cross-check every V18 base, patched, promoted, placement, model, and tileset surface from `spec.md` FR-001 through FR-028 has an explicit V22 home or is marked audit-only.
 - [x] T003 Record the stream-message boundary: tile blobs stay regular, while model and tileset libraries are separate per-build message types and are not duplicated per tile.
-- [x] T004 Record the fixed-key C# V22 dataset contract, including zero-fill and empty-array behavior for missing tile-local data.
+- [x] T004 Record the fixed-key V22 dataset contract, including zero-fill and empty-array behavior for missing tile-local data.
 - [x] T005 Confirm Phase 1 exit criteria in this file: no unresolved store-location questions remain; tests in later phases can pin the documented schema.
 
 **Checkpoint**: Phase 1 complete — V22 schema is stable enough for Phase 2 stream and Phase 3 writer tests to pin.
 
 ---
 
-## Phase 2: Stream Contract Expansion In C#
+## Phase 2: V22 Stream Contract Expansion (C#)
 
 **Purpose**: Make `WowViewer.Tool.Harvest` emit every V22 input in one pass without post-build patch scripts.
 
 - [x] T006 Add `RawArraySerializer.StreamProfile.V22` for V22 tile records without changing existing V16/full stream semantics.
-- [x] T007 Emit C#-derived V22 tile arrays for `mcnr_mask_257`, `liquid_type_256`, and `ground_intent_height_257` in the V22 stream profile; renderer-truth arrays remain pending until the C# store writer owns capture ingestion.
+- [x] T007 Emit C#-derived V22 tile arrays for `mcnr_mask_257`, `liquid_type_256`, and `ground_intent_height_257` in the V22 stream profile; renderer-truth arrays remain pending until the Python writer owns capture ingestion.
 - [x] T008 Emit MDDF and MODF placement rows, unique IDs, count arrays, provisional model-id arrays, explicit per-placement asset paths, and tile-local MTEX texture paths in the V22 stream profile.
 - [ ] T009 Emit unique M2 model payloads once per build session, including geometry, skin triangles, render flags, blend modes, texture references, bone lookups, bounds, and load-error markers.
 - [ ] T010 Emit unique WMO model payloads once per build session, including merged geometry, group offsets, materials, portals, doodad-set paths, bounds, flags, version, and load-error markers.
@@ -97,7 +97,7 @@
 **Purpose**: Rebuild only the scoped `0_5_3_3368`, `3_3_5_12340`, and `4_0_0_11927` stores and migrate consumers only after bounded proof and learnability gates pass.
 
 - [ ] T035 Rebuild `0_5_3_3368`, `3_3_5_12340`, and `4_0_0_11927` V22 stores only. Other staged clients remain out of scope unless Spec 086 is explicitly reopened.
-- [ ] T036 Migrate selected downstream consumers to the C# V22 dataset contract without MPQ reparse or sidecar-only core semantics.
+- [ ] T036 Migrate selected downstream consumers to the V22 Zarr contract without MPQ reparse or sidecar-only core semantics.
 - [ ] T037 Deprecate post-build patch scripts only after grep confirms no active consumer still needs them.
 - [ ] T038 Publish migration notes and update memory-bank completion status.
 

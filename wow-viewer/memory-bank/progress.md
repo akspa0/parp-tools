@@ -551,7 +551,7 @@
 ### Next slice (still Phase 2)
 
 - Run the enumerator + builder against a bounded V18 store and capture real-data stats.
-- Continue with the Python-only Zarr path before the capture tool extension (T010); do not add a C# Zarr writer for that lane.
+- Continue with the Python-only Zarr path before the capture tool extension (T010). Do not add a C# Zarr writer; C# only handles stream/preprocessing.
 
 ## 2026-06-28 - Spec 077 minimap deconstruction engine planned
 
