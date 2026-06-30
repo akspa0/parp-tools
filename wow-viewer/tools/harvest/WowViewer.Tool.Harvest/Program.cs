@@ -93,7 +93,7 @@ static class Program
               harvest-map       Batch-extract all tiles from a map directory (disk path)
               extract-unified   Extract NPZ shard from a tile inside MPQ archives
                                 (reads tileset BLP + ADT + WDL from MPQ, outputs NPZ shard)
-              harvest-stream    Stream V16-ready raw tile blobs from a map to stdout
+              harvest-stream    Stream raw tile blobs from a map to stdout
               discover-maps     List terrain-trainable maps from a staged client using
                                 WDT summary + tile probe checks
               synthetic-minimap Composite tilesets + alpha → synthetic minimap
@@ -512,9 +512,7 @@ static class Program
         int maxTiles = limit ?? int.MaxValue;
         int tileWorkers = Math.Max(1, GetIntOption(args, "--tile-workers", "--tile-workers") ?? DefaultHarvestTileWorkers);
         string streamProfileRaw = (GetOption(args, "--stream-profile", "") ?? "v16").Trim();
-        StreamProfile streamProfile = streamProfileRaw.Equals("full", StringComparison.OrdinalIgnoreCase)
-            ? StreamProfile.Full
-            : StreamProfile.V16;
+        StreamProfile streamProfile = ResolveStreamProfile(streamProfileRaw);
 
         if (string.IsNullOrWhiteSpace(clientRoot) || string.IsNullOrWhiteSpace(mapName))
         {
@@ -726,6 +724,15 @@ static class Program
         using var ms = new MemoryStream();
         RawArraySerializer.Serialize(pack, ms, streamProfile);
         return ms.ToArray();
+    }
+
+    private static StreamProfile ResolveStreamProfile(string value)
+    {
+        if (value.Equals("full", StringComparison.OrdinalIgnoreCase))
+            return StreamProfile.Full;
+        if (value.Equals("v22", StringComparison.OrdinalIgnoreCase))
+            return StreamProfile.V22;
+        return StreamProfile.V16;
     }
 
     private static void WriteHarvestStreamBlob(Stream stdout, byte[] blob)

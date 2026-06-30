@@ -106,7 +106,7 @@ Required fields:
 
 - `input_prior`: `(C, 256, 256)`
 - `height_257`: `(1, 257, 257)`
-- `weight_257`: `(1, 257, 257)` terrain-valid or object-aware loss weighting
+- `weight_257`: `(1, 257, 257)` terrain-valid or object-aware loss weighting; computed from `object_precise_mask` first, then `object_filtered_mask`, then `object_mask` only as fallback
 - `meta_build`
 - `meta_map`
 - `meta_tile_id`
@@ -117,6 +117,63 @@ Non-goals in phase 1:
 - no liquid head
 - no object head
 - no shared-weight multitask outputs
+
+### 3.2 Coarse-To-Fine Residual Height Chain
+
+The direct height model remains available for comparison, but the next active
+terrain lane splits the problem into two independently trained models.
+
+#### H0: HeightCoarseSample
+
+Inputs:
+
+- `input_prior`: `(C, 256, 256)` processed minimap prior channels
+- optional `albedo_rgb`: `(3, 256, 256)` texture-identity sidecar
+- optional `density_rgb`: `(3, 256, 256)` derived on the fly from minimap RGB
+
+Target:
+
+- `height_coarse_65`: `(1, 65, 65)`, area-downsampled from authoritative `height_257`
+- `weight_coarse_65`: `(1, 65, 65)`, area-downsampled from `weight_257`
+
+Output signal:
+
+- `height_coarse_65` only
+
+#### H1: HeightResidualSample
+
+Inputs:
+
+- same H0 source channels
+- `base_height_257`: `(1, 257, 257)`, deterministic upsample of frozen H0 output
+
+For H1 model input assembly, the 256x256 source channels are resized to the
+257x257 base-height grid before concatenation so the residual model operates on
+the same grid as its output and reconstruction loss.
+
+Target:
+
+- `height_delta_257 = height_257 - base_height_257`
+- `weight_257`: unchanged terrain-valid/object-aware loss weighting
+
+Output signal:
+
+- `height_delta_257` only
+
+Initialization invariant:
+
+- H1's final residual projection is zero-initialized. A fresh H1 checkpoint
+  therefore starts as a no-op delta and the composed validation loss should
+  begin near the frozen H0 baseline instead of destroying it with random deltas.
+
+Composition:
+
+```text
+height_refined_257 = base_height_257 + height_delta_257
+```
+
+H1 losses may inspect the composed height for gradient or normal guidance, but
+H1 does not predict normals, liquids, objects, or any second terrain head.
 
 ## 4. Minimap-Only Inference Objects
 

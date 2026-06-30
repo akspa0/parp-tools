@@ -19,8 +19,7 @@ public enum WorldBottomTab
     Source = 0,
     Placements = 1,
     Tiles = 2,
-    Overlays = 3,
-    SelectionTools = 4,
+    SelectionTools = 3,
 }
 
 /// <summary>
@@ -56,12 +55,11 @@ public enum UtilitiesBottomTab
 /// </summary>
 public enum TerrainBottomTab
 {
-    Layers = 0,
-    Clipboard = 1,
-    Analysis = 2,
-    Mcnk = 3,
-    WeakSignal = 4,
-    Export = 5,
+    Clipboard = 0,
+    Analysis = 1,
+    Mcnk = 2,
+    WeakSignal = 3,
+    Export = 4,
 }
 
 /// <summary>
@@ -96,7 +94,7 @@ public static class WorkbenchNavigator
     public static string[] GetBottomTabLabels(WorkbenchTab tab) => tab switch
     {
         WorkbenchTab.Model => ["Info", "Animations", "Actions", "LOD"],
-        WorkbenchTab.World => ["Source", "Placements", "Tiles", "Overlays", "Selection Tools"],
+        WorkbenchTab.World => ["Source", "Placements", "Tiles", "Selection Tools"],
         WorkbenchTab.Tools => ["Quick", "Archeology", "PM4", "Terrain", "Utilities"],
         _ => [],
     };

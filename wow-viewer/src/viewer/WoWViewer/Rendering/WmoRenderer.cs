@@ -423,6 +423,8 @@ public class WmoRenderer : ISceneRenderer
         _runtimeGroupLiquidsVisible = visible;
     }
 
+    public bool IsWireframe => _wireframe;
+
     public void ToggleWireframe()
     {
         _wireframe = !_wireframe;

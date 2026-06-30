@@ -152,7 +152,10 @@ Only if needed:
   is the production training contract. Normal guidance does not add a
   normal head; the model still predicts only `height_257`. Dataset
   `data-harvester/src/harvester/height_only_prior_dataset.py`, training
-  script `scripts/train_height_only_prior.py`, pytest tests. T029 (real-
+  script `scripts/train_height_only_prior.py`, pytest tests. Loss weighting
+  now gates with `object_precise_mask` first, then `object_filtered_mask`, then
+  `object_mask`; cloud bundles must include `object_precise_mask` so training
+  cannot silently fall back to non-precise object gates. T029 (real-
   data smoke proof) pending. D4 flip/rotate augmentation is no longer the
   canonical route for baked minimap RGB because terrain shadows have a fixed
   world direction; `--augment` defaults to the shadow-safe identity-only
@@ -200,14 +203,21 @@ Only if needed:
   when `runpodctl` is on `PATH`. `rsync` or RunPod's separate S3 credentials
   remain manual alternatives.
 
-  If small-detail quality remains weak after the base broad shape stabilizes,
-  the next model should be a separate MCLY-guided residual refinement lane, not
-  a new head on the base height model. The bounded contract is: freeze the base height
-  checkpoint, generate base predictions, derive low/medium/high detail masks
-  from MCLY layer activity and `alpha_256` transition gradients, then train a
-  small model that predicts one signal (`height_delta_257`) only inside the
-  high/transition-detail mask. Composition is `height_refined = base_height + detail_mask * height_delta`;
-  normals remain analytic from the refined height.
+  The `cuda_albedo_group_nearest` run plateaued around `train_loss ~= 0.20` /
+  `val_loss ~= 0.50` with muddy previews, so T029b is now the active follow-up.
+  The bounded replacement is a coarse-to-fine residual chain using the same
+  source signals, not a new head on the direct model. H0 predicts one signal,
+  `height_coarse_65`, from processed prior plus optional albedo/density. H1
+  loads a frozen H0 checkpoint, upsamples H0 to `base_height_257`, and predicts
+  one signal, `height_delta_257`. Composition is deterministic:
+  `height_refined_257 = base_height_257 + height_delta_257`; normals remain
+  analytic from the refined height. H1's residual projection is zero-initialized
+  so a fresh H1 starts as a no-op delta and should validate near the frozen H0
+  baseline before learning any detail. Implemented owner surfaces are
+  `data-harvester/src/harvester/height_residual_chain.py`,
+  `V18HeightCoarseModel`, `V18HeightResidualModel`,
+  `scripts/train_height_coarse_prior.py`, and
+  `scripts/train_height_residual_prior.py`.
 - **Stage D** (ADT-free object explanation): code-complete on the
   consumer side. Contracts `data-harvester/src/harvester/inference_object.py`
   (InferenceObjectHypothesis, AssetCandidate, RecoveredObjectPlacement,

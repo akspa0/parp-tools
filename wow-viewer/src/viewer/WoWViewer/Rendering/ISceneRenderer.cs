@@ -9,6 +9,7 @@ public interface ISceneRenderer : IDisposable
 {
     void Render(Matrix4x4 view, Matrix4x4 proj);
     void ToggleWireframe();
+    bool IsWireframe { get; }
 
     /// <summary>Number of renderable sub-objects (geosets/groups).</summary>
     int SubObjectCount { get; }

@@ -37,6 +37,8 @@ def _fake_harvester_root(path: Path) -> None:
     _write_text(path / "data-harvester" / "src" / "harvester" / "__init__.py", "")
     for script_name in (
         "train_height_only_prior.py",
+        "train_height_coarse_prior.py",
+        "train_height_residual_prior.py",
         "build_albedo_dataset.py",
         "package_spec077_runpod.py",
     ):
@@ -56,7 +58,7 @@ def test_package_spec077_runpod_copies_slim_v18_required_arrays(tmp_path: Path) 
     )
     _fake_zarr_store(
         wow_root / "output" / "datasets" / "v18" / f"{build}.zarr",
-        ["height_257", "object_filtered_mask", "normal_xyz", "normal_mask", "alpha_256"],
+        ["height_257", "object_precise_mask", "object_filtered_mask", "normal_xyz", "normal_mask", "alpha_256"],
         ["index.parquet"],
     )
     _fake_zarr_store(
@@ -84,6 +86,7 @@ def test_package_spec077_runpod_copies_slim_v18_required_arrays(tmp_path: Path) 
     assert (bundle / "runpod" / "train_spec077.sh").exists()
     v18_dest = bundle / "data" / "v18" / f"{build}.zarr"
     assert (v18_dest / "height_257").exists()
+    assert (v18_dest / "object_precise_mask").exists()
     assert (v18_dest / "object_filtered_mask").exists()
     assert (v18_dest / "normal_xyz").exists()
     assert (v18_dest / "normal_mask").exists()
@@ -166,6 +169,22 @@ def test_setup_spec077_runpod_network_volume_rejects_auto_datacenter() -> None:
         assert "auto" in str(ex)
     else:
         raise AssertionError("expected auto datacenter to be rejected for network-volume Pod payload")
+
+
+def test_setup_spec077_runpod_bootstrap_handles_receive_failure() -> None:
+    args = setup_spec077_runpod._parse_args(["--dry-run"])
+    args._resolved_package_name = "pkg"
+    args._resolved_transfer_code = "spec077-test"
+
+    start_cmd = setup_spec077_runpod._build_bootstrap_start_cmd(args)
+
+    assert start_cmd is not None
+    assert "/workspace/bootstrap.log" in start_cmd
+    assert "if ! runpodctl receive 'spec077-test'; then" in start_cmd
+    assert "runpodctl receive failed." in start_cmd
+    assert 'scp -P <port> pkg.tar root@<pod-ip>:/workspace/' in start_cmd
+    assert 'rsync -avzP pkg.tar root@<pod-ip>:/workspace/' in start_cmd
+    assert "bash runpod/install_deps.sh" in start_cmd
 
 
 def test_setup_spec077_runpod_retries_no_capacity_and_deletes_failed_volume(tmp_path: Path, monkeypatch) -> None:

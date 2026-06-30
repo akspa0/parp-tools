@@ -96,6 +96,7 @@ def _make_v18_store(path: Path, n_tiles: int = 3) -> None:
     root = zarr.group(store=store)
     height = np.linspace(100.0, 200.0, n_tiles * 257 * 257, dtype=np.float32).reshape(n_tiles, 257, 257)
     filtered = np.zeros((n_tiles, 257, 257), dtype=np.float32)
+    precise = np.zeros((n_tiles, 257, 257), dtype=np.float32)
     normals = np.zeros((n_tiles, 257, 257, 3), dtype=np.float32)
     normals[:, :, :, 2] = 1.0
     normal_mask = np.ones((n_tiles, 257, 257), dtype=np.float32)
@@ -115,7 +116,9 @@ def _make_v18_store(path: Path, n_tiles: int = 3) -> None:
         mcly_ids[1, :, :, 0] = 200 + yy16 * 16 + xx16
     if n_tiles > 1:
         filtered[1, 60:120, 60:120] = 1.0
+        precise[1, 60:120, 60:120] = 1.0
     root.create_array("height_257", data=height, chunks=(n_tiles, 257, 257), compressors=CODEC)
+    root.create_array("object_precise_mask", data=precise, chunks=(n_tiles, 257, 257), compressors=CODEC)
     root.create_array("object_filtered_mask", data=filtered, chunks=(n_tiles, 257, 257), compressors=CODEC)
     root.create_array("normal_xyz", data=normals, chunks=(n_tiles, 257, 257, 3), compressors=CODEC)
     root.create_array("normal_mask", data=normal_mask, chunks=(n_tiles, 257, 257), compressors=CODEC)
@@ -159,9 +162,34 @@ def test_dataset_weight_zeros_out_filtered_pixels() -> None:
         ds = HeightOnlyPriorDataset(prior_path=prior_path, v18_path=v18_path, height_norm=False)
         sample = ds[1]
         weight = sample["weight_257"][0].numpy()
-        # tile 1 has filtered mask at [60:120, 60:120]; weight must be 0 there.
+        # tile 1 has precise mask at [60:120, 60:120]; weight must be 0 there.
         assert float(weight[80, 80]) == 0.0
         assert float(weight[0, 0]) > 0.0
+        assert sample["meta_weight_mask_source"] == "object_precise_mask"
+
+
+def test_dataset_weight_prefers_precise_over_filtered_mask() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root_path = Path(tmp)
+        prior_path = root_path / "prior.zarr"
+        v18_path = root_path / "v18.zarr"
+        _make_prior_store(prior_path, n_tiles=2)
+        _make_v18_store(v18_path, n_tiles=2)
+        root = zarr.open_group(str(v18_path), mode="a")
+        filtered = np.zeros((2, 257, 257), dtype=np.float32)
+        filtered[1, 10:30, 10:30] = 1.0
+        precise = np.zeros((2, 257, 257), dtype=np.float32)
+        precise[1, 100:120, 100:120] = 1.0
+        root["object_filtered_mask"][:] = filtered
+        root["object_precise_mask"][:] = precise
+
+        ds = HeightOnlyPriorDataset(prior_path=prior_path, v18_path=v18_path, height_norm=False)
+        sample = ds[1]
+        weight = sample["weight_257"][0].numpy()
+
+        assert sample["meta_weight_mask_source"] == "object_precise_mask"
+        assert float(weight[110, 110]) == 0.0
+        assert float(weight[20, 20]) == 1.0
 
 
 def test_dataset_tile_filter_preserves_original_tensor_row_mapping() -> None:

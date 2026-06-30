@@ -360,6 +360,8 @@ public class MdxRenderer : IModelRenderer
         return true;
     }
 
+    public bool IsWireframe => _wireframe;
+
     public void ToggleWireframe()
     {
         _wireframe = !_wireframe;

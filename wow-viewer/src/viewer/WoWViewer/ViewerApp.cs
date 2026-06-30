@@ -1077,9 +1077,20 @@ public partial class ViewerApp : IDisposable
             ImGui.EndCombo();
         }
 
+var seq = animator.Sequences[animator.CurrentSequence];
+        float seqStart = seq.Time.Start;
+        float seqEnd = seq.Time.End;
+
         bool isPlaying = animator.IsPlaying;
         if (ImGui.Button(isPlaying ? "Pause GO Anim" : "Play GO Anim"))
             animator.IsPlaying = !isPlaying;
+
+        ImGui.SameLine();
+        if (ImGui.Button("Stop GO Anim"))
+        {
+            animator.IsPlaying = false;
+            animator.CurrentFrame = seqStart;
+        }
 
         ImGui.SameLine();
         if (ImGui.Button("Prev Key"))
@@ -1095,15 +1106,16 @@ public partial class ViewerApp : IDisposable
             animator.StepToNextKeyframe();
         }
 
-        var seq = animator.Sequences[animator.CurrentSequence];
-        float seqStart = seq.Time.Start;
-        float seqEnd = seq.Time.End;
         float currentFrame = Math.Clamp(animator.CurrentFrame, seqStart, seqEnd);
         if (ImGui.SliderFloat("GO Frame", ref currentFrame, seqStart, seqEnd, "%.0f"))
         {
             animator.IsPlaying = false;
             animator.CurrentFrame = currentFrame;
         }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Export JSON##GO"))
+            ExportAnimationStateJson(animator, currentSeq, currentSeqName, seqStart, seqEnd);
 
         ImGui.TextDisabled("Note: this affects all visible instances using the same MDX model renderer.");
     }

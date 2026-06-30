@@ -38,7 +38,10 @@
   <Folder Name="/tools/validation-capture/">
     <Project Path="tools/validation-capture/WowViewer.Tool.ValidationCapture/WowViewer.Tool.ValidationCapture.csproj" />
   </Folder>
-  <Folder Name="/tools/capture/">
+<Folder Name="/tools/capture/">
     <Project Path="tools/capture/WowViewer.Tool.Capture/WowViewer.Tool.Capture.csproj" />
+  </Folder>
+  <Folder Name="/tools/mask-validate/">
+    <Project Path="tools/mask-validate/WowViewer.Tool.MaskValidate/WowViewer.Tool.MaskValidate.csproj" />
   </Folder>
 </Solution>

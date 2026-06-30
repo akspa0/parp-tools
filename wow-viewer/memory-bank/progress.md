@@ -1,5 +1,151 @@
 # Progress — wow-viewer
 
+# 2026-06-30 - Spec 086 C# V22 stream profile started
+
+## What changed
+
+- User clarified Spec 086 must not add Python harvesting/writer/training code. V22 preprocessing is C#-owned: derive signals up front and write them into the dataset contract instead of doing Python/on-the-fly derivation.
+- Updated Spec 086 spec/plan/tasks and `docs/architecture/v22-dataset-signals-2026-06-30.md` away from Python writer / `V22Dataset` ownership toward C# `WowViewer.Tool.Harvest` and C# dataset records.
+- Added `RawArraySerializer.StreamProfile.V22` in C#.
+- Added `harvest-stream --stream-profile v22` routing.
+- V22 profile emits final V22 key names: `normal_xyz`, `alpha_256`, `holes_16`, `liquid_mask`, `liquid_height`, object masks, placement arrays, count arrays, unique ids, model id placeholders, and `tileset_texture_rgb_*` payloads when texture pixels are loaded.
+- V22 profile now also emits explicit per-placement asset path metadata: `placement_mddf_asset_paths` and `placement_modf_asset_paths`, aligned with placement row order. This is required because `nameId` without the correct tile name table is not enough for downstream asset identity.
+- V22 profile now emits tile-local MTEX texture paths as `mtex_texture_paths`, aligned with `mcly_texture_ids`, plus `tileset_texture_rgb_<index>` arrays when decoded texture pixels are available. This is required because `mcly_texture_ids` are local indices, not stable asset identities.
+- V22 profile derives `liquid_type_256` from `LiquidBasicType257`, converts `mcly_layer_mask` to float32, and expands legacy 14-column MODF placement rows into the V22 17-column layout with zero-filled fields for unavailable flags/doodadSet/nameSet.
+- Added `RawArraySerializerTests.Serialize_V22_WritesFinalDatasetKeysAndDerivedArrays` to pin final key aliases, `liquid_type_256`, float32 `mcly_layer_mask`, per-placement asset path metadata, MTEX texture path metadata, decoded texture payloads, and 17-column MODF rows.
+- Spec/plan/tasks now say the canonical consumer cache is a Zarr dataset written/read with the Python package. The game client is only a builder input; downstream loads should prefer Zarr whenever it exists.
+
+## Validation
+
+- Attempted focused xUnit and solution build, but the shell wrapper still fails before command execution with `The "path" argument must be of type string. Received undefined`.
+- Source-level checks confirm Spec 086 no longer contains Python writer/task routing except explicit "no Python post-build/preprocessing" guardrails.
+
+## Remaining Phase 2 gaps
+
+- Emit separate per-build model-library messages.
+- Emit separate per-build tileset-library messages and stable `mcly_tileset_ids` remapping.
+- Integrate renderer-truth arrays in the C# store path.
+- Run bounded stream-dump proof when shell/tool execution works.
+- Implement the actual Python-package-backed Zarr writer and reader fed by the decoded C# stream.
+
+# 2026-06-30 - Spec 086 V22 schema freeze complete
+
+## What changed
+
+- Realigned `specs/086-v22-consolidated-dataset/tasks.md` with the expanded plan: Phase 1 is now schema freeze/inventory proof, followed by C# stream expansion, Python Zarr writer, Zarr consumer contract, bounded three-build proof, learnability gates, then three-build migration.
+- Added `docs/architecture/v22-dataset-signals-2026-06-30.md` as the frozen V22 store contract: root tile arrays, placement offsets/data, `models/`, `tilesets/`, stream message classes, fixed-key `V22Dataset` behavior, and validation gates.
+- Fixed a spec inconsistency: `modf_placement_data` is `(total_modf, 17)`, matching the 17 documented fields.
+- Scoped V22 explicitly to `0_5_3_3368`, `3_3_5_12340`, and `4_0_0_11927` only. `4_0_0_11927` is included because development-map assets require it and current object decode/render support covers it. Other staged clients are out of scope unless Spec 086 is reopened.
+
+## Validation
+
+- Source-level checklist passed for Phase 1: FR-001 through FR-028 now have documented V22 homes or audit-only status, and the task list no longer contains six-client rebuild language.
+- No code was changed, so no build/test command was required for this phase.
+
+## Next
+
+- Start Phase 2 only: expand `WowViewer.Tool.Harvest` stream contract with separate tile, model-library, and tileset-library message types for the three scoped builds.
+
+# 2026-06-30 - Spec 086 V22 dataset planning expanded for learnability
+
+## What changed
+
+- Reframed V22 from a narrow "replace patch scripts" cleanup into a full training-facing data contract.
+- V22 now plans to include four surfaces in one store: consolidated tile signals, placement arrays, pre-decoded model library (full parsed M2/WMO payloads needed for masking), and pre-decoded tileset library (decoded BLP RGB).
+- The implementation plan now includes explicit learnability gates, not just build completion: tiny-overfit, mask-reconstruction parity, asset-retrieval baseline, and texture-composition baseline.
+
+## Why
+
+- The user wants to stop re-parsing assets or regenerating synthetic stand-ins downstream.
+- The new goal is not merely a cleaner dataset build; it is a dataset that lets models learn from the actual object and texture data the renderer/masker already uses.
+- The plan now tries to reduce unknowns behind prior plateaus by making asset coverage, mask quality, and consumer seams directly measurable.
+
+## Next
+
+- Sync `tasks.md` with the expanded V22 plan before implementation.
+- Freeze the final V22 schema and stream message types before touching the C# harvester or Python store writer.
+
+# 2026-06-30 — Spec 001 Precise M2 Masks — Implementation complete, validation pending
+
+**Key discovery**: All 10 FRs are already implemented in `AdtTensorPackBuilder.cs` (lines 1736–2441). `DoodadModelMetadata` has `TriangleVertices`; `TryLoadDoodadModelMetadata` reads M2 + companion `.skin` via `M2ModelIdentity.BuildSkinPath(0)`, maps skin `VertexLookup` to geometry positions; the MDDF loop rasterizes triangles via `PaintClippedTriangle` with `TryResolveProjectionMode`; three-way fallback (triangles → bounds rectangle → centroid circle) is intact; WMO code path is untouched.
+
+**What landed**:
+- `wow-viewer/specs/001-precise-m2-masks/plan.md` — 3 validation phases
+- `wow-viewer/specs/001-precise-m2-masks/tasks.md` — 14 tasks
+- Code-reviewed T005–T007 (US2 fallback) and T009 (US3 WMO unchanged) — all pass
+
+**Validation blocked by**: Local shell path error (`The "path" argument must be of type string. Received undefined`) prevents running `dotnet build` and `extract-unified`. Manual commands required for T001–T004, T008, T010–T011.
+
+# 2026-06-29 - Spec 077 H0/H1 residual height chain
+
+## Masking Correction
+
+- User correctly identified that training masks were still using non-precise object gates.
+- Root cause: `HeightOnlyPriorDataset` computed `weight_257` from `object_filtered_mask`, and the RunPod packager copied only `object_filtered_mask` in slim V18 bundles.
+- Fixed the training contract to prefer `object_precise_mask`, then `object_filtered_mask`, then `object_mask` fallback. RunPod packages now require/copy `object_precise_mask`.
+- All recent direct/H0/H1 cloud training results before this fix should be treated as contaminated by the old gate.
+- Required verification remains blocked locally by the shell-wrapper path error: `uv run pytest tests/test_height_only_prior.py tests/test_package_spec077_runpod.py -q`.
+
+## What landed
+
+- Expanded Spec 077 T029b into a concrete coarse-to-fine residual phase: H0 predicts `height_coarse_65`; H1 predicts `height_delta_257` from the same signals plus frozen/upscaled H0.
+- Added `V18HeightCoarseModel`, `V18HeightResidualModel`, and shared helpers in `height_residual_chain.py` for channel assembly, density channels, coarse downsample/upsample, residual target, and deterministic composition.
+- Added `scripts/train_height_coarse_prior.py` and `scripts/train_height_residual_prior.py` with independent checkpoints/metrics.
+- Added focused pytest `tests/test_height_residual_chain.py` for channel counts, H0/H1 shapes, residual composition, and script arg parsing.
+- Updated RunPod packaging to include new scripts/tests plus `runpod/train_spec077_h0.sh` and `runpod/train_spec077_h1.sh` wrappers.
+- Updated Spec 077 spec/plan/tasks/data-model/user-guide and the minimap architecture note.
+
+## Verification
+
+- Required command: `uv run pytest tests/test_height_residual_chain.py tests/test_package_spec077_runpod.py -q` from `wow-viewer/data-harvester`.
+- Attempted locally, but the shell wrapper still fails before execution with `The "path" argument must be of type string. Received undefined`.
+
+## Next
+
+- Rebuild/upload the RunPod package, run `bash runpod/train_spec077_h0.sh`, then `bash runpod/train_spec077_h1.sh`.
+- Compare H1 validation previews against `cuda_albedo_group_nearest`; T029b8 remains open until a bounded H0/H1 smoke proof is recorded.
+
+## Follow-up Fix
+
+- H1 first run started at val `~0.56` despite frozen H0 best val `~0.405`, which means the random residual head was destroying the H0 baseline.
+- Fixed `V18HeightResidualModel` to zero-initialize its final projection. Fresh H1 now starts as a no-op delta and should validate near H0 before learning detail.
+- Added/updated docs and `test_h1_residual_model_starts_as_zero_delta`; pytest still blocked locally by the shell-wrapper path error.
+
+# 2026-06-29 - Spec 079 RunPod bootstrap fallback hardening
+
+## What landed
+
+- `scripts/setup_spec077_runpod.py` now writes bootstrap logs to `/workspace/bootstrap.log` instead of the spec077-specific path.
+- The Pod bootstrap command now handles `runpodctl receive` failure explicitly and prints manual `scp`/`rsync` transfer instructions before exiting.
+- Added a unit test that locks the bootstrap fallback text and log path.
+
+## Verification
+
+- Code readback confirms the generated shell script now uses the new log path and `if ! runpodctl receive ...; then` fallback block.
+- Shell-based pytest verification is still pending because the local `bash` tool has been failing before command execution with `The "path" argument must be of type string. Received undefined`.
+
+## Next
+
+- Re-run `uv run pytest tests/test_package_spec077_runpod.py -q` from `wow-viewer/data-harvester` once the shell wrapper is available.
+
+# 2026-06-29 - Spec 080 UI wireframe build fix
+
+## What landed
+
+- Added `ISceneRenderer.IsWireframe` so the sidebar wireframe checkbox can query current state without reaching into concrete renderer types.
+- Implemented `IsWireframe` on `MdxRenderer`, `M2Renderer`, `M2CameraPathRenderer`, `WmoRenderer`, `TerrainRenderer`, `TerrainManager`, `VlmTerrainManager`, and `WorldScene`.
+- This unblocks the `ViewerApp_Sidebars.cs` build error at the wireframe checkbox.
+
+## Verification
+
+- Source-level consistency check passes: every active `ISceneRenderer` implementer now exposes `IsWireframe`.
+- Full build/test verification is still pending because the local `bash` tool fails before executing `dotnet build` with `The "path" argument must be of type string. Received undefined`.
+
+## Next
+
+- Re-run `dotnet build wow-viewer/WowViewer.slnx -c Debug` once the shell wrapper is available.
+- If the build is clean, continue the UI consolidation slice only if there are remaining spec 080 items.
+
 ## 2026-06-29 - Spec 077 anti-grid base rerun + RunPod package handoff
 
 ### Context
@@ -405,7 +551,7 @@
 ### Next slice (still Phase 2)
 
 - Run the enumerator + builder against a bounded V18 store and capture real-data stats.
-- Decide whether to add the C# Zarr/Parquet writer (T009 C# side) before the capture tool extension (T010), or run the first proof Python-only and add the C# writer when the C# capture lane is actually wired.
+- Continue with the Python-only Zarr path before the capture tool extension (T010); do not add a C# Zarr writer for that lane.
 
 ## 2026-06-28 - Spec 077 minimap deconstruction engine planned
 
@@ -782,3 +928,17 @@ All phases built clean and pushed to `071-left-right-sidebar-split`.
 - 070: Per-map workbench windows (deferred, large rewrite).
 - 073b: Tools tab converter integration (spec'd, implementation deferred to fresh chat).
 - V21/V21c height regression and fractal-aware height loss: paused pending 076 curated library validation.
+# 2026-06-29 - Viewer animation controls resurfaced
+
+## What landed
+
+- The active viewer now exposes model animation playback controls in the default Model > Info sub-tab, not only in the Animations sub-tab.
+- Added missing Stop buttons to the SQL gameobject animation panel and the world-MDX animation panel.
+- Added a save-dialog-backed animation state JSON export action from the viewer UI.
+
+## Verification
+
+- Source-level review confirms the controls are wired into `ViewerApp.cs` / `ViewerApp_Sidebars.cs` and reuse the existing animation controller state.
+- Shell build verification remains pending because the local `bash` tool still fails before executing commands with `The "path" argument must be of type string. Received undefined`.
+
+# 2026-06-29 - Spec 080 UI wireframe build fix

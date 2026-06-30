@@ -763,6 +763,8 @@ public class TerrainManager : ISceneRenderer
         _liquidRenderer.Render(view, proj, cameraPos, _terrainRenderer.Lighting, deltaTime);
     }
 
+    public bool IsWireframe => _terrainRenderer.IsWireframe;
+
     public void ToggleWireframe()
     {
         _terrainRenderer.ToggleWireframe();

@@ -1166,6 +1166,8 @@ public class TerrainRenderer : IDisposable
         Uniform1Counted(_uHasShadowLoc, hasShadow ? 1 : 0);
     }
 
+    public bool IsWireframe => _wireframe;
+
     public void ToggleWireframe()
     {
         _wireframe = !_wireframe;

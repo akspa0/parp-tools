@@ -14,7 +14,8 @@ public static class RawArraySerializer
     public enum StreamProfile
     {
         Full,
-        V16
+        V16,
+        V22
     }
 
     private static ReadOnlySpan<byte> ArrayMagic => "ARRY"u8;
@@ -42,6 +43,10 @@ public static class RawArraySerializer
         if (profile == StreamProfile.V16)
         {
             WriteV16Arrays(pack, outputStream);
+        }
+        else if (profile == StreamProfile.V22)
+        {
+            WriteV22Arrays(pack, outputStream);
         }
         else
         {
@@ -165,6 +170,47 @@ public static class RawArraySerializer
         }
     }
 
+    private static void WriteV22Arrays(TerrainTileTensorPack pack, Stream outputStream)
+    {
+        WriteArray(outputStream, "height_257", pack.Height257);
+        WriteArray(outputStream, "normal_xyz", pack.McnrNormalXyz);
+        WriteArray(outputStream, "normal_mask", pack.McnrMask257 ?? BuildNormalMask(pack.McnrNormalXyz));
+        WriteArray(outputStream, "alpha_256", pack.McalAlphaPack256);
+        WriteArray(outputStream, "holes_16", pack.HoleMask16);
+        WriteArray(outputStream, "liquid_mask", Crop257To256(pack.UnifiedLiquidMask));
+        WriteArray(outputStream, "liquid_height", Crop257To256(pack.UnifiedLiquidHeight));
+        WriteArray(outputStream, "object_mask", pack.ObjectMask257);
+        WriteArray(outputStream, "object_precise_mask", pack.ObjectPreciseMask257);
+        WriteArray(outputStream, "object_instance_mask", pack.ObjectInstanceMask257);
+        WriteArray(outputStream, "mcnk_flags_16", pack.McnkFlags16);
+        WriteArray(outputStream, "mddf_mask", pack.MddfMask257);
+        WriteArray(outputStream, "modf_mask", pack.ModfMask257);
+        WriteArray(outputStream, "object_filtered_mask", pack.ObjectFilteredMask257);
+        WriteArray(outputStream, "object_roof_mask", pack.ObjectRoofMask256);
+        WriteArray(outputStream, "object_roof_confidence", pack.ObjectRoofConfidence256);
+        WriteArray(outputStream, "minimap_rgb", pack.MinimapRgb256);
+        WriteArray(outputStream, "shadow_mask", pack.McshShadowMask256);
+        WriteArray(outputStream, "mcly_texture_ids", pack.MclyTextureIds);
+        WriteArray(outputStream, "mcly_layer_mask", BoolMaskToFloat(pack.MclyLayerMask));
+        WriteArray(outputStream, "mcnr_mask_257", pack.McnrMask257);
+        WriteArray(outputStream, "liquid_type_256", BuildLiquidType256(pack.LiquidBasicType257));
+        WriteArray(outputStream, "ground_intent_height_257", BuildGroundIntentHeight257(pack.Height257, pack.ObjectPreciseMask257));
+        WriteArray(outputStream, "mddf_placement_data", pack.PlacementMddfData);
+        WriteArray(outputStream, "modf_placement_data", ConvertModfPlacementDataToV22(pack.PlacementModfData));
+        WriteArray(outputStream, "mddf_unique_ids", ExtractPlacementColumnAsInt(pack.PlacementMddfData, 1));
+        WriteArray(outputStream, "modf_unique_ids", ExtractPlacementColumnAsInt(pack.PlacementModfData, 1));
+        WriteArray(outputStream, "mddf_model_ids", ExtractPlacementColumnAsInt(pack.PlacementMddfData, 0));
+        WriteArray(outputStream, "modf_model_ids", ExtractPlacementColumnAsInt(pack.PlacementModfData, 0));
+        WriteArray(outputStream, "mddf_count", new[] { pack.PlacementMddfCount });
+        WriteArray(outputStream, "modf_count", new[] { pack.PlacementModfCount });
+
+        if (pack.MclyTexturePixels is { Count: > 0 } pixels)
+        {
+            for (int i = 0; i < pixels.Count; i++)
+                WriteArray(outputStream, $"tileset_texture_rgb_{i}", pixels[i]);
+        }
+    }
+
     private static void WriteArray(Stream stream, string name, Array? array)
     {
         if (array is null)
@@ -268,6 +314,216 @@ public static class RawArraySerializer
         return fallback;
     }
 
+    private static bool[,]? BuildNormalMask(float[,,]? normals)
+    {
+        if (normals is null)
+            return null;
+
+        int height = normals.GetLength(0);
+        int width = normals.GetLength(1);
+        int channels = normals.GetLength(2);
+        if (channels < 3)
+            return null;
+
+        bool[,] mask = new bool[height, width];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                mask[y, x] = normals[y, x, 0] != 0f || normals[y, x, 1] != 0f || normals[y, x, 2] != 0f;
+            }
+        }
+
+        return mask;
+    }
+
+    private static float[,]? Crop257To256(float[,]? source)
+    {
+        if (source is null)
+            return null;
+
+        int height = Math.Min(256, source.GetLength(0));
+        int width = Math.Min(256, source.GetLength(1));
+        float[,] result = new float[height, width];
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+                result[y, x] = source[y, x];
+        return result;
+    }
+
+    private static byte[,]? BuildLiquidType256(byte[,]? liquidBasicType257)
+    {
+        if (liquidBasicType257 is null)
+            return null;
+
+        int height = Math.Min(256, liquidBasicType257.GetLength(0));
+        int width = Math.Min(256, liquidBasicType257.GetLength(1));
+        byte[,] result = new byte[height, width];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                byte value = liquidBasicType257[y, x];
+                result[y, x] = value == 0xFF ? (byte)0 : (byte)(value + 1);
+            }
+        }
+
+        return result;
+    }
+
+    private static float[,,]? BoolMaskToFloat(bool[,,]? source)
+    {
+        if (source is null)
+            return null;
+
+        int dim0 = source.GetLength(0);
+        int dim1 = source.GetLength(1);
+        int dim2 = source.GetLength(2);
+        float[,,] result = new float[dim0, dim1, dim2];
+        for (int i = 0; i < dim0; i++)
+            for (int j = 0; j < dim1; j++)
+                for (int k = 0; k < dim2; k++)
+                    result[i, j, k] = source[i, j, k] ? 1f : 0f;
+        return result;
+    }
+
+    private static float[,]? BuildGroundIntentHeight257(float[,]? height257, float[,]? objectPreciseMask257)
+    {
+        if (height257 is null)
+            return null;
+
+        int height = height257.GetLength(0);
+        int width = height257.GetLength(1);
+        float[,] result = new float[height, width];
+        bool[,] unresolved = new bool[height, width];
+        int unresolvedCount = 0;
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                result[y, x] = height257[y, x];
+                bool masked = objectPreciseMask257 is not null
+                    && y < objectPreciseMask257.GetLength(0)
+                    && x < objectPreciseMask257.GetLength(1)
+                    && objectPreciseMask257[y, x] >= 0.05f;
+                if (masked)
+                {
+                    unresolved[y, x] = true;
+                    unresolvedCount++;
+                }
+            }
+        }
+
+        if (unresolvedCount == 0)
+            return result;
+
+        float[,] next = new float[height, width];
+        bool[,] nextUnresolved = new bool[height, width];
+        int maxIterations = height + width;
+        for (int iteration = 0; iteration < maxIterations && unresolvedCount > 0; iteration++)
+        {
+            Array.Copy(result, next, result.Length);
+            Array.Clear(nextUnresolved);
+            int nextUnresolvedCount = 0;
+            bool madeProgress = false;
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    if (!unresolved[y, x])
+                        continue;
+
+                    float sum = 0f;
+                    int count = 0;
+                    AddResolvedNeighbor(x - 1, y, result, unresolved, ref sum, ref count);
+                    AddResolvedNeighbor(x + 1, y, result, unresolved, ref sum, ref count);
+                    AddResolvedNeighbor(x, y - 1, result, unresolved, ref sum, ref count);
+                    AddResolvedNeighbor(x, y + 1, result, unresolved, ref sum, ref count);
+
+                    if (count > 0)
+                    {
+                        next[y, x] = sum / count;
+                        madeProgress = true;
+                    }
+                    else
+                    {
+                        nextUnresolved[y, x] = true;
+                        nextUnresolvedCount++;
+                    }
+                }
+            }
+
+            (result, next) = (next, result);
+            (unresolved, nextUnresolved) = (nextUnresolved, unresolved);
+            unresolvedCount = nextUnresolvedCount;
+
+            if (!madeProgress)
+                break;
+        }
+
+        return result;
+    }
+
+    private static void AddResolvedNeighbor(int x, int y, float[,] values, bool[,] unresolved, ref float sum, ref int count)
+    {
+        if ((uint)y >= (uint)values.GetLength(0) || (uint)x >= (uint)values.GetLength(1) || unresolved[y, x])
+            return;
+
+        sum += values[y, x];
+        count++;
+    }
+
+    private static float[,]? ConvertModfPlacementDataToV22(float[,]? source)
+    {
+        if (source is null)
+            return null;
+
+        int count = source.GetLength(0);
+        int columns = source.GetLength(1);
+        float[,] result = new float[count, 17];
+        for (int i = 0; i < count; i++)
+        {
+            result[i, 0] = GetPlacementValue(source, i, columns, 0);
+            result[i, 1] = GetPlacementValue(source, i, columns, 1);
+            result[i, 2] = GetPlacementValue(source, i, columns, 2);
+            result[i, 3] = GetPlacementValue(source, i, columns, 3);
+            result[i, 4] = GetPlacementValue(source, i, columns, 4);
+            result[i, 5] = GetPlacementValue(source, i, columns, 5);
+            result[i, 6] = GetPlacementValue(source, i, columns, 6);
+            result[i, 7] = GetPlacementValue(source, i, columns, 7);
+            result[i, 8] = columns > 14 ? GetPlacementValue(source, i, columns, 8) : 0f;
+            result[i, 9] = columns > 15 ? GetPlacementValue(source, i, columns, 9) : 0f;
+            result[i, 10] = columns > 16 ? GetPlacementValue(source, i, columns, 10) : 0f;
+
+            int boundsOffset = columns >= 17 ? 11 : 8;
+            result[i, 11] = GetPlacementValue(source, i, columns, boundsOffset);
+            result[i, 12] = GetPlacementValue(source, i, columns, boundsOffset + 1);
+            result[i, 13] = GetPlacementValue(source, i, columns, boundsOffset + 2);
+            result[i, 14] = GetPlacementValue(source, i, columns, boundsOffset + 3);
+            result[i, 15] = GetPlacementValue(source, i, columns, boundsOffset + 4);
+            result[i, 16] = GetPlacementValue(source, i, columns, boundsOffset + 5);
+        }
+
+        return result;
+    }
+
+    private static int[]? ExtractPlacementColumnAsInt(float[,]? source, int column)
+    {
+        if (source is null || source.GetLength(1) <= column)
+            return null;
+
+        int count = source.GetLength(0);
+        int[] result = new int[count];
+        for (int i = 0; i < count; i++)
+            result[i] = (int)source[i, column];
+        return result;
+    }
+
+    private static float GetPlacementValue(float[,] source, int row, int columns, int column)
+        => column >= 0 && column < columns ? source[row, column] : 0f;
+
     private static string BuildMetadataJson(TerrainTileTensorPack pack)
     {
         var sb = new StringBuilder();
@@ -301,6 +557,16 @@ public static class RawArraySerializer
         }
         sb.Append("],");
 
+        sb.Append("\"mtex_texture_paths\":[");
+        first = true;
+        foreach (string n in pack.MclyTextureNames)
+        {
+            if (!first) sb.Append(',');
+            sb.Append($"\"{Escape(n)}\"");
+            first = false;
+        }
+        sb.Append("],");
+
         // placement names
         sb.Append("\"placement_mddf_names\":[");
         first = true;
@@ -321,6 +587,11 @@ public static class RawArraySerializer
         }
         sb.Append("],");
 
+        AppendPlacementAssetPaths(sb, "placement_mddf_asset_paths", pack.PlacementMddfData, pack.PlacementMddfNames);
+        sb.Append(',');
+        AppendPlacementAssetPaths(sb, "placement_modf_asset_paths", pack.PlacementModfData, pack.PlacementModfNames);
+        sb.Append(',');
+
         sb.Append($"\"object_roof_mask_source\":\"{Escape(pack.ObjectRoofMaskSource)}\",");
 
         sb.Append($"\"placement_mddf_count\":{pack.PlacementMddfCount},");
@@ -328,6 +599,24 @@ public static class RawArraySerializer
 
         sb.Append('}');
         return sb.ToString();
+    }
+
+    private static void AppendPlacementAssetPaths(StringBuilder sb, string propertyName, float[,]? placementData, IReadOnlyList<string> names)
+    {
+        sb.Append('"').Append(propertyName).Append("\":[");
+        if (placementData is not null)
+        {
+            for (int i = 0; i < placementData.GetLength(0); i++)
+            {
+                if (i > 0)
+                    sb.Append(',');
+
+                int nameId = placementData.GetLength(1) > 0 ? (int)placementData[i, 0] : -1;
+                string path = nameId >= 0 && nameId < names.Count ? names[nameId] : string.Empty;
+                sb.Append('"').Append(Escape(path)).Append('"');
+            }
+        }
+        sb.Append(']');
     }
 
     private static string Escape(string? s) => (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");

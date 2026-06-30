@@ -105,7 +105,15 @@
 - [x] T029d [US3] Add opt-in anti-grid base-model controls (`--model-norm group`, `--decoder-upsample nearest`) after the albedo run plateaued, while preserving legacy defaults for old checkpoints.
 - [x] T029e [US3] Add a RunPod cloud-training package builder that copies Python training code plus derived teacher-prior/V18/albedo/curation artifacts only, excluding game-client roots.
 - [x] T029f [US3] Add a RunPod REST setup helper for the RTX 4000 Ada training Pod, default network-volume storage, and `runpodctl` send/receive bootstrap using `RUNPOD_API_KEY` only for compute/volume creation; GPU fallbacks are opt-in only.
-- [ ] T029b [US3] If base albedo training still misses small detail, define a separate MCLY-guided `height_delta_257` residual-refinement dataset/trainer instead of adding heads to the base model.
+- [x] T029g [US3] Fix height trainer loss gates to prefer `object_precise_mask` and require precise masks in RunPod V18 slim bundles so cloud training cannot silently use non-precise object gates.
+- [x] T029b1 [US3] Define the H0/H1 coarse-to-fine residual chain in `spec.md`, `plan.md`, `data-model.md`, the architecture note, and this task list.
+- [x] T029b2 [US3] Add `V18HeightCoarseModel` and `V18HeightResidualModel` aliases/exports under `data-harvester/src/harvester/` without changing legacy `V18HeightModel` checkpoints.
+- [x] T029b3 [US3] Add shared residual-chain helpers for model-input assembly, coarse target downsampling, coarse upsampling, residual target construction, and composed-height reconstruction.
+- [x] T029b4 [US3] Add `scripts/train_height_coarse_prior.py` for H0 `height_coarse_65` training with its own metrics/checkpoints.
+- [x] T029b5 [US3] Add `scripts/train_height_residual_prior.py` for H1 `height_delta_257` training from a frozen H0 checkpoint.
+- [x] T029b6 [US3] Add pytest coverage for H0/H1 shapes, residual composition, and checkpoint metadata assumptions.
+- [x] T029b7 [US3] Update RunPod packaging/user-guide commands so cloud bundles include H0/H1 scripts and shell wrappers.
+- [ ] T029b8 [US3] Run a bounded H0/H1 smoke validation and record outputs or blockers.
 
 **Checkpoint**: The first terrain proof is a tiny height-only lane, not a combined terrain model.
 

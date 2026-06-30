@@ -13,6 +13,8 @@ Usage:
 
 from harvester.v16_1_models import (
     V161HeightModel as V18HeightModel,
+    V161HeightCoarseModel as V18HeightCoarseModel,
+    V161HeightResidualModel as V18HeightResidualModel,
     V161NormalModel as V18NormalModel,
     V161NormalHeightModel as V18NormalHeightModel,
     V161NormalHeightCombinedModel as V18NormalHeightCombinedModel,
@@ -28,9 +30,13 @@ from harvester.v16_1_models import (
 # channel is appended. Kept here so the trainer and tests share one constant.
 V18_HEIGHT_DEFAULT_IN_CHANNELS = 3
 V18_HEIGHT_ALBEDO_IN_CHANNELS = 6
+V18_HEIGHT_DENSITY_IN_CHANNELS = 3
+V18_HEIGHT_BASE_IN_CHANNELS = 1
 
 __all__ = [
     "V18HeightModel",
+    "V18HeightCoarseModel",
+    "V18HeightResidualModel",
     "V18NormalModel",
     "V18NormalHeightModel",
     "V18NormalHeightCombinedModel",
@@ -42,4 +48,6 @@ __all__ = [
     "compute_compositor_weights_torch",
     "V18_HEIGHT_DEFAULT_IN_CHANNELS",
     "V18_HEIGHT_ALBEDO_IN_CHANNELS",
+    "V18_HEIGHT_DENSITY_IN_CHANNELS",
+    "V18_HEIGHT_BASE_IN_CHANNELS",
 ]

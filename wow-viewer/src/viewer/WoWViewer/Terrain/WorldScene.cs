@@ -9798,6 +9798,8 @@ public class WorldScene : ISceneRenderer
             ClearWireframeReveal();
     }
 
+    public bool IsWireframe => _wireframeRevealEnabled;
+
     public void UpdateWireframeReveal(Matrix4x4 view, Matrix4x4 proj,
         float mouseViewportX, float mouseViewportY, float viewportWidth, float viewportHeight)
     {

@@ -1,6 +1,24 @@
 # Active Context — wow-viewer
 
-**Last updated**: 2026-06-29 | **Focus**: spec 077 cloud training on RunPod — `cuda_albedo_group_nearest` running successfully with GroupNorm + nearest-decoder, network-volume persistence, cost-target GPU selection
+**Last updated**: 2026-06-30 | **Focus**: Spec 086 V22 dataset schema freeze complete for the three-build scope (`0_5_3_3368`, `3_3_5_12340`, `4_0_0_11927`) — zero-patch tile signals plus native placement arrays, pre-decoded model library, and pre-decoded tileset library aimed at reducing downstream supervision ambiguity
+
+## Current Dataset Slice
+
+- **Spec 086 `086-v22-consolidated-dataset` Phase 1 is complete.** `tasks.md` is realigned to the expanded plan, and `docs/architecture/v22-dataset-signals-2026-06-30.md` freezes the root arrays, placement arrays, `models/` layout, `tilesets/` layout, stream-message boundary, and C# fixed-key read contract.
+- **Client scope is capped at three builds:** `0_5_3_3368`, `3_3_5_12340`, and `4_0_0_11927`. Include `4_0_0_11927` because the development map references Cata-only assets and current object decode/render support covers it. Do not include `0_5_5_3494`, `0_7_0_3694`, `3_0_1_8303`, or any other staged client merely because it exists. Expansion requires reopening Spec 086.
+- User clarified V22 harvesting/preprocessing should be C#-only. Do not add Python writer/dataset/training code for Spec 086; precompute signals and shove them into the dataset instead of deriving on the fly.
+- Phase 2 partial implementation landed: `RawArraySerializer.StreamProfile.V22`, `harvest-stream --stream-profile v22`, and `RawArraySerializerTests` for final key names, per-placement asset paths, MTEX texture paths, float32 `mcly_layer_mask`, and 17-column MODF rows.
+- Canonical target is now explicit: consumers should load the decoded V22 Zarr dataset instead of the game client whenever the dataset exists. The raw stream is only a builder seam; the final cache/load surface uses the Python Zarr package, not a C# Zarr implementation.
+- Remaining Phase 2 gaps: separate model-library and tileset-library message payloads, renderer-truth ingestion, bounded stream-dump proof. Remaining Phase 3/4 gaps: actual Python Zarr writer and Zarr reader implementation. No full rebuild, no patch-script deletion, and no consumer migration until bounded proof and learnability gates pass.
+
+## Current UI Slice
+
+- Viewer animation controls are now surfaced in the default Model > Info sub-tab, the Model > Animations sub-tab, and the world-MDX / SQL gameobject animation panels.
+- The UI now has Stop buttons where they were missing and a Save-Dialog-backed animation state JSON export action.
+- Spec 080 Phase A is the active viewer task: move duplicate toggles into the persistent bottom bar and remove duplicate sub-tab controls.
+- Build broke on `ViewerApp_Sidebars.cs` because `ISceneRenderer` lacked `IsWireframe`; added the property and implemented it across model, WMO, terrain, and world scene renderers.
+- Remaining verification step is a `dotnet build` / `dotnet test` pass, but the local shell wrapper currently fails before command execution with `The "path" argument must be of type string. Received undefined`.
+- No further UI scope change is planned until the build can be verified.
 
 ## Current State
 
@@ -10,7 +28,7 @@
 - **Spec 075 `075-scar-mask-segmentation`**: deprecated as primary direction. The trainer is a coarse diagnostic baseline only; do not continue it as the brush-family route unless explicitly reopened.
 - **Spec 076 `076-full-map-fractal-brush-library`**: active plan. Phases 1-3 are implemented for bounded compact and full-map strip proofs. Raw connected-component/near-dedupe outputs are diagnostic only; active review target is macro paste/scar/digital-painting regions via `--macro-pastes`.
 - **V21/V21c height training**: paused. Multiple runs (restored to d0929e2 baseline) failed to reproduce earlier 0.3126 convergence; model stalls at ~0.83 height L1. Pivoted to deconstruction-first approach.
-- **Spec 077 cloud training on RunPod (2026-06-29)**: D4 flip/rotate augmentation invalid for baked minimap RGB (fixed-direction lighting/shadows); `--augment` defaults to identity-only `shadow-safe`. Albedo precomputed as texture-identity pseudo-colour sidecar; stale flat-cyan ones need `--overwrite` rebuild. `cuda_albedo_shadow_safe` plateaued at epoch 240 — do not resume. Fresh `cuda_albedo_group_nearest` running on RunPod: `--albedo --model-norm group --decoder-upsample nearest`, default network-volume storage, cost-target ($1/hr, 12GB VRAM, 24GB RAM, community cloud, no datacenter GPUs). RunPod integration spec (079) written with all lessons learned (minimal REST payload, cost-target GPU exclusion, COMMUNITY default, network-volume datacenter filtering, `runpodctl` v2.x positional-arg syntax, SSH key requirement, web UI fallback).
+- **Spec 077 masking blocker (2026-06-29)**: Recent direct/H0/H1 training results are suspect. `HeightOnlyPriorDataset` was still using `object_filtered_mask` for `weight_257`, and RunPod slim V18 bundles only copied `object_filtered_mask`. Fixed dataset loss gates to prefer `object_precise_mask`, then filtered, then coarse object fallback; RunPod packaging now requires/copies `object_precise_mask`. Rebuild teacher-prior/package before trusting more training. Focused pytest is pending because shell wrapper fails before execution.
 
 ## Why the Pivot
 
@@ -91,7 +109,7 @@ End-to-end height regression from minimap was not converging despite identical c
 
 ### Spec 077
 1. Which bounded proof build/map should seed the first real-data per-object capture library run?
-2. Is the C# Zarr/Parquet writer (T009 C# side) worth doing before the capture tool extension (T010), or is Python-only path enough for first proof?
+2. Is the Python-only Zarr path enough before the capture tool extension (T010), given the current no-C#-Zarr direction?
 3. What is the smallest processed-prior channel contract that gives the height-only model enough context?
 4. Which development-map tile subset is the first ADT-free proof target for minimap-only object explanation?
 5. Does `cuda_albedo_group_nearest` on RunPod converge to good broad shape? If yes, should T029b (MCLY-guided `height_delta_257` residual-refinement lane) be opened?

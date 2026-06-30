@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Text.Json;
 using ImGuiNET;
 using WoWViewer.DataSources;
 using WoWViewer.Workbench;
@@ -90,52 +91,16 @@ public partial class ViewerApp
     private float GetDirectTerrainToolbarWidth(TerrainRenderer renderer, LiquidRenderer? liquidRenderer)
     {
         float width = 0f;
-        width += MeasureToolbarCheckboxWidth("Base");
-        width += MeasureToolbarCheckboxWidth("L1");
-        width += MeasureToolbarCheckboxWidth("L2");
-        width += MeasureToolbarCheckboxWidth("L3");
-        width += MeasureToolbarCheckboxWidth("Holes");
         if (_worldScene != null)
-        {
-            width += MeasureToolbarSeparatorWidth();
             width += MeasureToolbarCheckboxWidth("WDL");
-        }
         return width;
     }
 
     private void DrawDirectTerrainToolbarControls(TerrainRenderer renderer, LiquidRenderer? liquidRenderer)
     {
-        bool l0 = renderer.ShowLayer0;
-        if (ImGui.Checkbox("Base", ref l0)) renderer.ShowLayer0 = l0;
-        ImGui.SameLine();
-        bool l1 = renderer.ShowLayer1;
-        if (ImGui.Checkbox("L1", ref l1)) renderer.ShowLayer1 = l1;
-        ImGui.SameLine();
-        bool l2 = renderer.ShowLayer2;
-        if (ImGui.Checkbox("L2", ref l2)) renderer.ShowLayer2 = l2;
-        ImGui.SameLine();
-        bool l3 = renderer.ShowLayer3;
-        if (ImGui.Checkbox("L3", ref l3)) renderer.ShowLayer3 = l3;
-
-        ImGui.SameLine();
-        bool terrainHolesEnabled = !(_terrainManager?.IgnoreTerrainHolesGlobally
-            ?? _vlmTerrainManager?.IgnoreTerrainHolesGlobally
-            ?? false);
-        if (ImGui.Checkbox("Holes", ref terrainHolesEnabled))
-        {
-            if (SetIgnoreTerrainHolesGlobally(!terrainHolesEnabled))
-            {
-                _statusMessage = terrainHolesEnabled
-                    ? "Terrain hole masking enabled."
-                    : "Terrain hole masking disabled.";
-            }
-        }
-
-        ImGui.SameLine();
-        ImGui.Spacing();
+        // Layer toggles moved to bottom bar. Only keep WDL in toolbar.
         if (_worldScene != null)
         {
-            ImGui.SameLine();
             bool showWdl = _worldScene.ShowWdlTerrain;
             if (ImGui.Checkbox("WDL", ref showWdl))
                 _worldScene.ShowWdlTerrain = showWdl;
@@ -173,7 +138,37 @@ public partial class ViewerApp
                 ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
                 ImGui.SameLine();
 
-                // Overlay toggles
+                // Layer visibility (single source of truth)
+                bool l0 = renderer.ShowLayer0;
+                if (ImGui.Checkbox("Base", ref l0)) renderer.ShowLayer0 = l0;
+                ImGui.SameLine();
+                bool l1 = renderer.ShowLayer1;
+                if (ImGui.Checkbox("L1", ref l1)) renderer.ShowLayer1 = l1;
+                ImGui.SameLine();
+                bool l2 = renderer.ShowLayer2;
+                if (ImGui.Checkbox("L2", ref l2)) renderer.ShowLayer2 = l2;
+                ImGui.SameLine();
+                bool l3 = renderer.ShowLayer3;
+                if (ImGui.Checkbox("L3", ref l3)) renderer.ShowLayer3 = l3;
+                ImGui.SameLine();
+                bool terrainHolesEnabled = !(_terrainManager?.IgnoreTerrainHolesGlobally
+                    ?? _vlmTerrainManager?.IgnoreTerrainHolesGlobally
+                    ?? false);
+                if (ImGui.Checkbox("Holes", ref terrainHolesEnabled))
+                {
+                    if (SetIgnoreTerrainHolesGlobally(!terrainHolesEnabled))
+                    {
+                        _statusMessage = terrainHolesEnabled
+                            ? "Terrain hole masking enabled."
+                            : "Terrain hole masking disabled.";
+                    }
+                }
+
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+                ImGui.SameLine();
+
+                // Surface overlays
                 bool alphaMask = renderer.ShowAlphaMask;
                 if (ImGui.Checkbox("Alpha", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
                 ImGui.SameLine();
@@ -228,6 +223,14 @@ public partial class ViewerApp
                         ImGui.SetTooltip(_worldScene.Pm4Status);
                     }
                 }
+
+                // Wireframe toggle
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+                ImGui.SameLine();
+                bool wireframe = _renderer?.IsWireframe ?? false;
+                if (ImGui.Checkbox("Wireframe", ref wireframe))
+                    _renderer?.ToggleWireframe();
             }
 
             // Right-align chunk and perf stats
@@ -1949,6 +1952,12 @@ public partial class ViewerApp
         if (_renderer is IModelRenderer || _renderer is WmoRenderer)
         {
             ImGui.Separator();
+            DrawModelAnimationControls();
+        }
+
+        if (_renderer is IModelRenderer || _renderer is WmoRenderer)
+        {
+            ImGui.Separator();
             ImGui.Checkbox("Auto-frame on load", ref _autoFrameModelOnLoad);
             DrawToolbarPopupButton("Model Actions", string.Empty, "##ModelActionsPopup", () =>
             {
@@ -2117,6 +2126,10 @@ public partial class ViewerApp
                 ImGui.PopStyleColor();
         }
 
+        ImGui.SameLine();
+        if (ImGui.Button("Export JSON"))
+            ExportAnimationStateJson(animator, currentSeq, currentSeqName, seqStart, seqEnd);
+
         // Timeline slider
         ImGui.Separator();
         ImGui.SetNextItemWidth(-1);
@@ -2155,6 +2168,61 @@ public partial class ViewerApp
 
             ImGui.TreePop();
         }
+    }
+
+    private void ExportAnimationStateJson(
+        IAnimationController animator,
+        int currentSeq,
+        string currentSeqName,
+        float seqStart,
+        float seqEnd)
+    {
+        string sourceName = Path.GetFileNameWithoutExtension(_loadedFilePath ?? _renderer?.GetType().Name ?? "animation");
+        if (string.IsNullOrWhiteSpace(sourceName))
+            sourceName = "animation";
+
+        string defaultFileName = $"{sourceName}_animation_state.json";
+        string? picked = ShowSaveFileDialogSTA(
+            "Export Animation State JSON",
+            "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+            !string.IsNullOrWhiteSpace(_loadedFilePath) ? Path.GetDirectoryName(_loadedFilePath) : Environment.CurrentDirectory,
+            defaultFileName);
+
+        if (string.IsNullOrWhiteSpace(picked))
+            return;
+
+        var payload = new
+        {
+            exportedAtUtc = DateTimeOffset.UtcNow.ToString("O"),
+            source = new
+            {
+                loadedFilePath = _loadedFilePath,
+                rendererType = _renderer?.GetType().Name,
+            },
+            playback = new
+            {
+                currentSequence = currentSeq,
+                currentSequenceName = currentSeqName,
+                currentFrame = animator.CurrentFrame,
+                sequenceStart = seqStart,
+                sequenceEnd = seqEnd,
+                isPlaying = animator.IsPlaying,
+                playbackSpeed = animator.PlaybackSpeed,
+                loop = animator.Loop,
+            },
+            sequences = animator.Sequences.Select(seq => new
+            {
+                index = seq.Index,
+                name = seq.Name,
+                start = seq.Time.Start,
+                end = seq.Time.End,
+                duration = seq.Time.End - seq.Time.Start,
+            }).ToArray(),
+            debug = animator.GetTrackDebugStatsForCurrentSequence(),
+        };
+
+        File.WriteAllText(picked, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        _statusMessage = $"Exported animation state JSON: {picked}";
     }
 
     private void DrawStandaloneCharacterVariationControls(MdxRenderer renderer)
@@ -3722,6 +3790,12 @@ public partial class ViewerApp
             return;
         }
         DrawModelInfoCoreContent();
+
+        if (_renderer is IModelRenderer || _renderer is WmoRenderer)
+        {
+            ImGui.Separator();
+            DrawModelAnimationControls();
+        }
     }
 
     private void DrawModelAnimationsSubTab()
@@ -3780,6 +3854,13 @@ public partial class ViewerApp
         if (string.IsNullOrWhiteSpace(currentSeqName))
             currentSeqName = $"Sequence {currentSeq}";
 
+        float seqStart = currentSeq >= 0 && currentSeq < animator.Sequences.Count
+            ? animator.Sequences[currentSeq].Time.Start
+            : 0f;
+        float seqEnd = currentSeq >= 0 && currentSeq < animator.Sequences.Count
+            ? animator.Sequences[currentSeq].Time.End
+            : 0f;
+
         if (ImGui.BeginCombo("##world_mdx_anim_seq", currentSeqName))
         {
             for (int s = 0; s < animator.Sequences.Count; s++)
@@ -3828,6 +3909,10 @@ public partial class ViewerApp
             if (selected)
                 ImGui.PopStyleColor();
         }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Export JSON##World"))
+            ExportAnimationStateJson(animator, currentSeq, currentSeqName, seqStart, seqEnd);
     }
 
     private void DrawModelActionsSubTab()
@@ -3929,9 +4014,6 @@ public partial class ViewerApp
 
         switch ((TerrainBottomTab)_activeBottomTabIndex)
         {
-            case TerrainBottomTab.Layers:
-                DrawTerrainLayersSubTab(renderer);
-                break;
             case TerrainBottomTab.Clipboard:
                 DrawTerrainClipboardSubTab(renderer);
                 break;
@@ -3951,71 +4033,6 @@ public partial class ViewerApp
     }
 
     private bool HasTerrainOrWorldLoaded() => _terrainManager != null || _vlmTerrainManager != null || _worldScene != null;
-
-    private void DrawTerrainLayersSubTab(TerrainRenderer? renderer)
-    {
-        if (renderer == null)
-        {
-            ImGui.TextDisabled("Terrain renderer not available.");
-            return;
-        }
-
-        ImGui.Text("Texture Layers");
-        ImGui.Separator();
-        bool l0 = renderer.ShowLayer0;
-        if (ImGui.Checkbox("Base (L0)", ref l0)) renderer.ShowLayer0 = l0;
-        bool l1 = renderer.ShowLayer1;
-        if (ImGui.Checkbox("Alpha L1", ref l1)) renderer.ShowLayer1 = l1;
-        bool l2 = renderer.ShowLayer2;
-        if (ImGui.Checkbox("Alpha L2", ref l2)) renderer.ShowLayer2 = l2;
-        bool l3 = renderer.ShowLayer3;
-        if (ImGui.Checkbox("Alpha L3", ref l3)) renderer.ShowLayer3 = l3;
-
-        ImGui.Separator();
-        ImGui.Text("Surface Overlays");
-        bool alphaMask = renderer.ShowAlphaMask;
-        if (ImGui.Checkbox("Alpha mask", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
-        if (alphaMask)
-        {
-            int channel = renderer.AlphaMaskChannel;
-            if (ImGui.SliderInt("Alpha channel", ref channel, 0, 3)) renderer.AlphaMaskChannel = channel;
-        }
-        bool shadowMap = renderer.ShowShadowMap;
-        if (ImGui.Checkbox("Shadow map", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
-        bool useMccv = renderer.UseMccv;
-        if (ImGui.Checkbox("MCCV vertex colors", ref useMccv)) renderer.UseMccv = useMccv;
-        bool contours = renderer.ShowContours;
-        if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
-        if (contours)
-        {
-            float interval = renderer.ContourInterval;
-            if (ImGui.SliderFloat("Contour interval (units)", ref interval, 0.5f, 10f)) renderer.ContourInterval = interval;
-        }
-
-        ImGui.Separator();
-        ImGui.Text("Grid Lines");
-        bool chunkGrid = renderer.ShowChunkGrid;
-        if (ImGui.Checkbox("Chunks (16x16 half-cell)", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
-        bool tileGrid = renderer.ShowTileGrid;
-        if (ImGui.Checkbox("Tiles (chunk boundary)", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
-        bool cellGrid = renderer.ShowCellGrid;
-        if (ImGui.Checkbox("Cells (16x16 per chunk)", ref cellGrid)) renderer.ShowCellGrid = cellGrid;
-
-        ImGui.Separator();
-        ImGui.Text("Hole Masking");
-        bool terrainHolesEnabled = !(_terrainManager?.IgnoreTerrainHolesGlobally
-            ?? _vlmTerrainManager?.IgnoreTerrainHolesGlobally
-            ?? false);
-        if (ImGui.Checkbox("Enable hole masking", ref terrainHolesEnabled))
-        {
-            if (SetIgnoreTerrainHolesGlobally(!terrainHolesEnabled))
-            {
-                _statusMessage = terrainHolesEnabled
-                    ? "Terrain hole masking enabled."
-                    : "Terrain hole masking disabled.";
-            }
-        }
-    }
 
     private void DrawTerrainClipboardSubTab(TerrainRenderer? renderer)
     {
@@ -4132,9 +4149,6 @@ public partial class ViewerApp
             case WorldBottomTab.Tiles:
                 DrawWorldTilesSubTab();
                 break;
-            case WorldBottomTab.Overlays:
-                DrawWorldOverlaysSubTab();
-                break;
             case WorldBottomTab.SelectionTools:
                 DrawWorldSelectionToolsSubTab();
                 break;
@@ -4186,13 +4200,11 @@ public partial class ViewerApp
             return;
         }
 
-        ImGui.TextDisabled("Selection map + chunk targeting + live restore tuning + heightmap saves.");
+        ImGui.TextDisabled("Selection map + chunk targeting + live restore tuning.");
         ImGui.Separator();
         DrawTerrainWorkbenchSelectionContent(renderer);
         ImGui.Separator();
         DrawTerrainControlsAdjustmentContent();
-        ImGui.Separator();
-        DrawTerrainExportSubTab(renderer);
     }
 
     private void DrawTerrainExportSubTab(TerrainRenderer renderer)
@@ -4232,86 +4244,6 @@ public partial class ViewerApp
         }
     }
 
-    private void DrawWorldOverlaysSubTab()
-    {
-        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-        if (renderer == null)
-        {
-            ImGui.TextDisabled("Load a terrain-backed world to use overlays.");
-            return;
-        }
-
-        ImGui.Text("Grid Overlays");
-        ImGui.Separator();
-
-        bool l0 = renderer.ShowLayer0;
-        if (ImGui.Checkbox("Base layer", ref l0)) renderer.ShowLayer0 = l0;
-        ImGui.SameLine();
-        bool l1 = renderer.ShowLayer1;
-        if (ImGui.Checkbox("L1", ref l1)) renderer.ShowLayer1 = l1;
-        ImGui.SameLine();
-        bool l2 = renderer.ShowLayer2;
-        if (ImGui.Checkbox("L2", ref l2)) renderer.ShowLayer2 = l2;
-        ImGui.SameLine();
-        bool l3 = renderer.ShowLayer3;
-        if (ImGui.Checkbox("L3", ref l3)) renderer.ShowLayer3 = l3;
-
-        ImGui.SameLine();
-        bool terrainHolesEnabled = !(_terrainManager?.IgnoreTerrainHolesGlobally
-            ?? _vlmTerrainManager?.IgnoreTerrainHolesGlobally
-            ?? false);
-        if (ImGui.Checkbox("Holes", ref terrainHolesEnabled))
-        {
-            if (SetIgnoreTerrainHolesGlobally(!terrainHolesEnabled))
-            {
-                _statusMessage = terrainHolesEnabled
-                    ? "Terrain hole masking enabled."
-                    : "Terrain hole masking disabled.";
-            }
-        }
-
-        ImGui.Separator();
-        ImGui.Text("Grid Lines");
-
-        bool chunkGrid = renderer.ShowChunkGrid;
-        if (ImGui.Checkbox("Chunks (16x16 per chunk, half-cell)", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
-        ImGui.SameLine();
-        bool tileGrid = renderer.ShowTileGrid;
-        if (ImGui.Checkbox("Tiles (16x16 per tile, chunk boundary)", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
-        ImGui.SameLine();
-        bool cellGrid = renderer.ShowCellGrid;
-        if (ImGui.Checkbox("Cells (16x16 per chunk)", ref cellGrid)) renderer.ShowCellGrid = cellGrid;
-
-        ImGui.Separator();
-        ImGui.Text("Surface Overlays");
-
-        bool alphaMask = renderer.ShowAlphaMask;
-        if (ImGui.Checkbox("Alpha mask", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
-        if (alphaMask)
-        {
-            int channel = renderer.AlphaMaskChannel;
-            if (ImGui.SliderInt("Alpha channel", ref channel, 0, 3)) renderer.AlphaMaskChannel = channel;
-        }
-
-        ImGui.SameLine();
-        bool shadowMap = renderer.ShowShadowMap;
-        if (ImGui.Checkbox("Shadow map", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
-
-        ImGui.SameLine();
-        bool useMccv = renderer.UseMccv;
-        if (ImGui.Checkbox("MCCV vertex colors", ref useMccv)) renderer.UseMccv = useMccv;
-
-        ImGui.SameLine();
-        bool contours = renderer.ShowContours;
-        if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
-
-        if (contours)
-        {
-            float interval = renderer.ContourInterval;
-            if (ImGui.SliderFloat("Contour interval (units)", ref interval, 0.5f, 10f)) renderer.ContourInterval = interval;
-        }
-    }
-
     private void DrawWorldSelectionToolsSubTab()
     {
         ImGui.TextDisabled("Click selection, frame, asset path actions for world objects.");
@@ -4321,9 +4253,8 @@ public partial class ViewerApp
 
     private void DrawQuickControlsContent()
     {
-        // 069 Phase 14: Quick controls (camera, lighting, layers, overlays,
-        // reset buttons) live in the Scene > Quick sub-tab of the workbench.
-        // This replaces the separate Quick Controls popout.
+        // Quick camera + lighting + scene settings.
+        // Layer/overlay/fog toggles moved to bottom bar (single source of truth).
 
         // 1. Camera controls
         ImGui.Text("Camera");
@@ -4377,64 +4308,10 @@ public partial class ViewerApp
             };
             ImGui.SameLine();
             ImGui.Text(timeLabel);
-
-            float fogStart = Math.Clamp(lighting.FogStart, 0f, MaxTerrainFogDistance - 1f);
-            float fogEnd = Math.Clamp(lighting.FogEnd, 100f, MaxTerrainFogDistance);
-            bool fogStartChanged = ImGui.SliderFloat("Fog Start", ref fogStart, 0f, MaxTerrainFogDistance - 1f);
-            bool fogEndChanged = ImGui.SliderFloat("Fog End", ref fogEnd, 100f, MaxTerrainFogDistance);
-            if (fogStartChanged || fogEndChanged)
-            {
-                if (fogEnd <= fogStart)
-                {
-                    if (fogEndChanged && !fogStartChanged)
-                        fogStart = Math.Max(0f, fogEnd - 1f);
-                    else
-                        fogEnd = Math.Min(MaxTerrainFogDistance, fogStart + 1f);
-                }
-                lighting.FogStart = fogStart;
-                lighting.FogEnd = fogEnd;
-                _defaultFogStart = fogStart;
-                _defaultFogEnd = fogEnd;
-                SaveViewerSettings();
-            }
         }
 
-        // 3. Layer toggles (if terrain loaded)
-        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-        if (renderer != null)
-        {
-            ImGui.Spacing();
-            ImGui.Text("Layers");
-            ImGui.Separator();
-            bool l0 = renderer.ShowLayer0;
-            if (ImGui.Checkbox("Base", ref l0)) renderer.ShowLayer0 = l0;
-            ImGui.SameLine();
-            bool l1 = renderer.ShowLayer1;
-            if (ImGui.Checkbox("L1", ref l1)) renderer.ShowLayer1 = l1;
-            ImGui.SameLine();
-            bool l2 = renderer.ShowLayer2;
-            if (ImGui.Checkbox("L2", ref l2)) renderer.ShowLayer2 = l2;
-            ImGui.SameLine();
-            bool l3 = renderer.ShowLayer3;
-            if (ImGui.Checkbox("L3", ref l3)) renderer.ShowLayer3 = l3;
-
-            ImGui.Spacing();
-            ImGui.Text("Overlays");
-            ImGui.Separator();
-            bool alphaMask = renderer.ShowAlphaMask;
-            if (ImGui.Checkbox("Alpha", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
-            ImGui.SameLine();
-            bool shadowMap = renderer.ShowShadowMap;
-            if (ImGui.Checkbox("Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
-            ImGui.SameLine();
-            bool useMccv = renderer.UseMccv;
-            if (ImGui.Checkbox("MCCV", ref useMccv)) renderer.UseMccv = useMccv;
-            ImGui.SameLine();
-            bool contours = renderer.ShowContours;
-            if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
-        }
-
-        // 4. Reset view
+        // Reset view
+        ImGui.Spacing();
         ImGui.Spacing();
         if (ImGui.Button("Reset Camera"))
             ResetCamera();

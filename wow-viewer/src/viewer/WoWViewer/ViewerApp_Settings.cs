@@ -1,8 +1,6 @@
 using System;
 using ImGuiNET;
-using WoWViewer.Rendering;
 using WoWViewer.Terrain;
-using Silk.NET.OpenGL;
 
 namespace WoWViewer;
 

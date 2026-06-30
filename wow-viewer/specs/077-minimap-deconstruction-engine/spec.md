@@ -143,6 +143,10 @@ As a model developer, I want normals handled as a separate follow-on lane after 
 - **FR-024**: A normals lane MUST NOT begin until the height-only lane is validated on real data.
 - **FR-025**: The object library MUST be reusable by both training-time teacher generation and minimap-only inference.
 - **FR-026**: The spec MUST define explicit failure states for uncaptured, low-confidence, or minimap-invisible assets instead of silently treating them as good exemplars.
+- **FR-027**: If the direct height-only model plateaus with muddy previews, the next terrain lane MUST be decomposed into independently trained residual models rather than adding extra heads to the direct model.
+- **FR-028**: The coarse terrain model MUST predict one signal only: `height_coarse_65` from the documented processed-prior/albedo/density input contract.
+- **FR-029**: The residual terrain model MUST predict one signal only: `height_delta_257`, trained from the same documented inputs plus a frozen coarse height prediction.
+- **FR-030**: Final height reconstruction for the residual chain MUST be deterministic composition: `height_refined_257 = upsample(height_coarse_65) + height_delta_257`; normals remain analytic from the composed height.
 
 ### Key Entities
 
@@ -151,6 +155,8 @@ As a model developer, I want normals handled as a separate follow-on lane after 
 - **TeacherObjectMask**: Tile-level mask generated from ADT-backed placement data and filtered precise object signals, used only for supervised deconstruction and review.
 - **ProcessedMinimapPrior**: Tile-level terrain-focused input derived from raw minimap plus object suppression, confidence, and optional fill channels.
 - **HeightOnlyTrainingSample**: Training sample containing processed prior inputs, authoritative `height_257`, and review metadata.
+- **HeightCoarsePrediction**: H0 model output containing a single coarse normalized height field, default shape `(1, 65, 65)`, derived from the same input signals as the direct height model.
+- **HeightResidualPrediction**: H1 model output containing one normalized full-resolution delta field `(1, 257, 257)` relative to frozen/upscaled H0 height.
 - **InferenceObjectHypothesis**: Minimap-only prediction record containing object mask, asset candidates, confidence, XY, and yaw.
 - **RecoveredObjectPlacement**: Downstream placement reconstructed from `InferenceObjectHypothesis` plus terrain-derived Z and library metadata.
 

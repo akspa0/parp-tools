@@ -182,6 +182,25 @@ wow-viewer/data-harvester/
 - Smoke training completes and writes previews.
 - The lane is clearly height-only and does not carry extra terrain heads.
 
+## Phase 3b - Coarse-To-Fine Residual Height Chain
+
+**Goal**: Replace the muddy direct-height plateau with two independently trained height models that share the same source signals but split broad shape from fine residual detail.
+
+1. Add an H0 model that predicts only `height_coarse_65` from the processed-prior input contract, including optional albedo and density channels.
+2. Add an H0 training script that downsamples authoritative `height_257` / `weight_257` to the coarse target and writes its own checkpoint/metrics.
+3. Add an H1 model that predicts only `height_delta_257` from the same input contract plus frozen/upscaled H0 height.
+4. Add an H1 training script that loads a frozen H0 checkpoint, computes `height_delta_257 = height_257 - upsample(H0)`, and optimizes the composed height without updating H0.
+5. Use high-frequency residual-friendly losses for H1: residual/reconstruction Charbonnier or L1, optional gradient loss, and optional normal guidance derived from composed height. Do not add a normal head.
+6. Emit previews that show prior, optional albedo/density, frozen coarse base, residual delta, composed height, truth, and error.
+7. Add pytest coverage for model shapes, deterministic residual composition, and script-level smoke behavior where feasible.
+8. Update RunPod packaging so the H0/H1 scripts and helper shell commands are included in cloud bundles.
+
+**Validation**:
+
+- H0 and H1 smoke runs complete independently and write separate checkpoints.
+- H1 uses a frozen H0 checkpoint and predicts one residual signal only.
+- The residual chain can be compared against the direct `cuda_albedo_group_nearest` plateau without changing archived datasets.
+
 ## Phase 4 - Minimap-Only Object Explanation
 
 **Goal**: Add the smallest ADT-free runtime object explanation path needed for development-map deconstruction.

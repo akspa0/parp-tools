@@ -81,6 +81,7 @@ from harvester.v18_models import (  # noqa: E402
     V18HeightModel,
     V18_HEIGHT_DEFAULT_IN_CHANNELS,
     V18_HEIGHT_ALBEDO_IN_CHANNELS,
+    V18_HEIGHT_DENSITY_IN_CHANNELS,
 )
 
 _PANEL_SIZE = 256
@@ -226,6 +227,7 @@ def _save_deconstruction_preview(
     out_path: Path,
     max_samples: int,
     expect_albedo: bool = False,
+    expect_density: bool = False,
 ) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     rows: list[list[tuple[str, torch.Tensor]]] = []
@@ -253,6 +255,11 @@ def _save_deconstruction_preview(
             panels.append(("albedo input", batch["albedo_rgb"][idx].cpu()))
         elif expect_albedo:
             panels.append(("albedo MISSING", torch.zeros_like(prior)))
+        if expect_density:
+            density = _compute_density_channels(prior.unsqueeze(0).cpu()).squeeze(0)
+            panels.append(("density: high", _gray3(density[0:1])))
+            panels.append(("density: med", _gray3(density[1:2])))
+            panels.append(("density: low", _gray3(density[2:3])))
         panels.extend([
             ("height truth", _gray3(_norm_for_display(truth.squeeze(0), lo=lo, hi=hi))),
             ("height pred", _gray3(_norm_for_display(pred_i.squeeze(0), lo=lo, hi=hi))),
@@ -277,6 +284,50 @@ def _gradient_magnitude_257(x: torch.Tensor) -> torch.Tensor:
     dx = F.pad(dx, (0, 1, 0, 0), mode="replicate")
     dy = F.pad(dy, (0, 0, 0, 1), mode="replicate")
     return 0.5 * (dx + dy)
+
+
+_SOBEL_X = None
+_SOBEL_Y = None
+
+
+def _get_sobel_kernels(device: torch.device, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor]:
+    global _SOBEL_X, _SOBEL_Y
+    if _SOBEL_X is None or _SOBEL_X.device != device or _SOBEL_X.dtype != dtype:
+        _SOBEL_X = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], device=device, dtype=dtype).view(1, 1, 3, 3)
+        _SOBEL_Y = _SOBEL_X.transpose(2, 3).contiguous()
+    return _SOBEL_X, _SOBEL_Y
+
+
+def _compute_density_channels(rgb: torch.Tensor) -> torch.Tensor:
+    """Derive high/medium/low density channels from minimap RGB.
+
+    Input:  (B, 3, H, W) suppressed minimap RGB in [0, 1]
+    Output: (B, 3, H, W) — channels [high_density, medium_density, low_density]
+
+    High density   = pixels where Sobel gradient magnitude > 75th percentile
+    Medium density = pixels between 25th and 75th percentile
+    Low density    = pixels below 25th percentile
+
+    Thresholds are per-sample adaptive (no data leakage — derived from input, not target).
+    """
+    rgb = rgb.float()
+    # Luminance from RGB
+    gray = 0.299 * rgb[:, 0:1] + 0.587 * rgb[:, 1:2] + 0.114 * rgb[:, 2:3]
+    # Sobel gradient magnitude
+    sx, sy = _get_sobel_kernels(rgb.device, rgb.dtype)
+    gx = F.conv2d(gray, sx, padding=1)
+    gy = F.conv2d(gray, sy, padding=1)
+    grad_mag = torch.sqrt(gx * gx + gy * gy + 1e-8)
+    # Per-sample adaptive thresholds
+    flat = grad_mag.reshape(rgb.shape[0], -1)
+    p25 = flat.quantile(0.25, dim=1)
+    p75 = flat.quantile(0.75, dim=1)
+    hi = p75[:, None, None, None]
+    lo = p25[:, None, None, None]
+    high = (grad_mag > hi).to(rgb.dtype)
+    low = (grad_mag <= lo).to(rgb.dtype)
+    medium = ((grad_mag > lo) & (grad_mag <= hi)).to(rgb.dtype)
+    return torch.cat([high, medium, low], dim=1)
 
 
 def _multi_scale_l1(
@@ -446,7 +497,12 @@ def _autotune_batch_size(
         _cleanup()
         try:
             probe_use_albedo = bool(getattr(args, "albedo", False))
-            probe_in_ch = V18_HEIGHT_ALBEDO_IN_CHANNELS if probe_use_albedo else V18_HEIGHT_DEFAULT_IN_CHANNELS
+            probe_use_density = bool(getattr(args, "density", False))
+            probe_in_ch = V18_HEIGHT_DEFAULT_IN_CHANNELS
+            if probe_use_albedo:
+                probe_in_ch += V18_HEIGHT_ALBEDO_IN_CHANNELS - V18_HEIGHT_DEFAULT_IN_CHANNELS
+            if probe_use_density:
+                probe_in_ch += V18_HEIGHT_DENSITY_IN_CHANNELS
             probe_model = V18HeightModel(
                 in_channels=probe_in_ch,
                 norm=str(args.model_norm),
@@ -475,6 +531,9 @@ def _autotune_batch_size(
                 if probe_use_albedo and "albedo_rgb" in probe_batch:
                     albedo = probe_batch["albedo_rgb"].to(device, non_blocking=True)
                     prior = torch.cat([prior, albedo], dim=1)
+                if probe_use_density:
+                    density = _compute_density_channels(prior[:, :3, :, :])
+                    prior = torch.cat([prior, density], dim=1)
                 target = probe_batch["height_257"].to(device, non_blocking=True)
                 weight = probe_batch["weight_257"].to(device, non_blocking=True)
                 target_normals = probe_batch["normal_xyz"].to(device, non_blocking=True) if "normal_xyz" in probe_batch else None
@@ -627,6 +686,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "preferably loaded from --albedo-path sidecars built from V18 alpha_256 "
                              "and mcly_texture_ids. Orthogonal to the suppressed minimap RGB: encodes "
                              "terrain texture identity, not appearance.")
+    parser.add_argument("--density", action="store_true", default=False,
+                        help="Append 3 on-the-fly density channels (high/medium/low edge intensity bands) "
+                             "derived from the suppressed minimap RGB via Sobel gradient magnitude. "
+                             "Widens the model input by 3 channels (e.g. 3→6, 6→9). "
+                             "Thresholds are per-sample adaptive (25th/75th percentile). "
+                             "Gives the model direct access to where terrain edges are.")
     parser.add_argument("--model-norm", type=str, default="batch",
                         choices=["batch", "group"],
                         help="Normalization inside the height model. batch preserves legacy checkpoints; "
@@ -1162,6 +1227,13 @@ def main_with_args(argv: list[str] | None = None) -> int:
             "(cat suppressed_rgb, albedo_rgb from MCAL alpha).",
             flush=True,
         )
+    if bool(getattr(args, "density", False)):
+        base_ch = 3 + (3 if bool(getattr(args, "albedo", False)) else 0)
+        print(
+            f"Density: enabled — model input widened to {base_ch + V18_HEIGHT_DENSITY_IN_CHANNELS} channels "
+            f"(+3 high/medium/low density from Sobel gradient of minimap RGB).",
+            flush=True,
+        )
     print(
         f"Height model: norm={args.model_norm} decoder_upsample={args.decoder_upsample}",
         flush=True,
@@ -1223,7 +1295,12 @@ def main_with_args(argv: list[str] | None = None) -> int:
     )
 
     use_albedo = bool(getattr(args, "albedo", False))
-    model_in_channels = V18_HEIGHT_ALBEDO_IN_CHANNELS if use_albedo else V18_HEIGHT_DEFAULT_IN_CHANNELS
+    use_density = bool(getattr(args, "density", False))
+    model_in_channels = V18_HEIGHT_DEFAULT_IN_CHANNELS
+    if use_albedo:
+        model_in_channels += V18_HEIGHT_ALBEDO_IN_CHANNELS - V18_HEIGHT_DEFAULT_IN_CHANNELS
+    if use_density:
+        model_in_channels += V18_HEIGHT_DENSITY_IN_CHANNELS
     model = V18HeightModel(
         in_channels=model_in_channels,
         norm=str(args.model_norm),
@@ -1298,13 +1375,17 @@ def main_with_args(argv: list[str] | None = None) -> int:
         """Build the model input tensor from a batch.
 
         When ``--albedo`` is enabled, concatenates the suppressed RGB
-        prior (channels 0:3) with the albedo guidance channel (3 channels)
-        for a 6-channel input. Otherwise uses the legacy 3-channel prior.
+        prior (channels 0:3) with the albedo guidance channel (3 channels).
+        When ``--density`` is enabled, appends 3 on-the-fly density channels
+        derived from the suppressed minimap RGB via Sobel gradient magnitude.
         """
         prior = batch["input_prior"].to(device, non_blocking=True)[:, :3, :, :]
         if use_albedo and "albedo_rgb" in batch:
             albedo = batch["albedo_rgb"].to(device, non_blocking=True)
-            return torch.cat([prior, albedo], dim=1)
+            prior = torch.cat([prior, albedo], dim=1)
+        if use_density:
+            density = _compute_density_channels(prior[:, :3, :, :])
+            prior = torch.cat([prior, density], dim=1)
         return prior
 
     def _train_one_batch(batch: dict, model: torch.nn.Module) -> tuple[torch.Tensor, dict[str, float]]:
@@ -1474,6 +1555,9 @@ def main_with_args(argv: list[str] | None = None) -> int:
                     epoch_preview_input = epoch_preview_batch["input_prior"].to(device, non_blocking=True)[:, :3, :, :]
                     if use_albedo and "albedo_rgb" in epoch_preview_batch:
                         epoch_preview_input = torch.cat([epoch_preview_input, epoch_preview_batch["albedo_rgb"].to(device, non_blocking=True)], dim=1)
+                    if use_density:
+                        density = _compute_density_channels(epoch_preview_input[:, :3, :, :])
+                        epoch_preview_input = torch.cat([epoch_preview_input, density], dim=1)
                     preview_pred = model(epoch_preview_input)
             preview_path_for_epoch = validation_preview_dir / f"epoch_{epoch_number:04d}.png"
             _save_deconstruction_preview(
@@ -1482,6 +1566,7 @@ def main_with_args(argv: list[str] | None = None) -> int:
                 out_path=preview_path_for_epoch,
                 max_samples=max(1, int(args.preview_samples)),
                 expect_albedo=use_albedo,
+                expect_density=use_density,
             )
             validation_preview_paths.append(str(preview_path_for_epoch))
 
@@ -1604,6 +1689,9 @@ def main_with_args(argv: list[str] | None = None) -> int:
         preview_input = preview_batch["input_prior"].to(device, non_blocking=True)[:, :3, :, :]
         if use_albedo and "albedo_rgb" in preview_batch:
             preview_input = torch.cat([preview_input, preview_batch["albedo_rgb"].to(device, non_blocking=True)], dim=1)
+        if use_density:
+            density = _compute_density_channels(preview_input[:, :3, :, :])
+            preview_input = torch.cat([preview_input, density], dim=1)
         with torch.no_grad():
             with torch.amp.autocast(device.type, enabled=use_amp):
                 pred = model(preview_input)
@@ -1613,6 +1701,7 @@ def main_with_args(argv: list[str] | None = None) -> int:
             out_path=preview_path,
             max_samples=1,
             expect_albedo=use_albedo,
+            expect_density=use_density,
         )
 
     metrics_payload = {
@@ -1652,6 +1741,7 @@ def main_with_args(argv: list[str] | None = None) -> int:
         "augment_transforms": list(_AUGMENT_POLICY_TRANSFORMS[str(args.augment_policy)]),
         "augment_seed": int(args.augment_seed),
         "albedo": bool(getattr(args, "albedo", False)),
+        "density": bool(getattr(args, "density", False)),
         "model_in_channels": int(model_in_channels),
         "model_norm": str(args.model_norm),
         "decoder_upsample": str(args.decoder_upsample),

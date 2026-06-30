@@ -35,6 +35,7 @@ REQUIRED_ARRAYS = {
     ),
     "v18": (
         "height_257",
+        "object_precise_mask",
         "object_filtered_mask",
         "normal_xyz",
         "normal_mask",
@@ -52,12 +53,15 @@ CODE_DIRS = ("src",)
 CODE_FILES = ("pyproject.toml", "uv.lock", "README.md")
 SCRIPT_FILES = (
     "train_height_only_prior.py",
+    "train_height_coarse_prior.py",
+    "train_height_residual_prior.py",
     "build_albedo_dataset.py",
     "package_spec077_runpod.py",
     "setup_spec077_runpod.py",
 )
 TEST_FILES = (
     "test_height_only_prior.py",
+    "test_height_residual_chain.py",
     "test_terrain_augment.py",
     "test_height_to_normal.py",
     "test_package_spec077_runpod.py",
@@ -345,6 +349,100 @@ python scripts/train_height_only_prior.py \
 """
     (runpod_dir / "train_spec077.sh").write_text(train_script, encoding="utf-8", newline="\n")
 
+    train_h0_script = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")/.." && pwd)"
+cd "$ROOT_DIR/data-harvester"
+export PYTHONPATH="$PWD/src:${{PYTHONPATH:-}}"
+
+RUN_NAME="${{RUN_NAME:-h0_coarse_albedo_density}}"
+EPOCHS="${{EPOCHS:-80}}"
+BATCH_SIZE="${{BATCH_SIZE:-16}}"
+OUTPUT_DIR="${{OUTPUT_DIR:-../models/spec077/height-residual-chain/h0_coarse}}"
+NUM_WORKERS="${{NUM_WORKERS:-0}}"
+
+PRIOR_PATHS=(
+{_bash_array(prior_paths)}
+)
+V18_PATHS=(
+{_bash_array(v18_paths)}
+)
+ALBEDO_PATHS=(
+{_bash_array(albedo_paths)}
+)
+
+python scripts/train_height_coarse_prior.py \
+  --prior "${{PRIOR_PATHS[@]}}" \
+  --v18 "${{V18_PATHS[@]}}" \
+  --albedo-path "${{ALBEDO_PATHS[@]}}" \
+  --curation-manifest "../data/visibility-audit/two_build" \
+  --output-dir "$OUTPUT_DIR" \
+  --run-name "$RUN_NAME" \
+  --epochs "$EPOCHS" \
+  --val-steps 0 \
+  --batch-size "$BATCH_SIZE" \
+  --device cuda \
+  --albedo \
+  --density \
+  --model-norm group \
+  --decoder-upsample nearest \
+  --num-workers "$NUM_WORKERS" \
+  --no-persistent-workers \
+  "$@"
+"""
+    (runpod_dir / "train_spec077_h0.sh").write_text(train_h0_script, encoding="utf-8", newline="\n")
+
+    train_h1_script = """#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR/data-harvester"
+export PYTHONPATH="$PWD/src:${PYTHONPATH:-}"
+
+RUN_NAME="${RUN_NAME:-h1_residual_albedo_density}"
+EPOCHS="${EPOCHS:-160}"
+BATCH_SIZE="${BATCH_SIZE:-12}"
+OUTPUT_DIR="${OUTPUT_DIR:-../models/spec077/height-residual-chain/h1_residual}"
+COARSE_CHECKPOINT="${COARSE_CHECKPOINT:-../models/spec077/height-residual-chain/h0_coarse/h0_coarse_albedo_density_h0_best.pt}"
+NUM_WORKERS="${NUM_WORKERS:-0}"
+
+PRIOR_PATHS=(
+""" + _bash_array(prior_paths) + """
+)
+V18_PATHS=(
+""" + _bash_array(v18_paths) + """
+)
+ALBEDO_PATHS=(
+""" + _bash_array(albedo_paths) + """
+)
+
+python scripts/train_height_residual_prior.py \
+  --coarse-checkpoint "$COARSE_CHECKPOINT" \
+  --prior "${PRIOR_PATHS[@]}" \
+  --v18 "${V18_PATHS[@]}" \
+  --albedo-path "${ALBEDO_PATHS[@]}" \
+  --curation-manifest "../data/visibility-audit/two_build" \
+  --output-dir "$OUTPUT_DIR" \
+  --run-name "$RUN_NAME" \
+  --epochs "$EPOCHS" \
+  --val-steps 0 \
+  --batch-size "$BATCH_SIZE" \
+  --device cuda \
+  --albedo \
+  --density \
+  --model-norm group \
+  --decoder-upsample nearest \
+  --gradient-weight 0.05 \
+  --normal-guidance-weight 0.10 \
+  --hard-error-weight 0.05 \
+  --delta-weight 0.25 \
+  --num-workers "$NUM_WORKERS" \
+  --no-persistent-workers \
+  "$@"
+"""
+    (runpod_dir / "train_spec077_h1.sh").write_text(train_h1_script, encoding="utf-8", newline="\n")
+
     smoke_script = """#!/usr/bin/env bash
 set -euo pipefail
 
@@ -464,7 +562,7 @@ It does not contain game clients, MPQs, CASC archives, or raw asset trees. Treat
 
 - `data-harvester/`: minimal Python source and scripts for training.
 - `data/teacher-prior/`: object-suppressed minimap-prior Zarr stores.
-- `data/v18/`: V18 tensor-pack Zarr stores used for `height_257`, normals, and loss masks.
+- `data/v18/`: V18 tensor-pack Zarr stores used for `height_257`, normals, and object loss gates. Loss gates prefer `object_precise_mask`.
 - `data/albedo/`: precomputed `albedo_rgb_256` texture-identity sidecars.
 - `data/visibility-audit/two_build/`: `kept_tiles.parquet` curation manifest.
 - `runpod/`: setup, verification, smoke, and full-training shell scripts.
@@ -499,6 +597,15 @@ bash runpod/train_spec077.sh
 ```
 
 The default full run is `{run_name}` and uses `--albedo --model-norm group --decoder-upsample nearest`.
+
+If the direct height model plateaus with muddy previews, run the coarse-to-fine residual chain instead:
+
+```bash
+bash runpod/train_spec077_h0.sh
+bash runpod/train_spec077_h1.sh
+```
+
+H0 writes `height_coarse_65` checkpoints under `../models/spec077/height-residual-chain/h0_coarse/`. H1 defaults to the H0 best checkpoint at `../models/spec077/height-residual-chain/h0_coarse/h0_coarse_albedo_density_h0_best.pt` and predicts only `height_delta_257`; override `COARSE_CHECKPOINT=...` if needed.
 
 ## Transfer Options
 
@@ -608,6 +715,7 @@ def _write_manifest(
         "source_wow_root": str(wow_root),
         "contains_game_client_files": False,
         "game_client_policy": "Only derived Zarr/parquet training artifacts are copied. Staged clients and archive roots are excluded.",
+        "loss_gate_policy": "Height trainers gate loss with object_precise_mask first, then object_filtered_mask, then object_mask.",
         "builds": builds,
         "code": code_report,
         "validated_inputs": validation_reports,
@@ -622,6 +730,8 @@ def _write_manifest(
             "entrypoint": "bash runpod/train_spec077.sh",
             "smoke_entrypoint": "bash runpod/smoke_spec077.sh",
             "verify_entrypoint": "bash runpod/verify_bundle.sh",
+            "coarse_entrypoint": "bash runpod/train_spec077_h0.sh",
+            "residual_entrypoint": "bash runpod/train_spec077_h1.sh",
             "model_flags": ["--albedo", "--model-norm", "group", "--decoder-upsample", "nearest"],
         },
     }

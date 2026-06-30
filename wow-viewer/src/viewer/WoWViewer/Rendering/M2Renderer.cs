@@ -175,6 +175,8 @@ public sealed class M2Renderer : IModelRenderer
         RenderWithTransform(Matrix4x4.Identity, view, proj);
     }
 
+    public bool IsWireframe => _wireframe;
+
     public void ToggleWireframe()
     {
         if (_legacyRenderer != null)

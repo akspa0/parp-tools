@@ -1733,7 +1733,10 @@ public static class AdtTensorPackBuilder
         OriginYX,
     }
 
-    private sealed record DoodadModelMetadata(Vector3 BoundsMin, Vector3 BoundsMax);
+    private sealed record DoodadModelMetadata(
+        Vector3 BoundsMin,
+        Vector3 BoundsMax,
+        IReadOnlyList<Vector3>? TriangleVertices = null);
 
     private const int MinimapSize = 256;
     private const string ObjectRoofSourceNone = "none";
@@ -1789,6 +1792,86 @@ public static class AdtTensorPackBuilder
 
         foreach (AdtModelPlacement placement in placements.ModelPlacements)
         {
+            bool paintedFootprint = false;
+
+            if (assetReader is not null && doodadModelCache is not null)
+            {
+                string modelPath = NormalizeAssetPath(placement.ModelPath);
+                if (TryLoadDoodadModelMetadata(modelPath, assetReader, doodadModelCache, out DoodadModelMetadata? metadata)
+                    && metadata is not null)
+                {
+                    Matrix4x4 transform = BuildM2PlacementTransform(placement.Position, placement.Rotation, placement.Scale);
+
+                    // ── Triangle rasterization (M2 geometry + skin) ────────────────
+                    if (metadata.TriangleVertices is { Count: >= 3 })
+                    {
+                        // Build transformed sample points for projection mode resolution
+                        Vector3[] samples =
+                        [
+                            Vector3.Transform(new Vector3(metadata.BoundsMin.X, metadata.BoundsMin.Y, metadata.BoundsMin.Z), transform),
+                            Vector3.Transform(new Vector3(metadata.BoundsMax.X, metadata.BoundsMax.Y, metadata.BoundsMax.Z), transform),
+                            Vector3.Transform(new Vector3(metadata.BoundsMin.X, metadata.BoundsMax.Y, metadata.BoundsMax.Z), transform),
+                            Vector3.Transform(new Vector3(metadata.BoundsMax.X, metadata.BoundsMin.Y, metadata.BoundsMin.Z), transform),
+                        ];
+
+                        if (TryResolveProjectionMode(samples, placement.Position, tileX, tileY, out TileProjectionMode projMode))
+                        {
+                            IReadOnlyList<Vector3> triVerts = metadata.TriangleVertices;
+                            bool anyPainted = false;
+
+                            for (int i = 0; i + 2 < triVerts.Count; i += 3)
+                            {
+                                Vector3 w0 = Vector3.Transform(triVerts[i], transform);
+                                Vector3 w1 = Vector3.Transform(triVerts[i + 1], transform);
+                                Vector3 w2 = Vector3.Transform(triVerts[i + 2], transform);
+
+                                if (!TryProjectToTilePixel(w0, tileX, tileY, projMode, out Vector2 p0) ||
+                                    !TryProjectToTilePixel(w1, tileX, tileY, projMode, out Vector2 p1) ||
+                                    !TryProjectToTilePixel(w2, tileX, tileY, projMode, out Vector2 p2))
+                                    continue;
+
+                                anyPainted |= PaintClippedTriangle(mask, p0, p1, p2, 1.0f);
+                                PaintClippedTriangle(preciseMask, p0, p1, p2, 1.0f);
+                                PaintClippedTriangle(instanceMask, p0, p1, p2, instanceId);
+                                PaintClippedTriangle(mddfMask, p0, p1, p2, 1.0f);
+
+                                if (ShouldIncludeDoodadInFilteredMask(placement, assetReader, doodadModelCache))
+                                    PaintClippedTriangle(filteredMask, p0, p1, p2, 1.0f);
+                            }
+
+                            if (anyPainted)
+                                paintedFootprint = true;
+                        }
+                    }
+
+                    // ── Fallback: bounds rectangle ──────────────────────────────────
+                    if (!paintedFootprint)
+                    {
+                        (Vector3 worldMin, Vector3 worldMax) = TransformBounds(metadata.BoundsMin, metadata.BoundsMax, transform);
+
+                        if (TryProjectBoundsToTilePixels(worldMin, worldMax, tileX, tileY, out int minPx, out int minPy, out int maxPx, out int maxPy))
+                        {
+                            PaintRect(mask, minPx, minPy, maxPx, maxPy, value: 1.0f);
+                            PaintSoftRect(preciseMask, minPx, minPy, maxPx, maxPy);
+                            PaintRect(instanceMask, minPx, minPy, maxPx, maxPy, value: instanceId);
+                            PaintRect(mddfMask, minPx, minPy, maxPx, maxPy, value: 1.0f);
+
+                            if (ShouldIncludeDoodadInFilteredMask(placement, assetReader, doodadModelCache))
+                                PaintRect(filteredMask, minPx, minPy, maxPx, maxPy, value: 1.0f);
+
+                            paintedFootprint = true;
+                        }
+                    }
+                }
+            }
+
+            if (paintedFootprint)
+            {
+                instanceId++;
+                continue;
+            }
+
+            // ── Fallback: centroid circle (old behavior) ────────────────────────
             if (!TryProjectPlacementToTilePixel(placement.Position, tileX, tileY, out int px, out int py))
                 continue;
 
@@ -2273,10 +2356,10 @@ public static class AdtTensorPackBuilder
                 return false;
             }
 
-            using MemoryStream stream = new(bytes, writable: false);
             string extension = Path.GetExtension(modelPath);
             if (extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase))
             {
+                using MemoryStream stream = new(bytes, writable: false);
                 MdxSummary summary = MdxSummaryReader.Read(stream, modelPath);
                 if (summary.BoundsMin is Vector3 boundsMin && summary.BoundsMax is Vector3 boundsMax)
                 {
@@ -2287,8 +2370,53 @@ public static class AdtTensorPackBuilder
             }
             else
             {
-                M2ModelDocument model = M2ModelReader.Read(stream, modelPath);
-                metadata = new DoodadModelMetadata(model.BoundsMin, model.BoundsMax);
+                M2GeometryDocument geometry;
+                using (MemoryStream stream = new(bytes, writable: false))
+                    geometry = M2GeometryReader.Read(stream, modelPath);
+
+                IReadOnlyList<Vector3>? triangleVertices = null;
+                try
+                {
+                    string skinPath = M2ModelIdentity.FromPath(modelPath).BuildSkinPath(0);
+                    byte[]? skinBytes = assetReader(skinPath);
+                    if (skinBytes is { Length: > 0 })
+                    {
+                        using MemoryStream skinStream = new(skinBytes, writable: false);
+                        M2SkinDocument skin = M2SkinReader.Read(skinStream, skinPath);
+
+                        int indexCount = skin.TriangleIndices.Count;
+                        if (indexCount >= 3)
+                        {
+                            var vertList = new List<Vector3>(indexCount);
+                            for (int i = 0; i + 2 < indexCount; i += 3)
+                            {
+                                ushort vi0 = skin.VertexLookup[skin.TriangleIndices[i]];
+                                ushort vi1 = skin.VertexLookup[skin.TriangleIndices[i + 1]];
+                                ushort vi2 = skin.VertexLookup[skin.TriangleIndices[i + 2]];
+
+                                if (vi0 < geometry.Vertices.Count &&
+                                    vi1 < geometry.Vertices.Count &&
+                                    vi2 < geometry.Vertices.Count)
+                                {
+                                    vertList.Add(geometry.Vertices[vi0].Position);
+                                    vertList.Add(geometry.Vertices[vi1].Position);
+                                    vertList.Add(geometry.Vertices[vi2].Position);
+                                }
+                            }
+
+                            if (vertList.Count >= 3)
+                                triangleVertices = vertList;
+                        }
+                    }
+                }
+                catch
+                {
+                }
+
+                metadata = new DoodadModelMetadata(
+                    geometry.Model.BoundsMin,
+                    geometry.Model.BoundsMax,
+                    triangleVertices);
                 doodadModelCache[modelPath] = metadata;
                 return true;
             }
@@ -2640,6 +2768,85 @@ public static class AdtTensorPackBuilder
         {
             minPx = 0; minPy = 0; maxPx = 0; maxPy = 0;
         }
+    }
+
+    private static bool TryProjectBoundsToTilePixels(Vector3 min, Vector3 max, int tileX, int tileY,
+        out int minPx, out int minPy, out int maxPx, out int maxPy)
+    {
+        minPx = int.MaxValue;
+        minPy = int.MaxValue;
+        maxPx = int.MinValue;
+        maxPy = int.MinValue;
+
+        ReadOnlySpan<Vector3> corners =
+        [
+            new Vector3(min.X, min.Y, min.Z),
+            new Vector3(min.X, max.Y, min.Z),
+            new Vector3(max.X, min.Y, min.Z),
+            new Vector3(max.X, max.Y, min.Z),
+            new Vector3(min.X, min.Y, max.Z),
+            new Vector3(min.X, max.Y, max.Z),
+            new Vector3(max.X, min.Y, max.Z),
+            new Vector3(max.X, max.Y, max.Z),
+        ];
+
+        if (!TryResolveProjectionMode(corners.ToArray(), (min + max) * 0.5f, tileX, tileY, out TileProjectionMode projectionMode))
+            return false;
+
+        foreach (Vector3 corner in corners)
+        {
+            if (TryProjectToTilePixel(corner, tileX, tileY, projectionMode, out Vector2 pixel))
+            {
+                int px = Math.Clamp((int)MathF.Round(pixel.X), 0, TileHeightmapSize - 1);
+                int py = Math.Clamp((int)MathF.Round(pixel.Y), 0, TileHeightmapSize - 1);
+                minPx = Math.Min(minPx, px);
+                minPy = Math.Min(minPy, py);
+                maxPx = Math.Max(maxPx, px);
+                maxPy = Math.Max(maxPy, py);
+            }
+        }
+
+        return minPx != int.MaxValue;
+    }
+
+    private static Matrix4x4 BuildM2PlacementTransform(Vector3 position, Vector3 rotationDegrees, float scale)
+    {
+        float rx = -DegreesToRadians(rotationDegrees.Y);
+        float ry = -DegreesToRadians(rotationDegrees.X);
+        float rz = DegreesToRadians(rotationDegrees.Z);
+        return Matrix4x4.CreateRotationZ(MathF.PI)
+            * Matrix4x4.CreateScale(scale)
+            * Matrix4x4.CreateRotationX(rx)
+            * Matrix4x4.CreateRotationY(ry)
+            * Matrix4x4.CreateRotationZ(rz)
+            * Matrix4x4.CreateTranslation(position);
+    }
+
+    private static (Vector3 Min, Vector3 Max) TransformBounds(Vector3 localMin, Vector3 localMax, Matrix4x4 transform)
+    {
+        Vector3[] corners =
+        [
+            new Vector3(localMin.X, localMin.Y, localMin.Z),
+            new Vector3(localMin.X, localMin.Y, localMax.Z),
+            new Vector3(localMin.X, localMax.Y, localMin.Z),
+            new Vector3(localMin.X, localMax.Y, localMax.Z),
+            new Vector3(localMax.X, localMin.Y, localMin.Z),
+            new Vector3(localMax.X, localMin.Y, localMax.Z),
+            new Vector3(localMax.X, localMax.Y, localMin.Z),
+            new Vector3(localMax.X, localMax.Y, localMax.Z),
+        ];
+
+        Vector3 worldMin = new(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+        Vector3 worldMax = new(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
+
+        for (int i = 0; i < corners.Length; i++)
+        {
+            Vector3 world = Vector3.Transform(corners[i], transform);
+            worldMin = Vector3.Min(worldMin, world);
+            worldMax = Vector3.Max(worldMax, world);
+        }
+
+        return (worldMin, worldMax);
     }
 
     private static bool PaintClippedTriangle(float[,] buffer, Vector2 p0, Vector2 p1, Vector2 p2, float value)

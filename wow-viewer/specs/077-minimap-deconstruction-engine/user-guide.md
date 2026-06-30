@@ -192,17 +192,38 @@ uv run python scripts/train_height_only_prior.py --prior "..\output\datasets\tea
 
 Review `*_metrics.json`, `*_latest.pt`, `*_best.pt`, `*_model.pt`, `*_preview.png`, and per-epoch `*_validation_previews/epoch_####.png` in the output directory. With `--albedo`, both final and validation preview grids include an `albedo input` panel so you can verify the exact 6-channel signal being fed. The model predicts only `height_257`; it does not predict normals, liquids, or objects. `--normal-guidance-weight` is an auxiliary training loss: it derives normals from predicted height and compares them to V18 `normal_xyz` for sharper/faster height convergence, without adding a normal output head. `--hard-error-weight` is training-only online hard-pixel mining from detached absolute height residuals; validation abs-error remains a held-out diagnostic map and is not backpropagated. `--augment`, `--augment-policy`, `--split-mode`, `--albedo`, `--model-norm`, and `--decoder-upsample` are recorded in `*_metrics.json` under `augment`, `augment_policy`, `augment_transforms`, `augment_seed`, `split_mode`, `albedo`, `model_in_channels`, `model_norm`, and `decoder_upsample`. `--albedo-path` is recorded under `albedo_paths`.
 
-### MCLY-guided small-detail refinement (follow-up, not in the base run)
+### Coarse-to-fine residual height chain
 
-If the albedo run improves broad terrain shape but still misses small detail, do not add extra heads to the base height model. The next bounded lane should be a separate residual refinement pass:
+If the direct albedo run plateaus with muddy previews, stop extending it and run the independent H0/H1 chain. H0 predicts one signal, `height_coarse_65`. H1 loads frozen H0 output and predicts one signal, `height_delta_257`. Final height is composed as `height_refined_257 = upsample(H0) + H1`; normals remain analytic.
 
-- Freeze the accepted base height checkpoint.
-- Generate base predictions for the curated V18/teacher-prior rows.
-- Derive low/medium/high detail masks from MCLY layer activity, active-layer counts, and `alpha_256` transition gradients. These are curation/loss masks, not new prediction targets.
-- Train a tiny model that predicts one signal only: `height_delta_257 = height_truth - base_height_pred`, weighted toward the MCLY high/transition-detail mask.
-- Compose inference as `height_refined = base_height + detail_mask * height_delta`; derive normals analytically afterward.
+Local H0 command:
 
-This mirrors the older low/medium/high-detail idea but lets MCLY choose the detail regions naturally. It also preserves the repo rule that every model predicts one residual signal and trains independently.
+```powershell
+Set-Location -LiteralPath "I:\parp\parp-tools\wow-viewer\data-harvester"
+uv run python scripts/train_height_coarse_prior.py --prior "..\output\datasets\teacher-prior\0_5_3_3368.zarr" "..\output\datasets\teacher-prior\3_3_5_12340.zarr" --v18 "..\output\datasets\v18\0_5_3_3368.zarr" "..\output\datasets\v18\3_3_5_12340.zarr" --albedo-path "..\output\datasets\albedo\0_5_3_3368.zarr" "..\output\datasets\albedo\3_3_5_12340.zarr" --curation-manifest "..\output\analysis\teacher-prior\visibility-audit\two_build" --output-dir "models\spec077\height-residual-chain\h0_coarse" --run-name "h0_coarse_albedo_density" --epochs 80 --val-steps 0 --batch-size 16 --device cuda --albedo --density --model-norm group --decoder-upsample nearest --num-workers 0 --no-persistent-workers
+```
+
+Local H1 command after H0 writes its best checkpoint:
+
+```powershell
+Set-Location -LiteralPath "I:\parp\parp-tools\wow-viewer\data-harvester"
+uv run python scripts/train_height_residual_prior.py --coarse-checkpoint "models\spec077\height-residual-chain\h0_coarse\h0_coarse_albedo_density_h0_best.pt" --prior "..\output\datasets\teacher-prior\0_5_3_3368.zarr" "..\output\datasets\teacher-prior\3_3_5_12340.zarr" --v18 "..\output\datasets\v18\0_5_3_3368.zarr" "..\output\datasets\v18\3_3_5_12340.zarr" --albedo-path "..\output\datasets\albedo\0_5_3_3368.zarr" "..\output\datasets\albedo\3_3_5_12340.zarr" --curation-manifest "..\output\analysis\teacher-prior\visibility-audit\two_build" --output-dir "models\spec077\height-residual-chain\h1_residual" --run-name "h1_residual_albedo_density" --epochs 160 --val-steps 0 --batch-size 12 --device cuda --albedo --density --model-norm group --decoder-upsample nearest --gradient-weight 0.05 --normal-guidance-weight 0.10 --hard-error-weight 0.05 --delta-weight 0.25 --num-workers 0 --no-persistent-workers
+```
+
+RunPod bundle commands after upload/extract:
+
+```bash
+bash runpod/train_spec077_h0.sh
+bash runpod/train_spec077_h1.sh
+```
+
+A fresh H1 run should start near the frozen H0 validation loss because the H1 residual head is zero-initialized. If epoch 1 starts far above H0, rebuild/reupload the bundle and make sure the pod is using the updated `V18HeightResidualModel` code rather than an older package with random residual initialization.
+
+Override H1's coarse checkpoint if needed:
+
+```bash
+COARSE_CHECKPOINT=/workspace/<bundle>/models/spec077/height-residual-chain/h0_coarse/<checkpoint>.pt bash runpod/train_spec077_h1.sh
+```
 
 For full training, leave `--max-tiles` unset or set it to `0`. Use `--max-tiles` only for smoke runs. `--steps` is only a smoke/resume cap; use `--epochs` for real runs. `--val-steps 0` means validate the full deterministic validation split each epoch.
 
@@ -211,7 +232,7 @@ For full training, leave `--max-tiles` unset or set it to `0`. Use `--max-tiles`
 For cloud training, do not copy staged game clients, MPQs, CASC data, or asset trees. Package only the derived training artifacts and Python training code:
 
 - teacher-prior Zarr stores for `0_5_3_3368` and `3_3_5_12340`
-- slim V18 target Zarr stores containing only `height_257`, `object_filtered_mask`, `normal_xyz`, and `normal_mask`
+- slim V18 target Zarr stores containing `height_257`, `object_precise_mask`, `object_filtered_mask`, `normal_xyz`, and `normal_mask`; trainers use `object_precise_mask` first for the loss gate
 - precomputed albedo sidecar Zarr stores
 - visibility-audit `kept_tiles.parquet` manifest
 - `data-harvester/src`, focused scripts, RunPod helper scripts, and manifest

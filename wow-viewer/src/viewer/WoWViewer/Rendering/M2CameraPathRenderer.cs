@@ -61,6 +61,8 @@ public sealed class M2CameraPathRenderer : IModelRenderer
     public void Render(Matrix4x4 view, Matrix4x4 proj)
         => RenderWithTransform(Matrix4x4.Identity, view, proj, RenderPass.Opaque);
 
+    public bool IsWireframe => _wireframe;
+
     public void ToggleWireframe()
         => _wireframe = !_wireframe;
 

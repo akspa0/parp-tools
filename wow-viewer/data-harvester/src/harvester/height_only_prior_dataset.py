@@ -2,7 +2,7 @@
 
 Reads the spec 077 teacher-prior Zarr store as the model input and the
 source V18 Zarr store for the authoritative ``height_257`` target plus the
-``object_filtered_mask`` that gates the loss.
+best available object mask that gates the loss.
 
 The dataset returns the exact ``HeightOnlyTrainingSample`` contract from
 spec 077 data-model.md §3.1:
@@ -111,7 +111,7 @@ class HeightOnlyPriorDataset(Dataset):
     v18_path:
         Path to the source ``<build>.zarr`` V18 store. Used to read the
         authoritative ``height_257`` target and the
-        ``object_filtered_mask`` weight. May be ``None`` for inference-only
+        ``object_precise_mask`` / fallback object weight. May be ``None`` for inference-only
         mode that only emits the prior inputs (target arrays are zeros).
     albedo_path:
         Optional sidecar ``<build>.zarr`` store containing precomputed
@@ -121,8 +121,9 @@ class HeightOnlyPriorDataset(Dataset):
         Optional iterable of ``tile_id`` values to restrict to. When
         ``None`` all available tiles are used.
     include_weight:
-        If ``True`` (default), compute ``weight_257 = 1 - object_filtered_mask``.
-        If the filtered mask is missing the weight is a constant 1.0.
+        If ``True`` (default), compute ``weight_257`` from the best available
+        object gate: `object_precise_mask`, then `object_filtered_mask`, then
+        `object_mask`. If every mask is missing the weight is a constant 1.0.
     height_norm:
         If ``True`` (default), normalize ``height_257`` by its per-tile
         mean/std. The de-normalization is the caller's responsibility.
@@ -206,6 +207,7 @@ class HeightOnlyPriorDataset(Dataset):
         self.normal_xyz = None
         self.normal_mask = None
         self.weight_257 = None
+        self.weight_mask_source = "none"
         self.alpha_256 = None
         self.mcly_texture_ids = None
         self.mcly_layer_mask = None
@@ -223,9 +225,15 @@ class HeightOnlyPriorDataset(Dataset):
             self.normal_xyz = _load_zarr_array(self.v18_path, "normal_xyz")
             self.normal_mask = _load_zarr_array(self.v18_path, "normal_mask")
             if include_weight:
-                filtered = _load_zarr_array(self.v18_path, "object_filtered_mask")
-                if filtered is not None and filtered.size:
-                    self.weight_257 = (1.0 - np.clip(filtered, 0.0, 1.0)).astype(np.float32)
+                object_gate = None
+                for key in ("object_precise_mask", "object_filtered_mask", "object_mask"):
+                    candidate = _load_zarr_array(self.v18_path, key)
+                    if candidate is not None and candidate.size:
+                        object_gate = candidate
+                        self.weight_mask_source = key
+                        break
+                if object_gate is not None:
+                    self.weight_257 = (1.0 - np.clip(object_gate, 0.0, 1.0)).astype(np.float32)
                 else:
                     self.weight_257 = np.ones_like(
                         self.height_257, dtype=np.float32
@@ -379,6 +387,7 @@ class HeightOnlyPriorDataset(Dataset):
             "meta_tile_id": source_tile_id,
             "meta_prior_row": prior_index,
             "meta_v18_row": source_tile_id,
+            "meta_weight_mask_source": self.weight_mask_source,
         }
         if albedo_chw is not None:
             sample["albedo_rgb"] = albedo_chw
@@ -399,6 +408,7 @@ class HeightOnlyPriorDataset(Dataset):
             "meta_tile_id": sample["meta_tile_id"],
             "meta_prior_row": sample["meta_prior_row"],
             "meta_v18_row": sample["meta_v18_row"],
+            "meta_weight_mask_source": sample["meta_weight_mask_source"],
         }
         if "albedo_rgb" in sample:
             out["albedo_rgb"] = torch.from_numpy(np.ascontiguousarray(sample["albedo_rgb"]))

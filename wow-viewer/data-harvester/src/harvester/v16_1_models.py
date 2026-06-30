@@ -162,6 +162,67 @@ class V161HeightModel(nn.Module):
         return self.head(d0)
 
 
+class V161HeightCoarseModel(nn.Module):
+    """H0 coarse height model for the Spec 077 residual chain.
+
+    Predicts one signal only: a coarse normalized height field. The default
+    ``65x65`` target matches the quarter-scale broad-shape proof path while
+    preserving the 257-grid centerline semantics after deterministic upsample.
+    """
+
+    def __init__(
+        self,
+        in_channels: int = 3,
+        norm: str = "batch",
+        decoder_upsample: str = "bilinear",
+        coarse_size: int = 65,
+    ) -> None:
+        super().__init__()
+        self.in_channels = int(in_channels)
+        self.norm = str(norm)
+        self.decoder_upsample = str(decoder_upsample)
+        self.coarse_size = int(coarse_size)
+        self.backbone = _UNetBackbone(self.in_channels, norm=self.norm, upsample_mode=self.decoder_upsample)
+        self.head = nn.Sequential(
+            nn.Conv2d(32, 32, 3, padding=1),
+            nn.ReLU(inplace=True),
+            _ResizeTo((self.coarse_size, self.coarse_size), self.decoder_upsample),
+            nn.Conv2d(32, 1, 1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        d0, _ = self.backbone(x)
+        return self.head(d0)
+
+
+class V161HeightResidualModel(nn.Module):
+    """H1 full-resolution residual-height model.
+
+    Predicts one signal only: ``height_delta_257``. The frozen/upscaled coarse
+    base is an input channel, not a second output head.
+    """
+
+    def __init__(self, in_channels: int = 4, norm: str = "batch", decoder_upsample: str = "bilinear") -> None:
+        super().__init__()
+        self.in_channels = int(in_channels)
+        self.norm = str(norm)
+        self.decoder_upsample = str(decoder_upsample)
+        final = nn.Conv2d(32, 1, 1)
+        nn.init.zeros_(final.weight)
+        nn.init.zeros_(final.bias)
+        self.backbone = _UNetBackbone(self.in_channels, norm=self.norm, upsample_mode=self.decoder_upsample)
+        self.head = nn.Sequential(
+            nn.Conv2d(32, 32, 3, padding=1),
+            nn.ReLU(inplace=True),
+            _ResizeTo((257, 257), self.decoder_upsample),
+            final,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        d0, _ = self.backbone(x)
+        return self.head(d0)
+
+
 class _FractalDimHead(nn.Module):
     """16x16 patch-level fractal dimension (Hurst exponent) auxiliary head.
 
