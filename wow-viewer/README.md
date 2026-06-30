@@ -1,6 +1,6 @@
 # WoWViewer
 
-**Part of `parp-tools`** | **Branch**: `v0.5.0-dev` | **Stack**: .NET 10 / OpenGL 3.3 (Silk.NET) / ImGui
+**Part of `parp-tools`** | **Branch**: `v0.5.0-prerelease` | **Stack**: .NET 10 / OpenGL 3.3 (Silk.NET) / ImGui
 
 A 3D world viewer, format analysis toolkit, and ML dataset pipeline for World of Warcraft game client data. This is the sole active development target in the `parp-tools` monorepo — the legacy `MdxViewer` in `gillijimproject_refactor/` is read-only reference.
 
@@ -26,7 +26,7 @@ A 3D world viewer, format analysis toolkit, and ML dataset pipeline for World of
 | `WowViewer.Tool.Harvest` | CLI terrain tensor harvester | `tools/harvest/` |
 | `WowViewer.Tool.ValidationCapture` | CLI headless capture | `tools/validation-capture/` |
 | `WowViewer.Tool.AnimFarm` | CLI M2 animation farmer | `tools/animfarm/` |
-| Data harvester (Python) | V16/V18 dataset build + training | `data-harvester/` |
+| Data harvester (Python & C#) | V22 dataset build + training | `data-harvester/` |
 
 ## Quick Start
 
@@ -123,7 +123,7 @@ We support versions of WoW from 0.5.3 through 4.0.0, with varying levels of form
 | 0.7.0 / 0.8.0 | Pre-Release | MDX (chunked) — partial |
 | 1.12.1 | Vanilla | M2 (era-1121 MD20) — full (spec 048) |
 | 2.x | TBC | Not yet supported |
-| 3.0.1 / 3.3.5 | WotLK | Full — terrain, WMO, M2, PM4 |
+| 3.0.1 / 3.3.5 | WotLK | Full read/write — terrain, WMO, M2, PM4 |
 | 4.0.0+ | Cataclysm | ADT + PM4 — partial |
 
 ## Related
