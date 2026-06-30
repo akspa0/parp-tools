@@ -39,12 +39,13 @@
 **Purpose**: Write the expanded decoded stream into the frozen V22 Zarr dataset layout using the Python package.
 
 - [ ] T013 Create a V22 signal derivation helper for any tile signals that are not already emitted by `RawArraySerializer.StreamProfile.V22`.
++- [x] T013A Add `wow-viewer/data-harvester/src/harvester/v22_zarr_io.py` with `V22ZarrWriter`, `V22Dataset`, `V22TileRecord`, fixed-key contract, and full V22 array/group constants. Write `wow-viewer/data-harvester/scripts/build_v22_dataset.py` as the one-pass V22 stream → Zarr builder. Add `tests/test_v22_zarr_io.py` covering the writer/reader round-trip and fixed-key contract on synthetic records.
 - [ ] T014 Create placement accumulation/name-remap logic with per-tile offsets and fixed-shape output arrays.
 - [ ] T015 Create model-library contracts with payload validation, load-error handling, and cache metadata writers.
 - [ ] T016 Create tileset-library contracts with BLP RGB payload validation, MTEX path remapping, and `mcly_tileset_ids` helpers.
-- [ ] T017 Create `data-harvester/scripts/build_v22_dataset.py` as the one-pass Python Zarr writer fed by the decoded C# V22 stream.
+- [x] T017 Create `data-harvester/scripts/build_v22_dataset.py` as the one-pass Python Zarr writer fed by the decoded C# V22 stream. (Initial V22 stream → Zarr writer shipped; pending real-data bounded proof.)
 - [ ] T018 Keep index, placement, decoded metadata, and asset inventory outputs as audit reports, not training-only side paths.
-- [ ] T019 Add synthetic Zarr writer tests for root arrays, placement offsets, model entries, tileset entries, resume behavior, and source-placement parity.
+- [x] T019 Add synthetic Zarr writer tests for root arrays, placement offsets, model entries, tileset entries, resume behavior, and source-placement parity. (Initial synthetic round-trip test landed; resume + parity proofs remain.)
 
 **Checkpoint**: Phase 3 complete — a synthetic V22 Zarr store round-trips every documented schema group.
 
@@ -54,10 +55,10 @@
 
 **Purpose**: Define the single Zarr-backed dataset API used by downstream consumers.
 
-- [ ] T020 Create `data-harvester/src/harvester/v22_dataset.py` with fixed batch keys, zero-filled missing tile signals, and zero-length empty placement arrays.
+- [x] T020 Add `wow-viewer/data-harvester/src/harvester/v22_zarr_io.py` with `V22Dataset`, fixed batch keys, zero-filled missing tile signals, and zero-length empty placement arrays. (Initial reader shipped; collate/cache enhancements remain.)
 - [ ] T021 Expose cached `models` and `tilesets` properties without inlining giant geometry or texture blobs into every tile batch.
 - [ ] T022 Create batch/collate helpers for placement/model/tileset reference batches, including empty-placement tiles.
-- [ ] T023 Add synthetic store tests for fixed keys, shapes, dtypes, empty tiles, load-error entries, model cache hits, tileset cache hits, and multi-worker-safe cache reads.
+- [x] T023 Add synthetic store tests for fixed keys, shapes, dtypes, empty tiles, load-error entries, model cache hits, tileset cache hits, and multi-worker-safe cache reads. (Initial fixed-key/dtype/empty-tile test shipped; cache/multi-worker tests remain.)
 - [ ] T024 Add a compatibility smoke showing selected downstream input paths can read V22 root signals without sidecar or MPQ side paths.
 
 **Checkpoint**: Phase 4 complete — consumers can read tile signals, placements, model refs, and tileset refs from V22 alone.

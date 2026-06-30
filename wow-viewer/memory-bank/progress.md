@@ -20,13 +20,15 @@
 - Attempted focused xUnit and solution build, but the shell wrapper still fails before command execution with `The "path" argument must be of type string. Received undefined`.
 - Source-level checks confirm Spec 086 no longer contains Python writer/task routing except explicit "no Python post-build/preprocessing" guardrails.
 
-## Remaining Phase 2 gaps
+## Remaining Phase 2/3/4 gaps after the new writer/reader slice
 
-- Emit separate per-build model-library messages.
-- Emit separate per-build tileset-library messages and stable `mcly_tileset_ids` remapping.
-- Integrate renderer-truth arrays in the C# store path.
-- Run bounded stream-dump proof when shell/tool execution works.
+- Emit separate per-build model-library and tileset-library payloads in the C# V22 stream.
+- Promote tile-local MTEX paths into stable build-wide `mcly_tileset_ids`.
+- Integrate renderer-truth arrays (`object_visibility_mask`, `no_object_minimap`) in the C# store path.
+- Bounded real-data proof on the three staged clients and learnability gates.
+- Multi-worker-safe cache read, batch/collate helpers, and resume parity.
 - Implement the actual Python-package-backed Zarr writer and reader fed by the decoded C# stream.
++- Initial V22 Zarr writer/reader slice landed: `wow-viewer/data-harvester/src/harvester/v22_zarr_io.py` (`V22ZarrWriter`, `V22Dataset`, `V22TileRecord`, fixed-key contract, model/tileset groups), `data-harvester/scripts/build_v22_dataset.py` for V22 stream → Zarr build/stats, and `tests/test_v22_zarr_io.py` for the synthetic fixed-key round-trip.
 
 # 2026-06-30 - Spec 086 V22 schema freeze complete
 
