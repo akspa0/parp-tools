@@ -45,10 +45,10 @@ static class M2EnrichmentBuilder
         float[] uv1 = new float[vCount * 2];
         for (int i = 0; i < vCount; i++)
         {
-            uv0[i * 2 + 0] = geo.Vertices[i].Uv0.X;
-            uv0[i * 2 + 1] = geo.Vertices[i].Uv0.Y;
-            uv1[i * 2 + 0] = geo.Vertices[i].Uv1.X;
-            uv1[i * 2 + 1] = geo.Vertices[i].Uv1.Y;
+            uv0[i * 2 + 0] = geo.Vertices[i].TextureCoords0.X;
+            uv0[i * 2 + 1] = geo.Vertices[i].TextureCoords0.Y;
+            uv1[i * 2 + 0] = geo.Vertices[i].TextureCoords1.X;
+            uv1[i * 2 + 1] = geo.Vertices[i].TextureCoords1.Y;
         }
         arrays.Add(new EnrichmentArray("texcoords_0", [vCount, 2], typeof(float),
             EnrichmentArrayHelper.FlattenFloats(uv0)));
@@ -82,7 +82,10 @@ static class M2EnrichmentBuilder
         int tCount = skin.TriangleIndices.Count / 3;
         int[] tris = new int[skin.TriangleIndices.Count];
         for (int i = 0; i < skin.TriangleIndices.Count; i++)
-            tris[i] = skin.TriangleIndices[i];
+        {
+            ushort index = skin.TriangleIndices[i];
+            tris[i] = index < skin.VertexLookup.Count ? skin.VertexLookup[index] : index;
+        }
         arrays.Add(new EnrichmentArray("triangles", [tCount, 3], typeof(int),
             EnrichmentArrayHelper.FlattenInts(tris)));
 
@@ -90,7 +93,7 @@ static class M2EnrichmentBuilder
         int rCount = geo.RenderFlags.Count;
         uint[] rFlags = new uint[rCount];
         for (int i = 0; i < rCount; i++)
-            rFlags[i] = (uint)geo.RenderFlags[i].RenderFlags;
+            rFlags[i] = geo.RenderFlags[i].Flags;
         arrays.Add(new EnrichmentArray("render_flags", [rCount], typeof(uint),
             EnrichmentArrayHelper.FlattenUInts(rFlags)));
 
@@ -105,17 +108,31 @@ static class M2EnrichmentBuilder
         byte[] texLookup = new byte[tlCount * 2];
         for (int i = 0; i < tlCount; i++)
         {
-            ushort val = geo.TextureLookup[i].TextureIndex;
+            ushort val = geo.TextureLookup[i].TextureId;
             texLookup[i * 2 + 0] = (byte)(val & 0xFF);
             texLookup[i * 2 + 1] = (byte)((val >> 8) & 0xFF);
         }
         arrays.Add(new EnrichmentArray("texture_lookup", [tlCount], typeof(ushort), texLookup));
 
-        // ── Texture paths (P,) string (V22 spec: string metadata) ──
-        // String arrays are stored as a concatenated byte[] with length prefixes.
-        // For simplicity, we skip string arrays in this pass — they are recoverable
-        // from the M2 path and the dataset is canonical path-based.
-        // The Python consumer can reconstruct texture paths from the model path.
+        int textureCount = geo.Textures.Count;
+        uint[] replaceableIds = new uint[textureCount];
+        uint[] textureFlags = new uint[textureCount];
+        for (int i = 0; i < textureCount; i++)
+        {
+            replaceableIds[i] = geo.Textures[i].ReplaceableId;
+            textureFlags[i] = geo.Textures[i].Flags;
+        }
+        arrays.Add(new EnrichmentArray("texture_replaceable_ids", [textureCount], typeof(uint),
+            EnrichmentArrayHelper.FlattenUInts(replaceableIds)));
+        arrays.Add(new EnrichmentArray("texture_flags", [textureCount], typeof(uint),
+            EnrichmentArrayHelper.FlattenUInts(textureFlags)));
+
+        // ── Texture paths (P,) string table encoded as uint8 blob ──
+        string[] texturePaths = new string[textureCount];
+        for (int i = 0; i < textureCount; i++)
+            texturePaths[i] = geo.Textures[i].Filename ?? string.Empty;
+        byte[] texturePathBlob = EnrichmentArrayHelper.FlattenStrings(texturePaths);
+        arrays.Add(new EnrichmentArray("texture_paths", [texturePathBlob.Length], typeof(byte), texturePathBlob));
 
         // ── Transparency lookup (R,) uint16 ────────────────────
         int trlCount = geo.TransparencyLookup.Count;

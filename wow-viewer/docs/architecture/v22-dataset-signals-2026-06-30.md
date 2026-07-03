@@ -28,7 +28,7 @@ output/datasets/v22/<build>.zarr/        # Python Zarr store (canonical cache/lo
 |-- index report                  # audit mirror and tile metadata
 |-- placements report             # audit mirror of placement arrays
 |-- decoded_metadata report       # audit mirror of decoded ADT metadata
-|-- asset_inventory report        # audit mirror of model/tileset coverage
+|-- asset_inventory report        # audit mirror of model/tileset coverage + source provenance
 |-- signal_validation.json
 |-- harvest_metrics.json
 |-- finalization.json
@@ -243,11 +243,11 @@ Unloadable models still get a `model_paths` entry with `load_error=1` and zero-l
 
 ## Tileset Library
 
-The tileset library is a per-build group. Entries are keyed by integer tileset id, and `tileset_paths` maps id to canonical normalized BLP path. Tileset payloads are separate C# V22 stream messages and stored once per build by the Python Zarr writer.
+The tileset library is a per-build group. Entries are keyed by integer tileset id, and `tileset_paths` maps id to the canonical decoded-texture dataset key. Because the dataset stores decoded RGB payloads, BLP source paths are normalized to PNG-style keys in `tileset_paths` while the original archive BLP path is preserved in `asset_inventory.parquet` as `source_path`. Tileset payloads are separate C# V22 stream messages and stored once per build by the Python Zarr writer.
 
 ```text
 tilesets/
-|-- tileset_paths/                # string   (num_tilesets)
+|-- tileset_paths/                # string   (num_tilesets, decoded-texture dataset key)
 |-- load_error/                   # uint8    (num_tilesets)
 |-- load_error_message/           # string   (num_tilesets)
 |-- texture_shape/                # int32    (num_tilesets, 2)
@@ -255,6 +255,8 @@ tilesets/
 ```
 
 Root array `mcly_tileset_ids` remaps tile-local `mcly_texture_ids` into per-build `tileset_paths` indices. Unused layers are `-1`. Unloadable textures still get a `tileset_paths` entry with `load_error=1`, `texture_shape=(0, 0)`, and a zero-sized or zero-filled texture payload.
+
+`asset_inventory.parquet` is the audit surface for source provenance. Each model or tileset row records `asset_path`, `source_path`, `source_in_listfile`, `source_kind`, `kind`, and `load_error`. `source_in_listfile=1` means the canonical asset path was present in the archive's internal `(listfile)` data; `source_kind=archive_unlisted` marks assets that were readable through archive/scanned-file resolution but not backed by the internal listfile.
 
 Phase 2 tile records emit `mtex_texture_paths` in metadata and `tileset_texture_rgb_<index>` arrays for decoded tile-local textures. Phase 3 must promote these tile-local texture paths into stable build-wide `tileset_paths` ids and write `mcly_tileset_ids`.
 

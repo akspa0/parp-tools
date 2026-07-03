@@ -1,5 +1,31 @@
 # Progress — wow-viewer
 
+# 2026-07-03 - V22 asset provenance now tracks archive listfile backing
+
+- `WowViewer.Tool.V22Enrich` now classifies each requested M2 / WMO / BLP asset path against the loaded archives' internal `(listfile)` rows and emits `source_in_listfile` in every enrichment entry, including decode-failure rows.
+- `src/harvester/v22_zarr_io.py` now strips that provenance audit array from payload tensors, preserves `source_path`, `source_in_listfile`, and `source_kind` on both model and tileset inventory records, and writes them to `asset_inventory.parquet`.
+- Decoded terrain textures still store RGB payloads in the dataset, but their in-dataset identity is now a PNG-style decoded-texture key while the original BLP path remains available as `source_path` for audit/provenance joins.
+- Synthetic pytest coverage was extended so the enrichment stream carries provenance rows and the resulting `asset_inventory.parquet` is asserted for both model and tileset entries.
+- The FR-008 / FR-009 string surfaces are no longer skipped: the enrich stream now carries M2 `texture_paths`, WMO `material_texture_paths`, and WMO `doodad_set_paths` via a compact UTF-8 string-table blob, and the Python writer materializes those into real Zarr string arrays on the model entries. A bounded real-data one-tile smoke confirmed those arrays now exist on a real WMO entry.
+
+# 2026-07-03 - Spec 088 V22 enrich/build route repaired and real-data smoke proven
+
+- Repaired the upstream V22 implementation gap that had been blocking Spec 089 real-data work. `WowViewer.Tool.V22Enrich` now builds again against the current core APIs: `Program.cs` uses `NativeMpqService` from `WowViewer.Core.IO.Files`, resolves `.skin` via `M2ModelIdentity.FromPath(...).BuildSkinPath(0)`, and emits BLP tileset entries via `BlpRgbReader`.
+- The enrichment stream seam is now coherent end-to-end. `EnrichmentStreamFormat.cs` and the Python parser in `src/harvester/v22_zarr_io.py` both now treat `ENTRY` as the actual 5-byte magic that the writer emits; before this, the stream could look valid on disk while the Python side silently failed to ingest the model library.
+- `src/harvester/v22_zarr_io.py` is now a real Spec 088 writer instead of a partial stub: it no longer requires `pandas`, reads `placements.parquet` and `decoded_metadata.parquet` directly with PyArrow, derives `mcly_tileset_ids` from `decoded_metadata_json.mcly_texture_names`, preserves the fixed-key `V22Dataset` contract, fixes the last-tile flat-placement offset/count bug, and writes `index.parquet`, `placements.parquet`, `asset_inventory.parquet`, and `finalization.json` sidecars.
+- Focused validation now passes locally: `dotnet build wow-viewer/tools/enrich/WowViewer.Tool.V22Enrich -c Debug` succeeds, and `uv run pytest tests/test_v22_zarr_io.py tests/test_v22_patched_signals.py -q` passes (`28 passed`).
+- Real-data smoke also now exists. A one-tile temp V18 subset was cut from `wow-viewer/output/datasets/v18/3_3_5_12340.zarr` into `wow-viewer/data-harvester/tmp/v18_smoke/3_3_5_12340_tile0.zarr`, then `build_v22_dataset.py enrich` + `build` produced `wow-viewer/data-harvester/tmp/v22_smoke/3_3_5_12340_tile0.zarr`. `build_v22_dataset.py stats` reports `tile_count = 1`, `model_count = 1`, `tileset_count = 9`; `inspect_v22_dataset.py tile --tile-index 0` shows populated `mcly_tileset_ids` and one resolved MODF placement.
+- Remaining gap: the canonical full-store V22 output under `wow-viewer/output/datasets/v22/3_3_5_12340.zarr` still does not exist. A quick local build against the full existing 3.3.5 V18 store timed out after 10 minutes, so the next Spec 088 slice is to promote the temp one-tile proof into the durable bounded Phase 9 operator path or add a first-class bounded V18 export path.
+
+# 2026-07-03 - Spec 089 V23 Phase 1 dataset slice source-applied
+
+- Implemented `data-harvester/src/harvester/v23/channels.py`, `dataset.py`, and `scripts/build_tileset_prune_table.py`, plus `tests/v23/test_channels.py` and `test_dataset.py`.
+- Corrected the dataset contract to use bicubic `liquid_height` resampling, added detailed channel-contract docstrings, and made the prune-table script validate `tilesets/tileset_paths` before counting IDs.
+- Repaired the local harvester environment by quarantining the stale `.venv`, rebuilding it on `C:\Python314\python.exe`, and adding the missing `setuptools` / `src` package metadata to `pyproject.toml` so plain `uv run` can import `harvester`.
+- Fixed an import blocker in `src/harvester/v22_zarr_io.py` (`from dataclasses import dataclass` was missing).
+- Validation now passes locally: `uv sync`, `uv run python -c "import harvester.v23"` -> `import-ok`, `uv run pytest -q` -> `309 skipped`, and `uv run pytest tests/v23/test_dataset.py tests/v23/test_channels.py -m v23 -q` -> `10 passed`.
+- Remaining open work in Phase 1 is only T012 real-data proof against a V22 store. Attempting that proof showed the next blocker is upstream: `wow-viewer/tools/enrich/WowViewer.Tool.V22Enrich` does not currently build because its M2/WMO enrichment builders reference stale core API members.
+
 # 2026-07-03 - Spec 089 Speckit planning pack completed
 
 - Added the missing Phase 0/1 planning artifacts under `specs/089-dav2-height-predictor/`: `research.md`, `data-model.md`, `quickstart.md`, and `contracts/`.

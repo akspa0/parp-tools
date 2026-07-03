@@ -181,7 +181,7 @@ wow-viewer/tests/WowViewer.Core.Tests/
 - New file `wow-viewer/src/core/WowViewer.Core.IO/Maps/EnrichmentStreamFormat.cs`.
 - Stream layout (per FR-012):
   - Header: `V22E` (4 bytes) + version uint32 (little-endian, currently 1).
-  - One `ENTRY` per asset: `[ENTRY magic 4][path_len uint32][path_utf8][kind uint8 (0=unknown, 1=M2, 2=WMO, 3=BLP)][load_error uint8][array_count uint32][for each array: name_len uint32, name_utf8, ndim uint32, shape uint32 × ndim, dtype 8 bytes ASCII null-padded, data_len int64, data_bytes]`.
+  - One `ENTRY` per asset: `[ENTRY magic 5][path_len uint32][path_utf8][kind uint8 (0=unknown, 1=M2, 2=WMO, 3=BLP)][load_error uint8][array_count uint32][for each array: name_len uint32, name_utf8, ndim uint32, shape uint32 × ndim, dtype 8 bytes ASCII null-padded, data_len int64, data_bytes]`.
   - Outer `ENDS` (4 bytes) terminates the stream.
 - Public API: `EnrichmentStreamWriter` (writes one entry at a time), `EnrichmentStreamReader` (iterates entries). Both `IDisposable`. Stream is forward-only; no random access.
 - All keys are the original canonical path string — no `Path.GetHashCode()`. Two writers with the same canonical path produce streams whose `ENTRY` records can be matched by string equality.

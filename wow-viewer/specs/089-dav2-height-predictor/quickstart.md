@@ -14,7 +14,7 @@ This is the operator/developer on-ramp for Spec 089. It covers the routing fix, 
 - RunPod packaging pattern owner: Spec 079
 - Spec Kit PowerShell helpers must be run from `wow-viewer/` (or below), not the monorepo root, so `.specify/` is discoverable.
 
-This spec is currently a planning-and-Phase-0 lane. Do **not** start Phase 1 dataset work until the Phase 0 validation commands succeed.
+Phase 1 dataset code is now source-applied under `data-harvester/src/harvester/v23/`, but it is not validated yet. Treat the spec as a Phase-0-proof-plus-Phase-1-source lane: do **not** treat the dataset adapter as complete until the Phase 0 and Phase 1 validation commands succeed.
 
 ---
 
@@ -40,13 +40,20 @@ uv run python -c "import harvester.v23"
 uv run pytest tests/v23 -m v23 -q
 ```
 
-Expected result right now:
+Expected result:
 
 - `uv sync` resolves the added V23 dependencies
 - `import harvester.v23` succeeds
 - pytest collects only the gated V23 surface and exits cleanly
 
-If these commands fail, stop. Do not begin Phase 1 implementation.
+2026-07-03 local proof note:
+
+- The stale uv-managed 3.11 environment was replaced with a fresh `.venv` on `C:\Python314\python.exe`.
+- `pyproject.toml` now includes the missing `src/` packaging metadata, so plain `uv run` can import `harvester`.
+- `uv run python -c "import harvester.v23"` now prints `import-ok`.
+- `uv run pytest tests/v23/test_dataset.py tests/v23/test_channels.py -m v23 -q` passed with `10 passed`.
+
+If these commands fail on another machine, stop and repair the environment before treating Phase 1 as complete.
 
 ---
 
@@ -83,7 +90,7 @@ The bounded proof script for Spec 088 remains the preferred validation route whe
 
 ## 5. Planned Phase 1 Dataset Commands
 
-These commands become active once `channels.py`, `dataset.py`, and the prune-table script exist.
+These commands are the current Phase 1 validation path now that `channels.py`, `dataset.py`, and the prune-table script exist in source.
 
 ```powershell
 cd wow-viewer/data-harvester

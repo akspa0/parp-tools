@@ -43,7 +43,7 @@ For MODF rows, additional columns: `bbMinX, bbMinY, bbMinZ, bbMaxX, bbMaxY, bbMa
   uint32  version (little-endian, currently 1)
 
 [One or more ENTRY records]
-  'ENTRY' magic (4 bytes ASCII)
+  'ENTRY' magic (5 bytes ASCII)
   uint32  path_len
   bytes   path_utf8          (canonical asset path; no GetHashCode)
   uint8   kind               (0=unknown, 1=M2, 2=WMO, 3=BLP)
@@ -71,6 +71,10 @@ The `array_count` is the number of FR-008 (M2) / FR-009 (WMO) / tileset (BLP) ar
 **WMO entry arrays** (FR-009): `vertices`, `triangles`, `normals`, `group_counts`, `group_indices`, `materials`, `material_texture_paths`, `bounds`, `portal_vertices`, `portal_indices`, `doodad_set_paths`, `flags`, `version`.
 
 **BLP entry arrays**: `texture_rgb` (H, W, 3 uint8), `texture_shape` (2,) int32.
+
+**Provenance audit array**: every entry may also carry `source_in_listfile` (1,) uint8. `1` means the canonical asset path appeared in the archive's internal `(listfile)` data; `0` means the asset was readable through the archive/scanned-file path but was not backed by an internal listfile row.
+
+In the stream, the string-array surfaces (`texture_paths`, `material_texture_paths`, `doodad_set_paths`) are serialized as a compact uint8 blob: `count int32` followed by repeated `byte_len int32 + utf8 bytes`. The Python builder decodes that blob and materializes proper string arrays in the final Zarr store.
 
 ### 2.3 Dedup Contract
 
@@ -168,11 +172,13 @@ The `<id>` is a string key derived from the canonical asset path (e.g. `World/M2
 
 ```text
 tilesets/
-├── tileset_paths    # string (num_tilesets)
+├── tileset_paths    # string (num_tilesets, decoded-texture dataset key, PNG-style)
 ├── load_error       # uint8  (num_tilesets)
 ├── texture_shape    # int32  (num_tilesets, 2)
 └── texture_rgb/<id>/  # uint8 (H, W, 3)
 ```
+
+`tileset_paths` are dataset identities for decoded textures, so BLP source paths are normalized to a PNG-style key (for example `Tileset/Generic/Black.blp` becomes `Tileset/Generic/Black.png`). The original archive path is preserved in `asset_inventory.parquet` as `source_path`.
 
 ### 3.4 Audit Sidecars (outside the `.zarr`)
 
@@ -181,7 +187,7 @@ output/datasets/v22/<build>.zarr/
 ├── finalization.json           # build status, missing components
 ├── index.parquet               # copy of V18 index.parquet (audit)
 ├── placements.parquet          # copy of V18 placements.parquet (audit)
-└── asset_inventory.parquet     # unique M2/WMO/BLP path counts per kind
+└── asset_inventory.parquet     # unique M2/WMO/BLP rows with source_path + listfile provenance
 ```
 
 ## 4. Connection Summary

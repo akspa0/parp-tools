@@ -8,21 +8,17 @@ from __future__ import annotations
 
 import json
 import struct
-import tempfile
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-import zarr
 import zarr.storage
 
 from harvester.v22_zarr_io import (
     V22ZarrWriter,
     V22Dataset,
-    V22_ROOT_ARRAYS,
     V22_PER_TILE_SPECS,
 )
 
@@ -36,13 +32,11 @@ def _make_v18_store(path: Path, n_tiles: int = 2) -> Path:
     store = zarr.storage.LocalStore(str(path), read_only=False)
     root = zarr.group(store=store, attributes={"v18_dataset_version": "v18"})
 
-    # Per-tile arrays
+    # Per-tile arrays required by the V22 builder.
     for spec in V22_PER_TILE_SPECS:
-        if spec.shape == (1,):
-            arr = np.zeros((n_tiles, *spec.shape), dtype=spec.dtype)
-        else:
-            arr = np.zeros((n_tiles, *spec.shape), dtype=spec.dtype)
+        arr = np.zeros((n_tiles, *spec.shape), dtype=spec.dtype)
         root.create_array(spec.name, data=arr)
+    root.create_array("liquid_basic_type_257", data=np.zeros((n_tiles, 257, 257), dtype=np.uint8))
 
     # Populate height_257 with tile-varying data
     for i in range(n_tiles):
@@ -68,6 +62,9 @@ def _make_v18_store(path: Path, n_tiles: int = 2) -> Path:
         root["object_roof_confidence"][i] = np.zeros((256, 256), dtype=np.float32)
         root["shadow_mask"][i] = np.zeros((256, 256), dtype=np.float32)
         root["mcnr_mask_257"][i] = np.ones((257, 257), dtype=bool)
+        root["mcly_texture_ids"][i, :, :, 0] = 0
+        root["mcly_layer_mask"][i, :, :, 0] = 1.0
+        root["liquid_basic_type_257"][i] = np.full((257, 257), 0xFF, dtype=np.uint8)
 
     # Index
     index_table = pa.table({
@@ -76,15 +73,38 @@ def _make_v18_store(path: Path, n_tiles: int = 2) -> Path:
         "map": pa.array(["Azeroth"] * n_tiles, type=pa.string()),
         "tile_x": pa.array([30] * n_tiles, type=pa.int32()),
         "tile_y": pa.array([50] * n_tiles, type=pa.int32()),
-        "height_mean": pa.array([10.0, 11.0], type=pa.float32()),
-        "height_std": pa.array([0.0, 0.0], type=pa.float32()),
+        "height_mean": pa.array([10.0 + i for i in range(n_tiles)], type=pa.float32()),
+        "height_std": pa.array([0.0] * n_tiles, type=pa.float32()),
     })
     pq.write_table(index_table, str(path / "index.parquet"))
+
+    decoded_metadata_rows = []
+    for tile_id in range(n_tiles):
+        decoded_metadata_rows.append({
+            "tile_id": tile_id,
+            "build": "3_3_5_12340",
+            "map": "Azeroth",
+            "tile_x": 30,
+            "tile_y": 50,
+            "tile_name": f"Azeroth_{tile_id}",
+            "source_adt_path": f"World\\Maps\\Azeroth\\Azeroth_{tile_id:04d}.adt",
+            "source_wdt_path": "World\\Maps\\Azeroth\\Azeroth.wdt",
+            "raw_chunks_count": 256,
+            "decoded_metadata_json": json.dumps({
+                "mcly_texture_names": ["Tileset\\Generic\\Black.blp"],
+                "placement_mddf_count": 1 if tile_id == 0 else 0,
+                "placement_modf_count": 0,
+            }),
+            "decoded_metadata_keys_json": json.dumps(["mcly_texture_names"]),
+        })
+    pq.write_table(pa.Table.from_pylist(decoded_metadata_rows), str(path / "decoded_metadata.parquet"))
 
     # Placements
     placements_table = pa.table({
         "tile_id": pa.array([0], type=pa.int64()),
         "instance_type": pa.array(["mddf"], type=pa.string()),
+        "instance_idx": pa.array([0], type=pa.int32()),
+        "asset_path": pa.array(["World/M2/Peasant.m2"], type=pa.string()),
         "nameId": pa.array([1], type=pa.int32()),
         "uniqueId": pa.array([100], type=pa.int32()),
         "posX": pa.array([10.0], type=pa.float64()),
@@ -94,7 +114,12 @@ def _make_v18_store(path: Path, n_tiles: int = 2) -> Path:
         "rotY": pa.array([0.0], type=pa.float64()),
         "rotZ": pa.array([0.0], type=pa.float64()),
         "scale": pa.array([1.0], type=pa.float64()),
-        "asset_path": pa.array(["World/M2/Peasant.m2"], type=pa.string()),
+        "bbMinX": pa.array([0.0], type=pa.float64()),
+        "bbMinY": pa.array([0.0], type=pa.float64()),
+        "bbMinZ": pa.array([0.0], type=pa.float64()),
+        "bbMaxX": pa.array([0.0], type=pa.float64()),
+        "bbMaxY": pa.array([0.0], type=pa.float64()),
+        "bbMaxZ": pa.array([0.0], type=pa.float64()),
     })
     pq.write_table(placements_table, str(path / "placements.parquet"))
 
@@ -102,7 +127,16 @@ def _make_v18_store(path: Path, n_tiles: int = 2) -> Path:
 
 
 def _make_enrichment_stream(path: Path) -> Path:
-    """Write a minimal enrichment stream with one M2 entry."""
+    """Write a minimal enrichment stream with one M2 entry and one BLP entry."""
+    def _string_blob(values: list[str]) -> bytes:
+        blob = bytearray()
+        blob.extend(struct.pack("<i", len(values)))
+        for value in values:
+            encoded = value.encode("utf-8")
+            blob.extend(struct.pack("<i", len(encoded)))
+            blob.extend(encoded)
+        return bytes(blob)
+
     with open(path, "wb") as f:
         # Header
         f.write(b"V22E")
@@ -116,8 +150,8 @@ def _make_enrichment_stream(path: Path) -> Path:
         f.write(struct.pack("<B", 1))  # kind = M2
         f.write(struct.pack("<B", 0))  # load_error = 0
 
-        # 2 arrays: vertices (8, 3) float32, bounds (2, 3) float32
-        f.write(struct.pack("<I", 2))
+        # 4 arrays: vertices (8, 3) float32, bounds (2, 3) float32, texture paths, provenance
+        f.write(struct.pack("<I", 4))
 
         # Array 1: vertices
         vert_name = "vertices"
@@ -140,6 +174,117 @@ def _make_enrichment_stream(path: Path) -> Path:
         bnd_data = np.array([-1, -1, -1, 1, 1, 1], dtype=np.float32).tobytes()
         f.write(struct.pack("<q", len(bnd_data)))
         f.write(bnd_data)
+
+        src_name = "source_in_listfile"
+        f.write(struct.pack("<I", len(src_name)))
+        f.write(src_name.encode("utf-8"))
+        f.write(struct.pack("<I", 1))
+        f.write(struct.pack("<I", 1))
+        f.write(b"|u1" + b"\x00" * 5)
+        src_data = np.array([1], dtype=np.uint8).tobytes()
+        f.write(struct.pack("<q", len(src_data)))
+        f.write(src_data)
+
+        tex_paths_name = "texture_paths"
+        f.write(struct.pack("<I", len(tex_paths_name)))
+        f.write(tex_paths_name.encode("utf-8"))
+        m2_tex_blob = _string_blob(["Texture/PeasantDiffuse.blp", "Texture/PeasantCape.blp"])
+        f.write(struct.pack("<I", 1))
+        f.write(struct.pack("<I", len(m2_tex_blob)))
+        f.write(b"|u1" + b"\x00" * 5)
+        f.write(struct.pack("<q", len(m2_tex_blob)))
+        f.write(m2_tex_blob)
+
+        # One WMO entry with string metadata
+        f.write(b"ENTRY")
+        wmo_path = "World/WMO/Test/House.wmo"
+        f.write(struct.pack("<I", len(wmo_path)))
+        f.write(wmo_path.encode("utf-8"))
+        f.write(struct.pack("<B", 2))  # kind = WMO
+        f.write(struct.pack("<B", 0))  # load_error = 0
+        f.write(struct.pack("<I", 5))
+
+        f.write(struct.pack("<I", len(vert_name)))
+        f.write(vert_name.encode("utf-8"))
+        f.write(struct.pack("<I", 2))
+        f.write(struct.pack("<II", 3, 3))
+        f.write(b"<f4" + b"\x00" * 5)
+        wmo_vert_data = np.zeros(9, dtype=np.float32).tobytes()
+        f.write(struct.pack("<q", len(wmo_vert_data)))
+        f.write(wmo_vert_data)
+
+        f.write(struct.pack("<I", len(bnd_name)))
+        f.write(bnd_name.encode("utf-8"))
+        f.write(struct.pack("<I", 2))
+        f.write(struct.pack("<II", 2, 3))
+        f.write(b"<f4" + b"\x00" * 5)
+        f.write(struct.pack("<q", len(bnd_data)))
+        f.write(bnd_data)
+
+        mat_paths_name = "material_texture_paths"
+        f.write(struct.pack("<I", len(mat_paths_name)))
+        f.write(mat_paths_name.encode("utf-8"))
+        wmo_mat_blob = _string_blob(["Texture/Wall.blp", "Texture/Roof.blp"])
+        f.write(struct.pack("<I", 1))
+        f.write(struct.pack("<I", len(wmo_mat_blob)))
+        f.write(b"|u1" + b"\x00" * 5)
+        f.write(struct.pack("<q", len(wmo_mat_blob)))
+        f.write(wmo_mat_blob)
+
+        doodad_sets_name = "doodad_set_paths"
+        f.write(struct.pack("<I", len(doodad_sets_name)))
+        f.write(doodad_sets_name.encode("utf-8"))
+        wmo_doodad_blob = _string_blob(["Set_Default", "Set_Ruins"])
+        f.write(struct.pack("<I", 1))
+        f.write(struct.pack("<I", len(wmo_doodad_blob)))
+        f.write(b"|u1" + b"\x00" * 5)
+        f.write(struct.pack("<q", len(wmo_doodad_blob)))
+        f.write(wmo_doodad_blob)
+
+        f.write(struct.pack("<I", len(src_name)))
+        f.write(src_name.encode("utf-8"))
+        f.write(struct.pack("<I", 1))
+        f.write(struct.pack("<I", 1))
+        f.write(b"|u1" + b"\x00" * 5)
+        f.write(struct.pack("<q", len(src_data)))
+        f.write(src_data)
+
+        # One BLP tileset entry for Tileset/Generic/Black.blp
+        f.write(b"ENTRY")
+        blp_path = "Tileset/Generic/Black.blp"
+        f.write(struct.pack("<I", len(blp_path)))
+        f.write(blp_path.encode("utf-8"))
+        f.write(struct.pack("<B", 3))  # kind = BLP
+        f.write(struct.pack("<B", 0))  # load_error = 0
+        f.write(struct.pack("<I", 3))
+
+        rgb_name = "texture_rgb"
+        f.write(struct.pack("<I", len(rgb_name)))
+        f.write(rgb_name.encode("utf-8"))
+        f.write(struct.pack("<I", 3))
+        f.write(struct.pack("<III", 2, 2, 3))
+        f.write(b"|u1" + b"\x00" * 5)
+        rgb_data = np.arange(12, dtype=np.uint8).tobytes()
+        f.write(struct.pack("<q", len(rgb_data)))
+        f.write(rgb_data)
+
+        shape_name = "texture_shape"
+        f.write(struct.pack("<I", len(shape_name)))
+        f.write(shape_name.encode("utf-8"))
+        f.write(struct.pack("<I", 1))
+        f.write(struct.pack("<I", 2))
+        f.write(b"<i4" + b"\x00" * 5)
+        shape_data = np.array([2, 2], dtype=np.int32).tobytes()
+        f.write(struct.pack("<q", len(shape_data)))
+        f.write(shape_data)
+
+        f.write(struct.pack("<I", len(src_name)))
+        f.write(src_name.encode("utf-8"))
+        f.write(struct.pack("<I", 1))
+        f.write(struct.pack("<I", 1))
+        f.write(b"|u1" + b"\x00" * 5)
+        f.write(struct.pack("<q", len(src_data)))
+        f.write(src_data)
 
         # Terminator
         f.write(b"ENDS")
@@ -174,6 +319,9 @@ class TestV22ZarrWriterFromV18:
         assert tile["liquid_type_256"].shape == (256, 256)
         assert tile["ground_intent_height_257"].shape == (257, 257)
         assert tile["mddf_placement_data"].shape[0] == 1  # one placement
+        assert int(tile["mddf_count"][0]) == 1
+        assert int(tile["mddf_model_ids"][0]) == 0
+        assert np.all(tile["mcly_tileset_ids"][..., 0] == 0)
 
     def test_model_library_populated(self, tmp_path: Path):
         v18 = _make_v18_store(tmp_path / "v18", n_tiles=1)
@@ -188,7 +336,22 @@ class TestV22ZarrWriterFromV18:
         import zarr as z
         grp = z.open_group(z.storage.LocalStore(str(root_path), read_only=True), mode="r")
         assert "models" in grp
-        assert grp["models/model_paths"].shape[0] == 1
+        assert grp["models/model_paths"].shape[0] == 2
+        assert "tilesets" in grp
+        assert grp["tilesets/tileset_paths"].shape[0] == 1
+        assert grp["tilesets/tileset_paths"][0] == "Tileset/Generic/Black.png"
+        assert grp["models/World/M2/Peasant_m2/texture_paths"][:].tolist() == [
+            "Texture/PeasantDiffuse.blp",
+            "Texture/PeasantCape.blp",
+        ]
+        assert grp["models/World/WMO/Test/House_wmo/material_texture_paths"][:].tolist() == [
+            "Texture/Wall.blp",
+            "Texture/Roof.blp",
+        ]
+        assert grp["models/World/WMO/Test/House_wmo/doodad_set_paths"][:].tolist() == [
+            "Set_Default",
+            "Set_Ruins",
+        ]
 
     def test_empty_enrichment_stream_no_crash(self, tmp_path: Path):
         v18 = _make_v18_store(tmp_path / "v18", n_tiles=1)
@@ -292,3 +455,36 @@ class TestV22DatasetMetadataKeys:
         assert "map" in tile
         assert "tile_x" in tile
         assert "tile_y" in tile
+        assert tile["placement_mddf_asset_paths"] == ["World/M2/Peasant.m2"]
+        assert tile["mtex_texture_paths"] == ["Tileset/Generic/Black.png"]
+
+    def test_audit_sidecars_written(self, tmp_path: Path):
+        v18 = _make_v18_store(tmp_path / "v18", n_tiles=1)
+        enrich = _make_enrichment_stream(tmp_path / "enrich.bin")
+
+        writer = V22ZarrWriter(tmp_path / "v22", overwrite=True)
+        writer.add_from_v18(str(v18), str(enrich))
+        writer.finalize()
+
+        assert (tmp_path / "v22" / "index.parquet").exists()
+        assert (tmp_path / "v22" / "placements.parquet").exists()
+        assert (tmp_path / "v22" / "asset_inventory.parquet").exists()
+        assert (tmp_path / "v22" / "finalization.json").exists()
+
+        inventory_rows = pq.read_table(tmp_path / "v22" / "asset_inventory.parquet").to_pylist()
+        assert {
+            "asset_path": "World/M2/Peasant.m2",
+            "source_path": "World/M2/Peasant.m2",
+            "source_in_listfile": 1,
+            "source_kind": "internal_listfile",
+            "kind": "m2",
+            "load_error": 0,
+        } in inventory_rows
+        assert {
+            "asset_path": "Tileset/Generic/Black.png",
+            "source_path": "Tileset/Generic/Black.blp",
+            "source_in_listfile": 1,
+            "source_kind": "internal_listfile",
+            "kind": "texture_rgb",
+            "load_error": 0,
+        } in inventory_rows

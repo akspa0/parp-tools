@@ -18,15 +18,15 @@ Per the plan's Project Structure, all paths are under `wow-viewer/data-harvester
 
 **Purpose**: V23 package skeleton importable. CI baseline green.
 
-- [ ] T001 [P] Add `transformers>=4.40`, `peft>=0.10`, `bitsandbytes>=0.43` to `wow-viewer/data-harvester/pyproject.toml` under `[project.dependencies]`. Run `uv sync` and confirm lockfile resolves.
+- [x] T001 [P] Add `transformers>=4.40`, `peft>=0.10`, `bitsandbytes>=0.43` to `wow-viewer/data-harvester/pyproject.toml` under `[project.dependencies]`. Run `uv sync` and confirm lockfile resolves.
 - [x] T002 [P] Create `wow-viewer/data-harvester/src/harvester/v23/__init__.py` exposing public surface (`V23HeightDataset`, `V23HeightPredictor`, `V23Checkpoint`, `run_cai_inference`, `build_channel_tensor`) with `NotImplementedError` stubs.
 - [x] T003 [P] Create empty module files: `channels.py`, `dataset.py`, `encoder.py`, `head.py`, `model.py`, `losses.py`, `inference.py`, `checkpoint.py`. Each file contains only module docstring + `raise NotImplementedError` for exported classes/functions referenced by `__init__.py`.
 - [x] T004 [P] Create `wow-viewer/data-harvester/tests/v23/__init__.py` (empty). Create `tests/v23/conftest.py` that skips all tests under `tests/v23/` when not running pytest with `-m v23` (avoid noise on heritage test runs).
-- [ ] T005 Run `uv sync && uv run python -c "import harvester.v23"` and `uv run pytest -q`. Confirm exit 0 with 0 collected tests under the v23 marker. No heritage test under `wow-viewer/data-harvester/tests/` regressed.
+- [x] T005 Run `uv sync && uv run python -c "import harvester.v23"` and `uv run pytest -q`. Confirm exit 0 with 0 collected tests under the v23 marker. No heritage test under `wow-viewer/data-harvester/tests/` regressed.
 
-2026-07-03 status note: dependency declarations and the V23 package/test skeleton are source-applied. T001 and T005 remain open because local shell execution fails before command launch with `The "path" argument must be of type string. Received undefined`, so `uv sync`, import smoke, and pytest have not been executed.
+2026-07-03 status note: Phase 0 is now validated locally. The stale `.venv` was quarantined, the environment was rebuilt on `C:\Python314\python.exe`, `pyproject.toml` gained the missing `src/` packaging metadata, `uv sync` completed, `uv run python -c "import harvester.v23"` printed `import-ok`, and bare `uv run pytest -q` exited 0 with `309 skipped` (the gated v23 tests stayed out of the heritage baseline).
 
-**Checkpoint**: Pending. V23 package wiring is source-applied, but dependency install, import smoke, and CI baseline validation still need to run.
+**Checkpoint**: Complete. V23 package wiring, dependency resolution, import smoke, and baseline pytest execution are all proven locally.
 
 ---
 
@@ -38,32 +38,34 @@ Per the plan's Project Structure, all paths are under `wow-viewer/data-harvester
 
 ### Tests for User Story 1
 
-- [ ] T006 [P] [US1] Write `wow-viewer/data-harvester/tests/v23/test_channels.py` covering: (a) `CHANNEL_ORDER` constant matches the documented Spec Input Channel Contract indices 0–14 in order; (b) `build_channel_tensor(zarr_tile)` returns tensor shape `[15, 256, 256]` for synthetic input; (c) degrade mode `minimap_only` produces a 3-channel tensor with indices `[0,1,2]`; (d) degrade mode `minimap_alpha` produces a 7-channel tensor with indices `[0,1,2,3,4,5,6]`. (Tests must FAIL before implementation.)
-- [ ] T007 [P] [US1] Write `wow-viewer/data-harvester/tests/v23/test_dataset.py` covering: (a) `V23HeightDataset(store_path, build="3_3_5_12340").__getitem__(0)` returns dict with `input` shape `[15, 256, 256]`, `target` shape `[1, 257, 257]`, `valid_mask` shape `[1, 257, 257]`; (b) for a synthetic tile with `liquid_mask > 0`, target equals `liquid_height_257` at those pixels; (c) for a synthetic tile missing `normal_xyz` array when `--input-mode minimap_alpha`, input has 7 channels and `valid_mask` reflects the absent channels as False; (d) docstring on `V23HeightDataset` lists every channel index, source, dtype, normalization, fill policy.
+- [x] T006 [P] [US1] Write `wow-viewer/data-harvester/tests/v23/test_channels.py` covering: (a) `CHANNEL_ORDER` constant matches the documented Spec Input Channel Contract indices 0–14 in order; (b) `build_channel_tensor(zarr_tile)` returns tensor shape `[15, 256, 256]` for synthetic input; (c) degrade mode `minimap_only` produces a 3-channel tensor with indices `[0,1,2]`; (d) degrade mode `minimap_alpha` produces a 7-channel tensor with indices `[0,1,2,3,4,5,6]`. (Tests must FAIL before implementation.)
+- [x] T007 [P] [US1] Write `wow-viewer/data-harvester/tests/v23/test_dataset.py` covering: (a) `V23HeightDataset(store_path, build="3_3_5_12340").__getitem__(0)` returns dict with `input` shape `[15, 256, 256]`, `target` shape `[1, 257, 257]`, `valid_mask` shape `[1, 257, 257]`; (b) for a synthetic tile with `liquid_mask > 0`, target equals `liquid_height_257` at those pixels; (c) for a synthetic tile missing `normal_xyz` array when `--input-mode minimap_alpha`, input has 7 channels and `valid_mask` reflects the absent channels as False; (d) docstring on `V23HeightDataset` lists every channel index, source, dtype, normalization, fill policy.
 
 ### Implementation for User Story 1
 
-- [ ] T008 [US1] Implement `wow-viewer/data-harvester/src/harvester/v23/channels.py`:
+- [x] T008 [US1] Implement `wow-viewer/data-harvester/src/harvester/v23/channels.py`:
   - `CHANNEL_ORDER` constant (list of 15 channel-name strings in documented order).
   - `InputMode` enum (`FULL`, `MINIMAP_ONLY`, `MINIMAP_ALPHA`, `MINIMAP_ALPHA_NORMAL`).
   - `CHANNEL_INDICES` mapping from `InputMode` → list of int indices active.
   - `build_channel_tensor(zarr_tile, mode=InputMode.FULL, tileset_prune_table=None)` → torch tensor `[len(CHANNEL_INDICES[mode]), 256, 256]`.
   - Normalisation rules for `minimap_rgb` (uint8→float32 / 255.0, ImageNet mean/std) and `alpha_256` (already float32, [0,1]).
   - Tileset one-hot encoding against the prune table (top-K=256 by default).
-- [ ] T009 [US1] Implement `wow-viewer/data-harvester/scripts/build_tileset_prune_table.py`:
+- [x] T009 [US1] Implement `wow-viewer/data-harvester/scripts/build_tileset_prune_table.py`:
   - Reads a V22 store's `tilesets/tileset_paths` + all `mcly_tileset_ids` arrays.
   - Counts frequency of each unique tileset id.
   - Emits JSON `{original_id: pruned_index, ...}` sorted by frequency such that pruned indices 0..K-1 cover the top-K tilesets; everything outside maps to `K` (OOV bucket).
   - Default `--top-k 256`. Default `--builds` to all V22 builds under `--dataset-dir`.
   - Default output path `../output/datasets/v22/tileset_prune_<run>.json`.
-- [ ] T010 [US1] Implement `wow-viewer/data-harvester/src/harvester/v23/dataset.py`:
+- [x] T010 [US1] Implement `wow-viewer/data-harvester/src/harvester/v23/dataset.py`:
   - `V23HeightDataset(torch.utils.data.Dataset)` reads V22 Zarr via `harvester.v22_zarr_io`.
   - Bypass liquid-override via resampling `liquid_height_256` to `liquid_height_257` using bicubic + masking by `liquid_mask_256` resampled to 257.
   - `terrain_valid_mask_257` derived from `mcnr_mask_257 & ~liquid_mask_257 & ~object_mask_257_binarized`.
   - Degrade-mode zero-fill + per-channel `valid_mask` tracking.
   - Docstring lists every channel contract detail.
-- [ ] T011 [US1] Run `pytest tests/v23/test_dataset.py tests/v23/test_channels.py -m v23` and confirm green.
+- [x] T011 [US1] Run `pytest tests/v23/test_dataset.py tests/v23/test_channels.py -m v23` and confirm green.
 - [ ] T012 [US1] Real-data proof: locate or produce a V22 store under `wow-viewer/output/datasets/v22/3_3_5_12340.zarr/`. If absent, run `uv run python scripts/build_v18_dataset.py build --build 3_3_5_12340 --allow-zarr-write` then `uv run python scripts/build_v22_dataset.py enrich ... && uv run python scripts/build_v22_dataset.py build ...` per Spec 088 quickstart. Then run `uv run python -c "from harvester.v23 import V23HeightDataset; ds = V23HeightDataset('../output/datasets/v22/3_3_5_12340.zarr', build='3_3_5_12340'); print({k: v.shape for k, v in ds[0].items()})"` and record the printed dict in a Phase 1 validation note. Confirm shapes match documented contract.
+
+2026-07-03 status note: T006-T011 are validated locally. Syntax-only `py_compile` passed first, then `uv run pytest tests/v23/test_dataset.py tests/v23/test_channels.py -m v23 -q` passed with `10 passed`. T012 remains the only open Phase 1 task. The repo does not currently have `output/datasets/v22/3_3_5_12340.zarr`, and the bounded rebuild path is presently blocked because `dotnet build wow-viewer/tools/enrich/WowViewer.Tool.V22Enrich -c Debug` fails against current core APIs (`M2EnrichmentBuilder.cs`, `WmoEnrichmentBuilder.cs`, `Program.cs`).
 
 **Checkpoint**: US1 acceptance scenarios 1–4 pass; documented Input Channel Contract is verified against a real V22 tile.
 

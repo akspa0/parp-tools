@@ -12,10 +12,13 @@ returns the same batch keys. No ``has_*`` branches, no optional keys.
 
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 import zarr
 import zarr.codecs
@@ -223,6 +226,63 @@ def _parse_dtype(dtype_str: str) -> np.dtype:
     return mapping.get(dtype_str, np.uint8)
 
 
+def _normalize_asset_path(path: str | None) -> str:
+    """Normalize an asset path for storage and display."""
+    if not path:
+        return ""
+    normalized = str(path).replace("\\", "/").strip()
+    while "//" in normalized:
+        normalized = normalized.replace("//", "/")
+    return normalized
+
+
+def _asset_lookup_key(path: str | None) -> str:
+    """Normalize an asset path for stable lookups across placements/enrichment."""
+    return _normalize_asset_path(path).lower()
+
+
+def _dataset_texture_key(path: str | None) -> str:
+    """Normalize a decoded texture identity for the V22 dataset.
+
+    The staged source asset can still be a BLP, but the dataset stores decoded
+    texture payloads, so the in-dataset key uses a PNG-style path.
+    """
+    normalized = _normalize_asset_path(path)
+    if normalized.lower().endswith(".blp"):
+        normalized = normalized[:-4] + ".png"
+    return normalized
+
+
+def _source_kind(source_in_listfile: int | bool) -> str:
+    return "internal_listfile" if int(source_in_listfile) else "archive_unlisted"
+
+
+def _decode_string_table_blob(arr: np.ndarray | None) -> tuple[str, ...]:
+    if arr is None:
+        return ()
+    blob = np.asarray(arr, dtype=np.uint8).reshape(-1).tobytes()
+    if len(blob) < 4:
+        return ()
+
+    offset = 0
+    count = int.from_bytes(blob[offset:offset + 4], "little", signed=True)
+    offset += 4
+    if count <= 0:
+        return ()
+
+    values: list[str] = []
+    for _ in range(count):
+        if offset + 4 > len(blob):
+            break
+        length = int.from_bytes(blob[offset:offset + 4], "little", signed=True)
+        offset += 4
+        if length < 0 or offset + length > len(blob):
+            break
+        values.append(_normalize_asset_path(blob[offset:offset + length].decode("utf-8")))
+        offset += length
+    return tuple(value for value in values if value)
+
+
 # ---------------------------------------------------------------------------
 # Writer
 # ---------------------------------------------------------------------------
@@ -252,6 +312,8 @@ class V22ZarrWriter:
         self._modf_offsets: list[int] = []
         self._models: dict[str, dict[str, Any]] = {}
         self._tilesets: dict[str, dict[str, Any]] = {}
+        self._placement_rows: list[dict[str, Any]] = []
+        self._source_v18_store: str | None = None
         self._codec = codec
 
     # ── V18+enrichment → V22 ingestion ────────────────────────────
@@ -263,24 +325,35 @@ class V22ZarrWriter:
         promotes placements from V18's sidecar parquet, and reads the enrichment
         stream for per-build model and tileset libraries.
         """
-        import pandas as pd
-
         v18_store_path = Path(v18_path)
         enrich_path = Path(enrichment_path)
+        if not v18_store_path.exists():
+            raise FileNotFoundError(v18_store_path)
+
+        self._source_v18_store = str(v18_store_path)
 
         # ── 1. Read enrichment stream → populate _models, _tilesets ────
         self._ingest_enrichment_stream(enrich_path)
 
         # Build path → index lookups
-        model_path_to_idx = {p: i for i, p in enumerate(sorted(self._models.keys()))}
+        model_paths = sorted(self._models.keys(), key=str.casefold)
+        tileset_paths = sorted(self._tilesets.keys(), key=str.casefold)
+        model_path_to_idx = {_asset_lookup_key(p): i for i, p in enumerate(model_paths)}
+        tileset_path_to_idx = {_asset_lookup_key(p): i for i, p in enumerate(tileset_paths)}
 
         # ── 2. Read V18 placements.parquet ──────────────────────────
         placements_path = v18_store_path / "placements.parquet"
         mddf_by_tile: dict[int, list[dict]] = {}
         modf_by_tile: dict[int, list[dict]] = {}
         if placements_path.exists():
-            placements_df = pq.read_table(str(placements_path)).to_pandas()
-            for _, row in placements_df.iterrows():
+            placements_table = pq.read_table(str(placements_path))
+            placement_columns = {
+                name: placements_table.column(name).to_pylist()
+                for name in placements_table.column_names
+            }
+            row_count = placements_table.num_rows
+            for row_index in range(row_count):
+                row = {name: values[row_index] for name, values in placement_columns.items()}
                 tile_id = int(row.get("tile_id", -1))
                 if tile_id < 0:
                     continue
@@ -295,35 +368,66 @@ class V22ZarrWriter:
                     "rotY": float(row.get("rotY", 0)),
                     "rotZ": float(row.get("rotZ", 0)),
                     "scale": float(row.get("scale", 0)),
-                    "asset_path": str(row.get("asset_path", "") or "").replace("\\", "/").lower(),
+                    "asset_path": _normalize_asset_path(str(row.get("asset_path", "") or "")),
                     "bbMinX": float(row.get("bbMinX", 0)),
                     "bbMinY": float(row.get("bbMinY", 0)),
                     "bbMinZ": float(row.get("bbMinZ", 0)),
                     "bbMaxX": float(row.get("bbMaxX", 0)),
                     "bbMaxY": float(row.get("bbMaxY", 0)),
                     "bbMaxZ": float(row.get("bbMaxZ", 0)),
+                    "instance_idx": int(row.get("instance_idx", -1)),
                 }
                 if i_type == "mddf":
                     mddf_by_tile.setdefault(tile_id, []).append(entry)
                 elif i_type == "modf":
                     modf_by_tile.setdefault(tile_id, []).append(entry)
 
-        # ── 3. Enrichment stream entry lookups for model_ids ──────
-        def _model_index(asset_path: str) -> int:
-            if not asset_path:
-                return -1
-            return model_path_to_idx.get(asset_path, -1)
+        # ── 3. Read decoded V18 metadata sidecar ─────────────────
+        decoded_metadata_by_tile: dict[int, dict[str, Any]] = {}
+        decoded_meta_path = v18_store_path / "decoded_metadata.parquet"
+        if decoded_meta_path.exists():
+            metadata_table = pq.read_table(str(decoded_meta_path))
+            metadata_columns = {
+                name: metadata_table.column(name).to_pylist()
+                for name in metadata_table.column_names
+            }
+            for row_index in range(metadata_table.num_rows):
+                row = {name: values[row_index] for name, values in metadata_columns.items()}
+                tile_id = int(row.get("tile_id", -1))
+                payload = row.get("decoded_metadata_json", "")
+                if tile_id < 0 or not payload:
+                    continue
+                try:
+                    decoded_metadata_by_tile[tile_id] = json.loads(payload)
+                except json.JSONDecodeError:
+                    decoded_metadata_by_tile[tile_id] = {}
 
-        # ── 4. Open V18 store ─────────────────────────────────────
+        # ── 4. Enrichment stream entry lookups for model_ids ──────
+        def _model_index(asset_path: str) -> int:
+            return model_path_to_idx.get(_asset_lookup_key(asset_path), -1)
+
+        def _tileset_index(asset_path: str) -> int:
+            return tileset_path_to_idx.get(_asset_lookup_key(_dataset_texture_key(asset_path)), -1)
+
+        # ── 5. Open V18 store ─────────────────────────────────────
         v18_store = zarr.storage.LocalStore(str(v18_store_path), read_only=True)
         v18 = zarr.open_group(store=v18_store, mode="r")
         n_v18_tiles = v18["height_257"].shape[0]
 
-        # Read V18 index.parquet for per-tile metadata
+        # Read V18 index.parquet for per-tile metadata without pandas.
         v18_index_path = v18_store_path / "index.parquet"
-        v18_index: pd.DataFrame | None = None
+        v18_index_rows: list[dict[str, Any]] = []
         if v18_index_path.exists():
-            v18_index = pq.read_table(str(v18_index_path)).to_pandas()
+            index_table = pq.read_table(str(v18_index_path))
+            index_columns = {
+                name: index_table.column(name).to_pylist()
+                for name in index_table.column_names
+            }
+            for row_index in range(index_table.num_rows):
+                v18_index_rows.append({
+                    name: values[row_index]
+                    for name, values in index_columns.items()
+                })
 
         from harvester.v22_patched_signals import (
             derive_ground_intent_height_257,
@@ -340,8 +444,11 @@ class V22ZarrWriter:
             "mcnk_flags_16", "mddf_mask", "modf_mask", "object_filtered_mask",
             "object_roof_mask", "object_roof_confidence",
             "minimap_rgb", "shadow_mask", "mcly_texture_ids", "mcly_layer_mask",
-            "mcnr_mask_257",
+            "mcnr_mask_257", "liquid_basic_type_257",
         ]
+
+        mddf_cursor = 0
+        modf_cursor = 0
 
         for tile_idx in range(n_v18_tiles):
             # Build per-tile V18 dict
@@ -351,11 +458,12 @@ class V22ZarrWriter:
                     tile[key] = np.asarray(v18[key][tile_idx])
 
             # Read per-tile metadata from V18 index
-            tile_id = int(v18_index.iloc[tile_idx]["tile_id"]) if v18_index is not None else tile_idx
-            build_key = str(v18_index.iloc[tile_idx]["build"]) if v18_index is not None else ""
-            map_name = str(v18_index.iloc[tile_idx]["map"]) if v18_index is not None else ""
-            tile_x = int(v18_index.iloc[tile_idx]["tile_x"]) if v18_index is not None else 0
-            tile_y = int(v18_index.iloc[tile_idx]["tile_y"]) if v18_index is not None else 0
+            index_row = v18_index_rows[tile_idx] if tile_idx < len(v18_index_rows) else {}
+            tile_id = int(index_row.get("tile_id", tile_idx))
+            build_key = str(index_row.get("build", ""))
+            map_name = str(index_row.get("map", ""))
+            tile_x = int(index_row.get("tile_x", 0))
+            tile_y = int(index_row.get("tile_y", 0))
 
             # Derive V22-patched signals
             tile["mcnr_mask_257"] = derive_mcnr_mask_257(tile)
@@ -387,17 +495,36 @@ class V22ZarrWriter:
             # ── Placement promotion ───────────────────────────────
             tile_mddf = mddf_by_tile.get(tile_id, [])
             tile_modf = modf_by_tile.get(tile_id, [])
+            decoded_metadata = decoded_metadata_by_tile.get(tile_id, {})
 
             n_mddf = len(tile_mddf)
             n_modf = len(tile_modf)
 
-            self._mddf_offsets.append(sum(int(a.shape[0]) for a in self._mddf_data))
-            self._modf_offsets.append(sum(int(a.shape[0]) for a in self._modf_data))
+            self._mddf_offsets.append(mddf_cursor)
+            self._modf_offsets.append(modf_cursor)
+
+            mcly_tileset_ids = np.full((16, 16, 4), -1, dtype=np.int32)
+            if "mcly_texture_ids" in tile and "mcly_layer_mask" in tile:
+                local_texture_names = [
+                    _dataset_texture_key(name)
+                    for name in (decoded_metadata.get("mcly_texture_names", []) or [])
+                    if _dataset_texture_key(name)
+                ]
+                local_texture_ids = np.asarray(tile["mcly_texture_ids"], dtype=np.int32)
+                local_layer_mask = np.asarray(tile["mcly_layer_mask"], dtype=np.float32)
+                for cy in range(16):
+                    for cx in range(16):
+                        for layer in range(4):
+                            if local_layer_mask[cy, cx, layer] <= 0.0:
+                                continue
+                            texture_id = int(local_texture_ids[cy, cx, layer])
+                            if 0 <= texture_id < len(local_texture_names):
+                                mcly_tileset_ids[cy, cx, layer] = _tileset_index(local_texture_names[texture_id])
 
             if n_mddf > 0:
                 mddf = np.zeros((n_mddf, 9), dtype=np.float32)
                 uids = np.zeros(n_mddf, dtype=np.int32)
-                mids = np.zeros(n_mddf, dtype=np.int32)
+                mids = np.full(n_mddf, -1, dtype=np.int32)
                 for i, row in enumerate(tile_mddf):
                     mddf[i] = [
                         row["nameId"], row["uniqueId"],
@@ -410,11 +537,12 @@ class V22ZarrWriter:
                 self._mddf_data.append(mddf)
                 self._mddf_uids.append(uids)
                 self._mddf_model_ids.append(mids)
+                mddf_cursor += n_mddf
 
             if n_modf > 0:
                 modf = np.zeros((n_modf, 17), dtype=np.float32)
                 uids = np.zeros(n_modf, dtype=np.int32)
-                mids = np.zeros(n_modf, dtype=np.int32)
+                mids = np.full(n_modf, -1, dtype=np.int32)
                 for i, row in enumerate(tile_modf):
                     # Expand MODF from 14 → 17 columns (zero for flags/doodadSet/nameSet if missing)
                     modf[i] = [
@@ -432,19 +560,65 @@ class V22ZarrWriter:
                 self._modf_data.append(modf)
                 self._modf_uids.append(uids)
                 self._modf_model_ids.append(mids)
+                modf_cursor += n_modf
 
             # ── Tile metadata for the index ──────────────────────
-            mddf_asset_paths = [row["asset_path"] for row in tile_mddf]
-            modf_asset_paths = [row["asset_path"] for row in tile_modf]
+            mddf_asset_paths = [_normalize_asset_path(row["asset_path"]) for row in tile_mddf]
+            modf_asset_paths = [_normalize_asset_path(row["asset_path"]) for row in tile_modf]
+            mtex_paths = [
+                _dataset_texture_key(path)
+                for path in (decoded_metadata.get("mcly_texture_names", []) or [])
+                if _dataset_texture_key(path)
+            ]
 
-            # Read V18 tile-level BLP texture paths from decoded_metadata.parquet
-            mtex_paths: list[str] = []
-            decoded_meta_path = v18_store_path / "decoded_metadata.parquet"
-            if decoded_meta_path.exists():
-                meta_df = pq.read_table(str(decoded_meta_path)).to_pandas()
-                tile_meta = meta_df[meta_df["tile_id"] == tile_id]
-                if not tile_meta.empty:
-                    mtex_paths = list(tile_meta.iloc[0].get("mtex_texture_paths", []))
+            per_tile["mddf_count"] = np.asarray([n_mddf], dtype=np.int32)
+            per_tile["modf_count"] = np.asarray([n_modf], dtype=np.int32)
+            per_tile["mcly_tileset_ids"] = mcly_tileset_ids
+
+            for row in tile_mddf:
+                self._placement_rows.append({
+                    "tile_id": tile_id,
+                    "instance_type": "mddf",
+                    "instance_idx": row.get("instance_idx", -1),
+                    "asset_path": _normalize_asset_path(row["asset_path"]),
+                    "nameId": row["nameId"],
+                    "uniqueId": row["uniqueId"],
+                    "posX": row["posX"],
+                    "posY": row["posY"],
+                    "posZ": row["posZ"],
+                    "rotX": row["rotX"],
+                    "rotY": row["rotY"],
+                    "rotZ": row["rotZ"],
+                    "scale": row["scale"],
+                    "bbMinX": row["bbMinX"],
+                    "bbMinY": row["bbMinY"],
+                    "bbMinZ": row["bbMinZ"],
+                    "bbMaxX": row["bbMaxX"],
+                    "bbMaxY": row["bbMaxY"],
+                    "bbMaxZ": row["bbMaxZ"],
+                })
+            for row in tile_modf:
+                self._placement_rows.append({
+                    "tile_id": tile_id,
+                    "instance_type": "modf",
+                    "instance_idx": row.get("instance_idx", -1),
+                    "asset_path": _normalize_asset_path(row["asset_path"]),
+                    "nameId": row["nameId"],
+                    "uniqueId": row["uniqueId"],
+                    "posX": row["posX"],
+                    "posY": row["posY"],
+                    "posZ": row["posZ"],
+                    "rotX": row["rotX"],
+                    "rotY": row["rotY"],
+                    "rotZ": row["rotZ"],
+                    "scale": 1.0,
+                    "bbMinX": row["bbMinX"],
+                    "bbMinY": row["bbMinY"],
+                    "bbMinZ": row["bbMinZ"],
+                    "bbMaxX": row["bbMaxX"],
+                    "bbMaxY": row["bbMaxY"],
+                    "bbMaxZ": row["bbMaxZ"],
+                })
 
             self._tile_records.append({
                 "tile_id": tile_id,
@@ -464,19 +638,46 @@ class V22ZarrWriter:
         *,
         load_error: int = 0,
         texture_paths: tuple[str, ...] = (),
+        material_texture_paths: tuple[str, ...] = (),
+        doodad_set_paths: tuple[str, ...] = (),
+        source_path: str | None = None,
+        source_in_listfile: int | bool = 0,
     ) -> None:
+        model_path = _normalize_asset_path(model_path)
         if model_path in self._models:
             return
+        normalized_source = _normalize_asset_path(source_path or model_path)
         self._models[model_path] = {
             "payload": payload,
             "load_error": int(load_error),
-            "texture_paths": tuple(texture_paths),
+            "texture_paths": tuple(_normalize_asset_path(path) for path in texture_paths if _normalize_asset_path(path)),
+            "material_texture_paths": tuple(_normalize_asset_path(path) for path in material_texture_paths if _normalize_asset_path(path)),
+            "doodad_set_paths": tuple(_normalize_asset_path(path) for path in doodad_set_paths if _normalize_asset_path(path)),
+            "source_path": normalized_source,
+            "source_in_listfile": int(source_in_listfile),
+            "source_kind": _source_kind(source_in_listfile),
         }
 
-    def add_tileset(self, tileset_path: str, payload: dict[str, np.ndarray], *, load_error: int = 0) -> None:
-        if tileset_path in self._tilesets:
+    def add_tileset(
+        self,
+        tileset_path: str,
+        payload: dict[str, np.ndarray],
+        *,
+        load_error: int = 0,
+        source_path: str | None = None,
+        source_in_listfile: int | bool = 0,
+    ) -> None:
+        dataset_path = _dataset_texture_key(tileset_path)
+        normalized_source = _normalize_asset_path(source_path or tileset_path)
+        if dataset_path in self._tilesets:
             return
-        self._tilesets[tileset_path] = {"payload": payload, "load_error": int(load_error)}
+        self._tilesets[dataset_path] = {
+            "payload": payload,
+            "load_error": int(load_error),
+            "source_path": normalized_source,
+            "source_in_listfile": int(source_in_listfile),
+            "source_kind": _source_kind(source_in_listfile),
+        }
 
     # ── Enrichment stream ingestion ────────────────────────────
     def _ingest_enrichment_stream(self, enrichment_path: str | Path) -> None:
@@ -514,12 +715,16 @@ class V22ZarrWriter:
 
             if entry_magic == b"ENDS":
                 break
+            if offset >= len(data):
+                break
+            entry_magic += data[offset:offset + 1]
+            offset += 1
             if entry_magic != b"ENTRY":
                 break
 
             # Path
             path_len = struct.unpack_from("<I", data, offset)[0]; offset += 4
-            entry_path = data[offset:offset + path_len].decode("utf-8"); offset += path_len
+            entry_path = _normalize_asset_path(data[offset:offset + path_len].decode("utf-8")); offset += path_len
 
             # Kind + load_error
             kind_byte = data[offset]; offset += 1
@@ -549,6 +754,15 @@ class V22ZarrWriter:
                 arr = np.frombuffer(raw, dtype=dt).reshape(shape)
                 arrays[array_name] = arr
 
+            source_in_listfile_arr = arrays.pop("source_in_listfile", None)
+            source_in_listfile = 0
+            if source_in_listfile_arr is not None and np.asarray(source_in_listfile_arr).size > 0:
+                source_in_listfile = int(np.asarray(source_in_listfile_arr).reshape(-1)[0])
+
+            texture_paths = _decode_string_table_blob(arrays.pop("texture_paths", None))
+            material_texture_paths = _decode_string_table_blob(arrays.pop("material_texture_paths", None))
+            doodad_set_paths = _decode_string_table_blob(arrays.pop("doodad_set_paths", None))
+
             # Determine payload kind
             if kind_byte == 1:  # M2
                 kind_code = np.asarray([1], dtype=np.uint8)
@@ -556,7 +770,9 @@ class V22ZarrWriter:
                     entry_path,
                     {"kind": kind_code, **arrays},
                     load_error=int(load_error),
-                    texture_paths=(),
+                    texture_paths=texture_paths,
+                    source_path=entry_path,
+                    source_in_listfile=source_in_listfile,
                 )
             elif kind_byte == 2:  # WMO
                 kind_code = np.asarray([2], dtype=np.uint8)
@@ -564,21 +780,26 @@ class V22ZarrWriter:
                     entry_path,
                     {"kind": kind_code, **arrays},
                     load_error=int(load_error),
-                    texture_paths=(),
+                    texture_paths=texture_paths,
+                    material_texture_paths=material_texture_paths,
+                    doodad_set_paths=doodad_set_paths,
+                    source_path=entry_path,
+                    source_in_listfile=source_in_listfile,
                 )
             elif kind_byte == 3:  # BLP (tileset)
                 rgb_arr = arrays.get("texture_rgb")
                 shape_arr = arrays.get("texture_shape")
-                if rgb_arr is not None:
-                    payload = {
-                        "texture_rgb": rgb_arr,
-                        "texture_shape": shape_arr if shape_arr is not None else np.asarray([0, 0], dtype=np.int32),
-                    }
-                    self.add_tileset(
-                        entry_path,
-                        payload,
-                        load_error=int(load_error),
-                    )
+                payload = {
+                    "texture_rgb": rgb_arr if rgb_arr is not None else np.zeros((0, 0, 3), dtype=np.uint8),
+                    "texture_shape": shape_arr if shape_arr is not None else np.asarray([0, 0], dtype=np.int32),
+                }
+                self.add_tileset(
+                    entry_path,
+                    payload,
+                    load_error=int(load_error),
+                    source_path=entry_path,
+                    source_in_listfile=source_in_listfile,
+                )
 
         # ── Ensure all loaded entries are tracked ─────────────────
         # The stream may contain entries with kind=0 (unknown) which we skip.
@@ -645,6 +866,8 @@ class V22ZarrWriter:
         root.attrs["builds"] = sorted({r["build"] for r in self._tile_records})
         if self._tile_records:
             root.attrs["scoped_builds"] = list(V22_BUILD_IDS)
+        if self._source_v18_store:
+            root.attrs["source_v18_store"] = self._source_v18_store
 
         # Index report.
         for r in self._tile_records:
@@ -666,6 +889,8 @@ class V22ZarrWriter:
         self._write_models(root)
         # Tileset library.
         self._write_tilesets(root)
+        # Audit sidecars.
+        self._write_sidecars(index_rows)
 
         return self.store_path
 
@@ -680,7 +905,8 @@ class V22ZarrWriter:
             return
         group = root.create_group(V22_MODELS_GROUP, attributes={"kind": "per-build-model-library"})
         paths = sorted(self._models.keys())
-        group.create_array("model_paths", data=np.asarray(paths, dtype=object), object_codec=zarr.codecs.MsgPack(), chunks=(len(paths),))
+        max_len = max(len(path) for path in paths)
+        group.create_array("model_paths", data=np.asarray(paths, dtype=f"<U{max_len}"), chunks=(len(paths),))
         kinds = np.asarray(
             [int(np.asarray(self._models[p]["payload"].get("kind", 0)).reshape(-1)[0]) for p in paths],
             dtype=np.uint8,
@@ -698,7 +924,8 @@ class V22ZarrWriter:
             return
         group = root.create_group(V22_TILESETS_GROUP, attributes={"kind": "per-build-tileset-library"})
         paths = sorted(self._tilesets.keys())
-        group.create_array("tileset_paths", data=np.asarray(paths, dtype=object), object_codec=zarr.codecs.MsgPack(), chunks=(len(paths),))
+        max_len = max(len(path) for path in paths)
+        group.create_array("tileset_paths", data=np.asarray(paths, dtype=f"<U{max_len}"), chunks=(len(paths),))
         errors = np.asarray([int(self._tilesets[p]["load_error"]) for p in paths], dtype=np.uint8)
         group.create_array("load_error", data=errors, chunks=(len(paths),), compressors=self._codec)
         shapes = np.asarray(
@@ -714,7 +941,10 @@ class V22ZarrWriter:
             return
         entry = root.create_group(model_path.replace(".", "_").replace("\\", "/"), attributes={"kind": kind, "model_path": model_path})
         if model_path in self._models:
-            entry.attrs["texture_paths"] = list(self._models[model_path].get("texture_paths", ()))
+            model_record = self._models[model_path]
+            self._write_string_values(entry, "texture_paths", model_record.get("texture_paths", ()))
+            self._write_string_values(entry, "material_texture_paths", model_record.get("material_texture_paths", ()))
+            self._write_string_values(entry, "doodad_set_paths", model_record.get("doodad_set_paths", ()))
         for key, arr in payload.items():
             if key in {"kind", "texture_shape"}:
                 continue
@@ -725,6 +955,116 @@ class V22ZarrWriter:
                 chunks=_resolve_chunk(key, arr.shape),
                 compressors=self._codec,
             )
+
+    def _write_string_values(self, root: zarr.Group, name: str, values: Iterable[str]) -> None:
+        normalized = [value for value in values if value]
+        if not normalized:
+            return
+        max_len = max(len(value) for value in normalized)
+        root.create_array(
+            name,
+            data=np.asarray(normalized, dtype=f"<U{max_len}"),
+            chunks=(len(normalized),),
+        )
+
+    def _write_sidecars(self, index_rows: list[dict[str, Any]]) -> None:
+        self._write_index_sidecar(index_rows)
+        self._write_placements_sidecar()
+        self._write_asset_inventory_sidecar()
+        self._write_finalization_json(index_rows)
+
+    def _write_index_sidecar(self, index_rows: list[dict[str, Any]]) -> None:
+        if index_rows:
+            table = pa.Table.from_pylist(index_rows)
+        else:
+            table = pa.Table.from_pydict({
+                "tile_id": pa.array([], type=pa.int64()),
+                "build": pa.array([], type=pa.string()),
+                "map": pa.array([], type=pa.string()),
+                "tile_x": pa.array([], type=pa.int32()),
+                "tile_y": pa.array([], type=pa.int32()),
+                "mtex_texture_paths": pa.array([], type=pa.list_(pa.string())),
+                "placement_mddf_asset_paths": pa.array([], type=pa.list_(pa.string())),
+                "placement_modf_asset_paths": pa.array([], type=pa.list_(pa.string())),
+            })
+        pq.write_table(table, str(self.store_path / "index.parquet"))
+
+    def _write_placements_sidecar(self) -> None:
+        if self._placement_rows:
+            table = pa.Table.from_pylist(self._placement_rows)
+        else:
+            table = pa.Table.from_pydict({
+                "tile_id": pa.array([], type=pa.int64()),
+                "instance_type": pa.array([], type=pa.string()),
+                "instance_idx": pa.array([], type=pa.int32()),
+                "asset_path": pa.array([], type=pa.string()),
+                "nameId": pa.array([], type=pa.int32()),
+                "uniqueId": pa.array([], type=pa.int32()),
+                "posX": pa.array([], type=pa.float64()),
+                "posY": pa.array([], type=pa.float64()),
+                "posZ": pa.array([], type=pa.float64()),
+                "rotX": pa.array([], type=pa.float64()),
+                "rotY": pa.array([], type=pa.float64()),
+                "rotZ": pa.array([], type=pa.float64()),
+                "scale": pa.array([], type=pa.float64()),
+                "bbMinX": pa.array([], type=pa.float64()),
+                "bbMinY": pa.array([], type=pa.float64()),
+                "bbMinZ": pa.array([], type=pa.float64()),
+                "bbMaxX": pa.array([], type=pa.float64()),
+                "bbMaxY": pa.array([], type=pa.float64()),
+                "bbMaxZ": pa.array([], type=pa.float64()),
+            })
+        pq.write_table(table, str(self.store_path / "placements.parquet"))
+
+    def _write_asset_inventory_sidecar(self) -> None:
+        rows: list[dict[str, Any]] = []
+        for path, record in sorted(self._models.items(), key=lambda item: item[0].casefold()):
+            kind_code = int(np.asarray(record["payload"].get("kind", 0)).reshape(-1)[0]) if record["payload"] else 0
+            rows.append({
+                "asset_path": path,
+                "source_path": str(record.get("source_path", path)),
+                "source_in_listfile": int(record.get("source_in_listfile", 0)),
+                "source_kind": str(record.get("source_kind", "archive_unlisted")),
+                "kind": "m2" if kind_code == 1 else "wmo" if kind_code == 2 else "unknown",
+                "load_error": int(record["load_error"]),
+            })
+        for path, record in sorted(self._tilesets.items(), key=lambda item: item[0].casefold()):
+            rows.append({
+                "asset_path": path,
+                "source_path": str(record.get("source_path", "")),
+                "source_in_listfile": int(record.get("source_in_listfile", 0)),
+                "source_kind": str(record.get("source_kind", "archive_unlisted")),
+                "kind": "texture_rgb",
+                "load_error": int(record["load_error"]),
+            })
+        if rows:
+            table = pa.Table.from_pylist(rows)
+        else:
+            table = pa.Table.from_pydict({
+                "asset_path": pa.array([], type=pa.string()),
+                "source_path": pa.array([], type=pa.string()),
+                "source_in_listfile": pa.array([], type=pa.int32()),
+                "source_kind": pa.array([], type=pa.string()),
+                "kind": pa.array([], type=pa.string()),
+                "load_error": pa.array([], type=pa.int32()),
+            })
+        pq.write_table(table, str(self.store_path / "asset_inventory.parquet"))
+
+    def _write_finalization_json(self, index_rows: list[dict[str, Any]]) -> None:
+        payload = {
+            "tile_count": len(index_rows),
+            "builds": sorted({row["build"] for row in index_rows}),
+            "root_arrays": [spec.name for spec in V22_PER_TILE_SPECS],
+            "flat_arrays": [spec.name for spec in V22_FLAT_SPECS],
+            "model_count": len(self._models),
+            "tileset_count": len(self._tilesets),
+            "source_v18_store": self._source_v18_store,
+            "missing_components": [],
+        }
+        (self.store_path / "finalization.json").write_text(
+            json.dumps(payload, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     @staticmethod
     def _rmtree(path: Path) -> None:
@@ -801,15 +1141,19 @@ class V22Dataset:
         prefix = kind  # "mddf" or "modf"
         out: dict[str, np.ndarray] = {}
         offset_name = f"{prefix}_placement_offset"
+        count_name = f"{prefix}_count"
         if offset_name not in self.root:
             for spec in V22_FLAT_SPECS:
                 if spec.name.startswith(prefix + "_"):
                     out[spec.name] = np.zeros((0, *spec.shape[1:]), dtype=spec.dtype)
             return out
         offsets = self.root[offset_name][:]
-        nxt = int(offsets[index + 1]) if index + 1 < offsets.shape[0] else int(offsets[-1])
         cur = int(offsets[index])
-        length = max(0, nxt - cur)
+        if count_name in self.root:
+            length = int(np.asarray(self.root[count_name][index]).reshape(-1)[0])
+        else:
+            nxt = int(offsets[index + 1]) if index + 1 < offsets.shape[0] else int(offsets[-1])
+            length = max(0, nxt - cur)
         for spec in V22_FLAT_SPECS:
             if not spec.name.startswith(prefix + "_"):
                 continue

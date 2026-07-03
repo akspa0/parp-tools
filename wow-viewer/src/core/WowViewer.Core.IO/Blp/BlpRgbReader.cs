@@ -26,7 +26,8 @@ public static class BlpRgbReader
 
         try
         {
-            using var stream = new MemoryStream(source, writable: false);
+            AlphaBlpCompatibilityResult compatibility = AlphaBlpCompatibilityService.NormalizeForAlphaClient(virtualPath, source);
+            using var stream = new MemoryStream(compatibility.Data, writable: false);
             using var blp = new BlpFile(stream);
             using Image<Rgba32> image = blp.GetImage(0);
 
@@ -36,13 +37,8 @@ public static class BlpRgbReader
             if (width <= 0 || height <= 0)
                 return new BlpRgbResult(0, 0, null, LoadError: 1);
 
-            byte[] rgb = new byte[width * height * 3];
-            image.CopyPixelDataTo(new Span<byte>(rgb));
-            // CopyPixelDataTo writes RGBA. We need RGB only. Walk in place:
-            // Shift each pixel's R,G,B over the A byte.
-            // stride = width * 4 (RGBA). Output stride = width * 3.
-            // We iterate rows and compact each row in-place.
-            // Simplified: allocate new array, copy R,G,B only.
+            byte[] rgba = new byte[width * height * 4];
+            image.CopyPixelDataTo(rgba);
             byte[] rgbOnly = new byte[width * height * 3];
             for (int y = 0; y < height; y++)
             {
@@ -50,9 +46,9 @@ public static class BlpRgbReader
                 int dstRow = y * width * 3;
                 for (int x = 0; x < width; x++)
                 {
-                    rgbOnly[dstRow + x * 3 + 0] = rgb[srcRow + x * 4 + 0]; // R
-                    rgbOnly[dstRow + x * 3 + 1] = rgb[srcRow + x * 4 + 1]; // G
-                    rgbOnly[dstRow + x * 3 + 2] = rgb[srcRow + x * 4 + 2]; // B
+                    rgbOnly[dstRow + x * 3 + 0] = rgba[srcRow + x * 4 + 0];
+                    rgbOnly[dstRow + x * 3 + 1] = rgba[srcRow + x * 4 + 1];
+                    rgbOnly[dstRow + x * 3 + 2] = rgba[srcRow + x * 4 + 2];
                 }
             }
 

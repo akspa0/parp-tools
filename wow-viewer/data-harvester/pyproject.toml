@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=81"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "wowviewer-harvester"
 version = "0.1.0"
@@ -32,6 +36,12 @@ dev-dependencies = [
     "matplotlib>=3.8",
 ]
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.uv.sources]
 torch = { index = "pytorch-cu130" }
 
@@ -49,7 +59,7 @@ select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
 ignore = ["E501"]
 
 [tool.pytest.ini_options]
-testpaths = ["src/harvester"]
+testpaths = ["tests", "src/harvester"]
 markers = [
     "v23: Spec 089 V23 height predictor tests",
 ]

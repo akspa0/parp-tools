@@ -641,3 +641,4 @@ wow-viewer/data-harvester/models/*
 wow-viewer/from_cloud/*
 *.npz
 .omo/*
+wow-viewer/data-harvester/tmp/*
