@@ -317,10 +317,16 @@ public sealed class NativeMpqService : IArchiveCatalog
         uint nameA = HashString(normalized, HashNameA);
         uint nameB = HashString(normalized, HashNameB);
 
-        for (uint i = 0; i < archive.HashTable.Length; i++)
+        uint probeLimit = Math.Min((uint)archive.HashTable.Length, 256u);
+        uint probes = 0;
+        for (uint i = 0; i < archive.HashTable.Length && probes < probeLimit; i++)
         {
             var entry = archive.HashTable[(hashIndex + i) % archive.HashTable.Length];
-            if (entry.BlockIndex == HashEntryEmpty) break;
+            if (entry.BlockIndex == HashEntryEmpty)
+            {
+                probes++;
+                continue;
+            }
             if (entry.BlockIndex == HashEntryDeleted) continue;
 
             if (entry.Name1 == nameA && entry.Name2 == nameB && entry.BlockIndex < archive.BlockTable.Length)

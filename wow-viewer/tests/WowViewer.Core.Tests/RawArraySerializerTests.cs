@@ -45,6 +45,24 @@ public sealed class RawArraySerializerTests
             PlacementModfData = new float[,] { { 9, 202, 10, 11, 12, 13, 14, 15, -1, -2, -3, 4, 5, 6 } },
             PlacementMddfNames = BuildNameTable(7, "World/Generic/PassiveDoodads/Test/Test.m2"),
             PlacementModfNames = BuildNameTable(9, "World/Wmo/Test/Test.wmo"),
+            PerTileModelPayloads = new Dictionary<string, V22ModelPayload>
+            {
+                ["World/M2/Test.m2"] = new V22ModelPayload
+                {
+                    Kind = V22ModelPayload.ModelKind.M2,
+                    LoadError = 0,
+                    CanonicalPath = "World/M2/Test.m2",
+                    RawArrays = new Dictionary<string, Array>
+                    {
+                        ["vertices"] = new float[4, 3],
+                        ["triangles"] = new int[2, 3],
+                        ["normals"] = new float[4, 3],
+                        ["bounds"] = new float[2, 3],
+                        ["render_flags"] = new uint[1],
+                        ["blend_modes"] = new byte[1],
+                    }
+                }
+            },
         };
 
         using MemoryStream stream = new();
@@ -66,6 +84,7 @@ public sealed class RawArraySerializerTests
         Assert.Contains("mddf_model_ids", arrays.Keys);
         Assert.Contains("modf_model_ids", arrays.Keys);
         Assert.Contains("tileset_texture_rgb_0", arrays.Keys);
+        Assert.True(arrays.Keys.Any(k => k.StartsWith("m2_model_") && k.EndsWith("_vertices")), "Missing m2_model_*_vertices");
         Assert.DoesNotContain("mcnr_normal_xyz", arrays.Keys);
         Assert.DoesNotContain("mcal_alpha_pack_256", arrays.Keys);
         Assert.Equal([1, 17], arrays["modf_placement_data"].Shape);

@@ -279,6 +279,9 @@ public sealed class TerrainTileTensorPack
 
     // ── Placement data ──────────────────────────────────────────────────────
 
+    /// <summary>MDDF (M2) and MODF (WMO) model payloads for the V22 stream, keyed by canonical path.</summary>
+    public IReadOnlyDictionary<string, V22ModelPayload>? PerTileModelPayloads { get; init; }
+
     /// <summary>Number of MDDF (M2 model) placements on this tile.</summary>
     public int PlacementMddfCount { get; init; }
 

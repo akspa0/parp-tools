@@ -1,6 +1,10 @@
 # V22 Dataset Signal And Store Contract
 
-> Canonical schema freeze for Spec 086. V22 replaces V18 plus patch scripts, placement side paths, live MPQ asset reparsing, and decoded-texture sidecars with one Zarr-backed dataset. The C# harvester pre-decodes signals into a binary V22 stream; the Python Zarr package writes and reads the canonical dataset. Consumers load decoded data from Zarr instead of the client.
+> Canonical schema freeze. V22 replaces V18 plus patch scripts, placement side paths, live MPQ asset reparsing, and decoded-texture sidecars with one Zarr-backed dataset. The C# enrich tool pre-decodes M2 / WMO / BLP payloads from the staged client; the Python Zarr package writes and reads the canonical dataset. Consumers load decoded data from Zarr instead of the client.
+
+## Implementation Status
+
+> **Implementation lives in Spec 088 `088-v22-enrichment-from-v18`**, not Spec 086. Spec 086 and Spec 087 are superseded (see `specs/086-v22-consolidated-dataset/SUPERSEDED.md` and `specs/087-v22-asset-library-payloads/SUPERSEDED.md`). Spec 088 takes a different shape: V18 is the substrate, untouched. A new C# `WowViewer.Tool.V22Enrich` tool decodes each unique M2 / WMO / BLP once into a stable-path-keyed binary stream; the rewritten Python `build_v22_dataset.py` reads V18 + the enrichment stream and writes the V22 Zarr store. No per-tile model payloads in the C# harvester. No `Path.GetHashCode()` keys. The V22 store layout, model library layout, tileset library layout, and root arrays documented in this contract are implemented by Spec 088 exactly as specified here.
 
 ## Scope
 

@@ -25,6 +25,8 @@ Specs moved here are obsolete (superseded by later work, replaced by refactored 
 | 027 | Object multi-angle LoRA — V16 era |
 | 050 | PM4 WMO group matching — consolidated into 046 |
 | 052 | PM4 signature matcher — consolidated into 046 |
+| 086 | V22 consolidated dataset (per-tile stream) — never produced a populated store; C# three-message-class producer was never written; superseded by 088 (V18 substrate + separate enrich tool) |
+| 087 | V22 asset library payloads (per-tile, `Path.GetHashCode()` keys) — non-deterministic keys break cross-run dedup; per-tile design duplicates payloads; superseded by 088 (stable canonical path keys + build-wide library) |
 
 | 005 | PM4 workbench cleanup — targets legacy MdxViewer; all PM4 work now in wow-viewer specs (046/058) |
 | 020 | Renderer culling — subsumed by 056 (GPU/LOD modernization) |
@@ -33,9 +35,24 @@ Specs moved here are obsolete (superseded by later work, replaced by refactored 
 | 033 | MdxViewer migration — complete per user 2026-06-14. All viewer/renderer work now in wow-viewer; gillijimproject_refactor is read-only reference. |
 | 037 | M2 3.0.1 embedded-views adapter — implemented per user. |
 | 041 | MH2O/MCLQ liquid type fix — implemented per user (McnkFlagDecoder + tests exist). |
-| 043 | M2 chunked MDX classic support — implemented per user (MDLX reader/dispatcher landed). |
+| 043 | M2 chunked MDLX classic support — implemented per user (MDLX reader/dispatcher landed). |
 | 059 | M2 MD20 v109 Cata support — implemented 2026-06-11; Cataclysm M2 objects verified working |
 
 ## Completed specs (referenced from archive, available in active specs directory)
 
 Specs 012, 014, 024, 025, 033, 034, 037, 041, 043, 047, 048, 059, 060 are fully complete and live in the active specs directory (or archived after completion).
+
+## Supersession note for 086/087
+
+The contents of `specs/086-v22-consolidated-dataset/` and `specs/087-v22-asset-library-payloads/` remain on disk with a `SUPERSEDED.md` redirect. They are NOT physically moved into `archived/` because:
+
+1. They reference an active branch state and git history for the partial work that was done.
+2. Spec 088 directly supersedes them and cites both as predecessors in its `spec.md` "Supersedes" header.
+3. The redirect `SUPERSEDED.md` makes the supersession visible to anyone navigating the spec list.
+
+If the user wants physical archival, run:
+```
+mv specs/086-v22-consolidated-dataset specs/archived/086-v22-consolidated-dataset
+mv specs/087-v22-asset-library-payloads specs/archived/087-v22-asset-library-payloads
+```
+and update the directory paths in `088-v22-enrichment-from-v18/spec.md`. This is intentionally deferred to the user because it requires a git history decision.

@@ -88,6 +88,40 @@ dotnet run --project tools/harvest -c Debug -- harvest-map-mpq --client-root <st
 dotnet run --project tools/harvest -c Debug -- harvest-dataset --client-root <staged> --builds <build1,build2> --output <zarr-store>
 ```
 
+### V22 stream seam (Spec 086)
+
+Preferred operator path: use the Python builder as the single entrypoint and let it call the C# harvester for you.
+
+```powershell
+cd wow-viewer/data-harvester
+uv run python scripts/build_v22_dataset.py harvest-build --client-root ../../output/tmp/wowarchive-clients/3_3_5_12340 --map Azeroth --limit 1 --output ../output/datasets/v22/3_3_5_12340_smoke.zarr
+
+uv run python scripts/inspect_v22_dataset.py summary --store ../output/datasets/v22/3_3_5_12340_smoke.zarr
+uv run python scripts/inspect_v22_dataset.py tile --store ../output/datasets/v22/3_3_5_12340_smoke.zarr --tile-index 0 --output-json ../output/tmp/v22_tile_0.json
+```
+
+Low-level seam (still supported): `harvest-stream` is a **binary stdout producer**, not a direct dataset writer. It emits raw V22 tile blobs to standard output and can still be redirected to a file before the Python Zarr writer consumes it.
+
+```powershell
+# 1. Emit the raw V22 stream to a file (stdout redirected)
+cmd /c "dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest -c Debug -- harvest-stream --stream-profile v22 --client-root output/tmp/wowarchive-clients/3_3_5_12340 --map Azeroth --limit 1 1> output\tmp\v22_stream.bin 2> output\tmp\v22_stream.log"
+
+# 2. Build the V22 Zarr store from that stream
+cd wow-viewer/data-harvester
+uv run python scripts/build_v22_dataset.py build --stream ../output/tmp/v22_stream.bin --output ../output/datasets/v22/3_3_5_12340_smoke.zarr
+
+# 3. Inspect the resulting store
+uv run python scripts/inspect_v22_dataset.py summary --store ../output/datasets/v22/3_3_5_12340_smoke.zarr
+uv run python scripts/inspect_v22_dataset.py tile --store ../output/datasets/v22/3_3_5_12340_smoke.zarr --tile-index 0 --output-json ../output/tmp/v22_tile_0.json
+```
+
+Notes:
+
+- Use `--limit`, **not** `--tile-limit`, on `harvest-stream`.
+- `harvest-stream` does **not** write `--output`; stdout redirection is the transport seam.
+- `build_v22_dataset.py harvest-build` is now the canonical single-command operator path.
+- `build_v22_dataset.py build` remains the low-level "I already have a stream file" entrypoint.
+
 ---
 
 ## 4. Headless Validation Capture (`WowViewer.Tool.ValidationCapture`)

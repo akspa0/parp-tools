@@ -204,15 +204,9 @@ public static class RawArraySerializer
         WriteArray(outputStream, "modf_model_ids", ExtractPlacementColumnAsInt(pack.PlacementModfData, 0));
 WriteArray(outputStream, "mddf_count", new[] { pack.PlacementMddfCount });
         WriteArray(outputStream, "modf_count", new[] { pack.PlacementModfCount });
-        WriteArray(outputStream, "model_above_terrain_mask",
+WriteArray(outputStream, "model_above_terrain_mask",
             BuildModelAboveTerrainMask(pack.PlacementMddfData, pack.PlacementModfData, pack.Height257,
                 pack.TileX ?? 0, pack.TileY ?? 0));
-
-        if (pack.MclyTexturePixels is { Count: > 0 } pixels)
-        {
-            for (int i = 0; i < pixels.Count; i++)
-                WriteArray(outputStream, $"tileset_texture_rgb_{i}", pixels[i]);
-        }
     }
 
     private static void WriteArray(Stream stream, string name, Array? array)
@@ -675,7 +669,7 @@ WriteArray(outputStream, "mddf_count", new[] { pack.PlacementMddfCount });
         sb.Append($"\"object_roof_mask_source\":\"{Escape(pack.ObjectRoofMaskSource)}\",");
 
         sb.Append($"\"placement_mddf_count\":{pack.PlacementMddfCount},");
-        sb.Append($"\"placement_modf_count\":{pack.PlacementModfCount}");
+        sb.Append($"\"placement_modf_count\":{pack.PlacementModfCount},");
 
         sb.Append('}');
         return sb.ToString();

@@ -36,10 +36,11 @@ static class Program
     }
 
     private readonly record struct HarvestTileJob(int Order, int TileX, int TileY);
-    private readonly record struct HarvestTileResult(int Order, byte[]? Blob, bool HadError);
+    private readonly record struct HarvestTileResult(int Order, byte[]? Blob, bool HadError, string? ErrorMessage);
 
     static int Main(string[] args)
     {
+        Environment.ExitCode = 0;
         if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
         {
             ShowUsage();
@@ -78,7 +79,7 @@ static class Program
                 return 1;
         }
 
-        return 0;
+        return Environment.ExitCode;
     }
 
     static void ShowUsage()
@@ -125,6 +126,8 @@ static class Program
             Environment.ExitCode = 1;
             return;
         }
+
+        clientRoot = ResolveGameClientRoot(clientRoot);
 
         using var catalog = new NativeMpqService();
         catalog.LoadArchives([clientRoot]);
@@ -454,6 +457,8 @@ static class Program
             return;
         }
 
+        clientRoot = ResolveGameClientRoot(clientRoot);
+
         string? buildVersion = DetectBuildVersionFromClientRoot(clientRoot);
         Console.WriteLine($"Build version: {buildVersion ?? "(unknown)"}");
 
@@ -528,6 +533,8 @@ static class Program
             return;
         }
 
+        clientRoot = ResolveGameClientRoot(clientRoot);
+
         // Redirect Console.Out to stderr so stdout is pure binary
         var originalOut = Console.Out;
         Console.SetOut(Console.Error);
@@ -550,6 +557,7 @@ static class Program
 
         int extracted = 0;
         int errors = 0;
+        string? firstError = null;
         var stdout = Console.OpenStandardOutput();
         bool isAlpha = AlphaWdtReader.IsAlphaWdt(wdtBytes);
 
@@ -573,6 +581,7 @@ static class Program
                     if (result.HadError)
                     {
                         errors++;
+                        firstError ??= result.ErrorMessage;
                         continue;
                     }
                     if (result.Blob is null)
@@ -617,6 +626,7 @@ static class Program
                 if (result.HadError)
                 {
                     errors++;
+                    firstError ??= result.ErrorMessage;
                     continue;
                 }
                 if (result.Blob is null)
@@ -639,6 +649,10 @@ static class Program
         stdout.Flush();
 
         Console.Error.WriteLine($"Streamed {extracted} tiles, {errors} errors");
+        if (firstError is not null)
+            Console.Error.WriteLine($"First harvest-stream tile error: {firstError}");
+        if (extracted == 0)
+            Environment.ExitCode = 1;
     }
 
     private static HarvestTileResult HarvestStreamTileWorker(
@@ -656,11 +670,12 @@ static class Program
             return new HarvestTileResult(
                 job.Order,
                 TryBuildHarvestStreamBlob(catalog, clientRoot, mapName, wdtBytes, isAlpha, buildVersion, streamProfile, job.TileX, job.TileY),
-                false);
+                false,
+                null);
         }
-        catch
+        catch (Exception ex)
         {
-            return new HarvestTileResult(job.Order, null, true);
+            return new HarvestTileResult(job.Order, null, true, $"tile ({job.TileX},{job.TileY}): {ex.Message}");
         }
     }
 
@@ -768,6 +783,8 @@ static class Program
             Environment.ExitCode = 1;
             return;
         }
+
+        clientRoot = ResolveGameClientRoot(clientRoot);
 
         string? buildVersion = DetectBuildVersionFromClientRoot(clientRoot);
 
@@ -1534,6 +1551,20 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
 
         string versionString = dirName.Replace('_', '.');
         return ClientBuildKey.TryParse(versionString, out _) ? versionString : null;
+    }
+
+    static string ResolveGameClientRoot(string clientRoot)
+    {
+        string normalizedRoot = clientRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string dataDir = Path.Combine(normalizedRoot, "Data");
+        if (Directory.Exists(dataDir))
+            return normalizedRoot;
+
+        string nestedGameRoot = Path.Combine(normalizedRoot, "World of Warcraft");
+        if (Directory.Exists(Path.Combine(nestedGameRoot, "Data")))
+            return nestedGameRoot;
+
+        return normalizedRoot;
     }
 
     static string? GetOption(string[] args, string name, string shortName)

@@ -1,6 +1,102 @@
 # Progress — wow-viewer
 
+# 2026-07-03 - Spec 089 Speckit planning pack completed
+
+- Added the missing Phase 0/1 planning artifacts under `specs/089-dav2-height-predictor/`: `research.md`, `data-model.md`, `quickstart.md`, and `contracts/`.
+- Updated `specs/089-dav2-height-predictor/plan.md` and `tasks.md` so the pack no longer claims those artifacts are absent.
+- Repointed `wow-viewer/.specify/feature.json` from stale spec 056 to spec 089 so Spec Kit routing works on the non-feature branch.
+- Status is unchanged on implementation: Phase 0 code wiring exists, but `uv sync`, import smoke, and pytest are still the gate before any Phase 1 work.
+
+# 2026-07-03 - Spec 089 V23 Phase 0 source wiring started
+
+- Added the V23 package skeleton under `data-harvester/src/harvester/v23/`, exposed the planned public symbols, added placeholder modules for channels/dataset/encoder/head/model/losses/inference/checkpoint, declared `peft` + `bitsandbytes`, and created gated empty `tests/v23` wiring.
+- Updated `specs/089-dav2-height-predictor/tasks.md`: T002-T004 are checked; T001 and T005 remain open because validation could not run.
+- Blocker: every shell command, including `pwd` and `uv run python -c "import harvester.v23"`, fails before execution with `The "path" argument must be of type string. Received undefined`. basedpyright LSP is also unavailable, so Phase 0 is source-complete but not validated.
+- Next: fix/restore shell execution, run `uv sync`, import smoke, and pytest from `wow-viewer/data-harvester`; do not start Phase 1 until those pass.
+
+# 2026-06-30 - Spec 088 V22 Enrichment From V18 landed (086/087 superseded)
+
+## What changed
+
+- Spec 088 `088-v22-enrichment-from-v18` replaces Spec 086 and Spec 087. The per-tile V22 stream design (086) and the per-tile model library payloads with `Path.GetHashCode()` keys (087) never produced a populated `models/` or `tilesets/` group. Spec 088 takes a different shape: V18 is the substrate, untouched. A new C# `WowViewer.Tool.V22Enrich` tool reads a finished V18 store, decodes every unique M2 / WMO / BLP exactly once via existing `M2GeometryReader` / `M2SkinReader` / `WmoRenderDocumentReader` / a new `BlpRgbReader` wrapper around `AlphaBlpCompatibilityService`, and writes a stable-path-keyed binary enrichment stream. The rewritten Python `build_v22_dataset.py` reads V18 + the enrichment stream and writes the V22 Zarr store.
+- `specs/088-v22-enrichment-from-v18/{spec,plan,tasks,data-model,quickstart}.md` are written. Tasks: 10 phases, 41 bite-sized tasks. Each task is independently completable in 1-3 tool calls.
+- `specs/086-v22-consolidated-dataset/SUPERSEDED.md` and `specs/087-v22-asset-library-payloads/SUPERSEDED.md` redirect to 088 with rationale. `specs/archived/ARCHIVED.md` updated with entries for both.
+- `data-harvester/README.md` V22 section rewritten with the new two-tool operator flow (`enrich` + `build` subcommands).
+- `docs/architecture/v22-dataset-signals-2026-06-30.md` now carries an Implementation Status header pointing to Spec 088 as the implementation. The V22 contract doc itself (root arrays, model library layout, tileset library layout, placement arrays) is unchanged.
+- `memory-bank/activeContext.md` V22 entry rewritten to reflect 088 as the active design. The "Spec 086 V22 schema freeze complete" header is replaced.
+- FR-004 of Spec 088: the broken per-tile model payload emission in `RawArraySerializer.WriteV22Arrays` (the `Path.GetHashCode()` block) is to be reverted as Phase 1 of the implementation. This is the only existing code shape change; it removes the broken path so the C# harvester cannot accidentally produce a non-deterministic-keyed V22 stream.
+
+## Why
+
+- Specs 086 and 087 emitted per-tile model payloads in the C# harvester stream and expected Python to dedupe them into a per-build library. The C# side never produced the three-message-class stream (tile / model-library / tileset-library) the spec required, and `Path.GetHashCode()` is randomized per process in .NET 6+ (so dedup across runs was impossible even if the producer had existed). Result: zero populated `models/` or `tilesets/` groups in any V22 store, no end-to-end real-data build ever succeeded.
+- Spec 088 uses stable canonical path keys (via `M2ModelIdentity.NormalizePath`) and a build-wide library (one entry per unique path), not per-tile. The C# enrich tool decodes each unique asset once and writes a separate enrichment stream; the Python Zarr writer accumulates per-build from that stream.
+
+## Validation
+
+- No real-data build yet. The bounded real-data proof (Phase 9 of `tasks.md`) is the gate that 086/087 never crossed. It runs `build_v22_dataset.py enrich` + `build_v22_dataset.py build` + `inspect_v22_dataset.py summary` against staged `3_3_5_12340` Azeroth with `--limit 1` and asserts `tile_count == 1`, `model_count > 0`, `tileset_count > 0`. Repeat for `0_5_3_3368` and `4_0_0_11927`.
+- Phase 1 (revert broken V22 stream profile) is unblocked; can start immediately since it has no dependencies.
+- Phase 2 (BlpRgbReader) and Phase 3 (EnrichmentStreamFormat) can run in parallel.
+
+## Next
+
+- Start Phase 1: revert the per-tile model payload block in `RawArraySerializer.WriteV22Arrays`. Confirm `dotnet build` and `dotnet test` on `WowViewer.Core.Tests` pass.
+- Start Phase 2 and Phase 3 in parallel: `BlpRgbReader` + tests, `EnrichmentStreamFormat` + tests.
+- Phase 4: `V18StorePlacementsReader` + tests on synthetic parquet.
+- Phase 5: `WowViewer.Tool.V22Enrich` CLI. Real-data gate: tool runs on `3_3_5_12340` Azeroth with `--limit 1` and produces a non-empty stream.
+- Phase 6: pure-Python `v22_patched_signals` module.
+- Phase 7: refactor `v22_zarr_io.py` to use `add_from_v18` instead of `add_tile`.
+- Phase 8: rewrite `build_v22_dataset.py` with `enrich` + `build` + `stats` subcommands.
+- Phase 9: bounded real-data proof on the three scoped builds.
+- Phase 10: memory bank + data-harvester README + architecture doc are already updated in this entry. (FR-038, FR-039, T1001-T1004 of the spec are done.)
+
+## Stale-reference follow-up
+
+- Manual follow-up: grep the active specs directory and remaining memory-bank files for references to `086-v22-consolidated-dataset` or `087-v22-asset-library-payloads` and replace with 088 references. The bash tool failed with "The 'path' argument must be of type string" in this session, so automated grep was unavailable. Known candidate files to spot-check: `specs/077-minimap-deconstruction-engine/{spec,plan,tasks}.md`, `specs/076-full-map-fractal-brush-library/{spec,plan,tasks}.md`, and the remaining `memory-bank/progress.md` body. The `data-harvester/README.md`, `activeContext.md`, and architecture doc are confirmed updated.
+
 # 2026-06-30 - Spec 086 C# V22 stream profile started
+
+## 2026-06-30 - Archive-backed harvest WDT lookup repair pending validation
+
+### What changed
+
+- Fixed `NativeMpqService.FindFileInArchive()` to continue probing past `HashEntryEmpty` slots with a bounded 256-entry window, matching the known Blizzard MPQ mid-chain-empty behavior already documented in legacy notes.
+- Fixed `WowViewer.Tool.Harvest` client-root resolution so staged build directories like `output/tmp/wowarchive-clients/3_3_5_12340` automatically resolve to `output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft` when that nested game root exists.
+- This specifically targets the regression where `harvest-stream` failed immediately with `Could not read WDT 'World\\Maps\\Azeroth\\Azeroth.wdt' from client.` before any V22 tile serialization logic ran.
+
+### Validation
+
+- No local rerun here by user request. Required manual proof is a rebuild plus the same `harvest-stream --stream-profile v22 --client-root output/tmp/wowarchive-clients/3_3_5_12340 --map Azeroth ...` command that previously failed.
+
+### Next
+
+- Rebuild `wow-viewer/WowViewer.slnx`.
+- Rerun the bounded Azeroth V22 stream command against staged `3_3_5_12340` and confirm the WDT now resolves.
+
+## 2026-06-30 - V22 Zarr inspection surface added
+
+### What changed
+
+- Confirmed the `.stream` / `.bin` file is the intended pre-Zarr transport seam for Spec 086, not the final dataset artifact.
+- Fixed `data-harvester/scripts/build_v22_dataset.py` so `_parse_tile_blob()` emits exactly one `V22TileRecord` per tile blob instead of incorrectly appending one record per array inside a tile.
+- Added `build_v22_dataset.py harvest-build` so V22 once again has a single-script operator path: point it at `--client-root`, `--map`, `--limit`, and `--output`, and it runs the C# `harvest-stream` command internally before writing the final Zarr store.
+- Added `data-harvester/scripts/inspect_v22_dataset.py` with:
+  - `summary --store <zarr>` for store-level JSON (tile count, builds, root arrays, flat arrays, model count, tileset count, sample tile refs)
+  - `tile --store <zarr> --tile-index N|--tile-id N` for single-tile JSON metadata plus per-array shape/dtype/nonzero/min/max/mean stats
+- Updated `docs/CLI-TOOLS.md` and `data-harvester/README.md` with the explicit V22 operator flow: stdout stream redirection -> `build_v22_dataset.py build` -> `inspect_v22_dataset.py`.
+- Updated `docs/CLI-TOOLS.md` and `data-harvester/README.md` again to make `build_v22_dataset.py harvest-build` the canonical operator path and demote the raw `.stream` flow to a debugging seam.
+- Extended `tests/test_v22_zarr_io.py` to cover the one-record-per-tile stream parser contract and the new Zarr inspection summaries.
+- Real-user smoke surfaced additional V22 writer defects and they are now patched in code: wrong `harvester` import root (`data-harvester/src` was not on `sys.path`), wrong per-tile chunk rank in Zarr writes, model/tileset library payloads being silently dropped on the Python side, tileset RGB payloads not being written even when captured, and duplicate per-model asset-entry writes.
+- Real-user smoke also surfaced a wrapper/CLI failure-mode bug: `build_v22_dataset.py harvest-build` could finalize an empty store when the C# harvest step failed upstream because `WowViewer.Tool.Harvest` always returned process exit code `0` and the Python side treated zero parsed records as success. Fixed by making `Main()` return `Environment.ExitCode`, making the Python wrapper resolve relative client-root paths against the real workspace roots, and raising if zero V22 tile records are parsed.
+- Follow-up real-user smoke suggests `dotnet run` itself was likely polluting stdout for a binary stream command. The Python wrapper now prefers invoking the built `WowViewer.Tool.Harvest.dll` directly; fallback `dotnet run` now uses `--no-build`, and the parser will skip leading non-stream bytes before the first outer `ARRY` magic if any host chatter still leaks through.
+
+### Validation
+
+- No local Python run here by user request. Required manual proof is: rerun `build_v22_dataset.py harvest-build ...` with the corrected staged-client root, then inspect `summary` output for a non-trivial `tile_count`, plus non-zero `model_count` and `tileset_count`. If harvest still fails, the wrapper should now stop with a real error and point at the harvest log.
+
+### Next
+
+- Build one bounded real V22 store from staged `3_3_5_12340` via `harvest-build`.
+- Inspect tile 0 JSON to confirm metadata, placement arrays, per-array stats, and asset-library entry counts look sane before moving on to broader model/tileset library work.
 
 ## What changed
 

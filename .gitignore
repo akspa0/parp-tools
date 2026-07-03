@@ -640,3 +640,4 @@ __pycache__/
 wow-viewer/data-harvester/models/*
 wow-viewer/from_cloud/*
 *.npz
+.omo/*

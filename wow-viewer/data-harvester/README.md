@@ -377,6 +377,86 @@ against an already finalized store.
 
 ## Build Dataset
 
+## Spec 088 — V22 Enrichment From V18 Quickstart
+
+V22 is built on top of an existing V18 Zarr store. The C# `WowViewer.Tool.V22Enrich` tool decodes every unique M2 / WMO / BLP referenced by the V18 store's placements; the rewritten Python `build_v22_dataset.py` consumes that enrichment stream and writes the V22 Zarr store. V18 itself is not touched.
+
+**Why this design**: Spec 086 and Spec 087 tried to emit per-tile model payloads in the C# harvester stream and dedupe them Python-side. The C# producer was never finished (no three-message-class stream, no per-build library) and the model library used `Path.GetHashCode()` (non-deterministic in .NET 6+). Result: zero populated `models/` or `tilesets/` groups in any V22 store, no end-to-end real-data build ever succeeded. Spec 088 supersedes both with a stable-path-keyed, build-wide, separate-enrichment-pass design. See `specs/086-v22-consolidated-dataset/SUPERSEDED.md` and `specs/087-v22-asset-library-payloads/SUPERSEDED.md`.
+
+### Step 1 — Build the V18 store (substrate)
+
+```powershell
+cd wow-viewer/data-harvester
+uv run python scripts/build_v18_dataset.py build --build 3_3_5_12340 --limit 1
+```
+
+### Step 2 — Build the enrichment stream
+
+```powershell
+cd wow-viewer/data-harvester
+uv run python scripts/build_v22_dataset.py enrich `
+    --v18-store ../output/datasets/v18/3_3_5_12340.zarr `
+    --client-root ../output/tmp/wowarchive-clients/3_3_5_12340 `
+    --enrichment-output ../output/tmp/v22_enrich/3_3_5_12340.bin `
+    --build-key 3_3_5_12340 `
+    --limit 1
+```
+
+This shells out to `WowViewer.Tool.V22Enrich`, which reads the V18 store's `placements.parquet`, walks unique asset paths, and decodes each M2 / WMO / BLP exactly once. Stable canonical path keys (no `GetHashCode()`). Corrupt or missing assets emit `load_error = 1` and are skipped, not fatal.
+
+### Step 3 — Build the V22 Zarr store
+
+```powershell
+cd wow-viewer/data-harvester
+uv run python scripts/build_v22_dataset.py build `
+    --v18-store ../output/datasets/v18/3_3_5_12340.zarr `
+    --enrichment ../output/tmp/v22_enrich/3_3_5_12340.bin `
+    --output ../output/datasets/v22/3_3_5_12340.zarr
+```
+
+The Python builder reads V18 as the substrate, derives the 5 V22 patched signals in pure Python (matches C# reference algorithms in `RawArraySerializer.cs`), promotes V18 placements to native V22 flat arrays, consumes the enrichment stream, and writes a V22 Zarr store with populated `models/` and `tilesets/` groups.
+
+### Step 4 — Inspect the V22 store
+
+```powershell
+cd wow-viewer/data-harvester
+
+# Store-level summary
+uv run python scripts/inspect_v22_dataset.py summary `
+    --store ../output/datasets/v22/3_3_5_12340.zarr
+
+# Single-tile detail
+uv run python scripts/inspect_v22_dataset.py tile `
+    --store ../output/datasets/v22/3_3_5_12340.zarr `
+    --tile-index 0 `
+    --output-json ../output/tmp/v22_tile_0.json
+```
+
+### One-Command Operator Surface
+
+```powershell
+cd wow-viewer/data-harvester
+uv run python scripts/build_v22_dataset.py enrich `
+    --v18-store ../output/datasets/v18/3_3_5_12340.zarr `
+    --client-root ../output/tmp/wowarchive-clients/3_3_5_12340 `
+    --enrichment-output ../output/tmp/v22_enrich/3_3_5_12340.bin `
+    --build-key 3_3_5_12340 `
+    --limit 1 `
+&& uv run python scripts/build_v22_dataset.py build `
+    --v18-store ../output/datasets/v18/3_3_5_12340.zarr `
+    --enrichment ../output/tmp/v22_enrich/3_3_5_12340.bin `
+    --output ../output/datasets/v22/3_3_5_12340.zarr
+```
+
+The `enrich` step shells out to the C# tool; the `build` step is pure Python. The two-step is explicit because operators often want to inspect the enrichment stream between steps (e.g. after a partial asset decode failure).
+
+### Notes
+
+- V18 builders and trainers are not modified. V22 is a downstream consumer of V18.
+- Client scope is `0_5_3_3368`, `3_3_5_12340`, `4_0_0_11927`. Expansion requires reopening Spec 088.
+- The `stats` subcommand still works for inspecting a built V22 store.
+- Bounded real-data proof: see `specs/088-v22-enrichment-from-v18/scripts/proof_v22_bounded.py` (Phase 9 of the spec's `tasks.md`).
+
 ### Stable Baseline: V16 Stores
 
 ```powershell

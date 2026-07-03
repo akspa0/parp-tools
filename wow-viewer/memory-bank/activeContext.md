@@ -1,14 +1,24 @@
 # Active Context — wow-viewer
 
-**Last updated**: 2026-06-30 | **Focus**: Spec 086 V22 dataset schema freeze complete for the three-build scope (`0_5_3_3368`, `3_3_5_12340`, `4_0_0_11927`) — zero-patch tile signals plus native placement arrays, pre-decoded model library, and pre-decoded tileset library aimed at reducing downstream supervision ambiguity
+**Last updated**: 2026-07-03 | **Focus**: Spec 089 `089-dav2-height-predictor` now has a complete Speckit planning pack (`spec`, `plan`, `tasks`, `research`, `data-model`, `quickstart`, `contracts`). V23 package skeleton, public import surface, dependency declarations, and gated empty `tests/v23` package are present. Validation is still blocked because the local shell wrapper fails before command execution with `The "path" argument must be of type string. Received undefined`; do not start Phase 1 until `uv sync`, import smoke, and pytest run.
+
+## Current V23 Slice
+
+- **Spec 089 `089-dav2-height-predictor` is the active V23 design.** It consumes Spec 088 V22 Zarr stores and defines one single-signal height model: DepthAnything-V2-Small encoder + LoRA-r16 + DPT-style height head + affine anchor.
+- The Speckit planning pack is now complete: `research.md`, `data-model.md`, `quickstart.md`, and `contracts/` exist under `specs/089-dav2-height-predictor/`. `.specify/feature.json` is pinned to spec 089 so Spec Kit routes to the correct feature directory on `v0.5.0-prerelease`.
+- Phase 0 source wiring landed under `data-harvester/src/harvester/v23/` with `NotImplementedError` placeholders only. `pyproject.toml` now declares `peft` and `bitsandbytes`; `transformers>=4.52` already satisfied the plan.
+- `specs/089-dav2-height-predictor/tasks.md` has T002-T004 checked. T001/T005 remain open pending executable validation.
+- **Next gate**: run from `wow-viewer/data-harvester`: `uv sync`, `uv run python -c "import harvester.v23"`, and `uv run pytest -q`. Only then proceed to Phase 1 dataset adapter work.
 
 ## Current Dataset Slice
 
-- **Spec 086 `086-v22-consolidated-dataset` Phase 1 is complete.** `tasks.md` is realigned to the expanded plan, and `docs/architecture/v22-dataset-signals-2026-06-30.md` freezes the root arrays, placement arrays, `models/` layout, `tilesets/` layout, stream-message boundary, and C# fixed-key read contract.
-- **Client scope is capped at three builds:** `0_5_3_3368`, `3_3_5_12340`, and `4_0_0_11927`. Include `4_0_0_11927` because the development map references Cata-only assets and current object decode/render support covers it. Do not include `0_5_5_3494`, `0_7_0_3694`, `3_0_1_8303`, or any other staged client merely because it exists. Expansion requires reopening Spec 086.
-- User clarified V22 harvesting should be C#-only at the preprocessor layer; the Python Zarr package owns the canonical dataset write/read surface. C# only emits the binary V22 stream; Python writes/reads Zarr. No C# Zarr implementation and no Python reparse of the game client.
-- Phase 2/3/4 partial implementation landed: `RawArraySerializer.StreamProfile.V22`, `harvest-stream --stream-profile v22`, `RawArraySerializerTests`, plus the new `wow-viewer/data-harvester/src/harvester/v22_zarr_io.py` with `V22ZarrWriter`, `V22Dataset`, and `V22TileRecord`; `data-harvester/scripts/build_v22_dataset.py` parses the V22 stream and writes the canonical Zarr store; `tests/test_v22_zarr_io.py` covers the fixed-key round-trip on synthetic records.
-- Remaining gaps: model/tileset library payload writers (C# stream), MTEX → build-wide tileset id remap, bounded real-data proof on the three staged clients, learnability gates. No full rebuild, no patch-script deletion, and no consumer migration until bounded proof and learnability gates pass.
+- **Spec 088 `088-v22-enrichment-from-v18` is the active V22 design.** Supersedes Spec 086 and Spec 087. Both are marked `SUPERSEDED.md` in their original locations and listed in `specs/archived/ARCHIVED.md`.
+- **Architecture**: V18 Zarr store is the substrate, untouched. A new C# tool `WowViewer.Tool.V22Enrich` reads the V18 store's `placements.parquet`, walks unique asset paths, decodes each M2 / WMO / BLP exactly once via the existing `M2GeometryReader` / `M2SkinReader` / `WmoRenderDocumentReader` / a new ~30-line `BlpRgbReader` wrapper around `AlphaBlpCompatibilityService`, and writes a stable-path-keyed binary enrichment stream. A rewritten Python `build_v22_dataset.py` reads V18 + the enrichment stream and writes the V22 Zarr store. The 5 V22-patched signals (`mcnr_mask_257`, `liquid_type_256`, `ground_intent_height_257`, `model_focus_mask`, `model_above_terrain_mask`) are derived in pure Python, matching the C# reference algorithms in `RawArraySerializer.cs`.
+- **Client scope is unchanged**: `0_5_3_3368`, `3_3_5_12340`, `4_0_0_11927`. Expansion requires reopening Spec 088.
+- **V18 builders and trainers are not modified.** V22 is a downstream consumer of V18, not a replacement. Spec 047, 074, 075, 076, 077, and all V18 trainers keep working without changes.
+- **FR-004 of Spec 088**: the broken per-tile model payload emission in `RawArraySerializer.WriteV22Arrays` (the `Path.GetHashCode()` block) is to be reverted. The V22 stream profile becomes a thin wrapper over V16 with no per-tile model payloads. This is the only existing code shape change in Spec 088; it removes the broken path so the C# harvester cannot accidentally produce a non-deterministic-keyed V22 stream.
+- **Phase 10 of Spec 088** updates this memory bank entry, the data-harvester README, the architecture doc at `docs/architecture/v22-dataset-signals-2026-06-30.md`, and the archived spec registry. Done.
+- **Next gate**: bounded real-data proof on staged `3_3_5_12340` Azeroth with `--limit 1` (Phase 9 of Spec 088, `proof_v22_bounded.py`). The proof runs `build_v22_dataset.py enrich` + `build_v22_dataset.py build` + `inspect_v22_dataset.py summary` and asserts `tile_count == 1`, `model_count > 0`, `tileset_count > 0`. Repeat for `0_5_3_3368` and `4_0_0_11927`.
 
 ## Current UI Slice
 

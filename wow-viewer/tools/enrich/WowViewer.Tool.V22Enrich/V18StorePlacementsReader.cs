@@ -1,0 +1,1 @@
+// Moved to WowViewer.Core.IO.Maps.

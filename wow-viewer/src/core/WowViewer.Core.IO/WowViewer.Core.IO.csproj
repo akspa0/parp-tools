@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <PackageReference Include="BCnEncoder.Net" />
+    <PackageReference Include="Parquet.Net" />
     <PackageReference Include="SixLabors.ImageSharp" />
     <PackageReference Include="SharpZipLib" />
   </ItemGroup>

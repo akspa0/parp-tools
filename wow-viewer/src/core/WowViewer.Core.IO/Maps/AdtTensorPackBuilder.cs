@@ -104,7 +104,7 @@ public static class AdtTensorPackBuilder
             TryReadPlacementCatalog(adtPath, stream, fileSummary);
 
         // ── Build object footprint masks from MDDF/MODF ──────────────────────
-        (float[,]? objectMask257, float[,]? objectPreciseMask257, int[,]? objectInstanceMask257, float[,]? mddfMask257, float[,]? modfMask257, float[,]? objectFilteredMask257) =
+        (float[,]? objectMask257, float[,]? objectPreciseMask257, int[,]? objectInstanceMask257, float[,]? mddfMask257, float[,]? modfMask257, float[,]? objectFilteredMask257, var modelPayloads) =
             BuildObjectMasks(adtPath, stream, fileSummary, availableSignals, placementsOverride: placementCatalog, assetReader: assetReader, terrainChunksOverride: terrainChunks);
 
         (float[,]? objectRoofMask256, float[,]? objectRoofConfidence256, string objectRoofMaskSource) =
@@ -205,6 +205,7 @@ public static class AdtTensorPackBuilder
             PlacementModfNames = modfNames,
             RawChunks = rawChunks,
             AvailableSignals = availableSignals,
+            PerTileModelPayloads = modelPayloads,
         };
     }
 
@@ -265,7 +266,7 @@ public static class AdtTensorPackBuilder
         AdtPlacementCatalog? placementCatalog =
             TryReadPlacementCatalog(sourceAdtPath, stream, fileSummary, placementSourcePath, placementSourceBytes);
 
-        (float[,]? objectMask257, float[,]? objectPreciseMask257, int[,]? objectInstanceMask257, float[,]? mddfMask257, float[,]? modfMask257, float[,]? objectFilteredMask257) =
+        (float[,]? objectMask257, float[,]? objectPreciseMask257, int[,]? objectInstanceMask257, float[,]? mddfMask257, float[,]? modfMask257, float[,]? objectFilteredMask257, var modelPayloads) =
             BuildObjectMasks(
                 sourceAdtPath,
                 stream,
@@ -382,6 +383,7 @@ public static class AdtTensorPackBuilder
             PlacementModfNames = modfNames,
             RawChunks = rawChunks,
             AvailableSignals = availableSignals,
+            PerTileModelPayloads = modelPayloads,
         };
     }
 
@@ -1743,7 +1745,7 @@ public static class AdtTensorPackBuilder
     private const string ObjectRoofSourceMetadata = "metadata";
     private const float ObjectRoofMetadataConfidence = 0.95f;
 
-    private static (float[,]? mask, float[,]? preciseMask, int[,]? instanceMask, float[,]? mddfMask, float[,]? modfMask, float[,]? filteredMask)
+    private static (float[,]? mask, float[,]? preciseMask, int[,]? instanceMask, float[,]? mddfMask, float[,]? modfMask, float[,]? filteredMask, Dictionary<string, V22ModelPayload>? v22Payloads)
         BuildObjectMasks(
             string adtPath,
             Stream stream,
@@ -1756,15 +1758,15 @@ public static class AdtTensorPackBuilder
             List<MapChunkLocation>? terrainChunksOverride = null)
     {
         if (!TryParseAdtTileCoords(fileSummary.SourcePath, out int tileX, out int tileY))
-            return (null, null, null, null, null, null);
+            return (null, null, null, null, null, null, null);
 
         AdtPlacementCatalog? placements = placementsOverride
             ?? TryReadPlacementCatalog(adtPath, stream, fileSummary, placementSourcePathOverride, placementBytesOverride);
         if (placements is null)
-            return (null, null, null, null, null, null);
+            return (null, null, null, null, null, null, null);
 
         if (placements.ModelPlacements.Count == 0 && placements.WorldModelPlacements.Count == 0)
-            return (null, null, null, null, null, null);
+            return (null, null, null, null, null, null, null);
 
         float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
         float[,] preciseMask = new float[TileHeightmapSize, TileHeightmapSize];
@@ -1777,6 +1779,9 @@ public static class AdtTensorPackBuilder
             : null;
         Dictionary<string, WmoRenderDocument?>? wmoCache = assetReader is not null
             ? new Dictionary<string, WmoRenderDocument?>(StringComparer.OrdinalIgnoreCase)
+            : null;
+        Dictionary<string, V22ModelPayload>? v22Payloads = assetReader is not null
+            ? new Dictionary<string, V22ModelPayload>(StringComparer.OrdinalIgnoreCase)
             : null;
         bool[,,]? wmoChunkCoverage16 = placements.WorldModelPlacements.Count > 0
             ? TryBuildWmoPlacementChunkCoverage16(
@@ -1797,7 +1802,7 @@ public static class AdtTensorPackBuilder
             if (assetReader is not null && doodadModelCache is not null)
             {
                 string modelPath = NormalizeAssetPath(placement.ModelPath);
-                if (TryLoadDoodadModelMetadata(modelPath, assetReader, doodadModelCache, out DoodadModelMetadata? metadata)
+                if (TryLoadDoodadModelMetadata(modelPath, assetReader, doodadModelCache, out DoodadModelMetadata? metadata, v22Payloads)
                     && metadata is not null)
                 {
                     Matrix4x4 transform = BuildM2PlacementTransform(placement.Position, placement.Rotation, placement.Scale);
@@ -1903,6 +1908,7 @@ public static class AdtTensorPackBuilder
                     tileY,
                     assetReader,
                     wmoCache,
+                    v22Payloads,
                     mask,
                     preciseMask,
                     instanceMask,
@@ -1968,7 +1974,7 @@ public static class AdtTensorPackBuilder
         signals.Add("mddf_mask_257");
         signals.Add("modf_mask_257");
         signals.Add("object_filtered_mask_257");
-        return (mask, preciseMask, instanceMask, mddfMask, modfMask, filteredMask);
+        return (mask, preciseMask, instanceMask, mddfMask, modfMask, filteredMask, v22Payloads);
     }
 
     private static bool[,,]? TryBuildWmoPlacementChunkCoverage16(
@@ -2244,6 +2250,7 @@ public static class AdtTensorPackBuilder
         int tileY,
         Func<string, byte[]?> assetReader,
         Dictionary<string, WmoRenderDocument?> wmoCache,
+        Dictionary<string, V22ModelPayload>? v22Payloads,
         float[,] mask,
         float[,] preciseMask,
         int[,] instanceMask,
@@ -2252,7 +2259,7 @@ public static class AdtTensorPackBuilder
         int instanceId)
     {
         string modelPath = NormalizeAssetPath(placement.ModelPath);
-        if (!TryLoadWmoRenderDocument(modelPath, assetReader, wmoCache, out WmoRenderDocument? document)
+        if (!TryLoadWmoRenderDocument(modelPath, assetReader, wmoCache, out WmoRenderDocument? document, v22Payloads)
             || document is null
             || document.Groups.Count == 0)
         {
@@ -2341,7 +2348,8 @@ public static class AdtTensorPackBuilder
         string modelPath,
         Func<string, byte[]?> assetReader,
         Dictionary<string, DoodadModelMetadata?> doodadModelCache,
-        out DoodadModelMetadata? metadata)
+        out DoodadModelMetadata? metadata,
+        Dictionary<string, V22ModelPayload>? v22Payloads = null)
     {
         if (doodadModelCache.TryGetValue(modelPath, out metadata))
             return metadata is not null;
@@ -2371,6 +2379,7 @@ public static class AdtTensorPackBuilder
             else
             {
                 M2GeometryDocument geometry;
+                M2SkinDocument? skin = null;
                 using (MemoryStream stream = new(bytes, writable: false))
                     geometry = M2GeometryReader.Read(stream, modelPath);
 
@@ -2382,7 +2391,7 @@ public static class AdtTensorPackBuilder
                     if (skinBytes is { Length: > 0 })
                     {
                         using MemoryStream skinStream = new(skinBytes, writable: false);
-                        M2SkinDocument skin = M2SkinReader.Read(skinStream, skinPath);
+                        skin = M2SkinReader.Read(skinStream, skinPath);
 
                         int indexCount = skin.TriangleIndices.Count;
                         if (indexCount >= 3)
@@ -2418,6 +2427,26 @@ public static class AdtTensorPackBuilder
                     geometry.Model.BoundsMax,
                     triangleVertices);
                 doodadModelCache[modelPath] = metadata;
+
+                // Capture V22 model payload if requested
+                if (v22Payloads is not null && skin is not null && !v22Payloads.ContainsKey(Path.GetFileName(modelPath)))
+                {
+                    try
+                    {
+                        var payload = V22ModelPayload.FromM2(modelPath, geometry.Model, geometry, skin);
+                        v22Payloads[modelPath] = payload;
+                    }
+                    catch
+                    {
+                        v22Payloads[modelPath] = new V22ModelPayload
+                        {
+                            Kind = V22ModelPayload.ModelKind.M2,
+                            LoadError = 1,
+                            CanonicalPath = modelPath,
+                        };
+                    }
+                }
+
                 return true;
             }
         }
@@ -2434,7 +2463,8 @@ public static class AdtTensorPackBuilder
         string modelPath,
         Func<string, byte[]?> assetReader,
         Dictionary<string, WmoRenderDocument?> wmoCache,
-        out WmoRenderDocument? document)
+        out WmoRenderDocument? document,
+        Dictionary<string, V22ModelPayload>? v22Payloads = null)
     {
         if (wmoCache.TryGetValue(modelPath, out document))
             return document is not null;
@@ -2452,6 +2482,25 @@ public static class AdtTensorPackBuilder
             using MemoryStream stream = new(bytes, writable: false);
             document = WmoRenderDocumentReader.Read(stream, modelPath, assetReader);
             wmoCache[modelPath] = document;
+
+            if (v22Payloads is not null && !v22Payloads.ContainsKey(modelPath))
+            {
+                try
+                {
+                    var payload = V22ModelPayload.FromWmo(modelPath, document);
+                    v22Payloads[modelPath] = payload;
+                }
+                catch
+                {
+                    v22Payloads[modelPath] = new V22ModelPayload
+                    {
+                        Kind = V22ModelPayload.ModelKind.Wmo,
+                        LoadError = 1,
+                        CanonicalPath = modelPath,
+                    };
+                }
+            }
+
             return true;
         }
         catch
