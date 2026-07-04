@@ -414,7 +414,9 @@ uv run python scripts/build_v22_dataset.py build `
     --output ../output/datasets/v22/3_3_5_12340.zarr
 ```
 
-The Python builder reads V18 as the substrate, derives the 5 V22 patched signals in pure Python (matches C# reference algorithms in `RawArraySerializer.cs`), promotes V18 placements to native V22 flat arrays, consumes the enrichment stream, and writes a V22 Zarr store with populated `models/` and `tilesets/` groups.
+The Python builder reads V18 as the substrate, derives the 5 V22 patched signals in pure Python (matches C# reference algorithms in `RawArraySerializer.cs`), promotes V18 placements to native V22 flat arrays, consumes the enrichment stream, and writes a V22 Zarr store with populated `models/` and `tilesets/` inventory groups.
+
+Canonical V22 output is `asset_payload_mode = "paths_only"`: the store keeps the training arrays, placement remaps, `model_paths`, `tileset_paths`, `texture_shape`, and provenance sidecars, but it does not rely on embedded M2/WMO/BLP payload blobs as the canonical training contract.
 
 ### Step 4 — Inspect the V22 store
 

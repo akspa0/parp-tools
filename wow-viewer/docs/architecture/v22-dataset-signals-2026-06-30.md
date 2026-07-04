@@ -1,10 +1,10 @@
 # V22 Dataset Signal And Store Contract
 
-> Canonical schema freeze. V22 replaces V18 plus patch scripts, placement side paths, live MPQ asset reparsing, and decoded-texture sidecars with one Zarr-backed dataset. The C# enrich tool pre-decodes M2 / WMO / BLP payloads from the staged client; the Python Zarr package writes and reads the canonical dataset. Consumers load decoded data from Zarr instead of the client.
+> Canonical schema freeze. V22 replaces V18 plus patch scripts, placement side paths, and ad-hoc asset identity recovery with one Zarr-backed dataset. The canonical 2026-07-03 build mode is `paths_only`: the enrich step still decodes M2 / WMO / BLP assets once to recover stable ids, dimensions, and string surfaces, but the datastore itself keeps path inventories, remap arrays, and provenance sidecars rather than treating embedded asset blobs as the training contract.
 
 ## Implementation Status
 
-> **Implementation lives in Spec 088 `088-v22-enrichment-from-v18`**, not Spec 086. Spec 086 and Spec 087 are superseded (see `specs/086-v22-consolidated-dataset/SUPERSEDED.md` and `specs/087-v22-asset-library-payloads/SUPERSEDED.md`). Spec 088 takes a different shape: V18 is the substrate, untouched. A new C# `WowViewer.Tool.V22Enrich` tool decodes each unique M2 / WMO / BLP once into a stable-path-keyed binary stream; the rewritten Python `build_v22_dataset.py` reads V18 + the enrichment stream and writes the V22 Zarr store. No per-tile model payloads in the C# harvester. No `Path.GetHashCode()` keys. The V22 store layout, model library layout, tileset library layout, and root arrays documented in this contract are implemented by Spec 088 exactly as specified here.
+> **Implementation lives in Spec 088 `088-v22-enrichment-from-v18`**, not Spec 086. Spec 086 and Spec 087 are superseded (see `specs/086-v22-consolidated-dataset/SUPERSEDED.md` and `specs/087-v22-asset-library-payloads/SUPERSEDED.md`). Spec 088 takes a different shape: V18 is the substrate, untouched. `WowViewer.Tool.V22Enrich` decodes each unique M2 / WMO / BLP once into a stable-path-keyed binary stream; the rewritten Python `build_v22_dataset.py` reads V18 + the enrichment stream and writes the V22 Zarr store. No per-tile model payloads in the C# harvester. No `Path.GetHashCode()` keys. The canonical build now finalizes with `asset_payload_mode = "paths_only"`.
 
 ## Scope
 
@@ -12,14 +12,14 @@ V22 owns four training surfaces in one store:
 
 1. fixed per-tile signal arrays,
 2. native placement arrays with per-tile offsets,
-3. a per-build decoded model library,
-4. a per-build decoded tileset library.
+3. a per-build model-path inventory,
+4. a per-build tileset-path inventory.
 
 Index, placement, decoded metadata, and asset inventory outputs are audit mirrors only. A downstream consumer must be able to read core semantics from the Zarr dataset without opening MPQs or relying on sidecar-only data.
 
 Client scope is intentionally limited to `0_5_3_3368`, `3_3_5_12340`, and `4_0_0_11927`. `4_0_0_11927` is included because the development map references Cata-only assets and existing object decode/render support covers that era. Other staged clients are not V22 targets unless Spec 086 is explicitly reopened.
 
-Implementation status: Phase 2 has a C# `RawArraySerializer.StreamProfile.V22` tile-record profile. It emits final V22 tile key names from `TerrainTileTensorPack`, derives `liquid_type_256` and `ground_intent_height_257`, converts `mcly_layer_mask` to float32, emits MDDF/MODF placement data under V22 names, emits explicit per-placement asset path metadata, emits tile-local MTEX texture path metadata, and expands legacy 14-column MODF rows to the V22 17-column layout with zero-filled fields when the source format does not carry flags/doodadSet/nameSet. The Python Zarr writer and reader are the next phase.
+Implementation status: the canonical V22 stores for `0_5_3_3368` and `3_3_5_12340` now exist under `wow-viewer/output/datasets/v22/` and finalize with `asset_payload_mode = "paths_only"`. The build writes final V22 tile key names, derives `liquid_type_256` and `ground_intent_height_257`, converts `mcly_layer_mask` to float32, emits MDDF/MODF placement data under V22 names, emits explicit per-placement asset path metadata, emits tile-local MTEX texture path metadata, and expands legacy 14-column MODF rows to the V22 17-column layout with zero-filled fields when the source format does not carry flags/doodadSet/nameSet.
 
 ## Record Layout
 
@@ -186,75 +186,29 @@ Asset paths are required, not optional. `nameId` alone is not enough for V22 con
 
 ## Model Library
 
-The model library is a per-build group. Entries are keyed by integer model id, and `model_paths` maps id to canonical normalized path. Model payloads are emitted as separate C# V22 stream messages and stored once per build by the Python Zarr writer, not duplicated per tile.
+The canonical model library is a per-build path inventory. Entries are keyed by integer model id, and `model_paths` maps id to canonical normalized path. In `paths_only` mode the training store keeps ids, kinds, and load-error state; downstream tooling that truly needs decoded geometry must resolve it from the staged client using the recorded canonical path and the provenance sidecars.
 
 ```text
 models/
 |-- model_paths/                  # string   (num_models)
 |-- model_kind/                   # uint8    (num_models) 0=unknown, 1=M2, 2=WMO
-|-- load_error/                   # uint8    (num_models)
-|-- load_error_message/           # string   (num_models)
-|-- m2/<model_id>/...
-`-- wmo/<model_id>/...
+`-- load_error/                   # uint8    (num_models)
 ```
 
-### M2 Entry
-
-```text
-models/m2/<model_id>/
-|-- vertices/                     # float32  (V, 3)
-|-- normals/                      # float32  (V, 3)
-|-- texcoords_0/                  # float32  (V, 2)
-|-- texcoords_1/                  # float32  (V, 2)
-|-- bone_indices/                 # uint8    (V, 4)
-|-- bone_weights/                 # float32  (V, 4)
-|-- triangles/                    # int32    (T, 3)
-|-- render_flags/                 # uint32   (R)
-|-- blend_modes/                  # uint8    (R)
-|-- texture_lookup/               # uint16   (R)
-|-- texture_paths/                # string   (P)
-|-- texture_replaceable_ids/      # uint32   (P)
-|-- texture_flags/                # uint32   (P)
-|-- transparency_lookup/          # uint16   (R)
-|-- bone_lookup/                  # uint16   (B)
-`-- bounds/                       # float32  (2, 3)
-```
-
-### WMO Entry
-
-```text
-models/wmo/<model_id>/
-|-- vertices/                     # float32  (V, 3)
-|-- triangles/                    # int32    (T, 3)
-|-- normals/                      # float32  (V, 3)
-|-- group_counts/                 # int32    (G)
-|-- group_indices/                # int32    (G)
-|-- materials/                    # int32    (K, 8)
-|-- material_texture_paths/       # string   (P)
-|-- bounds/                       # float32  (2, 3)
-|-- portal_vertices/              # float32  (PV, 3)
-|-- portal_indices/               # int32    (PI, 3)
-|-- doodad_set_paths/             # string   (DS)
-|-- flags/                        # uint32   scalar
-`-- version/                      # uint32   scalar
-```
-
-Unloadable models still get a `model_paths` entry with `load_error=1` and zero-length payload arrays. The build must not crash because one asset is corrupt or missing.
+The enrichment seam may still carry richer M2/WMO detail during bounded proof/debug runs, but that is not part of the canonical datastore contract. Unloadable models still get a `model_paths` entry with `load_error=1`. The build must not crash because one asset is corrupt or missing.
 
 ## Tileset Library
 
-The tileset library is a per-build group. Entries are keyed by integer tileset id, and `tileset_paths` maps id to the canonical decoded-texture dataset key. Because the dataset stores decoded RGB payloads, BLP source paths are normalized to PNG-style keys in `tileset_paths` while the original archive BLP path is preserved in `asset_inventory.parquet` as `source_path`. Tileset payloads are separate C# V22 stream messages and stored once per build by the Python Zarr writer.
+The canonical tileset library is a per-build path inventory. Entries are keyed by integer tileset id, and `tileset_paths` maps id to the canonical decoded-texture dataset key. `texture_shape` records the decoded dimensions recovered during enrichment, while the original archive BLP path is preserved in `asset_inventory.parquet` as `source_path`.
 
 ```text
 tilesets/
 |-- tileset_paths/                # string   (num_tilesets, decoded-texture dataset key)
 |-- load_error/                   # uint8    (num_tilesets)
-|-- load_error_message/           # string   (num_tilesets)
-|-- texture_shape/                # int32    (num_tilesets, 2)
-`-- texture_rgb/<tileset_id>/      # uint8    (H, W, 3)
+`-- texture_shape/                # int32    (num_tilesets, 2)
 ```
 
-Root array `mcly_tileset_ids` remaps tile-local `mcly_texture_ids` into per-build `tileset_paths` indices. Unused layers are `-1`. Unloadable textures still get a `tileset_paths` entry with `load_error=1`, `texture_shape=(0, 0)`, and a zero-sized or zero-filled texture payload.
+Root array `mcly_tileset_ids` remaps tile-local `mcly_texture_ids` into per-build `tileset_paths` indices. Unused layers are `-1`. Unloadable textures still get a `tileset_paths` entry with `load_error=1` and `texture_shape=(0, 0)`.
 
 `asset_inventory.parquet` is the audit surface for source provenance. Each model or tileset row records `asset_path`, `source_path`, `source_in_listfile`, `source_kind`, `kind`, and `load_error`. `source_in_listfile=1` means the canonical asset path was present in the archive's internal `(listfile)` data; `source_kind=archive_unlisted` marks assets that were readable through archive/scanned-file resolution but not backed by the internal listfile.
 
@@ -265,8 +219,8 @@ Phase 2 tile records emit `mtex_texture_paths` in metadata and `tileset_texture_
 V22 has three message classes:
 
 - **Tile messages**: fixed-shape tile signals, placement rows, per-placement canonical paths or ids, and per-tile metadata. These stay regular and cheap to buffer.
-- **Model-library messages**: one per unique canonical M2/WMO path per build session. These contain the full parsed model payload and load-error status.
-- **Tileset-library messages**: one per unique canonical terrain texture path per build session. These contain decoded BLP RGB and load-error status.
+- **Model-library messages**: one per unique canonical M2/WMO path per build session. These recover stable ids, load-error state, and string surfaces used for provenance or later on-demand decode.
+- **Tileset-library messages**: one per unique canonical terrain texture path per build session. These recover stable ids, decoded dimensions, and provenance.
 
 The C# harvester owns id assignment in the V22 stream. A path table is complete only after all stream messages for a build are consumed. A placement id is valid if it indexes `models/model_paths`; `-1` is allowed only when the placement source path is absent and must be counted in the asset inventory report.
 
@@ -284,9 +238,9 @@ The V22 Zarr reader returns a fixed-key tile record for every tile. Required til
 - `modf_count`: int32 scalar
 - `mcly_tileset_ids`: int32 `(16, 16, 4)`
 
-Empty placement tiles return zero-length arrays with the correct second dimension, never `None`. Missing optional source data returns the documented fill array. Missing model or tileset payloads are represented by valid ids whose library entry has `load_error=1`.
+Empty placement tiles return zero-length arrays with the correct second dimension, never `None`. Missing optional source data returns the documented fill array. Missing model or tileset payloads are represented by valid ids whose inventory entry has `load_error=1`.
 
-The V22 Zarr reader exposes a cached mapping from model id to the decoded entry summary and payload arrays, plus a cached mapping from tileset id to decoded texture payloads. The cache is read-only after first load.
+The V22 Zarr reader exposes cached mappings from model id to path/kind/error state and from tileset id to path/shape/error state. The cache is read-only after first load.
 
 ## Validation Gates
 

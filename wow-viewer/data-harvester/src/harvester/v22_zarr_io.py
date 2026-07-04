@@ -13,6 +13,7 @@ returns the same batch keys. No ``has_*`` branches, no optional keys.
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -295,6 +296,7 @@ class V22ZarrWriter:
         *,
         codec: Any = DEFAULT_CODEC,
         overwrite: bool = True,
+        embed_asset_payloads: bool = True,
     ) -> None:
         self.store_path = Path(store_path)
         if overwrite and self.store_path.exists():
@@ -315,6 +317,7 @@ class V22ZarrWriter:
         self._placement_rows: list[dict[str, Any]] = []
         self._source_v18_store: str | None = None
         self._codec = codec
+        self._embed_asset_payloads = bool(embed_asset_payloads)
 
     # ── V18+enrichment → V22 ingestion ────────────────────────────
     def add_from_v18(self, v18_path: str | Path, enrichment_path: str | Path) -> None:
@@ -903,7 +906,13 @@ class V22ZarrWriter:
     def _write_models(self, root: zarr.Group) -> None:
         if not self._models:
             return
-        group = root.create_group(V22_MODELS_GROUP, attributes={"kind": "per-build-model-library"})
+        group = root.create_group(
+            V22_MODELS_GROUP,
+            attributes={
+                "kind": "per-build-model-library",
+                "payload_mode": "embedded" if self._embed_asset_payloads else "paths_only",
+            },
+        )
         paths = sorted(self._models.keys())
         max_len = max(len(path) for path in paths)
         group.create_array("model_paths", data=np.asarray(paths, dtype=f"<U{max_len}"), chunks=(len(paths),))
@@ -914,6 +923,8 @@ class V22ZarrWriter:
         group.create_array("model_kind", data=kinds, chunks=(len(paths),), compressors=self._codec)
         errors = np.asarray([int(self._models[p]["load_error"]) for p in paths], dtype=np.uint8)
         group.create_array("load_error", data=errors, chunks=(len(paths),), compressors=self._codec)
+        if not self._embed_asset_payloads:
+            return
         for p in paths:
             kind_code = int(np.asarray(self._models[p]["payload"].get("kind", 0)).reshape(-1)[0])
             kind_name = {1: "m2", 2: "wmo"}.get(kind_code, "model")
@@ -922,7 +933,13 @@ class V22ZarrWriter:
     def _write_tilesets(self, root: zarr.Group) -> None:
         if not self._tilesets:
             return
-        group = root.create_group(V22_TILESETS_GROUP, attributes={"kind": "per-build-tileset-library"})
+        group = root.create_group(
+            V22_TILESETS_GROUP,
+            attributes={
+                "kind": "per-build-tileset-library",
+                "payload_mode": "embedded" if self._embed_asset_payloads else "paths_only",
+            },
+        )
         paths = sorted(self._tilesets.keys())
         max_len = max(len(path) for path in paths)
         group.create_array("tileset_paths", data=np.asarray(paths, dtype=f"<U{max_len}"), chunks=(len(paths),))
@@ -933,6 +950,8 @@ class V22ZarrWriter:
             dtype=np.int32,
         )
         group.create_array("texture_shape", data=shapes, chunks=(len(paths), 2), compressors=self._codec)
+        if not self._embed_asset_payloads:
+            return
         for p in paths:
             self._write_asset_entry(group, "tileset", p, self._tilesets[p]["payload"])
 
@@ -1059,6 +1078,7 @@ class V22ZarrWriter:
             "model_count": len(self._models),
             "tileset_count": len(self._tilesets),
             "source_v18_store": self._source_v18_store,
+            "asset_payload_mode": "embedded" if self._embed_asset_payloads else "paths_only",
             "missing_components": [],
         }
         (self.store_path / "finalization.json").write_text(
@@ -1076,6 +1096,60 @@ class V22ZarrWriter:
             else:
                 child.unlink()
         path.rmdir()
+
+
+def complete_existing_store_from_enrichment(
+    store_path: str | Path,
+    v18_store_path: str | Path,
+    enrichment_path: str | Path,
+    *,
+    backup_suffix: str = ".partial-backup",
+    embed_asset_payloads: bool = True,
+) -> Path:
+    """Finish a partially-written V22 store using only the enrichment stream.
+
+    This is the recovery path for builds that already finished the expensive
+    per-tile root arrays but timed out while writing `models/`, `tilesets/`,
+    or the audit sidecars.
+    """
+    store_path = Path(store_path)
+    v18_store_path = Path(v18_store_path)
+    enrichment_path = Path(enrichment_path)
+
+    if not store_path.exists():
+        raise FileNotFoundError(store_path)
+    if not v18_store_path.exists():
+        raise FileNotFoundError(v18_store_path)
+    if not enrichment_path.exists():
+        raise FileNotFoundError(enrichment_path)
+
+    writer = V22ZarrWriter(store_path, overwrite=False, embed_asset_payloads=embed_asset_payloads)
+    writer._source_v18_store = str(v18_store_path)
+    writer._ingest_enrichment_stream(enrichment_path)
+
+    store = zarr.storage.LocalStore(str(store_path), read_only=False)
+    root = zarr.open_group(store=store, mode="a")
+    index_rows = list(root.attrs.get("tile_index", []))
+
+    for group_name in ("models", "tilesets"):
+        group_path = store_path / group_name
+        if group_path.exists():
+            backup_path = store_path.parent / f"{store_path.name}.{group_name}{backup_suffix}"
+            if backup_path.exists():
+                if backup_path.is_dir():
+                    shutil.rmtree(backup_path)
+                else:
+                    backup_path.unlink()
+            shutil.move(str(group_path), str(backup_path))
+
+    writer._write_models(root)
+    writer._write_tilesets(root)
+    writer._write_index_sidecar(index_rows)
+    shutil.copy2(v18_store_path / "placements.parquet", store_path / "placements.parquet")
+    writer._write_asset_inventory_sidecar()
+    writer._write_finalization_json(index_rows)
+
+    return store_path
 
 
 # ---------------------------------------------------------------------------
@@ -1181,5 +1255,6 @@ __all__ = [
     "V22_FLAT_SPECS",
     "V22ZarrWriter",
     "V22Dataset",
+    "complete_existing_store_from_enrichment",
     "DEFAULT_CODEC",
 ]

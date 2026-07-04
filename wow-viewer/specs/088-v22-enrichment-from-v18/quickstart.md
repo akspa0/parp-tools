@@ -61,11 +61,13 @@ The output store lives at `output/datasets/v22/3_3_5_12340.zarr/` with:
 - 20 V18-derived root arrays
 - 5 V22-patched signals (derived in pure Python)
 - 4 V22 native placement arrays (mddf/modf + offsets + counts + ids)
-- `models/` group with one entry per unique M2 / WMO
-- `tilesets/` group with one entry per unique BLP
+- `models/` group with one entry per unique M2 / WMO path (`model_paths`, `model_kind`, `load_error`)
+- `tilesets/` group with one entry per unique BLP path (`tileset_paths`, `texture_shape`, `load_error`)
 - `mcly_tileset_ids` per tile (build-wide remap)
 - `mddf_model_ids` / `modf_model_ids` per tile (resolved to `models/model_paths` indices)
 - Audit sidecars (`finalization.json`, `index.parquet`, `placements.parquet`, `asset_inventory.parquet`)
+
+The canonical build mode is `asset_payload_mode = "paths_only"`. That means the V22 store tracks stable asset ids, dimensions, and provenance, but does not treat embedded M2/WMO/BLP payload blobs as part of the canonical training contract.
 
 ## Step 3 — Inspect the V22 Store
 

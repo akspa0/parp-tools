@@ -332,6 +332,8 @@ def _requested_gpu_types(args: argparse.Namespace) -> list[str]:
         gpu_infos = _gpu_full_info()
         min_vram = int(args.min_gpu_vram_gb)
         cloud_type = args.cloud_type
+        preferred_gpu_ids = [str(item) for item in getattr(args, "preferred_gpu_ids", [])]
+        preferred_rank = {gpu_id: index for index, gpu_id in enumerate(preferred_gpu_ids)}
 
         qualifying = []
         for name, info in gpu_infos.items():
@@ -346,18 +348,21 @@ def _requested_gpu_types(args: argparse.Namespace) -> list[str]:
             price = float(info.get("price_per_hour", 0))
             if args.max_cost_per_hour and price > 0 and price > float(args.max_cost_per_hour):
                 continue
-            qualifying.append((name, price, info["vram_gb"]))
+            rank = preferred_rank.get(name, len(preferred_rank))
+            qualifying.append((name, price, info["vram_gb"], rank))
 
-        # Sort by VRAM ascending (smallest/cheapest first)
-        qualifying.sort(key=lambda x: (x[1] if x[1] > 0 else 999, x[2]))
+        # Prefer explicit GPU ids first, then sort the remainder by known price/VRAM.
+        qualifying.sort(key=lambda x: (x[3], x[1] if x[1] > 0 else 999, x[2]))
         if qualifying:
             print("GPU candidates (cheapest known first):")
-            for name, price, vram in qualifying:
+            for name, price, vram, rank in qualifying:
                 if price > 0:
-                    print(f"  {name}: ~${price:.2f}/hr, {int(vram)}GB VRAM")
+                    prefix = "* " if rank < len(preferred_rank) else "  "
+                    print(f"{prefix}{name}: ~${price:.2f}/hr, {int(vram)}GB VRAM")
                 else:
-                    print(f"  {name}: price unknown, {int(vram)}GB VRAM")
-            return [name for name, _, _ in qualifying]
+                    prefix = "* " if rank < len(preferred_rank) else "  "
+                    print(f"{prefix}{name}: price unknown, {int(vram)}GB VRAM")
+            return [name for name, _, _, _ in qualifying]
         print(f"No GPUs found matching criteria; falling back to {DEFAULT_GPU_TYPE}.", file=sys.stderr)
 
     # Specific GPU type mode

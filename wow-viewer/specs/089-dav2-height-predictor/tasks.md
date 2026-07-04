@@ -63,9 +63,9 @@ Per the plan's Project Structure, all paths are under `wow-viewer/data-harvester
   - Degrade-mode zero-fill + per-channel `valid_mask` tracking.
   - Docstring lists every channel contract detail.
 - [x] T011 [US1] Run `pytest tests/v23/test_dataset.py tests/v23/test_channels.py -m v23` and confirm green.
-- [ ] T012 [US1] Real-data proof: locate or produce a V22 store under `wow-viewer/output/datasets/v22/3_3_5_12340.zarr/`. If absent, run `uv run python scripts/build_v18_dataset.py build --build 3_3_5_12340 --allow-zarr-write` then `uv run python scripts/build_v22_dataset.py enrich ... && uv run python scripts/build_v22_dataset.py build ...` per Spec 088 quickstart. Then run `uv run python -c "from harvester.v23 import V23HeightDataset; ds = V23HeightDataset('../output/datasets/v22/3_3_5_12340.zarr', build='3_3_5_12340'); print({k: v.shape for k, v in ds[0].items()})"` and record the printed dict in a Phase 1 validation note. Confirm shapes match documented contract.
+- [x] T012 [US1] Real-data proof: locate or produce a V22 store under `wow-viewer/output/datasets/v22/3_3_5_12340.zarr/`. If absent, run `uv run python scripts/build_v18_dataset.py build --build 3_3_5_12340 --allow-zarr-write` then `uv run python scripts/build_v22_dataset.py enrich ... && uv run python scripts/build_v22_dataset.py build ...` per Spec 088 quickstart. Then run `uv run python -c "from harvester.v23 import V23HeightDataset; ds = V23HeightDataset('../output/datasets/v22/3_3_5_12340.zarr', build='3_3_5_12340'); item = ds[0]; print({k: tuple(v.shape) for k, v in item.items() if hasattr(v, 'shape')})"` and record the printed dict in a Phase 1 validation note. Confirm shapes match documented contract.
 
-2026-07-03 status note: T006-T011 are validated locally. Syntax-only `py_compile` passed first, then `uv run pytest tests/v23/test_dataset.py tests/v23/test_channels.py -m v23 -q` passed with `10 passed`. T012 remains the only open Phase 1 task. The repo does not currently have `output/datasets/v22/3_3_5_12340.zarr`, and the bounded rebuild path is presently blocked because `dotnet build wow-viewer/tools/enrich/WowViewer.Tool.V22Enrich -c Debug` fails against current core APIs (`M2EnrichmentBuilder.cs`, `WmoEnrichmentBuilder.cs`, `Program.cs`).
+2026-07-03 status note: T006-T012 are validated locally. Syntax-only `py_compile` passed first, then `uv run pytest tests/v23/test_dataset.py tests/v23/test_channels.py -m v23 -q` passed with `10 passed`. Canonical V22 stores now exist at `wow-viewer/output/datasets/v22/0_5_3_3368.zarr` and `wow-viewer/output/datasets/v22/3_3_5_12340.zarr`, both finalized with `asset_payload_mode = "paths_only"`. The real-data V23 loader proof on `3_3_5_12340` printed `{'input': (15, 256, 256), 'target': (1, 257, 257), 'target_height': (1, 257, 257), 'valid_mask': (1, 257, 257), 'channel_valid_mask': (15,)}`.
 
 **Checkpoint**: US1 acceptance scenarios 1–4 pass; documented Input Channel Contract is verified against a real V22 tile.
 
@@ -79,11 +79,11 @@ Per the plan's Project Structure, all paths are under `wow-viewer/data-harvester
 
 ### Tests for User Story 2
 
-- [ ] T013 [P] [US2] Write `wow-viewer/data-harvester/tests/v23/test_encoder.py` covering: (a) instantiate `DepthAnythingV2SmallEncoder(in_channels=15)`, count params: non-LoRA base frozen (all `requires_grad=False`), LoRA adapter params `< 2_000_000`, first patch-embed conv params trainable (all `requires_grad=True`); (b) forward pass on `[2, 15, 518, 518]` produces the documented DPT feature pyramid (output is a dict/list of intermediate features at DA-V2-Small's documented intermediate shapes); (c) under `disable_lora()` context, forward pass is bit-identical to a fresh `transformers.DepthAnythingV2ForDepthEstimation.from_pretrained('depth-anything/Depth-Anything-V2-Small-hf')` forward pass on a `[2, 3, 518, 518]` (only 3ch — minimap-only equivalent) input via `torch.allclose(atol=0, rtol=0)` on three random seeds.
+- [x] T013 [P] [US2] Write `wow-viewer/data-harvester/tests/v23/test_encoder.py` covering: (a) instantiate `DepthAnythingV2SmallEncoder(in_channels=15)`, count params: non-LoRA base frozen (all `requires_grad=False`), LoRA adapter params `< 2_000_000`, first patch-embed conv params trainable (all `requires_grad=True`); (b) forward pass on `[2, 15, 518, 518]` produces the documented DPT feature pyramid (output is a dict/list of intermediate features at DA-V2-Small's documented intermediate shapes); (c) under `disable_lora()` context, forward pass is bit-identical to a fresh `transformers.DepthAnythingV2ForDepthEstimation.from_pretrained('depth-anything/Depth-Anything-V2-Small-hf')` forward pass on a `[2, 3, 518, 518]` (only 3ch — minimap-only equivalent) input via `torch.allclose(atol=0, rtol=0)` on three random seeds.
 
 ### Implementation for User Story 2
 
-- [ ] T014 [US2] Implement `wow-viewer/data-harvester/src/harvester/v23/encoder.py`:
+- [x] T014 [US2] Implement `wow-viewer/data-harvester/src/harvester/v23/encoder.py`:
   - `DepthAnythingV2SmallEncoder(nn.Module)`. Constructor takes `in_channels`, LoRA config flags (`lora_rank=16`, `lora_alpha=32`, `lora_dropout=0.05`), and HF weights source `model_id='depth-anything/Depth-Anything-V2-Small-hf'`.
   - Load via `transformers.AutoModelForDepthEstimation.from_pretrained(model_id)`. Extract `pretrained.model` (DPT encoder) into self.pretrained_encoder. Freeze all `pretrained_encoder.parameters()`.
   - Apply LoRA: `peft.LoraConfig(target_modules=['q_proj','k_proj','v_proj','out_proj'], r=16, lora_alpha=32, lora_dropout=0.05, bias='none')` then `peft.get_peft_model(self.pretrained_encoder, lora_config)`.
@@ -91,8 +91,10 @@ Per the plan's Project Structure, all paths are under `wow-viewer/data-harvester
   - Implement `forward(x) -> FeatureDict` exposing the intermediate features consumed by the V23HeightHead (Phase 3). The shape contract is documented in the module docstring with explicit tensor shape annotations.
   - Implement `disable_lora()` context manager that calls `peft.disable_adapter_layers()` on enter + `peft.enable_adapter_layers()` on exit.
   - Docstring cites DA-V2 paper + peft docs + HF model card.
-- [ ] T015 [US2] Implement `disable_adapter_layers` test in `test_encoder.py`: under `disable_lora()` on a 3-channel input, the encoder forward should match a fresh `transformers.AutoModelForDepthEstimation.from_pretrained('depth-anything/Depth-Anything-V2-Small-hf')` forward on the same input bit-for-bit across three random seeds (using `torch.manual_seed(N)` before each noise draw, then `torch.allclose(atol=0, rtol=0)`).
-- [ ] T016 [US2] Run `pytest tests/v23/test_encoder.py -m v23` and confirm green.
+- [x] T015 [US2] Implement `disable_adapter_layers` test in `test_encoder.py`: under `disable_lora()` on a 3-channel input, the encoder forward should match a fresh `transformers.AutoModelForDepthEstimation.from_pretrained('depth-anything/Depth-Anything-V2-Small-hf')` forward on the same input bit-for-bit across three random seeds (using `torch.manual_seed(N)` before each noise draw, then `torch.allclose(atol=0, rtol=0)`).
+- [x] T016 [US2] Run `pytest tests/v23/test_encoder.py -m v23` and confirm green.
+
+2026-07-03 status note: T013-T016 are validated locally. `encoder.py` now wraps the local `transformers` `DepthAnythingForDepthEstimation` / `Dinov2Backbone` surface rather than a nonexistent local `depth_anything_v2` module, keeps cached-HF loading optional with an offline-safe fallback, swaps the patch-embed conv for 15-channel input, freezes the base backbone + neck, applies LoRA on the actual attention projection names (`query`, `key`, `value`, `dense`), and exposes a typed `V23FeaturePyramid`. `uv run python -m pytest tests/v23/test_encoder.py -m v23 -q` passed with `3 passed`; the forward/identity proof uses a tiny local config for offline CPU smoke, while the runtime code still supports the real 518-side backbone contract when cached weights are available.
 
 **Checkpoint**: US2 acceptance scenarios 1–3 pass; LoRA config + first-conv swap matches the FR-003 / FR-004 spec contracts.
 
@@ -106,22 +108,24 @@ Per the plan's Project Structure, all paths are under `wow-viewer/data-harvester
 
 ### Tests for User Story 3
 
-- [ ] T017 [P] [US3] Write `wow-viewer/data-harvester/tests/v23/test_head.py` covering: (a) instantiate `V23HeightHead(encrypted=feature_dict_schema)`, fed synthetic features matching the schema, output disparity shape `[B, 1, 257, 257]` and affine anchor shape `[B, 2]`; (b) `sum(p.numel() for p in head.parameters() if p.requires_grad) < 5_000_000`; (c) disparity returned is float32 in `[0, 1]` (sigmoided); (d) affine anchor composition `disparity * scale + shift` produces realistic metric height range (sanity: not all zero, not all NaN).
-- [ ] T018 [P] [US3] Write `wow-viewer/data-harvester/tests/v23/test_model.py` covering: (a) `V23-HeightPredictor(in_channels=15)` forward pass on `[2, 15, 518, 518]` returns a `V23ModelOutput` dataclass with `.disparity`, `.affine_anchor`, `.metric_height`; (b) `.metric_height` shape `[2, 1, 257, 257]`, dtype float32; (c) total trainable param count `sum(p.numel() for p in model.parameters() if p.requires_grad) < 8_000_000`.
+- [x] T017 [P] [US3] Write `wow-viewer/data-harvester/tests/v23/test_head.py` covering: (a) instantiate `V23HeightHead(encrypted=feature_dict_schema)`, fed synthetic features matching the schema, output disparity shape `[B, 1, 257, 257]` and affine anchor shape `[B, 2]`; (b) `sum(p.numel() for p in head.parameters() if p.requires_grad) < 5_000_000`; (c) disparity returned is float32 in `[0, 1]` (sigmoided); (d) affine anchor composition `disparity * scale + shift` produces realistic metric height range (sanity: not all zero, not all NaN).
+- [x] T018 [P] [US3] Write `wow-viewer/data-harvester/tests/v23/test_model.py` covering: (a) `V23-HeightPredictor(in_channels=15)` forward pass on `[2, 15, 518, 518]` returns a `V23ModelOutput` dataclass with `.disparity`, `.affine_anchor`, `.metric_height`; (b) `.metric_height` shape `[2, 1, 257, 257]`, dtype float32; (c) total trainable param count `sum(p.numel() for p in model.parameters() if p.requires_grad) < 8_000_000`.
 
 ### Implementation for User Story 3
 
-- [ ] T019 [US3] Implement `wow-viewer/data-harvester/src/harvester/v23/head.py`:
+- [x] T019 [US3] Implement `wow-viewer/data-harvester/src/harvester/v23/head.py`:
   - `V23HeightHead(nn.Module)`. Constructor requires a `feature_dict_schema` argument (dict of feature names → shape templates) so the reassembly blocks can be sized against the encoder's actual output.
   - Reassembly blocks reduced in width from the canonical 256-DA-V2-Large widths down to 128 (encoder feature dim) at the finest scale to keep param count under 5M.
   - Residual fuse + final sigmoid conv → disparity `[B, 1, H, W]` then `F.interpolate(mode="bicubic", align_corners=False, size=(257, 257))`.
   - Affine anchor head: pool encoder features via `mean over spatial dim`, then `MLP(features_dim → 64 → 2)` → `(scale, shift)`. Sigmoid scale to keep in `[0, 1]`; tanh shift scaled to `[-1, 1]`.
-- [ ] T020 [US3] Implement `wow-viewer/data-harvester/src/harvester/v23/model.py`:
+- [x] T020 [US3] Implement `wow-viewer/data-harvester/src/harvester/v23/model.py`:
   - `V23HeightPredictor(nn.Module)` wraps `DepthAnythingV2SmallEncoder` + `V23HeightHead`.
   - Forward returns `V23ModelOutput` (dataclass) with `.disparity`, `.affine_anchor`, `.metric_height = disparity * scale + shift` (broadcasting scale/shift over H×W).
   - Under `model.eval()` + `torch.no_grad()`, the forward is deterministic given the same input — but this property belongs to Phase 6 to formally verify across seeds.
-- [ ] T021 [US3] Implement the `feature_dict_schema` generator: small helper `infer_encoder_feature_schema(encoder)` runs a forward pass with a single synthetic input and captures intermediate shapes. Cache via `functools.lru_cache(maxsize=1)`. Wired into the head constructor in `model.py`.
-- [ ] T022 [US3] Run `pytest tests/v23/test_head.py tests/v23/test_model.py -m v23` and confirm green.
+- [x] T021 [US3] Implement the `feature_dict_schema` generator: small helper `infer_encoder_feature_schema(encoder)` runs a forward pass with a single synthetic input and captures intermediate shapes. Cache via `functools.lru_cache(maxsize=1)`. Wired into the head constructor in `model.py`.
+- [x] T022 [US3] Run `pytest tests/v23/test_head.py tests/v23/test_model.py -m v23` and confirm green.
+
+2026-07-03 status note: T017-T022 are validated locally. `head.py` now contains a compact top-down fusion decoder that consumes the encoder neck pyramid and predicts `disparity [B,1,257,257]` plus an affine anchor `[B,2]`; `model.py` adds `V23ModelOutput`, metric-height composition, and the schema-inference helper used to size the head from the encoder's actual output contract. `uv run python -m pytest tests/v23/test_head.py tests/v23/test_model.py -m v23 -q` passed with `5 passed`, and the combined targeted suite for Phases 2-3 passed with `8 passed`.
 
 **Checkpoint**: US3 acceptance scenarios 1–3 pass; total trainable param count under 8M per SC-008.
 
@@ -135,7 +139,7 @@ Per the plan's Project Structure, all paths are under `wow-viewer/data-harvester
 
 ### Tests for User Story 4 (Part 1)
 
-- [ ] T023 [P] [US4] Write `wow-viewer/data-harvester/tests/v23/test_losses.py` covering each component:
+- [x] T023 [P] [US4] Write `wow-viewer/data-harvester/tests/v23/test_losses.py` covering each component:
   - Lssi: input `pred=[2,1,257,257]`, `target=[2,1,257,257]`, both random; output scalar >= 0; gradient flows through both; least-squares alignment per-sample is internally applied before computing MSE.
   - Lgm: Sobel-style gradient of `pred` and `target`; L1 between gradients; output scalar >= 0; gradient flows.
   - SDC: spatial-distance-constraint matrix at patch size 16×16 (configurable); output scalar >= 0; gradient flows.
@@ -148,13 +152,15 @@ Per the plan's Project Structure, all paths are under `wow-viewer/data-harvester
 
 ### Implementation for User Story 4 (Part 1)
 
-- [ ] T024 [US4] Implement `affine_invariant_lssi(pred, target, mask=None)` in `wow-viewer/data-harvester/src/harvester/v23/losses.py`. Port from DepthAnything-V2 training code at `https://github.com/DepthAnything/Depth-Anything-V2/blob/main/loss.py`. Citation in docstring. Returns scalar loss.
-- [ ] T025 [US4] Implement `gradient_matching_lgm(pred, target, mask=None)` in `losses.py`. Port from DA-V2 source. Returns scalar.
-- [ ] T026 [US4] Implement `spatial_distance_constraint(features_pred, features_target, patch_size=16)` in `losses.py`. Per DepthAnything-AC paper (arXiv 2507.01634) §3.2. Returns scalar.
-- [ ] T027 [US4] Implement `gpct_overlap_consistency(sub_tile_preds, sub_tile_features, overlap_coords, feature_loss=True)` in `losses.py`. Per PRO paper (arXiv 2503.22351) §3.1. Returns scalar.
-- [ ] T028 [US4] Implement `apply_bias_free_masking(input_tensor, ratio=0.15, generator=None)` in `losses.py`. Returns `(masked_tensor, mask_indices)`. Masked patches are filled with channel-mean RGB (not zero, not noise).
-- [ ] T029 [US4] Implement `compute_v23_loss(outputs, target, weights, valid_mask=None)` in `losses.py`. Returns `(total_loss, components_dict)`. Each component gated by its weight being > 0.0.
-- [ ] T030 [US4] Run `pytest tests/v23/test_losses.py -m v23` and confirm green. Cross-check gradient flow on a tiny synthetic model containing one Linear + Conv as a sanity probe.
+- [x] T024 [US4] Implement `affine_invariant_lssi(pred, target, mask=None)` in `wow-viewer/data-harvester/src/harvester/v23/losses.py`. Port from DepthAnything-V2 training code at `https://github.com/DepthAnything/Depth-Anything-V2/blob/main/loss.py`. Citation in docstring. Returns scalar loss.
+- [x] T025 [US4] Implement `gradient_matching_lgm(pred, target, mask=None)` in `losses.py`. Port from DA-V2 source. Returns scalar.
+- [x] T026 [US4] Implement `spatial_distance_constraint(features_pred, features_target, patch_size=16)` in `losses.py`. Per DepthAnything-AC paper (arXiv 2507.01634) §3.2. Returns scalar.
+- [x] T027 [US4] Implement `gpct_overlap_consistency(sub_tile_preds, sub_tile_features, overlap_coords, feature_loss=True)` in `losses.py`. Per PRO paper (arXiv 2503.22351) §3.1. Returns scalar.
+- [x] T028 [US4] Implement `apply_bias_free_masking(input_tensor, ratio=0.15, generator=None)` in `losses.py`. Returns `(masked_tensor, mask_indices)`. Masked patches are filled with channel-mean RGB (not zero, not noise).
+- [x] T029 [US4] Implement `compute_v23_loss(outputs, target, weights, valid_mask=None)` in `losses.py`. Returns `(total_loss, components_dict)`. Each component gated by its weight being > 0.0.
+- [x] T030 [US4] Run `pytest tests/v23/test_losses.py -m v23` and confirm green. Cross-check gradient flow on a tiny synthetic model containing one Linear + Conv as a sanity probe.
+
+2026-07-03 status note: T023-T030 are validated locally. `losses.py` now contains affine-invariant least-squares alignment, Sobel gradient matching, pooled patch-distance SDC, GPCT overlap consistency, and bias-free masking with channel-mean fill. The focused local gate now rolls these into the full V23 suite; `uv run python -m pytest tests/v23 -m v23 -q` passed with `28 passed`.
 
 **Checkpoint**: US4 acceptance scenario 1 (zero-weight bypass) verified; components are isolated and testable independently.
 
@@ -168,14 +174,14 @@ Per the plan's Project Structure, all paths are under `wow-viewer/data-harvester
 
 ### Tests for User Story 4 (Part 2)
 
-- [ ] T031 [P] [US4] Write `wow-viewer/data-harvester/tests/v23/test_train_smoke.py` covering: (a) call `train_v23_height.main` with synthetic-data arguments `--epochs 2 --train-max-tiles 4 --val-max-tiles 2 --device cpu --deterministic --seed 42` against a 4-tile synthetic V22-shaped store fixture; assert checkpoint file `models/v23/height/runs/smoke_<run>/checkpoints/v23_height_last.pt` exists; assert preview PNG `models/v23/height/runs/smoke_<run>/val_preview_2/tile_0.png` exists; assert checkpoint metadata includes `seed=42`, `commit_sha`, `input_mode=full`, `gpct_weight`, `bias_free_mask_ratio`; (b) re-run with `--seed 12345` and same args; load both checkpoints' `model_state`; assert `torch.allclose(state_dict_42, state_dict_12345, atol=0, rtol=0)`.
+- [x] T031 [P] [US4] Write `wow-viewer/data-harvester/tests/v23/test_train_smoke.py` covering: (a) call `train_v23_height.main` with synthetic-data arguments `--epochs 2 --train-max-tiles 4 --val-max-tiles 2 --device cpu --deterministic --seed 42` against a 4-tile synthetic V22-shaped store fixture; assert checkpoint file `models/v23/height/runs/smoke_<run>/checkpoints/v23_height_last.pt` exists; assert preview PNG `models/v23/height/runs/smoke_<run>/val_preview_2/tile_0.png` exists; assert checkpoint metadata includes `seed=42`, `commit_sha`, `input_mode=full`, `gpct_weight`, `bias_free_mask_ratio`; (b) re-run with `--seed 12345` and same args; load both checkpoints' `model_state`; assert `torch.allclose(state_dict_42, state_dict_12345, atol=0, rtol=0)`.
 
 ### Implementation for User Story 4 (Part 2)
 
-- [ ] T032 [US4] Implement `wow-viewer/data-harvester/src/harvester/v23/checkpoint.py`:
+- [x] T032 [US4] Implement `wow-viewer/data-harvester/src/harvester/v23/checkpoint.py`:
   - `V23Checkpoint` dataclass: `config: dict`, `model_state: Dict[str, torch.Tensor]`, `optimizer_state: Dict[str, Any]`, `epoch: int`.
   - `save_checkpoint(path, ckpt)` writes torch.save with the full config dict including `seed`, `commit_sha` (via `subprocess.check_output(['git','rev-parse','HEAD']).strip().decode()`), `input_mode`, all CLI flag values, `v22_store_path_hash`, `tileset_prune_table_hash`.
-- [ ] T033 [US4] Implement `wow-viewer/data-harvester/scripts/train_v23_height.py`:
+- [x] T033 [US4] Implement `wow-viewer/data-harvester/scripts/train_v23_height.py`:
   - argparse with all documented flags: `--dataset-dir`, `--builds`, `--input-mode`, `--tileset-prune-table`, `--epochs`, `--lr`, `--batch-size`, `--grad-accum-steps`, `--gpct-K`, `--gpct-weight`, `--gpct-feature-loss`, `--sdc-weight`, `--spectral-weight`, `--bias-free-mask-ratio`, `--val-max-tiles`, `--val-interval`, `--val-preview-interval`, `--target-vram-gb`, `--device`, `--deterministic`, `--seed`, `--run-name`, `--output-dir`, `--resume-checkpoint`.
   - Dataset construction: `V23HeightDataset` with the configured `--input-mode` and `--tileset-prune-table`.
   - Optimizer: `bitsandbytes.optim.PagedAdamW8bit(model.parameters(), lr=args.lr)`. Resume from checkpoint state if `--resume-checkpoint` set.
@@ -188,8 +194,10 @@ Per the plan's Project Structure, all paths are under `wow-viewer/data-harvester
   - OOM catch: `try/except torch.cuda.OutOfMemoryError`; on first OOM, halve `--batch-size`, retry once. Persistent OOM after retry becomes fatal.
   - Validation loop every `--val-interval` epochs: per-tile L1 of anchored metric height vs target `height_257`, save preview PNG every `--val-preview-interval`.
   - Checkpoint save every epoch + best.
-- [ ] T034 [US4] Run `pytest tests/v23/test_train_smoke.py -m v23` and confirm green.
-- [ ] T035 [US4] Run on real GPU (if available locally) for 2 epochs on a 16-tile real V22 subset. Confirm zero CUDA OOM at `--device cuda --batch-size 4 --gpct-K 4 --target-vram-gb 22 --bias-free-mask-ratio 0.15` on an RTX-class card. Capture peak VRAM via `torch.cuda.max_memory_allocated() / 1e9` and record in the run folder's `peak_vram.json`. If no local CUDA available, defer this validation to Phase 8 RunPod smoke.
+- [x] T034 [US4] Run `pytest tests/v23/test_train_smoke.py -m v23` and confirm green.
+- [ ] T035 [US4] Run on a real local 12 GB class GPU for 2 epochs on a 16-tile real V22 subset. Confirm zero CUDA OOM with the 12 GB profile (`--device cuda --target-vram-gb 12 --memory-profile 12gb --batch-size 1 --grad-accum-steps 4 --gpct-K 2 --gpct-weight 0.1 --bias-free-mask-ratio 0.15`). Capture peak VRAM via `torch.cuda.max_memory_allocated() / 1e9` and record it in the run folder's `peak_vram.json`. Do this before any future remote/RunPod retry.
+
+2026-07-04 status note: T031-T034 are validated locally, and the trainer now has a real 12 GB profile instead of a fake `target-vram-gb` placeholder. `train_v23_height.py` now applies memory profiles, honors `grad_accum_steps`, records `peak_vram.json`, and retries by shrinking batch size / GPCT-K / AMP mode on CUDA OOM. Focused local coverage for the profile logic lives in `tests/v23/test_train_profiles.py`. T035 remains open because the actual local CUDA proof is scheduled for the next hardware-available session.
 
 **Checkpoint**: US4 acceptance scenarios 1–4 pass; checkpoint format full per FR-019.
 
@@ -203,22 +211,24 @@ Per the plan's Project Structure, all paths are under `wow-viewer/data-harvester
 
 ### Tests for User Story 5
 
-- [ ] T036 [P] [US5] Write `wow-viewer/data-harvester/tests/v23/test_inference_determinism.py` covering: (a) load a trained smoke checkpoint; (b) run inference on a single tile twice with `--seed 42` and `--seed 12345` under `--deterministic`; assert `torch.allclose(atol=0, rtol=0)`.
-- [ ] T037 [P] [US5] Write `wow-viewer/data-harvester/tests/v23/test_cai_stitch.py` covering: (a) load 3×3 tile grid from V22 store fixture; (b) run CAI-R=16 inference and CAI-R=1 inference; (c) cross-tile L1 along every shared edge is < 50% with CAI vs without; (d) saved preview PNG exists.
+- [x] T036 [P] [US5] Write `wow-viewer/data-harvester/tests/v23/test_inference_determinism.py` covering: (a) load a trained smoke checkpoint; (b) run inference on a single tile twice with `--seed 42` and `--seed 12345` under `--deterministic`; assert `torch.allclose(atol=0, rtol=0)`.
+- [x] T037 [P] [US5] Write `wow-viewer/data-harvester/tests/v23/test_cai_stitch.py` covering: (a) load 3×3 tile grid from V22 store fixture; (b) run CAI-R=16 inference and CAI-R=1 inference; (c) cross-tile L1 along every shared edge is < 50% with CAI vs without; (d) saved preview PNG exists.
 
 ### Implementation for User Story 5
 
-- [ ] T038 [US5] Implement `wow-viewer/data-harvester/src/harvester/v23/inference.py`:
+- [x] T038 [US5] Implement `wow-viewer/data-harvester/src/harvester/v23/inference.py`:
   - `run_cai_inference(model, store, tile_xy_grid, cai_r=16)`: build R overlapping sub-tile crops with overlap stride `(256 - overlap)//(R-1)` along both axes. Run model on each crop. For each output pixel, accumulate predictions and a coverage count into a running-mean buffer over a `(py*256, px*256)` output array. Skip outside-grid positions. Return the stitched tensor.
   - When `cai_r=1`, the function is equivalent to single-pass tile inference on each grid cell without overlap.
   - Hard guarantee: under `model.eval() + torch.no_grad()` (set by the caller), the running mean is the only averaging step.
-- [ ] T039 [US5] Implement `wow-viewer/data-harvester/scripts/infer_v23_height.py`:
+- [x] T039 [US5] Implement `wow-viewer/data-harvester/scripts/infer_v23_height.py`:
   - argparse: `--checkpoint`, `--v22-store`, `--build`, `--tiles <list>` (or `--tile-grid NxM`), `--output-dir`, `--cai-r`, `--seed`, `--deterministic`, `--save-preview`, `--fp16`.
   - Load checkpoint, restore config (input_mode, tileset_prune_table path, gpct flags).
   - For single-tile inference (`--tiles` lists one): forward + save disparity + metric height NPZ + preview PNG.
   - For multi-tile inference: call `run_cai_inference` with the requested `--cai-r`. Save stitched NPZ + preview PNG.
   - Set deterministic flags under `--deterministic`.
-- [ ] T040 [US5] Run `pytest tests/v23/test_inference_determinism.py tests/v23/test_cai_stitch.py -m v23` and confirm green.
+- [x] T040 [US5] Run `pytest tests/v23/test_inference_determinism.py tests/v23/test_cai_stitch.py -m v23` and confirm green.
+
+2026-07-03 status note: T036-T040 are validated locally. `inference.py` now provides CAI-style stitched running-mean inference for tile lists, and `infer_v23_height.py` restores checkpoint config, runs deterministic inference, and writes `prediction.npz` plus preview PNGs. The focused deterministic + stitch tests are included in the `28 passed` suite.
 
 **Checkpoint**: US5 acceptance scenarios 1–3 pass; SC-002 + SC-004 + SC-005 verifiable.
 
@@ -232,24 +242,26 @@ Per the plan's Project Structure, all paths are under `wow-viewer/data-harvester
 
 ### Implementation for User Story 6
 
-- [ ] T041 [P] [US6] Implement `wow-viewer/data-harvester/runpod/v23/install_deps.sh`:
+- [x] T041 [P] [US6] Implement `wow-viewer/data-harvester/runpod/v23/install_deps.sh`:
   - `set -euo pipefail`; `cd /workspace/v23_bundle`.
   - `uv sync --frozen` (uses packaged `pyproject.toml` + `uv.lock`).
   - Install extra: `uv pip install transformers peft bitsandbytes`.
   - Validate download: `python -c "from transformers import AutoModelForDepthEstimation; AutoModelForDepthEstimation.from_pretrained('depth-anything/Depth-Anything-V2-Small-hf')"` — first-download caches to `/runpod-volume/hf_cache/` via `HF_HOME` env.
   - Log to `/workspace/bootstrap.log`.
-- [ ] T042 [P] [US6] Implement `runpod/v23/verify_bundle.sh`: `set -euo pipefail`; check `manifest.json` exists; check `contains_game_client_files == "false"`; check `src/harvester/v23/__init__.py` exists; check `scripts/train_v23_height.py` and `scripts/infer_v23_height.py` exist; `python -c "from harvester.v23 import V23HeightPredictor"` succeeds (no NotImplementedError for the public surface).
-- [ ] T043 [P] [US6] Implement `runpod/v23/smoke.sh`:
+- [x] T042 [P] [US6] Implement `runpod/v23/verify_bundle.sh`: `set -euo pipefail`; check `manifest.json` exists; check `contains_game_client_files == "false"`; check `src/harvester/v23/__init__.py` exists; check `scripts/train_v23_height.py` and `scripts/infer_v23_height.py` exist; `python -c "from harvester.v23 import V23HeightPredictor"` succeeds (no NotImplementedError for the public surface).
+- [x] T043 [P] [US6] Implement `runpod/v23/smoke.sh`:
   - `set -euo pipefail`.
   - `uv run python scripts/train_v23_height.py --epochs 2 --train-max-tiles 4 --val-max-tiles 2 --device cuda --target-vram-gb 22 --batch-size 4 --gpct-K 4 --gpct-weight 0.1 --bias-free-mask-ratio 0.15 --deterministic --seed 42 --run-name smoke_v23`.
   - Asserts the checkpoint + preview exist; exits non-zero on failure.
-- [ ] T044 [P] [US6] Implement `runpod/v23/train.sh` — minimal wrapper: `exec uv run python scripts/train_v23_height.py "$@"`.
-- [ ] T045 [US6] Implement `wow-viewer/data-harvester/scripts/package_v23_runpod.py`:
+- [x] T044 [P] [US6] Implement `runpod/v23/train.sh` — minimal wrapper: `exec uv run python scripts/train_v23_height.py "$@"`.
+- [x] T045 [US6] Implement `wow-viewer/data-harvester/scripts/package_v23_runpod.py`:
   - argparse: `--bundle-name`, `--v22-store-subset-path`, `--tileset-prune-table`, `--output-tar`, `--include-v22-subset-tiles <int>`.
   - Copies `src/harvester/v23/`, `scripts/train_v23_height.py`, `scripts/infer_v23_height.py`, `pyproject.toml` (trimmed to v23 deps only), `uv.lock`, `runpod/v23/{install_deps,verify_bundle,smoke,train}.sh`, `tests/v23/`.
   - Generates or copies the V22 Zarr subset (using a small `zarr` slice of the first N tiles of each build root).
   - Writes `manifest.json` with `contains_game_client_files: false`, the tree hash audit, and a `v23_bundle_version` field.
 - [ ] T046 [US6] Manual Pod validation: launch a 24 GB RunPod RTX 4090 Pod (per Spec 079 — `--manual-pod` fallback if REST API fails). Upload the tar via `scp -P <port> <tar> root@<ip>:/workspace/`. `tar -xf v23_bundle.tar -C /workspace/v23_bundle`. Run `bash runpod/v23/install_deps.sh && bash runpod/v23/verify_bundle.sh && bash runpod/v23/smoke.sh`. Confirm smoke passes without CUDA OOM; capture `nvidia-smi` peak during smoke into `/workspace/v23_bundle/peak_vram.json`.
+
+2026-07-03 status note: T041-T045 are now source-complete locally. `runpod/v23/` contains the repo-owned install/verify/smoke/train helpers, and `scripts/package_v23_runpod.py` builds a BYOD tar with the V23 modules, the actual V22 read dependency surface, optional `tests/v23`, a bounded V22 subset store, and `manifest.json` with `contains_game_client_files = false`. Local packaging coverage now exists in `tests/v23/test_package_v23_runpod.py`, and the full focused suite passed with `28 passed`. T046 remains open because Pod-side execution was not performed in this session.
 
 **Checkpoint**: US6 acceptance scenarios 1–3 pass; SC-001 partially verified (smoke); SC-007 verified (manifest audit).
 
@@ -263,15 +275,17 @@ Per the plan's Project Structure, all paths are under `wow-viewer/data-harvester
 
 ### Implementation for User Story (Real-Data Validation)
 
-- [ ] T047 Real-data: confirm or build a V22 Zarr store at `wow-viewer/output/datasets/v22/3_3_5_12340.zarr/` per Spec 088 quickstart. If building fresh, record hashes of the staged client root + V18 store + V22 store into a `data_provenance.json` for reproducibility.
+- [x] T047 Real-data: confirm or build a V22 Zarr store at `wow-viewer/output/datasets/v22/3_3_5_12340.zarr/` per Spec 088 quickstart. If building fresh, record hashes of the staged client root + V18 store + V22 store into a `data_provenance.json` for reproducibility.
 - [ ] T048 Ship the V23 bundle to a 24 GB RunPod Pod per Phase 7. Run `bash runpod/v23/train.sh --dataset-dir /runpod-volume/v22 --builds 0_5_3_3368 3_3_5_12340 4_0_0_11927 --epochs 4 --train-max-tiles 25000 --val-max-tiles 256 --val-interval 1 --val-preview-interval 1 --device cuda --target-vram-gb 22 --batch-size 4 --gpct-K 4 --gpct-weight 0.1 --sdc-weight 0.1 --bias-free-mask-ratio 0.15 --deterministic --seed 42 --run-name v23_height_full_corpus_v1` (this is the canonical training command for the spec). Capture peak VRAM via `nvidia-smi dmon`sampling or by reading `torch.cuda.max_memory_allocated()` from the trainer's log.
 - [ ] T049 Capture V21 baseline L1 for the same validation set (saved into `models/v23/height/runs/v23_height_full_corpus_v1/baselines/v21_val_l1.json` from re-running `train_v18.py height` reference eval or by referencing a previously-recorded V21 baseline number). Compute V23 per-tile val L1 from saved predictions. Compute diff. Record into `models/v23/height/runs/v23_height_full_corpus_v1/sc_003_v21_comparison.json`.
 - [ ] T050 Run CAI-R=16 inference on a 3×3 validation tile grid using `infer_v23_height.py --tiles <3x3 list> --cai-r 16 --deterministic --seed 42 --save-preview --output-dir models/v23/height/runs/v23_height_full_corpus_v1/cai_3x3/`. Also run CAI-R=1 variant for the same grid. Save both preview PNGs.
 - [ ] T051 Run cross-tile L1: read both CAI-R=1 and CAI-R=16 stitched outputs, compute L1 along every shared tile edge, average over edges per output. Record `--cai-r=1_avg_edge_l1` and `--cai-r=16_avg_edge_l1` into `sc_005_cai_comparison.json`. Confirm CAI-R=16 is at least 50% lower.
 - [ ] T052 Determinism proof on Pod: run `infer_v23_height.py --tiles <single tile> --seed 42 --deterministic --output-dir /tmp/det_proof_42/`. Run again with `--seed 12345 --output-dir /tmp/det_proof_12345/`. Diff the two NPZ files; assert bit-identical. Record into `sc_006_determinism_proof.json`.
 - [ ] T053 Manual visual review: open the CAI-R=16 preview PNG. Confirm no visible seam at tile boundaries. Note the observation in `sc_004_visual_review.md` inside the run folder (text file body: "Reviewed by <operator>; preview at <relative path>; seam observed: no / yes; observation: <free text>").
-- [ ] T054 Update `wow-viewer/memory-bank/activeContext.md` to record V23 status. Compress aggressively: ~10 lines describing V23 completion, Phase 1–8 status, and what the next active work is. Update `wow-viewer/memory-bank/progress.md` with a one-line V23 entry dated 2026-07-03.
-- [ ] T055 Write `wow-viewer/docs/architecture/v23-height-predictor-2026-07-03.md` covering: architecture overview (DA-V2-Small + LoRA + DPT head + affine anchor), loss stack (Lssi + Lgm + SDC + GPCT + BiasFree), training envelope (24 GB RunPod), inference envelope (6 GB, fp16), determinism strategy (3-layer), validation results (SC-001 through SC-007 with file references), open questions (e.g. cross-build tileset id contract: union-top-K vs per-build choose), and downstream V24+ integration plan (height output feeds into normal/liquid/etc models as frozen input).
+- [x] T054 Update `wow-viewer/memory-bank/activeContext.md` to record V23 status. Compress aggressively: ~10 lines describing V23 completion, Phase 1–8 status, and what the next active work is. Update `wow-viewer/memory-bank/progress.md` with a one-line V23 entry dated 2026-07-03.
+- [x] T055 Write `wow-viewer/docs/architecture/v23-height-predictor-2026-07-03.md` covering: architecture overview (DA-V2-Small + LoRA + DPT head + affine anchor), loss stack (Lssi + Lgm + SDC + GPCT + BiasFree), training envelope (24 GB RunPod), inference envelope (6 GB, fp16), determinism strategy (3-layer), validation results (SC-001 through SC-007 with file references), open questions (e.g. cross-build tileset id contract: union-top-K vs per-build choose), and downstream V24+ integration plan (height output feeds into normal/liquid/etc models as frozen input).
+
+2026-07-03 status note: T047 is satisfied locally because canonical `0_5_3_3368.zarr` and `3_3_5_12340.zarr` stores now exist under `wow-viewer/output/datasets/v22/`. T054-T055 are also now satisfied locally via the synced V23 architecture note and memory-bank updates. The remaining open Phase 8 items are all external proof tasks: Pod smoke, full-corpus training, CAI seam review on real tiles, and cross-pod determinism.
 
 **Checkpoint**: All SC-001 through SC-007 verified and recorded. The spec is "implementation complete" only when these files exist with the expected contents.
 

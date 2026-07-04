@@ -1,5 +1,53 @@
 # Progress — wow-viewer
 
+# 2026-07-04 - V23 remote selector now prefers 3090/4090/5090 before workstation fallbacks
+
+- `setup_spec077_runpod.py` now supports an optional `preferred_gpu_ids` ranking inside the cost-target selector.
+- `setup_v23_runpod.py` now injects `NVIDIA GeForce RTX 3090`, `NVIDIA GeForce RTX 4090`, and `NVIDIA GeForce RTX 5090` as the preferred V23 remote order when no explicit `--gpu-types` list is provided, and its default single GPU target is now `NVIDIA GeForce RTX 4090`.
+- Added `tests/test_setup_v23_runpod.py`; focused validation passed with `1 passed`.
+
+# 2026-07-04 - Spec 089 pivots to a real 12 GB local envelope before any remote retry
+
+- `train_v23_height.py` no longer treats `--target-vram-gb` as decorative. It now applies explicit memory profiles (`auto`, `12gb`, `24gb`, `none`), honors `--grad-accum-steps`, records `peak_vram.json`, and retries CUDA OOM by shrinking batch size first, then GPCT-K, then AMP mode.
+- Default target VRAM is now `12`, not `22`. The 12 GB profile caps runtime to `batch_size=1`, promotes `grad_accum_steps`, reduces GPCT-K to `2` when GPCT is enabled, and prefers fp16 on CUDA.
+- Added focused tests in `tests/v23/test_train_profiles.py`; targeted validation `uv run python -m pytest tests/v23/test_train_profiles.py tests/v23/test_train_smoke.py -m v23 -q` passed with `3 passed`.
+- `infer_v23_height.py` now actually honors `--fp16` on CUDA via autocast instead of ignoring the flag.
+- Spec 089 task truth is updated: the next real gate is local T035 on a 12 GB class GPU. Remote/RunPod work is now explicitly after, not before, that local proof.
+
+# 2026-07-03 - Spec 089 external bootstrap route reached real RunPod Pod creation
+
+- Added `data-harvester/scripts/setup_v23_runpod.py`, a V23-specific wrapper over the proven Spec 079 / Spec 077 RunPod creation logic.
+- Fixed a real bundle recursion bug in `package_v23_runpod.py`: the original default output root lived under `runpod/v23/dist`, which caused the packager to recurse into its own output when copying `runpod/v23`. The package now writes to `wow-viewer/output/cloud-packages/v23/` and copies only the explicit `runpod/v23/*.sh` files.
+- Packaged a real tar: `wow-viewer/output/cloud-packages/v23/v23_smoke_bundle3.tar`.
+- Real API proof: RunPod network-volume creation failed consistently with `You must have at least $5 in your account to create a network volume`, so the fallback route was exercised successfully with `--no-network-volume`. That created a fallback Pod on `NVIDIA RTX A4500`; current REST state reported a public IP and SSH port mapping without blocking local package validation.
+- Remaining external blocker is upload/SSH bootstrap. The local environment hit an approval/usage limit before I could run the live `ssh`/`scp` test, so the Pod exists but bundle transfer + `runpod/v23/install_deps.sh` / `smoke.sh` still need the next network-capable pass.
+
+# 2026-07-03 - Spec 089 local V23 implementation now reaches the RunPod bundle boundary
+
+- Implemented the remaining local V23 stack: `data-harvester/src/harvester/v23/losses.py`, `checkpoint.py`, `inference.py`, `scripts/train_v23_height.py`, and `scripts/infer_v23_height.py`.
+- Added focused local proof coverage for losses, deterministic smoke training, deterministic inference, CAI stitching, and bundle packaging via `tests/v23/test_losses.py`, `test_train_smoke.py`, `test_inference_determinism.py`, `test_cai_stitch.py`, and `test_package_v23_runpod.py`.
+- Added the repo-owned Phase 7 RunPod bundle surfaces under `data-harvester/runpod/v23/` plus `scripts/package_v23_runpod.py`. The packager now copies the actual V23 runtime dependency surface, bounded V22 subset stores, optional `tests/v23`, and emits `manifest.json` with `contains_game_client_files = false`.
+- Added `docs/architecture/v23-height-predictor-2026-07-03.md` and synced `specs/089-dav2-height-predictor/tasks.md` so the task pack matches the landed local implementation boundary.
+- Current local proof owner: `uv run python -m pytest tests/v23 -m v23 -q` -> `28 passed, 14 warnings`.
+- Remaining open work is external proof only: T035 local CUDA envelope, T046 Pod smoke, and T048-T053 real-corpus / real-seam / cross-pod determinism evidence.
+
+# 2026-07-03 - Spec 089 V23 core model Phases 2-3 landed and validated
+
+- Implemented `data-harvester/src/harvester/v23/encoder.py`, `head.py`, and `model.py`, plus new focused tests `tests/v23/test_encoder.py`, `test_head.py`, and `test_model.py`.
+- The encoder now targets the actual local `transformers` `DepthAnythingForDepthEstimation` / `Dinov2Backbone` module tree, keeps pretrained loading offline-safe, swaps the patch-embed conv for 15-channel input, freezes the base backbone + neck, and applies LoRA to the real attention projection names (`query`, `key`, `value`, `dense`).
+- The combined model surface now exists: `V23FeaturePyramid`, `V23HeightHead`, `V23ModelOutput`, metric-height composition, and schema inference from a synthetic encoder forward.
+- Validation passed locally: `uv run python -m py_compile src/harvester/v23/encoder.py src/harvester/v23/head.py src/harvester/v23/model.py tests/v23/test_encoder.py tests/v23/test_head.py tests/v23/test_model.py` and `uv run python -m pytest tests/v23/test_encoder.py tests/v23/test_head.py tests/v23/test_model.py -m v23 -q` -> `8 passed`.
+- `uv run python -c "from harvester.v23 import V23HeightPredictor; print('import-ok')"` also passed after the public surface update.
+- Spec 089 task truth is now T001-T022 complete. The next concrete gate is Phase 4 loss-stack implementation (`tests/v23/test_losses.py`, `losses.py`), then the actual trainer/checkpoint path.
+
+# 2026-07-03 - Canonical V22 stores exist and the contract is paths-only
+
+- Canonical V22 stores now exist at `wow-viewer/output/datasets/v22/0_5_3_3368.zarr` and `wow-viewer/output/datasets/v22/3_3_5_12340.zarr`.
+- `build_v22_dataset.py stats` now reports `0_5_3_3368 -> tile_count 1629, model_count 368, tileset_count 322` and `3_3_5_12340 -> tile_count 5134, model_count 7660, tileset_count 748`.
+- `finalization.json` for both stores now records `asset_payload_mode = "paths_only"` with `missing_components = []`.
+- The canonical store contract is corrected: keep root arrays, placement arrays, path/id inventories, `texture_shape`, and provenance sidecars; do not rely on embedded M2/WMO/BLP blobs inside the Zarr store.
+- Spec 089 T012 is now proven against the canonical `3_3_5_12340` store: `V23HeightDataset(...)[0]` returned `input (15,256,256)`, `target (1,257,257)`, `target_height (1,257,257)`, `valid_mask (1,257,257)`, `channel_valid_mask (15,)`.
+
 # 2026-07-03 - V22 asset provenance now tracks archive listfile backing
 
 - `WowViewer.Tool.V22Enrich` now classifies each requested M2 / WMO / BLP asset path against the loaded archives' internal `(listfile)` rows and emits `source_in_listfile` in every enrichment entry, including decode-failure rows.
@@ -15,7 +63,7 @@
 - `src/harvester/v22_zarr_io.py` is now a real Spec 088 writer instead of a partial stub: it no longer requires `pandas`, reads `placements.parquet` and `decoded_metadata.parquet` directly with PyArrow, derives `mcly_tileset_ids` from `decoded_metadata_json.mcly_texture_names`, preserves the fixed-key `V22Dataset` contract, fixes the last-tile flat-placement offset/count bug, and writes `index.parquet`, `placements.parquet`, `asset_inventory.parquet`, and `finalization.json` sidecars.
 - Focused validation now passes locally: `dotnet build wow-viewer/tools/enrich/WowViewer.Tool.V22Enrich -c Debug` succeeds, and `uv run pytest tests/test_v22_zarr_io.py tests/test_v22_patched_signals.py -q` passes (`28 passed`).
 - Real-data smoke also now exists. A one-tile temp V18 subset was cut from `wow-viewer/output/datasets/v18/3_3_5_12340.zarr` into `wow-viewer/data-harvester/tmp/v18_smoke/3_3_5_12340_tile0.zarr`, then `build_v22_dataset.py enrich` + `build` produced `wow-viewer/data-harvester/tmp/v22_smoke/3_3_5_12340_tile0.zarr`. `build_v22_dataset.py stats` reports `tile_count = 1`, `model_count = 1`, `tileset_count = 9`; `inspect_v22_dataset.py tile --tile-index 0` shows populated `mcly_tileset_ids` and one resolved MODF placement.
-- Remaining gap: the canonical full-store V22 output under `wow-viewer/output/datasets/v22/3_3_5_12340.zarr` still does not exist. A quick local build against the full existing 3.3.5 V18 store timed out after 10 minutes, so the next Spec 088 slice is to promote the temp one-tile proof into the durable bounded Phase 9 operator path or add a first-class bounded V18 export path.
+- Superseded later the same day: canonical full-store V22 outputs now exist at `wow-viewer/output/datasets/v22/0_5_3_3368.zarr` and `wow-viewer/output/datasets/v22/3_3_5_12340.zarr`, both finalized with `asset_payload_mode = "paths_only"`.
 
 # 2026-07-03 - Spec 089 V23 Phase 1 dataset slice source-applied
 
@@ -24,7 +72,7 @@
 - Repaired the local harvester environment by quarantining the stale `.venv`, rebuilding it on `C:\Python314\python.exe`, and adding the missing `setuptools` / `src` package metadata to `pyproject.toml` so plain `uv run` can import `harvester`.
 - Fixed an import blocker in `src/harvester/v22_zarr_io.py` (`from dataclasses import dataclass` was missing).
 - Validation now passes locally: `uv sync`, `uv run python -c "import harvester.v23"` -> `import-ok`, `uv run pytest -q` -> `309 skipped`, and `uv run pytest tests/v23/test_dataset.py tests/v23/test_channels.py -m v23 -q` -> `10 passed`.
-- Remaining open work in Phase 1 is only T012 real-data proof against a V22 store. Attempting that proof showed the next blocker is upstream: `wow-viewer/tools/enrich/WowViewer.Tool.V22Enrich` does not currently build because its M2/WMO enrichment builders reference stale core API members.
+- Phase 1 is complete. The next open work moved downstream into the V23 model stack; the previous V22 toolchain blocker was resolved later the same day.
 
 # 2026-07-03 - Spec 089 Speckit planning pack completed
 

@@ -14,6 +14,8 @@ V18 Zarr stores already ship 20 base signal arrays and a `placements.parquet` si
 1. A new C# tool `WowViewer.Tool.V22Enrich` that takes a finished V18 store, walks its placement asset paths, opens the staged game client, decodes every unique M2 / WMO / BLP exactly once, and writes a stable-keyed binary enrichment stream. The stream is keyed by canonical asset path (via `M2ModelIdentity.NormalizePath`), not by `Path.GetHashCode()`.
 2. A rewritten Python `scripts/build_v22_dataset.py` that reads a V18 store, derives the V22 patched signals in pure Python, promotes V18 placements to native V22 flat arrays, consumes the enrichment stream, and writes a V22 Zarr store. No C# Zarr implementation. No Python client reparse. The C# side only emits the enrichment stream; the Python side owns the Zarr store.
 
+**Canonical asset mode correction (2026-07-03):** the canonical V22 datastore is `paths_only`. The enrich step may decode assets in order to recover stable ids, shapes, string surfaces, and provenance, but the final training store keeps path/id inventories plus audit sidecars instead of embedding full M2/WMO/BLP payload blobs as required runtime data.
+
 **Client Scope**: `0_5_3_3368`, `3_3_5_12340`, `4_0_0_11927`. Same scope as Spec 086. Cata `4_0_0_11927` stays in scope because the development map references Cata-only assets. Expansion beyond these three builds requires reopening this spec.
 
 **Repo Boundary**: All work is in `wow-viewer/`. The new C# tool lives at `wow-viewer/tools/enrich/WowViewer.Tool.V22Enrich/`. The Python builder stays at `wow-viewer/data-harvester/scripts/build_v22_dataset.py`. The Python Zarr I/O stays at `wow-viewer/data-harvester/src/harvester/v22_zarr_io.py`.
@@ -40,7 +42,7 @@ As a dataset builder, I can produce a V22 Zarr store by running two commands: `W
 
 **Why this priority**: This is the entire V22 contract. Without this, the spec is unfulfilled.
 
-**Independent Test**: A bounded V22 build on a single V18 tile produces a Zarr store with `tile_count = 1`, all 20+5 root arrays present, and `models/` / `tilesets/` groups populated for every unique M2/WMO/BLP the tile references.
+**Independent Test**: A bounded V22 build on a single V18 tile produces a Zarr store with `tile_count = 1`, all 20+5 root arrays present, and `models/` / `tilesets/` inventory groups populated for every unique M2/WMO/BLP the tile references.
 
 **Acceptance Scenarios**:
 1. **Given** a V18 store for `3_3_5_12340` Azeroth with 1 tile, **When** the V22 enrich tool runs, **Then** the enrichment stream contains one M2/WMO/BLP entry per unique asset path referenced by the tile's placements.
@@ -135,13 +137,13 @@ As a dataset builder, V22 produces a non-empty store on real staged client data.
   - `model_focus_mask` (float32 257×257) — alias of `object_filtered_mask` (copy).
   - `model_above_terrain_mask` (float32 257×257) — for each MDDF/MODF placement in the tile, project `(posX, posY, posZ)` to a tile pixel using the four candidate projections in `RawArraySerializer.BuildModelAboveTerrainMask` at lines 555-629, set the pixel to 1.0 if `posZ >= height[py, px] - 1.0`.
 - **FR-021**: The builder MUST read `placements.parquet` from the V18 store and promote it to native V22 placement arrays: `mddf_placement_data` (total, 9) float32 with `mddf_count` (N,) int32 and `mddf_placement_offset` (N,) int64; same for MODF at 17 columns (V18's 14-col MODF rows are expanded to 17 with zero-fill for `flags`/`doodadSet`/`nameSet` when missing — match `RawArraySerializer.ConvertModfPlacementDataToV22` at lines 506-538). Per-row `placement_mddf_asset_paths` and `placement_modf_asset_paths` are read from V18's `placement_mddf_data` / `placement_modf_data` rows (V18 already records resolved `asset_path` per row at `build_v18_dataset.py:1125-1148`).
-- **FR-022**: The builder MUST consume the enrichment stream produced by `WowViewer.Tool.V22Enrich` and write a `models/` group with one entry per unique asset path. Each entry contains the FR-008 (M2) or FR-009 (WMO) arrays. `models/model_paths` is a string array; `models/model_kind` is uint8 (0=unknown, 1=M2, 2=WMO); `models/load_error` is uint8 per entry.
-- **FR-023**: The builder MUST consume the enrichment stream's BLP entries and write a `tilesets/` group with one entry per unique BLP path. Each entry contains `texture_rgb` (H, W, 3) uint8 and `texture_shape` (2,) int32. `tilesets/tileset_paths` is a string array; `tilesets/load_error` is uint8 per entry.
+- **FR-022**: The builder MUST consume the enrichment stream produced by `WowViewer.Tool.V22Enrich` and write a `models/` group with one entry per unique asset path. In canonical `paths_only` mode, the required persisted fields are `models/model_paths` (string), `models/model_kind` (uint8, 0=unknown, 1=M2, 2=WMO), and `models/load_error` (uint8). Full decoded payload arrays are debug/proof-only and are not required parts of the canonical datastore contract.
+- **FR-023**: The builder MUST consume the enrichment stream's BLP entries and write a `tilesets/` group with one entry per unique BLP path. In canonical `paths_only` mode, the required persisted fields are `tilesets/tileset_paths` (string), `tilesets/load_error` (uint8), and `tilesets/texture_shape` ((2,) int32 per entry). Full decoded RGB payload blobs are debug/proof-only and are not required parts of the canonical datastore contract.
 - **FR-024**: The builder MUST write `mcly_tileset_ids` (N, 16, 16, 4) int32 by remapping each tile's `mcly_texture_ids` (which is tile-local MTEX index) through the build-wide `tilesets/tileset_paths` index. Each tile's `mtex_texture_paths` (read from V18's per-tile `metadata.mtex_texture_paths` or the row's `mtex_texture_names`) is used to build the per-tile index. Unused layers are `-1`.
 - **FR-025**: The builder MUST write `mddf_model_ids` (total_mddf,) int32 and `modf_model_ids` (total_modf,) int32 by resolving each placement's `asset_path` to the index in `models/model_paths`. Placements with no resolvable path get `-1`.
 - **FR-026**: The builder MUST write `mddf_unique_ids` (total_mddf,) int32 and `modf_unique_ids` (total_modf,) int32 by reading V18's `placement_mddf_data` / `placement_modf_data` column 1 (uniqueId).
 - **FR-027**: The builder MUST keep `index.parquet`, `placements.parquet` (audit copy), and `asset_inventory.parquet` as audit-only sidecars outside the `.zarr` store, in the style of V18.
-- **FR-028**: The builder MUST emit `finalization.json` recording array existence, model count, tileset count, and the source V18 store path. The store is only considered "finalized" when `finalization.json` reports zero missing components.
+- **FR-028**: The builder MUST emit `finalization.json` recording array existence, model count, tileset count, the source V18 store path, and `asset_payload_mode`. The store is only considered "finalized" when `finalization.json` reports zero missing components.
 - **FR-029**: The builder MUST set a real non-zero process exit code on any failure (empty V18 store, missing enrichment stream, parse error).
 
 ### `V22ZarrWriter` Python Module
@@ -170,7 +172,7 @@ As a dataset builder, V22 produces a non-empty store on real staged client data.
 
 ## Success Criteria
 
-- **SC-001**: A bounded V22 build on one `3_3_5_12340` Azeroth tile produces a Zarr store with `tile_count = 1`, all root arrays present, `models/model_paths.shape[0] > 0`, `tilesets/tileset_paths.shape[0] > 0`, and per-row placement ↔ model id round-trip verified.
+- **SC-001**: A bounded V22 build on one `3_3_5_12340` Azeroth tile produces a Zarr store with `tile_count = 1`, all root arrays present, `models/model_paths.shape[0] > 0`, `tilesets/tileset_paths.shape[0] > 0`, `asset_payload_mode = "paths_only"`, and per-row placement ↔ model id round-trip verified.
 - **SC-002**: V22 stores built twice from the same V18 store + same enrichment stream have byte-identical `models/model_paths` and `mcly_tileset_ids` per tile.
 - **SC-003**: V18 trainers (`train_v18.py`, `train_v18_focus.py`) keep working on V18 stores produced alongside V22 stores, with no spec-088 changes to the V18 build or trainer paths.
 - **SC-004**: The `WowViewer.Tool.V22Enrich` tool reads a real V18 store and produces a non-empty enrichment stream for `3_3_5_12340` Azeroth with at least one M2 entry (the development map's only placed M2 / WMO will do).
@@ -211,7 +213,7 @@ As a dataset builder, V22 produces a non-empty store on real staged client data.
 
 - **V18 Zarr store**: Substrate. Located at `output/datasets/v18/<build>.zarr/`. Carries 20 base signal arrays + `mcnr_mask_257` (already in V18) + `placements.parquet` sidecar. Read-only for this spec.
 - **Enrichment stream**: New artifact. Binary file produced by `WowViewer.Tool.V22Enrich`. Carries one `ENTRY` record per unique M2 / WMO / BLP path. Stable path keys. Format defined in FR-012.
-- **V22 Zarr store**: Output. Located at `output/datasets/v22/<build>.zarr/`. Carries V18-derived root arrays + V22 patched signals + V22 native placement arrays + `models/` group + `tilesets/` group + `mcly_tileset_ids`.
+- **V22 Zarr store**: Output. Located at `output/datasets/v22/<build>.zarr/`. Carries V18-derived root arrays + V22 patched signals + V22 native placement arrays + `models/` path inventory + `tilesets/` path inventory + `mcly_tileset_ids`.
 - **Canonical asset path**: A normalized game-client-relative path (e.g. `World/M2/Peasant.m2`). Produced by `M2ModelIdentity.NormalizePath`. Stable across processes and runs.
 - **`WowViewer.Tool.V22Enrich`**: New C# CLI tool. Thin wrapper around the existing C# readers. No new format parsing. Output: enrichment stream.
 - **`build_v22_dataset.py`**: Rewritten Python builder. Reads V18 store, reads enrichment stream, writes V22 Zarr store. No game client reparse, no C# Zarr implementation.

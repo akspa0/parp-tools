@@ -47,7 +47,10 @@ WOW_VIEWER_ROOT = DATA_HARVESTER_ROOT.parent
 WORKSPACE_ROOT = WOW_VIEWER_ROOT.parent
 sys.path.insert(0, str(DATA_HARVESTER_ROOT / "src"))
 
-from harvester.v22_zarr_io import V22ZarrWriter  # noqa: E402
+from harvester.v22_zarr_io import (  # noqa: E402
+    V22ZarrWriter,
+    complete_existing_store_from_enrichment,
+)
 
 
 DEFAULT_V22_OUTPUT_ROOT = WOW_VIEWER_ROOT / "output" / "datasets" / "v22"
@@ -137,7 +140,7 @@ def _build(v18_store: Path, enrichment: Path, output: Path) -> Path:
         # Empty enrichment stream — still produce a V22 store (no model/tileset entries)
         pass
 
-    writer = V22ZarrWriter(output, overwrite=True)
+    writer = V22ZarrWriter(output, overwrite=True, embed_asset_payloads=False)
     writer.add_from_v18(str(resolved_v18), str(resolved_enrich))
     return writer.finalize()
 
@@ -195,6 +198,15 @@ def main() -> int:
     stats = sub.add_parser("stats", help="Print a summary of an existing V22 Zarr store")
     stats.add_argument("--store", required=True, type=Path)
 
+    # ── complete-existing ────────────────────────────────────────
+    complete = sub.add_parser(
+        "complete-existing",
+        help="Finish a partial V22 store by writing models/tilesets/sidecars from the enrichment stream",
+    )
+    complete.add_argument("--store", required=True, type=Path)
+    complete.add_argument("--v18-store", required=True, type=Path)
+    complete.add_argument("--enrichment", required=True, type=Path)
+
     args = parser.parse_args()
 
     try:
@@ -222,6 +234,16 @@ def main() -> int:
         elif args.command == "stats":
             result = _stats(args.store)
             print(json.dumps(result, indent=2, default=str))
+            return 0
+
+        elif args.command == "complete-existing":
+            out = complete_existing_store_from_enrichment(
+                store_path=_resolve_cli_path(args.store),
+                v18_store_path=_resolve_cli_path(args.v18_store),
+                enrichment_path=_resolve_cli_path(args.enrichment),
+                embed_asset_payloads=False,
+            )
+            print(f"completed {out}")
             return 0
 
     except RuntimeError as exc:
