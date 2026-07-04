@@ -1,34 +1,18 @@
 # Progress — MdxViewer
 
-This file is intentionally compressed. Keep only the latest compatibility milestones and open risks.
+Last updated: 2026-07-04
+Keep last-week compatibility truth only. Older milestones moved to `memory-bank/archive/2026-07-04-older-history.md`.
 
-## Current Role
+## 2026-07-04
 
-- `MdxViewer` is the legacy compatibility lane, not the primary destination for new `wow-viewer` ownership.
+- Added bottom display bar in `ViewerApp_Sidebars.cs`; terrain/world toggles no longer need duplicate homes.
+- Reworked top toolbar into launcher strip for minimap, terrain workbench, PM4 workbench, and capture automation.
+- Replaced duplicate workspace toggles with window-launch actions.
+- Restored omitted PM4 windows by wiring `DrawPm4ObjectMatchWindow()` and `DrawPm4WmoCorrelationWindow()` back into `DrawUI()` and `Tools`.
+- Attempted validation used `dotnet build gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`, but broad missing refs outside this slice still block compile proof.
 
-## Recent Compatibility Milestones
+## Current handoff
 
-### Apr 16, 2026 - weak-signal terrain restore modes landed
-
-- Added whole-tile and per-chunk restore modes.
-- Added selected-chunk targeting and texture-tied sub-cell guidance.
-- Proof level: compile validation only.
-
-### Apr 16, 2026 - runtime-backed M2 path became the default successful viewer route
-
-- `MdxViewer` now defaults to the pure `wow-viewer`-backed M2 renderer for successful runtime loads.
-- Viewer-side skeletal animation playback is proven for the bounded wolf repro.
-- Character customization and projected-heavy object fixes improved the bounded runtime path.
-
-### May 21, 2026 - PM4 MSHD region grouping surfaced through wow-viewer
-
-- `wow-viewer` now exposes `MSHD.Field04` as a region-id grouping contract with compatibility aliases for older PM4 consumer names.
-- `MdxViewer` now colors/groups PM4 overlays by region id, shows the raw `MSHD` trio in the PM4 workbench, and includes the metadata in PM4 JSON exports and cache payloads.
-- The PM4 workbench selection tab now shows selected-region peers from the current visible overlay and can export an LLM-oriented PM4 evidence bundle (`json` + `md` + `svg`).
-- `MdxViewer.csproj` now builds again after explicitly binding the legacy `M2ToMdxConverter`.
-
-## Open Risks
-
-- Full M2 parity is still open.
-- Terrain restore remains heuristic and not broadly runtime-validated.
-- Prefer moving new ownership into `wow-viewer` instead of extending this lane.
+- `MdxViewer` stays compatibility only.
+- Use `wow-viewer` for new ownership.
+- Use archive file for Apr/May history.
