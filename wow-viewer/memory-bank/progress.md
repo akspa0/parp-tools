@@ -4,6 +4,13 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 
 ## 2026-07-04
 
+### Documentation audit and rewrite
+
+- Rewrote `wow-viewer/AGENTS.md` to current repo truth.
+- Rewrote root `README.md`, `docs/PLANS-OVERVIEW.md`, `docs/WoWViewer/README.md`, `docs/WoWViewer/USERGUIDE.md`, and `data-harvester/README.md`.
+- Added `docs/DOCUMENTATION-STATUS.md` as canonical doc map.
+- Removed dead links and stale path guidance from high-traffic docs.
+
 ### Spec 089 local 12 GB pivot
 
 - `train_v23_height.py` now applies real memory profiles, honors `grad_accum_steps`, records `peak_vram.json`, and retries OOM by shrinking batch size, then GPCT-K, then AMP mode.

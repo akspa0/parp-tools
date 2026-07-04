@@ -1,71 +1,63 @@
 <!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan.
-Spec Kit skills are available as opencode skills under `.opencode/skills/speckit-*`.
+Read current spec pack before non-trivial work. If no pack fits, create one.
 <!-- SPECKIT END -->
 
-# wow-viewer Guardrails
+# wow-viewer AGENTS
 
-The rules that keep new work in this repository shippable, findable, and safe to extend.
+Short file. Current truth only. Root `../AGENTS.md` still wins on workspace policy.
 
-For the day-to-day how-to (C#/Python conventions, project layout, tests, commits), see `wow-viewer/memory-bank/coding_standards.md`. For paths and override environment variables, see `wow-viewer/memory-bank/data-paths.md`.
+## Mission
 
-## Scope and Boundaries
+- `wow-viewer/` is active repo.
+- `gillijimproject_refactor/` is read-only reference.
+- Goal: keep `wow-viewer` extractable, spec-driven, and proof-backed.
 
-- All new implementation work lives in `wow-viewer/`. Do not add new code in `gillijimproject_refactor/` unless explicitly requested.
-- The top-level `../AGENTS.md` is the authoritative workspace policy for scope, safety, and repo boundaries. When guidance here and there conflict, the top-level file wins.
-- Game client data is read only from `output/tmp/wowarchive-clients/`. Any reference to `H:\CLIENTS` in code, scripts, tests, or documentation is a bug. Replace it with a staged path or remove the reference.
-- MDX files (MDLX container) must use the legacy `MdxRenderer` (GPU skinning via bone matrix uniforms), never the M2 runtime. Do not route `.mdx` files through `LoadChunkedMdxFromBytes` or any M2 conversion pipeline for rendering. The M2 CPU skinning path (`M2Renderer` + `M2RuntimeAnimator` + `M2SkinnedRenderModelBuilder`) produces incorrect animation for converted MDX data. World instances already use `MdxRenderer` directly at `WorldAssetManager.cs:1297`; standalone loading must do the same at `LoadModelFromBytesWithContainerProbe`.
+## Current active lanes
 
-## Spec Kit
+- Spec 089 `089-dav2-height-predictor` — active model lane.
+- Spec 088 `088-v22-enrichment-from-v18` — active dataset contract feeding 089.
+- Spec 080 `080-wow-ui-consolidation` — active viewer-shell doc and compatibility lane.
 
-Every non-trivial feature slice starts with a spec, then a plan, then tasks. Use the Spec Kit skills under `.opencode/skills/speckit-*`:
+## Background lanes still relevant
 
-- `speckit-specify` — write or refine a spec (`wow-viewer/specs/<NNN>-<feature>/spec.md`)
-- `speckit-plan` — implementation plan (`plan.md`)
-- `speckit-tasks` — concrete task breakdown (`tasks.md`)
-- `speckit-implement` — execute the task list with validation
-- `speckit-analyze` — stress-test a spec before committing to it
-- `speckit-checklist` — verify spec/plan/implementation alignment
+- Spec 047 `047-v18-distill-corpus-open-source-loop` — focused V18 operator path.
+- Spec 079 `079-runpod-integration-guide` — shared remote bundle/runtime pattern.
+- Spec 076 and Spec 077 — paused/background; reuse only when explicitly reopened.
 
-Specs live in `wow-viewer/specs/<NNN>-<feature>/`. The Spec Kit constitution is at `wow-viewer/.specify/memory/constitution.md`.
+## Hard rules
 
-Architecture docs live in `wow-viewer/docs/architecture/` and must stay aligned with the code that implements them. When a spec changes behavior, update the relevant architecture doc in the same change.
+- New code stays in `wow-viewer/`.
+- Staged clients only: `output/tmp/wowarchive-clients/`.
+- Any `H:\CLIENTS` reference is bug.
+- No new parser clones when shared `Core` or `Core.IO` surface already exists.
+- One phase at a time. Real-data proof ends phase.
+- Doc sync same pass: spec, architecture note, memory-bank.
 
-## Phasing and Validation
+## Spec flow
 
-A spec is a sequence of phases. Do not start phase N+1 until phase N is validated against real data. "Validated" means a real-data proof has been recorded, not just that the code compiles.
+- Check existing spec first: `wow-viewer/specs/<NNN>-<name>/`.
+- If behavior changes, update `spec.md`, `plan.md`, or `tasks.md` in same pass.
+- If no spec fits, create spec -> plan -> tasks before broad implementation.
 
-Each phase produces a small, independently committable diff. Big-bang commits and big-bang rewrites are out.
+## Canonical docs
 
-## Implementation Pass Checklist
+- [README.md](/I:/parp/parp-tools/wow-viewer/README.md)
+- [docs/DOCUMENTATION-STATUS.md](/I:/parp/parp-tools/wow-viewer/docs/DOCUMENTATION-STATUS.md)
+- [docs/architecture/wow-engine-modernization-plan-2026-05-14.md](/I:/parp/parp-tools/wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md)
+- [memory-bank/activeContext.md](/I:/parp/parp-tools/wow-viewer/memory-bank/activeContext.md)
+- [memory-bank/progress.md](/I:/parp/parp-tools/wow-viewer/memory-bank/progress.md)
 
-A complete pass on a spec task, plan slice, or feature lands four artifacts: code, documentation, a commit, and a self-review.
+## Validation
 
-**Code and tests**
+- C#: `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+- C# tests: `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+- Python: run from `wow-viewer/data-harvester/` with `uv run ...`
+- Do not run Python entrypoints from repo root when package imports depend on `data-harvester/src/`.
 
-- The diff addresses the task, the plan, and the spec. Nothing extra.
-- Null references, missing enum cases, file-locking, coordinate-transform, and cache-version regressions are caught before the commit, not after.
-- `dotnet build` and `dotnet test` pass on the affected projects.
-- No path in the diff resolves to `H:\CLIENTS` or any other untrusted client root.
+## Historical docs
 
-**Documentation**
-
-- `tasks.md` is current: completed items are checked off, new discoveries are added, counts are accurate.
-- `memory-bank/activeContext.md` and `memory-bank/progress.md` reflect what landed, what is open, and the biggest unproven gap. Compress aggressively — a 20-line accurate summary beats a 200-line log.
-- `spec.md` is updated when a discovery changes an assumption or requirement.
-
-**Commit**
-
-- One logical change per commit. A bug fix, a refactor, and a feature do not belong together.
-- Staged by name. `git add .` is a smell.
-- Commit message describes the "why," not the "what." The diff already shows the what.
-- No secrets, no private paths, no `H:\CLIENTS` references.
-
-**Self-review**
-
-- Re-read the diff as a new contributor would. Would they understand the change without a conversation?
-- If a cleaner, safer, or faster version is obvious, either make it now or add it as a follow-up task. Do not leave a known-uglier version in place to ship on schedule.
-- The final state compiles and tests pass.
-
-This four-part checklist is the difference between a one-day change and a one-week debug session. Skipping any of the four parts is how small issues become big ones.
+- `specs/archived/` = closed or superseded.
+- `specs/086-*` and `specs/087-*` stay on disk only as superseded evidence.
+- `plans/` = old planning notes unless current spec links them.
+- `docs/WoWViewer/` = viewer-facing guide layer; keep current if edited.
+- `docs/MdxViewer-legacy-documentation.tar.gz` = archive only.

@@ -41,6 +41,7 @@ Keep current contract only. Older notes live in `memory-bank/archive/2026-07-04-
 
 ## Recent background still live
 
+- 2026-07-04: repo doc audit rewrote `AGENTS.md`, root `README.md`, `docs/PLANS-OVERVIEW.md`, `docs/WoWViewer/*`, and `data-harvester/README.md`. Canonical doc routing now starts at `docs/DOCUMENTATION-STATUS.md`.
 - 2026-06-30: Spec 088 replaced broken V22 payload plans with `V22Enrich` + paths-only store.
 - 2026-06-29: Spec 077 loss-gate fix moved teacher-prior weighting to `object_precise_mask` first.
 - Spec 076 and Spec 077 remain paused/background unless user reopens them.
