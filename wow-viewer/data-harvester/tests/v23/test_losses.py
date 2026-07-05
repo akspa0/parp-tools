@@ -75,6 +75,15 @@ def test_bias_free_masking_returns_same_shape_and_patch_mask() -> None:
     assert patch_mask.any()
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA device required")
+def test_bias_free_masking_accepts_cpu_generator_for_cuda_tensor() -> None:
+    x = torch.rand(1, 15, 256, 256, device="cuda")
+    masked, patch_mask = apply_bias_free_masking(x, ratio=0.15, generator=torch.Generator().manual_seed(7))
+    assert masked.device.type == "cuda"
+    assert patch_mask.device.type == "cuda"
+    assert tuple(masked.shape) == (1, 15, 256, 256)
+
+
 def test_compute_v23_loss_bypasses_zero_weight_gpct() -> None:
     pred, target, mask = _sample_tensors()
     outputs = V23ModelOutput(
@@ -91,4 +100,3 @@ def test_compute_v23_loss_bypasses_zero_weight_gpct() -> None:
     )
     assert float(total.detach()) >= 0.0
     assert torch.equal(components["gpct"], torch.zeros_like(components["gpct"]))
-

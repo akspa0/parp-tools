@@ -163,6 +163,11 @@ def apply_bias_free_masking(
     channels: slice | Sequence[int] = slice(0, 3),
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Mask patch blocks by replacing them with the per-sample channel mean."""
+    def _generator_device(value: torch.Generator | None) -> torch.device:
+        if value is None:
+            return input_tensor.device
+        return torch.device(str(value.device))
+
     if ratio <= 0.0:
         empty = torch.zeros(
             input_tensor.shape[0],
@@ -184,7 +189,10 @@ def apply_bias_free_masking(
     batch_size, _, height, width = input_tensor.shape
     grid_h = height // patch_size
     grid_w = width // patch_size
-    patch_mask = torch.rand((batch_size, grid_h, grid_w), device=input_tensor.device, generator=generator) < float(ratio)
+    rand_device = _generator_device(generator)
+    patch_mask = (
+        torch.rand((batch_size, grid_h, grid_w), device=rand_device, generator=generator) < float(ratio)
+    ).to(device=input_tensor.device)
     spatial_mask = patch_mask.repeat_interleave(patch_size, dim=1).repeat_interleave(patch_size, dim=2)
     selected = masked[:, channel_indices]
     channel_means = selected.mean(dim=(2, 3), keepdim=True)

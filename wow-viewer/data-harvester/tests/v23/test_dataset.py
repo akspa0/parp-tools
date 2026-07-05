@@ -6,6 +6,7 @@ import torch
 
 from harvester.v23.channels import InputMode
 from harvester.v23.dataset import V23HeightDataset
+from tests.v23.support import write_curation_manifest
 
 pytestmark = pytest.mark.v23
 
@@ -95,6 +96,90 @@ def test_v23_dataset_minimap_alpha_mode_drops_normal_channels() -> None:
     sample = dataset[0]
     assert tuple(sample["input"].shape) == (7, 256, 256)
     assert tuple(sample["channel_valid_mask"].shape) == (7,)
+
+
+def test_v23_dataset_filters_by_map() -> None:
+    azeroth = _base_tile()
+    azeroth["tile_id"] = 0
+    azeroth["map"] = "Azeroth"
+    northrend_0 = _base_tile()
+    northrend_0["tile_id"] = 1
+    northrend_0["map"] = "Northrend"
+    northrend_1 = _base_tile()
+    northrend_1["tile_id"] = 2
+    northrend_1["map"] = "Northrend"
+
+    dataset = V23HeightDataset(
+        _StubV22Dataset([azeroth, northrend_0, northrend_1]),
+        build="3_3_5_12340",
+        maps=["Northrend"],
+        tileset_prune_table={7: 0},
+    )
+
+    assert len(dataset) == 2
+    assert dataset[0]["map"] == "Northrend"
+    assert dataset[1]["map"] == "Northrend"
+
+
+def test_v23_dataset_filters_and_exposes_curation_manifest(tmp_path) -> None:
+    good = _base_tile()
+    good["tile_id"] = 1
+    good["map"] = "Northrend"
+    rejected = _base_tile()
+    rejected["tile_id"] = 2
+    rejected["map"] = "Northrend"
+    low_signal = _base_tile()
+    low_signal["tile_id"] = 3
+    low_signal["map"] = "Northrend"
+    manifest = write_curation_manifest(
+        tmp_path / "kept_tiles.parquet",
+        [
+            {
+                "build": "3_3_5_12340",
+                "tile_id": 1,
+                "keep": True,
+                "quality_score": 0.8,
+                "usefulness_score": 0.7,
+                "difficulty_score": 0.9,
+                "difficulty_bucket": "hard",
+                "difficulty_rank": 2,
+                "score_terrain_validity": 0.8,
+                "score_minimap_target_usefulness": 0.7,
+                "liquid_cov": 0.0,
+                "what_plate": False,
+                "normal_edge_iou": 0.2,
+                "normal_edge_f1": 0.3,
+            },
+            {
+                "build": "3_3_5_12340",
+                "tile_id": 2,
+                "keep": False,
+                "score_terrain_validity": 1.0,
+                "score_minimap_target_usefulness": 1.0,
+            },
+            {
+                "build": "3_3_5_12340",
+                "tile_id": 3,
+                "keep": True,
+                "score_terrain_validity": 0.01,
+                "score_minimap_target_usefulness": 1.0,
+            },
+        ],
+    )
+
+    dataset = V23HeightDataset(
+        _StubV22Dataset([good, rejected, low_signal]),
+        build="3_3_5_12340",
+        maps=["Northrend"],
+        curation_manifest=manifest,
+        tileset_prune_table={7: 0},
+    )
+
+    assert len(dataset) == 1
+    sample = dataset[0]
+    assert sample["tile_id"] == 1
+    assert sample["curation_difficulty_bucket"] == "hard"
+    assert float(sample["curation_mismatch_score"]) > 0.0
 
 
 def test_v23_dataset_docstring_lists_channel_contract() -> None:

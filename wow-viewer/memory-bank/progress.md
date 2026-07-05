@@ -15,8 +15,15 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 
 - `train_v23_height.py` now applies real memory profiles, honors `grad_accum_steps`, records `peak_vram.json`, and retries OOM by shrinking batch size, then GPCT-K, then AMP mode.
 - Default target VRAM is now 12 GB, not 22 GB.
-- Focused validation passed: `uv run python -m pytest tests/v23/test_train_profiles.py tests/v23/test_train_smoke.py -m v23 -q` -> `3 passed`.
-- Next proof owner = real local T035 CUDA run, not remote Pod setup.
+- Focused validation passed with `3 passed`: `uv run python -m pytest tests/v23/test_train_profiles.py tests/v23/test_train_smoke.py -m v23 -q`.
+- T035 local CUDA proof passed on RTX 4070 Ti SUPER: `t035_local_12gb_20260704`, 16 real V22 train tiles, 4 val tiles, zero CUDA OOM, `peak_vram.json` max allocated `0.408541184 GB`; caveat: HF DA-V2-Small weights were unavailable locally, so this is an envelope proof rather than pretrained quality proof.
+- Added V23 `--maps` training filter and reran a Northrend-specific local CUDA smoke: `t035_northrend_local_12gb_20260705`, `3_3_5_12340`, `--maps Northrend`, checkpoint config records `maps = ["Northrend"]`, zero CUDA OOM, max allocated `0.408541184 GB`.
+- Fixed the bigger V23 route bug: trainer now accepts the V18 curation manifest, filters V22 samples through the same keep/threshold rules, selects validation from high-mismatch curated rows first, and writes labeled validation preview PNGs. Curated local proof: `v23_curated_northrend_labeled_smoke_20260705`, `--curation-manifest ../output/datasets/v18/curation/v18_focus_terrain_all_v1/kept_tiles.parquet`, `--maps Northrend`, zero CUDA OOM, max allocated `0.3959296 GB`.
+- Fixed V23 trainer console silence and weak loss evidence. `train_v23_height.py` now prints startup configuration, train/val batch `loss=...`, component breakdowns, epoch `train_loss`/`val_loss`/`best_val_loss`, preview/checkpoint/metrics paths, `loss_history.jsonl`, and CUDA peak VRAM; `--log-interval` controls batch cadence. `peak_vram.json` is capacity proof only. Focused smoke and full V23 suite passed with `35 passed, 14 warnings`: `uv run python -m pytest tests/v23 -m v23 -q`.
+- Added V23 startup batch autotune: `--autotune-batch-size`, `--autotune-batch-candidates`, `--autotune-safety-factor`, and `batch_autotune.json`. It probes CUDA candidates before epoch 1 and rebuilds loaders with the selected batch size. Focused profile/smoke tests passed with `6 passed, 14 warnings`; full V23 suite passed with `36 passed, 14 warnings`.
+- Fixed V23 validation cadence. `--val-interval` now skips unscheduled validation epochs, records `validation_skipped=true` in `loss_history.jsonl`, keeps saving `v23_height_last.pt`, and validates on the final epoch when enabled. Focused profile/smoke tests passed with `8 passed, 14 warnings`; full V23 suite passed with `38 passed, 14 warnings`.
+- Added visible per-step heartbeat lines for V23 training. `--log-interval 1` now shows `status=start` and `status=done` per batch with step/batch/sample progress, elapsed/ETA, optimizer-step status, loss breakdown, and CUDA memory.
+- Next proof owner = cached/pretrained quality rerun on curated local Northrend/wider-map slices, then T046 Pod smoke; do not move to RunPod before local curated training is stable.
 
 ### Spec 080 compatibility slice in `MdxViewer`
 
@@ -28,14 +35,14 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 ### V23 remote selector preference cleanup
 
 - `setup_v23_runpod.py` now prefers `3090 -> 4090 -> 5090` when no explicit GPU list is given.
-- Focused test passed: `tests/test_setup_v23_runpod.py` -> `1 passed`.
+- Focused test passed with `1 passed`: `tests/test_setup_v23_runpod.py`.
 
 ## 2026-07-03
 
 ### Spec 089 local stack reached bundle boundary
 
 - V23 encoder, head, model, losses, trainer, inference, checkpoint, and RunPod bundle surfaces all landed.
-- Local proof suite passed: `uv run python -m pytest tests/v23 -m v23 -q` -> `28 passed, 14 warnings`.
+- Local proof suite passed with `28 passed, 14 warnings`: `uv run python -m pytest tests/v23 -m v23 -q`.
 - Real Pod creation happened, but upload and remote smoke remain open. Not proof owner.
 
 ### Spec 088 real-data V22 path repaired

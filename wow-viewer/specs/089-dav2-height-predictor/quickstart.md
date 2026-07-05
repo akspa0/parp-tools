@@ -14,7 +14,7 @@ This is the operator/developer on-ramp for Spec 089. It covers the routing fix, 
 - RunPod packaging pattern owner: Spec 079
 - Spec Kit PowerShell helpers must be run from `wow-viewer/` (or below), not the monorepo root, so `.specify/` is discoverable.
 
-Phase 1 dataset code is now source-applied under `data-harvester/src/harvester/v23/`, but it is not validated yet. Treat the spec as a Phase-0-proof-plus-Phase-1-source lane: do **not** treat the dataset adapter as complete until the Phase 0 and Phase 1 validation commands succeed.
+Local source work through Phase 7 is now complete. Treat the remaining work as proof/evidence work: cached/pretrained local quality, Pod smoke, full-corpus training, CAI seam review, and determinism evidence.
 
 ---
 
@@ -110,34 +110,115 @@ Expected contract:
 
 ---
 
-## 6. Planned Training Smoke
+## 6. Local Training Smoke
 
-This command is the future Phase 5 smoke path after the model, losses, and trainer exist:
+V23 trains from V22 stores. V22 is the V18 substrate plus enrichment, so the trainer does not read V18 directly, but the V18 root arrays are expected to be present in V22. For real local training, also pass the V18 curation manifest. The trainer uses it to keep the same curated tile pool and to select validation from mismatch-rich rows instead of arbitrary first-N rows.
+
+The current curated Northrend local CUDA envelope proof used this command shape:
 
 ```powershell
 cd wow-viewer/data-harvester
 uv run python scripts/train_v23_height.py `
     --dataset-dir ../output/datasets/v22 `
     --builds 3_3_5_12340 `
+    --maps Northrend `
+    --curation-manifest ../output/datasets/v18/curation/v18_focus_terrain_all_v1/kept_tiles.parquet `
     --tileset-prune-table ../output/datasets/v22/tileset_prune_v23_union.json `
-    --epochs 2 `
-    --train-max-tiles 4 `
-    --val-max-tiles 2 `
-    --batch-size 4 `
-    --gpct-k 4 `
+    --epochs 1 `
+    --train-max-tiles 16 `
+    --val-max-tiles 4 `
+    --device cuda `
+    --target-vram-gb 12 `
+    --memory-profile 12gb `
+    --batch-size 1 `
+    --grad-accum-steps 4 `
+    --gpct-K 2 `
     --gpct-weight 0.1 `
     --sdc-weight 0.1 `
     --bias-free-mask-ratio 0.15 `
+    --log-interval 1 `
     --deterministic `
     --seed 42 `
-    --run-name smoke_v23
+    --run-name v23_curated_northrend_labeled_smoke_20260705
 ```
 
 Expected artifacts:
 
-- `models/v23/height/runs/smoke_v23/checkpoints/`
+- live console lines for run setup, train/val batch loss components, epoch summaries, checkpoints, metrics, and CUDA peak VRAM
+- `../models/v23/height/runs/v23_curated_northrend_labeled_smoke_20260705/loss_history.jsonl`
+- `../models/v23/height/runs/v23_curated_northrend_labeled_smoke_20260705/peak_vram.json`
+- `../models/v23/height/runs/v23_curated_northrend_labeled_smoke_20260705/metrics.json`
+- `../models/v23/height/runs/v23_curated_northrend_labeled_smoke_20260705/checkpoints/`
 - validation preview PNGs
 - metrics/config metadata with commit SHA and data hashes
+
+The operator-facing loss contract is:
+
+```text
+[v23] epoch=1/1 phase=train status=start step=1 batch=1/16
+[v23] epoch=1/1 phase=train status=done step=1 batch=1/16 samples=1/16 pct=6.2 elapsed=12.4s eta=3m06s optimizer_step=no loss=... affine_loss=... gradient_loss=... sdc_loss=... gpct_loss=... lr=... gpu_alloc_gb=... gpu_reserved_gb=...
+[v23] epoch=1/1 phase=val status=done step=1 batch=1/4 samples=1/4 pct=25.0 elapsed=2.0s eta=6.0s optimizer_step=no loss=... affine_loss=... gradient_loss=... sdc_loss=... gpct_loss=...
+[v23] epoch=1/1 summary train_loss=... val_loss=... best_val_loss=...
+```
+
+Use `loss` / `train_loss` / `val_loss` as the quality trend. Lower is better. `affine_loss`, `gradient_loss`, `sdc_loss`, and `gpct_loss` are the component breakdown that explains which term is dominating. `peak_vram.json` is only capacity evidence; it does not say whether the model is learning.
+
+How to read the status fields:
+
+- `phase=train` means weights can change. `phase=val` means forward-only measurement; it does not train.
+- `status=start` prints before the batch work starts. `status=done` prints after that batch finishes and includes loss.
+- `step` is the user-visible step counter inside the phase. In training, this advances with train batches.
+- `batch=A/B` is current batch out of total batches for that phase.
+- `samples=A/B` is current tiles seen out of total tiles in that phase.
+- `pct`, `elapsed`, and `eta` are phase progress, elapsed phase time, and estimated remaining phase time.
+- `optimizer_step=yes` means this batch triggered an optimizer update. With `--grad-accum-steps 4`, only every fourth train batch updates weights; the other train batches accumulate gradients.
+- `loss` is the training objective being optimized or measured. The component losses explain what is contributing to it.
+- `gpu_alloc_gb` and `gpu_reserved_gb` are memory status. They are utilization/capacity signals, not learning quality.
+
+`loss_history.jsonl` is the machine-readable training trace. It contains one JSON line per train/val batch plus one epoch summary line with `train_loss`, `val_loss`, and `best_val_loss`.
+
+For a larger local curated run, use `--train-max-tiles 2000` plus startup batch autotune. The autotune path probes CUDA batch candidates before epoch 1, selects the largest candidate that fits under `target_vram_gb * autotune_safety_factor`, writes `batch_autotune.json`, and then rebuilds the real train/val loaders using that selected batch size.
+
+Recommended current local corpus command for the important maps available in local V22 stores:
+
+```powershell
+cd wow-viewer/data-harvester
+uv run python scripts/train_v23_height.py `
+    --dataset-dir ../output/datasets/v22 `
+    --builds 0_5_3_3368 3_3_5_12340 `
+    --maps Azeroth Kalimdor Kalidar PVPZone01 PVPZone02 Northrend Expansion01 `
+    --curation-manifest ../output/datasets/v18/curation/v18_focus_terrain_all_v1/kept_tiles.parquet `
+    --tileset-prune-table ../output/datasets/v22/tileset_prune_v23_union.json `
+    --epochs 2 `
+    --train-max-tiles 2000 `
+    --val-max-tiles 256 `
+    --val-interval 2 `
+    --val-preview-interval 2 `
+    --device cuda `
+    --target-vram-gb 12 `
+    --memory-profile 12gb `
+    --batch-size 1 `
+    --grad-accum-steps 4 `
+    --autotune-batch-size `
+    --autotune-batch-candidates 1 2 4 8 12 16 24 `
+    --autotune-safety-factor 0.85 `
+    --gpct-K 2 `
+    --gpct-weight 0.1 `
+    --sdc-weight 0.1 `
+    --bias-free-mask-ratio 0.15 `
+    --log-interval 1 `
+    --deterministic `
+    --seed 42 `
+    --run-name v23_curated_2k_keymaps_autotune_20260705
+```
+
+Current local V22 map coverage note: `0_5_3_3368` has `Azeroth`, `Kalimdor`, and `PVPZone02`; `3_3_5_12340` has `Azeroth`, `Kalimdor`, `PVPZone01`, `PVPZone02`, `Northrend`, and `Expansion01`; `Kalidar` is present in the curation manifest but not in the currently inspected V22 stores. The map filter selects the intersection of `--builds` and `--maps`.
+
+Validation is forward-only measurement, not training. It is still real GPU time. For the 2-epoch local command above, `--val-interval 2` skips validation after epoch 1 and validates on the final epoch only. For longer runs, use `--val-interval 5` or higher if you want fewer measurement passes.
+
+When running pytest commands from this quickstart, do not paste summary arrows like `->` from chat output. They are not part of the command.
+
+2026-07-05 proof note: `3_3_5_12340` V18 and V22 both contain `Northrend` with 1,131 tiles. The curated `--maps Northrend` run completed on an RTX 4070 Ti SUPER with zero CUDA OOM, peak allocated VRAM `0.3959296 GB`, checkpoint config `maps = ["Northrend"]`, and checkpoint config `curation_manifest = "../output/datasets/v18/curation/v18_focus_terrain_all_v1/kept_tiles.parquet"`. The preview PNGs now include panel labels plus map/tile and curation bucket/mismatch metadata. The trainer now prints live setup, batch loss values, component breakdowns, epoch summaries, checkpoint paths, metrics paths, and peak CUDA VRAM; use `--log-interval N` to reduce batch log volume. The local HF cache did not contain `depth-anything/Depth-Anything-V2-Small-hf`, so this is an envelope/curation-path proof, not pretrained-quality evidence.
 
 ---
 

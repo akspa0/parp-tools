@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 from transformers import DepthAnythingConfig
 import zarr
 import zarr.codecs
@@ -46,7 +48,13 @@ def write_model_config_json(path: Path) -> Path:
     return path
 
 
-def make_synthetic_v22_store(path: Path, *, build: str = "3_3_5_12340", tile_count: int = 6) -> Path:
+def make_synthetic_v22_store(
+    path: Path,
+    *,
+    build: str = "3_3_5_12340",
+    tile_count: int = 6,
+    maps: list[str] | None = None,
+) -> Path:
     if path.exists():
         import shutil
 
@@ -70,6 +78,7 @@ def make_synthetic_v22_store(path: Path, *, build: str = "3_3_5_12340", tile_cou
 
     tile_index: list[dict[str, object]] = []
     for idx in range(tile_count):
+        map_name = maps[idx % len(maps)] if maps else "SyntheticMap"
         yy, xx = np.meshgrid(np.linspace(0.0, 1.0, 257), np.linspace(0.0, 1.0, 257), indexing="ij")
         heights[idx] = (xx * 10.0) + (yy * 5.0) + float(idx)
         minimap[idx, ..., 0] = np.clip((xx[:256, :256] * 255.0) + idx * 5.0, 0, 255).astype(np.uint8)
@@ -90,7 +99,7 @@ def make_synthetic_v22_store(path: Path, *, build: str = "3_3_5_12340", tile_cou
             {
                 "tile_id": idx,
                 "build": build,
-                "map": "SyntheticMap",
+                "map": map_name,
                 "tile_x": idx,
                 "tile_y": idx + 1,
                 "mtex_texture_paths": [],
@@ -110,4 +119,10 @@ def make_synthetic_v22_store(path: Path, *, build: str = "3_3_5_12340", tile_cou
     root.create_array("object_filtered_mask", data=object_filtered, chunks=(1, 257, 257), compressors=CODEC)
     root.create_array("mcly_tileset_ids", data=mcly_tileset_ids, chunks=(1, 16, 16, 4), compressors=CODEC)
     root.attrs["tile_index"] = tile_index
+    return path
+
+
+def write_curation_manifest(path: Path, rows: list[dict[str, object]]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(pa.Table.from_pylist(rows), str(path))
     return path

@@ -63,3 +63,20 @@ def test_apply_memory_profile_24gb_keeps_batch_and_promotes_bf16() -> None:
     assert runtime.grad_accum_steps >= 2
     assert runtime.gpct_K == 4
     assert runtime.amp_dtype == "bf16"
+
+
+def test_resolve_autotune_batch_candidates_copies_and_sorts_requested() -> None:
+    requested = [8, 4, 8, 2]
+
+    candidates = train_v23_height._resolve_autotune_batch_candidates(1, requested)
+
+    assert candidates == [1, 2, 4, 8]
+    assert requested == [8, 4, 8, 2]
+
+
+def test_should_validate_epoch_honors_interval_and_final_epoch() -> None:
+    assert train_v23_height._should_validate_epoch(1, 5, 2) is False
+    assert train_v23_height._should_validate_epoch(2, 5, 2) is True
+    assert train_v23_height._should_validate_epoch(5, 5, 2) is True
+    assert train_v23_height._should_validate_epoch(1, 1, 10) is True
+    assert train_v23_height._should_validate_epoch(5, 5, 0) is False
