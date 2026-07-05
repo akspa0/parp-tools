@@ -133,15 +133,34 @@ Repo-owned bundle inputs now live under `wow-viewer/data-harvester/runpod/v23/`:
 - `train_v23_height.py` and `infer_v23_height.py`
 - optional `tests/v23/`
 - a bounded V22 subset store under `data/v22/`
+- optional V18 curation manifest copied to `config/curation_manifest.parquet`
 - a `manifest.json` with `contains_game_client_files = false`
+
+`runpod/v23/train.sh` is no longer just a silent raw wrapper. With explicit CLI args it still forwards directly to `train_v23_height.py`; with no args it runs the current curated key-map proof shape:
+
+- `DATASET_DIR=data/v22`
+- `BUILDS=0_5_3_3368 3_3_5_12340`
+- `MAPS=Azeroth Kalimdor Kalidar PVPZone01 PVPZone02 Northrend Expansion01`
+- `CURATION_MANIFEST=config/curation_manifest.parquet`
+- `TILESET_PRUNE_TABLE=config/tileset_prune_table.json`
+- `TRAIN_MAX_TILES=2000`, `VAL_MAX_TILES=256`
+- `VAL_INTERVAL=2`, `VAL_PREVIEW_INTERVAL=2`
+- `TARGET_VRAM_GB=22`, `MEMORY_PROFILE=24gb`
+- `BATCH_SIZE=1`, `GRAD_ACCUM_STEPS=4`
+- `AUTOTUNE_BATCH_CANDIDATES=1 2 4 8 12 16 24 32 40 48 64 80 96`
+- `GPCT_K=2`, `GPCT_WEIGHT=0.1`, `SDC_WEIGHT=0.1`, `BIAS_FREE_MASK_RATIO=0.15`
+- `LOG_INTERVAL=1`
+
+The no-arg path fails early if the curation manifest or prune table is absent. That keeps remote training on the curated V18/V22 path instead of silently using uncurated first-N tiles.
 
 ## Next Proof Order
 
 The next proof order is:
 
 - cache or download the HF DA-V2-Small checkpoint and rerun through the curated manifest path when quality or pretrained behavior is being evaluated
-- keep local stability proof curated and map-targeted first, especially `--maps Northrend` for Wrath terrain knowledge
+- no more local training runs unless explicitly reopened
 - run the T046 24 GB Pod smoke with the same artifact capture discipline
+- run the curated key-map remote training default via `bash runpod/v23/train.sh`
 - only then consider full-corpus remote training
 
 Remote proof is still required eventually for:

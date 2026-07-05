@@ -6,21 +6,22 @@ Keep current contract only. Older notes live in `memory-bank/archive/2026-07-04-
 ## Main target
 
 - Spec 089 `089-dav2-height-predictor`.
-- Local first. The real 12 GB CUDA smoke is now done; next proof owner is cached/pretrained quality plus Pod-side validation.
+- No more local training runs unless explicitly reopened. The next proof owner is Pod-side validation with the curated V18/V22 path.
 - Source work through Phase 7 is local-complete.
 - Current local proof: `uv run python -m pytest tests/v23 -m v23 -q` passed with `35 passed, 14 warnings`.
 - Current hardware proof: `train_v23_height.py` T035 run `t035_local_12gb_20260704` on RTX 4070 Ti SUPER, 16 real V22 train tiles, 4 val tiles, zero CUDA OOM, `peak_vram.json` max allocated `0.408541184 GB`. Caveat: HF DA-V2-Small weights were not cached, so this validates the CUDA/trainer envelope, not pretrained quality.
 - Current curated Northrend proof: `v23_curated_northrend_labeled_smoke_20260705` used `--curation-manifest ../output/datasets/v18/curation/v18_focus_terrain_all_v1/kept_tiles.parquet` plus `--maps Northrend`, checkpoint config records the curation thresholds, zero CUDA OOM, max allocated `0.3959296 GB`. Validation preview is labeled and selected from high-mismatch curated rows (`bucket=hard`, mismatch score visible). Same HF-cache caveat.
 - Trainer observability is now a first-class loss surface: startup config, train/val batch `loss=...`, component breakdowns, epoch `train_loss`/`val_loss`/`best_val_loss`, checkpoint paths, `metrics.json`, `loss_history.jsonl`, and CUDA peak VRAM. Use `--log-interval N` to change batch log cadence; `--log-interval 1` is the local bring-up default. `peak_vram.json` is capacity proof only, not learning proof.
 - Step heartbeat is now explicit: with `--log-interval 1`, each logged batch prints `status=start` before work and `status=done` after work, with `step`, `batch`, `samples`, `pct`, `elapsed`, `eta`, `optimizer_step`, loss breakdown, and CUDA memory.
-- Startup batch autotune is now available for V23: `--autotune-batch-size`, `--autotune-batch-candidates`, `--autotune-safety-factor`, and `batch_autotune.json`. The intended local 2K key-map command uses builds `0_5_3_3368 3_3_5_12340`, maps `Azeroth Kalimdor Kalidar PVPZone01 PVPZone02 Northrend Expansion01`, V18 curation manifest, 12 GB profile, GPCT-K 2, and batch candidate ladder `1 2 4 8 12 16 24`.
-- `--val-interval` is now honored. Validation is forward-only measurement, not training. For the 2-epoch 2K key-map local command, use `--val-interval 2 --val-preview-interval 2` so epoch 1 is training-only and the final epoch gets the validation/best-checkpoint pass.
+- Startup batch autotune is now available for V23: `--autotune-batch-size`, `--autotune-batch-candidates`, `--autotune-safety-factor`, and `batch_autotune.json`. The Pod default uses builds `0_5_3_3368 3_3_5_12340`, maps `Azeroth Kalimdor Kalidar PVPZone01 PVPZone02 Northrend Expansion01`, packaged V18 curation manifest, 24 GB profile, GPCT-K 2, and batch candidate ladder `1 2 4 8 12 16 24 32 40 48 64 80 96`.
+- `--val-interval` is now honored. Validation is forward-only measurement, not training. The no-arg Pod wrapper uses `--val-interval 2 --val-preview-interval 2` so epoch 1 is training-only and the final epoch gets the validation/best-checkpoint pass.
+- RunPod `train.sh` now has a curated no-arg default. It requires `config/curation_manifest.parquet` and `config/tileset_prune_table.json`, then runs the curated 2K key-map corpus with visible step logging, SDC/GPCT/bias-free masking, and startup autotune. Explicit args still pass through to `train_v23_height.py`.
 - First 2K key-map run learned (`train_loss 16415.93 -> 10314.05`, `val_loss 11482.61 -> 6794.52`) but exposed fixes: batch candidate ladder ended too low at 24 despite only ~6.21 GB reserved, and SDC was dead-zero due sparse valid masks. Recommended candidates now extend to `32 40 48`; SDC uses fractional patch weights.
 
 ## Current gate
 
 - Do not treat V23 quality as proven until the HF DA-V2-Small checkpoint is cached/downloaded and rerun through the curated V18 manifest path.
-- Remaining external gates: T046 Pod smoke, T048 full-corpus training, T050-T053 CAI/determinism evidence.
+- Remaining external gates: T046 Pod smoke, curated 2K key-map Pod training, T048 full-corpus training, T050-T053 CAI/determinism evidence.
 - Do not claim remote proof from Pod creation alone.
 
 ## V23 contract

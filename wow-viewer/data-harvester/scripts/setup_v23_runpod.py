@@ -53,6 +53,8 @@ def _run_packager(args: argparse.Namespace, package_name: str) -> base.PackageRe
     ]
     if args.tileset_prune_table is not None:
         package_args.extend(["--tileset-prune-table", str(args.tileset_prune_table.resolve())])
+    if args.curation_manifest is not None:
+        package_args.extend(["--curation-manifest", str(args.curation_manifest.resolve())])
     if args.overwrite_package:
         package_args.append("--overwrite")
     if args.no_package_tests:
@@ -73,7 +75,9 @@ def _build_bootstrap_start_cmd(args: argparse.Namespace) -> str | None:
     package_name = str(getattr(args, "_resolved_package_name", "v23_bundle"))
     archive_name = f"{package_name}.tar"
     transfer_code = str(getattr(args, "_resolved_transfer_code", args.transfer_code or "v23-transfer"))
-    build_flags = " ".join(_shell_quote(build) for build in args.builds)
+    maps = " ".join(str(map_name) for map_name in args.maps)
+    builds = " ".join(str(build) for build in args.builds)
+    autotune_candidates = " ".join(str(candidate) for candidate in args.autotune_batch_candidates)
     lines = [
         "set -euo pipefail",
         "cd /workspace",
@@ -99,14 +103,25 @@ def _build_bootstrap_start_cmd(args: argparse.Namespace) -> str | None:
             [
                 "bash runpod/v23/smoke.sh",
                 (
-                    "bash runpod/v23/train.sh "
-                    f"--dataset-dir data/v22 --builds {build_flags} --device cuda "
-                    f"--target-vram-gb {float(args.target_vram_gb):g} --batch-size {int(args.batch_size)} "
-                    f"--epochs {int(args.epochs)} --gpct-K {int(args.gpct_K)} "
-                    f"--gpct-weight {float(args.gpct_weight):g} "
-                    f"--bias-free-mask-ratio {float(args.bias_free_mask_ratio):g} "
-                    f"--run-name {_shell_quote(args.run_name)} "
-                    "--output-dir models/v23/height/runs/auto_train"
+                    f"RUN_NAME={_shell_quote(args.run_name)} "
+                    f"BUILDS={_shell_quote(builds)} "
+                    f"MAPS={_shell_quote(maps)} "
+                    f"EPOCHS={int(args.epochs)} "
+                    f"TRAIN_MAX_TILES={int(args.train_max_tiles)} "
+                    f"VAL_MAX_TILES={int(args.val_max_tiles)} "
+                    f"VAL_INTERVAL={int(args.val_interval)} "
+                    f"VAL_PREVIEW_INTERVAL={int(args.val_preview_interval)} "
+                    f"TARGET_VRAM_GB={float(args.target_vram_gb):g} "
+                    f"MEMORY_PROFILE={_shell_quote(args.memory_profile)} "
+                    f"BATCH_SIZE={int(args.batch_size)} "
+                    f"GRAD_ACCUM_STEPS={int(args.grad_accum_steps)} "
+                    f"AUTOTUNE_BATCH_CANDIDATES={_shell_quote(autotune_candidates)} "
+                    f"GPCT_K={int(args.gpct_K)} "
+                    f"GPCT_WEIGHT={float(args.gpct_weight):g} "
+                    f"SDC_WEIGHT={float(args.sdc_weight):g} "
+                    f"BIAS_FREE_MASK_RATIO={float(args.bias_free_mask_ratio):g} "
+                    f"LOG_INTERVAL={int(args.log_interval)} "
+                    "bash runpod/v23/train.sh"
                 ),
             ]
         )
@@ -197,7 +212,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skip-package", action="store_true", default=False)
     parser.add_argument("--no-package-tests", action="store_true", default=False)
     parser.add_argument("--builds", nargs="+", default=["0_5_3_3368", "3_3_5_12340"])
+    parser.add_argument("--maps", nargs="+", default=["Azeroth", "Kalimdor", "Kalidar", "PVPZone01", "PVPZone02", "Northrend", "Expansion01"])
     parser.add_argument("--tileset-prune-table", type=Path, default=None)
+    parser.add_argument("--curation-manifest", type=Path, default=None)
     parser.add_argument("--include-v22-subset-tiles", type=int, default=8)
     parser.add_argument("--pod-name", type=str, default="spec089-v23")
     parser.add_argument("--gpu-type", type=str, default=DEFAULT_GPU_TYPE)
@@ -228,10 +245,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--no-auto-start-training", dest="auto_start_training", action="store_false")
     parser.add_argument("--run-name", type=str, default="v23_height_bundle_train")
     parser.add_argument("--epochs", type=int, default=4)
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--train-max-tiles", type=int, default=2000)
+    parser.add_argument("--val-max-tiles", type=int, default=256)
+    parser.add_argument("--val-interval", type=int, default=2)
+    parser.add_argument("--val-preview-interval", type=int, default=2)
+    parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--target-vram-gb", type=float, default=22.0)
-    parser.add_argument("--gpct-K", dest="gpct_K", type=int, default=4)
+    parser.add_argument("--memory-profile", type=str, default="24gb")
+    parser.add_argument("--grad-accum-steps", type=int, default=4)
+    parser.add_argument("--autotune-batch-candidates", nargs="+", type=int, default=[1, 2, 4, 8, 12, 16, 24, 32, 40, 48, 64, 80, 96])
+    parser.add_argument("--gpct-K", dest="gpct_K", type=int, default=2)
     parser.add_argument("--gpct-weight", type=float, default=0.1)
+    parser.add_argument("--sdc-weight", type=float, default=0.1)
+    parser.add_argument("--log-interval", type=int, default=1)
     parser.add_argument("--bias-free-mask-ratio", type=float, default=0.15)
     parser.add_argument("--dry-run", action="store_true", default=False)
     parser.add_argument("--no-wait", action="store_true", default=False)
@@ -248,6 +274,14 @@ def main(argv: list[str] | None = None) -> int:
     package_name = args.package_name or f"spec089_v23_bundle_{base._utc_stamp()}"
     args._resolved_package_name = package_name
     args._resolved_transfer_code = args.transfer_code or f"spec089-{secrets.token_hex(4)}"
+
+    if args.auto_start_training and args.curation_manifest is None:
+        print(
+            "--curation-manifest is required when --auto-start-training is enabled; "
+            "use --no-auto-start-training for smoke-only bundles.",
+            file=sys.stderr,
+        )
+        return 2
 
     if args.skip_package:
         package = base.PackageResult(

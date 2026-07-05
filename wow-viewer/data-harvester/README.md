@@ -137,9 +137,32 @@ uv run python scripts/train_v18_focus.py normal `
 
 ## RunPod / remote
 
-- Spec 089 remote work is not proof owner right now.
+- Spec 089 remote work is the active next proof owner; no more local training runs unless explicitly reopened.
 - Use [../docs/runpod-integration-cookbook.md](/I:/parp/parp-tools/wow-viewer/docs/runpod-integration-cookbook.md) for generic bundle/runtime flow.
-- Use `scripts/setup_v23_runpod.py` and `scripts/package_v23_runpod.py` only after local 12 GB proof is real.
+- Package the V18 curation manifest with the V22 bundle:
+
+```powershell
+cd wow-viewer/data-harvester
+uv run python scripts/package_v23_runpod.py `
+  --bundle-name v23_curated_2k_keymaps `
+  --dataset-dir ../output/datasets/v22 `
+  --builds 0_5_3_3368 3_3_5_12340 `
+  --tileset-prune-table ../output/datasets/v22/tileset_prune_v23_union.json `
+  --curation-manifest ../output/datasets/v18/curation/v18_focus_terrain_all_v1/kept_tiles.parquet `
+  --include-v22-subset-tiles 2000 `
+  --output-tar runpod/v23/dist/v23_curated_2k_keymaps.tar
+```
+
+On the Pod:
+
+```bash
+bash runpod/v23/install_deps.sh
+bash runpod/v23/verify_bundle.sh
+bash runpod/v23/smoke.sh
+bash runpod/v23/train.sh
+```
+
+The no-arg `train.sh` default is the curated 2K key-map run with visible per-step logging, validation every second epoch, SDC/GPCT/bias-free masking enabled, and startup batch autotune.
 
 ## Historical lanes
 

@@ -237,6 +237,7 @@ def _write_manifest(
     store_reports: list[dict[str, Any]],
     copied_sources: list[str],
     tileset_prune_table: str | None,
+    curation_manifest: str | None,
 ) -> None:
     manifest = {
         "schema": "spec-089-v23-runpod-bundle",
@@ -246,6 +247,7 @@ def _write_manifest(
         "store_reports": store_reports,
         "copied_sources": copied_sources,
         "tileset_prune_table": tileset_prune_table,
+        "curation_manifest": curation_manifest,
         "tree_hash": _tree_hash(bundle_root),
     }
     (bundle_root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -267,6 +269,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--builds", nargs="+", default=["0_5_3_3368", "3_3_5_12340"])
     parser.add_argument("--v22-store-subset-path", action="append", default=None)
     parser.add_argument("--tileset-prune-table", default=None)
+    parser.add_argument("--curation-manifest", default=None)
     parser.add_argument("--include-v22-subset-tiles", type=int, default=8)
     parser.add_argument("--output-root", type=Path, default=_DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--output-tar", type=Path, default=None)
@@ -297,6 +300,12 @@ def main(argv: list[str] | None = None) -> int:
         copied_prune = "config/tileset_prune_table.json"
         _copy_file(prune_source, bundle_root / copied_prune)
 
+    copied_curation = None
+    if args.curation_manifest:
+        curation_source = Path(args.curation_manifest).resolve()
+        copied_curation = "config/curation_manifest.parquet"
+        _copy_file(curation_source, bundle_root / copied_curation)
+
     data_root = bundle_root / "data" / "v22"
     data_root.mkdir(parents=True, exist_ok=True)
     store_reports: list[dict[str, Any]] = []
@@ -320,6 +329,7 @@ def main(argv: list[str] | None = None) -> int:
         store_reports=store_reports,
         copied_sources=copied_sources,
         tileset_prune_table=copied_prune,
+        curation_manifest=copied_curation,
     )
 
     if args.archive_format == "tar":

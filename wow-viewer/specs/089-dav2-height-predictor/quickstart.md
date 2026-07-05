@@ -254,8 +254,11 @@ V23 does not invent a second Pod bootstrap route. It follows Spec 079's pattern 
 cd wow-viewer/data-harvester
 uv run python scripts/package_v23_runpod.py `
     --bundle-name v23_smoke_bundle `
-    --v22-store-subset-path ../output/datasets/v22/3_3_5_12340.zarr `
+    --dataset-dir ../output/datasets/v22 `
+    --builds 0_5_3_3368 3_3_5_12340 `
     --tileset-prune-table ../output/datasets/v22/tileset_prune_v23_union.json `
+    --curation-manifest ../output/datasets/v18/curation/v18_focus_terrain_all_v1/kept_tiles.parquet `
+    --include-v22-subset-tiles 2000 `
     --output-tar runpod/v23/dist/v23_smoke_bundle.tar
 ```
 
@@ -267,6 +270,40 @@ bash runpod/v23/verify_bundle.sh
 bash runpod/v23/smoke.sh
 bash runpod/v23/train.sh
 ```
+
+With no positional arguments, `runpod/v23/train.sh` now runs the current curated key-map proof shape:
+
+```bash
+DATASET_DIR=data/v22 \
+RUN_NAME=v23_curated_2k_keymaps_runpod \
+bash runpod/v23/train.sh
+```
+
+Default full-train wrapper settings:
+
+- builds: `0_5_3_3368 3_3_5_12340`
+- maps: `Azeroth Kalimdor Kalidar PVPZone01 PVPZone02 Northrend Expansion01`
+- curation: `config/curation_manifest.parquet`
+- prune table: `config/tileset_prune_table.json`
+- train/val size: `TRAIN_MAX_TILES=2000`, `VAL_MAX_TILES=256`
+- validation cadence: `VAL_INTERVAL=2`, `VAL_PREVIEW_INTERVAL=2`
+- optimizer envelope: `MEMORY_PROFILE=24gb`, `TARGET_VRAM_GB=22`, `BATCH_SIZE=1`, `GRAD_ACCUM_STEPS=4`
+- startup autotune candidates: `1 2 4 8 12 16 24 32 40 48 64 80 96`
+- loss knobs: `GPCT_K=2`, `GPCT_WEIGHT=0.1`, `SDC_WEIGHT=0.1`, `BIAS_FREE_MASK_RATIO=0.15`
+- observability: `LOG_INTERVAL=1`
+
+Override with environment variables for later full-corpus training:
+
+```bash
+TRAIN_MAX_TILES=25000 \
+EPOCHS=4 \
+VAL_INTERVAL=1 \
+VAL_PREVIEW_INTERVAL=1 \
+RUN_NAME=v23_height_full_corpus_v1 \
+bash runpod/v23/train.sh
+```
+
+If `config/curation_manifest.parquet` or `config/tileset_prune_table.json` is missing, full training fails early. That is intentional; this path must not silently fall back to uncurated first-N tiles.
 
 ---
 

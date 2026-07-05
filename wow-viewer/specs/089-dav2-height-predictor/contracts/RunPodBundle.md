@@ -17,6 +17,7 @@ This contract defines the V23-specific bundle boundary on top of Spec 079's gene
 - `pyproject.toml`
 - `uv.lock`
 - bounded V22 subset
+- optional V18 curation manifest copied to `config/curation_manifest.parquet`
 - `manifest.json`
 
 ## Manifest Fields
@@ -27,6 +28,7 @@ This contract defines the V23-specific bundle boundary on top of Spec 079's gene
 | `source_spec` | yes | `089-dav2-height-predictor` |
 | `contains_game_client_files` | yes | must be `false` |
 | `dataset_subset` | yes | included builds / tile counts |
+| `curation_manifest` | yes | relative path to packaged curation manifest, or null for smoke-only bundles |
 | `tree_hash` | yes | bundle content hash |
 | `created_at` | yes | bundle timestamp |
 

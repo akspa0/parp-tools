@@ -24,7 +24,7 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 - Fixed V23 validation cadence. `--val-interval` now skips unscheduled validation epochs, records `validation_skipped=true` in `loss_history.jsonl`, keeps saving `v23_height_last.pt`, and validates on the final epoch when enabled. Focused profile/smoke tests passed with `8 passed, 14 warnings`; full V23 suite passed with `38 passed, 14 warnings`.
 - Added visible per-step heartbeat lines for V23 training. `--log-interval 1` now shows `status=start` and `status=done` per batch with step/batch/sample progress, elapsed/ETA, optimizer-step status, loss breakdown, and CUDA memory.
 - Read the first 2K key-map artifacts. Loss moved in the right direction, but the run selected the last batch candidate (`24`) while using only about `6.21 GB` reserved, and `sdc_loss` stayed dead-zero. Recommended autotune candidates now extend to `32 40 48`; SDC sparse-mask handling now uses fractional patch weights.
-- Next proof owner = cached/pretrained quality rerun on curated local Northrend/wider-map slices, then T046 Pod smoke; do not move to RunPod before local curated training is stable.
+- RunPod packaging now carries the V18 curation manifest into `config/curation_manifest.parquet`, and no-arg `runpod/v23/train.sh` runs the curated 2K key-map path with startup autotune, per-step logging, GPCT-K 2, SDC, bias-free masking, and `--val-interval 2`. Next proof owner = T046 Pod smoke plus curated 2K key-map Pod training; no more local training runs unless explicitly reopened.
 
 ### Spec 080 compatibility slice in `MdxViewer`
 

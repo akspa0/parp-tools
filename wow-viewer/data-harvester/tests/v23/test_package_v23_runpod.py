@@ -26,6 +26,8 @@ def test_package_v23_runpod_writes_subset_bundle(tmp_path: Path) -> None:
     store_path = make_synthetic_v22_store(dataset_dir / f"{build}.zarr", build=build, tile_count=6)
     prune_path = tmp_path / "tileset_prune.json"
     prune_path.write_text(json.dumps({"7": 0, "8": 1}), encoding="utf-8")
+    curation_path = tmp_path / "kept_tiles.parquet"
+    curation_path.write_bytes(b"placeholder parquet bytes for packaging contract")
     output_root = tmp_path / "dist"
 
     exit_code = package_v23_runpod.main(
@@ -38,6 +40,8 @@ def test_package_v23_runpod_writes_subset_bundle(tmp_path: Path) -> None:
             build,
             "--tileset-prune-table",
             str(prune_path),
+            "--curation-manifest",
+            str(curation_path),
             "--include-v22-subset-tiles",
             "2",
             "--output-root",
@@ -54,6 +58,7 @@ def test_package_v23_runpod_writes_subset_bundle(tmp_path: Path) -> None:
     assert (bundle / "src" / "harvester" / "v22_zarr_io.py").exists()
     assert (bundle / "src" / "harvester" / "v23" / "__init__.py").exists()
     assert (bundle / "config" / "tileset_prune_table.json").exists()
+    assert (bundle / "config" / "curation_manifest.parquet").exists()
 
     subset_store = bundle / "data" / "v22" / f"{build}.zarr"
     root = zarr.open_group(store=zarr.storage.LocalStore(str(subset_store), read_only=True), mode="r")
@@ -63,6 +68,7 @@ def test_package_v23_runpod_writes_subset_bundle(tmp_path: Path) -> None:
     manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["contains_game_client_files"] is False
     assert manifest["tileset_prune_table"] == "config/tileset_prune_table.json"
+    assert manifest["curation_manifest"] == "config/curation_manifest.parquet"
     assert manifest["store_reports"][0]["mode"] == "subset"
     assert manifest["store_reports"][0]["copied_tile_count"] == 2
     assert manifest["tree_hash"]
