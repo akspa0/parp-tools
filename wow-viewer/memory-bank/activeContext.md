@@ -58,8 +58,9 @@ Keep current contract only. Older notes live in `memory-bank/archive/2026-07-04-
 
 - Spec 091 `091-raw-audio-unswizzle` is active for investigating structured patterns seen when map-derived WAV payloads are viewed as raw image bytes.
 - First slice adds `data-harvester/scripts/unswizzle_audio_raw_patterns.py`, which strips WAV payloads when possible, sweeps likely widths/deinterleaves/bitplanes/sample interpretations, writes candidate PNGs, ranks them in `summary.json`, and creates `contact_sheet.png`.
+- The Azeroth V18 WAV at `output/azeroth_audio/Azeroth_all_tiles_0_5_3_3368_11025Hz.wav` is exactly 41,082,478 mono 16-bit samples, which equals 622 complete `257x257` height tiles with zero remainder. The tool now writes stream-order and `index.parquet` coordinate-order tile mosaics.
 - This is evidence tooling only. Structured output is a layout hypothesis, not proof of steganography or hidden payloads.
-- Proof level: py_compile and CLI help passed; a bounded smoke run against a local byte file wrote 60 candidates plus summary/contact sheet under `C:\tmp\wow-unswizzle-smoke`. Real Azeroth WAV inspection remains open.
+- Proof level: py_compile and CLI help passed; a bounded smoke run wrote 60 candidates under `C:\tmp\wow-unswizzle-smoke`; the real Azeroth WAV pass wrote 390 projections plus tile mosaics under `wow-viewer/output/analysis/raw-audio-unswizzle/azeroth_0_5_3_3368`.
 
 ## Recent background still live
 

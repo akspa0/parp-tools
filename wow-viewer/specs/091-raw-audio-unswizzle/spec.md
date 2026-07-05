@@ -37,6 +37,8 @@ An operator can compare ranked candidates by visual and numeric structure while 
 - **REQ-008**: The tool MUST write a ranked `summary.json`.
 - **REQ-009**: The tool MUST write a `contact_sheet.png` for the highest-ranked candidates.
 - **REQ-010**: The tool MUST avoid adding permanent dependencies beyond existing data-harvester dependencies.
+- **REQ-011**: The tool SHOULD reverse flattened `257x257` heightmap-audio samples into tile mosaics when the sample count divides cleanly.
+- **REQ-012**: The tool SHOULD use dataset `index.parquet` rows to arrange tile mosaics by map coordinates when provided.
 
 ## Non-Goals
 
@@ -50,4 +52,4 @@ An operator can compare ranked candidates by visual and numeric structure while 
 - Structured images can be caused by deterministic rasterization, sample-width aliasing, heightmap row order, or image-editor import assumptions.
 - Very large WAVs can generate expensive PNGs without pixel caps.
 - Width selection strongly changes visual patterns; comparison across maps should use identical candidate settings.
-
+- A map-coordinate mosaic depends on the WAV sample order matching the same index sort used by the original extraction script.

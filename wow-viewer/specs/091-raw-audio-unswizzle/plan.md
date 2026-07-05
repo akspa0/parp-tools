@@ -19,7 +19,9 @@ Create a bounded Python analysis script that turns map-derived WAV/raw payloads 
 2. Parse WAV payload bytes or raw file bytes.
 3. Generate bounded candidate PNGs for widths, byte phases, bitplanes, RGB triplets, and 16-bit interpretations.
 4. Score candidates with simple structure metrics.
-5. Write `summary.json` and `contact_sheet.png`.
+5. Reverse exact `257x257` sample groups into tile mosaics when the sample count permits.
+6. Optionally arrange tile mosaics by `index.parquet` map coordinates.
+7. Write `summary.json` and `contact_sheet.png`.
 
 ### Phase 2 - Cross-map comparison
 
@@ -38,4 +40,3 @@ Create a bounded Python analysis script that turns map-derived WAV/raw payloads 
 - `uv run python -m py_compile scripts/unswizzle_audio_raw_patterns.py`
 - `uv run python scripts/unswizzle_audio_raw_patterns.py --help`
 - Optional operator run against the existing Azeroth WAV output.
-
