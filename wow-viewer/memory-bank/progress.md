@@ -55,6 +55,13 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 - `setup_v23_runpod.py` now prefers `3090 -> 4090 -> 5090` when no explicit GPU list is given.
 - Focused test passed with `1 passed`: `tests/test_setup_v23_runpod.py`.
 
+### Spec 091 raw audio unswizzle probe
+
+- Added `specs/091-raw-audio-unswizzle` for the map-derived WAV/raw pattern investigation.
+- Added `data-harvester/scripts/unswizzle_audio_raw_patterns.py` to strip WAV payloads or read raw bytes, sweep grayscale byte views, deltas, bitplanes, byte phases, RGB triplets, 16-bit sample interpretations, and float32 probes.
+- The script writes ranked `summary.json`, candidate PNGs, and `contact_sheet.png`; results are explicitly layout hypotheses, not proof of hidden payloads.
+- Validation: `uv run python -m py_compile scripts/unswizzle_audio_raw_patterns.py`, `uv run python scripts/unswizzle_audio_raw_patterns.py --help`, and a bounded smoke run wrote 60 candidates under `C:\tmp\wow-unswizzle-smoke`.
+
 ## 2026-07-03
 
 ### Spec 089 local stack reached bundle boundary

@@ -54,6 +54,13 @@ Keep current contract only. Older notes live in `memory-bank/archive/2026-07-04-
 - First slice adds Runtime Stats process/GC memory counters plus MPQ/world raw-cache byte totals, and caps `WorldAssetManager` raw file cache at 512 MiB by LRU. Live M2/WMO renderer eviction remains unchanged until counters prove renderer residency is the retained owner.
 - Proof level: `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with existing warning noise and 0 errors. Manual staged `4_0_0_11927` Stormwind measurement remains open.
 
+## Raw audio pattern lane
+
+- Spec 091 `091-raw-audio-unswizzle` is active for investigating structured patterns seen when map-derived WAV payloads are viewed as raw image bytes.
+- First slice adds `data-harvester/scripts/unswizzle_audio_raw_patterns.py`, which strips WAV payloads when possible, sweeps likely widths/deinterleaves/bitplanes/sample interpretations, writes candidate PNGs, ranks them in `summary.json`, and creates `contact_sheet.png`.
+- This is evidence tooling only. Structured output is a layout hypothesis, not proof of steganography or hidden payloads.
+- Proof level: py_compile and CLI help passed; a bounded smoke run against a local byte file wrote 60 candidates plus summary/contact sheet under `C:\tmp\wow-unswizzle-smoke`. Real Azeroth WAV inspection remains open.
+
 ## Recent background still live
 
 - 2026-07-04: repo doc audit rewrote `AGENTS.md`, root `README.md`, `docs/PLANS-OVERVIEW.md`, `docs/WoWViewer/*`, and `data-harvester/README.md`. Canonical doc routing now starts at `docs/DOCUMENTATION-STATUS.md`.
