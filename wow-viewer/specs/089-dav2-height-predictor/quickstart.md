@@ -200,7 +200,7 @@ uv run python scripts/train_v23_height.py `
     --batch-size 1 `
     --grad-accum-steps 4 `
     --autotune-batch-size `
-    --autotune-batch-candidates 1 2 4 8 12 16 24 `
+    --autotune-batch-candidates 1 2 4 8 12 16 24 32 40 48 `
     --autotune-safety-factor 0.85 `
     --gpct-K 2 `
     --gpct-weight 0.1 `
@@ -215,6 +215,10 @@ uv run python scripts/train_v23_height.py `
 Current local V22 map coverage note: `0_5_3_3368` has `Azeroth`, `Kalimdor`, and `PVPZone02`; `3_3_5_12340` has `Azeroth`, `Kalimdor`, `PVPZone01`, `PVPZone02`, `Northrend`, and `Expansion01`; `Kalidar` is present in the curation manifest but not in the currently inspected V22 stores. The map filter selects the intersection of `--builds` and `--maps`.
 
 Validation is forward-only measurement, not training. It is still real GPU time. For the 2-epoch local command above, `--val-interval 2` skips validation after epoch 1 and validates on the final epoch only. For longer runs, use `--val-interval 5` or higher if you want fewer measurement passes.
+
+If `batch_autotune.json` shows the selected batch is the last candidate and reserved VRAM is still well below `effective_target_vram_gb`, extend `--autotune-batch-candidates`. The `v23_curated_2k_keymaps_autotune_20260705` run selected batch `24` with only about `6.21 GB` peak reserved against a `10.2 GB` effective target, so later local runs should include larger candidates like `32`, `40`, and `48`.
+
+If `sdc_loss` stays exactly `0.0` across all batches while `--sdc-weight` is nonzero, treat that as a loss-mask bug rather than healthy training. The SDC path now uses fractional valid-mask weights so sparse terrain-valid tiles do not zero the whole SDC term.
 
 When running pytest commands from this quickstart, do not paste summary arrows like `->` from chat output. They are not part of the command.
 

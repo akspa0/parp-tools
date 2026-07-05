@@ -213,6 +213,8 @@ Per the plan's Project Structure, all paths are under `wow-viewer/data-harvester
 
 2026-07-05 step-status correction: the trainer now emits a visible status line before and after every logged batch. With `--log-interval 1`, operators see each train step start and finish, including `step`, `batch`, `samples`, `pct`, `elapsed`, `eta`, `optimizer_step`, loss breakdown, and CUDA memory. The quickstart documents how to read each field.
 
+2026-07-05 run-trace correction: the first 2K key-map run learned (`train_loss 16415.93 -> 10314.05`, `val_loss 11482.61 -> 6794.52`) but exposed two fixes. First, the batch-autotune candidate ladder stopped at `24` while peak reserved VRAM was only about `6.21 GB`; the recommended ladder now extends to `32 40 48`. Second, `sdc_loss` was zero for every batch because sparse valid masks could drop every pooled patch; SDC now uses fractional patch weights, with a sparse-mask regression test.
+
 **Checkpoint**: US4 acceptance scenarios 1–4 pass; checkpoint format full per FR-019.
 
 ---

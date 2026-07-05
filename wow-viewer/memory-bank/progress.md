@@ -23,6 +23,7 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 - Added V23 startup batch autotune: `--autotune-batch-size`, `--autotune-batch-candidates`, `--autotune-safety-factor`, and `batch_autotune.json`. It probes CUDA candidates before epoch 1 and rebuilds loaders with the selected batch size. Focused profile/smoke tests passed with `6 passed, 14 warnings`; full V23 suite passed with `36 passed, 14 warnings`.
 - Fixed V23 validation cadence. `--val-interval` now skips unscheduled validation epochs, records `validation_skipped=true` in `loss_history.jsonl`, keeps saving `v23_height_last.pt`, and validates on the final epoch when enabled. Focused profile/smoke tests passed with `8 passed, 14 warnings`; full V23 suite passed with `38 passed, 14 warnings`.
 - Added visible per-step heartbeat lines for V23 training. `--log-interval 1` now shows `status=start` and `status=done` per batch with step/batch/sample progress, elapsed/ETA, optimizer-step status, loss breakdown, and CUDA memory.
+- Read the first 2K key-map artifacts. Loss moved in the right direction, but the run selected the last batch candidate (`24`) while using only about `6.21 GB` reserved, and `sdc_loss` stayed dead-zero. Recommended autotune candidates now extend to `32 40 48`; SDC sparse-mask handling now uses fractional patch weights.
 - Next proof owner = cached/pretrained quality rerun on curated local Northrend/wider-map slices, then T046 Pod smoke; do not move to RunPod before local curated training is stable.
 
 ### Spec 080 compatibility slice in `MdxViewer`

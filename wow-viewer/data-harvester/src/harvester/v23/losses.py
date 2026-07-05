@@ -106,8 +106,8 @@ def spatial_distance_constraint(
         return loss.mean()
 
     pooled_mask = F.avg_pool2d(_as_spatial_mask(mask, features_pred), kernel_size=patch_size, stride=patch_size, ceil_mode=False)
-    patch_valid = (pooled_mask.flatten(2).squeeze(1) > 0.5).to(loss.dtype)
-    pair_mask = patch_valid.unsqueeze(1) * patch_valid.unsqueeze(2)
+    patch_weight = pooled_mask.flatten(2).squeeze(1).clamp(0.0, 1.0).to(loss.dtype)
+    pair_mask = patch_weight.unsqueeze(1) * patch_weight.unsqueeze(2)
     return (loss * pair_mask).sum() / pair_mask.sum().clamp_min(1e-8)
 
 

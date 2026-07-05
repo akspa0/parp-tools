@@ -51,6 +51,23 @@ def test_spatial_distance_constraint_is_nonnegative_and_backpropagates() -> None
     assert pred.grad.abs().sum() > 0
 
 
+def test_spatial_distance_constraint_uses_sparse_valid_masks() -> None:
+    torch.manual_seed(11)
+    pred = torch.randn(1, 1, 32, 32, requires_grad=True)
+    target = torch.zeros(1, 1, 32, 32)
+    target[:, :, 16:, 16:] = 10.0
+    mask = torch.zeros(1, 1, 32, 32)
+    mask[:, :, 0, 0] = 1.0
+    mask[:, :, 16, 16] = 1.0
+
+    loss = spatial_distance_constraint(pred, target, patch_size=16, mask=mask)
+
+    assert float(loss.detach()) > 0.0
+    loss.backward()
+    assert pred.grad is not None
+    assert pred.grad.abs().sum() > 0
+
+
 def test_gpct_overlap_consistency_distributes_gradients() -> None:
     preds = [torch.randn(2, 1, 257, 257, requires_grad=True) for _ in range(4)]
     features = [torch.randn(2, 1, 257, 257, requires_grad=True) for _ in range(4)]

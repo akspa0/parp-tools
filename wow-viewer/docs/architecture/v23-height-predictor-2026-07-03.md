@@ -109,11 +109,13 @@ The operator-facing learning signal is the trainer loss, not `peak_vram.json`. C
 
 The user-visible training heartbeat is the batch status line. With `--log-interval 1`, the trainer prints `status=start` before a train/val batch begins and `status=done` after it finishes. `step`, `batch`, `samples`, `pct`, `elapsed`, and `eta` show progress through the current phase. `optimizer_step=yes` marks batches that actually update weights after gradient accumulation; `optimizer_step=no` means the batch only accumulated gradients or was validation. CUDA memory fields are capacity signals only.
 
-V23 also has startup batch autotune for local CUDA utilization. `--autotune-batch-size` probes the candidate ladder from `--autotune-batch-candidates`, compares PyTorch peak reserved memory against `--target-vram-gb * --autotune-safety-factor`, writes `batch_autotune.json`, and then uses the selected batch size for the real train/val loaders. The intended 12 GB local command uses `--batch-size 1` as the safe floor, `--grad-accum-steps 4`, `--gpct-K 2`, and candidate ladder `1 2 4 8 12 16 24`.
+V23 also has startup batch autotune for local CUDA utilization. `--autotune-batch-size` probes the candidate ladder from `--autotune-batch-candidates`, compares PyTorch peak reserved memory against `--target-vram-gb * --autotune-safety-factor`, writes `batch_autotune.json`, and then uses the selected batch size for the real train/val loaders. The intended 12 GB local command uses `--batch-size 1` as the safe floor, `--grad-accum-steps 4`, `--gpct-K 2`, and candidate ladder `1 2 4 8 12 16 24 32 40 48`. If autotune selects the last candidate while reserved VRAM is still far below the effective target, extend the ladder.
 
 Validation is forward-only measurement work. It does not update model weights, but it still costs GPU time. `--val-interval` is honored: skipped epochs save `v23_height_last.pt` and write `validation_skipped=true` to `loss_history.jsonl`; validation runs only on scheduled epochs and on the final epoch when `--val-interval > 0`. The local 2-epoch key-map command uses `--val-interval 2 --val-preview-interval 2` so epoch 1 stays training-only.
 
 For the current local 2K key-map run, use builds `0_5_3_3368 3_3_5_12340` and maps `Azeroth Kalimdor Kalidar PVPZone01 PVPZone02 Northrend Expansion01`. The currently inspected V22 stores cover all of those except `Kalidar`; the curation manifest contains `Kalidar`, but no current local V22 store for a Kalidar-bearing build is present in `../output/datasets/v22`.
+
+The first 2K key-map run showed real learning (`train_loss 16415.93 -> 10314.05`, `val_loss 11482.61 -> 6794.52`) and exposed two operator issues: the candidate ladder ended at batch 24 while peak reserved VRAM was only about 6.21 GB, and `sdc_loss` stayed exactly zero. SDC now uses fractional valid-mask weights so sparse terrain-valid masks do not zero the term.
 
 ## RunPod Bundle Surface
 
