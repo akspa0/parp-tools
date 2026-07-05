@@ -48,6 +48,12 @@ Keep current contract only. Older notes live in `memory-bank/archive/2026-07-04-
 - Spec 080 now has `plan.md` and `tasks.md` with the right-sidebar audit/migration broken into phases. Right sidebar remains the known messy surface; left sidebar remains in scope only for later wording cleanup.
 - Proof level: `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with existing warning noise and 0 errors. Manual viewer checks for standalone WMO and world map toggles remain open.
 
+## Viewer memory/performance lane
+
+- Spec 090 `090-viewer-memory-profiler` is active for the 4.0.0 Stormwind RAM blow-up investigation.
+- First slice adds Runtime Stats process/GC memory counters plus MPQ/world raw-cache byte totals, and caps `WorldAssetManager` raw file cache at 512 MiB by LRU. Live M2/WMO renderer eviction remains unchanged until counters prove renderer residency is the retained owner.
+- Proof level: `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with existing warning noise and 0 errors. Manual staged `4_0_0_11927` Stormwind measurement remains open.
+
 ## Recent background still live
 
 - 2026-07-04: repo doc audit rewrote `AGENTS.md`, root `README.md`, `docs/PLANS-OVERVIEW.md`, `docs/WoWViewer/*`, and `data-harvester/README.md`. Canonical doc routing now starts at `docs/DOCUMENTATION-STATUS.md`.

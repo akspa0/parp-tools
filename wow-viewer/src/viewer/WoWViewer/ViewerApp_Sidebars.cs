@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Diagnostics;
 using System.Text.Json;
 using ImGuiNET;
 using WoWViewer.DataSources;
@@ -60,6 +61,21 @@ public partial class ViewerApp
     {
         var style = ImGui.GetStyle();
         return ImGui.CalcTextSize("|").X + style.ItemSpacing.X * 2f;
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        const double kib = 1024.0;
+        const double mib = kib * 1024.0;
+        const double gib = mib * 1024.0;
+
+        if (bytes >= gib)
+            return $"{bytes / gib:0.00} GiB";
+        if (bytes >= mib)
+            return $"{bytes / mib:0.0} MiB";
+        if (bytes >= kib)
+            return $"{bytes / kib:0.0} KiB";
+        return $"{bytes} B";
     }
 
     private bool HasLoadedContent()
@@ -3046,6 +3062,12 @@ public partial class ViewerApp
 
     private void DrawRuntimeStatsPanelContent()
     {
+        using Process process = Process.GetCurrentProcess();
+        long managedHeap = GC.GetTotalMemory(forceFullCollection: false);
+        long totalAllocated = GC.GetTotalAllocatedBytes(precise: false);
+        ImGui.Text($"Process memory: working={FormatBytes(process.WorkingSet64)}  private={FormatBytes(process.PrivateMemorySize64)}");
+        ImGui.Text($"Managed heap: live={FormatBytes(managedHeap)}  allocated={FormatBytes(totalAllocated)}  GC={GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)}");
+
         int tiles = _terrainManager?.LoadedTileCount ?? _vlmTerrainManager?.LoadedTileCount ?? 0;
         int chunks = _terrainManager?.LoadedChunkCount ?? _vlmTerrainManager?.LoadedChunkCount ?? 0;
         var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
@@ -3088,12 +3110,14 @@ public partial class ViewerApp
         var assetReadStats = _worldScene.Assets.GetReadStats();
         ImGui.Separator();
         ImGui.Text($"Asset I/O req/cache: {assetReadStats.ReadRequests}/{assetReadStats.FileCacheHits}  resolved-cache: {assetReadStats.ResolvedPathCacheHits}  probes hit/miss: {assetReadStats.PathProbeResolutions}/{assetReadStats.PathProbeMisses}");
+        ImGui.Text($"Asset raw cache: {assetReadStats.FileCacheCount} files / {FormatBytes(assetReadStats.FileCacheBytes)}");
         ImGui.Text($"Asset misses: failed retry suppress={_worldScene.Assets.SuppressedFailedMdxRetryCount}  known missing M2 skins={_worldScene.Assets.KnownMissingM2SkinCount}  duplicate skin logs={_worldScene.Assets.SuppressedMissingM2SkinLogCount}");
 
         if (_dataSource is MpqDataSource mpqDataSource)
         {
             var mpqStats = mpqDataSource.GetStatsSnapshot();
             ImGui.Text($"MPQ I/O read cache/miss: {mpqStats.ReadCacheHits}/{mpqStats.ReadCacheMisses}  loose/alpha/mpq/miss: {mpqStats.ReadLooseHits}/{mpqStats.ReadAlphaHits}/{mpqStats.ReadMpqHits}/{mpqStats.ReadMisses}  uncached avg: {mpqStats.AverageUncachedReadMs:0.00} ms");
+            ImGui.Text($"MPQ raw cache: {mpqStats.ReadCacheEntryCount} files / {FormatBytes(mpqStats.ReadCacheBytes)}  prefetch queue: {mpqStats.PrefetchQueueDepth}");
             ImGui.Text($"MPQ prefetch enq/done/dup/cache: {mpqStats.PrefetchEnqueued}/{mpqStats.PrefetchCompleted}/{mpqStats.PrefetchDuplicateSkips}/{mpqStats.PrefetchCacheSkips}  queue avg: {mpqStats.AveragePrefetchQueueMs:0.00} ms  read avg: {mpqStats.AveragePrefetchReadMs:0.00} ms");
         }
     }

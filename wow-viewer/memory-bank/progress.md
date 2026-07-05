@@ -43,6 +43,13 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 - Standalone WMO group labels default to visible for every render group when loading a single WMO object; the existing selected/highlighted label workflow remains.
 - Validation: `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed twice with 0 errors and existing warning noise. Manual viewer checks remain open.
 
+### Spec 090 viewer memory profiler
+
+- Added `specs/090-viewer-memory-profiler` for the 4.0.0 Stormwind memory blow-up lane.
+- Runtime Stats now shows process working set/private bytes, managed heap/live allocated bytes, GC counts, MPQ raw-cache bytes, and world asset raw-cache bytes.
+- `WorldAssetManager` raw file-data cache now tracks byte residency and evicts by both entry count and a 512 MiB byte cap. Live renderer eviction was intentionally not changed.
+- Validation: `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with 0 errors and existing warning noise. Manual staged 4.0.0 Stormwind measurement remains open.
+
 ### V23 remote selector preference cleanup
 
 - `setup_v23_runpod.py` now prefers `3090 -> 4090 -> 5090` when no explicit GPU list is given.

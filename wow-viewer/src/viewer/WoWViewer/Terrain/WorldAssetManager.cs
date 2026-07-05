@@ -16,6 +16,8 @@ namespace WoWViewer.Terrain;
 public readonly record struct WorldAssetReadStats(
     long ReadRequests,
     long FileCacheHits,
+    int FileCacheCount,
+    long FileCacheBytes,
     long ResolvedPathCacheHits,
     long PathProbeAttempts,
     long PathProbeResolutions,
@@ -101,8 +103,10 @@ public class WorldAssetManager : IDisposable
     private readonly Dictionary<string, byte[]?> _fileDataCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly LinkedList<string> _fileLru = new();
     private readonly Dictionary<string, LinkedListNode<string>> _fileLruMap = new(StringComparer.OrdinalIgnoreCase);
+    private long _fileDataCacheBytes;
     private readonly Dictionary<string, string> _resolvedReadPathCache = new(StringComparer.OrdinalIgnoreCase);
     private const int MaxFileCached = 1000; // Max raw file entries cached
+    private const long MaxFileCacheBytes = 512L * 1024 * 1024; // Raw bytes only; parsed renderers have separate lifetimes.
 
     // Deferred world-asset loading keeps tile streaming responsive.
     private readonly Queue<string> _priorityMdxLoads = new();
@@ -127,6 +131,7 @@ public class WorldAssetManager : IDisposable
     public int WmoModelsLoaded => _wmoModels.Count(kv => kv.Value != null);
     public int WmoModelsFailed => _wmoModels.Count(kv => kv.Value == null);
     public int FileCacheCount => _fileDataCache.Count;
+    public long FileCacheBytes => _fileDataCacheBytes;
     public int PendingAssetLoadCount => _queuedMdxLoads.Count + _queuedWmoLoads.Count;
 public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer => renderer?.PendingDoodadModelLoadCount ?? 0);
     public int KnownMissingM2SkinCount => _knownMissingM2SkinPaths.Count;
@@ -223,6 +228,8 @@ public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer =
         => new(
             _fileReadRequests,
             _fileReadCacheHits,
+            _fileDataCache.Count,
+            _fileDataCacheBytes,
             _resolvedPathCacheHits,
             _pathProbeAttempts,
             _pathProbeResolutions,
@@ -711,10 +718,19 @@ public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer =
         else if (data == null)
             _pathProbeMisses++;
 
+        CacheFileData(key, data);
+        return data;
+    }
+
+    private void CacheFileData(string key, byte[]? data)
+    {
+        if (_fileDataCache.TryGetValue(key, out byte[]? existing))
+            _fileDataCacheBytes -= existing?.LongLength ?? 0;
+
         _fileDataCache[key] = data;
+        _fileDataCacheBytes += data?.LongLength ?? 0;
         TouchLru(_fileLru, _fileLruMap, key);
         EvictFileCacheIfNeeded();
-        return data;
     }
 
     public static string NormalizeKey(string path) => path.Replace('/', '\\').ToLowerInvariant();
@@ -1756,11 +1772,13 @@ private int _mdxLoadFailCount = 0;
 
     private void EvictFileCacheIfNeeded()
     {
-        while (_fileDataCache.Count > MaxFileCached && _fileLru.Count > 0)
+        while ((_fileDataCache.Count > MaxFileCached || _fileDataCacheBytes > MaxFileCacheBytes) && _fileLru.Count > 0)
         {
             string oldest = _fileLru.First!.Value;
             _fileLru.RemoveFirst();
             _fileLruMap.Remove(oldest);
+            if (_fileDataCache.TryGetValue(oldest, out byte[]? data))
+                _fileDataCacheBytes -= data?.LongLength ?? 0;
             _fileDataCache.Remove(oldest);
         }
     }
@@ -1780,6 +1798,7 @@ private int _mdxLoadFailCount = 0;
         _wmoLruMap.Clear();
 
         _fileDataCache.Clear();
+        _fileDataCacheBytes = 0;
         _fileLru.Clear();
         _fileLruMap.Clear();
 
