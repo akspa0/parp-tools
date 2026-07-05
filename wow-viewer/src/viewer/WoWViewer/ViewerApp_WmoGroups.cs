@@ -16,6 +16,7 @@ public partial class ViewerApp
 
         ImGui.Text("WMO Group Overlay:");
         ImGui.Checkbox("Show group boxes", ref _standaloneWmoGroupOverlayEnabled);
+        ImGui.Checkbox("Show all group names", ref _standaloneWmoGroupLabelsAllEnabled);
         ImGui.Checkbox("Include hidden groups", ref _standaloneWmoOverlayIncludeHiddenGroups);
         ImGui.TextDisabled($"Rendered groups: {wmoRenderer.GroupRenderCount}  Doodad defs: {wmoRenderer.DoodadDefCount}");
 
@@ -32,7 +33,7 @@ public partial class ViewerApp
 
         if (inspectionGroup < 0)
         {
-            ImGui.TextDisabled("Click a group box to inspect it. In-scene text stays hidden until a group is selected.");
+            ImGui.TextDisabled("Click a group box to inspect it. Group names can also be controlled from the bottom bar.");
             ImGui.TextDisabled("Left click: select  Shift+click: pin big label");
             return;
         }
@@ -210,11 +211,15 @@ public partial class ViewerApp
     private void DrawStandaloneHighlightedWmoGroupLabels(WmoRenderer wmoRenderer,
         float viewportX, float viewportY, float viewportWidth, float viewportHeight, Matrix4x4 view, Matrix4x4 proj)
     {
-        if (_highlightedStandaloneWmoGroupIndices.Count == 0 && _selectedStandaloneWmoGroupIndex < 0)
+        if (!_standaloneWmoGroupLabelsAllEnabled &&
+            _highlightedStandaloneWmoGroupIndices.Count == 0 &&
+            _selectedStandaloneWmoGroupIndex < 0)
             return;
 
         var drawList = ImGui.GetForegroundDrawList();
-        var labelIndices = _highlightedStandaloneWmoGroupIndices.OrderBy(index => index).ToList();
+        var labelIndices = _standaloneWmoGroupLabelsAllEnabled
+            ? Enumerable.Range(0, wmoRenderer.GroupRenderCount).ToList()
+            : _highlightedStandaloneWmoGroupIndices.OrderBy(index => index).ToList();
         if (_selectedStandaloneWmoGroupIndex >= 0 && !labelIndices.Contains(_selectedStandaloneWmoGroupIndex))
             labelIndices.Add(_selectedStandaloneWmoGroupIndex);
 

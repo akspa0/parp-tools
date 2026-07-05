@@ -33,6 +33,16 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 - `DrawPm4ObjectMatchWindow()` and `DrawPm4WmoCorrelationWindow()` are wired back into `DrawUI()` and exposed from `Tools`.
 - Legacy build still fails on broad pre-existing missing refs outside touched slice. Status = source-complete only.
 
+## 2026-07-05
+
+### Spec 080 wow-viewer UI audit and bottom-bar slice
+
+- Added missing Spec Kit execution artifacts for `specs/080-wow-ui-consolidation`: `plan.md` and `tasks.md`.
+- Audited the current right-sidebar/workbench state: WMO group boxes existed but were buried in model info, standalone WMO labels only drew for selected/highlighted groups, world wireframe was monolithic, Model LOD is placeholder text, and World LOD is missing from `WorkbenchNavigator`.
+- Implemented the bounded `wow-viewer` Phase 1 slice: bottom bar now has split world wireframe controls (`Terrain WF`, `M2/WMO WF`), standalone model/WMO wireframe, standalone WMO group bounding boxes, all-group WMO labels, and a Settings launcher.
+- Standalone WMO group labels default to visible for every render group when loading a single WMO object; the existing selected/highlighted label workflow remains.
+- Validation: `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed twice with 0 errors and existing warning noise. Manual viewer checks remain open.
+
 ### V23 remote selector preference cleanup
 
 - `setup_v23_runpod.py` now prefers `3090 -> 4090 -> 5090` when no explicit GPU list is given.

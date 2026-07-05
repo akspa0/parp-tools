@@ -1161,6 +1161,8 @@ public class WorldScene : ISceneRenderer
     public ObjectType SelectedObjectType => _selectedObjectType;
     public int SelectedObjectIndex => _selectedObjectIndex;
     public bool WireframeRevealEnabled => _wireframeRevealEnabled;
+    public bool TerrainWireframeEnabled => _terrainManager.IsWireframe;
+    public bool ObjectWireframeEnabled => _assets.ObjectWireframeEnabled;
     public HoveredAssetInfo? HoveredAssetInfo => _hoveredAssetInfo;
     public bool ShowHoveredAssetTooltips { get => _showHoveredAssetTooltips; set => _showHoveredAssetTooltips = value; }
     public bool LimitHoveredAssetRange { get => _limitHoveredAssetRange; set => _limitHoveredAssetRange = value; }
@@ -9791,14 +9793,31 @@ public class WorldScene : ISceneRenderer
 
     public void ToggleWireframe()
     {
-        _wireframeRevealEnabled = !_wireframeRevealEnabled;
+        bool enable = !IsWireframe;
+        SetTerrainWireframeEnabled(enable);
+        SetObjectWireframeEnabled(enable);
+    }
+
+    public void SetTerrainWireframeEnabled(bool enabled)
+    {
+        if (_terrainManager.IsWireframe == enabled)
+            return;
+
         _terrainManager.ToggleWireframe();
-        _assets.SetObjectWireframeEnabled(_wireframeRevealEnabled);
-        if (!_wireframeRevealEnabled)
+    }
+
+    public void SetObjectWireframeEnabled(bool enabled)
+    {
+        if (_assets.ObjectWireframeEnabled == enabled && _wireframeRevealEnabled == enabled)
+            return;
+
+        _wireframeRevealEnabled = enabled;
+        _assets.SetObjectWireframeEnabled(enabled);
+        if (!enabled)
             ClearWireframeReveal();
     }
 
-    public bool IsWireframe => _wireframeRevealEnabled;
+    public bool IsWireframe => TerrainWireframeEnabled || ObjectWireframeEnabled;
 
     public void UpdateWireframeReveal(Matrix4x4 view, Matrix4x4 proj,
         float mouseViewportX, float mouseViewportY, float viewportWidth, float viewportHeight)

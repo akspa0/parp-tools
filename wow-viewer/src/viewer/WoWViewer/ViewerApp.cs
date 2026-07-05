@@ -513,6 +513,7 @@ public partial class ViewerApp : IDisposable
     private string _terrainAnalysisHiddenStatus = string.Empty;
     private Terrain.BoundingBoxRenderer? _editorOverlayBb;
     private bool _standaloneWmoGroupOverlayEnabled = true;
+    private bool _standaloneWmoGroupLabelsAllEnabled = true;
     private bool _standaloneWmoOverlayIncludeHiddenGroups = true;
     private int _hoveredStandaloneWmoGroupIndex = -1;
     private int _selectedStandaloneWmoGroupIndex = -1;

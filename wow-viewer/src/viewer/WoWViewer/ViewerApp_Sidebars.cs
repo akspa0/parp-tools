@@ -224,14 +224,55 @@ public partial class ViewerApp
                     }
                 }
 
-                // Wireframe toggle
                 ImGui.SameLine();
                 ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
                 ImGui.SameLine();
-                bool wireframe = _renderer?.IsWireframe ?? false;
-                if (ImGui.Checkbox("Wireframe", ref wireframe))
-                    _renderer?.ToggleWireframe();
+
+                if (_worldScene != null)
+                {
+                    bool terrainWireframe = _worldScene.TerrainWireframeEnabled;
+                    if (ImGui.Checkbox("Terrain WF", ref terrainWireframe))
+                        _worldScene.SetTerrainWireframeEnabled(terrainWireframe);
+
+                    ImGui.SameLine();
+                    bool objectWireframe = _worldScene.ObjectWireframeEnabled;
+                    if (ImGui.Checkbox("M2/WMO WF", ref objectWireframe))
+                        _worldScene.SetObjectWireframeEnabled(objectWireframe);
+                }
+                else
+                {
+                    bool wireframe = _renderer?.IsWireframe ?? false;
+                    if (ImGui.Checkbox("Wireframe", ref wireframe))
+                        _renderer?.ToggleWireframe();
+                }
             }
+
+            if (renderer == null && _renderer != null)
+            {
+                bool wireframe = _renderer.IsWireframe;
+                if (ImGui.Checkbox(_renderer is WmoRenderer ? "WMO WF" : "Model WF", ref wireframe))
+                    _renderer.ToggleWireframe();
+            }
+
+            if (_renderer is WmoRenderer)
+            {
+                if (renderer != null || _renderer != null)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+                    ImGui.SameLine();
+                }
+
+                ImGui.Checkbox("WMO Group BBs", ref _standaloneWmoGroupOverlayEnabled);
+                ImGui.SameLine();
+                ImGui.Checkbox("Group Names", ref _standaloneWmoGroupLabelsAllEnabled);
+            }
+
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+            ImGui.SameLine();
+            if (ImGui.Button("Settings"))
+                _showSettingsWindow = true;
 
             // Right-align chunk and perf stats
             ImGui.SameLine();
