@@ -9,7 +9,7 @@ Short file. Current truth only. Root `../AGENTS.md` still wins on workspace poli
 ## Mission
 
 - `wow-viewer/` is active repo.
-- `gillijimproject_refactor/` is read-only reference.
+- `gillijimproject_refactor/` is read-only reference. DO NOT ALTER THE CODE IN THIS FOLDER! IT IS FOR REFERENCE ONLY.
 - Goal: keep `wow-viewer` extractable, spec-driven, and proof-backed.
 
 ## Current active lanes
@@ -28,10 +28,12 @@ Short file. Current truth only. Root `../AGENTS.md` still wins on workspace poli
 
 - New code stays in `wow-viewer/`.
 - Staged clients only: `output/tmp/wowarchive-clients/`.
-- Any `H:\CLIENTS` reference is bug.
 - No new parser clones when shared `Core` or `Core.IO` surface already exists.
-- One phase at a time. Real-data proof ends phase.
+- Implement as much as possible in each session, with memory bank and speckit documentation update at every step. Do not do wasteful partial work that leaves the repo in a state that cannot be built or tested.
 - Doc sync same pass: spec, architecture note, memory-bank.
+- Consolidate implemented speckit plans when little work or testing remains. Do not leave half-implemented plans in the repo.
+- Implement small wins first, then larger wins. Avoid large refactors that break the repo for days.
+- C# first, python second for ML tasks. C# is our main tooling for a reason - scalability and maintainability. Python is for ML tasks only. Do not implement new C# features in Python unless the feature is ML-specific and cannot be implemented in C#.
 
 ## Spec flow
 
