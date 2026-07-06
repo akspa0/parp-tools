@@ -26,11 +26,49 @@ from harvester.v24 import merged_wdl_prior, store, synth_wdl, wdl_reader  # noqa
 SYNTH_BATCH = 256
 
 
+def _load_curation_keepset(
+    manifest_path: str | Path,
+    build: str,
+    difficulty_buckets: list[str] | None = None,
+) -> set[tuple[str, int]] | None:
+    """Load curated kept tile_ids for one build from a V18 curation manifest.
+
+    The curation manifest (``kept_tiles.parquet`` from ``build_v18_curation_manifest``)
+    already omits mismatched-signal tiles (blank minimap/normals, normal/minimap
+    edge mismatch, WMO loss wipeout, insufficient trainable terrain) and buckets
+    the survivors by difficulty. We join on ``(build, tile_id)`` and keep only
+    rows with ``keep == True`` (and, when ``difficulty_buckets`` is given, those
+    buckets). Returns ``None`` when no rows survive for ``build``.
+    """
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(str(manifest_path))
+    cols = table.column_names
+    builds = table.column("build").to_pylist()
+    tile_ids = table.column("tile_id").to_pylist()
+    keep = table.column("keep").to_pylist() if "keep" in cols else [True] * len(builds)
+    buckets = (
+        table.column("difficulty_bucket").to_pylist()
+        if "difficulty_bucket" in cols
+        else [None] * len(builds)
+    )
+    wanted = {b.lower() for b in difficulty_buckets} if difficulty_buckets else None
+    keepset: set[tuple[str, int]] = set()
+    for b, tid, k, bk in zip(builds, tile_ids, keep, buckets):
+        if b != build or not k:
+            continue
+        if wanted is not None and (bk is None or str(bk).lower() not in wanted):
+            continue
+        keepset.add((b, int(tid)))
+    return keepset or None
+
+
 def _select_rows(
     index: dict[str, list],
     maps: list[str] | None,
     limit: int | None,
     min_height_std: float | None = None,
+    curation_keepset: set[tuple[str, int]] | None = None,
 ) -> list[int]:
     rows = list(range(len(index["tile_id"])))
     if maps:
@@ -38,6 +76,12 @@ def _select_rows(
         rows = [r for r in rows if index["map"][r].lower() in wanted]
     if min_height_std is not None and "height_std" in index:
         rows = [r for r in rows if index["height_std"][r] >= min_height_std]
+    if curation_keepset is not None:
+        rows = [
+            r
+            for r in rows
+            if (index["build"][r], int(index["tile_id"][r])) in curation_keepset
+        ]
     if limit is not None:
         rows = rows[:limit]
     return rows
@@ -50,7 +94,25 @@ def _build(args: argparse.Namespace) -> int:
 
     v18 = zarr.open_group(str(v18_path), mode="r")
     index = store.read_index(v18_path)
-    rows = _select_rows(index, args.maps, args.limit, args.min_height_std)
+
+    curation_keepset = None
+    if args.curation_manifest:
+        build_name = index["build"][0] if index.get("build") else None
+        if not build_name:
+            print("--curation-manifest requires the V18 index to carry a 'build' column",
+                  file=sys.stderr)
+            return 1
+        curation_keepset = _load_curation_keepset(
+            args.curation_manifest, build_name, args.difficulty_bucket
+        )
+        if curation_keepset is None:
+            print(f"curation manifest has no kept tiles for build {build_name}",
+                  file=sys.stderr)
+            return 1
+        bucket_note = f" buckets={sorted(set(args.difficulty_bucket))}" if args.difficulty_bucket else ""
+        print(f"curation: {len(curation_keepset)} kept tiles for build {build_name}{bucket_note}")
+
+    rows = _select_rows(index, args.maps, args.limit, args.min_height_std, curation_keepset)
     if not rows:
         print("No tiles selected.", file=sys.stderr)
         return 1
@@ -193,6 +255,13 @@ def main() -> int:
     build.add_argument("--disagree-threshold", type=float, default=1.0)
     build.add_argument("--min-height-std", type=float, default=None,
                        help="skip tiles flatter than this height_std (needs index column)")
+    build.add_argument("--curation-manifest", default=None,
+                       help="path to a V18 curation kept_tiles.parquet; restricts tiles to "
+                            "keep==True (omits mismatched-signal tiles). Preferred over "
+                            "--min-height-std for reliable training corpora.")
+    build.add_argument("--difficulty-bucket", nargs="*", default=None,
+                       choices=["easy", "medium", "hard", "pathological"],
+                       help="with --curation-manifest, further restrict to these difficulty buckets")
 
     infer = sub.add_parser("infer", help="synthetic-only prior for one tile NPZ")
     infer.add_argument("--minimap", default=None, help="accepted for interface parity; unused")
