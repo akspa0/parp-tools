@@ -63,6 +63,13 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 - Validation: `uv run python -m py_compile scripts/unswizzle_audio_raw_patterns.py`, `uv run python scripts/unswizzle_audio_raw_patterns.py --help`, and a bounded smoke run wrote 60 candidates under `C:\tmp\wow-unswizzle-smoke`.
 - Reran against `output/azeroth_audio/Azeroth_all_tiles_0_5_3_3368_11025Hz.wav`; payload was 41,082,478 mono 16-bit samples = 622 complete `257x257` tiles with zero remainder. Added stream-order and V18 `index.parquet` coordinate-order tile mosaics under `wow-viewer/output/analysis/raw-audio-unswizzle/azeroth_0_5_3_3368/tile_unswizzle`.
 
+### Spec 092 heightmap pattern miner
+
+- Added `specs/092-heightmap-pattern-miner` and `data-harvester/scripts/mine_heightmap_patterns.py`.
+- The miner reads Zarr `height_257`, samples configurable patches, hashes locally normalized low-resolution signatures, filters low-variance and saturated artifacts, then writes ranked `summary.json` and `pattern_atlas.png`.
+- Validation: py_compile/help passed; bounded real-data run on `0_5_3_3368` Azeroth 128 tiles kept 19,727 patches, found 15,702 buckets, and produced filtered output at `wow-viewer/output/analysis/heightmap-patterns/azeroth_0_5_3_3368_filtered`.
+- V23 trainer was intentionally unchanged; next step is motif-to-validation-error joining.
+
 ## 2026-07-03
 
 ### Spec 089 local stack reached bundle boundary

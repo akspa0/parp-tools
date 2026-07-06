@@ -62,6 +62,13 @@ Keep current contract only. Older notes live in `memory-bank/archive/2026-07-04-
 - This is evidence tooling only. Structured output is a layout hypothesis, not proof of steganography or hidden payloads.
 - Proof level: py_compile and CLI help passed; a bounded smoke run wrote 60 candidates under `C:\tmp\wow-unswizzle-smoke`; the real Azeroth WAV pass wrote 390 projections plus tile mosaics under `wow-viewer/output/analysis/raw-audio-unswizzle/azeroth_0_5_3_3368`.
 
+## Height pattern miner lane
+
+- Spec 092 `092-heightmap-pattern-miner` is active for V23-adjacent repeated height motif analysis.
+- `data-harvester/scripts/mine_heightmap_patterns.py` samples `height_257` patches from V18/V22-style Zarr stores, locally normalizes them, hashes coarse low-resolution signatures, suppresses low-variance and saturated artifacts, and writes `summary.json` plus `pattern_atlas.png`.
+- Bounded Azeroth proof: `0_5_3_3368`, 128 tiles, patch sizes `16 32`, stride `16`, grid `4`, quant `4`, max saturated ratio `0.30`. Output kept 19,727 patches, found 15,702 pattern buckets, and surfaced repeated ramps/ridges/falloffs across multiple tiles under `wow-viewer/output/analysis/heightmap-patterns/azeroth_0_5_3_3368_filtered`.
+- V23 training remains unchanged. Next useful step is joining motif IDs to V23 validation error maps before using patterns for curriculum or weighting.
+
 ## Recent background still live
 
 - 2026-07-04: repo doc audit rewrote `AGENTS.md`, root `README.md`, `docs/PLANS-OVERVIEW.md`, `docs/WoWViewer/*`, and `data-harvester/README.md`. Canonical doc routing now starts at `docs/DOCUMENTATION-STATUS.md`.
