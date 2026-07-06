@@ -66,7 +66,8 @@ Keep current contract only. Older notes live in `memory-bank/archive/2026-07-04-
 
 - Spec 092 `092-heightmap-pattern-miner` is active for V23-adjacent repeated height motif analysis.
 - `data-harvester/scripts/mine_heightmap_patterns.py` samples `height_257` patches from V18/V22-style Zarr stores, locally normalizes them, hashes coarse low-resolution signatures, suppresses low-variance and saturated artifacts, and writes `summary.json` plus `pattern_atlas.png`.
-- Bounded Azeroth proof: `0_5_3_3368`, 128 tiles, patch sizes `16 32`, stride `16`, grid `4`, quant `4`, max saturated ratio `0.30`. Output kept 19,727 patches, found 15,702 pattern buckets, and surfaced repeated ramps/ridges/falloffs across multiple tiles under `wow-viewer/output/analysis/heightmap-patterns/azeroth_0_5_3_3368_filtered`.
+- Corrected constraint: motif windows are terrain-cell spans, default `32 64` cells, minimum `32` cells, chunk-aligned to the 16-cell MCNK grid by default. Legacy tiny patch matching is not the intended mode.
+- Bounded Azeroth proof after correction: `0_5_3_3368`, 128 tiles, cell spans `32 64`, chunk-aligned, grid `4`, quant `4`, max saturated ratio `0.30`. Output kept 16,390 patches, found 14,745 buckets, and surfaced repeated chunk-scale ramps/ridges/falloffs under `wow-viewer/output/analysis/heightmap-patterns/azeroth_0_5_3_3368_chunkcells_coarse`.
 - V23 training remains unchanged. Next useful step is joining motif IDs to V23 validation error maps before using patterns for curriculum or weighting.
 
 ## Recent background still live

@@ -68,6 +68,7 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 - Added `specs/092-heightmap-pattern-miner` and `data-harvester/scripts/mine_heightmap_patterns.py`.
 - The miner reads Zarr `height_257`, samples configurable patches, hashes locally normalized low-resolution signatures, filters low-variance and saturated artifacts, then writes ranked `summary.json` and `pattern_atlas.png`.
 - Validation: py_compile/help passed; bounded real-data run on `0_5_3_3368` Azeroth 128 tiles kept 19,727 patches, found 15,702 buckets, and produced filtered output at `wow-viewer/output/analysis/heightmap-patterns/azeroth_0_5_3_3368_filtered`.
+- Corrected the miner to reject tiny patch matching. Default mode now uses terrain-cell spans `32 64`, minimum span `32`, chunk-aligned 16-cell starts, and coarse `4x4/q4` signatures. Corrected proof kept 16,390 patches and produced `wow-viewer/output/analysis/heightmap-patterns/azeroth_0_5_3_3368_chunkcells_coarse`.
 - V23 trainer was intentionally unchanged; next step is motif-to-validation-error joining.
 
 ## 2026-07-03

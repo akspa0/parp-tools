@@ -8,8 +8,8 @@ Add a standalone data-harvester analysis script that mines repeated heightmap pa
 
 1. Create `scripts/mine_heightmap_patterns.py`.
 2. Load `height_257` from a selected build store and filter rows from `index.parquet`.
-3. Sample configurable patch sizes and strides.
-4. Normalize each patch locally, downsample to a small signature grid, quantize, and hash.
+3. Sample configurable terrain-cell spans, with chunk-aligned starts by default.
+4. Normalize each patch locally, downsample to a coarse signature grid, quantize, and hash.
 5. Filter low-variance and over-saturated patches before ranking.
 6. Rank repeated signatures by occurrence count and distinct tile coverage.
 7. Write `summary.json` and `pattern_atlas.png`.
@@ -24,4 +24,4 @@ Add a standalone data-harvester analysis script that mines repeated heightmap pa
 ## Validation
 
 - `uv run python -m py_compile scripts/mine_heightmap_patterns.py`
-- Bounded run against a real V18 Zarr store with a small tile limit.
+- Bounded run against a real V18 Zarr store with a small tile limit, chunk-cell spans of at least 32 cells, and coarse motif signatures.

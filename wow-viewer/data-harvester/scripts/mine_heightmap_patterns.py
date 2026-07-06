@@ -32,6 +32,9 @@ class Example:
     patch_x: int
     patch_y: int
     patch_size: int
+    cell_span: int
+    chunk_x: int
+    chunk_y: int
     patch_std: float
 
 
@@ -39,12 +42,23 @@ class Example:
 class PatternGroup:
     pattern_id: str
     patch_size: int
+    cell_span: int
     count: int = 0
     sum_std: float = 0.0
     tiles: set[str] = field(default_factory=set)
     examples: list[Example] = field(default_factory=list)
 
-    def add(self, row: dict[str, Any], x: int, y: int, patch_size: int, patch_std: float, max_examples: int) -> None:
+    def add(
+        self,
+        row: dict[str, Any],
+        x: int,
+        y: int,
+        patch_size: int,
+        cell_span: int,
+        chunk_cells: int,
+        patch_std: float,
+        max_examples: int,
+    ) -> None:
         self.count += 1
         self.sum_std += float(patch_std)
         tile_key = f"{row.get('map')}:{row.get('tile_x')}:{row.get('tile_y')}"
@@ -59,6 +73,9 @@ class PatternGroup:
                     patch_x=int(x),
                     patch_y=int(y),
                     patch_size=int(patch_size),
+                    cell_span=int(cell_span),
+                    chunk_x=int(x // chunk_cells),
+                    chunk_y=int(y // chunk_cells),
                     patch_std=float(patch_std),
                 )
             )
@@ -85,10 +102,32 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--maps", nargs="+", default=None, help="Optional map filters.")
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--max-tiles", type=int, default=0, help="Zero means all filtered tiles.")
-    parser.add_argument("--patch-sizes", nargs="+", type=int, default=[16, 32, 64])
-    parser.add_argument("--stride", type=int, default=16)
-    parser.add_argument("--hash-grid", type=int, default=8)
-    parser.add_argument("--quant-levels", type=int, default=8)
+    parser.add_argument(
+        "--cell-spans",
+        nargs="+",
+        type=int,
+        default=[32, 64],
+        help="Terrain-cell spans to match. Patch vertices are cell_span + 1.",
+    )
+    parser.add_argument(
+        "--patch-sizes",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Legacy vertex patch sizes. Converted to cell spans by subtracting one.",
+    )
+    parser.add_argument(
+        "--min-cell-span",
+        type=int,
+        default=32,
+        help="Reject candidate windows smaller than this many terrain cells.",
+    )
+    parser.add_argument("--cell-stride", type=int, default=16)
+    parser.add_argument("--stride", type=int, default=None, help="Legacy alias for --cell-stride.")
+    parser.add_argument("--chunk-cells", type=int, default=16)
+    parser.add_argument("--chunk-aligned", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--hash-grid", type=int, default=4)
+    parser.add_argument("--quant-levels", type=int, default=4)
     parser.add_argument("--min-std", type=float, default=0.5)
     parser.add_argument(
         "--max-saturated-ratio",
@@ -155,8 +194,10 @@ def patch_signature(patch: np.ndarray, hash_grid: int, quant_levels: int) -> tup
 def mine_patterns(
     root: Any,
     rows: list[dict[str, Any]],
-    patch_sizes: list[int],
-    stride: int,
+    cell_spans: list[int],
+    cell_stride: int,
+    chunk_cells: int,
+    chunk_aligned: bool,
     hash_grid: int,
     quant_levels: int,
     min_std: float,
@@ -172,11 +213,17 @@ def mine_patterns(
     for row in rows:
         tile = height_array[int(row["tile_id"])].astype(np.float32)
         stats["tiles_read"] += 1
-        for patch_size in patch_sizes:
-            if patch_size <= 0 or patch_size > min(tile.shape):
+        tile_cell_width = tile.shape[1] - 1
+        tile_cell_height = tile.shape[0] - 1
+        for cell_span in cell_spans:
+            patch_size = cell_span + 1
+            if cell_span <= 0 or patch_size > min(tile.shape):
                 continue
-            for y in range(0, tile.shape[0] - patch_size + 1, stride):
-                for x in range(0, tile.shape[1] - patch_size + 1, stride):
+            step = chunk_cells if chunk_aligned else cell_stride
+            y_limit = tile_cell_height - cell_span
+            x_limit = tile_cell_width - cell_span
+            for y in range(0, y_limit + 1, step):
+                for x in range(0, x_limit + 1, step):
                     if max_patches > 0 and stats["patches_seen"] >= max_patches:
                         patch_cap_hit = True
                         break
@@ -189,10 +236,23 @@ def mine_patterns(
                     if saturated > max_saturated_ratio:
                         stats["patches_skipped_saturated"] += 1
                         continue
-                    key = f"p{patch_size}_g{hash_grid}_q{quant_levels}_{digest}"
+                    key = f"cells{cell_span}_g{hash_grid}_q{quant_levels}_{digest}"
                     if key not in groups:
-                        groups[key] = PatternGroup(pattern_id=key, patch_size=patch_size)
-                    groups[key].add(row, x, y, patch_size, patch_std, max_examples)
+                        groups[key] = PatternGroup(
+                            pattern_id=key,
+                            patch_size=patch_size,
+                            cell_span=cell_span,
+                        )
+                    groups[key].add(
+                        row,
+                        x,
+                        y,
+                        patch_size,
+                        cell_span,
+                        chunk_cells,
+                        patch_std,
+                        max_examples,
+                    )
                     stats["patches_kept"] += 1
                 if patch_cap_hit:
                     break
@@ -209,6 +269,7 @@ def group_to_json(group: PatternGroup) -> dict[str, Any]:
     return {
         "pattern_id": group.pattern_id,
         "patch_size": group.patch_size,
+        "cell_span": group.cell_span,
         "count": group.count,
         "distinct_tiles": group.distinct_tiles,
         "mean_std": group.mean_std,
@@ -243,7 +304,7 @@ def write_atlas(
         y0 = row_idx * row_h
         label = (
             f"{row_idx + 1}. {group.pattern_id}\n"
-            f"count={group.count} tiles={group.distinct_tiles} "
+            f"cells={group.cell_span} count={group.count} tiles={group.distinct_tiles} "
             f"mean_std={group.mean_std:.3f} score={group.score:.1f}"
         )
         draw.text((pad, y0 + pad), label, fill="black")
@@ -263,7 +324,8 @@ def write_atlas(
             sheet.paste(image, (x0, y0 + pad))
             draw.text(
                 (x0, y0 + pad + thumb - 24),
-                f"{example.map} {example.tile_x},{example.tile_y}\n{example.patch_x},{example.patch_y}",
+                f"{example.map} {example.tile_x},{example.tile_y}\n"
+                f"chunk {example.chunk_x},{example.chunk_y}",
                 fill=(255, 255, 0),
             )
 
@@ -282,12 +344,25 @@ def main() -> None:
     if not rows:
         raise RuntimeError("No index rows matched the requested filters.")
     root = open_zarr_group(store_path)
-    patch_sizes = sorted({int(value) for value in args.patch_sizes if int(value) > 0})
+    min_cell_span = max(1, int(args.min_cell_span))
+    if args.patch_sizes:
+        requested_cell_spans = [int(value) - 1 for value in args.patch_sizes]
+    else:
+        requested_cell_spans = [int(value) for value in args.cell_spans]
+    cell_spans = sorted({value for value in requested_cell_spans if value >= min_cell_span})
+    if not cell_spans:
+        raise RuntimeError(
+            f"No usable cell spans remain after min-cell-span={min_cell_span}. "
+            "Use --cell-spans with larger terrain-cell spans."
+        )
+    cell_stride = int(args.stride) if args.stride is not None else int(args.cell_stride)
     groups, stats = mine_patterns(
         root=root,
         rows=rows,
-        patch_sizes=patch_sizes,
-        stride=max(1, int(args.stride)),
+        cell_spans=cell_spans,
+        cell_stride=max(1, cell_stride),
+        chunk_cells=max(1, int(args.chunk_cells)),
+        chunk_aligned=bool(args.chunk_aligned),
         hash_grid=max(2, int(args.hash_grid)),
         quant_levels=max(2, int(args.quant_levels)),
         min_std=float(args.min_std),
@@ -306,8 +381,12 @@ def main() -> None:
         "store_path": str(store_path),
         "maps": args.maps,
         "row_count": len(rows),
-        "patch_sizes": patch_sizes,
-        "stride": int(args.stride),
+        "cell_spans": cell_spans,
+        "patch_sizes": [value + 1 for value in cell_spans],
+        "min_cell_span": min_cell_span,
+        "cell_stride": cell_stride,
+        "chunk_cells": int(args.chunk_cells),
+        "chunk_aligned": bool(args.chunk_aligned),
         "hash_grid": int(args.hash_grid),
         "quant_levels": int(args.quant_levels),
         "min_std": float(args.min_std),
