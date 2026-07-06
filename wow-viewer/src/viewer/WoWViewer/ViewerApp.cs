@@ -1838,6 +1838,13 @@ void main() {
                     ImGui.EndMenu();
                 }
 
+                ImGui.Separator();
+
+                if (ImGui.MenuItem("Settings..."))
+                    _showSettingsWindow = true;
+
+                ImGui.Separator();
+
                 if (ImGui.MenuItem("Quit"))
                     _window.Close();
 
@@ -14683,6 +14690,12 @@ void main() {
             _defaultFogEnd = float.IsFinite(settings.DefaultFogEnd)
                 ? Math.Clamp(settings.DefaultFogEnd, 100f, 6000f)
                 : 1500f;
+            _cameraSpeed = float.IsFinite(settings.CameraSpeed)
+                ? Math.Clamp(settings.CameraSpeed, 1f, 500f)
+                : 50f;
+            _fovDegrees = float.IsFinite(settings.FovDegrees)
+                ? Math.Clamp(settings.FovDegrees, 20f, 90f)
+                : 45f;
             _showMinimapWindow = settings.ShowMinimapWindow;
             _useDockspaceUi = settings.ShellPanelLayoutVersion < CurrentShellPanelLayoutVersion
                 ? true
@@ -14907,6 +14920,8 @@ void main() {
                 EnableWmoBackfaceCulling = _enableWmoBackfaceCulling,
                 DefaultFogStart = _defaultFogStart,
                 DefaultFogEnd = _defaultFogEnd,
+                CameraSpeed = _cameraSpeed,
+                FovDegrees = _fovDegrees,
                 KnownGoodClientPaths = _knownGoodClientPaths,
                 ShowMinimapWindow = _showMinimapWindow,
                 UseDockspaceUi = _useDockspaceUi,
@@ -15236,6 +15251,10 @@ void main() {
         // Global fog defaults
         public float DefaultFogStart { get; set; } = 200f;
         public float DefaultFogEnd { get; set; } = 1500f;
+
+        // Camera defaults
+        public float CameraSpeed { get; set; } = 50f;
+        public float FovDegrees { get; set; } = 45f;
     }
 
     private sealed class SavedTaxiActorOverride

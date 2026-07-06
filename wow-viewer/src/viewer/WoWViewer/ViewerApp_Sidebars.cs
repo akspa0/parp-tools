@@ -4217,6 +4217,9 @@ public partial class ViewerApp
             case WorldBottomTab.SelectionTools:
                 DrawWorldSelectionToolsSubTab();
                 break;
+            case WorldBottomTab.Lod:
+                DrawWorldLodSubTab();
+                break;
         }
     }
 
@@ -4314,6 +4317,72 @@ public partial class ViewerApp
         ImGui.TextDisabled("Click selection, frame, asset path actions for world objects.");
         ImGui.Separator();
         DrawSelectedObjectSummaryContent();
+    }
+
+    private void DrawWorldLodSubTab()
+    {
+        ImGui.TextDisabled("WDL visibility, detailed ADT budget, and distance LOD state.");
+        ImGui.Separator();
+
+        if (_worldScene == null && _terrainManager == null && _vlmTerrainManager == null)
+        {
+            ImGui.TextDisabled("Load a world map to inspect World LOD state.");
+            return;
+        }
+
+        if (_worldScene != null)
+        {
+            bool showWdl = _worldScene.ShowWdlTerrain;
+            if (ImGui.Checkbox("Show WDL Terrain", ref showWdl))
+                _worldScene.ShowWdlTerrain = showWdl;
+
+            bool showBoundingBoxes = _worldScene.ShowBoundingBoxes;
+            if (ImGui.Checkbox("World Bounding Boxes", ref showBoundingBoxes))
+                _worldScene.ShowBoundingBoxes = showBoundingBoxes;
+
+            bool showPm4Overlay = _worldScene.ShowPm4Overlay;
+            if (ImGui.Checkbox("PM4 Overlay", ref showPm4Overlay))
+                _worldScene.ShowPm4Overlay = showPm4Overlay;
+            if (_worldScene.ShowPm4Overlay && ImGui.IsItemHovered())
+                ImGui.SetTooltip(_worldScene.Pm4Status);
+        }
+
+        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (renderer != null)
+        {
+            int loadedTiles = _terrainManager?.LoadedTileCount ?? _vlmTerrainManager?.LoadedTileCount ?? 0;
+            ImGui.Text($"Loaded tiles: {loadedTiles}");
+            ImGui.Text($"Terrain chunks: {renderer.ChunksRendered} rendered / {renderer.ChunksCulled} culled");
+        }
+
+        if (_terrainManager != null)
+        {
+            int adtDetailTiles = _terrainManager.DetailedTileCountOverride <= 0
+                ? _terrainManager.EffectiveDetailedTileCount
+                : _terrainManager.DetailedTileCountOverride;
+            if (ImGui.SliderInt("ADT Detail Tiles", ref adtDetailTiles, 1, TerrainManager.MaxManualDetailedTileCount))
+            {
+                _terrainManager.DetailedTileCountOverride = adtDetailTiles;
+                _savedDetailedAdtTileCountOverride = _terrainManager.DetailedTileCountOverride;
+            }
+            if (ImGui.IsItemDeactivatedAfterEdit())
+                SaveViewerSettings();
+
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Auto##WorldLodAdtDetail"))
+            {
+                _terrainManager.DetailedTileCountOverride = 0;
+                _savedDetailedAdtTileCountOverride = 0;
+                SaveViewerSettings();
+            }
+
+            ImGui.TextDisabled(_terrainManager.DetailedTileCountOverride <= 0
+                ? $"Auto from fog: {_terrainManager.EffectiveDetailedTileCount} detailed / {_terrainManager.EffectiveRetainedTileCount} retained"
+                : $"Manual override: {_terrainManager.DetailedTileCountOverride} detailed / {_terrainManager.EffectiveRetainedTileCount} retained");
+        }
+
+        ImGui.Separator();
+        ImGui.TextDisabled("More World LOD facts belong here after the right-sidebar audit identifies the WDL data owner.");
     }
 
     private void DrawQuickControlsContent()

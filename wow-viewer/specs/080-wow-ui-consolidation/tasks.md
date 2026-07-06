@@ -27,9 +27,9 @@
 **Independent Test**: Click File -> Settings and the bottom-bar Settings launcher; both open the same persistent Settings window.
 
 - [x] T008 [US3] Add a bottom-bar Settings launcher in `ViewerApp_Sidebars.cs`.
-- [ ] T009 [US3] Confirm File -> Settings and any sidebar Settings button only set `_showSettingsWindow`.
-- [ ] T010 [US3] Add Camera defaults to `ViewerApp_Settings.cs`.
-- [ ] T011 [US3] Verify render quality, fog, interface, and camera settings save through the existing settings path.
+- [x] T009 [US3] Confirm File -> Settings and any sidebar Settings button only set `_showSettingsWindow`.
+- [x] T010 [US3] Add Camera defaults to `ViewerApp_Settings.cs`.
+- [x] T011 [US3] Verify render quality, fog, interface, and camera settings save through the existing settings path.
 
 ## Phase 3: Right Sidebar Audit (P1)
 
@@ -42,7 +42,7 @@
 - [ ] T014 [US2] Classify all World tab content as Source, Placements, Tiles, LOD, Selection Tools, or remove.
 - [ ] T015 [US2] Classify Tools content as PM4, Terrain, Archeology, Utilities, or remove.
 - [ ] T016 [US6] Hide or disable dead controls with tooltips instead of showing fake working buttons.
-- [ ] T017 [US2] Add `WorldBottomTab.Lod` and label it `LOD` in `Workbench/WorkbenchNavigator.cs`.
+- [x] T017 [US2] Add `WorldBottomTab.Lod` and label it `LOD` in `Workbench/WorkbenchNavigator.cs`.
 
 ## Phase 4: Model And World Info Tabs (P2)
 
@@ -53,7 +53,7 @@
 - [ ] T018 [US2] Move standalone WMO group controls into the Model info tab while keeping bottom-bar toggles.
 - [ ] T019 [US2] Move WMO/MDX placement details into World info/placement tabs without duplicating bottom-bar toggles.
 - [ ] T020 [US2] Replace the placeholder Model LOD text with actual available model LOD/runtime facts or a disabled state.
-- [ ] T021 [US2] Add World LOD tab content for WDL/world-distance state or explicitly disabled text with the missing data path.
+- [x] T021 [US2] Add World LOD tab content for WDL/world-distance state or explicitly disabled text with the missing data path.
 
 ## Phase 5: Named Frames (P2)
 

@@ -41,7 +41,9 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 - Audited the current right-sidebar/workbench state: WMO group boxes existed but were buried in model info, standalone WMO labels only drew for selected/highlighted groups, world wireframe was monolithic, Model LOD is placeholder text, and World LOD is missing from `WorkbenchNavigator`.
 - Implemented the bounded `wow-viewer` Phase 1 slice: bottom bar now has split world wireframe controls (`Terrain WF`, `M2/WMO WF`), standalone model/WMO wireframe, standalone WMO group bounding boxes, all-group WMO labels, and a Settings launcher.
 - Standalone WMO group labels default to visible for every render group when loading a single WMO object; the existing selected/highlighted label workflow remains.
-- Validation: `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed twice with 0 errors and existing warning noise. Manual viewer checks remain open.
+- Implemented the bounded Phase 2 Settings follow-up: File -> Settings now opens the same Settings window as the bottom bar, Tools menu, utility popup, and workspace card; Settings has persisted Camera Speed and FOV defaults through `viewer_settings.json`.
+- Added the first World -> LOD destination: WDL visibility, world bounding boxes, PM4 overlay/status tooltip, loaded tile/chunk counts, and ADT detail-tile budget controls now live under a real `LOD` bottom tab.
+- Validation: `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed three times with 0 errors and existing warning noise. Manual viewer checks remain open.
 
 ### Spec 090 viewer memory profiler
 

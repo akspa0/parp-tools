@@ -39,6 +39,13 @@ public partial class ViewerApp
         {
             DrawInterfaceSettingsContent();
         }
+
+        ImGui.Separator();
+
+        if (ImGui.CollapsingHeader("Camera", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            DrawCameraDefaultsContent();
+        }
     }
 
     private void DrawFogDefaultsContent()
@@ -75,6 +82,32 @@ public partial class ViewerApp
         if (ImGui.Checkbox("Show Minimap", ref showMinimap))
         {
             _showMinimapWindow = showMinimap;
+            SaveViewerSettings();
+        }
+    }
+
+    private void DrawCameraDefaultsContent()
+    {
+        ImGui.TextDisabled("Free-fly camera defaults saved with viewer settings.");
+
+        float cameraSpeed = Math.Clamp(_cameraSpeed, 1f, 500f);
+        if (ImGui.DragFloat("Camera Speed", ref cameraSpeed, 1f, 1f, 500f, "%.0f"))
+        {
+            _cameraSpeed = cameraSpeed;
+            SaveViewerSettings();
+        }
+
+        float fovDegrees = Math.Clamp(_fovDegrees, 20f, 90f);
+        if (ImGui.DragFloat("FOV", ref fovDegrees, 0.5f, 20f, 90f, "%.0f°"))
+        {
+            _fovDegrees = fovDegrees;
+            SaveViewerSettings();
+        }
+
+        if (ImGui.Button("Reset Camera Defaults"))
+        {
+            _cameraSpeed = 50f;
+            _fovDegrees = 45f;
             SaveViewerSettings();
         }
     }
