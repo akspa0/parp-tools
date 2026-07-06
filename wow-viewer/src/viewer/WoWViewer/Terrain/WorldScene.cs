@@ -854,6 +854,12 @@ public class WorldScene : ISceneRenderer
         public int OpaqueUnbatchedMdxCount { get; set; }
         public int TransparentBatchedMdxCount { get; set; }
         public int TransparentUnbatchedMdxCount { get; set; }
+        public int WmoDrawCallCount { get; set; }
+        public int WmoBatchDrawCallCount { get; set; }
+        public int WmoGroupFallbackDrawCallCount { get; set; }
+        public int WmoLiquidDrawCallCount { get; set; }
+        public int WmoDoodadSubmissionCount { get; set; }
+        public int WmoVisibleGroupSubmissionCount { get; set; }
 
         public double DeferredAssetLoadMs { get; set; }
         public double TaxiActorUpdateMs { get; set; }
@@ -864,6 +870,7 @@ public class WorldScene : ISceneRenderer
         public double TerrainMs { get; set; }
         public double WmoVisibilityMs { get; set; }
         public double WmoSubmissionMs { get; set; }
+        public double WmoTransparentSubmissionMs { get; set; }
         public double MdxAnimationMs { get; set; }
         public double MdxVisibilityMs { get; set; }
         public double MdxOpaqueSubmissionMs { get; set; }
@@ -882,6 +889,12 @@ public class WorldScene : ISceneRenderer
             OpaqueUnbatchedMdxCount = 0;
             TransparentBatchedMdxCount = 0;
             TransparentUnbatchedMdxCount = 0;
+            WmoDrawCallCount = 0;
+            WmoBatchDrawCallCount = 0;
+            WmoGroupFallbackDrawCallCount = 0;
+            WmoLiquidDrawCallCount = 0;
+            WmoDoodadSubmissionCount = 0;
+            WmoVisibleGroupSubmissionCount = 0;
             DeferredAssetLoadMs = 0;
             TaxiActorUpdateMs = 0;
             LightingMs = 0;
@@ -891,6 +904,7 @@ public class WorldScene : ISceneRenderer
             TerrainMs = 0;
             WmoVisibilityMs = 0;
             WmoSubmissionMs = 0;
+            WmoTransparentSubmissionMs = 0;
             MdxAnimationMs = 0;
             MdxVisibilityMs = 0;
             MdxOpaqueSubmissionMs = 0;
@@ -923,6 +937,12 @@ public class WorldScene : ISceneRenderer
                 OpaqueUnbatchedMdxCount,
                 TransparentBatchedMdxCount,
                 TransparentUnbatchedMdxCount,
+                WmoDrawCallCount,
+                WmoBatchDrawCallCount,
+                WmoGroupFallbackDrawCallCount,
+                WmoLiquidDrawCallCount,
+                WmoDoodadSubmissionCount,
+                WmoVisibleGroupSubmissionCount,
                 new WorldRenderStageStats(DeferredAssetLoadMs),
                 new WorldRenderStageStats(TaxiActorUpdateMs),
                 new WorldRenderStageStats(LightingMs),
@@ -932,6 +952,7 @@ public class WorldScene : ISceneRenderer
                 new WorldRenderStageStats(TerrainMs, terrainChunksRendered),
                 new WorldRenderStageStats(WmoVisibilityMs, VisibleWmoInstances.Count),
                 new WorldRenderStageStats(WmoSubmissionMs, VisibleWmoInstances.Count, VisibleWmoInstances.Count),
+                new WorldRenderStageStats(WmoTransparentSubmissionMs, VisibleWmoInstances.Count, WmoDrawCallCount),
                 new WorldRenderStageStats(MdxAnimationMs),
                 new WorldRenderStageStats(MdxVisibilityMs, VisibleMdxInstances.Count),
                 new WorldRenderStageStats(MdxOpaqueSubmissionMs, VisibleMdxInstances.Count, OpaqueBatchedMdxCount + OpaqueUnbatchedMdxCount),
@@ -7728,6 +7749,16 @@ public class WorldScene : ISceneRenderer
         return ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
     }
 
+    private static void AccumulateWmoRenderStats(WorldRenderFrame frame, WmoRenderStats stats)
+    {
+        frame.WmoDrawCallCount += stats.DrawCalls;
+        frame.WmoBatchDrawCallCount += stats.BatchDrawCalls;
+        frame.WmoGroupFallbackDrawCallCount += stats.GroupFallbackDrawCalls;
+        frame.WmoLiquidDrawCallCount += stats.LiquidDrawCalls;
+        frame.WmoDoodadSubmissionCount += stats.DoodadSubmissions;
+        frame.WmoVisibleGroupSubmissionCount += stats.VisibleGroupSubmissions;
+    }
+
     private void TrackPendingVisibleLoad(Dictionary<string, float> pendingLoads, string modelKey, float distanceSq)
     {
         if (pendingLoads.TryGetValue(modelKey, out float existingDistanceSq) && existingDistanceSq <= distanceSq)
@@ -8971,6 +9002,7 @@ public class WorldScene : ISceneRenderer
                             renderer.RenderWithTransform(visible.Instance.Transform, view, proj, WmoRenderPass.Opaque,
                                 fogColor, objectFogStart, objectFogEnd, cameraPos,
                                 lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                            AccumulateWmoRenderStats(frame, renderer.LastRenderStats);
                         });
                     });
                     if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Wmo, $"WMO render: {WmoRenderedCount} drawn, {WmoCulledCount} culled");
@@ -9059,7 +9091,7 @@ public class WorldScene : ISceneRenderer
                     // Render transparent/blended object layers sorted by distance to camera.
                     // Depth test ON but depth write OFF so transparent objects don't
                     // occlude each other incorrectly.
-                    frame.MdxTransparentSubmissionMs = MeasureDurationMs(() =>
+                    MeasureDurationMs(() =>
                     {
                         _gl.Enable(EnableCap.DepthTest);
                         _gl.DepthFunc(DepthFunction.Lequal);
@@ -9081,6 +9113,8 @@ public class WorldScene : ISceneRenderer
 
                         frame.TransparentBatchedMdxCount = 0;
                         frame.TransparentUnbatchedMdxCount = 0;
+                        frame.WmoTransparentSubmissionMs = 0;
+                        frame.MdxTransparentSubmissionMs = 0;
 
                         foreach (var entry in transparentObjectSort)
                         {
@@ -9091,9 +9125,14 @@ public class WorldScene : ISceneRenderer
                                 if (renderer == null)
                                     continue;
 
-                                renderer.RenderWithTransform(visibleWmo.Instance.Transform, view, proj, WmoRenderPass.Transparent,
-                                    fogColor, objectFogStart, objectFogEnd, cameraPos,
-                                    lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                                double wmoTransparentMs = MeasureDurationMs(() =>
+                                {
+                                    renderer.RenderWithTransform(visibleWmo.Instance.Transform, view, proj, WmoRenderPass.Transparent,
+                                        fogColor, objectFogStart, objectFogEnd, cameraPos,
+                                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                                });
+                                frame.WmoTransparentSubmissionMs += wmoTransparentMs;
+                                AccumulateWmoRenderStats(frame, renderer.LastRenderStats);
                                 continue;
                             }
 
@@ -9102,9 +9141,13 @@ public class WorldScene : ISceneRenderer
                             if (mdxRenderer == null)
                                 continue;
 
-                            mdxRenderer.RenderWithTransform(visibleMdx.Instance.Transform, view, proj, RenderPass.Transparent, visibleMdx.TransparentFade,
-                                fogColor, objectFogStart, objectFogEnd, cameraPos,
-                                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                            double mdxTransparentMs = MeasureDurationMs(() =>
+                            {
+                                mdxRenderer.RenderWithTransform(visibleMdx.Instance.Transform, view, proj, RenderPass.Transparent, visibleMdx.TransparentFade,
+                                    fogColor, objectFogStart, objectFogEnd, cameraPos,
+                                    lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                            });
+                            frame.MdxTransparentSubmissionMs += mdxTransparentMs;
                             frame.TransparentUnbatchedMdxCount++;
                         }
                     });

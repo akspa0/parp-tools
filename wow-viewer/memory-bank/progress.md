@@ -52,6 +52,14 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 - `WorldAssetManager` raw file-data cache now tracks byte residency and evicts by both entry count and a 512 MiB byte cap. Live renderer eviction was intentionally not changed.
 - Validation: `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with 0 errors and existing warning noise. Manual staged 4.0.0 Stormwind measurement remains open.
 
+### Spec 093 render performance and WMO liquid audit
+
+- Added `specs/093-render-performance-liquid-audit` for the slow-frame and WMO liquid lane.
+- Audited the source path: WMO rendering is per visible placement and per group/material batch; MDX "batched" means shared-shader submission rather than true GPU instancing; WMO transparent/liquid work was being timed under the MDX transparent bucket.
+- Added diagnostic WMO counters: total WMO draw calls, batch draws, fallback group draws, liquid draws, doodad submissions, and visible group submissions.
+- Runtime Stats now separates WMO opaque and WMO transparent submission timing and displays WMO draw composition. WMO liquid visuals were not changed in this slice.
+- Validation: `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with 0 errors and existing warning noise; focused `WorldRenderOptimizationAdvisorTests` passed with `3 passed`.
+
 ### V23 remote selector preference cleanup
 
 - `setup_v23_runpod.py` now prefers `3090 -> 4090 -> 5090` when no explicit GPU list is given.

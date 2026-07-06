@@ -84,7 +84,7 @@ public static class WorldRenderCompositionBuilder
                 passOptions.WmosVisible,
                 wmoSourceCount > 0,
                 wmoSourceCount,
-                stats.WmoSubmission.SubmittedCount,
+                stats.WmoSubmission.SubmittedCount + stats.WmoTransparentSubmission.SubmittedCount,
                 "WMO geometry is still represented by placement markers in the current preview."),
             new(
                 WorldRenderLayerKind.Doodad,

@@ -3100,7 +3100,8 @@ public partial class ViewerApp
         ImGui.Text($"WDL/terrain/liquid: {renderStats.Wdl.DurationMs:0.00} / {renderStats.Terrain.DurationMs:0.00} / {renderStats.Liquid.DurationMs:0.00} ms");
         if (renderStatsLiquidRenderer != null)
             ImGui.Text($"Liquid visible: {renderStatsLiquidRenderer.LastVisibleTerrainMeshCount}/{renderStatsLiquidRenderer.MeshCount}  WL: {renderStatsLiquidRenderer.LastVisibleWlMeshCount}/{renderStatsLiquidRenderer.WlMeshCount}");
-        ImGui.Text($"WMO vis/draw: {renderStats.WmoVisibility.DurationMs:0.00} / {renderStats.WmoSubmission.DurationMs:0.00} ms");
+        ImGui.Text($"WMO vis/opaque/trans: {renderStats.WmoVisibility.DurationMs:0.00} / {renderStats.WmoSubmission.DurationMs:0.00} / {renderStats.WmoTransparentSubmission.DurationMs:0.00} ms");
+        ImGui.Text($"WMO draws batch/fallback/liquid/doodad: {renderStats.WmoBatchDrawCallCount}/{renderStats.WmoGroupFallbackDrawCallCount}/{renderStats.WmoLiquidDrawCallCount}/{renderStats.WmoDoodadSubmissionCount}  groups={renderStats.WmoVisibleGroupSubmissionCount}");
         ImGui.Text($"MDX anim/vis/opaque: {renderStats.MdxAnimation.DurationMs:0.00} / {renderStats.MdxVisibility.DurationMs:0.00} / {renderStats.MdxOpaqueSubmission.DurationMs:0.00} ms");
         ImGui.Text($"MDX sort/trans: {renderStats.MdxTransparentSort.DurationMs:0.00} / {renderStats.MdxTransparentSubmission.DurationMs:0.00} ms");
         ImGui.Text($"MDX opaque shared/unbatched: {renderStats.OpaqueBatchedMdxCount}/{renderStats.OpaqueUnbatchedMdxCount}  transparent shared/unbatched: {renderStats.TransparentBatchedMdxCount}/{renderStats.TransparentUnbatchedMdxCount}");

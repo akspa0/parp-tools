@@ -98,7 +98,9 @@ public partial class ViewerApp
             _worldScene.DoodadsVisible = showDoodads;
 
         WorldRenderFrameStats stats = _worldScene.LastRenderFrameStats;
-        double wmoObjectCostMs = stats.WmoVisibility.DurationMs + stats.WmoSubmission.DurationMs;
+        double wmoObjectCostMs = stats.WmoVisibility.DurationMs
+            + stats.WmoSubmission.DurationMs
+            + stats.WmoTransparentSubmission.DurationMs;
         double mdxObjectCostMs = stats.MdxVisibility.DurationMs + stats.MdxOpaqueSubmission.DurationMs
             + stats.MdxTransparentSort.DurationMs + stats.MdxTransparentSubmission.DurationMs;
         string hotspot = wmoObjectCostMs >= mdxObjectCostMs

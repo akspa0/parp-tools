@@ -29,6 +29,15 @@ public enum WmoRenderPass
     Transparent,
 }
 
+public readonly record struct WmoRenderStats(
+    int DrawCalls,
+    int BatchDrawCalls,
+    int GroupFallbackDrawCalls,
+    int LiquidDrawCalls,
+    int DoodadSubmissions,
+    int VisibleGroupSubmissions,
+    int VisibleLiquidMeshes);
+
 /// <summary>
 /// Renders a WMO (World Map Object) using OpenGL.
 /// Uses WowViewer.Core.IO.Converters' WmoV14Data model for geometry.
@@ -94,6 +103,13 @@ public class WmoRenderer : ISceneRenderer
     private bool _doodadsVisible = true;
     private bool _runtimeDoodadsVisible = true;
     private bool _runtimeGroupLiquidsVisible = true;
+    private int _currentDrawCalls;
+    private int _currentBatchDrawCalls;
+    private int _currentGroupFallbackDrawCalls;
+    private int _currentLiquidDrawCalls;
+    private int _currentDoodadSubmissions;
+    private int _currentVisibleGroupSubmissions;
+    private int _currentVisibleLiquidMeshes;
     private const int DeferredDoodadLoadsPerFrame = 1;
     private const double DeferredDoodadLoadBudgetMs = 2.0;
     private const float GroupVisibilityBoundsPadding = 32f;
@@ -108,6 +124,7 @@ public class WmoRenderer : ISceneRenderer
     private const float DoodadMaxRenderCount = 1024; // Soft cap to avoid large WMO doodad sets dropping out too early
 
     public int PendingDoodadModelLoadCount => _pendingDoodadModelLoads.Count;
+    public WmoRenderStats LastRenderStats { get; private set; }
 
     public M2RouteDecision? GetDoodadRouteDecision(string normalizedPath)
         => _doodadRouteDecisions.TryGetValue(normalizedPath, out var decision) ? decision : null;
@@ -528,6 +545,7 @@ public class WmoRenderer : ISceneRenderer
         Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
         Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
     {
+        ResetRenderStats();
         ProcessDeferredMaterialTextureLoads();
         EnsureLiquidMeshesUpToDate();
         ProcessDeferredDoodadLoads();
@@ -578,6 +596,7 @@ public class WmoRenderer : ISceneRenderer
             foreach (var gb in _groups)
             {
                 if (!gb.IsVisible) continue;
+                _currentVisibleGroupSubmissions++;
                 var group = _wmo.Groups[gb.GroupIndex];
                 _gl.BindVertexArray(gb.Vao);
 
@@ -655,6 +674,7 @@ public class WmoRenderer : ISceneRenderer
                 var doodadWorld = inst.Transform * modelMatrix;
                 if (renderOpaquePass)
                 {
+                    _currentDoodadSubmissions++;
                     inst.Renderer!.RenderWithTransform(doodadWorld, view, proj, RenderPass.Opaque, 1.0f,
                         fogColor, fogStart, fogEnd, cameraPos,
                         lightDir, lightColor, ambientColor);
@@ -679,6 +699,9 @@ public class WmoRenderer : ISceneRenderer
                 if (liq.GroupIndex >= 0 && liq.GroupIndex < _runtimeVisibleGroups.Length && !_runtimeVisibleGroups[liq.GroupIndex])
                     continue;
 
+                _currentDrawCalls++;
+                _currentLiquidDrawCalls++;
+                _currentVisibleLiquidMeshes++;
                 _gl.Uniform4(_uLiqColor, liq.ColorR, liq.ColorG, liq.ColorB, liq.ColorA);
                 _gl.BindVertexArray(liq.Vao);
                 _gl.DrawElements(PrimitiveType.Triangles, liq.IndexCount, DrawElementsType.UnsignedShort, null);
@@ -699,6 +722,7 @@ public class WmoRenderer : ISceneRenderer
                     continue;
 
                 var doodadWorld = inst.Transform * modelMatrix;
+                _currentDoodadSubmissions++;
                 inst.Renderer.RenderWithTransform(doodadWorld, view, proj, RenderPass.Transparent, 1.0f,
                     fogColor, fogStart, fogEnd, cameraPos,
                     lightDir, lightColor, ambientColor);
@@ -741,6 +765,7 @@ public class WmoRenderer : ISceneRenderer
             {
                 var gb = _groups[groupBufferIndex];
                 if (!gb.IsVisible) continue;
+                _currentVisibleGroupSubmissions++;
                 var group = _wmo.Groups[gb.GroupIndex];
                 _gl.BindVertexArray(gb.Vao);
 
@@ -782,6 +807,26 @@ public class WmoRenderer : ISceneRenderer
         }
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
         _gl.Enable(EnableCap.CullFace);
+        LastRenderStats = new WmoRenderStats(
+            _currentDrawCalls,
+            _currentBatchDrawCalls,
+            _currentGroupFallbackDrawCalls,
+            _currentLiquidDrawCalls,
+            _currentDoodadSubmissions,
+            _currentVisibleGroupSubmissions,
+            _currentVisibleLiquidMeshes);
+    }
+
+    private void ResetRenderStats()
+    {
+        _currentDrawCalls = 0;
+        _currentBatchDrawCalls = 0;
+        _currentGroupFallbackDrawCalls = 0;
+        _currentLiquidDrawCalls = 0;
+        _currentDoodadSubmissions = 0;
+        _currentVisibleGroupSubmissions = 0;
+        _currentVisibleLiquidMeshes = 0;
+        LastRenderStats = default;
     }
 
     private void ApplySurfaceCulling()
@@ -829,6 +874,8 @@ public class WmoRenderer : ISceneRenderer
             float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
             _gl.Uniform4(_uColor, r, g, b, 1.0f);
         }
+        _currentDrawCalls++;
+        _currentBatchDrawCalls++;
         _gl.DrawElements(PrimitiveType.Triangles, batch.IndexCount,
             DrawElementsType.UnsignedShort, (void*)(batch.FirstIndex * sizeof(ushort)));
     }
@@ -840,6 +887,8 @@ public class WmoRenderer : ISceneRenderer
         float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
         float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
         _gl.Uniform4(_uColor, r, g, b, 1.0f);
+        _currentDrawCalls++;
+        _currentGroupFallbackDrawCalls++;
         _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
     }
 

@@ -56,6 +56,14 @@ Keep current contract only. Older notes live in `memory-bank/archive/2026-07-04-
 - First slice adds Runtime Stats process/GC memory counters plus MPQ/world raw-cache byte totals, and caps `WorldAssetManager` raw file cache at 512 MiB by LRU. Live M2/WMO renderer eviction remains unchanged until counters prove renderer residency is the retained owner.
 - Proof level: `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with existing warning noise and 0 errors. Manual staged `4_0_0_11927` Stormwind measurement remains open.
 
+## Render performance and WMO liquid lane
+
+- Spec 093 `093-render-performance-liquid-audit` is active for the slow-frame and WMO-liquid audit.
+- Source audit finding: WMO placements are still submitted per visible placement and per visible group/material batch; MDX "batched" counts mean shared-shader submission, not true GPU instancing; WMO transparent and WMO MLIQ liquid work were previously hidden inside the MDX transparent timing bucket.
+- WMO MLIQ basic GL state already enables alpha blending and disables depth writes, so "opaque liquid" most likely points to the current flat color-only shader/material/order path, not total absence of blending.
+- Runtime Stats now reports WMO visibility/opaque/transparent timing plus WMO batch/fallback/liquid/doodad/group submission counts. Next proof owner is a manual dense-map capture before any batching rewrite or liquid visual correction.
+- Proof level: `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with existing warning noise and 0 errors; focused `WorldRenderOptimizationAdvisorTests` passed `3/3`.
+
 ## Raw audio pattern lane
 
 - Spec 091 `091-raw-audio-unswizzle` is active for investigating structured patterns seen when map-derived WAV payloads are viewed as raw image bytes.

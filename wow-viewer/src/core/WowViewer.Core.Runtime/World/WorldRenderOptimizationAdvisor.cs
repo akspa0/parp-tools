@@ -9,7 +9,9 @@ public static class WorldRenderOptimizationAdvisor
             + stats.MdxOpaqueSubmission.DurationMs
             + stats.MdxTransparentSort.DurationMs
             + stats.MdxTransparentSubmission.DurationMs;
-        double wmoCost = stats.WmoVisibility.DurationMs + stats.WmoSubmission.DurationMs;
+        double wmoCost = stats.WmoVisibility.DurationMs
+            + stats.WmoSubmission.DurationMs
+            + stats.WmoTransparentSubmission.DurationMs;
         double terrainCost = stats.Terrain.DurationMs + stats.Wdl.DurationMs + stats.Liquid.DurationMs;
         double overlayCost = stats.Overlay.DurationMs;
         double assetCost = stats.DeferredAssetLoads.DurationMs;
