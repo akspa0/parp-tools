@@ -2,6 +2,21 @@
 
 Keep this file to last-week truth. Older history moved to `memory-bank/archive/2026-07-04-pre-2026-06-27.md`.
 
+## 2026-07-06
+
+### Spec 094 WDL prior + lattice detailer (V24) implemented end-to-end
+
+- Read and fleshed out the existing spec/plan/data-model/research/tasks Spec Kit artifacts, then verified every architectural guess against real code and real data before implementing: added an "Implementation Amendments" section to `spec.md` (A1-A8) recording the audited C# WDL grid shape (17×17 outer + 16×16 inner int16, MAHO not read), the MPQ-based (not loose-file) WDL resolution path, the actual V18 store schema (`minimap_rgb` 256² uint8, `object_precise_mask` 257² float32), the paired-array V24 store schema, the exact quincunx 33→257 upsample math, and the added V22 dataset audit lane.
+- Built `wow-viewer/tools/wdl-read/WowViewer.Tool.WdlRead` (new C# CLI, added to `WowViewer.slnx`, 0 build errors): `read` wraps `WdlSummaryReader` via `NativeMpqService`; `synth` wraps `WdlWriter.ExtractTileHeightsFromAlpha` with shim-local nearest-non-liquid resampling. Neither existing C# reader nor writer was modified.
+- Verified the "99% match" claim directly: synthetic-vs-real WDL convergence on 8 real Azeroth tiles hit 100% cell agreement within 1.0 world unit on both `3_3_5_12340` and `0_5_3_3368`.
+- Implemented the full Python pipeline under `data-harvester/src/harvester/v24/`: `shim.py` (subprocess bridge), `wdl_reader.py`, `synth_wdl.py`, `merged_wdl_prior.py`, `clean_minimap.py`, `lattice.py` (quincunx geometry), `tiles.py` (V24+V18 joined tile loader), `stage_a.py` (337,485-param residual U-Net), `stage_b.py` (827,681-param conv-deconv), `train_common.py`. Plus `scripts/build_wdl_prior.py`, `inspect_v24_dataset.py`, `clean_minimap.py`, `train_v24_stage_a.py`, `infer_v24_stage_a.py`, `train_v24_stage_b.py`, `infer_v24_stage_b.py`, `validate_v24.py`.
+- Full v24 pytest suite passed: `uv run python -m pytest tests/v24 -m v24 -q` → `30 passed`.
+- Ran two bounded real-data builds (both pass SC-001 coverage ≥ 95%): Northrend on `3_3_5_12340` (100% real WDL coverage) and Azeroth on `0_5_3_3368` (85% real / 15% synthetic).
+- Trained and validated Stage A + Stage B on a rough-terrain (`--min-height-std 15`) 50-tile Northrend set: Stage A real-cell L1 (0.479) < synth-cell L1 (0.736) < `block_reduce` baseline (0.603); Stage B final L1 (1.783) < upsampled-prior L1 (3.563) < `block_reduce+bilinear` baseline (3.247). SC-004 determinism (bit-identical across seeds) and SC-005 hardware envelope (peak VRAM 0.19 GB, max wall-time 0.05 s/tile) both pass cleanly.
+- Also validated on a flat-terrain 50-tile set to characterize a real edge case: SC-001's confidence bound passes at 100%, but SC-003 fails against `block_reduce+bilinear` because flat terrain gives that trivial baseline near-zero error — nothing to beat. Reported honestly rather than hidden; see `docs/architecture/v24-validation-2026-07-06.md`.
+- Found and worked around a real V18 dataset defect during this work: `holes_16` is inverted at the C# source (`AdtTensorPackBuilder.ReadMcrfAndHoles`, flags-based derivation wrong for LK-era MCNKs). Workaround lives in `harvester/v24/tiles.py::_normalize_holes`; the real fix is out of scope for Spec 094 (would touch `WowViewer.Core.IO`).
+- User-directed scope addition: built `scripts/audit_v22_dataset.py`, a C#-grounded V22/V18 signal audit (re-extracts reference signals via the existing `WowViewer.Tool.Harvest extract-unified`, Python only compares). Confirmed V24's actual input signals are sound; the object-mask family's divergence from naive re-extraction is by design (V22's enriched projection beats the reference heuristic). Report: `docs/architecture/v22-dataset-audit-2026-07-06.md`.
+
 ## 2026-07-04
 
 ### Documentation audit and rewrite

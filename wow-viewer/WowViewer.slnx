@@ -44,4 +44,7 @@
   <Folder Name="/tools/mask-validate/">
     <Project Path="tools/mask-validate/WowViewer.Tool.MaskValidate/WowViewer.Tool.MaskValidate.csproj" />
   </Folder>
+  <Folder Name="/tools/wdl-read/">
+    <Project Path="tools/wdl-read/WowViewer.Tool.WdlRead/WowViewer.Tool.WdlRead.csproj" />
+  </Folder>
 </Solution>

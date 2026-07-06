@@ -62,4 +62,5 @@ ignore = ["E501"]
 testpaths = ["tests", "src/harvester"]
 markers = [
     "v23: Spec 089 V23 height predictor tests",
+    "v24: Spec 094 WDL prior + lattice detailer tests",
 ]

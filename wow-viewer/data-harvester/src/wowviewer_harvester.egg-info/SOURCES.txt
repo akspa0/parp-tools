@@ -74,6 +74,14 @@ src/harvester/v23/head.py
 src/harvester/v23/inference.py
 src/harvester/v23/losses.py
 src/harvester/v23/model.py
+src/harvester/v24/__init__.py
+src/harvester/v24/clean_minimap.py
+src/harvester/v24/lattice.py
+src/harvester/v24/merged_wdl_prior.py
+src/harvester/v24/shim.py
+src/harvester/v24/store.py
+src/harvester/v24/synth_wdl.py
+src/harvester/v24/wdl_reader.py
 src/wowviewer_harvester.egg-info/PKG-INFO
 src/wowviewer_harvester.egg-info/SOURCES.txt
 src/wowviewer_harvester.egg-info/dependency_links.txt
@@ -95,6 +103,7 @@ tests/test_inference_object.py
 tests/test_object_library.py
 tests/test_object_library_e2e.py
 tests/test_package_spec077_runpod.py
+tests/test_setup_v23_runpod.py
 tests/test_teacher_prior.py
 tests/test_terrain_augment.py
 tests/test_v22_patched_signals.py
