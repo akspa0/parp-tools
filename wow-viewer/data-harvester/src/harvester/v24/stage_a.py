@@ -131,12 +131,39 @@ def build_input(record: TileRecord, include_synth: bool = True) -> tuple[np.ndar
     return np.stack(channels).astype(np.float32), quincunx.astype(np.float32)
 
 
+def object_gate_at_lattice(object_mask_257: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Object presence at the WDL lattice points (US2 scenario 4 loss gate).
+
+    Samples the 257x257 ``object_precise_mask`` with the A1 rule — outer at
+    (16r, 16c), inner at (16r+8, 16c+8) — the same slicing
+    :func:`lattice.sample_lattice_from_height` uses for heights. Stage A's loss
+    can then skip lattice cells that fall on object roofs, matching the minimap
+    input cleaning. Returns ``(outer_gate (17,17) bool, inner_gate (16,16) bool)``.
+    """
+    mask = np.asarray(object_mask_257, dtype=np.float32)
+    if mask.shape != (257, 257):
+        raise ValueError(f"object_mask must be (257, 257); got {mask.shape}")
+    outer_obj = mask[::16, ::16] > 0.5
+    inner_obj = mask[8::16, 8::16] > 0.5
+    return outer_obj, inner_obj
+
+
 def build_target(record: TileRecord) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Targets + per-cell loss weights (confidence, learned-fill excluded)."""
+    """Targets + per-cell loss weights.
+
+    Weights combine three gates (per FR-012 + US2 scenario 4):
+      * ``wdl_prior_confidence`` (per-cell sample weight),
+      * learned-fill exclusion (``source != 2``),
+      * object-pixel gate — lattice cells that fall on object roofs are
+        excluded from the loss, matching the minimap input cleaning.
+    """
     outer = record.prior_outer / HEIGHT_SCALE
     inner = record.prior_inner / HEIGHT_SCALE
     weight_outer = record.confidence_outer * (record.source_outer != 2)
     weight_inner = record.confidence_inner * (record.source_inner != 2)
+    obj_outer, obj_inner = object_gate_at_lattice(record.object_mask)
+    weight_outer = weight_outer * (~obj_outer).astype(np.float32)
+    weight_inner = weight_inner * (~obj_inner).astype(np.float32)
     return (
         outer.astype(np.float32),
         inner.astype(np.float32),

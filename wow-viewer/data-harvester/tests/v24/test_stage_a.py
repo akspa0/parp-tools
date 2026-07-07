@@ -95,3 +95,47 @@ def test_build_input_channels(synthetic_height):
     assert x_dropped[11].max() == 0.0
     assert x_dropped[12].max() == 0.0
     assert np.abs(q_dropped).max() == 0.0
+
+
+@pytest.mark.v24
+def test_build_target_object_gate_excludes_object_lattice_cells(synthetic_height):
+    """US2 scenario 4: Stage A loss weight is zero on lattice cells that fall on
+    object roofs, and unchanged on non-object cells."""
+    from harvester.v24 import lattice
+    from harvester.v24.tiles import TileRecord
+
+    outer, inner = lattice.sample_lattice_from_height(synthetic_height)
+    # Object mask covering exactly the outer lattice points (16r, 16c) and a
+    # few inner lattice points (16r+8, 16c+8); everything else is terrain.
+    obj = np.zeros((257, 257), np.float32)
+    obj[::16, ::16] = 1.0  # all 17x17 outer lattice points are objects
+    obj[8, 8] = 1.0  # one inner lattice point (16*0+8, 16*0+8)
+
+    record = TileRecord(
+        row=0, v18_row=0, map_name="t", tile_x=0, tile_y=0,
+        audit_empty=False, real_available=False,
+        cleaned_minimap=np.zeros((256, 256, 3), np.float32),
+        alpha=np.zeros((256, 256, 4), np.float32),
+        normal=np.zeros((257, 257, 3), np.float32),
+        mcnr_mask=np.ones((257, 257), np.float32),
+        object_mask=obj,
+        liquid_mask=np.zeros((256, 256), np.float32),
+        holes=np.zeros((16, 16), bool),
+        height=synthetic_height,
+        prior_outer=outer, prior_inner=inner,
+        source_outer=np.zeros((17, 17), np.uint8),  # all real -> confidence kept
+        source_inner=np.zeros((16, 16), np.uint8),
+        confidence_outer=np.ones((17, 17), np.float32),
+        confidence_inner=np.ones((16, 16), np.float32),
+        synth_outer=outer, synth_inner=inner,
+    )
+    _, _, wo, wi = stage_a.build_target(record)
+    # Every outer lattice cell is an object -> all outer weights zeroed.
+    assert wo.max() == 0.0
+    # Inner: only (0,0) is an object -> that cell zeroed, the rest kept at 1.0.
+    assert wi[0, 0] == 0.0
+    assert wi[1, 1] == 1.0
+    # Sanity: the gate helper samples at the A1 lattice points.
+    go, gi = stage_a.object_gate_at_lattice(obj)
+    assert go.all()
+    assert gi[0, 0] and not gi[1, 1]
