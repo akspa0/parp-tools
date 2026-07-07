@@ -69,6 +69,7 @@ def _select_rows(
     limit: int | None,
     min_height_std: float | None = None,
     curation_keepset: set[tuple[str, int]] | None = None,
+    limit_per_map: int | None = None,
 ) -> list[int]:
     rows = list(range(len(index["tile_id"])))
     if maps:
@@ -82,6 +83,16 @@ def _select_rows(
             for r in rows
             if (index["build"][r], int(index["tile_id"][r])) in curation_keepset
         ]
+    if limit_per_map is not None:
+        # Cap each map at `limit_per_map` rows so a small `--limit` corpus spans
+        # multiple terrain styles instead of filling from the first map only.
+        per_map: dict[str, list[int]] = {}
+        for r in rows:
+            per_map.setdefault(index["map"][r], []).append(r)
+        rows = []
+        for m in sorted(per_map):
+            rows.extend(per_map[m][:limit_per_map])
+        rows.sort()
     if limit is not None:
         rows = rows[:limit]
     return rows
@@ -112,7 +123,14 @@ def _build(args: argparse.Namespace) -> int:
         bucket_note = f" buckets={sorted(set(args.difficulty_bucket))}" if args.difficulty_bucket else ""
         print(f"curation: {len(curation_keepset)} kept tiles for build {build_name}{bucket_note}")
 
-    rows = _select_rows(index, args.maps, args.limit, args.min_height_std, curation_keepset)
+    rows = _select_rows(
+        index,
+        args.maps,
+        args.limit,
+        args.min_height_std,
+        curation_keepset,
+        args.limit_per_map,
+    )
     if not rows:
         print("No tiles selected.", file=sys.stderr)
         return 1
@@ -255,6 +273,8 @@ def main() -> int:
     build.add_argument("--disagree-threshold", type=float, default=1.0)
     build.add_argument("--min-height-std", type=float, default=None,
                        help="skip tiles flatter than this height_std (needs index column)")
+    build.add_argument("--limit-per-map", type=int, default=None,
+                       help="cap each map at N tiles so a small --limit corpus spans multiple terrain styles")
     build.add_argument("--curation-manifest", default=None,
                        help="path to a V18 curation kept_tiles.parquet; restricts tiles to "
                             "keep==True (omits mismatched-signal tiles). Preferred over "
