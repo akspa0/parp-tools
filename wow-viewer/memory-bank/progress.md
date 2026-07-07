@@ -4,6 +4,12 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 
 ## 2026-07-07
 
+### Spec 080 world object wireframe correction
+
+- Fixed the active `wow-viewer` world `M2/WMO WF` path so it no longer toggles M2/WMO renderers into line-only mode or implicitly enables hover-only wireframe reveal.
+- World object wireframe now renders a visible overlay for every currently visible WMO/M2 instance over the normal solid object pass; the previous hover reveal path is kept separate.
+- Validation: `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with 0 errors and existing warning noise. Manual world-map viewport proof remains open.
+
 ### Spec 094 V24 curated open-world training run
 
 - Wired V24 into the existing V18 curation manifest: `build_wdl_prior.py` gained `--curation-manifest` + `--difficulty-bucket` (join on `(build, tile_id)`, keep only `keep==True`), replacing the naive `--min-height-std` heuristic with the curated, mismatch-omitted corpus the rest of the model stack already uses. Committed `d6544f1a`. 30/30 v24 pytest still green.

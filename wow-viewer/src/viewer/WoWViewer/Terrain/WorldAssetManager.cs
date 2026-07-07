@@ -197,21 +197,27 @@ public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer =
 
     public void SetObjectWireframeEnabled(bool enabled)
     {
-        if (_objectWireframeEnabled == enabled)
-            return;
-
         _objectWireframeEnabled = enabled;
+        EnsureObjectRenderersUseSolidPass();
+    }
 
+    private void EnsureObjectRenderersUseSolidPass()
+    {
         foreach (IModelRenderer? renderer in _mdxModels.Values)
-            renderer?.ToggleWireframe();
+            EnsureRendererUsesSolidPass(renderer);
 
         foreach (WmoRenderer? renderer in _wmoModels.Values)
-            renderer?.ToggleWireframe();
+            EnsureRendererUsesSolidPass(renderer);
     }
 
     private void ApplyObjectWireframePreference(ISceneRenderer? renderer)
     {
-        if (_objectWireframeEnabled && renderer != null)
+        EnsureRendererUsesSolidPass(renderer);
+    }
+
+    private static void EnsureRendererUsesSolidPass(ISceneRenderer? renderer)
+    {
+        if (renderer is { IsWireframe: true })
             renderer.ToggleWireframe();
     }
 

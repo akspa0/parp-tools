@@ -28,7 +28,8 @@ The goal is to make the UI feel like World of Warcraft's interface: clean, consi
 **And** no duplicate controls should exist in any sub-tab.
 
 **Acceptance**:
-- Bottom bar contains: grid toggles (chunks/tiles/cells), surface overlays (alpha/shadow/MCCV/contours), layer visibility (Base/L1/L2/L3/Holes), liquid toggle, wireframe toggle
+- Bottom bar contains: grid toggles (chunks/tiles/cells), surface overlays (alpha/shadow/MCCV/contours), layer visibility (Base/L1/L2/L3/Holes), liquid toggle, split `Terrain WF` and `M2/WMO WF` toggles
+- `M2/WMO WF` renders visible object wireframes as an overlay over normal solid object rendering; it must not enable hover-only reveal or hide non-hovered objects
 - World > Overlays sub-tab: removed (no grid/overlay/layer controls)
 - Tools > Terrain > Layers sub-tab: removed (no layer/overlay/grid controls)
 - Settings window: removed (fog defaults moved to a proper setting, render quality removed from here)

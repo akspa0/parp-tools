@@ -44,6 +44,7 @@ Keep current contract only. Older notes live in `memory-bank/archive/2026-07-04-
 
 - Spec 080 is now re-centered on `wow-viewer/src/viewer/WoWViewer`; the earlier `gillijimproject_refactor/src/MdxViewer` Phase A work remains legacy source-only context, not the active target.
 - 2026-07-05 small Phase 1 slice: bottom bar now exposes split world wireframes (`Terrain WF`, `M2/WMO WF`), standalone model/WMO wireframe, standalone WMO group bounding boxes, standalone WMO group names, and a Settings launcher.
+- 2026-07-07 correction: world `M2/WMO WF` is overlay-based over normal solid rendering and no longer enables hover-only reveal; non-hovered objects should remain visible. Build proof passed; manual world-map viewport proof remains open.
 - 2026-07-05 small Phase 2/3 follow-up: File -> Settings, Tools -> Settings, bottom-bar Settings, utility popup Settings, and workspace Settings all route to `_showSettingsWindow`; Settings now includes persisted Camera Speed and FOV defaults.
 - World bottom tabs now include `LOD`, with a first-pass World LOD panel for WDL visibility, bounding boxes, PM4 overlay status, loaded tile/chunk counts, and ADT detail-tile budget. This is a destination for future WDL/world-distance facts, not a completed right-sidebar migration.
 - Standalone WMO group names default to visible for all groups; selected/highlighted labels still work.

@@ -9155,7 +9155,9 @@ public class WorldScene : ISceneRenderer
                 },
                 () => frame.OverlayMs = MeasureDurationMs(() =>
                 {
-            if (_wireframeRevealEnabled)
+            if (_assets.ObjectWireframeEnabled)
+                RenderVisibleObjectWireframeOverlay(frame, view, proj, cameraPos, fogColor, fogStart, fogEnd, lighting);
+            else if (_wireframeRevealEnabled)
                 RenderWireframeReveal(view, proj, cameraPos, fogColor, fogStart, fogEnd, lighting);
 
             // Reset GL state before bounding boxes
@@ -9851,13 +9853,12 @@ public class WorldScene : ISceneRenderer
 
     public void SetObjectWireframeEnabled(bool enabled)
     {
-        if (_assets.ObjectWireframeEnabled == enabled && _wireframeRevealEnabled == enabled)
+        if (_assets.ObjectWireframeEnabled == enabled && !_wireframeRevealEnabled)
             return;
 
-        _wireframeRevealEnabled = enabled;
+        _wireframeRevealEnabled = false;
         _assets.SetObjectWireframeEnabled(enabled);
-        if (!enabled)
-            ClearWireframeReveal();
+        ClearWireframeReveal();
     }
 
     public bool IsWireframe => TerrainWireframeEnabled || ObjectWireframeEnabled;
@@ -11301,6 +11302,43 @@ public class WorldScene : ISceneRenderer
                 continue;
 
             renderer.RenderWireframeOverlay(inst.Transform, view, proj,
+                fogColor, fogStart, fogEnd, cameraPos,
+                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+        }
+
+        _gl.DepthMask(true);
+        _gl.DepthFunc(DepthFunction.Lequal);
+    }
+
+    private void RenderVisibleObjectWireframeOverlay(WorldRenderFrame frame, Matrix4x4 view, Matrix4x4 proj,
+        Vector3 cameraPos, Vector3 fogColor, float fogStart, float fogEnd, TerrainLighting lighting)
+    {
+        if (frame.Visibility.VisibleWmos.Count == 0 && frame.Visibility.VisibleMdx.Count == 0)
+            return;
+
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Lequal);
+        _gl.DepthMask(false);
+        _gl.Disable(EnableCap.Blend);
+
+        foreach (VisibleWmoInstance visible in frame.Visibility.VisibleWmos)
+        {
+            WmoRenderer? renderer = ResolveVisibleWmoRenderer(frame, visible.Instance.ModelKey);
+            if (renderer == null)
+                continue;
+
+            renderer.RenderWireframeOverlay(visible.Instance.Transform, view, proj,
+                fogColor, fogStart, fogEnd, cameraPos,
+                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+        }
+
+        foreach (VisibleMdxInstance visible in frame.Visibility.VisibleMdx)
+        {
+            IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
+            if (renderer == null)
+                continue;
+
+            renderer.RenderWireframeOverlay(visible.Instance.Transform, view, proj,
                 fogColor, fogStart, fogEnd, cameraPos,
                 lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
         }
