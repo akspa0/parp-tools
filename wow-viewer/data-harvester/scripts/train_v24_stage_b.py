@@ -19,7 +19,25 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from harvester.v24 import stage_a, stage_b, train_common  # noqa: E402
-from harvester.v24.tiles import HEIGHT_SCALE, RESIDUAL_SCALE, TileSource  # noqa: E402
+from harvester.v24.tiles import (  # noqa: E402
+    HEIGHT_SCALE,
+    RESIDUAL_SCALE,
+    MultiTileSource,
+    TileSource,
+)
+
+
+def _build_source(v24_stores: list[str], v18_stores: list[str] | None) -> TileSource | MultiTileSource:
+    if v18_stores and len(v18_stores) != len(v24_stores):
+        raise ValueError(
+            f"--v18-store count ({len(v18_stores)}) must match --v24-store count ({len(v24_stores)}) when given"
+        )
+    if len(v24_stores) == 1:
+        return TileSource(v24_stores[0], (v18_stores[0] if v18_stores else None))
+    pairs = [
+        (v24, v18_stores[i] if v18_stores else None) for i, v24 in enumerate(v24_stores)
+    ]
+    return MultiTileSource(pairs)
 
 
 def _stage_a_priors(records, checkpoint_path: str | None, device: torch.device):
@@ -67,13 +85,15 @@ def _load_tensors(records, priors):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--v24-store", required=True)
-    parser.add_argument("--v18-store", default=None)
+    parser.add_argument("--v24-store", required=True, nargs="+",
+                         help="one or more V24 stores; multiple stores (e.g. different builds) are concatenated")
+    parser.add_argument("--v18-store", default=None, nargs="*",
+                         help="matching V18 store overrides, one per --v24-store (omit to use each store's own v18_store_path attr)")
     parser.add_argument("--stage-a-checkpoint", default=None,
                         help="omit to train against the merged prior directly")
     parser.add_argument("--output", required=True)
     parser.add_argument("--epochs", type=int, default=50)
-    parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--batch-size", type=int, default=24)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=94)
     parser.add_argument("--val-fraction", type=float, default=0.2)
@@ -83,15 +103,28 @@ def main() -> int:
                         help="print per-batch progress every N batches (1 = every batch)")
     parser.add_argument("--patience", type=int, default=0,
                         help="early-stop after N epochs without val improvement (0 = run all epochs)")
+    parser.add_argument("--cudnn-benchmark", dest="cudnn_benchmark", action="store_true", default=True,
+                        help="fast cuDNN kernel autotune + TF32 for training (default on; no bearing on inference determinism)")
+    parser.add_argument("--no-cudnn-benchmark", dest="cudnn_benchmark", action="store_false")
+    parser.add_argument("--gpu-resident-data", dest="gpu_resident_data", action="store_true", default=True,
+                        help="keep the whole train/val tensor set resident on the GPU when it fits (default on)")
+    parser.add_argument("--no-gpu-resident-data", dest="gpu_resident_data", action="store_false")
+    parser.add_argument("--amp-dtype", choices=["fp16", "bf16"], default="fp16")
+    parser.add_argument("--autotune-batch-size", action="store_true", default=False,
+                        help="probe --autotune-batch-candidates and pick the largest that fits before training")
+    parser.add_argument("--autotune-batch-candidates", nargs="+", type=int,
+                        default=[2, 4, 8, 12, 16, 24, 32, 48, 64, 96])
+    parser.add_argument("--autotune-safety-factor", type=float, default=0.85)
     args = parser.parse_args()
 
     train_common.set_determinism(args.seed, strict=False)
+    train_common.configure_perf(args.cudnn_benchmark)
     device = train_common.pick_device(args.device)
     run_dir = Path(args.output)
     logger = train_common.RunLogger(run_dir)
     print(f"stage B training: device={device} run_dir={run_dir}")
 
-    source = TileSource(args.v24_store, args.v18_store)
+    source = _build_source(args.v24_store, args.v18_store)
     rows = source.usable_rows()
     if args.limit:
         rows = rows[: args.limit]
@@ -119,9 +152,14 @@ def main() -> int:
     vx, vtarget, vvalid, vprior_up = _load_tensors(val_records, val_priors)
     print(f"loaded tensors in {time.time() - started:.1f}s", flush=True)
 
+    if args.gpu_resident_data:
+        x, target, valid = train_common.gpu_resident((x, target, valid), device)
+        vx, vtarget, vvalid = train_common.gpu_resident((vx, vtarget, vvalid), device)
+        print(f"train/val tensors resident={x.is_cuda if device.type == 'cuda' else False}", flush=True)
+
     # Baselines in world units on the validation split (SC-003).
     val_height = np.stack([r.height for r in val_records])
-    val_valid_np = vvalid.numpy() > 0.5
+    val_valid_np = vvalid.cpu().numpy() > 0.5
     prior_l1 = float(np.abs((val_height - vprior_up))[val_valid_np].mean())
     from harvester.v24 import lattice  # local import to keep top tidy
 
@@ -137,9 +175,36 @@ def main() -> int:
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-    scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
+    amp_dtype = torch.bfloat16 if args.amp_dtype == "bf16" else torch.float16
+    scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda" and amp_dtype == torch.float16)
 
     n = x.shape[0]
+
+    if args.autotune_batch_size:
+        candidates = [c for c in sorted(args.autotune_batch_candidates) if c <= n]
+        if candidates:
+            snapshot = train_common.snapshot_state(model, optimizer)
+
+            def _try_step(bs: int) -> None:
+                idx = torch.randperm(n)[:bs].to(x.device)
+                xb = x[idx].to(device, non_blocking=True)
+                tb = target[idx].to(device, non_blocking=True)
+                vb = valid[idx].to(device, non_blocking=True)
+                optimizer.zero_grad(set_to_none=True)
+                with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=device.type == "cuda"):
+                    pred = model(xb)
+                    loss = stage_b.gated_l1(pred, tb, vb)
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+
+            args.batch_size = train_common.autotune_batch_size(
+                device, candidates, _try_step, safety_fraction=args.autotune_safety_factor
+            )
+            train_common.restore_state(model, optimizer, snapshot)
+            scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda" and amp_dtype == torch.float16)
+            print(f"autotune selected batch_size={args.batch_size}", flush=True)
+
     n_batches = (n + args.batch_size - 1) // args.batch_size
     generator = torch.Generator().manual_seed(args.seed)
     best_val = float("inf")
@@ -151,13 +216,13 @@ def main() -> int:
         perm = torch.randperm(n, generator=generator)
         epoch_loss, batches = 0.0, 0
         for start_idx in range(0, n, args.batch_size):
-            idx = perm[start_idx : start_idx + args.batch_size]
-            xb = x[idx].to(device)
-            tb = target[idx].to(device)
-            vb = valid[idx].to(device)
+            idx = perm[start_idx : start_idx + args.batch_size].to(x.device)
+            xb = x[idx].to(device, non_blocking=True)
+            tb = target[idx].to(device, non_blocking=True)
+            vb = valid[idx].to(device, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
-            with torch.amp.autocast("cuda", dtype=torch.float16, enabled=device.type == "cuda"):
+            with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=device.type == "cuda"):
                 pred = model(xb)
                 loss = stage_b.gated_l1(pred, tb, vb)
             scaler.scale(loss).backward()
@@ -182,13 +247,15 @@ def main() -> int:
         with torch.no_grad():
             val_pred = []
             for start_idx in range(0, vx.shape[0], args.batch_size):
-                batch = vx[start_idx : start_idx + args.batch_size].to(device)
-                val_pred.append(model(batch).cpu())
+                batch = vx[start_idx : start_idx + args.batch_size].to(device, non_blocking=True)
+                val_pred.append(model(batch))
             val_pred = torch.cat(val_pred)
+        # vtarget/vvalid live wherever gpu_resident() put them; keep val_pred on
+        # the same device for the loss, then drop to CPU/numpy for the world-unit metric.
         val_loss = stage_b.gated_l1(val_pred, vtarget, vvalid).item() * RESIDUAL_SCALE
 
         # Final-height L1 in world units on valid pixels.
-        final = vprior_up + val_pred.numpy() * RESIDUAL_SCALE
+        final = vprior_up + val_pred.cpu().numpy() * RESIDUAL_SCALE
         final_l1 = float(np.abs(val_height - final)[val_valid_np].mean())
 
         train_loss_world = epoch_loss / max(1, batches) * RESIDUAL_SCALE

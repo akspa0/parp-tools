@@ -18,10 +18,23 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from harvester.v24 import stage_a, train_common  # noqa: E402
-from harvester.v24.tiles import HEIGHT_SCALE, TileSource  # noqa: E402
+from harvester.v24.tiles import HEIGHT_SCALE, MultiTileSource, TileSource  # noqa: E402
 
 
-def _load_tensors(source: TileSource, rows: list[int], label: str = "load"):
+def _build_source(v24_stores: list[str], v18_stores: list[str] | None) -> TileSource | MultiTileSource:
+    if v18_stores and len(v18_stores) != len(v24_stores):
+        raise ValueError(
+            f"--v18-store count ({len(v18_stores)}) must match --v24-store count ({len(v24_stores)}) when given"
+        )
+    if len(v24_stores) == 1:
+        return TileSource(v24_stores[0], (v18_stores[0] if v18_stores else None))
+    pairs = [
+        (v24, v18_stores[i] if v18_stores else None) for i, v24 in enumerate(v24_stores)
+    ]
+    return MultiTileSource(pairs)
+
+
+def _load_tensors(source: TileSource | MultiTileSource, rows: list[int], label: str = "load"):
     inputs, quincunxes, t_outer, t_inner = [], [], [], []
     w_outer, w_inner, s_outer, s_inner = [], [], [], []
     n = len(rows)
@@ -64,6 +77,7 @@ def _drop_synth(
     x: torch.Tensor, q: torch.Tensor, drop_mask: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Zero the synth channel (11), presence flag (12), and quincunx anchor."""
+    drop_mask = drop_mask.to(x.device)
     x_out = x.clone()
     x_out[drop_mask, 11] = 0.0
     x_out[drop_mask, 12] = 0.0
@@ -81,7 +95,9 @@ def _eval_split(model, x, q, to, ti, wo, wi, so, si, device, include_synth: bool
         else:
             xb, qb = _drop_synth(x, q, torch.ones(x.shape[0], dtype=torch.bool))
         po, pi = model(xb.to(device), qb.to(device))
-        po, pi = po.cpu(), pi.cpu()
+        # to/wo/etc. may be GPU-resident (train_common.gpu_resident) or CPU;
+        # match whichever device val_data actually lives on.
+        po, pi = po.to(to.device), pi.to(to.device)
 
     loss = stage_a.weighted_l1(po, pi, to, ti, wo, wi).item() * HEIGHT_SCALE
 
@@ -99,11 +115,13 @@ def _eval_split(model, x, q, to, ti, wo, wi, so, si, device, include_synth: bool
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--v24-store", required=True)
-    parser.add_argument("--v18-store", default=None)
+    parser.add_argument("--v24-store", required=True, nargs="+",
+                         help="one or more V24 stores; multiple stores (e.g. different builds) are concatenated")
+    parser.add_argument("--v18-store", default=None, nargs="*",
+                         help="matching V18 store overrides, one per --v24-store (omit to use each store's own v18_store_path attr)")
     parser.add_argument("--output", required=True, help="run directory (created)")
     parser.add_argument("--epochs", type=int, default=50)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=94)
     parser.add_argument("--val-fraction", type=float, default=0.2)
@@ -114,15 +132,28 @@ def main() -> int:
                         help="print per-batch progress every N batches (1 = every batch)")
     parser.add_argument("--patience", type=int, default=0,
                         help="early-stop after N epochs without val improvement (0 = run all epochs)")
+    parser.add_argument("--cudnn-benchmark", dest="cudnn_benchmark", action="store_true", default=True,
+                        help="fast cuDNN kernel autotune + TF32 for training (default on; no bearing on inference determinism)")
+    parser.add_argument("--no-cudnn-benchmark", dest="cudnn_benchmark", action="store_false")
+    parser.add_argument("--gpu-resident-data", dest="gpu_resident_data", action="store_true", default=True,
+                        help="keep the whole train/val tensor set resident on the GPU when it fits (default on)")
+    parser.add_argument("--no-gpu-resident-data", dest="gpu_resident_data", action="store_false")
+    parser.add_argument("--amp-dtype", choices=["fp16", "bf16"], default="fp16")
+    parser.add_argument("--autotune-batch-size", action="store_true", default=False,
+                        help="probe --autotune-batch-candidates and pick the largest that fits before training")
+    parser.add_argument("--autotune-batch-candidates", nargs="+", type=int,
+                        default=[16, 32, 64, 96, 128, 192, 256, 384, 512])
+    parser.add_argument("--autotune-safety-factor", type=float, default=0.85)
     args = parser.parse_args()
 
     train_common.set_determinism(args.seed, strict=False)
+    train_common.configure_perf(args.cudnn_benchmark)
     device = train_common.pick_device(args.device)
     run_dir = Path(args.output)
     logger = train_common.RunLogger(run_dir)
     print(f"stage A training: device={device} run_dir={run_dir}")
 
-    source = TileSource(args.v24_store, args.v18_store)
+    source = _build_source(args.v24_store, args.v18_store)
     rows = source.usable_rows()
     if args.limit:
         rows = rows[: args.limit]
@@ -134,6 +165,11 @@ def main() -> int:
     val_data = _load_tensors(source, val_rows, label="load val")
     print(f"loaded tensors in {time.time() - started_load:.1f}s", flush=True)
 
+    if args.gpu_resident_data:
+        train_data = train_common.gpu_resident(train_data, device)
+        val_data = train_common.gpu_resident(val_data, device)
+        print(f"train/val tensors resident={train_data[0].is_cuda if device.type == 'cuda' else False}", flush=True)
+
     model = stage_a.StageAModel().to(device)
     params = stage_a.parameter_count(model)
     assert params <= 1_000_000, f"Stage A exceeds 1M params: {params}"
@@ -141,10 +177,39 @@ def main() -> int:
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-    scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
+    amp_dtype = torch.bfloat16 if args.amp_dtype == "bf16" else torch.float16
+    scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda" and amp_dtype == torch.float16)
 
     x, q, to, ti, wo, wi, so, si = train_data
     n = x.shape[0]
+
+    if args.autotune_batch_size:
+        candidates = [c for c in sorted(args.autotune_batch_candidates) if c <= n]
+        if candidates:
+            snapshot = train_common.snapshot_state(model, optimizer)
+
+            def _try_step(bs: int) -> None:
+                idx = torch.randperm(n)[:bs].to(x.device)
+                drop = torch.rand(len(idx)) < args.synth_dropout
+                xb, qb = _drop_synth(x[idx], q[idx], drop)
+                xb, qb = xb.to(device, non_blocking=True), qb.to(device, non_blocking=True)
+                tob, tib = to[idx].to(device, non_blocking=True), ti[idx].to(device, non_blocking=True)
+                wob, wib = wo[idx].to(device, non_blocking=True), wi[idx].to(device, non_blocking=True)
+                optimizer.zero_grad(set_to_none=True)
+                with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=device.type == "cuda"):
+                    po, pi = model(xb, qb)
+                    loss = stage_a.weighted_l1(po, pi, tob, tib, wob, wib)
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+
+            args.batch_size = train_common.autotune_batch_size(
+                device, candidates, _try_step, safety_fraction=args.autotune_safety_factor
+            )
+            train_common.restore_state(model, optimizer, snapshot)
+            scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda" and amp_dtype == torch.float16)
+            print(f"autotune selected batch_size={args.batch_size}", flush=True)
+
     n_batches = (n + args.batch_size - 1) // args.batch_size
     generator = torch.Generator().manual_seed(args.seed)
     best_val = float("inf")
@@ -156,15 +221,15 @@ def main() -> int:
         perm = torch.randperm(n, generator=generator)
         epoch_loss, batches = 0.0, 0
         for start in range(0, n, args.batch_size):
-            idx = perm[start : start + args.batch_size]
+            idx = perm[start : start + args.batch_size].to(x.device)
             drop = torch.rand(len(idx), generator=generator) < args.synth_dropout
             xb, qb = _drop_synth(x[idx], q[idx], drop)
-            xb, qb = xb.to(device), qb.to(device)
-            tob, tib = to[idx].to(device), ti[idx].to(device)
-            wob, wib = wo[idx].to(device), wi[idx].to(device)
+            xb, qb = xb.to(device, non_blocking=True), qb.to(device, non_blocking=True)
+            tob, tib = to[idx].to(device, non_blocking=True), ti[idx].to(device, non_blocking=True)
+            wob, wib = wo[idx].to(device, non_blocking=True), wi[idx].to(device, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
-            with torch.amp.autocast("cuda", dtype=torch.float16, enabled=device.type == "cuda"):
+            with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=device.type == "cuda"):
                 po, pi = model(xb, qb)
                 loss = stage_a.weighted_l1(po, pi, tob, tib, wob, wib)
             scaler.scale(loss).backward()

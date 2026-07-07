@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import random
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import torch
@@ -35,6 +36,96 @@ def pick_device(requested: str | None) -> torch.device:
     if requested:
         return torch.device(requested)
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def configure_perf(fast: bool = True) -> None:
+    """Enable fast cuDNN kernel selection + TF32 matmul for training throughput.
+
+    ``set_determinism`` forces ``cudnn.benchmark=False`` and asks for
+    deterministic algorithms (warn-only) because inference has a real bit-
+    identical requirement (FR-014/FR-019). Training has no such requirement,
+    so call this *after* ``set_determinism`` to undo those restrictions and
+    let cuDNN autotune the fastest conv algorithm for the fixed 64x64 /
+    257x257 tile shapes, and let matmul/conv use TF32 on Ampere+.
+    """
+    if not fast:
+        return
+    torch.backends.cudnn.benchmark = True
+    torch.use_deterministic_algorithms(False)
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
+
+def gpu_resident(
+    tensors: tuple[torch.Tensor, ...], device: torch.device, safety_fraction: float = 0.5
+) -> tuple[torch.Tensor, ...]:
+    """Move a whole tensor tuple onto ``device`` if it comfortably fits in free VRAM.
+
+    Keeping the full train/val set resident on the GPU turns each batch's
+    ``.to(device)`` into a no-op instead of a host->device copy every step.
+    When it does not fit, tensors are pinned instead so the (still necessary)
+    per-batch transfer is a fast async copy.
+    """
+    if device.type != "cuda":
+        return tensors
+    total_bytes = sum(t.element_size() * t.nelement() for t in tensors)
+    free_bytes, _ = torch.cuda.mem_get_info()
+    if total_bytes <= free_bytes * safety_fraction:
+        return tuple(t.to(device) for t in tensors)
+    return tuple(t.pin_memory() for t in tensors)
+
+
+def snapshot_state(model: torch.nn.Module, optimizer: torch.optim.Optimizer) -> tuple[dict, dict]:
+    return (
+        copy.deepcopy(model.state_dict()),
+        copy.deepcopy(optimizer.state_dict()),
+    )
+
+
+def restore_state(
+    model: torch.nn.Module, optimizer: torch.optim.Optimizer, snapshot: tuple[dict, dict]
+) -> None:
+    model_state, optimizer_state = snapshot
+    model.load_state_dict(model_state)
+    optimizer.load_state_dict(optimizer_state)
+
+
+def autotune_batch_size(
+    device: torch.device,
+    candidates: list[int],
+    try_step: Callable[[int], None],
+    safety_fraction: float = 0.85,
+) -> int:
+    """Probe ascending batch sizes with one real train step; return the largest
+    that completes without CUDA OOM and under ``safety_fraction`` of total VRAM.
+
+    ``try_step(bs)`` must run a full forward+backward+optimizer.step at batch
+    size ``bs`` (the caller owns snapshotting/restoring model+optimizer state
+    around the probe so the few extra gradient steps do not leak into the
+    real training run). Falls back to the smallest candidate on CPU or if
+    every candidate OOMs.
+    """
+    if device.type != "cuda" or not candidates:
+        return candidates[0] if candidates else 1
+    _, total_bytes = torch.cuda.mem_get_info()
+    best = candidates[0]
+    for bs in candidates:
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        try:
+            try_step(bs)
+            torch.cuda.synchronize()
+        except torch.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            break
+        peak = torch.cuda.max_memory_allocated()
+        if peak > safety_fraction * total_bytes:
+            best = bs
+            break
+        best = bs
+    torch.cuda.empty_cache()
+    return best
 
 
 def split_rows(rows: list[int], val_fraction: float, seed: int) -> tuple[list[int], list[int]]:

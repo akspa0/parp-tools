@@ -124,6 +124,49 @@ class TileSource:
         )
 
 
+class MultiTileSource:
+    """Concatenates multiple (V24, V18) store pairs into one flat, indexable corpus.
+
+    Lets a training run span builds that only exist as separate V24 stores
+    (e.g. an 0.5.3 alpha corpus and a 3.3.5 curated corpus) without merging
+    the underlying Zarr data. Row indices are global offsets into the
+    concatenation, so callers that only ever see plain ints (train/val
+    splitting, shuffling) need no changes.
+    """
+
+    def __init__(self, pairs: list[tuple[Path | str, Path | str | None]]):
+        if not pairs:
+            raise ValueError("MultiTileSource requires at least one (v24, v18) pair")
+        self.sources = [TileSource(v24, v18) for v24, v18 in pairs]
+        self._offsets: list[int] = []
+        offset = 0
+        for source in self.sources:
+            self._offsets.append(offset)
+            offset += len(source)
+        self._total = offset
+
+    def __len__(self) -> int:
+        return self._total
+
+    def _locate(self, global_row: int) -> tuple[TileSource, int]:
+        for i in range(len(self.sources) - 1, -1, -1):
+            if global_row >= self._offsets[i]:
+                return self.sources[i], global_row - self._offsets[i]
+        raise IndexError(global_row)
+
+    def usable_rows(self) -> list[int]:
+        rows: list[int] = []
+        for offset, source in zip(self._offsets, self.sources):
+            rows.extend(offset + r for r in source.usable_rows())
+        return rows
+
+    def load(self, global_row: int) -> TileRecord:
+        source, local_row = self._locate(global_row)
+        record = source.load(local_row)
+        record.row = global_row
+        return record
+
+
 def _normalize_holes(holes_16: np.ndarray) -> np.ndarray:
     """Normalize the stored hole-mask polarity to True = hole.
 
