@@ -2,6 +2,15 @@
 
 Keep this file to last-week truth. Older history moved to `memory-bank/archive/2026-07-04-pre-2026-06-27.md`.
 
+## 2026-07-07
+
+### Spec 094 V24 curated open-world training run
+
+- Wired V24 into the existing V18 curation manifest: `build_wdl_prior.py` gained `--curation-manifest` + `--difficulty-bucket` (join on `(build, tile_id)`, keep only `keep==True`), replacing the naive `--min-height-std` heuristic with the curated, mismatch-omitted corpus the rest of the model stack already uses. Committed `d6544f1a`. 30/30 v24 pytest still green.
+- Ran the full pipeline on the curated open-world corpus for `3_3_5_12340`: 2,011 kept tiles across Azeroth (488), Kalimdor (741), Northrend (423), Expansion01 (359), all `hard`/`pathological` buckets, 76% real / 24% synthetic WDL coverage, 1,609 train / 402 val, 30 epochs/stage.
+- Stage A: real-cell L1 0.412 < synth-cell L1 6.54 < `block_reduce` baseline 1.76 (SC-002 PASS). Stage B: final L1 **0.649** < upsampled-prior 4.31 < `block_reduce+bilinear` 4.20 — beats both no-learning baselines by ~6.5× across four terrain-distinct continents (SC-003 PASS). SC-004 determinism + SC-005 hardware envelope (peak VRAM 0.187 GB, max 0.111 s/tile) PASS. SC-001 confidence bound FAIL (75.9% vs 80%) — the same documented rough-terrain sampling-phase disagreement, a data-quality signal not a pipeline defect.
+- This is the reliable, terrain-generalizable proof (vs. the 50-tile Northrend bounded pipeline proof from 2026-07-06). Report: `output/v24_validation/v24_openworld_curated_20260706/report.json`; updated `docs/architecture/v24-validation-2026-07-06.md` with the curated run section + reproduce commands.
+
 ## 2026-07-06
 
 ### Spec 094 WDL prior + lattice detailer (V24) implemented end-to-end

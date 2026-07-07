@@ -95,7 +95,68 @@ headroom under the "6 GB consumer GPU" target hardware.
   sampling-phase disagreement between the client WDL and our synthetic
   extractor at the default 1.0-unit threshold, not a pipeline defect.
 
-## Reproduce
+## Curated open-world run (2,011 tiles, 4 maps) — 2026-07-06/07
+
+The 50-tile Northrend-only runs above are a *pipeline* proof. For a
+*reliable, terrain-generalizable* model, V24 now consumes the existing V18
+curation manifest (`kept_tiles.parquet` from `build_v18_curation_manifest`),
+which already omits mismatched-signal tiles (blank minimap/normals,
+normal/minimap edge mismatch, WMO loss wipeout, insufficient trainable
+terrain) and buckets survivors by difficulty. `build_wdl_prior.py` gained
+`--curation-manifest` and `--difficulty-bucket` (join on `(build, tile_id)`,
+keep only `keep == True`).
+
+This run trains on the curated open-world corpus for `3_3_5_12340`:
+Azeroth (488), Kalimdor (741), Northrend (423), Expansion01 (359) = 2,011
+kept tiles, all `hard`/`pathological` buckets, 76% real / 24% synthetic WDL
+coverage. 1,609 train / 402 val, 30 epochs each stage.
+
+| Check | Result |
+|---|---|
+| SC-001 coverage | PASS (100% real+synthetic of non-empty) |
+| SC-001 confidence bound | FAIL (75.9% vs 80% — same documented rough-terrain sampling-phase disagreement; data-quality signal, not a pipeline defect) |
+| SC-002 Stage A beats `block_reduce` | PASS — cheat L1 **1.652** < baseline 1.760; real-cell L1 **0.412** < synth-cell L1 6.540 |
+| SC-003 Stage B beats prior + `block_reduce+bilinear` | PASS — final L1 **0.649** < upsampled-prior 4.307 < block_reduce+bilinear 4.199 (~6.5× better than both) |
+| SC-004 determinism | PASS (bit-identical across seeds) |
+| SC-005 hardware envelope | PASS — peak VRAM 0.187 GB, max wall 0.111 s/tile |
+
+This is a substantially stronger and more generalizable result than the
+50-tile bounded run: Stage B beats both no-learning baselines by a wide
+margin across four terrain-distinct continents, and Stage A's real-cell L1
+(0.41) is far below its synth-cell L1 (6.54), confirming it learned the
+real-WDL correlation rather than memorizing the synthetic pattern. The one
+remaining `all_pass=false` is the same SC-001 cell-level confidence bound
+that is terrain-dependent by construction at the default 1.0-unit
+`disagree_threshold`.
+
+### Reproduce (curated open-world)
+
+```bash
+cd wow-viewer/data-harvester
+uv run python scripts/build_wdl_prior.py build \
+  --v18-store ../output/datasets/v18/3_3_5_12340.zarr \
+  --staged-client ../../output/tmp/wowarchive-clients/3_3_5_12340 \
+  --output ../output/datasets/v24/3_3_5_12340_openworld_curated.zarr \
+  --curation-manifest ../output/datasets/v18/curation/v18_focus_terrain_all_v1/kept_tiles.parquet \
+  --maps Azeroth Kalimdor Northrend Expansion01
+
+uv run python scripts/train_v24_stage_a.py \
+  --v24-store ../output/datasets/v24/3_3_5_12340_openworld_curated.zarr \
+  --output ../output/v24_validation/v24_openworld_curated_20260706 --epochs 30
+
+uv run python scripts/train_v24_stage_b.py \
+  --v24-store ../output/datasets/v24/3_3_5_12340_openworld_curated.zarr \
+  --stage-a-checkpoint ../output/v24_validation/v24_openworld_curated_20260706/stage_a.pt \
+  --output ../output/v24_validation/v24_openworld_curated_20260706 --epochs 30
+
+uv run python scripts/validate_v24.py \
+  --v24-store ../output/datasets/v24/3_3_5_12340_openworld_curated.zarr \
+  --stage-a-checkpoint ../output/v24_validation/v24_openworld_curated_20260706/stage_a.pt \
+  --stage-b-checkpoint ../output/v24_validation/v24_openworld_curated_20260706/stage_b.pt \
+  --run-id v24_openworld_curated_20260706
+```
+
+## Reproduce (bounded 50-tile Northrend rough-50)
 
 ```bash
 cd wow-viewer/data-harvester
