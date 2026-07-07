@@ -79,6 +79,10 @@ def main() -> int:
     parser.add_argument("--val-fraction", type=float, default=0.2)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--log-interval", type=int, default=1,
+                        help="print per-batch progress every N batches (1 = every batch)")
+    parser.add_argument("--patience", type=int, default=0,
+                        help="early-stop after N epochs without val improvement (0 = run all epochs)")
     args = parser.parse_args()
 
     train_common.set_determinism(args.seed, strict=False)
@@ -95,13 +99,25 @@ def main() -> int:
     print(f"tiles: {len(rows)} usable -> {len(train_rows)} train / {len(val_rows)} val")
 
     started = time.time()
-    train_records = [source.load(r) for r in train_rows]
-    val_records = [source.load(r) for r in val_rows]
+
+    def _load_records(rows, label):
+        out = []
+        n = len(rows)
+        step = max(1, n // 20)
+        for i, r in enumerate(rows):
+            out.append(source.load(r))
+            if (i + 1) % step == 0 or (i + 1) == n:
+                el = time.time() - started
+                print(f"[{label}] {i + 1}/{n} tiles ({100.0 * (i + 1) / n:.0f}%) elapsed={el:.1f}s", flush=True)
+        return out
+
+    train_records = _load_records(train_rows, "load train")
+    val_records = _load_records(val_rows, "load val")
     train_priors = _stage_a_priors(train_records, args.stage_a_checkpoint, device)
     val_priors = _stage_a_priors(val_records, args.stage_a_checkpoint, device)
     x, target, valid, _ = _load_tensors(train_records, train_priors)
     vx, vtarget, vvalid, vprior_up = _load_tensors(val_records, val_priors)
-    print(f"loaded tensors in {time.time() - started:.1f}s")
+    print(f"loaded tensors in {time.time() - started:.1f}s", flush=True)
 
     # Baselines in world units on the validation split (SC-003).
     val_height = np.stack([r.height for r in val_records])
@@ -124,8 +140,11 @@ def main() -> int:
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
 
     n = x.shape[0]
+    n_batches = (n + args.batch_size - 1) // args.batch_size
     generator = torch.Generator().manual_seed(args.seed)
     best_val = float("inf")
+    stopper = train_common.EarlyStopping(patience=args.patience, min_delta=1e-4)
+    epoch_started = time.time()
 
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -147,6 +166,16 @@ def main() -> int:
             epoch_loss += loss.item()
             batches += 1
 
+            if batches % args.log_interval == 0 or start_idx + args.batch_size >= n:
+                elapsed = time.time() - epoch_started
+                pct = 100.0 * batches / n_batches
+                eta = elapsed / batches * (n_batches - batches) if batches else 0.0
+                print(
+                    f"epoch {epoch} batch {batches}/{n_batches} ({pct:.0f}%) "
+                    f"loss={loss.item() * RESIDUAL_SCALE:.4f} elapsed={elapsed:.1f}s eta={eta:.1f}s",
+                    flush=True,
+                )
+
         scheduler.step()
 
         model.eval()
@@ -162,9 +191,10 @@ def main() -> int:
         final = vprior_up + val_pred.numpy() * RESIDUAL_SCALE
         final_l1 = float(np.abs(val_height - final)[val_valid_np].mean())
 
+        train_loss_world = epoch_loss / max(1, batches) * RESIDUAL_SCALE
         logger.log_epoch(
             epoch,
-            train_loss=epoch_loss / max(1, batches) * RESIDUAL_SCALE,
+            train_loss=train_loss_world,
             val_residual_l1=val_loss,
             val_final_l1=final_l1,
             prior_l1=prior_l1,
@@ -187,21 +217,40 @@ def main() -> int:
                 run_dir / "stage_b.pt",
             )
 
+        if stopper.step(epoch, final_l1, train_loss_world):
+            print(
+                f"early stopping at epoch {epoch}: no val improvement for "
+                f"{args.patience} epochs (best val_final_l1={stopper.best:.4f} @ epoch {stopper.best_epoch})"
+                + (" [overtraining detected: train falling, val rising]" if stopper.overtraining else ""),
+                flush=True,
+            )
+            break
+
     metrics = {
         "params": params,
         "best_val_final_l1": best_val,
+        "best_epoch": stopper.best_epoch,
+        "epochs_run": epoch,
+        "early_stopped": stopper.stopped,
+        "overtraining_detected": stopper.overtraining,
         "upsampled_prior_l1": prior_l1,
         "block_reduce_bilinear_l1": block_reduce_l1,
         "train_tiles": len(train_rows),
         "val_tiles": len(val_rows),
         "epochs": args.epochs,
+        "patience": args.patience,
         "peak_vram_gb": train_common.peak_vram_gb(),
     }
     logger.write_json("stage_b_metrics.json", metrics)
     logger.close()
     print(
-        f"done: best_val_final_l1={best_val:.4f} vs prior={prior_l1:.4f} "
-        f"vs block_reduce={block_reduce_l1:.4f}; checkpoint={run_dir / 'stage_b.pt'}"
+        f"done: best_val_final_l1={best_val:.4f} @ epoch {stopper.best_epoch} "
+        f"(ran {epoch}/{args.epochs} epochs"
+        + (", early stopped" if stopper.stopped else "")
+        + (", overtraining detected" if stopper.overtraining else "")
+        + f") vs prior={prior_l1:.4f} vs block_reduce={block_reduce_l1:.4f}; "
+        f"checkpoint={run_dir / 'stage_b.pt'}",
+        flush=True,
     )
     return 0
 

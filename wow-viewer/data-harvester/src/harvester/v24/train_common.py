@@ -74,6 +74,47 @@ class RunLogger:
         self._history.close()
 
 
+class EarlyStopping:
+    """Stop training when validation loss stops improving (overtraining guard).
+
+    Tracks the best validation loss and the epoch it was set. After ``patience``
+    epochs without improvement (``val_loss < best - min_delta``), ``stopped`` is
+    set and the trainer should halt. Also flags ``overtraining`` when the
+    train/val gap widens in the classic overfit direction: train loss keeps
+    falling while val loss rises. ``patience <= 0`` disables early stopping
+    (the run goes the full ``--epochs``).
+    """
+
+    def __init__(self, patience: int = 0, min_delta: float = 0.0):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.best = float("inf")
+        self.best_epoch = 0
+        self.epochs_since_best = 0
+        self.stopped = False
+        self.overtraining = False
+        self._prev_train: float | None = None
+        self._prev_val: float | None = None
+
+    def step(self, epoch: int, val_loss: float, train_loss: float | None = None) -> bool:
+        if val_loss < self.best - self.min_delta:
+            self.best = val_loss
+            self.best_epoch = epoch
+            self.epochs_since_best = 0
+        else:
+            self.epochs_since_best += 1
+
+        if train_loss is not None and self._prev_train is not None and self._prev_val is not None:
+            if val_loss > self._prev_val and train_loss < self._prev_train:
+                self.overtraining = True
+        self._prev_train = train_loss
+        self._prev_val = val_loss
+
+        if self.patience > 0 and self.epochs_since_best >= self.patience:
+            self.stopped = True
+        return self.stopped
+
+
 def peak_vram_gb() -> float | None:
     if not torch.cuda.is_available():
         return None

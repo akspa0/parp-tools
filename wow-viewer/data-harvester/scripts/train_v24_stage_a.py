@@ -21,10 +21,13 @@ from harvester.v24 import stage_a, train_common  # noqa: E402
 from harvester.v24.tiles import HEIGHT_SCALE, TileSource  # noqa: E402
 
 
-def _load_tensors(source: TileSource, rows: list[int]):
+def _load_tensors(source: TileSource, rows: list[int], label: str = "load"):
     inputs, quincunxes, t_outer, t_inner = [], [], [], []
     w_outer, w_inner, s_outer, s_inner = [], [], [], []
-    for row in rows:
+    n = len(rows)
+    step = max(1, n // 20)
+    started = time.time()
+    for i, row in enumerate(rows):
         record = source.load(row)
         x, q = stage_a.build_input(record, include_synth=True)
         inputs.append(x)
@@ -36,6 +39,15 @@ def _load_tensors(source: TileSource, rows: list[int]):
         w_inner.append(wi)
         s_outer.append(record.source_outer)
         s_inner.append(record.source_inner)
+        if (i + 1) % step == 0 or (i + 1) == n:
+            elapsed = time.time() - started
+            pct = 100.0 * (i + 1) / n
+            eta = elapsed / (i + 1) * (n - i - 1) if i else 0.0
+            print(
+                f"[{label}] {i + 1}/{n} tiles ({pct:.0f}%) "
+                f"elapsed={elapsed:.1f}s eta={eta:.1f}s",
+                flush=True,
+            )
     return (
         torch.from_numpy(np.stack(inputs)),
         torch.from_numpy(np.stack(quincunxes)),
@@ -98,6 +110,10 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--synth-dropout", type=float, default=0.5)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--log-interval", type=int, default=1,
+                        help="print per-batch progress every N batches (1 = every batch)")
+    parser.add_argument("--patience", type=int, default=0,
+                        help="early-stop after N epochs without val improvement (0 = run all epochs)")
     args = parser.parse_args()
 
     train_common.set_determinism(args.seed, strict=False)
@@ -114,9 +130,9 @@ def main() -> int:
     print(f"tiles: {len(rows)} usable -> {len(train_rows)} train / {len(val_rows)} val")
 
     started_load = time.time()
-    train_data = _load_tensors(source, train_rows)
-    val_data = _load_tensors(source, val_rows)
-    print(f"loaded tensors in {time.time() - started_load:.1f}s")
+    train_data = _load_tensors(source, train_rows, label="load train")
+    val_data = _load_tensors(source, val_rows, label="load val")
+    print(f"loaded tensors in {time.time() - started_load:.1f}s", flush=True)
 
     model = stage_a.StageAModel().to(device)
     params = stage_a.parameter_count(model)
@@ -129,8 +145,11 @@ def main() -> int:
 
     x, q, to, ti, wo, wi, so, si = train_data
     n = x.shape[0]
+    n_batches = (n + args.batch_size - 1) // args.batch_size
     generator = torch.Generator().manual_seed(args.seed)
     best_val = float("inf")
+    stopper = train_common.EarlyStopping(patience=args.patience, min_delta=1e-4)
+    epoch_started = time.time()
 
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -154,15 +173,26 @@ def main() -> int:
             epoch_loss += loss.item()
             batches += 1
 
+            if batches % args.log_interval == 0 or start + args.batch_size >= n:
+                elapsed = time.time() - epoch_started
+                pct = 100.0 * batches / n_batches
+                eta = elapsed / batches * (n_batches - batches) if batches else 0.0
+                print(
+                    f"epoch {epoch} batch {batches}/{n_batches} ({pct:.0f}%) "
+                    f"loss={loss.item() * HEIGHT_SCALE:.4f} elapsed={elapsed:.1f}s eta={eta:.1f}s",
+                    flush=True,
+                )
+
         scheduler.step()
         val_loss, val_real, val_synth = _eval_split(
             model, *val_data, device=device, include_synth=True
         )
         val_nosynth, _, _ = _eval_split(model, *val_data, device=device, include_synth=False)
 
+        train_loss_world = epoch_loss / max(1, batches) * HEIGHT_SCALE
         logger.log_epoch(
             epoch,
-            train_loss=epoch_loss / max(1, batches) * HEIGHT_SCALE,
+            train_loss=train_loss_world,
             val_l1=val_loss,
             val_l1_real_cells=val_real if val_real is not None else -1.0,
             val_l1_synth_cells=val_synth if val_synth is not None else -1.0,
@@ -184,17 +214,38 @@ def main() -> int:
                 run_dir / "stage_a.pt",
             )
 
+        if stopper.step(epoch, val_loss, train_loss_world):
+            print(
+                f"early stopping at epoch {epoch}: no val improvement for "
+                f"{args.patience} epochs (best val_l1={stopper.best:.4f} @ epoch {stopper.best_epoch})"
+                + (" [overtraining detected: train falling, val rising]" if stopper.overtraining else ""),
+                flush=True,
+            )
+            break
+
     metrics = {
         "params": params,
         "best_val_l1": best_val,
+        "best_epoch": stopper.best_epoch,
+        "epochs_run": epoch,
+        "early_stopped": stopper.stopped,
+        "overtraining_detected": stopper.overtraining,
         "train_tiles": len(train_rows),
         "val_tiles": len(val_rows),
         "epochs": args.epochs,
+        "patience": args.patience,
         "peak_vram_gb": train_common.peak_vram_gb(),
     }
     logger.write_json("stage_a_metrics.json", metrics)
     logger.close()
-    print(f"done: best_val_l1={best_val:.4f} world units; checkpoint={run_dir / 'stage_a.pt'}")
+    print(
+        f"done: best_val_l1={best_val:.4f} world units @ epoch {stopper.best_epoch} "
+        f"(ran {epoch}/{args.epochs} epochs"
+        + (", early stopped" if stopper.stopped else "")
+        + (", overtraining detected" if stopper.overtraining else "")
+        + f"); checkpoint={run_dir / 'stage_a.pt'}",
+        flush=True,
+    )
     return 0
 
 
