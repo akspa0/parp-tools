@@ -645,3 +645,4 @@ wow-viewer/from_cloud/*
 wow-viewer/data-harvester/tmp/*
 wow-viewer/.hf-cache/hub/CACHEDIR.TAG
 wow-viewer/.hf-cache/*
+runpodctl/*
