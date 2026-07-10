@@ -28,7 +28,7 @@ import zarr.storage
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _HARVESTER_ROOT = _SCRIPT_DIR.parent
 _WOW_ROOT = _HARVESTER_ROOT.parent
-_DEFAULT_V24_STORE = _WOW_ROOT / "output" / "datasets" / "v24" / "3_3_5_12340_curated500.zarr"
+_DEFAULT_V24_STORE = _WOW_ROOT / "output" / "datasets" / "v24" / "3_3_5_12340_v24_all_v1.zarr"
 _DEFAULT_OUTPUT_ROOT = _WOW_ROOT / "output" / "cloud-packages" / "v24"
 
 _BUNDLE_PYPROJECT = """[build-system]
@@ -101,6 +101,10 @@ _V18_FIELDS_NEEDED = (
     "holes_16",
     "height_257",
 )
+
+# Process V18 rows in chunks to avoid OOM on large datasets (2,801 tiles of
+# alpha_256 = 2.74 GiB in one shot). 256 rows per chunk = ~256 MB peak.
+_V18_CHUNK = 256
 
 
 def _default_bundle_name() -> str:
@@ -179,29 +183,53 @@ def _copy_v24_store(source: Path, dest: Path) -> dict[str, Any]:
 def _subset_v18_store(
     source: Path, dest: Path, v18_rows_needed: list[int]
 ) -> tuple[dict[str, Any], dict[int, int]]:
-    """Copy only the fields/rows V24 training reads, remapped to compact indices."""
+    """Copy only the fields/rows V24 training reads, remapped to compact indices.
+
+    Processes rows in chunks (``_V18_CHUNK``) to avoid loading the full dataset
+    into memory at once — a 2,801-tile ``alpha_256`` is 2.74 GiB alone.
+    """
     if dest.exists():
         shutil.rmtree(dest)
     unique_rows = sorted({int(r) for r in v18_rows_needed})
     remap = {old: new for new, old in enumerate(unique_rows)}
+    n_rows = len(unique_rows)
 
     src_store = zarr.storage.LocalStore(str(source), read_only=True)
     src = zarr.open_group(store=src_store, mode="r")
     dest_store = zarr.storage.LocalStore(str(dest), read_only=False)
     dest_group = zarr.group(store=dest_store)
 
-    row_index = np.asarray(unique_rows, dtype=np.int64)
+    # First pass: create arrays with estimated chunks so we can write incrementally
+    # (v2 zarr doesn't support chunked append well; we allocate the full shape
+    # but write it one chunk at a time).
     copied_fields: list[str] = []
+    arrays: dict[str, zarr.Array] = {}
     for name in _V18_FIELDS_NEEDED:
         if name not in src:
             continue
         arr = src[name]
-        data = arr[row_index]
-        chunks = None
-        if arr.chunks is not None:
-            chunks = tuple(min(int(d), int(c)) for d, c in zip(data.shape, arr.chunks))
-        dest_group.create_array(name, data=data, chunks=chunks, overwrite=True)
+        shape = (n_rows,) + arr.shape[1:]
+        dtype = arr.dtype
+        src_chunks = arr.chunks
+        if src_chunks is not None:
+            # Keep source chunk sizes but cap row-chunk to _V18_CHUNK
+            row_chunk = min(int(src_chunks[0]), _V18_CHUNK)
+            chunks = (row_chunk,) + tuple(int(c) for c in src_chunks[1:])
+        else:
+            chunks = (_V18_CHUNK,) + shape[1:]
+        arrays[name] = dest_group.create_array(name, shape=shape, dtype=dtype, chunks=chunks, fill_value=0, overwrite=True)
         copied_fields.append(name)
+
+    # Second pass: read source rows in chunks and write to destination
+    chunk = _V18_CHUNK
+    for start in range(0, n_rows, chunk):
+        batch = unique_rows[start:start + chunk]
+        batch_idx = np.asarray(batch, dtype=np.int64)
+        end = min(start + chunk, n_rows)
+        for name in copied_fields:
+            data = src[name][batch_idx]
+            arrays[name][start:end] = data
+        print(f"  v18 subset [{start}:{end}/{n_rows}] rows", flush=True)
 
     dest_group.attrs.update(
         {

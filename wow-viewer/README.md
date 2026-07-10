@@ -6,6 +6,8 @@ World viewer, CLI toolchain, shared format libraries, and data-harvester for sta
 
 ## Current focus
 
+- **Spec 097 `097-v18-to-wdl-adt` — full-map V18 Zarr → stitched mesh + WDL + ADT round-trip.** Slice 1 (per-map stitched OBJ + baked atlas with edge alignment) is live as of 2026-07-10. Northrend smoke: 1,131 tiles → 7,453×10,023 heightmap, 74.7M vertices, 6.3 min wall. Slices 2/3/4 (WDL writer, ADT writer, round-trip smoke) are next-session work.
+- **Spec 096 `096-v24-minimap-deploy` — V24 minimap-to-prior deployment wiring.** Trained the minimap-only Stage A checkpoint; ships `infer_v24_stage_a_png.py` (PNG → WDL prior NPZ), `v24_prior_to_obj.py` (NPZ → textured OBJ), and `v24_run_on_png.py` (one-shot wrapper for any PNG, with `--batch-dir` for folder processing). 40/40 v24 tests pass. Honest caveat: the minimap-only regime is 158× worse than the cheat regime on the held-out V24 prior validation. Spec 095 (learned minimap cleaner) is the next step.
 - Spec 089 `089-dav2-height-predictor` — active height-model lane.
 - Spec 088 `088-v22-enrichment-from-v18` — active V22 dataset contract.
 - Spec 080 `080-wow-ui-consolidation` — active viewer-shell doc and compatibility lane.

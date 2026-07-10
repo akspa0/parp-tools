@@ -70,11 +70,10 @@ def _run_packager(args: argparse.Namespace, package_name: str) -> base.PackageRe
 
 
 def _build_bootstrap_start_cmd(args: argparse.Namespace) -> str | None:
-    if not args.auto_transfer:
-        return None
     package_name = str(getattr(args, "_resolved_package_name", "v23_bundle"))
     archive_name = f"{package_name}.tar"
     transfer_code = str(getattr(args, "_resolved_transfer_code", args.transfer_code or "v23-transfer"))
+    transfer_mode = base._resolve_transfer_mode(args)
     maps = " ".join(str(map_name) for map_name in args.maps)
     builds = " ".join(str(build) for build in args.builds)
     autotune_candidates = " ".join(str(candidate) for candidate in args.autotune_batch_candidates)
@@ -83,21 +82,47 @@ def _build_bootstrap_start_cmd(args: argparse.Namespace) -> str | None:
         "cd /workspace",
         "exec > >(tee -a /workspace/bootstrap.log) 2>&1",
         "date -u",
-        f"echo Waiting for Spec 089 package via runpodctl code {_shell_quote(transfer_code)}",
-        f"if ! runpodctl receive {_shell_quote(transfer_code)}; then",
-        "  echo",
-        "  echo 'runpodctl receive failed.'",
-        "  echo 'Manual transfer options:'",
-        f'  echo "  scp -P <port> {archive_name} root@<pod-ip>:/workspace/"',
-        f'  echo "  rsync -avzP {archive_name} root@<pod-ip>:/workspace/"',
-        "  exit 1",
-        "fi",
+    ]
+
+    if args.auto_transfer:
+        if transfer_mode == "url":
+            download_url = str(getattr(args, "download_url", ""))
+            lines.append(base._build_download_url_bootstrap_cmd(archive_name, download_url))
+        elif transfer_mode == "scp":
+            lines.append(base._build_scp_bootstrap_wait_cmd(archive_name))
+        else:
+            lines.extend([
+                f"echo Waiting for Spec 089 package via runpodctl code {_shell_quote(transfer_code)}",
+                f"if ! runpodctl receive {_shell_quote(transfer_code)}; then",
+                "  echo",
+                "  echo 'runpodctl receive failed.'",
+                "  echo 'Manual transfer options:'",
+                f'  echo "  scp -P <port> {archive_name} root@<pod-ip>:/workspace/"',
+                f'  echo "  rsync -avzP {archive_name} root@<pod-ip>:/workspace/"',
+                "  exit 1",
+                "fi",
+            ])
+    else:
+        lines.append(f"echo 'Network volume mode: bundle expected at /workspace/{archive_name}'")
+        lines.extend([
+            f"echo Waiting for Spec 089 package via runpodctl code {_shell_quote(transfer_code)}",
+            f"if ! runpodctl receive {_shell_quote(transfer_code)}; then",
+            "  echo",
+            "  echo 'runpodctl receive failed.'",
+            "  echo 'Manual transfer options:'",
+            f'  echo "  scp -P <port> {archive_name} root@<pod-ip>:/workspace/"',
+            f'  echo "  rsync -avzP {archive_name} root@<pod-ip>:/workspace/"',
+            "  exit 1",
+            "fi",
+        ])
+
+    lines.extend([
         f"test -f {_shell_quote(archive_name)}",
         f"tar -xf {_shell_quote(archive_name)}",
         f"cd {_shell_quote(package_name)}",
         "bash runpod/v23/install_deps.sh",
         "bash runpod/v23/verify_bundle.sh",
-    ]
+    ])
     if args.auto_start_training:
         lines.extend(
             [
@@ -215,7 +240,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--maps", nargs="+", default=["Azeroth", "Kalimdor", "Kalidar", "PVPZone01", "PVPZone02", "Northrend", "Expansion01"])
     parser.add_argument("--tileset-prune-table", type=Path, default=None)
     parser.add_argument("--curation-manifest", type=Path, default=None)
-    parser.add_argument("--include-v22-subset-tiles", type=int, default=8)
+    parser.add_argument("--include-v22-subset-tiles", type=int, default=0,
+                        help="Max V22 tiles per build to include in the bundle. 0 = ship the entire store (default).")
     parser.add_argument("--pod-name", type=str, default="spec089-v23")
     parser.add_argument("--gpu-type", type=str, default=DEFAULT_GPU_TYPE)
     parser.add_argument("--gpu-types", nargs="*", default=None)
@@ -225,7 +251,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-cost-per-hour", type=float, default=1.00)
     parser.add_argument("--no-cost-target", dest="no_cost_target", action="store_true", default=False)
     parser.add_argument("--image-name", type=str, default=DEFAULT_IMAGE)
-    parser.add_argument("--cloud-type", choices=["SECURE", "COMMUNITY"], default="COMMUNITY")
+    parser.add_argument("--cloud-type", choices=["SECURE", "COMMUNITY"], default="SECURE",
+                        help="SECURE always gets a public IP (default, needed for SCP/SSH). "
+                             "COMMUNITY is cheaper but pods may not get public IPs, breaking SCP transfer.")
     parser.add_argument("--data-center", type=str, default="auto")
     parser.add_argument("--data-centers", nargs="*", default=None)
     parser.add_argument("--container-disk-gb", type=int, default=50)
@@ -240,6 +268,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--network-volume-gb", type=int, default=150)
     parser.add_argument("--auto-transfer", dest="auto_transfer", action="store_true", default=True)
     parser.add_argument("--no-auto-transfer", dest="auto_transfer", action="store_false")
+    parser.add_argument("--transfer-mode", type=str, default="auto",
+                        choices=["auto", "relay", "scp"],
+                        help="Transfer method: 'auto' (detect: SCP if runpodctl missing, else relay), "
+                             "'relay' (runpodctl send/receive), 'scp' (SCP to Pod IP). Default: auto. "
+                             "Set --download-url instead to skip all local transfer and have Pod download via wget.")
+    parser.add_argument("--download-url", type=str, default=None,
+                        help="Have the Pod download the bundle from this URL via wget. No local transfer needed.")
     parser.add_argument("--transfer-code", type=str, default=None)
     parser.add_argument("--auto-start-training", dest="auto_start_training", action="store_true", default=True)
     parser.add_argument("--no-auto-start-training", dest="auto_start_training", action="store_false")
@@ -372,6 +407,14 @@ def main(argv: list[str] | None = None) -> int:
             if not args.no_wait:
                 print(f"Created Pod {pod_id}; waiting for public IP/port mappings...")
                 pod = base._poll_pod(api_key, pod_id, timeout_seconds=int(args.wait_timeout_seconds))
+                if base._resolve_transfer_mode(args) == "scp" and base._pod_scp_info(pod) is None:
+                    print(f"Pod {pod_id} has no public IP after {args.wait_timeout_seconds}s; terminating.", file=sys.stderr)
+                    try:
+                        base._request_json("DELETE", f"/pods/{pod_id}", api_key=api_key)
+                    except Exception:
+                        pass
+                    raise base.RunPodApiError("SCP_FAIL", f"/pods/{pod_id}", 502,
+                        f"Pod {pod_id} ({gpu_type}/{data_center}) has no public IP.")
             break
         except Exception as ex:  # noqa: BLE001
             attempt["status"] = "failed"
@@ -418,12 +461,23 @@ def main(argv: list[str] | None = None) -> int:
         attempts=attempts,
     )
     print(f"Wrote setup manifest: {manifest_path}")
+
+    transfer_mode = base._resolve_transfer_mode(args)
+    transferred = False
     if args.auto_transfer and not args.dry_run:
-        sent = base._send_package_with_runpodctl(package, str(args._resolved_transfer_code))
-        if sent:
-            print("Package transfer completed. The Pod bootstrap command should now unpack and continue.")
+        if transfer_mode == "scp":
+            print(f"Transfer mode: SCP (using Pod IP {pod.get('publicIp', '?')})")
+            transferred = base._send_package_with_scp(package, pod) if pod else False
+        else:
+            print("Transfer mode: runpodctl relay")
+            transferred = base._send_package_with_runpodctl(package, str(args._resolved_transfer_code))
+        if transferred:
+            print("Package transfer completed. The Pod bootstrap should now unpack and continue.")
     elif args.auto_transfer:
-        print(f"Dry run transfer command: runpodctl send \"{package.archive_path}\" --code {args._resolved_transfer_code}")
+        if transfer_mode == "scp":
+            print(f"Dry run SCP command: scp -P <ssh-port> \"{package.archive_path}\" root@<pod-ip>:/workspace/")
+        else:
+            print(f"Dry run transfer command: runpodctl send \"{package.archive_path}\" --code {args._resolved_transfer_code}")
     base._print_next_steps(package, pod, str(args._resolved_transfer_code))
     return 0
 

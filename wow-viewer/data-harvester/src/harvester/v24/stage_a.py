@@ -26,7 +26,9 @@ from torch import nn
 from harvester.v24 import lattice
 from harvester.v24.tiles import HEIGHT_SCALE, TileRecord, downsample_mean
 
+# Standard Stage A: 13-channel input (minimap + alpha + normal + mcnr + synth cheat)
 IN_CHANNELS = 13
+IN_CHANNELS_MINIMAP_ONLY = 3  # just cleaned minimap RGB
 GRID = 64
 
 
@@ -94,6 +96,62 @@ class StageAModel(nn.Module):
         outer = quincunx[:, ::2, ::2]
         inner = quincunx[:, 1::2, 1::2]
         return outer, inner
+
+
+class StageAMinimapOnly(nn.Module):
+    """Small U-Net predicting WDL prior from minimap RGB alone (3 channels).
+
+    No synth quincunx cheat, no alpha/normal/mcnr inputs. Predicts the FULL
+    WDL prior directly (no residual). Designed for standalone deployment where
+    only a minimap image is available.
+    """
+
+    def __init__(self, base: int = 28):
+        super().__init__()
+        self.enc1 = _ConvBlock(IN_CHANNELS_MINIMAP_ONLY, base)
+        self.enc2 = _ConvBlock(base, base * 2)
+        self.enc3 = _ConvBlock(base * 2, base * 4)
+        self.pool = nn.MaxPool2d(2)
+        self.up2 = nn.Conv2d(base * 4, base * 2, 1)
+        self.dec2 = _ConvBlock(base * 4, base * 2)
+        self.up1 = nn.Conv2d(base * 2, base, 1)
+        self.dec1 = _ConvBlock(base * 2, base)
+        self.head = nn.Conv2d(base, 1, 1)
+        nn.init.zeros_(self.head.weight)
+        nn.init.zeros_(self.head.bias)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Returns (outer (B,17,17), inner (B,16,16)) in normalized height space.
+
+        ``x`` is (B, 3, 64, 64) — cleaned minimap RGB, mean-pooled from 256².
+        No synth quincunx — the model predicts the full prior directly.
+        """
+        e1 = self.enc1(x)   # (B, base, 64, 64)
+        e2 = self.enc2(self.pool(e1))  # (B, 2b, 32, 32)
+        e3 = self.enc3(self.pool(e2))  # (B, 4b, 16, 16)
+
+        d2 = F.interpolate(e3, scale_factor=2, mode="nearest")
+        d2 = self.dec2(torch.cat([self.up2(d2), e2], dim=1))
+        d1 = F.interpolate(d2, scale_factor=2, mode="nearest")
+        d1 = self.dec1(torch.cat([self.up1(d1), e1], dim=1))
+
+        field = self.head(d1)  # (B, 1, 64, 64)
+        quincunx = F.interpolate(
+            field, size=(33, 33), mode="bilinear", align_corners=True
+        ).squeeze(1)
+        outer = quincunx[:, ::2, ::2]
+        inner = quincunx[:, 1::2, 1::2]
+        return outer, inner
+
+
+def build_minimap_only_input(cleaned_minimap: np.ndarray) -> np.ndarray:
+    """Assemble the (3, 64, 64) input tensor from cleaned minimap only.
+
+    ``cleaned_minimap`` is (256, 256, 3) float32 in [0, 1].
+    Returns (3, 64, 64) float32.
+    """
+    down = downsample_mean(cleaned_minimap, 4)  # (64, 64, 3)
+    return np.stack([down[..., 0], down[..., 1], down[..., 2]]).astype(np.float32)
 
 
 def parameter_count(model: nn.Module) -> int:

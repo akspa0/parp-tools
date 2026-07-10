@@ -169,12 +169,50 @@ def _write_preview(preview, path: Path) -> None:
     plt.close(fig)
 
 
+def _minimap_only_eval(model_minimap, records, device):
+    """Evaluate a StageAMinimapOnly model on the held-out val rows.
+
+    Reuses the same world-unit weighted L1 as the cheat regime so the
+    minimap-only number is directly comparable to the cheat regime's
+    val_l1_cheat and the block_reduce baseline.
+    """
+    losses = {"minimap_only": [], "baseline": []}
+    with torch.no_grad():
+        for record in records:
+            targets = stage_a.build_target(record)
+            to, ti, wo, wi = (torch.from_numpy(t)[None] for t in targets)
+
+            x_np = stage_a.build_minimap_only_input(record.cleaned_minimap)
+            x = torch.from_numpy(x_np)[None].to(device)
+            po, pi = model_minimap(x)
+            po, pi = po.cpu(), pi.cpu()
+            losses["minimap_only"].append(
+                stage_a.weighted_l1(po, pi, to, ti, wo, wi).item() * HEIGHT_SCALE
+            )
+
+            bo = torch.from_numpy(record.synth_outer / HEIGHT_SCALE)[None]
+            bi = torch.from_numpy(record.synth_inner / HEIGHT_SCALE)[None]
+            losses["baseline"].append(
+                stage_a.weighted_l1(bo, bi, to, ti, wo, wi).item() * HEIGHT_SCALE
+            )
+
+    return {
+        "val_l1_minimap_only": float(np.mean(losses["minimap_only"])),
+        "block_reduce_baseline_l1": float(np.mean(losses["baseline"])),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--v24-store", required=True)
     parser.add_argument("--v18-store", default=None)
     parser.add_argument("--stage-a-checkpoint", required=True)
     parser.add_argument("--stage-b-checkpoint", required=True)
+    parser.add_argument(
+        "--minimap-only-checkpoint", default=None,
+        help="optional path to a StageAMinimapOnly checkpoint; adds the "
+             "stage_a_minimap_only block + SC-002-MINIMAP gate to the report",
+    )
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--seed", type=int, default=94)
     parser.add_argument("--val-fraction", type=float, default=0.2)
@@ -217,6 +255,22 @@ def main() -> int:
     deterministic = _determinism_check(args, run_dir, row=val_rows[0])
     peak_vram = train_common.peak_vram_gb()
 
+    # Spec 096: optional minimap-only Stage A evaluation.
+    stage_a_minimap_report = None
+    minimap_only_beats_baseline = None
+    if args.minimap_only_checkpoint is not None:
+        ckpt_m = torch.load(args.minimap_only_checkpoint, map_location=device,
+                            weights_only=True)
+        model_m = stage_a.StageAMinimapOnly(base=ckpt_m["config"]["base"]).to(device)
+        model_m.load_state_dict(ckpt_m["model_state"])
+        model_m.eval()
+        stage_a_minimap_report = _minimap_only_eval(model_m, val_records, device)
+        stage_a_minimap_report["params"] = stage_a.parameter_count(model_m)
+        minimap_only_beats_baseline = (
+            stage_a_minimap_report["val_l1_minimap_only"]
+            < stage_a_minimap_report["block_reduce_baseline_l1"]
+        )
+
     checks = {
         "SC-001_coverage": stats["real_plus_synthetic_ratio_of_non_empty"] >= 0.95,
         "SC-001_confidence_bound": conf_bound is None or conf_bound >= 0.80,
@@ -235,6 +289,8 @@ def main() -> int:
         "SC-005_vram_under_4gb": peak_vram is None or peak_vram < 4.0,
         "SC-005_wall_under_3s": pipeline_report["max_wall_s_per_tile"] < 3.0,
     }
+    if minimap_only_beats_baseline is not None:
+        checks["SC-002-MINIMAP_minimap_only_beats_baseline"] = minimap_only_beats_baseline
 
     report = {
         "run_id": args.run_id,
@@ -248,6 +304,8 @@ def main() -> int:
         "checks": checks,
         "all_pass": all(checks.values()),
     }
+    if stage_a_minimap_report is not None:
+        report["stage_a_minimap_only"] = stage_a_minimap_report
     report_path = run_dir / "report.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 

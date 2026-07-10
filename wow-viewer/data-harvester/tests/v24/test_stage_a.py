@@ -139,3 +139,47 @@ def test_build_target_object_gate_excludes_object_lattice_cells(synthetic_height
     go, gi = stage_a.object_gate_at_lattice(obj)
     assert go.all()
     assert gi[0, 0] and not gi[1, 1]
+
+
+# ---------------------------------------------------------------------------
+# Spec 096 — minimap-only deployment wiring
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.v24
+def test_stage_a_minimap_only_forward_shape_and_params():
+    """The deployment model (3-channel, no synth) is shape-correct and <= 1M params."""
+    model = stage_a.StageAMinimapOnly()
+    params = stage_a.parameter_count(model)
+    assert params <= 1_000_000, f"Stage A minimap-only has {params} params (> 1M)"
+
+    x = torch.zeros(2, stage_a.IN_CHANNELS_MINIMAP_ONLY, 64, 64)
+    outer, inner = model(x)
+    assert outer.shape == (2, 17, 17)
+    assert inner.shape == (2, 16, 16)
+
+
+@pytest.mark.v24
+def test_stage_a_minimap_only_pre_train_is_constant():
+    """Zero-init head => pre-train output is a constant (B,17,17) and (B,16,16) field.
+
+    The minimap-only regime has no synth quincunx baseline to anchor against, so
+    the residual head is a constant bias. A fresh model should produce the same
+    value at every spatial position regardless of input.
+    """
+    torch.manual_seed(0)
+    model = stage_a.StageAMinimapOnly().eval()
+    x = torch.randn(1, stage_a.IN_CHANNELS_MINIMAP_ONLY, 64, 64,
+                    generator=torch.Generator().manual_seed(5))
+    with torch.no_grad():
+        outer, inner = model(x)
+    # Every spatial position has the same value.
+    assert torch.allclose(outer, outer[:, :1, :1].expand_as(outer), atol=1e-6)
+    assert torch.allclose(inner, inner[:, :1, :1].expand_as(inner), atol=1e-6)
+    # A different input produces the same constant (the head bias).
+    x2 = torch.randn(1, stage_a.IN_CHANNELS_MINIMAP_ONLY, 64, 64,
+                     generator=torch.Generator().manual_seed(99))
+    with torch.no_grad():
+        outer2, inner2 = model(x2)
+    assert torch.equal(outer, outer2)
+    assert torch.equal(inner, inner2)

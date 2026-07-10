@@ -133,6 +133,9 @@ def main() -> int:
 
     started = time.time()
 
+    # Preload V18 data in one sequential Zarr pass — avoids per-tile seek overhead.
+    source.preload(train_rows + val_rows)
+
     def _load_records(rows, label):
         out = []
         n = len(rows)

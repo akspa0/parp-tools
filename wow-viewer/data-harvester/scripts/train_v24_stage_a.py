@@ -34,7 +34,8 @@ def _build_source(v24_stores: list[str], v18_stores: list[str] | None) -> TileSo
     return MultiTileSource(pairs)
 
 
-def _load_tensors(source: TileSource | MultiTileSource, rows: list[int], label: str = "load"):
+def _load_tensors(source: TileSource | MultiTileSource, rows: list[int], label: str = "load",
+                  minimap_only: bool = False):
     inputs, quincunxes, t_outer, t_inner = [], [], [], []
     w_outer, w_inner, s_outer, s_inner = [], [], [], []
     n = len(rows)
@@ -42,7 +43,11 @@ def _load_tensors(source: TileSource | MultiTileSource, rows: list[int], label: 
     started = time.time()
     for i, row in enumerate(rows):
         record = source.load(row)
-        x, q = stage_a.build_input(record, include_synth=True)
+        if minimap_only:
+            x = stage_a.build_minimap_only_input(record.cleaned_minimap)
+            q = np.zeros((33, 33), dtype=np.float32)
+        else:
+            x, q = stage_a.build_input(record, include_synth=True)
         inputs.append(x)
         quincunxes.append(q)
         outer, inner, wo, wi = stage_a.build_target(record)
@@ -86,15 +91,19 @@ def _drop_synth(
     return x_out, q_out
 
 
-def _eval_split(model, x, q, to, ti, wo, wi, so, si, device, include_synth: bool):
+def _eval_split(model, x, q, to, ti, wo, wi, so, si, device, include_synth: bool,
+                minimap_only: bool = False):
     """Weighted L1 plus real-vs-synthetic cell split (world units)."""
     model.eval()
     with torch.no_grad():
-        if include_synth:
+        if minimap_only:
+            xb = x
+        elif include_synth:
             xb, qb = x, q
         else:
             xb, qb = _drop_synth(x, q, torch.ones(x.shape[0], dtype=torch.bool))
-        po, pi = model(xb.to(device), qb.to(device))
+        po, pi = (model(xb.to(device)) if minimap_only
+                  else model(xb.to(device), qb.to(device)))
         # to/wo/etc. may be GPU-resident (train_common.gpu_resident) or CPU;
         # match whichever device val_data actually lives on.
         po, pi = po.to(to.device), pi.to(to.device)
@@ -125,6 +134,8 @@ def main() -> int:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=94)
     parser.add_argument("--val-fraction", type=float, default=0.2)
+    parser.add_argument("--minimap-only", action="store_true", default=False,
+                        help="train 3-channel minimap-only Stage A (no alpha/normal/mcnr/quincunx)")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--synth-dropout", type=float, default=0.5)
     parser.add_argument("--device", default=None)
@@ -161,8 +172,12 @@ def main() -> int:
     print(f"tiles: {len(rows)} usable -> {len(train_rows)} train / {len(val_rows)} val")
 
     started_load = time.time()
-    train_data = _load_tensors(source, train_rows, label="load train")
-    val_data = _load_tensors(source, val_rows, label="load val")
+    # Preload V18 data in one sequential Zarr pass (no per-tile random-access seeks).
+    source.preload(train_rows + val_rows)
+    train_data = _load_tensors(source, train_rows, label="load train",
+                               minimap_only=args.minimap_only)
+    val_data = _load_tensors(source, val_rows, label="load val",
+                             minimap_only=args.minimap_only)
     print(f"loaded tensors in {time.time() - started_load:.1f}s", flush=True)
 
     if args.gpu_resident_data:
@@ -170,16 +185,19 @@ def main() -> int:
         val_data = train_common.gpu_resident(val_data, device)
         print(f"train/val tensors resident={train_data[0].is_cuda if device.type == 'cuda' else False}", flush=True)
 
-    model = stage_a.StageAModel().to(device)
+    if args.minimap_only:
+        model = stage_a.StageAMinimapOnly().to(device)
+    else:
+        model = stage_a.StageAModel().to(device)
     params = stage_a.parameter_count(model)
-    assert params <= 1_000_000, f"Stage A exceeds 1M params: {params}"
-    print(f"stage A params: {params}")
+    print(f"stage A params: {params} {'(minimap-only 3ch)' if args.minimap_only else ''}")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     amp_dtype = torch.bfloat16 if args.amp_dtype == "bf16" else torch.float16
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda" and amp_dtype == torch.float16)
 
+    minimap_only = args.minimap_only
     x, q, to, ti, wo, wi, so, si = train_data
     n = x.shape[0]
 
@@ -190,14 +208,17 @@ def main() -> int:
 
             def _try_step(bs: int) -> None:
                 idx = torch.randperm(n)[:bs].to(x.device)
-                drop = torch.rand(len(idx)) < args.synth_dropout
-                xb, qb = _drop_synth(x[idx], q[idx], drop)
-                xb, qb = xb.to(device, non_blocking=True), qb.to(device, non_blocking=True)
+                if minimap_only:
+                    xb = x[idx].to(device, non_blocking=True)
+                else:
+                    drop = torch.rand(len(idx)) < args.synth_dropout
+                    xb, qb = _drop_synth(x[idx], q[idx], drop)
+                    xb, qb = xb.to(device, non_blocking=True), qb.to(device, non_blocking=True)
                 tob, tib = to[idx].to(device, non_blocking=True), ti[idx].to(device, non_blocking=True)
                 wob, wib = wo[idx].to(device, non_blocking=True), wi[idx].to(device, non_blocking=True)
                 optimizer.zero_grad(set_to_none=True)
                 with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=device.type == "cuda"):
-                    po, pi = model(xb, qb)
+                    po, pi = model(xb) if minimap_only else model(xb, qb)
                     loss = stage_a.weighted_l1(po, pi, tob, tib, wob, wib)
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
@@ -222,15 +243,18 @@ def main() -> int:
         epoch_loss, batches = 0.0, 0
         for start in range(0, n, args.batch_size):
             idx = perm[start : start + args.batch_size].to(x.device)
-            drop = torch.rand(len(idx), generator=generator) < args.synth_dropout
-            xb, qb = _drop_synth(x[idx], q[idx], drop)
-            xb, qb = xb.to(device, non_blocking=True), qb.to(device, non_blocking=True)
+            if minimap_only:
+                xb = x[idx].to(device, non_blocking=True)
+            else:
+                drop = torch.rand(len(idx), generator=generator) < args.synth_dropout
+                xb, qb = _drop_synth(x[idx], q[idx], drop)
+                xb, qb = xb.to(device, non_blocking=True), qb.to(device, non_blocking=True)
             tob, tib = to[idx].to(device, non_blocking=True), ti[idx].to(device, non_blocking=True)
             wob, wib = wo[idx].to(device, non_blocking=True), wi[idx].to(device, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=device.type == "cuda"):
-                po, pi = model(xb, qb)
+                po, pi = model(xb) if minimap_only else model(xb, qb)
                 loss = stage_a.weighted_l1(po, pi, tob, tib, wob, wib)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -249,28 +273,47 @@ def main() -> int:
                 )
 
         scheduler.step()
-        val_loss, val_real, val_synth = _eval_split(
-            model, *val_data, device=device, include_synth=True
-        )
-        val_nosynth, _, _ = _eval_split(model, *val_data, device=device, include_synth=False)
+        if minimap_only:
+            val_loss, val_real, val_synth = _eval_split(
+                model, *val_data, device=device, include_synth=True,
+                minimap_only=True
+            )
+        else:
+            val_loss, val_real, val_synth = _eval_split(
+                model, *val_data, device=device, include_synth=True
+            )
+            val_nosynth, _, _ = _eval_split(
+                model, *val_data, device=device, include_synth=False
+            )
 
         train_loss_world = epoch_loss / max(1, batches) * HEIGHT_SCALE
-        logger.log_epoch(
-            epoch,
+        log_kw = dict(
+            epoch=epoch,
             train_loss=train_loss_world,
             val_l1=val_loss,
             val_l1_real_cells=val_real if val_real is not None else -1.0,
             val_l1_synth_cells=val_synth if val_synth is not None else -1.0,
-            val_l1_minimap_only=val_nosynth,
             lr=scheduler.get_last_lr()[0],
         )
+        if not minimap_only:
+            log_kw["val_l1_minimap_only"] = val_nosynth
+        logger.log_epoch(**log_kw)
 
         if val_loss < best_val:
             best_val = val_loss
+            in_channels = (
+                stage_a.IN_CHANNELS_MINIMAP_ONLY
+                if args.minimap_only
+                else stage_a.IN_CHANNELS
+            )
             torch.save(
                 {
                     "model_state": model.state_dict(),
-                    "config": {"base": 28, "in_channels": stage_a.IN_CHANNELS},
+                    "config": {
+                        "base": 28,
+                        "in_channels": in_channels,
+                        "minimap_only": bool(args.minimap_only),
+                    },
                     "height_scale": HEIGHT_SCALE,
                     "seed": args.seed,
                     "epoch": epoch,

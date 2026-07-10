@@ -2,6 +2,50 @@
 
 Keep this file to last-week truth. Older history moved to `memory-bank/archive/2026-07-04-pre-2026-06-27.md`.
 
+## 2026-07-09
+
+### Spec 094 V24 full-scale curated training
+
+- User-directed full-scale curated open-world training (50 epochs, `openworld_curated.zarr`, curated 2,011 tiles).
+- **Data-loading bug squashed:** Two independent bottlenecks caused ~1 s/tile load times:
+  1. `clean_minimap()` median-fill loop (512 passes) ran on every tile load. **Fix:** replaced with raw-minimap normalization. Pre-computed cleaning should be a dataset-build step.
+  2. Per-tile random Zarr reads from V18 store (read amplification via large chunks) caused ~25 min sequential load. **Fix:** added `TileSource.preload(rows)` that reads V18 in one contiguous Zarr slice, then caches in memory. Load time dropped to < 10 s.
+- Both `train_v24_stage_a.py` and `train_v24_stage_b.py` updated to call `source.preload()` before iteration.
+- **Full 50-epoch curated run completed.** Stage A val_l1_real_cells=0.397 (better than previous 0.412). Stage B final L1=0.857 (5x better than baselines 4.30/4.20). 7/10 SC checks pass (SC-001 confidence bound is the known rough-terrain sampling-phase disagreement).
+- **Pre-computed cleaned minimaps:** Wrote `scripts/precompute_v24_cleaned_minimaps.py` — one-time build that stores `clean_minimap()` output as `cleaned_minimap_256` array in the V24 Zarr store. Modified `TileSource.load()` in `tiles.py` to prefer the stored array when available (fast Zarr read, no per-load computation).
+- **Cleaned-minimap retrain running now** — 2011 tiles, 50+ epochs, target final L1 < 0.5.
+
+### Spec 096 V24 minimap-only deployment wiring
+
+- Closed the deployment gap from Spec 094 FR-013 / US3 scenario 5: there was no way to drop a bare PNG minimap into a CLI and get a WDL prior NPZ out. Built it. Four small slices, each validated before the next.
+- **Slice 1 — train the minimap-only Stage A.** Trainer `--minimap-only` flag existed but had never been run on real data. 50 epochs on `3_3_5_12340_v24_all_v1.zarr` (2,241 train / 560 val, autotune batch=512, peak_vram=0.005 GB). `stage_a.pt` 334,965 params, `minimap_only: true` in config, best_val_l1=190.31, overtraining detected. Patched the trainer's save code to record `minimap_only: bool` and the right `in_channels` (was hard-coded to 13 before).
+- **Slice 2 — `scripts/infer_v24_stage_a_png.py`.** ~200 lines, PIL+numpy+torch+harvester.v24, no matplotlib, no V24 store, no V18 store, no staged client. Loads PNG → resize 256×256 → mean-pool 64×64 → StageAMinimapOnly forward → bilinear upsample (1,1,64,64)→(1,1,33,33) → outer (17,17) + inner (16,16) → `* HEIGHT_SCALE=100` → world units. Writes NPZ + optional 4-up preview PNG (input | outer | inner | quincunx). Strict-checkpoint refusal of 13-channel cheat checkpoints. Smoke on a real PNG: 212 ms wall, 0.005 GB peak VRAM, world_min=51.95, world_max=319.02.
+- **Slice 3 — `validate_v24.py --minimap-only-checkpoint`.** New `stage_a_minimap_only` block + `SC-002-MINIMAP` gate. Ran full validation. Result: minimap-only val_l1=190.31 vs cheat val_l1=1.21 vs `block_reduce` baseline 1.31. The minimap-only regime is **158× worse than the cheat regime** on the same held-out tiles. `SC-002-MINIMAP` gate is **FAIL** (recorded honestly per Risk 1 in the spec). All other checks pass except the existing SC-001 confidence bound (known data-quality issue). Report: `output/v24_validation/v24_minimap_only_validation_20260709/report.json`.
+- **Slice 4 — docs.** Architecture doc at `docs/architecture/v24-minimap-deploy-2026-07-09.md`. Memory bank + this progress entry. Also fixed the dangling `>>>>> REPLACE` marker from the prior session.
+- **Honest deployment result.** The CLI works. The model it loads is not yet accurate enough to be useful — the bare RGB minimap does not carry enough signal to predict the WDL prior at the precision the WDL grid requires. This is the documented Risk 1 from the spec; the slice still ships because the CLI, the trained checkpoint, and the test suite are all real.
+- **Next step: Spec 095 (learned minimap cleaner).** A small U-Net that takes a raw minimap + V18 `object_precise_mask` and outputs a "terrain-only" minimap. Run as a pre-step to Stage A. Most likely path to closing the 158× gap. If 095 doesn't get us there, Spec 097 is "send the PNG to a server that has the staged client" — the honest fallback.
+- Test suite: 36/36 v24 tests pass (up from 31 before Spec 096).
+
+### Spec 096 follow-on — one-shot wrapper + OBJ mesh export
+
+- Wrote `v24_run_on_png.py` and `v24_prior_to_obj.py`. One command, any PNG, get back a WDL prior NPZ + 4-up preview PNG + 257×257 textured OBJ mesh. `--batch-dir <dir>` runs the wrapper on every PNG in a folder and stitches the tiles into a single grid OBJ with an atlas.
+- **X-flip fix:** the OBJ was opening mirrored along the X axis because the source PNG's image-X runs opposite to the world-X. The prior is now `np.fliplr`'d at load time so the mesh opens correctly in any 3D viewer. Discovered + fixed by the user testing a real PNG and reporting the bug.
+- Test suite: 36/36 v24 tests pass.
+
+### Spec 097 Slice 1 — per-map V18 Zarr → stitched OBJ + baked atlas
+
+- Wrote `scripts/v24_export_map.py`. CLI: `--v18-store --map [--build] [--curation-manifest] [--output] [--device] [--seed]`. Reads a per-map V18 Zarr, runs the V24 minimap-only Stage A prior on each tile, upsamples the (17,17)+(16,16) prior to 257×257, applies edge alignment across tile boundaries, and writes a single OBJ + atlas.
+- **Edge alignment:** the 16-pixel band on each side of every shared border is averaged; corner cells (4-way) inherit the average. The OBJ opens with continuous height across the seams — no visible hard step at the 256-pixel-tile borders.
+- **Northrend smoke:** 29 rows × 39 cols = 1,131 tiles, 7,453 × 10,023 heightmap, 74.7M vertices, world -786.9..409.3, **6.3 min** wall time on the 12 GB GPU. Output: `Northrend.obj` + `Northrend.atlas.png` + `Northrend_manifest.json` + `tiles/<tx>_<ty>.prior.npz` (1,131 NPZs). Reproduce: `uv run python scripts/v24_export_map.py --v18-store output/datasets/v18/3_3_5_12340.zarr --map Northrend`.
+- Wrote `tests/v24/test_export_map.py` — 4 tests (3 seam-alignment, 1 V18 loader smoke). All green.
+- Test suite: **40/40 v24 tests pass** (was 36 before Spec 097 Slice 1).
+
+### Spec 097 Slices 2/3/4 — NOT shipped this session (documented handoff)
+
+- WDL file writer and ADT file writer are substantial binary format work. The proper round-trip path is a small `write` subcommand on the existing C# `WowViewer.Tool.WdlRead` shim — a multi-step C# change that does not belong in a quick chat session.
+- Faking the writers in Python would produce files the C# readers cannot open. Worse than no output.
+- Spec/plan/tasks/checklist are all written under `wow-viewer/specs/097-v18-to-wdl-adt/`. Next session: pick up at Slice 2.
+
 ## 2026-07-07
 
 ### Spec 080 world object wireframe correction

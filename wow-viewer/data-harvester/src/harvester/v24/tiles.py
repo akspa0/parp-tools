@@ -15,7 +15,6 @@ import numpy as np
 import zarr
 
 from harvester.v24 import lattice, store
-from harvester.v24.clean_minimap import clean_minimap
 
 HEIGHT_SCALE = 100.0  # world units -> model space for absolute heights
 RESIDUAL_SCALE = 25.0  # world units -> model space for Stage B residuals
@@ -51,7 +50,28 @@ class TileRecord:
 
 
 class TileSource:
-    """Reads V24 + V18 stores and yields TileRecords."""
+    """Reads V24 + V18 stores and yields TileRecords.
+
+    Supports two load paths:
+
+    * **Random-access** (default): ``load(row)`` reads V18 data one array at a
+      time via ``zarr[row]`` indexing.  Fast when the OS page cache is warm,
+      but the FIRST epoch is slow if V18 chunks span many tiles (read
+      amplification: every index fetch pulls the whole chunk from disk).
+    * **Preloaded** (recommended for training): call ``preload(rows)`` *before*
+      iterating.  This reads all needed V18 rows in a single contiguous Zarr
+      slice (sequential I/O, no read amplification) then caches the block in
+      memory.  Subsequent ``load(row)`` calls are dict lookups — sub-ms.
+
+    Minimap loading order (first match wins):
+    1. ``cleaned_minimap_256`` in the V24 store (pre-computed, preferred)
+    2. Raw ``minimap_rgb`` from V18, normalized to float32 [0,1] (fallback)
+    """
+
+    _V18_ARRAYS = frozenset({
+        "minimap_rgb", "object_precise_mask", "alpha_256", "normal_xyz",
+        "mcnr_mask_257", "height_257", "liquid_mask", "holes_16",
+    })
 
     def __init__(self, v24_path: Path | str, v18_path: Path | str | None = None):
         self.v24 = store.open_v24_store(v24_path)
@@ -62,6 +82,12 @@ class TileSource:
                 raise ValueError("V24 store has no v18_store_path attr; pass v18_path")
         self.v18 = zarr.open_group(str(v18_path), mode="r")
         self.has_no_object_minimap = "no_object_minimap" in self.v18
+        # Check for pre-computed cleaned minimaps in V24 store.
+        self._has_cleaned = "cleaned_minimap_256" in self.v24
+        # Preload cache — populated by preload(), consumed by load().
+        self._v18_cache: dict[str, np.ndarray] = {}
+        self._v18_offset: dict[int, int] = {}   # v18_row -> index into cache arrays
+        self._v18_start_row: int = -1
 
     def __len__(self) -> int:
         return len(self.index["tile_id"])
@@ -71,18 +97,65 @@ class TileSource:
         audit_empty = np.asarray(self.v24["wdl_prior_audit_empty"][:])
         return [r for r in range(len(self)) if not audit_empty[r]]
 
+    # ------------------------------------------------------------------
+    # Preload API — call once before training to avoid per-load Zarr seeks
+    # ------------------------------------------------------------------
+
+    def preload(self, rows: list[int]) -> None:
+        """Batch-read V18 data for *rows* in a single contiguous Zarr pass.
+
+        All unique ``v18_row`` values are collected, sorted, and read via
+        ``arr[lo:hi]`` — sequential chunk access that avoids the read
+        amplification of per-row random indexing.  After this call,
+        ``load(row)`` reads from the in-memory cache.
+        """
+        unique_v18 = sorted({int(self.index["v18_row"][r]) for r in rows})
+        lo, hi = unique_v18[0], unique_v18[-1] + 1
+
+        for name in sorted(self._V18_ARRAYS):
+            if name not in self.v18:
+                continue
+            block = np.asarray(self.v18[name][lo:hi])
+            self._v18_cache[name] = block
+
+        self._v18_start_row = lo
+        self._v18_offset = {v: i for i, v in enumerate(unique_v18)}
+
+    def _v18_read(self, name: str, v18_row: int, dtype=None):
+        """Read a single tile from V18, using the preload cache if available."""
+        if self._v18_cache:
+            # Fast path — contiguous preload block
+            arr = self._v18_cache[name]
+            idx = v18_row - self._v18_start_row
+            raw = arr[idx]
+        else:
+            raw = np.asarray(self.v18[name][v18_row])
+        if dtype is not None:
+            return np.asarray(raw, dtype=dtype)
+        return raw
+
+    def _v18_has(self, name: str) -> bool:
+        return name in self._v18_cache or name in self.v18
+
+    # ------------------------------------------------------------------
+    # Tile loading
+    # ------------------------------------------------------------------
+
     def load(self, row: int) -> TileRecord:
         v18_row = int(self.index["v18_row"][row])
-        minimap = np.asarray(self.v18["minimap_rgb"][v18_row])
-        object_mask = np.asarray(self.v18["object_precise_mask"][v18_row], dtype=np.float32)
-        rendered = (
-            np.asarray(self.v18["no_object_minimap"][v18_row])
-            if self.has_no_object_minimap
-            else None
-        )
-        cleaned, _ = clean_minimap(minimap, object_mask, rendered)
 
-        height = np.asarray(self.v18["height_257"][v18_row], dtype=np.float32)
+        # Minimap: prefer pre-computed cleaned from V24 store (one-time build).
+        if self._has_cleaned:
+            cleaned = np.asarray(self.v24["cleaned_minimap_256"][row], dtype=np.float32)
+        else:
+            minimap_raw = self._v18_read("minimap_rgb", v18_row)
+            rgb = minimap_raw.astype(np.float32)
+            if rgb.max() > 1.5:
+                rgb = rgb / 255.0
+            cleaned = rgb
+
+        object_mask = self._v18_read("object_precise_mask", v18_row, dtype=np.float32)
+        height = self._v18_read("height_257", v18_row, dtype=np.float32)
         synth_outer, synth_inner = lattice.sample_lattice_from_height(height)
 
         return TileRecord(
@@ -94,18 +167,18 @@ class TileSource:
             audit_empty=bool(self.v24["wdl_prior_audit_empty"][row]),
             real_available=bool(self.v24["wdl_prior_real_available"][row]),
             cleaned_minimap=cleaned,
-            alpha=np.asarray(self.v18["alpha_256"][v18_row], dtype=np.float32),
-            normal=np.asarray(self.v18["normal_xyz"][v18_row], dtype=np.float32),
-            mcnr_mask=np.asarray(self.v18["mcnr_mask_257"][v18_row], dtype=np.float32),
+            alpha=self._v18_read("alpha_256", v18_row, dtype=np.float32),
+            normal=self._v18_read("normal_xyz", v18_row, dtype=np.float32),
+            mcnr_mask=self._v18_read("mcnr_mask_257", v18_row, dtype=np.float32),
             object_mask=object_mask,
             liquid_mask=(
-                np.asarray(self.v18["liquid_mask"][v18_row], dtype=np.float32)
-                if "liquid_mask" in self.v18
+                self._v18_read("liquid_mask", v18_row, dtype=np.float32)
+                if self._v18_has("liquid_mask")
                 else np.zeros((256, 256), dtype=np.float32)
             ),
             holes=_normalize_holes(
-                np.asarray(self.v18["holes_16"][v18_row]).astype(bool)
-                if "holes_16" in self.v18
+                self._v18_read("holes_16", v18_row).astype(bool)
+                if self._v18_has("holes_16")
                 else np.zeros((16, 16), dtype=bool)
             ),
             height=height,
@@ -165,6 +238,13 @@ class MultiTileSource:
         record = source.load(local_row)
         record.row = global_row
         return record
+
+    def preload(self, rows: list[int]) -> None:
+        """Preload V18 data for *rows* across all sub-sources."""
+        for offset, source in zip(self._offsets, self.sources):
+            local_rows = [r - offset for r in rows if offset <= r < offset + len(source)]
+            if local_rows:
+                source.preload(local_rows)
 
 
 def _normalize_holes(holes_16: np.ndarray) -> np.ndarray:

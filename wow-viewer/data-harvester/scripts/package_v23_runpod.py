@@ -270,7 +270,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--v22-store-subset-path", action="append", default=None)
     parser.add_argument("--tileset-prune-table", default=None)
     parser.add_argument("--curation-manifest", default=None)
-    parser.add_argument("--include-v22-subset-tiles", type=int, default=8)
+    parser.add_argument("--include-v22-subset-tiles", type=int, default=0,
+                        help="Max V22 tiles per build to include in the bundle. 0 = ship the entire store (default).")
     parser.add_argument("--output-root", type=Path, default=_DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--output-tar", type=Path, default=None)
     parser.add_argument("--archive-format", choices=["tar", "none"], default="tar")
