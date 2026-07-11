@@ -243,7 +243,7 @@ def main() -> int:
         if args.lr == 1e-3:
             args.lr = 1e-4  # LoRA needs higher LR than full fine-tune (DA-V2 uses 5e-6 for full).
         if args.batch_size == 64:
-            args.batch_size = 8  # DA-V2 is 25M params; start conservative.
+            args.batch_size = 4  # DA-V2 256x256 attention is VRAM-hungry; 4 fits 12GB.
         # bf16 is safer than fp16 for SiLogLoss: same dynamic range as fp32,
         # so log() of extreme values won't overflow to inf/NaN.
         if args.amp_dtype == "fp16":
@@ -252,6 +252,14 @@ def main() -> int:
         # corrupting model weights before the scaler can catch inf/NaN.
         if args.grad_clip == 0.0:
             args.grad_clip = 1.0
+        # Gradient checkpointing is essential for DA-V2 on 12GB GPUs.
+        # Without it, 12 transformer layers × 324×324 attention = ~16GB.
+        if not args.gradient_checkpointing:
+            args.gradient_checkpointing = True
+        # Keep data on CPU for DA-V2 — 2011 tiles at 256x256x3ch = ~1.6GB
+        # that's better spent on activation memory.
+        if args.gpu_resident_data:
+            args.gpu_resident_data = False
 
     train_common.set_determinism(args.seed, strict=False)
     train_common.configure_perf(args.cudnn_benchmark)
@@ -306,8 +314,19 @@ def main() -> int:
         # Only train LoRA + patch proj + head (backbone is frozen).
         # Enable gradient checkpointing if requested (before optimizer).
         if args.gradient_checkpointing and hasattr(model.encoder, 'gradient_checkpointing_enable'):
-            model.encoder.gradient_checkpointing_enable()
+            try:
+                model.encoder.gradient_checkpointing_enable(
+                    gradient_checkpointing_kwargs={"use_reentrant": False}
+                )
+            except TypeError:
+                # Older transformers versions don't accept gradient_checkpointing_kwargs.
+                model.encoder.gradient_checkpointing_enable()
             print("gradient checkpointing enabled on DA-V2 encoder")
+        # VRAM diagnostics.
+        if device.type == "cuda":
+            free_bytes, total_bytes = torch.cuda.mem_get_info()
+            print(f"VRAM after model: {total_bytes - free_bytes:.0f} used / {total_bytes:.0f} total "
+                  f"({free_bytes:.0f} free)", flush=True)
 
         if args.use_8bit_optimizer:
             try:

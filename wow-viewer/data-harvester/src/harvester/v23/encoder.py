@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Any
 import copy
 import warnings
 
@@ -196,9 +197,9 @@ class DepthAnythingV2SmallEncoder(nn.Module):
         for parameter in self.patch_embed_projection.parameters():
             parameter.requires_grad = True
 
-    def gradient_checkpointing_enable(self) -> None:
+    def gradient_checkpointing_enable(self, **kwargs: Any) -> None:
         if hasattr(self.backbone, "gradient_checkpointing_enable"):
-            self.backbone.gradient_checkpointing_enable()
+            self.backbone.gradient_checkpointing_enable(**kwargs)
 
     def gradient_checkpointing_disable(self) -> None:
         if hasattr(self.backbone, "gradient_checkpointing_disable"):
