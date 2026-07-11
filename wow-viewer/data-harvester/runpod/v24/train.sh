@@ -30,18 +30,25 @@ EPOCHS_A="${EPOCHS_A:-200}"
 EPOCHS_B="${EPOCHS_B:-1000}"
 PATIENCE_A="${PATIENCE_A:-40}"
 PATIENCE_B="${PATIENCE_B:-100}"
-BATCH_SIZE_A="${BATCH_SIZE_A:-4}"
+BATCH_SIZE_A="${BATCH_SIZE_A:-8}"
 BATCH_SIZE_B="${BATCH_SIZE_B:-8}"
 LORA_RANK="${LORA_RANK:-32}"
-AMP_DTYPE="${AMP_DTYPE:-bf16}"
+LR_A="${LR_A:-1e-4}"
+AMP_DTYPE="${AMP_DTYPE:-fp16}"
 LOG_INTERVAL="${LOG_INTERVAL:-1}"
 SEED="${SEED:-94}"
-# V24.1 DA-V2 flags: pretrained encoder + LoRA + DPT head.
-DAV2_FLAGS="--dav2 --loss-type hybrid --scheduler cosine --lora-rank $LORA_RANK --8bit-optimizer --gradient-checkpointing --grad-clip 1.0"
+
+# V24.1 DA-V2 flags for 24GB RunPod GPU.
+# Pure L1 loss (SiLogLoss caused instability + val/train mismatch).
+# Regular AdamW (8-bit optimizer lost precision; not needed on 24GB).
+# No gradient clipping (was too aggressive at 1.0, prevented learning).
+# No gradient checkpointing (24GB has enough VRAM for batch 8 without it).
+# fp16 (faster than bf16 on Ampere/Ada; no SiLogLoss log overflow risk).
+DAV2_FLAGS="--dav2 --loss-type l1 --scheduler cosine --lora-rank $LORA_RANK"
 
 echo "[v24.1] RunPod train: v24_stores=${V24_STORES[*]} v18_stores=${V18_STORES[*]}"
 echo "[v24.1] run_name=$RUN_NAME output_dir=$OUTPUT_DIR"
-echo "[v24.1] Stage A: DA-V2-Small + LoRA-$LORA_RANK, batch=$BATCH_SIZE_A, $AMP_DTYPE, grad-checkpointing, 8bit-optimizer"
+echo "[v24.1] Stage A: DA-V2-Small + LoRA-$LORA_RANK, batch=$BATCH_SIZE_A, lr=$LR_A, $AMP_DTYPE, L1 loss"
 
 uv run python scripts/train_v24_stage_a.py \
   --v24-store "${V24_STORES[@]}" \
@@ -50,6 +57,7 @@ uv run python scripts/train_v24_stage_a.py \
   --epochs "$EPOCHS_A" \
   --patience "$PATIENCE_A" \
   --batch-size "$BATCH_SIZE_A" \
+  --lr "$LR_A" \
   --amp-dtype "$AMP_DTYPE" \
   --device cuda \
   --log-interval "$LOG_INTERVAL" \

@@ -282,8 +282,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--epochs-b", type=int, default=1000)
     parser.add_argument("--patience-a", type=int, default=40)
     parser.add_argument("--patience-b", type=int, default=100)
-    parser.add_argument("--batch-size-a", type=int, default=4,
-                        help="Stage A batch size (V24.1 DA-V2 default: 4 for 24GB GPUs)")
+    parser.add_argument("--batch-size-a", type=int, default=8,
+                        help="Stage A batch size (V24.1 DA-V2 on 24GB: 8 without gradient checkpointing)")
     parser.add_argument("--batch-size-b", type=int, default=8,
                         help="Stage B batch size")
     parser.add_argument("--lora-rank", type=int, default=32,
@@ -293,8 +293,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                          help="Stage A autotune candidates (V24.1 DA-V2: small batch sizes for 24GB)")
     parser.add_argument("--autotune-candidates-b", nargs="+", type=int,
                          default=[2, 4, 8, 12, 16, 24, 32])
-    parser.add_argument("--amp-dtype", choices=["fp16", "bf16"], default="bf16",
-                        help="mixed precision dtype (V24.1 DA-V2 defaults to bf16 for SiLogLoss stability)")
+    parser.add_argument("--amp-dtype", choices=["fp16", "bf16"], default="fp16",
+                        help="mixed precision dtype (fp16 faster on 24GB; bf16 safer for SiLogLoss but we use L1)")
     parser.add_argument("--log-interval", type=int, default=20)
     parser.add_argument("--seed", type=int, default=94)
     parser.add_argument("--dry-run", action="store_true", default=False)

@@ -31,6 +31,7 @@ fi
 echo "[v24.1] smoke: v24_stores=${V24_STORES[*]} v18_stores=${V18_STORES[*]} device=$DEVICE"
 
 # V24.1 DA-V2 smoke: 2 epochs, 8 tiles, small LoRA rank for fast verification.
+# Uses L1 loss + fp16 + regular AdamW (24GB RunPod defaults).
 uv run python scripts/train_v24_stage_a.py \
   --v24-store "${V24_STORES[@]}" \
   --v18-store "${V18_STORES[@]}" \
@@ -40,11 +41,9 @@ uv run python scripts/train_v24_stage_a.py \
   --batch-size 2 \
   --dav2 \
   --lora-rank 8 \
-  --loss-type hybrid \
+  --loss-type l1 \
   --scheduler cosine \
-  --amp-dtype bf16 \
-  --gradient-checkpointing \
-  --grad-clip 1.0 \
+  --amp-dtype fp16 \
   --device "$DEVICE" \
   --log-interval 1 \
   --seed 42 \
@@ -62,7 +61,7 @@ uv run python scripts/train_v24_stage_b.py \
   --epochs 2 \
   --limit 8 \
   --batch-size 2 \
-  --amp-dtype bf16 \
+  --amp-dtype fp16 \
   --device "$DEVICE" \
   --log-interval 1 \
   --seed 42 \
