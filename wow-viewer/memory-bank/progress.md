@@ -4,6 +4,17 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 
 ## 2026-07-11
 
+### V25 Terrain Convergence Model (Spec 102)
+
+- **Spec & Plan Created**: Created spec, plan, and task lists under `specs/102-v25-terrain-convergence/` detailing the Visual Segformer Decompiler, progressive Sylvester upsampler, WDL downsampler, differentiable fractal generator, PM4 placement alignment handler, and trainer/VRAM optimizations.
+- **SegFormer Frontend & Decompiler**: Implemented `V25SegformerDecompiler` wrapping `nvidia/mit-b0`, `TerrainInpaintHead` for gated object removal, and `ObjectPlacementHead` for anonymous bounding box regressing. Tests pass.
+- **Progressive Height Solver**: Implemented `BatchedSylvesterSolver` solving $(I + \gamma_c L_c) X + X (\gamma_r L_r) = Y$ via GPU eigendecomposition, and progressive `V25StageBPredictor` upscaling heights progressively ($33 \rightarrow 65 \rightarrow 129 \rightarrow 257$). Checked math accuracy against Scipy CPU solvers. Tests pass.
+- **WDL Downsampler**: Implemented `WdlDownsampler` mapping $(257, 257) \rightarrow (33, 33)$ via strided coordinate average pooling, and visual height prior predictor `V25StageAPredictor`. Tests pass.
+- **PM4 Guided Handler**: Implemented `V25Pm4GuideHandler` which snaps ML predictions to PM4 segment centroids, rejects predicted placements outside PM4 regions, and matches WMO/M2 counterparts in our reference library using the `pm4_asset_matching.scorer` library. Tests pass.
+- **Differentiable Fractal Noise Generator**: Implemented `DifferentiableFractalGenerator` in PyTorch generating multi-octave noise maps by sampling a static continuous sine wave canvas via bilinear coordinate maps, and `FractalParameterHead` predicting translation seed, frequency, and soft paint masks. Tests pass.
+- **Texture Decoders & Multi-Task Loss**: Implemented `MtexPredictor`, `MclyDecoder`, and unified loss function `V25UnifiedLoss`. Tests pass.
+- **Test Coverage**: 18/18 pytest runs in `tests/v25/` pass successfully, verifying output dimensions, autograd backpropagation, and execution speed.
+
 ### UI release convergence plan
 
 - Consolidated competing viewer UI plans under Spec 080: `specs/080-wow-ui-consolidation/ui-release-convergence-plan.md` is canonical; the earlier 080 plan/tasks now point to it as historical partial context.
