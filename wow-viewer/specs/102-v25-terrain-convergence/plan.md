@@ -16,7 +16,7 @@ The V25 model (`V25SegformerDecompiler`) is a completely universal neural networ
 
 Decoupled components:
 - **Differentiable Fractal Noise Generator**: Predicts parameters (translation seeds, frequency, scale) to generate MCAL alpha maps, ensuring 100% out-of-distribution generalization.
-- **PM4-Guided Post-Processing Handler (`V25Pm4GuideHandler`)**: A modular post-processing utility. It is **completely separate** from the main neural network architecture. When `--pm4` is passed at inference, the handler snaps predicted object coordinates to PM4 segment centroids and matches WMO/M2 names via the `pm4_asset_matching` library.
+- **PM4-Guided Post-Processing Handler (`V25Pm4GuideHandler`)**: A modular post-processing utility. It is **completely separate** from the main neural network architecture. At inference, the handler snaps predicted object coordinates to PM4 segment centroids and matches WMO/M2 names via the `pm4_asset_matching` library. To prevent parser duplication, it consumes pre-parsed database segment structures (`Pm4SegmentSignalRecord`) loaded from the Zarr data store, rather than opening binary `.pm4` files.
 - **8 GB VRAM Constraint**: Optimized training pipeline (gradient checkpointing, 8-bit AdamW, and Zarr slice preloading) ensuring compatibilty with consumer GPUs.
 - **Zarr Output Datastore**: All inputs and outputs must pass through Zarr. The inference CLI writes the predicted terrain geometry, objects, and textures directly into a structured Zarr group store with lightweight Blosc LZ4 level 1 compression (no random array files on disk). This aligns with the repository's standard data structure, allowing downstream tooling to easily slice, query, and process the model outputs.
 
@@ -93,7 +93,7 @@ wow-viewer/
 - **Approach**:
   - `V25Pm4GuideHandler` operates only at inference. It is never invoked during network training or loss evaluations.
   - Snaps predicted object translations to nearby PM4 segment centroids.
-  - Resolves asset names by running `harvester.pm4_asset_matching.scorer` on the PM4 bounds.
+  - Resolves asset names by running `harvester.pm4_asset_matching.scorer` on the pre-parsed bounds dataset.
 
 ---
 
@@ -122,4 +122,4 @@ wow-viewer/
 - **Approach**:
   - `train_v25_decompiler.py` trains the decompiler.
   - Integrates `--gradient-checkpointing`, `--8bit-optimizer`, and `TileSource.preload()` from our training codebase.
-  - `infer_v25_decompiler.py` runs inference. If `--pm4` is passed, runs `V25Pm4GuideHandler` on the predictions, and outputs predicted heights ($257\times257$ & $33\times33$), objects, and textures directly to a structured Zarr group store with Blosc LZ4 level 1 compression.
+  - `infer_v25_decompiler.py` runs inference. If PM4 guide database query is requested, runs `V25Pm4GuideHandler` on the predictions using loaded database records, and outputs predicted heights ($257\times257$ & $33\times33$), objects, and textures directly to a structured Zarr group store with Blosc LZ4 level 1 compression.

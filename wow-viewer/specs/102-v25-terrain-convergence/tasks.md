@@ -47,8 +47,8 @@ This document contains the step-by-step tasks for the V25 SegFormer Decompiler a
 
 - [x] **T012 [US1] Author `data-harvester/src/harvester/v25/pm4_guide.py`**:
   - Implement `V25Pm4GuideHandler` as a standalone post-processing class.
-  - Implement snapping logic to align predicted object coordinates to PM4 segment centroids.
-  - Integrate `harvester.pm4_asset_matching.scorer` to resolve WMO/M2 counterparts from PM4 bounds.
+  - Implement snapping logic to align predicted object coordinates to pre-parsed PM4 segment centroids loaded from the database.
+  - Integrate `harvester.pm4_asset_matching.scorer` to resolve WMO/M2 counterparts from segment bounds.
 - [x] **T013 [US1] Author `data-harvester/tests/v25/test_pm4_guide.py`**:
   - Test coordinate snapping, asset match verification, and out-of-bounds predicted mask rejection.
 - [x] **T014 [US1] Checkpoint Phase 4**:
@@ -90,6 +90,6 @@ This document contains the step-by-step tasks for the V25 SegFormer Decompiler a
 - [ ] **T023 [US1] Author `data-harvester/scripts/validate_v25.py` and `infer_v25_decompiler.py`**:
   - Implement validation evaluation metrics.
   - Implement inference script that exports predicted heights ($257\times257$ & $33\times33$), objects, and textures directly into a structured Zarr group store with Blosc LZ4 level 1 compression.
-  - If `--pm4` is passed, runs `V25Pm4GuideHandler` on the predictions prior to export.
+  - Snaps predicted object placements against database PM4 segment records when requested.
 - [ ] **T024 [US1] Checkpoint Phase 7**:
   - Run a 1-epoch training smoke pass and export a test prediction to the Zarr store.

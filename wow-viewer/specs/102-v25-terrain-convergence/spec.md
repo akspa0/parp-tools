@@ -17,7 +17,7 @@
 - `docs/architecture/wowfileformatdefs-vision-2026-06-16.md` (MTEX, MCLY, MCAL structure)
 - `docs/architecture/v22-dataset-signals-2026-06-30.md` (Zarr signals)
 
-**Input**: User description — "the output of the model should be a zarr dataset, not random numpy arrays on disk. All the data we process in and out must be via zarr. do not compress the data beyond level 1. keep it simple. every input generates output signals, so store the signals as they are, in a dataset..."
+**Input**: User description — "pm4 files cannot be processed solely one by one, we already handle reading the data properly in our c# tooling, stop reinventing things that we have already"
 
 ---
 
@@ -25,11 +25,11 @@
 
 The terrain decompiler and texture convergence model must be **completely universal** to process any map from a single raw RGB minimap image.
 
-To keep data structures uniform, all data inputs and inference outputs are managed through **Zarr datasets**. The inference CLI writes the predicted terrain geometry, objects, and textures directly into a structured Zarr store (using lightweight Blosc LZ4 compression at level 1). The existing C# terrain compiler and downstream tooling read from this structured Zarr dataset to compile game-ready binary files or render previews.
+To prevent duplicating PM4 file parsers, all PM4 binary parsing and cataloging are handled by our existing C# tooling. The resulting PM4 segment data is stored in the database / Zarr stores. The post-processing alignment handler (`V25Pm4GuideHandler`) does not parse raw PM4 files; instead, it consumes pre-parsed lists of segment boundary signals (`Pm4SegmentSignalRecord`) loaded from our Zarr databases.
 
 The system is decoupled into two separate parts:
 1.  **Universal Decompiler Model (`V25SegformerDecompiler`)**: A neural network that runs from a single raw RGB minimap tile and predicts detailed heights, object instance bounds/rotations, MTEX selectors, MCLY assignments, and MCAL alpha maps (using a **Differentiable Fractal Noise Generator** to represent repeating artist brushes). It has **no** PM4 dependencies.
-2.  **PM4 Guided Post-Processing Handler (`V25Pm4GuideHandler`)**: A separate CLI/utility class. When a PM4 file is passed during inference (`--pm4`), it snaps the universal model's predicted object coordinates to PM4 segment bounds and matches WMO/M2 models from the asset library.
+2.  **PM4 Guided Post-Processing Handler (`V25Pm4GuideHandler`)**: A separate utility class. It takes predicted placements and aligns them to pre-parsed PM4 segment boundary signals loaded from the database.
 
 The pipeline runs entirely offline within an **8 GB / 10 GB VRAM GPU** limit using gradient checkpointing, 8-bit AdamW, and Zarr slice preloading.
 
@@ -52,14 +52,14 @@ The user drops a custom minimap PNG (e.g. from an expansion or custom edit) with
 
 ### User Story 2 — Separate PM4-Guided Post-Processing (Priority: P1)
 
-The user runs inference on a development map and supplies the corresponding PM4 file. The CLI invokes the post-processing handler to snap predicted placements to PM4 centroids and matches WMO/M2 models, producing the final aligned development arrays in the Zarr dataset.
+The user runs inference on a development map. The CLI invokes the post-processing handler to snap predicted placements to PM4 centroids and matches WMO/M2 models, producing the final aligned development arrays in the Zarr dataset.
 
 **Why this priority**: Bounded development map reconstruction.
 
 **Independent Test**: Verify that the PM4 handler runs as a separate step on top of the universal network's output predictions.
 
 **Acceptance Scenarios**:
-1. **Given** predicted object placements from the universal model, **When** passed through the separate `V25Pm4GuideHandler` alongside a PM4 file, **Then** coordinates snap to PM4 centroids and names are resolved.
+1. **Given** predicted object placements from the universal model, **When** passed through the separate `V25Pm4GuideHandler` alongside pre-parsed segment bounds, **Then** coordinates snap to centroids and names are resolved.
 
 ---
 
@@ -82,7 +82,7 @@ The user runs inference on a development map and supplies the corresponding PM4 
 
 #### Slice 4: Decoupled PM4 Reconstruction Utility (Stage 4)
 - **FR-102-401**: PM4 matching code MUST live entirely separate from the main neural network forward and backward pipelines.
-- **FR-102-402**: `V25Pm4GuideHandler` is a post-processing step running on top of predicted placements to snap coordinates and rank WMO/M2 names via `pm4_asset_matching.scorer`.
+- **FR-102-402**: `V25Pm4GuideHandler` is a post-processing step running on top of predicted placements to snap coordinates and rank WMO/M2 names via `pm4_asset_matching.scorer`. It consumes pre-parsed database segment structures (`Pm4SegmentSignalRecord`) instead of reading raw `.pm4` files.
 
 #### Slice 5: Trainer Memory & Zarr Optimizations
 - **FR-102-501**: Training code MUST implement `--gradient-checkpointing` and `--8bit-optimizer` flags.
@@ -95,7 +95,7 @@ The user runs inference on a development map and supplies the corresponding PM4 
 ### Measurable Outcomes
 
 - **SC-102-001**: Main model training fits on an 8 GB VRAM GPU (peak CUDA VRAM $< 7.0$ GB).
-- **SC-102-002**: PM4 guided snapping and name matching operates as a post-processing CLI step (`--pm4`).
+- **SC-102-002**: PM4 guided snapping and name matching operates as a post-processing CLI step using pre-parsed database records.
 - **SC-102-003**: Reconstructed MCAL `alpha_256` maps achieve an SSIM $\geq 0.85$ on validation sets using predicted fractal parameters.
 - **SC-102-004**: High-res heights and WDL priors are mathematically aligned.
 - **SC-102-005**: SegFormer semantic object footprint segmentation achieves an IoU $\geq 0.85$.
@@ -104,8 +104,8 @@ The user runs inference on a development map and supplies the corresponding PM4 
 
 ## What This Spec Does NOT Do
 
-- **No PM4 neural layers**: The neural network weights have no knowledge of PM4 files or coordinate schemas.
-- **No Python ADT Format Writer**: The model outputs are written directly to a structured Zarr dataset store to be compiled or consumed by other tooling.
+- **No PM4 binary file parser**: Python code does not open or parse binary PM4 files; it reads pre-extracted segment record schemas loaded by the dataset builder.
+- **No Python ADT Format Writer**: The model outputs are written directly to a structured Zarr dataset store to be compiled or consumed by other C# tooling.
 
 ---
 
