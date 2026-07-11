@@ -24,44 +24,39 @@ if [ "${#V24_STORES[@]}" -eq 0 ]; then
   exit 1
 fi
 
-RUN_NAME="${RUN_NAME:-v24_runpod_train}"
+RUN_NAME="${RUN_NAME:-v241_runpod_train}"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/models/v24/runs/$RUN_NAME}"
 EPOCHS_A="${EPOCHS_A:-200}"
 EPOCHS_B="${EPOCHS_B:-1000}"
 PATIENCE_A="${PATIENCE_A:-40}"
 PATIENCE_B="${PATIENCE_B:-100}"
-SYNTH_DROPOUT="${SYNTH_DROPOUT:-0.5}"
-BATCH_SIZE_A="${BATCH_SIZE_A:-64}"
-BATCH_SIZE_B="${BATCH_SIZE_B:-24}"
-AUTOTUNE_CANDIDATES_A="${AUTOTUNE_CANDIDATES_A:-16 32 64 96 128 192 256 384 512}"
-AUTOTUNE_CANDIDATES_B="${AUTOTUNE_CANDIDATES_B:-2 4 8 12 16 24 32 48 64 96}"
-AMP_DTYPE="${AMP_DTYPE:-fp16}"
-LOG_INTERVAL="${LOG_INTERVAL:-20}"
+BATCH_SIZE_A="${BATCH_SIZE_A:-4}"
+BATCH_SIZE_B="${BATCH_SIZE_B:-8}"
+LORA_RANK="${LORA_RANK:-32}"
+AMP_DTYPE="${AMP_DTYPE:-bf16}"
+LOG_INTERVAL="${LOG_INTERVAL:-1}"
 SEED="${SEED:-94}"
+# V24.1 DA-V2 flags: pretrained encoder + LoRA + DPT head.
+DAV2_FLAGS="--dav2 --loss-type hybrid --scheduler cosine --lora-rank $LORA_RANK --8bit-optimizer --gradient-checkpointing --grad-clip 1.0"
 
-read -r -a AUTOTUNE_A_ARGS <<< "$AUTOTUNE_CANDIDATES_A"
-read -r -a AUTOTUNE_B_ARGS <<< "$AUTOTUNE_CANDIDATES_B"
+echo "[v24.1] RunPod train: v24_stores=${V24_STORES[*]} v18_stores=${V18_STORES[*]}"
+echo "[v24.1] run_name=$RUN_NAME output_dir=$OUTPUT_DIR"
+echo "[v24.1] Stage A: DA-V2-Small + LoRA-$LORA_RANK, batch=$BATCH_SIZE_A, $AMP_DTYPE, grad-checkpointing, 8bit-optimizer"
 
-echo "[v24] RunPod train: v24_stores=${V24_STORES[*]} v18_stores=${V18_STORES[*]}"
-echo "[v24] run_name=$RUN_NAME output_dir=$OUTPUT_DIR"
-
-echo "[v24] Stage A: epochs=$EPOCHS_A patience=$PATIENCE_A batch_size=$BATCH_SIZE_A (autotuned)"
 uv run python scripts/train_v24_stage_a.py \
   --v24-store "${V24_STORES[@]}" \
   --v18-store "${V18_STORES[@]}" \
   --output "$OUTPUT_DIR/stage_a" \
   --epochs "$EPOCHS_A" \
   --patience "$PATIENCE_A" \
-  --synth-dropout "$SYNTH_DROPOUT" \
   --batch-size "$BATCH_SIZE_A" \
-  --autotune-batch-size \
-  --autotune-batch-candidates "${AUTOTUNE_A_ARGS[@]}" \
   --amp-dtype "$AMP_DTYPE" \
   --device cuda \
   --log-interval "$LOG_INTERVAL" \
-  --seed "$SEED"
+  --seed "$SEED" \
+  $DAV2_FLAGS
 
-echo "[v24] Stage B: epochs=$EPOCHS_B patience=$PATIENCE_B batch_size=$BATCH_SIZE_B (autotuned)"
+echo "[v24.1] Stage B: epochs=$EPOCHS_B patience=$PATIENCE_B batch_size=$BATCH_SIZE_B"
 uv run python scripts/train_v24_stage_b.py \
   --v24-store "${V24_STORES[@]}" \
   --v18-store "${V18_STORES[@]}" \
@@ -70,11 +65,9 @@ uv run python scripts/train_v24_stage_b.py \
   --epochs "$EPOCHS_B" \
   --patience "$PATIENCE_B" \
   --batch-size "$BATCH_SIZE_B" \
-  --autotune-batch-size \
-  --autotune-batch-candidates "${AUTOTUNE_B_ARGS[@]}" \
   --amp-dtype "$AMP_DTYPE" \
   --device cuda \
   --log-interval "$LOG_INTERVAL" \
   --seed "$SEED"
 
-echo "[v24] done: $OUTPUT_DIR/stage_a/stage_a.pt + $OUTPUT_DIR/stage_b/stage_b.pt"
+echo "[v24.1] done: $OUTPUT_DIR/stage_a/stage_a.pt + $OUTPUT_DIR/stage_b/stage_b.pt"

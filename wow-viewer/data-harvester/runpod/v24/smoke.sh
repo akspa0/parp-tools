@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEVICE="${DEVICE:-cuda}"
-RUN_NAME="${RUN_NAME:-smoke_v24}"
+RUN_NAME="${RUN_NAME:-smoke_v241}"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/models/v24/runs/$RUN_NAME}"
 
 cd "$ROOT_DIR"
@@ -28,32 +28,45 @@ if [ "${#V24_STORES[@]}" -eq 0 ]; then
   exit 1
 fi
 
-echo "[v24] smoke: v24_stores=${V24_STORES[*]} v18_stores=${V18_STORES[*]} device=$DEVICE"
+echo "[v24.1] smoke: v24_stores=${V24_STORES[*]} v18_stores=${V18_STORES[*]} device=$DEVICE"
 
+# V24.1 DA-V2 smoke: 2 epochs, 8 tiles, small LoRA rank for fast verification.
 uv run python scripts/train_v24_stage_a.py \
   --v24-store "${V24_STORES[@]}" \
   --v18-store "${V18_STORES[@]}" \
   --output "$OUTPUT_DIR/stage_a" \
   --epochs 2 \
-  --limit 16 \
+  --limit 8 \
+  --batch-size 2 \
+  --dav2 \
+  --lora-rank 8 \
+  --loss-type hybrid \
+  --scheduler cosine \
+  --amp-dtype bf16 \
+  --gradient-checkpointing \
+  --grad-clip 1.0 \
   --device "$DEVICE" \
   --log-interval 1 \
   --seed 42 \
   "$@"
 
 test -f "$OUTPUT_DIR/stage_a/stage_a.pt"
+echo "[v24.1] Stage A smoke passed"
 
+# Stage B smoke: 2 epochs, 8 tiles.
 uv run python scripts/train_v24_stage_b.py \
   --v24-store "${V24_STORES[@]}" \
   --v18-store "${V18_STORES[@]}" \
   --stage-a-checkpoint "$OUTPUT_DIR/stage_a/stage_a.pt" \
   --output "$OUTPUT_DIR/stage_b" \
   --epochs 2 \
-  --limit 16 \
+  --limit 8 \
+  --batch-size 2 \
+  --amp-dtype bf16 \
   --device "$DEVICE" \
   --log-interval 1 \
   --seed 42 \
   "$@"
 
 test -f "$OUTPUT_DIR/stage_b/stage_b.pt"
-echo "[v24] smoke passed"
+echo "[v24.1] smoke passed"

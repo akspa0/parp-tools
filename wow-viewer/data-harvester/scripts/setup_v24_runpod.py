@@ -1,10 +1,10 @@
-"""Create a RunPod Pod for the Spec 094 V24 bundle (WDL prior + lattice detailer).
+"""Create a RunPod Pod for the Spec 101 V24.1 DA-V2 bundle.
 
-Unlike V23/spec089 (DA-V2 encoder, GB-scale V22 corpus, needs a persistent
-network volume), V24 trains two small from-scratch conv nets (<= 2M params
-combined) on a bundle that is only a few GB including its right-sized data
-subset. The whole thing ships inside the bootstrap tar over `runpodctl send`,
-so no network volume is required by default, and a modest/cheap GPU is plenty.
+V24.1 uses a DA-V2-Small pretrained encoder (24.8M params, DINOv2 backbone)
+with LoRA adapters and a DPT head. This needs a 24GB GPU (RTX 3090/4090/A10)
+for training with gradient checkpointing + 8-bit optimizer + bf16. The bundle
+ships inside the bootstrap tar over `runpodctl send`; no network volume is
+required by default, but one is recommended for HF model cache persistence.
 """
 
 from __future__ import annotations
@@ -26,11 +26,13 @@ import setup_spec077_runpod as base  # noqa: E402
 DEFAULT_IMAGE = "runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04"
 DEFAULT_GPU_TYPE = "NVIDIA GeForce RTX 3090"
 DEFAULT_OUTPUT_ROOT = Path(__file__).resolve().parents[2] / "output" / "cloud-packages" / "v24"
+# V24.1 DA-V2 needs 24GB VRAM for gradient checkpointing + bf16 training.
 DEFAULT_PREFERRED_GPU_IDS = [
-    "NVIDIA GeForce RTX 3090",
-    "NVIDIA RTX A4000",
-    "NVIDIA GeForce RTX 4070",
-    "NVIDIA GeForce RTX 4090",
+    "NVIDIA GeForce RTX 3090",      # 24GB, cheapest 24GB option
+    "NVIDIA GeForce RTX 4090",      # 24GB, faster
+    "NVIDIA RTX A5000",             # 24GB, workstation
+    "NVIDIA GeForce RTX 5090",      # 32GB, newest
+    "NVIDIA RTX A6000",             # 48GB, headroom
 ]
 
 
@@ -93,7 +95,7 @@ def _build_bootstrap_start_cmd(args: argparse.Namespace) -> str | None:
             lines.append(base._build_scp_bootstrap_wait_cmd(archive_name))
         else:
             lines.extend([
-                f"echo Waiting for Spec 094 package via runpodctl code {_shell_quote(transfer_code)}",
+                f"echo Waiting for Spec 101 package via runpodctl code {_shell_quote(transfer_code)}",
                 f"if ! runpodctl receive {_shell_quote(transfer_code)}; then",
                 "  echo",
                 "  echo 'runpodctl receive failed.'",
@@ -106,7 +108,7 @@ def _build_bootstrap_start_cmd(args: argparse.Namespace) -> str | None:
     else:
         lines.append(f"echo 'Network volume mode: bundle expected at /workspace/{archive_name}'")
         lines.extend([
-            f"echo Waiting for Spec 094 package via runpodctl code {_shell_quote(transfer_code)}",
+            f"echo Waiting for Spec 101 package via runpodctl code {_shell_quote(transfer_code)}",
             f"if ! runpodctl receive {_shell_quote(transfer_code)}; then",
             "  echo",
             "  echo 'runpodctl receive failed.'",
@@ -136,8 +138,7 @@ def _build_bootstrap_start_cmd(args: argparse.Namespace) -> str | None:
                     f"PATIENCE_B={int(args.patience_b)} "
                     f"BATCH_SIZE_A={int(args.batch_size_a)} "
                     f"BATCH_SIZE_B={int(args.batch_size_b)} "
-                    f"AUTOTUNE_CANDIDATES_A={_shell_quote(autotune_a)} "
-                    f"AUTOTUNE_CANDIDATES_B={_shell_quote(autotune_b)} "
+                    f"LORA_RANK={int(args.lora_rank)} "
                     f"AMP_DTYPE={_shell_quote(args.amp_dtype)} "
                     f"LOG_INTERVAL={int(args.log_interval)} "
                     f"SEED={int(args.seed)} "
@@ -192,7 +193,7 @@ def _write_setup_manifest(
 ) -> Path:
     path = output_root / f"runpod_setup_{package.package_name}.json"
     payload = {
-        "schema": "spec-094-runpod-setup",
+        "schema": "spec-101-v241-runpod-setup",
         "created_utc": base.datetime.now(base.timezone.utc).isoformat(),
         "dry_run": dry_run,
         "package": {
@@ -215,7 +216,9 @@ def _write_setup_manifest(
         "notes": [
             "RUNPOD_API_KEY is used only for REST calls and is not written to this manifest.",
             "Bundle bootstrap path is runpod/v24/install_deps.sh -> verify_bundle.sh -> smoke.sh -> train.sh.",
+            "V24.1 DA-V2: install_deps.sh downloads DA-V2-Small weights from HuggingFace to HF_HOME.",
             "No network volume by default: the V24 bundle (right-sized V18 subset + V24 store) ships inside the tar.",
+            "A network volume is recommended for HF model cache persistence across Pod restarts.",
         ],
     }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -236,13 +239,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--overwrite-package", action="store_true", default=False)
     parser.add_argument("--skip-package", action="store_true", default=False)
     parser.add_argument("--no-package-tests", action="store_true", default=False)
-    parser.add_argument("--pod-name", type=str, default="spec094-v24")
+    parser.add_argument("--pod-name", type=str, default="spec101-v241")
     parser.add_argument("--gpu-type", type=str, default=DEFAULT_GPU_TYPE)
     parser.add_argument("--gpu-types", nargs="*", default=None)
     parser.add_argument("--gpu-fallback", dest="gpu_fallback", action="store_true", default=True)
     parser.add_argument("--no-gpu-fallback", dest="gpu_fallback", action="store_false")
-    parser.add_argument("--min-gpu-vram-gb", type=int, default=8)
-    parser.add_argument("--max-cost-per-hour", type=float, default=0.40)
+    parser.add_argument("--min-gpu-vram-gb", type=int, default=20,
+                        help="minimum GPU VRAM in GB (V24.1 DA-V2 needs 20+ for gradient checkpointing + bf16)")
+    parser.add_argument("--max-cost-per-hour", type=float, default=0.80,
+                        help="max cost per hour for GPU cost targeting (24GB GPUs are ~$0.40-0.80/hr)")
     parser.add_argument("--no-cost-target", dest="no_cost_target", action="store_true", default=False)
     parser.add_argument("--image-name", type=str, default=DEFAULT_IMAGE)
     parser.add_argument("--cloud-type", choices=["SECURE", "COMMUNITY"], default="SECURE",
@@ -258,7 +263,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--use-network-volume", dest="use_network_volume", action="store_true", default=False)
     parser.add_argument("--no-network-volume", dest="use_network_volume", action="store_false")
     parser.add_argument("--network-volume-id", type=str, default=None)
-    parser.add_argument("--network-volume-name", type=str, default="spec094-v24")
+    parser.add_argument("--network-volume-name", type=str, default="spec101-v241")
     parser.add_argument("--network-volume-gb", type=int, default=20)
     parser.add_argument("--auto-transfer", dest="auto_transfer", action="store_true", default=True)
     parser.add_argument("--no-auto-transfer", dest="auto_transfer", action="store_false")
@@ -272,18 +277,24 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--transfer-code", type=str, default=None)
     parser.add_argument("--auto-start-training", dest="auto_start_training", action="store_true", default=True)
     parser.add_argument("--no-auto-start-training", dest="auto_start_training", action="store_false")
-    parser.add_argument("--run-name", type=str, default="v24_runpod_train")
+    parser.add_argument("--run-name", type=str, default="v241_runpod_train")
     parser.add_argument("--epochs-a", type=int, default=200)
     parser.add_argument("--epochs-b", type=int, default=1000)
     parser.add_argument("--patience-a", type=int, default=40)
     parser.add_argument("--patience-b", type=int, default=100)
-    parser.add_argument("--batch-size-a", type=int, default=64)
-    parser.add_argument("--batch-size-b", type=int, default=24)
+    parser.add_argument("--batch-size-a", type=int, default=4,
+                        help="Stage A batch size (V24.1 DA-V2 default: 4 for 24GB GPUs)")
+    parser.add_argument("--batch-size-b", type=int, default=8,
+                        help="Stage B batch size")
+    parser.add_argument("--lora-rank", type=int, default=32,
+                        help="LoRA adapter rank for DA-V2 encoder (default 32)")
     parser.add_argument("--autotune-candidates-a", nargs="+", type=int,
-                         default=[16, 32, 64, 96, 128, 192, 256, 384, 512])
+                         default=[2, 4, 8, 12, 16],
+                         help="Stage A autotune candidates (V24.1 DA-V2: small batch sizes for 24GB)")
     parser.add_argument("--autotune-candidates-b", nargs="+", type=int,
-                         default=[2, 4, 8, 12, 16, 24, 32, 48, 64, 96])
-    parser.add_argument("--amp-dtype", choices=["fp16", "bf16"], default="fp16")
+                         default=[2, 4, 8, 12, 16, 24, 32])
+    parser.add_argument("--amp-dtype", choices=["fp16", "bf16"], default="bf16",
+                        help="mixed precision dtype (V24.1 DA-V2 defaults to bf16 for SiLogLoss stability)")
     parser.add_argument("--log-interval", type=int, default=20)
     parser.add_argument("--seed", type=int, default=94)
     parser.add_argument("--dry-run", action="store_true", default=False)
@@ -297,9 +308,9 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     output_root = args.output_root.resolve()
     output_root.mkdir(parents=True, exist_ok=True)
-    package_name = args.package_name or f"spec094_v24_bundle_{base._utc_stamp()}"
+    package_name = args.package_name or f"spec101_v241_bundle_{base._utc_stamp()}"
     args._resolved_package_name = package_name
-    args._resolved_transfer_code = args.transfer_code or f"spec094-{secrets.token_hex(4)}"
+    args._resolved_transfer_code = args.transfer_code or f"spec101-{secrets.token_hex(4)}"
 
     if args.skip_package:
         package = base.PackageResult(

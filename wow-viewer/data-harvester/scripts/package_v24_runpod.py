@@ -37,8 +37,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wowviewer-harvester-v24-bundle"
-version = "0.1.0"
-description = "Spec 094 V24 RunPod bundle"
+version = "0.2.0"
+description = "Spec 101 V24.1 DA-V2 RunPod bundle"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=2.0",
@@ -46,6 +46,11 @@ dependencies = [
     "torch>=2.5",
     "zarr>=2.0",
     "numcodecs>=0.13",
+    "transformers>=4.40",
+    "peft>=0.10",
+    "bitsandbytes>=0.43",
+    "scipy>=1.13",
+    "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]
@@ -65,6 +70,11 @@ pyarrow>=24.0.0
 torch>=2.5
 zarr>=2.0
 numcodecs>=0.13
+transformers>=4.40
+peft>=0.10
+bitsandbytes>=0.43
+scipy>=1.13
+Pillow>=10.0
 pytest>=8.0
 """
 
@@ -84,6 +94,7 @@ _SOURCE_FILES = (
 
 _SOURCE_DIRS = (
     "src/harvester/v24",
+    "src/harvester/v23",  # DA-V2 encoder (DepthAnythingV2SmallEncoder) lives here.
     "tests/v24",
 )
 
@@ -143,11 +154,22 @@ def _write_bundle_runtime_files(bundle_root: Path) -> None:
     (bundle_root / "pyproject.toml").write_text(_BUNDLE_PYPROJECT, encoding="utf-8")
     (bundle_root / "requirements-runpod.txt").write_text(_BUNDLE_REQUIREMENTS, encoding="utf-8")
     readme = (
-        "# Spec 094 V24 RunPod Bundle\n\n"
-        "Ships the V24 Python trainer/inference code plus a right-sized V24 store\n"
-        "(priors/confidence/source) and a compacted V18 substrate subset (only the\n"
-        "fields and rows V24 training reads). No game client files, no C# tooling\n"
-        "(the WDL shim is only needed to *build* the V24 store, not to train on it).\n"
+        "# Spec 101 V24.1 DA-V2 RunPod Bundle\n\n"
+        "Ships the V24.1 Python trainer (DA-V2-Small + LoRA + DPT head) plus a\n"
+        "right-sized V24 store (priors/confidence/source) and a compacted V18\n"
+        "substrate subset (only the fields and rows V24 training reads). The DA-V2\n"
+        "encoder is pretrained on 62M images (DINOv2) and downloaded from HuggingFace\n"
+        "on first run. No game client files, no C# tooling.\n\n"
+        "## V24.1 Training Defaults\n\n"
+        "- `--dav2` flag enables DA-V2-Small encoder + LoRA + DPT head\n"
+        "- bf16 mixed precision (same dynamic range as fp32)\n"
+        "- Gradient checkpointing (essential for 24GB GPUs)\n"
+        "- 8-bit AdamW optimizer (4x less optimizer state RAM)\n"
+        "- Gradient clipping (L2 norm = 1.0)\n"
+        "- Hybrid loss (0.7 SiLogLoss + 0.3 L1)\n"
+        "- Cosine annealing LR scheduler\n"
+        "- Default batch_size=4, lr=1e-4, LoRA rank=32\n\n"
+        "Run `bash runpod/v24/train.sh` with no env overrides for the V24.1 default.\n"
     )
     (bundle_root / "README_RunPod.md").write_text(readme, encoding="utf-8")
 
@@ -345,8 +367,8 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     manifest = {
-        "schema": "spec-094-v24-runpod-bundle",
-        "v24_bundle_version": 2,
+        "schema": "spec-101-v241-dav2-runpod-bundle",
+        "v24_bundle_version": 3,
         "bundle_name": str(args.bundle_name),
         "contains_game_client_files": False,
         "v24_stores": v24_reports,
