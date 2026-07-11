@@ -2,6 +2,16 @@
 
 Keep this file to last-week truth. Older history moved to `memory-bank/archive/2026-07-04-pre-2026-06-27.md`.
 
+## 2026-07-11
+
+### UI release convergence plan
+
+- Consolidated competing viewer UI plans under Spec 080: `specs/080-wow-ui-consolidation/ui-release-convergence-plan.md` is canonical; the earlier 080 plan/tasks now point to it as historical partial context.
+- Added companion research, UI surface-inventory data model, and release quickstart artifacts. The plan requires every visible control to be classified and manually proven in both tabbed and legacy modes before release.
+- Read-only audit confirmed a tabbed-mode Settings regression: menu routes set `_showSettingsWindow`, but `DrawSettingsWindow()` is dispatched only in the non-tabbed branch. Source fix remains pending.
+- 073b converter integration is completely open and part of the release inventory. No UI source behavior changed in this planning slice.
+- Extended the Spec 080 convergence plan with a UI/minimap/overlay performance workstream. It requires fixed-camera A/B Runtime Stats captures, explicit minimap cache/load activity, and one measured optimization at a time; Specs 090/093 remain the memory and renderer-counter evidence owners.
+
 ## 2026-07-10
 
 ### Spec 101 — V24.1 DA-V2 pretrained convergence model

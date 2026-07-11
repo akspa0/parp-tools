@@ -1,5 +1,12 @@
 # Implementation Plan: Spec 080 WoW UI Consolidation
 
+> **Release-convergence amendment (2026-07-11):** This earlier partial plan
+> remains historical implementation context. The canonical completion plan is
+> [`ui-release-convergence-plan.md`](ui-release-convergence-plan.md), which
+> consolidates the remaining viewer UI work from Specs 049, 053, 056, 057,
+> 060, 069, 070, 071, 073b, and 080. Do not start another competing sidebar or
+> workbench redesign; follow its inventory-first release gates.
+
 **Branch**: `v0.5.0-dev` | **Date**: 2026-07-05 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `wow-viewer/specs/080-wow-ui-consolidation/spec.md`

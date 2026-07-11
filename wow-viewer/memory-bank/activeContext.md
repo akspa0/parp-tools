@@ -3,6 +3,14 @@
 Last updated: 2026-07-10
 Keep current contract only. Older notes live in `memory-bank/archive/2026-07-04-pre-2026-06-27.md`.
 
+## UI release convergence
+
+- Spec 080 is the sole release owner for the active `WoWViewer` UI. Read `specs/080-wow-ui-consolidation/ui-release-convergence-plan.md` before resuming UI work; it consolidates 049, the viewer-facing parts of 053/056/057, 060, 069, 070, 071, 073b, and 080.
+- First gate is a complete UI surface inventory and tabbed/legacy route proof. Do not begin another sidebar/workbench redesign before that gate.
+- Confirmed defect: Settings menu handlers set `_showSettingsWindow`, but `ViewerApp.cs` only draws `DrawSettingsWindow()` in the non-tabbed branch. Tabbed-mode Settings is a release blocker until global dispatch is restored and manually proven.
+- Converter cards from 073b are entirely unimplemented; they remain part of the release inventory, not a hidden deferred surface.
+- The Spec 080 convergence plan now includes a performance workstream using Specs 090/093 as diagnostic evidence. Capture the staged dense-map baseline before changing minimap scheduling, overlays, WMO/MDX batching, or liquid rendering; minimap visibility currently increases world load budget and is a measured hypothesis, not a presumed optimization target.
+
 ## Main target
 
 - Spec 089 `089-dav2-height-predictor`.

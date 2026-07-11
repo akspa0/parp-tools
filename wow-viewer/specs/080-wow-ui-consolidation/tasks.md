@@ -1,5 +1,11 @@
 # Tasks: Spec 080 WoW UI Consolidation
 
+> **Release-convergence amendment (2026-07-11):** This task list records the
+> earlier partial implementation. The canonical completion order is
+> [`ui-release-convergence-plan.md`](ui-release-convergence-plan.md). Start
+> with its Phase 0 inventory and route-integrity gate before resuming any
+> unchecked sidebar/frame task below.
+
 **Input**: `spec.md`, `plan.md`
 
 **Prerequisites**: Current implementation stays in `wow-viewer`; `gillijimproject_refactor` is reference-only.

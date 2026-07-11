@@ -262,6 +262,17 @@ def main() -> int:
                         help="flip the heightmap along the Y axis at load time. "
                              "Use this if the mesh opens Y-mirrored in your viewer "
                              "vs the source minimap texture.")
+    parser.add_argument("--no-align", action="store_true",
+                        help="disable the 1-pixel shared-border edge alignment. "
+                             "Each tile is written with its raw predicted heightmap. "
+                             "Use this if you see a visible 'weird border' at every "
+                             "256-pixel tile boundary; the trade-off is that adjacent "
+                             "tiles' boundary vertices will not be welded.")
+    parser.add_argument("--flip-z", action="store_true",
+                        help="invert the heightmap (multiply by -1). Use this if "
+                             "the model's prior is upside-down vs your viewer's "
+                             "Y-up convention; the texture is unaffected, only the "
+                             "Z values are inverted.")
     parser.add_argument("--seed", type=int, default=94)
     args = parser.parse_args()
 
@@ -336,6 +347,8 @@ def main() -> int:
             height = np.fliplr(height).copy()
         if args.flip_y:
             height = np.flipud(height).copy()
+        if args.flip_z:
+            height = -height
         heights[(ty, tx)] = height
         if i % 50 == 0 or i == len(pngs):
             elapsed = time.time() - started
@@ -345,9 +358,16 @@ def main() -> int:
 
     # Edge alignment across the quilt. After this, every adjacent pair
     # of tiles shares an exact-equal boundary column/row, so the
-    # spiky-bits problem disappears.
-    print(f"aligning seams across {len(heights)} placed tiles ...", flush=True)
-    heights = _align_tile_boundaries(heights, seam_width=16)
+    # spiky-bits problem disappears. The user-reported "weird border"
+    # complaint is real for some view conventions; pass --no-align to
+    # skip this and write each tile with its raw predicted heightmap.
+    if args.no_align:
+        print("edge alignment: DISABLED (--no-align); tiles written as-is",
+              flush=True)
+    else:
+        print(f"aligning 1-pixel shared borders across {len(heights)} placed tiles ...",
+              flush=True)
+        heights = _align_tile_boundaries(heights, seam_width=0)
 
     for png, tx, ty in parsed_pngs:
         world_x = tx * args.tile_size
@@ -356,7 +376,12 @@ def main() -> int:
         out_obj = args.output_dir / f"{png.stem}.obj"
         out_png = args.output_dir / f"{png.stem}.png"
         with Image.open(png) as src:
-            tex = src.convert("RGB").resize((256, 256), Image.Resampling.LANCZOS)
+            tex = src.convert("RGB")
+            if args.flip_x:
+                tex = tex.transpose(Image.FLIP_LEFT_RIGHT)
+            if args.flip_y:
+                tex = tex.transpose(Image.FLIP_TOP_BOTTOM)
+            tex = tex.resize((256, 256), Image.Resampling.LANCZOS)
         tex.save(str(out_png))
         _write_quilt_obj(height, np.asarray(tex), out_obj, world_x, world_y,
                          tile_size=args.tile_size)
