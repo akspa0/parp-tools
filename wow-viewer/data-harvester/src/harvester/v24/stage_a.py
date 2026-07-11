@@ -604,10 +604,13 @@ class SiLogLoss(nn.Module):
         target_w = (target[mask] + self.shift).clamp_min(self.epsilon)
 
         diff_log = torch.log(target_w) - torch.log(pred_w)
-        loss = torch.sqrt(
-            (diff_log ** 2).mean() - self.lambd * (diff_log.mean() ** 2)
-        )
-        return loss.clamp_min(0.0)
+        # Clamp the radicand to be non-negative BEFORE sqrt.
+        # In fp16, (diff_log**2).mean() - lambd*(diff_log.mean()**2) can go
+        # slightly negative due to rounding, and sqrt(negative) = NaN.
+        # NaN.clamp_min(0.0) is still NaN, so the clamp must be inside.
+        radicand = (diff_log ** 2).mean() - self.lambd * (diff_log.mean() ** 2)
+        loss = torch.sqrt(radicand.clamp_min(self.epsilon))
+        return loss
 
 
 def hybrid_loss(

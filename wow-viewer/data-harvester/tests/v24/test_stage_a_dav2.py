@@ -141,7 +141,8 @@ def test_silog_loss_zero_when_perfect_prediction():
     w_o = torch.ones(1, 17, 17)
     w_i = torch.ones(1, 16, 16)
     loss = stage_a.SiLogLoss(shift=10.0)(pred_o, pred_i, tgt_o, tgt_i, w_o, w_i)
-    assert loss.item() < 1e-4
+    # sqrt(epsilon) = sqrt(1e-8) = 1e-4, so the floor is ~1e-4.
+    assert loss.item() < 1e-3
 
 
 @pytest.mark.v24

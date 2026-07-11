@@ -167,8 +167,9 @@ def main() -> int:
     parser.add_argument("--dav2", action="store_true", default=False,
                         help="train V24.1 Stage A with DA-V2-Small pretrained encoder + "
                              "LoRA + DPT head (Spec 101). Uses 256x256 input, SiLogLoss "
-                             "(or hybrid), and a fixed scheduler. Combine with "
-                             "--minimap-only (3ch) or --guided (9ch). Default lr=5e-6. "
+                             "(or hybrid), bf16 mixed precision, and gradient clipping. "
+                             "Combine with --minimap-only (3ch) or --guided (9ch). "
+                             "Defaults: lr=1e-4, batch=8, bf16, grad-clip=1.0, hybrid loss. "
                              "DA-V2 uses 256x256 inputs (16x more RAM than 64x64); "
                              "use --limit 500 --no-gpu-resident-data on 12GB GPUs.")
     parser.add_argument("--loss-type", choices=["l1", "silog", "hybrid"], default="l1",
@@ -221,7 +222,13 @@ def main() -> int:
     parser.add_argument("--gpu-resident-data", dest="gpu_resident_data", action="store_true", default=True,
                         help="keep the whole train/val tensor set resident on the GPU when it fits (default on)")
     parser.add_argument("--no-gpu-resident-data", dest="gpu_resident_data", action="store_false")
-    parser.add_argument("--amp-dtype", choices=["fp16", "bf16"], default="fp16")
+    parser.add_argument("--amp-dtype", choices=["fp16", "bf16"], default="fp16",
+                        help="mixed precision dtype: fp16 (faster, limited range) or "
+                             "bf16 (same range as fp32, safer for SiLogLoss). "
+                             "DA-V2 defaults to bf16.")
+    parser.add_argument("--grad-clip", type=float, default=0.0,
+                        help="gradient L2 norm clip (0 = disabled; try 1.0 for "
+                             "SiLogLoss stability). DA-V2 defaults to 1.0.")
     parser.add_argument("--autotune-batch-size", action="store_true", default=False,
                         help="probe --autotune-batch-candidates and pick the largest that fits before training")
     parser.add_argument("--autotune-batch-candidates", nargs="+", type=int,
@@ -229,7 +236,7 @@ def main() -> int:
     parser.add_argument("--autotune-safety-factor", type=float, default=0.85)
     args = parser.parse_args()
 
-    # DA-V2 defaults: hybrid loss, cosine scheduler, lr=5e-6.
+    # DA-V2 defaults: hybrid loss, cosine scheduler, lr=1e-4, bf16.
     if args.dav2:
         if args.loss_type == "l1":
             args.loss_type = "hybrid"
@@ -237,6 +244,14 @@ def main() -> int:
             args.lr = 1e-4  # LoRA needs higher LR than full fine-tune (DA-V2 uses 5e-6 for full).
         if args.batch_size == 64:
             args.batch_size = 8  # DA-V2 is 25M params; start conservative.
+        # bf16 is safer than fp16 for SiLogLoss: same dynamic range as fp32,
+        # so log() of extreme values won't overflow to inf/NaN.
+        if args.amp_dtype == "fp16":
+            args.amp_dtype = "bf16"
+        # Gradient clipping prevents SiLogLoss gradient explosions from
+        # corrupting model weights before the scaler can catch inf/NaN.
+        if args.grad_clip == 0.0:
+            args.grad_clip = 1.0
 
     train_common.set_determinism(args.seed, strict=False)
     train_common.configure_perf(args.cudnn_benchmark)
@@ -462,7 +477,18 @@ def main() -> int:
                     g_adv = bce(g_adv_logits.mean(dim=[2, 3]), real_label)
                     loss = loss + lambda_adv * g_adv
                     g_adv_loss_epoch += g_adv.item()
+            # NaN guard: skip the batch if loss is NaN/inf.
+            # This prevents NaN from corrupting model weights.
+            if torch.isnan(loss) or torch.isinf(loss):
+                print(f"  WARNING: loss is NaN/inf at epoch {epoch} batch {batches+1}, skipping", flush=True)
+                optimizer.zero_grad(set_to_none=True)
+                continue
             scaler.scale(loss).backward()
+            # Gradient clipping: unscale → clip → step (needed for both fp16 and bf16).
+            # With bf16, the scaler is disabled so unscale is a no-op.
+            if args.grad_clip > 0:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             scaler.step(optimizer)
             scaler.update()
             # Discriminator step (if GAN is enabled).
