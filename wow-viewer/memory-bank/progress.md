@@ -2,6 +2,38 @@
 
 Keep this file to last-week truth. Older history moved to `memory-bank/archive/2026-07-04-pre-2026-06-27.md`.
 
+## 2026-07-10
+
+### Spec 101 — V24.1 DA-V2 pretrained convergence model
+
+- **Research**: Surveyed HuggingFace + GitHub for existing models that help with image-to-terrain-height convergence. Report at `docs/architecture/v24-convergence-research-2026-07-10.md`.
+- **Key finding**: V24 Stage A's 190 L1 (minimap-only) is a model capacity + pretrained features problem. The 335K-param from-scratch U-Net cannot learn minimap → heightmap from ~2,000 tiles. The V23 codebase already has DA-V2-Small (24.8M params, pretrained on 62M images) with LoRA in `harvester/v23/encoder.py`.
+- **Most relevant models found**:
+  - Depth Anything V2 (8,430 stars) — DINOv2 encoder + DPT head, metric depth with SiLogLoss
+  - Prompt Depth Anything (1,135 stars, CVPR 2025) — RGB + low-res depth prompt → high-res depth (exactly our Stage B)
+  - Marigold (3,178 stars) — diffusion-based depth, sharp outputs
+  - pix2pix/PatchGAN (25,184 stars) — auxiliary adversarial loss (Spec 100 approach)
+- **Bugs found in training code**: OneCycleLR `total_steps=args.epochs` (should be `n_batches * epochs`); `scheduler.step()` called per-epoch instead of per-batch for OneCycleLR; plain L1 loss (should use SiLogLoss for metric depth).
+- **Spec 101 created** at `specs/101-v241-dav2-model/spec.md` with 7 slices, checklist at `specs/101-v241-dav2-model/checklists/requirements.md`.
+- **Slice 1**: `StageADAV2` model class in `stage_a.py` — wraps `DepthAnythingV2SmallEncoder` from V23 with a DPT-style head outputting 33×33 quincunx → 17×17 outer + 16×16 inner. Total ~25M params, ~1-2M trainable (LoRA + patch proj + head). Backbone frozen.
+- **Slice 2**: `SiLogLoss` class in `stage_a.py` — scale-invariant log loss with shift parameter for negative heights. `hybrid_loss` = 0.7 SiLogLoss + 0.3 L1.
+- **Slice 3**: Scheduler fix in `train_v24_stage_a.py` — OneCycleLR `total_steps` corrected to `n_batches * epochs`; per-batch stepping for OneCycleLR, per-epoch for CosineAnnealingLR. New `--scheduler` flag.
+- **Slice 4**: `--dav2` flag on `train_v24_stage_a.py` — loads pretrained DA-V2-Small, hybrid loss, lr=5e-6, batch_size=8. Checkpoint records `model_type`, `loss_type`, `scheduler_type`, `dav2`, `guided`.
+- **Slice 5**: 15 new tests in `test_stage_a_dav2.py` — model shape (3ch + 9ch), param count (≤26M total, ≤2M trainable), backbone frozen, offline load, SiLogLoss (positive, negative, gradient, perfect, zero-weight), hybrid loss (positive, gradient), `build_dav2_input` (3ch, 9ch, no-normal). All pass.
+- **Full v24 suite**: 67 passed, 1 deselected, 0 failed (was 46 before Spec 101). No regressions.
+- **Slice 6**: `StageBPromptDA` model class in `stage_b.py` — DA-V2-Small encoder (4ch: 3 RGB + 1 depth prompt) + LoRA + DPT head → 257×257 heightmap. `build_promptda_input` assembles (4, 256, 256) from minimap + WDL prior. 4 tests pass.
+- **Slice 7**: `WDLDiscriminator` PatchGAN in new `discriminator.py` — Conv(stride=2)→Conv(stride=2)→Conv→Conv with LeakyReLU, ~693K params (base=32). `gan_step` helper does D step + G step with BCEWithLogits + L1. `_render_quincunx_33` interleaves outer+inner into 33×33. 6 tests pass (shape 33+257, param count, gradient, quincunx render, GAN step updates both models).
+- **Full v24 suite**: 77 passed, 1 deselected, 0 failed (was 46 before Spec 101). Zero regressions.
+- **All 7 slices implemented.**
+- **VRAM optimizations**: `--8bit-optimizer` (bitsandbytes 8-bit AdamW), `--gradient-checkpointing` (recompute activations), `--lora-rank` (configurable), `--weight-decay` (regularization), V18 preload cache freed after tensor extraction.
+- **Training results**:
+  - Run 1 (lr=5e-6, 40ep, 500 tiles): val_l1=91.11. LR too low for LoRA.
+  - Run 2 (lr=1e-4, 200ep, 500 tiles, LoRA 16): best val_l1=48.13 @ ep 143, overtraining (train 17/val 49).
+  - Run 3 (lr=1e-4, 200ep, 2,011 tiles, LoRA 32, wd=1e-3, bs=8): cuDNN OOM at ep 132.
+  - Run 4 (in progress): lr=1e-4, 200ep, 2,011 tiles, LoRA 32, wd=1e-3, bs=8, bf16, 8-bit opt, grad ckpt. 26.3M total, 1.74M trainable.
+- **Progress**: val_l1 went 190 (old U-Net) → 91 → 48 (DA-V2). Still improving with more data + higher LoRA rank.
+- **Spec 101 plan.md and tasks.md created** at `specs/101-v241-dav2-model/`.
+
 ## 2026-07-09
 
 ### Spec 094 V24 full-scale curated training

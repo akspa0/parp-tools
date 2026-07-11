@@ -125,3 +125,142 @@ def gated_l1(
 ) -> torch.Tensor:
     num = (valid * (pred_residual - target_residual).abs()).sum()
     return num / valid.sum().clamp_min(1e-6)
+
+
+# ---------------------------------------------------------------------------
+# V24.1 — PromptDA-style Stage B (Spec 101 Slice 6)
+# ---------------------------------------------------------------------------
+
+class _PromptDARefineBlock(nn.Module):
+    """Small residual refine block for the PromptDA DPT head."""
+
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Conv2d(channels, channels, 3, padding=1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channels, channels, 3, padding=1, bias=False),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.layers(x)
+
+
+class StageBPromptDA(nn.Module):
+    """DA-V2-Small encoder + depth-prompt fusion + DPT head for Stage B (Spec 101).
+
+    Takes minimap RGB (3ch) + WDL prior as a depth prompt (1ch, upsampled to
+    256×256) and outputs a 257×257 heightmap. This is the "depth completion"
+    formulation: the WDL prior is the coarse depth signal, the minimap provides
+    visual context, and the model fills in the detail.
+
+    Reuses the V23 ``DepthAnythingV2SmallEncoder`` with 4 input channels
+    (3 RGB + 1 depth prompt). The backbone is frozen; only LoRA + patch proj
+    + DPT head are trained.
+
+    If the ``promptda`` package is available, this can be swapped for the real
+    PromptDA-Small model. The fallback uses the same DA-V2 encoder with a
+    depth-prompt input channel.
+
+    Total params: ~25M. Trainable: ~1-2M (LoRA + patch proj + head).
+    """
+
+    def __init__(
+        self,
+        *,
+        load_pretrained: bool = False,
+        local_files_only: bool = True,
+        lora_rank: int = 16,
+        lora_alpha: int = 32,
+        fusion_channels: int = 64,
+    ):
+        super().__init__()
+        from harvester.v23.encoder import DepthAnythingV2SmallEncoder
+
+        # 4 input channels: 3 RGB minimap + 1 depth prompt (WDL prior).
+        self.encoder = DepthAnythingV2SmallEncoder(
+            in_channels=4,
+            load_pretrained=load_pretrained,
+            local_files_only=local_files_only,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+        )
+
+        from harvester.v23.model import infer_encoder_feature_schema
+
+        schema_input_size = int(self.encoder.config.backbone_config.image_size)
+        self._feature_schema = infer_encoder_feature_schema(
+            self.encoder, input_size=schema_input_size,
+        )
+        neck_shapes = self._feature_schema["neck_features"]
+        self._neck_channels = [int(shape[1]) for shape in neck_shapes]
+
+        self.projections = nn.ModuleList(
+            nn.Conv2d(c, fusion_channels, kernel_size=1, bias=False)
+            for c in self._neck_channels
+        )
+        self.refine_blocks = nn.ModuleList(
+            _PromptDARefineBlock(fusion_channels) for _ in self._neck_channels
+        )
+        # Head: fusion_channels → 1 → 257×257 heightmap (normalized).
+        self.head = nn.Sequential(
+            nn.Conv2d(fusion_channels, fusion_channels // 2, 3, padding=1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(fusion_channels // 2, 1, 1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Returns the predicted heightmap (B, 257, 257) in normalized height space.
+
+        ``x`` is (B, 4, 256, 256) — 3 RGB minimap + 1 depth prompt (WDL prior
+        upsampled to 256×256, normalized by HEIGHT_SCALE).
+        """
+        features = self.encoder(x)
+        pyramid = list(features.neck_features)
+
+        projected = [
+            proj(level) for proj, level in zip(self.projections, pyramid, strict=True)
+        ]
+        fused = self.refine_blocks[0](projected[0])
+        for idx in range(1, len(projected)):
+            fused = F.interpolate(
+                fused,
+                size=projected[idx].shape[-2:],
+                mode="bilinear",
+                align_corners=False,
+            )
+            fused = self.refine_blocks[idx](fused + projected[idx])
+
+        field = self.head(fused)  # (B, 1, H, W)
+        height = F.interpolate(
+            field, size=(257, 257), mode="bilinear", align_corners=True
+        ).squeeze(1)  # (B, 257, 257)
+        return height
+
+    def trainable_parameters(self) -> list[nn.Parameter]:
+        """Return only the trainable parameters (LoRA + patch proj + head)."""
+        return [p for p in self.parameters() if p.requires_grad]
+
+
+def build_promptda_input(
+    cleaned_minimap: np.ndarray,
+    prior_up_256: np.ndarray,
+) -> np.ndarray:
+    """Assemble the (4, 256, 256) input for the PromptDA Stage B model.
+
+    Args:
+        cleaned_minimap: (256, 256, 3) float32 [0, 1] — minimap RGB.
+        prior_up_256: (256, 256) float32 — WDL prior upsampled to 256×256,
+            in world units. Will be normalized by HEIGHT_SCALE.
+
+    Returns:
+        (4, 256, 256) float32 — 3 RGB + 1 normalized depth prompt.
+    """
+    channels = [
+        cleaned_minimap[..., 0],
+        cleaned_minimap[..., 1],
+        cleaned_minimap[..., 2],
+        prior_up_256 / HEIGHT_SCALE,
+    ]
+    return np.stack(channels).astype(np.float32)

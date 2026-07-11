@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-05
+Last updated: 2026-07-10
 Keep current contract only. Older notes live in `memory-bank/archive/2026-07-04-pre-2026-06-27.md`.
 
 ## Main target
@@ -80,6 +80,27 @@ Keep current contract only. Older notes live in `memory-bank/archive/2026-07-04-
 - Corrected constraint: motif windows are terrain-cell spans, default `32 64` cells, minimum `32` cells, chunk-aligned to the 16-cell MCNK grid by default. Legacy tiny patch matching is not the intended mode.
 - Bounded Azeroth proof after correction: `0_5_3_3368`, 128 tiles, cell spans `32 64`, chunk-aligned, grid `4`, quant `4`, max saturated ratio `0.30`. Output kept 16,390 patches, found 14,745 buckets, and surfaced repeated chunk-scale ramps/ridges/falloffs under `wow-viewer/output/analysis/heightmap-patterns/azeroth_0_5_3_3368_chunkcells_coarse`.
 - V23 training remains unchanged. Next useful step is joining motif IDs to V23 validation error maps before using patterns for curriculum or weighting.
+
+## V24.1 DA-V2 pretrained convergence model lane (Spec 101)
+
+- **2026-07-10 — Spec 101 created and Slices 1-5 implemented.** Research report at `docs/architecture/v24-convergence-research-2026-07-10.md` surveyed HuggingFace + GitHub for existing models. Key finding: V24 Stage A's 190 L1 is a **model capacity and pretrained features** problem, not a loss function problem. The 335K-param from-scratch U-Net cannot learn minimap → heightmap from ~2,000 tiles.
+- **Solution**: Reuse the V23 DA-V2-Small encoder (24.8M params, pretrained on 62M images, already in `harvester/v23/encoder.py`) with LoRA + a new DPT head for WDL prior output. New `StageADAV2` class in `stage_a.py`.
+- **Slice 1**: `StageADAV2` model class — DA-V2-Small encoder + LoRA (rank 16) + DPT head → 33×33 quincunx → 17×17 outer + 16×16 inner. Total ~25M params, ~1-2M trainable. Backbone frozen.
+- **Slice 2**: `SiLogLoss` — scale-invariant log loss (standard for metric depth, used by DA-V2). Handles negative heights via shift parameter. `hybrid_loss` = 0.7 SiLogLoss + 0.3 L1.
+- **Slice 3**: Scheduler fix — OneCycleLR `total_steps` corrected to `n_batches * epochs` (was `epochs` only). Per-batch stepping for OneCycleLR; per-epoch for CosineAnnealingLR. New `--scheduler` flag.
+- **Slice 4**: `--dav2` flag on `train_v24_stage_a.py` — loads pretrained DA-V2-Small, uses hybrid loss, lr=5e-6 (pretrained encoder), batch_size=8. Checkpoint records `model_type`, `loss_type`, `scheduler_type`, `dav2`, `guided`.
+- **Slice 5**: 15 new tests in `test_stage_a_dav2.py` — model shape (3ch + 9ch), param count, backbone frozen, offline load, SiLogLoss (positive, negative, gradient, perfect, zero-weight), hybrid loss, `build_dav2_input` (3ch, 9ch, no-normal). All pass.
+- **Full v24 suite**: 67 passed, 1 deselected, 0 failed (was 46 before Spec 101). No regressions.
+- **All 7 slices implemented.** Slice 6 (`StageBPromptDA` in `stage_b.py` — DA-V2 depth completion, 4ch input: 3 RGB + 1 WDL prior prompt → 257×257 heightmap). Slice 7 (`WDLDiscriminator` PatchGAN in new `discriminator.py` — ~693K params, `gan_step` helper with BCEWithLogits + L1, lambda schedule 0→0.1 over epochs 5-30).
+- **Full v24 suite**: 77 passed, 1 deselected, 0 failed (was 46 before Spec 101). Zero regressions.
+- **Training results (2026-07-10/11)**:
+  - Run 1 (lr=5e-6, 40 epochs, 500 tiles): val_l1=91.11 (vs 190 old U-Net). LR too low.
+  - Run 2 (lr=1e-4, 200 epochs, 500 tiles, LoRA 16): best val_l1=48.13 @ epoch 143, overtraining detected (train 17 vs val 49). Model learning but overfitting on 500 tiles.
+  - Run 3 (lr=1e-4, 200 epochs, 2,011 tiles, LoRA 32, wd=1e-3, bs=8): crashed at epoch 132 with cuDNN OOM.
+  - Run 4 (in progress): lr=1e-4, 200 epochs, 2,011 tiles, LoRA 32, wd=1e-3, bs=8, bf16, 8-bit optimizer, gradient checkpointing. 26.3M total params, 1.74M trainable.
+- **Key VRAM optimizations added**: `--8bit-optimizer` (bitsandbytes 8-bit AdamW, 4× less optimizer state), `--gradient-checkpointing` (recompute activations, ~2-3× less VRAM), `--lora-rank` (configurable LoRA capacity), `--weight-decay` (regularization), V18 preload cache freed after tensor extraction.
+- **Key insight from research**: PromptDA (CVPR 2025, 1,135 stars) is the most directly relevant model for Stage B — takes RGB + low-res depth prompt → high-res metric depth. Exactly our Stage B structure. HuggingFace: `depth-anything/prompt-depth-anything-vits`.
+- **Next steps**: Evaluate Run 4 results. If val_l1 < 10, the DA-V2 Stage A is deployment-ready. If not, try guided (9ch with normals), higher LoRA rank (64), or PatchGAN adversarial loss. Then train Stage B (PromptDA) and run full pipeline.
 
 ## WDL prior + lattice detailer lane (V24)
 
