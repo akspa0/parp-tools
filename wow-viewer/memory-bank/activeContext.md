@@ -37,6 +37,7 @@ Keep current contract only. Older notes live in `memory-bank/archive/2026-07-04-
 - **Input**: Single raw RGB minimap image tile (256x256), with optional PM4 coordinate bounds file for snapping/verification.
 - **Model**: NVIDIA SegFormer (`nvidia/mit-b0` / `nvidia/mit-b1`) backbone + heads for terrain inpainting, object footprints, object placements, progressive Sylvester mesh solver (upscaling to 257x257), WDL downsampler (yielding 33x33 priors), MTEX/MCLY texture decoders, and a **Differentiable Fractal Noise Generator** (predicting seed, frequency, and boundary parameters of MCAL alpha masks to ensure 100% generalization on custom 40%-similar screenshots).
 - **PM4 guided handler**: Snaps predicted objects to PM4 segment centroids and resolves asset names using `pm4_asset_matching.scorer`.
+- **Output format**: Structured Zarr group store containing predicted signals (heights, objects, textures) with level-1 Blosc LZ4 compression.
 - **VRAM limit**: Hard-constrained to 8 GB / 10 GB VRAM using gradient checkpointing, 8-bit AdamW, and Zarr slice preloading.
 - **Progress**: Slices 1 through 6 implemented and fully tested. 18/18 pytest runs in `tests/v25/` pass successfully.
 

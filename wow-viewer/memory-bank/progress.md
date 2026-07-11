@@ -6,7 +6,7 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 
 ### V25 Terrain Convergence Model (Spec 102)
 
-- **Spec & Plan Created**: Created spec, plan, and task lists under `specs/102-v25-terrain-convergence/` detailing the Visual Segformer Decompiler, progressive Sylvester upsampler, WDL downsampler, differentiable fractal generator, PM4 placement alignment handler, and trainer/VRAM optimizations.
+- **Spec & Plan Created**: Created spec, plan, and task lists under `specs/102-v25-terrain-convergence/` detailing the Visual Segformer Decompiler, progressive Sylvester upsampler, WDL downsampler, differentiable fractal generator, PM4 placement alignment handler, trainer/VRAM optimizations, and structured Zarr output dataset stores.
 - **SegFormer Frontend & Decompiler**: Implemented `V25SegformerDecompiler` wrapping `nvidia/mit-b0`, `TerrainInpaintHead` for gated object removal, and `ObjectPlacementHead` for anonymous bounding box regressing. Tests pass.
 - **Progressive Height Solver**: Implemented `BatchedSylvesterSolver` solving $(I + \gamma_c L_c) X + X (\gamma_r L_r) = Y$ via GPU eigendecomposition, and progressive `V25StageBPredictor` upscaling heights progressively ($33 \rightarrow 65 \rightarrow 129 \rightarrow 257$). Checked math accuracy against Scipy CPU solvers. Tests pass.
 - **WDL Downsampler**: Implemented `WdlDownsampler` mapping $(257, 257) \rightarrow (33, 33)$ via strided coordinate average pooling, and visual height prior predictor `V25StageAPredictor`. Tests pass.

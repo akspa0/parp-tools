@@ -18,7 +18,7 @@ Decoupled components:
 - **Differentiable Fractal Noise Generator**: Predicts parameters (translation seeds, frequency, scale) to generate MCAL alpha maps, ensuring 100% out-of-distribution generalization.
 - **PM4-Guided Post-Processing Handler (`V25Pm4GuideHandler`)**: A modular post-processing utility. It is **completely separate** from the main neural network architecture. When `--pm4` is passed at inference, the handler snaps predicted object coordinates to PM4 segment centroids and matches WMO/M2 names via the `pm4_asset_matching` library.
 - **8 GB VRAM Constraint**: Optimized training pipeline (gradient checkpointing, 8-bit AdamW, and Zarr slice preloading) ensuring compatibilty with consumer GPUs.
-- **Payload Export**: Rather than implementing new python-side ADT file writing, the inference CLI writes the predicted terrain geometry, objects, and textures to a unified **Numpy `.npz` and JSON catalog** to be compiled directly by existing C# tooling.
+- **Zarr Output Datastore**: All inputs and outputs must pass through Zarr. The inference CLI writes the predicted terrain geometry, objects, and textures directly into a structured Zarr group store with lightweight Blosc LZ4 level 1 compression (no random array files on disk). This aligns with the repository's standard data structure, allowing downstream tooling to easily slice, query, and process the model outputs.
 
 ---
 
@@ -116,10 +116,10 @@ wow-viewer/
 
 ---
 
-### Phase 6 — Training and Payload Export Integration
+### Phase 6 — Training and Zarr Dataset Integration
 
 - **Goal**: Build trainer, validation, and CLI inference.
 - **Approach**:
   - `train_v25_decompiler.py` trains the decompiler.
   - Integrates `--gradient-checkpointing`, `--8bit-optimizer`, and `TileSource.preload()` from our training codebase.
-  - `infer_v25_decompiler.py` runs inference. If `--pm4` is passed, runs `V25Pm4GuideHandler` on the predictions, and outputs predicted heights ($257\times257$ & $33\times33$), objects, and textures to a unified `.npz` file and `.json` catalog for the C# tooling to consume and compile.
+  - `infer_v25_decompiler.py` runs inference. If `--pm4` is passed, runs `V25Pm4GuideHandler` on the predictions, and outputs predicted heights ($257\times257$ & $33\times33$), objects, and textures directly to a structured Zarr group store with Blosc LZ4 level 1 compression.

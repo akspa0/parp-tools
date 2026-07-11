@@ -82,14 +82,14 @@ This document contains the step-by-step tasks for the V25 SegFormer Decompiler a
 
 ---
 
-## Phase 7: Training and Payload Export Integration
+## Phase 7: Training and Zarr Dataset Integration
 
 - [ ] **T022 [US1] Author `data-harvester/scripts/train_v25_decompiler.py`**:
   - Build trainer loading raw minimaps, target clean minimaps, object precise masks, object metadata, target heightmaps, and target texture arrays.
   - Configure training optimizations (`--gradient-checkpointing`, `--8bit-optimizer`, and `TileSource.preload()`).
 - [ ] **T023 [US1] Author `data-harvester/scripts/validate_v25.py` and `infer_v25_decompiler.py`**:
   - Implement validation evaluation metrics.
-  - Implement inference script that exports predicted heights ($257\times257$ & $33\times33$), objects, and textures to a unified `.npz` file and `.json` catalog for the C# compiling tool.
+  - Implement inference script that exports predicted heights ($257\times257$ & $33\times33$), objects, and textures directly into a structured Zarr group store with Blosc LZ4 level 1 compression.
   - If `--pm4` is passed, runs `V25Pm4GuideHandler` on the predictions prior to export.
 - [ ] **T024 [US1] Checkpoint Phase 7**:
-  - Run a 1-epoch training smoke pass and export a test prediction payload.
+  - Run a 1-epoch training smoke pass and export a test prediction to the Zarr store.
