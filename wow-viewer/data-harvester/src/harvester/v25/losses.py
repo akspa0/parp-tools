@@ -56,8 +56,11 @@ def frequency_split_loss(
     # Force full precision to bypass cuFFT power-of-two size constraints in half precision (float16/bfloat16)
     pred_f32 = pred.float()
     target_f32 = target.float()
-    pred_fft = torch.fft.rfft2(pred_f32)
-    target_fft = torch.fft.rfft2(target_f32)
+    # ``norm="ortho"`` prevents this auxiliary loss from scaling with the
+    # 257x257 grid size.  The previous unnormalised FFT made it thousands of
+    # times larger than every other head and silently starved them of signal.
+    pred_fft = torch.fft.rfft2(pred_f32, norm="ortho")
+    target_fft = torch.fft.rfft2(target_f32, norm="ortho")
 
     H, W_half = pred_fft.shape[-2], pred_fft.shape[-1]
     # Build radial LF mask centred at DC
@@ -84,7 +87,8 @@ class V25UnifiedLoss(nn.Module):
     - FRAMER frequency-split height loss (LF structure + HF detail)
     """
     def __init__(self, use_freq_split: bool = True, freq_cutoff: float = 0.1,
-                 lf_weight: float = 3.0, hf_weight: float = 2.0):
+                 lf_weight: float = 3.0, hf_weight: float = 2.0,
+                 frequency_aux_weight: float = 0.25):
         super().__init__()
         self.bce = nn.BCEWithLogitsLoss()
         self.mse = nn.MSELoss()
@@ -94,6 +98,7 @@ class V25UnifiedLoss(nn.Module):
         self.freq_cutoff = freq_cutoff
         self.lf_weight = lf_weight
         self.hf_weight = hf_weight
+        self.frequency_aux_weight = frequency_aux_weight
 
     def forward(self, pred_outputs, target_outputs, minimap=None):
         """Calculate weighted multi-task losses.
@@ -162,14 +167,21 @@ class V25UnifiedLoss(nn.Module):
             else:
                 pred_h_eff = pred_h
             lf_loss, hf_loss = frequency_split_loss(pred_h_eff, tgt_h, self.freq_cutoff)
-            loss_height = self.lf_weight * lf_loss + self.hf_weight * hf_loss
+            frequency_height = self.lf_weight * lf_loss + self.hf_weight * hf_loss
         else:
-            lf_loss = hf_loss = None
-            if mask_h is not None:
-                denom = mask_h.sum().clamp(min=1.0)
-                loss_height = ((pred_h - tgt_h).abs() * mask_h).sum() / denom
-            else:
-                loss_height = self.l1(pred_h, tgt_h)
+            lf_loss = hf_loss = frequency_height = None
+
+        # The spatial L1 is the physically interpretable height term.  Keep it
+        # primary; normalized FRAMER frequency bands are auxiliary structure and
+        # detail guidance rather than a grid-size-dependent replacement.
+        if mask_h is not None:
+            denom = mask_h.sum().clamp(min=1.0)
+            spatial_height = ((pred_h - tgt_h).abs() * mask_h).sum() / denom
+        else:
+            spatial_height = self.l1(pred_h, tgt_h)
+        loss_height = spatial_height
+        if frequency_height is not None:
+            loss_height = loss_height + self.frequency_aux_weight * frequency_height
 
         # 3. Object placement coordinates, rotations, classifications, and existences
         pred_p = pred_outputs["placements"]
@@ -209,22 +221,23 @@ class V25UnifiedLoss(nn.Module):
             tex_density = None
             loss_alpha = self.l1(pred_alpha, tgt_alpha)
 
-        # Unified weighted sum
-        total_loss = (
-            1.0 * loss_mask +
-            5.0 * loss_height +
-            2.0 * loss_coords +
-            1.0 * loss_rotations +
-            1.0 * loss_exist +
-            1.0 * loss_class +
-            1.0 * loss_mtex +
-            1.0 * loss_mcly +
-            3.0 * loss_alpha
-        )
+        components = {
+            "mask": (loss_mask, 1.0),
+            "height": (loss_height, 1.0),
+            "coords": (loss_coords, 2.0),
+            "rotations": (loss_rotations, 1.0),
+            "exist": (loss_exist, 1.0),
+            "class": (loss_class, 1.0),
+            "mtex": (loss_mtex, 1.0),
+            "mcly": (loss_mcly, 1.0),
+            "alpha": (loss_alpha, 3.0),
+        }
         if loss_clean is not None:
-            total_loss = total_loss + 2.0 * loss_clean
+            components["clean_rgb"] = (loss_clean, 2.0)
         if loss_h33 is not None:
-            total_loss = total_loss + 3.0 * loss_h33
+            components["h_33"] = (loss_h33, 1.0)
+        weighted = {name: value * weight for name, (value, weight) in components.items()}
+        total_loss = sum(weighted.values())
 
         result = {
             "loss": total_loss,
@@ -238,10 +251,14 @@ class V25UnifiedLoss(nn.Module):
             "mcly": loss_mcly,
             "alpha": loss_alpha,
         }
+        result.update({f"weighted_{name}": value for name, value in weighted.items()})
         if loss_clean is not None:
             result["clean_rgb"] = loss_clean
         if loss_h33 is not None:
             result["h_33"] = loss_h33
+        result["height_spatial"] = spatial_height
+        if frequency_height is not None:
+            result["height_frequency"] = frequency_height
         if lf_loss is not None:
             result["height_lf"] = lf_loss
             result["height_hf"] = hf_loss

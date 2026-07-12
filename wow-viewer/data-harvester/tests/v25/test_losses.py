@@ -78,6 +78,9 @@ def test_unified_loss_forward():
     assert "height_lf" in losses
     assert "height_hf" in losses
     assert "texture_density_mean" in losses
+    assert "height_spatial" in losses
+    assert "height_frequency" in losses
+    assert "weighted_height" in losses
     
     # Assert gradients backprop
     loss_val = losses["loss"]
@@ -93,6 +96,41 @@ def test_unified_loss_forward():
     assert pred_outputs["mtex_logits"].grad is not None
     assert pred_outputs["mcly_logits"].grad is not None
     assert pred_outputs["alpha_256"].grad is not None
+
+
+def test_weighted_components_are_observable_and_sum_to_total():
+    """The run log can account for every term in the optimized objective."""
+    loss_fn = V25UnifiedLoss(use_freq_split=False)
+    B, max_objects, num_classes, vocab_size = 1, 2, 2, 4
+    predictions = {
+        "mask_logits": torch.zeros(B, 1, 2, 2, requires_grad=True),
+        "clean_rgb": torch.zeros(B, 3, 2, 2, requires_grad=True),
+        "h_257": torch.zeros(B, 2, 2, requires_grad=True),
+        "h_33": torch.zeros(B, 2, 2, requires_grad=True),
+        "placements": {
+            "class_logits": torch.zeros(B, max_objects, num_classes, requires_grad=True),
+            "coords": torch.zeros(B, max_objects, 3, requires_grad=True),
+            "rotations": torch.zeros(B, max_objects, 3, requires_grad=True),
+            "exist_logits": torch.zeros(B, max_objects, 1, requires_grad=True),
+        },
+        "mtex_logits": torch.zeros(B, vocab_size, requires_grad=True),
+        "mcly_logits": torch.zeros(B, 4, 1, 1, 4, requires_grad=True),
+        "alpha_256": torch.zeros(B, 4, 2, 2, requires_grad=True),
+    }
+    targets = {
+        "mask": torch.ones(B, 1, 2, 2), "clean_rgb": torch.ones(B, 3, 2, 2),
+        "h_257": torch.ones(B, 2, 2), "h_33": torch.ones(B, 2, 2),
+        "placements": {"class_ids": torch.zeros(B, max_objects, dtype=torch.long),
+                       "coords": torch.ones(B, max_objects, 3),
+                       "rotations": torch.ones(B, max_objects, 3),
+                       "exist": torch.ones(B, max_objects, dtype=torch.long)},
+        "mtex_labels": torch.ones(B, vocab_size),
+        "mcly_labels": torch.zeros(B, 1, 1, 4, dtype=torch.long),
+        "alpha_256": torch.ones(B, 4, 2, 2),
+    }
+    losses = loss_fn(predictions, targets)
+    weighted = [value for key, value in losses.items() if key.startswith("weighted_")]
+    assert torch.allclose(losses["loss"], sum(weighted))
 
 
 def test_unified_loss_optional_clean_and_prior_terms():
@@ -206,4 +244,3 @@ def test_height_loss_liquid_mask(use_freq_split):
     assert pred_h.grad is not None
     # No height gradient flows into the masked (liquid) region.
     assert pred_h.grad[:, 100:150, 100:150].abs().max().item() == pytest.approx(0.0)
-

@@ -5,14 +5,14 @@ Trains the full universal pipeline from the lean V25 store:
   raw minimap ──> SegFormer decompiler ──> object mask + clean terrain map
                                        ──> object placements
                      final feats ────────> Stage A WDL prior (33x33)
-  GT (or predicted) prior + clean map ──> progressive Sylvester solver (257x257)
+  learned WDL prior + clean map ──> progressive Sylvester solver (257x257)
                      final feats ────────> MTEX multi-hot + MCLY layers
                      final feats ────────> fractal params -> MCAL alpha maps
 
 Every head the inference CLI needs is supervised here — no ground-truth
-signal is fed to a head that inference cannot reproduce (the Stage B solver
-is teacher-forced with the GT 33x33 prior by default; pass ``--student-prior``
-to feed it Stage A's own prediction instead).
+signal is fed to a head that inference cannot reproduce.  In particular,
+the Stage B solver always consumes Stage A's learned 33x33 prediction; the
+stored WDL prior is a target only.
 
 VRAM discipline (SC-102-001): ``--gradient-checkpointing``, ``--8bit-optimizer``,
 ``--amp-dtype``, and a peak-VRAM report written to ``peak_vram.json``.
@@ -53,6 +53,21 @@ from harvester.v25.texture import MclyDecoder, MtexPredictor  # noqa: E402
 COORD_SCALE = 17066.0   # half the WoW map extent in yards
 ROT_SCALE = 180.0       # rotations in degrees -> [-2, 2] range
 PLACEMENT_CLASSES = ("m2", "wmo")
+TRAINING_BLOCK_REASON = (
+    "Spec 102 training is blocked: this unified multi-head architecture violates the modular "
+    "one-model/one-residual contract. Deployment has RGB minimap tiles only; do not spend GPU "
+    "time until the independently gated H0/H1/H2 residual pipeline lands."
+)
+AUDIT_MODULES = (
+    "decompiler.dec_fusion",
+    "decompiler.inpaint_head",
+    "decompiler.placement_head",
+    "stage_a",
+    "stage_b",
+    "mtex",
+    "mcly",
+    "fractal_head",
+)
 
 
 class V25DecompilerDataset(torch.utils.data.Dataset):
@@ -142,15 +157,11 @@ class V25Pipeline(torch.nn.Module):
         self.fractal_head = FractalParameterHead(in_channels=256, num_layers=4)
         self.fractal_gen = DifferentiableFractalGenerator(canvas_size=1024)
 
-    def forward(self, minimap: torch.Tensor, prior_33: torch.Tensor | None = None) -> dict:
-        """Full forward. When ``prior_33`` is None the pipeline is fully universal
-        (Stage A's own prediction feeds the solver) — this is the inference path.
-        """
+    def forward(self, minimap: torch.Tensor) -> dict:
+        """Reconstruct every output, including the WDL prior, from the minimap."""
         dec = self.decompiler(minimap)
         h_33_pred = self.stage_a(dec["final_feats"])
-
-        solver_prior = prior_33 if prior_33 is not None else h_33_pred
-        h_257 = self.stage_b(solver_prior, dec["clean_rgb"])
+        h_257 = self.stage_b(h_33_pred, dec["clean_rgb"])
 
         mtex_logits = self.mtex(dec["final_feats"])
         mcly_logits = self.mcly(dec["final_feats"])
@@ -209,6 +220,34 @@ def _targets_from_batch(batch: dict, liquid_height_mask: bool = True) -> dict:
     return targets
 
 
+def _gradient_norms(pipeline: V25Pipeline) -> dict[str, float]:
+    """Return one finite L2 gradient norm per trainable V25 head."""
+    norms: dict[str, float] = {}
+    for name in AUDIT_MODULES:
+        module = pipeline.get_submodule(name)
+        square_sum = sum(
+            (parameter.grad.detach().float().square().sum()
+             for parameter in module.parameters() if parameter.grad is not None),
+            torch.zeros((), device=next(module.parameters()).device),
+        )
+        norms[name] = float(square_sum.sqrt().item())
+    return norms
+
+
+def _format_components(losses: dict) -> str:
+    keys = ("mask", "height_spatial", "height_frequency", "h_33", "coords",
+            "rotations", "exist", "class", "mtex", "mcly", "alpha", "clean_rgb")
+    return " ".join(
+        f"{key}={losses[key].item():.4f}"
+        for key in keys if key in losses
+    )
+
+
+def assert_training_authorized() -> None:
+    """Fail before dataset loading or CUDA initialization while Spec 102 is reset."""
+    raise RuntimeError(TRAINING_BLOCK_REASON)
+
+
 def run_epoch(
     loader,
     pipeline: V25Pipeline,
@@ -217,7 +256,6 @@ def run_epoch(
     scaler,
     device: torch.device,
     amp_dtype: torch.dtype | None,
-    student_prior: bool,
     train: bool,
     log_interval: int,
     epoch: int,
@@ -232,6 +270,9 @@ def run_epoch(
     with ctx:
         for batch_idx, batch in enumerate(loader):
             batch = _batch_to_device(batch, device)
+            should_log = train and log_interval and (
+                (batch_idx + 1) % log_interval == 0 or batch_idx + 1 == len(loader)
+            )
             if train:
                 optimizer.zero_grad(set_to_none=True)
 
@@ -239,8 +280,7 @@ def run_epoch(
                 device.type, dtype=amp_dtype, enabled=amp_dtype is not None
             )
             with autocast:
-                prior = None if student_prior else batch["h_33"]
-                preds = pipeline(batch["minimap"], prior_33=prior)
+                preds = pipeline(batch["minimap"])
                 losses = loss_fn(
                     preds,
                     _targets_from_batch(batch, liquid_height_mask=liquid_height_mask),
@@ -251,11 +291,16 @@ def run_epoch(
             if train:
                 if scaler is not None:
                     scaler.scale(loss).backward()
+                    scaler.unscale_(optimizer)
+                    gradients = _gradient_norms(pipeline) if should_log else None
                     scaler.step(optimizer)
                     scaler.update()
                 else:
                     loss.backward()
+                    gradients = _gradient_norms(pipeline) if should_log else None
                     optimizer.step()
+            else:
+                gradients = None
 
             with torch.no_grad():
                 height_l1_sum += F.l1_loss(preds["h_257"].float(), batch["h_257"].float()).item()
@@ -264,13 +309,11 @@ def run_epoch(
                     totals[key] = totals.get(key, 0.0) + val.item()
             steps += 1
 
-            if train and log_interval and ((batch_idx + 1) % log_interval == 0 or batch_idx + 1 == len(loader)):
+            if should_log:
                 print(
                     f"  [epoch {epoch}] step {batch_idx + 1}/{len(loader)} "
-                    f"loss={loss.item():.4f} height={losses['height'].item():.4f} "
-                    f"h33={losses.get('h_33', torch.tensor(0.0)).item():.4f} "
-                    f"clean={losses.get('clean_rgb', torch.tensor(0.0)).item():.4f} "
-                    f"alpha={losses['alpha'].item():.4f}",
+                    f"loss={loss.item():.4f} components[{_format_components(losses)}] "
+                    f"grads[{', '.join(f'{name}={value:.3e}' for name, value in gradients.items())}]",
                     flush=True,
                 )
 
@@ -299,8 +342,6 @@ def main() -> int:
     parser.add_argument("--amp-dtype", choices=["fp16", "bf16", "none"], default="bf16",
                         help="autocast dtype on CUDA (default bf16 — fp16 overflows to NaN "
                              "in the Sylvester solver's eigen-basis matmuls on real heights)")
-    parser.add_argument("--student-prior", action="store_true",
-                        help="feed Stage A's own 33x33 prediction to the solver instead of the GT prior")
     parser.add_argument("--no-liquid-height-mask", action="store_true",
                         help="disable masking liquid areas out of the height/prior losses")
     parser.add_argument("--difficulty-buckets", nargs="+", default=None,
@@ -313,6 +354,8 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=102)
     parser.add_argument("--limit", type=int, default=None, help="cap loaded tiles (smoke runs)")
     args = parser.parse_args()
+
+    assert_training_authorized()
 
     set_determinism(args.seed, strict=False)
     device = pick_device(args.device)
@@ -395,7 +438,7 @@ def main() -> int:
         "max_objects": args.max_objects,
         "coord_scale": COORD_SCALE,
         "rot_scale": ROT_SCALE,
-        "student_prior": args.student_prior,
+        "prior_source": "predicted_from_minimap",
         "liquid_height_mask": not args.no_liquid_height_mask,
         "difficulty_buckets": args.difficulty_buckets,
         "amp_dtype": args.amp_dtype,
@@ -413,18 +456,18 @@ def main() -> int:
         start = time.time()
         train_metrics = run_epoch(
             train_loader, pipeline, loss_fn, optimizer, scaler, device, amp_dtype,
-            student_prior=args.student_prior, train=True,
+            train=True,
             log_interval=args.log_interval, epoch=epoch,
             liquid_height_mask=not args.no_liquid_height_mask,
         )
 
         val_metrics = {}
         if val_rows and (epoch % args.val_interval == 0 or epoch == args.epochs):
-            # Validation always runs the universal (student-prior) path: the
-            # solver sees Stage A's own prediction, exactly like inference.
+            # Both training and validation use the universal path: the solver
+            # always receives Stage A's predicted prior, exactly like inference.
             val_metrics = run_epoch(
                 val_loader, pipeline, loss_fn, optimizer=None, scaler=None,
-                device=device, amp_dtype=amp_dtype, student_prior=True,
+                device=device, amp_dtype=amp_dtype,
                 train=False, log_interval=0, epoch=epoch,
                 liquid_height_mask=not args.no_liquid_height_mask,
             )
@@ -435,11 +478,17 @@ def main() -> int:
             "train_height_l1": train_metrics["height_l1"],
             "epoch_seconds": round(elapsed, 1),
         }
+        for key, value in train_metrics.items():
+            if key not in {"loss", "height_l1"}:
+                record[f"train_{key}"] = value
         if val_metrics:
             record["val_loss"] = val_metrics["loss"]
             record["val_height_l1"] = val_metrics["height_l1"]
             record["val_h33"] = val_metrics.get("h_33", 0.0)
             record["val_mask"] = val_metrics.get("mask", 0.0)
+            for key, value in val_metrics.items():
+                if key not in {"loss", "height_l1", "h_33", "mask"}:
+                    record[f"val_{key}"] = value
         vram = peak_vram_gb()
         if vram is not None:
             record["peak_vram_gb"] = round(vram, 3)

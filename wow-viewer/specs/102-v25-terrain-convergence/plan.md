@@ -1,149 +1,66 @@
-# Implementation Plan: V25 SegFormer Decompiler and Terrain-Texture Convergence Network (Spec 102)
+# Implementation Plan: Spec 102 Minimap-Only Reset
 
-**Referenced Specification**: [`spec.md`](file:///i:/parp/parp-tools/wow-viewer/specs/102-v25-terrain-convergence/spec.md)
-
-**Status**: Draft
-
----
-
-## Summary
-
-The V25 model (`V25SegformerDecompiler`) is a completely universal neural network that processes a single raw RGB minimap tile to predict:
-1. **Low-res WDL height prior** ($33\times33$ mesh) via downsampling the predicted high-res mesh.
-2. **High-res terrain heightmap** ($257\times257$ edge-aligned mesh) via the progressive deep unfolded Sylvester solver.
-3. **Object segment footprints** and 3D placements/rotations.
-4. **Terrain texturing layers** (MTEX selections, MCLY layer indices, and MCAL alpha blend maps).
-
-Decoupled components:
-- **Differentiable Fractal Noise Generator**: Predicts parameters (translation seeds, frequency, scale) to generate MCAL alpha maps, ensuring 100% out-of-distribution generalization.
-- **PM4-Guided Post-Processing Handler (`V25Pm4GuideHandler`)**: A modular post-processing utility. It is **completely separate** from the main neural network architecture. At inference, the handler snaps predicted object coordinates to PM4 segment centroids and matches WMO/M2 names via the `pm4_asset_matching` library. To prevent parser duplication, it consumes pre-parsed database segment structures (`Pm4SegmentSignalRecord`) loaded from the Zarr data store, rather than opening binary `.pm4` files.
-- **8 GB VRAM Constraint**: Optimized training pipeline (gradient checkpointing, 8-bit AdamW, and Zarr slice preloading) ensuring compatibilty with consumer GPUs.
-- **Zarr Output Datastore**: All inputs and outputs must pass through Zarr. The inference CLI writes the predicted terrain geometry, objects, and textures directly into a structured Zarr group store with lightweight Blosc LZ4 level 1 compression (no random array files on disk). This aligns with the repository's standard data structure, allowing downstream tooling to easily slice, query, and process the model outputs.
-
----
+**Status**: Phase 0 only; previous V25 plan invalidated
+**Specification**: [spec.md](spec.md)
 
 ## Technical Context
 
-- **Platform**: Python 3.11 / PyTorch 2.x
-- **Segmentation Frontend**: Pretrained `SegformerForSemanticSegmentation` (`nvidia/mit-b0` or `nvidia/mit-b1`).
-- **PM4 Handler**: Completely separate post-processing class (`V25Pm4GuideHandler`) leveraging `harvester.pm4_asset_matching` modules.
-- **Fractal Generator**: Implements multi-octave Simplex or Perlin noise on PyTorch GPU.
-- **VRAM Optimizations**: Peak memory target $< 7.0$ GB on GPU. Sequential preloading maps contiguously.
+The only deployment input is RGB minimap pixels. Existing V18/V25 terrain arrays are labels and evaluation facts, never model inputs. The current unified trainer is permanently fail-closed. Replacement work is a sequence of tiny, independent residual models.
 
----
+## Constitution Check
 
-## Project Structure
+- New Python stays under `data-harvester/` and uses the existing environment.
+- No parser, client reader, or dataset-builder duplication.
+- CUDA is explicit; silent CPU fallback is a failure.
+- One model, one residual signal, one checkpoint, and one gate.
+- No shared weights or joint training between stages.
+- Each slice is independently testable and no phase exceeds ten tasks.
 
-We will add the new modular files under `data-harvester/`:
+## Phase 0 — Contract and Baselines
 
-```
-wow-viewer/
-├── data-harvester/
-│   ├── src/
-│   │   └── harvester/
-│   │       └── v25/
-│   │           ├── __init__.py           # Library entrypoint
-│   │           ├── dataset.py            # Lean V25 Zarr schema, builder, V25TileSource (preload), PM4 record sidecar
-│   │           ├── segformer.py          # SegFormer wrapper, inpainting, and object placement heads
-│   │           ├── pm4_guide.py          # Decoupled PM4 handler alignment and matching modules
-│   │           ├── fractal.py            # DifferentiableFractalGenerator & FractalParameterHead
-│   │           ├── texture.py            # MtexPredictor & MclyDecoder
-│   │           ├── solver.py             # Sylvester solver & tridiagonal math
-│   │           ├── prior.py              # V25StageAPredictor & WdlDownsampler
-│   │           ├── lapnet.py             # Progressive height solver and model routing
-│   │           └── losses.py             # Multi-task loss functions
-│   ├── scripts/
-│   │   ├── build_v25_dataset.py          # Lean V25 dataset builder CLI (V18+V22+V24 sources)
-│   │   ├── train_v25_decompiler.py       # Unified training script
-│   │   ├── validate_v25.py               # SC-gate validation harness (IoU, SSIM, WDL alignment)
-│   │   └── infer_v25_decompiler.py       # Single-image deployment inference script
-│   └── tests/
-│       └── v25/
-│           ├── test_dataset.py           # Builder round-trip, lean-signal, vocab, preload, PM4 record tests
-│           ├── test_segformer.py         # SegFormer frontend and head tests
-│           ├── test_pm4_guide.py         # PM4 handler tests (verifies decoupled logic)
-│           ├── test_fractal.py           # Fractal generator & parameter tests
-│           ├── test_solver.py            # Mathematical solver tests
-│           ├── test_lapnet.py            # Progressive upsampling tests
-│           ├── test_prior.py             # Stage A predictor & WDL downsampler tests
-│           ├── test_texture.py           # MTEX/MCLY decoder tests
-│           └── test_losses.py            # Multi-task loss tests
-```
+1. Generate a frozen split manifest holding out complete maps and one era.
+2. Generate an input-manifest audit proving every forward tensor derives from RGB pixels.
+3. Evaluate zero-height, train-global-mean, and RGB-derived flat-height baselines on the frozen split. Never use per-tile target statistics as inputs.
+4. Record the historical minimap-only checkpoint only if it can run on the identical split; otherwise label it non-comparable.
 
-Note: the earlier `harvester/v25_zarr_io.py` (a V22-writer subclass) was retired.
-It cloned the full V22 signal set — liquids, normals, holes, placement masks,
-asset payload groups — into the V25 store, which violates the lean-dataset
-requirement (FR-102-002), and the store it produced on disk was never finalized
-(no root Zarr group). `harvester/v25/dataset.py` replaces it.
+## Phase 1 — H0 Tile Offset Residual
 
----
+1. Predict one scalar correction residual over the frozen deployable RGB-flat baseline.
+2. Train with a dedicated H0 trainer and checkpoint.
+3. Run at most three epochs and stop unless held-out offset error beats the RGB-flat baseline.
 
-## Implementation Phases
+## Phase 2 — H1 Coarse Relief Residual
 
-### Phase 0 — Lean V25 Dataset
+This phase opens only after H0 passes.
 
-- **Goal**: Build the dedicated V25 training datastore fresh, carrying only V25-relevant signals.
-- **Approach**:
-  - `harvester/v25/dataset.py` defines the 8-array schema (`minimap_rgb`, `clean_minimap_256`, `object_mask_256`, `height_257`, `wdl_height_33`, `alpha_256`, `mcly_layer_mask`, `mcly_vocab_ids`) plus `index/placements/tileset_vocab` parquet sidecars.
-  - Sources: V18 substrate arrays, V22 `mcly_tileset_ids` + MDDF/MODF flat placements + model paths, V24 `cleaned_minimap_256` via the `v18_row` join (fallback: one-time `clean_minimap()` compute).
-  - Curation-manifest, map, and limit filters; contiguous slice reads throughout.
-  - `V25TileSource.preload(rows)` gives the trainer the one-pass sequential load (FR-102-502).
-  - `attach_pm4_segments` / `load_pm4_segment_records` round-trip pre-parsed `Pm4SegmentSignalRecord`s through `pm4_segments.parquet`.
+1. Freeze H0 and materialize its predictions for the frozen split.
+2. Predict one 33×33 low-frequency relief residual from RGB plus H0 output.
+3. Run at most three epochs and stop unless coarse-relief metrics beat the H0 plane.
 
----
+## Phase 3 — H2 Terrain Detail Residual
 
-### Phase 1 — SegFormer Frontend and Decompiler Decoders
+This phase opens only after H1 passes.
 
-- **Goal**: Implement SegFormer feature extraction and decoders.
-- **Approach**:
-  - Load `nvidia/mit-b0` using Hugging Face's `transformers` package.
-  - Implement `TerrainInpaintHead` and `ObjectPlacementHead`.
+1. Freeze H0/H1 and materialize the upsampled coarse prediction.
+2. Predict one 257×257 detail residual from RGB plus the frozen coarse prediction.
+3. Run at most three epochs and stop unless height/slope metrics beat H1 upsampling.
 
----
+## Phase 4 — H3 Border Residual
 
-### Phase 2 — Height Predictor & Sylvester Math
+This phase opens only after H2 passes.
 
-- **Goal**: Implement $257\times257$ progressive height solver and Sylvester solver.
-- **Approach**:
-  - `V25StageBPredictor` scales heights progressively ($33 \rightarrow 65 \rightarrow 129 \rightarrow 257$) using the Sylvester solver.
-  - `BatchedSylvesterSolver` solves tridiagonal row/column Laplacians on the GPU.
-  - `WdlDownsampler`: An average-pooling layer mapping $(257, 257) \rightarrow (33, 33)$ quincunx lattice.
+1. Consume adjacent RGB tiles and frozen H2 border predictions.
+2. Predict one shared-border correction residual.
+3. Validate raw continuity before any deterministic stitching.
 
----
+## Phase 5 — U1 Uncertainty
 
-### Phase 3 — Decoupled PM4 Post-Processing
+This phase opens only after H2 passes and is trained separately from height.
 
-- **Goal**: Support PM4 alignment as an optional post-processing step.
-- **Approach**:
-  - `V25Pm4GuideHandler` operates only at inference. It is never invoked during network training or loss evaluations.
-  - Snaps predicted object translations to nearby PM4 segment centroids.
-  - Resolves asset names by running `harvester.pm4_asset_matching.scorer` on the pre-parsed bounds dataset.
+1. Consume RGB and frozen height outputs.
+2. Predict one uncertainty map.
+3. Validate calibration against held-out H2 error.
 
----
+## Deferred Independent Phases
 
-### Phase 4 — Differentiable Fractal Generator and Parameter Head
-
-- **Goal**: Implement fractal brush simulation.
-- **Approach**:
-  - `DifferentiableFractalGenerator`: Implements vectorized Perlin/Simplex noise in PyTorch.
-  - `FractalParameterHead`: Estimates translation seeds $(S_x, S_y)$, frequencies $f$, amplitude $A$, persistence $p$, and coarse boundary mask $M$ ($256\times256$).
-  - Evaluates the final alpha map: $\text{Alpha} = M \cdot \text{Noise}(x \cdot f + S_x, y \cdot f + S_y)$.
-
----
-
-### Phase 5 — Texture Decoders & Losses
-
-- **Goal**: Implement texture layer decoders and multi-task losses.
-- **Approach**:
-  - `MtexPredictor` and `MclyDecoder`.
-  - `V25UnifiedLoss`: Computes combined losses (SegFormer CE, height L1, progressive height L1/SiLog, fractal parameter MSE, MCLY CE, MTEX CE, object placements).
-
----
-
-### Phase 6 — Training and Zarr Dataset Integration
-
-- **Goal**: Build trainer, validation, and CLI inference.
-- **Approach**:
-  - `train_v25_decompiler.py` trains the decompiler.
-  - Integrates `--gradient-checkpointing`, `--8bit-optimizer`, and `TileSource.preload()` from our training codebase.
-  - `infer_v25_decompiler.py` runs inference. If PM4 guide database query is requested, runs `V25Pm4GuideHandler` on the predictions using loaded database records, and outputs predicted heights ($257\times257$ & $33\times33$), objects, and textures directly to a structured Zarr group store with Blosc LZ4 level 1 compression.
+WDL export, objects, textures, alpha, liquids, PM4, and binary writers each require separate single-output models or deterministic stages and independent gates.

@@ -1,138 +1,97 @@
-# Feature Specification: V25 SegFormer Decompiler and Terrain-Texture Convergence Network (Spec 102)
+# Feature Specification: Minimap-Only Terrain Reconstruction (Spec 102 Reset)
 
 **Feature Branch**: `102-v25-terrain-convergence`
-
-**Created**: 2026-07-11
-
-**Status**: Draft
-
+**Reset Date**: 2026-07-12
+**Status**: BLOCKED AT FEASIBILITY GATE
 **Owner**: wow-viewer
-
-**Parent**: Spec 098 (V24 Lattice Reconstruction Vision)
-
-**Research**: 
-- *SegFormer: Simple and Efficient Design for Semantic Segmentation with Transformers* (NVIDIA, NeurIPS)
-- CVPR 2026: *Dual Graph Regularized Deep Unfolding Network for Guided Depth Map Super-resolution* (**LapNet**)
-- `data-harvester/src/harvester/pm4_asset_matching/` (PM4 segment bounds and scorer math)
-- `docs/architecture/wowfileformatdefs-vision-2026-06-16.md` (MTEX, MCLY, MCAL structure)
-- `docs/architecture/v22-dataset-signals-2026-06-30.md` (Zarr signals)
-
-**Input**: User description — "pm4 files cannot be processed solely one by one, we already handle reading the data properly in our c# tooling, stop reinventing things that we have already"
-
----
 
 ## Problem Statement
 
-The terrain decompiler and texture convergence model must be **completely universal** to process any map from a single raw RGB minimap image.
+The deployment input is one or more raw RGB minimap tiles. The required primary output is terrain height data aligned to the tile grid. No WDL, ADT height, normal, alpha, object mask, placement record, client coordinate, PM4 record, or target-derived signal exists at deployment unless a later user requirement explicitly adds it.
 
-To prevent duplicating PM4 file parsers, all PM4 binary parsing and cataloging are handled by our existing C# tooling. The resulting PM4 segment data is stored in the database / Zarr stores. The post-processing alignment handler (`V25Pm4GuideHandler`) does not parse raw PM4 files; instead, it consumes pre-parsed lists of segment boundary signals (`Pm4SegmentSignalRecord`) loaded from our Zarr databases.
+The previous Spec 102 mixed this minimap-only product with WDL-guided refinement and a large multi-head decompiler. That violated the program's modular-model rule and made failures impossible to isolate. All previous architecture and quality claims are invalidated until they pass the input-availability, single-output-model, and held-out-map gates below.
 
-The system is decoupled into two separate parts:
-1.  **Universal Decompiler Model (`V25SegformerDecompiler`)**: A neural network that runs from a single raw RGB minimap tile and predicts detailed heights, object instance bounds/rotations, MTEX selectors, MCLY assignments, and MCAL alpha maps (using a **Differentiable Fractal Noise Generator** to represent repeating artist brushes). It has **no** PM4 dependencies.
-2.  **PM4 Guided Post-Processing Handler (`V25Pm4GuideHandler`)**: A separate utility class. It takes predicted placements and aligns them to pre-parsed PM4 segment boundary signals loaded from the database.
+## Input Invariant
 
-The pipeline runs entirely offline within an **8 GB / 10 GB VRAM GPU** limit using gradient checkpointing, 8-bit AdamW, and Zarr slice preloading.
+- Production model input is RGB minimap pixels only.
+- Adjacent minimap tiles may be used only when they are supplied together as RGB pixels at deployment.
+- Training labels may supervise outputs but MUST NOT enter the forward input, initialization, teacher-forcing route, feature cache, normalization anchor, or post-processing path.
+- WDL may be derived from predicted terrain heights for evaluation or export. It MUST NOT be required to generate those heights.
+- Historical V24/V25 checkpoints and metrics are evidence records, not accepted baselines or reusable architecture proof.
 
----
+## Modular Pipeline Invariant
+
+- Every learned model predicts exactly one signal.
+- Every model trains independently with its own checkpoint, metrics, and stop gate.
+- Models never share weights and never train jointly.
+- A downstream model may consume frozen outputs from an upstream model.
+- Every height model predicts a residual over an explicit simpler baseline.
+- Failure of one stage blocks downstream training; it does not trigger more heads or a longer end-to-end run.
+
+The initial height chain is:
+
+1. **H0 Offset**: RGB minimap → one tile elevation-offset correction residual over the frozen RGB-flat baseline.
+2. **H1 Coarse Relief**: RGB minimap + frozen H0 output → one low-frequency 33×33 relief residual.
+3. **H2 Terrain Detail**: RGB minimap + frozen upsampled H1 output → one 257×257 detail residual.
+4. **H3 Border Correction**: adjacent RGB tiles + frozen H2 borders → one shared-border correction residual.
+5. **U1 Height Uncertainty**: RGB minimap + frozen height outputs → one 257×257 uncertainty signal.
+
+H1 is not an externally supplied WDL prior. It is a learned coarse residual produced from deployment-available RGB and H0 output. A WDL-shaped export may be derived later from the predicted height chain.
 
 ## User Scenarios & Testing
 
-### User Story 1 — Universal Single-Image Reconstruction (Priority: P1)
+### User Story 1 — Reconstruct height from minimap pixels (P1)
 
-The user drops a custom minimap PNG (e.g. from an expansion or custom edit) with no PM4 files available. The model performs forward inference and generates a structured Zarr dataset directory.
+Given a raw RGB minimap tile, the user receives a 257×257 terrain height prediction assembled from independently validated residual stages. Uncertainty is produced by a separate model.
 
-**Why this priority**: Core universal pipeline.
+**Independent test**: Delete access to every training store after loading a PNG and run inference successfully.
 
-**Independent Test**: Run inference on an arbitrary screenshot tile without specifying any `--pm4` arguments.
+### User Story 2 — Reconstruct adjacent tiles consistently (P1)
 
-**Acceptance Scenarios**:
-1. **Given** a raw minimap, **When** processed by the CLI, **Then** it generates a valid textured Zarr store utilizing only visual feature maps, showing that the network behaves universally.
+Given adjacent minimap tiles, the user receives height predictions whose shared borders do not form artificial cliffs.
 
----
+**Independent test**: Evaluate held-out adjacent tiles and measure border disagreement before any stitching correction.
 
-### User Story 2 — Separate PM4-Guided Post-Processing (Priority: P1)
+### User Story 3 — Reject unavailable-input leakage (P1)
 
-The user runs inference on a development map. The CLI invokes the post-processing handler to snap predicted placements to PM4 centroids and matches WMO/M2 models, producing the final aligned development arrays in the Zarr dataset.
+Before GPU training, the operator receives a machine-readable audit of every model input and its deployment source. Training refuses to start if any input is unavailable from RGB minimap pixels at inference.
 
-**Why this priority**: Bounded development map reconstruction.
+## Functional Requirements
 
-**Independent Test**: Verify that the PM4 handler runs as a separate step on top of the universal network's output predictions.
-
-**Acceptance Scenarios**:
-1. **Given** predicted object placements from the universal model, **When** passed through the separate `V25Pm4GuideHandler` alongside pre-parsed segment bounds, **Then** coordinates snap to centroids and names are resolved.
-
----
-
-## Requirements
-
-### Functional Requirements
-
-#### Slice 0: Lean V25 Training Dataset (Zarr)
-- **FR-102-001**: A dedicated V25 Zarr datastore MUST be built fresh from the existing V18 substrate, the V22 enrichment (tileset vocabulary + placements), and — when available — the V24 store's pre-computed cleaned minimaps. It MUST NOT be a copy of the V22 schema.
-- **FR-102-002**: Only signals that serve the V25 model as inputs, targets, or loss masks are carried over: `minimap_rgb`, `clean_minimap_256`, `object_mask_256`, `height_257`, `wdl_height_33`, `alpha_256`, `mcly_layer_mask`, `mcly_vocab_ids`, plus the liquid/flag loss signals `liquid_mask_256`, `liquid_type_256`, `liquid_height_256`, `mcnk_flags_16` (user-directed 2026-07-11 — liquid areas must be maskable out of height supervision, and era restoration needs MH2O/MCLQ facts), plus `index.parquet`, `placements.parquet`, and `tileset_vocab.parquet` sidecars. Normals, `holes_16` (inverted at the C# source per the V24 audit), roof/visibility/instance masks, ground-intent heights, and asset payload groups remain excluded.
-- **FR-102-003**: `wdl_height_33` MUST be derived from `height_257` with the exact `WdlDownsampler` stride-8 math at build time, so high-res heights and WDL priors are aligned by construction (SC-102-004).
-- **FR-102-004**: Cleaned minimaps are a dataset-build step (not per-load): prefer the V24 `cleaned_minimap_256` array via the `v18_row` join, else compute `harvester.v24.clean_minimap` once at build.
-- **FR-102-005**: The builder MUST support the V18 curation manifest (`--curation-manifest`, `--difficulty-bucket`), map filters, and tile limits, and MUST read source arrays through contiguous Zarr slices (no per-row random access).
-- **FR-102-006**: Pre-parsed PM4 segment records (C# export JSON) are attachable to the store as `pm4_segments.parquet` and loadable back as `Pm4SegmentSignalRecord` lists — Python never opens raw `.pm4` files.
-- **FR-102-007**: All arrays use Blosc LZ4 level-1 compression with per-tile chunks.
-- **FR-102-008** (amended 2026-07-11, second pass): The builder MUST accept multiple index-paired (V18, V22, V24) source triples and emit one combined multi-era corpus (user-directed: start with 0.5.3 + 3.3.5, later re-target the image side to any era). The tileset vocabulary is **era-scoped** — keyed by (build, normalized tileset path) — because tileset content changed across eras even under identical names ("the images are literally different between them"). Grass in 0.5.3 and grass in 3.3.5 are distinct vocab entries. Builds without a path table fall back to build-scoped id keys. Vocab sizing must cover every era's tilesets without frequency truncation (0.5.3 + 3.3.5 = 1,070 entries → 2048 slots).
-- **FR-102-008b**: Tileset texture **images** ride in the store: `WowViewer.Tool.Harvest extract-tilesets` decodes each era's BLPs from that era's own MPQs to PNGs + manifest, and `attach_tileset_images` writes a vocab-aligned `tilesets` group (`tileset_rgb_256` (V,256,256,3) uint8, `tileset_present` (V,)). Unresolvable textures stay flagged absent, never silently substituted.
-- **FR-102-009**: Curation provenance MUST be baked into the store (user-directed 2026-07-11 — months of curation work must not be lost at build time): every curation-manifest column (difficulty buckets, quality/usefulness/difficulty scores, coverage stats, profiles) is joined per tile into `index.parquet`, the mismatch-audit severity/reason columns ride along, and the trainer exposes `--difficulty-buckets` filtering against the baked metadata. When a mismatch-repair store carries a build (`height_corrected_257`), the builder MUST use the corrected heights instead of raw — never process bad data when a repaired version exists.
-- **FR-102-010**: Full-signal completeness (user-directed 2026-07-11 — "every signal we will ever need"): the store also carries `normal_xyz_257` (int8, MCNR-native), `shadow_mask_256` (MCSH), `object_visibility_256` (renderer-truth visibility), `ground_intent_height_257` (object-inpainted intended ground), and `object_instance_mask`. Only derivable or deprecated signals remain excluded, each documented in `dataset.py`.
-- **FR-102-011**: True hole bitmasks (user-directed 2026-07-11 — "WoWViewer flips them perfectly for every build"): the corrupt V18 `holes_16` is replaced end-to-end. The C# extractor defect is fixed at the source (`AdtTensorPackBuilder.ReadMcrfAndHoles` now reads the MCNK `holes` uint16 at header offset 0x3C — the same field `WorldTerrainHoleMask` renders — instead of flags bits 8-15; `AlphaWdtReader` preserves the full per-chunk ushort masks it already parsed at offset 0x40). A new `WowViewer.Tool.Harvest extract-holes` command dumps era-aware raw hole bitmasks per tile to JSON, and `attach_holes_bits` joins them into the store as `holes_bits_16` (int32, -1 = unknown). Mismatch-repair stores are **sparse overlays** (NaN except repaired tiles): the builder merges per cell and hard-counts non-finite heights (`nonfinite_height_tiles` attr must be 0 for a trainable store).
-
-#### Slice 1: Universal SegFormer Decompiler (Stage 1)
-- **FR-102-101**: Model MUST use a `SegformerForSemanticSegmentation` backbone (`nvidia/mit-b0`). No Depth Anything models allowed.
-- **FR-102-102**: Implement `TerrainInpaintHead` outputting the clean terrain-shadow map ($3\times256\times256$ RGB) and `ObjectMaskDecoder` outputting the object footprint mask ($1\times256\times256$).
-- **FR-102-103**: Implement `ObjectPlacementHead` predicting classifications, translations, and rotations.
-
-#### Slice 2: High-Res Height & WDL Prior Generator (Stage 2)
-- **FR-102-201**: Implement progressive `V25StageBPredictor` scaling heights progressively ($33 \rightarrow 65 \rightarrow 129 \rightarrow 257$) using the Sylvester solver.
-- **FR-102-202**: Implement `WdlDownsampler` which mathematically averages the $257\times257$ heightmap to yield the $33\times33$ quincunx WDL prior heights.
-
-#### Slice 3: Differentiable Fractal Generator and Parameter Head (Stage 3)
-- **FR-102-301**: Implement `DifferentiableFractalGenerator` in PyTorch generating multi-octave Simplex or Perlin noise on a $256\times256$ grid.
-- **FR-102-302**: Implement `FractalParameterHead` predicting boundary masks, translations, frequency, amplitude, and persistence.
-
-#### Slice 4: Decoupled PM4 Reconstruction Utility (Stage 4)
-- **FR-102-401**: PM4 matching code MUST live entirely separate from the main neural network forward and backward pipelines.
-- **FR-102-402**: `V25Pm4GuideHandler` is a post-processing step running on top of predicted placements to snap coordinates and rank WMO/M2 names via `pm4_asset_matching.scorer`. It consumes pre-parsed database segment structures (`Pm4SegmentSignalRecord`) instead of reading raw `.pm4` files.
-
-#### Slice 5: Trainer Memory & Zarr Optimizations
-- **FR-102-501**: Training code MUST implement `--gradient-checkpointing` and `--8bit-optimizer` flags.
-- **FR-102-502**: Use the sequential preloading cache `TileSource.preload()` to batch Zarr disk reads contiguously on start.
-
----
+- **FR-102-R001**: No model may have multiple prediction heads or optimize multiple output families. Each model has one output signal, one loss family, and one checkpoint.
+- **FR-102-R002**: A deploy-input manifest MUST enumerate every tensor entering `forward`, its shape, and its RGB-only derivation. The trainer MUST fail closed when the manifest and model signature disagree.
+- **FR-102-R003**: Dataset splitting MUST hold out complete maps and at least one build/era. Random tile splits from the same maps are not quality proof.
+- **FR-102-R004**: The benchmark MUST include zero-height, train-global-mean, and an RGB-derived flat-height baseline evaluated on the identical held-out set. Per-tile target means are prohibited because they are unavailable at deployment.
+- **FR-102-R005**: Training labels MAY include height, WDL, normals, objects, liquids, textures, and curation facts, but Phase 0 consumes only height as the optimization target and liquid/validity masks as loss masks.
+- **FR-102-R006**: Absolute offset, relative relief, slope, low-frequency structure, border continuity, and uncertainty MUST be reported separately. A single aggregate loss is insufficient.
+- **FR-102-R007**: Runs longer than three epochs are prohibited until a bounded smoke has finite gradients, stable validation, and beats the registered trivial baseline.
+- **FR-102-R008**: Every GPU run MUST record command, code revision, dataset identity, split manifest, peak VRAM, energy-relevant duration, and per-epoch validation metrics.
+- **FR-102-R009**: WDL export, object reconstruction, texture reconstruction, alpha reconstruction, and PM4 guidance are later independent phases. None may be used to claim Phase 0 height success.
+- **FR-102-R010**: The current unified V25 trainer MUST remain fail-closed until a replacement RGB-only height trainer satisfies FR-102-R001 through FR-102-R008.
+- **FR-102-R011**: H0 MUST pass its held-out offset gate before H1 training begins; H1 MUST pass its coarse-relief gate before H2 begins; H2 MUST pass before H3 or U1 begins.
+- **FR-102-R012**: H0, H1, H2, H3, and U1 MUST use separate optimizers, training commands, checkpoints, and metric histories. Joint fine-tuning is prohibited.
+- **FR-102-R013**: Object masks, cleaned terrain images, placements, tilesets, alpha maps, liquids, holes, normals, and shadows each require their own future single-output model and independent gate.
 
 ## Success Criteria
 
-### Measurable Outcomes
+- **SC-102-R001**: Inference succeeds from RGB minimap files after all dataset and game-client paths are made unavailable.
+- **SC-102-R002**: The deploy-input audit reports zero unavailable or target-derived inputs.
+- **SC-102-R003**: On held-out maps, the Phase 0 model improves height L1 by at least 20% over the best registered deployable baseline on the identical evaluation set. Historical results count only if rerun on that frozen split.
+- **SC-102-R004**: At least 95% of held-out shared borders remain within the registered border-error threshold before post-processing.
+- **SC-102-R005**: Validation reports calibration: higher predicted uncertainty corresponds to higher observed height error.
+- **SC-102-R006**: The bounded trainer remains below 7 GB peak VRAM and completes its three-epoch decision run without NaN, OOM, or silent CPU fallback.
+- **SC-102-R007**: The registry shows exactly one output signal per checkpoint and no shared trainable weights between pipeline stages.
 
-- **SC-102-001**: Main model training fits on an 8 GB VRAM GPU (peak CUDA VRAM $< 7.0$ GB).
-- **SC-102-002**: PM4 guided snapping and name matching operates as a post-processing CLI step using pre-parsed database records.
-- **SC-102-003**: Reconstructed MCAL `alpha_256` maps achieve an SSIM $\geq 0.85$ on validation sets using predicted fractal parameters.
-- **SC-102-004**: High-res heights and WDL priors are mathematically aligned.
-- **SC-102-005**: SegFormer semantic object footprint segmentation achieves an IoU $\geq 0.85$.
+## Out of Scope Until Phase 0 Passes
 
----
+- Externally supplied WDL-prior prediction or refinement as an internal prerequisite
+- Object placements or PM4 snapping
+- MTEX, MCLY, MCAL, liquid, hole, shadow, and normal generation
+- ADT/WDL binary writing
+- Claims of universal or production-ready reconstruction
 
-## What This Spec Does NOT Do
+## Assumptions
 
-- **No PM4 binary file parser**: Python code does not open or parse binary PM4 files; it reads pre-extracted segment record schemas loaded by the dataset builder.
-- **No Python ADT Format Writer**: The model outputs are written directly to a structured Zarr dataset store to be compiled or consumed by other C# tooling.
-
----
-
-## Implementation Order
-
-0. **Slice 0**: Lean V25 Zarr dataset builder (`build_v25_dataset.py` + `harvester/v25/dataset.py`) sourcing V18/V22/V24.
-1. **Slice 1**: SegFormer frontend and decompiler decoders (inpainting and object placements).
-2. **Slice 2**: GPU Sylvester Solver and progressive `V25StageBPredictor` for $257\times257$ heights.
-3. **Slice 3**: `WdlDownsampler` to generate WDL priors from high-res heightmaps.
-4. **Slice 4**: Decoupled `V25Pm4GuideHandler` post-processor for alignment and asset matching.
-5. **Slice 5**: `DifferentiableFractalGenerator` in PyTorch and `FractalParameterHead` predicting seeds and parameters.
-6. **Slice 6**: Texture decoders (`MtexPredictor`, `MclyDecoder`).
-7. **Slice 7**: Unified `V25SegformerDecompiler` model architecture.
-8. **Slice 8**: Multi-task `V25UnifiedLoss` training function.
-9. **Slice 9**: Trainer script `train_v25_decompiler.py` with 8 GB VRAM optimizations.
-10. **Slice 10**: Inference CLI `infer_v25_decompiler.py` outputting a structured Zarr dataset (Blosc LZ4, level 1 compression).
+- RGB minimap tiles are the only guaranteed deployment artifact.
+- Training-time terrain labels remain available for supervised evaluation.
+- The initial goal is an honest staged feasibility result, including a documented stop if any residual stage fails its gate.
