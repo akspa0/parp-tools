@@ -103,11 +103,11 @@ def test_setup_spec077_runpod_defaults_to_cost_target() -> None:
     assert args.max_cost_per_hour == 1.00
     assert args.min_gpu_vram_gb == 12
     assert args.min_ram_gb == 24
-    assert args.cloud_type == "COMMUNITY"
+    assert args.cloud_type == "SECURE"
     assert args.no_cost_target is False
     assert args.use_network_volume is True
     payload = setup_spec077_runpod._build_pod_payload(args, network_volume_id=None)
-    assert payload["cloudType"] == "COMMUNITY"
+    assert payload["cloudType"] == "SECURE"
     assert payload["gpuTypeIds"] == ["NVIDIA RTX 4000 Ada Generation"]
     assert payload["gpuCount"] == 1
     assert payload["containerDiskInGb"] == 50
@@ -152,7 +152,7 @@ def test_setup_spec077_runpod_network_volume_pins_datacenter() -> None:
     assert payload["networkVolumeId"] == "vol_test"
     assert payload["dataCenterId"] == "US-KS-2"
     assert "dataCenterIds" not in payload
-    assert "volumeInGb" not in payload
+    assert payload["volumeInGb"] == 150
 
 
 def test_setup_spec077_runpod_network_volume_rejects_auto_datacenter() -> None:
@@ -172,7 +172,7 @@ def test_setup_spec077_runpod_network_volume_rejects_auto_datacenter() -> None:
 
 
 def test_setup_spec077_runpod_bootstrap_handles_receive_failure() -> None:
-    args = setup_spec077_runpod._parse_args(["--dry-run"])
+    args = setup_spec077_runpod._parse_args(["--dry-run", "--transfer-mode", "relay"])
     args._resolved_package_name = "pkg"
     args._resolved_transfer_code = "spec077-test"
 
@@ -230,7 +230,7 @@ def test_setup_spec077_runpod_retries_no_capacity_and_deletes_failed_volume(tmp_
     assert manifest["pod_create_payload"]["gpuTypeIds"] == ["NVIDIA RTX A4500"]
     assert manifest["pod_create_payload"]["dataCenterId"] == "US-GA-2"
     assert manifest["pod_create_payload"]["networkVolumeId"] == "vol_US-GA-2"
-    assert "dockerStartCmd" not in manifest["pod_create_payload"]
+    assert "dockerStartCmd" in manifest["pod_create_payload"]
     assert manifest["availability_attempts"][0]["status"] == "failed"
     assert manifest["availability_attempts"][0]["network_volume_deleted"] is True
     assert manifest["availability_attempts"][1]["status"] == "created"
@@ -275,7 +275,8 @@ def test_setup_spec077_runpod_retries_datacenter_not_found(tmp_path: Path, monke
     assert exit_code == 0
     manifest = json.loads((output_root / "runpod_setup_pkg.json").read_text(encoding="utf-8"))
     assert manifest["pod"]["id"] == "pod_ok"
-    assert manifest["pod_create_payload"]["dataCenterIds"] == ["US-KS-2"]
+    assert manifest["pod_create_payload"]["dataCenterId"] == "US-KS-2"
     assert manifest["availability_attempts"][0]["status"] == "failed"
     assert "not found" in manifest["availability_attempts"][0]["error"].lower()
     assert manifest["availability_attempts"][1]["status"] == "created"
+

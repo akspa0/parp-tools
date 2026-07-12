@@ -34,6 +34,7 @@ public enum ToolsBottomTab
     Pm4 = 2,
     Terrain = 3,
     Utilities = 4,
+    Converters = 5,
 }
 
 /// <summary>
@@ -61,6 +62,7 @@ public enum TerrainBottomTab
     Mcnk = 2,
     WeakSignal = 3,
     Export = 4,
+    Tools = 5,
 }
 
 /// <summary>
@@ -96,7 +98,9 @@ public static class WorkbenchNavigator
     {
         WorkbenchTab.Model => ["Info", "Animations", "Actions", "LOD"],
         WorkbenchTab.World => ["Source", "Placements", "Tiles", "Selection Tools", "LOD"],
-        WorkbenchTab.Tools => ["Quick", "Archeology", "PM4", "Terrain", "Utilities"],
+        WorkbenchTab.Tools => ["Quick", "Archeology", "PM4", "Terrain", "Utilities", "Converters"],
         _ => [],
     };
+
+    public static string[] GetTerrainBottomTabLabels() => ["Clipboard", "Analysis", "MCNK", "Weak Signal", "Export", "Tools"];
 }

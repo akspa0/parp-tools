@@ -42,14 +42,26 @@ def test_height_loss_ignores_non_trainable_regions() -> None:
     batch = {
         "input": torch.zeros((1, 3, 2, 2), dtype=torch.float32),
         "height_norm": torch.zeros((1, 1, 2, 2), dtype=torch.float32),
-        "terrain_valid_mask_257": torch.tensor([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=torch.float32),
+        "weight_257": torch.tensor([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=torch.float32),
+        "liquid_mask": torch.zeros((1, 1, 1, 1), dtype=torch.float32),
     }
 
-    loss, metrics, outputs = _train_common._height_loss(model, batch, torch.device("cpu"), argparse.Namespace())
+    loss, metrics, outputs = _train_common._height_loss(
+        model,
+        batch,
+        torch.device("cpu"),
+        argparse.Namespace(
+            normal_consistency_weight=0.0,
+            gradient_weight=0.0,
+            multiscale_weight=0.0,
+        ),
+    )
 
     assert torch.isclose(loss, torch.tensor(1.0))
     assert metrics["height_mask_cov"] == 0.5
-    assert torch.equal(outputs["weight"], batch["terrain_valid_mask_257"])
+    assert torch.equal(outputs["weight"], batch["weight_257"])
+
+
 
 
 def test_normal_loss_respects_terrain_valid_mask() -> None:

@@ -1239,9 +1239,12 @@ public static class AdtTensorPackBuilder
             if ((uint)chunkX >= TileChunks || (uint)chunkY >= TileChunks)
                 continue;
 
-            // Hole mask from MCNK header flags (bits 8-15 in some formats)
-            uint flags = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x00, 4));
-            if ((flags & 0x0000FF00) != 0)
+            // True hole bitmap: MCNK header 'holes' uint16 at offset 0x3C — the
+            // same field the terrain renderer consumes via WorldTerrainHoleMask.
+            // The previous flags-bits-8-15 derivation marked ordinary terrain
+            // as holed (Spec 094 audit defect).
+            ushort holeBits = BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(0x3C, 2));
+            if (holeBits != 0)
             {
                 holes[chunkY, chunkX] = true;
                 anyHoles = true;
@@ -1293,6 +1296,40 @@ public static class AdtTensorPackBuilder
             anyMcrfDoodads ? mcrfDoodadRefIndices.ToArray() : null,
             anyMcrfWmos ? mcrfWmoRefCounts16 : null,
             anyMcrfWmos ? mcrfWmoRefIndices.ToArray() : null);
+    }
+
+    /// <summary>
+    /// Reads the raw per-chunk MCNK hole bitmasks (uint16 at header offset
+    /// 0x3C, 4x4 hole groups per chunk) from a root ADT stream. Returns a
+    /// row-major [chunkY, chunkX] grid, or null when the file has no terrain
+    /// chunks. This is the full-fidelity signal the lossy per-chunk bool in
+    /// the tensor pack cannot represent.
+    /// </summary>
+    public static ushort[,]? ReadHoleBitmasks(Stream stream, string sourcePath)
+    {
+        MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, sourcePath);
+        List<MapChunkLocation> chunks = ResolveTerrainChunkLocations(stream, fileSummary);
+        if (chunks.Count == 0)
+            return null;
+
+        ushort[,] holes = new ushort[TileChunks, TileChunks];
+        bool anyChunk = false;
+        foreach (MapChunkLocation chunk in chunks)
+        {
+            byte[] payload = ReadChunkPayload(stream, chunk);
+            if (payload.Length < RootMcnkHeaderSize)
+                continue;
+
+            int chunkX = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(0x04, 4));
+            int chunkY = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(0x08, 4));
+            if ((uint)chunkX >= TileChunks || (uint)chunkY >= TileChunks)
+                continue;
+
+            holes[chunkY, chunkX] = BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(0x3C, 2));
+            anyChunk = true;
+        }
+
+        return anyChunk ? holes : null;
     }
 
     // ═══════════════════════════════════════════════════════════════════════

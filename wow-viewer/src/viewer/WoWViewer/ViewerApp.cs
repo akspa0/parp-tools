@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -631,8 +632,8 @@ public partial class ViewerApp : IDisposable
     private bool _showRightSidebar = true;
     private const float DefaultSidebarWidth = 360f;
     private const float DefaultRightSidebarWidth = 480f;
-    private const float SidebarMinWidth = 260f;
-    private const float SidebarCompactMinWidth = 180f;
+    private const float SidebarMinWidth = 280f;
+    private const float SidebarCompactMinWidth = 240f;
     private const float SidebarMaxWidth = 1080f;
     private const float SidebarSplitterWidth = 8f;
     private const float DefaultBottomDrawerHeight = 280f;
@@ -816,6 +817,7 @@ public partial class ViewerApp : IDisposable
     private bool _mapConvertCopyAlphaSourceWdt = true;
     private bool _mapConvertEmitLkSplitOutputs = true;
     private bool _mapConvertVerbose = true;
+    private string _areaCrosswalkPath = ""; // Optional area crosswalk CSV for Alpha→LK conversion
     private bool _mapConverting = false;
     private readonly List<string> _mapConvertLog = new();
     private bool _mapConvertScrollToBottom = false;
@@ -1697,11 +1699,8 @@ void main() {
                 if (_showRenderQualityWindow)
                     DrawRenderQualityWindow();
 
-                // Settings (global configuration window)
-                if (_showSettingsWindow)
-                    DrawSettingsWindow();
-
-                if (_showTerrainToolsWindow && (_terrainManager != null || _vlmTerrainManager != null) && !_useTabUi)
+                // Terrain Tools (floating window) - available in both modes; tabbed mode also has Terrain > Tools sub-tab
+                if (_showTerrainToolsWindow && (_terrainManager != null || _vlmTerrainManager != null))
                     DrawTerrainToolsWindow();
 
                 // Chunk Clipboard (floating window)
@@ -1717,8 +1716,8 @@ void main() {
                 if (_showCaptureAutomationWindow)
                     DrawCaptureAutomationWindow();
 
-                // PM4 alignment (advanced fallback)
-                if (_showPm4AlignmentWindow)
+                // PM4 alignment (advanced fallback) - only in legacy mode; tabbed mode uses PM4 > Alignment sub-tab
+                if (_showPm4AlignmentWindow && !_useTabUi)
                     DrawPm4AlignmentWindow();
 
                 // Tool windows extracted from right sidebar
@@ -1728,6 +1727,10 @@ void main() {
                 if (_showTaxiWindow && _worldScene != null)
                     DrawTaxiWindow();
             }
+
+            // Settings (global configuration window) - must render in BOTH tabbed and legacy modes
+            if (_showSettingsWindow)
+                DrawSettingsWindow();
 
             if (!_useTabUi && _showWeakSignalWindow && (_terrainManager != null || _vlmTerrainManager != null))
                 DrawWeakSignalWindow();
@@ -1999,6 +2002,8 @@ void main() {
                     if (ImGui.MenuItem("MCNK Explorer", hasTerrain))
                         OpenWorkbenchTab(ToolsBottomTab.Terrain);
                     if (ImGui.MenuItem("Weak Signal", hasTerrain))
+                        OpenWorkbenchTab(ToolsBottomTab.Terrain);
+                    if (ImGui.MenuItem("Terrain Tools", hasTerrain))
                         OpenWorkbenchTab(ToolsBottomTab.Terrain);
 
                     ImGui.EndMenu();
@@ -6378,6 +6383,21 @@ void main() {
             ImGui.Checkbox("Verbose logging", ref _mapConvertVerbose);
             ImGui.Spacing();
 
+            if (_mapConvertDirection == 0)
+            {
+                ImGui.Text("Area Crosswalk CSV (optional):");
+                ImGui.SetNextItemWidth(-80);
+                ImGui.InputText("##area_crosswalk", ref _areaCrosswalkPath, 512);
+                ImGui.SameLine();
+                if (ImGui.Button("Browse##area_crosswalk"))
+                {
+                    var picked = ShowFileDialogSTA("Select area crosswalk CSV", "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*", null);
+                    if (picked != null) _areaCrosswalkPath = picked;
+                }
+                ImGui.SameLine();
+                ImGui.TextDisabled("Maps area IDs for Alpha→LK conversion");
+            }
+
             if (_mapConvertDirection == 1 && !string.IsNullOrEmpty(_mapConvertSourcePath) && string.IsNullOrEmpty(_mapConvertLkMapDir))
             {
                 _mapConvertLkMapDir = Path.GetDirectoryName(_mapConvertSourcePath) ?? "";
@@ -6429,21 +6449,35 @@ void main() {
 
                             if (emitLkSplitOutputs)
                             {
-                                throw new NotSupportedException("Conversion is now handled by WowViewer.Tool.Converter.");
-                                var converter = (object)null;
-
-                                var origOut = Console.Out;
-                                var sw = new StringWriter();
-                                try
+                                // Execute the converter CLI and capture output
+                                var converterExe = FindConverterExecutable();
+                                if (string.IsNullOrEmpty(converterExe))
                                 {
-                                    Console.SetOut(sw);
-                                    var result = new { Success = false, TilesConverted = 0, TotalTiles = 0, ElapsedMs = 0, Error = default(string), Warnings = new System.Collections.Generic.List<string>() };
+                                    _mapConvertError = "Converter executable not found. Build the project first.";
+                                    lock (_mapConvertLog)
+                                        _mapConvertLog.Add($"\n=== ERROR: {_mapConvertError} ===");
+                                }
+                                else
+                                {
+                                    var args = new List<string>
+                                    {
+                                        "convert-alpha-to-lk",
+                                        "--input", srcPath,
+                                        "--output", lkOutputDir
+                                    };
+                                    if (verbose) args.Add("--verbose");
+                                    if (!string.IsNullOrWhiteSpace(_areaCrosswalkPath))
+                                    {
+                                        args.Add("--area-crosswalk");
+                                        args.Add(_areaCrosswalkPath);
+                                    }
 
-                                    var lines = sw.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                                    lock (_mapConvertLog) _mapConvertLog.AddRange(lines);
-                                    _mapConvertScrollToBottom = true;
-
-                                    if (result.Success)
+                                    var result = await RunConverterAsync(converterExe, args, _mapConvertLog, _mapConvertScrollToBottom);
+                                    if (!result.Success)
+                                    {
+                                        _mapConvertError = result.Error ?? "Conversion failed";
+                                    }
+                                    else
                                     {
                                         _mapConvertLastLoadPath = lkLoadPath;
                                         lock (_mapConvertLog)
@@ -6451,21 +6485,6 @@ void main() {
                                         lock (_mapConvertLog)
                                             _mapConvertLog.Add($"Project outputs: alpha-source={(copyAlphaSourceWdt ? alphaCopyPath : "skipped")}, lk-split={lkOutputDir}");
                                     }
-                                    else
-                                    {
-                                        _mapConvertError = result.Error ?? "Unknown error";
-                                        lock (_mapConvertLog)
-                                            _mapConvertLog.Add($"\n=== FAILED: {result.Error} ===");
-                                    }
-
-                                    foreach (var w in result.Warnings)
-                                    {
-                                        lock (_mapConvertLog) _mapConvertLog.Add($"  WARN: {w}");
-                                    }
-                                }
-                                finally
-                                {
-                                    Console.SetOut(origOut);
                                 }
                             }
                             else
@@ -6477,21 +6496,31 @@ void main() {
                         else
                         {
                             string alphaOutputPath = BuildMapConverterAlphaOutputPath(outPath, srcPath);
-                            throw new NotSupportedException("Conversion is now handled by WowViewer.Tool.Converter.");
-                            var converter = (object)null;
 
-                            var origOut = Console.Out;
-                            var sw = new StringWriter();
-                            try
+                            // Execute the converter CLI and capture output
+                            var converterExe = FindConverterExecutable();
+                            if (string.IsNullOrEmpty(converterExe))
                             {
-                                Console.SetOut(sw);
-                                var result = new { Success = false, TilesConverted = 0, TotalTiles = 0, ElapsedMs = 0, Error = default(string), Warnings = new System.Collections.Generic.List<string>() };
+                                _mapConvertError = "Converter executable not found. Build the project first.";
+                                lock (_mapConvertLog)
+                                    _mapConvertLog.Add($"\n=== ERROR: {_mapConvertError} ===");
+                            }
+                            else
+                            {
+                                var args = new List<string>
+                                {
+                                    "convert-split-adt-to-lk",
+                                    "--input-root", srcPath,
+                                    "--output", alphaOutputPath
+                                };
+                                if (verbose) args.Add("--verbose");
 
-                                var lines = sw.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                                lock (_mapConvertLog) _mapConvertLog.AddRange(lines);
-                                _mapConvertScrollToBottom = true;
-
-                                if (result.Success)
+                                var result = await RunConverterAsync(converterExe, args, _mapConvertLog, _mapConvertScrollToBottom);
+                                if (!result.Success)
+                                {
+                                    _mapConvertError = result.Error ?? "Conversion failed";
+                                }
+                                else
                                 {
                                     _mapConvertLastLoadPath = alphaOutputPath;
                                     lock (_mapConvertLog)
@@ -6499,21 +6528,6 @@ void main() {
                                     lock (_mapConvertLog)
                                         _mapConvertLog.Add($"Project alpha output: {alphaOutputPath}");
                                 }
-                                else
-                                {
-                                    _mapConvertError = result.Error ?? "Unknown error";
-                                    lock (_mapConvertLog)
-                                        _mapConvertLog.Add($"\n=== FAILED: {result.Error} ===");
-                                }
-
-                                foreach (var w in result.Warnings)
-                                {
-                                    lock (_mapConvertLog) _mapConvertLog.Add($"  WARN: {w}");
-                                }
-                            }
-                            finally
-                            {
-                                Console.SetOut(origOut);
                             }
                         }
                     }
@@ -6696,53 +6710,47 @@ void main() {
                 bool copyTextures = _wmoConvertCopyTextures;
                 var dataSource = _dataSource;
 
-                Task.Run(() =>
+                Task.Run(async () =>
                 {
                     try
                     {
-                        var origOut = Console.Out;
-                        var sw = new StringWriter();
-                        Console.SetOut(sw);
+                        var converterExe = FindConverterExecutable();
+                        if (string.IsNullOrEmpty(converterExe))
+                        {
+                            _wmoConvertError = "Converter executable not found. Build the project first.";
+                            lock (_wmoConvertLog)
+                                _wmoConvertLog.Add($"\n=== ERROR: {_wmoConvertError} ===");
+                            _wmoConvertScrollToBottom = true;
+                            return;
+                        }
 
-                        List<string> textures = new();
-                        List<string> writtenFiles = new();
-                        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath)) ?? ".");
+                        var args = new List<string>();
                         if (direction == 0)
                         {
-                            var converter = new WmoV14ToV17Converter();
-                            textures = new System.Collections.Generic.List<string>();
-
-                            writtenFiles.Add(outPath);
-                            string outDir = Path.GetDirectoryName(Path.GetFullPath(outPath)) ?? ".";
-                            string baseName = Path.GetFileNameWithoutExtension(outPath);
-                            for (int gi = 0; gi < 2048; gi++)
-                            {
-                                string gp = Path.Combine(outDir, $"{baseName}_{gi:D3}.wmo");
-                                if (!File.Exists(gp)) break;
-                                writtenFiles.Add(gp);
-                            }
+                            args.Add("convert-wmo-v14-to-v17");
                         }
                         else
                         {
-                            var converter = new WmoV17ToV14Converter();
-                            // converter.Convert(srcPath, outPath);
-                            writtenFiles.Add(outPath);
+                            args.Add("convert-wmo-v17-to-v14");
                         }
+                        args.Add("--input-root");
+                        args.Add(srcPath);
+                        args.Add("--output");
+                        args.Add(outPath);
+                        if (copyTextures) args.Add("--copy-textures");
 
-                        Console.SetOut(origOut);
-                        var lines = sw.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                        lock (_wmoConvertLog) _wmoConvertLog.AddRange(lines);
-                        lock (_wmoConvertLog)
+                        var result = await RunConverterAsync(converterExe, args, _wmoConvertLog, _wmoConvertScrollToBottom);
+                        if (!result.Success)
                         {
-                            _wmoConvertLog.Add("\n=== SUCCESS ===");
-                            foreach (var f in writtenFiles)
-                                _wmoConvertLog.Add($"Wrote: {f}");
+                            _wmoConvertError = result.Error ?? "Conversion failed";
                         }
-
-                        if (copyTextures && textures.Count > 0 && direction == 0)
+                        else
                         {
-                            CopyWmoTexturesPreservePaths(srcPath, outPath, textures, dataSource);
-                            lock (_wmoConvertLog) _wmoConvertLog.Add($"Copied textures: {textures.Count}");
+                            lock (_wmoConvertLog)
+                            {
+                                _wmoConvertLog.Add("\n=== SUCCESS ===");
+                                _wmoConvertLog.Add($"Wrote: {outPath}");
+                            }
                         }
 
                         _wmoConvertScrollToBottom = true;
@@ -15300,6 +15308,130 @@ void main() {
         public string Path { get; set; } = "";
         public string? BuildVersion { get; set; }
     }
+
+    // Helper methods for converter CLI execution
+    private string? FindConverterExecutable()
+    {
+        // Try to find the converter executable in the build output
+        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        var candidates = new[]
+        {
+            Path.Combine(baseDir, "WowViewer.Tool.Converter.exe"),
+            Path.Combine(baseDir, "tools", "converter", "WowViewer.Tool.Converter", "bin", "Debug", "net9.0", "WowViewer.Tool.Converter.exe"),
+            Path.Combine(baseDir, "..", "tools", "converter", "WowViewer.Tool.Converter", "bin", "Debug", "net9.0", "WowViewer.Tool.Converter.exe"),
+            Path.Combine(baseDir, "..", "..", "tools", "converter", "WowViewer.Tool.Converter", "bin", "Debug", "net9.0", "WowViewer.Tool.Converter.exe"),
+        };
+
+        foreach (var candidate in candidates)
+        {
+            if (File.Exists(candidate))
+                return Path.GetFullPath(candidate);
+        }
+
+        return null;
+    }
+
+    private async Task<ConverterResult> RunConverterAsync(string exePath, List<string> args, List<string> log, bool scrollToBottom)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = exePath,
+            Arguments = string.Join(" ", args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a)),
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
+        };
+
+        var result = new ConverterResult { Success = false };
+
+        try
+        {
+            using var process = Process.Start(startInfo);
+            if (process == null)
+            {
+                result.Error = "Failed to start converter process";
+                return result;
+            }
+
+            var outputLines = new List<string>();
+            var errorLines = new List<string>();
+
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data != null)
+                {
+                    outputLines.Add(e.Data);
+                    lock (log)
+                    {
+                        log.Add(e.Data);
+                    }
+                    scrollToBottom = true;
+                }
+            };
+
+            process.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data != null)
+                {
+                    errorLines.Add(e.Data);
+                    lock (log)
+                    {
+                        log.Add($"[ERR] {e.Data}");
+                    }
+                    scrollToBottom = true;
+                }
+            };
+
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            await process.WaitForExitAsync();
+
+            result.Success = process.ExitCode == 0;
+            if (!result.Success)
+            {
+                result.Error = string.Join("\n", errorLines);
+            }
+
+            // Parse output for structured results
+            foreach (var line in outputLines)
+            {
+                if (line.StartsWith("Tiles converted:"))
+                {
+                    var parts = line.Split(':');
+                    if (parts.Length > 1 && int.TryParse(parts[1].Trim(), out int tiles))
+                        result.TilesConverted = tiles;
+                }
+                else if (line.StartsWith("Total tiles:"))
+                {
+                    var parts = line.Split(':');
+                    if (parts.Length > 1 && int.TryParse(parts[1].Trim(), out int total))
+                        result.TotalTiles = total;
+                }
+                else if (line.StartsWith("Elapsed:"))
+                {
+                    var parts = line.Split(':');
+                    if (parts.Length > 1 && int.TryParse(parts[1].Trim().Replace("ms", ""), out int elapsed))
+                        result.ElapsedMs = elapsed;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            result.Error = ex.Message;
+        }
+
+        return result;
+    }
+
+    private sealed class ConverterResult
+    {
+        public bool Success { get; set; }
+        public string? Error { get; set; }
+        public int TilesConverted { get; set; }
+        public int TotalTiles { get; set; }
+        public int ElapsedMs { get; set; }
+    }
 }
-
-

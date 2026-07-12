@@ -43,30 +43,54 @@ wow-viewer/
 │   │   └── harvester/
 │   │       └── v25/
 │   │           ├── __init__.py           # Library entrypoint
+│   │           ├── dataset.py            # Lean V25 Zarr schema, builder, V25TileSource (preload), PM4 record sidecar
 │   │           ├── segformer.py          # SegFormer wrapper, inpainting, and object placement heads
 │   │           ├── pm4_guide.py          # Decoupled PM4 handler alignment and matching modules
 │   │           ├── fractal.py            # DifferentiableFractalGenerator & FractalParameterHead
 │   │           ├── texture.py            # MtexPredictor & MclyDecoder
 │   │           ├── solver.py             # Sylvester solver & tridiagonal math
-│   │           ├── prior.py              # WdlDownsampler
+│   │           ├── prior.py              # V25StageAPredictor & WdlDownsampler
 │   │           ├── lapnet.py             # Progressive height solver and model routing
 │   │           └── losses.py             # Multi-task loss functions
 │   ├── scripts/
+│   │   ├── build_v25_dataset.py          # Lean V25 dataset builder CLI (V18+V22+V24 sources)
 │   │   ├── train_v25_decompiler.py       # Unified training script
+│   │   ├── validate_v25.py               # SC-gate validation harness (IoU, SSIM, WDL alignment)
 │   │   └── infer_v25_decompiler.py       # Single-image deployment inference script
 │   └── tests/
 │       └── v25/
+│           ├── test_dataset.py           # Builder round-trip, lean-signal, vocab, preload, PM4 record tests
 │           ├── test_segformer.py         # SegFormer frontend and head tests
 │           ├── test_pm4_guide.py         # PM4 handler tests (verifies decoupled logic)
 │           ├── test_fractal.py           # Fractal generator & parameter tests
 │           ├── test_solver.py            # Mathematical solver tests
 │           ├── test_lapnet.py            # Progressive upsampling tests
+│           ├── test_prior.py             # Stage A predictor & WDL downsampler tests
+│           ├── test_texture.py           # MTEX/MCLY decoder tests
 │           └── test_losses.py            # Multi-task loss tests
 ```
+
+Note: the earlier `harvester/v25_zarr_io.py` (a V22-writer subclass) was retired.
+It cloned the full V22 signal set — liquids, normals, holes, placement masks,
+asset payload groups — into the V25 store, which violates the lean-dataset
+requirement (FR-102-002), and the store it produced on disk was never finalized
+(no root Zarr group). `harvester/v25/dataset.py` replaces it.
 
 ---
 
 ## Implementation Phases
+
+### Phase 0 — Lean V25 Dataset
+
+- **Goal**: Build the dedicated V25 training datastore fresh, carrying only V25-relevant signals.
+- **Approach**:
+  - `harvester/v25/dataset.py` defines the 8-array schema (`minimap_rgb`, `clean_minimap_256`, `object_mask_256`, `height_257`, `wdl_height_33`, `alpha_256`, `mcly_layer_mask`, `mcly_vocab_ids`) plus `index/placements/tileset_vocab` parquet sidecars.
+  - Sources: V18 substrate arrays, V22 `mcly_tileset_ids` + MDDF/MODF flat placements + model paths, V24 `cleaned_minimap_256` via the `v18_row` join (fallback: one-time `clean_minimap()` compute).
+  - Curation-manifest, map, and limit filters; contiguous slice reads throughout.
+  - `V25TileSource.preload(rows)` gives the trainer the one-pass sequential load (FR-102-502).
+  - `attach_pm4_segments` / `load_pm4_segment_records` round-trip pre-parsed `Pm4SegmentSignalRecord`s through `pm4_segments.parquet`.
+
+---
 
 ### Phase 1 — SegFormer Frontend and Decompiler Decoders
 

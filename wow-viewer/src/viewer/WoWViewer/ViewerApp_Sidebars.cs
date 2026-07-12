@@ -3741,7 +3741,8 @@ public partial class ViewerApp
     private void DrawWorkbenchContent()
     {
         // Top tab bar inside the workbench (071: Model / World / Tools)
-        if (ImGui.BeginTabBar("##WorkbenchTopTabs", ImGuiTabBarFlags.None))
+        // Use FittingPolicyScroll to prevent text scaling when many tabs
+        if (ImGui.BeginTabBar("##WorkbenchTopTabs", ImGuiTabBarFlags.FittingPolicyScroll))
         {
             DrawTopTabButton(WorkbenchTab.Model, "Model");
             DrawTopTabButton(WorkbenchTab.World, "World");
@@ -3756,7 +3757,8 @@ public partial class ViewerApp
         if (_activeBottomTabIndex < 0 || _activeBottomTabIndex >= labels.Length)
             _activeBottomTabIndex = 0;
 
-        if (ImGui.BeginTabBar("##WorkbenchBottomTabs", ImGuiTabBarFlags.None))
+        // Use FittingPolicyScroll to prevent text scaling when many tabs
+        if (ImGui.BeginTabBar("##WorkbenchBottomTabs", ImGuiTabBarFlags.FittingPolicyScroll))
         {
             for (int i = 0; i < labels.Length; i++)
             {
@@ -4062,6 +4064,9 @@ public partial class ViewerApp
             case ToolsBottomTab.Utilities:
                 DrawUtilitiesSubTabContent();
                 break;
+            case ToolsBottomTab.Converters:
+                DrawConvertersSubTabContent();
+                break;
         }
     }
 
@@ -4094,6 +4099,9 @@ public partial class ViewerApp
                 break;
             case TerrainBottomTab.Export:
                 DrawTerrainExportSubTab(renderer!);
+                break;
+            case TerrainBottomTab.Tools:
+                DrawTerrainToolsSubTab(renderer);
                 break;
         }
     }
@@ -4143,6 +4151,59 @@ public partial class ViewerApp
             return;
         }
         DrawWeakSignalContent();
+    }
+
+    private void DrawTerrainToolsSubTab(TerrainRenderer? renderer)
+    {
+        if (renderer == null)
+        {
+            ImGui.TextDisabled("Terrain renderer not available for tools.");
+            return;
+        }
+        ImGui.TextDisabled("Terrain workbench: tile targeting, chunk targeting, live restore tuning, and reusable heightmap saves in one place.");
+        ImGui.Separator();
+        DrawTerrainWorkbenchSelectionContent(renderer);
+        ImGui.Separator();
+        DrawTerrainControlsAdjustmentContent();
+
+        ImGui.Separator();
+        ImGui.Text("Terrain Export Scope");
+        DrawTerrainTileScopeSelector("TerrainToolsExport", includeCurrentTile: true);
+        var scopedTiles = GetTileScopeList(_terrainTileScope);
+        ImGui.TextDisabled($"Resolved export scope: {scopedTiles.Count} tile(s).");
+
+        ImGui.Separator();
+        ImGui.Text("Scoped Export");
+        ImGui.TextDisabled("Use Current tile, Loaded tiles, Whole map, Custom list, or a row/column rectangle before exporting partial ADT data.");
+        if (ImGui.Button("Export Alpha"))
+        {
+            if (_terrainTileScope == TerrainTileScope.CurrentTile)
+                ExportAlphaCurrentTileChunksFolder();
+            else
+                ExportAlphaTilesFolder(_terrainTileScope);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Export Heightmap"))
+        {
+            if (_terrainTileScope == TerrainTileScope.CurrentTile)
+                ExportHeightmap257CurrentTilePerTile();
+            else
+                ExportHeightmap257TilesFolderPerTile(_terrainTileScope);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Export MCCV"))
+        {
+            if (_terrainTileScope == TerrainTileScope.CurrentTile)
+                ExportMccvCurrentTilePng();
+            else
+                ExportMccvTilesFolder(_terrainTileScope);
+        }
+
+        ImGui.Separator();
+        if (ImGui.CollapsingHeader("Clipboard + Save", ImGuiTreeNodeFlags.DefaultOpen))
+            DrawChunkClipboardContent(renderer);
     }
 
     // ── PM4 sub-tab content ────────────────────────────────────────────────
@@ -4470,6 +4531,55 @@ public partial class ViewerApp
         ImGui.Text("UI Theme");
         ImGui.Separator();
         DrawUiThemeSettingsContent();
+    }
+
+    // ── Converters sub-tab content ──────────────────────────────────────────
+    private void DrawConvertersSubTabContent()
+    {
+        ImGui.TextDisabled("Converter commands launch external tools. Each card runs the existing CLI and captures output.");
+        ImGui.Separator();
+
+        if (ImGui.CollapsingHeader("Map Converter", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.TextDisabled("Converts modern ADT/WDT to Alpha-era formats.");
+            if (ImGui.Button("Launch Map Converter"))
+            {
+                PrepareMapConverterDialogInputs();
+                _showMapConverterDialog = true;
+            }
+            ImGui.SameLine();
+            ImGui.TextDisabled("Tools > Offline Data / Conversion > Map Converter...");
+        }
+
+        if (ImGui.CollapsingHeader("WMO Converter", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.TextDisabled("Converts WMO v17 to v14 (Alpha) and vice versa.");
+            if (ImGui.Button("Launch WMO Converter"))
+            {
+                PrepareWmoConverterDialogInputs();
+                _showWmoConverterDialog = true;
+            }
+            ImGui.SameLine();
+            ImGui.TextDisabled("Tools > Offline Data / Conversion > WMO Converter...");
+        }
+
+        if (ImGui.CollapsingHeader("M2 / MDX Converter", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.TextDisabled("Converts between M2 (Wrath+) and MDX (Alpha/Vanilla) model formats.");
+            ImGui.TextDisabled("Not yet implemented — CLI tool exists in gillijimproject_refactor.");
+        }
+
+        if (ImGui.CollapsingHeader("ADT Utilities", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.TextDisabled("Split/merge ADT, texture transfer, alpha mask tools.");
+            ImGui.TextDisabled("Not yet implemented — CLI tools exist in gillijimproject_refactor.");
+        }
+
+        if (ImGui.CollapsingHeader("Round-trip Validation", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.TextDisabled("Validate converter output against source data.");
+            ImGui.TextDisabled("Not yet implemented.");
+        }
     }
 
     // ── Utilities sub-tab content ──────────────────────────────────────────

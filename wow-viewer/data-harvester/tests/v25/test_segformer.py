@@ -5,12 +5,18 @@ from harvester.v25.segformer import V25SegformerDecompiler, TerrainInpaintHead
 def test_segformer_forward():
     """Assert output shape formats, projections, and linear classification boundaries of the SegFormer decompiler."""
     model = V25SegformerDecompiler(num_classes=32, max_objects=16)
-    x = torch.randn(2, 3, 256, 256)
-    mask_logits, placements, final_feats = model(x)
-    
-    assert mask_logits.shape == (2, 1, 256, 256)
-    assert final_feats.shape == (2, 256, 8, 8)
-    
+    x = torch.rand(2, 3, 256, 256)
+    out = model(x)
+
+    assert out["mask_logits"].shape == (2, 1, 256, 256)
+    assert out["final_feats"].shape == (2, 256, 8, 8)
+
+    # FR-102-102: the unified decompiler emits the clean terrain-shadow map
+    assert out["clean_rgb"].shape == (2, 3, 256, 256)
+    assert out["clean_rgb"].min() >= 0.0
+    assert out["clean_rgb"].max() <= 1.0
+
+    placements = out["placements"]
     assert "class_logits" in placements
     assert placements["class_logits"].shape == (2, 16, 32)
     assert placements["coords"].shape == (2, 16, 3)

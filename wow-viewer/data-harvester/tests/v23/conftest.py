@@ -12,4 +12,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: Sequence[pytest.
 
     marker = pytest.mark.skip(reason="run V23 tests with pytest -m v23")
     for item in items:
-        item.add_marker(marker)
+        # Only add skip marker to items residing under tests/v23
+        if "tests/v23" in str(item.fspath) or "tests\\v23" in str(item.fspath):
+            item.add_marker(marker)
+

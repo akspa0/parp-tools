@@ -144,7 +144,12 @@ class V25SegformerDecompiler(nn.Module):
             num_classes=num_classes,
             max_objects=max_objects
         )
-        
+
+        # FR-102-102: the inpaint head is part of the unified decompiler — it
+        # consumes the raw RGB plus the predicted object mask and emits the
+        # clean terrain-shadow map that guides the progressive height solver.
+        self.inpaint_head = TerrainInpaintHead(in_channels=4, out_channels=3)
+
     def forward(self, x):
         # Input raw minimap: (B, 3, 256, 256)
         outputs = self.encoder(x, output_hidden_states=True)
@@ -176,5 +181,13 @@ class V25SegformerDecompiler(nn.Module):
         # Extracted high-level features for placements
         final_feats = stage_outputs[3] # (B, 256, 8, 8)
         placements = self.placement_head(final_feats)
-        
-        return mask_logits, placements, final_feats
+
+        # Clean terrain-shadow map from the raw RGB gated by the predicted mask
+        clean_rgb = self.inpaint_head(x, torch.sigmoid(mask_logits))
+
+        return {
+            "mask_logits": mask_logits,
+            "clean_rgb": clean_rgb,
+            "placements": placements,
+            "final_feats": final_feats,
+        }

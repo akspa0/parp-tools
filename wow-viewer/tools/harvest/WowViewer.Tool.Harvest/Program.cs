@@ -73,6 +73,12 @@ static class Program
             case "discover-maps":
                 RunDiscoverMaps(tail);
                 break;
+            case "extract-holes":
+                RunExtractHoles(tail);
+                break;
+            case "extract-tilesets":
+                RunExtractTilesets(tail);
+                break;
             default:
                 Console.Error.WriteLine($"Unknown command '{command}'.");
                 ShowUsage();
@@ -97,6 +103,11 @@ static class Program
               harvest-stream    Stream raw tile blobs from a map to stdout
               discover-maps     List terrain-trainable maps from a staged client using
                                 WDT summary + tile probe checks
+              extract-holes     Dump raw per-chunk MCNK hole bitmasks (uint16, 4x4
+                                hole groups) for every terrain tile of the given maps
+                                to JSON (era-aware: alpha WDT + LK/split ADT)
+              extract-tilesets  Decode the listed tileset BLPs from this client's
+                                MPQs to PNGs + a manifest JSON (era-specific pixels)
               synthetic-minimap Composite tilesets + alpha → synthetic minimap
 
             Global options:
@@ -825,6 +836,217 @@ static class Program
             Console.WriteLine();
             Console.WriteLine("Use --tile-x <0-63> --tile-y <0-63> to harvest a specific tile.");
         }
+    }
+
+    static void RunExtractHoles(string[] args)
+    {
+        string? clientRoot = GetOption(args, "--client-root", "-c");
+        string? mapsOption = GetOption(args, "--maps", "-m");
+        string? output = GetOption(args, "--output", "-o");
+
+        if (string.IsNullOrWhiteSpace(clientRoot) || !Directory.Exists(clientRoot))
+        {
+            Console.Error.WriteLine("Error: --client-root <dir> is required and must exist.");
+            Environment.ExitCode = 1;
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(mapsOption))
+        {
+            Console.Error.WriteLine("Error: --maps <comma-separated map names> is required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            Console.Error.WriteLine("Error: --output <json path> is required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        clientRoot = ResolveGameClientRoot(clientRoot);
+        string? buildVersion = DetectBuildVersionFromClientRoot(clientRoot);
+
+        using var catalog = new NativeMpqService();
+        catalog.LoadArchives([clientRoot]);
+        TryLoadSupplementalListfile(catalog);
+        LoadMd5Translate(clientRoot, catalog);
+
+        string[] maps = mapsOption.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var mapsOut = new Dictionary<string, List<Dictionary<string, object>>>();
+        int totalTiles = 0;
+        int totalHoled = 0;
+
+        foreach (string mapName in maps)
+        {
+            string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
+            byte[]? wdtBytes = catalog.ReadFile(wdtVirtual);
+            if (wdtBytes is null)
+            {
+                Console.Error.WriteLine($"Warning: WDT not readable for map '{mapName}', skipping.");
+                continue;
+            }
+
+            var tiles = new List<Dictionary<string, object>>();
+            bool isAlpha = AlphaWdtReader.IsAlphaWdt(wdtBytes);
+
+            for (int tileY = 0; tileY < 64; tileY++)
+            {
+                for (int tileX = 0; tileX < 64; tileX++)
+                {
+                    ushort[,]? holesYx = null;
+
+                    if (isAlpha)
+                    {
+                        if (!AlphaWdtReader.TryReadTile(wdtBytes, tileX, tileY, wdtVirtual, out AlphaTileData? tileData) || tileData?.HoleFullMasks is null)
+                            continue;
+                        // Alpha reader stores [cx, cy]; normalize to [y, x].
+                        holesYx = new ushort[16, 16];
+                        for (int cy = 0; cy < 16; cy++)
+                            for (int cx = 0; cx < 16; cx++)
+                                holesYx[cy, cx] = tileData.HoleFullMasks[cx, cy];
+                    }
+                    else
+                    {
+                        string adtVirtual = $"World\\Maps\\{mapName}\\{mapName}_{tileX}_{tileY}.adt";
+                        byte[]? adtBytes = catalog.ReadFile(adtVirtual);
+                        if (adtBytes is null)
+                            continue;
+                        using var ms = new MemoryStream(adtBytes);
+                        holesYx = AdtTensorPackBuilder.ReadHoleBitmasks(ms, adtVirtual);
+                        if (holesYx is null)
+                            continue;
+                    }
+
+                    int[] flat = new int[256];
+                    bool anyHole = false;
+                    for (int cy = 0; cy < 16; cy++)
+                    {
+                        for (int cx = 0; cx < 16; cx++)
+                        {
+                            flat[cy * 16 + cx] = holesYx[cy, cx];
+                            anyHole |= holesYx[cy, cx] != 0;
+                        }
+                    }
+
+                    tiles.Add(new Dictionary<string, object>
+                    {
+                        ["x"] = tileX,
+                        ["y"] = tileY,
+                        ["holes"] = flat,
+                    });
+                    totalTiles++;
+                    if (anyHole)
+                        totalHoled++;
+                }
+            }
+
+            mapsOut[mapName] = tiles;
+            Console.WriteLine($"extract-holes: {mapName}: {tiles.Count} tiles");
+        }
+
+        var payload = new Dictionary<string, object>
+        {
+            ["build_version"] = buildVersion ?? "",
+            ["client_root"] = clientRoot,
+            ["hole_field"] = "mcnk_holes_uint16_row_major_yx",
+            ["maps"] = mapsOut,
+        };
+
+        string json = System.Text.Json.JsonSerializer.Serialize(payload);
+        File.WriteAllText(output, json);
+        Console.WriteLine($"extract-holes: wrote {totalTiles} tiles ({totalHoled} with holes) -> {output}");
+    }
+
+    static void RunExtractTilesets(string[] args)
+    {
+        string? clientRoot = GetOption(args, "--client-root", "-c");
+        string? pathsFile = GetOption(args, "--paths-file", "-p");
+        string? outputDir = GetOption(args, "--output-dir", "-o");
+
+        if (string.IsNullOrWhiteSpace(clientRoot) || !Directory.Exists(clientRoot))
+        {
+            Console.Error.WriteLine("Error: --client-root <dir> is required and must exist.");
+            Environment.ExitCode = 1;
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(pathsFile) || !File.Exists(pathsFile))
+        {
+            Console.Error.WriteLine("Error: --paths-file <txt, one BLP virtual path per line> is required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(outputDir))
+        {
+            Console.Error.WriteLine("Error: --output-dir <dir> is required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        clientRoot = ResolveGameClientRoot(clientRoot);
+        Directory.CreateDirectory(outputDir);
+
+        using var catalog = new NativeMpqService();
+        catalog.LoadArchives([clientRoot]);
+        TryLoadSupplementalListfile(catalog);
+        LoadMd5Translate(clientRoot, catalog);
+
+        string[] paths = File.ReadAllLines(pathsFile)
+            .Select(l => l.Trim())
+            .Where(l => l.Length > 0)
+            .ToArray();
+
+        var entries = new List<Dictionary<string, object>>();
+        int failed = 0;
+        int index = 0;
+        foreach (string virtualPath in paths)
+        {
+            // Dataset stores carry normalized names (forward slashes, .png);
+            // MPQ lookup wants the raw BLP virtual path. Try as-given first,
+            // then the BLP-converted form. The manifest keeps the original
+            // string so downstream joins stay exact.
+            string converted = virtualPath.Replace('/', '\\');
+            if (converted.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                converted = converted[..^4] + ".blp";
+
+            byte[,,]? rgb = LoadTextureFromMpq(catalog, virtualPath)
+                ?? (converted != virtualPath ? LoadTextureFromMpq(catalog, converted) : null);
+            if (rgb is null)
+            {
+                failed++;
+                continue;
+            }
+
+            int h = rgb.GetLength(0);
+            int w = rgb.GetLength(1);
+            string fileName = $"t{index:D4}.png";
+            using (var image = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(w, h))
+            {
+                for (int y = 0; y < h; y++)
+                    for (int x = 0; x < w; x++)
+                        image[x, y] = new SixLabors.ImageSharp.PixelFormats.Rgba32(rgb[y, x, 0], rgb[y, x, 1], rgb[y, x, 2], 255);
+                using var fs = File.Create(Path.Combine(outputDir, fileName));
+                image.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+            }
+
+            entries.Add(new Dictionary<string, object>
+            {
+                ["path"] = virtualPath,
+                ["file"] = fileName,
+                ["width"] = w,
+                ["height"] = h,
+            });
+            index++;
+        }
+
+        var payload = new Dictionary<string, object>
+        {
+            ["build_version"] = DetectBuildVersionFromClientRoot(clientRoot) ?? "",
+            ["client_root"] = clientRoot,
+            ["tilesets"] = entries,
+        };
+        string manifestPath = Path.Combine(outputDir, "manifest.json");
+        File.WriteAllText(manifestPath, System.Text.Json.JsonSerializer.Serialize(payload));
+        Console.WriteLine($"extract-tilesets: {entries.Count} decoded, {failed} failed -> {manifestPath}");
     }
 
     static bool RunExtractTileFromMpq(NativeMpqService catalog, string clientRoot, string mapName, byte[] wdtBytes, int tileX, int tileY, string? outputPath, bool exportPlacements, string? syntheticMinimapPath = null, string? buildVersion = null)
