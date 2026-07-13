@@ -10,6 +10,7 @@ from harvester.spec102.m0 import (
     precise_object_target_256,
     segmentation_loss,
 )
+from harvester.spec102.m0_validation import M0ValidationSample, render_m0_validation_panel
 
 
 def test_m0_is_single_output_and_small() -> None:
@@ -56,3 +57,23 @@ def test_precise_mask_projection_uses_all_four_257_grid_corners() -> None:
 def test_precise_mask_projection_rejects_reduced_mask() -> None:
     with np.testing.assert_raises_regex(ValueError, PRECISE_MASK_KEY):
         precise_object_target_256(np.zeros((256, 256), dtype=np.float32))
+
+
+def test_validation_panel_embeds_legend_metadata_and_agreement_column() -> None:
+    probability = np.zeros((256, 256), dtype=np.float32)
+    target = np.zeros((256, 256), dtype=np.float32)
+    probability[10:20, 10:20] = 0.9
+    target[15:25, 15:25] = 1.0
+    panel = render_m0_validation_panel([
+        M0ValidationSample(
+            row=42, build="3_3_5_12340", map_name="Northrend", tile_x=17, tile_y=24,
+            source_rgb=np.zeros((256, 256, 3), dtype=np.uint8),
+            probability=probability, target=target,
+        )
+    ], split="validation_map", epoch=12, threshold=0.5, checkpoint_label="best.pt")
+    assert panel.size == (1024, 362)
+    pixels = np.asarray(panel)
+    agreement = pixels[76:332, 768:1024]
+    assert np.any(np.all(agreement == (40, 220, 90), axis=-1))
+    assert np.any(np.all(agreement == (240, 65, 65), axis=-1))
+    assert np.any(np.all(agreement == (70, 135, 255), axis=-1))

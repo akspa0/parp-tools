@@ -11,7 +11,6 @@ from pathlib import Path
 import numpy as np
 import torch
 import zarr
-from PIL import Image
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
@@ -21,6 +20,7 @@ from harvester.spec102.m0 import (
     precise_object_target_256,
     segmentation_loss,
 )
+from harvester.spec102.m0_validation import M0ValidationSample, render_m0_validation_panel
 
 
 class MaskDataset(Dataset):
@@ -76,21 +76,36 @@ def write_validation_grid(
     model: nn.Module,
     dataset: MaskDataset,
     device: torch.device,
+    metadata_by_row: dict[int, dict],
+    epoch: int,
+    split: str = "validation_map",
+    threshold: float = 0.5,
+    checkpoint_label: str = "current epoch",
     count: int = 4,
 ) -> None:
     rows = min(count, len(dataset))
-    canvas = Image.new("RGB", (256 * 3, 256 * rows))
+    samples: list[M0ValidationSample] = []
     model.eval()
     for index in range(rows):
         rgb, target = dataset[index]
         with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.float16):
             probability = torch.sigmoid(model(rgb[None].to(device)))[0, 0].float().cpu().numpy()
         source = np.clip(rgb.permute(1, 2, 0).numpy() * 255.0, 0, 255).astype(np.uint8)
-        predicted = np.clip(probability * 255.0, 0, 255).astype(np.uint8)
-        truth = (target[0].numpy() * 255.0).astype(np.uint8)
-        canvas.paste(Image.fromarray(source, "RGB"), (0, index * 256))
-        canvas.paste(Image.fromarray(predicted, "L").convert("RGB"), (256, index * 256))
-        canvas.paste(Image.fromarray(truth, "L").convert("RGB"), (512, index * 256))
+        row = dataset.rows[index]
+        metadata = metadata_by_row[row]
+        samples.append(M0ValidationSample(
+            row=row,
+            build=str(metadata["build"]),
+            map_name=str(metadata["map"]),
+            tile_x=int(metadata["tile_x"]),
+            tile_y=int(metadata["tile_y"]),
+            source_rgb=source,
+            probability=probability,
+            target=target[0].numpy(),
+        ))
+    canvas = render_m0_validation_panel(
+        samples, split=split, epoch=epoch, threshold=threshold, checkpoint_label=checkpoint_label,
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(path)
 
@@ -134,6 +149,7 @@ def main() -> int:
         ]
         for split in ("train", "validation_map", "test_era")
     }
+    metadata_by_row = {int(row["row"]): row for row in manifest["rows"]}
     if any(not rows_by_split[split] for split in rows_by_split):
         raise RuntimeError(f"M0 curated split is empty: { {key: len(value) for key, value in rows_by_split.items()} }")
     group = zarr.open_group(str(args.store), mode="r")
@@ -229,7 +245,14 @@ def main() -> int:
         record = {"epoch": epoch, "train_loss": train_loss / max(samples, 1), "validation": validation}
         history.append(record)
         print(json.dumps(record), flush=True)
-        write_validation_grid(args.output_dir / "validation" / f"epoch_{epoch:02d}.png", model, datasets["validation_map"], device)
+        write_validation_grid(
+            args.output_dir / "validation" / f"epoch_{epoch:02d}.png",
+            model,
+            datasets["validation_map"],
+            device,
+            metadata_by_row=metadata_by_row,
+            epoch=epoch,
+        )
         if validation["iou"] > best_iou:
             best_iou = validation["iou"]
             torch.save(

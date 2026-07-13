@@ -82,6 +82,7 @@ Before GPU training, the operator receives a machine-readable audit of every mod
 - **FR-102-R011**: H0 and the frozen M0 cleaner MUST pass their gates before W1 begins; W1 MUST pass its numeric lattice gate before H2 begins; H2 MUST pass before H3 or U1 begins.
 - **FR-102-R012**: M0, H0, W1, H2, H3, and U1 MUST use separate optimizers, training commands, checkpoints, and metric histories. Joint fine-tuning is prohibited.
 - **FR-102-R013**: Object masks, cleaned terrain imagery, placements, tilesets, alpha maps, liquids, holes, normals, and shadows each require their own future single-output model or deterministic transform and independent gate. The first intended terrain visual **guidance** is real fixed-light terrain-shadow imagery; it is correlated to numeric mesh shape, not used as an excuse to rasterize the mesh target or add an unavailable deployment input.
+- **FR-102-R014**: Every M0 validation PNG MUST be self-describing without external documentation. It embeds split, epoch, threshold, checkpoint, column meanings, tile identity, per-row IoU/Dice/pixel counts, and a colour legend for true positives, false positives, and false negatives. These panels are post-inference observability artifacts only.
 
 ## Success Criteria
 
