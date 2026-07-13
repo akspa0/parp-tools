@@ -115,6 +115,214 @@ public sealed class NpzTileSerializerTests
     }
 
     [Fact]
+    public void Serialize_WritesStrictGeometryTargetArraysAndCompletenessMetadata()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"wowviewer_npz_strict_object_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            string outputPath = Path.Combine(tempDir, "tile.npz");
+            TerrainTileTensorPack pack = new()
+            {
+                TileName = "tile_0_0",
+                MapName = "TestMap",
+                BuildKey = "3.3.5.12340",
+                SourceAdtPath = "tile_0_0.adt",
+                ObjectGeometryVisibleMask257 = new float[257, 257],
+                ObjectGeometryVisibleTopElevation257 = new float[257, 257],
+                ObjectGeometryVisibleTerrainElevation257 = new float[257, 257],
+                ObjectGeometryVisibleSource257 = new byte[257, 257],
+                ObjectGeometryTargetProvenance = new ObjectGeometryTargetProvenance(
+                    ObjectGeometryTargetStatus.CompleteEmpty,
+                    PlacementCount: 0,
+                    GeometryResolvedPlacementCount: 0,
+                    GeometryUnresolvedPlacementCount: 0,
+                    FallbackRequiredPlacementCount: 0,
+                    TriangleCount: 0,
+                    VisiblePixelCount: 0,
+                    OccludedPixelCount: 0,
+                    TerrainUnknownPixelCount: 0,
+                    LiquidEvidenceStatus: ObjectGeometryLiquidEvidenceStatus.Dry),
+                ObjectGeometryFragmentTrace = ObjectGeometryFragmentTrace.Create(
+                    Array.Empty<ObjectGeometryFragmentRecord>(),
+                    Array.Empty<ObjectGeometryTargetAsset>()),
+            };
+
+            NpzTileSerializer.Serialize(pack, outputPath);
+
+            using ZipArchive archive = ZipFile.OpenRead(outputPath);
+            Assert.Contains(archive.Entries, static entry => entry.FullName == "object_geometry_visible_mask_257.npy");
+            Assert.Contains(archive.Entries, static entry => entry.FullName == "object_geometry_visible_top_elevation_257.npy");
+            Assert.Contains(archive.Entries, static entry => entry.FullName == "object_geometry_visible_terrain_elevation_257.npy");
+            Assert.Contains(archive.Entries, static entry => entry.FullName == "object_geometry_visible_source_257.npy");
+            Assert.Contains(archive.Entries, static entry => entry.FullName == "object_geometry_fragment_raster_xy.npy");
+            Assert.Contains(archive.Entries, static entry => entry.FullName == "object_geometry_fragment_world_xyze.npy");
+            Assert.Contains(archive.Entries, static entry => entry.FullName == "object_geometry_fragment_source_ids.npy");
+            Assert.Contains(archive.Entries, static entry => entry.FullName == "object_geometry_fragment_source_classification.npy");
+            Assert.Contains(archive.Entries, static entry => entry.FullName == "object_geometry_fragment_terrain_vertex_dense_xy.npy");
+            Assert.Contains(archive.Entries, static entry => entry.FullName == "object_geometry_fragment_terrain_vertex_z.npy");
+            Assert.Contains(archive.Entries, static entry => entry.FullName == "object_geometry_fragment_terrain_vertex_present.npy");
+            Assert.Contains(archive.Entries, static entry => entry.FullName == "object_geometry_fragment_terrain_weights.npy");
+            Assert.Contains(archive.Entries, static entry => entry.FullName == "object_geometry_fragment_terrain_liquid_elevation.npy");
+            Assert.DoesNotContain(archive.Entries, static entry => entry.FullName == "object_precise_mask_257.npy");
+
+            ZipArchiveEntry metadataEntry = Assert.Single(archive.Entries, static entry => entry.FullName == "metadata.json");
+            using StreamReader reader = new(metadataEntry.Open(), Encoding.UTF8);
+            string metadata = reader.ReadToEnd();
+            Assert.Contains($"\"object_geometry_target_version\": \"{ObjectGeometryTargetProvenance.ContractVersion}\"", metadata, StringComparison.Ordinal);
+            Assert.Contains("\"object_geometry_target_status\": \"CompleteEmpty\"", metadata, StringComparison.Ordinal);
+            Assert.Contains("\"object_geometry_target_materialized\": true", metadata, StringComparison.Ordinal);
+            Assert.Contains("\"object_geometry_fragment_count\": 0", metadata, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Serialize_RejectsIncompleteStrictProvenanceWithUnionArraysBeforeCreatingOutput()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"wowviewer_npz_strict_reject_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            string outputPath = Path.Combine(tempDir, "tile.npz");
+            TerrainTileTensorPack pack = new()
+            {
+                TileName = "tile_0_0",
+                ObjectGeometryVisibleMask257 = new float[257, 257],
+                ObjectGeometryVisibleTopElevation257 = new float[257, 257],
+                ObjectGeometryVisibleTerrainElevation257 = new float[257, 257],
+                ObjectGeometryVisibleSource257 = new byte[257, 257],
+                ObjectGeometryTargetProvenance = new ObjectGeometryTargetProvenance(
+                    ObjectGeometryTargetStatus.IncompleteGeometry,
+                    PlacementCount: 1,
+                    GeometryResolvedPlacementCount: 0,
+                    GeometryUnresolvedPlacementCount: 1,
+                    FallbackRequiredPlacementCount: 1,
+                    TriangleCount: 0,
+                    VisiblePixelCount: 0,
+                    OccludedPixelCount: 0,
+                    TerrainUnknownPixelCount: 0,
+                    LiquidEvidenceStatus: ObjectGeometryLiquidEvidenceStatus.Dry),
+            };
+
+            InvalidDataException failure = Assert.Throws<InvalidDataException>(
+                () => NpzTileSerializer.Serialize(pack, outputPath));
+
+            Assert.Contains("nonmaterialized", failure.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.False(File.Exists(outputPath));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Serialize_IncompleteStrictGeometryRetainsValidFragmentTraceWithoutUnionArrays()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"wowviewer_npz_incomplete_trace_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            string outputPath = Path.Combine(tempDir, "tile.npz");
+            TerrainTileTensorPack pack = CreateIncompleteTracePack();
+
+            NpzTileSerializer.Serialize(pack, outputPath);
+
+            using ZipArchive archive = ZipFile.OpenRead(outputPath);
+            Assert.DoesNotContain(archive.Entries, static entry => entry.FullName == "object_geometry_visible_mask_257.npy");
+            Assert.Contains(archive.Entries, static entry => entry.FullName == "object_geometry_fragment_raster_xy.npy");
+            Assert.Contains(archive.Entries, static entry => entry.FullName == "object_geometry_fragment_world_xyze.npy");
+
+            ZipArchiveEntry metadataEntry = Assert.Single(archive.Entries, static entry => entry.FullName == "metadata.json");
+            using StreamReader reader = new(metadataEntry.Open(), Encoding.UTF8);
+            string metadata = reader.ReadToEnd();
+            Assert.Contains("\"object_geometry_target_materialized\": false", metadata, StringComparison.Ordinal);
+            Assert.Contains($"\"object_geometry_fragment_trace_schema\": \"{ObjectGeometryTargetProvenance.ContractVersion}\"", metadata, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Serialize_RejectsMutatedIncompleteFragmentTraceBeforeCreatingOutput()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"wowviewer_npz_mutated_trace_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            string outputPath = Path.Combine(tempDir, "tile.npz");
+            TerrainTileTensorPack pack = CreateIncompleteTracePack();
+            pack.ObjectGeometryFragmentTrace!.TerrainWeights[0, 0] += 0.1f;
+
+            InvalidDataException failure = Assert.Throws<InvalidDataException>(
+                () => NpzTileSerializer.Serialize(pack, outputPath));
+
+            Assert.Contains("does not match", failure.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.False(File.Exists(outputPath));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Serialize_RejectsMaterializedStrictUnionWithoutFragmentTrace()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"wowviewer_npz_strict_trace_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            string outputPath = Path.Combine(tempDir, "tile.npz");
+            TerrainTileTensorPack pack = new()
+            {
+                TileName = "tile_0_0",
+                ObjectGeometryVisibleMask257 = new float[257, 257],
+                ObjectGeometryVisibleTopElevation257 = new float[257, 257],
+                ObjectGeometryVisibleTerrainElevation257 = new float[257, 257],
+                ObjectGeometryVisibleSource257 = new byte[257, 257],
+                ObjectGeometryTargetProvenance = new ObjectGeometryTargetProvenance(
+                    ObjectGeometryTargetStatus.CompleteEmpty,
+                    PlacementCount: 0,
+                    GeometryResolvedPlacementCount: 0,
+                    GeometryUnresolvedPlacementCount: 0,
+                    FallbackRequiredPlacementCount: 0,
+                    TriangleCount: 0,
+                    VisiblePixelCount: 0,
+                    OccludedPixelCount: 0,
+                    TerrainUnknownPixelCount: 0,
+                    LiquidEvidenceStatus: ObjectGeometryLiquidEvidenceStatus.Dry),
+            };
+
+            InvalidDataException failure = Assert.Throws<InvalidDataException>(
+                () => NpzTileSerializer.Serialize(pack, outputPath));
+
+            Assert.Contains("fragment trace", failure.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.False(File.Exists(outputPath));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Serialize_WritesSplitPlacementReferenceSignals()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), $"wowviewer_npz_refs_{Guid.NewGuid():N}");
@@ -252,5 +460,66 @@ public sealed class NpzTileSerializerTests
             if (Directory.Exists(tempDir))
                 Directory.Delete(tempDir, recursive: true);
         }
+    }
+
+    private static TerrainTileTensorPack CreateIncompleteTracePack()
+    {
+        ObjectGeometryTargetAsset[] assets =
+        [
+            new ObjectGeometryTargetAsset(
+                AssetIndex: 0,
+                Source: ObjectGeometryPixelSource.WmoTriangle,
+                NormalizedAssetPath: "world/wmo/test.wmo"),
+        ];
+        ObjectGeometryFragmentTrace trace = ObjectGeometryFragmentTrace.Create(
+        [
+            new ObjectGeometryFragmentRecord(
+                RasterX: 5,
+                RasterY: 6,
+                ObjectWorldX: 100f,
+                ObjectWorldY: 200f,
+                ObjectWorldZ: 25f,
+                ObjectElevation: 25f,
+                PlacementUniqueId: 72,
+                AssetIndex: 0,
+                SourceTriangleIndex: 4,
+                Source: ObjectGeometryPixelSource.WmoTriangle,
+                Classification: ObjectGeometryFragmentClassification.TerrainHidden,
+                TerrainVertex0X: 4,
+                TerrainVertex0Y: 6,
+                TerrainVertex1X: 6,
+                TerrainVertex1Y: 6,
+                TerrainVertex2X: 5,
+                TerrainVertex2Y: 7,
+                TerrainVertex0Z: 26f,
+                TerrainVertex1Z: 26f,
+                TerrainVertex2Z: 26f,
+                TerrainVertex0Present: true,
+                TerrainVertex1Present: true,
+                TerrainVertex2Present: true,
+                TerrainWeight0: 0.25f,
+                TerrainWeight1: 0.25f,
+                TerrainWeight2: 0.5f,
+                TerrainElevation: 26f,
+                LiquidSurfaceElevation: float.NaN),
+        ],
+            assets);
+        return new TerrainTileTensorPack
+        {
+            TileName = "tile_0_0",
+            ObjectGeometryTargetProvenance = new ObjectGeometryTargetProvenance(
+                ObjectGeometryTargetStatus.IncompleteGeometry,
+                PlacementCount: 1,
+                GeometryResolvedPlacementCount: 0,
+                GeometryUnresolvedPlacementCount: 1,
+                FallbackRequiredPlacementCount: 1,
+                TriangleCount: 1,
+                VisiblePixelCount: 0,
+                OccludedPixelCount: 1,
+                TerrainUnknownPixelCount: 0,
+                LiquidEvidenceStatus: ObjectGeometryLiquidEvidenceStatus.Dry),
+            ObjectGeometryTargetAssets = assets,
+            ObjectGeometryFragmentTrace = trace,
+        };
     }
 }

@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from harvester.spec102.m0 import PRECISE_MASK_KEY
+from harvester.spec102.m0 import STRICT_OBJECT_TARGET_KEY
 
 
 def main() -> int:
@@ -22,11 +22,11 @@ def main() -> int:
     train_losses = [float(item["train_loss"]) for item in history]
     late_best = len(ious) == 3 and int(max(range(len(ious)), key=ious.__getitem__)) >= 1
     train_loss_decreasing = len(train_losses) == 3 and all(
-        later < earlier for earlier, later in zip(train_losses, train_losses[1:])
+        later < earlier for earlier, later in zip(train_losses, train_losses[1:], strict=False)
     )
     gain = ious[-1] - ious[0] if len(ious) == 3 else 0.0
     conditions = {
-        "canonical_precise_target": training.get("target") == PRECISE_MASK_KEY,
+        "strict_terrain_visible_geometry_target": training.get("target") == STRICT_OBJECT_TARGET_KEY,
         "three_epoch_decision_run": training.get("epochs") == 3,
         "validation_best_in_final_two_epochs": late_best,
         "validation_iou_gain_at_least_0_02": gain >= 0.02,

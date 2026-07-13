@@ -2,7 +2,7 @@
 
 **Feature Branch**: `102-v25-terrain-convergence`
 **Reset Date**: 2026-07-12
-**Status**: BLOCKED AT M0 SUPERVISION GATE
+**Status**: BLOCKED — legacy object targets are contaminated; no M0 CUDA or training is authorized
 **Owner**: wow-viewer
 
 > **2026-07-12 numeric-lattice correction:** `wdl_height_33 = height_257[::8, ::8]` is not a WDL MARE. The actual C# contract is `outer_17` (17x17 at `::16`) plus `inner_16` (16x16 at `8::16`). Treat the prior H1 target and every `wdl_height_33` consumer as invalid proof. The recovery decision is [`v25-v24-numeric-lattice-recovery-audit-2026-07-12.md`](../../docs/architecture/v25-v24-numeric-lattice-recovery-audit-2026-07-12.md).
@@ -83,6 +83,10 @@ Before GPU training, the operator receives a machine-readable audit of every mod
 - **FR-102-R012**: M0, H0, W1, H2, H3, and U1 MUST use separate optimizers, training commands, checkpoints, and metric histories. Joint fine-tuning is prohibited.
 - **FR-102-R013**: Object masks, cleaned terrain imagery, placements, tilesets, alpha maps, liquids, holes, normals, and shadows each require their own future single-output model or deterministic transform and independent gate. The first intended terrain visual **guidance** is real fixed-light terrain-shadow imagery; it is correlated to numeric mesh shape, not used as an excuse to rasterize the mesh target or add an unavailable deployment input.
 - **FR-102-R014**: Every M0 validation PNG MUST be self-describing without external documentation. It embeds split, epoch, threshold, checkpoint, column meanings, tile identity, per-row IoU/Dice/pixel counts, and a colour legend for true positives, false positives, and false negatives. These panels are post-inference observability artifacts only.
+- **FR-102-R015**: M0 MUST NOT initialize CUDA from any current `spec102-m0-build-local-split-v1` contract, `spec102-dataset-signal-audit-v1` report, checkpoint, or numeric store. Those artifacts audit identity/copy integrity only; their legacy `object_precise_mask_257` target is contaminated. A new versioned target, numeric store, split, and audit may be considered only after FR-102-R016 through FR-102-R018 pass. Its metrics MUST state `cross_era_evaluated: false`.
+- **FR-102-R016**: The legacy `object_precise_mask_257` target is invalid for M0 training and quality claims, including its exact copies in numeric-v3 and the full-current-build store. A replacement target MUST be reharvested from transformed source geometry. For every raster fragment it MUST record transformed world X/Y/Z, raw-MCVT terrain Z and valid-node/interpolation evidence at that X/Y, source placement/asset identity, and its resulting classification. The `strict-geometry-terrain-liquid-fragment-trace-v3` sidecar is numeric tabular evidence, not an image tensor or M0 input: it stores raster coordinates, world XYZ/comparison elevation, placement/asset/triangle identity, raw-MCVT three-node coordinates/Z/presence/weights, terrain/liquid elevations, classification, a versioned asset table, unresolved-placement records, and a content hash. It MUST preserve overlapping fragments rather than only a union raster. Only an individual fragment proven below terrain may be omitted; it MUST retain every above-ground fragment and MUST NOT erase a whole placement or instance from a centroid, bounds, fallback, or missing-asset decision.
+- **FR-102-R017**: A replacement target MUST also resolve liquid visibility at the same raster-fragment contract. It MUST record liquid coverage/state and liquid surface height where present, then classify each fragment as terrain-visible, terrain-hidden-by-water, or unknown. A water-covered/unknown pixel MUST NOT become a fabricated zero-object or visible-terrain label because a minimap looks blue or uniform. Until renderer/capture or client-data evidence proves the relevant water visibility rule, an unknown/water-obscured tile is rejected from M0 rather than guessed. **Initial M0 is dry-only:** until a per-pixel valid-loss mask exists, any detected liquid coverage rejects the entire tile from M0 rather than silently treating water pixels as background negatives.
+- **FR-102-R018**: Before CUDA, a machine-readable full-3.3.5 coverage report MUST bind the staged-client discovery inventory, raw V18 rows, replacement numeric rows, strict-target rows, and split. At minimum it records: client/build fingerprint; per-map discovery/probe/WDT status; raw `(build,map,tile_x,tile_y,tile_id,row)` identity and materialized-signal status; numeric-to-raw row identity; target version plus per-fragment provenance summary; liquid-visibility state; M0 eligibility or explicit rejection reason(s); exact counts; source gaps; and content hashes. It MUST fail closed when any row disappears, a target is legacy/fallback-derived, a water state is unknown, or an inventory gap remains. The current staged 3.3.5 evidence is a hard source-contract gap: eight readable maps have height/normals but no canonical minimap RGB: ArgentTournamentDungeon (Trial of the Champion), ArgentTournamentRaid (Trial of the Crusader), DalaranArena, development_nonweighted, ExteriorTest, OrgrimmarArena, QA_DVD, and WintergraspRaid (Vault of Archavon). Six production maps in that group also lack MCLY/MCAL, so deterministic texture/alpha composition cannot supply a canonical RGB fallback. This is not a harvester parser defect and a reharvest cannot manufacture the absent inputs. All-map provenance and M0 eligibility are distinct: a map may have zero eligible rows, but the requested full-3.3.5 decision remains unauthorized until the missing canonical source is supplied or the user consciously revises the source/input contract.
 
 ## Success Criteria
 
@@ -107,30 +111,53 @@ Before GPU training, the operator receives a machine-readable audit of every mod
 ## 2026-07-12 Invalidated Run Notice
 
 The first M0 run violated the dataset contract by training from the reduced
-`object_mask_256` array instead of the canonical `object_precise_mask_257`
-signal. Its metrics and every W1 result derived from that checkpoint are
-invalid and must not be used for feasibility decisions. M0 training now fails
-closed unless the exact 257x257 precise array exists and derives its 256x256
-loss target with the registered four-corner maximum projection. No coarse,
-visibility, or fallback mask is permitted.
+`object_mask_256` array. Its metrics and every W1 result derived from that
+checkpoint are invalid and must not be used for feasibility decisions. The
+historical `object_precise_mask_257` family is also rejected: audit found
+legacy bounds, circle, and coverage fallbacks mixed into it. M0 now fails
+closed unless the versioned strict `object_geometry_visible_mask_257` target
+is materialized from transformed M2/WMO triangles, carries complete
+per-fragment raw-MCVT/liquid provenance, and derives its 256x256 loss target
+with the registered four-corner maximum projection. No legacy precise,
+coarse, visibility, or fallback mask is permitted.
 
-The corrected numeric-only store verifies build/map/tile identity against the
-originating V18 indices and retains raw unrepaired height, numeric normals,
-precise object masks, liquid coverage/height, MCNK flags, and liquid-source
-provenance. A 2026-07-12 audit found that V18 extraction existed, but MH2O's
-8x8 cells had been incorrectly emitted as sparse vertices on the 16x16
-half-step coverage grid. The canonical builder now expands each present MH2O
-cell to its 2x2 half-step coverage block and respects the exists bitmap. The
-Spec 102 v3 store is an exact copy of the repaired V18 masks; the stale liquid
-type raster is excluded. Curation rejects known mismatches, visually uniform
-or water minimaps, missing liquid evidence, and tiles with at least 80% liquid
-occlusion. The 2026-07-13 rerun used this exact v3/v6 contract. Its bounded
-three-epoch run improved every epoch and authorized continuation; the resumed
-12-epoch run reached held-out Northrend IoU `0.2764` but Alpha-era IoU only
-`0.0743` (required `0.10`), with `2.15 GB` peak VRAM. Threshold calibration
-selected `0.50` and did not improve the era result. M0 is therefore not frozen
-and W1 remains blocked. W1 also has no eligible rows until real paired WDL
-arrays exist.
+The corrected numeric-only stores verify build/map/tile identity and raw-array
+copy integrity. They retain raw unrepaired height, numeric normals, legacy
+object-mask arrays, liquid coverage/height, MCNK flags, and liquid-source
+provenance. That transport proof is useful, but it is **not** proof that the
+legacy object masks are a valid visible-object target. Every exact legacy copy,
+including the 46-map numeric-v3 snapshot and the later full-current-build
+snapshot, is contaminated for M0 target use.
+
+The MH2O repair remains a source-data repair: present 8x8 MH2O cells expand to
+their 2x2 half-step coverage blocks and respect the exists bitmap. It does not
+establish whether terrain or an object is visible through water. A visually
+blue, uniform, or water-covered minimap is not enough evidence to create an
+empty-object label. The replacement reharvest must make water/terrain/object
+visibility explicit per fragment under FR-102-R016 and FR-102-R017.
+
+The staged-client probe currently identifies 52 terrain-ready map identities
+and raw V18 contains 5,134 valid rows across them, but the requested all-3.3.5
+corpus is still incomplete. Eight readable staged maps have height/normals but
+no canonical minimap RGB; six production maps among that group also lack
+MCLY/MCAL, eliminating deterministic texture/alpha composition as a canonical
+RGB fallback. This is a frozen-input source gap in the staged client, not a
+harvester parser bug and not something a simple reharvest can repair. The 367
+WDT locations rejected for missing required source signals remain separate
+provenance gaps. The 46-map/2,804-row and 52-map/5,134-row coverage reports
+must retain those facts; neither can authorize all-map M0 unless a canonical
+source is added or the user consciously revises the source/input contract.
+
+**2026-07-13 target reset:** The reported 2,059-row curation, its split,
+seven-signal fingerprint, `coverage_final.json`, validation panels, and all
+old M0 metrics are evidence about legacy transport/selection only. They do not
+authorize a three-epoch run, an epoch extension, cleaner materialization, W1,
+or 0.5.3 work. The source implementation now emits the versioned v3 numeric
+fragment trace and rejects stale/mutated trace evidence at serialization, but
+no real staged strict reharvest has yet been produced or accepted. The next
+proof owner remains a strict all-map target reharvest with per-fragment
+transformed geometry versus raw-MCVT terrain Z and explicit liquid-visibility
+evidence.
 
 ## Assumptions
 

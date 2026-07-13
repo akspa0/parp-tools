@@ -7,41 +7,57 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pyarrow.parquet as pq
 import torch
 import zarr
-
-from harvester.spec102.m0 import PRECISE_MASK_KEY, M0ObjectMask, precise_object_target_256
 from train_spec102_m0 import MaskDataset, write_validation_grid
+
+from harvester.spec102.m0 import STRICT_OBJECT_TARGET_KEY, M0ObjectMask, strict_object_target_256
+from harvester.spec102.m0_coverage import validate_m0_coverage_audit
+from harvester.spec102.m0_scope import validate_m0_build_local_scope
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Render labeled Spec 102 M0 validation panel")
     parser.add_argument("--store", required=True, type=Path)
     parser.add_argument("--split-manifest", required=True, type=Path)
+    parser.add_argument("--coverage-report", required=True, type=Path)
+    parser.add_argument("--raw-v18-store", required=True, type=Path)
     parser.add_argument("--checkpoint", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--split", choices=("validation_map", "test_era"), default="validation_map")
+    parser.add_argument("--split", choices=("validation_map", "test_build_local"), default="validation_map")
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--count", type=int, default=8)
     args = parser.parse_args()
-    if not torch.cuda.is_available():
-        raise RuntimeError("M0 validation renderer requires CUDA; silent CPU fallback is prohibited")
     manifest = json.loads(args.split_manifest.read_text(encoding="utf-8"))
-    if manifest.get("schema") != "spec102-curated-split-v2":
-        raise RuntimeError("renderer refuses an uncurated split manifest")
-    rows = [
-        int(row["row"]) for row in manifest["rows"]
-        if row["split"] == args.split and row.get("eligible_m0") is True
-    ]
-    metadata_by_row = {int(row["row"]): row for row in manifest["rows"]}
+    store_index = pq.read_table(args.store / "index.parquet").to_pylist()
+    scope = validate_m0_build_local_scope(manifest, source_index=store_index)
+    validate_m0_coverage_audit(
+        args.coverage_report,
+        raw_v18_store=args.raw_v18_store,
+        store=args.store,
+        split_manifest=args.split_manifest,
+        expected_scope=scope.audit_binding,
+    )
+    artifact_binding = scope.artifact_binding(
+        store=args.store,
+        split_manifest=args.split_manifest,
+        coverage_report=args.coverage_report,
+    )
+    rows = scope.rows_by_split[args.split]
+    metadata_by_row = scope.metadata_by_row
     group = zarr.open_group(str(args.store), mode="r")
     rgb = np.asarray(group["minimap_rgb"][:])
-    precise = np.asarray(group[PRECISE_MASK_KEY][:], dtype=np.float32)
-    masks = np.stack([precise_object_target_256(mask) for mask in precise], axis=0)
-    checkpoint = torch.load(args.checkpoint, map_location="cuda", weights_only=False)
-    if checkpoint.get("schema") != "spec102-m0-checkpoint-v1":
+    strict = np.asarray(group[STRICT_OBJECT_TARGET_KEY][:], dtype=np.float32)
+    masks = np.stack([strict_object_target_256(mask) for mask in strict], axis=0)
+    checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    if checkpoint.get("schema") != "spec102-m0-checkpoint-v2":
         raise RuntimeError("checkpoint is not Spec 102 M0")
-    model = M0ObjectMask().cuda()
+    if checkpoint.get("m0_artifact_binding") != artifact_binding:
+        raise RuntimeError("checkpoint was not trained on this 3.3.5 build-local scope")
+    if not torch.cuda.is_available():
+        raise RuntimeError("M0 validation renderer requires CUDA; silent CPU fallback is prohibited")
+    model = M0ObjectMask(base_channels=int(checkpoint["config"]["base_channels"])).cuda()
     model.load_state_dict(checkpoint["model"], strict=True)
     write_validation_grid(
         args.output,

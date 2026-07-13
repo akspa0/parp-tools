@@ -75,7 +75,7 @@ public static class AdtTensorPackBuilder
 
         // ── Read MH2O liquid ─────────────────────────────────────────────────
         (float[,]? mh2oHeight, float[,]? mh2oDepth, int[,]? mh2oType, bool[,]? mh2oPresence) =
-            ReadMh2o(stream, fileSummary, profile, availableSignals);
+            ReadMh2o(stream, fileSummary, profile, availableSignals, out bool mh2oParseFailed);
 
         // ── Read MTXF texture flags ──────────────────────────────────────────
         (int[,]? mtxfAnimated, int[,]? mtxfTransform) =
@@ -101,8 +101,14 @@ public static class AdtTensorPackBuilder
             ReadSplitPlacementChunkReferences(adtPath, availableSignals);
 
         // ── Read WL* loose liquid files ──────────────────────────────────────
-        (float[,]? wlMask, float[,]? wlHeight) =
+        (float[,]? wlMask, float[,]? wlHeight, bool wlReadFailed) =
             ReadWlFiles(adtPath, availableSignals);
+
+        // ── Resolve liquid before strict object supervision ──────────────────
+        // The initial M0 target is dry-only.  A decoded liquid tile is retained
+        // as provenance but cannot silently turn water pixels into negatives.
+        (float[,]? unifiedLiquidMask, float[,]? unifiedLiquidHeight) =
+            BuildUnifiedLiquid(mh2oHeight, mh2oPresence, mclqHeight, mclqPresence, wlMask, wlHeight, availableSignals);
 
         // ── Read placements once for masks + placement arrays ───────────────
         AdtPlacementCatalog? placementCatalog =
@@ -112,6 +118,17 @@ public static class AdtTensorPackBuilder
         (float[,]? objectMask257, float[,]? objectPreciseMask257, int[,]? objectInstanceMask257, float[,]? mddfMask257, float[,]? modfMask257, float[,]? objectFilteredMask257, var modelPayloads) =
             BuildObjectMasks(adtPath, stream, fileSummary, availableSignals, placementsOverride: placementCatalog, assetReader: assetReader, terrainChunksOverride: terrainChunks);
 
+        StrictObjectMaskBuildResult strictObjectMask = BuildStrictTerrainVisibleObjectMask(
+            placementCatalog,
+            tileX,
+            tileY,
+            assetReader,
+            terrainVertices,
+            unifiedLiquidMask,
+            unifiedLiquidHeight,
+            liquidEvidenceComplete: !mh2oParseFailed && !wlReadFailed,
+            signals: availableSignals);
+
         (float[,]? objectRoofMask256, float[,]? objectRoofConfidence256, string objectRoofMaskSource) =
             BuildObjectRoofMasks(placementCatalog, tileX, tileY, availableSignals);
 
@@ -120,10 +137,6 @@ public static class AdtTensorPackBuilder
         // ── Build PM4 path, building footprint, and MPRL portal masks ────────
         (float[,]? pm4PathMask, float[,]? pm4BuildingFootprintMask, float[,]? pm4MprlMask) =
             BuildPm4Masks(adtPath, availableSignals);
-
-        // ── Build unified liquid mask and height ─────────────────────────────
-        (float[,]? unifiedLiquidMask, float[,]? unifiedLiquidHeight) =
-            BuildUnifiedLiquid(mh2oHeight, mh2oPresence, mclqHeight, mclqPresence, wlMask, wlHeight, availableSignals);
 
         // ── Compute downsampled heights ──────────────────────────────────────
         float[,]? height65 = DownsampleHeightmap(height257, 65);
@@ -192,6 +205,14 @@ public static class AdtTensorPackBuilder
                 mh2oPresence, mh2oType, mclqPresence, mclqType, mcnkFlags16),
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
+            ObjectGeometryVisibleMask257 = strictObjectMask.Mask,
+            ObjectGeometryVisibleTopElevation257 = strictObjectMask.TopElevation,
+            ObjectGeometryVisibleTerrainElevation257 = strictObjectMask.TerrainElevation,
+            ObjectGeometryVisibleSource257 = strictObjectMask.Source,
+            ObjectGeometryTargetProvenance = strictObjectMask.Provenance,
+            ObjectGeometryTargetAssets = strictObjectMask.Assets ?? Array.Empty<ObjectGeometryTargetAsset>(),
+            ObjectGeometryTargetUnresolvedPlacements = strictObjectMask.UnresolvedPlacements ?? Array.Empty<ObjectGeometryTargetUnresolvedPlacement>(),
+            ObjectGeometryFragmentTrace = strictObjectMask.FragmentTrace,
             ObjectInstanceMask257 = objectInstanceMask257,
             MddfMask257 = mddfMask257,
             ModfMask257 = modfMask257,
@@ -256,7 +277,7 @@ public static class AdtTensorPackBuilder
             ReadTextureDataFromBytes(sourceAdtPath, adtBytes, textureSourcePath, textureSourceBytes, profile, availableSignals);
 
         (float[,]? mh2oHeight, float[,]? mh2oDepth, int[,]? mh2oType, bool[,]? mh2oPresence) =
-            ReadMh2o(stream, fileSummary, profile, availableSignals);
+            ReadMh2o(stream, fileSummary, profile, availableSignals, out bool mh2oParseFailed);
 
         (int[,]? mtxfAnimated, int[,]? mtxfTransform) =
             ReadMtxf(stream, fileSummary, mclyTextureIds, availableSignals);
@@ -275,6 +296,9 @@ public static class AdtTensorPackBuilder
         (int[,]? mcrdRefCounts16, int[]? mcrdRefIndices, int[,]? mcrwRefCounts16, int[]? mcrwRefIndices) =
             ReadSplitPlacementChunkReferencesFromBytes(placementSourcePath, placementSourceBytes, availableSignals);
 
+        (float[,]? unifiedLiquidMask, float[,]? unifiedLiquidHeight) =
+            BuildUnifiedLiquid(mh2oHeight, mh2oPresence, mclqHeight, mclqPresence, null, null, availableSignals);
+
         AdtPlacementCatalog? placementCatalog =
             TryReadPlacementCatalog(sourceAdtPath, stream, fileSummary, placementSourcePath, placementSourceBytes);
 
@@ -290,6 +314,17 @@ public static class AdtTensorPackBuilder
                 assetReader,
                 terrainChunks);
 
+        StrictObjectMaskBuildResult strictObjectMask = BuildStrictTerrainVisibleObjectMask(
+            placementCatalog,
+            tileX,
+            tileY,
+            assetReader,
+            terrainVertices,
+            unifiedLiquidMask,
+            unifiedLiquidHeight,
+            liquidEvidenceComplete: !mh2oParseFailed,
+            signals: availableSignals);
+
         (float[,]? objectRoofMask256, float[,]? objectRoofConfidence256, string objectRoofMaskSource) =
             BuildObjectRoofMasks(placementCatalog, tileX, tileY, availableSignals);
 
@@ -297,9 +332,6 @@ public static class AdtTensorPackBuilder
 
         (float[,]? pm4PathMask, float[,]? pm4BuildingFootprintMask, float[,]? pm4MprlMask) =
             BuildPm4Masks(sourceAdtPath, availableSignals);
-
-        (float[,]? unifiedLiquidMask, float[,]? unifiedLiquidHeight) =
-            BuildUnifiedLiquid(mh2oHeight, mh2oPresence, mclqHeight, mclqPresence, null, null, availableSignals);
 
         float[,]? height65 = DownsampleHeightmap(height257, 65);
         float[,]? height17 = DownsampleHeightmap(height257, 17);
@@ -377,6 +409,14 @@ public static class AdtTensorPackBuilder
             UnifiedLiquidHeight = unifiedLiquidHeight,
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
+            ObjectGeometryVisibleMask257 = strictObjectMask.Mask,
+            ObjectGeometryVisibleTopElevation257 = strictObjectMask.TopElevation,
+            ObjectGeometryVisibleTerrainElevation257 = strictObjectMask.TerrainElevation,
+            ObjectGeometryVisibleSource257 = strictObjectMask.Source,
+            ObjectGeometryTargetProvenance = strictObjectMask.Provenance,
+            ObjectGeometryTargetAssets = strictObjectMask.Assets ?? Array.Empty<ObjectGeometryTargetAsset>(),
+            ObjectGeometryTargetUnresolvedPlacements = strictObjectMask.UnresolvedPlacements ?? Array.Empty<ObjectGeometryTargetUnresolvedPlacement>(),
+            ObjectGeometryFragmentTrace = strictObjectMask.FragmentTrace,
             ObjectInstanceMask257 = objectInstanceMask257,
             MddfMask257 = mddfMask257,
             ModfMask257 = modfMask257,
@@ -1085,8 +1125,14 @@ public static class AdtTensorPackBuilder
     }
 
     private static (float[,]? height, float[,]? depth, int[,]? typeMask, bool[,]? presenceMask)
-        ReadMh2o(Stream stream, MapFileSummary fileSummary, AdtFormatProfile profile, HashSet<string> signals)
+        ReadMh2o(
+            Stream stream,
+            MapFileSummary fileSummary,
+            AdtFormatProfile profile,
+            HashSet<string> signals,
+            out bool parseFailed)
     {
+        parseFailed = false;
         try
         {
             AdtLiquidFile liquidFile = AdtLiquidReader.Read(stream, fileSummary, profile);
@@ -1156,6 +1202,7 @@ public static class AdtTensorPackBuilder
         }
         catch (Exception ex)
         {
+            parseFailed = true;
             Console.WriteLine($"[MH2O] Warning: Failed to parse liquid data for tile: {ex.GetType().Name}: {ex.Message}");
             return (null, null, null, null);
         }
@@ -1685,15 +1732,15 @@ public static class AdtTensorPackBuilder
     private const float WlTileSize = 533.333f;
     private const float WlMapSize = 17066.666f;
 
-    private static (float[,]? mask, float[,]? height)
+    private static (float[,]? mask, float[,]? height, bool readFailed)
         ReadWlFiles(string adtPath, HashSet<string> signals)
     {
         string? mapDir = Path.GetDirectoryName(adtPath);
         if (string.IsNullOrEmpty(mapDir))
-            return (null, null);
+            return (null, null, false);
 
         if (!TryParseAdtTileCoords(adtPath, out int targetTileX, out int targetTileY))
-            return (null, null);
+            return (null, null, false);
 
         // Scan ALL WL files in the map directory (MdxViewer pattern)
         string[] wlFiles;
@@ -1707,15 +1754,19 @@ public static class AdtTensorPackBuilder
         }
         catch
         {
-            return (null, null);
+            // A discovery failure leaves WL* evidence unknown. Preserve
+            // ordinary liquid output behavior, but do not let strict M0
+            // provenance turn that unknown into a fabricated dry tile.
+            return (null, null, true);
         }
 
         if (wlFiles.Length == 0)
-            return (null, null);
+            return (null, null, false);
 
         float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
         float[,] heights = new float[TileHeightmapSize, TileHeightmapSize];
         bool any = false;
+        bool readFailed = false;
 
         // Each WL block is ~33.33m on a 533.33m tile = ~16 pixels on 257 grid
         // Block local coords are in [0, WlTileSize) range within the tile
@@ -1731,6 +1782,10 @@ public static class AdtTensorPackBuilder
             }
             catch
             {
+                // Other readable WL files may still contribute to the legacy
+                // liquid arrays. The strict target nevertheless remains
+                // ineligible because one discovered liquid source was unread.
+                readFailed = true;
                 continue;
             }
 
@@ -1793,7 +1848,7 @@ public static class AdtTensorPackBuilder
         }
 
         if (!any)
-            return (null, null);
+            return (null, null, readFailed);
 
         // Normalize mask to [0, 1]
         float maxMask = 0f;
@@ -1808,7 +1863,7 @@ public static class AdtTensorPackBuilder
 
         signals.Add("wl_liquid_mask");
         signals.Add("wl_liquid_height");
-        return (mask, heights);
+        return (mask, heights, readFailed);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1858,6 +1913,7 @@ public static class AdtTensorPackBuilder
     private const float DoodadSmallPlanarAreaThreshold = 6.0f;
     private const float DoodadTallHeightThreshold = 8.0f;
     private const float DoodadTallAspectThreshold = 1.35f;
+    private const float StrictWmoBoundsScoreTolerance = 0.30f;
 
     private enum TileProjectionMode
     {
@@ -1876,6 +1932,522 @@ public static class AdtTensorPackBuilder
     private const string ObjectRoofSourceNone = "none";
     private const string ObjectRoofSourceMetadata = "metadata";
     private const float ObjectRoofMetadataConfidence = 0.95f;
+
+    private sealed record StrictObjectMaskBuildResult(
+        float[,]? Mask,
+        float[,]? TopElevation,
+        float[,]? TerrainElevation,
+        byte[,]? Source,
+        ObjectGeometryTargetProvenance Provenance,
+        IReadOnlyList<ObjectGeometryTargetAsset>? Assets = null,
+        IReadOnlyList<ObjectGeometryTargetUnresolvedPlacement>? UnresolvedPlacements = null,
+        ObjectGeometryFragmentTrace? FragmentTrace = null);
+
+    private readonly record struct StrictLiquidEvidence(
+        ObjectGeometryLiquidEvidenceStatus Status,
+        int CoveredPixelCount,
+        int SurfaceUnknownPixelCount);
+
+    /// <summary>
+    /// Resolves the only liquid contract accepted by the initial M0 target.
+    /// Dry tiles are usable; any decoded liquid or unreadable liquid fact is
+    /// preserved in provenance and rejects supervision. This deliberately does
+    /// not use MCNK flags to invent water pixels.
+    /// </summary>
+    private static StrictLiquidEvidence ResolveStrictLiquidEvidence(
+        float[,]? liquidMask,
+        float[,]? liquidHeight,
+        bool liquidEvidenceComplete)
+    {
+        if (!liquidEvidenceComplete)
+            return new StrictLiquidEvidence(ObjectGeometryLiquidEvidenceStatus.Unknown, 0, 0);
+
+        if (liquidMask is null && liquidHeight is null)
+            return new StrictLiquidEvidence(ObjectGeometryLiquidEvidenceStatus.Dry, 0, 0);
+
+        if (liquidMask is null
+            || liquidHeight is null
+            || liquidMask.GetLength(0) != TileHeightmapSize
+            || liquidMask.GetLength(1) != TileHeightmapSize
+            || liquidHeight.GetLength(0) != TileHeightmapSize
+            || liquidHeight.GetLength(1) != TileHeightmapSize)
+        {
+            return new StrictLiquidEvidence(ObjectGeometryLiquidEvidenceStatus.Unknown, 0, 0);
+        }
+
+        int covered = 0;
+        int unknownSurface = 0;
+        for (int y = 0; y < TileHeightmapSize; y++)
+        {
+            for (int x = 0; x < TileHeightmapSize; x++)
+            {
+                float mask = liquidMask[y, x];
+                if (!float.IsFinite(mask))
+                    return new StrictLiquidEvidence(ObjectGeometryLiquidEvidenceStatus.Unknown, covered, unknownSurface);
+                if (mask <= 0f)
+                    continue;
+
+                covered++;
+                if (!float.IsFinite(liquidHeight[y, x]))
+                    unknownSurface++;
+            }
+        }
+
+        return unknownSurface > 0
+            ? new StrictLiquidEvidence(ObjectGeometryLiquidEvidenceStatus.Unknown, covered, unknownSurface)
+            : covered > 0
+                ? new StrictLiquidEvidence(ObjectGeometryLiquidEvidenceStatus.LiquidPresent, covered, 0)
+                : new StrictLiquidEvidence(ObjectGeometryLiquidEvidenceStatus.Dry, 0, 0);
+    }
+
+    /// <summary>
+    /// Produces a new, strict target that never reuses the historical
+    /// <c>object_precise_mask_257</c> semantics. Only transformed M2/WMO mesh
+    /// triangles contribute, and each raster fragment must be above the raw
+    /// MCVT terrain surface. Any unreadable or fallback-requiring placement
+    /// makes the whole tile ineligible instead of fabricating a negative label.
+    /// </summary>
+    private static StrictObjectMaskBuildResult BuildStrictTerrainVisibleObjectMask(
+        AdtPlacementCatalog? placements,
+        int tileX,
+        int tileY,
+        Func<string, byte[]?>? assetReader,
+        TerrainVertexLattice? terrainVertices,
+        float[,]? unifiedLiquidMask,
+        float[,]? unifiedLiquidHeight,
+        bool liquidEvidenceComplete,
+        HashSet<string> signals)
+    {
+        StrictLiquidEvidence liquid = ResolveStrictLiquidEvidence(
+            unifiedLiquidMask,
+            unifiedLiquidHeight,
+            liquidEvidenceComplete);
+
+        if (placements is null)
+        {
+            return new StrictObjectMaskBuildResult(
+                null,
+                null,
+                null,
+                null,
+                new ObjectGeometryTargetProvenance(
+                    ObjectGeometryTargetStatus.PlacementCatalogUnavailable,
+                    0, 0, 0, 0, 0, 0, 0, 0,
+                    LiquidEvidenceStatus: liquid.Status,
+                    LiquidCoveredPixelCount: liquid.CoveredPixelCount,
+                    LiquidSurfaceUnknownPixelCount: liquid.SurfaceUnknownPixelCount));
+        }
+
+        int placementCount = placements.ModelPlacements.Count + placements.WorldModelPlacements.Count;
+        float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
+        float[,] topElevation = new float[TileHeightmapSize, TileHeightmapSize];
+        float[,] terrainElevation = new float[TileHeightmapSize, TileHeightmapSize];
+        byte[,] source = new byte[TileHeightmapSize, TileHeightmapSize];
+        if (liquid.Status == ObjectGeometryLiquidEvidenceStatus.Unknown)
+        {
+            AddStrictObjectGeometryProvenanceSignal(signals);
+            return new StrictObjectMaskBuildResult(
+                null,
+                null,
+                null,
+                null,
+                new ObjectGeometryTargetProvenance(
+                    ObjectGeometryTargetStatus.LiquidVisibilityUnknown,
+                    placementCount, 0, 0, 0, 0, 0, 0, 0,
+                    LiquidEvidenceStatus: liquid.Status,
+                    LiquidCoveredPixelCount: liquid.CoveredPixelCount,
+                    LiquidSurfaceUnknownPixelCount: liquid.SurfaceUnknownPixelCount));
+        }
+        if (placementCount == 0)
+        {
+            AddStrictObjectGeometrySignals(signals);
+            return new StrictObjectMaskBuildResult(
+                mask,
+                topElevation,
+                terrainElevation,
+                source,
+                new ObjectGeometryTargetProvenance(
+                    ObjectGeometryTargetStatus.CompleteEmpty,
+                    0, 0, 0, 0, 0, 0, 0, 0,
+                    LiquidEvidenceStatus: liquid.Status,
+                    LiquidCoveredPixelCount: liquid.CoveredPixelCount,
+                    LiquidSurfaceUnknownPixelCount: liquid.SurfaceUnknownPixelCount),
+                FragmentTrace: ObjectGeometryFragmentTrace.Create(
+                    Array.Empty<ObjectGeometryFragmentRecord>(),
+                    Array.Empty<ObjectGeometryTargetAsset>()));
+        }
+
+        if (terrainVertices is null)
+        {
+            AddStrictObjectGeometryProvenanceSignal(signals);
+            return new StrictObjectMaskBuildResult(
+                null,
+                null,
+                null,
+                null,
+                new ObjectGeometryTargetProvenance(
+                    ObjectGeometryTargetStatus.TerrainSurfaceUnavailable,
+                    placementCount, 0, placementCount, placementCount, 0, 0, 0, 0,
+                    LiquidEvidenceStatus: liquid.Status,
+                    LiquidCoveredPixelCount: liquid.CoveredPixelCount,
+                    LiquidSurfaceUnknownPixelCount: liquid.SurfaceUnknownPixelCount),
+                UnresolvedPlacements: DescribeStrictUnresolvedPlacements(
+                    placements,
+                    "terrain-surface-unavailable"));
+        }
+
+        if (assetReader is null)
+        {
+            AddStrictObjectGeometryProvenanceSignal(signals);
+            return new StrictObjectMaskBuildResult(
+                null,
+                null,
+                null,
+                null,
+                new ObjectGeometryTargetProvenance(
+                    ObjectGeometryTargetStatus.IncompleteGeometry,
+                    placementCount, 0, placementCount, placementCount, 0, 0, 0, 0,
+                    LiquidEvidenceStatus: liquid.Status,
+                    LiquidCoveredPixelCount: liquid.CoveredPixelCount,
+                    LiquidSurfaceUnknownPixelCount: liquid.SurfaceUnknownPixelCount),
+                UnresolvedPlacements: DescribeStrictUnresolvedPlacements(
+                    placements,
+                    "asset-reader-unavailable"));
+        }
+
+        TerrainVisibleObjectMaskRasterizer rasterizer = new(
+            terrainVertices,
+            liquidMask: unifiedLiquidMask,
+            liquidHeight: unifiedLiquidHeight);
+        Dictionary<string, DoodadModelMetadata?> doodadCache = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, WmoRenderDocument?> wmoCache = new(StringComparer.OrdinalIgnoreCase);
+        List<ObjectGeometryTargetAsset> assets = [];
+        Dictionary<string, int> assetIndices = new(StringComparer.OrdinalIgnoreCase);
+        List<ObjectGeometryTargetUnresolvedPlacement> unresolvedPlacementRecords = [];
+        List<ObjectGeometryFragmentRecord> fragmentRecords = [];
+        int resolvedPlacements = 0;
+        int unresolvedPlacements = 0;
+        int fallbackRequiredPlacements = 0;
+        int triangleCount = 0;
+        int visiblePixels = 0;
+        int occludedPixels = 0;
+        int terrainUnknownPixels = 0;
+        int liquidCoveredFragments = 0;
+        int liquidHiddenFragments = 0;
+        int liquidAboveSurfaceFragments = 0;
+        int liquidUnknownFragments = 0;
+
+        int ResolveAssetIndex(ObjectGeometryPixelSource pixelSource, string normalizedPath)
+        {
+            string key = $"{(byte)pixelSource}:{normalizedPath}";
+            if (assetIndices.TryGetValue(key, out int existing))
+                return existing;
+
+            int index = assets.Count;
+            assets.Add(new ObjectGeometryTargetAsset(index, pixelSource, normalizedPath));
+            assetIndices.Add(key, index);
+            return index;
+        }
+
+        void RecordUnresolvedPlacement(
+            int placementUniqueId,
+            ObjectGeometryPixelSource pixelSource,
+            string normalizedPath,
+            string reason)
+            => unresolvedPlacementRecords.Add(new ObjectGeometryTargetUnresolvedPlacement(
+                placementUniqueId,
+                pixelSource,
+                normalizedPath,
+                reason));
+
+        bool RecordTriangle(
+            Vector3 w0,
+            Vector3 w1,
+            Vector3 w2,
+            TileProjectionMode projectionMode,
+            ObjectGeometryPixelSource pixelSource,
+            int placementUniqueId,
+            int assetIndex,
+            int sourceTriangleIndex)
+        {
+            if (!TryProjectToTilePixel(w0, tileX, tileY, projectionMode, out Vector2 p0)
+                || !TryProjectToTilePixel(w1, tileX, tileY, projectionMode, out Vector2 p1)
+                || !TryProjectToTilePixel(w2, tileX, tileY, projectionMode, out Vector2 p2))
+            {
+                return false;
+            }
+
+            triangleCount++;
+            ObjectTriangleRasterResult result = rasterizer.PaintTriangleWithTrace(
+                mask,
+                topElevation,
+                terrainElevation,
+                source,
+                p0,
+                p1,
+                p2,
+                w0,
+                w1,
+                w2,
+                ResolveObjectElevation(w0, projectionMode),
+                ResolveObjectElevation(w1, projectionMode),
+                ResolveObjectElevation(w2, projectionMode),
+                pixelSource,
+                placementUniqueId,
+                assetIndex,
+                sourceTriangleIndex,
+                fragmentRecords);
+            occludedPixels += result.OccludedPixels;
+            terrainUnknownPixels += result.TerrainUnknownPixels;
+            liquidCoveredFragments += result.LiquidCoveredPixels;
+            liquidHiddenFragments += result.LiquidHiddenPixels;
+            liquidAboveSurfaceFragments += result.LiquidAboveSurfacePixels;
+            liquidUnknownFragments += result.LiquidUnknownPixels;
+            return true;
+        }
+
+        foreach (AdtModelPlacement placement in placements.ModelPlacements)
+        {
+            string modelPath = NormalizeAssetPath(placement.ModelPath);
+            if (!TryLoadDoodadModelMetadata(modelPath, assetReader, doodadCache, out DoodadModelMetadata? metadata)
+                || metadata?.TriangleVertices is not { Count: >= 3 } triangles
+                || triangles.Count % 3 != 0)
+            {
+                unresolvedPlacements++;
+                fallbackRequiredPlacements++;
+                RecordUnresolvedPlacement(
+                    placement.UniqueId,
+                    ObjectGeometryPixelSource.M2Triangle,
+                    modelPath,
+                    "m2-asset-or-triangle-geometry-unavailable");
+                continue;
+            }
+
+            int assetIndex = ResolveAssetIndex(ObjectGeometryPixelSource.M2Triangle, modelPath);
+            Matrix4x4 transform = BuildM2PlacementTransform(placement.Position, placement.Rotation, placement.Scale);
+            const TileProjectionMode projectionMode = TileProjectionMode.OriginYX;
+
+            bool invalidGeometry = false;
+            for (int index = 0; index < triangles.Count; index += 3)
+            {
+                if (!RecordTriangle(
+                    Vector3.Transform(triangles[index], transform),
+                    Vector3.Transform(triangles[index + 1], transform),
+                    Vector3.Transform(triangles[index + 2], transform),
+                    projectionMode,
+                    ObjectGeometryPixelSource.M2Triangle,
+                    placement.UniqueId,
+                    assetIndex,
+                    index / 3))
+                {
+                    invalidGeometry = true;
+                    break;
+                }
+            }
+            if (invalidGeometry)
+            {
+                unresolvedPlacements++;
+                fallbackRequiredPlacements++;
+                RecordUnresolvedPlacement(
+                    placement.UniqueId,
+                    ObjectGeometryPixelSource.M2Triangle,
+                    modelPath,
+                    "m2-triangle-projection-unavailable");
+                continue;
+            }
+            resolvedPlacements++;
+        }
+
+        foreach (AdtWorldModelPlacement placement in placements.WorldModelPlacements)
+        {
+            string modelPath = NormalizeAssetPath(placement.ModelPath);
+            if (!TryLoadWmoRenderDocument(modelPath, assetReader, wmoCache, out WmoRenderDocument? document, null)
+                || document is null
+                || document.Groups.Count == 0)
+            {
+                unresolvedPlacements++;
+                fallbackRequiredPlacements++;
+                RecordUnresolvedPlacement(
+                    placement.UniqueId,
+                    ObjectGeometryPixelSource.WmoTriangle,
+                    modelPath,
+                    "wmo-asset-or-group-geometry-unavailable");
+                continue;
+            }
+
+            Matrix4x4 transform = BuildCanonicalWmoPlacementTransform(placement.Position, placement.Rotation);
+            Vector3[] localCorners = GetBoundsCorners(document.Summary.BoundsMin, document.Summary.BoundsMax);
+            if (ScoreTransformedBounds(localCorners, transform, placement.BoundsMin, placement.BoundsMax) > StrictWmoBoundsScoreTolerance)
+            {
+                unresolvedPlacements++;
+                fallbackRequiredPlacements++;
+                RecordUnresolvedPlacement(
+                    placement.UniqueId,
+                    ObjectGeometryPixelSource.WmoTriangle,
+                    modelPath,
+                    "wmo-transform-bounds-mismatch");
+                continue;
+            }
+
+            int assetIndex = ResolveAssetIndex(ObjectGeometryPixelSource.WmoTriangle, modelPath);
+            const TileProjectionMode projectionMode = TileProjectionMode.OriginYX;
+
+            bool hasGeometryTriangle = false;
+            bool invalidGeometry = false;
+            int sourceTriangleIndex = 0;
+            foreach (WmoEmbeddedGroupMeshDetail group in document.Groups)
+            {
+                IReadOnlyList<Vector3> vertices = group.Mesh.Vertices;
+                IReadOnlyList<ushort> indices = group.Mesh.Indices;
+                if (indices.Count % 3 != 0)
+                {
+                    invalidGeometry = true;
+                    break;
+                }
+
+                for (int index = 0; index + 2 < indices.Count; index += 3)
+                {
+                    int currentTriangleIndex = sourceTriangleIndex++;
+                    ushort i0 = indices[index];
+                    ushort i1 = indices[index + 1];
+                    ushort i2 = indices[index + 2];
+                    if ((uint)i0 >= (uint)vertices.Count || (uint)i1 >= (uint)vertices.Count || (uint)i2 >= (uint)vertices.Count)
+                    {
+                        invalidGeometry = true;
+                        break;
+                    }
+
+                    hasGeometryTriangle = true;
+                    if (!RecordTriangle(
+                        Vector3.Transform(vertices[i0], transform),
+                        Vector3.Transform(vertices[i1], transform),
+                        Vector3.Transform(vertices[i2], transform),
+                        projectionMode,
+                        ObjectGeometryPixelSource.WmoTriangle,
+                        placement.UniqueId,
+                        assetIndex,
+                        currentTriangleIndex))
+                    {
+                        invalidGeometry = true;
+                        break;
+                    }
+                }
+
+                if (invalidGeometry)
+                    break;
+            }
+
+            if (!hasGeometryTriangle || invalidGeometry)
+            {
+                unresolvedPlacements++;
+                fallbackRequiredPlacements++;
+                RecordUnresolvedPlacement(
+                    placement.UniqueId,
+                    ObjectGeometryPixelSource.WmoTriangle,
+                    modelPath,
+                    hasGeometryTriangle
+                        ? "wmo-triangle-projection-or-index-unavailable"
+                        : "wmo-has-no-valid-triangles");
+                continue;
+            }
+            resolvedPlacements++;
+        }
+
+        // The output target is a union of triangles. Record its actual positive
+        // pixels rather than a duplicate-prone sum of per-triangle fragments.
+        visiblePixels = mask.Cast<float>().Count(static value => value > 0f);
+        ObjectGeometryFragmentTrace fragmentTrace = ObjectGeometryFragmentTrace.Create(fragmentRecords, assets);
+        ObjectGeometryTargetStatus status = unresolvedPlacements > 0
+            ? ObjectGeometryTargetStatus.IncompleteGeometry
+            : liquidUnknownFragments > 0
+                ? ObjectGeometryTargetStatus.LiquidVisibilityUnknown
+                : terrainUnknownPixels > 0
+                    ? ObjectGeometryTargetStatus.TerrainSurfaceUnavailable
+                    : visiblePixels > 0
+                        ? ObjectGeometryTargetStatus.CompleteVisible
+                        : ObjectGeometryTargetStatus.CompleteEmpty;
+        ObjectGeometryTargetProvenance provenance = new(
+            status,
+            placementCount,
+            resolvedPlacements,
+            unresolvedPlacements,
+            fallbackRequiredPlacements,
+            triangleCount,
+            visiblePixels,
+            occludedPixels,
+            terrainUnknownPixels,
+            LiquidEvidenceStatus: liquid.Status,
+            LiquidCoveredPixelCount: liquid.CoveredPixelCount,
+            LiquidSurfaceUnknownPixelCount: liquid.SurfaceUnknownPixelCount,
+            LiquidCoveredFragmentCount: liquidCoveredFragments,
+            LiquidHiddenFragmentCount: liquidHiddenFragments,
+            LiquidAboveSurfaceFragmentCount: liquidAboveSurfaceFragments,
+            LiquidUnknownFragmentCount: liquidUnknownFragments);
+        signals.Add("object_geometry_fragment_trace_v3");
+        if (provenance.IsMaterialized)
+            AddStrictObjectGeometrySignals(signals);
+        else
+            AddStrictObjectGeometryProvenanceSignal(signals);
+        return new StrictObjectMaskBuildResult(
+            provenance.IsMaterialized ? mask : null,
+            provenance.IsMaterialized ? topElevation : null,
+            provenance.IsMaterialized ? terrainElevation : null,
+            provenance.IsMaterialized ? source : null,
+            provenance,
+            assets,
+            unresolvedPlacementRecords,
+            fragmentTrace);
+    }
+
+    private static void AddStrictObjectGeometrySignals(HashSet<string> signals)
+    {
+        signals.Add("object_geometry_visible_mask_257");
+        signals.Add("object_geometry_visible_top_elevation_257");
+        signals.Add("object_geometry_visible_terrain_elevation_257");
+        signals.Add("object_geometry_visible_source_257");
+        signals.Add("object_geometry_fragment_trace_v3");
+        AddStrictObjectGeometryProvenanceSignal(signals);
+    }
+
+    private static void AddStrictObjectGeometryProvenanceSignal(HashSet<string> signals)
+    {
+        signals.Add("object_geometry_target_provenance_v3");
+    }
+
+    private static float ResolveObjectElevation(Vector3 position, TileProjectionMode projectionMode)
+        => projectionMode is TileProjectionMode.WorldXZ or TileProjectionMode.OriginZX
+            ? position.Y
+            : position.Z;
+
+    private static IReadOnlyList<ObjectGeometryTargetUnresolvedPlacement> DescribeStrictUnresolvedPlacements(
+        AdtPlacementCatalog placements,
+        string reason)
+    {
+        ArgumentNullException.ThrowIfNull(placements);
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+
+        List<ObjectGeometryTargetUnresolvedPlacement> result = new(
+            placements.ModelPlacements.Count + placements.WorldModelPlacements.Count);
+        foreach (AdtModelPlacement placement in placements.ModelPlacements)
+        {
+            result.Add(new ObjectGeometryTargetUnresolvedPlacement(
+                placement.UniqueId,
+                ObjectGeometryPixelSource.M2Triangle,
+                NormalizeAssetPath(placement.ModelPath),
+                reason));
+        }
+
+        foreach (AdtWorldModelPlacement placement in placements.WorldModelPlacements)
+        {
+            result.Add(new ObjectGeometryTargetUnresolvedPlacement(
+                placement.UniqueId,
+                ObjectGeometryPixelSource.WmoTriangle,
+                NormalizeAssetPath(placement.ModelPath),
+                reason));
+        }
+
+        return result;
+    }
 
     private static (float[,]? mask, float[,]? preciseMask, int[,]? instanceMask, float[,]? mddfMask, float[,]? modfMask, float[,]? filteredMask, Dictionary<string, V22ModelPayload>? v22Payloads)
         BuildObjectMasks(
@@ -2667,6 +3239,20 @@ public static class AdtTensorPackBuilder
         }
 
         return best;
+    }
+
+    /// <summary>
+    /// Renderer-owned MODF transform. Strict target generation may use only
+    /// this canonical transform and rejects a bounds disagreement; it must not
+    /// choose a best-looking legacy candidate.
+    /// </summary>
+    private static Matrix4x4 BuildCanonicalWmoPlacementTransform(Vector3 position, Vector3 rotationDegrees)
+    {
+        return Matrix4x4.CreateRotationZ(MathF.PI)
+            * Matrix4x4.CreateRotationX(DegreesToRadians(rotationDegrees.X))
+            * Matrix4x4.CreateRotationY(DegreesToRadians(rotationDegrees.Y))
+            * Matrix4x4.CreateRotationZ(DegreesToRadians(rotationDegrees.Z))
+            * Matrix4x4.CreateTranslation(position);
     }
 
     private static Matrix4x4 BuildLegacyWmoPlacementTransform(Vector3 position, Vector3 rotationDegrees)
@@ -3769,43 +4355,37 @@ private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payloa
             float[,]? wlHeight,
             HashSet<string> signals)
     {
-        // Priority: MH2O > MCLQ > WL*
-        // MH2O is the richest source (WotLK+) with per-vertex heights at 257×257.
-        if (mh2oHeight is not null && mh2oPresence is not null)
-        {
-            float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
-            float[,] height = new float[TileHeightmapSize, TileHeightmapSize];
-            bool any = false;
+        // Resolve source precedence per pixel, not per tile. A tile can have
+        // MH2O in one area and MCLQ/WL* coverage elsewhere; returning after
+        // the first nonempty source silently loses that lower-priority water.
+        // MCNK flags intentionally do not participate: they do not encode
+        // per-pixel coverage or a liquid surface height.
+        float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
+        float[,] height = new float[TileHeightmapSize, TileHeightmapSize];
+        bool any = false;
 
+        // WL* is the lowest-priority source.
+        if (wlMask is not null)
+        {
             for (int y = 0; y < TileHeightmapSize; y++)
             {
                 for (int x = 0; x < TileHeightmapSize; x++)
                 {
-                    if (!mh2oPresence[y, x])
+                    if (wlMask[y, x] == 0f)
                         continue;
 
-                    float h = mh2oHeight[y, x];
                     mask[y, x] = 1.0f;
-                    height[y, x] = h;
+                    height[y, x] = wlHeight?[y, x] ?? 0f;
                     any = true;
                 }
             }
-
-            if (any)
-            {
-                signals.Add("unified_liquid_mask");
-                signals.Add("unified_liquid_height");
-                return (mask, height);
-            }
         }
 
-        // MCLQ is pre-WotLK, stored at 129×129 resolution.
+        // MCLQ is pre-WotLK, stored at 129×129 resolution. It supersedes WL*
+        // only where decoded MCLQ presence covers the destination pixel.
         if (mclqHeight is not null && mclqPresence is not null)
         {
             int mclqSize = mclqHeight.GetLength(0);
-            float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
-            float[,] height = new float[TileHeightmapSize, TileHeightmapSize];
-            bool any = false;
 
             // Upsample 129×129 → 257×257 via bilinear
             float scale = (float)(mclqSize - 1) / (TileHeightmapSize - 1);
@@ -3838,44 +4418,33 @@ private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payloa
                     any = true;
                 }
             }
-
-            if (any)
-            {
-                signals.Add("unified_liquid_mask");
-                signals.Add("unified_liquid_height");
-                return (mask, height);
-            }
         }
 
-        // WL* loose files are the last resort.
-        if (wlMask is not null)
+        // MH2O is the richest source (WotLK+) with per-vertex heights at
+        // 257×257, so it overwrites only the pixels it explicitly marks.
+        if (mh2oHeight is not null && mh2oPresence is not null)
         {
-            float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
-            float[,] height = new float[TileHeightmapSize, TileHeightmapSize];
-            bool any = false;
-
             for (int y = 0; y < TileHeightmapSize; y++)
             {
                 for (int x = 0; x < TileHeightmapSize; x++)
                 {
-                    if (wlMask[y, x] == 0f)
+                    if (!mh2oPresence[y, x])
                         continue;
 
+                    float h = mh2oHeight[y, x];
                     mask[y, x] = 1.0f;
-                    height[y, x] = wlHeight?[y, x] ?? 0f;
+                    height[y, x] = h;
                     any = true;
                 }
             }
-
-            if (any)
-            {
-                signals.Add("unified_liquid_mask");
-                signals.Add("unified_liquid_height");
-                return (mask, height);
-            }
         }
 
-        return (null, null);
+        if (!any)
+            return (null, null);
+
+        signals.Add("unified_liquid_mask");
+        signals.Add("unified_liquid_height");
+        return (mask, height);
     }
 
     private static string ExtractMapName(string adtPath)

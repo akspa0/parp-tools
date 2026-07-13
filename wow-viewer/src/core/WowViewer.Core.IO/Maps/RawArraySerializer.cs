@@ -29,6 +29,7 @@ public static class RawArraySerializer
     {
         ArgumentNullException.ThrowIfNull(pack);
         ArgumentNullException.ThrowIfNull(outputStream);
+        ValidateStrictUnionTargetSerialization(pack, profile != StreamProfile.V22);
 
         // Magic
         outputStream.Write(ArrayMagic);
@@ -58,6 +59,157 @@ public static class RawArraySerializer
         outputStream.Write(EndsMagic);
     }
 
+    /// <summary>
+    /// Strict union labels are meaningful only when their provenance says the
+    /// target was materialized. Do not inspect fragment-trace sidecars here:
+    /// incomplete geometry may legitimately retain those audit records.
+    /// </summary>
+    private static void ValidateStrictUnionTargetSerialization(
+        TerrainTileTensorPack pack,
+        bool writesStrictUnionArrays)
+    {
+        if (!writesStrictUnionArrays)
+            return;
+
+        // A fragment trace is permitted for an incomplete target, but when it
+        // is present it must still be structurally and cryptographically
+        // coherent before we write any bytes.
+        ValidateStrictFragmentTrace(pack);
+
+        bool hasMask = pack.ObjectGeometryVisibleMask257 is not null;
+        bool hasTopElevation = pack.ObjectGeometryVisibleTopElevation257 is not null;
+        bool hasTerrainElevation = pack.ObjectGeometryVisibleTerrainElevation257 is not null;
+        bool hasSource = pack.ObjectGeometryVisibleSource257 is not null;
+        bool hasAnyUnionArray = hasMask || hasTopElevation || hasTerrainElevation || hasSource;
+        ObjectGeometryTargetProvenance? provenance = pack.ObjectGeometryTargetProvenance;
+
+        if (!hasAnyUnionArray)
+        {
+            if (provenance?.IsMaterialized == true)
+            {
+                throw new InvalidDataException(
+                    "A materialized strict object target must include all four union target arrays.");
+            }
+
+            return;
+        }
+
+        if (provenance is null)
+        {
+            throw new InvalidDataException(
+                "Strict object union target arrays require explicit materialized provenance.");
+        }
+
+        if (!provenance.IsMaterialized)
+        {
+            throw new InvalidDataException(
+                $"Strict object union target arrays cannot be serialized for nonmaterialized status {provenance.Status}. "+
+                "Retain only provenance and optional fragment-trace sidecars.");
+        }
+
+        if (!hasMask || !hasTopElevation || !hasTerrainElevation || !hasSource)
+        {
+            throw new InvalidDataException(
+                "A materialized strict object target must include mask, top elevation, terrain elevation, and source arrays together.");
+        }
+
+    }
+
+    private static void ValidateStrictFragmentTrace(TerrainTileTensorPack pack)
+    {
+        ObjectGeometryTargetProvenance? provenance = pack.ObjectGeometryTargetProvenance;
+        ObjectGeometryFragmentTrace? trace = pack.ObjectGeometryFragmentTrace;
+        if (trace is null)
+        {
+            if (provenance?.IsMaterialized == true)
+            {
+                throw new InvalidDataException(
+                    "A materialized strict object target requires its v3 uncollapsed fragment trace.");
+            }
+
+            return;
+        }
+        if (provenance is null)
+            throw new InvalidDataException("A strict object fragment trace requires strict target provenance.");
+
+        int count = trace.Count;
+        ValidateTraceShape(trace.RasterXy, count, 2, nameof(trace.RasterXy));
+        ValidateTraceShape(trace.ObjectWorldXyzElevation, count, 4, nameof(trace.ObjectWorldXyzElevation));
+        ValidateTraceShape(trace.SourceIds, count, 3, nameof(trace.SourceIds));
+        ValidateTraceShape(trace.SourceClassification, count, 2, nameof(trace.SourceClassification));
+        ValidateTraceShape(trace.TerrainVertexDenseXy, count, 6, nameof(trace.TerrainVertexDenseXy));
+        ValidateTraceShape(trace.TerrainVertexZ, count, 3, nameof(trace.TerrainVertexZ));
+        ValidateTraceShape(trace.TerrainVertexPresent, count, 3, nameof(trace.TerrainVertexPresent));
+        ValidateTraceShape(trace.TerrainWeights, count, 3, nameof(trace.TerrainWeights));
+        ValidateTraceShape(trace.TerrainLiquidElevation, count, 2, nameof(trace.TerrainLiquidElevation));
+        if (trace.ContentSha256.Length != 64 || !trace.ContentSha256.All(static c => char.IsAsciiHexDigit(c)))
+            throw new InvalidDataException("Strict object fragment trace must carry a SHA-256 content hash.");
+        ValidateStrictFragmentAssetTable(pack.ObjectGeometryTargetAssets);
+        if (!trace.HasConsistentContentHash(pack.ObjectGeometryTargetAssets))
+            throw new InvalidDataException("Strict object fragment trace content does not match its SHA-256 hash.");
+        if (provenance.IsMaterialized
+            && provenance.Status == ObjectGeometryTargetStatus.CompleteVisible
+            && count == 0)
+            throw new InvalidDataException("A visible strict union target cannot have an empty fragment trace.");
+
+        for (int row = 0; row < count; row++)
+        {
+            int assetIndex = trace.SourceIds[row, 1];
+            if (assetIndex < 0 || assetIndex >= pack.ObjectGeometryTargetAssets.Count)
+                throw new InvalidDataException($"Strict fragment row {row} references missing asset index {assetIndex}.");
+            ObjectGeometryPixelSource source = (ObjectGeometryPixelSource)trace.SourceClassification[row, 0];
+            if (source == ObjectGeometryPixelSource.None || !Enum.IsDefined(source))
+                throw new InvalidDataException($"Strict fragment row {row} has unknown source {trace.SourceClassification[row, 0]}.");
+            if (pack.ObjectGeometryTargetAssets[assetIndex].Source != source)
+            {
+                throw new InvalidDataException(
+                    $"Strict fragment row {row} source does not match asset index {assetIndex}.");
+            }
+            byte classification = trace.SourceClassification[row, 1];
+            if (!Enum.IsDefined((ObjectGeometryFragmentClassification)classification))
+                throw new InvalidDataException($"Strict fragment row {row} has unknown classification {classification}.");
+        }
+    }
+
+    private static void ValidateStrictFragmentAssetTable(IReadOnlyList<ObjectGeometryTargetAsset> assets)
+    {
+        for (int index = 0; index < assets.Count; index++)
+        {
+            ObjectGeometryTargetAsset asset = assets[index];
+            if (asset.AssetIndex != index)
+                throw new InvalidDataException($"Strict fragment asset table index {index} has declared id {asset.AssetIndex}.");
+            if (asset.Source == ObjectGeometryPixelSource.None || !Enum.IsDefined(asset.Source))
+                throw new InvalidDataException($"Strict fragment asset index {index} has an unknown source.");
+            if (string.IsNullOrWhiteSpace(asset.NormalizedAssetPath))
+                throw new InvalidDataException($"Strict fragment asset index {index} has no normalized asset path.");
+        }
+    }
+
+    private static void ValidateTraceShape(Array array, int rows, int columns, string name)
+    {
+        if (array.Rank != 2 || array.GetLength(0) != rows || array.GetLength(1) != columns)
+            throw new InvalidDataException($"Strict fragment trace field {name} must have shape [{rows},{columns}].");
+    }
+
+    private static void WriteStrictObjectGeometryFragmentTrace(
+        TerrainTileTensorPack pack,
+        Stream outputStream)
+    {
+        ObjectGeometryFragmentTrace? trace = pack.ObjectGeometryFragmentTrace;
+        if (trace is null)
+            return;
+
+        WriteArray(outputStream, "object_geometry_fragment_raster_xy", trace.RasterXy);
+        WriteArray(outputStream, "object_geometry_fragment_world_xyze", trace.ObjectWorldXyzElevation);
+        WriteArray(outputStream, "object_geometry_fragment_source_ids", trace.SourceIds);
+        WriteArray(outputStream, "object_geometry_fragment_source_classification", trace.SourceClassification);
+        WriteArray(outputStream, "object_geometry_fragment_terrain_vertex_dense_xy", trace.TerrainVertexDenseXy);
+        WriteArray(outputStream, "object_geometry_fragment_terrain_vertex_z", trace.TerrainVertexZ);
+        WriteArray(outputStream, "object_geometry_fragment_terrain_vertex_present", trace.TerrainVertexPresent);
+        WriteArray(outputStream, "object_geometry_fragment_terrain_weights", trace.TerrainWeights);
+        WriteArray(outputStream, "object_geometry_fragment_terrain_liquid_elevation", trace.TerrainLiquidElevation);
+    }
+
     private static void WriteV16Arrays(TerrainTileTensorPack pack, Stream outputStream)
     {
         WriteArray(outputStream, "height_257", pack.Height257);
@@ -82,6 +234,11 @@ public static class RawArraySerializer
         WriteArray(outputStream, "liquid_basic_type_257", pack.LiquidBasicType257);
         WriteArray(outputStream, "object_mask_257", pack.ObjectMask257);
         WriteArray(outputStream, "object_precise_mask_257", pack.ObjectPreciseMask257);
+        WriteArray(outputStream, "object_geometry_visible_mask_257", pack.ObjectGeometryVisibleMask257);
+        WriteArray(outputStream, "object_geometry_visible_top_elevation_257", pack.ObjectGeometryVisibleTopElevation257);
+        WriteArray(outputStream, "object_geometry_visible_terrain_elevation_257", pack.ObjectGeometryVisibleTerrainElevation257);
+        WriteArray(outputStream, "object_geometry_visible_source_257", pack.ObjectGeometryVisibleSource257);
+        WriteStrictObjectGeometryFragmentTrace(pack, outputStream);
         WriteArray(outputStream, "object_instance_mask_257", pack.ObjectInstanceMask257);
         WriteArray(outputStream, "mddf_mask_257", pack.MddfMask257);
         WriteArray(outputStream, "modf_mask_257", pack.ModfMask257);
@@ -127,6 +284,11 @@ public static class RawArraySerializer
         WriteArray(outputStream, "liquid_basic_type_257", pack.LiquidBasicType257);
         WriteArray(outputStream, "object_mask_257", pack.ObjectMask257);
         WriteArray(outputStream, "object_precise_mask_257", pack.ObjectPreciseMask257);
+        WriteArray(outputStream, "object_geometry_visible_mask_257", pack.ObjectGeometryVisibleMask257);
+        WriteArray(outputStream, "object_geometry_visible_top_elevation_257", pack.ObjectGeometryVisibleTopElevation257);
+        WriteArray(outputStream, "object_geometry_visible_terrain_elevation_257", pack.ObjectGeometryVisibleTerrainElevation257);
+        WriteArray(outputStream, "object_geometry_visible_source_257", pack.ObjectGeometryVisibleSource257);
+        WriteStrictObjectGeometryFragmentTrace(pack, outputStream);
         WriteArray(outputStream, "object_instance_mask_257", pack.ObjectInstanceMask257);
         WriteArray(outputStream, "mddf_mask_257", pack.MddfMask257);
         WriteArray(outputStream, "modf_mask_257", pack.ModfMask257);
@@ -634,6 +796,42 @@ WriteArray(outputStream, "model_above_terrain_mask",
             placement_mddf_asset_paths = BuildPlacementAssetPaths(pack.PlacementMddfData, pack.PlacementMddfNames),
             placement_modf_asset_paths = BuildPlacementAssetPaths(pack.PlacementModfData, pack.PlacementModfNames),
             object_roof_mask_source = pack.ObjectRoofMaskSource,
+            object_geometry_target_version = ObjectGeometryTargetProvenance.ContractVersion,
+            object_geometry_target_status = pack.ObjectGeometryTargetProvenance?.Status.ToString(),
+            object_geometry_target_materialized = pack.ObjectGeometryTargetProvenance?.IsMaterialized ?? false,
+            object_geometry_target_placement_count = pack.ObjectGeometryTargetProvenance?.PlacementCount,
+            object_geometry_target_geometry_resolved_placement_count = pack.ObjectGeometryTargetProvenance?.GeometryResolvedPlacementCount,
+            object_geometry_target_geometry_unresolved_placement_count = pack.ObjectGeometryTargetProvenance?.GeometryUnresolvedPlacementCount,
+            object_geometry_target_fallback_required_placement_count = pack.ObjectGeometryTargetProvenance?.FallbackRequiredPlacementCount,
+            object_geometry_target_triangle_count = pack.ObjectGeometryTargetProvenance?.TriangleCount,
+            object_geometry_target_visible_pixel_count = pack.ObjectGeometryTargetProvenance?.VisiblePixelCount,
+            object_geometry_target_occluded_pixel_count = pack.ObjectGeometryTargetProvenance?.OccludedPixelCount,
+            object_geometry_target_terrain_unknown_pixel_count = pack.ObjectGeometryTargetProvenance?.TerrainUnknownPixelCount,
+            object_geometry_target_liquid_evidence_status = pack.ObjectGeometryTargetProvenance?.LiquidEvidenceStatus.ToString(),
+            object_geometry_target_liquid_covered_pixel_count = pack.ObjectGeometryTargetProvenance?.LiquidCoveredPixelCount,
+            object_geometry_target_liquid_surface_unknown_pixel_count = pack.ObjectGeometryTargetProvenance?.LiquidSurfaceUnknownPixelCount,
+            object_geometry_target_liquid_covered_fragment_count = pack.ObjectGeometryTargetProvenance?.LiquidCoveredFragmentCount,
+            object_geometry_target_liquid_hidden_fragment_count = pack.ObjectGeometryTargetProvenance?.LiquidHiddenFragmentCount,
+            object_geometry_target_liquid_above_surface_fragment_count = pack.ObjectGeometryTargetProvenance?.LiquidAboveSurfaceFragmentCount,
+            object_geometry_target_liquid_unknown_fragment_count = pack.ObjectGeometryTargetProvenance?.LiquidUnknownFragmentCount,
+            object_geometry_fragment_trace_schema = pack.ObjectGeometryFragmentTrace is null
+                ? null
+                : ObjectGeometryTargetProvenance.ContractVersion,
+            object_geometry_fragment_count = pack.ObjectGeometryFragmentTrace?.Count,
+            object_geometry_fragment_sha256 = pack.ObjectGeometryFragmentTrace?.ContentSha256,
+            object_geometry_target_assets = pack.ObjectGeometryTargetAssets.Select(static asset => new
+            {
+                asset_index = asset.AssetIndex,
+                source = asset.Source.ToString(),
+                normalized_asset_path = asset.NormalizedAssetPath,
+            }),
+            object_geometry_target_unresolved_placements = pack.ObjectGeometryTargetUnresolvedPlacements.Select(static placement => new
+            {
+                placement_unique_id = placement.PlacementUniqueId,
+                source = placement.Source.ToString(),
+                normalized_asset_path = placement.NormalizedAssetPath,
+                reason = placement.Reason,
+            }),
             placement_mddf_count = pack.PlacementMddfCount,
             placement_modf_count = pack.PlacementModfCount,
         });

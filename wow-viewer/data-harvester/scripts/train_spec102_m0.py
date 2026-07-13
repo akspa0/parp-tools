@@ -1,26 +1,32 @@
-"""Train Spec 102 M0: RGB minimap -> one object-visibility mask."""
+"""Train Spec 102 M0: RGB minimap -> one strict terrain-visible geometry mask."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import random
+import subprocess
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
+import pyarrow.parquet as pq
 import torch
 import zarr
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
 from harvester.spec102.m0 import (
-    PRECISE_MASK_KEY,
+    STRICT_OBJECT_TARGET_KEY,
     M0ObjectMask,
-    precise_object_target_256,
     segmentation_loss,
+    strict_object_target_256,
 )
+from harvester.spec102.m0_coverage import validate_m0_coverage_audit
+from harvester.spec102.m0_scope import validate_m0_build_local_scope
 from harvester.spec102.m0_validation import M0ValidationSample, render_m0_validation_panel
+from harvester.spec102.signal_audit import validate_m0_training_audit
 
 
 class MaskDataset(Dataset):
@@ -44,6 +50,25 @@ def seed_everything(seed: int) -> None:
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+
+def repository_revision() -> str:
+    """Record the exact committed trainer revision instead of a vague run label."""
+    repository = Path(__file__).resolve().parents[2]
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise RuntimeError("M0 cannot record its git revision; refusing an untraceable GPU run") from error
+    revision = result.stdout.strip()
+    if len(revision) != 40:
+        raise RuntimeError("M0 received an invalid git revision; refusing an untraceable GPU run")
+    return revision
 
 
 def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> dict[str, float]:
@@ -114,6 +139,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Train Spec 102 M0 object-mask model")
     parser.add_argument("--store", required=True, type=Path)
     parser.add_argument("--split-manifest", required=True, type=Path)
+    parser.add_argument("--signal-audit-report", required=True, type=Path)
+    parser.add_argument("--coverage-report", required=True, type=Path)
+    parser.add_argument("--raw-v18-store", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--prior-gate-report", type=Path)
@@ -127,44 +155,73 @@ def main() -> int:
 
     if args.epochs < 1 or args.epochs > 12:
         raise ValueError("Spec 102 M0 permits 1-12 epochs; extension requires a passed prior gate")
+    manifest = json.loads(args.split_manifest.read_text(encoding="utf-8"))
+    store_index = pq.read_table(args.store / "index.parquet").to_pylist()
+    scope = validate_m0_build_local_scope(manifest, source_index=store_index)
+    audit_report = validate_m0_training_audit(
+        args.signal_audit_report,
+        store=args.store,
+        split_manifest=args.split_manifest,
+        expected_scope=scope.audit_binding,
+        scoped_rows=scope.scoped_rows,
+    )
+    validate_m0_coverage_audit(
+        args.coverage_report,
+        raw_v18_store=args.raw_v18_store,
+        store=args.store,
+        split_manifest=args.split_manifest,
+        expected_scope=scope.audit_binding,
+    )
+    artifact_binding = scope.artifact_binding(
+        store=args.store,
+        split_manifest=args.split_manifest,
+        coverage_report=args.coverage_report,
+    )
+    code_revision = repository_revision()
     if args.epochs > 3:
         if args.prior_gate_report is None or not args.prior_gate_report.is_file():
-            raise RuntimeError("M0 runs beyond 3 epochs require --prior-gate-report")
-        prior_gate = json.loads(args.prior_gate_report.read_text(encoding="utf-8"))
-        if not (prior_gate.get("gate_passed") or prior_gate.get("extension_authorized")):
-            raise RuntimeError("M0 extended run blocked: prior bounded run did not pass or authorize undertraining continuation")
+            raise RuntimeError("M0 runs beyond 3 epochs require a passed build-local --prior-gate-report")
+        if args.resume_checkpoint is None:
+            raise RuntimeError("M0 runs beyond 3 epochs must resume the bound three-epoch checkpoint")
+        try:
+            prior_gate = json.loads(args.prior_gate_report.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"cannot read M0 prior gate report: {error}") from error
+        if prior_gate.get("schema") != "spec102-m0-training-report-v3":
+            raise RuntimeError("M0 extension rejects legacy or unknown prior gate reports")
+        if prior_gate.get("gate_scope") != "build_local_3_3_5_only" or prior_gate.get("cross_era_evaluated") is not False:
+            raise RuntimeError("M0 extension requires a 3.3.5-only prior decision report")
+        if prior_gate.get("m0_artifact_binding") != artifact_binding:
+            raise RuntimeError("M0 extension prior report is bound to a different store or split")
+        if prior_gate.get("signal_audit_fingerprint") != audit_report.get("scoped_signal_fingerprint"):
+            raise RuntimeError("M0 extension prior report is bound to a different audited signal snapshot")
+        if prior_gate.get("epochs") != 3 or prior_gate.get("extension_authorized") is not True:
+            raise RuntimeError("M0 extension requires an improving three-epoch build-local decision")
+        prior_checkpoint = prior_gate.get("best_checkpoint")
+        if not isinstance(prior_checkpoint, str) or Path(prior_checkpoint).resolve() != args.resume_checkpoint.resolve():
+            raise RuntimeError("M0 extension must resume the checkpoint named by its prior decision report")
+    rows_by_split = scope.rows_by_split
+    metadata_by_row = scope.metadata_by_row
+
     if not torch.cuda.is_available():
         raise RuntimeError("M0 is CUDA-only; CPU fallback is prohibited")
     seed_everything(args.seed)
     device = torch.device("cuda")
     torch.cuda.reset_peak_memory_stats()
 
-    manifest = json.loads(args.split_manifest.read_text(encoding="utf-8"))
-    if manifest.get("schema") != "spec102-curated-split-v2":
-        raise RuntimeError("M0 refuses an uncurated split manifest")
-    rows_by_split = {
-        split: [
-            int(row["row"]) for row in manifest["rows"]
-            if row["split"] == split and row.get("eligible_m0") is True
-        ]
-        for split in ("train", "validation_map", "test_era")
-    }
-    metadata_by_row = {int(row["row"]): row for row in manifest["rows"]}
-    if any(not rows_by_split[split] for split in rows_by_split):
-        raise RuntimeError(f"M0 curated split is empty: { {key: len(value) for key, value in rows_by_split.items()} }")
     group = zarr.open_group(str(args.store), mode="r")
-    target_name = PRECISE_MASK_KEY
+    target_name = STRICT_OBJECT_TARGET_KEY
     if target_name not in group:
         raise RuntimeError(
-            f"M0 canonical target '{target_name}' is missing; refusing coarse-mask or visibility-mask fallbacks"
+            f"M0 strict geometry target '{target_name}' is missing; refusing all target fallbacks"
         )
     rgb = np.asarray(group["minimap_rgb"][:])
-    precise_masks = np.asarray(group[target_name][:], dtype=np.float32)
-    if precise_masks.shape[1:] != (257, 257):
-        raise RuntimeError(f"M0 canonical precise target has invalid shape {precise_masks.shape}")
-    masks = np.stack([precise_object_target_256(mask) for mask in precise_masks], axis=0)
-    if rgb.shape[0] != len(manifest["rows"]) or masks.shape[0] != len(manifest["rows"]):
-        raise RuntimeError("Store row count does not match the frozen split")
+    strict_masks = np.asarray(group[target_name][:], dtype=np.float32)
+    if strict_masks.shape[1:] != (257, 257):
+        raise RuntimeError(f"M0 strict geometry target has invalid shape {strict_masks.shape}")
+    masks = np.stack([strict_object_target_256(mask) for mask in strict_masks], axis=0)
+    if rgb.shape[0] != len(store_index) or masks.shape[0] != len(store_index):
+        raise RuntimeError("Store row count does not match the hash-bound M0 scope")
     eligible_rows = np.asarray(
         [row for split_rows in rows_by_split.values() for row in split_rows], dtype=np.int64
     )
@@ -177,7 +234,7 @@ def main() -> int:
     loaders = {
         "train": DataLoader(datasets["train"], batch_size=args.batch_size, shuffle=True, generator=generator, num_workers=0, pin_memory=True),
         "validation_map": DataLoader(datasets["validation_map"], batch_size=args.batch_size, shuffle=False, num_workers=0, pin_memory=True),
-        "test_era": DataLoader(datasets["test_era"], batch_size=args.batch_size, shuffle=False, num_workers=0, pin_memory=True),
+        "test_build_local": DataLoader(datasets["test_build_local"], batch_size=args.batch_size, shuffle=False, num_workers=0, pin_memory=True),
     }
 
     model = M0ObjectMask().to(device)
@@ -188,18 +245,28 @@ def main() -> int:
     scaler = torch.amp.GradScaler("cuda")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     input_manifest = {
-        "schema": "spec102-m0-input-v1",
+        "schema": "spec102-m0-input-v3",
         "forward_inputs": [{"name": "minimap_rgb", "shape": ["batch", 3, 256, 256], "deployment_source": "raw minimap RGB"}],
         "target_only": [{
             "name": target_name,
             "shape": ["batch", 257, 257],
             "projection": "four_corner_max_to_256",
         }],
-        "output": {"name": "object_visibility_mask_logits", "shape": ["batch", 1, 256, 256]},
+        "output": {"name": "object_geometry_visible_mask_logits", "shape": ["batch", 1, 256, 256]},
         "prohibited_inputs": [
             "height_257", "normal_xyz_257", "wdl_height_33", target_name,
-            "object_mask_256", "object_visibility_256",
+            "object_mask_256", "object_visibility_256", "object_precise_mask_257",
         ],
+        "m0_training_scope": scope.audit_binding,
+        "m0_artifact_binding": artifact_binding,
+        "cross_era_evaluated": False,
+        "signal_audit_report": str(args.signal_audit_report.resolve()),
+        "signal_audit_fingerprint": audit_report["scoped_signal_fingerprint"],
+        "coverage_report": str(args.coverage_report.resolve()),
+        "coverage_report_sha256": artifact_binding["coverage_report_sha256"],
+        "coverage_raw_v18_store": str(args.raw_v18_store.resolve()),
+        "command": list(sys.argv),
+        "code_revision": code_revision,
     }
     (args.output_dir / "input_manifest.json").write_text(json.dumps(input_manifest, indent=2), encoding="utf-8")
 
@@ -208,8 +275,10 @@ def main() -> int:
     start_epoch = 0
     if args.resume_checkpoint is not None:
         resume = torch.load(args.resume_checkpoint, map_location=device, weights_only=False)
-        if resume.get("schema") != "spec102-m0-checkpoint-v1":
+        if resume.get("schema") != "spec102-m0-checkpoint-v2":
             raise RuntimeError("--resume-checkpoint is not a Spec 102 M0 checkpoint")
+        if resume.get("m0_artifact_binding") != artifact_binding:
+            raise RuntimeError("--resume-checkpoint was not trained on this hash-bound 3.3.5-only scope")
         model.load_state_dict(resume["model"], strict=True)
         start_epoch = int(resume["epoch"])
         best_iou = float(resume["validation"]["iou"])
@@ -257,7 +326,7 @@ def main() -> int:
             best_iou = validation["iou"]
             torch.save(
                 {
-                    "schema": "spec102-m0-checkpoint-v1",
+                    "schema": "spec102-m0-checkpoint-v2",
                     "model": model.state_dict(),
                     "config": {
                         "base_channels": 40,
@@ -268,6 +337,9 @@ def main() -> int:
                         "single_output": True,
                     },
                     "input_manifest": input_manifest,
+                    "m0_training_scope": scope.audit_binding,
+                    "m0_artifact_binding": artifact_binding,
+                    "code_revision": code_revision,
                     "epoch": epoch,
                     "validation": validation,
                 },
@@ -276,10 +348,39 @@ def main() -> int:
 
     checkpoint = torch.load(args.output_dir / "checkpoint_best.pt", map_location=device, weights_only=False)
     model.load_state_dict(checkpoint["model"])
-    test_metrics = evaluate(model, loaders["test_era"], device)
+    test_metrics = evaluate(model, loaders["test_build_local"], device)
+    write_validation_grid(
+        args.output_dir / "validation" / "best_test_build_local.png",
+        model,
+        datasets["test_build_local"],
+        device,
+        metadata_by_row=metadata_by_row,
+        epoch=int(checkpoint["epoch"]),
+        split="test_build_local",
+        checkpoint_label="best_checkpoint",
+    )
     gate_passed = best_iou >= 0.25 and test_metrics["iou"] >= 0.10
+    extension_authorized = (
+        args.epochs == 3
+        and not gate_passed
+        and len(history) == 3
+        and all(np.isfinite(record["train_loss"]) and np.isfinite(record["validation"]["iou"]) for record in history)
+        and history[-1]["validation"]["iou"] > history[0]["validation"]["iou"]
+        and test_metrics["iou"] > 0.0
+    )
     report = {
-        "schema": "spec102-m0-training-report-v1",
+        "schema": "spec102-m0-training-report-v3",
+        "gate_scope": "build_local_3_3_5_only",
+        "cross_era_evaluated": False,
+        "m0_training_scope": scope.audit_binding,
+        "m0_artifact_binding": artifact_binding,
+        "signal_audit_report": str(args.signal_audit_report.resolve()),
+        "signal_audit_fingerprint": audit_report["scoped_signal_fingerprint"],
+        "coverage_report": str(args.coverage_report.resolve()),
+        "coverage_report_sha256": artifact_binding["coverage_report_sha256"],
+        "coverage_raw_v18_store": str(args.raw_v18_store.resolve()),
+        "command": list(sys.argv),
+        "code_revision": code_revision,
         "parameter_count": parameter_count,
         "target": target_name,
         "target_positive_prevalence": positive_prevalence,
@@ -288,10 +389,12 @@ def main() -> int:
         "resume_checkpoint": str(args.resume_checkpoint.resolve()) if args.resume_checkpoint else None,
         "history": history,
         "best_validation_iou": best_iou,
-        "test_era": test_metrics,
+        "test_build_local": test_metrics,
         "zero_mask_baseline_iou": 0.0,
-        "gate_requirements": {"validation_iou_min": 0.25, "test_era_iou_min": 0.10},
+        "gate_requirements": {"validation_iou_min": 0.25, "test_build_local_iou_min": 0.10},
         "gate_passed": gate_passed,
+        "extension_authorized": extension_authorized,
+        "best_checkpoint": str((args.output_dir / "checkpoint_best.pt").resolve()),
         "peak_vram_gb": torch.cuda.max_memory_allocated() / (1024**3),
         "wall_seconds": time.perf_counter() - started,
     }

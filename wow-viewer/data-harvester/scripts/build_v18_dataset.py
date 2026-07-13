@@ -51,6 +51,27 @@ import zarr
 import zarr.codecs
 import zarr.storage
 
+from harvester.spec102.strict_target_contract import (
+    REQUIRED_STRICT_OBJECT_TARGET_VERSION,
+    STRICT_FRAGMENT_COUNT_FIELD,
+    STRICT_FRAGMENT_SHA256_FIELD,
+    STRICT_FRAGMENT_TRACE_ARRAYS_PRESENT_FIELD,
+    STRICT_FRAGMENT_TRACE_ARRAY_NAMES,
+    STRICT_FRAGMENT_TRACE_SCHEMA_FIELD,
+    STRICT_FRAGMENT_TRACE_SIDECAR_DIRECTORY,
+    STRICT_FRAGMENT_TRACE_SIDECAR_END_FIELD,
+    STRICT_FRAGMENT_TRACE_SIDECAR_START_FIELD,
+    STRICT_FRAGMENT_TRACE_VALIDATED_FIELD,
+    STRICT_OBJECT_TARGET_VERSION_FIELD,
+    STRICT_TARGET_ASSETS_FIELD,
+    STRICT_TARGET_UNRESOLVED_PLACEMENTS_FIELD,
+    StrictFragmentTrace,
+    StrictFragmentTraceError,
+    StrictFragmentTraceSidecar,
+    validate_fragment_trace_sidecar,
+    validate_materialized_strict_fragment_trace,
+)
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _HARVEST_TOOL_DIR = _PROJECT_ROOT / "tools" / "harvest" / "WowViewer.Tool.Harvest" / "bin" / "Debug" / "net10.0"
 _VALIDATION_CAPTURE_TOOL_DIR = _PROJECT_ROOT / "tools" / "validation-capture" / "WowViewer.Tool.ValidationCapture" / "bin" / "Debug" / "net10.0"
@@ -73,6 +94,10 @@ V18_STREAMED_ARRAY_NAMES = {
     "liquid_height",
     "object_mask",
     "object_precise_mask",
+    "object_geometry_visible_mask",
+    "object_geometry_visible_top_elevation",
+    "object_geometry_visible_terrain_elevation",
+    "object_geometry_visible_source",
     "object_instance_mask",
     "mcnk_flags_16",
     "mddf_mask",
@@ -108,6 +133,7 @@ V18_REQUIRED_ARTIFACTS = (
     "harvest_metrics.json",
     "signal_validation.json",
     "decoded_metadata_validation.json",
+    STRICT_FRAGMENT_TRACE_SIDECAR_DIRECTORY,
     "_resume_state.json",
 )
 
@@ -126,6 +152,10 @@ OUTPUT_ARRAY_NAMES = {
     "unified_liquid_height": "liquid_height",
     "object_mask_257": "object_mask",
     "object_precise_mask_257": "object_precise_mask",
+    "object_geometry_visible_mask_257": "object_geometry_visible_mask",
+    "object_geometry_visible_top_elevation_257": "object_geometry_visible_top_elevation",
+    "object_geometry_visible_terrain_elevation_257": "object_geometry_visible_terrain_elevation",
+    "object_geometry_visible_source_257": "object_geometry_visible_source",
     "object_instance_mask_257": "object_instance_mask",
     "mcnk_flags_16": "mcnk_flags_16",
     "mddf_mask_257": "mddf_mask",
@@ -143,6 +173,9 @@ DTYPES = {
     "height_257": np.float32, "normal_xyz": np.float32, "normal_mask": np.bool_,
     "alpha_256": np.float32, "holes_16": np.bool_, "liquid_mask": np.float32,
     "liquid_height": np.float32, "object_mask": np.bool_, "object_precise_mask": np.float32,
+    "object_geometry_visible_mask": np.float32, "object_geometry_visible_top_elevation": np.float32,
+    "object_geometry_visible_terrain_elevation": np.float32,
+    "object_geometry_visible_source": np.uint8,
     "object_instance_mask": np.int32, "mcnk_flags_16": np.int32,
     "mddf_mask": np.float32, "modf_mask": np.float32, "object_filtered_mask": np.float32,
     "object_roof_mask": np.float32, "object_roof_confidence": np.float32,
@@ -154,6 +187,9 @@ FILL_VALUES = {
     "height_257": 0.0, "normal_xyz": 0.0, "normal_mask": False,
     "alpha_256": 0.0, "holes_16": False, "liquid_mask": 0.0,
     "liquid_height": 0.0, "object_mask": False, "object_precise_mask": 0.0,
+    "object_geometry_visible_mask": 0.0, "object_geometry_visible_top_elevation": 0.0,
+    "object_geometry_visible_terrain_elevation": 0.0,
+    "object_geometry_visible_source": 0,
     "object_instance_mask": 0, "mcnk_flags_16": 0,
     "mddf_mask": 0.0, "modf_mask": 0.0, "object_filtered_mask": 0.0,
     "object_roof_mask": 0.0, "object_roof_confidence": 0.0,
@@ -165,6 +201,9 @@ SHAPES = {
     "height_257": (257, 257), "normal_xyz": (257, 257, 3), "normal_mask": (257, 257),
     "alpha_256": (256, 256, 4), "holes_16": (16, 16), "liquid_mask": (256, 256),
     "liquid_height": (256, 256), "object_mask": (257, 257), "object_precise_mask": (257, 257),
+    "object_geometry_visible_mask": (257, 257), "object_geometry_visible_top_elevation": (257, 257),
+    "object_geometry_visible_terrain_elevation": (257, 257),
+    "object_geometry_visible_source": (257, 257),
     "object_instance_mask": (257, 257), "mcnk_flags_16": (16, 16),
     "mddf_mask": (257, 257), "modf_mask": (257, 257), "object_filtered_mask": (257, 257),
     "object_roof_mask": (256, 256), "object_roof_confidence": (256, 256),
@@ -177,7 +216,10 @@ CHUNK_SIZES = {
     "normal_mask": (256, 257, 257), "alpha_256": (64, 256, 256, 4),
     "holes_16": (1024, 16, 16), "liquid_mask": (64, 256, 256),
     "liquid_height": (64, 256, 256), "object_mask": (256, 257, 257),
-    "object_precise_mask": (256, 257, 257), "object_instance_mask": (256, 257, 257),
+    "object_precise_mask": (256, 257, 257), "object_geometry_visible_mask": (256, 257, 257),
+    "object_geometry_visible_top_elevation": (64, 257, 257), "object_geometry_visible_terrain_elevation": (64, 257, 257),
+    "object_geometry_visible_source": (256, 257, 257),
+    "object_instance_mask": (256, 257, 257),
     "mcnk_flags_16": (256, 16, 16),
     "mddf_mask": (256, 257, 257), "modf_mask": (256, 257, 257),
     "object_filtered_mask": (256, 257, 257),
@@ -305,6 +347,47 @@ ALL_ARRAY_KEYS = list(V18_STREAMED_ARRAY_NAMES)
 
 LIQUID_SOURCE_KEYS = ("mcnk", "mh2o", "mclq", "unified", "wl")
 OBJECT_SIGNAL_KEYS = ("object_mask", "object_precise_mask", "object_instance_mask")
+STRICT_OBJECT_TARGET_COMPLETE_STATUSES = {"CompleteEmpty", "CompleteVisible"}
+
+V18_INDEX_STRING_FIELDS = (
+    "object_roof_mask_source",
+    STRICT_OBJECT_TARGET_VERSION_FIELD,
+    "object_geometry_target_status",
+    "object_geometry_target_liquid_evidence_status",
+    STRICT_FRAGMENT_TRACE_SCHEMA_FIELD,
+    STRICT_FRAGMENT_SHA256_FIELD,
+    "object_geometry_target_assets_json",
+    "object_geometry_target_unresolved_placements_json",
+)
+V18_INDEX_BOOL_FIELDS = (
+    "object_geometry_target_materialized",
+    "object_geometry_target_arrays_present",
+    STRICT_FRAGMENT_TRACE_ARRAYS_PRESENT_FIELD,
+    STRICT_FRAGMENT_TRACE_VALIDATED_FIELD,
+)
+V18_INDEX_INT_FIELDS = (
+    "n_mddf",
+    "n_modf",
+    "object_geometry_target_placement_count",
+    "object_geometry_target_geometry_resolved_placement_count",
+    "object_geometry_target_geometry_unresolved_placement_count",
+    "object_geometry_target_fallback_required_placement_count",
+    "object_geometry_target_triangle_count",
+    "object_geometry_target_visible_pixel_count",
+    "object_geometry_target_occluded_pixel_count",
+    "object_geometry_target_terrain_unknown_pixel_count",
+    "object_geometry_target_liquid_covered_pixel_count",
+    "object_geometry_target_liquid_surface_unknown_pixel_count",
+    "object_geometry_target_liquid_covered_fragment_count",
+    "object_geometry_target_liquid_hidden_fragment_count",
+    "object_geometry_target_liquid_above_surface_fragment_count",
+    "object_geometry_target_liquid_unknown_fragment_count",
+    STRICT_FRAGMENT_COUNT_FIELD,
+)
+V18_INDEX_INT64_FIELDS = (
+    STRICT_FRAGMENT_TRACE_SIDECAR_START_FIELD,
+    STRICT_FRAGMENT_TRACE_SIDECAR_END_FIELD,
+)
 
 # Integration keys: derive has_* flags for these signals in the Parquet index.
 # Include all fixed-shape arrays plus explicit liquid-source provenance flags.
@@ -1057,6 +1140,121 @@ def _extract_metadata(data: dict[str, np.ndarray]) -> dict:
         return {}
 
 
+def _extract_strict_object_target_provenance(
+    data: dict[str, np.ndarray],
+    metadata: dict,
+) -> tuple[dict[str, object], StrictFragmentTrace | None]:
+    """Keep explicit strict-target status; never infer it from mask pixels."""
+    status = str(metadata.get("object_geometry_target_status", "") or "")
+    declared_materialized = metadata.get("object_geometry_target_materialized") is True
+    required_arrays = (
+        "object_geometry_visible_mask_257",
+        "object_geometry_visible_top_elevation_257",
+        "object_geometry_visible_terrain_elevation_257",
+        "object_geometry_visible_source_257",
+    )
+    arrays_present = all(name in data for name in required_arrays)
+    materialized = (
+        declared_materialized
+        and status in STRICT_OBJECT_TARGET_COMPLETE_STATUSES
+        and arrays_present
+    )
+
+    def as_int(name: str) -> int:
+        try:
+            return int(metadata.get(name, 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    provenance: dict[str, object] = {
+        STRICT_OBJECT_TARGET_VERSION_FIELD: str(
+            metadata.get(STRICT_OBJECT_TARGET_VERSION_FIELD, "") or "missing"
+        ),
+        "object_geometry_target_status": status or "missing",
+        "object_geometry_target_materialized": materialized,
+        "object_geometry_target_arrays_present": arrays_present,
+        "object_geometry_target_liquid_evidence_status": str(
+            metadata.get("object_geometry_target_liquid_evidence_status", "") or "missing"
+        ),
+        "object_geometry_target_liquid_covered_pixel_count": as_int(
+            "object_geometry_target_liquid_covered_pixel_count"
+        ),
+        "object_geometry_target_liquid_surface_unknown_pixel_count": as_int(
+            "object_geometry_target_liquid_surface_unknown_pixel_count"
+        ),
+        "object_geometry_target_liquid_covered_fragment_count": as_int(
+            "object_geometry_target_liquid_covered_fragment_count"
+        ),
+        "object_geometry_target_liquid_hidden_fragment_count": as_int(
+            "object_geometry_target_liquid_hidden_fragment_count"
+        ),
+        "object_geometry_target_liquid_above_surface_fragment_count": as_int(
+            "object_geometry_target_liquid_above_surface_fragment_count"
+        ),
+        "object_geometry_target_liquid_unknown_fragment_count": as_int(
+            "object_geometry_target_liquid_unknown_fragment_count"
+        ),
+        "object_geometry_target_placement_count": as_int("object_geometry_target_placement_count"),
+        "object_geometry_target_geometry_resolved_placement_count": as_int(
+            "object_geometry_target_geometry_resolved_placement_count"
+        ),
+        "object_geometry_target_geometry_unresolved_placement_count": as_int(
+            "object_geometry_target_geometry_unresolved_placement_count"
+        ),
+        "object_geometry_target_fallback_required_placement_count": as_int(
+            "object_geometry_target_fallback_required_placement_count"
+        ),
+        "object_geometry_target_triangle_count": as_int("object_geometry_target_triangle_count"),
+        "object_geometry_target_visible_pixel_count": as_int(
+            "object_geometry_target_visible_pixel_count"
+        ),
+        "object_geometry_target_occluded_pixel_count": as_int(
+            "object_geometry_target_occluded_pixel_count"
+        ),
+        "object_geometry_target_terrain_unknown_pixel_count": as_int(
+            "object_geometry_target_terrain_unknown_pixel_count"
+        ),
+    }
+    trace: StrictFragmentTrace | None = None
+    if materialized:
+        try:
+            trace = validate_materialized_strict_fragment_trace(data, metadata, status=status)
+        except StrictFragmentTraceError as error:
+            raise RuntimeError(f"materialized strict target has invalid v3 fragment trace: {error}") from error
+        provenance.update(
+            {
+                STRICT_FRAGMENT_TRACE_SCHEMA_FIELD: REQUIRED_STRICT_OBJECT_TARGET_VERSION,
+                STRICT_FRAGMENT_COUNT_FIELD: trace.count,
+                STRICT_FRAGMENT_SHA256_FIELD: trace.sha256,
+                "object_geometry_target_assets_json": trace.assets_json,
+                "object_geometry_target_unresolved_placements_json": trace.unresolved_placements_json,
+                STRICT_FRAGMENT_TRACE_ARRAYS_PRESENT_FIELD: True,
+                STRICT_FRAGMENT_TRACE_VALIDATED_FIELD: True,
+                STRICT_FRAGMENT_TRACE_SIDECAR_START_FIELD: -1,
+                STRICT_FRAGMENT_TRACE_SIDECAR_END_FIELD: -1,
+            }
+        )
+    else:
+        provenance.update(
+            {
+                STRICT_FRAGMENT_TRACE_SCHEMA_FIELD: str(
+                    metadata.get(STRICT_FRAGMENT_TRACE_SCHEMA_FIELD, "") or "missing"
+                ),
+                STRICT_FRAGMENT_COUNT_FIELD: as_int(STRICT_FRAGMENT_COUNT_FIELD),
+                STRICT_FRAGMENT_SHA256_FIELD: str(
+                    metadata.get(STRICT_FRAGMENT_SHA256_FIELD, "") or "missing"
+                ),
+                "object_geometry_target_assets_json": "[]",
+                "object_geometry_target_unresolved_placements_json": "[]",
+                STRICT_FRAGMENT_TRACE_ARRAYS_PRESENT_FIELD: False,
+                STRICT_FRAGMENT_TRACE_VALIDATED_FIELD: False,
+                STRICT_FRAGMENT_TRACE_SIDECAR_START_FIELD: -1,
+                STRICT_FRAGMENT_TRACE_SIDECAR_END_FIELD: -1,
+            }
+        )
+    return provenance, trace
+
+
 def _try_parse_tile_coords_from_stem(stem: str) -> tuple[int | None, int | None]:
     parts = stem.rsplit("_", 2)
     if len(parts) < 3:
@@ -1258,6 +1456,10 @@ def _write_index(rows: list[dict], output_path: Path) -> None:
         pa.field("height_mean", pa.float32()),
         pa.field("height_std", pa.float32()),
     ]
+    schema_fields.extend(pa.field(name, pa.string()) for name in V18_INDEX_STRING_FIELDS)
+    schema_fields.extend(pa.field(name, pa.bool_()) for name in V18_INDEX_BOOL_FIELDS)
+    schema_fields.extend(pa.field(name, pa.int32()) for name in V18_INDEX_INT_FIELDS)
+    schema_fields.extend(pa.field(name, pa.int64()) for name in V18_INDEX_INT64_FIELDS)
     bool_fields = sorted({
         k
         for row in rows
@@ -1271,7 +1473,16 @@ def _write_index(rows: list[dict], output_path: Path) -> None:
     col_data = {k: [] for k in schema.names}
     for row in rows:
         for k in schema.names:
-            col_data[k].append(row.get(k, False if k.startswith("has_") else 0))
+            if k.startswith("has_") or k in V18_INDEX_BOOL_FIELDS:
+                value = bool(row.get(k, False))
+            elif k in V18_INDEX_STRING_FIELDS:
+                value = str(row.get(k, "missing") or "missing")
+            elif k in V18_INDEX_INT64_FIELDS:
+                raw_value = row.get(k, -1)
+                value = -1 if raw_value is None else int(raw_value)
+            else:
+                value = row.get(k, 0)
+            col_data[k].append(value)
 
     table = pa.table(col_data, schema=schema)
     pq.write_table(table, str(output_path / "index.parquet"))
@@ -1351,6 +1562,34 @@ def _validate_build_signals(build: str, output_path: Path, strict: bool = True) 
 
     if tile_count <= 0:
         failures.append("index has zero rows")
+
+    strict_v3_rows = sum(
+        int(row.get(STRICT_OBJECT_TARGET_VERSION_FIELD) == REQUIRED_STRICT_OBJECT_TARGET_VERSION)
+        for row in index_rows
+    )
+    if strict_v3_rows != tile_count:
+        failures.append(
+            "strict target version coverage must be exact v3 for every V18 row "
+            f"({strict_v3_rows}/{tile_count})"
+        )
+    materialized_strict_rows = [
+        row for row in index_rows if row.get("object_geometry_target_materialized") is True
+    ]
+    strict_trace_sidecar_sha256: str | None = None
+    try:
+        strict_trace_sidecar_sha256 = validate_fragment_trace_sidecar(output_path, index_rows)
+    except StrictFragmentTraceError as error:
+        failures.append(f"strict fragment-trace sidecar invalid: {error}")
+    for row in materialized_strict_rows:
+        if row.get(STRICT_FRAGMENT_TRACE_VALIDATED_FIELD) is not True:
+            failures.append("materialized strict target lacks validated v3 fragment trace")
+            break
+        if row.get(STRICT_FRAGMENT_TRACE_ARRAYS_PRESENT_FIELD) is not True:
+            failures.append("materialized strict target lacks the nine v3 fragment-trace arrays")
+            break
+        if row.get(STRICT_FRAGMENT_TRACE_SCHEMA_FIELD) != REQUIRED_STRICT_OBJECT_TARGET_VERSION:
+            failures.append("materialized strict target trace metadata schema is not exact C# v3")
+            break
 
     missing_cols = sorted(set(expected_has_cols) - set(present_cols))
     if missing_cols:
@@ -1469,6 +1708,17 @@ def _validate_build_signals(build: str, output_path: Path, strict: bool = True) 
         "passed": len(failures) == 0,
         "failures": failures,
         "warnings": warnings_list,
+        "strict_fragment_trace": {
+            "target_version": REQUIRED_STRICT_OBJECT_TARGET_VERSION,
+            "sidecar": STRICT_FRAGMENT_TRACE_SIDECAR_DIRECTORY,
+            "sidecar_sha256": strict_trace_sidecar_sha256,
+            "materialized_rows": len(materialized_strict_rows),
+            "validated_materialized_rows": sum(
+                int(row.get(STRICT_FRAGMENT_TRACE_VALIDATED_FIELD) is True)
+                for row in materialized_strict_rows
+            ),
+            "array_names": list(STRICT_FRAGMENT_TRACE_ARRAY_NAMES),
+        },
         "signal_coverage": {
             key: {
                 "count": int(coverage.get(key, 0)),
@@ -2622,6 +2872,12 @@ def _build_zarr_streaming(
                 compressors=compressors, fill_value=FILL_VALUES.get(key, 0),
             )
 
+    trace_sidecar = StrictFragmentTraceSidecar.open(
+        output_path,
+        tile_capacity=capacity,
+        resume_tile_count=valid,
+    )
+
     for map_name in map_names:
         if map_name in completed_maps:
             print(f"\n  Skipping completed map: {map_name}")
@@ -2759,6 +3015,15 @@ def _build_zarr_streaming(
                 "n_mddf": len(mddf_rows), "n_modf": len(modf_rows),
                 "object_roof_mask_source": str(meta.get("object_roof_mask_source", "") if isinstance(meta, dict) else ""),
             }
+            strict_provenance, strict_trace = _extract_strict_object_target_provenance(
+                data,
+                meta if isinstance(meta, dict) else {},
+            )
+            row.update(strict_provenance)
+            trace_start, trace_end = trace_sidecar.append(tile_id, strict_trace)
+            if strict_trace is not None:
+                row[STRICT_FRAGMENT_TRACE_SIDECAR_START_FIELD] = trace_start
+                row[STRICT_FRAGMENT_TRACE_SIDECAR_END_FIELD] = trace_end
             for key in SIGNAL_FLAG_KEYS:
                 row[f"has_{key}"] = bool(has_signals.get(key, False))
             index_rows.append(row)
@@ -2787,6 +3052,7 @@ def _build_zarr_streaming(
                 capacity += 50000
                 for key in ALL_ARRAY_KEYS:
                     arrays[key].resize((capacity,) + SHAPES[key])
+                trace_sidecar.ensure_tile_capacity(capacity)
 
             for key in ALL_ARRAY_KEYS:
                 pending_arrays[key].append(tile_arrays[key])
@@ -2933,6 +3199,8 @@ def _build_zarr_streaming(
     if decoded_metadata_rows:
         _write_decoded_metadata(decoded_metadata_rows, output_path)
 
+    trace_sidecar.finalize(valid)
+    trace_sidecar.close()
     store.close()
     _write_resume_state(
         output_path,

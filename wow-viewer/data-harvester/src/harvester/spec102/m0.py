@@ -1,4 +1,4 @@
-"""M0: raw minimap RGB -> one object-visibility mask signal."""
+"""M0: raw minimap RGB -> one strict terrain-visible object-mask signal."""
 
 from __future__ import annotations
 
@@ -6,22 +6,31 @@ import numpy as np
 import torch
 from scipy.ndimage import distance_transform_edt
 from torch import nn
-from torch.nn import functional as F
+from torch.nn import functional as F  # noqa: N812
+
+STRICT_OBJECT_TARGET_KEY = "object_geometry_visible_mask_257"
+
+# Compatibility alias for the active Spec 102 modules. It deliberately points
+# at the new strict target, never at the historical object_precise_mask_257
+# array whose fallback provenance cannot be recovered.
+PRECISE_MASK_KEY = STRICT_OBJECT_TARGET_KEY
 
 
-PRECISE_MASK_KEY = "object_precise_mask_257"
-
-
-def precise_object_target_256(precise_mask_257: np.ndarray) -> np.ndarray:
-    """Project the canonical precise 257x257 footprint onto minimap cells."""
-    precise = np.asarray(precise_mask_257, dtype=np.float32)
+def strict_object_target_256(strict_mask_257: np.ndarray) -> np.ndarray:
+    """Project the strict 257x257 terrain-visible footprint onto minimap cells."""
+    precise = np.asarray(strict_mask_257, dtype=np.float32)
     if precise.shape != (257, 257):
-        raise ValueError(f"{PRECISE_MASK_KEY} must be [257,257], got {precise.shape}")
+        raise ValueError(f"{STRICT_OBJECT_TARGET_KEY} must be [257,257], got {precise.shape}")
     corners = np.stack(
         [precise[:-1, :-1], precise[1:, :-1], precise[:-1, 1:], precise[1:, 1:]],
         axis=0,
     )
     return corners.max(axis=0)
+
+
+def precise_object_target_256(precise_mask_257: np.ndarray) -> np.ndarray:
+    """Backward-compatible spelling for the strict Spec 102 target projection."""
+    return strict_object_target_256(precise_mask_257)
 
 
 class ConvBlock(nn.Module):

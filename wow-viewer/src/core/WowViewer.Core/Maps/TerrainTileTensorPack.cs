@@ -144,14 +144,16 @@ public sealed class TerrainTileTensorPack
     public float[,]? WlLiquidHeight { get; set; }
 
     /// <summary>
-    /// 257×257 unified liquid mask combining MCNK, MCLQ, MH2O, and WL* sources.
-    /// Priority: MCNK > MCLQ > MH2O > WL*. 1.0 where any liquid source indicates water.
+    /// 257×257 unified liquid mask from decoded MH2O, MCLQ, or WL* sources.
+    /// MCNK flags are metadata only and never invent liquid coverage. Source
+    /// precedence is MH2O, then MCLQ, then WL*; 1.0 marks decoded water.
     /// </summary>
     public float[,]? UnifiedLiquidMask { get; set; }
 
     /// <summary>
-    /// 257×257 unified liquid surface height combining MCNK, MCLQ, MH2O, and WL* sources.
-    /// Priority: MCNK > MCLQ > MH2O > WL*.
+    /// 257×257 unified liquid surface height from decoded MH2O, MCLQ, or WL*
+    /// sources. MCNK flags never supply a surface height; precedence matches
+    /// <see cref="UnifiedLiquidMask"/>.
     /// </summary>
     public float[,]? UnifiedLiquidHeight { get; set; }
 
@@ -173,6 +175,63 @@ public sealed class TerrainTileTensorPack
 
     /// <summary>257×257 anti-aliased object silhouette.</summary>
     public float[,]? ObjectPreciseMask257 { get; init; }
+
+    /// <summary>
+    /// 257×257 strict training target: transformed M2/WMO geometry fragments
+    /// only, retained per raster sample only when above raw MCVT terrain Z.
+    /// This is deliberately distinct from historical approximate mask fields.
+    /// </summary>
+    public float[,]? ObjectGeometryVisibleMask257 { get; init; }
+
+    /// <summary>
+    /// 257×257 world elevation of the highest strict geometry fragment at each
+    /// positive <see cref="ObjectGeometryVisibleMask257"/> pixel. Diagnostic
+    /// provenance only; never a model input.
+    /// </summary>
+    public float[,]? ObjectGeometryVisibleTopElevation257 { get; init; }
+
+    /// <summary>
+    /// 257×257 raw-MCVT terrain elevation sampled at the same raster fragment
+    /// as <see cref="ObjectGeometryVisibleTopElevation257"/>. Diagnostic
+    /// provenance only; never a model input.
+    /// </summary>
+    public float[,]? ObjectGeometryVisibleTerrainElevation257 { get; init; }
+
+    /// <summary>
+    /// 257×257 source tag for strict geometry pixels: 0 none, 1 M2 triangle,
+    /// 2 WMO triangle. Diagnostic provenance only; never a model input.
+    /// </summary>
+    public byte[,]? ObjectGeometryVisibleSource257 { get; init; }
+
+    /// <summary>
+    /// Per-tile completeness/provenance for the strict geometry target. Only
+    /// complete-empty and complete-visible status may supervise M0.
+    /// </summary>
+    public ObjectGeometryTargetProvenance? ObjectGeometryTargetProvenance { get; init; }
+
+    /// <summary>
+    /// Asset table for <see cref="ObjectGeometryFragmentTrace"/>. This retains
+    /// the exact normalized M2/WMO path referenced by each strict fragment;
+    /// it is audit metadata only and never a model input.
+    /// </summary>
+    public IReadOnlyList<ObjectGeometryTargetAsset> ObjectGeometryTargetAssets { get; init; }
+        = Array.Empty<ObjectGeometryTargetAsset>();
+
+    /// <summary>
+    /// Explicit placement/asset failures for a nonmaterialized strict target.
+    /// These records are audit facts only and make incomplete geometry visible
+    /// rather than silently converting it into an empty mask.
+    /// </summary>
+    public IReadOnlyList<ObjectGeometryTargetUnresolvedPlacement> ObjectGeometryTargetUnresolvedPlacements { get; init; }
+        = Array.Empty<ObjectGeometryTargetUnresolvedPlacement>();
+
+    /// <summary>
+    /// Lossless uncollapsed triangle/raster-fragment evidence for the strict
+    /// geometry target. The union mask remains the M0 label; this sidecar
+    /// preserves transformed object XYZ, source identity, raw-MCVT
+    /// interpolation, liquid state, and classification for audit.
+    /// </summary>
+    public ObjectGeometryFragmentTrace? ObjectGeometryFragmentTrace { get; init; }
 
     /// <summary>
     /// 257×257 per-instance object label mask.

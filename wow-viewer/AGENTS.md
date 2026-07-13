@@ -26,6 +26,7 @@ Short file. Current truth only. Root `../AGENTS.md` still wins on workspace poli
 
 ## Hard rules
 
+- The user runs training, GPU jobs, harvests, and any long/heavy/billed run. Prepare the script and hand over the exact `uv run ...` command — do NOT launch it yourself. Communicate directly and respectfully regardless of tone. See root `../AGENTS.md` RULE 0.
 - New code stays in `wow-viewer/`.
 - Staged clients only: `output/tmp/wowarchive-clients/`.
 - No new parser clones when shared `Core` or `Core.IO` surface already exists.

@@ -1,4 +1,4 @@
-"""Render inspection-only raw/liquid/precise panels from a curated split."""
+"""Render inspection-only raw/liquid/strict-geometry panels from a curated split."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import numpy as np
 import zarr
 from PIL import Image, ImageDraw
 
-from harvester.spec102.m0 import PRECISE_MASK_KEY, precise_object_target_256
+from harvester.spec102.m0 import STRICT_OBJECT_TARGET_KEY, strict_object_target_256
 
 
 def main() -> int:
@@ -36,10 +36,10 @@ def main() -> int:
         row = int(metadata["row"])
         rgb = np.asarray(group["minimap_rgb"][row], dtype=np.uint8)
         liquid = np.asarray(group["liquid_mask_256"][row], dtype=np.uint8)
-        precise = precise_object_target_256(np.asarray(group[PRECISE_MASK_KEY][row]))
+        strict = strict_object_target_256(np.asarray(group[STRICT_OBJECT_TARGET_KEY][row]))
         canvas.paste(Image.fromarray(rgb, "RGB"), (0, index * 256))
         canvas.paste(Image.fromarray(liquid, "L").convert("RGB"), (256, index * 256))
-        canvas.paste(Image.fromarray(np.clip(precise * 255.0, 0, 255).astype(np.uint8), "L").convert("RGB"), (512, index * 256))
+        canvas.paste(Image.fromarray(np.clip(strict * 255.0, 0, 255).astype(np.uint8), "L").convert("RGB"), (512, index * 256))
         draw.text((4, index * 256 + 4), f"row {row} {metadata['tile_x']},{metadata['tile_y']}", fill=(255, 255, 0))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(args.output)

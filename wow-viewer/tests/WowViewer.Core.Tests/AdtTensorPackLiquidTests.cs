@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Reflection;
 using WowViewer.Core.Chunks;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
@@ -75,6 +76,106 @@ public sealed class AdtTensorPackLiquidTests
             if (Directory.Exists(tempDir))
                 Directory.Delete(tempDir, recursive: true);
         }
+    }
+
+    [Fact]
+    public void BuildUnifiedLiquid_UsesPerPixelMh2oMclqWlPrecedence()
+    {
+        float[,] mh2oHeight = new float[257, 257];
+        bool[,] mh2oPresence = new bool[257, 257];
+        mh2oHeight[0, 0] = 30f;
+        mh2oPresence[0, 0] = true;
+
+        float[,] mclqHeight = new float[129, 129];
+        bool[,] mclqPresence = new bool[129, 129];
+        for (int y = 0; y < 129; y++)
+            for (int x = 0; x < 129; x++)
+                mclqHeight[y, x] = 20f;
+        mclqPresence[0, 0] = true;
+
+        float[,] wlMask = new float[257, 257];
+        float[,] wlHeight = new float[257, 257];
+        wlMask[0, 0] = 1f;
+        wlHeight[0, 0] = 10f;
+        wlMask[200, 200] = 1f;
+        wlHeight[200, 200] = 10f;
+
+        HashSet<string> signals = new(StringComparer.OrdinalIgnoreCase);
+        (float[,]? mask, float[,]? height) = InvokeBuildUnifiedLiquid(
+            mh2oHeight,
+            mh2oPresence,
+            mclqHeight,
+            mclqPresence,
+            wlMask,
+            wlHeight,
+            signals);
+
+        Assert.NotNull(mask);
+        Assert.NotNull(height);
+        Assert.Equal(30f, height![0, 0]); // MH2O wins over MCLQ and WL*.
+        Assert.Equal(20f, height[1, 1]); // MCLQ remains where MH2O is absent.
+        Assert.Equal(10f, height[200, 200]); // WL* remains where neither higher source covers.
+        Assert.Equal(1f, mask![0, 0]);
+        Assert.Equal(1f, mask[1, 1]);
+        Assert.Equal(1f, mask[200, 200]);
+        Assert.Contains("unified_liquid_mask", signals);
+        Assert.Contains("unified_liquid_height", signals);
+    }
+
+    [Fact]
+    public void Build_WlReadFailureMakesStrictLiquidEvidenceUnknown()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"wowviewer_liquid_wl_failure_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            string rootPath = Path.Combine(tempDir, "Test_0_0.adt");
+            File.WriteAllBytes(rootPath,
+            [
+                .. CreateChunk("MVER", CreateUInt32Payload(18)),
+                .. CreateChunk("MHDR", new byte[64]),
+                .. CreateChunk("MCNK", CreateRootMcnkPayload(0, 0)),
+            ]);
+            File.WriteAllBytes(Path.Combine(tempDir, "broken.wlw"), [0, 0, 0, 0]);
+
+            TerrainTileTensorPack pack = AdtTensorPackBuilder.Build(rootPath, buildVersion: "3.3.5.12340");
+
+            ObjectGeometryTargetProvenance provenance = Assert.IsType<ObjectGeometryTargetProvenance>(pack.ObjectGeometryTargetProvenance);
+            Assert.Equal(ObjectGeometryTargetStatus.LiquidVisibilityUnknown, provenance.Status);
+            Assert.Equal(ObjectGeometryLiquidEvidenceStatus.Unknown, provenance.LiquidEvidenceStatus);
+            Assert.False(provenance.IsMaterialized);
+            Assert.Null(pack.ObjectGeometryVisibleMask257);
+            Assert.Null(pack.ObjectGeometryVisibleTopElevation257);
+            Assert.Null(pack.ObjectGeometryVisibleTerrainElevation257);
+            Assert.Null(pack.ObjectGeometryVisibleSource257);
+            Assert.Null(pack.WlLiquidMask);
+            Assert.Null(pack.WlLiquidHeight);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    private static (float[,]? mask, float[,]? height) InvokeBuildUnifiedLiquid(
+        float[,]? mh2oHeight,
+        bool[,]? mh2oPresence,
+        float[,]? mclqHeight,
+        bool[,]? mclqPresence,
+        float[,]? wlMask,
+        float[,]? wlHeight,
+        HashSet<string> signals)
+    {
+        MethodInfo? method = typeof(AdtTensorPackBuilder).GetMethod(
+            "BuildUnifiedLiquid",
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        object result = Assert.IsType<ValueTuple<float[,]?, float[,]?>>(method!.Invoke(
+            null,
+            [mh2oHeight, mh2oPresence, mclqHeight, mclqPresence, wlMask, wlHeight, signals]));
+        return (ValueTuple<float[,]?, float[,]?>)result;
     }
 
     private static byte[] CreateMh2oPayloadWithZeroHeights()

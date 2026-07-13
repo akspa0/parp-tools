@@ -4,11 +4,11 @@ import numpy as np
 import torch
 
 from harvester.spec102.m0 import (
-    PRECISE_MASK_KEY,
+    STRICT_OBJECT_TARGET_KEY,
     M0ObjectMask,
     clean_minimap_with_mask,
-    precise_object_target_256,
     segmentation_loss,
+    strict_object_target_256,
 )
 from harvester.spec102.m0_validation import M0ValidationSample, render_m0_validation_panel
 
@@ -45,18 +45,18 @@ def test_cleaner_is_identity_without_mask_and_deterministic_with_mask() -> None:
     assert not np.array_equal(first[mask], rgb[mask])
 
 
-def test_precise_mask_projection_uses_all_four_257_grid_corners() -> None:
-    precise = np.zeros((257, 257), dtype=np.float32)
-    precise[1, 1] = 0.75
-    projected = precise_object_target_256(precise)
+def test_strict_target_projection_uses_all_four_257_grid_corners() -> None:
+    strict = np.zeros((257, 257), dtype=np.float32)
+    strict[1, 1] = 0.75
+    projected = strict_object_target_256(strict)
     assert projected.shape == (256, 256)
     assert np.array_equal(projected[:2, :2], np.full((2, 2), 0.75, dtype=np.float32))
     assert projected[2:, 2:].max() == 0.0
 
 
-def test_precise_mask_projection_rejects_reduced_mask() -> None:
-    with np.testing.assert_raises_regex(ValueError, PRECISE_MASK_KEY):
-        precise_object_target_256(np.zeros((256, 256), dtype=np.float32))
+def test_strict_target_projection_rejects_reduced_mask() -> None:
+    with np.testing.assert_raises_regex(ValueError, STRICT_OBJECT_TARGET_KEY):
+        strict_object_target_256(np.zeros((256, 256), dtype=np.float32))
 
 
 def test_validation_panel_embeds_legend_metadata_and_agreement_column() -> None:
