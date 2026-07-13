@@ -14,12 +14,17 @@ Short file. Current truth only. Root `../AGENTS.md` still wins on workspace poli
 
 ## Current active lanes
 
-- Spec 089 `089-dav2-height-predictor` — active model lane.
-- Spec 088 `088-v22-enrichment-from-v18` — active dataset contract feeding 089.
+- Spec 102 `102-v25-terrain-convergence` — active model lane. Current path is the
+  simple M0 (RGB minimap → object mask) on the existing precise-mask store; the
+  strict fragment-trace target is committed but parked. See memory-bank.
 - Spec 080 `080-wow-ui-consolidation` — active viewer-shell doc and compatibility lane.
 
-## Background lanes still relevant
+## Background / historical lanes
 
+- Spec 089 `089-dav2-height-predictor` — HISTORICAL/PAUSED. DA-family (Depth
+  Anything) models are blacklisted for terrain work (non-deterministic). Do not
+  reopen without an explicit instruction.
+- Spec 088 `088-v22-enrichment-from-v18` — historical dataset contract; superseded by 102.
 - Spec 047 `047-v18-distill-corpus-open-source-loop` — focused V18 operator path.
 - Spec 079 `079-runpod-integration-guide` — shared remote bundle/runtime pattern.
 - Spec 076 and Spec 077 — paused/background; reuse only when explicitly reopened.
