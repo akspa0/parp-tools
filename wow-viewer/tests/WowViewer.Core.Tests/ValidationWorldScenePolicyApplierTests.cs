@@ -112,6 +112,33 @@ public sealed class ValidationWorldScenePolicyApplierTests
         Assert.False(state.ShowDoodads);
     }
 
+    [Fact]
+    public void CreateState_TerrainShadeVariant_UsesTerrainOnlyAndNeutralAlbedo()
+    {
+        ValidationWorldScenePolicyState state = ValidationWorldScenePolicyApplier.CreateState(
+            CreateScenePolicy(),
+            new ValidationCaptureVariantPolicy(
+                ShowTerrain: true,
+                ShowTerrainLiquids: false,
+                ShowObjects: false,
+                ShowWmos: false,
+                ShowDoodads: false,
+                ShowSky: false,
+                ShowWdl: false,
+                ShowWorldLiquids: false,
+                TerrainShadeOnly: true));
+
+        Assert.True(state.ShowTerrain);
+        Assert.False(state.ShowTerrainLiquids);
+        Assert.False(state.ShowObjects);
+        Assert.False(state.ShowWmos);
+        Assert.False(state.ShowDoodads);
+        Assert.False(state.ShowSky);
+        Assert.False(state.ShowWdl);
+        Assert.False(state.ShowWorldLiquids);
+        Assert.True(state.TerrainShadeOnly);
+    }
+
     private static ValidationCaptureScenePolicy CreateScenePolicy()
     {
         return new ValidationCaptureScenePolicy(

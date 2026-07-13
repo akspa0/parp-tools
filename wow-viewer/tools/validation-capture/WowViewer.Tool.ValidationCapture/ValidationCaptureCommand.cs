@@ -52,6 +52,7 @@ internal static class ValidationCaptureCommand
         int? settledFrames = GetIntOption(args, "--settled-frames");
         int? maxFrames = GetIntOption(args, "--max-frames");
         int? batchSettledFrames = GetIntOption(args, "--batch-settled-frames");
+        string? variantsArg = GetOption(args, "--variants");
         bool dryRun = HasFlag(args, "--dry-run");
         bool gpuViewerStyle = HasFlag(args, "--renderer", "--gpu-viewer-style");
         bool realSceneDryRun = HasFlag(args, "--real-scene-dry-run");
@@ -81,7 +82,7 @@ internal static class ValidationCaptureCommand
             resolution,
             buildLabel,
             [new CaptureTileInput(tileName, tileX.Value, tileY.Value, null, null, null, null, null, null, null, null, null)],
-            ParseVariantsFlag(null));
+            ParseVariantsFlag(variantsArg));
 
         ValidationCaptureScenePolicy scenePolicy = CreateDefaultScenePolicy(resolution,
             settledFramesOverride: settledFrames,
@@ -119,7 +120,7 @@ internal static class ValidationCaptureCommand
             {
                 adapter.ApplyVariantPolicy(session.VariantPolicies[request.Variant]);
                 ValidationWorldSceneSnapshot snapshot = adapter.CaptureSnapshot(request, framesObserved: 1, settledFrames: 0);
-                Console.WriteLine($"Validation capture real-scene dry-run {request.Variant}: sceneContent={snapshot.HasSceneContent} framebuffer={snapshot.FramebufferWidth}x{snapshot.FramebufferHeight} tileLoaded={snapshot.TargetTileLoaded} terrainStreaming={snapshot.TerrainStreaming} pendingObjects={snapshot.PendingWorldObjectLoadCount}");
+                Console.WriteLine($"Validation capture real-scene dry-run {request.Variant}: sceneContent={snapshot.HasSceneContent} framebuffer={snapshot.FramebufferWidth}x{snapshot.FramebufferHeight} tileLoaded={snapshot.TargetTileLoaded} terrainStreaming={snapshot.TerrainStreaming} pendingObjects={snapshot.PendingWorldObjectLoadCount} terrainHeightRange={adapter.LastTerrainHeightRange:F3}");
                 allRequestsReady &= snapshot.HasSceneContent && snapshot.TargetTileLoaded;
             }
 
@@ -330,6 +331,7 @@ int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
         string noLiquidsDirectory = Path.Combine(outputRoot, "noliquids");
         string noObjectsDirectory = Path.Combine(outputRoot, "noobjects");
         string objectsOnlyDirectory = Path.Combine(outputRoot, "objectsonly");
+        string terrainShadeDirectory = Path.Combine(outputRoot, "terrain-shade");
 
         List<ValidationCaptureTileRequest> requests = new(capacity: tiles.Count * enabledVariants.Count);
         foreach (CaptureTileInput tile in tiles)
@@ -349,6 +351,10 @@ int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
             if (enabledVariants.Contains(ValidationCaptureVariant.ObjectsOnly))
             {
                 requests.Add(new ValidationCaptureTileRequest(tile.TileName, tile.TileX, tile.TileY, ValidationCaptureVariant.ObjectsOnly, Path.Combine(objectsOnlyDirectory, $"{tile.TileName}_viewer_validation.png")));
+            }
+            if (enabledVariants.Contains(ValidationCaptureVariant.TerrainShade))
+            {
+                requests.Add(new ValidationCaptureTileRequest(tile.TileName, tile.TileX, tile.TileY, ValidationCaptureVariant.TerrainShade, Path.Combine(terrainShadeDirectory, $"{tile.TileName}_terrain_shade.png")));
             }
         }
 
@@ -374,6 +380,7 @@ int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
                 ValidationCaptureVariant.NoLiquids,
                 ValidationCaptureVariant.NoObjects,
                 ValidationCaptureVariant.ObjectsOnly,
+                ValidationCaptureVariant.TerrainShade,
             };
         }
 
@@ -386,6 +393,7 @@ int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
                 ValidationCaptureVariant.NoLiquids,
                 ValidationCaptureVariant.NoObjects,
                 ValidationCaptureVariant.ObjectsOnly,
+                ValidationCaptureVariant.TerrainShade,
             };
         }
 
@@ -409,13 +417,17 @@ int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
                 case "objectsonly":
                     result.Add(ValidationCaptureVariant.ObjectsOnly);
                     break;
+                case "terrain-shade":
+                case "terrainshade":
+                    result.Add(ValidationCaptureVariant.TerrainShade);
+                    break;
                 default:
-                    throw new ArgumentException($"Unknown --variants token '{token}'. Expected one of: primary, no-liquids, no-objects, objects-only, all.");
+                    throw new ArgumentException($"Unknown --variants token '{token}'. Expected one of: primary, no-liquids, no-objects, objects-only, terrain-shade, all.");
             }
         }
         if (result.Count == 0)
         {
-            throw new ArgumentException("--variants resolved to an empty set. Provide at least one of: primary, no-liquids, no-objects, objects-only, all.");
+            throw new ArgumentException("--variants resolved to an empty set. Provide at least one of: primary, no-liquids, no-objects, objects-only, terrain-shade, all.");
         }
         return result;
     }
@@ -467,6 +479,7 @@ private static ValidationCaptureScenePolicy CreateDefaultScenePolicy(int resolut
             [ValidationCaptureVariant.NoLiquids] = new(true, false, true, true, true, true, true, false),
             [ValidationCaptureVariant.NoObjects] = new(true, true, false, false, false, true, true, false),
             [ValidationCaptureVariant.ObjectsOnly] = new(false, false, true, true, true, false, false, false),
+            [ValidationCaptureVariant.TerrainShade] = new(true, false, false, false, false, false, false, false, TerrainShadeOnly: true),
         };
     }
 
@@ -655,6 +668,7 @@ private static void ShowCaptureUsage()
               --settled-frames <int>  Frames to wait for scene settle (default: 12)
               --max-frames <int>     Max frames before capture timeout (default: 480)
               --batch-settled-frames <int>  Fast-settle frames after first tile settles (default: 2)
+              --variants <list>       primary,no-liquids,no-objects,objects-only,terrain-shade,all
               --dry-run               Build the shared-runtime session and print a summary
               --renderer             Run bounded captures through the existing WoWViewer renderer
                             --gpu-viewer-style      Back-compat alias for --renderer

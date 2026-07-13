@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using System.Text.Json;
 using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Maps;
@@ -60,6 +61,7 @@ public static class RawArraySerializer
     private static void WriteV16Arrays(TerrainTileTensorPack pack, Stream outputStream)
     {
         WriteArray(outputStream, "height_257", pack.Height257);
+        WriteTerrainVertexArrays(pack, outputStream);
         WriteArray(outputStream, "mcly_texture_ids", pack.MclyTextureIds);
         WriteArray(outputStream, "mcly_layer_mask", pack.MclyLayerMask);
         WriteArray(outputStream, "mcal_alpha_pack_256", pack.McalAlphaPack256);
@@ -96,6 +98,7 @@ public static class RawArraySerializer
     private static void WriteFullArrays(TerrainTileTensorPack pack, Stream outputStream)
     {
         WriteArray(outputStream, "height_257", pack.Height257);
+        WriteTerrainVertexArrays(pack, outputStream);
         WriteArray(outputStream, "height_65", pack.Height65);
         WriteArray(outputStream, "height_17", pack.Height17);
         WriteArray(outputStream, "mcly_texture_ids", pack.MclyTextureIds);
@@ -173,6 +176,7 @@ public static class RawArraySerializer
     private static void WriteV22Arrays(TerrainTileTensorPack pack, Stream outputStream)
     {
         WriteArray(outputStream, "height_257", pack.Height257);
+        WriteTerrainVertexArrays(pack, outputStream);
         WriteArray(outputStream, "normal_xyz", pack.McnrNormalXyz);
         WriteArray(outputStream, "normal_mask", pack.McnrMask257 ?? BuildNormalMask(pack.McnrNormalXyz));
         WriteArray(outputStream, "alpha_256", pack.McalAlphaPack256);
@@ -207,6 +211,20 @@ WriteArray(outputStream, "mddf_count", new[] { pack.PlacementMddfCount });
 WriteArray(outputStream, "model_above_terrain_mask",
             BuildModelAboveTerrainMask(pack.PlacementMddfData, pack.PlacementModfData, pack.Height257,
                 pack.TileX ?? 0, pack.TileY ?? 0));
+    }
+
+    private static void WriteTerrainVertexArrays(TerrainTileTensorPack pack, Stream outputStream)
+    {
+        WriteArray(outputStream, "mcvt_vertex_z", pack.TerrainVertices?.VertexZ);
+        WriteArray(outputStream, "mcvt_vertex_world_x", pack.TerrainVertices?.WorldX);
+        WriteArray(outputStream, "mcvt_vertex_world_y", pack.TerrainVertices?.WorldY);
+        WriteArray(outputStream, "mcvt_triangle_indices", pack.TerrainVertices is null ? null : TerrainVertexLattice.ChunkTriangleIndices);
+        WriteArray(outputStream, "mcvt_vertex_present", pack.TerrainVertices?.Present);
+        WriteArray(outputStream, "mcvt_vertex_mask_257", pack.TerrainVertices?.DenseValidMask);
+        WriteArray(outputStream, "wdl_outer_17", pack.WdlLattice?.Outer17);
+        WriteArray(outputStream, "wdl_inner_16", pack.WdlLattice?.Inner16);
+        WriteArray(outputStream, "wdl_outer_present", pack.WdlLattice?.OuterPresent);
+        WriteArray(outputStream, "wdl_inner_present", pack.WdlLattice?.InnerPresent);
     }
 
     private static void WriteArray(Stream stream, string name, Array? array)
@@ -600,98 +618,38 @@ WriteArray(outputStream, "model_above_terrain_mask",
 
     private static string BuildMetadataJson(TerrainTileTensorPack pack)
     {
-        var sb = new StringBuilder();
-        sb.Append('{');
-        sb.Append($"\"tile_name\":\"{Escape(pack.TileName)}\",");
-        sb.Append($"\"map_name\":\"{Escape(pack.MapName)}\",");
-        sb.Append($"\"tile_x\":{pack.TileX},");
-        sb.Append($"\"tile_y\":{pack.TileY},");
-        sb.Append($"\"build_key\":\"{Escape(pack.BuildKey)}\",");
-        sb.Append($"\"source_adt_path\":\"{Escape(pack.SourceAdtPath)}\",");
-
-        // available_signals
-        sb.Append("\"available_signals\":[");
-        bool first = true;
-        foreach (string s in pack.AvailableSignals.OrderBy(static x => x, StringComparer.OrdinalIgnoreCase))
+        return JsonSerializer.Serialize(new
         {
-            if (!first) sb.Append(',');
-            sb.Append($"\"{Escape(s)}\"");
-            first = false;
-        }
-        sb.Append("],");
-
-        // mcly_texture_names
-        sb.Append("\"mcly_texture_names\":[");
-        first = true;
-        foreach (string n in pack.MclyTextureNames)
-        {
-            if (!first) sb.Append(',');
-            sb.Append($"\"{Escape(n)}\"");
-            first = false;
-        }
-        sb.Append("],");
-
-        sb.Append("\"mtex_texture_paths\":[");
-        first = true;
-        foreach (string n in pack.MclyTextureNames)
-        {
-            if (!first) sb.Append(',');
-            sb.Append($"\"{Escape(n)}\"");
-            first = false;
-        }
-        sb.Append("],");
-
-        // placement names
-        sb.Append("\"placement_mddf_names\":[");
-        first = true;
-        foreach (string n in pack.PlacementMddfNames)
-        {
-            if (!first) sb.Append(',');
-            sb.Append($"\"{Escape(n)}\"");
-            first = false;
-        }
-        sb.Append("],");
-        sb.Append("\"placement_modf_names\":[");
-        first = true;
-        foreach (string n in pack.PlacementModfNames)
-        {
-            if (!first) sb.Append(',');
-            sb.Append($"\"{Escape(n)}\"");
-            first = false;
-        }
-        sb.Append("],");
-
-        AppendPlacementAssetPaths(sb, "placement_mddf_asset_paths", pack.PlacementMddfData, pack.PlacementMddfNames);
-        sb.Append(',');
-        AppendPlacementAssetPaths(sb, "placement_modf_asset_paths", pack.PlacementModfData, pack.PlacementModfNames);
-        sb.Append(',');
-
-        sb.Append($"\"object_roof_mask_source\":\"{Escape(pack.ObjectRoofMaskSource)}\",");
-
-        sb.Append($"\"placement_mddf_count\":{pack.PlacementMddfCount},");
-        sb.Append($"\"placement_modf_count\":{pack.PlacementModfCount},");
-
-        sb.Append('}');
-        return sb.ToString();
+            tile_name = pack.TileName,
+            map_name = pack.MapName,
+            tile_x = pack.TileX,
+            tile_y = pack.TileY,
+            build_key = pack.BuildKey,
+            source_adt_path = pack.SourceAdtPath,
+            available_signals = pack.AvailableSignals.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
+            mcly_texture_names = pack.MclyTextureNames,
+            mtex_texture_paths = pack.MclyTextureNames,
+            placement_mddf_names = pack.PlacementMddfNames,
+            placement_modf_names = pack.PlacementModfNames,
+            placement_mddf_asset_paths = BuildPlacementAssetPaths(pack.PlacementMddfData, pack.PlacementMddfNames),
+            placement_modf_asset_paths = BuildPlacementAssetPaths(pack.PlacementModfData, pack.PlacementModfNames),
+            object_roof_mask_source = pack.ObjectRoofMaskSource,
+            placement_mddf_count = pack.PlacementMddfCount,
+            placement_modf_count = pack.PlacementModfCount,
+        });
     }
 
-    private static void AppendPlacementAssetPaths(StringBuilder sb, string propertyName, float[,]? placementData, IReadOnlyList<string> names)
+    private static string[] BuildPlacementAssetPaths(float[,]? placementData, IReadOnlyList<string> names)
     {
-        sb.Append('"').Append(propertyName).Append("\":[");
-        if (placementData is not null)
+        if (placementData is null)
+            return [];
+
+        string[] paths = new string[placementData.GetLength(0)];
+        for (int i = 0; i < paths.Length; i++)
         {
-            for (int i = 0; i < placementData.GetLength(0); i++)
-            {
-                if (i > 0)
-                    sb.Append(',');
-
-                int nameId = placementData.GetLength(1) > 0 ? (int)placementData[i, 0] : -1;
-                string path = nameId >= 0 && nameId < names.Count ? names[nameId] : string.Empty;
-                sb.Append('"').Append(Escape(path)).Append('"');
-            }
+            int nameId = placementData.GetLength(1) > 0 ? (int)placementData[i, 0] : -1;
+            paths[i] = nameId >= 0 && nameId < names.Count ? names[nameId] : string.Empty;
         }
-        sb.Append(']');
+        return paths;
     }
-
-    private static string Escape(string? s) => (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
 }

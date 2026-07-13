@@ -29,8 +29,9 @@ public sealed class AdtTensorPackLiquidTests
 
             Assert.NotNull(pack.UnifiedLiquidMask);
             Assert.NotNull(pack.UnifiedLiquidHeight);
-            Assert.Equal(1.0f, pack.UnifiedLiquidMask![2, 81]);
-            Assert.Equal(0.0f, pack.UnifiedLiquidHeight![2, 81]);
+            Assert.Equal(1.0f, pack.UnifiedLiquidMask![4, 82]);
+            Assert.Equal(0.0f, pack.UnifiedLiquidHeight![4, 82]);
+            Assert.Equal(16, pack.UnifiedLiquidMask.Cast<float>().Count(static value => value > 0.5f));
             Assert.Contains("unified_liquid_mask", pack.AvailableSignals);
             Assert.Contains("unified_liquid_height", pack.AvailableSignals);
         }

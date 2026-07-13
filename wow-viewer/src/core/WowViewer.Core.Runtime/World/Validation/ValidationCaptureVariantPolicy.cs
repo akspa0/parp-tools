@@ -8,4 +8,5 @@ public readonly record struct ValidationCaptureVariantPolicy(
     bool ShowDoodads,
     bool ShowSky,
     bool ShowWdl,
-    bool ShowWorldLiquids);
+    bool ShowWorldLiquids,
+    bool TerrainShadeOnly = false);

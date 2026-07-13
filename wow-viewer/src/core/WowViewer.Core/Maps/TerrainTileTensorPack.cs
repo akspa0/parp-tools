@@ -18,8 +18,21 @@ public sealed class TerrainTileTensorPack
 
     // ── Height fields ──────────────────────────────────────────────────────
 
-    /// <summary>257×257 per-vertex terrain heights (MCVT assembled across 16×16 chunks).</summary>
+    /// <summary>
+    /// 257×257 compatibility view assembled from MCVT. Mixed-parity positions
+    /// are filled for raster consumers and are not real terrain vertices; use
+    /// <see cref="TerrainVertices"/> for training and mesh reconstruction.
+    /// </summary>
     public float[,]? Height257 { get; init; }
+
+    /// <summary>
+    /// Canonical raw MCVT terrain vertices in native per-chunk sample order.
+    /// Unlike <see cref="Height257"/>, this contract never fills non-vertex
+    /// positions and preserves legitimate zero-height samples.
+    /// </summary>
+    public TerrainVertexLattice? TerrainVertices { get; init; }
+
+    public TerrainWdlLattice? WdlLattice { get; init; }
 
     /// <summary>65×65 downsampled height field (area-averaged from 257×257).</summary>
     public float[,]? Height65 { get; init; }

@@ -14,7 +14,8 @@ name                dtype      shape            role
 ==================  =========  ===============  =====================================
 minimap_rgb         uint8      (256, 256, 3)    model input (raw RGB minimap)
 clean_minimap_256   uint8      (256, 256, 3)    TerrainInpaintHead target
-object_mask_256     float32    (256, 256)       ObjectMaskDecoder footprint target
+object_precise_mask_257 float32 (257, 257)      Canonical precise object footprint
+object_mask_256     float32    (256, 256)       Derived compatibility projection only
 height_257          float32    (257, 257)       Stage B height target
 wdl_height_33       float32    (33, 33)         Stage A WDL prior target (stride-8)
 alpha_256           uint8      (256, 256, 4)    MCAL fractal/alpha target
@@ -55,7 +56,7 @@ from harvester.pm4_asset_matching.models import (
     Pm4SegmentTopologyStats,
 )
 
-V25_DATASET_VERSION = "v25.2"
+V25_DATASET_VERSION = "v25.3"
 
 # Spec 102: lightweight Blosc LZ4 level-1 compression for every array.
 DEFAULT_CODEC = zarr.codecs.BloscCodec(cname="lz4", clevel=1)
@@ -77,6 +78,7 @@ def _arr(name: str, dtype, shape: tuple[int, ...]) -> _ArraySpec:
 V25_PER_TILE_SPECS: tuple[_ArraySpec, ...] = (
     _arr("minimap_rgb", np.uint8, (256, 256, 3)),
     _arr("clean_minimap_256", np.uint8, (256, 256, 3)),
+    _arr("object_precise_mask_257", np.float32, (257, 257)),
     _arr("object_mask_256", np.float32, (256, 256)),
     _arr("height_257", np.float32, (257, 257)),
     _arr("wdl_height_33", np.float32, (33, 33)),
@@ -616,6 +618,7 @@ def build_v25_dataset(
 
                 arrays["minimap_rgb"][out_row] = _to_uint8_rgb(minimap)
                 arrays["clean_minimap_256"][out_row] = _to_uint8_rgb(cleaned)
+                arrays["object_precise_mask_257"][out_row] = precise.astype(np.float32)
                 arrays["object_mask_256"][out_row] = object_mask_256_from_precise(precise)
                 arrays["height_257"][out_row] = height
                 arrays["wdl_height_33"][out_row] = wdl_height_33_from_257(height)

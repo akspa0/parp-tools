@@ -6,7 +6,7 @@ namespace WowViewer.Core.Tests;
 public sealed class ValidationCaptureCameraSolverTests
 {
     [Fact]
-    public void ComputeTileCenter_UsesMapOriginAndTileSpan()
+    public void ComputeTileCenter_MatchesTerrainMeshTileAxisContract()
     {
         Vector2 center = ValidationCaptureCameraSolver.ComputeTileCenter(
             tileX: 30,
@@ -14,8 +14,9 @@ public sealed class ValidationCaptureCameraSolverTests
             mapOrigin: 17066.666f,
             tileWorldSize: 533.33333f);
 
-        Assert.Equal(800f, center.X, 3);
-        Assert.Equal(-8800f, center.Y, 3);
+        // Terrain mesh world X is derived from ADT tile Y; world Y from ADT tile X.
+        Assert.Equal(-8800f, center.X, 3);
+        Assert.Equal(800f, center.Y, 3);
     }
 
     [Fact]

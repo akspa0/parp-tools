@@ -167,8 +167,11 @@ def test_build_round_trip_shapes_and_math(built_store: Path):
     wdl = np.asarray(root["wdl_height_33"][0])
     assert np.array_equal(wdl, h[::8, ::8])
 
-    # Object mask is the corner-max reduction of the precise mask.
+    # The canonical precise mask survives intact; 256 is only its projection.
+    precise = np.asarray(root["object_precise_mask_257"][0])
+    assert precise.shape == (257, 257)
     mask = np.asarray(root["object_mask_256"][0])
+    assert np.array_equal(mask, object_mask_256_from_precise(precise))
     assert mask.shape == (256, 256)
     assert mask[9:29, 9:29].max() == 1.0
     assert mask[100:, 100:].max() == 0.0

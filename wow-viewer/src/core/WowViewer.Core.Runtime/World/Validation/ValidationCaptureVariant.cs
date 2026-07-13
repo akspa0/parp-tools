@@ -6,4 +6,5 @@ public enum ValidationCaptureVariant
     NoLiquids = 1,
     NoObjects = 2,
     ObjectsOnly = 3,
+    TerrainShade = 4,
 }

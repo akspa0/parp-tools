@@ -50,7 +50,12 @@ public static class AdtTensorPackBuilder
         List<MapChunkLocation> terrainChunks = ResolveTerrainChunkLocations(stream, fileSummary);
 
         // ── Assemble heightmap (MCVT) ───────────────────────────────────────
-        float[,]? height257 = AssembleHeightmap(stream, terrainChunks, availableSignals);
+        (float[,]? height257, TerrainVertexLattice? terrainVertices) = AssembleHeightmap(stream, terrainChunks, tileX, tileY, availableSignals);
+        if (terrainVertices is not null)
+        {
+            availableSignals.Add("wdl_outer_17");
+            availableSignals.Add("wdl_inner_16");
+        }
 
         // ── Assemble normals (MCNR) ─────────────────────────────────────────
         (float[,,]? mcnrNormalXyz, bool[,]? mcnrMask257) = AssembleNormals(stream, terrainChunks, availableSignals);
@@ -140,6 +145,8 @@ public static class AdtTensorPackBuilder
             TileX = tileX,
             TileY = tileY,
             Height257 = height257,
+            TerrainVertices = terrainVertices,
+            WdlLattice = terrainVertices is null ? null : TerrainWdlLattice.FromTerrainVertices(terrainVertices),
             Height65 = height65,
             Height17 = height17,
             MclyTextureIds = mclyTextureIds,
@@ -234,7 +241,12 @@ public static class AdtTensorPackBuilder
         HashSet<string> availableSignals = [];
 
         List<MapChunkLocation> terrainChunks = ResolveTerrainChunkLocations(stream, fileSummary);
-        float[,]? height257 = AssembleHeightmap(stream, terrainChunks, availableSignals);
+        (float[,]? height257, TerrainVertexLattice? terrainVertices) = AssembleHeightmap(stream, terrainChunks, tileX, tileY, availableSignals);
+        if (terrainVertices is not null)
+        {
+            availableSignals.Add("wdl_outer_17");
+            availableSignals.Add("wdl_inner_16");
+        }
         (float[,,]? mcnrNormalXyz, bool[,]? mcnrMask257) = AssembleNormals(stream, terrainChunks, availableSignals);
         float[,,]? mccvRgb = AssembleMccv(stream, terrainChunks, availableSignals);
         byte[,,]? mclvLightingBytes = AssembleMclv(stream, terrainChunks, availableSignals);
@@ -320,6 +332,8 @@ public static class AdtTensorPackBuilder
             TileX = tileX,
             TileY = tileY,
             Height257 = height257,
+            TerrainVertices = terrainVertices,
+            WdlLattice = terrainVertices is null ? null : TerrainWdlLattice.FromTerrainVertices(terrainVertices),
             Height65 = height65,
             Height17 = height17,
             MclyTextureIds = mclyTextureIds,
@@ -434,6 +448,8 @@ public static class AdtTensorPackBuilder
             TileX = tileX,
             TileY = tileY,
             Height257 = null,
+            TerrainVertices = null,
+            WdlLattice = null,
             Height65 = null,
             Height17 = null,
             MclyTextureIds = null,
@@ -491,12 +507,22 @@ public static class AdtTensorPackBuilder
     // Heightmap assembly (MCVT)
     // ═══════════════════════════════════════════════════════════════════════
 
-    private static float[,]? AssembleHeightmap(Stream stream, List<MapChunkLocation> chunks, HashSet<string> signals)
+    private static (float[,]? heightmap, TerrainVertexLattice? vertices) AssembleHeightmap(
+        Stream stream,
+        List<MapChunkLocation> chunks,
+        int tileX,
+        int tileY,
+        HashSet<string> signals)
     {
         if (chunks.Count == 0)
-            return null;
+            return (null, null);
 
         float[,] heightmap = new float[TileHeightmapSize, TileHeightmapSize];
+        float[,,] vertexZ = new float[TileChunks, TileChunks, McvtSampleCount];
+        float[,,] vertexWorldX = new float[TileChunks, TileChunks, McvtSampleCount];
+        float[,,] vertexWorldY = new float[TileChunks, TileChunks, McvtSampleCount];
+        bool[,,] vertexPresent = new bool[TileChunks, TileChunks, McvtSampleCount];
+        bool[,] denseValidMask = new bool[TileHeightmapSize, TileHeightmapSize];
         bool any = false;
 
         foreach (MapChunkLocation chunk in chunks)
@@ -524,29 +550,49 @@ public static class AdtTensorPackBuilder
 
                 ResolveTileSampleCoordinates(chunkX, chunkY, sampleIndex, out int sampleX, out int sampleY);
                 heightmap[sampleY, sampleX] = absoluteHeight;
+                vertexZ[chunkY, chunkX, sampleIndex] = absoluteHeight;
+                const float tileWorldSize = 533.33333f;
+                const float mapOrigin = 32f * tileWorldSize;
+                float halfStepWorldSize = tileWorldSize / TileChunks / HalfStepsPerChunk;
+                TerrainVertexLattice.ResolveLocalHalfStepCoordinates(sampleIndex, out int localX, out int localY);
+                vertexWorldX[chunkY, chunkX, sampleIndex] = mapOrigin
+                    - (tileY * tileWorldSize)
+                    - (chunkY * tileWorldSize / TileChunks)
+                    - (localY * halfStepWorldSize);
+                vertexWorldY[chunkY, chunkX, sampleIndex] = mapOrigin
+                    - (tileX * tileWorldSize)
+                    - (chunkX * tileWorldSize / TileChunks)
+                    - (localX * halfStepWorldSize);
+                vertexPresent[chunkY, chunkX, sampleIndex] = true;
+                denseValidMask[sampleY, sampleX] = true;
             }
         }
 
         if (!any)
-            return null;
+            return (null, null);
 
-        FillHeightmapGaps(heightmap);
+        FillHeightmapGaps(heightmap, denseValidMask);
         signals.Add("height_257");
-        return heightmap;
+        signals.Add("mcvt_vertex_z");
+        signals.Add("mcvt_vertex_present");
+        signals.Add("mcvt_vertex_mask_257");
+        signals.Add("mcvt_vertex_world_xy");
+        signals.Add("mcvt_triangle_indices");
+        return (heightmap, new TerrainVertexLattice(vertexZ, vertexWorldX, vertexWorldY, vertexPresent, denseValidMask));
     }
 
-    private static void FillHeightmapGaps(float[,] hm)
+    private static void FillHeightmapGaps(float[,] hm, bool[,] validMask)
     {
         int size = hm.GetLength(0);
         for (int y = 0; y < size; y++)
         {
             for (int x = 0; x < size; x++)
             {
-                if (hm[y, x] != 0f) continue;
-                if (x > 0 && hm[y, x - 1] != 0f) hm[y, x] = hm[y, x - 1];
-                else if (y > 0 && hm[y - 1, x] != 0f) hm[y, x] = hm[y - 1, x];
-                else if (x < size - 1 && hm[y, x + 1] != 0f) hm[y, x] = hm[y, x + 1];
-                else if (y < size - 1 && hm[y + 1, x] != 0f) hm[y, x] = hm[y + 1, x];
+                if (validMask[y, x]) continue;
+                if (x > 0 && validMask[y, x - 1]) hm[y, x] = hm[y, x - 1];
+                else if (y > 0 && validMask[y - 1, x]) hm[y, x] = hm[y - 1, x];
+                else if (x < size - 1 && validMask[y, x + 1]) hm[y, x] = hm[y, x + 1];
+                else if (y < size - 1 && validMask[y + 1, x]) hm[y, x] = hm[y + 1, x];
             }
         }
     }
@@ -583,14 +629,18 @@ public static class AdtTensorPackBuilder
             for (int sampleIndex = 0; sampleIndex < McvtSampleCount; sampleIndex++)
             {
                 int normalOffset = mcnrOffset + (sampleIndex * 3);
+                // MCNR stores components in X, Z, Y order. Normalize exactly
+                // as the active terrain renderer does before exposing XYZ.
                 float nx = DecodeNormalComponent(payload[normalOffset + 0]);
-                float ny = DecodeNormalComponent(payload[normalOffset + 1]);
-                float nz = DecodeNormalComponent(payload[normalOffset + 2]);
+                float nz = DecodeNormalComponent(payload[normalOffset + 1]);
+                float ny = DecodeNormalComponent(payload[normalOffset + 2]);
+                Vector3 normal = new(nx, ny, nz);
+                normal = normal.LengthSquared() > 1e-6f ? Vector3.Normalize(normal) : Vector3.UnitZ;
 
                 ResolveTileSampleCoordinates(chunkX, chunkY, sampleIndex, out int sampleX, out int sampleY);
-                normals[sampleY, sampleX, 0] = nx;
-                normals[sampleY, sampleX, 1] = ny;
-                normals[sampleY, sampleX, 2] = nz;
+                normals[sampleY, sampleX, 0] = normal.X;
+                normals[sampleY, sampleX, 1] = normal.Y;
+                normals[sampleY, sampleX, 2] = normal.Z;
                 mask[sampleY, sampleX] = true;
             }
         }
@@ -1058,36 +1108,39 @@ public static class AdtTensorPackBuilder
                 int chunkX = chunkIndex % TileChunks;
                 int chunkY = chunkIndex / TileChunks;
 
-                // Each MH2O chunk covers an 8×8 cell region within the MCNK
-                // We map the chunk-level liquid data to the tile grid
+                // MH2O uses 8x8 liquid cells per MCNK while the canonical
+                // terrain/minimap contract uses 16x16 half-step cells. Expand
+                // each present MH2O cell to its 2x2 canonical coverage block.
                 foreach (AdtLiquidLayer layer in chunk.Layers)
                 {
-                    if (layer.Heights is null)
-                        continue;
-
-                    any = true;
                     int vertW = layer.Width + 1;
-                    int vertH = layer.Height + 1;
-
-                    for (int localY = 0; localY < vertH; localY++)
+                    for (int cellY = 0; cellY < layer.Height; cellY++)
                     {
-                        for (int localX = 0; localX < vertW; localX++)
+                        for (int cellX = 0; cellX < layer.Width; cellX++)
                         {
-                            int vertexIndex = (localY * vertW) + localX;
-                            if (vertexIndex >= layer.Heights.Length)
+                            if (!Mh2oCellExists(layer, cellX, cellY))
                                 continue;
 
-                            int globalX = (chunkX * HalfStepsPerChunk) + layer.XOffset + localX;
-                            int globalY = (chunkY * HalfStepsPerChunk) + layer.YOffset + localY;
-                            if (globalX >= TileHeightmapSize || globalY >= TileHeightmapSize)
-                                continue;
+                            any = true;
+                            int baseX = (chunkX * HalfStepsPerChunk) + ((layer.XOffset + cellX) * 2);
+                            int baseY = (chunkY * HalfStepsPerChunk) + ((layer.YOffset + cellY) * 2);
+                            for (int halfY = 0; halfY < 2; halfY++)
+                            {
+                                for (int halfX = 0; halfX < 2; halfX++)
+                                {
+                                    int globalX = baseX + halfX;
+                                    int globalY = baseY + halfY;
+                                    if ((uint)globalX >= TileHeightmapSize || (uint)globalY >= TileHeightmapSize)
+                                        continue;
 
-                            heights[globalY, globalX] = layer.Heights[vertexIndex];
-                            typeMask[globalY, globalX] = (int)layer.BasicType;
-                            presenceMask[globalY, globalX] = true;
-
-                            if (layer.Depths is not null && vertexIndex < layer.Depths.Length)
-                                depths[globalY, globalX] = layer.Depths[vertexIndex];
+                                    float tx = halfX * 0.5f;
+                                    float ty = halfY * 0.5f;
+                                    heights[globalY, globalX] = SampleMh2oHeight(layer, vertW, cellX, cellY, tx, ty);
+                                    depths[globalY, globalX] = SampleMh2oDepth(layer, vertW, cellX, cellY, tx, ty);
+                                    typeMask[globalY, globalX] = (int)layer.BasicType;
+                                    presenceMask[globalY, globalX] = true;
+                                }
+                            }
                         }
                     }
                 }
@@ -1106,6 +1159,48 @@ public static class AdtTensorPackBuilder
             Console.WriteLine($"[MH2O] Warning: Failed to parse liquid data for tile: {ex.GetType().Name}: {ex.Message}");
             return (null, null, null, null);
         }
+    }
+
+    private static bool Mh2oCellExists(AdtLiquidLayer layer, int cellX, int cellY)
+    {
+        if (layer.ExistsBitmap is null)
+            return true;
+
+        int bitIndex = (cellY * layer.Width) + cellX;
+        int byteIndex = bitIndex >> 3;
+        int bitOffset = bitIndex & 7;
+        return byteIndex < layer.ExistsBitmap.Length
+            && (layer.ExistsBitmap[byteIndex] & (1 << bitOffset)) != 0;
+    }
+
+    private static float SampleMh2oHeight(
+        AdtLiquidLayer layer, int vertexWidth, int cellX, int cellY, float tx, float ty)
+    {
+        if (layer.Heights is null)
+            return layer.MinHeight;
+
+        float h00 = layer.Heights[(cellY * vertexWidth) + cellX];
+        float h10 = layer.Heights[(cellY * vertexWidth) + cellX + 1];
+        float h01 = layer.Heights[((cellY + 1) * vertexWidth) + cellX];
+        float h11 = layer.Heights[((cellY + 1) * vertexWidth) + cellX + 1];
+        float top = h00 + ((h10 - h00) * tx);
+        float bottom = h01 + ((h11 - h01) * tx);
+        return top + ((bottom - top) * ty);
+    }
+
+    private static float SampleMh2oDepth(
+        AdtLiquidLayer layer, int vertexWidth, int cellX, int cellY, float tx, float ty)
+    {
+        if (layer.Depths is null)
+            return 0f;
+
+        float d00 = layer.Depths[(cellY * vertexWidth) + cellX];
+        float d10 = layer.Depths[(cellY * vertexWidth) + cellX + 1];
+        float d01 = layer.Depths[((cellY + 1) * vertexWidth) + cellX];
+        float d11 = layer.Depths[((cellY + 1) * vertexWidth) + cellX + 1];
+        float top = d00 + ((d10 - d00) * tx);
+        float bottom = d01 + ((d11 - d01) * tx);
+        return top + ((bottom - top) * ty);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3405,34 +3500,7 @@ public static class AdtTensorPackBuilder
 
     private static void ResolveTileSampleCoordinates(int chunkX, int chunkY, int sampleIndex, out int sampleX, out int sampleY)
     {
-        GetVertexPosition(sampleIndex, out int row, out int col, out bool isInner);
-        int localX = isInner ? (col * 2) + 1 : col * 2;
-        int localY = isInner ? ((row / 2) * 2) + 1 : (row / 2) * 2;
-
-        sampleX = (chunkX * HalfStepsPerChunk) + localX;
-        sampleY = (chunkY * HalfStepsPerChunk) + localY;
-    }
-
-    private static void GetVertexPosition(int index, out int row, out int col, out bool isInner)
-    {
-        int remaining = index;
-        row = 0;
-        col = 0;
-        isInner = false;
-
-        for (int currentRow = 0; currentRow < 17; currentRow++)
-        {
-            int rowSize = (currentRow % 2 == 0) ? 9 : 8;
-            if (remaining < rowSize)
-            {
-                row = currentRow;
-                col = remaining;
-                isInner = (currentRow % 2) != 0;
-                return;
-            }
-
-            remaining -= rowSize;
-        }
+        TerrainVertexLattice.ResolveDenseCoordinates(chunkX, chunkY, sampleIndex, out sampleX, out sampleY);
     }
 
     // ═══════════════════════════════════════════════════════════════════════

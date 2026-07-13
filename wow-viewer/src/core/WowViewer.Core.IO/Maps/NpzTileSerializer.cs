@@ -38,6 +38,16 @@ public static class NpzTileSerializer
 
         // Write each present signal as a .npy entry
         WriteArray(zip, "height_257", pack.Height257, "<f4");
+        WriteArray(zip, "mcvt_vertex_z", pack.TerrainVertices?.VertexZ, "<f4");
+        WriteArray(zip, "mcvt_vertex_world_x", pack.TerrainVertices?.WorldX, "<f4");
+        WriteArray(zip, "mcvt_vertex_world_y", pack.TerrainVertices?.WorldY, "<f4");
+        WriteArray(zip, "mcvt_triangle_indices", pack.TerrainVertices is null ? null : TerrainVertexLattice.ChunkTriangleIndices, "<i4");
+        WriteArray(zip, "mcvt_vertex_present", pack.TerrainVertices?.Present, "|b1");
+        WriteArray(zip, "mcvt_vertex_mask_257", pack.TerrainVertices?.DenseValidMask, "|b1");
+        WriteArray(zip, "wdl_outer_17", pack.WdlLattice?.Outer17, "<f4");
+        WriteArray(zip, "wdl_inner_16", pack.WdlLattice?.Inner16, "<f4");
+        WriteArray(zip, "wdl_outer_present", pack.WdlLattice?.OuterPresent, "|b1");
+        WriteArray(zip, "wdl_inner_present", pack.WdlLattice?.InnerPresent, "|b1");
         WriteArray(zip, "height_65", pack.Height65, "<f4");
         WriteArray(zip, "height_17", pack.Height17, "<f4");
         WriteArray(zip, "mcly_texture_ids", pack.MclyTextureIds, "<i4");

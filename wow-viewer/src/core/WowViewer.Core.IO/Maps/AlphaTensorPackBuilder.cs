@@ -22,8 +22,19 @@ public static class AlphaTensorPackBuilder
         string mapName = ExtractMapNameFromTilePath(sourcePath);
 
         float[,]? height257 = tileData.Heightmap;
+        TerrainVertexLattice? terrainVertices = BuildTerrainVertices(height257, tileX, tileY);
         if (height257 is not null)
             signals.Add("height_257");
+        if (terrainVertices is not null)
+        {
+            signals.Add("mcvt_vertex_z");
+            signals.Add("mcvt_vertex_present");
+            signals.Add("mcvt_vertex_mask_257");
+            signals.Add("mcvt_vertex_world_xy");
+            signals.Add("mcvt_triangle_indices");
+            signals.Add("wdl_outer_17");
+            signals.Add("wdl_inner_16");
+        }
 
         if (tileData.McnrNormalXyz is not null)
             signals.Add("mcnr_normal_xyz");
@@ -90,6 +101,8 @@ public static class AlphaTensorPackBuilder
             TileX = tileX,
             TileY = tileY,
             Height257 = height257,
+            TerrainVertices = terrainVertices,
+            WdlLattice = terrainVertices is null ? null : TerrainWdlLattice.FromTerrainVertices(terrainVertices),
             Height65 = height65,
             Height17 = height17,
             MclyTextureIds = tileData.MclyTextureIds,
@@ -98,6 +111,7 @@ public static class AlphaTensorPackBuilder
             McalAlphaPack = mcalAlphaPack,
             McalAlphaPack256 = DownsampleAlpha256(mcalAlphaPack),
             McnrNormalXyz = tileData.McnrNormalXyz,
+            McnrMask257 = tileData.McnrNormalXyz is null ? null : terrainVertices?.DenseValidMask,
             McshShadowMask256 = tileData.McshShadowMask256,
             MccvRgb = null,
             Mh2oSurfaceHeight = null,
@@ -639,6 +653,46 @@ public static class AlphaTensorPackBuilder
         signals.Add("object_roof_mask_256");
         signals.Add("object_roof_confidence_256");
         return (roofMask, roofConfidence, ObjectRoofSourceMetadata);
+    }
+
+    private static TerrainVertexLattice? BuildTerrainVertices(float[,]? height257, int tileX, int tileY)
+    {
+        if (height257 is null
+            || height257.GetLength(0) != TerrainVertexLattice.DenseGridSize
+            || height257.GetLength(1) != TerrainVertexLattice.DenseGridSize)
+        {
+            return null;
+        }
+
+        float[,,] z = new float[16, 16, TerrainVertexLattice.SamplesPerChunk];
+        float[,,] worldX = new float[16, 16, TerrainVertexLattice.SamplesPerChunk];
+        float[,,] worldY = new float[16, 16, TerrainVertexLattice.SamplesPerChunk];
+        bool[,,] present = new bool[16, 16, TerrainVertexLattice.SamplesPerChunk];
+        bool[,] denseValid = new bool[257, 257];
+        const float tileSize = 533.33333f;
+        const float mapOrigin = 32f * tileSize;
+        float chunkSize = tileSize / 16f;
+        float halfStepSize = chunkSize / 16f;
+
+        for (int chunkY = 0; chunkY < 16; chunkY++)
+        {
+            for (int chunkX = 0; chunkX < 16; chunkX++)
+            {
+                for (int sample = 0; sample < TerrainVertexLattice.SamplesPerChunk; sample++)
+                {
+                    TerrainVertexLattice.ResolveLocalHalfStepCoordinates(sample, out int localX, out int localY);
+                    int denseX = (chunkX * 16) + localX;
+                    int denseY = (chunkY * 16) + localY;
+                    z[chunkY, chunkX, sample] = height257[denseY, denseX];
+                    worldX[chunkY, chunkX, sample] = mapOrigin - (tileY * tileSize) - (chunkY * chunkSize) - (localY * halfStepSize);
+                    worldY[chunkY, chunkX, sample] = mapOrigin - (tileX * tileSize) - (chunkX * chunkSize) - (localX * halfStepSize);
+                    present[chunkY, chunkX, sample] = true;
+                    denseValid[denseY, denseX] = true;
+                }
+            }
+        }
+
+        return new TerrainVertexLattice(z, worldX, worldY, present, denseValid);
     }
 
     private static bool TryProjectPlacementToMinimapPixel(Vector3 position, int tileX, int tileY, out int pixelX, out int pixelY)

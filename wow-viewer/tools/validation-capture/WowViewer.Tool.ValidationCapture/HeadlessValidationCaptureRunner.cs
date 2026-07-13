@@ -108,6 +108,22 @@ internal static class HeadlessValidationCaptureRunner
                         sceneSnapshot.FramebufferHeight,
                         rgbaPixels,
                         sourceOriginBottomLeft: true);
+                    if (request.Variant == ValidationCaptureVariant.TerrainShade)
+                    {
+                        TerrainShadeCaptureManifestWriter.Write(session, request, cameraFrame);
+                        if (sceneAdapter is ValidationWorldSceneAdapter concreteAdapter
+                            && concreteAdapter.LastRuntimeFrame is { } runtimeFrame)
+                        {
+                            TerrainShadeSignalAuditor.Write(
+                                request.OutputPath,
+                                runtimeFrame,
+                                cameraFrame,
+                                rgbaPixels,
+                                sceneSnapshot.FramebufferWidth,
+                                sceneSnapshot.FramebufferHeight,
+                                sourceOriginBottomLeft: true);
+                        }
+                    }
 
                     return new ValidationCaptureVariantResult(
                         request.Variant,

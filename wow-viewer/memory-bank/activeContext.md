@@ -5,8 +5,11 @@ Keep current contract only. Older notes live in `memory-bank/archive/2026-07-04-
 
 ## Spec 102 modular terrain pipeline
 
-- H0 v2 is frozen after passing its three-epoch gate: validation offset MAE 178.4316 versus required <=231.5561, era MAE 169.1934, peak VRAM 0.0905 GB. Checkpoint: `output/train_v25_h0/h0_offset_v2_rgb_residual/checkpoint_best.pt`.
-- H1 is the only active training stage: RGB plus frozen H0 tile mean -> one 33x33 coarse-relief residual. It has its own model, optimizer, checkpoint, history, CUDA-only three-epoch gate, and no WDL deployment input. H2 remains blocked until H1 passes and freezes.
+- **Corrected M0/liquid data gate (2026-07-12):** V18 liquid extraction existed, but MH2O 8x8 cells were rasterized as sparse half-scale vertices instead of filled 2x2 blocks on the 16x16 half-step grid; malformed raw-stream metadata JSON also blocked a clean repatch. Both are fixed, staged `3_3_5_12340` was repatched, and Spec 102 numeric v3 exactly matches repaired V18 on audited coastal rows. It carries raw minimap, canonical `object_precise_mask_257`, liquid mask/height/source, MCNK flags, numeric normals, and unrepaired height; stale liquid type is excluded. Curated v6 yields M0 1,901 train / 302 map-val / 770 era and H2 1,880 / 279 / 770, rejecting 490 tiles at >=80% liquid coverage. All earlier M0 metrics are stale; rerun M0 before W1. Never substitute reduced or visibility masks.
+- **2026-07-12 recovery audit:** `wdl_height_33 = height_257[::8, ::8]` is not WDL. Real MARE is paired `outer_17`/`inner_16` (545 numeric samples). More fundamentally, terrain supervision must be raw MCVT mesh vertices/topology, not a dense height image; `height_257` is only a display view until its exact vertex mapping is proven. Recovery order: raw-vertex/lattice audit -> M0 object segmentation -> deterministic cleaning -> frozen H0 -> W1 paired lattice residual -> H2 mesh-vertex residual. Native normals are numeric validation facts, and PNG/OBJ previews are one-way post-inference observability only. See `docs/architecture/v25-v24-numeric-lattice-recovery-audit-2026-07-12.md`.
+- **Terrain-shadow guidance:** use the canonical viewer's fixed global-light capture mode on real staged-client terrain with objects/liquids/textures/alpha/tint disabled. This produces a real-client shape cue for an upper-bound probe and, only after numeric H2 proof, a separately reported predicted-mesh rerender agreement metric. It is never a deployment input or a replacement for vertex-Z supervision.
+
+- Historical H0/H1 results are non-comparable to the corrected curated numeric contract and are not active proof owners.
 - The old unified V25 multi-head trainer remains fail-closed and is not a valid architecture or proof surface.
 
 ## UI release convergence
@@ -193,3 +196,14 @@ Keep current contract only. Older notes live in `memory-bank/archive/2026-07-04-
 - Do not claim remote proof from Pod creation alone.
 - Do not claim UI compile validation from legacy-solution failures outside touched slice.
 - Staged clients only under `output/tmp/wowarchive-clients/`.
+
+## Current target: Spec 102 numeric-lattice recovery
+
+- Recovery Phase 0 passed. M0 implementation exists but failed its cross-era usefulness gate (val IoU 0.2439, era 0.0767); W1/H2 are blocked.
+- Canonical target arrays are raw `[16,16,145]` MCVT Z/world-X/world-Y/presence, `[256,3]` chunk topology, and paired WDL `[17,17] + [16,16]`; `height_257` is compatibility/display only at mixed-parity cells.
+- Both Alpha and split-ADT C# harvest paths now emit the same contract. Real staged `(35,55)` NPZ proofs exist for `0_5_3_3368` and `3_3_5_12340`.
+- `TerrainShade` is guidance/validation only. Five staged Alpha tiles are byte-identical across repeat captures; luminance-to-directional-NdotL correlation is 0.8596-0.9819.
+- The capture camera axis bug is fixed: ADT Y maps to world X and ADT X maps to world Y. Earlier flat captures were clear colour, not terrain.
+- Current light is an explicit fixed viewer contract, not decoded client light-table data. Do not overclaim it.
+- Numeric baselines are published at `output/analysis/spec102_numeric_lattice_v1/baseline_report.json`. Next work must improve or replace M0 supervision without adding heads; do not start H2.
+- M0 diagnosis: `object_visibility_256` is all zero; `object_mask_256` is geometry-projected and often not visible in minimap pixels. Next valid slice is aligned non-empty renderer-visible mask capture on object-bearing tiles, with empty-capture rejection.

@@ -35,6 +35,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     private int _terrainLightDirectionLocation;
     private int _terrainLightColorLocation;
     private int _terrainAmbientColorLocation;
+    private int _terrainShadeOnlyLocation;
     private uint _overlayProgram;
     private int _overlayViewLocation;
     private int _overlayProjectionLocation;
@@ -57,6 +58,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     private Vector3 _boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
     private Vector3 _boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
     private bool _showSky;
+    private bool _terrainShadeOnly;
     private Vector3 _skyZenithColor = new(0.16f, 0.30f, 0.54f);
     private Vector3 _skyHorizonColor = new(0.58f, 0.58f, 0.50f);
     private Vector3 _skyFogColor = new(0.34f, 0.38f, 0.42f);
@@ -139,11 +141,16 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         _skyBackdropStrength = 0.0f;
     }
 
-    public void LoadPreview(WowViewerWorldRuntimeFrameResult frame, bool ignoreTerrainHoles = false, bool showHoleOverlay = false)
+    public void LoadPreview(
+        WowViewerWorldRuntimeFrameResult frame,
+        bool ignoreTerrainHoles = false,
+        bool showHoleOverlay = false,
+        bool terrainShadeOnly = false)
     {
         ArgumentNullException.ThrowIfNull(frame);
 
         ClearPreview();
+        _terrainShadeOnly = terrainShadeOnly;
         _showSky = frame.PassOptions.SkyVisible;
         ConfigureSkyColors(frame);
         BuildTerrainBuffers(frame, ignoreTerrainHoles);
@@ -204,9 +211,13 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             _gl.UseProgram(_terrainProgram);
             _gl.UniformMatrix4(_terrainViewLocation, 1, false, (float*)&view.M11);
             _gl.UniformMatrix4(_terrainProjectionLocation, 1, false, (float*)&projection.M11);
-            _gl.Uniform3(_terrainLightDirectionLocation, -0.45f, -0.55f, 0.70f);
-            _gl.Uniform3(_terrainLightColorLocation, 0.80f, 0.82f, 0.78f);
-            _gl.Uniform3(_terrainAmbientColorLocation, 0.28f, 0.30f, 0.34f);
+            Vector3 lightDirection = ValidationTerrainShadeContract.LightDirection;
+            Vector3 lightColor = ValidationTerrainShadeContract.LightColor;
+            Vector3 ambientColor = ValidationTerrainShadeContract.AmbientColor;
+            _gl.Uniform3(_terrainLightDirectionLocation, lightDirection.X, lightDirection.Y, lightDirection.Z);
+            _gl.Uniform3(_terrainLightColorLocation, lightColor.X, lightColor.Y, lightColor.Z);
+            _gl.Uniform3(_terrainAmbientColorLocation, ambientColor.X, ambientColor.Y, ambientColor.Z);
+            _gl.Uniform1(_terrainShadeOnlyLocation, _terrainShadeOnly ? 1 : 0);
             foreach (TerrainTileMesh tileMesh in _terrainTiles)
             {
                 _gl.ActiveTexture(TextureUnit.Texture0);
@@ -1106,6 +1117,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             uniform vec3 uLightDirection;
             uniform vec3 uLightColor;
             uniform vec3 uAmbientColor;
+            uniform bool uTerrainShadeOnly;
 
             out vec4 FragColor;
 
@@ -1119,6 +1131,11 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
                 vec3 normal = normalize(vNormal);
                 float ndotl = max(dot(normal, normalize(uLightDirection)), 0.0);
                 vec3 lighting = uAmbientColor + (uLightColor * ndotl);
+                if (uTerrainShadeOnly)
+                {
+                    FragColor = vec4(lighting, 1.0);
+                    return;
+                }
                 float texScale = 8.0 / 33.333;
                 vec2 diffuseUv = vec2(-vWorldPosition.y, -vWorldPosition.x) * texScale;
                 vec4 alphaShadow = texture(uAlphaShadowArray, vec3(vTexCoord, float(vChunkSlice)));
@@ -1148,6 +1165,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         _terrainLightDirectionLocation = _gl.GetUniformLocation(_terrainProgram, "uLightDirection");
         _terrainLightColorLocation = _gl.GetUniformLocation(_terrainProgram, "uLightColor");
         _terrainAmbientColorLocation = _gl.GetUniformLocation(_terrainProgram, "uAmbientColor");
+        _terrainShadeOnlyLocation = _gl.GetUniformLocation(_terrainProgram, "uTerrainShadeOnly");
         _terrainDiffuseLayerCountLocation = _gl.GetUniformLocation(_terrainProgram, "uDiffuseLayerCount");
         _gl.UseProgram(_terrainProgram);
         _gl.Uniform1(_gl.GetUniformLocation(_terrainProgram, "uDiffuseArray"), 0);

@@ -2,6 +2,14 @@
 
 Keep this file to last-week truth. Older history moved to `memory-bank/archive/2026-07-04-pre-2026-06-27.md`.
 
+## 2026-07-12 — V25/V24 numeric lattice recovery audit
+
+- Audited `ef99e715` against V25. Preserve its small sequential trainer discipline only; do not restore its synthetic-prior deployment contract.
+- Confirmed C# WDL is 17x17 outer plus 16x16 inner samples. V25's stride-8 33x33 target is invalid as WDL and cannot unblock H2.
+- Planned object mask -> deterministic clean minimap -> H0 datum -> paired WDL lattice residual -> full-height residual. No trainer or data code changed.
+- Follow-up correction: only observed terrain-shadow/minimap imagery is raster input. Canonical supervision/output must be raw ADT mesh vertices; validation images are post-inference inspection only and are forbidden from re-entering training.
+- Added real-client terrain-shadow guidance contract: fixed-light viewer captures with objects/liquids/textures/alpha/tint disabled are an upper-bound and later mesh-rerender metric, never a deployment input or mesh target.
+
 ## 2026-07-11
 
 ### Minimap→height REFRAMED as minimap→terrain-SHAPE (2026-07-12, decisive finding)
@@ -295,3 +303,20 @@ Keep this file to last-week truth. Older history moved to `memory-bank/archive/2
 - Model animation controls resurfaced in default info surfaces.
 - Save-dialog-backed animation state export landed.
 - Shell-wrapper blocker was later replaced by real legacy build failures outside the UI slice.
+
+## 2026-07-12 — Spec 102 numeric recovery Phase 0
+
+- Added canonical `TerrainVertexLattice`, `TerrainWdlLattice`, and numeric `TerrainNormalGeometry` contracts.
+- Fixed dense height assembly so legitimate zero is valid and mixed-parity compatibility cells are never marked as vertices.
+- Fixed MCNR disk X/Z/Y to normalized public X/Y/Z conversion.
+- Updated Alpha and split-ADT tensor builders plus NPZ/raw serializers with raw vertex Z, world XY, presence, topology, paired WDL, and masks.
+- Added deterministic terrain-shade capture, manifest, fixed viewer-light contract, and numeric signal audit.
+- Fixed validation camera X/Y mismatch that previously captured only clear colour.
+- Real proof: five Alpha tiles captured twice byte-identically; directional-NdotL correlation 0.8596-0.9819.
+- Real NPZ proof: staged Alpha hash `0693FD1B...797BB794`; staged LK hash `C7CA2BD4...F08AD33D`.
+- Focused tests pass; full solution build passes with 0 errors. Full solution test command exceeded the 180-second harness timeout, so it is not claimed as a full-suite pass.
+- Phase 0 passed after a 3,581-row real-node audit published M0/H0/W1/H2/normal baselines without `wdl_height_33` or mixed-parity cells. M0 is unblocked; no GPU training started yet.
+- Invalidated the first M0/W1 runs because M0 used the reduced `object_mask_256` target. Those checkpoints, materializations, metrics, and W1 results are non-comparable.
+- Added an identity-checked Spec 102 numeric-only store: raw minimap, canonical `object_precise_mask_257`, liquid mask/height/source, MCNK flags, numeric normals, and raw unrepaired height only. It excludes cleaned images, reduced/visibility masks, placements, derived WDL, repair overlays, and the stale legacy liquid-type raster.
+- Repaired the liquid substrate instead of hiding it downstream. V18 extraction was present, but MH2O 8x8 cells were emitted as sparse half-scale vertices; the canonical builder now respects the exists bitmap and fills each cell's 2x2 half-step block. Strict JSON serialization also repaired the raw-stream metadata that had prevented repatching. Repatched staged `3_3_5_12340`; eight audited coastal rows copy exactly into Spec 102 numeric v3.
+- Recurated v6 from corrected liquid coverage: M0 1,901 train / 302 Northrend / 770 Alpha; H2 1,880 / 279 / 770; 490 tiles rejected at >=80% liquid coverage. The prior precise-mask M0 metrics predate this cohort and are stale. No retraining has started; M0 remains the proof owner and W1 has zero eligible rows until real paired WDL arrays exist.

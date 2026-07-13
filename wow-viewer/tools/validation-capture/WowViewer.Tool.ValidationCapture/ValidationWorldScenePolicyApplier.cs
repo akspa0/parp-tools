@@ -32,6 +32,8 @@ internal sealed class ValidationWorldScenePolicyState
 
     public bool ShowWdl { get; set; }
 
+    public bool TerrainShadeOnly { get; set; }
+
     public bool IgnoreTerrainHolesGlobally { get; set; }
 
     public bool ObjectPathFiltersEnabled { get; set; } = true;
@@ -111,6 +113,7 @@ internal static class ValidationWorldScenePolicyApplier
         state.ShowDoodads = variantPolicy.ShowObjects && variantPolicy.ShowDoodads;
         state.ShowSky = variantPolicy.ShowSky;
         state.ShowWdl = variantPolicy.ShowWdl;
+        state.TerrainShadeOnly = variantPolicy.TerrainShadeOnly;
         state.ShowWorldLiquids = !scenePolicy.HideWorldLiquids && variantPolicy.ShowWorldLiquids;
         state.EnableRuntimeWmoGroupLiquids = scenePolicy.EnableRuntimeWmoGroupLiquids && variantPolicy.ShowTerrainLiquids;
     }

@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using System.Text.Json;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 
@@ -99,11 +100,71 @@ public sealed class RawArraySerializerTests
         Assert.Contains("\"placement_modf_asset_paths\":[\"World/Wmo/Test/Test.wmo\"]", metadata, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Serialize_V16_WritesStrictValidMetadataJson()
+    {
+        TerrainTileTensorPack pack = new()
+        {
+            TileName = "Quoted \\\"tile\\\"",
+            MapName = "Azeroth",
+            SourceAdtPath = @"World\\Maps\\Azeroth\\Azeroth_1_2.adt",
+        };
+
+        using MemoryStream stream = new();
+        RawArraySerializer.Serialize(pack, stream, RawArraySerializer.StreamProfile.V16);
+
+        string metadata = ReadMetadataJson(stream.ToArray());
+        using JsonDocument parsed = JsonDocument.Parse(metadata);
+        Assert.Equal("Quoted \\\"tile\\\"", parsed.RootElement.GetProperty("tile_name").GetString());
+        Assert.Equal(JsonValueKind.Null, parsed.RootElement.GetProperty("tile_x").ValueKind);
+        Assert.Equal(0, parsed.RootElement.GetProperty("placement_modf_count").GetInt32());
+    }
+
+    [Fact]
+    public void Serialize_V22_WritesCanonicalMcvtArrays()
+    {
+        TerrainVertexLattice terrainVertices = BuildTerrainVertices();
+        TerrainTileTensorPack pack = new()
+        {
+            TileName = "Azeroth_1_2",
+            TerrainVertices = terrainVertices,
+            WdlLattice = TerrainWdlLattice.FromTerrainVertices(terrainVertices),
+        };
+
+        using MemoryStream stream = new();
+        RawArraySerializer.Serialize(pack, stream, RawArraySerializer.StreamProfile.V22);
+        Dictionary<string, RawArrayInfo> arrays = ReadArrayIndex(stream.ToArray());
+
+        Assert.Equal([16, 16, 145], arrays["mcvt_vertex_z"].Shape);
+        Assert.Equal([16, 16, 145], arrays["mcvt_vertex_present"].Shape);
+        Assert.Equal([16, 16, 145], arrays["mcvt_vertex_world_x"].Shape);
+        Assert.Equal([16, 16, 145], arrays["mcvt_vertex_world_y"].Shape);
+        Assert.Equal([256, 3], arrays["mcvt_triangle_indices"].Shape);
+        Assert.Equal([257, 257], arrays["mcvt_vertex_mask_257"].Shape);
+        Assert.Equal("<f4", arrays["mcvt_vertex_z"].Dtype);
+        Assert.Equal("|b1", arrays["mcvt_vertex_present"].Dtype);
+        Assert.Equal("|b1", arrays["mcvt_vertex_mask_257"].Dtype);
+        Assert.Equal([17, 17], arrays["wdl_outer_17"].Shape);
+        Assert.Equal([16, 16], arrays["wdl_inner_16"].Shape);
+        Assert.Equal([17, 17], arrays["wdl_outer_present"].Shape);
+        Assert.Equal([16, 16], arrays["wdl_inner_present"].Shape);
+    }
+
     private static float[,,] BuildNormals()
     {
         float[,,] normals = new float[257, 257, 3];
         normals[0, 0, 2] = 1f;
         return normals;
+    }
+
+    private static TerrainVertexLattice BuildTerrainVertices()
+    {
+        return new TerrainVertexLattice(
+            new float[16, 16, 145],
+            new float[16, 16, 145],
+            new float[16, 16, 145],
+            new bool[16, 16, 145],
+            new bool[257, 257]);
     }
 
     private static bool[,] BuildCheckerMask()

@@ -17,6 +17,10 @@ internal sealed class ValidationWorldSceneAdapter : IValidationWorldSceneAdapter
     private float _lastGroundHeight;
     private HiddenWindowRenderHost? _renderHost;
 
+    internal float LastTerrainHeightRange { get; private set; }
+
+    internal WowViewerWorldRuntimeFrameResult? LastRuntimeFrame => _runtimeFrame;
+
     public void Initialize(HeadlessValidationCaptureSession session)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
@@ -51,6 +55,9 @@ internal sealed class ValidationWorldSceneAdapter : IValidationWorldSceneAdapter
         WowViewerWorldRuntimeFrameResult runtimeFrame = WowViewerWorldRuntimeBridge.Build(runtimeRequest);
         _runtimeFrame = runtimeFrame;
         _lastGroundHeight = runtimeFrame.TerrainTileData.Heightmap?.CenterHeight ?? 0f;
+        LastTerrainHeightRange = runtimeFrame.TerrainTileData.Heightmap is { } heightmap
+            ? heightmap.MaxHeight - heightmap.MinHeight
+            : 0f;
 
         return CreateSnapshot(
             _scenePolicy!.RequestedResolution,
@@ -75,7 +82,11 @@ internal sealed class ValidationWorldSceneAdapter : IValidationWorldSceneAdapter
 
         EnsureReadyToRender();
         _renderHost ??= new HiddenWindowRenderHost(_session!, _scenePolicy!.RequestedResolution);
-        _renderHost.Render(_runtimeFrame!, _scenePolicy!.IgnoreTerrainHolesGlobally, cameraFrame);
+        _renderHost.Render(
+            _runtimeFrame!,
+            _scenePolicy!.IgnoreTerrainHolesGlobally,
+            _policyState!.TerrainShadeOnly,
+            cameraFrame);
     }
 
     public byte[] ReadFramebufferRgba()
@@ -213,6 +224,7 @@ internal sealed class ValidationWorldSceneAdapter : IValidationWorldSceneAdapter
         private WorldGpuPreviewRenderer? _renderer;
         private WowViewerWorldRuntimeFrameResult? _pendingRuntimeFrame;
         private ValidationCaptureCameraFrame _pendingCameraFrame;
+        private bool _pendingTerrainShadeOnly;
         private byte[]? _lastFramebuffer;
         private Exception? _loadFailure;
         private Exception? _renderFailure;
@@ -252,7 +264,11 @@ internal sealed class ValidationWorldSceneAdapter : IValidationWorldSceneAdapter
                 throw new InvalidOperationException($"Failed to initialize validation GPU render host: {_loadFailure.Message}", _loadFailure);
         }
 
-        public void Render(WowViewerWorldRuntimeFrameResult runtimeFrame, bool ignoreTerrainHolesGlobally, ValidationCaptureCameraFrame cameraFrame)
+        public void Render(
+            WowViewerWorldRuntimeFrameResult runtimeFrame,
+            bool ignoreTerrainHolesGlobally,
+            bool terrainShadeOnly,
+            ValidationCaptureCameraFrame cameraFrame)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             ArgumentNullException.ThrowIfNull(runtimeFrame);
@@ -261,6 +277,7 @@ internal sealed class ValidationWorldSceneAdapter : IValidationWorldSceneAdapter
             {
                 _pendingRuntimeFrame = runtimeFrame;
                 _pendingCameraFrame = cameraFrame;
+                _pendingTerrainShadeOnly = terrainShadeOnly;
                 _renderFailure = null;
                 _lastFramebuffer = null;
                 _renderRequested = true;
@@ -326,12 +343,14 @@ internal sealed class ValidationWorldSceneAdapter : IValidationWorldSceneAdapter
             bool shouldRender;
             WowViewerWorldRuntimeFrameResult? runtimeFrame;
             ValidationCaptureCameraFrame cameraFrame;
+            bool terrainShadeOnly;
 
             lock (_sync)
             {
                 shouldRender = _renderRequested;
                 runtimeFrame = _pendingRuntimeFrame;
                 cameraFrame = _pendingCameraFrame;
+                terrainShadeOnly = _pendingTerrainShadeOnly;
                 _renderRequested = false;
             }
 
@@ -340,7 +359,11 @@ internal sealed class ValidationWorldSceneAdapter : IValidationWorldSceneAdapter
 
             try
             {
-                _renderer.LoadPreview(runtimeFrame, _session.ScenePolicy.IgnoreTerrainHolesGlobally, showHoleOverlay: false);
+                _renderer.LoadPreview(
+                    runtimeFrame,
+                    _session.ScenePolicy.IgnoreTerrainHolesGlobally,
+                    showHoleOverlay: false,
+                    terrainShadeOnly: terrainShadeOnly);
                 _renderer.Render(_resolution, _resolution, cameraFrame);
                 _lastFramebuffer = ReadPreviewTexture(_gl, _renderer.PreviewTextureHandle, _resolution, _resolution);
             }

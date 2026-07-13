@@ -37,7 +37,7 @@ public sealed class ValidationCaptureCommandTests
 
             Assert.Equal(0, exitCode);
             Assert.Contains("Validation capture shell dry-run succeeded.", capture.Output, StringComparison.Ordinal);
-            Assert.Contains("Variant count: 4", capture.Output, StringComparison.Ordinal);
+            Assert.Contains("Variant count: 5", capture.Output, StringComparison.Ordinal);
         }
     }
 
@@ -52,14 +52,40 @@ public sealed class ValidationCaptureCommandTests
             int exitCode = ValidationCaptureCommand.Execute(CreateCaptureArgs(temp.RootPath, "--stub-scene"));
 
             Assert.Equal(0, exitCode);
-            Assert.Contains("Validation capture stub run completed: 4/4 succeeded, 0 timed out.", capture.Output, StringComparison.Ordinal);
+            Assert.Contains("Validation capture stub run completed: 5/5 succeeded, 0 timed out.", capture.Output, StringComparison.Ordinal);
 
             Assert.True(File.Exists(Path.Combine(temp.RootPath, "primary", "Azeroth_30_48_viewer_validation.png")));
             Assert.True(File.Exists(Path.Combine(temp.RootPath, "noliquids", "Azeroth_30_48_viewer_validation.png")));
             Assert.True(File.Exists(Path.Combine(temp.RootPath, "noobjects", "Azeroth_30_48_viewer_validation.png")));
             Assert.True(File.Exists(Path.Combine(temp.RootPath, "objectsonly", "Azeroth_30_48_viewer_validation.png")));
+            Assert.True(File.Exists(Path.Combine(temp.RootPath, "terrain-shade", "Azeroth_30_48_terrain_shade.png")));
+            string terrainShadeManifestPath = Path.Combine(temp.RootPath, "terrain-shade", "Azeroth_30_48_terrain_shade.json");
+            Assert.True(File.Exists(terrainShadeManifestPath));
+            string terrainShadeManifest = File.ReadAllText(terrainShadeManifestPath);
+            Assert.Contains("\"guidance_only\": true", terrainShadeManifest, StringComparison.Ordinal);
+            Assert.Contains("\"deployment_input\": false", terrainShadeManifest, StringComparison.Ordinal);
+            Assert.Contains("\"canonical_terrain_target\": \"mcvt_vertex_z\"", terrainShadeManifest, StringComparison.Ordinal);
+            Assert.Contains("fixed_viewer_contract_not_client_light_tables", terrainShadeManifest, StringComparison.Ordinal);
             Assert.True(File.Exists(Path.Combine(temp.RootPath, "images", "Azeroth_30_48_object_visibility_mask.png")));
             Assert.True(File.Exists(Path.Combine(temp.RootPath, "images", "Azeroth_30_48_no_objects.png")));
+        }
+    }
+
+    [Fact]
+    public void Execute_CaptureStubScene_TerrainShadeOnly_WritesOnlyGuidanceCapture()
+    {
+        lock (ConsoleLock)
+        {
+            using TemporaryDirectory temp = new();
+            using ConsoleCapture capture = new();
+            string[] args = [.. CreateCaptureArgs(temp.RootPath, "--stub-scene"), "--variants", "terrain-shade"];
+
+            int exitCode = ValidationCaptureCommand.Execute(args);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("Validation capture stub run completed: 1/1 succeeded", capture.Output, StringComparison.Ordinal);
+            Assert.True(File.Exists(Path.Combine(temp.RootPath, "terrain-shade", "Azeroth_30_48_terrain_shade.png")));
+            Assert.False(Directory.Exists(Path.Combine(temp.RootPath, "primary")));
         }
     }
 
@@ -111,7 +137,7 @@ public sealed class ValidationCaptureCommandTests
             Assert.Equal(0, exitCode);
             Assert.Contains("Validation capture batch dry-run succeeded.", capture.Output, StringComparison.Ordinal);
             Assert.Contains("Tile count: 2", capture.Output, StringComparison.Ordinal);
-            Assert.Contains("Variant count: 8", capture.Output, StringComparison.Ordinal);
+            Assert.Contains("Variant count: 10", capture.Output, StringComparison.Ordinal);
         }
     }
 
@@ -137,7 +163,7 @@ public sealed class ValidationCaptureCommandTests
             ]);
 
             Assert.Equal(0, exitCode);
-            Assert.Contains("Validation capture batch stub run completed: 4/4 succeeded, 0 timed out.", capture.Output, StringComparison.Ordinal);
+            Assert.Contains("Validation capture batch stub run completed: 5/5 succeeded, 0 timed out.", capture.Output, StringComparison.Ordinal);
 
             string posePath = Path.Combine(temp.RootPath, "pose-metadata", "Azeroth_30_48_pose.json");
             Assert.True(File.Exists(posePath));

@@ -18,8 +18,8 @@ public static class ValidationCaptureCameraSolver
             throw new ArgumentOutOfRangeException(nameof(tileWorldSize), tileWorldSize, "Tile world size must be greater than zero.");
 
         return new Vector2(
-            mapOrigin - ((tileX + 0.5f) * tileWorldSize),
-            mapOrigin - ((tileY + 0.5f) * tileWorldSize));
+            mapOrigin - ((tileY + 0.5f) * tileWorldSize),
+            mapOrigin - ((tileX + 0.5f) * tileWorldSize));
     }
 
     public static ValidationCaptureCameraFrame SolveTopDown(
