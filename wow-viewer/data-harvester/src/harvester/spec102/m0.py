@@ -55,10 +55,11 @@ class ConvBlock(nn.Module):
 class M0ObjectMask(nn.Module):
     """A compact U-Net with exactly one output: object-mask logits."""
 
-    def __init__(self, base_channels: int = 40) -> None:
+    def __init__(self, base_channels: int = 40, in_channels: int = 3) -> None:
         super().__init__()
+        self.in_channels = in_channels
         widths = [base_channels, base_channels * 2, base_channels * 4, base_channels * 8]
-        self.encoder0 = ConvBlock(3, widths[0])
+        self.encoder0 = ConvBlock(in_channels, widths[0])
         self.encoder1 = ConvBlock(widths[0], widths[1])
         self.encoder2 = ConvBlock(widths[1], widths[2])
         self.bottleneck = ConvBlock(widths[2], widths[3])
@@ -68,8 +69,8 @@ class M0ObjectMask(nn.Module):
         self.output = nn.Conv2d(widths[0], 1, 1)
 
     def forward(self, minimap_rgb: torch.Tensor) -> torch.Tensor:
-        if minimap_rgb.ndim != 4 or minimap_rgb.shape[1] != 3:
-            raise ValueError(f"M0 expects [batch,3,height,width], got {tuple(minimap_rgb.shape)}")
+        if minimap_rgb.ndim != 4 or minimap_rgb.shape[1] != self.in_channels:
+            raise ValueError(f"M0 expects [batch,{self.in_channels},height,width], got {tuple(minimap_rgb.shape)}")
         e0 = self.encoder0(minimap_rgb)
         e1 = self.encoder1(F.max_pool2d(e0, 2))
         e2 = self.encoder2(F.max_pool2d(e1, 2))

@@ -1,0 +1,108 @@
+# Implementation Plan: Revive the v7 terrain regressor on current clean signals
+
+**Branch**: `103-image-only-reconstruction` (work lands on `v0.5.0-prerelease`) | **Date**: 2026-07-13 | **Spec**: [spec.md](spec.md)
+
+> **Correction (2026-07-13):** V24 / Spec 094 is NOT functional and is ignored. This plan revives the original **v7** model — a single, basic U-Net (no stages) from ~April 2026 — and runs it on the current clean dataset. The user's claim: v7 was simple, dirty, and worked; with clean signals it should "fly and be perfect."
+
+## Summary
+
+Port the real v7 model (`MultiChannelUNetV7`) into `wow-viewer` and train it on the current clean signals. v7 is one U-Net: **[minimap RGB + normal RGB + WDL prior + aux context] → terrain height**, refining the WDL prior in a single shot (no Stage A/B). It is read-only reference in `gillijimproject_refactor`; we port it, we do not modify it there.
+
+**Source of truth (read-only reference):** `gillijimproject_refactor/src/WoWMapConverter/scripts/` — `v7_model.py` (168 lines, `MultiChannelUNetV7`), `train_v7.py`, `v7_losses.py`, `infer_v7.py`. v7 added 2026-04-14; V7.7 detail head 2026-04-19.
+
+## v7 Contract (from the model + V7.5 guide)
+
+- **Input: 13 channels** — `0–2` minimap RGB (terrain-only cleaned preferred), `3–5` normal-map RGB, `6` WDL height prior (the residual/"trestle" base: `global = wdl_base + tanh(delta)*scale`), `7–12` six auxiliary context channels (alpha/liquid/hole/chunk metadata) marking known minimap losses.
+- **Output: 2 channels** — global + local height (V7.7 adds an optional 3rd detail channel), plus a small `bounds` head (4 values). Model interpolates output to `OUTPUT_SIZE` (512 in the original).
+- **Core**: 5-level residual U-Net (64→128→256→512→1024→2048 bottleneck), GroupNorm, reflect padding. Architecturally simple; not tiny, but "basic."
+
+## How our current clean signals map to v7's 13 channels
+
+| v7 channel | our signal |
+|---|---|
+| 0–2 minimap RGB | `minimap_rgb` (cleaned via `object_precise_mask` where wanted) |
+| 3–5 normal RGB | `normal_xyz` |
+| 6 WDL prior | derived from `height_257`: outer/inner sampled at `::16` / `8::16`, upsampled to the working resolution (the verified LR-from-HR transform) |
+| 7–12 aux | alpha, `liquid_mask`, `holes_16`, chunk-metadata context (pin exact set from `train_v7.py`) |
+
+**Target**: `height_257` (resized/aligned to the working resolution). This is a supervised reconstruction model; the WDL prior it refines is derived from the same height family, so at deployment the prior must eventually be image-generated — see "Relationship to the image-only law."
+
+## Loss & object handling — quick-and-dirty (decided)
+
+The loss stays simple: plain height regression over all pixels, the way v7 worked. **Object-mask gating in the loss is OFF by default** — masking out object pixels wipes out large swaths of the tile (everything that exists or doesn't), costs hours of extra training, and buys little; v7 proved training straight through object noise works. Object-mask gating is available as an optional flag for later experiments, off unless explicitly requested. Objects are accepted noise; cleanup stays deferred to the output-space segmentation+inpaint lane (spec US3).
+
+## Constitution Check
+
+- **Residual Model Chain**: one model, one signal (terrain height as a residual over the WDL prior). No multi-task, no shared weights. PASS.
+- **Repo Independence / Read-Only Reference**: v7 is read from `gillijimproject_refactor` (RULE 1 valid reason: reference for reimplementation) and ported into `wow-viewer/data-harvester/`. The reference repo is not modified. PASS.
+- **Real-Data Validation**: trained/validated on staged 3.3.5 clean signals. PASS.
+- **Training-Script Discipline**: the ported trainer documents input-channel layout and losses. PASS.
+- **Bite-Sized**: phases ≤10 one-concern steps. PASS.
+
+No violations.
+
+## WDL-prior robustness & the path to image-only (decided + exploratory)
+
+- **Robustness to missing WDL prior (in scope, cheap):** train with WDL-prior **channel dropout** — randomly zero/flatten channel 6 for a fraction of tiles. Because v7's trestle is `height = wdl_base + delta`, a zeroed base makes the model predict the full height as the residual (no prior), a present base makes it refine. One model serves both prior-present and prior-absent tiles. Training-time input augmentation only; no architecture change.
+- **Invert to predict the prior (exploratory front-end lane):** once v7 has the WDL↔terrain correlation, train a small `minimap → WDL prior` from the same paired data, closing the image-only loop: image → predicted prior → v7 → terrain.
+- **Synthetic universality (exploratory lane):** author synthetic ADT tiles with known height patterns (existing ADT-creation tooling), capture their minimaps in WoWViewer, derive the prior deterministically → perfectly-clean (image, prior, terrain) triples with known ground truth for training and for probing what the model learned; a route to a universal model.
+
+## Terrain shadow & the teacher/student path (exploratory, unlocked by synthetic control data)
+
+- **Shadow ↔ height, now measurable.** Synthetic tiles with known height let us render a deterministic fixed-light terrain shadow (Spec 102 N011-N013 already defines the capture + determinism contract) and directly measure how shadow encodes slope/relief — against perfect ground truth, which the uncooperative renderer blocked before. If the correlation is strong, terrain shadow becomes a legitimate signal (and it is partly baked into the minimap's own lighting).
+- **Teacher → student.** Train a TEACHER on the rich clean synthetic signals (minimap + normals + WDL prior + terrain shadow → height, known GT) to prove the mapping is learnable. Then distill it into a STUDENT that consumes only deployment-available inputs (ultimately image-only), inheriting the teacher's mapping while honoring the image-only law. This is the bridge from rich synthetic training to image-only deployment.
+
+## Relationship to the image-only law (spec Governing Principle)
+
+v7 consumes the WDL prior + normals + aux, which are height-derived — so v7 by itself is the **reconstruction** model, not an image-only one. That is fine and intended for this revival: get v7 flying on the signals we have. Generating those inputs (chiefly the WDL prior) from the image alone is the *separate, later* image-only front-end. The spec's law governs the eventual deployment chain (image → generated prior → v7 → terrain); this plan delivers the proven back half first. Recorded honestly so we don't pretend v7 is image-only.
+
+## Phases (bite-sized)
+
+### Phase 0 — Pin the v7 contract (read-only)
+
+1. Read `train_v7.py` to record the exact 13-channel assembly order and the aux channels 7–12.
+2. Read `v7_losses.py` + `infer_v7.py` for the loss terms, output-head modes, and inference resolution.
+3. Confirm the working spatial resolution (v7 used 512; our height is 257) and decide the resize convention.
+
+### Phase 1 — Port v7 into wow-viewer
+
+1. Port `MultiChannelUNetV7` (+ losses) to `data-harvester/src/harvester/spec103/v7_model.py`, unchanged in architecture.
+2. Write the input assembler that builds the 13-channel stack from the current clean signals (table above), including the derived WDL prior.
+3. CPU sanity harness (no GPU run): forward/loss/backward, 13-ch input, output shape, WDL-trestle residual path.
+
+### Phase 2 — Synthetic proof-of-concept (lead experiment, de-risk first)
+
+1. Author a small set of synthetic ADT tiles with known height patterns (ramps, ridges, craters, plateaus) using the existing ADT-creation tooling, used as-is (AlphaWdtWriter stays frozen; no C# rewrites).
+2. Capture their minimaps via the WoWViewer capture path; derive the WDL prior deterministically from the synthetic height (`::16`/`8::16`); assemble the 13-channel input.
+3. Train v7 on the clean synthetic set (user runs). Verify it reconstructs the known patterns and that prior-dropout tiles still resolve. Catalog every caveat (resolution, channel order, trestle behavior, losses) — this is the whole point of going synthetic-first.
+
+### Phase 3 — Apply the proven recipe to the real clean dataset (user runs)
+
+1. With synthetic caveats resolved, build/point at a real clean store (`minimap_rgb` + `normal_xyz` + `height_257` + alpha/liquid/holes; derive the prior).
+2. Train the now-proven v7 on real data with the bounded-trainer conveniences (complete-map holdout, AMP, EMA, warmup+cosine, early-stop, resumable, WDL-prior dropout). User runs.
+
+### Phase 4 — Review + validation
+
+1. Reuse the OBJ/mesh export path to render terrain for eyeball review (the side-by-side you showed).
+2. Dev diagnostic: height L1/gradient vs. the WDL-prior baseline; label-free self-consistency (border agreement, plausibility, artifacts) toward the spec's acceptance test.
+
+### Phase 5 — Deferred lanes
+
+- Image-only WDL-prior front-end (image → prior), synthetic-universality scale-up, and output-space object cleanup remain separate later lanes.
+
+## Project Structure
+
+```text
+specs/103-image-only-reconstruction/{spec.md, plan.md, checklists/, tasks.md}
+
+wow-viewer/data-harvester/
+├── src/harvester/spec103/v7_model.py      # ported from gillijimproject_refactor (read-only ref)
+├── src/harvester/spec103/v7_inputs.py     # 13-channel assembler from current signals
+└── scripts/train_spec103_v7.py            # lean trainer (reuses bounded-trainer conveniences)
+```
+
+**Structure Decision**: new `spec103` lane under `data-harvester/`; port v7 in, do not touch the reference repo, do not touch V24.
+
+## Complexity Tracking
+
+No constitution violations. Deliberate decision: revive the proven single-model v7 rather than the non-functional two-stage V24. The honest caveat (v7 is not image-only; it needs the WDL prior) is recorded above; the image-only front-end is a separate later lane.
