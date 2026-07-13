@@ -42,8 +42,10 @@ stream metadata document that prevented a clean repatch. The repaired numeric
 v3 store retains the canonical precise mask and real numeric liquid mask,
 height, MCNK flags, and source provenance. With an 80% occlusion cutoff, M0
 receives 1,901 train / 302 map-validation / 770 era rows; H2 receives 1,880 /
-279 / 770. No M0 metric is currently comparable to this cohort. M0 must be
-rerun and frozen before W1; W1/H2 remain blocked.
+279 / 770. The 2026-07-13 M0 rerun was extended from three to twelve epochs
+only after the registered undertraining gate passed. Best held-out Northrend
+IoU was `0.2764`, but Alpha-era IoU was `0.0743` against the `0.10` gate;
+calibration selected threshold `0.50`. M0 is not frozen. W1/H2 remain blocked.
 
 ## Phase 2 — H0 Tile Offset Residual
 

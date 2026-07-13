@@ -123,9 +123,13 @@ cell to its 2x2 half-step coverage block and respects the exists bitmap. The
 Spec 102 v3 store is an exact copy of the repaired V18 masks; the stale liquid
 type raster is excluded. Curation rejects known mismatches, visually uniform
 or water minimaps, missing liquid evidence, and tiles with at least 80% liquid
-occlusion. All prior M0 metrics are stale under this corrected cohort; M0 is
-not frozen and must be rerun before W1. W1 also has no eligible rows until real
-paired WDL arrays exist.
+occlusion. The 2026-07-13 rerun used this exact v3/v6 contract. Its bounded
+three-epoch run improved every epoch and authorized continuation; the resumed
+12-epoch run reached held-out Northrend IoU `0.2764` but Alpha-era IoU only
+`0.0743` (required `0.10`), with `2.15 GB` peak VRAM. Threshold calibration
+selected `0.50` and did not improve the era result. M0 is therefore not frozen
+and W1 remains blocked. W1 also has no eligible rows until real paired WDL
+arrays exist.
 
 ## Assumptions
 

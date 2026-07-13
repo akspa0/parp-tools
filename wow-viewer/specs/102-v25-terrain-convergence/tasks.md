@@ -73,7 +73,7 @@ Phase 0 gate passed. Numeric report: `output/analysis/spec102_numeric_lattice_v1
 
 - [x] **N015 Implement M0 only**: RGB -> one object-mask signal, separate checkpoint and bounded CUDA gate. The trainer requires canonical `object_precise_mask_257` and performs the registered four-corner maximum projection internally. It rejects `object_mask_256`, visibility masks, and fallbacks.
 - [x] **N015A Repair and prove liquid curation inputs**: fixed strict raw-stream metadata JSON, corrected MH2O 8x8-cell to 16x16-half-step coverage (including exists bitmap), repatched staged `3_3_5_12340`, rebuilt numeric v3, and proved exact V18/Spec102 equality on eight coastal MH2O rows. The legacy liquid-type raster is excluded because the repair path does not refresh it.
-- [ ] **N016 Validate and freeze M0**: **must be rerun on numeric v3 / curated v6**. The repaired cohort contains 1,901 train / 302 map-validation / 770 era M0 rows and excludes 490 tiles with at least 80% liquid coverage. Every earlier M0 metric predates the corrected MH2O coverage and is stale.
+- [ ] **N016 Validate and freeze M0**: **rerun complete; gate failed, not frozen**. Numeric v3 / curated v6 contains 1,901 train / 302 map-validation / 770 era rows and excludes 490 tiles with at least 80% liquid coverage. The three-epoch decision run improved validation IoU `0.1796 -> 0.2102` and passed the registered extension authorization. The resumed 12-epoch run reached validation IoU `0.2764` but Alpha-era IoU `0.0743` (gate `0.25` / `0.10`, peak `2.15 GB`). Calibration selected `0.50` with the same era result. Stop here; do not materialize M0 or start W1.
 
 ## Recovery Phase 2 — W1 WDL Lattice Residual
 
