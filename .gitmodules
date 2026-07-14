@@ -47,3 +47,21 @@
 [submodule "headroom"]
 	path = headroom
 	url = https://github.com/chopratejas/headroom.git
+[submodule "wow-viewer/libs/wowdev/WoWDBDefs"]
+	path = wow-viewer/libs/wowdev/WoWDBDefs
+	url = https://github.com/wowdev/WoWDBDefs.git
+[submodule "wow-viewer/libs/Marlamin/WoWTools.Minimaps"]
+	path = wow-viewer/libs/Marlamin/WoWTools.Minimaps
+	url = https://github.com/Marlamin/WoWTools.Minimaps.git
+[submodule "wow-viewer/libs/wowdev/DBCD"]
+	path = wow-viewer/libs/wowdev/DBCD
+	url = https://github.com/wowdev/DBCD.git
+[submodule "wow-viewer/libs/ModernWoWTools/Warcraft.NET"]
+	path = wow-viewer/libs/ModernWoWTools/Warcraft.NET
+	url = https://github.com/ModernWoWTools/Warcraft.NET.git
+[submodule "wow-viewer/libs/WoW-Tools/SereniaBLPLib"]
+	path = wow-viewer/libs/WoW-Tools/SereniaBLPLib
+	url = https://github.com/WoW-Tools/SereniaBLPLib.git
+[submodule "wow-viewer/libs/wowdev/wow-listfile"]
+	path = wow-viewer/libs/wowdev/wow-listfile
+	url = https://github.com/wowdev/wow-listfile.git

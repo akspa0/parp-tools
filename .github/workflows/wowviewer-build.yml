@@ -64,6 +64,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Init wow-viewer vendored-lib submodules
+        # Scoped to exactly the submodules wow-viewer's build needs — NOT `submodules: true`
+        # on checkout, which would also pull unrelated, much larger submodules elsewhere in
+        # this repo (gillijimproject_refactor's Depth-Anything-3, PM4Tool/lib/*, dirac,
+        # headroom). These 6 were previously orphaned gitlinks with no .gitmodules entry
+        # (silently empty on any fresh clone, including every CI run before this fix) —
+        # properly wired up 2026-07-14, updated to each upstream's latest commit.
+        run: >
+          git submodule update --init --depth 1 --
+          wow-viewer/libs/Marlamin/WoWTools.Minimaps
+          wow-viewer/libs/ModernWoWTools/Warcraft.NET
+          wow-viewer/libs/WoW-Tools/SereniaBLPLib
+          wow-viewer/libs/wowdev/DBCD
+          wow-viewer/libs/wowdev/WoWDBDefs
+          wow-viewer/libs/wowdev/wow-listfile
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
@@ -106,6 +122,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Init wow-viewer vendored-lib submodules
+        # Scoped to exactly the submodules wow-viewer's build needs — NOT `submodules: true`
+        # on checkout, which would also pull unrelated, much larger submodules elsewhere in
+        # this repo (gillijimproject_refactor's Depth-Anything-3, PM4Tool/lib/*, dirac,
+        # headroom). These 6 were previously orphaned gitlinks with no .gitmodules entry
+        # (silently empty on any fresh clone, including every CI run before this fix) —
+        # properly wired up 2026-07-14, updated to each upstream's latest commit.
+        run: >
+          git submodule update --init --depth 1 --
+          wow-viewer/libs/Marlamin/WoWTools.Minimaps
+          wow-viewer/libs/ModernWoWTools/Warcraft.NET
+          wow-viewer/libs/WoW-Tools/SereniaBLPLib
+          wow-viewer/libs/wowdev/DBCD
+          wow-viewer/libs/wowdev/WoWDBDefs
+          wow-viewer/libs/wowdev/wow-listfile
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
@@ -130,6 +162,22 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Init wow-viewer vendored-lib submodules
+        # Scoped to exactly the submodules wow-viewer's build needs — NOT `submodules: true`
+        # on checkout, which would also pull unrelated, much larger submodules elsewhere in
+        # this repo (gillijimproject_refactor's Depth-Anything-3, PM4Tool/lib/*, dirac,
+        # headroom). These 6 were previously orphaned gitlinks with no .gitmodules entry
+        # (silently empty on any fresh clone, including every CI run before this fix) —
+        # properly wired up 2026-07-14, updated to each upstream's latest commit.
+        run: >
+          git submodule update --init --depth 1 --
+          wow-viewer/libs/Marlamin/WoWTools.Minimaps
+          wow-viewer/libs/ModernWoWTools/Warcraft.NET
+          wow-viewer/libs/WoW-Tools/SereniaBLPLib
+          wow-viewer/libs/wowdev/DBCD
+          wow-viewer/libs/wowdev/WoWDBDefs
+          wow-viewer/libs/wowdev/wow-listfile
 
       - uses: actions/setup-dotnet@v4
         with:

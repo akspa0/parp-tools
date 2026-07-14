@@ -54,6 +54,39 @@ Last updated: 2026-07-14 (WoWViewer GitHub Actions CI added; cross-platform audi
   `tools/harvest/WowViewer.Tool.Harvest/Program.cs:398` and `tools/converter/WowViewer.Tool.
   Converter/LkToAlphaCommand.cs:1885` — both real on-disk filesystem paths (not the MPQ
   virtual-path `\` convention used correctly elsewhere), now `Path.Combine`.
+- **First real CI push found two more pre-existing repo bugs, both fixed (2026-07-14):**
+  1. **`.gitignore` `maps/` (unanchored) was shadowing real C# source, not just data dirs.**
+     Matched any directory named `maps` anywhere in the tree, not just at repo root — silently
+     hid `wow-viewer/src/core/WowViewer.Core/Maps/` and `.../WowViewer.Core.IO/Maps/`. 9 source
+     files were never committed (invisible to any fresh clone, always present locally since the
+     files exist on disk regardless of git tracking). Anchored `runs/`, `datasets/`, `publish/`,
+     `maps/` with a leading `/`; recovered all 9 files; verified no other `.cs` anywhere in
+     `src/`/`tools/`/`tests/`/`libs/` is similarly shadowed.
+  2. **6 vendored libs under `wow-viewer/libs/` were orphaned git submodule gitlinks with no
+     `.gitmodules` entry** (`Marlamin/WoWTools.Minimaps`, `ModernWoWTools/Warcraft.NET`,
+     `WoW-Tools/SereniaBLPLib`, `wowdev/DBCD`, `wowdev/WoWDBDefs`, `wowdev/wow-listfile`) —
+     each had a real nested `.git` clone locally (never lost), but no upstream URL was recorded
+     anywhere, so every fresh clone (every CI run) got a completely empty folder for all 6.
+     **USER decision: convert to real submodules (option they explicitly chose over flattening
+     to plain files), updated to each upstream's latest commit** — "should not cause a rift."
+     Before updating, checked each repo for local un-pushed commits first (a naive
+     force-reset to origin/master would have silently destroyed them): `WoW-Tools/SereniaBLPLib`
+     and `wowdev/DBCD` both carry a local, user-authored "Disable central package version
+     management" commit (works around the `Directory.Packages.props` central-versioning
+     conflict with SereniaBLPLib's own per-TFM ImageSharp pin) — preserved via rebase for DBCD
+     (21 commits behind → rebased clean), left as-is for SereniaBLPLib (its `master` was
+     *behind* the locally-patched commit, not ahead — nothing to gain from resetting).
+     `WoWDBDefs` (+116 commits) and `wow-listfile` (+158 commits) fast-forwarded cleanly, no
+     local divergence. `Marlamin/WoWTools.Minimaps` and `ModernWoWTools/Warcraft.NET` were
+     already at their upstream tip. Full solution rebuild after updating: 0 errors (confirmed
+     "no rift" empirically, not just assumed). CI workflow updated: all 3 jobs now run
+     `git submodule update --init --depth 1 -- <the 6 paths>` after checkout — deliberately
+     NOT `submodules: true`, which would also pull unrelated, much larger submodules elsewhere
+     in the repo (`gillijimproject_refactor`'s Depth-Anything-3, `PM4Tool/lib/*`, `dirac`,
+     `headroom`).
+  Both bugs were invisible from `git status` inspection alone and had persisted for a long
+  time — proving the exact value of standing up real CI, first-run-ever, at the top of this
+  same session.
 - **Local `dotnet test WowViewer.slnx` run surfaced ~20 pre-existing failures, unrelated to
   this session's edits** (confirmed: the two touched files aren't referenced by the failing
   test projects). All failures are in `*RealData*`/`*Corpus*`-named tests
