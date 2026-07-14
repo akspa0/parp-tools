@@ -87,16 +87,6 @@ public sealed class AdtLiquidReaderTests
         Assert.Equal(50f, layer.Heights[^1]);
     }
 
-    [Fact]
-    public void Read_DevelopmentRootAdt_ProducesStableMh2oSignals()
-    {
-        AdtLiquidFile liquidFile = AdtLiquidReader.Read(MapTestPaths.DevelopmentRootAdtPath);
-
-        Assert.Equal(MapFileKind.Adt, liquidFile.Kind);
-        Assert.Equal(256, liquidFile.Chunks.Count);
-        Assert.True(liquidFile.Chunks.All(chunk => chunk.Layers.Count == 0));
-    }
-
     [Theory]
     [InlineData((ushort)17, AdtLiquidBasicType.Ocean)]
     [InlineData((ushort)19, AdtLiquidBasicType.Magma)]

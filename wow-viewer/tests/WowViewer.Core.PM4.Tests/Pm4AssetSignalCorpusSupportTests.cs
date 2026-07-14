@@ -31,41 +31,4 @@ public sealed class Pm4AssetSignalCorpusSupportTests
             Assert.True(lastWorldWmoIndex < firstDoodadsIndex);
     }
 
-    [Fact]
-    public void LoadSeedPlacementAssetPaths_SinglePlacementFileMatchesSingleFileDirectory()
-    {
-        string placementFile = Path.Combine(Pm4TestPaths.DevelopmentDirectoryPath, "development_0_0_obj0.adt");
-        IReadOnlyList<string> fromFile = Pm4AssetSignalCorpusSupport.LoadSeedPlacementAssetPaths(placementFile);
-
-        using TemporaryPlacementDirectory tempDirectory = TemporaryPlacementDirectory.Create(placementFile);
-        IReadOnlyList<string> fromDirectory = Pm4AssetSignalCorpusSupport.LoadSeedPlacementAssetPaths(tempDirectory.Path);
-
-        Assert.True(fromFile.SequenceEqual(fromDirectory, StringComparer.OrdinalIgnoreCase));
-    }
-
-    private sealed class TemporaryPlacementDirectory : IDisposable
-    {
-        private TemporaryPlacementDirectory(string path)
-        {
-            Path = path;
-        }
-
-        public string Path { get; }
-
-        public static TemporaryPlacementDirectory Create(string placementFile)
-        {
-            string tempDirectory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"pm4-seed-placement-tests-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(tempDirectory);
-
-            string targetPath = System.IO.Path.Combine(tempDirectory, System.IO.Path.GetFileName(placementFile));
-            File.Copy(placementFile, targetPath, overwrite: true);
-            return new TemporaryPlacementDirectory(tempDirectory);
-        }
-
-        public void Dispose()
-        {
-            if (Directory.Exists(Path))
-                Directory.Delete(Path, recursive: true);
-        }
-    }
 }

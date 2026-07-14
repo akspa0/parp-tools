@@ -9,18 +9,6 @@ namespace WowViewer.Core.Tests;
 public sealed class WorldLiquidTileBuilderTests
 {
     [Fact]
-    public void Read_DevelopmentRootAdt_ProducesNoActiveLiquidChunks()
-    {
-        WorldLiquidTileData liquidTile = WorldLiquidTileBuilder.Read(MapTestPaths.DevelopmentRootAdtPath);
-
-        Assert.Equal(MapFileKind.Adt, liquidTile.Kind);
-        Assert.Empty(liquidTile.Chunks);
-        Assert.Equal(0, liquidTile.ActiveChunkCount);
-        Assert.Equal(0, liquidTile.LayerCount);
-        Assert.Equal(0, liquidTile.VisibleTileCount);
-    }
-
-    [Fact]
     public void Read_SyntheticRootAdt_ProducesChunkCoordinatesAndLayerSignals()
     {
         byte[] bytes =

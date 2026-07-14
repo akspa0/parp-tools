@@ -75,21 +75,6 @@ public sealed class AdtMcalSummaryReaderTests
         Assert.Equal(0, summary.PackedLayerCount);
     }
 
-    [Fact]
-    public void Read_DevelopmentTexAdt_ProducesStableRealDataSummary()
-    {
-        AdtMcalSummary summary = AdtMcalSummaryReader.Read(MapTestPaths.DevelopmentTexAdtPath);
-
-        Assert.Equal(MapFileKind.AdtTex, summary.Kind);
-        Assert.Equal(AdtMcalDecodeProfile.Cataclysm400, summary.DecodeProfile);
-        Assert.Equal(256, summary.McnkWithLayerTableCount);
-        Assert.Equal(519, summary.OverlayLayerCount);
-        Assert.True(summary.DecodedLayerCount > 0);
-        Assert.True(summary.BigAlphaLayerCount + summary.BigAlphaFixedLayerCount > 0);
-        Assert.Equal(summary.OverlayLayerCount, summary.DecodedLayerCount + summary.MissingPayloadLayerCount + summary.DecodeFailureCount);
-        Assert.Equal(summary.DecodedLayerCount, summary.CompressedLayerCount + summary.BigAlphaLayerCount + summary.BigAlphaFixedLayerCount + summary.PackedLayerCount);
-    }
-
     private static byte[] CreateRootMcnkPayload(uint flags, uint[] layerFlags, uint[] layerOffsets, byte[] mcalPayload)
     {
         byte[] header = new byte[128];

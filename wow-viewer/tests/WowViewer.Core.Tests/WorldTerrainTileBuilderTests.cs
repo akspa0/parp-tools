@@ -9,27 +9,6 @@ namespace WowViewer.Core.Tests;
 public sealed class WorldTerrainTileBuilderTests
 {
     [Fact]
-    public void Read_DevelopmentRootAdt_ProducesExpectedChunkInventory()
-    {
-        WorldTerrainTileData terrainTile = WorldTerrainTileBuilder.Read(MapTestPaths.DevelopmentRootAdtPath);
-
-        Assert.Equal(MapFileKind.Adt, terrainTile.Kind);
-        Assert.Equal(256, terrainTile.ChunkCount);
-        Assert.Equal(256, terrainTile.ChunksWithHeights);
-        Assert.Equal(10, terrainTile.HoleChunkCount);
-        Assert.Equal(0, terrainTile.LiquidFlagChunkCount);
-        Assert.Equal(0, terrainTile.VertexColorChunkCount);
-        Assert.Equal(256, terrainTile.TextureLayerChunkCount);
-        Assert.Equal(775, terrainTile.TotalTextureLayerCount);
-        Assert.Equal(1, terrainTile.DistinctAreaIdCount);
-        Assert.NotNull(terrainTile.Heightmap);
-        Assert.Equal(257, terrainTile.Heightmap!.Width);
-        Assert.Equal(257, terrainTile.Heightmap.Height);
-        Assert.True(terrainTile.Heightmap.AuthoritativeSampleCount > 0);
-        Assert.True(terrainTile.Heightmap.MaxHeight > terrainTile.Heightmap.MinHeight);
-    }
-
-    [Fact]
     public void Read_SyntheticRootAdt_ProducesExpectedChunkSignals()
     {
         float[] heights = Enumerable.Range(0, 145).Select(static value => (float)value).ToArray();

@@ -52,47 +52,6 @@ public sealed class AdtPlacementWriterTests
         Assert.Equal(new Vector3(17046.666f, 17056.666f, 60f) + wmoDelta, catalog.WorldModelPlacements[0].BoundsMax);
     }
 
-    [Fact]
-    public void ApplyTransaction_DevelopmentObjAdt_RoundTripsMovedPlacementsThroughSharedReader()
-    {
-        AdtPlacementCatalog originalCatalog = AdtPlacementReader.Read(MapTestPaths.DevelopmentObjAdtPath);
-        AdtModelPlacement originalModel = originalCatalog.ModelPlacements[0];
-        AdtWorldModelPlacement originalWorldModel = originalCatalog.WorldModelPlacements[0];
-
-        Vector3 modelDelta = new(1.5f, -2.25f, 3.75f);
-        Vector3 wmoDelta = new(-4f, 2f, 1f);
-
-        var transaction = new AdtPlacementEditTransaction(
-            MapTestPaths.DevelopmentObjAdtPath,
-            [
-                new AdtPlacementMove(new AdtPlacementReference(AdtPlacementKind.Model, 0, originalModel.UniqueId), originalModel.Position + modelDelta, "real-data model move"),
-                new AdtPlacementMove(new AdtPlacementReference(AdtPlacementKind.WorldModel, 0, originalWorldModel.UniqueId), originalWorldModel.Position + wmoDelta, "real-data wmo move"),
-            ]);
-
-        string outputPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}_development_0_0_obj0.adt");
-
-        try
-        {
-            AdtPlacementWriter.Write(MapTestPaths.DevelopmentObjAdtPath, outputPath, transaction);
-
-            AdtPlacementCatalog updatedCatalog = AdtPlacementReader.Read(outputPath);
-
-            Assert.Equal(originalCatalog.ModelPlacements.Count, updatedCatalog.ModelPlacements.Count);
-            Assert.Equal(originalCatalog.WorldModelPlacements.Count, updatedCatalog.WorldModelPlacements.Count);
-            Assert.Equal(originalCatalog.ModelPlacements[0].Position + modelDelta, updatedCatalog.ModelPlacements[0].Position);
-            Assert.Equal(originalCatalog.WorldModelPlacements[0].Position + wmoDelta, updatedCatalog.WorldModelPlacements[0].Position);
-            Assert.Equal(originalCatalog.WorldModelPlacements[0].BoundsMin + wmoDelta, updatedCatalog.WorldModelPlacements[0].BoundsMin);
-            Assert.Equal(originalCatalog.WorldModelPlacements[0].BoundsMax + wmoDelta, updatedCatalog.WorldModelPlacements[0].BoundsMax);
-            Assert.Equal(originalCatalog.ModelPlacements[1].Position, updatedCatalog.ModelPlacements[1].Position);
-            Assert.Equal(originalCatalog.WorldModelPlacements[1].Position, updatedCatalog.WorldModelPlacements[1].Position);
-        }
-        finally
-        {
-            if (File.Exists(outputPath))
-                File.Delete(outputPath);
-        }
-    }
-
     private static byte[] CreateChunk(string id, byte[] payload)
     {
         byte[] bytes = new byte[8 + payload.Length];

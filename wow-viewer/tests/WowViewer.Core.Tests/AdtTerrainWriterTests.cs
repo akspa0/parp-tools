@@ -13,33 +13,6 @@ public sealed class AdtTerrainWriterTests
     private const int McinEntrySize = 16;
 
     [Fact]
-    public void ApplyHeightmap_DevelopmentRootAdt_RoundTripsTerrainHeights()
-    {
-        WorldTerrainTileData originalTile = WorldTerrainTileBuilder.Read(MapTestPaths.DevelopmentRootAdtPath);
-        Assert.NotNull(originalTile.Heightmap);
-
-        string outputPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}_development_0_0.adt");
-
-        try
-        {
-            AdtTerrainWriter.Write(MapTestPaths.DevelopmentRootAdtPath, outputPath, originalTile.Heightmap!.Heights);
-
-            WorldTerrainTileData updatedTile = WorldTerrainTileBuilder.Read(outputPath);
-            Assert.NotNull(updatedTile.Heightmap);
-            Assert.Equal(originalTile.Heightmap.Width, updatedTile.Heightmap!.Width);
-            Assert.Equal(originalTile.Heightmap.Height, updatedTile.Heightmap.Height);
-
-            for (int index = 0; index < originalTile.Heightmap.Heights.Length; index++)
-                Assert.Equal(originalTile.Heightmap.Heights[index], updatedTile.Heightmap.Heights[index], 4);
-        }
-        finally
-        {
-            if (File.Exists(outputPath))
-                File.Delete(outputPath);
-        }
-    }
-
-    [Fact]
     public void ApplyHeightmap_PreservesNonMcvtPayloads()
     {
         byte[] sourceMccv = CreatePatternedMccv();

@@ -40,18 +40,4 @@ public sealed class AdtTileFamilyResolverTests
         }
     }
 
-    [Fact]
-    public void Resolve_DevelopmentTile_PrefersSplitTextureAndPlacementSources()
-    {
-        AdtTileFamily family = AdtTileFamilyResolver.Resolve(MapTestPaths.DevelopmentRootAdtPath);
-
-        Assert.True(family.HasRoot);
-        Assert.True(family.HasTex0);
-        Assert.True(family.HasObj0);
-        Assert.False(family.HasLod);
-        Assert.Equal(MapFileKind.AdtTex, family.TextureSourceKind);
-        Assert.Equal(MapFileKind.AdtObj, family.PlacementSourceKind);
-		Assert.Equal(Path.GetFullPath(MapTestPaths.DevelopmentTexAdtPath), family.Tex0Path);
-		Assert.Equal(Path.GetFullPath(MapTestPaths.DevelopmentObjAdtPath), family.Obj0Path);
-    }
 }

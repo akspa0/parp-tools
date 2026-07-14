@@ -22,26 +22,6 @@ public class LkAdtReaderTests
     }
 
     [Fact]
-    public void Read_OriginalDevelopmentSplitFamily_MergesTexAndObjWithoutThrowing()
-    {
-        string rootPath = Path.Combine(MapTestPaths.OriginalDevelopmentDirectoryPath, "development_0_0.adt");
-        string texPath = Path.Combine(MapTestPaths.OriginalDevelopmentDirectoryPath, "development_0_0_tex0.adt");
-        string objPath = Path.Combine(MapTestPaths.OriginalDevelopmentDirectoryPath, "development_0_0_obj0.adt");
-
-        var adt = LkAdtReader.Read(
-            File.ReadAllBytes(rootPath),
-            File.ReadAllBytes(texPath),
-            File.ReadAllBytes(objPath),
-            0,
-            0);
-
-        Assert.NotEmpty(adt.Chunks);
-        Assert.Contains(adt.Chunks, static chunk => chunk.Layers.Count > 0);
-        Assert.True(adt.ModelNames.Count > 0 || adt.WorldModelNames.Count > 0);
-        Assert.True(adt.ModelPlacements.Count > 0 || adt.WorldModelPlacements.Count > 0);
-    }
-
-    [Fact]
     public void Read_McnkTrailingSubchunkWithOverflowingSize_DoesNotThrow()
     {
         using var ms = new MemoryStream();

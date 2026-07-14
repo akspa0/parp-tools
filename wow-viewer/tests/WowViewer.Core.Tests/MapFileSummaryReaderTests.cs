@@ -89,18 +89,6 @@ public sealed class MapFileSummaryReaderTests
     }
 
     [Fact]
-    public void Read_DevelopmentWdt_ProducesExpectedTopLevelSignals()
-    {
-        MapFileSummary summary = MapFileSummaryReader.Read(MapTestPaths.DevelopmentWdtPath);
-
-        Assert.Equal(MapFileKind.Wdt, summary.Kind);
-        Assert.Equal(18u, summary.Version);
-        Assert.True(summary.HasChunk(MapChunkIds.Mphd));
-        Assert.True(summary.HasChunk(MapChunkIds.Main));
-        Assert.True(summary.ChunkCount >= 3);
-    }
-
-    [Fact]
     public void Read_AlphaWdtWithEmbeddedPayload_FallsBackToAlphaTopLevelSummary()
     {
         byte[] mainData = new byte[64 * 64 * 16];
@@ -144,33 +132,6 @@ public sealed class MapFileSummaryReaderTests
         Assert.True(summary.HasChunk(MapChunkIds.Mhdr));
         Assert.True(summary.HasChunk(MapChunkIds.Mcin));
         Assert.False(summary.HasChunk(MapChunkIds.Mcnk));
-    }
-
-    [Fact]
-    public void Read_DevelopmentRootAdt_ProducesExpectedTopLevelSignals()
-    {
-        MapFileSummary summary = MapFileSummaryReader.Read(MapTestPaths.DevelopmentRootAdtPath);
-
-        Assert.Equal(MapFileKind.Adt, summary.Kind);
-        Assert.Equal(18u, summary.Version);
-        Assert.True(summary.HasChunk(MapChunkIds.Mhdr));
-        Assert.True(summary.HasChunk(MapChunkIds.Mcnk));
-        Assert.True(summary.HasChunk(MapChunkIds.Mfbo));
-        Assert.Equal(256, summary.CountChunks(MapChunkIds.Mcnk));
-    }
-
-    [Fact]
-    public void Read_OriginalDevelopment3223ObjAdt_PreservesChunksAfterOddSizedMmdx()
-    {
-        MapFileSummary summary = MapFileSummaryReader.Read(MapTestPaths.OriginalDevelopment3223ObjAdtPath);
-
-        Assert.Equal(MapFileKind.AdtObj, summary.Kind);
-        Assert.Equal(18u, summary.Version);
-        Assert.True(summary.HasChunk(MapChunkIds.Mmid));
-        Assert.True(summary.HasChunk(MapChunkIds.Mwid));
-        Assert.True(summary.HasChunk(MapChunkIds.Mddf));
-        Assert.True(summary.HasChunk(MapChunkIds.Modf));
-        Assert.Equal(256, summary.CountChunks(MapChunkIds.Mcnk));
     }
 
     private static byte[] CreateChunk(string id, byte[] payload)

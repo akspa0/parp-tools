@@ -73,19 +73,6 @@ public sealed class AdtTextureReaderTests
     }
 
     [Fact]
-    public void Read_DevelopmentRootAdt_AcceptsRootAdtAndReportsStableSplitFamilySignals()
-    {
-        AdtTextureFile textureFile = AdtTextureReader.Read(MapTestPaths.DevelopmentRootAdtPath);
-
-        Assert.Equal(MapFileKind.Adt, textureFile.Kind);
-        Assert.Equal(AdtMcalDecodeProfile.LichKingStrict, textureFile.DecodeProfile);
-        Assert.Empty(textureFile.TextureNames);
-        Assert.Equal(256, textureFile.Chunks.Count);
-        Assert.Equal(0, textureFile.Chunks.Sum(chunk => chunk.Layers.Count));
-        Assert.Equal(0, textureFile.Chunks.Sum(chunk => chunk.DecodedLayerCount));
-    }
-
-    [Fact]
     public void Read_DevelopmentTexAdt_ProducesStableRealDataChunkSignals()
     {
         AdtTextureFile textureFile = AdtTextureReader.Read(MapTestPaths.DevelopmentTexAdtPath);

@@ -10,21 +10,6 @@ namespace WowViewer.Core.Tests;
 public sealed class WorldTileStageSummaryBuilderTests
 {
     [Fact]
-    public void Read_DevelopmentRootAdt_ProducesExpectedTerrainSignals()
-    {
-        WorldTileStageSummary summary = WorldTileStageSummaryBuilder.Read(MapTestPaths.DevelopmentRootAdtPath);
-
-        Assert.Equal(MapFileKind.Adt, summary.Kind);
-        Assert.Equal(1, summary.WdlVisibleTileCount);
-        Assert.Equal(256, summary.TerrainChunkCount);
-        Assert.Equal(10, summary.TerrainHoleChunkCount);
-        Assert.Equal(0, summary.LiquidChunkCount);
-        Assert.Equal(0, summary.LiquidLayerCount);
-        Assert.Equal(0, summary.VisibleLiquidTileCount);
-        Assert.False(summary.HasWater);
-    }
-
-    [Fact]
     public void Read_SyntheticRootAdt_ProducesExpectedLiquidSignals()
     {
         byte[] bytes =

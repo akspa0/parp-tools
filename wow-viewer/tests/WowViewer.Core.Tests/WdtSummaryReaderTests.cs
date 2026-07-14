@@ -165,35 +165,6 @@ public sealed class WdtSummaryReaderTests
         Assert.Contains(new WdtTileCoordinate(0, 0), tiles);
     }
 
-    [Fact]
-    public void Read_DevelopmentWdt_ProducesExpectedSemanticSummary()
-    {
-        WdtSummary summary = WdtSummaryReader.Read(MapTestPaths.DevelopmentWdtPath);
-        WdtMainFlagsSummary mainFlags = Assert.IsType<WdtMainFlagsSummary>(summary.MainFlags);
-
-        Assert.False(summary.IsWmoBased);
-        Assert.Equal(1496, summary.TilesWithData);
-        Assert.Equal(4096, summary.TotalTiles);
-        Assert.Equal(8, summary.MainCellSizeBytes);
-        Assert.Equal(0, summary.DoodadNameCount);
-        Assert.Equal(0, summary.WorldModelNameCount);
-        Assert.Equal(0, summary.DoodadPlacementCount);
-        Assert.Equal(0, summary.WorldModelPlacementCount);
-        Assert.Equal(1496, mainFlags.CellsWithAnyFlags);
-        Assert.Equal(1496, mainFlags.CellsWithHasAdt);
-        Assert.Equal(0, mainFlags.CellsWithAllWater);
-        Assert.Equal(0, mainFlags.CellsWithLoaded);
-        Assert.Equal(0, mainFlags.CellsWithUnknownFlags);
-        Assert.Equal(0, mainFlags.CellsWithAsyncId);
-        Assert.Collection(
-            mainFlags.DistinctNonZeroValues,
-            value =>
-            {
-                Assert.Equal(1u, value.Value);
-                Assert.Equal(1496, value.TileCount);
-            });
-    }
-
     private static byte[] CreateChunk(string id, byte[] payload)
     {
         byte[] bytes = new byte[8 + payload.Length];

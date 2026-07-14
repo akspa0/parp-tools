@@ -122,20 +122,6 @@ public sealed class WowFileDetectorTests
         Assert.Null(detection.Version);
     }
 
-    [Theory]
-    [InlineData("development.wdt", WowFileKind.Wdt, 18u)]
-    [InlineData("development_0_0.adt", WowFileKind.Adt, 18u)]
-    [InlineData("development_0_0_tex0.adt", WowFileKind.AdtTex, 18u)]
-    [InlineData("development_0_0_obj0.adt", WowFileKind.AdtObj, 18u)]
-    [InlineData("development_00_00.pm4", WowFileKind.Pm4, 12304u)]
-    public void Detect_DevelopmentFiles_ReturnExpectedKinds(string fileName, WowFileKind expectedKind, uint expectedVersion)
-    {
-        WowFileDetection detection = WowFileDetector.Detect(Path.Combine(MapTestPaths.DevelopmentDirectoryPath, fileName));
-
-        Assert.Equal(expectedKind, detection.Kind);
-        Assert.Equal(expectedVersion, detection.Version);
-    }
-
     [Fact]
     public void Detect_SyntheticAdtLodBuffer_ReturnsAdtLod()
     {

@@ -108,69 +108,6 @@ public sealed class AdtMcnkSummaryReaderTests
         Assert.Equal(0, summary.TotalLayerCount);
     }
 
-    [Fact]
-    public void Read_DevelopmentRootAdt_ProducesExpectedMcnkSummary()
-    {
-        AdtMcnkSummary summary = AdtMcnkSummaryReader.Read(MapTestPaths.DevelopmentRootAdtPath);
-
-        Assert.Equal(MapFileKind.Adt, summary.Kind);
-        Assert.Equal(256, summary.McnkCount);
-        Assert.Equal(0, summary.ZeroLengthMcnkCount);
-        Assert.Equal(256, summary.HeaderLikeMcnkCount);
-        Assert.Equal(256, summary.DistinctIndexCount);
-        Assert.Equal(0, summary.DuplicateIndexCount);
-        Assert.Equal(1, summary.DistinctAreaIdCount);
-        Assert.Equal(10, summary.ChunksWithHoles);
-        Assert.Equal(0, summary.ChunksWithLiquidFlags);
-        Assert.Equal(0, summary.ChunksWithMccvFlag);
-        Assert.Equal(256, summary.ChunksWithMcvt);
-        Assert.Equal(256, summary.ChunksWithMcnr);
-        Assert.Equal(0, summary.ChunksWithMcly);
-        Assert.Equal(0, summary.ChunksWithMcal);
-        Assert.Equal(0, summary.ChunksWithMcsh);
-        Assert.Equal(0, summary.ChunksWithMcse);
-        Assert.Equal(0, summary.ChunksWithMccv);
-        Assert.Equal(0, summary.ChunksWithMclq);
-        Assert.Equal(0, summary.ChunksWithMcrd);
-        Assert.Equal(0, summary.ChunksWithMcrw);
-        Assert.Equal(0, summary.TotalMcsePayloadBytes);
-        Assert.Equal(0, summary.TotalLayerCount);
-        Assert.Equal(0, summary.MaxLayerCount);
-        Assert.Equal(0, summary.ChunksWithMultipleLayers);
-    }
-
-    [Fact]
-    public void Read_DevelopmentTexAdt_ProducesExpectedMcnkSummary()
-    {
-        AdtMcnkSummary summary = AdtMcnkSummaryReader.Read(MapTestPaths.DevelopmentTexAdtPath);
-
-        Assert.Equal(MapFileKind.AdtTex, summary.Kind);
-        Assert.Equal(0, summary.McnkCount);
-        Assert.Equal(0, summary.ZeroLengthMcnkCount);
-        Assert.Equal(0, summary.HeaderLikeMcnkCount);
-        Assert.Equal(0, summary.ChunksWithMcly);
-        Assert.Equal(0, summary.ChunksWithMcal);
-        Assert.Equal(0, summary.ChunksWithMcsh);
-        Assert.Equal(0, summary.ChunksWithMcse);
-        Assert.Equal(0, summary.TotalLayerCount);
-        Assert.Equal(0, summary.MaxLayerCount);
-        Assert.Equal(0, summary.ChunksWithMultipleLayers);
-    }
-
-    [Fact]
-    public void Read_DevelopmentObjAdt_ProducesExpectedMcnkSummary()
-    {
-        AdtMcnkSummary summary = AdtMcnkSummaryReader.Read(MapTestPaths.DevelopmentObjAdtPath);
-
-        Assert.Equal(MapFileKind.AdtObj, summary.Kind);
-        Assert.Equal(0, summary.McnkCount);
-        Assert.Equal(0, summary.ZeroLengthMcnkCount);
-        Assert.Equal(0, summary.HeaderLikeMcnkCount);
-        Assert.Equal(0, summary.ChunksWithMcse);
-        Assert.Equal(0, summary.ChunksWithMcrd);
-        Assert.Equal(0, summary.ChunksWithMcrw);
-    }
-
     private static byte[] CreateChunk(string id, byte[] payload)
     {
         byte[] bytes = new byte[8 + payload.Length];

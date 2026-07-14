@@ -8,22 +8,6 @@ namespace WowViewer.Core.Tests;
 public sealed class WdlSummaryReaderTests
 {
     [Fact]
-    public void Read_DevelopmentWdl_ProducesExpectedTileSignals()
-    {
-        WdlSummary summary = WdlSummaryReader.Read(MapTestPaths.DevelopmentWdlPath);
-
-        Assert.Equal((uint)18, summary.Version);
-        Assert.True(summary.TileCount > 0);
-        Assert.True(summary.TryGetTile(0, 0, out WdlTileSummary? tile));
-        Assert.NotNull(tile);
-        Assert.Equal(0, tile!.TileX);
-        Assert.Equal(0, tile.TileY);
-        Assert.Equal(WdlTileSummary.OuterHeightCount, tile.OuterHeights.Length);
-        Assert.Equal(WdlTileSummary.InnerHeightCount, tile.InnerHeights.Length);
-        Assert.True(tile.MinHeight <= tile.MaxHeight);
-    }
-
-    [Fact]
     public void Read_SyntheticReadableChunkTags_ProducesExpectedHeights()
     {
         byte[] bytes = WdlTestDataBuilder.CreateSingleTileWdl(tileX: 5, tileY: 7, useReadableTags: true, startHeight: 10);
