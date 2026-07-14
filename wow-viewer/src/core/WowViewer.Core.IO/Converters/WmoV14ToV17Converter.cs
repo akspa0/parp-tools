@@ -109,14 +109,22 @@ public class WmoV14ToV17Converter
         using var ms = new MemoryStream(data);
         using var reader = new BinaryReader(ms);
         var wmoData = ParseWmoV14Internal(reader);
-        
-        // Populate group names from MOGN/MOGI
-        for (int i = 0; i < wmoData.Groups.Count && i < wmoData.GroupInfos.Count; i++)
+
+        // ParseMogp already resolved each group's name from that group's OWN embedded
+        // NameOffset (the correct, unambiguous source). MOGI's per-group info table is not
+        // guaranteed to list entries in the same order groups physically appear in the file,
+        // so matching it to Groups by array position here previously overwrote correct
+        // per-group names with whichever other group's name MOGI happened to list at that
+        // index -- only fall back to MOGI when a group genuinely has no name yet.
+        for (int i = 0; i < wmoData.Groups.Count; i++)
         {
-            var nameOfs = wmoData.GroupInfos[i].NameOffset;
+            if (!string.IsNullOrEmpty(wmoData.Groups[i].Name))
+                continue;
+
+            var nameOfs = i < wmoData.GroupInfos.Count ? wmoData.GroupInfos[i].NameOffset : -1;
             wmoData.Groups[i].Name = GetGroupName(wmoData.GroupNamesRaw, nameOfs) ?? $"group_{i}";
         }
-        
+
         return wmoData;
     }
     
