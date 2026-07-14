@@ -1,27 +1,20 @@
 name: WoWViewer build
 
-# Scope: wow-viewer/ is a .NET 10 solution inside this repo (not a submodule — the actual
-# GitHub repo is akspa0/parp-tools). Only the C#/build-relevant paths trigger this workflow.
+# wow-viewer/ is a .NET 10 solution inside this repo (the GitHub repo is akspa0/parp-tools,
+# not a submodule). Every push that touches the build inputs produces downloadable,
+# self-contained binaries for all four targets as workflow artifacts; pushing a v* tag
+# additionally cuts a permanent GitHub Release with those binaries attached.
 #
-# Platform reality (audited 2026-07-14, see memory-bank/activeContext.md):
-#   - The real, functional viewer binary is Windows-only today: WoWViewer.csproj targets
-#     net10.0-windows (WinForms file dialogs). This is what "build-windows" produces and what
-#     "publish-release" ships.
-#   - WoWViewer.CrossPlatform.csproj (plain net10.0, no WinForms) already exists and compiles
-#     on Linux/macOS, but is NOT functionally cross-platform yet: BlpFile.GetBitmap() (System.
-#     Drawing/GDI+) is used throughout the actual rendering/export call sites and throws
-#     PlatformNotSupportedException at runtime on non-Windows since .NET 7. The cross-platform-
-#     safe BlpFile.GetImage() (ImageSharp) already exists and is already used correctly in
-#     BlpRgbReader.cs/AlphaBlpCompatibilityService.cs — swapping the ~19 remaining call sites is
-#     future work, not done here. So the Linux/macOS jobs are compile-only, to catch
-#     regressions in the existing port without claiming a working non-Windows viewer.
-#   - WowViewer.Tool.ValidationCapture is deliberately, permanently Windows-only by design
-#     (throws PlatformNotSupportedException itself for GPU capture) — never attempted elsewhere.
-#
-# Build vs. test are separate jobs on purpose: publish-release depends only on the Windows
-# BUILD succeeding, not on the test suite. The test suite has real, pre-existing failures
-# unrelated to whether the compiled viewer works (tracked separately, see progress.md) — a
-# clean compile shouldn't be held hostage to fixing years of accumulated test debt in one night.
+# Platform layout:
+#   - Windows publishes WoWViewer.csproj (net10.0-windows) — the full viewer incl. native
+#     WinForms file dialogs.
+#   - Linux/macOS publish WoWViewer.CrossPlatform.csproj (plain net10.0). BLP decoding uses
+#     ImageSharp everywhere now (the old System.Drawing/GDI+ path was Windows-only at runtime),
+#     so these are functional. Known limitation: native file dialogs are Windows-only and
+#     no-op elsewhere — load content via the CLI flags (--game-path, --build, --world).
+#   - No test job: the suite has pre-existing failures unrelated to whether the viewer builds
+#     or runs (game-data-dependent + separate known bugs, tracked in memory-bank/progress.md),
+#     and per project direction the build must not be gated on it.
 
 on:
   push:
@@ -30,7 +23,6 @@ on:
       - 'wow-viewer/src/**'
       - 'wow-viewer/tools/**'
       - 'wow-viewer/libs/**'
-      - 'wow-viewer/tests/**'
       - 'wow-viewer/*.props'
       - 'wow-viewer/*.slnx'
       - '.github/workflows/wowviewer-build.yml'
@@ -41,16 +33,10 @@ on:
       - 'wow-viewer/src/**'
       - 'wow-viewer/tools/**'
       - 'wow-viewer/libs/**'
-      - 'wow-viewer/tests/**'
       - 'wow-viewer/*.props'
       - 'wow-viewer/*.slnx'
       - '.github/workflows/wowviewer-build.yml'
   workflow_dispatch:
-    inputs:
-      publish_release:
-        description: 'Publish a win-x64 release build as a GitHub Release'
-        type: boolean
-        default: false
 
 concurrency:
   group: wowviewer-build-${{ github.workflow }}-${{ github.ref }}
@@ -72,101 +58,8 @@ env:
     wow-viewer/libs/wowdev/wow-listfile
 
 jobs:
-  build-windows:
-    name: Build (Windows, real viewer)
-    runs-on: windows-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - name: Init wow-viewer vendored-lib submodules
-        run: git submodule update --init --depth 1 -- ${{ env.SUBMODULE_PATHS }}
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-      - name: Restore
-        run: dotnet restore wow-viewer/WowViewer.slnx
-      - name: Build (Release)
-        run: dotnet build wow-viewer/WowViewer.slnx -c Release --no-restore
-
-  test-windows:
-    name: Test (Windows) — informational, does not block release
-    needs: build-windows
-    runs-on: windows-latest
-    timeout-minutes: 30
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - name: Init wow-viewer vendored-lib submodules
-        run: git submodule update --init --depth 1 -- ${{ env.SUBMODULE_PATHS }}
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-      - name: Restore
-        run: dotnet restore wow-viewer/WowViewer.slnx
-      - name: Build (Release)
-        run: dotnet build wow-viewer/WowViewer.slnx -c Release --no-restore
-      - name: Test
-        # Real, pre-existing failures tracked in memory-bank/progress.md: some tests need a
-        # staged WoW client that's intentionally never committed (AGENTS.md), others are
-        # separate production/test bugs unrelated to game data (V18StorePlacementsReader NRE,
-        # AlphaWdtWriter chunk-budget logic, RawArraySerializer key mismatch, a synthetic ADT
-        # v23 buffer, WorldFramePassCoordinator's wdlVisible default). continue-on-error above
-        # means this job going red is informational, not a release blocker.
-        run: dotnet test wow-viewer/WowViewer.slnx -c Release --no-build --logger "trx;LogFileName=test-results.trx"
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-windows
-          path: '**/test-results.trx'
-          if-no-files-found: ignore
-
-  build-linux-crossplatform-check:
-    name: Build check (Linux, compile-only — see header note)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - name: Init wow-viewer vendored-lib submodules
-        run: git submodule update --init --depth 1 -- ${{ env.SUBMODULE_PATHS }}
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-      - name: Build cross-platform viewer target
-        run: dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.CrossPlatform.csproj -c Release
-      - name: Build portable CLI tools (confirmed no Windows-only runtime dependency)
-        run: |
-          dotnet build wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Release
-          dotnet build wow-viewer/tools/wdl-read/WowViewer.Tool.WdlRead/WowViewer.Tool.WdlRead.csproj -c Release
-          dotnet build wow-viewer/tools/enrich/WowViewer.Tool.V22Enrich/WowViewer.Tool.V22Enrich.csproj -c Release
-          dotnet build wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Release
-
-  build-macos-crossplatform-check:
-    name: Build check (macOS, compile-only — see header note)
-    runs-on: macos-latest
-    timeout-minutes: 20
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - name: Init wow-viewer vendored-lib submodules
-        run: git submodule update --init --depth 1 -- ${{ env.SUBMODULE_PATHS }}
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-      - name: Build cross-platform viewer target
-        run: dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.CrossPlatform.csproj -c Release
-      - name: Build portable CLI tools (confirmed no Windows-only runtime dependency)
-        run: |
-          dotnet build wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Release
-          dotnet build wow-viewer/tools/wdl-read/WowViewer.Tool.WdlRead/WowViewer.Tool.WdlRead.csproj -c Release
-          dotnet build wow-viewer/tools/enrich/WowViewer.Tool.V22Enrich/WowViewer.Tool.V22Enrich.csproj -c Release
-          dotnet build wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Release
-
-  publish-release:
-    name: Publish release build (${{ matrix.os_label }})
-    needs: build-windows
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+  build:
+    name: Build ${{ matrix.os_label }}
     strategy:
       fail-fast: false
       matrix:
@@ -189,8 +82,6 @@ jobs:
             os_label: macOS x64 (Intel)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: Init wow-viewer vendored-lib submodules
@@ -205,24 +96,25 @@ jobs:
           -p:PublishSingleFile=false
           -o publish/${{ matrix.rid }}
       - name: Bundle README and release notes
-        shell: pwsh
+        shell: bash
         run: |
-          Copy-Item "wow-viewer/README.md" "publish/${{ matrix.rid }}/README.md"
-          if (Test-Path "wow-viewer/docs/releases/v0.5.0.md") {
-            Copy-Item "wow-viewer/docs/releases/v0.5.0.md" "publish/${{ matrix.rid }}/CHANGES-v0.5.0.md"
-          }
-      - name: Zip publish output
-        shell: pwsh
-        run: Compress-Archive -Path publish/${{ matrix.rid }}/* -DestinationPath ParpToolsWoWViewer-${{ matrix.rid }}.zip
+          cp wow-viewer/README.md "publish/${{ matrix.rid }}/README.md"
+          if [ -f wow-viewer/docs/releases/v0.5.0.md ]; then
+            cp wow-viewer/docs/releases/v0.5.0.md "publish/${{ matrix.rid }}/CHANGES-v0.5.0.md"
+          fi
+      # upload-artifact zips the directory automatically, so downloading this artifact from the
+      # Actions run yields ParpToolsWoWViewer-<rid>.zip with the self-contained build inside.
+      # No manual zip step (avoids per-runner shell differences for zip/Compress-Archive).
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ParpToolsWoWViewer-${{ matrix.rid }}
-          path: ParpToolsWoWViewer-${{ matrix.rid }}.zip
+          path: publish/${{ matrix.rid }}/
+          if-no-files-found: error
 
   create-release:
     name: Create GitHub Release
-    needs: publish-release
+    needs: build
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -230,14 +122,24 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Download all artifacts
+      - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: ParpToolsWoWViewer-*
-          merge-multiple: true
+          path: dist
+      - name: Zip each platform build
+        # Each artifact downloaded into dist/ParpToolsWoWViewer-<rid>/ ; re-zip per platform.
+        # Runs on ubuntu, so `zip` is always available.
+        run: |
+          cd dist
+          for d in ParpToolsWoWViewer-*/; do
+            name="${d%/}"
+            (cd "$d" && zip -qr "../${name}.zip" .)
+          done
+          ls -la *.zip
       - name: Create GitHub Release
         run: >
-          gh release create "${{ github.ref_name }}" ParpToolsWoWViewer-*.zip
+          gh release create "${{ github.ref_name }}" dist/ParpToolsWoWViewer-*.zip
           --notes-file wow-viewer/docs/releases/v0.5.0.md
           --title "parp-tools WoW Viewer ${{ github.ref_name }}"
         env:
