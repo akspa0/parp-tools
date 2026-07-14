@@ -1451,10 +1451,14 @@ var seq = animator.Sequences[animator.CurrentSequence];
             if (_worldScene != null)
                 UpdateWorldSceneHoveredAssetInfo(view, proj);
 
-            // Update current area name from chunk under camera (throttled to avoid per-frame overhead)
-            if (_areaTableService != null && _terrainManager != null && _frameCount == 0)
+            // Update current area name from chunk under camera (throttled to avoid per-frame overhead).
+            // Covers BOTH terrain paths: the status bar shows coordinates for _terrainManager and
+            // _vlmTerrainManager alike, so the area lookup must too (it previously only ran for
+            // _terrainManager, leaving the Area segment permanently blank in VLM sessions).
+            var areaChunkRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+            if (_areaTableService != null && areaChunkRenderer != null && _frameCount == 0)
             {
-                var chunk = _terrainManager.Renderer.GetChunkAt(_camera.Position.X, _camera.Position.Y);
+                var chunk = areaChunkRenderer.GetChunkAt(_camera.Position.X, _camera.Position.Y);
                 if (chunk != null && chunk.AreaId != 0)
                 {
                     // Filter by MapID to avoid showing areas from other continents

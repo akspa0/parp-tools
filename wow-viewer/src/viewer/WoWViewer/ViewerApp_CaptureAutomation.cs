@@ -393,13 +393,10 @@ public partial class ViewerApp
 
     private static float GetWorldFacingDegrees(float yawDegrees)
     {
-        float yawRad = yawDegrees * MathF.PI / 180f;
-        float rendererForwardX = MathF.Cos(yawRad);
-        float rendererForwardY = MathF.Sin(yawRad);
-        float wowForwardX = -rendererForwardY;
-        float wowForwardY = -rendererForwardX;
-
-        float degrees = MathF.Atan2(-wowForwardY, wowForwardX) * 180f / MathF.PI + 90f;
+        // The old formula reduced algebraically to (yaw + 180): facing North displayed
+        // "South" and vice versa. Empirically (user report), true North is yaw = 0, so the
+        // compass heading is simply the yaw itself, normalized to [0, 360).
+        float degrees = yawDegrees % 360f;
         if (degrees < 0f)
             degrees += 360f;
 
