@@ -48,6 +48,17 @@ uv run python scripts/train_spec103_v7.py `
     --epochs 60 --batch 4 --wdl-prior-dropout 0.25
 ```
 
+> **§1 demoted to smoke test (2026-07-14):** procedural patterns don't replicate real terrain
+> and the WDL prior trivially solves them (l1_global ≈ 0.0006 at init — prior-dominated, no
+> learning signal). Use §1 only to verify the pipeline runs end-to-end; **soundness is proven in
+> §3 (real data)**, which is now cheap with the v8 default. Real-terrain-derived shadow synthesis
+> is the §4 / T018 lane.
+
+The trainer defaults to **`--arch v8`** (V8LeanUNet, 6.2M params / 16.4 GFLOPs — built for
+minutes-to-signal local iteration); pass `--arch v7` for the original 117M MultiChannelUNetV7
+ablation. Same 13-ch contract, trestle, loss, and checkpoint layout either way; inference
+resolves the arch from the checkpoint. v8's VRAM headroom allows raising `--batch` 2-4x.
+
 Watch `val_previews/` (minimap | prior | prediction | GT) and the `noprior_l1_g` column —
 that is the prior-dropout robustness. T011: record every caveat in
 `research-v7-contract.md` §8 after this run.
@@ -93,14 +104,13 @@ uv run python scripts/spec103_build_real_store.py `
 
 # 3b. CURATE + BUCKET (CPU, read-only, ~a few min). Drops object-contaminated, blank, and
 #     height/normal-mismatch tiles; writes an auditable manifest + per-map/regime buckets.
-#     V18 result: 5134 -> 3131 kept (410 blank, 1593 object-contaminated dropped).
-#     Purist zero-object set: add --max-object-coverage 0.0 (2650 tiles).
+#     Default --max-object-coverage 0.0 drops ANY object. V18 at 0.0: 5134 -> 2650 kept.
 uv run python scripts/spec103_curate_dataset.py `
     --store ../output/datasets/v18/3_3_5_12340.zarr `
     --output ../output/spec103/curation_v18_v1
 
 # 3c. TRAIN on the curated set (GPU — USER runs). Complete-map holdout inside the kept tiles
-#     (Azeroth: 2666 train / 465 val, all clean terrain).
+#     (Azeroth: clean terrain, zero objects).
 uv run python scripts/train_spec103_v7.py `
     --store ../output/datasets/v18/3_3_5_12340.zarr `
     --curation-manifest ../output/spec103/curation_v18_v1 `
@@ -110,7 +120,9 @@ uv run python scripts/train_spec103_v7.py `
 ```
 
 Without `--curation-manifest` the trainer still drops object tiles by default
-(`--max-object-coverage 0.02`); pass `1.0` only for the v7-faithful keep-all ablation.
+(`--max-object-coverage 0.0` — drops ANY object); pass `1.0` only for the v7-faithful keep-all
+ablation. The 13-channel input contract is unchanged; only the tile *selection* changes.
+Architecture: `--arch v8` (lean, default) or `--arch v7` (117M reference) — see §1f note.
 
 ## 4. Shadow capture lane (T018, exploratory — USER runs)
 

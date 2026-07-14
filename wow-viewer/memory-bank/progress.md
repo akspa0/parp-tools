@@ -1,6 +1,45 @@
 # Progress — wow-viewer
 
-Last updated: 2026-07-13 (evening)
+Last updated: 2026-07-13 (v8 lean architecture is the primary Spec 103 lane)
+
+## 2026-07-14 — Procedural synthetic dropped as a gate; real data is the proving ground
+
+- **USER decision:** procedural patterns (flat/ramp/ridge/crater/plateau) don't replicate real
+  terrain and the WDL prior trivially solves them (v8 smoke run: l1_global ≈ 0.0006 at init and
+  at best — the metric is prior-dominated, not learning). The intended synthetic lane =
+  **synthesize signals from real terrain** (deterministic shadow/hillshade of real height, T018),
+  not invented terrain. Real-data v8 run (quickstart §3) is now the soundness test; ready to run
+  (curation manifest 2253 kept, Azeroth 332-tile holdout).
+- **Trainer hardening from the smoke run:** batch clamped to train-set size; `drop_last` only
+  when ≥2 full batches (tiny sets no longer silently produce 0 train batches); hard exit on an
+  empty train loader; loud warning when planned steps are too few for `--ema-decay` (the
+  validated EMA model would otherwise stay ~= its initial weights). 13/13 tests green.
+
+## 2026-07-13 (late) — v8 lean architecture implemented; primary lane by USER decision
+
+- **Why:** v7's 117.06M-param U-Net (73% of params at 8×8–16×16; 119.9 GFLOPs @256) meant ~26 h
+  before a training run proved sound or not. USER decision: modern lean arch is primary, no
+  baseline-first gatekeeping; v7 kept for ablation only.
+- **What:** [`v8_model.py`](wow-viewer/data-harvester/src/harvester/spec103/v8_model.py)
+  `V8LeanUNet` (`v8-lean-convnextv2-v1`): ConvNeXt-V2 blocks (7×7 reflect DW + GRN), widths
+  32-64-128-256-384, pixel-shuffle decoder, pooled global-context mixer + bounds head.
+  **Measured 6,204,198 params (25 MB) / 16.4 GFLOPs @256** — 18.9× / 7.3× less than v7. Head,
+  trestle residual, clamp modes copied verbatim; the 13-ch contract, `combined_loss`, trainer,
+  inference, previews, mesh export, and label-free harness run unchanged.
+- **Wiring:** trainer `--arch v8|v7` (v8 default), arch recorded in checkpoints + run identity;
+  `infer_spec103_v7.py` auto-resolves arch (pre-v8 checkpoints default to v7). Tests: 6 new v8
+  CPU sanity tests incl. a <10M-param budget guard; 13/13 spec103 suite green. Docs synced
+  (plan, tasks T021, quickstart, research-v8-optimization.md = survey + decision record).
+
+## 2026-07-14 — Curation default tightened (drop ANY object tile)
+
+- **Curation default tightened:** `--max-object-coverage` default is now `0.0` (drop ANY object) in both
+  [`spec103_curate_dataset.py`](wow-viewer/data-harvester/scripts/spec103_curate_dataset.py:59) and
+  [`train_spec103_v7.py`](wow-viewer/data-harvester/scripts/train_spec103_v7.py:198). Was 0.02.
+  The model architecture is **unchanged** (13 channels) — this is a tile *selection* change only, not an
+  architecture change. Object tiles are impossible height targets (spec Principle #5: height under an
+  object is occluded in the minimap), so they are dropped, not learned.
+- **Tests:** 7/7 CPU sanity green. Docs synced (research-v7-contract, plan, quickstart, spec FR-013, tasks).
 
 ## 2026-07-13 (evening) — Spec 103 Phases 0–4 agent work implemented
 

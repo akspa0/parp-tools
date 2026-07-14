@@ -56,9 +56,9 @@ def main() -> int:
     ap.add_argument("--store", required=True, type=Path)
     ap.add_argument("--output", required=True, type=Path, help="directory for the curation manifest + summary")
     ap.add_argument("--min-rgb-std", type=float, default=1.0, help="drop blank-minimap tiles below this RGB std")
-    ap.add_argument("--max-object-coverage", type=float, default=0.02,
+    ap.add_argument("--max-object-coverage", type=float, default=0.0,
                     help="drop tiles whose object_precise_mask covers more than this fraction "
-                         "(0.0 = zero-object purist set; 0.02 tolerates a few stray pixels)")
+                         "(0.0 = drop ANY object — the default; the model never sees an object tile)")
     ap.add_argument("--flat-height-range", type=float, default=3.0,
                     help="a tile is 'flat' below this world-unit height range (mismatch check only)")
     ap.add_argument("--normal-relief", type=float, default=0.02,

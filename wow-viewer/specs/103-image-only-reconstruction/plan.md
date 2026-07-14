@@ -3,6 +3,8 @@
 **Branch**: `103-image-only-reconstruction` (work lands on `v0.5.0-prerelease`) | **Date**: 2026-07-13 | **Spec**: [spec.md](spec.md)
 
 > **Correction (2026-07-13):** V24 / Spec 094 is NOT functional and is ignored. This plan revives the original **v7** model — a single, basic U-Net (no stages) from ~April 2026 — and runs it on the current clean dataset. The user's claim: v7 was simple, dirty, and worked; with clean signals it should "fly and be perfect."
+>
+> **Correction (2026-07-14):** Phase 2's procedural-synthetic PoC is demoted to a pipeline smoke test. Procedural patterns (flat/ramp/ridge/crater/plateau) don't replicate real terrain, and the WDL prior trivially solves them (measured: l1_global ≈ 0.0006 at init). The synthetic lane's intended form is **signals synthesized from real terrain** (deterministic shadow/hillshade renders of real height — the T018 lane), never invented terrain. Soundness verification happens on the real curated dataset (Phase 3) with the lean **v8** architecture (see Implementation state).
 
 ## Summary
 
@@ -54,7 +56,7 @@ it. `scripts/spec103_curate_dataset.py` is a first-class, auditable pass that bu
 and drops three failure classes, writing a `curation_manifest.parquet` the trainer consumes:
 
 - **object_contaminated** — `object_precise_mask` coverage above `--max-object-coverage`
-  (default 0.02; `0.0` = zero-object purist set).
+  (default **0.0** = drop ANY object; `1.0` = v7-faithful keep-all ablation only).
 - **blank_minimap** — per-tile RGB std below `--min-rgb-std` (dead-space art; spec edge case).
 - **height_normal_mismatch** — flat height but normals show relief (a harvest failure / mismatched signal).
 - **missing_signal** — a required array (height / minimap / normals) absent.
@@ -64,7 +66,7 @@ complete-map holdouts (FR-008). **V18 measured result (2026-07-13):** 5134 → 3
 410 blank + 1593 object-contaminated dropped; 0 height/normal mismatch (verified: relief tracks
 height-std at r=0.57, and only 2 flat tiles have varied normals — this store is clean on that
 axis). Alternatives recorded in the summary: 2650 tiles at zero objects, 3078 at ≤0.5%, 3540 at ≤2%.
-The trainer drops object tiles by default even without a manifest (`--max-object-coverage 0.02`);
+The trainer drops object tiles by default even without a manifest (`--max-object-coverage 0.0`);
 `1.0` restores the v7-faithful keep-all behavior for ablation only.
 
 ## Constitution Check
@@ -131,9 +133,14 @@ v7 consumes the WDL prior + normals + aux, which are height-derived — so v7 by
 
 ### Implementation state (2026-07-13)
 
-Phases 0–1 complete and tested (7/7 CPU sanity tests): pinned contract in
+Phases 0–1 complete and tested (13/13 CPU sanity tests): pinned contract in
 [research-v7-contract.md](research-v7-contract.md), ported lane in
-`data-harvester/src/harvester/spec103/` (`v7_model.py`, `v7_losses.py`, `v7_inputs.py`).
+`data-harvester/src/harvester/spec103/` (`v7_model.py`, `v7_losses.py`, `v7_inputs.py`,
+`v8_model.py`). **Architecture update (USER decision 2026-07-13):** the primary training
+architecture is `V8LeanUNet` (`--arch v8`, trainer default) — a ConvNeXt-V2-style lean U-Net
+(6.2M params / 16.4 GFLOPs @256 vs v7's 117M / 119.9) honoring the identical 13-ch/trestle/
+bounds contract, built for fast local iteration. v7 stays available (`--arch v7`) as the
+faithful ablation. Survey + rationale: [research-v8-optimization.md](research-v8-optimization.md).
 Phase 2–4 scripts prepared (`spec103_make_synthetic_adts.py`, `spec103_build_synthetic_store.py`,
 `train_spec103_v7.py`, `infer_spec103_v7.py`, `spec103_build_real_store.py`,
 `spec103_export_mesh.py`, `validate_spec103_labelfree.py`); commands in

@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-13 (evening — Spec 103 Phases 0–1 implemented)
+Last updated: 2026-07-14 (curation default tightened to drop ANY object tile)
 
 ## Current target — Spec 103: revive the v7 terrain regressor on clean signals
 
@@ -16,9 +16,17 @@ Last updated: 2026-07-13 (evening — Spec 103 Phases 0–1 implemented)
   ×0.85/×0.70 then ImageNet-normalized), 6 WDL prior (outer 17×17 only, align_corners=True, **0.5 fill when
   missing — dropout reuses this**), 7-8 tile height min/max hint planes (`--height-hints gt|wdl|none`),
   9 liquid mask, 10 liquid height, 11 object mask, 12 brush (zeros). Loss reads 9/11/12 — order is load-bearing.
+  **The model architecture is unchanged (13 channels).**
 - **WDL prior = verified transform:** `outer = height257[::16,::16]`, `inner = height257[8::16,8::16]`.
   Derived at batch time from `height_257` — no reharvest, nothing stored. **Never** `wdl_height_33`.
-- **Synthetic chain (all existing C# used as-is):** `map generate-blank` (Inspect tool) → known-height .npy →
+- **Procedural-synthetic PoC DROPPED as a gate (USER decision 2026-07-14):** flat/ramp/ridge/crater
+  patterns don't replicate real terrain, and the WDL prior trivially solves them (v8 run: init
+  l1_g ≈ 0.0006 — nothing to learn on the global channel). The intended "synthetic" lane was always
+  **signals synthesized FROM real terrain** (deterministic shadow/hillshade renders of real height —
+  T018's reinterpretation), never invented terrain. The 10-tile procedural store survives only as a
+  pipeline smoke test. **Soundness test = the real-data v8 run** (quickstart §3; everything ready:
+  V18 store + curation manifest, 2253 kept, Azeroth holdout 332/1921).
+- **Synthetic chain (kept for smoke tests; all existing C# used as-is):** `map generate-blank` (Inspect tool) → known-height .npy →
   `terrain-patch-adt` (Converter) → `Capture render` (perspective-camera caveat recorded) or
   `--synthesize-minimaps` hillshade fallback. Synthetic tiles are placed non-adjacent so the patcher's seam
   stitching never mutates a known pattern.
@@ -27,9 +35,17 @@ Last updated: 2026-07-13 (evening — Spec 103 Phases 0–1 implemented)
   was right and I initially defaulted keep-all in violation of the spec; fixed. `spec103_curate_dataset.py`
   buckets every tile and drops object_contaminated / blank_minimap / height_normal_mismatch, writes an
   auditable `curation_manifest.parquet` (+ map/height-regime buckets) the trainer consumes via
-  `--curation-manifest`. **V18 measured: 5134 → 3131 kept** (410 blank + 1593 object dropped; 0 mismatch —
-  relief calc validated r=0.57 vs height-std). Trainer default `--max-object-coverage 0.02` (was 1.0); `1.0`
-  is v7-faithful keep-all ablation only. Trainer reports `val_no_prior` every epoch (prior-dropout robustness).
+  `--curation-manifest`. **Default `--max-object-coverage 0.0`** (drop ANY object; was 0.02). V18 at 0.0:
+  5134 → 2650 kept. `1.0` is v7-faithful keep-all ablation only. Trainer reports `val_no_prior` every epoch (prior-dropout robustness).
+- **v8 is the PRIMARY architecture (USER decision 2026-07-13; implemented + tested):**
+  `V8LeanUNet` (`src/harvester/spec103/v8_model.py`, ConvNeXt-V2 blocks, pixel-shuffle decoder,
+  global-context mixer) — measured **6.2M params / 16.4 GFLOPs @256** vs v7's 117.06M / 119.9
+  (73% of v7's params sat at 8×8–16×16). Identical 13-ch/trestle/bounds contract → loss, trainer,
+  inference, previews, harness all unchanged. Trainer default `--arch v8` (`--arch v7` = 117M
+  ablation only, NOT a gate); checkpoints record arch, inference auto-resolves. 13/13 CPU tests.
+  Driver: v7's ~26 h time-to-signal was unacceptable; v8 targets minutes on synthetic. Survey +
+  rationale: `specs/103-image-only-reconstruction/research-v8-optimization.md` (T021).
+  Excluded: DA-family (blacklist), diffusion predictors, 100M+ depth foundations.
 - **The USER runs all training/capture/heavy jobs.** The agent prepares scripts + commands only (AGENTS RULE 0).
 
 ## Dropped / paused

@@ -13,6 +13,11 @@ Implements the pinned contract (specs/103-image-only-reconstruction/research-v7-
     ch 11   object footprint mask
     ch 12   brush imprint mask (zeros; V18 carries no brush imprints)
 
+The model architecture is unchanged from v7 (13 channels). Tiles containing any objects are
+dropped during curation (spec Principle #5: height under an object is occluded in the minimap,
+an impossible target) — that is a data-selection change, not an architecture change. The object
+mask channel stays in the input (it is zero on kept tiles, but the design is not altered).
+
 All arrays are numpy in, torch out. Vertex-grid (257) signals resample to the 256 working
 raster with align_corners=True; binary 257 masks with nearest. WDL-prior dropout fills ch 6
 with 0.5 (v7's own missing-prior fallback) so one model serves prior-present and prior-absent
@@ -114,6 +119,11 @@ def assemble_v7_input(
     drop_wdl_prior: bool = False,
 ) -> torch.Tensor:
     """Build the pinned (13, size, size) v7 input tensor from per-tile arrays.
+
+    The model architecture is unchanged from v7 (13 channels including object mask ch 11 and
+    brush ch 12). Tiles containing any objects are dropped during curation (spec Principle #5)
+    — a data-selection change, not an architecture change. The object mask is zero on kept tiles
+    but the channel stays so the design is not altered.
 
     The prior comes from `wdl_outer_17` when given, else is derived from `height_257`
     (the verified ::16 outer transform). `drop_wdl_prior` fills ch 6 with 0.5 and, in hint

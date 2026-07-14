@@ -44,6 +44,7 @@ from harvester.spec103.v7_inputs import (  # noqa: E402
     wdl_lattice_from_height257,
 )
 from harvester.spec103.v7_model import MultiChannelUNetV7  # noqa: E402
+from harvester.spec103.v8_model import V8LeanUNet  # noqa: E402
 
 OPTIONAL_ARRAYS = ("normal_xyz", "liquid_mask", "liquid_height", "object_precise_mask")
 
@@ -63,7 +64,9 @@ def main() -> int:
     ck = torch.load(args.checkpoint, map_location=device)
     use_detail = bool(ck.get("use_detail_head", False))
     height_hints = str(ck.get("height_hints", "gt"))
-    model = MultiChannelUNetV7(
+    arch = str(ck.get("arch", "v7"))  # pre-v8 checkpoints carry no arch key
+    model_cls = V8LeanUNet if arch == "v8" else MultiChannelUNetV7
+    model = model_cls(
         out_channels=3 if use_detail else 2,
         use_wdl_global_trestle=bool(ck.get("use_wdl_global_trestle", True)),
         use_detail_head=use_detail,
