@@ -276,24 +276,7 @@ public static class MapGlbExporter
         {
             using var ms = new MemoryStream(blpData);
             using var blp = new BlpFile(ms);
-            using var bmp = blp.GetBitmap(0);
-
-            int w = bmp.Width, h = bmp.Height;
-            var rect = new System.Drawing.Rectangle(0, 0, w, h);
-            var lockBits = bmp.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly,
-                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-
-            byte[] pixels = new byte[w * h * 4];
-            System.Runtime.InteropServices.Marshal.Copy(lockBits.Scan0, pixels, 0, pixels.Length);
-            bmp.UnlockBits(lockBits);
-
-            // BGRA → RGBA
-            for (int i = 0; i < pixels.Length; i += 4)
-            {
-                (pixels[i], pixels[i + 2]) = (pixels[i + 2], pixels[i]);
-            }
-
-            using var image = SixLabors.ImageSharp.Image.LoadPixelData<Rgba32>(pixels, w, h);
+            using Image<Rgba32> image = blp.GetImage(0);
             using var output = new MemoryStream();
             image.SaveAsPng(output);
             return output.ToArray();

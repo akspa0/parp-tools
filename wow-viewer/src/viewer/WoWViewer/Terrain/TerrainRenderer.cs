@@ -1042,34 +1042,13 @@ public class TerrainRenderer : IDisposable
         {
             using var stream = new MemoryStream(blpData);
             using var blp = new BlpFile(stream);
-            using var bitmap = blp.GetBitmap(0);
-            width = bitmap.Width;
-            height = bitmap.Height;
+            using var image = blp.GetImage(0);
+            width = image.Width;
+            height = image.Height;
 
+            // ImageSharp Image<Rgba32> is already tightly-packed RGBA
             pixels = new byte[width * height * 4];
-            var rect = new System.Drawing.Rectangle(0, 0, width, height);
-            var data = bitmap.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            try
-            {
-                var sourceBytes = new byte[data.Stride * height];
-                System.Runtime.InteropServices.Marshal.Copy(data.Scan0, sourceBytes, 0, sourceBytes.Length);
-                for (int y = 0; y < height; y++)
-                {
-                    for (int x = 0; x < width; x++)
-                    {
-                        int sourceIndex = y * data.Stride + x * 4;
-                        int destIndex = (y * width + x) * 4;
-                        pixels[destIndex + 0] = sourceBytes[sourceIndex + 2];
-                        pixels[destIndex + 1] = sourceBytes[sourceIndex + 1];
-                        pixels[destIndex + 2] = sourceBytes[sourceIndex + 0];
-                        pixels[destIndex + 3] = sourceBytes[sourceIndex + 3];
-                    }
-                }
-            }
-            finally
-            {
-                bitmap.UnlockBits(data);
-            }
+            image.CopyPixelDataTo(pixels);
 
             return true;
         }
@@ -1087,33 +1066,11 @@ public class TerrainRenderer : IDisposable
 
         try
         {
-            using var bitmap = new System.Drawing.Bitmap(pngPath);
-            width = bitmap.Width;
-            height = bitmap.Height;
+            using var image = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(pngPath);
+            width = image.Width;
+            height = image.Height;
             pixels = new byte[width * height * 4];
-            var rect = new System.Drawing.Rectangle(0, 0, width, height);
-            var data = bitmap.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            try
-            {
-                var sourceBytes = new byte[data.Stride * height];
-                System.Runtime.InteropServices.Marshal.Copy(data.Scan0, sourceBytes, 0, sourceBytes.Length);
-                for (int y = 0; y < height; y++)
-                {
-                    for (int x = 0; x < width; x++)
-                    {
-                        int sourceIndex = y * data.Stride + x * 4;
-                        int destIndex = (y * width + x) * 4;
-                        pixels[destIndex + 0] = sourceBytes[sourceIndex + 2];
-                        pixels[destIndex + 1] = sourceBytes[sourceIndex + 1];
-                        pixels[destIndex + 2] = sourceBytes[sourceIndex + 0];
-                        pixels[destIndex + 3] = sourceBytes[sourceIndex + 3];
-                    }
-                }
-            }
-            finally
-            {
-                bitmap.UnlockBits(data);
-            }
+            image.CopyPixelDataTo(pixels);
 
             return true;
         }
@@ -1209,33 +1166,13 @@ public class TerrainRenderer : IDisposable
         {
             using var stream = new MemoryStream(blpData);
             using var blp = new BlpFile(stream);
-            using var bitmap = blp.GetBitmap(0);
-            int width = bitmap.Width;
-            int height = bitmap.Height;
+            using var image = blp.GetImage(0);
+            int width = image.Width;
+            int height = image.Height;
+
+            // ImageSharp Image<Rgba32> is already tightly-packed RGBA
             var pixels = new byte[width * height * 4];
-            var rect = new System.Drawing.Rectangle(0, 0, width, height);
-            var data = bitmap.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            try
-            {
-                var sourceBytes = new byte[data.Stride * height];
-                System.Runtime.InteropServices.Marshal.Copy(data.Scan0, sourceBytes, 0, sourceBytes.Length);
-                for (int y = 0; y < height; y++)
-                {
-                    for (int x = 0; x < width; x++)
-                    {
-                        int sourceIndex = y * data.Stride + x * 4;
-                        int destIndex = (y * width + x) * 4;
-                        pixels[destIndex + 0] = sourceBytes[sourceIndex + 2];
-                        pixels[destIndex + 1] = sourceBytes[sourceIndex + 1];
-                        pixels[destIndex + 2] = sourceBytes[sourceIndex + 0];
-                        pixels[destIndex + 3] = sourceBytes[sourceIndex + 3];
-                    }
-                }
-            }
-            finally
-            {
-                bitmap.UnlockBits(data);
-            }
+            image.CopyPixelDataTo(pixels);
 
             uint texture = _gl.GenTexture();
             _gl.BindTexture(TextureTarget.Texture2D, texture);
@@ -1263,33 +1200,11 @@ public class TerrainRenderer : IDisposable
     {
         try
         {
-            using var bitmap = new System.Drawing.Bitmap(pngPath);
-            int width = bitmap.Width;
-            int height = bitmap.Height;
+            using var image = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(pngPath);
+            int width = image.Width;
+            int height = image.Height;
             var pixels = new byte[width * height * 4];
-            var rect = new System.Drawing.Rectangle(0, 0, width, height);
-            var data = bitmap.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            try
-            {
-                var sourceBytes = new byte[data.Stride * height];
-                System.Runtime.InteropServices.Marshal.Copy(data.Scan0, sourceBytes, 0, sourceBytes.Length);
-                for (int y = 0; y < height; y++)
-                {
-                    for (int x = 0; x < width; x++)
-                    {
-                        int sourceIndex = y * data.Stride + x * 4;
-                        int destIndex = (y * width + x) * 4;
-                        pixels[destIndex + 0] = sourceBytes[sourceIndex + 2];
-                        pixels[destIndex + 1] = sourceBytes[sourceIndex + 1];
-                        pixels[destIndex + 2] = sourceBytes[sourceIndex + 0];
-                        pixels[destIndex + 3] = sourceBytes[sourceIndex + 3];
-                    }
-                }
-            }
-            finally
-            {
-                bitmap.UnlockBits(data);
-            }
+            image.CopyPixelDataTo(pixels);
 
             uint texture = _gl.GenTexture();
             _gl.BindTexture(TextureTarget.Texture2D, texture);

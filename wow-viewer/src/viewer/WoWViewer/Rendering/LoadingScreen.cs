@@ -1,5 +1,7 @@
 using Silk.NET.OpenGL;
 using SereniaBLPLib;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 using WoWViewer.DataSources;
 using WoWViewer.Logging;
 
@@ -271,32 +273,11 @@ public class LoadingScreen : IDisposable
         {
             using var ms = new MemoryStream(blpData);
             using var blp = new BlpFile(ms);
-            var bmp = blp.GetBitmap(0);
+            using Image<Rgba32> image = blp.GetImage(0);
 
-            int w = bmp.Width, h = bmp.Height;
+            int w = image.Width, h = image.Height;
             var pixels = new byte[w * h * 4];
-            var rect = new System.Drawing.Rectangle(0, 0, w, h);
-            var data = bmp.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly,
-                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            try
-            {
-                var srcBytes = new byte[data.Stride * h];
-                System.Runtime.InteropServices.Marshal.Copy(data.Scan0, srcBytes, 0, srcBytes.Length);
-
-                // BGRA -> RGBA
-                for (int y = 0; y < h; y++)
-                    for (int x = 0; x < w; x++)
-                    {
-                        int srcIdx = y * data.Stride + x * 4;
-                        int dstIdx = (y * w + x) * 4;
-                        pixels[dstIdx + 0] = srcBytes[srcIdx + 2]; // R
-                        pixels[dstIdx + 1] = srcBytes[srcIdx + 1]; // G
-                        pixels[dstIdx + 2] = srcBytes[srcIdx + 0]; // B
-                        pixels[dstIdx + 3] = srcBytes[srcIdx + 3]; // A
-                    }
-            }
-            finally { bmp.UnlockBits(data); }
-            bmp.Dispose();
+            image.CopyPixelDataTo(pixels);
 
             uint tex = _gl.GenTexture();
             _gl.BindTexture(TextureTarget.Texture2D, tex);

@@ -6,6 +6,8 @@ using WoWViewer.DataSources;
 using WoWViewer.Logging;
 using SereniaBLPLib;
 using Silk.NET.OpenGL;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 using WowViewer.Core.IO.Files;
 
 namespace WoWViewer.Rendering;
@@ -181,10 +183,8 @@ public class MinimapRenderer : IDisposable
         {
             using var ms = new MemoryStream(data);
             using var blp = new BlpFile(ms);
-            var bmp = blp.GetBitmap(0);
-            DecodedMinimapTile decoded = ConvertBitmap(bmp);
-            bmp.Dispose();
-            return decoded;
+            using Image<Rgba32> image = blp.GetImage(0);
+            return ConvertImage(image);
         }
         catch (Exception ex)
         {
@@ -317,38 +317,12 @@ public class MinimapRenderer : IDisposable
     private readonly record struct DecodedMinimapTileUpload(string CacheKey, DecodedMinimapTile? Tile);
     private readonly record struct MinimapTileRequest(string MapName, int Tx, int Ty, string CacheKey);
 
-    private static DecodedMinimapTile ConvertBitmap(System.Drawing.Bitmap bmp)
+    private static DecodedMinimapTile ConvertImage(Image<Rgba32> image)
     {
-        int width = bmp.Width;
-        int height = bmp.Height;
+        int width = image.Width;
+        int height = image.Height;
         var pixels = new byte[width * height * 4];
-        var rect = new System.Drawing.Rectangle(0, 0, width, height);
-        var bmpData = bmp.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly,
-            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-
-        try
-        {
-            var srcBytes = new byte[bmpData.Stride * height];
-            System.Runtime.InteropServices.Marshal.Copy(bmpData.Scan0, srcBytes, 0, srcBytes.Length);
-
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    int srcIdx = y * bmpData.Stride + x * 4;
-                    int dstIdx = (y * width + x) * 4;
-                    pixels[dstIdx + 0] = srcBytes[srcIdx + 2];
-                    pixels[dstIdx + 1] = srcBytes[srcIdx + 1];
-                    pixels[dstIdx + 2] = srcBytes[srcIdx + 0];
-                    pixels[dstIdx + 3] = srcBytes[srcIdx + 3];
-                }
-            }
-        }
-        finally
-        {
-            bmp.UnlockBits(bmpData);
-        }
-
+        image.CopyPixelDataTo(pixels);
         return new DecodedMinimapTile(width, height, pixels);
     }
 
@@ -377,8 +351,8 @@ public class MinimapRenderer : IDisposable
 
         try
         {
-            using var bmp = new System.Drawing.Bitmap(cachePath);
-            tile = ConvertBitmap(bmp);
+            using Image<Rgba32> image = SixLabors.ImageSharp.Image.Load<Rgba32>(cachePath);
+            tile = ConvertImage(image);
             return true;
         }
         catch (Exception ex)
@@ -388,7 +362,7 @@ public class MinimapRenderer : IDisposable
         }
     }
 
-    private void TrySaveCachedBitmap(string plainPath, System.Drawing.Bitmap bmp)
+    private void TrySaveCachedBitmap(string plainPath, Image<Rgba32> image)
     {
         string cachePath = GetCachePath(plainPath);
         string? cacheDirectory = Path.GetDirectoryName(cachePath);
@@ -398,7 +372,7 @@ public class MinimapRenderer : IDisposable
         string tempPath = cachePath + ".tmp";
         try
         {
-            bmp.Save(tempPath, System.Drawing.Imaging.ImageFormat.Png);
+            image.SaveAsPng(tempPath);
             File.Move(tempPath, cachePath, overwrite: true);
         }
         catch (Exception ex)

@@ -2927,8 +2927,8 @@ static byte[]? DecodeArchiveBackedMinimap(byte[] bytes, string sourcePath)
 
 	using MemoryStream stream = new(bytes, writable: false);
 	using BlpFile blp = new(stream);
-	using System.Drawing.Bitmap bitmap = blp.GetBitmap(0);
-	return NormalizeBitmap(bitmap, NativeMinimapSize, NativeMinimapSize);
+	using Image<Rgba32> image = blp.GetImage(0);
+	return NormalizeImage(image, NativeMinimapSize, NativeMinimapSize);
 }
 
 static byte[]? DecodeFilesystemMinimap(string path)
@@ -2938,8 +2938,8 @@ static byte[]? DecodeFilesystemMinimap(string path)
 
 	using FileStream stream = File.OpenRead(path);
 	using BlpFile blp = new(stream);
-	using System.Drawing.Bitmap bitmap = blp.GetBitmap(0);
-	return NormalizeBitmap(bitmap, NativeMinimapSize, NativeMinimapSize);
+	using Image<Rgba32> image = blp.GetImage(0);
+	return NormalizeImage(image, NativeMinimapSize, NativeMinimapSize);
 }
 
 static byte[]? DecodeRgbImage(byte[] bytes)
@@ -2960,11 +2960,12 @@ static byte[] NormalizeRgbPixels(byte[] rgbaPixels, int width, int height, int t
 	return FlattenImageRgb(image);
 }
 
-static byte[] NormalizeBitmap(System.Drawing.Bitmap bitmap, int targetWidth, int targetHeight)
+static byte[] NormalizeImage(Image<Rgba32> image, int targetWidth, int targetHeight)
 {
-	using MemoryStream pngStream = new();
-	bitmap.Save(pngStream, System.Drawing.Imaging.ImageFormat.Png);
-	return DecodeRgbImage(pngStream.ToArray())!;
+	if (image.Width != targetWidth || image.Height != targetHeight)
+		image.Mutate(context => context.Resize(targetWidth, targetHeight));
+
+	return FlattenImageRgb(image);
 }
 
 static byte[] FlattenImageRgb(Image<Rgba32> image)

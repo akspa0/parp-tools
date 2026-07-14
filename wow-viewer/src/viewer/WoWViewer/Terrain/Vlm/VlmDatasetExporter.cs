@@ -4877,32 +4877,30 @@ public class VlmDatasetExporter
 
             using var ms = new MemoryStream(blpData);
             using var blp = new SereniaBLPLib.BlpFile(ms);
-            using var bmp = blp.GetBitmap(0);
-            
+            using Image<Rgba32> image = blp.GetImage(0);
 
-            
             // Log ALL minimaps to debug
             if (blpPath.Contains("minimap", StringComparison.OrdinalIgnoreCase))
             {
                 Console.WriteLine($"[DEBUG] ConvertBlpToPng: {blpPath}");
                 Console.WriteLine($"[DEBUG]   BLP Size: {blpData.Length} bytes");
-                Console.WriteLine($"[DEBUG]   Bitmap: {bmp.Width}x{bmp.Height} {bmp.PixelFormat}");
-                var px = bmp.GetPixel(bmp.Width/2, bmp.Height/2);
+                Console.WriteLine($"[DEBUG]   Bitmap: {image.Width}x{image.Height} Rgba32");
+                Rgba32 px = image[image.Width / 2, image.Height / 2];
                 Console.WriteLine($"[DEBUG]   Center Pixel: R={px.R} G={px.G} B={px.B} A={px.A}");
             }
 
-            // V7 Dataset Standard requires 512x512 for terrain tiles, 
+            // V7 Dataset Standard requires 512x512 for terrain tiles,
             // but older dataset tools expect 256x256 for MINIMAP tiles?
             // User says: "minimap tiles in 4.0.0 are 512x512... it breaks all the dataset tools".
             // So we should specificially RESIZE MINIMAP TILES to 256x256 if they are 512x512.
-            
+
             // NOTE: This function is used for BOTH tileset textures (which we want 512) and minimaps (which might need 256).
             // We need a flag or logic to distinguish?
             // "blpPath" usually contains "minimap" string if it's a minimap.
-            
+
             int targetWidth = 512;
             int targetHeight = 512;
-            
+
             bool isMinimap = blpPath.Contains("minimap", StringComparison.OrdinalIgnoreCase);
             if (isMinimap)
             {
@@ -4911,26 +4909,18 @@ public class VlmDatasetExporter
                 targetHeight = 256;
             }
 
-            if (bmp.Width != targetWidth || bmp.Height != targetHeight)
+            if (image.Width != targetWidth || image.Height != targetHeight)
             {
-                var resized = new System.Drawing.Bitmap(targetWidth, targetHeight);
-                using (var g = System.Drawing.Graphics.FromImage(resized))
-                {
-                    // Use HighQualityBicubic for downscaling to preserve detail
-                    // Use NearestNeighbor for upscaling (if needed)
-                    g.InterpolationMode = bmp.Width > targetWidth 
-                        ? System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic 
-                        : System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
-                        
-                    g.DrawImage(bmp, 0, 0, targetWidth, targetHeight);
-                }
-                resized.Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
+                // Bicubic when downscaling (preserve detail), nearest-neighbor when upscaling —
+                // same policy as the previous System.Drawing.Graphics path.
+                var sampler = image.Width > targetWidth
+                    ? KnownResamplers.Bicubic
+                    : KnownResamplers.NearestNeighbor;
+                image.Mutate(x => x.Resize(targetWidth, targetHeight, sampler));
             }
-            else
-            {
-                bmp.Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
-            }
-            
+
+            image.SaveAsPng(pngPath);
+
             return true;
         }
         catch (Exception ex)

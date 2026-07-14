@@ -22,6 +22,11 @@ mono_crash.*
 [Rr]elease/
 [Rr]eleases/
 [Oo]utput/
+
+# ...but wow-viewer/docs/releases holds human-authored release notes, not build output.
+# The unanchored [Rr]eleases/ above would otherwise silently hide them from every clone.
+!wow-viewer/docs/releases/
+!wow-viewer/docs/releases/**
 x64/
 x86/
 [Ww][Ii][Nn]32/

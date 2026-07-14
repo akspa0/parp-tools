@@ -1,4 +1,6 @@
 using Silk.NET.OpenGL;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 using WowViewer.Core.IO.Files;
 
 namespace WowViewer.Core.Renderer.Texture;
@@ -99,34 +101,13 @@ public sealed class TextureCache : IDisposable
         {
             using var stream = new MemoryStream(blpData);
             using var blp = new SereniaBLPLib.BlpFile(stream);
-            using var bitmap = blp.GetBitmap(0);
-            int width = bitmap.Width;
-            int height = bitmap.Height;
+            using Image<Rgba32> image = blp.GetImage(0);
+            int width = image.Width;
+            int height = image.Height;
+            // ImageSharp CopyPixelDataTo yields tightly-packed RGBA, top-down — the exact
+            // layout the GL upload below expects (PixelFormat.Rgba), so no channel swap.
             var pixels = new byte[width * height * 4];
-            var rect = new System.Drawing.Rectangle(0, 0, width, height);
-            var data = bitmap.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-
-            try
-            {
-                var sourceBytes = new byte[data.Stride * height];
-                System.Runtime.InteropServices.Marshal.Copy(data.Scan0, sourceBytes, 0, sourceBytes.Length);
-                for (int y = 0; y < height; y++)
-                {
-                    for (int x = 0; x < width; x++)
-                    {
-                        int si = y * data.Stride + x * 4;
-                        int di = (y * width + x) * 4;
-                        pixels[di + 0] = sourceBytes[si + 2]; // B→R
-                        pixels[di + 1] = sourceBytes[si + 1]; // G→G
-                        pixels[di + 2] = sourceBytes[si + 0]; // R→B
-                        pixels[di + 3] = sourceBytes[si + 3]; // A→A
-                    }
-                }
-            }
-            finally
-            {
-                bitmap.UnlockBits(data);
-            }
+            image.CopyPixelDataTo(pixels);
 
             uint texture = _gl.GenTexture();
             _gl.BindTexture(TextureTarget.Texture2D, texture);
@@ -166,34 +147,13 @@ public sealed class TextureCache : IDisposable
         {
             using var stream = new MemoryStream(blpData);
             using var blp = new SereniaBLPLib.BlpFile(stream);
-            using var bitmap = blp.GetBitmap(0);
-            width = bitmap.Width;
-            height = bitmap.Height;
+            using Image<Rgba32> image = blp.GetImage(0);
+            width = image.Width;
+            height = image.Height;
+            // Tightly-packed RGBA from ImageSharp; consumers (ResampleNearest, the Rgba GL
+            // upload path) treat these bytes as RGBA already, so no channel swap is needed.
             pixels = new byte[width * height * 4];
-            var rect = new System.Drawing.Rectangle(0, 0, width, height);
-            var data = bitmap.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-
-            try
-            {
-                var sourceBytes = new byte[data.Stride * height];
-                System.Runtime.InteropServices.Marshal.Copy(data.Scan0, sourceBytes, 0, sourceBytes.Length);
-                for (int y = 0; y < height; y++)
-                {
-                    for (int x = 0; x < width; x++)
-                    {
-                        int si = y * data.Stride + x * 4;
-                        int di = (y * width + x) * 4;
-                        pixels[di + 0] = sourceBytes[si + 2];
-                        pixels[di + 1] = sourceBytes[si + 1];
-                        pixels[di + 2] = sourceBytes[si + 0];
-                        pixels[di + 3] = sourceBytes[si + 3];
-                    }
-                }
-            }
-            finally
-            {
-                bitmap.UnlockBits(data);
-            }
+            image.CopyPixelDataTo(pixels);
 
             return true;
         }

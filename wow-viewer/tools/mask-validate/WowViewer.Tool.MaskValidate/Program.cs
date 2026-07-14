@@ -199,11 +199,11 @@ internal static class Program
 
                 using var ms = new MemoryStream(blpBytes, writable: false);
                 using var blp = new BlpFile(ms);
-                var bitmap = blp.GetBitmap(0);
-                if (bitmap is null) { Console.WriteLine("    GetBitmap returned null"); continue; }
+                using Image<Rgba32>? image = blp.GetImage(0);
+                if (image is null) { Console.WriteLine("    GetImage returned null"); continue; }
 
-                int w = bitmap.Width;
-                int h = bitmap.Height;
+                int w = image.Width;
+                int h = image.Height;
                 Console.WriteLine($"    BLP decoded: {w}x{h}");
                 if (w < 1 || h < 1) continue;
 
@@ -217,7 +217,7 @@ internal static class Program
                     {
                         int sx = Math.Clamp((int)(x * scaleX + 0.5f), 0, w - 1);
                         int sy = Math.Clamp((int)(y * scaleY + 0.5f), 0, h - 1);
-                        var px = bitmap.GetPixel(sx, sy);
+                        Rgba32 px = image[sx, sy];
                         rgb[y, x, 0] = px.R;
                         rgb[y, x, 1] = px.G;
                         rgb[y, x, 2] = px.B;

@@ -1,7 +1,6 @@
-using System.Drawing;
-using System.Drawing.Imaging;
 using System.Numerics;
-using System.Runtime.InteropServices;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 using WowViewer.Core.IO.Mdx;
 using WoWViewer.DataSources;
 using WoWViewer.Logging;
@@ -958,49 +957,40 @@ var runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(modelBytes, s
     {
         using var stream = new MemoryStream(data);
         using var blp = new SereniaBlpFile(stream);
-        using Bitmap bitmap = blp.GetBitmap(0);
+        using Image<Rgba32> image = blp.GetImage(0);
 
-        var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
-        BitmapData bitmapData = bitmap.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-        try
+        byte[] pixels = new byte[image.Width * image.Height * 4];
+        image.CopyPixelDataTo(pixels);
+
+        int zeroAlpha = 0;
+        int fullAlpha = 0;
+        int translucentAlpha = 0;
+
+        for (int i = 3; i < pixels.Length; i += 4)
         {
-            byte[] pixels = new byte[bitmapData.Stride * bitmapData.Height];
-            Marshal.Copy(bitmapData.Scan0, pixels, 0, pixels.Length);
-
-            int zeroAlpha = 0;
-            int fullAlpha = 0;
-            int translucentAlpha = 0;
-
-            for (int i = 3; i < pixels.Length; i += 4)
-            {
-                byte alpha = pixels[i];
-                if (alpha == 0)
-                    zeroAlpha++;
-                else if (alpha == 255)
-                    fullAlpha++;
-                else
-                    translucentAlpha++;
-            }
-
-            return new TextureProbeResult(
-                resolvedPath,
-                detectedKind,
-                detectedVersion,
-                sharedBlpSummary,
-                sharedBlpError,
-                bitmap.Width,
-                bitmap.Height,
-                ClassifyTextureAlpha(zeroAlpha, translucentAlpha),
-                zeroAlpha,
-                fullAlpha,
-                translucentAlpha,
-                true,
-                null);
+            byte alpha = pixels[i];
+            if (alpha == 0)
+                zeroAlpha++;
+            else if (alpha == 255)
+                fullAlpha++;
+            else
+                translucentAlpha++;
         }
-        finally
-        {
-            bitmap.UnlockBits(bitmapData);
-        }
+
+        return new TextureProbeResult(
+            resolvedPath,
+            detectedKind,
+            detectedVersion,
+            sharedBlpSummary,
+            sharedBlpError,
+            image.Width,
+            image.Height,
+            ClassifyTextureAlpha(zeroAlpha, translucentAlpha),
+            zeroAlpha,
+            fullAlpha,
+            translucentAlpha,
+            true,
+            null);
     }
 
     private static WowFileDetection DetectFile(string path, byte[] data)

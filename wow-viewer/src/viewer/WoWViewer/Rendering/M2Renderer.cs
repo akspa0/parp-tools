@@ -1,10 +1,10 @@
-using System.Drawing;
-using System.Drawing.Imaging;
 using System.Numerics;
 using WoWViewer.DataSources;
 using WoWViewer.Logging;
 using SereniaBLPLib;
 using Silk.NET.OpenGL;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 using WowViewer.Core.M2;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.Runtime.M2;
@@ -1203,8 +1203,8 @@ void main()
         {
             using MemoryStream memoryStream = new(blpData, writable: false);
             using BlpFile blp = new(memoryStream);
-            using Bitmap bitmap = blp.GetBitmap(0);
-            return UploadBitmap(bitmap, clampS, clampT);
+            using Image<Rgba32> image = blp.GetImage(0);
+            return UploadImage(image, clampS, clampT);
         }
         catch (Exception ex)
         {
@@ -1217,9 +1217,8 @@ void main()
     {
         try
         {
-            using Bitmap bitmap = new(imagePath);
-            using Bitmap converted = bitmap.Clone(new Rectangle(0, 0, bitmap.Width, bitmap.Height), System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            return UploadBitmap(converted, clampS, clampT);
+            using Image<Rgba32> image = SixLabors.ImageSharp.Image.Load<Rgba32>(imagePath);
+            return UploadImage(image, clampS, clampT);
         }
         catch (Exception ex)
         {
@@ -1228,38 +1227,15 @@ void main()
         }
     }
 
-    private unsafe uint UploadBitmap(Bitmap bitmap, bool clampS, bool clampT)
+    private uint UploadImage(Image<Rgba32> image, bool clampS, bool clampT)
     {
         if (_gl == null)
             return 0;
 
-        Rectangle rect = new(0, 0, bitmap.Width, bitmap.Height);
-        BitmapData bitmapData = bitmap.LockBits(rect, ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-        try
-        {
-            byte[] sourceBytes = new byte[bitmapData.Stride * bitmapData.Height];
-            System.Runtime.InteropServices.Marshal.Copy(bitmapData.Scan0, sourceBytes, 0, sourceBytes.Length);
+        byte[] pixels = new byte[image.Width * image.Height * 4];
+        image.CopyPixelDataTo(pixels);
 
-            byte[] pixels = new byte[bitmap.Width * bitmap.Height * 4];
-            for (int y = 0; y < bitmap.Height; y++)
-            {
-                for (int x = 0; x < bitmap.Width; x++)
-                {
-                    int sourceOffset = (y * bitmapData.Stride) + (x * 4);
-                    int destinationOffset = ((y * bitmap.Width) + x) * 4;
-                    pixels[destinationOffset + 0] = sourceBytes[sourceOffset + 2];
-                    pixels[destinationOffset + 1] = sourceBytes[sourceOffset + 1];
-                    pixels[destinationOffset + 2] = sourceBytes[sourceOffset + 0];
-                    pixels[destinationOffset + 3] = sourceBytes[sourceOffset + 3];
-                }
-            }
-
-            return UploadTexture(pixels, (uint)bitmap.Width, (uint)bitmap.Height, clampS, clampT);
-        }
-        finally
-        {
-            bitmap.UnlockBits(bitmapData);
-        }
+        return UploadTexture(pixels, (uint)image.Width, (uint)image.Height, clampS, clampT);
     }
 
     private unsafe uint UploadTexture(byte[] pixels, uint width, uint height, bool clampS, bool clampT)

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Numerics;
+using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using StreamProfile = WowViewer.Core.IO.Maps.RawArraySerializer.StreamProfile;
 using WowViewer.Core.IO.Dbc;
@@ -1702,11 +1703,11 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     {
         using var ms = new MemoryStream(blpBytes, writable: false);
         using var blp = new SereniaBLPLib.BlpFile(ms);
-        var bitmap = blp.GetBitmap(0);
-        if (bitmap == null) return null;
+        using Image<Rgba32>? image = blp.GetImage(0);
+        if (image == null) return null;
 
-        int w = bitmap.Width;
-        int h = bitmap.Height;
+        int w = image.Width;
+        int h = image.Height;
         if (w < 1 || h < 1) return null;
 
         var rgb = new byte[h, w, 3];
@@ -1714,7 +1715,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         {
             for (int x = 0; x < w; x++)
             {
-                var px = bitmap.GetPixel(x, y);
+                Rgba32 px = image[x, y];
                 rgb[y, x, 0] = px.R;
                 rgb[y, x, 1] = px.G;
                 rgb[y, x, 2] = px.B;
@@ -1727,11 +1728,11 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     {
         using var ms = new MemoryStream(blpBytes, writable: false);
         using var blp = new SereniaBLPLib.BlpFile(ms);
-        var bitmap = blp.GetBitmap(0);
-        if (bitmap == null) return null;
+        using Image<Rgba32>? image = blp.GetImage(0);
+        if (image == null) return null;
 
-        int w = bitmap.Width;
-        int h = bitmap.Height;
+        int w = image.Width;
+        int h = image.Height;
         if (w < 1 || h < 1) return null;
 
         var rgb = new byte[256, 256, 3];
@@ -1744,7 +1745,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             {
                 int sx = Math.Clamp((int)(x * scaleX + 0.5f), 0, w - 1);
                 int sy = Math.Clamp((int)(y * scaleY + 0.5f), 0, h - 1);
-                var px = bitmap.GetPixel(sx, sy);
+                Rgba32 px = image[sx, sy];
                 rgb[y, x, 0] = px.R;
                 rgb[y, x, 1] = px.G;
                 rgb[y, x, 2] = px.B;
