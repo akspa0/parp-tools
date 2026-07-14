@@ -8,7 +8,6 @@ public enum ModelBottomTab
     Info = 0,
     Animations = 1,
     Actions = 2,
-    Lod = 3,
 }
 
 /// <summary>
@@ -96,7 +95,7 @@ public static class WorkbenchNavigator
 {
     public static string[] GetBottomTabLabels(WorkbenchTab tab) => tab switch
     {
-        WorkbenchTab.Model => ["Info", "Animations", "Actions", "LOD"],
+        WorkbenchTab.Model => ["Info", "Animations", "Actions"],
         WorkbenchTab.World => ["Source", "Placements", "Tiles", "Selection Tools", "LOD"],
         WorkbenchTab.Tools => ["Quick", "Archeology", "PM4", "Terrain", "Utilities", "Converters"],
         _ => [],

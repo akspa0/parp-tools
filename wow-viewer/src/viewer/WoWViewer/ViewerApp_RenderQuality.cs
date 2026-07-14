@@ -11,7 +11,6 @@ public partial class ViewerApp
     private TextureFilteringMode _textureFilteringMode = TextureFilteringMode.Trilinear;
     private bool _enableMultisample = true;
     private bool _enableTerrainBackfaceCulling = true;
-    private bool _enableWmoBackfaceCulling;
     private int _sampleBufferCount;
     private int _sampleCount;
     private float _defaultFogStart = 200f;
@@ -29,7 +28,6 @@ public partial class ViewerApp
     {
         RenderQualitySettings.TextureFilteringMode = _textureFilteringMode;
         RenderQualitySettings.EnableTerrainBackfaceCulling = _enableTerrainBackfaceCulling;
-        RenderQualitySettings.EnableWmoBackfaceCulling = _enableWmoBackfaceCulling;
 
         if (SupportsRuntimeMultisampleToggle && _enableMultisample)
             _gl.Enable(EnableCap.Multisample);
@@ -119,16 +117,6 @@ public partial class ViewerApp
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Terrain chunk winding is generated locally, so this can safely skip underside fragments in the normal terrain pass.");
-
-        bool wmoCull = _enableWmoBackfaceCulling;
-        if (ImGui.Checkbox("Cull WMO Backfaces (Experimental)", ref wmoCull))
-        {
-            _enableWmoBackfaceCulling = wmoCull;
-            ApplyRenderQualitySettings(refreshTextures: false);
-            SaveViewerSettings();
-        }
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Applies backface culling to WMO shell passes. Keep this off if a scene has intentionally double-sided WMO materials until we finish a material-flag-aware rollout.");
 
         if (ImGui.Button("Reapply To Loaded Textures"))
             ApplyRenderQualitySettings(refreshTextures: true);

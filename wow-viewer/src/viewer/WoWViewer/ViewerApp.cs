@@ -14689,9 +14689,7 @@ void main() {
                 : TextureFilteringMode.Trilinear;
             _enableMultisample = settings.EnableMultisample;
             _enableTerrainBackfaceCulling = settings.EnableTerrainBackfaceCulling;
-            _enableWmoBackfaceCulling = settings.EnableWmoBackfaceCulling;
             RenderQualitySettings.EnableTerrainBackfaceCulling = _enableTerrainBackfaceCulling;
-            RenderQualitySettings.EnableWmoBackfaceCulling = _enableWmoBackfaceCulling;
             _defaultFogStart = float.IsFinite(settings.DefaultFogStart)
                 ? Math.Clamp(settings.DefaultFogStart, 0f, 5000f)
                 : 200f;
@@ -14925,7 +14923,6 @@ void main() {
                 TextureFilteringMode = (int)_textureFilteringMode,
                 EnableMultisample = _enableMultisample,
                 EnableTerrainBackfaceCulling = _enableTerrainBackfaceCulling,
-                EnableWmoBackfaceCulling = _enableWmoBackfaceCulling,
                 DefaultFogStart = _defaultFogStart,
                 DefaultFogEnd = _defaultFogEnd,
                 CameraSpeed = _cameraSpeed,
@@ -15195,7 +15192,6 @@ void main() {
         public int TextureFilteringMode { get; set; } = (int)Rendering.TextureFilteringMode.Trilinear;
         public bool EnableMultisample { get; set; } = true;
         public bool EnableTerrainBackfaceCulling { get; set; } = true;
-        public bool EnableWmoBackfaceCulling { get; set; }
         public List<KnownGoodClientPath> KnownGoodClientPaths { get; set; } = new();
         public bool ShowMinimapWindow { get; set; } = true;
         public bool UseDockspaceUi { get; set; }

@@ -831,14 +831,9 @@ public class WmoRenderer : ISceneRenderer
 
     private void ApplySurfaceCulling()
     {
-        if (_wireframe || !RenderQualitySettings.EnableWmoBackfaceCulling)
-        {
-            _gl.Disable(EnableCap.CullFace);
-            return;
-        }
-
-        _gl.Enable(EnableCap.CullFace);
-        _gl.CullFace(TriangleFace.Back);
+        // WMO materials aren't reliably single-sided (double-sided flags vary per material),
+        // so WMO backface culling was never safely on by default; removed as an option.
+        _gl.Disable(EnableCap.CullFace);
     }
 
     private static EGxBlend ResolveWmoBlendMode(uint rawBlendMode)

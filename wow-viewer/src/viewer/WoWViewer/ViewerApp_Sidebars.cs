@@ -3832,9 +3832,6 @@ public partial class ViewerApp
             case ModelBottomTab.Actions:
                 DrawModelActionsSubTab();
                 break;
-            case ModelBottomTab.Lod:
-                DrawModelLodSubTab();
-                break;
         }
     }
 
@@ -4017,31 +4014,6 @@ public partial class ViewerApp
                 }
                 ImGui.EndCombo();
             }
-        }
-    }
-
-    private void DrawModelLodSubTab()
-    {
-        ImGui.TextDisabled("Model Viewer — LOD");
-        ImGui.Separator();
-
-        if (_renderer == null)
-        {
-            ImGui.TextDisabled("No model loaded.");
-            return;
-        }
-
-        ImGui.TextWrapped("Model-level LOD controls are not yet exposed. Use the global Render Quality window (Tools > Render Quality) for texture sampling and effect quality settings.");
-
-        ImGui.Separator();
-        ImGui.TextDisabled("Renderer");
-        ImGui.Text(_renderer.GetType().Name);
-
-        if (_renderer is IModelRenderer modelRenderer && modelRenderer.Animator != null)
-        {
-            var animator = modelRenderer.Animator;
-            ImGui.TextDisabled("Animation sequences");
-            ImGui.Text($"{animator.Sequences.Count} sequences");
         }
     }
 
