@@ -135,7 +135,7 @@ public class EnrichmentStreamFormatTests
         byte[] rgb = new byte[w * h * 3];
         for (int i = 0; i < rgb.Length; i++)
             rgb[i] = (byte)(i % 256);
-        byte[] shape = [4, 4]; // int32 shape packed as bytes
+        int[] shape = [4, 4]; // int32 shape packed as bytes
         byte[] shapeBytes = new byte[8];
         Buffer.BlockCopy(shape, 0, shapeBytes, 0, 8);
 
