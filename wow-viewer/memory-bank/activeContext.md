@@ -33,9 +33,21 @@ Last updated: 2026-07-14 (RunPod deployment ready; WoWViewer cross-platform CI i
   E/W chirality should be eyeballed in-app once); AreaTable status-bar lookup never ran for
   `_vlmTerrainManager` sessions (condition required `_terrainManager` — fixed). Removed
   Model>LOD stub tab + WMO backface-culling toggle (USER: both useless).
-- **M2 readers for 0.11–2.4.3 render nothing but bounding boxes** — top known gap, USER wants
-  an RE-backed plan (x64dbg MCP configured at repo-root `.mcp.json` → `C:\x64dbg`; **Ghidra not
-  installed on this machine** — no Ghidra MCP possible until installed).
+- **M2 readers for 0.11–2.4.3 render nothing but bounding boxes** — top known gap. **Spec 104
+  written (specify + plan done, 2026-07-14):** `specs/104-legacy-m2-rendering/` (spec, plan,
+  research, data-model, quickstart, contracts/m2-format-profile.md, checklist). Root cause:
+  `M2ModelReader.cs` hardcodes `embeddedSkinProfileCount/Offset = 0`; for M2 format version ≤ 263
+  (client 0.11–2.4.3) the skin profiles (geometry/submeshes/material bindings) are EMBEDDED in the
+  .m2 (`nViews`/`ofsViews`), not external `.skin` files. Phased by format-version boundary:
+  P1 = 2.4.3+1.12.1 (documented, validate vs wowdev.wiki + reference impl, no debugger),
+  P2 = 2.0.0α/2.1/2.2/2.3, P3 = 1.0.0/0.12/0.11 (x64dbg dynamic tracing). x64dbg MCP configured +
+  responding (`.mcp.json` → `C:\x64dbg`, `list_sessions` OK); **Ghidra NOT installed** (static RE
+  is a separate setup step). Next speckit step: `speckit-tasks`. Not yet implemented — spec/plan only.
+  NOTE: `.specify/*` scripts resolve the git root (parp-tools) not `wow-viewer/`, so spec artifacts
+  are written to `wow-viewer/specs/` manually.
+- **Status-bar facing fully fixed (2026-07-14):** was N/S-swapped (`yaw+180`), then E/W-swapped
+  after the first fix; final form `(360 - yaw) % 360` (N/S are negation fixed points). USER to
+  confirm all four cardinals in-app.
 
 ## Current target — Spec 103: revive the v7 terrain regressor on clean signals
 
