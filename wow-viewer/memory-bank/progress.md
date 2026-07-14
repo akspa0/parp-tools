@@ -1,26 +1,43 @@
 # Progress — wow-viewer
 
-Last updated: 2026-07-13
+Last updated: 2026-07-13 (evening)
+
+## 2026-07-13 (evening) — Spec 103 Phases 0–4 agent work implemented
+
+- **Contract pinned** (`specs/103-image-only-reconstruction/research-v7-contract.md`): real v7 aux
+  channels 7-12 are height-min/max hints, liquid mask, liquid height, object mask, brush — the plan's
+  alpha/holes guess was wrong and is corrected in plan.md. Missing/dropped WDL prior = 0.5 fill (v7's own
+  fallback). Resolution decision: 256, `output_size` parameterized (the port's only deviation).
+- **Lane ported + tested:** `src/harvester/spec103/{v7_model,v7_losses,v7_inputs}.py`; 7/7 CPU sanity
+  tests (`tests/spec103/test_v7_sanity.py`): channel order, trestle residual, prior dropout, targets/bounds,
+  forward/loss/backward, world-unit round trip.
+- **Scripts prepared (USER runs the GPU/dotnet steps — quickstart.md):** synthetic known-height author
+  (flat/ramp/ridge/crater/plateau, non-adjacent tiles; prints exact `map generate-blank` +
+  `terrain-patch-adt` + `Capture render` commands) → 13-ch store builder (captured PNGs or labeled
+  hillshade fallback) → lean trainer (holdout by any index column, AMP/EMA/warmup+cosine/early-stop/resume,
+  `--wdl-prior-dropout` with per-epoch `val_no_prior`, `--height-hints gt|wdl|none`, `--loss v7|l1`,
+  `--max-object-coverage` clean-tile selection, FR-011 run identity + peak VRAM) → batch inference
+  (predicted height_257 npy + paired WDL lattice npz, `terrain-patch-adt`-compatible) → OBJ export →
+  label-free harness (border agreement, plausibility, checkerboard/blockiness; `--gt-store` dev-only baselines).
+- **Speckit synced same pass:** plan.md (pinned channel table, loss/object decisions, Phase 5 scoped
+  deferred lanes T016/T019, implementation state), tasks.md (T001-T010, T012-T017, T019 checked;
+  T011/T018 + training runs USER-blocked), quickstart.md new.
 
 ## 2026-07-13 — Pivot to Spec 103 (revive v7); image-only law established
 
-- **New governing law** captured in Spec 103: input is one image, every signal is generated from it, no
-  ground-truth signal at inference, validation is label-free. This resolves the long-running "missing signals"
-  problem — the model generates missing signals; it never assumes them.
-- **Direction:** revive the real single-model **v7** (`MultiChannelUNetV7`, no stages) on the current clean
-  signals, synthetic-first to de-risk. Quick-and-dirty (no object-mask loss gating; WDL-prior dropout).
-  Spec 103 = spec.md + plan.md + tasks.md + checklist (all via Spec Kit).
-- **V24 / Spec 094 dropped** as non-functional. `wdl_height_33` prohibited; the WDL prior is the verified
-  `height257[::16]` / `[8::16]` transform, derivable from existing `height_257` (no reharvest).
-- **Spec 102 M0 object-mask work paused/superseded** but preserved: full-stack simple M0 trainer + image-only
-  inference committed; strict fragment-trace tests 42/42 green. Not the active path.
+- **New governing law** in Spec 103: input is one image; every signal is generated from it; validation is
+  label-free. **V24 / Spec 094 dropped** as non-functional. `wdl_height_33` prohibited; the WDL prior is the
+  verified `height257[::16]` / `[8::16]` transform. **Spec 102 M0 paused/superseded** but preserved
+  (simple trainer + 42/42-green strict tests).
 
 ## Key facts for the next session
 
-- v7 source (read-only ref): `gillijimproject_refactor/src/WoWMapConverter/scripts/{v7_model,train_v7,v7_losses,infer_v7}.py` (added 2026-04-14; V7.7 detail head 2026-04-19).
-- v7 input = 13 ch: minimap RGB (0-2), normal RGB (3-5), WDL prior (6, the trestle base), aux (7-12). Output = height.
-- Existing V18 store `output/datasets/v18/3_3_5_12340.zarr` has `minimap_rgb` + `height_257` + `normal_xyz` (no WDL arrays — derive the prior).
-- Next agent work (no training): Spec 103 Phase 2 — pin v7's exact contract from `train_v7.py`, port the model + 13-channel assembler into `spec103/`, CPU sanity. Then the USER runs synthetic capture + training.
+- Next step is entirely USER runs: quickstart §1 (synthetic authoring → dotnet generate/patch/capture →
+  store → training), then T011 caveat catalog in research-v7-contract.md §8, then real-data run (§3).
+- v7 reference (read-only): `gillijimproject_refactor/src/WoWMapConverter/scripts/{v7_model,train_v7,v7_losses,infer_v7}.py`.
+- Real store = existing V18 `output/datasets/v18/3_3_5_12340.zarr` (5134 tiles; has minimap_rgb, height_257,
+  normal_xyz, liquid_mask/height, object_precise_mask — FR-012 satisfied, no copy needed;
+  `spec103_build_real_store.py` verifies and pins it).
 
 ## Durable boundaries
 

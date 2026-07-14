@@ -14,10 +14,15 @@ Short file. Current truth only. Root `../AGENTS.md` still wins on workspace poli
 
 ## Current active lanes
 
-- Spec 102 `102-v25-terrain-convergence` — active model lane. Current path is the
-  simple M0 (RGB minimap → object mask) on the existing precise-mask store; the
-  strict fragment-trace target is committed but parked. See memory-bank.
+- Spec 103 `103-image-only-reconstruction` — active model lane: revive v7
+  (`MultiChannelUNetV7`) on clean signals, synthetic-first. Lane ported + tested;
+  USER runs capture/training (see `specs/103-.../quickstart.md` and memory-bank).
 - Spec 080 `080-wow-ui-consolidation` — active viewer-shell doc and compatibility lane.
+
+## Background / paused model lanes
+
+- Spec 102 `102-v25-terrain-convergence` — PAUSED/superseded by 103. Simple M0 trainer
+  and strict fragment-trace target are committed but parked. See memory-bank.
 
 ## Background / historical lanes
 

@@ -90,6 +90,7 @@ Later and optionally, object artifacts are removed from the *generated output* b
 - **FR-010**: The Spec 102 strict fragment-trace sidecar and precise-mask target are NOT PoC prerequisites; they are retained only as optional later refinements and MUST NOT block the WDL PoC.
 - **FR-011**: Every training run MUST record command, data identity, split, per-epoch metrics, and peak VRAM, and MUST NOT be claimed as success without passing the label-free acceptance check.
 - **FR-012**: A training store MUST pair the minimap image with the real WDL lattice per tile. The current 3-array precise-mask store lacks height/WDL, so a suitable store MUST be produced or identified before training.
+- **FR-013**: The training corpus MUST be curated before use, not consumed raw. Tiles whose supervised height target is not supportable by the image — object-contaminated tiles (Principle #5), blank-minimap dead space, and height/normal-mismatch harvest failures — MUST be dropped, and the kept set recorded in an auditable curation manifest bound to the store. Object tile removal is the default, not an opt-in; the manifest MUST record per-tile drop reasons and the thresholds used.
 
 ### Key Entities
 
