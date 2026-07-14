@@ -164,11 +164,31 @@ jobs:
           dotnet build wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Release
 
   publish-release:
-    name: Publish win-x64 release build
+    name: Publish release build (${{ matrix.os_label }})
     needs: build-windows
     if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
-    runs-on: windows-latest
-    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            project: wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj
+            os_label: Windows x64
+          - os: ubuntu-latest
+            rid: linux-x64
+            project: wow-viewer/src/viewer/WoWViewer/WoWViewer.CrossPlatform.csproj
+            os_label: Linux x64
+          - os: macos-latest
+            rid: osx-arm64
+            project: wow-viewer/src/viewer/WoWViewer/WoWViewer.CrossPlatform.csproj
+            os_label: macOS arm64
+          - os: macos-latest
+            rid: osx-x64
+            project: wow-viewer/src/viewer/WoWViewer/WoWViewer.CrossPlatform.csproj
+            os_label: macOS x64 (Intel)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     permissions:
       contents: write
     steps:
@@ -178,22 +198,47 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
-      - name: Publish self-contained win-x64
+      - name: Publish self-contained (${{ matrix.rid }})
         run: >
-          dotnet publish wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj
-          -c Release -r win-x64 --self-contained true
+          dotnet publish ${{ matrix.project }}
+          -c Release -r ${{ matrix.rid }} --self-contained true
           -p:PublishSingleFile=false
-          -o publish/win-x64
+          -o publish/${{ matrix.rid }}
+      - name: Bundle README and release notes
+        shell: pwsh
+        run: |
+          Copy-Item "wow-viewer/README.md" "publish/${{ matrix.rid }}/README.md"
+          if (Test-Path "wow-viewer/docs/releases/v0.5.0.md") {
+            Copy-Item "wow-viewer/docs/releases/v0.5.0.md" "publish/${{ matrix.rid }}/CHANGES-v0.5.0.md"
+          }
       - name: Zip publish output
         shell: pwsh
-        run: Compress-Archive -Path publish/win-x64/* -DestinationPath ParpToolsWoWViewer-win-x64.zip
+        run: Compress-Archive -Path publish/${{ matrix.rid }}/* -DestinationPath ParpToolsWoWViewer-${{ matrix.rid }}.zip
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ParpToolsWoWViewer-win-x64
-          path: ParpToolsWoWViewer-win-x64.zip
+          name: ParpToolsWoWViewer-${{ matrix.rid }}
+          path: ParpToolsWoWViewer-${{ matrix.rid }}.zip
+
+  create-release:
+    name: Create GitHub Release
+    needs: publish-release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ParpToolsWoWViewer-*
+          merge-multiple: true
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: gh release create "${{ github.ref_name }}" ParpToolsWoWViewer-win-x64.zip --generate-notes
+        run: >
+          gh release create "${{ github.ref_name }}" ParpToolsWoWViewer-*.zip
+          --notes-file wow-viewer/docs/releases/v0.5.0.md
+          --title "parp-tools WoW Viewer ${{ github.ref_name }}"
         env:
           GH_TOKEN: ${{ github.token }}

@@ -19,6 +19,24 @@ Last updated: 2026-07-14 (RunPod deployment ready; WoWViewer cross-platform CI i
    `WoWViewer.CrossPlatform.csproj` becomes an actually-functional Linux/macOS viewer, not just
    a compiling one. Sizeable, touches core rendering files — scope with the user before starting.
 
+## WoWViewer v0.5.0 release push (2026-07-14/15, USER-driven)
+
+- **Multiplatform:** GetBitmap()/GDI+ → ImageSharp GetImage() migration across all renderers/
+  exporters/tools (delegated to agent, ~15 sites; the CA1416 runtime blocker for Linux/macOS).
+  Workflow now publishes win-x64 + linux-x64 + osx-arm64 + osx-x64 self-contained builds on
+  `v*` tag / manual dispatch; `create-release` job attaches all four zips + release notes.
+- **Changelog:** `wow-viewer/docs/releases/v0.5.0.md` (new) — headline is the MdxViewer
+  decoupling; README CI section updated. Old release-notes convention was per-version md
+  bundled into the zip (v0.4.7 precedent) — kept.
+- **Viewer fixes tonight:** WMOv14 group-name mismatch (MOGI positional overwrite — fixed);
+  status-bar facing 180° off (displayed = yaw+180; true North = yaw 0 per USER report — fixed,
+  E/W chirality should be eyeballed in-app once); AreaTable status-bar lookup never ran for
+  `_vlmTerrainManager` sessions (condition required `_terrainManager` — fixed). Removed
+  Model>LOD stub tab + WMO backface-culling toggle (USER: both useless).
+- **M2 readers for 0.11–2.4.3 render nothing but bounding boxes** — top known gap, USER wants
+  an RE-backed plan (x64dbg MCP configured at repo-root `.mcp.json` → `C:\x64dbg`; **Ghidra not
+  installed on this machine** — no Ghidra MCP possible until installed).
+
 ## Current target — Spec 103: revive the v7 terrain regressor on clean signals
 
 - **Governing law (image-only):** the only deployment input is one image tile. Every other signal is generated from it; no model reads a ground-truth signal at inference; downstream trains on generated (not ground-truth) upstream; a target the image cannot support is invalid. Validation is **label-free** (self-consistency), never label-comparison. See `specs/103-image-only-reconstruction/spec.md`.

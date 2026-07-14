@@ -33,16 +33,16 @@ dotnet build wow-viewer/WowViewer.slnx -c Debug
 dotnet test wow-viewer/WowViewer.slnx -c Debug
 ```
 
-CI: `.github/workflows/wowviewer-build.yml` builds + tests on Windows (the real, functional
-viewer) on every push/PR touching `wow-viewer/`, does a compile-only check of the in-progress
-cross-platform port on Linux, and publishes a self-contained win-x64 release build + GitHub
-Release on a `v*` tag push or manual dispatch. The Linux viewer target
-(`WoWViewer.CrossPlatform.csproj`) compiles but is **not yet functional** — `BlpFile.GetBitmap()`
-(GDI+) is used at ~19 real rendering/export call sites and throws `PlatformNotSupportedException`
-off-Windows since .NET 7; the cross-platform-safe `BlpFile.GetImage()` (ImageSharp) already
-exists and is already used correctly in two IO-layer files. Swapping the remaining call sites is
-scoped, not yet done. `WowViewer.Tool.ValidationCapture` is deliberately Windows-only by design
-(GPU capture via a hidden window) and is never expected to run on Linux.
+CI: `.github/workflows/wowviewer-build.yml` builds the solution on Windows and compile-checks
+the cross-platform target on Linux + macOS on every push/PR touching `wow-viewer/`; the test
+suite runs as an informational (non-blocking) job. A `v*` tag push (or manual dispatch with
+`publish_release`) publishes self-contained binaries for **win-x64, linux-x64, osx-arm64, and
+osx-x64** and, for tags, creates a GitHub Release with the notes from
+[docs/releases/](docs/releases/). BLP decoding uses ImageSharp everywhere (the old GDI+ path
+was Windows-only at runtime), so Linux/macOS builds are functional — with one known limitation:
+native file dialogs are Windows-only; use the CLI automation flags (`--game-path`, `--build`,
+`--world`) on other platforms. `WowViewer.Tool.ValidationCapture` is deliberately Windows-only
+by design (GPU capture via a hidden window).
 
 ## Run viewer
 
