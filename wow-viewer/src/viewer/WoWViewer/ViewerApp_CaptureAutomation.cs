@@ -393,10 +393,11 @@ public partial class ViewerApp
 
     private static float GetWorldFacingDegrees(float yawDegrees)
     {
-        // The old formula reduced algebraically to (yaw + 180): facing North displayed
-        // "South" and vice versa. Empirically (user report), true North is yaw = 0, so the
-        // compass heading is simply the yaw itself, normalized to [0, 360).
-        float degrees = yawDegrees % 360f;
+        // Compass heading from camera yaw. True North is yaw = 0 (so N/S land correctly), but
+        // the yaw increases in the opposite rotational sense to the compass, which swapped
+        // East and West. Negating the angle — (360 - yaw) — fixes E/W while leaving the North
+        // (0deg) and South (180deg) fixed points unchanged.
+        float degrees = (360f - (yawDegrees % 360f)) % 360f;
         if (degrees < 0f)
             degrees += 360f;
 
