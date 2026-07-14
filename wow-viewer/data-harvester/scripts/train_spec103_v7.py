@@ -319,6 +319,15 @@ def main() -> int:
                     help="v8 = lean ConvNeXt-V2 U-Net (~6M params, default; fast local iteration); "
                          "v7 = the original 117M MultiChannelUNetV7 (ablation/reference). Same 13-ch "
                          "contract, trestle, loss, and checkpoints layout either way.")
+    ap.add_argument("--output-head-mode", choices=["legacy_clamped", "linear_unclamped_train"],
+                    default="legacy_clamped",
+                    help="legacy_clamped (default, v7-faithful): global residual = tanh(delta)*scale, "
+                         "then hard-clamped to [0,1] every step, including during training. tanh "
+                         "saturates fast, so delta clusters near +-scale instead of spanning it "
+                         "continuously -- a likely source of v7's reported output banding/terracing. "
+                         "linear_unclamped_train: residual = delta*scale (no tanh), clamped only at "
+                         "eval time -- lets training gradients flow through the full residual range. "
+                         "Cheap to A/B against legacy_clamped on the same data.")
     ap.add_argument("--wdl-prior-dropout", type=float, default=0.25)
     ap.add_argument("--height-hints", choices=["gt", "wdl", "none"], default="gt")
     ap.add_argument("--loss", choices=["v7", "l1"], default="v7")
@@ -334,6 +343,7 @@ def main() -> int:
     ap.add_argument("--init-weights", type=Path, default=None)
     ap.add_argument("--no-amp", action="store_true")
     ap.add_argument("--workers", type=int, default=4, help="DataLoader workers (0 = synchronous; 4+ overlaps data loading with GPU)")
+    ap.add_argument("--limit", type=int, default=0, help="truncate train/val rows for a fast smoke test (0 = no limit)")
     args = ap.parse_args()
 
     if not torch.cuda.is_available():
@@ -376,6 +386,9 @@ def main() -> int:
                          f"dropped_objects={int((coverage > args.max_object_coverage).sum())}")
     val_rows = [i for i, row in enumerate(index) if str(row[args.val_key]) == args.val_value and keep[i]]
     train_rows = [i for i, row in enumerate(index) if str(row[args.val_key]) != args.val_value and keep[i]]
+    if args.limit:
+        train_rows = train_rows[:args.limit]
+        val_rows = val_rows[:max(1, args.limit // 4)]
     if not val_rows or not train_rows:
         raise SystemExit(f"bad holdout: val={len(val_rows)} train={len(train_rows)} for {args.val_key}={args.val_value!r} "
                          f"(after curation: {int(keep.sum())} tiles kept)")
@@ -413,9 +426,11 @@ def main() -> int:
         use_wdl_global_trestle=True,
         use_detail_head=args.detail_head,
         output_size=WORKING_SIZE,
+        output_head_mode=args.output_head_mode,
     ).to(device)
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"[model] {model_cls.__name__} arch={args.arch} variant={model_variant} out_ch={out_channels} params={n_params:,}", flush=True)
+    print(f"[model] {model_cls.__name__} arch={args.arch} variant={model_variant} out_ch={out_channels} "
+          f"params={n_params:,} output_head_mode={args.output_head_mode}", flush=True)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     def lr_lambda(e: int) -> float:
@@ -476,6 +491,7 @@ def main() -> int:
         "curation": (str(args.curation_manifest.resolve()) if args.curation_manifest is not None
                      else f"inline max_object_coverage={args.max_object_coverage} min_rgb_std={args.min_rgb_std}"),
         "arch": args.arch,
+        "output_head_mode": args.output_head_mode,
         "model_variant": model_variant + ("-v77" if args.detail_head else ""),
         "params": n_params, "loss": args.loss, "height_hints": args.height_hints,
         "wdl_prior_dropout": args.wdl_prior_dropout, "max_object_coverage": args.max_object_coverage,
@@ -528,7 +544,8 @@ def main() -> int:
                         "epoch": epoch, "run_identity": run_identity,
                         "arch": args.arch, "model_variant": run_identity["model_variant"],
                         "use_wdl_global_trestle": True, "use_detail_head": args.detail_head,
-                        "output_size": WORKING_SIZE, "height_hints": args.height_hints},
+                        "output_size": WORKING_SIZE, "height_hints": args.height_hints,
+                        "output_head_mode": args.output_head_mode},
                        args.output / "checkpoint_best.pt")
             render_preview(ema_model, val_ds, preview_indices, device,
                            args.output / "val_previews" / f"best_epoch_{epoch:03d}.png", epoch, val)

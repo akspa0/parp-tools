@@ -98,7 +98,52 @@ global-context mixer + bounds head at the 16× stage. Head/trestle/clamp semanti
 verbatim from v7 — `combined_loss`, trainer, inference, previews, mesh export, and the
 label-free harness all run unchanged.
 
-## 5. Sources
+## 6. Banding investigation (2026-07-14) — where v7's reported banding likely came from
+
+The user reported v7's outputs had visible banding and asked two questions: (1) does v8 avoid
+it, (2) is precise numeric data (height, WDL prior) accidentally being routed through 8-bit
+image encoding somewhere, since only the deployment minimap should be image data.
+
+**Verified against the live V18 zarr store** (`zarr.open_group(...); a.dtype` per array):
+`height_257`, `normal_xyz`, `liquid_mask`, `liquid_height`, `object_precise_mask` are all
+**float32**. Only `minimap_rgb` is `uint8` — correct, since it is the one signal that is
+genuinely the deployment image. The WDL prior (`v7_inputs.wdl_lattice_from_height257`) is a
+`::16` subsample of the float32 height array, done at batch time — never rasterized. The
+`wdl_height_33` prohibition already recorded in this lane is exactly this class of mistake,
+caught previously. **Conclusion: no, precise data is not going through image quantization.**
+One quantization source is real but external: WoW's own ADT `MCNR` chunk stores terrain
+normals as signed bytes per axis (~256 directions) — a client file-format limit inherited by
+`normal_xyz`, not introduced by this pipeline, and not fixable without different source data.
+
+**Two real, code-level causes were found and fixed:**
+
+1. **`output_head_mode` was wired into both model constructors but never exposed to the
+   trainer** — every run silently used `legacy_clamped`: `global_delta = tanh(raw) * scale`,
+   then `clamp(wdl_base + global_delta, 0, 1)` applied every step, including during training.
+   tanh saturates quickly, so `global_delta` clusters near ±`global_residual_scale` rather than
+   spanning it continuously — a plausible mechanism for terraced/banded output relative to the
+   WDL base. Fixed: `--output-head-mode {legacy_clamped, linear_unclamped_train}` is now a
+   trainer flag (default stays `legacy_clamped` for v7-parity), recorded in checkpoints, and
+   resolved automatically by `infer_spec103_v7.py`. `linear_unclamped_train` drops the tanh,
+   clamps only at eval time, and is cheap to A/B on the same data/checkpoint layout.
+2. **v8-specific, self-introduced risk: PixelShuffle without ICNR init.** Random-init
+   pixel-shuffle decoders reliably show checkerboard/grid artifacts (Aitken et al. 2017,
+   arXiv:1707.02937) — a failure mode v7 never had (it upsamples via bilinear + 1×1 conv, not
+   PixelShuffle). Fixed: `_icnr_init` in `v8_model.py` makes each contiguous group of 4 channels
+   feeding one 2×2 PixelShuffle output block start identical (a smooth upsample at init, not
+   noise); verified live (sub-kernels bit-identical at init) and guarded by
+   `test_icnr_init_avoids_pixelshuffle_checkerboard`.
+
+**One structural contributor left as-is (shared equally by v7 and v8, not a bug):** the WDL
+prior is a 17×17 grid bilinearly upsampled to 256×256 — visibly faceted every ~16px, since
+bilinear upsampling of a coarse grid is only C0-continuous at the original control points. The
+global residual head only gets ±`global_residual_scale` (0.20 default) of room to correct this,
+so the prior's facets dominate large-scale structure. This is the documented trestle design
+(`global = wdl_base + residual`), not a bug — changing it is a bigger design call than this pass
+scoped, but it is the most likely remaining source of any residual faceting/banding tied to the
+16px WDL grid spacing, worth watching for in `val_previews/` on the real-data run.
+
+## 7. Sources
 
 - https://arxiv.org/abs/2507.09681 (prior-based terrain reconstruction)
 - https://arxiv.org/html/2603.29245v2 (PhiSat-2 TSONet; PHDataset on HF)

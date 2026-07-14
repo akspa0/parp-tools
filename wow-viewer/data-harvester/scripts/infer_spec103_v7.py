@@ -71,6 +71,7 @@ def main() -> int:
         use_wdl_global_trestle=bool(ck.get("use_wdl_global_trestle", True)),
         use_detail_head=use_detail,
         output_size=int(ck.get("output_size", WORKING_SIZE)),
+        output_head_mode=str(ck.get("output_head_mode", "legacy_clamped")),
     ).to(device)
     model.load_state_dict(ck["model"])
     model.eval()

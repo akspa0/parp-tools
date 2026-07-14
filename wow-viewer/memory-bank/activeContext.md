@@ -1,6 +1,23 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-14 (curation default tightened to drop ANY object tile)
+Last updated: 2026-07-14 (RunPod deployment ready; WoWViewer cross-platform CI investigation started)
+
+## For tomorrow (pick up here)
+
+1. **Spec 103 training**: everything is built and verified, nothing left to code. Run
+   `specs/103-image-only-reconstruction/quickstart.md` **"Start here"** section (top of file):
+   build the RunPod bundle → transfer → `install_deps.sh` → `verify_bundle.sh` → `smoke.sh` →
+   `train.sh` on the pod. If output shows banding, try `OUTPUT_HEAD_MODE=linear_unclamped_train`.
+2. **WoWViewer CI**: built and locally validated (see entry below) — `.github/workflows/
+   wowviewer-build.yml` exists at the true repo root (`i:\parp\parp-tools\.github\`, NOT under
+   `wow-viewer/` — this repo is `akspa0/parp-tools`, not a submodule, confirmed via `git
+   rev-parse --show-toplevel` and `.gitmodules`). Push it and watch the first real run; nothing
+   else to build. To cut a release: push a `v*` tag, or run the workflow manually with
+   `publish_release: true`.
+3. **WoWViewer real cross-platform viewer** (separate, larger, NOT started): swap `BlpFile.
+   GetBitmap()` → `GetImage()` at ~19 call sites (listed in progress.md) so the existing
+   `WoWViewer.CrossPlatform.csproj` becomes an actually-functional Linux/macOS viewer, not just
+   a compiling one. Sizeable, touches core rendering files — scope with the user before starting.
 
 ## Current target — Spec 103: revive the v7 terrain regressor on clean signals
 
@@ -37,6 +54,28 @@ Last updated: 2026-07-14 (curation default tightened to drop ANY object tile)
   auditable `curation_manifest.parquet` (+ map/height-regime buckets) the trainer consumes via
   `--curation-manifest`. **Default `--max-object-coverage 0.0`** (drop ANY object; was 0.02). V18 at 0.0:
   5134 → 2650 kept. `1.0` is v7-faithful keep-all ablation only. Trainer reports `val_no_prior` every epoch (prior-dropout robustness).
+- **Banding investigation (2026-07-14):** verified live against V18 zarr — height_257/normal_xyz/
+  liquid_height/object_precise_mask are all float32; only minimap_rgb is uint8 (correctly, the
+  deployment image). No precise data is routed through 8-bit image encoding. Real causes found:
+  (1) `output_head_mode` was never exposed to the trainer — every run silently hard-clamped a
+  tanh-scaled residual every step (tanh saturation → residual clusters near ±scale = plausible
+  v7 banding/terracing source); now `--output-head-mode {legacy_clamped, linear_unclamped_train}`,
+  recorded in checkpoints, auto-resolved by inference. (2) v8's PixelShuffle upsampling lacked
+  ICNR init (Aitken 2017) — a checkerboard-artifact class v7 never had (bilinear+conv instead);
+  fixed + regression-tested. Left as-is (shared v7/v8, not a bug): the 17×17 WDL prior is only
+  C0-continuous when bilinear-upsampled to 256×256 — visible ~16px facets the ±0.20 residual
+  can't fully correct; watch for it in `val_previews/`. 15/15 tests green.
+  Full writeup: `specs/103-image-only-reconstruction/research-v8-optimization.md` §6.
+- **Local GPU training is OFF (2026-07-14):** USER's GPU overheated mid-run; **no more local
+  training runs** — the path forward is RunPod deployment (see [[project_v24_runpod_migration]]
+  for prior RunPod lessons: US datacenters only, runpodctl.exe location, verify before killing).
+- **RunPod deployment built (2026-07-14, T022):** `scripts/package_spec103_runpod.py` +
+  `runpod/spec103/{install_deps,verify_bundle,smoke,train}.sh`. Bundle subsets BOTH fields
+  (only the 6 arrays `train_spec103_v7.py` reads, not the V18 store's other 18) AND rows
+  (curation-kept only) — measured **3.2 GB -> 127 MB** (2253/5134 tiles), verified end-to-end
+  through the real `V7TileDataset`. No HF downloads (v8/v7 train from scratch). Added `--limit`
+  to the trainer for the smoke stage; `train.sh` always passes `--resume` (spot-preemption
+  safe). Command: quickstart.md §5.
 - **v8 is the PRIMARY architecture (USER decision 2026-07-13; implemented + tested):**
   `V8LeanUNet` (`src/harvester/spec103/v8_model.py`, ConvNeXt-V2 blocks, pixel-shuffle decoder,
   global-context mixer) — measured **6.2M params / 16.4 GFLOPs @256** vs v7's 117.06M / 119.9
@@ -47,6 +86,51 @@ Last updated: 2026-07-14 (curation default tightened to drop ANY object tile)
   rationale: `specs/103-image-only-reconstruction/research-v8-optimization.md` (T021).
   Excluded: DA-family (blacklist), diffusion predictors, 100M+ depth foundations.
 - **The USER runs all training/capture/heavy jobs.** The agent prepares scripts + commands only (AGENTS RULE 0).
+
+## WoWViewer CI + cross-platform build (2026-07-14, new lane)
+
+- **GitHub Actions added:** `.github/workflows/wowviewer-build.yml` (repo root — the actual
+  GitHub repo is `akspa0/parp-tools`; `wow-viewer/` is a plain subdirectory, not a submodule).
+  Three jobs: (1) build+test on `windows-latest` via `WowViewer.slnx` (the real, functional
+  viewer — always runs); (2) compile-only check of `WoWViewer.CrossPlatform.csproj` +
+  4 confirmed-portable tool projects on `ubuntu-latest` (`continue-on-error: true` — advisory,
+  keeps the port from bit-rotting without gating on non-functional-yet code); (3) publish a
+  self-contained win-x64 build + GitHub Release, gated on a `v*` tag push or manual
+  `workflow_dispatch` with `publish_release: true` (never auto-triggered — matches
+  [[feedback_no_auto_deploy]]). All three validated **locally** before commit: full solution
+  build (0 errors), CrossPlatform target build (0 errors, 435 warnings — mostly the predicted
+  CA1416 GDI+ hits), portable tools build clean.
+- **Audit finding (Explore agent, full results in progress.md): the cross-platform port is
+  further along than expected but NOT functional yet.** `WoWViewer.CrossPlatform.csproj`
+  (plain `net10.0`, no WinForms) already existed, compiles cross-platform-clean at the TFM/
+  dependency-graph level, and the three WinForms file-dialog calls in `ViewerApp.cs` were
+  already correctly `#if WINDOWS`-guarded (SDK auto-defines `WINDOWS` only for `-windows`
+  TFMs) with graceful `return null` fallback. **The real blocker: `BlpFile.GetBitmap()`**
+  (`SereniaBLPLib`, System.Drawing/GDI+) is called at ~19 actual rendering/export sites
+  (M2Renderer, WmoRenderer, TerrainRenderer, MinimapRenderer, GlbExporter, MapGlbExporter,
+  LoadingScreen, AssetProbe, Core.Renderer's TextureCache, MDX-L_Tool's TextureService, plus
+  harvest/converter/mask-validate tool code) and **throws `PlatformNotSupportedException` at
+  runtime off-Windows since .NET 7** — compiles fine, crashes on first texture load. The fix
+  (`BlpFile.GetImage()`, ImageSharp-based, already exists and is already used correctly in
+  `BlpRgbReader.cs`/`AlphaBlpCompatibilityService.cs`) is scoped but NOT done — a real,
+  sizeable follow-up task (~19 call sites in core rendering code), not started without user
+  sign-off given the blast radius.
+- **Fixed in this pass (small, unambiguous, verified compiling):** two hardcoded-backslash
+  filesystem-path bugs that would break on Linux — `tools/harvest/.../Program.cs:398` and
+  `tools/converter/.../LkToAlphaCommand.cs:1885`, both now `Path.Combine`. (Distinct from MPQ
+  virtual-path strings elsewhere, which correctly and intentionally use `\` as the game-data
+  convention — those were not touched.)
+- **`WowViewer.Tool.ValidationCapture` is deliberately, permanently Windows-only by design**
+  (throws `PlatformNotSupportedException` itself for its GPU hidden-window capture path) — not
+  a portability bug, never expected to run on Linux.
+- **Confirmed portable today** (tool-project level): `inspect` (`map generate-blank`),
+  `wdl-read`, `enrich`, and `converter`'s `terrain-patch-adt` subcommand specifically (its
+  other, minimap-related subcommands still hit `GetBitmap()`). `capture`, `harvest`, and
+  `mask-validate` still have the GetBitmap runtime landmine.
+- **`WowViewer.CrossPlatform.csproj`, `WmoMinimap`, `V22Enrich`, and `App.Defunct` are not in
+  `WowViewer.slnx`** — deliberately left out of the solution file (CI builds them by direct
+  csproj path instead) to avoid changing the user's local `dotnet build WowViewer.slnx` behavior
+  without being asked.
 
 ## Dropped / paused
 

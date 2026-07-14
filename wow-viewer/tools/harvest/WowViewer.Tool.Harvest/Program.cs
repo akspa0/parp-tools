@@ -395,9 +395,8 @@ static class Program
                 continue;
             }
 
-            string? textureSource = File.Exists($"{inputDir}\\{stem}_tex0.adt")
-                ? $"{inputDir}\\{stem}_tex0.adt"
-                : null;
+            string candidateTextureSource = Path.Combine(inputDir, $"{stem}_tex0.adt");
+            string? textureSource = File.Exists(candidateTextureSource) ? candidateTextureSource : null;
 
             try
             {

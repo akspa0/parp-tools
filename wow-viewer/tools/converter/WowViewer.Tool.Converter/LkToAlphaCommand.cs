@@ -1882,7 +1882,7 @@ internal static class LkToAlphaCommand
         string directory = Path.GetDirectoryName(rootPath) ?? string.Empty;
         string baseName = Path.GetFileNameWithoutExtension(rootPath);
         string fileName = $"{baseName}_{groupIndex:D3}.wmo";
-        return string.IsNullOrWhiteSpace(directory) ? fileName : $"{directory}\\{fileName}";
+        return string.IsNullOrWhiteSpace(directory) ? fileName : Path.Combine(directory, fileName);
     }
 
     private static LkToAlphaOptions ParseOptions(string[] args)

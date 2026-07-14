@@ -98,8 +98,23 @@ class Downsample(nn.Module):
         return self.conv(self.norm(x))
 
 
+def _icnr_init(weight: torch.Tensor, upscale_factor: int = 2) -> torch.Tensor:
+    """ICNR init (Aitken et al. 2017, arXiv:1707.02937): each group of upscale_factor**2
+    output channels that PixelShuffle maps into one 2x2 output block starts IDENTICAL
+    (effectively a nearest-neighbor upsample), instead of independently random. Without
+    this, pixel-shuffle decoders reliably show checkerboard/grid artifacts at init that
+    training only partially removes — a real, well-documented banding source distinct
+    from anything in v7 (v7 upsamples via bilinear + conv, not PixelShuffle)."""
+    out_channels, in_channels, kh, kw = weight.shape
+    sub_channels = out_channels // (upscale_factor ** 2)
+    sub_kernel = torch.empty(sub_channels, in_channels, kh, kw)
+    nn.init.trunc_normal_(sub_kernel, std=0.02)
+    return sub_kernel.repeat_interleave(upscale_factor ** 2, dim=0)
+
+
 class PixelShuffleUp(nn.Module):
-    """1x1 conv to 4x channels + PixelShuffle(2): checkerboard-free 2x upsampling."""
+    """1x1 conv to 4x channels + PixelShuffle(2): checkerboard-free 2x upsampling
+    (given ICNR init — see `_icnr_init`; applied by the owning module after construction)."""
 
     def __init__(self, in_dim: int, out_dim: int):
         super().__init__()
@@ -180,6 +195,9 @@ class V8LeanUNet(nn.Module):
         self.out_conv = nn.Conv2d(widths[0], out_channels, kernel_size=1)
 
         self.apply(self._init_weights)
+        for up in self.ups:
+            with torch.no_grad():
+                up.conv.weight.copy_(_icnr_init(up.conv.weight, upscale_factor=2))
 
     @staticmethod
     def _init_weights(module: nn.Module) -> None:

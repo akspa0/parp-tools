@@ -90,6 +90,42 @@ def test_detail_head_third_channel() -> None:
     assert float(outputs[:, 2:3].abs().max()) <= model.detail_residual_scale + 1e-5
 
 
+def test_icnr_init_avoids_pixelshuffle_checkerboard() -> None:
+    """ICNR (Aitken et al. 2017): at init, each contiguous group of upscale_factor**2
+    channels feeding one PixelShuffle output pixel must be identical -- the fix for the
+    well-documented checkerboard/grid artifact pixel-shuffle decoders show under plain
+    random init. This is a v8-specific risk (v7 upsamples via bilinear + conv, not
+    PixelShuffle) that must not regress silently."""
+    model = V8LeanUNet(use_wdl_global_trestle=True, output_size=SMALL)
+    for up in model.ups:
+        w = up.conv.weight  # (out_dim * 4, in_dim, 1, 1); PixelShuffle(2) groups are contiguous blocks of 4
+        out_dim = w.shape[0] // 4
+        for c in range(out_dim):
+            block = w[c * 4:(c + 1) * 4]
+            assert torch.allclose(block[0], block[1]) and torch.allclose(block[0], block[2]) and torch.allclose(block[0], block[3])
+
+
+def test_output_head_mode_linear_unclamped_train_differs_from_default() -> None:
+    """--output-head-mode default (legacy_clamped) hard-clamps the tanh-scaled residual
+    every step, including during training -- tanh saturation plus a per-step clamp is a
+    plausible source of v7's reported output banding/terracing (residual clusters at
+    +-scale instead of spanning it continuously). linear_unclamped_train must let the
+    residual range freely during training and only clamp at eval time."""
+    torch.manual_seed(0)
+    model = V8LeanUNet(use_wdl_global_trestle=True, output_size=SMALL, output_head_mode="linear_unclamped_train")
+    model.train()
+    arrays = _tile_arrays()
+    x = assemble_v7_input(size=SMALL, **arrays).unsqueeze(0)
+    outputs, _ = model(x)
+    # unclamped during training: at least one of global/local should exceed [0,1] on fresh random init
+    assert float(outputs.min()) < 0.0 or float(outputs.max()) > 1.0
+
+    model.eval()
+    with torch.no_grad():
+        outputs_eval, _ = model(x)
+    assert float(outputs_eval.min()) >= 0.0 and float(outputs_eval.max()) <= 1.0
+
+
 def test_output_interpolates_to_requested_size() -> None:
     torch.manual_seed(0)
     model = V8LeanUNet(use_wdl_global_trestle=True, output_size=48)
