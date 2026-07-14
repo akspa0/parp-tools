@@ -87,6 +87,59 @@ Last updated: 2026-07-14 (WoWViewer GitHub Actions CI added; cross-platform audi
   Both bugs were invisible from `git status` inspection alone and had persisted for a long
   time — proving the exact value of standing up real CI, first-run-ever, at the top of this
   same session.
+- **Third CI attempt failed differently: `fatal: remote error: upload-pack: not our ref
+  0bb9dac...`** — SereniaBLPLib and DBCD both carried a user-authored "Disable central package
+  version management" commit that was **never pushed to the actual GitHub remote**, discovered
+  when preserving it during the submodule fix above. A submodule can only ever pin a commit
+  that exists on its own remote; CI (or any fresh clone) can never fetch a local-only commit.
+  **USER, on hearing this: confirmed vendored libs are never supposed to be directly patched**
+  (same policy as `gillijimproject_refactor`'s read-only boundary) and approved discarding both
+  commits. Root cause of why the patch existed: 5 `ProjectReference`s to `SereniaBLPLib.csproj`/
+  `DBCD.csproj`/`DBCD.IO.csproj` were missing `GlobalPropertiesToRemove="ManagePackageVersionsCentrally"`
+  (2 genuinely missing on SereniaBLPLib refs in `WowViewer.Tool.Harvest.csproj` and
+  `WowViewer.Tool.WmoMinimap.csproj`; DBCD had zero refs using it) — added to all 5, but proved
+  **insufficient alone**: it only affects MSBuild's build-time ProjectReference graph walk, not
+  solution-wide `dotnet restore`/`dotnet build WowViewer.slnx`'s separate restore-graph
+  evaluation, which still hit NU1008 (central package management forbids explicit `Version` on
+  a `PackageReference`, which both vendored csprojs declare). Tried and abandoned: a
+  `wow-viewer/libs/Directory.Build.props`/`.targets` ancestor override (DBCD ships its own
+  nearer `Directory.Build.props`/`.targets` from upstream, which wins and stops the auto-import
+  walk before reaching an ancestor file; even for SereniaBLPLib, which has no such nearer file
+  and *did* show the property correctly overridden via a standalone `-getProperty` check,
+  solution-wide restore still ignored it — likely global-property propagation from the
+  solution-level evaluation, not fully root-caused). **What actually worked**: a
+  path-conditioned `PropertyGroup` inside `wow-viewer/Directory.Packages.props` itself (the
+  file NuGet's CPM detection is keyed on) — `Condition="$(MSBuildProjectFullPath.Contains(...))"`
+  matching `libs/WoW-Tools/SereniaBLPLib` and `libs/wowdev/DBCD`, setting
+  `ManagePackageVersionsCentrally=false` for just those paths. Verified: full clean-build
+  (all `obj/` cleared first) 0 errors; `WoWViewer.CrossPlatform.csproj` 0 errors; both edited
+  tool csprojs 0 errors. Both submodules reset to genuinely fetchable pristine upstream commits
+  (`SereniaBLPLib` → `origin/master` 2323219; `DBCD` → rebased-tip-minus-patch 9ca6553) —
+  vendored libs are pristine again, matching policy.
+- **Same `wow-viewer/libs/*` gitignore rule was ALSO hiding a second, much bigger problem:**
+  `libs/WoW-Tools/{Warcraft.NET, MDX-L_Tool, WoWMapConverter.Core, WoWRollback,
+  GillijimProject}` were **completely untracked** (0 files each, not a partial gap like the
+  `maps/` bug). `WoW-Tools/Warcraft.NET` was a *second*, entirely separate nested-git clone of
+  the exact same upstream (`ModernWoWTools/Warcraft.NET.git`) already wired up at a different
+  path — and it was the one `WoWViewer.csproj`/`CrossPlatform.csproj` actually referenced (the
+  submodule fixed earlier was only used by that library's own tests/docs). **USER decision:
+  point everything at one copy; MDX-L_Tool and WoWRollback are obsolete now that wow-viewer is
+  self-contained.** Verified before deleting: zero `MdxLTool` namespace usage anywhere in
+  `wow-viewer/src` (vestigial — `WoWViewer.csproj` referenced it but nothing used it;
+  functionality already natively ported to `Terrain/Transfer/M2ToMdxConverter.cs`); the only
+  `WoWRollback` mention in `wow-viewer/src` is a dead `throw new NotSupportedException(...)`
+  string; `WoWMapConverter.Core` (287MB, of which 271MB was `bin/` build-output bloat under
+  `WoWRollback.PM4Module`, not source) is referenced by nothing in the real solution and itself
+  depends on WoWRollback. Repointed `WoWViewer.csproj`/`CrossPlatform.csproj`'s Warcraft.NET
+  `ProjectReference` to the `ModernWoWTools` copy, dropped the `MDX-L_Tool` reference entirely,
+  deleted all 4 untracked dirs (zero git history lost — none were ever tracked), rebuilt clean
+  (0 errors). Properly tracked `GillijimProject` (895K, plain source, genuinely needed, no
+  nested `.git`) by narrowing the gitignore rule: `wow-viewer/libs/*` now has an explicit
+  `!wow-viewer/libs/WoW-Tools` / `wow-viewer/libs/WoW-Tools/*` /
+  `!wow-viewer/libs/WoW-Tools/GillijimProject` allow-list instead of blanket-hiding everything.
+  `ManagePackageVersionsCentrally` opt-out condition in `Directory.Packages.props` extended to
+  cover the now-active `ModernWoWTools/Warcraft.NET` path too (same NU1008 pattern). Full clean
+  rebuild (all `obj/` cleared) + `WoWViewer.CrossPlatform.csproj` standalone: both 0 errors.
 - **Local `dotnet test WowViewer.slnx` run surfaced ~20 pre-existing failures, unrelated to
   this session's edits** (confirmed: the two touched files aren't referenced by the failing
   test projects). All failures are in `*RealData*`/`*Corpus*`-named tests

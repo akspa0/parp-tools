@@ -3,6 +3,13 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
 
+  <!-- Vendored/forked third-party libraries under libs/ (several are git submodules pointing
+       at pristine upstream commits, never to be edited directly) manage their own package
+       versions and must opt out of central management here rather than in their own files. -->
+  <PropertyGroup Condition="$(MSBuildProjectFullPath.Contains('libs\WoW-Tools\SereniaBLPLib')) Or $(MSBuildProjectFullPath.Contains('libs/WoW-Tools/SereniaBLPLib')) Or $(MSBuildProjectFullPath.Contains('libs\wowdev\DBCD')) Or $(MSBuildProjectFullPath.Contains('libs/wowdev/DBCD')) Or $(MSBuildProjectFullPath.Contains('libs\ModernWoWTools\Warcraft.NET')) Or $(MSBuildProjectFullPath.Contains('libs/ModernWoWTools/Warcraft.NET'))">
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageVersion Include="BCnEncoder.Net" Version="2.1.0" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />

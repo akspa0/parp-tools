@@ -31,15 +31,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\libs\WoW-Tools\MDX-L_Tool\MDX-L_Tool.csproj" />
     <ProjectReference Include="..\..\..\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj" />
     <ProjectReference Include="..\..\..\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj" />
     <ProjectReference Include="..\..\..\src\core\WowViewer.Core.PM4\WowViewer.Core.PM4.csproj" />
     <ProjectReference Include="..\..\..\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
-    <ProjectReference Include="..\..\..\libs\WoW-Tools\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
+    <ProjectReference Include="..\..\..\libs\ModernWoWTools\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
     <ProjectReference Include="..\..\..\libs\WoW-Tools\GillijimProject\gillijimproject-csharp.csproj" />
-    <ProjectReference Include="..\..\..\libs\wowdev\DBCD\DBCD\DBCD.csproj" />
-    <ProjectReference Include="..\..\..\libs\wowdev\DBCD\DBCD.IO\DBCD.IO.csproj" />
+    <ProjectReference Include="..\..\..\libs\wowdev\DBCD\DBCD\DBCD.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
+    <ProjectReference Include="..\..\..\libs\wowdev\DBCD\DBCD.IO\DBCD.IO.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
 
   </ItemGroup>
 
