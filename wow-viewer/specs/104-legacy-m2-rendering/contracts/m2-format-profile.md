@@ -53,25 +53,46 @@ does today.
 - Deltas vs 256: **(record per version)**
 - Evidence: _pending_ — target model(s): _pending staged 2.4.3 client_
 
-### Version 256 (0x100) — WoW 1.0.0 (Vanilla release) — Status: confirmed (static, Ghidra)
+### Version 256 (0x100) — WoW 1.0.0 (Vanilla release, build 3980) — Status: confirmed (static, Ghidra)
 
 - Skin storage: **embedded** — no external `.skin` or `.anim` files exist on 1.0.0
   (string-sweep: zero `.skin`/`%02d.skin`/`.anim` hits).
 - Version field: header `0x04` == `0x100` (parser `FUN_0071e190` hard-rejects `!= 0x100`
   → `Corrupt model data`). **Corrects `research.md` line 28**: 1.0.0 is 0x100, NOT
   pre-256. This is the 0.12→1.x boundary: 0.12 MDX is pre-0x100 and is rejected by 1.0.0.
-- Header offsets used (full map in `research-1.0.0-ghidra-trace.md` §4): bones `0x34`
-  (0x6c), vertices `0x44` (0x30), **divisions `0x4C` (0x2c)** = embedded skin profiles,
-  textures `0x5C` (0x10), attachments `0x104` (0x30), events `0x114` (0x2c),
-  lights `0x11C` (0xd4), cameras `0x124` (0x7c), ribbons `0x134` (0xdc),
-  particles `0x13C` (0x1f8). Sequences `0x1C` (0x44), sequenceLookup `0x24` (int16[]).
+- **CRITICAL**: 1.0.0 and 1.12.1 both use version `0x100` but have **completely different
+  header layouts**. 1.0.0 uses the "classic" M2 layout (M2Vertex records + M2Division
+  embedded skin profiles); 1.12.1 uses flat parallel arrays (positions[], normals[],
+  uvs[], triangles[], batches[]). The dispatcher distinguishes them via layout validation
+  (`M2Era100ModelReader.ValidateLayout` checks vertices/divisions/textures offsets).
+- Header offsets used (full map in `research-1.0.0-ghidra-trace.md` §4, implemented in
+  `M2Era100Constants.cs`): bones `0x34` (0x6c), vertices `0x44` (0x30), **divisions
+  `0x4C` (0x2c)** = embedded skin profiles, colors `0x54` (0x38), textures `0x5C`
+  (0x10), textureWeights `0x64` (0x1c), textureTransforms `0x6C` (0x1c),
+  attachments `0x104` (0x30), events `0x114` (0x2c), lights `0x11C` (0xd4),
+  cameras `0x124` (0x7c), ribbons `0x134` (0xdc), particles `0x13C` (0x1f8).
+  Sequences `0x1C` (0x44), sequenceLookup `0x24` (int16[]). Bounds at `0xB4`.
+- M2Track format: **old 0x1c (28-byte)** with interpolation-ranges array (dropped in
+  Wrath+ 264+). See `wow-1.0.0-m2-camera-tracks-2026-07-15.md` §2.1.
 - Skin-profile struct (M2Division 0x2c): vertexLookup (int16[]) @0x04, indices
   (int16[]) @0x0C, uint32[] @0x14, sections (0x20 B) @0x1C, batches (0x18 B) @0x24
   (`division->batches.count == 1`). Materializer `FUN_006b7720` builds 0x20-B render
   vertices by remapping through vertexLookup into the 0x30-B global vertex table.
+- M2Vertex (0x30 = 48 B): position (C3Vector @0x00), normal (C3Vector @0x0C),
+  texCoords[0] (C2Vector @0x18), texCoords[1] (C2Vector @0x20), boneWeights (4 B @0x28),
+  boneIndices (4 B @0x2C).
+- M2Batch (0x18 = 24 B): flags, priorityPlane, shaderId, skinSectionIndex, geosetIndex,
+  colorIndex, materialIndex, materialLayer, textureCount, textureComboIndex,
+  textureCoordComboIndex, textureWeightComboIndex, textureTransformComboIndex.
+- M2Section (0x20 = 32 B): submeshId, level, vertexStart, vertexCount, indexStart,
+  indexCount + 16 B additional (bounds/flags — per-field layout pending).
+- Reader: `M2Era100ModelReader` in `WowViewer.Core.IO/M2Era100/`. Reads division 0,
+  resolves render vertices through vertexLookup, emits `M2Era100Geometry` consumed by
+  `WarcraftNetM2Adapter.ParseEra100Model`.
 - Evidence: `ghidra-static-trace:research-1.0.0-ghidra-trace.md` + raw decompilations
   `output/ghidra_1.0.0/*.c`. Target model(s): _pending staged 1.0.0 client render check_.
-- Status: **confirmed (static layout)**; render validation pending a staged 1.0.0 client.
+- Status: **confirmed (static layout + reader implemented)**; render validation pending
+  a staged 1.0.0 client.
 
 ### Versions pre-256 — Alphas 0.12 / 0.11 — Status: open (P3 target)
 

@@ -2,6 +2,8 @@ using WowViewer.Core.IO.Mdx;
 using WoWViewer.DataSources;
 using Silk.NET.OpenGL;
 using WowViewer.Core.IO.M2;
+using WowViewer.Core.IO.M2Chunked;
+using WowViewer.Core.IO.M2Era1121;
 using WowViewer.Core.M2;
 using WowViewer.Core.Runtime.M2;
 
@@ -31,6 +33,73 @@ internal static class WowViewerM2RuntimeBridge
         M2SkinProfileRuntimeState initialized = M2SkinProfileRuntime.Initialize(loaded);
 
         return M2StaticRenderModelBuilder.Build(geometry, initialized);
+    }
+
+    /// <summary>
+    /// Builds the native runtime representation for WoW 1.0.0's embedded M2 division.
+    /// This deliberately does not materialize an MdxFile: the source and draw contract remain M2.
+    /// </summary>
+    public static M2StaticRenderModel BuildEra100StaticRenderModel(byte[] modelBytes, string modelPath)
+    {
+        ArgumentNullException.ThrowIfNull(modelBytes);
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelPath);
+
+        using MemoryStream stream = new(modelBytes, writable: false);
+        M2DispatchResult dispatch = M2ModelReaderDispatcher.ReadDetailed(stream, modelPath);
+        if (dispatch.Era != M2Era1121EraTag.Md20_1X_V100_Era100)
+            throw new InvalidDataException($"M2 '{modelPath}' did not classify as the 1.0.0-era 0x100 layout.");
+
+        M2Era100Geometry geometry = dispatch.Document.InlineEra100Geometry
+            ?? throw new InvalidDataException($"1.0.0 M2 '{modelPath}' did not contain an embedded render division.");
+
+        List<M2StaticRenderSection> sections = [];
+        List<M2StructuredRenderSection> structuredSections = [];
+        for (int sectionIndex = 0; sectionIndex < geometry.Sections.Count; sectionIndex++)
+        {
+            M2Era100Section sourceSection = geometry.Sections[sectionIndex];
+            if (!TryBuildEra100Section(geometry, sourceSection, out List<M2StaticRenderVertex> vertices, out List<uint> indices))
+                continue;
+
+            M2Era100Batch[] batches = geometry.Batches
+                .Where(batch => batch.SkinSectionIndex == sectionIndex)
+                .OrderBy(batch => batch.MaterialLayer)
+                .ToArray();
+            if (batches.Length == 0)
+                batches = [new M2Era100Batch(0, 0, 0, (ushort)sectionIndex, sourceSection.SubmeshId, 0, 0, 0, 0, 0, 0, 0, 0)];
+
+            List<M2StructuredRenderPass> passes = [];
+            foreach (M2Era100Batch batch in batches)
+            {
+                M2StaticRenderMaterial material = BuildEra100Material(geometry, batch);
+                passes.Add(new M2StructuredRenderPass(passes.Count, material));
+                sections.Add(new M2StaticRenderSection(
+                    sectionIndex,
+                    sourceSection.SubmeshId,
+                    boneComboIndex: 0,
+                    boneCount: 0,
+                    boneInfluences: 0,
+                    centerBoneIndex: 0,
+                    vertices,
+                    indices,
+                    material));
+            }
+
+            structuredSections.Add(new M2StructuredRenderSection(
+                sectionIndex,
+                sourceSection.SubmeshId,
+                boneComboIndex: 0,
+                boneCount: 0,
+                boneInfluences: 0,
+                centerBoneIndex: 0,
+                vertices,
+                indices,
+                passes));
+        }
+
+        if (sections.Count == 0)
+            throw new InvalidDataException($"1.0.0 M2 '{modelPath}' contained no drawable embedded sections.");
+
+        return new M2StaticRenderModel(dispatch.Document, sections, structuredSections, [], usesCompatibilityFallback: false);
     }
 
     public static bool PreferNativeStaticRenderer
@@ -101,5 +170,101 @@ internal static class WowViewerM2RuntimeBridge
         }
 
         return 0;
+    }
+
+    private static bool TryBuildEra100Section(
+        M2Era100Geometry geometry,
+        M2Era100Section sourceSection,
+        out List<M2StaticRenderVertex> vertices,
+        out List<uint> indices)
+    {
+        vertices = [];
+        indices = [];
+
+        if (sourceSection.IndexStart > int.MaxValue || sourceSection.IndexCount > int.MaxValue)
+            return false;
+
+        int start = (int)sourceSection.IndexStart;
+        int count = (int)sourceSection.IndexCount;
+        if (start < 0 || count < 3 || start > geometry.Triangles.Count || count > geometry.Triangles.Count - start)
+            return false;
+
+        Dictionary<ushort, uint> remap = [];
+        int endExclusive = start + count - (count % 3);
+        for (int indexPosition = start; indexPosition < endExclusive; indexPosition++)
+        {
+            ushort sourceVertexIndex = geometry.Triangles[indexPosition];
+            if (sourceVertexIndex >= geometry.RenderVertices.Count)
+                return false;
+
+            if (!remap.TryGetValue(sourceVertexIndex, out uint mappedIndex))
+            {
+                M2Era100Vertex vertex = geometry.RenderVertices[sourceVertexIndex];
+                mappedIndex = (uint)vertices.Count;
+                remap.Add(sourceVertexIndex, mappedIndex);
+                vertices.Add(new M2StaticRenderVertex(
+                    vertex.Position,
+                    vertex.Normal,
+                    vertex.TexCoord0,
+                    vertex.TexCoord1,
+                    new System.Numerics.Vector4(vertex.BoneIndex0, vertex.BoneIndex1, vertex.BoneIndex2, vertex.BoneIndex3),
+                    new System.Numerics.Vector4(vertex.BoneWeight0 / 255f, vertex.BoneWeight1 / 255f, vertex.BoneWeight2 / 255f, vertex.BoneWeight3 / 255f)));
+            }
+
+            indices.Add(mappedIndex);
+        }
+
+        return vertices.Count > 0 && indices.Count >= 3;
+    }
+
+    private static M2StaticRenderMaterial BuildEra100Material(M2Era100Geometry geometry, M2Era100Batch batch)
+    {
+        List<M2StaticRenderTextureBinding> bindings = [];
+        for (int stage = 0; stage < batch.TextureCount; stage++)
+        {
+            int lookupIndex = batch.TextureComboIndex + stage;
+            ushort? textureId = lookupIndex >= 0 && lookupIndex < geometry.TextureLookup.Count
+                ? geometry.TextureLookup[lookupIndex]
+                : null;
+            M2Era100Texture? texture = textureId is ushort id && id < geometry.Textures.Count
+                ? geometry.Textures[id]
+                : null;
+            bindings.Add(new M2StaticRenderTextureBinding(
+                stage, lookupIndex, textureId, texture?.Filename, texture?.Type ?? 0, texture?.Flags ?? 0,
+                null, null, null, null, null, null));
+        }
+
+        M2StaticRenderTextureBinding? primary = bindings.FirstOrDefault();
+        M2EffectRecipe recipe = new(
+            bindings.Count > 0 ? M2DiffuseEffectFamily.T1 : M2DiffuseEffectFamily.None,
+            M2CombinerEffectFamily.Opaque,
+            isProjected: false,
+            usesColorAnimation: false,
+            usesTransparencyAnimation: false,
+            usesTextureTransformAnimation: false,
+            suppressCombinedTransparency: false,
+            isHeuristic: true);
+        return new M2StaticRenderMaterial(
+            batchIndex: batch.SkinSectionIndex,
+            batch.Flags,
+            batch.PriorityPlane,
+            batch.ShaderId,
+            batch.GeosetIndex,
+            (short)batch.ColorIndex,
+            batch.MaterialIndex,
+            batch.MaterialLayer,
+            batch.TextureCount,
+            batch.TextureComboIndex,
+            batch.TextureCoordComboIndex,
+            batch.TextureWeightComboIndex,
+            batch.TextureTransformComboIndex,
+            renderFlags: 0,
+            rawBlendMode: 0,
+            M2BlendMode.Opaque,
+            primary?.TexturePath,
+            primary?.ReplaceableId ?? 0,
+            primary?.TextureFlags ?? 0,
+            bindings,
+            recipe);
     }
 }

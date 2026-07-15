@@ -114,6 +114,12 @@ public sealed class M2ModelDocument
 
     public M2Era1121Geometry? InlineEra1121Geometry { get; set; }
 
+    /// <summary>
+    /// Resolved geometry from a WoW 1.0.0 (build 3980) M2 model's embedded division.
+    /// Populated by <see cref="WowViewer.Core.IO.M2Era100.M2Era100ModelReader"/>.
+    /// </summary>
+    public M2Era100Geometry? InlineEra100Geometry { get; set; }
+
     public int GlobalLoopCount => GlobalLoops.Count;
 
     public int SequenceCount => Sequences.Count;

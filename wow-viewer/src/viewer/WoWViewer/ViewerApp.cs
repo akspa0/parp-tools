@@ -10617,15 +10617,11 @@ void main() {
     private void LoadM2FromBytes(byte[] m2Bytes, string originalPath, string dir)
     {
         string resolvedModelPath = ResolveStandaloneCanonicalModelPath(originalPath);
-        var profile = FormatProfileRegistry.ResolveModelProfile(_dbcBuild);
-        if (profile == null)
-        {
-            string buildLabel = string.IsNullOrWhiteSpace(_dbcBuild) ? "unknown" : _dbcBuild;
-            throw new InvalidDataException(
-                $"Standalone M2-family loading is not supported for build {buildLabel}. Early clients should be browsed through .mdx/.mdl assets instead.");
-        }
 
-        WarcraftNetM2Adapter.ValidateModelProfile(m2Bytes, resolvedModelPath, profile, _dbcBuild);
+        // Detect era FIRST — 1.0.0 and 1.12.1 models have embedded geometry and don't
+        // need a format profile or external .skin files. Only WotLK+ (264+) needs the
+        // profile registry + external .skin companion path.
+        M2Era1121EraTag detectedEra = M2ModelReaderDispatcher.DetectEra(m2Bytes.AsSpan(), resolvedModelPath);
 
         if (TryLoadStandaloneCameraPathM2(m2Bytes, resolvedModelPath))
         {
@@ -10633,7 +10629,26 @@ void main() {
             return;
         }
 
-        M2Era1121EraTag detectedEra = M2ModelReaderDispatcher.DetectEra(m2Bytes.AsSpan(), resolvedModelPath);
+        if (detectedEra is M2Era1121EraTag.Md20_1X_V100_Era100)
+        {
+            try
+            {
+                M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildEra100StaticRenderModel(m2Bytes, resolvedModelPath);
+                LoadM2RuntimeModel(runtimeModel, modelDir: dir, virtualPath: resolvedModelPath);
+                ViewerLog.Info(ViewerLog.Category.Mdx,
+                    $"[M2] Loaded native 1.0.0 M2 geometry for {Path.GetFileName(originalPath)} (era={detectedEra.ToDisplayString()})");
+                _statusMessage = $"Loaded M2: {Path.GetFileName(originalPath)}";
+                return;
+            }
+            catch (Exception ex)
+            {
+                ViewerLog.Debug(ViewerLog.Category.Mdx,
+                    $"[M2] Embedded 1.0.0 fallback failed for {Path.GetFileName(originalPath)}: {ex.Message}");
+                throw new InvalidDataException(
+                    $"Failed to load embedded 1.0.0 geometry for {Path.GetFileName(originalPath)}: {ex.Message}", ex);
+            }
+        }
+
         if (detectedEra is M2Era1121EraTag.Md20_1X_V100 or M2Era1121EraTag.Md20_1X_V101)
         {
             try
@@ -10653,6 +10668,19 @@ void main() {
                     $"Failed to load embedded 1.12.1 geometry for {Path.GetFileName(originalPath)}: {ex.Message}", ex);
             }
         }
+
+        // WotLK+ (264+) path: requires a format profile + external .skin companion.
+        var profile = FormatProfileRegistry.ResolveModelProfile(_dbcBuild);
+        if (profile == null)
+        {
+            string buildLabel = string.IsNullOrWhiteSpace(_dbcBuild) ? "unknown" : _dbcBuild;
+            throw new InvalidDataException(
+                $"Standalone M2-family loading is not yet implemented for build {buildLabel}. " +
+                "This asset is an M2-family model; .mdx/.mdl is not a substitute for 1.x M2 data. " +
+                "Use the version-specific M2 reader path or load a supported client build.");
+        }
+
+        WarcraftNetM2Adapter.ValidateModelProfile(m2Bytes, resolvedModelPath, profile, _dbcBuild);
 
         var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
 
@@ -11878,6 +11906,21 @@ void main() {
     private readonly record struct MdxRuntimeSharedInfo(
         CoreMdxSummary? Summary,
         CoreMdxGeometryFile? Geometry);
+
+    /// <summary>
+    /// Tears down the world/terrain scene so the viewer switches to standalone
+    /// object-view mode (WMO or M2 model rendering without the world scene).
+    /// </summary>
+    private void ExitToStandaloneView()
+    {
+        _worldScene?.Dispose();
+        _worldScene = null;
+        _terrainManager?.Dispose();
+        _terrainManager = null;
+        _vlmTerrainManager?.Dispose();
+        _vlmTerrainManager = null;
+        ResetSqlSpawnStreamingState(clearSceneSpawns: false);
+    }
 
     private void LoadWmoModel(WmoV14ToV17Converter.WmoV14Data wmo, string dir)
     {

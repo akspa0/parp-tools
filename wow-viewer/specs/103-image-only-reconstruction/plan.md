@@ -69,6 +69,38 @@ axis). Alternatives recorded in the summary: 2650 tiles at zero objects, 3078 at
 The trainer drops object tiles by default even without a manifest (`--max-object-coverage 0.0`);
 `1.0` restores the v7-faithful keep-all behavior for ablation only.
 
+### Pattern-aware reduction: select evidence coverage, not more tiles
+
+The clean-tile manifest is only the first filter. The next bounded slice reduces the remaining
+corpus by selecting unique, reusable terrain-art evidence. It does **not** restart alpha analysis:
+Spec 076's full-map fractal brush library is the authority for map-canvas segmentation, global
+region/family IDs, cross-ADT continuity, and coupled alpha/height/normal/MCLY/object evidence.
+Raw 074/tile-local connected components remain supporting evidence only.
+
+The Spec 103 consumer will read that library and emit three auditable curation artifacts:
+
+1. `pattern_evidence_ledger.parquet` — one or more rows per eligible tile and intersecting region,
+   preserving build, map, tile ID/coordinates, ADT 16x16 chunk/cell coverage, alpha layer,
+   region/family IDs and state, terrain relief, MCLY texture/layer context, and object/liquid
+   relationship. It records non-brush, blocky-paste, rectangle-page, composite, and atomic patterns;
+   no class is erased merely because it is not a brush stroke.
+2. `tile_pattern_coverage.parquet` — one row per tile, aggregating the ledger into deterministic
+   family/context coverage and an eligibility decision. This is the directly inspectable answer to
+   “what exists in this place on this map?”
+3. `curation_manifest.parquet` + `curation_summary.json` — the trainer-facing selection, extended
+   with `selection_reason`, representative family/context keys, upstream artifact hashes, and the
+   selected/excluded duplicate lineage.
+
+Selection is deliberately conservative: preserve a representative set across map/build, terrain
+relief, MCLY context, alpha family/state, and object-placement context; discard only examples whose
+coverage is already represented. Family grouping is performed before split assignment, and a family
+never spans train and validation. Alpha, mesh, MCLY, and object values are curation observations
+only—they never change the eventual image-only deployment tensor or permit ground-truth inference.
+
+The first implementation does not change model architecture, loss, or training. It only produces
+the evidence and a smaller manifest. A training claim remains blocked until the user runs a new
+training job against that manifest.
+
 ## Constitution Check
 
 - **Residual Model Chain**: one model, one signal (terrain height as a residual over the WDL prior). No multi-task, no shared weights. PASS.
@@ -123,6 +155,17 @@ v7 consumes the WDL prior + normals + aux, which are height-derived — so v7 by
 
 1. Reuse the OBJ/mesh export path to render terrain for eyeball review (the side-by-side you showed).
 2. Dev diagnostic: height L1/gradient vs. the WDL-prior baseline; label-free self-consistency (border agreement, plausibility, artifacts) toward the spec's acceptance test.
+
+### Phase 3B — Pattern-aware corpus curation (before any next real-data run)
+
+1. Define the Spec 103 ledger contract as a consumer of the validated Spec 076 full-map primitive
+   library; include the complete map/tile/chunk/layer and upstream-artifact identity chain.
+2. Build the ledger for every available map and alpha layer, preserving atomic, composite, patterned,
+   and non-brush region states plus terrain/MCLY/object context.
+3. Aggregate tile coverage and deterministically select representative pattern/context coverage,
+   assigning group-safe train/validation partitions and explicit duplicate/exclusion lineage.
+4. Validate on a bounded store with schema/provenance/unit tests and review a per-map report; then
+   prepare (but do not launch) the user-owned training command against the reduced manifest.
 
 ### Phase 5 — Deferred lanes (scoped notes only — T016/T019; no implementation)
 

@@ -4,9 +4,9 @@
 
 **Created**: 2026-07-14
 
-**Status**: Draft
+**Status**: Active — 1.0.0 (`MD20`, version `0x100`) is the current implementation slice.
 
-**Input**: User description: "M2 model rendering support for legacy client versions 0.11 through 2.4.3 (WoW alpha through end of The Burning Crusade). The viewer parses these M2 files enough to render bounding boxes, but the actual geometry (mesh) and materials do NOT render. Root cause already identified: `M2ModelReader` hardcodes `embeddedSkinProfileCount`/`embeddedSkinProfileOffset` to 0; for M2 version ≤ 263 the skin/geometry profiles are embedded inside the .m2 itself (nViews/ofsViews), not in external .skin files. Investigate per format-version boundary, well-documented versions first (2.4.3, 1.12.1), then mid-range, then the sparsely-documented early alphas (1.0.0, 0.12, 0.11) using dynamic runtime tracing. x64dbg MCP is available; Ghidra is not installed."
+**Input**: User description: "M2 model rendering support for legacy client versions 0.11 through 2.4.3 (WoW alpha through end of The Burning Crusade). 1.x client assets are M2 (`MD20`), not MDX. The viewer must dispatch each supported layout to its own M2 reader and must never advise an MDX/MDL substitute for a 1.x M2 asset."
 
 ## Overview
 
@@ -22,6 +22,11 @@ The scope discriminator is the **M2 format version** (the `uint32` at header off
 the client build string — several builds share a format version, and the format changed at known
 boundaries. WotLK (version 264+) externalized skin profiles to `.skin` files; every version in
 scope (≤ 263) keeps them embedded via `nViews` / `ofsViews`.
+
+**1.x correction**: 1.0.0 uses an `MD20` M2 file with header version `0x100`; `.mdx` and `.mdl`
+are compatibility aliases in that client, not substitute source formats. Because 1.0.0 and 1.12.1
+share `0x100` but have different layouts, the reader must classify the layout from validated header
+spans before parsing it.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -136,6 +141,12 @@ the recovered header/skin layout for each is captured in the research notes with
 - **FR-008**: Rendering correctness for the well-documented versions MUST be validated against at
   least one independent known-good reference implementation's output for the same source files.
 - **FR-009**: Existing WotLK+ (version 264+) M2 rendering, which already works, MUST NOT regress.
+- **FR-010**: A 1.x M2 asset MUST be described and routed as M2. If its version-specific reader fails,
+  the viewer MUST report that reader failure and MUST NOT suggest `.mdx`/`.mdl` as a substitute or fall
+  through to a different M2 layout.
+- **FR-011**: The 1.0.0 era-100 route MUST submit its embedded M2 division through `M2Renderer` from
+  an `M2StaticRenderModel`. It MUST NOT construct `MdxFile`, `MdxRenderer`, or an M2-to-MDX
+  compatibility model on that route.
 
 ### Key Entities *(include if feature involves data)*
 

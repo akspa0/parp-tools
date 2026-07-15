@@ -48,6 +48,41 @@
 - [x] T014 [US2] Mesh/OBJ export of predicted terrain for eyeball review (existing export_terrain_obj mesh convention) in `wow-viewer/data-harvester/scripts/spec103_export_mesh.py`. *(plus `infer_spec103_v7.py`, whose per-tile output is `terrain-patch-adt`-compatible for in-viewer review)* — **USER runs** inference/render.
 - [x] T015 [US2] Label-free self-consistency harness (adjacent-tile border agreement, plausible height range/gradients, checkerboard + chunk-blockiness detection); ground-truth L1 + prior/flat baselines kept as a dev-only diagnostic (`--gt-store`), in `wow-viewer/data-harvester/scripts/validate_spec103_labelfree.py`.
 
+## Phase 3B (US1): Pattern-aware corpus reduction — evidence before the next user-run training
+
+**Goal**: retain the smallest defensible set of clean tiles by the terrain-art patterns and contexts
+they uniquely cover, with a trace from each choice to map, ADT tile/chunk/layer, and the upstream
+full-map library. This is curation-only: it MUST NOT add alpha/object/mesh channels to V8 inference.
+
+- [ ] T023 [US1] Add `research-pattern-curation.md`, pinning Spec 076 as the authoritative full-map
+  alpha/fractal/paste source and defining the no-tile-local-brush-truth rule plus the group-safe
+  family split policy.
+- [ ] T024 [US1] Define typed schema helpers and tests for `pattern_evidence_ledger.parquet`,
+  `tile_pattern_coverage.parquet`, and extended curation-manifest lineage in
+  `src/harvester/spec103/`; require canonical `prefab_family_id`, placement identity, transform,
+  tileset-variant identity, build/map/tile/chunk/cell/layer/region identity, and explicit
+  missing-context values.
+- [ ] T025 [US1] Add a CPU-only **map-canvas** ledger builder that joins the existing Spec 076
+  regions/members and V18 index signals for every selected map/layer. It MUST preserve cross-tile
+  extent and atomic, blocky-paste, rectangle-page, composite, and non-brush states rather than
+  filtering to brush strokes.
+- [ ] T026 [US1] Add map-global composition features for each ledger membership: multi-scale alpha
+  occupancy/transitions, parent/child and neighbour links, repeated relative-placement vectors, and
+  local cellular/game-of-life-style arrangement descriptors. Validate that ADT boundaries do not
+  change the features for a continuous map-canvas region.
+- [ ] T027 [US1] Add terrain/placement and tileset-provenance summaries: relief/normal response,
+  MCLY IDs/paths/coverage, map-local tileset baseline, retained-texture anomaly candidates, and
+  available object/liquid overlap or proximity; never synthesize missing evidence.
+- [ ] T028 [US1] Aggregate ledger rows to deterministic tile family/context/composition coverage and
+  select prefab representatives under a declared diversity budget; retain transform/retexture
+  variants only where they add coverage, and record duplicate-to-representative lineage/exclusions.
+- [ ] T029 [US1] Assign train/validation partitions only after canonical prefab grouping; prove with
+  a unit test and summary audit that no transformed/retextured placement of a prefab crosses
+  partitions and complete-map holdout remains intact.
+- [ ] T030 [US1] Run a bounded CPU-only curation proof and inspect its map-wide report. Record counts,
+  composition/tileset-anomaly coverage, artifact hashes, and exact user-owned next-training command
+  in `quickstart.md`. **USER runs any subsequent training.**
+
 ## Phase 5: Polish & deferred lanes
 
 - [x] T016 [P] Record the deferred follow-on lanes (image-only `minimap → WDL-prior` front-end; synthetic-universality scale-up; output-space object segmentation + inpaint) as scoped notes in the plan; no implementation now. *(plan.md Phase 5)*

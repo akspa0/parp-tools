@@ -21,17 +21,22 @@ Approximate version → era map (confirm exact values per staged client in P1):
 
 | M2 version (hdr 0x04) | Era / builds | Skin profiles |
 | --- | --- | --- |
-| 256 (0x100) | Classic 1.x incl. 1.12.1 | **embedded** |
+| 256 (0x100) | Classic 1.x incl. 1.12.1 | **embedded** — layout classification required |
 | ~257–263 | TBC 2.0–2.4.3 | **embedded** |
 | 264 (0x108) | WotLK 3.x | **external `.skin`** |
 | ≥ 265 (0x109+) | Cata+ (current code's `CataVersionThreshold`) | external + chunked |
-| 256 (0x100) | **WoW 1.0.0** (Vanilla release) + 1.x incl. 1.12.1 | **embedded** — **CONFIRMED via Ghidra** (see `research-1.0.0-ghidra-trace.md`) |
+| 256 (0x100) | **WoW 1.0.0** (Vanilla release) | **embedded classic layout** — **CONFIRMED via Ghidra** (see `research-1.0.0-ghidra-trace.md`) |
 | pre-256 | Alphas 0.11 / 0.12 only | **embedded**, layout undocumented — **(open P3)** |
 
 The current reader assumes the ≥ 264 world (external skins) and so reads **no** embedded geometry for
 everything ≤ 263. That is the empty-box bug.
 
 ## Decision 2 — Embedded skin profiles (`nViews` / `ofsViews`) are the missing geometry
+
+**1.x routing correction (2026-07-15)**: 1.0.0 assets are `MD20` M2 files. The 1.0.0 client
+normalizes `.mdx`/`.mdl` aliases to `.m2`; those aliases are not a fallback data format. A detected
+`0x100` classic layout must be parsed only by the era-100 M2 reader and fail loudly if that reader
+cannot consume it.
 
 **Decision**: For version ≤ 263, read the embedded skin-profile table the header points at and extract
 geometry + material bindings from it. **Rationale**: pre-WotLK `.m2` files carry their "views" (skin

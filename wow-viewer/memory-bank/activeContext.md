@@ -2,6 +2,20 @@
 
 Last updated: 2026-07-14 (RunPod deployment ready; WoWViewer cross-platform CI investigation started)
 
+## Spec 104 — 1.0.0 M2 route (2026-07-15)
+
+- Correct contract: 1.0.0 assets are `MD20` / `0x100` **M2**, not MDX. `.mdx`/`.mdl` are
+  compatibility aliases, never a substitute route for a 1.x M2.
+- Spec 104 has been re-scoped to the first gated slice and now has `tasks.md`. The era-100 reader
+  must fail loudly rather than fall through to a different M2 layout; standalone UI copy no longer
+  tells users to browse MDX/MDL instead.
+- Code proof: `dotnet build wow-viewer/WowViewer.slnx -c Debug` (0 errors) and focused
+  `M2Era1121ModelReaderTests` (9/9) pass. Still unproven: user-run visible mesh/material render from
+  a named staged 1.0.0 client, then a WotLK+ no-regression check. Do not claim rendering signoff yet.
+- Correction from live viewer evidence: the first route still adapted the M2 into `MdxRenderer` and
+  produced visibly wrong geometry. Era-100 now builds a native `M2StaticRenderModel` and calls
+  `LoadM2RuntimeModel` with no `MdxFile`; the next viewer check must show `Renderer: M2Renderer`.
+
 ## For tomorrow (pick up here)
 
 1. **Spec 103 training**: everything is built and verified, nothing left to code. Run
@@ -50,6 +64,25 @@ Last updated: 2026-07-14 (RunPod deployment ready; WoWViewer cross-platform CI i
   confirm all four cardinals in-app.
 
 ## Current target — Spec 103: revive the v7 terrain regressor on clean signals
+
+- **New planned curation gate (2026-07-15):** The next real-data V8 corpus must be reduced by
+  provenance-backed pattern/context coverage, not raw tile count. Spec 103 Phase 3B consumes (does
+  not duplicate) Spec 076's full-map fractal/paste library; it must ledger every available alpha
+  layer per map/tile/chunk/cell with region/family identity, terrain/MCLY, and object/liquid context,
+  then retain deterministic representatives with duplicate lineage and family-safe splits. This is
+  training-time curation only: it does not add alpha/object/mesh inputs to image-only deployment.
+  **Correction:** ADT tiles are storage pages, not curation units. The ledger must begin per
+  map-wide canvas/layer and preserve multi-scale fractal/cellular neighbour composition plus MCLY
+  tileset anomalies that repeat with placements; tiny local brush strokes are explicitly worthless
+  as final curation units.
+  **Vocabulary correction:** canonical family = terrain-art **prefab**; its placements may be
+  translated/mirrored/rotated/retextured. User reports initial 0.5.3–3.3.5 analysis found ~140
+  prefab families. Retained MCLY texture is a tileset variant/provenance signal, not automatic
+  family separation; split grouping must be at canonical prefab level.
+  **Purpose:** reverse-engineer an explainable, editable historical art pipeline from image/game-data
+  breadcrumbs. Preserve recovered evidence separately from model proposals and operator hand edits;
+  the viewer/export path is the human-authoritative finishing step, never an automated claim of
+  historical truth.
 
 - **Governing law (image-only):** the only deployment input is one image tile. Every other signal is generated from it; no model reads a ground-truth signal at inference; downstream trains on generated (not ground-truth) upstream; a target the image cannot support is invalid. Validation is **label-free** (self-consistency), never label-comparison. See `specs/103-image-only-reconstruction/spec.md`.
 - **Implemented (agent side, 2026-07-13):** v7 contract pinned in `specs/103-.../research-v7-contract.md`;

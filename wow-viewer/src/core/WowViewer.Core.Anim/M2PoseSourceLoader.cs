@@ -46,6 +46,7 @@ public static class M2PoseSourceLoader
         return era switch
         {
             M2Era1121EraTag.Mdlx => "chunked",
+            M2Era1121EraTag.Md20_1X_V100_Era100 => "era100",
             M2Era1121EraTag.Md20_1X_V100 or M2Era1121EraTag.Md20_1X_V101 => "era1121",
             M2Era1121EraTag.Md20_3X_V108 => "classic",
             _ => "unknown",

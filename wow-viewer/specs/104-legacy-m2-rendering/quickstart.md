@@ -17,26 +17,31 @@ Read the `uint32` at offset `0x04` of any `.m2` from the client. Record it again
 reader's version branch targets the right value. (A tiny inspect command or a hex view of the first 8
 bytes suffices; the magic `MD20` is at 0x00, version at 0x04.)
 
-## 1. P1 — documented versions (2.4.3, 1.12.1)
+## 1. Current P1 — 1.0.0 M2 (`MD20`, version `0x100`)
 
 ```text
 # Build the viewer (from repo root)
 dotnet build wow-viewer/WowViewer.slnx -c Release
 
-# Load a known 2.4.3 model in the viewer (USER runs), e.g. a creature or simple prop,
-# and confirm CURRENT behavior: empty bounding box (the baseline this phase fixes).
+# USER runs: load a known staged 1.0.0 `.m2` model in the viewer.
+# It must be treated as M2, not redirected to .mdx/.mdl. Record the exact model path and outcome.
 ```
 
-Then implement the reader steps (plan.md Phase 1, steps 2–10) in
-[M2ModelReader.cs](../../src/core/WowViewer.Core.IO/M2/M2ModelReader.cs):
+The 1.0.0 branch lives in
+[`M2Era100ModelReader.cs`](../../src/core/WowViewer.Core.IO/M2Era100/M2Era100ModelReader.cs),
+with classification in
+[`M2ModelReaderDispatcher.cs`](../../src/core/WowViewer.Core.IO/M2Chunked/M2ModelReaderDispatcher.cs).
 
-- Verify header offsets for the version against a hex dump of the loaded model (research U1).
-- Read the embedded skin profile; parse submeshes + triangle indices + texture units.
-- Feed them to the render path.
+- Confirm the dispatcher selects the era-100 branch, not the 1.12.1 layout.
+- Confirm the info panel identifies `Renderer: M2Renderer`; seeing `MdxRenderer` is a failure of
+  this phase, even if triangles appear.
+- Confirm the viewer reports a version-specific M2 reader failure if parsing fails; it must not
+  advise MDX/MDL or silently parse through another layout.
+- Validate mesh and material output against the same staged source model.
 
-**Validate**: the same 2.4.3 model now renders textured mesh, and it visually matches a reference
-renderer's output of the same file. Repeat for 1.12.1 (version 256). Record confirmed offsets/structs in
-[contracts/m2-format-profile.md](contracts/m2-format-profile.md). Gate: SC-001, SC-002.
+**Validate**: the 1.0.0 model renders visible mesh/materials, and record the staged client/model
+path plus confirmed layout in [contracts/m2-format-profile.md](contracts/m2-format-profile.md).
+This is not signoff for 1.12.1 merely because it shares `0x100`.
 
 ## 2. P2 — mid-range (2.0.0 alpha, 2.1, 2.2, 2.3)
 

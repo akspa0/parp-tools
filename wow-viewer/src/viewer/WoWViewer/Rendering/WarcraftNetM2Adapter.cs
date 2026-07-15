@@ -255,7 +255,23 @@ internal static class WarcraftNetM2Adapter
             try
             {
                 M2Era1121EraTag era = M2ModelReaderDispatcher.DetectEra(m2Bytes.AsSpan(), fileName);
-                if (era is M2Era1121EraTag.Md20_1X_V100 or M2Era1121EraTag.Md20_1X_V101)
+                if (era is M2Era1121EraTag.Md20_1X_V100_Era100)
+                {
+                    ViewerLog.Info(ViewerLog.Category.Mdx,
+                        $"[M2] Detected 1.0.0 era (version 0x100, classic layout), using era-100 reader for {fileName}");
+                    try
+                    {
+                        return ParseEra100Model(m2Bytes, modelPath);
+                    }
+                    catch (Exception era100Ex)
+                    {
+                        throw new InvalidDataException(
+                            $"1.x M2 '{fileName}' was recognized as the 1.0.0-era 0x100 layout but could not be parsed by its required era-100 reader. " +
+                            "It must not fall through to a different M2/MDX layout.",
+                            era100Ex);
+                    }
+                }
+                else if (era is M2Era1121EraTag.Md20_1X_V100 or M2Era1121EraTag.Md20_1X_V101)
                 {
                     uint rawVersion = BitConverter.ToUInt32(m2Bytes, M2Era1121Constants.VersionOffset);
                     ViewerLog.Info(ViewerLog.Category.Mdx,
@@ -917,6 +933,128 @@ internal static class WarcraftNetM2Adapter
         {
             return null;
         }
+    }
+
+    private static ParsedModelData ParseEra100Model(byte[] modelBytes, string modelPath)
+    {
+        string fileName = Path.GetFileName(modelPath);
+        using var ms = new MemoryStream(modelBytes, writable: false);
+        M2DispatchResult dispatch = M2ModelReaderDispatcher.ReadDetailed(ms, modelPath);
+        M2ModelDocument document = dispatch.Document;
+
+        WnBoundingBox boundingBox = new()
+        {
+            Minimum = document.BoundsMin,
+            Maximum = document.BoundsMax,
+        };
+
+        var data = new ParsedModelData
+        {
+            Name = document.ModelName ?? string.Empty,
+            BoundingBox = boundingBox,
+            BoundingBoxRadius = document.BoundsRadius,
+            EmbeddedSkin = new SkinData { GlobalVertexOffset = 0 },
+        };
+
+        if (document.InlineEra100Geometry is { } geometry)
+        {
+            // Build render vertices from the resolved M2Era100Vertex array.
+            // The vertexLookup has already been applied by the reader.
+            var vertices = new List<ParsedVertexData>(geometry.RenderVertices.Count);
+            for (int i = 0; i < geometry.RenderVertices.Count; i++)
+            {
+                var v = geometry.RenderVertices[i];
+                vertices.Add(new ParsedVertexData
+                {
+                    Position = v.Position,
+                    Normal = v.Normal,
+                    TextureCoord0X = v.TexCoord0.X,
+                    TextureCoord0Y = v.TexCoord0.Y,
+                });
+            }
+
+            var skin = data.EmbeddedSkin;
+            for (int i = 0; i < geometry.RenderVertices.Count; i++)
+                skin.Vertices.Add((ushort)i);
+
+            foreach (var tri in geometry.Triangles)
+                skin.TriangleIndices.Add(tri);
+
+            // Build submeshes from sections and texture units from batches.
+            // Each batch references a section via SkinSectionIndex.
+            foreach (var batch in geometry.Batches)
+            {
+                int sectionIdx = batch.SkinSectionIndex;
+                if (sectionIdx >= 0 && sectionIdx < geometry.Sections.Count)
+                {
+                    var section = geometry.Sections[sectionIdx];
+                    skin.Submeshes.Add(new SkinSubmeshData
+                    {
+                        SkinSectionId = section.SubmeshId,
+                        Level = section.Level,
+                        VertexStart = section.VertexStart,
+                        VertexCount = section.VertexCount,
+                        IndexStart = (ushort)Math.Min(section.IndexStart, ushort.MaxValue),
+                        IndexCount = (ushort)Math.Min(section.IndexCount, ushort.MaxValue),
+                        BoneComboIndex = 0,
+                    });
+                }
+
+                skin.TextureUnits.Add(new SkinTextureUnitData
+                {
+                    PriorityPlane = batch.PriorityPlane,
+                    MaterialLayer = batch.MaterialLayer,
+                    TextureCount = Math.Max(batch.TextureCount, (ushort)1),
+                    SkinSectionIndex = batch.SkinSectionIndex,
+                    MaterialIndex = batch.MaterialIndex,
+                    TextureComboIndex = batch.TextureComboIndex,
+                    ColorIndex = batch.ColorIndex,
+                    TextureCoordComboIndex = batch.TextureCoordComboIndex,
+                    TransparencyComboIndex = -1,
+                    TextureAnimationLookupIndex = batch.TextureTransformComboIndex,
+                });
+            }
+
+            foreach (var v in vertices)
+                data.Vertices.Add(v);
+
+            foreach (var tex in geometry.Textures)
+            {
+                data.Textures.Add(new ParsedTextureData
+                {
+                    Type = (Warcraft.NET.Files.M2.Entries.TextureType)tex.Type,
+                    Flags = (Warcraft.NET.Files.M2.Entries.TextureFlags)tex.Flags,
+                    Filename = tex.Filename,
+                });
+            }
+
+            // 1.0.0 does not have a separate render-flags array like 1.12.1.
+            // The blend mode is encoded in the batch's materialIndex/shaderId fields.
+            // For now, default to opaque (flags=0, blendMode=0) per batch.
+            for (int i = 0; i < geometry.Batches.Count; i++)
+            {
+                data.RenderFlags.Add(new ParsedRenderFlagData
+                {
+                    Flags = 0,
+                    BlendingMode = 0,
+                });
+            }
+
+            foreach (var lookup in geometry.TextureLookup)
+            {
+                data.TextureLookup.Add(new ParsedTextureLookupData
+                {
+                    TextureId = lookup,
+                });
+            }
+        }
+        else
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                $"[M2] 1.0.0 model '{fileName}' has no inline geometry; returning header-only data for downstream fallback");
+        }
+
+        return data;
     }
 
     private static ParsedModelData ParseEra1121Model(byte[] modelBytes, string modelPath)

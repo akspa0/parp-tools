@@ -26,6 +26,20 @@ The **WoW 1.0.0** (Vanilla release) M2/MDX subsystem was fully traced statically
 [`specs/104-legacy-m2-rendering/research-1.0.0-ghidra-trace.md`](../../specs/104-legacy-m2-rendering/research-1.0.0-ghidra-trace.md).
 Key findings:
 
+**Implementation (Jul 15, 2026)**: The 1.0.0 reader codepath is now implemented in
+`wow-viewer/src/core/WowViewer.Core.IO/M2Era100/`:
+- `M2Era100Constants.cs` — complete header field map from Ghidra trace §4
+- `M2Era100ModelReader.cs` — reads M2Vertex[] + M2Division (embedded skin profiles),
+  resolves render vertices through vertexLookup, emits `M2Era100Geometry`
+- `M2Era100Geometry.cs` (in `WowViewer.Core/M2/`) — geometry data model
+- The dispatcher (`M2ModelReaderDispatcher`) distinguishes 1.0.0 from 1.12.1 (both
+  version 0x100) via layout validation (`ValidateLayout` checks vertices/divisions/
+  textures offsets at the 1.0.0 header positions)
+- `WarcraftNetM2Adapter.ParseEra100Model` consumes the geometry and builds
+  `ParsedModelData` for the renderer
+- Era tag `Md20_1X_V100_Era100` added to `M2Era1121EraTag` enum
+- Build passes (no new errors); render validation pending a staged 1.0.0 client
+
 - **Viewer gap (user, 2026-07-15)**: the wow-viewer M2 reader already handles 0.11/0.12
   (pre-`0x100`); **1.x+ (`0x100` → 3.0.1) does not render correctly** — the format expanded
   incrementally across that range. The 1.0.0 game-client parser (`FUN_0071e190`)

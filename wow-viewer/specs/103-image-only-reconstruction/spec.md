@@ -91,6 +91,11 @@ Later and optionally, object artifacts are removed from the *generated output* b
 - **FR-011**: Every training run MUST record command, data identity, split, per-epoch metrics, and peak VRAM, and MUST NOT be claimed as success without passing the label-free acceptance check.
 - **FR-012**: A training store MUST pair the minimap image with the real WDL lattice per tile. The current 3-array precise-mask store lacks height/WDL, so a suitable store MUST be produced or identified before training.
 - **FR-013**: The training corpus MUST be curated before use, not consumed raw. Tiles whose supervised height target is not supportable by the image — object-contaminated tiles (Principle #5), blank-minimap dead space, and height/normal-mismatch harvest failures — MUST be dropped, and the kept set recorded in an auditable curation manifest bound to the store. Object tile removal is the default (`--max-object-coverage 0.0` drops ANY object), not an opt-in; the manifest MUST record per-tile drop reasons and the thresholds used.
+- **FR-014**: Before selecting the final training corpus, the curation pass MUST observe every available MCAL alpha layer per build/map/tile and preserve its ADT chunk/cell provenance. Alpha is a training-time curation signal only; it MUST NOT be added to the deployed image-only input.
+- **FR-015**: Alpha observations MUST be joined to the existing full-map fractal/primitive library rather than treating tile-local connected components as authoritative brushes. The ledger MUST retain both atomic and non-brush/composite patterned regions, including their curation state and stable family/region identifiers.
+- **FR-016**: Each candidate tile MUST record its terrain and placement context: height/normal relief signature, MCLY layer/texture context, and available object/liquid overlap or proximity. Missing context is explicit evidence, never silently imputed.
+- **FR-017**: The final manifest MUST select for canonical terrain-art prefab family and context diversity rather than raw tile count. A prefab placement MAY be translated, mirrored, rotated, or retextured while retaining its canonical family; every kept tile MUST name the prefab family, placement transform/variant coverage it contributes, and every excluded duplicate MUST name its representative or exclusion reason. Prefab families MUST be group-safe across train/validation splits so transformed authored placements cannot leak between them.
+- **FR-018**: A curation run MUST write a reproducible evidence chain: source-store and upstream-library identities, per-map/layer/region ledger rows, tile-to-region membership, deterministic selection parameters, and a summary of represented versus excluded families. This evidence is required before a smaller curated corpus is used for training.
 
 ### Key Entities
 
@@ -98,6 +103,7 @@ Later and optionally, object artifacts are removed from the *generated output* b
 - **WDL height lattice**: paired 17×17 outer + 16×16 inner samples (545 values). The PoC output signal, generated from the image.
 - **Generated signal stack**: every non-image signal, produced by models; never assumed present.
 - **Ground-truth game signals**: height/WDL/mask from game clients; supervision and dev diagnostics only, never an input or the acceptance test.
+- **Pattern evidence ledger**: training-time Parquet evidence linking a tile to full-map alpha/fractal/paste regions, their family identities, ADT tile/chunk/layer locations, terrain/texture/placement context, and selection rationale. It is not a model input.
 
 ## Success Criteria *(mandatory)*
 
@@ -108,6 +114,9 @@ Later and optionally, object artifacts are removed from the *generated output* b
 - **SC-003**: The end-to-end loop (image → lattice) runs on inputs with zero auxiliary signals, including at least one input outside the training distribution.
 - **SC-004** *(dev diagnostic, not acceptance)*: On the labeled game subset, generated height beats the trivial flat/mean baseline by a recorded margin — reported explicitly as a development metric, not the product proof.
 - **SC-005**: An audit confirms no model in the pipeline reads a ground-truth signal at inference.
+- **SC-006**: Every retained tile is traceable through the curation manifest to its build, map, ADT tile, chunk/cell coverage, alpha layer/region/family evidence, and terrain/object-context statistics.
+- **SC-007**: The selected corpus has no duplicate pattern family leaking across train/validation partitions, and its summary reports both family and map/context coverage.
+- **SC-008**: The curated subset is materially smaller than the clean eligible set while retaining a declared representative for each selected pattern/context family; the reduction and all exclusions are reproducible from recorded parameters.
 
 ## Assumptions
 

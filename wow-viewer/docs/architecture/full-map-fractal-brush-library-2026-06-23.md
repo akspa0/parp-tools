@@ -8,6 +8,11 @@ The primary terrain-art decomposition path is now full-map, fractal-aware, mesh-
 
 Treat each map's terrain mesh, alpha layers, MCLY texture/layer assignments, and candidate source BLP/effect/decal textures as stacked ZBrush-like documents/layers that together form one cohesive 3D digital painting.
 
+The unit of analysis is the **entire map canvas**, never its ADT storage pages. Region crops and
+components are coordinate anchors only. Full-map analysis must retain multi-scale recurrence,
+neighbour/relative-placement arrangements, cross-tile parent-child structure, and map-local tileset
+outliers; this is how repeated cellular/fractal composition survives beyond tiny alpha strokes.
+
 ## Why
 
 The 074 contact sheets showed that many extracted candidates are wrong for training:
@@ -40,6 +45,10 @@ Existing V18 Zarr stores provide the initial substrate:
 | object/liquid/shadow masks | Non-terrain contamination controls. |
 | decoded BLP texture/effect candidates | Possible original brush/decal/effect source assets for alpha/fractal motifs. |
 
+MCLY identity is also paste evidence: a texture that is locally anomalous for a map area but recurs
+with a full-map alpha family can retain the lineage of a copied placement. Preserve its era-scoped
+path/ID, coverage, and local-frequency baseline instead of collapsing it into a generic tileset tag.
+
 ## Primitive Definition
 
 A valid terrain-art primitive is not an alpha mask alone. It is a coupled reusable unit that may include:
@@ -50,6 +59,12 @@ A valid terrain-art primitive is not an alpha mask alone. It is a coupled reusab
 - height/normal sculpt response
 - repeated placement/provenance across the map
 - curation status separating reusable motifs from chonkers and one-off hand-painted details
+
+Use **terrain-art prefab** as the canonical name for a reusable primitive family. A prefab has one
+canonical family identity and many placement identities; placements may be translated, mirrored,
+rotated, or retextured to fit a zone. Preserve transform and era-scoped tileset-variant provenance
+instead of splitting those placements into unrelated families. User-reported initial analysis found
+roughly 140 such families across 0.5.3–3.3.5; treat that as a review baseline, not a fixed target.
 
 ## Phasing
 
@@ -87,3 +102,12 @@ A valid terrain-art primitive is not an alpha mask alone. It is a coupled reusab
 ## Training Rule
 
 No new model training should proceed from raw 074 connected components, 075 binary scar masks, alpha-only labels, or minimap-only labels. Future models must consume the curated full-map primitive library and obey the one-signal/one-output rule.
+
+## Reconstruction Boundary
+
+The library exists to make terrain-art reconstruction explainable and editable: recover observed
+prefab evidence from complete map canvases, use a narrowly scoped model to propose one missing
+relationship at a time, and retain operator handwork as a first-class final step in the viewer or
+existing export paths. Keep recovered source evidence, model proposal, and operator revision as
+separate provenance states. Do not present a generated/reconstructed placement as a verified
+historical original merely because it fits a prefab family.

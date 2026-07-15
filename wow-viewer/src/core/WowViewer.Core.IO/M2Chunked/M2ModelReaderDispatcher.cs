@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using WowViewer.Core.IO.M2;
+using WowViewer.Core.IO.M2Era100;
 using WowViewer.Core.IO.M2Era1121;
 using WowViewer.Core.M2;
 
@@ -68,7 +69,16 @@ public static class M2ModelReaderDispatcher
             uint version = BinaryPrimitives.ReadUInt32LittleEndian(headerBytes.Slice(sizeof(uint), sizeof(uint)));
             M2Era1121Version eraVersion = M2Era1121VersionExtensions.FromUInt(version);
             if (eraVersion.Is1121())
+            {
+                // Both 1.0.0 and 1.12.1 use version 0x100, but they have completely
+                // different header layouts. Validate the 1.0.0 layout first; if the
+                // vertices/divisions/textures fields at the 1.0.0 header positions
+                // produce sane offsets, it's a 1.0.0 file. Otherwise fall back to 1.12.1.
+                if (version == 0x100u && M2Era100ModelReader.ValidateLayout(headerBytes, sourcePath))
+                    return M2Era1121EraTag.Md20_1X_V100_Era100;
+
                 return eraVersion == M2Era1121Version.V101 ? M2Era1121EraTag.Md20_1X_V101 : M2Era1121EraTag.Md20_1X_V100;
+            }
 
             if (version == 0x108u)
                 return M2Era1121EraTag.Md20_3X_V108;
@@ -94,6 +104,9 @@ public static class M2ModelReaderDispatcher
         {
             M2Era1121EraTag.Mdlx => new M2DispatchResult(
                 M2ChunkedModelReader.Read(dispatchStream, sourcePath, companionReader),
+                era),
+            M2Era1121EraTag.Md20_1X_V100_Era100 => new M2DispatchResult(
+                M2Era100ModelReader.Read(dispatchStream, sourcePath),
                 era),
             M2Era1121EraTag.Md20_1X_V100 or M2Era1121EraTag.Md20_1X_V101 => new M2DispatchResult(
                 M2Era1121ModelReader.Read(dispatchStream, sourcePath),

@@ -2,6 +2,43 @@
 
 Last updated: 2026-07-15 (world lighting/shadow model + M2 camera tracks Ghidra traces)
 
+## 2026-07-15 — Spec 103 pattern-aware V8 corpus reduction planned
+
+- User direction: favor fewer tiles, but preserve every reusable terrain-art relationship with its
+  evidence chain. Extended Spec 103 with FR-014–018 and a bite-sized Phase 3B/task sequence.
+- Reuses the existing Spec 076 full-map fractal/paste library as authority; raw tile-local alpha
+  components are supporting evidence only. The future ledger carries build/map/tile/chunk/cell/layer,
+  full-map region/family, terrain/MCLY, and object/liquid context, plus selection/duplicate lineage.
+- Explicit boundary: alpha, mesh, MCLY, and object data are curation observations only. V8 deployment
+  remains image-only; no model architecture or training run changed/launched. Next proof is CPU-only
+  ledger/schema/split audit, then the user may choose to train on the reduced manifest.
+- Follow-up correction: the inspection unit is the entire map-wide artist canvas per alpha layer,
+  not independent ADT tiles or tiny strokes. Planned ledger features now include multi-scale
+  fractal/cellular neighbour arrangements and map-local MCLY tileset anomalies that can retain
+  copy/paste lineage across otherwise unrelated zones.
+- Canonical terminology is now **terrain-art prefab**: transform/retexture-equivalent placements
+  belong to one prefab family, while exact map/canvas orientation and MCLY variant remain placement
+  evidence. User-reported initial analysis found about 140 prefab families across 0.5.3–3.3.5; it is
+  a review baseline, not a forced count. Prefab family is the future split-leakage group.
+- Reconstruction purpose pinned: recover editable, provenance-backed artist-pipeline evidence from
+  sparse historical/game-data breadcrumbs; models only propose bounded relationships, while viewer
+  handwork and existing export remain the final authority. Recovered evidence, model proposals, and
+  operator revisions must remain distinct provenance states.
+
+## 2026-07-15 — Spec 104 1.0.0 M2 contract and task recovery
+
+- Replaced the false standalone-viewer instruction to use `.mdx/.mdl` for early clients: 1.0.0
+  source assets are `MD20`/`0x100` M2, and the viewer now says so.
+- Era-100 parse failure is terminal and descriptive; it no longer falls through to a generic
+  parser that can conflate the classic 1.0.0 and distinct 1.12.1 `0x100` layouts.
+- Reworked `specs/104-legacy-m2-rendering/plan.md`, corrected spec/research/quickstart, and created
+  dependency-ordered `tasks.md`. Build: 0 errors; focused `M2Era1121ModelReaderTests`: 9/9.
+- Remaining user-run gate: load and visually verify a named staged 1.0.0 `.m2`, document the result
+  in the format profile, then check one WotLK+ model. No viewer render signoff yet.
+- Live screenshot exposed a material breach: the first 1.0.0 branch displayed `MdxRenderer` and
+  distorted geometry. Replaced it with native `M2StaticRenderModel` → `M2Renderer` routing; build
+  is green, but the required user proof is now specifically `Renderer: M2Renderer` plus correct mesh.
+
 ## 2026-07-15 (latest) — World render systems: M2/doodad draw, terrain surface, water, blend modes
 
 - **Driver**: user wants everything else we missed for WORLD rendering documented, to build a better
