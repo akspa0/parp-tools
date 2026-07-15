@@ -24,7 +24,17 @@ Data flows from the C# harvester through a length-prefixed binary protocol over 
 
 ### VI. No Game Client Path Assumptions
 
-Never use `H:\CLIENTS` for anything. Those paths are untrusted. The only trusted client data lives under `I:\parp\parp-tools\output\tmp\wowarchive-clients\`. All references to `H:\CLIENTS` in code, scripts, or docs are stale and incorrect.
+Client data locations are **configuration, never assumptions baked into code**. No source file, script, or doc may hardcode a client root. Validation and harvesting read from a configured clients folder; the current default is `I:\parp\parp-tools\output\tmp\wowarchive-clients\`.
+
+**Storage layout (as of 2026-07-15):** the authoritative corpus is **WoWArchive** (~150 GB, cold HDD storage). `H:\CLIENTS` is a **curated temporary SSD staging area** the user copies individual builds into for working sessions. Both are legitimate sources.
+
+**Amended 2026-07-15 (v1.1.0).** This principle previously read *"Never use `H:\CLIENTS` for anything. Those paths are untrusted."*
+
+- **Rationale for the amendment**: the original prohibition was written against a specific hazard — broken clients of unknown origin that the user did not trust. The user has since cleaned that folder out; the hazard no longer exists, and the folder is now curated for this project's needs. The rule outlived its reason and had started producing false conflicts (e.g. the 1.0.0 Ghidra evidence underpinning spec 105 is derived from a binary imported from that path, which the old wording nominally forbade while every prior session relied on it).
+- **Approved by**: the user, 2026-07-15, in session.
+- **Migration**: one enforcement point exists and now **contradicts** this principle — `WowViewer.Core.Anim/PathNormalizer.cs` (`StaleClientsRoot`) **throws `InvalidOperationException`** on any path containing `H:\CLIENTS`, with `PathNormalizerTests` pinning that behaviour. Under the amended principle the pose-farm library would refuse a legitimate staging path. **This is a tracked follow-up, deliberately not bundled into the amendment commit** (it is a code change to spec 053's library, outside the scope of the session that raised it). Until it is removed or retargeted, `Core.Anim` consumers must continue to pass staged-client paths. Documentation and memory-bank text asserting a blanket prohibition is superseded by this principle. Static RE evidence derived from a staged binary is explicitly permitted and should cite the build it came from.
+
+**What has NOT changed**: hardcoding *any* client path is still forbidden, `output/tmp/wowarchive-clients/` remains the default for automated validation, and the Data Policy below still governs distribution.
 
 ## Safety Constraints
 
@@ -84,4 +94,8 @@ Bring Your Own Data. Do not distribute proprietary client data, harvested corpor
 
 This constitution supersedes all other development practices when conflicts arise. Amendments require: (1) documented rationale, (2) user approval, (3) migration plan for affected code. The workspace `AGENTS.md` at repo root is the authoritative policy source for scope, safety, and repo boundaries.
 
-**Version**: 1.0.0 | **Ratified**: 2026-05-18 | **Last Amended**: 2026-05-18
+**Version**: 1.1.0 | **Ratified**: 2026-05-18 | **Last Amended**: 2026-07-15
+
+### Amendment log
+
+- **1.1.0** (2026-07-15) — Principle VI rewritten. The blanket `H:\CLIENTS` prohibition was retired: it was written against untrusted broken clients that the user has since removed, and the folder is now a curated SSD staging area fed from WoWArchive (~150 GB, cold HDD). The principle's durable intent — never hardcode a client root — is preserved and strengthened. Rationale, approval, and migration recorded inline. Requested and approved by the user in session.
