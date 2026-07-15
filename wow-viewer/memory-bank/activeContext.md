@@ -46,13 +46,31 @@ Last updated: 2026-07-15 (1.0.0 M2 geometry FIXED + Ghidra header remap; sidebar
      **OLD M2Track = 0x1C** (confirmed): `+0x00` interpType u16 · `+0x02` globalSeq u16 ·
      **`+0x04` interpRanges M2Array over 8-byte M2Range{u32 start,u32 end}** · `+0x0C` timestamps
      M2Array · `+0x14` values M2Array.
-     **THE REAL WORK — sampling model differs:** 1.0.0 timestamps/values are **FLAT** arrays
-     (binary validates timestamps at **stride 4** = plain uint32) sliced per-animation by
-     `interpRanges`. Wrath+ instead nests `M2Array<M2Array<T>>` per sequence and drops interpRanges
-     (track 0x1C→0x14). Our `M2TrackDefinition<T>` / `M2TrackArrayReference` are built for the
-     nested form, so era-100 needs either interpRanges support in the sampler or per-sequence views
-     synthesized from the flat arrays. **Do NOT populate bones without handling this** — wrong
-     poses are worse than none, and guessed layouts caused every bug fixed this session.
+     **SAMPLING ALGORITHM — FULLY RECOVERED from `FUN_0070f6d0`** (the track sampler; called 58×
+     from `CM2Model::Update` `FUN_0070f960`). Signature
+     `(model, uint time, int animIndex, track*, uint out[3])` → `out = {key0, key1, lerpT}`:
+     ```
+     if (track.interpRanges.count == 0) { start = 0; end = track.timestamps.count - 1; }
+     else { start = interpRanges[animIndex].start;      // offset + animIndex*8
+            end   = interpRanges[animIndex].end; }      // offset + animIndex*8 + 4
+     if (end <= start) return {start, start, 0.0};                    // single key, no interp
+     if (track.globalSequence != 0xFFFF)                              // u16 @ track+0x02
+         time = *(u32*)(model[0x5c] + globalSequence*4);              // global timers override time
+     k0 = search timestamps[start..end] bracketing time;              // cached-key fwd / bsearch / bwd
+     k1 = k0 + 1;
+     if (track.timestamps.count <= k1) return {k0, k0, 0.0};          // NB: clamps on TOTAL count
+     return {k0, k1, (float)(time - ts[k0]) / (float)(ts[k1] - ts[k0])};
+     ```
+     Then `value = lerp(values[key0], values[key1], lerpT)` (slerp for the quaternion track).
+     **KEY SEMANTIC:** `interpRanges` is indexed by **animation index**, stride 8 =
+     `{u32 firstKey, u32 lastKey}` — **inclusive** bounds into the FLAT timestamps/values arrays.
+     Empty interpRanges ⇒ use the whole array. Wrath+ instead nests `M2Array<M2Array<T>>` per
+     sequence and drops interpRanges (track 0x1C→0x14).
+     **REMAINING WORK:** our `M2TrackDefinition<T>` carries only `TimestampArray`/`ValueArray`
+     (`M2TrackArrayReference`) shaped for the nested Wrath form. Add an interp-ranges reference +
+     a flat-range sampling path, then populate `bones` in the era-100 reader with the 0x6C layout
+     above. **Do NOT populate bones without the flat+ranges sampler** — wrong poses are worse than
+     none, and guessed layouts caused every bug fixed this session.
 - **Sidebar "missing panels" root cause (FIXED, `7d7caa50`)** — nothing was ever deleted.
   `_activeBottomTabIndex` was shared across TWO nesting levels: Tools > Terrain and
   Tools > Utilities re-read the parent's index, so "Utilities" (index 4) rendered
