@@ -1,5 +1,119 @@
 # Active Context — wow-viewer
 
+Last updated: 2026-07-15 (Spec 105 written: M2 version profiles; two premises corrected)
+
+## Spec 105 — M2 format version profiles (2026-07-15, SPEC + PLAN done, NOT implemented)
+
+- **`specs/105-format-version-profiles/`**: spec, checklist, **plan, research, data-model,
+  contracts/m2-era-profile.md, quickstart**. `tasks.md` NOT yet generated (next: `speckit-tasks`).
+  Written on `v0.5.1` — no feature branch, artifacts manual (`.specify` scripts are PowerShell-only
+  and resolve the git root; known quirk).
+- **🔴 LIVE BUG FOUND DURING PLANNING (research R1) — the M2Sequence record is MISREAD.**
+  Ghidra `FUN_0070f960`: 1.0.0 `M2Sequence` (stride 0x44) = **{id u16@0, variationIndex u16@2,
+  START u32@4, END u32@8, movespeed f32@0xC, flags u32@0x10 (bit0 clear = looping)}**.
+  `M2Era100ModelReader.ReadSequences` reads **Wrath offsets** (`duration@4, moveSpeed@8, flags@0xC,
+  frequency@0x10`) — **every field from +0x04 is shifted 4 bytes**. The stride was fixed per era; the
+  **field offsets inside were copied from Wrath and never revisited** (the constant's own comment
+  "0x44 — same as 1.12.1 V100" records that the size was checked and the interior wasn't).
+  **This explains "frame 2030/3333, static": `Duration` is actually reading `start`** — a
+  global-timeline offset displayed as a duration. It was never a duration.
+  **Corroborated by wowdev.wiki**: `M2Sequence` documents `startTimestamp`/`endTimestamp` for **≤BC**,
+  merged into a single `duration` from **Wrath**. Ghidra and the public docs agree.
+  **⚠️ `M2Era1121ModelReader` HAS THE SAME SHAPE** (stride 0x6C, but `moveSpeed@0x08` = Wrath
+  offsets) → **1.12.1 may be animating wrongly TODAY and nobody has reported it.** Marked
+  PROVISIONAL, deliberately **NOT fixed by analogy** (1.0.0 vs 1.12.1 already proved they diverge
+  despite sharing version 0x100 — analogy is the exact reasoning that caused this bug). Needs a
+  1.12.1 client in Ghidra to settle. 3.x `M2ModelReader` (stride 0x40) is **correct** (true Wrath).
+- **KEY DESIGN DECISION (research R2) — normalize sequences to `{Start, Duration}`:** Wrath sets
+  `Start = 0`, `Duration = duration@4`; 1.0.0 sets `Start = start@4`, `Duration = end@8 - start@4`.
+  Sampler becomes ONE rule for all eras: `sampleTime = Start + (elapsed mod Duration)` — which
+  **reduces to today's exact `elapsed % duration` when Start = 0**. So the **3.x/4.x no-regression
+  guarantee is STRUCTURAL, not empirical**. This is the spine of the whole plan.
+- **Phasing (each ends with a gate, not code):** P0 pin the 3.x/4.x baseline **BEFORE touching any
+  shared type** (ordering is load-bearing — a later baseline measures the new code against itself);
+  P1 profile contract in core + delete inert `M2Profile` (net ≈ **−50 lines**, SC-004 shrink bar
+  verified feasible in R6); P2 era-aware track addressing + time base + the R1 offset fix; P3
+  populate era-100 bones (blocked on P2 — FR-007); P4 deterministic era resolution, kill the
+  trial-parse.
+- **Constitution Check: PASS**, no violations, Complexity Tracking empty. Core→viewer tension for
+  the build hint resolved by **dependency inversion** (core exposes an optional build hint; the
+  viewer supplies its existing `_dbcBuild`) — R4.
+- **OPEN, needs USER:** (1) FR-017 reading — deleting the inert `M2Profile` leaves a dangling
+  validation call in `WarcraftNetM2Adapter`; remove it (cannot change behaviour — it validates
+  against records that can only ever pass) or keep a local copy? (2) Is 1.12.1 animating correctly
+  today? (see the era-1121 warning above). (3) The R4 header-size discriminator is **reasoned, not
+  measured** — must be confirmed against real 1.0.0 + 1.12.1 models before it's relied on.
+- **TWO PREMISE CORRECTIONS — both verified in code, both invalidate prior framing:**
+  1. **Our M2 code is NOT Warcraft.NET wrappers.** `WowViewer.Core{,.IO,.Runtime}` (~5,000 lines of
+     M2 readers) have **zero** Warcraft.NET dependency — it is not in those .csproj at all. The
+     native path (`WowViewerM2RuntimeBridge` → `M2StaticRenderModel` → `M2Renderer`) is 100% ours,
+     including the 3.x/4.x path that works. Warcraft.NET's M2 = Legion+ chunked MD21; its ONLY
+     consumer is `WarcraftNetM2Adapter.cs` (viewer, 3,070 lines), the legacy M2→`MdxFile` fallback
+     for `MdxRenderer` (it feeds raw MD20 into `new MD21(...)`, which works only because MD21's
+     payload IS an MD20 blob). **There is nothing to build Warcraft.NET adapters for.** USER's
+     original ask was based on the inverted premise; corrected and accepted.
+  2. **`FormatProfileRegistry` (`src/viewer/WoWViewer/Terrain/`, 717 lines) is a PRIOR ATTEMPT at
+     the exact "per-version profile" architecture** — found before writing the spec, so it is the
+     spec's anchor rather than being reinvented. It is scheme (A): keyed on **build string**
+     ("3.3.5.12340"), viewer-side, **validation-only**, returns `null` for 1.x. Scheme (B) is
+     `M2ModelReaderDispatcher`: keyed on the **file's own version field**, core-side, actually
+     parses. They never talk (core can't reference the viewer — Constitution I). **That is the
+     "stepping on toes."** Violates Constitution II ("one canonical owner per format surface").
+     The **M2 half of the registry is INERT**: all 5 `M2Profile` records carry identical strides
+     (0x70/0x2C/0xD4/0x7C) and `SkinLikeA`/`EffectLikeB` naming admits guessed semantics. The
+     Adt/Wmo/Mdx halves DO carry real varying values (MclqLayerStride 0x2D4 vs 0x324) — not
+     uniformly worthless.
+- **USER SCOPE DECISIONS (this session):** (a) full profile architecture, not a narrow track fix;
+  (b) **M2 surface ONLY** — delete the inert M2Profile records, leave Adt/Wmo/Mdx on the registry
+  untouched (they sit in the Constitution's Terrain Alpha Risk Area), design so they *can* migrate
+  later under their own spec; (c) `WarcraftNetM2Adapter` + MdxRenderer fallback **untouched**, tech
+  debt only.
+- **Ghidra `FUN_0070f6d0` (track sampler) RE-VERIFIED against WoW.exe 1.0.0.3980.** Last session
+  recorded it as **prose only — no evidence file**, unlike the other ~40 traces. Re-decompiled: the
+  prose is **CONFIRMED accurate on every point**, incl. the total-count clamp. Raw evidence NOW
+  saved: `specs/104-legacy-m2-rendering/evidence/1.0.0-ghidra/m2_track_sampler.c`.
+  **NEW:** `out[0]` is an **IN/OUT cached-key seed** driving a 3-way search (fwd scan if
+  `time-ts[cache]` ∈ [0,500); bsearch if far; bwd scan if ∈ [-500,0)). It is **purely a perf cache —
+  all branches converge on the same key**, so a **stateless bracketing search is equivalent**: do
+  NOT port the cache, do NOT thread per-track mutable state. This makes the port simpler than the
+  prior session assumed.
+- **`FUN_0070f960` (the caller) TRACED — prior "largest open risk" RETIRED + a NEW gap found.**
+  2,082 lines, 58 sampler call sites. Independently re-confirms bone stride **0x6C**, `parentBone`
+  **@0x08**, rotation track **@0x28**, scale **@0x44** from a second site.
+  - **animIndex IS the sequence index.** Per-bone state (model+0x80, stride **0x118**) holds the
+    anim id at **+0xa4**; the same id indexes the M2Sequence array (`id * 0x44`). So
+    `interpRanges[i]` describes `sequences[i]` — **our existing `sequenceIndex` is the right value**.
+    No alias translation at this layer. Risk retired; no bone-pose guesswork needed.
+  - **NEW GAP (FR-005a) — 1.0.0 sequence time is a GLOBAL TIMELINE, not sequence-local.**
+    **M2Sequence (0x44) = {id u16@0, variationIndex u16@2, START u32@4, END u32@8, movespeed f32@0xC,
+    flags u32@0x10 (bit0 = non-looping)}**. Client: `time = start + (elapsed % (end - start))`, handed
+    to the sampler as an **absolute** time bracketed against a flat key array shared by ALL
+    animations. **That is WHY interpRanges exists.** Wrath+ replaced start/end with a single
+    `duration` and gave each sequence its own key array → interpRanges became unnecessary.
+    **Our `M2SequenceDefinition` carries `duration` ONLY (verified) — it cannot express 1.0.0
+    start/end**, and `M2TrackSampler.ResolveSampleTime` does `timeMs % duration` = the Wrath rule.
+    **Implementing flat+ranges addressing ALONE still yields wrong keys.** Era-dependent *time base*
+    is a first-class concern alongside era-dependent *track addressing*.
+  - **Deliberately NOT modelled (noted, not flattened):** animation state is **per-bone** (each bone
+    its own (time, animIndex); **-1 = inherit parent's**), and a **second** (time, animIndex) pair at
+    state[0x31]/[0x32] drives **cross-animation blending** via a second sampler call. Our runtime is
+    one-sequence-per-model. Out of scope for a first pass; neither blocks the P1 slice.
+- **`H:\CLIENTS` IS NO LONGER FORBIDDEN — Constitution amended to v1.1.0 (2026-07-15, USER-approved).**
+  USER clarification: the old ban existed because that folder once held **broken clients of unknown
+  origin they didn't trust**. They have since cleaned it out. It is now a **curated temporary SSD
+  staging area** they copy individual builds into, from **WoWArchive (~150 GB, cold HDD storage)** —
+  the authoritative corpus. Both are legitimate sources. Principle VI now reads "never *hardcode* a
+  client root" (config, not prohibition); `output/tmp/wowarchive-clients/` stays the default for
+  automated validation. Static RE evidence from a staged binary is explicitly permitted.
+  **Stop flagging the 1.0.0 Ghidra program's `H:/CLIENTS/...` origin as a violation — it is not one.**
+  The "forbidden legacy client root" language in the Boundaries section below is **superseded**.
+  **⚠️ CODE STILL ENFORCES THE OLD BAN — tracked follow-up, NOT yet done:**
+  `src/core/WowViewer.Core.Anim/PathNormalizer.cs` (`StaleClientsRoot = @"H:\CLIENTS"`) **THROWS
+  `InvalidOperationException`** on any path containing it, and `PathNormalizerTests` pins that
+  behaviour. So the **spec 053 pose-farm library will refuse a legitimate staging path today.**
+  Left alone on purpose this session (it's a code change to another spec's library, outside the
+  scope that raised it). Remove or retarget it before pointing any Core.Anim work at `H:\CLIENTS`.
+
 Last updated: 2026-07-15 (1.0.0 M2 geometry FIXED + Ghidra header remap; sidebar tabs unblocked)
 
 ## 1.0.0 M2 + viewer fixes (2026-07-15, session)
@@ -569,8 +683,13 @@ Last updated: 2026-07-15 (Spec 103 prefab curation and renderer-faithful lightin
 ## Boundaries
 
 - New work in `wow-viewer/`; `gillijimproject_refactor` is read-only reference (port from, never edit).
-- Staged clients only: `output/tmp/wowarchive-clients/`; the forbidden legacy client root remains
-  prohibited for inspection, validation, harvesting, commands, and documentation.
+- **Client data (UPDATED 2026-07-15, Constitution v1.1.0):** `output/tmp/wowarchive-clients/` remains
+  the **default for automated validation/harvesting**. `H:\CLIENTS` is **no longer prohibited** — it
+  is a curated temporary SSD staging area fed from **WoWArchive (~150 GB, cold HDD)**, the
+  authoritative corpus. The old "forbidden legacy client root" ban is **retired** (it targeted
+  broken clients of unknown origin that the USER has since removed). The surviving rule: **never
+  hardcode a client root** — it is configuration. Static RE from a staged binary is permitted; cite
+  the build.
 - Spec 080 owns the UI lane.
 
 ## Spec 103 — map-canvas prefab curation + synthetic lighting (2026-07-15)
