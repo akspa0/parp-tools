@@ -2,6 +2,17 @@
 
 Last updated: 2026-07-15 (Spec 106 native day/night lighting planned; 0.5.3 direction recovered)
 
+## Spec 107 — Lighting quick controls + confident hover (2026-07-15, implemented/build green)
+
+- **Fog defect fixed:** LIT/DBC fog decoding was already correct; `GetSceneFarPlane` silently forced a
+  6000-unit minimum, defeating short valid FogEnd values and exposing distant terrain through fog.
+  It now uses `FogEnd + 1024` padding with only a projection-valid 1-unit minimum.
+- **Quick controls:** Tools > Quick now exposes time, FogStart/FogEnd, LIT fog toggle, active range,
+  computed clip distance, and a one-action link to Utilities > Lighting (the full LIT evidence owner).
+- **Hover contract:** an exact-path card now requires a nearest ray hit. Brush/overlap candidates
+  remain usable for click inspection but no longer claim a precise tooltip. Isolated Debug build to
+  `output/tmp/spec107-build` passed with 0 errors; normal output was locked by the user's running viewer.
+
 ## Spec 106 — Native day/night lighting fidelity (2026-07-15, planned; no implementation/capture run)
 
 - **Exact 0.5.3.3368 live/PDB proof:** `DayNightUpdateLighting` (`0x006bd6c0`) calls separate

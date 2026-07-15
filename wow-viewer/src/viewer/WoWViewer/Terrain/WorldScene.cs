@@ -9950,13 +9950,13 @@ public class WorldScene : ISceneRenderer
             const float rayDistanceEpsilon = 0.01f;
             if (hasPm4RayHit && (!hasSceneRayHit || _pm4OverlayIgnoreDepth || pm4RayDistance < sceneRayDistance - rayDistanceEpsilon))
             {
-                _hoveredAssetInfo = pm4RayInfo;
+                _hoveredAssetInfo = pm4RayInfo.WithPreciseRayHit();
                 return;
             }
 
             if (hasSceneRayHit)
             {
-                _hoveredAssetInfo = sceneRayInfo;
+                _hoveredAssetInfo = sceneRayInfo.WithPreciseRayHit();
                 return;
             }
         }
@@ -13388,7 +13388,8 @@ public readonly struct HoveredAssetInfo
         (int tileX, int tileY, uint ck24, int objectPart)? pm4ObjectKey,
         ObjectType sceneObjectType = ObjectType.None,
         int sceneObjectIndex = -1,
-        string? wlBodyKey = null)
+        string? wlBodyKey = null,
+        bool isPreciseRayHit = false)
     {
         AssetKind = assetKind ?? string.Empty;
         DisplayName = displayName ?? string.Empty;
@@ -13400,6 +13401,7 @@ public readonly struct HoveredAssetInfo
         SceneObjectType = sceneObjectType;
         SceneObjectIndex = sceneObjectIndex;
         WlBodyKey = wlBodyKey ?? string.Empty;
+        IsPreciseRayHit = isPreciseRayHit;
     }
 
     public string AssetKind { get; }
@@ -13412,7 +13414,12 @@ public readonly struct HoveredAssetInfo
     public ObjectType SceneObjectType { get; }
     public int SceneObjectIndex { get; }
     public string WlBodyKey { get; }
+    public bool IsPreciseRayHit { get; }
     public bool HasSceneObject => SceneObjectType is ObjectType.Mdx or ObjectType.Wmo && SceneObjectIndex >= 0;
+
+    public HoveredAssetInfo WithPreciseRayHit() => new(
+        AssetKind, DisplayName, SourcePath, DetailLine, WorldPosition, AdditionalHitCount, Pm4ObjectKey,
+        SceneObjectType, SceneObjectIndex, WlBodyKey, isPreciseRayHit: true);
 }
 
 public readonly record struct SceneObjectPickHit(

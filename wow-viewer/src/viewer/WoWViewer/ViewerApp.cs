@@ -178,7 +178,7 @@ public partial class ViewerApp : IDisposable
         new("Cataclysm (4.x) - 4.0.1.12304", "4.0.1.12304")
     };
     private const float MaxTerrainFogDistance = 20000f;
-    private const float MinTerrainFarPlane = 6000f;
+    private const float MinTerrainFarPlane = 1f;
     private const float TerrainFarPlanePadding = 1024f;
     private const float MaxTerrainFarPlane = MaxTerrainFogDistance + TerrainFarPlanePadding;
 
@@ -6104,22 +6104,18 @@ void main() {
     private float GetSceneFarPlane()
     {
         if (_terrainManager != null)
-        {
-            return Math.Clamp(
-                MathF.Max(_terrainManager.Lighting.FogEnd + TerrainFarPlanePadding, MinTerrainFarPlane),
-                MinTerrainFarPlane,
-                MaxTerrainFarPlane);
-        }
+            return ComputeSceneFarPlane(_terrainManager.Lighting.FogEnd);
 
         if (_vlmTerrainManager != null)
-        {
-            return Math.Clamp(
-                MathF.Max(_vlmTerrainManager.Lighting.FogEnd + TerrainFarPlanePadding, MinTerrainFarPlane),
-                MinTerrainFarPlane,
-                MaxTerrainFarPlane);
-        }
+            return ComputeSceneFarPlane(_vlmTerrainManager.Lighting.FogEnd);
 
         return 10000f;
+    }
+
+    internal static float ComputeSceneFarPlane(float fogEnd)
+    {
+        float safeFogEnd = float.IsFinite(fogEnd) && fogEnd > 0f ? fogEnd : 1500f;
+        return Math.Clamp(safeFogEnd + TerrainFarPlanePadding, MinTerrainFarPlane, MaxTerrainFarPlane);
     }
 
     private bool TrySampleTerrainHeightLoaded(TerrainRenderer renderer, float worldX, float worldY, out float height, out TerrainRenderer.TerrainChunkInfo info)
@@ -13745,7 +13741,7 @@ void main() {
         if (_worldScene?.HoveredAssetInfo is not HoveredAssetInfo info)
             return;
 
-        if (!ShouldShowHoveredAssetInfoForInvestigation(info))
+        if (!info.IsPreciseRayHit || !ShouldShowHoveredAssetInfoForInvestigation(info))
             return;
 
         if (!TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))

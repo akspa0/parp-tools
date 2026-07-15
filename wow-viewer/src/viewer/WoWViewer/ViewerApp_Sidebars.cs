@@ -4487,7 +4487,7 @@ public partial class ViewerApp
         if (lighting != null)
         {
             ImGui.Spacing();
-            ImGui.Text("Lighting");
+            ImGui.Text("Lighting + LIT fog");
             ImGui.Separator();
             float gameTime = lighting.GameTime;
             if (ImGui.SliderFloat("Time of Day", ref gameTime, 0f, 1f, "%.2f"))
@@ -4504,6 +4504,34 @@ public partial class ViewerApp
             };
             ImGui.SameLine();
             ImGui.Text(timeLabel);
+
+            float fogStart = Math.Clamp(lighting.FogStart, 0f, MaxTerrainFogDistance - 1f);
+            float fogEnd = Math.Clamp(lighting.FogEnd, 1f, MaxTerrainFogDistance);
+            bool fogStartChanged = ImGui.DragFloat("Fog Start", ref fogStart, 5f, 0f, MaxTerrainFogDistance - 1f, "%.0f");
+            bool fogEndChanged = ImGui.DragFloat("Fog End", ref fogEnd, 5f, 1f, MaxTerrainFogDistance, "%.0f");
+            if (fogStartChanged || fogEndChanged)
+            {
+                fogStart = Math.Min(fogStart, fogEnd - 0.001f);
+                lighting.FogStart = fogStart;
+                lighting.FogEnd = fogEnd;
+                _defaultFogStart = fogStart;
+                _defaultFogEnd = fogEnd;
+                SaveViewerSettings();
+            }
+
+            if (_worldScene != null)
+            {
+                bool useLitFog = _worldScene.UseLitFogOverride;
+                if (ImGui.Checkbox("Use LIT fog", ref useLitFog))
+                    _worldScene.UseLitFogOverride = useLitFog;
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Open detailed LIT lighting"))
+                {
+                    OpenWorkbenchTab(ToolsBottomTab.Utilities);
+                    _activeUtilitiesTabIndex = (int)UtilitiesBottomTab.Lighting;
+                }
+                ImGui.TextDisabled($"Active range: {lighting.FogStart:F0}–{lighting.FogEnd:F0}; scene clips at {ComputeSceneFarPlane(lighting.FogEnd):F0}.");
+            }
         }
 
         // Reset view

@@ -2,6 +2,18 @@
 
 Last updated: 2026-07-15 (Spec 106 native day/night lighting plan + world lighting evidence)
 
+## 2026-07-15 — FogEnd visibility and hover confidence
+
+- Created/implemented Spec 107. Quick now makes the LIT lighting workflow discoverable: time,
+  FogStart/FogEnd, LIT-fog toggle, active clip range, and direct navigation to the detailed Lighting
+  utility. The detailed panel remains the LIT source/sample authority.
+- Fixed the apparent fog "see-through" cause: `GetSceneFarPlane` previously used a 6000-unit minimum
+  even when exact LIT/DBC FogEnd was much shorter. Far plane now follows `FogEnd + 1024` with a safe
+  1-unit floor and existing maximum.
+- Exact hover card now requires a nearest ray hit. Ambiguous brush hits no longer pop an exact asset
+  path, while click inspection still sees those candidates. Isolated Debug build passed (0 errors);
+  main output was intentionally not overwritten because the viewer was live.
+
 ## 2026-07-15 — 0.5.3 world-light direction recovered; Spec 106 planned
 
 - Live 0.5.3.3368 `WoWClient.exe` with matching PDB proved the world-light direction is computed
