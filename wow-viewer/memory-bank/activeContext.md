@@ -1,6 +1,23 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-15 (Spec 105 written: M2 version profiles; two premises corrected)
+Last updated: 2026-07-15 (Spec 106 native day/night lighting planned; 0.5.3 direction recovered)
+
+## Spec 106 — Native day/night lighting fidelity (2026-07-15, planned; no implementation/capture run)
+
+- **Exact 0.5.3.3368 live/PDB proof:** `DayNightUpdateLighting` (`0x006bd6c0`) calls separate
+  color and direction paths. `SetDirection` (`0x006bca40`) computes the native downward ray as
+  `(sin(phi)cos(theta), sin(phi)sin(theta), cos(phi))`; all theta samples are 225 degrees and phi
+  varies 110–127 degrees. Thus source azimuth is fixed 45 degrees but elevation varies about
+  20–37 degrees. The old `cos(pi/4)` finding is **unit/dynamic shadow projection only**, never the
+  world sun. Recorded in `docs/architecture/wow-1.0.0-world-lighting-shadow-model-2026-07-15.md` §2.1.
+- **Current gap:** LIT/DBC colors are already exact-build data, but `LitTerrainDayNightProfile` and
+  interactive `TerrainLighting` still inherit/compute authored direction. The one remaining empirical
+  proof is a *single fixed native-vector → viewer-terrain coordinate/sign transform*, validated at one
+  lock and two held-out times; it is not an azimuth search. USER owns the native/capture comparison.
+- **Plan:** `specs/106-native-daynight-lighting/` contains spec, research, data model, contract,
+  quickstart, and phased library-first plan. It links (not replaces) Spec 032 renderer parity and
+  Spec 103 T040 synthetic provenance. Do not claim client-exact capture until a calibrated transform
+  plus coherent LIT-or-DBC source is recorded; MCSH attenuation and sky-band altitude stay separate.
 
 ## Spec 105 — SCOPE EXPANDED to combined 1.0.0 M2 render (2026-07-15, spec+plan, NOT implemented)
 

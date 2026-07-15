@@ -116,7 +116,10 @@ and fail-closed rights/evidence behavior.
   license/assertion/hash evidence or any client-derived source presented as clean synthetic.
 - [ ] T040 [US1] Run bounded staged-client LIT/DBC profile exports and canonical captures at declared
   times, compare image hashes/color statistics, and calibrate remaining direction/MCSH/sky-placement
-  gaps. **USER runs capture/client-data work; no training is launched by this task.**
+  gaps. The native world-direction and transform contract is now owned by
+  [Spec 106](../106-native-daynight-lighting/spec.md): 0.5.3 direction is recovered from the client,
+  while one native/viewer comparison still proves its terrain-axis transform. **USER runs
+  capture/client-data work; no training is launched by this task.**
 
 ## Phase 5: Polish & deferred lanes
 

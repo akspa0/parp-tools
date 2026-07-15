@@ -1,6 +1,20 @@
 # Progress — wow-viewer
 
-Last updated: 2026-07-15 (world lighting/shadow model + M2 camera tracks Ghidra traces)
+Last updated: 2026-07-15 (Spec 106 native day/night lighting plan + world lighting evidence)
+
+## 2026-07-15 — 0.5.3 world-light direction recovered; Spec 106 planned
+
+- Live 0.5.3.3368 `WoWClient.exe` with matching PDB proved the world-light direction is computed
+  by `SetDirection`, separately from LIT/DBC-driven color work: native ray theta is a constant 225
+  degrees; phi is time-interpolated from 110/127-degree samples. The source direction therefore has
+  fixed 45-degree azimuth and time-varying 20–37-degree elevation. Captured vector at normalized
+  time `0.6976439`: `(-0.6481626,-0.6481628,-0.3997127)`.
+- Corrected the earlier false inference: `FUN_006cbd50`'s 45-degree constant is a separate
+  dynamic/unit shadow-projection path, not the outdoor world sun.
+- Created `specs/106-native-daynight-lighting/` with the build-scoped direction model, calibrated
+  native→viewer transform, coherent color source, fail-closed capture provenance, and grouped
+  synthetic-data plan. Spec 103 T040 now points to this owner. The user-run native/viewer comparison
+  remains the only blocker to promoting a 0.5.3 profile to client-exact.
 
 ## 2026-07-15 — Spec 103 pattern-aware V8 corpus reduction planned
 

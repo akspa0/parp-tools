@@ -110,6 +110,40 @@ keyframes; those are database tables whose band records contain timed values.
 - Sun direction sweeps across the sky with time; do **not** hardcode a fixed sun (except
   the *shadow* projection, which the client does fix — see §5).
 
+### 2.1 Exact 0.5.3 direction proof (live client + PDB, 2026-07-15)
+
+This is the exact-build direction contract for `WoWClient.exe` 0.5.3.3368. It was captured
+from the staged client while a map was loaded, with the matching `Wowae.pdb` symbols available
+to x32dbg. It corrects the earlier temptation to use the `cos(pi/4)` shadow constant as the
+world-light direction.
+
+- **[V]** `DayNightUpdateLighting` is at `0x006bd6c0`. It derives the current polar angle,
+  then calls `SetColors` (`0x006bb5d0`) and `SetDirection` (`0x006bca40`) separately.
+  Color data and direction are therefore separate day/night outputs.
+- **[V]** `SetDirection` interpolates `phiTable` and `thetaTable` by the normalized day
+  progression at `0x010b23b4`, then writes this native-client directional vector at
+  `0x010b247c`:
+
+  ```text
+  ray = (sin(phi) * cos(theta),
+         sin(phi) * sin(theta),
+         cos(phi))
+  ```
+
+- **[V]** The four `thetaTable` samples are all `3.926991` radians (225 degrees): azimuth is
+  constant for this client path. This is the **light-ray** azimuth; a renderer that stores a
+  vector *toward* the source must invert it, yielding 45 degrees.
+- **[V]** `phiTable` alternates between `2.216568` (127 degrees) and `1.919862` (110 degrees).
+  The elevation is consequently time-varying (the ray points downward; source elevation is
+  the inverse interpretation), not a fixed 45 degrees.
+- **[V]** At captured normalized progression `0.6976439`, process memory held the computed
+  vector `(-0.6481626, -0.6481628, -0.3997127)`. This matches the interpolation formula.
+
+**Calibration consequence:** use exact-build LIT/DBC for colors, this timed phi/theta model
+for the native world-light vector, and a single real-minimap image comparison only to prove the
+native-vector → viewer-terrain coordinate/sign transform. Do not search LIT/DBC for a direction
+record, and do not reuse the fixed `cos(pi/4)` shadow-projection value as the moving sun.
+
 ### 2026-07-15 implementation proof
 
 - Shared LIT decode now follows `file header → all 64-byte light headers → all light groups`.
