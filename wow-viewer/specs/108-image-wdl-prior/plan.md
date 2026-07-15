@@ -44,7 +44,8 @@ data-harvester/
 1. Pin the paired WDL and generated-prior archive contracts.
 2. Add the RGB-only predictor, trainer, inference writer, and CPU tests.
 3. Let V8 consume an explicitly supplied generated outer prior, never silently ground truth.
-4. User runs a representative-pattern experiment and the existing label-free evaluation.
+4. User runs a representative-pattern experiment, evaluates one held-out real tile, then runs the
+   evaluator's exported PNG through the standalone path before existing label-free V8 evaluation.
 
 ## Complexity Tracking
 

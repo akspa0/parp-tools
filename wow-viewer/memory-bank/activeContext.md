@@ -15,6 +15,9 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior built; user-run compact-co
 - Train only on a compact curated representative-pattern store with complete source-group holdout;
   do not run the full V18 corpus. CPU contracts: 4/4 passed. User owns the CUDA train/infer run;
   `specs/108-image-wdl-prior/quickstart.md` has the commands.
+- **Required first quality proof:** `evaluate_spec103_wdl_prior.py` runs inference from RGB alone,
+  then opens the real tile's height only to report outer/inner lattice world-unit error and save both
+  lattices. Its exported `input_minimap.png` can immediately prove standalone PNG→lattice inference.
 
 ## Spec 107 — Lighting quick controls + confident hover (2026-07-15, implemented/build green)
 

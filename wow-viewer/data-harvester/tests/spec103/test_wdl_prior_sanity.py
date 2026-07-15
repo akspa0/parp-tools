@@ -3,10 +3,17 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import torch
+import subprocess
+import sys
+from pathlib import Path
+from PIL import Image
 
 from harvester.spec103.v7_inputs import assemble_v7_input, wdl_lattice_from_height257
 from harvester.spec103.wdl_prior_io import read_prediction_archive, write_prediction_archive
 from harvester.spec103.wdl_prior_model import (
+    INPUT_CONTRACT,
+    MODEL_VARIANT_WDL_PRIOR,
+    TARGET_CONTRACT,
     WDL_VALUE_COUNT,
     WdlPriorNet,
     build_wdl_target,
@@ -55,3 +62,25 @@ def test_prediction_archive_rejects_duplicate_rows(tmp_path):
     values, metadata = read_prediction_archive(path)
     assert sorted(values) == [4, 7]
     assert metadata["schema"] == "test"
+
+
+def test_standalone_png_cli_needs_no_store_or_wdl(tmp_path):
+    checkpoint = tmp_path / "checkpoint.pt"
+    torch.save({
+        "model_variant": MODEL_VARIANT_WDL_PRIOR,
+        "input_contract": INPUT_CONTRACT,
+        "target_contract": TARGET_CONTRACT,
+        "model": WdlPriorNet().state_dict(),
+    }, checkpoint)
+    image = tmp_path / "minimap.png"
+    Image.fromarray(np.full((32, 32, 3), 127, dtype=np.uint8), mode="RGB").save(image)
+    output = tmp_path / "lattice.npz"
+    script = Path(__file__).resolve().parents[2] / "scripts" / "infer_spec103_wdl_prior.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), "--image", str(image), "--checkpoint", str(checkpoint), "--output", str(output), "--device", "cpu"],
+        check=True, capture_output=True, text=True,
+    )
+    assert "RGB image only" in completed.stdout
+    with np.load(output, allow_pickle=False) as archive:
+        assert archive["outer_17"].shape == (17, 17)
+        assert archive["inner_16"].shape == (16, 16)

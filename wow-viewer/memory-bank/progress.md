@@ -12,6 +12,9 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior implementation)
 - User decision retained: do **not** train on the full V18 corpus. The next experiment is the
   existing curated representative terrain/lighting patterns, with whole source groups held out.
   CPU tests and syntax checks passed (4/4). No training, capture, or harvest was launched.
+- Follow-up implementation adds `evaluate_spec103_wdl_prior.py`: RGB-only prediction on one selected
+  real row, then truth-only lattice scoring with saved input/prediction/truth artifacts. The same
+  `input_minimap.png` runs through the standalone `--image` inference path with no store or WDL input.
 
 ## 2026-07-15 — FogEnd visibility and hover confidence
 
