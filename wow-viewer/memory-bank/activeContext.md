@@ -21,6 +21,10 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior built; user-run compact-co
   lattices. Its exported `input_minimap.png` can immediately prove standalone PNG→lattice inference.
 - The initial tiny800 run plateaued at normalized validation L1 `0.037808`; trainer now has default
   `--patience 10`, writes `best_epoch`/stale count, and stops rather than wasting later epochs.
+- Correction after a black first evaluation tile: tiny800 includes dark water/placeholders and object
+  pages. The trainer now excludes pathological rows, RGB mean below 25, and any object coverage by
+  default. On real 3.3.5 tiny800 this leaves 62 train / 10 held-out clean ChamberOfAspectsBlack rows;
+  row 906 (`ChamberOfAspectsBlack_29_27`) is the first bright, valid real-tile evaluation target.
 
 ## Spec 107 — Lighting quick controls + confident hover (2026-07-15, implemented/build green)
 

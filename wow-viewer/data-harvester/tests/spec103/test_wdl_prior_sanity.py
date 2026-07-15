@@ -8,6 +8,10 @@ import sys
 from pathlib import Path
 from PIL import Image
 
+_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
 from harvester.spec103.v7_inputs import assemble_v7_input, wdl_lattice_from_height257
 from harvester.spec103.wdl_prior_io import read_prediction_archive, write_prediction_archive
 from harvester.spec103.wdl_prior_model import (
@@ -20,6 +24,7 @@ from harvester.spec103.wdl_prior_model import (
     decode_wdl_target,
     normalize_minimap_rgb,
 )
+from train_spec103_wdl_prior import filter_deployable_rows
 
 
 def test_target_is_exact_paired_wdl_mapping():
@@ -84,3 +89,21 @@ def test_standalone_png_cli_needs_no_store_or_wdl(tmp_path):
     with np.load(output, allow_pickle=False) as archive:
         assert archive["outer_17"].shape == (17, 17)
         assert archive["inner_16"].shape == (16, 16)
+
+
+def test_training_filter_rejects_dark_and_occluded_minimap_rows():
+    group = {
+        "minimap_rgb": np.stack([
+            np.zeros((8, 8, 3), dtype=np.uint8),
+            np.full((8, 8, 3), 100, dtype=np.uint8),
+            np.full((8, 8, 3), 100, dtype=np.uint8),
+        ]),
+        "object_precise_mask": np.stack([
+            np.zeros((9, 9), dtype=np.float32),
+            np.ones((9, 9), dtype=np.float32),
+            np.zeros((9, 9), dtype=np.float32),
+        ]),
+    }
+    rows, report = filter_deployable_rows(group, [0, 1, 2], min_rgb_mean=25.0, max_object_coverage=0.0)
+    assert rows == [2]
+    assert report == {"dropped_dark": 1, "dropped_object": 1}

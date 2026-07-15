@@ -21,6 +21,10 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior implementation)
 - Added early stopping to the WDL trainer (default ten stale validation epochs) after the initial
   tiny800 experiment plateaued at `0.037808` normalized L1. The user should inspect the held-out
   real-tile lattice report before changing model capacity or training schedule.
+- First evaluation-row correction: prior suggested row 1918 was a dark water/missing-terrain page
+  (no alpha/MCLY), so it is invalid as a visual proof. Trainer now filters dark/occluded/pathological
+  rows before dataset construction; the compact 3.3.5 split is 62 clean train / 10 clean Chamber
+  validation rows, with row 906 selected for the real visible proof.
 
 ## 2026-07-15 — FogEnd visibility and hover confidence
 

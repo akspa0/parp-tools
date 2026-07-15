@@ -33,6 +33,22 @@ class PriorDataset(Dataset):
         return normalize_minimap_rgb(self.group["minimap_rgb"][row]), torch.from_numpy(build_wdl_target(self.group["height_257"][row]))
 
 
+def filter_deployable_rows(group, rows: list[int], *, min_rgb_mean: float, max_object_coverage: float) -> tuple[list[int], dict[str, int]]:
+    """Keep only tiles whose visible minimap can honestly supervise RGB-only inference."""
+    has_object_mask = "object_precise_mask" in group
+    kept: list[int] = []
+    dropped_dark = dropped_object = 0
+    for row in rows:
+        if float(np.asarray(group["minimap_rgb"][row], dtype=np.float32).mean()) < min_rgb_mean:
+            dropped_dark += 1
+            continue
+        if has_object_mask and float((np.asarray(group["object_precise_mask"][row]) > 0.5).mean()) > max_object_coverage:
+            dropped_object += 1
+            continue
+        kept.append(row)
+    return kept, {"dropped_dark": dropped_dark, "dropped_object": dropped_object}
+
+
 def evaluate(model, loader, device) -> float:
     model.eval(); losses = []
     with torch.no_grad():
@@ -54,6 +70,13 @@ def main() -> int:
     ap.add_argument("--lr", type=float, default=2e-4); ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--patience", type=int, default=10,
                     help="stop after this many epochs without a strictly better held-out L1 (0 disables)")
+    ap.add_argument("--min-rgb-mean", type=float, default=25.0,
+                    help="reject dark/water placeholder minimaps before training (uint8 mean, default 25)")
+    ap.add_argument("--max-object-coverage", type=float, default=0.0,
+                    help="reject tiles with more occluding object-mask coverage (default 0, clean terrain only)")
+    ap.add_argument("--include-pathological", action="store_true",
+                    help="retain curation rows labelled pathological (off by default for first RGB/WDL proof)")
+    ap.add_argument("--min-train-rows", type=int, default=32); ap.add_argument("--min-val-rows", type=int, default=8)
     args = ap.parse_args()
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is not available; user-run training refuses CPU.")
@@ -66,8 +89,13 @@ def main() -> int:
     split_mode = "manifest_partition"
     if args.curation_manifest is not None:
         manifest_path = args.curation_manifest / "curation_manifest.parquet" if args.curation_manifest.is_dir() else args.curation_manifest
+        manifest_rows = pq.read_table(manifest_path).to_pylist()
+        if not args.include_pathological:
+            for row in manifest_rows:
+                if str(row.get("difficulty_bucket", "")) == "pathological":
+                    row["keep"] = False
         train_rows, val_rows, split_mode = resolve_manifest_rows(
-            index, pq.read_table(manifest_path).to_pylist(), val_key=args.val_key or "map", val_value=args.val_value or ""
+            index, manifest_rows, val_key=args.val_key or "map", val_value=args.val_value or ""
         )
     else:
         if args.val_key is None or args.val_value is None or args.val_key not in index[0]:
@@ -76,8 +104,11 @@ def main() -> int:
         train_rows = [i for i, row in enumerate(index) if str(row.get(args.val_key)) != str(args.val_value)]
         val_rows = [i for i, row in enumerate(index) if str(row.get(args.val_key)) == str(args.val_value)]
         validate_source_group_split(index, train_rows, val_rows)
-    if not train_rows or not val_rows:
-        raise SystemExit(f"invalid complete-group split: train={len(train_rows)} val={len(val_rows)}")
+    train_rows, train_filter = filter_deployable_rows(group, train_rows, min_rgb_mean=args.min_rgb_mean, max_object_coverage=args.max_object_coverage)
+    val_rows, val_filter = filter_deployable_rows(group, val_rows, min_rgb_mean=args.min_rgb_mean, max_object_coverage=args.max_object_coverage)
+    print(f"[filter] train={len(train_rows)} {train_filter}; val={len(val_rows)} {val_filter}; pathological={'included' if args.include_pathological else 'excluded'}", flush=True)
+    if len(train_rows) < args.min_train_rows or len(val_rows) < args.min_val_rows:
+        raise SystemExit(f"insufficient deployable rows after filters: train={len(train_rows)} (min {args.min_train_rows}) val={len(val_rows)} (min {args.min_val_rows})")
     device = torch.device("cuda"); model = WdlPriorNet().to(device); opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     train = DataLoader(PriorDataset(group, train_rows), batch_size=min(args.batch, len(train_rows)), shuffle=True, num_workers=args.workers, pin_memory=True)
     val = DataLoader(PriorDataset(group, val_rows), batch_size=min(args.batch, len(val_rows)), num_workers=args.workers, pin_memory=True)
