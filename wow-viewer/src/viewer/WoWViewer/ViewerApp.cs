@@ -11881,6 +11881,15 @@ void main() {
 
     private void LoadWmoModel(WmoV14ToV17Converter.WmoV14Data wmo, string dir)
     {
+        // Loading a standalone WMO fully switches the viewer to object-view mode — the render
+        // path draws this WMO and no longer draws the world scene. Tear down any lingering
+        // world/terrain scene so the object-view UI drives THIS renderer. Otherwise the sidebar
+        // keys off the still-alive _worldScene/_terrainManager and shows world-scene controls
+        // (e.g. the "M2/WMO WF" wireframe checkbox drives the dormant world scene, so toggling it
+        // has no visible effect on the loaded WMO — the object-view wireframe checkbox is skipped
+        // because a stale terrain renderer is still present).
+        ExitToStandaloneView();
+
         _loadedMdx = null;
         _loadedM2Runtime = null;
         _loadedWmo = wmo;

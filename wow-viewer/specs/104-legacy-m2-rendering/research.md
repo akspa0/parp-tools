@@ -25,7 +25,8 @@ Approximate version → era map (confirm exact values per staged client in P1):
 | ~257–263 | TBC 2.0–2.4.3 | **embedded** |
 | 264 (0x108) | WotLK 3.x | **external `.skin`** |
 | ≥ 265 (0x109+) | Cata+ (current code's `CataVersionThreshold`) | external + chunked |
-| pre-256 | Alphas 0.11 / 0.12 / 1.0.0 | **embedded**, layout partly undocumented — **(confirm P3)** |
+| 256 (0x100) | **WoW 1.0.0** (Vanilla release) + 1.x incl. 1.12.1 | **embedded** — **CONFIRMED via Ghidra** (see `research-1.0.0-ghidra-trace.md`) |
+| pre-256 | Alphas 0.11 / 0.12 only | **embedded**, layout undocumented — **(open P3)** |
 
 The current reader assumes the ≥ 264 world (external skins) and so reads **no** embedded geometry for
 everything ≤ 263. That is the empty-box bug.
@@ -77,13 +78,16 @@ independent oracle exists, so that when we reach the undocumented alphas we only
 genuine unknowns, not the whole structure. **Alternatives rejected**: chronological (oldest-first) order
 — it front-loads the hardest, least-documented work with no validated baseline.
 
-## Decision 5 — Tooling: dynamic tracing available, static RE not
+## Decision 5 — Tooling: Ghidra (static) + x64dbg (dynamic) both available
 
-**Decision**: Use x64dbg (MCP bridge, confirmed responding) for Phase 3 dynamic recovery of alpha layouts;
-do not depend on Ghidra. **Rationale**: Ghidra is not installed; x64dbg can trace the real client's M2
-load path at runtime to recover true offsets, which is sufficient for reading a file format.
-**Alternatives rejected**: Ghidra static disassembly (would require installing Ghidra first — a separate
-user-approved step; keep as a fallback only if dynamic tracing stalls).
+**Update (2026-07-15)**: Ghidra IS now installed (`H:\ghidra_11.3.2_PUBLIC`) with the
+GhidraMCP plugin + `bridge_mcp_ghidra.py` wired into `.mcp.json` as the `ghidra` server.
+The 1.0.0 client was fully traced statically (see `research-1.0.0-ghidra-trace.md`) — the
+MD20 parser decompilation gave the complete header field map and the version-`0x100`
+rejection root cause without any dynamic tracing. **Decision**: prefer Ghidra static RE
+for format-reading surfaces (it yields exact offsets/sizes directly); keep x64dbg for
+runtime/draw-path questions the static view can't answer. The original "Ghidra not
+installed" rationale is obsolete.
 
 ## Open unknowns (resolved during implementation)
 

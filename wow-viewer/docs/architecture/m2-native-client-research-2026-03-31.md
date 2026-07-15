@@ -18,6 +18,39 @@ The 1.12.1 (Vanilla / Build 5875) native contract is documented separately in [`
 
 This doc continues to own the 3.3.5 (and earlier 3.0.1+ / 2.0.0) research surface; the 1.12.1 surface is owned by the new trace doc.
 
+## WoW 1.0.0 Coverage Note - Jul 15, 2026
+
+The **WoW 1.0.0** (Vanilla release) M2/MDX subsystem was fully traced statically in Ghidra
+(GhidraMCP plugin + `bridge_mcp_ghidra.py`, REST on `127.0.0.1:8080`, now wired into
+`.mcp.json` as the `ghidra` server). Full evidence + implementation seeds live in
+[`specs/104-legacy-m2-rendering/research-1.0.0-ghidra-trace.md`](../../specs/104-legacy-m2-rendering/research-1.0.0-ghidra-trace.md).
+Key findings:
+
+- **Viewer gap (user, 2026-07-15)**: the wow-viewer M2 reader already handles 0.11/0.12
+  (pre-`0x100`); **1.x+ (`0x100` → 3.0.1) does not render correctly** — the format expanded
+  incrementally across that range. The 1.0.0 game-client parser (`FUN_0071e190`)
+  hard-requires `MD20`+`0x100` (rejects others as `Corrupt model data`) — this confirms the
+  1.x on-disk format is `0x100` with the recovered layout; it is NOT the viewer's bug.
+  Extension gate is not a factor (`.mdx`/`.mdl`→`.m2`, same as 3.3.5 `FUN_0081c390`).
+- **Design direction (user)**: the M2 reader should accept any version and dispatch to
+  per-version codepaths (one per layout-change step 1.0→3.0.1). This trace specifies the
+  `0x100` (1.0.0/1.x) codepath.
+- **1.0.0 = version `0x100`** (same version field as 1.12.1) — it is NOT pre-256; only
+  0.11/0.12 are pre-256.
+- **Fully embedded**: no external `.skin` or `.anim` on 1.0.0 (zero string hits). Skin
+  profiles = `data->divisions` (header 0x4C, M2Division 0x2c) with vertexLookup/indices/
+  sections(0x20)/batches(0x18). Complete header field map + all block sizes recovered
+  (bones 0x6c, vertices 0x30, lights 0xd4, cameras 0x7c, ribbons 0xdc, particles 0x1f8,
+  sequences 0x44).
+- **Shaders**: `.bls` + CGx (`CGxVertexShader`/`CGxTexFlags`) + `GL_NV_register_combiners`
+  — NOT the later `Combiners_*`/`Diffuse_*` named-effect system. M2 options minimal
+  (`M2UseShaders`, `M2UseThreads`).
+- **Animation**: `CM2Model::Update` (`FUN_0070f960`), bone matrices at 0x118 stride,
+  embedded sequences (no external `.anim`).
+- Native anchors: cache `FUN_00721800`, parser `FUN_0071e190`, division materializer
+  `FUN_006b7720`, shader init `FUN_007213b0`, lighting `FUN_0071c9d0`. Full table in the
+  trace doc §11.
+
 ## Scope
 
 This note records native-client M2 findings gathered from Ghidra against the 3.3.5 OS X client and frames them as `wow-viewer` library work, not as more long-term ownership in `MdxViewer`.

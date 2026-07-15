@@ -162,6 +162,257 @@ Last updated: 2026-07-14 (RunPod deployment ready; WoWViewer cross-platform CI i
   csproj path instead) to avoid changing the user's local `dotnet build WowViewer.slnx` behavior
   without being asked.
 
+## Spec 104 / 1.0.0 M2 — Ghidra static trace DONE (2026-07-15)
+
+- **Ghidra MCP now live**: `H:\ghidra_11.3.2_PUBLIC` + GhidraMCP plugin (HTTP API
+  `127.0.0.1:8080`) + `bridge_mcp_ghidra.py` wired into `.mcp.json` as the `ghidra`
+  server (`uv run --script`). x64dbg MCP still broken (anaconda env gone — separate fix).
+- **Viewer gap (user clarification 2026-07-15)**: the wow-viewer M2 reader already
+  handles **0.11/0.12** (pre-`0x100`) fine; **1.x+ does not render correctly**. The
+  format expanded incrementally 1.0 (`0x100`) → 3.0.1. The 1.0.0 game client's parser
+  (`FUN_0071e190`) hard-requires `MD20`+version `0x100` (rejects others as `Corrupt
+  model data`) — this confirms the 1.x on-disk format is `0x100` with the recovered
+  layout; it is NOT the viewer's bug. Extension gate is not a factor (`.mdx`/`.mdl`→`.m2`).
+- **User design direction**: the M2 reader should **accept any version** and dispatch to
+  a **per-version codepath** (one per layout-change step 1.0→3.0.1), not hard-reject.
+  This Ghidra trace fully specifies the **`0x100` (1.0.0/1.x) codepath**.
+- **1.0.0 = version 0x100** (same version field as 1.12.1) — CORRECTS Spec 104
+  `research.md` which had grouped 1.0.0 with 0.11/0.12 as "pre-256". Only 0.11/0.12
+  are pre-256.
+- **Fully embedded format**: no external `.skin` or `.anim` on 1.0.0. Skin profiles =
+  `data->divisions` (0x4C, M2Division 0x2c) with vertexLookup/indices/sections(0x20)/
+  batches(0x18). Complete header field map + all block sizes recovered.
+- **Shaders**: `.bls` + CGx (CGxVertexShader/CGxTexFlags) + GL_NV_register_combiners —
+  NOT the later `Combiners_*`/`Diffuse_*` named-effect system. M2 options minimal
+  (`M2UseShaders`, `M2UseThreads`).
+- **Deliverables**: `specs/104-legacy-m2-rendering/research-1.0.0-ghidra-trace.md`
+  (full), `contracts/m2-format-profile.md` (1.0.0 entry populated), raw decompilations
+  in `specs/104-legacy-m2-rendering/evidence/1.0.0-ghidra/` + `output/ghidra_1.0.0/`.
+  Ready for a fresh chat to implement the 1.0.0 (`0x100`) reader branch.
+- **Still open**: pre-`0x100` (0.11/0.12) layout (needs 0.12 client in Ghidra); 1.0.0 vs
+  1.12.1 header diff; render validation against a staged 1.0.0 client.
+
+## WoW 1.0.0 renderer features — Ghidra trace DONE (2026-07-15)
+
+- **Doc**: `docs/architecture/wow-1.0.0-renderer-features-ghidra-trace-2026-07-15.md`.
+  Goal: eventually reproduce all 1.0.0 client rendering in the wow-viewer renderer.
+- **Liquids**: 1.0.0 has **12 liquid types** (`LIQUID_COUNT=0xC`, `LIQUID_NONE`), not
+  just magma/water. `liquidTexBaseName[type]` table @ `0x00834d4c` → river_lake_a,
+  river_fast_a, ocean_h, slime, lava, splash, water. **30 animated frames/type**
+  (`FUN_00686d40`). **MCLQ** chunk (pre-3.0, NOT MH2O), MCNK sub-chunk @ +0x60
+  (`FUN_006b4920`). `.bls` shaders: ocean0_s, MapObjExtWater0. Ripple: `Water0Ripple`/
+  `WaterRadWave`. Cvars: waterParticulates/Ripples/Specular/Waves/MaxLOD/LOD, SetWaterDetail.
+- **Particles**: `M2Particle=0x1f8` @ M2 0x13C; emitters `CParticleEmitter2` +
+  Plane/Sphere/Spline subclasses, `ParticleSystemManager`, child emitters, `particleDensity`,
+  footprint particles. `GetEmitter`=`FUN_0070ef60`.
+- **Ribbons**: `M2Ribbon=0xdc` @ 0x134; `CRibbonEmitter`/`RibbonManager`/`CRibbonMat`.
+- **Attachments (armor/equipment)**: `M2Attachment=0x30` @ 0x104 = {boneIndex(ushort)@0x04,
+  pos(3f)@0x08}; worldXform = modelWorld * boneMatrix[bone] * offset (`FUN_0070e500`).
+  API: HasAttachment/GetAttachment{Pivot,Position,WorldTransform}. Mount/Character/Pet
+  attachments, `GetInventorySlotInfo`.
+- **Helmet/hair geosets**: `HelmetGeosetVisData.dbc`, `CharHairGeosets.dbc` (`FUN_0057ef40`).
+- **Skybox**: sky = M2/MDX models `Environments\Stars\{stars.mdl,DeathClouds.mdx,
+  StratholmeSkybox.mdx}` + `LightDataSky`/`DNOverrideSky`; cvars SkyShow/SunGlare/CloudLOD/
+  CloudDensity/CloudLayers. Sky init `FUN_006ce6c0`.
+- **Camera/POV**: `CGCamera`/`CSimpleCamera` (smoothed yaw/pitch/zoom orbit) + `M2ModelCamera`
+  (0x7c @ M2 0x124, model-authored cameras for preview/portrait). No true first-person mode
+  on 1.0.0. Camera per race/sex via DBC.
+- **Cross-cutting**: all render via CGx (`.bls` + register combiners), no `Combiners_*`/
+  `Diffuse_*` named-effect system. Evidence: `specs/104-legacy-m2-rendering/evidence/1.0.0-ghidra/`
+  (33 .c files). Open: per-field layouts of M2Particle/Ribbon/Camera records + liquid type
+  index-map (read 12 ptrs @ 0x00834d4c).
+
+## WoW 1.0.0 deep-dive (M2 layouts + WMO + dev tools) — DONE (2026-07-15)
+
+- **Doc**: `docs/architecture/wow-1.0.0-deep-dive-ghidra-trace-2026-07-15.md`. Build is
+  **beta 3** (`BETA_BUILD` string present). Sets up the whole 1.x object era.
+- **M2 per-field layouts** recovered for every block (Bone 0x6c, Vertex 0x30, Division 0x2c,
+  Sequence 0x44, Texture 0x10, Color 0x38, TexWeight/Transform 0x1c, Attachment 0x30,
+  Event 0x2c, **Light 0xd4** [>3.3.5's 0x9c, ~6 tracks], **Camera 0x7c** [src/tgt/near/far/fov
+  tracks], **Ribbon 0xdc**, **Particle 0x1f8** [2 string bufs + ~16 tracks]). Relocator
+  legend documented. Enough to parse all of 1.0.0 M2; only per-field *semantic* naming remains.
+- **WMO/WDT**: WDT = MVER→MPHD(0x20)→MAIN(0x8000)→[if MPHD&1: MWMO+MODF] (`FUN_006976f0`).
+  WMO group **version 0x11** (`FUN_006c5380`), MOGP + sub-chunks MOPY/MOVT/MOLR/MOBA/MOCV/MLIQ,
+  0x18-B batches, **max 12 portals/group**, `missingwmo.wmo` fallback, `WMOAreaTable.dbc`,
+  doodad anim. Dev-humor assert `lameAssLink_IsLinked`.
+- **Dev/dead code (live, referenced)**: `BETA_BUILD`, **Godmode** cheat, **developer console**
+  (`ConsoleExec`/`SetConsoleKey`), **profiler** (`ProfileInternal`), debug toggles
+  (`debugTargetInfo`/`TogglePortals`/`GetDebugStats`), `FIXME: Not yet implemented` leftover,
+  intro movie. Console is the easy dynamic-validation entry point.
+- **Evidence**: 36 .c decompilations in `specs/104-legacy-m2-rendering/evidence/1.0.0-ghidra/`.
+- **Open**: M2 track semantic naming; M2Vertex field split; WMO *root* .wmo reader
+  (MOHD/MOGN/MOGI/MOTX/MOMT/MOPV/MOPT/MOPR/MODS/MODD); liquid type index-map; full console
+  command table.
+
+## WoW 1.0.0 WMO rendering pipeline — Ghidra trace DONE (2026-07-15)
+
+- **Doc**: `docs/architecture/wow-1.0.0-wmo-rendering-ghidra-trace-2026-07-15.md`.
+  Goal: upgrade wow-viewer from brute-force renderer to proper 1.0-era world renderer.
+- **WMO shaders (6 .bls)**: MapObjSpecular, MapObjTransSpecular, MapObjTransDiffuse,
+  MapObjOverbright, MapObjMetal, MapObjExtWater0 — all loaded from `FUN_006abab0`.
+  Shader backends: GL_NV_register_combiners, GL_NV_texture_shader, GL_ATI_fragment_shader,
+  GL_ARB_fragment_program, D3D ps_1_1–ps_2_0.
+- **Batch system**: `intBatchCount` (opaque) + `transBatchCount` (transparent) per group.
+  VBOs: `group->vertexVB` / `group->indexVB` (GxBufSize). Liquid verts: `group->liquidVerts`.
+  Render list: `renderList.IsLinked(batch)`. Max: `Gx_MaxBatchCount`.
+- **Lighting**: 3 layers — MOCV (pre-baked vertex colors), MOLR→CMapLight (dynamic),
+  CMapCacheLight (cache). `mapObjLightLOD` (0-2), `mapObjOverbright`. Light linking:
+  `mapObjDefGroup->lightLinkList`. Dir light: PLightDirIntens/Color/Pos. Ambient format string.
+- **Fog**: per-group (`SMOGroup::NUM_FOGS`), `FogQ`/`LightDataFog`. OpenGL glFogfv/f/i.
+  ARB options: exp2/exp/linear. Console: SetFogNear/Far/Color/ClearFog.
+- **Portals**: max 12/group (`portal->count <= 12`). `USPortalExt` struct. Debug: TogglePortals,
+  Portal display/vis.
+- **BSP**: MOBN (nodes) + MOBR (refs) + MORB (render batches). `AaBsp.cpp`. Node cache:
+  `bspcache`/`BSP node caching`. Debug: BSP render enabled/disabled.
+- **Liquids (WMO)**: MLIQ chunk (WMO-internal), MCLQ (terrain). 12 types (`LIQUID_COUNT=0xC`).
+  `liquidTexBaseName[type]` → ocean/lava/slime. `CChunkLiquid`. Ripple: `Water0Ripple`/
+  `WaterRadWave`. `MapObjExtWater0.bls` for WMO near water.
+- **Doodads**: `CMapDoodadDef` (M2 in WMO). Detail doodad system (CDetailDoodadData/Geom/Inst).
+  Linked via `mapObjDefGroup->doodadDefLinkList`. Toggles: showSimpleDoodads/showDetailDoodads.
+- **Scene**: `WorldScene.cpp` (40+ functions in 0x0067cxxx-0x00682xxx). Query flags:
+  WQF_doodadMask/gameObjMask/terrain/liquid. Vis lists: visMapObjDefGroupList/visDoodadList.
+  Frustum: `mapObjDefGroup->frustumList`. Fadeout: `CWModelFadeout`.
+- **CGx abstraction**: CGxDeviceOpenGl/D3d, CGxPixelShader (nvrc/arbfp1/ps_1_1/ps_2_0),
+  CGxVertexShader, CGxStateBom (state batching), CGxVboBroker, CGxTex/CGxTexCache/CGxTexFlags.
+  Vertex formats: CGxVertexPC (Pos+Color), CGxVertexPT0T1 (Pos+Tex0+Tex1).
+- **WMO chunks confirmed**: MOGP, MOPY, MOVI, MOVT, MONR, MOBA, MORB, MOBR, MOBN, MOLR, MOCV, MLIQ.
+- **Function map**: 16+ WMO render funcs (0x006b9xxx-0x006bcxxx), 6 shader load (FUN_006abab0),
+  40+ WorldScene funcs, 23+ MapChunk funcs, 15+ MapObj funcs, 5 MapObjDef funcs.
+- **Open**: decompile WMO render funcs (decompile endpoint was down); MOPY flag bits;
+  MOBA/MORB batch struct; MOLR light format; MLIQ liquid format; portal vis algorithm;
+  BSP traversal; WorldScene render order; CGxStateBom; CWModelFadeout algorithm.
+
+- **DECOMPILED (8 functions, targeted code path tracing)**: Via GhidraMCP v5.14.2 on
+  port 8089 (Ghidra 12.1.2). Evidence:
+  `specs/104-legacy-m2-rendering/evidence/1.0.0-ghidra/wmo_render_pipeline.c` +
+  `wmo_transparent_batch_renderer.c`.
+  - `FUN_006abab0` = WMO shader loader (calls FUN_0058ee90 ×6)
+  - `FUN_0058ee90` = shader load (virtual call on CGx device vtable[0xb4])
+  - `FUN_006ba9d0` = WMO group VBO setup (vertex/index buffers, mode 3/4)
+  - `FUN_006babc0` = **opaque batch renderer** (BSP-ordered batches, materials, state)
+  - `FUN_006baea0` = batch draw setup (primType, baseVertex, startIndex, count, primCount)
+  - `FUN_006ba940` = batch visibility check (6 shorts = bounding box → frustum cull)
+  - `FUN_0067e340` = frustum cull wrapper → FUN_006827e0
+  - `FUN_006baf70` = **transparent batch renderer** (mode 4, vertex colors, fog, specular)
+- **RECOVERED STRUCT LAYOUTS**:
+  - **Batch struct = 0x18 (24) bytes**: bbox minXYZ@0x00-0x0a (6 int16), baseVertex@0x0c,
+    startIndex@0x10, count@0x12, primCount@0x14, flags@0x16 (bit0=strip, upper nibble=state),
+    materialIndex@0x17
+  - **Material struct = 0x40 (64) bytes**: flags@0x00 (bit3=render state, bit4=use material
+    color, bit5=use vertex colors/MOCV), passCount@0x04 (0=single, 1=specular, 2=extended
+    specular), color@0x14
+  - **CMapObjGroup fields**: vertexVB@0x04, indexVB@0x08, transBatchCount@0x3c,
+    intBatchCount@0x3e, BSPBatchCount@0x40, batchArray@0xd8, vertexBufSize@0xe8,
+    indexBufSize@0xec, totalBatchCount@0x138, materialArray@0x1d8
+  - **Batch array ordering**: [transparent (0x3c)] [interior (0x3e)] [other]
+  - **Context object fields**: vertexColor RGB@0x110-0x112, fogColor RGB@0x118-0x11a,
+    ambientColor RGB@0x11c-0x11e, materialArray@0x1d8
+  - **Global state**: DAT_00a8732c (ambient@0xb0-0xb8, fog@0xbc-0xc4),
+    DAT_00aadce4=specular enabled, DAT_00aadec1=specular supported
+  - **Constants**: 0.003921569=1/255 (byte→float), 0x41600000=8.0f (specular intensity)
+- **DECOMPILED (targeted code path tracing)**: 5 functions decompiled via
+  `/decompile_function?address=0x...` endpoint. Evidence:
+  `specs/104-legacy-m2-rendering/evidence/1.0.0-ghidra/wmo_render_pipeline.c`.
+  - `FUN_006abab0` = WMO shader loader (calls FUN_0058ee90 ×6 for 6 .bls shaders)
+  - `FUN_0058ee90` = shader load (virtual call on CGx device vtable[0xb4])
+  - `FUN_006ba9d0` = WMO group VBO setup (creates vertex/index buffers, validates sizes)
+  - `FUN_006babc0` = **WMO batch renderer** (iterates BSP-ordered batches, looks up
+    materials, sets render state, draws — THE main render function)
+  - `FUN_006baea0` = batch draw setup (fills draw params: primType, baseVertex, startIndex,
+    count, primCount)
+- **RECOVERED STRUCT LAYOUTS**:
+  - **Batch struct = 0x18 (24) bytes**: baseVertex@0x0c, startIndex@0x10, count@0x12,
+    primCount@0x14, flags@0x16 (bit0=strip, upper nibble=render state), materialIndex@0x17
+  - **Material struct = 0x40 (64) bytes**: flags@0x00 (bit4=use material color),
+    passCount@0x04 (0=single, 1=two-pass specular), color@0x14
+  - **CMapObjGroup fields**: vertexVB@0x04, indexVB@0x08, transBatchCount@0x3c,
+    intBatchCount@0x3e, batchCount@0x40, batchArray@0xd8, vertexBufSize@0xe8,
+    indexBufSize@0xec, materialArray@0x1d8
+  - **Draw params**: primType@0x00 (3=triangles, 4=strip), baseVertex@0x04,
+    startIndex@0x08, count@0x0a, primCount@0x0c
+  - **Globals**: DAT_00a93790=use strips, DAT_00aadec1=specular enabled,
+    DAT_00a1ce58=CGx device ptr
+- **Additional findings (deep sweep)**: MapRender.cpp (main map render entry, separate from
+  WorldScene/MapObjRender). CSimpleRender engine framework + RENDERCALLBACKNODE. Culling:
+  DistCull (distance, 1.0-max), SmallCull (size, 0.001-2.0), showCull debug. Triangle strips
+  toggle (requires restart). Vertex opt regions (optRegion->vertexStart/Count). Max verts
+  0x40000 (262K). Max 2 textures/batch (M2). Sort entries for transparent ordering. Texture
+  cache (TextureCache.cpp, CTextureHash, TEXTURECACHEROW). Render state stack (CGxPushedRenderState,
+  Gx_MaxRsStackDepth). Perf counters (GxPerfCounters_Last). WMO root chunks (MOHD/MOGN/MOGI/etc.)
+  NOT in assertion strings — root reader uses generic chunk reader without per-chunk validation.
+- **BLOCKED**: decompile + xrefs endpoints down (plugin context lost, API overloaded from
+  string sweeps). Remaining items need decompilation: MOPY flag bits, MOBA/MORB batch struct,
+  MOLR/MOCV formats, MLIQ liquid format, portal vis algorithm, BSP traversal, WorldScene
+  render order, CGxStateBom, CWModelFadeout algorithm. Next session: restart GhidraMCP plugin,
+  use decompile SPARINGLY (one function at a time, not batch sweeps).
+
+- **UNBLOCKED + 5 items RESOLVED (2026-07-15 follow-up)**: GhidraMCP decompile back up
+  (WoW.exe 1.0.0.3980, base 0x400000). Doc updated (§20) + evidence
+  `evidence/1.0.0-ghidra/wmo_scene_portal_bsp.c`. ~20 funcs decompiled one-at-a-time.
+  - **MOGP parsers**: `FUN_006c55a0` mandatory (MOPY@0xc0 size>>1, MOVI@0xc4, MOVT@0xcc size/0xc,
+    MONR@0xd0, MOTV@0xd4 size>>3, MOBA@0xd8 size/0x18); `FUN_006c5810` optional gated by SMOGroup
+    flag group[0x10]: 0x200 MOLR, 0x800 MODR, 0x1 MOBN+MOBR(BSP), 0x4 MOCV, 0x1000 MLIQ, 0x20000 MORI+MORB.
+  - **MOPY** = 2 B/tri `{flags:u8, materialId:u8}`, cnt size/2. Runtime: renderer ignores materialId
+    (MOBA carries matIndex@0x17; 0xFF=collision-only never batched); flags = per-face COLLISION FILTER
+    MASK cached `flags&0x7f` in BSP cache (`FUN_00696bf0`), tested `(flags&queryMask)==0→skip` in
+    `FUN_006a2c60`(box)/`FUN_006a2840`(line). Bit names cross-ref'd to documented SMOPoly set.
+  - **MLIQ** (flag 0x1000): 30-B header {xVerts,yVerts,xTiles,yTiles u32×4, baseX/Y/Z f32×3, matId u16}
+    →group[0xf4..0x110]; verts@group[0x114]=xVerts·yVerts×8B; tileFlags@group[0x118]=xTiles·yTiles×1B.
+  - **BSP** (AaBsp.cpp): 16-B node {flags u16(0x4=leaf,low2=axis), neg i16@2, pos i16@4, nFaces u16@6,
+    faceStart u32@8, planeDist f32@0xc}; MOBR=u16 refs. Ray `FUN_006965f0`, AABB `FUN_00696820`, leaf
+    `FUN_00696560`; 8-way cache `FUN_00696ab0`/`FUN_00696bf0`. WMO RENDER batch select is FRUSTUM-based
+    (`FUN_006babc0` culls each MOBA bbox); BSP is the COLLISION tree.
+  - **WorldScene render order** = `FUN_0067c460` (CWorldScene::Render, from map-top `FUN_006742e0`):
+    begin → `FUN_0067d4f0` cam-in-WMO test → outside=`FUN_0067e3c0`/inside=`FUN_00681690`+drain CExtView
+    (max16) → opaque → fog select → transparent/effects → portal debug. Frustum STACK 32×0xfc @DAT_00a7a758,
+    push `FUN_0067d760`/pop `FUN_0067e390`/build `FUN_0067dd30`.
+  - **Portal vis** = SCREEN-RECT culling. Root arrays MOPV@scene[0x134], MOPT@[0x138] (20-B: startVtx,count,
+    C4Plane), MOPR@[0x13c] (8-B: portalIdx,groupIdx,side,filler). `FUN_006ba230` projects portal→SPortalExt
+    (0x1c B: flags,minX/minY/maxX/maxY,stamp); recursion `FUN_006b9d30` (back-face + rect-intersect + push
+    sub-frustum + recurse cap DAT_00ab5d5c; exterior flag 0x8 → CExtView). Seeds `FUN_006b9600`(in)/
+    `FUN_006b9900`(out); visible = frame stamp DAT_00aade18.
+  - **Still open**: MOBA per-batch light/color; MOLR per-light record; MOCV consume; CGxStateBom;
+    CWModelFadeout; MCLQ terrain-liquid grid.
+
+## World render systems (M2 draw / terrain surface / water / blend) (2026-07-15)
+
+- **`docs/architecture/wow-1.0.0-world-render-systems-2026-07-15.md`** + evidence
+  `world_render_systems.c` — the geometry/material/blend pipeline (complements the lighting doc).
+- **M2/doodad render**: tick `FUN_006bf060` → build list `FUN_00716c40` → dispatch `FUN_0071a150`
+  (entry types 0 opaque/1 transparent-sorted/2 multi/3 particle/4 ribbon/5 proj-shadow), geo draw
+  `FUN_0071b550`. **renderFlag={u8 flags,u16 blendMode}**: flags 0x01=UNLIT, 0x02=UNFOGGED (0x04
+  two-sided…). **blendMode 0-6**: opaque/alphakey/alpha/add/add/mod/mod2x (std GL map in doc §2.3).
+  **Max 2 tex/batch** + animated UV matrix (`FUN_0071a540`); color+alpha from anim tracks. Opaque
+  pass then back-to-front transparent pass.
+- **Terrain**: VBO **24 B = pos+normal** (`FUN_006c0db0`) → **hardware FFP-lit** (RESOLVES lighting
+  doc's FFP-vs-bake open item; normals uploaded, GPU N·L). 4 MCLY layers × MCAL alpha, LOD strips.
+- **Water** (MapWater.cpp): 12 types, **flipbook-animated `XTextures\<type>\*.%d.blp` ~30 frames**,
+  8×8 tile grid/chunk with depth→shore fade, ocean0_s.bls/MapObjExtWater0.bls, drawn transparent.
+- **State**: FFP via batched CGxStateBom stack; `.bls` = texture combine only; viewer just needs the
+  state SET per batch. Build order (doc §6): lighting P0/P1 → M2 blend/2-tex/sort → animated water →
+  particles/ribbons.
+
+## World renderer reality (lighting/shadow/fog) + M2 camera tracks (2026-07-15)
+
+- **Why**: user wants the viewer's renderer grounded in how 1.0.0 actually renders (lighting,
+  shadows, fog) + wants **M2/MDX camera tracks** playable like taxi routes. Two new guides:
+- **`docs/architecture/wow-1.0.0-world-lighting-shadow-model-2026-07-15.md`** — 1.0.0 is a
+  **fixed-function** renderer: **1 directional (sun) + ambient**, Lambert `N·L` (SetLight/PLight
+  cvars, glLight*/glFog*/glColorMaterial imports); `.bls`+combiners = texture combine only.
+  Day/night (`DayNight.cpp` LightData/Fog/Sky) drives sun/ambient/fog/sky by time. Terrain
+  (`FUN_006b4920`): MCVT/MCNR/MCLY/MCAL/**MCSH**(1-bit baked shadow)/MCLQ — **no MCCV**, so lit
+  dynamically from normals × MCSH. Shadows: terrain baked MCSH + unit **ShadowBlob.blp**/projected
+  (fixed ~45° sun). Fog FFP, interior/exterior selected in `FUN_0067c460`. **P0-P3 gap analysis**
+  in doc §8 (P0 = normal-lit terrain + day/night sun; P1 = MCSH shadows + fog + WMO interior light).
+- **`docs/architecture/wow-1.0.0-m2-camera-tracks-2026-07-15.md`** + evidence `m2_camera.c` —
+  **M2Camera 0x7c** @ header 0x124, cameraLookup int16[] @0x12C. Layout: type@0, fov@4 (diagonal rad),
+  far@8, near@0xc, positions(Vec3 spline)@0x10, positionBase@0x2c, targetPosition(Vec3)@0x38,
+  targetBase@0x54, roll(float)@0x60. **GOTCHA: 1.0.0 uses OLD M2Track 0x1c** (has interpRanges@+0x04;
+  Wrath+ drops it → 0x14). Runtime instance 0x84 @ model+0x398 (+0x80=src ptr); accessors
+  `FUN_0070edc0/ee30/eeb0`. Eval = sample eye+target (SEPARATE splines)+roll+static fov → lookAt+persp;
+  reuse taxi/anim sampler. Only new parsing = 0x7c record + old-0x1c track. Consumed by portraits/
+  model-view widgets/cinematic system (drives CGCamera). Checklist in doc §7. FOV aspect = calibrate.
+
 ## Dropped / paused
 
 - **V24 / Spec 094 is NOT functional — dropped.** Do not revive it.

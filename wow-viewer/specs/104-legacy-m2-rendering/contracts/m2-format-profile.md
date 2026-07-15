@@ -53,12 +53,36 @@ does today.
 - Deltas vs 256: **(record per version)**
 - Evidence: _pending_ — target model(s): _pending staged 2.4.3 client_
 
-### Versions pre-256 — Alphas 1.0.0 / 0.12 / 0.11 — Status: open (P3 target, x64dbg)
+### Version 256 (0x100) — WoW 1.0.0 (Vanilla release) — Status: confirmed (static, Ghidra)
 
-- Skin storage: embedded (layout partly undocumented)
-- Header offsets used: **(recover via x64dbg trace per version)**
-- Skin-profile struct deltas: **(recover P3)**
-- Evidence: _pending_ — `x64dbg-trace:<ref>` + target model(s) per staged alpha client
+- Skin storage: **embedded** — no external `.skin` or `.anim` files exist on 1.0.0
+  (string-sweep: zero `.skin`/`%02d.skin`/`.anim` hits).
+- Version field: header `0x04` == `0x100` (parser `FUN_0071e190` hard-rejects `!= 0x100`
+  → `Corrupt model data`). **Corrects `research.md` line 28**: 1.0.0 is 0x100, NOT
+  pre-256. This is the 0.12→1.x boundary: 0.12 MDX is pre-0x100 and is rejected by 1.0.0.
+- Header offsets used (full map in `research-1.0.0-ghidra-trace.md` §4): bones `0x34`
+  (0x6c), vertices `0x44` (0x30), **divisions `0x4C` (0x2c)** = embedded skin profiles,
+  textures `0x5C` (0x10), attachments `0x104` (0x30), events `0x114` (0x2c),
+  lights `0x11C` (0xd4), cameras `0x124` (0x7c), ribbons `0x134` (0xdc),
+  particles `0x13C` (0x1f8). Sequences `0x1C` (0x44), sequenceLookup `0x24` (int16[]).
+- Skin-profile struct (M2Division 0x2c): vertexLookup (int16[]) @0x04, indices
+  (int16[]) @0x0C, uint32[] @0x14, sections (0x20 B) @0x1C, batches (0x18 B) @0x24
+  (`division->batches.count == 1`). Materializer `FUN_006b7720` builds 0x20-B render
+  vertices by remapping through vertexLookup into the 0x30-B global vertex table.
+- Evidence: `ghidra-static-trace:research-1.0.0-ghidra-trace.md` + raw decompilations
+  `output/ghidra_1.0.0/*.c`. Target model(s): _pending staged 1.0.0 client render check_.
+- Status: **confirmed (static layout)**; render validation pending a staged 1.0.0 client.
+
+### Versions pre-256 — Alphas 0.12 / 0.11 — Status: open (P3 target)
+
+- Skin storage: embedded (layout undocumented; distinct from 0x100).
+- Header offsets used: **(recover via Ghidra/x64dbg trace of the 0.12 client)**
+- Note: 0.11/0.12 MDX files use a pre-`0x100` version. The wow-viewer reader already
+  handles these (they render fine); the viewer gap is **1.x+ (`0x100` → 3.0.1)**, not
+  pre-`0x100`. The 1.0.0 game-client parser rejects `!= 0x100` as `Corrupt model data`
+  — a fact about the native client, not the viewer. Design: accept any version, dispatch
+  to per-version codepaths.
+- Evidence: _pending_ — needs 0.12 `WoW.exe` loaded in Ghidra.
 
 ### Version ≥ 264 — WotLK+ (baseline, already working) — Status: confirmed (do not regress)
 
