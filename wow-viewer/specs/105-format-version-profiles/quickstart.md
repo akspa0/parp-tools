@@ -21,8 +21,42 @@ dotnet build wow-viewer\WowViewer.slnx -c Debug
 dotnet test wow-viewer\tests\WowViewer.Core.Tests --filter "FullyQualifiedName~M2ThreeXBaselineRegression"
 ```
 
-**Expected**: green, and `M2ThreeXBaseline.json` written + committed.
-**Gate**: baseline committed **before** any shared type is touched. Any later diff is a real regression.
+**Expected**: green, and `M2ThreeXBaseline.json` written + committed (animation **and** rendering state).
+**Gate**: baseline committed **before** any shared type or shared renderer path is touched. Any later diff is a real regression.
+
+---
+
+## §T. Texture — CentaurKhan shows its skin — **USER RUNS THIS**
+
+Runs first (most visible). Diagnose before fixing.
+
+```powershell
+# Diagnosis pass (reports only; no behaviour change) — inspect the per-batch texture resolution
+dotnet run --project wow-viewer\src\viewer\WoWViewer\WoWViewer.csproj
+# load CentaurKhan from a staged 1.0.0 client; read the [M2] texture-diag log lines
+```
+
+**Expected after the fix**: CentaurKhan's body shows **texture detail**, not uniform gray. Multi-stage
+materials show more than one texture. **Watch for**: a creature texture that resolved to a *negative*
+combo (replaceable) when it should be a hardcoded BLP — that is the prime suspect for the gray.
+
+**No-regression**: load a 3.3.5 and a 4.0.0 model; textures unchanged from baseline (Phase 0 step 3).
+
+**Gate**: SC-T1, user-confirmed. Not self-certifiable (AGENTS Rule 0).
+
+---
+
+## §L. Lighting — the textured model is correctly lit — **USER RUNS THIS**
+
+Only meaningful after §T (a gray model hides lighting).
+
+**Expected**: a non-UNLIT 1.0.0 material is directionally shaded (N·L); an UNLIT one is fullbright —
+matching the client. No batch wrongly forced to one mode.
+
+**Note**: Lambert already runs, so this pillar may reduce to "audit confirms the mapping is already
+correct, close it." If so, that is a valid outcome — record it, do not invent a change.
+
+**Gate**: SC-L1, user-confirmed.
 
 ---
 

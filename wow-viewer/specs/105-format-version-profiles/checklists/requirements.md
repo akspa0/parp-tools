@@ -31,6 +31,22 @@
 
 ## Notes
 
+### Scope expansion — 2026-07-15 (post-screenshot)
+
+The spec was expanded from animation-only to a **combined three-pillar 1.0.0-render spec**
+(texture, lighting, animation) after a live-viewer screenshot showed animation alone leaves the model
+gray and flat. User chose "one combined 1.0.0 M2 render spec." Consequences for this checklist:
+
+- The animation pillar's root cause is **confirmed** (bones dropped by both readers). The texture and
+  lighting pillars' causes are **narrowed but not fully pinned** — Phase T opens with a diagnosis-only
+  pass by design (FR-T1). This is honest, not a gap: a "diagnose then fix" pillar is legitimate when
+  the fix depends on which of three classified causes is real.
+- A correction is recorded in the spec: the earlier claim that the misread duration ("3333") freezes
+  the pose was wrong. The freeze is `bones: null/[]`. The duration misread only corrupts the displayed
+  timeline number.
+- The folder name (`105-format-version-profiles`) no longer matches the broadened scope. Left as-is to
+  avoid rename/recommit churn; flagged as cosmetic in the spec.
+
 ### Deliberate deviations from the default checklist posture
 
 **"Written for non-technical stakeholders" is interpreted as "written for the project owner."**

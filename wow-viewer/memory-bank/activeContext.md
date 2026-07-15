@@ -2,7 +2,37 @@
 
 Last updated: 2026-07-15 (Spec 105 written: M2 version profiles; two premises corrected)
 
-## Spec 105 — M2 format version profiles (2026-07-15, SPEC + PLAN done, NOT implemented)
+## Spec 105 — SCOPE EXPANDED to combined 1.0.0 M2 render (2026-07-15, spec+plan, NOT implemented)
+
+- **USER showed a live screenshot: CentaurKhan.m2 (v256) renders GRAY, FLAT, STATIC** (frame
+  2081/3333 advancing). USER: "still flat shaded and only a single material and not animated."
+  Chose **"one combined 1.0.0 M2 render spec"** → spec 105 expanded from animation-only to **THREE
+  rendering pillars**. Folder still named `105-format-version-profiles` (cosmetic; scope is now
+  "1.0.0 M2 renders correctly"). Title updated.
+- **THE THREE PILLARS + verified causes (sequenced texture→lighting→animation):**
+  - **P-Texture (gray/single-material)** — the reader parses filenames fine
+    (`M2Era100ModelReader.cs:302`) AND `M2Renderer` has a full load+replaceable path (`:1023`), so the
+    gray is a **resolution failure** (batch→combo→texture), NOT a parse/support gap. Exact cause
+    (combo mis-index vs BLP-not-found vs replaceable-with-no-runtime-skin) **NOT yet pinned** — Phase T
+    opens with a **diagnosis-only pass** (FR-T1). Prime suspect: a creature texture whose combo
+    resolves NEGATIVE (replaceable) when it should be a hardcoded BLP. Fix in `BuildEra100Material` /
+    `WowViewerM2RuntimeBridge.cs:220`, era-100-scoped.
+  - **P-Lighting ("flat shaded")** — Lambert ALREADY RUNS (`M2Renderer.cs:854`, gated on
+    `Material.IsUnshaded` @`:697`); screenshot shows a visible N·L gradient. The "flat" look is
+    **mostly the missing texture**. This pillar is CONFIRM-then-correct: audit material flag `0x01`
+    (UNLIT) → `IsUnshaded` mapping; may reduce to "already correct, close it."
+  - **P-Animation (frozen)** — CONFIRMED: **both** readers drop bones (`M2Era100ModelReader.cs:118`
+    `bones: null`; `M2Era1121ModelReader.cs:95` `bones: []`). Rests on the version-profile foundation.
+- **CORRECTION recorded (I overclaimed earlier):** "3333 = misread duration" is NOT why the pose is
+  frozen. The freeze is `bones: null/[]`, full stop. The R1 sequence-offset misread is real but only
+  corrupts the DISPLAYED timeline number (`M2RuntimeAnimator.cs:31` builds the timeline from
+  `sequence.Duration`, which era-100 reads from field @0x04 = actually `start`).
+- **Execution order (plan):** Phase 0 baseline (now ALSO captures 3.x/4.x TEXTURE/material state, since
+  Phase T/L touch the shared `M2Renderer`) → **Phase T texture** → **Phase L lighting** → Phase 1–4
+  (architecture + animation, unchanged). Headline success **SC-000**: CentaurKhan textured + lit +
+  animated, user-confirmed.
+
+## Spec 105 — foundation: M2 version profiles (2026-07-15, SPEC + PLAN done, NOT implemented)
 
 - **`specs/105-format-version-profiles/`**: spec, checklist, **plan, research, data-model,
   contracts/m2-era-profile.md, quickstart**. `tasks.md` NOT yet generated (next: `speckit-tasks`).
