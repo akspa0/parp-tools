@@ -17,7 +17,7 @@ _SRC = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from harvester.spec103.prefab_curation import validate_source_group_split
+from harvester.spec103.prefab_curation import resolve_manifest_rows, validate_source_group_split
 from harvester.spec103.wdl_prior_model import INPUT_CONTRACT, MODEL_VARIANT_WDL_PRIOR, TARGET_CONTRACT, WdlPriorNet, build_wdl_target, normalize_minimap_rgb
 
 
@@ -47,6 +47,9 @@ def main() -> int:
     ap.add_argument("--output", required=True, type=Path)
     ap.add_argument("--val-key", required=True, help="complete source-group column, normally pattern")
     ap.add_argument("--val-value", required=True)
+    ap.add_argument("--curation-manifest", type=Path, default=None,
+                    help="existing Spec 103 representative-pattern curation manifest (or its directory). "
+                         "Only its kept train/val rows are read; no full-corpus training.")
     ap.add_argument("--epochs", type=int, default=80); ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--lr", type=float, default=2e-4); ap.add_argument("--workers", type=int, default=4)
     args = ap.parse_args()
@@ -58,9 +61,16 @@ def main() -> int:
     index = pq.read_table(args.store / "index.parquet").to_pylist()
     if not index or args.val_key not in index[0]:
         raise SystemExit(f"index lacks requested holdout key {args.val_key!r}")
-    train_rows = [i for i, row in enumerate(index) if str(row.get(args.val_key)) != str(args.val_value)]
-    val_rows = [i for i, row in enumerate(index) if str(row.get(args.val_key)) == str(args.val_value)]
-    validate_source_group_split(index, train_rows, val_rows)
+    split_mode = f"holdout:{args.val_key}={args.val_value}"
+    if args.curation_manifest is not None:
+        manifest_path = args.curation_manifest / "curation_manifest.parquet" if args.curation_manifest.is_dir() else args.curation_manifest
+        train_rows, val_rows, split_mode = resolve_manifest_rows(
+            index, pq.read_table(manifest_path).to_pylist(), val_key=args.val_key, val_value=args.val_value
+        )
+    else:
+        train_rows = [i for i, row in enumerate(index) if str(row.get(args.val_key)) != str(args.val_value)]
+        val_rows = [i for i, row in enumerate(index) if str(row.get(args.val_key)) == str(args.val_value)]
+        validate_source_group_split(index, train_rows, val_rows)
     if not train_rows or not val_rows:
         raise SystemExit(f"invalid complete-group split: train={len(train_rows)} val={len(val_rows)}")
     device = torch.device("cuda"); model = WdlPriorNet().to(device); opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -77,7 +87,7 @@ def main() -> int:
         if val_l1 < best:
             best = val_l1; torch.save(checkpoint, args.output / "checkpoint_best.pt")
         print(f"[epoch {epoch:03d}] val_l1={val_l1:.6f} best={best:.6f}", flush=True)
-    (args.output / "training_summary.json").write_text(json.dumps({"best_val_l1": best, "train_rows": len(train_rows), "val_rows": len(val_rows), "split": {"key": args.val_key, "value": args.val_value}}, indent=2), encoding="utf-8")
+    (args.output / "training_summary.json").write_text(json.dumps({"best_val_l1": best, "train_rows": len(train_rows), "val_rows": len(val_rows), "split": {"mode": split_mode, "key": args.val_key, "value": args.val_value, "curation_manifest": str(args.curation_manifest) if args.curation_manifest else None}}, indent=2), encoding="utf-8")
     return 0
 
 

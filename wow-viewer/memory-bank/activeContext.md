@@ -12,8 +12,9 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior built; user-run compact-co
   ch6 and derives its height hints from it; missing/misaligned rows fail closed rather than fall
   back to ground truth. This only closes the WDL handoff: V8's remaining auxiliary-channel
   predictors remain later independent residual slices.
-- Train only on a compact curated representative-pattern store with complete source-group holdout;
-  do not run the full V18 corpus. CPU contracts: 4/4 passed. User owns the CUDA train/infer run;
+- Train directly from the real V18 paired store **through the existing compact representative-pattern
+  curation manifest**; the trainer reads only selected rows and honors manifest partitions. Do not
+  train on the full V18 corpus. CPU contracts: 4/4 passed. User owns the CUDA train/infer run;
   `specs/108-image-wdl-prior/quickstart.md` has the commands.
 - **Required first quality proof:** `evaluate_spec103_wdl_prior.py` runs inference from RGB alone,
   then opens the real tile's height only to report outer/inner lattice world-unit error and save both

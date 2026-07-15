@@ -15,6 +15,9 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior implementation)
 - Follow-up implementation adds `evaluate_spec103_wdl_prior.py`: RGB-only prediction on one selected
   real row, then truth-only lattice scoring with saved input/prediction/truth artifacts. The same
   `input_minimap.png` runs through the standalone `--image` inference path with no store or WDL input.
+- The trainer now accepts the existing Spec 103 curation manifest directly against the real V18
+  backing store. Only manifest-selected representative rows are loaded; its grouped train/validation
+  partitions remain authoritative, so this does not reopen full-corpus training.
 
 ## 2026-07-15 — FogEnd visibility and hover confidence
 
