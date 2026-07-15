@@ -18,6 +18,9 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior implementation)
 - The trainer now accepts the existing Spec 103 curation manifest directly against the real V18
   backing store. Only manifest-selected representative rows are loaded; its grouped train/validation
   partitions remain authoritative, so this does not reopen full-corpus training.
+- Added early stopping to the WDL trainer (default ten stale validation epochs) after the initial
+  tiny800 experiment plateaued at `0.037808` normalized L1. The user should inspect the held-out
+  real-tile lattice report before changing model capacity or training schedule.
 
 ## 2026-07-15 — FogEnd visibility and hover confidence
 

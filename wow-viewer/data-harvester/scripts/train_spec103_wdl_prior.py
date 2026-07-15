@@ -52,6 +52,8 @@ def main() -> int:
                          "Only its kept train/val rows are read; no full-corpus training.")
     ap.add_argument("--epochs", type=int, default=80); ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--lr", type=float, default=2e-4); ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--patience", type=int, default=10,
+                    help="stop after this many epochs without a strictly better held-out L1 (0 disables)")
     args = ap.parse_args()
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is not available; user-run training refuses CPU.")
@@ -79,7 +81,7 @@ def main() -> int:
     device = torch.device("cuda"); model = WdlPriorNet().to(device); opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     train = DataLoader(PriorDataset(group, train_rows), batch_size=min(args.batch, len(train_rows)), shuffle=True, num_workers=args.workers, pin_memory=True)
     val = DataLoader(PriorDataset(group, val_rows), batch_size=min(args.batch, len(val_rows)), num_workers=args.workers, pin_memory=True)
-    args.output.mkdir(parents=True, exist_ok=True); best = float("inf")
+    args.output.mkdir(parents=True, exist_ok=True); best = float("inf"); best_epoch = 0; stale_epochs = 0
     for epoch in range(1, args.epochs + 1):
         model.train()
         for x, y in train:
@@ -88,9 +90,14 @@ def main() -> int:
         checkpoint = {"model_variant": MODEL_VARIANT_WDL_PRIOR, "input_contract": INPUT_CONTRACT, "target_contract": TARGET_CONTRACT, "model": model.state_dict(), "epoch": epoch, "val_l1": val_l1, "store": str(args.store.resolve()), "split": {"key": args.val_key, "value": args.val_value}}
         torch.save(checkpoint, args.output / "checkpoint_last.pt")
         if val_l1 < best:
-            best = val_l1; torch.save(checkpoint, args.output / "checkpoint_best.pt")
-        print(f"[epoch {epoch:03d}] val_l1={val_l1:.6f} best={best:.6f}", flush=True)
-    (args.output / "training_summary.json").write_text(json.dumps({"best_val_l1": best, "train_rows": len(train_rows), "val_rows": len(val_rows), "split": {"mode": split_mode, "key": args.val_key, "value": args.val_value, "curation_manifest": str(args.curation_manifest) if args.curation_manifest else None}}, indent=2), encoding="utf-8")
+            best = val_l1; best_epoch = epoch; stale_epochs = 0; torch.save(checkpoint, args.output / "checkpoint_best.pt")
+        else:
+            stale_epochs += 1
+        print(f"[epoch {epoch:03d}] val_l1={val_l1:.6f} best={best:.6f} stale={stale_epochs}/{args.patience}", flush=True)
+        if args.patience > 0 and stale_epochs >= args.patience:
+            print(f"[early-stop] best epoch={best_epoch} val_l1={best:.6f}; no improvement for {stale_epochs} epochs", flush=True)
+            break
+    (args.output / "training_summary.json").write_text(json.dumps({"best_val_l1": best, "best_epoch": best_epoch, "stale_epochs": stale_epochs, "patience": args.patience, "train_rows": len(train_rows), "val_rows": len(val_rows), "split": {"mode": split_mode, "key": args.val_key, "value": args.val_value, "curation_manifest": str(args.curation_manifest) if args.curation_manifest else None}}, indent=2), encoding="utf-8")
     return 0
 
 

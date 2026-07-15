@@ -19,6 +19,8 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior built; user-run compact-co
 - **Required first quality proof:** `evaluate_spec103_wdl_prior.py` runs inference from RGB alone,
   then opens the real tile's height only to report outer/inner lattice world-unit error and save both
   lattices. Its exported `input_minimap.png` can immediately prove standalone PNG→lattice inference.
+- The initial tiny800 run plateaued at normalized validation L1 `0.037808`; trainer now has default
+  `--patience 10`, writes `best_epoch`/stale count, and stops rather than wasting later epochs.
 
 ## Spec 107 — Lighting quick controls + confident hover (2026-07-15, implemented/build green)
 
