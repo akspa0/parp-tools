@@ -52,12 +52,17 @@ def main() -> int:
     source = index[args.row]
     args.output.mkdir(parents=True, exist_ok=True)
     Image.fromarray(rgb, mode="RGB").save(args.output / "input_minimap.png")
+    with Image.open(args.output / "input_minimap.png") as exported:
+        png_rgb = np.asarray(exported.convert("RGB").resize((256, 256), Image.Resampling.LANCZOS), dtype=np.uint8)
+    png_outer, png_inner = predict_rgb(model, png_rgb, device)
     np.savez_compressed(args.output / "predicted_wdl_lattice.npz", outer_17=predicted_outer, inner_16=predicted_inner)
     np.savez_compressed(args.output / "ground_truth_wdl_lattice.npz", outer_17=truth_outer, inner_16=truth_inner)
+    np.savez_compressed(args.output / "standalone_png_wdl_lattice.npz", outer_17=png_outer, inner_16=png_inner)
     report = {"schema": "spec108-real-tile-evaluation-v1", "source_row": args.row, "source": source,
               "checkpoint": str(args.checkpoint.resolve()), "input": "input_minimap.png", "prediction": "predicted_wdl_lattice.npz",
-              "ground_truth": "ground_truth_wdl_lattice.npz", "outer_17": _metrics(predicted_outer, truth_outer),
-              "inner_16": _metrics(predicted_inner, truth_inner)}
+              "ground_truth": "ground_truth_wdl_lattice.npz", "standalone_png_prediction": "standalone_png_wdl_lattice.npz",
+              "outer_17": _metrics(predicted_outer, truth_outer), "inner_16": _metrics(predicted_inner, truth_inner),
+              "standalone_png_vs_store_rgb": {"outer_17": _metrics(png_outer, predicted_outer), "inner_16": _metrics(png_inner, predicted_inner)}}
     (args.output / "report.json").write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     print(f"[REAL TILE] row={args.row} outer_mae={report['outer_17']['mae_world']:.3f} inner_mae={report['inner_16']['mae_world']:.3f} -> {args.output}", flush=True)
     return 0

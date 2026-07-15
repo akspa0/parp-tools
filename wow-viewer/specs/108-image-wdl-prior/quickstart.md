@@ -24,6 +24,9 @@ uv run python scripts/infer_spec103_v7.py --store <real-v18-store.zarr> --checkp
 uv run python scripts/evaluate_spec103_wdl_prior.py --store <real-representative-store.zarr> --checkpoint ../output/spec108_wdl_prior_v1/checkpoint_best.pt --row <held-out-row> --output ../output/spec108_wdl_prior_v1/real_tile_row<held-out-row>
 ```
 
+Its `report.json` records truth error and a `standalone_png_vs_store_rgb` round-trip metric after
+reloading the exported PNG. Both should be inspected before using the generated prior in V8.
+
 5. Prove the standalone image route using the evaluator's exported minimap. This has no WDL/store
    input at all:
 
