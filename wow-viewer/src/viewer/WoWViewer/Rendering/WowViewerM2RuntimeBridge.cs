@@ -223,21 +223,43 @@ internal static class WowViewerM2RuntimeBridge
         for (int stage = 0; stage < batch.TextureCount; stage++)
         {
             int lookupIndex = batch.TextureComboIndex + stage;
-            ushort? textureId = lookupIndex >= 0 && lookupIndex < geometry.TextureLookup.Count
+            short lookupValue = lookupIndex >= 0 && lookupIndex < geometry.TextureLookup.Count
                 ? geometry.TextureLookup[lookupIndex]
-                : null;
-            M2Era100Texture? texture = textureId is ushort id && id < geometry.Textures.Count
-                ? geometry.Textures[id]
-                : null;
+                : (short)-1;
+
+            // A negative textureCombos entry is a replaceable texture supplied at runtime
+            // (character/creature skin), not an index into the model's texture array — the client
+            // resolves slot ~value through its own table (FUN_0071a540). We have no runtime skin to
+            // bind, so carry the slot as the replaceable id and leave the path unresolved rather
+            // than letting the out-of-range index collapse every batch onto one fallback texture.
+            M2Era100Texture? texture = null;
+            ushort? textureId = null;
+            uint replaceableId;
+            if (lookupValue >= 0)
+            {
+                textureId = (ushort)lookupValue;
+                texture = lookupValue < geometry.Textures.Count ? geometry.Textures[lookupValue] : null;
+                replaceableId = texture?.Type ?? 0;
+            }
+            else
+            {
+                replaceableId = (uint)~lookupValue + 1;
+            }
+
             bindings.Add(new M2StaticRenderTextureBinding(
-                stage, lookupIndex, textureId, texture?.Filename, texture?.Type ?? 0, texture?.Flags ?? 0,
+                stage, lookupIndex, textureId, texture?.Filename, replaceableId, texture?.Flags ?? 0,
                 null, null, null, null, null, null));
         }
+
+        M2Era100Material material = batch.MaterialIndex < geometry.Materials.Count
+            ? geometry.Materials[batch.MaterialIndex]
+            : default;
+        M2BlendMode blendMode = MapEra100BlendMode(material.BlendMode);
 
         M2StaticRenderTextureBinding? primary = bindings.FirstOrDefault();
         M2EffectRecipe recipe = new(
             bindings.Count > 0 ? M2DiffuseEffectFamily.T1 : M2DiffuseEffectFamily.None,
-            M2CombinerEffectFamily.Opaque,
+            blendMode == M2BlendMode.Opaque ? M2CombinerEffectFamily.Opaque : M2CombinerEffectFamily.Mod,
             isProjected: false,
             usesColorAnimation: false,
             usesTransparencyAnimation: false,
@@ -258,13 +280,29 @@ internal static class WowViewerM2RuntimeBridge
             batch.TextureCoordComboIndex,
             batch.TextureWeightComboIndex,
             batch.TextureTransformComboIndex,
-            renderFlags: 0,
-            rawBlendMode: 0,
-            M2BlendMode.Opaque,
+            material.Flags,
+            material.BlendMode,
+            blendMode,
             primary?.TexturePath,
             primary?.ReplaceableId ?? 0,
             primary?.TextureFlags ?? 0,
             bindings,
             recipe);
     }
+
+    /// <summary>
+    /// M2Material.blendMode (header 0x84) → renderer blend mode. Values per FUN_0071a910 /
+    /// FUN_0071a150: 0 opaque, 1 alpha-key, 2 alpha, 3 and 4 additive, 5 mod, 6 mod2x.
+    /// </summary>
+    private static M2BlendMode MapEra100BlendMode(ushort rawBlendMode) => rawBlendMode switch
+    {
+        0 => M2BlendMode.Opaque,
+        1 => M2BlendMode.AlphaKey,
+        2 => M2BlendMode.AlphaBlend,
+        3 => M2BlendMode.NoAlphaAdd,
+        4 => M2BlendMode.Add,
+        5 => M2BlendMode.Mod,
+        6 => M2BlendMode.Mod2X,
+        _ => M2BlendMode.Opaque,
+    };
 }

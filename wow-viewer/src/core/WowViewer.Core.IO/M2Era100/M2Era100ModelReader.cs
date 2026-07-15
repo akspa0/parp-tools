@@ -70,11 +70,11 @@ public static class M2Era100ModelReader
         // --- Textures ---
 
         List<M2Era100Texture> textures = ReadTextures(data, sourcePath);
-        List<ushort> textureLookup = ReadUInt16Lookup(data, sourcePath, "textureLookup",
+        List<short> textureLookup = ReadInt16Lookup(data, sourcePath, "textureLookup",
             M2Era100Constants.TextureLookupCountOffset, M2Era100Constants.TextureLookupOffsetOffset);
+        List<M2Era100Material> materials = ReadMaterials(data, sourcePath);
 
-        // Attach texture lookup to geometry if we have it.
-        if (geometry != null && textureLookup.Count > 0)
+        if (geometry != null)
         {
             geometry = new M2Era100Geometry(
                 geometry.RenderVertices,
@@ -82,17 +82,8 @@ public static class M2Era100ModelReader
                 geometry.Sections,
                 geometry.Batches,
                 textures,
-                textureLookup);
-        }
-        else if (geometry != null)
-        {
-            geometry = new M2Era100Geometry(
-                geometry.RenderVertices,
-                geometry.Triangles,
-                geometry.Sections,
-                geometry.Batches,
-                textures,
-                geometry.TextureLookup);
+                textureLookup.Count > 0 ? textureLookup : geometry.TextureLookup,
+                materials);
         }
 
         // --- Build the document ---
@@ -473,19 +464,38 @@ public static class M2Era100ModelReader
         return values;
     }
 
-    private static List<ushort> ReadUInt16Lookup(byte[] data, string sourcePath, string label, int countOffset, int offsetOffset)
+    private static List<short> ReadInt16Lookup(byte[] data, string sourcePath, string label, int countOffset, int offsetOffset)
     {
         uint count = ReadUInt32At(data, countOffset);
         uint offset = ReadUInt32At(data, offsetOffset);
         if (count == 0 || offset == 0)
             return [];
 
-        ValidateSpan(count, offset, sizeof(ushort), data.Length, sourcePath, label);
-        List<ushort> values = new(checked((int)count));
+        ValidateSpan(count, offset, sizeof(short), data.Length, sourcePath, label);
+        List<short> values = new(checked((int)count));
         for (int i = 0; i < count; i++)
-            values.Add(ReadUInt16At(data, checked((int)offset + (i * sizeof(ushort)))));
+            values.Add(unchecked((short)ReadUInt16At(data, checked((int)offset + (i * sizeof(short))))));
 
         return values;
+    }
+
+    /// <summary>Reads M2Material[] at header 0x84 — {uint16 flags, uint16 blendMode}, stride 4.</summary>
+    private static List<M2Era100Material> ReadMaterials(byte[] data, string sourcePath)
+    {
+        uint count = ReadUInt32At(data, M2Era100Constants.MaterialCountOffset);
+        uint offset = ReadUInt32At(data, M2Era100Constants.MaterialOffsetOffset);
+        if (count == 0 || offset == 0)
+            return [];
+
+        ValidateSpan(count, offset, M2Era100Constants.MaterialStride, data.Length, sourcePath, "materials");
+        List<M2Era100Material> materials = new(checked((int)count));
+        for (int i = 0; i < count; i++)
+        {
+            int ofs = checked((int)offset + (i * M2Era100Constants.MaterialStride));
+            materials.Add(new M2Era100Material(ReadUInt16At(data, ofs), ReadUInt16At(data, ofs + 2)));
+        }
+
+        return materials;
     }
 
     // ─── Validation ──────────────────────────────────────────────────────────

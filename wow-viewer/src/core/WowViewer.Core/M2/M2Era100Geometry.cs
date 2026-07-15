@@ -15,7 +15,8 @@ public sealed class M2Era100Geometry
         IReadOnlyList<M2Era100Section> sections,
         IReadOnlyList<M2Era100Batch> batches,
         IReadOnlyList<M2Era100Texture> textures,
-        IReadOnlyList<ushort> textureLookup)
+        IReadOnlyList<short> textureLookup,
+        IReadOnlyList<M2Era100Material>? materials = null)
     {
         ArgumentNullException.ThrowIfNull(renderVertices);
         ArgumentNullException.ThrowIfNull(triangles);
@@ -30,6 +31,7 @@ public sealed class M2Era100Geometry
         Batches = batches;
         Textures = textures;
         TextureLookup = textureLookup;
+        Materials = materials ?? [];
     }
 
     /// <summary>Vertices in division-local order (vertexLookup already applied).</summary>
@@ -46,8 +48,26 @@ public sealed class M2Era100Geometry
 
     public IReadOnlyList<M2Era100Texture> Textures { get; }
 
-    /// <summary>Maps batch.textureComboIndex → texture array index.</summary>
-    public IReadOnlyList<ushort> TextureLookup { get; }
+    /// <summary>
+    /// textureCombos (header 0x94). Maps batch.textureComboIndex + stage → texture array index.
+    /// SIGNED: a negative entry means a replaceable texture supplied at runtime (character skin,
+    /// creature skin), resolved as slot <c>~value</c> rather than indexing <see cref="Textures"/>.
+    /// </summary>
+    public IReadOnlyList<short> TextureLookup { get; }
+
+    /// <summary>M2Material[] (header 0x84) — render flags and blend mode per batch.MaterialIndex.</summary>
+    public IReadOnlyList<M2Era100Material> Materials { get; }
+}
+
+/// <summary>
+/// M2Material (header 0x84, 4 bytes): {uint16 flags, uint16 blendMode}.
+/// FUN_0071a910 reads flags bit 0x01 = unlit and bit 0x02 = unfogged; blendMode 3/4 are additive.
+/// </summary>
+public readonly record struct M2Era100Material(ushort Flags, ushort BlendMode)
+{
+    public bool Unlit => (Flags & 0x01) != 0;
+    public bool Unfogged => (Flags & 0x02) != 0;
+    public bool TwoSided => (Flags & 0x04) != 0;
 }
 
 /// <summary>
