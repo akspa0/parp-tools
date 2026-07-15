@@ -10,6 +10,7 @@ using WowViewer.Core.Diagnostics;
 using WowViewer.Core.IO.Lk;
 using WowViewer.Core.IO.Liquids;
 using WowViewer.Core.IO.Maps;
+using WowViewer.Core.Maps;
 using WoWViewer.Terrain.Vlm;
 
 namespace WoWViewer.Terrain;
@@ -816,9 +817,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 float nx = (sbyte)mcnrData[off] / 127f;
                 float nz = (sbyte)mcnrData[off + 1] / 127f;
                 float ny = (sbyte)mcnrData[off + 2] / 127f;
-                var n = new Vector3(nx, ny, nz);
-                float len = n.Length();
-                normals[i] = len > 0.001f ? n / len : Vector3.UnitZ;
+                normals[i] = TerrainNormalGeometry.TransformAdtNormalToRenderer(new Vector3(nx, ny, nz));
             }
             return normals;
         }

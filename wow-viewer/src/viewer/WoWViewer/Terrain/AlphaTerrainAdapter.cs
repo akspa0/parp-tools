@@ -3,6 +3,7 @@ using System.Numerics;
 using GillijimProject.WowFiles.Alpha;
 using WoWViewer.Logging;
 using WoWViewer.Rendering;
+using WowViewer.Core.Maps;
 
 namespace WoWViewer.Terrain;
 
@@ -551,10 +552,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         float nz = (sbyte)data[offset + 1] / 127f;
         float ny = (sbyte)data[offset + 2] / 127f;
 
-        // Return as (X, Y, Z) in our coordinate system
-        var n = new Vector3(nx, ny, nz);
-        float len = n.Length();
-        return len > 0.001f ? n / len : Vector3.UnitZ;
+        return TerrainNormalGeometry.TransformAdtNormalToRenderer(new Vector3(nx, ny, nz));
     }
 
     private static TerrainLayer[] ExtractLayers(byte[] mclyData, int nLayers)

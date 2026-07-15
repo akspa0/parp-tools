@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-13
 
-**Status**: Draft
+**Status**: Implemented through agent-prepared tooling; user-run corpus/capture/training proofs pending
 
 **Input**: Reconstruct terrain from a single image tile alone. No auxiliary signals exist for real use-case data, so every signal must be generated from the image, and validation must not depend on ground-truth signals we will never have.
 
@@ -96,6 +96,14 @@ Later and optionally, object artifacts are removed from the *generated output* b
 - **FR-016**: Each candidate tile MUST record its terrain and placement context: height/normal relief signature, MCLY layer/texture context, and available object/liquid overlap or proximity. Missing context is explicit evidence, never silently imputed.
 - **FR-017**: The final manifest MUST select for canonical terrain-art prefab family and context diversity rather than raw tile count. A prefab placement MAY be translated, mirrored, rotated, or retextured while retaining its canonical family; every kept tile MUST name the prefab family, placement transform/variant coverage it contributes, and every excluded duplicate MUST name its representative or exclusion reason. Prefab families MUST be group-safe across train/validation splits so transformed authored placements cannot leak between them.
 - **FR-018**: A curation run MUST write a reproducible evidence chain: source-store and upstream-library identities, per-map/layer/region ledger rows, tile-to-region membership, deterministic selection parameters, and a summary of represented versus excluded families. This evidence is required before a smaller curated corpus is used for training.
+- **FR-019**: Synthetic terrain RGB MUST use one-sided `max(0, N dot L)` lighting from MCNR-equivalent normals and MUST preserve optional MCSH as a distinct 64x64 per-chunk signal. MCSH borders MUST NOT receive MCAL edge-fix copying, and a missing shadow map MUST remain distinguishable from a present all-lit map.
+- **FR-020**: Every synthetic lighting profile MUST declare its revision and evidence state. Build-scoped `Light*` DBC exports are preferred when available; any analytic palette, direction path, or shadow coefficient MUST be labeled authored rather than client-exact.
+- **FR-021**: Time-of-day renders of one terrain source MUST share a `source_group_id` and train/validation partition, MUST record the full lighting/shadow provenance, and MUST be generated from unlit owned/licensed source data. Captured or already-lit minimaps MUST NOT be lit a second time.
+- **FR-022**: A clean-synthetic workflow MUST fail closed unless source origin, license/rights assertion, and content hashes are explicit and no client-derived training data is present. Client-derived BYOD data MUST remain labeled private BYOD. The tooling MUST preserve this evidence and MUST NOT claim that rendering or training determines legal status.
+- **FR-023**: LIT decoding MUST use the shared Core.IO reader, honor the version-specific layout in which all light headers precede all light payload groups, validate declared lengths and exact payload size, decode BGRX colors, and fail closed on unsupported layouts. Synthetic capture MUST use only the unique default/global clear group; local-zone placement remains disabled until its coordinate transform is proven.
+- **FR-024**: Classic outdoor database lighting MUST be resolved through DBCD and the bundled WoWDBDefs with the exact client build over `Light`, `LightParams`, `LightIntBand`, `LightFloatBand`, and `LightSkybox`. It MUST retain selected Light/params/band record IDs and build/source evidence; no second DBC parser or flattened `LightData` substitute is permitted for this chain.
+- **FR-025**: A captured terrain PNG MUST have a sidecar binding the renderer contract, camera orientation, source ADT and PNG hashes, selected lighting source/profile/time, contributing LIT tracks or DBC records, direction evidence, MCSH presence/strength/evidence, and source identifier/hash. The store builder MUST reject a missing, mismatched, or stale sidecar.
+- **FR-026**: The active viewer and capture path MUST apply direct, ambient, fog, and sky values from one coherent selected source. They MUST NOT silently combine LIT fog with DBC direct/ambient values, and the five LIT sky colors MUST NOT be assigned invented client-exact altitude thresholds.
 
 ### Key Entities
 
@@ -104,6 +112,7 @@ Later and optionally, object artifacts are removed from the *generated output* b
 - **Generated signal stack**: every non-image signal, produced by models; never assumed present.
 - **Ground-truth game signals**: height/WDL/mask from game clients; supervision and dev diagnostics only, never an input or the acceptance test.
 - **Pattern evidence ledger**: training-time Parquet evidence linking a tile to full-map alpha/fractal/paste regions, their family identities, ADT tile/chunk/layer locations, terrain/texture/placement context, and selection rationale. It is not a model input.
+- **Terrain lighting profile**: a build-scoped or authored-fallback set of time-keyed outdoor-light values plus evidence/source hashes and the declared MCNR/MCSH renderer contract. It controls synthetic RGB generation and is not a deployment input.
 
 ## Success Criteria *(mandatory)*
 
@@ -117,6 +126,8 @@ Later and optionally, object artifacts are removed from the *generated output* b
 - **SC-006**: Every retained tile is traceable through the curation manifest to its build, map, ADT tile, chunk/cell coverage, alpha layer/region/family evidence, and terrain/object-context statistics.
 - **SC-007**: The selected corpus has no duplicate pattern family leaking across train/validation partitions, and its summary reports both family and map/context coverage.
 - **SC-008**: The curated subset is materially smaller than the clean eligible set while retaining a declared representative for each selected pattern/context family; the reduction and all exclusions are reproducible from recorded parameters.
+- **SC-009**: Focused renderer tests prove asymmetric MCNR conversion, back-facing ambient-only lighting, full-edge MCSH preservation, Z-up sky geometry, and one-tile top-down capture orientation.
+- **SC-010**: Every synthetic RGB row is either a grouped authored variant with explicit non-client-exact evidence or a hash-bound captured variant whose client-derived source forces the private-BYOD rights class.
 
 ## Assumptions
 

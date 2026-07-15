@@ -502,7 +502,7 @@ public partial class ViewerApp
 
         ImGui.SameLine();
         bool useLitFogOverride = _worldScene.UseLitFogOverride;
-        if (ImGui.Checkbox("Use LIT Sky/Fog Override", ref useLitFogOverride))
+        if (ImGui.Checkbox("Use LIT Lighting Override", ref useLitFogOverride))
             _worldScene.UseLitFogOverride = useLitFogOverride;
 
         if (!_worldScene.LitLoadAttempted)
@@ -547,7 +547,7 @@ public partial class ViewerApp
 
         ImGui.TextDisabled($"Path: {loader.SourcePath}");
         ImGui.TextDisabled($"Version: 0x{loader.Version:X8}  RawCount: {loader.RawLightCount}  Parsed lights: {loader.Lights.Count}");
-        ImGui.TextDisabled("Runtime LIT is still camera-driven and uses group 0 only; table selection is inspection/highlight only, and other groups are not applied yet.");
+        ImGui.TextDisabled("Runtime LIT uses clear group 0. Global diffuse/ambient/sky/fog are applied together; local-zone coordinates and sky-band placement remain diagnostic-only.");
 
         LitLoader.LitLightingSample? litSample = _worldScene.LastLitSample;
         if (litSample != null)

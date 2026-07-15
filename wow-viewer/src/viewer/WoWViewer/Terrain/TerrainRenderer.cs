@@ -5,6 +5,7 @@ using WoWViewer.Logging;
 using WoWViewer.Rendering;
 using SereniaBLPLib;
 using Silk.NET.OpenGL;
+using WowViewer.Core.Maps;
 
 namespace WoWViewer.Terrain;
 
@@ -64,7 +65,8 @@ public class TerrainRenderer : IDisposable
     public bool ShowCellGrid { get; set; }
     public bool ShowAlphaMask { get; set; }
     public int AlphaMaskChannel { get; set; } = 0;
-    public bool ShowShadowMap { get; set; }
+    public bool ShowShadowMap { get; set; } = true;
+    public float ShadowStrength { get; set; } = TerrainLightingMath.DefaultAuthoredMcshShadowStrength;
     public bool UseMccv { get; set; } = true;
 
     private bool _useNearestForAlphaSampling;
@@ -508,6 +510,7 @@ public class TerrainRenderer : IDisposable
         _shader.SetInt("uShowCellGrid", ShowCellGrid ? 1 : 0);
         _shader.SetInt("uShowAlphaMask", ShowAlphaMask ? 1 : 0);
         _shader.SetInt("uShowShadowMap", ShowShadowMap ? 1 : 0);
+        _shader.SetFloat("uShadowStrength", Math.Clamp(ShadowStrength, 0f, 1f));
         _shader.SetInt("uShowContours", ShowContours ? 1 : 0);
         _shader.SetFloat("uContourInterval", ContourInterval);
         _shader.SetInt("uShowLayer0", ShowLayer0 ? 1 : 0);
@@ -682,6 +685,7 @@ public class TerrainRenderer : IDisposable
         _tileShader.SetInt("uShowCellGrid", ShowCellGrid ? 1 : 0);
         _tileShader.SetInt("uShowAlphaMask", ShowAlphaMask ? 1 : 0);
         _tileShader.SetInt("uShowShadowMap", ShowShadowMap ? 1 : 0);
+        _tileShader.SetFloat("uShadowStrength", Math.Clamp(ShadowStrength, 0f, 1f));
         _tileShader.SetInt("uShowContours", ShowContours ? 1 : 0);
         _tileShader.SetFloat("uContourInterval", ContourInterval);
         _tileShader.SetInt("uShowLayer0", ShowLayer0 ? 1 : 0);
@@ -1302,16 +1306,18 @@ layout(location = 5) in vec4 aVertexColor;
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProj;
+uniform vec3 uLightDir;
 
 out vec3 vWorldPos;
-out vec3 vNormal;
+out float vDiffuse;
 out vec2 vTexCoord;
 out vec4 vVertexColor;
 
 void main() {
     vec4 worldPos = uModel * vec4(aPos, 1.0);
     vWorldPos = worldPos.xyz;
-    vNormal = mat3(uModel) * aNormal;
+    vec3 worldNormal = normalize(mat3(uModel) * aNormal);
+    vDiffuse = max(dot(worldNormal, normalize(uLightDir)), 0.0);
     vTexCoord = aTexCoord;
     vVertexColor = aVertexColor;
     gl_Position = uProj * uView * worldPos;
@@ -1321,7 +1327,7 @@ void main() {
         string fragSrc = @"
 #version 330 core
 in vec3 vWorldPos;
-in vec3 vNormal;
+in float vDiffuse;
 in vec2 vTexCoord;
 in vec4 vVertexColor;
 
@@ -1357,9 +1363,9 @@ uniform int uImplicitAlpha3;
     uniform int uShowCellGrid;
     uniform int uShowAlphaMask;
     uniform int uShowShadowMap;
+uniform float uShadowStrength;
 uniform int uShowContours;
 uniform float uContourInterval;
-uniform vec3 uLightDir;
 uniform vec3 uLightColor;
 uniform vec3 uAmbientColor;
 uniform vec3 uFogColor;
@@ -1406,9 +1412,10 @@ void main() {
         }
     }
 
-    vec3 norm = normalize(vNormal);
-    float diff = abs(dot(norm, normalize(uLightDir)));
-    vec3 lighting = uAmbientColor + uLightColor * diff;
+    float shadowVisibility = (uShowShadowMap == 1 && uHasShadowMap == 1)
+        ? 1.0 - clamp(texture(uShadowSampler, vTexCoord).r, 0.0, 1.0) * clamp(uShadowStrength, 0.0, 1.0)
+        : 1.0;
+    vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility;
     vec3 result = vec3(1.0);
 
     if (uShowLayer0 == 1) {
@@ -1432,11 +1439,6 @@ void main() {
     float tintStrength = clamp(vVertexColor.a * 2.0 - 1.0, 0.0, 1.0);
     vec3 vertexTint = (uUseMccv == 1) ? mix(vec3(1.0), tintColor, tintStrength) : vec3(1.0);
     result *= vertexTint;
-
-    if (uShowShadowMap == 1 && uHasShadowMap == 1) {
-        float shadow = texture(uShadowSampler, vTexCoord).r;
-        result *= mix(1.0, 0.4, shadow);
-    }
 
     float dist = length(vWorldPos - uCameraPos);
     float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
@@ -1534,9 +1536,10 @@ layout(location = 5) in vec4 aVertexColor;
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProj;
+uniform vec3 uLightDir;
 
 out vec3 vWorldPos;
-out vec3 vNormal;
+out float vDiffuse;
 out vec2 vTexCoord;
 out vec4 vVertexColor;
 flat out uint vChunkSlice;
@@ -1545,7 +1548,8 @@ flat out uvec4 vTexIdx;
 void main() {
     vec4 worldPos = uModel * vec4(aPos, 1.0);
     vWorldPos = worldPos.xyz;
-    vNormal = mat3(uModel) * aNormal;
+    vec3 worldNormal = normalize(mat3(uModel) * aNormal);
+    vDiffuse = max(dot(worldNormal, normalize(uLightDir)), 0.0);
     vTexCoord = aTexCoord;
     vVertexColor = aVertexColor;
     vChunkSlice = aChunkSlice;
@@ -1557,7 +1561,7 @@ void main() {
         string fragSrc = @"
 #version 330 core
 in vec3 vWorldPos;
-in vec3 vNormal;
+in float vDiffuse;
 in vec2 vTexCoord;
 in vec4 vVertexColor;
 flat in uint vChunkSlice;
@@ -1578,9 +1582,9 @@ uniform int uShowLayer2;
     uniform int uShowCellGrid;
     uniform int uShowAlphaMask;
     uniform int uShowShadowMap;
+uniform float uShadowStrength;
 uniform int uShowContours;
 uniform float uContourInterval;
-uniform vec3 uLightDir;
 uniform vec3 uLightColor;
 uniform vec3 uAmbientColor;
 uniform vec3 uFogColor;
@@ -1628,9 +1632,10 @@ void main() {
         }
     }
 
-    vec3 norm = normalize(vNormal);
-    float diff = abs(dot(norm, normalize(uLightDir)));
-    vec3 lighting = uAmbientColor + uLightColor * diff;
+    float shadowVisibility = (uShowShadowMap == 1)
+        ? 1.0 - clamp(alphaShadow.a, 0.0, 1.0) * clamp(uShadowStrength, 0.0, 1.0)
+        : 1.0;
+    vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility;
     vec3 result = vec3(1.0);
 
     if (uShowLayer0 == 1 && has0) {
@@ -1654,11 +1659,6 @@ void main() {
     float tintStrength = clamp(vVertexColor.a * 2.0 - 1.0, 0.0, 1.0);
     vec3 vertexTint = (uUseMccv == 1) ? mix(vec3(1.0), tintColor, tintStrength) : vec3(1.0);
     result *= vertexTint;
-
-    if (uShowShadowMap == 1) {
-        float shadow = alphaShadow.a;
-        result *= mix(1.0, 0.4, shadow);
-    }
 
     float dist = length(vWorldPos - uCameraPos);
     float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);

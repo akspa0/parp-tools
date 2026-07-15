@@ -96,11 +96,11 @@ v7 ran INPUT_SIZE = OUTPUT_SIZE = 512 (upscaled 256 minimaps). Our signals are n
 - Height hints (ch 7/8) in mode `gt` leak per-tile GT min/max; mode `wdl` derives them from the
   prior (deployment-consistent). The trainer exposes `--height-hints gt|wdl|none` (default `gt`,
   faithful to v7; use `wdl` for deployment-shaped runs).
-- The synthetic minimap capture (`WowViewer.Tool.Capture render`) uses a perspective camera, not a
-  true top-down minimap projection; the store builder also supports a labeled procedural fallback
-  (`--synthesize-minimaps`) so the loop is testable before a capture pass. Store attrs record which
-  source was used. Neither is a real game minimap — that is the point of synthetic-first: catalog
-  exactly how far the minimap domain can drift before v7 stops resolving.
+- The synthetic capture now uses a canonical one-tile top-down orthographic projection with the
+  dataset row/column orientation and a hash-bound lighting sidecar. The store builder also retains
+  the old, explicitly labeled procedural fallback (`--synthesize-minimaps`) only as a pipeline
+  smoke. Neither fallback is silently presented as a native game minimap; captured LIT colors and
+  authored color variants retain different evidence states and rights classes.
 
 ## 8. Synthetic caveat catalog (T011 — fill after the user's training run)
 

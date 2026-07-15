@@ -20,6 +20,7 @@ The printed dotnet/capture commands are for the USER to run (AGENTS RULE 0).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -60,7 +61,33 @@ def main() -> int:
     ap.add_argument("--amplitudes", nargs="*", type=float, default=[60.0, 180.0],
                     help="world-unit height amplitudes; each (pattern, amplitude) pair becomes one tile")
     ap.add_argument("--base-tile", type=int, nargs=2, default=(30, 30), metavar=("X", "Y"))
+    ap.add_argument(
+        "--source-license",
+        default="UNSPECIFIED",
+        help="operator-declared license for the generated terrain source; never inferred",
+    )
+    ap.add_argument(
+        "--source-rights-assertion",
+        default="UNSPECIFIED",
+        help="operator assertion identifying their authority to use the generated source",
+    )
+    ap.add_argument(
+        "--lighting-source",
+        choices=("authored", "lit"),
+        default="authored",
+        help="capture profile source; LIT captures are private-BYOD evidence",
+    )
+    lit_source = ap.add_mutually_exclusive_group()
+    lit_source.add_argument("--lit-file", type=Path)
+    lit_source.add_argument("--lit-client-root", type=Path)
+    ap.add_argument(
+        "--lit-virtual-path",
+        default="World/Maps/Azeroth/lights.lit",
+        help="archive path used with --lit-client-root",
+    )
     args = ap.parse_args()
+    if args.lighting_source == "lit" and args.lit_file is None and args.lit_client_root is None:
+        ap.error("--lighting-source lit requires --lit-file or --lit-client-root")
 
     out_root = args.output.resolve()
     heights_dir = out_root / "known_heights"
@@ -87,6 +114,7 @@ def main() -> int:
         height = _pattern_height(pattern, amplitude)
         npy_path = heights_dir / f"{tile_name}.npy"
         np.save(npy_path, height)
+        height_sha256 = hashlib.sha256(npy_path.read_bytes()).hexdigest()
 
         summary_dir = inference_dir / tile_name
         summary_dir.mkdir(parents=True, exist_ok=True)
@@ -99,6 +127,10 @@ def main() -> int:
             "tile_name": tile_name, "map": MAP_NAME, "tile_x": tile_x, "tile_y": tile_y,
             "pattern": pattern, "amplitude": amplitude,
             "height_npy": str(npy_path.resolve()).replace("\\", "/"),
+            "height_sha256": height_sha256,
+            "terrain_source_origin": "analytic_generated",
+            "terrain_source_license": args.source_license,
+            "terrain_source_rights_assertion": args.source_rights_assertion,
             "height_min": float(height.min()), "height_max": float(height.max()),
         })
         generate_cmds.append(
@@ -106,15 +138,31 @@ def main() -> int:
             f"map generate-blank --tile-x {tile_x} --tile-y {tile_y} --map-name {MAP_NAME} "
             f"--format lk --output-dir \"{adt_blank_dir}\""
         )
+        lighting_args = "--lighting-source authored"
+        if args.lighting_source == "lit" and args.lit_file is not None:
+            lighting_args = f'--lighting-source lit --lit-file "{args.lit_file.resolve()}"'
+        elif args.lighting_source == "lit" and args.lit_client_root is not None:
+            lighting_args = (
+                f'--lighting-source lit --lit-client-root "{args.lit_client_root.resolve()}" '
+                f'--lit-virtual-path "{args.lit_virtual_path}"'
+            )
         capture_cmds.append(
             f"dotnet run --project tools/capture/WowViewer.Tool.Capture -c Release -- "
             f"render --client-root \"{adt_patched_dir}\" --tile-name {tile_name} "
-            f"--output \"{captures_dir / (tile_name + '.png')}\" --resolution 256"
+            f"--output \"{captures_dir / (tile_name + '.png')}\" --resolution 256 "
+            f"--game-time 0.35 {lighting_args}"
         )
 
     (out_root / "synthetic_manifest.json").write_text(json.dumps({
         "schema": "spec103-synthetic-manifest-v1",
         "map": MAP_NAME,
+        "provenance": {
+            "generator": "spec103_make_synthetic_adts.py",
+            "terrain_source_origin": "analytic_generated",
+            "terrain_source_license": args.source_license,
+            "terrain_source_rights_assertion": args.source_rights_assertion,
+            "license_policy": "operator_declared_never_inferred",
+        },
         "tiles": manifest,
     }, indent=2), encoding="utf-8")
 
@@ -136,8 +184,9 @@ def main() -> int:
     print("# 2. patch the known heights into the blank ADTs:")
     print(patch_cmd)
     print()
-    print("# 3. capture per-tile renders (GPU; perspective-camera caveat is recorded in")
-    print("#    research-v7-contract.md §7 — or skip and use --synthesize-minimaps in step 4):")
+    print("# 3. capture canonical one-tile top-down orthographic renders (GPU).")
+    print("#    Each PNG receives a hash-bound .lighting.json evidence sidecar.")
+    print("#    Or skip capture and use an explicitly authored --lighting-time variant in step 4:")
     for cmd in capture_cmds:
         print(cmd)
     print()

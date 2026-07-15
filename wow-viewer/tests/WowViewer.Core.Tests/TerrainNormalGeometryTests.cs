@@ -1,9 +1,27 @@
+using System.Numerics;
 using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.Tests;
 
 public sealed class TerrainNormalGeometryTests
 {
+    [Theory]
+    [InlineData(1f, 0f, 0f, 0f, -1f, 0f)]
+    [InlineData(0f, 1f, 0f, -1f, 0f, 0f)]
+    [InlineData(0f, 0f, 1f, 0f, 0f, 1f)]
+    public void TransformAdtNormalToRenderer_MapsGridAxesToWorldAxes(
+        float sourceX,
+        float sourceY,
+        float sourceZ,
+        float expectedX,
+        float expectedY,
+        float expectedZ)
+    {
+        Vector3 actual = TerrainNormalGeometry.TransformAdtNormalToRenderer(new Vector3(sourceX, sourceY, sourceZ));
+
+        Assert.Equal(new Vector3(expectedX, expectedY, expectedZ), actual);
+    }
+
     [Fact]
     public void CompareWithNativeDenseNormals_FlatChunkMatchesUnitZ()
     {

@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import math
 import sys
@@ -52,7 +53,7 @@ from pathlib import Path
 import numpy as np
 import pyarrow.parquet as pq
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: N812
 import zarr
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
@@ -61,6 +62,11 @@ _SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
+from harvester.height_to_normal import analytic_normals_from_height  # noqa: E402
+from harvester.spec103.prefab_curation import (  # noqa: E402
+    resolve_manifest_rows,
+    validate_source_group_split,
+)
 from harvester.spec103.v7_inputs import (  # noqa: E402
     HEIGHT_GLOBAL_MAX,
     HEIGHT_GLOBAL_MIN,
@@ -77,7 +83,14 @@ from harvester.spec103.v8_model import (  # noqa: E402
     MODEL_VARIANT_V8_LEAN,
     V8LeanUNet,
 )
-from harvester.height_to_normal import analytic_normals_from_height  # noqa: E402
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 OPTIONAL_ARRAYS = ("normal_xyz", "liquid_mask", "liquid_height", "object_precise_mask")
 ADT_SPACING_256 = 533.33333 / 256.0  # world meters per pixel at 256 resolution
@@ -340,6 +353,9 @@ def main() -> int:
                     help="training-only focal L1 that up-weights high-error pixels (0 = off). "
                          "Validation never uses this term.")
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--allow-legacy-resume", action="store_true",
+                    help="allow resume from a checkpoint lacking the manifest/index identity gate; "
+                         "off by default so a changed curated corpus cannot silently reuse weights")
     ap.add_argument("--init-weights", type=Path, default=None)
     ap.add_argument("--no-amp", action="store_true")
     ap.add_argument("--workers", type=int, default=4, help="DataLoader workers (0 = synchronous; 4+ overlaps data loading with GPU)")
@@ -367,32 +383,53 @@ def main() -> int:
     print(f"[signals] ch0-2 minimap=YES ch6 WDL prior=derived ch7-8 height hints={args.height_hints} "
           f"ch12 brush=zeros  |  " + "  ".join(_signals), flush=True)
     index = pq.read_table(args.store / "index.parquet").to_pylist()
-    if args.val_key not in index[0]:
-        raise SystemExit(f"index.parquet has no column {args.val_key!r}")
+    index_path = args.store / "index.parquet"
+    index_sha256 = _sha256_file(index_path)
 
     coverage = object_coverage_per_tile(group)
+    curation_rows: list[dict] | None = None
+    manifest_path: Path | None = None
+    manifest_sha256: str | None = None
+    split_mode = f"legacy_holdout:{args.val_key}={args.val_value}"
     if args.curation_manifest is not None:
         manifest_path = args.curation_manifest
         if manifest_path.is_dir():
             manifest_path = manifest_path / "curation_manifest.parquet"
-        curation = pq.read_table(manifest_path).to_pylist()
-        kept_ids = {int(r["tile_id"]) for r in curation if r["keep"]}
-        keep = np.array([int(row["tile_id"]) in kept_ids for row in index], dtype=bool)
-        curation_note = f"curation_manifest={manifest_path.name} kept={len(kept_ids)}"
+        curation_rows = pq.read_table(manifest_path).to_pylist()
+        manifest_sha256 = _sha256_file(manifest_path)
+        train_rows, val_rows, split_mode = resolve_manifest_rows(
+            index, curation_rows, val_key=args.val_key, val_value=args.val_value
+        )
+        kept_keys = {
+            (str(row.get("build", "")), int(row["tile_id"]))
+            for row in curation_rows
+            if row.get("keep")
+        }
+        keep = np.array(
+            [(str(row.get("build", "")), int(row["tile_id"])) in kept_keys for row in index],
+            dtype=bool,
+        )
+        curation_note = (
+            f"curation_manifest={manifest_path.name} kept={len(kept_keys)} "
+            f"split={split_mode} sha256={manifest_sha256[:12]}"
+        )
     else:
+        if args.val_key not in index[0]:
+            raise SystemExit(f"index.parquet has no column {args.val_key!r}")
         keep = rgb_std_per_tile(group["minimap_rgb"]) >= args.min_rgb_std
         keep &= coverage <= args.max_object_coverage
         curation_note = (f"inline dropped_blank={int((rgb_std_per_tile(group['minimap_rgb']) < args.min_rgb_std).sum())} "
                          f"dropped_objects={int((coverage > args.max_object_coverage).sum())}")
-    val_rows = [i for i, row in enumerate(index) if str(row[args.val_key]) == args.val_value and keep[i]]
-    train_rows = [i for i, row in enumerate(index) if str(row[args.val_key]) != args.val_value and keep[i]]
+        val_rows = [i for i, row in enumerate(index) if str(row[args.val_key]) == args.val_value and keep[i]]
+        train_rows = [i for i, row in enumerate(index) if str(row[args.val_key]) != args.val_value and keep[i]]
     if args.limit:
         train_rows = train_rows[:args.limit]
         val_rows = val_rows[:max(1, args.limit // 4)]
+    validate_source_group_split(index, train_rows, val_rows)
     if not val_rows or not train_rows:
         raise SystemExit(f"bad holdout: val={len(val_rows)} train={len(train_rows)} for {args.val_key}={args.val_value!r} "
                          f"(after curation: {int(keep.sum())} tiles kept)")
-    print(f"[split] train={len(train_rows)} val={len(val_rows)} holdout {args.val_key}={args.val_value} "
+    print(f"[split] train={len(train_rows)} val={len(val_rows)} mode={split_mode} "
           f"{curation_note} hints={args.height_hints} prior_dropout={args.wdl_prior_dropout} loss={args.loss}", flush=True)
 
     train_ds = V7TileDataset(group, train_rows, prior_dropout=args.wdl_prior_dropout, height_hints=args.height_hints)
@@ -446,10 +483,28 @@ def main() -> int:
         p.requires_grad_(False)
 
     detail_weight = args.detail_head_weight if args.detail_head else 0.0
+    data_identity = {
+        "index_sha256": index_sha256,
+        "curation_manifest_sha256": manifest_sha256,
+        "split_mode": split_mode,
+        "train_rows": len(train_rows),
+        "val_rows": len(val_rows),
+    }
     history, best_l1, start_epoch = [], float("inf"), 1
     resume_path = args.output / "checkpoint_last.pt"
     if args.resume and resume_path.exists():
         ck = torch.load(resume_path, map_location=device)
+        checkpoint_identity = ck.get("run_identity", {}).get("data_identity")
+        if checkpoint_identity is None and not args.allow_legacy_resume:
+            raise SystemExit(
+                "checkpoint_last.pt lacks the Spec 103 data-identity gate; refusing resume. "
+                "Use a fresh --output, or pass --allow-legacy-resume explicitly."
+            )
+        if checkpoint_identity is not None and checkpoint_identity != data_identity:
+            raise SystemExit(
+                "checkpoint/data mismatch; refusing resume. "
+                f"checkpoint={checkpoint_identity} current={data_identity}"
+            )
         model.load_state_dict(ck["model"])
         ema_model.load_state_dict(ck.get("ema", ck["model"]))
         if "opt" in ck:
@@ -498,6 +553,7 @@ def main() -> int:
         "normal_guidance_weight": args.normal_guidance_weight,
         "hard_error_weight": args.hard_error_weight,
         "seed": args.seed,
+        "data_identity": data_identity,
     }
 
     epochs_no_improve = 0
@@ -519,9 +575,9 @@ def main() -> int:
             scaler.step(opt)
             scaler.update()
             with torch.no_grad():
-                for e, p in zip(ema_model.parameters(), model.parameters()):
+                for e, p in zip(ema_model.parameters(), model.parameters(), strict=True):
                     e.mul_(args.ema_decay).add_(p.detach(), alpha=1.0 - args.ema_decay)
-                for eb, b in zip(ema_model.buffers(), model.buffers()):
+                for eb, b in zip(ema_model.buffers(), model.buffers(), strict=True):
                     eb.copy_(b)
             run += float(loss)
         sched.step()
@@ -553,7 +609,8 @@ def main() -> int:
             epochs_no_improve += 1
         torch.save({"model": model.state_dict(), "ema": ema_model.state_dict(), "opt": opt.state_dict(),
                     "sched": sched.state_dict(), "scaler": scaler.state_dict(), "epoch": epoch,
-                    "best_l1": best_l1, "history": history}, args.output / "checkpoint_last.pt")
+                    "best_l1": best_l1, "history": history, "run_identity": run_identity},
+                   args.output / "checkpoint_last.pt")
         (args.output / "history.json").write_text(
             json.dumps({**run_identity, "history": history, "best_val_l1_global": best_l1}, indent=2),
             encoding="utf-8")

@@ -90,22 +90,40 @@ Everything below is the detail needed to reproduce each term.
 `LightDataSky` (sky/skybox colors). The cycle drives sun direction + sun color + ambient
 color + fog color/range + sky gradient as a function of time of day. `FUN_006d2460`
 takes an `alpha ∈ [0,1)` blend factor (time-of-day interpolation weight) — the client
-**interpolates between keyframed light sets**.
+**interpolates timed light samples**. This does not make the `Light*` DBC files animation
+keyframes; those are database tables whose band records contain timed values.
 
 - **[V]** Skybox (from the renderer-features trace): `LightDataSky` + `DNOverrideSky`, sky
   models under `Environments\Stars\*`, cvars `SkyShow/SunGlare/CloudDensity/…`.
-- **[I]** Source of the keyframes: a light table keyed by world position (light zones) +
-  time. 1.0.0 has **no `Light.dbc` string** — the outdoor light set is driven from
-  `DayNight.cpp`/`LightData` (either hardcoded gradients or an early data table), not the
-  later `Light.dbc`/`LightParams` DBC chain. Treat the *values* as data to author, not
-  something to read from a modern DBC.
+- **[V]** Early map-scoped `World\\Maps\\<map>\\lights.lit` files carry the applicable
+  direct, ambient, five sky-band, fog, cloud, water, and related timed tracks. Their global
+  clear-weather entry is the first exact source to use for minimap generation. The later
+  `Light`, `LightParams`, `LightIntBand`, `LightFloatBand`, and `LightSkybox` DBC chain is
+  loaded through DBCD with the exact client build and the bundled WoWDBDefs definitions.
+  LIT tracks and Light* DBC records are separate sources and must not be silently mixed.
 
 ### Renderer action
 - Implement a time-of-day → `{sunDir, sunColor, ambientColor, fogColor, fogStart, fogEnd,
-  skyColors}` evaluator with smooth interpolation between keyframes. Start with a single
-  global set (dawn/noon/dusk/night); add per-zone light sets later.
+  skyColors}` evaluator from an explicitly selected exact-build source. For early minimap
+  capture, evaluate the global clear LIT group. For DBC-era builds, resolve the Light* records
+  through DBCD/WoWDBDefs. Use an authored fallback only when it is labeled as such.
 - Sun direction sweeps across the sky with time; do **not** hardcode a fixed sun (except
   the *shadow* projection, which the client does fix — see §5).
+
+### 2026-07-15 implementation proof
+
+- Shared LIT decode now follows `file header → all 64-byte light headers → all light groups`.
+  The old viewer interleaved one header with its groups, so later header bytes were interpreted as
+  plausible colors and produced the burgundy/neon band. Global/default clear sampling is strict;
+  local LIT placement stays off until its coordinate transform is proven.
+- The sky mesh is an XY ring with Z height. The old Y-up sphere rotated the gradient onto the
+  horizon and was the other half of the horizontal-band symptom.
+- Exact-build 1.12.1 DBCD proof loaded 374 `Light`, 426 `LightParams`, 7,668 `LightIntBand`,
+  2,556 `LightFloatBand`, and 6 `LightSkybox` rows through the bundled definitions. The resolver
+  preserves hashes for all five DBC byte streams and all five DBD files plus every selected record.
+- `Light.GameCoords` is fixed-scale `[WoW X, vertical Z, WoW Y]`: divide every component and both
+  falloffs by 36, then map to renderer `(MapOrigin-wowY, MapOrigin-wowX, wowZ)`. The active viewer
+  now uses this transform rather than the former unscaled X/Y/Z interpretation.
 
 ---
 
@@ -134,13 +152,14 @@ No MCCV / MCLV → **terrain color is computed from MCNR normals at runtime**, n
   branches into a plain path (`FUN_006c0db0/…e80`) vs. a **shadow+fog path**
   (`FUN_006c65c0` + `FUN_006c0eb0/…f20`) when the chunk has a shadow map or fog.
 
-### 3.3 Terrain lighting = normals · sun + ambient **[V model / I mechanism]**
+### 3.3 Terrain lighting = normals · sun + ambient **[V]**
 - The lighting **model** is `ambient + sunColor·sunIntensity·max(0, N·L)` using the MCNR
   normal per vertex, identical to the outdoor light of §1.
-- **[I]** Mechanism: the client either (a) uploads MCNR normals and lets FFP light them
-  with the one global GL light, or (b) pre-bakes per-vertex color from normals at
-  light-change time. Either way the renderer should compute the same term. Per-pixel with
-  interpolated normals is the faithful-but-better choice.
+- The client uploads a 24-byte position+normal terrain vertex and fixed-function OpenGL evaluates
+  the directional light per vertex. The viewer mirrors that ordering: compute clamped Lambert at
+  each MCNR vertex, interpolate the lit term across the primitive, then apply the sampled MCSH
+  visibility to the directional contribution. It does not use two-sided or per-fragment re-normalized
+  lighting for the client-faithful capture mode.
 
 ### 3.4 Terrain shadow map (MCSH) **[V]**
 - MCSH is a **64×64 1-bit-per-texel** shadow mask per chunk (read as `byte & (1<<(x&7))`,
@@ -288,8 +307,10 @@ Source files: `DayNight.cpp`, `MapChunk.cpp`, `MapChunkRender.cpp`, `MapLight.cp
 
 ## 10. Still open (for a later pass)
 
-- Exact day/night keyframe **values** (sun/ambient/fog per time slot) + whether zones
-  override them — needs dynamic capture (x64dbg) or the light data table located.
+- ~~Source of exact timed color values~~ — **RESOLVED**: map LIT tracks for the early/minimap
+  lane and build-scoped Light* DBC records through DBCD/WoWDBDefs for the DBC lane. Still open:
+  exact local-LIT coordinate conversion, five-band altitude placement from the four sky float
+  arrays, and the native MCSH attenuation coefficient.
 - ~~Whether terrain lighting is FFP-GPU or a CPU vertex-color bake~~ — **RESOLVED**: terrain VBO
   is `position + normal` (24 B, no color), so it's **hardware FFP lighting** (normals uploaded, GPU
   computes N·L). See [world-render-systems](wow-viewer/docs/architecture/wow-1.0.0-world-render-systems-2026-07-15.md) §3.1.

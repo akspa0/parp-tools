@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Numerics;
 using System.Text;
 using WowViewer.Core.Chunks;
 using WowViewer.Core.IO.Files;
@@ -18,6 +19,7 @@ public static class WorldTerrainTileBuilder
     private const int TileHeightmapSize = 257;
     private const int HalfStepsPerChunk = 16;
     private const int McvtSampleCount = 145;
+    private const int McnrBytesPerSample = 3;
     private const uint LiquidFlagMask = 0x3Cu;
     private const uint VertexColorFlagMask = 0x40u;
 
@@ -71,6 +73,7 @@ public static class WorldTerrainTileBuilder
             ushort holes = BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(0x3C, 2));
             float baseHeight = BinaryPrimitives.ReadSingleLittleEndian(payload.AsSpan(0x70, 4));
             float[]? heights = TryReadMcvtHeights(payload, baseHeight, applyBaseHeightOffset);
+            Vector3[]? normals = TryReadMcnrNormals(payload);
             AdtTextureChunk? textureChunk = ResolveTextureChunk(chunkOrdinal, payload, fileSummary.Kind, inlineTextureNames, externalTextureChunks);
 
             chunks.Add(new WorldTerrainChunkData(
@@ -84,7 +87,9 @@ public static class WorldTerrainTileBuilder
                 (flags & LiquidFlagMask) != 0,
                 (flags & VertexColorFlagMask) != 0,
                 heights,
-                textureChunk?.Layers));
+                textureChunk?.Layers,
+                normals,
+                textureChunk?.ShadowMap));
             chunkOrdinal++;
         }
 
@@ -111,11 +116,8 @@ public static class WorldTerrainTileBuilder
         if (externalTextureChunks is not null && externalTextureChunks.TryGetValue(chunkIndex, out AdtTextureChunk? externalChunk))
             return externalChunk;
 
-        if (inlineTextureNames.Count == 0)
-            return null;
-
         AdtTextureChunk inlineChunk = AdtTextureChunkReader.Read(chunkIndex, payload, terrainKind, inlineTextureNames);
-        return inlineChunk.Layers.Count > 0 ? inlineChunk : null;
+        return inlineChunk.Layers.Count > 0 || inlineChunk.ShadowMap is not null ? inlineChunk : null;
     }
 
     private static IReadOnlyList<string> ParseStringEntries(byte[] payload)
@@ -248,6 +250,48 @@ public static class WorldTerrainTileBuilder
 
                 return heights;
             }
+
+            position = checked((int)nextOffset);
+        }
+
+        return null;
+    }
+
+    private static Vector3[]? TryReadMcnrNormals(byte[] payload)
+    {
+        int position = RootMcnkSubchunkOffset;
+        while (position <= payload.Length - ChunkHeader.SizeInBytes)
+        {
+            if (!ChunkHeaderReader.TryRead(payload.AsSpan(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
+                break;
+
+            int dataOffset = position + ChunkHeader.SizeInBytes;
+            int declaredSize = checked((int)header.Size);
+            if (header.Id == AdtChunkIds.Mcnr)
+            {
+                int requiredBytes = McvtSampleCount * McnrBytesPerSample;
+                if (declaredSize < requiredBytes || (long)dataOffset + requiredBytes > payload.Length)
+                    return null;
+
+                Vector3[] normals = new Vector3[McvtSampleCount];
+                for (int index = 0; index < normals.Length; index++)
+                {
+                    int offset = dataOffset + (index * McnrBytesPerSample);
+                    float gridX = (sbyte)payload[offset] / 127f;
+                    float gridZ = (sbyte)payload[offset + 1] / 127f;
+                    float gridY = (sbyte)payload[offset + 2] / 127f;
+                    normals[index] = TerrainNormalGeometry.TransformAdtNormalToRenderer(new Vector3(gridX, gridY, gridZ));
+                }
+
+                return normals;
+            }
+
+            int consumedSize = header.Id == AdtChunkIds.Mcnr
+                ? Math.Max(declaredSize, McnrConsumedSize)
+                : declaredSize;
+            long nextOffset = (long)position + ChunkHeader.SizeInBytes + consumedSize;
+            if (nextOffset > payload.Length)
+                break;
 
             position = checked((int)nextOffset);
         }

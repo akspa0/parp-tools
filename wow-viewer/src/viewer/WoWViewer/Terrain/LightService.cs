@@ -1,21 +1,25 @@
 using System.Numerics;
 using DBCD;
 using DBCD.Providers;
+using WowViewer.Core.IO.Lighting;
 using WoWViewer.Logging;
 using WoWViewer.Rendering;
 
 namespace WoWViewer.Terrain;
 
 /// <summary>
-/// Loads Light.dbc and LightData.dbc to provide zone-based ambient and directional lighting.
+/// Experimental loader for zone-based ambient and directional lighting.
 /// Light.dbc defines light zones with position + falloff radius on each map.
-/// LightData.dbc provides time-of-day keyframed colors (DirectColor, AmbientColor, FogColor, etc.).
-/// For Alpha 0.5.3, we use a fixed time-of-day (noon) since there's no day/night cycle.
+/// The current flattened LightData path is only valid when that exact build/table schema exists;
+/// classic LightParams/LightIntBand/LightFloatBand tables are a separate DBCD-backed contract.
+/// DBC rows are database records, not animation keyframes.
 /// </summary>
 public class LightService
 {
     private readonly List<LightZone> _zones = new();
     private readonly Dictionary<int, List<LightDataEntry>> _lightData = new(); // LightParamID → entries sorted by Time
+    private LightDbcCatalog? _classicCatalog;
+    private int _mapId = -1;
 
     // Current interpolated light state
     public Vector3 AmbientColor { get; private set; } = new(0.5f, 0.5f, 0.5f);
@@ -30,14 +34,43 @@ public class LightService
     // 1440 = noon, 0 = midnight
     public int TimeOfDay { get; set; } = 1440;
 
-    public int ZoneCount => _zones.Count;
-    public int DataEntryCount => _lightData.Values.Sum(v => v.Count);
+    public int ZoneCount => _classicCatalog is null
+        ? _zones.Count
+        : _classicCatalog.Zones.Count(zone => zone.ContinentId == _mapId);
+    public int DataEntryCount => _classicCatalog?.TimedSampleCount ?? _lightData.Values.Sum(v => v.Count);
+    public LightDbcEvaluationEvidence? LastDbcEvidence { get; private set; }
 
     /// <summary>
-    /// Load Light.dbc and LightData.dbc from the given DBC provider.
+    /// Load the exact-build lighting database chain. Classic builds use the native
+    /// Light/LightParams/LightIntBand/LightFloatBand/LightSkybox contract first. The
+    /// flattened LightData path is retained only as a later-build compatibility fallback.
     /// </summary>
     public void Load(IDBCProvider dbcProvider, string dbdDir, string build, int mapId)
     {
+        _zones.Clear();
+        _lightData.Clear();
+        _classicCatalog = null;
+        LastDbcEvidence = null;
+        _mapId = mapId;
+
+        try
+        {
+            _classicCatalog = new BuildScopedLightDbcProfileResolver().Load(
+                dbcProvider,
+                dbdDir,
+                build);
+            ViewerLog.Trace(
+                $"[LightService] Loaded exact-build Light* chain for map {mapId}: " +
+                $"{ZoneCount} zones, {DataEntryCount} timed samples");
+            return;
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Trace(
+                $"[LightService] Classic Light* chain unavailable for exact build {build}; " +
+                $"trying flattened LightData compatibility path: {ex.Message}");
+        }
+
         var dbdProvider = new FilesystemDBDProvider(dbdDir);
         var dbcd = new DBCD.DBCD(dbcProvider, dbdProvider);
 
@@ -74,7 +107,7 @@ public class LightService
             int continent = SafeField<int>(row, continentCol, -1);
             if (continent != mapId) continue;
 
-            // GameCoords is float[3] — X, Y, Z in WoW world coords
+            // GameCoords is float[3] in fixed-scale X,Z,Y order.
             float[] coords;
             try
             {
@@ -103,18 +136,20 @@ public class LightService
             }
             catch { continue; }
 
-            // Convert WoW coords to renderer coords
-            // rendererX = MapOrigin - wowY, rendererY = MapOrigin - wowX
-            float rendererX = WoWConstants.MapOrigin - coords[1];
-            float rendererY = WoWConstants.MapOrigin - coords[0];
-            float rendererZ = coords[2];
+            // Convert X,Z,Y fixed-scale values to renderer coordinates.
+            float wowX = coords[0] / LightDbcZoneRecord.GameUnitsPerWorldUnit;
+            float wowZ = coords[1] / LightDbcZoneRecord.GameUnitsPerWorldUnit;
+            float wowY = coords[2] / LightDbcZoneRecord.GameUnitsPerWorldUnit;
+            float rendererX = WoWConstants.MapOrigin - wowY;
+            float rendererY = WoWConstants.MapOrigin - wowX;
+            float rendererZ = wowZ;
 
             _zones.Add(new LightZone
             {
                 Id = (int)key,
                 Position = new Vector3(rendererX, rendererY, rendererZ),
-                FalloffStart = falloffStart,
-                FalloffEnd = falloffEnd,
+                FalloffStart = falloffStart / LightDbcZoneRecord.GameUnitsPerWorldUnit,
+                FalloffEnd = falloffEnd / LightDbcZoneRecord.GameUnitsPerWorldUnit,
                 ParamIds = paramIds
             });
         }
@@ -186,6 +221,12 @@ public class LightService
     /// </summary>
     public void Update(Vector3 cameraPos)
     {
+        if (_classicCatalog is not null)
+        {
+            UpdateClassicCatalog(cameraPos);
+            return;
+        }
+
         if (_zones.Count == 0) return;
 
         // Find the best matching light zone:
@@ -240,7 +281,7 @@ public class LightService
         if (!_lightData.TryGetValue(paramId, out var entries) || entries.Count == 0)
             return;
 
-        // Interpolate between time keyframes
+        // Interpolate between time-sampled LightData records.
         var data = InterpolateTime(entries, TimeOfDay);
 
         // If we have a local zone with partial weight, blend with global
@@ -262,14 +303,53 @@ public class LightService
         FogScaler = data.FogScaler;
     }
 
+    private void UpdateClassicCatalog(Vector3 rendererCameraPosition)
+    {
+        // Inverse of LightDbcZoneRecord.ToRendererPosition(MapOrigin).
+        var worldPosition = new Vector3(
+            WoWConstants.MapOrigin - rendererCameraPosition.Y,
+            WoWConstants.MapOrigin - rendererCameraPosition.X,
+            rendererCameraPosition.Z);
+
+        try
+        {
+            LightDbcEvaluation value = _classicCatalog!.EvaluateClearWeather(
+                _mapId,
+                worldPosition,
+                TimeOfDay);
+            DirectColor = value[LightDbcColorBand.Direct];
+            AmbientColor = value[LightDbcColorBand.Ambient];
+            SkyTopColor = value[LightDbcColorBand.SkyTop];
+            FogColor = value[LightDbcColorBand.Fog];
+
+            float fogEnd = value[LightDbcFloatBand.FogEnd];
+            if (float.IsFinite(fogEnd) && fogEnd > 10f)
+                FogEnd = fogEnd;
+            float fogScaler = value[LightDbcFloatBand.FogStartScalar];
+            if (float.IsFinite(fogScaler))
+                FogScaler = fogScaler;
+
+            LastDbcEvidence = value.Evidence;
+            ActiveLightId = value.Evidence.LocalProfile?.LightRecordId
+                ?? value.Evidence.GlobalProfile?.LightRecordId
+                ?? -1;
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Trace(
+                $"[LightService] Exact-build Light* evaluation failed for map {_mapId}, " +
+                $"time {TimeOfDay}, world position {worldPosition}: {ex.Message}");
+        }
+    }
+
     /// <summary>
-    /// Interpolate between LightData keyframes at the given time.
+    /// Interpolate between time-sampled LightData records at the given time.
     /// </summary>
     private static LightDataEntry InterpolateTime(List<LightDataEntry> entries, int time)
     {
         if (entries.Count == 1) return entries[0];
 
-        // Find the two keyframes surrounding the current time
+        // Find the two records surrounding the current time.
         int idx = 0;
         for (int i = 0; i < entries.Count; i++)
         {

@@ -82,21 +82,25 @@ public sealed class WorldTerrainTileBuilderTests
     public void Read_SyntheticRootAdt_WithExternalTexSource_UsesResolvedTextureLayers()
     {
         float[] heights = Enumerable.Range(0, 145).Select(static value => (float)value).ToArray();
+        byte[] normals = CreateMcnrPayload(127, 0, 0);
         byte[] rootBytes =
         [
             .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(18)),
             .. MapFileSummaryReaderTestsAccessor.CreateChunk("MHDR", new byte[64]),
-            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MCNK", CreateRootMcnkPayload(flags: 0, indexX: 0, indexY: 0, areaId: 123, holes: 0, layerCount: 1, heights)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MCNK", CreateRootMcnkPayload(flags: 0, indexX: 0, indexY: 0, areaId: 123, holes: 0, layerCount: 1, heights, normals: normals)),
         ];
 
         byte[] packedAlpha = Enumerable.Repeat((byte)0x10, 2048).ToArray();
+        byte[] packedShadow = new byte[512];
+        packedShadow[^1] = 0x80;
         byte[] texBytes =
         [
             .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(18)),
             .. MapFileSummaryReaderTestsAccessor.CreateChunk("MTEX", CreateStringBlock("base.blp", "snow.blp")),
             .. MapFileSummaryReaderTestsAccessor.CreateChunk("MCNK", CreateTexChunkPayload(
                 CreateMclyPayload([0u, 0u], [0u, 0u]),
-                packedAlpha)),
+                packedAlpha,
+                packedShadow)),
         ];
 
         using MemoryStream rootStream = new(rootBytes, writable: false);
@@ -117,6 +121,11 @@ public sealed class WorldTerrainTileBuilderTests
         Assert.Equal("base.blp", chunk.TextureLayers[0].TexturePath);
         Assert.Equal("snow.blp", chunk.TextureLayers[1].TexturePath);
         Assert.NotNull(chunk.TextureLayers[1].DecodedAlpha);
+        Assert.True(chunk.HasNormals);
+        Assert.Equal(new System.Numerics.Vector3(0f, -1f, 0f), chunk.Normals![0]);
+        Assert.True(chunk.HasShadowMap);
+        Assert.Equal((byte)0, chunk.ShadowMap![4094]);
+        Assert.Equal((byte)255, chunk.ShadowMap[4095]);
     }
 
     [Fact]
@@ -164,7 +173,7 @@ public sealed class WorldTerrainTileBuilderTests
         Assert.Equal(0f, terrainTile.Heightmap!.GetHeight(0, 0));
     }
 
-    private static byte[] CreateRootMcnkPayload(uint flags, uint indexX, uint indexY, uint areaId, ushort holes, uint layerCount, float[] heights, float baseHeight = 0f)
+    private static byte[] CreateRootMcnkPayload(uint flags, uint indexX, uint indexY, uint areaId, ushort holes, uint layerCount, float[] heights, float baseHeight = 0f, byte[]? normals = null)
     {
         byte[] header = new byte[128];
         BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0x00, 4), flags);
@@ -179,11 +188,12 @@ public sealed class WorldTerrainTileBuilderTests
         for (int index = 0; index < heights.Length; index++)
             BinaryPrimitives.WriteSingleLittleEndian(mcvtPayload.AsSpan(index * sizeof(float), sizeof(float)), heights[index]);
 
-        return
-        [
-            .. header,
-            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MCVT", mcvtPayload),
-        ];
+        using MemoryStream stream = new();
+        stream.Write(header);
+        stream.Write(MapFileSummaryReaderTestsAccessor.CreateChunk("MCVT", mcvtPayload));
+        if (normals is not null)
+            stream.Write(MapFileSummaryReaderTestsAccessor.CreateChunk("MCNR", normals));
+        return stream.ToArray();
     }
 
     private static byte[] CreateMcinPayload(int firstChunkHeaderOffset, int firstChunkSize, int secondChunkHeaderOffset, int secondChunkSize)
@@ -220,12 +230,27 @@ public sealed class WorldTerrainTileBuilderTests
         return bytes;
     }
 
-    private static byte[] CreateTexChunkPayload(byte[] mclyPayload, byte[] mcalPayload)
+    private static byte[] CreateTexChunkPayload(byte[] mclyPayload, byte[] mcalPayload, byte[]? mcshPayload = null)
     {
         using MemoryStream stream = new();
         stream.Write(MapFileSummaryReaderTestsAccessor.CreateChunk("MCLY", mclyPayload));
         stream.Write(MapFileSummaryReaderTestsAccessor.CreateChunk("MCAL", mcalPayload));
+        if (mcshPayload is not null)
+            stream.Write(MapFileSummaryReaderTestsAccessor.CreateChunk("MCSH", mcshPayload));
         return stream.ToArray();
+    }
+
+    private static byte[] CreateMcnrPayload(sbyte x, sbyte z, sbyte y)
+    {
+        byte[] payload = new byte[0x1C0];
+        for (int sample = 0; sample < 145; sample++)
+        {
+            int offset = sample * 3;
+            payload[offset] = unchecked((byte)x);
+            payload[offset + 1] = unchecked((byte)z);
+            payload[offset + 2] = unchecked((byte)y);
+        }
+        return payload;
     }
 
     private static byte[] CreateMclyPayload(uint[] layerFlags, uint[] layerOffsets)

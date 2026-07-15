@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-14 (RunPod deployment ready; WoWViewer cross-platform CI investigation started)
+Last updated: 2026-07-15 (Spec 103 prefab curation and renderer-faithful lighting prepared)
 
 ## Spec 104 — 1.0.0 M2 route (2026-07-15)
 
@@ -18,10 +18,11 @@ Last updated: 2026-07-14 (RunPod deployment ready; WoWViewer cross-platform CI i
 
 ## For tomorrow (pick up here)
 
-1. **Spec 103 training**: everything is built and verified, nothing left to code. Run
-   `specs/103-image-only-reconstruction/quickstart.md` **"Start here"** section (top of file):
-   build the RunPod bundle → transfer → `install_deps.sh` → `verify_bundle.sh` → `smoke.sh` →
-   `train.sh` on the pod. If output shows banding, try `OUTPUT_HEAD_MODE=linear_unclamped_train`.
+1. **Spec 103 corpus gate:** implementation and focused verification are complete, but the next
+   training corpus is not approved yet. The USER runs quickstart §3d against the existing bounded
+   Azeroth/Kalimdor map canvases, reviews `curation_summary.json` plus both evidence ledgers, then
+   uses §5 to package that new prefab-reduced manifest. Do not reuse the historical 2,253-tile
+   bundle. Quickstart §6 is the separate user-run LIT/DBC capture-calibration lane.
 2. **WoWViewer CI**: built and locally validated (see entry below) — `.github/workflows/
    wowviewer-build.yml` exists at the true repo root (`i:\parp\parp-tools\.github\`, NOT under
    `wow-viewer/` — this repo is `akspa0/parp-tools`, not a submodule, confirmed via `git
@@ -115,8 +116,10 @@ Last updated: 2026-07-14 (RunPod deployment ready; WoWViewer cross-platform CI i
   was right and I initially defaulted keep-all in violation of the spec; fixed. `spec103_curate_dataset.py`
   buckets every tile and drops object_contaminated / blank_minimap / height_normal_mismatch, writes an
   auditable `curation_manifest.parquet` (+ map/height-regime buckets) the trainer consumes via
-  `--curation-manifest`. **Default `--max-object-coverage 0.0`** (drop ANY object; was 0.02). V18 at 0.0:
-  5134 → 2650 kept. `1.0` is v7-faithful keep-all ablation only. Trainer reports `val_no_prior` every epoch (prior-dropout robustness).
+  `--curation-manifest`. **Default `--max-object-coverage 0.0`** (drop ANY object; was 0.02).
+  Recorded V18 proof: 5134 total, 2650 object-free before other gates, 2253 kept after blank/signal
+  filtering. `1.0` is v7-faithful keep-all ablation only. Trainer reports `val_no_prior` every epoch
+  (prior-dropout robustness).
 - **Banding investigation (2026-07-14):** verified live against V18 zarr — height_257/normal_xyz/
   liquid_height/object_precise_mask are all float32; only minimap_rgb is uint8 (correctly, the
   deployment image). No precise data is routed through 8-bit image encoding. Real causes found:
@@ -455,5 +458,33 @@ Last updated: 2026-07-14 (RunPod deployment ready; WoWViewer cross-platform CI i
 ## Boundaries
 
 - New work in `wow-viewer/`; `gillijimproject_refactor` is read-only reference (port from, never edit).
-- Staged clients only: `output/tmp/wowarchive-clients/`. Never `H:\CLIENTS`.
+- Staged clients only: `output/tmp/wowarchive-clients/`; the forbidden legacy client root remains
+  prohibited for inspection, validation, harvesting, commands, and documentation.
 - Spec 080 owns the UI lane.
+
+## Spec 103 — map-canvas prefab curation + synthetic lighting (2026-07-15)
+
+- **Current target:** shrink the V8 corpus by unique terrain-art prefab/context coverage before the
+  next training run, while making synthetic RGB reproduce the recoverable 1.x terrain-lighting
+  contract. The proof owner is Spec 103; alpha/paste discovery remains owned by Spec 076.
+- **Curation implemented:** `spec103_curate_prefabs.py` consumes complete-map Spec 076 canvases and
+  regions, emits typed pattern/tile ledgers plus a reduced manifest, treats ADTs as storage pages,
+  retains atomic/composite/blocky/non-brush states, derives multiscale/cellular placement features,
+  records MCLY/tileset anomalies and object/liquid context, selects deterministic representatives,
+  and prevents canonical prefab families from crossing partitions.
+- **Lighting implemented:** shared strict LIT reader/profile export; all headers before all groups;
+  BGRX timed colors; unique global/default clear selection; local LIT placement remains disabled.
+  Sky geometry is Z-up. Terrain now carries MCNR and optional full MCSH through both render paths,
+  uses one-sided Lambert, and modulates directional light only. Capture is one-tile top-down
+  orthographic with hash-bound v2 sidecars.
+- **DBC truth:** exact-build DBCD + bundled WoWDBDefs resolves `Light`, `LightParams`,
+  `LightIntBand`, `LightFloatBand`, and `LightSkybox`, retaining DBC/DBD hashes and record IDs.
+  `GameCoords` is fixed-scale X/Z/Y; the active `LightService` now converts `/36` correctly and
+  uses this chain before any later flattened compatibility path.
+- **Rights boundary:** licensed/generated authored variants can be `clean_synthetic`; any captured
+  client LIT/DBC color is `private_byod`. No renderer or model output is presented as a legal status.
+- **Verification:** 37/37 Spec 103 Python tests and 35/35 focused Core lighting/runtime tests pass;
+  Capture, active WoWViewer, and Inspect projects build with zero errors. Existing Snappier advisory
+  warnings remain outside this slice.
+- **Unproven/user-run:** T030 bounded real-corpus curation report; T040 staged LIT/DBC image
+  comparison and direction/MCSH/sky calibration; all capture, harvest, GPU, and training runs.

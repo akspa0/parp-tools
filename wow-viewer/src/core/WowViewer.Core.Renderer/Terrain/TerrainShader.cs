@@ -29,6 +29,7 @@ public sealed class TerrainShader : IDisposable
     private readonly int _uShowLayer2;
     private readonly int _uShowLayer3;
     private readonly int _uShowShadowMap;
+    private readonly int _uShadowStrength;
 
     private const string VertexSource = @"
 #version 330 core
@@ -42,9 +43,10 @@ layout(location = 5) in vec4 aVertexColor;
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProj;
+uniform vec3 uLightDir;
 
 out vec3 vWorldPos;
-out vec3 vNormal;
+out float vDiffuse;
 out vec2 vTexCoord;
 out vec4 vVertexColor;
 flat out uint vChunkSlice;
@@ -53,7 +55,8 @@ flat out uvec4 vTexIdx;
 void main() {
     vec4 worldPos = uModel * vec4(aPos, 1.0);
     vWorldPos = worldPos.xyz;
-    vNormal = mat3(uModel) * aNormal;
+    vec3 worldNormal = normalize(mat3(uModel) * aNormal);
+    vDiffuse = max(dot(worldNormal, normalize(uLightDir)), 0.0);
     vTexCoord = aTexCoord;
     vVertexColor = aVertexColor;
     vChunkSlice = aChunkSlice;
@@ -65,7 +68,7 @@ void main() {
     private const string FragmentSource = @"
 #version 330 core
 in vec3 vWorldPos;
-in vec3 vNormal;
+in float vDiffuse;
 in vec2 vTexCoord;
 in vec4 vVertexColor;
 flat in uint vChunkSlice;
@@ -81,7 +84,7 @@ uniform int uShowLayer1;
 uniform int uShowLayer2;
 uniform int uShowLayer3;
 uniform int uShowShadowMap;
-uniform vec3 uLightDir;
+uniform float uShadowStrength;
 uniform vec3 uLightColor;
 uniform vec3 uAmbientColor;
 uniform vec3 uFogColor;
@@ -109,9 +112,10 @@ void main() {
     float a2 = (uShowLayer2 == 1 && has2) ? alphaShadow.g : 0.0;
     float a3 = (uShowLayer3 == 1 && has3) ? alphaShadow.b : 0.0;
 
-    vec3 norm = normalize(vNormal);
-    float diff = abs(dot(norm, normalize(uLightDir)));
-    vec3 lighting = uAmbientColor + uLightColor * diff;
+    float shadowVisibility = (uShowShadowMap == 1)
+        ? 1.0 - clamp(alphaShadow.a, 0.0, 1.0) * clamp(uShadowStrength, 0.0, 1.0)
+        : 1.0;
+    vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility;
     vec3 result = vec3(1.0);
 
     if (uShowLayer0 == 1 && has0) {
@@ -135,11 +139,6 @@ void main() {
     float tintStrength = clamp(vVertexColor.a * 2.0 - 1.0, 0.0, 1.0);
     vec3 vertexTint = (uUseMccv == 1) ? mix(vec3(1.0), tintColor, tintStrength) : vec3(1.0);
     result *= vertexTint;
-
-    if (uShowShadowMap == 1) {
-        float shadow = alphaShadow.a;
-        result *= mix(1.0, 0.4, shadow);
-    }
 
     float dist = length(vWorldPos - uCameraPos);
     float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
@@ -174,6 +173,7 @@ void main() {
         _uShowLayer2 = gl.GetUniformLocation(_program, "uShowLayer2");
         _uShowLayer3 = gl.GetUniformLocation(_program, "uShowLayer3");
         _uShowShadowMap = gl.GetUniformLocation(_program, "uShowShadowMap");
+        _uShadowStrength = gl.GetUniformLocation(_program, "uShadowStrength");
 
         Use();
         gl.Uniform1(_uDiffuseArray, 0);
@@ -212,6 +212,7 @@ void main() {
         if (loc >= 0) _gl.Uniform1(loc, visible ? 1 : 0);
     }
     public void SetShowShadowMap(bool enabled) => _gl.Uniform1(_uShowShadowMap, enabled ? 1 : 0);
+    public void SetShadowStrength(float strength) => _gl.Uniform1(_uShadowStrength, Math.Clamp(strength, 0f, 1f));
 
     private uint CreateProgram()
     {

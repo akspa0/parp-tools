@@ -10,6 +10,18 @@ public readonly record struct TerrainNormalAgreementReport(
 /// <summary>Numeric mesh-normal derivation and MCNR agreement metrics for real MCVT vertices.</summary>
 public static class TerrainNormalGeometry
 {
+    /// <summary>
+    /// Converts an ADT grid-space XYZ normal into the renderer's world axes.
+    /// Terrain grid X advances along -world Y and grid Y advances along -world X.
+    /// </summary>
+    public static Vector3 TransformAdtNormalToRenderer(Vector3 adtNormal)
+    {
+        Vector3 rendererNormal = new(-adtNormal.Y, -adtNormal.X, adtNormal.Z);
+        return rendererNormal.LengthSquared() > 1e-10f
+            ? Vector3.Normalize(rendererNormal)
+            : Vector3.UnitZ;
+    }
+
     public static TerrainNormalAgreementReport CompareWithNativeDenseNormals(
         TerrainVertexLattice terrain,
         float[,,] nativeNormalXyz257,

@@ -7,6 +7,7 @@ using WoWViewer.DataSources;
 using WoWViewer.Logging;
 using WoWViewer.Population;
 using WoWViewer.Rendering;
+using WowViewer.Core.Maps;
 using Silk.NET.OpenGL;
 using CorePm4AxisConvention = WowViewer.Core.PM4.Models.Pm4AxisConvention;
 using CorePm4CorrelationCandidateScore = WowViewer.Core.PM4.Models.Pm4CorrelationCandidateScore;
@@ -3253,6 +3254,9 @@ public class WorldScene : ISceneRenderer
     private bool _showLitLights;
     private bool _litLoadAttempted;
     private bool _useLitFogOverride;
+    private bool _hasPreLitFogRange;
+    private float _preLitFogStart;
+    private float _preLitFogEnd;
     private string _litStatus = "LIT not loaded.";
     private int _selectedLitLightIndex = -1;
     private string? _selectedLitSourcePath;
@@ -3272,6 +3276,10 @@ public class WorldScene : ISceneRenderer
         get => _useLitFogOverride;
         set
         {
+            if (_useLitFogOverride == value)
+                return;
+            if (!value)
+                RestorePreLitFogRange(_terrainManager?.Lighting);
             _useLitFogOverride = value;
             if (value && !_litLoadAttempted)
                 LazyLoadLit();
@@ -3284,6 +3292,28 @@ public class WorldScene : ISceneRenderer
     public string? SelectedLitSourcePath => _selectedLitSourcePath ?? _litLoader?.SourcePath;
     public IReadOnlyList<string> AvailableLitSourcePaths => _litLoader?.AvailableSourcePaths ?? Array.Empty<string>();
     public LitLoader.LitLightingSample? LastLitSample => _lastLitSample;
+
+    private void CapturePreLitFogRange(TerrainLighting lighting)
+    {
+        if (_hasPreLitFogRange)
+            return;
+
+        _preLitFogStart = lighting.FogStart;
+        _preLitFogEnd = lighting.FogEnd;
+        _hasPreLitFogRange = true;
+    }
+
+    private void RestorePreLitFogRange(TerrainLighting? lighting)
+    {
+        if (!_hasPreLitFogRange)
+            return;
+        if (lighting != null)
+        {
+            lighting.FogStart = _preLitFogStart;
+            lighting.FogEnd = _preLitFogEnd;
+        }
+        _hasPreLitFogRange = false;
+    }
 
     // Taxi selection: -1 = show all (or none if !_showTaxi)
     private int _selectedTaxiNodeId = -1;
@@ -7075,7 +7105,8 @@ public class WorldScene : ISceneRenderer
     }
 
     /// <summary>
-    /// Load Light.dbc and LightData.dbc for zone-based lighting.
+    /// Load the exact-build Light* DBC chain for zone-based lighting, with the flattened
+    /// LightData table retained only as a later-build compatibility fallback.
     /// </summary>
     public void LoadLighting(DBCD.Providers.IDBCProvider dbcProvider, string dbdDir, string build, int mapId)
     {
@@ -8838,10 +8869,16 @@ public class WorldScene : ISceneRenderer
 
                         if (_lightService != null && _lightService.ActiveLightId >= 0)
                         {
+                            (float dbcFogStart, float dbcFogEnd) =
+                                TerrainLightingMath.ComputeClientFogRange(
+                                    _lightService.FogEnd,
+                                    _lightService.FogScaler);
                             lighting.ApplyExternalLighting(
                                 _lightService.DirectColor,
                                 _lightService.AmbientColor,
                                 _lightService.FogColor);
+                            lighting.FogStart = dbcFogStart;
+                            lighting.FogEnd = dbcFogEnd;
                             lighting.Update();
 
                             _skyDome.ZenithColor = _lightService.SkyTopColor;
@@ -8853,6 +8890,11 @@ public class WorldScene : ISceneRenderer
                         }
                         else
                         {
+                            if (_useLitFogOverride && litSample == null && _hasPreLitFogRange)
+                            {
+                                lighting.FogStart = _preLitFogStart;
+                                lighting.FogEnd = _preLitFogEnd;
+                            }
                             lighting.ClearExternalLighting();
                             lighting.Update();
                             _skyDome.UpdateFromLighting(lighting.GameTime);
@@ -8863,12 +8905,14 @@ public class WorldScene : ISceneRenderer
 
                         if (_useLitFogOverride && litSample != null)
                         {
-                            Vector3 baseLightColor = lighting.LightColor;
-                            Vector3 baseAmbientColor = lighting.AmbientColor;
-
-                            // Keep the scene's base diffuse/ambient path and only trust LIT for the
-                            // sky/fog seam until the light-color semantics are validated on real maps.
-                            lighting.ApplyExternalLighting(baseLightColor, baseAmbientColor, litSample.FogColor);
+                            CapturePreLitFogRange(lighting);
+                            // LIT tracks 0/1/7 are the global diffuse, ambient, and fog colors.
+                            // Apply the profile as one coherent source; silently mixing DBC colors
+                            // with LIT fog produced a profile that no client file actually authored.
+                            lighting.ApplyExternalLighting(
+                                litSample.DirectColor,
+                                litSample.AmbientColor,
+                                litSample.FogColor);
                             lighting.FogStart = litSample.FogStart;
                             lighting.FogEnd = litSample.FogEnd;
                             lighting.Update();

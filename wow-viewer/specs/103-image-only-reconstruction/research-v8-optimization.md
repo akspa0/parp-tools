@@ -27,8 +27,9 @@ Nothing here weakens the pinned 13-ch contract.
 smooth 257² height field from a 256² minimap *with a 17×17 WDL prior already supplied as the
 trestle base* — is low-frequency residual regression. This is the 2015-era "double width every
 level" habit; modern dense-prediction practice caps widths at 256–512 and spends capacity on
-better blocks, not wider bottlenecks. With only ~2,650–3,131 curated tiles (V18 @ 0.0
-object coverage), 117M params is also a memorization risk the curation pass can't fix.
+better blocks, not wider bottlenecks. With 2,253 tiles in the recorded all-gates clean manifest
+(2,650 object-free before blank/signal filtering), 117M params is also a memorization risk the
+curation pass can't fix.
 
 ## 2. 2025–2026 landscape (papers/code surveyed 2026-07-13)
 

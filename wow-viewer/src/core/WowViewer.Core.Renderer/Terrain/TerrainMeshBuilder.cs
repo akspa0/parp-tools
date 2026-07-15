@@ -87,7 +87,9 @@ public sealed class TerrainMeshBuilder
                 vertices[vb + 1] = wy;
                 vertices[vb + 2] = z;
 
-                var normal = ComputeDefaultNormal();
+                Vector3 normal = chunk.Normals is { Length: vertsPerChunk }
+                    ? chunk.Normals[i]
+                    : Vector3.UnitZ;
                 vertices[vb + 3] = normal.X;
                 vertices[vb + 4] = normal.Y;
                 vertices[vb + 5] = normal.Z;
@@ -277,7 +279,10 @@ public sealed class TerrainMeshBuilder
                 alphaShadow[idx + 0] = (byte)(a1 * 255);
                 alphaShadow[idx + 1] = (byte)(a2 * 255);
                 alphaShadow[idx + 2] = (byte)(a3 * 255);
-                alphaShadow[idx + 3] = 0;
+                int shadowIndex = (y * size) + x;
+                alphaShadow[idx + 3] = chunk.ShadowMap is { Length: size * size }
+                    ? chunk.ShadowMap[shadowIndex]
+                    : byte.MinValue;
             }
         }
     }
@@ -312,11 +317,6 @@ public sealed class TerrainMeshBuilder
     private static int InnerIndex(int innerRow, int innerCol)
     {
         return innerRow * 17 + 9 + innerCol;
-    }
-
-    private static Vector3 ComputeDefaultNormal()
-    {
-        return Vector3.UnitZ;
     }
 
     private static int[] BuildIndices(ushort holeMask)

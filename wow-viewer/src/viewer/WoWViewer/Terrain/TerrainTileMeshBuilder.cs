@@ -293,8 +293,8 @@ public sealed class TerrainTileMeshBuilder
                 for (int x = 0; x < size; x++)
                 {
                     int dst = y * size + x;
-                    int src = EdgeFixedIndex(x, y);
-                    alphaShadow[sliceBase + dst * 4 + 3] = chunk.ShadowMap[src];
+                    // MCSH is a native 64x64 mask. The MCAL edge-fix does not apply to it.
+                    alphaShadow[sliceBase + dst * 4 + 3] = chunk.ShadowMap[dst];
                 }
             }
         }

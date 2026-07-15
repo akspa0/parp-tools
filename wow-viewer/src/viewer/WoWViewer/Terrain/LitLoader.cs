@@ -1,5 +1,6 @@
 using System.Numerics;
-using System.Text;
+using WowViewer.Core.IO.Lit;
+using WowViewer.Core.Maps;
 using WoWViewer.DataSources;
 using WoWViewer.Logging;
 
@@ -24,7 +25,8 @@ public sealed class LitLoader
     public const int TrackSkyAboveHorizon = 5;
     public const int TrackSkyHorizon = 6;
     public const int TrackFogColor = 7;
-    public const int TrackShadowOpacity = 8;
+    // LIT.md leaves track 8 unknown. Do not promote it to shadow opacity without client proof.
+    public const int TrackUnknown8 = 8;
     public const int TrackSunColor = 9;
     public const int TrackSunHaloColor = 10;
     public const int TrackCloudColor = 12;
@@ -156,7 +158,10 @@ public sealed class LitLoader
 
         public float EvaluateFogEnd(float timeOfDay)
         {
-            return EvaluateFloatCurve(FogEndSamples, timeOfDay, fallback: 1500f);
+            return EvaluateFloatCurve(
+                FogEndSamples,
+                timeOfDay,
+                fallback: 1500f * TerrainLightingMath.ClientFixedUnitsPerWorldUnit);
         }
 
         public float EvaluateFogStartScaler(float timeOfDay)
@@ -277,46 +282,11 @@ public sealed class LitLoader
         try
         {
             using var stream = new MemoryStream(data, writable: false);
-            using var reader = new BinaryReader(stream, Encoding.ASCII, leaveOpen: false);
-
-            Version = reader.ReadUInt32();
-            RawLightCount = reader.ReadInt32();
-            int dataLightCount = RawLightCount < 0 ? Math.Abs(RawLightCount) : RawLightCount;
-            int trackCount = GetTrackCountForVersion(Version);
-            bool partialDataOnly = RawLightCount < 0;
-
-            if (partialDataOnly)
-            {
-                var groups = new List<LitGroup>
-                {
-                    Version == Version02Test
-                        ? ReadLegacyVersion02PartialGroup(reader, 0)
-                        : ReadGroup(reader, 0, trackCount)
-                };
-                Lights.Add(new LitLight(0, -1, -1, -1, Vector3.Zero, 0f, 0f, "Default", groups));
-            }
-            else
-            {
-                for (int lightIndex = 0; lightIndex < dataLightCount; lightIndex++)
-                {
-                    var meta = ReadLightHeader(reader, lightIndex);
-
-                    var groups = new List<LitGroup>(4);
-                    for (int groupIndex = 0; groupIndex < 4; groupIndex++)
-                        groups.Add(ReadGroup(reader, groupIndex, trackCount));
-
-                    Lights.Add(new LitLight(
-                        lightIndex,
-                        meta.Item1,
-                        meta.Item2,
-                        meta.Item3,
-                        meta.Item4,
-                        meta.Item5,
-                        meta.Item6,
-                        meta.Item7,
-                        groups));
-                }
-            }
+            LitFileProfile profile = LitProfileReader.Read(stream, SourcePath);
+            Version = profile.VersionNumber;
+            RawLightCount = profile.RawLightCount;
+            foreach (LitLightProfile sourceLight in profile.Lights)
+                Lights.Add(ConvertLight(sourceLight));
 
             Status = $"LIT: loaded {Lights.Count} light entries from {SourcePath}.";
             ViewerLog.Info(ViewerLog.Category.Terrain, $"[LIT] Loaded {Lights.Count} light entries from {SourcePath} (version=0x{Version:X8}, rawCount={RawLightCount}).");
@@ -331,7 +301,63 @@ public sealed class LitLoader
         }
     }
 
-    public LitLightingSample? EvaluateLighting(Vector3 cameraPosition, float gameTime)
+    private static LitLight ConvertLight(LitLightProfile source)
+    {
+        LitLightHeaderProfile? header = source.Header;
+        IReadOnlyList<LitGroup> groups = source.Groups.Select(ConvertGroup).ToArray();
+        return header == null
+            ? new LitLight(source.Index, -1, -1, -1, Vector3.Zero, 0f, 0f, "Default", groups)
+            : new LitLight(
+                source.Index,
+                header.ChunkX,
+                header.ChunkY,
+                header.ChunkRadius,
+                header.Position,
+                header.Radius,
+                header.Dropoff,
+                header.Name,
+                groups);
+    }
+
+    private static LitGroup ConvertGroup(LitLightGroupProfile source)
+    {
+        IReadOnlyList<LitTrack> tracks = source.Tracks
+            .Select(track => new LitTrack(
+                track.Index,
+                track.Keyframes
+                    .Select(key => new LitColorKeyframe(key.TimeOfDay, key.PackedBgrx, key.Color))
+                    .ToArray()))
+            .ToArray();
+
+        IReadOnlyList<float> fogEnd = source.FloatBands.Count > 0
+            ? source.FloatBands[0].Samples
+            : Array.Empty<float>();
+        IReadOnlyList<float> fogStart = source.FloatBands.Count > 1
+            ? source.FloatBands[1].Samples
+            : Array.Empty<float>();
+        IReadOnlyList<IReadOnlyList<float>> skyBands = source.FloatBands
+            .Skip(2)
+            .Select(band => band.Samples)
+            .ToArray();
+        IReadOnlyList<IReadOnlyList<float>> parameterBands = source.ParameterBands
+            .Select(band => band.Samples)
+            .ToArray();
+
+        return new LitGroup(
+            source.Index,
+            tracks,
+            fogEnd,
+            fogStart,
+            source.HighlightSky ?? 0,
+            skyBands,
+            source.CloudMask ?? 0,
+            parameterBands);
+    }
+
+    public LitLightingSample? EvaluateLighting(
+        Vector3 cameraPosition,
+        float gameTime,
+        bool includeUnprovenLocalZones = false)
     {
         if (Lights.Count == 0)
             return null;
@@ -358,50 +384,56 @@ public sealed class LitLoader
         string dominantLightName = baseSample?.DominantLightName ?? "None";
         float dominantWeight = 0f;
 
-        for (int i = 0; i < Lights.Count; i++)
+        // The global/default entry is reliable. Local LIT coordinates still need a proven
+        // /36 + axis/origin transform before they may drive capture or the default viewer.
+        // Keep the old spatial experiment available only behind an explicit diagnostic opt-in.
+        if (includeUnprovenLocalZones)
         {
-            LitLight light = Lights[i];
-            if (light.IsDefaultLight)
-                continue;
-
-            float spatialWeight = ComputeSpatialWeight(light, cameraPosition);
-            if (spatialWeight <= 0f)
-                continue;
-
-            LitLightingSample? localSample = EvaluateSingleLight(light, timeOfDay, clearGroupIndex, spatialWeight);
-            if (localSample == null)
-                continue;
-
-            if (dominantLightIndex < 0 || spatialWeight > dominantWeight)
+            for (int i = 0; i < Lights.Count; i++)
             {
-                dominantLightIndex = localSample.DominantLightIndex;
-                dominantLightName = localSample.DominantLightName;
-                dominantWeight = spatialWeight;
-            }
+                LitLight light = Lights[i];
+                if (light.IsDefaultLight)
+                    continue;
 
-            if (totalWeight <= 0f)
-            {
-                direct = Vector3.Lerp(direct, localSample.DirectColor, spatialWeight);
-                ambient = Vector3.Lerp(ambient, localSample.AmbientColor, spatialWeight);
-                fog = Vector3.Lerp(fog, localSample.FogColor, spatialWeight);
-                skyTop = Vector3.Lerp(skyTop, localSample.SkyTopColor, spatialWeight);
-                skyHorizon = Vector3.Lerp(skyHorizon, localSample.SkyHorizonColor, spatialWeight);
-                fogEnd = LerpScalar(fogEnd, localSample.FogEnd, spatialWeight);
-                fogStartScalar = LerpScalar(fogStartScalar, localSample.FogStartScalar, spatialWeight);
-                totalWeight = spatialWeight;
-            }
-            else
-            {
-                float newWeight = Math.Clamp(totalWeight + spatialWeight, 0f, 1f);
-                float blend = newWeight <= 0.0001f ? 0f : spatialWeight / newWeight;
-                direct = Vector3.Lerp(direct, localSample.DirectColor, blend);
-                ambient = Vector3.Lerp(ambient, localSample.AmbientColor, blend);
-                fog = Vector3.Lerp(fog, localSample.FogColor, blend);
-                skyTop = Vector3.Lerp(skyTop, localSample.SkyTopColor, blend);
-                skyHorizon = Vector3.Lerp(skyHorizon, localSample.SkyHorizonColor, blend);
-                fogEnd = LerpScalar(fogEnd, localSample.FogEnd, blend);
-                fogStartScalar = LerpScalar(fogStartScalar, localSample.FogStartScalar, blend);
-                totalWeight = newWeight;
+                float spatialWeight = ComputeSpatialWeight(light, cameraPosition);
+                if (spatialWeight <= 0f)
+                    continue;
+
+                LitLightingSample? localSample = EvaluateSingleLight(light, timeOfDay, clearGroupIndex, spatialWeight);
+                if (localSample == null)
+                    continue;
+
+                if (dominantLightIndex < 0 || spatialWeight > dominantWeight)
+                {
+                    dominantLightIndex = localSample.DominantLightIndex;
+                    dominantLightName = localSample.DominantLightName;
+                    dominantWeight = spatialWeight;
+                }
+
+                if (totalWeight <= 0f)
+                {
+                    direct = Vector3.Lerp(direct, localSample.DirectColor, spatialWeight);
+                    ambient = Vector3.Lerp(ambient, localSample.AmbientColor, spatialWeight);
+                    fog = Vector3.Lerp(fog, localSample.FogColor, spatialWeight);
+                    skyTop = Vector3.Lerp(skyTop, localSample.SkyTopColor, spatialWeight);
+                    skyHorizon = Vector3.Lerp(skyHorizon, localSample.SkyHorizonColor, spatialWeight);
+                    fogEnd = LerpScalar(fogEnd, localSample.FogEnd, spatialWeight);
+                    fogStartScalar = LerpScalar(fogStartScalar, localSample.FogStartScalar, spatialWeight);
+                    totalWeight = spatialWeight;
+                }
+                else
+                {
+                    float newWeight = Math.Clamp(totalWeight + spatialWeight, 0f, 1f);
+                    float blend = newWeight <= 0.0001f ? 0f : spatialWeight / newWeight;
+                    direct = Vector3.Lerp(direct, localSample.DirectColor, blend);
+                    ambient = Vector3.Lerp(ambient, localSample.AmbientColor, blend);
+                    fog = Vector3.Lerp(fog, localSample.FogColor, blend);
+                    skyTop = Vector3.Lerp(skyTop, localSample.SkyTopColor, blend);
+                    skyHorizon = Vector3.Lerp(skyHorizon, localSample.SkyHorizonColor, blend);
+                    fogEnd = LerpScalar(fogEnd, localSample.FogEnd, blend);
+                    fogStartScalar = LerpScalar(fogStartScalar, localSample.FogStartScalar, blend);
+                    totalWeight = newWeight;
+                }
             }
         }
 
@@ -412,9 +444,10 @@ public sealed class LitLoader
             dominantWeight = 1f;
         }
 
-        fogEnd = Math.Clamp(fogEnd, 50f, 100000f);
-        fogStartScalar = Math.Clamp(fogStartScalar, 0.02f, 1.0f);
-        float fogStart = Math.Clamp(fogEnd * fogStartScalar, 0f, fogEnd);
+        (float fogStart, float normalizedFogEnd) = TerrainLightingMath.ComputeFogRange(
+            fogEnd,
+            fogStartScalar);
+        fogEnd = normalizedFogEnd;
 
         return new LitLightingSample(
             dominantLightIndex,
@@ -468,7 +501,10 @@ public sealed class LitLoader
             : fog;
         float fogEnd = group.EvaluateFogEnd(timeOfDay);
         float fogStartScalar = group.EvaluateFogStartScaler(timeOfDay);
-        float fogStart = Math.Clamp(fogEnd * Math.Clamp(fogStartScalar, 0.02f, 1f), 0f, fogEnd);
+        (float fogStart, float normalizedFogEnd) = TerrainLightingMath.ComputeClientFogRange(
+            fogEnd,
+            fogStartScalar);
+        fogEnd = normalizedFogEnd;
 
         return new LitLightingSample(
             light.Index,
@@ -483,123 +519,6 @@ public sealed class LitLoader
             fogEnd,
             fogStart,
             fogStartScalar);
-    }
-
-    private LitGroup ReadGroup(BinaryReader reader, int groupIndex, int trackCount)
-    {
-        var lengths = new int[trackCount];
-        for (int i = 0; i < trackCount; i++)
-            lengths[i] = Math.Clamp(reader.ReadInt32(), 0, 32);
-
-        var tracks = new List<LitTrack>(trackCount);
-        for (int trackIndex = 0; trackIndex < trackCount; trackIndex++)
-        {
-            var keyframes = new List<LitColorKeyframe>(lengths[trackIndex]);
-            for (int sampleIndex = 0; sampleIndex < 32; sampleIndex++)
-            {
-                int timeOfDay = reader.ReadInt32();
-                uint packedColor = unchecked((uint)reader.ReadInt32());
-                if (sampleIndex < lengths[trackIndex])
-                    keyframes.Add(new LitColorKeyframe(timeOfDay, packedColor, DecodeBgrx(packedColor)));
-            }
-
-            tracks.Add(new LitTrack(trackIndex, keyframes));
-        }
-
-        float[] fogEndSamples = ReadFloatArray(reader, 32);
-        float[] fogStartScalers = ReadFloatArray(reader, 32);
-        int highlightSky = reader.ReadInt32();
-        var skyFloatBands = new IReadOnlyList<float>[]
-        {
-            ReadFloatArray(reader, 32),
-            ReadFloatArray(reader, 32),
-            ReadFloatArray(reader, 32),
-            ReadFloatArray(reader, 32),
-        };
-        int cloudMask = reader.ReadInt32();
-        IReadOnlyList<float>[] parameterBands = Array.Empty<IReadOnlyList<float>>();
-
-        if (Version >= Version85)
-        {
-            parameterBands = new IReadOnlyList<float>[]
-            {
-                ReadFloatArray(reader, 10),
-                ReadFloatArray(reader, 10),
-                ReadFloatArray(reader, 10),
-                ReadFloatArray(reader, 10),
-            };
-        }
-
-        return new LitGroup(groupIndex, tracks, fogEndSamples, fogStartScalers, highlightSky, skyFloatBands, cloudMask, parameterBands);
-    }
-
-    private LitGroup ReadLegacyVersion02PartialGroup(BinaryReader reader, int groupIndex)
-    {
-        const int legacyTrackCount = 17;
-
-        var lengths = new int[legacyTrackCount];
-        for (int i = 0; i < legacyTrackCount; i++)
-            lengths[i] = Math.Clamp(reader.ReadInt32(), 0, 32);
-
-        var tracks = new List<LitTrack>(legacyTrackCount);
-        for (int trackIndex = 0; trackIndex < legacyTrackCount; trackIndex++)
-        {
-            var keyframes = new List<LitColorKeyframe>(lengths[trackIndex]);
-            for (int sampleIndex = 0; sampleIndex < 32; sampleIndex++)
-            {
-                int timeOfDay = reader.ReadInt32();
-                uint packedColor = unchecked((uint)reader.ReadInt32());
-                if (sampleIndex < lengths[trackIndex])
-                    keyframes.Add(new LitColorKeyframe(timeOfDay, packedColor, DecodeBgrx(packedColor)));
-            }
-
-            tracks.Add(new LitTrack(trackIndex, keyframes));
-        }
-
-        var legacyFloatBands = new List<IReadOnlyList<float>>(7);
-        int availableLegacyBands = (int)((reader.BaseStream.Length - reader.BaseStream.Position) / (32 * sizeof(float)));
-        int bandCount = Math.Clamp(availableLegacyBands, 0, 7);
-        for (int i = 0; i < bandCount; i++)
-            legacyFloatBands.Add(ReadFloatArray(reader, 32));
-
-        while (legacyFloatBands.Count < 7)
-            legacyFloatBands.Add(Array.Empty<float>());
-
-        var skyFloatBands = new IReadOnlyList<float>[]
-        {
-            legacyFloatBands[2],
-            legacyFloatBands[3],
-            legacyFloatBands[4],
-            legacyFloatBands[5],
-        };
-
-        IReadOnlyList<float>[] parameterBands = legacyFloatBands[6].Count > 0
-            ? new[] { legacyFloatBands[6] }
-            : Array.Empty<IReadOnlyList<float>>();
-
-        return new LitGroup(
-            groupIndex,
-            tracks,
-            legacyFloatBands[0],
-            legacyFloatBands[1],
-            highlightSky: 0,
-            skyFloatBands,
-            cloudMask: 0,
-            parameterBands);
-    }
-
-    private static (int ChunkX, int ChunkY, int ChunkRadius, Vector3 Position, float RadiusRaw, float DropoffRaw, string Name) ReadLightHeader(BinaryReader reader, int lightIndex)
-    {
-        int chunkX = reader.ReadInt32();
-        int chunkY = reader.ReadInt32();
-        int chunkRadius = reader.ReadInt32();
-        float x = reader.ReadSingle();
-        float y = reader.ReadSingle();
-        float z = reader.ReadSingle();
-        float radiusRaw = reader.ReadSingle();
-        float dropoffRaw = reader.ReadSingle();
-        string name = ReadFixedString(reader, 32);
-        return (chunkX, chunkY, chunkRadius, new Vector3(x, y, z), radiusRaw, dropoffRaw, string.IsNullOrWhiteSpace(name) ? $"Light {lightIndex}" : name);
     }
 
     private string? ResolveSourcePath()
@@ -642,42 +561,6 @@ public sealed class LitLoader
         }
 
         return available;
-    }
-
-    private static float[] ReadFloatArray(BinaryReader reader, int count)
-    {
-        var result = new float[count];
-        for (int i = 0; i < count; i++)
-            result[i] = reader.ReadSingle();
-        return result;
-    }
-
-    private static int GetTrackCountForVersion(uint version)
-    {
-        return version switch
-        {
-            Version02Test => 17,
-            Version83 => 14,
-            _ => 18,
-        };
-    }
-
-    private static string ReadFixedString(BinaryReader reader, int length)
-    {
-        byte[] bytes = reader.ReadBytes(length);
-        int end = Array.IndexOf(bytes, (byte)0);
-        if (end < 0)
-            end = bytes.Length;
-        string raw = Encoding.ASCII.GetString(bytes, 0, end).Trim();
-        return raw.Replace("\uFFFD", string.Empty).Trim();
-    }
-
-    private static Vector3 DecodeBgrx(uint packedColor)
-    {
-        float b = (packedColor & 0xFF) / 255f;
-        float g = ((packedColor >> 8) & 0xFF) / 255f;
-        float r = ((packedColor >> 16) & 0xFF) / 255f;
-        return new Vector3(r, g, b);
     }
 
     private static float EvaluateFloatCurve(IReadOnlyList<float> samples, float timeOfDay, float fallback)

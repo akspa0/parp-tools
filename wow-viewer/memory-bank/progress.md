@@ -519,17 +519,42 @@ Last updated: 2026-07-15 (world lighting/shadow model + M2 camera tracks Ghidra 
   verified `height257[::16]` / `[8::16]` transform. **Spec 102 M0 paused/superseded** but preserved
   (simple trainer + 42/42-green strict tests).
 
+## 2026-07-15 — Spec 103 prefab reduction and renderer-faithful lighting implemented
+
+- **Phase 3B code complete (T023-T029):** typed Parquet evidence ledgers, full-map/multilayer prefab
+  placement analysis, D4-equivalent fallback families, fractal/cellular composition features,
+  terrain/MCLY/tileset/object/liquid context, deterministic coverage selection, duplicate lineage,
+  complete-map holdout propagation, and prefab-family leakage gates. The whole Spec 103 Python
+  suite passes (37 tests). T030 is the USER-run bounded corpus proof.
+- **Phase 3C code complete through preparation (T031-T039):** strict shared LIT layouts and sampling,
+  `lit profile`, Z-up sky, MCNR/MCSH mesh propagation, one-sided Lambert, orthographic tile capture,
+  v2 lighting sidecars, grouped authored/LIT/DBC time variants, source-group split enforcement, and
+  fail-closed clean-synthetic/private-BYOD rights contracts. Focused Core tests pass (35); Capture,
+  active WoWViewer, and Inspect projects build with 0 errors.
+- **Exact 1.12.1 DBCD proof:** 374 Light, 426 LightParams, 7,668 LightIntBand, 2,556 LightFloatBand,
+  6 LightSkybox rows. Noon global selection is Light 1 / Params 12; the resolver retains all five
+  DBC hashes, all five definition hashes, selected band records, and timed-sample evidence.
+- **Renderer corrections:** LIT payload order is all 64-byte light headers before all light groups;
+  the old interleaving produced false burgundy/neon bands. The sky dome was Y-up and is now Z-up.
+  DBC `GameCoords` is X/Z/Y scaled by 36; active LightService conversion is corrected.
+- **Next USER-owned sequence:** run Spec 103 quickstart §3d, inspect `curation_summary.json` and the
+  evidence Parquets, then package the new reduced manifest for RunPod. Separately run §6/T040 for
+  staged LIT/DBC exports and canonical capture comparison. Do not reuse the older 2,253-tile bundle
+  as the next training corpus.
+
 ## Key facts for the next session
 
-- Next step is entirely USER runs: quickstart §1 (synthetic authoring → dotnet generate/patch/capture →
-  store → training), then T011 caveat catalog in research-v7-contract.md §8, then real-data run (§3).
-- v7 reference (read-only): `gillijimproject_refactor/src/WoWMapConverter/scripts/{v7_model,train_v7,v7_losses,infer_v7}.py`.
-- Real store = existing V18 `output/datasets/v18/3_3_5_12340.zarr` (5134 tiles; has minimap_rgb, height_257,
-  normal_xyz, liquid_mask/height, object_precise_mask — FR-012 satisfied, no copy needed;
-  `spec103_build_real_store.py` verifies and pins it).
+- The next model run is blocked on T030's reviewed prefab-reduced manifest, not on more code or a
+  larger raw dataset. Fewer representative tiles are the intended result.
+- LIT supplies recovered colors only; sun direction, MCSH attenuation, and exact five-band sky
+  altitude placement remain explicitly authored/unproven until T040.
+- v7 reference remains read-only; V8 is the primary small model. The final deployment contract is
+  still image-only, and all alpha/terrain/lighting evidence in this slice is training-time curation
+  or RGB-generation provenance—not a new model input.
 
 ## Durable boundaries
 
 - `gillijimproject_refactor` read-only (port from, never edit). C# WDL reader + AlphaWdtWriter frozen.
-- The USER runs all training/capture/heavy jobs (AGENTS RULE 0). Staged clients only; never `H:\CLIENTS`.
+- The USER runs all training/capture/heavy jobs (AGENTS RULE 0). Staged clients only; the forbidden
+  legacy client root remains out of scope for inspection, validation, harvesting, and commands.
 - Older M0 strict-target detail: `memory-bank/archive/2026-07-13-spec102-strict-target-detail.md`.

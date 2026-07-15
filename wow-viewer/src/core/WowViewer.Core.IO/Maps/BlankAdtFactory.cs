@@ -307,15 +307,13 @@ public static class BlankAdtFactory
     private static byte[] CreateUpNormals()
     {
         var normals = new byte[McnrByteCount];
-        for (int i = 0; i < TotalChunks; i++)
+        for (int i = 0; i < McvtFloatCount; i++)
         {
             int offset = i * 3;
-            if (offset + 2 < normals.Length)
-            {
-                normals[offset] = 128;
-                normals[offset + 1] = 128;
-                normals[offset + 2] = 255;
-            }
+            // Disk MCNR component order is signed X, Z, Y. Flat terrain points up.
+            normals[offset] = 0;
+            normals[offset + 1] = 127;
+            normals[offset + 2] = 0;
         }
         return normals;
     }

@@ -1,6 +1,6 @@
 # Pattern-Aware Corpus Curation Research
 
-**Status**: planned Spec 103 Phase 3B | **Date**: 2026-07-15
+**Status**: implemented; bounded corpus proof remains user-run | **Date**: 2026-07-15
 
 ## Decision
 

@@ -1,6 +1,7 @@
 using System.Numerics;
 using WoWViewer.Logging;
 using Silk.NET.OpenGL;
+using WowViewer.Core.Runtime.World.Sky;
 
 namespace WoWViewer.Rendering;
 
@@ -96,51 +97,10 @@ public class SkyDomeRenderer : IDisposable
 
     private unsafe void BuildDome(int segments, int rings, float radius)
     {
-        // Generate hemisphere vertices: position (3 floats) + height factor (1 float)
-        int vertCount = (rings + 1) * (segments + 1);
-        float[] verts = new float[vertCount * 4]; // x, y, z, heightFactor
-        int vi = 0;
-
-        for (int r = 0; r <= rings; r++)
-        {
-            // phi: 0 = horizon, PI/2 = zenith
-            float phi = (float)r / rings * MathF.PI * 0.5f;
-            float y = MathF.Sin(phi) * radius;
-            float ringRadius = MathF.Cos(phi) * radius;
-            float heightFactor = (float)r / rings; // 0 at horizon, 1 at zenith
-
-            for (int s = 0; s <= segments; s++)
-            {
-                float theta = (float)s / segments * MathF.PI * 2f;
-                float x = MathF.Cos(theta) * ringRadius;
-                float z = MathF.Sin(theta) * ringRadius;
-
-                verts[vi++] = x;
-                verts[vi++] = y;
-                verts[vi++] = z;
-                verts[vi++] = heightFactor;
-            }
-        }
-
-        // Generate indices
-        var indices = new List<ushort>();
-        for (int r = 0; r < rings; r++)
-        {
-            for (int s = 0; s < segments; s++)
-            {
-                int curr = r * (segments + 1) + s;
-                int next = curr + segments + 1;
-
-                indices.Add((ushort)curr);
-                indices.Add((ushort)next);
-                indices.Add((ushort)(curr + 1));
-
-                indices.Add((ushort)(curr + 1));
-                indices.Add((ushort)next);
-                indices.Add((ushort)(next + 1));
-            }
-        }
-        _indexCount = indices.Count;
+        SkyDomeMeshData mesh = SkyDomeVertexBuilder.Build(segments, rings, radius);
+        float[] verts = mesh.Vertices;
+        ushort[] indices = mesh.Indices;
+        _indexCount = indices.Length;
 
         // Upload to GPU
         _vao = _gl.GenVertexArray();
@@ -154,9 +114,8 @@ public class SkyDomeRenderer : IDisposable
             _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(verts.Length * sizeof(float)), ptr, BufferUsageARB.StaticDraw);
 
         _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, _ebo);
-        var idxArr = indices.ToArray();
-        fixed (ushort* ptr = idxArr)
-            _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(idxArr.Length * sizeof(ushort)), ptr, BufferUsageARB.StaticDraw);
+        fixed (ushort* ptr = indices)
+            _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(ushort)), ptr, BufferUsageARB.StaticDraw);
 
         // Position: location 0, 3 floats
         _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 4 * sizeof(float), (void*)0);

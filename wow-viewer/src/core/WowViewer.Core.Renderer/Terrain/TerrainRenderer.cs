@@ -1,5 +1,6 @@
 using System.Numerics;
 using Silk.NET.OpenGL;
+using WowViewer.Core.Maps;
 using WowViewer.Core.Renderer.Scene;
 
 namespace WowViewer.Core.Renderer.Terrain;
@@ -19,6 +20,22 @@ public sealed class TerrainRenderer : IDisposable
 
     public FrustumCuller Culler => _culler;
 
+    public bool ShowShadowMap { get; set; } = true;
+
+    public Vector3 LightDirection { get; set; } = Vector3.Normalize(new Vector3(0.5f, -0.5f, 0.8f));
+
+    public Vector3 DirectionalLightColor { get; set; } = new(0.9f, 0.85f, 0.8f);
+
+    public Vector3 AmbientLightColor { get; set; } = new(0.35f, 0.35f, 0.35f);
+
+    public float ShadowStrength { get; set; } = TerrainLightingMath.DefaultAuthoredMcshShadowStrength;
+
+    public Vector3 FogColor { get; set; } = new(0.34f, 0.38f, 0.42f);
+
+    public float FogStart { get; set; } = 4000f;
+
+    public float FogEnd { get; set; } = 7000f;
+
     public void Render(
         SceneCamera camera,
         IEnumerable<TerrainMesh> meshes,
@@ -35,14 +52,18 @@ public sealed class TerrainRenderer : IDisposable
         _shader.SetShowLayer(1, !variant.HideTerrain);
         _shader.SetShowLayer(2, !variant.HideTerrain);
         _shader.SetShowLayer(3, !variant.HideTerrain);
-        _shader.SetShowShadowMap(false);
+        _shader.SetShowShadowMap(ShowShadowMap);
+        _shader.SetShadowStrength(ShadowStrength);
 
-        _shader.SetLightDirection(Vector3.Normalize(new Vector3(0.5f, -0.5f, 0.8f)));
-        _shader.SetLightColor(new Vector3(0.9f, 0.85f, 0.8f));
-        _shader.SetAmbientColor(new Vector3(0.35f, 0.35f, 0.35f));
-        _shader.SetFogColor(new Vector3(0.34f, 0.38f, 0.42f));
-        _shader.SetFogStart(4000f);
-        _shader.SetFogEnd(7000f);
+        Vector3 lightDirection = LightDirection.LengthSquared() > 1e-10f
+            ? Vector3.Normalize(LightDirection)
+            : Vector3.UnitZ;
+        _shader.SetLightDirection(lightDirection);
+        _shader.SetLightColor(DirectionalLightColor);
+        _shader.SetAmbientColor(AmbientLightColor);
+        _shader.SetFogColor(FogColor);
+        _shader.SetFogStart(FogStart);
+        _shader.SetFogEnd(FogEnd);
 
         _culler.ComputePlanes(camera.GetViewMatrix() * camera.GetProjectionMatrix());
 

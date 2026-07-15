@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Buffers.Binary;
 using System.Numerics;
+using System.Security.Cryptography;
 using System.Text.Json;
 using WowViewer.Core.Audio;
 using WowViewer.Core.Blp;
@@ -63,6 +64,9 @@ switch (area)
 		break;
 	case "lit":
 		RunLit(tail);
+		break;
+	case "light":
+		RunLight(tail);
 		break;
 	case "pm4":
 		RunPm4(tail);
@@ -1497,6 +1501,10 @@ static void RunLit(string[] args)
 		case "inspect":
 			RunLitInspect(tail);
 			break;
+		case "profile":
+		case "sample":
+			RunLitProfile(tail);
+			break;
 		default:
 			Console.Error.WriteLine($"Unknown lit command '{command}'.");
 			ShowLitUsage();
@@ -1612,6 +1620,194 @@ static void RunLitInspect(string[] args)
 		summary = LitSummaryReader.Read(stream, sourceLabel);
 
 	PrintLitSummary(summary, hasSamplePosition ? samplePosition : null);
+}
+
+static void RunLight(string[] args)
+{
+	if (args.Length == 0)
+	{
+		ShowLightUsage();
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string command = args[0].ToLowerInvariant();
+	string[] tail = args.Skip(1).ToArray();
+	if (command != "profile")
+	{
+		Console.Error.WriteLine($"Unknown light command '{command}'.");
+		ShowLightUsage();
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!TryBuildArchiveBootstrapOptions(tail, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	try
+	{
+		LightDbcProfileCommand.Execute(tail, archiveBootstrapOptions);
+	}
+	catch (Exception ex) when (ex is ArgumentException
+		or IOException
+		or InvalidDataException
+		or UnauthorizedAccessException)
+	{
+		Console.Error.WriteLine($"Error: {ex.Message}");
+		Environment.ExitCode = 1;
+	}
+}
+
+static void RunLitProfile(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? virtualPath = GetOption(args, "--virtual-path", "-v");
+	string? output = GetOption(args, "--output", "-o");
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	if (!TryParseNormalizedGameTimes(args, out IReadOnlyList<float> normalizedTimes, out string? timeError))
+	{
+		Console.Error.WriteLine($"Error: {timeError}");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
+		virtualPath = input;
+
+	if (string.IsNullOrWhiteSpace(input)
+		&& (string.IsNullOrWhiteSpace(archiveRoot) || string.IsNullOrWhiteSpace(virtualPath)))
+	{
+		Console.Error.WriteLine("Error: provide --input <lights.lit> or --archive-root <game|data dir> with --virtual-path <world/.../lights.lit>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	try
+	{
+		byte[] bytes;
+		string sourceKind;
+		string sourceLabel;
+		string? sourcePath = null;
+		string? resolvedArchiveRoot = null;
+		string? resolvedVirtualPath = null;
+
+		if (!string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath))
+		{
+			resolvedArchiveRoot = Path.GetFullPath(archiveRoot);
+			resolvedVirtualPath = virtualPath;
+			sourceKind = "archive_virtual_file";
+			sourceLabel = virtualPath;
+			bytes = ArchiveVirtualFileReader.ReadVirtualFile(
+				virtualPath,
+				[archiveRoot],
+				archiveBootstrapOptions);
+		}
+		else if (File.Exists(input) && !input.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+		{
+			sourcePath = Path.GetFullPath(input);
+			sourceKind = "local_file";
+			sourceLabel = sourcePath;
+			bytes = File.ReadAllBytes(sourcePath);
+		}
+		else
+		{
+			sourceKind = "companion_mpq_fallback";
+			sourceLabel = input!;
+			sourcePath = File.Exists(input) ? Path.GetFullPath(input) : null;
+			bytes = AlphaArchiveReader.ReadWithMpqFallback(input!)
+				?? throw new FileNotFoundException(
+					$"Could not read profile input '{input}' directly or from a companion MPQ archive.",
+					input);
+		}
+
+		string sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+		LitFileProfile profile;
+		using (var stream = new MemoryStream(bytes, writable: false))
+			profile = LitProfileReader.Read(stream, sourceLabel);
+
+		var source = new LitProfileSourceEvidence(
+			sourceKind,
+			sourceLabel,
+			sourcePath,
+			resolvedArchiveRoot,
+			resolvedVirtualPath,
+			sha256);
+		LitProfileArtifact artifact = LitProfileCommandSupport.Build(profile, source, normalizedTimes);
+		var jsonOptions = new JsonSerializerOptions
+		{
+			WriteIndented = true,
+			PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+		};
+		string json = JsonSerializer.Serialize(artifact, jsonOptions);
+
+		if (string.IsNullOrWhiteSpace(output) || output == "-")
+		{
+			Console.WriteLine(json);
+			return;
+		}
+
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"Wrote {outputPath}");
+	}
+	catch (Exception exception) when (
+		exception is IOException
+		or UnauthorizedAccessException
+		or InvalidDataException
+		or ArgumentException)
+	{
+		Console.Error.WriteLine($"Error: {exception.Message}");
+		Environment.ExitCode = 1;
+	}
+}
+
+static bool TryParseNormalizedGameTimes(
+	string[] args,
+	out IReadOnlyList<float> normalizedTimes,
+	out string? error)
+{
+	IReadOnlyList<string> rawValues = GetOptionValues(args, "--game-time", "-t");
+	if (rawValues.Count == 0)
+	{
+		normalizedTimes = [0.35f];
+		error = null;
+		return true;
+	}
+
+	var parsed = new List<float>();
+	foreach (string rawValue in rawValues)
+	{
+		foreach (string token in rawValue.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+		{
+			if (!float.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out float value)
+				|| !float.IsFinite(value)
+				|| value is < 0f or > 1f)
+			{
+				normalizedTimes = [];
+				error = $"--game-time requires normalized values in 0..1; received '{token}'.";
+				return false;
+			}
+
+			parsed.Add(value);
+		}
+	}
+
+	if (parsed.Count == 0)
+	{
+		normalizedTimes = [];
+		error = "--game-time did not contain any values.";
+		return false;
+	}
+
+	normalizedTimes = parsed;
+	error = null;
+	return true;
 }
 
 static void RunMapUniqueIdReport(string[] args)
@@ -6237,6 +6433,9 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--format lk|alpha] [--texture <path>] [--output-dir <dir>]");
 	Console.WriteLine("  wowviewer-inspect lit inspect --input <lights.lit>");
 	Console.WriteLine("  wowviewer-inspect lit inspect --archive-root <game|data dir> --virtual-path <world/.../lights.lit> [--listfile <listfile.txt>]");
+	Console.WriteLine("  wowviewer-inspect lit profile --input <lights.lit> [--game-time <0..1>[,<0..1>...]]... [--output <profile.json>]");
+	Console.WriteLine("  wowviewer-inspect lit profile --archive-root <game|data dir> --virtual-path <world/.../lights.lit> [--listfile <listfile.txt>] [--game-time <0..1>[,<0..1>...]]... [--output <profile.json>]");
+	Console.WriteLine("  wowviewer-inspect light profile --archive-root <staged-client> --build <exact-build> --map-id <id> (--world-position <x,y,z> | --renderer-position <x,y,z>) [--map-origin <units>] [--game-time <normalized:0..1|raw:0..2880>[,...]]... [--dbd-dir <definitions>] [--output <profile.json>]");
 	Console.WriteLine("  wowviewer-inspect wmo inspect --input <file.wmo> [--dump-lights]");
 	Console.WriteLine("  wowviewer-inspect wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]");
 	Console.WriteLine("  wowviewer-inspect pm4 inspect --input <file.pm4>");
@@ -6706,6 +6905,18 @@ static void ShowLitUsage()
 	Console.WriteLine("LIT commands:");
 	Console.WriteLine("  lit inspect --input <lights.lit> [--sample-position <x,y,z>]");
 	Console.WriteLine("  lit inspect --archive-root <game|data dir> --virtual-path <world/.../lights.lit> [--listfile <listfile.txt>] [--sample-position <x,y,z>]");
+	Console.WriteLine("  lit profile --input <lights.lit> [--game-time <0..1>[,<0..1>...]]... [--output <profile.json>]");
+	Console.WriteLine("  lit profile --archive-root <game|data dir> --virtual-path <world/.../lights.lit> [--listfile <listfile.txt>] [--game-time <0..1>[,<0..1>...]]... [--output <profile.json>]");
+	Console.WriteLine("  lit sample is an alias for lit profile; default --game-time is 0.35.");
+}
+
+static void ShowLightUsage()
+{
+	Console.WriteLine("Light DBC commands:");
+	Console.WriteLine("  light profile --archive-root <staged-client> --build <exact-build> --map-id <id> --world-position <x,y,z> [--game-time <normalized:0..1|raw:0..2880>[,...]]... [--dbd-dir <definitions>] [--output <profile.json>]");
+	Console.WriteLine("  light profile --archive-root <staged-client> --build <exact-build> --map-id <id> --renderer-position <x,y,z> [--map-origin <units>] [--game-time <normalized:0..1|raw:0..2880>[,...]]... [--dbd-dir <definitions>] [--output <profile.json>]");
+	Console.WriteLine("  Bare times in 0..1 are normalized; bare times above 1 are raw 0..2880 units. Prefix raw: to disambiguate raw values 0 or 1. Default time is normalized:0.35.");
+	Console.WriteLine($"  Default map origin: {LightDbcProfileCommand.DefaultMapOrigin.ToString("R", CultureInfo.InvariantCulture)}.");
 }
 
 static void ShowM2Usage()

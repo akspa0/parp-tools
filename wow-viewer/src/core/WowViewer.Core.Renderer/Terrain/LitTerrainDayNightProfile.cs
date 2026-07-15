@@ -1,0 +1,128 @@
+using System.Numerics;
+using WowViewer.Core.IO.Lit;
+
+namespace WowViewer.Core.Renderer.Terrain;
+
+/// <summary>
+/// Evaluates the global clear-weather colors used by the early LIT/minimap lane.
+/// LIT supplies colors but not the directional vector or the MCSH attenuation coefficient;
+/// those two inputs remain explicitly authored in this hybrid profile.
+/// </summary>
+public static class LitTerrainDayNightProfile
+{
+    public const string ProfileRevision = "lit-global-clear-colors-v1";
+    public const string EvidenceState = "client_lit_colors_authored_direction_and_mcsh_strength";
+    public const string DirectionEvidenceState = "authored_solar_direction_not_lit_data";
+    public const string McshEvidenceState = "authored_mcsh_strength_not_client_exact";
+
+    public const int TrackDirectColor = 0;
+    public const int TrackAmbientColor = 1;
+    public const int TrackFogColor = 7;
+
+    public static LitTerrainLightingEvaluation EvaluateGlobalClear(
+        LitFileProfile profile,
+        float gameTime)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        if (!float.IsFinite(gameTime) || gameTime < 0f || gameTime >= 1f)
+            throw new ArgumentOutOfRangeException(nameof(gameTime), "Game time must be in [0, 1).");
+
+        (LitLightProfile light, LitLightGroupProfile group) = SelectUniqueGlobalClear(profile);
+
+        float litTime = gameTime * LitProfileReader.TimeUnitsPerDay;
+        Vector3 direct = EvaluateRequiredTrack(group, TrackDirectColor, litTime, "global diffuse");
+        Vector3 ambient = EvaluateRequiredTrack(group, TrackAmbientColor, litTime, "global ambient");
+        Vector3 fog = EvaluateRequiredTrack(group, TrackFogColor, litTime, "fog");
+
+        TerrainLightingSample authored = AuthoredTerrainDayNightProfile.Evaluate(gameTime);
+        var sample = new TerrainLightingSample(
+            ProfileRevision,
+            EvidenceState,
+            AuthoredTerrainDayNightProfile.LightingModel,
+            gameTime,
+            authored.LightDirection,
+            direct,
+            1f,
+            ambient,
+            1f,
+            fog,
+            authored.McshShadowStrength);
+
+        return new LitTerrainLightingEvaluation(
+            sample,
+            profile.VersionNumber,
+            light.Index,
+            light.Header?.Name ?? "Default partial LIT profile",
+            group.Index,
+            litTime,
+            [TrackDirectColor, TrackAmbientColor, TrackFogColor],
+            DirectionEvidenceState,
+            McshEvidenceState);
+    }
+
+    private static (LitLightProfile Light, LitLightGroupProfile Group) SelectUniqueGlobalClear(
+        LitFileProfile profile)
+    {
+        if (profile.IsSinglePartialProfile)
+        {
+            LitLightProfile partial = profile.Lights.Count == 1
+                ? profile.Lights[0]
+                : throw new InvalidDataException(
+                    $"LIT partial profile must contain exactly one light; found {profile.Lights.Count}.");
+            LitLightGroupProfile group = partial.IsPartial
+                && partial.Groups.Count == 1
+                && partial.Groups[0].Kind == LitLightGroupKind.Partial
+                    ? partial.Groups[0]
+                    : throw new InvalidDataException(
+                        "LIT partial profile does not contain exactly one partial group.");
+            return (partial, group);
+        }
+
+        LitLightProfile[] defaults = profile.Lights
+            .Where(candidate => candidate.Header?.IsDefault == true)
+            .ToArray();
+        if (defaults.Length != 1)
+        {
+            throw new InvalidDataException(
+                $"LIT profile must contain exactly one default/global light header; found {defaults.Length}.");
+        }
+
+        LitLightGroupProfile[] clearGroups = defaults[0].Groups
+            .Where(candidate => candidate.Kind == LitLightGroupKind.Clear)
+            .ToArray();
+        if (clearGroups.Length != 1)
+        {
+            throw new InvalidDataException(
+                $"LIT default/global light must contain exactly one clear group; found {clearGroups.Length}.");
+        }
+
+        return (defaults[0], clearGroups[0]);
+    }
+
+    private static Vector3 EvaluateRequiredTrack(
+        LitLightGroupProfile group,
+        int trackIndex,
+        float timeOfDay,
+        string description)
+    {
+        if (!group.TryGetTrack(trackIndex, out LitColorTrack track) ||
+            !track.TryEvaluate(timeOfDay, out Vector3 color))
+        {
+            throw new InvalidDataException(
+                $"LIT group {group.Index} has no timed samples for required track {trackIndex} ({description}).");
+        }
+
+        return color;
+    }
+}
+
+public sealed record LitTerrainLightingEvaluation(
+    TerrainLightingSample Lighting,
+    uint LitVersion,
+    int LightIndex,
+    string LightName,
+    int GroupIndex,
+    float LitTimeOfDay,
+    IReadOnlyList<int> ContributingTrackIds,
+    string DirectionEvidenceState,
+    string McshEvidenceState);

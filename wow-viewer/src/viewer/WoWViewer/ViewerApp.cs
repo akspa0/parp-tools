@@ -8384,7 +8384,7 @@ void main() {
                 ImGui.SetTooltip("Alpha-era lights.lit placement overlay. Pins show light origins; boxes show approximate influence radius.");
 
             bool useLitFogOverride = _worldScene.UseLitFogOverride;
-            if (ImGui.Checkbox("Use LIT Sky/Fog Override", ref useLitFogOverride))
+            if (ImGui.Checkbox("Use LIT Lighting Override", ref useLitFogOverride))
                 _worldScene.UseLitFogOverride = useLitFogOverride;
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Experimental: sample LIT clear-weather colors and fog distances instead of the current DBC lighting path.");

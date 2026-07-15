@@ -1,6 +1,6 @@
 # Implementation Plan: Revive the v7 terrain regressor on current clean signals
 
-**Branch**: `103-image-only-reconstruction` (work lands on `v0.5.0-prerelease`) | **Date**: 2026-07-13 | **Spec**: [spec.md](spec.md)
+**Branch**: `v0.5.1` | **Date**: 2026-07-15 | **Spec**: [spec.md](spec.md)
 
 > **Correction (2026-07-13):** V24 / Spec 094 is NOT functional and is ignored. This plan revives the original **v7** model — a single, basic U-Net (no stages) from ~April 2026 — and runs it on the current clean dataset. The user's claim: v7 was simple, dirty, and worked; with clean signals it should "fly and be perfect."
 >
@@ -62,10 +62,11 @@ and drops three failure classes, writing a `curation_manifest.parquet` the train
 - **missing_signal** — a required array (height / minimap / normals) absent.
 
 Kept tiles are tagged with stratification buckets (map + height-regime tertile) for representative
-complete-map holdouts (FR-008). **V18 measured result (2026-07-13):** 5134 → 3131 kept (61%);
-410 blank + 1593 object-contaminated dropped; 0 height/normal mismatch (verified: relief tracks
+complete-map holdouts (FR-008). **Recorded V18 zero-object result:** 5134 → 2253 kept (43.9%);
+410 blank + 2471 object-contaminated dropped; 0 height/normal mismatch (verified: relief tracks
 height-std at r=0.57, and only 2 flat tiles have varied normals — this store is clean on that
-axis). Alternatives recorded in the summary: 2650 tiles at zero objects, 3078 at ≤0.5%, 3540 at ≤2%.
+axis). The summary's coverage alternatives are pre-other-gate counts: 2650 tiles at zero objects,
+3078 at ≤0.5%, and 3540 at ≤2%.
 The trainer drops object tiles by default even without a manifest (`--max-object-coverage 0.0`);
 `1.0` restores the v7-faithful keep-all behavior for ablation only.
 
@@ -105,7 +106,8 @@ training job against that manifest.
 
 - **Residual Model Chain**: one model, one signal (terrain height as a residual over the WDL prior). No multi-task, no shared weights. PASS.
 - **Repo Independence / Read-Only Reference**: v7 is read from `gillijimproject_refactor` (RULE 1 valid reason: reference for reimplementation) and ported into `wow-viewer/data-harvester/`. The reference repo is not modified. PASS.
-- **Real-Data Validation**: trained/validated on staged 3.3.5 clean signals. PASS.
+- **Real-Data Validation**: code/tests are prepared; the staged-client curation/capture and model
+  quality proofs remain USER-run. PREPARED, NOT YET SIGNED OFF.
 - **Training-Script Discipline**: the ported trainer documents input-channel layout and losses. PASS.
 - **Bite-Sized**: phases ≤10 one-concern steps. PASS.
 
@@ -121,6 +123,23 @@ No violations.
 
 - **Shadow ↔ height, now measurable.** Synthetic tiles with known height let us render a deterministic fixed-light terrain shadow (Spec 102 N011-N013 already defines the capture + determinism contract) and directly measure how shadow encodes slope/relief — against perfect ground truth, which the uncooperative renderer blocked before. If the correlation is strong, terrain shadow becomes a legitimate signal (and it is partly baked into the minimap's own lighting).
 - **Teacher → student.** Train a TEACHER on the rich clean synthetic signals (minimap + normals + WDL prior + terrain shadow → height, known GT) to prove the mapping is learnable. Then distill it into a STUDENT that consumes only deployment-available inputs (ultimately image-only), inheriting the teacher's mapping while honoring the image-only law. This is the bridge from rich synthetic training to image-only deployment.
+
+### Phase 2C — Correct synthetic illumination before another synthetic capture
+
+1. Bridge existing MCNR and MCSH decode results into both active terrain render paths; preserve the
+   format-specific normal decode and transform explicitly rather than hiding Alpha-era inversions in
+   a two-sided shader.
+2. Replace `abs(N dot L)` with one-sided Lambert, preserve the complete MCSH grid, and make shadow
+   strength/version an explicit contract while exact client attenuation remains unrecovered.
+3. Replace the capture path's perspective/16-tile framing with a canonical one-tile top-down
+   orthographic camera and write a lighting/provenance sidecar for each image.
+4. Add grouped time-of-day variants to the synthetic-store builder. Prefer a build-scoped DBCD
+   `Light*` export; retain the authored fallback with an unambiguous non-client-exact label.
+5. Keep generated/owned and private client-derived sources in separate rights classes. Fail closed
+   when the operator requests a clean-synthetic artifact without explicit license, assertion, and
+   matching hashes. This is provenance enforcement, not a legal determination.
+
+Detailed evidence and proof gates: [research-synthetic-lighting.md](research-synthetic-lighting.md).
 
 ## Relationship to the image-only law (spec Governing Principle)
 
@@ -174,7 +193,7 @@ v7 consumes the WDL prior + normals + aux, which are height-derived — so v7 by
 - **Output-space object cleanup** (T016, spec US3): segment object artifacts in the *generated* height field, mask, inpaint from the surrounding lattice; input contract stays image-only. The predicted lattice stays editable (coarse WDL representation).
 - **Teacher → student distillation** (T019): TEACHER trained on rich clean synthetic signals (minimap + normals + WDL prior + fixed-light terrain shadow → height, known GT — shadow capture per Spec 102 N011-N013, measured by T018) distilled into a STUDENT consuming deployment-available inputs only (ultimately image-only). The bridge from rich synthetic training to the image-only law; contingent on the T018 shadow↔height correlation result.
 
-### Implementation state (2026-07-13)
+### Implementation state (2026-07-15)
 
 Phases 0–1 complete and tested (13/13 CPU sanity tests): pinned contract in
 [research-v7-contract.md](research-v7-contract.md), ported lane in
@@ -189,6 +208,20 @@ Phase 2–4 scripts prepared (`spec103_make_synthetic_adts.py`, `spec103_build_s
 `spec103_export_mesh.py`, `validate_spec103_labelfree.py`); commands in
 [quickstart.md](quickstart.md). Blocked on USER runs: capture (1d), training (1f/3b),
 inference (2a), shadow capture (T018).
+
+Phase 3B is now implemented by `spec103_curate_prefabs.py` plus
+`src/harvester/spec103/prefab_curation.py`: typed Parquet evidence ledgers, map-canvas multiscale
+and cellular composition features, canonical transform-equivalent prefab families, MCLY/tileset
+anomaly evidence, object/liquid context, deterministic coverage selection, representative lineage,
+and prefab-family-safe partitions. The bounded real-corpus proof is T030 and remains USER-run.
+
+Phase 2C is implemented across shared I/O/runtime/renderer/capture code: strict shared LIT layouts,
+global-clear sampling and `lit profile` evidence export, exact-build DBCD+WoWDBDefs Light* chain,
+Z-up sky geometry, MCNR coordinate conversion, complete MCSH propagation, one-sided Lambert,
+one-tile orthographic capture sidecars, grouped authored time variants, and fail-closed rights lanes.
+LIT supplies recovered colors only; sun direction and MCSH attenuation remain explicitly authored.
+Real-client image comparison and the final attenuation calibration remain USER-run proof, not claims
+made by this implementation.
 
 ## Project Structure
 
