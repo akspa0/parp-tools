@@ -34,7 +34,19 @@ uv run python scripts/evaluate_spec103_wdl_prior.py --store "I:\parp\parp-tools\
 Its `report.json` records truth error and a `standalone_png_vs_store_rgb` round-trip metric after
 reloading the exported PNG. Both should be inspected before using the generated prior in V8.
 
-5. Prove the standalone image route using the evaluator's exported minimap. This has no WDL/store
+5. Write visible review artifacts for either evaluation directory. This creates textured OBJ meshes
+for the predicted paired-WDL reconstruction, the truth WDL reconstruction, and the actual 257×257
+truth terrain, plus a signed-error PNG heatmap:
+
+```powershell
+uv run python scripts/visualize_spec103_wdl_prior.py --evaluation "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_synthetic_varied_crater\real_ChamberOfAspectsBlack_29_27"
+```
+
+Open `visual_review\predicted_wdl_reconstruction.obj` and
+`visual_review\truth_wdl_reconstruction.obj` side by side in an OBJ viewer. The error PNG is red
+where predicted terrain is above truth and blue where it is below.
+
+6. Prove the standalone image route using the evaluator's exported minimap. This has no WDL/store
    input at all:
 
 ```powershell

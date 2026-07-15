@@ -30,6 +30,9 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior built; user-run compact-co
   seeded parameterizations); three authored lighting times yield 960 RGB→WDL rows. Train on this
   controlled corpus first, hold out its full crater family (96 rows), then measure the explicit
   synthetic-to-real gap. Do not replace it with the tiny real-data difficulty sample.
+- Visible proof is now `visualize_spec103_wdl_prior.py`: it writes predicted/truth paired-WDL OBJ
+  meshes, full truth OBJ, and an error heatmap from an evaluation directory. The reconstruction
+  interpolates the paired lattice and is explicitly a coarse-prior view, not a claim of full detail.
 
 ## Spec 107 — Lighting quick controls + confident hover (2026-07-15, implemented/build green)
 

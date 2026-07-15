@@ -57,6 +57,7 @@ def main() -> int:
     png_outer, png_inner = predict_rgb(model, png_rgb, device)
     np.savez_compressed(args.output / "predicted_wdl_lattice.npz", outer_17=predicted_outer, inner_16=predicted_inner)
     np.savez_compressed(args.output / "ground_truth_wdl_lattice.npz", outer_17=truth_outer, inner_16=truth_inner)
+    np.save(args.output / "ground_truth_height_257.npy", np.asarray(group["height_257"][args.row], dtype=np.float32))
     np.savez_compressed(args.output / "standalone_png_wdl_lattice.npz", outer_17=png_outer, inner_16=png_inner)
     report = {"schema": "spec108-real-tile-evaluation-v1", "source_row": args.row, "source": source,
               "checkpoint": str(args.checkpoint.resolve()), "input": "input_minimap.png", "prediction": "predicted_wdl_lattice.npz",

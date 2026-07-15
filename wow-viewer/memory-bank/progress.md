@@ -29,6 +29,9 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior implementation)
   corpus requested for WDL training. `spec103_make_synthetic_adts.py` now defaults to 320 seeded
   fields across plane/ridge/crater/plateau/hills/valley/terraces/saddle/dunes/basin; its three lighting
   variants create 960 rows. First proof holds out all crater rows (96), then measures real row 906.
+- Added visible WDL validation: evaluator saves full 257 truth height; visualizer produces textured
+  predicted-WDL/truth-WDL/full-truth OBJ meshes and a signed error heatmap. Tests confirm the visual
+  reconstruction preserves every outer and inner paired-lattice sample.
 
 ## 2026-07-15 — FogEnd visibility and hover confidence
 

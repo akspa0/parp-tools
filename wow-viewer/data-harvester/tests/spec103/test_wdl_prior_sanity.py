@@ -24,6 +24,7 @@ from harvester.spec103.wdl_prior_model import (
     decode_wdl_target,
     normalize_minimap_rgb,
 )
+from harvester.spec103.wdl_visualization import reconstruct_wdl_pair
 from train_spec103_wdl_prior import filter_deployable_rows
 from spec103_make_synthetic_adts import DEFAULT_PATTERNS, _pattern_height
 
@@ -118,3 +119,12 @@ def test_synthetic_generator_has_deterministic_family_variation():
     assert first_params != second_params
     assert not np.array_equal(first, second)
     assert {"hills", "valley", "terraces", "saddle", "dunes", "basin"}.issubset(DEFAULT_PATTERNS)
+
+
+def test_visual_reconstruction_preserves_paired_lattice_samples():
+    outer = np.arange(17 * 17, dtype=np.float32).reshape(17, 17)
+    inner = np.full((16, 16), -42.0, dtype=np.float32)
+    height = reconstruct_wdl_pair(outer, inner)
+    assert height.shape == (257, 257)
+    np.testing.assert_allclose(height[::16, ::16], outer)
+    np.testing.assert_allclose(height[8::16, 8::16], inner)
