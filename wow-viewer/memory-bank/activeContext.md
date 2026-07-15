@@ -1,5 +1,82 @@
 # Active Context — wow-viewer
 
+Last updated: 2026-07-15 (1.0.0 M2 geometry FIXED + Ghidra header remap; sidebar tabs unblocked)
+
+## 1.0.0 M2 + viewer fixes (2026-07-15, session)
+
+- **1.0.0 M2 geometry now RENDERS** (USER-confirmed on a real client: DoomGuard, TrollMale).
+  Root cause was `M2Era100Constants` **guessing** the section layout ("Per-field layout not fully
+  recovered from Ghidra; using standard M2SkinSection fields"). Real `M2SkinSection` is ten uint16
+  + C3Vector: **indexStart @0x08 uint16, indexCount @0x0A uint16** (reader had uint32 @0x08/0x0C,
+  folding indexCount into indexStart's high bits → every section failed the bridge bounds check →
+  "contained no drawable embedded sections"). **`Level` carries the high bits** of vertexStart/
+  indexStart. Commit `7d7caa50`. New `M2Era100ModelReaderTests` (T003/T004, never existed before —
+  the 9 "passing" M2Era1121 tests never touched the era-100 path); 3/4 fail on the old layout.
+- **RECOVERED 1.0.0 M2 header map (Ghidra, WoW.exe 1.0.0.3980)** — commit `6b22bd80`. This beta has
+  **one MORE array across 0x74-0xAC than documented v256**, so everything after texture_transforms
+  is shifted one slot vs wowdev. From relocator strides in `FUN_0071e190`:
+  `0x74` M2TextureTransform[] stride **0x54** (=3 old M2Tracks 0x1C, `FUN_0071fc40`) ·
+  `0x7C` replaceableTexLookup int16 · **`0x84` M2Material[] stride 4** {u16 flags,u16 blendMode}
+  (`FUN_0071fe10`) · `0x8C` boneCombos · **`0x94` textureCombos** · `0x9C` textureCoordCombos ·
+  `0xA4` textureWeightCombos · `0xAC` textureTransformCombos (all int16, `FUN_0071f2c0` stride 2).
+  Confirmed independently by runtime pointer reads in `FUN_0071a540`: model+0x98/+0xA0/+0xB0
+  (M2Array = {count,offset}, so ptr at +N ⇒ count at N-4). We had read textureLookup from **0x7C**
+  (the replaceable lookup) — that was the texturing bug.
+- **STILL BROKEN (next session, in priority order):**
+  1. **textureCombos is SIGNED int16; negative = REPLACEABLE texture.** `FUN_0071a540`:
+     `if ((short)v < 0) v = *(ushort*)(~v * 0x20 + 0xc + *(int*)(runtime+0x9c));` — resolve via a
+     runtime table (0x20-B records, field @+0xC). Our `TextureLookup` is `IReadOnlyList<ushort>`, so
+     negatives become ~65535 → bounds check fails → null texture → **"everything is a single
+     color"** (USER report on TrollMale — characters are almost all replaceable skins).
+  2. **Blend modes never applied**: `BuildEra100Material` (`WowViewerM2RuntimeBridge`) hardcodes
+     `renderFlags: 0` + `Opaque` + `isHeuristic:true`. The 0x84 material array is now located but
+     NOT read. `FUN_0071a910`: flags bit **0x01=UNLIT**, **0x02=UNFOGGED**; blendMode @short 2
+     (3/4 = additive). This is why everything is **shiny** (nothing is ever unlit). Runtime already
+     has `renderFlags`/`rawBlendMode`/`M2GeometryRenderFlag` plumbing — wiring only, no new arch.
+  3. **Animations advance but do not pose** (USER: frame 2030/3333, model static). Prime suspect:
+     **old 0x1C M2Track** (1.0.0 keeps `interpRanges` @+0x04; Wrath+ drops it → 0x14). If the bone
+     track reader assumes 0x14, every keyframe offset shifts → valid frame counts, dead pose.
+     See `docs/architecture/wow-1.0.0-m2-camera-tracks-2026-07-15.md` §2.1.
+- **Sidebar "missing panels" root cause (FIXED, `7d7caa50`)** — nothing was ever deleted.
+  `_activeBottomTabIndex` was shared across TWO nesting levels: Tools > Terrain and
+  Tools > Utilities re-read the parent's index, so "Utilities" (index 4) rendered
+  `UtilitiesBottomTab 4` = **Taxi** and "Terrain" (3) rendered **Weak Signal**. Capture Automation,
+  Asset Catalog, Runtime Stats, Minimap, Log, Perf, Render Quality, and the **MCNK** tab were all
+  unreachable. Tell: `GetTerrainBottomTabLabels()` existed but was **never called** — the
+  second-level tab strip was never drawn. Each nested level now owns its index + draws its strip
+  (`DrawNestedSubTabStrip`).
+- **Lighting readout added** (`b601b3dc`): Tools > Utilities > **Lighting** — LIT load state,
+  version, source path, evaluated sample (dominant light, ToD, direct/ambient/fog/sky swatches, fog
+  range), effective terrain lighting + external light-dir override. All state already existed on
+  `WorldScene` (`LitStatus` even defaulted to "LIT not loaded.") and was simply never surfaced.
+- **CALIBRATION (USER, unverified in code):** **time of day ≈ 0.64 matches the real minimaps**, NOT
+  our `TerrainLighting.GameTime` default of **0.35** ("morning"). Directly relevant to T040 /
+  synthetic-minimap truth — the capture default is probably wrong.
+- **WMO-only maps don't load their WMO (fix WRITTEN, NOT BUILT/PROVEN — viewer was running).**
+  `StandardTerrainAdapter:86` had `IsWmoBased = _existingTiles.Count == 0` — **ignores the MPHD
+  flag**, unlike its sibling `AlphaTerrainAdapter:89` (`_wdt.IsWmoBased`, flag-based) and unlike the
+  client (`FUN_006976f0`: `if MPHD&1 → MWMO+MODF`). Line 97 already consults the flag to *parse*
+  placements, but `WorldScene:7166` gates *loading* on `IsWmoBased`, so a WMO-only WDT that flags
+  any MAIN tile parses its placements, logs them, then never loads them. Changed to
+  `(_mphdFlags & 0x1) != 0 || _existingTiles.Count == 0`. **RISK to check:** if hybrid maps (MPHD&1
+  *with* real terrain tiles) exist, this now sends them down the WMO-only branch and skips terrain
+  streaming — the comment at `StandardTerrainAdapter:100` claims hybrids exist. If so, fix the
+  *load gate* instead (load global WMO whenever `ModfPlacements.Count > 0`, independent of
+  `IsWmoBased`). Needs the USER's failing map name + log to confirm which branch actually fails.
+- **Pre-existing, NOT ours:** 11 Core test failures (`WorldFramePassCoordinatorTests`,
+  `LkToAlphaRoundTripTests`, `RawArraySerializerTests`, `AdtV23SummaryReaderTests`,
+  `EnrichmentStreamFormatTests`, `ModelFootprintReaderTests`, `V18StorePlacementsReaderTests`,
+  `AdtMcrfRealDataTests`) — verified identical against the parent commit by stashing.
+- **USER direction (queued, not started):** retire staged clients in `output/tmp/wowarchive-clients`
+  → point at a configurable **base clients folder** (their 10.5 TB WoWArchive: every build 0.5.3–
+  3.3.5, all locales, PTRs), shared with the harvester scripts; **DBC schema fallback = use the last
+  version that fits** when no exact DBD match (e.g. builds up to ~1.5 use the 1.0.1 schema). Also
+  wanted: uniqueID-lineage visualization across builds; strip dead v7-dataset/training File-menu
+  cruft into a real panel; **Ghidra: document 1.0.0 WDT flags** (undocumented for 20+ years).
+- **Wireframe for MDX/M2/WMO reportedly broken** (USER). NOT the tab bug — the "M2/WMO WF" checkbox
+  is in `DrawBottomBar()` (always reachable) and `RenderVisibleObjectWireframeOverlay` is intact.
+  Last touched by `5266b25f`. Needs runtime diagnosis.
+
 Last updated: 2026-07-15 (Spec 103 prefab curation and renderer-faithful lighting prepared)
 
 ## Spec 104 — 1.0.0 M2 route (2026-07-15)

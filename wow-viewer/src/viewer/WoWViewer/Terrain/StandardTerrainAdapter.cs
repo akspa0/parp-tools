@@ -82,8 +82,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         _useBigAlpha = (_mphdFlags & _adtProfile.BigAlphaFlagsMask) != 0;
 
-        // Check for WMO-only map (no terrain tiles but has MODF)
-        IsWmoBased = _existingTiles.Count == 0;
+        // The MPHD global-map-object flag is what makes a map WMO-only — the client's WDT reader
+        // gates MWMO/MODF on it, and such a WDT may still flag MAIN tiles, so tile count alone
+        // misses those maps and leaves their WMO parsed but never loaded.
+        IsWmoBased = (_mphdFlags & WdtUsesGlobalMapObjFlag) != 0 || _existingTiles.Count == 0;
 
         ViewerLog.Important(ViewerLog.Category.Terrain,
             $"Standard WDT: {_existingTiles.Count} tiles, MPHD=0x{_mphdFlags:X}, bigAlpha={_useBigAlpha}");
