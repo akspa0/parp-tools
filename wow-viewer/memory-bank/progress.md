@@ -32,6 +32,10 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior implementation)
 - Added visible WDL validation: evaluator saves full 257 truth height; visualizer produces textured
   predicted-WDL/truth-WDL/full-truth OBJ meshes and a signed error heatmap. Tests confirm the visual
   reconstruction preserves every outer and inner paired-lattice sample.
+- Generic varied synthetic WDL prior produced ~24–25 world-unit held-out synthetic lattice MAE but
+  ~48–50 on the first 3.3.5 real tile. Correct next route is evidence-first: the workspace lacks
+  0.5.3 full-map prefab analysis, so recover/audit those terrain-art families before generating a
+  prefab-derived synthetic placement corpus or changing the model again.
 
 ## 2026-07-15 — FogEnd visibility and hover confidence
 

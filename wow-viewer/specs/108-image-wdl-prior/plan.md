@@ -4,7 +4,7 @@
 
 ## Summary
 
-Add a small, independent RGB-only model that predicts the verified paired WDL lattice: a 17×17 outer grid and a 16×16 inner grid.  Train it only on a compact, provenance-preserving representative corpus—not the full V18 store—then pass the generated outer grid explicitly to V8.
+Add a small, independent RGB-only model that predicts the verified paired WDL lattice: a 17×17 outer grid and a 16×16 inner grid. Generic analytic synthesis established a controlled baseline but transferred poorly (about 50 world-unit outer MAE on the first real tile). The next corpus is therefore grounded in recovered 0.5.3 terrain-art prefab families: analyze real full-map evidence first, then synthesize many placement/lighting variants from those measured families before handing the generated outer grid to V8.
 
 ## Technical Context
 
@@ -41,11 +41,14 @@ data-harvester/
 
 ## Phases
 
-1. Pin the paired WDL and generated-prior archive contracts.
-2. Add the RGB-only predictor, trainer, inference writer, and CPU tests.
-3. Let V8 consume an explicitly supplied generated outer prior, never silently ground truth.
-4. User runs a representative-pattern experiment, evaluates one held-out real tile, then runs the
-   evaluator's exported PNG through the standalone path before existing label-free V8 evaluation.
+1. Pin the paired WDL and generated-prior archive contracts. **Complete.**
+2. Add the RGB-only predictor, trainer, inference writer, visual review artifacts, and CPU tests. **Complete.**
+3. Run 0.5.3 Azeroth/Kalimdor full-map analysis; form canonical terrain-art prefab families and a
+   family-safe representative manifest. **User-run evidence gate; no generic-synthesis retrain first.**
+4. Materialize many synthetic placements from those recovered prefab families, with transform,
+   amplitude/relief, tileset/layout, and multi-time lighting variants. Hold out whole families.
+5. Train the WDL prior on the prefab-derived corpus, inspect synthetic holdout plus 0.5.3 real-tile
+   visual reports, then let V8 consume only the generated outer prior.
 
 ## Complexity Tracking
 

@@ -11,3 +11,5 @@
 - [ ] T009 User-run: train on selected representative patterns with a group holdout.
 - [ ] T010 User-run: inspect one real-tile lattice report and repeat its exported PNG through standalone inference.
 - [ ] T011 User-run: evaluate generated-prior V8 output through the label-free harness.
+- [ ] T012 User-run: create full-map 0.5.3 Azeroth/Kalimdor terrain-art prefab evidence and review its family/leakage audit.
+- [ ] T013 Build a prefab-derived synthetic placement corpus only after T012's family contract is accepted.

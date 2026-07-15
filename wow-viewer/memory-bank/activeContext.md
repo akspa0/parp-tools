@@ -33,6 +33,10 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior built; user-run compact-co
 - Visible proof is now `visualize_spec103_wdl_prior.py`: it writes predicted/truth paired-WDL OBJ
   meshes, full truth OBJ, and an error heatmap from an evaluation directory. The reconstruction
   interpolates the paired lattice and is explicitly a coarse-prior view, not a claim of full detail.
+- **Next mandatory gate:** generic varied synthesis reached ~50 world-unit real-tile outer MAE, so
+  do not keep tuning its model. Full-map 0.5.3 Azeroth/Kalimdor prefab analysis is absent and must
+  become the source of canonical terrain-art families; only then synthesize many transform/layout/
+  lighting variants from those measured families and hold out whole families.
 
 ## Spec 107 — Lighting quick controls + confident hover (2026-07-15, implemented/build green)
 
