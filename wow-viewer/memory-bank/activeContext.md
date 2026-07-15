@@ -33,10 +33,26 @@ Last updated: 2026-07-15 (1.0.0 M2 geometry FIXED + Ghidra header remap; sidebar
      NOT read. `FUN_0071a910`: flags bit **0x01=UNLIT**, **0x02=UNFOGGED**; blendMode @short 2
      (3/4 = additive). This is why everything is **shiny** (nothing is ever unlit). Runtime already
      has `renderFlags`/`rawBlendMode`/`M2GeometryRenderFlag` plumbing — wiring only, no new arch.
-  3. **Animations advance but do not pose** (USER: frame 2030/3333, model static). Prime suspect:
-     **old 0x1C M2Track** (1.0.0 keeps `interpRanges` @+0x04; Wrath+ drops it → 0x14). If the bone
-     track reader assumes 0x14, every keyframe offset shifts → valid frame counts, dead pose.
-     See `docs/architecture/wow-1.0.0-m2-camera-tracks-2026-07-15.md` §2.1.
+  3. **Animations: ROOT CAUSE FOUND + BONE LAYOUT FULLY RECOVERED (implementation is the only
+     thing left).** `M2Era100ModelReader` builds its document with **`bones: null`** (line ~118) —
+     1.0.0 models reach the renderer with **zero bone tracks**, so sequences advance the frame
+     counter against nothing (USER: frame 2030/3333, static). Not a stride bug; the bones are
+     simply never read.
+     **M2CompBone = 0x6C, proven from relocator `FUN_0071f440`** (stride 0x6c; sub-array offsets
+     decode exactly, and 3 tracks + pivot sum to 0x6C):
+     `0x00` keyBoneId i32 · `0x04` flags u32 · `0x08` parentBone i16 · `0x0A` submeshId u16 ·
+     **`0x0C` translation M2Track** · **`0x28` rotation M2Track** (values via `FUN_00720d30` =
+     quaternion) · **`0x44` scale M2Track** · **`0x60` pivot C3Vector(12)**.
+     **OLD M2Track = 0x1C** (confirmed): `+0x00` interpType u16 · `+0x02` globalSeq u16 ·
+     **`+0x04` interpRanges M2Array over 8-byte M2Range{u32 start,u32 end}** · `+0x0C` timestamps
+     M2Array · `+0x14` values M2Array.
+     **THE REAL WORK — sampling model differs:** 1.0.0 timestamps/values are **FLAT** arrays
+     (binary validates timestamps at **stride 4** = plain uint32) sliced per-animation by
+     `interpRanges`. Wrath+ instead nests `M2Array<M2Array<T>>` per sequence and drops interpRanges
+     (track 0x1C→0x14). Our `M2TrackDefinition<T>` / `M2TrackArrayReference` are built for the
+     nested form, so era-100 needs either interpRanges support in the sampler or per-sequence views
+     synthesized from the flat arrays. **Do NOT populate bones without handling this** — wrong
+     poses are worse than none, and guessed layouts caused every bug fixed this session.
 - **Sidebar "missing panels" root cause (FIXED, `7d7caa50`)** — nothing was ever deleted.
   `_activeBottomTabIndex` was shared across TWO nesting levels: Tools > Terrain and
   Tools > Utilities re-read the parent's index, so "Utilities" (index 4) rendered
