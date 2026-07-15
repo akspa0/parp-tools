@@ -67,43 +67,60 @@ public static class M2Era100Constants
     public const int TextureWeightCountOffset = 0x64;
     public const int TextureWeightOffsetOffset = 0x68;
 
-    public const int TextureTransformCountOffset = 0x6C;
-    public const int TextureTransformOffsetOffset = 0x70;
+    /// <summary>Relocated by FUN_0071fb20. Semantic identity not yet recovered.</summary>
+    public const int Block_6C_CountOffset = 0x6C;
+    public const int Block_6C_OffsetOffset = 0x70;
 
-    /// <summary>replaceableTexLookup — 0x54 (84) bytes per element.</summary>
-    public const int ReplaceableTexLookupCountOffset = 0x74;
-    public const int ReplaceableTexLookupOffsetOffset = 0x78;
+    /// <summary>
+    /// M2TextureTransform[] — 0x54 (84) bytes each = 3 old-style M2Tracks (0x1C) for
+    /// translation/rotation/scaling. Relocator FUN_0071fc40 validates a 0x54 stride and walks the
+    /// nested track arrays. Batch texture-transform indices are bounds-checked against this count
+    /// in FUN_0071a540.
+    /// </summary>
+    public const int TextureTransformCountOffset = 0x74;
+    public const int TextureTransformOffsetOffset = 0x78;
 
-    // --- Unnamed lookups (int16[] / uint32[]) at 0x7C–0xB0 ---
-    // These are relocated by FUN_0071f2c0 (int16) or FUN_0071fe10 (uint32).
-    // Semantic names not recovered in the Ghidra trace; ordered by header position.
-    // 0x7C: int16[] — likely textureLookup (maps batch.textureComboIndex → texture index)
-    public const int TextureLookupCountOffset = 0x7C;
-    public const int TextureLookupOffsetOffset = 0x80;
+    // --- Lookup / material arrays at 0x7C–0xB0 ---
+    // NOTE: this beta carries one MORE array across 0x74-0xAC than the documented version-256
+    // layout, so every slot after texture_transforms sits one position later than wowdev's table.
+    // Offsets below are anchored to the relocator strides in FUN_0071e190 and to the runtime
+    // pointer reads in FUN_0071a540 (an M2Array is {count, offset}, so a pointer read at +N means
+    // the count lives at N-4).
 
-    // 0x84: uint32[]
-    public const int LookupUint32_84_CountOffset = 0x84;
-    public const int LookupUint32_84_OffsetOffset = 0x88;
+    /// <summary>int16[] (FUN_0071f2c0, stride 2) — replaceable-texture lookup.</summary>
+    public const int ReplaceableTexLookupCountOffset = 0x7C;
+    public const int ReplaceableTexLookupOffsetOffset = 0x80;
 
-    // 0x8C: int16[] — likely textureUnitLookup or renderFlags lookup
-    public const int LookupInt16_8C_CountOffset = 0x8C;
-    public const int LookupInt16_8C_OffsetOffset = 0x90;
+    /// <summary>
+    /// M2Material[] renderFlags — stride 4 (FUN_0071fe10): {uint16 flags, uint16 blendMode}.
+    /// FUN_0071a910 reads flags at byte 0 (0x01 = unlit, 0x02 = unfogged) and blendMode at
+    /// short 2 (3/4 = additive).
+    /// </summary>
+    public const int MaterialCountOffset = 0x84;
+    public const int MaterialOffsetOffset = 0x88;
 
-    // 0x94: int16[]
-    public const int LookupInt16_94_CountOffset = 0x94;
-    public const int LookupInt16_94_OffsetOffset = 0x98;
+    /// <summary>int16[] — bone combos.</summary>
+    public const int BoneComboCountOffset = 0x8C;
+    public const int BoneComboOffsetOffset = 0x90;
 
-    // 0x9C: int16[]
-    public const int LookupInt16_9C_CountOffset = 0x9C;
-    public const int LookupInt16_9C_OffsetOffset = 0xA0;
+    /// <summary>
+    /// int16[] textureCombos — maps batch.textureComboIndex + stage → texture index.
+    /// Confirmed: FUN_0071a540 reads the pointer at model+0x98.
+    /// </summary>
+    public const int TextureLookupCountOffset = 0x94;
+    public const int TextureLookupOffsetOffset = 0x98;
 
-    // 0xA4: int16[]
-    public const int LookupInt16_A4_CountOffset = 0xA4;
-    public const int LookupInt16_A4_OffsetOffset = 0xA8;
+    /// <summary>int16[] textureCoordCombos — confirmed via model+0xA0 in FUN_0071a540.</summary>
+    public const int TextureCoordComboCountOffset = 0x9C;
+    public const int TextureCoordComboOffsetOffset = 0xA0;
 
-    // 0xAC: int16[]
-    public const int LookupInt16_AC_CountOffset = 0xAC;
-    public const int LookupInt16_AC_OffsetOffset = 0xB0;
+    /// <summary>int16[] textureWeightCombos.</summary>
+    public const int TextureWeightComboCountOffset = 0xA4;
+    public const int TextureWeightComboOffsetOffset = 0xA8;
+
+    /// <summary>int16[] textureTransformCombos — confirmed via model+0xB0 in FUN_0071a540.</summary>
+    public const int TextureTransformComboCountOffset = 0xAC;
+    public const int TextureTransformComboOffsetOffset = 0xB0;
 
     // --- Bounding box (gap 0xB4–0xEB, matches 1.12.1 V100 layout) ---
     public const int BoundsOffset = 0xB4;
@@ -156,8 +173,8 @@ public static class M2Era100Constants
     public const int ColorStride = 0x38;      // 56 B — WotLK is 0x28, 1.12.1 is 0x1C
     public const int TextureStride = 0x10;    // 16 B — {type, flags, nameLen, nameOfs}
     public const int TextureWeightStride = 0x1C; // 28 B — WotLK is 0x14
-    public const int TextureTransformStride = 0x1C; // 28 B — WotLK is 0x3C
-    public const int ReplaceableTexLookupStride = 0x54; // 84 B
+    public const int TextureTransformStride = 0x54; // 84 B — 3 old M2Tracks (0x1C each)
+    public const int MaterialStride = 0x04;      // 4 B — {uint16 flags, uint16 blendMode}
     public const int LightStride = 0xD4;       // 212 B — WotLK is 0x9C
     public const int CameraStride = 0x7C;      // 124 B
     public const int RibbonStride = 0xDC;      // 220 B
