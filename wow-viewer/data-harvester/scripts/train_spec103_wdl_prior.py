@@ -45,8 +45,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Spec 108 RGB-only WDL prior trainer (USER runs CUDA)")
     ap.add_argument("--store", required=True, type=Path, help="compact representative paired store")
     ap.add_argument("--output", required=True, type=Path)
-    ap.add_argument("--val-key", required=True, help="complete source-group column, normally pattern")
-    ap.add_argument("--val-value", required=True)
+    ap.add_argument("--val-key", default=None, help="complete source-group column when no manifest partition exists")
+    ap.add_argument("--val-value", default=None)
     ap.add_argument("--curation-manifest", type=Path, default=None,
                     help="existing Spec 103 representative-pattern curation manifest (or its directory). "
                          "Only its kept train/val rows are read; no full-corpus training.")
@@ -59,15 +59,18 @@ def main() -> int:
     if "minimap_rgb" not in group or "height_257" not in group:
         raise SystemExit("store must contain minimap_rgb and height_257")
     index = pq.read_table(args.store / "index.parquet").to_pylist()
-    if not index or args.val_key not in index[0]:
-        raise SystemExit(f"index lacks requested holdout key {args.val_key!r}")
-    split_mode = f"holdout:{args.val_key}={args.val_value}"
+    if not index:
+        raise SystemExit("store index is empty")
+    split_mode = "manifest_partition"
     if args.curation_manifest is not None:
         manifest_path = args.curation_manifest / "curation_manifest.parquet" if args.curation_manifest.is_dir() else args.curation_manifest
         train_rows, val_rows, split_mode = resolve_manifest_rows(
-            index, pq.read_table(manifest_path).to_pylist(), val_key=args.val_key, val_value=args.val_value
+            index, pq.read_table(manifest_path).to_pylist(), val_key=args.val_key or "map", val_value=args.val_value or ""
         )
     else:
+        if args.val_key is None or args.val_value is None or args.val_key not in index[0]:
+            raise SystemExit("--val-key and --val-value are required when no curation manifest supplies partitions")
+        split_mode = f"holdout:{args.val_key}={args.val_value}"
         train_rows = [i for i, row in enumerate(index) if str(row.get(args.val_key)) != str(args.val_value)]
         val_rows = [i for i, row in enumerate(index) if str(row.get(args.val_key)) == str(args.val_value)]
         validate_source_group_split(index, train_rows, val_rows)

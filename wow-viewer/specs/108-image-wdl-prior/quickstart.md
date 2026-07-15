@@ -7,7 +7,7 @@ Run from `wow-viewer/data-harvester`. The user owns these CUDA runs.
 2. Train the independent WDL prior:
 
 ```powershell
-uv run python scripts/train_spec103_wdl_prior.py --store <real-v18-store.zarr> --curation-manifest <spec103-curation-manifest-or-directory> --output ../output/spec108_wdl_prior_v1 --val-key map --val-value ignored-when-manifest-partitioned --epochs 80 --batch 32
+uv run python scripts/train_spec103_wdl_prior.py --store <real-v18-store.zarr> --curation-manifest <spec103-curation-manifest-or-directory> --output ../output/spec108_wdl_prior_v1 --epochs 80 --batch 32
 ```
 
 3. Produce generated priors and use them in V8:
