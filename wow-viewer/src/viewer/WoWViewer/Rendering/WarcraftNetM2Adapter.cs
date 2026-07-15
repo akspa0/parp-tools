@@ -252,45 +252,51 @@ internal static class WarcraftNetM2Adapter
 
         if (IsMd20(m2Bytes) && !IsMd21(m2Bytes))
         {
+            // An era-100 parse failure is terminal and must escape this method: falling back to a
+            // different M2/MDX layout would silently reinterpret 1.0.0 bytes as another format.
+            M2Era1121EraTag detectedEra;
             try
             {
-                M2Era1121EraTag era = M2ModelReaderDispatcher.DetectEra(m2Bytes.AsSpan(), fileName);
-                if (era is M2Era1121EraTag.Md20_1X_V100_Era100)
-                {
-                    ViewerLog.Info(ViewerLog.Category.Mdx,
-                        $"[M2] Detected 1.0.0 era (version 0x100, classic layout), using era-100 reader for {fileName}");
-                    try
-                    {
-                        return ParseEra100Model(m2Bytes, modelPath);
-                    }
-                    catch (Exception era100Ex)
-                    {
-                        throw new InvalidDataException(
-                            $"1.x M2 '{fileName}' was recognized as the 1.0.0-era 0x100 layout but could not be parsed by its required era-100 reader. " +
-                            "It must not fall through to a different M2/MDX layout.",
-                            era100Ex);
-                    }
-                }
-                else if (era is M2Era1121EraTag.Md20_1X_V100 or M2Era1121EraTag.Md20_1X_V101)
-                {
-                    uint rawVersion = BitConverter.ToUInt32(m2Bytes, M2Era1121Constants.VersionOffset);
-                    ViewerLog.Info(ViewerLog.Category.Mdx,
-                        $"[M2] Detected 1.12.1 era (version 0x{rawVersion:X}), using era-aware reader for {fileName}");
-                    try
-                    {
-                        return ParseEra1121Model(m2Bytes, modelPath);
-                    }
-                    catch (Exception era1121Ex)
-                    {
-                        ViewerLog.Debug(ViewerLog.Category.Mdx,
-                            $"[M2] Era-aware 1.12.1 parse failed for {fileName}, falling through to legacy parser: {era1121Ex.Message}");
-                    }
-                }
+                detectedEra = M2ModelReaderDispatcher.DetectEra(m2Bytes.AsSpan(), fileName);
             }
             catch (Exception eraDetectEx)
             {
                 ViewerLog.Debug(ViewerLog.Category.Mdx,
                     $"[M2] Era detection failed for {fileName}, falling through to legacy parser: {eraDetectEx.Message}");
+                detectedEra = M2Era1121EraTag.Unknown;
+            }
+
+            if (detectedEra is M2Era1121EraTag.Md20_1X_V100_Era100)
+            {
+                ViewerLog.Info(ViewerLog.Category.Mdx,
+                    $"[M2] Detected 1.0.0 era (version 0x100, classic layout), using era-100 reader for {fileName}");
+                try
+                {
+                    return ParseEra100Model(m2Bytes, modelPath);
+                }
+                catch (Exception era100Ex)
+                {
+                    throw new InvalidDataException(
+                        $"1.x M2 '{fileName}' was recognized as the 1.0.0-era 0x100 layout but could not be parsed by its required era-100 reader. " +
+                        "It must not fall through to a different M2/MDX layout.",
+                        era100Ex);
+                }
+            }
+
+            if (detectedEra is M2Era1121EraTag.Md20_1X_V100 or M2Era1121EraTag.Md20_1X_V101)
+            {
+                uint rawVersion = BitConverter.ToUInt32(m2Bytes, M2Era1121Constants.VersionOffset);
+                ViewerLog.Info(ViewerLog.Category.Mdx,
+                    $"[M2] Detected 1.12.1 era (version 0x{rawVersion:X}), using era-aware reader for {fileName}");
+                try
+                {
+                    return ParseEra1121Model(m2Bytes, modelPath);
+                }
+                catch (Exception era1121Ex)
+                {
+                    ViewerLog.Debug(ViewerLog.Category.Mdx,
+                        $"[M2] Era-aware 1.12.1 parse failed for {fileName}, falling through to legacy parser: {era1121Ex.Message}");
+                }
             }
         }
 
@@ -992,10 +998,10 @@ internal static class WarcraftNetM2Adapter
                     {
                         SkinSectionId = section.SubmeshId,
                         Level = section.Level,
-                        VertexStart = section.VertexStart,
+                        VertexStart = (int)section.VertexStart,
                         VertexCount = section.VertexCount,
-                        IndexStart = (ushort)Math.Min(section.IndexStart, ushort.MaxValue),
-                        IndexCount = (ushort)Math.Min(section.IndexCount, ushort.MaxValue),
+                        IndexStart = (int)section.IndexStart,
+                        IndexCount = (int)section.IndexCount,
                         BoneComboIndex = 0,
                     });
                 }

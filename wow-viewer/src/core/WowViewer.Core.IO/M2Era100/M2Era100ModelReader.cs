@@ -203,13 +203,15 @@ public static class M2Era100ModelReader
             for (int i = 0; i < sectionsCount; i++)
             {
                 int ofs = checked((int)sectionsOfs + (i * M2Era100Constants.SectionStride));
+                ushort level = ReadUInt16At(data, ofs + M2Era100Constants.SectionLevelOffset);
+                uint levelHighBits = (uint)level << 16;
                 sections.Add(new M2Era100Section(
                     ReadUInt16At(data, ofs + M2Era100Constants.SectionSubmeshIdOffset),
-                    ReadUInt16At(data, ofs + M2Era100Constants.SectionLevelOffset),
-                    ReadUInt16At(data, ofs + M2Era100Constants.SectionVertexStartOffset),
+                    level,
+                    ReadUInt16At(data, ofs + M2Era100Constants.SectionVertexStartOffset) | levelHighBits,
                     ReadUInt16At(data, ofs + M2Era100Constants.SectionVertexCountOffset),
-                    ReadUInt32At(data, ofs + M2Era100Constants.SectionIndexStartOffset),
-                    ReadUInt32At(data, ofs + M2Era100Constants.SectionIndexCountOffset)));
+                    ReadUInt16At(data, ofs + M2Era100Constants.SectionIndexStartOffset) | levelHighBits,
+                    ReadUInt16At(data, ofs + M2Era100Constants.SectionIndexCountOffset)));
             }
         }
 

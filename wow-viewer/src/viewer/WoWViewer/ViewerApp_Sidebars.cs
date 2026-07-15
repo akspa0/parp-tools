@@ -4017,6 +4017,31 @@ public partial class ViewerApp
         }
     }
 
+    /// <summary>
+    /// Draws the tab strip for a nested sub-tab level and returns the selected index.
+    /// The parent strip in DrawWorkbenchContent only covers the first level, so without this
+    /// a nested section can never select anything but its parent's index.
+    /// </summary>
+    private static int DrawNestedSubTabStrip(string id, string[] labels, int activeIndex)
+    {
+        if (labels.Length == 0)
+            return 0;
+
+        int selected = Math.Clamp(activeIndex, 0, labels.Length - 1);
+        if (ImGui.BeginTabBar(id, ImGuiTabBarFlags.FittingPolicyScroll))
+        {
+            for (int i = 0; i < labels.Length; i++)
+            {
+                if (ImGui.TabItemButton(labels[i], i == selected ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+                    selected = i;
+            }
+            ImGui.EndTabBar();
+        }
+
+        ImGui.Separator();
+        return selected;
+    }
+
     private void DrawToolsSubTabContent()
     {
         switch ((ToolsBottomTab)_activeBottomTabIndex)
@@ -4055,7 +4080,10 @@ public partial class ViewerApp
             return;
         }
 
-        switch ((TerrainBottomTab)_activeBottomTabIndex)
+        _activeTerrainTabIndex = DrawNestedSubTabStrip(
+            "##TerrainSubTabs", WorkbenchNavigator.GetTerrainBottomTabLabels(), _activeTerrainTabIndex);
+
+        switch ((TerrainBottomTab)_activeTerrainTabIndex)
         {
             case TerrainBottomTab.Clipboard:
                 DrawTerrainClipboardSubTab(renderer);
@@ -4560,7 +4588,10 @@ public partial class ViewerApp
         // 069 Phase 16: use headless variants (Draw*Content) so no nested
         // window opens inside the workbench. The legacy Draw*Window
         // wrappers still work for users who toggle the old menu items.
-        switch ((UtilitiesBottomTab)_activeBottomTabIndex)
+        _activeUtilitiesTabIndex = DrawNestedSubTabStrip(
+            "##UtilitiesSubTabs", WorkbenchNavigator.GetUtilitiesBottomTabLabels(), _activeUtilitiesTabIndex);
+
+        switch ((UtilitiesBottomTab)_activeUtilitiesTabIndex)
         {
             case UtilitiesBottomTab.Minimap:
                 DrawUtilitiesMinimap();

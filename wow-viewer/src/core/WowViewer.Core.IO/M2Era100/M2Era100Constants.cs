@@ -224,14 +224,21 @@ public static class M2Era100Constants
     public const int BatchTextureTransformComboIndexOffset = 0x16; // uint16
 
     // --- M2Section internal layout (0x20 = 32 bytes) ---
-    // Per-field layout not fully recovered from Ghidra; using standard M2SkinSection fields.
+    // Standard M2SkinSection fields: ten uint16 (0x00-0x13) + C3Vector centerPosition (0x14-0x1F).
+    // Every field is uint16; vertexStart/indexStart are widened by Level, which carries their
+    // high bits ((Level << 16) is OR'd in) so a division may exceed 65535 vertices/indices.
 
     public const int SectionSubmeshIdOffset = 0x00;  // uint16
     public const int SectionLevelOffset = 0x02;      // uint16
-    public const int SectionVertexStartOffset = 0x04; // uint16
+    public const int SectionVertexStartOffset = 0x04; // uint16 (low bits; high bits from Level)
     public const int SectionVertexCountOffset = 0x06; // uint16
-    public const int SectionIndexStartOffset = 0x08;  // uint32
-    public const int SectionIndexCountOffset = 0x0C;  // uint32
+    public const int SectionIndexStartOffset = 0x08;  // uint16 (low bits; high bits from Level)
+    public const int SectionIndexCountOffset = 0x0A;  // uint16
+    public const int SectionBoneCountOffset = 0x0C;       // uint16
+    public const int SectionBoneComboIndexOffset = 0x0E;  // uint16
+    public const int SectionBoneInfluencesOffset = 0x10;  // uint16
+    public const int SectionCenterBoneIndexOffset = 0x12; // uint16
+    public const int SectionCenterPositionOffset = 0x14;  // C3Vector (12 B)
 
     // --- Global loop / name ---
 

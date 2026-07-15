@@ -102,4 +102,8 @@ public static class WorkbenchNavigator
     };
 
     public static string[] GetTerrainBottomTabLabels() => ["Clipboard", "Analysis", "MCNK", "Weak Signal", "Export", "Tools"];
+
+    /// <summary>Labels for <see cref="UtilitiesBottomTab"/>; order must match the enum.</summary>
+    public static string[] GetUtilitiesBottomTabLabels() =>
+        ["Minimap", "Log", "Perf", "Render Quality", "Taxi", "Capture", "Asset Catalog", "Runtime Stats"];
 }

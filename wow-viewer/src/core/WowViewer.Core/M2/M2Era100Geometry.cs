@@ -71,11 +71,13 @@ public readonly record struct M2Era100Vertex(
 /// <summary>
 /// Render section / geometry group (0x20 bytes on disk). Defines a contiguous slice
 /// of the vertex/index buffers that shares a material.
+/// VertexStart and IndexStart are stored on disk as uint16 with their high bits in Level;
+/// both are already combined here.
 /// </summary>
 public readonly record struct M2Era100Section(
     ushort SubmeshId,
     ushort Level,
-    ushort VertexStart,
+    uint VertexStart,
     ushort VertexCount,
     uint IndexStart,
     uint IndexCount);

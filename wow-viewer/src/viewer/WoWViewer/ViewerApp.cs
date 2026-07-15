@@ -298,6 +298,12 @@ public partial class ViewerApp : IDisposable
     private WorkbenchTab _activeTopTab = WorkbenchTab.Tools;
     private int _activeBottomTabIndex = 0;
 
+    // Nested sub-tab selection. These must be separate from _activeBottomTabIndex: Tools > Terrain
+    // and Tools > Utilities are a second nesting level, so reusing the parent's index pins the
+    // child to whatever slot the parent occupies and makes its other tabs unreachable.
+    private int _activeTerrainTabIndex = 0;
+    private int _activeUtilitiesTabIndex = 0;
+
     // Workbench popout (069 Phase 14: single resizable panel, no window sprawl)
     private bool _workbenchOpen = true;
 
