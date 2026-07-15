@@ -4618,6 +4618,9 @@ public partial class ViewerApp
             case UtilitiesBottomTab.RuntimeStats:
                 DrawRuntimeStatsPanelContent();
                 break;
+            case UtilitiesBottomTab.Lighting:
+                DrawLightingContent();
+                break;
         }
     }
 
