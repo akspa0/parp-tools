@@ -25,6 +25,10 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior implementation)
   (no alpha/MCLY), so it is invalid as a visual proof. Trainer now filters dark/occluded/pathological
   rows before dataset construction; the compact 3.3.5 split is 62 clean train / 10 clean Chamber
   validation rows, with row 906 selected for the real visible proof.
+- Corrected a second routing error: the 30-row synthetic store is a smoke fixture, not the varied
+  corpus requested for WDL training. `spec103_make_synthetic_adts.py` now defaults to 320 seeded
+  fields across plane/ridge/crater/plateau/hills/valley/terraces/saddle/dunes/basin; its three lighting
+  variants create 960 rows. First proof holds out all crater rows (96), then measures real row 906.
 
 ## 2026-07-15 — FogEnd visibility and hover confidence
 

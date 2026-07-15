@@ -104,9 +104,14 @@ def main() -> int:
         train_rows = [i for i, row in enumerate(index) if str(row.get(args.val_key)) != str(args.val_value)]
         val_rows = [i for i, row in enumerate(index) if str(row.get(args.val_key)) == str(args.val_value)]
         validate_source_group_split(index, train_rows, val_rows)
-    train_rows, train_filter = filter_deployable_rows(group, train_rows, min_rgb_mean=args.min_rgb_mean, max_object_coverage=args.max_object_coverage)
-    val_rows, val_filter = filter_deployable_rows(group, val_rows, min_rgb_mean=args.min_rgb_mean, max_object_coverage=args.max_object_coverage)
-    print(f"[filter] train={len(train_rows)} {train_filter}; val={len(val_rows)} {val_filter}; pathological={'included' if args.include_pathological else 'excluded'}", flush=True)
+    synthetic_rows = all(str(index[row].get("build", "")) == "synthetic" for row in [*train_rows, *val_rows])
+    if synthetic_rows:
+        train_filter = val_filter = {"dropped_dark": 0, "dropped_object": 0}
+        print(f"[filter] synthetic paired corpus: retain all authored lighting variants; train={len(train_rows)} val={len(val_rows)}", flush=True)
+    else:
+        train_rows, train_filter = filter_deployable_rows(group, train_rows, min_rgb_mean=args.min_rgb_mean, max_object_coverage=args.max_object_coverage)
+        val_rows, val_filter = filter_deployable_rows(group, val_rows, min_rgb_mean=args.min_rgb_mean, max_object_coverage=args.max_object_coverage)
+        print(f"[filter] train={len(train_rows)} {train_filter}; val={len(val_rows)} {val_filter}; pathological={'included' if args.include_pathological else 'excluded'}", flush=True)
     if len(train_rows) < args.min_train_rows or len(val_rows) < args.min_val_rows:
         raise SystemExit(f"insufficient deployable rows after filters: train={len(train_rows)} (min {args.min_train_rows}) val={len(val_rows)} (min {args.min_val_rows})")
     device = torch.device("cuda"); model = WdlPriorNet().to(device); opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)

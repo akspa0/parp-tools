@@ -25,6 +25,7 @@ from harvester.spec103.wdl_prior_model import (
     normalize_minimap_rgb,
 )
 from train_spec103_wdl_prior import filter_deployable_rows
+from spec103_make_synthetic_adts import DEFAULT_PATTERNS, _pattern_height
 
 
 def test_target_is_exact_paired_wdl_mapping():
@@ -107,3 +108,13 @@ def test_training_filter_rejects_dark_and_occluded_minimap_rows():
     rows, report = filter_deployable_rows(group, [0, 1, 2], min_rgb_mean=25.0, max_object_coverage=0.0)
     assert rows == [2]
     assert report == {"dropped_dark": 1, "dropped_object": 1}
+
+
+def test_synthetic_generator_has_deterministic_family_variation():
+    first, first_params = _pattern_height("ridge", 180.0, np.random.default_rng(103))
+    second, second_params = _pattern_height("ridge", 180.0, np.random.default_rng(104))
+    assert first.shape == (257, 257)
+    assert float(first.max() - first.min()) > 170.0
+    assert first_params != second_params
+    assert not np.array_equal(first, second)
+    assert {"hills", "valley", "terraces", "saddle", "dunes", "basin"}.issubset(DEFAULT_PATTERNS)

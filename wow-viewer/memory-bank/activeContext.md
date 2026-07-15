@@ -25,6 +25,11 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior built; user-run compact-co
   pages. The trainer now excludes pathological rows, RGB mean below 25, and any object coverage by
   default. On real 3.3.5 tiny800 this leaves 62 train / 10 held-out clean ChamberOfAspectsBlack rows;
   row 906 (`ChamberOfAspectsBlack_29_27`) is the first bright, valid real-tile evaluation target.
+- **Corrected corpus owner:** the old 10-tile/30-row synthetic store was only a smoke fixture. The
+  default generator now authors 320 varied fields (10 families × 2 amplitudes × 16 independently
+  seeded parameterizations); three authored lighting times yield 960 RGB→WDL rows. Train on this
+  controlled corpus first, hold out its full crater family (96 rows), then measure the explicit
+  synthetic-to-real gap. Do not replace it with the tiny real-data difficulty sample.
 
 ## Spec 107 — Lighting quick controls + confident hover (2026-07-15, implemented/build green)
 

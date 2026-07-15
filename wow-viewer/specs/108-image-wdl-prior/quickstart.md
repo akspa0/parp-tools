@@ -2,25 +2,33 @@
 
 Run from `wow-viewer/data-harvester`. The user owns these CUDA runs.
 
-1. Use the real paired V18 store with the existing Spec 103 representative-pattern curation manifest.
-   The trainer reads only the manifest's selected rows; it does not train on the whole store.
-2. Train the independent WDL prior:
+1. Generate the varied controlled corpus (320 known-height tiles: ten terrain families, two
+   amplitudes, sixteen parameterized variants each). This is CPU preparation; the printed ADT/capture
+   commands remain optional because the authored-lighting store path below renders from known height.
 
 ```powershell
-uv run python scripts/train_spec103_wdl_prior.py --store "I:\parp\parp-tools\wow-viewer\output\datasets\v18\3_3_5_12340.zarr" --curation-manifest "I:\parp\parp-tools\wow-viewer\output\datasets\v18\curation\v18_focus_tiny_800ish\kept_tiles.parquet" --val-key map --val-value ChamberOfAspectsBlack --output "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_tiny800_335_chamber" --epochs 80 --batch 16 --patience 10
+uv run python scripts/spec103_make_synthetic_adts.py --output "I:\parp\parp-tools\wow-viewer\output\spec108\synthetic_varied_v1" --map-name synth108 --variants-per-pattern 16 --seed 103
+uv run python scripts/spec103_build_synthetic_store.py --manifest "I:\parp\parp-tools\wow-viewer\output\spec108\synthetic_varied_v1\synthetic_manifest.json" --lighting-time 0.25 --lighting-time 0.35 --lighting-time 0.50 --synthesize-mcsh --output "I:\parp\parp-tools\wow-viewer\output\datasets\spec108\synthetic_varied_lighting_v1.zarr"
 ```
 
-3. Produce generated priors and use them in V8:
+2. Train the independent WDL prior, holding out the entire crater family (96 rows):
 
 ```powershell
-uv run python scripts/infer_spec103_wdl_prior.py --store "I:\parp\parp-tools\wow-viewer\output\datasets\v18\3_3_5_12340.zarr" --checkpoint "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_tiny800_335_expansion01\checkpoint_best.pt" --val-key map --val-value Expansion01 --output "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_tiny800_335_expansion01\generated_Expansion01_priors.npz"
+uv run python scripts/train_spec103_wdl_prior.py --store "I:\parp\parp-tools\wow-viewer\output\datasets\spec108\synthetic_varied_lighting_v1.zarr" --val-key pattern --val-value crater --output "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_synthetic_varied_crater" --epochs 80 --batch 32 --patience 10
 ```
 
-4. Before trusting V8, evaluate a held-out real tile. This model call consumes its minimap RGB;
-   `height_257` is opened afterwards only to score the prediction:
+3. Evaluate the first held-out synthetic crater row (row 192 = first crater variant at time 0.25),
+then measure the synthetic-to-real gap with the same checkpoint.
 
 ```powershell
-uv run python scripts/evaluate_spec103_wdl_prior.py --store "I:\parp\parp-tools\wow-viewer\output\datasets\v18\3_3_5_12340.zarr" --checkpoint "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_tiny800_335_chamber\checkpoint_best.pt" --row 906 --output "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_tiny800_335_chamber\real_ChamberOfAspectsBlack_29_27"
+uv run python scripts/evaluate_spec103_wdl_prior.py --store "I:\parp\parp-tools\wow-viewer\output\datasets\spec108\synthetic_varied_lighting_v1.zarr" --checkpoint "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_synthetic_varied_crater\checkpoint_best.pt" --row 192 --output "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_synthetic_varied_crater\heldout_crater_row192"
+```
+
+4. Then measure the synthetic-to-real gap on a bright real minimap. The model consumes only RGB;
+   `height_257` is opened afterwards solely to score it:
+
+```powershell
+uv run python scripts/evaluate_spec103_wdl_prior.py --store "I:\parp\parp-tools\wow-viewer\output\datasets\v18\3_3_5_12340.zarr" --checkpoint "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_synthetic_varied_crater\checkpoint_best.pt" --row 906 --output "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_synthetic_varied_crater\real_ChamberOfAspectsBlack_29_27"
 ```
 
 Its `report.json` records truth error and a `standalone_png_vs_store_rgb` round-trip metric after
@@ -30,7 +38,7 @@ reloading the exported PNG. Both should be inspected before using the generated 
    input at all:
 
 ```powershell
-uv run python scripts/infer_spec103_wdl_prior.py --image "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_tiny800_335_chamber\real_ChamberOfAspectsBlack_29_27\input_minimap.png" --checkpoint "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_tiny800_335_chamber\checkpoint_best.pt" --output "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_tiny800_335_chamber\real_ChamberOfAspectsBlack_29_27\standalone_wdl_lattice.npz"
+uv run python scripts/infer_spec103_wdl_prior.py --image "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_synthetic_lighting_plateau\real_ChamberOfAspectsBlack_29_27\input_minimap.png" --checkpoint "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_synthetic_lighting_plateau\checkpoint_best.pt" --output "I:\parp\parp-tools\wow-viewer\output\spec108_wdl_prior_synthetic_lighting_plateau\real_ChamberOfAspectsBlack_29_27\standalone_wdl_lattice.npz"
 ```
 
 The current V8 checkpoint may still depend on its other auxiliary channels. This slice proves the WDL handoff; replacing those auxiliaries is a later, separate residual-model slice.
