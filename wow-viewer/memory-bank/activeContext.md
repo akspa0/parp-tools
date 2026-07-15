@@ -1,6 +1,20 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-15 (Spec 106 native day/night lighting planned; 0.5.3 direction recovered)
+Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior built; user-run compact-corpus training next)
+
+## Spec 108 — RGB-only WDL prior (2026-07-15, implemented/tested; no training launched)
+
+- Added a small independent RGB→WDL model with the exact paired target: outer
+  `height_257[::16,::16]` (17×17) plus inner `height_257[8::16,8::16]` (16×16), never a 33×33
+  substitute. It serializes the input/target contract and writes row-addressed generated-prior
+  archives.
+- `infer_spec103_v7.py --generated-wdl-priors` now consumes that generated outer lattice for V8
+  ch6 and derives its height hints from it; missing/misaligned rows fail closed rather than fall
+  back to ground truth. This only closes the WDL handoff: V8's remaining auxiliary-channel
+  predictors remain later independent residual slices.
+- Train only on a compact curated representative-pattern store with complete source-group holdout;
+  do not run the full V18 corpus. CPU contracts: 4/4 passed. User owns the CUDA train/infer run;
+  `specs/108-image-wdl-prior/quickstart.md` has the commands.
 
 ## Spec 107 — Lighting quick controls + confident hover (2026-07-15, implemented/build green)
 

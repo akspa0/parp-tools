@@ -1,6 +1,17 @@
 # Progress — wow-viewer
 
-Last updated: 2026-07-15 (Spec 106 native day/night lighting plan + world lighting evidence)
+Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior implementation)
+
+## 2026-07-15 — Spec 108 compact-corpus RGB→WDL prior
+
+- Built the independent Spec 108 front-end: minimap RGB only → 545 normalized WDL values,
+  decoded as the exact 17×17 outer and 16×16 inner lattice. Checkpoints pin the normalization and
+  target contracts; inference writes a source-row-bound NPZ archive.
+- Wired V8 inference to take `--generated-wdl-priors`. It uses the generated outer grid and
+  generated WDL min/max hints, never silently ground-truth WDL; archive row omissions fail closed.
+- User decision retained: do **not** train on the full V18 corpus. The next experiment is the
+  existing curated representative terrain/lighting patterns, with whole source groups held out.
+  CPU tests and syntax checks passed (4/4). No training, capture, or harvest was launched.
 
 ## 2026-07-15 — FogEnd visibility and hover confidence
 

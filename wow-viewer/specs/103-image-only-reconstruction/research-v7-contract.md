@@ -88,6 +88,10 @@ v7 ran INPUT_SIZE = OUTPUT_SIZE = 512 (upscaled 256 minimaps). Our signals are n
 - **Missing/dropped prior = 0.5 constant fill** (v7's own fallback). WDL-prior dropout re-uses this:
   a dropped tile gets `ch6 = 0.5` and (in hint mode `wdl`) neutral hints, so one model learns both
   prior-present refinement and prior-absent full prediction.
+- **Spec 108 handoff:** the RGB-only prior model writes a row-addressed generated-prior archive
+  containing the paired 17×17/16×16 grids. `infer_spec103_v7.py --generated-wdl-priors` uses its
+  outer grid for ch6 and derives ch7/8 from that generated grid; it rejects missing rows rather
+  than substituting a ground-truth prior. The remaining V8 auxiliary signals are a separate lane.
 
 ## 7. Honest caveats (recorded, not hidden)
 
