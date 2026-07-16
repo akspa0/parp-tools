@@ -8,8 +8,10 @@
 - [x] T006 Validate CPU contracts and prepare the user-owned compact-corpus training command.
 - [x] T007 [US1] Add a standalone minimap-PNG-to-lattice inference route with no paired-store input.
 - [x] T008 [US1] Add a real-tile evaluator that separates RGB prediction from truth-only scoring.
-- [ ] T009 [US1] User-run: train the WDL prior on `output/datasets/spec108/synthetic_varied_lighting_v1.zarr` with the complete `pattern=crater` holdout.
-- [ ] T010 [US1] User-run: inspect row 192 synthetic WDL lattices and the paired-WDL OBJ visual review under `output/spec108_wdl_prior_synthetic_varied_crater_v2/`.
-- [x] T011 [US2] Add `--generated-wdl-priors` to `data-harvester/scripts/train_spec103_v7.py`, with exact-store and selected-row gates.
-- [ ] T012 [US2] User-run: generate `generated_wdl_all_rows.npz`, train V8 with it, infer held-out synthetic crater rows, and run `validate_spec103_labelfree.py`.
-- [ ] T013 [US3] Deferred research: create full-map 0.5.3 irregular terrain-art motif evidence only for a later prefab-derived synthetic corpus; it does not block T009–T012.
+- [ ] T009 [US1] Build `data-harvester/scripts/spec108_build_mixed_curriculum.py`: a 240-row mixed store (144 real 0.5.3 + 96 synthetic) with stable source groups and no duplicated lighting group across split.
+- [ ] T010 [US3] Add fast real tile brush/paste descriptors in `data-harvester/src/harvester/` using one 16x16 cell signature pass; select irregular repeated motifs only, not regions or rectangular crops.
+- [ ] T011 [US1] Add CPU tests proving map quotas, the <256 cap, mixed source provenance, group split isolation, and real motif selection to `data-harvester/tests/spec108/`.
+- [ ] T012 [US1] User-run: build and inspect the mixed curriculum before any CUDA work.
+- [ ] T013 [US1] User-run: train the WDL prior on the mixed store with a complete source-group holdout and inspect multi-row visual reports.
+- [x] T014 [US2] Add `--generated-wdl-priors` to `data-harvester/scripts/train_spec103_v7.py`, with exact-store and selected-row gates.
+- [ ] T015 [US2] User-run: generate mixed-corpus priors, train V8 with them, infer held-out mixed rows, and run `validate_spec103_labelfree.py`.

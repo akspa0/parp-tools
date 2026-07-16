@@ -1,4 +1,8 @@
-# Synthetic WDL Prior: What To Run Next
+# Superseded: Analytic-Only WDL Prior Runbook
+
+> Do not start this sequence for the universal model. It remains useful as a smoke reference only.
+> Spec 108 now requires a capped mixed real-plus-synthetic curriculum before another training run;
+> see `plan.md` Phase 3 and `tasks.md` T009–T015.
 
 Run every command from `I:\parp\parp-tools\wow-viewer\data-harvester`.
 
