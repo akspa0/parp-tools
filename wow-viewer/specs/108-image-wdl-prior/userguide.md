@@ -4,6 +4,8 @@
 > Spec 108 now requires a capped mixed real-plus-synthetic curriculum before another training run;
 > see `plan.md` Phase 3 and `tasks.md` T009–T015.
 
+The active, complete post-build runbook is [mixed-curriculum-userguide.md](mixed-curriculum-userguide.md).
+
 ## Active next command
 
 Run from `I:\parp\parp-tools\wow-viewer\data-harvester`. This is the user-owned CPU/I/O build;
