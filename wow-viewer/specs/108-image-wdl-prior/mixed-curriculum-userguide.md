@@ -8,7 +8,7 @@ below; do not pick one arbitrary tile as validation.
 
 ```text
 Mixed store: I:\parp\parp-tools\wow-viewer\output\datasets\spec108\mixed_053_synthetic_v1.zarr
-Training cap: 240 rows total (144 real 0.5.3 + 96 synthetic)
+Training cap: 240 rows total (up to 144 clean real 0.5.3; synthetic rows fill any clean-real shortfall)
 Holdout:     all rows whose index.parquet split is val
 ```
 
@@ -18,8 +18,9 @@ Holdout:     all rows whose index.parquet split is val
 Get-Content "I:\parp\parp-tools\wow-viewer\output\datasets\spec108\mixed_053_synthetic_v1.zarr\summary.json"
 ```
 
-Continue only when it says 240 total rows, 144 real rows, 96 synthetic rows, and contains all four
-0.5.3 maps.
+Continue only when it says 240 total rows, contains all four 0.5.3 maps, and its `real_filter`
+reports rejected dark/object rows. Clean real rows may be below 144; synthetic source groups fill the
+remainder rather than admitting bad real tiles.
 
 ## 2. Train the WDL prior on the mixed store
 
