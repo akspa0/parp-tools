@@ -6,6 +6,10 @@ This is the universal-model lane. It uses the 240-row mixed store, never the old
 store. The builder assigns `split=train|val` by whole source group, so use `split=val` everywhere
 below; do not pick one arbitrary tile as validation.
 
+> The prior WDL checkpoint is rejected: its globally pooled scalar head produced noisy lattices.
+> Rebuild the mixed store with the current code so it includes `alpha_256` brush evidence, then train
+> a fresh spatial-v2 WDL checkpoint. Do not use the older generated archive or V8 output.
+
 ```text
 Mixed store: I:\parp\parp-tools\wow-viewer\output\datasets\spec108\mixed_053_synthetic_v1.zarr
 Training cap: 240 rows total (up to 144 clean real 0.5.3; synthetic rows fill any clean-real shortfall)

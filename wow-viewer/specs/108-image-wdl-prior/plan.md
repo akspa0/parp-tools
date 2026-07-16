@@ -44,7 +44,7 @@ data-harvester/
 1. Pin the paired WDL and generated-prior archive contracts. **Complete.**
 2. Add the RGB-only predictor, trainer, inference writer, visual review artifacts, and CPU tests. **Complete.**
 3. Build a fast bounded mixed-store selector: read metadata first, then one bounded 16x16-cell alpha/relative-height descriptor pass over 0.5.3 candidates. Retain irregular brush/paste motifs only; never zones or fixed windows. Write a 240-row mixed proof store with source-group and split evidence, then scale the same contract to approximately 1,000 clean real + 500 synthetic composite rows. **Implementation + user-run store build.**
-4. Train the WDL prior with complete mixed source-group holdout and inspect a multi-row synthetic-and-real visual review. **User-run.**
+4. Train the WDL prior with a spatial lattice decoder, topology loss, complete mixed source-group holdout, and multi-row synthetic-and-real visual review. A globally pooled independent-scalar head is prohibited. **Implementation + user-run.**
 5. Generate a complete row-addressed predicted-WDL archive from that checkpoint. The archive must bind to the exact mixed store and include every selected V8 train/validation row. **User-run.**
 6. Train V8 against generated outer priors with WDL-derived height hints, then run generated-prior mixed inference and the label-free harness. **User-run.**
 

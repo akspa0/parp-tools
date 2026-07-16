@@ -65,6 +65,10 @@ def test_v8_dataset_uses_generated_wdl_archive_for_training_input():
     group = {
         "minimap_rgb": np.zeros((1, 256, 256, 3), dtype=np.uint8),
         "height_257": np.zeros((1, 257, 257), dtype=np.float32),
+        "alpha_256": np.pad(
+            (np.indices((64, 64)).sum(axis=0) % 2).astype(np.float32)[None, :, :, None],
+            ((0, 0), (0, 192), (0, 192), (0, 3)),
+        ),
     }
     dataset = V7TileDataset(
         group,
@@ -81,6 +85,7 @@ def test_v8_dataset_uses_generated_wdl_archive_for_training_input():
         height_hints="wdl",
     )
     torch.testing.assert_close(x[6:9], expected[6:9])
+    assert float(x[12].sum()) > 0.0
 
 
 def test_prediction_archive_rejects_duplicate_rows(tmp_path):

@@ -15,7 +15,7 @@ from harvester.spec103.v7_inputs import (
     wdl_lattice_from_height257,
 )
 
-MODEL_VARIANT_WDL_PRIOR = "spec108-rgb-wdl-prior-v1"
+MODEL_VARIANT_WDL_PRIOR = "spec108-rgb-wdl-prior-spatial-v2"
 WDL_OUTER_SIZE = 17
 WDL_INNER_SIZE = 16
 WDL_VALUE_COUNT = WDL_OUTER_SIZE * WDL_OUTER_SIZE + WDL_INNER_SIZE * WDL_INNER_SIZE
@@ -54,7 +54,13 @@ def decode_wdl_target(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 class WdlPriorNet(nn.Module):
-    """Small independent front-end: one RGB tile to one 545-value WDL prior."""
+    """Spatial RGB front-end that emits coherent outer/inner WDL lattices.
+
+    The old model globally pooled to 4x4 and independently emitted 545 numbers;
+    it could minimize normalized L1 with spatial noise.  This keeps a 16x16
+    feature plane, predicts two local lattice shapes, and composes each with
+    learned per-tile absolute elevation bounds.
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -63,9 +69,20 @@ class WdlPriorNet(nn.Module):
             nn.Conv2d(32, 64, 3, stride=2, padding=1), nn.GELU(),
             nn.Conv2d(64, 128, 3, stride=2, padding=1), nn.GELU(),
             nn.Conv2d(128, 192, 3, stride=2, padding=1), nn.GELU(),
-            nn.AdaptiveAvgPool2d((4, 4)),
         )
-        self.head = nn.Sequential(nn.Flatten(), nn.Linear(192 * 16, 512), nn.GELU(), nn.Linear(512, WDL_VALUE_COUNT))
+        self.shape_head = nn.Sequential(nn.Conv2d(192, 96, 3, padding=1), nn.GELU(), nn.Conv2d(96, 2, 1))
+        self.bounds_head = nn.Sequential(nn.AdaptiveAvgPool2d(1), nn.Flatten(), nn.Linear(192, 64), nn.GELU(), nn.Linear(64, 2))
 
     def forward(self, minimap_rgb: torch.Tensor) -> torch.Tensor:
-        return torch.sigmoid(self.head(self.encoder(minimap_rgb)))
+        features = self.encoder(minimap_rgb)
+        local = torch.sigmoid(self.shape_head(features))
+        outer_local = torch.nn.functional.interpolate(local[:, :1], size=(17, 17), mode="bilinear", align_corners=True)
+        inner_local = local[:, 1:2]
+        bounds = torch.sigmoid(self.bounds_head(features))
+        low = torch.minimum(bounds[:, :1], bounds[:, 1:2]).view(-1, 1, 1, 1)
+        high = torch.maximum(bounds[:, :1], bounds[:, 1:2]).view(-1, 1, 1, 1)
+        # Keep a nonzero span so the shape heads always receive a useful gradient.
+        high = torch.maximum(high, low + 0.02)
+        outer = low + (high - low) * outer_local
+        inner = low + (high - low) * inner_local
+        return torch.cat((outer.flatten(1), inner.flatten(1)), dim=1)

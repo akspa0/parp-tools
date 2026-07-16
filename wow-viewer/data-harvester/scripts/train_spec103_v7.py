@@ -93,7 +93,7 @@ def _sha256_file(path: Path) -> str:
             digest.update(chunk)
     return digest.hexdigest()
 
-OPTIONAL_ARRAYS = ("normal_xyz", "liquid_mask", "liquid_height", "object_precise_mask")
+OPTIONAL_ARRAYS = ("normal_xyz", "liquid_mask", "liquid_height", "object_precise_mask", "alpha_256")
 ADT_SPACING_256 = 533.33333 / 256.0  # world meters per pixel at 256 resolution
 HEIGHT_RANGE = HEIGHT_GLOBAL_MAX - HEIGHT_GLOBAL_MIN
 
@@ -116,6 +116,20 @@ class V7TileDataset(Dataset):
     def _optional(self, name: str, row: int):
         return np.asarray(self.group[name][row]) if self.present[name] else None
 
+    def _brush_mask(self, row: int) -> np.ndarray | None:
+        alpha = self._optional("alpha_256", row)
+        if alpha is None:
+            return None
+        weights = np.asarray(alpha, dtype=np.float32)
+        if weights.ndim != 3:
+            return None
+        painted = weights.max(axis=2)
+        gy, gx = np.gradient(painted)
+        edge = np.hypot(gx, gy)
+        # Alpha transition strokes are the only brush evidence available in the
+        # mixed store; solid base fill is deliberately not called a brush.
+        return ((painted > 0.05) & (edge >= 0.02)).astype(np.float32)
+
     def __getitem__(self, i: int):
         r = self.rows[i]
         height = np.asarray(self.group["height_257"][r], dtype=np.float32)
@@ -129,6 +143,7 @@ class V7TileDataset(Dataset):
             liquid_mask=raw_liquid,
             liquid_height=self._optional("liquid_height", r),
             object_mask=self._optional("object_precise_mask", r),
+            brush_mask=self._brush_mask(r),
             wdl_outer_17=(self.generated_outer_by_row or {}).get(r),
             height_hints=self.height_hints,
             drop_wdl_prior=drop,

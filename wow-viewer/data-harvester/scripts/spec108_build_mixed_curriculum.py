@@ -17,7 +17,7 @@ if str(_SRC) not in sys.path:
 
 from harvester.spec108_mixed_curriculum import assign_group_splits, real_brush_descriptor, select_real_rows, select_synthetic_rows  # noqa: E402, I001
 
-FIELDS = ("minimap_rgb", "height_257", "normal_xyz", "liquid_mask", "liquid_height", "object_precise_mask")
+FIELDS = ("minimap_rgb", "height_257", "normal_xyz", "liquid_mask", "liquid_height", "object_precise_mask", "alpha_256")
 
 
 def _records(store: Path) -> list[dict]:

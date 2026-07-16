@@ -18,7 +18,7 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from harvester.spec103.prefab_curation import resolve_manifest_rows, validate_source_group_split
-from harvester.spec103.wdl_prior_model import INPUT_CONTRACT, MODEL_VARIANT_WDL_PRIOR, TARGET_CONTRACT, WdlPriorNet, build_wdl_target, normalize_minimap_rgb
+from harvester.spec103.wdl_prior_model import INPUT_CONTRACT, MODEL_VARIANT_WDL_PRIOR, TARGET_CONTRACT, WDL_OUTER_SIZE, WdlPriorNet, build_wdl_target, normalize_minimap_rgb
 
 
 class PriorDataset(Dataset):
@@ -53,8 +53,18 @@ def evaluate(model, loader, device) -> float:
     model.eval(); losses = []
     with torch.no_grad():
         for x, y in loader:
-            losses.append(float(torch.nn.functional.l1_loss(model(x.to(device)), y.to(device)).item()))
+            losses.append(float(wdl_loss(model(x.to(device)), y.to(device)).item()))
     return float(np.mean(losses)) if losses else float("inf")
+
+
+def wdl_loss(predicted: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """Absolute lattice loss plus topology matching; normalized L1 alone hid noise."""
+    point = torch.nn.functional.smooth_l1_loss(predicted, target)
+    split = WDL_OUTER_SIZE * WDL_OUTER_SIZE
+    pred_outer = predicted[:, :split].view(-1, WDL_OUTER_SIZE, WDL_OUTER_SIZE)
+    target_outer = target[:, :split].view(-1, WDL_OUTER_SIZE, WDL_OUTER_SIZE)
+    gradient = torch.nn.functional.l1_loss(pred_outer[:, 1:, :], target_outer[:, 1:, :]) + torch.nn.functional.l1_loss(pred_outer[:, :, 1:], target_outer[:, :, 1:])
+    return point + 0.25 * gradient
 
 
 def main() -> int:
@@ -121,7 +131,7 @@ def main() -> int:
     for epoch in range(1, args.epochs + 1):
         model.train()
         for x, y in train:
-            opt.zero_grad(set_to_none=True); loss = torch.nn.functional.smooth_l1_loss(model(x.to(device)), y.to(device)); loss.backward(); opt.step()
+            opt.zero_grad(set_to_none=True); loss = wdl_loss(model(x.to(device)), y.to(device)); loss.backward(); opt.step()
         val_l1 = evaluate(model, val, device)
         checkpoint = {"model_variant": MODEL_VARIANT_WDL_PRIOR, "input_contract": INPUT_CONTRACT, "target_contract": TARGET_CONTRACT, "model": model.state_dict(), "epoch": epoch, "val_l1": val_l1, "store": str(args.store.resolve()), "split": {"key": args.val_key, "value": args.val_value}}
         torch.save(checkpoint, args.output / "checkpoint_last.pt")
