@@ -179,7 +179,10 @@ public partial class ViewerApp : IDisposable
     };
     private const float MaxTerrainFogDistance = 20000f;
     private const float MinTerrainFarPlane = 1f;
-    private const float TerrainFarPlanePadding = 1024f;
+    // Keep the WDL horizon visible well past the LIT/DBC fog endpoint.  FogEnd
+    // remains the full-detail/visibility authority; this is projection room for
+    // the low-detail WDL replacement terrain, not a second fog range.
+    private const float TerrainFarPlanePadding = 2500f;
     private const float MaxTerrainFarPlane = MaxTerrainFogDistance + TerrainFarPlanePadding;
 
     private readonly List<WoWViewer.Terrain.ClientBuildOption> _clientBuildOptions = new();

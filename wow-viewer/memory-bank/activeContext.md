@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior built; user-run compact-corpus training next)
+Last updated: 2026-07-15 (Spec 107 WDL horizon policy corrected; Spec 108 prefab evidence next)
 
 ## Spec 108 — RGB-only WDL prior (2026-07-15, implemented/tested; no training launched)
 
@@ -42,7 +42,11 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior built; user-run compact-co
 
 - **Fog defect fixed:** LIT/DBC fog decoding was already correct; `GetSceneFarPlane` silently forced a
   6000-unit minimum, defeating short valid FogEnd values and exposing distant terrain through fog.
-  It now uses `FogEnd + 1024` padding with only a projection-valid 1-unit minimum.
+  It now uses `FogEnd + 2500` with only a projection-valid 1-unit minimum. This is **projection room
+  for the existing WDL horizon**, not a second fog or a wider full-detail terrain radius: the AOI keeps
+  detailed ADTs fog-driven, hides matching WDL tiles while they are loaded, and restores WDL when they
+  unload. Quick now labels the FogEnd-to-WDL-horizon split explicitly. Isolated Debug build to
+  `output/tmp/spec107-wdl-horizon-build` passed with 0 errors.
 - **Quick controls:** Tools > Quick now exposes time, FogStart/FogEnd, LIT fog toggle, active range,
   computed clip distance, and a one-action link to Utilities > Lighting (the full LIT evidence owner).
 - **Hover contract:** an exact-path card now requires a nearest ray hit. Brush/overlap candidates

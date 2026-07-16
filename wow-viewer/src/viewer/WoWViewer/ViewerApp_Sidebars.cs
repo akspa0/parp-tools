@@ -4530,7 +4530,7 @@ public partial class ViewerApp
                     OpenWorkbenchTab(ToolsBottomTab.Utilities);
                     _activeUtilitiesTabIndex = (int)UtilitiesBottomTab.Lighting;
                 }
-                ImGui.TextDisabled($"Active range: {lighting.FogStart:F0}–{lighting.FogEnd:F0}; scene clips at {ComputeSceneFarPlane(lighting.FogEnd):F0}.");
+                ImGui.TextDisabled($"Fog/detail range: {lighting.FogStart:F0}–{lighting.FogEnd:F0}; WDL horizon clips at {ComputeSceneFarPlane(lighting.FogEnd):F0} (+2500).");
             }
         }
 

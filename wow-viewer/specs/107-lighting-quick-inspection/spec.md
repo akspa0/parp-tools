@@ -19,7 +19,7 @@ A world viewer user can see the active LIT state and change time-of-day and fog 
 **Acceptance Scenarios**:
 
 1. **Given** a terrain world, **When** the user opens Quick, **Then** current lighting source, time, fog range, and a link to detailed LIT evidence are visible.
-2. **Given** a LIT or DBC fog sample, **When** its FogEnd changes, **Then** rendering culls beyond a bounded safety margin instead of exposing distant blended terrain.
+2. **Given** a LIT or DBC fog sample, **When** its FogEnd changes, **Then** detailed ADTs remain fog-bounded while the real WDL mesh supplies a low-detail horizon for 2,500 additional world units.
 
 ### User Story 2 - Trust hover inspection (Priority: P1)
 
@@ -43,7 +43,7 @@ A user sees a hover card only when one scene asset is a confident match; ambiguo
 ### Functional Requirements
 
 - **FR-001**: Quick MUST expose active time of day, FogStart, FogEnd, LIT override state, and direct navigation to detailed Lighting/LIT inspection.
-- **FR-002**: The scene far plane MUST be derived from the active fog end plus a small padding and MUST NOT impose the existing 6000-unit minimum that defeats valid short fog ranges.
+- **FR-002**: The scene far plane MUST be `FogEnd + 2500` world units (bounded by the existing valid range) and MUST NOT impose the existing 6000-unit minimum that defeats valid short fog ranges. The added projection range MUST be WDL/LOD horizon space; FogEnd remains the detailed-terrain and fog authority.
 - **FR-003**: Hover cards MUST require a confident single scene-ray hit; brush-only, multi-candidate, and unresolved hits MUST not display an exact-path card.
 - **FR-004**: Click inspection behavior remains available when hover-card display is suppressed.
 - **FR-005**: Fog and hover confidence behavior MUST be covered by focused automated tests or pure helper tests.
@@ -53,7 +53,7 @@ A user sees a hover card only when one scene asset is a confident match; ambiguo
 ### Measurable Outcomes
 
 - **SC-001**: Quick exposes all active lighting controls in one panel and reaches detailed LIT status in one action.
-- **SC-002**: A valid FogEnd below 6000 produces a far plane within the defined padding rather than 6000.
+- **SC-002**: A valid FogEnd below 6000 produces a far plane exactly 2,500 world units farther rather than 6000.
 - **SC-003**: Ambiguous hover candidates produce zero hover cards; a single ray hit produces one precise card.
 
 ## Assumptions

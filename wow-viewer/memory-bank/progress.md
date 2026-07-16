@@ -619,3 +619,9 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior implementation)
 - The USER runs all training/capture/heavy jobs (AGENTS RULE 0). Staged clients only; the forbidden
   legacy client root remains out of scope for inspection, validation, harvesting, and commands.
 - Older M0 strict-target detail: `memory-bank/archive/2026-07-13-spec102-strict-target-detail.md`.
+## 2026-07-15 — Spec 107 WDL horizon range
+
+- Changed the viewer projection policy from `FogEnd + 1024` to `FogEnd + 2500`. LIT/DBC `FogEnd`
+  still controls fog and the detailed-ADT AOI; real WDL meshes cover the newly visible horizon space.
+- Updated Quick text and Spec 107 to describe that split. Isolated Debug viewer build passed:
+  `output/tmp/spec107-wdl-horizon-build` (0 errors; existing package warnings only).
