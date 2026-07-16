@@ -39,12 +39,18 @@ Last updated: 2026-07-15 (Spec 108 chunk-motif extractor implemented and fixture
   prefab discovery or may feed curation/synthesis. The required next evidence is a **chunk-cell motif
   graph**: irregular masks grown from repeated real alpha + relative-height cell topology, with
   transform metadata and cross-chunk/tile continuity. This follows the V7 brush contract exactly.
-- **Chunk-motif implementation is now present:** `analyze_chunk_motifs.py` reads real 16x16
+- **Synthetic WDL-prior lane is independent and current:** its corpus is the existing 960-row
+  `output/datasets/spec108/synthetic_varied_lighting_v1.zarr` (ten analytic terrain families, two
+  amplitudes, sixteen variants, three authored lighting times). The crater-family holdout training
+  run used 864/96 rows and early-stopped with best L1 `0.014485` at epoch 7. The real-client route
+  is optional evaluation only; it MUST NOT become WDL-prior training or a replacement corpus.
+- **Chunk-motif implementation is deferred prefab-synthesis research:** `analyze_chunk_motifs.py` reads real 16x16
   alpha/relative-height cells, grows local 4-neighbor graphs across ADT borders, rejects filled
   rectangular graphs, canonicalizes eight rotations/mirrors, and emits only repeated families plus
   source tile/cell provenance. Focused Python proof passes (irregular repeated stair crossing a tile
   border, plus brush regression tests: 6 passed). The user-run 0.5.3 Azeroth/Kalimdor command is
-  in Spec 108 quickstart §7. Review that output before T013 or any new training run.
+  in Spec 108 quickstart §7. Review that output before T013, not before the established synthetic
+  WDL-prior training run.
 
 ## Spec 107 — Lighting quick controls + confident hover (2026-07-15, implemented/build green)
 

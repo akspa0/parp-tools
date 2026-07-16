@@ -652,5 +652,7 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior implementation)
   rejects complete rectangular masks, preserves source placement data, and emits only families that
   repeat. `tests/test_chunk_motifs.py` proves a repeated irregular four-cell graph crossing an ADT
   border; Ruff plus it and `test_alpha_brush.py` passed (6 tests).
-- Next is user-owned 0.5.3 Azeroth/Kalimdor evidence extraction and human family review. Do not
-  create a prefab-synthetic corpus or train from any fixed-window/macro/blocky output.
+- This is deferred prefab-synthesis research, not the WDL-prior training input. The current WDL
+  prior trains only from `output/datasets/spec108/synthetic_varied_lighting_v1.zarr` (960 rows);
+  its real-store evaluation is optional scoring, never corpus substitution. Do not create a
+  prefab-synthetic corpus or train from any fixed-window/macro/blocky output.
