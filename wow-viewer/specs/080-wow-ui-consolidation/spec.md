@@ -61,7 +61,7 @@ The goal is to make the UI feel like World of Warcraft's interface: clean, consi
 **Given** the user clicks File → Settings or presses Escape,
 **Then** they see a proper settings window with categories:
 - Display: render quality, texture filtering, MSAA, backface culling
-- Fog: global fog start/end defaults
+- Fog: global fog start/end defaults; the Lighting surface owns any active world override
 - Interface: tab UI toggle, minimap visibility, theme
 - Camera: speed, FOV defaults
 
@@ -156,7 +156,8 @@ The goal is to make the UI feel like World of Warcraft's interface: clean, consi
 - FR-022: Settings contains: render quality (texture filtering, MSAA, culling), fog defaults (start/end), interface (theme, tab UI toggle), camera defaults
 - FR-023: Settings is opened from File → Settings or a gear icon on the bottom bar
 - FR-024: `_showSettingsWindow` bool persists in ViewerSettings
-- FR-025: Fog defaults applied to terrain lighting on load
+- FR-025: Fog defaults apply on load when no active world override is selected; the Lighting surface
+  exposes the active start/end range, its source, and reset-to-lighting behavior
 
 ### FR-026 to FR-030: Window Behavior
 - FR-026: All frames use `ImGuiWindowFlags.NoDocking` to prevent docking collapse

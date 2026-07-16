@@ -70,8 +70,8 @@ An audit of `wow-viewer/src/` was performed to determine readiness for the harve
 
 | Component | What It Does | Priority |
 |-----------|-------------|----------|
-| Synthetic minimap compositor | No code composites tileset textures + MCAL alpha into a 256×256 RGB image. A new `TerrainMinimapCompositor.cs` is needed in `WowViewer.Core.IO`. | High |
-| Harvester CLI tool | No `WowViewer.Tool.Harvest` project exists. Needs to be created. | High |
+| Synthetic minimap compositor | `TerrainMinimapCompositor.cs` and `TerrainMinimapStitcher.cs` compose direct terrain PNGs from decoded BLP/MCLY/MCAL/MCNR/MCSH data, with LIT/global-fallback provenance supplied by Harvest. | Landed |
+| Harvester CLI tool | `WowViewer.Tool.Harvest` exists and owns archive-backed `synthetic-minimap` export. | Landed |
 | `data-harvester/` directory | Python training environment does not exist yet. | High |
 
 **Note:** BLP pixel decoding is now available via SereniaBLPLib (added to `WowViewer.Core.IO.csproj`). Tests pass confirming `GetPixels()` and `GetImage()` work correctly.

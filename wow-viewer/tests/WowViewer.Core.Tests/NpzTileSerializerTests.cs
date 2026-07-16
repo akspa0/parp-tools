@@ -23,6 +23,20 @@ public sealed class NpzTileSerializerTests
                 BuildKey = "3.3.5.12340",
                 SourceAdtPath = "tile_0_0.adt",
                 AvailableSignals = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "raw_adt_chunks" },
+                MinimapLightingProvenance = new MinimapLightingProvenance(
+                    MinimapLightingProvenance.CurrentContractVersion,
+                    "baked_tint_likely",
+                    64,
+                    0.8f,
+                    1f,
+                    0.6f,
+                    0.24f,
+                    0.9f,
+                    null,
+                    12f,
+                    0.8f,
+                    "inferred_global_lighting_chroma_match_not_capture_proof",
+                    "fixture"),
                 RawChunks =
                 [
                     new TerrainRawChunkBlob
@@ -35,6 +49,14 @@ public sealed class NpzTileSerializerTests
                         Data = [1, 2, 3, 4],
                     },
                 ],
+                MinimapTextureFallbacks = new Dictionary<int, TerrainTextureFallbackResolution>
+                {
+                    [5] = new TerrainTextureFallbackResolution(
+                        5,
+                        "Tileset/Durotar/DurotarIGrass.blp",
+                        "Tileset/Durotar/DurotarIGrass_s.blp",
+                        TerrainTextureFallbackPolicy.SpecularCompanionRgbProxy),
+                },
             };
 
             NpzTileSerializer.Serialize(pack, outputPath);
@@ -50,6 +72,9 @@ public sealed class NpzTileSerializerTests
             Assert.Contains("\"raw_chunks\"", metadata, StringComparison.Ordinal);
             Assert.Contains("\"chunk_id\": \"MFBO\"", metadata, StringComparison.Ordinal);
             Assert.Contains("\"entry_name\": \"raw_chunks/root/top/MFBO_000\"", metadata, StringComparison.Ordinal);
+            Assert.Contains("\"minimap_lighting\"", metadata, StringComparison.Ordinal);
+            Assert.Contains("\"estimated_time_of_day_hours\": 12", metadata, StringComparison.Ordinal);
+            Assert.Contains("\"resolved_path\": \"Tileset/Durotar/DurotarIGrass_s.blp\"", metadata, StringComparison.Ordinal);
         }
         finally
         {
@@ -106,6 +131,37 @@ public sealed class NpzTileSerializerTests
             Assert.Contains(archive.Entries, static entry => entry.FullName == "mamp_value.npy");
             Assert.Contains(archive.Entries, static entry => entry.FullName == "mclv_lighting_bytes.npy");
             Assert.Contains(archive.Entries, static entry => entry.FullName == "mfbo_flight_bounds.npy");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Serialize_DoesNotShiftAnIncompleteTexturePayloadTable()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"wowviewer_npz_texture_alignment_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            string outputPath = Path.Combine(tempDir, "tile.npz");
+            TerrainTileTensorPack pack = new()
+            {
+                TileName = "tile_0_0",
+                MclyTextureNames = ["Tileset/First.blp", "Tileset/Second.blp"],
+                MclyTexturePixels = [new byte[2, 2, 3]],
+            };
+
+            NpzTileSerializer.Serialize(pack, outputPath);
+
+            using ZipArchive archive = ZipFile.OpenRead(outputPath);
+            Assert.DoesNotContain(archive.Entries, static entry => entry.FullName == "mcly_texture_pixels_0.npy");
+            ZipArchiveEntry metadataEntry = Assert.Single(archive.Entries, static entry => entry.FullName == "metadata.json");
+            using StreamReader reader = new(metadataEntry.Open(), Encoding.UTF8);
+            Assert.Contains("\"mcly_texture_payload_state\": \"incomplete_not_serialized\"", reader.ReadToEnd(), StringComparison.Ordinal);
         }
         finally
         {

@@ -301,9 +301,10 @@ public partial class ViewerApp : IDisposable
     private WorkbenchTab _activeTopTab = WorkbenchTab.Tools;
     private int _activeBottomTabIndex = 0;
 
-    // Nested sub-tab selection. These must be separate from _activeBottomTabIndex: Tools > Terrain
-    // and Tools > Utilities are a second nesting level, so reusing the parent's index pins the
-    // child to whatever slot the parent occupies and makes its other tabs unreachable.
+    // Nested sub-tab selection. These must be separate from _activeBottomTabIndex: Tools >
+    // Archeology, Terrain, and Utilities are a second nesting level, so reusing the parent's index
+    // pins the child to whatever slot the parent occupies and makes its other tabs unreachable.
+    private int _activeArcheologyTabIndex = 0;
     private int _activeTerrainTabIndex = 0;
     private int _activeUtilitiesTabIndex = 0;
 
@@ -846,6 +847,22 @@ public partial class ViewerApp : IDisposable
     private string? _wmoConvertError = null;
     private bool _wmoConvertDone = false;
 
+    // Terrain-derived minimap export state. This is intentionally separate from the retired
+    // VLM/MK dataset workflow: it invokes the direct client terrain synthesis command.
+    private bool _showSynthesizedMinimapExportDialog;
+    private string _synthesizedMinimapClientRoot = string.Empty;
+    private string _synthesizedMinimapMapName = string.Empty;
+    private string _synthesizedMinimapOutputDirectory = string.Empty;
+    private float _synthesizedMinimapTimeHours = 12f;
+    private int _synthesizedMinimapResolution = 256;
+    private bool _synthesizedMinimapEmitTiles = true;
+    private bool _synthesizedMinimapEmitWholeMap = true;
+    private bool _synthesizedMinimapRunning;
+    private bool _synthesizedMinimapDone;
+    private string? _synthesizedMinimapError;
+    private readonly List<string> _synthesizedMinimapLog = new();
+    private bool _synthesizedMinimapScrollToBottom;
+
     // ML Dataset build state
     private bool _showVlmExportDialog = false;
     private string _vlmClientPath = "";
@@ -1150,9 +1167,24 @@ var seq = animator.Sequences[animator.CurrentSequence];
 
     private void UpdateArcheologyPlayback(double dt)
     {
-        if (!_archeologyPlaybackActive || _worldScene == null) return;
-        if (!_worldScene.TryGetUniqueIdFilterRange(out int minId, out int maxId, out _))
+        if (!_archeologyPlaybackActive)
             return;
+
+        if (_worldScene == null)
+        {
+            _archeologyPlaybackActive = false;
+            _archeologyPlaybackAccumulator = 0;
+            _statusMessage = "Archeology playback stopped because the world was unloaded.";
+            return;
+        }
+
+        if (!_worldScene.TryGetUniqueIdFilterRange(out int minId, out int maxId, out _))
+        {
+            _archeologyPlaybackActive = false;
+            _archeologyPlaybackAccumulator = 0;
+            _statusMessage = "Archeology playback stopped because no scoped UniqueId range is available.";
+            return;
+        }
 
         _archeologyPlaybackAccumulator += dt * _archeologyPlaybackSpeed;
         int advance = (int)Math.Floor(_archeologyPlaybackAccumulator);
@@ -1781,6 +1813,8 @@ void main() {
             DrawMapConverterDialog();
         if (_showWmoConverterDialog)
             DrawWmoConverterDialog();
+        if (_showSynthesizedMinimapExportDialog)
+            DrawSynthesizedMinimapExportDialog();
 
         DrawSceneHoverAssetOverlay();
         DrawClickSelectionOverlay();
@@ -2004,7 +2038,12 @@ void main() {
                     ImGui.Separator();
 
                     if (ImGui.MenuItem("UniqueId Archeology", hasWorld))
-                        OpenWorkbenchTab(ToolsBottomTab.Archeology);
+                    {
+                        if (_useTabUi)
+                            OpenWorkbenchTab(ToolsBottomTab.Archeology);
+                        else
+                            _showUniqueIdArchaeologyWindow = true;
+                    }
 
                     ImGui.Separator();
 
@@ -2026,6 +2065,14 @@ void main() {
 
                 if (ImGui.BeginMenu("Export"))
                 {
+                    if (ImGui.MenuItem("Synthesized Terrain Minimap..."))
+                    {
+                        PrepareSynthesizedMinimapExportDialogInputs();
+                        _showSynthesizedMinimapExportDialog = true;
+                    }
+
+                    ImGui.Separator();
+
                     if (ImGui.BeginMenu("GLB"))
                     {
                         if (ImGui.MenuItem("Export GLB...", _renderer != null))
@@ -8446,158 +8493,7 @@ void main() {
 
         DrawObjectPathFilterControls();
 
-        ImGui.Separator();
-        ImGui.Text("UniqueId Archaeology");
-
-        int cameraTileX = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
-        int cameraTileY = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize);
-        _worldScene.SetUniqueIdFilterTile(cameraTileX, cameraTileY);
-
-        bool uniqueIdFilterChanged = false;
-        bool uniqueIdFilterEnabled = _worldScene.UniqueIdFilterEnabled;
-        if (ImGui.Checkbox("Filter UniqueId Range", ref uniqueIdFilterEnabled))
-        {
-            _worldScene.UniqueIdFilterEnabled = uniqueIdFilterEnabled;
-            uniqueIdFilterChanged = true;
-        }
-
-        string[] uniqueIdScopeLabels = { "Per Map", "Camera Tile" };
-        int uniqueIdScopeIndex = _worldScene.UniqueIdVisibilityScope == UniqueIdVisibilityScope.CameraTile ? 1 : 0;
-        if (ImGui.Combo("UniqueId Scope", ref uniqueIdScopeIndex, uniqueIdScopeLabels, uniqueIdScopeLabels.Length))
-        {
-            _worldScene.UniqueIdVisibilityScope = uniqueIdScopeIndex == 1
-                ? UniqueIdVisibilityScope.CameraTile
-                : UniqueIdVisibilityScope.PerMap;
-            uniqueIdFilterChanged = true;
-        }
-
-        if (_worldScene.UniqueIdVisibilityScope == UniqueIdVisibilityScope.CameraTile)
-            ImGui.TextDisabled($"Camera tile: ({cameraTileX}, {cameraTileY})");
-
-        if (_worldScene.TryGetUniqueIdFilterRange(out int minUniqueId, out int maxUniqueId, out int instanceCount))
-        {
-            int configuredMin = _worldScene.UniqueIdFilterMin;
-            int configuredMax = _worldScene.UniqueIdFilterMax;
-            bool hasConfiguredRange = configuredMin >= minUniqueId && configuredMax >= minUniqueId;
-            int visibleMin = hasConfiguredRange
-                ? Math.Clamp(Math.Min(configuredMin, configuredMax), minUniqueId, maxUniqueId)
-                : minUniqueId;
-            int visibleMax = hasConfiguredRange
-                ? Math.Clamp(Math.Max(configuredMin, configuredMax), minUniqueId, maxUniqueId)
-                : maxUniqueId;
-
-            if (ImGui.SliderInt("Visible Range Start", ref visibleMin, minUniqueId, maxUniqueId))
-            {
-                if (!hasConfiguredRange)
-                {
-                    visibleMax = visibleMin;
-                }
-                else if (visibleMin > visibleMax)
-                {
-                    visibleMax = visibleMin;
-                }
-
-                _worldScene.SetUniqueIdFilterRange(visibleMin, visibleMax);
-                _worldScene.UniqueIdFilterEnabled = true;
-                uniqueIdFilterChanged = true;
-                hasConfiguredRange = true;
-            }
-
-            if (ImGui.SliderInt("Visible Range End", ref visibleMax, minUniqueId, maxUniqueId))
-            {
-                if (!hasConfiguredRange)
-                {
-                    visibleMin = visibleMax;
-                }
-                else if (visibleMax < visibleMin)
-                {
-                    visibleMin = visibleMax;
-                }
-
-                _worldScene.SetUniqueIdFilterRange(visibleMin, visibleMax);
-                _worldScene.UniqueIdFilterEnabled = true;
-                uniqueIdFilterChanged = true;
-                hasConfiguredRange = true;
-            }
-
-            if (!hasConfiguredRange)
-            {
-                ImGui.TextDisabled($"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  No visible range selected.");
-            }
-            else if (!_worldScene.UniqueIdFilterEnabled)
-            {
-                ImGui.TextDisabled($"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  Selected visible range: {visibleMin}..{visibleMax}");
-            }
-            else
-            {
-                ImGui.TextDisabled($"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  Visible range: {visibleMin}..{visibleMax}");
-            }
-
-            IReadOnlyList<UniqueIdArchaeologyLayer> detectedLayers = _worldScene.GetUniqueIdArchaeologyLayers();
-            if (detectedLayers.Count > 0)
-            {
-                ImGui.Separator();
-                ImGui.TextDisabled(_worldScene.UniqueIdVisibilityScope == UniqueIdVisibilityScope.CameraTile
-                    ? "Detected layers in current camera tile (gap > 100)"
-                    : "Detected layers in current map scope (gap > 100)");
-
-                if (_worldScene.UniqueIdVisibilityScope != UniqueIdVisibilityScope.CameraTile)
-                    ImGui.TextDisabled("Switch scope to Camera Tile to inspect one tile's layer stack directly.");
-
-                if (ImGui.BeginTable("UniqueIdArchaeologyLayers", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollX))
-                {
-                    ImGui.TableSetupScrollFreeze(0, 1);
-                    ImGui.TableSetupColumn("Layer", ImGuiTableColumnFlags.WidthFixed, 56f);
-                    ImGui.TableSetupColumn("Range", ImGuiTableColumnFlags.WidthFixed, 120f);
-                    ImGui.TableSetupColumn("Summary", ImGuiTableColumnFlags.WidthStretch);
-                    ImGui.TableSetupColumn("Action", ImGuiTableColumnFlags.WidthFixed, 72f);
-                    ImGui.TableHeadersRow();
-
-                    for (int i = 0; i < detectedLayers.Count; i++)
-                    {
-                        UniqueIdArchaeologyLayer layer = detectedLayers[i];
-                        ImGui.TableNextRow();
-
-                        ImGui.TableSetColumnIndex(0);
-                        ImGui.TextUnformatted($"L{layer.LayerNumber}");
-
-                        ImGui.TableSetColumnIndex(1);
-                        ImGui.TextUnformatted($"{layer.MinUniqueId}..{layer.MaxUniqueId}");
-
-                        ImGui.TableSetColumnIndex(2);
-                        ImGui.TextUnformatted($"{layer.PlacementCount} placements | WMO {layer.WmoCount} / M2 {layer.MdxCount}");
-
-                        ImGui.TableSetColumnIndex(3);
-                        if (ImGui.SmallButton($"Show##UniqueIdLayer{layer.LayerNumber}"))
-                        {
-                            _worldScene.SetUniqueIdFilterRange(layer.MinUniqueId, layer.MaxUniqueId);
-                            _worldScene.UniqueIdFilterEnabled = true;
-                            uniqueIdFilterChanged = true;
-                        }
-                    }
-
-                    ImGui.EndTable();
-                }
-            }
-
-            if (ImGui.SmallButton("Reset UniqueId Filter"))
-            {
-                _worldScene.ResetUniqueIdFilter();
-                uniqueIdFilterChanged = true;
-            }
-        }
-        else
-        {
-            ImGui.TextDisabled("No scoped placements with positive UniqueIds are currently available.");
-        }
-
-        if (uniqueIdFilterChanged)
-        {
-            _worldScene.ClearSelection();
-            _selectedObjectIndex = -1;
-            _selectedObjectType = "";
-            _selectedObjectInfo = "";
-        }
+        ImGui.TextDisabled("UniqueId ranges and playback are in Tools > Archeology.");
 
         if (!_worldScene.WlLoadAttempted)
         {

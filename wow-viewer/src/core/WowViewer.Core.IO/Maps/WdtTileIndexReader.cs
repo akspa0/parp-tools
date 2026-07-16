@@ -43,9 +43,12 @@ public static class WdtTileIndexReader
             if (value == 0)
                 continue;
 
-            occupiedTiles.Add(mainCellSize == AlphaMainCellSize
-                ? new WdtTileCoordinate(index / WdtTilesPerAxis, index % WdtTilesPerAxis)
-                : new WdtTileCoordinate(index % WdtTilesPerAxis, index / WdtTilesPerAxis));
+            // Alpha MAIN cells have a larger payload than later WDTs, but they retain the same
+            // row-major [tileY * 64 + tileX] coordinate contract used by AlphaWdtReader.
+            // Transposing this index turns valid sparse Alpha maps into mostly missing tiles.
+            occupiedTiles.Add(new WdtTileCoordinate(
+                index % WdtTilesPerAxis,
+                index / WdtTilesPerAxis));
         }
 
         return occupiedTiles;

@@ -1,6 +1,7 @@
 using System;
 using ImGuiNET;
 using WoWViewer.Terrain;
+using WowViewer.Core.Maps;
 
 namespace WoWViewer;
 
@@ -50,19 +51,15 @@ public partial class ViewerApp
 
     private void DrawFogDefaultsContent()
     {
-        ImGui.TextDisabled("Global fog defaults applied when terrain loads.");
+        ImGui.TextDisabled("Global fog defaults apply when terrain loads without an active user override.");
 
         float fogStart = Math.Clamp(_defaultFogStart, 0f, MaxTerrainFogDistance - 1f);
-        if (ImGui.DragFloat("Fog Start", ref fogStart, 10f, 0f, MaxTerrainFogDistance - 1f))
-        {
-            _defaultFogStart = fogStart;
-            SaveViewerSettings();
-        }
-
         float fogEnd = Math.Clamp(_defaultFogEnd, 100f, MaxTerrainFogDistance);
-        if (ImGui.DragFloat("Fog End", ref fogEnd, 10f, 100f, MaxTerrainFogDistance))
+        bool fogStartChanged = ImGui.SliderFloat("Fog Start", ref fogStart, 0f, MaxTerrainFogDistance - 1f);
+        bool fogEndChanged = ImGui.SliderFloat("Fog End", ref fogEnd, 100f, MaxTerrainFogDistance);
+        if (fogStartChanged || fogEndChanged)
         {
-            _defaultFogEnd = fogEnd;
+            (_defaultFogStart, _defaultFogEnd) = TerrainLightingMath.NormalizeFogRange(fogStart, fogEnd);
             SaveViewerSettings();
         }
     }
@@ -118,7 +115,6 @@ public partial class ViewerApp
     /// </summary>
     private void ApplyGlobalFogDefaults(TerrainLighting lighting)
     {
-        lighting.FogStart = _defaultFogStart;
-        lighting.FogEnd = _defaultFogEnd;
+        (lighting.FogStart, lighting.FogEnd) = TerrainLightingMath.NormalizeFogRange(_defaultFogStart, _defaultFogEnd);
     }
 }

@@ -119,7 +119,7 @@ dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest -c Debug --
 | `harvest-stream` | Stream all tiles as length-prefixed NPZ blobs to stdout (for V16 pipeline) |
 | `harvest-tile` | Extract single tile from loose ADT file on disk |
 | `harvest-map` | Batch extract from loose ADT directory on disk |
-| `synthetic-minimap` | Composite tileset textures + MCAL alpha → minimap (not yet wired) |
+| `synthetic-minimap` | Compose terrain texture layers + MCAL into per-tile and/or stitched map PNGs at a selected time of day |
 
 **harvest-stream flags:**
 | Flag | Description |
@@ -157,6 +157,23 @@ NPZ files are written to disk.
 | `-m, --map` | Map name (required) |
 | `-o, --output-dir` | Output directory for NPZ files (required) |
 | `-n, --limit` | Max tiles to extract |
+
+**synthetic-minimap flags:**
+| Flag | Description |
+|------|-------------|
+| `-c, --client-root` | Client root containing the map archives (required) |
+| `-m, --map` | Map directory name (required) |
+| `-o, --output-dir` | Directory for `synthesis-manifest.json` and PNG outputs (required) |
+| `-t, --time-hours` | Clock time in `[0, 24)`; defaults to noon |
+| `-r, --resolution` | Per-tile PNG resolution; defaults to 256 |
+| `--per-tile` | Write one terrain-only PNG for each successfully composed tile |
+| `--whole-map` | Write one stitched PNG covering the successful tile-coordinate bounds |
+| `-n, --limit` | Process at most N occupied terrain tiles for a bounded check |
+
+If neither output flag is supplied, the command writes both output forms. It composites decoded BLP
+pixels using MCLY/MCAL weights, MCNR normals, and MCSH shadow occupancy. Global clear-weather LIT
+colors are used when their tracks can be evaluated; otherwise it uses the versioned authored
+day/night fallback. The manifest identifies that source and must accompany any derived output.
 
 ---
 
@@ -299,7 +316,8 @@ print(f"Heights: min={h.min():.1f} max={h.max():.1f}")
 
 - **0.6.0 ADT profile**: Not yet tested through `AdtProfile060070Baseline`
 - **PM4 path masks**: Only generated for retail when loose PM4 files exist alongside ADT
-- **Texture compositing**: `synthetic-minimap` not yet wired (reads NPZ but doesn't composite)
+- **Texture compositing**: `synthetic-minimap` is terrain-only derived output. It does not include
+  M2/WMO objects, liquids, sky, or a proof of client-exact local LIT-zone lighting.
 - **MPQ compression**: `NativeMpqService` only supports zlib (type 0x02) — bzip2/PKWARE/LZMA not supported
 - **DBC/DB2 enrichment**: WorldSafeLocs, AreaTable, GroundEffects, LiquidType metadata not yet in NPZ
 - **MCRF per-chunk references**: Only object aggregate counts, not the actual reference index lists

@@ -119,8 +119,9 @@ public static class NpzTileSerializer
         WriteArray(zip, "placement_modf_data", pack.PlacementModfData, "<f4");
 
         // Texture swatches for tileset identification
-        if (pack.MclyTexturePixels is { Count: > 0 } pixels)
+        if (HasNameAlignedTexturePixels(pack))
         {
+            IReadOnlyList<byte[,,]> pixels = pack.MclyTexturePixels!;
             for (int i = 0; i < pixels.Count; i++)
                 WriteArray(zip, $"mcly_texture_pixels_{i}", pixels[i], "|u1");
         }
@@ -322,6 +323,17 @@ public static class NpzTileSerializer
             available_signals = pack.AvailableSignals.OrderBy(static signal => signal, StringComparer.OrdinalIgnoreCase),
             mcly_texture_names = pack.MclyTextureNames,
             mcly_texture_name_table = BuildNameTable(pack.MclyTextureNames),
+            mcly_texture_payload_state = GetTexturePayloadState(pack),
+            mtex_texture_fallbacks = pack.MinimapTextureFallbacks
+                .OrderBy(static entry => entry.Key)
+                .Select(static entry => new
+                {
+                    texture_id = entry.Value.TextureId,
+                    requested_path = entry.Value.RequestedPath,
+                    resolved_path = entry.Value.ResolvedPath,
+                    resolution_kind = entry.Value.ResolutionKind,
+                })
+                .ToArray(),
             placement_mddf_names = pack.PlacementMddfNames,
             placement_mddf_name_table = BuildNameTable(pack.PlacementMddfNames),
             placement_modf_names = pack.PlacementModfNames,
@@ -366,6 +378,7 @@ public static class NpzTileSerializer
                 reason = placement.Reason,
             }),
             minimap_source_tag = pack.MinimapSourceTag,
+            minimap_lighting = pack.MinimapLightingProvenance?.ToMetadata(),
             raw_chunks = pack.RawChunks.Select(static rawChunk => new
             {
                 entry_name = rawChunk.EntryName,
@@ -388,6 +401,23 @@ public static class NpzTileSerializer
         byte[] bytes = Encoding.UTF8.GetBytes(json);
         zip.Write(bytes, 0, bytes.Length);
         zip.CloseEntry();
+    }
+
+    private static bool HasNameAlignedTexturePixels(TerrainTileTensorPack pack)
+        => pack.MclyTexturePixels is { Count: > 0 } pixels
+           && pixels.Count == pack.MclyTextureNames.Count;
+
+    private static string GetTexturePayloadState(TerrainTileTensorPack pack)
+    {
+        if (pack.MclyTextureNames.Count == 0)
+            return "no_mtex_textures";
+        if (pack.MclyTexturePixels is not { Count: > 0 })
+            return "not_available";
+        return HasNameAlignedTexturePixels(pack)
+            ? pack.MinimapTextureFallbacks.Count > 0
+                ? "complete_name_aligned_with_rgb_proxy"
+                : "complete_name_aligned"
+            : "incomplete_not_serialized";
     }
 
     private static object[] BuildNameTable(IReadOnlyList<string> names)

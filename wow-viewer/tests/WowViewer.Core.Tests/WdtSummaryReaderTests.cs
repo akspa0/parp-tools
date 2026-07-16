@@ -129,7 +129,7 @@ public sealed class WdtSummaryReaderTests
     }
 
     [Fact]
-    public void ReadOccupiedTiles_WdtWithOddSizedChunkPadding_ReturnsOccupiedCoordinates()
+    public void ReadOccupiedTiles_AlphaWdtBuffer_ReturnsRowMajorCoordinates()
     {
         byte[] mainData = new byte[64 * 64 * 16];
         WriteUInt32(mainData, 0, 128);
@@ -150,8 +150,8 @@ public sealed class WdtSummaryReaderTests
         Assert.Equal(
             [
                 new WdtTileCoordinate(0, 0),
-                new WdtTileCoordinate(0, 1),
                 new WdtTileCoordinate(1, 0),
+                new WdtTileCoordinate(0, 1),
             ],
             tiles);
     }

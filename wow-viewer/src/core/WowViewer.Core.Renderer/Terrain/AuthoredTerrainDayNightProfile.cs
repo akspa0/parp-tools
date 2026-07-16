@@ -1,5 +1,6 @@
 using System.Numerics;
 using WowViewer.Core.Maps;
+using WowViewer.Core.Terrain;
 
 namespace WowViewer.Core.Renderer.Terrain;
 
@@ -11,22 +12,18 @@ namespace WowViewer.Core.Renderer.Terrain;
 /// </summary>
 public static class AuthoredTerrainDayNightProfile
 {
-    public const string ProfileRevision = "wow-1.0.0-authored-day-night-v1";
+    public const string ProfileRevision = "wow-1.0.0-authored-day-night-v2";
     public const string EvidenceState = "authored_fallback_not_client_light_data";
-    public const string LightingModel = "mcnr_lambert_plus_mcsh_directional_v1";
+    public const string LightingModel = "mcnr_lambert_plus_mcsh_authored_diagonal_solar_v2";
     public const float DefaultGameTime = 0.35f;
     public const float DefaultMcshShadowStrength = 0.60f;
 
     public static TerrainLightingSample Evaluate(float gameTime)
     {
         float wrappedTime = gameTime - MathF.Floor(gameTime);
+        Vector3 direction = EvaluateLightDirection(wrappedTime);
         float sunAngle = wrappedTime * MathF.Tau;
         float sunHeight = MathF.Sin(sunAngle - (MathF.PI * 0.5f));
-        float sunHorizontal = MathF.Cos(sunAngle - (MathF.PI * 0.5f));
-        Vector3 direction = Vector3.Normalize(new Vector3(
-            sunHorizontal * 0.5f,
-            0.3f,
-            MathF.Max(sunHeight, 0.05f)));
 
         float dayFactor = MathF.Max(0f, sunHeight);
         Vector3 directionalColor = Vector3.Lerp(
@@ -54,6 +51,16 @@ public static class AuthoredTerrainDayNightProfile
             1f,
             fogColor,
             DefaultMcshShadowStrength);
+    }
+
+    /// <summary>
+    /// Returns the authored world-space sun direction for the terrain coordinate convention.
+    /// World +X/+Y project toward the top-left of a synthesized raster. The old profile held
+    /// +Y constant, causing a permanent diagonal bias and directional shading at noon.
+    /// </summary>
+    public static Vector3 EvaluateLightDirection(float gameTime)
+    {
+        return TerrainSolarDirection.Evaluate(gameTime);
     }
 
     public static Vector3 Shade(

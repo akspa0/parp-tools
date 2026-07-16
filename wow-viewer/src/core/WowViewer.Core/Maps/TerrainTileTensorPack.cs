@@ -58,6 +58,13 @@ public sealed class TerrainTileTensorPack
     public IReadOnlyList<byte[,,]>? MclyTexturePixels { get; set; }
 
     /// <summary>
+    /// Explicit RGB-proxy substitutions used by derived minimap/dataset consumers when a referenced
+    /// MTEX BLP cannot decode. Original MTEX names and IDs are never rewritten.
+    /// </summary>
+    public IReadOnlyDictionary<int, TerrainTextureFallbackResolution> MinimapTextureFallbacks { get; set; }
+        = new Dictionary<int, TerrainTextureFallbackResolution>();
+
+    /// <summary>
     /// 16×16 chunk grid × 4 layers.
     /// Boolean flags: is this layer active in this chunk?
     /// </summary>
@@ -341,6 +348,12 @@ public sealed class TerrainTileTensorPack
 
     /// <summary>Minimap source tag (terrain_only, no_liquid, no_object, raw, etc.).</summary>
     public string MinimapSourceTag { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional comparison of the authored minimap with an unlit terrain reconstruction. This is
+    /// downstream bucketing evidence only: an inferred time is never a claim of exact capture time.
+    /// </summary>
+    public MinimapLightingProvenance? MinimapLightingProvenance { get; set; }
 
     /// <summary>
     /// Raw ADT-family chunks that the current tensor-pack builder does not yet decode into

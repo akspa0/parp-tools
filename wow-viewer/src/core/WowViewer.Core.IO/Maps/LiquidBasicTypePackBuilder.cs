@@ -16,11 +16,12 @@ namespace WowViewer.Core.IO.Maps;
 ///   <item><description>MH2O presence/type mask (LK WotLK+) — already
 ///     resolved by <c>AdtLiquidReader.MapLiquidTypeId</c> via the
 ///     <c>DbcLiquidTypeTable</c>.</description></item>
-///   <item><description>MCLQ presence/type mask (pre-WotLK) — the Alpha
-///     builder stores <see cref="AdtLiquidBasicType"/> here; the LK builder
-///     stores raw <c>MclqLiquidType</c> enum values which this helper
+///   <item><description>MCLQ presence/type mask (pre-WotLK) — later ADT
+///     builders store raw <c>MclqLiquidType</c> enum values which this helper
 ///     degrades to <see cref="AdtLiquidBasicType.Water"/> on out-of-range
-///     values (per the MCLQ encoding table in spec 040 §3).</description></item>
+///     values (per the MCLQ encoding table in spec 040 §3). Alpha already
+///     carries resolved basic types and normalizes them in
+///     <c>AlphaTensorPackBuilder</c>.</description></item>
 ///   <item><description>MCNK flag fallback — per-chunk
 ///     <see cref="McnkFlagDecoder.Decode"/> applied to all 17×17 vertices
 ///     in the chunk. Used when neither MH2O nor MCLQ is present but the

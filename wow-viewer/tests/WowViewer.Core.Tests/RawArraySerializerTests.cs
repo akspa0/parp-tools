@@ -40,6 +40,15 @@ public sealed class RawArraySerializerTests
             MclyLayerMask = new bool[16, 16, 4],
             MclyTextureNames = ["Tileset/Test/Test.blp"],
             MclyTexturePixels = [BuildTexturePixels()],
+            MinimapTextureFallbacks = new Dictionary<int, TerrainTextureFallbackResolution>
+            {
+                [0] = new TerrainTextureFallbackResolution(
+                    0,
+                    "Tileset/Test/Test.blp",
+                    "Tileset/Test/Test_s.blp",
+                    TerrainTextureFallbackPolicy.SpecularCompanionRgbProxy),
+            },
+            MinimapLightingProvenance = MinimapLightingProvenance.NotEvaluated("fixture_no_baseline"),
             PlacementMddfCount = 1,
             PlacementModfCount = 1,
             PlacementMddfData = new float[,] { { 7, 101, 1, 2, 3, 4, 5, 6, 1.5f } },
@@ -78,6 +87,8 @@ public sealed class RawArraySerializerTests
         Assert.Contains("holes_16", arrays.Keys);
         Assert.Contains("liquid_type_256", arrays.Keys);
         Assert.Contains("ground_intent_height_257", arrays.Keys);
+        Assert.Contains("\"minimap_lighting\"", metadata, StringComparison.Ordinal);
+        Assert.Contains("\"inference_status\":\"fixture_no_baseline\"", metadata, StringComparison.Ordinal);
         Assert.Contains("model_focus_mask", arrays.Keys);
         Assert.Contains("model_above_terrain_mask", arrays.Keys);
         Assert.Contains("mddf_placement_data", arrays.Keys);
@@ -86,6 +97,10 @@ public sealed class RawArraySerializerTests
         Assert.Contains("modf_model_ids", arrays.Keys);
         Assert.Contains("tileset_texture_rgb_0", arrays.Keys);
         Assert.True(arrays.Keys.Any(k => k.StartsWith("m2_model_") && k.EndsWith("_vertices")), "Missing m2_model_*_vertices");
+        string modelPrefix = arrays.Keys.Single(k => k.StartsWith("m2_model_") && k.EndsWith("_vertices"))[..^"_vertices".Length];
+        Assert.Equal("<u4", arrays[$"{modelPrefix}_render_flags"].Dtype);
+        Assert.Contains("\"tile_model_paths\":[\"World/M2/Test.m2\"]", metadata, StringComparison.Ordinal);
+        Assert.Contains("\"tile_model_kinds\":[\"m2\"]", metadata, StringComparison.Ordinal);
         Assert.DoesNotContain("mcnr_normal_xyz", arrays.Keys);
         Assert.DoesNotContain("mcal_alpha_pack_256", arrays.Keys);
         Assert.Equal([1, 17], arrays["modf_placement_data"].Shape);
@@ -96,6 +111,8 @@ public sealed class RawArraySerializerTests
         Assert.Equal([257, 257], arrays["model_above_terrain_mask"].Shape);
         Assert.Equal([2, 2, 3], arrays["tileset_texture_rgb_0"].Shape);
         Assert.Contains("\"mtex_texture_paths\":[\"Tileset/Test/Test.blp\"]", metadata, StringComparison.Ordinal);
+        Assert.Contains("\"mtex_texture_payload_state\":\"complete_name_aligned_with_rgb_proxy\"", metadata, StringComparison.Ordinal);
+        Assert.Contains("\"resolved_path\":\"Tileset/Test/Test_s.blp\"", metadata, StringComparison.Ordinal);
         Assert.Contains("\"placement_mddf_asset_paths\":[\"World/Generic/PassiveDoodads/Test/Test.m2\"]", metadata, StringComparison.Ordinal);
         Assert.Contains("\"placement_modf_asset_paths\":[\"World/Wmo/Test/Test.wmo\"]", metadata, StringComparison.Ordinal);
     }
@@ -118,6 +135,26 @@ public sealed class RawArraySerializerTests
         Assert.Equal("Quoted \\\"tile\\\"", parsed.RootElement.GetProperty("tile_name").GetString());
         Assert.Equal(JsonValueKind.Null, parsed.RootElement.GetProperty("tile_x").ValueKind);
         Assert.Equal(0, parsed.RootElement.GetProperty("placement_modf_count").GetInt32());
+    }
+
+    [Fact]
+    public void Serialize_V22_DoesNotShiftAnIncompleteTexturePayloadTable()
+    {
+        TerrainTileTensorPack pack = new()
+        {
+            TileName = "Azeroth_1_2",
+            MclyTextureNames = ["Tileset/First.blp", "Tileset/Second.blp"],
+            MclyTexturePixels = [BuildTexturePixels()],
+        };
+
+        using MemoryStream stream = new();
+        RawArraySerializer.Serialize(pack, stream, RawArraySerializer.StreamProfile.V22);
+
+        Dictionary<string, RawArrayInfo> arrays = ReadArrayIndex(stream.ToArray());
+        string metadata = ReadMetadataJson(stream.ToArray());
+
+        Assert.DoesNotContain("tileset_texture_rgb_0", arrays.Keys);
+        Assert.Contains("\"mtex_texture_payload_state\":\"incomplete_not_serialized\"", metadata, StringComparison.Ordinal);
     }
 
     [Fact]

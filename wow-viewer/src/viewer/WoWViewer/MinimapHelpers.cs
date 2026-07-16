@@ -115,6 +115,32 @@ internal static class MinimapHelpers
             }
         }
 
+        // LIT markers are a diagnostic layer only. They deliberately share the same loaded source
+        // and selected index as the Lighting panel and never change fog or lighting selection.
+        if (worldScene?.ShowLitMinimapMarkers == true && worldScene.LitLoader is { HasData: true } lit)
+        {
+            float timeOfDay = worldScene.LastLitSample?.TimeOfDay ?? 0.5f;
+            for (int lightIndex = 0; lightIndex < lit.Lights.Count; lightIndex++)
+            {
+                LitLoader.LitLight light = lit.Lights[lightIndex];
+                if (!TryGetLitMarkerPosition(light, cursorPos, mapSize, viewMinTx, viewMinTy, cellSize, out Vector2 markerPos))
+                    continue;
+
+                uint color = ToImGuiColor(lit.EvaluateOverlayColor(light, timeOfDay));
+                bool selected = lightIndex == worldScene.SelectedLitLightIndex;
+                float coverageRadius = Math.Clamp(
+                    MathF.Max(3f, MathF.Max(light.Radius, light.Dropoff) / MinimapWorldTileSize * cellSize),
+                    3f,
+                    MathF.Max(3f, mapSize * 0.4f));
+                float markerRadius = selected ? MathF.Max(5f, cellSize * 0.12f) : MathF.Max(3.5f, cellSize * 0.08f);
+
+                drawList.AddCircle(markerPos, coverageRadius, color, 24, selected ? 2.5f : 1.25f);
+                drawList.AddCircleFilled(markerPos, markerRadius, selected ? 0xFFFFFFFF : color);
+                if (selected)
+                    drawList.AddCircle(markerPos, markerRadius + 3f, color, 16, 1.75f);
+            }
+        }
+
         // Taxi paths
         if (worldScene?.TaxiLoader != null && worldScene.ShowTaxi)
         {
@@ -146,6 +172,40 @@ internal static class MinimapHelpers
 
         // Border
         drawList.AddRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize), 0xFF666666);
+    }
+
+    /// <summary>Returns the nearest visible positional LIT marker under a minimap point.</summary>
+    public static bool TryGetLitMarkerAtPoint(
+        WorldScene? worldScene,
+        Vector2 mousePos,
+        Vector2 cursorPos,
+        float mapSize,
+        float viewMinTx,
+        float viewMinTy,
+        float cellSize,
+        out int lightIndex)
+    {
+        lightIndex = -1;
+        if (worldScene?.ShowLitMinimapMarkers != true || worldScene.LitLoader is not { HasData: true } lit)
+            return false;
+
+        float bestDistanceSquared = float.MaxValue;
+        float hitRadius = MathF.Max(8f, cellSize * 0.16f);
+        float hitRadiusSquared = hitRadius * hitRadius;
+        for (int index = 0; index < lit.Lights.Count; index++)
+        {
+            if (!TryGetLitMarkerPosition(lit.Lights[index], cursorPos, mapSize, viewMinTx, viewMinTy, cellSize, out Vector2 markerPos))
+                continue;
+
+            float distanceSquared = Vector2.DistanceSquared(mousePos, markerPos);
+            if (distanceSquared <= hitRadiusSquared && distanceSquared < bestDistanceSquared)
+            {
+                lightIndex = index;
+                bestDistanceSquared = distanceSquared;
+            }
+        }
+
+        return lightIndex >= 0;
     }
 
     public static void HandleMinimapClick(
@@ -187,5 +247,37 @@ internal static class MinimapHelpers
                 camera.Position = new Vector3(worldX, worldY, camera.Position.Z);
             }
         }
+    }
+
+    private static bool TryGetLitMarkerPosition(
+        LitLoader.LitLight light,
+        Vector2 cursorPos,
+        float mapSize,
+        float viewMinTx,
+        float viewMinTy,
+        float cellSize,
+        out Vector2 markerPos)
+    {
+        markerPos = default;
+        if (!light.IsNavigable)
+            return false;
+
+        float tileX = (WoWConstants.MapOrigin - light.Position.X) / MinimapWorldTileSize;
+        float tileY = (WoWConstants.MapOrigin - light.Position.Y) / MinimapWorldTileSize;
+        float x = cursorPos.X + (tileY - viewMinTy) * cellSize;
+        float y = cursorPos.Y + (tileX - viewMinTx) * cellSize;
+        if (x < cursorPos.X || x > cursorPos.X + mapSize || y < cursorPos.Y || y > cursorPos.Y + mapSize)
+            return false;
+
+        markerPos = new Vector2(x, y);
+        return true;
+    }
+
+    private static uint ToImGuiColor(Vector3 color)
+    {
+        uint red = (uint)Math.Clamp((int)MathF.Round(color.X * 255f), 0, 255);
+        uint green = (uint)Math.Clamp((int)MathF.Round(color.Y * 255f), 0, 255);
+        uint blue = (uint)Math.Clamp((int)MathF.Round(color.Z * 255f), 0, 255);
+        return 0xFF000000u | blue << 16 | green << 8 | red;
     }
 }

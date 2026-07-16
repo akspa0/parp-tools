@@ -51,6 +51,22 @@ public sealed class TerrainLightingMathTests
     }
 
     [Fact]
+    public void NormalizeFogRange_CollapsedOrReversedSource_UsesVisibleFallback()
+    {
+        Assert.Equal((200f, 1500f), TerrainLightingMath.NormalizeFogRange(0f, 0f));
+        Assert.Equal((300f, 1800f), TerrainLightingMath.NormalizeFogRange(1800f, 300f, 300f, 1800f));
+    }
+
+    [Fact]
+    public void NormalizeFogRange_ValidSource_ProtectsMinimumSpan()
+    {
+        (float start, float end) = TerrainLightingMath.NormalizeFogRange(1499.75f, 1500f);
+
+        Assert.Equal(1499f, start);
+        Assert.Equal(1500f, end);
+    }
+
+    [Fact]
     public void ComputeClientFogRange_ConvertsClassicFixedUnitsBeforeApplyingScalar()
     {
         (float start, float end) = TerrainLightingMath.ComputeClientFogRange(18000f, 0.25f);

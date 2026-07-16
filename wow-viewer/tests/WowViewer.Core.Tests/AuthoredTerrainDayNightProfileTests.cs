@@ -44,4 +44,18 @@ public sealed class AuthoredTerrainDayNightProfileTests
         Assert.True(night.DirectionalColor.Z > night.DirectionalColor.X);
         Assert.True(noon.DirectionalColor.X > noon.DirectionalColor.Z);
     }
+
+    [Fact]
+    public void EvaluateLightDirection_IsVerticalAtNoonAndProjectsPostNoonSunFromTopLeft()
+    {
+        Vector3 noon = AuthoredTerrainDayNightProfile.EvaluateLightDirection(0.5f);
+        Vector3 postNoon = AuthoredTerrainDayNightProfile.EvaluateLightDirection(13f / 24f);
+        Vector2 rasterSource = new(-postNoon.Y, -postNoon.X);
+
+        Assert.Equal(0f, noon.X, 5);
+        Assert.Equal(0f, noon.Y, 5);
+        Assert.Equal(1f, noon.Z, 5);
+        Assert.True(rasterSource.X < 0f);
+        Assert.True(rasterSource.Y < 0f);
+    }
 }

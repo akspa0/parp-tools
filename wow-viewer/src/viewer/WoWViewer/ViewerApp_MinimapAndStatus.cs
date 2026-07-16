@@ -81,6 +81,15 @@ public partial class ViewerApp
             {
                 Vector2 totalDelta = mousePos - _minimapDragOrigin;
                 if (totalDelta.Length() <= MinimapClickMovementThresholdPixels
+                    && MinimapHelpers.TryGetLitMarkerAtPoint(_worldScene, mousePos, cursorPos, mapSize, viewMinTx, viewMinTy, cellSize, out int litLightIndex))
+                {
+                    _worldScene!.SelectedLitLightIndex = litLightIndex;
+                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                        FocusCameraOnLitLight(litLightIndex, closeFullscreenAfterFocus: true);
+                    else
+                        _statusMessage = $"Selected LIT entry [{litLightIndex}] from minimap.";
+                }
+                else if (totalDelta.Length() <= MinimapClickMovementThresholdPixels
                     && TryGetMinimapClickTarget(mousePos, cursorPos, cellSize, viewMinTx, viewMinTy, out float clickTileX, out float clickTileY))
                 {
                     if (teleportMode == MinimapTeleportMode.Immediate)
@@ -108,6 +117,40 @@ public partial class ViewerApp
         _statusMessage = $"Minimap teleported camera to tile ({tileX},{tileY}).";
 
         if (closeFullscreenAfterTeleport && _fullscreenMinimap)
+        {
+            _fullscreenMinimap = false;
+            _minimapDragging = false;
+        }
+
+        ClearPendingMinimapTeleport();
+    }
+
+    private void FocusCameraOnLitLight(int lightIndex, bool closeFullscreenAfterFocus)
+    {
+        if (_worldScene?.LitLoader is not { HasData: true } lit
+            || lightIndex < 0
+            || lightIndex >= lit.Lights.Count)
+        {
+            _statusMessage = "Selected LIT entry is unavailable.";
+            return;
+        }
+
+        LitLoader.LitLight light = lit.Lights[lightIndex];
+        if (!light.IsNavigable)
+        {
+            _statusMessage = $"LIT entry [{lightIndex}] has no navigable position.";
+            return;
+        }
+
+        float distance = MathF.Max(80f, MathF.Min(MathF.Max(light.Radius, light.Dropoff), 250f));
+        float height = MathF.Max(50f, distance * 0.58f);
+        _worldScene.SelectedLitLightIndex = lightIndex;
+        _camera.Position = light.Position + new Vector3(distance, 0f, height);
+        _camera.Yaw = 180f;
+        _camera.Pitch = -30f;
+        _statusMessage = $"Focused LIT entry [{lightIndex}] {light.DisplayName}.";
+
+        if (closeFullscreenAfterFocus && _fullscreenMinimap)
         {
             _fullscreenMinimap = false;
             _minimapDragging = false;

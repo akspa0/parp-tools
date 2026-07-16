@@ -1148,23 +1148,62 @@ public class TerrainRenderer : IDisposable
 
     private unsafe uint LoadTerrainTexture(string textureName)
     {
-        byte[]? blpData = null;
-        if (_dataSource != null)
-        {
-            blpData = _dataSource.ReadFile(textureName) ?? _dataSource.ReadFile(textureName.Replace('/', '\\'));
-        }
+        if (TryLoadTerrainBlpTexture(textureName, out uint directTexture))
+            return directTexture;
 
-        if (blpData == null || blpData.Length == 0)
+        if (_dataSource is not null)
         {
-            if (_texturePathResolver != null)
+            string? companionPath = TerrainTextureFallbackPolicy.GetSpecularCompanionPath(textureName);
+            if (companionPath is not null
+                && TryLoadTerrainBlpTexture(companionPath, out uint companionTexture))
             {
-                var pngPath = _texturePathResolver(textureName);
-                if (pngPath != null)
-                    return LoadPngTexture(pngPath);
+                ViewerLog.Trace(
+                    $"[TerrainRenderer] Recovered terrain texture '{textureName}' from '{companionPath}' " +
+                    $"({TerrainTextureFallbackPolicy.SpecularCompanionRgbProxy}).");
+                return companionTexture;
             }
 
-            return 0;
+            IReadOnlyList<string> knownBlpPaths = _dataSource.GetFileList(".blp");
+            foreach (TerrainTextureFallbackCandidate candidate in TerrainTextureFallbackPolicy.GetRelatedDiffuseRgbProxyCandidates(textureName, knownBlpPaths))
+            {
+                if (!TryLoadTerrainBlpTexture(candidate.ResolvedPath, out uint fallbackTexture))
+                    continue;
+
+                ViewerLog.Trace(
+                    $"[TerrainRenderer] Recovered terrain texture '{textureName}' from '{candidate.ResolvedPath}' " +
+                    $"({candidate.ResolutionKind}).");
+                return fallbackTexture;
+            }
+
+            foreach (TerrainTextureFallbackCandidate candidate in TerrainTextureFallbackPolicy.GetCatalogRgbLastResortCandidates(textureName, knownBlpPaths))
+            {
+                if (!TryLoadTerrainBlpTexture(candidate.ResolvedPath, out uint fallbackTexture))
+                    continue;
+
+                ViewerLog.Trace(
+                    $"[TerrainRenderer] Recovered terrain texture '{textureName}' from catalog fallback " +
+                    $"'{candidate.ResolvedPath}' ({candidate.ResolutionKind}).");
+                return fallbackTexture;
+            }
         }
+
+        if (_texturePathResolver != null)
+        {
+            var pngPath = _texturePathResolver(textureName);
+            if (pngPath != null)
+                return LoadPngTexture(pngPath);
+        }
+
+        return 0;
+    }
+
+    private unsafe bool TryLoadTerrainBlpTexture(string textureName, out uint texture)
+    {
+        texture = 0;
+        byte[]? blpData = _dataSource?.ReadFile(textureName)
+                          ?? _dataSource?.ReadFile(textureName.Replace('/', '\\'));
+        if (blpData == null || blpData.Length == 0)
+            return false;
 
         try
         {
@@ -1178,7 +1217,7 @@ public class TerrainRenderer : IDisposable
             var pixels = new byte[width * height * 4];
             image.CopyPixelDataTo(pixels);
 
-            uint texture = _gl.GenTexture();
+            texture = _gl.GenTexture();
             _gl.BindTexture(TextureTarget.Texture2D, texture);
             fixed (byte* ptr = pixels)
             {
@@ -1191,12 +1230,13 @@ public class TerrainRenderer : IDisposable
             _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
             _gl.GenerateMipmap(TextureTarget.Texture2D);
             _gl.BindTexture(TextureTarget.Texture2D, 0);
-            return texture;
+            return true;
         }
         catch (Exception ex)
         {
             ViewerLog.Trace($"[TerrainRenderer] Failed to load texture {textureName}: {ex.Message}");
-            return 0;
+            texture = 0;
+            return false;
         }
     }
 

@@ -2908,11 +2908,13 @@ public partial class ViewerApp
                     fogEnd = Math.Min(MaxTerrainFogDistance, fogStart + 1f);
             }
 
-            lighting.FogStart = fogStart;
-            lighting.FogEnd = fogEnd;
-            _defaultFogStart = fogStart;
-            _defaultFogEnd = fogEnd;
-            SaveViewerSettings();
+            if (_worldScene != null)
+                _worldScene.SetUserFogRangeOverride(fogStart, fogEnd);
+            else
+            {
+                lighting.FogStart = fogStart;
+                lighting.FogEnd = fogEnd;
+            }
         }
 
         if (_worldScene != null)
@@ -3391,10 +3393,16 @@ public partial class ViewerApp
         DrawArcheologyRangeSubTab();
         ImGui.Separator();
         DrawArcheologyLayersSubTab();
+        ImGui.Separator();
+        DrawArcheologyPlaybackSubTab();
     }
 
     private void DrawArcheologyRangeSubTab()
     {
+        int cameraTileX = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
+        int cameraTileY = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize);
+        _worldScene!.SetUniqueIdFilterTile(cameraTileX, cameraTileY);
+
         ImGui.TextDisabled("Filter by UniqueId range. The 'Camera Tile' scope uses the tile the camera is currently in.");
         ImGui.Spacing();
 
@@ -3447,7 +3455,8 @@ public partial class ViewerApp
             {
                 _worldScene.SetUniqueIdFilterRange(visibleMin, visibleMax);
                 _worldScene.UniqueIdFilterEnabled = true;
-                if (_archeologyPlaybackActive) _archeologyPlaybackActive = false;
+                if (_archeologyPlaybackActive)
+                    StopArcheologyPlayback(restoreRange: false);
                 changed = true;
             }
 
@@ -3455,7 +3464,8 @@ public partial class ViewerApp
             {
                 _worldScene.SetUniqueIdFilterRange(visibleMin, visibleMax);
                 _worldScene.UniqueIdFilterEnabled = true;
-                if (_archeologyPlaybackActive) _archeologyPlaybackActive = false;
+                if (_archeologyPlaybackActive)
+                    StopArcheologyPlayback(restoreRange: false);
                 changed = true;
             }
 
@@ -3547,7 +3557,32 @@ public partial class ViewerApp
 
         ImGui.Spacing();
 
-        // Play / Pause / Stop buttons
+        DrawArcheologyPlaybackTransportControls();
+
+        ImGui.Spacing();
+
+        // Status
+        if (_worldScene.TryGetUniqueIdFilterRange(out int minId, out int maxId, out int count))
+        {
+            int currentMax = _worldScene.UniqueIdFilterMax;
+            int remaining = Math.Max(0, maxId - currentMax);
+            float secondsAtCurrentSpeed = _archeologyPlaybackSpeed > 0
+                ? remaining / _archeologyPlaybackSpeed
+                : float.PositiveInfinity;
+
+            string status = _archeologyPlaybackActive
+                ? $"Playing — end advancing at {_archeologyPlaybackSpeed:F0}/s. Remaining: {remaining} uniqueIds (~{secondsAtCurrentSpeed:F1}s)."
+                : $"Stopped. End at {currentMax}, max {maxId}. Range: {minId}..{maxId}.";
+            ImGui.TextDisabled(status);
+        }
+        else
+        {
+            ImGui.TextDisabled("No scoped placements to play.");
+        }
+    }
+
+    private void DrawArcheologyPlaybackTransportControls()
+    {
         if (_archeologyPlaybackActive)
         {
             if (ImGui.Button("Pause##archeology"))
@@ -3572,27 +3607,6 @@ public partial class ViewerApp
             {
                 StopArcheologyPlayback(restoreRange: true);
             }
-        }
-
-        ImGui.Spacing();
-
-        // Status
-        if (_worldScene.TryGetUniqueIdFilterRange(out int minId, out int maxId, out int count))
-        {
-            int currentMax = _worldScene.UniqueIdFilterMax;
-            int remaining = Math.Max(0, maxId - currentMax);
-            float secondsAtCurrentSpeed = _archeologyPlaybackSpeed > 0
-                ? remaining / _archeologyPlaybackSpeed
-                : float.PositiveInfinity;
-
-            string status = _archeologyPlaybackActive
-                ? $"Playing — end advancing at {_archeologyPlaybackSpeed:F0}/s. Remaining: {remaining} uniqueIds (~{secondsAtCurrentSpeed:F1}s)."
-                : $"Stopped. End at {currentMax}, max {maxId}. Range: {minId}..{maxId}.";
-            ImGui.TextDisabled(status);
-        }
-        else
-        {
-            ImGui.TextDisabled("No scoped placements to play.");
         }
     }
 
@@ -4246,7 +4260,19 @@ public partial class ViewerApp
             ImGui.TextDisabled("Load a world to use the Archeology tab.");
             return;
         }
-        switch ((ArcheologyBottomTab)_activeBottomTabIndex)
+
+        if (_archeologyPlaybackActive)
+        {
+            ImGui.TextColored(new Vector4(0.95f, 0.75f, 0.25f, 1f), "Playback is active");
+            ImGui.SameLine();
+            DrawArcheologyPlaybackTransportControls();
+            ImGui.Separator();
+        }
+
+        _activeArcheologyTabIndex = DrawNestedSubTabStrip(
+            "##ArcheologySubTabs", WorkbenchNavigator.GetArcheologyBottomTabLabels(), _activeArcheologyTabIndex);
+
+        switch ((ArcheologyBottomTab)_activeArcheologyTabIndex)
         {
             case ArcheologyBottomTab.Range:
                 DrawArcheologyRangeSubTab();
@@ -4507,16 +4533,18 @@ public partial class ViewerApp
 
             float fogStart = Math.Clamp(lighting.FogStart, 0f, MaxTerrainFogDistance - 1f);
             float fogEnd = Math.Clamp(lighting.FogEnd, 1f, MaxTerrainFogDistance);
-            bool fogStartChanged = ImGui.DragFloat("Fog Start", ref fogStart, 5f, 0f, MaxTerrainFogDistance - 1f, "%.0f");
-            bool fogEndChanged = ImGui.DragFloat("Fog End", ref fogEnd, 5f, 1f, MaxTerrainFogDistance, "%.0f");
+            bool fogStartChanged = ImGui.SliderFloat("Fog Start", ref fogStart, 0f, MaxTerrainFogDistance - 1f, "%.0f");
+            bool fogEndChanged = ImGui.SliderFloat("Fog End", ref fogEnd, 1f, MaxTerrainFogDistance, "%.0f");
             if (fogStartChanged || fogEndChanged)
             {
                 fogStart = Math.Min(fogStart, fogEnd - 0.001f);
-                lighting.FogStart = fogStart;
-                lighting.FogEnd = fogEnd;
-                _defaultFogStart = fogStart;
-                _defaultFogEnd = fogEnd;
-                SaveViewerSettings();
+                if (_worldScene != null)
+                    _worldScene.SetUserFogRangeOverride(fogStart, fogEnd);
+                else
+                {
+                    lighting.FogStart = fogStart;
+                    lighting.FogEnd = fogEnd;
+                }
             }
 
             if (_worldScene != null)

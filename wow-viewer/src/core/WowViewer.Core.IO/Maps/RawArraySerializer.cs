@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using WowViewer.Core.Maps;
@@ -359,6 +360,12 @@ public static class RawArraySerializer
         WriteArray(outputStream, "shadow_mask", pack.McshShadowMask256);
         WriteArray(outputStream, "mcly_texture_ids", pack.MclyTextureIds);
         WriteArray(outputStream, "mcly_layer_mask", BoolMaskToFloat(pack.MclyLayerMask));
+        if (HasNameAlignedTexturePixels(pack))
+        {
+            IReadOnlyList<byte[,,]> texturePixels = pack.MclyTexturePixels!;
+            for (int index = 0; index < texturePixels.Count; index++)
+                WriteArray(outputStream, $"tileset_texture_rgb_{index}", texturePixels[index]);
+        }
         WriteArray(outputStream, "mcnr_mask_257", pack.McnrMask257);
         WriteArray(outputStream, "liquid_type_256", BuildLiquidType256(pack.LiquidBasicType257));
         WriteArray(outputStream, "ground_intent_height_257", BuildGroundIntentHeight257(pack.Height257, pack.ObjectPreciseMask257));
@@ -370,9 +377,30 @@ public static class RawArraySerializer
         WriteArray(outputStream, "modf_model_ids", ExtractPlacementColumnAsInt(pack.PlacementModfData, 0));
 WriteArray(outputStream, "mddf_count", new[] { pack.PlacementMddfCount });
         WriteArray(outputStream, "modf_count", new[] { pack.PlacementModfCount });
-WriteArray(outputStream, "model_above_terrain_mask",
+        WriteArray(outputStream, "model_above_terrain_mask",
             BuildModelAboveTerrainMask(pack.PlacementMddfData, pack.PlacementModfData, pack.Height257,
                 pack.TileX ?? 0, pack.TileY ?? 0));
+        WriteV22ModelPayloads(pack, outputStream);
+    }
+
+    /// <summary>
+    /// Writes the model library sidecars promised by the V22 stream contract.  The stable hash
+    /// keeps the raw-array namespace compact while metadata retains the canonical path and kind
+    /// needed to resolve it.  This is dataset evidence only; it does not imply a renderer route.
+    /// </summary>
+    private static void WriteV22ModelPayloads(TerrainTileTensorPack pack, Stream outputStream)
+    {
+        foreach (V22ModelStreamRecord record in BuildV22ModelStreamRecords(pack))
+        {
+            string prefix = $"{record.Kind}_model_{record.StableKey}";
+            WriteArray(outputStream, $"{prefix}_load_error", new[] { record.Payload.LoadError });
+
+            foreach ((string arrayName, Array array) in record.Payload.RawArrays
+                         .OrderBy(static entry => entry.Key, StringComparer.Ordinal))
+            {
+                WriteArray(outputStream, $"{prefix}_{arrayName}", array);
+            }
+        }
     }
 
     private static void WriteTerrainVertexArrays(TerrainTileTensorPack pack, Stream outputStream)
@@ -433,12 +461,14 @@ WriteArray(outputStream, "model_above_terrain_mask",
         if (t == typeof(double)) return "<f8";
         if (t == typeof(int)) return "<i4";
         if (t == typeof(uint)) return "<u4";
+        if (t == typeof(long)) return "<i8";
+        if (t == typeof(ulong)) return "<u8";
         if (t == typeof(short)) return "<i2";
         if (t == typeof(ushort)) return "<u2";
         if (t == typeof(byte)) return "|u1";
         if (t == typeof(sbyte)) return "|i1";
         if (t == typeof(bool)) return "|b1";
-        if (t == typeof(char)) return "|U1";
+        if (t == typeof(char)) return "<u2";
         return "|u1";
     }
 
@@ -463,6 +493,65 @@ WriteArray(outputStream, "model_above_terrain_mask",
                 BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(idx++ * 4), v);
             return result;
         }
+        if (et == typeof(uint))
+        {
+            var result = new byte[total * 4];
+            int idx = 0;
+            foreach (uint v in array)
+                BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(idx++ * 4), v);
+            return result;
+        }
+        if (et == typeof(long))
+        {
+            var result = new byte[total * 8];
+            int idx = 0;
+            foreach (long v in array)
+                BinaryPrimitives.WriteInt64LittleEndian(result.AsSpan(idx++ * 8), v);
+            return result;
+        }
+        if (et == typeof(ulong))
+        {
+            var result = new byte[total * 8];
+            int idx = 0;
+            foreach (ulong v in array)
+                BinaryPrimitives.WriteUInt64LittleEndian(result.AsSpan(idx++ * 8), v);
+            return result;
+        }
+        if (et == typeof(short))
+        {
+            var result = new byte[total * 2];
+            int idx = 0;
+            foreach (short v in array)
+                BinaryPrimitives.WriteInt16LittleEndian(result.AsSpan(idx++ * 2), v);
+            return result;
+        }
+        if (et == typeof(ushort) || et == typeof(char))
+        {
+            var result = new byte[total * 2];
+            int idx = 0;
+            foreach (object value in array)
+            {
+                ushort v = value is char c ? c : (ushort)value;
+                BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(idx++ * 2), v);
+            }
+            return result;
+        }
+        if (et == typeof(double))
+        {
+            var result = new byte[total * 8];
+            int idx = 0;
+            foreach (double v in array)
+                BinaryPrimitives.WriteInt64LittleEndian(result.AsSpan(idx++ * 8), BitConverter.DoubleToInt64Bits(v));
+            return result;
+        }
+        if (et == typeof(sbyte))
+        {
+            var result = new byte[total];
+            int idx = 0;
+            foreach (sbyte v in array)
+                result[idx++] = unchecked((byte)v);
+            return result;
+        }
         if (et == typeof(bool))
         {
             var result = new byte[total];
@@ -479,17 +568,7 @@ WriteArray(outputStream, "model_above_terrain_mask",
             return result;
         }
 
-        // Fallback: convert to bytes via BitConverter
-        var fallback = new byte[total * 8];
-        int fi = 0;
-        foreach (object v in array)
-        {
-            if (v is float f) BitConverter.GetBytes(f).CopyTo(fallback, fi * 4);
-            else if (v is int i) BitConverter.GetBytes(i).CopyTo(fallback, fi * 4);
-            else if (v is double d) BitConverter.GetBytes(d).CopyTo(fallback, fi * 8);
-            fi++;
-        }
-        return fallback;
+        throw new NotSupportedException($"Raw array serialization does not support element type {et.FullName}.");
     }
 
     private static bool[,]? BuildNormalMask(float[,,]? normals)
@@ -780,6 +859,7 @@ WriteArray(outputStream, "model_above_terrain_mask",
 
     private static string BuildMetadataJson(TerrainTileTensorPack pack)
     {
+        IReadOnlyList<V22ModelStreamRecord> modelRecords = BuildV22ModelStreamRecords(pack);
         return JsonSerializer.Serialize(new
         {
             tile_name = pack.TileName,
@@ -791,6 +871,17 @@ WriteArray(outputStream, "model_above_terrain_mask",
             available_signals = pack.AvailableSignals.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
             mcly_texture_names = pack.MclyTextureNames,
             mtex_texture_paths = pack.MclyTextureNames,
+            mtex_texture_payload_state = GetTexturePayloadState(pack),
+            mtex_texture_fallbacks = pack.MinimapTextureFallbacks
+                .OrderBy(static entry => entry.Key)
+                .Select(static entry => new
+                {
+                    texture_id = entry.Value.TextureId,
+                    requested_path = entry.Value.RequestedPath,
+                    resolved_path = entry.Value.ResolvedPath,
+                    resolution_kind = entry.Value.ResolutionKind,
+                })
+                .ToArray(),
             placement_mddf_names = pack.PlacementMddfNames,
             placement_modf_names = pack.PlacementModfNames,
             placement_mddf_asset_paths = BuildPlacementAssetPaths(pack.PlacementMddfData, pack.PlacementMddfNames),
@@ -834,7 +925,76 @@ WriteArray(outputStream, "model_above_terrain_mask",
             }),
             placement_mddf_count = pack.PlacementMddfCount,
             placement_modf_count = pack.PlacementModfCount,
+            tile_model_paths = modelRecords.Select(static record => record.CanonicalPath).ToArray(),
+            tile_model_kinds = modelRecords.Select(static record => record.Kind).ToArray(),
+            tile_model_payloads = modelRecords.Select(static record => new
+            {
+                canonical_path = record.CanonicalPath,
+                kind = record.Kind,
+                stable_key = record.StableKey,
+                load_error = record.Payload.LoadError,
+            }).ToArray(),
+            minimap_source_tag = pack.MinimapSourceTag,
+            minimap_lighting = pack.MinimapLightingProvenance?.ToMetadata(),
         });
+    }
+
+    private static IReadOnlyList<V22ModelStreamRecord> BuildV22ModelStreamRecords(TerrainTileTensorPack pack)
+    {
+        if (pack.PerTileModelPayloads is not { Count: > 0 } payloads)
+            return [];
+
+        return payloads
+            .Select(static entry =>
+            {
+                string canonicalPath = string.IsNullOrWhiteSpace(entry.Value.CanonicalPath)
+                    ? entry.Key
+                    : entry.Value.CanonicalPath;
+                string kind = entry.Value.Kind switch
+                {
+                    V22ModelPayload.ModelKind.M2 => "m2",
+                    V22ModelPayload.ModelKind.Wmo => "wmo",
+                    _ => "unknown",
+                };
+                return new V22ModelStreamRecord(
+                    canonicalPath,
+                    kind,
+                    BuildStableModelKey(canonicalPath),
+                    entry.Value);
+            })
+            .OrderBy(static record => record.CanonicalPath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static record => record.CanonicalPath, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static string BuildStableModelKey(string canonicalPath)
+    {
+        string normalizedPath = canonicalPath.Replace('\\', '/').Trim().ToLowerInvariant();
+        byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes(normalizedPath));
+        return Convert.ToHexString(digest.AsSpan(0, 4)).ToLowerInvariant();
+    }
+
+    private sealed record V22ModelStreamRecord(
+        string CanonicalPath,
+        string Kind,
+        string StableKey,
+        V22ModelPayload Payload);
+
+    private static bool HasNameAlignedTexturePixels(TerrainTileTensorPack pack)
+        => pack.MclyTexturePixels is { Count: > 0 } pixels
+           && pixels.Count == pack.MclyTextureNames.Count;
+
+    private static string GetTexturePayloadState(TerrainTileTensorPack pack)
+    {
+        if (pack.MclyTextureNames.Count == 0)
+            return "no_mtex_textures";
+        if (pack.MclyTexturePixels is not { Count: > 0 })
+            return "not_available";
+        return HasNameAlignedTexturePixels(pack)
+            ? pack.MinimapTextureFallbacks.Count > 0
+                ? "complete_name_aligned_with_rgb_proxy"
+                : "complete_name_aligned"
+            : "incomplete_not_serialized";
     }
 
     private static string[] BuildPlacementAssetPaths(float[,]? placementData, IReadOnlyList<string> names)

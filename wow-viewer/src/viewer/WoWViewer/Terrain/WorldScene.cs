@@ -3252,11 +3252,19 @@ public class WorldScene : ISceneRenderer
     // Alpha LIT lighting (lazy-loaded on first request)
     private LitLoader? _litLoader;
     private bool _showLitLights;
+    private bool _showLitMinimapMarkers;
     private bool _litLoadAttempted;
     private bool _useLitFogOverride;
     private bool _hasPreLitFogRange;
     private float _preLitFogStart;
     private float _preLitFogEnd;
+    private bool _hasUserFogRangeOverride;
+    private float _userFogStart = TerrainLightingMath.DefaultFogStart;
+    private float _userFogEnd = TerrainLightingMath.DefaultFogEnd;
+    private float _activeFogStart = TerrainLightingMath.DefaultFogStart;
+    private float _activeFogEnd = TerrainLightingMath.DefaultFogEnd;
+    private string _activeFogRangeSource = "Fallback";
+    private bool _activeFogRangeAdjusted;
     private string _litStatus = "LIT not loaded.";
     private int _selectedLitLightIndex = -1;
     private string? _selectedLitSourcePath;
@@ -3271,6 +3279,19 @@ public class WorldScene : ISceneRenderer
                 LazyLoadLit();
         }
     }
+
+    /// <summary>Shows loaded positional LIT entries on shared minimap surfaces without changing lighting.</summary>
+    public bool ShowLitMinimapMarkers
+    {
+        get => _showLitMinimapMarkers;
+        set
+        {
+            _showLitMinimapMarkers = value;
+            if (value && !_litLoadAttempted)
+                LazyLoadLit();
+        }
+    }
+
     public bool UseLitFogOverride
     {
         get => _useLitFogOverride;
@@ -3293,6 +3314,32 @@ public class WorldScene : ISceneRenderer
     public IReadOnlyList<string> AvailableLitSourcePaths => _litLoader?.AvailableSourcePaths ?? Array.Empty<string>();
     public LitLoader.LitLightingSample? LastLitSample => _lastLitSample;
 
+    /// <summary>User-selected fog range that is intentionally independent from lighting recommendations.</summary>
+    public bool HasUserFogRangeOverride => _hasUserFogRangeOverride;
+
+    public float UserFogStart => _userFogStart;
+
+    public float UserFogEnd => _userFogEnd;
+
+    public float ActiveFogStart => _activeFogStart;
+
+    public float ActiveFogEnd => _activeFogEnd;
+
+    public string ActiveFogRangeSource => _activeFogRangeSource;
+
+    public bool ActiveFogRangeAdjusted => _activeFogRangeAdjusted;
+
+    public void SetUserFogRangeOverride(float fogStart, float fogEnd)
+    {
+        (_userFogStart, _userFogEnd) = TerrainLightingMath.NormalizeFogRange(fogStart, fogEnd);
+        _hasUserFogRangeOverride = true;
+    }
+
+    public void ClearUserFogRangeOverride()
+    {
+        _hasUserFogRangeOverride = false;
+    }
+
     private void CapturePreLitFogRange(TerrainLighting lighting)
     {
         if (_hasPreLitFogRange)
@@ -3314,6 +3361,34 @@ public class WorldScene : ISceneRenderer
         }
         _hasPreLitFogRange = false;
     }
+
+    private void ResolveActiveFogRange(TerrainLighting lighting, string recommendationSource)
+    {
+        float rawRecommendedStart = lighting.FogStart;
+        float rawRecommendedEnd = lighting.FogEnd;
+        float fallbackStart = _hasPreLitFogRange ? _preLitFogStart : TerrainLightingMath.DefaultFogStart;
+        float fallbackEnd = _hasPreLitFogRange ? _preLitFogEnd : TerrainLightingMath.DefaultFogEnd;
+        (float recommendedStart, float recommendedEnd) = TerrainLightingMath.NormalizeFogRange(
+            rawRecommendedStart,
+            rawRecommendedEnd,
+            fallbackStart,
+            fallbackEnd);
+
+        (float activeStart, float activeEnd) = _hasUserFogRangeOverride
+            ? TerrainLightingMath.NormalizeFogRange(_userFogStart, _userFogEnd, recommendedStart, recommendedEnd)
+            : (recommendedStart, recommendedEnd);
+
+        _activeFogRangeAdjusted = !FogRangesEqual(rawRecommendedStart, rawRecommendedEnd, recommendedStart, recommendedEnd)
+            || (_hasUserFogRangeOverride && !FogRangesEqual(_userFogStart, _userFogEnd, activeStart, activeEnd));
+        _activeFogRangeSource = _hasUserFogRangeOverride ? "User override" : recommendationSource;
+        _activeFogStart = activeStart;
+        _activeFogEnd = activeEnd;
+        lighting.FogStart = activeStart;
+        lighting.FogEnd = activeEnd;
+    }
+
+    private static bool FogRangesEqual(float leftStart, float leftEnd, float rightStart, float rightEnd)
+        => MathF.Abs(leftStart - rightStart) < 0.001f && MathF.Abs(leftEnd - rightEnd) < 0.001f;
 
     // Taxi selection: -1 = show all (or none if !_showTaxi)
     private int _selectedTaxiNodeId = -1;
@@ -8860,6 +8935,7 @@ public class WorldScene : ISceneRenderer
                     frame.LightingMs = MeasureDurationMs(() =>
                     {
                         LitLoader.LitLightingSample? litSample = null;
+                        string fogRecommendationSource;
                         _lightService?.Update(camPos);
                         if (_lightService != null && _lightService.ActiveLightId >= 0)
                             lighting.GameTime = Math.Clamp(_lightService.TimeOfDay / 2880f, 0f, 1f);
@@ -8880,13 +8956,11 @@ public class WorldScene : ISceneRenderer
                             lighting.FogStart = dbcFogStart;
                             lighting.FogEnd = dbcFogEnd;
                             lighting.Update();
+                            fogRecommendationSource = "DBC lighting";
 
                             _skyDome.ZenithColor = _lightService.SkyTopColor;
                             _skyDome.HorizonColor = lighting.FogColor;
                             _skyDome.SkyFogColor = lighting.FogColor;
-                            fogColor = lighting.FogColor;
-                            fogStart = lighting.FogStart;
-                            fogEnd = lighting.FogEnd;
                         }
                         else
                         {
@@ -8897,10 +8971,8 @@ public class WorldScene : ISceneRenderer
                             }
                             lighting.ClearExternalLighting();
                             lighting.Update();
+                            fogRecommendationSource = "Fallback";
                             _skyDome.UpdateFromLighting(lighting.GameTime);
-                            fogColor = lighting.FogColor;
-                            fogStart = lighting.FogStart;
-                            fogEnd = lighting.FogEnd;
                         }
 
                         if (_useLitFogOverride && litSample != null)
@@ -8916,15 +8988,17 @@ public class WorldScene : ISceneRenderer
                             lighting.FogStart = litSample.FogStart;
                             lighting.FogEnd = litSample.FogEnd;
                             lighting.Update();
+                            fogRecommendationSource = "LIT lighting";
 
                             _skyDome.ZenithColor = litSample.SkyTopColor;
                             _skyDome.HorizonColor = litSample.SkyHorizonColor;
                             _skyDome.SkyFogColor = litSample.FogColor;
-                            fogColor = lighting.FogColor;
-                            fogStart = lighting.FogStart;
-                            fogEnd = lighting.FogEnd;
                         }
 
+                        ResolveActiveFogRange(lighting, fogRecommendationSource);
+                        fogColor = lighting.FogColor;
+                        fogStart = lighting.FogStart;
+                        fogEnd = lighting.FogEnd;
                         _lastLitSample = litSample;
                     });
 

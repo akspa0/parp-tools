@@ -616,6 +616,11 @@ The viewer's GLSL shaders (terrain, WMO, liquid, MDX/M2, sky) produce output vis
 - **FR-033**: Fog blend MUST follow the linear formula: `blendFactor = 1.0 - (dist - fogStart) / (fogEnd - fogStart)` when `dist >= fogStart`, clamped [0,1], matching `ComputeFogBlend`.
 - **FR-034**: Interior fog MUST use `DayNightGetInfo()->intFogInfo` (start, end, color) when camera is inside a WMO and `intFog != 0`.
 - **FR-035**: WMO area fog MUST support up to 4 `SMOFog` zones per group, with distance-based blending between overlapping zones, matching `QueryCameraFog`.
+- **FR-036**: Before any terrain shader, culling, WDL, or object-visibility consumer receives fog
+  values, the active range MUST be finite, positive, and have `FogStart < FogEnd`; a missing or
+  degenerate lighting sample MUST fall back to a visible range.
+- **FR-037**: A user-selected active fog range MUST remain distinct from the lighting recommendation;
+  LIT/DBC evaluation may update colors and recommendations but MUST NOT overwrite that override.
 
 **Water Color from Lighting:**
 - **FR-036**: Exterior water surface tint MUST use `CurrentLight.WaterArray[3]`.

@@ -6,9 +6,8 @@ using WoWViewer.Terrain;
 namespace WoWViewer;
 
 /// <summary>
-/// Read-only lighting status panel: shows whether a LIT file resolved, which one, and the
-/// colours/fog actually reaching the renderer. Exists so a synthetic-minimap capture can be
-/// confirmed to be lit as intended before it becomes training data.
+/// Lighting inspection panel: shows the resolved source, active colors/fog, and spatial LIT entry
+/// diagnostics without allowing the inspection surfaces to alter lighting selection.
 /// </summary>
 public partial class ViewerApp
 {
@@ -22,9 +21,11 @@ public partial class ViewerApp
 
         DrawLitStatusSection(_worldScene);
         ImGui.Separator();
+        DrawLitEntriesSection(_worldScene);
+        ImGui.Separator();
         DrawLitSampleSection(_worldScene);
         ImGui.Separator();
-        DrawEffectiveLightingSection();
+        DrawEffectiveLightingSection(_worldScene);
     }
 
     private void DrawLitStatusSection(WorldScene scene)
@@ -65,9 +66,68 @@ public partial class ViewerApp
         if (ImGui.Checkbox("Show LIT lights", ref showLitLights))
             scene.ShowLitLights = showLitLights;
 
+        bool showLitMinimapMarkers = scene.ShowLitMinimapMarkers;
+        if (ImGui.Checkbox("Show LIT minimap markers", ref showLitMinimapMarkers))
+            scene.ShowLitMinimapMarkers = showLitMinimapMarkers;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Shows positional LIT entries in the regular and full-screen minimaps. This does not change lighting or fog.");
+
         bool useLitFog = scene.UseLitFogOverride;
         if (ImGui.Checkbox("Use LIT fog override", ref useLitFog))
             scene.UseLitFogOverride = useLitFog;
+    }
+
+    private void DrawLitEntriesSection(WorldScene scene)
+    {
+        ImGui.SeparatorText("LIT entries");
+        if (scene.LitLoader is not { HasData: true } lit)
+        {
+            ImGui.TextDisabled("No loaded LIT entries to map.");
+            ImGui.TextDisabled("Enable a LIT visualization above to request the existing lazy load.");
+            return;
+        }
+
+        ImGui.TextDisabled("Select an entry to highlight it on both minimaps. Double-click a positional entry to focus the 3D camera.");
+        if (!ImGui.BeginChild("##LitEntries", new Vector2(0, 220f), true))
+            return;
+
+        float rowHeight = GetUniformListRowHeight();
+        GetVisibleListRange(lit.Lights.Count, rowHeight, out int startIndex, out int endIndex);
+        if (startIndex > 0)
+            ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
+
+        for (int index = startIndex; index < endIndex; index++)
+        {
+            LitLoader.LitLight light = lit.Lights[index];
+            string label = $"[{index}] {light.DisplayName}";
+            if (!light.IsNavigable)
+                label += " (not mappable)";
+
+            bool selected = scene.SelectedLitLightIndex == index;
+            if (ImGui.Selectable(label, selected, ImGuiSelectableFlags.AllowDoubleClick))
+            {
+                scene.SelectedLitLightIndex = index;
+                if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    FocusCameraOnLitLight(index, closeFullscreenAfterFocus: false);
+            }
+
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.BeginTooltip();
+                ImGui.Text($"Position: ({light.Position.X:F1}, {light.Position.Y:F1}, {light.Position.Z:F1})");
+                ImGui.Text($"Radius: {light.Radius:F1}  Dropoff: {light.Dropoff:F1}");
+                ImGui.Text($"Chunk: ({light.ChunkX}, {light.ChunkY}) r={light.ChunkRadius}");
+                ImGui.TextDisabled(light.IsNavigable
+                    ? "Double-click to focus the 3D camera."
+                    : "Default or invalid-position LIT entry; no minimap marker or camera target.");
+                ImGui.EndTooltip();
+            }
+        }
+
+        if (endIndex < lit.Lights.Count)
+            ImGui.Dummy(new Vector2(0, (lit.Lights.Count - endIndex) * rowHeight));
+
+        ImGui.EndChild();
     }
 
     private static void DrawLitSampleSection(WorldScene scene)
@@ -94,7 +154,7 @@ public partial class ViewerApp
         ImGui.Text($"Fog start: {sample.FogStart:F1}   end: {sample.FogEnd:F1}   startScalar: {sample.FogStartScalar:F3}");
     }
 
-    private void DrawEffectiveLightingSection()
+    private void DrawEffectiveLightingSection(WorldScene scene)
     {
         ImGui.SeparatorText("Effective terrain lighting");
 
@@ -119,7 +179,35 @@ public partial class ViewerApp
         DrawColorRow("Light", lighting.LightColor);
         DrawColorRow("Ambient", lighting.AmbientColor);
         DrawColorRow("Fog", lighting.FogColor);
-        ImGui.Text($"Fog start: {lighting.FogStart:F1}   end: {lighting.FogEnd:F1}");
+        ImGui.Text($"Active fog start: {scene.ActiveFogStart:F1}   end: {scene.ActiveFogEnd:F1}");
+        ImGui.TextDisabled($"Source: {scene.ActiveFogRangeSource}{(scene.ActiveFogRangeAdjusted ? " (normalized to stay visible)" : string.Empty)}");
+
+        ImGui.SeparatorText("Active fog range");
+        ImGui.TextDisabled("This affects the loaded world now. Settings contains load defaults only.");
+
+        float fogStart = scene.HasUserFogRangeOverride ? scene.UserFogStart : scene.ActiveFogStart;
+        float fogEnd = scene.HasUserFogRangeOverride ? scene.UserFogEnd : scene.ActiveFogEnd;
+        bool fogStartChanged = ImGui.SliderFloat("Fog Start", ref fogStart, 0f, MaxTerrainFogDistance - 1f, "%.0f");
+        bool fogEndChanged = ImGui.SliderFloat("Fog End", ref fogEnd, 1f, MaxTerrainFogDistance, "%.0f");
+        if (fogStartChanged || fogEndChanged)
+        {
+            if (fogEnd <= fogStart)
+            {
+                if (fogEndChanged && !fogStartChanged)
+                    fogStart = Math.Max(0f, fogEnd - 1f);
+                else
+                    fogEnd = Math.Min(MaxTerrainFogDistance, fogStart + 1f);
+            }
+
+            scene.SetUserFogRangeOverride(fogStart, fogEnd);
+        }
+
+        if (scene.HasUserFogRangeOverride)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Reset to lighting recommendation"))
+                scene.ClearUserFogRangeOverride();
+        }
     }
 
     private static void DrawColorRow(string label, Vector3 color)

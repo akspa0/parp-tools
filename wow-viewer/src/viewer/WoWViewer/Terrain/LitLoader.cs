@@ -220,7 +220,13 @@ public sealed class LitLoader
 
         public bool IsDefaultLight => ChunkX == -1 && ChunkY == -1 && ChunkRadius == -1;
 
-        public bool HasMeaningfulPosition => !float.IsNaN(Position.X) && !float.IsNaN(Position.Y) && !float.IsNaN(Position.Z);
+        public bool HasMeaningfulPosition => float.IsFinite(Position.X) && float.IsFinite(Position.Y) && float.IsFinite(Position.Z);
+
+        /// <summary>
+        /// Default lights and entries without a finite renderer position are global metadata, not
+        /// locations the minimap or camera can represent.
+        /// </summary>
+        public bool IsNavigable => !IsDefaultLight && HasMeaningfulPosition;
 
         public string DisplayName => IsDefaultLight ? $"{Name} (default)" : Name;
     }
@@ -624,7 +630,7 @@ public sealed class LitLoader
 
     private static float NormalizeDistance(float rawDistance)
     {
-        if (rawDistance <= 0f)
+        if (!float.IsFinite(rawDistance) || rawDistance <= 0f)
             return 0f;
 
         float normalized = rawDistance / RadiusScale;

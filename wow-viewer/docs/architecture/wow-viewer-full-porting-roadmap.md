@@ -202,7 +202,8 @@ Each model trains independently. If H3 improves, only H3's checkpoint changes. F
 
 | Component | Purpose |
 |-----------|---------|
-| `MinimapBakeService` port | Full tileset compositing with shadow de-baking |
+| `TerrainMinimapCompositor` | Direct client terrain composition plus transparent whole-map stitching (landed) |
+| `MinimapBakeService` port | VLM-artifact baking and shadow de-baking (separate from direct client minimap export) |
 | `SynthesizedTrainingService` port | Matched deformed-minimap/heightmap training pairs |
 | `HeightmapBakeService` port | 256×256 + 4096×4096 grayscale heightmap images |
 | `TileStitchingService` port | Chunk-level assembly (shadows, alpha atlases, liquid maps) |
@@ -242,7 +243,7 @@ Each model trains independently. If H3 improves, only H3's checkpoint changes. F
 | `ml-bake / ml-bake-heightmap` | `MinimapBakeService` / `HeightmapBakeService` | NOT PORTED |
 | `convert` (lk→alpha) | `WoWMapConverter.Cli` converters | REPLACED by `convert-lk-to-alpha` |
 | `inspect` (PM4, ADT, WDT) | Existing `WowViewer.Tool.Inspect` | PARTIAL |
-| `synthetic-minimap` | `MinimapBakeService` | STUB (not wired) |
+| `synthetic-minimap` | `TerrainMinimapCompositor` + `TerrainMinimapStitcher` | LANDED — direct client terrain synthesis with LIT/global-fallback provenance, per-tile and whole-map PNGs |
 | `ml-corpus / ml-batch` | `export_ml_corpus.ps1` | NOT PORTED |
 
 ---
@@ -252,7 +253,7 @@ Each model trains independently. If H3 improves, only H3's checkpoint changes. F
 | wow-viewer project | Owns |
 |--------------------|------|
 | `WowViewer.Core` | Domain types, `ITerrainAdapter`, `TileLoadResult`, `TerrainTileTensorPack`, `LkAdtData`, `LkMcnkData` |
-| `WowViewer.Core.IO` | All file readers + writers: ADT, WDT, WMO, M2, BLP, DBC, MPQ, PM4, WDL, WL |
+| `WowViewer.Core.IO` | All file readers + writers: ADT, WDT, WMO, M2, BLP, DBC, MPQ, PM4, WDL, WL; terrain minimap composition and stitching |
 | `WowViewer.Core.IO.Maps` | `AlphaWdtReader`, `AdtTensorPackBuilder`, `AlphaTensorPackBuilder`, `AlphaTerrainAdapter`, `AdtTerrainWriter`, `AdtPlacementWriter`, `NpzTileSerializer`, `WlFileReader`, `Md5TranslateResolver`, `AlphaToLkConverter`, `LkToAlphaConverter`, `AlphaWdtWriter`, `LkAdtWriter`, `LkWdtWriter`, `WdlWriter` |
 | `WowViewer.Core.PM4` | PM4 format reader, linkage, MPRL, MSCN |
 | `WowViewer.Core.Runtime` | M2 runtime, skin profiles, render passes |

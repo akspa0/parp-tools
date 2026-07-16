@@ -7,8 +7,6 @@ public static class AlphaTensorPackBuilder
 {
     private const int TileHeightmapSize = 257;
     private const int TileChunks = 16;
-    private const int VerticesPerChunk = 17;
-    private const int TileLiquidSize = TileChunks * VerticesPerChunk;
     private const float ObjectTileSize = 533.33333f;
     private const float ObjectMapOrigin = 17066.666f;
     private const float ObjectMaskMarginTiles = 0.25f;
@@ -43,6 +41,12 @@ public static class AlphaTensorPackBuilder
         float[,]? height17 = DownsampleHeightmap(height257, 17);
 
         float[,,]? mcalAlphaPack = tileData.McalAlphaPack;
+        // AlphaWdtReader retains the native [chunkX, chunkY, layer] MCLY layout for the
+        // legacy terrain adapter. TerrainTileTensorPack is row-major everywhere else:
+        // [chunkY, chunkX, layer]. Normalize only at this shared boundary so MCAL rows and
+        // MCLY layers address the same terrain chunk in minimap/export consumers.
+        int[,,] mclyTextureIds = ToRowMajorChunkLayers(tileData.MclyTextureIds);
+        bool[,,] mclyLayerMask = ToRowMajorChunkLayers(tileData.MclyLayerMask);
 
         float[,]? mclqSurfaceHeight257 = tileData.MclqSurfaceHeight;
         int[,]? mclqTypeMask257 = tileData.MclqTypeMask;
@@ -52,7 +56,20 @@ public static class AlphaTensorPackBuilder
             signals.Add("mclq_surface_height");
             signals.Add("mclq_type_mask");
             if (mclqTypeMask257 is not null)
-                mclqPresenceMask257 = BuildPresenceMaskFromTypeMask(mclqTypeMask257);
+            {
+                // Alpha WDTs can expose MCLQ heights on the 257² terrain grid while retaining
+                // liquid type only per 16×16 chunk. Normalize once at the tensor boundary so
+                // unified-liquid composition never indexes mismatched arrays.
+                mclqTypeMask257 = NormalizeLiquidTypeMask(
+                    mclqTypeMask257,
+                    mclqSurfaceHeight257.GetLength(0),
+                    mclqSurfaceHeight257.GetLength(1));
+                mclqPresenceMask257 = BuildAlphaLiquidPresenceMask(
+                    tileData,
+                    mclqTypeMask257,
+                    mclqSurfaceHeight257.GetLength(0),
+                    mclqSurfaceHeight257.GetLength(1));
+            }
         }
         else
         {
@@ -92,6 +109,16 @@ public static class AlphaTensorPackBuilder
         (float[,]? objectRoofMask256, float[,]? objectRoofConfidence256, string objectRoofMaskSource) =
             BuildObjectRoofMasks(tileData, tileX, tileY, signals);
 
+        (float[,]? unifiedLiquidMask, float[,]? unifiedLiquidHeight) =
+            AdtTensorPackBuilder.BuildUnifiedLiquid(
+                mh2oHeight: null,
+                mh2oPresence: null,
+                mclqHeight: mclqSurfaceHeight257,
+                mclqPresence: mclqPresenceMask257,
+                wlMask: null,
+                wlHeight: null,
+                signals);
+
         return new TerrainTileTensorPack
         {
             TileName = tileName,
@@ -105,9 +132,9 @@ public static class AlphaTensorPackBuilder
             WdlLattice = terrainVertices is null ? null : TerrainWdlLattice.FromTerrainVertices(terrainVertices),
             Height65 = height65,
             Height17 = height17,
-            MclyTextureIds = tileData.MclyTextureIds,
+            MclyTextureIds = mclyTextureIds,
             MclyTextureNames = tileData.TextureNames,
-            MclyLayerMask = tileData.MclyLayerMask,
+            MclyLayerMask = mclyLayerMask,
             McalAlphaPack = mcalAlphaPack,
             McalAlphaPack256 = DownsampleAlpha256(mcalAlphaPack),
             McnrNormalXyz = tileData.McnrNormalXyz,
@@ -121,12 +148,9 @@ public static class AlphaTensorPackBuilder
             MclqSurfaceHeight = mclqSurfaceHeight257,
             MclqTypeMask = mclqTypeMask257,
             MclqPresenceMask = mclqPresenceMask257,
-            LiquidBasicType257 = LiquidBasicTypePackBuilder.Build(
-                mh2oPresence: null,
-                mh2oType: null,
-                mclqPresence: mclqPresenceMask257,
-                mclqType: mclqTypeMask257,
-                mcnkFlags16: null),
+            UnifiedLiquidMask = unifiedLiquidMask,
+            UnifiedLiquidHeight = unifiedLiquidHeight,
+            LiquidBasicType257 = BuildAlphaLiquidBasicType257(mclqPresenceMask257, mclqTypeMask257),
             HoleMask16 = holeMask16,
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
@@ -167,6 +191,42 @@ public static class AlphaTensorPackBuilder
         return fileName;
     }
 
+    private static int[,,] ToRowMajorChunkLayers(int[,,] source)
+    {
+        int chunksX = source.GetLength(0);
+        int chunksY = source.GetLength(1);
+        int layers = source.GetLength(2);
+        var result = new int[chunksY, chunksX, layers];
+        for (int chunkX = 0; chunkX < chunksX; chunkX++)
+        {
+            for (int chunkY = 0; chunkY < chunksY; chunkY++)
+            {
+                for (int layer = 0; layer < layers; layer++)
+                    result[chunkY, chunkX, layer] = source[chunkX, chunkY, layer];
+            }
+        }
+
+        return result;
+    }
+
+    private static bool[,,] ToRowMajorChunkLayers(bool[,,] source)
+    {
+        int chunksX = source.GetLength(0);
+        int chunksY = source.GetLength(1);
+        int layers = source.GetLength(2);
+        var result = new bool[chunksY, chunksX, layers];
+        for (int chunkX = 0; chunkX < chunksX; chunkX++)
+        {
+            for (int chunkY = 0; chunkY < chunksY; chunkY++)
+            {
+                for (int layer = 0; layer < layers; layer++)
+                    result[chunkY, chunkX, layer] = source[chunkX, chunkY, layer];
+            }
+        }
+
+        return result;
+    }
+
     private static void BuildAlphaLiquid(
         AlphaTileData tileData,
         ref float[,]? mclqSurfaceHeight,
@@ -177,12 +237,12 @@ public static class AlphaTensorPackBuilder
         if (tileData.LiquidChunks.Count == 0)
             return;
 
-        mclqSurfaceHeight = new float[TileLiquidSize, TileLiquidSize];
-        mclqTypeMask = new int[TileLiquidSize, TileLiquidSize];
-        mclqPresenceMask = new bool[TileLiquidSize, TileLiquidSize];
+        mclqSurfaceHeight = new float[TileHeightmapSize, TileHeightmapSize];
+        mclqTypeMask = new int[TileHeightmapSize, TileHeightmapSize];
+        mclqPresenceMask = new bool[TileHeightmapSize, TileHeightmapSize];
 
-        for (int i = 0; i < TileLiquidSize; i++)
-            for (int j = 0; j < TileLiquidSize; j++)
+        for (int i = 0; i < TileHeightmapSize; i++)
+            for (int j = 0; j < TileHeightmapSize; j++)
                 mclqTypeMask[i, j] = -1;
 
         foreach (AlphaLiquidChunk lc in tileData.LiquidChunks)
@@ -194,44 +254,157 @@ public static class AlphaTensorPackBuilder
             if ((uint)chunkX >= TileChunks || (uint)chunkY >= TileChunks)
                 continue;
 
-            int baseX = chunkX * VerticesPerChunk;
-            int baseY = chunkY * VerticesPerChunk;
-
             float avgHeight = (lc.MinHeight + lc.MaxHeight) * 0.5f;
             int liquidType = McnkFlagsToLiquidType(lc.MinHeight, lc.MaxHeight, lc.McnkFlags);
-
-            for (int vy = 0; vy < VerticesPerChunk; vy++)
-            {
-                for (int vx = 0; vx < VerticesPerChunk; vx++)
-                {
-                    int gx = baseX + vx;
-                    int gy = baseY + vy;
-                    if ((uint)gx < TileLiquidSize && (uint)gy < TileLiquidSize)
-                    {
-                        mclqSurfaceHeight[gy, gx] = avgHeight;
-                        mclqTypeMask[gy, gx] = liquidType;
-                        mclqPresenceMask[gy, gx] = true;
-                    }
-                }
-            }
+            PaintAlphaLiquidChunk(
+                mclqSurfaceHeight,
+                mclqTypeMask,
+                mclqPresenceMask,
+                chunkX,
+                chunkY,
+                lc.TileFlags,
+                avgHeight,
+                liquidType);
         }
 
         signals.Add("mclq_surface_height");
         signals.Add("mclq_type_mask");
     }
 
-    private static bool[,] BuildPresenceMaskFromTypeMask(int[,] typeMask)
+    private static bool[,] BuildAlphaLiquidPresenceMask(
+        AlphaTileData tileData,
+        int[,] typeMask,
+        int targetHeight,
+        int targetWidth)
     {
-        int h = typeMask.GetLength(0);
-        int w = typeMask.GetLength(1);
-        bool[,] presence = new bool[h, w];
-        for (int y = 0; y < h; y++)
+        var presence = new bool[targetHeight, targetWidth];
+        bool hasChunkVisibility = false;
+        foreach (AlphaLiquidChunk liquid in tileData.LiquidChunks)
         {
-            for (int x = 0; x < w; x++)
+            if ((uint)liquid.IndexX >= TileChunks || (uint)liquid.IndexY >= TileChunks)
+                continue;
+
+            PaintAlphaLiquidChunk(
+                null,
+                null,
+                presence,
+                liquid.IndexX,
+                liquid.IndexY,
+                liquid.TileFlags,
+                height: 0f,
+                liquidType: 0);
+            hasChunkVisibility = true;
+        }
+
+        if (hasChunkVisibility)
+            return presence;
+
+        for (int y = 0; y < targetHeight; y++)
+        {
+            for (int x = 0; x < targetWidth; x++)
                 presence[y, x] = typeMask[y, x] >= 0;
         }
 
         return presence;
+    }
+
+    private static void PaintAlphaLiquidChunk(
+        float[,]? heights,
+        int[,]? typeMask,
+        bool[,] presence,
+        int chunkX,
+        int chunkY,
+        byte[]? tileFlags,
+        float height,
+        int liquidType)
+    {
+        bool hasTileFlags = tileFlags is { Length: >= 64 };
+        for (int liquidCellY = 0; liquidCellY < 8; liquidCellY++)
+        {
+            for (int liquidCellX = 0; liquidCellX < 8; liquidCellX++)
+            {
+                int flagIndex = (liquidCellY * 8) + liquidCellX;
+                if (hasTileFlags && (tileFlags![flagIndex] & 0x0F) == 0x0F)
+                    continue;
+
+                // One MCLQ 8×8 liquid cell spans a 2×2 region of the 16×16 terrain-cell grid.
+                // Include its four boundary vertices so minimap composition can require a complete
+                // liquid cell and never paint a dangling vertex strip over dry terrain.
+                int baseX = (chunkX * 16) + (liquidCellX * 2);
+                int baseY = (chunkY * 16) + (liquidCellY * 2);
+                for (int y = baseY; y <= baseY + 2 && y < presence.GetLength(0); y++)
+                {
+                    for (int x = baseX; x <= baseX + 2 && x < presence.GetLength(1); x++)
+                    {
+                        if (x < 0 || y < 0)
+                            continue;
+
+                        presence[y, x] = true;
+                        if (heights is not null)
+                            heights[y, x] = height;
+                        if (typeMask is not null)
+                            typeMask[y, x] = liquidType;
+                    }
+                }
+            }
+        }
+    }
+
+    private static int[,] NormalizeLiquidTypeMask(int[,] source, int targetHeight, int targetWidth)
+    {
+        if (source.GetLength(0) == targetHeight && source.GetLength(1) == targetWidth)
+            return source;
+
+        var result = new int[targetHeight, targetWidth];
+        for (int y = 0; y < targetHeight; y++)
+        {
+            int sourceY = ScaleCoordinate(y, targetHeight, source.GetLength(0));
+            for (int x = 0; x < targetWidth; x++)
+            {
+                int sourceX = ScaleCoordinate(x, targetWidth, source.GetLength(1));
+                result[y, x] = source[sourceY, sourceX];
+            }
+        }
+
+        return result;
+    }
+
+    private static byte[,]? BuildAlphaLiquidBasicType257(bool[,]? presence, int[,]? typeMask)
+    {
+        if (presence is null || typeMask is null)
+            return null;
+
+        int height = presence.GetLength(0);
+        int width = presence.GetLength(1);
+        var result = new byte[height, width];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                if (!presence[y, x])
+                {
+                    result[y, x] = LiquidBasicTypeConstants.NoLiquid;
+                    continue;
+                }
+
+                // Alpha records the already-resolved basic type (0..3), unlike the later
+                // MCLQ enum. Do not route it through the later-era MCLQ conversion table.
+                int rawType = typeMask[y, x];
+                result[y, x] = rawType is >= 0 and <= LiquidBasicTypeConstants.MaxBasicType
+                    ? (byte)rawType
+                    : (byte)AdtLiquidBasicType.Water;
+            }
+        }
+
+        return result;
+    }
+
+    private static int ScaleCoordinate(int coordinate, int sourceSize, int targetSize)
+    {
+        if (targetSize <= 1 || sourceSize <= 1)
+            return 0;
+
+        return Math.Clamp((int)MathF.Round(coordinate * (targetSize - 1f) / (sourceSize - 1f)), 0, targetSize - 1);
     }
 
     private static int McnkFlagsToLiquidType(float minH, float maxH, uint mcnkFlags)
@@ -477,7 +650,7 @@ public static class AlphaTensorPackBuilder
                     continue;
                 int x = cx + dx;
                 int y = cy + dy;
-                if ((uint)x >= TileHeightmapSize || (uint)y >= TileHeightmapSize)
+                if ((uint)x >= buffer.GetLength(1) || (uint)y >= buffer.GetLength(0))
                     continue;
                 buffer[y, x] = value;
             }
@@ -490,7 +663,7 @@ public static class AlphaTensorPackBuilder
         {
             for (int x = minX; x <= maxX; x++)
             {
-                if ((uint)x >= TileHeightmapSize || (uint)y >= TileHeightmapSize)
+                if ((uint)x >= buffer.GetLength(1) || (uint)y >= buffer.GetLength(0))
                     continue;
                 buffer[y, x] = value;
             }
@@ -745,7 +918,7 @@ public static class AlphaTensorPackBuilder
             {
                 if (dx * dx + dy * dy > r2) continue;
                 int px = cx + dx, py = cy + dy;
-                if ((uint)px < TileHeightmapSize && (uint)py < TileHeightmapSize)
+                if ((uint)px < buf.GetLength(1) && (uint)py < buf.GetLength(0))
                     buf[py, px] = value;
             }
         }
@@ -763,7 +936,7 @@ public static class AlphaTensorPackBuilder
                 float a = 1f - MathF.Min(1f, dist / radius);
                 if (a <= 0f) continue;
                 int px = cx + dx, py = cy + dy;
-                if ((uint)px < TileHeightmapSize && (uint)py < TileHeightmapSize)
+                if ((uint)px < buf.GetLength(1) && (uint)py < buf.GetLength(0))
                     buf[py, px] = Math.Max(buf[py, px], a);
             }
         }
@@ -775,7 +948,7 @@ public static class AlphaTensorPackBuilder
         {
             for (int x = x0; x <= x1; x++)
             {
-                if ((uint)x < TileHeightmapSize && (uint)y < TileHeightmapSize)
+                if ((uint)x < buf.GetLength(1) && (uint)y < buf.GetLength(0))
                     buf[y, x] = value;
             }
         }
@@ -788,7 +961,7 @@ public static class AlphaTensorPackBuilder
         {
             for (int x = x0 - pad; x <= x1 + pad; x++)
             {
-                if ((uint)x >= TileHeightmapSize || (uint)y >= TileHeightmapSize) continue;
+                if ((uint)x >= buf.GetLength(1) || (uint)y >= buf.GetLength(0)) continue;
                 float dx = (x < x0) ? x0 - x : (x > x1) ? x - x1 : 0f;
                 float dy = (y < y0) ? y0 - y : (y > y1) ? y - y1 : 0f;
                 float dist = MathF.Sqrt(dx * dx + dy * dy);

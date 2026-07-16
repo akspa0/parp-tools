@@ -1,4 +1,5 @@
 using System.Numerics;
+using WowViewer.Core.Terrain;
 
 namespace WoWViewer.Terrain;
 
@@ -20,7 +21,7 @@ public class TerrainLighting
     public float GameTime { get; set; } = 0.35f; // Default: morning
 
     /// <summary>Current sun/light direction (normalized, pointing toward light).</summary>
-    public Vector3 LightDirection { get; private set; } = Vector3.Normalize(new Vector3(0.5f, 0.3f, 1.0f));
+    public Vector3 LightDirection { get; private set; } = TerrainSolarDirection.Evaluate(0.35f);
 
     public bool HasExternalLightDirectionOverride => _hasExternalLightDirectionOverride;
 
@@ -76,10 +77,9 @@ public class TerrainLighting
         // Sun angle: 0.0 = below horizon (midnight), 0.25 = sunrise, 0.5 = zenith, 0.75 = sunset
         float sunAngle = GameTime * MathF.PI * 2f;
         float sunHeight = MathF.Sin(sunAngle - MathF.PI * 0.5f); // -1 at midnight, +1 at noon
-        float sunHorizontal = MathF.Cos(sunAngle - MathF.PI * 0.5f);
-
-        // Light direction (sun position)
-        LightDirection = Vector3.Normalize(new Vector3(sunHorizontal * 0.5f, 0.3f, MathF.Max(sunHeight, 0.05f)));
+        // The shared profile owns terrain-world versus minimap-raster direction mapping so
+        // interactive terrain and exported minimaps use the same solar path.
+        LightDirection = TerrainSolarDirection.Evaluate(GameTime);
 
         if (_hasExternalLightDirectionOverride)
             LightDirection = _externalLightDirection;
