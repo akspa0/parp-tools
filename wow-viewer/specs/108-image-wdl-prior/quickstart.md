@@ -54,3 +54,22 @@ uv run python scripts/infer_spec103_wdl_prior.py --image "I:\parp\parp-tools\wow
 ```
 
 The current V8 checkpoint may still depend on its other auxiliary channels. This slice proves the WDL handoff; replacing those auxiliaries is a later, separate residual-model slice.
+
+7. **Do not use `analyze_fractal_raw_components.py --macro-pastes` or `--blocky-pastes` for prefab
+   evidence.** Those are zone-scale connected-component tools. Recover bounded, repeated terrain-art
+   fragments from 0.5.3 instead:
+
+```powershell
+uv run python scripts/analyze_prefab_fragments.py `
+  --store "I:\parp\parp-tools\wow-viewer\output\datasets\v18\0_5_3_3368.zarr" `
+  --build 0_5_3_3368 `
+  --maps Azeroth Kalimdor `
+  --output "I:\parp\parp-tools\wow-viewer\output\analysis\prefab-fragments\053_azeroth_kalimdor_v1" `
+  --supports 32,64,128 `
+  --stride 16 `
+  --max-candidates-per-tile 48
+```
+
+This writes only 32/64/128-pixel chunk-aligned windows, with source tile and local coordinates in
+`fragment_members.parquet`; `fragment_families.parquet` contains only normalized signatures that
+repeat. Review `contact_sheets\fragment_families_*.png` before using a family as synthesis evidence.

@@ -625,3 +625,12 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior implementation)
   still controls fog and the detailed-ADT AOI; real WDL meshes cover the newly visible horizon space.
 - Updated Quick text and Spec 107 to describe that split. Isolated Debug viewer build passed:
   `output/tmp/spec107-wdl-horizon-build` (0 errors; existing package warnings only).
+## 2026-07-15 — Corrected Spec 108 prefab evidence route
+
+- The macro/blocky paste contact sheet was invalid for prefab discovery: it showed connected,
+  zone-scale alpha components, not the small reusable terrain-art pieces required for synthesis.
+- Added `analyze_prefab_fragments.py` and `prefab_fragments.py`: scan bounded 32/64/128-pixel,
+  chunk-aligned local windows per tile; retain source coordinates and relief/alpha evidence; group
+  only repeated normalized local signatures. Macro/blocky analysis is now explicitly disallowed as
+  prefab evidence in Spec 108.
+- Focused fragment proof plus existing segmentation tests: 10 passed.

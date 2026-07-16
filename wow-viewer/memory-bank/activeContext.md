@@ -33,10 +33,13 @@ Last updated: 2026-07-15 (Spec 107 WDL horizon policy corrected; Spec 108 prefab
 - Visible proof is now `visualize_spec103_wdl_prior.py`: it writes predicted/truth paired-WDL OBJ
   meshes, full truth OBJ, and an error heatmap from an evaluation directory. The reconstruction
   interpolates the paired lattice and is explicitly a coarse-prior view, not a claim of full detail.
-- **Next mandatory gate:** generic varied synthesis reached ~50 world-unit real-tile outer MAE, so
-  do not keep tuning its model. Full-map 0.5.3 Azeroth/Kalimdor prefab analysis is absent and must
-  become the source of canonical terrain-art families; only then synthesize many transform/layout/
-  lighting variants from those measured families and hold out whole families.
+- **Corrected prefab-evidence gate:** generic varied synthesis reached ~50 world-unit real-tile outer
+  MAE, so do not keep tuning its model. The old `analyze_fractal_raw_components --macro-pastes` /
+  `--blocky-pastes` route is explicitly **not prefab discovery**: it emits connected zone-scale
+  components (as the first contact sheet proved) and must not feed curation or synthesis. The only
+  valid next evidence is `analyze_prefab_fragments.py`, which emits 32/64/128-pixel chunk-aligned,
+  tile-local windows and groups only repeated normalized signatures. Review those bounded family
+  contact sheets before any prefab-derived synthesis.
 
 ## Spec 107 — Lighting quick controls + confident hover (2026-07-15, implemented/build green)
 
