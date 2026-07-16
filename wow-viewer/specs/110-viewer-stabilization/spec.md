@@ -235,6 +235,11 @@ A user can determine which WMO v14/v17 and M2-to-MDX conversions are supported, 
   flags are authoritative where available, and isolated coverage vertices MUST NOT produce a
   liquid strip along dry terrain-cell boundaries. It MUST NOT claim parity with client water
   textures, animation, reflection, or shader effects.
+- **FR-023o**: The liquid companion MUST render water, ocean, magma, and slime with distinct
+  deterministic palette entries. For Alpha MCLQ, each visible cell's type nibble MUST take
+  precedence over the containing MCNK liquid flags; the MCNK flags are the fallback only when a
+  visible cell carries no type nibble. The resolved per-cell basic type remains an independent
+  tensor/metadata signal from the visual palette.
 - **FR-023m**: A missing/undecodable terrain BLP or absent usable MTEX table MUST NOT skip an
   otherwise readable tile solely for lack of material RGB. Recovery MUST try same-stem and related
   candidates first, then a successfully decoded deterministic catalog BLP selected by source-folder

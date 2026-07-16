@@ -84,6 +84,11 @@ Last updated: 2026-07-16
   coverage/basic types, not a claim of native water texture/animation/reflection parity. Alpha MCLQ
   257² surface data with a 16×16 type grid is normalized before unified-liquid composition, removing
   the mismatched-array failure mode that can affect liquid tiles.
+- Corrected Alpha liquid classification granularity. A visible MCLQ cell now uses its own type
+  nibble (water/ocean/magma/slime) before falling back to the containing MCNK's flags; the paired
+  liquid image uses deterministic distinct flat palette entries while `LiquidBasicType257` remains
+  the separate supervision signal. Focused type-precedence/palette/round-trip coverage passes and
+  Debug Harvest builds with no errors.
 - Corrected liquid coverage geometry after a 0.5.3 map showed water above dry terrain-cell
   boundaries: Alpha MCLQ now respects its 8×8 cell flags instead of treating an entire chunk as
   wet, and the minimap compositor requires all four source-cell coverage corners before emitting a

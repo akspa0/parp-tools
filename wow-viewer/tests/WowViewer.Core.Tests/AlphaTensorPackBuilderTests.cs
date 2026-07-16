@@ -214,4 +214,39 @@ public sealed class AlphaTensorPackBuilderTests
         Assert.Equal(1f, pack.UnifiedLiquidMask![1, 1]);
         Assert.Equal(0f, pack.UnifiedLiquidMask[3, 1]);
     }
+
+    [Fact]
+    public void Build_UsesVisibleMclqCellTypeBeforeItsMcnkChunkFallback()
+    {
+        var liquidTypes = new int[16, 16];
+        for (int y = 0; y < 16; y++)
+            for (int x = 0; x < 16; x++)
+                liquidTypes[y, x] = -1;
+        liquidTypes[0, 0] = (int)AdtLiquidBasicType.Magma;
+
+        byte[] flags = Enumerable.Repeat((byte)0x0F, 64).ToArray();
+        flags[0] = 0x02; // Ocean; the containing MCNK declares magma.
+        AlphaTileData tile = new(
+            sourcePath: "alpha.wdt#alpha-tile(0,0)",
+            heightmap: new float[257, 257],
+            mcalAlphaPack: new float[256, 256, 4],
+            mclyTextureIds: new int[16, 16, 4],
+            mclyLayerMask: new bool[16, 16, 4],
+            holeMask: new bool[16, 16],
+            textureNames: Array.Empty<string>(),
+            modelPlacements: Array.Empty<AlphaModelPlacement>(),
+            worldModelPlacements: Array.Empty<AlphaWorldModelPlacement>(),
+            liquidChunks:
+            [
+                new AlphaLiquidChunk(0, 0, 0, 12f, 12f, flags, 0x10u, null)
+            ],
+            mclqSurfaceHeight: new float[257, 257],
+            mclqTypeMask: liquidTypes);
+
+        TerrainTileTensorPack pack = AlphaTensorPackBuilder.Build(tile, 0, 0);
+
+        Assert.True(pack.MclqPresenceMask![1, 1]);
+        Assert.Equal((int)AdtLiquidBasicType.Ocean, pack.MclqTypeMask![1, 1]);
+        Assert.Equal((byte)AdtLiquidBasicType.Ocean, pack.LiquidBasicType257![1, 1]);
+    }
 }

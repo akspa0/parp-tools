@@ -67,6 +67,11 @@ Last updated: 2026-07-16
 - Liquid pixels are now rasterized from complete source cells: Alpha honors the 8×8 MCLQ tile flags,
   and the companion compositor requires all four coverage corners before overlaying a liquid pixel.
   This replaces the single-vertex/all-chunk behavior that produced liquid strips on dry cell edges.
+- Alpha liquid class is now resolved at the same visible-cell granularity: the MCLQ cell type nibble
+  takes precedence over MCNK's containing-chunk type flags, with MCNK retained as the fallback.
+  The companion palette deterministically distinguishes water, ocean, magma, and slime while the
+  resolved `LiquidBasicType257` remains the independent data signal. Focused type-precedence,
+  palette, and Alpha round-trip proof passes; Debug Harvest build succeeds (existing warnings only).
 - The same time-of-day path had a distinct lighting defect: Alpha MCNR's 257² compatibility grid
   intentionally has alternating non-vertex positions, but minimap synthesis sampled those gaps as
   `UnitZ`. `TerrainMinimapCompositor` now evaluates Lambert at the five real staggered vertices and

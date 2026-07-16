@@ -368,6 +368,39 @@ public sealed class TerrainMinimapCompositorTests
         Assert.Equal(1, liquidPixelCount);
     }
 
+    [Theory]
+    [InlineData((byte)AdtLiquidBasicType.Water, 136, 164, 206)]
+    [InlineData((byte)AdtLiquidBasicType.Magma, 226, 121, 73)]
+    [InlineData((byte)AdtLiquidBasicType.Slime, 122, 205, 114)]
+    public void ComposeLiquid_UsesDistinctDeterministicPaletteForEachBasicType(
+        byte basicType,
+        byte expectedRed,
+        byte expectedGreen,
+        byte expectedBlue)
+    {
+        TerrainTileTensorPack pack = new()
+        {
+            UnifiedLiquidMask = new float[3, 3]
+            {
+                { 1f, 1f, 0f },
+                { 1f, 1f, 0f },
+                { 0f, 0f, 0f }
+            },
+            LiquidBasicType257 = new byte[3, 3]
+            {
+                { basicType, basicType, LiquidBasicTypeConstants.NoLiquid },
+                { basicType, basicType, LiquidBasicTypeConstants.NoLiquid },
+                { LiquidBasicTypeConstants.NoLiquid, LiquidBasicTypeConstants.NoLiquid, LiquidBasicTypeConstants.NoLiquid }
+            }
+        };
+        using var terrain = new Image<Rgba32>(2, 2, new Rgba32(255, 255, 255, 255));
+
+        using Image<Rgba32> liquid = TerrainMinimapLiquidCompositor.Compose(terrain, pack, out int liquidPixelCount);
+
+        Assert.Equal(new Rgba32(expectedRed, expectedGreen, expectedBlue, 255), liquid[0, 0]);
+        Assert.Equal(1, liquidPixelCount);
+    }
+
     private static TerrainTileTensorPack BuildPack(
         float layerOneAlpha,
         float layerTwoAlpha = 0f,

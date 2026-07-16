@@ -268,7 +268,7 @@ public static class AlphaWdtReader
                 for (int y = baseY; y < endY; y++)
                     for (int x = baseX; x < endX; x++)
                         mclqSurface[y, x] = avgHeight;
-                mclqTypes[lc.IndexY, lc.IndexX] = ClassifyLiquid(lc.McnkFlags);
+                mclqTypes[lc.IndexY, lc.IndexX] = ClassifyLiquid(lc.TileFlags, lc.McnkFlags);
                 hasLiquid = true;
             }
         }
@@ -988,8 +988,18 @@ public static class AlphaWdtReader
 
     private const float WorldTileSize = 533.33333f;
 
-    private static int ClassifyLiquid(uint mcnkFlags)
+    private static int ClassifyLiquid(byte[]? tileFlags, uint mcnkFlags)
     {
+        if (tileFlags is { Length: >= 64 })
+        {
+            for (int index = 0; index < 64; index++)
+            {
+                byte nibble = (byte)(tileFlags[index] & 0x0F);
+                if (nibble != 0x0F)
+                    return (int)McnkFlagDecoder.DecodeWithMclqTileNibble(mcnkFlags, nibble);
+            }
+        }
+
         return (int)McnkFlagDecoder.Decode(mcnkFlags);
     }
 }

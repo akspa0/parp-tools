@@ -179,12 +179,16 @@
   independently and record paths, liquid-pixel count, and render-profile identity in the manifest.
   Alpha's 16×16 MCLQ type grid is normalized to the 257² MCLQ surface before unified-liquid output.
   Its native 8×8 MCLQ tile flags are the authoritative cell-presence signal; the output compositor
-  requires all four source-cell corners to be covered before painting a liquid pixel.
+  requires all four source-cell corners to be covered before painting a liquid pixel. For a visible
+  Alpha cell, its MCLQ low-nibble liquid type is the primary class; MCNK liquid flags classify only
+  cells that omit a type nibble. The output uses deterministic distinct flat colors for water,
+  ocean, magma, and slime while retaining the resolved basic type array separately from RGB.
 - **Rationale**: A terrain-only image cannot supervise or classify liquid evidence in historical
   input minimaps. Coupled, coordinate-identical baseline/liquid outputs retain both signals without
   confusing the terrain model or pretending to have recreated water materials. Sampling a single
   covered vertex caused false liquid strips over adjacent dry terrain cells, which is a geometry
-  error rather than a water-material characteristic.
+  error rather than a water-material characteristic. Collapsing a whole chunk to its MCNK type
+  discarded valid local ocean/magma/slime evidence and made the companion color misleading.
 - **Alternatives considered**: Replace the terrain baseline with liquid RGB (rejected: loses the
   no-liquid signal); emit only a mask (rejected: omits the visual input target and liquid type);
   reuse client minimap imagery (rejected: violates direct synthesis); call the analytic overlay

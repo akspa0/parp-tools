@@ -29,7 +29,9 @@
    composition; it never requires a shipped minimap BLP/PNG. Each emitted terrain artifact has an
    aligned `_liquid` companion derived from decoded unified liquid coverage/type evidence. The
    companion rasterizes complete source cells, not individual coverage vertices; Alpha MCLQ's 8×8
-   tile flags determine whether a source cell exists.
+   tile flags determine whether a source cell exists. A visible cell's type nibble selects its
+   water/ocean/magma/slime palette class; MCNK liquid flags are used only when that cell lacks a
+   type nibble.
 2. `--time-hours` accepts minute-precise `HHmm` (`1215`) or `HH:mm` (`12:15`) clock input as
    well as legacy decimal hours. It is normalized to one client day and recorded as both canonical
    `HH:mm` and decimal hours in the manifest. A readable global clear-weather LIT profile supplies

@@ -255,7 +255,6 @@ public static class AlphaTensorPackBuilder
                 continue;
 
             float avgHeight = (lc.MinHeight + lc.MaxHeight) * 0.5f;
-            int liquidType = McnkFlagsToLiquidType(lc.MinHeight, lc.MaxHeight, lc.McnkFlags);
             PaintAlphaLiquidChunk(
                 mclqSurfaceHeight,
                 mclqTypeMask,
@@ -264,7 +263,7 @@ public static class AlphaTensorPackBuilder
                 chunkY,
                 lc.TileFlags,
                 avgHeight,
-                liquidType);
+                lc.McnkFlags);
         }
 
         signals.Add("mclq_surface_height");
@@ -286,13 +285,13 @@ public static class AlphaTensorPackBuilder
 
             PaintAlphaLiquidChunk(
                 null,
-                null,
+                typeMask,
                 presence,
                 liquid.IndexX,
                 liquid.IndexY,
                 liquid.TileFlags,
                 height: 0f,
-                liquidType: 0);
+                mcnkFlags: liquid.McnkFlags);
             hasChunkVisibility = true;
         }
 
@@ -316,9 +315,10 @@ public static class AlphaTensorPackBuilder
         int chunkY,
         byte[]? tileFlags,
         float height,
-        int liquidType)
+        uint mcnkFlags)
     {
         bool hasTileFlags = tileFlags is { Length: >= 64 };
+        int fallbackLiquidType = (int)McnkFlagDecoder.Decode(mcnkFlags);
         for (int liquidCellY = 0; liquidCellY < 8; liquidCellY++)
         {
             for (int liquidCellX = 0; liquidCellX < 8; liquidCellX++)
@@ -326,6 +326,12 @@ public static class AlphaTensorPackBuilder
                 int flagIndex = (liquidCellY * 8) + liquidCellX;
                 if (hasTileFlags && (tileFlags![flagIndex] & 0x0F) == 0x0F)
                     continue;
+
+                // The MCLQ cell nibble is the most local type evidence. MCNK describes the
+                // containing chunk and is used only if a visible cell supplies no type nibble.
+                int liquidType = hasTileFlags
+                    ? (int)McnkFlagDecoder.DecodeWithMclqTileNibble(mcnkFlags, (byte)(tileFlags![flagIndex] & 0x0F))
+                    : fallbackLiquidType;
 
                 // One MCLQ 8×8 liquid cell spans a 2×2 region of the 16×16 terrain-cell grid.
                 // Include its four boundary vertices so minimap composition can require a complete
@@ -405,11 +411,6 @@ public static class AlphaTensorPackBuilder
             return 0;
 
         return Math.Clamp((int)MathF.Round(coordinate * (targetSize - 1f) / (sourceSize - 1f)), 0, targetSize - 1);
-    }
-
-    private static int McnkFlagsToLiquidType(float minH, float maxH, uint mcnkFlags)
-    {
-        return (int)McnkFlagDecoder.Decode(mcnkFlags);
     }
 
     private static float[,]? DownsampleHeightmap(float[,]? source, int targetSize)
