@@ -41,7 +41,7 @@ zone and a rectangular bounding crop alone cannot qualify as a candidate.
 - **FR-002**: Inference MUST read minimap RGB only.
 - **FR-003**: Train/validation partitions MUST hold out complete maps or source groups.
 - **FR-004**: The predictor MUST serialize model/input normalization/target contract in its checkpoint.
-- **FR-005**: Generated-prior integration MUST remain distinct from V8 ground-truth-prior training; later V8 fine-tuning consumes generated priors.
+- **FR-005**: Generated-prior integration MUST remain distinct from V8 ground-truth-prior training. Deployment-shaped V8 training MUST consume a hash-bound generated-prior archive and fail closed on wrong-store or missing selected rows.
 - **FR-006**: Real-tile evaluation MUST read `height_257` only after RGB-only prediction, solely to
   calculate ground-truth lattice errors.
 - **FR-007**: Standalone image inference MUST accept a PNG/JPEG and checkpoint without a paired store,
@@ -58,7 +58,7 @@ zone and a rectangular bounding crop alone cannot qualify as a candidate.
 
 - **SC-001**: CPU tests prove output shapes, finite values, RGB-only inference, and exact WDL lattice mapping.
 - **SC-002**: A user-run training command writes resumable checkpoints and held-out metrics.
-- **SC-003**: A user-run inference command writes one 17×17+16×16 prior pair per input row.
+- **SC-003**: A user-run inference command writes one 17×17+16×16 prior pair per synthetic input row, and V8 training records that exact archive path and SHA-256 in `history.json`.
 - **SC-004**: A real-tile report records separate outer/inner MAE and RMSE in world units and exports
   the input minimap, predicted lattice, and truth lattice for direct inspection.
 - **SC-005**: Motif-review contact sheets show each repeated irregular mask over its local alpha and

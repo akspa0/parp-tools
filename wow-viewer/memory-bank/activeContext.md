@@ -44,6 +44,7 @@ Last updated: 2026-07-15 (Spec 108 chunk-motif extractor implemented and fixture
   amplitudes, sixteen variants, three authored lighting times). The crater-family holdout training
   run used 864/96 rows and early-stopped with best L1 `0.014485` at epoch 7. The real-client route
   is optional evaluation only; it MUST NOT become WDL-prior training or a replacement corpus.
+- **Generated-prior handoff is now implemented:** `train_spec103_v7.py --generated-wdl-priors` injects the Spec 108 predicted outer lattice into V8 ch6, uses it for `--height-hints wdl`, and rejects an archive for another store or one missing selected rows. `history.json` records the archive path, checksum, and WDL checkpoint. The exact user-run sequence is `specs/108-image-wdl-prior/userguide.md`; it is the active next step.
 - **Chunk-motif implementation is deferred prefab-synthesis research:** `analyze_chunk_motifs.py` reads real 16x16
   alpha/relative-height cells, grows local 4-neighbor graphs across ADT borders, rejects filled
   rectangular graphs, canonicalizes eight rotations/mirrors, and emits only repeated families plus

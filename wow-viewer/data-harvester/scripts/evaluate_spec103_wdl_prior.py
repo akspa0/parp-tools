@@ -20,8 +20,8 @@ _SRC = _SCRIPTS.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from infer_spec103_wdl_prior import load_model, predict_rgb  # noqa: E402
-from harvester.spec103.v7_inputs import wdl_lattice_from_height257  # noqa: E402
+from harvester.spec103.v7_inputs import wdl_lattice_from_height257  # noqa: E402, I001
+from infer_spec103_wdl_prior import load_model, predict_rgb  # noqa: E402, I001
 
 
 def _metrics(predicted: np.ndarray, truth: np.ndarray) -> dict[str, float]:
@@ -65,7 +65,7 @@ def main() -> int:
               "outer_17": _metrics(predicted_outer, truth_outer), "inner_16": _metrics(predicted_inner, truth_inner),
               "standalone_png_vs_store_rgb": {"outer_17": _metrics(png_outer, predicted_outer), "inner_16": _metrics(png_inner, predicted_inner)}}
     (args.output / "report.json").write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
-    print(f"[REAL TILE] row={args.row} outer_mae={report['outer_17']['mae_world']:.3f} inner_mae={report['inner_16']['mae_world']:.3f} -> {args.output}", flush=True)
+    print(f"[WDL EVALUATION] row={args.row} outer_mae={report['outer_17']['mae_world']:.3f} inner_mae={report['inner_16']['mae_world']:.3f} -> {args.output}", flush=True)
     return 0
 
 

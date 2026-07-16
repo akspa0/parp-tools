@@ -4,7 +4,7 @@
 
 ## Summary
 
-Add a small, independent RGB-only model that predicts the verified paired WDL lattice: a 17×17 outer grid and a 16×16 inner grid. Generic analytic synthesis established a controlled baseline but transferred poorly (about 50 world-unit outer MAE on the first real tile). The next corpus is therefore grounded in recovered 0.5.3 terrain-art prefab families: analyze real full-map evidence first, then synthesize many placement/lighting variants from those measured families before handing the generated outer grid to V8.
+Add a small, independent RGB-only model that predicts the verified paired WDL lattice: a 17×17 outer grid and a 16×16 inner grid. The active corpus is the existing varied analytic, authored-lighting synthetic store. Train the WDL prior from that store, generate a row-addressed predicted-WDL archive from its RGB rows, and train V8 using that archive rather than a ground-truth WDL channel. Real-client motif archaeology is separate deferred prefab-synthesis research, not a substitute training corpus or a gate on this lane.
 
 ## Technical Context
 
@@ -23,7 +23,7 @@ Add a small, independent RGB-only model that predicts the verified paired WDL la
 - Repo independence: pass; every file remains below `wow-viewer/`.
 - Residual model chain: pass; this is one independent prior model, not a new V8 head.
 - Training contract: pass; target, normalization, split, checkpoint, and validation are documented here.
-- Real-data signoff: pending user-run representative-corpus experiment. Synthetic tests prove plumbing only.
+- Synthetic signoff: user-run crater-family holdout, generated-prior archive, and V8 label-free validation. Real-client evaluation is optional and never a corpus substitution.
 
 ## Project Structure
 
@@ -43,15 +43,10 @@ data-harvester/
 
 1. Pin the paired WDL and generated-prior archive contracts. **Complete.**
 2. Add the RGB-only predictor, trainer, inference writer, visual review artifacts, and CPU tests. **Complete.**
-3. Run chunk-cell motif archaeology on 0.5.3 Azeroth/Kalimdor: derive alpha and relative-height
-   signatures for real terrain cells, grow recurring adjacent signatures into variable-shaped graphs,
-   and group transform-equivalent placements. Preserve motifs across chunk/tile borders. Never use
-   macro/blocky zones or fixed rectangular windows as the prefab payload. **User-run evidence gate;
-   no generic-synthesis retrain first.**
-4. Materialize many synthetic placements from those recovered prefab families, with transform,
-   amplitude/relief, tileset/layout, and multi-time lighting variants. Hold out whole families.
-5. Train the WDL prior on the prefab-derived corpus, inspect synthetic holdout plus 0.5.3 real-tile
-   visual reports, then let V8 consume only the generated outer prior.
+3. Train the WDL prior with a complete synthetic terrain-family holdout and inspect the held-out synthetic visual review. **User-run.**
+4. Generate a complete row-addressed predicted-WDL archive from that checkpoint. The archive must bind to the exact synthetic store and include every selected V8 train/validation row. **User-run.**
+5. Train V8 against generated outer priors with WDL-derived height hints, then run generated-prior synthetic inference and the label-free harness. **User-run.**
+6. Deferred, separate research: run chunk-cell motif archaeology on 0.5.3 only if building a later prefab-derived synthetic corpus. It neither feeds nor blocks phases 3–5.
 
 ## Complexity Tracking
 

@@ -83,6 +83,7 @@ from harvester.spec103.v8_model import (  # noqa: E402
     MODEL_VARIANT_V8_LEAN,
     V8LeanUNet,
 )
+from harvester.spec103.wdl_prior_io import read_prediction_archive  # noqa: E402
 
 
 def _sha256_file(path: Path) -> str:
@@ -99,11 +100,13 @@ HEIGHT_RANGE = HEIGHT_GLOBAL_MAX - HEIGHT_GLOBAL_MIN
 
 class V7TileDataset(Dataset):
     def __init__(self, group: zarr.Group, rows: list[int], *, prior_dropout: float,
-                 height_hints: str, force_drop_prior: bool = False) -> None:
+                 height_hints: str, generated_outer_by_row: dict[int, np.ndarray] | None = None,
+                 force_drop_prior: bool = False) -> None:
         self.group = group
         self.rows = rows
         self.prior_dropout = float(prior_dropout)
         self.height_hints = height_hints
+        self.generated_outer_by_row = generated_outer_by_row
         self.force_drop_prior = force_drop_prior
         self.present = {name: name in group for name in OPTIONAL_ARRAYS}
 
@@ -126,6 +129,7 @@ class V7TileDataset(Dataset):
             liquid_mask=raw_liquid,
             liquid_height=self._optional("liquid_height", r),
             object_mask=self._optional("object_precise_mask", r),
+            wdl_outer_17=(self.generated_outer_by_row or {}).get(r),
             height_hints=self.height_hints,
             drop_wdl_prior=drop,
         )
@@ -342,6 +346,9 @@ def main() -> int:
                          "eval time -- lets training gradients flow through the full residual range. "
                          "Cheap to A/B against legacy_clamped on the same data.")
     ap.add_argument("--wdl-prior-dropout", type=float, default=0.25)
+    ap.add_argument("--generated-wdl-priors", type=Path, default=None,
+                    help="Spec 108 generated-WDL archive. When supplied, ch6 and --height-hints wdl "
+                         "come only from its predicted outer lattice; missing/wrong-store rows fail closed.")
     ap.add_argument("--height-hints", choices=["gt", "wdl", "none"], default="gt")
     ap.add_argument("--loss", choices=["v7", "l1"], default="v7")
     ap.add_argument("--detail-head", action="store_true", help="V7.7 3-channel detail head")
@@ -380,7 +387,8 @@ def main() -> int:
     _ch_map = {"normal_xyz": "ch3-5 normals", "liquid_mask": "ch9 liquid mask",
                "liquid_height": "ch10 liquid height", "object_precise_mask": "ch11 object mask"}
     _signals = [f"{_ch_map[k]}={'YES' if v else 'NO'}" for k, v in _present.items()]
-    print(f"[signals] ch0-2 minimap=YES ch6 WDL prior=derived ch7-8 height hints={args.height_hints} "
+    prior_source = "generated archive" if args.generated_wdl_priors else "derived ground truth"
+    print(f"[signals] ch0-2 minimap=YES ch6 WDL prior={prior_source} ch7-8 height hints={args.height_hints} "
           f"ch12 brush=zeros  |  " + "  ".join(_signals), flush=True)
     index = pq.read_table(args.store / "index.parquet").to_pylist()
     index_path = args.store / "index.parquet"
@@ -429,12 +437,34 @@ def main() -> int:
     if not val_rows or not train_rows:
         raise SystemExit(f"bad holdout: val={len(val_rows)} train={len(train_rows)} for {args.val_key}={args.val_value!r} "
                          f"(after curation: {int(keep.sum())} tiles kept)")
+    generated_outer_by_row: dict[int, np.ndarray] | None = None
+    generated_prior_identity: dict[str, str] | None = None
+    if args.generated_wdl_priors is not None:
+        generated_outer_by_row, generated_metadata = read_prediction_archive(args.generated_wdl_priors)
+        archive_store = Path(str(generated_metadata.get("store") or "")).resolve()
+        if archive_store != args.store.resolve():
+            raise SystemExit(
+                "generated WDL archive store does not match --store: "
+                f"{archive_store} != {args.store.resolve()}"
+            )
+        required_rows = set(train_rows) | set(val_rows)
+        missing_rows = sorted(required_rows - set(generated_outer_by_row))
+        if missing_rows:
+            raise SystemExit(
+                f"generated WDL archive is missing {len(missing_rows)} selected row(s), "
+                f"starting with {missing_rows[:8]}"
+            )
+        generated_prior_identity = {
+            "path": str(args.generated_wdl_priors.resolve()),
+            "sha256": _sha256_file(args.generated_wdl_priors),
+            "checkpoint": str(generated_metadata.get("checkpoint") or ""),
+        }
     print(f"[split] train={len(train_rows)} val={len(val_rows)} mode={split_mode} "
           f"{curation_note} hints={args.height_hints} prior_dropout={args.wdl_prior_dropout} loss={args.loss}", flush=True)
 
-    train_ds = V7TileDataset(group, train_rows, prior_dropout=args.wdl_prior_dropout, height_hints=args.height_hints)
-    val_ds = V7TileDataset(group, val_rows, prior_dropout=0.0, height_hints=args.height_hints)
-    val_noprior_ds = V7TileDataset(group, val_rows, prior_dropout=0.0, height_hints=args.height_hints, force_drop_prior=True)
+    train_ds = V7TileDataset(group, train_rows, prior_dropout=args.wdl_prior_dropout, height_hints=args.height_hints, generated_outer_by_row=generated_outer_by_row)
+    val_ds = V7TileDataset(group, val_rows, prior_dropout=0.0, height_hints=args.height_hints, generated_outer_by_row=generated_outer_by_row)
+    val_noprior_ds = V7TileDataset(group, val_rows, prior_dropout=0.0, height_hints=args.height_hints, generated_outer_by_row=generated_outer_by_row, force_drop_prior=True)
     nw = args.workers
     if args.batch > len(train_ds):
         print(f"[loader] WARNING: --batch {args.batch} > {len(train_ds)} train tiles; clamping to {len(train_ds)}", flush=True)
@@ -486,6 +516,7 @@ def main() -> int:
     data_identity = {
         "index_sha256": index_sha256,
         "curation_manifest_sha256": manifest_sha256,
+        "generated_wdl_priors_sha256": (generated_prior_identity or {}).get("sha256"),
         "split_mode": split_mode,
         "train_rows": len(train_rows),
         "val_rows": len(val_rows),
@@ -549,7 +580,8 @@ def main() -> int:
         "output_head_mode": args.output_head_mode,
         "model_variant": model_variant + ("-v77" if args.detail_head else ""),
         "params": n_params, "loss": args.loss, "height_hints": args.height_hints,
-        "wdl_prior_dropout": args.wdl_prior_dropout, "max_object_coverage": args.max_object_coverage,
+        "wdl_prior_dropout": args.wdl_prior_dropout, "generated_wdl_priors": generated_prior_identity,
+        "max_object_coverage": args.max_object_coverage,
         "normal_guidance_weight": args.normal_guidance_weight,
         "hard_error_weight": args.hard_error_weight,
         "seed": args.seed,

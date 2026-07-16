@@ -4,6 +4,10 @@ Run from `wow-viewer/data-harvester`. The user owns these CUDA runs. **The synth
 store is the WDL-prior training corpus.** Do not substitute a real-client store, a curation manifest,
 or any discovered real-data motif output for steps 1–3.
 
+For the active end-to-end sequence—WDL training, visual review, generated archive, deployment-shaped
+V8 training, inference, and validation—follow [userguide.md](userguide.md). This file preserves the
+individual command reference.
+
 1. Generate the varied controlled corpus (320 known-height tiles: ten terrain families, two
    amplitudes, sixteen parameterized variants each). This is CPU preparation; the printed ADT/capture
    commands remain optional because the authored-lighting store path below renders from known height.

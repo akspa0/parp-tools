@@ -25,6 +25,7 @@ from harvester.spec103.wdl_prior_model import (
     normalize_minimap_rgb,
 )
 from harvester.spec103.wdl_visualization import reconstruct_wdl_pair
+from train_spec103_v7 import V7TileDataset
 from train_spec103_wdl_prior import filter_deployable_rows
 from spec103_make_synthetic_adts import DEFAULT_PATTERNS, _pattern_height
 
@@ -57,6 +58,29 @@ def test_generated_outer_changes_v8_prior_channel():
     generated_input = assemble_v7_input(rgb, height_257=None, wdl_outer_17=generated, height_hints="wdl")
     assert tuple(generated_input.shape) == (13, 256, 256)
     assert not torch.equal(ground_truth_input[6], generated_input[6])
+
+
+def test_v8_dataset_uses_generated_wdl_archive_for_training_input():
+    generated = np.full((17, 17), 200.0, dtype=np.float32)
+    group = {
+        "minimap_rgb": np.zeros((1, 256, 256, 3), dtype=np.uint8),
+        "height_257": np.zeros((1, 257, 257), dtype=np.float32),
+    }
+    dataset = V7TileDataset(
+        group,
+        [0],
+        prior_dropout=0.0,
+        height_hints="wdl",
+        generated_outer_by_row={0: generated},
+    )
+    x, *_ = dataset[0]
+    expected = assemble_v7_input(
+        np.zeros((256, 256, 3), dtype=np.uint8),
+        height_257=None,
+        wdl_outer_17=generated,
+        height_hints="wdl",
+    )
+    torch.testing.assert_close(x[6:9], expected[6:9])
 
 
 def test_prediction_archive_rejects_duplicate_rows(tmp_path):

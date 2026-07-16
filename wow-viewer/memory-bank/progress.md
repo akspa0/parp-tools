@@ -656,3 +656,8 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior implementation)
   prior trains only from `output/datasets/spec108/synthetic_varied_lighting_v1.zarr` (960 rows);
   its real-store evaluation is optional scoring, never corpus substitution. Do not create a
   prefab-synthetic corpus or train from any fixed-window/macro/blocky output.
+
+## 2026-07-15 — Synthetic WDL-to-V8 handoff
+
+- Added fail-closed `--generated-wdl-priors` to `train_spec103_v7.py`; V8 training can now use the same RGB-generated WDL archive that V8 inference already supported. The train contract binds the archive to the exact store and records its SHA-256 in `history.json`.
+- Added `specs/108-image-wdl-prior/userguide.md`: train/inspect synthetic WDL, generate the full archive, train V8 deployment-shaped, infer crater holdout, and run the label-free harness. This is the only active WDL-prior sequence; all real-data routes are optional/deferred.
