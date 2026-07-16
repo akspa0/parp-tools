@@ -51,6 +51,7 @@ def select_real_rows(rows: list[dict[str, Any]], *, total: int) -> list[dict[str
         return []
     base, extra = divmod(total, len(maps))
     selected: list[dict[str, Any]] = []
+    remaining_by_map: dict[str, list[dict[str, Any]]] = {}
     for map_index, map_name in enumerate(maps):
         quota = base + (1 if map_index < extra else 0)
         buckets: dict[tuple[int, int, int], deque[dict[str, Any]]] = defaultdict(deque)
@@ -69,6 +70,16 @@ def select_real_rows(rows: list[dict[str, Any]], *, total: int) -> list[dict[str
                     selected.append(buckets[key].popleft())
                 if not buckets[key]:
                     ordered.remove(key)
+        remaining_by_map[map_name] = [row for values in buckets.values() for row in values]
+    # Small maps may legitimately have fewer alpha-bearing pages than their even
+    # quota. Preserve their available examples, then redistribute only the
+    # unfilled slots to the other maps rather than lowering the declared cap.
+    for map_name in maps:
+        if len(selected) >= total:
+            break
+        extras = sorted(remaining_by_map[map_name], key=lambda item: (-float(item["descriptor"]["brush_score"]), _stable_key(item)))
+        take = min(total - len(selected), len(extras))
+        selected.extend(extras[:take])
     return selected
 
 

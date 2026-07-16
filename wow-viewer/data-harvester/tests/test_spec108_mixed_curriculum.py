@@ -39,3 +39,13 @@ def test_selection_is_capped_diverse_and_group_safe() -> None:
         groups.setdefault(row["source_group_id"], set()).add(row["split"])
     assert len(selected) == 20
     assert all(len(splits) == 1 for splits in groups.values())
+
+
+def test_small_maps_are_preserved_then_quota_is_redistributed() -> None:
+    rows = [
+        {"build": "0_5_3_3368", "map": map_name, "tile_id": index, "source_group_id": f"r:{map_name}:{index}", "descriptor": {"irregularity": 0.5, "height_relief": 8.0, "active_cells": 4, "brush_score": 5.0}}
+        for index, map_name in enumerate(["Azeroth"] * 20 + ["Kalimdor"] * 20 + ["PVPZone02"] * 2 + ["DeadminesInstance"] * 1)
+    ]
+    selected = select_real_rows(rows, total=24)
+    assert len(selected) == 24
+    assert {"PVPZone02", "DeadminesInstance"}.issubset({row["map"] for row in selected})
