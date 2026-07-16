@@ -43,9 +43,11 @@ data-harvester/
 
 1. Pin the paired WDL and generated-prior archive contracts. **Complete.**
 2. Add the RGB-only predictor, trainer, inference writer, visual review artifacts, and CPU tests. **Complete.**
-3. Run the bounded local-fragment analysis on 0.5.3 Azeroth/Kalimdor; form canonical terrain-art
-   prefab families from repeated chunk-aligned 32/64/128-alpha-pixel windows, never from connected
-   macro/blocky zones. **User-run evidence gate; no generic-synthesis retrain first.**
+3. Run chunk-cell motif archaeology on 0.5.3 Azeroth/Kalimdor: derive alpha and relative-height
+   signatures for real terrain cells, grow recurring adjacent signatures into variable-shaped graphs,
+   and group transform-equivalent placements. Preserve motifs across chunk/tile borders. Never use
+   macro/blocky zones or fixed rectangular windows as the prefab payload. **User-run evidence gate;
+   no generic-synthesis retrain first.**
 4. Materialize many synthetic placements from those recovered prefab families, with transform,
    amplitude/relief, tileset/layout, and multi-time lighting variants. Hold out whole families.
 5. Train the WDL prior on the prefab-derived corpus, inspect synthetic holdout plus 0.5.3 real-tile

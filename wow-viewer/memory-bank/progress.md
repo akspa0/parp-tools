@@ -634,3 +634,11 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior implementation)
   only repeated normalized local signatures. Macro/blocky analysis is now explicitly disallowed as
   prefab evidence in Spec 108.
 - Focused fragment proof plus existing segmentation tests: 10 passed.
+## 2026-07-15 — Spec 108 brush-contract correction
+
+- The immediately preceding fixed-window fragment extractor is **not** prefab evidence either. It
+  prevents zone-scale output but still treats rectangles as candidates, contrary to the V7 brush
+  contract. It is diagnostic-only and must not feed curation or synthesis.
+- The required detector is now precise: form real chunk-cell alpha + relative-height signatures, grow
+  transform-equivalent neighboring cells into variable-shaped/cross-tile motif graphs, and store the
+  irregular cell mask plus payload and transform as the candidate. A rectangle is display context only.

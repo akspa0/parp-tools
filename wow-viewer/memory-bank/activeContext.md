@@ -34,12 +34,11 @@ Last updated: 2026-07-15 (Spec 107 WDL horizon policy corrected; Spec 108 prefab
   meshes, full truth OBJ, and an error heatmap from an evaluation directory. The reconstruction
   interpolates the paired lattice and is explicitly a coarse-prior view, not a claim of full detail.
 - **Corrected prefab-evidence gate:** generic varied synthesis reached ~50 world-unit real-tile outer
-  MAE, so do not keep tuning its model. The old `analyze_fractal_raw_components --macro-pastes` /
-  `--blocky-pastes` route is explicitly **not prefab discovery**: it emits connected zone-scale
-  components (as the first contact sheet proved) and must not feed curation or synthesis. The only
-  valid next evidence is `analyze_prefab_fragments.py`, which emits 32/64/128-pixel chunk-aligned,
-  tile-local windows and groups only repeated normalized signatures. Review those bounded family
-  contact sheets before any prefab-derived synthesis.
+  MAE, so do not keep tuning its model. Neither `analyze_fractal_raw_components --macro-pastes` /
+  `--blocky-pastes` (zone-scale components) nor `analyze_prefab_fragments.py` (fixed rectangles) is
+  prefab discovery or may feed curation/synthesis. The required next evidence is a **chunk-cell motif
+  graph**: irregular masks grown from repeated real alpha + relative-height cell topology, with
+  transform metadata and cross-chunk/tile continuity. This follows the V7 brush contract exactly.
 
 ## Spec 107 — Lighting quick controls + confident hover (2026-07-15, implemented/build green)
 

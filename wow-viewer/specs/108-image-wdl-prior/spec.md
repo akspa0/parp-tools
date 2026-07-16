@@ -24,15 +24,16 @@ A user can provide the predicted outer prior to the existing V8 terrain refiner;
 
 **Independent Test**: Build V8 input using a generated prior and verify it differs from a ground-truth-prior input while retaining valid shape/range.
 
-### User Story 3 - Recover reusable terrain-art fragments, not zones (Priority: P1)
+### User Story 3 - Recover reusable terrain-art motifs, not zones or rectangles (Priority: P1)
 
-An analyst can inspect repeated, bounded terrain-art candidates from the 0.5.3 corpus. A continuous
-alpha-painted zone is never itself called a prefab: candidates are chunk-aligned local windows whose
-maximum support is explicit, and only their repeated normalized signatures become family evidence.
+An analyst can inspect repeated, irregular terrain-art candidates from the 0.5.3 corpus. A continuous
+alpha-painted zone is never itself called a prefab. A candidate is a connected graph of actual terrain
+cells/chunks whose alpha and relative-height topology recurs under translation, mirror, or rotation;
+its irregular mask, rather than its bounding rectangle, is the payload.
 
-**Independent Test**: A synthetic pair of equal local motifs embedded in two larger continuous alpha
-zones produces a repeated fragment family; no emitted candidate has a footprint larger than its chosen
-window support.
+**Independent Test**: Two equal irregular multi-chunk motifs embedded in larger continuous alpha zones
+produce one repeated family with the same cell topology and paired relative-height payload. A whole
+zone and a rectangular bounding crop alone cannot qualify as a candidate.
 
 ### Requirements
 
@@ -45,10 +46,13 @@ window support.
   calculate ground-truth lattice errors.
 - **FR-007**: Standalone image inference MUST accept a PNG/JPEG and checkpoint without a paired store,
   WDL file, height grid, or other auxiliary signal.
-- **FR-008**: Prefab discovery MUST use bounded local, chunk-aligned windows at explicitly recorded
-  supports; it MUST NOT use macro/blocky connected components or an entire zone as a prefab candidate.
-- **FR-009**: A fragment family MUST be formed only from repeated normalized local signatures, with
-  source tile, local coordinates, support, alpha statistics, and relief statistics retained for review.
+- **FR-008**: Prefab discovery MUST start from chunk-aligned real alpha/relative-height cell signatures,
+  grow transform-equivalent adjacent cells into an irregular motif graph, and preserve its mask. It
+  MUST NOT treat macro/blocky connected components, an entire zone, or a fixed rectangular crop as a
+  prefab candidate.
+- **FR-009**: A motif family MUST be formed only from repeated cell-topology signatures, with source
+  tiles, world-cell coordinates, irregular mask, transform, alpha payload, and relative-height payload
+  retained for review.
 
 ### Success Criteria
 
@@ -57,8 +61,9 @@ window support.
 - **SC-003**: A user-run inference command writes one 17×17+16×16 prior pair per input row.
 - **SC-004**: A real-tile report records separate outer/inner MAE and RMSE in world units and exports
   the input minimap, predicted lattice, and truth lattice for direct inspection.
-- **SC-005**: Fragment-review contact sheets show bounded local candidates and their repeated family
-  members; no contact-sheet candidate exceeds the configured support.
+- **SC-005**: Motif-review contact sheets show each repeated irregular mask over its local alpha and
+  height context, plus transformed placements. A bounding rectangle alone is never presented as the
+  motif payload.
 
 ## Assumptions
 
