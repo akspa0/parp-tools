@@ -4,6 +4,18 @@
 > Spec 108 now requires a capped mixed real-plus-synthetic curriculum before another training run;
 > see `plan.md` Phase 3 and `tasks.md` T009–T015.
 
+## Active next command
+
+Run from `I:\parp\parp-tools\wow-viewer\data-harvester`. This is the user-owned CPU/I/O build;
+it writes the new <256-row store and does not start CUDA training.
+
+```powershell
+uv run python scripts/spec108_build_mixed_curriculum.py --real-store "I:\parp\parp-tools\wow-viewer\output\datasets\v18\0_5_3_3368.zarr" --synthetic-store "I:\parp\parp-tools\wow-viewer\output\datasets\spec108\synthetic_varied_lighting_v1.zarr" --real-rows 144 --synthetic-rows 96 --max-rows 240 --output "I:\parp\parp-tools\wow-viewer\output\datasets\spec108\mixed_053_synthetic_v1.zarr"
+```
+
+It writes `summary.json` and `index.parquet`. Confirm the summary reports 240 total rows, 144 real,
+96 synthetic, and all four 0.5.3 maps before starting a training run.
+
 Run every command from `I:\parp\parp-tools\wow-viewer\data-harvester`.
 
 This lane has one source of training truth: the synthesized authored-lighting store below. Do not
