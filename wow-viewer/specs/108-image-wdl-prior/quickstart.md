@@ -59,4 +59,13 @@ The current V8 checkpoint may still depend on its other auxiliary channels. This
    `analyze_prefab_fragments.py` as prefab evidence.** Those respectively return zone-scale connected
    components or fixed rectangular windows. The required next detector is the chunk-cell motif graph:
    variable irregular masks, paired alpha/relative-height payloads, cross-chunk/tile continuity, and
-   transform-aware repeated topology. Its command will be added only with that detector's implementation.
+   transform-aware repeated topology. Run this real-data evidence pass before creating or training on
+   any prefab-derived corpus:
+
+```powershell
+uv run python scripts/analyze_chunk_motifs.py --store "I:\parp\parp-tools\wow-viewer\output\datasets\v18\0_5_3_3368.zarr" --build 0_5_3_3368 --maps Azeroth Kalimdor --output "I:\parp\parp-tools\wow-viewer\output\analysis\spec108\053_chunk_motifs_v1" --min-alpha-variation 0.025 --min-height-relief 2.0 --max-hops 3 --max-cells 32 --min-occurrences 2
+```
+
+It writes `motif_families.parquet`, `motif_members.parquet`, JSONL copies, a summary, and compact
+irregular-mask contact sheets. Review the repeated families before T013: no family is training data
+until its placements and source payload references are accepted.
