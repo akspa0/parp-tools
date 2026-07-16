@@ -1,13 +1,13 @@
-"""Spec 103 T010 — lean trainer for the terrain regressor (v8 default, v7 for ablation).
+"""v50 terrain-refiner trainer (legacy v7 source path; v50 is the default).
 
 One U-Net, one signal: [minimap + normals + WDL prior + aux] -> terrain height, residual over
 the WDL "trestle" prior. Quick-and-dirty per the plan: no object-mask loss gating; the loss is
 the ported v7 combined_loss WITHOUT the PatchGAN (or --loss l1 for pure regression).
 
---arch v8 (default): V8LeanUNet, ~6M-param ConvNeXt-V2-style U-Net (2026 recipe) honoring the
+--arch v50 (default): V50TerrainRefiner, ~6M-param ConvNeXt-V2-style U-Net (2026 recipe) honoring the
   exact 13-ch/trestle/bounds contract — built for fast local iteration (minutes-to-signal).
 --arch v7: the original 117M MultiChannelUNetV7, kept for ablation/reference.
-Checkpoints record the arch; inference resolves it automatically.
+Checkpoints record the arch and immutable v50 release; inference resolves it automatically.
 
 Conveniences carried over from the committed spec102 simple trainer: complete-holdout split,
 AMP, EMA (the deploy weights), LR warmup + cosine, gradient clipping, early stopping, fully
@@ -28,15 +28,12 @@ harness (validate_spec103_labelfree.py).
 
 Run from wow-viewer/data-harvester/ (USER runs training — AGENTS RULE 0):
 
-    uv run python scripts/train_spec103_v7.py \
-        --store ../output/datasets/spec103/synthetic_v1.zarr \
-        --output ../output/spec103_v7_synth_v1 --val-key pattern --val-value crater \
+    uv run python scripts/v50_train_terrain.py \
+        --store ../output/v50/v50.1/dataset/mixed_053_synthetic.zarr \
+        --output ../output/v50/v50.1/terrain --val-key split --val-value val \
         --epochs 60 --batch 4 --wdl-prior-dropout 0.25
 
-    uv run python scripts/train_spec103_v7.py \
-        --store ../output/datasets/v18/3_3_5_12340.zarr \
-        --output ../output/spec103_v7_real_v1 --val-key map --val-value Azeroth \
-        --epochs 80 --batch 8 --wdl-prior-dropout 0.25
+    New v50 runs never consume an old v8 checkpoint, archive, or dataset.
 """
 
 from __future__ import annotations
@@ -72,6 +69,7 @@ from harvester.spec103.v7_inputs import (  # noqa: E402
     HEIGHT_GLOBAL_MIN,
     WORKING_SIZE,
     assemble_v7_input,
+    brush_mask_from_alpha,
     build_v7_targets,
 )
 from harvester.spec103.v7_losses import combined_loss  # noqa: E402
@@ -80,10 +78,11 @@ from harvester.spec103.v7_model import (  # noqa: E402
     MultiChannelUNetV7,
 )
 from harvester.spec103.v8_model import (  # noqa: E402
-    MODEL_VARIANT_V8_LEAN,
-    V8LeanUNet,
+    MODEL_VARIANT_V50_TERRAIN,
+    V50TerrainRefiner,
 )
 from harvester.spec103.wdl_prior_io import read_prediction_archive  # noqa: E402
+from harvester.v50_contract import require_metadata_release, require_store_release, release_identity, validate_release  # noqa: E402
 
 
 def _sha256_file(path: Path) -> str:
@@ -117,18 +116,7 @@ class V7TileDataset(Dataset):
         return np.asarray(self.group[name][row]) if self.present[name] else None
 
     def _brush_mask(self, row: int) -> np.ndarray | None:
-        alpha = self._optional("alpha_256", row)
-        if alpha is None:
-            return None
-        weights = np.asarray(alpha, dtype=np.float32)
-        if weights.ndim != 3:
-            return None
-        painted = weights.max(axis=2)
-        gy, gx = np.gradient(painted)
-        edge = np.hypot(gx, gy)
-        # Alpha transition strokes are the only brush evidence available in the
-        # mixed store; solid base fill is deliberately not called a brush.
-        return ((painted > 0.05) & (edge >= 0.02)).astype(np.float32)
+        return brush_mask_from_alpha(self._optional("alpha_256", row))
 
     def __getitem__(self, i: int):
         r = self.rows[i]
@@ -327,7 +315,7 @@ def render_preview(model, dataset, preview_indices, device, out_path: Path, epoc
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Spec 103 v7 trainer")
+    ap = argparse.ArgumentParser(description="v50 terrain-refiner trainer")
     ap.add_argument("--store", required=True, type=Path)
     ap.add_argument("--output", required=True, type=Path)
     ap.add_argument("--val-key", default="map", help="index.parquet column for the complete holdout (map, pattern, ...)")
@@ -347,8 +335,8 @@ def main() -> int:
                     help="drop tiles with object coverage above this fraction (spec Principle #5: object "
                          "tiles are impossible height targets). Default 0.0 drops ANY object. Ignored when "
                          "--curation-manifest is given. Use 1.0 for the v7-faithful keep-all ablation only.")
-    ap.add_argument("--arch", choices=["v8", "v7"], default="v8",
-                    help="v8 = lean ConvNeXt-V2 U-Net (~6M params, default; fast local iteration); "
+    ap.add_argument("--arch", choices=["v50", "v7"], default="v50",
+                    help="v50 = lean ConvNeXt-V2 terrain refiner (~6M params, default); "
                          "v7 = the original 117M MultiChannelUNetV7 (ablation/reference). Same 13-ch "
                          "contract, trestle, loss, and checkpoints layout either way.")
     ap.add_argument("--output-head-mode", choices=["legacy_clamped", "linear_unclamped_train"],
@@ -384,6 +372,8 @@ def main() -> int:
     ap.add_argument("--no-amp", action="store_true")
     ap.add_argument("--workers", type=int, default=4, help="DataLoader workers (0 = synchronous; 4+ overlaps data loading with GPU)")
     ap.add_argument("--limit", type=int, default=0, help="truncate train/val rows for a fast smoke test (0 = no limit)")
+    ap.add_argument("--release", default="v50.1", type=validate_release,
+                    help="must match the v50 store/archive release (default: v50.1)")
     args = ap.parse_args()
 
     if args.best_snapshot_every < 0:
@@ -400,16 +390,22 @@ def main() -> int:
 
     print(f"[load] {args.store}", flush=True)
     group = zarr.open_group(str(args.store), mode="r")
+    try:
+        require_store_release(group, args.release, store=args.store)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     for required in ("minimap_rgb", "height_257"):
         if required not in group:
             raise SystemExit(f"store lacks required array {required!r}")
     _present = {name: name in group for name in OPTIONAL_ARRAYS}
     _ch_map = {"normal_xyz": "ch3-5 normals", "liquid_mask": "ch9 liquid mask",
-               "liquid_height": "ch10 liquid height", "object_precise_mask": "ch11 object mask"}
+               "liquid_height": "ch10 liquid height", "object_precise_mask": "ch11 object mask",
+               "alpha_256": "ch12 brush alpha"}
     _signals = [f"{_ch_map[k]}={'YES' if v else 'NO'}" for k, v in _present.items()]
     prior_source = "generated archive" if args.generated_wdl_priors else "derived ground truth"
+    brush_source = "alpha-transition strokes" if _present["alpha_256"] else "zeros (store has no alpha_256)"
     print(f"[signals] ch0-2 minimap=YES ch6 WDL prior={prior_source} ch7-8 height hints={args.height_hints} "
-          f"ch12 brush=zeros  |  " + "  ".join(_signals), flush=True)
+          f"ch12 brush={brush_source}  |  " + "  ".join(_signals), flush=True)
     index = pq.read_table(args.store / "index.parquet").to_pylist()
     index_path = args.store / "index.parquet"
     index_sha256 = _sha256_file(index_path)
@@ -444,10 +440,10 @@ def main() -> int:
     else:
         if args.val_key not in index[0]:
             raise SystemExit(f"index.parquet has no column {args.val_key!r}")
-        keep = rgb_std_per_tile(group["minimap_rgb"]) >= args.min_rgb_std
-        keep &= coverage <= args.max_object_coverage
-        curation_note = (f"inline dropped_blank={int((rgb_std_per_tile(group['minimap_rgb']) < args.min_rgb_std).sum())} "
-                         f"dropped_objects={int((coverage > args.max_object_coverage).sum())}")
+        # v50 dataset construction is the only filter owner.  Do not discard a
+        # second, invisible subset after the user approved the fixed corpus.
+        keep = np.ones(len(index), dtype=bool)
+        curation_note = "v50 dataset prefiltered before selection"
         val_rows = [i for i, row in enumerate(index) if str(row[args.val_key]) == args.val_value and keep[i]]
         train_rows = [i for i, row in enumerate(index) if str(row[args.val_key]) != args.val_value and keep[i]]
     if args.limit:
@@ -461,6 +457,10 @@ def main() -> int:
     generated_prior_identity: dict[str, str] | None = None
     if args.generated_wdl_priors is not None:
         generated_outer_by_row, generated_metadata = read_prediction_archive(args.generated_wdl_priors)
+        try:
+            require_metadata_release(generated_metadata, args.release, artifact="generated WDL archive")
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
         archive_store = Path(str(generated_metadata.get("store") or "")).resolve()
         if archive_store != args.store.resolve():
             raise SystemExit(
@@ -506,8 +506,8 @@ def main() -> int:
               f"Pass --ema-decay {suggested:.2f} (or lower) for short runs.", flush=True)
 
     out_channels = 3 if args.detail_head else 2
-    model_cls = V8LeanUNet if args.arch == "v8" else MultiChannelUNetV7
-    model_variant = MODEL_VARIANT_V8_LEAN if args.arch == "v8" else MODEL_VARIANT_WDL_TRESTLE_REFLECT
+    model_cls = V50TerrainRefiner if args.arch == "v50" else MultiChannelUNetV7
+    model_variant = MODEL_VARIANT_V50_TERRAIN if args.arch == "v50" else MODEL_VARIANT_WDL_TRESTLE_REFLECT
     model = model_cls(
         out_channels=out_channels,
         use_wdl_global_trestle=True,
@@ -534,6 +534,8 @@ def main() -> int:
 
     detail_weight = args.detail_head_weight if args.detail_head else 0.0
     data_identity = {
+        "model_family": "v50",
+        "release": args.release,
         "index_sha256": index_sha256,
         "curation_manifest_sha256": manifest_sha256,
         "generated_wdl_priors_sha256": (generated_prior_identity or {}).get("sha256"),
@@ -591,6 +593,7 @@ def main() -> int:
           f"top4 rgb_std={[round(s, 1) for s in _top4_std]}", flush=True)
 
     run_identity = {
+        **release_identity(args.release),
         "command": " ".join(sys.argv),
         "store": str(args.store.resolve()),
         "val_key": args.val_key, "val_value": args.val_value,

@@ -12,7 +12,10 @@ Every capability starts as a shared library in `WowViewer.Core`, `WowViewer.Core
 
 ### III. Real-Data Validation
 
-Every format, converter, and dataset claim must be validated against real staged game client data from `output/tmp/wowarchive-clients/`. Mock assets are not sufficient for signoff. Validation evidence (commands, outputs, hashes) must be reproducible.
+Every format, converter, and dataset claim must be validated against real data from an approved,
+configured game-client library. `H:\CLIENTS` is the current preferred fast SSD library of known-good
+builds; `output/tmp/wowarchive-clients/` remains optional staging. Mock assets are not sufficient for
+signoff. Validation evidence must record commands, configured root, build identity, and hashes.
 
 ### IV. Residual Model Chain
 
@@ -24,9 +27,13 @@ Data flows from the C# harvester through a length-prefixed binary protocol over 
 
 ### VI. No Game Client Path Assumptions
 
-Client data locations are **configuration, never assumptions baked into code**. No source file, script, or doc may hardcode a client root. Validation and harvesting read from a configured clients folder; the current default is `I:\parp\parp-tools\output\tmp\wowarchive-clients\`.
+Client data locations are **configuration, never assumptions baked into code**. No source file or
+portable config may hardcode a client root. Validation and harvesting read from a configured clients
+folder; the current operator-approved preferred root is `H:\CLIENTS`.
 
-**Storage layout (as of 2026-07-15):** the authoritative corpus is **WoWArchive** (~150 GB, cold HDD storage). `H:\CLIENTS` is a **curated temporary SSD staging area** the user copies individual builds into for working sessions. Both are legitimate sources.
+**Storage layout (as of 2026-07-15):** the authoritative cold corpus is **WoWArchive** (~150 GB,
+cold HDD storage). `H:\CLIENTS` is a **user-curated, known-good SSD client library** with broader,
+faster build coverage. Both are legitimate sources; v50 work should prefer the SSD library.
 
 **Amended 2026-07-15 (v1.1.0).** This principle previously read *"Never use `H:\CLIENTS` for anything. Those paths are untrusted."*
 
@@ -34,7 +41,8 @@ Client data locations are **configuration, never assumptions baked into code**. 
 - **Approved by**: the user, 2026-07-15, in session.
 - **Migration**: one enforcement point exists and now **contradicts** this principle — `WowViewer.Core.Anim/PathNormalizer.cs` (`StaleClientsRoot`) **throws `InvalidOperationException`** on any path containing `H:\CLIENTS`, with `PathNormalizerTests` pinning that behaviour. Under the amended principle the pose-farm library would refuse a legitimate staging path. **This is a tracked follow-up, deliberately not bundled into the amendment commit** (it is a code change to spec 053's library, outside the scope of the session that raised it). Until it is removed or retargeted, `Core.Anim` consumers must continue to pass staged-client paths. Documentation and memory-bank text asserting a blanket prohibition is superseded by this principle. Static RE evidence derived from a staged binary is explicitly permitted and should cite the build it came from.
 
-**What has NOT changed**: hardcoding *any* client path is still forbidden, `output/tmp/wowarchive-clients/` remains the default for automated validation, and the Data Policy below still governs distribution.
+**What has NOT changed**: hardcoding a machine-local client path in source is still forbidden, every
+build must be fingerprinted, and the Data Policy below still governs distribution.
 
 ## Safety Constraints
 
@@ -94,8 +102,13 @@ Bring Your Own Data. Do not distribute proprietary client data, harvested corpor
 
 This constitution supersedes all other development practices when conflicts arise. Amendments require: (1) documented rationale, (2) user approval, (3) migration plan for affected code. The workspace `AGENTS.md` at repo root is the authoritative policy source for scope, safety, and repo boundaries.
 
-**Version**: 1.1.0 | **Ratified**: 2026-05-18 | **Last Amended**: 2026-07-15
+**Version**: 1.2.0 | **Ratified**: 2026-05-18 | **Last Amended**: 2026-07-15
 
 ### Amendment log
 
+- **1.2.0** (2026-07-15) — User confirmed `H:\CLIENTS` is the current known-good, faster SSD
+  client library. It is now the preferred configured root for v50 work; project-local staging is
+  optional. Per-build fingerprints and runtime configuration remain mandatory. Conflicting AGENTS
+  text was updated in the same pass. The existing Core.Anim stale-root throw remains a tracked
+  compatibility fix and is not needed by the v50 dataset path.
 - **1.1.0** (2026-07-15) — Principle VI rewritten. The blanket `H:\CLIENTS` prohibition was retired: it was written against untrusted broken clients that the user has since removed, and the folder is now a curated SSD staging area fed from WoWArchive (~150 GB, cold HDD). The principle's durable intent — never hardcode a client root — is preserved and strengthened. Rationale, approval, and migration recorded inline. Requested and approved by the user in session.

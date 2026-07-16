@@ -38,7 +38,9 @@ Short file. Current truth only. Root `../AGENTS.md` still wins on workspace poli
 
 - The user runs training, GPU jobs, harvests, and any long/heavy/billed run. Prepare the script and hand over the exact `uv run ...` command — do NOT launch it yourself. Communicate directly and respectfully regardless of tone. See root `../AGENTS.md` RULE 0.
 - New code stays in `wow-viewer/`.
-- Staged clients only: `output/tmp/wowarchive-clients/`.
+- Client roots are runtime configuration. `H:\CLIENTS` is the approved fast SSD library for
+  known-good builds; `output/tmp/wowarchive-clients/` is optional staging, not a mandatory hop.
+  Record the exact build and fingerprint used.
 - No new parser clones when shared `Core` or `Core.IO` surface already exists.
 - Implement as much as possible in each session, with memory bank and speckit documentation update at every step. Do not do wasteful partial work that leaves the repo in a state that cannot be built or tested.
 - Doc sync same pass: spec, architecture note, memory-bank.

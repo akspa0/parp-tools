@@ -11,7 +11,7 @@ Implements the pinned contract (specs/103-image-only-reconstruction/research-v7-
     ch 9    liquid mask
     ch 10   liquid height prior (normalized, ×mask)
     ch 11   object footprint mask
-    ch 12   brush imprint mask (zeros; V18 carries no brush imprints)
+    ch 12   brush imprint mask (alpha-transition strokes when ``alpha_256`` exists)
 
 The model architecture is unchanged from v7 (13 channels). Tiles containing any objects are
 dropped during curation (spec Principle #5: height under an object is occluded in the minimap,
@@ -101,6 +101,24 @@ def _binary_mask_channel(mask: Optional[np.ndarray], size: int) -> torch.Tensor:
     if tensor.shape[-2:] != (size, size):
         tensor = F.interpolate(tensor, size=(size, size), mode="nearest")
     return (tensor.squeeze(0) > 0.1).float()
+
+
+def brush_mask_from_alpha(alpha_256: Optional[np.ndarray]) -> Optional[np.ndarray]:
+    """Derive the brush input from alpha *transitions*, never a solid painted zone.
+
+    The V7 contract calls this channel a brush imprint.  The mixed v50 store
+    has terrain alpha rather than a separate brush layer, so a paint edge is
+    the honest proxy.  Returning ``None`` preserves the explicit zero fallback
+    for stores that genuinely have no alpha evidence.
+    """
+    if alpha_256 is None:
+        return None
+    weights = np.asarray(alpha_256, dtype=np.float32)
+    if weights.ndim != 3:
+        return None
+    painted = weights.max(axis=2)
+    gy, gx = np.gradient(painted)
+    return ((painted > 0.05) & (np.hypot(gx, gy) >= 0.02)).astype(np.float32)
 
 
 def assemble_v7_input(

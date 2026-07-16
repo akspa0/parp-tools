@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "v50-provenance.schema.json",
+  "title": "V50 Dataset Store Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "model_family", "release", "schema", "store_id", "build_id",
+    "producer_identity", "client_build_evidence_id", "index_identity",
+    "row_count", "signals", "row_lineage_identity", "finalization_state"
+  ],
+  "properties": {
+    "model_family": { "const": "v50" },
+    "release": { "type": "string", "pattern": "^v50\\.[1-9][0-9]*$" },
+    "schema": { "const": "v50-complete-store-v1" },
+    "store_id": { "$ref": "#/$defs/hash" },
+    "build_id": { "type": "string", "minLength": 1 },
+    "producer_identity": { "$ref": "#/$defs/hash" },
+    "client_build_evidence_id": { "$ref": "#/$defs/hash" },
+    "index_identity": { "$ref": "#/$defs/hash" },
+    "row_count": { "type": "integer", "minimum": 0 },
+    "signals": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/signal" }
+    },
+    "row_lineage_identity": { "$ref": "#/$defs/hash" },
+    "unavailable_signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "reason"],
+        "properties": {
+          "name": { "type": "string" },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "finalization_state": { "enum": ["incomplete", "complete"] }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "signal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name", "dtype", "row_shape", "required", "authoritative_source",
+        "content_identity", "coverage_count", "migration_policy"
+      ],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "dtype": { "type": "string", "minLength": 1 },
+        "row_shape": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "required": { "type": "boolean" },
+        "authoritative_source": { "type": "string", "minLength": 1 },
+        "content_identity": { "$ref": "#/$defs/hash" },
+        "coverage_count": { "type": "integer", "minimum": 0 },
+        "migration_policy": {
+          "enum": ["copy-if-verified", "fresh-only", "derived-after-build", "unavailable"]
+        }
+      }
+    }
+  }
+}

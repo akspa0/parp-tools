@@ -1,4 +1,4 @@
-"""Spec 103 — batch v7 inference: store rows -> predicted height + paired WDL lattice.
+"""v50 terrain-refiner batch inference: store rows -> predicted height + WDL lattice.
 
 Per tile this writes, under <output>/<tile_name>/:
   predicted_height_257.npy   world-unit vertex grid (align_corners=True resample of the
@@ -15,10 +15,10 @@ optional dev-only diagnostic).
 
 Run from wow-viewer/data-harvester/ (GPU; USER runs):
 
-    uv run python scripts/infer_spec103_v7.py \
-        --store ../output/datasets/spec103/synthetic_v1.zarr \
-        --checkpoint ../output/spec103_v7_synth_v1/checkpoint_best.pt \
-        --val-key pattern --val-value crater --output ../output/spec103_v7_synth_v1/predictions
+    uv run python scripts/v50_infer_terrain.py \
+        --store ../output/v50/v50.1/dataset/mixed_053_synthetic.zarr \
+        --checkpoint ../output/v50/v50.1/terrain/checkpoint_best.pt \
+        --val-key split --val-value val --output ../output/v50/v50.1/terrain/predictions
 """
 
 from __future__ import annotations
@@ -40,18 +40,20 @@ if str(_SRC_DIR) not in sys.path:
 from harvester.spec103.v7_inputs import (  # noqa: E402
     WORKING_SIZE,
     assemble_v7_input,
+    brush_mask_from_alpha,
     prediction_to_height257,
     wdl_lattice_from_height257,
 )
 from harvester.spec103.v7_model import MultiChannelUNetV7  # noqa: E402
-from harvester.spec103.v8_model import V8LeanUNet  # noqa: E402
+from harvester.spec103.v8_model import V50TerrainRefiner  # noqa: E402
 from harvester.spec103.wdl_prior_io import read_prediction_archive  # noqa: E402
+from harvester.v50_contract import require_metadata_release, require_store_release, release_identity, validate_release  # noqa: E402
 
-OPTIONAL_ARRAYS = ("normal_xyz", "liquid_mask", "liquid_height", "object_precise_mask")
+OPTIONAL_ARRAYS = ("normal_xyz", "liquid_mask", "liquid_height", "object_precise_mask", "alpha_256")
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Spec 103 v7 batch inference")
+    ap = argparse.ArgumentParser(description="v50 terrain-refiner batch inference")
     ap.add_argument("--store", required=True, type=Path)
     ap.add_argument("--checkpoint", required=True, type=Path)
     ap.add_argument("--output", required=True, type=Path)
@@ -62,16 +64,24 @@ def main() -> int:
                     help="Spec 108 row-addressed generated-WDL archive. Its outer grid is used for ch6; "
                          "ground-truth WDL is not read for this path.")
     ap.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
+    ap.add_argument("--release", default="v50.1", type=validate_release,
+                    help="must match the v50 store/checkpoint/archive release (default: v50.1)")
     args = ap.parse_args()
     if args.drop_prior and args.generated_wdl_priors is not None:
         raise SystemExit("--drop-prior and --generated-wdl-priors are mutually exclusive")
 
     device = torch.device("cuda" if args.device in ("auto", "cuda") and torch.cuda.is_available() else "cpu")
     ck = torch.load(args.checkpoint, map_location=device)
+    try:
+        require_metadata_release(ck, args.release, artifact="terrain checkpoint")
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     use_detail = bool(ck.get("use_detail_head", False))
     height_hints = str(ck.get("height_hints", "gt"))
-    arch = str(ck.get("arch", "v7"))  # pre-v8 checkpoints carry no arch key
-    model_cls = V8LeanUNet if arch == "v8" else MultiChannelUNetV7
+    arch = str(ck.get("arch", ""))
+    if arch not in ("v50", "v7"):
+        raise SystemExit(f"terrain checkpoint has unsupported arch {arch!r}; v50 will not load legacy v8 artifacts")
+    model_cls = V50TerrainRefiner if arch == "v50" else MultiChannelUNetV7
     model = model_cls(
         out_channels=3 if use_detail else 2,
         use_wdl_global_trestle=bool(ck.get("use_wdl_global_trestle", True)),
@@ -83,6 +93,10 @@ def main() -> int:
     model.eval()
 
     group = zarr.open_group(str(args.store), mode="r")
+    try:
+        require_store_release(group, args.release, store=args.store)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     index = pq.read_table(args.store / "index.parquet").to_pylist()
     rows = [
         (i, row) for i, row in enumerate(index)
@@ -94,6 +108,13 @@ def main() -> int:
     generated_metadata: dict | None = None
     if args.generated_wdl_priors is not None:
         generated_outer, generated_metadata = read_prediction_archive(args.generated_wdl_priors)
+        try:
+            require_metadata_release(generated_metadata, args.release, artifact="generated WDL archive")
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        archive_store = Path(str(generated_metadata.get("store") or "")).resolve()
+        if archive_store != args.store.resolve():
+            raise SystemExit(f"generated WDL archive store does not match --store: {archive_store} != {args.store.resolve()}")
         missing = [i for i, _row in rows if i not in generated_outer]
         if missing:
             raise SystemExit(f"generated WDL archive lacks {len(missing)} requested store rows (first {missing[0]})")
@@ -112,6 +133,7 @@ def main() -> int:
             liquid_mask=np.asarray(group["liquid_mask"][i]) if present["liquid_mask"] else None,
             liquid_height=np.asarray(group["liquid_height"][i]) if present["liquid_height"] else None,
             object_mask=np.asarray(group["object_precise_mask"][i]) if present["object_precise_mask"] else None,
+            brush_mask=brush_mask_from_alpha(np.asarray(group["alpha_256"][i]) if present["alpha_256"] else None),
             wdl_outer_17=supplied_outer,
             height_hints="none" if args.drop_prior else ("wdl" if supplied_outer is not None else height_hints),
             drop_wdl_prior=args.drop_prior,
@@ -126,6 +148,7 @@ def main() -> int:
         np.save(tile_dir / "predicted_height_257.npy", predicted)
         np.savez(tile_dir / "wdl_lattice.npz", outer_17=outer, inner_16=inner)
         (tile_dir / "inference_summary.json").write_text(json.dumps({
+            **release_identity(args.release),
             "tile_name": tile_name,
             "predicted_height_257_path": "predicted_height_257.npy",
             "checkpoint": str(args.checkpoint.resolve()),
@@ -140,7 +163,7 @@ def main() -> int:
         print(f"[infer] {tile_name}: height [{predicted.min():.1f}, {predicted.max():.1f}]", flush=True)
 
     (args.output / "predictions_manifest.json").write_text(json.dumps({
-        "schema": "spec103-predictions-v1",
+        "schema": "v50-terrain-predictions-v1", **release_identity(args.release),
         "store": str(args.store.resolve()),
         "checkpoint": str(args.checkpoint.resolve()),
         "drop_prior": args.drop_prior,

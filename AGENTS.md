@@ -123,17 +123,21 @@ Every V14 model is a tiny, independent network that predicts ONE residual signal
 - DO NOT make models depend on each other's weights — only on each other's outputs.
 - The full V14 plan is in `wow-viewer/docs/architecture/v14-model-and-refactor-plan-2026-05-06.md`.
 
-### RULE 9: NEVER USE H:\CLIENTS — USE STAGED CLIENTS ONLY
+### RULE 9: CLIENT ROOTS ARE CONFIGURED; H:\CLIENTS IS APPROVED
 
-**DO NOT use any path under `H:\CLIENTS` for ANY purpose. EVER.**
+**`H:\CLIENTS` is a user-curated, known-good client library and is approved for validation,
+extraction, inspection, harvesting, and other client-backed workflows.**
 
-The data in `H:\CLIENTS` is NOT trusted. It must not be used for validation, extraction, inspection, harvesting, or any other workflow — not even as a fallback.
-
-The ONLY trusted client data lives in the project-local staging area:
-- `I:\parp\parp-tools\output\tmp\wowarchive-clients\` — use this for ALL client-root needs.
-- If a needed client build is not yet staged there, copy it from WoWArchive first, then work from the staged copy.
-- NEVER reference `H:\CLIENTS` in code, scripts, commands, validation notes, or documentation.
-- ALL references to `H:\CLIENTS` paths in existing docs (including `data-paths.md` and `AGENTS.md`) are stale and must be treated as incorrect. Only `output/tmp/wowarchive-clients/` paths are valid.
+- Prefer `H:\CLIENTS` for the current v50 clean-room dataset work because it contains more builds
+  on the faster SSD.
+- Pass the client-library root as runtime configuration. Do not bake a machine-local client path into
+  source code or portable configs.
+- Fingerprint and report the exact client build used; trust in the library does not replace per-build
+  provenance or dataset verification.
+- `I:\parp\parp-tools\output\tmp\wowarchive-clients\` remains an optional project-local staging
+  area, not a mandatory hop.
+- WoWArchive remains a valid cold source for builds that are not present in either approved local
+  client library.
 
 ### RULE 10: `AlphaWdtWriter` IS FROZEN UNLESS EXPLICITLY REOPENED
 
@@ -280,13 +284,15 @@ Even for exceptions, you should still read the relevant spec if one exists.
 
 ## Game Client Access And Staging
 
-- **NEVER use `H:\CLIENTS` for anything. Those paths are untrusted and stale. See RULE 9.**
-- The ONLY trusted client data lives under `I:\parp\parp-tools\output\tmp\wowarchive-clients\`.
+- `H:\CLIENTS` is the current approved fast SSD library for known-good client builds. See Rule 9.
+- `I:\parp\parp-tools\output\tmp\wowarchive-clients\` is optional local staging and may be pruned
+  when its copies are no longer needed.
 - Canonical WoWArchive docs live at `G:\WoW\WoWArchive-0.X-3.X\Readme.txt`, and the current mount entrypoint is `G:\WoW\WoWArchive-0.X-3.X\MountAll.bat`.
 - The current batch mounts the deduplicated bundle read-only into `G:\WoW\WoWArchive-0.X-3.X\Mount`; treat that mount as a source surface, not a high-throughput working root.
-- For all client work, first copy the required client root from WoWArchive into `i:/parp/parp-tools/output/tmp/wowarchive-clients` and process the staged copy.
-- Delete staged client copies that are no longer needed so the temp area does not silently grow without bound.
-- When reporting validation, always say the staged client path used.
+- Use an approved configured client root directly; do not require a project-local copy when the
+  known-good build already exists on the faster SSD.
+- Delete obsolete project-local staged copies only through the reviewed v50 cleanup manifest.
+- When reporting validation, always state the configured client root, build identity, and fingerprint.
 
 ## Build And Validation
 

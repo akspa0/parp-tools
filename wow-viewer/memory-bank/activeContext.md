@@ -1,6 +1,30 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-15 (Spec 108 chunk-motif extractor implemented and fixture-tested)
+Last updated: 2026-07-16 (Spec 109 clean-slate output cleanup complete; 200+ GB recovered)
+
+## Spec 109 — v50 clean-room dataset and repository audit (active)
+
+- `H:\CLIENTS` is now the user-approved preferred known-good fast SSD client library for v50.
+  Pass it as runtime configuration and fingerprint every build; project-local staging is optional.
+- The user approved emptying workspace `output/` and `wow-viewer/output/` before v50. Use the guarded
+  `wow-viewer/scripts/clean-legacy-outputs.ps1`; Codex prepares/dry-runs it and the user launches the
+  measured deletion.
+- **Cleanup complete:** both legacy output roots were emptied after ACL repair, recovering more than
+  200 GB. The retained client authority is `H:\CLIENTS`; local 1.0.0 decompile evidence is preserved
+  under ignored `wow-viewer/test_data/native-research/1.0.0-decomp`.
+- After reboot, continue at Spec 109 Phase 0/1. Build only new provenance-bound v50 datasets/models;
+  do not recreate or fall back to deleted V18/Spec 103/Spec 108 outputs.
+- Every pre-v50 dataset, checkpoint, model, generated prior, manifest, and derived report is
+  quarantined until independently verified. A v50 label alone is never proof.
+- Initial audit found that the proposed mixed-store builder can stamp arbitrary legacy inputs as
+  v50 without proving source schema, provenance, hashes, or row lineage. No output is trusted until
+  that metadata-laundering defect is closed.
+- Existing modified/untracked v50 work is user work and remains untouched. No dataset, training,
+  harvest, GPU job, or deletion was launched.
+- Authority: `specs/109-v50-clean-room-audit/spec.md` and
+  `docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`.
+- Next slice: define the provenance manifest and implement read-only inventory/fail-closed source
+  gates with fixtures before any real dataset is considered.
 
 ## Spec 108 — RGB-only WDL prior (2026-07-15, implemented/tested; no training launched)
 
@@ -212,13 +236,13 @@ Last updated: 2026-07-15 (Spec 108 chunk-motif extractor implemented and fixture
     its own (time, animIndex); **-1 = inherit parent's**), and a **second** (time, animIndex) pair at
     state[0x31]/[0x32] drives **cross-animation blending** via a second sampler call. Our runtime is
     one-sequence-per-model. Out of scope for a first pass; neither blocks the P1 slice.
-- **`H:\CLIENTS` IS NO LONGER FORBIDDEN — Constitution amended to v1.1.0 (2026-07-15, USER-approved).**
+- **`H:\CLIENTS` IS APPROVED — Constitution amended through v1.2.0 (2026-07-15, USER-approved).**
   USER clarification: the old ban existed because that folder once held **broken clients of unknown
   origin they didn't trust**. They have since cleaned it out. It is now a **curated temporary SSD
   staging area** they copy individual builds into, from **WoWArchive (~150 GB, cold HDD storage)** —
-  the authoritative corpus. Both are legitimate sources. Principle VI now reads "never *hardcode* a
-  client root" (config, not prohibition); `output/tmp/wowarchive-clients/` stays the default for
-  automated validation. Static RE evidence from a staged binary is explicitly permitted.
+  the cold authoritative corpus. Both are legitimate sources. `H:\CLIENTS` is now the preferred
+  known-good fast library for v50; Principle VI reads "never *hardcode* a client root" (config, not
+  prohibition). Static RE evidence from a client binary is explicitly permitted.
   **Stop flagging the 1.0.0 Ghidra program's `H:/CLIENTS/...` origin as a violation — it is not one.**
   The "forbidden legacy client root" language in the Boundaries section below is **superseded**.
   **⚠️ CODE STILL ENFORCES THE OLD BAN — tracked follow-up, NOT yet done:**

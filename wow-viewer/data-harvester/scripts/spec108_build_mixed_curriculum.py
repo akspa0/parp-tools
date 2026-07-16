@@ -1,4 +1,4 @@
-"""Build the capped, mixed Spec 108 WDL-prior store (USER runs; CPU I/O)."""
+"""Build the capped v50 mixed WDL-prior store (USER runs; CPU I/O)."""
 from __future__ import annotations
 
 import argparse
@@ -16,6 +16,7 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from harvester.spec108_mixed_curriculum import assign_group_splits, real_brush_descriptor, select_real_rows, select_synthetic_rows  # noqa: E402, I001
+from harvester.v50_contract import MIXED_STORE_SCHEMA, MODEL_FAMILY, validate_release  # noqa: E402
 
 FIELDS = ("minimap_rgb", "height_257", "normal_xyz", "liquid_mask", "liquid_height", "object_precise_mask", "alpha_256")
 
@@ -25,7 +26,7 @@ def _records(store: Path) -> list[dict]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Build capped mixed real/synthetic Spec 108 curriculum")
+    ap = argparse.ArgumentParser(description="Build capped mixed real/synthetic v50 curriculum")
     ap.add_argument("--real-store", required=True, type=Path)
     ap.add_argument("--synthetic-store", required=True, type=Path)
     ap.add_argument("--output", required=True, type=Path)
@@ -34,6 +35,8 @@ def main() -> int:
     ap.add_argument("--max-rows", type=int, default=240)
     ap.add_argument("--min-rgb-mean", type=float, default=25.0)
     ap.add_argument("--max-object-coverage", type=float, default=0.0)
+    ap.add_argument("--release", default="v50.1", type=validate_release,
+                    help="immutable v50 data/model release written into the store (default: v50.1)")
     args = ap.parse_args()
     if args.real_rows + args.synthetic_rows > args.max_rows or args.max_rows >= 256:
         raise SystemExit("real + synthetic rows must be <= max-rows and max-rows must be < 256")
@@ -68,6 +71,13 @@ def main() -> int:
         raise SystemExit(f"insufficient clean source groups for {args.max_rows} rows: {len(selected)}")
     assign_group_splits(selected)
     output = zarr.open_group(str(args.output), mode="w")
+    output.attrs.update({
+        "schema": MIXED_STORE_SCHEMA,
+        "model_family": MODEL_FAMILY,
+        "release": args.release,
+        "source_real_store": str(args.real_store.resolve()),
+        "source_synthetic_store": str(args.synthetic_store.resolve()),
+    })
     reference = {field: (real_group[field] if field in real_group else synthetic_group[field]) for field in FIELDS if field in real_group or field in synthetic_group}
     for field, array in reference.items():
         output.create_array(field, shape=(len(selected), *array.shape[1:]), dtype=array.dtype, chunks=(1, *array.shape[1:]))
@@ -79,11 +89,14 @@ def main() -> int:
                 output[field][target_row] = source[field][int(row["store_row"])]
             else:
                 output[field][target_row] = np.zeros(target.shape[1:], dtype=target.dtype)
-        index_rows.append({**row, "tile_id": target_row, "source_tile_id": int(row["tile_id"]), "source_store": str((args.real_store if row["source_kind"] == "real_053" else args.synthetic_store).resolve())})
+        index_rows.append({**row, "tile_id": target_row, "source_tile_id": int(row["tile_id"]),
+                           "source_store": str((args.real_store if row["source_kind"] == "real_053" else args.synthetic_store).resolve()),
+                           "model_family": MODEL_FAMILY, "release": args.release})
     pq.write_table(pa.Table.from_pylist(index_rows), args.output / "index.parquet")
-    summary = {"schema": "spec108-mixed-curriculum-v2", "total_rows": len(selected), "real_rows": sum(row["source_kind"] == "real_053" for row in selected), "synthetic_rows": sum(row["source_kind"] == "synthetic" for row in selected), "maps": sorted({str(row["map"]) for row in selected if row["source_kind"] == "real_053"}), "splits": {name: sum(row["split"] == name for row in selected) for name in ("train", "val")}, "real_filter": {"min_rgb_mean": args.min_rgb_mean, "max_object_coverage": args.max_object_coverage, "rejected_dark": rejected_dark, "rejected_object": rejected_object}}
+    summary = {"schema": MIXED_STORE_SCHEMA, "model_family": MODEL_FAMILY, "release": args.release,
+               "total_rows": len(selected), "real_rows": sum(row["source_kind"] == "real_053" for row in selected), "synthetic_rows": sum(row["source_kind"] == "synthetic" for row in selected), "maps": sorted({str(row["map"]) for row in selected if row["source_kind"] == "real_053"}), "splits": {name: sum(row["split"] == name for row in selected) for name in ("train", "val")}, "real_filter": {"min_rgb_mean": args.min_rgb_mean, "max_object_coverage": args.max_object_coverage, "rejected_dark": rejected_dark, "rejected_object": rejected_object}, "sources": {"real_store": str(args.real_store.resolve()), "synthetic_store": str(args.synthetic_store.resolve())}}
     (args.output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    print(f"[spec108] mixed curriculum rows={summary['total_rows']} real={summary['real_rows']} synthetic={summary['synthetic_rows']} -> {args.output}")
+    print(f"[{args.release}] mixed curriculum rows={summary['total_rows']} real={summary['real_rows']} synthetic={summary['synthetic_rows']} -> {args.output}")
     return 0
 
 

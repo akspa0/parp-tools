@@ -12,7 +12,8 @@ _SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from harvester.spec103.v7_inputs import assemble_v7_input, wdl_lattice_from_height257
+from harvester.spec103.v7_inputs import assemble_v7_input, brush_mask_from_alpha, wdl_lattice_from_height257
+from harvester.v50_contract import MODEL_FAMILY
 from harvester.spec103.wdl_prior_io import read_prediction_archive, write_prediction_archive
 from harvester.spec103.wdl_prior_model import (
     INPUT_CONTRACT,
@@ -88,6 +89,15 @@ def test_v8_dataset_uses_generated_wdl_archive_for_training_input():
     assert float(x[12].sum()) > 0.0
 
 
+def test_alpha_transition_is_nonzero_brush_but_solid_fill_is_not():
+    alpha = np.zeros((256, 256, 4), dtype=np.float32)
+    alpha[:, 128:, 0] = 1.0
+    brush = brush_mask_from_alpha(alpha)
+    assert brush is not None
+    assert float(brush.sum()) > 0.0
+    assert float(brush[:, :96].sum()) == 0.0
+
+
 def test_prediction_archive_rejects_duplicate_rows(tmp_path):
     path = tmp_path / "prior.npz"
     outer = np.zeros((2, 17, 17), dtype=np.float32)
@@ -103,6 +113,8 @@ def test_prediction_archive_rejects_duplicate_rows(tmp_path):
 def test_standalone_png_cli_needs_no_store_or_wdl(tmp_path):
     checkpoint = tmp_path / "checkpoint.pt"
     torch.save({
+        "model_family": MODEL_FAMILY,
+        "release": "v50.1",
         "model_variant": MODEL_VARIANT_WDL_PRIOR,
         "input_contract": INPUT_CONTRACT,
         "target_contract": TARGET_CONTRACT,

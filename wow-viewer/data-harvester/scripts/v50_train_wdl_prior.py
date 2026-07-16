@@ -1,0 +1,7 @@
+"""Canonical v50 entry point for RGB-to-WDL training."""
+
+from train_spec103_wdl_prior import main  # noqa: I001
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

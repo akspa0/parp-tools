@@ -1,6 +1,34 @@
 # Progress — wow-viewer
 
-Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior implementation)
+Last updated: 2026-07-16 (Spec 109 clean-slate output cleanup complete)
+
+## 2026-07-15 — Spec 109 v50 clean-room audit, initial inventory
+
+- Completed T001: `H:\CLIENTS` is the user-approved preferred known-good fast SSD client library;
+  root and wow-viewer AGENTS plus constitution v1.2.0 now agree. Runtime configuration and per-build
+  fingerprints remain mandatory.
+- Completed T001A preparation: added guarded output cleanup for the two exact legacy roots and
+  removed the unreferenced tracked PM4 result that would have blocked it. User owns measure/apply.
+- Relocated the small 1.0.0 native-client decompile bundle from root output into ignored local
+  `wow-viewer/test_data/native-research/1.0.0-decomp` so cleanup does not discard M2 evidence.
+- Created the owning spec, requirements checklist, and initial architecture audit.
+- Quarantined all historical datasets/models by policy; none were validated or reused.
+- Recorded the blocking source-trust defect: the current builder can relabel arbitrary old stores
+  as v50 without provenance, schema, hash, or row-lineage proof.
+- Classified the untracked v50 wrappers, historical command owners, ignored output roots, root-level
+  Python environment files, and oversized continuity docs without deleting user work.
+- Next: provenance-manifest contract, read-only artifact inventory, and fixture-only fail-closed gates.
+
+## 2026-07-16 — Clean-slate output cleanup complete
+
+- User ran the guarded cleanup successfully after repairing sandbox-owned ACLs.
+- Workspace `output/` and `wow-viewer/output/` are empty; more than 200 GB was recovered.
+- `H:\CLIENTS` remains untouched and authoritative for configured known-good client reads.
+- Preserved ignored local M2/native evidence at
+  `wow-viewer/test_data/native-research/1.0.0-decomp`.
+- Reboot handoff: resume Spec 109 Phase 0/1 and create only new v50 provenance-bound datasets and
+  models. Old datasets, checkpoints, and derived outputs are gone and must not be reconstructed from
+  stale assumptions.
 
 ## 2026-07-15 — Spec 108 compact-corpus RGB→WDL prior
 
@@ -616,8 +644,8 @@ Last updated: 2026-07-15 (Spec 108 RGB-only WDL prior implementation)
 ## Durable boundaries
 
 - `gillijimproject_refactor` read-only (port from, never edit). C# WDL reader + AlphaWdtWriter frozen.
-- The USER runs all training/capture/heavy jobs (AGENTS RULE 0). Staged clients only; the forbidden
-  legacy client root remains out of scope for inspection, validation, harvesting, and commands.
+- The USER runs all training/capture/heavy jobs (AGENTS RULE 0). Use an approved configured client
+  library and report the exact root, build identity, and fingerprint.
 - Older M0 strict-target detail: `memory-bank/archive/2026-07-13-spec102-strict-target-detail.md`.
 ## 2026-07-15 — Spec 107 WDL horizon range
 

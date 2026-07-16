@@ -14,8 +14,11 @@ from harvester.spec103.v7_inputs import (
     normalize_height,
     wdl_lattice_from_height257,
 )
+from harvester.v50_contract import WDL_CHECKPOINT_VARIANT
 
-MODEL_VARIANT_WDL_PRIOR = "spec108-rgb-wdl-prior-spatial-v2"
+# Kept as the import-compatible symbol for the old module path.  Its value is
+# deliberately v50-only, so old checkpoints cannot masquerade as current ones.
+MODEL_VARIANT_WDL_PRIOR = WDL_CHECKPOINT_VARIANT
 WDL_OUTER_SIZE = 17
 WDL_INNER_SIZE = 16
 WDL_VALUE_COUNT = WDL_OUTER_SIZE * WDL_OUTER_SIZE + WDL_INNER_SIZE * WDL_INNER_SIZE

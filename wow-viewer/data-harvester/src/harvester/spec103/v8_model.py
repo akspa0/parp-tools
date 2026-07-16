@@ -1,11 +1,11 @@
-"""V8LeanUNet — modern lightweight replacement for MultiChannelUNetV7 (2026 recipe).
+"""V50TerrainRefiner — current lightweight terrain refinement model.
 
 Same pinned contract as v7 (research-v7-contract.md): 13-channel input in the same order,
 WDL-trestle residual on channel 6, 2-3 output channels + 4-value bounds head, output
 interpolated to `output_size`. Drop-in for `v7_losses.combined_loss`, the trainer, the
 inference script, and the label-free harness — nothing downstream changes.
 
-What changed vs v7 (and why): v7 spends 117.06M params, 73% of them at 8x8-16x16
+What changed vs the legacy v7/v8 lineage (and why): v7 spends 117.06M params, 73% of them at 8x8-16x16
 (1024->2048 bottleneck + dec5), on a smooth low-frequency height field that already
 receives a 17x17 prior as its trestle base. V8 is a ConvNeXt-V2-style U-Net
 (arXiv 2301.00808: 7x7 depthwise conv + pointwise MLP + GRN) with capped widths
@@ -15,7 +15,8 @@ global-context mixer + pooled bounds head at the deepest stage. ~6M params /
 training tells you whether a run is sound in minutes, not days.
 
 Deterministic feedforward, plain PyTorch only (no custom kernels — Windows and RunPod
-run the same code). See research-v8-optimization.md for the survey behind these choices.
+run the same code).  The filename remains for source-history compatibility;
+all current artifacts identify this implementation as v50.1.
 """
 
 from __future__ import annotations
@@ -34,8 +35,11 @@ from .v7_model import (
     MODEL_INPUT_CHANNELS,
     MODEL_OUTPUT_CHANNELS,
 )
+from harvester.v50_contract import TERRAIN_CHECKPOINT_VARIANT
 
-MODEL_VARIANT_V8_LEAN = "v8-lean-convnextv2-v1"
+MODEL_VARIANT_V50_TERRAIN = TERRAIN_CHECKPOINT_VARIANT
+# Import-compatible legacy alias. New code must use MODEL_VARIANT_V50_TERRAIN.
+MODEL_VARIANT_V8_LEAN = MODEL_VARIANT_V50_TERRAIN
 DEFAULT_WIDTHS = (32, 64, 128, 256, 384)
 DEFAULT_DEPTHS = (1, 1, 2, 2, 2)
 
@@ -145,7 +149,7 @@ class GlobalContext(nn.Module):
         return x + g[:, :, None, None]
 
 
-class V8LeanUNet(nn.Module):
+class V50TerrainRefiner(nn.Module):
     """Lean ConvNeXt-V2 U-Net honoring the exact v7 I/O contract.
 
     forward(inputs[N,13,S,S]) -> (outputs[N,2..3,output_size,output_size], bounds[N,4]),
@@ -256,3 +260,8 @@ class V8LeanUNet(nn.Module):
             outputs = F.interpolate(outputs, size=(self.output_size, self.output_size), mode="bilinear", align_corners=False)
 
         return outputs, bounds
+
+
+# Existing source/tests may import this historical name.  Its checkpoint value
+# and all current command surfaces are v50-only.
+V8LeanUNet = V50TerrainRefiner
