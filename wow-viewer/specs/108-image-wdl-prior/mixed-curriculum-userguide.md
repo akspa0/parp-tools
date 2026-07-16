@@ -47,6 +47,8 @@ uv run python scripts/train_spec103_v7.py --store "I:\parp\parp-tools\wow-viewer
 
 Open `history.json` after the run. It must contain `generated_wdl_priors.path` and
 `generated_wdl_priors.sha256`. If either is absent, stop: that run did not use generated WDL.
+Every fifth new best also writes a checkpoint and preview under `validation_snapshots\`; leave the
+default `--best-snapshot-every 5` in place to compare genuine validation improvements.
 
 ## 5. Infer every held-out mixed row and validate
 

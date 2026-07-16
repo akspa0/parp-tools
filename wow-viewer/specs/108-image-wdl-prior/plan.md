@@ -4,7 +4,7 @@
 
 ## Summary
 
-Add a small, independent RGB-only model that predicts the verified paired WDL lattice: a 17×17 outer grid and a 16×16 inner grid. The prior analytic-only store is a smoke corpus, not a universal-model corpus: lighting variants did not create terrain diversity, and one held-out synthetic tile is not a quality proof. The active next corpus is capped below 256 examples and mixes real and synthetic rows: 144 real 0.5.3 rows quota-balanced across Azeroth, Kalimdor, DeadminesInstance, and PVPZone02, selected by real irregular alpha/relative-height cell motifs; plus 96 diverse synthetic placements. All source groups stay intact across the split. Generate a row-addressed predicted-WDL archive from this mixed corpus, then train V8 using that archive rather than a ground-truth WDL channel.
+Add a small, independent RGB-only model that predicts the verified paired WDL lattice: a 17×17 outer grid and a 16×16 inner grid. The prior analytic-only store is a smoke corpus, not a universal-model corpus: lighting variants did not create terrain diversity, and one held-out synthetic tile is not a quality proof. The 240-row mixed store is the fast contract/proof stage. The next scale target is roughly 1,500 clean rows: about 1,000 real tiles selected by irregular alpha/relative-height brush/paste motifs across maps plus about 500 synthetic composite placements that deliberately extend beyond shipped-map vocabulary. All source groups stay intact across the split. Generate a row-addressed predicted-WDL archive from the mixed corpus, then train V8 using that archive rather than a ground-truth WDL channel.
 
 ## Technical Context
 
@@ -43,7 +43,7 @@ data-harvester/
 
 1. Pin the paired WDL and generated-prior archive contracts. **Complete.**
 2. Add the RGB-only predictor, trainer, inference writer, visual review artifacts, and CPU tests. **Complete.**
-3. Build a fast bounded mixed-store selector: read metadata first, then one bounded 16x16-cell alpha/relative-height descriptor pass over 0.5.3 candidates. Retain irregular brush/paste motifs only; never zones or fixed windows. Write a 240-row mixed store with source-group and split evidence. **Implementation + user-run store build.**
+3. Build a fast bounded mixed-store selector: read metadata first, then one bounded 16x16-cell alpha/relative-height descriptor pass over 0.5.3 candidates. Retain irregular brush/paste motifs only; never zones or fixed windows. Write a 240-row mixed proof store with source-group and split evidence, then scale the same contract to approximately 1,000 clean real + 500 synthetic composite rows. **Implementation + user-run store build.**
 4. Train the WDL prior with complete mixed source-group holdout and inspect a multi-row synthetic-and-real visual review. **User-run.**
 5. Generate a complete row-addressed predicted-WDL archive from that checkpoint. The archive must bind to the exact mixed store and include every selected V8 train/validation row. **User-run.**
 6. Train V8 against generated outer priors with WDL-derived height hints, then run generated-prior mixed inference and the label-free harness. **User-run.**

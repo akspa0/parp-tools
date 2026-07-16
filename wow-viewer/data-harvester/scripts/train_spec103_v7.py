@@ -346,6 +346,8 @@ def main() -> int:
                          "eval time -- lets training gradients flow through the full residual range. "
                          "Cheap to A/B against legacy_clamped on the same data.")
     ap.add_argument("--wdl-prior-dropout", type=float, default=0.25)
+    ap.add_argument("--best-snapshot-every", type=int, default=5,
+                    help="save a validation checkpoint and preview after every Nth new best (0 disables)")
     ap.add_argument("--generated-wdl-priors", type=Path, default=None,
                     help="Spec 108 generated-WDL archive. When supplied, ch6 and --height-hints wdl "
                          "come only from its predicted outer lattice; missing/wrong-store rows fail closed.")
@@ -368,6 +370,9 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=4, help="DataLoader workers (0 = synchronous; 4+ overlaps data loading with GPU)")
     ap.add_argument("--limit", type=int, default=0, help="truncate train/val rows for a fast smoke test (0 = no limit)")
     args = ap.parse_args()
+
+    if args.best_snapshot_every < 0:
+        ap.error("--best-snapshot-every must be >= 0")
 
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is not available; refusing to train on CPU.")
@@ -521,7 +526,7 @@ def main() -> int:
         "train_rows": len(train_rows),
         "val_rows": len(val_rows),
     }
-    history, best_l1, start_epoch = [], float("inf"), 1
+    history, best_l1, best_improvement_count, start_epoch = [], float("inf"), 0, 1
     resume_path = args.output / "checkpoint_last.pt"
     if args.resume and resume_path.exists():
         ck = torch.load(resume_path, map_location=device)
@@ -546,6 +551,7 @@ def main() -> int:
             scaler.load_state_dict(ck["scaler"])
         start_epoch = int(ck.get("epoch", 0)) + 1
         best_l1 = float(ck.get("best_l1", float("inf")))
+        best_improvement_count = int(ck.get("best_improvement_count", 0))
         history = ck.get("history", []) or []
         print(f"[resume] {resume_path} -> epoch {start_epoch}, best_l1={best_l1:.4f}", flush=True)
     elif args.resume:
@@ -626,6 +632,7 @@ def main() -> int:
         star = ""
         if val["l1_global"] < best_l1:
             best_l1 = val["l1_global"]
+            best_improvement_count += 1
             epochs_no_improve = 0
             star = " *best"
             torch.save({"model": ema_model.state_dict(), "val": val, "val_no_prior": val_noprior,
@@ -637,14 +644,30 @@ def main() -> int:
                        args.output / "checkpoint_best.pt")
             render_preview(ema_model, val_ds, preview_indices, device,
                            args.output / "val_previews" / f"best_epoch_{epoch:03d}.png", epoch, val)
+            rec["best_improvement_count"] = best_improvement_count
+            if args.best_snapshot_every and best_improvement_count % args.best_snapshot_every == 0:
+                snapshot_dir = args.output / "validation_snapshots"
+                snapshot_dir.mkdir(parents=True, exist_ok=True)
+                torch.save({"model": ema_model.state_dict(), "val": val, "val_no_prior": val_noprior,
+                            "epoch": epoch, "best_improvement_count": best_improvement_count,
+                            "run_identity": run_identity, "arch": args.arch,
+                            "model_variant": run_identity["model_variant"], "output_size": WORKING_SIZE,
+                            "height_hints": args.height_hints, "output_head_mode": args.output_head_mode},
+                           snapshot_dir / f"best_{best_improvement_count:03d}_epoch_{epoch:03d}.pt")
+                render_preview(ema_model, val_ds, preview_indices, device,
+                               snapshot_dir / f"best_{best_improvement_count:03d}_epoch_{epoch:03d}.png", epoch, val)
+                rec["validation_snapshot"] = f"best_{best_improvement_count:03d}_epoch_{epoch:03d}"
         else:
             epochs_no_improve += 1
         torch.save({"model": model.state_dict(), "ema": ema_model.state_dict(), "opt": opt.state_dict(),
                     "sched": sched.state_dict(), "scaler": scaler.state_dict(), "epoch": epoch,
-                    "best_l1": best_l1, "history": history, "run_identity": run_identity},
+                    "best_l1": best_l1, "best_improvement_count": best_improvement_count,
+                    "history": history, "run_identity": run_identity},
                    args.output / "checkpoint_last.pt")
         (args.output / "history.json").write_text(
-            json.dumps({**run_identity, "history": history, "best_val_l1_global": best_l1}, indent=2),
+            json.dumps({**run_identity, "history": history, "best_val_l1_global": best_l1,
+                        "best_improvement_count": best_improvement_count,
+                        "best_snapshot_every": args.best_snapshot_every}, indent=2),
             encoding="utf-8")
         ng_str = f"  ng={val['normal_guidance']:.4f}" if args.normal_guidance_weight > 0.0 else ""
         print(f"[EPOCH {epoch}/{args.epochs}] loss {rec['train_loss']:.4f}/{val['loss']:.4f}  "
