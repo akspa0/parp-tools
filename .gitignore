@@ -655,3 +655,5 @@ wow-viewer/.hf-cache/hub/CACHEDIR.TAG
 wow-viewer/.hf-cache/*
 runpodctl/*
 wow-viewer/imgui.ini
+map-references/difference_0.5.3-prealpha.png
+map-references/Azeroth-2002-03.kra
