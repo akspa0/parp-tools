@@ -257,6 +257,58 @@
 - **Alternatives considered**: Describe all three paths as generically reliable (rejected: it would
   overstate fixture coverage and invite renderer reuse).
 
+## Decision: the authored solar direction's north lock must be positive terrain X, not negative
+
+- **Decision**: Flip `TerrainSolarDirection`'s horizontal north-south bias from always-negative X to
+  always-positive X. Raw MCNR/MCVT vertex data is decoded and consumed in unswapped WoW world axes
+  (+X = North, +Y = West, +Z = Up): `AdtTensorPackBuilder.AssembleNormals` copies decoded MCNR bytes
+  straight into `(X,Y,Z)` with no axis remap, and `TerrainMeshBuilder` computes each vertex's world-X
+  from the row/tileY-indexed quantities that decrease going south — the same basis the compositor
+  dots its light vector against. The traced 1.0.0 `SetDirection` ray
+  (`docs/architecture/wow-1.0.0-world-lighting-shadow-model-2026-07-15.md` §2.1) is negative on X, Y,
+  and Z, so the light *source* direction (its negation) is positive X/Y/Z — North-West-Up.
+- **Rationale**: The prior "MCNR hillshade proof" (T027i/T027k) locked the source to negative X and
+  labeled it "raster north," but negative X in this codebase's confirmed world-axis convention is
+  south, not north. That earlier empirical pass produced a real visual improvement over an
+  unconstrained sign, which is likely why it was accepted, but it settled on the wrong absolute sign
+  rather than the correct one; the user re-reported the sun sourcing from the south (shadows on the
+  wrong side of terrain relief) after that fix landed. The newly ghidra-traced native ray gives an
+  independently derived ground truth for which absolute sign is correct, instead of another
+  visual-only guess.
+- **Alternatives considered**: Re-run only an empirical visual pass again (rejected: the same
+  ambiguity that produced the wrong sign the first time could repeat it); adopt the traced native ray
+  directly as the minimap light (rejected: still out of scope per the "0.5.3 native world-light
+  recovery is not minimap input" decision above — its azimuth is fixed/table-driven and its exact
+  calibration for this consumer remains unproven; only the *sign convention* it proves is adopted
+  here, not the vector itself); leave the East/West (Y) day sweep untouched (kept: the reported defect
+  and the traced sign proof are both about the north/south axis, and the sweep direction is a
+  separate, unreported concern).
+
+## Decision: fix the authored solar bearing at north-west all day instead of sweeping it through zero at noon
+
+- **Decision**: Remove the time-of-day sweep of the horizontal light bearing entirely. Lock both the
+  X (north/south) and Y (east/west) horizontal components to the same fixed positive
+  `0.5/sqrt(2)` share used for the north lock, so the light source sits at a constant north-west
+  bearing at every time of day; only the vertical component (elevation/day-night brightness) still
+  varies with `gameTime`.
+- **Rationale**: A user side-by-side of a synthesized tile against the real 0.5.3 client minimap for
+  the same crater/lake feature showed the client's minimap has a clean, persistent bright-north/
+  dark-south hillshade at every sampled time, while ours looked comparatively washed out. The prior
+  formula swept the horizontal bearing with `cos(sunAngle - pi/2)`, which is exactly zero at solar
+  noon and midnight (`gameTime` 0.5 and 0.0) — the sun pointed straight up with no horizontal bias at
+  all at those instants, producing a near-symmetric shadow ring on bowl/crater terrain instead of a
+  one-sided hillshade. The traced native `SetDirection` ray independently confirms the client itself
+  holds a constant azimuth (theta = 225 degrees across all four sampled table entries,
+  `wow-1.0.0-world-lighting-shadow-model-2026-07-15.md` §2.1) and cycles only elevation — so a fixed
+  bearing is the evidence-backed shape, not an azimuth sweep.
+- **Alternatives considered**: Clamp the horizontal magnitude to a nonzero floor while keeping the
+  day sweep (rejected: still an invented sweep with no evidence behind its shape, and reintroduces
+  the same class of unverified guess that produced the earlier sign error); reproduce the traced
+  ray's exact table-interpolated bearing (rejected: still out of scope per the "0.5.3 native
+  world-light recovery is not minimap input" decision — only the constant-azimuth *shape* is adopted
+  here, not the traced vector itself, since its exact calibration for this consumer remains
+  unproven).
+
 ## Decision: Remove dead UI instead of wrapping absent binaries
 
 - **Decision**: The Tools audit removes obsolete ML/dataset entries and keeps only actions with a

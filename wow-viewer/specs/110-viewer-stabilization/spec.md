@@ -228,8 +228,8 @@ A user can determine which WMO v14/v17 and M2-to-MDX conversions are supported, 
   map, selected time, lighting evidence state, output dimensions, tile bounds, and per-tile result.
 - **FR-023k**: The recovered 0.5.3.3368 world-light ray is diagnostic research only. Synthesized
   minimaps MUST exclude it and use the shared north/top-edge white terrain direction, whose
-  negative terrain-X source prevents hillshade inversion. The manifest records this as
-  `minimap_white_light_not_lit_data`.
+  positive terrain-X source (raw MCNR/MCVT world axes: +X = North, +Y = West, +Z = Up) prevents
+  hillshade inversion. The manifest records this as `minimap_white_light_not_lit_data`.
 - **FR-023l**: Every synthesized terrain tile MUST have an aligned liquid-bearing companion PNG
   whose filename ends in `_liquid.png`; whole-map export MUST stitch an equivalent `_liquid` map.
   The companion MUST use decoded unified liquid coverage and resolved basic types when available,

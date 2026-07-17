@@ -46,20 +46,21 @@ public sealed class AuthoredTerrainDayNightProfileTests
     }
 
     [Fact]
-    public void EvaluateLightDirection_IsVerticalAtNoonAndSweepsAcrossTheRasterTopEdge()
+    public void EvaluateLightDirection_KeepsAFixedNorthWestBearingInsteadOfGoingVerticalAtNoon()
     {
         Vector3 noon = AuthoredTerrainDayNightProfile.EvaluateLightDirection(0.5f);
         Vector3 preNoon = AuthoredTerrainDayNightProfile.EvaluateLightDirection(11f / 24f);
         Vector3 postNoon = AuthoredTerrainDayNightProfile.EvaluateLightDirection(13f / 24f);
-        Vector2 preNoonRasterSource = new(-preNoon.Y, -preNoon.X);
-        Vector2 postNoonRasterSource = new(-postNoon.Y, -postNoon.X);
 
-        Assert.Equal(0f, noon.X, 5);
-        Assert.Equal(0f, noon.Y, 5);
-        Assert.Equal(1f, noon.Z, 5);
-        Assert.True(preNoonRasterSource.X < 0f);
-        Assert.True(preNoonRasterSource.Y < 0f);
-        Assert.True(postNoonRasterSource.X > 0f);
-        Assert.True(postNoonRasterSource.Y < 0f);
+        // A previous implementation swept the horizontal bearing with time of day and collapsed to a
+        // fully vertical, shadow-less sun exactly at solar noon (a real 0.5.3 minimap comparison
+        // showed this washes out the hillshade instead of matching the client's persistent
+        // bright-north/dark-south relief). The traced native ray holds a constant azimuth, so noon
+        // must keep the same meaningful north-west horizontal bearing as every other time of day.
+        Assert.True(noon.X > 0.2f);
+        Assert.True(noon.Y > 0.2f);
+        Assert.Equal(1f, noon.X / noon.Y, 4);
+        Assert.Equal(noon.X / noon.Y, preNoon.X / preNoon.Y, 4);
+        Assert.Equal(noon.X / noon.Y, postNoon.X / postNoon.Y, 4);
     }
 }

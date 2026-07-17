@@ -18,14 +18,19 @@ public sealed class TerrainMinimapCompositorTests
     {
         TerrainMinimapLighting lighting = TerrainMinimapLighting.CreateWhiteTopEdge(gameTime);
 
-        // In the MCNR/minimap coordinate contract, negative terrain X is raster north.
-        // A positive X source was visually proven to invert the terrain hillshade.
+        // Raw MCNR/MCVT world axes are +X = North, +Y = West, +Z = Up (AdtTensorPackBuilder decodes
+        // MCNR with no axis swap; TerrainMeshBuilder derives vertex world-X from the row/tileY-indexed
+        // quantities that decrease southward). Positive terrain X is therefore raster north; a
+        // negative-X source inverts the terrain hillshade. The bearing is fixed north-west at every
+        // time of day (matching the traced constant-azimuth native ray) instead of sweeping through
+        // a zero-horizontal, straight-overhead sun at solar noon.
         Assert.Equal(Vector3.One, lighting.DirectionalColor);
         Assert.Equal(0.25f, lighting.AmbientColor.X, 6);
         Assert.Equal(lighting.AmbientColor.X, lighting.AmbientColor.Y, 6);
         Assert.Equal(lighting.AmbientColor.X, lighting.AmbientColor.Z, 6);
         Assert.True(lighting.LightDirection.Z > 0f);
-        Assert.True(lighting.LightDirection.X <= 0f);
+        Assert.True(lighting.LightDirection.X > 0f);
+        Assert.True(lighting.LightDirection.Y > 0f);
     }
 
     [Fact]

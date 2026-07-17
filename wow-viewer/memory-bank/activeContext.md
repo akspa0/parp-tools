@@ -117,6 +117,21 @@ Last updated: 2026-07-16
   south side, reversing basin/hill perception. `synthetic-minimap` now excludes LIT/native-ray
   inputs entirely. It uses pure-white direct light, achromatic ambient, and a negative terrain-X
   north/top-edge source; native `SetDirection` recovery remains diagnostic research only.
+- That negative-terrain-X "north" lock was itself backwards. `wow-1.0.0-world-lighting-shadow-model-2026-07-15.md`
+  §2.1 traces the native `SetDirection` ray in raw WoW world axes; `AdtTensorPackBuilder.AssembleNormals`
+  (no axis swap) and `TerrainMeshBuilder`'s row/tileY-driven vertex world-X confirm this codebase's
+  MCNR/MCVT convention is +X = North, +Y = West, +Z = Up. So negative X is south, not north, and the
+  prior fix was still sourcing the sun from the south. `TerrainSolarDirection` now locks the horizontal
+  bias to positive X; the compositor test and spec/contract wording were corrected to match.
+- A user side-by-side of a synthesized tile against the real 0.5.3 client minimap (same crater/lake
+  feature) exposed a second, more consequential defect: the horizontal bearing was swept with
+  `cos(sunAngle - pi/2)`, which is exactly zero at solar noon/midnight, making the sun point straight
+  up with no shadow direction at those instants and washing out the ring-shaped relief. The real
+  minimap keeps a persistent bright-north/dark-south hillshade at every sampled time, matching the
+  traced native ray's constant azimuth (theta = 225 degrees across all four sampled table entries).
+  `TerrainSolarDirection` now locks the horizontal bearing to a fixed north-west share all day and
+  varies only elevation. Added `TerrainSolarDirectionTests` and corrected
+  `AuthoredTerrainDayNightProfileTests`' now-inverted "vertical at noon" assertion.
 - WL* liquid output was reduced to sparse origin/vertex stamps, causing a checkerboard. Both loose
   and archive-backed paths now share a geometry rasterizer that fills each block's nine 4x4-grid
   surface quads with interpolated heights, then drops every sample below the aligned terrain height.

@@ -41,8 +41,9 @@
    records `minimap_white_light_not_lit_data` and states that LIT colors, fog, and native
    world-light direction were excluded.
 4. The recovered 0.5.3.3368 world-light ray remains independent diagnostic research. It is never
-   transformed or applied by synthesized minimaps. Negative terrain X is raster north in the
-   MCNR/minimap contract, preventing terrain hillshade inversion.
+   transformed or applied by synthesized minimaps. Raw MCNR/MCVT world axes are +X = North,
+   +Y = West, +Z = Up, so positive terrain X is raster north in the MCNR/minimap contract,
+   preventing terrain hillshade inversion.
 5. Per-tile output and whole-map output are independently selectable. Each selected mode emits
    both liquid-free terrain and `_liquid` artifacts. Whole-map canvases cover only the inclusive
    bounds of successfully emitted tiles and preserve unoccupied positions as transparent pixels.

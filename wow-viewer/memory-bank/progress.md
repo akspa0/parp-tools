@@ -79,6 +79,25 @@ Last updated: 2026-07-16
   recovered 0.5.3 native ray, using instead pure-white direct light, achromatic ambient, and a
   negative terrain-X north/top-edge source. Native-ray recovery remains diagnostic research only.
   Focused minimap coverage: 22 passed; Debug Harvest build: 0 errors.
+- Corrected that fix's sign: negative terrain-X was mislabeled "north." The traced 1.0.0 native
+  `SetDirection` ray (`docs/architecture/wow-1.0.0-world-lighting-shadow-model-2026-07-15.md` §2.1),
+  cross-checked against `AdtTensorPackBuilder.AssembleNormals` (MCNR decoded with no axis swap) and
+  `TerrainMeshBuilder` (vertex world-X built from row/tileY-indexed quantities that decrease
+  southward), confirms this codebase's MCNR/MCVT convention is +X = North, +Y = West, +Z = Up — so
+  negative X is south. `TerrainSolarDirection` now locks the horizontal bias to positive X; updated
+  the compositor test assertion and the spec/contract/task wording that encoded the inverted claim.
+- Corrected a second, more consequential defect in the same function: a user-run side-by-side of a
+  synthesized tile against the real 0.5.3 client minimap (same crater/lake feature) showed the client
+  keeps a persistent bright-north/dark-south hillshade at every sampled time, while ours looked washed
+  out. The horizontal bearing was swept with `cos(sunAngle - pi/2)`, which is exactly zero at solar
+  noon/midnight, pointing the sun straight up with no shadow direction at those instants — matching
+  the traced native ray's constant azimuth (theta = 225 degrees across all four sampled table
+  entries) rather than a sweeping one. `TerrainSolarDirection` now locks the horizontal bearing to a
+  fixed north-west share all day; only elevation varies. Added `TerrainSolarDirectionTests` (28 total
+  focused lighting/minimap tests passed) and corrected `AuthoredTerrainDayNightProfileTests`'
+  now-inverted "vertical at noon" assertion. Debug Harvest build: 0 errors. The pre-existing,
+  unrelated `LkToAlphaRoundTripTests`/reader/coordinator failures (9 tests) reproduce identically on
+  unmodified `HEAD` and are outside this correction's scope.
 - Corrected WL* liquid synthesis beyond checkerboards: archive and loose-file paths share actual
   world-geometry triangle rasterization of all nine surface quads, reject samples below the aligned
   terrain height, and resolve per-pixel type into `LiquidBasicType257`. WLW/WLQ use parsed header
