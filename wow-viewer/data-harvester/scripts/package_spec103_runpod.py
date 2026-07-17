@@ -63,6 +63,7 @@ _SOURCE_FILES = (
 
 _SOURCE_DIRS = (
     "src/harvester/spec103",
+    "src/harvester/v50",
     "tests/spec103",
 )
 

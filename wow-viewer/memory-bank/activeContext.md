@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-17
 
-## Active work: Spec 109 v50 clean-room dataset — Phase 5 (US3 dataset builder) complete
+## Active work: Spec 109 v50 clean-room dataset — Phase 6 (command-ownership convergence) complete
 
 - User asked directly to "get the v50 dataset built and models trained." Reality check delivered
   and accepted: Spec 109 was only 2/53 tasks done (T001 client-root policy, T002a fail-closed
@@ -78,10 +78,37 @@ Last updated: 2026-07-17
   wrong one; `curriculum` produced a row-reference-only train/val manifest.
 - Proof: `tests/v50/ tests/test_v50_contract.py tests/spec103/ tests/spec111/` → 164 passed, 2
   skipped (symlink privilege), 0 failed.
-- Not yet proven: the real client-backed paths (`build` launching the C# harvester against
-  `H:\CLIENTS`, and running `migrate-v18`/`verify` against a real V18 build) — implemented and
-  gated, but not yet pointed at real data. That, then Phase 6 (command-owner rename convergence)
-  and Phase 7 (reviewed cleanup apply), then training, remain explicit user go-aheads.
+- Not yet proven at Phase 5 time: the real client-backed paths (`build` launching the C#
+  harvester against `H:\CLIENTS`, and running `migrate-v18`/`verify` against a real V18 build) —
+  implemented and gated, but not yet pointed at real data. Still true after Phase 6.
+- **Phase 6 (command-ownership convergence) also complete, same session, no pause between phases
+  — user was explicit ("I already told you to do the whole implementation, not once, but 3 times")
+  that code-only phases should proceed without stopping to ask**: moved the real WDL-prior
+  (train/infer/evaluate/visualize) and terrain-refiner (train/infer) implementations out of
+  top-level `scripts/*_spec103_*.py` into `harvester.v50.wdl_prior_train`/`wdl_prior_infer`/
+  `wdl_prior_evaluate`/`wdl_prior_visualize`/`terrain_refiner_train`/`terrain_refiner_infer`. All 6
+  `scripts/v50_*.py` entries now import `main` only from their v50 owner. The 6 historical
+  `scripts/*_spec103_*.py` files stay as thin shims — not deleted — because
+  `tests/spec103/test_wdl_prior_sanity.py` imports symbols from those exact names and
+  subprocess-invokes one, and `runpod/spec103/*.sh` invoke two by file path; a repo-wide caller
+  search confirmed none is a deletion candidate.
+- Caught two real regressions before they shipped: (1) `scripts/package_spec103_runpod.py`'s
+  RunPod bundle packager listed the terrain-refiner shim scripts but never packaged
+  `src/harvester/v50`, so the bundled shims would have imported a module the bundle didn't
+  contain — fixed by adding `src/harvester/v50` to `_SOURCE_DIRS`; (2) `tests/test_v50_build_command.py`
+  still asserted Phase 1's retired fail-closed placeholder message, invisible to the v50-scoped
+  test command — only a full, non-scoped `pytest tests/ -q` run surfaced it. Rewrote it against
+  the current CLI contract (subcommand required, unrecognized subcommand rejected).
+- Added `tests/v50/test_command_compatibility.py` (14 tests, T038): canonical-owner-only imports,
+  no second `main()` in any shim, cross-release checkpoint rejection, and an `is`-identity check
+  proving all 4 moved command modules share one `harvester.v50.contracts` gate, not a
+  reimplemented copy that could drift.
+- Proof: `tests/spec103/ tests/v50/ tests/test_v50_contract.py tests/spec111/` → 178 passed, 2
+  skipped, 0 failed. Full `tests/` → 568 passed, 43 skipped, 3 failed; those 3
+  (`tests/v24/test_export_map.py`, `tests/v25/test_h1_coarse.py` ×2) were confirmed via `git
+  stash` to reproduce identically on committed `HEAD` before this phase — pre-existing, unrelated.
+- Remaining: Phase 7 (reviewed cleanup apply, currently dry-run-only), the real client-backed
+  build/migrate/verify against `H:\CLIENTS`, and training — all still explicit user go-aheads.
 
 ## Prior active work: Spec 111 minimap lighting calibration (implemented through the T019 gate)
 

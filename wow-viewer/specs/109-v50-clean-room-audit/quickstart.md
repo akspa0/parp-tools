@@ -161,6 +161,51 @@ The real client-backed paths (`build` launching the C# harvester against `H:\CLI
 or explicit user execution, but have not been run against real client data yet -- see sections 3-5
 below.
 
+## 0.9. Phase 6 canonical command-ownership convergence — COMPLETE 2026-07-17
+
+WDL-prior (train/infer/evaluate/visualize) and terrain-refiner (train/infer) command
+implementations now live in `harvester.v50.wdl_prior_train`/`wdl_prior_infer`/
+`wdl_prior_evaluate`/`wdl_prior_visualize`/`terrain_refiner_train`/`terrain_refiner_infer`. Every
+`scripts/v50_*.py` entry point imports `main` only from its `harvester.v50` owner. The six
+historical `scripts/{train,infer}_spec103_{wdl_prior,v7}.py` / `evaluate_spec103_wdl_prior.py` /
+`visualize_spec103_wdl_prior.py` files remain as thin re-export shims -- not deleted -- because
+`tests/spec103/test_wdl_prior_sanity.py` imports `filter_deployable_rows`/`V7TileDataset` from
+those exact module names and subprocess-invokes `infer_spec103_wdl_prior.py` by file path, and
+`runpod/spec103/{train,smoke,verify_bundle}.sh` invoke `train_spec103_v7.py`/`infer_spec103_v7.py`
+by file path. A repo-wide caller search found no wrapper safe to delete.
+
+```powershell
+uv run python -m pytest tests/spec103/ tests/v50/ tests/test_v50_contract.py tests/spec111/ -q
+```
+
+Result: 178 passed, 2 skipped (symlink privilege), 0 failed -- includes the new
+`tests/v50/test_command_compatibility.py` (14 tests: every canonical entry imports only its v50
+owner, every historical shim re-exports that owner without a second `main()`, a cross-release
+checkpoint is rejected, and all four moved command-owner modules share the identical
+`harvester.v50.contracts` gate objects rather than a locally reimplemented copy).
+
+A full `uv run python -m pytest tests/ -q` run (not just the v50-scoped slice) caught a real
+regression the move otherwise would have shipped silently:
+`scripts/package_spec103_runpod.py`'s `_SOURCE_DIRS` did not include `src/harvester/v50`, so the
+RunPod bundle would have packaged `train_spec103_v7.py`/`infer_spec103_v7.py` shims pointing at a
+module the bundle never shipped -- fixed by adding `src/harvester/v50` to `_SOURCE_DIRS`. The same
+full run also caught `tests/test_v50_build_command.py`, an old test asserting Phase 1's retired
+fail-closed placeholder message (`"legacy Spec 108 mixed builder cannot create a clean-room V50
+store"`); that message no longer exists by design once Phase 5 replaced the placeholder, so the
+test was rewritten against the current CLI contract (subcommand required; unrecognized subcommand
+rejected). After both fixes: `uv run python -m pytest tests/ -q` -> 568 passed, 43 skipped, 3
+failed. The 3 failures (`tests/v24/test_export_map.py`,
+`tests/v25/test_h1_coarse.py::test_h1_has_one_coarse_residual_output_and_is_tiny`,
+`tests/v25/test_h1_coarse.py::test_h1_gradient_reaches_model`) were confirmed via `git stash` to
+reproduce identically against committed `HEAD` (commit `b84d30aa`, before any Phase 6 change) --
+pre-existing and unrelated.
+
+All 12 touched scripts (6 canonical + 6 historical shims) were also smoke-tested individually via
+`uv run python scripts/<name>.py --help`, which exercises the real import chain end to end
+(including the `visualize` module's scripts-directory `sys.path` reach for the shared
+`spec103_export_mesh.height_to_obj` mesh helper) in a way unit tests alone would not catch. All 12
+produced a clean argparse help listing.
+
 ## 1. Configure the faster client library
 
 The root is runtime configuration and is not committed:

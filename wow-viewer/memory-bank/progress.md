@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-17
 
-## Spec 109 — v50 clean-room dataset (Phase 5 US3 dataset builder complete)
+## Spec 109 — v50 clean-room dataset (Phase 6 command-ownership convergence complete)
 
 - Implemented the `harvester/v50/` package: `contracts.py` (ArtifactRecord, DatasetStoreManifest,
   DatasetSignal, RowLineage, verification enums — matches `v50-provenance.schema.json` via hand
@@ -45,6 +45,24 @@ Last updated: 2026-07-17
   remains implemented-but-unrun, pending user build selection and go-ahead. Proof:
   `tests/v50/ tests/test_v50_contract.py tests/spec103/ tests/spec111/` → 164 passed, 2 skipped,
   0 failed.
+- Phase 6 (command-ownership convergence) complete same session: real WDL-prior and
+  terrain-refiner implementations moved out of top-level `scripts/*_spec103_*.py` into
+  `harvester.v50.wdl_prior_train`/`wdl_prior_infer`/`wdl_prior_evaluate`/`wdl_prior_visualize`/
+  `terrain_refiner_train`/`terrain_refiner_infer`; all 6 `scripts/v50_*.py` entries import `main`
+  only from their v50 owner. The 6 historical `scripts/*_spec103_*.py` files stay as thin
+  re-export shims (a repo-wide caller search found each one load-bearing: direct symbol imports
+  and a subprocess call from `tests/spec103/test_wdl_prior_sanity.py`, file-path invocations from
+  `runpod/spec103/*.sh`) — none is a deletion candidate. Added
+  `tests/v50/test_command_compatibility.py` (14 tests): canonical-owner-only imports, no second
+  `main()` in any shim, cross-release checkpoint rejection, and an identity check proving all 4
+  moved modules share one `harvester.v50.contracts` gate rather than a reimplemented copy. Caught
+  and fixed two real regressions before they shipped: `package_spec103_runpod.py`'s bundle
+  packager was missing `src/harvester/v50` in `_SOURCE_DIRS` (the bundled shims would have
+  imported an unshipped module), and `tests/test_v50_build_command.py` still asserted Phase 1's
+  retired placeholder refusal message (rewritten against the current CLI contract). Proof:
+  `tests/spec103/ tests/v50/ tests/test_v50_contract.py tests/spec111/` → 178 passed, 2 skipped,
+  0 failed; full `tests/` → 568 passed, 43 skipped, 3 failed (the 3 failures confirmed via `git
+  stash` to reproduce identically on committed HEAD before this phase — pre-existing, unrelated).
 
 ## Spec 111 — minimap lighting calibration
 

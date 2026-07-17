@@ -86,6 +86,47 @@
   needed for `migrate-v18`/`verify` since they only read already-decoded local stores, but they have
   not been pointed at real data yet). See `quickstart.md` sections 3-5.
 
+## Phase 6 canonical command-ownership convergence — 2026-07-17
+
+- Moved the real implementations of the WDL-prior (train/infer/evaluate/visualize) and
+  terrain-refiner (train/infer) commands out of top-level `scripts/*_spec103_*.py` files and into
+  `harvester.v50.wdl_prior_train`/`wdl_prior_infer`/`wdl_prior_evaluate`/`wdl_prior_visualize`/
+  `terrain_refiner_train`/`terrain_refiner_infer`. All 6 `scripts/v50_*.py` entry points now import
+  `main` only from their `harvester.v50` owner.
+- Disposition of the 6 historical `scripts/{train,infer}_spec103_{wdl_prior,v7}.py` /
+  `evaluate_spec103_wdl_prior.py` / `visualize_spec103_wdl_prior.py` files: **kept as thin
+  re-export shims, not deleted.** A repo-wide caller search (`grep` across `wow-viewer/` for each
+  of the 6 module names) found every one is load-bearing: `tests/spec103/test_wdl_prior_sanity.py`
+  imports `filter_deployable_rows` and `V7TileDataset` from those exact module names and
+  subprocess-invokes `infer_spec103_wdl_prior.py` by file path, and
+  `runpod/spec103/{train,smoke,verify_bundle}.sh` invoke `train_spec103_v7.py`/`infer_spec103_v7.py`
+  by file path. None is a deletion candidate; each now contains only re-exports plus
+  `if __name__ == "__main__": raise SystemExit(main())`, never a second implementation that could
+  drift from its `harvester.v50` owner.
+- The same caller search caught a real regression this move would otherwise have shipped
+  silently: `scripts/package_spec103_runpod.py`'s RunPod bundle packager listed
+  `scripts/train_spec103_v7.py`/`infer_spec103_v7.py` as files to ship but never packaged
+  `src/harvester/v50` -- the bundled shims would have imported a module the bundle didn't
+  contain. Fixed by adding `src/harvester/v50` to `_SOURCE_DIRS` (that package has no dependency
+  beyond what the bundle already ships: numpy, pyarrow, torch, zarr, Pillow, all stdlib otherwise).
+- Added `tests/v50/test_command_compatibility.py` (14 tests, T038): every canonical `v50_*.py`
+  entry imports `main` only from its `harvester.v50` owner and never from a historical
+  spec103-named module; every historical shim re-exports that owner and defines no second
+  `main()`; a WDL checkpoint from the wrong release is rejected by `load_model`; all 4 moved
+  command-owner modules import the identical `harvester.v50.contracts` gate objects (`is`
+  comparison), not a locally reimplemented copy that could silently drift.
+- A full (not v50-scoped) `uv run python -m pytest tests/ -q` run surfaced one more real
+  regression: `tests/test_v50_build_command.py` still asserted Phase 1's retired fail-closed
+  placeholder refusal message. That message was intentionally retired by Phase 5's real
+  subcommands; the test was rewritten against the current CLI contract (subcommand required,
+  unrecognized subcommand rejected with the matching argparse error and exit code 2).
+- Proof: `tests/spec103/ tests/v50/ tests/test_v50_contract.py tests/spec111/` -> 178 passed, 2
+  skipped, 0 failed. Full `tests/` -> 568 passed, 43 skipped, 3 failed; the 3 failures
+  (`tests/v24/test_export_map.py`, `tests/v25/test_h1_coarse.py` x2) were confirmed via `git
+  stash` to reproduce identically against committed `HEAD` (`b84d30aa`, before any Phase 6
+  change) -- pre-existing and unrelated. All 12 touched scripts individually smoke-tested via
+  `--help`; all 12 clean.
+
 ## Clean-slate completion — 2026-07-16
 
 - The user successfully emptied workspace `output/` and `wow-viewer/output/` with the guarded
