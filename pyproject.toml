@@ -1,0 +1,8 @@
+[project]
+name = "parp-tools-mcp"
+version = "0.1.0"
+description = "Project-native tooling environment for MCP servers."
+requires-python = ">=3.11"
+dependencies = [
+    "x64dbg-automate[mcp]",
+]
