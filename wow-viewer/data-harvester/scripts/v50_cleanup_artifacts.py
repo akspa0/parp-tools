@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Spec 109 T025: read-only cleanup planning. Only a ``plan`` (dry-run) subcommand exists here --
-apply is a separate, later, user-run-only command (Phase 7) that requires the reviewed plan's hash
-and explicit confirmation. Nothing in this script deletes, moves, or modifies any file (FR-010).
+"""Spec 109 T025/T047: cleanup planning (read-only, dry-run) and reviewed apply (destructive,
+user-run-only). ``plan`` never deletes, moves, or modifies any file (FR-010). ``apply`` deletes
+exactly the targets in a plan the caller has already reviewed, and only when the caller passes
+back the plan's own ``plan_id`` verbatim plus an explicit ``--confirm`` -- there is no default-on
+deletion path, and approved/protected roots are re-supplied and re-checked at apply time rather
+than trusted from the plan file.
 
 Usage:
     uv run python scripts/v50_cleanup_artifacts.py plan \
@@ -11,6 +14,14 @@ Usage:
         --dispositions <dispositions.json: {"<artifact_id>": "remove-candidate", ...}> \
         --replacement-proofs <proofs.json: {"<artifact_id>": "proof text", ...}> \
         --output <cleanup-plan.json>
+
+    uv run python scripts/v50_cleanup_artifacts.py apply \
+        --plan <cleanup-plan.json written by the plan subcommand above> \
+        --plan-id <the exact plan_id field copied from that same file> \
+        --approved-root <root> [--approved-root <root> ...] \
+        --protected-root <root> [--protected-root <root> ...] \
+        --confirm \
+        --output <cleanup-apply-result.json>
 
 ``--dispositions`` and ``--replacement-proofs`` are separate, explicit, human-reviewed inputs
 rather than something this script infers on its own -- disposition and replacement proof are
@@ -26,7 +37,7 @@ import json
 import sys
 from pathlib import Path
 
-from harvester.v50.cleanup import build_cleanup_plan
+from harvester.v50.cleanup import CleanupApplyError, CleanupPlan, CleanupTarget, apply_cleanup_plan, build_cleanup_plan
 from harvester.v50.contracts import ArtifactRecord, Disposition
 from harvester.v50.dependencies import discover_dependencies
 from harvester.v50.path_policy import PathPolicy
@@ -91,8 +102,60 @@ def _cmd_plan(args: argparse.Namespace) -> int:
         f"cleanup plan: {len(plan.targets)} approved target(s), "
         f"{plan.expected_recovered_bytes:,} bytes expected recovered -> {output_path}"
     )
-    print("This is a dry run. Nothing has been deleted. Review the plan, then use the separate "
-          "(not-yet-available) apply command only after explicit confirmation.")
+    print("This is a dry run. Nothing has been deleted. Review the plan, then run the separate "
+          "'apply' subcommand with this exact plan_id and --confirm only after explicit review.")
+    return 0
+
+
+def _load_plan(plan_path: Path) -> CleanupPlan:
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    targets = tuple(
+        CleanupTarget(
+            artifact_id=t["artifact_id"],
+            resolved_path=t["resolved_path"],
+            kind=t["kind"],
+            observed_identity=t["observed_identity"],
+            observed_bytes=t["observed_bytes"],
+            replacement_proof=t["replacement_proof"],
+            dependency_check=t["dependency_check"],
+            approved=t["approved"],
+        )
+        for t in payload["targets"]
+    )
+    return CleanupPlan(
+        plan_id=payload["plan_id"],
+        inventory_identity=payload["inventory_identity"],
+        release_manifest_identity=payload["release_manifest_identity"],
+        approved_roots=tuple(payload["approved_roots"]),
+        protected_artifact_ids=tuple(payload["protected_artifact_ids"]),
+        targets=targets,
+        expected_recovered_bytes=payload["expected_recovered_bytes"],
+        dry_run_complete=payload["dry_run_complete"],
+    )
+
+
+def _cmd_apply(args: argparse.Namespace) -> int:
+    plan = _load_plan(Path(args.plan))
+    policy = PathPolicy(
+        approved_roots=[Path(root) for root in args.approved_root],
+        protected_roots=[Path(root) for root in (args.protected_root or [])],
+    )
+
+    try:
+        result = apply_cleanup_plan(plan, path_policy=policy, expected_plan_id=args.plan_id, confirm=args.confirm)
+    except CleanupApplyError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
+
+    print(
+        f"cleanup apply: {len(result.removed)} removed, {len(result.skipped)} skipped, "
+        f"{result.recovered_bytes:,} bytes recovered -> {output_path}"
+    )
+    if result.skipped:
+        print("Skipped targets were left untouched; see the reason field in the output for each.")
     return 0
 
 
@@ -111,6 +174,17 @@ def main() -> int:
     plan_parser.add_argument("--release-manifest-identity", default=None)
     plan_parser.add_argument("--output", required=True)
     plan_parser.set_defaults(handler=_cmd_plan)
+
+    apply_parser = subparsers.add_parser("apply", help="delete exactly the targets in a reviewed plan (destructive)")
+    apply_parser.add_argument("--plan", required=True, help="cleanup-plan.json written by the plan subcommand")
+    apply_parser.add_argument("--plan-id", required=True,
+                               help="the exact plan_id field copied from --plan; a mismatch refuses to run")
+    apply_parser.add_argument("--approved-root", action="append", required=True)
+    apply_parser.add_argument("--protected-root", action="append", default=None)
+    apply_parser.add_argument("--confirm", action="store_true",
+                               help="required to actually delete anything; omit to see the refusal")
+    apply_parser.add_argument("--output", required=True)
+    apply_parser.set_defaults(handler=_cmd_apply)
 
     args = parser.parse_args()
     return args.handler(args)

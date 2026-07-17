@@ -322,21 +322,51 @@ uv run python scripts/v50_build_dataset.py curriculum `
 canonical rows only -- no array payloads -- and partition-leakage across splits is rejected using
 the same `validate_source_group_split` check as `verify`.
 
-## 7. Cleanup dry run — PLANNED
+## 7. Cleanup dry run — IMPLEMENTED, refreshed 2026-07-17
 
 ```powershell
+uv run python scripts/v50_audit_artifacts.py inventory `
+  --output-root ../output --model-root ../models `
+  --extra-root checkpoints=./checkpoints --extra-root tmp=./tmp --extra-root harvester_models=./models `
+  --report ../output/reports/v50/v50.1/inventory.json
+
 uv run python scripts/v50_cleanup_artifacts.py plan `
   --inventory ../output/reports/v50/v50.1/inventory.json `
-  --release-manifest ../output/datasets/v50/v50.1/release-manifest.json `
+  --approved-root ../output --approved-root ../models --approved-root ./checkpoints --approved-root ./tmp --approved-root ./models `
+  --protected-root ../specs `
+  --dispositions <dispositions.json: {"<artifact_id>": "remove-candidate", ...}> `
+  --replacement-proofs <proofs.json: {"<artifact_id>": "proof text", ...}> `
   --output ../output/reports/v50/v50.1/cleanup-plan.json
 ```
 
-Review exact targets, dependencies, and expected recovered bytes. The plan must include old datasets,
-temporary project-local client copies, obsolete models/checkpoints, cloud downloads, and caches only
-when their replacement/dependency checks pass.
+Current real result (2026-07-17): 2 targets, 12,901,439 bytes expected recovered
+(`data-harvester/tmp/v18_smoke`, `.../v22_smoke`, the same two genuinely-disposable scratch
+artifacts identified in Phase 4 -- nothing new has accumulated since), `plan_id =
+sha256:fc2c657b42c33fd852a57f4873e657cd8ccbcef021487057a2eeddb826a4e346`. **Review this exact
+plan_id and the target list in `output/reports/v50/v50.1/cleanup-plan.json` before running step 8.**
 
-## 8. Cleanup apply — PLANNED, USER RUNS ONLY
+## 8. Cleanup apply — IMPLEMENTED, USER RUNS ONLY
 
-The implemented tool will require the reviewed cleanup-plan hash and will refuse paths outside
-approved generated roots. The exact apply command will be added only after fixture tests and dry-run
-review; do not use a manual recursive-delete command.
+```powershell
+uv run python scripts/v50_cleanup_artifacts.py apply `
+  --plan ../output/reports/v50/v50.1/cleanup-plan.json `
+  --plan-id sha256:fc2c657b42c33fd852a57f4873e657cd8ccbcef021487057a2eeddb826a4e346 `
+  --approved-root ../output --approved-root ../models --approved-root ./checkpoints --approved-root ./tmp --approved-root ./models `
+  --protected-root ../specs `
+  --confirm `
+  --output ../output/reports/v50/v50.1/cleanup-apply-result.json
+```
+
+`--plan-id` must match the plan file's own `plan_id` field verbatim -- a stale, hand-edited, or
+copy-pasted-from-a-different-run plan is refused outright, before anything is touched. Every
+target is re-resolved against `--approved-root`/`--protected-root` at apply time (never trusted
+from the plan file) and its real on-disk content is rehashed immediately before deletion; a
+target that changed since the plan was built is skipped, not deleted. A target already missing
+(a prior, interrupted apply) is treated as already done and its bytes are not recounted, so
+re-running this exact command after an interruption is safe. Smoke-tested end-to-end against a
+real synthetic fixture (not mocked): wrong `--plan-id` refused with the file untouched; the
+matching run actually deleted the fixture and reported the correct removed/skipped/recovered
+counts; re-running the identical command afterward was idempotent (`0 bytes recovered` the
+second time, not double-counted). **This command has not been run against the real
+`tmp/v18_smoke`/`tmp/v22_smoke` targets above -- that requires the user's explicit review and
+go-ahead first (Codex does not run destructive real-disk operations without it).**

@@ -127,6 +127,40 @@
   change) -- pre-existing and unrelated. All 12 touched scripts individually smoke-tested via
   `--help`; all 12 clean.
 
+## Phase 7 reviewed cleanup apply (code + dry-run refresh) — 2026-07-17
+
+- Implemented `harvester/v50/cleanup.py`'s `apply_cleanup_plan()`, `CleanupApplyResult`, and
+  `CleanupApplyError`: refuses without explicit `confirm=True`; refuses unless the caller's
+  `expected_plan_id` matches the plan's own `plan_id` exactly (a stale or hand-edited plan cannot
+  be applied); re-resolves every target against `PathPolicy` at execution time rather than
+  trusting the plan's own `approved_roots` snapshot; rehashes each target's real on-disk content
+  immediately before deleting it, skipping (not deleting) anything that drifted since the plan
+  was built. A target already absent is treated as already-removed (a prior interrupted apply),
+  not an error, and its bytes are not recounted -- reapplying the same plan is idempotent.
+- Added the `apply` subcommand to `scripts/v50_cleanup_artifacts.py` (`--plan`, `--plan-id`,
+  `--approved-root`/`--protected-root`, `--confirm`, `--output`). Smoke-tested end-to-end against
+  a real synthetic fixture file: a wrong `--plan-id` was refused (exit 1, file untouched); the
+  correct `--plan-id --confirm` run actually deleted the fixture and reported `1 removed, 0
+  skipped, 22 bytes recovered`; re-running the identical command afterward reported `1 removed, 0
+  skipped, 0 bytes recovered` (idempotent).
+- Added `tests/v50/test_cleanup_apply.py` (9 tests, T045): identity gate (wrong plan_id, missing
+  confirm), successful removal, content-drift skip, re-tampered protected-root rejection at
+  apply time, interrupted-run resumability, and `to_dict()` round-trip.
+- Refreshed the real (non-fixture) inventory and cleanup dry-run plan against everything
+  currently on disk: 13 artifacts now (2 new since Phase 4 are this report directory's own prior
+  output and `models/.gitignore`, neither a disposal candidate). The same 2 genuinely-disposable
+  targets as Phase 4 (`data-harvester/tmp/v18_smoke`, `.../v22_smoke`) reproduce byte-for-byte:
+  2 targets, 12,901,439 bytes expected recovered,
+  `plan_id=sha256:fc2c657b42c33fd852a57f4873e657cd8ccbcef021487057a2eeddb826a4e346`. **Nothing has
+  been deleted.** The exact user-run apply command is documented in `quickstart.md` section 8.
+- Proof: `tests/v50/ tests/test_v50_contract.py tests/spec103/ tests/spec111/
+  tests/test_v50_build_command.py` -> 189 passed, 2 skipped, 0 failed. Full `tests/` -> 577
+  passed, 43 skipped, 3 failed (same 3 pre-existing, unrelated failures as Phase 6).
+- Not done, and explicitly gated on the user: actually running `apply` against the real
+  `tmp/v18_smoke`/`tmp/v22_smoke` targets (T050), the post-apply verification that follows it,
+  and the memory-bank compression (T051) that was deliberately deferred until after that real run
+  so it only needs to happen once.
+
 ## Clean-slate completion — 2026-07-16
 
 - The user successfully emptied workspace `output/` and `wow-viewer/output/` with the guarded

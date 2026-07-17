@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-17
 
-## Spec 109 — v50 clean-room dataset (Phase 6 command-ownership convergence complete)
+## Spec 109 — v50 clean-room dataset (Phase 7 cleanup-apply code complete; real run pending user go-ahead)
 
 - Implemented the `harvester/v50/` package: `contracts.py` (ArtifactRecord, DatasetStoreManifest,
   DatasetSignal, RowLineage, verification enums — matches `v50-provenance.schema.json` via hand
@@ -63,6 +63,24 @@ Last updated: 2026-07-17
   `tests/spec103/ tests/v50/ tests/test_v50_contract.py tests/spec111/` → 178 passed, 2 skipped,
   0 failed; full `tests/` → 568 passed, 43 skipped, 3 failed (the 3 failures confirmed via `git
   stash` to reproduce identically on committed HEAD before this phase — pre-existing, unrelated).
+- Phase 7 (reviewed cleanup apply) code complete same session:
+  `harvester.v50.cleanup.apply_cleanup_plan()`/`CleanupApplyResult`/`CleanupApplyError` — refuses
+  without `confirm=True`, refuses unless the caller's plan hash matches the plan's own `plan_id`
+  exactly, re-resolves every target against `PathPolicy` at execution time rather than trusting
+  the plan file, and rehashes each target's real content immediately before deleting it (a target
+  whose content drifted since planning is skipped, not deleted). A target already missing is
+  treated as already-removed (idempotent resume), not an error. Added the `apply` subcommand to
+  `scripts/v50_cleanup_artifacts.py`. Smoke-tested end-to-end against a real synthetic fixture
+  file: wrong plan-id refused, matching plan-id+confirm actually deleted the fixture, re-running
+  afterward was idempotent. Refreshed the real dry-run plan against current disk state: same 2
+  disposable targets as Phase 4, same 12,901,439 bytes,
+  `plan_id=sha256:fc2c657b42c33fd852a57f4873e657cd8ccbcef021487057a2eeddb826a4e346`; the exact
+  real apply command is documented in `quickstart.md` but has **not** been run. Proof:
+  `tests/v50/ tests/test_v50_contract.py tests/spec103/ tests/spec111/
+  tests/test_v50_build_command.py` → 189 passed, 2 skipped, 0 failed; full `tests/` → 577 passed,
+  43 skipped, 3 failed (same pre-existing failures). Remaining, all user-gated: the real apply run
+  against `tmp/{v18,v22}_smoke`, its post-apply verification, and memory-bank compression
+  (deliberately deferred until after that real run).
 
 ## Spec 111 — minimap lighting calibration
 

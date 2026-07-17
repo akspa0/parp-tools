@@ -10,13 +10,18 @@ entirely. Read-only: this module only ever measures and proposes; nothing here d
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from harvester.v50.contracts import ArtifactRecord, Disposition
-from harvester.v50.identity import hash_manifest
+from harvester.v50.identity import hash_file, hash_manifest, hash_metadata_tree
 from harvester.v50.path_policy import PathPolicy, PathPolicyError
+
+
+class CleanupApplyError(ValueError):
+    """Raised when ``apply_cleanup_plan`` is asked to run without a matching, confirmed plan."""
 
 
 @dataclass(frozen=True)
@@ -137,4 +142,99 @@ def build_cleanup_plan(
         protected_artifact_ids=protected_ids,
         targets=tuple(targets),
         expected_recovered_bytes=expected_recovered_bytes,
+    )
+
+
+@dataclass(frozen=True)
+class CleanupApplyResult:
+    plan_id: str
+    removed: tuple[str, ...]
+    skipped: tuple[dict[str, str], ...]
+    recovered_bytes: int
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema": "v50-cleanup-apply-result-v1",
+            "plan_id": self.plan_id,
+            "removed": list(self.removed),
+            "skipped": [dict(entry) for entry in self.skipped],
+            "recovered_bytes": self.recovered_bytes,
+        }
+
+
+def apply_cleanup_plan(
+    plan: CleanupPlan,
+    *,
+    path_policy: PathPolicy,
+    expected_plan_id: str,
+    confirm: bool,
+) -> CleanupApplyResult:
+    """Delete exactly the targets in ``plan``, and only when every gate holds:
+
+    1. ``confirm=True`` is passed explicitly -- there is no default-on apply path.
+    2. ``expected_plan_id`` matches ``plan.plan_id`` exactly, so a caller must have the literal
+       reviewed plan (not a hand-edited or stale one) to run this at all.
+    3. ``plan.dry_run_complete`` is true.
+    4. Each target is re-resolved against ``path_policy`` at execution time (never trusting the
+       plan's own ``approved_roots`` snapshot), and its on-disk content is rehashed and compared
+       against the plan's recorded ``observed_identity`` immediately before deletion -- a file that
+       changed since the plan was built is skipped, never deleted based on stale evidence.
+
+    A target that no longer exists (because a prior, interrupted apply already removed it) is
+    treated as already done, not an error: re-running the same plan after an interruption is
+    idempotent, and its bytes are not recounted as newly recovered.
+    """
+    if not confirm:
+        raise CleanupApplyError("apply requires explicit confirm=True; refusing an unconfirmed run")
+    if expected_plan_id != plan.plan_id:
+        raise CleanupApplyError(
+            f"plan_id mismatch: expected {expected_plan_id!r} does not match this plan's {plan.plan_id!r}; "
+            "the caller must pass back the exact reviewed plan hash"
+        )
+    if not plan.dry_run_complete:
+        raise CleanupApplyError("plan is not dry_run_complete; refusing to apply an incomplete plan")
+
+    removed: list[str] = []
+    skipped: list[dict[str, str]] = []
+    recovered_bytes = 0
+
+    for target in plan.targets:
+        path = Path(target.resolved_path)
+        if not path.exists():
+            # Already gone -- most likely a prior, interrupted apply of this same plan. Checked
+            # before the strict policy resolve below, which raises for a path that doesn't exist.
+            removed.append(target.artifact_id)
+            continue
+
+        try:
+            resolved = path_policy.resolve_within_approved_root(path)
+        except PathPolicyError as exc:
+            skipped.append({"artifact_id": target.artifact_id, "reason": f"path_policy_rejected: {exc}"})
+            continue
+
+        try:
+            observed_identity = hash_file(resolved) if resolved.is_file() else hash_metadata_tree(resolved)
+        except OSError as exc:
+            skipped.append({"artifact_id": target.artifact_id, "reason": f"hash_failed: {exc}"})
+            continue
+
+        if observed_identity != target.observed_identity:
+            skipped.append({
+                "artifact_id": target.artifact_id,
+                "reason": f"content_changed_since_plan: plan={target.observed_identity} observed={observed_identity}",
+            })
+            continue
+
+        if resolved.is_dir():
+            shutil.rmtree(resolved)
+        else:
+            resolved.unlink()
+        removed.append(target.artifact_id)
+        recovered_bytes += target.observed_bytes
+
+    return CleanupApplyResult(
+        plan_id=plan.plan_id,
+        removed=tuple(removed),
+        skipped=tuple(skipped),
+        recovered_bytes=recovered_bytes,
     )

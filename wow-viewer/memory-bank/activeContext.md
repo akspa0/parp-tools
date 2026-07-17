@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-17
 
-## Active work: Spec 109 v50 clean-room dataset — Phase 6 (command-ownership convergence) complete
+## Active work: Spec 109 v50 clean-room dataset — Phase 7 (cleanup apply code) implemented, real run pending user go-ahead
 
 - User asked directly to "get the v50 dataset built and models trained." Reality check delivered
   and accepted: Spec 109 was only 2/53 tasks done (T001 client-root policy, T002a fail-closed
@@ -107,8 +107,31 @@ Last updated: 2026-07-17
   skipped, 0 failed. Full `tests/` → 568 passed, 43 skipped, 3 failed; those 3
   (`tests/v24/test_export_map.py`, `tests/v25/test_h1_coarse.py` ×2) were confirmed via `git
   stash` to reproduce identically on committed `HEAD` before this phase — pre-existing, unrelated.
-- Remaining: Phase 7 (reviewed cleanup apply, currently dry-run-only), the real client-backed
-  build/migrate/verify against `H:\CLIENTS`, and training — all still explicit user go-aheads.
+- **Phase 7 (reviewed cleanup apply) code complete, same session, still no pause between
+  code-only phases**: `harvester.v50.cleanup.apply_cleanup_plan()`/`CleanupApplyResult`/
+  `CleanupApplyError` — refuses without explicit `confirm=True`; refuses unless the caller's
+  `expected_plan_id` matches the plan's own `plan_id` exactly (a stale/hand-edited plan cannot be
+  applied); re-resolves every target against `PathPolicy` at execution time rather than trusting
+  the plan's own `approved_roots` snapshot; rehashes each target's real content immediately
+  before deleting it, skipping (not deleting) anything that drifted since the plan was built. A
+  target already missing is treated as already-removed (a prior interrupted apply), not an
+  error, and its bytes are not double-counted — reapplying the same plan is idempotent. Added the
+  `apply` subcommand to `scripts/v50_cleanup_artifacts.py`.
+- Smoke-tested the full plan→apply pipeline end-to-end against a real synthetic fixture file (not
+  mocked): wrong `--plan-id` refused (file untouched); matching `--plan-id --confirm` actually
+  deleted the fixture and reported correct removed/skipped/recovered counts; re-running the exact
+  same command afterward was idempotent (0 bytes recovered the second time).
+- Refreshed the real (non-fixture) inventory + cleanup dry-run plan against everything on disk:
+  same 2 disposable targets as Phase 4 (`data-harvester/tmp/{v18,v22}_smoke`), same 12,901,439
+  bytes, `plan_id=sha256:fc2c657b42c33fd852a57f4873e657cd8ccbcef021487057a2eeddb826a4e346`.
+  Documented the exact real apply command in `quickstart.md` — **not run**.
+- Proof: `tests/v50/ tests/test_v50_contract.py tests/spec103/ tests/spec111/
+  tests/test_v50_build_command.py` → 189 passed, 2 skipped, 0 failed. Full `tests/` → 577
+  passed, 43 skipped, 3 failed (same 3 pre-existing failures as Phase 6).
+- Remaining, all explicit user go-aheads: actually running `apply` for real against
+  `tmp/{v18,v22}_smoke` (needs the user's review of the plan_id above), the post-apply
+  verification that follows, memory-bank compression (deliberately deferred until after that real
+  run), the real client-backed build/migrate/verify against `H:\CLIENTS`, and training.
 
 ## Prior active work: Spec 111 minimap lighting calibration (implemented through the T019 gate)
 
