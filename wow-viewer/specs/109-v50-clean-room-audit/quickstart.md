@@ -67,6 +67,35 @@ host with symlink privilege; re-run on Developer Mode or an elevated shell to cl
 non-symlink containment tests (protected-root-wins-when-nested, out-of-root rejection,
 nonexistent-path rejection) exercise the same resolution logic and all pass.
 
+## 0.6. Phase 3 fail-closed trust boundary — COMPLETE 2026-07-17
+
+`harvester.v50.inventory`/`verify_v18`/`verify_store` implemented with fixture tests, plus the
+real, working `scripts/v50_audit_artifacts.py` CLI (`inventory`, `verify-v18` subcommands).
+
+```powershell
+uv run python -m pytest tests/v50/ tests/test_v50_contract.py tests/spec103/ -q
+```
+
+Result: 114 passed, 2 skipped (symlink privilege, same as Phase 2), 0 failed.
+
+The `inventory` command was also run for real (read-only) against everything currently on disk:
+
+```powershell
+uv run python scripts/v50_audit_artifacts.py inventory `
+  --output-root ../output --model-root ../models `
+  --extra-root checkpoints=./checkpoints --extra-root tmp=./tmp --extra-root harvester_models=./models `
+  --report ../output/reports/v50/v50.1/inventory.json
+```
+
+12 artifacts, ~15.6 GB, every one `trust_state=unverified`/`disposition=quarantine` regardless of
+path or filename. Full results in
+`docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`.
+
+`verify-v18` needs a real V18 Zarr store + `index.parquet` and a `--signals-config` JSON file
+(`{"signals": [{"name": ..., "blacklisted": ..., "blacklist_reason": ..., "has_flag_name": ...}]}`).
+It does not yet cross-validate against a fresh client extraction -- that is deferred until Spec 109
+T002 freezes the v50 signal catalog (see the architecture doc for the exact gap statement).
+
 ## 1. Configure the faster client library
 
 The root is runtime configuration and is not committed:

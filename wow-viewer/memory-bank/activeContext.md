@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-17
 
-## Active work: Spec 109 v50 clean-room dataset — Phase 2 (Foundational) complete
+## Active work: Spec 109 v50 clean-room dataset — Phase 3 (US1 trust boundary) complete
 
 - User asked directly to "get the v50 dataset built and models trained." Reality check delivered
   and accepted: Spec 109 was only 2/53 tasks done (T001 client-root policy, T002a fail-closed
@@ -27,9 +27,30 @@ Last updated: 2026-07-17
   preserving every existing caller and its own test file untouched.
 - Proof: `tests/v50/` 29 passed + 2 skipped (symlink privilege); full check including existing
   consumers `tests/v50/ tests/test_v50_contract.py tests/spec103/` → 90 passed, 2 skipped, 0 failed.
-- Next: Phase 3 (US1 fail-closed trust boundary / inventory) — still no client/GPU needed. Phase 5
-  (the actual dataset builder) is where `H:\CLIENTS` access and long-running extraction enter, and
-  training after that remains its own explicit go-ahead.
+- **Phase 3 (US1) also complete, same session**: `inventory.py` (metadata-only discovery, never
+  reads array payloads, never sets trust_state to anything but UNVERIFIED regardless of name —
+  proven with a fixture literally named `totally_legit_v50_verified.zarr`), `verify_v18.py`
+  (per-(signal,row) audit, not a whole-signal verdict — FR-016; `holes_16` always rejected
+  regardless of content; false `has_*` truthfulness and non-finite detection), `verify_store.py`
+  (FR-005 promotion gate: schema/row-count/required-signal-truthfulness/content-hash/partition-leak
+  checks, reusing the existing `harvester.spec103.prefab_curation.validate_source_group_split`
+  rather than reimplementing it), and a real, working `scripts/v50_audit_artifacts.py` CLI
+  (`inventory`, `verify-v18`). Both subcommands smoke-tested end-to-end against real synthetic
+  fixtures (not just unit tests) — `verify-v18` correctly rejected a NaN row and blacklisted
+  `holes_16` in every row.
+- Ran the real (non-fixture) inventory pass against everything currently on disk: 12 artifacts,
+  ~15.6 GB (`models/v18` alone is ~10.8 GB), every one `unverified`/`quarantine` regardless of path.
+  Recorded in `docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md` and
+  `output/reports/v50/v50.1/inventory.json`.
+- Honest gap flagged, not hidden: `verify-v18` audits an already-decoded V18 store's content but
+  does not yet cross-validate against a fresh client extraction (plan.md Phase 2 step 2) — deferred
+  until Spec 109 T002 (the frozen v50 signal table) is done, since hardcoding a signal catalog
+  ahead of that would be exactly the kind of premature assumption this audit exists to avoid.
+- Proof: 114 passed, 2 skipped (symlink privilege), 0 failed across `tests/v50/
+  tests/test_v50_contract.py tests/spec103/`.
+- Next: Phase 4 (US2 reviewable cleanup planning, dry-run only) — still no client/GPU needed.
+  Phase 5 (the actual dataset builder) is where `H:\CLIENTS` access and long-running extraction
+  enter, and training after that remains its own explicit go-ahead.
 
 ## Prior active work: Spec 111 minimap lighting calibration (implemented through the T019 gate)
 

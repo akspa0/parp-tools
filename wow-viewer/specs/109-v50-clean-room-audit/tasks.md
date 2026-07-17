@@ -54,17 +54,17 @@ can be promoted.
 
 ### Tests for User Story 1
 
-- [ ] T014 [P] [US1] Add failing metadata-only inventory tests in `wow-viewer/data-harvester/tests/v50/test_inventory.py`
-- [ ] T015 [P] [US1] Add failing per-signal V18 verification tests, including rejected `holes_16`, in `wow-viewer/data-harvester/tests/v50/test_verify_v18.py`
+- [x] T014 [P] [US1] Add failing metadata-only inventory tests in `wow-viewer/data-harvester/tests/v50/test_inventory.py` (7 tests: forged v50 attributes, old pre-v50 names, kind classification, metadata-only content identity, artifact_id vs content_identity distinctness, missing root, determinism)
+- [x] T015 [P] [US1] Add failing per-signal V18 verification tests, including rejected `holes_16`, in `wow-viewer/data-harvester/tests/v50/test_verify_v18.py` (9 tests)
 
 ### Implementation for User Story 1
 
-- [ ] T016 [US1] Implement deterministic metadata-only artifact discovery in `wow-viewer/data-harvester/src/harvester/v50/inventory.py`
-- [ ] T017 [US1] Implement complete v50 store/index/lineage validation in `wow-viewer/data-harvester/src/harvester/v50/verify_store.py`
-- [ ] T018 [US1] Implement V18 per-signal audit planning and known-defect rejection in `wow-viewer/data-harvester/src/harvester/v50/verify_v18.py`
-- [ ] T019 [US1] Add inventory and verify-v18 subcommands in `wow-viewer/data-harvester/scripts/v50_audit_artifacts.py`
-- [ ] T020 [US1] Emit the initial machine-readable inventory under `wow-viewer/output/reports/v50/v50.1/` using the read-only command and summarize it in `wow-viewer/docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`
-- [ ] T021 [US1] Run all fixture-only User Story 1 tests from `wow-viewer/data-harvester/` and record the exact command/results in `wow-viewer/specs/109-v50-clean-room-audit/quickstart.md`
+- [x] T016 [US1] Implement deterministic metadata-only artifact discovery in `wow-viewer/data-harvester/src/harvester/v50/inventory.py`; never reads array payloads, never sets trust_state to anything but UNVERIFIED regardless of name/attributes
+- [x] T017 [US1] Implement complete v50 store/index/lineage validation in `wow-viewer/data-harvester/src/harvester/v50/verify_store.py` (FR-005: schema/dtype/shape, row-count agreement, required-signal truthfulness, content-integrity hashes, partition leakage -- reuses the existing `harvester.spec103.prefab_curation.validate_source_group_split` rather than reimplementing it); 8 fixture tests
+- [x] T018 [US1] Implement V18 per-signal audit planning and known-defect rejection in `wow-viewer/data-harvester/src/harvester/v50/verify_v18.py`; per-(signal,row) results, not a whole-signal verdict (FR-016)
+- [x] T019 [US1] Add `inventory` and `verify-v18` subcommands in `wow-viewer/data-harvester/scripts/v50_audit_artifacts.py`; both smoke-tested end-to-end against synthetic fixtures (a real filesystem tree for inventory, a real Zarr+Parquet store for verify-v18, which correctly rejected a NaN-poisoned row and blacklisted `holes_16`). `verify-v18`'s fresh-client cross-validation (plan.md Phase 2 step 2) is an explicit, documented gap -- deferred until Spec 109 T002 freezes the signal catalog
+- [x] T020 [US1] Ran the real read-only inventory command against everything currently on disk (`output/`, `models/`, `data-harvester/checkpoints`, `data-harvester/tmp`, `data-harvester/models`): 12 artifacts, ~15.6 GB, all `unverified`/`quarantine`. Report at `output/reports/v50/v50.1/inventory.json`; summarized in `docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`
+- [x] T021 [US1] Ran all fixture-only User Story 1 tests: `uv run python -m pytest tests/v50/ tests/test_v50_contract.py tests/spec103/ -q` -> 114 passed, 2 skipped (symlink privilege), 0 failed. Recorded in `quickstart.md`
 
 **Checkpoint**: All legacy artifacts remain unverified; no name or release attribute can launder trust.
 

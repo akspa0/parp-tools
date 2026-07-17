@@ -4,6 +4,43 @@
 
 **Status**: Clean-slate bootstrap complete 2026-07-16; no dataset promoted
 
+## Phase 2/3 foundational + trust-boundary implementation — 2026-07-17
+
+- Implemented `harvester/v50/` (contracts, identity, client_evidence, path_policy, inventory,
+  verify_v18, verify_store) and the read-only `scripts/v50_audit_artifacts.py inventory`/
+  `verify-v18` commands, all fixture-tested (114 passed, 2 skipped for symlink privilege, 0
+  failed). `v50_contract.py`'s release-identity gates now live in `harvester.v50.contracts`; the
+  old module is a thin re-export shim so existing Spec 103/108 callers are unaffected.
+- Ran the real (non-fixture) read-only inventory command against everything currently on disk:
+  `wow-viewer/output`, `wow-viewer/models`, `data-harvester/checkpoints`, `data-harvester/tmp`,
+  `data-harvester/models`. Report: `output/reports/v50/v50.1/inventory.json`.
+
+  | Owner | Kind | Path | Bytes |
+  |---|---|---|---:|
+  | output | unknown | `output/synthesized-minimaps` | 954,670,730 |
+  | models | unknown | `models/v18` | 10,848,359,743 |
+  | models | unknown | `models/v21` | 25,156,952 |
+  | models | unknown | `models/v23` | 1,871,311,176 |
+  | checkpoints | checkpoint | `data-harvester/checkpoints/d1_best.pt` | 44,737,027 |
+  | checkpoints | checkpoint | `data-harvester/checkpoints/d1_final.pt` | 44,737,799 |
+  | checkpoints | checkpoint | `data-harvester/checkpoints/v15_best.pt` | 328,818,359 |
+  | checkpoints | checkpoint | `data-harvester/checkpoints/v15_final.pt` | 328,819,211 |
+  | tmp | unknown | `data-harvester/tmp/v18_smoke` | 205,050 |
+  | tmp | unknown | `data-harvester/tmp/v22_smoke` | 12,696,389 |
+  | harvester_models | unknown | `data-harvester/models/spec077` | 1,095,721,766 |
+
+  Every record above is `trust_state=unverified`, `disposition=quarantine`, `proof_level=inventory`
+  regardless of path or filename — none of this is promoted or claimed compatible with v50 by this
+  pass. Directory-kind entries show `unknown` rather than a guessed kind: the classifier only infers
+  kind from file suffixes, and a directory (a nested tree of possibly-mixed content) is not
+  guessed at.
+- `verify-v18`'s per-signal audit (T018) does not yet cross-validate against a fresh client
+  extraction (plan.md Phase 2 step 2) — it audits an already-decoded V18 store's content for known
+  defects (blacklisted signals, non-finite values, `has_*` truthfulness) using a caller-supplied
+  signal catalog, since Spec 109's frozen v50 signal table (T002) is not finalized yet. Smoke-tested
+  against a synthetic fixture store: correctly rejected a NaN-poisoned row and blacklisted
+  `holes_16` in every row regardless of its content.
+
 ## Clean-slate completion — 2026-07-16
 
 - The user successfully emptied workspace `output/` and `wow-viewer/output/` with the guarded
