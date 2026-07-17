@@ -104,19 +104,19 @@ fresh/unavailable, all rows have lineage, and curricula contain no array payload
 
 ### Tests for User Story 3
 
-- [ ] T028 [P] [US3] Add failing selective-migration and resumability tests in `wow-viewer/data-harvester/tests/v50/test_migrate.py`
-- [ ] T029 [P] [US3] Add failing complete-store/finalization and curriculum-manifest tests in `wow-viewer/data-harvester/tests/v50/test_store.py`
+- [x] T028 [P] [US3] Add failing selective-migration and resumability tests in `wow-viewer/data-harvester/tests/v50/test_migrate.py` (7 tests: copy-eligible planning, blacklist rejection, ledger append-only, bit-preserving copy round-trip)
+- [x] T029 [P] [US3] Add failing complete-store/finalization and curriculum-manifest tests in `wow-viewer/data-harvester/tests/v50/test_store.py` (12 tests: partial vs complete store write, `finalization_state` gating, `TestCurriculumManifest` row-reference-only payloads)
 
 ### Implementation for User Story 3
 
-- [ ] T030 [US3] Implement the complete per-build v50 Zarr writer and finalization checks in `wow-viewer/data-harvester/src/harvester/v50/store.py`
-- [ ] T031 [US3] Implement bit-preserving verified V18 copy, fresh-signal slots, row lineage, and resume ledger in `wow-viewer/data-harvester/src/harvester/v50/migrate.py`
-- [ ] T032 [US3] Integrate the existing C# harvester stream for fresh signals and new builds in `wow-viewer/data-harvester/src/harvester/v50/build.py`
-- [ ] T033 [US3] Implement immutable row-selection curricula over canonical stores in `wow-viewer/data-harvester/src/harvester/v50/curriculum.py`
-- [ ] T034 [US3] Replace the current thin wrapper with migrate-v18, build, verify, finalize, and curriculum commands in `wow-viewer/data-harvester/scripts/v50_build_dataset.py`
-- [ ] T035 [US3] Run fixture-only migration/store tests and document exact results in `wow-viewer/specs/109-v50-clean-room-audit/quickstart.md`
-- [ ] T036 [US3] Prepare the bounded sampled V18 verification command for one user-selected build in `wow-viewer/specs/109-v50-clean-room-audit/quickstart.md`
-- [ ] T037 [US3] After user review of sampled proof, prepare the full user-run migration and fresh-build commands with duration and output estimates in `wow-viewer/specs/109-v50-clean-room-audit/quickstart.md`
+- [x] T030 [US3] Implement the complete per-build v50 Zarr writer and finalization checks in `wow-viewer/data-harvester/src/harvester/v50/store.py`; `write_v50_store()`, `read_v50_manifest()`, `finalize_store()` -- finalization recomputes observed hashes from the actual written store and refuses `complete` unless every required signal's `content_identity` matches, proven against both a stale-manifest (correctly `incomplete`, exit 1) and the real written manifest (`complete`, exit 0)
+- [x] T031 [US3] Implement bit-preserving verified V18 copy, fresh-signal slots, row lineage, and resume ledger in `wow-viewer/data-harvester/src/harvester/v50/migrate.py`; `plan_signal_migration()`, `MigrationLedger`/`MigrationLedgerEntry` (append-only), `copy_signal_row()`
+- [x] T032 [US3] Integrate the existing C# harvester stream for fresh signals and new builds in `wow-viewer/data-harvester/src/harvester/v50/build.py`; `build_harvest_stream_command()`, `read_harvest_stream()` (reuses `harvester.raw_reader.read_tile_blob` for the inner-blob format rather than reimplementing it), `run_fresh_extraction()` -- gated behind `--confirm-run`, prints the command and returns without launching anything otherwise
+- [x] T033 [US3] Implement immutable row-selection curricula over canonical stores in `wow-viewer/data-harvester/src/harvester/v50/curriculum.py`; `build_curriculum()`/`CurriculumManifest` store only `{store_id, row_id, source_group, split}` references, never array payloads, and reuse `harvester.spec103.prefab_curation.validate_source_group_split` for partition-leakage checks
+- [x] T034 [US3] Replace the current thin wrapper with migrate-v18, build, verify, finalize, and curriculum commands in `wow-viewer/data-harvester/scripts/v50_build_dataset.py`
+- [x] T035 [US3] Run fixture-only migration/store tests and document exact results in `wow-viewer/specs/109-v50-clean-room-audit/quickstart.md` -- `uv run python -m pytest tests/v50/ tests/test_v50_contract.py tests/spec103/ tests/spec111/ -q` -> 164 passed, 2 skipped (symlink privilege), 0 failed. All 5 CLI subcommands additionally smoke-tested end-to-end against a synthetic V18 Zarr fixture (`migrate-v18 --write-store` -> `finalize` -> `verify` (both the passing case and a deliberate hash-mismatch, which correctly failed closed with `proof_level=contract`, exit 1) -> `curriculum`), all against real Zarr/Parquet I/O, no fixtures mocked
+- [x] T036 [US3] Prepare the bounded sampled V18 verification command for one user-selected build in `wow-viewer/specs/109-v50-clean-room-audit/quickstart.md` -- documented with the real `verify-v18` flag names from the implemented CLI; execution against a real build under `H:\CLIENTS` remains user-run only pending build selection
+- [ ] T037 [US3] After user review of sampled proof, prepare the full user-run migration and fresh-build commands with duration and output estimates in `wow-viewer/specs/109-v50-clean-room-audit/quickstart.md` -- command shape is documented, but duration/output-size estimates require a real sampled run first (T036), which has not happened yet; genuinely blocked on the user selecting and reviewing one build
 
 **Checkpoint**: The user-run v50 release is complete and fully verified before old datasets become deletable.
 

@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-17
 
-## Active work: Spec 109 v50 clean-room dataset — Phase 4 (US2 cleanup planning) complete
+## Active work: Spec 109 v50 clean-room dataset — Phase 5 (US3 dataset builder) complete
 
 - User asked directly to "get the v50 dataset built and models trained." Reality check delivered
   and accepted: Spec 109 was only 2/53 tasks done (T001 client-root policy, T002a fail-closed
@@ -61,8 +61,27 @@ Last updated: 2026-07-17
 - Proof: 121 passed, 2 skipped (symlink privilege), 0 failed. The fixture test reproduces tasks.md's
   exact Independent Test scenario (protected/depended-on/out-of-root/safe-obsolete fixture →
   only the safe-obsolete target survives).
-- Next: Phase 5 (US3, the actual dataset builder) — this is where `H:\CLIENTS` access and
-  long-running extraction enter, and training after that remains its own explicit go-ahead.
+- **Phase 5 (US3) also complete, same session**: `store.py` (`write_v50_store`/`read_v50_manifest`/
+  `finalize_store` — finalization recomputes hashes from the store actually on disk and only reports
+  `complete` if every required signal matches, proven against both a deliberately stale manifest
+  and the real written one), `migrate.py` (`plan_signal_migration`/`MigrationLedger`/
+  `copy_signal_row`, bit-preserving), `build.py` (`build_harvest_stream_command`/
+  `run_fresh_extraction` gated behind `--confirm-run`/`read_harvest_stream`, reusing
+  `harvester.raw_reader.read_tile_blob` for the C# harvest-stream inner-blob format), `curriculum.py`
+  (`build_curriculum`, row-reference-only, reuses `validate_source_group_split` for partition
+  leakage). `scripts/v50_build_dataset.py` is now 5 real subcommands (`migrate-v18`, `build`,
+  `verify`, `finalize`, `curriculum`) replacing the old fail-closed placeholder.
+- All 5 subcommands smoke-tested end-to-end against a synthetic V18 Zarr fixture (real Zarr/Parquet
+  I/O): `migrate-v18 --write-store` → partial store; `finalize` correctly refused on a stale
+  manifest (exit 1) then succeeded on the real written manifest (exit 0); `verify` passed
+  (`proof_level=full`) on the correct hash and failed closed (`proof_level=contract`, exit 1) on a
+  wrong one; `curriculum` produced a row-reference-only train/val manifest.
+- Proof: `tests/v50/ tests/test_v50_contract.py tests/spec103/ tests/spec111/` → 164 passed, 2
+  skipped (symlink privilege), 0 failed.
+- Not yet proven: the real client-backed paths (`build` launching the C# harvester against
+  `H:\CLIENTS`, and running `migrate-v18`/`verify` against a real V18 build) — implemented and
+  gated, but not yet pointed at real data. That, then Phase 6 (command-owner rename convergence)
+  and Phase 7 (reviewed cleanup apply), then training, remain explicit user go-aheads.
 
 ## Prior active work: Spec 111 minimap lighting calibration (implemented through the T019 gate)
 
@@ -296,11 +315,13 @@ Last updated: 2026-07-17
 ## Separate active lane
 
 - Spec 109 v50 clean-room dataset work remains separate. `H:\CLIENTS` is the approved configured
-  client library; legacy workspace output was cleared. Do not recreate pre-v50 outputs. V50 does
-  not yet have a per-build store writer: its former Spec 108 mixed-copy wrapper now fails closed.
-  Its frozen liquid policy preserves `liquid_mask`/`liquid_height` as useful targets but makes them
-  fresh-only; a WL source requires all three contiguous/above-terrain/typed markers, while non-WL
-  sources retain reader identity in row lineage.
+  client library; legacy workspace output was cleared. Do not recreate pre-v50 outputs. V50 now has
+  a real per-build store writer (`harvester/v50/store.py` + `scripts/v50_build_dataset.py`,
+  fixture-proven and smoke-tested; see Phase 5 above) — the former Spec 108 mixed-copy wrapper is
+  fully replaced, not just failing closed. Its frozen liquid policy preserves `liquid_mask`/
+  `liquid_height` as useful targets but makes them fresh-only; a WL source requires all three
+  contiguous/above-terrain/typed markers, while non-WL sources retain reader identity in row
+  lineage. No dataset has been built from real client data yet — that remains user-run.
 
 ## Durable boundaries
 

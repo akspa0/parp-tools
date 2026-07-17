@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-17
 
-## Spec 109 — v50 clean-room dataset (Phase 2 Foundational complete)
+## Spec 109 — v50 clean-room dataset (Phase 5 US3 dataset builder complete)
 
 - Implemented the `harvester/v50/` package: `contracts.py` (ArtifactRecord, DatasetStoreManifest,
   DatasetSignal, RowLineage, verification enums — matches `v50-provenance.schema.json` via hand
@@ -32,6 +32,19 @@ Last updated: 2026-07-17
   dispositioned+proofed → exactly those 2 targets, 12,901,439 bytes, nothing deleted. Fixture
   reproduces tasks.md's exact protected/depended-on/out-of-root/safe-obsolete scenario. Proof: 121
   passed, 2 skipped, 0 failed.
+- Phase 5 (US3) complete same session: `store.py` (`write_v50_store`/`read_v50_manifest`/
+  `finalize_store` — finalization recomputes hashes from disk, refuses `complete` on any mismatch),
+  `migrate.py` (bit-preserving `plan_signal_migration`/`copy_signal_row`/`MigrationLedger`),
+  `build.py` (`build_harvest_stream_command`/`run_fresh_extraction` gated behind `--confirm-run`,
+  `read_harvest_stream` reusing `harvester.raw_reader.read_tile_blob`), `curriculum.py`
+  (row-reference-only `build_curriculum`, reuses `validate_source_group_split`). Rewrote
+  `scripts/v50_build_dataset.py` into 5 real subcommands (`migrate-v18`, `build`, `verify`,
+  `finalize`, `curriculum`), replacing the fail-closed placeholder entirely. All 5 smoke-tested
+  end-to-end against a synthetic V18 Zarr fixture, including a deliberate hash-mismatch case that
+  correctly failed closed (`proof_level=contract`, exit 1). Real client-backed extraction/build
+  remains implemented-but-unrun, pending user build selection and go-ahead. Proof:
+  `tests/v50/ tests/test_v50_contract.py tests/spec103/ tests/spec111/` → 164 passed, 2 skipped,
+  0 failed.
 
 ## Spec 111 — minimap lighting calibration
 
@@ -255,9 +268,10 @@ Last updated: 2026-07-17
 
 ## Separate continuity
 
-- Spec 109 v50 clean-room dataset work is separate from Spec 110. V50 does not yet have a canonical
-  per-build writer, so `v50_build_dataset.py` now refuses to delegate to the legacy mixed-copy
-  builder. Its initial liquid contract keeps `liquid_mask`/`liquid_height` as fresh-only targets:
-  historic payloads are rejected; fresh WL sources require contiguous, above-terrain, and typed
-  provenance; non-WL sources must retain their reader identity in row lineage. Focused V50/WL
-  contract coverage: 5 Python tests passed.
+- Spec 109 v50 clean-room dataset work is separate from Spec 110. V50 now has a canonical
+  per-build writer (`harvester/v50/store.py` + `scripts/v50_build_dataset.py migrate-v18/build/
+  verify/finalize/curriculum`; see Phase 5 above) replacing the legacy mixed-copy builder. Its
+  liquid contract keeps `liquid_mask`/`liquid_height` as fresh-only targets: historic payloads are
+  rejected; fresh WL sources require contiguous, above-terrain, and typed provenance; non-WL
+  sources must retain their reader identity in row lineage. Focused V50/WL contract coverage: 5
+  Python tests passed. No dataset has been built from real client data yet.

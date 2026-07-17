@@ -125,6 +125,42 @@ supplied via `--dispositions`/`--replacement-proofs` JSON, never inferred automa
 command produced a real plan: 2 targets, 12,901,439 bytes expected recovered, `dry_run_complete:
 true`. **Nothing was deleted** -- there is no apply command yet.
 
+## 0.8. Phase 5 complete v50 dataset builder — COMPLETE 2026-07-17
+
+`harvester.v50.store`/`migrate`/`build`/`curriculum` implemented with fixture tests, plus the real,
+working `scripts/v50_build_dataset.py` (`migrate-v18`, `build`, `verify`, `finalize`, `curriculum`
+subcommands -- this replaces the old thin fail-closed placeholder entirely).
+
+```powershell
+uv run python -m pytest tests/v50/ tests/test_v50_contract.py tests/spec103/ tests/spec111/ -q
+```
+
+Result: 164 passed, 2 skipped (symlink privilege), 0 failed.
+
+All 5 subcommands were also smoke-tested end-to-end against a synthetic 3-row V18 Zarr fixture
+(real Zarr/Parquet I/O, nothing mocked):
+
+1. `migrate-v18 --write-store` -- audited all 3 rows as copy-eligible for `height_257`, wrote a
+   partial v50 store with `finalization_state=incomplete`.
+2. `finalize` against the stale manifest template -- correctly refused with
+   `finalization_state=incomplete`, exit 1 (the template's placeholder `content_identity` didn't
+   match what was actually written -- this is the check working, not a bug).
+3. `finalize` against the manifest read back from the real written store --
+   `finalization_state=complete`, exit 0.
+4. `verify` against the finalized manifest with the matching observed hash -- `passed: true`,
+   `proof_level: full`, all 5 checks (`schema_dtype_shape`, `row_count_agreement`,
+   `required_signal_truthfulness`, `content_integrity`, `partition_leakage`).
+5. `verify` again with a deliberately wrong observed hash -- correctly failed closed:
+   `passed: false`, `proof_level: contract`, `failure_reasons` names the exact signal and both
+   hash values.
+6. `curriculum` over 3 row references across a train/val split -- wrote a manifest containing only
+   `{store_id, row_id, source_group, split}` references, no array payloads.
+
+The real client-backed paths (`build` launching the C# harvester against `H:\CLIENTS`, and running
+`migrate-v18`/`verify` against a real V18 build) are implemented and gated behind `--confirm-run`
+or explicit user execution, but have not been run against real client data yet -- see sections 3-5
+below.
+
 ## 1. Configure the faster client library
 
 The root is runtime configuration and is not committed:
@@ -162,54 +198,84 @@ uv run python scripts/v50_audit_artifacts.py verify-v18 `
 This uses the existing C# harvester as the independent reader. It reports every signal separately;
 it never promotes the complete store because a subset of signals passed.
 
-## 4. Full verification and selective migration — PLANNED, USER RUNS
+## 4. Selective migration from a verified V18 build — IMPLEMENTED, USER RUNS
 
-After reviewing the sample report, the intended command will be:
+After reviewing the sample report, migrate only the signals that passed the V18 audit
+(`--signals-config` is the same per-signal blacklist/policy JSON used in step 3; `--manifest-template`
+is a hand-reviewed manifest shell with the real `store_id`/`build_id`/`producer_identity`/
+`client_build_evidence_id` for this build -- see `contracts/v50-provenance.schema.json`):
 
 ```powershell
 uv run python scripts/v50_build_dataset.py migrate-v18 `
-  --source ../output/datasets/v18/3_3_5_12340.zarr `
-  --clients-root $FastClientsRoot `
-  --build 3_3_5_12340 `
-  --release v50.1 `
-  --output ../output/datasets/v50/v50.1/3_3_5_12340.zarr `
-  --full-verify `
-  --allow-zarr-write
+  --v18-store ../output/datasets/v18/3_3_5_12340.zarr `
+  --signals-config ./v50-signals-3_3_5_12340.json `
+  --manifest-template ./v50-manifest-template-3_3_5_12340.json `
+  --report ../output/reports/v50/v50.1/migrate-3_3_5_12340.json `
+  --write-store ../output/datasets/v50/v50.1/3_3_5_12340.zarr
 ```
 
-Passing payloads are copied bit-for-bit. Known-defective or failed signals are freshly extracted or
-recorded unavailable. `holes_16` is never copied from the old V18 store. `liquid_mask` and
-`liquid_height` are fresh-only: historic liquid payloads are rejected, and a WL source must declare
-`wl_liquid_surface_quads_v1`.
+Passing payloads are copied bit-for-bit (`copy_signal_row`, hash-checked). Known-defective, failed,
+or missing signals are recorded `unavailable` (never partially copied) and require a fresh
+extraction via step 5. `holes_16` is never copy-eligible. `liquid_mask`/`liquid_height` are
+fresh-only and are rejected by the audit regardless of V18 pass/fail.
 
-**Current status**: this command is intentionally unavailable. `v50_build_dataset.py` returns a
-non-zero result instead of delegating to the legacy mixed-copy builder until Spec 109 implements
-the fixture-proven migration and client-backed fresh-extraction owner.
+The `--write-store` output is partial (`finalization_state=incomplete`) until every required signal
+either copied or was topped up by a fresh build. Run `finalize` afterward:
 
-## 5. Fresh build for an additional SSD client — PLANNED, USER RUNS
+```powershell
+uv run python scripts/v50_build_dataset.py finalize `
+  --store ../output/datasets/v50/v50.1/3_3_5_12340.zarr `
+  --manifest ./v50-manifest-template-3_3_5_12340.json `
+  --row-lineages ../output/reports/v50/v50.1/migrate-3_3_5_12340.json `
+  --output ../output/datasets/v50/v50.1/3_3_5_12340.manifest.json
+```
+
+`finalize` recomputes hashes from the store actually on disk and only reports `complete` (exit 0)
+if every required signal's `content_identity` matches; otherwise `incomplete`, exit 1. Then run
+`verify` against the finalized manifest as the promotion gate (FR-005) before anything downstream
+treats this store as trusted:
+
+```powershell
+uv run python scripts/v50_build_dataset.py verify `
+  --manifest ../output/datasets/v50/v50.1/3_3_5_12340.manifest.json `
+  --row-lineages ../output/reports/v50/v50.1/migrate-3_3_5_12340.json `
+  --observed-hashes ./v50-observed-hashes-3_3_5_12340.json
+```
+
+`verify` fails closed on any hash mismatch, row-count disagreement, or partition leakage -- see the
+Phase 5 smoke test above for both the pass and deliberate-failure cases.
+
+## 5. Fresh build for an additional SSD client — IMPLEMENTED, USER RUNS
 
 ```powershell
 uv run python scripts/v50_build_dataset.py build `
+  --harvest-project ..\..\tools\harvest\WowViewer.Tool.Harvest `
   --clients-root $FastClientsRoot `
-  --build <build-id> `
-  --release v50.1 `
-  --output ../output/datasets/v50/v50.1/<build-id>.zarr `
-  --allow-zarr-write
+  --map Azeroth `
+  --stream-profile v22 `
+  --confirm-run
 ```
 
-The command writes one complete canonical per-build store and finalization manifest. It does not
-create a training-specific mixed copy.
+Without `--confirm-run` the command only prints the exact C# harvester invocation and launches
+nothing (`run_fresh_extraction(confirm_run=False)` returns `None`). Consuming the resulting
+`harvest-stream` into a v50 store writer is not yet wired end-to-end in this pass -- today the
+stream can be read with `harvester.v50.build.read_harvest_stream()`, but turning that into store
+rows still requires the same manual `migrate-v18 --write-store` / `finalize` steps above.
 
-## 6. Create curriculum manifests — PLANNED
+## 6. Create curriculum manifests — IMPLEMENTED
 
 ```powershell
 uv run python scripts/v50_build_dataset.py curriculum `
-  --release-root ../output/datasets/v50/v50.1 `
-  --policy <reviewed-policy.json> `
-  --output ../output/datasets/v50/v50.1/curricula/<name>.parquet
+  --release v50.1 `
+  --rows ./v50-curriculum-rows.json `
+  --selection-reason "<why these rows/splits were chosen>" `
+  --policy-identity sha256:<hash of the reviewed selection policy> `
+  --output ../output/datasets/v50/v50.1/curricula/<name>.json
 ```
 
-Curricula reference canonical rows and contain no array payloads.
+`--rows` is `{"rows": [{"store_id", "row_id", "source_group", "split"}, ...]}`. Curricula reference
+canonical rows only -- no array payloads -- and partition-leakage across splits is rejected using
+the same `validate_source_group_split` check as `verify`.
 
 ## 7. Cleanup dry run — PLANNED
 

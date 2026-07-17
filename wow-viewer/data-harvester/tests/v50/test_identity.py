@@ -8,7 +8,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from harvester.v50.identity import hash_file, hash_manifest, hash_metadata_tree, hash_parquet_table
+import numpy as np
+
+from harvester.v50.identity import hash_array, hash_file, hash_manifest, hash_metadata_tree, hash_parquet_table
 
 
 def test_hash_file_is_deterministic_and_content_sensitive(tmp_path: Path):
@@ -64,6 +66,22 @@ def test_hash_parquet_table_is_invariant_to_physical_layout_but_sensitive_to_con
     path_different = tmp_path / "different.parquet"
     pq.write_table(different_table, path_different)
     assert hash_parquet_table(path_snappy) != hash_parquet_table(path_different)
+
+
+def test_hash_array_is_sensitive_to_values_shape_and_dtype_but_not_memory_layout():
+    base = np.ones((4, 4), dtype=np.float32)
+    same_values_different_layout = np.asfortranarray(base)  # same values, different memory layout
+    assert hash_array(base) == hash_array(same_values_different_layout)
+
+    different_values = base.copy()
+    different_values[0, 0] = 0.0
+    assert hash_array(base) != hash_array(different_values)
+
+    different_dtype = base.astype(np.float64)
+    assert hash_array(base) != hash_array(different_dtype)
+
+    different_shape = np.ones((2, 8), dtype=np.float32)
+    assert hash_array(base) != hash_array(different_shape)
 
 
 def test_hash_manifest_is_invariant_to_key_order_but_sensitive_to_value(tmp_path: Path):

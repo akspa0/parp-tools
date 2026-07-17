@@ -58,6 +58,34 @@
 - Fixture proof: the exact scenario in tasks.md's Independent Test (protected, depended-on,
   out-of-root, and safe-obsolete targets in one fixture) included only the safe-obsolete target.
 
+## Phase 5 complete v50 dataset builder — 2026-07-17
+
+- Implemented `harvester/v50/store.py` (`write_v50_store`, `read_v50_manifest`, `finalize_store`),
+  `migrate.py` (`plan_signal_migration`, `MigrationLedger`/`MigrationLedgerEntry`, `copy_signal_row`),
+  `build.py` (`build_harvest_stream_command`, `run_fresh_extraction` gated behind
+  `confirm_run`, `read_harvest_stream` reusing `harvester.raw_reader.read_tile_blob` for the C#
+  harvest-stream inner-blob format rather than reimplementing it), and `curriculum.py`
+  (`build_curriculum`/`CurriculumManifest`, row-reference-only, reuses
+  `harvester.spec103.prefab_curation.validate_source_group_split` for partition-leakage checks).
+- Rewrote `scripts/v50_build_dataset.py` from the Phase 1 fail-closed placeholder into 5 real
+  subcommands: `migrate-v18`, `build`, `verify`, `finalize`, `curriculum`.
+- Fixture tests: `uv run python -m pytest tests/v50/ tests/test_v50_contract.py tests/spec103/
+  tests/spec111/ -q` → 164 passed, 2 skipped (symlink privilege), 0 failed.
+- Smoke-tested all 5 subcommands end-to-end against a synthetic 3-row V18 Zarr fixture (real
+  Zarr/Parquet I/O, nothing mocked): `migrate-v18 --write-store` produced a partial store
+  (`finalization_state=incomplete`); `finalize` against a stale manifest template correctly refused
+  (`incomplete`, exit 1 — the check catching a real mismatch, not a bug), then succeeded
+  (`complete`, exit 0) against the manifest actually read back from the written store; `verify`
+  passed with `proof_level=full` against the correct observed hash and failed closed
+  (`proof_level=contract`, exit 1, naming the exact signal and both hash values) against a
+  deliberately wrong one; `curriculum` produced a row-reference-only manifest across a train/val
+  split.
+- Explicitly not proven yet: the real client-backed paths. `build`'s C# harvester launch and
+  `migrate-v18`/`verify` against a real V18 build under `H:\CLIENTS` are implemented but require the
+  user to select a build and authorize the run (`--confirm-run` for `build`; no equivalent gate is
+  needed for `migrate-v18`/`verify` since they only read already-decoded local stores, but they have
+  not been pointed at real data yet). See `quickstart.md` sections 3-5.
+
 ## Clean-slate completion — 2026-07-16
 
 - The user successfully emptied workspace `output/` and `wow-viewer/output/` with the guarded

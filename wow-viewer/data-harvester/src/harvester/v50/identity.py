@@ -99,3 +99,19 @@ def hash_manifest(payload: dict[str, Any]) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     digest = hashlib.sha256(canonical.encode("utf-8"))
     return _format_digest(digest)
+
+
+def hash_array(array: Any) -> str:
+    """Identity of an array's actual values (a written Zarr signal array, or any array-like),
+    independent of chunking/compression -- two arrays with the same shape/dtype/values hash
+    identically regardless of how they are physically stored. Used by the v50 store writer/
+    finalizer to prove a signal's declared ``content_identity`` matches what was actually written.
+    """
+    import numpy as np
+
+    values = np.ascontiguousarray(array)
+    digest = hashlib.sha256()
+    digest.update(str(values.dtype).encode("utf-8"))
+    digest.update(str(values.shape).encode("utf-8"))
+    digest.update(values.tobytes())
+    return _format_digest(digest)
