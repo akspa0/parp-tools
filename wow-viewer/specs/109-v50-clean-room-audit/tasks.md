@@ -31,14 +31,14 @@ reviewed disk reclamation. One phase must be validated before the next starts.
 
 **CRITICAL**: No user-story implementation starts before this phase passes fixture tests.
 
-- [ ] T006 [P] Add failing provenance/store-manifest contract tests in `wow-viewer/data-harvester/tests/v50/test_contracts.py`
-- [ ] T007 [P] Add failing resolved-path and protected-root tests in `wow-viewer/data-harvester/tests/v50/test_path_policy.py`
-- [ ] T008 Implement ArtifactRecord, DatasetStoreManifest, DatasetSignal, RowLineage, and verification enums in `wow-viewer/data-harvester/src/harvester/v50/contracts.py`
-- [ ] T009 Implement deterministic file, metadata-tree, Parquet, and manifest identities in `wow-viewer/data-harvester/src/harvester/v50/identity.py`
-- [ ] T010 Implement configurable client-library/build evidence without source hardcoding in `wow-viewer/data-harvester/src/harvester/v50/client_evidence.py`
-- [ ] T011 Implement approved-root/protected-root resolution that rejects links and escapes in `wow-viewer/data-harvester/src/harvester/v50/path_policy.py`
-- [ ] T012 Migrate release identity helpers from `wow-viewer/data-harvester/src/harvester/v50_contract.py` into `wow-viewer/data-harvester/src/harvester/v50/contracts.py`
-- [ ] T013 Run fixture-only contract/path tests from `wow-viewer/data-harvester/` and record results in `wow-viewer/specs/109-v50-clean-room-audit/quickstart.md`
+- [x] T006 [P] Add failing provenance/store-manifest contract tests in `wow-viewer/data-harvester/tests/v50/test_contracts.py` (23 tests: ArtifactRecord, DatasetStoreManifest schema round-trip, RowLineage, migrated release gates)
+- [x] T007 [P] Add failing resolved-path and protected-root tests in `wow-viewer/data-harvester/tests/v50/test_path_policy.py` (7 tests; 2 symlink-escape cases self-skip via a runtime probe on hosts without symlink-creation privilege -- this host skipped both; not yet observed passing on a privileged host, see quickstart.md)
+- [x] T008 Implement ArtifactRecord, DatasetStoreManifest, DatasetSignal, RowLineage, and verification enums (`ProofLevel`, `TrustState`, `Disposition`, `MigrationPolicy`, `FinalizationState`) in `wow-viewer/data-harvester/src/harvester/v50/contracts.py`; `to_dict()`/`validate()` match `contracts/v50-provenance.schema.json` exactly without a runtime jsonschema dependency
+- [x] T009 Implement deterministic file, metadata-tree, Parquet, and manifest identities in `wow-viewer/data-harvester/src/harvester/v50/identity.py`; Parquet identity is invariant to physical layout/compression but sensitive to content (proven in test)
+- [x] T010 Implement configurable client-library/build evidence without source hardcoding in `wow-viewer/data-harvester/src/harvester/v50/client_evidence.py`; required paths, executable candidates, and archive glob are all caller-supplied, never hardcoded
+- [x] T011 Implement approved-root/protected-root resolution that rejects links and escapes in `wow-viewer/data-harvester/src/harvester/v50/path_policy.py`; protected root wins even when nested inside an approved root
+- [x] T012 Migrate release identity helpers from `wow-viewer/data-harvester/src/harvester/v50_contract.py` into `wow-viewer/data-harvester/src/harvester/v50/contracts.py`; `v50_contract.py` is now a thin re-export shim (existing `tests/test_v50_contract.py` and all spec103/108 callers pass unchanged)
+- [x] T013 Ran fixture-only contract/path tests from `wow-viewer/data-harvester/`: `uv run python -m pytest tests/v50/ tests/test_v50_contract.py tests/spec103/ -q` -> 90 passed, 2 skipped (symlink privilege), 0 failed. Recorded in `quickstart.md`
 
 **Checkpoint**: Missing identities, unsafe paths, and incompatible releases fail before I/O-heavy work.
 

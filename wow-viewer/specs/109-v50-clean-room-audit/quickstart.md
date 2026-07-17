@@ -48,6 +48,25 @@ icacls "I:\parp\parp-tools\wow-viewer\output" /grant "%USERDOMAIN%\%USERNAME%:(O
 Then rerun the exact apply command. Do not run these ACL commands against the workspace root or
 `H:\CLIENTS`.
 
+## 0.5. Phase 2 foundational contracts — COMPLETE 2026-07-17
+
+`harvester.v50.contracts`/`identity`/`client_evidence`/`path_policy` are implemented with
+fixture-only tests (no client data, no GPU, nothing destructive). `harvester.v50_contract` is now a
+thin re-export shim over `harvester.v50.contracts` so existing Spec 103/108 callers are unaffected.
+
+```powershell
+uv run python -m pytest tests/v50/ tests/test_v50_contract.py tests/spec103/ -q
+```
+
+Result: 90 passed, 2 skipped, 0 failed. The 2 skips are the symlink-escape cases
+(`test_rejects_a_symlink_that_escapes_every_approved_root`,
+`test_rejects_a_symlink_that_redirects_into_a_protected_root`) -- this host's account cannot
+create symlinks without elevated privilege/Developer Mode, so they self-skip via a runtime probe
+rather than failing on an environment limitation. They have not yet been observed passing on a
+host with symlink privilege; re-run on Developer Mode or an elevated shell to close that gap. The
+non-symlink containment tests (protected-root-wins-when-nested, out-of-root rejection,
+nonexistent-path rejection) exercise the same resolution logic and all pass.
+
 ## 1. Configure the faster client library
 
 The root is runtime configuration and is not committed:

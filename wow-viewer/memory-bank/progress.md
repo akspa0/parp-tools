@@ -2,6 +2,23 @@
 
 Last updated: 2026-07-17
 
+## Spec 109 — v50 clean-room dataset (Phase 2 Foundational complete)
+
+- Implemented the `harvester/v50/` package: `contracts.py` (ArtifactRecord, DatasetStoreManifest,
+  DatasetSignal, RowLineage, verification enums — matches `v50-provenance.schema.json` via hand
+  validation), `identity.py` (file/metadata-tree/Parquet/manifest deterministic `sha256:` hashing),
+  `client_evidence.py` (configurable client-root fingerprinting, nothing hardcoded), `path_policy.py`
+  (approved/protected-root resolution, protected always wins, symlink-escape rejection). Migrated
+  the release-identity gates out of `v50_contract.py` into `contracts.py`, leaving the former as a
+  thin re-export shim so existing spec103/108 callers and their tests are untouched.
+- Proof: `tests/v50/` 29 passed + 2 skipped (symlink privilege unavailable on this host, self-skips
+  via a runtime probe); combined with existing consumers (`test_v50_contract.py`, `tests/spec103/`)
+  → 90 passed, 2 skipped, 0 failed.
+- Context: user asked to get the v50 dataset built and models trained; delivered an honest scope
+  check first (2/53 Spec 109 tasks done, no dataset possible yet) and the user chose to start
+  Phase 2 now. Phases 3-4 (trust-boundary inventory, cleanup planning) remain client/GPU-free; Phase
+  5 is where real `H:\CLIENTS` extraction and eventually training enter, each its own checkpoint.
+
 ## Spec 111 — minimap lighting calibration
 
 - Implemented all code phases (T001–T018, T020–T021) up to the explicitly gated T019 training run.

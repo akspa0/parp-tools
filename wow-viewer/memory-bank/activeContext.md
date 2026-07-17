@@ -2,7 +2,36 @@
 
 Last updated: 2026-07-17
 
-## Active work: Spec 111 minimap lighting calibration (implemented through the T019 gate)
+## Active work: Spec 109 v50 clean-room dataset — Phase 2 (Foundational) complete
+
+- User asked directly to "get the v50 dataset built and models trained." Reality check delivered
+  and accepted: Spec 109 was only 2/53 tasks done (T001 client-root policy, T002a fail-closed
+  liquid provenance) with no `harvester/v50/` package yet; `v50_build_dataset.py` still fails
+  closed by design. Real dataset building needs Phases 2→5 in order (this project's own
+  "one phase at a time" rule); training needs a finalized Phase 5 store. User chose to start
+  Phase 2 now (pure code + fixtures, no client/GPU) rather than a full walkthrough or a narrower
+  shortcut.
+- Phase 2 (T006-T013) implemented and proven: `harvester/v50/contracts.py` (ArtifactRecord,
+  DatasetStoreManifest/DatasetSignal matching `v50-provenance.schema.json` exactly via hand
+  validation — no new jsonschema runtime dependency, project didn't have one declared — RowLineage,
+  and the ProofLevel/TrustState/Disposition/MigrationPolicy/FinalizationState enums), `identity.py`
+  (file/metadata-tree/Parquet-content/manifest hashing, all `sha256:<hex>`; Parquet identity proven
+  invariant to compression/layout but sensitive to content), `client_evidence.py` (fingerprints a
+  configured client root; every path/filename/glob is caller-supplied, never hardcoded — no
+  hardcoded `Wow.exe` assumption since that filename varies by client era), `path_policy.py`
+  (approved/protected-root resolution; protected always wins even when nested inside an approved
+  root; symlink-escape tests self-skip via a runtime probe on this unprivileged host, not yet
+  observed passing on a privileged one — flagged honestly rather than claimed).
+- `harvester/v50_contract.py` (the pre-existing release-identity module with real spec103/108
+  consumers) is now a thin re-export shim over the new package rather than being replaced outright,
+  preserving every existing caller and its own test file untouched.
+- Proof: `tests/v50/` 29 passed + 2 skipped (symlink privilege); full check including existing
+  consumers `tests/v50/ tests/test_v50_contract.py tests/spec103/` → 90 passed, 2 skipped, 0 failed.
+- Next: Phase 3 (US1 fail-closed trust boundary / inventory) — still no client/GPU needed. Phase 5
+  (the actual dataset builder) is where `H:\CLIENTS` access and long-running extraction enter, and
+  training after that remains its own explicit go-ahead.
+
+## Prior active work: Spec 111 minimap lighting calibration (implemented through the T019 gate)
 
 - Spec/plan/research/data-model/contract/quickstart/tasks written and all code phases implemented
   (`specs/111-minimap-lighting-calibration/`). Remaining: the user-run real-client bucketing pass
