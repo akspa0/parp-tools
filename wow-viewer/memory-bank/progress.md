@@ -1,6 +1,21 @@
 # Progress — wow-viewer
 
-Last updated: 2026-07-16
+Last updated: 2026-07-17
+
+## Spec 111 — minimap lighting calibration
+
+- Created the Spec Kit spec, plan, research, data-model, contract, quickstart, and dependency-ordered
+  tasks (`specs/111-minimap-lighting-calibration/`). Planning only — no implementation code written
+  yet; `tasks.md` T001 (file skeletons) is the next actionable step.
+- Three user stories: US1 shading-based lighting-bucket inference for the real 0.5.3.3368 dataset
+  (MVP), US2 rebalance synthetic-lighting-variant training sampling to match the real distribution,
+  US3 retrain-and-evaluate the existing reconstruction model with an explicit go/no-go gate.
+- Confirmed with the user before writing the spec: build scope is 0.5.3.3368 only; training scope
+  includes the full retrain-and-evaluate loop (not just data prep), with its GPU/cloud execution step
+  explicitly gated on separate authorization at run time.
+- Research surfaced that `data-harvester/src/harvester/spec103/terrain_lighting.py` independently
+  reimplements the solar-direction model and has drifted to `v1` while the corrected C# path is now
+  `v3` — the plan retires that duplication rather than syncing constants by hand.
 
 ## Spec 110 — viewer stabilization
 

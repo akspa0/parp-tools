@@ -1,8 +1,34 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-16
+Last updated: 2026-07-17
 
-## Active work: Spec 110 viewer stabilization
+## Active work: Spec 111 minimap lighting calibration (planned, not yet implemented)
+
+- New feature spec, plan, research, data-model, contract, quickstart, and tasks written
+  (`specs/111-minimap-lighting-calibration/`). Not yet implemented — Phase 3 code has not started.
+- Goal: use the now ground-truth-corrected `TerrainSolarDirection`/`TerrainMinimapCompositor` path to
+  shading-match every 0.5.3.3368 authored minimap (geometric hillshade direction, not the existing
+  tint-ratio signal) against synthesized candidates, bucket the real dataset by inferred lighting, use
+  that real distribution to rebalance the existing synthetic-lighting-variant training generator, then
+  retrain/evaluate the existing reconstruction model with a go/no-go gate.
+- Scope is explicitly 0.5.3.3368 only (the only build with a ground-truth-traced sun model); user
+  chose this over broader/DBC-verified-build coverage when asked.
+- User explicitly chose to include a full retrain-and-evaluate phase (not just dataset prep) when
+  asked — but its actual GPU/cloud execution step is written as a hard stop requiring separate,
+  explicit authorization at run time, per established practice.
+- Key finding baked into the plan: `data-harvester/src/harvester/spec103/terrain_lighting.py` is a
+  **separate Python reimplementation** of the solar-direction model (`...-v1`) that has already
+  drifted from the corrected C# `AuthoredTerrainDayNightProfile` (now `...-v3`) — i.e. the existing
+  synthetic-lighting training-variant generator has been training against a stale/wrong lighting
+  model independent of today's minimap-exporter fix. Spec 111 retires that duplication in favor of
+  streaming lighting parameters from the single C# production path, rather than hand-porting constants
+  (which would just drift again next time).
+- Hard constraints carried forward from prior specs, not relitigated: no DepthAnything-family/
+  multi-head/shared-weight model paths (Spec 102 Constitution Check); ground-truth lighting/time is
+  never a deployed-model input (Spec 103/106); canonical storage stays per-build Zarr, no NPZ
+  (constitution principle V).
+
+## Prior active work: Spec 110 viewer stabilization
 
 - Current phase: **Phase 1d terrain-minimap fidelity correction** after fog, terrain visibility,
   LIT inspection, export, and control reachability. A real 0.5.3 Kalimdor export now emits a tile;
