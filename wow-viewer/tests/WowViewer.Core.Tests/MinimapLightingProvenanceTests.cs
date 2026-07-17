@@ -66,4 +66,63 @@ public sealed class MinimapLightingProvenanceTests
         Assert.Null(result.EstimatedTimeOfDayHours);
         Assert.Equal("no_baked_tint_detected", result.TimeOfDayEvidence);
     }
+
+    [Fact]
+    public void NotEvaluated_DefaultsShadingMatchFieldsToNotEvaluatedAndNull()
+    {
+        MinimapLightingProvenance result = MinimapLightingProvenance.NotEvaluated("no_authored_minimap");
+
+        Assert.Equal("not_evaluated", result.ShadingMatchStatus);
+        Assert.Null(result.ShadingMatchedTimeOfDayHours);
+        Assert.Null(result.ShadingMatchConfidence);
+        Assert.Null(result.ShadingMatchEvidence);
+        Assert.Null(result.ShadingMatchExcludedMcshFraction);
+        Assert.Null(result.ShadingMatchBuildFingerprint);
+    }
+
+    [Fact]
+    public void Infer_LeavesShadingMatchFieldsAtTheirDefaultUntouched()
+    {
+        var image = new byte[8, 8, 3];
+        for (int y = 0; y < 8; y++)
+            for (int x = 0; x < 8; x++)
+                for (int channel = 0; channel < 3; channel++)
+                    image[y, x, channel] = 100;
+
+        MinimapLightingProvenance result = MinimapLightingProvenance.Infer(
+            image,
+            image,
+            mcshShadowMask256: null,
+            timeCandidates: null);
+
+        // The v1 tint-based Infer() factory has no knowledge of the additive shading-match fields;
+        // they must remain at their not-evaluated default rather than silently reporting a match.
+        Assert.Equal("not_evaluated", result.ShadingMatchStatus);
+    }
+
+    [Fact]
+    public void ToMetadata_IncludesShadingMatchFields()
+    {
+        MinimapLightingProvenance result = MinimapLightingProvenance.NotEvaluated("no_authored_minimap") with
+        {
+            ShadingMatchStatus = "matched",
+            ShadingMatchedTimeOfDayHours = 13.5f,
+            ShadingMatchConfidence = 0.82f,
+            ShadingMatchEvidence = "directional_structure_match_not_capture_proof",
+            ShadingMatchExcludedMcshFraction = 0.1f,
+            ShadingMatchBuildFingerprint = "0.5.3.3368",
+        };
+
+        IReadOnlyDictionary<string, object?> metadata = result.ToMetadata();
+
+        Assert.Equal("matched", metadata["shading_match_status"]);
+        Assert.Equal(13.5f, metadata["shading_matched_time_of_day_hours"]);
+        Assert.Equal(0.82f, metadata["shading_match_confidence"]);
+        Assert.Equal("directional_structure_match_not_capture_proof", metadata["shading_match_evidence"]);
+        Assert.Equal(0.1f, metadata["shading_match_excluded_mcsh_fraction"]);
+        Assert.Equal("0.5.3.3368", metadata["shading_match_build_fingerprint"]);
+
+        // Existing tint-based metadata keys must remain unaffected by the additive fields.
+        Assert.Equal("no_authored_minimap", metadata["inference_status"]);
+    }
 }

@@ -24,6 +24,7 @@ from harvester.spec103.terrain_lighting import (
     GRID_TO_RENDERER_NORMAL_TRANSFORM,
     LIT_PROFILE_SCHEMA,
     PROFILE_REVISION,
+    _terrain_solar_direction,
     evaluate_authored_day_night,
     grid_normals_to_renderer,
     load_lighting_profile_artifact,
@@ -200,6 +201,28 @@ def test_profile_wraps_and_mcsh_only_modulates_clamped_directional_term() -> Non
     )
     np.testing.assert_allclose(lit[2], ambient, atol=1e-6)
     np.testing.assert_allclose(lit[3], ambient, atol=1e-6)
+
+
+def test_solar_direction_keeps_a_fixed_north_west_bearing_instead_of_going_vertical_at_noon() -> None:
+    # Spec 111: this module's direction formula had drifted from the corrected C#
+    # TerrainSolarDirection (neither the north/south sign fix nor the fixed-bearing fix had been
+    # ported). Assert both corrections hold here too: X and Y stay positive (north-west) at every
+    # sampled hour, and noon does not collapse to a vertical, shadow-less sun.
+    noon = _terrain_solar_direction(0.5)
+    dawn = _terrain_solar_direction(11.0 / 24.0)
+    dusk = _terrain_solar_direction(13.0 / 24.0)
+
+    for direction in (noon, dawn, dusk):
+        assert direction[0] > 0.0
+        assert direction[1] > 0.0
+
+    assert noon[0] == pytest.approx(noon[1])
+    assert noon[0] / noon[1] == pytest.approx(dawn[0] / dawn[1], rel=1e-4)
+    assert noon[0] / noon[1] == pytest.approx(dusk[0] / dusk[1], rel=1e-4)
+
+    midnight = _terrain_solar_direction(0.0)
+    mid_morning = _terrain_solar_direction(0.4)
+    assert noon[2] > mid_morning[2] > midnight[2]
 
 
 def test_grid_normal_transform_is_asymmetric_and_not_an_axis_noop() -> None:

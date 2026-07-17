@@ -2,10 +2,43 @@
 
 Last updated: 2026-07-17
 
-## Active work: Spec 111 minimap lighting calibration (planned, not yet implemented)
+## Active work: Spec 111 minimap lighting calibration (implemented through the T019 gate)
 
-- New feature spec, plan, research, data-model, contract, quickstart, and tasks written
-  (`specs/111-minimap-lighting-calibration/`). Not yet implemented — Phase 3 code has not started.
+- Spec/plan/research/data-model/contract/quickstart/tasks written and all code phases implemented
+  (`specs/111-minimap-lighting-calibration/`). Remaining: the user-run real-client bucketing pass
+  (T009's bounded `harvest-stream --stream-profile v22` + eyeball proof) and the explicitly gated
+  T019 training run.
+- Implementation shape: `MinimapLightingProvenance` gained six additive shading-match fields;
+  `MinimapShadingMatch` (Core.IO, because it must call `TerrainMinimapCompositor`) sweeps 24 hourly
+  candidates through the production compositor and scores mean/variance-normalized luma Pearson
+  correlation — gradient-direction cosine was tried first and could not discriminate hours at all
+  once the azimuth became fixed; value correlation is tint-invariant for a single material (luma =
+  materialLuma × lightingValue) and genuinely elevation-discriminative. Empirical facts baked into
+  its tests: `TerrainSolarDirection`'s 0.05 elevation floor makes hours 0–6/18–23 render
+  byte-identically (a genuine tie, not a metric bug — test at noon, which is unique), and material
+  channels near 255 clip at high-lambert hours, breaking multiplicative tint-invariance (test
+  colors stay ≤150).
+- The Harvest wiring is NOT a new command: `AnalyzeAuthoredMinimapLighting` chains
+  `MinimapShadingMatch.Evaluate` after the tint `Infer()` on the existing Full/V22 streaming
+  pathway; the internal 0.5.3.3368 fingerprint gate renders zero candidates for other builds.
+  `minimap_shading_match_v1` joins AvailableSignals only when a tile was actually evaluated.
+- Python side: `harvester/spec111/lighting_buckets.py` (reconciled distribution report; pre-111
+  tiles missing the field are surfaced as `tiles_without_shading_match_field`, never folded into
+  not-evaluated), `rebalance_lighting_variants.py` (largest-remainder allocation into bare-float
+  `lighting_times` for the existing spec103 store builder — structurally cannot leak bucket labels
+  into model input), `checkpoint_comparison.py` (regressed AND inconclusive both keep the deployed
+  checkpoint). `scripts/train_spec111_reconstruction.py` validates and prints the delegated
+  `train_spec103_wdl_prior.py` command but refuses to run without `--confirm-run`.
+- The drifted `terrain_lighting.py` direction formula is now a documented value-for-value port of
+  the corrected C# `TerrainSolarDirection` with a regression test; a streamed (not ported)
+  architecture stays a labeled follow-up.
+- Proof: focused C# sweep 42/42; Harvest Debug build 0 errors; `tests/spec111/` 16/16;
+  `tests/spec103/test_terrain_lighting.py` 10/10; gate smoke-run refused to train and wrote no
+  checkpoint. Full data-harvester suite: 3 pre-existing failures (v24 export-map fixture, v25
+  h1_coarse neighbor-context API) reproduce without these changes and are unrelated.
+
+## Prior work: Spec 111 planning notes
+
 - Goal: use the now ground-truth-corrected `TerrainSolarDirection`/`TerrainMinimapCompositor` path to
   shading-match every 0.5.3.3368 authored minimap (geometric hillshade direction, not the existing
   tint-ratio signal) against synthesized candidates, bucket the real dataset by inferred lighting, use

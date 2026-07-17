@@ -1098,7 +1098,7 @@ static class Program
 
         bool needsTerrainTexturePayloads = streamProfile is StreamProfile.Full or StreamProfile.V22;
         if (needsTerrainTexturePayloads)
-            AnalyzeAuthoredMinimapLighting(catalog, mapName, pack);
+            AnalyzeAuthoredMinimapLighting(catalog, mapName, pack, buildVersion);
         else if (pack.MinimapRgb256 is not null)
             SetMinimapLightingProvenance(pack, MinimapLightingProvenance.NotEvaluated("analysis_requires_full_texture_decode"));
 
@@ -1450,7 +1450,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             }
         }
 
-        AnalyzeAuthoredMinimapLighting(catalog, mapName, pack);
+        AnalyzeAuthoredMinimapLighting(catalog, mapName, pack, buildVersion);
 
         // MTEX table indices are semantic. Do not shift later texture payloads into an earlier
         // missing slot: either retain a fully name-aligned payload table or record incompleteness.
@@ -1872,7 +1872,8 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     private static void AnalyzeAuthoredMinimapLighting(
         NativeMpqService catalog,
         string mapName,
-        TerrainTileTensorPack pack)
+        TerrainTileTensorPack pack,
+        string? buildVersion = null)
     {
         if (pack.MinimapRgb256 is null)
         {
@@ -1906,13 +1907,24 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
                     TerrainMinimapLighting.Neutral));
             byte[,,] baselineRgb = CopyRgb(baseline);
             IReadOnlyList<MinimapLightingTimeCandidate> candidates = LoadMinimapLightingTimeCandidates(catalog, mapName);
-            SetMinimapLightingProvenance(
+            MinimapLightingProvenance provenance = MinimapLightingProvenance.Infer(
+                pack.MinimapRgb256,
+                baselineRgb,
+                pack.McshShadowMask256,
+                candidates);
+
+            // Spec 111: geometric shading-direction inference, additive to the tint-ratio result
+            // above. MinimapShadingMatch.Evaluate gates on the exact 0.5.3.3368 build fingerprint
+            // internally and renders zero candidates for any other build, so chaining it here adds
+            // no measurable cost to Full/V22 exports of other client builds.
+            provenance = MinimapShadingMatch.Evaluate(
+                provenance,
                 pack,
-                MinimapLightingProvenance.Infer(
-                    pack.MinimapRgb256,
-                    baselineRgb,
-                    pack.McshShadowMask256,
-                    candidates));
+                textures,
+                pack.MinimapRgb256,
+                buildVersion ?? string.Empty);
+
+            SetMinimapLightingProvenance(pack, provenance);
         }
         catch (Exception ex)
         {
@@ -2046,10 +2058,13 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         MinimapLightingProvenance provenance)
     {
         pack.MinimapLightingProvenance = provenance;
-        pack.AvailableSignals = new HashSet<string>(pack.AvailableSignals, StringComparer.OrdinalIgnoreCase)
+        var signals = new HashSet<string>(pack.AvailableSignals, StringComparer.OrdinalIgnoreCase)
         {
             "minimap_lighting_provenance_v1"
         };
+        if (!string.Equals(provenance.ShadingMatchStatus, "not_evaluated", StringComparison.Ordinal))
+            signals.Add("minimap_shading_match_v1");
+        pack.AvailableSignals = signals;
     }
 
     private static SyntheticMinimapLightingProfile ResolveSyntheticMinimapLighting(float gameTime)

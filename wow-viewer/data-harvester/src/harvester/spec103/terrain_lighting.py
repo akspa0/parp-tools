@@ -372,16 +372,41 @@ def _lerp(start: FloatArray, end: FloatArray, factor: float) -> NDArray[np.float
     return np.asarray(start + ((end - start) * factor), dtype=np.float32)
 
 
+def _terrain_solar_direction(game_time: float) -> NDArray[np.float64]:
+    """Synchronized port of ``WowViewer.Core.Terrain.TerrainSolarDirection.Evaluate`` (C#).
+
+    Spec 111 found this module carrying its own independent reimplementation of the solar
+    direction, already two corrections behind the C# source of truth: it neither locked the
+    north/south bearing to the correct sign nor kept the horizontal bearing from collapsing to a
+    vertical, shadow-less sun at solar noon/midnight. This function is a direct, value-for-value
+    port of the corrected C# formula rather than an independent model, specifically so this
+    lighting-direction logic has exactly one authored definition to keep in sync. A true streamed
+    (not ported) architecture -- computing this in C# and passing it through the existing
+    C#-to-Python pipeline for every sampled game_time -- remains a larger follow-up; porting the
+    verified formula is the immediately achievable fix for the drift itself.
+
+    Raw MCNR/MCVT world axes are +X = North, +Y = West, +Z = Up. The traced native SetDirection ray
+    (docs/architecture/wow-1.0.0-world-lighting-shadow-model-2026-07-15.md Section 2.1) holds a
+    constant azimuth and only cycles elevation, so the horizontal bearing here is fixed north-west
+    at every time of day; only elevation varies.
+    """
+    wrapped_time = float(game_time - np.floor(game_time))
+    sun_angle = wrapped_time * (2.0 * np.pi)
+    sun_height = float(np.sin(sun_angle - (np.pi * 0.5)))
+    diagonal_horizontal_scale = 0.5 / np.sqrt(2.0)  # matches the traced 225-degree bearing
+    direction = np.asarray(
+        [diagonal_horizontal_scale, diagonal_horizontal_scale, max(sun_height, 0.05)],
+        dtype=np.float64,
+    )
+    return direction / np.linalg.norm(direction)
+
+
 def evaluate_authored_day_night(game_time: float) -> TerrainLightingSample:
     """Evaluate the authored fallback at a normalized game time, wrapping to [0, 1)."""
     wrapped_time = float(game_time - np.floor(game_time))
     sun_angle = wrapped_time * (2.0 * np.pi)
     sun_height = float(np.sin(sun_angle - (np.pi * 0.5)))
-    sun_horizontal = float(np.cos(sun_angle - (np.pi * 0.5)))
-    direction = np.asarray(
-        [sun_horizontal * 0.5, 0.3, max(sun_height, 0.05)], dtype=np.float64
-    )
-    direction /= np.linalg.norm(direction)
+    direction = _terrain_solar_direction(game_time)
 
     day_factor = max(0.0, sun_height)
     directional_color = _lerp(

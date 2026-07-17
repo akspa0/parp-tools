@@ -29,9 +29,21 @@ public sealed record MinimapLightingProvenance(
     float? EstimatedTimeOfDayHours,
     float? TimeOfDayConfidence,
     string TimeOfDayEvidence,
-    string? TimeOfDayCandidateSource)
+    string? TimeOfDayCandidateSource,
+    string ShadingMatchStatus = "not_evaluated",
+    float? ShadingMatchedTimeOfDayHours = null,
+    float? ShadingMatchConfidence = null,
+    string? ShadingMatchEvidence = null,
+    float? ShadingMatchExcludedMcshFraction = null,
+    string? ShadingMatchBuildFingerprint = null)
 {
     public const string CurrentContractVersion = "minimap-lighting-provenance-v1";
+
+    // Spec 111: the shading-match fields above are additive to the v1 tint-based contract. They
+    // describe a distinct, geometric signal (which direction the terrain shadows fall) that the
+    // tint-ratio inference below cannot see, and are populated independently by
+    // WowViewer.Core.IO.Maps.MinimapShadingMatch. A tile can be tint-matched and
+    // shading-not_evaluated, or vice versa -- the two signals do not imply each other.
 
     public IReadOnlyDictionary<string, object?> ToMetadata() => new Dictionary<string, object?>
     {
@@ -48,6 +60,12 @@ public sealed record MinimapLightingProvenance(
         ["time_of_day_confidence"] = TimeOfDayConfidence,
         ["time_of_day_evidence"] = TimeOfDayEvidence,
         ["time_of_day_candidate_source"] = TimeOfDayCandidateSource,
+        ["shading_match_status"] = ShadingMatchStatus,
+        ["shading_matched_time_of_day_hours"] = ShadingMatchedTimeOfDayHours,
+        ["shading_match_confidence"] = ShadingMatchConfidence,
+        ["shading_match_evidence"] = ShadingMatchEvidence,
+        ["shading_match_excluded_mcsh_fraction"] = ShadingMatchExcludedMcshFraction,
+        ["shading_match_build_fingerprint"] = ShadingMatchBuildFingerprint,
     };
 
     public static MinimapLightingProvenance NotEvaluated(string reason) => new(

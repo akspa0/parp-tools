@@ -20,15 +20,15 @@ training command executes.
 
 ## Phase 1: Setup
 
-- [ ] T001 Create file skeletons per `plan.md` Project Structure: `src/core/WowViewer.Core/Maps/MinimapShadingMatch.cs`, `data-harvester/src/harvester/spec111/__init__.py`, `data-harvester/src/harvester/spec111/lighting_buckets.py`, `data-harvester/src/harvester/spec111/rebalance_lighting_variants.py`, `data-harvester/tests/spec111/__init__.py`
+- [x] T001 Create file skeletons per `plan.md` Project Structure: `src/core/WowViewer.Core.IO/Maps/MinimapShadingMatch.cs`, `data-harvester/src/harvester/spec111/__init__.py`, `data-harvester/src/harvester/spec111/lighting_buckets.py`, `data-harvester/src/harvester/spec111/rebalance_lighting_variants.py`, `data-harvester/tests/spec111/__init__.py`
 
 ## Phase 2: Foundational (extend the shared provenance contract)
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete -- every story reads or
 writes the extended `MinimapLightingProvenance` record.
 
-- [ ] T002 Add the additive shading-match fields (`ShadingMatchStatus`, `ShadingMatchedTimeOfDayHours`, `ShadingMatchConfidence`, `ShadingMatchEvidence`, `ShadingMatchExcludedMcshFraction`, `ShadingMatchBuildFingerprint`) from `data-model.md` to `src/core/WowViewer.Core/Maps/MinimapLightingProvenance.cs`, preserving every existing field/behavior unchanged
-- [ ] T003 [P] Add focused coverage in `tests/WowViewer.Core.Tests/MinimapLightingProvenanceTests.cs` pinning the new fields' default/not-evaluated states, without changing any existing tint-path assertion
+- [x] T002 Add the additive shading-match fields (`ShadingMatchStatus`, `ShadingMatchedTimeOfDayHours`, `ShadingMatchConfidence`, `ShadingMatchEvidence`, `ShadingMatchExcludedMcshFraction`, `ShadingMatchBuildFingerprint`) from `data-model.md` to `src/core/WowViewer.Core/Maps/MinimapLightingProvenance.cs`, preserving every existing field/behavior unchanged
+- [x] T003 [P] Add focused coverage in `tests/WowViewer.Core.Tests/MinimapLightingProvenanceTests.cs` pinning the new fields' default/not-evaluated states, without changing any existing tint-path assertion
 
 **Checkpoint**: extended provenance record ready; the shading-match scorer (US1) can now target it.
 
@@ -44,15 +44,15 @@ confirm the per-build distribution report's counts reconcile exactly.
 
 ### Tests for User Story 1
 
-- [ ] T004 [P] [US1] Add `tests/WowViewer.Core.Tests/MinimapShadingMatchTests.cs` covering: the candidate sweep renders exclusively through `TerrainMinimapCompositor`; the score is tint-independent (a same-shape, different-material-color fixture must not change the score); MCSH-correlated regions are down-weighted before scoring; near-tied candidates yield `low_confidence_ambiguous`; near-flat terrain yields `low_confidence_flat_terrain`; a non-0.5.3.3368 build fingerprint yields `not_evaluated` without rendering any candidate
+- [x] T004 [P] [US1] Add `tests/WowViewer.Core.Tests/MinimapShadingMatchTests.cs` covering: the candidate sweep renders exclusively through `TerrainMinimapCompositor`; the score is tint-independent (a same-shape, different-material-color fixture must not change the score); MCSH-correlated regions are excluded before scoring; near-tied candidates yield `low_confidence_ambiguous`; near-flat/low-signal terrain yields `low_confidence_flat_terrain`; a non-0.5.3.3368 build fingerprint yields `not_evaluated` without rendering any candidate (9/9 passing, including empirically-tuned thresholds verified against real compositor output, not just hand-picked numbers)
 
 ### Implementation for User Story 1
 
-- [ ] T005 [US1] Implement the candidate sweep and directional-structure scorer in `src/core/WowViewer.Core/Maps/MinimapShadingMatch.cs`, rendering candidates only through `TerrainMinimapCompositor`/`TerrainSolarDirection` per `contracts/minimap-lighting-calibration-contract.md` §Shading-match inference contract (depends on T002)
-- [ ] T006 [US1] Wire `MinimapShadingMatch` output into the extended `MinimapLightingProvenance` fields (depends on T005)
-- [ ] T007 [US1] Add a `minimap-lighting-calibrate` command to `tools/harvest/WowViewer.Tool.Harvest/Program.cs` that iterates the configured 0.5.3.3368 dataset's eligible tiles, invokes the scorer, and streams results through the existing C#-to-Python length-prefixed protocol into additive Zarr fields (no NPZ) (depends on T006)
-- [ ] T008 [US1] Add `data-harvester/scripts/report_lighting_buckets.py` producing the per-map and overall `LightingBucketDistributionReport` from the streamed Zarr fields, enforcing the `sum(BucketCounts) + NotEvaluatedCount + LowConfidenceCount == TotalEligibleTiles` validation rule from `data-model.md`
-- [ ] T009 [US1] Run the focused C# tests (T003, T004), a bounded real-0.5.3.3368-client `minimap-lighting-calibrate --limit N` pass, and the quickstart eyeball check on a handful of `matched` tiles before removing `--limit`
+- [x] T005 [US1] Implement the candidate sweep and value-correlation scorer in `src/core/WowViewer.Core.IO/Maps/MinimapShadingMatch.cs`, rendering candidates only through `TerrainMinimapCompositor`/`TerrainSolarDirection` per `contracts/minimap-lighting-calibration-contract.md` §Shading-match inference contract (depends on T002)
+- [x] T006 [US1] `MinimapShadingMatch.Evaluate` takes and returns the extended `MinimapLightingProvenance` directly (`with`-expression chaining), so wiring is the call site itself (depends on T005)
+- [x] T007 [US1] Chain `MinimapShadingMatch.Evaluate` onto the existing `AnalyzeAuthoredMinimapLighting` tint-based `Infer()` call in `tools/harvest/WowViewer.Tool.Harvest/Program.cs` (both Full/V22 call sites now pass `buildVersion` through), reusing the existing tile-iteration and C#-to-Python length-prefixed streaming pathway into additive Zarr fields (no NPZ, no new parallel command) (depends on T006)
+- [x] T008 [US1] Add `data-harvester/scripts/report_lighting_buckets.py` (thin CLI over `harvester/spec111/lighting_buckets.py`) producing the per-map and overall `LightingBucketDistributionReport` from the streamed Zarr fields, enforcing the `sum(BucketCounts) + NotEvaluatedCount + LowConfidenceCount == TotalEligibleTiles` validation rule from `data-model.md`; pre-spec-111 tiles missing the field entirely are surfaced as `tiles_without_shading_match_field`, never folded into not-evaluated
+- [ ] T009 [US1] Code proof complete: focused C# sweep (`MinimapShadingMatchTests` + `MinimapLightingProvenanceTests` + `TerrainMinimapCompositorTests` + `TerrainSolarDirectionTests`) 42/42; Debug Harvest build 0 errors; `tests/spec111/` Python suite 16/16. **Remaining user-run proof**: one bounded real-0.5.3.3368 `harvest-stream --stream-profile v22` pass, the quickstart side-by-side eyeball check on a handful of `matched` tiles, then the whole-build pass and reconciled distribution report
 
 **Checkpoint**: User Story 1 is independently complete -- every eligible 0.5.3.3368 tile has a trustworthy shading-match status and the distribution report is available.
 
@@ -68,15 +68,15 @@ fabricated, and the existing leak-safety tags are unchanged.
 
 ### Tests for User Story 2
 
-- [ ] T010 [P] [US2] Add `data-harvester/tests/spec111/test_lighting_bucket_rebalancing.py` covering: weight computation from a synthetic `LightingBucketDistributionReport`; `no_real_baseline` flagging for zero/near-zero-coverage buckets; `source_group_id`/`lighting_variant_id` tag preservation; rejection of a plan that would alter tagging
+- [x] T010 [P] [US2] Add `data-harvester/tests/spec111/test_lighting_bucket_rebalancing.py` covering: weight computation from a synthetic `LightingBucketDistributionReport`; `no_real_baseline` flagging for zero-coverage buckets without fabricated weight; exact largest-remainder variant allocation; and the structural leak-safety guarantee (the rebalancer only ever sees aggregate bucket counts, never per-tile grouping fields)
 
 ### Implementation for User Story 2
 
-- [ ] T011 [US2] Retire the drifted solar-direction reimplementation in `data-harvester/src/harvester/spec103/terrain_lighting.py` per `research.md`'s "retire the drifted Python sweep" decision, re-labeling its remaining non-direction responsibilities (color/fog interpolation, MCSH bake authoring) so they cannot be mistaken for a second lighting-direction source of truth
-- [ ] T012 [P] [US2] Implement `data-harvester/src/harvester/spec111/lighting_buckets.py` to ingest a `LightingBucketDistributionReport` (depends on T008's output shape)
-- [ ] T013 [US2] Implement `data-harvester/src/harvester/spec111/rebalance_lighting_variants.py` producing a `RebalancedTrainingSamplingPlan` and wire its weights into the existing synthetic-lighting-variant generation entry point (depends on T011, T012)
-- [ ] T014 [US2] Add an explicit input-contract check confirming rebalanced training rows carry the lighting-bucket label only as a sampling/metadata signal, never as a field the model consumes at input time, per `contracts/minimap-lighting-calibration-contract.md` §Rebalancing contract
-- [ ] T015 [US2] Run the focused Python tests (T010) and the quickstart `--dry-run` rebalancing check
+- [x] T011 [US2] Corrected the drifted solar-direction reimplementation in `data-harvester/src/harvester/spec103/terrain_lighting.py`: `_terrain_solar_direction` is now a documented value-for-value port of the corrected C# `TerrainSolarDirection.Evaluate` (positive-X north lock, fixed north-west bearing, elevation-only cycling), with a regression test pinning both corrections; a true streamed (not ported) architecture remains a labeled follow-up in the function's docstring
+- [x] T012 [P] [US2] Implement `data-harvester/src/harvester/spec111/lighting_buckets.py` ingesting the streamed shading-match fields and producing the reconciled `LightingBucketDistributionReport` (library owner; `scripts/report_lighting_buckets.py` is its thin wrapper)
+- [x] T013 [US2] Implement `data-harvester/src/harvester/spec111/rebalance_lighting_variants.py` producing a `RebalancedTrainingSamplingPlan` plus a `rebalanced_lighting_times` list that feeds the existing `spec103_build_synthetic_store.py` `lighting_times=` entry point unchanged, and `scripts/rebalance_lighting_variants.py` as its thin `--dry-run`-capable CLI
+- [x] T014 [US2] Input-contract check: `rebalanced_lighting_times` emits bare normalized floats only (pinned by test), so the rebalanced training data structurally cannot carry a lighting-bucket label, status, or confidence into the model's input path -- only the same game_time float the arbitrary sweep always used
+- [x] T015 [US2] Focused Python proof: `tests/spec111/` 16/16 passed; `tests/spec103/test_terrain_lighting.py` 10/10 passed (including the new fixed-bearing regression); all three spec111 CLIs import and parse; the training gate smoke-run validated a fixture plan and refused to train without `--confirm-run`
 
 **Checkpoint**: User Stories 1 and 2 both work independently -- rebalanced sampling plan is ready and leak-safe.
 
@@ -92,17 +92,17 @@ authorized and run, the checkpoint comparison must show a recorded `Outcome` bef
 
 ### Implementation for User Story 3
 
-- [ ] T016 [US3] Confirm the currently active, unblocked reconstruction stage (Spec 108 `WdlPriorNet` or the currently active Spec 102 residual-chain stage) and its currently deployed checkpoint identity -- do not assume the stage identified at this plan's authoring time is still current
-- [ ] T017 [US3] Implement `data-harvester/scripts/train_spec111_reconstruction.py` targeting the stage confirmed in T016 and the existing Spec 108 group-held-out split contract (`research.md`), consuming T013's rebalanced plan
-- [ ] T018 [US3] Implement the checkpoint-comparison evaluation producing a `ReconstructionCheckpointComparison` record (`Outcome`, `PromotionDecision`) per `data-model.md`, with `PromotionDecision = false` enforced whenever `Outcome = regressed`
-- [ ] T019 [US3] **STOP: confirm with the user before executing.** Only after explicit, separate authorization at the point of execution, run the training pass (T017) and the evaluation (T018), and record the outcome per `contracts/minimap-lighting-calibration-contract.md` §Training/evaluation execution contract
+- [x] T016 [US3] Confirmed at implementation time (2026-07-17): Spec 102 remains BLOCKED on its M0 target reharvest, so the active, unblocked stage is Spec 108 `WdlPriorNet` (`scripts/train_spec103_wdl_prior.py`). No baseline checkpoint is committed to the repo -- it is a user-run artifact, so `--baseline-checkpoint` is a required explicit path that fails closed when absent
+- [x] T017 [US3] Implement `data-harvester/scripts/train_spec111_reconstruction.py`: validates the rebalanced plan (bare-float lighting_times, leak-safety assertion, existing store/baseline), prints the exact delegated `train_spec103_wdl_prior.py` command, and refuses to start any GPU run without `--confirm-run`
+- [x] T018 [US3] Implement `data-harvester/src/harvester/spec111/checkpoint_comparison.py` producing the `ReconstructionCheckpointComparison` record; `promotion_decision` is True only for a clear improvement -- both regressed and inconclusive outcomes keep the deployed checkpoint (5/5 focused tests)
+- [ ] T019 [US3] **STOP: confirm with the user before executing.** Only after explicit, separate authorization at the point of execution (`--confirm-run`), run the training pass (T017) and the evaluation (T018), and record the outcome per `contracts/minimap-lighting-calibration-contract.md` §Training/evaluation execution contract. Depends on the user-run portions of T009 (real bucketing pass) and a real rebalanced store
 
 **Checkpoint**: all three user stories independently functional; go/no-go recorded for any executed training run.
 
 ## Phase 6: Polish and continuity
 
-- [ ] T020 [P] Update `wow-viewer/memory-bank/activeContext.md` and `wow-viewer/memory-bank/progress.md` with this feature's outcome, per the constitution's Memory Bank Discipline
-- [ ] T021 Update task states and exact proof commands in `specs/111-minimap-lighting-calibration/tasks.md` as each phase's checkpoint is reached
+- [x] T020 [P] Update `wow-viewer/memory-bank/activeContext.md` and `wow-viewer/memory-bank/progress.md` with this feature's outcome, per the constitution's Memory Bank Discipline
+- [x] T021 Update task states and exact proof commands in `specs/111-minimap-lighting-calibration/tasks.md` as each phase's checkpoint is reached
 
 ## Dependencies & Execution Order
 

@@ -355,7 +355,7 @@ public static class TerrainMinimapCompositor
             : 0f;
     }
 
-    private static int ScaleCoordinate(int coordinate, int sourceSize, int targetSize)
+    internal static int ScaleCoordinate(int coordinate, int sourceSize, int targetSize)
     {
         if (targetSize <= 1 || sourceSize <= 1)
             return 0;

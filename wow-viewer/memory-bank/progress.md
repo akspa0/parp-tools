@@ -4,9 +4,30 @@ Last updated: 2026-07-17
 
 ## Spec 111 — minimap lighting calibration
 
+- Implemented all code phases (T001–T018, T020–T021) up to the explicitly gated T019 training run.
+  C# side: six additive shading-match fields on `MinimapLightingProvenance`;
+  `Core.IO/Maps/MinimapShadingMatch.cs` sweeps 24 hourly `TerrainMinimapCompositor` candidates and
+  scores tint-invariant luma Pearson correlation (gradient-direction cosine was tried and discarded:
+  with the fixed azimuth it cannot distinguish hours); chained onto the existing Full/V22
+  `AnalyzeAuthoredMinimapLighting` streaming pathway with an internal 0.5.3.3368 fingerprint gate —
+  no new command, zero cost for other builds. Python side: `harvester/spec111/`
+  (`lighting_buckets.py` reconciled report, `rebalance_lighting_variants.py` bare-float
+  largest-remainder `lighting_times`, `checkpoint_comparison.py` where regressed and inconclusive
+  both keep the deployed checkpoint) plus three thin CLIs; `train_spec111_reconstruction.py`
+  validates and refuses to train without `--confirm-run` (smoke-proven). The drifted
+  `terrain_lighting.py` direction formula became a documented port of the corrected C#
+  `TerrainSolarDirection` with regression coverage.
+- Proof: focused C# sweep 42/42; Debug Harvest build 0 errors; `tests/spec111/` 16/16;
+  `tests/spec103/test_terrain_lighting.py` 10/10. Full data-harvester suite 548 passed with 3
+  pre-existing unrelated failures (v24 export-map fixture, v25 h1_coarse neighbor-context API).
+- Remaining user-run proof: bounded real-0.5.3.3368 `harvest-stream --stream-profile v22` bucketing
+  pass, the quickstart side-by-side eyeball check on `matched` tiles, whole-build report, then the
+  separately authorized T019 retrain/evaluate.
+
+### Planning record
+
 - Created the Spec Kit spec, plan, research, data-model, contract, quickstart, and dependency-ordered
-  tasks (`specs/111-minimap-lighting-calibration/`). Planning only — no implementation code written
-  yet; `tasks.md` T001 (file skeletons) is the next actionable step.
+  tasks (`specs/111-minimap-lighting-calibration/`).
 - Three user stories: US1 shading-based lighting-bucket inference for the real 0.5.3.3368 dataset
   (MVP), US2 rebalance synthetic-lighting-variant training sampling to match the real distribution,
   US3 retrain-and-evaluate the existing reconstruction model with an explicit go/no-go gate.

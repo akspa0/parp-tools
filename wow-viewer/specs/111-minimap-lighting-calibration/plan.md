@@ -94,19 +94,26 @@ specs/111-minimap-lighting-calibration/
 
 ```text
 src/core/WowViewer.Core/Maps/
-├── MinimapLightingProvenance.cs          # extended: shading-match fields (additive)
-└── MinimapShadingMatch.cs                # new: candidate sweep + directional-structure scoring
+└── MinimapLightingProvenance.cs          # extended: shading-match fields (additive)
 
 src/core/WowViewer.Core.IO/Maps/
-└── TerrainMinimapCompositor.cs           # unchanged; reused as-is for candidate rendering
+├── TerrainMinimapCompositor.cs           # unchanged; reused as-is for candidate rendering
+└── MinimapShadingMatch.cs                # new: candidate sweep + directional-structure scoring
+                                           # (lives in Core.IO, not Core: Core.IO -> Core is the only
+                                           # allowed reference direction, and this type must call
+                                           # TerrainMinimapCompositor.Compose)
 
 tests/WowViewer.Core.Tests/
 ├── MinimapLightingProvenanceTests.cs     # extended coverage for new fields
 └── MinimapShadingMatchTests.cs           # new: scorer unit coverage (synthetic fixtures)
 
 tools/harvest/WowViewer.Tool.Harvest/
-└── Program.cs                            # extended: new dataset-wide calibration command,
-                                           # streamed through the existing C#->Python protocol
+└── Program.cs                            # extended: AnalyzeAuthoredMinimapLighting chains
+                                           # MinimapShadingMatch.Evaluate onto the existing
+                                           # tint-based Infer() call for Full/V22 exports (reuses
+                                           # the existing tile-iteration/streaming pathway rather
+                                           # than a new parallel command; the build-fingerprint
+                                           # gate makes this a no-op for non-0.5.3.3368 tiles)
 
 data-harvester/src/harvester/
 ├── spec103/terrain_lighting.py           # drifted direction reimplementation retired/re-scoped;
@@ -133,11 +140,16 @@ convention for feature-scoped Python modules.
 
 1. **User Story 1 -- shading-match inference and bucketing (Implementation).** Add
    `MinimapShadingMatch` in C#, rendering candidates through the existing
-   `TerrainMinimapCompositor`/`TerrainSolarDirection` path and scoring directional structure
-   independent of tint (research.md). Extend `MinimapLightingProvenance` with the new fields. Add a
-   Harvest CLI command that iterates the 0.5.3.3368 portion of the configured dataset, streams results
-   through the existing C#->Python protocol into additive Zarr fields, and add
-   `report_lighting_buckets.py` to produce the per-map/overall distribution report. Focused C#/Python
+   `TerrainMinimapCompositor`/`TerrainSolarDirection` path and correlating luma-value patterns
+   independent of tint (research.md -- gradient-direction cosine similarity was tried first and
+   found unable to discriminate hours at all once azimuth is fixed; value correlation is both
+   tint-invariant for a single material and genuinely elevation-discriminative). Extend
+   `MinimapLightingProvenance` with the new fields. Chain `MinimapShadingMatch.Evaluate` onto the
+   existing `AnalyzeAuthoredMinimapLighting` tint-based `Infer()` call in
+   `WowViewer.Tool.Harvest/Program.cs`, reusing the existing Full/V22 tile-iteration and
+   C#->Python streaming pathway rather than adding a new parallel command; the build-fingerprint
+   gate makes this a zero-cost no-op for non-0.5.3.3368 tiles. Add `report_lighting_buckets.py` to
+   produce the per-map/overall distribution report from the streamed Zarr fields. Focused C#/Python
    tests plus one real-client bounded run to sanity-check a handful of known tiles by eye.
 2. **User Story 2 -- rebalance synthetic lighting variants (Implementation).** Retire the drifted
    direction math in `terrain_lighting.py` per research.md; add `spec111/lighting_buckets.py` and
