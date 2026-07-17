@@ -41,6 +41,23 @@
   against a synthetic fixture store: correctly rejected a NaN-poisoned row and blacklisted
   `holes_16` in every row regardless of its content.
 
+## Phase 4 reviewable cleanup planning — 2026-07-17
+
+- Implemented `harvester/v50/dependencies.py` (scans manifest/report JSON for references by path
+  or content hash -- no not-yet-frozen manifest schema hardcoded) and `cleanup.py` (matches
+  `v50-cleanup-plan.schema.json` exactly: a candidate only reaches `targets` once it already has
+  `dependency_check=pass` and `approved=true`; failing candidates are absent, not marked-rejected).
+  `scripts/v50_cleanup_artifacts.py plan` is the only subcommand -- no `apply` exists yet (Phase 7,
+  user-run-only, requires the reviewed plan's hash and explicit confirmation).
+- Real local dry run against the Phase 3 real inventory: with zero dispositions reviewed, correctly
+  0 targets. With the two genuinely-disposable `data-harvester/tmp/v18_smoke` and `.../v22_smoke`
+  scratch artifacts explicitly reviewed and dispositioned `remove-candidate` with a stated
+  replacement proof, the plan correctly proposed exactly those 2 targets (12,901,439 bytes),
+  `dependency_check=pass`, `approved=true`, `dry_run_complete=true`. Nothing was deleted; there is
+  still no apply path.
+- Fixture proof: the exact scenario in tasks.md's Independent Test (protected, depended-on,
+  out-of-root, and safe-obsolete targets in one fixture) included only the safe-obsolete target.
+
 ## Clean-slate completion — 2026-07-16
 
 - The user successfully emptied workspace `output/` and `wow-viewer/output/` with the guarded

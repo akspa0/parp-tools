@@ -96,6 +96,35 @@ path or filename. Full results in
 It does not yet cross-validate against a fresh client extraction -- that is deferred until Spec 109
 T002 freezes the v50 signal catalog (see the architecture doc for the exact gap statement).
 
+## 0.7. Phase 4 reviewable cleanup planning — COMPLETE 2026-07-17
+
+`harvester.v50.dependencies`/`cleanup` implemented with fixture tests, plus a real, working
+`scripts/v50_cleanup_artifacts.py plan` command. No `apply` command exists yet -- that is Phase 7,
+separate and user-run-only.
+
+```powershell
+uv run python -m pytest tests/v50/ tests/test_v50_contract.py tests/spec103/ -q
+```
+
+Result: 121 passed, 2 skipped (symlink privilege), 0 failed.
+
+A real local dry run against the Phase 3 inventory, with zero dispositions reviewed, correctly
+produced zero targets (nothing has been human-reviewed yet, so nothing is proposed):
+
+```powershell
+uv run python scripts/v50_cleanup_artifacts.py plan `
+  --inventory ../output/reports/v50/v50.1/inventory.json `
+  --approved-root ../output --approved-root ../models --approved-root ./checkpoints --approved-root ./tmp --approved-root ./models `
+  --protected-root ../specs `
+  --output ../output/reports/v50/v50.1/cleanup-plan-noop.json
+```
+
+With the two genuinely-disposable `data-harvester/tmp/v18_smoke` and `.../v22_smoke` scratch
+artifacts explicitly dispositioned `remove-candidate` and given a replacement-proof string (both
+supplied via `--dispositions`/`--replacement-proofs` JSON, never inferred automatically), the same
+command produced a real plan: 2 targets, 12,901,439 bytes expected recovered, `dry_run_complete:
+true`. **Nothing was deleted** -- there is no apply command yet.
+
 ## 1. Configure the faster client library
 
 The root is runtime configuration and is not committed:

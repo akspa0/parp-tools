@@ -79,15 +79,15 @@ and out-of-root targets includes only the safe obsolete target in the approved d
 
 ### Tests for User Story 2
 
-- [ ] T022 [P] [US2] Add failing dependency and cleanup-plan tests in `wow-viewer/data-harvester/tests/v50/test_cleanup.py`
+- [x] T022 [P] [US2] Add failing dependency and cleanup-plan tests in `wow-viewer/data-harvester/tests/v50/test_cleanup.py` (7 tests; the exact mixed fixture from tasks.md's Independent Test -- protected/depended-on/out-of-root/safe-obsolete -- included only the safe-obsolete target)
 
 ### Implementation for User Story 2
 
-- [ ] T023 [US2] Implement dependency discovery across manifests, checkpoints, reports, and known output layouts in `wow-viewer/data-harvester/src/harvester/v50/dependencies.py`
-- [ ] T024 [US2] Implement size inventory and deterministic cleanup-plan generation in `wow-viewer/data-harvester/src/harvester/v50/cleanup.py`
-- [ ] T025 [US2] Add inventory-to-plan and dry-run subcommands in `wow-viewer/data-harvester/scripts/v50_cleanup_artifacts.py`
-- [ ] T026 [US2] Classify old datasets, temporary client copies, model outputs, cloud downloads, caches, root Python files, and continuity debt in `wow-viewer/docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`
-- [ ] T027 [US2] Run fixture-only cleanup planning tests and a local read-only dry run, then record candidate bytes without approving deletion in `wow-viewer/specs/109-v50-clean-room-audit/quickstart.md`
+- [x] T023 [US2] Implement dependency discovery across manifests, checkpoints, reports, and known output layouts in `wow-viewer/data-harvester/src/harvester/v50/dependencies.py`; scans manifest/report JSON for references by path or content hash rather than hardcoding a not-yet-frozen manifest schema
+- [x] T024 [US2] Implement size inventory and deterministic cleanup-plan generation in `wow-viewer/data-harvester/src/harvester/v50/cleanup.py`; matches `v50-cleanup-plan.schema.json` exactly -- a candidate only ever appears in `targets` once it already has `dependency_check=pass` and `approved=true`, never as a marked-rejected entry
+- [x] T025 [US2] Add `plan` (dry-run only, no apply) subcommand in `wow-viewer/data-harvester/scripts/v50_cleanup_artifacts.py`; disposition and replacement-proof are explicit human-reviewed JSON inputs, never inferred from a filename
+- [x] T026 [US2] `docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md` already carried the per-category disposition table from the original audit; added the Phase 4 proof-of-concept run against real `tmp/` scratch artifacts as a concrete worked example
+- [x] T027 [US2] Ran fixture-only cleanup planning tests (`tests/v50/ tests/test_v50_contract.py tests/spec103/` -> 121 passed, 2 skipped, 0 failed) and a real local read-only dry run: zero reviewed dispositions -> 0 targets (correct, nothing has been human-reviewed yet); with the two genuinely-disposable `data-harvester/tmp/*_smoke` scratch artifacts explicitly dispositioned + proofed -> 2 targets, 12,901,439 bytes, `dry_run_complete=true`, nothing deleted. Recorded in `quickstart.md`
 
 **Checkpoint**: Every deletion candidate has replacement/dependency proof; apply remains unavailable.
 

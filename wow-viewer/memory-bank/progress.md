@@ -25,6 +25,13 @@ Last updated: 2026-07-17
   artifacts, ~15.6 GB, all unverified/quarantined regardless of name. `verify-v18`'s fresh-client
   cross-validation is an explicit, documented gap pending Spec 109 T002's frozen signal catalog.
   Proof: 114 passed, 2 skipped, 0 failed.
+- Phase 4 (US2) complete same session: `dependencies.py` + `cleanup.py` (matches
+  `v50-cleanup-plan.schema.json` exactly), `scripts/v50_cleanup_artifacts.py plan` (dry-run only,
+  no apply). Real dry run against the Phase 3 inventory: 0 dispositions reviewed → 0 targets
+  (correct); the two genuinely-disposable `data-harvester/tmp/*_smoke` artifacts explicitly
+  dispositioned+proofed → exactly those 2 targets, 12,901,439 bytes, nothing deleted. Fixture
+  reproduces tasks.md's exact protected/depended-on/out-of-root/safe-obsolete scenario. Proof: 121
+  passed, 2 skipped, 0 failed.
 
 ## Spec 111 — minimap lighting calibration
 

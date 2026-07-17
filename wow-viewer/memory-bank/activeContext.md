@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-17
 
-## Active work: Spec 109 v50 clean-room dataset — Phase 3 (US1 trust boundary) complete
+## Active work: Spec 109 v50 clean-room dataset — Phase 4 (US2 cleanup planning) complete
 
 - User asked directly to "get the v50 dataset built and models trained." Reality check delivered
   and accepted: Spec 109 was only 2/53 tasks done (T001 client-root policy, T002a fail-closed
@@ -48,9 +48,21 @@ Last updated: 2026-07-17
   ahead of that would be exactly the kind of premature assumption this audit exists to avoid.
 - Proof: 114 passed, 2 skipped (symlink privilege), 0 failed across `tests/v50/
   tests/test_v50_contract.py tests/spec103/`.
-- Next: Phase 4 (US2 reviewable cleanup planning, dry-run only) — still no client/GPU needed.
-  Phase 5 (the actual dataset builder) is where `H:\CLIENTS` access and long-running extraction
-  enter, and training after that remains its own explicit go-ahead.
+- **Phase 4 (US2) also complete, same session**: `dependencies.py` (scans manifest/report JSON for
+  references by path or content hash rather than hardcoding a not-yet-frozen manifest schema) and
+  `cleanup.py` (matches `v50-cleanup-plan.schema.json` exactly — a candidate only ever reaches
+  `targets` once it already has `dependency_check=pass`+`approved=true`; failing candidates are
+  absent, never marked-rejected-but-included). `scripts/v50_cleanup_artifacts.py plan` is a real,
+  working dry-run-only command — no `apply` exists yet (that's Phase 7, user-run-only).
+- Ran a real local dry run against the Phase 3 inventory: with zero dispositions reviewed,
+  correctly 0 targets. With the two genuinely-disposable `data-harvester/tmp/*_smoke` scratch
+  artifacts explicitly dispositioned + proofed (JSON inputs, never auto-inferred from filename),
+  the plan correctly proposed exactly those 2 targets, 12,901,439 bytes, nothing deleted.
+- Proof: 121 passed, 2 skipped (symlink privilege), 0 failed. The fixture test reproduces tasks.md's
+  exact Independent Test scenario (protected/depended-on/out-of-root/safe-obsolete fixture →
+  only the safe-obsolete target survives).
+- Next: Phase 5 (US3, the actual dataset builder) — this is where `H:\CLIENTS` access and
+  long-running extraction enter, and training after that remains its own explicit go-ahead.
 
 ## Prior active work: Spec 111 minimap lighting calibration (implemented through the T019 gate)
 
