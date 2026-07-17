@@ -73,10 +73,6 @@ public static class WlFileReader
         ushort padding = br.ReadUInt16();
         uint blockCount = br.ReadUInt32();
 
-        // WLM files always use magma (type 6) regardless of header value
-        if (type == WlFileType.WLM)
-            rawLiquidType = 6;
-
         return new WlHeader
         {
             Magic = magic,
@@ -86,7 +82,11 @@ public static class WlFileReader
             RawLiquidType = rawLiquidType,
             Padding = padding,
             BlockCount = blockCount,
-            LiquidType = MapWlwLiquidType(rawLiquidType)
+            // The shared WLW/WLM/WLL header stores a raw liquid-type value,
+            // but the WLM and WLL container families declare magma and lava.
+            // Lava uses the canonical Magma terrain palette; retain raw data
+            // separately for inspection rather than overwriting it.
+            LiquidType = ResolveWlwFamilyLiquidType(rawLiquidType, type)
         };
     }
 
@@ -139,15 +139,23 @@ public static class WlFileReader
         };
     }
 
-    /// <summary>Maps WLW/WLM liquid type to unified WlLiquidType.</summary>
+    /// <summary>Maps WLW liquid type to unified WlLiquidType.</summary>
     private static WlLiquidType MapWlwLiquidType(ushort raw) => raw switch
     {
         0 => WlLiquidType.StillWater,
         1 => WlLiquidType.Ocean,
+        3 => WlLiquidType.Slime,
         4 => WlLiquidType.River,
         6 => WlLiquidType.Magma,
         8 => WlLiquidType.FastWater,
         _ => WlLiquidType.StillWater
+    };
+
+    private static WlLiquidType ResolveWlwFamilyLiquidType(ushort raw, WlFileType fileType) => fileType switch
+    {
+        WlFileType.WLM => WlLiquidType.Magma,
+        WlFileType.WLL => WlLiquidType.Magma,
+        _ => MapWlwLiquidType(raw)
     };
 
     /// <summary>Maps WLQ liquid type to unified WlLiquidType.</summary>

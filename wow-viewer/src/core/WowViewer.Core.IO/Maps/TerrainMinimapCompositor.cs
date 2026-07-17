@@ -2,6 +2,7 @@ using System.Numerics;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using WowViewer.Core.Maps;
+using WowViewer.Core.Terrain;
 
 namespace WowViewer.Core.IO.Maps;
 
@@ -22,6 +23,15 @@ public static class TerrainMinimapCompositor
         ArgumentNullException.ThrowIfNull(pack);
         ArgumentNullException.ThrowIfNull(texturesById);
 
+        options ??= TerrainMinimapCompositionOptions.Default;
+        options.Validate();
+
+        // No MTEX names is an explicit empty-tile state, not a stale material reference. Preserve
+        // the empty terrain signal as unlit white rather than inventing colour from an unrelated
+        // catalog BLP or allowing lighting to turn the placeholder grey.
+        if (!HasDeclaredTileset(pack))
+            return new Image<Rgba32>(options.Resolution, options.Resolution, new Rgba32(255, 255, 255, 255));
+
         float[,,]? alpha = pack.McalAlphaPack256;
         int[,,] textureIds = pack.MclyTextureIds ?? CreateFallbackTextureGrid();
         bool[,,]? layerMask = pack.MclyLayerMask;
@@ -39,9 +49,6 @@ public static class TerrainMinimapCompositor
             throw new InvalidDataException(
                 "Synthetic minimap composition requires four MCAL layer channels when MCAL is present.");
         }
-
-        options ??= TerrainMinimapCompositionOptions.Default;
-        options.Validate();
 
         // MCAL is optional for a base-only tile. Do not invent overlay weights when it is absent:
         // render the declared layer-zero material, retain the normal/lighting path, and leave the
@@ -100,6 +107,17 @@ public static class TerrainMinimapCompositor
         }
 
         return image;
+    }
+
+    private static bool HasDeclaredTileset(TerrainTileTensorPack pack)
+    {
+        foreach (string textureName in pack.MclyTextureNames)
+        {
+            if (!string.IsNullOrWhiteSpace(textureName))
+                return true;
+        }
+
+        return false;
     }
 
     private static Vector3 BlendLayers(
@@ -369,6 +387,20 @@ public sealed record TerrainMinimapLighting(
         Vector3.Zero,
         Vector3.One,
         0f);
+
+    /// <summary>
+    /// The synthesized-minimap lighting contract: achromatic sunlight from the raster's top edge.
+    /// LIT tracks are world/viewer data, not a source of minimap colour or direction. The modest
+    /// achromatic ambient term keeps terrain-readable slopes without tinting the materials.
+    /// </summary>
+    public static TerrainMinimapLighting CreateWhiteTopEdge(float gameTime)
+    {
+        return new TerrainMinimapLighting(
+            TerrainSolarDirection.Evaluate(gameTime),
+            Vector3.One,
+            new Vector3(0.25f),
+            0f);
+    }
 }
 
 /// <summary>Controls deterministic terrain minimap composition without carrying client-source policy.</summary>

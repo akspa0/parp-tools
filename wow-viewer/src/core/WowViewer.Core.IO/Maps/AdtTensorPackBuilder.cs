@@ -101,14 +101,37 @@ public static class AdtTensorPackBuilder
             ReadSplitPlacementChunkReferences(adtPath, availableSignals);
 
         // ── Read WL* loose liquid files ──────────────────────────────────────
-        (float[,]? wlMask, float[,]? wlHeight, bool wlReadFailed) =
+        (float[,]? wlMask, float[,]? wlHeight, byte[,]? wlBasicTypes, bool wlReadFailed) =
             ReadWlFiles(adtPath, availableSignals);
+        if (wlMask is not null && wlHeight is not null)
+        {
+            if (WlLiquidRasterizer.KeepOnlyAboveTerrain(wlMask, wlHeight, height257, wlBasicTypes) == 0)
+            {
+                wlMask = null;
+                wlHeight = null;
+                wlBasicTypes = null;
+            }
+            else
+            {
+                availableSignals.Add(WlLiquidRasterizer.SurfaceRasterizationSignal);
+                availableSignals.Add(WlLiquidRasterizer.AboveTerrainSignal);
+                availableSignals.Add(WlLiquidRasterizer.BasicTypeSignal);
+            }
+        }
 
         // ── Resolve liquid before strict object supervision ──────────────────
         // The initial M0 target is dry-only.  A decoded liquid tile is retained
         // as provenance but cannot silently turn water pixels into negatives.
         (float[,]? unifiedLiquidMask, float[,]? unifiedLiquidHeight) =
             BuildUnifiedLiquid(mh2oHeight, mh2oPresence, mclqHeight, mclqPresence, wlMask, wlHeight, availableSignals);
+        byte[,]? liquidBasicType257 = LiquidBasicTypePackBuilder.OverlayWlFallbackTypes(
+            LiquidBasicTypePackBuilder.Build(mh2oPresence, mh2oType, mclqPresence, mclqType, mcnkFlags16),
+            wlMask,
+            wlBasicTypes,
+            mh2oHeight,
+            mh2oPresence,
+            mclqHeight,
+            mclqPresence);
 
         // ── Read placements once for masks + placement arrays ───────────────
         AdtPlacementCatalog? placementCatalog =
@@ -201,8 +224,7 @@ public static class AdtTensorPackBuilder
             WlLiquidHeight = wlHeight,
             UnifiedLiquidMask = unifiedLiquidMask,
             UnifiedLiquidHeight = unifiedLiquidHeight,
-            LiquidBasicType257 = LiquidBasicTypePackBuilder.Build(
-                mh2oPresence, mh2oType, mclqPresence, mclqType, mcnkFlags16),
+            LiquidBasicType257 = liquidBasicType257,
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
             ObjectGeometryVisibleMask257 = strictObjectMask.Mask,
@@ -1729,18 +1751,15 @@ public static class AdtTensorPackBuilder
     // WL* loose liquid files
     // ═══════════════════════════════════════════════════════════════════════
 
-    private const float WlTileSize = 533.333f;
-    private const float WlMapSize = 17066.666f;
-
-    private static (float[,]? mask, float[,]? height, bool readFailed)
+    private static (float[,]? mask, float[,]? height, byte[,]? basicTypes, bool readFailed)
         ReadWlFiles(string adtPath, HashSet<string> signals)
     {
         string? mapDir = Path.GetDirectoryName(adtPath);
         if (string.IsNullOrEmpty(mapDir))
-            return (null, null, false);
+            return (null, null, null, false);
 
         if (!TryParseAdtTileCoords(adtPath, out int targetTileX, out int targetTileY))
-            return (null, null, false);
+            return (null, null, null, false);
 
         // Scan ALL WL files in the map directory (MdxViewer pattern)
         string[] wlFiles;
@@ -1757,21 +1776,14 @@ public static class AdtTensorPackBuilder
             // A discovery failure leaves WL* evidence unknown. Preserve
             // ordinary liquid output behavior, but do not let strict M0
             // provenance turn that unknown into a fabricated dry tile.
-            return (null, null, true);
+            return (null, null, null, true);
         }
 
         if (wlFiles.Length == 0)
-            return (null, null, false);
+            return (null, null, null, false);
 
-        float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
-        float[,] heights = new float[TileHeightmapSize, TileHeightmapSize];
-        bool any = false;
         bool readFailed = false;
-
-        // Each WL block is ~33.33m on a 533.33m tile = ~16 pixels on 257 grid
-        // Block local coords are in [0, WlTileSize) range within the tile
-        float blockWorldSize = WlTileSize / 16f; // ~33.33m per block
-        float pixelsPerBlock = (TileHeightmapSize - 1) / 16f; // ~16 pixels per block
+        var readableFiles = new List<WlFile>();
 
         foreach (string wlPath in wlFiles)
         {
@@ -1789,81 +1801,22 @@ public static class AdtTensorPackBuilder
                 continue;
             }
 
-            foreach (WlBlock block in wl.Blocks)
-            {
-                Vector3 pos = block.WorldPosition;
-                int tileX = Math.Clamp((int)Math.Floor((WlMapSize - pos.Y) / WlTileSize), 0, 63);
-                int tileY = Math.Clamp((int)Math.Floor((WlMapSize - pos.X) / WlTileSize), 0, 63);
-
-                if (tileX != targetTileX || tileY != targetTileY)
-                    continue;
-
-                // Get per-vertex heights in standard row-major order
-                float[] vertexHeights = block.GetHeights4x4();
-
-                // Block origin in tile-local coordinates (meters from tile corner)
-                float blockLocalX = (WlMapSize - pos.Y) - (tileX * WlTileSize);
-                float blockLocalY = (WlMapSize - pos.X) - (tileY * WlTileSize);
-
-                // Map each of the 16 vertices to the 257x257 grid
-                for (int vi = 0; vi < 4; vi++)
-                {
-                    for (int vj = 0; vj < 4; vj++)
-                    {
-                        float vh = vertexHeights[vi * 4 + vj];
-
-                        // Vertex position in tile-local meters
-                        float vx = blockLocalX + vj * blockWorldSize;
-                        float vy = blockLocalY + vi * blockWorldSize;
-
-                        // Convert to pixel coordinate
-                        float px = vx / WlTileSize * (TileHeightmapSize - 1);
-                        float py = vy / WlTileSize * (TileHeightmapSize - 1);
-
-                        // Write to nearest pixel with 2-pixel radius for blending
-                        int ix = Math.Clamp((int)Math.Round(px), 0, TileHeightmapSize - 1);
-                        int iy = Math.Clamp((int)Math.Round(py), 0, TileHeightmapSize - 1);
-
-                        for (int dy = -2; dy <= 2; dy++)
-                        {
-                            for (int dx = -2; dx <= 2; dx++)
-                            {
-                                int x = Math.Clamp(ix + dx, 0, TileHeightmapSize - 1);
-                                int y = Math.Clamp(iy + dy, 0, TileHeightmapSize - 1);
-                                float dist = MathF.Sqrt(dx * dx + dy * dy);
-                                if (dist > 2.5f)
-                                    continue;
-                                float w = 1.0f / (1.0f + dist);
-                                if (w > mask[y, x])
-                                {
-                                    mask[y, x] = w;
-                                    heights[y, x] = vh;
-                                }
-                            }
-                        }
-                        any = true;
-                    }
-                }
-            }
+            readableFiles.Add(wl);
         }
 
-        if (!any)
-            return (null, null, readFailed);
-
-        // Normalize mask to [0, 1]
-        float maxMask = 0f;
-        for (int y = 0; y < TileHeightmapSize; y++)
-            for (int x = 0; x < TileHeightmapSize; x++)
-                if (mask[y, x] > maxMask)
-                    maxMask = mask[y, x];
-        if (maxMask > 0f)
-            for (int y = 0; y < TileHeightmapSize; y++)
-                for (int x = 0; x < TileHeightmapSize; x++)
-                    mask[y, x] = MathF.Min(mask[y, x] / maxMask, 1.0f);
+        if (!WlLiquidRasterizer.TryRasterize(
+                readableFiles,
+                targetTileX,
+                targetTileY,
+                out float[,]? mask,
+                out float[,]? heights,
+                out byte[,]? basicTypes,
+                TileHeightmapSize))
+            return (null, null, null, readFailed);
 
         signals.Add("wl_liquid_mask");
         signals.Add("wl_liquid_height");
-        return (mask, heights, readFailed);
+        return (mask, heights, basicTypes, readFailed);
     }
 
     // ═══════════════════════════════════════════════════════════════════════

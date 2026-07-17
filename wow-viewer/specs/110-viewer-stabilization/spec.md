@@ -62,11 +62,10 @@ stitching, then have the user run one real map export with and without a usable 
    synthesized minimap, **Then** each terrain baseline PNG is composed directly from the tile's MTEX/MCLY/
    MCAL data and BLP pixels rather than from an authored minimap image.
 2. **Given** a selected minute-precise time of day and a readable supported LIT profile, **When** the export runs,
-   **Then** the PNGs use the profile's global clear-weather colors and record the source, selected
-   time, and remaining authored lighting assumptions in a manifest.
-3. **Given** no usable LIT profile, **When** the export runs, **Then** it still emits visible
-   terrain using a clearly labeled authored day/night fallback; it does not claim client-exact
-   lighting.
+   **Then** the PNGs use the same neutral-white top-edge terrain-light profile as a map without
+   LIT, record the selected time, and explicitly record that LIT was excluded from synthesis.
+3. **Given** no usable LIT profile, **When** the export runs, **Then** it emits the same visible
+   neutral-white top-edge terrain result; LIT availability cannot tint or redirect the minimap.
 4. **Given** an export configured for tiles and a whole map, **When** it completes, **Then** it
    writes one PNG per occupied terrain tile and a single stitched PNG covering their map-coordinate
    bounds, leaving missing tiles transparent instead of inventing terrain.
@@ -83,19 +82,22 @@ stitching, then have the user run one real map export with and without a usable 
 7. **Given** an Alpha WDT, **When** the exporter enumerates occupied MAIN cells, **Then** it uses
    the same row-major `(tileX, tileY)` coordinates as the Alpha tile reader and does not transpose
    valid sparse-map entries into false decode failures.
-8. **Given** synthesized terrain lighting uses the authored solar fallback, **When** time is noon,
-   **Then** its direction is vertical; immediately after noon its source projects from the raster's
-   top-left rather than carrying a permanent diagonal bias.
+8. **Given** a 0.5.3.3368 global LIT profile, **When** synthesized terrain lighting evaluates a
+   selected time, **Then** it MUST NOT use its color tracks or the recovered native world-light ray.
+   The generator uses only the white top-edge terrain profile; native world-light recovery remains
+   separate diagnostic research until a different consumer has a calibrated contract.
 9. **Given** a synthesized terrain tile, **When** it is emitted, **Then** the exporter also emits an
    aligned `_liquid` PNG using decoded unified liquid coverage and resolved basic liquid types,
    while retaining the terrain-only baseline separately. The liquid target records its rendered
    pixel count and does not claim native water-material or animation parity. Alpha MCLQ coverage
    MUST honor its 8×8 per-chunk cell visibility flags, and a rendered liquid pixel MUST represent
    a complete covered source cell rather than a single wet vertex on a dry-terrain boundary.
-10. **Given** an otherwise readable tile whose MTEX path is absent, undecodable, or lacks a usable
-   MCLY/MTEX table, **When** narrow same-name and related-texture recovery cannot resolve it,
-   **Then** the exporter uses a successfully decoded deterministic catalog RGB proxy rather than
-   dropping the tile. The manifest records the original reference and `catalog_rgb_last_resort_proxy`.
+10. **Given** an otherwise readable tile with a declared MTEX material whose BLP path is absent or
+   undecodable, **When** narrow same-name and related-texture recovery cannot resolve it, **Then**
+   the exporter uses a successfully decoded deterministic catalog RGB proxy rather than dropping
+   the tile. A tile with no non-empty declared MTEX names is instead an unlit solid-white empty
+   terrain baseline, not a fabricated catalog material. The manifest records any proxy's original
+   reference and `catalog_rgb_last_resort_proxy`.
 11. **Given** a placement lies on a tile edge, **When** its Alpha roof/object-mask footprint is
    rasterized into a 256² minimap buffer, **Then** the footprint is clipped to that buffer and
    cannot make terrain decode fail from a 257² object-mask assumption.
@@ -216,17 +218,18 @@ A user can determine which WMO v14/v17 and M2-to-MDX conversions are supported, 
   existing decimal-hour values.
 - **FR-020**: The export MUST compose minimap pixels from decoded terrain texture layers and alpha
   masks; it MUST NOT require or substitute a client-authored minimap image.
-- **FR-021**: The export MUST use the global clear-weather LIT profile when it can be evaluated at
-  the selected time and otherwise use a visible labeled authored fallback. It MUST record which
-  source it used and MUST NOT claim unproven local-zone lighting as client-exact.
+- **FR-021**: The export MUST use a neutral-white, north/top-edge terrain-light profile at every
+  selected time. It MUST NOT consume LIT color tracks, LIT fog tracks, or recovered native
+  world-light direction. The manifest MUST record that exclusion and MUST NOT claim client-exact
+  lighting.
 - **FR-022**: A whole-map export MUST stitch exactly the emitted terrain-tile outputs into one PNG
   with explicit tile-coordinate bounds and transparent missing-tile regions.
 - **FR-023**: The export MUST write a machine-readable manifest with client build identity, source
   map, selected time, lighting evidence state, output dimensions, tile bounds, and per-tile result.
-- **FR-023k**: The authored direction used with LIT color tracks or no-LIT fallback MUST share the
-  terrain world/minimap-raster coordinate contract: it MUST be vertical at noon, vary with time,
-  and record its authored evidence state because early LIT profiles do not provide a client sun
-  vector.
+- **FR-023k**: The recovered 0.5.3.3368 world-light ray is diagnostic research only. Synthesized
+  minimaps MUST exclude it and use the shared north/top-edge white terrain direction, whose
+  negative terrain-X source prevents hillshade inversion. The manifest records this as
+  `minimap_white_light_not_lit_data`.
 - **FR-023l**: Every synthesized terrain tile MUST have an aligned liquid-bearing companion PNG
   whose filename ends in `_liquid.png`; whole-map export MUST stitch an equivalent `_liquid` map.
   The companion MUST use decoded unified liquid coverage and resolved basic types when available,
@@ -238,13 +241,23 @@ A user can determine which WMO v14/v17 and M2-to-MDX conversions are supported, 
 - **FR-023o**: The liquid companion MUST render water, ocean, magma, and slime with distinct
   deterministic palette entries. For Alpha MCLQ, each visible cell's type nibble MUST take
   precedence over the containing MCNK liquid flags; the MCNK flags are the fallback only when a
-  visible cell carries no type nibble. The resolved per-cell basic type remains an independent
-  tensor/metadata signal from the visual palette.
-- **FR-023m**: A missing/undecodable terrain BLP or absent usable MTEX table MUST NOT skip an
-  otherwise readable tile solely for lack of material RGB. Recovery MUST try same-stem and related
-  candidates first, then a successfully decoded deterministic catalog BLP selected by source-folder
+  visible cell carries no type nibble. Raw MCLQ nibbles MUST map as `0x01=Ocean`, `0x03=Slime`,
+  `0x04=River/Water`, and `0x06=Magma`; a river MUST select the blue water palette even when its
+  containing MCNK fallback advertises slime. The resolved per-cell basic type remains an
+  independent tensor/metadata signal from the visual palette.
+- **FR-023p**: A WL*-derived surface MUST be visible only where its interpolated WL height is finite
+  and at or above the aligned terrain height. It MUST resolve its per-pixel basic liquid type before
+  writing `LiquidBasicType257`: parsed WLW/WLQ header values select water/ocean/slime/magma where
+  valid, `WLM` selects magma, and `WLL` lava selects the canonical magma class. The three WL
+  provenance markers `wl_liquid_surface_quads_v1`, `wl_liquid_above_terrain_v1`, and
+  `wl_liquid_basic_type_header_v1` are jointly required by liquid-aware dataset builders.
+- **FR-023m**: A missing/undecodable BLP for a declared terrain material MUST NOT skip an otherwise
+  readable tile solely for lack of material RGB. Recovery MUST try same-stem and related candidates
+  first, then a successfully decoded deterministic catalog BLP selected by source-folder
   and terrain-family affinity. The original reference, resolved path, and
-  `catalog_rgb_last_resort_proxy` kind MUST remain in the per-tile metadata.
+  `catalog_rgb_last_resort_proxy` kind MUST remain in the per-tile metadata. A tile with no
+  non-empty declared MTEX name MUST instead compose as an unlit solid-white empty baseline and
+  MUST NOT receive a catalog material proxy.
 - **FR-023n**: Alpha object/roof-mask rasterization MUST validate against each destination buffer's
   actual dimensions, not the 257² terrain height grid. An edge placement MUST not abort terrain
   decoding merely because roof masks are 256².
@@ -275,7 +288,7 @@ A user can determine which WMO v14/v17 and M2-to-MDX conversions are supported, 
   sidecar table and record its incomplete state in metadata.
 - **FR-023h**: A readable terrain tile with MCLY base-layer material but no MCAL payload MUST remain
   exportable as base-layer-only terrain. The compositor MUST NOT invent overlay alpha; it continues
-  to apply available normal/LIT lighting and records the normal tile result.
+  to apply available normal/white-top-edge lighting and records the normal tile result.
 - **FR-023i**: A malformed or differently sized MCNR validity mask MUST NOT abort minimap export.
   Normal samples outside that mask are treated as unknown/neutral while valid normal data continues
   to contribute; the compositor MUST not index a mask beyond its declared bounds.

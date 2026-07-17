@@ -4,7 +4,8 @@ using WowViewer.Core.IO.Lit;
 namespace WowViewer.Core.Renderer.Terrain;
 
 /// <summary>
-/// Evaluates the global clear-weather colors used by the early LIT/minimap lane.
+/// Evaluates global clear-weather colors for LIT inspection and world-light diagnostics.
+/// Synthesized minimaps intentionally do not consume these tracks.
 /// LIT supplies colors but not the directional vector or the MCSH attenuation coefficient;
 /// those two inputs remain explicitly authored in this hybrid profile.
 /// </summary>
@@ -23,9 +24,55 @@ public static class LitTerrainDayNightProfile
         LitFileProfile profile,
         float gameTime)
     {
+        TerrainLightingSample authored = AuthoredTerrainDayNightProfile.Evaluate(gameTime);
+        return EvaluateGlobalClear(
+            profile,
+            gameTime,
+            authored.LightDirection,
+            ProfileRevision,
+            EvidenceState,
+            AuthoredTerrainDayNightProfile.LightingModel,
+            DirectionEvidenceState,
+            authored.McshShadowStrength);
+    }
+
+    /// <summary>
+    /// Evaluates LIT colors with an independently recovered build-scoped world-light direction.
+    /// The caller owns the evidence state of that direction and must not call this client-exact
+    /// unless its native-to-viewer transform has been calibrated.
+    /// </summary>
+    public static LitTerrainLightingEvaluation EvaluateGlobalClear(
+        LitFileProfile profile,
+        float gameTime,
+        NativeWorldLightDirectionSample direction)
+    {
+        ArgumentNullException.ThrowIfNull(direction);
+        return EvaluateGlobalClear(
+            profile,
+            gameTime,
+            direction.ViewerSourceDirection,
+            $"{ProfileRevision}+{direction.DirectionModelRevision}+{direction.CoordinateTransformRevision}",
+            "partially_proven_client_lit_colors_native_0533368_ray_unproven_viewer_transform",
+            direction.LightingModel,
+            direction.EvidenceState,
+            AuthoredTerrainDayNightProfile.DefaultMcshShadowStrength);
+    }
+
+    private static LitTerrainLightingEvaluation EvaluateGlobalClear(
+        LitFileProfile profile,
+        float gameTime,
+        Vector3 lightDirection,
+        string profileRevision,
+        string evidenceState,
+        string lightingModel,
+        string directionEvidenceState,
+        float mcshShadowStrength)
+    {
         ArgumentNullException.ThrowIfNull(profile);
         if (!float.IsFinite(gameTime) || gameTime < 0f || gameTime >= 1f)
             throw new ArgumentOutOfRangeException(nameof(gameTime), "Game time must be in [0, 1).");
+        if (!IsFiniteDirection(lightDirection))
+            throw new ArgumentOutOfRangeException(nameof(lightDirection), "Light direction must be finite and non-zero.");
 
         (LitLightProfile light, LitLightGroupProfile group) = SelectUniqueGlobalClear(profile);
 
@@ -34,19 +81,18 @@ public static class LitTerrainDayNightProfile
         Vector3 ambient = EvaluateRequiredTrack(group, TrackAmbientColor, litTime, "global ambient");
         Vector3 fog = EvaluateRequiredTrack(group, TrackFogColor, litTime, "fog");
 
-        TerrainLightingSample authored = AuthoredTerrainDayNightProfile.Evaluate(gameTime);
         var sample = new TerrainLightingSample(
-            ProfileRevision,
-            EvidenceState,
-            AuthoredTerrainDayNightProfile.LightingModel,
+            profileRevision,
+            evidenceState,
+            lightingModel,
             gameTime,
-            authored.LightDirection,
+            Vector3.Normalize(lightDirection),
             direct,
             1f,
             ambient,
             1f,
             fog,
-            authored.McshShadowStrength);
+            mcshShadowStrength);
 
         return new LitTerrainLightingEvaluation(
             sample,
@@ -56,8 +102,16 @@ public static class LitTerrainDayNightProfile
             group.Index,
             litTime,
             [TrackDirectColor, TrackAmbientColor, TrackFogColor],
-            DirectionEvidenceState,
+            directionEvidenceState,
             McshEvidenceState);
+    }
+
+    private static bool IsFiniteDirection(Vector3 value)
+    {
+        return float.IsFinite(value.X)
+            && float.IsFinite(value.Y)
+            && float.IsFinite(value.Z)
+            && value.LengthSquared() > 1e-10f;
     }
 
     private static (LitLightProfile Light, LitLightGroupProfile Group) SelectUniqueGlobalClear(

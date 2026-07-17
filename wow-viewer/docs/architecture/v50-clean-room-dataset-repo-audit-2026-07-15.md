@@ -74,10 +74,10 @@ Passing an earlier level does not imply a later one.
 |---|---|---:|---|---|
 | Historical dataset roots | Many local roots under ignored `wow-viewer/output/datasets` | Unverified | Quarantine | Per-artifact provenance and schema inventory; independent sampled comparison before any promotion |
 | Historical model/checkpoint roots | Local output/model/cloud-download roots exist | Unverified | Quarantine | Bind each artifact to a verified dataset, split, code identity, and metrics report |
-| `v50_build_dataset.py` | Thin wrapper over `spec108_build_mixed_curriculum.py` | Inventory only | Migrate | Establish a canonical v50 owner after source-verification gates exist |
+| `v50_build_dataset.py` | Refuses production until the Spec 109 canonical owner exists | Fail-closed | Keep blocked | Replace only with fixture-proven migration and client-backed fresh extraction |
 | Other `v50_*.py` commands | Thin wrappers over Spec 103/108 scripts | Inventory only | Migrate | Focused parity tests, then move ownership out of historical spec command modules |
 | Current mixed-store builder | Accepts arbitrary real/synthetic stores and writes v50 metadata | Failed trust gate | Quarantine | Reject unverified sources; bind source schema, manifest, hashes, and row lineage before writing output |
-| `v50_contract.py` | Checks release syntax and three top-level attributes | Partial contract proof | Keep/extend | Validate complete store schema, index identity, source identities, row lineage, and downstream hashes |
+| `v50_contract.py` | Checks release identity plus WL surface provenance and fresh-only liquid policy | Partial contract proof | Keep/extend | Validate complete store schema, index identity, source identities, row lineage, and downstream hashes |
 | Modified Spec 103/108 modules | Carry v50 behavior while retaining historical owner paths and aliases | Unreviewed user work | Verify/migrate | Focused tests plus an ownership plan that preserves historical compatibility intentionally |
 | Root Python project files | Separate MCP environment at repository root | Boundary violation candidate | Remove-candidate | Confirm no required workspace tool depends on them, then remove without touching the harvester environment |
 | Ignored output roots | Git ignores `wow-viewer/output` and other generated/model roots | Local user data | Keep quarantined | Produce an artifact manifest before any pruning |
@@ -92,6 +92,19 @@ truthfulness, or row-level lineage. An arbitrary historical store can therefore 
 v50-labeled store.
 
 Until that defect is closed, no output from this builder is trusted regardless of its v50 metadata.
+
+## Frozen liquid policy — 2026-07-16
+
+- V50 will include `liquid_mask` and `liquid_height` as valuable terrain-supervision signals, but
+  both are **fresh-only** in the first V50 release. No historic V16/V18 payload can prove that its
+  WL fallback avoided the former sparse-stamp/checkerboard projection.
+- A newly extracted WL source is accepted only when its signal metadata contains
+  `wl_liquid_surface_quads_v1`, proving the continuous nine-quad surface rasterizer. MH2O/MCLQ
+  sources are not required to claim that WL-specific marker, but their authoritative reader must
+  be retained in row lineage.
+- `scripts/v50_build_dataset.py` now stops with a non-zero result rather than delegating to the
+  legacy Spec 108 mixed-copy builder. It does not create or relabel a V50 store. The future Spec
+  109 per-build writer must enforce this policy before writing any liquid payload.
 
 ## Phase 1 audit slices
 

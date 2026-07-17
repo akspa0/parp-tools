@@ -29,19 +29,20 @@
    composition; it never requires a shipped minimap BLP/PNG. Each emitted terrain artifact has an
    aligned `_liquid` companion derived from decoded unified liquid coverage/type evidence. The
    companion rasterizes complete source cells, not individual coverage vertices; Alpha MCLQ's 8×8
-   tile flags determine whether a source cell exists. A visible cell's type nibble selects its
-   water/ocean/magma/slime palette class; MCNK liquid flags are used only when that cell lacks a
-   type nibble.
+   tile flags determine whether a source cell exists. A visible cell's raw MCLQ type nibble selects
+   its palette class (`0x01=Ocean`, `0x03=Slime`, `0x04=River/Water`, `0x06=Magma`); MCNK liquid
+   flags are used only when that cell lacks a type nibble.
 2. `--time-hours` accepts minute-precise `HHmm` (`1215`) or `HH:mm` (`12:15`) clock input as
    well as legacy decimal hours. It is normalized to one client day and recorded as both canonical
-   `HH:mm` and decimal hours in the manifest. A readable global clear-weather LIT profile supplies
-   direct, ambient, and fog color tracks; the manifest records its source and evidence.
-3. If global LIT evaluation is unavailable, the command uses the versioned authored day/night
-   profile and records `authored_fallback_not_client_light_data`. It does not claim exact client
-   lighting or use unproven local LIT zones.
-4. LIT global-clear colors do not supply a directional vector. The shared authored direction is
-   vertical at noon and uses the terrain-world/minimap-raster axis transform after noon; its
-   evidence remains explicitly authored rather than client-exact.
+   `HH:mm` and decimal hours in the manifest. It selects the shared north/top-edge terrain
+   direction, with a pure-white direct term and achromatic ambient term; LIT is not an input to
+   this profile.
+3. A readable or unreadable global LIT profile produces the same terrain RGB contract. The manifest
+   records `minimap_white_light_not_lit_data` and states that LIT colors, fog, and native
+   world-light direction were excluded.
+4. The recovered 0.5.3.3368 world-light ray remains independent diagnostic research. It is never
+   transformed or applied by synthesized minimaps. Negative terrain X is raster north in the
+   MCNR/minimap contract, preventing terrain hillshade inversion.
 5. Per-tile output and whole-map output are independently selectable. Each selected mode emits
    both liquid-free terrain and `_liquid` artifacts. Whole-map canvases cover only the inclusive
    bounds of successfully emitted tiles and preserve unoccupied positions as transparent pixels.
@@ -51,16 +52,25 @@
    `--tile-y` select one occupied coordinate only when supplied together. The liquid overlay uses
    the current flat viewer type palette and opacity, not a claim of native water texture, animation,
    or reflection parity. It is the source of truth for how each PNG was derived.
-7. A readable tile is not skipped solely because no referenced MTEX BLP decodes. After the
+7. A readable tile is not skipped solely because a declared MTEX BLP does not decode. After the
    same-stem and related-diffuse tiers, the exporter may use a successfully decoded deterministic
    catalog RGB material chosen by source-folder and terrain-family affinity, or a previously decoded
    catalog material when early-client listfile discovery is incomplete. It records
-   `catalog_rgb_last_resort_proxy`, the original reference, and the resolved BLP. If MCLY/MTEX is
-   absent entirely, the compositor uses that proxy as its base material.
+   `catalog_rgb_last_resort_proxy`, the original reference, and the resolved BLP. If no non-empty
+   MTEX name is declared, the compositor instead emits an unlit solid-white empty baseline.
 8. Alpha object and roof masks may have different dimensions. Every painter validates its target
    buffer dimensions; the 257² terrain grid is never used as a bounds check for a 256² roof mask.
    WMO placements that cross a tile boundary are clipped per destination tile rather than treated
    as a terrain-decode failure.
+9. Any WL*-derived `wl_liquid_*` or unified fallback mask MUST carry all of
+   `wl_liquid_surface_quads_v1`, `wl_liquid_above_terrain_v1`, and
+   `wl_liquid_basic_type_header_v1`. They prove contiguous 4x4-block surface geometry,
+   per-raster-sample terrain-height visibility, and a resolved per-pixel liquid class. WLW/WLQ
+   use the parsed header class where valid; WLM is magma and WLL is lava represented through the
+   canonical magma palette. Dataset builders MUST reject a WL* fallback lacking any marker rather
+   than treating sparse, below-terrain, or default-water pixels as a liquid-aware fact. Earlier
+   datasets are invalid for liquid-aware use and require re-harvest; their stored masks cannot be
+   repaired after the fact.
 
 ## Conversion contract
 

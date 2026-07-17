@@ -12,9 +12,9 @@ namespace WowViewer.Core.Renderer.Terrain;
 /// </summary>
 public static class AuthoredTerrainDayNightProfile
 {
-    public const string ProfileRevision = "wow-1.0.0-authored-day-night-v2";
+    public const string ProfileRevision = "wow-1.0.0-authored-day-night-v3";
     public const string EvidenceState = "authored_fallback_not_client_light_data";
-    public const string LightingModel = "mcnr_lambert_plus_mcsh_authored_diagonal_solar_v2";
+    public const string LightingModel = "mcnr_lambert_plus_mcsh_authored_top_edge_solar_v3";
     public const float DefaultGameTime = 0.35f;
     public const float DefaultMcshShadowStrength = 0.60f;
 
@@ -55,8 +55,8 @@ public static class AuthoredTerrainDayNightProfile
 
     /// <summary>
     /// Returns the authored world-space sun direction for the terrain coordinate convention.
-    /// World +X/+Y project toward the top-left of a synthesized raster. The old profile held
-    /// +Y constant, causing a permanent diagonal bias and directional shading at noon.
+    /// The shared profile maps the authored source across the synthesized raster's top edge so
+    /// terrain shadows always project downward. It remains an authored vector, not LIT data.
     /// </summary>
     public static Vector3 EvaluateLightDirection(float gameTime)
     {

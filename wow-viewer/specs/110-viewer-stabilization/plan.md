@@ -149,8 +149,9 @@ unresolved technical ambiguity remains.
    source-project fallback) instead of assuming an external binary exists.
 10. Run focused test/build proof, then hand the user one LIT and one no-LIT real-client visual/export
     proof command.
-11. Keep Alpha MAIN coordinate enumeration and the authored solar direction aligned with their
-    reader/raster coordinate contracts; record pipeline failure stages for residual real-data tiles.
+11. Keep Alpha MAIN coordinate enumeration aligned with its reader contract. Synthesized minimaps
+    use north/top-edge white terrain light independent of LIT/native-world-light data; record that
+    exclusion and pipeline failure stages for residual real-data tiles.
 
 **Exit criteria**: zero-width/invalid ranges cannot reach a shader; manual UI controls cannot be
 overwritten by a lighting update; no-LIT fallback remains visible; LIT markers and selection agree
@@ -194,7 +195,7 @@ parent Tools tab; an active UniqueId range can always be paused or stopped from 
    payload identity by omitting incomplete sidecar tables rather than shifting their indices.
 9. Treat missing MCAL on a readable MCLY tile as base-layer-only and a mismatched MCNR validity
    mask as incomplete evidence. Do not fabricate overlay alpha or abort whole-map export; bound-check
-   the mask, retain normal/LIT evaluation, and use a neutral normal outside valid mask bounds.
+   the mask, retain normal/white-top-edge evaluation, and use a neutral normal outside valid mask bounds.
 10. When a referenced terrain BLP cannot decode, try only successfully decoded deterministic RGB
     proxies: its same-stem `_s` companion, then at most sixteen ordinary color BLPs scanned from the
     loaded archive/listfile catalog. Rank exact/strong basename matches before directory-theme tokens
@@ -205,13 +206,15 @@ parent Tools tab; an active UniqueId range can always be paused or stopped from 
     MCLQ type coverage to its terrain-resolution surface before building unified liquid, then render
     decoded coverage with the current flat viewer liquid palette/opacity. Respect Alpha's 8×8 MCLQ
     cell flags and rasterize only complete covered source cells so liquid cannot bleed along dry
-    terrain-cell boundaries. Record render profile and pixel count without claiming water-material
-    or animation parity. Retain a one-tile CLI selection and first relevant source frame in failed
+    terrain-cell boundaries. Decode raw MCLQ `0x04` as a river/water rather than slime. Record
+    render profile and pixel count without claiming water-material or animation parity. Retain a
+    one-tile CLI selection and first relevant source frame in failed
     diagnostics so residual client-data decode faults are reproducible rather than opaque. Make
     Alpha footprint painters use their destination-buffer dimensions so 256² roof-mask edges cannot
     abort terrain decode; after same-name/related BLP recovery, use a decoded folder/terrain-family
     catalog RGB proxy (then a verified previously decoded BLP) rather than skip a readable tile
-    whose stale MTEX linkage cannot resolve. Record every such substitution.
+    whose named stale MTEX linkage cannot resolve. A tile with no declared material name stays an
+    unlit solid-white empty baseline. Record every such substitution.
 
 **Exit criteria**: focused tests prove terrain-equivalent layer order, phase-independent material
 averaging, MCNR triangle interpolation, unshadowed default RGB, trustworthy lighting sidecar

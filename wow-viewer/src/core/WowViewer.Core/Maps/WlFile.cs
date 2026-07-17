@@ -18,7 +18,8 @@ public enum WlFileType
     WLW,  // Water Level Water
     WLM,  // Water Level Magma (always magma)
     WLQ,  // Water Level (alternate format, WMO-style types)
-    WLL   // Water Level (legacy)
+    // Water Level Lava. The canonical terrain liquid palette represents lava as Magma.
+    WLL
 }
 
 public enum WlLiquidType

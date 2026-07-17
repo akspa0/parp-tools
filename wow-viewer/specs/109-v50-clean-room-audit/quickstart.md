@@ -87,7 +87,7 @@ it never promotes the complete store because a subset of signals passed.
 
 ## 4. Full verification and selective migration — PLANNED, USER RUNS
 
-After reviewing the sample report:
+After reviewing the sample report, the intended command will be:
 
 ```powershell
 uv run python scripts/v50_build_dataset.py migrate-v18 `
@@ -101,7 +101,13 @@ uv run python scripts/v50_build_dataset.py migrate-v18 `
 ```
 
 Passing payloads are copied bit-for-bit. Known-defective or failed signals are freshly extracted or
-recorded unavailable. `holes_16` is never copied from the old V18 store.
+recorded unavailable. `holes_16` is never copied from the old V18 store. `liquid_mask` and
+`liquid_height` are fresh-only: historic liquid payloads are rejected, and a WL source must declare
+`wl_liquid_surface_quads_v1`.
+
+**Current status**: this command is intentionally unavailable. `v50_build_dataset.py` returns a
+non-zero result instead of delegating to the legacy mixed-copy builder until Spec 109 implements
+the fixture-proven migration and client-backed fresh-extraction owner.
 
 ## 5. Fresh build for an additional SSD client — PLANNED, USER RUNS
 

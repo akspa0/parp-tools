@@ -22,9 +22,8 @@ namespace WowViewer.Core.Maps;
 /// function that returns the canonical <c>MclqLiquidType</c> enum and feeds
 /// the bidirection conversion path <c>LiquidConverter.MclqToMh2o</c>.
 /// <para>
-/// Note: <c>AlphaLiquidTypeCodec.ResolveBasicType</c> uses the opposite order
-/// (Slime first). The canonical helper picks Magma-first because it matches
-/// the only function whose output is consumed by the bidirectional converter.
+/// <c>AlphaLiquidTypeCodec.ResolveBasicType</c> delegates to this decoder so
+/// Alpha reader, tensor, and conversion paths share the same raw MCLQ mapping.
 /// The 0x30 case (both Magma and Slime bits set) is treated as Magma.
 /// </para>
 /// </remarks>
@@ -35,10 +34,12 @@ public static class McnkFlagDecoder
     private const uint McnkMagmaBit = 0x10u;
     private const uint McnkSlimeBit = 0x20u;
 
-    private const byte MclqTileNibbleWater = 0x01;
-    private const byte MclqTileNibbleOcean = 0x02;
-    private const byte MclqTileNibbleMagma = 0x03;
-    private const byte MclqTileNibbleSlime = 0x04;
+    // These are raw MCLQ lower-nibble values, not AdtLiquidBasicType values.
+    // In particular, 0x04 means River (blue water), not Slime.
+    private const byte MclqTileNibbleOcean = 0x01;
+    private const byte MclqTileNibbleSlime = 0x03;
+    private const byte MclqTileNibbleRiver = 0x04;
+    private const byte MclqTileNibbleMagma = 0x06;
     private const byte MclqTileNibbleDontRender = 0x0F;
 
     /// <summary>
@@ -73,7 +74,8 @@ public static class McnkFlagDecoder
     /// nibble is non-zero and not <c>0x0F</c> (DontRender), the nibble wins.
     /// </summary>
     /// <param name="mcnkFlags">Raw MCNK flags (uint). Used when the nibble is 0 or DontRender.</param>
-    /// <param name="mclqTileNibble">Lower 4 bits of the first non-DontRender MCLQ tile flag byte.</param>
+    /// <param name="mclqTileNibble">Lower 4 bits of an MCLQ tile flag byte. Raw MCLQ uses
+    /// 0x01=Ocean, 0x03=Slime, 0x04=River/Water, and 0x06=Magma.</param>
     /// <returns>Resolved <see cref="AdtLiquidBasicType"/>.</returns>
     public static AdtLiquidBasicType DecodeWithMclqTileNibble(uint mcnkFlags, byte mclqTileNibble)
     {
@@ -84,6 +86,7 @@ public static class McnkFlagDecoder
                 MclqTileNibbleOcean => AdtLiquidBasicType.Ocean,
                 MclqTileNibbleMagma => AdtLiquidBasicType.Magma,
                 MclqTileNibbleSlime => AdtLiquidBasicType.Slime,
+                MclqTileNibbleRiver => AdtLiquidBasicType.Water,
                 _ => AdtLiquidBasicType.Water,
             };
         }

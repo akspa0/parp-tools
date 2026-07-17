@@ -47,6 +47,9 @@
 - `coverage_count`
 - `verification_scope` and report identity
 - `migration_policy`: copy-if-verified, fresh-only, derived-after-build, or unavailable
+- Liquid-specific provenance: source reader and, for WL fallback data,
+  `wl_liquid_surface_quads_v1`. `liquid_mask` and `liquid_height` are `fresh-only` in the initial
+  V50 release; old payloads cannot become trustworthy through a copied mask alone.
 
 ## RowLineage
 

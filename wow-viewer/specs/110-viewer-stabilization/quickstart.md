@@ -62,10 +62,14 @@ Run the Debug viewer with an approved configured client root. For one map with L
 6. Reset the override; verify the source returns to `Lighting recommendation` or `Fallback`.
 7. Open **Tools > Export > Synthesized Terrain Minimap...** and run one bounded per-tile export
    first. Verify its terrain is correctly projected, blended, and free of static-like texture noise.
-   Verify the paired `_liquid` image does not paint narrow strips over dry terrain-cell boundaries.
-   Then choose per-tile and whole-map output. Verify the manifest says either `LitGlobalClear` or
-   `AuthoredFallback`, all successful tile PNGs are present, and the combined PNG has the recorded
-   bounds and transparent missing areas. If a tile fails, rerun only that coordinate with
+   Verify the paired `_liquid` image does not paint narrow strips over dry terrain-cell boundaries,
+   does not paint through terrain, and renders water blue, slime green, and WLM/WLL magma/lava
+   through the orange magma palette where those sources exist.
+   Then choose per-tile and whole-map output. Verify the manifest says `WhiteTopEdge` with
+   `minimap_white_light_not_lit_data`, terrain material colours are not LIT-tinted, and relief is
+   north-lit rather than south-lit (basins must not read as mountains). At `12:00`, no horizontal
+   hillshade should remain. Confirm all successful tile PNGs are present and the combined PNG has
+   the recorded bounds and transparent missing areas. If a tile fails, rerun only that coordinate with
    `--tile-x <x> --tile-y <y>`; the error must include the decode stage and first relevant source
    frame before any additional bounds fix is attempted.
 8. Confirm Lighting's Fog Start and Fog End each show a visible slider track and grab. Change both

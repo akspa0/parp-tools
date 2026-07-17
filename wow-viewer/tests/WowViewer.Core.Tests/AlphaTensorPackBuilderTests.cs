@@ -225,7 +225,7 @@ public sealed class AlphaTensorPackBuilderTests
         liquidTypes[0, 0] = (int)AdtLiquidBasicType.Magma;
 
         byte[] flags = Enumerable.Repeat((byte)0x0F, 64).ToArray();
-        flags[0] = 0x02; // Ocean; the containing MCNK declares magma.
+        flags[0] = 0x01; // Ocean; the containing MCNK declares magma.
         AlphaTileData tile = new(
             sourcePath: "alpha.wdt#alpha-tile(0,0)",
             heightmap: new float[257, 257],
@@ -248,5 +248,34 @@ public sealed class AlphaTensorPackBuilderTests
         Assert.True(pack.MclqPresenceMask![1, 1]);
         Assert.Equal((int)AdtLiquidBasicType.Ocean, pack.MclqTypeMask![1, 1]);
         Assert.Equal((byte)AdtLiquidBasicType.Ocean, pack.LiquidBasicType257![1, 1]);
+    }
+
+    [Fact]
+    public void Build_MapsVisibleMclqRiverCellToWaterRatherThanSlime()
+    {
+        byte[] flags = Enumerable.Repeat((byte)0x0F, 64).ToArray();
+        flags[0] = 0x04; // MCLQ River, even if the MCNK fallback says slime.
+        AlphaTileData tile = new(
+            sourcePath: "alpha.wdt#alpha-tile(0,0)",
+            heightmap: new float[257, 257],
+            mcalAlphaPack: new float[256, 256, 4],
+            mclyTextureIds: new int[16, 16, 4],
+            mclyLayerMask: new bool[16, 16, 4],
+            holeMask: new bool[16, 16],
+            textureNames: Array.Empty<string>(),
+            modelPlacements: Array.Empty<AlphaModelPlacement>(),
+            worldModelPlacements: Array.Empty<AlphaWorldModelPlacement>(),
+            liquidChunks:
+            [
+                new AlphaLiquidChunk(0, 0, 0, 12f, 12f, flags, 0x20u, null)
+            ],
+            mclqSurfaceHeight: null,
+            mclqTypeMask: null);
+
+        TerrainTileTensorPack pack = AlphaTensorPackBuilder.Build(tile, 0, 0);
+
+        Assert.True(pack.MclqPresenceMask![1, 1]);
+        Assert.Equal((int)AdtLiquidBasicType.Water, pack.MclqTypeMask![1, 1]);
+        Assert.Equal((byte)AdtLiquidBasicType.Water, pack.LiquidBasicType257![1, 1]);
     }
 }

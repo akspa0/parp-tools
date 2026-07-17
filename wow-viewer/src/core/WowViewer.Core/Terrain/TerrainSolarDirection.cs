@@ -14,13 +14,16 @@ public static class TerrainSolarDirection
         float sunHeight = MathF.Sin(sunAngle - (MathF.PI * 0.5f));
         float sunHorizontal = MathF.Cos(sunAngle - (MathF.PI * 0.5f));
 
-        // World +X/+Y project toward the top-left of the synthesized terrain raster.
-        // At 12:00 horizontal components are zero; after noon the source projects top-left.
+        // MCNR hillshade proof establishes that a positive terrain-X source reads as south in the
+        // synthesized minimap, which inverts basin/hill perception. Keep the source on negative
+        // terrain X (raster north) throughout the day: it traverses north-west before noon and
+        // north-east after. Letting the source enter positive X makes shading project upward.
         const float diagonalHorizontalScale = 0.3535534f; // 0.5 / sqrt(2)
-        float horizontal = -sunHorizontal * diagonalHorizontalScale;
+        float horizontalX = -MathF.Abs(sunHorizontal) * diagonalHorizontalScale;
+        float horizontalY = sunHorizontal * diagonalHorizontalScale;
         return Vector3.Normalize(new Vector3(
-            horizontal,
-            horizontal,
+            horizontalX,
+            horizontalY,
             MathF.Max(sunHeight, 0.05f)));
     }
 }

@@ -8,7 +8,7 @@ checkpoint may only be used together when their release values agree.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 MODEL_FAMILY = "v50"
@@ -17,6 +17,18 @@ MIXED_STORE_SCHEMA = "v50-mixed-curriculum-v1"
 WDL_ARCHIVE_SCHEMA = "v50-generated-wdl-v1"
 WDL_CHECKPOINT_VARIANT = "v50.1-spatial-wdl-prior"
 TERRAIN_CHECKPOINT_VARIANT = "v50.1-terrain-refiner-convnextv2"
+WL_LIQUID_SURFACE_QUADS_SIGNAL = "wl_liquid_surface_quads_v1"
+WL_LIQUID_ABOVE_TERRAIN_SIGNAL = "wl_liquid_above_terrain_v1"
+WL_LIQUID_BASIC_TYPE_SIGNAL = "wl_liquid_basic_type_header_v1"
+WL_LIQUID_REQUIRED_PROVENANCE = frozenset(
+    {
+        WL_LIQUID_SURFACE_QUADS_SIGNAL,
+        WL_LIQUID_ABOVE_TERRAIN_SIGNAL,
+        WL_LIQUID_BASIC_TYPE_SIGNAL,
+    }
+)
+WL_LIQUID_SOURCE_SIGNALS = frozenset({"wl_liquid_mask", "wl_liquid_height"})
+V50_FRESH_ONLY_SIGNALS = frozenset({"liquid_mask", "liquid_height"})
 
 _RELEASE = re.compile(r"^v50\.[1-9][0-9]*$")
 
@@ -57,3 +69,34 @@ def require_metadata_release(metadata: Mapping[str, object], expected_release: s
 def release_identity(release: str) -> dict[str, str]:
     release = validate_release(release)
     return {"model_family": MODEL_FAMILY, "release": release}
+
+
+def migration_policy_for_signal(signal_name: str) -> str:
+    """Return the frozen V50 migration policy for a canonical signal.
+
+    Historic liquid payloads cannot prove whether their WL fallback was the former
+    sparse-stamp projection. They are therefore never eligible for bit-preserving
+    V18 migration: V50 obtains them only from a corrected client-backed extraction.
+    """
+    return "fresh-only" if str(signal_name) in V50_FRESH_ONLY_SIGNALS else "copy-if-verified"
+
+
+def require_liquid_source_provenance(available_signals: Iterable[object] | object, *, artifact: str) -> None:
+    """Reject WL liquid arrays that lack complete visibility/type provenance.
+
+    Non-WL liquid readers (for example MH2O/MCLQ) do not carry the WL marker. The
+    caller must still record their authoritative reader in the V50 row lineage.
+    """
+    if isinstance(available_signals, str):
+        signals = {available_signals}
+    else:
+        try:
+            signals = {str(signal) for signal in available_signals}
+        except TypeError:
+            signals = set()
+    if signals.intersection(WL_LIQUID_SOURCE_SIGNALS) and not WL_LIQUID_REQUIRED_PROVENANCE.issubset(signals):
+        missing = ", ".join(sorted(WL_LIQUID_REQUIRED_PROVENANCE.difference(signals)))
+        raise ValueError(
+            f"{artifact} contains WL liquid data without required provenance ({missing}); "
+            "reject it and re-extract from an approved client build"
+        )

@@ -26,6 +26,9 @@ namespace WowViewer.Core.IO.Maps;
 ///     <see cref="McnkFlagDecoder.Decode"/> applied to all 17×17 vertices
 ///     in the chunk. Used when neither MH2O nor MCLQ is present but the
 ///     MCNK header marks the chunk as liquid.</description></item>
+///   <item><description>WL* fallback — a terrain-gated recovered surface uses
+///     its parsed header/container family type only where neither explicit
+///     MH2O nor MCLQ coverage owns the destination pixel.</description></item>
 /// </list>
 /// </remarks>
 public static class LiquidBasicTypePackBuilder
@@ -51,6 +54,63 @@ public static class LiquidBasicTypePackBuilder
             return BuildFromMcnkFlags(mcnkFlags16);
 
         return null;
+    }
+
+    /// <summary>
+    /// Overlays WL* type evidence at the same per-pixel priority used by the
+    /// unified liquid-height mask: MH2O, then MCLQ, then recovered WL*.
+    /// MCNK flags are classification-only and intentionally do not suppress a
+    /// visible, terrain-gated WL* surface.
+    /// </summary>
+    public static byte[,]? OverlayWlFallbackTypes(
+        byte[,]? resolvedTypes,
+        float[,]? wlMask,
+        byte[,]? wlTypes,
+        float[,]? mh2oSurfaceHeight,
+        bool[,]? mh2oPresence,
+        float[,]? mclqSurfaceHeight,
+        bool[,]? mclqPresence)
+    {
+        if (wlMask is null || wlTypes is null)
+            return resolvedTypes;
+
+        int height = wlMask.GetLength(0);
+        int width = wlMask.GetLength(1);
+        if (height == 0 || width == 0
+            || wlTypes.GetLength(0) != height
+            || wlTypes.GetLength(1) != width)
+        {
+            throw new ArgumentException("WL mask and basic-type grids must have matching non-empty dimensions.");
+        }
+
+        if (resolvedTypes is not null
+            && (resolvedTypes.GetLength(0) != height || resolvedTypes.GetLength(1) != width))
+        {
+            throw new ArgumentException("Resolved liquid type grid must match the WL grid.", nameof(resolvedTypes));
+        }
+
+        byte[,] result = resolvedTypes is null
+            ? CreateNoLiquidGrid(height, width)
+            : (byte[,])resolvedTypes.Clone();
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                byte wlType = wlTypes[y, x];
+                if (!(wlMask[y, x] > 0f)
+                    || wlType > LiquidBasicTypeConstants.MaxBasicType
+                    || HasMh2oCoverage(mh2oSurfaceHeight, mh2oPresence, x, y, width, height)
+                    || HasMclqCoverage(mclqSurfaceHeight, mclqPresence, x, y, width, height))
+                {
+                    continue;
+                }
+
+                result[y, x] = wlType;
+            }
+        }
+
+        return result;
     }
 
     private static byte[,] BuildFromMh2o(bool[,] presence, int[,]? type)
@@ -127,5 +187,77 @@ public static class LiquidBasicTypePackBuilder
             }
         }
         return result;
+    }
+
+    private static byte[,] CreateNoLiquidGrid(int height, int width)
+    {
+        byte[,] result = new byte[height, width];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+                result[y, x] = LiquidBasicTypeConstants.NoLiquid;
+        }
+
+        return result;
+    }
+
+    private static bool HasMh2oCoverage(
+        float[,]? surfaceHeight,
+        bool[,]? presence,
+        int x,
+        int y,
+        int targetWidth,
+        int targetHeight)
+    {
+        if (surfaceHeight is null || presence is null
+            || surfaceHeight.GetLength(0) != presence.GetLength(0)
+            || surfaceHeight.GetLength(1) != presence.GetLength(1))
+        {
+            return false;
+        }
+
+        int sourceY = ScaleCoordinate(y, targetHeight, presence.GetLength(0));
+        int sourceX = ScaleCoordinate(x, targetWidth, presence.GetLength(1));
+        return presence[sourceY, sourceX];
+    }
+
+    private static bool HasMclqCoverage(
+        float[,]? surfaceHeight,
+        bool[,]? presence,
+        int x,
+        int y,
+        int targetWidth,
+        int targetHeight)
+    {
+        if (surfaceHeight is null || presence is null
+            || surfaceHeight.GetLength(0) != presence.GetLength(0)
+            || surfaceHeight.GetLength(1) != presence.GetLength(1)
+            || presence.GetLength(0) == 0
+            || presence.GetLength(1) == 0)
+        {
+            return false;
+        }
+
+        int sourceHeight = presence.GetLength(0);
+        int sourceWidth = presence.GetLength(1);
+        if (sourceHeight == 1 || sourceWidth == 1)
+            return presence[Math.Min(y, sourceHeight - 1), Math.Min(x, sourceWidth - 1)];
+
+        float sourceX = x * (sourceWidth - 1f) / Math.Max(targetWidth - 1f, 1f);
+        float sourceY = y * (sourceHeight - 1f) / Math.Max(targetHeight - 1f, 1f);
+        int ix = Math.Clamp((int)sourceX, 0, sourceWidth - 2);
+        int iy = Math.Clamp((int)sourceY, 0, sourceHeight - 2);
+        return presence[iy, ix]
+            || presence[iy, ix + 1]
+            || presence[iy + 1, ix]
+            || presence[iy + 1, ix + 1];
+    }
+
+    private static int ScaleCoordinate(int coordinate, int sourceSize, int targetSize)
+    {
+        if (sourceSize <= 1 || targetSize <= 1)
+            return 0;
+
+        return Math.Clamp((int)MathF.Round(coordinate * (targetSize - 1f) / (sourceSize - 1f)), 0, targetSize - 1);
     }
 }

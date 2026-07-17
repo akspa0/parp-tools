@@ -49,18 +49,18 @@
   deterministic nor terrain-only); revive MK/VLM menus (rejected: data-authoring is not the user
   workflow); use an existing client minimap as an input (rejected: the target maps may have none).
 
-## Decision: Time of day is provenance-first
+## Decision: Synthesized minimaps use neutral white top-edge lighting, not LIT
 
-- **Decision**: At the requested normalized clock time, use
-  `LitTerrainDayNightProfile.EvaluateGlobalClear` only when its global clear-weather tracks can be
-  evaluated. Otherwise use `AuthoredTerrainDayNightProfile` and label the export accordingly.
-  Keep local LIT zones out of the exporter until their spatial transform is proven.
-- **Rationale**: Global LIT colors are decoded and tested, but the current local-zone coordinate
-  transform remains explicitly diagnostic-only. A visible fallback makes a missing-LIT map useful
-  without representing an authored approximation as client-exact.
-- **Alternatives considered**: Make export fail without LIT (rejected: defeats the missing-minimap
-  use case); apply local zones speculatively (rejected: unproven spatial semantics); use a static
-  color grade (rejected: ignores the requested time of day).
+- **Decision**: At the requested normalized clock time, use `TerrainSolarDirection` for the
+  north/top-edge source direction, `Vector3.One` for direct sunlight, and achromatic ambient light.
+  Exclude LIT color/fog tracks and recovered world-light rays from synthesized-minimap RGB.
+- **Rationale**: LIT is world-light/atmosphere data, not a minimap rendering contract. Applying its
+  colour tracks caused orange/pink terrain; applying an uncalibrated native-ray transform put the
+  raster light to the south, making basins read as mountains. The north/top-edge profile preserves
+  time selection while keeping material colours untinted and relief correctly oriented.
+- **Alternatives considered**: Keep LIT colours with a corrected transform (rejected: still tints
+  minimap materials); rotate the provisional native ray again (rejected: wrong consumer and
+  uncalibrated axes); use a static no-time profile (rejected: loses the requested clock control).
 
 ## Decision: Export time uses an exact clock minute
 
@@ -74,17 +74,41 @@
   minute); second-precision input (rejected: no downstream LIT/minimap requirement currently needs
   it).
 
-## Decision: Authored direction follows the terrain raster axes
+## Decision: 0.5.3 native world-light recovery is not minimap input
 
-- **Decision**: Keep the LIT global-clear colour tracks, but derive the required direction through
-  one shared authored solar profile. It is vertical at 12:00 and follows the terrain world-to-raster
-  diagonal after noon so the source projects from top-left rather than retaining a fixed horizontal
-  bias.
-- **Rationale**: Early LIT profiles provide timed colours but not a sun vector. The previous
-  profile held world Y positive throughout the day, producing directional noon shading and the
-  wrong visible origin regardless of selected minute.
-- **Alternatives considered**: Treat LIT colour as a light direction (rejected: it is not vector
-  data); leave the axis arbitrary (rejected: produces stable but visibly wrong terrain relief).
+- **Decision**: Preserve the recovered 0.5.3.3368 downward-ray table as versioned native-client
+  research, but do not route it through `synthetic-minimap`.
+- **Rationale**: Its native-to-viewer transform is uncalibrated and, more importantly, minimap
+  synthesis is not the consumer whose lighting contract it describes. Using it sent the apparent
+  minimap source into the raster south.
+- **Alternatives considered**: Keep it as partially proven minimap shading (rejected: observed
+  orientation is wrong); discard the recovery entirely (rejected: it remains useful world-light
+  research); call it client-exact after axis guessing (rejected: no image calibration exists).
+
+## Decision: WL* liquid blocks are contiguous surface geometry
+
+- **Decision**: Rasterize all nine quads of each WL* 4x4 vertex block, using its actual world-space
+  XY vertices and interpolated heights. Both loose ADT and archive-backed Harvest paths share the
+  same rasterizer.
+- **Rationale**: Reducing a block to its origin/vertex stamps produces a regular checkerboard of
+  isolated liquid points. WL* is a heightfield surface, so coverage must be filled continuously.
+- **Alternatives considered**: Increase the point-stamp radius (rejected: it only blurs the grid);
+  use a fixed block size (rejected: ignores stored geometry and tile transforms).
+
+## Decision: WL* visibility and type require the terrain and WL-family contracts together
+
+- **Decision**: After world-space WL* quad rasterization, discard every sample whose interpolated
+  surface is non-finite or below the aligned 257² terrain height. Resolve the resulting pixels as
+  water/ocean/slime/magma before they enter `LiquidBasicType257`. WLW/WLQ use parsed header type
+  information where defined; WLM is magma and WLL is lava, represented by the existing canonical
+  magma type/palette. Record geometry, terrain-visibility, and type provenance independently.
+- **Rationale**: WL* is recovered auxiliary geometry, so untested samples can paint through a hill
+  or basin. A mask without class provenance also silently became blue water, contaminating liquid
+  masks and type supervision even after its checkerboard projection was corrected.
+- **Alternatives considered**: Render every WL block regardless of elevation (rejected: visibly
+  overlays dry terrain); infer all classes from filename only (rejected: discards valid header
+  distinctions); add a separate Lava renderer type (rejected: the canonical terrain palette has
+  Magma as its lava representation).
 
 ## Decision: distinguish ordinary minimap RGB from rare baked-lighting evidence
 
@@ -181,8 +205,10 @@
   Its native 8×8 MCLQ tile flags are the authoritative cell-presence signal; the output compositor
   requires all four source-cell corners to be covered before painting a liquid pixel. For a visible
   Alpha cell, its MCLQ low-nibble liquid type is the primary class; MCNK liquid flags classify only
-  cells that omit a type nibble. The output uses deterministic distinct flat colors for water,
-  ocean, magma, and slime while retaining the resolved basic type array separately from RGB.
+  cells that omit a type nibble. The raw MCLQ values are `0x01=Ocean`, `0x03=Slime`,
+  `0x04=River/Water`, and `0x06=Magma`—they are not basic-type ordinals. The output uses
+  deterministic distinct flat colors for water, ocean, magma, and slime while retaining the
+  resolved basic type array separately from RGB.
 - **Rationale**: A terrain-only image cannot supervise or classify liquid evidence in historical
   input minimaps. Coupled, coordinate-identical baseline/liquid outputs retain both signals without
   confusing the terrain model or pretending to have recreated water materials. Sampling a single
@@ -200,8 +226,9 @@
   candidates), but when all of those fail, choose a successfully decoded ordinary catalog BLP
   deterministically: same folder, then the same terrain family, then any terrain-likely catalog
   path. Cache verified decoded candidates during an export for incomplete early-client listfiles.
-  Record `catalog_rgb_last_resort_proxy`; do not rewrite the original MTEX identity. If MCLY/MTEX
-  is absent, compose using that proxy as the explicit base material.
+  Record `catalog_rgb_last_resort_proxy`; do not rewrite the original MTEX identity. If no non-empty
+  MTEX name is declared, compose an unlit solid-white empty baseline instead of inventing a proxy
+  material.
 - **Rationale**: The 0.5.3 Kalimdor manifest had 220 otherwise-readable tiles skipped only because
   no referenced BLP resolved. A visible, provenance-labeled terrain tile is more useful than a
   transparent hole, while the retained source/resolved identities keep the artifact honest.

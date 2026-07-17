@@ -82,11 +82,11 @@ public class WlFile
             BlockCount = br.ReadUInt32()
         };
 
-        // WLM files always use magma (type 6) regardless of header value
-        if (type == WlFileType.WLM)
-            header.RawLiquidType = 6;
-
-        header.LiquidType = MapWlwLiquidType(header.RawLiquidType);
+        // The shared WLW/WLM/WLL header has a raw type field, but WLM and WLL
+        // are file-family declarations: magma and lava respectively. The
+        // canonical terrain palette represents both through Magma. Preserve
+        // the raw field for inspection rather than rewriting it.
+        header.LiquidType = ResolveWlwFamilyLiquidType(header.RawLiquidType, type);
         return header;
     }
 
@@ -139,16 +139,24 @@ public class WlFile
 
     /// <summary>
     /// Maps WLW/WLM liquid type to unified WlLiquidType.
-    /// WLW types: 0=still, 1=ocean, 4=river, 6=magma, 8=fast
+    /// WLW types: 0=still, 1=ocean, 3=slime, 4=river, 6=magma, 8=fast.
     /// </summary>
     private static WlLiquidType MapWlwLiquidType(ushort raw) => raw switch
     {
         0 => WlLiquidType.StillWater,
         1 => WlLiquidType.Ocean,
+        3 => WlLiquidType.Slime,
         4 => WlLiquidType.River,
         6 => WlLiquidType.Magma,
         8 => WlLiquidType.FastWater,
         _ => WlLiquidType.StillWater
+    };
+
+    private static WlLiquidType ResolveWlwFamilyLiquidType(ushort raw, WlFileType fileType) => fileType switch
+    {
+        WlFileType.WLM => WlLiquidType.Magma,
+        WlFileType.WLL => WlLiquidType.Magma,
+        _ => MapWlwLiquidType(raw)
     };
 
     /// <summary>
@@ -170,7 +178,7 @@ public enum WlFileType
     WLW,  // Water Level Water
     WLM,  // Water Level Magma (always magma)
     WLQ,  // Water Level (alternate format, WMO-style types)
-    WLL   // Water Level (legacy?)
+    WLL   // Water Level Lava (canonical terrain palette uses Magma)
 }
 
 public enum WlLiquidType

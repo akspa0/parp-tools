@@ -8,6 +8,26 @@ namespace WowViewer.Core.Tests;
 
 public sealed class TerrainMinimapCompositorTests
 {
+    [Theory]
+    [InlineData(0.25f)]
+    [InlineData(0.35f)]
+    [InlineData(0.50f)]
+    [InlineData(0.65f)]
+    [InlineData(0.75f)]
+    public void WhiteTopEdgeLighting_StaysAchromaticAndKeepsTheRasterSunAboveTerrain(float gameTime)
+    {
+        TerrainMinimapLighting lighting = TerrainMinimapLighting.CreateWhiteTopEdge(gameTime);
+
+        // In the MCNR/minimap coordinate contract, negative terrain X is raster north.
+        // A positive X source was visually proven to invert the terrain hillshade.
+        Assert.Equal(Vector3.One, lighting.DirectionalColor);
+        Assert.Equal(0.25f, lighting.AmbientColor.X, 6);
+        Assert.Equal(lighting.AmbientColor.X, lighting.AmbientColor.Y, 6);
+        Assert.Equal(lighting.AmbientColor.X, lighting.AmbientColor.Z, 6);
+        Assert.True(lighting.LightDirection.Z > 0f);
+        Assert.True(lighting.LightDirection.X <= 0f);
+    }
+
     [Fact]
     public void Compose_UsesWeightedMcalLayersAndNeutralLighting()
     {
@@ -64,7 +84,8 @@ public sealed class TerrainMinimapCompositorTests
         var pack = new TerrainTileTensorPack
         {
             McalAlphaPack256 = alpha,
-            MclyTextureIds = textureIds
+            MclyTextureIds = textureIds,
+            MclyTextureNames = ["test_0.blp", "test_1.blp", "test_2.blp", "test_3.blp"]
         };
         var textures = new Dictionary<int, byte[,,]>
         {
@@ -132,7 +153,8 @@ public sealed class TerrainMinimapCompositorTests
             TileX = 0,
             TileY = 0,
             McalAlphaPack256 = alpha,
-            MclyTextureIds = textureIds
+            MclyTextureIds = textureIds,
+            MclyTextureNames = ["test_0.blp"]
         };
 
         using Image<Rgba32> image = TerrainMinimapCompositor.Compose(
@@ -217,6 +239,7 @@ public sealed class TerrainMinimapCompositorTests
         var pack = new TerrainTileTensorPack
         {
             MclyTextureIds = textureIds,
+            MclyTextureNames = ["test_0.blp", "test_1.blp"],
         };
 
         using Image<Rgba32> image = TerrainMinimapCompositor.Compose(
@@ -232,14 +255,16 @@ public sealed class TerrainMinimapCompositorTests
     }
 
     [Fact]
-    public void Compose_UsesTheDeclaredCatalogFallbackWhenMclyIsAbsent()
+    public void Compose_RendersAnEmptyTilesetAsUnlitSolidWhite()
     {
         using Image<Rgba32> image = TerrainMinimapCompositor.Compose(
             new TerrainTileTensorPack(),
             new Dictionary<int, byte[,,]> { [0] = SolidTexture(80, 120, 40) },
-            new TerrainMinimapCompositionOptions(1, TerrainMinimapLighting.Neutral));
+            new TerrainMinimapCompositionOptions(
+                1,
+                new TerrainMinimapLighting(Vector3.UnitZ, Vector3.Zero, Vector3.Zero, McshShadowStrength: 1f)));
 
-        Assert.Equal(new Rgba32(80, 120, 40, 255), image[0, 0]);
+        Assert.Equal(new Rgba32(255, 255, 255, 255), image[0, 0]);
     }
 
     [Fact]
@@ -251,6 +276,7 @@ public sealed class TerrainMinimapCompositorTests
         {
             McalAlphaPack256 = new float[2, 2, 4],
             MclyTextureIds = textureIds,
+            MclyTextureNames = ["test_0.blp"],
             McnrNormalXyz = new float[3, 3, 3],
             McnrMask257 = new bool[1, 1],
         };
@@ -429,6 +455,7 @@ public sealed class TerrainMinimapCompositorTests
             TileY = 0,
             McalAlphaPack256 = alpha,
             MclyTextureIds = textureIds,
+            MclyTextureNames = ["test_0.blp", "test_1.blp", "test_2.blp"],
             MclyLayerMask = layerMask,
             McshShadowMask256 = new[,] { { shadow } },
             McnrNormalXyz = normals,

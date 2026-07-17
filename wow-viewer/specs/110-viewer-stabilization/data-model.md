@@ -51,8 +51,8 @@
 | `TimeOfDay` | Canonical selected clock time | exact `HH:mm`; parsed from `HHmm`, `HH:mm`, or legacy decimal hours |
 | `TimeOfDayHours` | Compatibility/projection form of selected time | finite in `[0, 24)`; derived from the exact minute and normalized to `[0, 1)` |
 | `EmitTiles` / `EmitWholeMap` | Requested outputs | at least one target is true |
-| `LightingSource` | `LitGlobalClear` or `AuthoredFallback` | attached to every manifest |
-| `LightingEvidence` | Exact LIT/fallback evidence state | never represented as stronger proof than it is |
+| `LightingSource` | `WhiteTopEdge` | attached to every manifest |
+| `LightingEvidence` | `minimap_white_light_not_lit_data` | LIT colors/fog/native direction are excluded from minimap RGB |
 | `TileResults` | One result per occupied tile | source coordinate, output path, error/skip reason |
 | `StitchedBounds` | Inclusive tile-coordinate bounds for the combined image | emitted only when whole-map stitching succeeds |
 
@@ -60,7 +60,7 @@
 
 1. Tools > Export prepopulates client root and map from the active viewer session when available.
 2. The user starts the in-repository Harvest command after selecting at least one output target.
-3. The command resolves global LIT lighting once, or records the authored fallback once.
+3. The command resolves white north/top-edge terrain lighting once, independent of LIT/native-world-light data.
 4. Each readable tile is composed and saved independently; the optional combined image stitches only
    successful tile outputs and leaves missing coordinates transparent.
 5. The final manifest records successes, skips, failures, provenance, and output dimensions.

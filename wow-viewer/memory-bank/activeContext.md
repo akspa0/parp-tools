@@ -33,7 +33,7 @@ Last updated: 2026-07-16
   adding interpolation. The baseline never reads or substitutes a pre-authored client minimap.
 - A user-run full-map Kalimdor export exposed a readable tile with no `McalAlphaPack256`. Missing
   MCAL now means base-layer-only composition (no fabricated overlay weights), not a tile failure;
-  normal/LIT evaluation still applies. The next encountered tile had a partial MCNR mask shape;
+  normal/white-top-edge evaluation still applies. The next encountered tile had a partial MCNR mask shape;
   bounds-safe normal reads now treat out-of-mask samples as neutral rather than indexing beyond the
   mask. Focused regression proof covers both fallbacks.
 - Missing terrain diffuse BLPs first use a successfully decoded same-stem `_s.blp` companion as
@@ -63,15 +63,17 @@ Last updated: 2026-07-16
   abort terrain decoding. The 220 skips are separate stale/missing material-linkage cases: after
   original, `_s`, and related diffuse candidates, Harvester now uses a successfully decoded catalog
   RGB fallback (same directory, then terrain family, then a verified prior decode) and records
-  `catalog_rgb_last_resort_proxy`; the compositor can use it when MCLY/MTEX is absent.
+  `catalog_rgb_last_resort_proxy` for a declared material whose BLP cannot resolve. A tile with no
+  non-empty MTEX name is an unlit solid-white empty baseline rather than a catalog proxy.
 - Liquid pixels are now rasterized from complete source cells: Alpha honors the 8×8 MCLQ tile flags,
   and the companion compositor requires all four coverage corners before overlaying a liquid pixel.
   This replaces the single-vertex/all-chunk behavior that produced liquid strips on dry cell edges.
 - Alpha liquid class is now resolved at the same visible-cell granularity: the MCLQ cell type nibble
   takes precedence over MCNK's containing-chunk type flags, with MCNK retained as the fallback.
-  The companion palette deterministically distinguishes water, ocean, magma, and slime while the
-  resolved `LiquidBasicType257` remains the independent data signal. Focused type-precedence,
-  palette, and Alpha round-trip proof passes; Debug Harvest build succeeds (existing warnings only).
+  Raw MCLQ values are `0x01=Ocean`, `0x03=Slime`, `0x04=River/Water`, and `0x06=Magma`; the former
+  ordinal mapping called `0x04` slime, turning rivers green. The companion palette therefore keeps
+  rivers blue while `LiquidBasicType257` remains the independent data signal. Focused decoder,
+  tensor, and Alpha round-trip proof: 52 passed.
 - The same time-of-day path had a distinct lighting defect: Alpha MCNR's 257² compatibility grid
   intentionally has alternating non-vertex positions, but minimap synthesis sampled those gaps as
   `UnitZ`. `TerrainMinimapCompositor` now evaluates Lambert at the five real staggered vertices and
@@ -110,10 +112,21 @@ Last updated: 2026-07-16
   Alpha WDT MAIN enumeration had transposed `(tileX,tileY)` despite Alpha tile offsets being
   row-major. `WdtTileIndexReader` now matches `AlphaWdtReader`'s `tileY * 64 + tileX` mapping.
   Tile failures now record the exact pipeline stage in the manifest.
-- The prior authored solar vector held world Y positive all day, creating a wrong fixed diagonal
-  and non-vertical noon. The shared v2 authored direction is vertical at noon and projects from
-  top-left just after noon in the synthesized raster. LIT colour remains client data; direction is
-  explicitly labeled authored because early LIT profiles contain no sun vector.
+- A user visual review proved that applying LIT colors and the recovered 0.5.3 world-light ray to
+  minimaps was the wrong consumer contract: it tinted terrain orange/pink and put hillshade on the
+  south side, reversing basin/hill perception. `synthetic-minimap` now excludes LIT/native-ray
+  inputs entirely. It uses pure-white direct light, achromatic ambient, and a negative terrain-X
+  north/top-edge source; native `SetDirection` recovery remains diagnostic research only.
+- WL* liquid output was reduced to sparse origin/vertex stamps, causing a checkerboard. Both loose
+  and archive-backed paths now share a geometry rasterizer that fills each block's nine 4x4-grid
+  surface quads with interpolated heights, then drops every sample below the aligned terrain height.
+  The same path resolves `LiquidBasicType257`: WLW/WLQ use their parsed header class, WLM is magma,
+  and WLL lava uses the canonical magma class. Corrected shards carry all three markers:
+  `wl_liquid_surface_quads_v1`, `wl_liquid_above_terrain_v1`, and
+  `wl_liquid_basic_type_header_v1`; V16/V18/V50 fail closed on any incomplete WL provenance.
+  All earlier WL liquid-aware datasets are invalid and must be re-harvested, not patched from their
+  stored masks. Focused C# liquid/minimap tests: 32 passed; V16/V18/V50 provenance tests: 5 passed;
+  Harvest Debug build succeeds with only existing package/nullability warnings.
 - UniqueId controls are now owned only by Tools > Archeology. Archeology has a separate nested
   Range/Layers/Playback/Capture selection, so opening Playback cannot switch the parent Tools tab
   to PM4. Active playback exposes pause/stop on every Archeology subtab; manual range edits and a
@@ -138,7 +151,11 @@ Last updated: 2026-07-16
 ## Separate active lane
 
 - Spec 109 v50 clean-room dataset work remains separate. `H:\CLIENTS` is the approved configured
-  client library; legacy workspace output was cleared. Do not recreate pre-v50 outputs.
+  client library; legacy workspace output was cleared. Do not recreate pre-v50 outputs. V50 does
+  not yet have a per-build store writer: its former Spec 108 mixed-copy wrapper now fails closed.
+  Its frozen liquid policy preserves `liquid_mask`/`liquid_height` as useful targets but makes them
+  fresh-only; a WL source requires all three contiguous/above-terrain/typed markers, while non-WL
+  sources retain reader identity in row lineage.
 
 ## Durable boundaries
 

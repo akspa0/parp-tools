@@ -23,6 +23,26 @@ public sealed class LitTerrainDayNightProfileTests
     }
 
     [Fact]
+    public void EvaluateGlobalClear_UsesRecovered0533368DirectionWithoutChangingLitColorTracks()
+    {
+        LitFileProfile profile = BuildProfile(includeDefault: true, omitAmbient: false);
+        Assert.True(Native0533368WorldLightDirection.TryEvaluateProvisionalViewerSource(
+            Native0533368WorldLightDirection.BuildIdentity,
+            0.5f,
+            out NativeWorldLightDirectionSample direction));
+
+        LitTerrainLightingEvaluation result = LitTerrainDayNightProfile.EvaluateGlobalClear(profile, 0.5f, direction);
+
+        Assert.Equal(direction.ViewerSourceDirection.X, result.Lighting.LightDirection.X, 6);
+        Assert.Equal(direction.ViewerSourceDirection.Y, result.Lighting.LightDirection.Y, 6);
+        Assert.Equal(direction.ViewerSourceDirection.Z, result.Lighting.LightDirection.Z, 6);
+        Assert.Equal("partially_proven_client_lit_colors_native_0533368_ray_unproven_viewer_transform", result.Lighting.EvidenceState);
+        Assert.Equal(direction.EvidenceState, result.DirectionEvidenceState);
+        Assert.Equal(new Vector3(1f, 0f, 1f), result.Lighting.DirectionalColor);
+        Assert.Equal(new Vector3(0f, 1f, 1f), result.Lighting.AmbientColor);
+    }
+
+    [Fact]
     public void EvaluateGlobalClear_RejectsMissingDefaultLight()
     {
         LitFileProfile profile = BuildProfile(includeDefault: false, omitAmbient: false);

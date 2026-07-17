@@ -48,7 +48,7 @@ Last updated: 2026-07-16
   payload arrays/metadata use deterministic keys so downstream consumers can reproduce the
   baseline without shifted identities.
 - Corrected whole-map resilience for readable base-only terrain: if an Alpha tile has MCLY material
-  but no MCAL payload, the compositor now exports its layer-zero material with normal/LIT evaluation
+  but no MCAL payload, the compositor now exports its layer-zero material with normal/white-top-edge evaluation
   instead of aborting the tile or inventing overlay alpha.
 - Corrected partial Alpha MCNR-mask resilience: a mask shape that differs from the normal grid now
   yields a neutral normal outside the available mask rather than an out-of-bounds exception.
@@ -74,9 +74,24 @@ Last updated: 2026-07-16
   `361/951` tiles: 16-byte Alpha MAIN cells are row-major like the Alpha reader, not transposed.
   Failed tile records now include the decode/texture/composition/write stage for actionable
   follow-up.
-- Replaced the fixed-bias authored sun vector with a shared terrain/raster-axis solar path: it is
-  vertical at noon and projects from top-left after noon. LIT global-clear colours remain client
-  data, while this direction remains explicitly authored because LIT does not carry a sun vector.
+- Corrected the minimap-light consumer boundary after visual proof showed south-side hillshade that
+  inverted basins into mountains. `synthetic-minimap` now excludes LIT color/fog tracks and the
+  recovered 0.5.3 native ray, using instead pure-white direct light, achromatic ambient, and a
+  negative terrain-X north/top-edge source. Native-ray recovery remains diagnostic research only.
+  Focused minimap coverage: 22 passed; Debug Harvest build: 0 errors.
+- Corrected WL* liquid synthesis beyond checkerboards: archive and loose-file paths share actual
+  world-geometry triangle rasterization of all nine surface quads, reject samples below the aligned
+  terrain height, and resolve per-pixel type into `LiquidBasicType257`. WLW/WLQ use parsed header
+  classes; WLM is magma and WLL lava flows through the canonical magma class. Focused liquid/minimap
+  suite: 32 C# tests passed; Debug Harvest build succeeds with only existing package/nullability
+  warnings.
+- Elevated the WL* defect to complete dataset provenance: corrected shards require
+  `wl_liquid_surface_quads_v1`, `wl_liquid_above_terrain_v1`, and
+  `wl_liquid_basic_type_header_v1`; V16/V18/V50 reject any incomplete WL fallback rather than
+  converting sparse, through-terrain, or default-water pixels into training facts. Existing earlier
+  WL datasets are invalid for liquid-aware work and require client-backed re-harvest; their stored
+  masks cannot reconstruct missing visibility or type semantics. Focused Python provenance tests:
+  5 passed.
 - Added paired liquid minimap output. Every successful synthetic tile now writes the existing
   liquid-free terrain PNG and an aligned `_liquid.png`; `--whole-map` writes matching terrain and
   liquid stitched maps. The v4 manifest records liquid paths, pixel count, and the
@@ -84,11 +99,11 @@ Last updated: 2026-07-16
   coverage/basic types, not a claim of native water texture/animation/reflection parity. Alpha MCLQ
   257² surface data with a 16×16 type grid is normalized before unified-liquid composition, removing
   the mismatched-array failure mode that can affect liquid tiles.
-- Corrected Alpha liquid classification granularity. A visible MCLQ cell now uses its own type
-  nibble (water/ocean/magma/slime) before falling back to the containing MCNK's flags; the paired
-  liquid image uses deterministic distinct flat palette entries while `LiquidBasicType257` remains
-  the separate supervision signal. Focused type-precedence/palette/round-trip coverage passes and
-  Debug Harvest builds with no errors.
+- Corrected Alpha liquid classification granularity. A visible MCLQ cell now uses its own raw type
+  nibble before falling back to the containing MCNK's flags: `0x01=Ocean`, `0x03=Slime`,
+  `0x04=River/Water`, and `0x06=Magma`. The former ordinal mapping turned all `0x04` rivers green;
+  they now select the blue water palette. `LiquidBasicType257` remains the separate supervision
+  signal. Focused decoder/tensor/Alpha-round-trip coverage: 52 passed.
 - Corrected liquid coverage geometry after a 0.5.3 map showed water above dry terrain-cell
   boundaries: Alpha MCLQ now respects its 8×8 cell flags instead of treating an entire chunk as
   wet, and the minimap compositor requires all four source-cell coverage corners before emitting a
@@ -101,9 +116,10 @@ Last updated: 2026-07-16
   painters now check their actual destination dimensions; a WMO at tile edge is regression-covered.
   Separately, 220 `no referenced BLP texture could be decoded` skips now enter a provenance-labeled
   catalog RGB last-resort tier (same folder, terrain family, then prior verified decode) rather than
-  discard otherwise readable terrain; missing MCLY/MTEX uses that material as an explicit base.
-  Latest focused Alpha/minimap/texture-policy suite: 27 passed; Debug Harvest and Viewer builds:
-  0 errors (existing warnings only).
+  discard otherwise readable terrain. That recovery now applies only to named materials; a tile
+  with no non-empty MTEX name composes as an unlit solid-white empty baseline. Latest focused
+  Alpha/minimap/texture-policy suite: 27 passed; Debug Harvest and Viewer builds: 0 errors
+  (existing warnings only).
 - Replaced drag-only fog fields with visible slider controls. Moved UniqueId ranges/layers out of
   World into Tools > Archeology, gave Archeology a dedicated nested-tab index, and kept pause/stop
   visible while playback is active. Playback now stops safely if its world or scoped range vanishes;
@@ -147,4 +163,9 @@ Last updated: 2026-07-16
 
 ## Separate continuity
 
-- Spec 109 v50 clean-room dataset work is unchanged and separate from Spec 110.
+- Spec 109 v50 clean-room dataset work is separate from Spec 110. V50 does not yet have a canonical
+  per-build writer, so `v50_build_dataset.py` now refuses to delegate to the legacy mixed-copy
+  builder. Its initial liquid contract keeps `liquid_mask`/`liquid_height` as fresh-only targets:
+  historic payloads are rejected; fresh WL sources require contiguous, above-terrain, and typed
+  provenance; non-WL sources must retain their reader identity in row lineage. Focused V50/WL
+  contract coverage: 5 Python tests passed.

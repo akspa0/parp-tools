@@ -82,6 +82,9 @@ mismatched dataset, prior archive, or checkpoint fails closed.
    **Then** it is copied bit-for-bit with source lineage rather than reinterpreted or merely relabeled.
 4. **Given** a V18 signal or row that fails or lacks proof, **When** the v50 dataset is built,
    **Then** it is re-extracted from an approved client build or omitted with an explicit gap record.
+5. **Given** a historical liquid signal whose WL fallback lacks continuous-surface provenance,
+   **When** the v50 dataset is built, **Then** `liquid_mask` and `liquid_height` are freshly
+   extracted and the historical payload is rejected rather than copied or relabeled.
 
 ### Edge Cases
 
@@ -135,8 +138,10 @@ mismatched dataset, prior archive, or checkpoint fails closed.
   Spec 103, or Spec 108 store and not a mixed copy created solely for one training run.
 - **FR-016**: Every sound V18 signal considered for migration MUST be audited independently. Passing
   one signal MUST NOT promote other signals in the same row or store.
-- **FR-017**: Known-defective V18 data, including uncorrected hole masks, MUST NOT be ported. It MUST
-  be re-extracted from the authoritative reader or recorded as unavailable.
+- **FR-017**: Known-defective V18 data, including uncorrected hole masks and every historical
+  `liquid_mask`/`liquid_height` payload without `wl_liquid_surface_quads_v1` provenance, MUST NOT
+  be ported. Liquid signals are `fresh-only` for v50 until a client-backed extraction records its
+  authoritative source; known-defective inputs MUST be re-extracted or recorded as unavailable.
 - **FR-018**: V50 training curricula MUST select rows by immutable manifests or views over canonical
   stores so repeated experiments do not duplicate full dataset payloads.
 - **FR-019**: The v50 rename MUST establish canonical v50 module and command ownership. Historical

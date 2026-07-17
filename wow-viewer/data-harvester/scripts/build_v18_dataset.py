@@ -406,6 +406,16 @@ WRITE_RETRY_BASE_DELAY_SECONDS = 0.15
 WRITE_BATCH_SIZE = 16
 
 LK_CATA_BUILD_PREFIXES = ("3_", "4_")
+WL_LIQUID_SURFACE_QUADS_SIGNAL = "wl_liquid_surface_quads_v1"
+WL_LIQUID_ABOVE_TERRAIN_SIGNAL = "wl_liquid_above_terrain_v1"
+WL_LIQUID_BASIC_TYPE_SIGNAL = "wl_liquid_basic_type_header_v1"
+WL_LIQUID_REQUIRED_PROVENANCE = frozenset(
+    {
+        WL_LIQUID_SURFACE_QUADS_SIGNAL,
+        WL_LIQUID_ABOVE_TERRAIN_SIGNAL,
+        WL_LIQUID_BASIC_TYPE_SIGNAL,
+    }
+)
 
 
 def _decode_metadata_json(tile_blob: dict[str, np.ndarray]) -> dict[str, object]:
@@ -423,6 +433,16 @@ def _decode_metadata_json(tile_blob: dict[str, np.ndarray]) -> dict[str, object]
     except Exception:
         return {}
     return decoded if isinstance(decoded, dict) else {}
+
+
+def _has_unverified_wl_liquid_fallback(tile_blob: dict[str, np.ndarray]) -> bool:
+    """Reject WL* masks without contiguous, terrain-gated, typed provenance."""
+    if "wl_liquid_mask" not in tile_blob and "wl_liquid_height" not in tile_blob:
+        return False
+    signals = _decode_metadata_json(tile_blob).get("available_signals", [])
+    return not isinstance(signals, list) or not WL_LIQUID_REQUIRED_PROVENANCE.issubset(
+        {str(signal) for signal in signals}
+    )
 
 
 def _tile_rejection_report_path(output_path: Path, build_name: str) -> Path:
@@ -755,6 +775,8 @@ def _find_client_root(build: str) -> Path | None:
 
 def _process_tile_data(data: dict[str, np.ndarray]) -> tuple[dict[str, np.ndarray], dict[str, bool]] | None:
     if "minimap_rgb_256" not in data or "height_257" not in data:
+        return None
+    if _has_unverified_wl_liquid_fallback(data):
         return None
 
     tile_arrays: dict[str, np.ndarray] = {}
@@ -2955,6 +2977,11 @@ def _build_zarr_streaming(
                 dropped_missing_required += 1
                 rejected_tile_count += 1
                 missing = sorted(REQUIRED_KEYS - set(data.keys()))
+                rejection_reason = (
+                    "unverified_wl_liquid_provenance"
+                    if _has_unverified_wl_liquid_fallback(data)
+                    else "missing_required_keys"
+                )
                 meta = _decode_metadata_json(data)
                 source_adt_path = str(meta.get("source_adt_path", ""))
                 tx, ty = _extract_tile_coords_from_metadata(meta)
@@ -2968,6 +2995,7 @@ def _build_zarr_streaming(
                                 "source_adt_path": source_adt_path,
                                 "tile_x": tx,
                                 "tile_y": ty,
+                                "rejection_reason": rejection_reason,
                                 "missing_required_keys": missing,
                                 "available_keys": sorted(data.keys()),
                             },
@@ -2978,7 +3006,7 @@ def _build_zarr_streaming(
                     rejected_tiles_report.flush()
                 if dropped_missing_required <= 5:
                     print(
-                        f"    Warning: dropped tile blob missing required keys {missing}; "
+                        f"    Warning: dropped tile blob ({rejection_reason}); missing required keys {missing}; "
                         f"available keys: {sorted(data.keys())}",
                         file=sys.stderr,
                         flush=True,

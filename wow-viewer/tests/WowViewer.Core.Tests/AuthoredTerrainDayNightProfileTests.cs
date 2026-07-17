@@ -46,16 +46,20 @@ public sealed class AuthoredTerrainDayNightProfileTests
     }
 
     [Fact]
-    public void EvaluateLightDirection_IsVerticalAtNoonAndProjectsPostNoonSunFromTopLeft()
+    public void EvaluateLightDirection_IsVerticalAtNoonAndSweepsAcrossTheRasterTopEdge()
     {
         Vector3 noon = AuthoredTerrainDayNightProfile.EvaluateLightDirection(0.5f);
+        Vector3 preNoon = AuthoredTerrainDayNightProfile.EvaluateLightDirection(11f / 24f);
         Vector3 postNoon = AuthoredTerrainDayNightProfile.EvaluateLightDirection(13f / 24f);
-        Vector2 rasterSource = new(-postNoon.Y, -postNoon.X);
+        Vector2 preNoonRasterSource = new(-preNoon.Y, -preNoon.X);
+        Vector2 postNoonRasterSource = new(-postNoon.Y, -postNoon.X);
 
         Assert.Equal(0f, noon.X, 5);
         Assert.Equal(0f, noon.Y, 5);
         Assert.Equal(1f, noon.Z, 5);
-        Assert.True(rasterSource.X < 0f);
-        Assert.True(rasterSource.Y < 0f);
+        Assert.True(preNoonRasterSource.X < 0f);
+        Assert.True(preNoonRasterSource.Y < 0f);
+        Assert.True(postNoonRasterSource.X > 0f);
+        Assert.True(postNoonRasterSource.Y < 0f);
     }
 }

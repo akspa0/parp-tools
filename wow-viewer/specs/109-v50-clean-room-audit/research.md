@@ -16,9 +16,13 @@ training-specific copies.
 
 **Decision**: Audit each V18 signal independently. Copy passing payloads bit-for-bit with hashes and
 lineage; freshly extract failing or missing signals; never port known-defective `holes_16`.
+`liquid_mask` and `liquid_height` are additionally `fresh-only`: historic stores cannot establish
+that a WL fallback used the corrected continuous surface-quads rasterizer. A fresh WL source must
+declare `wl_liquid_surface_quads_v1`; non-WL sources retain their reader identity in row lineage.
 
-**Rationale**: Prior audit evidence showed sound core arrays alongside a systemic hole-mask defect
-and per-tile coverage gaps. Whole-store or whole-row certification would overclaim.
+**Rationale**: Prior audit evidence showed sound core arrays alongside a systemic hole-mask defect,
+per-tile coverage gaps, and a historic WL sparse-stamp projection defect. Whole-store or whole-row
+certification would overclaim.
 
 **Alternatives considered**: Trust the prior six-row audit; rebuild everything from clients; port all
 V18 arrays and fix later. The chosen hybrid preserves proven work without carrying known defects and

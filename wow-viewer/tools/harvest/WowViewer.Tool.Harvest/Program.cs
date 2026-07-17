@@ -585,7 +585,7 @@ static class Program
 
         bool isAlpha = AlphaWdtReader.IsAlphaWdt(wdtBytes);
         float gameTime = timeOfDayHours / 24f;
-        SyntheticMinimapLightingProfile lighting = ResolveSyntheticMinimapLighting(catalog, mapName, gameTime);
+        SyntheticMinimapLightingProfile lighting = ResolveSyntheticMinimapLighting(gameTime);
         if (bakeMcsh)
         {
             lighting = lighting with
@@ -1713,6 +1713,9 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
 
     private static Dictionary<int, byte[,,]> LoadSyntheticMinimapTextures(NativeMpqService catalog, TerrainTileTensorPack pack)
     {
+        if (!pack.MclyTextureNames.Any(static textureName => !string.IsNullOrWhiteSpace(textureName)))
+            return [];
+
         int[,,]? textureIds = pack.MclyTextureIds;
         var usedIds = new HashSet<int>();
         if (textureIds is not null)
@@ -1724,9 +1727,9 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
                             usedIds.Add(textureIds[y, x, layer]);
         }
 
-        // A few early-client tiles carry readable terrain but no usable MCLY/MTEX material table.
-        // The compositor has an explicit ID-zero fallback grid for that case; make it a decoded
-        // catalog BLP rather than dropping height, lighting, and liquid output.
+        // A named material grid can still contain stale IDs. Keep ID zero in the recovery path so
+        // those references receive a deterministic provenance-labeled RGB proxy. Truly empty
+        // MTEX tables returned above are white empty terrain, never catalog-coloured terrain.
         if (usedIds.Count == 0)
             usedIds.Add(0);
 
@@ -2049,67 +2052,20 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         };
     }
 
-    private static SyntheticMinimapLightingProfile ResolveSyntheticMinimapLighting(
-        NativeMpqService catalog,
-        string mapName,
-        float gameTime)
+    private static SyntheticMinimapLightingProfile ResolveSyntheticMinimapLighting(float gameTime)
     {
-        var diagnostics = new List<string>();
-
-        foreach (string candidate in EnumerateMapLitPaths(mapName).Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            byte[]? bytes = catalog.ReadFile(candidate);
-            if (bytes is null || bytes.Length == 0)
-                continue;
-
-            try
-            {
-                using var stream = new MemoryStream(bytes, writable: false);
-                LitFileProfile profile = LitProfileReader.Read(stream, candidate);
-                LitTerrainLightingEvaluation evaluation = LitTerrainDayNightProfile.EvaluateGlobalClear(profile, gameTime);
-                TerrainLightingSample sample = evaluation.Lighting;
-                return new SyntheticMinimapLightingProfile(
-                    new TerrainMinimapLighting(
-                        sample.LightDirection,
-                        sample.DirectionalColor * sample.DirectionalIntensity,
-                        sample.AmbientColor * sample.AmbientIntensity,
-                        sample.McshShadowStrength),
-                    "LitGlobalClear",
-                    sample.EvidenceState,
-                    sample.ProfileRevision,
-                    candidate,
-                    evaluation.LitVersion,
-                    evaluation.LightName,
-                    evaluation.LightIndex,
-                    evaluation.DirectionEvidenceState,
-                    evaluation.McshEvidenceState,
-                    null);
-            }
-            catch (Exception ex)
-            {
-                diagnostics.Add($"{candidate}: {ex.Message}");
-            }
-        }
-
-        TerrainLightingSample fallback = AuthoredTerrainDayNightProfile.Evaluate(gameTime);
         return new SyntheticMinimapLightingProfile(
-            new TerrainMinimapLighting(
-                fallback.LightDirection,
-                fallback.DirectionalColor * fallback.DirectionalIntensity,
-                fallback.AmbientColor * fallback.AmbientIntensity,
-                fallback.McshShadowStrength),
-            "AuthoredFallback",
-            fallback.EvidenceState,
-            fallback.ProfileRevision,
+            TerrainMinimapLighting.CreateWhiteTopEdge(gameTime),
+            "WhiteTopEdge",
+            "minimap_white_light_not_lit_data",
+            "terrain-minimap-white-top-edge-lambert-v1",
             null,
             null,
             null,
             null,
-            "authored_solar_direction_not_lit_data",
-            "authored_mcsh_strength_not_client_exact",
-            diagnostics.Count == 0
-                ? "No readable supported global clear-weather LIT profile was found."
-                : string.Join(" | ", diagnostics));
+            "authored_top_edge_solar_direction_not_lit_data",
+            "mcsh_omitted_from_normal_minimap_rgb",
+            "LIT tracks and the provisional native world-light ray are intentionally excluded from minimap synthesis.");
     }
 
     static void GenerateSyntheticMinimap(NativeMpqService catalog, TerrainTileTensorPack pack, int tileX, int tileY, string outputPath)
@@ -2208,52 +2164,37 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         if (wlFiles.Length == 0)
             return;
 
-        bool any = false;
-        float[,]? mask = null;
-        float[,]? heights = null;
-
-        const int size = 257;
-        const float tileWorldSize = 533.33333f;
-        const float mapOrigin = 17066.666f;
-
-        foreach (WlLooseFileEntry entry in wlFiles)
+        if (WlLiquidRasterizer.TryRasterize(
+                wlFiles.Select(static entry => entry.File),
+                tileX,
+                tileY,
+                out float[,]? mask,
+                out float[,]? heights,
+                out byte[,]? basicTypes))
         {
-            foreach (var block in entry.File.Blocks)
-            {
-                Vector3 pos = block.WorldPosition;
-                int blockTileX = Math.Clamp((int)Math.Floor((mapOrigin - pos.Y) / tileWorldSize), 0, 63);
-                int blockTileY = Math.Clamp((int)Math.Floor((mapOrigin - pos.X) / tileWorldSize), 0, 63);
-                if (blockTileX != tileX || blockTileY != tileY)
-                    continue;
+            if (mask is null || heights is null || basicTypes is null
+                || WlLiquidRasterizer.KeepOnlyAboveTerrain(mask, heights, pack.Height257, basicTypes) == 0)
+                return;
 
-                float avgH = block.Vertices.Average(v => v.Z);
-                float localX = (mapOrigin - pos.Y) - (tileX * tileWorldSize);
-                float localY = (mapOrigin - pos.X) - (tileY * tileWorldSize);
-                int cx = Math.Clamp((int)(localX / tileWorldSize * (size - 1)), 0, size - 1);
-                int cy = Math.Clamp((int)(localY / tileWorldSize * (size - 1)), 0, size - 1);
-
-                mask ??= new float[size, size];
-                heights ??= new float[size, size];
-
-                for (int dy = -1; dy <= 1; dy++)
-                {
-                    for (int dx = -1; dx <= 1; dx++)
-                    {
-                        int px = Math.Clamp(cx + dx, 0, size - 1);
-                        int py = Math.Clamp(cy + dy, 0, size - 1);
-                        mask[py, px] = 1.0f;
-                        heights[py, px] = avgH;
-                    }
-                }
-                any = true;
-            }
-        }
-
-        if (any)
-        {
             pack.WlLiquidMask = mask;
             pack.WlLiquidHeight = heights;
-            pack.AvailableSignals = new HashSet<string>(pack.AvailableSignals) { "wl_liquid_mask", "wl_liquid_height" };
+            pack.AvailableSignals = new HashSet<string>(pack.AvailableSignals)
+            {
+                "wl_liquid_mask",
+                "wl_liquid_height",
+                WlLiquidRasterizer.SurfaceRasterizationSignal,
+                WlLiquidRasterizer.AboveTerrainSignal,
+                WlLiquidRasterizer.BasicTypeSignal
+            };
+
+            pack.LiquidBasicType257 = LiquidBasicTypePackBuilder.OverlayWlFallbackTypes(
+                pack.LiquidBasicType257,
+                mask,
+                basicTypes,
+                pack.Mh2oSurfaceHeight,
+                pack.Mh2oPresenceMask,
+                pack.MclqSurfaceHeight,
+                pack.MclqPresenceMask);
 
             // Rebuild unified liquid: MH2O > MCLQ > WL*
             if (pack.UnifiedLiquidMask is null && pack.Mh2oSurfaceHeight is null && pack.MclqSurfaceHeight is null)

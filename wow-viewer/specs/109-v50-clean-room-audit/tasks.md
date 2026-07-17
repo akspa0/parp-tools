@@ -16,6 +16,7 @@ reviewed disk reclamation. One phase must be validated before the next starts.
 
 - [x] T001 Reconcile the `H:\CLIENTS` fast-SSD policy and prepare the guarded clean-slate bootstrap in `AGENTS.md`, `wow-viewer/AGENTS.md`, `wow-viewer/.specify/memory/constitution.md`, and `wow-viewer/scripts/clean-legacy-outputs.ps1`
 - [ ] T002 Freeze the complete v50 signal table and V18 per-signal migration policy in `wow-viewer/docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`
+- [x] T002a Freeze V50 liquid provenance: make `liquid_mask`/`liquid_height` fresh-only, require `wl_liquid_surface_quads_v1` for WL sources, and refuse the legacy mixed-copy wrapper in `harvester/v50_contract.py` and `scripts/v50_build_dataset.py`
 - [ ] T003 [P] Record approved generated-data roots and protected roots in `wow-viewer/specs/109-v50-clean-room-audit/research.md`
 - [ ] T004 [P] Create the canonical package and fixture directories at `wow-viewer/data-harvester/src/harvester/v50/` and `wow-viewer/data-harvester/tests/v50/`
 - [ ] T005 Validate Spec 109 requirements, plan, schemas, and command examples in `wow-viewer/specs/109-v50-clean-room-audit/`

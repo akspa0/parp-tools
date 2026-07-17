@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
+using System.Numerics;
 using System.Reflection;
+using System.Text;
 using WowViewer.Core.Chunks;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
@@ -157,6 +159,235 @@ public sealed class AdtTensorPackLiquidTests
             if (Directory.Exists(tempDir))
                 Directory.Delete(tempDir, recursive: true);
         }
+    }
+
+    [Fact]
+    public void WlLiquidRasterizer_FillsContiguousBlockQuadsInsteadOfSparseMarkers()
+    {
+        Vector3[] vertices = new Vector3[16];
+        const float vertexSpacing = 32f;
+        for (int row = 0; row < 4; row++)
+        {
+            for (int column = 0; column < 4; column++)
+            {
+                // The file stores this 4x4 grid in reverse (lower-right to upper-left).
+                vertices[15 - (row * 4 + column)] = new Vector3(
+                    WlLiquidRasterizer.MapOrigin - (row * vertexSpacing),
+                    WlLiquidRasterizer.MapOrigin - (column * vertexSpacing),
+                    100f + (row * 10f) + column);
+            }
+        }
+
+        var file = new WlFile
+        {
+            Blocks = [new WlBlock { Vertices = vertices }]
+        };
+
+        bool success = WlLiquidRasterizer.TryRasterize(
+            [file],
+            0,
+            0,
+            out float[,]? mask,
+            out float[,]? heights,
+            out byte[,]? basicTypes);
+
+        Assert.True(success);
+        Assert.NotNull(mask);
+        Assert.NotNull(heights);
+        Assert.NotNull(basicTypes);
+        Assert.True(mask!.Cast<float>().Count(static value => value > 0.5f) > 2_000);
+        Assert.Equal(1f, mask[0, 0]);
+        Assert.Equal(1f, mask[45, 45]);
+        Assert.Equal(0f, mask[46, 46]);
+        Assert.True(heights![40, 40] > heights[0, 0]);
+        Assert.Equal((byte)AdtLiquidBasicType.Water, basicTypes![0, 0]);
+    }
+
+    [Fact]
+    public void WlLiquidRasterizer_RemovesSurfacesBelowAlignedTerrain()
+    {
+        float[,] mask = new float[3, 3];
+        float[,] heights = new float[3, 3];
+        float[,] terrain = new float[3, 3];
+        byte[,] types = new byte[3, 3];
+        for (int y = 0; y < 3; y++)
+        {
+            for (int x = 0; x < 3; x++)
+            {
+                mask[y, x] = 1f;
+                heights[y, x] = 100f;
+                terrain[y, x] = 99f;
+                types[y, x] = (byte)AdtLiquidBasicType.Water;
+            }
+        }
+        terrain[1, 1] = 101f;
+
+        int retained = WlLiquidRasterizer.KeepOnlyAboveTerrain(mask, heights, terrain, types);
+
+        Assert.Equal(8, retained);
+        Assert.Equal(0f, mask[1, 1]);
+        Assert.Equal(0f, heights[1, 1]);
+        Assert.Equal(LiquidBasicTypeConstants.NoLiquid, types[1, 1]);
+        Assert.Equal(1f, mask[0, 0]);
+        Assert.Equal(100f, heights[0, 0]);
+    }
+
+    [Fact]
+    public void WlLiquidRasterizer_UsesTheSameNonSquareRasterAxesAsTerrainForHeightGating()
+    {
+        Vector3[] vertices = new Vector3[16];
+        const float terrainOffsetY = 100f;
+        const float terrainOffsetX = 200f;
+        const float spacing = 20f;
+        for (int row = 0; row < 4; row++)
+        {
+            for (int column = 0; column < 4; column++)
+            {
+                vertices[15 - (row * 4 + column)] = new Vector3(
+                    WlLiquidRasterizer.MapOrigin - terrainOffsetY - (row * spacing),
+                    WlLiquidRasterizer.MapOrigin - terrainOffsetX - (column * spacing),
+                    100f);
+            }
+        }
+
+        var file = new WlFile
+        {
+            Header = new WlHeader { FileType = WlFileType.WLW, LiquidType = WlLiquidType.StillWater },
+            Blocks = [new WlBlock { Vertices = vertices }]
+        };
+
+        Assert.True(WlLiquidRasterizer.TryRasterize(
+            [file], 0, 0, out float[,]? mask, out float[,]? heights, out byte[,]? types));
+        Assert.NotNull(mask);
+        Assert.NotNull(heights);
+        Assert.NotNull(types);
+
+        // World Y maps to raster X and world X maps to raster Y, matching the ADT terrain lattice.
+        Assert.Equal(1f, mask![48, 96]);
+        Assert.Equal(0f, mask[96, 48]);
+
+        float[,] terrain = new float[257, 257];
+        for (int y = 0; y < 257; y++)
+            for (int x = 0; x < 257; x++)
+                terrain[y, x] = 99f;
+        terrain[48, 96] = 101f;
+
+        WlLiquidRasterizer.KeepOnlyAboveTerrain(mask, heights!, terrain, types);
+
+        Assert.Equal(0f, mask[48, 96]);
+        Assert.Equal(LiquidBasicTypeConstants.NoLiquid, types![48, 96]);
+    }
+
+    [Fact]
+    public void WlLiquidRasterizer_UsesHeaderTypeAndLavaFamilyFallback()
+    {
+        Vector3[] vertices = CreateWlVertices();
+        var slime = new WlFile
+        {
+            Header = new WlHeader { FileType = WlFileType.WLW, LiquidType = WlLiquidType.Slime },
+            Blocks = [new WlBlock { Vertices = vertices }]
+        };
+
+        Assert.True(WlLiquidRasterizer.TryRasterize(
+            [slime], 0, 0, out _, out _, out byte[,]? slimeTypes));
+        Assert.NotNull(slimeTypes);
+        Assert.Equal((byte)AdtLiquidBasicType.Slime, slimeTypes![0, 0]);
+
+        var lava = new WlFile
+        {
+            // WLL is lava even if the shared header's raw class is water.
+            Header = new WlHeader { FileType = WlFileType.WLL, LiquidType = WlLiquidType.StillWater },
+            Blocks = [new WlBlock { Vertices = vertices }]
+        };
+
+        Assert.True(WlLiquidRasterizer.TryRasterize(
+            [lava], 0, 0, out _, out _, out byte[,]? lavaTypes));
+        Assert.NotNull(lavaTypes);
+        Assert.Equal((byte)AdtLiquidBasicType.Magma, lavaTypes![0, 0]);
+    }
+
+    [Fact]
+    public void WlFileReader_UsesWlwHeaderAndWllFamilyForLiquidType()
+    {
+        WlFile slime = ReadWlHeader(3, "liquid.wlw");
+        WlFile lava = ReadWlHeader(0, "liquid.wll");
+
+        Assert.Equal(WlLiquidType.Slime, slime.Header.LiquidType);
+        Assert.Equal((ushort)3, slime.Header.RawLiquidType);
+        Assert.Equal(WlLiquidType.Magma, lava.Header.LiquidType);
+        Assert.Equal((ushort)0, lava.Header.RawLiquidType);
+    }
+
+    [Fact]
+    public void LiquidBasicTypePackBuilder_OverlaysWlTypesOnlyWhereNoExplicitSurfaceOwnsThePixel()
+    {
+        float[,] wlMask = new float[3, 3];
+        byte[,] wlTypes = new byte[3, 3];
+        for (int y = 0; y < 3; y++)
+        {
+            for (int x = 0; x < 3; x++)
+            {
+                wlMask[y, x] = 1f;
+                wlTypes[y, x] = (byte)AdtLiquidBasicType.Magma;
+            }
+        }
+
+        float[,] mh2oHeights = new float[3, 3];
+        bool[,] mh2oPresence = new bool[3, 3];
+        mh2oPresence[1, 1] = true;
+        byte[,] resolved = new byte[3, 3];
+        for (int y = 0; y < 3; y++)
+            for (int x = 0; x < 3; x++)
+                resolved[y, x] = LiquidBasicTypeConstants.NoLiquid;
+        resolved[1, 1] = (byte)AdtLiquidBasicType.Ocean;
+
+        byte[,]? result = LiquidBasicTypePackBuilder.OverlayWlFallbackTypes(
+            resolved,
+            wlMask,
+            wlTypes,
+            mh2oHeights,
+            mh2oPresence,
+            null,
+            null);
+
+        Assert.NotNull(result);
+        Assert.Equal((byte)AdtLiquidBasicType.Magma, result![0, 0]);
+        Assert.Equal((byte)AdtLiquidBasicType.Ocean, result[1, 1]);
+    }
+
+    private static Vector3[] CreateWlVertices()
+    {
+        Vector3[] vertices = new Vector3[16];
+        const float vertexSpacing = 32f;
+        for (int row = 0; row < 4; row++)
+        {
+            for (int column = 0; column < 4; column++)
+            {
+                vertices[15 - (row * 4 + column)] = new Vector3(
+                    WlLiquidRasterizer.MapOrigin - (row * vertexSpacing),
+                    WlLiquidRasterizer.MapOrigin - (column * vertexSpacing),
+                    100f);
+            }
+        }
+
+        return vertices;
+    }
+
+    private static WlFile ReadWlHeader(ushort rawLiquidType, string fileName)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new BinaryWriter(stream, Encoding.ASCII, leaveOpen: true))
+        {
+            writer.Write(Encoding.ASCII.GetBytes("*QIL"));
+            writer.Write((ushort)1);
+            writer.Write((ushort)0);
+            writer.Write(rawLiquidType);
+            writer.Write((ushort)0);
+            writer.Write(0u);
+        }
+
+        stream.Position = 0;
+        return WlFileReader.Read(stream, fileName);
     }
 
     private static (float[,]? mask, float[,]? height) InvokeBuildUnifiedLiquid(

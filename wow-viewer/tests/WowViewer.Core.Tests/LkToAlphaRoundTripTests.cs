@@ -157,7 +157,7 @@ public sealed class LkToAlphaRoundTripTests
         Assert.Equal(33f, liquidChunk.MaxHeight, 3);
         Assert.Equal(0x3Cu, liquidChunk.McnkFlags & 0x3Cu);
         Assert.NotNull(liquidChunk.TileFlags);
-        Assert.Equal(0x01, liquidChunk.TileFlags![0] & 0x0F);
+        Assert.Equal(0x04, liquidChunk.TileFlags![0] & 0x0F); // MCLQ River = water.
     }
 
     [Fact]
@@ -896,7 +896,7 @@ public sealed class LkToAlphaRoundTripTests
 
         AlphaLiquidChunk alphaLiquid = Assert.Single(alphaRoundTrip.LiquidChunks, static chunk => chunk.IndexX == 5 && chunk.IndexY == 6);
         Assert.NotNull(alphaLiquid.TileFlags);
-        Assert.Equal(0x02, alphaLiquid.TileFlags![0] & 0x0F);
+        Assert.Equal(0x01, alphaLiquid.TileFlags![0] & 0x0F); // MCLQ Ocean.
         Assert.NotNull(alphaRoundTrip.MclqTypeMask);
         Assert.Equal((int)AdtLiquidBasicType.Ocean, alphaRoundTrip.MclqTypeMask![6, 5]);
         Assert.Equal(0x3Cu, alphaLiquid.McnkFlags & 0x3Cu);

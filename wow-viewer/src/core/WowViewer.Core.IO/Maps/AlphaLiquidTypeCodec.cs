@@ -10,12 +10,13 @@ internal static class AlphaLiquidTypeCodec
 
     public static byte GetWriterTileTypeNibble(AdtLiquidBasicType basicType)
     {
+        // MCLQ's raw lower nibble is not the AdtLiquidBasicType ordinal.
         return basicType switch
         {
-            AdtLiquidBasicType.Ocean => 0x02,
-            AdtLiquidBasicType.Magma => 0x03,
-            AdtLiquidBasicType.Slime => 0x04,
-            _ => 0x01,
+            AdtLiquidBasicType.Ocean => 0x01,
+            AdtLiquidBasicType.Magma => 0x06,
+            AdtLiquidBasicType.Slime => 0x03,
+            _ => 0x04, // River, rendered as water.
         };
     }
 
@@ -31,42 +32,16 @@ internal static class AlphaLiquidTypeCodec
 
     public static AdtLiquidBasicType ResolveBasicType(byte[]? tileFlags, uint mcnkFlags)
     {
-        byte tileType = GetVisibleTileTypeNibble(tileFlags);
-        if (tileType != 0)
+        if (tileFlags is { Length: >= 64 })
         {
-            return tileType switch
+            for (int index = 0; index < 64; index++)
             {
-                0x02 => AdtLiquidBasicType.Ocean,
-                0x03 => AdtLiquidBasicType.Magma,
-                0x04 => AdtLiquidBasicType.Slime,
-                _ => AdtLiquidBasicType.Water,
-            };
+                byte tileType = (byte)(tileFlags[index] & 0x0F);
+                if (tileType != 0x0F)
+                    return McnkFlagDecoder.DecodeWithMclqTileNibble(mcnkFlags, tileType);
+            }
         }
 
-        if ((mcnkFlags & 0x20u) != 0)
-            return AdtLiquidBasicType.Slime;
-
-        if ((mcnkFlags & 0x10u) != 0)
-            return AdtLiquidBasicType.Magma;
-
-        if ((mcnkFlags & 0x08u) != 0)
-            return AdtLiquidBasicType.Ocean;
-
-        return AdtLiquidBasicType.Water;
-    }
-
-    private static byte GetVisibleTileTypeNibble(byte[]? tileFlags)
-    {
-        if (tileFlags is not { Length: >= 64 })
-            return 0;
-
-        for (int index = 0; index < 64; index++)
-        {
-            byte lowNibble = (byte)(tileFlags[index] & 0x0F);
-            if (lowNibble != 0x0F)
-                return lowNibble;
-        }
-
-        return 0;
+        return McnkFlagDecoder.Decode(mcnkFlags);
     }
 }
