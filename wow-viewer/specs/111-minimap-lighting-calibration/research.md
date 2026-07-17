@@ -90,6 +90,28 @@
   would conflate "did rebalancing help" with "is this a harder/easier split than before," making the
   go/no-go comparison unreliable).
 
+## Decision: Spec 111 targets the v50 lane; legacy module names are implementation details, not the destination
+
+- **Decision**: Every Spec 111 consumer is v50-lane-scoped. The Phase 3 wrapper delegates to the
+  canonical `scripts/v50_train_wdl_prior.py` entry point (never the `train_spec103_wdl_prior.py`
+  implementation module it wraps), passes `--release` through (default `v50.1`), and inherits the
+  wrapped trainer's `require_store_release` check so a non-v50 store fails closed. The bucketing
+  report reader documents the harvester's decoded-metadata sidecar as *today's transport only*, with
+  V50-store reading declared as a dependency on Spec 109's future clean-room builder — which must
+  (1) run a full-texture-decode extraction profile so the shading-match analysis executes, and
+  (2) carry `minimap_lighting` (with the shading-match fields) as one of its DatasetSignals.
+- **Rationale**: The first implementation pass anchored on Spec 108/spec103/V22 names because that
+  is where the existing minimap-lighting provenance code lives, and the user corrected it: the
+  active dataset/model lane is v50 (Spec 109), and pre-v50 outputs are not to be recreated. The
+  `v50_*` scripts already exist and are the canonical entries; the spec103-named module is the
+  implementation they wrap. The V22 stream profile is a harvester transport detail — treating it as
+  the dataset destination misrepresented the lane.
+- **Alternatives considered**: Keep delegating to `train_spec103_wdl_prior.py` since it is the same
+  code (rejected: bypasses the canonical entry, so future v50-entry changes and release-stamping
+  conventions would silently not apply); block all of Spec 111 until Spec 109's store builder exists
+  (rejected: the C# harvest-side inference and the rebalancing/comparison logic are lane-agnostic
+  and testable now; only the dataset-wide store pass genuinely waits on Spec 109).
+
 ## Decision: Phase 3 execution is a distinct, separately gated step, never a byproduct of Phase 1/2 completion
 
 - **Decision**: Phases 1 and 2 (bucketing, rebalancing) are implementation work with their own

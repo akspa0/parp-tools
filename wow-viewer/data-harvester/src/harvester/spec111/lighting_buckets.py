@@ -1,11 +1,16 @@
 """Spec 111: ingest the shading-match fields streamed into a build's decoded metadata sidecar
-(``decoded_metadata.parquet``, written by the existing C#-to-Python streaming pathway -- see
+(``decoded_metadata.parquet``, written by the C# harvester's streaming pathway -- see
 ``WowViewer.Tool.Harvest/Program.cs``'s ``AnalyzeAuthoredMinimapLighting``) and produce a per-map
 and overall lighting-bucket distribution report.
 
-This reads an existing additive Zarr/Parquet field; it does not introduce a new primary storage
-format (constitution principle V). The report itself is a derived, human-readable summary artifact,
-analogous to Spec 110's ``synthesis-manifest.json``.
+Lane note: the active dataset lane is **v50** (Spec 109). The C# harvester computes shading-match
+provenance at extraction time and attaches it to each tile's metadata regardless of lane; this
+sidecar layout is the transport the harvester writes *today*, because Spec 109's clean-room V50
+store builder does not exist yet (``v50_build_dataset.py`` fails closed). When that builder lands,
+it must carry ``minimap_lighting`` (including these shading-match fields) as one of its
+DatasetSignals, and this reader gains a V50-store path alongside -- not instead of -- the sidecar
+it can already read. No new primary storage format is introduced (constitution principle V); the
+report is a derived summary artifact, analogous to Spec 110's ``synthesis-manifest.json``.
 """
 
 from __future__ import annotations

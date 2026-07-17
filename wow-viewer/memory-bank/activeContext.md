@@ -19,9 +19,18 @@ Last updated: 2026-07-17
   channels near 255 clip at high-lambert hours, breaking multiplicative tint-invariance (test
   colors stay ≤150).
 - The Harvest wiring is NOT a new command: `AnalyzeAuthoredMinimapLighting` chains
-  `MinimapShadingMatch.Evaluate` after the tint `Infer()` on the existing Full/V22 streaming
-  pathway; the internal 0.5.3.3368 fingerprint gate renders zero candidates for other builds.
-  `minimap_shading_match_v1` joins AvailableSignals only when a tile was actually evaluated.
+  `MinimapShadingMatch.Evaluate` after the tint `Infer()` on the harvester's existing
+  full-texture-decode streaming pathway; the internal 0.5.3.3368 fingerprint gate renders zero
+  candidates for other builds. `minimap_shading_match_v1` joins AvailableSignals only when a tile
+  was actually evaluated.
+- **Lane correction (user feedback, 2026-07-17): the active dataset/model lane is v50, not the
+  legacy V22/spec103/spec108 naming.** Phase 3 now delegates to the canonical
+  `v50_train_wdl_prior.py` entry (`--release v50.1` passthrough; wrapped trainer enforces
+  `require_store_release`, so non-v50 stores fail closed). The stream profile is transport only;
+  the dataset-wide bucketing pass depends on Spec 109's clean-room V50 store builder, which must
+  (1) extract with a full-texture-decode profile so the analysis runs and (2) carry
+  `minimap_lighting` incl. shading-match fields as a DatasetSignal. Recorded as a research.md
+  decision in spec 111.
 - Python side: `harvester/spec111/lighting_buckets.py` (reconciled distribution report; pre-111
   tiles missing the field are surfaced as `tiles_without_shading_match_field`, never folded into
   not-evaluated), `rebalance_lighting_variants.py` (largest-remainder allocation into bare-float

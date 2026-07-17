@@ -7,7 +7,9 @@ Usage:
         [--map <single map name>] [--output <report.json>]
 
 The report-building logic lives in ``harvester.spec111.lighting_buckets`` -- this script is a thin
-CLI wrapper over that library module (constitution: CLI tools are thin wrappers).
+CLI wrapper over that library module (constitution: CLI tools are thin wrappers). See that
+module's lane note: the v50 lane is the target; the sidecar layout read here is the transport the
+C# harvester writes today, pending Spec 109's clean-room V50 store builder.
 """
 
 from __future__ import annotations

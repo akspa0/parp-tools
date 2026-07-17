@@ -11,14 +11,23 @@ dotnet build wow-viewer/tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harv
 
 Current proof: 42/42 focused C# tests; Debug Harvest build 0 errors.
 
-## Dataset-wide bucketing pass (0.5.3.3368 only)
+## Dataset-wide bucketing pass (0.5.3.3368 only) — v50 lane
 
-The shading-match inference is not a separate command: it runs inside the existing Full/V22
-streaming exports, chained onto the tint-based analysis in `AnalyzeAuthoredMinimapLighting`
-(`WowViewer.Tool.Harvest`), and gates internally on the exact 0.5.3.3368 build fingerprint. Any
-other build's tiles pass through untouched with `shading_match_status = not_evaluated`.
+The active dataset lane is **v50** (Spec 109). The shading-match inference is not a separate
+command: the C# harvester computes it at extraction time, chained onto the tint-based analysis in
+`AnalyzeAuthoredMinimapLighting` (`WowViewer.Tool.Harvest`), gated internally on the exact
+0.5.3.3368 build fingerprint. Any other build's tiles pass through untouched with
+`shading_match_status = not_evaluated`.
 
-User-run against a configured client root (this is a bulk pass; bound it first):
+**Spec 109 dependency, stated plainly**: the clean-room V50 per-build store builder does not exist
+yet (`v50_build_dataset.py` fails closed by design), so there is no V50 store to bucket today. Two
+integration requirements land on Spec 109's builder when it is implemented: (1) its
+fresh-extraction path must use a stream profile that performs the full texture decode, or the
+shading-match analysis is skipped (`analysis_requires_full_texture_decode`); (2) it must carry
+`minimap_lighting` — including the shading-match fields — as one of its DatasetSignals.
+
+Until then, a bounded harvester run (its full-texture-decode profile is the transport detail, not
+a dataset-lane choice) exercises the C# inference end-to-end against the real client:
 
 ```powershell
 dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harvest.csproj -- \
@@ -57,9 +66,10 @@ floats only (the input-contract check in `test_lighting_bucket_rebalancing.py` p
 
 ## Phase 3 retrain and evaluate -- requires explicit go-ahead
 
-`train_spec111_reconstruction.py` targets the active, unblocked reconstruction stage (Spec 108
-`WdlPriorNet`; Spec 102's chain is BLOCKED on its M0 reharvest) by delegating to the existing
-`train_spec103_wdl_prior.py` trainer. Running it without `--confirm-run` only validates the
+`train_spec111_reconstruction.py` targets the **v50 lane** by delegating to the canonical
+`v50_train_wdl_prior.py` entry point (default `--release v50.1`; the wrapped trainer enforces
+`require_store_release`, so a non-v50 store fails closed). Spec 102's chain is BLOCKED on its M0
+reharvest and is not a valid target. Running without `--confirm-run` only validates the
 configuration and prints the delegated command -- it never starts a GPU run:
 
 ```powershell

@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Spec 111 US3 (T017): retrain the active reconstruction stage on lighting-rebalanced data.
 
-The active, unblocked stage is Spec 108's ``WdlPriorNet`` (Spec 102's residual chain is BLOCKED on
-its M0 target reharvest), so this script prepares and delegates to the existing
-``scripts/train_spec103_wdl_prior.py`` trainer rather than introducing any new architecture
-(contract: no DepthAnything-family/multi-head/shared-weight paths; extend the existing lineage).
+This targets the **v50 lane**: the canonical RGB-to-WDL trainer entry point is
+``scripts/v50_train_wdl_prior.py`` (its default ``--release`` is ``v50.1``), and this script
+delegates there rather than introducing any new architecture (contract: no
+DepthAnything-family/multi-head/shared-weight paths; extend the existing lineage). The
+``spec103``-named module underneath is the implementation the canonical v50 entry wraps -- do not
+call it directly, so release stamping and future v50-entry changes stay in one place. Spec 102's
+residual chain remains BLOCKED on its M0 target reharvest and is not a valid target.
 
 EXECUTION GATE (contract, Training/evaluation execution contract item 1): running this script
 without ``--confirm-run`` only validates the configuration and prints the exact delegated training
@@ -34,11 +37,12 @@ from pathlib import Path
 def build_delegated_command(args: argparse.Namespace) -> list[str]:
     return [
         sys.executable,
-        str(Path(__file__).parent / "train_spec103_wdl_prior.py"),
+        str(Path(__file__).parent / "v50_train_wdl_prior.py"),
         "--store", str(args.store),
         "--output", str(args.output),
         "--epochs", str(args.epochs),
         "--batch", str(args.batch),
+        "--release", args.release,
     ]
 
 
@@ -73,6 +77,8 @@ def main() -> int:
     parser.add_argument("--baseline-checkpoint", required=True, type=Path)
     parser.add_argument("--epochs", type=int, default=80)
     parser.add_argument("--batch", type=int, default=32)
+    parser.add_argument("--release", default="v50.1",
+                        help="v50 release identity stamped by the canonical trainer.")
     parser.add_argument("--confirm-run", action="store_true",
                         help="Actually start the GPU training run. Pass only with explicit "
                              "user authorization given at this moment.")

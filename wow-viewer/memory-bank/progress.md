@@ -17,6 +17,12 @@ Last updated: 2026-07-17
   validates and refuses to train without `--confirm-run` (smoke-proven). The drifted
   `terrain_lighting.py` direction formula became a documented port of the corrected C#
   `TerrainSolarDirection` with regression coverage.
+- Lane correction after user feedback: the target lane is **v50**, not the legacy
+  V22/spec103/spec108 naming the first pass anchored on. Phase 3 delegation now goes through the
+  canonical `v50_train_wdl_prior.py` entry with `--release` passthrough (its `require_store_release`
+  makes non-v50 stores fail closed); docs/readers now state the harvester stream profile is
+  transport only and the dataset-wide store pass depends on Spec 109's clean-room builder carrying
+  `minimap_lighting` as a DatasetSignal from a full-texture-decode extraction profile.
 - Proof: focused C# sweep 42/42; Debug Harvest build 0 errors; `tests/spec111/` 16/16;
   `tests/spec103/test_terrain_lighting.py` 10/10. Full data-harvester suite 548 passed with 3
   pre-existing unrelated failures (v24 export-map fixture, v25 h1_coarse neighbor-context API).

@@ -60,9 +60,10 @@ retrain-and-evaluate pass against one existing model lineage
   corpus; results record build identity/fingerprint per the existing `MinimapLightingProvenance`
   discipline.
 - **Residual Model Chain**: pass -- Phase 3 retrains the existing single reconstruction
-  stage/checkpoint (Spec 108 `WdlPriorNet` or whichever Spec 102 residual-chain stage is currently
-  active and unblocked); it does not add a lighting-conditioned head, does not share weights across
-  stages, and does not become multi-task.
+  stage/checkpoint through the **v50 lane's canonical entry** (`scripts/v50_train_wdl_prior.py`,
+  which wraps the spec103-named implementation and enforces `require_store_release`; Spec 102's
+  chain stays BLOCKED and is not a target); it does not add a lighting-conditioned head, does not
+  share weights across stages, and does not become multi-task.
 - **Streaming-First Dataset Pipeline**: pass -- new shading-match results are written as additive
   Zarr/Parquet fields via the existing C#-to-Python streaming protocol; no intermediate NPZ.
 - **No Game Client Path Assumptions**: pass -- the calibration pass reads from the existing configured
@@ -146,11 +147,14 @@ convention for feature-scoped Python modules.
    tint-invariant for a single material and genuinely elevation-discriminative). Extend
    `MinimapLightingProvenance` with the new fields. Chain `MinimapShadingMatch.Evaluate` onto the
    existing `AnalyzeAuthoredMinimapLighting` tint-based `Infer()` call in
-   `WowViewer.Tool.Harvest/Program.cs`, reusing the existing Full/V22 tile-iteration and
-   C#->Python streaming pathway rather than adding a new parallel command; the build-fingerprint
-   gate makes this a zero-cost no-op for non-0.5.3.3368 tiles. Add `report_lighting_buckets.py` to
-   produce the per-map/overall distribution report from the streamed Zarr fields. Focused C#/Python
-   tests plus one real-client bounded run to sanity-check a handful of known tiles by eye.
+   `WowViewer.Tool.Harvest/Program.cs`, reusing the harvester's existing full-texture-decode
+   tile-iteration and C#->Python streaming pathway (a transport detail, not a dataset-lane choice
+   -- the destination lane is v50, and the dataset-wide store pass depends on Spec 109's clean-room
+   builder carrying `minimap_lighting` as a DatasetSignal, per research.md) rather than adding a
+   new parallel command; the build-fingerprint gate makes this a zero-cost no-op for
+   non-0.5.3.3368 tiles. Add `report_lighting_buckets.py` to produce the per-map/overall
+   distribution report from the streamed metadata. Focused C#/Python tests plus one real-client
+   bounded run to sanity-check a handful of known tiles by eye.
 2. **User Story 2 -- rebalance synthetic lighting variants (Implementation).** Retire the drifted
    direction math in `terrain_lighting.py` per research.md; add `spec111/lighting_buckets.py` and
    `rebalance_lighting_variants.py` to turn Phase 1's distribution report into resampling weights, and
@@ -159,8 +163,9 @@ convention for feature-scoped Python modules.
    rebalanced training data's input contract still excludes ground-truth lighting/time. Focused Python
    tests.
 3. **User Story 3 -- retrain and evaluate (Implementation up to the gate, then User-run).** Prepare
-   `train_spec111_reconstruction.py` targeting the existing reconstruction architecture and the
-   existing Spec 108 group-held-out split contract (research.md); prepare the checkpoint-comparison
+   `train_spec111_reconstruction.py` delegating to the canonical v50 trainer entry
+   (`v50_train_wdl_prior.py`, `--release v50.1`, `require_store_release` enforced) and the
+   existing group-held-out split contract (research.md); prepare the checkpoint-comparison
    evaluation. **Stop here and confirm with the user before executing.** Only after explicit
    authorization: run the training pass, evaluate the resulting checkpoint against the current
    deployed one on the held-out set, and record the improved/regressed/inconclusive outcome. A
