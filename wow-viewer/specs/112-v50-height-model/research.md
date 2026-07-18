@@ -20,7 +20,35 @@ new reader is written (constitution II) — the data is already being parsed, ju
 path) was considered and rejected — the flags are demonstrably present and already parsed in the
 Alpha reader; declaring them unavailable would be documenting a bug as a limitation.
 
-## Decision 2 — `minimap_rgb_1024` under-coverage: initial race hypothesis DISPROVEN by code audit; diagnosis moved to an instrumented A/B run
+## Decision 2 — RESOLVED: the 256/1024 gap was authored-minimap provenance leakage, not concurrency
+
+**Confirmed mechanism (2026-07-18, after the T012 rebuild reproduced the gap)**: the v22 stream
+profile serializes the AUTHORED client minimap from the MPQ under the key `minimap_rgb`
+(`RawArraySerializer.cs` line 359). `_cmd_build` filled every declared signal found in the stream,
+so each tile first received the authored minimap labeled `freshly_extracted`, and the synthesized
+256px PNG overwrote it only where synthesis succeeded. On the 220 Kalimdor tiles (and 41 Azeroth
+tiles) where synthesis legitimately skipped ("no referenced BLP texture could be decoded" —
+reproduced bit-identically at both resolutions on a single-tile probe of Kalimdor (19,12)), the
+authored imagery silently remained, while `minimap_rgb_1024` (which has no authored counterpart in
+any client) stayed honestly empty. The lost-row pattern proved it before the code did: contiguous
+map-edge runs (Kalimdor rows 0–28 etc.), which no race or memory-pressure mechanism produces, and
+Kalidar showed zero gap because it has no authored minimaps at all.
+
+**Fix**: `signal_takes_stream_data()` in `v50_build_dataset.py` — a signal whose
+`authoritative_source` is `synthetic-minimap` never accepts stream data; a tile without a
+synthesized PNG is unavailable at BOTH resolutions (the spec's US1 edge case verbatim), restoring
+parity by construction and ending the authored/synthesized provenance mix inside the store.
+
+**Open design question surfaced for the user, not decided here**: authored client minimaps are the
+model's eventual *deployment* input (the point of reconstruction is decompiling real minimaps), and
+the frozen catalog's own Notes for `minimap_rgb` read "Authored/synthesized minimap." If authored
+minimaps should exist in the store at all, they belong under a separate, honestly-labeled signal
+(e.g. `minimap_rgb_authored`) via a catalog amendment — a user-owned doc decision, out of scope for
+this fix.
+
+### Superseded intermediate finding (kept for the record)
+
+## Decision 2 (superseded) — initial race hypothesis DISPROVEN by code audit; diagnosis moved to an instrumented A/B run
 
 **Finding (updated during implementation, 2026-07-18)**: The originally suspected mechanism — a
 plain `Dictionary` in `NativeMpqService` mutated across `Parallel.ForEach` worker threads — does

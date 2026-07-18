@@ -245,6 +245,16 @@ def _cmd_migrate_v18(args: argparse.Namespace) -> int:
 
 
 
+def signal_takes_stream_data(signal: DatasetSignal) -> bool:
+    """Spec 112 (FR-004/US1 edge case): a signal whose authoritative source is minimap synthesis
+    must NEVER be filled from the harvest stream. The v22 stream carries the AUTHORED client
+    minimap under the same ``minimap_rgb`` key, and letting it stand wherever synthesis skipped
+    silently mixed authored imagery into the clean-room store labeled as fresh synthesis -- the
+    actual mechanism behind the 256/1024 coverage gap (220 Kalimdor rows). A synthesis-sourced
+    signal with no synthesized PNG is honestly unavailable for that tile, at both resolutions."""
+    return signal.authoritative_source != "synthetic-minimap"
+
+
 def _cmd_build(args: argparse.Namespace) -> int:
     import tempfile
     import subprocess
@@ -497,7 +507,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
 
                 for signal in manifest_template.signals:
                     signal_name = signal.name
-                    if signal_name in tile_data:
+                    if signal_name in tile_data and signal_takes_stream_data(signal):
                         array = tile_data[signal_name]
                         array = adjust_to_manifest_shape(array, tuple(signal.row_shape))
                         content_hash = hash_array(array)
