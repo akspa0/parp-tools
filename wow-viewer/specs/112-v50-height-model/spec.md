@@ -27,6 +27,14 @@ go-ahead, curriculum stores carry the full frozen signal catalog."
 - **Small maps are not evaluation material and are excluded entirely.** PVPZone02 (~60 usable
   tiles) and Kalidar (~24) are too small to gauge anything. This spec's corpus is Kalimdor and
   Azeroth only; validation is a within-map stratified holdout drawn from both.
+- **Authored client minimaps are used, as separate training rows (user-directed 2026-07-18).**
+  After the initial provenance fix left the store synthesized-only, the user ruled that the model
+  must train on the *real* authored client minimap — the actual deployment input — not just our
+  compositor's synthetic render, or it learns only to invert our renderer's quirks. The frozen
+  catalog gains `minimap_rgb_authored` (harvest-stream sourced, honest partial coverage); the
+  curriculum emits up to two rows per tile (one per available minimap source) against the same
+  height target; the model reads `minimap_rgb` per row and never sees the source label. Full
+  rationale in research.md Decision 7.
 - **The dataset audit found real gaps** (2026-07-18, measured on all four v50.1 stores): the
   manifest template declares four signals the frozen Spec 109 catalog explicitly dropped
   (`mddf_mask`, `modf_mask`, `object_filtered_mask`, `model_focus_mask` — all 0% populated, dead
@@ -186,6 +194,14 @@ tiles is visually and numerically superior to a predict-the-tile-mean baseline.
   out-of-scope.
 - **FR-012**: All stores remain per-build Zarr with the established identity/lineage discipline;
   no NPZ side-channels.
+- **FR-013**: The authored client minimap MUST be stored under its own signal
+  (`minimap_rgb_authored`), sourced only from the harvest stream, never overwritten by synthesis,
+  and honestly unavailable (not zero-substituted) on tiles the client shipped no minimap for.
+  `minimap_rgb`/`minimap_rgb_1024` MUST be synthesized-only — the two provenances never share a key.
+- **FR-014**: The training curriculum MUST emit one row per available minimap source per kept tile
+  (synthetic and/or authored), each carrying the same height target and auxiliary signals, with the
+  per-row source recorded. A tile's rows MUST share one `source_group_id` and one split assignment,
+  so authored and synthetic views of the same terrain can never cross the train/val boundary.
 
 ### Key Entities
 

@@ -16,13 +16,18 @@ from harvester.v50.contracts import require_store_release
 from harvester.v50.training_curriculum import CurriculumBuildError, build_training_curriculum
 
 
-def _write_complete_store(path: Path, map_name: str, rows: int) -> None:
+def _write_complete_store(path: Path, map_name: str, rows: int, authored_rows: set[int] | None = None) -> None:
     group = zarr.open_group(str(path), mode="w")
     group.attrs.update({"schema": "v50-complete-store-v1", "model_family": "v50", "release": "v50.1"})
     rng = np.random.default_rng(hash(map_name) % (2**32))
-    group.create_array("minimap_rgb", data=rng.integers(0, 255, size=(rows, 8, 8, 3), dtype=np.uint8))
+    group.create_array("minimap_rgb", data=rng.integers(1, 255, size=(rows, 8, 8, 3), dtype=np.uint8))
     group.create_array("height_257", data=rng.random((rows, 9, 9), dtype=np.float32))
     group.create_array("object_precise_mask", data=np.zeros((rows, 9, 9), dtype=np.float32))
+    if authored_rows is not None:
+        authored = np.zeros((rows, 8, 8, 3), dtype=np.uint8)
+        for r in authored_rows:
+            authored[r] = rng.integers(1, 255, size=(8, 8, 3), dtype=np.uint8)
+        group.create_array("minimap_rgb_authored", data=authored)
     index = [
         {"tile_id": i, "build": "0_5_3_3368", "map": map_name, "tile_x": i, "tile_y": 0}
         for i in range(rows)
@@ -116,6 +121,60 @@ def test_stratified_split_holds_out_rows_from_every_map_deterministically(tmp_pa
     first_index = pq.read_table(tmp_path / "s1.zarr" / "index.parquet").to_pylist()
     second_index = pq.read_table(tmp_path / "s2.zarr" / "index.parquet").to_pylist()
     assert [row["split"] for row in first_index] == [row["split"] for row in second_index]
+
+
+def test_dual_minimap_source_emits_two_rows_per_authored_tile(tmp_path: Path):
+    # Spec 112: a kept tile with BOTH a synthetic and an authored minimap contributes two rows
+    # (one per source) sharing one height target; a tile with only synthetic contributes one.
+    store = tmp_path / "A.zarr"
+    manifest = tmp_path / "curation-A"
+    _write_complete_store(store, "MapA", rows=4, authored_rows={0, 2})  # tiles 0,2 have authored
+    _write_manifest(manifest, "MapA", keeps=[True, True, True, True])
+    output = tmp_path / "curriculum.zarr"
+
+    summary = build_training_curriculum(
+        stores=[store], curation_manifests=[manifest],
+        output=output, val_fraction=0.25, release="v50.1",
+    )
+
+    # 4 kept tiles -> 4 synthetic rows + 2 authored rows = 6
+    assert summary["total_rows"] == 6
+    assert summary["minimap_source_counts"] == {"authored": 2, "synthetic": 4}
+
+    index = pq.read_table(output / "index.parquet").to_pylist()
+    out = zarr.open_group(str(output), mode="r")
+    src = zarr.open_group(str(store), mode="r")
+
+    # authored row's minimap_rgb equals the source authored image; synthetic row's equals synthetic
+    for row in index:
+        tid = row["source_tile_id"]
+        want = src["minimap_rgb_authored"][tid] if row["minimap_source"] == "authored" else src["minimap_rgb"][tid]
+        np.testing.assert_array_equal(out["minimap_rgb"][row["tile_id"]], want)
+
+    # neither the authored source array nor the 1024 upscaler target is copied as its own column
+    assert "minimap_rgb_authored" not in out.array_keys()
+    assert "minimap_rgb_1024" not in out.array_keys()
+
+
+def test_both_rows_of_a_tile_share_split_no_leakage(tmp_path: Path):
+    store = tmp_path / "A.zarr"
+    manifest = tmp_path / "curation-A"
+    _write_complete_store(store, "MapA", rows=8, authored_rows=set(range(8)))  # every tile dual
+    _write_manifest(manifest, "MapA", keeps=[True] * 8)
+    output = tmp_path / "curriculum.zarr"
+
+    build_training_curriculum(
+        stores=[store], curation_manifests=[manifest],
+        output=output, val_fraction=0.25, release="v50.1",
+    )
+    index = pq.read_table(output / "index.parquet").to_pylist()
+
+    split_by_group: dict[str, set[str]] = {}
+    for row in index:
+        split_by_group.setdefault(row["source_group_id"], set()).add(row["split"])
+    # every tile's two rows land in exactly one split -- the leak-safety invariant the trainer rechecks
+    assert all(len(splits) == 1 for splits in split_by_group.values())
+    assert {row["split"] for row in index} == {"train", "val"}
 
 
 def test_split_mode_selection_is_exactly_one_of_val_map_or_val_fraction(tmp_path: Path):

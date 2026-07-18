@@ -39,12 +39,9 @@ Kalidar showed zero gap because it has no authored minimaps at all.
 synthesized PNG is unavailable at BOTH resolutions (the spec's US1 edge case verbatim), restoring
 parity by construction and ending the authored/synthesized provenance mix inside the store.
 
-**Open design question surfaced for the user, not decided here**: authored client minimaps are the
-model's eventual *deployment* input (the point of reconstruction is decompiling real minimaps), and
-the frozen catalog's own Notes for `minimap_rgb` read "Authored/synthesized minimap." If authored
-minimaps should exist in the store at all, they belong under a separate, honestly-labeled signal
-(e.g. `minimap_rgb_authored`) via a catalog amendment — a user-owned doc decision, out of scope for
-this fix.
+**Open design question — RESOLVED by the user 2026-07-18 (see Decision 7).** Authored client
+minimaps are the model's real deployment input; they are now a first-class signal
+(`minimap_rgb_authored`) and the model trains on both sources.
 
 ### Superseded intermediate finding (kept for the record)
 
@@ -159,3 +156,35 @@ contract (Decision 5) and the one-signal constraint (constitution IV) are what t
 constants hint it may have partially assumed) was considered; deferred rather than rejected outright
 — if the from-scratch model underperforms, swapping the encoder is a contained follow-up that
 doesn't reopen the target contract.
+
+## Decision 7 — authored + synthetic minimaps are BOTH used, as separate training rows (user-directed 2026-07-18)
+
+**Finding**: Fixing the provenance leak (Decision 2) removed the authored client minimap from the
+store entirely, leaving `minimap_rgb`/`minimap_rgb_1024` synthesized-only. The user flagged this as
+a correctness problem, not a cleanup: a model that will ultimately decompile *real* minimaps
+(screenshots, private-server exports, authored client tiles) must be trained on that real imagery,
+or it only learns to invert our compositor's specific lighting/texture-averaging quirks — a domain
+gap that makes the model useless on real input. "We need to use the originals if we are going to
+train a model on fucking anything useful."
+
+**Decision**:
+- **Store**: the frozen catalog gains `minimap_rgb_authored` (harvest-stream sourced, uint8
+  256×256×3, partial coverage, honestly unavailable where the client shipped no minimap BLP — never
+  zero-substituted). `minimap_rgb`/`minimap_rgb_1024` are now documented synthesized-only. The v22
+  stream already decodes the authored image (`TryLoadMinimapFromMpq`); `_cmd_build` captures it
+  under the new key before the synthesis override, at zero re-harvest cost.
+- **Curriculum**: each kept tile emits up to two rows — one per available minimap source — paired
+  with the SAME height target and all the same auxiliary terrain signals. The curriculum's
+  `minimap_rgb` column is the per-row model input (synthetic or authored); an `minimap_source`
+  index column records which. Both rows share one `source_group_id` and the split is assigned per
+  group, so a tile's rows can never straddle train/val (the leak-safety invariant the trainer
+  rechecks). The 1024px synthetic upscaler target is excluded from this height curriculum (separate
+  lane, no authored counterpart).
+- **Model**: unchanged — it reads `minimap_rgb` per row and predicts relative height. The
+  authored/synthetic distinction is data, not architecture; the model never sees the label. The
+  training summary records the authored/synthetic row split for analysis.
+
+**Alternatives considered**: authored-only (rejected — discards synthetic augmentation the user
+wanted kept); two input channels in one row (rejected — the user explicitly chose separate rows,
+and it also forces every tile to have both sources, which many don't); synthetic-only (the rejected
+status quo that prompted this decision).

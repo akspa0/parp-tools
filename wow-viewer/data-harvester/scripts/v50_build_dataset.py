@@ -501,6 +501,16 @@ def _cmd_build(args: argparse.Namespace) -> int:
                                     mcly_tileset_ids[cy, cx, layer] = global_textures_to_idx.get(tex_path, -1)
                 tile_data["mcly_tileset_ids"] = mcly_tileset_ids
 
+                # Spec 112 (user-directed): the v22 stream decodes the AUTHORED client minimap under
+                # the key `minimap_rgb`. Capture it under `minimap_rgb_authored` (its own honest,
+                # harvest-stream-sourced signal) BEFORE the synthesis override below replaces
+                # `minimap_rgb` with the compositor's synthesized render. Where the client shipped no
+                # minimap BLP the stream omits the key, so the signal is honestly unavailable for
+                # that tile -- never zero-substituted. This is the real deployment input the height
+                # model trains on alongside synthetic (as separate curriculum rows).
+                if "minimap_rgb" in tile_data:
+                    tile_data["minimap_rgb_authored"] = tile_data["minimap_rgb"]
+
                 lineage_actions = {}
                 lineage_src_hashes = {}
                 lineage_dst_hashes = {}

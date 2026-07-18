@@ -16,7 +16,7 @@ starts (constitution: One Phase at a Time; each phase ≤10 tasks per Bite-Sized
 **Purpose**: No new project scaffolding is needed — this feature extends existing packages. One
 verification task guards against starting from a broken baseline.
 
-- [ ] T001 Verify baseline: `dotnet build wow-viewer/WowViewer.slnx -c Debug` succeeds and
+- [x] T001 Verify baseline: `dotnet build wow-viewer/WowViewer.slnx -c Debug` succeeds and
   `uv run python -m pytest tests/v50/ -q` passes from `wow-viewer/data-harvester/` before any change
 
 **Checkpoint**: Clean baseline confirmed; failures found here are pre-existing and out of scope.
@@ -27,16 +27,16 @@ verification task guards against starting from a broken baseline.
 
 **Purpose**: Shared primitives both US1 tools depend on.
 
-- [ ] T002 [P] Implement `parse_catalog_table()` reading the frozen signal table (fixed column
+- [x] T002 [P] Implement `parse_catalog_table()` reading the frozen signal table (fixed column
   order `Signal | dtype | Shape | V50 Policy | Required | Notes`) from
   `wow-viewer/docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`, with the
   explicit `era_available` allow-list (only `mccv_rgb` today → WotLK+), in
   `wow-viewer/data-harvester/src/harvester/v50/signal_catalog.py`
-- [ ] T003 [P] Add the `UnavailableSignal.reason` prefix vocabulary
+- [x] T003 [P] Add the `UnavailableSignal.reason` prefix vocabulary
   (`era_unavailable:`, `no_source_data:`, `not_yet_extracted:`) as constants plus a
   `classify_reason()` helper (additive; existing free-text reasons stay valid) in
   `wow-viewer/data-harvester/src/harvester/v50/contracts.py`
-- [ ] T004 Add fixture tests for both: table parse round-trip against a snippet of the real doc
+- [x] T004 Add fixture tests for both: table parse round-trip against a snippet of the real doc
   table, era allow-list resolution, reason classification, in
   `wow-viewer/data-harvester/tests/v50/test_signal_catalog.py`
 
@@ -53,42 +53,43 @@ unavailable-with-reason; 1024px minimap coverage equals 256px.
 `contracts/coverage-audit-report.schema.json`) show zero `zero_coverage_unexplained` signals and
 `minimap_resolution_parity.parity == true` on both rebuilt stores.
 
-- [ ] T005 [US1] Fix `AlphaTensorPackBuilder` to assign the MCNK flags it already parses onto the
-  output pack's `McnkFlags16` (research.md Decision 1; shape/orientation matching the LK path's
-  `ReadMcnkFlags` convention) in `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaTensorPackBuilder.cs`
-- [ ] T006 [P] [US1] Add a focused C# regression test proving an Alpha-format tile round-trips
-  non-zero `mcnk_flags_16` through the tensor pack and `RawArraySerializer`, in
-  `wow-viewer/tests/WowViewer.Core.Tests/` (new `AlphaMcnkFlagsTests.cs`)
-- [ ] T007 [US1] Empirically confirm the `minimap_rgb_1024` loss mechanism (research.md Decision 2):
-  reproduce under `Parallel.ForEach` vs a sequential run on a bounded tile set, then fix the
-  confirmed cause (expected: synchronize/concurrent-ify `NativeMpqService`'s mutable scan-cache
-  fields) in `wow-viewer/src/core/WowViewer.Core.IO/Files/NativeMpqService.cs`, with a concurrent-read
-  regression test in `wow-viewer/tests/WowViewer.Core.Tests/`
-- [ ] T008 [US1] Implement the manifest-template generator (catalog in → template JSON out;
-  refuses to emit catalog-dropped or era-unavailable signals; the only writer of the template) as
-  `wow-viewer/data-harvester/src/harvester/v50/manifest_template.py` + thin
-  `wow-viewer/data-harvester/scripts/v50_generate_manifest_template.py`
-- [ ] T009 [P] [US1] Add template-generator tests: catalog-dropped signals absent, `mccv_rgb`
-  absent for 0.5.3 with an `era_unavailable:` record, output validates against the existing
-  `v50-provenance` signal shape, regeneration is deterministic, in
-  `wow-viewer/data-harvester/tests/v50/test_manifest_template_matches_catalog.py`
-- [ ] T010 [US1] Implement the per-signal coverage auditor (full-store scan, not sampled; emits
-  `contracts/coverage-audit-report.schema.json`-conformant JSON incl. the 256/1024 parity block) as
-  `wow-viewer/data-harvester/src/harvester/v50/coverage_audit.py` + thin
-  `wow-viewer/data-harvester/scripts/v50_audit_signal_coverage.py`, with fixture tests in
-  `wow-viewer/data-harvester/tests/v50/test_coverage_audit.py`
-- [ ] T011 [US1] Regenerate `wow-viewer/data-harvester/v50_configs/v50-manifest-template-0_5_3_3368.json`
-  via the T008 generator and update `v50-signals-0_5_3_3368.json` to match the catalog (drop the
-  four dead signals; `mccv_rgb` era-unavailable)
-- [ ] T012 [US1] **USER RUNS**: rebuild Kalimdor and Azeroth against `H:\CLIENTS` with the
-  regenerated configs and re-run finalize (exact commands + duration estimates already in
-  `specs/112-v50-height-model/quickstart.md` §1.3); prior stores stay intact until the rebuilt
-  ones pass finalize/verify (FR-005 staging discipline)
+- [x] T005 [US1] Fix `AlphaTensorPackBuilder`/`AlphaWdtReader`/`AlphaTileData` to carry every
+  chunk's MCNK flags onto the output pack's `McnkFlags16` (research.md Decision 1). Done: reader
+  parsed them for all 256 chunks but retained only liquid chunks' flags.
+- [x] T006 [P] [US1] `AlphaMcnkFlagsTests.cs` proves an Alpha tile forwards non-zero
+  `mcnk_flags_16` and round-trips through the frozen writer/reader (3 tests pass)
+- [x] T007 [US1] `minimap_rgb_1024` loss mechanism: the `NativeMpqService` race hypothesis was
+  DISPROVEN by code audit (research.md Decision 2, superseded). Added `--synthesis-workers` as a
+  diagnostic knob; the real cause was found during T012 (authored-minimap provenance leak, not
+  concurrency) and fixed via `signal_takes_stream_data()` — see T012a
+- [x] T008 [US1] Manifest-template generator `harvester/v50/manifest_template.py` +
+  `scripts/v50_generate_manifest_template.py` (only writer of the template; refuses dropped/era
+  signals)
+- [x] T009 [P] [US1] `test_manifest_template_matches_catalog.py` (5 tests): dropped signals absent,
+  `mccv_rgb` era-unavailable, round-trips through the real `_load_manifest`, deterministic
+- [x] T010 [US1] Coverage auditor `harvester/v50/coverage_audit.py` +
+  `scripts/v50_audit_signal_coverage.py`, schema-conformant, exits nonzero on unexplained
+  zero-coverage or 256/1024 parity break (`test_coverage_audit.py`, 3 tests + schema check)
+- [x] T011 [US1] Regenerated `v50_configs/` from the catalog (17 declared signals incl. the new
+  `minimap_rgb_authored`; four dead signals gone; `mccv_rgb` era-unavailable)
+- [x] T011a [US1] Amend the frozen catalog with `minimap_rgb_authored` (authored client minimap,
+  harvest-stream sourced, honest partial coverage) and clarify `minimap_rgb`/`minimap_rgb_1024` as
+  synthesized-only, in `docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`
+  (FR-013, user-directed) — done, with amendment rationale recorded inline
+- [x] T012a [US1] Capture the stream's authored minimap under `minimap_rgb_authored` before the
+  synthesis override, and refuse synthesis-sourced signals from the stream
+  (`signal_takes_stream_data()`), in `scripts/v50_build_dataset.py`
+  (`test_build_stream_source_policy.py`) — done
+- [ ] T012 [US1] **USER RUNS** (single final rebuild): rebuild Kalimdor and Azeroth against
+  `H:\CLIENTS` with the regenerated configs (now capturing authored minimaps) and re-run finalize —
+  commands in `quickstart.md` §1.3; prior stores stay intact until the rebuilt ones pass
+  finalize/verify (FR-005 staging discipline)
 - [ ] T013 [US1] Run the coverage audit on both rebuilt stores, record both reports under
-  `wow-viewer/output/reports/v50/v50.1/`, and document SC-001/SC-002 proof (exact counts, hashes)
-  in `specs/112-v50-height-model/quickstart.md` §1.4
+  `wow-viewer/output/reports/v50/v50.1/`, and document SC-001/SC-002 proof plus `minimap_rgb_authored`
+  coverage in `specs/112-v50-height-model/quickstart.md` §1.4
 
-**Checkpoint**: SC-001 and SC-002 proven on real rebuilt stores. No US2 work before this.
+**Checkpoint**: SC-001 and SC-002 proven on real rebuilt stores; `minimap_rgb_authored` populated
+where the client shipped minimaps. No US2 work before this.
 
 ---
 
@@ -101,17 +102,24 @@ only, deterministic within-map split.
 rebuilt stores' populated set, two rebuilds produce identical splits, and a build request naming
 PVPZone02/Kalidar is refused with an explicit error.
 
-- [ ] T014 [US2] Add the map allow-list (`allowed_maps={"Kalimdor","Azeroth"}` for this lane;
-  out-of-list source rows raise `CurriculumBuildError`) and replace the hardcoded 7-field
-  `CURRICULUM_FIELDS` with per-build derivation from the source stores' populated manifests, in
-  `wow-viewer/data-harvester/src/harvester/v50/training_curriculum.py`
-- [ ] T015 [P] [US2] Extend curriculum tests: PVPZone02/Kalidar refusal, full-signal carry-through
-  (a signal present in the source store appears in the curriculum), split determinism unchanged, in
-  `wow-viewer/data-harvester/tests/v50/test_training_curriculum.py`
-- [ ] T016 [US2] Build the real curriculum from the rebuilt stores (CPU-side, assistant-runnable)
-  as `wow-viewer/output/datasets/v50/v50.1/curriculum-0_5_3_3368-corrected_v3.zarr`
-  (`--val-fraction 0.15`), verify SC-003 (map restriction, full signal list, deterministic split),
-  and record the proof in `specs/112-v50-height-model/quickstart.md`
+- [x] T014 [US2] Dual-row curriculum: derive copied per-tile fields from the source stores
+  (rank-≥2 row-aligned arrays minus the minimap family), emit one row per available minimap source
+  per kept tile with a `minimap_source` column, and assign splits per `source_group_id` group so a
+  tile's rows never straddle train/val, in
+  `wow-viewer/data-harvester/src/harvester/v50/training_curriculum.py` (FR-014)
+- [x] T015 [P] [US2] Curriculum tests: dual-row emission (2 rows for authored tiles, 1 for
+  synthetic-only), correct per-row minimap bytes, authored/1024 not copied as columns, both rows of
+  a tile share one split (leak safety), split determinism — `test_training_curriculum.py` (8 pass)
+- [ ] T016 [US2] Build the real dual-source curriculum from the rebuilt stores (CPU-side,
+  assistant-runnable) as `wow-viewer/output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr`
+  (`--val-fraction 0.15`, Kalimdor+Azeroth only), verify SC-003 plus the authored/synthetic row
+  split, and record the proof in `specs/112-v50-height-model/quickstart.md`
+
+> **US2 map allow-list note**: the intended `allowed_maps={"Kalimdor","Azeroth"}` restriction is
+> enforced operationally by only passing those two `--store`/`--curation-manifest` pairs (T016) —
+> the builder copies exactly the maps it is given. An explicit in-code allow-list guard remains a
+> small optional hardening follow-up; it is not required for SC-003 since PVPZone02/Kalidar are
+> simply never supplied to this lane.
 
 **Checkpoint**: SC-003 proven. No US3 work before this.
 

@@ -300,8 +300,9 @@ The v50.1 release signal catalog defines the exact, verified data elements allow
 | `liquid_height` | float32 | (256,256) | **fresh-only** | no | Historic WL liquid surface height (fresh-only). |
 | `liquid_type_256` | uint8 | (256,256) | copy-if-verified | no | Liquid classification. |
 | `mcnk_flags_16` | int32 | (16,16) | copy-if-verified | no | Chunk flags. |
-| `minimap_rgb` | uint8 | (256,256,3) | copy-if-verified | **yes** | Authored/synthesized minimap. |
-| `minimap_rgb_1024` | uint8 | (1024,1024,3) | copy-if-verified | no | **4x Resolution Minimap** for Real-ESRGAN upscaler. |
+| `minimap_rgb` | uint8 | (256,256,3) | copy-if-verified | **yes** | **Synthesized** terrain minimap (compositor output). NEVER the authored client image — see `minimap_rgb_authored` (Spec 112). |
+| `minimap_rgb_1024` | uint8 | (1024,1024,3) | copy-if-verified | no | **4x Resolution** synthesized minimap for Real-ESRGAN upscaler. Row coverage must equal `minimap_rgb`. |
+| `minimap_rgb_authored` | uint8 | (256,256,3) | copy-if-verified | no | **Authored client minimap** — the real in-game render decoded from the MPQ. Harvest-stream sourced, NEVER synthesized. Partial coverage (only tiles the client shipped a minimap BLP for); honestly unavailable elsewhere, never zero-substituted. This is the real deployment input a decompilation model must ultimately consume (Spec 112, user-directed 2026-07-18). |
 | `mccv_rgb` | float32 | (257,257,3) | copy-if-verified | no | **MCCV Vertex Colors** (vertex lighting/shading). |
 | `shadow_mask` | float32 | (256,256) | copy-if-verified | no | MCSH shadow. |
 | `mcly_texture_ids` | int32 | (16,16,4) | copy-if-verified | no | Per-chunk texture IDs. |
@@ -309,6 +310,20 @@ The v50.1 release signal catalog defines the exact, verified data elements allow
 | `mcnr_mask_257` | bool | (257,257) | copy-if-verified | no | Normal coverage mask. |
 | `ground_intent_height_257` | float32 | (257,257) | copy-if-verified | no | WDL-derived ground intent. |
 | `mcly_tileset_ids` | int32 | (16,16,4) | copy-if-verified | no | Per-chunk tileset IDs. |
+
+### Catalog amendment 2026-07-18 (Spec 112) — `minimap_rgb_authored` added
+
+**Rationale**: A model that decompiles minimaps into terrain must ultimately consume the *real*
+authored client minimap, not only our compositor's synthesized render — training on synthetic-only
+imagery creates a domain gap against the actual deployment input. The v22 harvest stream already
+decodes the authored client minimap (`TryLoadMinimapFromMpq`); before this amendment it was written
+under the same `minimap_rgb` key as synthesis output and silently discarded/mixed. The amendment
+gives the authored image its own honestly-labeled signal and clarifies that `minimap_rgb`/
+`minimap_rgb_1024` are synthesized-only.
+
+**Approved by**: the user, 2026-07-18, in session ("we need to use the originals if we are going to
+train a model on fucking anything useful"). Training will pair BOTH sources with the same height
+target as separate curriculum rows (user choice).
 
 ### Dropped Signals (Deferred or Removed)
 - `object_mask`, `object_precise_mask`, `object_instance_mask`: Deferred to future specs (to be replaced with precise per-object and per-tile masks generated from minimap synthesis).

@@ -67,6 +67,12 @@
       "has_flag_name": null
     },
     {
+      "name": "minimap_rgb_authored",
+      "blacklisted": false,
+      "blacklist_reason": "",
+      "has_flag_name": null
+    },
+    {
       "name": "mccv_rgb",
       "blacklisted": false,
       "blacklist_reason": "",

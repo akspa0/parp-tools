@@ -1,24 +1,28 @@
 """Build a trainer-consumable v50 curriculum store from Spec 109 complete per-map stores.
 
-Both canonical v50 trainers (``wdl_prior_train``/``terrain_refiner_train``) gate their input on
-``require_store_release``, which demands ``schema == "v50-mixed-curriculum-v1"`` plus a ``split``
-column in ``index.parquet`` -- the Spec 109 clean-room builder emits ``v50-complete-store-v1``
-per-map stores, so neither trainer can consume them directly. This module is the bridge: it selects
-the ``keep`` rows named by each map's reviewed strict curation manifest (the object-free profile --
-correct for height-supervision training, where an object occludes the ground it sits on), assigns a
-whole-map holdout split, and writes one training store with full source lineage.
+Both canonical v50 trainers gate their input on ``require_store_release``, which demands
+``schema == "v50-mixed-curriculum-v1"`` plus a ``split`` column in ``index.parquet`` -- the Spec 109
+clean-room builder emits ``v50-complete-store-v1`` per-map stores, so neither trainer can consume
+them directly. This module is the bridge: it selects the ``keep`` rows named by each map's reviewed
+strict curation manifest (the object-free profile -- correct for height-supervision training, where
+an object occludes the ground it sits on) and writes one trainer-facing store with full lineage.
+
+Dual minimap sources (Spec 112, user-directed 2026-07-18): the per-map store carries both the
+synthesized compositor minimap (``minimap_rgb``) and the authored client minimap
+(``minimap_rgb_authored``). A model that decompiles real minimaps must see the authored image, but
+synthetic imagery is valuable augmentation. So each kept tile emits UP TO TWO rows -- one per
+available minimap source -- paired with the SAME height target and all the same auxiliary terrain
+signals. The curriculum's ``minimap_rgb`` column is the per-row model input (synthetic or authored);
+an ``minimap_source`` index column records which. Both rows of a tile share one ``source_group_id``,
+and the split is assigned per group, so a tile's two rows can never straddle the train/val boundary
+(leak safety, checked again by ``validate_source_group_split`` in the trainer).
 
 Selection is manifest-driven on purpose: this builder never re-derives its own quality policy. The
-strict curation manifest is the reviewed artifact that already dropped blank-minimap,
-object-contaminated, and height/normal-mismatched tiles (Spec 109 Phase 9); rows it kept are copied
-bit-for-bit, rows it dropped never enter the store. Because the split is assigned per whole map and
-real 0.5.3 tiles have no time/color variants, every ``source_group_id`` lands entirely in one
-partition, satisfying ``validate_source_group_split`` by construction.
-
-The schema name ``v50-mixed-curriculum-v1`` is historical (Spec 108 mixed real/synthetic); an
-all-real curriculum is still that schema -- it is what the release contract requires of any
-trainer-facing store, and ``source_kind`` in the index records honestly that every row here is
-``real_053``.
+strict curation manifest already dropped blank-minimap, object-contaminated, and
+height/normal-mismatched tiles; rows it kept are copied bit-for-bit, rows it dropped never enter the
+store. The schema name ``v50-mixed-curriculum-v1`` is historical (Spec 108 mixed real/synthetic); an
+all-real dual-source curriculum is still that schema -- it is what the release contract requires of
+any trainer-facing store.
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -34,18 +39,16 @@ import pyarrow.parquet as pq
 
 from harvester.v50.contracts import MIXED_STORE_SCHEMA, MODEL_FAMILY, validate_release
 
-# Superset of what both trainers read (wdl_prior_train: minimap_rgb/height_257;
-# terrain_refiner_train additionally object_precise_mask); matches the proven Spec 108
-# builder's field list so downstream inference/visualization tooling sees the same layout.
-CURRICULUM_FIELDS = (
-    "minimap_rgb",
-    "height_257",
-    "normal_xyz",
-    "liquid_mask",
-    "liquid_height",
-    "object_precise_mask",
-    "alpha_256",
-)
+# The curriculum's model-input minimap column. For each row it holds EITHER the synthesized or the
+# authored image, per that row's ``minimap_source``; it is written from the source field named in
+# ``_MINIMAP_SOURCE_FIELDS``.
+MINIMAP_INPUT_FIELD = "minimap_rgb"
+_MINIMAP_SOURCE_FIELDS = {"synthetic": "minimap_rgb", "authored": "minimap_rgb_authored"}
+
+# Never copied as their own curriculum column: the two minimap source arrays (folded into per-row
+# ``minimap_rgb``) and the synthetic 1024px upscaler target (a separate lane, synthetic-only, with
+# no authored counterpart -- undefined for an authored row).
+_EXCLUDED_FIELDS = frozenset({"minimap_rgb", "minimap_rgb_authored", "minimap_rgb_1024"})
 
 
 class CurriculumBuildError(ValueError):
@@ -61,26 +64,54 @@ def _load_keep_rows(manifest_path: Path) -> list[dict]:
     return kept
 
 
-def _stratified_split(selected: list[dict], val_fraction: float) -> None:
-    """Assign a deterministic within-map holdout: each map contributes ``val_fraction`` of its
-    kept rows (at least one) to val, ordered by a stable hash of ``source_group_id``.
+def _store_row_count(group) -> int:
+    declared = int(group.attrs.get("row_count", 0))
+    return declared if declared > 0 else int(group["height_257"].shape[0])
 
-    This is the established WDL-prior evaluation regime (Spec 108's group split): val tiles come
-    from the *same* maps as train. A whole-map holdout is NOT interchangeable with it -- the WDL
-    target is absolute elevation on a global scale, and real 0.5.3 maps sit at very different
-    absolute altitudes (measured on the v50.1 corpus: PVPZone02 mean +381 vs Azeroth -150), so a
-    fully held-out map mostly measures an altitude offset the model has never seen and val loss
-    *worsens* as training progresses. Use ``val_map`` only for deliberate cross-map
-    generalization experiments, knowing that is what it measures.
-    """
-    by_map: dict[str, list[dict]] = {}
+
+def _per_tile_fields(group) -> list[str]:
+    """Per-tile terrain signals to copy identically for both rows of a tile: row-aligned arrays of
+    rank >= 2, excluding the minimap family (handled polymorphically). Flat placement arrays are
+    1-D or not row-aligned, so they are naturally excluded rather than copied without their data."""
+    row_count = _store_row_count(group)
+    fields = []
+    for name in group.array_keys():
+        if name in _EXCLUDED_FIELDS:
+            continue
+        array = group[name]
+        if array.ndim >= 2 and array.shape[0] == row_count:
+            fields.append(name)
+    return fields
+
+
+def _tile_has_data(group, field: str, tile_id: int) -> bool:
+    return field in group and bool(np.asarray(group[field][tile_id]).any())
+
+
+def _assign_group_split(selected: list[dict], *, val_map: str | None, val_fraction: float | None) -> str:
+    """Assign each row a ``split``. Splits are decided per ``source_group_id`` (a whole tile, i.e.
+    both its minimap-source rows together), so a tile's rows never cross the train/val boundary.
+
+    ``val_map``: hold out one whole map (cross-map generalization regime). ``val_fraction``: within
+    each map, hold out that fraction of TILES (not rows), the standard regime -- absolute altitude
+    is not a fair cross-map target, see the Spec 112 within-map ruling."""
+    if val_map is not None:
+        for row in selected:
+            row["split"] = "val" if row["map"] == val_map else "train"
+        return f"whole_map_holdout:{val_map}"
+
+    by_map_group: dict[str, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
     for row in selected:
-        by_map.setdefault(row["map"], []).append(row)
-    for rows in by_map.values():
-        rows.sort(key=lambda row: hashlib.sha256(row["source_group_id"].encode()).hexdigest())
-        val_count = max(1, round(len(rows) * val_fraction))
-        for position, row in enumerate(rows):
-            row["split"] = "val" if position < val_count else "train"
+        by_map_group[row["map"]][row["source_group_id"]].append(row)
+    for groups in by_map_group.values():
+        ordered = sorted(groups, key=lambda gid: hashlib.sha256(gid.encode()).hexdigest())
+        val_count = max(1, round(len(ordered) * float(val_fraction)))
+        val_groups = set(ordered[:val_count])
+        for gid, rows in groups.items():
+            split = "val" if gid in val_groups else "train"
+            for row in rows:
+                row["split"] = split
+    return f"within_map_stratified:{val_fraction}"
 
 
 def build_training_curriculum(
@@ -110,7 +141,7 @@ def build_training_curriculum(
     if output.exists():
         raise CurriculumBuildError(f"refusing to overwrite existing output: {output}")
 
-    selected: list[dict] = []
+    selected: list[dict] = []  # one entry PER ROW (a tile can yield up to two)
     source_groups = []
     for store_path, manifest_path in zip(stores, curation_manifests):
         group = zarr.open_group(str(store_path), mode="r")
@@ -118,48 +149,63 @@ def build_training_curriculum(
             raise CurriculumBuildError(
                 f"source store release {group.attrs.get('release')!r} != requested {release!r}: {store_path}"
             )
+        source_index = len(source_groups)
         source_groups.append(group)
         for row in _load_keep_rows(manifest_path):
-            selected.append(
-                {
-                    "build": str(row["build"]),
-                    "map": str(row["map"]),
-                    "tile_x": int(row["tile_x"]),
-                    "tile_y": int(row["tile_y"]),
-                    "source_tile_id": int(row["tile_id"]),
-                    "source_store_index": len(source_groups) - 1,
-                    "source_store": str(store_path.resolve()),
-                    "source_curation_manifest": str(manifest_path.resolve()),
-                    "source_kind": "real_053",
-                    "source_group_id": f"real:{row['build']}:{row['map']}:{int(row['tile_id'])}",
-                    "height_regime": str(row.get("height_regime", "")),
-                }
-            )
+            tile_id = int(row["tile_id"])
+            base = {
+                "build": str(row["build"]),
+                "map": str(row["map"]),
+                "tile_x": int(row["tile_x"]),
+                "tile_y": int(row["tile_y"]),
+                "source_tile_id": tile_id,
+                "source_store_index": source_index,
+                "source_store": str(store_path.resolve()),
+                "source_curation_manifest": str(manifest_path.resolve()),
+                "source_kind": "real_053",
+                "source_group_id": f"real:{row['build']}:{row['map']}:{tile_id}",
+                "height_regime": str(row.get("height_regime", "")),
+            }
+            for source_name, source_field in _MINIMAP_SOURCE_FIELDS.items():
+                if _tile_has_data(group, source_field, tile_id):
+                    selected.append({**base, "minimap_source": source_name, "minimap_field": source_field})
+
+    if not selected:
+        raise CurriculumBuildError("no kept tile carries any minimap source; nothing to train on")
 
     maps_present = sorted({row["map"] for row in selected})
-    if val_map is not None:
-        if val_map not in maps_present:
-            raise CurriculumBuildError(f"--val-map {val_map!r} matched no kept rows; maps present: {maps_present}")
-        for row in selected:
-            row["split"] = "val" if row["map"] == val_map else "train"
-        split_mode = f"whole_map_holdout:{val_map}"
-    else:
-        _stratified_split(selected, float(val_fraction))
-        split_mode = f"within_map_stratified:{val_fraction}"
+    if val_map is not None and val_map not in maps_present:
+        raise CurriculumBuildError(f"--val-map {val_map!r} matched no kept rows; maps present: {maps_present}")
+    split_mode = _assign_group_split(selected, val_map=val_map, val_fraction=val_fraction)
     train_count = sum(row["split"] == "train" for row in selected)
     val_count = len(selected) - train_count
     if train_count == 0:
         raise CurriculumBuildError("every kept row landed in val; holdout map cannot be the whole corpus")
 
+    # Copied per-tile fields: union across source stores, minus the minimap family.
+    copied_field_names: list[str] = []
+    seen: set[str] = set()
+    for group in source_groups:
+        for name in _per_tile_fields(group):
+            if name not in seen:
+                seen.add(name)
+                copied_field_names.append(name)
+    if "height_257" not in copied_field_names:
+        raise CurriculumBuildError("no source store carries the required height_257 signal")
+
     reference = {}
-    for field in CURRICULUM_FIELDS:
+    for name in copied_field_names:
         for group in source_groups:
-            if field in group:
-                reference[field] = group[field]
+            if name in group:
+                reference[name] = group[name]
                 break
-    for required in ("minimap_rgb", "height_257"):
-        if required not in reference:
-            raise CurriculumBuildError(f"no source store carries required trainer signal {required!r}")
+    minimap_reference = None
+    for group in source_groups:
+        if "minimap_rgb" in group:
+            minimap_reference = group["minimap_rgb"]
+            break
+    if minimap_reference is None:
+        raise CurriculumBuildError("no source store carries minimap_rgb to shape the input column")
 
     out = zarr.open_group(str(output), mode="w")
     out.attrs.update(
@@ -167,40 +213,57 @@ def build_training_curriculum(
             "schema": MIXED_STORE_SCHEMA,
             "model_family": MODEL_FAMILY,
             "release": release,
-            "curriculum_kind": "all_real_strict_curated",
+            "curriculum_kind": "all_real_dual_minimap",
             "split_mode": split_mode,
+            "minimap_sources": sorted({row["minimap_source"] for row in selected}),
             "source_stores": [str(path.resolve()) for path in stores],
             "source_curation_manifests": [str(path.resolve()) for path in curation_manifests],
         }
     )
-    for field, array in reference.items():
-        out.create_array(field, shape=(len(selected), *array.shape[1:]), dtype=array.dtype, chunks=(1, *array.shape[1:]))
+    out.create_array(
+        MINIMAP_INPUT_FIELD,
+        shape=(len(selected), *minimap_reference.shape[1:]),
+        dtype=minimap_reference.dtype,
+        chunks=(1, *minimap_reference.shape[1:]),
+    )
+    for name in copied_field_names:
+        array = reference[name]
+        out.create_array(name, shape=(len(selected), *array.shape[1:]), dtype=array.dtype, chunks=(1, *array.shape[1:]))
 
     index_rows = []
     for target_row, row in enumerate(selected):
         source = source_groups[row["source_store_index"]]
-        for field, target in reference.items():
-            if field in source:
-                out[field][target_row] = source[field][row["source_tile_id"]]
+        tile_id = row["source_tile_id"]
+        out[MINIMAP_INPUT_FIELD][target_row] = source[row["minimap_field"]][tile_id]
+        for name in copied_field_names:
+            if name in source:
+                out[name][target_row] = source[name][tile_id]
             else:
-                out[field][target_row] = np.zeros(target.shape[1:], dtype=target.dtype)
+                out[name][target_row] = np.zeros(reference[name].shape[1:], dtype=reference[name].dtype)
         index_rows.append(
-            {key: value for key, value in row.items() if key != "source_store_index"}
+            {key: value for key, value in row.items() if key not in ("source_store_index", "minimap_field")}
             | {"tile_id": target_row, "model_family": MODEL_FAMILY, "release": release}
         )
     pq.write_table(pa.Table.from_pylist(index_rows), output / "index.parquet")
+
+    def _count(pred) -> int:
+        return sum(1 for row in selected if pred(row))
 
     summary = {
         "schema": MIXED_STORE_SCHEMA,
         "model_family": MODEL_FAMILY,
         "release": release,
-        "curriculum_kind": "all_real_strict_curated",
+        "curriculum_kind": "all_real_dual_minimap",
         "total_rows": len(selected),
         "splits": {"train": train_count, "val": val_count},
         "split_mode": split_mode,
-        "val_rows_per_map": {name: sum(row["map"] == name and row["split"] == "val" for row in selected) for name in maps_present},
+        "minimap_source_counts": {
+            name: _count(lambda r, n=name: r["minimap_source"] == n) for name in sorted({r["minimap_source"] for r in selected})
+        },
+        "val_rows_per_map": {name: _count(lambda r, n=name: r["map"] == n and r["split"] == "val") for name in maps_present},
         "maps": maps_present,
-        "rows_per_map": {name: sum(row["map"] == name for row in selected) for name in maps_present},
+        "rows_per_map": {name: _count(lambda r, n=name: r["map"] == n) for name in maps_present},
+        "copied_fields": copied_field_names,
         "sources": [
             {"store": str(store.resolve()), "curation_manifest": str(manifest.resolve())}
             for store, manifest in zip(stores, curation_manifests)
@@ -219,11 +282,9 @@ def main() -> int:
     ap.add_argument("--output", required=True, type=Path)
     split_group = ap.add_mutually_exclusive_group(required=True)
     split_group.add_argument("--val-map", default=None,
-                             help="whole map held out as validation -- cross-map generalization regime ONLY; "
-                                  "the WDL target is absolute elevation, so an unseen map's altitude offset "
-                                  "dominates this metric (see _stratified_split docstring)")
+                             help="whole map held out as validation -- cross-map generalization regime ONLY")
     split_group.add_argument("--val-fraction", type=float, default=None,
-                             help="standard regime: deterministic within-map stratified holdout (e.g. 0.15)")
+                             help="standard regime: deterministic within-map stratified holdout of TILES (e.g. 0.15)")
     ap.add_argument("--release", default="v50.1", type=validate_release)
     args = ap.parse_args()
     try:
@@ -239,6 +300,7 @@ def main() -> int:
         raise SystemExit(str(exc)) from exc
     print(
         f"[{summary['release']}] curriculum rows={summary['total_rows']} "
+        f"({summary['minimap_source_counts']}) "
         f"train={summary['splits']['train']} val={summary['splits']['val']} ({summary['split_mode']}) "
         f"-> {args.output}"
     )

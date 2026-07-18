@@ -144,6 +144,20 @@
       "migration_policy": "copy-if-verified"
     },
     {
+      "name": "minimap_rgb_authored",
+      "dtype": "uint8",
+      "row_shape": [
+        256,
+        256,
+        3
+      ],
+      "required": false,
+      "authoritative_source": "harvest-stream",
+      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "coverage_count": 0,
+      "migration_policy": "copy-if-verified"
+    },
+    {
       "name": "shadow_mask",
       "dtype": "float32",
       "row_shape": [
