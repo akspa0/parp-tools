@@ -506,7 +506,42 @@ means generating an equivalent signals/manifest-template pair for that build's s
 before `v50_build_dataset.py build`/`v50_pipeline_runner.py` can target it — that work has not been
 done for any build beyond `0_5_3_3368`.
 
-### 8.4 Everything else (verify, curriculum, cleanup audit)
+### 8.4 Training on the corpus
+
+The canonical trainers (`v50_train_wdl_prior.py`, `v50_train_terrain.py`) refuse the per-map
+complete stores directly — their release gate requires the trainer-facing curriculum schema
+(`v50-mixed-curriculum-v1`) with a `split` index column. Build that store from the complete stores
+plus their **strict** curation manifests (the object-free profile is the correct one for
+height-supervision training):
+
+```powershell
+uv run python scripts/v50_build_training_curriculum.py `
+  --store ../output/datasets/v50/v50.1/0_5_3_3368-Kalimdor.zarr  --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-Kalimdor `
+  --store ../output/datasets/v50/v50.1/0_5_3_3368-Azeroth.zarr   --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-Azeroth `
+  --store ../output/datasets/v50/v50.1/0_5_3_3368-PVPZone02.zarr --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-PVPZone02 `
+  --store ../output/datasets/v50/v50.1/0_5_3_3368-Kalidar.zarr   --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-Kalidar `
+  --output ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-strict_v1.zarr `
+  --val-map PVPZone02
+```
+
+Selection is manifest-driven (only reviewed `keep` rows are copied, bit-for-bit); the split is a
+whole-map holdout, so no map leaks across train/val. Then train stage 1 (the small RGB→WDL prior;
+CUDA required, minutes-scale on a desktop GPU):
+
+```powershell
+uv run python scripts/v50_train_wdl_prior.py `
+  --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-strict_v1.zarr `
+  --val-key split --val-value val `
+  --output ../output/v50/v50.1/wdl_prior_strict_v1 `
+  --epochs 100 --batch 32 --workers 4 --patience 15
+```
+
+Stage 2 (generate WDL priors for all rows, then train the V8 terrain refiner on *generated* — never
+ground-truth — WDL) follows the established runbook in
+`specs/108-image-wdl-prior/mixed-curriculum-userguide.md`, substituting this curriculum store and
+the `v50_*` script names.
+
+### 8.5 Everything else (verify, curriculum, cleanup audit)
 
 `v50_build_dataset.py` also has `migrate-v18` (bit-preserving copy of verified V18 signals) and
 `curriculum` (immutable row-selection manifests, no array payloads) subcommands, and

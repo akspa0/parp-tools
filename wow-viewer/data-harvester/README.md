@@ -31,7 +31,15 @@ uv run python scripts/v50_pipeline_runner.py --confirm
 
 Omit `--confirm` to dry-run first (prints every command without launching anything); add
 `--sample N` to cap tiles per map for a smoke test. A single dirty tile or one map's failure no
-longer aborts the whole run — the script prints a per-map summary at the end. Full detail, per-map manual commands, and the
+longer aborts the whole run — the script prints a per-map summary at the end.
+
+To train on the corpus, first bridge the per-map complete stores into the trainer-facing curriculum
+store (`scripts/v50_build_training_curriculum.py` — manifest-driven keep-row selection, whole-map
+holdout split), then run `scripts/v50_train_wdl_prior.py` / `scripts/v50_train_terrain.py` against
+it; the trainers refuse complete stores directly by release-gate design. See
+[`../docs/dataset-preparation-userguide.md`](../docs/dataset-preparation-userguide.md) §8.4.
+
+Full detail, per-map manual commands, and the
 current one-client-build scope limitation are in
 [`../docs/dataset-preparation-userguide.md`](../docs/dataset-preparation-userguide.md#8-v50-clean-room-dataset-current-canonical-lane)
 and [`../specs/109-v50-clean-room-audit/quickstart.md`](../specs/109-v50-clean-room-audit/quickstart.md).
