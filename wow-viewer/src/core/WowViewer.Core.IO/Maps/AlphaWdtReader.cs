@@ -217,6 +217,7 @@ public static class AlphaWdtReader
         bool[,,] layerMask = new bool[16, 16, 4];
         bool[,] holes = new bool[16, 16];
         ushort[,] holeFullMasks = new ushort[16, 16];
+        int[,] mcnkFlags16 = new int[16, 16];
         List<AlphaLiquidChunk> liquidChunks = [];
         List<AlphaModelPlacement> modelPlacements = [];
         List<AlphaWorldModelPlacement> worldModelPlacements = [];
@@ -231,7 +232,7 @@ public static class AlphaWdtReader
             activeChunkCount++;
 
             if (!TryParseMcnk(container, mcnkOffset, textureNameList,
-                    heightmap, alphaPack, normalXyz, alphaPackShadow, texIds, layerMask, holes, holeFullMasks, liquidChunks,
+                    heightmap, alphaPack, normalXyz, alphaPackShadow, texIds, layerMask, holes, holeFullMasks, mcnkFlags16, liquidChunks,
                     ref hasHeight, ref hasAlpha, ref hasNormals, ref hasShadow, ref totalMcshBytes))
                 continue;
         }
@@ -290,7 +291,8 @@ public static class AlphaWdtReader
             mclqTypeMask: hasLiquid ? mclqTypes : null,
             mcshShadowMask1024: hasShadow ? alphaPackShadow : null,
             holeFullMasks: holeFullMasks,
-            rawChunks: rawChunks);
+            rawChunks: rawChunks,
+            mcnkFlags16: mcnkFlags16);
 
         return true;
     }
@@ -443,6 +445,7 @@ public static class AlphaWdtReader
         IReadOnlyList<string> textureNames,
         float[,] heightmap, float[,,] alphaPack, float[,,] normalXyz, float[,] alphaPackShadow,
         int[,,] texIds, bool[,,] layerMask, bool[,] holes, ushort[,] holeFullMasks,
+        int[,] mcnkFlags16,
         List<AlphaLiquidChunk> liquidChunks, ref bool hasHeight, ref bool hasAlpha,
         ref bool hasNormals, ref bool hasShadow, ref int totalMcshBytes)
     {
@@ -468,6 +471,11 @@ public static class AlphaWdtReader
         int mccvRel = BitConverter.ToInt32(container, headerOffset + 0x74);
 
         if ((uint)indexX >= 16 || (uint)indexY >= 16) return true;
+
+        // Every chunk's raw MCNK header flags, [chunkY, chunkX] like the LK ReadMcnkFlags path.
+        // Previously only liquid chunks retained these (via AlphaLiquidChunk.McnkFlags), leaving
+        // the mcnk_flags_16 dataset signal permanently zero-filled for Alpha builds (Spec 112 T005).
+        mcnkFlags16[indexY, indexX] = (int)flags;
 
         int cx = indexX, cy = indexY;
         int chunkDataBase = mcnkOffset + ChunkHeaderSize + McnkHeaderSize;

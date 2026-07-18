@@ -486,6 +486,17 @@ static class Program
         string? outputDirectory = GetOption(args, "--output-dir", "-o");
         int resolution = GetIntOption(args, "--resolution", "-r") ?? TerrainMinimapCompositor.DefaultResolution;
         int maxTiles = GetIntOption(args, "--limit", "-n") ?? int.MaxValue;
+        // Spec 112 T007 diagnostic: bound the tile-composition parallelism (1 = fully sequential).
+        // minimap_rgb_1024 coverage trails minimap_rgb on real builds; an A/B run of the same map
+        // at --synthesis-workers 1 vs default isolates whether in-process parallel decode is the
+        // loss mechanism before any blind "fix".
+        int synthesisWorkers = GetIntOption(args, "--synthesis-workers", "-w") ?? -1;
+        if (synthesisWorkers is 0 or < -1)
+        {
+            Console.Error.WriteLine("Error: --synthesis-workers must be -1 (unbounded, default) or a positive worker count.");
+            Environment.ExitCode = 1;
+            return;
+        }
         int? requestedTileX = GetIntOption(args, "--tile-x", "-x");
         int? requestedTileY = GetIntOption(args, "--tile-y", "-y");
         string? requestedTimeOfDay = GetOption(args, "--time-hours", "-t");
@@ -618,7 +629,11 @@ static class Program
         var sortedTiles = occupiedTiles.OrderBy(tile => tile.TileY).ThenBy(tile => tile.TileX).ToArray();
         var tilesToProcess = sortedTiles.Take(maxTiles).ToArray();
 
-        System.Threading.Tasks.Parallel.ForEach(tilesToProcess, tile =>
+        var parallelOptions = new System.Threading.Tasks.ParallelOptions
+        {
+            MaxDegreeOfParallelism = synthesisWorkers
+        };
+        System.Threading.Tasks.Parallel.ForEach(tilesToProcess, parallelOptions, tile =>
         {
             string stage = "decoding terrain";
             try

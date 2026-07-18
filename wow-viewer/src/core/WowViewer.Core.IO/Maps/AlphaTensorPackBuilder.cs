@@ -80,6 +80,12 @@ public static class AlphaTensorPackBuilder
         if (holeMask16 is not null)
             signals.Add("hole_mask_16");
 
+        // Spec 112 T005: the reader now carries every chunk's raw MCNK header flags; previously
+        // only liquid chunks retained them, so the mcnk_flags_16 dataset signal was always zeros.
+        int[,]? mcnkFlags16 = tileData.McnkFlags16;
+        if (mcnkFlags16 is not null && HasAnyNonZero(mcnkFlags16))
+            signals.Add("mcnk_flags_16");
+
         if (tileData.MclyTextureIds is not null)
             signals.Add("mcly_texture_ids");
         if (tileData.MclyLayerMask is not null)
@@ -152,6 +158,7 @@ public static class AlphaTensorPackBuilder
             UnifiedLiquidHeight = unifiedLiquidHeight,
             LiquidBasicType257 = BuildAlphaLiquidBasicType257(mclqPresenceMask257, mclqTypeMask257),
             HoleMask16 = holeMask16,
+            McnkFlags16 = mcnkFlags16,
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
             ObjectInstanceMask257 = objectInstanceMask257,
@@ -168,6 +175,16 @@ public static class AlphaTensorPackBuilder
             RawChunks = tileData.RawChunks,
             AvailableSignals = signals,
         };
+    }
+
+    private static bool HasAnyNonZero(int[,] grid)
+    {
+        foreach (int value in grid)
+        {
+            if (value != 0)
+                return true;
+        }
+        return false;
     }
 
     private static string ExtractTileName(string sourcePath)

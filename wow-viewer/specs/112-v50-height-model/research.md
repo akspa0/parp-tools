@@ -20,30 +20,40 @@ new reader is written (constitution II) — the data is already being parsed, ju
 path) was considered and rejected — the flags are demonstrably present and already parsed in the
 Alpha reader; declaring them unavailable would be documenting a bug as a limitation.
 
-## Decision 2 — `minimap_rgb_1024` under-coverage is a suspected concurrent-archive-access race, not file locking
+## Decision 2 — `minimap_rgb_1024` under-coverage: initial race hypothesis DISPROVEN by code audit; diagnosis moved to an instrumented A/B run
 
-**Finding**: `NativeMpqService`'s file reads use `FileShare.Read` (confirmed at three call sites),
-which permits concurrent cross-process reads — ruling out simple OS-level file locking as the cause
-of the two parallel `synthetic-minimap` subprocesses (256px and 1024px, launched as separate
-`Popen` calls in `_cmd_build`) interfering with each other. The more likely mechanism is *within* a
-single `synthetic-minimap` process: `Program.cs`'s per-tile composition loop runs under
-`Parallel.ForEach` (added in the Spec 109 Phase 8-era parallelization). `NativeMpqService` holds
-several plain (non-concurrent) `Dictionary`/`HashSet` fields — notably `_scannedArchives`, mutated
-by a lazy per-archive fallback scan inside the read path — accessed from every worker thread in that
-`Parallel.ForEach` without visible synchronization. Concurrent mutation of a plain `Dictionary` from
-multiple threads is a classic silent-corruption/intermittent-exception source, and 1024px synthesis
-(more decode work per tile, wider concurrency window) would be expected to hit it more often than
-256px — matching the observed 40–92% vs ~100% coverage gap.
+**Finding (updated during implementation, 2026-07-18)**: The originally suspected mechanism — a
+plain `Dictionary` in `NativeMpqService` mutated across `Parallel.ForEach` worker threads — does
+not survive a full read of the class. Every mutation of `_scannedArchives`/`_archives`/
+`_knownFileHashes`/`_hashToName` happens in load/scan methods (`LoadArchives`,
+`ScanMapMpqArchives`, `LoadListfile*`) that run single-threaded at startup, before the tile loop;
+the read paths (`FileExists`, `ReadFile`, `ReadFromScannedArchive`, `ReadFileFromArchive`) only
+read those collections and open a fresh per-call `FileStream` with `FileShare.Read` — stateless
+and safe under concurrent readers, in-process and cross-process alike. There is no dictionary race
+to fix, and fixing one anyway would have been a phantom repair.
 
-**Decision**: Treat this as a hypothesis to confirm empirically in Phase 1, not a certainty to fix
-blind. Implementation step: run 1024px-only synthesis for one map with `Parallel.ForEach` intact
-versus a sequential fallback, diff the skip/failure counts. If the race is confirmed, the fix is
-synchronizing (or making thread-local) `NativeMpqService`'s mutable scan-cache fields, not touching
-the two-process design (which is unaffected by `FileShare.Read`).
+What remains true: 1024px coverage trails 256px on three of four maps (Kalimdor 0.76, Azeroth
+0.92, PVPZone02 0.40 vs ~1.00) while Kalidar shows *no* gap (0.64 = 0.64, both limited by the same
+20 genuinely texture-less tiles) — so the loss is real, resolution-correlated, and map-dependent.
+Surviving candidate mechanisms, in rough order of plausibility: memory/allocation pressure in the
+1024 process (16× the pixel buffers per tile across up to core-count concurrent workers, with
+broad `catch` blocks in the decode path converting any failure into a "texture could not be
+decoded" skip); cross-process I/O pressure from the two resolutions running simultaneously against
+the same archives; or a genuinely resolution-dependent code path not yet identified.
 
-**Alternatives considered**: Serializing the two resolutions back into one sequential pass would
-trivially remove the suspected race but regress the wall-clock win Phase 8 delivered; rejected
-unless the in-process fix proves intractable.
+**Decision**: Do not fix blind. `synthetic-minimap` gained `--synthesis-workers N` (default -1 =
+unbounded, matching current behavior; 1 = fully sequential) so a bounded, user-run A/B matrix can
+isolate the mechanism: (a) 1024 alone, default workers; (b) 1024 alone, workers=1; (c) 1024
+concurrent with 256, default workers. Coverage equal in (a)/(b) but degraded in (c) implicates
+cross-process pressure; degraded in (a) but clean in (b) implicates in-process parallelism; clean
+everywhere implicates the pipeline-runner context specifically. The fix follows the measurement.
+FR-004's acceptance (1024 row-set equals 256 row-set on rebuilt stores) governs regardless of
+which mechanism is confirmed.
+
+**Alternatives considered**: Synchronizing `NativeMpqService`'s collections (the original plan) —
+rejected as demonstrably unnecessary after the audit. Serializing the two resolution passes in
+`_cmd_build` unconditionally — deferred; it is the likely mitigation if (c) is the confirmed
+mechanism, but adopting it before measurement would mask the cause instead of naming it.
 
 ## Decision 3 — the manifest template must be *generated from*, not hand-synced with, the frozen catalog
 

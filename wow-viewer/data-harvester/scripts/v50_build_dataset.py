@@ -597,6 +597,9 @@ def _cmd_build(args: argparse.Namespace) -> int:
             for signal in manifest_template.signals
             if signal.name not in stacked_arrays
         ]
+        # Spec 112: carry the template's era-unavailability records (e.g. mccv_rgb on 0.5.3) into
+        # the built store's manifest -- the reason must survive into store attrs, not vanish here.
+        unavailable_signals.extend(manifest_template.unavailable_signals)
 
         output_manifest = DatasetStoreManifest(
             release=manifest_template.release,

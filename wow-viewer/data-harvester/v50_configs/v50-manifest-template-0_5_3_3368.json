@@ -1,5 +1,7 @@
 {
+  "model_family": "v50",
   "release": "v50.1",
+  "schema": "v50-complete-store-v1",
   "store_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "build_id": "0_5_3_3368",
   "producer_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -10,7 +12,10 @@
     {
       "name": "height_257",
       "dtype": "float32",
-      "row_shape": [257, 257],
+      "row_shape": [
+        257,
+        257
+      ],
       "required": true,
       "authoritative_source": "harvest-stream",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -20,7 +25,11 @@
     {
       "name": "normal_xyz",
       "dtype": "float32",
-      "row_shape": [257, 257, 3],
+      "row_shape": [
+        257,
+        257,
+        3
+      ],
       "required": false,
       "authoritative_source": "harvest-stream",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -30,7 +39,10 @@
     {
       "name": "normal_mask",
       "dtype": "bool",
-      "row_shape": [257, 257],
+      "row_shape": [
+        257,
+        257
+      ],
       "required": false,
       "authoritative_source": "harvest-stream",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -40,7 +52,11 @@
     {
       "name": "alpha_256",
       "dtype": "float32",
-      "row_shape": [256, 256, 4],
+      "row_shape": [
+        256,
+        256,
+        4
+      ],
       "required": false,
       "authoritative_source": "harvest-stream",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -50,7 +66,10 @@
     {
       "name": "liquid_mask",
       "dtype": "float32",
-      "row_shape": [256, 256],
+      "row_shape": [
+        256,
+        256
+      ],
       "required": false,
       "authoritative_source": "harvest-stream",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -60,7 +79,10 @@
     {
       "name": "liquid_height",
       "dtype": "float32",
-      "row_shape": [256, 256],
+      "row_shape": [
+        256,
+        256
+      ],
       "required": false,
       "authoritative_source": "harvest-stream",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -70,7 +92,10 @@
     {
       "name": "liquid_type_256",
       "dtype": "uint8",
-      "row_shape": [256, 256],
+      "row_shape": [
+        256,
+        256
+      ],
       "required": false,
       "authoritative_source": "harvest-stream",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -80,7 +105,10 @@
     {
       "name": "mcnk_flags_16",
       "dtype": "int32",
-      "row_shape": [16, 16],
+      "row_shape": [
+        16,
+        16
+      ],
       "required": false,
       "authoritative_source": "harvest-stream",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -90,7 +118,11 @@
     {
       "name": "minimap_rgb",
       "dtype": "uint8",
-      "row_shape": [256, 256, 3],
+      "row_shape": [
+        256,
+        256,
+        3
+      ],
       "required": true,
       "authoritative_source": "synthetic-minimap",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -100,7 +132,11 @@
     {
       "name": "minimap_rgb_1024",
       "dtype": "uint8",
-      "row_shape": [1024, 1024, 3],
+      "row_shape": [
+        1024,
+        1024,
+        3
+      ],
       "required": false,
       "authoritative_source": "synthetic-minimap",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -108,19 +144,12 @@
       "migration_policy": "copy-if-verified"
     },
     {
-      "name": "mccv_rgb",
-      "dtype": "float32",
-      "row_shape": [257, 257, 3],
-      "required": false,
-      "authoritative_source": "harvest-stream",
-      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "coverage_count": 0,
-      "migration_policy": "copy-if-verified"
-    },
-    {
       "name": "shadow_mask",
       "dtype": "float32",
-      "row_shape": [256, 256],
+      "row_shape": [
+        256,
+        256
+      ],
       "required": false,
       "authoritative_source": "harvest-stream",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -130,7 +159,11 @@
     {
       "name": "mcly_texture_ids",
       "dtype": "int32",
-      "row_shape": [16, 16, 4],
+      "row_shape": [
+        16,
+        16,
+        4
+      ],
       "required": false,
       "authoritative_source": "harvest-stream",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -140,7 +173,11 @@
     {
       "name": "mcly_layer_mask",
       "dtype": "float32",
-      "row_shape": [16, 16, 4],
+      "row_shape": [
+        16,
+        16,
+        4
+      ],
       "required": false,
       "authoritative_source": "harvest-stream",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -150,7 +187,10 @@
     {
       "name": "mcnr_mask_257",
       "dtype": "bool",
-      "row_shape": [257, 257],
+      "row_shape": [
+        257,
+        257
+      ],
       "required": false,
       "authoritative_source": "harvest-stream",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -160,7 +200,10 @@
     {
       "name": "ground_intent_height_257",
       "dtype": "float32",
-      "row_shape": [257, 257],
+      "row_shape": [
+        257,
+        257
+      ],
       "required": false,
       "authoritative_source": "harvest-stream",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -170,97 +213,11 @@
     {
       "name": "mcly_tileset_ids",
       "dtype": "int32",
-      "row_shape": [16, 16, 4],
-      "required": false,
-      "authoritative_source": "harvest-stream",
-      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "coverage_count": 0,
-      "migration_policy": "copy-if-verified"
-    },
-    {
-      "name": "object_precise_mask",
-      "dtype": "float32",
-      "row_shape": [257, 257],
-      "required": false,
-      "authoritative_source": "harvest-stream",
-      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "coverage_count": 0,
-      "migration_policy": "copy-if-verified"
-    },
-    {
-      "name": "object_instance_mask",
-      "dtype": "int32",
-      "row_shape": [257, 257],
-      "required": false,
-      "authoritative_source": "harvest-stream",
-      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "coverage_count": 0,
-      "migration_policy": "copy-if-verified"
-    },
-    {
-      "name": "mddf_mask",
-      "dtype": "float32",
-      "row_shape": [257, 257],
-      "required": false,
-      "authoritative_source": "harvest-stream",
-      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "coverage_count": 0,
-      "migration_policy": "copy-if-verified"
-    },
-    {
-      "name": "modf_mask",
-      "dtype": "float32",
-      "row_shape": [257, 257],
-      "required": false,
-      "authoritative_source": "harvest-stream",
-      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "coverage_count": 0,
-      "migration_policy": "copy-if-verified"
-    },
-    {
-      "name": "object_filtered_mask",
-      "dtype": "float32",
-      "row_shape": [257, 257],
-      "required": false,
-      "authoritative_source": "harvest-stream",
-      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "coverage_count": 0,
-      "migration_policy": "copy-if-verified"
-    },
-    {
-      "name": "model_focus_mask",
-      "dtype": "float32",
-      "row_shape": [257, 257],
-      "required": false,
-      "authoritative_source": "harvest-stream",
-      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "coverage_count": 0,
-      "migration_policy": "copy-if-verified"
-    },
-    {
-      "name": "object_roof_mask",
-      "dtype": "float32",
-      "row_shape": [256, 256],
-      "required": false,
-      "authoritative_source": "harvest-stream",
-      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "coverage_count": 0,
-      "migration_policy": "copy-if-verified"
-    },
-    {
-      "name": "object_roof_confidence",
-      "dtype": "float32",
-      "row_shape": [256, 256],
-      "required": false,
-      "authoritative_source": "harvest-stream",
-      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "coverage_count": 0,
-      "migration_policy": "copy-if-verified"
-    },
-    {
-      "name": "model_above_terrain_mask",
-      "dtype": "float32",
-      "row_shape": [257, 257],
+      "row_shape": [
+        16,
+        16,
+        4
+      ],
       "required": false,
       "authoritative_source": "harvest-stream",
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -270,5 +227,10 @@
   ],
   "row_lineage_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "finalization_state": "incomplete",
-  "unavailable_signals": []
+  "unavailable_signals": [
+    {
+      "name": "mccv_rgb",
+      "reason": "era_unavailable: MCCV vertex colors introduced WotLK+ (commonly 4.x); absent from pre-3.0 clients (build 0_5_3_3368)"
+    }
+  ]
 }

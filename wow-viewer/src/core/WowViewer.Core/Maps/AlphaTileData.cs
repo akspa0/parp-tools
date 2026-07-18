@@ -66,7 +66,8 @@ public sealed class AlphaTileData
         IReadOnlyList<int>[]? mcrfDoodadRefsByChunk = null,
         IReadOnlyList<int>[]? mcrfWorldModelRefsByChunk = null,
         IReadOnlyList<int>[]? mcrfDoodadUniqueIdsByChunk = null,
-        IReadOnlyList<int>[]? mcrfWorldModelUniqueIdsByChunk = null)
+        IReadOnlyList<int>[]? mcrfWorldModelUniqueIdsByChunk = null,
+        int[,]? mcnkFlags16 = null)
     {
         SourcePath = sourcePath;
         Heightmap = heightmap;
@@ -94,6 +95,7 @@ public sealed class AlphaTileData
         McrfWorldModelRefsByChunk = mcrfWorldModelRefsByChunk;
         McrfDoodadUniqueIdsByChunk = mcrfDoodadUniqueIdsByChunk;
         McrfWorldModelUniqueIdsByChunk = mcrfWorldModelUniqueIdsByChunk;
+        McnkFlags16 = mcnkFlags16;
     }
 
     public string SourcePath { get; }
@@ -122,6 +124,13 @@ public sealed class AlphaTileData
     public IReadOnlyList<int>[]? McrfWorldModelRefsByChunk { get; }
     public IReadOnlyList<int>[]? McrfDoodadUniqueIdsByChunk { get; }
     public IReadOnlyList<int>[]? McrfWorldModelUniqueIdsByChunk { get; }
+
+    /// <summary>
+    /// Raw MCNK header flags per chunk, [chunkY, chunkX] (row-major, matching the LK path's
+    /// <c>ReadMcnkFlags</c> convention). Spec 112 T005: the Alpha reader always parsed these but
+    /// previously kept them only for liquid chunks, leaving the dataset signal zero-filled.
+    /// </summary>
+    public int[,]? McnkFlags16 { get; }
 
     public AdtPlacementCatalog ToPlacementCatalog()
     {

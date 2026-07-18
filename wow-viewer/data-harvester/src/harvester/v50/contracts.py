@@ -182,6 +182,25 @@ class UnavailableSignal:
         return {"name": self.name, "reason": self.reason}
 
 
+# Spec 112 (T003): closed vocabulary of machine-readable reason PREFIXES for UnavailableSignal.
+# Additive and opt-in — existing free-text reasons (Spec 109 era) remain valid; new corrective code
+# paths use these so tooling can distinguish "cannot exist for this build" from "this tile lacks it"
+# without parsing prose (research.md Decision 4).
+REASON_ERA_UNAVAILABLE = "era_unavailable:"
+REASON_NO_SOURCE_DATA = "no_source_data:"
+REASON_NOT_YET_EXTRACTED = "not_yet_extracted:"
+
+_REASON_PREFIXES = (REASON_ERA_UNAVAILABLE, REASON_NO_SOURCE_DATA, REASON_NOT_YET_EXTRACTED)
+
+
+def classify_reason(reason: str) -> str | None:
+    """Return the vocabulary prefix a reason uses, or None for legacy free-text reasons."""
+    for prefix in _REASON_PREFIXES:
+        if reason.startswith(prefix):
+            return prefix
+    return None
+
+
 @dataclass(frozen=True)
 class DatasetStoreManifest:
     """Matches ``specs/109-v50-clean-room-audit/contracts/v50-provenance.schema.json`` exactly;
