@@ -2,7 +2,27 @@
 
 Last updated: 2026-07-18
 
-## Active work: Spec 109 v50 clean-room dataset — Setup and Build Pipeline Fully Operational
+## Active work: Spec 112 v50-native height-first terrain model — Planned, Phase 1 not started
+
+Supersedes the legacy spec103/spec108 model lane, which the user rejected after a real training run
+on the v50.1 corpus proved it structurally broken (best val loss at epoch 1, degrading after — the
+target embeds absolute elevation, which minimap pixels can't determine). Spec/plan/research/
+data-model/contracts/quickstart written (`specs/112-v50-height-model/`); `tasks.md` not yet
+generated (`/speckit-tasks` next). Key decisions: (1) dataset corrections are Phase 1/US1, not a
+separate spec — manifest template must be *generated from* the frozen signal catalog (currently
+hand-drifted: declares 4 signals the catalog dropped, plus `mccv_rgb` which doesn't exist until
+WotLK+); `mcnk_flags_16`'s 0% coverage is a confirmed C# bug (`AlphaTensorPackBuilder` reads MCNK
+flags but never assigns them to the output pack — `research.md` Decision 1, file:line cited);
+`minimap_rgb_1024`'s partial coverage is a suspected thread-safety race in `NativeMpqService`'s
+plain-Dictionary scan cache under the Phase-8-era `Parallel.ForEach` tile loop (Decision 2, to
+confirm empirically, not yet fixed). (2) Curriculum lane is Kalimdor + Azeroth ONLY — PVPZone02 and
+Kalidar excluded entirely (user ruling: too tiny to gauge anything, never use for tests). (3) Model
+target is per-tile min-max-normalized relative height (altitude-offset-invariant by construction,
+directly fixing the old target's flaw) — see `contracts/relative-height-target-contract.md`. All
+training remains user-executed; this session had one execution-boundary violation (see the feedback
+memory) that is now fixed both in behavior and in the durable memory rule.
+
+## Prior active work: Spec 109 v50 clean-room dataset — Setup and Build Pipeline Fully Operational
 
 - **Phase 1 Setup (T002-T005) is complete**: Signal table frozen in the docs, approved/protected roots recorded in `research.md`, package directories validated, and CLI/contracts verified.
 - **Wired-Up Build Pipeline (T037) is complete and tested**: The `build` subcommand in `scripts/v50_build_dataset.py` has been upgraded from a printing stub to a fully operational stream-consuming compiler. It compiles the C# harvester once and launches both `synthetic-minimap` synthesis processes (256x256 and 1024x1024) in parallel using the compiled DLL directly (avoiding stdout compilation pollution). It streams real ADT signals (including `mccv_rgb` vertex colors) and compiles all inputs into the Zarr store.
