@@ -1,137 +1,23 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-17
+Last updated: 2026-07-18
 
-## Active work: Spec 109 v50 clean-room dataset — Phase 7 (cleanup apply code) implemented, real run pending user go-ahead
+## Active work: Spec 109 v50 clean-room dataset — Setup and Build Pipeline Fully Operational
 
-- User asked directly to "get the v50 dataset built and models trained." Reality check delivered
-  and accepted: Spec 109 was only 2/53 tasks done (T001 client-root policy, T002a fail-closed
-  liquid provenance) with no `harvester/v50/` package yet; `v50_build_dataset.py` still fails
-  closed by design. Real dataset building needs Phases 2→5 in order (this project's own
-  "one phase at a time" rule); training needs a finalized Phase 5 store. User chose to start
-  Phase 2 now (pure code + fixtures, no client/GPU) rather than a full walkthrough or a narrower
-  shortcut.
-- Phase 2 (T006-T013) implemented and proven: `harvester/v50/contracts.py` (ArtifactRecord,
-  DatasetStoreManifest/DatasetSignal matching `v50-provenance.schema.json` exactly via hand
-  validation — no new jsonschema runtime dependency, project didn't have one declared — RowLineage,
-  and the ProofLevel/TrustState/Disposition/MigrationPolicy/FinalizationState enums), `identity.py`
-  (file/metadata-tree/Parquet-content/manifest hashing, all `sha256:<hex>`; Parquet identity proven
-  invariant to compression/layout but sensitive to content), `client_evidence.py` (fingerprints a
-  configured client root; every path/filename/glob is caller-supplied, never hardcoded — no
-  hardcoded `Wow.exe` assumption since that filename varies by client era), `path_policy.py`
-  (approved/protected-root resolution; protected always wins even when nested inside an approved
-  root; symlink-escape tests self-skip via a runtime probe on this unprivileged host, not yet
-  observed passing on a privileged one — flagged honestly rather than claimed).
-- `harvester/v50_contract.py` (the pre-existing release-identity module with real spec103/108
-  consumers) is now a thin re-export shim over the new package rather than being replaced outright,
-  preserving every existing caller and its own test file untouched.
-- Proof: `tests/v50/` 29 passed + 2 skipped (symlink privilege); full check including existing
-  consumers `tests/v50/ tests/test_v50_contract.py tests/spec103/` → 90 passed, 2 skipped, 0 failed.
-- **Phase 3 (US1) also complete, same session**: `inventory.py` (metadata-only discovery, never
-  reads array payloads, never sets trust_state to anything but UNVERIFIED regardless of name —
-  proven with a fixture literally named `totally_legit_v50_verified.zarr`), `verify_v18.py`
-  (per-(signal,row) audit, not a whole-signal verdict — FR-016; `holes_16` always rejected
-  regardless of content; false `has_*` truthfulness and non-finite detection), `verify_store.py`
-  (FR-005 promotion gate: schema/row-count/required-signal-truthfulness/content-hash/partition-leak
-  checks, reusing the existing `harvester.spec103.prefab_curation.validate_source_group_split`
-  rather than reimplementing it), and a real, working `scripts/v50_audit_artifacts.py` CLI
-  (`inventory`, `verify-v18`). Both subcommands smoke-tested end-to-end against real synthetic
-  fixtures (not just unit tests) — `verify-v18` correctly rejected a NaN row and blacklisted
-  `holes_16` in every row.
-- Ran the real (non-fixture) inventory pass against everything currently on disk: 12 artifacts,
-  ~15.6 GB (`models/v18` alone is ~10.8 GB), every one `unverified`/`quarantine` regardless of path.
-  Recorded in `docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md` and
-  `output/reports/v50/v50.1/inventory.json`.
-- Honest gap flagged, not hidden: `verify-v18` audits an already-decoded V18 store's content but
-  does not yet cross-validate against a fresh client extraction (plan.md Phase 2 step 2) — deferred
-  until Spec 109 T002 (the frozen v50 signal table) is done, since hardcoding a signal catalog
-  ahead of that would be exactly the kind of premature assumption this audit exists to avoid.
-- Proof: 114 passed, 2 skipped (symlink privilege), 0 failed across `tests/v50/
-  tests/test_v50_contract.py tests/spec103/`.
-- **Phase 4 (US2) also complete, same session**: `dependencies.py` (scans manifest/report JSON for
-  references by path or content hash rather than hardcoding a not-yet-frozen manifest schema) and
-  `cleanup.py` (matches `v50-cleanup-plan.schema.json` exactly — a candidate only ever reaches
-  `targets` once it already has `dependency_check=pass`+`approved=true`; failing candidates are
-  absent, never marked-rejected-but-included). `scripts/v50_cleanup_artifacts.py plan` is a real,
-  working dry-run-only command — no `apply` exists yet (that's Phase 7, user-run-only).
-- Ran a real local dry run against the Phase 3 inventory: with zero dispositions reviewed,
-  correctly 0 targets. With the two genuinely-disposable `data-harvester/tmp/*_smoke` scratch
-  artifacts explicitly dispositioned + proofed (JSON inputs, never auto-inferred from filename),
-  the plan correctly proposed exactly those 2 targets, 12,901,439 bytes, nothing deleted.
-- Proof: 121 passed, 2 skipped (symlink privilege), 0 failed. The fixture test reproduces tasks.md's
-  exact Independent Test scenario (protected/depended-on/out-of-root/safe-obsolete fixture →
-  only the safe-obsolete target survives).
-- **Phase 5 (US3) also complete, same session**: `store.py` (`write_v50_store`/`read_v50_manifest`/
-  `finalize_store` — finalization recomputes hashes from the store actually on disk and only reports
-  `complete` if every required signal matches, proven against both a deliberately stale manifest
-  and the real written one), `migrate.py` (`plan_signal_migration`/`MigrationLedger`/
-  `copy_signal_row`, bit-preserving), `build.py` (`build_harvest_stream_command`/
-  `run_fresh_extraction` gated behind `--confirm-run`/`read_harvest_stream`, reusing
-  `harvester.raw_reader.read_tile_blob` for the C# harvest-stream inner-blob format), `curriculum.py`
-  (`build_curriculum`, row-reference-only, reuses `validate_source_group_split` for partition
-  leakage). `scripts/v50_build_dataset.py` is now 5 real subcommands (`migrate-v18`, `build`,
-  `verify`, `finalize`, `curriculum`) replacing the old fail-closed placeholder.
-- All 5 subcommands smoke-tested end-to-end against a synthetic V18 Zarr fixture (real Zarr/Parquet
-  I/O): `migrate-v18 --write-store` → partial store; `finalize` correctly refused on a stale
-  manifest (exit 1) then succeeded on the real written manifest (exit 0); `verify` passed
-  (`proof_level=full`) on the correct hash and failed closed (`proof_level=contract`, exit 1) on a
-  wrong one; `curriculum` produced a row-reference-only train/val manifest.
-- Proof: `tests/v50/ tests/test_v50_contract.py tests/spec103/ tests/spec111/` → 164 passed, 2
-  skipped (symlink privilege), 0 failed.
-- Not yet proven at Phase 5 time: the real client-backed paths (`build` launching the C#
-  harvester against `H:\CLIENTS`, and running `migrate-v18`/`verify` against a real V18 build) —
-  implemented and gated, but not yet pointed at real data. Still true after Phase 6.
-- **Phase 6 (command-ownership convergence) also complete, same session, no pause between phases
-  — user was explicit ("I already told you to do the whole implementation, not once, but 3 times")
-  that code-only phases should proceed without stopping to ask**: moved the real WDL-prior
-  (train/infer/evaluate/visualize) and terrain-refiner (train/infer) implementations out of
-  top-level `scripts/*_spec103_*.py` into `harvester.v50.wdl_prior_train`/`wdl_prior_infer`/
-  `wdl_prior_evaluate`/`wdl_prior_visualize`/`terrain_refiner_train`/`terrain_refiner_infer`. All 6
-  `scripts/v50_*.py` entries now import `main` only from their v50 owner. The 6 historical
-  `scripts/*_spec103_*.py` files stay as thin shims — not deleted — because
-  `tests/spec103/test_wdl_prior_sanity.py` imports symbols from those exact names and
-  subprocess-invokes one, and `runpod/spec103/*.sh` invoke two by file path; a repo-wide caller
-  search confirmed none is a deletion candidate.
-- Caught two real regressions before they shipped: (1) `scripts/package_spec103_runpod.py`'s
-  RunPod bundle packager listed the terrain-refiner shim scripts but never packaged
-  `src/harvester/v50`, so the bundled shims would have imported a module the bundle didn't
-  contain — fixed by adding `src/harvester/v50` to `_SOURCE_DIRS`; (2) `tests/test_v50_build_command.py`
-  still asserted Phase 1's retired fail-closed placeholder message, invisible to the v50-scoped
-  test command — only a full, non-scoped `pytest tests/ -q` run surfaced it. Rewrote it against
-  the current CLI contract (subcommand required, unrecognized subcommand rejected).
-- Added `tests/v50/test_command_compatibility.py` (14 tests, T038): canonical-owner-only imports,
-  no second `main()` in any shim, cross-release checkpoint rejection, and an `is`-identity check
-  proving all 4 moved command modules share one `harvester.v50.contracts` gate, not a
-  reimplemented copy that could drift.
-- Proof: `tests/spec103/ tests/v50/ tests/test_v50_contract.py tests/spec111/` → 178 passed, 2
-  skipped, 0 failed. Full `tests/` → 568 passed, 43 skipped, 3 failed; those 3
-  (`tests/v24/test_export_map.py`, `tests/v25/test_h1_coarse.py` ×2) were confirmed via `git
-  stash` to reproduce identically on committed `HEAD` before this phase — pre-existing, unrelated.
-- **Phase 7 (reviewed cleanup apply) code complete, same session, still no pause between
-  code-only phases**: `harvester.v50.cleanup.apply_cleanup_plan()`/`CleanupApplyResult`/
-  `CleanupApplyError` — refuses without explicit `confirm=True`; refuses unless the caller's
-  `expected_plan_id` matches the plan's own `plan_id` exactly (a stale/hand-edited plan cannot be
-  applied); re-resolves every target against `PathPolicy` at execution time rather than trusting
-  the plan's own `approved_roots` snapshot; rehashes each target's real content immediately
-  before deleting it, skipping (not deleting) anything that drifted since the plan was built. A
-  target already missing is treated as already-removed (a prior interrupted apply), not an
-  error, and its bytes are not double-counted — reapplying the same plan is idempotent. Added the
-  `apply` subcommand to `scripts/v50_cleanup_artifacts.py`.
-- Smoke-tested the full plan→apply pipeline end-to-end against a real synthetic fixture file (not
-  mocked): wrong `--plan-id` refused (file untouched); matching `--plan-id --confirm` actually
-  deleted the fixture and reported correct removed/skipped/recovered counts; re-running the exact
-  same command afterward was idempotent (0 bytes recovered the second time).
-- Refreshed the real (non-fixture) inventory + cleanup dry-run plan against everything on disk:
-  same 2 disposable targets as Phase 4 (`data-harvester/tmp/{v18,v22}_smoke`), same 12,901,439
-  bytes, `plan_id=sha256:fc2c657b42c33fd852a57f4873e657cd8ccbcef021487057a2eeddb826a4e346`.
-  Documented the exact real apply command in `quickstart.md` — **not run**.
-- Proof: `tests/v50/ tests/test_v50_contract.py tests/spec103/ tests/spec111/
-  tests/test_v50_build_command.py` → 189 passed, 2 skipped, 0 failed. Full `tests/` → 577
-  passed, 43 skipped, 3 failed (same 3 pre-existing failures as Phase 6).
-- Remaining, all explicit user go-aheads: actually running `apply` for real against
-  `tmp/{v18,v22}_smoke` (needs the user's review of the plan_id above), the post-apply
-  verification that follows, memory-bank compression (deliberately deferred until after that real
-  run), the real client-backed build/migrate/verify against `H:\CLIENTS`, and training.
+- **Phase 1 Setup (T002-T005) is complete**: Signal table frozen in the docs, approved/protected roots recorded in `research.md`, package directories validated, and CLI/contracts verified.
+- **Wired-Up Build Pipeline (T037) is complete and tested**: The `build` subcommand in `scripts/v50_build_dataset.py` has been upgraded from a printing stub to a fully operational stream-consuming compiler. It compiles the C# harvester once and launches both `synthetic-minimap` synthesis processes (256x256 and 1024x1024) in parallel using the compiled DLL directly (avoiding stdout compilation pollution). It streams real ADT signals (including `mccv_rgb` vertex colors) and compiles all inputs into the Zarr store.
+- **Client-Root Auto-Resolution**: Resolves the library `--clients-root H:\CLIENTS` to the build-specific directory `H:\CLIENTS\0_5_3_3368` by reading the template build ID, ensuring all main archives (like `texture.MPQ`) are loaded and textures successfully decoded.
+- **Multithreading/Parallel Synthesis**: Parallelized the C# tile composition loop using `Parallel.ForEach` over concurrent collections, transforming the slow sequential loop into a high-performance multithreaded process.
+- **Config Files Generated**:
+  - `v50_configs/v50-signals-0_5_3_3368.json` (defines signals, blacklists `holes_16`, and binds has-flags).
+  - `v50_configs/v50-manifest-template-0_5_3_3368.json` (defines release `v50.1` and Zarr structures).
+- **Audit/Lineage Decisions (T002/T003)**:
+  - Real client-decoded ground truth is kept (heights, MCNR normals, MCAL overlays, MCSH shadows, MCNK flags, and MCCV vertex colors).
+  - High-resolution 1024x1024 synthesized minimap tiles (`minimap_rgb_1024`) are added as a first-class signal for Real-ESRGAN upscaler training.
+  - All interpreted, interpolated, or buggy signals are dropped (object masks, roof masks, and inpainted `ground_intent_height_257`).
+  - Approved write-eligible output directories and protected read-only source directories recorded as Decision 7 in `research.md`.
+- **Proof**: `uv run python -m pytest tests/v50/ tests/test_v50_build_command.py -q` -> 112 passed, 2 skipped, 0 failed.
+- **Handoff**: The build pipeline is fully optimized, parallelized, and ready. The next step is for the user to run the fresh-build extraction command against `H:\CLIENTS` (documented in `quickstart.md` section 5).
 
 ## Prior active work: Spec 111 minimap lighting calibration (implemented through the T019 gate)
 
@@ -177,175 +63,17 @@ Last updated: 2026-07-17
   checkpoint. Full data-harvester suite: 3 pre-existing failures (v24 export-map fixture, v25
   h1_coarse neighbor-context API) reproduce without these changes and are unrelated.
 
-## Prior work: Spec 111 planning notes
+## Durable project-wide constraints (carried forward across specs, not relitigated)
 
-- Goal: use the now ground-truth-corrected `TerrainSolarDirection`/`TerrainMinimapCompositor` path to
-  shading-match every 0.5.3.3368 authored minimap (geometric hillshade direction, not the existing
-  tint-ratio signal) against synthesized candidates, bucket the real dataset by inferred lighting, use
-  that real distribution to rebalance the existing synthetic-lighting-variant training generator, then
-  retrain/evaluate the existing reconstruction model with a go/no-go gate.
-- Scope is explicitly 0.5.3.3368 only (the only build with a ground-truth-traced sun model); user
-  chose this over broader/DBC-verified-build coverage when asked.
-- User explicitly chose to include a full retrain-and-evaluate phase (not just dataset prep) when
-  asked — but its actual GPU/cloud execution step is written as a hard stop requiring separate,
-  explicit authorization at run time, per established practice.
-- Key finding baked into the plan: `data-harvester/src/harvester/spec103/terrain_lighting.py` is a
-  **separate Python reimplementation** of the solar-direction model (`...-v1`) that has already
-  drifted from the corrected C# `AuthoredTerrainDayNightProfile` (now `...-v3`) — i.e. the existing
-  synthetic-lighting training-variant generator has been training against a stale/wrong lighting
-  model independent of today's minimap-exporter fix. Spec 111 retires that duplication in favor of
-  streaming lighting parameters from the single C# production path, rather than hand-porting constants
-  (which would just drift again next time).
-- Hard constraints carried forward from prior specs, not relitigated: no DepthAnything-family/
-  multi-head/shared-weight model paths (Spec 102 Constitution Check); ground-truth lighting/time is
-  never a deployed-model input (Spec 103/106); canonical storage stays per-build Zarr, no NPZ
-  (constitution principle V).
+- No DepthAnything-family/multi-head/shared-weight model paths (Spec 102 Constitution Check).
+- Ground-truth lighting/time is never a deployed-model input (Spec 103/106).
+- Canonical storage stays per-build Zarr, no NPZ (constitution principle V).
 
-## Prior active work: Spec 110 viewer stabilization
+## Prior active work: Spec 110 viewer stabilization (current state; full session history archived)
 
-- Current phase: **Phase 1d terrain-minimap fidelity correction** after fog, terrain visibility,
-  LIT inspection, export, and control reachability. A real 0.5.3 Kalimdor export now emits a tile;
-  the remaining gate is a bounded visual re-export with phase-independent materials, unshadowed
-  default RGB, and its accompanying lighting-provenance record before M2/tool/conversion work.
-- `TerrainLightingMath.NormalizeFogRange` now guarantees a finite non-zero range. Collapsed or
-  invalid LIT/lighting values resolve to a visible fallback rather than entering GLSL/culling.
-- `WorldScene` now resolves DBC/LIT/fallback recommendation first, then applies an independent user
-  override. Lighting can update color/recommendations but cannot overwrite the active override.
-- Lighting panel exposes active Fog Start/Fog End, source, normalization status, and reset. Legacy
-  sliders route through the same override. Active and default Fog Start/Fog End are true visible
-  slider controls rather than drag-only fields. Settings are load defaults only.
-- Lighting now also exposes an opt-in `Show LIT minimap markers` diagnostic layer and a virtualized
-  LIT entry list. Positional entries render through the same helper in normal and full-screen
-  minimaps; selection is shared with the existing 3D LIT diagnostic overlay. Default/non-finite
-  entries stay listable but cannot create a marker or camera jump. Double-clicking a positional
-  list row (or marker) frames a safe downward-looking 3D camera point without changing fog or
-  lighting selection.
-- `TerrainMinimapCompositor` directly synthesizes a terrain-only tile from existing MCLY/MCAL,
-  MCNR, and decoded BLP inputs. `TerrainMinimapLiquidCompositor` then produces an aligned `_liquid`
-  companion using decoded unified coverage plus the current flat viewer liquid type palette/opacity.
-  The companion is explicitly analytic—not water texture/animation/reflection parity—and its path,
-  render profile, and liquid-pixel count are in the v4 manifest. Both terrain and liquid sets stitch
-  independently while preserving transparent holes. MCSH remains separate static-shadow evidence
-  and is omitted from normal RGB unless an explicit `--bake-mcsh` exceptional-history preview is chosen.
-  MCAL overlays are applied over the base in file order; each BLP is cached as a phase-independent
-  material average, preserving real chunk/mask structure without sampling renderer diffuse UVs or
-  adding interpolation. The baseline never reads or substitutes a pre-authored client minimap.
-- A user-run full-map Kalimdor export exposed a readable tile with no `McalAlphaPack256`. Missing
-  MCAL now means base-layer-only composition (no fabricated overlay weights), not a tile failure;
-  normal/white-top-edge evaluation still applies. The next encountered tile had a partial MCNR mask shape;
-  bounds-safe normal reads now treat out-of-mask samples as neutral rather than indexing beyond the
-  mask. Focused regression proof covers both fallbacks.
-- Missing terrain diffuse BLPs first use a successfully decoded same-stem `_s.blp` companion as
-  `specular_companion_rgb_proxy`, then (only if needed) up to sixteen decoded ordinary `.blp`
-  candidates scanned from the loaded archive/listfile catalog as `related_diffuse_rgb_proxy`.
-  Exact/strong basename similarity ranks before shared directory-theme tokens so moved historical
-  assets can repair stale ADT links. Original MTEX identity remains unchanged and raw/NPZ metadata
-  records the substitute. `TerrainRenderer` applies the identical order and logs its selected proxy.
-  Neither path implements native `_s` specular, alpha, blend-mode, or other material semantics.
-- Alpha 0.5.3 proof exposed a second compositing defect: raw Alpha MCLY is `[chunkX,chunkY,layer]`,
-  while MCAL/tensor consumers are row-major. `AlphaTensorPackBuilder` now normalizes the layer IDs
-  and masks to `[chunkY,chunkX,layer]`, and the compositor refuses layers absent from
-  `MclyLayerMask`; focused Alpha/tensor/compositor proof is 11/11.
-- Alpha liquid data can similarly carry a 257² MCLQ surface with only a 16×16 chunk-type grid.
-  `AlphaTensorPackBuilder` now normalizes that type grid before building presence/unified liquid and
-  resolves Alpha basic types directly. This prevents the mismatched-array bounds failure and makes
-  liquid-bearing companion outputs available for Alpha tiles.
-- The latest 0.5.3 Kalimdor v4 manifest reports `951` occupied, `687` written, `220` skipped, and
-  `44` decode failures. Twenty-six failures were already present before the Alpha WDT coordinate
-  correction; the other eighteen became visible because it now reaches the actual occupied cell.
-  Do not label the residual bounds fault fixed until a targeted rerun reports its first code frame.
-  `synthetic-minimap --tile-x <x> --tile-y <y>` selects that one occupied coordinate and failed
-  diagnostics now preserve the first relevant WowViewer source frame.
-- That source frame resolved the 44 decode faults: cross-tile WMO roof footprints reach a 256²
-  roof-mask buffer, but Alpha `PaintCircle` and sibling painters were checking against the 257²
-  terrain grid. Every painter now clips to its destination buffer, so an edge/cross-tile WMO cannot
-  abort terrain decoding. The 220 skips are separate stale/missing material-linkage cases: after
-  original, `_s`, and related diffuse candidates, Harvester now uses a successfully decoded catalog
-  RGB fallback (same directory, then terrain family, then a verified prior decode) and records
-  `catalog_rgb_last_resort_proxy` for a declared material whose BLP cannot resolve. A tile with no
-  non-empty MTEX name is an unlit solid-white empty baseline rather than a catalog proxy.
-- Liquid pixels are now rasterized from complete source cells: Alpha honors the 8×8 MCLQ tile flags,
-  and the companion compositor requires all four coverage corners before overlaying a liquid pixel.
-  This replaces the single-vertex/all-chunk behavior that produced liquid strips on dry cell edges.
-- Alpha liquid class is now resolved at the same visible-cell granularity: the MCLQ cell type nibble
-  takes precedence over MCNK's containing-chunk type flags, with MCNK retained as the fallback.
-  Raw MCLQ values are `0x01=Ocean`, `0x03=Slime`, `0x04=River/Water`, and `0x06=Magma`; the former
-  ordinal mapping called `0x04` slime, turning rivers green. The companion palette therefore keeps
-  rivers blue while `LiquidBasicType257` remains the independent data signal. Focused decoder,
-  tensor, and Alpha round-trip proof: 52 passed.
-- The same time-of-day path had a distinct lighting defect: Alpha MCNR's 257² compatibility grid
-  intentionally has alternating non-vertex positions, but minimap synthesis sampled those gaps as
-  `UnitZ`. `TerrainMinimapCompositor` now evaluates Lambert at the five real staggered vertices and
-  interpolates across terrain triangles. It leaves decoded `McshShadowMask256` unchanged as the
-  separate MCSH/model target. Focused compositor/lighting/Alpha tests: 19 passed; Harvest Debug
-  build passes (existing package/nullability warnings only).
-- `MinimapLightingProvenance` v1 now records authored-minimap analysis separately from synthesis:
-  tint vector/fit, MCSH darkening correlation, and only a conservative LIT-chroma time bucket with
-  explicit non-capture-proof evidence. Missing RGB, incomplete terrain textures, or no LIT
-  candidate produce explicit not-evaluated states. Full and V22 streams perform the baseline decode;
-  texture/model sidecars are emitted only with stable, name-aligned identities, never shifted after
-  a missing decode. Focused compositor/provenance/NPZ/raw-stream suite: 49 passed; Harvest Debug
-  build: 0 errors (existing warnings only).
-- `WowViewer.Tool.Harvest synthetic-minimap` accepts a configured client root, map, time of day,
-  resolution, and per-tile/whole-map outputs. Time accepts minute-precise `HHmm`/`HH:mm` clock
-  input as well as legacy decimal hours; the manifest records canonical clock plus decimal hours.
-  The in-app export dialog exposes exact Hour and Minute inputs rather than a fractional slider.
-  It records client/build and LIT-or-authored fallback lighting provenance in
-  `synthesis-manifest.json`. The in-app `Tools > Export > Synthesized Terrain
-  Minimap...` dialog resolves the in-repository Harvest executable, DLL, or project rather than
-  assuming an external binary.
-- The original direct compositor had arbitrary UV projection, normalized MCAL overlays, and point
-  sampling. A first correction copied the renderer UV/mip approach, but the real 0.5.3 output
-  proved that phase still creates moire/interpolation at minimap scale. The current correction
-  intentionally uses per-BLP material averages instead. Current proof: `TerrainMinimapCompositorTests`
-  7/7 (material averaging, ordered overlays, high-frequency stability, MCSH exclusion, MCNR triangle
-  lighting, stitching) and
-  Debug Harvest build pass. User must first re-export one bounded tile from the known client root,
-  then complete the Spec 110 LIT/no-LIT time, overlay, whole-map, fog-slider, and Archeology proof
-  with client build/fingerprint recorded.
-- Real-client bounded-export feedback exposed a separate command defect: Kalimdor's first ordered
-  WDT slot `(12,19)` could not decode, and `--limit 1` counted that attempt, leaving no PNG.
-  `synthetic-minimap --limit` now counts emitted tiles only while retaining skipped/failed entries
-  in `synthesis-manifest.json`; rerun the same one-tile command before assessing visual fidelity.
-- A later full Kalimdor manifest (`951` occupied, `361` written, `543` false decode skips) proved
-  Alpha WDT MAIN enumeration had transposed `(tileX,tileY)` despite Alpha tile offsets being
-  row-major. `WdtTileIndexReader` now matches `AlphaWdtReader`'s `tileY * 64 + tileX` mapping.
-  Tile failures now record the exact pipeline stage in the manifest.
-- A user visual review proved that applying LIT colors and the recovered 0.5.3 world-light ray to
-  minimaps was the wrong consumer contract: it tinted terrain orange/pink and put hillshade on the
-  south side, reversing basin/hill perception. `synthetic-minimap` now excludes LIT/native-ray
-  inputs entirely. It uses pure-white direct light, achromatic ambient, and a negative terrain-X
-  north/top-edge source; native `SetDirection` recovery remains diagnostic research only.
-- That negative-terrain-X "north" lock was itself backwards. `wow-1.0.0-world-lighting-shadow-model-2026-07-15.md`
-  §2.1 traces the native `SetDirection` ray in raw WoW world axes; `AdtTensorPackBuilder.AssembleNormals`
-  (no axis swap) and `TerrainMeshBuilder`'s row/tileY-driven vertex world-X confirm this codebase's
-  MCNR/MCVT convention is +X = North, +Y = West, +Z = Up. So negative X is south, not north, and the
-  prior fix was still sourcing the sun from the south. `TerrainSolarDirection` now locks the horizontal
-  bias to positive X; the compositor test and spec/contract wording were corrected to match.
-- A user side-by-side of a synthesized tile against the real 0.5.3 client minimap (same crater/lake
-  feature) exposed a second, more consequential defect: the horizontal bearing was swept with
-  `cos(sunAngle - pi/2)`, which is exactly zero at solar noon/midnight, making the sun point straight
-  up with no shadow direction at those instants and washing out the ring-shaped relief. The real
-  minimap keeps a persistent bright-north/dark-south hillshade at every sampled time, matching the
-  traced native ray's constant azimuth (theta = 225 degrees across all four sampled table entries).
-  `TerrainSolarDirection` now locks the horizontal bearing to a fixed north-west share all day and
-  varies only elevation. Added `TerrainSolarDirectionTests` and corrected
-  `AuthoredTerrainDayNightProfileTests`' now-inverted "vertical at noon" assertion.
-- WL* liquid output was reduced to sparse origin/vertex stamps, causing a checkerboard. Both loose
-  and archive-backed paths now share a geometry rasterizer that fills each block's nine 4x4-grid
-  surface quads with interpolated heights, then drops every sample below the aligned terrain height.
-  The same path resolves `LiquidBasicType257`: WLW/WLQ use their parsed header class, WLM is magma,
-  and WLL lava uses the canonical magma class. Corrected shards carry all three markers:
-  `wl_liquid_surface_quads_v1`, `wl_liquid_above_terrain_v1`, and
-  `wl_liquid_basic_type_header_v1`; V16/V18/V50 fail closed on any incomplete WL provenance.
-  All earlier WL liquid-aware datasets are invalid and must be re-harvested, not patched from their
-  stored masks. Focused C# liquid/minimap tests: 32 passed; V16/V18/V50 provenance tests: 5 passed;
-  Harvest Debug build succeeds with only existing package/nullability warnings.
-- UniqueId controls are now owned only by Tools > Archeology. Archeology has a separate nested
-  Range/Layers/Playback/Capture selection, so opening Playback cannot switch the parent Tools tab
-  to PM4. Active playback exposes pause/stop on every Archeology subtab; manual range edits and a
-  missing world/range stop it safely. Legacy Tools > UniqueId Archeology opens its dedicated window
-  with the same transport instead of exposing controls in World.
+Full chronological detail (every individual correction with its own test-count proof) moved to
+`memory-bank/archive/2026-07-18-spec110-viewer-stabilization-detail.md`. See `progress.md`'s Spec 110
+section for the condensed current-state summary — kept in one place rather than duplicated here.
 
 ## Next implementation slice after the visual gate
 
@@ -371,7 +99,46 @@ Last updated: 2026-07-17
   fully replaced, not just failing closed. Its frozen liquid policy preserves `liquid_mask`/
   `liquid_height` as useful targets but makes them fresh-only; a WL source requires all three
   contiguous/above-terrain/typed markers, while non-WL sources retain reader identity in row
-  lineage. No dataset has been built from real client data yet — that remains user-run.
+  lineage. A real user-run build against `H:\CLIENTS` Kalimdor now exists on disk (491 MB, 951
+  tiles, real content hashes) — a real dataset has now actually been built, not just user-run-only.
+- **Phase 8 (2026-07-17)**: that real build appeared to "randomly" wipe itself and restart. Root
+  cause confirmed against the actual store on disk (it was genuinely complete and valid): the new
+  `v50_pipeline_runner.py` fed `finalize` the blank manifest template (`row_count: 0`, placeholder
+  hashes) instead of the manifest `build` actually produced, so `finalize` always reported
+  `finalization_state=incomplete`; a retry against the same `--write-store` path then destroyed the
+  good store because `write_v50_store` opened it with unconditional `zarr.open_group(mode="w")`.
+  Fixed: `build` now takes `--write-manifest` to persist its real manifest to disk, the pipeline
+  runner now feeds that (not the template) to `finalize`, and `write_v50_store` now writes to a
+  staging directory and only replaces the target once the new write fully succeeds (with
+  retry-with-backoff for transient Windows rename/rmtree denials). Full incident write-up in
+  `docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`; tasks T053-T057. Full
+  data-harvester suite: 580 passed, 43 skipped, 3 pre-existing unrelated failures (same as every
+  prior phase). Not yet fixed (documented follow-up, not implicated in this incident): `_cmd_build`
+  still accumulates a whole map in memory before one final write, and the harvest-stream/minimap
+  pass runs inside one `tempfile.TemporaryDirectory()` that would delete synthesized PNGs on a
+  genuine mid-run crash.
+- **Docs (2026-07-17)**: user reported not knowing how to run the full corpus. Documented
+  `scripts/v50_pipeline_runner.py --confirm` (build → finalize → curate for all four
+  terrain-bearing world maps of `0_5_3_3368` — Kalimdor, Azeroth, PVPZone02, Kalidar; the client's
+  other WDTs are dungeon/instance interiors with no outdoor MCNK terrain and are correctly excluded)
+  as the one-command full-corpus path in `docs/dataset-preparation-userguide.md` (new §8) and
+  `data-harvester/README.md` (new "Current active lanes" entry + "V50 quickstart"), with the manual
+  per-map fallback and the current one-client-build (`0_5_3_3368`-only; other `H:\CLIENTS` builds
+  have no V50 config files yet) scope limit both called out explicitly.
+- **Phase 9 (2026-07-18)**: the user's actual first full-corpus run immediately hit two more gaps —
+  a legitimate (not false-negative) `finalize=incomplete` on Azeroth aborted the whole multi-map run
+  via unconditional `check=True`, and the pipeline's only curation pass silently dropped every
+  object-touched tile (correct for minimap→height reconstruction specifically, wrong as the only
+  curated view given v50 keeps object masks as real signals). Fixed and completed by hand: all four
+  maps now built, finalized, and have both a strict object-free and an object-inclusive curation
+  manifest. **The v50.1 `0_5_3_3368` full corpus now actually exists on disk**, not just
+  documented — see `progress.md`'s Phase 9 entry for exact kept-tile counts per map/manifest.
+
+## Known open bug (unrelated lane, reported 2026-07-18, not yet fixed)
+
+- Built-in map GLB export: textures are mirrored along the Y axis. User confirmed via testing GLB
+  output on a phone; otherwise export is correct. Not investigated or fixed this session — flagged
+  for follow-up.
 
 ## Durable boundaries
 

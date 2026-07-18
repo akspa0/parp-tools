@@ -284,3 +284,156 @@ Until that defect is closed, no output from this builder is trusted regardless o
 The final bullet above described the initial audit state and is superseded by the user-approved
 clean-slate completion: the two output roots were explicitly designated disposable and successfully
 emptied. It does not authorize deletion outside those roots.
+
+## Frozen Signal Catalog (T002) — Updated 2026-07-17
+
+The v50.1 release signal catalog defines the exact, verified data elements allowed in the clean-room store:
+
+| Signal | dtype | Shape | V50 Policy | Required | Notes |
+|---|---|---|---|---|---|
+| `height_257` | float32 | (257,257) | copy-if-verified | **yes** | Core terrain heightmap. |
+| `normal_xyz` | float32 | (257,257,3) | copy-if-verified | no | MCNR normals. |
+| `normal_mask` | bool | (257,257) | copy-if-verified | no | MCNR availability mask. |
+| `alpha_256` | float32 | (256,256,4) | copy-if-verified | no | MCAL texture blend weights. |
+| `holes_16` | bool | (16,16) | **blacklisted** | no | Uncorrected hole masks (FR-017). |
+| `liquid_mask` | float32 | (256,256) | **fresh-only** | no | Historic WL liquid presence (fresh-only). |
+| `liquid_height` | float32 | (256,256) | **fresh-only** | no | Historic WL liquid surface height (fresh-only). |
+| `liquid_type_256` | uint8 | (256,256) | copy-if-verified | no | Liquid classification. |
+| `mcnk_flags_16` | int32 | (16,16) | copy-if-verified | no | Chunk flags. |
+| `minimap_rgb` | uint8 | (256,256,3) | copy-if-verified | **yes** | Authored/synthesized minimap. |
+| `minimap_rgb_1024` | uint8 | (1024,1024,3) | copy-if-verified | no | **4x Resolution Minimap** for Real-ESRGAN upscaler. |
+| `mccv_rgb` | float32 | (257,257,3) | copy-if-verified | no | **MCCV Vertex Colors** (vertex lighting/shading). |
+| `shadow_mask` | float32 | (256,256) | copy-if-verified | no | MCSH shadow. |
+| `mcly_texture_ids` | int32 | (16,16,4) | copy-if-verified | no | Per-chunk texture IDs. |
+| `mcly_layer_mask` | float32 | (16,16,4) | copy-if-verified | no | Layer presence. |
+| `mcnr_mask_257` | bool | (257,257) | copy-if-verified | no | Normal coverage mask. |
+| `ground_intent_height_257` | float32 | (257,257) | copy-if-verified | no | WDL-derived ground intent. |
+| `mcly_tileset_ids` | int32 | (16,16,4) | copy-if-verified | no | Per-chunk tileset IDs. |
+
+### Dropped Signals (Deferred or Removed)
+- `object_mask`, `object_precise_mask`, `object_instance_mask`: Deferred to future specs (to be replaced with precise per-object and per-tile masks generated from minimap synthesis).
+- `object_roof_mask`, `object_roof_confidence`: Removed (broken/dead signals).
+- `object_filtered_mask`, `model_focus_mask`: Removed (derivative of broken masks).
+- `mddf_mask`, `modf_mask`: Removed (synthesized/interpolated projections).
+- `model_above_terrain_mask`: Removed (requires volumetric redesign).
+
+## Approved and Protected Roots (T003)
+
+To guarantee safety during clean-room dataset builds and cleanup:
+- **Approved Roots** (write-eligible/deletion candidates under dry-run):
+  - `wow-viewer/output/`
+  - `wow-viewer/data-harvester/tmp/`
+  - `wow-viewer/data-harvester/checkpoints/`
+  - `wow-viewer/data-harvester/models/`
+- **Protected Roots** (strictly read-only, never deleted or written):
+  - `wow-viewer/specs/`
+  - `wow-viewer/docs/`
+  - `wow-viewer/src/`
+  - `wow-viewer/tests/`
+  - `H:\CLIENTS` (or any other external client root)
+
+## Phase 8 incident — real build silently wiped and restarted (2026-07-17)
+
+**Symptom (user-reported)**: a real `build --confirm-run` run against `H:\CLIENTS` Kalimdor would
+run for the full ~8-11 minutes, then "randomly" delete everything it had generated and restart the
+whole extraction from tile 0, with no visible reason.
+
+**Root cause, confirmed against real output already on disk, not reproduced from a guess**: at the
+time of investigation, `output/datasets/v50/v50.1/0_5_3_3368-Kalimdor.zarr` was a completely valid,
+complete 491 MB / 951-tile store -- its own `zarr.json` attrs carried `row_count: 951` and real,
+non-placeholder content hashes for every signal. But the sibling
+`0_5_3_3368-Kalimdor.manifest.json`, written by `v50_pipeline_runner.py`'s `finalize` step, showed
+`row_count: 0` and all-zero placeholder hashes with `finalization_state: "incomplete"`. Two bugs
+combined to turn that false-negative into real data loss:
+
+1. `v50_pipeline_runner.py`'s `finalize_cmd` passed `--manifest
+   ./v50_configs/v50-manifest-template-0_5_3_3368.json` -- the blank release template with
+   `row_count: 0` -- instead of the manifest `build` had actually produced. `finalize_store()`
+   therefore always found `row_lineage count 951 != manifest row_count 0` and every hash
+   mismatched, so it reported `finalization_state=incomplete`/exit 1 for every build, however good.
+   Quickstart's own Phase 5 smoke-test record already said the correct input is "the manifest read
+   back from the real written store" -- but no CLI path ever wrote that manifest to a file; it only
+   ever lived in the Zarr store's own `attrs`.
+2. `write_v50_store()` (`harvester/v50/store.py`) opened its target with `zarr.open_group(...,
+   mode="w")` unconditionally, which erases any pre-existing store at that path with no resume, no
+   backup, and no confirmation. So the retry that followed the false "incomplete" report -- or any
+   process/host interruption mid-write -- destroyed the good store and forced a full restart.
+
+**Fix**:
+
+- `build` now also writes its real, just-computed manifest to disk via a new `--write-manifest`
+  path (`harvester/v50/build.py`/`scripts/v50_build_dataset.py`); `v50_pipeline_runner.py`'s
+  `finalize_cmd` now points at that file instead of the blank template.
+- `write_v50_store()` now writes to a staging directory beside the target path and only replaces
+  the target once every array has been written without error, with a short retry-with-backoff
+  around the final directory swap (Windows can transiently deny a rename/rmtree on a
+  just-finished-writing directory, e.g. an antivirus or indexer scan; retrying clears it rather
+  than failing outright). A build that fails or is interrupted partway now leaves a prior good
+  store at the target path untouched.
+- Regression coverage: `tests/v50/test_store.py` proves a failed second write leaves the prior good
+  store's manifest byte-identical, a successful second write does replace it, and no staging
+  directory is left behind on success.
+
+**Not yet fixed (known follow-up, out of scope for this pass)**: `_cmd_build` still accumulates the
+entire map's tile stream in Python memory and only calls `write_v50_store` once at the very end, and
+the harvest-stream/minimap-synthesis pass runs inside one `tempfile.TemporaryDirectory()` whose
+`__exit__` deletes all synthesized minimap PNGs on any unhandled exception mid-run. Neither bug was
+implicated in the confirmed incident above (the store on disk proved `build` itself completed
+cleanly), but a genuine mid-run crash still loses that run's synthesized-minimap work and reports no
+partial progress. Left as a documented gap rather than a larger unrequested rewrite.
+
+## Phase 9 incident — the first real full-corpus run hit two more gaps immediately (2026-07-18)
+
+**Symptom (user-reported)**: running the fixed `v50_pipeline_runner.py --confirm` against the full
+`0_5_3_3368` corpus for the first time, Kalimdor completed, but the run then crashed with a Python
+traceback partway through Azeroth's `finalize` step and stopped entirely -- PVPZone02 and Kalidar
+never ran.
+
+**Root cause 1 -- a legitimate `finalize` failure was still treated as fatal for the whole run**:
+Azeroth's `finalize` genuinely reported `finalization_state=incomplete` (not the Phase 8 false
+negative -- the manifest fed to it this time was the correct one). Diagnosing why required a
+hand-rolled script reproducing `finalize_store`'s internal mismatch computation, because the CLI only
+ever printed the bare state, never the reason. That diagnosis found two real tiles (row 8 = tile
+(2,2), row 9) that legitimately lack `minimap_rgb`: their MCLY texture data was absent, so minimap
+synthesis correctly skipped them (consistent with `alpha_256`/`mcnk_flags_16`/`shadow_mask` also
+being `unavailable` for the same rows). This is exactly the kind of dirty tile Spec 103 curation
+exists to drop -- but `v50_pipeline_runner.py`'s `finalize_cmd` still ran through `run_command(...,
+check=True)`, so `finalize`'s exit 1 raised `CalledProcessError` and killed the whole script before
+curation, PVPZone02, or Kalidar ever ran.
+
+**Root cause 2 -- the one curation pass silently discarded all object-touched tiles from the corpus**:
+the pipeline's only curation step passes `spec103_curate_dataset.py --max-object-coverage 0.0`. That
+script's own docstring explains the policy is scoped to one task: "Height under an object is occluded
+in the minimap, so an object tile is an impossible target and must be DROPPED, not learned" -- a real
+constraint for minimap-to-height reconstruction, not a general judgment that object tiles are bad
+data. Baking it in as the *only* curated view meant every real, wanted object tile (518/951 = 54.5%
+of Kalimdor, 355/685 = 51.8% of Azeroth, 3/64 = 4.7% of PVPZone02, 12/56 = 21.4% of Kalidar) was
+absent from the one manifest that existed, even though v50's frozen signal catalog deliberately keeps
+`object_precise_mask`/`object_instance_mask` as first-class signals for object-aware work.
+
+**Fix**:
+
+- `harvester/v50/store.py` gained `FinalizeReport`/`finalize_store_report()`: same completeness
+  check as `finalize_store()`, but returns every concrete mismatch reason (missing/mismatched
+  signal, row-count disagreement, or up to 5 named rows + a count per required signal missing
+  lineage). `_cmd_finalize` now prints every reason, not just the bare state.
+- `v50_pipeline_runner.py` is now resilient per map: a `build` failure skips the rest of that map
+  only (other maps still run); a non-complete `finalize` no longer aborts anything -- it prints the
+  reasons and curation still runs for that map, since curation is what actually drops those rows. A
+  final per-map summary table (`build`/`finalize`/`curate`/`curate_object_inclusive`) prints at the
+  end of every run so a long run's outcome isn't buried in scrollback.
+- The pipeline now writes a second curation manifest per map,
+  `curation-<build>-<Map>-object-inclusive/` (`--max-object-coverage 1.0`, object filter effectively
+  off), alongside the unchanged strict one. Both apply the same missing_signal/blank_minimap/
+  height_normal_mismatch checks; only the object policy differs. Neither manifest ever duplicated
+  array data -- both are Parquet row-reference lists over the same raw, untouched store, so no data
+  was ever actually lost, only absent from one curated *view*.
+- Completed the interrupted real run by hand with the fixed tools: all four maps now have both
+  manifests. Strict kept Kalimdor 421/951, Azeroth 328/685, PVPZone02 60/64, Kalidar 24/56.
+  Object-inclusive kept Kalimdor 939/951, Azeroth 683/685, PVPZone02 63/64, Kalidar 36/56 (Kalidar's
+  ceiling here is the 20 missing-minimap rows, not objects).
+- Regression coverage: `tests/v50/test_store.py` proves `finalize_store_report` names the specific
+  signal and row(s) responsible, and reports zero mismatches for a genuinely complete store.
+  `uv run python -m pytest tests/v50/ tests/test_v50_contract.py tests/test_v50_build_command.py -q`
+  -> 120 passed, 2 skipped, 0 failed.
+

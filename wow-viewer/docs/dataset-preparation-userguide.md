@@ -387,4 +387,136 @@ zero-filled. This eliminates per-sample feature gating complexity.
 
 ---
 
-*Last updated: 2026-05-16 — adds V16 Zarr dataset pipeline and harvest-stream command.*
+## 8. V50 Clean-Room Dataset (Current Canonical Lane)
+
+**V50 is the active dataset lane** (Spec 109, `specs/109-v50-clean-room-audit/`). It supersedes V16/
+V22/V23 above for new work: a fail-closed trust boundary (nothing is "verified" by name alone),
+complete per-build Zarr stores with real content-hash identity, and immutable curriculum manifests
+instead of duplicated data copies. The sections above remain accurate for the older NPZ/V16 formats
+and for clients V50 hasn't been configured for yet, but start here for anything new.
+
+### 8.1 Run the full corpus (the easy way)
+
+For the currently configured client (`0_5_3_3368`, Alpha 0.5.3), one script builds every map,
+finalizes each store, and pre-curates it in one pass:
+
+```powershell
+cd wow-viewer/data-harvester
+uv run python scripts/v50_pipeline_runner.py --confirm
+```
+
+Omit `--confirm` first to dry-run — it prints every command it would execute (build → finalize →
+curate, per map) without launching anything. Add `--sample N` to cap tiles per map for a quick
+smoke test before committing to a full run.
+
+**What it processes and how long it takes** (`H:\CLIENTS\0_5_3_3368`, the four terrain-bearing world
+maps in this build — the rest of that client's WDTs are dungeon/instance interiors with no outdoor
+MCNK terrain, which V50's harvest-stream doesn't extract):
+
+| Map | Estimated time |
+|-----|----------------|
+| Kalimdor | 8 to 12 minutes |
+| Azeroth | 5 to 8 minutes |
+| PVPZone02 | less than 30 seconds |
+| Kalidar | less than 30 seconds |
+
+Total wall time for the full corpus is roughly 15-20 minutes. Each map writes to
+`../output/datasets/v50/v50.1/0_5_3_3368-<Map>.zarr` (~0.5-2 GB depending on map size) plus a
+manifest JSON and a build-lineage report under `../output/reports/v50/v50.1/`.
+
+**Every map gets two curation manifests, not one** — both are Parquet row-reference lists over the
+same raw store (no array data is ever copied or duplicated by either):
+
+- `curation-0_5_3_3368-<Map>/` — the strict, object-free manifest (drops missing-signal, near-blank,
+  *any* object-touched, and height/normal-mismatched tiles). Correct for minimap-to-height
+  reconstruction specifically: an object occludes the ground, so "true height under it" isn't a
+  fair target from the minimap alone.
+- `curation-0_5_3_3368-<Map>-object-inclusive/` — the same missing-signal/blank/mismatch checks, but
+  object-touched tiles are kept. Use this for anything object-aware — v50's signal catalog keeps
+  `object_precise_mask`/`object_instance_mask` as real signals specifically for this. The strict
+  manifest alone had been silently discarding roughly half of some maps' tiles (e.g. 51.8% of
+  Azeroth) from the only curated view that existed before this manifest was added.
+
+A tile can legitimately be missing a required signal on real client data (e.g. a tile with terrain
+but no texture data, so minimap synthesis has nothing to composite) — `finalize` will report
+`finalization_state=incomplete` for that map and print exactly which signal and rows are affected.
+That is expected, not a failure: it doesn't stop the run, and curation is what drops those specific
+rows from both manifests above.
+
+**If a run is interrupted or a map's `build` step fails partway**, it is safe to just re-run the same
+command: `write_v50_store` stages its write and only replaces a map's store once the new write fully
+succeeds, so a prior good store for a map is never destroyed by a failed or interrupted retry (Spec
+109 Phase 8). A `build` failure for one map no longer stops the others, and a non-complete `finalize`
+no longer aborts the run at all (Spec 109 Phase 9) — the run always ends with a per-map summary table
+showing `build`/`finalize`/`curate`/`curate_object_inclusive` status for every map. See
+`docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`'s Phase 8/9 incident write-ups
+for the full history — two rounds of real user-run bugs, both now fixed.
+
+### 8.2 Running one map by hand
+
+Useful when iterating on one map, or debugging a single stage. See
+`specs/109-v50-clean-room-audit/quickstart.md` section 5 for the full command reference; the shape
+is:
+
+```powershell
+cd wow-viewer/data-harvester
+
+# 1. Build (extraction + minimap synthesis + Zarr compile) -- add --confirm-run to actually launch it
+uv run python scripts/v50_build_dataset.py build `
+  --harvest-project ../tools/harvest/WowViewer.Tool.Harvest `
+  --clients-root H:\CLIENTS `
+  --map Kalimdor `
+  --stream-profile v22 `
+  --signals-config ./v50_configs/v50-signals-0_5_3_3368.json `
+  --manifest-template ./v50_configs/v50-manifest-template-0_5_3_3368.json `
+  --report ../output/reports/v50/v50.1/build-0_5_3_3368-Kalimdor.json `
+  --write-store ../output/datasets/v50/v50.1/0_5_3_3368-Kalimdor.zarr `
+  --write-manifest ../output/reports/v50/v50.1/build-manifest-0_5_3_3368-Kalimdor.json `
+  --confirm-run
+
+# 2. Finalize -- MUST use the file --write-manifest just wrote, never --manifest-template
+#    (the template always declares row_count=0 and would report finalization_state=incomplete
+#    against every build, however good -- see the Phase 8 incident note above)
+uv run python scripts/v50_build_dataset.py finalize `
+  --store ../output/datasets/v50/v50.1/0_5_3_3368-Kalimdor.zarr `
+  --manifest ../output/reports/v50/v50.1/build-manifest-0_5_3_3368-Kalimdor.json `
+  --row-lineages ../output/reports/v50/v50.1/build-0_5_3_3368-Kalimdor.json `
+  --output ../output/datasets/v50/v50.1/0_5_3_3368-Kalimdor.manifest.json
+
+# 3a. Pre-curate: strict, object-free manifest (for minimap-to-height reconstruction)
+uv run python scripts/spec103_curate_dataset.py `
+  --store ../output/datasets/v50/v50.1/0_5_3_3368-Kalimdor.zarr `
+  --output ../output/datasets/v50/v50.1/curation-0_5_3_3368-Kalimdor `
+  --max-object-coverage 0.0
+
+# 3b. Pre-curate: object-inclusive manifest (same missing-signal/blank/mismatch checks, keeps object tiles)
+uv run python scripts/spec103_curate_dataset.py `
+  --store ../output/datasets/v50/v50.1/0_5_3_3368-Kalimdor.zarr `
+  --output ../output/datasets/v50/v50.1/curation-0_5_3_3368-Kalimdor-object-inclusive `
+  --max-object-coverage 1.0
+```
+
+### 8.3 Scope: this is currently one client build only
+
+The signal catalog and manifest template (`v50_configs/v50-signals-0_5_3_3368.json`,
+`v50_configs/v50-manifest-template-0_5_3_3368.json`) are specific to `0_5_3_3368`. `H:\CLIENTS`
+holds many other client builds (0.5.5 through 4.0.0 and beyond — see section 1 above for the older
+NPZ-era client list), but none of them have V50 config files yet. Extending V50 to another build
+means generating an equivalent signals/manifest-template pair for that build's signal availability
+before `v50_build_dataset.py build`/`v50_pipeline_runner.py` can target it — that work has not been
+done for any build beyond `0_5_3_3368`.
+
+### 8.4 Everything else (verify, curriculum, cleanup audit)
+
+`v50_build_dataset.py` also has `migrate-v18` (bit-preserving copy of verified V18 signals) and
+`curriculum` (immutable row-selection manifests, no array payloads) subcommands, and
+`v50_audit_artifacts.py` / `v50_cleanup_artifacts.py` handle the read-only trust inventory and
+reviewed disk-cleanup plan/apply. All of these, their exact flags, and their fixture-proof results
+are documented in `specs/109-v50-clean-room-audit/quickstart.md`, which is the authoritative
+reference this section summarizes.
+
+---
+
+*Last updated: 2026-07-18 — dual curation manifests (strict object-free + object-inclusive), resilient
+multi-map pipeline (a dirty tile or one map's failure no longer aborts the whole run), and
+self-diagnosing `finalize` output.*

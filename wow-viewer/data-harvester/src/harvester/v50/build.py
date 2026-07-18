@@ -31,6 +31,27 @@ _ARRY_MAGIC = b"ARRY"
 _HEADER_SIZE = 8
 
 
+def find_harvest_dll(harvest_project_path: Path) -> Path:
+    """Find the compiled DLL for WowViewer.Tool.Harvest."""
+    if harvest_project_path.suffix == ".csproj":
+        project_dir = harvest_project_path.parent
+    else:
+        project_dir = harvest_project_path
+
+    for tfm in ["net10.0", "net9.0", "net8.0"]:
+        dll_path = project_dir / "bin" / "Debug" / tfm / "WowViewer.Tool.Harvest.dll"
+        if dll_path.exists():
+            return dll_path
+
+    bin_dir = project_dir / "bin"
+    if bin_dir.exists():
+        dll_files = list(bin_dir.glob("**/WowViewer.Tool.Harvest.dll"))
+        if dll_files:
+            return dll_files[0]
+
+    return project_dir / "bin" / "Debug" / "net10.0" / "WowViewer.Tool.Harvest.dll"
+
+
 def build_harvest_stream_command(
     harvest_project_path: Path,
     *,
@@ -38,15 +59,13 @@ def build_harvest_stream_command(
     map_name: str,
     stream_profile: str = "v22",
 ) -> list[str]:
-    """Construct the exact ``dotnet run`` invocation for the existing C# harvester's
+    """Construct the exact ``dotnet`` invocation using the compiled DLL for the existing C# harvester's
     ``harvest-stream`` command. Every value that would tempt a hardcoded assumption (the project
     path, client root, map, stream profile) is a required parameter."""
+    dll_path = find_harvest_dll(harvest_project_path)
     return [
         "dotnet",
-        "run",
-        "--project",
-        str(harvest_project_path),
-        "--",
+        str(dll_path),
         "harvest-stream",
         "--client-root",
         str(client_root),
@@ -55,6 +74,7 @@ def build_harvest_stream_command(
         "--stream-profile",
         stream_profile,
     ]
+
 
 
 def run_fresh_extraction(

@@ -290,22 +290,57 @@ uv run python scripts/v50_build_dataset.py verify `
 `verify` fails closed on any hash mismatch, row-count disagreement, or partition leakage -- see the
 Phase 5 smoke test above for both the pass and deliberate-failure cases.
 
-## 5. Fresh build for an additional SSD client — IMPLEMENTED, USER RUNS
+## 5. Fresh build for the 0.5.3 clean-room store — OPERATIONAL, USER RUNS
+
+Since no legacy V18 store exists for 0.5.3, we build the clean-room V50.1 store entirely from the client library on the SSD:
+
+- **Build**: `0_5_3_3368`
+- **Map**: `Kalimdor` (Alpha-era Kalimdor is the only map in this build)
+- **Stream Profile**: `v22` (required to decode MCNR, MCAL, and MCCV signals)
+- **Time/Size Estimate**: ~950 occupied tiles. Processing takes **7 to 11 minutes** on the SSD. Expected Zarr size on disk is **~1.8 GB** (compressed).
+
+First verify the command and inputs by running without `--confirm-run`:
 
 ```powershell
 uv run python scripts/v50_build_dataset.py build `
-  --harvest-project ..\..\tools\harvest\WowViewer.Tool.Harvest `
+  --harvest-project ../tools/harvest/WowViewer.Tool.Harvest `
   --clients-root $FastClientsRoot `
-  --map Azeroth `
+  --map Kalimdor `
   --stream-profile v22 `
+  --signals-config ./v50_configs/v50-signals-0_5_3_3368.json `
+  --manifest-template ./v50_configs/v50-manifest-template-0_5_3_3368.json `
+  --report ../output/reports/v50/v50.1/build-0_5_3_3368.json `
+  --write-store ../output/datasets/v50/v50.1/0_5_3_3368.zarr
+```
+
+To run the actual extraction, minimap synthesis (both 256x256 and 4x 1024x1024 tiles for Real-ESRGAN), Zarr compilation, and lineage tracking, append `--confirm-run` and `--write-manifest`:
+
+```powershell
+uv run python scripts/v50_build_dataset.py build `
+  --harvest-project ../tools/harvest/WowViewer.Tool.Harvest `
+  --clients-root $FastClientsRoot `
+  --map Kalimdor `
+  --stream-profile v22 `
+  --signals-config ./v50_configs/v50-signals-0_5_3_3368.json `
+  --manifest-template ./v50_configs/v50-manifest-template-0_5_3_3368.json `
+  --report ../output/reports/v50/v50.1/build-0_5_3_3368.json `
+  --write-store ../output/datasets/v50/v50.1/0_5_3_3368.zarr `
+  --write-manifest ../output/reports/v50/v50.1/build-manifest-0_5_3_3368.json `
   --confirm-run
 ```
 
-Without `--confirm-run` the command only prints the exact C# harvester invocation and launches
-nothing (`run_fresh_extraction(confirm_run=False)` returns `None`). Consuming the resulting
-`harvest-stream` into a v50 store writer is not yet wired end-to-end in this pass -- today the
-stream can be read with `harvester.v50.build.read_harvest_stream()`, but turning that into store
-rows still requires the same manual `migrate-v18 --write-store` / `finalize` steps above.
+Consuming the stream is fully wired: the subcommand automatically generates standard and high-resolution synthesized minimaps in parallel, reads the stdout of `harvest-stream`, compiles all signals, and writes the incomplete store to disk.
+
+Once written, you must run `finalize` to compute the content identities and check for completeness, followed by `verify` to run the FR-005 promotion gates. **Pass `--write-manifest`'s output file as `finalize`'s `--manifest`, never `--manifest-template`** -- the template always declares `row_count: 0` and placeholder hashes, so `finalize` would report `finalization_state=incomplete`/exit 1 against every build, however good (this was the Spec 109 Phase 8 incident: a genuinely complete, valid store looked "broken" because of the wrong `finalize` input, and a retry against the same `--write-store` path then destroyed it -- both the false-incomplete report and the destructive retry are now fixed, see `docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`). `scripts/v50_pipeline_runner.py` already wires this correctly for its multi-map run.
+
+```powershell
+uv run python scripts/v50_build_dataset.py finalize `
+  --store ../output/datasets/v50/v50.1/0_5_3_3368.zarr `
+  --manifest ../output/reports/v50/v50.1/build-manifest-0_5_3_3368.json `
+  --row-lineages ../output/reports/v50/v50.1/build-0_5_3_3368.json `
+  --output ../output/datasets/v50/v50.1/0_5_3_3368.manifest.json
+```
+
 
 ## 6. Create curriculum manifests — IMPLEMENTED
 

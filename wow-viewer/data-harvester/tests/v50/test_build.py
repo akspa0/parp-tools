@@ -116,7 +116,8 @@ def test_build_harvest_stream_command_embeds_every_caller_supplied_value(tmp_pat
         stream_profile="v22",
     )
 
-    assert str(project_path) in command
+    assert any(str(project_path) in item for item in command)
     assert str(tmp_path / "clients" / "0.5.3.3368") in command
     assert "Azeroth" in command
     assert "v22" in command
+

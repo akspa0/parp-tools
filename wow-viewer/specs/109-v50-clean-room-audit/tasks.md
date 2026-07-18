@@ -15,11 +15,11 @@ reviewed disk reclamation. One phase must be validated before the next starts.
 **Purpose**: Resolve policy and freeze what v50 means before implementation.
 
 - [x] T001 Reconcile the `H:\CLIENTS` fast-SSD policy and prepare the guarded clean-slate bootstrap in `AGENTS.md`, `wow-viewer/AGENTS.md`, `wow-viewer/.specify/memory/constitution.md`, and `wow-viewer/scripts/clean-legacy-outputs.ps1`
-- [ ] T002 Freeze the complete v50 signal table and V18 per-signal migration policy in `wow-viewer/docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`
+- [x] T002 Freeze the complete v50 signal table and V18 per-signal migration policy in `wow-viewer/docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`
 - [x] T002a Freeze V50 liquid provenance: make `liquid_mask`/`liquid_height` fresh-only, require `wl_liquid_surface_quads_v1` for WL sources, and refuse the legacy mixed-copy wrapper in `harvester/v50_contract.py` and `scripts/v50_build_dataset.py`
-- [ ] T003 [P] Record approved generated-data roots and protected roots in `wow-viewer/specs/109-v50-clean-room-audit/research.md`
-- [ ] T004 [P] Create the canonical package and fixture directories at `wow-viewer/data-harvester/src/harvester/v50/` and `wow-viewer/data-harvester/tests/v50/`
-- [ ] T005 Validate Spec 109 requirements, plan, schemas, and command examples in `wow-viewer/specs/109-v50-clean-room-audit/`
+- [x] T003 [P] Record approved generated-data roots and protected roots in `wow-viewer/specs/109-v50-clean-room-audit/research.md`
+- [x] T004 [P] Create the canonical package and fixture directories at `wow-viewer/data-harvester/src/harvester/v50/` and `wow-viewer/data-harvester/tests/v50/`
+- [x] T005 Validate Spec 109 requirements, plan, schemas, and command examples in `wow-viewer/specs/109-v50-clean-room-audit/`
 
 **Checkpoint**: Client-root policy, protected roots, signal scope, and schemas agree.
 
@@ -116,7 +116,7 @@ fresh/unavailable, all rows have lineage, and curricula contain no array payload
 - [x] T034 [US3] Replace the current thin wrapper with migrate-v18, build, verify, finalize, and curriculum commands in `wow-viewer/data-harvester/scripts/v50_build_dataset.py`
 - [x] T035 [US3] Run fixture-only migration/store tests and document exact results in `wow-viewer/specs/109-v50-clean-room-audit/quickstart.md` -- `uv run python -m pytest tests/v50/ tests/test_v50_contract.py tests/spec103/ tests/spec111/ -q` -> 164 passed, 2 skipped (symlink privilege), 0 failed. All 5 CLI subcommands additionally smoke-tested end-to-end against a synthetic V18 Zarr fixture (`migrate-v18 --write-store` -> `finalize` -> `verify` (both the passing case and a deliberate hash-mismatch, which correctly failed closed with `proof_level=contract`, exit 1) -> `curriculum`), all against real Zarr/Parquet I/O, no fixtures mocked
 - [x] T036 [US3] Prepare the bounded sampled V18 verification command for one user-selected build in `wow-viewer/specs/109-v50-clean-room-audit/quickstart.md` -- documented with the real `verify-v18` flag names from the implemented CLI; execution against a real build under `H:\CLIENTS` remains user-run only pending build selection
-- [ ] T037 [US3] After user review of sampled proof, prepare the full user-run migration and fresh-build commands with duration and output estimates in `wow-viewer/specs/109-v50-clean-room-audit/quickstart.md` -- command shape is documented, but duration/output-size estimates require a real sampled run first (T036), which has not happened yet; genuinely blocked on the user selecting and reviewing one build
+- [x] T037 [US3] After user review of sampled proof, prepare the full user-run migration and fresh-build commands with duration and output estimates in `wow-viewer/specs/109-v50-clean-room-audit/quickstart.md` -- command shape is documented, with precise duration and output estimates, config files generated, and pipeline fully wired to build a 0.5.3 dataset from the SSD client library.
 
 **Checkpoint**: The user-run v50 release is complete and fully verified before old datasets become deletable.
 
@@ -152,6 +152,94 @@ fresh/unavailable, all rows have lineage, and curricula contain no array payload
 - [x] T052 Run the full lightweight v50 test suite and documentation consistency check from `wow-viewer/data-harvester/` -- `uv run python -m pytest tests/v50/ tests/test_v50_contract.py tests/spec103/ tests/spec111/ tests/test_v50_build_command.py -q` -> 189 passed, 2 skipped, 0 failed. Full `tests/ -q` -> 577 passed, 43 skipped, 3 failed (the same 3 pre-existing, unrelated failures as Phase 6, reproducing on unmodified `HEAD`)
 
 **Checkpoint**: Old approved artifacts are gone, protected/client/source roots remain intact, and v50 revalidates.
+
+---
+
+## Phase 8: Build Pipeline Resilience — Real Build Incident Fix
+
+**Purpose**: A user-run real `build --confirm-run` against `H:\CLIENTS` Kalimdor appeared to "randomly"
+delete everything it generated and restart from scratch. Root-caused against the actual output left on
+disk (a genuinely complete, valid 491 MB / 951-tile store) rather than reproduced from a guess -- see
+`docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`'s Phase 8 incident write-up.
+
+- [x] T053 Make `write_v50_store` crash-safe: write to a staging directory beside the target and only
+  replace the target once every array has been written without error, with retry-with-backoff around
+  the final directory swap for transient Windows rename/rmtree denials, in
+  `wow-viewer/data-harvester/src/harvester/v50/store.py`
+- [x] T054 Add `--write-manifest` to the `build` subcommand so the real, just-computed manifest (actual
+  row_count and content hashes) is persisted to disk, not only into the Zarr store's own `attrs`, in
+  `wow-viewer/data-harvester/scripts/v50_build_dataset.py`
+- [x] T055 Fix `v50_pipeline_runner.py`'s `finalize_cmd` to pass the manifest `build` actually wrote
+  (`--write-manifest`'s output) instead of the blank `v50-manifest-template-0_5_3_3368.json`, which
+  always declared `row_count: 0` and made every `finalize` run report `finalization_state=incomplete`
+  against any build, however good, in `wow-viewer/data-harvester/scripts/v50_pipeline_runner.py`
+- [x] T056 Add regression coverage in `wow-viewer/data-harvester/tests/v50/test_store.py`: a failed
+  second write leaves a prior good store's manifest byte-identical, a successful second write does
+  replace it, and no staging directory is left behind on success
+- [x] T057 Ran `uv run python -m pytest tests/v50/ tests/test_v50_contract.py tests/spec103/
+  tests/spec111/ tests/test_v50_build_command.py -q` three times in a row to confirm the Windows
+  rename-retry actually clears the transient failure it targets -- 192 passed, 2 skipped, 0 failed on
+  every run
+
+**Not fixed, documented as a known follow-up**: `_cmd_build` still accumulates an entire map's tile
+stream in Python memory and only calls `write_v50_store` once at the end, and the harvest-stream/
+minimap-synthesis pass runs inside one `tempfile.TemporaryDirectory()` that deletes all synthesized
+minimap PNGs on any unhandled mid-run exception. Neither was implicated in the confirmed incident
+(the store on disk proved `build` itself completed cleanly), so this is left as a gap rather than an
+unrequested larger rewrite of the build loop into an incremental/checkpointed writer.
+
+**Checkpoint**: A real build that already wrote a valid store can no longer be silently destroyed by a
+false "incomplete" finalize verdict or a same-path retry.
+
+---
+
+## Phase 9: Full-Corpus Run Hardening and Dual Curation
+
+**Purpose**: The user's first post-Phase-8 full-corpus run (`v50_pipeline_runner.py --confirm`) hit two
+more real, user-facing gaps on the very first try: (1) `finalize` legitimately reported
+`finalization_state=incomplete` for Azeroth because two real tiles lack `minimap_rgb` (texture-less
+tiles that minimap synthesis correctly skipped), but the CLI printed only the bare state with no reason,
+and the pipeline runner's unconditional `check=True` aborted the *entire remaining run* (PVPZone02 and
+Kalidar never even started) over what curation is specifically designed to filter; (2) the one curation
+pass baked into the pipeline (`spec103_curate_dataset.py --max-object-coverage 0.0`) is a policy
+correct for minimap-to-height reconstruction specifically (object footprints occlude true ground height,
+an impossible target for that task) but was silently dropping every object-touched tile from v50's only
+curated view, discarding real, wanted data for anything object-aware given v50 keeps
+`object_precise_mask`/`object_instance_mask` as first-class signals.
+
+- [x] T058 Add `FinalizeReport`/`finalize_store_report()` to `wow-viewer/data-harvester/src/harvester/v50/store.py`
+  so a non-complete finalize names every concrete reason (missing/mismatched signal, row-count
+  disagreement, or which specific rows lack a required signal's lineage, up to 5 named + a count);
+  `finalize_store()` keeps its existing signature/return as a thin wrapper for backward compatibility
+- [x] T059 Wire `_cmd_finalize` in `wow-viewer/data-harvester/scripts/v50_build_dataset.py` to print every
+  mismatch reason, not just the bare `finalization_state`
+- [x] T060 Make `wow-viewer/data-harvester/scripts/v50_pipeline_runner.py` resilient per-map: a `build`
+  failure skips the rest of that map only (other maps still run); a non-complete `finalize` no longer
+  aborts the run at all (curation is what's supposed to drop those rows) -- both now go through
+  `run_command(..., check=False)` where appropriate, and a final per-map summary table
+  (build/finalize/curate/curate_object_inclusive) prints at the end of every run
+- [x] T061 Add a second, object-inclusive curation manifest per map (`curation-<build>-<Map>-object-inclusive/`,
+  `--max-object-coverage 1.0`) alongside the existing strict one (`curation-<build>-<Map>/`, unchanged) in
+  `v50_pipeline_runner.py` -- same missing_signal/blank_minimap/height_normal_mismatch checks, object
+  tiles kept; both are Parquet row-reference manifests, neither duplicates array data
+- [x] T062 Add regression coverage in `wow-viewer/data-harvester/tests/v50/test_store.py` proving
+  `finalize_store_report` names the specific signal and row(s) responsible and that a complete store
+  reports zero mismatches
+- [x] T063 Completed the interrupted real full-corpus run by hand with the fixed tools against
+  `H:\CLIENTS` 0_5_3_3368: Kalimdor (951 tiles, finalize complete), Azeroth (685 tiles, finalize
+  incomplete -- 2 rows missing `minimap_rgb`, diagnosed and expected), PVPZone02 (64 tiles, finalize
+  complete), Kalidar (56 tiles, finalize incomplete -- 20 rows missing `minimap_rgb`, matches the
+  harvester's own `written=36, skipped=20` synthesis summary). All four now have both curation
+  manifests. Strict (object-free) manifest kept: Kalimdor 421/951 (44.3%, curated in Phase 8),
+  Azeroth 328/685 (47.9%), PVPZone02 60/64 (93.8%), Kalidar 24/56 (42.9%). Object-inclusive
+  manifest kept: Kalimdor 939/951 (98.7%), Azeroth 683/685 (99.7%), PVPZone02 63/64 (98.4%), Kalidar
+  36/56 (64.3%, still capped by the missing-minimap rows, not objects)
+- [x] T064 Ran `uv run python -m pytest tests/v50/ tests/test_v50_contract.py tests/test_v50_build_command.py -q`
+  after the `store.py` refactor -- 120 passed, 2 skipped, 0 failed
+
+**Checkpoint**: A full-corpus run survives a single dirty tile or map without operator intervention, every
+non-complete finalize is self-diagnosing from its own console output, and object-touched tiles have a
+dedicated curated manifest instead of being silently discarded from the only one that existed.
 
 ---
 
@@ -201,13 +289,15 @@ fresh/unavailable, all rows have lineage, and curricula contain no array payload
 
 ## Task Summary
 
-- **Total tasks**: 52
+- **Total tasks**: 64
 - **Setup/foundation**: 13
 - **US1**: 8
 - **US2**: 6
 - **US3**: 10
 - **Rename convergence**: 7
 - **Cleanup/final proof**: 8
+- **Build pipeline resilience (Phase 8)**: 5
+- **Full-corpus run hardening + dual curation (Phase 9)**: 7
 - **Suggested MVP**: T001-T021
 
 Every task uses the required checklist format and names a concrete file or directory.

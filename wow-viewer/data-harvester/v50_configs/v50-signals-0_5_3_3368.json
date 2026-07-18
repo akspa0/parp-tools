@@ -1,0 +1,31 @@
+{
+  "signals": [
+    { "name": "height_257", "has_flag_name": "has_height_257" },
+    { "name": "normal_xyz", "has_flag_name": "has_normal_xyz" },
+    { "name": "normal_mask" },
+    { "name": "alpha_256", "has_flag_name": "has_alpha_256" },
+    { "name": "holes_16", "blacklisted": true, "blacklist_reason": "uncorrected hole masks (FR-017)" },
+    { "name": "liquid_mask", "has_flag_name": "has_liquid" },
+    { "name": "liquid_height", "has_flag_name": "has_liquid" },
+    { "name": "liquid_type_256" },
+    { "name": "mcnk_flags_16" },
+    { "name": "minimap_rgb" },
+    { "name": "minimap_rgb_1024" },
+    { "name": "mccv_rgb" },
+    { "name": "shadow_mask" },
+    { "name": "mcly_texture_ids" },
+    { "name": "mcly_layer_mask" },
+    { "name": "mcnr_mask_257" },
+    { "name": "ground_intent_height_257" },
+    { "name": "mcly_tileset_ids" },
+    { "name": "object_precise_mask" },
+    { "name": "object_instance_mask" },
+    { "name": "mddf_mask" },
+    { "name": "modf_mask" },
+    { "name": "object_filtered_mask" },
+    { "name": "model_focus_mask" },
+    { "name": "object_roof_mask" },
+    { "name": "object_roof_confidence" },
+    { "name": "model_above_terrain_mask" }
+  ]
+}

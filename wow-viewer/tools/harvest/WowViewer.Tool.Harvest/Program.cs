@@ -607,23 +607,19 @@ static class Program
         var compositionOptions = new TerrainMinimapCompositionOptions(
             resolution,
             lighting.Lighting);
-        var results = new List<SyntheticMinimapTileResult>();
-        var emittedTiles = new Dictionary<(int TileX, int TileY), string>();
-        var emittedLiquidTiles = new Dictionary<(int TileX, int TileY), string>();
+        var results = new ConcurrentBag<SyntheticMinimapTileResult>();
+        var emittedTiles = new ConcurrentDictionary<(int TileX, int TileY), string>();
+        var emittedLiquidTiles = new ConcurrentDictionary<(int TileX, int TileY), string>();
         string tilesDirectory = emitPerTile
             ? Path.Combine(outputDirectory, "tiles")
             : Path.Combine(outputDirectory, ".stitch-cache", $"{mapName}-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tilesDirectory);
 
-        int emittedCount = 0;
-        foreach (WdtTileCoordinate tile in occupiedTiles.OrderBy(tile => tile.TileY).ThenBy(tile => tile.TileX))
-        {
-            // A bounded visual proof needs an actual PNG. Decoded failures remain visible in the
-            // manifest, but must not consume the requested count before a synthesizable terrain
-            // tile has been reached.
-            if (emittedCount >= maxTiles)
-                break;
+        var sortedTiles = occupiedTiles.OrderBy(tile => tile.TileY).ThenBy(tile => tile.TileX).ToArray();
+        var tilesToProcess = sortedTiles.Take(maxTiles).ToArray();
 
+        System.Threading.Tasks.Parallel.ForEach(tilesToProcess, tile =>
+        {
             string stage = "decoding terrain";
             try
             {
@@ -639,7 +635,7 @@ static class Program
                 if (pack is null)
                 {
                     results.Add(new SyntheticMinimapTileResult(tile.TileX, tile.TileY, "skipped", null, 0, "tile data could not be decoded"));
-                    continue;
+                    return;
                 }
 
                 stage = "decoding terrain textures";
@@ -647,7 +643,7 @@ static class Program
                 if (textures.Count == 0)
                 {
                     results.Add(new SyntheticMinimapTileResult(tile.TileX, tile.TileY, "skipped", null, 0, "no referenced BLP texture could be decoded"));
-                    continue;
+                    return;
                 }
 
                 string tilePath = Path.Combine(tilesDirectory, $"{mapName}_{tile.TileX:D2}_{tile.TileY:D2}_synthesized.png");
@@ -674,7 +670,6 @@ static class Program
                         .ToArray(),
                     emitPerTile ? liquidTilePath : null,
                     liquidPixelCount));
-                emittedCount++;
                 Console.WriteLine($"Synthetic minimap tile: {tile.TileX:D2},{tile.TileY:D2} -> {tilePath} + {liquidTilePath} ({liquidPixelCount} liquid pixels)");
             }
             catch (Exception ex)
@@ -683,7 +678,8 @@ static class Program
                 results.Add(new SyntheticMinimapTileResult(tile.TileX, tile.TileY, "failed", null, 0, detail));
                 Console.Error.WriteLine($"Synthetic minimap tile {tile.TileX:D2},{tile.TileY:D2} failed: {detail}");
             }
-        }
+        });
+
 
         TerrainMinimapStitchResult? stitched = null;
         TerrainMinimapStitchResult? liquidStitched = null;
@@ -724,7 +720,8 @@ static class Program
             TerrainMinimapLiquidCompositor.RenderProfile,
             stitched,
             liquidStitched,
-            results);
+            results.OrderBy(static r => r.TileY).ThenBy(static r => r.TileX).ToArray());
+
         string manifestPath = Path.Combine(outputDirectory, "synthesis-manifest.json");
         File.WriteAllText(
             manifestPath,
