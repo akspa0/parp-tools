@@ -520,19 +520,26 @@ uv run python scripts/v50_build_training_curriculum.py `
   --store ../output/datasets/v50/v50.1/0_5_3_3368-Azeroth.zarr   --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-Azeroth `
   --store ../output/datasets/v50/v50.1/0_5_3_3368-PVPZone02.zarr --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-PVPZone02 `
   --store ../output/datasets/v50/v50.1/0_5_3_3368-Kalidar.zarr   --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-Kalidar `
-  --output ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-strict_v1.zarr `
-  --val-map PVPZone02
+  --output ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-strict_withinmap_v2.zarr `
+  --val-fraction 0.15
 ```
 
-Selection is manifest-driven (only reviewed `keep` rows are copied, bit-for-bit); the split is a
-whole-map holdout, so no map leaks across train/val. Then train stage 1 (the small RGB→WDL prior;
-CUDA required, minutes-scale on a desktop GPU):
+Selection is manifest-driven (only reviewed `keep` rows are copied, bit-for-bit). **Use
+`--val-fraction` (within-map stratified holdout), not `--val-map`, for standard training.** The WDL
+target is absolute elevation on a global scale and real 0.5.3 maps sit at very different altitudes
+(measured on this corpus: PVPZone02 mean +381, Kalimdor +32, Kalidar −7, Azeroth −150), so a whole
+held-out map mostly measures an altitude offset the model has never seen — a real run against
+`--val-map PVPZone02` had its *best* val loss at epoch 1 and got monotonically worse as the model
+learned the training maps' true elevations. `--val-map` remains available strictly for deliberate
+cross-map generalization experiments, knowing that is what it measures.
+
+Then train stage 1 (the small RGB→WDL prior; CUDA required, minutes-scale on a desktop GPU):
 
 ```powershell
 uv run python scripts/v50_train_wdl_prior.py `
-  --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-strict_v1.zarr `
+  --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-strict_withinmap_v2.zarr `
   --val-key split --val-value val `
-  --output ../output/v50/v50.1/wdl_prior_strict_v1 `
+  --output ../output/v50/v50.1/wdl_prior_strict_v2 `
   --epochs 100 --batch 32 --workers 4 --patience 15
 ```
 

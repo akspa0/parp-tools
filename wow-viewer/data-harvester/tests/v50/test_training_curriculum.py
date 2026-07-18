@@ -91,6 +91,46 @@ def test_builder_output_passes_the_trainer_release_gate_and_preserves_bytes(tmp_
     np.testing.assert_array_equal(group["height_257"][0], source["height_257"][0])
 
 
+def test_stratified_split_holds_out_rows_from_every_map_deterministically(tmp_path: Path):
+    # The standard regime: the WDL target is absolute elevation, so val tiles must come from the
+    # same maps as train -- a whole-map holdout measures an unseen altitude offset instead (this
+    # was observed on the real v50.1 corpus: val loss *worsened* as training progressed).
+    store_a, store_b = tmp_path / "A.zarr", tmp_path / "B.zarr"
+    manifest_a, manifest_b = tmp_path / "curation-A", tmp_path / "curation-B"
+    _write_complete_store(store_a, "MapA", rows=10)
+    _write_complete_store(store_b, "MapB", rows=10)
+    _write_manifest(manifest_a, "MapA", keeps=[True] * 10)
+    _write_manifest(manifest_b, "MapB", keeps=[True] * 10)
+
+    first = build_training_curriculum(
+        stores=[store_a, store_b], curation_manifests=[manifest_a, manifest_b],
+        output=tmp_path / "s1.zarr", val_map=None, val_fraction=0.2, release="v50.1",
+    )
+    second = build_training_curriculum(
+        stores=[store_a, store_b], curation_manifests=[manifest_a, manifest_b],
+        output=tmp_path / "s2.zarr", val_map=None, val_fraction=0.2, release="v50.1",
+    )
+
+    assert first["splits"] == {"train": 16, "val": 4}
+    assert first["val_rows_per_map"] == {"MapA": 2, "MapB": 2}  # every map contributes val rows
+    first_index = pq.read_table(tmp_path / "s1.zarr" / "index.parquet").to_pylist()
+    second_index = pq.read_table(tmp_path / "s2.zarr" / "index.parquet").to_pylist()
+    assert [row["split"] for row in first_index] == [row["split"] for row in second_index]
+
+
+def test_split_mode_selection_is_exactly_one_of_val_map_or_val_fraction(tmp_path: Path):
+    fixture = _build_two_map_fixture(tmp_path)
+    with pytest.raises(CurriculumBuildError, match="exactly one"):
+        build_training_curriculum(stores=fixture["stores"], curation_manifests=fixture["manifests"],
+                                  output=tmp_path / "x.zarr", val_map="MapB", val_fraction=0.2, release="v50.1")
+    with pytest.raises(CurriculumBuildError, match="exactly one"):
+        build_training_curriculum(stores=fixture["stores"], curation_manifests=fixture["manifests"],
+                                  output=tmp_path / "y.zarr", val_map=None, val_fraction=None, release="v50.1")
+    with pytest.raises(CurriculumBuildError, match=r"in \(0, 1\)"):
+        build_training_curriculum(stores=fixture["stores"], curation_manifests=fixture["manifests"],
+                                  output=tmp_path / "z.zarr", val_map=None, val_fraction=1.5, release="v50.1")
+
+
 def test_builder_refuses_overwrite_all_val_and_mismatched_pairing(tmp_path: Path):
     fixture = _build_two_map_fixture(tmp_path)
     output = tmp_path / "curriculum.zarr"
