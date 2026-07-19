@@ -28,6 +28,15 @@ class FakePatchBackbone(nn.Module):
         return SimpleNamespace(last_hidden_state=torch.cat((cls, patches), dim=1))
 
 
+class ConstantPatchBackbone(FakePatchBackbone):
+    def forward(self, *, pixel_values: torch.Tensor):
+        count = (pixel_values.shape[-2] // self.config.patch_size) * (
+            pixel_values.shape[-1] // self.config.patch_size
+        )
+        encoded = pixel_values.new_zeros(pixel_values.shape[0], count + 1, self.config.hidden_size)
+        return SimpleNamespace(last_hidden_state=encoded)
+
+
 def test_pinned_student_identity_is_full_safe_and_single_output() -> None:
     identity = student_identity()
     assert len(identity.revision) == 40
@@ -56,6 +65,21 @@ def test_frozen_backbone_stays_eval_and_only_decoder_is_trainable() -> None:
     assert not any(parameter.requires_grad for parameter in model.backbone.parameters())
     assert model.trainable_parameter_count() > 0
     assert model.trainable_parameter_count() < model.total_parameter_count()
+
+
+def test_full_resolution_rgb_detail_path_survives_constant_patch_features() -> None:
+    torch.manual_seed(114)
+    model = UniversalReliefNet(ConstantPatchBackbone(), freeze_backbone=True).eval()
+    blank = torch.zeros(1, 3, INPUT_TILE_SIZE, INPUT_TILE_SIZE)
+    detailed = blank.clone()
+    detailed[:, 0, ::2, ::2] = 1.0
+
+    with torch.no_grad():
+        blank_relief = model(blank)
+        detailed_relief = model(detailed)
+
+    assert not torch.allclose(blank_relief, detailed_relief)
+    assert any(parameter.requires_grad for parameter in model.local_rgb.parameters())
 
 
 def test_unfrozen_ablation_allows_backbone_gradients() -> None:

@@ -10,7 +10,7 @@ from typing import Any
 import torch
 from torch import nn
 
-MODEL_ARCHITECTURE_ID = "dinov2_small_relief_v1"
+MODEL_ARCHITECTURE_ID = "dinov2_small_rgb_detail_relief_v1"
 OUTPUT_SIGNAL = "relative_relief"
 INPUT_TILE_SIZE = 224
 STUDENT_HUB_ID = "facebook/dinov2-small"
@@ -119,6 +119,8 @@ class UniversalReliefNet(nn.Module):
                 _decoder_block(64, 32),
             ]
         )
+        self.local_rgb = _decoder_block(3, 32)
+        self.fusion = _decoder_block(64, 32)
         self.head = nn.Conv2d(32, 1, kernel_size=3, padding=1)
         self.register_buffer(
             "image_mean",
@@ -172,6 +174,8 @@ class UniversalReliefNet(nn.Module):
         decoded = nn.functional.interpolate(
             decoded, size=(height, width), mode="bilinear", align_corners=False
         )
+        local = self.local_rgb(rgb)
+        decoded = self.fusion(torch.cat((decoded, local), dim=1))
         return torch.sigmoid(self.head(decoded)).squeeze(1)
 
     def trainable_parameter_count(self) -> int:
