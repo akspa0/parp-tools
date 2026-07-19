@@ -59,7 +59,10 @@ public static class TerrainMinimapCompositor
             throw new InvalidDataException("Synthetic minimap alpha dimensions must be positive.");
 
         var image = new Image<Rgba32>(options.Resolution, options.Resolution);
-        var textureSampler = new TerrainTextureSampler(texturesById);
+        var textureSampler = new TerrainTextureSampler(
+            texturesById,
+            options.Resolution,
+            16f * TerrainMinimapCompositionOptions.TextureRepeatsPerChunk);
 
         for (int y = 0; y < options.Resolution; y++)
         {
@@ -71,6 +74,18 @@ public static class TerrainMinimapCompositor
                 int sourceX = ScaleCoordinate(x, options.Resolution, alphaWidth);
                 int chunkX = Math.Min(textureIds.GetLength(1) - 1, sourceX * textureIds.GetLength(1) / alphaWidth);
 
+                // Detail mode (Spec 113): sample real texels at the production terrain UV.
+                // TerrainMeshBuilder supplies 0..1 per chunk and both production terrain shaders
+                // multiply that by 8, so the diffuse material repeats eight times per chunk.
+                float detailU = 0f, detailV = 0f;
+                if (options.DetailTexels)
+                {
+                    float chunkPosX = (x + 0.5f) / options.Resolution * 16f * TerrainMinimapCompositionOptions.TextureRepeatsPerChunk;
+                    float chunkPosY = (y + 0.5f) / options.Resolution * 16f * TerrainMinimapCompositionOptions.TextureRepeatsPerChunk;
+                    detailU = chunkPosX - MathF.Floor(chunkPosX);
+                    detailV = chunkPosY - MathF.Floor(chunkPosY);
+                }
+
                 Vector3 blended = BlendLayers(
                     alpha,
                     textureIds,
@@ -79,7 +94,10 @@ public static class TerrainMinimapCompositor
                     sourceX,
                     sourceY,
                     chunkX,
-                    chunkY);
+                    chunkY,
+                    options.DetailTexels,
+                    detailU,
+                    detailV);
 
                 float lambert = ResolveInterpolatedLambert(
                     pack,
@@ -128,7 +146,10 @@ public static class TerrainMinimapCompositor
         int sourceX,
         int sourceY,
         int chunkX,
-        int chunkY)
+        int chunkY,
+        bool detailTexels = false,
+        float detailU = 0f,
+        float detailV = 0f)
     {
         Vector3 color = Vector3.Zero;
         bool hasColor = false;
@@ -149,7 +170,10 @@ public static class TerrainMinimapCompositor
             }
 
             int textureId = textureIds[chunkY, chunkX, layer];
-            if (textureId < 0 || !textureSampler.TrySample(textureId, out Vector3 layerColor))
+            bool sampled = detailTexels
+                ? textureSampler.TrySampleTexel(textureId, detailU, detailV, out Vector3 layerColor)
+                : textureSampler.TrySample(textureId, out layerColor);
+            if (textureId < 0 || !sampled)
                 continue;
 
             if (layer == 0 || !hasColor)
@@ -185,10 +209,18 @@ public static class TerrainMinimapCompositor
     {
         private readonly IReadOnlyDictionary<int, byte[,,]> _texturesById;
         private readonly Dictionary<int, Vector3> _materialColors = [];
+        private readonly Dictionary<int, IReadOnlyList<byte[,,]>> _detailMipChains = [];
+        private readonly int _outputResolution;
+        private readonly float _textureRepeatsAcrossTile;
 
-        public TerrainTextureSampler(IReadOnlyDictionary<int, byte[,,]> texturesById)
+        public TerrainTextureSampler(
+            IReadOnlyDictionary<int, byte[,,]> texturesById,
+            int outputResolution,
+            float textureRepeatsAcrossTile)
         {
             _texturesById = texturesById;
+            _outputResolution = outputResolution;
+            _textureRepeatsAcrossTile = textureRepeatsAcrossTile;
         }
 
         public bool TrySample(int textureId, out Vector3 color)
@@ -212,6 +244,111 @@ public static class TerrainMinimapCompositor
                 _materialColors[textureId] = color;
             }
 
+            return true;
+        }
+
+        /// <summary>
+        /// Spec 113 detail mode: the real BLP texel at (u, v) in [0,1)², bilinear with wraparound
+        /// (terrain textures tile). A deterministic box-filtered mip is selected from the decoded
+        /// pixels for the output footprint; sampling the full-resolution base texture after an 8x
+        /// minification would alias and recreate the exact moire this feature must avoid. Falls
+        /// back to the same decodability rules as
+        /// <see cref="TrySample"/> — a missing/undecodable texture is a miss, never a fabricated
+        /// texel.
+        /// </summary>
+        public bool TrySampleTexel(int textureId, float u, float v, out Vector3 color)
+        {
+            color = Vector3.Zero;
+            if (!_texturesById.TryGetValue(textureId, out byte[,,]? texture)
+                || texture.GetLength(0) <= 0
+                || texture.GetLength(1) <= 0
+                || texture.GetLength(2) < 3)
+            {
+                return false;
+            }
+
+            IReadOnlyList<byte[,,]> mipChain = GetOrBuildMipChain(textureId, texture);
+            float texelFootprint = MathF.Max(texture.GetLength(0), texture.GetLength(1))
+                * _textureRepeatsAcrossTile
+                / _outputResolution;
+            int mipLevel = texelFootprint <= 1f
+                ? 0
+                : Math.Clamp((int)MathF.Floor(MathF.Log2(texelFootprint)), 0, mipChain.Count - 1);
+            return TrySampleBilinear(mipChain[mipLevel], u, v, out color);
+        }
+
+        private IReadOnlyList<byte[,,]> GetOrBuildMipChain(int textureId, byte[,,] texture)
+        {
+            if (_detailMipChains.TryGetValue(textureId, out IReadOnlyList<byte[,,]>? cached))
+                return cached;
+
+            var levels = new List<byte[,,]> { texture };
+            byte[,,] current = texture;
+            while (current.GetLength(0) > 1 || current.GetLength(1) > 1)
+            {
+                current = BuildNextMip(current);
+                levels.Add(current);
+            }
+
+            _detailMipChains[textureId] = levels;
+            return levels;
+        }
+
+        private static byte[,,] BuildNextMip(byte[,,] source)
+        {
+            int sourceHeight = source.GetLength(0);
+            int sourceWidth = source.GetLength(1);
+            int targetHeight = Math.Max(1, (sourceHeight + 1) / 2);
+            int targetWidth = Math.Max(1, (sourceWidth + 1) / 2);
+            var target = new byte[targetHeight, targetWidth, 3];
+            for (int y = 0; y < targetHeight; y++)
+            {
+                int y0 = Math.Min(sourceHeight - 1, y * 2);
+                int y1 = (y0 + 1) % sourceHeight;
+                for (int x = 0; x < targetWidth; x++)
+                {
+                    int x0 = Math.Min(sourceWidth - 1, x * 2);
+                    int x1 = (x0 + 1) % sourceWidth;
+                    for (int channel = 0; channel < 3; channel++)
+                    {
+                        int sum = source[y0, x0, channel]
+                            + source[y0, x1, channel]
+                            + source[y1, x0, channel]
+                            + source[y1, x1, channel];
+                        target[y, x, channel] = (byte)((sum + 2) / 4);
+                    }
+                }
+            }
+
+            return target;
+        }
+
+        private static bool TrySampleBilinear(byte[,,] texture, float u, float v, out Vector3 color)
+        {
+            color = Vector3.Zero;
+            int height = texture.GetLength(0);
+            int width = texture.GetLength(1);
+            float px = u * width - 0.5f;
+            float py = v * height - 0.5f;
+            int x0 = (int)MathF.Floor(px);
+            int y0 = (int)MathF.Floor(py);
+            float fx = px - x0;
+            float fy = py - y0;
+            int x1 = x0 + 1;
+            int y1 = y0 + 1;
+            // wraparound (tiling texture)
+            x0 = ((x0 % width) + width) % width;
+            x1 = ((x1 % width) + width) % width;
+            y0 = ((y0 % height) + height) % height;
+            y1 = ((y1 % height) + height) % height;
+
+            Vector3 c00 = new(texture[y0, x0, 0], texture[y0, x0, 1], texture[y0, x0, 2]);
+            Vector3 c10 = new(texture[y0, x1, 0], texture[y0, x1, 1], texture[y0, x1, 2]);
+            Vector3 c01 = new(texture[y1, x0, 0], texture[y1, x0, 1], texture[y1, x0, 2]);
+            Vector3 c11 = new(texture[y1, x1, 0], texture[y1, x1, 1], texture[y1, x1, 2]);
+            Vector3 top = Vector3.Lerp(c00, c10, fx);
+            Vector3 bottom = Vector3.Lerp(c01, c11, fx);
+            color = Vector3.Lerp(top, bottom, fy) / 255f;
             return true;
         }
 
@@ -329,9 +466,16 @@ public static class TerrainMinimapCompositor
             return Vector3.UnitZ;
         }
 
-        Vector3 normal = new(normals[y, x, 0], normals[y, x, 1], normals[y, x, 2]);
-        return normal.LengthSquared() > 1e-10f && float.IsFinite(normal.X) && float.IsFinite(normal.Y) && float.IsFinite(normal.Z)
-            ? Vector3.Normalize(normal)
+        Vector3 adtNormal = new(normals[y, x, 0], normals[y, x, 1], normals[y, x, 2]);
+        // McnrNormalXyz is stored in ADT grid axes, while TerrainMinimapLighting.LightDirection is
+        // expressed in renderer/world axes. Terrain grid X advances along -world Y and grid Y
+        // advances along -world X. Dotting these spaces directly reverses the horizontal hillshade
+        // for the fixed diagonal sun; convert through the shared numeric terrain contract first.
+        return adtNormal.LengthSquared() > 1e-10f
+            && float.IsFinite(adtNormal.X)
+            && float.IsFinite(adtNormal.Y)
+            && float.IsFinite(adtNormal.Z)
+            ? TerrainNormalGeometry.TransformAdtNormalToRenderer(adtNormal)
             : Vector3.UnitZ;
     }
 
@@ -389,9 +533,8 @@ public sealed record TerrainMinimapLighting(
         0f);
 
     /// <summary>
-    /// The synthesized-minimap lighting contract: achromatic sunlight from the raster's top edge.
-    /// LIT tracks are world/viewer data, not a source of minimap colour or direction. The modest
-    /// achromatic ambient term keeps terrain-readable slopes without tinting the materials.
+    /// Achromatic diagnostic light using the shared solar direction. The modest ambient term keeps
+    /// terrain-readable slopes without tinting its materials.
     /// </summary>
     public static TerrainMinimapLighting CreateWhiteTopEdge(float gameTime)
     {
@@ -401,16 +544,36 @@ public sealed record TerrainMinimapLighting(
             new Vector3(0.25f),
             0f);
     }
+
+    /// <summary>
+    /// Production synthetic-minimap light: one fixed noon, achromatic global light. Authored
+    /// minimaps are not runtime world renders, so map LIT data and local/exact-build Light DBC
+    /// profiles must not color-grade this composition.
+    /// </summary>
+    public static TerrainMinimapLighting CreateNoonWhiteGlobal() => CreateWhiteTopEdge(0.5f);
 }
 
 /// <summary>Controls deterministic terrain minimap composition without carrying client-source policy.</summary>
+/// <remarks>
+/// <see cref="DetailTexels"/> (Spec 113 US1): when true, layer colors come from real BLP texels at
+/// the terrain UV (bilinear) instead of each texture's phase-independent average color. The
+/// material-average default exists because texel sampling while downsampling hard to 256px produced
+/// moire; at high output resolutions (1024+) the downsample is gentle and real texel detail becomes
+/// viable — the premise of the minimap super-resolution HR target. The terrain UV convention
+/// (eight texture repeats per chunk) matches the production renderer: TerrainMeshBuilder emits
+/// 0..1 chunk UVs and the terrain shaders sample <c>vTexCoord * 8.0</c>.
+/// </remarks>
 public sealed record TerrainMinimapCompositionOptions(
     int Resolution,
-    TerrainMinimapLighting Lighting)
+    TerrainMinimapLighting Lighting,
+    bool DetailTexels = false)
 {
     public static TerrainMinimapCompositionOptions Default { get; } = new(
         TerrainMinimapCompositor.DefaultResolution,
         TerrainMinimapLighting.Neutral);
+
+    /// <summary>Diffuse texture repeats per chunk edge, matching both production terrain shaders.</summary>
+    public const float TextureRepeatsPerChunk = 8f;
 
     internal void Validate()
     {

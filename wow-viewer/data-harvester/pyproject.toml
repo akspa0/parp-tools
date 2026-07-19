@@ -21,6 +21,8 @@ dependencies = [
     "pyarrow>=24.0.0",
     "scipy>=1.12",
     "pillow>=10.0",
+    "spandrel>=0.4.2",
+    "lpips>=0.1.4",
 ]
 
 [project.optional-dependencies]

@@ -7,8 +7,11 @@ Current state first. Old long-form lane history trimmed out.
 - **Spec 109 `109-v50-clean-room-audit` — active dataset lane.** V50 is the canonical dataset
   target for new work: fail-closed trust boundary, complete per-build Zarr stores with real
   content-hash identity, immutable curriculum manifests. See "V50 quickstart" below.
-- Spec 089 `089-dav2-height-predictor` — active model lane (currently trains against the older V22
-  contract; migrating to V50 is tracked in Spec 109/111, not yet complete).
+- **Spec 112 `112-v50-height-model` — active height-model lane.** Dual-source authored/synthetic
+  curriculum, Kalimdor+Azeroth only, one altitude-invariant relative-height target.
+- **Spec 113 `113-minimap-superres` — gated SR lane.** Mip-filtered detail HR, same-row datastore
+  visual proof, guarded terrain-only cross-domain pairs, then ComfyUI-native RealPLKSR ×4.
+- Spec 089 `089-dav2-height-predictor` — legacy V22 model lane; not the current V50 route.
 - Spec 088 `088-v22-enrichment-from-v18` — V22 dataset contract feeding 089; legacy relative to V50,
   kept live only until 089's training path moves over.
 
@@ -33,10 +36,13 @@ Omit `--confirm` to dry-run first (prints every command without launching anythi
 `--sample N` to cap tiles per map for a smoke test. A single dirty tile or one map's failure no
 longer aborts the whole run — the script prints a per-map summary at the end.
 
-To train on the corpus, first bridge the per-map complete stores into the trainer-facing curriculum
-store (`scripts/v50_build_training_curriculum.py` — manifest-driven keep-row selection, whole-map
-holdout split), then run `scripts/v50_train_wdl_prior.py` / `scripts/v50_train_terrain.py` against
-it; the trainers refuse complete stores directly by release-gate design. See
+The current height path uses the already-built
+`curriculum-0_5_3_3368-dual_v1.zarr` (2,990 authored/synthetic rows, deterministic within-map
+split) and `scripts/v50_train_height_relative.py`. The absolute-WDL prior/refiner commands are the
+rejected legacy lane. Spec 113's RealPLKSR path is blocked on corrected-light comparison and fresh
+synthetic-RGB visual proof; raw full-frame NCC is diagnostic because authored objects are absent
+from the terrain-only target.
+See
 [`../docs/dataset-preparation-userguide.md`](../docs/dataset-preparation-userguide.md) §8.4.
 
 Full detail, per-map manual commands, and the

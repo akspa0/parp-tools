@@ -16,6 +16,8 @@ Requires-Dist: triton-windows>=3.7
 Requires-Dist: pyarrow>=24.0.0
 Requires-Dist: scipy>=1.12
 Requires-Dist: pillow>=10.0
+Requires-Dist: spandrel>=0.4.2
+Requires-Dist: lpips>=0.1.4
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
 Requires-Dist: ruff>=0.8; extra == "dev"
@@ -26,14 +28,45 @@ Current state first. Old long-form lane history trimmed out.
 
 ## Current active lanes
 
-- Spec 089 `089-dav2-height-predictor` — active model lane.
-- Spec 088 `088-v22-enrichment-from-v18` — active V22 dataset contract feeding 089.
+- **Spec 109 `109-v50-clean-room-audit` — active dataset lane.** V50 is the canonical dataset
+  target for new work: fail-closed trust boundary, complete per-build Zarr stores with real
+  content-hash identity, immutable curriculum manifests. See "V50 quickstart" below.
+- Spec 089 `089-dav2-height-predictor` — active model lane (currently trains against the older V22
+  contract; migrating to V50 is tracked in Spec 109/111, not yet complete).
+- Spec 088 `088-v22-enrichment-from-v18` — V22 dataset contract feeding 089; legacy relative to V50,
+  kept live only until 089's training path moves over.
 
 Background only:
 
 - Spec 047 — focused V18 operator path.
 - Spec 076 / 077 — paused/background research surfaces.
 - Spec 074 / 075 / 066 / 067 / 068 — historical only.
+
+## V50 quickstart
+
+Build the full V50 clean-room dataset corpus for the configured `0_5_3_3368` client (all four
+terrain-bearing world maps: Kalimdor, Azeroth, PVPZone02, Kalidar — build, finalize, and two
+curation passes each: strict object-free and object-inclusive; ~15-20 minutes total):
+
+```powershell
+cd wow-viewer/data-harvester
+uv run python scripts/v50_pipeline_runner.py --confirm
+```
+
+Omit `--confirm` to dry-run first (prints every command without launching anything); add
+`--sample N` to cap tiles per map for a smoke test. A single dirty tile or one map's failure no
+longer aborts the whole run — the script prints a per-map summary at the end.
+
+To train on the corpus, first bridge the per-map complete stores into the trainer-facing curriculum
+store (`scripts/v50_build_training_curriculum.py` — manifest-driven keep-row selection, whole-map
+holdout split), then run `scripts/v50_train_wdl_prior.py` / `scripts/v50_train_terrain.py` against
+it; the trainers refuse complete stores directly by release-gate design. See
+[`../docs/dataset-preparation-userguide.md`](../docs/dataset-preparation-userguide.md) §8.4.
+
+Full detail, per-map manual commands, and the
+current one-client-build scope limitation are in
+[`../docs/dataset-preparation-userguide.md`](../docs/dataset-preparation-userguide.md#8-v50-clean-room-dataset-current-canonical-lane)
+and [`../specs/109-v50-clean-room-audit/quickstart.md`](../specs/109-v50-clean-room-audit/quickstart.md).
 
 ## Environment
 

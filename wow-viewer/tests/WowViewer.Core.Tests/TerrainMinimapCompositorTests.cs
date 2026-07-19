@@ -3,6 +3,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
+using WowViewer.Core.Terrain;
 
 namespace WowViewer.Core.Tests;
 
@@ -18,10 +19,9 @@ public sealed class TerrainMinimapCompositorTests
     {
         TerrainMinimapLighting lighting = TerrainMinimapLighting.CreateWhiteTopEdge(gameTime);
 
-        // Raw MCNR/MCVT world axes are +X = North, +Y = West, +Z = Up (AdtTensorPackBuilder decodes
-        // MCNR with no axis swap; TerrainMeshBuilder derives vertex world-X from the row/tileY-indexed
-        // quantities that decrease southward). Positive terrain X is therefore raster north; a
-        // negative-X source inverts the terrain hillshade. The bearing is fixed north-west at every
+        // The lighting vector is in renderer/world axes (+X = North, +Y = West, +Z = Up). Raw MCNR
+        // normals are ADT-grid vectors and the compositor converts them through
+        // TerrainNormalGeometry before N.L. The bearing is fixed north-west at every
         // time of day (matching the traced constant-azimuth native ray) instead of sweeping through
         // a zero-horizontal, straight-overhead sun at solar noon.
         Assert.Equal(Vector3.One, lighting.DirectionalColor);
@@ -31,6 +31,65 @@ public sealed class TerrainMinimapCompositorTests
         Assert.True(lighting.LightDirection.Z > 0f);
         Assert.True(lighting.LightDirection.X > 0f);
         Assert.True(lighting.LightDirection.Y > 0f);
+    }
+
+    [Fact]
+    public void NoonWhiteGlobal_IsFixedAchromaticAndDoesNotCrushFlatTerrain()
+    {
+        TerrainMinimapLighting lighting = TerrainMinimapLighting.CreateNoonWhiteGlobal();
+
+        Assert.Equal(TerrainSolarDirection.Evaluate(0.5f), lighting.LightDirection);
+        Assert.Equal(Vector3.One, lighting.DirectionalColor);
+        Assert.Equal(new Vector3(0.25f), lighting.AmbientColor);
+
+        Vector3 flatTerrainLight = TerrainLightingMath.Evaluate(
+            Vector3.UnitZ,
+            lighting.LightDirection,
+            lighting.DirectionalColor,
+            lighting.AmbientColor,
+            shadowMask: 0f);
+        Assert.True(flatTerrainLight.X > 1f);
+        Assert.Equal(flatTerrainLight.X, flatTerrainLight.Y, 6);
+        Assert.Equal(flatTerrainLight.X, flatTerrainLight.Z, 6);
+    }
+
+    [Fact]
+    public void Compose_TransformsAdtMcnrNormalsToWorldBeforeApplyingSunlight()
+    {
+        var normals = new float[3, 3, 3];
+        var normalMask = new bool[3, 3];
+        float component = 1f / MathF.Sqrt(2f);
+        for (int y = 0; y < 3; y++)
+        {
+            for (int x = 0; x < 3; x++)
+            {
+                if ((x & 1) != (y & 1))
+                    continue;
+
+                // ADT (0,-Y,+Z) transforms to renderer/world (+X,0,+Z).
+                normals[y, x, 1] = -component;
+                normals[y, x, 2] = component;
+                normalMask[y, x] = true;
+            }
+        }
+
+        TerrainTileTensorPack pack = BuildPack(
+            layerOneAlpha: 0f,
+            normals: normals,
+            normalMask: normalMask);
+        var lighting = new TerrainMinimapLighting(
+            Vector3.Normalize(new Vector3(1f, 0f, 1f)),
+            Vector3.One,
+            Vector3.Zero,
+            McshShadowStrength: 0f);
+
+        using Image<Rgba32> image = TerrainMinimapCompositor.Compose(
+            pack,
+            new Dictionary<int, byte[,,]> { [0] = SolidTexture(255, 255, 255) },
+            new TerrainMinimapCompositionOptions(1, lighting));
+
+        // Correct world-space N.L is 1.0. The old raw-ADT/world dot was 0.5 and rendered gray.
+        Assert.Equal(new Rgba32(255, 255, 255, 255), image[0, 0]);
     }
 
     [Fact]

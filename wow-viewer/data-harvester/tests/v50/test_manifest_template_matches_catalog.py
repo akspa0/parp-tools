@@ -41,6 +41,7 @@ def test_template_for_053_omits_dropped_and_era_impossible_signals():
     by_name = {s.name: s for s in manifest.signals}
     assert by_name["height_257"].required and by_name["height_257"].row_shape == (257, 257)
     assert by_name["minimap_rgb"].authoritative_source == "synthetic-minimap"
+    assert by_name["minimap_rgb"].required is False
     assert by_name["mcnk_flags_16"].authoritative_source == "harvest-stream"
 
 
@@ -72,6 +73,13 @@ def test_generation_is_deterministic():
     first = build_manifest_template(_catalog(), build_id="0_5_3_3368", release="v50.1")
     second = build_manifest_template(_catalog(), build_id="0_5_3_3368", release="v50.1")
     assert first.to_dict() == second.to_dict()
+
+
+def test_committed_053_template_matches_the_frozen_catalog():
+    expected = build_manifest_template(_catalog(), build_id="0_5_3_3368", release="v50.1")
+    committed_path = Path(__file__).parents[2] / "v50_configs" / "v50-manifest-template-0_5_3_3368.json"
+
+    assert json.loads(committed_path.read_text(encoding="utf-8")) == expected.to_dict()
 
 
 def test_signals_config_carries_blacklist_through():

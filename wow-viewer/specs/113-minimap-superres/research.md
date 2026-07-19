@@ -1,4 +1,4 @@
-# Phase 0 Research: Minimap Super-Resolution (Real-ESRGAN)
+# Phase 0 Research: ComfyUI-Native Minimap Super-Resolution
 
 ## Decision 1 — the detail render is a new sampling mode inside the existing compositor, not a new renderer
 
@@ -42,8 +42,9 @@ cross-correlation / phase correlation) under each of the 8 dihedral transforms (
 rotations, 4 flips/transposes) plus a small translational search. It reports the best transform and
 its residual error per tile and in aggregate. The **gate**: either identity wins within tolerance,
 or one single transform wins consistently across all sampled tiles (a fixed correction we then apply
-to the render or the pairing). A per-tile-varying "best" transform means the images are not a
-consistent SR pair and the spec halts (spec Edge Case + SC-002).
+to the render or the pairing). A per-tile-varying "best" transform blocks pixel-registered pairing.
+Decision 6 records the later user-approved, visually evidenced terrain-only cross-domain contract;
+it does not reinterpret the raw registration result or permit per-tile transforms.
 
 **Alternatives considered**: assume identity alignment (rejected — the whole spec's validity rests
 on this and the codebase has burned us on orientation before); learnable/optical-flow registration
@@ -79,6 +80,9 @@ diffusion-transformer; LoRA on it is technically conceivable but wrong-biased, w
 (video), and VRAM-hostile for a 16 GB card.
 
 ## Decision 3 (arch choice superseded by 3a) — Real-ESRGAN: compact RRDBNet generator, PSNR-first then optional GAN, dependency only if it stays clean
+
+**Historical note**: Decision 3a supersedes the generator/dependency choice below. It is retained
+only to explain the original Real-ESRGAN route; current implementation uses spandrel RealPLKSR.
 
 **Finding**: No SR/ESRGAN code exists in the repo; `torch>=2.5` (CUDA 13.0 wheels) is already a
 dependency; `basicsr`/`realesrgan`/`lpips` are not. The official Real-ESRGAN (RRDBNet generator +
@@ -137,3 +141,35 @@ detail genuine terrain structure vs fabricated/restyled. SC-005 is decisive wher
 **Alternatives considered**: a single scalar metric (rejected — no single SR metric captures both
 "matches target" and "adds real, non-hallucinated detail"); no-reference perceptual metrics only
 (kept as secondary; the reference detail HR is available so use it).
+
+## Decision 6 — raw pixel NCC is not the gate for intentional terrain-only cross-domain supervision
+
+**Real result (2026-07-18)**: the two-map, 120-tile alignment report is
+`fail_inconsistent`: no fixed dihedral transform or LR offset registers all tiles; NCC p50 is
+0.2113 and p05 is 0.0000. The detail renderer itself is productive (SC-001 detail gain 16.1047),
+but visual comparison shows authored client imagery contains a different water, icon, lighting, and
+material render domain from the synthesized terrain target.
+
+**Correction after visual proof and user clarification (2026-07-18)**: authored minimaps include
+client-baked objects/icons while the synthetic renderer is intentionally terrain-only. Raw luma NCC
+therefore scores intentional content removal plus water/lighting/material-domain differences as
+"misregistration." It cannot distinguish that from a real geometric transform. The persisted
+same-tile contact sheets show coastlines, ridges, roads, snow boundaries, and terrain shapes in the
+same identity tile space across low-, medium-, high-relief, and object-heavy examples. They also
+show the intended result: authored buildings/trees disappear from the terrain-only target, while
+the 1024 signal preserves the synthetic-256 layout and adds native texel detail.
+
+**Decision**: continue as an explicitly labeled **terrain-only cross-domain reconstruction + ×4
+upscale** model, not an object-preserving pixel-SR model. Do not apply per-tile transforms. Pair the
+same store row under identity using lineage plus the persisted visual-review report. The pair-set
+builder requires `--terrain-only-cross-domain` and `--visual-review` before it will accept the raw
+NCC report's `fail_inconsistent` verdict. Training/evaluation must treat object removal and render
+style translation as intentional; raw full-frame PSNR cannot be the sole promotion gate.
+
+**Lighting correction (2026-07-18)**: the visual review also exposed a real synthetic-render bug:
+the compositor dotted raw ADT MCNR axes against a renderer-space light vector, putting relief
+shadows on the wrong side. That bug makes the existing `minimap_rgb` and `minimap_rgb_1024` images
+stale and partly explains the raw NCC failure; it does not invalidate height, normal, liquid,
+material-ID, mask, flag, or authored-minimap arrays in the same stores. The code correction is
+covered by asymmetric-normal tests. Before pair-set creation, the user rerenders one known tile and
+visually signs off the light direction, then refreshes only the synthetic RGB passes/stores.

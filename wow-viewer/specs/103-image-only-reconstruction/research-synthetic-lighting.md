@@ -31,13 +31,20 @@ visibility = f(MCSH)
   The native MCSH attenuation coefficient is still unproven in this spec. A fallback palette or
   coefficient is authored evidence, never client-exact evidence.
 
-## Profile precedence
+## Minimap boundary
+
+`synthetic-minimap` is not a runtime-world capture. Every supported era uses one fixed 12:00
+achromatic global light so its terrain material colors remain comparable. Map LIT and local/global
+Light DBC profiles belong to interactive viewer lighting and MUST NOT color-grade minimap targets.
+The profile precedence below applies to runtime/capture experiments outside that minimap command.
+
+## Runtime/capture profile precedence
 
 Synthetic rendering uses a versioned lighting profile with an explicit evidence state:
 
 1. **Explicit exact profile artifact**: an operator-selected, hash-bound artifact wins. It must name
    one source kind and may not silently splice LIT fog into DBC diffuse/ambient values.
-2. **Map LIT profile**: for the early/minimap lane, evaluate the selected map's global/default clear
+2. **Map LIT profile**: for the non-minimap runtime/capture lane, evaluate the selected map's global/default clear
    group at the requested time. Retain build, exact virtual path, file hash, LIT version, light/group,
    track IDs, timed samples, and interpolation result. Local LIT zones remain disabled for capture
    until their `/36` scale and coordinate transform are proven.
@@ -58,6 +65,14 @@ Implemented operator surfaces are `wowviewer-inspect lit profile` and
 `wowviewer-inspect light profile`. Their hash-bound JSON can be passed directly to
 `spec103_build_synthetic_store.py --lighting-profile`; direct/ambient/fog colors are retained as
 client evidence while direction and MCSH strength stay authored. Such rows are always private BYOD.
+
+The active viewer uses the exact-build Light DBC resolver for 2.x+ clients without a usable map LIT
+source and exposes whether it is active and why it is unavailable. `synthetic-minimap` deliberately
+does not call that resolver; `terrain-minimap-synthesis-v6` records its fixed-noon-white profile.
+Live 2.4.3.8606 proof also established two recoverable source anomalies: LightIntBand row 360
+declares 360 values although six Time/Data slots are populated, and LightParams row 575 references
+an absent optional LightSkybox row 18. The resolver records both anomalies while preserving the
+usable direct, ambient, and fog bands.
 
 ## LIT decode and sky boundary
 
@@ -107,5 +122,6 @@ a question for the operator and counsel; code can preserve evidence, not certify
 4. Top-down capture tests prove one ADT tile maps to one image with dataset row/column orientation.
 5. Synthetic-store tests prove variant provenance, source grouping, no double-lighting, and the
    fail-closed licensed-synthetic gate.
-6. A later user-run capture compares build-scoped DBC profiles and records image hashes; no training
-   or broad client harvest is launched by this implementation pass.
+6. The exact 2.4.3.8606 archive probe resolves global Light row 1 / LightParams row 12 and the timed
+   direct, ambient, and fog values with exact source hashes. A user-run one-tile render remains the
+   visual proof; no training or broad client harvest is launched by this implementation pass.

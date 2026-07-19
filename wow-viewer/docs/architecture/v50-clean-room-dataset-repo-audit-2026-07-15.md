@@ -300,8 +300,8 @@ The v50.1 release signal catalog defines the exact, verified data elements allow
 | `liquid_height` | float32 | (256,256) | **fresh-only** | no | Historic WL liquid surface height (fresh-only). |
 | `liquid_type_256` | uint8 | (256,256) | copy-if-verified | no | Liquid classification. |
 | `mcnk_flags_16` | int32 | (16,16) | copy-if-verified | no | Chunk flags. |
-| `minimap_rgb` | uint8 | (256,256,3) | copy-if-verified | **yes** | **Synthesized** terrain minimap (compositor output). NEVER the authored client image — see `minimap_rgb_authored` (Spec 112). |
-| `minimap_rgb_1024` | uint8 | (1024,1024,3) | copy-if-verified | no | **4x Resolution** synthesized minimap for Real-ESRGAN upscaler. Row coverage must equal `minimap_rgb`. |
+| `minimap_rgb` | uint8 | (256,256,3) | copy-if-verified | no | **Synthesized** terrain minimap (compositor output). Partial coverage is honest where a tile lacks usable texture data; curriculum/pair-set selection requires real row lineage. NEVER the authored client image — see `minimap_rgb_authored` (Spec 112). |
+| `minimap_rgb_1024` | uint8 | (1024,1024,3) | copy-if-verified | no | **4x Resolution** synthesized minimap for Real-ESRGAN upscaler. Same honest partial coverage as `minimap_rgb`; row coverage must equal it. |
 | `minimap_rgb_authored` | uint8 | (256,256,3) | copy-if-verified | no | **Authored client minimap** — the real in-game render decoded from the MPQ. Harvest-stream sourced, NEVER synthesized. Partial coverage (only tiles the client shipped a minimap BLP for); honestly unavailable elsewhere, never zero-substituted. This is the real deployment input a decompilation model must ultimately consume (Spec 112, user-directed 2026-07-18). |
 | `mccv_rgb` | float32 | (257,257,3) | copy-if-verified | no | **MCCV Vertex Colors** (vertex lighting/shading). |
 | `shadow_mask` | float32 | (256,256) | copy-if-verified | no | MCSH shadow. |
@@ -451,4 +451,3 @@ absent from the one manifest that existed, even though v50's frozen signal catal
   signal and row(s) responsible, and reports zero mismatches for a genuinely complete store.
   `uv run python -m pytest tests/v50/ tests/test_v50_contract.py tests/test_v50_build_command.py -q`
   -> 120 passed, 2 skipped, 0 failed.
-

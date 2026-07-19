@@ -1,26 +1,46 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
-## Active work: Spec 112 v50-native height-first terrain model — Planned, Phase 1 not started
+## Active work: Specs 112/113 — minimap/viewer lighting boundary corrected; user visual proof next
 
-Supersedes the legacy spec103/spec108 model lane, which the user rejected after a real training run
-on the v50.1 corpus proved it structurally broken (best val loss at epoch 1, degrading after — the
-target embeds absolute elevation, which minimap pixels can't determine). Spec/plan/research/
-data-model/contracts/quickstart written (`specs/112-v50-height-model/`); `tasks.md` not yet
-generated (`/speckit-tasks` next). Key decisions: (1) dataset corrections are Phase 1/US1, not a
-separate spec — manifest template must be *generated from* the frozen signal catalog (currently
-hand-drifted: declares 4 signals the catalog dropped, plus `mccv_rgb` which doesn't exist until
-WotLK+); `mcnk_flags_16`'s 0% coverage is a confirmed C# bug (`AlphaTensorPackBuilder` reads MCNK
-flags but never assigns them to the output pack — `research.md` Decision 1, file:line cited);
-`minimap_rgb_1024`'s partial coverage is a suspected thread-safety race in `NativeMpqService`'s
-plain-Dictionary scan cache under the Phase-8-era `Parallel.ForEach` tile loop (Decision 2, to
-confirm empirically, not yet fixed). (2) Curriculum lane is Kalimdor + Azeroth ONLY — PVPZone02 and
-Kalidar excluded entirely (user ruling: too tiny to gauge anything, never use for tests). (3) Model
-target is per-tile min-max-normalized relative height (altitude-offset-invariant by construction,
-directly fixing the old target's flaw) — see `contracts/relative-height-target-contract.md`. All
-training remains user-executed; this session had one execution-boundary violation (see the feedback
-memory) that is now fixed both in behavior and in the durable memory rule.
+- **Spec 112**: real corpus correction and dual-source curriculum are proven. Kalimdor/Azeroth
+  coverage reports pass parity; `curriculum-0_5_3_3368-dual_v1.zarr` has 2,990 rows (1,629 authored
+  + 1,361 synthetic; 2,545 train / 445 val). The `v112.1` relative-height model and CUDA-only
+  trainer are implemented with schema/map/leak gates, target round-trip/offset-invariance tests,
+  baseline reporting, and epoch-1 structural-failure detection. Next: **user runs T021 training**;
+  assistant reviews `training_summary.json` and prepares the held-out visual review.
+- **Spec 113**: T001-T010c, T011/T012, and T014 are implemented. The detail compositor uses production 8×/chunk UVs and
+  footprint-selected mips (not unfiltered base texels); the v50 builder applies `--detail` only to
+  1024, preserves synthetic-minimap authority, and records store provenance. The cross-map analyzer
+  searches all 8 dihedral transforms plus one fixed LR-pixel offset without wrap and emits the hard
+  gate. The completed staged builds exposed a correctable manifest-policy mismatch: 220
+  synthesized-minimap rows are honestly unavailable, so `finalize --policy-template ...` now
+  derives 731/951 coverage without a rebuild. The real 120-tile cross-map report then failed
+  `fail_inconsistent` (NCC p50 0.211 / p05 0.000; SC-001 detail gain 16.10): authored minimaps and
+  synthetic detail renders are different domains, not one transform apart. The user confirmed this
+  is intentional terrain-only cross-domain supervision: authored objects/icons are not expected in
+  synthetic targets, so raw full-frame NCC is diagnostic, not the promotion owner.
+- Visual review exposed an actual renderer bug: raw ADT MCNR axes were dotted directly with a
+  renderer-space solar vector, reversing relief lighting. The shared compositor now applies
+  `TransformAdtNormalToRenderer` first. Existing `minimap_rgb`/`minimap_rgb_1024` store arrays are
+  stale; numeric height/normal/liquid/material/mask/flag signals and authored minimaps remain sane.
+- The first 2.4.3 comparison proved a policy error: runtime local Light DBC color was purple-tinting
+  and crushing minimap terrain. `synthetic-minimap` is now fixed to one 12:00 achromatic global
+  light for every era; v6 records `NoonWhiteGlobal`, rejects non-noon/`--dbd-dir` inputs, and never
+  evaluates LIT/DBC. The interactive viewer alone retains exact-build DBC lighting/status. Next:
+  user reruns T010b, then refreshes only synthetic RGB before pair-set/training work.
+- The original Expansion01 32,32 handoff was wrong: it is WDT-occupied but produced an all-black
+  one-material synthetic PNG. `synthetic-minimap` now supports bounded `--tile-list` and
+  `--authored-reference`, emitting authored/synthetic/liquid/side-by-side files per tile and rejecting
+  missing/all-black references or results. The replacement 2.4.3 set is `24,24;21,28;28,30;26,26;
+  27,27;23,30`, proven occupied, authored-nonblack, and backed by 5-10 nonblack decoded terrain BLPs.
+- Architecture ruling for later Spec 113 US3: ComfyUI-native RealPLKSR via spandrel; DAT-2 ceiling,
+  RRDBNet floor. The visual-review surface, guarded `sr_pairset.py`, its contract tests, and
+  `sr_model.py` wrapper are implemented pre-gate; no real pair set is promoted yet.
+  `v50_train_minimap_superres.py` is intentionally absent until T010b/T013 complete.
+- Proof: current combined compositor/detail/DBC/lookup C# focus 41/41; Harvest build 0 errors. Full
+  v50 Python focus is 175 passed / 4 skipped.
 
 ## Prior active work: Spec 109 v50 clean-room dataset — Setup and Build Pipeline Fully Operational
 
@@ -153,21 +173,6 @@ section for the condensed current-state summary — kept in one place rather tha
   maps now built, finalized, and have both a strict object-free and an object-inclusive curation
   manifest. **The v50.1 `0_5_3_3368` full corpus now actually exists on disk**, not just
   documented — see `progress.md`'s Phase 9 entry for exact kept-tile counts per map/manifest.
-
-## Spec 112/113 state (2026-07-18, post final rebuild)
-
-- **Spec 112 dataset phase is DONE on real data**: rebuilt Kalimdor/Azeroth stores pass SC-001
-  (no unexplained zero-coverage; mcnk_flags_16 99.7%/98.0%, mccv_rgb era-unavailable) and SC-002
-  (256/1024 parity TRUE). `minimap_rgb_authored` captured at 100%/99% coverage. Dual-source
-  curriculum built: `curriculum-0_5_3_3368-dual_v1.zarr`, 2990 rows (1629 authored + 1361
-  synthetic; per-source blank check recovered ~270 authored rows on synthesis-failed tiles —
-  user-directed), 2545 train / 445 val, within-map stratified, Kalimdor+Azeroth only. Remaining
-  Spec 112: T017-T021 (relative-height model + trainer, then user-run training).
-- **Spec 113 (minimap SR) spec+plan+tasks committed**; architecture decided by user constraint
-  (must be ComfyUI-native): ComfyUI loads upscale models via spandrel, so primary arch =
-  RealPLKSR (near-DAT2 quality, ~10x faster, low VRAM), DAT-2 ceiling, RRDBNet floor; SeedVR2/RTX
-  VSR rejected for training (generative bias / closed model), RTX VSR optional eval baseline.
-  US1 hard gate (authored↔detail alignment) not yet run; detail render not yet implemented.
 
 ## Known open bug (unrelated lane, reported 2026-07-18, not yet fixed)
 

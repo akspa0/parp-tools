@@ -27,6 +27,28 @@ public sealed class DbcLookupTests
         Assert.True(lookup.IsLoaded);
         Assert.Equal("Azeroth", lookup.ResolveDirectory("1"));
         Assert.Equal("Azeroth", lookup.ResolveDirectory("Eastern Kingdoms"));
+        Assert.True(lookup.TryResolveId("Azeroth", out int mapId));
+        Assert.Equal(1, mapId);
+        Assert.True(lookup.TryResolveId("Eastern Kingdoms", out int localizedMapId));
+        Assert.Equal(1, localizedMapId);
+    }
+
+    [Fact]
+    public void ArchiveReaderDbcProvider_ReturnsExactArchiveTableBytes()
+    {
+        byte[] expected = [1, 2, 3, 4];
+        FakeArchiveReader archiveReader = new(
+            new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["DBFilesClient\\Light.dbc"] = expected,
+            });
+
+        ArchiveReaderDbcProvider provider = new(archiveReader);
+        using Stream stream = provider.StreamForTableName("Light", "2.4.3.8606");
+        using MemoryStream copy = new();
+        stream.CopyTo(copy);
+
+        Assert.Equal(expected, copy.ToArray());
     }
 
     [Fact]

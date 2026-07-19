@@ -11,6 +11,7 @@ using WowViewer.Core.IO.Lit;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 using WowViewer.Core.Renderer.Terrain;
+using WowViewer.Core.Terrain;
 
 namespace WowViewer.Tools.Harvest;
 
@@ -64,7 +65,10 @@ static class Program
         string? Detail,
         IReadOnlyList<TerrainTextureFallbackResolution>? TextureFallbacks = null,
         string? LiquidOutputPath = null,
-        int LiquidPixelCount = 0);
+        int LiquidPixelCount = 0,
+        SyntheticMinimapLightingProfile? Lighting = null,
+        string? AuthoredOutputPath = null,
+        string? ComparisonOutputPath = null);
     private sealed record SyntheticMinimapManifest(
         string Format,
         string ClientRoot,
@@ -74,6 +78,8 @@ static class Program
         float TimeOfDayHours,
         float NormalizedGameTime,
         int TileResolution,
+        string RenderMode,
+        float TextureRepeatsPerChunk,
         bool PerTileRequested,
         bool WholeMapRequested,
         SyntheticMinimapLightingProfile Lighting,
@@ -163,9 +169,14 @@ static class Program
               --client-root     WoW client root directory (for extract-unified)
               --map, -m         Map name (e.g. "Azeroth") for archive-backed commands
 
-            synthetic-minimap notable options: --time-hours <HHmm|HH:mm|0-24 decimal>, --per-tile, --whole-map,
-              --tile-x/--tile-y <0..63> for one occupied tile, --limit <emitted terrain/_liquid PNG pairs>,
-              and --bake-mcsh (diagnostic preview only).
+            synthetic-minimap uses one fixed 12:00 achromatic global light; map LIT and Light DBC
+              profiles belong to the viewer and are never applied to minimap generation.
+            synthetic-minimap notable options: --build <exact-build>, --per-tile, --whole-map,
+              --tile-x/--tile-y <0..63> for one occupied tile, --tile-list "x,y;x,y;..." for a bounded set,
+              --authored-reference to require and emit the real client minimap plus a side-by-side comparison,
+              --limit <emitted terrain/_liquid PNG pairs>,
+              --detail (mip-filtered real BLP texels for 1024+ SR targets), and --bake-mcsh
+              (diagnostic preview only).
             harvest-stream --stream-profile v22 emits full terrain texture/model sidecars plus
               conservative minimap_lighting provenance when the client data permits it.
             """);
@@ -484,6 +495,7 @@ static class Program
         string? clientRoot = GetOption(args, "--client-root", "-c");
         string? mapName = GetOption(args, "--map", "-m");
         string? outputDirectory = GetOption(args, "--output-dir", "-o");
+        string? requestedBuildVersion = GetOption(args, "--build", "-b");
         int resolution = GetIntOption(args, "--resolution", "-r") ?? TerrainMinimapCompositor.DefaultResolution;
         int maxTiles = GetIntOption(args, "--limit", "-n") ?? int.MaxValue;
         // Spec 112 T007 diagnostic: bound the tile-composition parallelism (1 = fully sequential).
@@ -499,6 +511,7 @@ static class Program
         }
         int? requestedTileX = GetIntOption(args, "--tile-x", "-x");
         int? requestedTileY = GetIntOption(args, "--tile-y", "-y");
+        string? requestedTileList = GetOption(args, "--tile-list", "");
         string? requestedTimeOfDay = GetOption(args, "--time-hours", "-t");
         TimeOfDayClock timeOfDay;
         if (requestedTimeOfDay is null)
@@ -517,6 +530,7 @@ static class Program
         bool emitPerTile = HasFlag(args, "--per-tile");
         bool emitWholeMap = HasFlag(args, "--whole-map");
         bool bakeMcsh = HasFlag(args, "--bake-mcsh");
+        bool emitAuthoredReference = HasFlag(args, "--authored-reference");
         if (!emitPerTile && !emitWholeMap)
         {
             emitPerTile = true;
@@ -528,6 +542,37 @@ static class Program
             || requestedTileY is < 0 or > 63)
         {
             Console.Error.WriteLine("Error: --tile-x and --tile-y must be supplied together within 0..63.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (requestedTileX.HasValue && !string.IsNullOrWhiteSpace(requestedTileList))
+        {
+            Console.Error.WriteLine("Error: choose either --tile-x/--tile-y or --tile-list, not both.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (MathF.Abs(timeOfDay.Hours - 12f) > 0.0001f)
+        {
+            Console.Error.WriteLine(
+                "Error: synthetic-minimap uses a fixed 12:00 global white light; " +
+                "--time-hours may only be 12:00 when supplied.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (GetOption(args, "--dbd-dir", "") is not null)
+        {
+            Console.Error.WriteLine(
+                "Error: --dbd-dir does not apply to synthetic-minimap; Light DBC profiles are viewer-only.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (!TryParseSyntheticMinimapTileList(requestedTileList, out HashSet<(int TileX, int TileY)> listedTiles, out string? tileListError))
+        {
+            Console.Error.WriteLine($"Error: {tileListError}");
             Environment.ExitCode = 1;
             return;
         }
@@ -556,7 +601,7 @@ static class Program
         }
 
         clientRoot = ResolveGameClientRoot(clientRoot);
-        string? buildVersion = DetectBuildVersionFromClientRoot(clientRoot);
+        string? buildVersion = requestedBuildVersion ?? DetectBuildVersionFromClientRoot(clientRoot);
         Directory.CreateDirectory(outputDirectory);
 
         using var catalog = new NativeMpqService();
@@ -586,6 +631,29 @@ static class Program
                 .Where(tile => tile.TileX == requestedTileX.Value && tile.TileY == requestedTileY!.Value)
                 .ToArray();
         }
+        else if (listedTiles.Count > 0)
+        {
+            HashSet<(int TileX, int TileY)> occupiedSet = occupiedTiles
+                .Select(static tile => (tile.TileX, tile.TileY))
+                .ToHashSet();
+            (int TileX, int TileY)[] missing = listedTiles
+                .Where(tile => !occupiedSet.Contains(tile))
+                .OrderBy(static tile => tile.TileY)
+                .ThenBy(static tile => tile.TileX)
+                .ToArray();
+            if (missing.Length > 0)
+            {
+                Console.Error.WriteLine(
+                    $"Error: map '{mapName}' does not mark requested tile(s) occupied: " +
+                    string.Join(", ", missing.Select(static tile => $"{tile.TileX},{tile.TileY}")));
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            occupiedTiles = occupiedTiles
+                .Where(tile => listedTiles.Contains((tile.TileX, tile.TileY)))
+                .ToArray();
+        }
 
         if (occupiedTiles.Count == 0)
         {
@@ -595,8 +663,8 @@ static class Program
         }
 
         bool isAlpha = AlphaWdtReader.IsAlphaWdt(wdtBytes);
-        float gameTime = timeOfDayHours / 24f;
-        SyntheticMinimapLightingProfile lighting = ResolveSyntheticMinimapLighting(gameTime);
+        const float gameTime = 0.5f;
+        SyntheticMinimapLightingProfile lighting = ResolveSyntheticMinimapLighting();
         if (bakeMcsh)
         {
             lighting = lighting with
@@ -615,9 +683,11 @@ static class Program
         if (!string.IsNullOrWhiteSpace(lighting.Diagnostic))
             Console.WriteLine($"  Lighting note: {lighting.Diagnostic}");
 
-        var compositionOptions = new TerrainMinimapCompositionOptions(
-            resolution,
-            lighting.Lighting);
+        // Spec 113: --detail selects real-texel sampling (the SR HR target); default stays the
+        // material-average view every existing consumer expects.
+        bool detailTexels = HasFlag(args, "--detail");
+        if (detailTexels)
+            Console.WriteLine($"Render mode: detail (real texel sampling, {TerrainMinimapCompositionOptions.TextureRepeatsPerChunk} repeat(s)/chunk)");
         var results = new ConcurrentBag<SyntheticMinimapTileResult>();
         var emittedTiles = new ConcurrentDictionary<(int TileX, int TileY), string>();
         var emittedLiquidTiles = new ConcurrentDictionary<(int TileX, int TileY), string>();
@@ -653,6 +723,33 @@ static class Program
                     return;
                 }
 
+                byte[,,]? authoredReference = null;
+                if (emitAuthoredReference)
+                {
+                    stage = "decoding authored client minimap";
+                    authoredReference = TryLoadMinimapFromMpq(catalog, mapName, tile.TileX, tile.TileY);
+                    if (authoredReference is null || !HasVisibleRgb(authoredReference))
+                    {
+                        results.Add(new SyntheticMinimapTileResult(
+                            tile.TileX,
+                            tile.TileY,
+                            "skipped",
+                            null,
+                            0,
+                            "--authored-reference was requested but no visible real client minimap decoded"));
+                        Console.Error.WriteLine(
+                            $"Synthetic minimap tile {tile.TileX:D2},{tile.TileY:D2} skipped: " +
+                            "no visible authored client minimap decoded for comparison.");
+                        return;
+                    }
+                }
+
+                SyntheticMinimapLightingProfile tileLighting = lighting;
+                var compositionOptions = new TerrainMinimapCompositionOptions(
+                    resolution,
+                    tileLighting.Lighting,
+                    DetailTexels: detailTexels);
+
                 stage = "decoding terrain textures";
                 Dictionary<int, byte[,,]> textures = LoadSyntheticMinimapTextures(catalog, pack);
                 if (textures.Count == 0)
@@ -663,14 +760,32 @@ static class Program
 
                 string tilePath = Path.Combine(tilesDirectory, $"{mapName}_{tile.TileX:D2}_{tile.TileY:D2}_synthesized.png");
                 string liquidTilePath = Path.Combine(tilesDirectory, $"{mapName}_{tile.TileX:D2}_{tile.TileY:D2}_synthesized_liquid.png");
+                string? authoredTilePath = emitAuthoredReference
+                    ? Path.Combine(tilesDirectory, $"{mapName}_{tile.TileX:D2}_{tile.TileY:D2}_authored.png")
+                    : null;
+                string? comparisonTilePath = emitAuthoredReference
+                    ? Path.Combine(tilesDirectory, $"{mapName}_{tile.TileX:D2}_{tile.TileY:D2}_authored_vs_synthesized.png")
+                    : null;
                 stage = "compositing terrain minimap";
                 using Image<Rgba32> image = TerrainMinimapCompositor.Compose(pack, textures, compositionOptions);
+                if (!HasVisibleRgb(image))
+                    throw new InvalidDataException(
+                        "composed terrain RGB is entirely black; the tile is not valid visual proof");
                 stage = "compositing liquid minimap";
                 using Image<Rgba32> liquidImage = TerrainMinimapLiquidCompositor.Compose(image, pack, out int liquidPixelCount);
                 stage = "writing terrain PNG";
                 image.SaveAsPng(tilePath);
                 stage = "writing liquid PNG";
                 liquidImage.SaveAsPng(liquidTilePath);
+                if (authoredReference is not null && authoredTilePath is not null && comparisonTilePath is not null)
+                {
+                    stage = "writing authored client reference";
+                    using Image<Rgba32> authoredImage = CreateRgbImage(authoredReference);
+                    authoredImage.SaveAsPng(authoredTilePath);
+                    stage = "writing authored-versus-synthetic comparison";
+                    using Image<Rgba32> comparisonImage = CreateAuthoredSyntheticComparison(authoredImage, image);
+                    comparisonImage.SaveAsPng(comparisonTilePath);
+                }
                 emittedTiles[(tile.TileX, tile.TileY)] = tilePath;
                 emittedLiquidTiles[(tile.TileX, tile.TileY)] = liquidTilePath;
                 results.Add(new SyntheticMinimapTileResult(
@@ -684,8 +799,14 @@ static class Program
                         .OrderBy(static fallback => fallback.TextureId)
                         .ToArray(),
                     emitPerTile ? liquidTilePath : null,
-                    liquidPixelCount));
-                Console.WriteLine($"Synthetic minimap tile: {tile.TileX:D2},{tile.TileY:D2} -> {tilePath} + {liquidTilePath} ({liquidPixelCount} liquid pixels)");
+                    liquidPixelCount,
+                    tileLighting,
+                    emitPerTile ? authoredTilePath : null,
+                    emitPerTile ? comparisonTilePath : null));
+                Console.WriteLine(
+                    $"Synthetic minimap tile: {tile.TileX:D2},{tile.TileY:D2} -> {tilePath} + {liquidTilePath}" +
+                    (comparisonTilePath is null ? string.Empty : $" + {authoredTilePath} + {comparisonTilePath}") +
+                    $" ({liquidPixelCount} liquid pixels)");
             }
             catch (Exception ex)
             {
@@ -721,7 +842,7 @@ static class Program
             Directory.Delete(tilesDirectory, recursive: true);
 
         var manifest = new SyntheticMinimapManifest(
-            "terrain-minimap-synthesis-v4",
+            "terrain-minimap-synthesis-v6",
             clientRoot,
             buildVersion,
             mapName,
@@ -729,6 +850,8 @@ static class Program
             timeOfDayHours,
             gameTime,
             resolution,
+            detailTexels ? "detail" : "material_average",
+            TerrainMinimapCompositionOptions.TextureRepeatsPerChunk,
             emitPerTile,
             emitWholeMap,
             lighting,
@@ -746,7 +869,9 @@ static class Program
         Console.WriteLine($"Synthetic minimap manifest: {manifestPath}");
         Console.WriteLine($"Synthetic minimap summary: written={results.Count(result => result.Status is "written" or "stitched-only")}, skipped={results.Count(result => result.Status == "skipped")}, failed={results.Count(result => result.Status == "failed")}");
 
-        if (emittedTiles.Count == 0 || (emitWholeMap && stitchFailure is not null))
+        bool authoredProofIncomplete = emitAuthoredReference
+            && results.Any(static result => result.Status is not ("written" or "stitched-only"));
+        if (emittedTiles.Count == 0 || (emitWholeMap && stitchFailure is not null) || authoredProofIncomplete)
             Environment.ExitCode = 1;
     }
 
@@ -765,6 +890,101 @@ static class Program
         }
 
         return string.Join(" <- ", parts);
+    }
+
+    private static bool TryParseSyntheticMinimapTileList(
+        string? value,
+        out HashSet<(int TileX, int TileY)> tiles,
+        out string? error)
+    {
+        tiles = [];
+        error = null;
+        if (string.IsNullOrWhiteSpace(value))
+            return true;
+
+        foreach (string entry in value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            string[] parts = entry.Split(',', StringSplitOptions.TrimEntries);
+            if (parts.Length != 2
+                || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int tileX)
+                || !int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int tileY)
+                || tileX is < 0 or > 63
+                || tileY is < 0 or > 63)
+            {
+                error = $"--tile-list entry '{entry}' must be x,y with both coordinates in 0..63.";
+                return false;
+            }
+
+            tiles.Add((tileX, tileY));
+        }
+
+        if (tiles.Count == 0)
+        {
+            error = "--tile-list did not contain any x,y coordinates.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static Image<Rgba32> CreateRgbImage(byte[,,] rgb)
+    {
+        int height = rgb.GetLength(0);
+        int width = rgb.GetLength(1);
+        if (height <= 0 || width <= 0 || rgb.GetLength(2) < 3)
+            throw new InvalidDataException("RGB reference must have shape [height,width,>=3].");
+
+        var image = new Image<Rgba32>(width, height);
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+                image[x, y] = new Rgba32(rgb[y, x, 0], rgb[y, x, 1], rgb[y, x, 2], 255);
+        return image;
+    }
+
+    private static bool HasVisibleRgb(byte[,,] rgb)
+    {
+        int height = rgb.GetLength(0);
+        int width = rgb.GetLength(1);
+        int channels = rgb.GetLength(2);
+        if (height <= 0 || width <= 0 || channels < 3)
+            return false;
+
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+                if (rgb[y, x, 0] > 2 || rgb[y, x, 1] > 2 || rgb[y, x, 2] > 2)
+                    return true;
+        return false;
+    }
+
+    private static bool HasVisibleRgb(Image<Rgba32> image)
+    {
+        for (int y = 0; y < image.Height; y++)
+            for (int x = 0; x < image.Width; x++)
+            {
+                Rgba32 pixel = image[x, y];
+                if (pixel.R > 2 || pixel.G > 2 || pixel.B > 2)
+                    return true;
+            }
+        return false;
+    }
+
+    private static Image<Rgba32> CreateAuthoredSyntheticComparison(
+        Image<Rgba32> authored,
+        Image<Rgba32> synthesized)
+    {
+        var comparison = new Image<Rgba32>(synthesized.Width * 2, synthesized.Height);
+        for (int y = 0; y < synthesized.Height; y++)
+        {
+            int authoredY = Math.Min(authored.Height - 1, y * authored.Height / synthesized.Height);
+            for (int x = 0; x < synthesized.Width; x++)
+            {
+                int authoredX = Math.Min(authored.Width - 1, x * authored.Width / synthesized.Width);
+                comparison[x, y] = authored[authoredX, authoredY];
+                comparison[x + synthesized.Width, y] = synthesized[x, y];
+            }
+        }
+
+        return comparison;
     }
 
     private sealed class KnownTerrainTexturePaths
@@ -2079,21 +2299,29 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         pack.AvailableSignals = signals;
     }
 
-    private static SyntheticMinimapLightingProfile ResolveSyntheticMinimapLighting(float gameTime)
+    private static SyntheticMinimapLightingProfile ResolveSyntheticMinimapLighting()
     {
         return new SyntheticMinimapLightingProfile(
-            TerrainMinimapLighting.CreateWhiteTopEdge(gameTime),
-            "WhiteTopEdge",
-            "minimap_white_light_not_lit_data",
-            "terrain-minimap-white-top-edge-lambert-v1",
+            TerrainMinimapLighting.CreateNoonWhiteGlobal(),
+            "NoonWhiteGlobal",
+            "synthetic_minimap_fixed_noon_global_white",
+            "terrain-minimap-noon-white-global-lambert-v2+renderer-space-mcnr-v2",
             null,
             null,
             null,
             null,
-            "authored_top_edge_solar_direction_not_lit_data",
+            "fixed_noon_shared_solar_direction_not_lit_or_dbc_data",
             "mcsh_omitted_from_normal_minimap_rgb",
-            "LIT tracks and the provisional native world-light ray are intentionally excluded from minimap synthesis.");
+            "Synthetic minimaps use one fixed 12:00 achromatic global light; map LIT and " +
+            "Light DBC runtime profiles are intentionally excluded.");
     }
+
+    private static SyntheticMinimapLightingProfile WithBakedMcsh(SyntheticMinimapLightingProfile profile) =>
+        profile with
+        {
+            Lighting = profile.Lighting with { ApplyMcshToMinimap = true },
+            McshEvidenceState = $"{profile.McshEvidenceState}; explicit_baked_mcsh_preview"
+        };
 
     static void GenerateSyntheticMinimap(NativeMpqService catalog, TerrainTileTensorPack pack, int tileX, int tileY, string outputPath)
     {
@@ -2105,7 +2333,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
 
             var compositionOptions = new TerrainMinimapCompositionOptions(
                 TerrainMinimapCompositor.DefaultResolution,
-                TerrainMinimapLighting.Neutral);
+                TerrainMinimapLighting.CreateNoonWhiteGlobal());
             using Image<Rgba32> image = TerrainMinimapCompositor.Compose(pack, textures, compositionOptions);
             using Image<Rgba32> liquidImage = TerrainMinimapLiquidCompositor.Compose(image, pack, out int liquidPixelCount);
             string? directory = Path.GetDirectoryName(outputPath);
@@ -2418,6 +2646,18 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             if (string.IsNullOrWhiteSpace(parent))
                 return null;
             dirName = Path.GetFileName(parent);
+        }
+
+        string normalizedPath = clientRoot.Replace('_', '.');
+        System.Text.RegularExpressions.MatchCollection matches =
+            System.Text.RegularExpressions.Regex.Matches(
+                normalizedPath,
+                @"(?<!\d)(\d+\.\d+\.\d+\.\d+)(?!\d)");
+        for (int index = matches.Count - 1; index >= 0; index--)
+        {
+            string candidate = matches[index].Groups[1].Value;
+            if (ClientBuildKey.TryParse(candidate, out _))
+                return candidate;
         }
 
         string versionString = dirName.Replace('_', '.');

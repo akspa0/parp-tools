@@ -74,7 +74,7 @@ etc.) are unchanged from the existing implementation.
 
 `decode(normalized_height, tile_min, tile_max) = normalized_height * max(tile_max - tile_min,
 RANGE_FLOOR) + tile_min` exactly inverts the encode for any tile, including the flat-tile floor
-case (round-trips to the flat tile's constant height). This pair is what a checkpoint's
+case (a flat tile encodes as zero and round-trips to its constant height). This pair is what a checkpoint's
 `run_identity.json`/training summary must reference by `contract_version` (FR-010), mirroring how
 `wdl_prior_train.py` already records `INPUT_CONTRACT`/`TARGET_CONTRACT`.
 
@@ -88,3 +88,7 @@ case (round-trips to the flat tile's constant height). This pair is what a check
 | `per_epoch_metrics` | list[dict] | existing pattern: composite/point loss per epoch |
 | `tile_mean_baseline` | dict | new: the same validation metric computed against a trivial "predict each tile's own mean height" baseline, so SC-004's "beats baseline" claim is self-contained in the summary rather than requiring a separate run |
 | `best_epoch` | int | existing pattern; SC-004 requires this to be `> 1` |
+
+The first trainer uses Smooth-L1 point loss plus `0.25 ×` first-difference L1 (horizontal and
+vertical). That weight and purpose are fixed for the first run: fit values while retaining relief
+topology without adding a second target or model head.

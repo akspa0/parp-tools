@@ -1,4 +1,4 @@
-# Implementation Plan: Minimap Super-Resolution (Real-ESRGAN)
+# Implementation Plan: ComfyUI-Native Minimap Super-Resolution (RealPLKSR)
 
 **Branch**: `113-minimap-superres` | **Date**: 2026-07-18 | **Spec**: [spec.md](spec.md)
 
@@ -9,10 +9,11 @@
 Three phases. Phase 1 (US1, the hard gate) adds a detail-preserving 1024 render mode to the terrain
 minimap compositor — sampling real BLP texels instead of per-texture average colors — and proves
 the resulting HR is (a) genuinely more detailed than a bicubic upscale of the material-average
-render and (b) spatially registered to the authored client minimap for the same tile. If authored↔
-detail registration cannot be established, the spec halts here with the finding rather than training
-on invalid pairs. Phase 2 (US2) assembles a leak-safe (authored LR, detail HR) pair set from
-Kalimdor and Azeroth. Phase 3 (US3) trains a Real-ESRGAN model that upscales real authored minimaps
+render and (b) bound to the authored client minimap for the same tile. Raw pixel registration is
+measured first. If objects/icons make that metric inapplicable, the lane may proceed only under the
+explicit terrain-only cross-domain same-row identity contract, with persisted visual-review evidence
+and no per-tile corrective transform. Phase 2 (US2) assembles a leak-safe (authored LR, detail HR) pair set from
+Kalimdor and Azeroth. Phase 3 (US3) trains a spandrel-recognized RealPLKSR model that upscales real authored minimaps
 and evaluates it against a bicubic baseline plus a user visual gate. All rendering-at-scale and
 training runs are user-executed.
 
@@ -22,8 +23,8 @@ training runs are user-executed.
 owns minimap synthesis), Python 3.11+ / uv (alignment analysis, pair-set assembly, training, eval)
 
 **Primary Dependencies**: existing `TerrainMinimapCompositor` / `TerrainTextureSampler` (extended,
-not replaced — constitution II); `torch` (already a dep, CUDA 13.0 wheels); a Real-ESRGAN
-implementation + an SR perceptual metric (LPIPS) — dependency-vs-vendor decided in research.md
+not replaced — constitution II); `torch` (already a dep, CUDA 13.0 wheels); `spandrel` for the
+canonical RealPLKSR implementation and the same loader ComfyUI uses; LPIPS for evaluation
 
 **Storage**: per-build Zarr (constitution V). The detail HR upgrades the existing
 `minimap_rgb_1024` signal's render semantics (same shape/coverage contract as Spec 112). The pair
@@ -34,7 +35,7 @@ no-moire behavior on a synthetic texture); `pytest` for alignment analysis, pair
 trainer's contract/gate logic (CPU-safe). Real renders and training are user-run
 
 **Target Platform**: Windows desktop; training on the user's local RTX 4070 Ti SUPER (16 GB) —
-Real-ESRGAN is heavier than the Spec 112 height model and likely needs patch-based training
+RealPLKSR is heavier than the Spec 112 height model and uses patch-based training
 
 **Project Type**: Extension of the existing `wow-viewer` monorepo (compositor + `data-harvester`),
 one new model lane; not a new project
@@ -62,7 +63,7 @@ successful detail render), one new render mode, one new model + trainer + eval, 
 | IV. Residual Model Chain | Governs terrain-signal residual models. The minimap SR model is a distinct single-purpose image model (SR only, one output, no multi-task, no shared weights) — it does not enter the terrain residual chain and does not violate it; recorded explicitly rather than force-fit | PASS (with note) |
 | V. Streaming-First Pipeline | Detail render flows through the same harvest/synthesis path into Zarr; pair set references store rows; no NPZ | PASS |
 | VI. No Client Path Assumptions | Renders/authored reads take a configured `--clients-root`; no hardcoded path | PASS |
-| One Phase at a Time | US1 is a hard gate (can fail); US2/US3 blocked behind it in task ordering | PASS |
+| One Phase at a Time | US1 requires either a fixed pixel transform or the explicit same-row terrain-only visual contract; US2/US3 stay blocked until corrected lighting is visually signed off and synthetic RGB is refreshed | PASS |
 | Bite-Sized Plans | Each phase ≤10 tasks, enforced at /speckit-tasks | Deferred to tasks.md |
 
 No violations requiring the Complexity Tracking table. The principle-IV note is a scope
@@ -100,8 +101,8 @@ data-harvester/
 ├── src/harvester/v50/
 │   ├── minimap_alignment.py                     # authored<->detail registration analysis + corrective transform (US1)
 │   ├── sr_pairset.py                            # leak-safe (authored LR, detail HR) pair-set builder (US2)
-│   ├── sr_esrgan_model.py                        # RRDBNet generator (+ discriminator/losses) or dependency wrapper (US3)
-│   └── sr_esrgan_train.py                        # user-run trainer + bicubic-baseline eval + summary (US3)
+│   ├── sr_model.py                               # spandrel RealPLKSR + ComfyUI checkpoint proof (US3)
+│   └── sr_train.py                               # user-run trainer + bicubic-baseline eval + summary (US3)
 ├── scripts/
 │   ├── v50_analyze_minimap_alignment.py          # thin CLI (US1)
 │   ├── v50_build_sr_pairset.py                    # thin CLI (US2)
@@ -109,14 +110,15 @@ data-harvester/
 └── tests/v50/
     ├── test_minimap_alignment.py                  # registration + corrective-transform detection (US1)
     ├── test_sr_pairset.py                         # coverage honesty + leak-safe split (US2)
-    └── test_sr_esrgan_train.py                    # gate/contract/summary logic, CPU-safe (US3)
+    └── test_sr_train.py                           # gate/contract/summary logic, CPU-safe (US3)
 ```
 
 **Structure Decision**: extend the existing compositor (one canonical minimap renderer, constitution
 II) with a detail mode rather than a second renderer; keep the Python SR lane inside the established
 `harvester/v50/` + `scripts/` convention used by Specs 109-112. The detail HR is not a new store
 signal — it upgrades `minimap_rgb_1024`'s render semantics, so Spec 112's coverage/parity contract
-carries over unchanged.
+carries over unchanged. Both minimap resolutions share one fixed-noon achromatic global-light
+contract; interactive-viewer LIT/Light DBC lighting remains outside this plan.
 
 ## Complexity Tracking
 

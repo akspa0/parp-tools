@@ -51,28 +51,26 @@
 
 ## Decision: Synthesized minimaps use neutral white top-edge lighting, not LIT
 
-- **Decision**: At the requested normalized clock time, use `TerrainSolarDirection` for the
+- **Decision**: At fixed normalized noon (`0.5`), use `TerrainSolarDirection` for the
   north/top-edge source direction, `Vector3.One` for direct sunlight, and achromatic ambient light.
-  Exclude LIT color/fog tracks and recovered world-light rays from synthesized-minimap RGB.
+  Exclude LIT color/fog tracks, every Light DBC profile, and recovered world-light rays from
+  synthesized-minimap RGB for every client era.
 - **Rationale**: LIT is world-light/atmosphere data, not a minimap rendering contract. Applying its
   colour tracks caused orange/pink terrain; applying an uncalibrated native-ray transform put the
   raster light to the south, making basins read as mountains. The north/top-edge profile preserves
-  time selection while keeping material colours untinted and relief correctly oriented.
+  one reproducible material grade while keeping colours untinted and relief correctly oriented.
 - **Alternatives considered**: Keep LIT colours with a corrected transform (rejected: still tints
   minimap materials); rotate the provisional native ray again (rejected: wrong consumer and
-  uncalibrated axes); use a static no-time profile (rejected: loses the requested clock control).
+  uncalibrated axes); vary minimap time by client profile (rejected: runtime lighting is the wrong
+  owner and makes same-purpose targets incomparable).
 
-## Decision: Export time uses an exact clock minute
+## Decision: Export time is fixed at noon
 
-- **Decision**: Accept compact `HHmm` and `HH:mm` as exact clock input, retain decimal hours for
-  compatibility, and normalize every accepted value to a single minute before LIT evaluation.
-  Persist both canonical `HH:mm` and decimal hours in the manifest.
-- **Rationale**: `12` is only a convenient default, not necessarily solar noon for a map's authored
-  light track. Exact clock input permits a reproducible 12:15 sample without ambiguous floating
-  slider positions.
-- **Alternatives considered**: Decimal-only input (rejected: users cannot plainly express a clock
-  minute); second-precision input (rejected: no downstream LIT/minimap requirement currently needs
-  it).
+- **Decision**: Production synthesis always records `12:00`, `12.0`, and normalized time `0.5`.
+  Compatibility `--time-hours` syntax may be supplied only when it names noon.
+- **Rationale**: minimap synthesis needs one stable white global light, not map/runtime time tracks.
+- **Alternatives considered**: arbitrary clock input (rejected: it reintroduces a runtime-lighting
+  control into the minimap contract); silently ignoring non-noon input (rejected: false provenance).
 
 ## Decision: 0.5.3 native world-light recovery is not minimap input
 

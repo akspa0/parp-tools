@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -106,6 +107,60 @@ def _load_row_lineages(path: Path) -> list[RowLineage]:
         )
         for row in payload["rows"]
     ]
+
+
+def reconcile_manifest_policy(
+    manifest: DatasetStoreManifest,
+    policy_template: DatasetStoreManifest,
+    row_lineages: list[RowLineage],
+) -> DatasetStoreManifest:
+    """Apply only a current template's signal policy to a written-build manifest.
+
+    Build manifests carry the content identities that were observed from a particular store, while
+    the frozen template owns whether a signal is required.  This is deliberately a narrow repair:
+    names, dtype, shape, source, and migration policy must already agree, and the function derives
+    coverage only from explicit real row-lineage actions.  It therefore cannot relabel authored
+    stream data as synthesis or fabricate coverage for zero-filled missing rows.
+    """
+    policy_by_name = {signal.name: signal for signal in policy_template.signals}
+    manifest_names = {signal.name for signal in manifest.signals}
+    policy_names = set(policy_by_name)
+    if manifest_names != policy_names:
+        raise ValueError(
+            "policy template signals do not match the written manifest: "
+            f"missing={sorted(manifest_names - policy_names)!r}, "
+            f"unexpected={sorted(policy_names - manifest_names)!r}"
+        )
+
+    coverage_by_name = {
+        signal.name: sum(
+            lineage.signal_actions.get(signal.name) not in (None, "unavailable")
+            for lineage in row_lineages
+        )
+        for signal in manifest.signals
+    }
+    reconciled_signals: list[DatasetSignal] = []
+    for signal in manifest.signals:
+        policy = policy_by_name[signal.name]
+        if (
+            signal.dtype != policy.dtype
+            or signal.row_shape != policy.row_shape
+            or signal.authoritative_source != policy.authoritative_source
+            or signal.migration_policy != policy.migration_policy
+        ):
+            raise ValueError(
+                f"policy template disagrees with written manifest for {signal.name!r}; "
+                "refusing to relabel already-written data"
+            )
+        reconciled_signals.append(
+            replace(
+                signal,
+                required=policy.required,
+                coverage_count=coverage_by_name[signal.name],
+            )
+        )
+
+    return replace(manifest, signals=tuple(reconciled_signals))
 
 
 def _cmd_migrate_v18(args: argparse.Namespace) -> int:
@@ -255,6 +310,34 @@ def signal_takes_stream_data(signal: DatasetSignal) -> bool:
     return signal.authoritative_source != "synthetic-minimap"
 
 
+def build_synthetic_minimap_command(
+    *,
+    dll_path: Path,
+    client_root: Path,
+    map_name: str,
+    resolution: int,
+    output_dir: Path | None = None,
+    detail_texels: bool = False,
+) -> list[str]:
+    """Build one synthesis invocation while keeping the 256/1024 render intents explicit.
+
+    Spec 113 upgrades only ``minimap_rgb_1024`` to the mip-filtered real-texel detail mode. The
+    256 signal remains the phase-independent material-average render used by Spec 112.
+    """
+    command = [
+        "dotnet", str(dll_path),
+        "synthetic-minimap", "--client-root", str(client_root),
+        "--map", map_name,
+        "--resolution", str(resolution),
+        "--per-tile",
+    ]
+    if output_dir is not None:
+        command.extend(["--output-dir", str(output_dir)])
+    if detail_texels:
+        command.append("--detail")
+    return command
+
+
 def _cmd_build(args: argparse.Namespace) -> int:
     import tempfile
     import subprocess
@@ -333,11 +416,13 @@ def _cmd_build(args: argparse.Namespace) -> int:
     if not args.confirm_run:
         print(f"Would run fresh extraction: {' '.join(command)}")
         for res in resolutions:
-            synth_cmd = [
-                "dotnet", str(dll_path),
-                "synthetic-minimap", "--client-root", str(resolved_client_root),
-                "--map", args.map, "--resolution", str(res), "--per-tile"
-            ]
+            synth_cmd = build_synthetic_minimap_command(
+                dll_path=dll_path,
+                client_root=resolved_client_root,
+                map_name=args.map,
+                resolution=res,
+                detail_texels=res == 1024,
+            )
             print(f"Would run synthetic minimap ({res}x{res}): {' '.join(synth_cmd)}")
         print("NOT executing: pass confirm_run=True only with explicit user authorization for this run.")
         return 0
@@ -353,21 +438,42 @@ def _cmd_build(args: argparse.Namespace) -> int:
         synth_processes = []
         for res in resolutions:
             synth_out_dir = temp_path / f"minimap_{res}"
-            synth_cmd = [
-                "dotnet", str(dll_path),
-                "synthetic-minimap", "--client-root", str(resolved_client_root),
-                "--map", args.map, "--output-dir", str(synth_out_dir),
-                "--resolution", str(res), "--per-tile"
-            ]
-            print(f"Launching synthesized {res}x{res} minimaps generation...", flush=True)
+            synth_cmd = build_synthetic_minimap_command(
+                dll_path=dll_path,
+                client_root=resolved_client_root,
+                map_name=args.map,
+                resolution=res,
+                output_dir=synth_out_dir,
+                detail_texels=res == 1024,
+            )
+            render_mode = "detail" if res == 1024 else "material-average"
+            print(f"Launching synthesized {res}x{res} minimaps generation ({render_mode})...", flush=True)
             p = subprocess.Popen(synth_cmd)
             synth_processes.append((res, p))
 
         # Wait for both minimap processes to complete
+        synthesis_manifests: dict[int, dict[str, object]] = {}
         for res, p in synth_processes:
             res_code = p.wait()
             if res_code != 0:
                 print(f"Warning: synthetic-minimap resolution {res} exited with code {res_code}")
+                continue
+            synthesis_manifest_path = temp_path / f"minimap_{res}" / "synthesis-manifest.json"
+            if not synthesis_manifest_path.exists():
+                raise RuntimeError(
+                    f"synthetic-minimap {res} succeeded but wrote no synthesis manifest: "
+                    f"{synthesis_manifest_path}"
+                )
+            synthesis_manifests[res] = json.loads(
+                synthesis_manifest_path.read_text(encoding="utf-8")
+            )
+
+        detail_manifest = synthesis_manifests.get(1024)
+        if detail_manifest is not None and detail_manifest.get("RenderMode") != "detail":
+            raise RuntimeError(
+                "1024 minimap synthesis did not report RenderMode=detail; refusing to label the "
+                "result as Spec 113 HR"
+            )
 
         print(f"Launching harvest-stream...", flush=True)
         process = run_fresh_extraction(command, confirm_run=True)
@@ -595,6 +701,13 @@ def _cmd_build(args: argparse.Namespace) -> int:
 
         stacked_arrays = {name: np.stack(lst) for name, lst in accumulated_signals.items()}
 
+        coverage_by_signal = {
+            signal.name: sum(
+                lineage["signal_actions"].get(signal.name) not in (None, "unavailable")
+                for lineage in row_lineages
+            )
+            for signal in manifest_template.signals
+        }
         recomputed_signals = []
         for signal in manifest_template.signals:
             if signal.name in stacked_arrays:
@@ -605,9 +718,9 @@ def _cmd_build(args: argparse.Namespace) -> int:
                         dtype=str(arr.dtype),
                         row_shape=arr.shape[1:],
                         required=signal.required,
-                        authoritative_source="harvest-stream",
+                        authoritative_source=signal.authoritative_source,
                         content_identity=hash_array(arr),
-                        coverage_count=row_id,
+                        coverage_count=coverage_by_signal[signal.name],
                         migration_policy=signal.migration_policy,
                     )
                 )
@@ -710,6 +823,16 @@ def _cmd_build(args: argparse.Namespace) -> int:
                 modf_mids_list.append(mids_idx)
 
         store_root = zarr.open_group(str(write_store_path), mode="r+")
+        if detail_manifest is not None:
+            store_root.attrs.update(
+                {
+                    "minimap_rgb_1024_render_mode": str(detail_manifest["RenderMode"]),
+                    "minimap_rgb_1024_texture_repeats_per_chunk": float(
+                        detail_manifest["TextureRepeatsPerChunk"]
+                    ),
+                    "minimap_rgb_1024_synthesis_format": str(detail_manifest["Format"]),
+                }
+            )
         store_root.create_array("mddf_placement_offset", data=np.array(mddf_offsets, dtype=np.int64))
         store_root.create_array("mddf_count", data=np.array(mddf_counts, dtype=np.int32))
 
@@ -848,6 +971,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 def _cmd_finalize(args: argparse.Namespace) -> int:
     manifest = _load_manifest(Path(args.manifest))
     row_lineages = _load_row_lineages(Path(args.row_lineages))
+    if args.policy_template:
+        policy_template = _load_manifest(Path(args.policy_template))
+        manifest = reconcile_manifest_policy(manifest, policy_template, row_lineages)
 
     report = finalize_store_report(Path(args.store), manifest, row_lineages)
     output_path = Path(args.output)
@@ -920,6 +1046,11 @@ def main() -> int:
     finalize_parser.add_argument("--store", required=True)
     finalize_parser.add_argument("--manifest", required=True)
     finalize_parser.add_argument("--row-lineages", required=True)
+    finalize_parser.add_argument(
+        "--policy-template",
+        default=None,
+        help="optional frozen template used to reconcile required flags and observed coverage before finalization",
+    )
     finalize_parser.add_argument("--output", required=True)
     finalize_parser.set_defaults(handler=_cmd_finalize)
 

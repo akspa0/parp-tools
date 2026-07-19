@@ -98,7 +98,11 @@ and fail-closed rights/evidence behavior.
   tracks 2–6, requested times, and no invented direction/MCSH evidence.
 - [x] T033 [US1] Add the exact-build DBCD+WoWDBDefs `Light` → `LightParams` → `LightIntBand` /
   `LightFloatBand` / `LightSkybox` resolver with build, table/definition hash, record/band, timed-sample,
-  BGRX, dense-join, spatial falloff, and fail-closed schema evidence tests.
+  BGRX, dense-join, spatial falloff, and fail-closed schema evidence tests. Wire the shared resolver
+  into the interactive viewer for 2.x+ no-LIT clients; recover and record the exact 2.4.3.8606
+  malformed band-count prefix and missing optional skybox reference without discarding usable
+  terrain bands. Live archive proof resolves Light 1 / LightParams 12. Synthetic minimap generation
+  is explicitly excluded from this runtime-lighting ownership.
 - [x] T034 [US1] Bridge MCNR and optional MCSH through active runtime terrain chunks/meshes, preserving
   the file `[X,Z,Y]` normal convention, Alpha/standard transforms, all 64 MCSH rows/columns, and the
   distinction between missing and present-all-lit shadow maps.

@@ -97,18 +97,30 @@ keyframes; those are database tables whose band records contain timed values.
   models under `Environments\Stars\*`, cvars `SkyShow/SunGlare/CloudDensity/…`.
 - **[V]** Early map-scoped `World\\Maps\\<map>\\lights.lit` files carry the applicable
   direct, ambient, five sky-band, fog, cloud, water, and related timed tracks. Their global
-  clear-weather entry is the first exact source to use for minimap generation. The later
+  clear-weather entry is an exact runtime-viewer/capture source. The later
   `Light`, `LightParams`, `LightIntBand`, `LightFloatBand`, and `LightSkybox` DBC chain is
   loaded through DBCD with the exact client build and the bundled WoWDBDefs definitions.
   LIT tracks and Light* DBC records are separate sources and must not be silently mixed.
 
 ### Renderer action
 - Implement a time-of-day → `{sunDir, sunColor, ambientColor, fogColor, fogStart, fogEnd,
-  skyColors}` evaluator from an explicitly selected exact-build source. For early minimap
-  capture, evaluate the global clear LIT group. For DBC-era builds, resolve the Light* records
-  through DBCD/WoWDBDefs. Use an authored fallback only when it is labeled as such.
+  skyColors}` evaluator from an explicitly selected exact-build source for the interactive viewer
+  and runtime-scene captures. For DBC-era builds, resolve the Light* records through
+  DBCD/WoWDBDefs. `synthetic-minimap` is excluded and uses its fixed-noon white global light.
+  Use an authored fallback only when it is labeled as such.
 - Sun direction sweeps across the sky with time; do **not** hardcode a fixed sun (except
   the *shadow* projection, which the client does fix — see §5).
+
+### 2.0.1 Shared DBC implementation proof (2.4.3.8606, 2026-07-18)
+
+The interactive viewer uses `BuildScopedLightDbcProfileResolver`. A live archive
+probe against the exact 2.4.3.8606 client resolves global Light row 1 / LightParams row 12 at noon:
+direct `(1.0, 0.53333336, 0.0)`, ambient `(0.40784314, 0.50980395, 0.6039216)`, fog
+`(0.3019608, 0.47058824, 0.56078434)`, fog end `18000`, start scalar `0.25`, with exact hashes for
+all five DBC and DBD inputs. One malformed LightIntBand declared count and one missing optional
+LightSkybox reference are preserved as recovery evidence rather than disabling terrain lighting.
+The viewer reports whether this source is active. Synthetic minimap generation is a separate fixed
+12:00 achromatic-global-light contract and does not load or apply these DBC colors.
 
 ### 2.1 Exact 0.5.3 direction proof (live client + PDB, 2026-07-15)
 
@@ -194,6 +206,9 @@ No MCCV / MCLV → **terrain color is computed from MCNR normals at runtime**, n
   each MCNR vertex, interpolate the lit term across the primitive, then apply the sampled MCSH
   visibility to the directional contribution. It does not use two-sided or per-fragment re-normalized
   lighting for the client-faithful capture mode.
+- Raw ADT MCNR axes are not renderer axes. Every CPU compositor path transforms the decoded normal
+  with the shared ADT-to-renderer mapping before `N dot L`; dotting the raw file vector directly
+  against the renderer/world-space solar vector reverses the visible hillshade direction.
 
 ### 3.4 Terrain shadow map (MCSH) **[V]**
 - MCSH is a **64×64 1-bit-per-texel** shadow mask per chunk (read as `byte & (1<<(x&7))`,
@@ -341,8 +356,9 @@ Source files: `DayNight.cpp`, `MapChunk.cpp`, `MapChunkRender.cpp`, `MapLight.cp
 
 ## 10. Still open (for a later pass)
 
-- ~~Source of exact timed color values~~ — **RESOLVED**: map LIT tracks for the early/minimap
-  lane and build-scoped Light* DBC records through DBCD/WoWDBDefs for the DBC lane. Still open:
+- ~~Source of exact timed color values~~ — **RESOLVED**: map LIT tracks and build-scoped Light* DBC
+  records through DBCD/WoWDBDefs for the runtime viewer/capture lane. `synthetic-minimap` deliberately
+  uses neither source and is fixed to an achromatic 12:00 global light. Still open:
   exact local-LIT coordinate conversion, five-band altitude placement from the four sky float
   arrays, and the native MCSH attenuation coefficient.
 - ~~Whether terrain lighting is FFP-GPU or a CPU vertex-color bake~~ — **RESOLVED**: terrain VBO

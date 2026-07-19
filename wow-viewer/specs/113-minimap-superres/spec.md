@@ -1,4 +1,4 @@
-# Feature Specification: Minimap Super-Resolution (Real-ESRGAN) from Authored LR to Detail-Rendered HR
+# Feature Specification: ComfyUI-Native Minimap Super-Resolution from Authored LR to Detail-Rendered HR
 
 **Feature Branch**: `113-minimap-superres`
 
@@ -40,15 +40,20 @@ extreme details that are otherwise lost."
   (too small to gauge anything).
 - **User scope decisions (2026-07-18)**: HR detail from a NEW detail-preserving render; LR = real
   authored minimap; first target scale ×4 (256→1024), pipeline built to go bigger later.
+- **Deployment decision (2026-07-18)**: the checkpoint must load in ComfyUI's standard `Load
+  Upscale Model` node with no custom node. RealPLKSR is the primary generator because spandrel
+  recognizes it natively and it fits the 16 GB local budget; DAT-2 is the quality-ceiling follow-up
+  and RRDBNet remains a compatibility floor, not this first implementation.
 
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Detail-Rendered HR, Spatially Aligned to the Authored LR (Priority: P1) — MVP
 
 The dataset operator produces a detail-preserving 1024 render for each tile that samples real
-terrain texture pixels, and proves it is spatially registered to the authored client minimap for
-the same tile — so an (authored 256, detail 1024) pair is a valid super-resolution pair, not two
-misaligned pictures.
+terrain texture pixels, characterizes raw pixel registration against the authored client minimap,
+and proves the two sources share exact tile identity. When authored objects/icons prevent a useful
+full-frame pixel score, the operator must explicitly select the terrain-only cross-domain contract
+and persist a same-row visual review before pairing.
 
 **Why this priority**: Every downstream step (pair assembly, training, evaluation) is worthless if
 the HR is either detail-free or misaligned with the LR. This story is the make-or-break foundation:
@@ -65,10 +70,10 @@ transpose needed) — or the exact misregistration is characterized so it can be
 1. **Given** a tile with decodable terrain textures, **When** the detail-preserving render runs,
    **Then** its output contains real texture-pixel detail (high-frequency content materially above
    a bicubic upscale of the material-average render), not merely upsampled flat colors.
-2. **Given** a tile with both an authored client minimap and a detail render, **When** the two are
-   registered, **Then** their alignment error under the identity transform is below the stated
-   tolerance, OR a fixed corrective transform (flip/rotate/transpose/offset) is identified that
-   brings them into alignment for all sampled tiles consistently.
+2. **Given** a tile with both an authored client minimap and a detail render, **When** registration
+   is analyzed, **Then** either identity/a single fixed transform passes the stated tolerance, OR
+   the report records that raw pixels cross render domains and the operator explicitly proves
+   same-row identity through the persisted visual-review contract; per-tile transforms are forbidden.
 3. **Given** a tile whose textures cannot be decoded, **When** the detail render is attempted,
    **Then** it is honestly skipped and recorded — never emitted as a flat or fabricated HR.
 4. **Given** the detail render at 1024, **When** compared to the moire failure that motivated the
@@ -83,7 +88,7 @@ The dataset operator assembles a training set of aligned (authored LR, detail HR
 Kalimdor and Azeroth, including only tiles that have BOTH a real authored minimap and a successful
 detail render, with an honest held-out evaluation split and no tile crossing it.
 
-**Why this priority**: Real-ESRGAN training consumes paired LR/HR data; the pairing, coverage
+**Why this priority**: supervised SR training consumes paired LR/HR data; the pairing, coverage
 honesty, and leak-safe split are what make the trained model's evaluation trustworthy.
 
 **Independent Test**: The assembled pair set contains only tiles with both sources present; each
@@ -103,9 +108,9 @@ actual `minimap_rgb_authored`/detail coverage.
 
 ---
 
-### User Story 3 - Trained Super-Resolution Model and Evaluation (Priority: P3)
+### User Story 3 - Trained ComfyUI-Native Super-Resolution Model and Evaluation (Priority: P3)
 
-The model operator trains a Real-ESRGAN super-resolution model on the aligned pairs and evaluates
+The model operator trains a RealPLKSR super-resolution model on the aligned pairs and evaluates
 it: given a real authored low-res client minimap, the model produces a detailed high-resolution
 minimap that is measurably and visibly superior to a naive upscale, on held-out tiles.
 
@@ -134,12 +139,11 @@ to preserve genuine detail rather than plausible-but-invented texture.
 
 ### Edge Cases
 
-- **Misalignment beyond correction**: if no single fixed transform registers authored↔detail across
-  sampled tiles (e.g. the authored minimap uses a different projection/crop than our render), the
-  real-LR→synthetic-HR pairing is invalid as-is. The spec must stop at the US1 gate and surface the
-  finding rather than train on misaligned pairs; a documented fallback is pure-synthetic pairs
-  (detail HR degraded down to LR), which changes the deployment story and requires a separate
-  decision.
+- **Raw registration failure**: if no single fixed transform registers authored↔detail across
+  sampled tiles, pixel-registered pairing is invalid. The report must preserve that failure. The
+  accepted fallback is the explicit terrain-only cross-domain same-row identity contract, which
+  requires a persisted visual review, records that authored objects are absent from HR, and forbids
+  per-tile transforms. Any other fallback still requires a separate decision.
 - **Detail render reintroduces moire** at 1024 on some texture families: treated as a US1 failure
   for those tiles, characterized, and either resolved or those tiles excluded — never shipped as HR.
 - **Authored minimap present but detail render fails** (or vice versa): the tile has no valid pair
@@ -157,21 +161,24 @@ to preserve genuine detail rather than plausible-but-invented texture.
 - **FR-001**: The system MUST provide a detail-preserving minimap render that samples real terrain
   texture pixels (with MCAL blending and MCNR lighting) at 1024/tile, distinct from the existing
   material-average render, and MUST NOT emit a flat/fabricated image where textures cannot be
-  decoded (honest skip instead).
+  decoded (honest skip instead). Both render intents MUST use the fixed 12:00 achromatic global
+  minimap light and MUST NOT consume runtime map LIT or Light DBC profiles.
 - **FR-002**: The detail render MUST contain measurably more real high-frequency texture detail
   than a bicubic upscale of the material-average render, and MUST NOT exhibit minimap-scale moire
   at 1024 (the condition that justified the material-average hack must be shown not to recur).
-- **FR-003**: The system MUST verify spatial registration between the authored client minimap and
-  the detail render for the same tile, quantify the alignment error, and either confirm identity
-  alignment within tolerance or identify a single fixed corrective transform that aligns all
-  sampled tiles; it MUST NOT assume alignment.
+- **FR-003**: The system MUST characterize spatial registration between the authored client minimap
+  and detail render for the same tile and preserve the raw result. It may use either identity/a
+  single fixed corrective transform that aligns all sampled tiles, or an explicitly selected
+  terrain-only cross-domain same-row identity mode backed by persisted visual-review evidence. It
+  MUST NOT infer or apply per-tile transforms.
 - **FR-004**: The super-resolution pair set MUST include only tiles that have both a populated
   authored minimap and a successful detail render, from Kalimdor and Azeroth only; excluded tiles
   MUST be counted, never zero-filled into pairs.
 - **FR-005**: The pair set MUST carry a deterministic train/eval split in which no tile appears on
   both sides; PVPZone02 and Kalidar MUST NOT appear in this lane.
-- **FR-006**: The model MUST be a single-purpose image super-resolution model (Real-ESRGAN family);
-  it MUST NOT be multi-task or share weights with any terrain-signal model.
+- **FR-006**: The model MUST be a single-purpose RealPLKSR ×4 image super-resolution model whose
+  bare state dict is recognized by spandrel/ComfyUI's standard upscale-model loader; it MUST NOT be
+  multi-task or share weights with any terrain-signal model.
 - **FR-007**: Training MUST be user-executed with explicit per-run go-ahead; tooling prepares and
   prints exact commands but never launches training itself.
 - **FR-008**: Every training run MUST record pair-set identity, split, model/loss configuration,
@@ -203,9 +210,10 @@ to preserve genuine detail rather than plausible-but-invented texture.
 
 - **SC-001**: On a sampled set of tiles, the detail render's high-frequency content exceeds a
   bicubic upscale of the material-average render by a stated margin, with no visible moire at 1024.
-- **SC-002**: Authored↔detail registration error is characterized on a sample and is either within
-  tolerance under identity, or a single corrective transform brings all sampled tiles within
-  tolerance — the US1 gate passes explicitly or the spec halts with the finding.
+- **SC-002**: Authored↔detail registration error is characterized on a sample. The selected pair
+  contract is either identity/a single fixed corrective transform within tolerance, or the explicit
+  terrain-only cross-domain same-row identity mode with persisted visual-review evidence and no
+  per-tile transform.
 - **SC-003**: The SR pair set contains only tiles with both sources present from the two big maps,
   with a deterministic leak-free split, and its coverage is reported against the store's actual
   authored/detail coverage.
@@ -224,14 +232,14 @@ to preserve genuine detail rather than plausible-but-invented texture.
 - The authored client minimap and our render share the same per-tile world bounds (both are
   per-(tileX,tileY) tile renders); only pixel-level orientation/offset is in question, which US1
   resolves.
-- Real-ESRGAN is the chosen model family (user-specified); the exact generator/discriminator/loss
-  and whether to fine-tune from public pretrained SR weights are plan-level decisions, subject to
-  the constitution (repo-independence: any dependency is a package, not a path reference).
+- The user's original Real-ESRGAN request establishes the supervised SR lane; the later explicit
+  ComfyUI-native constraint selects RealPLKSR for the first generator. Optional GAN fine-tuning and
+  any pretrained initialization remain separately gated.
 - The material-average render (`minimap_rgb`, 256) remains the height model's input (Spec 112) and
   is unchanged by this spec; only the 1024 render becomes detail-preserving.
 - ×4 (256→1024) is the first and only delivered scale; 2048/4096 are future work.
 - Training compute is the user's local CUDA GPU unless a cloud run is separately authorized; the
-  Real-ESRGAN training is heavier than the Spec 112 height model and may need patch-based training,
+  RealPLKSR training is heavier than the Spec 112 height model and uses patch-based training,
   which is a plan-level concern.
 - Constitution principle IV (terrain residual chain) governs terrain-signal models; the minimap SR
   model is a distinct single-purpose image model and is evaluated under that lens in the plan's

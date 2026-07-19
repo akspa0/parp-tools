@@ -144,7 +144,7 @@ unresolved technical ambiguity remains.
 7. Add a Core.IO compositor and stitcher that reuse decoded MTEX/MCLY/MCAL, MCNR, and MCSH data;
    verify their weighted blend, lighting, and transparent-hole behavior with focused tests.
 8. Replace the `synthetic-minimap` stub with a map-aware Harvest command that emits tile PNGs,
-   a stitched PNG, and a provenance manifest at an exact selected clock minute.
+   a stitched PNG, and a provenance manifest under one fixed 12:00 achromatic global light.
 9. Add a Tools > Export dialog that resolves the in-repository Harvest command (built output or
    source-project fallback) instead of assuming an external binary exists.
 10. Run focused test/build proof, then hand the user one LIT and one no-LIT real-client visual/export

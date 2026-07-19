@@ -39,6 +39,10 @@ public class LightService
         : _classicCatalog.Zones.Count(zone => zone.ContinentId == _mapId);
     public int DataEntryCount => _classicCatalog?.TimedSampleCount ?? _lightData.Values.Sum(v => v.Count);
     public LightDbcEvaluationEvidence? LastDbcEvidence { get; private set; }
+    public string Source { get; private set; } = "not loaded";
+    public string Status { get; private set; } = "Lighting database not loaded.";
+    public int BandCountRecoveryCount => _classicCatalog?.BandCountRecoveries.Length ?? 0;
+    public int MissingOptionalSkyboxCount => _classicCatalog?.MissingSkyboxReferences.Length ?? 0;
 
     /// <summary>
     /// Load the exact-build lighting database chain. Classic builds use the native
@@ -52,6 +56,8 @@ public class LightService
         _classicCatalog = null;
         LastDbcEvidence = null;
         _mapId = mapId;
+        Source = "loading";
+        Status = $"Loading exact-build outdoor lighting for map {mapId}...";
 
         try
         {
@@ -62,6 +68,10 @@ public class LightService
             ViewerLog.Trace(
                 $"[LightService] Loaded exact-build Light* chain for map {mapId}: " +
                 $"{ZoneCount} zones, {DataEntryCount} timed samples");
+            Source = "Light/LightParams/LightIntBand/LightFloatBand";
+            Status = $"Loaded exact-build Light* DBC chain ({ZoneCount} map zones, " +
+                $"{BandCountRecoveryCount} explicit band-count recoveries, " +
+                $"{MissingOptionalSkyboxCount} missing optional skybox references).";
             return;
         }
         catch (Exception ex)
@@ -78,6 +88,10 @@ public class LightService
         LoadLightData(dbcd, build);
 
         ViewerLog.Trace($"[LightService] Loaded {_zones.Count} light zones for map {mapId}, {DataEntryCount} data entries");
+        Source = _zones.Count > 0 && DataEntryCount > 0 ? "LightData compatibility" : "unavailable";
+        Status = _zones.Count > 0 && DataEntryCount > 0
+            ? $"Loaded flattened LightData compatibility path ({_zones.Count} zones, {DataEntryCount} samples)."
+            : $"No usable exact-build Light* or LightData profile was loaded for map {mapId}.";
     }
 
     private void LoadLightZones(DBCD.DBCD dbcd, string build, int mapId)
@@ -333,9 +347,14 @@ public class LightService
             ActiveLightId = value.Evidence.LocalProfile?.LightRecordId
                 ?? value.Evidence.GlobalProfile?.LightRecordId
                 ?? -1;
+            Status = $"Active exact-build DBC light {ActiveLightId} at time {value.Evidence.NormalizedTime}/2880 " +
+                $"({BandCountRecoveryCount} recorded band-count recoveries).";
         }
         catch (Exception ex)
         {
+            ActiveLightId = -1;
+            LastDbcEvidence = null;
+            Status = $"Exact-build Light* evaluation failed: {ex.Message}";
             ViewerLog.Trace(
                 $"[LightService] Exact-build Light* evaluation failed for map {_mapId}, " +
                 $"time {TimeOfDay}, world position {worldPosition}: {ex.Message}");

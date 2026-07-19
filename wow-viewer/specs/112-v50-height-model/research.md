@@ -127,9 +127,10 @@ function of relief shape, satisfying FR-007 (constant per-tile offset invariance
 adding a constant to every height in a tile shifts `tile_min`/`tile_max` by the same constant and
 leaves the normalized values unchanged.
 
-**Decision**: Adopt per-tile min-max to `[0, 1]`, with a small floor (e.g. 1.0 world unit) on the
-denominator so a genuinely flat tile normalizes to a well-defined constant (0.5) rather than
-dividing by ~0. The target contract records `tile_min`/`tile_max` alongside the normalized field so
+**Decision**: Adopt per-tile min-max to `[0, 1]`, with a 1.0-world-unit floor on the denominator so
+a genuinely flat tile normalizes to the well-defined constant 0 rather than dividing by ~0, while
+a near-flat tile retains its small relief without amplifying it. The target contract records
+`tile_min`/`tile_max` alongside the normalized field so
 reconstruction (decode back to world-unit height) is exact, not approximate — this pair is the
 "Relative-Height Target Contract" entity from spec.md.
 
@@ -151,6 +152,9 @@ relative-height contract from Decision 5, sized to train in minutes on the avail
 ~600-tile corpus. No DepthAnything-family or other large pretrained backbone (standing memory).
 Exact layer counts/widths are an implementation-time tuning detail, not a planning decision — the
 contract (Decision 5) and the one-signal constraint (constitution IV) are what this plan fixes.
+The first run uses Smooth-L1 point loss plus a 0.25-weighted first-difference L1 term: the point
+term fits relief values while the bounded gradient term penalizes washed-out or noisy topology.
+`test_height_relative_model.py` validates finite forward/backward behavior for that exact loss.
 
 **Alternatives considered**: A pretrained ImageNet backbone (as `WdlPriorNet`'s RGB normalization
 constants hint it may have partially assumed) was considered; deferred rather than rejected outright

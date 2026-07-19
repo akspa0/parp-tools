@@ -55,6 +55,24 @@ public sealed record LightDbcFloatBandRecord(
     int RecordId,
     ImmutableArray<LightDbcFloatSample> Samples);
 
+/// <summary>
+/// Explicit evidence that a malformed declared band count was replaced by the finite populated
+/// Time/Data prefix already present in the exact client table. The source bytes are never changed.
+/// </summary>
+public sealed record LightDbcBandCountRecovery(
+    string Table,
+    int RecordId,
+    int DeclaredCount,
+    int RecoveredCount);
+
+/// <summary>
+/// An optional LightParams skybox reference that is absent from the exact-build LightSkybox table.
+/// Terrain direct, ambient, and fog bands remain independently usable.
+/// </summary>
+public sealed record LightDbcMissingSkyboxReference(
+    int LightParamsRecordId,
+    int LightSkyboxRecordId);
+
 public sealed record LightDbcSkyboxRecord(
     int RecordId,
     string Name,

@@ -10,7 +10,7 @@ so `minimap_rgb_1024` still equals `minimap_rgb` in row coverage.
 | Aspect | Value |
 |---|---|
 | Signal | `minimap_rgb_1024` (existing) |
-| Render mode | new `detail` mode: per-pixel real BLP texel sample (bilinear) at terrain UV, MCAL-blended, MCNR-lit |
+| Render mode | new `detail` mode: mip-filtered bilinear sample from real decoded BLP texels at the production terrain UV (8 repeats/chunk), MCAL-blended, MCNR-lit |
 | Selection flag | `synthetic-minimap --detail` (1024 pass); 256 pass stays material-average |
 | Honesty | tiles with undecodable textures are skipped (unavailable), never flat-filled |
 | Provenance | synthesis manifest records `render_mode=detail` and the texel-repeat frequency used |
@@ -26,9 +26,12 @@ detail `minimap_rgb_1024`.
 | `per_tile` | list[{tile, best_transform, residual_error}] | best dihedral transform + small translation, and its NCC/phase-corr residual |
 | `best_transform_global` | str | one of `identity` / `rot90` / `rot180` / `rot270` / `flip_h` / `flip_v` / `transpose` / `anti_transpose` |
 | `transform_is_consistent` | bool | true iff one transform wins for every sampled tile within tolerance |
+| `best_offset_global` | int[2] | fixed LR-pixel `[dy, dx]` correction selected across the sample |
+| `offset_is_consistent` | bool | true iff every sampled offset is within the declared one-pixel tolerance of the global offset |
 | `residual_p50` / `residual_p95` | float | aggregate registration error under the chosen transform |
-| `gate` | `pass_identity` / `pass_with_transform` / `fail_inconsistent` | US1 verdict; `fail_inconsistent` halts the spec |
+| `gate` | `pass_identity` / `pass_with_transform` / `fail_inconsistent` | raw pixel-registration verdict; `fail_inconsistent` blocks pixel-registered mode but may be retained as diagnostic evidence for the explicit terrain-only cross-domain mode |
 | `corrective_transform` | str \| null | the transform to apply to the render (or pairing) when `pass_with_transform` |
+| `corrective_offset_lr` | int[2] \| null | fixed LR-pixel shift; pair assembly multiplies it by the declared scale before shifting HR without wrap |
 
 ## SR Pair Set (trainer-facing, `v50-sr-pairset-v1`)
 
@@ -46,7 +49,12 @@ A curriculum-style Zarr store referencing store rows; each entry is one tile's a
 | attrs: `schema` | `v50-sr-pairset-v1` | |
 | attrs: `scale` | int | 4 (256→1024); not hardcoded elsewhere (FR-011) |
 | attrs: `corrective_transform` | str | carried from the alignment report |
+| attrs: `corrective_offset_lr` | int[2] | carried from the alignment report and applied to HR at ×4 |
 | attrs: `maps` | list[str] | `["Azeroth","Kalimdor"]` only |
+| attrs: `pairing_mode` | str | `pixel_registered_sr` or explicit `terrain_only_cross_domain_same_tile` |
+| attrs: `visual_review_report` | str | required for terrain-only cross-domain mode; empty for a passing pixel-registration gate |
+| attrs: `authored_object_policy` | str | authored LR may contain client-baked objects |
+| attrs: `synthetic_object_policy` | str | detail HR is terrain-only and contains no generated objects |
 
 Coverage honesty (FR-004): a tile enters the pair set only if BOTH `minimap_rgb_authored` and the
 detail `minimap_rgb_1024` are populated for it; excluded tiles are counted in the summary, never
@@ -56,12 +64,13 @@ zero-filled.
 
 | Field | Type | Notes |
 |---|---|---|
-| `arch` | str | `rrdbnet_x4` |
+| `arch` | str | `realplksr_x4` (spandrel's canonical RealPLKSR implementation) |
 | `stage` | `psnr` / `gan` | stage 1 (L1/PSNR) then optional stage 2 (GAN fine-tune) |
 | `losses` | dict | stage 1: `{l1: 1.0}`; stage 2 adds `{perceptual_vgg: w, gan: w}` |
 | `init_from` | str \| null | optional public RealESRGAN ×4 weights, if license/shape permit |
 | `patch_size` | int | training crop (HR) for patch-based training on a 16 GB GPU |
 | `degradation` | const `none_real_pairs` | NOT synthetic — real authored LR is the input (research Decision 4) |
+| `checkpoint_format` | const `spandrel_state_dict` | bare standard state dict, loader-round-tripped before promotion so ComfyUI needs no custom node |
 
 ## SR Training Run Summary
 

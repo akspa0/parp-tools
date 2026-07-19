@@ -6,6 +6,7 @@ public sealed class MapDirectoryLookup
 {
     private readonly Dictionary<string, string> _mapDirectoryLookup = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, string> _mapIdToDirectory = [];
+    private readonly Dictionary<string, int> _mapDirectoryToId = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<MapDirectoryEntry> _entries = [];
 
     public bool IsLoaded => _mapDirectoryLookup.Count > 0;
@@ -37,6 +38,20 @@ public sealed class MapDirectoryLookup
             return directory;
 
         return _mapDirectoryLookup.TryGetValue(mapNameOrId, out string? match) ? match : null;
+    }
+
+    public bool TryResolveId(string mapNameOrId, out int id)
+    {
+        id = -1;
+        ArgumentException.ThrowIfNullOrWhiteSpace(mapNameOrId);
+        if (int.TryParse(mapNameOrId, out int numericId) && _mapIdToDirectory.ContainsKey(numericId))
+        {
+            id = numericId;
+            return true;
+        }
+
+        string? directory = ResolveDirectory(mapNameOrId);
+        return directory is not null && _mapDirectoryToId.TryGetValue(directory, out id);
     }
 
     private static byte[]? TryReadFromDisk(IEnumerable<string> searchPaths)
@@ -87,6 +102,7 @@ public sealed class MapDirectoryLookup
                     mapName = dbc.GetString(rowIndex, 4);
 
                 _mapIdToDirectory[id] = directory;
+                _mapDirectoryToId[directory] = id;
                 _mapDirectoryLookup.TryAdd(directory, directory);
                 _entries.Add(new MapDirectoryEntry(id, directory, string.IsNullOrWhiteSpace(mapName) ? directory : mapName));
 

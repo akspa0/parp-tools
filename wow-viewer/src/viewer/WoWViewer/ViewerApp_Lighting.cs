@@ -158,6 +158,21 @@ public partial class ViewerApp
     {
         ImGui.SeparatorText("Effective terrain lighting");
 
+        if (scene.LightService is { } dbcLighting)
+        {
+            Vector4 statusColor = dbcLighting.ActiveLightId >= 0
+                ? new Vector4(0.45f, 0.85f, 0.45f, 1f)
+                : new Vector4(0.95f, 0.55f, 0.35f, 1f);
+            ImGui.TextColored(statusColor, dbcLighting.ActiveLightId >= 0 ? "DBC ACTIVE" : "DBC INACTIVE");
+            ImGui.TextWrapped($"Source: {dbcLighting.Source}");
+            ImGui.TextWrapped(dbcLighting.Status);
+        }
+        else
+        {
+            ImGui.TextColored(new Vector4(0.95f, 0.55f, 0.35f, 1f), "DBC NOT LOADED");
+            ImGui.TextDisabled("The loaded world has no exact-build Light DBC service.");
+        }
+
         TerrainLighting? lighting = _terrainManager?.Lighting ?? _vlmTerrainManager?.Lighting;
         if (lighting == null)
         {

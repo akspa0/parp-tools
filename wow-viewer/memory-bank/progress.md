@@ -1,6 +1,50 @@
 # Progress — wow-viewer
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
+
+## Specs 112/113 — implementation continuation
+
+- Corrected the shared terrain lighting seam: CPU minimap composition now transforms raw ADT MCNR
+  normals into renderer coordinates before the Lambert dot. This invalidates only previously
+  synthesized RGB outputs, not the numeric reconstruction arrays in the same v50 stores.
+- Corrected lighting ownership after the 2.4.3 authored-reference proof: `synthetic-minimap` now
+  uses one fixed-noon achromatic global light for every era, emits v6 `NoonWhiteGlobal` evidence,
+  and rejects non-noon/DBC options. Exact-build Light DBC loading, anomaly recovery, and status are
+  retained only in the interactive viewer. Focused compositor/detail/DBC tests pass 38/38; Harvest
+  builds with zero errors.
+- Corrected the visual-proof handoff after Expansion01 32,32 produced black despite WDT occupancy.
+  Added bounded multi-tile authored-reference output and all-black rejection. The replacement six
+  Expansion01 coordinates have readable nonblack authored minimaps and 5-10 nonblack decoded terrain
+  textures each; the five Kalimdor coordinates come from the persisted same-row visual review.
+
+- Spec 112 T012/T013/T016 real-data gates recorded; T017-T020 landed. Relative-height contract now
+  follows the published floor formula exactly (flat→0, near-flat relief retained), and the trainer
+  fails closed on wrong schema, out-of-scope maps, row misalignment, invalid source/split values,
+  or split-group leakage. T021 remains the user-run CUDA training gate.
+- Spec 113 T001-T008 landed. Corrected the initial false 1-repeat assumption to the production
+  shader's 8 repeats/chunk and added deterministic mip selection to avoid base-texture minification
+  aliasing. The canonical v50 build makes 256 material-average / 1024 detail explicit and records
+  detail provenance on the store. Alignment now gates both big maps on one dihedral transform and
+  fixed LR offset; wrapped-edge correlation is forbidden.
+- Specs/runbooks/README/user guide synchronized to the ComfyUI-native RealPLKSR decision and the
+  exact staged T009 commands. `H:\CLIENTS` policy in active data-path docs now matches AGENTS Rule 9.
+- Follow-up: synthesized minimaps are now cataloged as optional partial-coverage signals; the
+  finalizer's `--policy-template` reconciles stale manifests using only real row lineage, so the
+  already-built Kalimdor detail staging store can finalize without re-harvest (731/951 synthesis
+  coverage, 220 honest gaps).
+- Real Spec 113 US1 proof: the 120-tile Kalimdor+Azeroth report returned `fail_inconsistent` (NCC
+  p50 0.211 / p05 0.000; no fixed transform or offset) although SC-001 detail gain passed at 16.10.
+  Visual comparison confirms an intentional authored-with-objects versus terrain-only target domain,
+  plus the now-fixed light-direction bug. Continue under the explicit identity, terrain-only
+  cross-domain contract after the user signs off the fresh comparison sets and synthetic RGB is rebuilt.
+- Added the same-row datastore contact-sheet tool and fail-closed terrain-only pair builder. The
+  builder requires explicit cross-domain mode plus persisted visual-review evidence when raw NCC
+  fails, forbids per-tile transforms, counts every missing source, and preserves leak-safe splits.
+  The ComfyUI-native RealPLKSR model wrapper is also present; real pair-set promotion and trainer
+  implementation remain behind T010b/T013.
+- Verification: `tests/v50/ + test_v50_contract.py + test_v50_build_command.py` = 175 passed,
+  4 skipped; current combined DBC/lookup/compositor/detail C# focus = 41 passed; Harvest build =
+  0 errors; full Debug solution build = 0 errors (existing warnings remain).
 
 ## Spec 109 — v50 clean-room dataset (Setup & Build Pipeline complete and tested; ready for user build run)
 

@@ -79,14 +79,17 @@ public sealed class BuildScopedLightDbcProfileResolver
             hashingProvider.Snapshot(RequiredTableNames),
             HashDefinitionFiles(definitionsDirectory, RequiredTableNames));
 
+        List<LightDbcBandCountRecovery> bandCountRecoveries = [];
+
         return LightDbcCatalog.Create(
             exactBuild,
             ParseZones(light, exactBuild),
             ParseParams(lightParams, exactBuild),
-            ParseIntBands(intBands, exactBuild),
-            ParseFloatBands(floatBands, exactBuild),
+            ParseIntBands(intBands, exactBuild, bandCountRecoveries),
+            ParseFloatBands(floatBands, exactBuild, bandCountRecoveries),
             ParseSkyboxes(skyboxes, exactBuild),
-            sources);
+            sources,
+            bandCountRecoveries);
     }
 
     /// <summary>
@@ -318,14 +321,22 @@ public sealed class BuildScopedLightDbcProfileResolver
         }
     }
 
-    private static IEnumerable<LightDbcIntBandRecord> ParseIntBands(IDBCDStorage storage, string build)
+    private static IEnumerable<LightDbcIntBandRecord> ParseIntBands(
+        IDBCDStorage storage,
+        string build,
+        ICollection<LightDbcBandCountRecovery> recoveries)
     {
         foreach (DBCDRow row in storage.Values)
         {
-            int count = GetRequiredInt(row, "Num", "LightIntBand", build);
+            int declaredCount = GetRequiredInt(row, "Num", "LightIntBand", build);
             int[] times = GetRequiredArray<int>(row, "Time", "LightIntBand", build);
             int[] data = GetRequiredArray<int>(row, "Data", "LightIntBand", build);
-            ValidateBandCount("LightIntBand", row.ID, build, count, times.Length, data.Length);
+            int count = ResolveBandSampleCount(declaredCount, times, data);
+            if (count != declaredCount)
+            {
+                recoveries.Add(new LightDbcBandCountRecovery(
+                    "LightIntBand", row.ID, declaredCount, count));
+            }
 
             ImmutableArray<LightDbcColorSample>.Builder samples =
                 ImmutableArray.CreateBuilder<LightDbcColorSample>(count);
@@ -338,14 +349,22 @@ public sealed class BuildScopedLightDbcProfileResolver
         }
     }
 
-    private static IEnumerable<LightDbcFloatBandRecord> ParseFloatBands(IDBCDStorage storage, string build)
+    private static IEnumerable<LightDbcFloatBandRecord> ParseFloatBands(
+        IDBCDStorage storage,
+        string build,
+        ICollection<LightDbcBandCountRecovery> recoveries)
     {
         foreach (DBCDRow row in storage.Values)
         {
-            int count = GetRequiredInt(row, "Num", "LightFloatBand", build);
+            int declaredCount = GetRequiredInt(row, "Num", "LightFloatBand", build);
             int[] times = GetRequiredArray<int>(row, "Time", "LightFloatBand", build);
             float[] data = GetRequiredArray<float>(row, "Data", "LightFloatBand", build);
-            ValidateBandCount("LightFloatBand", row.ID, build, count, times.Length, data.Length);
+            int count = ResolveBandSampleCount(declaredCount, times, data);
+            if (count != declaredCount)
+            {
+                recoveries.Add(new LightDbcBandCountRecovery(
+                    "LightFloatBand", row.ID, declaredCount, count));
+            }
 
             ImmutableArray<LightDbcFloatSample>.Builder samples =
                 ImmutableArray.CreateBuilder<LightDbcFloatSample>(count);
@@ -370,22 +389,36 @@ public sealed class BuildScopedLightDbcProfileResolver
         }
     }
 
-    private static void ValidateBandCount(
-        string table,
-        int recordId,
-        string build,
-        int count,
-        int timeLength,
-        int dataLength)
+    /// <summary>
+    /// Accepts a valid declared sample count, or recovers an invalid count from the last populated
+    /// Time/Data pair. This covers the exact 2.4.3.8606 LightIntBand row 360 defect without
+    /// truncating, renumbering, or replacing any client sample values.
+    /// </summary>
+    public static int ResolveBandSampleCount<T>(
+        int declaredCount,
+        IReadOnlyList<int> times,
+        IReadOnlyList<T> data)
     {
-        if (count < 0 || count > timeLength || count > dataLength)
+        ArgumentNullException.ThrowIfNull(times);
+        ArgumentNullException.ThrowIfNull(data);
+        int capacity = Math.Min(times.Count, data.Count);
+        if (declaredCount >= 0 && declaredCount <= capacity)
+            return declaredCount;
+
+        EqualityComparer<T> comparer = EqualityComparer<T>.Default;
+        int lastPopulatedIndex = -1;
+        for (int index = 0; index < capacity; index++)
         {
-            throw InvalidRecord(
-                table,
-                recordId,
-                build,
-                $"Num={count} exceeds Time/Data capacity ({timeLength}/{dataLength}).");
+            if (times[index] != 0 || !comparer.Equals(data[index], default!))
+                lastPopulatedIndex = index;
         }
+
+        if (lastPopulatedIndex < 0)
+            throw new LightDbcLoadException(
+                $"Declared band sample count {declaredCount} exceeds Time/Data capacity {capacity}, " +
+                "and no populated sample prefix can be recovered.");
+
+        return lastPopulatedIndex + 1;
     }
 
     private static int GetRequiredInt(DBCDRow row, string column, string table, string build)

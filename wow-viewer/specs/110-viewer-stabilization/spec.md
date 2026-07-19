@@ -53,19 +53,20 @@ tile PNGs, one combined map PNG, or both from the Tools menu.
 **Why this priority**: Missing or stale authored minimaps should not make on-disk terrain
 uninspectable, particularly in Alpha-era clients such as 0.5.3.
 
-**Independent Test**: Use a small fixture pack to prove MCAL/MCLY compositing and whole-map
-stitching, then have the user run one real map export with and without a usable LIT profile.
+**Independent Test**: Use a small fixture pack to prove MCAL/MCLY compositing, fixed-noon white
+lighting, and whole-map stitching, then have the user run one bounded authored-reference export.
 
 **Acceptance Scenarios**:
 
 1. **Given** a client map with terrain tiles but no minimap assets, **When** the user exports a
    synthesized minimap, **Then** each terrain baseline PNG is composed directly from the tile's MTEX/MCLY/
    MCAL data and BLP pixels rather than from an authored minimap image.
-2. **Given** a selected minute-precise time of day and a readable supported LIT profile, **When** the export runs,
-   **Then** the PNGs use the same neutral-white top-edge terrain-light profile as a map without
-   LIT, record the selected time, and explicitly record that LIT was excluded from synthesis.
-3. **Given** no usable LIT profile, **When** the export runs, **Then** it emits the same visible
-   neutral-white top-edge terrain result; LIT availability cannot tint or redirect the minimap.
+2. **Given** any supported client in the synthetic-minimap lane, **When** the export runs, **Then**
+   the PNGs use one fixed 12:00 achromatic global terrain light and explicitly record that map LIT
+   and Light DBC runtime colors were excluded.
+3. **Given** a 2.x+ client without a usable map LIT source, **When** the interactive viewer evaluates
+   outdoor lighting, **Then** it resolves exact-build `Light`/`LightParams`/band data and exposes
+   source/provenance rather than silently substituting muddy compatibility lighting.
 4. **Given** an export configured for tiles and a whole map, **When** it completes, **Then** it
    writes one PNG per occupied terrain tile and a single stitched PNG covering their map-coordinate
    bounds, leaving missing tiles transparent instead of inventing terrain.
@@ -213,15 +214,17 @@ A user can determine which WMO v14/v17 and M2-to-MDX conversions are supported, 
 - **FR-017**: Selecting a positional LIT entry from the list or minimap MUST highlight the same entry in the list and both minimap views.
 - **FR-018**: Double-clicking a navigable LIT list entry MUST move the 3D camera to a safe viewing point above that entry and preserve a usable downward-looking orientation.
 - **FR-019**: The Tools menu MUST expose a terrain-derived minimap export that accepts a configured
-  client root, map name, minute-precise time of day, output location, and independent
-  per-tile/whole-map targets. It MUST accept compact `HHmm` (for example `1215`), `HH:mm`, and
-  existing decimal-hour values.
+  client root, map name, output location, and independent per-tile/whole-map targets. Its production
+  lighting time is fixed at 12:00; a supplied `--time-hours` value MUST be exactly noon.
 - **FR-020**: The export MUST compose minimap pixels from decoded terrain texture layers and alpha
   masks; it MUST NOT require or substitute a client-authored minimap image.
-- **FR-021**: The export MUST use a neutral-white, north/top-edge terrain-light profile at every
-  selected time. It MUST NOT consume LIT color tracks, LIT fog tracks, or recovered native
-  world-light direction. The manifest MUST record that exclusion and MUST NOT claim client-exact
-  lighting.
+- **FR-021**: The export MUST use one fixed 12:00 neutral-white, north/top-edge global terrain-light
+  profile for every client era. It MUST NOT consume map LIT color/fog, local or global Light DBC
+  colors, or recovered native world-light direction. The manifest MUST record that exclusion and
+  MUST NOT claim client-exact runtime lighting.
+- **FR-021a**: For 2.x+ clients, the interactive viewer MUST resolve the exact-build Light DBC chain
+  when a usable map LIT source is absent and expose active/inactive DBC status plus its diagnostic.
+  This runtime-viewer contract MUST NOT be reused by synthetic-minimap generation.
 - **FR-022**: A whole-map export MUST stitch exactly the emitted terrain-tile outputs into one PNG
   with explicit tile-coordinate bounds and transparent missing-tile regions.
 - **FR-023**: The export MUST write a machine-readable manifest with client build identity, source
@@ -229,7 +232,7 @@ A user can determine which WMO v14/v17 and M2-to-MDX conversions are supported, 
 - **FR-023k**: The recovered 0.5.3.3368 world-light ray is diagnostic research only. Synthesized
   minimaps MUST exclude it and use the shared north/top-edge white terrain direction, whose
   positive terrain-X source (raw MCNR/MCVT world axes: +X = North, +Y = West, +Z = Up) prevents
-  hillshade inversion. The manifest records this as `minimap_white_light_not_lit_data`.
+  hillshade inversion. The manifest records this as `synthetic_minimap_fixed_noon_global_white`.
 - **FR-023l**: Every synthesized terrain tile MUST have an aligned liquid-bearing companion PNG
   whose filename ends in `_liquid.png`; whole-map export MUST stitch an equivalent `_liquid` map.
   The companion MUST use decoded unified liquid coverage and resolved basic types when available,
@@ -271,8 +274,10 @@ A user can determine which WMO v14/v17 and M2-to-MDX conversions are supported, 
   texture-id slot is zero.
 - **FR-023d**: When MCNR arrives as Alpha's sparse staggered terrain-vertex lattice, the compositor
   MUST evaluate the Lambert term at real vertices and interpolate it over the terrain triangles. It
-  MUST NOT treat the alternating dense-raster gaps as up-facing normals. The MCSH 256² occupancy
-  signal remains a separate model target and is not rewritten by this visual interpolation.
+  MUST first transform raw ADT normals into renderer coordinates, MUST NOT dot raw file axes with a
+  renderer/world-space light vector, and MUST NOT treat alternating dense-raster gaps as up-facing
+  normals. The MCSH 256² occupancy signal remains a separate model target and is not rewritten by
+  this visual interpolation.
 - **FR-023e**: Default synthesized minimap RGB MUST omit MCSH. MCSH remains a decoded static-shadow
   signal for diagnostics and training; an MCSH-baked RGB preview is permitted only through explicit
   opt-in and MUST be labeled as an exceptional historical-minimap diagnostic, not the normal export

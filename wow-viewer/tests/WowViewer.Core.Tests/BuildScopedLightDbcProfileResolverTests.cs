@@ -7,6 +7,46 @@ namespace WowViewer.Core.Tests;
 public sealed class BuildScopedLightDbcProfileResolverTests
 {
     [Fact]
+    public void ResolveBandSampleCount_RecoversExact243MalformedWaterBandPrefix()
+    {
+        int[] times = [360, 360, 720, 1440, 2520, 2640, 0, 0];
+        int[] colors = [6052956, 6052956, 7237230, 5789784, 7237230, 6052956, 0, 0];
+
+        int count = BuildScopedLightDbcProfileResolver.ResolveBandSampleCount(360, times, colors);
+
+        Assert.Equal(6, count);
+    }
+
+    [Fact]
+    public void ResolveBandSampleCount_PreservesValidZeroCount()
+    {
+        Assert.Equal(
+            0,
+            BuildScopedLightDbcProfileResolver.ResolveBandSampleCount(0, new int[16], new int[16]));
+    }
+
+    [Fact]
+    public void Catalog_PreservesMissingOptionalSkyboxWithoutRejectingTerrainBands()
+    {
+        LightDbcZoneRecord zone = Zone(recordId: 10, clearParamsId: 1, rawEnd: 0f);
+        LightDbcParamsRecord parameters = Params(1) with { LightSkyboxId = 18 };
+        (IEnumerable<LightDbcIntBandRecord> ints, IEnumerable<LightDbcFloatBandRecord> floats) =
+            Bands([(1, 0x00112233, 100f)]);
+
+        LightDbcCatalog catalog = LightDbcCatalog.Create(
+            "2.4.3.8606",
+            [zone],
+            [parameters],
+            ints,
+            floats,
+            []);
+
+        LightDbcEvaluation evaluation = catalog.EvaluateClearWeather(0, Vector3.Zero, 0);
+        Assert.Null(evaluation.PrimarySkybox);
+        Assert.Equal(new LightDbcMissingSkyboxReference(1, 18), Assert.Single(catalog.MissingSkyboxReferences));
+    }
+
+    [Fact]
     public void EvaluateColorBand_WrapsAcrossMidnight()
     {
         LightDbcIntBandRecord band = new(

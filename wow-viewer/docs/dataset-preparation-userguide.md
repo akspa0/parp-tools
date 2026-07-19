@@ -437,11 +437,10 @@ same raw store (no array data is ever copied or duplicated by either):
   manifest alone had been silently discarding roughly half of some maps' tiles (e.g. 51.8% of
   Azeroth) from the only curated view that existed before this manifest was added.
 
-A tile can legitimately be missing a required signal on real client data (e.g. a tile with terrain
-but no texture data, so minimap synthesis has nothing to composite) — `finalize` will report
-`finalization_state=incomplete` for that map and print exactly which signal and rows are affected.
-That is expected, not a failure: it doesn't stop the run, and curation is what drops those specific
-rows from both manifests above.
+A tile can legitimately lack optional client-backed data (for example, no usable texture data for
+minimap synthesis). `minimap_rgb` and `minimap_rgb_1024` record those rows as unavailable with
+honest partial coverage; curation and SR pairing select only rows with real lineage. A genuinely
+required signal such as `height_257` still makes `finalize` fail closed if it is missing.
 
 **If a run is interrupted or a map's `build` step fails partway**, it is safe to just re-run the same
 command: `write_v50_store` stages its write and only replaces a map's store once the new write fully
@@ -474,13 +473,13 @@ uv run python scripts/v50_build_dataset.py build `
   --write-manifest ../output/reports/v50/v50.1/build-manifest-0_5_3_3368-Kalimdor.json `
   --confirm-run
 
-# 2. Finalize -- MUST use the file --write-manifest just wrote, never --manifest-template
-#    (the template always declares row_count=0 and would report finalization_state=incomplete
-#    against every build, however good -- see the Phase 8 incident note above)
+# 2. Finalize -- use the file --write-manifest just wrote for real hashes, and the frozen
+#    policy template for required/optional status plus lineage-derived coverage.
 uv run python scripts/v50_build_dataset.py finalize `
   --store ../output/datasets/v50/v50.1/0_5_3_3368-Kalimdor.zarr `
   --manifest ../output/reports/v50/v50.1/build-manifest-0_5_3_3368-Kalimdor.json `
   --row-lineages ../output/reports/v50/v50.1/build-0_5_3_3368-Kalimdor.json `
+  --policy-template ./v50_configs/v50-manifest-template-0_5_3_3368.json `
   --output ../output/datasets/v50/v50.1/0_5_3_3368-Kalimdor.manifest.json
 
 # 3a. Pre-curate: strict, object-free manifest (for minimap-to-height reconstruction)
@@ -508,47 +507,62 @@ done for any build beyond `0_5_3_3368`.
 
 ### 8.4 Training on the corpus
 
-The canonical trainers (`v50_train_wdl_prior.py`, `v50_train_terrain.py`) refuse the per-map
-complete stores directly — their release gate requires the trainer-facing curriculum schema
-(`v50-mixed-curriculum-v1`) with a `split` index column. Build that store from the complete stores
-plus their **strict** curation manifests (the object-free profile is the correct one for
-height-supervision training):
+**Spec 112 is the current height lane.** The older RGB→absolute-WDL prior below was rejected by its
+real run: it peaked at epoch 1 because absolute map altitude is not inferable from minimap pixels.
+The replacement predicts one per-tile relative-height field under target contract `v112.1`; adding
+a constant altitude offset leaves its target byte-identical.
+
+The real dual-source curriculum already exists at
+`../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr`: 2,990 rows (1,629 authored +
+1,361 synthetic), 2,545 train / 445 validation, Kalimdor+Azeroth only. Each tile's authored and
+synthetic rows share one split group, so the two views cannot leak across train/validation. To
+rebuild it, use only the two big-map stores and their strict `-terrain` curation manifests:
 
 ```powershell
 uv run python scripts/v50_build_training_curriculum.py `
-  --store ../output/datasets/v50/v50.1/0_5_3_3368-Kalimdor.zarr  --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-Kalimdor `
-  --store ../output/datasets/v50/v50.1/0_5_3_3368-Azeroth.zarr   --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-Azeroth `
-  --store ../output/datasets/v50/v50.1/0_5_3_3368-PVPZone02.zarr --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-PVPZone02 `
-  --store ../output/datasets/v50/v50.1/0_5_3_3368-Kalidar.zarr   --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-Kalidar `
-  --output ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-strict_withinmap_v2.zarr `
+  --store ../output/datasets/v50/v50.1/0_5_3_3368-Kalimdor.zarr  --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-Kalimdor-terrain `
+  --store ../output/datasets/v50/v50.1/0_5_3_3368-Azeroth.zarr   --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-Azeroth-terrain `
+  --output ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
   --val-fraction 0.15
 ```
 
-Selection is manifest-driven (only reviewed `keep` rows are copied, bit-for-bit). **Use
-`--val-fraction` (within-map stratified holdout), not `--val-map`, for standard training.** The WDL
-target is absolute elevation on a global scale and real 0.5.3 maps sit at very different altitudes
-(measured on this corpus: PVPZone02 mean +381, Kalimdor +32, Kalidar −7, Azeroth −150), so a whole
-held-out map mostly measures an altitude offset the model has never seen — a real run against
-`--val-map PVPZone02` had its *best* val loss at epoch 1 and got monotonically worse as the model
-learned the training maps' true elevations. `--val-map` remains available strictly for deliberate
-cross-map generalization experiments, knowing that is what it measures.
-
-Then train stage 1 (the small RGB→WDL prior; CUDA required, minutes-scale on a desktop GPU):
+Train the relative-height model (CUDA required; **the user launches this command**, never the
+assistant):
 
 ```powershell
-uv run python scripts/v50_train_wdl_prior.py `
-  --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-strict_withinmap_v2.zarr `
+uv run python scripts/v50_train_height_relative.py `
+  --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
   --val-key split --val-value val `
-  --output ../output/v50/v50.1/wdl_prior_strict_v2 `
+  --output ../output/v50/v50.1/height_relative_v1 `
   --epochs 100 --batch 32 --workers 4 --patience 15
 ```
 
-Stage 2 (generate WDL priors for all rows, then train the V8 terrain refiner on *generated* — never
-ground-truth — WDL) follows the established runbook in
-`specs/108-image-wdl-prior/mixed-curriculum-userguide.md`, substituting this curriculum store and
-the `v50_*` script names.
+The trainer fails closed on the wrong store schema, maps outside Kalimdor/Azeroth, split-group
+leakage, or CPU-only execution. It writes `run_identity.json`, checkpoints, and a machine-readable
+`training_summary.json` with target-contract version, per-epoch validation MAE, the tile-mean
+baseline, and an epoch-1 structural-failure flag. Exact proof and estimates live in
+`specs/112-v50-height-model/quickstart.md`. The old `v50_train_wdl_prior.py` and
+`v50_train_terrain.py` commands remain only for the rejected Spec 103/108 legacy lane.
 
-### 8.5 Everything else (verify, curriculum, cleanup audit)
+### 8.5 Minimap super-resolution (Spec 113, corrected-light visual gate pending)
+
+Spec 113 upgrades only `minimap_rgb_1024` to a mip-filtered real-texel detail render (production
+eight repeats/chunk); the 256px material-average signal remains unchanged. The real 120-tile raw
+pixel gate reported `fail_inconsistent` (NCC p50 0.211, p05 0.000) despite a 16.10 detail-gain pass
+because authored client images may contain baked objects/icons while synthetic targets are
+terrain-only. The accepted contract is therefore explicit same-row identity, not a fabricated
+per-tile transform: `v50_visualize_store.py` persists authored/synthetic/detail/height/normal contact
+sheets, and `v50_build_sr_pairset.py --terrain-only-cross-domain --visual-review ...` requires that
+evidence before it will accept the raw diagnostic failure.
+
+The compositor now transforms MCNR normals into renderer space and every minimap era uses one fixed
+12:00 achromatic global light; LIT/Light DBC colors remain interactive-viewer inputs only. Existing
+synthetic RGB must be refreshed and visually accepted before building the real pair set. The pair
+builder and RealPLKSR model wrapper exist; the trainer intentionally does not yet exist. Exact
+comparison, datastore visual-review, pair-set, and future user-run training commands live in
+`specs/113-minimap-superres/quickstart.md`.
+
+### 8.6 Everything else (verify, curriculum, cleanup audit)
 
 `v50_build_dataset.py` also has `migrate-v18` (bit-preserving copy of verified V18 signals) and
 `curriculum` (immutable row-selection manifests, no array payloads) subcommands, and
@@ -559,6 +573,5 @@ reference this section summarizes.
 
 ---
 
-*Last updated: 2026-07-18 — dual curation manifests (strict object-free + object-inclusive), resilient
-multi-map pipeline (a dirty tile or one map's failure no longer aborts the whole run), and
-self-diagnosing `finalize` output.*
+*Last updated: 2026-07-19 — Spec 112 relative-height training is the active model lane; Spec 113
+detail-render/alignment is the gated SR lane. The absolute-WDL trainer is legacy/rejected.*

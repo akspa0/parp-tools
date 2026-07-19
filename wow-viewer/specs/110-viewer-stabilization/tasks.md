@@ -57,7 +57,7 @@ records its build and lighting provenance.
 - [x] T013 [US6] Add the reusable weighted terrain compositor and explicit lighting input in `src/core/WowViewer.Core.IO/Maps/TerrainMinimapCompositor.cs`
 - [x] T014 [US6] Add the reusable transparent-hole stitcher and explicit bounds/result contract in `src/core/WowViewer.Core.IO/Maps/TerrainMinimapStitcher.cs`
 - [x] T015 [P] [US6] Add compositor and stitcher coverage in `tests/WowViewer.Core.Tests/TerrainMinimapCompositorTests.cs`
-- [x] T016 [US6] Replace the Harvest `synthetic-minimap` stub with client-map, per-tile, whole-map, manifest, and LIT/fallback provenance support in `tools/harvest/WowViewer.Tool.Harvest/Program.cs`
+- [x] T016 [US6] Replace the Harvest `synthetic-minimap` stub with client-map, per-tile, whole-map, manifest, and explicit lighting-provenance support in `tools/harvest/WowViewer.Tool.Harvest/Program.cs`; T027q later fixes that provenance to the all-era noon-white contract.
 - [x] T017 [US6] Add an in-repository-resolving Tools > Export dialog in `src/viewer/WoWViewer/ViewerApp.cs` and `src/viewer/WoWViewer/ViewerApp_SynthesizedMinimapExport.cs`
 - [x] T018 [US1] [US6] Run focused fog/minimap tests and the Debug Viewer/Harvest build documented in `specs/110-viewer-stabilization/quickstart.md`
 - [ ] T019 [US1] [US6] [US7] Run the two-map LIT/no-LIT time-of-day, overlay, synthesized-minimap, visible-fog-slider, and Archeology playback visual proof in `specs/110-viewer-stabilization/quickstart.md`
@@ -109,6 +109,20 @@ white minimap light independent of world LIT, and make WL* liquid continuous.
 - [x] T027l [US6] Replace sparse WL* origin/vertex stamps with a shared world-geometry triangle rasterizer for all nine 4x4-block quads in both loose and archive-backed liquid paths; clip each raster sample against aligned terrain height; resolve WLW/WLQ header and WLM/WLL family liquid types into `LiquidBasicType257`; stamp contiguous-surface, above-terrain, and typed provenance markers; and make V16/V18/V50 builders reject any incomplete WL fallback so historic checkerboard, through-terrain, or default-water masks cannot enter a liquid-aware dataset.
 - [x] T027m [US6] Correct the shared authored solar vector's cardinal sign using the traced 1.0.0 world-light ghidra proof (`docs/architecture/wow-1.0.0-world-lighting-shadow-model-2026-07-15.md`): raw MCNR/MCVT world axes are +X = North, +Y = West, +Z = Up (`AdtTensorPackBuilder.AssembleNormals` applies no axis swap; `TerrainMeshBuilder` derives vertex world-X from row/tileY-indexed quantities that decrease southward), so the north-locked horizontal bias must be positive X, not negative. T027i/T027k had locked the source to negative X and mislabeled it "raster north," which actually sourced the sun from the south and inverted hillshade relief. Update `TerrainSolarDirection`, its shared-consumer doc comments, and the compositor test/spec/contract wording that encoded the inverted claim.
 - [x] T027n [US6] Stop sweeping the authored solar bearing through zero at solar noon/midnight. A user-run side-by-side of a synthesized tile against the real 0.5.3 client minimap for the same crater/lake feature showed the client keeps a persistent bright-north/dark-south hillshade at every sampled time, while the swept formula (`cos(sunAngle - pi/2)`) went exactly horizontal-less (straight overhead) at noon/midnight, washing out the relief on bowl/crater terrain. Lock the horizontal bearing to a fixed north-west share at every time of day (matching the traced ray's constant azimuth, §2.1) and vary only elevation. Add `TerrainSolarDirectionTests` regression coverage for the non-collapsing horizontal magnitude and fixed bearing ratio, and correct `AuthoredTerrainDayNightProfileTests`' now-inverted "vertical at noon" assertion.
+- [x] T027o [US6] Transform raw ADT MCNR normals to renderer coordinates before every compositor
+  Lambert dot. Wire the shared exact-build Light DBC resolver into the interactive viewer for 2.x+
+  no-LIT clients, expose active source/status and anomaly recoveries, and prove the real
+  2.4.3.8606 catalog plus focused asymmetric-normal regressions. Minimap use was removed by T027q.
+- [x] T027p [US6] Replace the inadequate WDT-occupied one-tile visual handoff with bounded
+  `--tile-list` plus `--authored-reference`. Emit native authored, synthetic, liquid, and
+  authored-vs-synthetic images per tile; reject missing/all-black authored references and all-black
+  synthetic results. Vet the 2.4.3 Expansion01 comparison set by WDT occupancy, nonblack authored
+  decode, and 5-10 nonblack decoded terrain BLPs; explicitly retire black tile 32,32.
+- [x] T027q [US6] Restore the minimap/viewer lighting ownership boundary after the Expansion01
+  proof showed local Light DBC colors crushing and purple-tinting synthetic terrain. Make every
+  `synthetic-minimap` path use one fixed 12:00 achromatic global light, reject non-noon/DBC options,
+  bump the manifest to v6, retain exact-build LIT/Light DBC only in the interactive viewer, and add
+  a focused no-darkening regression.
 
 ## Phase 4: User Story 2 - Render M2 assets through their native path (Priority: P1)
 

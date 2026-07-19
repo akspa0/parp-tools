@@ -80,11 +80,11 @@ unavailable-with-reason; 1024px minimap coverage equals 256px.
   synthesis override, and refuse synthesis-sourced signals from the stream
   (`signal_takes_stream_data()`), in `scripts/v50_build_dataset.py`
   (`test_build_stream_source_policy.py`) — done
-- [ ] T012 [US1] **USER RUNS** (single final rebuild): rebuild Kalimdor and Azeroth against
+- [x] T012 [US1] **USER RUNS** (single final rebuild): rebuild Kalimdor and Azeroth against
   `H:\CLIENTS` with the regenerated configs (now capturing authored minimaps) and re-run finalize —
   commands in `quickstart.md` §1.3; prior stores stay intact until the rebuilt ones pass
   finalize/verify (FR-005 staging discipline)
-- [ ] T013 [US1] Run the coverage audit on both rebuilt stores, record both reports under
+- [x] T013 [US1] Run the coverage audit on both rebuilt stores, record both reports under
   `wow-viewer/output/reports/v50/v50.1/`, and document SC-001/SC-002 proof plus `minimap_rgb_authored`
   coverage in `specs/112-v50-height-model/quickstart.md` §1.4
 
@@ -110,7 +110,7 @@ PVPZone02/Kalidar is refused with an explicit error.
 - [x] T015 [P] [US2] Curriculum tests: dual-row emission (2 rows for authored tiles, 1 for
   synthetic-only), correct per-row minimap bytes, authored/1024 not copied as columns, both rows of
   a tile share one split (leak safety), split determinism — `test_training_curriculum.py` (8 pass)
-- [ ] T016 [US2] Build the real dual-source curriculum from the rebuilt stores (CPU-side,
+- [x] T016 [US2] Build the real dual-source curriculum from the rebuilt stores (CPU-side,
   assistant-runnable) as `wow-viewer/output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr`
   (`--val-fraction 0.15`, Kalimdor+Azeroth only), verify SC-003 plus the authored/synthetic row
   split, and record the proof in `specs/112-v50-height-model/quickstart.md`
@@ -135,21 +135,21 @@ after epoch 1.
 `training_summary.json` shows `best_epoch > 1` and `tile_mean_baseline` beaten; SC-005 visual
 review passes on held-out tiles from both maps.
 
-- [ ] T017 [US3] Implement the Relative-Height Target Contract (`contract_version="v112.1"`,
+- [x] T017 [US3] Implement the Relative-Height Target Contract (`contract_version="v112.1"`,
   encode/decode with `RANGE_FLOOR`, per data-model.md) and the lean from-scratch CNN
   (research.md Decision 6: small encoder/spatial decoder, single output head, no pretrained
   backbone) in `wow-viewer/data-harvester/src/harvester/v50/height_relative_model.py`
-- [ ] T018 [P] [US3] Add model/target tests: encode/decode exact round-trip incl. flat-tile floor,
+- [x] T018 [P] [US3] Add model/target tests: encode/decode exact round-trip incl. flat-tile floor,
   the FR-007 property test (constant offset added to a tile's heights leaves the target
   byte-identical), forward pass shape/grad sanity on a tiny fixture, in
   `wow-viewer/data-harvester/tests/v50/test_height_relative_model.py`
-- [ ] T019 [US3] Implement the trainer (curriculum-schema gate, `--val-key split` holdout,
+- [x] T019 [US3] Implement the trainer (curriculum-schema gate, `--val-key split` holdout,
   Kalimdor/Azeroth-only evaluation guard per FR-011, per-epoch metrics + in-run
   `tile_mean_baseline` + `target_contract_version` in `training_summary.json` per FR-010,
   epoch-1-best flagged as structural failure per the execution contract) in
   `wow-viewer/data-harvester/src/harvester/v50/height_relative_train.py` + thin
   `wow-viewer/data-harvester/scripts/v50_train_height_relative.py`
-- [ ] T020 [P] [US3] Add trainer contract tests (CPU-safe, no CUDA): store-schema gate refusal,
+- [x] T020 [P] [US3] Add trainer contract tests (CPU-safe, no CUDA): store-schema gate refusal,
   out-of-scope-map evaluation refusal, summary fields present after a mocked 2-epoch loop, baseline
   computation correctness on a fixture, in
   `wow-viewer/data-harvester/tests/v50/test_height_relative_train.py`
@@ -165,11 +165,11 @@ review passes on held-out tiles from both maps.
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T022 [P] Update `wow-viewer/docs/dataset-preparation-userguide.md` §8 and
+- [x] T022 [P] Update `wow-viewer/docs/dataset-preparation-userguide.md` §8 and
   `wow-viewer/data-harvester/README.md` to route the training path through Spec 112 (corrected
   configs, corrected curriculum, `v50_train_height_relative.py`) and mark the WDL-prior §8.4
   commands as the rejected legacy lane
-- [ ] T023 Run the full focused suite (`tests/v50/`, `tests/test_v50_contract.py`,
+- [x] T023 Run the full focused suite (`tests/v50/`, `tests/test_v50_contract.py`,
   `tests/test_v50_build_command.py` + the new C# focused filters) and record exact results in
   `specs/112-v50-height-model/quickstart.md`; update `wow-viewer/memory-bank/activeContext.md` and
   `progress.md` per Memory Bank Discipline

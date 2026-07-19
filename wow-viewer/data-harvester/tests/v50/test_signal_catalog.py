@@ -63,7 +63,9 @@ def test_parses_the_real_frozen_catalog_doc():
 
     # Pinned facts from the frozen table itself — if the doc changes these, the test must too.
     assert "height_257" in signals and signals["height_257"].required
-    assert "minimap_rgb" in signals and signals["minimap_rgb"].required
+    # Synthesis is genuinely absent for tiles without usable texture data; downstream curricula
+    # select only rows with real minimap lineage instead of treating the zero placeholder as data.
+    assert "minimap_rgb" in signals and signals["minimap_rgb"].required is False
     assert signals["mcnk_flags_16"].shape == (16, 16)
     assert signals["holes_16"].policy == "blacklisted"
     assert signals["liquid_mask"].policy == "fresh-only"

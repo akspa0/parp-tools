@@ -2,9 +2,12 @@
 
 ## Detail render contract
 
-1. The detail render MUST sample real BLP texels at the terrain texture UV (bilinear), MCAL-blended
-   in file order and MCNR-lit, for the 1024 pass — it MUST NOT return a per-texture average color
-   for a detail-mode pixel.
+1. The detail render MUST sample real decoded BLP texels at the production terrain texture UV
+   (eight repeats per chunk), using bilinear sampling from a deterministic footprint-selected mip,
+   MCAL-blended in file order and MCNR-lit, for the 1024 pass — it MUST NOT return a per-texture
+   average color for a detail-mode pixel.
+   Both 256 and 1024 synthesis use the same fixed 12:00 achromatic global light; runtime map LIT
+   and Light DBC profiles MUST NOT color-grade either minimap target.
 2. The detail render MUST live in `TerrainMinimapCompositor`/`TerrainTextureSampler` as an added
    mode; no second minimap renderer and no duplicate BLP reader may be introduced (constitution II).
 3. The 256px minimap render MUST remain material-average (unchanged) — the detail mode applies only
@@ -24,21 +27,26 @@
    alignment.
 2. Registration MUST search all 8 dihedral transforms plus a small translation and report the best
    transform and residual per tile and in aggregate.
-3. The gate passes only as `pass_identity` (identity within tolerance) or `pass_with_transform` (one
-   single transform wins for EVERY sampled tile within tolerance). A per-tile-varying best transform
-   is `fail_inconsistent`: the images are not a consistent SR pair and the spec HALTS with the
-   finding — it does not silently pick per-tile transforms or train on misaligned pairs (SC-002).
-4. When `pass_with_transform`, the identified corrective transform MUST be applied consistently (to
-   the render or the pairing) and recorded in the pair set's `corrective_transform` attr, so every
-   pair is genuinely registered.
+3. The raw pixel gate passes only as `pass_identity` (identity plus zero offset within tolerance) or
+   `pass_with_transform` (one single transform and fixed LR-pixel offset win for EVERY sampled tile
+   within tolerance). A per-tile-varying best transform or offset is `fail_inconsistent` and blocks
+   pixel-registered pairing. The only accepted alternate mode is explicit
+   `terrain_only_cross_domain_same_tile`: it retains the failed raw report, requires same-row
+   lineage plus persisted visual-review evidence, records that authored objects are intentionally
+   absent from HR, and applies no corrective transform (SC-002).
+4. When `pass_with_transform`, the identified dihedral transform and LR-pixel offset MUST be
+   applied consistently (the offset scaled to HR without edge wrap) and recorded in the pair set's
+   `corrective_transform` / `corrective_offset_lr` attrs, so every pair is genuinely registered.
 
 ## SR training / evaluation contract
 
 1. Training MUST use the real (authored LR, detail HR) pairs directly; it MUST NOT apply a synthetic
    degradation pipeline to fabricate LR (research Decision 4) — the real authored minimap is the
    input the model must learn to upscale.
-2. The model MUST be a single-purpose SR generator (RRDBNet family), one output, no multi-task head,
-   no weights shared with any terrain-signal model (constitution IV lens).
+2. The model MUST be a single-purpose RealPLKSR ×4 generator using spandrel's canonical class, one
+   output, no multi-task head, no weights shared with any terrain-signal model. Its promoted
+   checkpoint MUST be a bare state dict that round-trips through `spandrel.ModelLoader`, matching
+   ComfyUI's standard upscale-model loading path (constitution IV lens).
 3. Training MUST be user-executed with explicit per-run go-ahead; tooling prints the exact command
    with an estimate and never launches it (standing rule; FR-007/SC-006). This includes any
    whole-map detail-render pass, which is also a heavy user-run step.

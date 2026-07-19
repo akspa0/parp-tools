@@ -32,14 +32,13 @@
    tile flags determine whether a source cell exists. A visible cell's raw MCLQ type nibble selects
    its palette class (`0x01=Ocean`, `0x03=Slime`, `0x04=River/Water`, `0x06=Magma`); MCNK liquid
    flags are used only when that cell lacks a type nibble.
-2. `--time-hours` accepts minute-precise `HHmm` (`1215`) or `HH:mm` (`12:15`) clock input as
-   well as legacy decimal hours. It is normalized to one client day and recorded as both canonical
-   `HH:mm` and decimal hours in the manifest. It selects the shared north/top-edge terrain
-   direction, with a pure-white direct term and achromatic ambient term; LIT is not an input to
-   this profile.
-3. A readable or unreadable global LIT profile produces the same terrain RGB contract. The manifest
-   records `minimap_white_light_not_lit_data` and states that LIT colors, fog, and native
-   world-light direction were excluded.
+2. Production minimap synthesis is fixed at 12:00. `--time-hours` is optional compatibility syntax
+   and may only specify noon. Every client era selects the shared terrain direction with a
+   pure-white direct term and achromatic ambient; map LIT and Light DBC colors are not inputs.
+3. For 2.x+ clients without a usable map LIT source, the interactive viewer uses the exact-build
+   `Light` → `LightParams` → band chain and reports its records/recovery evidence. The generator
+   never loads or evaluates that chain. Raw ADT normals are transformed to renderer space before
+   the synthetic minimap Lambert dot.
 4. The recovered 0.5.3.3368 world-light ray remains independent diagnostic research. It is never
    transformed or applied by synthesized minimaps. Raw MCNR/MCVT world axes are +X = North,
    +Y = West, +Z = Up, so positive terrain X is raster north in the MCNR/minimap contract,

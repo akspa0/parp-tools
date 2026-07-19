@@ -14,26 +14,23 @@ dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug
 
 The following is a user-run map export; it reads every occupied terrain tile and can take several
 minutes. It writes per-tile PNGs, one stitched PNG, and `synthesis-manifest.json` under the output
-directory. Do not treat the derived PNG as a raw client minimap. `--time-hours` accepts exact clock
-input as `HHmm` (for example `1215`) or `HH:mm` (for example `12:15`). Existing decimal hours
-remain valid (`12.25` is 12:15); the manifest records canonical clock and decimal-hour forms.
+directory. Do not treat the derived PNG as a raw client minimap. Production synthesis always uses
+one 12:00 achromatic global light; map LIT and Light DBC runtime profiles are viewer-only inputs.
 
 ```powershell
 dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harvest.csproj -- \
   synthetic-minimap --client-root "H:\CLIENTS\<build>" --map "<MapName>" \
   --output-dir "wow-viewer\output\synthesized-minimaps\<MapName>" \
-  --time-hours 1215 --per-tile --whole-map
+  --per-tile --whole-map
 ```
 
 For the post-fidelity-correction visual check, start with `--limit 1 --per-tile` and inspect that
 single PNG for stable material regions, correct Alpha MCAL/MCLY layer alignment, smoothly
 interpolated terrain lighting (no dense-MCNR checkerboard), and no repeated-texture moire or blurred
 interpolation bands. Only then increase to `--limit 4` or add `--whole-map`. Record configured
-client root, build identity, and the manifest's lighting evidence. Normal synthesized RGB omits
+client root, build identity, and the manifest's fixed-noon-white lighting evidence. Normal synthesized RGB omits
 MCSH, as ordinary minimaps do; `--bake-mcsh` is an explicit exceptional-history diagnostic preview,
-not a normal export or training-label mode. A global LIT profile is color-authored; a map without
-LIT uses the explicit authored fallback and remains a valid terrain export, not a client-exact
-lighting claim.
+not a normal export or training-label mode.
 
 If the command reports `specular_companion_rgb_proxy`, it recovered a missing diffuse BLP from a
 verified same-stem `_s.blp` companion. If it reports `related_diffuse_rgb_proxy`, that companion
@@ -65,10 +62,10 @@ Run the Debug viewer with an approved configured client root. For one map with L
    Verify the paired `_liquid` image does not paint narrow strips over dry terrain-cell boundaries,
    does not paint through terrain, and renders water blue, slime green, and WLM/WLL magma/lava
    through the orange magma palette where those sources exist.
-   Then choose per-tile and whole-map output. Verify the manifest says `WhiteTopEdge` with
-   `minimap_white_light_not_lit_data`, terrain material colours are not LIT-tinted, and relief is
-   north-lit rather than south-lit (basins must not read as mountains). At `12:00`, no horizontal
-   hillshade should remain. Confirm all successful tile PNGs are present and the combined PNG has
+   Then choose per-tile and whole-map output. Verify the manifest says `NoonWhiteGlobal` with
+   `synthetic_minimap_fixed_noon_global_white`, terrain material colours are not LIT/DBC-tinted,
+   and relief is north-lit rather than south-lit (basins must not read as mountains). The fixed
+   north-west bearing remains asymmetric at noon. Confirm all successful tile PNGs are present and the combined PNG has
    the recorded bounds and transparent missing areas. If a tile fails, rerun only that coordinate with
    `--tile-x <x> --tile-y <y>`; the error must include the decode stage and first relevant source
    frame before any additional bounds fix is attempted.

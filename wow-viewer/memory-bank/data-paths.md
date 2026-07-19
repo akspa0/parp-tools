@@ -9,7 +9,8 @@ This document is the authoritative reference for any path that appears in wow-vi
 | What | Default location | Override |
 |------|------------------|----------|
 | Workspace root | `<repo>` (wherever you cloned `parp-tools`) | `WOWVIEWER_WORKSPACE` |
-| Staged game clients | `output/tmp/wowarchive-clients/` (under the workspace) | `WOWVIEWER_STAGED_CLIENTS` |
+| Configured game-client library | runtime CLI/config; `H:\CLIENTS` is approved on this machine | explicit CLI argument |
+| Optional staged game clients | `output/tmp/wowarchive-clients/` (under the workspace) | `WOWVIEWER_STAGED_CLIENTS` |
 | WoWArchive mount | `G:\WoW\WoWArchive-0.X-3.X\Mount` (Windows default) | `WOWARCHIVE_MOUNT` |
 | Build/test data | `test_data/` (under the workspace) | `WOWVIEWER_TEST_DATA` |
 | Caches (listfiles, PM4 overlays) | `wow-viewer/output/cache/` | `WOWVIEWER_CACHE` |
@@ -22,9 +23,15 @@ All paths are normalized to forward slashes in code, manifests, and reports. Win
 
 ## Game Client Access
 
-### Staged clients are the only trusted source
+### Configured client roots
 
-wow-viewer reads game client data exclusively from a local staged copy. Do not point it at a raw install or at any path that is not a deliberate, writable staging area.
+Pass the client-library root at runtime; do not bake a machine-local path into source or portable
+configuration. `H:\CLIENTS` is the current user-curated, known-good fast SSD library and is approved
+for validation, extraction, inspection, and harvesting. Trust in the library does not replace
+per-build fingerprinting: every report must still identify the exact configured root, build, and
+fingerprint used.
+
+The optional project-local staging root is:
 
 The default staging root is:
 
@@ -42,7 +49,7 @@ output/tmp/wowarchive-clients/3_0_1_8303/World of Warcraft
 
 When reporting validation, always name the staged client root you used.
 
-### How to stage a client
+### How to stage a client when the build is not in the approved library
 
 1. If you have a `WoWArchive` mount available, locate the build under the mount.
 2. Copy the required build folder into `output/tmp/wowarchive-clients/`.
@@ -51,11 +58,12 @@ When reporting validation, always name the staged client root you used.
 
 A local staged copy is roughly five times faster than reading through the archive mount, even before factoring SSD vs. network-attached storage. Stage first, work second.
 
-### Why the old `H:\CLIENTS` location is forbidden
+### `H:\CLIENTS` policy
 
-A legacy collection of raw installs lived under `H:\CLIENTS`. That collection is no longer maintained, has inconsistent data, and has been used as a silent fallback in enough places that it became a source of stale-data bugs. The library layer rejects any path containing that prefix.
-
-If you find code, scripts, tests, or documentation that reference `H:\CLIENTS` as a usable path, treat that reference as a bug. Replace it with a staged path or remove the reference entirely.
+`H:\CLIENTS` is explicitly approved by the user as the current known-good client library. It is a
+runtime input, never a source-code default. The older "forbidden/untrusted" wording is retired;
+project-local staging remains optional for builds absent from the approved library or for bounded
+scratch copies.
 
 ### WoWArchive (source-of-truth bundle)
 
@@ -102,7 +110,7 @@ To relocate the entire test-data tree (for example, onto a fast scratch disk), s
 | Caches (listfiles, PM4 overlays) | `wow-viewer/output/cache/` | `WOWVIEWER_CACHE` |
 | Datasets (Zarr stores) | `wow-viewer/output/datasets/` | `WOWVIEWER_DATASETS` |
 | Smoke / scratch reports | `wow-viewer/output/tmp/` | `WOWVIEWER_TMP` |
-| Staged clients | `output/tmp/wowarchive-clients/` | `WOWVIEWER_STAGED_CLIENTS` |
+| Optional staged clients | `output/tmp/wowarchive-clients/` | `WOWVIEWER_STAGED_CLIENTS` |
 
 Output directories under `wow-viewer/output/` are gitignored. Datasets and caches are large; they live under `wow-viewer/output/` rather than the repo-root `output/` so they stay inside the active development target.
 

@@ -11,7 +11,7 @@
     "pairset_summary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema", "scale", "maps", "corrective_transform", "total_pairs", "splits", "per_map", "excluded"],
+      "required": ["schema", "scale", "maps", "corrective_transform", "corrective_offset_lr", "pairing_mode", "authored_object_policy", "synthetic_object_policy", "visual_review_report", "total_pairs", "splits", "per_map", "excluded"],
       "properties": {
         "schema": { "const": "v50-sr-pairset-v1" },
         "scale": { "type": "integer", "enum": [4] },
@@ -23,6 +23,25 @@
         },
         "corrective_transform": {
           "enum": ["identity", "rot90", "rot180", "rot270", "flip_h", "flip_v", "transpose", "anti_transpose"]
+        },
+        "corrective_offset_lr": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "pairing_mode": {
+          "enum": ["pixel_registered_sr", "terrain_only_cross_domain_same_tile"]
+        },
+        "authored_object_policy": {
+          "const": "may_contain_client_baked_objects"
+        },
+        "synthetic_object_policy": {
+          "const": "terrain_only_no_objects"
+        },
+        "visual_review_report": {
+          "type": "string",
+          "description": "Required non-empty evidence path for terrain_only_cross_domain_same_tile; empty only for conventional pixel-registered SR."
         },
         "total_pairs": { "type": "integer", "minimum": 1 },
         "splits": {
@@ -62,7 +81,7 @@
           "type": "object",
           "required": ["arch", "stage", "degradation"],
           "properties": {
-            "arch": { "const": "rrdbnet_x4" },
+            "arch": { "const": "realplksr_x4" },
             "stage": { "enum": ["psnr", "gan"] },
             "degradation": {
               "const": "none_real_pairs",

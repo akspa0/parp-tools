@@ -1,8 +1,8 @@
 # Quickstart: V50-Native Height-First Terrain Model
 
-**Status**: planning-stage runbook — commands below describe the intended sequence; none has been
-implemented or run yet. This file gets filled in with real proof (exact output, hashes, metrics) as
-each phase lands, matching the discipline established in `specs/109-v50-clean-room-audit/quickstart.md`.
+**Status**: dataset correction and dual-source curriculum are complete on real 0.5.3.3368 data;
+the relative-height model/trainer and CPU contract tests are implemented. The remaining gate is the
+user-run CUDA training command in Phase 2.
 
 All commands run from `wow-viewer/data-harvester/` unless noted otherwise. The C# fixes (Decisions
 1-2) are built via the existing `dotnet build wow-viewer/WowViewer.slnx -c Debug` before any Phase 1
@@ -66,13 +66,21 @@ Report conforms to `contracts/coverage-audit-report.schema.json`. Expect zero
 `zero_coverage_unexplained` signals and `minimap_resolution_parity.parity == true`. Repeat for
 Azeroth. This is the SC-001/SC-002 proof.
 
+**Real proof (2026-07-18)**:
+
+- Kalimdor: 951 rows; `mcnk_flags_16` 948/951 (99.68%); synthesized minimaps 731/951 at both
+  resolutions; authored minimap 951/951; parity true; `mccv_rgb` explicitly era-unavailable.
+- Azeroth: 685 rows; `mcnk_flags_16` 671/685 (97.96%); synthesized minimaps 642/685 at both
+  resolutions; authored minimap 678/685; parity true; `mccv_rgb` explicitly era-unavailable.
+- Reports: `output/reports/v50/v50.1/coverage-audit-0_5_3_3368-{Kalimdor,Azeroth}.json`.
+
 ## Phase 1 — Curriculum (US2)
 
 ```powershell
 uv run python scripts/v50_build_training_curriculum.py `
-  --store ../output/datasets/v50/v50.1/0_5_3_3368-Kalimdor.zarr --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-Kalimdor `
-  --store ../output/datasets/v50/v50.1/0_5_3_3368-Azeroth.zarr  --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-Azeroth `
-  --output ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-corrected_v3.zarr `
+  --store ../output/datasets/v50/v50.1/0_5_3_3368-Kalimdor.zarr --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-Kalimdor-terrain `
+  --store ../output/datasets/v50/v50.1/0_5_3_3368-Azeroth.zarr  --curation-manifest ../output/datasets/v50/v50.1/curation-0_5_3_3368-Azeroth-terrain `
+  --output ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
   --val-fraction 0.15
 ```
 
@@ -80,11 +88,16 @@ Note the absence of `--store`/`--curation-manifest` pairs for PVPZone02 or Kalid
 map allow-list (data-model.md) refuses them for this lane even if supplied. Verify the curriculum's
 signal list against the frozen catalog's populated set (SC-003).
 
+**Real proof (2026-07-18)**: `curriculum-0_5_3_3368-dual_v1.zarr` contains 2,990 rows
+(2,545 train / 445 val), 1,629 authored + 1,361 synthetic inputs, and only Kalimdor/Azeroth.
+Validation contributes 248 Kalimdor and 197 Azeroth rows. The summary is stored beside the Zarr
+store as `summary.json`.
+
 ## Phase 2 — Model (US3, user-executed)
 
 ```powershell
 uv run python scripts/v50_train_height_relative.py `
-  --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-corrected_v3.zarr `
+  --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
   --val-key split --val-value val `
   --output ../output/v50/v50.1/height_relative_v1 `
   --epochs 100 --batch 32 --workers 4 --patience 15
@@ -96,6 +109,19 @@ relative-height-target-contract.md, execution contract). Expect the training sum
 comparison the trained model beats — this is SC-004. SC-005 (visual relief-structure judgment) is a
 separate user review step over reconstructed held-out tiles from both maps, following the same
 side-by-side discipline as Spec 110/111's minimap fidelity gates.
+
+Estimated runtime on the user's RTX 4070 Ti SUPER: roughly 15–30 minutes for 100 epochs with early
+stopping, writing checkpoints, `run_identity.json`, and `training_summary.json` under
+`output/v50/v50.1/height_relative_v1/`. This is an estimate; the command remains user-launched.
+
+## Implementation proof (2026-07-18)
+
+- `uv run python -m pytest tests/v50/ tests/test_v50_contract.py tests/test_v50_build_command.py -q`
+  → **175 passed, 4 skipped** (2026-07-19; includes the later Spec 113 visual/pair contracts).
+- `dotnet test ... --filter "FullyQualifiedName~AlphaMcnkFlagsTests|FullyQualifiedName~TerrainMinimapDetailRenderTests"`
+  → **7 passed** (3 Spec 112 MCNK-flag tests + 4 Spec 113 detail-render tests).
+- `dotnet build WowViewer.slnx -c Debug` → **0 errors**; existing analyzer/package warnings remain.
+- Model/trainer scripts and all new v50 modules pass `py_compile`.
 
 ## Explicitly out of scope for verification here
 

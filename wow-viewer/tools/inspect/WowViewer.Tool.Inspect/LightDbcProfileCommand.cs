@@ -122,7 +122,9 @@ internal static class LightDbcProfileCommand
                 catalog.LightIntBandRecordCount,
                 catalog.LightFloatBandRecordCount,
                 catalog.LightSkyboxRecordCount,
-                catalog.TimedSampleCount),
+                catalog.TimedSampleCount,
+                catalog.BandCountRecoveries,
+                catalog.MissingSkyboxReferences),
             new LightDbcQueryArtifact(mapId, coordinate, times),
             samples);
     }
@@ -505,7 +507,9 @@ internal sealed record LightDbcCatalogArtifact(
     int LightIntBandRecordCount,
     int LightFloatBandRecordCount,
     int LightSkyboxRecordCount,
-    int TimedSampleCount);
+    int TimedSampleCount,
+    IReadOnlyList<LightDbcBandCountRecovery> BandCountRecoveries,
+    IReadOnlyList<LightDbcMissingSkyboxReference> MissingOptionalSkyboxReferences);
 
 internal sealed record LightDbcQueryArtifact(
     int MapId,

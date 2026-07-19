@@ -21,7 +21,9 @@ public sealed class LightDbcCatalog
         ImmutableDictionary<int, LightDbcIntBandRecord> intBands,
         ImmutableDictionary<int, LightDbcFloatBandRecord> floatBands,
         ImmutableDictionary<int, LightDbcSkyboxRecord> skyboxes,
-        LightDbcSourceHashes sourceHashes)
+        LightDbcSourceHashes sourceHashes,
+        ImmutableArray<LightDbcBandCountRecovery> bandCountRecoveries,
+        ImmutableArray<LightDbcMissingSkyboxReference> missingSkyboxReferences)
     {
         Build = build;
         Zones = zones;
@@ -30,6 +32,8 @@ public sealed class LightDbcCatalog
         _floatBands = floatBands;
         _skyboxes = skyboxes;
         SourceHashes = sourceHashes;
+        BandCountRecoveries = bandCountRecoveries;
+        MissingSkyboxReferences = missingSkyboxReferences;
     }
 
     public string Build { get; }
@@ -41,6 +45,10 @@ public sealed class LightDbcCatalog
         _floatBands.Values.Sum(static band => band.Samples.Length);
 
     public LightDbcSourceHashes SourceHashes { get; }
+
+    public ImmutableArray<LightDbcBandCountRecovery> BandCountRecoveries { get; }
+
+    public ImmutableArray<LightDbcMissingSkyboxReference> MissingSkyboxReferences { get; }
 
     public int LightParamsRecordCount => _params.Count;
 
@@ -57,7 +65,8 @@ public sealed class LightDbcCatalog
         IEnumerable<LightDbcIntBandRecord> intBands,
         IEnumerable<LightDbcFloatBandRecord> floatBands,
         IEnumerable<LightDbcSkyboxRecord> skyboxes,
-        LightDbcSourceHashes? sourceHashes = null)
+        LightDbcSourceHashes? sourceHashes = null,
+        IEnumerable<LightDbcBandCountRecovery>? bandCountRecoveries = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(exactBuild);
         ArgumentNullException.ThrowIfNull(zones);
@@ -90,6 +99,8 @@ public sealed class LightDbcCatalog
             "LightSkybox",
             exactBuild);
 
+        ImmutableArray<LightDbcMissingSkyboxReference>.Builder missingSkyboxes =
+            ImmutableArray.CreateBuilder<LightDbcMissingSkyboxReference>();
         foreach (LightDbcParamsRecord lightParam in paramsById.Values)
         {
             for (int band = 0; band < BuildScopedLightDbcProfileResolver.ColorBandCount; band++)
@@ -116,9 +127,12 @@ public sealed class LightDbcCatalog
 
             if (lightParam.LightSkyboxId > 0 && !skyboxesById.ContainsKey(lightParam.LightSkyboxId))
             {
-                throw new LightDbcLoadException(
-                    $"LightParams record {lightParam.RecordId} for exact build '{exactBuild}' references " +
-                    $"missing LightSkybox record {lightParam.LightSkyboxId}.");
+                // Skyboxes decorate the outdoor profile but do not supply terrain direct,
+                // ambient, or fog bands. Some exact client tables retain dangling optional
+                // references; preserve that evidence without disabling usable terrain lighting.
+                missingSkyboxes.Add(new LightDbcMissingSkyboxReference(
+                    lightParam.RecordId,
+                    lightParam.LightSkyboxId));
             }
         }
 
@@ -129,7 +143,9 @@ public sealed class LightDbcCatalog
             intBandsById,
             floatBandsById,
             skyboxesById,
-            sourceHashes ?? LightDbcSourceHashes.Empty);
+            sourceHashes ?? LightDbcSourceHashes.Empty,
+            (bandCountRecoveries ?? []).ToImmutableArray(),
+            missingSkyboxes.ToImmutable());
     }
 
     public LightDbcEvaluation EvaluateClearWeather(int continentId, Vector3 worldPosition, int time)
@@ -258,8 +274,9 @@ public sealed class LightDbcCatalog
         }
 
         LightDbcSkyboxRecord? skybox = lightParams.LightSkyboxId > 0
-            ? _skyboxes[lightParams.LightSkyboxId]
-            : null;
+            && _skyboxes.TryGetValue(lightParams.LightSkyboxId, out LightDbcSkyboxRecord? resolvedSkybox)
+                ? resolvedSkybox
+                : null;
         return new EvaluatedProfile(
             colors.MoveToImmutable(),
             floats.MoveToImmutable(),
