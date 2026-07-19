@@ -11,32 +11,35 @@ Last updated: 2026-07-19
 - Synthetic minimap lighting is untouched. Focused composer/DBC tests: 15 passed. Active viewer
   Debug build: 0 errors. T019 still owns the user-run 3.x visual confirmation.
 
-## Spec 114 — authored direct-height bootstrap failed; validation and recipe repair active
+## Spec 114 — universal image-to-terrain contract reset
 
 - The authored run completed all 100 epochs and failed its numeric promotion gate: best epoch 92,
   validation MAE 0.149267, tile-mean baseline 0.138747, `beats_baseline=false`. It remains immutable
   diagnostic evidence; do not rerun the same recipe.
+- The separate full evaluator confirms MAE 0.1493349, gradient MAE 0.0058671, and border MAE
+  0.1607286 over 245 held-out rows, with per-row, quantile, and worst-case artifacts.
 - Added the missing observability contract: future best checkpoints emit fixed-row sheets and final
   best weights emit all-validation per-row MAE/gradient/border/baseline metrics plus fixed-scale
   error-quantile and worst-case sheets. A separate CLI backfills the completed checkpoint to a new
   directory. Focused validation/model/trainer tests pass 18/18; py_compile and CLI help pass.
-- Fleshed the Phase 1 model contract and made tonight's authored-only run executable through the
-  proven Spec 112 trainer: `direct_cnn_v112`, 1,561,537 parameters, RGB 256→relative height 257,
-  Smooth-L1 + 0.25 gradient L1, AdamW 2e-4/1e-4, batch 16, seed 114, max 100, patience 15.
-- Added explicit source selection, no-training preview, `--confirm-run`, immutable output refusal,
-  deterministic seeding, exact element-weighted validation MAE, per-epoch train loss, and persisted
-  training plan/run identity. Current Windows run is pinned to workers 0.
-- Real curriculum preview passes: 1,629 authored rows, 1,384 train / 245 validation, 87 steps/epoch;
-  it creates no output. Synthetic/all-source selection fails closed until corrected-light provenance
-  exists. Focused tests 23 passed; full v50 focus 178 passed / 4 skipped; Ruff and py_compile pass.
-- T011-T013/T016 complete; T017 is the user's authored CUDA run. T014/T015 retain MiT-B0, border
-  metrics, prediction sheets, and the corrected dual-view bakeoff after Spec 113's rerender gate.
+- Corrected the product boundary across Spec 114: any decodable raster must produce normalized
+  view-axis relief plus deterministic mesh/UVs. WoW minimaps are one exact top-down curriculum
+  family, not the deployment domain. Promotion now requires at least five visual families,
+  whole-family holdouts, constant+luminance baselines, finite-mesh compatibility, and arbitrary-
+  image visual review.
+- Selected a pinned DINOv2-small general visual backbone (22.1M, Apache-2.0) plus one relief decoder
+  as the first student candidate. A pinned DPT-Hybrid/MiDaS teacher (Apache-2.0, non-
+  DepthAnything) may create normalized broad-image pseudo-relief offline. Exact v50 height remains
+  authoritative for top-down rows; neither teacher nor clean numeric guidance enters deployment.
+- Retired the planned optimized WoW-only retry. The optimization stack—AMP, EMA, warmup/cosine,
+  clipping, multiscale/gradient/normal guidance, hard-error weighting, history/VRAM evidence—moves
+  to the universal student after raster/mesh, teacher-label, curriculum, and leakage contracts pass.
 - Kept object cleanup, terrain features, texture families, and alpha blends as separate stages with
   their own targets/checkpoints/gates. Trusted object labels must be renderer-derived; image
   difference is explicitly rejected. Downstream stages must see generated upstream outputs.
-- Phase order is fail-closed: corrected Spec 113 T010b/store hashes → shared curriculum contracts →
-  direct geometry → trusted objects → feature library → texture families → alpha. The user owns all
-  heavy builds/training. Spec 113 still owns RealPLKSR/detail.
+- Phase order is fail-closed: universal input/mesh contract → multi-family curriculum → universal
+  relief student → optional WoW objects → feature library → texture families → alpha. The user owns
+  all heavy builds/training. Spec 113 still owns RealPLKSR/detail.
 
 ## Specs 112/113 — implementation continuation
 

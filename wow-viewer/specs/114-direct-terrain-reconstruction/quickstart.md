@@ -1,18 +1,30 @@
-# Quickstart: Direct Minimap-to-Terrain Reconstruction
+# Quickstart: Universal Image-to-Terrain Reconstruction
 
-## Status — authored-only baseline completed and failed promotion
+## Status — narrow authored-only baseline completed, measured, and rejected
 
 The proven Spec 112 CNN is now pinned as Spec 114 architecture `direct_cnn_v112`. Its trainer can
 select only authored rows, prints a validated no-training plan unless `--confirm-run` is present,
 and refuses synthetic rows until the curriculum records corrected `NoonWhiteGlobal` provenance.
-This is direct RGB→relative-height training with no WDL prior.
+This was direct WoW-minimap RGB→relative-height training with no WDL prior. It is retained as
+negative evidence, not as the deployment-domain definition.
 
 The user-run 100-epoch result is frozen as evidence: best epoch 92 reached validation MAE 0.149267
 against the 0.138747 per-tile constant baseline, a 7.59% regression. The checkpoint is retained as
 a diagnostic baseline, not a promoted model. It also exposed a trainer handoff defect: there were no
 prediction sheets, per-row metrics, gradient/border metrics, or reviewable error cases, and the
-trainer omitted the repo's proven bounded optimization stack. Do not rerun the same command;
-T017a/T017b repair observability and optimization first.
+trainer omitted the repo's proven bounded optimization stack. Do not rerun the same command.
+
+The separate evaluator subsequently measured the best checkpoint over all 245 held-out rows:
+
+- MAE `0.1493349023` versus tile-mean baseline `0.1387469612` (`+0.0105879408`, failed);
+- gradient MAE `0.0058671215`;
+- border MAE `0.1607286124`;
+- checkpoint epoch 92, with review artifacts in the separate validation directory.
+
+The governing correction is larger than optimizer repair: deployment now means **any decodable
+raster image → normalized view-axis relief → deterministic terrain mesh**. The next trainer must use
+multiple visual/source families and whole-family holdouts. The v50 WoW corpus is exact top-down
+supervision, not the complete input domain.
 
 Real dry-run proof on the frozen curriculum:
 
@@ -75,7 +87,7 @@ Get-Content -Raw ../output/v50/v50.1/direct_geometry/direct_cnn_v112-authored-v1
 
 Actual artifacts are `training_plan.json`, `run_identity.json`, `checkpoint_best.pt`,
 `checkpoint_last.pt`, and `training_summary.json`. Do not rename, reuse, or overwrite the run
-directory. The T017a evaluator writes backfilled evidence to a separate output directory.
+directory. The separate evaluator writes backfilled evidence to a separate output directory.
 
 ## Backfill the missing validation evidence from the failed checkpoint
 
@@ -104,51 +116,46 @@ Lightweight proof completed before handoff:
 - real `--source all` dry run: correctly refused for missing corrected-light provenance;
 - dry runs created no output directory.
 
-## Architecture comparison to implement
+## Corrected universal geometry route
 
-| Stage | Required baseline | Candidate | Output | Explicitly excluded |
+| Stage | Evidence/baseline | Candidate | Output | Explicitly excluded |
 |---|---|---|---|---|
-| Direct geometry | Spec 112 lean CNN | MiT-B0/SegFormer-style continuous decoder | `relative_height_257` | WDL prior, DA-V2, GAN/diffusion height |
+| Universal geometry | rejected Spec 112 CNN; constant and luminance relief | pinned DINOv2-small visual student + one continuous decoder | normalized `relative_relief` + deterministic mesh/UVs | WoW-only promotion, WDL, DepthAnything family, multi-head geometry |
+| Broad pseudo-relief | no teacher | pinned DPT-Hybrid/MiDaS offline teacher | normalized teacher label only | teacher at deployment, unlabeled pseudo-truth |
 | Object visibility | Empty/all-object baselines | Compact SegFormer semantic mask | one object mask | authored-minus-synthetic RGB labels |
 | Terrain features | Majority family | Compact SegFormer semantic classifier | one feature map | shared geometry weights |
 | Texture families | Per-map majority | Small ordered family selector | ordered family IDs | alpha prediction head |
 | Alpha stack | Base-only/uniform blend | Lean U-Net/FPN regressor | one ordered alpha stack | texture identity head |
 | Visual detail | Spec 113 RRDB floor | Spec 113 RealPLKSR | detailed RGB | numeric terrain truth |
 
-Pretrained weights are optional ablations. Any Hub artifact must be license-recorded and pinned to
-an immutable revision/hash; every stage must retain a from-scratch/local baseline on the same split.
+Current Hub candidates are Apache-2.0, but their exact revisions and file hashes must be frozen
+before any label build or training. The DPT teacher is offline supervision only. The deployable
+student accepts the raster alone.
 
-## Later planned commands — corrected dual-view bakeoff
+## Next commands are intentionally gated
 
-From `wow-viewer/data-harvester`:
+Do not substitute the old `v50_train_height_relative.py` command here. The next user-run commands
+are added only after T006–T020 land and pass lightweight proof:
 
-```powershell
-# After T008: build the leak-safe authored + corrected-synthetic geometry curriculum.
-uv run python scripts/v50_build_reconstruction_curriculum.py `
-  --store ../output/datasets/v50/v50.1/0_5_3_3368-Kalimdor.zarr `
-  --store ../output/datasets/v50/v50.1/0_5_3_3368-Azeroth.zarr `
-  --output ../output/datasets/v50/v50.1/reconstruction-direct-v1.zarr
+1. build pinned broad-image pseudo-relief labels;
+2. build the leak-safe multi-family universal curriculum;
+3. preview the exact training plan without allocating CUDA training state;
+4. train only after the preview reports at least five visual families, a non-empty whole-family
+   holdout, and zero group/family leakage;
+5. run any-image inference to emit relief preview, OBJ mesh, material/UV metadata, and validation
+   sheet.
 
-# After T014/T015: user-run candidate on the corrected identical split/target.
-uv run python scripts/v50_train_direct_geometry.py `
-  --store ../output/datasets/v50/v50.1/reconstruction-direct-v1.zarr `
-  --architecture mit_b0_regression `
-  --output ../output/v50/v50.1/direct_geometry/mit_b0_regression `
-  --confirm-run
-```
-
-The later runtime estimate must be recalibrated from that trainer's no-training dry run. Object,
-feature, texture, and alpha commands are added only when their preceding phase passes.
+This gate prevents another expensive run against a contract that cannot meet the product.
 
 ## Geometry promotion gate
 
-The first Spec 114 checkpoint is promotable only when all of these hold:
+The first universal Spec 114 checkpoint is promotable only when all of these hold:
 
-- No WDL, ground-truth normal, height, alpha, material, or mask enters deployment inference.
-- Authored and synthetic views share one group/split; leakage count is zero.
-- Validation MAE beats flat/tile-mean and the strongest recorded Spec 112 result by at least 5%.
-- Best epoch is later than epoch 1.
-- Adjacent-border error passes SC-002 and the user accepts the held-out visual sheet.
+- Any valid RGB/RGBA/grayscale test raster produces a finite continuous mesh and complete UVs.
+- No WDL, teacher, ground-truth normal, height, alpha, material, or mask enters deployment inference.
+- Every derived view shares its source group; group and whole-family leakage counts are zero.
+- Whole-family paired holdouts beat both constant-relief and direct-luminance baselines by at least 5%.
+- Adjacent-border error passes SC-004 and the user accepts at least 80% of the arbitrary-image sheet.
 - The run summary validates against `contracts/model-stage-and-curriculum.schema.json`.
 
 Stop after this gate. Object-mask implementation is the next phase, not concurrent work.

@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-19
 
-## Active work: Spec 114 authored direct-height baseline failed; remediation is active
+## Active work: Spec 114 reset to universal image-to-terrain
 
 - **Viewer-only Spec 110 lighting repair is implemented; real 3.x visual proof remains.** The
   interactive renderer now establishes an always-present global directional/ambient light at noon
@@ -11,25 +11,27 @@ Last updated: 2026-07-19
   Lighting panel reports global and local layers separately. This does not alter fixed-noon-white
   synthetic minimaps. Focused composition/DBC tests pass 15/15; viewer Debug build has 0 errors.
 
-- **Tonight's runnable Spec 114 slice is `direct_cnn_v112` on authored rows only.** The existing
-  1,561,537-parameter U-Net-lite completed 100 epochs but failed promotion: best epoch 92,
-  validation MAE 0.149267 versus tile-mean 0.138747 (7.59% worse). The checkpoint is diagnostic,
-  not promoted. T017a now adds a separate all-validation evaluator plus per-best future previews;
-  the exact user-run backfill command writes fixed-scale quantile/worst-case sheets and per-row
-  MAE/gradient/border evidence without mutating the original run. T017b must port the proven
-  optimization/guidance stack before any retry.
-- Synthetic/all-source training remains blocked until Spec 113 T010b rerender + fresh RGB hashes
-  produce curriculum-level `synthetic_lighting_contract=NoonWhiteGlobal`. Then compare the same CNN
-  on dual views and only afterward add the compact MiT-B0 candidate. Object masks, terrain features,
-  texture families, and alpha remain later independent models; no mask truth comes from RGB diff.
+- **The deployment contract is any raster image, not any WoW minimap.** Spec 114 now requires
+  RGB/RGBA/grayscale input at arbitrary practical sizes/aspects, normalized view-axis relief,
+  deterministic mesh/UV output, at least five visual/source families, and whole-family holdouts.
+  V50 authored/synthetic minimaps are exact top-down supervision but cannot define the input domain.
+- The 1,561,537-parameter WoW-only CNN completed 100 epochs and is rejected: evaluator MAE
+  0.1493349 versus tile-mean 0.1387470, gradient MAE 0.0058671, border MAE 0.1607286. Its fixed-scale
+  quantile/worst/per-row artifacts are immutable negative evidence. **Do not optimize/rerun it.**
+- The planned universal student uses pinned `facebook/dinov2-small` general features plus one relief
+  decoder. A pinned non-DepthAnything teacher such as `Intel/dpt-hybrid-midas` may produce broad
+  normalized pseudo-relief offline; exact v50 heights remain authoritative for top-down rows. The
+  teacher is never a deployment input. Next implementation starts with raster/mesh contracts and
+  multi-family curriculum identity before any new user-run training command.
+- Source-image UV projection provides immediate mesh texture. Object cleanup, terrain semantics,
+  editable texture families, and alpha remain later independent models with separate checkpoints.
 
 - **Spec 112**: real corpus correction and dual-source curriculum are proven. Kalimdor/Azeroth
   coverage reports pass parity; `curriculum-0_5_3_3368-dual_v1.zarr` has 2,990 rows (1,629 authored
   + 1,361 synthetic; 2,545 train / 445 val). The `v112.1` relative-height model and CUDA-only
   trainer are implemented with schema/map/leak gates, target round-trip/offset-invariance tests,
-  baseline reporting, and epoch-1 structural-failure detection. Next: **user runs T021/T017
-  authored-only training**;
-  assistant reviews `training_summary.json` and prepares the held-out visual review.
+  baseline reporting, and epoch-1 structural-failure detection. Its failed run is historical input
+  to Spec 114 only; it is not the universal-model route.
 - **Spec 113**: T001-T010c, T011/T012, and T014 are implemented. The detail compositor uses production 8×/chunk UVs and
   footprint-selected mips (not unfiltered base texels); the v50 builder applies `--detail` only to
   1024, preserves synthetic-minimap authority, and records store provenance. The cross-map analyzer

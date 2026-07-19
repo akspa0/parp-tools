@@ -1,4 +1,4 @@
-# Phase 0 Research: Direct Minimap-to-Terrain Reconstruction
+# Phase 0 Research: Universal Image-to-Terrain Reconstruction
 
 **Date**: 2026-07-19
 
@@ -175,22 +175,28 @@ experiments, but geometry/alpha truth remains numeric.
 **Rationale**: one owner avoids competing trainers and checkpoints. RealPLKSR is already selected for
 ComfyUI-native delivery, while terrain geometry and alpha have different objectives.
 
-## Decision 7 — pretrained weights are optional ablations
+## Decision 7 — general visual initialization is part of the universal geometry candidate
 
-**Decision**: every stage first proves a small from-scratch baseline. A Hub checkpoint may be tested
-only when its license/source/revision/hash are recorded and it uses the same frozen split and output
-contract. Pretraining promotion requires a material improvement, not assumed transfer.
+**Decision**: preserve the failed from-scratch CNN as reproducible negative evidence, but do not make
+another from-scratch WoW-only run the universal candidate. The first universal student uses a pinned
+general visual initialization and one newly trained continuous relief decoder. The current primary
+candidate is `facebook/dinov2-small` (22.1M parameters, Apache-2.0) because it is explicitly a
+self-supervised general image feature extractor. `nvidia/mit-b0` remains the smaller ImageNet
+baseline. Exact Hub revision, content hash, license, preprocessing, and frozen/fine-tuned state are
+part of every run identity.
 
-**Rationale**: ImageNet/ADE/COCO features may help edges and regions, but WoW minimaps are a stylized
-orthographic domain. SegFormer and DINOv2 provide strong, accessible starting points; neither model
-card claims terrain reconstruction. Architecture reuse is safer than assuming checkpoint semantics.
+**Rationale**: the deployment contract now includes images outside the WoW minimap distribution.
+The v50 corpus cannot teach broad image semantics by optimizer changes alone. DINOv2-small supplies
+general image features while remaining a tractable student backbone; the decoder still predicts one
+signal and does not share weights with later models. Neither Hub model card claims terrain output,
+so promotion still depends on the repo's paired-relief and arbitrary-image gates.
 
 ## Decision 8 — one stage at a time
 
 Implementation order:
 
-1. corrected synthetic RGB visual gate (Spec 113 dependency);
-2. direct geometry baseline and MiT-B0 bakeoff;
+1. universal input/relief/mesh contract and whole-domain evaluation suite;
+2. universal curriculum plus general visual student and relief-teacher bakeoff;
 3. trusted object-label renderer/audit;
 4. object-mask model and geometry ablation with generated masks;
 5. deterministic land-feature library and classifier;
@@ -200,7 +206,7 @@ Implementation order:
 No later model is implemented merely because its architecture is known. Each phase ends with its own
 real-data and user visual gate.
 
-## Decision 9 — failed authored CNN run requires observability and recipe repair
+## Decision 9 — failed authored CNN run requires observability, but not a narrow retry
 
 **Evidence**: the user-owned `direct_cnn_v112-authored-v1` run completed all 100 epochs. Best epoch
 92 reached validation MAE 0.1492665126; the in-run per-tile constant baseline was 0.1387469612.
@@ -216,9 +222,35 @@ repo's terrain trainers. Repeating it unchanged would not answer why it lost.
 
 1. Backfill the immutable checkpoint through a separate evaluator and require future runs to emit
    fixed-sample best-epoch previews plus final all-validation metrics and sheets.
-2. Keep `minimap_rgb` as the only deployment input and one relative-height output.
+2. Keep a source raster as the only deployment input and one normalized-relief output.
 3. Use clean numeric signals only as training-time supervision/masking: `normal_xyz` with
    `normal_mask`/`mcnr_mask_257`, `liquid_mask`, and height-derived multiscale/gradient structure.
-4. Do not use D4 transforms on baked-light RGB. Identity-only geometry is the default; any later
-   photometric augmentation is an explicit ablation.
-5. Port the proven bounded optimization stack before comparing the same CNN with MiT-B0.
+4. Do not repeat the narrow authored-only trainer. Universal training uses paired spatial transforms
+   on raster and relief plus broad photometric/style changes; baked-light direction is deliberately
+   varied because fixed WoW lighting is no longer a deployment assumption.
+5. Port the proven bounded optimization stack into the universal student only after its curriculum,
+   universal compatibility suite, and whole-domain split are fixture-proven.
+
+## Decision 10 — distill broad view-axis relief; exact v50 height stays authoritative
+
+**Decision**: define the universal geometry output as normalized view-axis relief. For top-down
+terrain imagery this is relative terrain height. For perspective photographs or artwork it is a
+bas-relief interpretation of visible structure, not an assertion of metric scene reconstruction.
+Use exact `height_257` for v50 rows. For broad licensed/BYOD imagery without relief truth, allow a
+pinned non-DepthAnything teacher such as `Intel/dpt-hybrid-midas` (Apache-2.0, trained on roughly
+1.4M mixed monocular-depth images) to create normalized pseudo-labels in a separate user-run build.
+Teacher identity and output orientation are stored per row; the teacher is never a deployment input.
+
+**Rationale**: an arbitrary 2D raster does not identify a unique metric 3D scene, but it can define a
+stable view-axis relief surface suitable for terrainification. A general monocular-depth teacher
+supplies broad image structure; exact v50 height corrects it on the orthographic top-down terrain
+family. This keeps one output and permits a compact deployment student.
+
+**Alternatives rejected**:
+
+- Optimizing the 1,384-row authored WoW CNN harder: it cannot create missing image-domain coverage.
+- Treating image luminance as truth: retained only as a mandatory baseline because it produces an
+  embossing, not learned terrain interpretation.
+- DepthAnything-family teachers: explicitly disallowed by the standing project decision.
+- Claiming exact terrain for arbitrary perspective art/photos: the inverse problem is non-unique;
+  outputs are truthfully labeled image-conditioned relief.
