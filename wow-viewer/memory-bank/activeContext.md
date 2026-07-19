@@ -11,10 +11,10 @@ Last updated: 2026-07-19
   Lighting panel reports global and local layers separately. This does not alter fixed-noon-white
   synthetic minimaps. Focused composition/DBC tests pass 15/15; viewer Debug build has 0 errors.
 
-- **The deployment contract is any raster image, not any WoW minimap.** Spec 114 now requires
-  RGB/RGBA/grayscale input at arbitrary practical sizes/aspects, normalized view-axis relief,
-  deterministic mesh/UV output, at least five visual/source families, and whole-family holdouts.
-  V50 authored/synthetic minimaps are exact top-down supervision but cannot define the input domain.
+- **The deployment contract is any raster image, not any WoW minimap.** Spec 114 requires
+  RGB/RGBA/grayscale input at arbitrary practical sizes/aspects, normalized view-axis relief, and
+  deterministic mesh/UV output. The first run now uses only our exact v50 data and holds out a whole
+  map; broader arbitrary-raster review does not pretend to have numeric truth.
 - The 1,561,537-parameter WoW-only CNN completed 100 epochs and is rejected: evaluator MAE
   0.1493349 versus tile-mean 0.1387470, gradient MAE 0.0058671, border MAE 0.1607286. Its fixed-scale
   quantile/worst/per-row artifacts are immutable negative evidence. **Do not optimize/rerun it.**
@@ -29,11 +29,10 @@ Last updated: 2026-07-19
   record, DepthAnything refusal, larger-is-higher robust normalization, license/BYOD gate, variable-
   aspect Zarr rows, and dry-run/`--confirm-run` ownership. Seven focused tests pass; no weights were
   downloaded and no real label corpus was built.
-- Whole-family curriculum T012-T013 are implemented: v50 exact rows plus at least four distinct
-  teacher families, a complete family holdout, exact/pseudo authority counts, immutable source and
-  target identities, source-image/teacher-relief drift refusal, union-preserved Parquet lineage,
-  and zero group/family/content-relabel leakage. Nine focused tests pass; CLI is dry-run by default.
-  No real external family stores or curriculum have been built.
+- Curriculum T012-T013 now supports the direct exact-v50 route: no image export, external dataset,
+  or teacher store. The real dry run selects 1,629 authored rows: 808 Kalimdor train, 143 Kalimdor
+  validation, and all 678 Azeroth rows as compatibility; exact=1,629, pseudo=0, both leaks=0. The
+  optional mixed-teacher route remains available but is not tonight's prerequisite.
 - Student model T014-T015 is implemented: exact DINOv2-small revision and 88.2 MB safetensors hash,
   frozen 22.1M general encoder, compact trainable progressive decoder plus full-resolution RGB
   detail path, and exactly one bounded 224x224 relief output per tile. Seven CPU tests pass; no Hub
@@ -42,12 +41,10 @@ Last updated: 2026-07-19
   image augmentation, multiscale/gradient/exact-normal/liquid-aware/hard-error guidance,
   AdamW+AMP+OneCycle+clipping+EMA, named fixed-scale review sheets, and per-row/family/baseline
   metrics. Promotion uses only the entirely unseen compatibility family. The any-raster CLI writes
-  normalized relief plus a source-textured OBJ/MTL after confirmation. Universal focus: 48 tests;
-  broader v50: 224 passed / 4 skipped; Ruff/compile/CLI help pass. No broad stores, real curriculum,
-  weights, training, or inference were run. Next action is the user-owned four-family label builds
-  and curriculum from the quickstart. The canonical local source root is
-  `I:\parp\parp-tools\wow-viewer\output\source-images\universal-relief`; its four family folders
-  are currently empty. Do not invent alternate drive paths.
+  normalized relief plus a source-textured OBJ/MTL after confirmation. Checkpoint selection now
+  uses validation-only rows; the held-out map is promotion-only. Universal focus: 51 tests; Ruff and
+  compile pass. No real curriculum, weights, training, or inference were run. Next action is the
+  user-owned exact curriculum index build and CUDA command from the quickstart.
 - Source-image UV projection provides immediate mesh texture. Object cleanup, terrain semantics,
   editable texture families, and alpha remain later independent models with separate checkpoints.
 

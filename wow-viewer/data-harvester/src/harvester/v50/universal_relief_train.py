@@ -507,7 +507,11 @@ def evaluate_universal_relief(
         }
         return family_metrics, macro
 
-    family_metrics, macro = aggregate(records)
+    family_metrics, all_macro = aggregate(records)
+    selection_records = [record for record in records if record["split"] == "validation"]
+    if not selection_records:
+        raise UniversalTrainingError("validation loader has no validation-only selection tiles")
+    selection_family_metrics, selection_macro = aggregate(selection_records)
     compatibility_records = [record for record in records if record["split"] == "compatibility"]
     if not compatibility_records:
         raise UniversalTrainingError("validation loader has no whole-family compatibility tiles")
@@ -529,7 +533,10 @@ def evaluate_universal_relief(
     summary = {
         "tiles": len(records),
         "family_metrics": family_metrics,
-        "macro": macro,
+        "all_macro": all_macro,
+        "selection_scope": "validation_only",
+        "selection_family_metrics": selection_family_metrics,
+        "macro": selection_macro,
         "promotion_scope": "whole_family_compatibility_only",
         "compatibility_family_metrics": compatibility_family_metrics,
         "compatibility_macro": compatibility_macro,
@@ -593,16 +600,19 @@ def _validate_curriculum(curriculum: Path) -> tuple[dict[str, Any], list[dict[st
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     if summary.get("schema") != UNIVERSAL_CURRICULUM_SCHEMA:
         raise UniversalTrainingError(f"unexpected curriculum schema {summary.get('schema')!r}")
-    if len(summary.get("visual_families", {})) < 5:
-        raise UniversalTrainingError("universal training requires at least five visual families")
+    authorities = summary.get("target_authorities", {})
+    has_teacher_rows = authorities.get("teacher_pseudo", 0) > 0
+    minimum_families = 5 if has_teacher_rows else 2
+    if len(summary.get("visual_families", {})) < minimum_families:
+        raise UniversalTrainingError(
+            f"curriculum requires at least {minimum_families} visual families for this authority mix"
+        )
     if not summary.get("held_out_families") or summary.get("split_counts", {}).get("compatibility", 0) < 1:
         raise UniversalTrainingError("universal training requires a non-empty whole-family holdout")
     if summary.get("group_leak_count") != 0 or summary.get("family_leak_count") != 0:
         raise UniversalTrainingError("curriculum leakage counters must both be zero")
-    if summary.get("target_authorities", {}).get("exact_numeric", 0) < 1 or summary.get(
-        "target_authorities", {}
-    ).get("teacher_pseudo", 0) < 1:
-        raise UniversalTrainingError("curriculum requires exact and teacher-pseudo targets")
+    if authorities.get("exact_numeric", 0) < 1:
+        raise UniversalTrainingError("curriculum requires exact numeric targets")
     for source in summary.get("source_inputs", []):
         source_path = Path(source["path"])
         observed = source_store_identity(source_path)
@@ -662,8 +672,10 @@ def build_training_plan(
         x_count = len(_axis_origins(int(row["width"]), INPUT_TILE_SIZE, overlap))
         y_count = len(_axis_origins(int(row["height"]), INPUT_TILE_SIZE, overlap))
         tile_counts[str(row["split"])] += x_count * y_count
-    if tile_counts["train"] < 1 or tile_counts["compatibility"] < 1:
-        raise UniversalTrainingError("training and compatibility tile counts must both be nonzero")
+    if min(tile_counts["train"], tile_counts["validation"], tile_counts["compatibility"]) < 1:
+        raise UniversalTrainingError(
+            "training, validation, and compatibility tile counts must all be nonzero"
+        )
     return {
         "schema": "v114-universal-training-plan-v1",
         "training_recipe": TRAINING_RECIPE_ID,

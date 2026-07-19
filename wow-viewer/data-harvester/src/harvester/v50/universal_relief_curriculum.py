@@ -25,7 +25,8 @@ import zarr
 from harvester.v50.relief_teacher_labels import relief_array_sha256
 
 UNIVERSAL_CURRICULUM_SCHEMA = "v50-universal-relief-curriculum-v1"
-MIN_VISUAL_FAMILIES = 5
+MIN_MIXED_VISUAL_FAMILIES = 5
+MIN_EXACT_VISUAL_FAMILIES = 2
 V50_VISUAL_FAMILY = "wow_minimap"
 V50_REQUIRED_ARRAYS = frozenset({"minimap_rgb", "height_257"})
 
@@ -46,6 +47,7 @@ class UniversalCurriculumPlan:
     v50_source: str
     teacher_stores: tuple[TeacherStoreBinding, ...]
     holdout_families: tuple[str, ...]
+    holdout_maps: tuple[str, ...]
     output: Path
     rows: tuple[dict[str, Any], ...]
     summary: dict[str, Any]
@@ -81,7 +83,12 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _load_v50_rows(store_path: Path, source_filter: str) -> tuple[list[dict[str, Any]], str]:
+def _load_v50_rows(
+    store_path: Path,
+    source_filter: str,
+    *,
+    holdout_maps: set[str] | None = None,
+) -> tuple[list[dict[str, Any]], str]:
     if not store_path.is_dir():
         raise UniversalCurriculumError(f"v50 curriculum store does not exist: {store_path}")
     index_path = store_path / "index.parquet"
@@ -93,6 +100,8 @@ def _load_v50_rows(store_path: Path, source_filter: str) -> tuple[list[dict[str,
         raise UniversalCurriculumError(f"v50 curriculum missing arrays: {missing_arrays}")
     table = pq.read_table(index_path)
     required_columns = {"source_group_id", "minimap_source", "split"}
+    if holdout_maps:
+        required_columns.add("map")
     missing_columns = sorted(required_columns - set(table.column_names))
     if missing_columns:
         raise UniversalCurriculumError(f"v50 curriculum index missing columns: {missing_columns}")
@@ -107,6 +116,7 @@ def _load_v50_rows(store_path: Path, source_filter: str) -> tuple[list[dict[str,
 
     identity = source_store_identity(store_path)
     rows = []
+    observed_maps: set[str] = set()
     for source_index, source in enumerate(table.to_pylist()):
         minimap_source = str(source["minimap_source"])
         if source_filter != "all" and minimap_source != source_filter:
@@ -115,6 +125,16 @@ def _load_v50_rows(store_path: Path, source_filter: str) -> tuple[list[dict[str,
         split = "validation" if original_split in {"val", "validation"} else original_split
         if split not in {"train", "validation", "test"}:
             raise UniversalCurriculumError(f"unsupported v50 split {original_split!r}")
+        map_name = str(source.get("map", "")).strip()
+        if holdout_maps is not None:
+            if not map_name:
+                raise UniversalCurriculumError("v50 exact curriculum requires a non-empty map")
+            observed_maps.add(map_name)
+            visual_family = f"wow_{minimap_source}:{map_name}"
+            if map_name in holdout_maps:
+                split = "compatibility"
+        else:
+            visual_family = V50_VISUAL_FAMILY
         source_group_id = f"v50:{identity}:{source['source_group_id']}"
         row_payload = {
             "source_identity": identity,
@@ -127,7 +147,7 @@ def _load_v50_rows(store_path: Path, source_filter: str) -> tuple[list[dict[str,
                 "row_id": _row_id(row_payload),
                 "source_group_id": source_group_id,
                 "source_content_id": "",
-                "visual_family": V50_VISUAL_FAMILY,
+                "visual_family": visual_family,
                 "split": split,
                 "input_origin": f"v50_{minimap_source}",
                 "target_authority": "exact_numeric",
@@ -143,10 +163,15 @@ def _load_v50_rows(store_path: Path, source_filter: str) -> tuple[list[dict[str,
                 "mode": "RGB",
                 "teacher_revision": "",
                 "teacher_weights_sha256": "",
+                "map": map_name,
             }
         )
     if not rows:
         raise UniversalCurriculumError(f"no v50 rows selected by --v50-source {source_filter}")
+    if holdout_maps is not None:
+        unknown_maps = sorted(holdout_maps - observed_maps)
+        if unknown_maps:
+            raise UniversalCurriculumError(f"unknown v50 held-out maps: {unknown_maps}")
     return rows, identity
 
 
@@ -289,6 +314,7 @@ def build_universal_curriculum_plan(
     v50_store: str | Path,
     teacher_stores: Sequence[TeacherStoreBinding],
     holdout_families: Sequence[str],
+    holdout_maps: Sequence[str] = (),
     output: str | Path,
     v50_source: str = "authored",
 ) -> UniversalCurriculumPlan:
@@ -301,23 +327,54 @@ def build_universal_curriculum_plan(
         TeacherStoreBinding(binding.visual_family, binding.path.resolve())
         for binding in teacher_stores
     )
-    family_names = [V50_VISUAL_FAMILY, *(binding.visual_family for binding in bindings)]
-    if len(set(family_names)) != len(family_names):
-        raise UniversalCurriculumError("every teacher store must have a unique visual family")
-    if len(family_names) < MIN_VISUAL_FAMILIES:
-        raise UniversalCurriculumError(
-            f"universal curriculum requires at least {MIN_VISUAL_FAMILIES} visual families, "
-            f"got {len(family_names)}"
-        )
-    holdouts = set(holdout_families)
-    if not holdouts:
-        raise UniversalCurriculumError("at least one whole visual family must be held out")
-    unknown_holdouts = sorted(holdouts - set(family_names))
-    if unknown_holdouts:
-        raise UniversalCurriculumError(f"unknown held-out visual families: {unknown_holdouts}")
-
     v50_path = Path(v50_store).resolve()
-    rows, v50_identity = _load_v50_rows(v50_path, v50_source)
+    map_holdouts = {value.strip() for value in holdout_maps if value.strip()}
+    if bindings and map_holdouts:
+        raise UniversalCurriculumError(
+            "--holdout-map is for exact v50-only curricula; teacher curricula use --holdout-family"
+        )
+    if not bindings and not map_holdouts:
+        raise UniversalCurriculumError(
+            "exact v50-only curriculum requires at least one --holdout-map"
+        )
+    rows, v50_identity = _load_v50_rows(
+        v50_path,
+        v50_source,
+        holdout_maps=map_holdouts if not bindings else None,
+    )
+    if bindings:
+        family_names = [V50_VISUAL_FAMILY, *(binding.visual_family for binding in bindings)]
+        if len(set(family_names)) != len(family_names):
+            raise UniversalCurriculumError("every teacher store must have a unique visual family")
+        if len(family_names) < MIN_MIXED_VISUAL_FAMILIES:
+            raise UniversalCurriculumError(
+                "mixed exact/teacher curriculum requires at least "
+                f"{MIN_MIXED_VISUAL_FAMILIES} visual families, got {len(family_names)}"
+            )
+        holdouts = {value.strip() for value in holdout_families if value.strip()}
+        if not holdouts:
+            raise UniversalCurriculumError("at least one whole visual family must be held out")
+        unknown_holdouts = sorted(holdouts - set(family_names))
+        if unknown_holdouts:
+            raise UniversalCurriculumError(f"unknown held-out visual families: {unknown_holdouts}")
+    else:
+        if holdout_families:
+            raise UniversalCurriculumError(
+                "exact v50-only curriculum derives held-out families from --holdout-map"
+            )
+        family_names = sorted({str(row["visual_family"]) for row in rows})
+        if len(family_names) < MIN_EXACT_VISUAL_FAMILIES:
+            raise UniversalCurriculumError(
+                f"exact v50-only curriculum requires at least {MIN_EXACT_VISUAL_FAMILIES} "
+                f"map/source families, got {len(family_names)}"
+            )
+        holdouts = {
+            str(row["visual_family"])
+            for row in rows
+            if str(row["split"]) == "compatibility"
+        }
+        if not holdouts:
+            raise UniversalCurriculumError("held-out maps produced no compatibility families")
     source_inputs = [{"path": str(v50_path), "sha256": v50_identity}]
     for binding in bindings:
         teacher_rows, identity = _load_teacher_rows(binding, holdout_families=holdouts)
@@ -366,6 +423,7 @@ def build_universal_curriculum_plan(
         v50_source=v50_source,
         teacher_stores=bindings,
         holdout_families=tuple(sorted(holdouts)),
+        holdout_maps=tuple(sorted(map_holdouts)),
         output=output_path,
         rows=tuple(rows),
         summary=summary,
@@ -402,8 +460,13 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--v50-store", required=True, type=Path)
     parser.add_argument("--v50-source", choices=("authored", "synthetic", "all"), default="authored")
-    parser.add_argument("--teacher-store", action="append", required=True, type=_parse_teacher_binding)
-    parser.add_argument("--holdout-family", action="append", required=True)
+    parser.add_argument("--teacher-store", action="append", type=_parse_teacher_binding)
+    parser.add_argument("--holdout-family", action="append")
+    parser.add_argument(
+        "--holdout-map",
+        action="append",
+        help="Hold out every selected v50 row from this map as compatibility evidence.",
+    )
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--confirm-build", action="store_true")
     return parser.parse_args(argv)
@@ -414,8 +477,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     plan = build_universal_curriculum_plan(
         v50_store=args.v50_store,
         v50_source=args.v50_source,
-        teacher_stores=args.teacher_store,
-        holdout_families=args.holdout_family,
+        teacher_stores=args.teacher_store or (),
+        holdout_families=args.holdout_family or (),
+        holdout_maps=args.holdout_map or (),
         output=args.output,
     )
     print(json.dumps(plan.summary, indent=2))

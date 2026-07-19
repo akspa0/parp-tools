@@ -128,8 +128,8 @@ Lightweight proof completed before handoff:
 | Alpha stack | Base-only/uniform blend | Lean U-Net/FPN regressor | one ordered alpha stack | texture identity head |
 | Visual detail | Spec 113 RRDB floor | Spec 113 RealPLKSR | detailed RGB | numeric terrain truth |
 
-Current Hub candidates are Apache-2.0, but their exact revisions and file hashes must be frozen
-before any label build or training. The DPT teacher is offline supervision only. The deployable
+The DINOv2 student initialization is Apache-2.0 and pinned by exact revision/file hash. It is model
+initialization only; all training rows in tonight's route come from our v50 store. The deployable
 student accepts the raster alone.
 
 ## Universal build and training commands
@@ -137,116 +137,73 @@ student accepts the raster alone.
 Do not substitute the old `v50_train_height_relative.py` command here. The next user-run commands
 are separate, fail-closed stages:
 
-1. build pinned broad-image pseudo-relief labels;
-2. build the leak-safe multi-family universal curriculum;
-3. preview the exact training plan without allocating CUDA training state;
-4. train only after the preview reports at least five visual families, a non-empty whole-family
-   holdout, and zero group/family leakage;
-5. run any-image inference to emit relief preview, OBJ mesh, material/UV metadata, and validation
+1. build an index over our exact v50 RGB/height pairs with one whole map held out;
+2. preview the exact training plan without allocating CUDA training state;
+3. train only after the preview reports train, validation, and compatibility rows plus zero leakage;
+4. run any-image inference to emit relief preview, OBJ mesh, material/UV metadata, and validation
    sheet.
 
 Each CLI is a dry run unless its explicit confirmation flag is present. This prevents another
 expensive run against a contract that cannot meet the product.
 
-### Pinned broad-image teacher labels
+### Build the exact curriculum from our v50 datastore
 
-T010-T011 are implemented. The builder pins `Intel/dpt-hybrid-midas` at revision
-`17fb43d4437eb62c260a593400db13c22b04511a`, requires `model.safetensors` SHA-256
-`9599793d3ce64d7ebc85657360831596c1df9abc61f6820fe623fe7efb2e29c5`, records Apache-2.0, and
-refuses DepthAnything-family identities. Labels are explicitly `teacher_pseudo`, use
-larger-is-closer/higher orientation, preserve each source image's aspect, and live in one Zarr store.
+The first training run uses our existing v50 corpus only. It reads `minimap_rgb` as input and
+`height_257` as exact truth directly from the immutable dual curriculum store; it does not export
+PNGs, create arbitrary-image folders, download another dataset, or run a relief teacher.
 
-Preview a licensed image family without downloading weights or writing output:
+Preview an exact authored-only curriculum with all Azeroth rows reserved as the whole-map
+compatibility set:
 
 ```powershell
 cd I:\parp\parp-tools\wow-viewer\data-harvester
-$corpusRoot = 'I:\parp\parp-tools\wow-viewer\output\source-images\universal-relief'
-New-Item -ItemType Directory -Force -Path @(
-  "$corpusRoot\aerial",
-  "$corpusRoot\photos",
-  "$corpusRoot\paintings",
-  "$corpusRoot\drawings"
-)
-uv run python scripts/v50_build_relief_teacher_labels.py `
-  --input-dir "$corpusRoot\aerial" `
-  --output ../output/datasets/v50/v50.1/universal-relief-aerial-v1.zarr `
-  --family aerial `
-  --license-id YOUR-DATASET-LICENSE
-```
-
-For a private image folder, replace `--license-id ...` with `--byod`. After the dry run lists the
-expected decodable images and exact teacher identity, the user launches the heavy step by adding:
-
-```powershell
-  --device cuda --confirm-run
-```
-
-The first confirmed run downloads about 490 MB into the Hugging Face cache, then performs one
-teacher inference per image and writes float32 relief plus identities. Runtime and label-store size
-depend on the chosen image count/resolutions; the assistant does not launch it. Do not point five
-commands at one folder and rename the family—the curriculum gate requires genuinely distinct
-visual/source families. These four `I:` folders are currently empty; populate them before running
-the teacher commands. They live under the ignored local `wow-viewer/output/` tree and are not
-committed to Git.
-
-### Universal curriculum index
-
-After four genuinely distinct non-WoW family stores have been built, preview the combined exact and
-pseudo-relief curriculum. This example holds out the complete paintings family and uses only the
-unaffected authored v50 rows:
-
-```powershell
 uv run python scripts/v50_build_universal_relief_curriculum.py `
   --v50-store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
   --v50-source authored `
-  --teacher-store aerial=../output/datasets/v50/v50.1/universal-relief-aerial-v1.zarr `
-  --teacher-store photos=../output/datasets/v50/v50.1/universal-relief-photos-v1.zarr `
-  --teacher-store paintings=../output/datasets/v50/v50.1/universal-relief-paintings-v1.zarr `
-  --teacher-store drawings=../output/datasets/v50/v50.1/universal-relief-drawings-v1.zarr `
-  --holdout-family paintings `
-  --output ../output/datasets/v50/v50.1/universal-relief-curriculum-v1.zarr
+  --holdout-map Azeroth `
+  --output ../output/datasets/v50/v50.1/universal-relief-exact-authored-v1.zarr
 ```
 
-The preview writes nothing. It must report five families, nonzero exact and teacher-pseudo rows,
-nonzero compatibility rows for the held-out family, and both leak counts as zero. Add
-`--confirm-build` only after those values are correct. The output is a content-identified Zarr
-curriculum index that references the immutable source stores; it does not duplicate the image
-corpus. Pointing multiple family names at the same image content is refused. The curriculum build
-also re-hashes every teacher source image and generated pseudo-relief target; training re-verifies
-the curriculum source-store identities plus both hashes before consuming pseudo labels. Exact-row
-and teacher-row fields are union-preserved in Parquet instead of inferred from only the first row.
+The validated dry run reports 1,629 exact rows: 808 Kalimdor train, 143 Kalimdor validation, and 678
+Azeroth compatibility; `teacher_pseudo=0`; both leak counts are zero. It writes nothing. If those
+values match, rerun the same command with `--confirm-build` appended. This creates only an immutable
+index/summary that references our existing arrays; it does not duplicate the datastore.
+
+The authored-only route is deliberate for tonight because that RGB is unaffected by the stale
+synthetic-light provenance. After corrected `NoonWhiteGlobal` synthetic RGB is rebuilt into a store
+that records that contract, a later run can use `--v50-source all` without changing the model.
 
 ### Universal relief training
 
-Once the curriculum preview/build reports at least five real families, a complete `paintings`
-compatibility holdout, nonzero exact and pseudo rows, and zero leakage, preview the training plan:
+Once the curriculum preview/build reports 808 train, 143 validation, 678 whole-map compatibility,
+1,629 exact rows, zero pseudo rows, and zero leakage, preview the training plan:
 
 ```powershell
 uv run python scripts/v50_train_universal_relief.py `
-  --curriculum ../output/datasets/v50/v50.1/universal-relief-curriculum-v1.zarr `
-  --output ../output/v50/v50.1/universal_relief/dinov2-small-relief-v1 `
+  --curriculum ../output/datasets/v50/v50.1/universal-relief-exact-authored-v1.zarr `
+  --output ../output/v50/v50.1/universal_relief/dinov2-small-exact-authored-v1 `
   --epochs 50 --batch 8 --workers 0 --patience 10 --seed 114
 ```
 
-The preview writes nothing and does not download the student. Verify the printed source identity,
-family counts, complete holdout, tile counts, deployment input `rgb`, loss weights, AMP/EMA/schedule,
-and output path. Then the user launches the CUDA run by appending:
+The preview writes nothing and does not download the student. Verify the source identity, 808/143/
+678 row split, `wow_authored:Azeroth` holdout, deployment input `rgb`, height/normal/liquid guidance,
+AMP/EMA/OneCycle settings, validation-only checkpoint selection, and output path. Then the user
+launches the CUDA run by appending:
 
 ```powershell
   --device cuda --confirm-run
 ```
 
 The first confirmed run downloads the pinned 88.2 MB DINOv2-small safetensors, freezes that general
-encoder by default, and trains only the compact relief decoder. Runtime depends on the four chosen
-image corpora and resulting tile count; budget roughly 30–180 minutes on the local RTX 4070 Ti
-SUPER, then replace that estimate with the plan's actual `steps_per_epoch`. The run refuses a
+encoder by default, and trains only the compact relief decoder. Budget roughly 30–120 minutes on the
+local RTX 4070 Ti SUPER, then replace that estimate with the plan's actual `steps_per_epoch`. The run refuses a
 non-empty output and writes `training_plan.json`, `history.json`, `checkpoint_best.pt`,
 `checkpoint_last.pt`, per-row metrics, best/final/worst visual sheets, and
 `training_summary.json`.
 
-Checkpoint selection uses macro-family validation MAE. Promotion is stricter: only the entire
-unseen compatibility family is scored against both the per-tile constant and direct-luminance
-baselines, and MAE plus gradient MAE must beat all four comparisons by at least 5%.
+Checkpoint selection uses only Kalimdor validation MAE. Azeroth never selects an epoch; it is used
+only for the stricter whole-map promotion check against per-tile constant and direct-luminance
+baselines, where MAE and gradient MAE must beat all four comparisons by at least 5%.
 
 ### Any raster to textured terrain
 
@@ -276,18 +233,18 @@ Lightweight universal contract proof completed after the reset:
   export are implemented;
 - focused tests: 9 passed; Ruff, `py_compile`, and `git diff --check`: pass.
 - teacher-label tests: 7 passed; CLI help, Ruff, `py_compile`, and dry-run/no-output contract: pass.
-- universal curriculum tests: 9 passed; five-family/whole-holdout/exact-vs-pseudo/content-relabel,
-  source/target drift, and full Parquet-lineage gates; CLI help, schema JSON parse, Ruff, and
-  `py_compile`: pass.
+- universal curriculum tests: 12 passed; exact-v50-only whole-map holdout, optional mixed-teacher,
+  source/target drift, content-relabel, and full Parquet-lineage gates; the real authored dry run
+  reports 808/143/678 and writes nothing.
 - universal student tests: 7 passed; pinned full DINOv2-small revision/safetensors SHA, RGB-only one-
   relief output, finite bounded forward, frozen-backbone discipline, full-resolution RGB detail
   retention, explicit unfreeze ablation, and fail-closed weight/channel/patch validation. No student
   weights were downloaded.
 - trainer/inference tests: 16 passed; exact/pseudo weighting, normal/liquid masks, multiscale and
-  structural losses, D4/style augmentation, EMA, complete-family-only promotion, fixed-scale named
+  structural losses, D4/style augmentation, EMA, validation-only selection, whole-map promotion, fixed-scale named
   review sheets, arbitrary-aspect inference planning, checkpoint pin checks, and no-write dry runs.
-- combined Spec 114 universal focus: 48 passed; Ruff, `py_compile`, and both CLI help paths pass.
-  No Hub download, real teacher build, curriculum build, CUDA training, or inference run was launched.
+- combined Spec 114 universal focus: 51 passed; Ruff and `py_compile` pass. No Hub download, real
+  curriculum build, CUDA training, or inference run was launched.
 - broader `tests/v50`: 224 passed / 4 skipped; only expected Zarr sidecar warnings remain.
 
 ## Geometry promotion gate

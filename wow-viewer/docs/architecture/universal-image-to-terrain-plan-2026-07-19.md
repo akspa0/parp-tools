@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-19  
 **Spec owner:** `specs/114-direct-terrain-reconstruction/`  
-**Status:** universal contracts, curriculum, student, trainer, and inference implemented; real corpus/training pending
+**Status:** exact-v50 curriculum route, student, trainer, and inference implemented; user curriculum build/training pending
 
 ## Product boundary
 
@@ -70,10 +70,10 @@ hash, and writes variable-aspect `teacher_pseudo` rows to one Zarr store only af
 
 ## Universal curriculum
 
-The first promotable curriculum must contain at least five visual/source families, including exact
-v50 top-down terrain plus broad non-WoW imagery. Every crop, render, style variant, and teacher label
-shares the underlying `source_group_id`. At least one whole family is held out. Random row or
-within-map validation alone cannot promote a universal checkpoint.
+The first runnable curriculum uses only our existing v50 arrays: authored `minimap_rgb` input and
+exact `height_257` truth, with numeric normal and liquid signals providing training-only guidance.
+Rows are grouped by source terrain and map/source family. One entire map is compatibility-only;
+random row or within-map validation alone cannot promote the checkpoint.
 
 Each row records:
 
@@ -83,14 +83,12 @@ Each row records:
 - teacher ID/revision/hash/orientation when applicable;
 - immutable split/source-group identity.
 
-The curriculum index builder is landed. It requires v50 plus at least four distinct external
-families, at least one complete compatibility holdout, nonzero exact and teacher-pseudo authority,
-and zero group/family leakage. It rejects identical source content relabeled under multiple family
-names. Authored v50 rows are usable immediately; synthetic selection fails until the source store
-records `NoonWhiteGlobal`. Teacher source images and the generated relief arrays are individually
-hashed; curriculum build and training refuse either kind of drift. The Parquet writer explicitly
-preserves the union of exact-row and teacher-row lineage fields. The builder is dry-run by default
-and writes only after user confirmation.
+The curriculum index builder is landed. Exact-only mode needs no teacher store: it requires at least
+two map/source families, a whole-map compatibility holdout, exact authority, and zero group/family
+leakage. The proven real dry run reads 1,629 authored rows and produces 808 Kalimdor train, 143
+Kalimdor validation, and 678 Azeroth compatibility rows. Synthetic selection remains fail-closed
+until the source store records `NoonWhiteGlobal`. Optional teacher stores remain supported as a
+future lower-authority extension, but they are not part of tonight's data route.
 
 The landed `universal_relief_contract.py` now proves the pre/post-model boundary independently of a
 checkpoint: common raster modes, aspect-preserving overlap tiling, exact-coverage relief stitching,
@@ -109,15 +107,16 @@ The landed trainer uses family-balanced sampling, lower authority weight for pse
 multiscale L1 plus gradient/exact-normal/liquid-aware/hard-error guidance, AdamW, AMP, OneCycle
 warmup/cosine, gradient clipping, and EMA deploy weights. It writes immutable checkpoint identity,
 per-family/per-row metrics, fixed-scale named validation sheets, global worst cases, history, and
-peak VRAM. Model selection uses all validation families; promotion uses only the completely unseen
-compatibility family. The inference CLI accepts any supported raster/aspect, stitches normalized
+peak VRAM. Model selection uses validation-only rows; it never uses compatibility rows to select an
+epoch. Promotion uses only the completely held-out map/family. The inference CLI accepts any
+supported raster/aspect, stitches normalized
 relief, preserves aspect in a bounded mesh grid, and writes a source-textured OBJ/MTL plus 16-bit
 relief and a visual proof sheet. Both CLIs are no-write dry runs without explicit confirmation.
 
-Focused contract/model/trainer/inference proof is 48 tests; the broader v50 suite is 224 passed / 4
-skipped. Ruff, `py_compile`, and CLI help pass.
-No Hub download, broad label build, real curriculum build, CUDA training, or real checkpoint
-inference has been performed by the assistant.
+Focused contract/teacher/curriculum/model/trainer/inference proof is 51 passing tests. The real
+exact-curriculum dry run passes with zero leakage and writes nothing.
+No Hub download, real curriculum build, CUDA training, or real checkpoint inference has been
+performed by the assistant.
 
 Promotion requires:
 

@@ -20,7 +20,11 @@ from harvester.v50.universal_relief_curriculum import (
     main,
     write_universal_curriculum,
 )
-from harvester.v50.universal_relief_train import UniversalReliefDataset, UniversalTrainingError
+from harvester.v50.universal_relief_train import (
+    UniversalReliefDataset,
+    UniversalTrainingError,
+    build_training_plan,
+)
 
 
 def _make_v50_store(tmp_path, *, leak: bool = False):
@@ -44,6 +48,38 @@ def _make_v50_store(tmp_path, *, leak: bool = False):
     ]
     pq.write_table(pa.Table.from_pylist(rows), store_path / "index.parquet")
     (store_path / "summary.json").write_text(json.dumps({"rows": 3}), encoding="utf-8")
+    return store_path
+
+
+def _make_exact_v50_store(tmp_path):
+    store_path = tmp_path / "v50-exact.zarr"
+    group = zarr.open_group(str(store_path), mode="w")
+    group.create_array(
+        "minimap_rgb", data=np.zeros((6, 256, 256, 3), dtype=np.uint8), chunks=(1, 256, 256, 3)
+    )
+    group.create_array(
+        "height_257", data=np.zeros((6, 257, 257), dtype=np.float32), chunks=(1, 257, 257)
+    )
+    rows = [
+        {
+            "source_group_id": f"terrain:{map_name}:{index}",
+            "minimap_source": "authored",
+            "split": split,
+            "map": map_name,
+        }
+        for index, (map_name, split) in enumerate(
+            (
+                ("Kalimdor", "train"),
+                ("Kalimdor", "train"),
+                ("Kalimdor", "val"),
+                ("Azeroth", "train"),
+                ("Azeroth", "train"),
+                ("Azeroth", "val"),
+            )
+        )
+    ]
+    pq.write_table(pa.Table.from_pylist(rows), store_path / "index.parquet")
+    (store_path / "summary.json").write_text(json.dumps({"rows": 6}), encoding="utf-8")
     return store_path
 
 
@@ -94,6 +130,85 @@ def test_plan_requires_five_real_families_and_a_whole_family_holdout(tmp_path) -
             holdout_families=[],
             output=tmp_path / "no-holdout.zarr",
         )
+
+
+def test_exact_v50_only_plan_uses_own_rgb_height_and_whole_map_holdout(tmp_path) -> None:
+    plan = build_universal_curriculum_plan(
+        v50_store=_make_exact_v50_store(tmp_path),
+        v50_source="authored",
+        teacher_stores=(),
+        holdout_families=(),
+        holdout_maps=["Azeroth"],
+        output=tmp_path / "exact-only.zarr",
+    )
+
+    assert plan.summary["visual_families"] == {
+        "wow_authored:Azeroth": 3,
+        "wow_authored:Kalimdor": 3,
+    }
+    assert plan.summary["held_out_families"] == ["wow_authored:Azeroth"]
+    assert plan.summary["target_authorities"] == {"exact_numeric": 6, "teacher_pseudo": 0}
+    assert plan.summary["split_counts"] == {
+        "train": 2,
+        "validation": 1,
+        "test": 0,
+        "compatibility": 3,
+    }
+    assert all(
+        row["split"] == "compatibility" for row in plan.rows if row["map"] == "Azeroth"
+    )
+    assert all(row["target_authority"] == "exact_numeric" for row in plan.rows)
+
+
+def test_exact_v50_only_curriculum_is_accepted_by_training_plan(tmp_path) -> None:
+    curriculum = tmp_path / "exact-only.zarr"
+    plan = build_universal_curriculum_plan(
+        v50_store=_make_exact_v50_store(tmp_path),
+        teacher_stores=(),
+        holdout_families=(),
+        holdout_maps=["Azeroth"],
+        output=curriculum,
+    )
+    write_universal_curriculum(plan)
+
+    training = build_training_plan(
+        curriculum=curriculum,
+        output=tmp_path / "run",
+        batch_size=2,
+        epochs=2,
+        workers=0,
+        seed=114,
+        overlap=28,
+        learning_rate=2e-4,
+        weight_decay=1e-4,
+        pseudo_weight=0.5,
+        freeze_backbone=True,
+    )
+
+    assert training["source_rows"] == 6
+    assert training["held_out_families"] == ["wow_authored:Azeroth"]
+    assert training["tile_counts"]["compatibility"] > 0
+
+
+def test_exact_v50_only_cli_is_dry_run_and_writes_nothing(tmp_path, capsys) -> None:
+    output = tmp_path / "exact-dry.zarr"
+    assert (
+        main(
+            [
+                "--v50-store",
+                str(_make_exact_v50_store(tmp_path)),
+                "--v50-source",
+                "authored",
+                "--holdout-map",
+                "Azeroth",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    assert not output.exists()
+    assert "DRY RUN" in capsys.readouterr().out
 
 
 def test_plan_keeps_exact_and_pseudo_authorities_and_holds_out_family(tmp_path) -> None:

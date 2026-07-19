@@ -50,10 +50,11 @@ deployment; no 100M+ parameter deployment model
 
 **Constraints**: user launches all training/heavy rebuilds; arbitrary-raster-only deployment
 contract; no WDL prior; one output per model; no shared weights; no DepthAnything-family model; no
-MCAL parser or AlphaWdtWriter changes; licensed public data or private BYOD only
+MCAL parser or AlphaWdtWriter changes; the first training run uses project-owned v50 data only
 
-**Scale/Scope**: at least five visual/source families for universal evaluation; Kalimdor and Azeroth
-provide the first exact top-down family; every derived view stays grouped by underlying source
+**Scale/Scope**: two exact authored map/source families for the first training run, with Kalimdor
+train/validation and Azeroth compatibility; broader arbitrary-raster review remains non-numeric
+until project-owned paired truth exists; every derived view stays grouped by underlying source
 
 ## Constitution Check
 
@@ -120,8 +121,8 @@ no universal claim or optimized rerun may be based on this table.
 
 1. Freeze the universal raster normalization, normalized-relief, deterministic mesh, UV, extent,
    and vertical-scale contracts.
-2. Freeze at least five visual/source families and group every crop/render/style by its underlying
-   source; designate whole-family train, validation, and compatibility partitions.
+2. Freeze the first exact v50 authored curriculum by map/source family and keep one entire map in
+   compatibility; group every future crop/render/style by its underlying source.
 3. Bind the exact v50 top-down family to corrected fixed-noon store revisions from Spec 113.
 4. Pin license, immutable revision/hash, preprocessing, and output orientation for the general
    visual student initialization and optional non-DepthAnything teacher.
@@ -131,13 +132,15 @@ no universal claim or optimized rerun may be based on this table.
 
 1. Implement and fixture-test arbitrary RGB/RGBA/grayscale loading, aspect-preserving tiling/padding,
    relief stitching, deterministic grid-mesh export, UVs, and blank-image stability.
-2. Build an immutable universal curriculum index spanning exact v50 top-down rows, procedural/style-
-   randomized terrain views, and broad licensed/BYOD image-relief pairs or pinned teacher labels.
+2. Build the first immutable curriculum index directly from v50 `minimap_rgb` and exact
+   `height_257`. Keep optional project-owned procedural/style rows or teacher labels as later
+   additions, not a prerequisite for tonight's run.
 3. Keep every view of one source grouped; reject random row splits and report whole-domain holdouts.
 4. Implement one compact general-visual student with one continuous normalized-relief output. Start
    from the pinned general initialization; retain the failed CNN only as negative evidence.
-5. Train with exact v50 height/normal/liquid guidance where available and normalized teacher relief
-   elsewhere. Missing clean signals mask their own loss only and never become deployment inputs.
+5. Train with exact v50 height/normal/liquid guidance. Missing clean signals mask their own loss only
+   and never become deployment inputs; optional teacher relief remains a separate lower-authority
+   extension.
 6. Port AMP, EMA deploy weights, warmup/cosine decay, clipping, multiscale/gradient/normal guidance,
    detached hard-error weighting, history/VRAM evidence, and geometry-consistent spatial plus broad
    photometric/style augmentation as one documented recipe.
@@ -145,7 +148,7 @@ no universal claim or optimized rerun may be based on this table.
    quantile/worst sheets, and exported mesh previews from the best EMA checkpoint.
 8. Prove universal input compatibility, finite meshes, source-group isolation, no-WDL/no-teacher
    deployment, and reproducible model/source identities with CPU fixtures.
-9. Hand the user separate dry-run, optional teacher-label build, and bounded CUDA training commands.
+9. Hand the user separate exact-curriculum dry-run/build and bounded CUDA training commands.
 10. Promote only if SC-001 through SC-004 and user visual review pass.
 
 ### Phase 2 — Trusted objects and mask-guided geometry

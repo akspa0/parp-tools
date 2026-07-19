@@ -202,7 +202,7 @@ def test_promotion_gate_uses_only_whole_family_compatibility_tiles() -> None:
 
     target = torch.linspace(0.0, 1.0, 224).view(1, 1, 224).expand(2, 224, 224)
     rgb = torch.zeros(2, 3, 224, 224)
-    rgb[:, 0] = target
+    rgb[1, 0] = target[1]
     rgb[:, 1] = 1.0 - target
     loader = [
         {
@@ -221,6 +221,8 @@ def test_promotion_gate_uses_only_whole_family_compatibility_tiles() -> None:
     assert len(records) == 2
     assert previews
     assert summary["promotion_scope"] == "whole_family_compatibility_only"
+    assert summary["selection_scope"] == "validation_only"
+    assert summary["macro"]["mae"] > 0.0
     assert set(summary["compatibility_family_metrics"]) == {"heldout_painting"}
     assert summary["compatibility_macro"]["mae"] == pytest.approx(0.0)
     assert summary["passes_five_percent_gate"] is True

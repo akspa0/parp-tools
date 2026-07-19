@@ -23,10 +23,8 @@ Last updated: 2026-07-19
   error-quantile and worst-case sheets. A separate CLI backfills the completed checkpoint to a new
   directory. Focused validation/model/trainer tests pass 18/18; py_compile and CLI help pass.
 - Corrected the product boundary across Spec 114: any decodable raster must produce normalized
-  view-axis relief plus deterministic mesh/UVs. WoW minimaps are one exact top-down curriculum
-  family, not the deployment domain. Promotion now requires at least five visual families,
-  whole-family holdouts, constant+luminance baselines, finite-mesh compatibility, and arbitrary-
-  image visual review.
+  view-axis relief plus deterministic mesh/UVs. The first numeric run uses only our exact v50 data;
+  arbitrary-image review remains a non-numeric compatibility surface.
 - Selected a pinned DINOv2-small general visual backbone (22.1M, Apache-2.0) plus one relief decoder
   as the first student candidate. A pinned DPT-Hybrid/MiDaS teacher (Apache-2.0, non-
   DepthAnything) may create normalized broad-image pseudo-relief offline. Exact v50 height remains
@@ -40,11 +38,10 @@ Last updated: 2026-07-19
 - Implemented teacher-label T010-T011 with a full pinned DPT-Hybrid revision, safetensors hash
   verification, license/BYOD and DepthAnything gates, explicit pseudo-target authority, variable-
   aspect Zarr storage, and dry-run/confirmation CLI. Seven tests pass; no download/build was run.
-- Implemented universal curriculum T012-T013 with five-family minimum, complete held-out-family
-  compatibility split, exact/pseudo authority, source-store/input/target identities, same-source
-  relabel and post-build source/relief drift refusal, union-preserved Parquet lineage, and
-  group/family leakage gates. Nine tests, CLI help, schema parse, Ruff, and `py_compile` pass. No
-  real curriculum was built.
+- Implemented exact-v50-only curriculum mode: direct `minimap_rgb`/`height_257`, map/source family
+  identity, and whole-map compatibility with no external data or teacher prerequisite. The real
+  no-write dry run reports 808 Kalimdor train, 143 validation, 678 Azeroth compatibility, exact
+  1,629/pseudo 0, and zero leaks. Optional mixed-teacher mode remains supported.
 - Implemented student T014-T015 with pinned DINOv2-small revision/safetensors identity, frozen
   backbone default, one compact relief decoder/output, a full-resolution RGB detail path that
   survives constant patch features, and explicit unfreeze ablation. Seven tests, Ruff, and
@@ -53,13 +50,13 @@ Last updated: 2026-07-19
   optimization setting, verifies source-store and teacher-image hashes, balances families, applies
   exact-vs-pseudo authority, and trains with multiscale/gradient/normal/liquid-aware/hard-error
   guidance plus AdamW, AMP, OneCycle, clipping, and EMA. It emits history/VRAM, named fixed-scale
-  best/final/worst sheets, per-row/family metrics, and a whole-held-out-family 5% gate against
-  constant and luminance baselines. Any supported raster can be tiled/stitched into 16-bit relief
-  and a source-textured OBJ/MTL after explicit inference confirmation. Universal focus: 48 tests;
-  broader v50: 224 passed / 4 skipped; Ruff, compile, and CLI help pass. No heavy operation was
+  best/final/worst sheets, per-row/family metrics, and a whole-held-out-map 5% gate against constant
+  and luminance baselines. Best epoch selection now excludes compatibility rows. Any supported
+  raster can be tiled/stitched into 16-bit relief and a source-textured OBJ/MTL after explicit
+  inference confirmation. Universal focus: 51 tests; Ruff and compile pass. No heavy operation was
   launched.
-- Corrected the universal quickstart to use the real ignored `I:\parp\parp-tools\wow-viewer\output\source-images\universal-relief`
-  root. Aerial/photos/paintings/drawings currently contain zero images; no alternate-drive placeholder is valid.
+- Removed the broken default workflow that created four empty arbitrary-image folders and then ran
+  the teacher labeler. Tonight's quickstart indexes the existing v50 Zarr directly.
 - Kept object cleanup, terrain features, texture families, and alpha blends as separate stages with
   their own targets/checkpoints/gates. Trusted object labels must be renderer-derived; image
   difference is explicitly rejected. Downstream stages must see generated upstream outputs.

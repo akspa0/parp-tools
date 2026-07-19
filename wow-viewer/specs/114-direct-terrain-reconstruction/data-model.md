@@ -41,7 +41,7 @@ One source raster or paired relief example outside the build-specific v50 terrai
 |---|---|---|
 | `source_id` | string | Stable content-derived identity for the original source |
 | `source_group_id` | string | Shared by every crop/render/style/teacher label derived from the source |
-| `visual_family` | string | Versioned family such as aerial, natural-photo, artwork, grayscale, procedural, or held-out custom |
+| `visual_family` | string | Versioned family such as `wow_authored:Kalimdor`; optional later sources may add procedural or other project-owned families |
 | `split` | enum | `train`, `validation`, `test`, or `compatibility`; whole-family holdout policy is recorded |
 | `raster` | signal reference | Decodable RGB/RGBA/grayscale image with original size/mode metadata |
 | `relief_truth` | signal reference or null | Exact paired view-axis relief when available |

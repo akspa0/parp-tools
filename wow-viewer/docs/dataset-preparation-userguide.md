@@ -571,9 +571,10 @@ comparison, datastore visual-review, pair-set, and future user-run training comm
 
 Spec 114 accepts any decodable RGB, RGBA, or grayscale raster at practical dimensions/aspect and
 predicts one normalized view-axis-relief field with no WDL prior. Deterministic stitching and mesh
-export produce a source-textured OBJ/MTL immediately. Exact v50 height is authoritative for the WoW
-top-down family; four genuinely different licensed/BYOD image families receive pinned offline
-DPT-Hybrid pseudo-relief. One complete non-WoW family is held out from training.
+export produce a source-textured OBJ/MTL immediately. The first runnable curriculum uses only our
+v50 datastore: authored `minimap_rgb` input, exact `height_257` truth, and training-only normal/
+liquid guidance. All Azeroth rows are held out as compatibility evidence; no external image dataset
+or teacher-label build is required.
 
 Later stages remain independent: trusted rendered object visibility, terrain-feature classes,
 ordered canonical texture families, then a compositor-compatible alpha stack. They do not share
@@ -581,11 +582,11 @@ weights or add multi-task heads. Raw authored-minus-synthetic RGB is not valid o
 ground-truth upstream signals cannot be used as deployment inputs. Spec 113 continues to own visual
 detail/SR; high-resolution synthetic RGB does not replace numeric height or alpha truth.
 
-The pinned teacher/student, leak-safe curriculum, observable AMP/EMA/OneCycle trainer, and
-any-raster relief/OBJ inference CLI are implemented and fixture-proven. Every CLI is dry-run unless
-its confirmation flag is present. The remaining prerequisite is data, not architecture: build four
-real non-WoW teacher stores and the universal curriculum, inspect its five-family/whole-holdout/
-zero-leak plan, then the user launches the exact CUDA command in
+The pinned student, leak-safe exact curriculum, observable AMP/EMA/OneCycle trainer, and any-raster
+relief/OBJ inference CLI are implemented and fixture-proven. Every CLI is dry-run unless its
+confirmation flag is present. Build the small exact-v50 curriculum index, verify its 808 Kalimdor
+train / 143 Kalimdor validation / 678 Azeroth compatibility rows and zero leaks, then the user
+launches the exact CUDA command in
 `specs/114-direct-terrain-reconstruction/quickstart.md`. The old WoW-only checkpoint is rejected
 negative evidence and must not be presented as the universal model.
 
@@ -600,6 +601,6 @@ reference this section summarizes.
 
 ---
 
-*Last updated: 2026-07-19 — Spec 114 universal relief code and user-run commands are ready; real
-broad-family label stores, curriculum, and CUDA checkpoint remain to be built. Spec 113 owns the
+*Last updated: 2026-07-19 — Spec 114 exact-v50 curriculum and user-run commands are ready; the
+curriculum index and CUDA checkpoint remain to be built. Spec 113 owns the
 separate corrected-light/SR lane. The absolute-WDL and failed WoW-only trainers are rejected.*

@@ -41,18 +41,19 @@ models with separate checkpoints and promotion gates.
 ### User Story 1 - Turn Any Raster Image into Terrain (Priority: P1)
 
 A user supplies any raster image and receives a normalized relief field and usable terrain mesh whose
-major spatial structures follow the image. The model learns from multiple visually distinct paired
-families. Corrected WoW synthetic/authored minimaps and numeric terrain are one high-quality family,
-not the only family. The model does not consume or predict a WDL lattice.
+major spatial structures follow the image. The first trainable checkpoint uses only project-owned
+v50 authored minimaps and exact numeric terrain, with one entire map held out. Broader project-owned
+image families may be added later without changing the raster-only deployment contract. The model
+does not consume or predict a WDL lattice.
 
 **Why this priority**: Universal image-to-terrain conversion is the product. An excellent
 WoW-minimap-only estimator still fails the product contract if it cannot terrainify an unfamiliar
 image.
 
-**Independent Test**: Run a frozen suite whose entire visual/source families were excluded from
-training. Every valid raster produces a finite continuous mesh, paired samples beat constant and
-direct-luminance terrainification baselines, and the user accepts the spatial interpretation of the
-unpaired arbitrary-image review sheet.
+**Independent Test**: Hold out an entire v50 map from training. Every valid raster still produces a
+finite continuous mesh; held-out exact pairs beat constant and direct-luminance terrainification
+baselines; and arbitrary-image sheets remain a separate user-reviewed compatibility surface rather
+than mislabeled numeric truth.
 
 **Acceptance Scenarios**:
 
@@ -241,7 +242,7 @@ base-only/uniform-blend composition without changing the geometry checkpoint.
 - **SC-001**: Every image in a frozen compatibility suite of at least 100 valid rasters spanning at
   least five visual/source families, RGB/RGBA/grayscale modes, and five aspect-ratio/resolution
   classes produces a finite relief field and valid continuous mesh without semantic-domain refusal.
-- **SC-002**: On paired truth from visual/source families wholly absent from training, direct
+- **SC-002**: On paired truth from whole maps wholly absent from training, direct
   image-to-relief inference beats both constant-relief and direct-luminance baselines by at least 5%
   relative validation MAE and gradient MAE.
 - **SC-003**: On a frozen review sheet of at least 30 unpaired arbitrary images spanning the same

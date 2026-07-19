@@ -13,9 +13,9 @@ Current state first. Old long-form lane history trimmed out.
   visual proof, guarded terrain-only cross-domain pairs, then ComfyUI-native RealPLKSR ×4.
 - **Spec 114 `114-direct-terrain-reconstruction` — universal geometry implementation lane.** Any
   raster is the deployment input; pinned DINOv2-small plus one decoder predicts normalized
-  view-axis relief, then deterministic export produces a source-textured terrain OBJ. Exact v50
-  rows and four broad teacher-labeled families form a leak-safe curriculum with one entire held-out
-  family. Heavy label builds/training remain user-run. Object visibility, terrain features, texture
+  view-axis relief, then deterministic export produces a source-textured terrain OBJ. Tonight's
+  curriculum reads our v50 `minimap_rgb` and exact `height_257` directly, holding out all Azeroth
+  rows; no external image corpus or teacher build is required. Training remains user-run. Object visibility, terrain features, texture
   families, and alpha stacks remain separate one-output models.
 - Spec 089 `089-dav2-height-predictor` — legacy V22 model lane; not the current V50 route.
 - Spec 088 `088-v22-enrichment-from-v18` — V22 dataset contract feeding 089; legacy relative to V50,
@@ -49,8 +49,8 @@ split) and `scripts/v50_train_height_relative.py`. Tonight's valid bootstrap fil
 present, and writes the rejected `direct_cnn_v112` baseline. Synthetic/all-source runs are blocked
 until corrected `NoonWhiteGlobal` provenance is frozen. The absolute-WDL prior/refiner and failed
 authored-only CNN are legacy evidence. Spec 113's RealPLKSR path remains separate. Spec 114's
-dry-run teacher, curriculum, DINOv2-small trainer, and any-raster OBJ inference commands are
-implemented in its quickstart; a real universal curriculum must be built before the user launches
+exact-v50 curriculum, DINOv2-small trainer, and any-raster OBJ inference commands are implemented
+in its quickstart; the small curriculum index must be built before the user launches
 training. Later object/feature/texture/alpha phases do not start until arbitrary-image geometry
 passes the whole-family gate.
 See

@@ -35,13 +35,13 @@ Primary references and official model surfaces:
 
 **Decision**: the first model consumes only an arbitrary source raster and predicts one normalized
 view-axis-relief field. There is no WDL input, WDL auxiliary head, map/client identity, or
-ground-truth deployment input. Top-down v50 rows encode exact `height_257` under `v112.1`; broader
-images use explicitly lower-authority pseudo-relief.
+ground-truth deployment input. Top-down v50 rows encode exact `height_257` under `v112.1`; arbitrary
+rasters remain valid inference inputs even when exact paired truth is unavailable.
 
 **Rationale**: the v50 corpus provides exact orthographic terrain supervision but cannot define an
 arbitrary-image deployment domain. A WDL lattice is a lossy projection of exact truth and does not
-help photos, drawings, paintings, or aerial imagery. The student therefore needs general visual
-features, broad source families, and one measurable continuous output.
+help an arbitrary raster. The student therefore uses pinned general visual features, while the first
+numeric training/evaluation claims remain limited to our exact v50 data.
 
 **Selected candidate and ablation**:
 
@@ -62,16 +62,16 @@ features, broad source families, and one measurable continuous output.
 - A conditional GAN for height: a plausible-looking hallucinated surface is worse than a measurable
   numeric error. Pix2pix is relevant as image-translation history, not the geometry loss owner.
 
-## Decision 2 — train on whole visual families and preserve deployment truth
+## Decision 2 — train on our exact data and hold out a whole map
 
-**Decision**: the curriculum contains exact v50 terrain plus at least four genuinely distinct broad
-image families. Every derived crop/render/style/teacher view shares `source_group_id`; at least one
-entire non-WoW family is compatibility-only. Target authority is always `exact_numeric` or
-`teacher_pseudo`, and pseudo rows receive lower loss weight.
+**Decision**: the first curriculum reads project-owned v50 `minimap_rgb` and `height_257` directly.
+Every derived view shares `source_group_id`; all Azeroth rows are compatibility-only, while
+Kalimdor retains separate train and validation rows. Teacher pseudo-labels remain supported by code
+but are not a prerequisite or part of tonight's run.
 
-**Rationale**: authored and synthetic WoW RGB can diagnose one top-down family, but optimizer and
-view augmentation cannot create the missing image-domain coverage. Whole-family holdout proof is
-the minimum honest test of an arbitrary-image claim.
+**Rationale**: this is the shortest honest route to a new model using the clean paired signals we
+already built. The whole-map holdout tests terrain generalization without importing an unrelated
+image corpus or leaking compatibility rows into epoch selection.
 
 **Rejected**: using high-resolution synthetic RGB as numeric height truth. It is a rendered
 observation and may supervise SR/detail appearance, while `height_257`, `normal_xyz`, `alpha_256`,
@@ -274,3 +274,23 @@ luminance baselines by at least 5% in both MAE and gradient MAE. The any-image i
 the normalized 16-bit relief, aspect-preserving terrain OBJ/MTL with full source UVs, validation
 sheet, and manifest. Sixteen trainer/inference tests pass; the complete universal focus is 48 tests.
 No real broad corpus, CUDA training run, or checkpoint inference has been launched.
+
+## Decision 12 — first runnable curriculum uses our exact v50 data only
+
+**Decision**: the first DINOv2 relief run consumes the existing
+`curriculum-0_5_3_3368-dual_v1.zarr` directly. `minimap_rgb` is the only deployment-style input;
+`height_257` is exact relief truth; `normal_xyz`/normal masks and liquid masks provide training-only
+guidance. No external image dataset, PNG export, or teacher-label build is required. The first safe
+command selects authored rows only because the current dual store does not record corrected
+`NoonWhiteGlobal` synthetic provenance.
+
+The exact dry run selects 1,629 project rows: 808 Kalimdor train, 143 Kalimdor validation, and all
+678 Azeroth rows as whole-map compatibility evidence. Best-epoch selection uses only validation;
+Azeroth is evaluated only for promotion. The curriculum has two map/source families, zero pseudo
+targets, and zero group/family leakage. The any-raster inference contract remains, but numeric
+promotion claims for this first checkpoint are limited to the project-owned held-out map plus user
+visual review on arbitrary rasters.
+
+**Rejected route**: creating empty `aerial/photos/paintings/drawings` folders and immediately running
+the teacher labeler. It necessarily fails with `no decodable raster images found` and is not the
+project's dataset route.

@@ -30,8 +30,8 @@ training recipe.
 - [x] T012 [P] Write whole-family split, derived-view leakage, and target-authority tests in `data-harvester/tests/v50/test_universal_relief_curriculum.py`
 - [x] T013 Implement the immutable universal curriculum/index builder and dry-run CLI in `data-harvester/src/harvester/v50/universal_relief_curriculum.py` and `data-harvester/scripts/v50_build_universal_relief_curriculum.py`
 
-**Checkpoint**: Any training row is exact numeric or pinned teacher pseudo-relief; at least five
-visual families exist; source-group and held-out-family leak counts are zero.
+**Checkpoint**: Any training row is exact numeric or explicitly pinned teacher pseudo-relief. The
+first run uses only exact v50 rows, a whole-map compatibility holdout, and zero group/family leaks.
 
 ## Phase 3: User Story 1 — Any raster to terrain (P1 MVP)
 
@@ -45,8 +45,8 @@ image review sheet.
 - [x] T017 [US1] Implement the guided optimization/evaluation stack in `data-harvester/src/harvester/v50/universal_relief_train.py`
 - [x] T018 [P] [US1] Add the any-image relief/OBJ/height-preview inference CLI in `data-harvester/scripts/v50_image_to_terrain.py`
 - [x] T019 [US1] Add dry-run, immutable-source identity, and explicit user-confirmation training CLI in `data-harvester/scripts/v50_train_universal_relief.py`
-- [ ] T020 [US1] Run CPU fixtures, lint, compile, and real no-training dry runs; record proof and exact commands in `specs/114-direct-terrain-reconstruction/quickstart.md`
-- [ ] T021 [US1] USER RUN: build broad teacher relief labels using the exact command in `specs/114-direct-terrain-reconstruction/quickstart.md`
+- [x] T020 [US1] Add exact-v50-only curriculum mode, reserve compatibility from checkpoint selection, and prove the real no-write 808/143/678 split in `specs/114-direct-terrain-reconstruction/quickstart.md`
+- [ ] T021 [US1] USER RUN: build the exact-v50 curriculum index using the exact command in `specs/114-direct-terrain-reconstruction/quickstart.md`
 - [ ] T022 [US1] USER RUN: train the universal relief student using the exact command in `specs/114-direct-terrain-reconstruction/quickstart.md`
 - [ ] T023 [US1] Evaluate SC-001 through SC-004 and record the user visual verdict in `specs/114-direct-terrain-reconstruction/research.md`
 
