@@ -270,15 +270,16 @@ Lightweight universal contract proof completed after the reset:
 - universal curriculum tests: 9 passed; five-family/whole-holdout/exact-vs-pseudo/content-relabel,
   source/target drift, and full Parquet-lineage gates; CLI help, schema JSON parse, Ruff, and
   `py_compile`: pass.
-- universal student tests: 6 passed; pinned full DINOv2-small revision/safetensors SHA, RGB-only one-
-  relief output, finite bounded forward, frozen-backbone discipline, explicit unfreeze ablation, and
-  fail-closed weight/channel/patch validation. No student weights were downloaded.
+- universal student tests: 7 passed; pinned full DINOv2-small revision/safetensors SHA, RGB-only one-
+  relief output, finite bounded forward, frozen-backbone discipline, full-resolution RGB detail
+  retention, explicit unfreeze ablation, and fail-closed weight/channel/patch validation. No student
+  weights were downloaded.
 - trainer/inference tests: 16 passed; exact/pseudo weighting, normal/liquid masks, multiscale and
   structural losses, D4/style augmentation, EMA, complete-family-only promotion, fixed-scale named
   review sheets, arbitrary-aspect inference planning, checkpoint pin checks, and no-write dry runs.
-- combined Spec 114 universal focus: 47 passed; Ruff, `py_compile`, and both CLI help paths pass.
+- combined Spec 114 universal focus: 48 passed; Ruff, `py_compile`, and both CLI help paths pass.
   No Hub download, real teacher build, curriculum build, CUDA training, or inference run was launched.
-- broader `tests/v50`: 223 passed / 4 skipped; only expected Zarr sidecar warnings remain.
+- broader `tests/v50`: 224 passed / 4 skipped; only expected Zarr sidecar warnings remain.
 
 ## Geometry promotion gate
 

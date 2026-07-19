@@ -35,14 +35,15 @@ Last updated: 2026-07-19
   and zero group/family/content-relabel leakage. Nine focused tests pass; CLI is dry-run by default.
   No real external family stores or curriculum have been built.
 - Student model T014-T015 is implemented: exact DINOv2-small revision and 88.2 MB safetensors hash,
-  frozen 22.1M general encoder, compact trainable progressive decoder, and exactly one bounded
-  224x224 relief output per tile. Six CPU tests pass; no Hub download occurred.
+  frozen 22.1M general encoder, compact trainable progressive decoder plus full-resolution RGB
+  detail path, and exactly one bounded 224x224 relief output per tile. Seven CPU tests pass; no Hub
+  download occurred.
 - Trainer/inference T016-T019 are implemented: family-balanced exact/pseudo training, D4 and broad
   image augmentation, multiscale/gradient/exact-normal/liquid-aware/hard-error guidance,
   AdamW+AMP+OneCycle+clipping+EMA, named fixed-scale review sheets, and per-row/family/baseline
   metrics. Promotion uses only the entirely unseen compatibility family. The any-raster CLI writes
-  normalized relief plus a source-textured OBJ/MTL after confirmation. Universal focus: 47 tests;
-  broader v50: 223 passed / 4 skipped; Ruff/compile/CLI help pass. No broad stores, real curriculum,
+  normalized relief plus a source-textured OBJ/MTL after confirmation. Universal focus: 48 tests;
+  broader v50: 224 passed / 4 skipped; Ruff/compile/CLI help pass. No broad stores, real curriculum,
   weights, training, or inference were run. Next action is the user-owned four-family label builds
   and curriculum from the quickstart.
 - Source-image UV projection provides immediate mesh texture. Object cleanup, terrain semantics,

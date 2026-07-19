@@ -46,8 +46,9 @@ features, broad source families, and one measurable continuous output.
 **Selected candidate and ablation**:
 
 1. Primary: pinned `facebook/dinov2-small` general visual encoder plus one compact progressive
-   continuous-relief decoder. Freeze the encoder for the first run; unfreezing is an explicit
-   ablation. One 224×224 RGB tile produces one 224×224 relief tile.
+   continuous-relief decoder with a full-resolution trainable RGB detail path fused before its one
+   output head. Freeze the encoder for the first run; unfreezing is an explicit ablation. One
+   224×224 RGB tile produces one 224×224 relief tile.
 2. Smaller ablation only: MiT-B0/SegFormer-style encoder with the identical one-output contract.
 3. The failed Spec 112 WoW-only CNN remains immutable negative evidence, not the mandatory baseline
    for universal promotion.
@@ -271,5 +272,5 @@ history and peak VRAM, per-row/per-family MAE/gradient/border/baseline metrics, 
 best/final sheets, and global worst cases. The compatibility family must beat constant and direct-
 luminance baselines by at least 5% in both MAE and gradient MAE. The any-image inference CLI emits
 the normalized 16-bit relief, aspect-preserving terrain OBJ/MTL with full source UVs, validation
-sheet, and manifest. Sixteen trainer/inference tests pass; the complete universal focus is 47 tests.
+sheet, and manifest. Sixteen trainer/inference tests pass; the complete universal focus is 48 tests.
 No real broad corpus, CUDA training run, or checkpoint inference has been launched.

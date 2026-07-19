@@ -50,10 +50,12 @@ The first student candidate uses pinned
 card claims terrain reconstruction; promotion belongs to Spec 114's gates.
 
 The student architecture is landed: a pinned DINOv2-small patch encoder feeds one compact
-progressive continuous-relief decoder. The default freezes the encoder and trains only the decoder;
-unfreezing is an explicit later ablation. The model accepts one RGB 224x224 tile and emits one
-bounded 224x224 relief tile; arbitrary image sizes remain the already-proven tiling/stitching
-contract. Six CPU model tests pass without downloading Hub weights.
+progressive continuous-relief decoder, while a trainable full-resolution RGB detail path is fused
+before the one relief head so 16x16 patch tokens do not erase local terrain evidence. The default
+freezes the encoder and trains the decoder/detail path; unfreezing is an explicit later ablation.
+The model accepts one RGB 224x224 tile and emits one bounded 224x224 relief tile; arbitrary image
+sizes remain the already-proven tiling/stitching contract. Seven CPU model tests pass without
+downloading Hub weights.
 
 Broad images without exact relief may receive offline pseudo-labels from pinned
 [`Intel/dpt-hybrid-midas`](https://huggingface.co/Intel/dpt-hybrid-midas), an Apache-2.0 relative
@@ -112,7 +114,7 @@ compatibility family. The inference CLI accepts any supported raster/aspect, sti
 relief, preserves aspect in a bounded mesh grid, and writes a source-textured OBJ/MTL plus 16-bit
 relief and a visual proof sheet. Both CLIs are no-write dry runs without explicit confirmation.
 
-Focused contract/model/trainer/inference proof is 47 tests; the broader v50 suite is 223 passed / 4
+Focused contract/model/trainer/inference proof is 48 tests; the broader v50 suite is 224 passed / 4
 skipped. Ruff, `py_compile`, and CLI help pass.
 No Hub download, broad label build, real curriculum build, CUDA training, or real checkpoint
 inference has been performed by the assistant.
