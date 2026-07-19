@@ -109,6 +109,23 @@ trained with the proven bounded optimization stack, compared against the frozen 
 metrics on the same split. Any `synthetic` or `all` run stays fail-closed unless the curriculum
 records `synthetic_lighting_contract=NoonWhiteGlobal`.
 
+### T002/T003 record: source coverage audit and frozen baseline identity
+
+**T002 signal audit (2026-07-19)**: the Spec 113 compositor lighting correction invalidated only
+synthesized RGB outputs (`minimap_rgb`/`minimap_rgb_1024` in existing stores). Numeric
+reconstruction signals — `height_257`, `normal_xyz`/masks, `alpha_256`, `liquid_mask`/
+`liquid_height`, `mcly_texture_ids`/`mcly_tileset_ids`, `mccv_rgb`, flags — and the authored client
+minimaps (`minimap_rgb_authored`) remain valid supervision. Synthetic RGB re-enters corpora only
+after the user-run Spec 113 rerender freezes `synthetic_lighting_contract=NoonWhiteGlobal` store
+provenance; the T008 curriculum builder enforces this by exclusion, not trust.
+
+**T003 frozen baseline (2026-07-19)**: the strongest completed Spec 112 direct run is
+`direct_cnn_v112-authored-v1` (architecture `direct_cnn_v112`, 1,561,537 parameters, target contract
+`v112.1`, 1,384 train / 245 validation authored rows). Final record: best epoch 92, validation MAE
+0.1492665126 vs tile-mean baseline 0.1387469612, `beats_baseline=false`, evaluator MAE 0.1493349,
+gradient MAE 0.0058671, border MAE 0.1607286. Verdict: **rejected** under SC-001; retained as the
+mandatory comparison baseline and immutable negative evidence for every later geometry candidate.
+
 **Reverted detour (2026-07-19)**: an unauthorized "universal arbitrary-raster" reset briefly
 replaced this spec with a DINOv2 student, a DPT-Hybrid/MiDaS pseudo-label teacher, and broad
 third-party image folders. That route was reverted: the deployment contract is the authored WoW

@@ -1,0 +1,41 @@
+{
+  "schema": "v50-model-stage-run-v1",
+  "run_id": "direct_cnn_v112-authored-v1",
+  "created_utc": "2026-07-19T00:00:00Z",
+  "stage": "direct_geometry",
+  "output_signal": "relative_height_257",
+  "architecture": {
+    "id": "direct_cnn_v112",
+    "config_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "parameter_count": 1561537
+  },
+  "pretrained_source": null,
+  "curriculum": {
+    "path": "output/datasets/v50/curriculum-0_5_3_3368-dual_v1.zarr",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "upstream_models": [],
+  "checkpoint": {
+    "path": "output/training/direct_cnn_v112-authored-v1/checkpoint_best.pt",
+    "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "best_epoch": 92
+  },
+  "baselines": {
+    "tile_mean": {
+      "val_mae": 0.1387469612
+    }
+  },
+  "metrics": {
+    "best_val_mae": 0.1492665126,
+    "evaluator_val_mae": 0.1493349,
+    "gradient_mae": 0.0058671,
+    "border_mae": 0.1607286,
+    "held_out_rows": 245,
+    "beats_baseline": false
+  },
+  "visual_evidence": {
+    "fixed_scale_sheets": "output/training/direct_cnn_v112-authored-v1/validation/final_best",
+    "error_quantile_sheets": "output/training/direct_cnn_v112-authored-v1/validation/final_best/quantiles"
+  },
+  "promotion_verdict": "rejected"
+}

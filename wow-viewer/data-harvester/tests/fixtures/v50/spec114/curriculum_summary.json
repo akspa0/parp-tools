@@ -1,0 +1,28 @@
+{
+  "schema": "v50-reconstruction-curriculum-v1",
+  "curriculum_id": "reconstruction-0_5_3_3368-dual-v1",
+  "created_utc": "2026-07-19T00:00:00Z",
+  "source_stores": [
+    {
+      "path": "output/datasets/v50/curriculum-0_5_3_3368-dual_v1.zarr",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "row_count": 1629,
+  "source_group_count": 1629,
+  "split_counts": {
+    "train": 1384,
+    "validation": 245,
+    "test": 0
+  },
+  "input_origins": {
+    "authored": 1629,
+    "synthetic_noon_white": 0
+  },
+  "target_signal": "relative_height_257",
+  "synthetic_lighting_contract": "NoonWhiteGlobal",
+  "group_leak_count": 0,
+  "excluded_counts": {
+    "synthetic_stale_lighting": 1361
+  }
+}

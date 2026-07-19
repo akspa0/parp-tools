@@ -22,10 +22,10 @@ object-mask work while direct geometry is unproven.
 **Purpose**: Bind the feature to corrected source evidence and keep the old baseline reproducible.
 
 - [ ] T001 Record the completed Spec 113 T010b fixed-noon-white visual evidence and fresh synthetic store/manifest hashes in `specs/114-direct-terrain-reconstruction/research.md`
-- [ ] T002 Audit Kalimdor/Azeroth v50.1 signal coverage and confirm numeric height/normal/liquid/material/alpha plus authored RGB were not invalidated by the synthetic-lighting fix in `specs/114-direct-terrain-reconstruction/research.md`
-- [ ] T003 Freeze the strongest completed Spec 112 run identity and metrics as `direct_cnn_v112` comparison evidence in `specs/114-direct-terrain-reconstruction/research.md`
-- [ ] T004 [P] Add schema fixture documents for all three contract variants under `data-harvester/tests/fixtures/v50/spec114/`
-- [ ] T005 [P] Add JSON-schema contract tests in `data-harvester/tests/v50/test_model_stage_contract.py`
+- [x] T002 Audit Kalimdor/Azeroth v50.1 signal coverage and confirm numeric height/normal/liquid/material/alpha plus authored RGB were not invalidated by the synthetic-lighting fix in `specs/114-direct-terrain-reconstruction/research.md`
+- [x] T003 Freeze the strongest completed Spec 112 run identity and metrics as `direct_cnn_v112` comparison evidence in `specs/114-direct-terrain-reconstruction/research.md`
+- [x] T004 [P] Add schema fixture documents for all three contract variants under `data-harvester/tests/fixtures/v50/spec114/`
+- [x] T005 [P] Add JSON-schema contract tests in `data-harvester/tests/v50/test_model_stage_contract.py`
 
 **Checkpoint**: Source provenance is corrected and contract fixtures pass; no corpus or trainer has
 been launched.
@@ -36,10 +36,10 @@ been launched.
 
 **Purpose**: Build shared identity/lineage infrastructure that blocks every model story.
 
-- [ ] T006 Implement immutable curriculum/model-stage validation in `data-harvester/src/harvester/v50/model_stage_contract.py`
-- [ ] T007 [P] Write failing grouped-split, missing-signal, stale-lighting, and generated-input provenance tests in `data-harvester/tests/v50/test_reconstruction_curriculum.py`
-- [ ] T008 Implement dual-view row selection and summary generation in `data-harvester/src/harvester/v50/reconstruction_curriculum.py`
-- [ ] T009 Add the thin non-training builder/dry-run CLI in `data-harvester/scripts/v50_build_reconstruction_curriculum.py`
+- [x] T006 Implement immutable curriculum/model-stage validation in `data-harvester/src/harvester/v50/model_stage_contract.py`
+- [x] T007 [P] Write failing grouped-split, missing-signal, stale-lighting, and generated-input provenance tests in `data-harvester/tests/v50/test_reconstruction_curriculum.py`
+- [x] T008 Implement dual-view row selection and summary generation in `data-harvester/src/harvester/v50/reconstruction_curriculum.py`
+- [x] T009 Add the thin non-training builder/dry-run CLI in `data-harvester/scripts/v50_build_reconstruction_curriculum.py`
 - [ ] T010 Run CPU fixtures and hand the user the exact real corpus-build command, output paths, coverage expectations, and time/disk estimate in `specs/114-direct-terrain-reconstruction/quickstart.md`
 
 **Checkpoint**: The curriculum builder refuses group leakage, zero-filled missing signals, and any
