@@ -17,9 +17,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import zarr
+
+from harvester.v50.relief_teacher_labels import relief_array_sha256
 
 UNIVERSAL_CURRICULUM_SCHEMA = "v50-universal-relief-curriculum-v1"
 MIN_VISUAL_FAMILIES = 5
@@ -179,7 +182,15 @@ def _load_teacher_rows(
     row_group = group["rows"]
     for source_row_key in sorted(row_group.group_keys()):
         source = dict(row_group[source_row_key].attrs)
-        required = {"source_id", "source_sha256", "relative_path", "width", "height", "mode"}
+        required = {
+            "source_id",
+            "source_sha256",
+            "relative_path",
+            "width",
+            "height",
+            "mode",
+            "relief_sha256",
+        }
         missing = sorted(required - set(source))
         if missing:
             raise UniversalCurriculumError(
@@ -194,6 +205,13 @@ def _load_teacher_rows(
             raise UniversalCurriculumError(
                 f"teacher source image drift for {input_path}: expected {source['source_sha256']}, "
                 f"observed {observed_source_sha256}"
+            )
+        relief = np.asarray(row_group[source_row_key]["relative_relief"][:], dtype=np.float32)
+        observed_relief_sha256 = relief_array_sha256(relief)
+        if observed_relief_sha256 != source["relief_sha256"]:
+            raise UniversalCurriculumError(
+                f"teacher relief target drift for {source_row_key}: "
+                f"expected {source['relief_sha256']}, observed {observed_relief_sha256}"
             )
         row_payload = {
             "source_identity": identity,
@@ -216,6 +234,7 @@ def _load_teacher_rows(
                 "source_index": -1,
                 "input_path": str(input_path),
                 "input_sha256": str(source["source_sha256"]),
+                "target_sha256": str(source["relief_sha256"]),
                 "width": int(source["width"]),
                 "height": int(source["height"]),
                 "mode": str(source["mode"]),
@@ -358,7 +377,9 @@ def write_universal_curriculum(plan: UniversalCurriculumPlan) -> dict[str, Any]:
         raise FileExistsError(f"universal curriculum output already exists: {plan.output}")
     group = zarr.open_group(str(plan.output), mode="w")
     group.attrs.update(plan.summary)
-    table = pa.Table.from_pylist(list(plan.rows))
+    columns = sorted({key for row in plan.rows for key in row})
+    normalized_rows = [{column: row.get(column) for column in columns} for row in plan.rows]
+    table = pa.Table.from_pylist(normalized_rows)
     pq.write_table(table, plan.output / "index.parquet", compression="zstd")
     (plan.output / "summary.json").write_text(
         json.dumps(plan.summary, indent=2) + "\n", encoding="utf-8"

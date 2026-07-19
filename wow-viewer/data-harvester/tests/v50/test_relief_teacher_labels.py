@@ -98,11 +98,13 @@ def test_fake_teacher_writes_variable_shape_zarr_and_separates_pseudo_authority(
 
     assert summary["target_authority"] == "teacher_pseudo"
     assert summary["source_count"] == 2
+    assert all(len(row["relief_sha256"]) == 64 for row in summary["rows"])
     assert output.with_suffix(".summary.json").is_file()
     store = zarr.open_group(str(output), mode="r")
     shapes = sorted(tuple(store["rows"][row_id]["relative_relief"].shape) for row_id in store["rows"])
     assert shapes == [(5, 13), (11, 4)]
     assert store.attrs["teacher"]["revision"] == default_teacher_identity().revision
+    assert all(len(store["rows"][row_id].attrs["relief_sha256"]) == 64 for row_id in store["rows"])
 
 
 def test_cli_is_dry_run_by_default_and_creates_no_output(tmp_path, capsys) -> None:

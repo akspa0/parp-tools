@@ -30,6 +30,7 @@ from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
 from harvester.height_to_normal import analytic_normals_from_height
 from harvester.v50.height_relative_model import encode_relative_height
+from harvester.v50.relief_teacher_labels import relief_array_sha256
 from harvester.v50.universal_relief_curriculum import (
     UNIVERSAL_CURRICULUM_SCHEMA,
     source_store_identity,
@@ -152,6 +153,7 @@ class UniversalReliefDataset(Dataset):
             raise UniversalTrainingError(f"no samples selected for splits {sorted(splits)}")
         self._stores: dict[str, zarr.Group] = {}
         self._verified_inputs: set[str] = set()
+        self._verified_targets: set[str] = set()
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -212,9 +214,17 @@ class UniversalReliefDataset(Dataset):
                 )
             self._verified_inputs.add(input_path)
         rgb = _load_image_rgb(input_path)
-        target = np.asarray(
-            store["rows"][str(row["source_row_key"])]["relative_relief"][:], dtype=np.float32
-        )
+        source_row_key = str(row["source_row_key"])
+        target = np.asarray(store["rows"][source_row_key]["relative_relief"][:], dtype=np.float32)
+        target_identity = f"{row['source_store']}#{source_row_key}"
+        if target_identity not in self._verified_targets:
+            observed_target_sha256 = relief_array_sha256(target)
+            if observed_target_sha256 != row["target_sha256"]:
+                raise UniversalTrainingError(
+                    f"teacher relief target drift for {target_identity}: "
+                    f"expected {row['target_sha256']}, observed {observed_target_sha256}"
+                )
+            self._verified_targets.add(target_identity)
         if target.shape != rgb.shape[:2]:
             raise UniversalTrainingError(
                 f"teacher image/target shape mismatch for {row['row_id']}: "

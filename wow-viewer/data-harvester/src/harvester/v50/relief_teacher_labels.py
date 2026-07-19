@@ -124,6 +124,15 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def relief_array_sha256(values: np.ndarray) -> str:
+    array = np.ascontiguousarray(np.asarray(values))
+    digest = hashlib.sha256()
+    digest.update(array.dtype.str.encode())
+    digest.update(json.dumps(list(array.shape)).encode())
+    digest.update(array.tobytes(order="C"))
+    return digest.hexdigest()
+
+
 def _source_id(relative_path: str, source_sha256: str) -> str:
     payload = f"{relative_path}\0{source_sha256}".encode()
     return hashlib.sha256(payload).hexdigest()
@@ -245,6 +254,7 @@ def write_teacher_label_store(
             "row_id": row_id,
             "target_authority": "teacher_pseudo",
             "target_signal": "relative_relief",
+            "relief_sha256": relief_array_sha256(relief),
             "relief_min": float(relief.min()),
             "relief_max": float(relief.max()),
         }

@@ -20,6 +20,7 @@ from harvester.v50.universal_relief_curriculum import (
     main,
     write_universal_curriculum,
 )
+from harvester.v50.universal_relief_train import UniversalReliefDataset, UniversalTrainingError
 
 
 def _make_v50_store(tmp_path, *, leak: bool = False):
@@ -172,6 +173,22 @@ def test_teacher_source_image_drift_is_refused_before_curriculum_build(tmp_path)
         )
 
 
+def test_teacher_relief_target_drift_is_refused_before_curriculum_build(tmp_path) -> None:
+    v50 = _make_v50_store(tmp_path)
+    bindings = _bindings(tmp_path)
+    aerial = zarr.open_group(str(bindings[0].path), mode="a")
+    row_id = next(iter(aerial["rows"].group_keys()))
+    aerial["rows"][row_id]["relative_relief"][:] = 0.0
+
+    with pytest.raises(UniversalCurriculumError, match="relief target drift"):
+        build_universal_curriculum_plan(
+            v50_store=v50,
+            teacher_stores=bindings,
+            holdout_families=["aerial"],
+            output=tmp_path / "target-drift.zarr",
+        )
+
+
 def test_write_produces_immutable_zarr_index_and_summary(tmp_path) -> None:
     plan = build_universal_curriculum_plan(
         v50_store=_make_v50_store(tmp_path),
@@ -184,9 +201,35 @@ def test_write_produces_immutable_zarr_index_and_summary(tmp_path) -> None:
     assert (plan.output / "index.parquet").is_file()
     assert (plan.output / "summary.json").is_file()
     assert summary["curriculum_id"].startswith("sha256:")
-    assert pq.read_table(plan.output / "index.parquet").num_rows == len(plan.rows)
+    table = pq.read_table(plan.output / "index.parquet")
+    assert table.num_rows == len(plan.rows)
+    teacher_rows = [row for row in table.to_pylist() if row["target_authority"] == "teacher_pseudo"]
+    assert all(row["input_path"] and len(row["target_sha256"]) == 64 for row in teacher_rows)
     with pytest.raises(FileExistsError):
         write_universal_curriculum(plan)
+
+
+def test_training_refuses_teacher_target_mutated_after_curriculum_build(tmp_path) -> None:
+    bindings = _bindings(tmp_path)
+    plan = build_universal_curriculum_plan(
+        v50_store=_make_v50_store(tmp_path),
+        teacher_stores=bindings,
+        holdout_families=["aerial"],
+        output=tmp_path / "universal.zarr",
+    )
+    write_universal_curriculum(plan)
+    photos = zarr.open_group(str(bindings[1].path), mode="a")
+    row_id = next(iter(photos["rows"].group_keys()))
+    photos["rows"][row_id]["relative_relief"][:] = 0.0
+    dataset = UniversalReliefDataset(plan.output, {"train"}, augment=False)
+    sample_index = next(
+        index
+        for index, sample in enumerate(dataset.samples)
+        if sample.row["visual_family"] == "photos"
+    )
+
+    with pytest.raises(UniversalTrainingError, match="relief target drift"):
+        dataset[sample_index]
 
 
 def test_cli_is_dry_run_and_creates_no_output(tmp_path, capsys) -> None:
