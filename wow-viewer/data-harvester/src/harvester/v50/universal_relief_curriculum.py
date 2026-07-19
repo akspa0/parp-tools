@@ -48,7 +48,7 @@ class UniversalCurriculumPlan:
     summary: dict[str, Any]
 
 
-def _store_identity(store_path: Path) -> str:
+def source_store_identity(store_path: Path) -> str:
     digest = hashlib.sha256()
     found = False
     for candidate in (
@@ -68,6 +68,14 @@ def _store_identity(store_path: Path) -> str:
 
 def _row_id(payload: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while block := stream.read(1024 * 1024):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def _load_v50_rows(store_path: Path, source_filter: str) -> tuple[list[dict[str, Any]], str]:
@@ -94,7 +102,7 @@ def _load_v50_rows(store_path: Path, source_filter: str) -> tuple[list[dict[str,
                 "synthetic v50 rows require synthetic_lighting_contract=NoonWhiteGlobal"
             )
 
-    identity = _store_identity(store_path)
+    identity = source_store_identity(store_path)
     rows = []
     for source_index, source in enumerate(table.to_pylist()):
         minimap_source = str(source["minimap_source"])
@@ -165,7 +173,7 @@ def _load_teacher_rows(
     if "rows" not in group:
         raise UniversalCurriculumError(f"teacher store has no rows group: {store_path}")
 
-    identity = _store_identity(store_path)
+    identity = source_store_identity(store_path)
     split = "compatibility" if binding.visual_family in holdout_families else "train"
     rows = []
     row_group = group["rows"]
@@ -178,6 +186,15 @@ def _load_teacher_rows(
                 f"teacher row {source_row_key} in {store_path} missing {missing}"
             )
         source_group_id = f"image:{source['source_id']}"
+        input_path = Path(str(attrs["input_root"])) / str(source["relative_path"])
+        if not input_path.is_file():
+            raise UniversalCurriculumError(f"teacher source image is missing: {input_path}")
+        observed_source_sha256 = _sha256_file(input_path)
+        if observed_source_sha256 != source["source_sha256"]:
+            raise UniversalCurriculumError(
+                f"teacher source image drift for {input_path}: expected {source['source_sha256']}, "
+                f"observed {observed_source_sha256}"
+            )
         row_payload = {
             "source_identity": identity,
             "source_row_key": source_row_key,
@@ -197,7 +214,7 @@ def _load_teacher_rows(
                 "source_store_sha256": identity,
                 "source_row_key": source_row_key,
                 "source_index": -1,
-                "input_path": str(Path(str(attrs["input_root"])) / str(source["relative_path"])),
+                "input_path": str(input_path),
                 "input_sha256": str(source["source_sha256"]),
                 "width": int(source["width"]),
                 "height": int(source["height"]),

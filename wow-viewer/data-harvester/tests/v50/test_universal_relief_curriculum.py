@@ -153,6 +153,25 @@ def test_same_teacher_image_cannot_be_renamed_as_two_families(tmp_path) -> None:
         )
 
 
+def test_teacher_source_image_drift_is_refused_before_curriculum_build(tmp_path) -> None:
+    v50 = _make_v50_store(tmp_path)
+    bindings = _bindings(tmp_path)
+    aerial = zarr.open_group(str(bindings[0].path), mode="r")
+    input_root = tmp_path / "aerial-images"
+    Image.fromarray(np.full((17, 9, 3), 255, dtype=np.uint8), mode="RGB").save(
+        input_root / "source.png"
+    )
+    assert aerial.attrs["input_root"] == str(input_root.resolve())
+
+    with pytest.raises(UniversalCurriculumError, match="source image drift"):
+        build_universal_curriculum_plan(
+            v50_store=v50,
+            teacher_stores=bindings,
+            holdout_families=["aerial"],
+            output=tmp_path / "drift.zarr",
+        )
+
+
 def test_write_produces_immutable_zarr_index_and_summary(tmp_path) -> None:
     plan = build_universal_curriculum_plan(
         v50_store=_make_v50_store(tmp_path),
