@@ -154,6 +154,21 @@ section for the condensed current-state summary — kept in one place rather tha
   manifest. **The v50.1 `0_5_3_3368` full corpus now actually exists on disk**, not just
   documented — see `progress.md`'s Phase 9 entry for exact kept-tile counts per map/manifest.
 
+## Spec 112/113 state (2026-07-18, post final rebuild)
+
+- **Spec 112 dataset phase is DONE on real data**: rebuilt Kalimdor/Azeroth stores pass SC-001
+  (no unexplained zero-coverage; mcnk_flags_16 99.7%/98.0%, mccv_rgb era-unavailable) and SC-002
+  (256/1024 parity TRUE). `minimap_rgb_authored` captured at 100%/99% coverage. Dual-source
+  curriculum built: `curriculum-0_5_3_3368-dual_v1.zarr`, 2990 rows (1629 authored + 1361
+  synthetic; per-source blank check recovered ~270 authored rows on synthesis-failed tiles —
+  user-directed), 2545 train / 445 val, within-map stratified, Kalimdor+Azeroth only. Remaining
+  Spec 112: T017-T021 (relative-height model + trainer, then user-run training).
+- **Spec 113 (minimap SR) spec+plan+tasks committed**; architecture decided by user constraint
+  (must be ComfyUI-native): ComfyUI loads upscale models via spandrel, so primary arch =
+  RealPLKSR (near-DAT2 quality, ~10x faster, low VRAM), DAT-2 ceiling, RRDBNet floor; SeedVR2/RTX
+  VSR rejected for training (generative bias / closed model), RTX VSR optional eval baseline.
+  US1 hard gate (authored↔detail alignment) not yet run; detail render not yet implemented.
+
 ## Known open bug (unrelated lane, reported 2026-07-18, not yet fixed)
 
 - Built-in map GLB export: textures are mirrored along the Y axis. User confirmed via testing GLB
