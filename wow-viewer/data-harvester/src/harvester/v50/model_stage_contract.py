@@ -36,12 +36,12 @@ PROMOTION_VERDICTS = frozenset({"pending", "promoted", "rejected"})
 _HEX = frozenset("0123456789abcdefABCDEF")
 
 
-class ContractViolation(ValueError):
+class ContractViolationError(ValueError):
     """Raised when a document does not satisfy the published Spec 114 contract."""
 
 
 def _fail(path: str, message: str) -> None:
-    raise ContractViolation(f"{path}: {message}")
+    raise ContractViolationError(f"{path}: {message}")
 
 
 def _is_sha256(value: Any) -> bool:
@@ -275,7 +275,7 @@ def sha256_json(obj: Any) -> str:
 def identity_for_path(path: Path, *, display_path: str | None = None) -> dict[str, str]:
     """Build a schema ``identity`` binding a document to the file's current content."""
     if not path.is_file():
-        raise ContractViolation(f"identity target does not exist or is not a file: {path}")
+        raise ContractViolationError(f"identity target does not exist or is not a file: {path}")
     return {"path": display_path or str(path), "sha256": sha256_file(path)}
 
 
@@ -284,7 +284,7 @@ def verify_identity(identity: dict, path: Path) -> None:
     validate_identity(identity)
     actual = sha256_file(path)
     if actual.lower() != identity["sha256"].lower():
-        raise ContractViolation(
+        raise ContractViolationError(
             f"identity drift for {identity['path']!r}: recorded {identity['sha256']}, "
             f"file now hashes {actual}"
         )

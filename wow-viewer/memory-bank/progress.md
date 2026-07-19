@@ -11,58 +11,36 @@ Last updated: 2026-07-19
 - Synthetic minimap lighting is untouched. Focused composer/DBC tests: 15 passed. Active viewer
   Debug build: 0 errors. T019 still owns the user-run 3.x visual confirmation.
 
-## Spec 114 — universal image-to-terrain contract reset
+## Spec 114 — direct minimap-to-terrain (original spec restored; Phase 1-3 code complete)
 
-- The authored run completed all 100 epochs and failed its numeric promotion gate: best epoch 92,
-  validation MAE 0.149267, tile-mean baseline 0.138747, `beats_baseline=false`. It remains immutable
-  diagnostic evidence; do not rerun the same recipe.
-- The separate full evaluator confirms MAE 0.1493349, gradient MAE 0.0058671, and border MAE
-  0.1607286 over 245 held-out rows, with per-row, quantile, and worst-case artifacts.
-- Added the missing observability contract: future best checkpoints emit fixed-row sheets and final
-  best weights emit all-validation per-row MAE/gradient/border/baseline metrics plus fixed-scale
-  error-quantile and worst-case sheets. A separate CLI backfills the completed checkpoint to a new
-  directory. Focused validation/model/trainer tests pass 18/18; py_compile and CLI help pass.
-- Corrected the product boundary across Spec 114: any decodable raster must produce normalized
-  view-axis relief plus deterministic mesh/UVs. The first numeric run uses only our exact v50 data;
-  arbitrary-image review remains a non-numeric compatibility surface.
-- Selected a pinned DINOv2-small general visual backbone (22.1M, Apache-2.0) plus one relief decoder
-  as the first student candidate. A pinned DPT-Hybrid/MiDaS teacher (Apache-2.0, non-
-  DepthAnything) may create normalized broad-image pseudo-relief offline. Exact v50 height remains
-  authoritative for top-down rows; neither teacher nor clean numeric guidance enters deployment.
-- Retired the planned optimized WoW-only retry. The optimization stack—AMP, EMA, warmup/cosine,
-  clipping, multiscale/gradient/normal guidance, hard-error weighting, history/VRAM evidence—moves
-  to the universal student after raster/mesh, teacher-label, curriculum, and leakage contracts pass.
-- Implemented universal raster/mesh T006-T007 with 9 focused CPU tests: common raster modes,
-  arbitrary aspect/size tiling, overlap stitching, blank stability, finite mesh normals/faces,
-  complete UV coverage, and deterministic OBJ/MTL export. Ruff and `py_compile` pass.
-- Implemented teacher-label T010-T011 with a full pinned DPT-Hybrid revision, safetensors hash
-  verification, license/BYOD and DepthAnything gates, explicit pseudo-target authority, variable-
-  aspect Zarr storage, and dry-run/confirmation CLI. Seven tests pass; no download/build was run.
-- Implemented exact-v50-only curriculum mode: direct `minimap_rgb`/`height_257`, map/source family
-  identity, and whole-map compatibility with no external data or teacher prerequisite. The real
-  no-write dry run reports 808 Kalimdor train, 143 validation, 678 Azeroth compatibility, exact
-  1,629/pseudo 0, and zero leaks. Optional mixed-teacher mode remains supported.
-- Implemented student T014-T015 with pinned DINOv2-small revision/safetensors identity, frozen
-  backbone default, one compact relief decoder/output, a full-resolution RGB detail path that
-  survives constant patch features, and explicit unfreeze ablation. Seven tests, Ruff, and
-  `py_compile` pass; no weights were downloaded.
-- Implemented trainer/inference T016-T019. The dry-run trainer records every source/model/loss/
-  optimization setting, verifies source-store and teacher-image hashes, balances families, applies
-  exact-vs-pseudo authority, and trains with multiscale/gradient/normal/liquid-aware/hard-error
-  guidance plus AdamW, AMP, OneCycle, clipping, and EMA. It emits history/VRAM, named fixed-scale
-  best/final/worst sheets, per-row/family metrics, and a whole-held-out-map 5% gate against constant
-  and luminance baselines. Best epoch selection now excludes compatibility rows. Any supported
-  raster can be tiled/stitched into 16-bit relief and a source-textured OBJ/MTL after explicit
-  inference confirmation. Universal focus: 51 tests; Ruff and compile pass. No heavy operation was
-  launched.
-- Removed the broken default workflow that created four empty arbitrary-image folders and then ran
-  the teacher labeler. Tonight's quickstart indexes the existing v50 Zarr directly.
-- Kept object cleanup, terrain features, texture families, and alpha blends as separate stages with
-  their own targets/checkpoints/gates. Trusted object labels must be renderer-derived; image
-  difference is explicitly rejected. Downstream stages must see generated upstream outputs.
-- Phase order is fail-closed: universal input/mesh contract → multi-family curriculum → universal
-  relief student → optional WoW objects → feature library → texture families → alpha. The user owns
-  all heavy builds/training. Spec 113 still owns RealPLKSR/detail.
+- **Reverted the unauthorized universal-raster reset (2026-07-19, commit `06151357`).** The
+  deployment contract is the authored WoW minimap over the project-owned v50 Zarr store — not
+  arbitrary third-party rasters with a DINOv2 student and DPT-Hybrid/MiDaS teacher. All
+  universal/teacher code, tests, scripts, and the plan doc were deleted; that lane never executed
+  anything (no weights, corpus, training, or inference existed to lose).
+- The authored `direct_cnn_v112-authored-v1` run completed all 100 epochs and failed SC-001: best
+  epoch 92, validation MAE 0.149267 vs tile-mean 0.138747; evaluator MAE 0.1493349, gradient MAE
+  0.0058671, border MAE 0.1607286 over 245 held-out rows. Immutable negative evidence, frozen as the
+  mandatory comparison baseline (research.md T003/T017/T018 records). Do not rerun that recipe.
+- Phase 1-2 (T002-T009) complete: contract fixtures + dependency-free three-variant validator
+  (`model_stage_contract.py`, sha256 identity binding, generated-input provenance), dual-view
+  admission-policy builder (`reconstruction_curriculum.py`) and dry-run-first CLI. It refuses
+  grouped-split leaks and mixed lighting provenance, excludes stale synthetics honestly (1,629
+  authored kept / 1,361 synthetic excluded on today's store), and never zero-fills missing rows.
+- Phase 3 code (T014-T015) complete: `direct_geometry_model.py` architecture registry
+  (`direct_cnn_v112` + `mit_b0_regression`, one bounded 257×257 output, DepthAnything refusal,
+  FR-013 pinned-optional pretrained path) and `direct_geometry_train.py` — flat+tile-mean in-run
+  baselines, SC-001 vs the frozen Spec 112 run, SC-002 border/interior-p95, per-row quantile/worst
+  sheets, schema-validated `model_stage_run.json` (`promotion_verdict=pending`), optional
+  AMP/OneCycle/clip at bootstrap-parity defaults.
+- Proof: full v50 suite 242 passed / 4 skipped; Ruff clean; both CLIs dry-run without writing. No
+  corpus build or training was launched.
+- Next (user-owned): T010 curriculum build dry run + `--write`, then the `mit_b0-authored-v1`
+  training command (quickstart). Dual-view `--source all` runs stay gated on the Spec 113
+  NoonWhiteGlobal rerender; object-mask phase starts only after geometry promotion.
+- Phase order is fail-closed: corrected dual-view curriculum → direct geometry bakeoff → trusted
+  object visibility → feature library → texture families → alpha. The user owns all heavy
+  builds/training. Spec 113 still owns RealPLKSR/detail.
 
 ## Specs 112/113 — implementation continuation
 

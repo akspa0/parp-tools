@@ -60,6 +60,9 @@ def compute_row_metrics(
         "mae": model_mae,
         "gradient_mae": gradient_mae,
         "border_mae": float(absolute[border].mean()),
+        # Interior complement of the border ring: SC-002 compares held-out border error against
+        # the interior error distribution's 95th percentile.
+        "interior_mae": float(absolute[~border].mean()),
         "tile_mean_baseline_mae": baseline_mae,
         "mae_delta_vs_baseline": model_mae - baseline_mae,
     }

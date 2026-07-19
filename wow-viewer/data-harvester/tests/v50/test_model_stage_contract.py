@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from harvester.v50.model_stage_contract import (
-    ContractViolation,
+    ContractViolationError,
     append_generated_input,
     identity_for_path,
     sha256_json,
@@ -57,7 +57,7 @@ def test_dispatch_routes_each_fixture(curriculum: dict, visibility: dict, stage_
 def test_dispatch_refuses_unknown_schema(curriculum: dict) -> None:
     mutated = copy.deepcopy(curriculum)
     mutated["schema"] = "v50-mixed-curriculum-v1"
-    with pytest.raises(ContractViolation, match="unknown Spec 114 schema"):
+    with pytest.raises(ContractViolationError, match="unknown Spec 114 schema"):
         validate_document(mutated)
 
 
@@ -81,7 +81,7 @@ def test_dispatch_refuses_unknown_schema(curriculum: dict) -> None:
 def test_curriculum_mutations_fail(curriculum: dict, mutate) -> None:
     mutated = copy.deepcopy(curriculum)
     mutate(mutated)
-    with pytest.raises(ContractViolation):
+    with pytest.raises(ContractViolationError):
         validate_curriculum_summary(mutated)
 
 
@@ -101,7 +101,7 @@ def test_curriculum_mutations_fail(curriculum: dict, mutate) -> None:
 def test_visibility_mutations_fail(visibility: dict, mutate) -> None:
     mutated = copy.deepcopy(visibility)
     mutate(mutated)
-    with pytest.raises(ContractViolation):
+    with pytest.raises(ContractViolationError):
         validate_object_visibility_summary(mutated)
 
 
@@ -130,7 +130,7 @@ def test_visibility_mutations_fail(visibility: dict, mutate) -> None:
 def test_stage_run_mutations_fail(stage_run: dict, mutate) -> None:
     mutated = copy.deepcopy(stage_run)
     mutate(mutated)
-    with pytest.raises(ContractViolation):
+    with pytest.raises(ContractViolationError):
         validate_model_stage_run(mutated)
 
 
@@ -152,12 +152,12 @@ def test_identity_roundtrip_and_drift_detection(tmp_path: Path) -> None:
     identity = identity_for_path(target)
     verify_identity(identity, target)
     target.write_bytes(b"tampered")
-    with pytest.raises(ContractViolation, match="identity drift"):
+    with pytest.raises(ContractViolationError, match="identity drift"):
         verify_identity(identity, target)
 
 
 def test_identity_for_path_refuses_missing_file(tmp_path: Path) -> None:
-    with pytest.raises(ContractViolation, match="does not exist"):
+    with pytest.raises(ContractViolationError, match="does not exist"):
         identity_for_path(tmp_path / "absent.bin")
 
 
@@ -166,7 +166,7 @@ def test_sha256_json_is_key_order_invariant() -> None:
 
 
 def test_append_generated_input_requires_valid_identity(curriculum: dict) -> None:
-    with pytest.raises(ContractViolation):
+    with pytest.raises(ContractViolationError):
         append_generated_input(curriculum, {"path": "mask.ckpt", "sha256": "short"})
     updated = append_generated_input(
         curriculum, {"path": "mask.ckpt", "sha256": "f" * 64}

@@ -33,7 +33,7 @@ from typing import Any
 from harvester.v50.model_stage_contract import (
     SYNTHETIC_LIGHTING_CONTRACT,
     TARGET_SIGNAL,
-    ContractViolation,
+    ContractViolationError,
     identity_for_path,
     validate_curriculum_summary,
 )
@@ -173,7 +173,7 @@ def build_reconstruction_summary(
     }
     try:
         validate_curriculum_summary(summary)
-    except ContractViolation as exc:
+    except ContractViolationError as exc:
         raise ReconstructionCurriculumError(f"built summary violates its own contract: {exc}") from exc
     return summary
 
@@ -284,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
         summary = run_builder(
             stores=args.store, output=args.output, curriculum_id=args.curriculum_id, write=args.write
         )
-    except (ReconstructionCurriculumError, ContractViolation) as exc:
+    except (ReconstructionCurriculumError, ContractViolationError) as exc:
         raise SystemExit(str(exc)) from exc
 
     print(json.dumps(summary, indent=2), flush=True)
