@@ -39,8 +39,8 @@ visual families exist; source-group and held-out-family leak counts are zero.
 whole-family paired holdouts beat constant and luminance baselines; the user accepts the arbitrary-
 image review sheet.
 
-- [ ] T014 [P] [US1] Write one-output, arbitrary-size, finite-forward, and frozen-backbone tests in `data-harvester/tests/v50/test_universal_relief_model.py`
-- [ ] T015 [US1] Implement the pinned DINOv2-small relief student and one continuous decoder in `data-harvester/src/harvester/v50/universal_relief_model.py`
+- [x] T014 [P] [US1] Write one-output, tile-contract, finite-forward, frozen-backbone, and pin/hash tests in `data-harvester/tests/v50/test_universal_relief_model.py`
+- [x] T015 [US1] Implement the pinned DINOv2-small relief student and one continuous decoder in `data-harvester/src/harvester/v50/universal_relief_model.py`
 - [ ] T016 [P] [US1] Write loss masking, exact/pseudo authority, EMA, scheduler, AMP, clipping, and artifact tests in `data-harvester/tests/v50/test_universal_relief_train.py`
 - [ ] T017 [US1] Implement the guided optimization/evaluation stack in `data-harvester/src/harvester/v50/universal_relief_train.py`
 - [ ] T018 [P] [US1] Add the any-image relief/OBJ/height-preview inference CLI in `data-harvester/scripts/v50_image_to_terrain.py`

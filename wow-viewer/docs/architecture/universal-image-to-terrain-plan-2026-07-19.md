@@ -49,6 +49,12 @@ The first student candidate uses pinned
 [`nvidia/mit-b0`](https://huggingface.co/nvidia/mit-b0) encoder remains an ablation. Neither model
 card claims terrain reconstruction; promotion belongs to Spec 114's gates.
 
+The student architecture is landed: a pinned DINOv2-small patch encoder feeds one compact
+progressive continuous-relief decoder. The default freezes the encoder and trains only the decoder;
+unfreezing is an explicit later ablation. The model accepts one RGB 224x224 tile and emits one
+bounded 224x224 relief tile; arbitrary image sizes remain the already-proven tiling/stitching
+contract. Six CPU model tests pass without downloading Hub weights.
+
 Broad images without exact relief may receive offline pseudo-labels from pinned
 [`Intel/dpt-hybrid-midas`](https://huggingface.co/Intel/dpt-hybrid-midas), an Apache-2.0 relative
 monocular-depth model trained on roughly 1.4M mixed images. It is a non-DepthAnything teacher, not a

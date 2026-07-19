@@ -215,6 +215,9 @@ Lightweight universal contract proof completed after the reset:
 - teacher-label tests: 7 passed; CLI help, Ruff, `py_compile`, and dry-run/no-output contract: pass.
 - universal curriculum tests: 6 passed; five-family/whole-holdout/exact-vs-pseudo/content-relabel
   gates, CLI help, schema JSON parse, Ruff, and `py_compile`: pass.
+- universal student tests: 6 passed; pinned full DINOv2-small revision/safetensors SHA, RGB-only one-
+  relief output, finite bounded forward, frozen-backbone discipline, explicit unfreeze ablation, and
+  fail-closed weight/channel/patch validation. No student weights were downloaded.
 
 ## Geometry promotion gate
 

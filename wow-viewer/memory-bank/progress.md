@@ -44,6 +44,9 @@ Last updated: 2026-07-19
   compatibility split, exact/pseudo authority, source-store identities, same-source content
   relabel refusal, and group/family leakage gates. Six tests, CLI help, schema parse, Ruff, and
   `py_compile` pass. No real curriculum was built.
+- Implemented student T014-T015 with pinned DINOv2-small revision/safetensors identity, frozen
+  backbone default, one compact relief decoder/output, and explicit unfreeze ablation. Six tests,
+  Ruff, and `py_compile` pass; no weights were downloaded.
 - Kept object cleanup, terrain features, texture families, and alpha blends as separate stages with
   their own targets/checkpoints/gates. Trusted object labels must be renderer-derived; image
   difference is explicitly rejected. Downstream stages must see generated upstream outputs.

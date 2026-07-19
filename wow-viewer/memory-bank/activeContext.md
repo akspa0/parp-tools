@@ -36,6 +36,10 @@ Last updated: 2026-07-19
   identities, and zero group/family/content-relabel leakage. Six focused tests pass; CLI is dry-run
   by default. No real external family stores or curriculum have been built. Next is the student
   architecture/tests; user data/teacher build remains required before CUDA training.
+- Student model T014-T015 is implemented: exact DINOv2-small revision and 88.2 MB safetensors hash,
+  frozen 22.1M general encoder, compact trainable progressive decoder, and exactly one bounded
+  224x224 relief output per tile. Six CPU tests pass; no Hub download occurred. Next is the separately
+  documented trainer/optimization slice T016-T017.
 - Source-image UV projection provides immediate mesh texture. Object cleanup, terrain semantics,
   editable texture families, and alpha remain later independent models with separate checkpoints.
 
