@@ -21,8 +21,8 @@ training recipe.
 
 ## Phase 2: Foundational universal contracts and curriculum
 
-- [ ] T006 [P] Write raster-mode/aspect/blank/finite-mesh/UV contract tests in `data-harvester/tests/v50/test_universal_relief_contract.py`
-- [ ] T007 Implement arbitrary-raster preprocessing, relief stitching, and deterministic mesh export in `data-harvester/src/harvester/v50/universal_relief_contract.py`
+- [x] T006 [P] Write raster-mode/aspect/blank/finite-mesh/UV contract tests in `data-harvester/tests/v50/test_universal_relief_contract.py`
+- [x] T007 Implement arbitrary-raster preprocessing, relief stitching, and deterministic mesh export in `data-harvester/src/harvester/v50/universal_relief_contract.py`
 - [ ] T008 [P] Add universal curriculum and model-stage schema fixtures under `data-harvester/tests/fixtures/v50/spec114/`
 - [ ] T009 Implement fail-closed schema and source/group/family validation in `data-harvester/src/harvester/v50/model_stage_contract.py`
 - [ ] T010 [P] Write teacher identity/orientation/normalization/license tests in `data-harvester/tests/v50/test_relief_teacher_labels.py`

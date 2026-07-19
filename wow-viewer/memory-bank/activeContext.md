@@ -23,6 +23,10 @@ Last updated: 2026-07-19
   normalized pseudo-relief offline; exact v50 heights remain authoritative for top-down rows. The
   teacher is never a deployment input. Next implementation starts with raster/mesh contracts and
   multi-family curriculum identity before any new user-run training command.
+- Universal raster/mesh T006-T007 are implemented: RGB/RGBA/grayscale, native-aspect overlap tiles,
+  exact-coverage stitching, stable blank relief, finite grid mesh/normals/faces, full UVs, and
+  OBJ/MTL export. Focused tests pass 9/9; Ruff and `py_compile` pass. Next is teacher/curriculum
+  identity, not training.
 - Source-image UV projection provides immediate mesh texture. Object cleanup, terrain semantics,
   editable texture families, and alpha remain later independent models with separate checkpoints.
 

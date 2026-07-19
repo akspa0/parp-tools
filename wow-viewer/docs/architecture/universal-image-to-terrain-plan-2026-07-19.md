@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-19  
 **Spec owner:** `specs/114-direct-terrain-reconstruction/`  
-**Status:** contract reset; foundation implementation pending
+**Status:** contract reset; universal raster/mesh boundary implemented; curriculum pending
 
 ## Product boundary
 
@@ -68,6 +68,11 @@ Each row records:
 - exact-numeric or teacher-pseudo target authority;
 - teacher ID/revision/hash/orientation when applicable;
 - immutable split/source-group identity.
+
+The landed `universal_relief_contract.py` now proves the pre/post-model boundary independently of a
+checkpoint: common raster modes, aspect-preserving overlap tiling, exact-coverage relief stitching,
+blank stability, finite deterministic mesh construction, complete UVs, and OBJ/MTL export. Focused
+CPU proof is 9/9 tests. This does not yet prove model quality.
 
 ## Training and evaluation
 

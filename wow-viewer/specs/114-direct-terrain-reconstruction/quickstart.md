@@ -147,6 +147,16 @@ are added only after T006–T020 land and pass lightweight proof:
 
 This gate prevents another expensive run against a contract that cannot meet the product.
 
+Lightweight universal contract proof completed after the reset:
+
+- `universal_relief_contract.py` accepts RGB/RGBA/grayscale and preserves non-square coverage by
+  edge-padding only when smaller than a model tile and overlap-tiling at native aspect otherwise;
+- stitched relief crops back to the exact source dimensions;
+- constant inputs produce stable zero relief and a finite flat mesh;
+- deterministic X/Z grid vertices, upward normals, triangles, full `[0,1]` UV coverage, and OBJ/MTL
+  export are implemented;
+- focused tests: 9 passed; Ruff, `py_compile`, and `git diff --check`: pass.
+
 ## Geometry promotion gate
 
 The first universal Spec 114 checkpoint is promotable only when all of these hold:

@@ -34,6 +34,9 @@ Last updated: 2026-07-19
 - Retired the planned optimized WoW-only retry. The optimization stack—AMP, EMA, warmup/cosine,
   clipping, multiscale/gradient/normal guidance, hard-error weighting, history/VRAM evidence—moves
   to the universal student after raster/mesh, teacher-label, curriculum, and leakage contracts pass.
+- Implemented universal raster/mesh T006-T007 with 9 focused CPU tests: common raster modes,
+  arbitrary aspect/size tiling, overlap stitching, blank stability, finite mesh normals/faces,
+  complete UV coverage, and deterministic OBJ/MTL export. Ruff and `py_compile` pass.
 - Kept object cleanup, terrain features, texture families, and alpha blends as separate stages with
   their own targets/checkpoints/gates. Trusted object labels must be renderer-derived; image
   difference is explicitly rejected. Downstream stages must see generated upstream outputs.
