@@ -40,6 +40,10 @@ Last updated: 2026-07-19
 - Implemented teacher-label T010-T011 with a full pinned DPT-Hybrid revision, safetensors hash
   verification, license/BYOD and DepthAnything gates, explicit pseudo-target authority, variable-
   aspect Zarr storage, and dry-run/confirmation CLI. Seven tests pass; no download/build was run.
+- Implemented universal curriculum T012-T013 with five-family minimum, complete held-out-family
+  compatibility split, exact/pseudo authority, source-store identities, same-source content
+  relabel refusal, and group/family leakage gates. Six tests, CLI help, schema parse, Ruff, and
+  `py_compile` pass. No real curriculum was built.
 - Kept object cleanup, terrain features, texture families, and alpha blends as separate stages with
   their own targets/checkpoints/gates. Trusted object labels must be renderer-derived; image
   difference is explicitly rejected. Downstream stages must see generated upstream outputs.

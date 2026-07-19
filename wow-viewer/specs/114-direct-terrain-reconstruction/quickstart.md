@@ -179,6 +179,30 @@ depend on the chosen image count/resolutions; the assistant does not launch it. 
 commands at one folder and rename the family—the curriculum gate requires genuinely distinct
 visual/source families.
 
+### Universal curriculum index
+
+After four genuinely distinct non-WoW family stores have been built, preview the combined exact and
+pseudo-relief curriculum. This example holds out the complete paintings family and uses only the
+unaffected authored v50 rows:
+
+```powershell
+uv run python scripts/v50_build_universal_relief_curriculum.py `
+  --v50-store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
+  --v50-source authored `
+  --teacher-store aerial=../output/datasets/v50/v50.1/universal-relief-aerial-v1.zarr `
+  --teacher-store photos=../output/datasets/v50/v50.1/universal-relief-photos-v1.zarr `
+  --teacher-store paintings=../output/datasets/v50/v50.1/universal-relief-paintings-v1.zarr `
+  --teacher-store drawings=../output/datasets/v50/v50.1/universal-relief-drawings-v1.zarr `
+  --holdout-family paintings `
+  --output ../output/datasets/v50/v50.1/universal-relief-curriculum-v1.zarr
+```
+
+The preview writes nothing. It must report five families, nonzero exact and teacher-pseudo rows,
+nonzero compatibility rows for the held-out family, and both leak counts as zero. Add
+`--confirm-build` only after those values are correct. The output is a content-identified Zarr
+curriculum index that references the immutable source stores; it does not duplicate the image
+corpus. Pointing multiple family names at the same image content is refused.
+
 Lightweight universal contract proof completed after the reset:
 
 - `universal_relief_contract.py` accepts RGB/RGBA/grayscale and preserves non-square coverage by
@@ -189,6 +213,8 @@ Lightweight universal contract proof completed after the reset:
   export are implemented;
 - focused tests: 9 passed; Ruff, `py_compile`, and `git diff --check`: pass.
 - teacher-label tests: 7 passed; CLI help, Ruff, `py_compile`, and dry-run/no-output contract: pass.
+- universal curriculum tests: 6 passed; five-family/whole-holdout/exact-vs-pseudo/content-relabel
+  gates, CLI help, schema JSON parse, Ruff, and `py_compile`: pass.
 
 ## Geometry promotion gate
 

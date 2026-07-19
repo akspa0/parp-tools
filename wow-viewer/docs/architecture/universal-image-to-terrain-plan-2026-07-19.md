@@ -75,6 +75,12 @@ Each row records:
 - teacher ID/revision/hash/orientation when applicable;
 - immutable split/source-group identity.
 
+The curriculum index builder is landed. It requires v50 plus at least four distinct external
+families, at least one complete compatibility holdout, nonzero exact and teacher-pseudo authority,
+and zero group/family leakage. It rejects identical source content relabeled under multiple family
+names. Authored v50 rows are usable immediately; synthetic selection fails until the source store
+records `NoonWhiteGlobal`. The builder is dry-run by default and writes only after user confirmation.
+
 The landed `universal_relief_contract.py` now proves the pre/post-model boundary independently of a
 checkpoint: common raster modes, aspect-preserving overlap tiling, exact-coverage relief stitching,
 blank stability, finite deterministic mesh construction, complete UVs, and OBJ/MTL export. Focused

@@ -31,6 +31,11 @@ Last updated: 2026-07-19
   record, DepthAnything refusal, larger-is-higher robust normalization, license/BYOD gate, variable-
   aspect Zarr rows, and dry-run/`--confirm-run` ownership. Seven focused tests pass; no weights were
   downloaded and no real label corpus was built. Next is whole-family curriculum T012-T013.
+- Whole-family curriculum T012-T013 are implemented: v50 exact rows plus at least four distinct
+  teacher families, a complete family holdout, exact/pseudo authority counts, immutable source
+  identities, and zero group/family/content-relabel leakage. Six focused tests pass; CLI is dry-run
+  by default. No real external family stores or curriculum have been built. Next is the student
+  architecture/tests; user data/teacher build remains required before CUDA training.
 - Source-image UV projection provides immediate mesh texture. Object cleanup, terrain semantics,
   editable texture families, and alpha remain later independent models with separate checkpoints.
 

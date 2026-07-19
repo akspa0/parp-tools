@@ -71,7 +71,9 @@
           },
           "additionalProperties": false
         },
-        "synthetic_lighting_contract": { "const": "NoonWhiteGlobal" },
+        "synthetic_lighting_contract": {
+          "enum": ["NoonWhiteGlobal", "not_applicable_no_synthetic"]
+        },
         "group_leak_count": { "const": 0 },
         "family_leak_count": { "const": 0 },
         "teacher_models": { "type": "array", "items": { "$ref": "#/$defs/identity" } },
