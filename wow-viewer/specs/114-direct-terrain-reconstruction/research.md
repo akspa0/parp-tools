@@ -126,6 +126,30 @@ provenance; the T008 curriculum builder enforces this by exclusion, not trust.
 gradient MAE 0.0058671, border MAE 0.1607286. Verdict: **rejected** under SC-001; retained as the
 mandatory comparison baseline and immutable negative evidence for every later geometry candidate.
 
+### T018 follow-on record: `mit_b0-authored-v1` and the spectral-bias finding
+
+**Outcome (2026-07-19)**: the first MiT-B0 regression run (from scratch, AMP + OneCycle + clip,
+100 epochs) reached best epoch 93 with validation MAE 0.187802 — SC-001 false (tile-mean
+0.138747, frozen CNN 0.149267), SC-002 true (borders within interior p95). The user reports the
+strongest VISUAL geometry to date: correct land/water layout, mountain placement, and plausible
+coarse relief on unseen tiles.
+
+**Diagnosis**: the fixed-epoch-65 preview shows predictions that are systematically smooth and
+under-amplituded wherever truth carries self-similar ridge/drainage/coastline structure — classic
+spectral bias. Smooth-L1 + a single-scale gradient term does not supervise the terrain's fractal
+statistics (power-law spectrum, multi-octave self-similarity). This is exactly the gap Spec 068's
+paused US1 identified for the V21 lane.
+
+**Decision**: revive Spec 068 US1 as loss-only guidance in `spectral_guidance.py` — radial
+log-power L1 (DC-removed, so structure not altitude is supervised; the spectral slope is the
+fractal-dimension proxy) plus multi-octave gradient L1 — exposed as `--spectral-weight` /
+`--multiscale-weight` (default 0, bootstrap parity). No aux head (one-output constitution), no
+deployment-input change, no architecture change. Spec 068's Hurst aux head stays paused: it would
+violate the one-output rule in this lane. Validation path: CPU unit tests (zero loss on exact
+prediction, penalty on smoothing, fractal-vs-white-noise discrimination, DC invariance,
+differentiability) plus a user-run v2 comparison against this run's frozen metrics. Deployment
+inference (T056) is now implemented for loose 256x256 tiles with per-tile hash-bound manifests.
+
 **Reverted detour (2026-07-19)**: an unauthorized "universal arbitrary-raster" reset briefly
 replaced this spec with a DINOv2 student, a DPT-Hybrid/MiDaS pseudo-label teacher, and broad
 third-party image folders. That route was reverted: the deployment contract is the authored WoW

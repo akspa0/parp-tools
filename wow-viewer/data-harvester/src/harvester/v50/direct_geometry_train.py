@@ -58,6 +58,7 @@ from harvester.v50.model_stage_contract import (
     identity_for_path,
     validate_model_stage_run,
 )
+from harvester.v50.spectral_guidance import multiscale_gradient_loss, radial_spectral_loss
 
 STAGE = "direct_geometry"
 OUTPUT_SIGNAL = "relative_height_257"
@@ -166,12 +167,16 @@ def build_direct_plan(
     lr_schedule: str,
     amp: bool,
     clip: float,
+    spectral_weight: float = 0.0,
+    multiscale_weight: float = 0.0,
 ) -> dict:
     """Machine-readable no-training preview printed before CUDA allocation."""
     if batch_size < 1 or epochs < 1:
         raise TrainerContractError("batch size and epochs must both be positive")
     if lr_schedule not in LR_SCHEDULES:
         raise TrainerContractError(f"lr schedule must be one of {sorted(LR_SCHEDULES)}")
+    if spectral_weight < 0 or multiscale_weight < 0:
+        raise TrainerContractError("guidance weights must be >= 0")
     selected = [index_rows[i] for i in selected_rows]
     split_counts = {
         split: sum(str(row.get("split")) == split for row in selected) for split in ("train", "val")
@@ -197,6 +202,10 @@ def build_direct_plan(
         "lr_schedule": lr_schedule,
         "amp": amp,
         "grad_clip": clip,
+        "guidance": {
+            "spectral_weight": spectral_weight,
+            "multiscale_weight": multiscale_weight,
+        },
         "train_steps_per_epoch": math.ceil(split_counts["train"] / batch_size),
         "deployment_inputs": ["minimap_rgb"],
         "training_target": "height_257 -> relative_height_257",
@@ -230,6 +239,10 @@ def main() -> int:
     ap.add_argument("--lr-schedule", default="constant", choices=sorted(LR_SCHEDULES))
     ap.add_argument("--amp", action="store_true")
     ap.add_argument("--clip", type=float, default=0.0, help="grad-norm clip; 0 disables (bootstrap parity)")
+    ap.add_argument("--spectral-weight", type=float, default=0.0,
+                    help="fractal radial log-power guidance weight; 0 keeps bootstrap parity")
+    ap.add_argument("--multiscale-weight", type=float, default=0.0,
+                    help="multi-octave gradient guidance weight; 0 keeps bootstrap parity")
     ap.add_argument("--workers", type=int, choices=[0], default=0)
     ap.add_argument("--patience", type=int, default=15)
     ap.add_argument("--seed", type=int, default=114)
@@ -299,6 +312,8 @@ def main() -> int:
         lr_schedule=args.lr_schedule,
         amp=args.amp,
         clip=args.clip,
+        spectral_weight=args.spectral_weight,
+        multiscale_weight=args.multiscale_weight,
     )
     print(json.dumps(plan, indent=2), flush=True)
     if not args.confirm_run:
@@ -365,7 +380,12 @@ def main() -> int:
         "wdl_prior": False,
         "store": str(args.store.resolve()),
         "optimizer": plan["optimizer"],
-        "loss": {"point": "smooth_l1", "gradient_l1_weight": 0.25},
+        "loss": {
+            "point": "smooth_l1",
+            "gradient_l1_weight": 0.25,
+            "spectral_weight": args.spectral_weight,
+            "multiscale_weight": args.multiscale_weight,
+        },
         "schedule": {
             "max_epochs": args.epochs, "batch_size": args.batch, "patience": args.patience,
             "workers": args.workers, "seed": args.seed, "lr_schedule": args.lr_schedule,
@@ -385,7 +405,18 @@ def main() -> int:
         for x, y in train_loader:
             opt.zero_grad(set_to_none=True)
             with torch.amp.autocast("cuda", enabled=args.amp):
-                loss = height_loss(model(x.to(device)), y.to(device))
+                x_device = x.to(device)
+                y_device = y.to(device)
+                predicted = model(x_device)
+                loss = height_loss(predicted, y_device)
+                if args.spectral_weight > 0:
+                    loss = loss + args.spectral_weight * radial_spectral_loss(
+                        predicted.float(), y_device.float()
+                    )
+                if args.multiscale_weight > 0:
+                    loss = loss + args.multiscale_weight * multiscale_gradient_loss(
+                        predicted.float(), y_device.float()
+                    )
             scaler.scale(loss).backward()
             if args.clip > 0:
                 scaler.unscale_(opt)

@@ -169,9 +169,49 @@ checkpoints, fixed-row best-epoch previews, all-validation per-row metrics, erro
 worst-case sheets, and `model_stage_run.json` (schema-validated, `promotion_verdict=pending`).
 Promotion requires SC-001 + SC-002 + the user's visual review of the sheets.
 
+**`mit_b0-authored-v1` outcome (2026-07-19)**: best epoch 93, val MAE 0.187802, SC-001 false
+(tile-mean 0.138747), SC-002 true. Visually the strongest geometry to date — correct land/water
+layout and mountain placement — but relief is smooth and under-amplituded: classic spectral bias
+against the terrain's fractal ridge/drainage structure. The documented next ablation enables the
+spectral guidance terms (Spec 068 US1 revived, loss-only, no deployment change):
+
+```powershell
+uv run python scripts/v50_train_direct_geometry.py `
+  --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
+  --source authored `
+  --architecture mit_b0_regression `
+  --run-id mit_b0-authored-v2-spectral `
+  --output ../output/v50/v50.1/direct_geometry/mit_b0-authored-v2-spectral `
+  --epochs 150 --batch 16 --workers 0 --patience 20 --seed 114 `
+  --amp --lr-schedule onecycle --clip 1.0 `
+  --spectral-weight 0.1 --multiscale-weight 0.25 `
+  --confirm-run
+```
+
 The `--source all` dual-view variants of these commands stay fail-closed until Gate 0 completes;
 pretrained MiT encoder weights remain an optional FR-013 ablation (`--mit-pretrained` with pinned
 `--mit-revision`/`--mit-sha256`), never the default.
+
+## Deployment inference — tiles the model never saw (FR-015)
+
+The geometry model has no tile-identity input: any authored 256x256 minimap tile runs through the
+same contract. Dry run prints the per-tile manifest and writes nothing:
+
+```powershell
+uv run python scripts/v50_infer_direct_geometry.py `
+  --checkpoint ../output/v50/v50.1/direct_geometry/mit_b0-authored-v1/checkpoint_best.pt `
+  --input path\to\some_tile.png `
+  --input path\to\folder_of_tiles `
+  --output ../output/v50/v50.1/direct_geometry/inference-review
+```
+
+Add `--write` to persist, per tile: a 16-bit grayscale relative-relief PNG (`*_relief16.png`),
+plus one fixed-scale side-by-side `review_sheet.png` and an `inference_manifest.json` binding each
+input hash to the checkpoint hash and output hash. CPU is the default and is fast enough for
+folders; `--device cuda` is optional. Inputs must be exactly 256x256 RGB (PNG/JPEG); anything else
+is refused, never silently resampled. Outputs are RELATIVE relief per tile (contract `v112.1`) —
+absolute world altitude is not identifiable from one minimap and remains a possible future
+independent stage.
 
 ## Geometry promotion gate
 

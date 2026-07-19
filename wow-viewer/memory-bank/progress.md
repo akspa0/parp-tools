@@ -35,9 +35,18 @@ Last updated: 2026-07-19
   AMP/OneCycle/clip at bootstrap-parity defaults.
 - Proof: full v50 suite 242 passed / 4 skipped; Ruff clean; both CLIs dry-run without writing. No
   corpus build or training was launched.
-- Next (user-owned): T010 curriculum build dry run + `--write`, then the `mit_b0-authored-v1`
-  training command (quickstart). Dual-view `--source all` runs stay gated on the Spec 113
-  NoonWhiteGlobal rerender; object-mask phase starts only after geometry promotion.
+- **`mit_b0-authored-v1` (user-run) done**: best epoch 93, val MAE 0.187802, SC-001 false, SC-002
+  true; visually the strongest geometry so far. Diagnosis: spectral bias vs fractal terrain
+  structure (smooth, under-amplituded relief) — recorded in research.md.
+- T056 deployment inference complete: loose 256x256 tile(s) → 16-bit relief PNG + review sheet +
+  hash-bound manifest via `v50_infer_direct_geometry.py` (FR-015; dry-run default).
+- Spectral guidance (Spec 068 US1 revived as loss-only): radial log-power + multi-octave gradient
+  terms behind `--spectral-weight`/`--multiscale-weight` (default 0). Full v50 suite 257 passed /
+  4 skipped; Ruff clean.
+- Next (user-owned): T057 `mit_b0-authored-v2-spectral` run (quickstart command, 150 epochs,
+  spectral 0.1 / multiscale 0.25) compared against frozen v1 metrics; T010 curriculum build
+  dry run + `--write`; dual-view `--source all` stays gated on the Spec 113 NoonWhiteGlobal
+  rerender; object-mask phase starts only after geometry promotion.
 - Phase order is fail-closed: corrected dual-view curriculum → direct geometry bakeoff → trusted
   object visibility → feature library → texture families → alpha. The user owns all heavy
   builds/training. Spec 113 still owns RealPLKSR/detail.

@@ -32,9 +32,21 @@ Last updated: 2026-07-19
   `v50_train_direct_geometry.py` (flat+tile-mean baselines, SC-001 vs frozen Spec 112 run,
   SC-002 border-vs-interior-p95, quantile/worst sheets, schema-validated `model_stage_run.json`
   with `promotion_verdict=pending`; optional AMP/OneCycle/clip, defaults at bootstrap parity).
-- Proof: full v50 suite 242 passed / 4 skipped; Ruff clean. No curriculum build or training run
-  was launched — next actions are user-owned: the T010 curriculum build dry run, then the
-  `mit_b0-authored-v1` training command, both in the quickstart.
+- **`mit_b0-authored-v1` completed (user-run, 2026-07-19)**: best epoch 93, val MAE 0.187802,
+  SC-001 false (tile-mean 0.138747), SC-002 true. User verdict: strongest VISUAL geometry to date
+  (correct layout/mountains on unseen tiles) but smooth and under-amplituded — diagnosed as
+  spectral bias against fractal terrain structure (research.md T018 follow-on record).
+- T056 deployment inference implemented: `direct_geometry_infer.py` +
+  `v50_infer_direct_geometry.py` run any loose 256x256 minimap tile(s) through a checkpoint →
+  16-bit relief PNGs + fixed-scale review sheet + per-tile hash-bound manifest (FR-015). Dry-run
+  default; relative-relief-only caveat recorded in every manifest.
+- Spectral guidance (Spec 068 US1 revived, loss-only): `spectral_guidance.py` adds radial
+  log-power L1 (DC-removed; spectral slope = fractal-dimension proxy) and multi-octave gradient L1,
+  wired into `direct_geometry_train.py` as `--spectral-weight`/`--multiscale-weight` (default 0 =
+  bootstrap parity). No aux head (one-output constitution), no deployment change.
+- Proof: full v50 suite 257 passed / 4 skipped; Ruff clean. Next user-owned run:
+  `mit_b0-authored-v2-spectral` (150 epochs, spectral 0.1 / multiscale 0.25) per the quickstart,
+  then dual-view once the Spec 113 NoonWhiteGlobal rerender lands.
 - Source-image UV projection provides immediate mesh texture. Object cleanup, terrain semantics,
   editable texture families, and alpha remain later independent models with separate checkpoints.
 
