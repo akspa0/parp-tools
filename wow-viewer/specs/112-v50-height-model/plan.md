@@ -13,6 +13,9 @@ concurrent MPQ reads that under-covers `minimap_rgb_1024`), rebuilds Kalimdor an
 produces a full-catalog training curriculum restricted to those two maps. Phase 2 (US3) trains a
 small CNN that maps minimap RGB to a per-tile *relative* (altitude-invariant) height field,
 replacing the rejected absolute-elevation `WdlPriorNet` lane. All training remains user-executed.
+After the 2026-07-19 synthetic-lighting correction, the first run explicitly filters the frozen
+curriculum to its 1,629 unaffected authored rows. Synthetic/all-source training is fail-closed until
+the curriculum records corrected `NoonWhiteGlobal` provenance; Spec 114 owns that later bakeoff.
 
 ## Technical Context
 

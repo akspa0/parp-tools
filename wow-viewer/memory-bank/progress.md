@@ -2,14 +2,19 @@
 
 Last updated: 2026-07-19
 
-## Spec 114 — direct minimap-to-terrain architecture planned
+## Spec 114 — authored direct-height bootstrap ready for user training
 
-- Created the complete Spec Kit design pack under `specs/114-direct-terrain-reconstruction/`:
-  feature requirements, Hugging Face/primary architecture research, implementation plan, data
-  model, JSON contracts, gated quickstart, checklist, and 55 dependency-ordered tasks.
-- Removed WDL from the planned deployment path. Phase 1 predicts one relative-height field directly
-  from authored/corrected-synthetic RGB; the existing Spec 112 CNN is the mandatory baseline and a
-  compact MiT-B0 continuous decoder is the sole first candidate. No Spec 114 trainer exists yet.
+- Fleshed the Phase 1 model contract and made tonight's authored-only run executable through the
+  proven Spec 112 trainer: `direct_cnn_v112`, 1,561,537 parameters, RGB 256→relative height 257,
+  Smooth-L1 + 0.25 gradient L1, AdamW 2e-4/1e-4, batch 16, seed 114, max 100, patience 15.
+- Added explicit source selection, no-training preview, `--confirm-run`, immutable output refusal,
+  deterministic seeding, exact element-weighted validation MAE, per-epoch train loss, and persisted
+  training plan/run identity. Current Windows run is pinned to workers 0.
+- Real curriculum preview passes: 1,629 authored rows, 1,384 train / 245 validation, 87 steps/epoch;
+  it creates no output. Synthetic/all-source selection fails closed until corrected-light provenance
+  exists. Focused tests 23 passed; full v50 focus 178 passed / 4 skipped; Ruff and py_compile pass.
+- T011-T013/T016 complete; T017 is the user's authored CUDA run. T014/T015 retain MiT-B0, border
+  metrics, prediction sheets, and the corrected dual-view bakeoff after Spec 113's rerender gate.
 - Kept object cleanup, terrain features, texture families, and alpha blends as separate stages with
   their own targets/checkpoints/gates. Trusted object labels must be renderer-derived; image
   difference is explicitly rejected. Downstream stages must see generated upstream outputs.

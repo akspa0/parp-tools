@@ -2,22 +2,24 @@
 
 Last updated: 2026-07-19
 
-## Active work: Specs 112/113/114 — corrected visual proof, then direct reconstruction
+## Active work: Spec 114 authored direct-height run is ready for the user tonight
 
-- **Spec 114 is now planned, not implemented.** Corrected authored/synthetic same-tile views feed a
-  direct RGB→`relative_height_257` MVP with no WDL prior. The proven Spec 112 lean CNN remains the
-  baseline; the only first architecture comparison is a compact MiT-B0/SegFormer-style continuous
-  regressor. Trusted object visibility, terrain-feature classes, texture-family selection, and
-  alpha-stack reconstruction are subsequent independent one-output models with generated-signal
-  lineage; Spec 113 retains all SR/detail ownership. No mask label may come from raw RGB difference.
-  The immediate proof owner is still the user's corrected fixed-noon-white Spec 113 T010b rerender,
-  followed by fresh synthetic RGB hashes; Spec 114 implementation starts only after that gate.
+- **Tonight's runnable Spec 114 slice is `direct_cnn_v112` on authored rows only.** The existing
+  1,561,537-parameter U-Net-lite now has explicit `--source`, read-only dry-run, `--confirm-run`,
+  deterministic seed, immutable-output, and stale-synthetic gates. Real dry-run: 1,629 authored
+  rows (1,384 train / 245 val; Kalimdor 951 / Azeroth 678), batch 16, 87 steps/epoch, RGB-only input,
+  `v112.1` relative-height target, no WDL. Exact user command/output is in Spec 114 quickstart T017.
+- Synthetic/all-source training remains blocked until Spec 113 T010b rerender + fresh RGB hashes
+  produce curriculum-level `synthetic_lighting_contract=NoonWhiteGlobal`. Then compare the same CNN
+  on dual views and only afterward add the compact MiT-B0 candidate. Object masks, terrain features,
+  texture families, and alpha remain later independent models; no mask truth comes from RGB diff.
 
 - **Spec 112**: real corpus correction and dual-source curriculum are proven. Kalimdor/Azeroth
   coverage reports pass parity; `curriculum-0_5_3_3368-dual_v1.zarr` has 2,990 rows (1,629 authored
   + 1,361 synthetic; 2,545 train / 445 val). The `v112.1` relative-height model and CUDA-only
   trainer are implemented with schema/map/leak gates, target round-trip/offset-invariance tests,
-  baseline reporting, and epoch-1 structural-failure detection. Next: **user runs T021 training**;
+  baseline reporting, and epoch-1 structural-failure detection. Next: **user runs T021/T017
+  authored-only training**;
   assistant reviews `training_summary.json` and prepares the held-out visual review.
 - **Spec 113**: T001-T010c, T011/T012, and T014 are implemented. The detail compositor uses production 8×/chunk UVs and
   footprint-selected mips (not unfiltered base texels); the v50 builder applies `--detail` only to
@@ -48,8 +50,9 @@ Last updated: 2026-07-19
   RRDBNet floor. The visual-review surface, guarded `sr_pairset.py`, its contract tests, and
   `sr_model.py` wrapper are implemented pre-gate; no real pair set is promoted yet.
   `v50_train_minimap_superres.py` is intentionally absent until T010b/T013 complete.
-- Proof: current combined compositor/detail/DBC/lookup C# focus 41/41; Harvest build 0 errors. Full
-  v50 Python focus is 175 passed / 4 skipped.
+- Proof: authored training focus 23/23, full v50 Python focus 178 passed / 4 skipped, Ruff/pycompile,
+  and real dry-run pass; stale synthetic input is refused. Prior combined
+  compositor/detail/DBC/lookup C# focus remains 41/41; Harvest build 0 errors.
 
 ## Prior active work: Spec 109 v50 clean-room dataset — Setup and Build Pipeline Fully Operational
 

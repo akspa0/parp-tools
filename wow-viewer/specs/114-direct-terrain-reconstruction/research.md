@@ -81,6 +81,18 @@ dual-view discipline already proven in Spec 112.
 observation and may supervise SR/detail appearance, while `height_257`, `normal_xyz`, `alpha_256`,
 and material IDs remain the actual numeric truth.
 
+### Tonight bootstrap: authored-only direct geometry
+
+The frozen dual-source curriculum already contains 1,629 authored rows: 1,384 train and 245
+validation, spanning Kalimdor (951) and Azeroth (678). These images and their exact `height_257`
+targets were not invalidated by the synthetic compositor lighting fix. Therefore the first bounded
+run uses only `minimap_source=authored` with the existing 1,561,537-parameter Spec 112 CNN.
+
+This run is evidence, not a substitute for the corrected dual-view bakeoff. It answers the most
+immediate question—whether real minimap pixels can learn the offset-invariant terrain field—without
+polluting training with stale synthetic lighting. Any `synthetic` or `all` run is now fail-closed
+unless the curriculum records `synthetic_lighting_contract=NoonWhiteGlobal`.
+
 ## Decision 3 — trusted object visibility is a prerequisite, not an RGB difference
 
 **Decision**: add a dedicated object-label proof before training object cleanup. Labels must be

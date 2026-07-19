@@ -1,14 +1,24 @@
 # Quickstart: Direct Minimap-to-Terrain Reconstruction
 
-## Status
+## Status — authored-only baseline is runnable tonight
 
-This is a planning handoff, not a runnable trainer handoff. The commands under **Planned commands**
-name the intended CLI contract; those scripts do not exist until their tasks are implemented and
-fixture-proven. Do not substitute the old WDL trainer.
+The proven Spec 112 CNN is now pinned as Spec 114 architecture `direct_cnn_v112`. Its trainer can
+select only authored rows, prints a validated no-training plan unless `--confirm-run` is present,
+and refuses synthetic rows until the curriculum records corrected `NoonWhiteGlobal` provenance.
+This is direct RGB→relative-height training with no WDL prior.
+
+Real dry-run proof on the frozen curriculum:
+
+- 1,561,537 trainable parameters;
+- 1,629 authored rows: 1,384 train / 245 validation;
+- Kalimdor 951 / Azeroth 678;
+- batch 16 gives 87 train steps per epoch;
+- deployment inputs: `minimap_rgb` only;
+- target: numeric `height_257` encoded under offset-invariant contract `v112.1`.
 
 ## Gate 0 — finish the corrected source evidence
 
-Before Spec 114 can build a real corpus:
+Before Spec 114 can use synthetic rows or run the final dual-view bakeoff:
 
 1. Complete Spec 113 T010b with the fixed-noon-white synthetic renderer.
 2. Visually compare the real authored tile, synthetic 256 tile, and synthetic 1024 detail tile.
@@ -16,8 +26,56 @@ Before Spec 114 can build a real corpus:
    authored RGB, and other unaffected v50 signals remain valid.
 4. Record the new store/manifest hashes and `NoonWhiteGlobal` provenance.
 
-Spec 112 T021 may still be run as the current lean direct-height baseline. Its result becomes the
-mandatory `direct_cnn_v112` comparison rather than a discarded lane.
+The authored-only run below does not wait on this gate because neither authored RGB nor numeric
+height truth changed.
+
+## Tonight — dry run, then user-owned CUDA training
+
+From `wow-viewer/data-harvester`, first run the exact validated preview. It performs contract/index
+checks and does not create the output directory or allocate CUDA training state:
+
+```powershell
+uv run python scripts/v50_train_height_relative.py `
+  --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
+  --source authored `
+  --output ../output/v50/v50.1/direct_geometry/direct_cnn_v112-authored-v1 `
+  --epochs 100 --batch 16 --workers 0 --patience 15 --seed 114
+```
+
+If the preview reports exactly 1,384 train / 245 validation authored rows, launch training by adding
+the final confirmation flag:
+
+```powershell
+uv run python scripts/v50_train_height_relative.py `
+  --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
+  --source authored `
+  --output ../output/v50/v50.1/direct_geometry/direct_cnn_v112-authored-v1 `
+  --epochs 100 --batch 16 --workers 0 --patience 15 --seed 114 `
+  --confirm-run
+```
+
+Expected on the local RTX 4070 Ti SUPER: approximately 15–60 minutes with early stopping,
+comfortably within 16 GB VRAM, and under 50 MB of checkpoints/summaries. `--workers 0` is
+intentional for the current Windows-local dataset implementation. The user launches this command;
+the assistant does not.
+
+The console prints `train_loss`, exact validation MAE, tile-mean baseline, best MAE, and early-stop
+staleness every epoch. When it finishes, inspect/share the promotion summary with:
+
+```powershell
+Get-Content -Raw ../output/v50/v50.1/direct_geometry/direct_cnn_v112-authored-v1/training_summary.json
+```
+
+Expected artifacts are `training_plan.json`, `run_identity.json`, `checkpoint_best.pt`,
+`checkpoint_last.pt`, and `training_summary.json`. Do not rename or reuse the run directory.
+
+Lightweight proof completed before handoff:
+
+- focused model/trainer/curriculum tests: 23 passed; full v50 focus: 178 passed / 4 skipped;
+- Ruff and `py_compile`: pass;
+- real authored-only dry run: 1,629 selected, 1,384 train, 245 validation, 87 steps/epoch;
+- real `--source all` dry run: correctly refused for missing corrected-light provenance;
+- dry runs created no output directory.
 
 ## Architecture comparison to implement
 
@@ -33,7 +91,7 @@ mandatory `direct_cnn_v112` comparison rather than a discarded lane.
 Pretrained weights are optional ablations. Any Hub artifact must be license-recorded and pinned to
 an immutable revision/hash; every stage must retain a from-scratch/local baseline on the same split.
 
-## Planned commands — available only after the named tasks land
+## Later planned commands — corrected dual-view bakeoff
 
 From `wow-viewer/data-harvester`:
 
@@ -44,14 +102,7 @@ uv run python scripts/v50_build_reconstruction_curriculum.py `
   --store ../output/datasets/v50/v50.1/0_5_3_3368-Azeroth.zarr `
   --output ../output/datasets/v50/v50.1/reconstruction-direct-v1.zarr
 
-# After T015: user-run baseline. Expected first calibration: roughly 1-3 hours, <=16 GB VRAM.
-uv run python scripts/v50_train_direct_geometry.py `
-  --store ../output/datasets/v50/v50.1/reconstruction-direct-v1.zarr `
-  --architecture direct_cnn_v112 `
-  --output ../output/v50/v50.1/direct_geometry/direct_cnn_v112 `
-  --confirm-run
-
-# After T015: user-run candidate on the identical split/target.
+# After T014/T015: user-run candidate on the corrected identical split/target.
 uv run python scripts/v50_train_direct_geometry.py `
   --store ../output/datasets/v50/v50.1/reconstruction-direct-v1.zarr `
   --architecture mit_b0_regression `
@@ -59,8 +110,7 @@ uv run python scripts/v50_train_direct_geometry.py `
   --confirm-run
 ```
 
-The runtime estimate is a planning bound for the local RTX 4070 Ti SUPER and must be recalibrated
-from the trainer's non-training dry-run report before the user launches either run. Later object,
+The later runtime estimate must be recalibrated from that trainer's no-training dry run. Object,
 feature, texture, and alpha commands are added only when their preceding phase passes.
 
 ## Geometry promotion gate

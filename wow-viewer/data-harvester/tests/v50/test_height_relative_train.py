@@ -8,11 +8,16 @@ import numpy as np
 import pytest
 
 from harvester.v50.height_relative_train import (
+    ARCHITECTURE_ID,
     TrainerContractError,
     build_run_summary,
+    build_training_plan,
     compute_tile_mean_baseline,
+    require_new_output,
+    select_training_rows,
     validate_curriculum_contract,
     validate_curriculum_maps,
+    validate_source_selection,
 )
 
 
@@ -77,6 +82,75 @@ def test_tile_mean_baseline_is_the_per_tile_constant_predictor_error():
     assert compute_tile_mean_baseline([ramp]) == pytest.approx(0.25, abs=0.01)
     with pytest.raises(TrainerContractError, match="zero validation"):
         compute_tile_mean_baseline([])
+
+
+def test_authored_bootstrap_filters_rows_without_synthetic_lighting_provenance():
+    rows = _valid_rows() + [
+        {
+            "map": "Azeroth",
+            "source_group_id": "real:0_5_3_3368:Azeroth:2",
+            "minimap_source": "authored",
+            "split": "val",
+        }
+    ]
+
+    validate_source_selection(attrs={}, source="authored")
+    assert select_training_rows(rows, "authored") == [0, 2]
+    assert select_training_rows(rows, "synthetic") == [1]
+    assert select_training_rows(rows, "all") == [0, 1, 2]
+
+    with pytest.raises(TrainerContractError, match="synthetic rows are blocked"):
+        validate_source_selection(attrs={}, source="all")
+    with pytest.raises(TrainerContractError, match="synthetic rows are blocked"):
+        validate_source_selection(attrs={}, source="synthetic")
+    validate_source_selection(
+        attrs={"synthetic_lighting_contract": "NoonWhiteGlobal"}, source="all"
+    )
+    with pytest.raises(TrainerContractError, match="source must be one of"):
+        select_training_rows(rows, "mystery")
+
+
+def test_training_plan_is_direct_one_output_and_reports_selected_domain():
+    rows = [
+        {
+            "map": "Kalimdor",
+            "source_group_id": f"g{i}",
+            "minimap_source": "authored",
+            "split": "train" if i < 3 else "val",
+        }
+        for i in range(5)
+    ]
+    plan = build_training_plan(
+        source="authored",
+        index_rows=rows,
+        selected_rows=list(range(5)),
+        batch_size=2,
+        epochs=10,
+        parameter_count=1_561_537,
+        seed=114,
+    )
+
+    assert plan["architecture"] == ARCHITECTURE_ID == "direct_cnn_v112"
+    assert plan["selected_rows"] == 5
+    assert plan["split_counts"] == {"train": 3, "val": 2}
+    assert plan["train_steps_per_epoch"] == 2
+    assert plan["seed"] == 114
+    assert plan["deployment_inputs"] == ["minimap_rgb"]
+    assert plan["training_target"] == "height_257 -> relative_height_257"
+    assert plan["wdl_prior"] is False
+
+
+def test_training_output_must_be_new_or_empty(tmp_path):
+    missing = tmp_path / "new-run"
+    require_new_output(missing)
+
+    empty = tmp_path / "empty-run"
+    empty.mkdir()
+    require_new_output(empty)
+
+    (empty / "checkpoint_last.pt").write_bytes(b"partial")
+    with pytest.raises(TrainerContractError, match="refusing to overwrite"):
+        require_new_output(empty)
 
 
 def test_run_summary_records_contract_and_flags_epoch1_best_as_structural_failure():

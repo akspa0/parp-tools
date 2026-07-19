@@ -35,6 +35,9 @@ go-ahead, curriculum stores carry the full frozen signal catalog."
   curriculum emits up to two rows per tile (one per available minimap source) against the same
   height target; the model reads `minimap_rgb` per row and never sees the source label. Full
   rationale in research.md Decision 7.
+  After the synthetic lighting correction, `--source authored` is the valid immediate bootstrap
+  (1,384 train / 245 validation); synthetic/all-source runs require curriculum-level
+  `synthetic_lighting_contract=NoonWhiteGlobal` evidence and belong to Spec 114's later comparison.
 - **The dataset audit found real gaps** (2026-07-18, measured on all four v50.1 stores): the
   manifest template declares four signals the frozen Spec 109 catalog explicitly dropped
   (`mddf_mask`, `modf_mask`, `object_filtered_mask`, `model_focus_mask` — all 0% populated, dead

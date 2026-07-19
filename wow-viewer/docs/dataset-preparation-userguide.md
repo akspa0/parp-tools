@@ -532,16 +532,21 @@ assistant):
 ```powershell
 uv run python scripts/v50_train_height_relative.py `
   --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
+  --source authored `
   --val-key split --val-value val `
-  --output ../output/v50/v50.1/height_relative_v1 `
-  --epochs 100 --batch 32 --workers 4 --patience 15
+  --output ../output/v50/v50.1/direct_geometry/direct_cnn_v112-authored-v1 `
+  --epochs 100 --batch 16 --workers 0 --patience 15 --seed 114 `
+  --confirm-run
 ```
 
 The trainer fails closed on the wrong store schema, maps outside Kalimdor/Azeroth, split-group
-leakage, or CPU-only execution. It writes `run_identity.json`, checkpoints, and a machine-readable
+leakage, or CPU-only execution. Omit `--confirm-run` first for a read-only validated preview.
+Authored-only is the immediate safe baseline: 1,384 train / 245 validation rows. Synthetic or
+all-source runs are refused until the curriculum records corrected `NoonWhiteGlobal` provenance.
+The confirmed run writes `run_identity.json`, checkpoints, and a machine-readable
 `training_summary.json` with target-contract version, per-epoch validation MAE, the tile-mean
 baseline, and an epoch-1 structural-failure flag. Exact proof and estimates live in
-`specs/112-v50-height-model/quickstart.md`. The old `v50_train_wdl_prior.py` and
+`specs/114-direct-terrain-reconstruction/quickstart.md`. The old `v50_train_wdl_prior.py` and
 `v50_train_terrain.py` commands remain only for the rejected Spec 103/108 legacy lane.
 
 ### 8.5 Minimap super-resolution (Spec 113, corrected-light visual gate pending)

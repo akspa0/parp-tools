@@ -98,9 +98,11 @@ store as `summary.json`.
 ```powershell
 uv run python scripts/v50_train_height_relative.py `
   --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
+  --source authored `
   --val-key split --val-value val `
-  --output ../output/v50/v50.1/height_relative_v1 `
-  --epochs 100 --batch 32 --workers 4 --patience 15
+  --output ../output/v50/v50.1/direct_geometry/direct_cnn_v112-authored-v1 `
+  --epochs 100 --batch 16 --workers 0 --patience 15 --seed 114 `
+  --confirm-run
 ```
 
 **This command is printed for the user to run, never executed by the assistant** (contracts/
@@ -110,9 +112,14 @@ comparison the trained model beats — this is SC-004. SC-005 (visual relief-str
 separate user review step over reconstructed held-out tiles from both maps, following the same
 side-by-side discipline as Spec 110/111's minimap fidelity gates.
 
-Estimated runtime on the user's RTX 4070 Ti SUPER: roughly 15–30 minutes for 100 epochs with early
+Omit `--confirm-run` first to print the validated 1,384-train / 245-validation plan without
+launching CUDA or creating the output directory. Synthetic/all-source runs are blocked until the
+curriculum records corrected `NoonWhiteGlobal` provenance; Spec 114 owns that later comparison.
+
+Estimated runtime on the user's RTX 4070 Ti SUPER: roughly 15–60 minutes for 100 epochs with early
 stopping, writing checkpoints, `run_identity.json`, and `training_summary.json` under
-`output/v50/v50.1/height_relative_v1/`. This is an estimate; the command remains user-launched.
+`output/v50/v50.1/direct_geometry/direct_cnn_v112-authored-v1/`. This is an estimate; the command
+remains user-launched. `--workers 0` is intentional for the current Windows-local dataset class.
 
 ## Implementation proof (2026-07-18)
 

@@ -215,6 +215,9 @@ base-only/uniform-blend composition without changing the geometry checkpoint.
 
 - The corrected fixed-noon synthetic minimap rerender and visual validation from Spec 113 complete
   before any real corpus in this spec is promoted.
+- An authored-only `direct_cnn_v112` bootstrap MAY run before that rerender because authored RGB and
+  numeric height truth were not invalidated by the compositor lighting correction. It is a useful
+  deployment-domain baseline, not the final corrected dual-view comparison.
 - Current v50.1 stores provide height, normals, alpha, liquid, material IDs, authored minimaps, and
   partial synthetic minimaps. Trusted object-visibility masks are not yet a frozen v50.1 signal and
   require a separate foundational proof.

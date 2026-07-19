@@ -1,4 +1,4 @@
-"""User-run trainer for the v50 relative-height model (Spec 112 US3, T019).
+"""User-run trainer for direct v50 relative height (Spec 112 baseline / Spec 114 bootstrap).
 
 Consumes the dual-source curriculum (``v50-mixed-curriculum-v1``): each row pairs one minimap image
 (authored OR synthetic, recorded in ``minimap_source`` — the model never sees the label) with the
@@ -7,7 +7,9 @@ same tile's real height ground truth, encoded per the Relative-Height Target Con
 Contract enforcement lives in small pure functions so the gates are CPU-testable without CUDA:
 ``validate_curriculum_maps`` (Kalimdor/Azeroth only, FR-011), ``compute_tile_mean_baseline``
 (SC-004's in-run baseline), ``build_run_summary`` (FR-010's machine-readable record, incl. the
-epoch-1-best structural-failure flag from the execution contract).
+epoch-1-best structural-failure flag from the execution contract). Spec 114 adds an explicit
+``--source`` gate: authored-only training is valid while old synthesized RGB is stale, whereas any
+run containing synthetic rows must prove the ``NoonWhiteGlobal`` lighting contract in store attrs.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -31,6 +34,9 @@ ALLOWED_MAPS = frozenset({"Kalimdor", "Azeroth"})
 CURRICULUM_SCHEMA = "v50-mixed-curriculum-v1"
 REQUIRED_ARRAYS = frozenset({"minimap_rgb", "height_257"})
 REQUIRED_INDEX_FIELDS = frozenset({"map", "source_group_id", "minimap_source", "split"})
+ARCHITECTURE_ID = "direct_cnn_v112"
+SYNTHETIC_LIGHTING_CONTRACT = "NoonWhiteGlobal"
+SOURCE_CHOICES = frozenset({"all", "authored", "synthetic"})
 
 
 class TrainerContractError(ValueError):
@@ -98,6 +104,91 @@ def validate_curriculum_maps(index_rows: list[dict]) -> None:
         )
 
 
+def validate_source_selection(*, attrs: dict, source: str) -> None:
+    """Refuse accidental use of stale synthetic RGB while keeping authored truth runnable.
+
+    Authored minimaps are client evidence and were not invalidated by the compositor lighting fix.
+    Synthetic/all-source runs are Spec 114 dual-view runs and therefore require the corrected
+    lighting provenance to be frozen on the curriculum itself.
+    """
+    if source not in SOURCE_CHOICES:
+        raise TrainerContractError(
+            f"source must be one of {sorted(SOURCE_CHOICES)}, got {source!r}"
+        )
+    if source != "authored" and attrs.get("synthetic_lighting_contract") != SYNTHETIC_LIGHTING_CONTRACT:
+        raise TrainerContractError(
+            "synthetic rows are blocked until the curriculum records "
+            f"synthetic_lighting_contract={SYNTHETIC_LIGHTING_CONTRACT!r}; "
+            "use --source authored for the valid bootstrap run"
+        )
+
+
+def select_training_rows(index_rows: list[dict], source: str) -> list[int]:
+    """Return stable row indices for one explicit input-domain selection."""
+    if source not in SOURCE_CHOICES:
+        raise TrainerContractError(
+            f"source must be one of {sorted(SOURCE_CHOICES)}, got {source!r}"
+        )
+    if source == "all":
+        return list(range(len(index_rows)))
+    return [i for i, row in enumerate(index_rows) if str(row.get("minimap_source")) == source]
+
+
+def build_training_plan(
+    *,
+    source: str,
+    index_rows: list[dict],
+    selected_rows: list[int],
+    batch_size: int,
+    epochs: int,
+    parameter_count: int,
+    seed: int,
+) -> dict:
+    """Build the machine-readable no-training preview printed before CUDA allocation."""
+    if batch_size < 1 or epochs < 1:
+        raise TrainerContractError("batch size and epochs must both be positive")
+    selected = [index_rows[i] for i in selected_rows]
+    split_counts = {
+        split: sum(str(row.get("split")) == split for row in selected)
+        for split in ("train", "val")
+    }
+    source_counts = {
+        value: sum(str(row.get("minimap_source")) == value for row in selected)
+        for value in ("authored", "synthetic")
+    }
+    source_counts = {key: value for key, value in source_counts.items() if value}
+    map_counts: dict[str, int] = {}
+    for row in selected:
+        name = str(row.get("map", "unknown"))
+        map_counts[name] = map_counts.get(name, 0) + 1
+    return {
+        "schema": "v114-direct-geometry-plan-v1",
+        "architecture": ARCHITECTURE_ID,
+        "parameter_count": parameter_count,
+        "target_contract_version": TARGET_CONTRACT_VERSION,
+        "source_filter": source,
+        "selected_rows": len(selected_rows),
+        "split_counts": split_counts,
+        "source_counts": source_counts,
+        "map_counts": dict(sorted(map_counts.items())),
+        "batch_size": batch_size,
+        "epochs": epochs,
+        "seed": seed,
+        "train_steps_per_epoch": math.ceil(split_counts["train"] / batch_size),
+        "deployment_inputs": ["minimap_rgb"],
+        "training_target": "height_257 -> relative_height_257",
+        "wdl_prior": False,
+    }
+
+
+def require_new_output(output: Path) -> None:
+    """Never overwrite an existing run directory or partial checkpoint set."""
+    if output.exists() and any(output.iterdir()):
+        raise TrainerContractError(
+            f"refusing to overwrite non-empty training output {output}; choose a new run path"
+        )
+
+
 def compute_tile_mean_baseline(targets: list[np.ndarray]) -> float:
     """Mean absolute error of predicting each tile's own mean normalized height — the trivial
     baseline SC-004 requires the model to beat, computed in-run so the claim is self-contained."""
@@ -126,6 +217,8 @@ def build_run_summary(
     train_rows: int,
     val_rows: int,
     source_counts: dict[str, int],
+    source_filter: str = "all",
+    architecture: str = ARCHITECTURE_ID,
 ) -> dict:
     best = min(per_epoch, key=lambda e: e["val_mae"]) if per_epoch else {"epoch": 0, "val_mae": float("inf")}
     return {
@@ -144,27 +237,49 @@ def build_run_summary(
         "train_rows": train_rows,
         "val_rows": val_rows,
         "minimap_source_counts": source_counts,
+        "source_filter": source_filter,
+        "architecture": architecture,
+        "wdl_prior": False,
     }
 
 
 def main() -> int:
-    import torch
     import pyarrow.parquet as pq
+    import torch
     import zarr
     from torch.utils.data import DataLoader, Dataset
 
-    ap = argparse.ArgumentParser(description="v50 relative-height trainer (USER runs CUDA)")
+    ap = argparse.ArgumentParser(description="v50 direct relative-height trainer (USER runs CUDA)")
     ap.add_argument("--store", required=True, type=Path, help="dual-source curriculum store")
     ap.add_argument("--output", required=True, type=Path)
-    ap.add_argument("--val-key", default="split"); ap.add_argument("--val-value", default="val")
-    ap.add_argument("--epochs", type=int, default=100); ap.add_argument("--batch", type=int, default=16)
-    ap.add_argument("--lr", type=float, default=2e-4); ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument(
+        "--source",
+        required=True,
+        choices=sorted(SOURCE_CHOICES),
+        help="input domain; use authored until corrected synthetic provenance is frozen",
+    )
+    ap.add_argument(
+        "--confirm-run",
+        action="store_true",
+        help="launch CUDA training; without this flag only print the validated plan",
+    )
+    ap.add_argument("--val-key", default="split")
+    ap.add_argument("--val-value", default="val")
+    ap.add_argument("--epochs", type=int, default=100)
+    ap.add_argument("--batch", type=int, default=16)
+    ap.add_argument("--lr", type=float, default=2e-4)
+    ap.add_argument(
+        "--workers",
+        type=int,
+        choices=[0],
+        default=0,
+        help="must remain 0 for the current Windows-local Zarr dataset implementation",
+    )
     ap.add_argument("--patience", type=int, default=15)
+    ap.add_argument("--seed", type=int, default=114)
     ap.add_argument("--release", default="v50.1", type=validate_release)
     args = ap.parse_args()
 
-    if not torch.cuda.is_available():
-        raise SystemExit("CUDA is not available; user-run training refuses CPU.")
     group = zarr.open_group(str(args.store), mode="r")
     try:
         require_store_release(group, args.release, store=args.store)
@@ -176,19 +291,54 @@ def main() -> int:
         validate_curriculum_contract(
             attrs=dict(group.attrs), array_lengths=array_lengths, index_rows=index
         )
+        validate_source_selection(attrs=dict(group.attrs), source=args.source)
     except TrainerContractError as exc:
         raise SystemExit(str(exc)) from exc
 
     if any(args.val_key not in row for row in index):
         raise SystemExit(f"curriculum index does not contain --val-key {args.val_key!r}")
 
-    train_rows = [i for i, r in enumerate(index) if str(r.get(args.val_key)) != args.val_value]
-    val_rows = [i for i, r in enumerate(index) if str(r.get(args.val_key)) == args.val_value]
+    try:
+        selected_rows = select_training_rows(index, args.source)
+    except TrainerContractError as exc:
+        raise SystemExit(str(exc)) from exc
+    train_rows = [i for i in selected_rows if str(index[i].get(args.val_key)) != args.val_value]
+    val_rows = [i for i in selected_rows if str(index[i].get(args.val_key)) == args.val_value]
     if len(train_rows) < 32 or len(val_rows) < 8:
-        raise SystemExit(f"insufficient rows: train={len(train_rows)} val={len(val_rows)}")
+        raise SystemExit(
+            f"insufficient rows after --source {args.source}: "
+            f"train={len(train_rows)} val={len(val_rows)}"
+        )
     source_counts: dict[str, int] = {}
-    for r in index:
+    for i in selected_rows:
+        r = index[i]
         source_counts[str(r.get("minimap_source", "unknown"))] = source_counts.get(str(r.get("minimap_source", "unknown")), 0) + 1
+
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    model = HeightRelativeNet()
+    plan = build_training_plan(
+        source=args.source,
+        index_rows=index,
+        selected_rows=selected_rows,
+        batch_size=args.batch,
+        epochs=args.epochs,
+        parameter_count=sum(parameter.numel() for parameter in model.parameters()),
+        seed=args.seed,
+    )
+    print(json.dumps(plan, indent=2), flush=True)
+    if not args.confirm_run:
+        print("DRY RUN ONLY: add --confirm-run to launch user-owned CUDA training.", flush=True)
+        return 0
+    try:
+        require_new_output(args.output)
+    except TrainerContractError as exc:
+        raise SystemExit(str(exc)) from exc
+    if not torch.cuda.is_available():
+        raise SystemExit("CUDA is not available; user-run training refuses CPU.")
+    torch.cuda.manual_seed_all(args.seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
 
     class RowDataset(Dataset):
         def __init__(self, rows: list[int]) -> None:
@@ -208,40 +358,81 @@ def main() -> int:
     )
 
     device = torch.device("cuda")
-    model = HeightRelativeNet().to(device)
+    model = model.to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
-    train_loader = DataLoader(RowDataset(train_rows), batch_size=args.batch, shuffle=True, num_workers=args.workers, pin_memory=True)
+    train_generator = torch.Generator()
+    train_generator.manual_seed(args.seed)
+    train_loader = DataLoader(
+        RowDataset(train_rows),
+        batch_size=args.batch,
+        shuffle=True,
+        num_workers=args.workers,
+        pin_memory=True,
+        generator=train_generator,
+    )
     val_loader = DataLoader(RowDataset(val_rows), batch_size=args.batch, num_workers=args.workers, pin_memory=True)
 
     args.output.mkdir(parents=True, exist_ok=True)
     identity = curriculum_identity(args.store)
-    run_identity = {**release_identity(args.release), "model_variant": "height-relative-v112",
-                    "target_contract_version": TARGET_CONTRACT_VERSION, "store": str(args.store.resolve())}
+    run_identity = {
+        **release_identity(args.release),
+        "model_variant": ARCHITECTURE_ID,
+        "parameter_count": plan["parameter_count"],
+        "target_contract_version": TARGET_CONTRACT_VERSION,
+        "source_filter": args.source,
+        "wdl_prior": False,
+        "store": str(args.store.resolve()),
+        "optimizer": {"name": "AdamW", "learning_rate": args.lr, "weight_decay": 1e-4},
+        "loss": {"point": "smooth_l1", "gradient_l1_weight": 0.25},
+        "schedule": {
+            "max_epochs": args.epochs,
+            "batch_size": args.batch,
+            "patience": args.patience,
+            "workers": args.workers,
+            "seed": args.seed,
+        },
+    }
+    (args.output / "training_plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
     (args.output / "run_identity.json").write_text(json.dumps(run_identity, indent=2), encoding="utf-8")
 
     per_epoch: list[dict] = []
-    best = float("inf"); stale = 0
+    best = float("inf")
+    stale = 0
     for epoch in range(1, args.epochs + 1):
         model.train()
+        train_losses = []
         for x, y in train_loader:
             opt.zero_grad(set_to_none=True)
             loss = height_loss(model(x.to(device)), y.to(device))
-            loss.backward(); opt.step()
-        model.eval(); maes = []
+            loss.backward()
+            opt.step()
+            train_losses.append(float(loss.detach().item()))
+        model.eval()
+        val_absolute_error = 0.0
+        val_elements = 0
         with torch.no_grad():
             for x, y in val_loader:
-                maes.append(float(torch.nn.functional.l1_loss(model(x.to(device)), y.to(device)).item()))
-        val_mae = float(np.mean(maes))
-        per_epoch.append({"epoch": epoch, "val_mae": val_mae})
+                y_device = y.to(device)
+                absolute_error = torch.abs(model(x.to(device)) - y_device)
+                val_absolute_error += float(absolute_error.sum().item())
+                val_elements += absolute_error.numel()
+        val_mae = val_absolute_error / val_elements
+        train_loss = float(np.mean(train_losses))
+        per_epoch.append({"epoch": epoch, "train_loss": train_loss, "val_mae": val_mae})
         checkpoint = {**run_identity, "model": model.state_dict(), "epoch": epoch, "val_mae": val_mae,
                       "curriculum_identity": identity}
         torch.save(checkpoint, args.output / "checkpoint_last.pt")
         if val_mae < best:
-            best = val_mae; stale = 0
+            best = val_mae
+            stale = 0
             torch.save(checkpoint, args.output / "checkpoint_best.pt")
         else:
             stale += 1
-        print(f"[epoch {epoch:03d}] val_mae={val_mae:.6f} baseline={baseline_mae:.6f} best={best:.6f} stale={stale}/{args.patience}", flush=True)
+        print(
+            f"[epoch {epoch:03d}] train_loss={train_loss:.6f} val_mae={val_mae:.6f} "
+            f"baseline={baseline_mae:.6f} best={best:.6f} stale={stale}/{args.patience}",
+            flush=True,
+        )
         if args.patience > 0 and stale >= args.patience:
             print(f"[early-stop] no improvement for {stale} epochs", flush=True)
             break
@@ -251,6 +442,7 @@ def main() -> int:
         split_mode=str(group.attrs.get("split_mode", f"{args.val_key}={args.val_value}")),
         per_epoch=per_epoch, baseline_mae=baseline_mae,
         train_rows=len(train_rows), val_rows=len(val_rows), source_counts=source_counts,
+        source_filter=args.source,
     )
     (args.output / "training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     if summary["structural_failure_epoch1_best"]:

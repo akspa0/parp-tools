@@ -55,14 +55,14 @@ same direct RGB-to-`relative_height_257` curriculum, without WDL.
 **Independent Test**: Frozen held-out metrics beat the flat/tile-mean and strongest Spec 112
 baselines by SC-001, border error passes SC-002, and the user accepts the held-out visual sheet.
 
-- [ ] T011 [P] [US1] Write failing shape, finite-output, offset-invariance, and no-WDL input-audit tests in `data-harvester/tests/v50/test_direct_geometry_model.py`
-- [ ] T012 [P] [US1] Add direct-geometry run-summary and epoch-1 structural-failure tests in `data-harvester/tests/v50/test_direct_geometry_train.py`
-- [ ] T013 [US1] Port the proven Spec 112 lean CNN behind the `direct_cnn_v112` architecture contract in `data-harvester/src/harvester/v50/direct_geometry_model.py`
+- [x] T011 [P] [US1] Prove shape, finite-output, offset-invariance, and the one-RGB-input contract in `data-harvester/tests/v50/test_height_relative_model.py` and `data-harvester/tests/v50/test_height_relative_train.py`
+- [x] T012 [P] [US1] Add direct-geometry source-filter, dry-run-plan, run-summary, and epoch-1 structural-failure tests in `data-harvester/tests/v50/test_height_relative_train.py`
+- [x] T013 [US1] Pin the proven Spec 112 lean CNN as the 1,561,537-parameter `direct_cnn_v112` architecture in `data-harvester/src/harvester/v50/height_relative_model.py`
 - [ ] T014 [US1] Add the compact `mit_b0_regression` architecture with one continuous relative-height output in `data-harvester/src/harvester/v50/direct_geometry_model.py`
 - [ ] T015 [US1] Implement same-split training/evaluation, flat/tile-mean baselines, border metrics, and held-out visual sheets in `data-harvester/src/harvester/v50/direct_geometry_train.py`
-- [ ] T016 [US1] Add the fail-closed dry-run/`--confirm-run` CLI in `data-harvester/scripts/v50_train_direct_geometry.py`
-- [ ] T017 [US1] USER RUN: build the frozen real curriculum and train `direct_cnn_v112` plus `mit_b0_regression` with the exact commands and recalibrated time/VRAM estimates in `specs/114-direct-terrain-reconstruction/quickstart.md`
-- [ ] T018 [US1] Validate both run summaries, compare SC-001/SC-002, record the user's visual verdict, and promote or reject each immutable checkpoint in `specs/114-direct-terrain-reconstruction/research.md`
+- [x] T016 [US1] Add explicit `--source`, stale-synthetic refusal, no-training dry run, and `--confirm-run` to `data-harvester/scripts/v50_train_height_relative.py` through its library owner
+- [ ] T017 [US1] USER RUN: train tonight's authored-only `direct_cnn_v112` baseline with the exact proven command in `specs/114-direct-terrain-reconstruction/quickstart.md`; corrected dual-view and `mit_b0_regression` runs follow after T014/T015 and the Spec 113 rerender gate
+- [ ] T018 [US1] Validate the authored baseline summary first, then compare the later corrected dual-view/CNN/MiT runs against SC-001/SC-002 and record the user's visual verdict in `specs/114-direct-terrain-reconstruction/research.md`
 
 **Checkpoint**: Stop. Geometry MVP must be validated before any trusted-object work begins.
 

@@ -146,14 +146,16 @@ review passes on held-out tiles from both maps.
 - [x] T019 [US3] Implement the trainer (curriculum-schema gate, `--val-key split` holdout,
   Kalimdor/Azeroth-only evaluation guard per FR-011, per-epoch metrics + in-run
   `tile_mean_baseline` + `target_contract_version` in `training_summary.json` per FR-010,
-  epoch-1-best flagged as structural failure per the execution contract) in
+  epoch-1-best flagged as structural failure per the execution contract, and Spec 114's explicit
+  authored-source/dry-run/confirmation gate) in
   `wow-viewer/data-harvester/src/harvester/v50/height_relative_train.py` + thin
   `wow-viewer/data-harvester/scripts/v50_train_height_relative.py`
 - [x] T020 [P] [US3] Add trainer contract tests (CPU-safe, no CUDA): store-schema gate refusal,
   out-of-scope-map evaluation refusal, summary fields present after a mocked 2-epoch loop, baseline
   computation correctness on a fixture, in
   `wow-viewer/data-harvester/tests/v50/test_height_relative_train.py`
-- [ ] T021 [US3] **USER RUNS**: training on the corrected curriculum (command + estimate printed
+- [ ] T021 [US3] **USER RUNS**: authored-only baseline training on the unaffected rows of the
+  corrected curriculum (command + estimate printed
   in `specs/112-v50-height-model/quickstart.md` Phase 2); assistant reviews the resulting
   `training_summary.json` against SC-004 and prepares the SC-005 side-by-side reconstruction
   review (decode predictions to world units, render held-out Kalimdor/Azeroth tiles for the user's

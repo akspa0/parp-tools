@@ -14,6 +14,11 @@ CNN as the mandatory geometry baseline; evaluate a compact MiT-B0/SegFormer-styl
 variant. Use semantic segmentation architectures for object/landform maps, and a lean U-Net/FPN
 regressor for the ordered alpha stack. Spec 113 retains all SR/detail ownership.
 
+The first executable slice is smaller than the full dual-view MVP: train the exact Spec 112 CNN on
+the 1,629 valid authored rows already in the frozen curriculum. This authored-only bootstrap is
+independent of stale synthetic lighting and establishes tonight's deployment-domain baseline. The
+corrected authored+synthetic comparison and MiT-B0 candidate remain the next geometry slice.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11+ through the existing uv environment; no new C# format reader
@@ -81,6 +86,29 @@ with a checkpoint identity. During downstream training, generated upstream outpu
 errors—must be present. Spec 113's RealPLKSR output is a separate visualization/detail branch and
 does not become ground-truth geometry or alpha.
 
+### Phase 1A frozen model/training contract
+
+| Item | Tonight value |
+|---|---|
+| Architecture | `direct_cnn_v112`, U-Net-lite, base width 32, 1,561,537 parameters |
+| Input | authored `minimap_rgb`, uint8 RGB normalized to `[0,1]`, shape `3×256×256` |
+| Output | one sigmoid-bounded `relative_height_257`, shape `257×257` |
+| Target | `v112.1`: `(height - tile_min) / max(tile_range, 1.0)` |
+| Loss | Smooth-L1 point loss + `0.25 ×` first-derivative L1 loss |
+| Optimizer | AdamW, learning rate `2e-4`, weight decay `1e-4` |
+| Schedule | batch 16, max 100 epochs, patience 15, seed 114, no scheduler, Windows workers 0 |
+| Split | frozen source-group split: 1,384 authored train / 245 authored validation |
+| Augmentation | none in the bootstrap; later paired D4 augmentation requires its own proof |
+| Baseline | per-tile mean normalized height, computed from validation truth |
+| Checkpoints | immutable best and last; non-empty output directories are refused |
+| Failure gate | best epoch 1 is structural failure even if it numerically beats the baseline |
+
+The bootstrap seeds NumPy, CPU/CUDA PyTorch, and the shuffle generator; cuDNN benchmarking is off
+and deterministic mode is on. It reports exact element-weighted validation MAE and mean training loss each epoch. It
+persists `training_plan.json`, `run_identity.json`, both checkpoints, and `training_summary.json`.
+It does not yet own SC-002 border analysis or held-out prediction sheets; those remain T015 before
+full geometry promotion.
+
 ## Phase Design
 
 ### Phase 0 — Corpus and contract audit
@@ -93,12 +121,17 @@ does not become ground-truth geometry or alpha.
 
 ### Phase 1 — Direct geometry MVP
 
-1. Adapt the Spec 112 trainer/curriculum to accept authored and corrected synthetic RGB with no WDL.
-2. Retain the existing lean CNN as `direct_cnn_v112` baseline.
-3. Add one MiT-B0/SegFormer-style continuous regression candidate with the identical output/target.
+1. **Phase 1A tonight bootstrap**: pin the existing 1,561,537-parameter lean CNN as
+   `direct_cnn_v112`; add an explicit source filter, dry-run plan, stale-synthetic refusal, and
+   user confirmation gate; train on 1,384 authored train / 245 authored validation rows.
+2. **Phase 1B corrected dual-view bakeoff**: rebuild synthetic RGB, freeze
+   `synthetic_lighting_contract=NoonWhiteGlobal`, and run the identical CNN on grouped
+   authored+synthetic views.
+3. Add one MiT-B0/SegFormer-style continuous regression candidate with the identical output/target
+   only after the authored baseline is reviewed.
 4. Prove shape, offset invariance, group leakage refusal, no-WDL input audit, and generated-signal
    provenance using CPU fixtures.
-5. Hand the user two bounded training commands on the same frozen split.
+5. Hand the user one bounded command per comparison, always on the frozen source-group split.
 6. Promote only if SC-001/SC-002 and user visual review pass.
 
 ### Phase 2 — Trusted objects and mask-guided geometry

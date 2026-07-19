@@ -42,7 +42,10 @@ longer aborts the whole run — the script prints a per-map summary at the end.
 
 The current height path uses the already-built
 `curriculum-0_5_3_3368-dual_v1.zarr` (2,990 authored/synthetic rows, deterministic within-map
-split) and `scripts/v50_train_height_relative.py`. The absolute-WDL prior/refiner commands are the
+split) and `scripts/v50_train_height_relative.py`. Tonight's valid bootstrap filters that store to
+1,629 unaffected authored rows (`--source authored`), prints a plan unless `--confirm-run` is
+present, and writes the `direct_cnn_v112` baseline. Synthetic/all-source runs are blocked until
+corrected `NoonWhiteGlobal` provenance is frozen. The absolute-WDL prior/refiner commands are the
 rejected legacy lane. Spec 113's RealPLKSR path is blocked on corrected-light comparison and fresh
 synthetic-RGB visual proof; raw full-frame NCC is diagnostic because authored objects are absent
 from the terrain-only target. Spec 114 preserves the current trainer as its lean geometry baseline,

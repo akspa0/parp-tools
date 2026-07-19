@@ -60,7 +60,12 @@ def _block(in_ch: int, out_ch: int, stride: int = 1) -> nn.Sequential:
 
 
 class HeightRelativeNet(nn.Module):
-    """U-Net-lite: 256x256x3 minimap -> 257x257 normalized relative height in [0, 1]. ~3M params."""
+    """U-Net-lite: 256x256x3 minimap -> 257x257 normalized relative height in [0, 1].
+
+    The default ``base=32`` network has 1,561,537 trainable parameters. Spec 114 records it as
+    ``direct_cnn_v112`` so tonight's authored-only bootstrap and the later corrected dual-view
+    bakeoff use the exact same baseline architecture.
+    """
 
     def __init__(self, base: int = 32) -> None:
         super().__init__()
