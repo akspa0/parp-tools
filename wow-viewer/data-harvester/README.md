@@ -11,10 +11,12 @@ Current state first. Old long-form lane history trimmed out.
   curriculum, Kalimdor+Azeroth only, one altitude-invariant relative-height target.
 - **Spec 113 `113-minimap-superres` — gated SR lane.** Mip-filtered detail HR, same-row datastore
   visual proof, guarded terrain-only cross-domain pairs, then ComfyUI-native RealPLKSR ×4.
-- **Spec 114 `114-direct-terrain-reconstruction` — planned reconstruction stack.** Once corrected
-  synthetic RGB passes Spec 113's visual gate, pair authored and synthetic views by terrain-row
-  identity and train direct RGB→relative-height without a WDL prior. Trusted object visibility,
-  terrain features, texture families, and alpha stacks remain separate one-output models.
+- **Spec 114 `114-direct-terrain-reconstruction` — universal geometry implementation lane.** Any
+  raster is the deployment input; pinned DINOv2-small plus one decoder predicts normalized
+  view-axis relief, then deterministic export produces a source-textured terrain OBJ. Exact v50
+  rows and four broad teacher-labeled families form a leak-safe curriculum with one entire held-out
+  family. Heavy label builds/training remain user-run. Object visibility, terrain features, texture
+  families, and alpha stacks remain separate one-output models.
 - Spec 089 `089-dav2-height-predictor` — legacy V22 model lane; not the current V50 route.
 - Spec 088 `088-v22-enrichment-from-v18` — V22 dataset contract feeding 089; legacy relative to V50,
   kept live only until 089's training path moves over.
@@ -44,13 +46,13 @@ The current height path uses the already-built
 `curriculum-0_5_3_3368-dual_v1.zarr` (2,990 authored/synthetic rows, deterministic within-map
 split) and `scripts/v50_train_height_relative.py`. Tonight's valid bootstrap filters that store to
 1,629 unaffected authored rows (`--source authored`), prints a plan unless `--confirm-run` is
-present, and writes the `direct_cnn_v112` baseline. Synthetic/all-source runs are blocked until
-corrected `NoonWhiteGlobal` provenance is frozen. The absolute-WDL prior/refiner commands are the
-rejected legacy lane. Spec 113's RealPLKSR path is blocked on corrected-light comparison and fresh
-synthetic-RGB visual proof; raw full-frame NCC is diagnostic because authored objects are absent
-from the terrain-only target. Spec 114 preserves the current trainer as its lean geometry baseline,
-then compares one compact MiT-B0 continuous-regression candidate on the same frozen split; its
-object/feature/texture/alpha phases do not start until direct geometry is proven.
+present, and writes the rejected `direct_cnn_v112` baseline. Synthetic/all-source runs are blocked
+until corrected `NoonWhiteGlobal` provenance is frozen. The absolute-WDL prior/refiner and failed
+authored-only CNN are legacy evidence. Spec 113's RealPLKSR path remains separate. Spec 114's
+dry-run teacher, curriculum, DINOv2-small trainer, and any-raster OBJ inference commands are
+implemented in its quickstart; a real universal curriculum must be built before the user launches
+training. Later object/feature/texture/alpha phases do not start until arbitrary-image geometry
+passes the whole-family gate.
 See
 [`../docs/dataset-preparation-userguide.md`](../docs/dataset-preparation-userguide.md) §8.4.
 

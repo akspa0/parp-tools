@@ -41,12 +41,22 @@ Last updated: 2026-07-19
   verification, license/BYOD and DepthAnything gates, explicit pseudo-target authority, variable-
   aspect Zarr storage, and dry-run/confirmation CLI. Seven tests pass; no download/build was run.
 - Implemented universal curriculum T012-T013 with five-family minimum, complete held-out-family
-  compatibility split, exact/pseudo authority, source-store identities, same-source content
-  relabel refusal, and group/family leakage gates. Six tests, CLI help, schema parse, Ruff, and
-  `py_compile` pass. No real curriculum was built.
+  compatibility split, exact/pseudo authority, source-store/input/target identities, same-source
+  relabel and post-build source/relief drift refusal, union-preserved Parquet lineage, and
+  group/family leakage gates. Nine tests, CLI help, schema parse, Ruff, and `py_compile` pass. No
+  real curriculum was built.
 - Implemented student T014-T015 with pinned DINOv2-small revision/safetensors identity, frozen
   backbone default, one compact relief decoder/output, and explicit unfreeze ablation. Six tests,
   Ruff, and `py_compile` pass; no weights were downloaded.
+- Implemented trainer/inference T016-T019. The dry-run trainer records every source/model/loss/
+  optimization setting, verifies source-store and teacher-image hashes, balances families, applies
+  exact-vs-pseudo authority, and trains with multiscale/gradient/normal/liquid-aware/hard-error
+  guidance plus AdamW, AMP, OneCycle, clipping, and EMA. It emits history/VRAM, named fixed-scale
+  best/final/worst sheets, per-row/family metrics, and a whole-held-out-family 5% gate against
+  constant and luminance baselines. Any supported raster can be tiled/stitched into 16-bit relief
+  and a source-textured OBJ/MTL after explicit inference confirmation. Universal focus: 47 tests;
+  broader v50: 223 passed / 4 skipped; Ruff, compile, and CLI help pass. No heavy operation was
+  launched.
 - Kept object cleanup, terrain features, texture families, and alpha blends as separate stages with
   their own targets/checkpoints/gates. Trusted object labels must be renderer-derived; image
   difference is explicitly rejected. Downstream stages must see generated upstream outputs.

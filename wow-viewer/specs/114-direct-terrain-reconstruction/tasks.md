@@ -41,10 +41,10 @@ image review sheet.
 
 - [x] T014 [P] [US1] Write one-output, tile-contract, finite-forward, frozen-backbone, and pin/hash tests in `data-harvester/tests/v50/test_universal_relief_model.py`
 - [x] T015 [US1] Implement the pinned DINOv2-small relief student and one continuous decoder in `data-harvester/src/harvester/v50/universal_relief_model.py`
-- [ ] T016 [P] [US1] Write loss masking, exact/pseudo authority, EMA, scheduler, AMP, clipping, and artifact tests in `data-harvester/tests/v50/test_universal_relief_train.py`
-- [ ] T017 [US1] Implement the guided optimization/evaluation stack in `data-harvester/src/harvester/v50/universal_relief_train.py`
-- [ ] T018 [P] [US1] Add the any-image relief/OBJ/height-preview inference CLI in `data-harvester/scripts/v50_image_to_terrain.py`
-- [ ] T019 [US1] Add dry-run, immutable-source identity, and explicit user-confirmation training CLI in `data-harvester/scripts/v50_train_universal_relief.py`
+- [x] T016 [P] [US1] Write loss masking, exact/pseudo authority, EMA, scheduler, AMP, clipping, and artifact tests in `data-harvester/tests/v50/test_universal_relief_train.py`
+- [x] T017 [US1] Implement the guided optimization/evaluation stack in `data-harvester/src/harvester/v50/universal_relief_train.py`
+- [x] T018 [P] [US1] Add the any-image relief/OBJ/height-preview inference CLI in `data-harvester/scripts/v50_image_to_terrain.py`
+- [x] T019 [US1] Add dry-run, immutable-source identity, and explicit user-confirmation training CLI in `data-harvester/scripts/v50_train_universal_relief.py`
 - [ ] T020 [US1] Run CPU fixtures, lint, compile, and real no-training dry runs; record proof and exact commands in `specs/114-direct-terrain-reconstruction/quickstart.md`
 - [ ] T021 [US1] USER RUN: build broad teacher relief labels using the exact command in `specs/114-direct-terrain-reconstruction/quickstart.md`
 - [ ] T022 [US1] USER RUN: train the universal relief student using the exact command in `specs/114-direct-terrain-reconstruction/quickstart.md`

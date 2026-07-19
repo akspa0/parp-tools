@@ -132,10 +132,10 @@ Current Hub candidates are Apache-2.0, but their exact revisions and file hashes
 before any label build or training. The DPT teacher is offline supervision only. The deployable
 student accepts the raster alone.
 
-## Next commands are intentionally gated
+## Universal build and training commands
 
 Do not substitute the old `v50_train_height_relative.py` command here. The next user-run commands
-are added only after T006–T020 land and pass lightweight proof:
+are separate, fail-closed stages:
 
 1. build pinned broad-image pseudo-relief labels;
 2. build the leak-safe multi-family universal curriculum;
@@ -145,7 +145,8 @@ are added only after T006–T020 land and pass lightweight proof:
 5. run any-image inference to emit relief preview, OBJ mesh, material/UV metadata, and validation
    sheet.
 
-This gate prevents another expensive run against a contract that cannot meet the product.
+Each CLI is a dry run unless its explicit confirmation flag is present. This prevents another
+expensive run against a contract that cannot meet the product.
 
 ### Pinned broad-image teacher labels
 
@@ -201,7 +202,60 @@ The preview writes nothing. It must report five families, nonzero exact and teac
 nonzero compatibility rows for the held-out family, and both leak counts as zero. Add
 `--confirm-build` only after those values are correct. The output is a content-identified Zarr
 curriculum index that references the immutable source stores; it does not duplicate the image
-corpus. Pointing multiple family names at the same image content is refused.
+corpus. Pointing multiple family names at the same image content is refused. The curriculum build
+also re-hashes every teacher source image and generated pseudo-relief target; training re-verifies
+the curriculum source-store identities plus both hashes before consuming pseudo labels. Exact-row
+and teacher-row fields are union-preserved in Parquet instead of inferred from only the first row.
+
+### Universal relief training
+
+Once the curriculum preview/build reports at least five real families, a complete `paintings`
+compatibility holdout, nonzero exact and pseudo rows, and zero leakage, preview the training plan:
+
+```powershell
+uv run python scripts/v50_train_universal_relief.py `
+  --curriculum ../output/datasets/v50/v50.1/universal-relief-curriculum-v1.zarr `
+  --output ../output/v50/v50.1/universal_relief/dinov2-small-relief-v1 `
+  --epochs 50 --batch 8 --workers 0 --patience 10 --seed 114
+```
+
+The preview writes nothing and does not download the student. Verify the printed source identity,
+family counts, complete holdout, tile counts, deployment input `rgb`, loss weights, AMP/EMA/schedule,
+and output path. Then the user launches the CUDA run by appending:
+
+```powershell
+  --device cuda --confirm-run
+```
+
+The first confirmed run downloads the pinned 88.2 MB DINOv2-small safetensors, freezes that general
+encoder by default, and trains only the compact relief decoder. Runtime depends on the four chosen
+image corpora and resulting tile count; budget roughly 30–180 minutes on the local RTX 4070 Ti
+SUPER, then replace that estimate with the plan's actual `steps_per_epoch`. The run refuses a
+non-empty output and writes `training_plan.json`, `history.json`, `checkpoint_best.pt`,
+`checkpoint_last.pt`, per-row metrics, best/final/worst visual sheets, and
+`training_summary.json`.
+
+Checkpoint selection uses macro-family validation MAE. Promotion is stricter: only the entire
+unseen compatibility family is scored against both the per-tile constant and direct-luminance
+baselines, and MAE plus gradient MAE must beat all four comparisons by at least 5%.
+
+### Any raster to textured terrain
+
+After a checkpoint promotes, preview conversion of any decodable RGB, RGBA, or grayscale image:
+
+```powershell
+uv run python scripts/v50_image_to_terrain.py `
+  --image D:\path\to\any-image.png `
+  --checkpoint ../output/v50/v50.1/universal_relief/dinov2-small-relief-v1/checkpoint_best.pt `
+  --output ../output/v50/v50.1/universal_relief/inference/any-image-v1 `
+  --mesh-max-resolution 257 --extent-x 533.3333333333 --vertical-scale 128
+```
+
+The dry run reads and identifies the raster/checkpoint but writes nothing and does not download the
+student. Add `--device cuda --confirm-run` to emit `source.png`, 16-bit normalized relief,
+`terrain.obj`, `terrain.mtl`, `validation.png`, and `manifest.json`. The source raster is UV-mapped
+onto the mesh immediately. For perspective photographs or artwork this is a view-axis bas-relief
+terrain interpretation, not a claim of unique metric scene geometry.
 
 Lightweight universal contract proof completed after the reset:
 
@@ -213,11 +267,18 @@ Lightweight universal contract proof completed after the reset:
   export are implemented;
 - focused tests: 9 passed; Ruff, `py_compile`, and `git diff --check`: pass.
 - teacher-label tests: 7 passed; CLI help, Ruff, `py_compile`, and dry-run/no-output contract: pass.
-- universal curriculum tests: 6 passed; five-family/whole-holdout/exact-vs-pseudo/content-relabel
-  gates, CLI help, schema JSON parse, Ruff, and `py_compile`: pass.
+- universal curriculum tests: 9 passed; five-family/whole-holdout/exact-vs-pseudo/content-relabel,
+  source/target drift, and full Parquet-lineage gates; CLI help, schema JSON parse, Ruff, and
+  `py_compile`: pass.
 - universal student tests: 6 passed; pinned full DINOv2-small revision/safetensors SHA, RGB-only one-
   relief output, finite bounded forward, frozen-backbone discipline, explicit unfreeze ablation, and
   fail-closed weight/channel/patch validation. No student weights were downloaded.
+- trainer/inference tests: 16 passed; exact/pseudo weighting, normal/liquid masks, multiscale and
+  structural losses, D4/style augmentation, EMA, complete-family-only promotion, fixed-scale named
+  review sheets, arbitrary-aspect inference planning, checkpoint pin checks, and no-write dry runs.
+- combined Spec 114 universal focus: 47 passed; Ruff, `py_compile`, and both CLI help paths pass.
+  No Hub download, real teacher build, curriculum build, CUDA training, or inference run was launched.
+- broader `tests/v50`: 223 passed / 4 skipped; only expected Zarr sidecar warnings remain.
 
 ## Geometry promotion gate
 

@@ -33,65 +33,59 @@ Primary references and official model surfaces:
 
 ## Decision 1 — direct relative height replaces a mandatory WDL prior
 
-**Decision**: the first model consumes minimap RGB (and, after US2, a generated object-cleanup
-signal) and directly predicts the existing `v112.1` relative-height target. There is no WDL input,
-WDL auxiliary head, or WDL teacher forcing. In constitution terms, the output is one residual signal
-relative to the target's fixed zero/mean baseline.
+**Decision**: the first model consumes only an arbitrary source raster and predicts one normalized
+view-axis-relief field. There is no WDL input, WDL auxiliary head, map/client identity, or
+ground-truth deployment input. Top-down v50 rows encode exact `height_257` under `v112.1`; broader
+images use explicitly lower-authority pseudo-relief.
 
-**Rationale**: the v50 corpus now pairs exact `height_257` with corrected synthetic terrain RGB and
-authored RGB. A WDL lattice is a lossy coarse projection of the target we already own; making it a
-required intermediate can only constrain or leak the answer. Direct single-image height estimation
-is an established supervised dense-prediction formulation. The cited aerial-height work uses an
-encoder/decoder and shows multi-scale context is important; unlike unconstrained aerial imagery,
-our source/target projection is fixed and exact.
+**Rationale**: the v50 corpus provides exact orthographic terrain supervision but cannot define an
+arbitrary-image deployment domain. A WDL lattice is a lossy projection of exact truth and does not
+help photos, drawings, paintings, or aerial imagery. The student therefore needs general visual
+features, broad source families, and one measurable continuous output.
 
-**Baseline/candidate**:
+**Selected candidate and ablation**:
 
-1. Keep Spec 112's lean from-scratch relative-height CNN as the mandatory baseline.
-2. Candidate A: a MiT-B0/SegFormer-style hierarchical encoder with a one-channel continuous
-   regression decoder at 257×257. SegFormer-B0 is attractive because the paper reports a compact
-   multiscale design (3.7M parameters for B0) and the official HF implementation accepts variable
-   input sizes without learned positional interpolation.
-3. Candidate B: a lean U-Net/ConvNeXt-style encoder-decoder with the same one-channel contract.
-4. Optional ablation: ordinal height bins plus continuous residual refinement only if direct
-   continuous regression demonstrably stalls. It is not the initial design because `v112.1` already
-   provides a bounded, offset-invariant target.
+1. Primary: pinned `facebook/dinov2-small` general visual encoder plus one compact progressive
+   continuous-relief decoder. Freeze the encoder for the first run; unfreezing is an explicit
+   ablation. One 224×224 RGB tile produces one 224×224 relief tile.
+2. Smaller ablation only: MiT-B0/SegFormer-style encoder with the identical one-output contract.
+3. The failed Spec 112 WoW-only CNN remains immutable negative evidence, not the mandatory baseline
+   for universal promotion.
 
 **Rejected**:
 
 - WDL-first or WDL-plus-height multi-head models: redundant intermediate and constitution violation.
-- DepthAnything/DA-V2 and generic monocular-depth checkpoints: explicitly out of this terrain lane,
-  perspective/depth priors mismatch the top-down orthographic target, and direct exact labels exist.
+- DepthAnything/DA-V2 checkpoints: explicitly out of this terrain lane.
+- A monocular teacher at deployment: the pinned DPT-Hybrid teacher may create offline pseudo labels
+  only; it is never an inference input or a claim of exact terrain truth.
 - A conditional GAN for height: a plausible-looking hallucinated surface is worse than a measurable
   numeric error. Pix2pix is relevant as image-translation history, not the geometry loss owner.
 
-## Decision 2 — train on paired views, but preserve deployment truth
+## Decision 2 — train on whole visual families and preserve deployment truth
 
-**Decision**: every source tile may contribute two input rows with the same relative-height target:
-corrected synthetic RGB and authored RGB. Both rows share `source_group_id` and split. The curriculum
-records input origin, object-mask availability, and upstream checkpoint identities. Deployment
-metrics are reported on authored RGB; synthetic metrics diagnose the clean-domain ceiling.
+**Decision**: the curriculum contains exact v50 terrain plus at least four genuinely distinct broad
+image families. Every derived crop/render/style/teacher view shares `source_group_id`; at least one
+entire non-WoW family is compatibility-only. Target authority is always `exact_numeric` or
+`teacher_pseudo`, and pseudo rows receive lower loss weight.
 
-**Rationale**: synthetic RGB is clean and exactly registered to numeric terrain, while authored RGB
-is the actual deployment domain and may contain objects/icons/water/material differences. Treating
-them as separate views of one target uses both without claiming pixel equality. This extends the
-dual-view discipline already proven in Spec 112.
+**Rationale**: authored and synthetic WoW RGB can diagnose one top-down family, but optimizer and
+view augmentation cannot create the missing image-domain coverage. Whole-family holdout proof is
+the minimum honest test of an arbitrary-image claim.
 
 **Rejected**: using high-resolution synthetic RGB as numeric height truth. It is a rendered
 observation and may supervise SR/detail appearance, while `height_257`, `normal_xyz`, `alpha_256`,
 and material IDs remain the actual numeric truth.
 
-### Tonight bootstrap: authored-only direct geometry
+### Historical bootstrap: authored-only direct geometry
 
 The frozen dual-source curriculum already contains 1,629 authored rows: 1,384 train and 245
 validation, spanning Kalimdor (951) and Azeroth (678). These images and their exact `height_257`
 targets were not invalidated by the synthetic compositor lighting fix. Therefore the first bounded
 run uses only `minimap_source=authored` with the existing 1,561,537-parameter Spec 112 CNN.
 
-This run is evidence, not a substitute for the corrected dual-view bakeoff. It answers the most
-immediate question—whether real minimap pixels can learn the offset-invariant terrain field—without
-polluting training with stale synthetic lighting. Any `synthetic` or `all` run is now fail-closed
-unless the curriculum records `synthetic_lighting_contract=NoonWhiteGlobal`.
+This run completed and failed its own constant baseline. It is evidence, not a substitute for the
+universal family curriculum. Any synthetic v50 selection remains fail-closed unless the curriculum
+records `synthetic_lighting_contract=NoonWhiteGlobal`.
 
 ## Decision 3 — trusted object visibility is a prerequisite, not an RGB difference
 
@@ -260,4 +254,22 @@ family. This keeps one output and permits a compact deployment student.
 `9599793d3ce64d7ebc85657360831596c1df9abc61f6820fe623fe7efb2e29c5`. The builder downloads only
 safe weights/config after explicit user confirmation, verifies the file hash before loading, keeps
 larger-is-closer/higher orientation, robustly normalizes each label, and writes variable-aspect
-`teacher_pseudo` rows into one Zarr store. Seven focused tests pass without model download.
+`teacher_pseudo` rows into one Zarr store. Each generated target has its own array-content hash;
+curriculum build and training independently refuse source-image or relief-target drift. Seven
+focused teacher tests pass without model download.
+
+## Decision 11 — observable universal trainer and whole-family promotion
+
+**Decision**: train the pinned student with family-balanced sampling; lower pseudo authority;
+paired D4 and broad photometric/style transforms; multiscale L1, gradient, exact-normal,
+liquid-aware, and detached hard-error guidance; AdamW; AMP; OneCycle warmup/cosine; gradient
+clipping; and EMA deployment weights. Select checkpoints on macro-family validation MAE, but permit
+promotion only from the completely unseen compatibility family.
+
+**Evidence contract**: every run writes the exact plan, immutable source/student identities,
+history and peak VRAM, per-row/per-family MAE/gradient/border/baseline metrics, named fixed-scale
+best/final sheets, and global worst cases. The compatibility family must beat constant and direct-
+luminance baselines by at least 5% in both MAE and gradient MAE. The any-image inference CLI emits
+the normalized 16-bit relief, aspect-preserving terrain OBJ/MTL with full source UVs, validation
+sheet, and manifest. Sixteen trainer/inference tests pass; the complete universal focus is 47 tests.
+No real broad corpus, CUDA training run, or checkpoint inference has been launched.

@@ -18,28 +18,33 @@ Last updated: 2026-07-19
 - The 1,561,537-parameter WoW-only CNN completed 100 epochs and is rejected: evaluator MAE
   0.1493349 versus tile-mean 0.1387470, gradient MAE 0.0058671, border MAE 0.1607286. Its fixed-scale
   quantile/worst/per-row artifacts are immutable negative evidence. **Do not optimize/rerun it.**
-- The planned universal student uses pinned `facebook/dinov2-small` general features plus one relief
-  decoder. A pinned non-DepthAnything teacher such as `Intel/dpt-hybrid-midas` may produce broad
+- The implemented universal student uses pinned `facebook/dinov2-small` general features plus one
+  relief decoder. Pinned non-DepthAnything `Intel/dpt-hybrid-midas` produces broad
   normalized pseudo-relief offline; exact v50 heights remain authoritative for top-down rows. The
-  teacher is never a deployment input. Next implementation starts with raster/mesh contracts and
-  multi-family curriculum identity before any new user-run training command.
+  teacher is never a deployment input.
 - Universal raster/mesh T006-T007 are implemented: RGB/RGBA/grayscale, native-aspect overlap tiles,
   exact-coverage stitching, stable blank relief, finite grid mesh/normals/faces, full UVs, and
-  OBJ/MTL export. Focused tests pass 9/9; Ruff and `py_compile` pass. Next is teacher/curriculum
-  identity, not training.
+  OBJ/MTL export. Focused tests pass 9/9; Ruff and `py_compile` pass.
 - Teacher-label T010-T011 are implemented: pinned DPT-Hybrid revision/safetensors SHA, Apache-2.0
   record, DepthAnything refusal, larger-is-higher robust normalization, license/BYOD gate, variable-
   aspect Zarr rows, and dry-run/`--confirm-run` ownership. Seven focused tests pass; no weights were
-  downloaded and no real label corpus was built. Next is whole-family curriculum T012-T013.
+  downloaded and no real label corpus was built.
 - Whole-family curriculum T012-T013 are implemented: v50 exact rows plus at least four distinct
-  teacher families, a complete family holdout, exact/pseudo authority counts, immutable source
-  identities, and zero group/family/content-relabel leakage. Six focused tests pass; CLI is dry-run
-  by default. No real external family stores or curriculum have been built. Next is the student
-  architecture/tests; user data/teacher build remains required before CUDA training.
+  teacher families, a complete family holdout, exact/pseudo authority counts, immutable source and
+  target identities, source-image/teacher-relief drift refusal, union-preserved Parquet lineage,
+  and zero group/family/content-relabel leakage. Nine focused tests pass; CLI is dry-run by default.
+  No real external family stores or curriculum have been built.
 - Student model T014-T015 is implemented: exact DINOv2-small revision and 88.2 MB safetensors hash,
   frozen 22.1M general encoder, compact trainable progressive decoder, and exactly one bounded
-  224x224 relief output per tile. Six CPU tests pass; no Hub download occurred. Next is the separately
-  documented trainer/optimization slice T016-T017.
+  224x224 relief output per tile. Six CPU tests pass; no Hub download occurred.
+- Trainer/inference T016-T019 are implemented: family-balanced exact/pseudo training, D4 and broad
+  image augmentation, multiscale/gradient/exact-normal/liquid-aware/hard-error guidance,
+  AdamW+AMP+OneCycle+clipping+EMA, named fixed-scale review sheets, and per-row/family/baseline
+  metrics. Promotion uses only the entirely unseen compatibility family. The any-raster CLI writes
+  normalized relief plus a source-textured OBJ/MTL after confirmation. Universal focus: 47 tests;
+  broader v50: 223 passed / 4 skipped; Ruff/compile/CLI help pass. No broad stores, real curriculum,
+  weights, training, or inference were run. Next action is the user-owned four-family label builds
+  and curriculum from the quickstart.
 - Source-image UV projection provides immediate mesh texture. Object cleanup, terrain semantics,
   editable texture families, and alpha remain later independent models with separate checkpoints.
 

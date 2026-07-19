@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-19  
 **Spec owner:** `specs/114-direct-terrain-reconstruction/`  
-**Status:** contract reset; universal raster/mesh boundary implemented; curriculum pending
+**Status:** universal contracts, curriculum, student, trainer, and inference implemented; real corpus/training pending
 
 ## Product boundary
 
@@ -85,7 +85,10 @@ The curriculum index builder is landed. It requires v50 plus at least four disti
 families, at least one complete compatibility holdout, nonzero exact and teacher-pseudo authority,
 and zero group/family leakage. It rejects identical source content relabeled under multiple family
 names. Authored v50 rows are usable immediately; synthetic selection fails until the source store
-records `NoonWhiteGlobal`. The builder is dry-run by default and writes only after user confirmation.
+records `NoonWhiteGlobal`. Teacher source images and the generated relief arrays are individually
+hashed; curriculum build and training refuse either kind of drift. The Parquet writer explicitly
+preserves the union of exact-row and teacher-row lineage fields. The builder is dry-run by default
+and writes only after user confirmation.
 
 The landed `universal_relief_contract.py` now proves the pre/post-model boundary independently of a
 checkpoint: common raster modes, aspect-preserving overlap tiling, exact-coverage relief stitching,
@@ -99,6 +102,20 @@ own training losses where available; they never become input channels. The bound
 AMP, EMA deploy weights, warmup/cosine decay, gradient clipping, multiscale relief, gradient and
 normal guidance, detached hard-error weighting, peak-VRAM/history evidence, and paired spatial plus
 photometric/style augmentation.
+
+The landed trainer uses family-balanced sampling, lower authority weight for pseudo labels,
+multiscale L1 plus gradient/exact-normal/liquid-aware/hard-error guidance, AdamW, AMP, OneCycle
+warmup/cosine, gradient clipping, and EMA deploy weights. It writes immutable checkpoint identity,
+per-family/per-row metrics, fixed-scale named validation sheets, global worst cases, history, and
+peak VRAM. Model selection uses all validation families; promotion uses only the completely unseen
+compatibility family. The inference CLI accepts any supported raster/aspect, stitches normalized
+relief, preserves aspect in a bounded mesh grid, and writes a source-textured OBJ/MTL plus 16-bit
+relief and a visual proof sheet. Both CLIs are no-write dry runs without explicit confirmation.
+
+Focused contract/model/trainer/inference proof is 47 tests; the broader v50 suite is 223 passed / 4
+skipped. Ruff, `py_compile`, and CLI help pass.
+No Hub download, broad label build, real curriculum build, CUDA training, or real checkpoint
+inference has been performed by the assistant.
 
 Promotion requires:
 

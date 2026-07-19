@@ -567,12 +567,13 @@ builder and RealPLKSR model wrapper exist; the trainer intentionally does not ye
 comparison, datastore visual-review, pair-set, and future user-run training commands live in
 `specs/113-minimap-superres/quickstart.md`.
 
-### 8.6 Direct terrain reconstruction (Spec 114, planning only)
+### 8.6 Universal image-to-terrain reconstruction (Spec 114, implementation ready)
 
-Spec 114 turns the corrected corpus into a modular authored-minimap reconstruction stack. The first
-MVP predicts one `relative_height_257` field directly from RGB with no WDL prior. It retains the
-Spec 112 lean CNN as the mandatory baseline and plans one compact MiT-B0/SegFormer-style continuous
-regression comparison on the identical grouped split.
+Spec 114 accepts any decodable RGB, RGBA, or grayscale raster at practical dimensions/aspect and
+predicts one normalized view-axis-relief field with no WDL prior. Deterministic stitching and mesh
+export produce a source-textured OBJ/MTL immediately. Exact v50 height is authoritative for the WoW
+top-down family; four genuinely different licensed/BYOD image families receive pinned offline
+DPT-Hybrid pseudo-relief. One complete non-WoW family is held out from training.
 
 Later stages remain independent: trusted rendered object visibility, terrain-feature classes,
 ordered canonical texture families, then a compositor-compatible alpha stack. They do not share
@@ -580,10 +581,13 @@ weights or add multi-task heads. Raw authored-minus-synthetic RGB is not valid o
 ground-truth upstream signals cannot be used as deployment inputs. Spec 113 continues to own visual
 detail/SR; high-resolution synthetic RGB does not replace numeric height or alpha truth.
 
-Implementation is intentionally gated on the fresh fixed-noon-white Spec 113 comparison and store
-hashes. The architecture research, data contracts, planned command shapes, and dependency-ordered
-tasks are in `specs/114-direct-terrain-reconstruction/`. No Spec 114 training command is runnable
-yet; the user will launch each heavy build/training run only after its implementation task passes.
+The pinned teacher/student, leak-safe curriculum, observable AMP/EMA/OneCycle trainer, and
+any-raster relief/OBJ inference CLI are implemented and fixture-proven. Every CLI is dry-run unless
+its confirmation flag is present. The remaining prerequisite is data, not architecture: build four
+real non-WoW teacher stores and the universal curriculum, inspect its five-family/whole-holdout/
+zero-leak plan, then the user launches the exact CUDA command in
+`specs/114-direct-terrain-reconstruction/quickstart.md`. The old WoW-only checkpoint is rejected
+negative evidence and must not be presented as the universal model.
 
 ### 8.7 Everything else (verify, curriculum, cleanup audit)
 
@@ -596,6 +600,6 @@ reference this section summarizes.
 
 ---
 
-*Last updated: 2026-07-19 — Spec 112 relative-height training is the runnable model lane; Spec 113
-owns the corrected-light/SR gate; Spec 114 plans the direct modular reconstruction stack. The
-absolute-WDL trainer is legacy/rejected.*
+*Last updated: 2026-07-19 — Spec 114 universal relief code and user-run commands are ready; real
+broad-family label stores, curriculum, and CUDA checkpoint remain to be built. Spec 113 owns the
+separate corrected-light/SR lane. The absolute-WDL and failed WoW-only trainers are rejected.*
