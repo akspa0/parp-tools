@@ -25,8 +25,8 @@ training recipe.
 - [x] T007 Implement arbitrary-raster preprocessing, relief stitching, and deterministic mesh export in `data-harvester/src/harvester/v50/universal_relief_contract.py`
 - [ ] T008 [P] Add universal curriculum and model-stage schema fixtures under `data-harvester/tests/fixtures/v50/spec114/`
 - [ ] T009 Implement fail-closed schema and source/group/family validation in `data-harvester/src/harvester/v50/model_stage_contract.py`
-- [ ] T010 [P] Write teacher identity/orientation/normalization/license tests in `data-harvester/tests/v50/test_relief_teacher_labels.py`
-- [ ] T011 Implement pinned non-DepthAnything teacher labeling in `data-harvester/src/harvester/v50/relief_teacher_labels.py`
+- [x] T010 [P] Write teacher identity/orientation/normalization/license tests in `data-harvester/tests/v50/test_relief_teacher_labels.py`
+- [x] T011 Implement pinned non-DepthAnything teacher labeling and its dry-run/user-confirmed CLI in `data-harvester/src/harvester/v50/relief_teacher_labels.py` and `data-harvester/scripts/v50_build_relief_teacher_labels.py`
 - [ ] T012 [P] Write whole-family split, derived-view leakage, and target-authority tests in `data-harvester/tests/v50/test_universal_relief_curriculum.py`
 - [ ] T013 Implement the immutable universal curriculum/index builder and dry-run CLI in `data-harvester/src/harvester/v50/universal_relief_curriculum.py` and `data-harvester/scripts/v50_build_universal_relief_curriculum.py`
 

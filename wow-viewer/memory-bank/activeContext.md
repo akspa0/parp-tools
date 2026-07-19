@@ -27,6 +27,10 @@ Last updated: 2026-07-19
   exact-coverage stitching, stable blank relief, finite grid mesh/normals/faces, full UVs, and
   OBJ/MTL export. Focused tests pass 9/9; Ruff and `py_compile` pass. Next is teacher/curriculum
   identity, not training.
+- Teacher-label T010-T011 are implemented: pinned DPT-Hybrid revision/safetensors SHA, Apache-2.0
+  record, DepthAnything refusal, larger-is-higher robust normalization, license/BYOD gate, variable-
+  aspect Zarr rows, and dry-run/`--confirm-run` ownership. Seven focused tests pass; no weights were
+  downloaded and no real label corpus was built. Next is whole-family curriculum T012-T013.
 - Source-image UV projection provides immediate mesh texture. Object cleanup, terrain semantics,
   editable texture families, and alpha remain later independent models with separate checkpoints.
 

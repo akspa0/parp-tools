@@ -37,6 +37,9 @@ Last updated: 2026-07-19
 - Implemented universal raster/mesh T006-T007 with 9 focused CPU tests: common raster modes,
   arbitrary aspect/size tiling, overlap stitching, blank stability, finite mesh normals/faces,
   complete UV coverage, and deterministic OBJ/MTL export. Ruff and `py_compile` pass.
+- Implemented teacher-label T010-T011 with a full pinned DPT-Hybrid revision, safetensors hash
+  verification, license/BYOD and DepthAnything gates, explicit pseudo-target authority, variable-
+  aspect Zarr storage, and dry-run/confirmation CLI. Seven tests pass; no download/build was run.
 - Kept object cleanup, terrain features, texture families, and alpha blends as separate stages with
   their own targets/checkpoints/gates. Trusted object labels must be renderer-derived; image
   difference is explicitly rejected. Downstream stages must see generated upstream outputs.

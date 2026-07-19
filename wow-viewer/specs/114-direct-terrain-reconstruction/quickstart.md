@@ -147,6 +147,38 @@ are added only after T006–T020 land and pass lightweight proof:
 
 This gate prevents another expensive run against a contract that cannot meet the product.
 
+### Pinned broad-image teacher labels
+
+T010-T011 are implemented. The builder pins `Intel/dpt-hybrid-midas` at revision
+`17fb43d4437eb62c260a593400db13c22b04511a`, requires `model.safetensors` SHA-256
+`9599793d3ce64d7ebc85657360831596c1df9abc61f6820fe623fe7efb2e29c5`, records Apache-2.0, and
+refuses DepthAnything-family identities. Labels are explicitly `teacher_pseudo`, use
+larger-is-closer/higher orientation, preserve each source image's aspect, and live in one Zarr store.
+
+Preview a licensed image family without downloading weights or writing output:
+
+```powershell
+cd I:\parp\parp-tools\wow-viewer\data-harvester
+uv run python scripts/v50_build_relief_teacher_labels.py `
+  --input-dir D:\path\to\licensed-aerial-images `
+  --output ../output/datasets/v50/v50.1/universal-relief-aerial-v1.zarr `
+  --family aerial `
+  --license-id YOUR-DATASET-LICENSE
+```
+
+For a private image folder, replace `--license-id ...` with `--byod`. After the dry run lists the
+expected decodable images and exact teacher identity, the user launches the heavy step by adding:
+
+```powershell
+  --device cuda --confirm-run
+```
+
+The first confirmed run downloads about 490 MB into the Hugging Face cache, then performs one
+teacher inference per image and writes float32 relief plus identities. Runtime and label-store size
+depend on the chosen image count/resolutions; the assistant does not launch it. Do not point five
+commands at one folder and rename the family—the curriculum gate requires genuinely distinct
+visual/source families.
+
 Lightweight universal contract proof completed after the reset:
 
 - `universal_relief_contract.py` accepts RGB/RGBA/grayscale and preserves non-square coverage by
@@ -156,6 +188,7 @@ Lightweight universal contract proof completed after the reset:
 - deterministic X/Z grid vertices, upward normals, triangles, full `[0,1]` UV coverage, and OBJ/MTL
   export are implemented;
 - focused tests: 9 passed; Ruff, `py_compile`, and `git diff --check`: pass.
+- teacher-label tests: 7 passed; CLI help, Ruff, `py_compile`, and dry-run/no-output contract: pass.
 
 ## Geometry promotion gate
 

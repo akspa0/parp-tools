@@ -254,3 +254,10 @@ family. This keeps one output and permits a compact deployment student.
 - DepthAnything-family teachers: explicitly disallowed by the standing project decision.
 - Claiming exact terrain for arbitrary perspective art/photos: the inverse problem is non-unique;
   outputs are truthfully labeled image-conditioned relief.
+
+**Pinned teacher implementation evidence**: T010-T011 freeze revision
+`17fb43d4437eb62c260a593400db13c22b04511a` and `model.safetensors` SHA-256
+`9599793d3ce64d7ebc85657360831596c1df9abc61f6820fe623fe7efb2e29c5`. The builder downloads only
+safe weights/config after explicit user confirmation, verifies the file hash before loading, keeps
+larger-is-closer/higher orientation, robustly normalizes each label, and writes variable-aspect
+`teacher_pseudo` rows into one Zarr store. Seven focused tests pass without model download.

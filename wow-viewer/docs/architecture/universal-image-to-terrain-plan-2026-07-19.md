@@ -54,6 +54,12 @@ Broad images without exact relief may receive offline pseudo-labels from pinned
 monocular-depth model trained on roughly 1.4M mixed images. It is a non-DepthAnything teacher, not a
 deployment dependency. Exact v50 `height_257` remains authoritative for top-down WoW rows.
 
+The teacher builder is landed and pins revision
+`17fb43d4437eb62c260a593400db13c22b04511a` plus safetensors SHA-256
+`9599793d3ce64d7ebc85657360831596c1df9abc61f6820fe623fe7efb2e29c5`. It is dry-run by default,
+requires license/BYOD authority, refuses DepthAnything identities, verifies the downloaded weight
+hash, and writes variable-aspect `teacher_pseudo` rows to one Zarr store only after user confirmation.
+
 ## Universal curriculum
 
 The first promotable curriculum must contain at least five visual/source families, including exact
