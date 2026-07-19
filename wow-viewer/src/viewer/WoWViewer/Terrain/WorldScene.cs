@@ -3255,6 +3255,9 @@ public class WorldScene : ISceneRenderer
     private bool _showLitMinimapMarkers;
     private bool _litLoadAttempted;
     private bool _useLitFogOverride;
+    private bool _hasGlobalViewerFogRange;
+    private float _globalViewerFogStart;
+    private float _globalViewerFogEnd;
     private bool _hasPreLitFogRange;
     private float _preLitFogStart;
     private float _preLitFogEnd;
@@ -3348,6 +3351,19 @@ public class WorldScene : ISceneRenderer
         _preLitFogStart = lighting.FogStart;
         _preLitFogEnd = lighting.FogEnd;
         _hasPreLitFogRange = true;
+    }
+
+    private void RestoreGlobalViewerFogRange(TerrainLighting lighting)
+    {
+        if (!_hasGlobalViewerFogRange)
+        {
+            _globalViewerFogStart = lighting.FogStart;
+            _globalViewerFogEnd = lighting.FogEnd;
+            _hasGlobalViewerFogRange = true;
+        }
+
+        lighting.FogStart = _globalViewerFogStart;
+        lighting.FogEnd = _globalViewerFogEnd;
     }
 
     private void RestorePreLitFogRange(TerrainLighting? lighting)
@@ -8937,42 +8953,66 @@ public class WorldScene : ISceneRenderer
                         LitLoader.LitLightingSample? litSample = null;
                         string fogRecommendationSource;
                         _lightService?.Update(camPos);
-                        if (_lightService != null && _lightService.ActiveLightId >= 0)
+                        if (_lightService != null)
                             lighting.GameTime = Math.Clamp(_lightService.TimeOfDay / 2880f, 0f, 1f);
 
                         if (_litLoader != null && _litLoader.HasData)
                             litSample = _litLoader.EvaluateLighting(camPos, lighting.GameTime);
 
-                        if (_lightService != null && _lightService.ActiveLightId >= 0)
+                        // The viewer global sun is unconditional. DBC/LightData colors and fog
+                        // are spatial overlays; a missing record is therefore an identity case,
+                        // never a reason to darken the terrain or retain a departed zone's fog.
+                        RestoreGlobalViewerFogRange(lighting);
+                        lighting.ClearExternalLighting();
+                        lighting.Update();
+                        _skyDome.UpdateFromLighting(lighting.GameTime);
+                        fogRecommendationSource = "Global viewer light";
+
+                        if (_lightService is { HasActiveLocalOverlay: true } localLighting)
                         {
                             (float dbcFogStart, float dbcFogEnd) =
                                 TerrainLightingMath.ComputeClientFogRange(
-                                    _lightService.FogEnd,
-                                    _lightService.FogScaler);
-                            lighting.ApplyExternalLighting(
-                                _lightService.DirectColor,
-                                _lightService.AmbientColor,
-                                _lightService.FogColor);
-                            lighting.FogStart = dbcFogStart;
-                            lighting.FogEnd = dbcFogEnd;
-                            lighting.Update();
-                            fogRecommendationSource = "DBC lighting";
+                                    localLighting.FogEnd,
+                                    localLighting.FogScaler);
 
-                            _skyDome.ZenithColor = _lightService.SkyTopColor;
-                            _skyDome.HorizonColor = lighting.FogColor;
-                            _skyDome.SkyFogColor = lighting.FogColor;
-                        }
-                        else
-                        {
-                            if (_useLitFogOverride && litSample == null && _hasPreLitFogRange)
-                            {
-                                lighting.FogStart = _preLitFogStart;
-                                lighting.FogEnd = _preLitFogEnd;
-                            }
-                            lighting.ClearExternalLighting();
+                            var globalState = new TerrainViewerLightingState(
+                                lighting.LightColor,
+                                lighting.AmbientColor,
+                                lighting.FogColor,
+                                lighting.FogStart,
+                                lighting.FogEnd);
+                            var localState = new TerrainViewerLightingState(
+                                localLighting.DirectColor,
+                                localLighting.AmbientColor,
+                                localLighting.FogColor,
+                                dbcFogStart,
+                                dbcFogEnd);
+                            TerrainViewerLightingState composed =
+                                TerrainViewerLightingComposer.ComposeGlobalWithLocal(
+                                    globalState,
+                                    localState,
+                                    localLighting.ActiveLocalWeight);
+
+                            Vector3 globalSkyTop = _skyDome.ZenithColor;
+                            Vector3 globalSkyHorizon = _skyDome.HorizonColor;
+                            lighting.ApplyExternalLighting(
+                                composed.DirectionalColor,
+                                composed.AmbientColor,
+                                composed.FogColor);
+                            lighting.FogStart = composed.FogStart;
+                            lighting.FogEnd = composed.FogEnd;
                             lighting.Update();
-                            fogRecommendationSource = "Fallback";
-                            _skyDome.UpdateFromLighting(lighting.GameTime);
+                            fogRecommendationSource = "Global viewer light + local DBC overlay";
+
+                            _skyDome.ZenithColor = Vector3.Lerp(
+                                globalSkyTop,
+                                localLighting.SkyTopColor,
+                                localLighting.ActiveLocalWeight);
+                            _skyDome.HorizonColor = Vector3.Lerp(
+                                globalSkyHorizon,
+                                lighting.FogColor,
+                                localLighting.ActiveLocalWeight);
+                            _skyDome.SkyFogColor = lighting.FogColor;
                         }
 
                         if (_useLitFogOverride && litSample != null)

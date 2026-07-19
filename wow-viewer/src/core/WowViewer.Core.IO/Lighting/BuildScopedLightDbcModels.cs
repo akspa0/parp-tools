@@ -161,9 +161,27 @@ public sealed record LightDbcEvaluation(
     LightDbcSkyboxRecord? PrimarySkybox,
     LightDbcEvaluationEvidence Evidence)
 {
+    /// <summary>
+    /// Raw evaluated bands for the selected in-range local record. These remain separate from
+    /// ColorBands/FloatBands, which preserve the client-table global/local blend contract.
+    /// Interactive renderers use these bands when composing a local overlay over their own
+    /// always-present global sun.
+    /// </summary>
+    public ImmutableArray<Vector3> LocalColorBands { get; init; } = ImmutableArray<Vector3>.Empty;
+
+    public ImmutableArray<float> LocalFloatBands { get; init; } = ImmutableArray<float>.Empty;
+
+    public bool HasLocalProfile =>
+        LocalColorBands.Length == BuildScopedLightDbcProfileResolver.ColorBandCount
+        && LocalFloatBands.Length == BuildScopedLightDbcProfileResolver.FloatBandCount;
+
     public Vector3 this[LightDbcColorBand band] => ColorBands[(int)band];
 
     public float this[LightDbcFloatBand band] => FloatBands[(int)band];
+
+    public Vector3 GetLocalColor(LightDbcColorBand band) => LocalColorBands[(int)band];
+
+    public float GetLocalFloat(LightDbcFloatBand band) => LocalFloatBands[(int)band];
 }
 
 public sealed class LightDbcLoadException : IOException

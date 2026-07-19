@@ -87,6 +87,9 @@ public sealed class BuildScopedLightDbcProfileResolverTests
 
         Assert.All(result.ColorBands, color => AssertVector(color, new Vector3(0.5f)));
         Assert.All(result.FloatBands, value => Assert.Equal(200f, value, 4));
+        Assert.True(result.HasLocalProfile);
+        Assert.All(result.LocalColorBands, color => AssertVector(color, Vector3.One));
+        Assert.All(result.LocalFloatBands, value => Assert.Equal(300f, value, 4));
         Assert.Equal(2, result.PrimaryParams.RecordId);
         Assert.Equal(0.5f, result.Evidence.LocalWeight, 4);
         Assert.Equal(10, result.Evidence.GlobalProfile!.LightRecordId);

@@ -1,10 +1,22 @@
 # Viewer Stabilization Contract
 
+## Interactive viewer global-light contract
+
+1. Every rendered world starts with the viewer's global directional and ambient terrain light.
+2. The default viewer time is noon; a loaded time-of-day control may move the same global sun.
+3. Exact-build DBC/LightData records with spatial falloff are local color, sky, and fog overlays.
+   Their raw local profile blends over the viewer base by the resolved spatial weight.
+4. No local record, zero local weight, or a profile evaluation failure is an identity operation.
+   It cannot disable the global light or retain a local fog range after the camera leaves the zone.
+5. The Lighting panel reports `GLOBAL VIEWER LIGHT ACTIVE` independently from local-overlay status.
+6. This contract is interactive-viewer-only. Synthesized minimaps retain their separate fixed-noon,
+   neutral-white, no-LIT/no-DBC contract.
+
 ## Active fog contract
 
 1. The renderer receives exactly one finite range with `0 <= start < end`.
 2. The range source is visible: fallback, lighting recommendation, or user override.
-3. LIT/DBC updates may change colors and the recommendation, but must not overwrite a user override.
+3. Local LIT/DBC overlays may change colors and the recommendation, but must not overwrite a user override.
 4. Invalid/missing lighting values resolve to a visible fallback before any shader or culling work.
 5. Reset returns control to the current lighting recommendation or fallback.
 

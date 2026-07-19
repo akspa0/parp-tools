@@ -18,10 +18,10 @@ public class TerrainLighting
     private Vector3 _externalLightDirection;
 
     /// <summary>Game time as fraction of day: 0.0 = midnight, 0.5 = noon, 1.0 = midnight.</summary>
-    public float GameTime { get; set; } = 0.35f; // Default: morning
+    public float GameTime { get; set; } = 0.5f; // Default: noon so an unprofiled world remains legible.
 
     /// <summary>Current sun/light direction (normalized, pointing toward light).</summary>
-    public Vector3 LightDirection { get; private set; } = TerrainSolarDirection.Evaluate(0.35f);
+    public Vector3 LightDirection { get; private set; } = TerrainSolarDirection.Evaluate(0.5f);
 
     public bool HasExternalLightDirectionOverride => _hasExternalLightDirectionOverride;
 

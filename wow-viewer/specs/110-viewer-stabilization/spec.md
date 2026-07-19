@@ -24,6 +24,9 @@ A viewer user can inspect any loaded map regardless of whether it has lighting d
 2. **Given** any loaded map, **When** the user changes fog start or fog end, **Then** the requested valid range takes effect without being silently overwritten by lighting evaluation.
 3. **Given** a time-of-day sample with missing, invalid, or degenerate lighting values, **When** the scene renders, **Then** terrain remains visible with a safe fallback rather than becoming fully clipped, fully fogged, or non-drawn.
 4. **Given** a user enters an invalid fog range, **When** the setting is applied, **Then** the viewer shows a valid ordered range and explains any adjustment it made.
+5. **Given** a 3.x map with no in-range local Light record, **When** the scene renders, **Then** the
+   viewer keeps its global directional and ambient light active at the selected time instead of
+   treating the absent local profile as an unlit world.
 
 ---
 
@@ -65,8 +68,9 @@ lighting, and whole-map stitching, then have the user run one bounded authored-r
    the PNGs use one fixed 12:00 achromatic global terrain light and explicitly record that map LIT
    and Light DBC runtime colors were excluded.
 3. **Given** a 2.x+ client without a usable map LIT source, **When** the interactive viewer evaluates
-   outdoor lighting, **Then** it resolves exact-build `Light`/`LightParams`/band data and exposes
-   source/provenance rather than silently substituting muddy compatibility lighting.
+   outdoor lighting, **Then** it resolves exact-build `Light`/`LightParams`/band data, applies an
+   in-range local profile over the always-present viewer sun, and exposes source/provenance rather
+   than replacing the global base with muddy compatibility lighting.
 4. **Given** an export configured for tiles and a whole map, **When** it completes, **Then** it
    writes one PNG per occupied terrain tile and a single stitched PNG covering their map-coordinate
    bounds, leaving missing tiles transparent instead of inventing terrain.
@@ -223,8 +227,12 @@ A user can determine which WMO v14/v17 and M2-to-MDX conversions are supported, 
   colors, or recovered native world-light direction. The manifest MUST record that exclusion and
   MUST NOT claim client-exact runtime lighting.
 - **FR-021a**: For 2.x+ clients, the interactive viewer MUST resolve the exact-build Light DBC chain
-  when a usable map LIT source is absent and expose active/inactive DBC status plus its diagnostic.
+  when a usable map LIT source is absent and expose local-overlay status plus its diagnostic.
   This runtime-viewer contract MUST NOT be reused by synthetic-minimap generation.
+- **FR-021b**: The interactive viewer MUST establish a global directional and ambient terrain light
+  before evaluating LIT, Light DBC, or LightData profiles. Exact-build local profiles MAY blend over
+  that base by their spatial weight. A missing, out-of-range, or failed local profile MUST be an
+  identity operation and MUST NOT disable, darken, or retain stale fog over the global viewer light.
 - **FR-022**: A whole-map export MUST stitch exactly the emitted terrain-tile outputs into one PNG
   with explicit tile-coordinate bounds and transparent missing-tile regions.
 - **FR-023**: The export MUST write a machine-readable manifest with client build identity, source
@@ -334,7 +342,9 @@ A user can determine which WMO v14/v17 and M2-to-MDX conversions are supported, 
 
 ### Measurable Outcomes
 
-- **SC-001**: On maps with and without lighting data, 100% of tested valid fog ranges produce a finite start less than end and visible terrain at each supported time-of-day sample.
+- **SC-001**: On maps with and without local lighting data, 100% of tested valid fog ranges produce
+  a finite start less than end, an active global viewer light, and visible terrain at each supported
+  time-of-day sample.
 - **SC-002**: Changing either fog endpoint changes the active range within the next rendered frame and the selection survives an unload/reload cycle according to its documented scope.
 - **SC-003**: Representative 1.0.0, 1.12.1, 2.4.3, and WotLK-or-later M2 samples each produce either visible native geometry or a specific, version-bound diagnostic; no sample fails silently.
 - **SC-004**: The Tools menu audit has zero obsolete dataset entries and zero launchers that fail solely because an unreported binary is missing.

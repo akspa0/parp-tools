@@ -158,19 +158,25 @@ public partial class ViewerApp
     {
         ImGui.SeparatorText("Effective terrain lighting");
 
+        ImGui.TextColored(new Vector4(0.45f, 0.85f, 0.45f, 1f), "GLOBAL VIEWER LIGHT ACTIVE");
+        ImGui.TextDisabled("Always present; local DBC/LIT profiles may overlay it but cannot replace its availability.");
+
         if (scene.LightService is { } dbcLighting)
         {
-            Vector4 statusColor = dbcLighting.ActiveLightId >= 0
+            Vector4 statusColor = dbcLighting.HasActiveLocalOverlay
                 ? new Vector4(0.45f, 0.85f, 0.45f, 1f)
-                : new Vector4(0.95f, 0.55f, 0.35f, 1f);
-            ImGui.TextColored(statusColor, dbcLighting.ActiveLightId >= 0 ? "DBC ACTIVE" : "DBC INACTIVE");
+                : new Vector4(0.65f, 0.70f, 0.75f, 1f);
+            ImGui.TextColored(
+                statusColor,
+                dbcLighting.HasActiveLocalOverlay
+                    ? $"LOCAL DBC OVERLAY ACTIVE ({dbcLighting.ActiveLocalWeight:F3})"
+                    : "NO LOCAL DBC OVERLAY");
             ImGui.TextWrapped($"Source: {dbcLighting.Source}");
             ImGui.TextWrapped(dbcLighting.Status);
         }
         else
         {
-            ImGui.TextColored(new Vector4(0.95f, 0.55f, 0.35f, 1f), "DBC NOT LOADED");
-            ImGui.TextDisabled("The loaded world has no exact-build Light DBC service.");
+            ImGui.TextDisabled("NO LOCAL DBC OVERLAY (the global viewer light remains active)");
         }
 
         TerrainLighting? lighting = _terrainManager?.Lighting ?? _vlmTerrainManager?.Lighting;

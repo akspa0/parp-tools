@@ -123,6 +123,11 @@ white minimap light independent of world LIT, and make WL* liquid continuous.
   `synthetic-minimap` path use one fixed 12:00 achromatic global light, reject non-noon/DBC options,
   bump the manifest to v6, retain exact-build LIT/Light DBC only in the interactive viewer, and add
   a focused no-darkening regression.
+- [x] T027r [US1] Make the interactive viewer global directional/ambient light unconditional and
+  default it to noon. Preserve raw exact-build DBC/LightData profiles only as spatially weighted
+  local overlays, reset departed local fog to the global range, expose both layers independently in
+  Lighting, and prove zero-weight identity plus local blending with focused tests and a Debug build.
+  User-run 3.x visual confirmation remains part of T019.
 
 ## Phase 4: User Story 2 - Render M2 assets through their native path (Priority: P1)
 

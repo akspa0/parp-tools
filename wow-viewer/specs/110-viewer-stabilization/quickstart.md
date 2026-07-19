@@ -5,7 +5,7 @@
 From `I:\parp\parp-tools`:
 
 ```powershell
-dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~TerrainLightingMathTests|FullyQualifiedName~TerrainMinimapCompositorTests"
+dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~TerrainLightingMathTests|FullyQualifiedName~TerrainViewerLightingComposerTests|FullyQualifiedName~TerrainMinimapCompositorTests|FullyQualifiedName~BuildScopedLightDbcProfileResolverTests"
 dotnet build wow-viewer/tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harvest.csproj -c Debug
 dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug
 ```
@@ -51,8 +51,12 @@ only when `time_of_day_evidence` explicitly says so; it is never proof of the im
 
 Run the Debug viewer with an approved configured client root. For one map with LIT and one map without:
 
-1. Open Lighting and set a custom fog start/end range.
-2. Change time of day through dawn, noon, dusk, and night.
+1. Open a 3.x map with no in-range local Light record. In Lighting, verify
+   `GLOBAL VIEWER LIGHT ACTIVE` and `NO LOCAL DBC OVERLAY` appear together and the terrain remains
+   normally lit. Move into a known local zone, if available, and verify only the local-overlay line
+   changes; leaving the zone must restore the global fog range.
+2. Open Lighting and set a custom fog start/end range. Change time of day through dawn, noon, dusk,
+   and night; the global light must remain present at every sample.
 3. Verify the active range says `User override`, survives lighting updates, and terrain stays visible.
 4. On the LIT map, enable `Show LIT minimap markers`; verify positional markers appear in both the normal minimap and the full-screen minimap (`M`) with the same selected entry highlight.
 5. In Lighting, select a positional LIT entry and double-click it; verify the camera frames that entry from above and the active fog range has not changed.

@@ -28,7 +28,10 @@ public class LightService
     public Vector3 FogColor { get; private set; } = new(0.6f, 0.7f, 0.85f);
     public float FogEnd { get; private set; } = 1500f;
     public float FogScaler { get; private set; } = 1.0f;
+    /// <summary>The selected in-range local record. Global DBC rows never replace the viewer sun.</summary>
     public int ActiveLightId { get; private set; } = -1;
+    public bool HasActiveLocalOverlay { get; private set; }
+    public float ActiveLocalWeight { get; private set; }
 
     // Fixed time of day (0-2880, where 1440 = noon in WoW's 24-minute cycle)
     // 1440 = noon, 0 = midnight
@@ -55,6 +58,7 @@ public class LightService
         _lightData.Clear();
         _classicCatalog = null;
         LastDbcEvidence = null;
+        ResetActiveLocalOverlayState();
         _mapId = mapId;
         Source = "loading";
         Status = $"Loading exact-build outdoor lighting for map {mapId}...";
@@ -235,33 +239,27 @@ public class LightService
     /// </summary>
     public void Update(Vector3 cameraPos)
     {
+        ResetActiveLocalOverlayState();
+        LastDbcEvidence = null;
+
         if (_classicCatalog is not null)
         {
             UpdateClassicCatalog(cameraPos);
             return;
         }
 
-        if (_zones.Count == 0) return;
+        if (_zones.Count == 0)
+        {
+            Status = $"Global viewer light active; no local LightData compatibility overlay exists for map {_mapId}.";
+            return;
+        }
 
         // Find the best matching light zone:
-        // 1. Zones with FalloffEnd=0 are global defaults (apply everywhere)
-        // 2. Zones with position+falloff define local overrides
-        // 3. Camera inside falloff range → blend based on distance
+        // zones with position+falloff define local overlays. Global DBC rows are metadata
+        // for the native table chain; they do not replace the viewer's always-present sun.
         LightZone? bestZone = null;
         float bestWeight = 0f;
 
-        // First, find global default (FalloffEnd == 0 or very large)
-        LightZone? globalZone = null;
-        foreach (var zone in _zones)
-        {
-            if (zone.FalloffEnd <= 0.01f || zone.FalloffEnd > 50000f)
-            {
-                globalZone = zone;
-                break;
-            }
-        }
-
-        // Then find the nearest local zone the camera is inside
         foreach (var zone in _zones)
         {
             if (zone.FalloffEnd <= 0.01f || zone.FalloffEnd > 50000f) continue;
@@ -281,33 +279,29 @@ public class LightService
             }
         }
 
-        // Use best local zone, or fall back to global
-        var activeZone = bestZone ?? globalZone;
-        if (activeZone == null) return;
-
-        ActiveLightId = activeZone.Id;
+        if (bestZone == null)
+        {
+            Status = $"Global viewer light active; no in-range local LightData compatibility overlay at the camera.";
+            return;
+        }
 
         // Get the normal-day param set (index 0)
-        int paramId = activeZone.ParamIds.Length > 0 ? activeZone.ParamIds[0] : 0;
-        if (paramId == 0) return;
+        int paramId = bestZone.ParamIds.Length > 0 ? bestZone.ParamIds[0] : 0;
+        if (paramId == 0)
+        {
+            Status = $"Global viewer light active; local LightData record {bestZone.Id} has no clear-weather profile.";
+            return;
+        }
 
         // Look up LightData for this param at current time
         if (!_lightData.TryGetValue(paramId, out var entries) || entries.Count == 0)
+        {
+            Status = $"Global viewer light active; local LightData record {bestZone.Id} has no timed samples.";
             return;
+        }
 
         // Interpolate between time-sampled LightData records.
         var data = InterpolateTime(entries, TimeOfDay);
-
-        // If we have a local zone with partial weight, blend with global
-        if (bestZone != null && globalZone != null && bestWeight < 1.0f)
-        {
-            int globalParamId = globalZone.ParamIds.Length > 0 ? globalZone.ParamIds[0] : 0;
-            if (globalParamId != 0 && _lightData.TryGetValue(globalParamId, out var globalEntries) && globalEntries.Count > 0)
-            {
-                var globalData = InterpolateTime(globalEntries, TimeOfDay);
-                data = BlendData(globalData, data, bestWeight);
-            }
-        }
 
         AmbientColor = data.AmbientColor;
         DirectColor = data.DirectColor;
@@ -315,6 +309,10 @@ public class LightService
         FogColor = data.FogColor;
         if (data.FogEnd > 10f) FogEnd = data.FogEnd;
         FogScaler = data.FogScaler;
+        ActiveLightId = bestZone.Id;
+        HasActiveLocalOverlay = true;
+        ActiveLocalWeight = Math.Clamp(bestWeight, 0f, 1f);
+        Status = $"Local LightData compatibility overlay {ActiveLightId} active at weight {ActiveLocalWeight:F3}.";
     }
 
     private void UpdateClassicCatalog(Vector3 rendererCameraPosition)
@@ -331,34 +329,49 @@ public class LightService
                 _mapId,
                 worldPosition,
                 TimeOfDay);
-            DirectColor = value[LightDbcColorBand.Direct];
-            AmbientColor = value[LightDbcColorBand.Ambient];
-            SkyTopColor = value[LightDbcColorBand.SkyTop];
-            FogColor = value[LightDbcColorBand.Fog];
+            LastDbcEvidence = value.Evidence;
+            if (!value.HasLocalProfile || value.Evidence.LocalWeight <= 0f)
+            {
+                Status = $"Global viewer light active; no in-range local DBC overlay at time " +
+                    $"{value.Evidence.NormalizedTime}/2880.";
+                return;
+            }
 
-            float fogEnd = value[LightDbcFloatBand.FogEnd];
+            DirectColor = value.GetLocalColor(LightDbcColorBand.Direct);
+            AmbientColor = value.GetLocalColor(LightDbcColorBand.Ambient);
+            SkyTopColor = value.GetLocalColor(LightDbcColorBand.SkyTop);
+            FogColor = value.GetLocalColor(LightDbcColorBand.Fog);
+
+            float fogEnd = value.GetLocalFloat(LightDbcFloatBand.FogEnd);
             if (float.IsFinite(fogEnd) && fogEnd > 10f)
                 FogEnd = fogEnd;
-            float fogScaler = value[LightDbcFloatBand.FogStartScalar];
+            float fogScaler = value.GetLocalFloat(LightDbcFloatBand.FogStartScalar);
             if (float.IsFinite(fogScaler))
                 FogScaler = fogScaler;
 
-            LastDbcEvidence = value.Evidence;
-            ActiveLightId = value.Evidence.LocalProfile?.LightRecordId
-                ?? value.Evidence.GlobalProfile?.LightRecordId
-                ?? -1;
-            Status = $"Active exact-build DBC light {ActiveLightId} at time {value.Evidence.NormalizedTime}/2880 " +
+            ActiveLightId = value.Evidence.LocalProfile!.LightRecordId;
+            HasActiveLocalOverlay = true;
+            ActiveLocalWeight = Math.Clamp(value.Evidence.LocalWeight, 0f, 1f);
+            Status = $"Local exact-build DBC overlay {ActiveLightId} active at weight {ActiveLocalWeight:F3}, " +
+                $"time {value.Evidence.NormalizedTime}/2880 " +
                 $"({BandCountRecoveryCount} recorded band-count recoveries).";
         }
         catch (Exception ex)
         {
-            ActiveLightId = -1;
+            ResetActiveLocalOverlayState();
             LastDbcEvidence = null;
-            Status = $"Exact-build Light* evaluation failed: {ex.Message}";
+            Status = $"Global viewer light active; exact-build local Light* evaluation failed: {ex.Message}";
             ViewerLog.Trace(
                 $"[LightService] Exact-build Light* evaluation failed for map {_mapId}, " +
                 $"time {TimeOfDay}, world position {worldPosition}: {ex.Message}");
         }
+    }
+
+    private void ResetActiveLocalOverlayState()
+    {
+        ActiveLightId = -1;
+        HasActiveLocalOverlay = false;
+        ActiveLocalWeight = 0f;
     }
 
     /// <summary>
@@ -397,21 +410,6 @@ public class LightService
             FogColor = Vector3.Lerp(a.FogColor, b.FogColor, t),
             FogEnd = a.FogEnd + (b.FogEnd - a.FogEnd) * t,
             FogScaler = a.FogScaler + (b.FogScaler - a.FogScaler) * t
-        };
-    }
-
-    private static LightDataEntry BlendData(LightDataEntry global, LightDataEntry local, float localWeight)
-    {
-        float gw = 1.0f - localWeight;
-        return new LightDataEntry
-        {
-            Time = local.Time,
-            DirectColor = global.DirectColor * gw + local.DirectColor * localWeight,
-            AmbientColor = global.AmbientColor * gw + local.AmbientColor * localWeight,
-            SkyTopColor = global.SkyTopColor * gw + local.SkyTopColor * localWeight,
-            FogColor = global.FogColor * gw + local.FogColor * localWeight,
-            FogEnd = global.FogEnd * gw + local.FogEnd * localWeight,
-            FogScaler = global.FogScaler * gw + local.FogScaler * localWeight
         };
     }
 

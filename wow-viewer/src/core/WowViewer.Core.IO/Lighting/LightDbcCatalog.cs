@@ -212,7 +212,11 @@ public sealed class LightDbcCatalog
                 globalProfile?.Evidence,
                 localProfile?.Evidence,
                 localWeight,
-                SourceHashes));
+                SourceHashes))
+        {
+            LocalColorBands = localProfile?.Colors ?? ImmutableArray<Vector3>.Empty,
+            LocalFloatBands = localProfile?.Floats ?? ImmutableArray<float>.Empty,
+        };
     }
 
     public static float CalculateZoneWeight(LightDbcZoneRecord zone, Vector3 worldPosition)

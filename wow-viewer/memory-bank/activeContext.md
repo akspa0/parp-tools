@@ -4,6 +4,13 @@ Last updated: 2026-07-19
 
 ## Active work: Spec 114 authored direct-height run is ready for the user tonight
 
+- **Viewer-only Spec 110 lighting repair is implemented; real 3.x visual proof remains.** The
+  interactive renderer now establishes an always-present global directional/ambient light at noon
+  before evaluating profiles. Raw exact-build DBC/LightData local profiles blend by spatial weight;
+  absent/out-of-range/failed locals leave the base unchanged and departed local fog is reset. The
+  Lighting panel reports global and local layers separately. This does not alter fixed-noon-white
+  synthetic minimaps. Focused composition/DBC tests pass 15/15; viewer Debug build has 0 errors.
+
 - **Tonight's runnable Spec 114 slice is `direct_cnn_v112` on authored rows only.** The existing
   1,561,537-parameter U-Net-lite now has explicit `--source`, read-only dry-run, `--confirm-run`,
   deterministic seed, immutable-output, and stale-synthetic gates. Real dry-run: 1,629 authored

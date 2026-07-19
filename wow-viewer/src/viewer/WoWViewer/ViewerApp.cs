@@ -8439,7 +8439,7 @@ void main() {
             if (ImGui.Checkbox("Use LIT Lighting Override", ref useLitFogOverride))
                 _worldScene.UseLitFogOverride = useLitFogOverride;
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Experimental: sample LIT clear-weather colors and fog distances instead of the current DBC lighting path.");
+                ImGui.SetTooltip("Experimental: apply the selected LIT profile over the viewer's always-present global lighting path.");
 
             if (_worldScene.LastLitSample != null)
                 ImGui.TextDisabled($"LIT sample: {_worldScene.LastLitSample.DominantLightName}  fogEnd={_worldScene.LastLitSample.FogEnd:F1}");

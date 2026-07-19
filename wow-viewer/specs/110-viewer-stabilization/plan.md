@@ -135,8 +135,8 @@ unresolved technical ambiguity remains.
 1. Add a Core-tested fog-range normalizer with a visible fallback and minimum non-zero span.
 2. Add a `WorldScene` user fog-range override with source/status reporting and a reset to the
    current lighting recommendation.
-3. Resolve the active range after LIT/DBC/no-source lighting selection and before all terrain,
-   object, WDL, and shader consumers receive it.
+3. Establish the viewer's global sun first, compose only in-range local LIT/DBC profiles over it,
+   then resolve the active range before all terrain, object, WDL, and shader consumers receive it.
 4. Put active-range controls in the Lighting surface; retain Settings as defaults only.
 5. Add a shared opt-in LIT marker overlay to both minimap surfaces and selection handling that does
    not alter lighting state.
@@ -154,7 +154,8 @@ unresolved technical ambiguity remains.
     exclusion and pipeline failure stages for residual real-data tiles.
 
 **Exit criteria**: zero-width/invalid ranges cannot reach a shader; manual UI controls cannot be
-overwritten by a lighting update; no-LIT fallback remains visible; LIT markers and selection agree
+overwritten by a lighting update; the global viewer light remains active without a local Light
+record; no-LIT fallback remains visible; LIT markers and selection agree
 between both minimap views and the list without altering the active lighting contract; the current
 Tools menu can launch a terrain-only per-tile and combined-map export with explicit lighting
 provenance.

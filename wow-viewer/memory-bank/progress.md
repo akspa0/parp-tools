@@ -2,6 +2,15 @@
 
 Last updated: 2026-07-19
 
+## Spec 110 — viewer global light is unconditional
+
+- The interactive viewer now starts every world with its global time-of-day directional/ambient
+  light (default noon). Exact-build DBC/LightData bands are retained as raw local profiles and blend
+  over that base only while in range; missing or failed locals are identity, and local fog cannot
+  leak after leaving a zone. Lighting reports the global base separately from local overlay status.
+- Synthetic minimap lighting is untouched. Focused composer/DBC tests: 15 passed. Active viewer
+  Debug build: 0 errors. T019 still owns the user-run 3.x visual confirmation.
+
 ## Spec 114 — authored direct-height bootstrap ready for user training
 
 - Fleshed the Phase 1 model contract and made tonight's authored-only run executable through the
