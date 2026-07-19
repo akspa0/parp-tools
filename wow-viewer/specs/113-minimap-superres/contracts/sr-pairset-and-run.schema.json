@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sr-pairset-and-run.schema.json",
+  "title": "V50 Minimap SR Pair-Set Summary and Training Run Summary",
+  "description": "Two sibling document shapes for Spec 113: the SR pair-set build summary (US2) and the training run summary (US3). Both are JSON sidecars; the pair data itself lives in a v50-sr-pairset-v1 Zarr store.",
+  "oneOf": [
+    { "$ref": "#/$defs/pairset_summary" },
+    { "$ref": "#/$defs/run_summary" }
+  ],
+  "$defs": {
+    "pairset_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "scale", "maps", "corrective_transform", "total_pairs", "splits", "per_map", "excluded"],
+      "properties": {
+        "schema": { "const": "v50-sr-pairset-v1" },
+        "scale": { "type": "integer", "enum": [4] },
+        "maps": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["Kalimdor", "Azeroth"] },
+          "minItems": 1,
+          "maxItems": 2
+        },
+        "corrective_transform": {
+          "enum": ["identity", "rot90", "rot180", "rot270", "flip_h", "flip_v", "transpose", "anti_transpose"]
+        },
+        "total_pairs": { "type": "integer", "minimum": 1 },
+        "splits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["train", "val"],
+          "properties": {
+            "train": { "type": "integer", "minimum": 1 },
+            "val": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "per_map": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "excluded": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["missing_authored", "missing_detail_render"],
+          "properties": {
+            "missing_authored": { "type": "integer", "minimum": 0 },
+            "missing_detail_render": { "type": "integer", "minimum": 0 }
+          },
+          "description": "excluded tiles counted, never zero-filled into pairs (FR-004)"
+        }
+      }
+    },
+    "run_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "pairset_identity", "split_mode", "model_config", "metrics", "baseline_comparison", "eval_maps"],
+      "properties": {
+        "schema": { "const": "v50-sr-run-v1" },
+        "pairset_identity": { "type": "string", "minLength": 1 },
+        "split_mode": { "type": "string", "minLength": 1 },
+        "model_config": {
+          "type": "object",
+          "required": ["arch", "stage", "degradation"],
+          "properties": {
+            "arch": { "const": "rrdbnet_x4" },
+            "stage": { "enum": ["psnr", "gan"] },
+            "degradation": {
+              "const": "none_real_pairs",
+              "description": "real authored LR, never a synthetic degradation pipeline (research Decision 4)"
+            }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "description": "held-out reference metrics of model output vs the detail HR",
+          "properties": {
+            "psnr": { "type": "number" },
+            "ssim": { "type": "number" },
+            "lpips": { "type": "number" }
+          }
+        },
+        "baseline_comparison": {
+          "type": "object",
+          "required": ["vs_bicubic_detail_gain", "beats_bicubic"],
+          "properties": {
+            "vs_bicubic_detail_gain": {
+              "type": "number",
+              "description": "model high-frequency detail over bicubic(authored LR), the SC-004 metric"
+            },
+            "vs_material_average_detail_gain": { "type": "number" },
+            "beats_bicubic": { "type": "boolean" }
+          }
+        },
+        "eval_maps": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["Kalimdor", "Azeroth"] },
+          "minItems": 1,
+          "maxItems": 2,
+          "description": "FR-009: metrics restricted to the two big maps"
+        }
+      }
+    }
+  }
+}
