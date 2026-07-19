@@ -84,8 +84,20 @@ def _per_tile_fields(group) -> list[str]:
     return fields
 
 
-def _tile_has_data(group, field: str, tile_id: int) -> bool:
-    return field in group and bool(np.asarray(group[field][tile_id]).any())
+def _minimap_usable(group, field: str, tile_id: int, min_rgb_std: float) -> bool:
+    """A minimap source is usable for a training row when it is present, non-empty, and not a
+    near-uniform blank (RGB std >= ``min_rgb_std``, matching the curation blank-minimap check).
+
+    This is applied PER SOURCE (Spec 112, user-directed 2026-07-18): a tile whose synthesized
+    minimap failed/blanked but whose authored client minimap is valid still contributes an authored
+    training row. Synthetic-centric curation would have discarded ~275 real authored tiles on the
+    0.5.3.3368 corpus purely because our renderer couldn't decode their textures."""
+    if field not in group:
+        return False
+    array = np.asarray(group[field][tile_id], dtype=np.float32)
+    if not array.any():
+        return False
+    return float(array.std()) >= min_rgb_std
 
 
 def _assign_group_split(selected: list[dict], *, val_map: str | None, val_fraction: float | None) -> str:
@@ -122,10 +134,13 @@ def build_training_curriculum(
     release: str,
     val_map: str | None = None,
     val_fraction: float | None = None,
+    min_rgb_std: float = 1.0,
 ) -> dict:
     """Write the curriculum store and return its summary dict. Exactly one of ``val_map`` (whole
     held-out map; cross-map generalization regime) or ``val_fraction`` (within-map stratified
-    holdout; the standard regime) selects the split."""
+    holdout; the standard regime) selects the split. ``min_rgb_std`` is the per-source blank-minimap
+    threshold (matches the curation default); pass a terrain-quality-only curation manifest so the
+    per-source blank check here is the sole minimap gate."""
     import zarr
 
     release = validate_release(release)
@@ -167,7 +182,7 @@ def build_training_curriculum(
                 "height_regime": str(row.get("height_regime", "")),
             }
             for source_name, source_field in _MINIMAP_SOURCE_FIELDS.items():
-                if _tile_has_data(group, source_field, tile_id):
+                if _minimap_usable(group, source_field, tile_id, min_rgb_std):
                     selected.append({**base, "minimap_source": source_name, "minimap_field": source_field})
 
     if not selected:
@@ -215,6 +230,7 @@ def build_training_curriculum(
             "release": release,
             "curriculum_kind": "all_real_dual_minimap",
             "split_mode": split_mode,
+            "min_rgb_std": min_rgb_std,
             "minimap_sources": sorted({row["minimap_source"] for row in selected}),
             "source_stores": [str(path.resolve()) for path in stores],
             "source_curation_manifests": [str(path.resolve()) for path in curation_manifests],
@@ -285,6 +301,9 @@ def main() -> int:
                              help="whole map held out as validation -- cross-map generalization regime ONLY")
     split_group.add_argument("--val-fraction", type=float, default=None,
                              help="standard regime: deterministic within-map stratified holdout of TILES (e.g. 0.15)")
+    ap.add_argument("--min-rgb-std", type=float, default=1.0,
+                    help="per-source blank-minimap threshold (default 1.0, matches curation); pass a "
+                         "terrain-quality-only curation manifest so this is the sole minimap gate")
     ap.add_argument("--release", default="v50.1", type=validate_release)
     args = ap.parse_args()
     try:
@@ -294,6 +313,7 @@ def main() -> int:
             output=args.output,
             val_map=args.val_map,
             val_fraction=args.val_fraction,
+            min_rgb_std=args.min_rgb_std,
             release=args.release,
         )
     except CurriculumBuildError as exc:

@@ -156,6 +156,37 @@ def test_dual_minimap_source_emits_two_rows_per_authored_tile(tmp_path: Path):
     assert "minimap_rgb_1024" not in out.array_keys()
 
 
+def test_per_source_blank_check_recovers_authored_when_synthetic_is_blank(tmp_path: Path):
+    # Spec 112 (user-directed): a tile whose synthetic minimap is blank/uniform but whose authored
+    # minimap is valid must still contribute an AUTHORED row -- the ~275-tile authored-recovery case
+    # on the real corpus. The synthetic row is correctly skipped for that tile.
+    store = tmp_path / "A.zarr"
+    manifest = tmp_path / "curation-A"
+    group = zarr.open_group(str(store), mode="w")
+    group.attrs.update({"schema": "v50-complete-store-v1", "model_family": "v50", "release": "v50.1"})
+    rng = np.random.default_rng(1)
+    synthetic = rng.integers(1, 255, size=(3, 8, 8, 3), dtype=np.uint8)
+    synthetic[1] = 128  # tile 1: uniform (nonzero) => blank by std, unusable as a synthetic input
+    authored = rng.integers(1, 255, size=(3, 8, 8, 3), dtype=np.uint8)  # all three authored valid
+    group.create_array("minimap_rgb", data=synthetic)
+    group.create_array("minimap_rgb_authored", data=authored)
+    group.create_array("height_257", data=rng.random((3, 9, 9), dtype=np.float32))
+    index = [{"tile_id": i, "build": "0_5_3_3368", "map": "MapA", "tile_x": i, "tile_y": 0} for i in range(3)]
+    pq.write_table(pa.Table.from_pylist(index), store / "index.parquet")
+    _write_manifest(manifest, "MapA", keeps=[True, True, True])
+
+    summary = build_training_curriculum(
+        stores=[store], curation_manifests=[manifest],
+        output=tmp_path / "curriculum.zarr", val_fraction=0.34, release="v50.1", min_rgb_std=1.0,
+    )
+
+    # tile 1 loses its synthetic row (blank) but keeps its authored row
+    assert summary["minimap_source_counts"] == {"authored": 3, "synthetic": 2}
+    index_out = pq.read_table(tmp_path / "curriculum.zarr" / "index.parquet").to_pylist()
+    tile1 = {r["minimap_source"] for r in index_out if r["source_tile_id"] == 1}
+    assert tile1 == {"authored"}
+
+
 def test_both_rows_of_a_tile_share_split_no_leakage(tmp_path: Path):
     store = tmp_path / "A.zarr"
     manifest = tmp_path / "curation-A"
