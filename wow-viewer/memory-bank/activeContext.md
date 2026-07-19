@@ -45,7 +45,9 @@ Last updated: 2026-07-19
   normalized relief plus a source-textured OBJ/MTL after confirmation. Universal focus: 48 tests;
   broader v50: 224 passed / 4 skipped; Ruff/compile/CLI help pass. No broad stores, real curriculum,
   weights, training, or inference were run. Next action is the user-owned four-family label builds
-  and curriculum from the quickstart.
+  and curriculum from the quickstart. The canonical local source root is
+  `I:\parp\parp-tools\wow-viewer\output\source-images\universal-relief`; its four family folders
+  are currently empty. Do not invent alternate drive paths.
 - Source-image UV projection provides immediate mesh texture. Object cleanup, terrain semantics,
   editable texture families, and alpha remain later independent models with separate checkpoints.
 

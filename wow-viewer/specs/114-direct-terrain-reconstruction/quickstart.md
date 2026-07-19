@@ -160,8 +160,15 @@ Preview a licensed image family without downloading weights or writing output:
 
 ```powershell
 cd I:\parp\parp-tools\wow-viewer\data-harvester
+$corpusRoot = 'I:\parp\parp-tools\wow-viewer\output\source-images\universal-relief'
+New-Item -ItemType Directory -Force -Path @(
+  "$corpusRoot\aerial",
+  "$corpusRoot\photos",
+  "$corpusRoot\paintings",
+  "$corpusRoot\drawings"
+)
 uv run python scripts/v50_build_relief_teacher_labels.py `
-  --input-dir D:\path\to\licensed-aerial-images `
+  --input-dir "$corpusRoot\aerial" `
   --output ../output/datasets/v50/v50.1/universal-relief-aerial-v1.zarr `
   --family aerial `
   --license-id YOUR-DATASET-LICENSE
@@ -178,7 +185,9 @@ The first confirmed run downloads about 490 MB into the Hugging Face cache, then
 teacher inference per image and writes float32 relief plus identities. Runtime and label-store size
 depend on the chosen image count/resolutions; the assistant does not launch it. Do not point five
 commands at one folder and rename the family—the curriculum gate requires genuinely distinct
-visual/source families.
+visual/source families. These four `I:` folders are currently empty; populate them before running
+the teacher commands. They live under the ignored local `wow-viewer/output/` tree and are not
+committed to Git.
 
 ### Universal curriculum index
 
@@ -245,7 +254,7 @@ After a checkpoint promotes, preview conversion of any decodable RGB, RGBA, or g
 
 ```powershell
 uv run python scripts/v50_image_to_terrain.py `
-  --image D:\path\to\any-image.png `
+  --image I:\parp\parp-tools\wow-viewer\output\source-images\inference\any-image.png `
   --checkpoint ../output/v50/v50.1/universal_relief/dinov2-small-relief-v1/checkpoint_best.pt `
   --output ../output/v50/v50.1/universal_relief/inference/any-image-v1 `
   --mesh-max-resolution 257 --extent-x 533.3333333333 --vertical-scale 128

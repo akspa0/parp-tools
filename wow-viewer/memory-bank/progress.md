@@ -58,6 +58,8 @@ Last updated: 2026-07-19
   and a source-textured OBJ/MTL after explicit inference confirmation. Universal focus: 48 tests;
   broader v50: 224 passed / 4 skipped; Ruff, compile, and CLI help pass. No heavy operation was
   launched.
+- Corrected the universal quickstart to use the real ignored `I:\parp\parp-tools\wow-viewer\output\source-images\universal-relief`
+  root. Aerial/photos/paintings/drawings currently contain zero images; no alternate-drive placeholder is valid.
 - Kept object cleanup, terrain features, texture families, and alpha blends as separate stages with
   their own targets/checkpoints/gates. Trusted object labels must be renderer-derived; image
   difference is explicitly rejected. Downstream stages must see generated upstream outputs.
