@@ -1,4 +1,4 @@
-# Implementation Plan: Universal Image-to-Terrain Reconstruction
+# Implementation Plan: Direct Minimap-to-Terrain Reconstruction
 
 **Branch**: `114-direct-terrain-reconstruction` | **Date**: 2026-07-19 | **Spec**: [spec.md](spec.md)
 
@@ -6,25 +6,18 @@
 
 ## Summary
 
-Replace the old mandatory WDL-prior route with one universal image-to-relative-relief stage. The
-accepted deployment input is any decodable raster; corrected v50 authored/synthetic minimaps provide
-exact top-down supervision but are only one curriculum family. A compact student combines a pinned
-general visual initialization with a single continuous relief decoder. A pinned general monocular-
-depth teacher may generate normalized view-axis-relief supervision for broad licensed/BYOD imagery;
-exact v50 numeric heights remain authoritative for top-down terrain rows. Whole visual/source
-families—not random WoW tiles alone—are held out for promotion.
+Replace the old mandatory WDL-prior route with one direct image-to-relative-height stage trained on
+the corrected dual-view v50 corpus. Keep the model stack modular: trusted object visibility,
+relative geometry, terrain-feature classification, texture-family selection, and alpha-stack
+reconstruction each own one output, checkpoint, trainer, and gate. Use the existing Spec 112 lean
+CNN as the mandatory geometry baseline; evaluate a compact MiT-B0/SegFormer-style dense regression
+variant. Use semantic segmentation architectures for object/landform maps, and a lean U-Net/FPN
+regressor for the ordered alpha stack. Spec 113 retains all SR/detail ownership.
 
-Keep the model stack modular: universal relief geometry, optional WoW object visibility,
-terrain-feature classification, texture-family selection, and alpha-stack reconstruction each own
-one output, checkpoint, trainer, and gate. The source raster can be UV-projected onto the generated
-mesh immediately; editable material reconstruction remains separate. Spec 113 retains SR/detail
-ownership for the WoW-specific branch.
-
-The narrow authored-only run completed on 2026-07-19 and did not promote: best epoch 92 reached
-0.149267 validation MAE against the 0.138747 per-tile constant baseline. Before any second training
-run, Phase 1 must gain a universal input/mesh contract, broad relief supervision, whole-domain
-evaluation, reviewable artifacts, and the repo's proven bounded optimization stack. Optimizing the
-same WoW-only corpus is explicitly not the next run.
+The first executable slice is smaller than the full dual-view MVP: train the exact Spec 112 CNN on
+the 1,629 valid authored rows already in the frozen curriculum. This authored-only bootstrap is
+independent of stale synthetic lighting and establishes tonight's deployment-domain baseline. The
+corrected authored+synthetic comparison and MiT-B0 candidate remain the next geometry slice.
 
 ## Technical Context
 
@@ -44,17 +37,16 @@ the persisted data/model contract CUDA-specific
 
 **Project Type**: Python model/data library plus thin CLIs under `wow-viewer/data-harvester/`
 
-**Performance Goals**: the deployable student fits 16 GB VRAM for training and supports same-day
-iteration; large teacher inference is an offline, user-run label-build step and is never required at
-deployment; no 100M+ parameter deployment model
+**Performance Goals**: every first-pass model fits 16 GB VRAM at its documented patch/batch size;
+geometry and semantic baselines remain small enough for same-day iteration; no 100M+ parameter
+default model
 
-**Constraints**: user launches all training/heavy rebuilds; arbitrary-raster-only deployment
-contract; no WDL prior; one output per model; no shared weights; no DepthAnything-family model; no
-MCAL parser or AlphaWdtWriter changes; the first training run uses project-owned v50 data only
+**Constraints**: user launches all training/heavy rebuilds; image-only deployment contract; no WDL
+prior; one output per model; no shared weights; no DA-V2; no MCAL parser or AlphaWdtWriter changes;
+private BYOD only
 
-**Scale/Scope**: two exact authored map/source families for the first training run, with Kalimdor
-train/validation and Azeroth compatibility; broader arbitrary-raster review remains non-numeric
-until project-owned paired truth exists; every derived view stays grouped by underlying source
+**Scale/Scope**: Kalimdor and Azeroth first; authored and corrected synthetic views grouped per tile;
+expand to later builds only after the first full stack is proven
 
 ## Constitution Check
 
@@ -64,7 +56,7 @@ until project-owned paired truth exists; every derived view stays grouped by und
 |---|---|---|
 | I. Repo Independence | All files stay under `wow-viewer/data-harvester/` and `wow-viewer/specs/114-*`; Hub IDs are runtime inputs, never external path references | PASS |
 | II. Library-First | Model/data logic lives in `src/harvester/v50/`; scripts are thin wrappers; existing readers/compositor are reused | PASS |
-| III. Real-Data Validation | The WoW family uses configured `H:\CLIENTS` evidence/build hashes; universal promotion additionally holds out entire licensed/BYOD visual families and requires user review | PASS |
+| III. Real-Data Validation | Every promotion uses configured `H:\CLIENTS` evidence, build identity, store hash, held-out metrics, and user visual review | PASS |
 | IV. Residual Model Chain | Each model predicts one signal with its own weights. Direct geometry predicts relative height as the residual from the fixed zero/mean baseline; no WDL or multi-task head | PASS |
 | V. Streaming/Zarr | Source and derived corpora remain Zarr/Parquet; no NPZ side channel | PASS |
 | VI. No Client Path Assumptions | Client root remains a CLI/config value; docs show the current operator path only in user-run commands | PASS |
@@ -74,19 +66,19 @@ until project-owned paired truth exists; every derived view stays grouped by und
 ## Architecture Decision
 
 ```text
-any source raster ──> universal relief model ──> normalized relief ──> deterministic mesh + UVs
-       │
-       ├── direct source-image projection (immediate visual texture)
-       │
-       ├── optional WoW object-mask model ──> generated cleanup signal ──> relief ablation
-       │
-       └── land-feature model ──> generated feature classes
-                                          │
-                                          └── texture-family selector ──> ordered family IDs
-                                                                               │
-source raster + generated feature/family signals ──────────────────────────────┴──> alpha model
-                                                                                      │
-                                                                                      └── alpha stack
+authored minimap RGB
+        │
+        ├── object-mask model ──> generated object visibility/cleanup signal
+        │                               │
+        ├───────────────────────────────┴──> direct geometry model ──> relative_height_257
+        │
+        └── land-feature model ──> generated feature classes
+                                         │
+                                         └── texture-family selector ──> ordered family IDs
+                                                                              │
+authored RGB + generated feature/family signals ──────────────────────────────┴──> alpha model
+                                                                                     │
+                                                                                     └── alpha_256x4
 ```
 
 This is a dependency graph, not a shared network. Each arrow carries a persisted/generated signal
@@ -94,9 +86,9 @@ with a checkpoint identity. During downstream training, generated upstream outpu
 errors—must be present. Spec 113's RealPLKSR output is a separate visualization/detail branch and
 does not become ground-truth geometry or alpha.
 
-### Frozen negative baseline
+### Phase 1A frozen model/training contract
 
-| Item | Recorded value |
+| Item | Tonight value |
 |---|---|
 | Architecture | `direct_cnn_v112`, U-Net-lite, base width 32, 1,561,537 parameters |
 | Input | authored `minimap_rgb`, uint8 RGB normalized to `[0,1]`, shape `3×256×256` |
@@ -111,45 +103,36 @@ does not become ground-truth geometry or alpha.
 | Checkpoints | immutable best and last; non-empty output directories are refused |
 | Failure gate | best epoch 1 is structural failure even if it numerically beats the baseline |
 
-This checkpoint is retained only to prove that a from-scratch WoW-domain CNN and an in-domain random
-split are insufficient. Its separately backfilled validation sheets remain useful diagnostics, but
-no universal claim or optimized rerun may be based on this table.
+The bootstrap seeds NumPy, CPU/CUDA PyTorch, and the shuffle generator; cuDNN benchmarking is off
+and deterministic mode is on. It reports exact element-weighted validation MAE and mean training loss each epoch. It
+persists `training_plan.json`, `run_identity.json`, both checkpoints, and `training_summary.json`.
+It does not yet own SC-002 border analysis or held-out prediction sheets; those remain T015 before
+full geometry promotion.
 
 ## Phase Design
 
 ### Phase 0 — Corpus and contract audit
 
-1. Freeze the universal raster normalization, normalized-relief, deterministic mesh, UV, extent,
-   and vertical-scale contracts.
-2. Freeze the first exact v50 authored curriculum by map/source family and keep one entire map in
-   compatibility; group every future crop/render/style by its underlying source.
-3. Bind the exact v50 top-down family to corrected fixed-noon store revisions from Spec 113.
-4. Pin license, immutable revision/hash, preprocessing, and output orientation for the general
-   visual student initialization and optional non-DepthAnything teacher.
-5. Freeze model-stage/run-summary schemas, constant/luminance baselines, and arbitrary-image sheets.
+1. Bind Spec 114 to corrected fixed-noon synthetic store revisions from Spec 113.
+2. Freeze a dual-view geometry curriculum contract with grouped authored/synthetic rows.
+3. Audit current object evidence and define a trusted top-down object-visibility target; do not
+   promote old dropped masks.
+4. Freeze model-stage/run-summary schemas and Hub source/license/hash evidence.
 
 ### Phase 1 — Direct geometry MVP
 
-1. Implement and fixture-test arbitrary RGB/RGBA/grayscale loading, aspect-preserving tiling/padding,
-   relief stitching, deterministic grid-mesh export, UVs, and blank-image stability.
-2. Build the first immutable curriculum index directly from v50 `minimap_rgb` and exact
-   `height_257`. Keep optional project-owned procedural/style rows or teacher labels as later
-   additions, not a prerequisite for tonight's run.
-3. Keep every view of one source grouped; reject random row splits and report whole-domain holdouts.
-4. Implement one compact general-visual student with one continuous normalized-relief output. Start
-   from the pinned general initialization; retain the failed CNN only as negative evidence.
-5. Train with exact v50 height/normal/liquid guidance. Missing clean signals mask their own loss only
-   and never become deployment inputs; optional teacher relief remains a separate lower-authority
-   extension.
-6. Port AMP, EMA deploy weights, warmup/cosine decay, clipping, multiscale/gradient/normal guidance,
-   detached hard-error weighting, history/VRAM evidence, and geometry-consistent spatial plus broad
-   photometric/style augmentation as one documented recipe.
-7. Emit fixed arbitrary-image previews, paired per-row metrics, constant/luminance comparisons,
-   quantile/worst sheets, and exported mesh previews from the best EMA checkpoint.
-8. Prove universal input compatibility, finite meshes, source-group isolation, no-WDL/no-teacher
-   deployment, and reproducible model/source identities with CPU fixtures.
-9. Hand the user separate exact-curriculum dry-run/build and bounded CUDA training commands.
-10. Promote only if SC-001 through SC-004 and user visual review pass.
+1. **Phase 1A tonight bootstrap**: pin the existing 1,561,537-parameter lean CNN as
+   `direct_cnn_v112`; add an explicit source filter, dry-run plan, stale-synthetic refusal, and
+   user confirmation gate; train on 1,384 authored train / 245 authored validation rows.
+2. **Phase 1B corrected dual-view bakeoff**: rebuild synthetic RGB, freeze
+   `synthetic_lighting_contract=NoonWhiteGlobal`, and run the identical CNN on grouped
+   authored+synthetic views.
+3. Add one MiT-B0/SegFormer-style continuous regression candidate with the identical output/target
+   only after the authored baseline is reviewed.
+4. Prove shape, offset invariance, group leakage refusal, no-WDL input audit, and generated-signal
+   provenance using CPU fixtures.
+5. Hand the user one bounded command per comparison, always on the frozen source-group split.
+6. Promote only if SC-001/SC-002 and user visual review pass.
 
 ### Phase 2 — Trusted objects and mask-guided geometry
 
@@ -204,11 +187,8 @@ specs/114-direct-terrain-reconstruction/
 ```text
 data-harvester/
 ├── src/harvester/v50/
-│   ├── universal_relief_contract.py
-│   ├── relief_teacher_labels.py
-│   ├── universal_relief_curriculum.py
-│   ├── universal_relief_model.py
-│   ├── universal_relief_train.py
+│   ├── direct_geometry_model.py
+│   ├── direct_geometry_train.py
 │   ├── object_visibility_labels.py
 │   ├── object_mask_model.py
 │   ├── object_mask_train.py
@@ -218,12 +198,10 @@ data-harvester/
 │   ├── texture_family_model.py
 │   ├── alpha_stack_model.py
 │   ├── model_stage_contract.py
-│   └── model_stage_contract.py
+│   └── reconstruction_curriculum.py
 ├── scripts/
-│   ├── v50_build_relief_teacher_labels.py
-│   ├── v50_build_universal_relief_curriculum.py
-│   ├── v50_train_universal_relief.py
-│   ├── v50_image_to_terrain.py
+│   ├── v50_build_reconstruction_curriculum.py
+│   ├── v50_train_direct_geometry.py
 │   ├── v50_build_object_visibility.py
 │   ├── v50_train_object_mask.py
 │   ├── v50_build_terrain_feature_library.py
@@ -232,11 +210,8 @@ data-harvester/
 │   ├── v50_train_texture_families.py
 │   └── v50_train_alpha_stack.py
 └── tests/v50/
-    ├── test_universal_relief_contract.py
-    ├── test_relief_teacher_labels.py
-    ├── test_universal_relief_curriculum.py
-    ├── test_universal_relief_model.py
-    ├── test_universal_relief_train.py
+    ├── test_reconstruction_curriculum.py
+    ├── test_direct_geometry_model.py
     ├── test_object_visibility_labels.py
     ├── test_object_mask_model.py
     ├── test_terrain_feature_library.py
@@ -256,8 +231,8 @@ any Python model task begins.
 ## Post-Design Constitution Recheck
 
 - No monolithic or shared-weight model appears in the design.
-- Universal geometry remains one normalized view-axis-relief residual. The general encoder and
-  relief decoder form one independently trained stage; no WDL or downstream head is added.
+- Direct geometry remains a single relative-height residual, so removing WDL does not violate the
+  one-residual rule.
 - Texture identity and alpha fields are explicitly separate.
 - The only proposed renderer addition is a trusted label export, not a format/parser rewrite.
 - Training and heavy data generation remain user-run.

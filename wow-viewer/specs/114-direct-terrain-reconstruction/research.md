@@ -1,4 +1,4 @@
-# Phase 0 Research: Universal Image-to-Terrain Reconstruction
+# Phase 0 Research: Direct Minimap-to-Terrain Reconstruction
 
 **Date**: 2026-07-19
 
@@ -33,60 +33,89 @@ Primary references and official model surfaces:
 
 ## Decision 1 — direct relative height replaces a mandatory WDL prior
 
-**Decision**: the first model consumes only an arbitrary source raster and predicts one normalized
-view-axis-relief field. There is no WDL input, WDL auxiliary head, map/client identity, or
-ground-truth deployment input. Top-down v50 rows encode exact `height_257` under `v112.1`; arbitrary
-rasters remain valid inference inputs even when exact paired truth is unavailable.
+**Decision**: the first model consumes minimap RGB (and, after US2, a generated object-cleanup
+signal) and directly predicts the existing `v112.1` relative-height target. There is no WDL input,
+WDL auxiliary head, or WDL teacher forcing. In constitution terms, the output is one residual signal
+relative to the target's fixed zero/mean baseline.
 
-**Rationale**: the v50 corpus provides exact orthographic terrain supervision but cannot define an
-arbitrary-image deployment domain. A WDL lattice is a lossy projection of exact truth and does not
-help an arbitrary raster. The student therefore uses pinned general visual features, while the first
-numeric training/evaluation claims remain limited to our exact v50 data.
+**Rationale**: the v50 corpus now pairs exact `height_257` with corrected synthetic terrain RGB and
+authored RGB. A WDL lattice is a lossy coarse projection of the target we already own; making it a
+required intermediate can only constrain or leak the answer. Direct single-image height estimation
+is an established supervised dense-prediction formulation. The cited aerial-height work uses an
+encoder/decoder and shows multi-scale context is important; unlike unconstrained aerial imagery,
+our source/target projection is fixed and exact.
 
-**Selected candidate and ablation**:
+**Baseline/candidate**:
 
-1. Primary: pinned `facebook/dinov2-small` general visual encoder plus one compact progressive
-   continuous-relief decoder with a full-resolution trainable RGB detail path fused before its one
-   output head. Freeze the encoder for the first run; unfreezing is an explicit ablation. One
-   224×224 RGB tile produces one 224×224 relief tile.
-2. Smaller ablation only: MiT-B0/SegFormer-style encoder with the identical one-output contract.
-3. The failed Spec 112 WoW-only CNN remains immutable negative evidence, not the mandatory baseline
-   for universal promotion.
+1. Keep Spec 112's lean from-scratch relative-height CNN as the mandatory baseline.
+2. Candidate A: a MiT-B0/SegFormer-style hierarchical encoder with a one-channel continuous
+   regression decoder at 257×257. SegFormer-B0 is attractive because the paper reports a compact
+   multiscale design (3.7M parameters for B0) and the official HF implementation accepts variable
+   input sizes without learned positional interpolation.
+3. Candidate B: a lean U-Net/ConvNeXt-style encoder-decoder with the same one-channel contract.
+4. Optional ablation: ordinal height bins plus continuous residual refinement only if direct
+   continuous regression demonstrably stalls. It is not the initial design because `v112.1` already
+   provides a bounded, offset-invariant target.
 
 **Rejected**:
 
 - WDL-first or WDL-plus-height multi-head models: redundant intermediate and constitution violation.
-- DepthAnything/DA-V2 checkpoints: explicitly out of this terrain lane.
-- A monocular teacher at deployment: the pinned DPT-Hybrid teacher may create offline pseudo labels
-  only; it is never an inference input or a claim of exact terrain truth.
+- DepthAnything/DA-V2 and generic monocular-depth checkpoints: explicitly out of this terrain lane,
+  perspective/depth priors mismatch the top-down orthographic target, and direct exact labels exist.
 - A conditional GAN for height: a plausible-looking hallucinated surface is worse than a measurable
   numeric error. Pix2pix is relevant as image-translation history, not the geometry loss owner.
 
-## Decision 2 — train on our exact data and hold out a whole map
+## Decision 2 — train on paired views, but preserve deployment truth
 
-**Decision**: the first curriculum reads project-owned v50 `minimap_rgb` and `height_257` directly.
-Every derived view shares `source_group_id`; all Azeroth rows are compatibility-only, while
-Kalimdor retains separate train and validation rows. Teacher pseudo-labels remain supported by code
-but are not a prerequisite or part of tonight's run.
+**Decision**: every source tile may contribute two input rows with the same relative-height target:
+corrected synthetic RGB and authored RGB. Both rows share `source_group_id` and split. The curriculum
+records input origin, object-mask availability, and upstream checkpoint identities. Deployment
+metrics are reported on authored RGB; synthetic metrics diagnose the clean-domain ceiling.
 
-**Rationale**: this is the shortest honest route to a new model using the clean paired signals we
-already built. The whole-map holdout tests terrain generalization without importing an unrelated
-image corpus or leaking compatibility rows into epoch selection.
+**Rationale**: synthetic RGB is clean and exactly registered to numeric terrain, while authored RGB
+is the actual deployment domain and may contain objects/icons/water/material differences. Treating
+them as separate views of one target uses both without claiming pixel equality. This extends the
+dual-view discipline already proven in Spec 112.
 
 **Rejected**: using high-resolution synthetic RGB as numeric height truth. It is a rendered
 observation and may supervise SR/detail appearance, while `height_257`, `normal_xyz`, `alpha_256`,
 and material IDs remain the actual numeric truth.
 
-### Historical bootstrap: authored-only direct geometry
+### T017/T018 record: authored-only bootstrap run completed and failed SC-001
 
 The frozen dual-source curriculum already contains 1,629 authored rows: 1,384 train and 245
 validation, spanning Kalimdor (951) and Azeroth (678). These images and their exact `height_257`
 targets were not invalidated by the synthetic compositor lighting fix. Therefore the first bounded
-run uses only `minimap_source=authored` with the existing 1,561,537-parameter Spec 112 CNN.
+run used only `minimap_source=authored` with the existing 1,561,537-parameter Spec 112 CNN.
 
-This run completed and failed its own constant baseline. It is evidence, not a substitute for the
-universal family curriculum. Any synthetic v50 selection remains fail-closed unless the curriculum
+**Outcome (immutable negative evidence, 2026-07-19)**: the user-owned
+`direct_cnn_v112-authored-v1` run completed all 100 epochs. Best epoch 92 reached validation MAE
+0.1492665126; the in-run per-tile constant baseline was 0.1387469612. The checkpoint is therefore
+7.59% worse than predicting each tile's mean and fails SC-001. The separate evaluator confirms MAE
+0.1493349, gradient MAE 0.0058671, and border MAE 0.1607286 over the 245 held-out rows, with
+per-row, quantile, and worst-case artifacts backfilled. **Do not rerun the same recipe.**
+
+**Audit finding**: the bootstrap used AdamW at a constant learning rate and Smooth-L1 plus one
+gradient term. It omitted the AMP, EMA, warmup/cosine, gradient clipping, multiscale loss,
+normal-guidance, hard-error, validation-preview, and VRAM/history patterns already proven by the
+repo's terrain trainers. It also wrote no prediction sheet, per-row errors, or border metrics at
+training time; those were backfilled afterward and are now required observability for every future
+run.
+
+**Implication**: the failure does not invalidate the direct dual-view route; it invalidates this
+specific narrow recipe. The next geometry candidates remain the original plan's T014
+`mit_b0_regression` and Candidate B U-Net-style decoder on the corrected dual-view curriculum,
+trained with the proven bounded optimization stack, compared against the frozen `direct_cnn_v112`
+metrics on the same split. Any `synthetic` or `all` run stays fail-closed unless the curriculum
 records `synthetic_lighting_contract=NoonWhiteGlobal`.
+
+**Reverted detour (2026-07-19)**: an unauthorized "universal arbitrary-raster" reset briefly
+replaced this spec with a DINOv2 student, a DPT-Hybrid/MiDaS pseudo-label teacher, and broad
+third-party image folders. That route was reverted: the deployment contract is the authored WoW
+minimap, the dataset is the project-owned v50 Zarr store, and no third-party image corpus or
+teacher model is part of this spec. Pretrained encoder weights remain only an optional
+license-recorded, hash-pinned ablation per FR-013, compared against the from-scratch baseline on
+the same split.
 
 ## Decision 3 — trusted object visibility is a prerequisite, not an RGB difference
 
@@ -170,28 +199,22 @@ experiments, but geometry/alpha truth remains numeric.
 **Rationale**: one owner avoids competing trainers and checkpoints. RealPLKSR is already selected for
 ComfyUI-native delivery, while terrain geometry and alpha have different objectives.
 
-## Decision 7 — general visual initialization is part of the universal geometry candidate
+## Decision 7 — pretrained weights are optional ablations
 
-**Decision**: preserve the failed from-scratch CNN as reproducible negative evidence, but do not make
-another from-scratch WoW-only run the universal candidate. The first universal student uses a pinned
-general visual initialization and one newly trained continuous relief decoder. The current primary
-candidate is `facebook/dinov2-small` (22.1M parameters, Apache-2.0) because it is explicitly a
-self-supervised general image feature extractor. `nvidia/mit-b0` remains the smaller ImageNet
-baseline. Exact Hub revision, content hash, license, preprocessing, and frozen/fine-tuned state are
-part of every run identity.
+**Decision**: every stage first proves a small from-scratch baseline. A Hub checkpoint may be tested
+only when its license/source/revision/hash are recorded and it uses the same frozen split and output
+contract. Pretraining promotion requires a material improvement, not assumed transfer.
 
-**Rationale**: the deployment contract now includes images outside the WoW minimap distribution.
-The v50 corpus cannot teach broad image semantics by optimizer changes alone. DINOv2-small supplies
-general image features while remaining a tractable student backbone; the decoder still predicts one
-signal and does not share weights with later models. Neither Hub model card claims terrain output,
-so promotion still depends on the repo's paired-relief and arbitrary-image gates.
+**Rationale**: ImageNet/ADE/COCO features may help edges and regions, but WoW minimaps are a stylized
+orthographic domain. SegFormer and DINOv2 provide strong, accessible starting points; neither model
+card claims terrain reconstruction. Architecture reuse is safer than assuming checkpoint semantics.
 
 ## Decision 8 — one stage at a time
 
 Implementation order:
 
-1. universal input/relief/mesh contract and whole-domain evaluation suite;
-2. universal curriculum plus general visual student and relief-teacher bakeoff;
+1. corrected synthetic RGB visual gate (Spec 113 dependency);
+2. direct geometry baseline and MiT-B0 bakeoff;
 3. trusted object-label renderer/audit;
 4. object-mask model and geometry ablation with generated masks;
 5. deterministic land-feature library and classifier;
@@ -200,97 +223,3 @@ Implementation order:
 
 No later model is implemented merely because its architecture is known. Each phase ends with its own
 real-data and user visual gate.
-
-## Decision 9 — failed authored CNN run requires observability, but not a narrow retry
-
-**Evidence**: the user-owned `direct_cnn_v112-authored-v1` run completed all 100 epochs. Best epoch
-92 reached validation MAE 0.1492665126; the in-run per-tile constant baseline was 0.1387469612.
-The checkpoint is therefore 7.59% worse and fails SC-001. It learned nontrivial structure, but the
-run wrote no prediction sheet, per-row errors, gradient/border metrics, or worst-case review.
-
-**Audit finding**: the bootstrap used AdamW at a constant learning rate and Smooth-L1 plus one
-gradient term. It omitted the AMP, EMA, warmup/cosine, gradient clipping, multiscale loss,
-normal-guidance, hard-error, validation-preview, and VRAM/history patterns already proven by the
-repo's terrain trainers. Repeating it unchanged would not answer why it lost.
-
-**Decision**:
-
-1. Backfill the immutable checkpoint through a separate evaluator and require future runs to emit
-   fixed-sample best-epoch previews plus final all-validation metrics and sheets.
-2. Keep a source raster as the only deployment input and one normalized-relief output.
-3. Use clean numeric signals only as training-time supervision/masking: `normal_xyz` with
-   `normal_mask`/`mcnr_mask_257`, `liquid_mask`, and height-derived multiscale/gradient structure.
-4. Do not repeat the narrow authored-only trainer. Universal training uses paired spatial transforms
-   on raster and relief plus broad photometric/style changes; baked-light direction is deliberately
-   varied because fixed WoW lighting is no longer a deployment assumption.
-5. Port the proven bounded optimization stack into the universal student only after its curriculum,
-   universal compatibility suite, and whole-domain split are fixture-proven.
-
-## Decision 10 — distill broad view-axis relief; exact v50 height stays authoritative
-
-**Decision**: define the universal geometry output as normalized view-axis relief. For top-down
-terrain imagery this is relative terrain height. For perspective photographs or artwork it is a
-bas-relief interpretation of visible structure, not an assertion of metric scene reconstruction.
-Use exact `height_257` for v50 rows. For broad licensed/BYOD imagery without relief truth, allow a
-pinned non-DepthAnything teacher such as `Intel/dpt-hybrid-midas` (Apache-2.0, trained on roughly
-1.4M mixed monocular-depth images) to create normalized pseudo-labels in a separate user-run build.
-Teacher identity and output orientation are stored per row; the teacher is never a deployment input.
-
-**Rationale**: an arbitrary 2D raster does not identify a unique metric 3D scene, but it can define a
-stable view-axis relief surface suitable for terrainification. A general monocular-depth teacher
-supplies broad image structure; exact v50 height corrects it on the orthographic top-down terrain
-family. This keeps one output and permits a compact deployment student.
-
-**Alternatives rejected**:
-
-- Optimizing the 1,384-row authored WoW CNN harder: it cannot create missing image-domain coverage.
-- Treating image luminance as truth: retained only as a mandatory baseline because it produces an
-  embossing, not learned terrain interpretation.
-- DepthAnything-family teachers: explicitly disallowed by the standing project decision.
-- Claiming exact terrain for arbitrary perspective art/photos: the inverse problem is non-unique;
-  outputs are truthfully labeled image-conditioned relief.
-
-**Pinned teacher implementation evidence**: T010-T011 freeze revision
-`17fb43d4437eb62c260a593400db13c22b04511a` and `model.safetensors` SHA-256
-`9599793d3ce64d7ebc85657360831596c1df9abc61f6820fe623fe7efb2e29c5`. The builder downloads only
-safe weights/config after explicit user confirmation, verifies the file hash before loading, keeps
-larger-is-closer/higher orientation, robustly normalizes each label, and writes variable-aspect
-`teacher_pseudo` rows into one Zarr store. Each generated target has its own array-content hash;
-curriculum build and training independently refuse source-image or relief-target drift. Seven
-focused teacher tests pass without model download.
-
-## Decision 11 — observable universal trainer and whole-family promotion
-
-**Decision**: train the pinned student with family-balanced sampling; lower pseudo authority;
-paired D4 and broad photometric/style transforms; multiscale L1, gradient, exact-normal,
-liquid-aware, and detached hard-error guidance; AdamW; AMP; OneCycle warmup/cosine; gradient
-clipping; and EMA deployment weights. Select checkpoints on macro-family validation MAE, but permit
-promotion only from the completely unseen compatibility family.
-
-**Evidence contract**: every run writes the exact plan, immutable source/student identities,
-history and peak VRAM, per-row/per-family MAE/gradient/border/baseline metrics, named fixed-scale
-best/final sheets, and global worst cases. The compatibility family must beat constant and direct-
-luminance baselines by at least 5% in both MAE and gradient MAE. The any-image inference CLI emits
-the normalized 16-bit relief, aspect-preserving terrain OBJ/MTL with full source UVs, validation
-sheet, and manifest. Sixteen trainer/inference tests pass; the complete universal focus is 48 tests.
-No real broad corpus, CUDA training run, or checkpoint inference has been launched.
-
-## Decision 12 — first runnable curriculum uses our exact v50 data only
-
-**Decision**: the first DINOv2 relief run consumes the existing
-`curriculum-0_5_3_3368-dual_v1.zarr` directly. `minimap_rgb` is the only deployment-style input;
-`height_257` is exact relief truth; `normal_xyz`/normal masks and liquid masks provide training-only
-guidance. No external image dataset, PNG export, or teacher-label build is required. The first safe
-command selects authored rows only because the current dual store does not record corrected
-`NoonWhiteGlobal` synthetic provenance.
-
-The exact dry run selects 1,629 project rows: 808 Kalimdor train, 143 Kalimdor validation, and all
-678 Azeroth rows as whole-map compatibility evidence. Best-epoch selection uses only validation;
-Azeroth is evaluated only for promotion. The curriculum has two map/source families, zero pseudo
-targets, and zero group/family leakage. The any-raster inference contract remains, but numeric
-promotion claims for this first checkpoint are limited to the project-owned held-out map plus user
-visual review on arbitrary rasters.
-
-**Rejected route**: creating empty `aerial/photos/paintings/drawings` folders and immediately running
-the teacher labeler. It necessarily fails with `no decodable raster images found` and is not the
-project's dataset route.

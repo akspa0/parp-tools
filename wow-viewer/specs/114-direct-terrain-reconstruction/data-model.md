@@ -1,12 +1,11 @@
-# Data Model: Universal Image-to-Terrain Reconstruction
+# Data Model: Direct Minimap-to-Terrain Reconstruction
 
 ## Design rules
 
-- Any decodable source raster is the deployment root. Every other inference input is generated and
-  names the checkpoint that produced it.
+- The authored minimap is the deployment root. Every other inference input is generated and names
+  the checkpoint that produced it.
 - Training truth is never silently substituted for a generated upstream signal.
-- Every crop, rendering, or style variant derived from one source shares one `source_group_id` and
-  split. Whole visual/source families can be held out as a unit.
+- Authored and synthetic views of the same terrain row share one `source_group_id` and split.
 - Missing evidence is `unavailable`, never a zero-filled tensor.
 - Each model-stage record describes exactly one output signal and one independently replaceable
   checkpoint.
@@ -33,25 +32,6 @@ One leak-safe terrain row before it is expanded into authored/synthetic curricul
 Validation rejects duplicate source identities, cross-split `source_group_id` reuse, synthetic RGB
 without `NoonWhiteGlobal` provenance, and declared signals whose coverage action is not real.
 
-## UniversalImageSource
-
-One source raster or paired relief example outside the build-specific v50 terrain family.
-
-| Field | Type | Rules |
-|---|---|---|
-| `source_id` | string | Stable content-derived identity for the original source |
-| `source_group_id` | string | Shared by every crop/render/style/teacher label derived from the source |
-| `visual_family` | string | Versioned family such as `wow_authored:Kalimdor`; optional later sources may add procedural or other project-owned families |
-| `split` | enum | `train`, `validation`, `test`, or `compatibility`; whole-family holdout policy is recorded |
-| `raster` | signal reference | Decodable RGB/RGBA/grayscale image with original size/mode metadata |
-| `relief_truth` | signal reference or null | Exact paired view-axis relief when available |
-| `teacher_relief` | generated signal reference or null | Pinned teacher/revision/hash/orientation; never silently treated as exact truth |
-| `license_or_byod` | object | Distribution/use authority; absent authority is rejected |
-| `transform_lineage` | object | Parent source, crop, resize/pad/tile, spatial transform, and style transform |
-
-At least one of exact `relief_truth` or explicitly labeled `teacher_relief` is required for a
-training row. Unpaired sources are compatibility/review evidence only.
-
 ## ObjectVisibilityEvidence
 
 Trusted top-down object coverage aligned to the authored minimap.
@@ -70,36 +50,23 @@ Trusted top-down object coverage aligned to the authored minimap.
 An empty mask is valid only when the renderer successfully processed the tile and proved zero
 visible object coverage. Failure to render is `unavailable`, not `empty`.
 
-## UniversalReliefCurriculumRow
+## GeometryCurriculumRow
 
-One image view with one direct normalized view-axis-relief target.
+One image view with one direct relative-height target.
 
 | Field | Type | Rules |
 |---|---|---|
 | `row_id` | string | Stable identity for this view |
-| `source_group_id` | string | Same for every derived view of one underlying source/terrain |
-| `visual_family` | string | Drives whole-domain holdout reporting; never a model input |
+| `source_group_id` | string | Same for authored and synthetic views of one terrain tile |
 | `split` | enum | Copied from `ReconstructionSourceRow` |
-| `input_origin` | enum | Exact v50, procedural paired, exact external pair, teacher-labeled, or review-only |
-| `raster` | signal reference | Preprocessed image plus original dimensions/mode and coverage transform |
+| `input_origin` | enum | `authored` or `synthetic_noon_white` |
+| `rgb` | signal reference | 256 input used by the model |
 | `generated_object_mask` | generated signal reference or null | Names checkpoint and inference run when used |
-| `relative_relief` | signal reference | Exact or explicitly teacher-labeled normalized view-axis displacement |
-| `target_authority` | enum | `exact_numeric` or `teacher_pseudo`; controls loss/reporting separation |
-| `target_decode` | object | Relief orientation, normalization, invalid-value policy, extent, and scale metadata |
+| `relative_height_257` | signal reference | Exact numeric target |
+| `target_decode` | object | Relative-height scale/offset and invalid-value policy |
 
-The base geometry model consumes the raster only. Teacher identity, visual family, transform
-lineage, and all exact numeric guidance are training/evaluation metadata, never inference channels.
-Mask-guided WoW geometry is a later, separately recorded ablation.
-
-## TerrainMeshArtifact
-
-Deterministic conversion of one predicted relief field into a terrain artifact.
-
-- Original raster identity and coverage transform.
-- Finite normalized relief grid plus output extent, vertical scale, and offset.
-- Deterministic grid vertices/triangles, normals, boundary policy, and stitch metadata.
-- UV coordinates that cover the complete source image after documented padding/cropping/tiling.
-- Model/checkpoint/inference identity and truthful `top_down_height` or `view_axis_relief` semantics.
+The base geometry comparison uses RGB only. Mask-guided geometry is a later, separately recorded
+ablation and must consume generated masks for training and evaluation.
 
 ## TerrainFeatureLibrary
 

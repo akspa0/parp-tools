@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://wow-viewer.local/specs/114/model-stage-and-curriculum.schema.json",
-  "title": "Spec 114 universal image-to-terrain contracts",
+  "title": "Spec 114 reconstruction contracts",
   "oneOf": [
     { "$ref": "#/$defs/curriculum_summary" },
     { "$ref": "#/$defs/object_visibility_summary" },
@@ -19,64 +19,41 @@
     },
     "split_counts": {
       "type": "object",
-      "required": ["train", "validation", "test", "compatibility"],
+      "required": ["train", "validation", "test"],
       "properties": {
         "train": { "type": "integer", "minimum": 0 },
         "validation": { "type": "integer", "minimum": 0 },
-        "test": { "type": "integer", "minimum": 0 },
-        "compatibility": { "type": "integer", "minimum": 0 }
+        "test": { "type": "integer", "minimum": 0 }
       },
       "additionalProperties": false
     },
     "curriculum_summary": {
       "type": "object",
       "required": [
-        "schema", "curriculum_id", "created_utc", "source_inputs", "row_count",
-        "source_group_count", "split_counts", "input_origins", "visual_families",
-        "held_out_families", "target_signal", "target_authorities",
-        "synthetic_lighting_contract", "group_leak_count", "family_leak_count",
-        "excluded_counts"
+        "schema", "curriculum_id", "created_utc", "source_stores", "row_count",
+        "source_group_count", "split_counts", "input_origins", "target_signal",
+        "synthetic_lighting_contract", "group_leak_count", "excluded_counts"
       ],
       "properties": {
-        "schema": { "const": "v50-universal-relief-curriculum-v1" },
+        "schema": { "const": "v50-reconstruction-curriculum-v1" },
         "curriculum_id": { "type": "string", "minLength": 1 },
         "created_utc": { "type": "string", "format": "date-time" },
-        "source_inputs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/identity" } },
+        "source_stores": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/identity" } },
         "row_count": { "type": "integer", "minimum": 1 },
         "source_group_count": { "type": "integer", "minimum": 1 },
         "split_counts": { "$ref": "#/$defs/split_counts" },
         "input_origins": {
           "type": "object",
-          "minProperties": 1,
-          "additionalProperties": { "type": "integer", "minimum": 0 }
-        },
-        "visual_families": {
-          "type": "object",
-          "minProperties": 2,
-          "additionalProperties": { "type": "integer", "minimum": 1 }
-        },
-        "held_out_families": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
-        },
-        "target_signal": { "const": "relative_relief" },
-        "target_authorities": {
-          "type": "object",
-          "required": ["exact_numeric", "teacher_pseudo"],
+          "required": ["authored", "synthetic_noon_white"],
           "properties": {
-            "exact_numeric": { "type": "integer", "minimum": 1 },
-            "teacher_pseudo": { "type": "integer", "minimum": 0 }
+            "authored": { "type": "integer", "minimum": 0 },
+            "synthetic_noon_white": { "type": "integer", "minimum": 0 }
           },
           "additionalProperties": false
         },
-        "synthetic_lighting_contract": {
-          "enum": ["NoonWhiteGlobal", "not_applicable_no_synthetic"]
-        },
+        "target_signal": { "const": "relative_height_257" },
+        "synthetic_lighting_contract": { "const": "NoonWhiteGlobal" },
         "group_leak_count": { "const": 0 },
-        "family_leak_count": { "const": 0 },
-        "teacher_models": { "type": "array", "items": { "$ref": "#/$defs/identity" } },
         "generated_input_models": { "type": "array", "items": { "$ref": "#/$defs/identity" } },
         "excluded_counts": {
           "type": "object",
@@ -126,7 +103,7 @@
         "run_id": { "type": "string", "minLength": 1 },
         "created_utc": { "type": "string", "format": "date-time" },
         "stage": {
-          "enum": ["universal_relief", "object_visibility", "terrain_features", "texture_families", "alpha_stack"]
+          "enum": ["direct_geometry", "object_visibility", "terrain_features", "texture_families", "alpha_stack"]
         },
         "output_signal": { "type": "string", "minLength": 1 },
         "architecture": {
@@ -144,13 +121,13 @@
             { "type": "null" },
             {
               "type": "object",
-              "required": ["hub_id", "revision", "sha256", "license", "role"],
+              "required": ["hub_id", "revision", "sha256", "license", "optional"],
               "properties": {
                 "hub_id": { "type": "string", "minLength": 1 },
                 "revision": { "type": "string", "minLength": 1 },
                 "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
                 "license": { "type": "string", "minLength": 1 },
-                "role": { "enum": ["student_initialization", "teacher"] }
+                "optional": { "const": true }
               },
               "additionalProperties": false
             }

@@ -1,4 +1,4 @@
-# Specification Quality Checklist: Universal Image-to-Terrain Reconstruction
+# Specification Quality Checklist: Direct Minimap-to-Terrain Reconstruction
 
 **Purpose**: Validate specification completeness and quality before planning
 
@@ -27,7 +27,7 @@
 ## Feature Readiness
 
 - [x] All functional requirements have clear acceptance criteria
-- [x] User scenarios cover universal geometry, optional minimap object cleanup, semantics, and texturing
+- [x] User scenarios cover geometry, object cleanup, semantics, and texturing
 - [x] Feature meets measurable outcomes defined in Success Criteria
 - [x] No implementation details leak into the specification
 
@@ -35,8 +35,6 @@
 
 - Architecture names, Hugging Face candidates, and dependency choices are intentionally confined to
   `research.md` and `plan.md`.
-- The 2026-07-19 correction makes arbitrary raster input the deployment contract. WoW minimaps are
-  one supervised curriculum family, not an inference-domain restriction.
 - The spec resolves the apparent "one-pass"/modularity tension: geometry is direct image-to-one-
-  relief signal inference with no WDL prior; other outputs remain independent models.
+  signal inference with no WDL prior; other outputs remain independent models.
 - Trusted object-mask availability is a foundational gate, not assumed solved by RGB differencing.
