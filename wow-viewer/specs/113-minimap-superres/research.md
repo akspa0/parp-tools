@@ -50,7 +50,35 @@ on this and the codebase has burned us on orientation before); learnable/optical
 (rejected — an SR pair must be a fixed geometric correspondence, not a per-tile warp, or the model
 learns to undo a warp instead of to add detail).
 
-## Decision 3 — Real-ESRGAN: compact RRDBNet generator, PSNR-first then optional GAN, dependency only if it stays clean
+## Decision 3a (supersedes 3's arch choice) — ComfyUI-native architecture: RealPLKSR primary, DAT-2 quality ceiling, RRDBNet compatibility floor
+
+**New user constraint (2026-07-18)**: the trained upscaler must load in ComfyUI out of the box.
+ComfyUI's `Load Upscale Model` node uses **spandrel**, which auto-detects and loads 30+ supervised
+SR architectures from a standard checkpoint — including ESRGAN/RRDBNet, SwinIR, HAT, DAT, ATD,
+SPAN, PLKSR/RealPLKSR, DRCT, MoSR. So ComfyUI support is not a framework question, it's an
+architecture question: train any spandrel-recognized arch and save its standard state dict, and it
+drops into ComfyUI natively with zero custom nodes.
+
+**Decision**: primary architecture becomes **RealPLKSR** — community training consensus (neosr
+ecosystem) is that it approaches DAT-2 quality (the heavyweight transformer) at roughly 10× the
+speed with far lower VRAM, which fits both our 16 GB local training budget and fast ComfyUI
+inference. **DAT-2** is the quality-ceiling option if RealPLKSR's fidelity proves insufficient on
+the SC-004/SC-005 gates; **RRDBNet ×4** remains the compatibility floor (largest pretrained zoo, in
+case pretrained-init proves valuable). All three are spandrel/ComfyUI-native. The vendoring
+approach, PSNR-first-then-optional-GAN staging, real-pair training (Decision 4), and evaluation
+contract are unchanged — only the generator arch swaps. The trainer saves checkpoints as standard
+spandrel-recognizable state dicts so the deliverable is directly a ComfyUI upscale model.
+
+**Generative upscalers considered and rejected for training** (user asked about SeedVR2 and NVIDIA
+RTX VSR): both are prior-driven/generative — they hallucinate plausible detail from natural-image/
+video priors, which is the opposite bias from this spec's premise (recovering the REAL lost detail
+we can render from source assets; SC-005 explicitly fails fabricated structure). RTX VSR is
+additionally a closed driver-level model with no training surface at all — kept as an optional
+inference *baseline* in the SC-004 comparison, nothing more. SeedVR2 is a heavy video
+diffusion-transformer; LoRA on it is technically conceivable but wrong-biased, wrong-modality
+(video), and VRAM-hostile for a 16 GB card.
+
+## Decision 3 (arch choice superseded by 3a) — Real-ESRGAN: compact RRDBNet generator, PSNR-first then optional GAN, dependency only if it stays clean
 
 **Finding**: No SR/ESRGAN code exists in the repo; `torch>=2.5` (CUDA 13.0 wheels) is already a
 dependency; `basicsr`/`realesrgan`/`lpips` are not. The official Real-ESRGAN (RRDBNet generator +
