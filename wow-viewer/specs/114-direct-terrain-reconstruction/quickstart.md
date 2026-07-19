@@ -1,11 +1,18 @@
 # Quickstart: Direct Minimap-to-Terrain Reconstruction
 
-## Status — authored-only baseline is runnable tonight
+## Status — authored-only baseline completed and failed promotion
 
 The proven Spec 112 CNN is now pinned as Spec 114 architecture `direct_cnn_v112`. Its trainer can
 select only authored rows, prints a validated no-training plan unless `--confirm-run` is present,
 and refuses synthetic rows until the curriculum records corrected `NoonWhiteGlobal` provenance.
 This is direct RGB→relative-height training with no WDL prior.
+
+The user-run 100-epoch result is frozen as evidence: best epoch 92 reached validation MAE 0.149267
+against the 0.138747 per-tile constant baseline, a 7.59% regression. The checkpoint is retained as
+a diagnostic baseline, not a promoted model. It also exposed a trainer handoff defect: there were no
+prediction sheets, per-row metrics, gradient/border metrics, or reviewable error cases, and the
+trainer omitted the repo's proven bounded optimization stack. Do not rerun the same command;
+T017a/T017b repair observability and optimization first.
 
 Real dry-run proof on the frozen curriculum:
 
@@ -29,7 +36,7 @@ Before Spec 114 can use synthetic rows or run the final dual-view bakeoff:
 The authored-only run below does not wait on this gate because neither authored RGB nor numeric
 height truth changed.
 
-## Tonight — dry run, then user-owned CUDA training
+## Completed bootstrap command — do not rerun unchanged
 
 From `wow-viewer/data-harvester`, first run the exact validated preview. It performs contract/index
 checks and does not create the output directory or allocate CUDA training state:
@@ -66,8 +73,28 @@ staleness every epoch. When it finishes, inspect/share the promotion summary wit
 Get-Content -Raw ../output/v50/v50.1/direct_geometry/direct_cnn_v112-authored-v1/training_summary.json
 ```
 
-Expected artifacts are `training_plan.json`, `run_identity.json`, `checkpoint_best.pt`,
-`checkpoint_last.pt`, and `training_summary.json`. Do not rename or reuse the run directory.
+Actual artifacts are `training_plan.json`, `run_identity.json`, `checkpoint_best.pt`,
+`checkpoint_last.pt`, and `training_summary.json`. Do not rename, reuse, or overwrite the run
+directory. The T017a evaluator writes backfilled evidence to a separate output directory.
+
+## Backfill the missing validation evidence from the failed checkpoint
+
+This is a bounded user-run evaluation over the 245 held-out rows. It performs no training and does
+not modify the original run directory. From `wow-viewer/data-harvester`:
+
+```powershell
+uv run python scripts/v50_evaluate_height_relative.py `
+  --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
+  --checkpoint ../output/v50/v50.1/direct_geometry/direct_cnn_v112-authored-v1/checkpoint_best.pt `
+  --source authored `
+  --output ../output/v50/v50.1/direct_geometry/direct_cnn_v112-authored-v1-validation-v1 `
+  --batch 16 --workers 0 --device cuda
+```
+
+It writes `summary.json`, `per_row_metrics.json`, `error_quantiles.png`, `worst_cases.png`, and
+`evaluation_identity.json`. Every height panel uses the same fixed `[0,1]` scale. The sheets include
+the real RGB input, truth, prediction, per-tile constant baseline, signed error, and absolute error;
+they must be reviewed before selecting the optimized retry.
 
 Lightweight proof completed before handoff:
 

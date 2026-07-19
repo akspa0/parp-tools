@@ -61,7 +61,14 @@ baselines by SC-001, border error passes SC-002, and the user accepts the held-o
 - [ ] T014 [US1] Add the compact `mit_b0_regression` architecture with one continuous relative-height output in `data-harvester/src/harvester/v50/direct_geometry_model.py`
 - [ ] T015 [US1] Implement same-split training/evaluation, flat/tile-mean baselines, border metrics, and held-out visual sheets in `data-harvester/src/harvester/v50/direct_geometry_train.py`
 - [x] T016 [US1] Add explicit `--source`, stale-synthetic refusal, no-training dry run, and `--confirm-run` to `data-harvester/scripts/v50_train_height_relative.py` through its library owner
-- [ ] T017 [US1] USER RUN: train tonight's authored-only `direct_cnn_v112` baseline with the exact proven command in `specs/114-direct-terrain-reconstruction/quickstart.md`; corrected dual-view and `mit_b0_regression` runs follow after T014/T015 and the Spec 113 rerender gate
+- [x] T017 [US1] USER RUN: train tonight's authored-only `direct_cnn_v112` baseline with the exact proven command in `specs/114-direct-terrain-reconstruction/quickstart.md`; the 100-epoch run completed with best epoch 92, validation MAE 0.149267 versus tile-mean 0.138747, so it failed promotion honestly.
+- [x] T017a [US1] Add deterministic per-best prediction sheets plus final all-validation per-row MAE,
+  gradient MAE, border MAE, baseline comparison, error-quantile sheet, and worst-case sheet. Add a
+  separate evaluator that can backfill those artifacts from the completed immutable checkpoint.
+- [ ] T017b [US1] Port the previously proven bounded trainer stack in one separately validated
+  change: AMP, EMA deploy weights, warmup/cosine decay, gradient clipping, multiscale height loss,
+  training-only normal guidance through valid non-liquid terrain, detached hard-error weighting,
+  peak-VRAM/history evidence, and identity-only geometric augmentation for baked-light RGB.
 - [ ] T018 [US1] Validate the authored baseline summary first, then compare the later corrected dual-view/CNN/MiT runs against SC-001/SC-002 and record the user's visual verdict in `specs/114-direct-terrain-reconstruction/research.md`
 
 **Checkpoint**: Stop. Geometry MVP must be validated before any trusted-object work begins.

@@ -19,6 +19,12 @@ the 1,629 valid authored rows already in the frozen curriculum. This authored-on
 independent of stale synthetic lighting and establishes tonight's deployment-domain baseline. The
 corrected authored+synthetic comparison and MiT-B0 candidate remain the next geometry slice.
 
+The first authored-only run completed on 2026-07-19 and did not promote: best epoch 92 reached
+0.149267 validation MAE against the 0.138747 per-tile constant baseline. Before any second training
+run, Phase 1 must gain reviewable prediction artifacts and port the repo's already-proven bounded
+optimization stack. This is a repair of the baseline experiment, not permission to add another
+model stage or make training-only truth a deployment input.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11+ through the existing uv environment; no new C# format reader
@@ -129,10 +135,15 @@ full geometry promotion.
    authored+synthetic views.
 3. Add one MiT-B0/SegFormer-style continuous regression candidate with the identical output/target
    only after the authored baseline is reviewed.
-4. Prove shape, offset invariance, group leakage refusal, no-WDL input audit, and generated-signal
+4. Emit fixed-sample best-epoch previews and final all-validation per-row metrics plus error sheets;
+   a checkpoint without those artifacts is not reviewable.
+5. Use `normal_xyz`, `normal_mask`/`mcnr_mask_257`, and `liquid_mask` only in training-time
+   guidance/masking. Deployment remains RGB-only with one height output. Baked-light RGB receives
+   identity-only geometric augmentation by default.
+6. Prove shape, offset invariance, group leakage refusal, no-WDL input audit, and generated-signal
    provenance using CPU fixtures.
-5. Hand the user one bounded command per comparison, always on the frozen source-group split.
-6. Promote only if SC-001/SC-002 and user visual review pass.
+7. Hand the user one bounded command per comparison, always on the frozen source-group split.
+8. Promote only if SC-001/SC-002 and user visual review pass.
 
 ### Phase 2 — Trusted objects and mask-guided geometry
 

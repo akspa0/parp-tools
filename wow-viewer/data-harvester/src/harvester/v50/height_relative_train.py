@@ -23,6 +23,11 @@ from pathlib import Path
 import numpy as np
 
 from harvester.v50.contracts import release_identity, require_store_release, validate_release
+from harvester.v50.height_relative_evaluate import (
+    evaluate_height_model,
+    render_fixed_model_preview,
+    select_fixed_preview_rows,
+)
 from harvester.v50.height_relative_model import (
     TARGET_CONTRACT_VERSION,
     HeightRelativeNet,
@@ -371,6 +376,7 @@ def main() -> int:
         generator=train_generator,
     )
     val_loader = DataLoader(RowDataset(val_rows), batch_size=args.batch, num_workers=args.workers, pin_memory=True)
+    fixed_preview_rows = select_fixed_preview_rows(val_rows, 8)
 
     args.output.mkdir(parents=True, exist_ok=True)
     identity = curriculum_identity(args.store)
@@ -426,6 +432,17 @@ def main() -> int:
             best = val_mae
             stale = 0
             torch.save(checkpoint, args.output / "checkpoint_best.pt")
+            render_fixed_model_preview(
+                model,
+                group,
+                index,
+                fixed_preview_rows,
+                device,
+                args.output / "validation" / "best_previews" / f"epoch_{epoch:04d}.png",
+                epoch=epoch,
+                val_mae=val_mae,
+                use_amp=False,
+            )
         else:
             stale += 1
         print(
@@ -443,6 +460,22 @@ def main() -> int:
         per_epoch=per_epoch, baseline_mae=baseline_mae,
         train_rows=len(train_rows), val_rows=len(val_rows), source_counts=source_counts,
         source_filter=args.source,
+    )
+    best_checkpoint = torch.load(
+        args.output / "checkpoint_best.pt", map_location=device, weights_only=False
+    )
+    model.load_state_dict(best_checkpoint["model"])
+    summary["validation"] = evaluate_height_model(
+        model,
+        group,
+        index,
+        val_rows,
+        device,
+        args.output / "validation" / "final_best",
+        batch_size=args.batch,
+        workers=args.workers,
+        checkpoint_epoch=int(best_checkpoint["epoch"]),
+        use_amp=False,
     )
     (args.output / "training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     if summary["structural_failure_epoch1_best"]:

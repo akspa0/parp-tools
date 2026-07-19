@@ -199,3 +199,26 @@ Implementation order:
 
 No later model is implemented merely because its architecture is known. Each phase ends with its own
 real-data and user visual gate.
+
+## Decision 9 — failed authored CNN run requires observability and recipe repair
+
+**Evidence**: the user-owned `direct_cnn_v112-authored-v1` run completed all 100 epochs. Best epoch
+92 reached validation MAE 0.1492665126; the in-run per-tile constant baseline was 0.1387469612.
+The checkpoint is therefore 7.59% worse and fails SC-001. It learned nontrivial structure, but the
+run wrote no prediction sheet, per-row errors, gradient/border metrics, or worst-case review.
+
+**Audit finding**: the bootstrap used AdamW at a constant learning rate and Smooth-L1 plus one
+gradient term. It omitted the AMP, EMA, warmup/cosine, gradient clipping, multiscale loss,
+normal-guidance, hard-error, validation-preview, and VRAM/history patterns already proven by the
+repo's terrain trainers. Repeating it unchanged would not answer why it lost.
+
+**Decision**:
+
+1. Backfill the immutable checkpoint through a separate evaluator and require future runs to emit
+   fixed-sample best-epoch previews plus final all-validation metrics and sheets.
+2. Keep `minimap_rgb` as the only deployment input and one relative-height output.
+3. Use clean numeric signals only as training-time supervision/masking: `normal_xyz` with
+   `normal_mask`/`mcnr_mask_257`, `liquid_mask`, and height-derived multiscale/gradient structure.
+4. Do not use D4 transforms on baked-light RGB. Identity-only geometry is the default; any later
+   photometric augmentation is an explicit ablation.
+5. Port the proven bounded optimization stack before comparing the same CNN with MiT-B0.

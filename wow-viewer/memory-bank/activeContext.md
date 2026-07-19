@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-19
 
-## Active work: Spec 114 authored direct-height run is ready for the user tonight
+## Active work: Spec 114 authored direct-height baseline failed; remediation is active
 
 - **Viewer-only Spec 110 lighting repair is implemented; real 3.x visual proof remains.** The
   interactive renderer now establishes an always-present global directional/ambient light at noon
@@ -12,10 +12,12 @@ Last updated: 2026-07-19
   synthetic minimaps. Focused composition/DBC tests pass 15/15; viewer Debug build has 0 errors.
 
 - **Tonight's runnable Spec 114 slice is `direct_cnn_v112` on authored rows only.** The existing
-  1,561,537-parameter U-Net-lite now has explicit `--source`, read-only dry-run, `--confirm-run`,
-  deterministic seed, immutable-output, and stale-synthetic gates. Real dry-run: 1,629 authored
-  rows (1,384 train / 245 val; Kalimdor 951 / Azeroth 678), batch 16, 87 steps/epoch, RGB-only input,
-  `v112.1` relative-height target, no WDL. Exact user command/output is in Spec 114 quickstart T017.
+  1,561,537-parameter U-Net-lite completed 100 epochs but failed promotion: best epoch 92,
+  validation MAE 0.149267 versus tile-mean 0.138747 (7.59% worse). The checkpoint is diagnostic,
+  not promoted. T017a now adds a separate all-validation evaluator plus per-best future previews;
+  the exact user-run backfill command writes fixed-scale quantile/worst-case sheets and per-row
+  MAE/gradient/border evidence without mutating the original run. T017b must port the proven
+  optimization/guidance stack before any retry.
 - Synthetic/all-source training remains blocked until Spec 113 T010b rerender + fresh RGB hashes
   produce curriculum-level `synthetic_lighting_contract=NoonWhiteGlobal`. Then compare the same CNN
   on dual views and only afterward add the compact MiT-B0 candidate. Object masks, terrain features,

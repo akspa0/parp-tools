@@ -11,8 +11,15 @@ Last updated: 2026-07-19
 - Synthetic minimap lighting is untouched. Focused composer/DBC tests: 15 passed. Active viewer
   Debug build: 0 errors. T019 still owns the user-run 3.x visual confirmation.
 
-## Spec 114 — authored direct-height bootstrap ready for user training
+## Spec 114 — authored direct-height bootstrap failed; validation and recipe repair active
 
+- The authored run completed all 100 epochs and failed its numeric promotion gate: best epoch 92,
+  validation MAE 0.149267, tile-mean baseline 0.138747, `beats_baseline=false`. It remains immutable
+  diagnostic evidence; do not rerun the same recipe.
+- Added the missing observability contract: future best checkpoints emit fixed-row sheets and final
+  best weights emit all-validation per-row MAE/gradient/border/baseline metrics plus fixed-scale
+  error-quantile and worst-case sheets. A separate CLI backfills the completed checkpoint to a new
+  directory. Focused validation/model/trainer tests pass 18/18; py_compile and CLI help pass.
 - Fleshed the Phase 1 model contract and made tonight's authored-only run executable through the
   proven Spec 112 trainer: `direct_cnn_v112`, 1,561,537 parameters, RGB 256→relative height 257,
   Smooth-L1 + 0.25 gradient L1, AdamW 2e-4/1e-4, batch 16, seed 114, max 100, patience 15.
