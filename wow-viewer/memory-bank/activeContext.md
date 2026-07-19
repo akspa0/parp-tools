@@ -2,7 +2,16 @@
 
 Last updated: 2026-07-19
 
-## Active work: Specs 112/113 — minimap/viewer lighting boundary corrected; user visual proof next
+## Active work: Specs 112/113/114 — corrected visual proof, then direct reconstruction
+
+- **Spec 114 is now planned, not implemented.** Corrected authored/synthetic same-tile views feed a
+  direct RGB→`relative_height_257` MVP with no WDL prior. The proven Spec 112 lean CNN remains the
+  baseline; the only first architecture comparison is a compact MiT-B0/SegFormer-style continuous
+  regressor. Trusted object visibility, terrain-feature classes, texture-family selection, and
+  alpha-stack reconstruction are subsequent independent one-output models with generated-signal
+  lineage; Spec 113 retains all SR/detail ownership. No mask label may come from raw RGB difference.
+  The immediate proof owner is still the user's corrected fixed-noon-white Spec 113 T010b rerender,
+  followed by fresh synthetic RGB hashes; Spec 114 implementation starts only after that gate.
 
 - **Spec 112**: real corpus correction and dual-source curriculum are proven. Kalimdor/Azeroth
   coverage reports pass parity; `curriculum-0_5_3_3368-dual_v1.zarr` has 2,990 rows (1,629 authored

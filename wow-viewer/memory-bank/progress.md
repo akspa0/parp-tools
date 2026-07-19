@@ -2,6 +2,21 @@
 
 Last updated: 2026-07-19
 
+## Spec 114 — direct minimap-to-terrain architecture planned
+
+- Created the complete Spec Kit design pack under `specs/114-direct-terrain-reconstruction/`:
+  feature requirements, Hugging Face/primary architecture research, implementation plan, data
+  model, JSON contracts, gated quickstart, checklist, and 55 dependency-ordered tasks.
+- Removed WDL from the planned deployment path. Phase 1 predicts one relative-height field directly
+  from authored/corrected-synthetic RGB; the existing Spec 112 CNN is the mandatory baseline and a
+  compact MiT-B0 continuous decoder is the sole first candidate. No Spec 114 trainer exists yet.
+- Kept object cleanup, terrain features, texture families, and alpha blends as separate stages with
+  their own targets/checkpoints/gates. Trusted object labels must be renderer-derived; image
+  difference is explicitly rejected. Downstream stages must see generated upstream outputs.
+- Phase order is fail-closed: corrected Spec 113 T010b/store hashes → shared curriculum contracts →
+  direct geometry → trusted objects → feature library → texture families → alpha. The user owns all
+  heavy builds/training. Spec 113 still owns RealPLKSR/detail.
+
 ## Specs 112/113 — implementation continuation
 
 - Corrected the shared terrain lighting seam: CPU minimap composition now transforms raw ADT MCNR

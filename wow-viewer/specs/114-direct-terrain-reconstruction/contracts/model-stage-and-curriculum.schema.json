@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wow-viewer.local/specs/114/model-stage-and-curriculum.schema.json",
+  "title": "Spec 114 reconstruction contracts",
+  "oneOf": [
+    { "$ref": "#/$defs/curriculum_summary" },
+    { "$ref": "#/$defs/object_visibility_summary" },
+    { "$ref": "#/$defs/model_stage_run" }
+  ],
+  "$defs": {
+    "identity": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "split_counts": {
+      "type": "object",
+      "required": ["train", "validation", "test"],
+      "properties": {
+        "train": { "type": "integer", "minimum": 0 },
+        "validation": { "type": "integer", "minimum": 0 },
+        "test": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "curriculum_summary": {
+      "type": "object",
+      "required": [
+        "schema", "curriculum_id", "created_utc", "source_stores", "row_count",
+        "source_group_count", "split_counts", "input_origins", "target_signal",
+        "synthetic_lighting_contract", "group_leak_count", "excluded_counts"
+      ],
+      "properties": {
+        "schema": { "const": "v50-reconstruction-curriculum-v1" },
+        "curriculum_id": { "type": "string", "minLength": 1 },
+        "created_utc": { "type": "string", "format": "date-time" },
+        "source_stores": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/identity" } },
+        "row_count": { "type": "integer", "minimum": 1 },
+        "source_group_count": { "type": "integer", "minimum": 1 },
+        "split_counts": { "$ref": "#/$defs/split_counts" },
+        "input_origins": {
+          "type": "object",
+          "required": ["authored", "synthetic_noon_white"],
+          "properties": {
+            "authored": { "type": "integer", "minimum": 0 },
+            "synthetic_noon_white": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "target_signal": { "const": "relative_height_257" },
+        "synthetic_lighting_contract": { "const": "NoonWhiteGlobal" },
+        "group_leak_count": { "const": 0 },
+        "generated_input_models": { "type": "array", "items": { "$ref": "#/$defs/identity" } },
+        "excluded_counts": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "object_visibility_summary": {
+      "type": "object",
+      "required": [
+        "schema", "evidence_id", "created_utc", "renderer_revision",
+        "placement_sources", "populated_rows", "empty_rows", "unavailable_rows",
+        "alignment_fixture_count"
+      ],
+      "properties": {
+        "schema": { "const": "v50-object-visibility-v1" },
+        "evidence_id": { "type": "string", "minLength": 1 },
+        "created_utc": { "type": "string", "format": "date-time" },
+        "renderer_revision": { "type": "string", "minLength": 1 },
+        "placement_sources": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/identity" } },
+        "populated_rows": { "type": "integer", "minimum": 0 },
+        "empty_rows": { "type": "integer", "minimum": 0 },
+        "unavailable_rows": { "type": "integer", "minimum": 0 },
+        "alignment_fixture_count": { "type": "integer", "minimum": 1 },
+        "mask_shape": {
+          "type": "array",
+          "prefixItems": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "integer", "minimum": 1 }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "additionalProperties": false
+    },
+    "model_stage_run": {
+      "type": "object",
+      "required": [
+        "schema", "run_id", "created_utc", "stage", "output_signal", "architecture",
+        "curriculum", "upstream_models", "checkpoint", "baselines", "metrics",
+        "visual_evidence", "promotion_verdict"
+      ],
+      "properties": {
+        "schema": { "const": "v50-model-stage-run-v1" },
+        "run_id": { "type": "string", "minLength": 1 },
+        "created_utc": { "type": "string", "format": "date-time" },
+        "stage": {
+          "enum": ["direct_geometry", "object_visibility", "terrain_features", "texture_families", "alpha_stack"]
+        },
+        "output_signal": { "type": "string", "minLength": 1 },
+        "architecture": {
+          "type": "object",
+          "required": ["id", "config_sha256", "parameter_count"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "config_sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+            "parameter_count": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "pretrained_source": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["hub_id", "revision", "sha256", "license", "optional"],
+              "properties": {
+                "hub_id": { "type": "string", "minLength": 1 },
+                "revision": { "type": "string", "minLength": 1 },
+                "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+                "license": { "type": "string", "minLength": 1 },
+                "optional": { "const": true }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "curriculum": { "$ref": "#/$defs/identity" },
+        "upstream_models": { "type": "array", "items": { "$ref": "#/$defs/identity" } },
+        "checkpoint": {
+          "type": "object",
+          "required": ["path", "sha256", "best_epoch"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+            "best_epoch": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "baselines": { "type": "object" },
+        "metrics": { "type": "object" },
+        "visual_evidence": { "type": "object" },
+        "promotion_verdict": { "enum": ["pending", "promoted", "rejected"] }
+      },
+      "additionalProperties": false
+    }
+  }
+}

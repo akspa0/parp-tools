@@ -562,7 +562,25 @@ builder and RealPLKSR model wrapper exist; the trainer intentionally does not ye
 comparison, datastore visual-review, pair-set, and future user-run training commands live in
 `specs/113-minimap-superres/quickstart.md`.
 
-### 8.6 Everything else (verify, curriculum, cleanup audit)
+### 8.6 Direct terrain reconstruction (Spec 114, planning only)
+
+Spec 114 turns the corrected corpus into a modular authored-minimap reconstruction stack. The first
+MVP predicts one `relative_height_257` field directly from RGB with no WDL prior. It retains the
+Spec 112 lean CNN as the mandatory baseline and plans one compact MiT-B0/SegFormer-style continuous
+regression comparison on the identical grouped split.
+
+Later stages remain independent: trusted rendered object visibility, terrain-feature classes,
+ordered canonical texture families, then a compositor-compatible alpha stack. They do not share
+weights or add multi-task heads. Raw authored-minus-synthetic RGB is not valid object truth, and
+ground-truth upstream signals cannot be used as deployment inputs. Spec 113 continues to own visual
+detail/SR; high-resolution synthetic RGB does not replace numeric height or alpha truth.
+
+Implementation is intentionally gated on the fresh fixed-noon-white Spec 113 comparison and store
+hashes. The architecture research, data contracts, planned command shapes, and dependency-ordered
+tasks are in `specs/114-direct-terrain-reconstruction/`. No Spec 114 training command is runnable
+yet; the user will launch each heavy build/training run only after its implementation task passes.
+
+### 8.7 Everything else (verify, curriculum, cleanup audit)
 
 `v50_build_dataset.py` also has `migrate-v18` (bit-preserving copy of verified V18 signals) and
 `curriculum` (immutable row-selection manifests, no array payloads) subcommands, and
@@ -573,5 +591,6 @@ reference this section summarizes.
 
 ---
 
-*Last updated: 2026-07-19 — Spec 112 relative-height training is the active model lane; Spec 113
-detail-render/alignment is the gated SR lane. The absolute-WDL trainer is legacy/rejected.*
+*Last updated: 2026-07-19 — Spec 112 relative-height training is the runnable model lane; Spec 113
+owns the corrected-light/SR gate; Spec 114 plans the direct modular reconstruction stack. The
+absolute-WDL trainer is legacy/rejected.*
