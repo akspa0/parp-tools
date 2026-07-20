@@ -124,6 +124,7 @@ def test_direct_plan_records_recipe_and_sc001_references() -> None:
         lr=2e-4,
         lr_schedule="onecycle",
         amp=True,
+        amp_dtype="bf16",
         clip=1.0,
     )
     assert plan["schema"] == "v114-direct-geometry-plan-v2"
@@ -131,10 +132,17 @@ def test_direct_plan_records_recipe_and_sc001_references() -> None:
     assert plan["deployment_inputs"] == ["minimap_rgb"]
     assert plan["lr_schedule"] == "onecycle"
     assert plan["amp"] is True
+    assert plan["amp_dtype"] == "bf16"
     assert plan["sc001_references"]["spec112_frozen_best_val_mae"] == SPEC112_FROZEN_BEST_VAL_MAE
     with pytest.raises(TrainerContractError, match="lr schedule"):
         build_direct_plan(
             architecture_identity=plan["architecture"], pretrained_source=None, source="authored",
             index_rows=rows, selected_rows=[0], batch_size=16, epochs=100, seed=114,
-            lr=2e-4, lr_schedule="cosmic", amp=False, clip=0.0,
+            lr=2e-4, lr_schedule="cosmic", amp=False, amp_dtype="fp16", clip=0.0,
+        )
+    with pytest.raises(TrainerContractError, match="amp_dtype"):
+        build_direct_plan(
+            architecture_identity=plan["architecture"], pretrained_source=None, source="authored",
+            index_rows=rows, selected_rows=[0], batch_size=16, epochs=100, seed=114,
+            lr=2e-4, lr_schedule="constant", amp=False, amp_dtype="int8", clip=0.0,
         )

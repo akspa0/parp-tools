@@ -145,6 +145,7 @@ def build_detailer_plan(
     lr: float,
     lr_schedule: str,
     amp: bool,
+    amp_dtype: str,
     clip: float,
     spectral_weight: float,
     multiscale_weight: float,
@@ -174,6 +175,7 @@ def build_detailer_plan(
         "optimizer": {"name": "AdamW", "learning_rate": lr, "weight_decay": 1e-4},
         "lr_schedule": lr_schedule,
         "amp": amp,
+        "amp_dtype": amp_dtype,
         "grad_clip": clip,
         "guidance": {
             "spectral_weight": spectral_weight,
@@ -249,6 +251,9 @@ def main() -> int:
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--lr-schedule", default="constant", choices=sorted(LR_SCHEDULES))
     ap.add_argument("--amp", action="store_true")
+    ap.add_argument("--amp-dtype", default="fp16", choices=["fp16", "bf16"],
+                    help="AMP dtype: fp16 (default, needs GradScaler) or bf16 (native on Ampere+, "
+                         "no scaler needed, better numerical stability for FFT losses)")
     ap.add_argument("--clip", type=float, default=0.0)
     ap.add_argument("--spectral-weight", type=float, default=0.0)
     ap.add_argument("--multiscale-weight", type=float, default=0.0)
@@ -326,6 +331,7 @@ def main() -> int:
         lr=args.lr,
         lr_schedule=args.lr_schedule,
         amp=args.amp,
+        amp_dtype=args.amp_dtype,
         clip=args.clip,
         spectral_weight=args.spectral_weight,
         multiscale_weight=args.multiscale_weight,
@@ -397,7 +403,9 @@ def main() -> int:
         scheduler = torch.optim.lr_scheduler.OneCycleLR(
             opt, max_lr=args.lr, epochs=args.epochs, steps_per_epoch=len(train_loader)
         )
-    scaler = torch.amp.GradScaler("cuda", enabled=args.amp)
+    amp_dtype = torch.bfloat16 if args.amp_dtype == "bf16" else torch.float16
+    use_scaler = args.amp and args.amp_dtype == "fp16"
+    scaler = torch.amp.GradScaler("cuda", enabled=use_scaler)
     fixed_preview_positions = select_fixed_preview_rows(val_positions, 8)
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -429,7 +437,7 @@ def main() -> int:
         "schedule": {
             "max_epochs": args.epochs, "batch_size": args.batch, "patience": args.patience,
             "workers": args.workers, "seed": args.seed, "lr_schedule": args.lr_schedule,
-            "amp": args.amp, "grad_clip": args.clip,
+            "amp": args.amp, "amp_dtype": args.amp_dtype, "grad_clip": args.clip,
         },
     }
     (args.output / "training_plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
@@ -443,7 +451,7 @@ def main() -> int:
         train_losses = []
         for rgb, coarse, truth in train_loader:
             opt.zero_grad(set_to_none=True)
-            with torch.amp.autocast("cuda", enabled=args.amp):
+            with torch.amp.autocast("cuda", enabled=args.amp, dtype=amp_dtype):
                 rgb_d = rgb.to(device)
                 coarse_d = coarse.to(device)
                 truth_d = truth.to(device)
@@ -491,7 +499,7 @@ def main() -> int:
         model.eval()
         val_absolute_error = 0.0
         val_elements = 0
-        with torch.no_grad(), torch.amp.autocast("cuda", enabled=args.amp):
+        with torch.no_grad(), torch.amp.autocast("cuda", enabled=args.amp, dtype=amp_dtype):
             for rgb, coarse, truth in val_loader:
                 truth_d = truth.to(device)
                 final = compose_final(
@@ -542,7 +550,7 @@ def main() -> int:
             truth, _, _ = encode_relative_height(np.asarray(group["height_257"][source_row]))
             tensor = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(device)
             coarse_t = torch.from_numpy(coarse).unsqueeze(0).to(device)
-            with torch.amp.autocast("cuda", enabled=args.amp):
+            with torch.amp.autocast("cuda", enabled=args.amp, dtype=amp_dtype):
                 final = compose_final(coarse_t, model(tensor, coarse_t), clamp=True)[0]
             predicted = final.float().cpu().numpy()
             index_row = index[source_row]

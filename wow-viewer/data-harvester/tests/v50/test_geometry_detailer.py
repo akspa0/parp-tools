@@ -262,7 +262,7 @@ def test_detailer_plan_records_upstream_and_no_teacher_forcing() -> None:
         upstream={"path": "ckpt.pt", "sha256": "a" * 64},
         source="authored", selected_rows=100, train_rows=80, val_rows=20,
         batch_size=16, epochs=100, seed=114, lr=2e-4, lr_schedule="onecycle",
-        amp=True, clip=1.0, spectral_weight=0.1, multiscale_weight=0.25,
+        amp=True, amp_dtype="bf16", clip=1.0, spectral_weight=0.1, multiscale_weight=0.25,
         frequency_2d_weight=0.0, laplacian_weight=0.0, edge_weight=0.0,
         transition_focus_weight=0.0, band_lf_weight=0.0, band_hf_weight=0.0,
         band_cutoff=0.1,
@@ -273,6 +273,7 @@ def test_detailer_plan_records_upstream_and_no_teacher_forcing() -> None:
     assert plan["deployment_inputs"] == ["minimap_rgb", "generated_coarse_relief"]
     assert plan["guidance"]["frequency_2d_weight"] == 0.0
     assert plan["guidance"]["band_cutoff"] == 0.1
+    assert plan["amp_dtype"] == "bf16"
 
 
 def test_detailer_stage_run_validates_with_upstream_models() -> None:

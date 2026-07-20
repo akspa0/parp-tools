@@ -260,7 +260,7 @@ uv run python scripts/v50_train_geometry_detailer.py `
   --run-id detailer-mit_b0-authored-v2-bandsplit `
   --output ../output/v50/v50.1/direct_geometry/detailer-mit_b0-authored-v2-bandsplit `
   --epochs 100 --batch 16 --workers 0 --patience 15 --seed 114 `
-  --amp --lr-schedule onecycle --clip 1.0 `
+  --amp --amp-dtype bf16 --lr-schedule onecycle --clip 1.0 `
   --spectral-weight 0.1 --multiscale-weight 0.25 `
   --frequency-2d-weight 0.1 --laplacian-weight 0.1 --edge-weight 0.1 `
   --transition-focus-weight 0.1 --band-lf-weight 0.3 --band-hf-weight 0.2

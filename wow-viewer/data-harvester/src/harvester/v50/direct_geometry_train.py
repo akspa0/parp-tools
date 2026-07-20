@@ -166,6 +166,7 @@ def build_direct_plan(
     lr: float,
     lr_schedule: str,
     amp: bool,
+    amp_dtype: str,
     clip: float,
     spectral_weight: float = 0.0,
     multiscale_weight: float = 0.0,
@@ -177,6 +178,8 @@ def build_direct_plan(
         raise TrainerContractError(f"lr schedule must be one of {sorted(LR_SCHEDULES)}")
     if spectral_weight < 0 or multiscale_weight < 0:
         raise TrainerContractError("guidance weights must be >= 0")
+    if amp_dtype not in ("fp16", "bf16"):
+        raise TrainerContractError(f"amp_dtype must be 'fp16' or 'bf16', got {amp_dtype!r}")
     selected = [index_rows[i] for i in selected_rows]
     split_counts = {
         split: sum(str(row.get("split")) == split for row in selected) for split in ("train", "val")
@@ -201,6 +204,7 @@ def build_direct_plan(
         "optimizer": {"name": "AdamW", "learning_rate": lr, "weight_decay": 1e-4},
         "lr_schedule": lr_schedule,
         "amp": amp,
+        "amp_dtype": amp_dtype,
         "grad_clip": clip,
         "guidance": {
             "spectral_weight": spectral_weight,
@@ -238,6 +242,9 @@ def main() -> int:
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--lr-schedule", default="constant", choices=sorted(LR_SCHEDULES))
     ap.add_argument("--amp", action="store_true")
+    ap.add_argument("--amp-dtype", default="fp16", choices=["fp16", "bf16"],
+                    help="AMP dtype: fp16 (default, needs GradScaler) or bf16 (native on Ampere+, "
+                         "no scaler needed, better numerical stability for FFT losses)")
     ap.add_argument("--clip", type=float, default=0.0, help="grad-norm clip; 0 disables (bootstrap parity)")
     ap.add_argument("--spectral-weight", type=float, default=0.0,
                     help="fractal radial log-power guidance weight; 0 keeps bootstrap parity")
@@ -311,6 +318,7 @@ def main() -> int:
         lr=args.lr,
         lr_schedule=args.lr_schedule,
         amp=args.amp,
+        amp_dtype=args.amp_dtype,
         clip=args.clip,
         spectral_weight=args.spectral_weight,
         multiscale_weight=args.multiscale_weight,
@@ -366,7 +374,9 @@ def main() -> int:
         scheduler = torch.optim.lr_scheduler.OneCycleLR(
             opt, max_lr=args.lr, epochs=args.epochs, steps_per_epoch=len(train_loader)
         )
-    scaler = torch.amp.GradScaler("cuda", enabled=args.amp)
+    amp_dtype = torch.bfloat16 if args.amp_dtype == "bf16" else torch.float16
+    use_scaler = args.amp and args.amp_dtype == "fp16"
+    scaler = torch.amp.GradScaler("cuda", enabled=use_scaler)
     fixed_preview_rows = select_fixed_preview_rows(val_rows, 8)
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -389,7 +399,7 @@ def main() -> int:
         "schedule": {
             "max_epochs": args.epochs, "batch_size": args.batch, "patience": args.patience,
             "workers": args.workers, "seed": args.seed, "lr_schedule": args.lr_schedule,
-            "amp": args.amp, "grad_clip": args.clip,
+            "amp": args.amp, "amp_dtype": args.amp_dtype, "grad_clip": args.clip,
         },
         "pretrained_source": model_identity["pretrained_source"],
     }
@@ -404,7 +414,7 @@ def main() -> int:
         train_losses = []
         for x, y in train_loader:
             opt.zero_grad(set_to_none=True)
-            with torch.amp.autocast("cuda", enabled=args.amp):
+            with torch.amp.autocast("cuda", enabled=args.amp, dtype=amp_dtype):
                 x_device = x.to(device)
                 y_device = y.to(device)
                 predicted = model(x_device)
@@ -429,7 +439,7 @@ def main() -> int:
         model.eval()
         val_absolute_error = 0.0
         val_elements = 0
-        with torch.no_grad(), torch.amp.autocast("cuda", enabled=args.amp):
+        with torch.no_grad(), torch.amp.autocast("cuda", enabled=args.amp, dtype=amp_dtype):
             for x, y in val_loader:
                 y_device = y.to(device)
                 absolute_error = torch.abs(model(x.to(device)) - y_device)
