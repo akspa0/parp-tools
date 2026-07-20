@@ -313,10 +313,10 @@ def render_detailer_epoch_preview(
             tensor = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(device)
             coarse_t = torch.from_numpy(coarse).unsqueeze(0).to(device)
             with torch.amp.autocast("cuda", enabled=amp_enabled, dtype=amp_dtype):
-                residual = model(tensor, coarse_t)[0]
-                final = compose_final(coarse_t, residual, clamp=True)[0]
-            predicted = final.float().cpu().numpy()
-            residual_np = residual.float().cpu().numpy()
+                residual = model(tensor, coarse_t)
+                final = compose_final(coarse_t, residual, clamp=True)
+            predicted = final[0].float().cpu().numpy()
+            residual_np = residual[0].float().cpu().numpy()
             row = index[source_row]
             metrics = compute_row_metrics(predicted, truth)
             y = header_height + row_index * row_height
