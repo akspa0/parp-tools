@@ -255,6 +255,11 @@ def main() -> int:
                     help="Val MAE within this fraction of best still resets stale counter "
                          "(0.0 = strict, 0.01 = within 1%% of best counts as not stale). "
                          "Handles noisy val MAE when train loss is still decreasing.")
+    ap.add_argument("--liquid-mask-weight", type=float, default=0.0,
+                    help="Downweight point loss in liquid regions by this fraction "
+                         "(0.0 = no masking, 1.0 = zero loss where liquid_mask=1). "
+                         "The minimap input is blue water in liquid regions — the model "
+                         "can't see underwater terrain, so penalizing it there is noise.")
     ap.add_argument("--patience", type=int, default=15)
     ap.add_argument("--seed", type=int, default=114)
     ap.add_argument("--release", default="v50.1", type=validate_release)
@@ -344,6 +349,13 @@ def main() -> int:
     if args.mit_pretrained:
         load_pretrained_encoder(model, hub_id=args.mit_hub_id, revision=args.mit_revision)
 
+    use_liquid_mask = args.liquid_mask_weight > 0
+    has_liquid_mask = "liquid_mask" in group
+    if use_liquid_mask and not has_liquid_mask:
+        print("WARNING: --liquid-mask-weight > 0 but 'liquid_mask' not in store; "
+              "liquid loss masking disabled.", flush=True)
+        use_liquid_mask = False
+
     class RowDataset(Dataset):
         def __init__(self, rows: list[int]) -> None:
             self.rows = rows
@@ -355,7 +367,16 @@ def main() -> int:
             row = self.rows[i]
             rgb = np.asarray(group["minimap_rgb"][row], dtype=np.float32) / 255.0
             target, _, _ = encode_relative_height(np.asarray(group["height_257"][row]))
-            return torch.from_numpy(rgb).permute(2, 0, 1), torch.from_numpy(target)
+            if use_liquid_mask:
+                liq = np.asarray(group["liquid_mask"][row], dtype=np.float32)
+                liq_t = torch.from_numpy(liq).unsqueeze(0).unsqueeze(0)
+                liq_t = torch.nn.functional.interpolate(
+                    liq_t, size=target.shape, mode="nearest"
+                ).squeeze(0).squeeze(0)
+                liq_t = (liq_t > 0.1).float()
+            else:
+                liq_t = torch.empty(0)
+            return torch.from_numpy(rgb).permute(2, 0, 1), torch.from_numpy(target), liq_t
 
     val_targets = [encode_relative_height(np.asarray(group["height_257"][r]))[0] for r in val_rows]
     tile_mean_baseline = compute_tile_mean_baseline(val_targets)
@@ -397,6 +418,7 @@ def main() -> int:
         "loss": {
             "point": "smooth_l1",
             "gradient_l1_weight": 0.25,
+            "liquid_mask_weight": args.liquid_mask_weight,
             "spectral_weight": args.spectral_weight,
             "multiscale_weight": args.multiscale_weight,
         },
@@ -417,13 +439,17 @@ def main() -> int:
     for epoch in range(1, args.epochs + 1):
         model.train()
         train_losses = []
-        for x, y in train_loader:
+        for x, y, liq in train_loader:
             opt.zero_grad(set_to_none=True)
             with torch.amp.autocast("cuda", enabled=args.amp, dtype=amp_dtype):
                 x_device = x.to(device)
                 y_device = y.to(device)
                 predicted = model(x_device)
                 loss = height_loss(predicted, y_device)
+                if use_liquid_mask and liq.numel() > 0:
+                    liq_d = liq.to(device)
+                    point_weight = 1.0 - args.liquid_mask_weight * liq_d
+                    loss = (torch.abs(predicted - y_device) * point_weight).mean()
                 if args.spectral_weight > 0:
                     loss = loss + args.spectral_weight * radial_spectral_loss(
                         predicted.float(), y_device.float()
@@ -445,7 +471,7 @@ def main() -> int:
         val_absolute_error = 0.0
         val_elements = 0
         with torch.no_grad(), torch.amp.autocast("cuda", enabled=args.amp, dtype=amp_dtype):
-            for x, y in val_loader:
+            for x, y, _liq in val_loader:
                 y_device = y.to(device)
                 absolute_error = torch.abs(model(x.to(device)) - y_device)
                 val_absolute_error += float(absolute_error.sum().item())
