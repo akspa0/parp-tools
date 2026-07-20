@@ -7,11 +7,24 @@ namespace WowViewer.Core.Terrain;
 /// </summary>
 public static class TerrainSolarDirection
 {
-    public static Vector3 Evaluate(float gameTime)
+    /// <summary>
+    /// The clamped elevation scalar alone (before the fixed-bearing horizontal components are
+    /// mixed in). Exposed separately from <see cref="Evaluate"/> because this value is exactly
+    /// what determines whether two different hours render an IDENTICAL lighting direction: the
+    /// bearing never changes, so any two hours with the same elevation are indistinguishable to
+    /// every consumer of this class, including <see cref="WowViewer.Core.IO.Maps.MinimapShadingMatch"/>.
+    /// </summary>
+    public static float EvaluateElevation(float gameTime)
     {
         float wrappedTime = gameTime - MathF.Floor(gameTime);
         float sunAngle = wrappedTime * MathF.Tau;
         float sunHeight = MathF.Sin(sunAngle - (MathF.PI * 0.5f));
+        return MathF.Max(sunHeight, 0.05f);
+    }
+
+    public static Vector3 Evaluate(float gameTime)
+    {
+        float sunHeight = EvaluateElevation(gameTime);
 
         // wow-1.0.0-world-lighting-shadow-model-2026-07-15.md ties this down two ways:
         //
@@ -34,6 +47,6 @@ public static class TerrainSolarDirection
         return Vector3.Normalize(new Vector3(
             diagonalHorizontalScale,
             diagonalHorizontalScale,
-            MathF.Max(sunHeight, 0.05f)));
+            sunHeight));
     }
 }

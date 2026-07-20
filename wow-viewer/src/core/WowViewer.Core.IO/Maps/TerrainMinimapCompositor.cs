@@ -117,7 +117,8 @@ public static class TerrainMinimapCompositor
                     options.Lighting.DirectionalColor,
                     options.Lighting.AmbientColor,
                     shadowMask,
-                    options.Lighting.McshShadowStrength);
+                    options.Lighting.McshShadowStrength,
+                    options.Lighting.ToneMapped);
 
                 Vector3 shaded = Vector3.Max(Vector3.Zero, blended * lighting);
                 image[x, y] = ToRgba(shaded);
@@ -523,7 +524,8 @@ public sealed record TerrainMinimapLighting(
     Vector3 DirectionalColor,
     Vector3 AmbientColor,
     float McshShadowStrength,
-    bool ApplyMcshToMinimap = false)
+    bool ApplyMcshToMinimap = false,
+    bool ToneMapped = false)
 {
     /// <summary>Visible neutral composition for callers that intentionally do not grade lighting.</summary>
     public static TerrainMinimapLighting Neutral { get; } = new(
@@ -536,6 +538,12 @@ public sealed record TerrainMinimapLighting(
     /// Achromatic diagnostic light using the shared solar direction. The modest ambient term keeps
     /// terrain-readable slopes without tinting its materials.
     /// </summary>
+    /// <remarks>
+    /// Deliberately linear/untone-mapped: <see cref="MinimapShadingMatch"/> sweeps this factory
+    /// across every hour of the day to recover an authored minimap's unknown capture time from its
+    /// shading pattern, and needs the raw linear response across that whole sweep, not just at
+    /// noon. Tone mapping is scoped to <see cref="CreateNoonWhiteGlobal"/> only.
+    /// </remarks>
     public static TerrainMinimapLighting CreateWhiteTopEdge(float gameTime)
     {
         return new TerrainMinimapLighting(
@@ -550,7 +558,17 @@ public sealed record TerrainMinimapLighting(
     /// minimaps are not runtime world renders, so map LIT data and local/exact-build Light DBC
     /// profiles must not color-grade this composition.
     /// </summary>
-    public static TerrainMinimapLighting CreateNoonWhiteGlobal() => CreateWhiteTopEdge(0.5f);
+    /// <remarks>
+    /// Tone mapping calibrated 2026-07-20 against the T010b 2.4.3/Expansion01 comparison set: the
+    /// raw linear response measured a 2.41-3.18x (mean 2.79x) brightness deficit against authored
+    /// minimaps, with R/G and B/G channel ratios matching authored almost exactly (e.g. tile 27,27:
+    /// auth R/G=1.56 vs synth R/G=1.58) -- confirming the gap was pure underexposure, not a hue/tint
+    /// bug. A flat linear multiplier fixed the deficit but clipped ~4% of pixels to hard white on
+    /// steep, well-lit slopes; <see cref="TerrainLightingMath.ToneMapExposure"/>'s Reinhard curve
+    /// (see <see cref="ToneMapped"/>) closes the same deficit without hard-clipping highlights.
+    /// </remarks>
+    public static TerrainMinimapLighting CreateNoonWhiteGlobal() =>
+        CreateWhiteTopEdge(0.5f) with { ToneMapped = true };
 }
 
 /// <summary>Controls deterministic terrain minimap composition without carrying client-source policy.</summary>

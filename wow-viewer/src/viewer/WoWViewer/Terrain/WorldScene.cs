@@ -8953,7 +8953,7 @@ public class WorldScene : ISceneRenderer
                         LitLoader.LitLightingSample? litSample = null;
                         string fogRecommendationSource;
                         _lightService?.Update(camPos);
-                        if (_lightService != null)
+                        if (_lightService != null && !lighting.HasManualGameTimeOverride)
                             lighting.GameTime = Math.Clamp(_lightService.TimeOfDay / 2880f, 0f, 1f);
 
                         if (_litLoader != null && _litLoader.HasData)

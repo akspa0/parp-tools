@@ -20,6 +20,15 @@ public class TerrainLighting
     /// <summary>Game time as fraction of day: 0.0 = midnight, 0.5 = noon, 1.0 = midnight.</summary>
     public float GameTime { get; set; } = 0.5f; // Default: noon so an unprofiled world remains legible.
 
+    /// <summary>
+    /// True once the user has manually set <see cref="GameTime"/> from a UI control (e.g. the
+    /// "Time of Day" slider). Callers that also drive GameTime from a live clock/light service
+    /// (<c>WorldScene</c>'s per-frame <c>_lightService.TimeOfDay</c> sync) must skip their own
+    /// assignment while this is set, or the automatic sync silently overwrites manual input on the
+    /// very next frame, making the slider appear locked/unresponsive.
+    /// </summary>
+    public bool HasManualGameTimeOverride { get; set; }
+
     /// <summary>Current sun/light direction (normalized, pointing toward light).</summary>
     public Vector3 LightDirection { get; private set; } = TerrainSolarDirection.Evaluate(0.5f);
 

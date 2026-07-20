@@ -24,6 +24,9 @@ public sealed class TerrainMinimapCompositorTests
         // TerrainNormalGeometry before N.L. The bearing is fixed north-west at every
         // time of day (matching the traced constant-azimuth native ray) instead of sweeping through
         // a zero-horizontal, straight-overhead sun at solar noon.
+        // CreateWhiteTopEdge itself stays unscaled -- MinimapShadingMatch sweeps this factory
+        // across every hour and needs headroom against clipping; only CreateNoonWhiteGlobal (the
+        // production fixed-noon entry point) applies TerrainMinimapLighting.ExposureFactor.
         Assert.Equal(Vector3.One, lighting.DirectionalColor);
         Assert.Equal(0.25f, lighting.AmbientColor.X, 6);
         Assert.Equal(lighting.AmbientColor.X, lighting.AmbientColor.Y, 6);
@@ -41,14 +44,19 @@ public sealed class TerrainMinimapCompositorTests
         Assert.Equal(TerrainSolarDirection.Evaluate(0.5f), lighting.LightDirection);
         Assert.Equal(Vector3.One, lighting.DirectionalColor);
         Assert.Equal(new Vector3(0.25f), lighting.AmbientColor);
+        Assert.True(lighting.ToneMapped);
 
         Vector3 flatTerrainLight = TerrainLightingMath.Evaluate(
             Vector3.UnitZ,
             lighting.LightDirection,
             lighting.DirectionalColor,
             lighting.AmbientColor,
-            shadowMask: 0f);
-        Assert.True(flatTerrainLight.X > 1f);
+            shadowMask: 0f,
+            toneMapped: lighting.ToneMapped);
+        // Tone-mapped output stays within [0,1) by construction (Reinhard asymptotes to 1, never
+        // reaches or exceeds it) -- assert it's meaningfully lifted above the raw 0.25 ambient
+        // floor instead of the old raw-linear ">1" overexposure assertion.
+        Assert.True(flatTerrainLight.X is > 0.25f and < 1f);
         Assert.Equal(flatTerrainLight.X, flatTerrainLight.Y, 6);
         Assert.Equal(flatTerrainLight.X, flatTerrainLight.Z, 6);
     }

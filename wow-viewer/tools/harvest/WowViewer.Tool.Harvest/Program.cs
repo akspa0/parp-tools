@@ -2,8 +2,11 @@ using System.Collections.Concurrent;
 using System.Numerics;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using System.Text.Json;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 using StreamProfile = WowViewer.Core.IO.Maps.RawArraySerializer.StreamProfile;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
@@ -11,6 +14,7 @@ using WowViewer.Core.IO.Lit;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 using WowViewer.Core.Renderer.Terrain;
+using WowViewer.Core.Runtime.World.Terrain;
 using WowViewer.Core.Terrain;
 
 namespace WowViewer.Tools.Harvest;
@@ -129,6 +133,12 @@ static class Program
             case "extract-tilesets":
                 RunExtractTilesets(tail);
                 break;
+            case "split-minimap-image":
+                RunSplitMinimapImage(tail);
+                break;
+            case "relief-to-map":
+                RunReliefToMap(tail);
+                break;
             default:
                 Console.Error.WriteLine($"Unknown command '{command}'.");
                 ShowUsage();
@@ -161,6 +171,18 @@ static class Program
               synthetic-minimap Compose paired terrain-only and _liquid minimaps directly from
                                 client tiles, with optional per-tile and whole-map PNG outputs.
                                 Normal RGB omits MCSH; --bake-mcsh is an exceptional-history preview only.
+              split-minimap-image
+                                Slice one standalone composite map image (e.g. a full-continent
+                                scan/render with no client/MPQ backing) into a fixed-size tile grid
+                                for downstream model inference. Near-uniform (blank) tiles are
+                                skipped by default.
+              relief-to-map     Turn a folder of predicted relief16 PNGs (from
+                                v50_infer_geometry_detailer.py / v50_infer_direct_geometry.py) into
+                                a real, loadable synthetic map: one blank-textured ADT per tile with
+                                the predicted heightmap patched into MCVT/MCNR (BlankAdtFactory +
+                                AdtTerrainWriter), plus one shared WDT and WDL covering every tile.
+                                Output lands in <output-dir>/World/Maps/<map-name>/, the same layout
+                                WowViewer.Tool.Inspect's "map generate-blank" uses.
 
             Global options:
               --build, -b       Client build version (e.g. "4.3.4.15595") for
@@ -179,6 +201,21 @@ static class Program
               (diagnostic preview only).
             harvest-stream --stream-profile v22 emits full terrain texture/model sidecars plus
               conservative minimap_lighting provenance when the client data permits it.
+            split-minimap-image required: --input <image> --output-dir <dir>.
+              Optional: --tile-size <px> (default 256, must match the target model's input
+              contract), --prefix <name> (default: input file stem), --white-threshold /
+              --black-threshold <mean 0-255> (default 250 / 5, skip near-blank tiles),
+              --keep-blank (disable blank-tile skipping).
+            relief-to-map required: --manifest <inference_manifest.json> --output-dir <dir>.
+              Optional: --map-name <name> (default "relief_predicted"), --texture <blp path>
+              (default tileset\ocean\westfallseafloor.blp, placeholder only -- Spec 114 texture-
+              family reconstruction is a separate unbuilt stage), --height-scale <float> (default
+              100.0, visualization exaggeration only), --no-center (disable per-tile mean-
+              centering), --verify (read each written ADT back and compare heights to what was
+              written; reports a max-abs-diff failure per tile if the round trip doesn't match).
+              NOTE: relief is per-tile RELATIVE height (contract v112.1) -- there is no cross-tile
+              absolute continuity, so adjacent tiles will show a height step at their shared
+              border; this is the model's documented contract, not a bug.
             """);
     }
 
@@ -488,6 +525,378 @@ static class Program
         }
 
         Console.WriteLine($"Done. Processed={processed} Skipped={skipped}");
+    }
+
+    private sealed record SplitMinimapTileResult(int TileX, int TileY, string Status, string? OutputPath, double MeanValue);
+    private sealed record SplitMinimapManifest(
+        string Format,
+        string InputPath,
+        string InputSha256,
+        int SourceWidth,
+        int SourceHeight,
+        int TileSize,
+        int TilesX,
+        int TilesY,
+        double WhiteThreshold,
+        double BlackThreshold,
+        bool KeepBlank,
+        int Written,
+        int SkippedBlank,
+        IReadOnlyList<SplitMinimapTileResult> Tiles);
+
+    static void RunSplitMinimapImage(string[] args)
+    {
+        string? input = GetOption(args, "--input", "-i");
+        string? outputDir = GetOption(args, "--output-dir", "-o");
+        int tileSize = GetIntOption(args, "--tile-size", "-s") ?? 256;
+        string? prefix = GetOption(args, "--prefix", "-p");
+        double whiteThreshold = GetFloatOption(args, "--white-threshold", "") ?? 250.0;
+        double blackThreshold = GetFloatOption(args, "--black-threshold", "") ?? 5.0;
+        bool keepBlank = HasFlag(args, "--keep-blank");
+
+        if (string.IsNullOrWhiteSpace(input) || string.IsNullOrWhiteSpace(outputDir))
+        {
+            Console.Error.WriteLine("Error: --input <image> and --output-dir <dir> are required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (!File.Exists(input))
+        {
+            Console.Error.WriteLine($"Error: input image not found: {input}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (tileSize is < 1 or > 8192)
+        {
+            Console.Error.WriteLine("Error: --tile-size must be within 1..8192.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        prefix = string.IsNullOrWhiteSpace(prefix) ? Path.GetFileNameWithoutExtension(input) : prefix;
+        Directory.CreateDirectory(outputDir);
+
+        string inputSha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(input)));
+
+        using Image<Rgb24> source = Image.Load<Rgb24>(input);
+        int width = source.Width;
+        int height = source.Height;
+        int tilesX = width / tileSize;
+        int tilesY = height / tileSize;
+        Console.WriteLine($"Loaded {input}: {width}x{height} -> grid {tilesX}x{tilesY} at {tileSize}px/tile" +
+            (keepBlank ? string.Empty : $" (skipping tiles with mean < {blackThreshold} or > {whiteThreshold})"));
+
+        if (tilesX == 0 || tilesY == 0)
+        {
+            Console.Error.WriteLine($"Error: image is smaller than one {tileSize}px tile.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var results = new List<SplitMinimapTileResult>(tilesX * tilesY);
+        int written = 0;
+        int skippedBlank = 0;
+
+        for (int ty = 0; ty < tilesY; ty++)
+        {
+            for (int tx = 0; tx < tilesX; tx++)
+            {
+                var rect = new Rectangle(tx * tileSize, ty * tileSize, tileSize, tileSize);
+                using Image<Rgb24> tile = source.Clone(context => context.Crop(rect));
+
+                double mean = MeanPixelValue(tile);
+                if (!keepBlank && (mean < blackThreshold || mean > whiteThreshold))
+                {
+                    skippedBlank++;
+                    results.Add(new SplitMinimapTileResult(tx, ty, "skipped_blank", null, mean));
+                    continue;
+                }
+
+                string outputPath = Path.Combine(outputDir, $"{prefix}_{tx:D2}_{ty:D2}.png");
+                tile.SaveAsPng(outputPath);
+                written++;
+                results.Add(new SplitMinimapTileResult(tx, ty, "written", outputPath, mean));
+            }
+
+            if (ty % 10 == 0 || ty == tilesY - 1)
+                Console.WriteLine($"  Row {ty}/{tilesY - 1} - written {written}, skipped blank {skippedBlank}");
+        }
+
+        var manifest = new SplitMinimapManifest(
+            "split-minimap-image-v1",
+            Path.GetFullPath(input),
+            inputSha256,
+            width,
+            height,
+            tileSize,
+            tilesX,
+            tilesY,
+            whiteThreshold,
+            blackThreshold,
+            keepBlank,
+            written,
+            skippedBlank,
+            results);
+        string manifestPath = Path.Combine(outputDir, "split-manifest.json");
+        File.WriteAllText(
+            manifestPath,
+            System.Text.Json.JsonSerializer.Serialize(
+                manifest,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+
+        Console.WriteLine($"Done. Written={written} SkippedBlank={skippedBlank} -> {outputDir}");
+        Console.WriteLine($"Manifest: {manifestPath}");
+
+        if (written == 0)
+            Environment.ExitCode = 1;
+    }
+
+    private static double MeanPixelValue(Image<Rgb24> tile)
+    {
+        long sum = 0;
+        long count = 0;
+        tile.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < accessor.Height; y++)
+            {
+                Span<Rgb24> row = accessor.GetRowSpan(y);
+                foreach (Rgb24 pixel in row)
+                {
+                    sum += pixel.R + pixel.G + pixel.B;
+                    count += 3;
+                }
+            }
+        });
+        return count == 0 ? 0.0 : sum / (double)count;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex ReliefTileNameRegex =
+        new(@"^(?<prefix>.+)_(?<tx>\d+)_(?<ty>\d+)$", System.Text.RegularExpressions.RegexOptions.Compiled);
+    private const int ReliefGridSize = 257;
+
+    static void RunReliefToMap(string[] args)
+    {
+        string? manifestPath = GetOption(args, "--manifest", "");
+        string? outputDir = GetOption(args, "--output-dir", "-o");
+        string mapName = GetOption(args, "--map-name", "-m") ?? "relief_predicted";
+        string texture = GetOption(args, "--texture", "-t") ?? "tileset\\ocean\\westfallseafloor.blp";
+        float heightScale = GetFloatOption(args, "--height-scale", "") ?? 100.0f;
+        bool noCenter = HasFlag(args, "--no-center");
+        bool verify = HasFlag(args, "--verify");
+
+        if (string.IsNullOrWhiteSpace(manifestPath) || string.IsNullOrWhiteSpace(outputDir))
+        {
+            Console.Error.WriteLine("Error: --manifest <inference_manifest.json> and --output-dir <dir> are required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (!File.Exists(manifestPath))
+        {
+            Console.Error.WriteLine($"Error: manifest not found: {manifestPath}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        Console.WriteLine(
+            "NOTE: Spec 114 relief is PER-TILE relative height (contract v112.1) -- there is no " +
+            "cross-tile absolute continuity. Adjacent tiles will show a height step at their " +
+            "shared border; this reflects the model's relative-only contract, not a bug here.");
+
+        using JsonDocument manifest = JsonDocument.Parse(File.ReadAllText(manifestPath));
+        if (!manifest.RootElement.TryGetProperty("tiles", out JsonElement tilesElement) || tilesElement.ValueKind != JsonValueKind.Array)
+        {
+            Console.Error.WriteLine($"Error: manifest {manifestPath} has no 'tiles' array.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        string manifestDirectory = Path.GetDirectoryName(Path.GetFullPath(manifestPath)) ?? ".";
+        string mapDir = Path.Combine(outputDir, "World", "Maps", mapName);
+        Directory.CreateDirectory(mapDir);
+
+        var allTiles = new HashSet<(int TileX, int TileY)>();
+        var wdlTiles = new List<WdlHeightTile>();
+        int written = 0;
+        var unplaced = new List<string>();
+
+        foreach (JsonElement entry in tilesElement.EnumerateArray())
+        {
+            if (!entry.TryGetProperty("output", out JsonElement outputElement) || outputElement.ValueKind != JsonValueKind.String)
+            {
+                string inputHint = entry.TryGetProperty("input", out JsonElement inputHint2) ? inputHint2.GetString() ?? "<unknown>" : "<unknown>";
+                unplaced.Add(inputHint);
+                continue;
+            }
+
+            // The manifest records paths relative to the Python script's original working
+            // directory, not relative to the manifest file itself, so a naive Combine can double
+            // up path segments. Relief PNGs are always written flat next to the manifest
+            // (v50_infer_geometry_detailer.py / v50_infer_direct_geometry.py), so resolve by
+            // filename against the manifest's own directory instead of trusting the raw path.
+            string reliefPath = Path.Combine(manifestDirectory, Path.GetFileName(outputElement.GetString()!));
+
+            string inputPath = entry.TryGetProperty("input", out JsonElement inputElement) ? inputElement.GetString() ?? reliefPath : reliefPath;
+            string stem = Path.GetFileNameWithoutExtension(inputPath);
+            System.Text.RegularExpressions.Match match = ReliefTileNameRegex.Match(stem);
+            if (!match.Success)
+            {
+                unplaced.Add(stem);
+                continue;
+            }
+
+            int tileX = int.Parse(match.Groups["tx"].Value, CultureInfo.InvariantCulture);
+            int tileY = int.Parse(match.Groups["ty"].Value, CultureInfo.InvariantCulture);
+            if (tileX is < 0 or >= 64 || tileY is < 0 or >= 64)
+            {
+                unplaced.Add(stem);
+                continue;
+            }
+
+            if (!File.Exists(reliefPath))
+            {
+                Console.Error.WriteLine($"  {stem}: relief PNG not found: {reliefPath}");
+                unplaced.Add(stem);
+                continue;
+            }
+
+            float[,] height2D = LoadReliefHeightmap(reliefPath, heightScale, noCenter);
+
+            LkAdtData blank = BlankAdtFactory.CreateBlank(mapName, tileX, tileY, texture);
+            byte[] blankBytes = LkAdtWriter.Build(blank);
+            float[] heightFlat = new float[ReliefGridSize * ReliefGridSize];
+            for (int y = 0; y < ReliefGridSize; y++)
+                for (int x = 0; x < ReliefGridSize; x++)
+                    heightFlat[(y * ReliefGridSize) + x] = height2D[y, x];
+            byte[] patchedBytes = AdtTerrainWriter.ApplyHeightmap(blankBytes, "synthetic.adt", heightFlat);
+
+            string adtPath = Path.Combine(mapDir, $"{mapName}_{tileX}_{tileY}.adt");
+            File.WriteAllBytes(adtPath, patchedBytes);
+
+            if (verify)
+            {
+                WorldTerrainTileData readBack = WorldTerrainTileBuilder.Read(adtPath);
+                float[]? readHeights = readBack.Heightmap?.Heights;
+                if (readHeights is null || readHeights.Length != heightFlat.Length)
+                {
+                    Console.Error.WriteLine($"  VERIFY FAIL {mapName}_{tileX}_{tileY}: heightmap missing or wrong length on readback.");
+                }
+                else
+                {
+                    // MCVT only stores the quincunx checkerboard subset of the 257x257 grid (145
+                    // samples/chunk: 9x9 outer + 8x8 diagonally-offset inner); the remaining grid
+                    // positions are interpolated by any reader, never stored verbatim. Comparing
+                    // the full dense grid would flag that expected interpolation loss as a false
+                    // "write" bug, so only the positions actually written to MCVT are checked here.
+                    float maxAbsDiff = 0f;
+                    for (int cy = 0; cy < 16; cy++)
+                    {
+                        for (int cx = 0; cx < 16; cx++)
+                        {
+                            for (int sampleIndex = 0; sampleIndex < 145; sampleIndex++)
+                            {
+                                VerifyResolveStoredSamplePosition(cx, cy, sampleIndex, out int sampleX, out int sampleY);
+                                int flatIndex = (sampleY * ReliefGridSize) + sampleX;
+                                maxAbsDiff = Math.Max(maxAbsDiff, Math.Abs(readHeights[flatIndex] - heightFlat[flatIndex]));
+                            }
+                        }
+                    }
+                    if (maxAbsDiff > 0.01f)
+                        Console.Error.WriteLine($"  VERIFY FAIL {mapName}_{tileX}_{tileY}: max abs height diff at stored MCVT samples = {maxAbsDiff:F4}");
+                }
+            }
+
+            allTiles.Add((tileX, tileY));
+            wdlTiles.Add(WdlWriter.ExtractTileHeightsFromAlpha(height2D, tileX, tileY));
+            written++;
+        }
+
+        if (allTiles.Count == 0)
+        {
+            Console.Error.WriteLine("Error: no tiles were written; nothing to build a WDT/WDL from.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        string wdtPath = Path.Combine(mapDir, $"{mapName}.wdt");
+        LkWdtWriter.Write(wdtPath, allTiles, BlankAdtFactory.CreateBlankWdtOptions());
+
+        string wdlPath = Path.Combine(mapDir, $"{mapName}.wdl");
+        WdlWriter.Write(wdlPath, wdlTiles);
+
+        Console.WriteLine($"Wrote {written} ADT(s), 1 WDT, 1 WDL to {mapDir}");
+        Console.WriteLine($"  WDT: {wdtPath}");
+        Console.WriteLine($"  WDL: {wdlPath}");
+        if (unplaced.Count > 0)
+        {
+            Console.WriteLine($"Skipped {unplaced.Count} entr(y/ies) with no relief output or unparseable '..._<tx>_<ty>' filename " +
+                $"(first 5): {string.Join(", ", unplaced.Take(5))}");
+        }
+    }
+
+    // Ported from AdtTerrainWriter's private ResolveTileSampleCoordinates/GetVertexPosition so
+    // --verify checks the exact same quincunx sample positions AdtTerrainWriter writes to MCVT.
+    private static void VerifyResolveStoredSamplePosition(int chunkX, int chunkY, int sampleIndex, out int sampleX, out int sampleY)
+    {
+        int remaining = sampleIndex;
+        int row = 0, col = 0;
+        bool isInner = false;
+        for (int currentRow = 0; currentRow < 17; currentRow++)
+        {
+            int rowSize = (currentRow % 2 == 0) ? 9 : 8;
+            if (remaining < rowSize)
+            {
+                row = currentRow;
+                col = remaining;
+                isInner = (currentRow % 2) != 0;
+                break;
+            }
+            remaining -= rowSize;
+        }
+
+        int localX = isInner ? (col * 2) + 1 : col * 2;
+        int localY = isInner ? ((row / 2) * 2) + 1 : (row / 2) * 2;
+        sampleX = (chunkX * 16) + localX;
+        sampleY = (chunkY * 16) + localY;
+    }
+
+    private static float[,] LoadReliefHeightmap(string reliefPath, float heightScale, bool noCenter)
+    {
+        using Image<L16> image = Image.Load<L16>(reliefPath);
+        if (image.Width != ReliefGridSize || image.Height != ReliefGridSize)
+            throw new InvalidDataException($"{reliefPath} must be {ReliefGridSize}x{ReliefGridSize}, got {image.Width}x{image.Height}.");
+
+        var height = new float[ReliefGridSize, ReliefGridSize];
+        double sum = 0;
+        image.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < accessor.Height; y++)
+            {
+                Span<L16> row = accessor.GetRowSpan(y);
+                for (int x = 0; x < row.Length; x++)
+                {
+                    float normalized = row[x].PackedValue / 65535.0f;
+                    height[y, x] = normalized;
+                    sum += normalized;
+                }
+            }
+        });
+
+        if (!noCenter)
+        {
+            float mean = (float)(sum / (ReliefGridSize * ReliefGridSize));
+            for (int y = 0; y < ReliefGridSize; y++)
+                for (int x = 0; x < ReliefGridSize; x++)
+                    height[y, x] -= mean;
+        }
+
+        for (int y = 0; y < ReliefGridSize; y++)
+            for (int x = 0; x < ReliefGridSize; x++)
+                height[y, x] *= heightScale;
+
+        return height;
     }
 
     static void RunSyntheticMinimap(string[] args)
@@ -1048,12 +1457,20 @@ static class Program
         string? mapName = GetOption(args, "--map", "-m");
         string? outputDir = GetOption(args, "--output-dir", "-o");
         int? limit = GetIntOption(args, "--limit", "-n");
+        string? tileListRaw = GetOption(args, "--tile-list", "");
         bool force = HasFlag(args, "--force");
         int maxTiles = limit ?? int.MaxValue;
 
         if (string.IsNullOrWhiteSpace(clientRoot) || string.IsNullOrWhiteSpace(mapName) || string.IsNullOrWhiteSpace(outputDir))
         {
             Console.Error.WriteLine("Error: --client-root, --map, and --output-dir are required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (!TryParseSyntheticMinimapTileList(tileListRaw, out HashSet<(int TileX, int TileY)> requestedTiles, out string? tileListError))
+        {
+            Console.Error.WriteLine($"Error: {tileListError}");
             Environment.ExitCode = 1;
             return;
         }
@@ -1089,28 +1506,29 @@ static class Program
         int extracted = 0, skipped = 0, errors = 0;
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        for (int tx = 0; tx < 64; tx++)
+        IEnumerable<(int TileX, int TileY)> tilesToVisit = requestedTiles.Count > 0
+            ? requestedTiles.OrderBy(static t => t.TileY).ThenBy(static t => t.TileX)
+            : Enumerable.Range(0, 64).SelectMany(tx => Enumerable.Range(0, 64).Select(ty => (TileX: tx, TileY: ty)));
+
+        foreach ((int tx, int ty) in tilesToVisit)
         {
-            for (int ty = 0; ty < 64; ty++)
+            if (extracted >= maxTiles) break;
+
+            string outputPath = Path.Combine(outputDir, $"{mapName}_{tx}_{ty}_harvest.npz");
+            if (!force && File.Exists(outputPath)) { skipped++; continue; }
+
+            try
             {
-                if (extracted >= maxTiles) break;
-
-                string outputPath = Path.Combine(outputDir, $"{mapName}_{tx}_{ty}_harvest.npz");
-                if (!force && File.Exists(outputPath)) { skipped++; continue; }
-
+                var oldErr = Console.Error;
+                Console.SetError(TextWriter.Null);
                 try
                 {
-                    var oldErr = Console.Error;
-                    Console.SetError(TextWriter.Null);
-                    try
-                    {
-                        if (RunExtractTileFromMpq(catalog, clientRoot, mapName, wdtBytes, tx, ty, outputPath, exportPlacements: false, buildVersion: buildVersion))
-                            extracted++;
-                    }
-                    finally { Console.SetError(oldErr); }
+                    if (RunExtractTileFromMpq(catalog, clientRoot, mapName, wdtBytes, tx, ty, outputPath, exportPlacements: false, buildVersion: buildVersion))
+                        extracted++;
                 }
-                catch { }
+                finally { Console.SetError(oldErr); }
             }
+            catch { }
         }
 
         sw.Stop();

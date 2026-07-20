@@ -117,6 +117,37 @@ public sealed class MinimapShadingMatchTests
     }
 
     [Fact]
+    public void Evaluate_SelfRenderedAtNonNoonHour_DoesNotTieAgainstItsOwnMirrorHour()
+    {
+        // Hour 9 and hour 15 sit at the same TerrainSolarDirection elevation (symmetric around
+        // solar noon) and therefore render byte-for-byte identical candidates. Before the
+        // elevation-distinctness fix, the sweep's own best-vs-runner-up bookkeeping picked hour 15
+        // as "second best" purely because it exactly ties hour 9's perfect self-match score,
+        // producing a zero margin and a false low_confidence_ambiguous verdict for what is actually
+        // a clean match against every genuinely distinct hour. A real 0.5.3.3368 regression: 11
+        // sampled real tiles all scored exactly this kind of zero/near-zero confidence before the
+        // fix, several recovering meaningfully afterward (one tile 0 -> 0.45).
+        TerrainTileTensorPack pack = BuildSlopedPack();
+        var textures = new Dictionary<int, byte[,,]> { [0] = SolidTexture(200, 60, 60) };
+        byte[,,] authored = RenderReferenceCandidate(pack, textures, hour: 9f);
+
+        MinimapLightingProvenance result = MinimapShadingMatch.Evaluate(
+            MinimapLightingProvenance.NotEvaluated("seed"),
+            pack,
+            textures,
+            authored,
+            RequiredBuild);
+
+        Assert.NotEqual("not_evaluated", result.ShadingMatchStatus);
+        Assert.NotEqual("low_confidence_flat_terrain", result.ShadingMatchStatus);
+        Assert.NotNull(result.ShadingMatchedTimeOfDayHours);
+        Assert.True(result.ShadingMatchedTimeOfDayHours is 9f or 15f);
+        // The bug produced exactly zero confidence (an exact float tie); any positive confidence
+        // proves the runner-up came from a genuinely distinct elevation, not the mirror hour.
+        Assert.True(result.ShadingMatchConfidence > 0f);
+    }
+
+    [Fact]
     public void Evaluate_IsInvariantToMaterialTintAtTheSameGeometryAndHour()
     {
         TerrainTileTensorPack pack = BuildSlopedPack();

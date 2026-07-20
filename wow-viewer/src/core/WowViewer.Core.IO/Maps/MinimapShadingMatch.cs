@@ -1,6 +1,7 @@
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using WowViewer.Core.Maps;
+using WowViewer.Core.Terrain;
 
 namespace WowViewer.Core.IO.Maps;
 
@@ -55,15 +56,18 @@ public static class MinimapShadingMatch
         int resolution = authoredMinimapRgb.GetLength(0);
         float[,]? mcshMask = pack.McshShadowMask256;
 
-        float bestScore = float.NegativeInfinity;
-        float secondBestScore = float.NegativeInfinity;
-        float bestTimeHours = 0f;
-        float bestExcludedFraction = 0f;
-        float bestSignalStrength = 0f;
-
+        // TerrainSolarDirection holds bearing fixed all day and only cycles elevation, so any two
+        // hours with the same elevation render an IDENTICAL candidate image: the whole "night" span
+        // clamps to one shared elevation floor, and every daytime hour has an exact mirror on the
+        // other side of solar noon (elevation(hour) == elevation(24-hour)). A naive best-vs-runner-up
+        // margin is therefore comparing the winner against its own structural twin on most real
+        // inputs, producing a near-zero margin regardless of match quality. Track each candidate's
+        // elevation and require a genuinely distinct elevation before it can count as the runner-up.
+        var candidates = new List<(float Hour, float Elevation, float Score01, float ExcludedFraction, float SignalStrength)>();
         for (float hour = 0f; hour < 24f; hour += options.TimeStepHours)
         {
             float gameTime = hour / 24f;
+            float elevation = TerrainSolarDirection.EvaluateElevation(gameTime);
             var candidateOptions = new TerrainMinimapCompositionOptions(
                 resolution,
                 TerrainMinimapLighting.CreateWhiteTopEdge(gameTime));
@@ -78,19 +82,22 @@ public static class MinimapShadingMatch
                 out float signalStrength,
                 out float excludedFraction);
             float score01 = Math.Clamp((correlation + 1f) * 0.5f, 0f, 1f);
+            candidates.Add((hour, elevation, score01, excludedFraction, signalStrength));
+        }
 
-            if (score01 > bestScore)
-            {
-                secondBestScore = bestScore;
-                bestScore = score01;
-                bestTimeHours = hour;
-                bestExcludedFraction = excludedFraction;
-                bestSignalStrength = signalStrength;
-            }
-            else if (score01 > secondBestScore)
-            {
-                secondBestScore = score01;
-            }
+        (float Hour, float Elevation, float Score01, float ExcludedFraction, float SignalStrength) best =
+            candidates.MaxBy(static c => c.Score01);
+        float bestScore = best.Score01;
+        float bestTimeHours = best.Hour;
+        float bestExcludedFraction = best.ExcludedFraction;
+        float bestSignalStrength = best.SignalStrength;
+
+        float secondBestScore = float.NegativeInfinity;
+        foreach ((float Hour, float Elevation, float Score01, float ExcludedFraction, float SignalStrength) candidate in candidates)
+        {
+            bool distinctFromBest = MathF.Abs(candidate.Elevation - best.Elevation) > options.ElevationDistinctnessEpsilon;
+            if (distinctFromBest && candidate.Score01 > secondBestScore)
+                secondBestScore = candidate.Score01;
         }
 
         MatchClassification classification = Classify(
@@ -262,7 +269,8 @@ public sealed record MinimapShadingMatchOptions(
     float TimeStepHours = 1f,
     float McshExclusionThreshold = 0.5f,
     float AmbiguousMarginThreshold = 0.05f,
-    float MinimumSignalStrength = 0.001f)
+    float MinimumSignalStrength = 0.001f,
+    float ElevationDistinctnessEpsilon = 1e-3f)
 {
     public static MinimapShadingMatchOptions Default { get; } = new();
 }
