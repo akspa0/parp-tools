@@ -182,6 +182,85 @@ height or normals as detailer input — deployment contract violation; (c) a sin
 violates the small-modular-residual rule and forfeits independent replaceability; (d) per-tile
 amplitude rescaling of predictions — metric cosmetics, not learned structure.
 
+### T061 record: first promotable Spec 114 geometry checkpoint
+
+**Outcome (2026-07-20)**: `detailer-mit_b0-authored-v1` (100 epochs, AMP + OneCycle + clip 1.0,
+spectral 0.1 / multiscale 0.25) reached best epoch 91, val MAE **0.170665** vs coarse-only
+baseline 0.187800 — a **9.1% relative improvement**, `gate=True`, `sc002=True`,
+`promotion=pending(user visual gate)`. User visual verdict: "a lot more detailed than previous
+attempts, actually looking like we're getting REALLY close now." Train loss was still declining
+at epoch 100 (0.010533, stale 9/15) — the run hit the epoch cap, not a true plateau, so more
+epochs likely yield further improvement.
+
+**Significance**: this is the first Spec 114 geometry checkpoint to clear its numeric promotion
+gate. The two-stage residual chain works: coarse `mit_b0-authored-v1` owns layout (val MAE
+0.187802), detailer owns the high-frequency residual (final 0.170665), each stage independently
+replaceable with its own checkpoint and gate. The spectral guidance terms (Spec 068 US1 revived)
+contributed visible structure sharpening across both the coarse v2 run and this detailer run.
+
+**Next lever identified by the user**: the old V7 model (April 2026) used a multi-frequency band
+approach that let an undertrained model on a dirty, half-broken dataset still perform well —
+objects and liquids losses weren't even processing and it still worked. The hypothesis: band
+decomposition (splitting the target into octave frequency bands) is the missing structural prior
+the current single-residual detailer lacks. Comparison and band-split detailer spec follow below.
+
+### T062 findings: V7 (April) vs current detailer (July) — the multi-band structural prior
+
+**V7's loss stack** (`spec103/v7_losses.py`, ported verbatim from the April reference): 13 weighted
+terms, of which four are the multi-frequency structural prior the current detailer lacks:
+
+| V7 term | Weight | What it supervises | Current detailer equivalent |
+|---|---|---|---|
+| `frequency_loss` | 0.08 | L1 of log-magnitude FFT (full spectrum match) | `radial_spectral_loss` (radial average only — coarser) |
+| `laplacian_loss` | 0.12 | L1 of 5-point Laplacian (second-derivative / curvature) | **none** |
+| `edge_loss` | 0.12 | L1 of Sobel edge magnitude (first-derivative ridges) | single-scale gradient L1 only |
+| `transition_focus_loss` | 0.10 | L1 weighted 3× at gradient transitions (cliffs/coasts) | **none** |
+
+V7 also had `tile_edge_loss` (0.12, border emphasis) and `recovery_focus_loss` (0.16, 3.5× at
+object/liquid regions) — the latter is why V7 "still worked" despite broken object/liquid losses:
+the recovery mask was derived from the *input channels* (ch 9 liquid, ch 11 object), not from
+whether the loss was correctly computed, so the model still concentrated learning where the
+dirty data said to. That's a structural insight, not luck.
+
+**V25's `frequency_split_loss`** (`v25/losses.py`): explicitly splits the FFT into LF (structure)
+and HF (detail) bands with a radial cutoff mask, weighted 3.0/2.0. This is the "MRI" decomposition
+the user remembers — LF captures terrain shape, HF captures cliff/micro-terrain detail. It was
+built for V25 but never landed in the v50 lane.
+
+**Current detailer (July)**: Smooth-L1 + 0.25 single-scale gradient + optional radial spectral +
+optional multi-octave gradient. It has *no* Laplacian (curvature), *no* Sobel edge, *no*
+transition-focus weighting, and *no* explicit LF/HF band split. The spectral term matches the
+*radial average* of the spectrum, not the full 2D magnitude — so it cannot supervise directional
+ridge structure, only isotropic fractal energy.
+
+**Why V7 outperformed despite dirty data**: the four structural terms (frequency + laplacian +
+edge + transition) gave the model a multi-scale *curvature and ridge prior* that compensated for
+input noise. The model learned "produce terrain with correct edge statistics and curvature
+distribution" regardless of whether the object/liquid channels were clean. The current detailer
+has no such prior — it only knows "match the pixel values and the first derivative," which is
+why it smooths ridges and under-predicts amplitude.
+
+**Decision (T063)**: port V7's structural prior into the v50 detailer lane as a multi-frequency
+band-split loss stack, adapted to the one-output constitution:
+
+1. **Full 2D frequency loss** (not radial average): L1 of log-magnitude FFT, matching V7's
+   `frequency_loss` — supervises directional ridge structure, not just isotropic energy.
+2. **Laplacian loss**: 5-point curvature L1 — the second-derivative prior V7 had and we don't.
+3. **Sobel edge loss**: first-derivative ridge L1 — sharper than the current gradient term.
+4. **Transition-focus weighting**: 3× L1 at gradient transitions — cliffs and coastlines.
+5. **LF/HF band split** (from V25): explicit radial cutoff separating structure from detail,
+   weighted independently, so the model can't trade structure for detail or vice-versa.
+
+All five are loss-only, training-only, no deployment-input change, no aux head. They go behind
+flags in `geometry_detailer_train.py` (default 0 = current parity; the ablation enables them).
+The band-split detailer *variant* is the same architecture with the richer loss stack — not a
+new model, just a better prior. If the loss stack alone closes the gap, the scaffold idea is
+unnecessary. If it plateaus, the scaffold becomes the next stage.
+
+**Rejected**: porting V7's 117M architecture. It's a monolith with a WDL trestle, 13 input
+channels, and a PatchGAN — wrong constitution, wrong input contract, wrong scale. The loss
+*prior* is the transferable insight, not the architecture.
+
 **Reverted detour (2026-07-19)**: an unauthorized "universal arbitrary-raster" reset briefly
 replaced this spec with a DINOv2 student, a DPT-Hybrid/MiDaS pseudo-label teacher, and broad
 third-party image folders. That route was reverted: the deployment contract is the authored WoW

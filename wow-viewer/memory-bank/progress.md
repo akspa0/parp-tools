@@ -53,10 +53,16 @@ Last updated: 2026-07-19
   residual field; zero-init head starts AT coarse baseline), and detailer trainer (coarse-only
   strong baseline, ≥5% relative gate, SC-002, fixed/quantile/worst sheets, `upstream_models`
   provenance). 16 focused tests; full v50 suite 273 passed / 4 skipped; Ruff clean.
-- Next (user-owned): T061 — materialize `mit_b0-authored-v1`'s outputs, then train
-  `detailer-mit_b0-authored-v1` (quickstart commands). T010 curriculum build dry run + `--write`;
-  dual-view `--source all` stays gated on the Spec 113 NoonWhiteGlobal rerender; object-mask
-  phase starts only after geometry promotion.
+- **T061 DONE (user-run)**: `detailer-mit_b0-authored-v1` best epoch 91, val MAE 0.170665 vs
+  coarse-only 0.187800 (9.1% relative), gate=True, sc002=True. First Spec 114 geometry checkpoint
+  to clear its numeric gate. Two-stage residual chain proven.
+- **T062 DONE**: V7 vs current detailer comparison. V7's four structural loss terms (full 2D
+  frequency, Laplacian, Sobel edge, transition-focus 3×) + V25's LF/HF band split are the missing
+  multi-band prior. V7 compensated for dirty data via structural statistics, not clean inputs.
+  Decision: port all five as loss-only flags into the detailer trainer (T063), not the V7 arch.
+- Next: T063 — implement band-split loss stack, user-run `detailer-mit_b0-authored-v2-bandsplit`.
+  T010 curriculum build dry run + `--write`; dual-view `--source all` stays gated on Spec 113
+  NoonWhiteGlobal rerender; object-mask phase starts only after geometry promotion.
 - Phase order is fail-closed: corrected dual-view curriculum → direct geometry bakeoff → trusted
   object visibility → feature library → texture families → alpha. The user owns all heavy
   builds/training. Spec 113 still owns RealPLKSR/detail.

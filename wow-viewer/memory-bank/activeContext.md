@@ -56,9 +56,21 @@ Last updated: 2026-07-19
   `geometry_detailer_train.py` + `v50_train_geometry_detailer.py` (coarse-only strong baseline,
   ≥5% relative gate, SC-002, fixed/quantile/worst sheets, `upstream_models` provenance in
   `model_stage_run.json`). 16 focused tests; full v50 suite 273 passed / 4 skipped; Ruff clean.
-- Next user-owned: T061 — materialize `mit_b0-authored-v1`'s outputs, then train
-  `detailer-mit_b0-authored-v1` (quickstart commands). Dual-view `--source all` stays gated on
-  the Spec 113 NoonWhiteGlobal rerender; object-mask phase starts only after geometry promotion.
+- **T061 DONE (user-run, 2026-07-20)**: `detailer-mit_b0-authored-v1` best epoch 91, val MAE
+  0.170665 vs coarse-only 0.187800 — **9.1% relative, gate=True, sc002=True**. First Spec 114
+  geometry checkpoint to clear its numeric gate. User visual verdict positive ("a lot more
+  detailed, getting REALLY close"). Two-stage chain proven: coarse owns layout, detailer owns
+  high-frequency residual, each independently replaceable.
+- **T062 DONE**: V7 (April) vs current detailer (July) comparison. V7 had four structural loss
+  terms the current detailer lacks: full 2D frequency (not radial average), Laplacian curvature,
+  Sobel edge, transition-focus 3× weighting. V25 had explicit LF/HF band split. V7 "still worked"
+  on dirty data because the structural prior compensated for input noise — the model learned
+  "produce correct edge/curvature statistics" regardless of object/liquid channel cleanliness.
+  Decision: port all five as loss-only flags into the detailer trainer (T063), not the 117M V7
+  architecture (wrong constitution/scale).
+- Next: T063 — implement the multi-frequency band-split loss stack in the detailer trainer, then
+  user-run `detailer-mit_b0-authored-v2-bandsplit`. Dual-view `--source all` stays gated on the
+  Spec 113 NoonWhiteGlobal rerender; object-mask phase starts only after geometry promotion.
 - Source-image UV projection provides immediate mesh texture. Object cleanup, terrain semantics,
   editable texture families, and alpha remain later independent models with separate checkpoints.
 
