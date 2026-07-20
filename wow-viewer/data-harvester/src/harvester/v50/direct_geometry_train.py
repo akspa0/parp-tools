@@ -251,6 +251,10 @@ def main() -> int:
     ap.add_argument("--multiscale-weight", type=float, default=0.0,
                     help="multi-octave gradient guidance weight; 0 keeps bootstrap parity")
     ap.add_argument("--workers", type=int, choices=[0], default=0)
+    ap.add_argument("--val-tolerance", type=float, default=0.0,
+                    help="Val MAE within this fraction of best still resets stale counter "
+                         "(0.0 = strict, 0.01 = within 1%% of best counts as not stale). "
+                         "Handles noisy val MAE when train loss is still decreasing.")
     ap.add_argument("--patience", type=int, default=15)
     ap.add_argument("--seed", type=int, default=114)
     ap.add_argument("--release", default="v50.1", type=validate_release)
@@ -397,7 +401,8 @@ def main() -> int:
             "multiscale_weight": args.multiscale_weight,
         },
         "schedule": {
-            "max_epochs": args.epochs, "batch_size": args.batch, "patience": args.patience,
+            "max_epochs": args.epochs, "batch_size": args.batch,
+            "patience": args.patience, "val_tolerance": args.val_tolerance,
             "workers": args.workers, "seed": args.seed, "lr_schedule": args.lr_schedule,
             "amp": args.amp, "amp_dtype": args.amp_dtype, "grad_clip": args.clip,
         },
@@ -460,6 +465,8 @@ def main() -> int:
                 args.output / "validation" / "best_previews" / f"epoch_{epoch:04d}.png",
                 epoch=epoch, val_mae=val_mae, use_amp=args.amp,
             )
+        elif args.val_tolerance > 0 and val_mae <= best * (1.0 + args.val_tolerance):
+            stale = 0
         else:
             stale += 1
         print(

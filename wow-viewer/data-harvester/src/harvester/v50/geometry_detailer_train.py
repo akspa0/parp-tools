@@ -272,6 +272,10 @@ def main() -> int:
     ap.add_argument("--band-cutoff", type=float, default=0.1,
                     help="V25 radial FFT cutoff fraction for LF/HF split (0.1 = lowest 10%%)")
     ap.add_argument("--workers", type=int, choices=[0], default=0)
+    ap.add_argument("--val-tolerance", type=float, default=0.0,
+                    help="Val MAE within this fraction of best still resets stale counter "
+                         "(0.0 = strict, 0.01 = within 1%% of best counts as not stale). "
+                         "Handles noisy val MAE when train loss is still decreasing.")
     ap.add_argument("--patience", type=int, default=15)
     ap.add_argument("--seed", type=int, default=114)
     ap.add_argument("--release", default="v50.1", type=validate_release)
@@ -435,7 +439,8 @@ def main() -> int:
             "on": "final composition (coarse + residual), unclamped",
         },
         "schedule": {
-            "max_epochs": args.epochs, "batch_size": args.batch, "patience": args.patience,
+            "max_epochs": args.epochs, "batch_size": args.batch,
+            "patience": args.patience, "val_tolerance": args.val_tolerance,
             "workers": args.workers, "seed": args.seed, "lr_schedule": args.lr_schedule,
             "amp": args.amp, "amp_dtype": args.amp_dtype, "grad_clip": args.clip,
         },
@@ -518,6 +523,10 @@ def main() -> int:
             best = val_mae
             stale = 0
             torch.save(checkpoint, args.output / "checkpoint_best.pt")
+        elif args.val_tolerance > 0 and val_mae <= best * (1.0 + args.val_tolerance):
+            # Within tolerance band of best: model is still in a productive region.
+            # Reset stale but don't update best (only strict improvement saves a checkpoint).
+            stale = 0
         else:
             stale += 1
         print(
