@@ -2884,12 +2884,6 @@ public partial class ViewerApp
             lighting.GameTime = gameTime;
             lighting.HasManualGameTimeOverride = true;
         }
-        if (lighting.HasManualGameTimeOverride)
-        {
-            ImGui.SameLine();
-            if (ImGui.SmallButton("Follow Live Clock"))
-                lighting.HasManualGameTimeOverride = false;
-        }
         string timeLabel = gameTime switch
         {
             < 0.15f => "Night",
@@ -4529,12 +4523,6 @@ public partial class ViewerApp
             {
                 lighting.GameTime = gameTime;
                 lighting.HasManualGameTimeOverride = true;
-            }
-            if (lighting.HasManualGameTimeOverride)
-            {
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Follow Live Clock"))
-                    lighting.HasManualGameTimeOverride = false;
             }
             string timeLabel = gameTime switch
             {

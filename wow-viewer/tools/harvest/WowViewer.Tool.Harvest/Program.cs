@@ -139,6 +139,9 @@ static class Program
             case "relief-to-map":
                 RunReliefToMap(tail);
                 break;
+            case "dump-texture-names":
+                RunDumpTextureNames(tail);
+                break;
             default:
                 Console.Error.WriteLine($"Unknown command '{command}'.");
                 ShowUsage();
@@ -212,10 +215,20 @@ static class Program
               family reconstruction is a separate unbuilt stage), --height-scale <float> (default
               100.0, visualization exaggeration only), --no-center (disable per-tile mean-
               centering), --verify (read each written ADT back and compare heights to what was
-              written; reports a max-abs-diff failure per tile if the round trip doesn't match).
+              written; reports a max-abs-diff failure per tile if the round trip doesn't match),
+              --no-fill-gaps (disable gap-filling; default fills every missing tile inside the
+              inferred tiles' bounding rectangle with a flat/blank ADT -- e.g. tiles
+              split-minimap-image skipped as blank source input -- so the map is a complete,
+              hole-free quilt across its own extent instead of leaving real absent-geometry gaps),
+              --bake-mccv (bake each inferred tile's source minimap RGB into per-vertex MCCV color,
+              tinting the placeholder texture so the terrain visually resembles the source minimap
+              in-viewer -- a quick-look guide for sharing model output, NOT real texture-layer
+              reconstruction; unaffected gap-fill tiles carry no MCCV since they have no source
+              image; sets the WDT's MPHD AdtHasMccv flag).
               NOTE: relief is per-tile RELATIVE height (contract v112.1) -- there is no cross-tile
-              absolute continuity, so adjacent tiles will show a height step at their shared
-              border; this is the model's documented contract, not a bug.
+              absolute continuity, so adjacent INFERRED tiles will still show a height step at
+              their shared border; this is the model's documented contract, not a bug, and
+              --no-fill-gaps/gap-filling does not and cannot change it.
             """);
     }
 
@@ -672,6 +685,118 @@ static class Program
         return count == 0 ? 0.0 : sum / (double)count;
     }
 
+    private sealed record TextureNameTileRecord(int TileX, int TileY, IReadOnlyList<string> TextureNames);
+    private sealed record TextureNameDump(
+        string Format,
+        string ClientRoot,
+        string? Build,
+        string Map,
+        int TileCount,
+        IReadOnlyList<TextureNameTileRecord> Tiles);
+
+    /// <summary>
+    /// Spec 115: dump each occupied tile's ORDERED MTEX texture-name table.
+    ///
+    /// The v50 Zarr store keeps <c>mcly_texture_ids</c> (a per-tile local index into this table) but
+    /// does not persist any index-to-name mapping: the global tileset list lives only in the
+    /// transient build-time enrichment stream. This command recovers the names directly from the
+    /// client so terrain-feature labels can be derived without rebuilding any store. Ordering is
+    /// load-bearing -- position in TextureNames IS the value stored in mcly_texture_ids.
+    /// </summary>
+    static void RunDumpTextureNames(string[] args)
+    {
+        string? clientRoot = GetOption(args, "--client-root", "-c");
+        string? mapName = GetOption(args, "--map", "-m");
+        string? outputPath = GetOption(args, "--output", "-o");
+        string? requestedBuild = GetOption(args, "--build", "-b");
+        int maxTiles = GetIntOption(args, "--limit", "-n") ?? int.MaxValue;
+
+        if (string.IsNullOrWhiteSpace(clientRoot) || string.IsNullOrWhiteSpace(mapName) || string.IsNullOrWhiteSpace(outputPath))
+        {
+            Console.Error.WriteLine("Error: --client-root, --map, and --output are required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (!Directory.Exists(clientRoot))
+        {
+            Console.Error.WriteLine($"Error: client root not found: {clientRoot}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        clientRoot = ResolveGameClientRoot(clientRoot);
+        string? buildVersion = requestedBuild ?? DetectBuildVersionFromClientRoot(clientRoot);
+
+        using var catalog = new NativeMpqService();
+        catalog.LoadArchives([clientRoot]);
+        TryLoadSupplementalListfile(catalog);
+        LoadMd5Translate(clientRoot, catalog);
+
+        string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
+        byte[]? wdtBytes = catalog.ReadFile(wdtVirtual);
+        if (wdtBytes is null || wdtBytes.Length == 0)
+        {
+            Console.Error.WriteLine($"Error: could not read WDT '{wdtVirtual}' from client.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        IReadOnlyList<WdtTileCoordinate> occupiedTiles;
+        using (var summaryStream = new MemoryStream(wdtBytes, writable: false))
+        {
+            MapFileSummary summary = MapFileSummaryReader.Read(summaryStream, wdtVirtual);
+            occupiedTiles = WdtTileIndexReader.ReadOccupiedTiles(summaryStream, summary);
+        }
+
+        bool isAlpha = AlphaWdtReader.IsAlphaWdt(wdtBytes);
+        var records = new List<TextureNameTileRecord>();
+        int skipped = 0;
+
+        foreach (WdtTileCoordinate tile in occupiedTiles
+                     .OrderBy(static t => t.TileY).ThenBy(static t => t.TileX)
+                     .Take(maxTiles))
+        {
+            try
+            {
+                TerrainTileTensorPack? pack = TryBuildSyntheticMinimapPack(
+                    catalog, clientRoot, mapName, wdtBytes, isAlpha, tile.TileX, tile.TileY, buildVersion);
+                if (pack is null || pack.MclyTextureNames.Count == 0)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                records.Add(new TextureNameTileRecord(tile.TileX, tile.TileY, pack.MclyTextureNames.ToArray()));
+            }
+            catch (Exception ex)
+            {
+                skipped++;
+                Console.Error.WriteLine($"  tile {tile.TileX},{tile.TileY} skipped: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        if (records.Count == 0)
+        {
+            Console.Error.WriteLine($"Error: no tile produced an MTEX texture-name table for map '{mapName}'.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var dump = new TextureNameDump(
+            "terrain-texture-name-dump-v1", clientRoot, buildVersion, mapName, records.Count, records);
+
+        string? outputDirectory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
+        if (!string.IsNullOrWhiteSpace(outputDirectory))
+            Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(
+            outputPath,
+            JsonSerializer.Serialize(dump, new JsonSerializerOptions { WriteIndented = true }));
+
+        Console.WriteLine($"Wrote texture-name dump: {outputPath}");
+        Console.WriteLine($"  map={mapName} build={buildVersion ?? "(unknown)"} tiles={records.Count} skipped={skipped}");
+    }
+
     private static readonly System.Text.RegularExpressions.Regex ReliefTileNameRegex =
         new(@"^(?<prefix>.+)_(?<tx>\d+)_(?<ty>\d+)$", System.Text.RegularExpressions.RegexOptions.Compiled);
     private const int ReliefGridSize = 257;
@@ -685,6 +810,8 @@ static class Program
         float heightScale = GetFloatOption(args, "--height-scale", "") ?? 100.0f;
         bool noCenter = HasFlag(args, "--no-center");
         bool verify = HasFlag(args, "--verify");
+        bool fillGaps = !HasFlag(args, "--no-fill-gaps");
+        bool bakeMccv = HasFlag(args, "--bake-mccv");
 
         if (string.IsNullOrWhiteSpace(manifestPath) || string.IsNullOrWhiteSpace(outputDir))
         {
@@ -765,12 +892,50 @@ static class Program
             float[,] height2D = LoadReliefHeightmap(reliefPath, heightScale, noCenter);
 
             LkAdtData blank = BlankAdtFactory.CreateBlank(mapName, tileX, tileY, texture);
-            byte[] blankBytes = LkAdtWriter.Build(blank);
             float[] heightFlat = new float[ReliefGridSize * ReliefGridSize];
             for (int y = 0; y < ReliefGridSize; y++)
                 for (int x = 0; x < ReliefGridSize; x++)
                     heightFlat[(y * ReliefGridSize) + x] = height2D[y, x];
-            byte[] patchedBytes = AdtTerrainWriter.ApplyHeightmap(blankBytes, "synthetic.adt", heightFlat);
+
+            byte[] patchedBytes;
+            if (bakeMccv)
+            {
+                if (!File.Exists(inputPath))
+                {
+                    Console.Error.WriteLine($"  {stem}: --bake-mccv requires the source minimap tile, not found: {inputPath}");
+                    unplaced.Add(stem);
+                    continue;
+                }
+
+                byte[,,] sourceRgb = LoadSourceRgb256(inputPath);
+                var chunks = new LkMcnkData[blank.Chunks.Count];
+                for (int i = 0; i < blank.Chunks.Count; i++)
+                {
+                    LkMcnkData template = blank.Chunks[i];
+                    chunks[i] = BuildInferredChunk(template, heightFlat, sourceRgb);
+                }
+
+                var populated = new LkAdtData
+                {
+                    MapName = blank.MapName,
+                    TileX = blank.TileX,
+                    TileY = blank.TileY,
+                    TextureNames = blank.TextureNames,
+                    ModelNames = blank.ModelNames,
+                    WorldModelNames = blank.WorldModelNames,
+                    ModelPlacements = blank.ModelPlacements,
+                    WorldModelPlacements = blank.WorldModelPlacements,
+                    Chunks = chunks,
+                    MhdrFlags = blank.MhdrFlags,
+                    MfboFlightBounds = blank.MfboFlightBounds,
+                };
+                patchedBytes = LkAdtWriter.Build(populated);
+            }
+            else
+            {
+                byte[] blankBytes = LkAdtWriter.Build(blank);
+                patchedBytes = AdtTerrainWriter.ApplyHeightmap(blankBytes, "synthetic.adt", heightFlat);
+            }
 
             string adtPath = Path.Combine(mapDir, $"{mapName}_{tileX}_{tileY}.adt");
             File.WriteAllBytes(adtPath, patchedBytes);
@@ -820,13 +985,50 @@ static class Program
             return;
         }
 
+        int gapsFilled = 0;
+        if (fillGaps)
+        {
+            // Inference input tiles are commonly sparse -- e.g. split-minimap-image skips
+            // near-uniform blank source tiles, so most of a source image's tile grid never gets a
+            // relief prediction at all. Left as-is, the WDT only declares the inferred tiles,
+            // leaving real holes (no ADT, no geometry) at every skipped coordinate inside the
+            // covered area -- not just a height mismatch at a shared border, an actual absence.
+            // Fill every missing tile inside the bounding rectangle of what WAS inferred with a
+            // flat/blank ADT (BlankAdtFactory's already-established "white plate = valid empty
+            // terrain" convention), so the map is a complete, gap-free quilt across its own extent.
+            int minTileX = allTiles.Min(static t => t.TileX);
+            int maxTileX = allTiles.Max(static t => t.TileX);
+            int minTileY = allTiles.Min(static t => t.TileY);
+            int maxTileY = allTiles.Max(static t => t.TileY);
+
+            for (int ty = minTileY; ty <= maxTileY; ty++)
+            {
+                for (int tx = minTileX; tx <= maxTileX; tx++)
+                {
+                    if (allTiles.Contains((tx, ty)))
+                        continue;
+
+                    LkAdtData blankGapTile = BlankAdtFactory.CreateBlank(mapName, tx, ty, texture);
+                    byte[] blankGapBytes = LkAdtWriter.Build(blankGapTile);
+                    string gapAdtPath = Path.Combine(mapDir, $"{mapName}_{tx}_{ty}.adt");
+                    File.WriteAllBytes(gapAdtPath, blankGapBytes);
+
+                    allTiles.Add((tx, ty));
+                    wdlTiles.Add(BlankAdtFactory.CreateBlankWdlTile(tx, ty));
+                    gapsFilled++;
+                }
+            }
+        }
+
         string wdtPath = Path.Combine(mapDir, $"{mapName}.wdt");
-        LkWdtWriter.Write(wdtPath, allTiles, BlankAdtFactory.CreateBlankWdtOptions());
+        LkWdtWriter.Write(wdtPath, allTiles, new LkWdtWriteOptions { HasMccv = bakeMccv });
 
         string wdlPath = Path.Combine(mapDir, $"{mapName}.wdl");
         WdlWriter.Write(wdlPath, wdlTiles);
 
-        Console.WriteLine($"Wrote {written} ADT(s), 1 WDT, 1 WDL to {mapDir}");
+        Console.WriteLine($"Wrote {written} inferred ADT(s)" +
+            (fillGaps ? $" + {gapsFilled} flat gap-fill ADT(s)" : string.Empty) +
+            $", 1 WDT, 1 WDL to {mapDir}");
         Console.WriteLine($"  WDT: {wdtPath}");
         Console.WriteLine($"  WDL: {wdlPath}");
         if (unplaced.Count > 0)
@@ -861,6 +1063,96 @@ static class Program
         sampleX = (chunkX * 16) + localX;
         sampleY = (chunkY * 16) + localY;
     }
+
+    private static byte[,,] LoadSourceRgb256(string path)
+    {
+        using Image<Rgb24> image = Image.Load<Rgb24>(path);
+        var rgb = new byte[image.Height, image.Width, 3];
+        image.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < accessor.Height; y++)
+            {
+                Span<Rgb24> row = accessor.GetRowSpan(y);
+                for (int x = 0; x < row.Length; x++)
+                {
+                    rgb[y, x, 0] = row[x].R;
+                    rgb[y, x, 1] = row[x].G;
+                    rgb[y, x, 2] = row[x].B;
+                }
+            }
+        });
+        return rgb;
+    }
+
+    /// <summary>
+    /// Builds one MCNK's height/normal/MCCV arrays from a dense 257x257 relative-relief grid and,
+    /// optionally, the source minimap tile used to infer it. Constructing fresh LkMcnkData (rather
+    /// than byte-patching an existing serialized ADT, as AdtTerrainWriter.ApplyHeightmap does) is
+    /// required here because MCCV is a whole new subchunk with no existing byte range to patch into.
+    /// </summary>
+    private static LkMcnkData BuildInferredChunk(LkMcnkData template, float[] heightFlat257, byte[,,]? sourceRgb256)
+    {
+        var heights = new float[145];
+        var normals = new byte[448];
+        byte[]? mccv = sourceRgb256 is null ? null : new byte[580];
+        int sourceHeight = sourceRgb256?.GetLength(0) ?? 0;
+        int sourceWidth = sourceRgb256?.GetLength(1) ?? 0;
+
+        for (int sampleIndex = 0; sampleIndex < 145; sampleIndex++)
+        {
+            VerifyResolveStoredSamplePosition(template.IndexX, template.IndexY, sampleIndex, out int sampleX, out int sampleY);
+            heights[sampleIndex] = heightFlat257[(sampleY * ReliefGridSize) + sampleX];
+
+            Vector3 normal = AdtTerrainMath.ComputeNormal(heightFlat257, sampleX, sampleY);
+            int normalOffset = sampleIndex * 3;
+            normals[normalOffset + 0] = EncodeNormalComponent(normal.X);
+            normals[normalOffset + 1] = EncodeNormalComponent(normal.Z);
+            normals[normalOffset + 2] = EncodeNormalComponent(normal.Y);
+
+            if (mccv is not null && sourceRgb256 is not null)
+            {
+                int imageX = Math.Clamp(sampleX, 0, sourceWidth - 1);
+                int imageY = Math.Clamp(sampleY, 0, sourceHeight - 1);
+                int mccvOffset = sampleIndex * 4;
+                // TerrainRenderer's shader computes tintColor = clamp(vertexColor.rgb * 2, 0, 2), so
+                // halving the source byte here recovers it after that x2 unscaling. tintStrength =
+                // clamp(vertexColor.a * 2 - 1, 0, 1): alpha must be 255 for full tint strength, or
+                // the shader blends toward "no tint" instead of showing this color at all.
+                mccv[mccvOffset + 0] = (byte)(sourceRgb256[imageY, imageX, 0] / 2);
+                mccv[mccvOffset + 1] = (byte)(sourceRgb256[imageY, imageX, 1] / 2);
+                mccv[mccvOffset + 2] = (byte)(sourceRgb256[imageY, imageX, 2] / 2);
+                mccv[mccvOffset + 3] = 255;
+            }
+        }
+
+        return new LkMcnkData
+        {
+            IndexX = template.IndexX,
+            IndexY = template.IndexY,
+            Flags = template.Flags,
+            AreaId = template.AreaId,
+            NLayers = template.NLayers,
+            HoleMask = template.HoleMask,
+            BaseHeight = template.BaseHeight,
+            Heights = heights,
+            Normals = normals,
+            ShadowMap = template.ShadowMap,
+            AlphaMapData = template.AlphaMapData,
+            AlphaMapSize = template.AlphaMapSize,
+            Layers = template.Layers,
+            DoodadRefs = template.DoodadRefs,
+            WorldModelRefs = template.WorldModelRefs,
+            LiquidData = template.LiquidData,
+            MccvColors = mccv,
+            MclvLighting = template.MclvLighting,
+            PosX = template.PosX,
+            PosY = template.PosY,
+            PosZ = template.PosZ,
+        };
+    }
+
+    private static byte EncodeNormalComponent(float value) =>
+        unchecked((byte)(sbyte)MathF.Round(Math.Clamp(value, -1f, 1f) * 127f));
 
     private static float[,] LoadReliefHeightmap(string reliefPath, float heightScale, bool noCenter)
     {
