@@ -231,6 +231,141 @@ def build_detailer_stage_run(
     return summary
 
 
+def render_detailer_epoch_preview(
+    *,
+    model,
+    group,
+    coarse_group,
+    selected_rows: list[int],
+    positions: list[int],
+    index: list[dict],
+    device,
+    output: Path,
+    epoch: int,
+    val_mae: float,
+    amp_enabled: bool,
+    amp_dtype,
+) -> None:
+    """Render a comprehensive per-epoch validation sheet showing ALL signals.
+
+    Panels per tile (left to right):
+      1. Minimap RGB (input)
+      2. Coarse relief (frozen upstream input)
+      3. Residual (detailer output, signed)
+      4. Final composition (coarse + residual, clamped)
+      5. Ground truth
+      6. Signed error (final - truth)
+      7. Absolute error
+      8. Liquid mask (if available in store)
+      9. Normal XYZ (if available in store, rendered as RGB)
+
+    Called per-epoch when val_mae improves, so the user can visually track progress
+    during training without waiting for the final evaluation pass.
+    """
+    import torch
+    from PIL import Image, ImageDraw, ImageFont
+
+    from harvester.v50.geometry_detailer_model import compose_final
+    from harvester.v50.height_relative_evaluate import (
+        _absolute_error_rgb,
+        _gray_fixed,
+        _signed_error_rgb,
+        compute_row_metrics,
+    )
+    from harvester.v50.height_relative_model import encode_relative_height
+
+    has_liquid = "liquid_mask" in group
+    has_normals = "normal_xyz" in group
+
+    labels = ["Minimap RGB", "Coarse relief", "Residual (signed)",
+              "Final (coarse+res)", "Ground truth", "Signed error", "Abs error"]
+    if has_liquid:
+        labels.append("Liquid mask")
+    if has_normals:
+        labels.append("Normal XYZ")
+
+    panel_size = 160
+    label_width = 200
+    header_height = 42
+    row_height = panel_size + 4
+    gap = 4
+    width = label_width + (len(labels) * panel_size) + ((len(labels) - 1) * gap)
+    height = header_height + (len(positions) * row_height)
+    canvas = Image.new("RGB", (width, height), (245, 245, 245))
+    draw = ImageDraw.Draw(canvas)
+    try:
+        font = ImageFont.truetype("arial.ttf", 12)
+    except OSError:
+        font = ImageFont.load_default()
+    draw.text((5, 3), f"detailer fixed validation | epoch {epoch} | MAE {val_mae:.6f}",
+              fill=(20, 20, 20), font=font)
+    for column, label in enumerate(labels):
+        x = label_width + column * (panel_size + gap)
+        draw.text((x + 3, 23), label, fill=(30, 30, 30), font=font)
+
+    model.eval()
+    with torch.no_grad():
+        for row_index, position in enumerate(positions):
+            source_row = selected_rows[position]
+            rgb = np.asarray(group["minimap_rgb"][source_row], dtype=np.uint8)
+            coarse = np.asarray(coarse_group[COARSE_ARRAY][position], dtype=np.float32)
+            truth, _, _ = encode_relative_height(np.asarray(group["height_257"][source_row]))
+            tensor = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(device)
+            coarse_t = torch.from_numpy(coarse).unsqueeze(0).to(device)
+            with torch.amp.autocast("cuda", enabled=amp_enabled, dtype=amp_dtype):
+                residual = model(tensor, coarse_t)[0]
+                final = compose_final(coarse_t, residual, clamp=True)[0]
+            predicted = final.float().cpu().numpy()
+            residual_np = residual.float().cpu().numpy()
+            row = index[source_row]
+            metrics = compute_row_metrics(predicted, truth)
+            y = header_height + row_index * row_height
+            label_text = (
+                f"row {source_row}  {row.get('map', '?')}\n"
+                f"MAE {metrics['mae']:.4f}  base {metrics['tile_mean_baseline_mae']:.4f}\n"
+                f"grad {metrics['gradient_mae']:.4f}  border {metrics['border_mae']:.4f}"
+            )
+            draw.multiline_text((5, y + 5), label_text, fill=(20, 20, 20), font=font, spacing=3)
+
+            panels = [
+                np.asarray(rgb, dtype=np.uint8),
+                _gray_fixed(coarse),
+                _signed_error_rgb(residual_np),
+                _gray_fixed(predicted),
+                _gray_fixed(truth),
+                _signed_error_rgb(predicted - truth),
+                _absolute_error_rgb(np.abs(predicted - truth)),
+            ]
+            if has_liquid:
+                liq = np.asarray(group["liquid_mask"][source_row], dtype=np.float32)
+                # Upscale to 257x257 if needed
+                if liq.shape != truth.shape:
+                    liq_t = torch.from_numpy(liq).unsqueeze(0).unsqueeze(0)
+                    liq_t = torch.nn.functional.interpolate(liq_t, size=truth.shape, mode="nearest")
+                    liq = liq_t.squeeze(0).squeeze(0).numpy()
+                liq_rgb = np.stack([liq * 255, liq * 100, liq * 255], axis=-1).astype(np.uint8)
+                panels.append(liq_rgb)
+            if has_normals:
+                nrm = np.asarray(group["normal_xyz"][source_row], dtype=np.float32)
+                # Normals are (H, W, 3) in [-1, 1] — map to [0, 255]
+                nrm_rgb = np.clip((nrm + 1.0) * 127.5, 0, 255).astype(np.uint8)
+                if nrm_rgb.shape[:2] != truth.shape:
+                    nrm_t = torch.from_numpy(nrm_rgb.astype(np.float32)).permute(2, 0, 1).unsqueeze(0)
+                    nrm_t = torch.nn.functional.interpolate(nrm_t, size=truth.shape, mode="nearest")
+                    nrm_rgb = nrm_t.squeeze(0).permute(1, 2, 0).numpy().astype(np.uint8)
+                panels.append(nrm_rgb)
+
+            for column, panel in enumerate(panels):
+                image = Image.fromarray(panel, mode="RGB").resize(
+                    (panel_size, panel_size), Image.Resampling.BILINEAR
+                )
+                x = label_width + column * (panel_size + gap)
+                canvas.paste(image, (x, y))
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output)
+
+
 def main() -> int:
     import pyarrow.parquet as pq
     import torch
@@ -553,6 +688,16 @@ def main() -> int:
             best = val_mae
             stale = 0
             torch.save(checkpoint, args.output / "checkpoint_best.pt")
+            preview_dir = args.output / "validation" / "best_previews"
+            preview_dir.mkdir(parents=True, exist_ok=True)
+            render_detailer_epoch_preview(
+                model=model, group=group, coarse_group=coarse_group,
+                selected_rows=selected_rows, positions=fixed_preview_positions,
+                index=index, device=device,
+                output=preview_dir / f"epoch_{epoch:04d}.png",
+                epoch=epoch, val_mae=val_mae,
+                amp_enabled=args.amp, amp_dtype=amp_dtype,
+            )
         elif args.val_tolerance > 0 and val_mae <= best * (1.0 + args.val_tolerance):
             # Within tolerance band of best: model is still in a productive region.
             # Reset stale but don't update best (only strict improvement saves a checkpoint).
