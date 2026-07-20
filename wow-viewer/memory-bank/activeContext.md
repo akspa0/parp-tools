@@ -68,19 +68,19 @@ Last updated: 2026-07-20
   "produce correct edge/curvature statistics" regardless of object/liquid channel cleanliness.
   Decision: port all five as loss-only flags into the detailer trainer (T063), not the 117M V7
   architecture (wrong constitution/scale).
-- **T063 DONE**: multi-frequency band-split loss stack implemented in `spectral_guidance.py` —
-  five new loss-only terms ported from V7/V25 to the v50 single-channel (B, H, W) API: full 2D
-  log-magnitude FFT L1 (`frequency_loss_2d`), 5-point Laplacian curvature L1 (`laplacian_loss`),
-  Sobel edge magnitude L1 (`sobel_edge_loss`), transition-focus weighted L1
-  (`transition_focus_loss`, 3× at gradient transitions), and LF/HF band split via radial FFT cutoff
-  (`frequency_split_loss`, returns `(lf_loss, hf_loss)`). All wired behind flags in
-  `geometry_detailer_train.py` (default 0 = parity): `--frequency-2d-weight`, `--laplacian-weight`,
-  `--edge-weight`, `--transition-focus-weight`, `--band-lf-weight`, `--band-hf-weight`,
-  `--band-cutoff`. 17 spectral tests + 16 detailer tests pass; Ruff clean. No model architecture
-  change, no deployment-input change, no aux head — one-output constitution preserved.
-- Next: user-run `detailer-mit_b0-authored-v2-bandsplit` ablation. Dual-view `--source all` stays
-  gated on the Spec 113 NoonWhiteGlobal rerender; object-mask phase starts only after geometry
-  promotion.
+- **T063 DONE + USER-RUN COMPLETE**: multi-frequency band-split loss stack implemented in
+  `spectral_guidance.py` (5 new loss-only terms from V7/V25) and user-run
+  `detailer-mit_b0-authored-v2-bandsplit`: best epoch 89, val MAE 0.170494 vs coarse-only 0.187800
+  (9.2% relative), gate=True, sc002=True. User visual verdict: "visually stunning, very very close."
+  The band-split loss stack produced a significant visual quality jump over v1 despite a small
+  numeric improvement (0.170665 → 0.170494). Run used bf16 AMP, val-tolerance 0.01,
+  liquid-mask-weight 0.5, per-epoch validation previews (9-panel comprehensive sheets).
+  Also added: `--amp-dtype bf16` (both trainers), `--val-tolerance` (noise-robust early stopping),
+  `--liquid-mask-weight` (loss masking in liquid regions), per-epoch detailer validation previews
+  showing all signals (minimap, coarse, residual, final, truth, errors, liquid mask, normals).
+- Next: user visual promotion gate for bandsplit-v2. Dual-view `--source all` stays gated on the
+  Spec 113 NoonWhiteGlobal rerender; object-mask phase starts only after geometry promotion.
+  If more training is needed, increase `--epochs` (val_mae was still improving at epoch 100).
 - Source-image UV projection provides immediate mesh texture. Object cleanup, terrain semantics,
   editable texture families, and alpha remain later independent models with separate checkpoints.
 
