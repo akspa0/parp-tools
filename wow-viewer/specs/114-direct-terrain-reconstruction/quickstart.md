@@ -244,6 +244,35 @@ over `coarse_only`, SC-002, and your visual review of the fixed/quantile/worst s
 `model_stage_run.json` records `upstream_models` naming the coarse checkpoint, so the detailer is
 independently replaceable — swap the coarse checkpoint, re-materialize, retrain only the detailer.
 
+### Band-split ablation — V7's multi-frequency structural prior (T063)
+
+The detailer-v1 run cleared the gate (9.1% improvement) but the user observed the output is "not
+quite baked enough yet." T062 found that V7 (April 2026, the most successful terrain model to
+date) had four structural loss terms the current detailer lacks: full 2D frequency, Laplacian
+curvature, Sobel edge, and transition-focus weighting. V25 added an explicit LF/HF band split.
+All five are now available as loss-only flags (default 0 = current parity):
+
+```powershell
+uv run python scripts/v50_train_geometry_detailer.py `
+  --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
+  --coarse-store ../output/datasets/v50/v50.1/coarse-mit_b0-authored-v1.zarr `
+  --source authored `
+  --run-id detailer-mit_b0-authored-v2-bandsplit `
+  --output ../output/v50/v50.1/direct_geometry/detailer-mit_b0-authored-v2-bandsplit `
+  --epochs 100 --batch 16 --workers 0 --patience 15 --seed 114 `
+  --amp --lr-schedule onecycle --clip 1.0 `
+  --spectral-weight 0.1 --multiscale-weight 0.25 `
+  --frequency-2d-weight 0.1 --laplacian-weight 0.1 --edge-weight 0.1 `
+  --transition-focus-weight 0.1 --band-lf-weight 0.3 --band-hf-weight 0.2
+
+# Then add --confirm-run to launch.
+```
+
+The weights above are a starting point for ablation, not a tuned recipe. The LF/HF split uses
+`--band-cutoff 0.1` (lowest 10% of frequencies = LF structure, rest = HF detail) by default. All
+five terms operate on the final composition (coarse + residual), are training-only, and add no
+deployment inputs or auxiliary heads — the one-output constitution is preserved.
+
 ## Deployment inference — tiles the model never saw (FR-015)
 
 The geometry model has no tile-identity input: any authored 256x256 minimap tile runs through the

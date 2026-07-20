@@ -59,7 +59,15 @@ from harvester.v50.model_stage_contract import (
     identity_for_path,
     validate_model_stage_run,
 )
-from harvester.v50.spectral_guidance import multiscale_gradient_loss, radial_spectral_loss
+from harvester.v50.spectral_guidance import (
+    frequency_loss_2d,
+    frequency_split_loss,
+    laplacian_loss,
+    multiscale_gradient_loss,
+    radial_spectral_loss,
+    sobel_edge_loss,
+    transition_focus_loss,
+)
 
 STAGE = "direct_geometry"
 OUTPUT_SIGNAL = "residual_relief_257"
@@ -140,6 +148,13 @@ def build_detailer_plan(
     clip: float,
     spectral_weight: float,
     multiscale_weight: float,
+    frequency_2d_weight: float,
+    laplacian_weight: float,
+    edge_weight: float,
+    transition_focus_weight: float,
+    band_lf_weight: float,
+    band_hf_weight: float,
+    band_cutoff: float,
 ) -> dict:
     if batch_size < 1 or epochs < 1:
         raise TrainerContractError("batch size and epochs must both be positive")
@@ -160,7 +175,17 @@ def build_detailer_plan(
         "lr_schedule": lr_schedule,
         "amp": amp,
         "grad_clip": clip,
-        "guidance": {"spectral_weight": spectral_weight, "multiscale_weight": multiscale_weight},
+        "guidance": {
+            "spectral_weight": spectral_weight,
+            "multiscale_weight": multiscale_weight,
+            "frequency_2d_weight": frequency_2d_weight,
+            "laplacian_weight": laplacian_weight,
+            "edge_weight": edge_weight,
+            "transition_focus_weight": transition_focus_weight,
+            "band_lf_weight": band_lf_weight,
+            "band_hf_weight": band_hf_weight,
+            "band_cutoff": band_cutoff,
+        },
         "train_steps_per_epoch": math.ceil(train_rows / batch_size),
         "deployment_inputs": ["minimap_rgb", "generated_coarse_relief"],
         "training_target": "relative_height_257 - generated coarse (residual, v112.1 space)",
@@ -227,6 +252,20 @@ def main() -> int:
     ap.add_argument("--clip", type=float, default=0.0)
     ap.add_argument("--spectral-weight", type=float, default=0.0)
     ap.add_argument("--multiscale-weight", type=float, default=0.0)
+    ap.add_argument("--frequency-2d-weight", type=float, default=0.0,
+                    help="V7 full 2D log-magnitude FFT L1 weight (directional structure)")
+    ap.add_argument("--laplacian-weight", type=float, default=0.0,
+                    help="V7 5-point Laplacian curvature L1 weight")
+    ap.add_argument("--edge-weight", type=float, default=0.0,
+                    help="V7 Sobel edge magnitude L1 weight")
+    ap.add_argument("--transition-focus-weight", type=float, default=0.0,
+                    help="V7 transition-focus weighted L1 weight (up-weights terrain transitions)")
+    ap.add_argument("--band-lf-weight", type=float, default=0.0,
+                    help="V25 LF band-split loss weight (low-frequency structure)")
+    ap.add_argument("--band-hf-weight", type=float, default=0.0,
+                    help="V25 HF band-split loss weight (high-frequency detail)")
+    ap.add_argument("--band-cutoff", type=float, default=0.1,
+                    help="V25 radial FFT cutoff fraction for LF/HF split (0.1 = lowest 10%%)")
     ap.add_argument("--workers", type=int, choices=[0], default=0)
     ap.add_argument("--patience", type=int, default=15)
     ap.add_argument("--seed", type=int, default=114)
@@ -290,6 +329,13 @@ def main() -> int:
         clip=args.clip,
         spectral_weight=args.spectral_weight,
         multiscale_weight=args.multiscale_weight,
+        frequency_2d_weight=args.frequency_2d_weight,
+        laplacian_weight=args.laplacian_weight,
+        edge_weight=args.edge_weight,
+        transition_focus_weight=args.transition_focus_weight,
+        band_lf_weight=args.band_lf_weight,
+        band_hf_weight=args.band_hf_weight,
+        band_cutoff=args.band_cutoff,
     )
     print(json.dumps(plan, indent=2), flush=True)
     if not args.confirm_run:
@@ -371,6 +417,13 @@ def main() -> int:
             "point": "smooth_l1", "gradient_l1_weight": 0.25,
             "spectral_weight": args.spectral_weight,
             "multiscale_weight": args.multiscale_weight,
+            "frequency_2d_weight": args.frequency_2d_weight,
+            "laplacian_weight": args.laplacian_weight,
+            "edge_weight": args.edge_weight,
+            "transition_focus_weight": args.transition_focus_weight,
+            "band_lf_weight": args.band_lf_weight,
+            "band_hf_weight": args.band_hf_weight,
+            "band_cutoff": args.band_cutoff,
             "on": "final composition (coarse + residual), unclamped",
         },
         "schedule": {
@@ -405,6 +458,27 @@ def main() -> int:
                     loss = loss + args.multiscale_weight * multiscale_gradient_loss(
                         final.float(), truth_d.float()
                     )
+                if args.frequency_2d_weight > 0:
+                    loss = loss + args.frequency_2d_weight * frequency_loss_2d(
+                        final.float(), truth_d.float()
+                    )
+                if args.laplacian_weight > 0:
+                    loss = loss + args.laplacian_weight * laplacian_loss(
+                        final.float(), truth_d.float()
+                    )
+                if args.edge_weight > 0:
+                    loss = loss + args.edge_weight * sobel_edge_loss(
+                        final.float(), truth_d.float()
+                    )
+                if args.transition_focus_weight > 0:
+                    loss = loss + args.transition_focus_weight * transition_focus_loss(
+                        final.float(), truth_d.float()
+                    )
+                if args.band_lf_weight > 0 or args.band_hf_weight > 0:
+                    lf_loss, hf_loss = frequency_split_loss(
+                        final.float(), truth_d.float(), cutoff=args.band_cutoff
+                    )
+                    loss = loss + args.band_lf_weight * lf_loss + args.band_hf_weight * hf_loss
             scaler.scale(loss).backward()
             if args.clip > 0:
                 scaler.unscale_(opt)

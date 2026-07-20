@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-19
+Last updated: 2026-07-20
 
 ## Active work: Spec 114 direct minimap-to-terrain (original zarr-based spec restored)
 
@@ -68,9 +68,19 @@ Last updated: 2026-07-19
   "produce correct edge/curvature statistics" regardless of object/liquid channel cleanliness.
   Decision: port all five as loss-only flags into the detailer trainer (T063), not the 117M V7
   architecture (wrong constitution/scale).
-- Next: T063 — implement the multi-frequency band-split loss stack in the detailer trainer, then
-  user-run `detailer-mit_b0-authored-v2-bandsplit`. Dual-view `--source all` stays gated on the
-  Spec 113 NoonWhiteGlobal rerender; object-mask phase starts only after geometry promotion.
+- **T063 DONE**: multi-frequency band-split loss stack implemented in `spectral_guidance.py` —
+  five new loss-only terms ported from V7/V25 to the v50 single-channel (B, H, W) API: full 2D
+  log-magnitude FFT L1 (`frequency_loss_2d`), 5-point Laplacian curvature L1 (`laplacian_loss`),
+  Sobel edge magnitude L1 (`sobel_edge_loss`), transition-focus weighted L1
+  (`transition_focus_loss`, 3× at gradient transitions), and LF/HF band split via radial FFT cutoff
+  (`frequency_split_loss`, returns `(lf_loss, hf_loss)`). All wired behind flags in
+  `geometry_detailer_train.py` (default 0 = parity): `--frequency-2d-weight`, `--laplacian-weight`,
+  `--edge-weight`, `--transition-focus-weight`, `--band-lf-weight`, `--band-hf-weight`,
+  `--band-cutoff`. 17 spectral tests + 16 detailer tests pass; Ruff clean. No model architecture
+  change, no deployment-input change, no aux head — one-output constitution preserved.
+- Next: user-run `detailer-mit_b0-authored-v2-bandsplit` ablation. Dual-view `--source all` stays
+  gated on the Spec 113 NoonWhiteGlobal rerender; object-mask phase starts only after geometry
+  promotion.
 - Source-image UV projection provides immediate mesh texture. Object cleanup, terrain semantics,
   editable texture families, and alpha remain later independent models with separate checkpoints.
 
