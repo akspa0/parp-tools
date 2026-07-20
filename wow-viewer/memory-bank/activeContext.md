@@ -44,9 +44,21 @@ Last updated: 2026-07-19
   log-power L1 (DC-removed; spectral slope = fractal-dimension proxy) and multi-octave gradient L1,
   wired into `direct_geometry_train.py` as `--spectral-weight`/`--multiscale-weight` (default 0 =
   bootstrap parity). No aux head (one-output constitution), no deployment change.
-- Proof: full v50 suite 257 passed / 4 skipped; Ruff clean. Next user-owned run:
-  `mit_b0-authored-v2-spectral` (150 epochs, spectral 0.1 / multiscale 0.25) per the quickstart,
-  then dual-view once the Spec 113 NoonWhiteGlobal rerender lands.
+- **`mit_b0-authored-v2-spectral` (user-run) done**: best epoch 130, val MAE 0.193435, SC-001
+  false, SC-002 true. Visually sharper structure (islands/ridges) at a small MAE cost; both runs
+  plateau at ≈0.19 with train loss ≈0.016 — the single stage is capacity-saturated at 1,384
+  tiles. More epochs/loss tuning is not the lever.
+- **Residual detailer stage implemented (T058-T060)**: `direct_geometry_materialize.py` +
+  `v50_materialize_coarse_relief.py` (frozen checkpoint → derived `coarse_relief` Zarr bound to
+  checkpoint hash, source stores immutable, 1:1 row alignment validated);
+  `geometry_detailer_model.py` (U-Net-lite residual refiner, RGB + generated coarse → one
+  residual field, zero-init head so epoch 1 starts AT the coarse baseline);
+  `geometry_detailer_train.py` + `v50_train_geometry_detailer.py` (coarse-only strong baseline,
+  ≥5% relative gate, SC-002, fixed/quantile/worst sheets, `upstream_models` provenance in
+  `model_stage_run.json`). 16 focused tests; full v50 suite 273 passed / 4 skipped; Ruff clean.
+- Next user-owned: T061 — materialize `mit_b0-authored-v1`'s outputs, then train
+  `detailer-mit_b0-authored-v1` (quickstart commands). Dual-view `--source all` stays gated on
+  the Spec 113 NoonWhiteGlobal rerender; object-mask phase starts only after geometry promotion.
 - Source-image UV projection provides immediate mesh texture. Object cleanup, terrain semantics,
   editable texture families, and alpha remain later independent models with separate checkpoints.
 

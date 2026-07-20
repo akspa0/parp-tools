@@ -150,6 +150,38 @@ prediction, penalty on smoothing, fractal-vs-white-noise discrimination, DC inva
 differentiability) plus a user-run v2 comparison against this run's frozen metrics. Deployment
 inference (T056) is now implemented for loose 256x256 tiles with per-tile hash-bound manifests.
 
+### Decision: residual detailer stage after the v1/v2 plateau
+
+**Evidence (2026-07-20)**: `mit_b0-authored-v2-spectral` (150 epochs, spectral 0.1 / multiscale
+0.25) reached best epoch 130, val MAE 0.193435 — versus v1's 0.187802. Both runs plateau at
+≈0.19 while train loss sits at ≈0.016: the single stage has extracted what 1,384 tiles can teach
+it, and more epochs/loss tuning is not the lever. The spectral term visibly sharpened structure
+(islands, ridge lines) at a small MAE cost, confirming that per-pixel MAE and perceived detail are
+now dominated by different parts of the signal.
+
+**Decision**: add one independent residual detailer stage, per constitution IV (RULE 7):
+
+- Upstream: a FROZEN coarse geometry checkpoint. Its predictions over every selected curriculum
+  row (train and val) are materialized into a derived `coarse_relief` Zarr array bound to the
+  checkpoint hash. Source stores stay immutable; the derived store records full lineage.
+- Detailer input: minimap RGB + the GENERATED coarse field (never ground-truth height as input).
+  Detailer output: exactly one residual signal (`truth − coarse` in `v112.1` space). Final relief
+  is `coarse + residual`, clamped to [0, 1] only for metrics/artifacts.
+- Split discipline: the frozen source-group split is reused unchanged. The coarse checkpoint never
+  trained on val rows, so its val predictions are honest upstream outputs; the detailer trains on
+  generated coarse outputs (including their errors), never teacher-forced truth.
+- Baseline: coarse-only (residual ≡ 0) is the mandatory strong baseline, alongside flat/tile-mean
+  and the frozen Spec 112 run. Promotion requires ≥5% relative val-MAE improvement over
+  coarse-only, SC-002, and the user's visual gate, recorded as a `v50-model-stage-run-v1` document
+  with `upstream_models` naming the coarse checkpoint.
+- The detailer is separately replaceable: swapping the coarse checkpoint re-materializes the
+  derived store and retrains only the detailer.
+
+**Rejected**: (a) simply training longer — plateaued with stale 20/20; (b) feeding ground-truth
+height or normals as detailer input — deployment contract violation; (c) a single deeper model —
+violates the small-modular-residual rule and forfeits independent replaceability; (d) per-tile
+amplitude rescaling of predictions — metric cosmetics, not learned structure.
+
 **Reverted detour (2026-07-19)**: an unauthorized "universal arbitrary-raster" reset briefly
 replaced this spec with a DINOv2 student, a DPT-Hybrid/MiDaS pseudo-label teacher, and broad
 third-party image folders. That route was reverted: the deployment contract is the authored WoW

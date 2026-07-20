@@ -70,15 +70,17 @@ authored minimap RGB
         │
         ├── object-mask model ──> generated object visibility/cleanup signal
         │                               │
-        ├───────────────────────────────┴──> direct geometry model ──> relative_height_257
-        │
+        ├───────────────────────────────┴──> direct geometry model ──> coarse relative relief
+        │                                                               │
+        ├──────────────────────────────> residual detailer ──> final relative_height_257
+        │                               (RGB + generated coarse)
         └── land-feature model ──> generated feature classes
                                          │
                                          └── texture-family selector ──> ordered family IDs
-                                                                              │
+                                                                               │
 authored RGB + generated feature/family signals ──────────────────────────────┴──> alpha model
-                                                                                     │
-                                                                                     └── alpha_256x4
+                                                                                      │
+                                                                                      └── alpha_256x4
 ```
 
 This is a dependency graph, not a shared network. Each arrow carries a persisted/generated signal

@@ -43,10 +43,20 @@ Last updated: 2026-07-19
 - Spectral guidance (Spec 068 US1 revived as loss-only): radial log-power + multi-octave gradient
   terms behind `--spectral-weight`/`--multiscale-weight` (default 0). Full v50 suite 257 passed /
   4 skipped; Ruff clean.
-- Next (user-owned): T057 `mit_b0-authored-v2-spectral` run (quickstart command, 150 epochs,
-  spectral 0.1 / multiscale 0.25) compared against frozen v1 metrics; T010 curriculum build
-  dry run + `--write`; dual-view `--source all` stays gated on the Spec 113 NoonWhiteGlobal
-  rerender; object-mask phase starts only after geometry promotion.
+- **`mit_b0-authored-v2-spectral` (user-run) done**: best epoch 130, val MAE 0.193435, SC-001
+  false, SC-002 true. Both coarse runs plateau at ≈0.19 (train loss ≈0.016): single-stage
+  capacity saturated at 1,384 tiles. Spectral term sharpened structure visually at small MAE
+  cost — MAE and perceived detail now measure different things.
+- **Residual detailer stage (T058-T060) implemented**: coarse-output materializer (frozen
+  checkpoint → derived `coarse_relief` Zarr, checkpoint-hash-bound, source stores immutable,
+  1:1 row alignment validated), residual U-Net-lite detailer (RGB + generated coarse → one
+  residual field; zero-init head starts AT coarse baseline), and detailer trainer (coarse-only
+  strong baseline, ≥5% relative gate, SC-002, fixed/quantile/worst sheets, `upstream_models`
+  provenance). 16 focused tests; full v50 suite 273 passed / 4 skipped; Ruff clean.
+- Next (user-owned): T061 — materialize `mit_b0-authored-v1`'s outputs, then train
+  `detailer-mit_b0-authored-v1` (quickstart commands). T010 curriculum build dry run + `--write`;
+  dual-view `--source all` stays gated on the Spec 113 NoonWhiteGlobal rerender; object-mask
+  phase starts only after geometry promotion.
 - Phase order is fail-closed: corrected dual-view curriculum → direct geometry bakeoff → trusted
   object visibility → feature library → texture families → alpha. The user owns all heavy
   builds/training. Spec 113 still owns RealPLKSR/detail.

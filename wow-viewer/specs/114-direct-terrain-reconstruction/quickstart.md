@@ -192,6 +192,58 @@ The `--source all` dual-view variants of these commands stay fail-closed until G
 pretrained MiT encoder weights remain an optional FR-013 ablation (`--mit-pretrained` with pinned
 `--mit-revision`/`--mit-sha256`), never the default.
 
+## Residual detailer stage — the next lever after the v1/v2 plateau
+
+Both coarse runs plateau at val MAE ≈0.19 while train loss sits at ≈0.016: the single stage has
+extracted what 1,384 tiles can teach it. The detailer is a small independent residual refiner
+(constitution IV) that takes RGB + the FROZEN coarse model's generated output and predicts only
+`truth − coarse`. Final relief is `coarse + residual`. The coarse-only composition is the strong
+baseline the detailer must beat by ≥5%.
+
+**Step 1 — materialize the frozen coarse checkpoint's outputs** (CPU, seconds-to-minutes depending
+on row count; dry run first):
+
+```powershell
+uv run python scripts/v50_materialize_coarse_relief.py `
+  --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
+  --checkpoint ../output/v50/v50.1/direct_geometry/mit_b0-authored-v1/checkpoint_best.pt `
+  --output ../output/datasets/v50/v50.1/coarse-mit_b0-authored-v1.zarr `
+  --source authored --device cpu
+
+# Then add --write to persist the derived coarse store (refuses to overwrite).
+uv run python scripts/v50_materialize_coarse_relief.py `
+  --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
+  --checkpoint ../output/v50/v50.1/direct_geometry/mit_b0-authored-v1/checkpoint_best.pt `
+  --output ../output/datasets/v50/v50.1/coarse-mit_b0-authored-v1.zarr `
+  --source authored --device cpu --write
+```
+
+The dry run prints the plan (selected rows, split counts, checkpoint hash, output shape); verify
+`selected_rows` matches the coarse trainer's row count and the checkpoint hash matches
+`run_identity.json` before writing.
+
+**Step 2 — train the detailer** (USER runs CUDA; dry run first):
+
+```powershell
+uv run python scripts/v50_train_geometry_detailer.py `
+  --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v1.zarr `
+  --coarse-store ../output/datasets/v50/v50.1/coarse-mit_b0-authored-v1.zarr `
+  --source authored `
+  --run-id detailer-mit_b0-authored-v1 `
+  --output ../output/v50/v50.1/direct_geometry/detailer-mit_b0-authored-v1 `
+  --epochs 100 --batch 16 --workers 0 --patience 15 --seed 114 `
+  --amp --lr-schedule onecycle --clip 1.0 `
+  --spectral-weight 0.1 --multiscale-weight 0.25
+
+# Then add --confirm-run to launch.
+```
+
+The detailer starts AT the coarse baseline (zero-initialized head), so epoch 1 should already
+match `coarse_only` and improve from there. Promotion requires ≥5% relative val-MAE improvement
+over `coarse_only`, SC-002, and your visual review of the fixed/quantile/worst sheets. The
+`model_stage_run.json` records `upstream_models` naming the coarse checkpoint, so the detailer is
+independently replaceable — swap the coarse checkpoint, re-materialize, retrain only the detailer.
+
 ## Deployment inference — tiles the model never saw (FR-015)
 
 The geometry model has no tile-identity input: any authored 256x256 minimap tile runs through the

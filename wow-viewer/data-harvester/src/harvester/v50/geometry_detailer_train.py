@@ -1,0 +1,578 @@
+"""Spec 114 T060: residual detailer trainer (USER runs CUDA).
+
+Trains the detailer on GENERATED coarse outputs: minimap RGB + the frozen upstream checkpoint's
+materialized ``coarse_relief`` -> one residual field; final relief = coarse + residual. The
+coarse-only composition (residual ≡ 0) is the mandatory strong baseline, reported in-run from
+validation truth — the detailer must beat it by ≥5% relative val MAE, alongside the flat,
+tile-mean, and frozen Spec 112 references already owned by the coarse stage.
+
+Split discipline: the derived coarse store's index is validated to align 1:1 with the selected
+source rows, so the detailer reuses the exact frozen source-group split. The upstream checkpoint
+never trained on val rows, so its val predictions are honest generated outputs.
+
+Artifacts mirror the coarse trainer (plan, run identity, both checkpoints, fixed previews, per-row
+metrics, quantile/worst sheets) plus ``model_stage_run.json`` with ``upstream_models`` naming the
+coarse checkpoint — the detailer is replaceable without retraining anything else.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+from datetime import UTC, datetime
+from pathlib import Path
+
+import numpy as np
+
+from harvester.v50.contracts import release_identity, require_store_release, validate_release
+from harvester.v50.direct_geometry_materialize import COARSE_ARRAY, COARSE_STORE_SCHEMA
+from harvester.v50.geometry_detailer_model import (
+    DETAILER_ARCHITECTURE_ID,
+    GeometryDetailerNet,
+    compose_final,
+    detailer_identity,
+)
+from harvester.v50.height_relative_evaluate import (
+    compute_row_metrics,
+    render_validation_sheet,
+    select_error_quantile_rows,
+    select_fixed_preview_rows,
+)
+from harvester.v50.height_relative_model import (
+    TARGET_CONTRACT_VERSION,
+    encode_relative_height,
+    height_loss,
+)
+from harvester.v50.height_relative_train import (
+    SOURCE_CHOICES,
+    TrainerContractError,
+    compute_tile_mean_baseline,
+    curriculum_identity,
+    require_new_output,
+    select_training_rows,
+    validate_curriculum_contract,
+    validate_source_selection,
+)
+from harvester.v50.model_stage_contract import (
+    ContractViolationError,
+    identity_for_path,
+    validate_model_stage_run,
+)
+from harvester.v50.spectral_guidance import multiscale_gradient_loss, radial_spectral_loss
+
+STAGE = "direct_geometry"
+OUTPUT_SIGNAL = "residual_relief_257"
+SPEC112_FROZEN_BEST_VAL_MAE = 0.1492665126
+DETAILER_RELATIVE_MARGIN = 0.05
+LR_SCHEDULES = frozenset({"constant", "onecycle"})
+
+
+def validate_coarse_store(
+    *,
+    attrs: dict,
+    coarse_index_rows: list[dict],
+    coarse_array_rows: int,
+    selected: list[int],
+    source: str,
+) -> None:
+    """Fail closed unless the derived store aligns 1:1 with the selected source rows."""
+    if attrs.get("schema") != COARSE_STORE_SCHEMA:
+        raise TrainerContractError(
+            f"coarse store schema must be {COARSE_STORE_SCHEMA!r}, got {attrs.get('schema')!r}"
+        )
+    if attrs.get("source_filter") != source:
+        raise TrainerContractError(
+            f"coarse store was materialized with source filter {attrs.get('source_filter')!r}, "
+            f"but this run selects {source!r}"
+        )
+    if coarse_array_rows != len(selected) or len(coarse_index_rows) != len(selected):
+        raise TrainerContractError(
+            f"coarse store row count ({coarse_array_rows} array / {len(coarse_index_rows)} index) "
+            f"does not match the {len(selected)} selected source rows"
+        )
+    misaligned = [
+        position
+        for position, row in enumerate(coarse_index_rows)
+        if int(row.get("source_row_index", -1)) != selected[position]
+    ]
+    if misaligned:
+        raise TrainerContractError(
+            f"coarse store index does not align with selected source rows at positions "
+            f"{misaligned[:5]}; re-materialize from the same curriculum and source filter"
+        )
+
+
+def compute_coarse_baseline(coarse: list[np.ndarray], targets: list[np.ndarray]) -> float:
+    """Val MAE of the upstream composition alone — the strong baseline the detailer must beat."""
+    if not coarse or len(coarse) != len(targets):
+        raise TrainerContractError("coarse baseline requires one coarse field per validation target")
+    return float(np.mean([float(np.abs(c - t).mean()) for c, t in zip(coarse, targets, strict=True)]))
+
+
+def evaluate_detailer_gate(*, best_val_mae: float, coarse_baseline: float) -> dict:
+    """The detailer promotion gate: ≥5% relative improvement over the coarse-only composition."""
+    threshold = coarse_baseline * (1.0 - DETAILER_RELATIVE_MARGIN)
+    return {
+        "best_val_mae": best_val_mae,
+        "coarse_only_baseline": coarse_baseline,
+        "relative_margin_required": DETAILER_RELATIVE_MARGIN,
+        "threshold": threshold,
+        "beats_coarse_only": best_val_mae <= threshold,
+        "passes": best_val_mae <= threshold,
+    }
+
+
+def build_detailer_plan(
+    *,
+    architecture: dict,
+    upstream: dict,
+    source: str,
+    selected_rows: int,
+    train_rows: int,
+    val_rows: int,
+    batch_size: int,
+    epochs: int,
+    seed: int,
+    lr: float,
+    lr_schedule: str,
+    amp: bool,
+    clip: float,
+    spectral_weight: float,
+    multiscale_weight: float,
+) -> dict:
+    if batch_size < 1 or epochs < 1:
+        raise TrainerContractError("batch size and epochs must both be positive")
+    if lr_schedule not in LR_SCHEDULES:
+        raise TrainerContractError(f"lr schedule must be one of {sorted(LR_SCHEDULES)}")
+    return {
+        "schema": "v114-detailer-plan-v1",
+        "stage": STAGE,
+        "architecture": architecture,
+        "upstream_coarse_checkpoint": upstream,
+        "source_filter": source,
+        "selected_rows": selected_rows,
+        "split_counts": {"train": train_rows, "val": val_rows},
+        "batch_size": batch_size,
+        "epochs": epochs,
+        "seed": seed,
+        "optimizer": {"name": "AdamW", "learning_rate": lr, "weight_decay": 1e-4},
+        "lr_schedule": lr_schedule,
+        "amp": amp,
+        "grad_clip": clip,
+        "guidance": {"spectral_weight": spectral_weight, "multiscale_weight": multiscale_weight},
+        "train_steps_per_epoch": math.ceil(train_rows / batch_size),
+        "deployment_inputs": ["minimap_rgb", "generated_coarse_relief"],
+        "training_target": "relative_height_257 - generated coarse (residual, v112.1 space)",
+        "wdl_prior": False,
+        "teacher_forced_truth_inputs": False,
+    }
+
+
+def build_detailer_stage_run(
+    *,
+    run_id: str,
+    architecture: dict,
+    upstream_identity: dict,
+    curriculum: dict,
+    checkpoint: dict,
+    baselines: dict,
+    metrics: dict,
+    visual_evidence: dict,
+    created_utc: str | None = None,
+) -> dict:
+    summary = {
+        "schema": "v50-model-stage-run-v1",
+        "run_id": run_id,
+        "created_utc": created_utc or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "stage": STAGE,
+        "output_signal": OUTPUT_SIGNAL,
+        "architecture": architecture,
+        "pretrained_source": None,
+        "curriculum": curriculum,
+        "upstream_models": [upstream_identity],
+        "checkpoint": checkpoint,
+        "baselines": baselines,
+        "metrics": metrics,
+        "visual_evidence": visual_evidence,
+        "promotion_verdict": "pending",
+    }
+    try:
+        validate_model_stage_run(summary)
+    except ContractViolationError as exc:
+        raise TrainerContractError(f"stage-run record violates its own contract: {exc}") from exc
+    return summary
+
+
+def main() -> int:
+    import pyarrow.parquet as pq
+    import torch
+    import zarr
+    from torch.utils.data import DataLoader, Dataset
+
+    ap = argparse.ArgumentParser(description="Spec 114 residual detailer trainer (USER runs CUDA)")
+    ap.add_argument("--store", required=True, type=Path, help="dual-source curriculum store")
+    ap.add_argument("--coarse-store", required=True, type=Path, help="materialized coarse store")
+    ap.add_argument("--output", required=True, type=Path)
+    ap.add_argument("--run-id", required=True)
+    ap.add_argument("--source", required=True, choices=sorted(SOURCE_CHOICES))
+    ap.add_argument("--confirm-run", action="store_true")
+    ap.add_argument("--val-key", default="split")
+    ap.add_argument("--val-value", default="val")
+    ap.add_argument("--epochs", type=int, default=100)
+    ap.add_argument("--batch", type=int, default=16)
+    ap.add_argument("--lr", type=float, default=2e-4)
+    ap.add_argument("--lr-schedule", default="constant", choices=sorted(LR_SCHEDULES))
+    ap.add_argument("--amp", action="store_true")
+    ap.add_argument("--clip", type=float, default=0.0)
+    ap.add_argument("--spectral-weight", type=float, default=0.0)
+    ap.add_argument("--multiscale-weight", type=float, default=0.0)
+    ap.add_argument("--workers", type=int, choices=[0], default=0)
+    ap.add_argument("--patience", type=int, default=15)
+    ap.add_argument("--seed", type=int, default=114)
+    ap.add_argument("--release", default="v50.1", type=validate_release)
+    args = ap.parse_args()
+
+    group = zarr.open_group(str(args.store), mode="r")
+    try:
+        require_store_release(group, args.release, store=args.store)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    index = pq.read_table(args.store / "index.parquet").to_pylist()
+    coarse_group = zarr.open_group(str(args.coarse_store), mode="r")
+    coarse_index = pq.read_table(args.coarse_store / "index.parquet").to_pylist()
+    try:
+        array_lengths = {name: int(group[name].shape[0]) for name in group.array_keys()}
+        validate_curriculum_contract(
+            attrs=dict(group.attrs), array_lengths=array_lengths, index_rows=index
+        )
+        validate_source_selection(attrs=dict(group.attrs), source=args.source)
+        selected_rows = select_training_rows(index, args.source)
+        validate_coarse_store(
+            attrs=dict(coarse_group.attrs),
+            coarse_index_rows=coarse_index,
+            coarse_array_rows=int(coarse_group[COARSE_ARRAY].shape[0]),
+            selected=selected_rows,
+            source=args.source,
+        )
+    except TrainerContractError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    positions = list(range(len(selected_rows)))
+    train_positions = [p for p in positions if str(index[selected_rows[p]].get(args.val_key)) != args.val_value]
+    val_positions = [p for p in positions if str(index[selected_rows[p]].get(args.val_key)) == args.val_value]
+    if len(train_positions) < 32 or len(val_positions) < 8:
+        raise SystemExit(
+            f"insufficient rows: train={len(train_positions)} val={len(val_positions)}"
+        )
+
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    model = GeometryDetailerNet()
+    architecture = detailer_identity(model)
+    upstream_identity = {
+        "path": str(coarse_group.attrs.get("checkpoint_path", "unknown")),
+        "sha256": str(coarse_group.attrs.get("checkpoint_sha256", "0" * 64)),
+    }
+    plan = build_detailer_plan(
+        architecture=architecture,
+        upstream=upstream_identity,
+        source=args.source,
+        selected_rows=len(selected_rows),
+        train_rows=len(train_positions),
+        val_rows=len(val_positions),
+        batch_size=args.batch,
+        epochs=args.epochs,
+        seed=args.seed,
+        lr=args.lr,
+        lr_schedule=args.lr_schedule,
+        amp=args.amp,
+        clip=args.clip,
+        spectral_weight=args.spectral_weight,
+        multiscale_weight=args.multiscale_weight,
+    )
+    print(json.dumps(plan, indent=2), flush=True)
+    if not args.confirm_run:
+        print("DRY RUN ONLY: add --confirm-run to launch user-owned CUDA training.", flush=True)
+        return 0
+    try:
+        require_new_output(args.output)
+    except TrainerContractError as exc:
+        raise SystemExit(str(exc)) from exc
+    if not torch.cuda.is_available():
+        raise SystemExit("CUDA is not available; user-run training refuses CPU.")
+    torch.cuda.manual_seed_all(args.seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
+    class DetailerDataset(Dataset):
+        def __init__(self, rows: list[int]) -> None:
+            self.rows = rows
+
+        def __len__(self) -> int:
+            return len(self.rows)
+
+        def __getitem__(self, i: int):
+            position = self.rows[i]
+            source_row = selected_rows[position]
+            rgb = np.asarray(group["minimap_rgb"][source_row], dtype=np.float32) / 255.0
+            coarse = np.asarray(coarse_group[COARSE_ARRAY][position], dtype=np.float32)
+            truth, _, _ = encode_relative_height(np.asarray(group["height_257"][source_row]))
+            return (
+                torch.from_numpy(rgb).permute(2, 0, 1),
+                torch.from_numpy(coarse),
+                torch.from_numpy(truth),
+            )
+
+    val_coarse = [np.asarray(coarse_group[COARSE_ARRAY][p], dtype=np.float32) for p in val_positions]
+    val_targets = [
+        encode_relative_height(np.asarray(group["height_257"][selected_rows[p]]))[0]
+        for p in val_positions
+    ]
+    coarse_baseline = compute_coarse_baseline(val_coarse, val_targets)
+    tile_mean_baseline = compute_tile_mean_baseline(val_targets)
+    flat_baseline = float(np.mean([float(np.abs(t - 0.5).mean()) for t in val_targets]))
+
+    device = torch.device("cuda")
+    model = model.to(device)
+    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    train_generator = torch.Generator()
+    train_generator.manual_seed(args.seed)
+    train_loader = DataLoader(
+        DetailerDataset(train_positions), batch_size=args.batch, shuffle=True,
+        num_workers=args.workers, pin_memory=True, generator=train_generator,
+    )
+    val_loader = DataLoader(
+        DetailerDataset(val_positions), batch_size=args.batch,
+        num_workers=args.workers, pin_memory=True,
+    )
+    scheduler = None
+    if args.lr_schedule == "onecycle":
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            opt, max_lr=args.lr, epochs=args.epochs, steps_per_epoch=len(train_loader)
+        )
+    scaler = torch.amp.GradScaler("cuda", enabled=args.amp)
+    fixed_preview_positions = select_fixed_preview_rows(val_positions, 8)
+
+    args.output.mkdir(parents=True, exist_ok=True)
+    identity = curriculum_identity(args.store)
+    run_identity = {
+        **release_identity(args.release),
+        "model_variant": DETAILER_ARCHITECTURE_ID,
+        "parameter_count": architecture["parameter_count"],
+        "target_contract_version": TARGET_CONTRACT_VERSION,
+        "source_filter": args.source,
+        "wdl_prior": False,
+        "store": str(args.store.resolve()),
+        "coarse_store": str(args.coarse_store.resolve()),
+        "upstream_coarse_checkpoint": upstream_identity,
+        "optimizer": plan["optimizer"],
+        "loss": {
+            "point": "smooth_l1", "gradient_l1_weight": 0.25,
+            "spectral_weight": args.spectral_weight,
+            "multiscale_weight": args.multiscale_weight,
+            "on": "final composition (coarse + residual), unclamped",
+        },
+        "schedule": {
+            "max_epochs": args.epochs, "batch_size": args.batch, "patience": args.patience,
+            "workers": args.workers, "seed": args.seed, "lr_schedule": args.lr_schedule,
+            "amp": args.amp, "grad_clip": args.clip,
+        },
+    }
+    (args.output / "training_plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
+    (args.output / "run_identity.json").write_text(json.dumps(run_identity, indent=2), encoding="utf-8")
+
+    per_epoch: list[dict] = []
+    best = float("inf")
+    stale = 0
+    for epoch in range(1, args.epochs + 1):
+        model.train()
+        train_losses = []
+        for rgb, coarse, truth in train_loader:
+            opt.zero_grad(set_to_none=True)
+            with torch.amp.autocast("cuda", enabled=args.amp):
+                rgb_d = rgb.to(device)
+                coarse_d = coarse.to(device)
+                truth_d = truth.to(device)
+                residual = model(rgb_d, coarse_d)
+                final = compose_final(coarse_d, residual, clamp=False)
+                loss = height_loss(final, truth_d)
+                if args.spectral_weight > 0:
+                    loss = loss + args.spectral_weight * radial_spectral_loss(
+                        final.float(), truth_d.float()
+                    )
+                if args.multiscale_weight > 0:
+                    loss = loss + args.multiscale_weight * multiscale_gradient_loss(
+                        final.float(), truth_d.float()
+                    )
+            scaler.scale(loss).backward()
+            if args.clip > 0:
+                scaler.unscale_(opt)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+            scaler.step(opt)
+            scaler.update()
+            if scheduler is not None:
+                scheduler.step()
+            train_losses.append(float(loss.detach().item()))
+        model.eval()
+        val_absolute_error = 0.0
+        val_elements = 0
+        with torch.no_grad(), torch.amp.autocast("cuda", enabled=args.amp):
+            for rgb, coarse, truth in val_loader:
+                truth_d = truth.to(device)
+                final = compose_final(
+                    coarse.to(device), model(rgb.to(device), coarse.to(device)), clamp=True
+                )
+                absolute_error = torch.abs(final - truth_d)
+                val_absolute_error += float(absolute_error.sum().item())
+                val_elements += absolute_error.numel()
+        val_mae = val_absolute_error / val_elements
+        train_loss = float(np.mean(train_losses))
+        per_epoch.append({"epoch": epoch, "train_loss": train_loss, "val_mae": val_mae})
+        checkpoint = {**run_identity, "model": model.state_dict(), "epoch": epoch,
+                      "val_mae": val_mae, "curriculum_identity": identity}
+        torch.save(checkpoint, args.output / "checkpoint_last.pt")
+        if val_mae < best:
+            best = val_mae
+            stale = 0
+            torch.save(checkpoint, args.output / "checkpoint_best.pt")
+        else:
+            stale += 1
+        print(
+            f"[epoch {epoch:03d}] train_loss={train_loss:.6f} val_mae={val_mae:.6f} "
+            f"coarse={coarse_baseline:.6f} tile_mean={tile_mean_baseline:.6f} "
+            f"best={best:.6f} stale={stale}/{args.patience}",
+            flush=True,
+        )
+        if args.patience > 0 and stale >= args.patience:
+            print(f"[early-stop] no improvement for {stale} epochs", flush=True)
+            break
+
+    best_record = min(per_epoch, key=lambda e: e["val_mae"])
+    best_checkpoint = torch.load(
+        args.output / "checkpoint_best.pt", map_location=device, weights_only=False
+    )
+    model.load_state_dict(best_checkpoint["model"])
+    model.eval()
+
+    # Final all-validation evaluation with per-row metrics and fixed-scale sheets.
+    eval_dir = args.output / "validation" / "final_best"
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    records: list[dict] = []
+    samples_by_position: dict[int, dict] = {}
+    with torch.no_grad():
+        for position in val_positions:
+            source_row = selected_rows[position]
+            rgb = np.asarray(group["minimap_rgb"][source_row], dtype=np.uint8)
+            coarse = np.asarray(coarse_group[COARSE_ARRAY][position], dtype=np.float32)
+            truth, _, _ = encode_relative_height(np.asarray(group["height_257"][source_row]))
+            tensor = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(device)
+            coarse_t = torch.from_numpy(coarse).unsqueeze(0).to(device)
+            with torch.amp.autocast("cuda", enabled=args.amp):
+                final = compose_final(coarse_t, model(tensor, coarse_t), clamp=True)[0]
+            predicted = final.float().cpu().numpy()
+            index_row = index[source_row]
+            metrics = compute_row_metrics(predicted, truth)
+            records.append({
+                "row_id": int(source_row),
+                "map": str(index_row.get("map", "unknown")),
+                "minimap_source": str(index_row.get("minimap_source", "unknown")),
+                **metrics,
+            })
+            samples_by_position[position] = {
+                "row_id": int(source_row),
+                "label": f"row {source_row}  {index_row.get('map', '?')}",
+                "rgb": rgb,
+                "target": truth,
+                "predicted": predicted,
+                "metrics": metrics,
+            }
+    (eval_dir / "per_row_metrics.json").write_text(json.dumps(records, indent=2), encoding="utf-8")
+    from harvester.v50.direct_geometry_train import check_sc002
+
+    sc002 = check_sc002(records)
+    gate = evaluate_detailer_gate(best_val_mae=best_record["val_mae"], coarse_baseline=coarse_baseline)
+    quantile_rows = select_error_quantile_rows(records, 8)
+    position_by_row_id = {selected_rows[p]: p for p in val_positions}
+    render_validation_sheet(
+        [samples_by_position[position_by_row_id[row]] for row in quantile_rows],
+        eval_dir / "error_quantiles.png",
+        title=f"detailer all-validation error quantiles | checkpoint epoch {best_checkpoint['epoch']}",
+    )
+    worst_rows = [
+        int(r["row_id"]) for r in sorted(
+            records, key=lambda r: (-float(r["mae"]), int(r["row_id"]))
+        )[:8]
+    ]
+    render_validation_sheet(
+        [samples_by_position[position_by_row_id[row]] for row in worst_rows],
+        eval_dir / "worst_cases.png",
+        title=f"detailer worst held-out rows | checkpoint epoch {best_checkpoint['epoch']}",
+    )
+    fixed_samples = [samples_by_position[p] for p in fixed_preview_positions]
+    render_validation_sheet(
+        fixed_samples,
+        eval_dir / "fixed_rows.png",
+        title=f"detailer fixed validation rows | checkpoint epoch {best_checkpoint['epoch']}",
+    )
+
+    aggregate = {
+        key: float(np.mean([float(r[key]) for r in records]))
+        for key in ("mae", "gradient_mae", "border_mae", "interior_mae",
+                    "tile_mean_baseline_mae", "mae_delta_vs_baseline")
+    }
+    aggregate["val_rows"] = len(records)
+    checkpoint_identity = identity_for_path(args.output / "checkpoint_best.pt")
+    stage_run = build_detailer_stage_run(
+        run_id=args.run_id,
+        architecture=architecture,
+        upstream_identity=upstream_identity,
+        curriculum=identity_for_path(
+            args.store / "index.parquet", display_path=str(args.store.resolve())
+        ),
+        checkpoint={**checkpoint_identity, "best_epoch": int(best_checkpoint["epoch"])},
+        baselines={
+            "coarse_only": {"val_mae": coarse_baseline},
+            "tile_mean": {"val_mae": tile_mean_baseline},
+            "flat": {"val_mae": flat_baseline},
+            "spec112_frozen": {
+                "run_id": "direct_cnn_v112-authored-v1",
+                "best_val_mae": SPEC112_FROZEN_BEST_VAL_MAE,
+            },
+        },
+        metrics={
+            "best_epoch": best_record["epoch"],
+            "best_val_mae": best_record["val_mae"],
+            "evaluator": aggregate,
+            "detailer_gate": gate,
+            "sc002": sc002,
+            "structural_failure_epoch1_best": best_record["epoch"] == 1,
+        },
+        visual_evidence={
+            "fixed_rows": "validation/final_best/fixed_rows.png",
+            "error_quantiles": "validation/final_best/error_quantiles.png",
+            "worst_cases": "validation/final_best/worst_cases.png",
+            "per_row_metrics": "validation/final_best/per_row_metrics.json",
+        },
+    )
+    (args.output / "model_stage_run.json").write_text(
+        json.dumps(stage_run, indent=2), encoding="utf-8"
+    )
+    (args.output / "training_summary.json").write_text(
+        json.dumps({"per_epoch_metrics": per_epoch, "model_stage_run": stage_run["run_id"]}, indent=2),
+        encoding="utf-8",
+    )
+    if stage_run["metrics"]["structural_failure_epoch1_best"]:
+        print("STRUCTURAL FAILURE: best epoch is epoch 1; this run is not a success.", flush=True)
+        return 1
+    print(
+        f"best_epoch={best_record['epoch']} best_val_mae={best_record['val_mae']:.6f} "
+        f"coarse_only={coarse_baseline:.6f} gate={gate['passes']} sc002={sc002['passes']} "
+        f"promotion=pending(user visual gate)",
+        flush=True,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
