@@ -418,6 +418,9 @@ def main() -> int:
                          "can't see underwater terrain, so penalizing it there is noise.")
     ap.add_argument("--patience", type=int, default=15)
     ap.add_argument("--seed", type=int, default=114)
+    ap.add_argument("--init-weights", type=Path, default=None,
+                    help="Path to a checkpoint .pt file to initialize model weights from "
+                         "(resumes training from that checkpoint's epoch).")
     ap.add_argument("--release", default="v50.1", type=validate_release)
     args = ap.parse_args()
 
@@ -457,6 +460,10 @@ def main() -> int:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     model = GeometryDetailerNet()
+    if args.init_weights is not None:
+        ck = torch.load(args.init_weights, map_location="cpu")
+        model.load_state_dict(ck["model"])
+        print(f"Loaded init weights from {args.init_weights} (epoch {ck.get('epoch', '?')})", flush=True)
     architecture = detailer_identity(model)
     upstream_identity = {
         "path": str(coarse_group.attrs.get("checkpoint_path", "unknown")),
