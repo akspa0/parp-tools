@@ -60,13 +60,21 @@ Last updated: 2026-07-19
   frequency, Laplacian, Sobel edge, transition-focus 3×) + V25's LF/HF band split are the missing
   multi-band prior. V7 compensated for dirty data via structural statistics, not clean inputs.
   Decision: port all five as loss-only flags into the detailer trainer (T063), not the V7 arch.
-- **T063 DONE + USER-RUN COMPLETE**: multi-frequency band-split loss stack implemented and
-  user-run `detailer-mit_b0-authored-v2-bandsplit`: best epoch 89, val MAE 0.170494 vs
-  coarse-only 0.187800 (9.2% relative), gate=True, sc002=True. User: "visually stunning."
-  Also added: `--amp-dtype bf16`, `--val-tolerance`, `--liquid-mask-weight`, per-epoch
-  validation previews (9-panel comprehensive sheets). 283 v50 tests pass; Ruff clean.
-- Next: user visual promotion gate for bandsplit-v2. T010 curriculum build dry run + `--write`;
-  dual-view `--source all` stays gated on Spec 113
+- **T063 DONE + USER-RUN COMPLETE + CONTINUED**: multi-frequency band-split loss stack
+  implemented in `spectral_guidance.py` (5 new loss-only terms from V7/V25).
+  - Run 1 (100 epochs): `detailer-mit_b0-authored-v2-bandsplit` best epoch 89, val MAE 0.170494
+    vs coarse-only 0.187800 (9.2% relative), gate=True, sc002=True. User: "visually stunning."
+  - Run 2 (continued, 200 epochs total): resumed from epoch 89 checkpoint via `--init-weights`,
+    best epoch 164, val MAE 0.166769 vs coarse-only 0.187800 (11.2% relative), gate=True,
+    sc002=True. Plateaued at epoch 164 after 36 epochs of no improvement; 100 additional epochs
+    yielded 0.003725 absolute MAE improvement over the 100-epoch run.
+  - Run used bf16 AMP, val-tolerance 0.01, liquid-mask-weight 0.5, per-epoch validation previews
+    (9-panel comprehensive sheets). Also added: `--amp-dtype bf16` (both trainers),
+    `--val-tolerance` (noise-robust early stopping), `--liquid-mask-weight` (loss masking in
+    liquid regions), per-epoch validation previews (9-panel comprehensive sheets),
+    `--init-weights` for checkpoint resumption.
+- Next: user visual promotion gate for bandsplit-v2 (epoch 164 checkpoint). Dual-view
+  `--source all` stays gated on Spec 113
   NoonWhiteGlobal rerender; object-mask phase starts only after geometry promotion.
 - Phase order is fail-closed: corrected dual-view curriculum → direct geometry bakeoff → trusted
   object visibility → feature library → texture families → alpha. The user owns all heavy

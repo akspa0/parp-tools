@@ -68,19 +68,24 @@ Last updated: 2026-07-20
   "produce correct edge/curvature statistics" regardless of object/liquid channel cleanliness.
   Decision: port all five as loss-only flags into the detailer trainer (T063), not the 117M V7
   architecture (wrong constitution/scale).
-- **T063 DONE + USER-RUN COMPLETE**: multi-frequency band-split loss stack implemented in
-  `spectral_guidance.py` (5 new loss-only terms from V7/V25) and user-run
-  `detailer-mit_b0-authored-v2-bandsplit`: best epoch 89, val MAE 0.170494 vs coarse-only 0.187800
-  (9.2% relative), gate=True, sc002=True. User visual verdict: "visually stunning, very very close."
-  The band-split loss stack produced a significant visual quality jump over v1 despite a small
-  numeric improvement (0.170665 → 0.170494). Run used bf16 AMP, val-tolerance 0.01,
-  liquid-mask-weight 0.5, per-epoch validation previews (9-panel comprehensive sheets).
-  Also added: `--amp-dtype bf16` (both trainers), `--val-tolerance` (noise-robust early stopping),
-  `--liquid-mask-weight` (loss masking in liquid regions), per-epoch detailer validation previews
-  showing all signals (minimap, coarse, residual, final, truth, errors, liquid mask, normals).
-- Next: user visual promotion gate for bandsplit-v2. Dual-view `--source all` stays gated on the
-  Spec 113 NoonWhiteGlobal rerender; object-mask phase starts only after geometry promotion.
-  If more training is needed, increase `--epochs` (val_mae was still improving at epoch 100).
+- **T063 DONE + USER-RUN COMPLETE + CONTINUED**: multi-frequency band-split loss stack
+  implemented in `spectral_guidance.py` (5 new loss-only terms from V7/V25).
+  - Run 1 (100 epochs): `detailer-mit_b0-authored-v2-bandsplit` best epoch 89, val MAE 0.170494
+    vs coarse-only 0.187800 (9.2% relative), gate=True, sc002=True. User: "visually stunning."
+  - Run 2 (continued, 200 epochs total): resumed from epoch 89 checkpoint via `--init-weights`,
+    best epoch 164, val MAE 0.166769 vs coarse-only 0.187800 (11.2% relative), gate=True,
+    sc002=True. Plateaued at epoch 164 after 36 epochs of no improvement; 100 additional epochs
+    yielded 0.003725 absolute MAE improvement over the 100-epoch run.
+  - Run used bf16 AMP, val-tolerance 0.01, liquid-mask-weight 0.5, per-epoch validation previews
+    (9-panel comprehensive sheets). Also added: `--amp-dtype bf16` (both trainers),
+    `--val-tolerance` (noise-robust early stopping), `--liquid-mask-weight` (loss masking in
+    liquid regions), per-epoch validation previews (9-panel comprehensive sheets),
+    `--init-weights` for checkpoint resumption.
+- Next: user visual promotion gate for bandsplit-v2 (epoch 164 checkpoint). Dual-view
+  `--source all` stays gated on the Spec 113 NoonWhiteGlobal rerender; object-mask phase starts
+  only after geometry promotion. If more training is needed, the plateau suggests the single-stage
+  detailer has hit its capacity limit — the next lever would be a multi-stage frequency-band
+  chain (T064) or architecture change.
 - Source-image UV projection provides immediate mesh texture. Object cleanup, terrain semantics,
   editable texture families, and alpha remain later independent models with separate checkpoints.
 
