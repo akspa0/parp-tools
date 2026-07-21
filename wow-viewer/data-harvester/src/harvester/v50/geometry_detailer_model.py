@@ -40,16 +40,19 @@ def _block(in_ch: int, out_ch: int, stride: int = 1) -> nn.Sequential:
 
 
 class GeometryDetailerNet(nn.Module):
-    """U-Net-lite residual refiner: (RGB 3x256x256, coarse 1x257x257) -> residual 257x257.
+    """U-Net-lite residual refiner: (RGB[+features] Cx256x256, coarse 1x257x257) -> residual 257x257.
 
-    Default ``base=32`` gives 1,561,857 trainable parameters — the coarse baseline's capacity
-    class plus one input channel. A zero-initialized head makes the initial composition exactly
-    the coarse prediction, so training starts FROM the strong baseline instead of below it.
+    Default ``base=32``, ``in_channels=3`` gives 1,561,857 trainable parameters — the coarse
+    baseline's capacity class plus one input channel. A zero-initialized head makes the initial
+    composition exactly the coarse prediction, so training starts FROM the strong baseline instead
+    of below it. ``in_channels`` > 3 admits a Spec 115/116 GENERATED feature map concatenated onto
+    RGB (never ground truth), mirroring the coarse stage's own ``--feature-store`` contract.
     """
 
-    def __init__(self, base: int = 32) -> None:
+    def __init__(self, base: int = 32, in_channels: int = 3) -> None:
         super().__init__()
-        self.enc1 = _block(4, base)                       # 256
+        self.in_channels = in_channels
+        self.enc1 = _block(in_channels + 1, base)         # 256
         self.enc2 = _block(base, base * 2, stride=2)      # 128
         self.enc3 = _block(base * 2, base * 4, stride=2)  # 64
         self.enc4 = _block(base * 4, base * 8, stride=2)  # 32
@@ -62,9 +65,9 @@ class GeometryDetailerNet(nn.Module):
         nn.init.zeros_(self.head.bias)
 
     def forward(self, rgb: torch.Tensor, coarse: torch.Tensor) -> torch.Tensor:
-        if rgb.ndim != 4 or rgb.shape[1] != 3:
+        if rgb.ndim != 4 or rgb.shape[1] != self.in_channels:
             raise DetailerContractError(
-                f"rgb must be (B, 3, {INPUT_SIZE}, {INPUT_SIZE}), got {tuple(rgb.shape)}"
+                f"rgb must be (B, {self.in_channels}, {INPUT_SIZE}, {INPUT_SIZE}), got {tuple(rgb.shape)}"
             )
         if coarse.ndim != 3 or coarse.shape[-2:] != (HEIGHT_GRID, HEIGHT_GRID):
             raise DetailerContractError(
@@ -105,12 +108,13 @@ def compose_final(coarse: torch.Tensor, residual: torch.Tensor, *, clamp: bool) 
     return torch.clamp(final, 0.0, 1.0) if clamp else final
 
 
-def detailer_identity(model: nn.Module, *, base: int = 32) -> dict:
+def detailer_identity(model: nn.Module, *, base: int = 32, in_channels: int = 3) -> dict:
     """Schema-conformant architecture block for the detailer stage."""
     config = {
         "class": "GeometryDetailerNet",
         "base": base,
-        "input": f"rgb 3x{INPUT_SIZE}x{INPUT_SIZE} + generated coarse 1x{HEIGHT_GRID}x{HEIGHT_GRID}",
+        "in_channels": in_channels,
+        "input": f"rgb[+features] {in_channels}x{INPUT_SIZE}x{INPUT_SIZE} + generated coarse 1x{HEIGHT_GRID}x{HEIGHT_GRID}",
         "output": f"residual 1x{HEIGHT_GRID}x{HEIGHT_GRID} (final = coarse + residual)",
         "head": "linear, zero-initialized",
         "target_contract": "v112.1 residual",

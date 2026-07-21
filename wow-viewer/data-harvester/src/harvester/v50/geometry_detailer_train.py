@@ -27,6 +27,7 @@ import numpy as np
 
 from harvester.v50.contracts import release_identity, require_store_release, validate_release
 from harvester.v50.direct_geometry_materialize import COARSE_ARRAY, COARSE_STORE_SCHEMA
+from harvester.v50.direct_geometry_train import apply_held_out_split
 from harvester.v50.geometry_detailer_model import (
     DETAILER_ARCHITECTURE_ID,
     GeometryDetailerNet,
@@ -245,6 +246,8 @@ def render_detailer_epoch_preview(
     val_mae: float,
     amp_enabled: bool,
     amp_dtype,
+    feature_group=None,
+    feature_row_to_position: dict[int, int] | None = None,
 ) -> None:
     """Render a comprehensive per-epoch validation sheet showing ALL signals.
 
@@ -310,7 +313,12 @@ def render_detailer_epoch_preview(
             rgb = np.asarray(group["minimap_rgb"][source_row], dtype=np.uint8)
             coarse = np.asarray(coarse_group[COARSE_ARRAY][position], dtype=np.float32)
             truth, _, _ = encode_relative_height(np.asarray(group["height_257"][source_row]))
-            tensor = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(device)
+            rgb_channels = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1)
+            if feature_group is not None:
+                feature_position = feature_row_to_position[source_row]
+                feats = np.asarray(feature_group["feature_map"][feature_position], dtype=np.float32)
+                rgb_channels = torch.cat([rgb_channels, torch.from_numpy(feats)], dim=0)
+            tensor = rgb_channels.unsqueeze(0).to(device)
             coarse_t = torch.from_numpy(coarse).unsqueeze(0).to(device)
             with torch.amp.autocast("cuda", enabled=amp_enabled, dtype=amp_dtype):
                 residual = model(tensor, coarse_t)
@@ -381,6 +389,16 @@ def main() -> int:
     ap.add_argument("--confirm-run", action="store_true")
     ap.add_argument("--val-key", default="split")
     ap.add_argument("--val-value", default="val")
+    ap.add_argument("--held-out-split", type=Path, default=None,
+                    help="Spec 116 US4: a v50-held-out-split-v1 directory whose spatially-isolated "
+                         "held_out rows become validation, overriding --val-key/--val-value. "
+                         "Refuses a leaky split. Never mutates --store.")
+    ap.add_argument("--feature-store", type=Path, default=None,
+                    help="Spec 115/116: a v115-feature-map-v1 store (from "
+                         "v50_materialize_feature_maps.py or spec116_structure_to_feature_map.py). "
+                         "Concatenates the classifier's GENERATED per-pixel feature map onto RGB, "
+                         "so the detailer gets a texture-vs-terrain signal alongside the coarse "
+                         "field. RGB-only without it.")
     ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--lr", type=float, default=2e-4)
@@ -450,21 +468,61 @@ def main() -> int:
         raise SystemExit(str(exc)) from exc
 
     positions = list(range(len(selected_rows)))
-    train_positions = [p for p in positions if str(index[selected_rows[p]].get(args.val_key)) != args.val_value]
-    val_positions = [p for p in positions if str(index[selected_rows[p]].get(args.val_key)) == args.val_value]
+    held_out_split_manifest: dict | None = None
+    if args.held_out_split is not None:
+        try:
+            train_rows, val_rows, held_out_split_manifest = apply_held_out_split(
+                index_rows=index, selected_rows=selected_rows, split_dir=args.held_out_split,
+            )
+        except TrainerContractError as exc:
+            raise SystemExit(str(exc)) from exc
+        row_to_position = {row: position for position, row in enumerate(selected_rows)}
+        train_positions = [row_to_position[r] for r in train_rows]
+        val_positions = [row_to_position[r] for r in val_rows]
+    else:
+        train_positions = [p for p in positions if str(index[selected_rows[p]].get(args.val_key)) != args.val_value]
+        val_positions = [p for p in positions if str(index[selected_rows[p]].get(args.val_key)) == args.val_value]
     if len(train_positions) < 32 or len(val_positions) < 8:
         raise SystemExit(
             f"insufficient rows: train={len(train_positions)} val={len(val_positions)}"
         )
 
+    # Spec 115/116: optional generated feature-map input, concatenated onto RGB (never ground
+    # truth). Loaded here so the model is built with the right input-channel count. Row-aligned to
+    # the curriculum via its own index.parquet's source_row_index -- validated, never assumed.
+    feature_group = None
+    feature_class_count = 0
+    feature_row_to_position: dict[int, int] = {}
+    if args.feature_store is not None:
+        feature_group = zarr.open_group(str(args.feature_store), mode="r")
+        feature_attrs = dict(feature_group.attrs)
+        if feature_attrs.get("schema") != "v115-feature-map-v1":
+            raise SystemExit(
+                f"--feature-store is not a v115-feature-map-v1 store: {args.feature_store}"
+            )
+        feature_class_count = int(feature_attrs.get("class_count", 0))
+        if feature_class_count < 1 or "feature_map" not in feature_group:
+            raise SystemExit(f"--feature-store has no usable feature_map array: {args.feature_store}")
+        feature_index = pq.read_table(args.feature_store / "index.parquet").to_pylist()
+        feature_row_to_position = {
+            int(r["source_row_index"]): pos for pos, r in enumerate(feature_index)
+        }
+        missing = [r for r in selected_rows if r not in feature_row_to_position]
+        if missing:
+            raise SystemExit(
+                f"--feature-store is missing {len(missing)} selected curriculum rows "
+                f"(first missing source_row_index={missing[0]})"
+            )
+    in_channels = 3 + feature_class_count
+
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    model = GeometryDetailerNet()
+    model = GeometryDetailerNet(in_channels=in_channels)
     if args.init_weights is not None:
         ck = torch.load(args.init_weights, map_location="cpu")
         model.load_state_dict(ck["model"])
         print(f"Loaded init weights from {args.init_weights} (epoch {ck.get('epoch', '?')})", flush=True)
-    architecture = detailer_identity(model)
+    architecture = detailer_identity(model, in_channels=in_channels)
     upstream_identity = {
         "path": str(coarse_group.attrs.get("checkpoint_path", "unknown")),
         "sha256": str(coarse_group.attrs.get("checkpoint_sha256", "0" * 64)),
@@ -494,6 +552,20 @@ def main() -> int:
         band_hf_weight=args.band_hf_weight,
         band_cutoff=args.band_cutoff,
     )
+    if feature_group is not None:
+        plan["deployment_inputs"] = ["minimap_rgb", "generated_terrain_feature_map", "generated_coarse_relief"]
+        plan["feature_store"] = {
+            "path": str(args.feature_store.resolve()),
+            "class_count": feature_class_count,
+            "input_channels": in_channels,
+        }
+    if held_out_split_manifest is not None:
+        plan["split_counts"] = {"train": len(train_positions), "val": len(val_positions)}
+        plan["held_out_split"] = {
+            "path": str((args.held_out_split / "split.json").resolve()),
+            "verified_violation_count": int(held_out_split_manifest["verified_violation_count"]),
+            "absolute_comparison_to_prior_runs_invalid": True,
+        }
     print(json.dumps(plan, indent=2), flush=True)
     if not args.confirm_run:
         print("DRY RUN ONLY: add --confirm-run to launch user-owned CUDA training.", flush=True)
@@ -526,6 +598,13 @@ def main() -> int:
             position = self.rows[i]
             source_row = selected_rows[position]
             rgb = np.asarray(group["minimap_rgb"][source_row], dtype=np.float32) / 255.0
+            channels = torch.from_numpy(rgb).permute(2, 0, 1)
+            if feature_group is not None:
+                feature_position = feature_row_to_position[source_row]
+                feats = np.asarray(feature_group["feature_map"][feature_position], dtype=np.float32)
+                # Generated (K, 256, 256) class probabilities, concatenated onto RGB. This is the
+                # classifier's OUTPUT, never ground-truth labels (Spec 115 FR-007).
+                channels = torch.cat([channels, torch.from_numpy(feats)], dim=0)
             coarse = np.asarray(coarse_group[COARSE_ARRAY][position], dtype=np.float32)
             truth, _, _ = encode_relative_height(np.asarray(group["height_257"][source_row]))
             if use_liquid_mask:
@@ -540,7 +619,7 @@ def main() -> int:
             else:
                 liq_t = torch.empty(0)
             return (
-                torch.from_numpy(rgb).permute(2, 0, 1),
+                channels,
                 torch.from_numpy(coarse),
                 torch.from_numpy(truth),
                 liq_t,
@@ -611,6 +690,8 @@ def main() -> int:
             "workers": args.workers, "seed": args.seed, "lr_schedule": args.lr_schedule,
             "amp": args.amp, "amp_dtype": args.amp_dtype, "grad_clip": args.clip,
         },
+        "feature_store": plan.get("feature_store"),
+        "held_out_split": plan.get("held_out_split"),
     }
     (args.output / "training_plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
     (args.output / "run_identity.json").write_text(json.dumps(run_identity, indent=2), encoding="utf-8")
@@ -704,6 +785,7 @@ def main() -> int:
                 output=preview_dir / f"epoch_{epoch:04d}.png",
                 epoch=epoch, val_mae=val_mae,
                 amp_enabled=args.amp, amp_dtype=amp_dtype,
+                feature_group=feature_group, feature_row_to_position=feature_row_to_position,
             )
         elif args.val_tolerance > 0 and val_mae <= best * (1.0 + args.val_tolerance):
             # Within tolerance band of best: model is still in a productive region.
@@ -739,7 +821,12 @@ def main() -> int:
             rgb = np.asarray(group["minimap_rgb"][source_row], dtype=np.uint8)
             coarse = np.asarray(coarse_group[COARSE_ARRAY][position], dtype=np.float32)
             truth, _, _ = encode_relative_height(np.asarray(group["height_257"][source_row]))
-            tensor = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(device)
+            rgb_channels = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1)
+            if feature_group is not None:
+                feature_position = feature_row_to_position[source_row]
+                feats = np.asarray(feature_group["feature_map"][feature_position], dtype=np.float32)
+                rgb_channels = torch.cat([rgb_channels, torch.from_numpy(feats)], dim=0)
+            tensor = rgb_channels.unsqueeze(0).to(device)
             coarse_t = torch.from_numpy(coarse).unsqueeze(0).to(device)
             with torch.amp.autocast("cuda", enabled=args.amp, dtype=amp_dtype):
                 final = compose_final(coarse_t, model(tensor, coarse_t), clamp=True)[0]

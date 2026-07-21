@@ -58,6 +58,7 @@ from harvester.v50.height_relative_train import (
 from harvester.v50.model_stage_contract import (
     ContractViolationError,
     identity_for_path,
+    sha256_file,
     validate_model_stage_run,
 )
 from harvester.v50.normal_guidance import normal_gradient_loss
@@ -224,6 +225,44 @@ def build_direct_plan(
     }
 
 
+def apply_held_out_split(
+    *,
+    index_rows: list[dict],
+    selected_rows: list[int],
+    split_dir: Path,
+) -> tuple[list[int], list[int], dict]:
+    """Partition ``selected_rows`` by a Spec 116 US4 spatially-isolated held-out split.
+
+    Consumes ``split_dir`` as an external, read-only artifact (never written back into the
+    curriculum store, which stays immutable) via ``(map, tile_x, tile_y)`` lookup. Returns
+    ``(train_rows, val_rows, split_manifest)``; raises ``TrainerContractError`` if the split is
+    leaky (``verified_violation_count != 0`` -- FR-010).
+    """
+    from harvester.spec116.held_out_split import load_split
+
+    split_manifest, split_rows = load_split(split_dir)
+    if split_manifest["verified_violation_count"] != 0:
+        raise TrainerContractError(
+            f"--held-out-split has {split_manifest['verified_violation_count']} violations; "
+            "refusing to train on a leaky split (FR-010)"
+        )
+    split_map: dict[tuple[str, int, int], str] = {
+        (str(row["map"]), int(row["tile_x"]), int(row["tile_y"])): str(row["split"])
+        for row in split_rows
+    }
+    train_rows: list[int] = []
+    val_rows: list[int] = []
+    for i in selected_rows:
+        meta = index_rows[i]
+        key = (str(meta.get("map")), int(meta.get("tile_x", -1)), int(meta.get("tile_y", -1)))
+        label = split_map.get(key, "excluded")
+        if label == "train":
+            train_rows.append(i)
+        elif label == "held_out":
+            val_rows.append(i)
+    return train_rows, val_rows, split_manifest
+
+
 def main() -> int:
     import pyarrow.parquet as pq
     import torch
@@ -240,6 +279,11 @@ def main() -> int:
                     help="launch CUDA training; without this flag only print the validated plan")
     ap.add_argument("--val-key", default="split")
     ap.add_argument("--val-value", default="val")
+    ap.add_argument("--held-out-split", type=Path, default=None,
+                    help="Spec 116 US4: a v50-held-out-split-v1 directory (from "
+                         "spec116_build_held_out_split.py) whose spatially-isolated held_out "
+                         "rows become validation, overriding --val-key/--val-value. Refuses a "
+                         "leaky split (verified_violation_count != 0). Never mutates --store.")
     ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--lr", type=float, default=2e-4)
@@ -350,8 +394,17 @@ def main() -> int:
     except TrainerContractError as exc:
         raise SystemExit(str(exc)) from exc
 
-    train_rows = [i for i in selected_rows if str(index[i].get(args.val_key)) != args.val_value]
-    val_rows = [i for i in selected_rows if str(index[i].get(args.val_key)) == args.val_value]
+    split_manifest: dict | None = None
+    if args.held_out_split is not None:
+        try:
+            train_rows, val_rows, split_manifest = apply_held_out_split(
+                index_rows=index, selected_rows=selected_rows, split_dir=args.held_out_split,
+            )
+        except TrainerContractError as exc:
+            raise SystemExit(str(exc)) from exc
+    else:
+        train_rows = [i for i in selected_rows if str(index[i].get(args.val_key)) != args.val_value]
+        val_rows = [i for i in selected_rows if str(index[i].get(args.val_key)) == args.val_value]
     if len(train_rows) < 32 or len(val_rows) < 8:
         raise SystemExit(
             f"insufficient rows after --source {args.source}: train={len(train_rows)} val={len(val_rows)}"
@@ -446,6 +499,19 @@ def main() -> int:
         spectral_weight=args.spectral_weight,
         multiscale_weight=args.multiscale_weight,
     )
+    if args.held_out_split is not None:
+        # build_direct_plan's split_counts reads the curriculum's own stale "split" column;
+        # override with the actual rows the training loop below will use, and record the
+        # external split's identity so a dry run's printed plan is never wrong about what will
+        # actually train (FR-017: rebuilding this split invalidates absolute prior comparisons).
+        plan["split_counts"] = {"train": len(train_rows), "val": len(val_rows)}
+        plan["train_steps_per_epoch"] = math.ceil(max(len(train_rows), 1) / args.batch)
+        plan["held_out_split"] = {
+            "path": str((args.held_out_split / "split.json").resolve()),
+            "sha256": sha256_file(args.held_out_split / "split.json"),
+            "verified_violation_count": int(split_manifest["verified_violation_count"]),
+            "absolute_comparison_to_prior_runs_invalid": True,
+        }
     if use_normal_loss:
         # Loss-only, like the brush term: normals never enter the model input, so
         # deployment_inputs is unchanged.
@@ -721,6 +787,7 @@ def main() -> int:
             "amp": args.amp, "amp_dtype": args.amp_dtype, "grad_clip": args.clip,
         },
         "pretrained_source": model_identity["pretrained_source"],
+        "held_out_split": plan.get("held_out_split"),
     }
     (args.output / "training_plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
     (args.output / "run_identity.json").write_text(json.dumps(run_identity, indent=2), encoding="utf-8")
