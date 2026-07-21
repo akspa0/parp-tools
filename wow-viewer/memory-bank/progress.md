@@ -1,6 +1,17 @@
 # Progress — wow-viewer
 
-Last updated: 2026-07-19
+Last updated: 2026-07-21
+
+## Spec 116 — relational terrain layer reconstruction (planning complete)
+
+- Spec Kit plan generated for `specs/116-relational-terrain-layers/`: spec.md + requirements
+  checklist already existed; added plan.md, research.md (D-01..D-10), data-model.md, contracts/
+  (cli-contract + held-out-split / analysis-report / structure-run JSON schemas), quickstart.md.
+- Constitution check PASS; Principle IV (no multi-task) resolved by decomposing US3 into one
+  independent `StructureSlotNet` per detail slot (base slot never predicted). Reuses v50 store (no
+  new harvest), Spec 115 family taxonomy `v115.1`, Spec 114 contract/dry-run-first pattern. User
+  runs all training (FR-018). `tasks.md` generated (T001–T035, MVP = US1). Next: code phases
+  US1→US2→US4→US3→US5.
 
 ## Spec 110 — viewer global light is unconditional
 

@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://wow-viewer/specs/116/contracts/analysis-report.schema.json",
+  "title": "v116-analysis-report-v1",
+  "description": "Durable decision artifact for Spec 116 US1 (family->slot consistency) and US2 (shape->coverage coupling). Consumed verbatim by US3.",
+  "type": "object",
+  "required": ["schema", "created_utc", "report_kind", "identity", "decision"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "type": "string", "const": "v116-analysis-report-v1" },
+    "created_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+    "report_kind": { "type": "string", "enum": ["family_slot_consistency", "shape_coverage_coupling"] },
+    "identity": {
+      "type": "object",
+      "required": ["store", "taxonomy_revision"],
+      "additionalProperties": false,
+      "properties": {
+        "store": {
+          "type": "object", "required": ["path", "sha256"], "additionalProperties": false,
+          "properties": {
+            "path": { "type": "string" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
+        "taxonomy_revision": { "type": "string" },
+        "rule_set_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "texture_name_dumps": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["path", "sha256"], "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string" },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          }
+        }
+      }
+    },
+    "family_slot_consistency": {
+      "type": "object",
+      "required": ["per_family", "summary_consistency_score", "threshold", "recommendation"],
+      "additionalProperties": false,
+      "properties": {
+        "per_family": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["family", "slot_distribution", "max_slot_probability"],
+            "additionalProperties": false,
+            "properties": {
+              "family": { "type": "string" },
+              "slot_distribution": {
+                "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 1 }, "minItems": 4, "maxItems": 4
+              },
+              "max_slot_probability": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "summary_consistency_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "recommendation": { "type": "string", "enum": ["slot_keyed", "family_keyed"] }
+      }
+    },
+    "shape_coverage_coupling": {
+      "type": "object",
+      "required": ["per_tile_layer_explained_variance", "dip_test_p_value", "mixture_bic", "high_coupling_tile_share", "linear_underpowered_note"],
+      "additionalProperties": false,
+      "properties": {
+        "per_tile_layer_explained_variance": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["tile_row", "layer", "explained_variance"],
+            "additionalProperties": false,
+            "properties": {
+              "tile_row": { "type": "integer", "minimum": 0 },
+              "layer": { "type": "integer", "minimum": 1, "maximum": 3 },
+              "explained_variance": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "dip_test_p_value": { "type": "number", "minimum": 0, "maximum": 1 },
+        "mixture_bic": {
+          "type": "object", "required": ["one_component", "two_component", "two_preferred"],
+          "additionalProperties": false,
+          "properties": {
+            "one_component": { "type": "number" },
+            "two_component": { "type": "number" },
+            "two_preferred": { "type": "boolean" }
+          }
+        },
+        "high_coupling_tile_share": { "type": "number", "minimum": 0, "maximum": 1 },
+        "linear_underpowered_note": { "type": "string" }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "enum": ["vocabulary", "derivability"] },
+        "value": { "type": "string", "enum": ["slot_keyed", "family_keyed", "coverage_derivable", "coverage_independent"] }
+      }
+    }
+  }
+}

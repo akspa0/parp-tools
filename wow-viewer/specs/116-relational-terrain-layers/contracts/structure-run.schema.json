@@ -1,0 +1,146 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://wow-viewer/specs/116/contracts/structure-run.schema.json",
+  "title": "v50-structure-run-v1",
+  "description": "Spec 116 US3 training run record. Per-class IoU/recall gate; aggregate accuracy is reported but never gates (D-08).",
+  "type": "object",
+  "required": [
+    "schema", "created_utc", "feature", "slot", "vocabulary_decision",
+    "identity", "inputs", "architecture", "config", "split_counts",
+    "baselines", "best_epoch", "metrics", "promotion_verdict", "gate"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "type": "string", "const": "v50-structure-run-v1" },
+    "created_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+    "feature": { "type": "string", "const": "116-relational-terrain-layers" },
+    "slot": { "type": "integer", "minimum": 1, "maximum": 3 },
+    "vocabulary_decision": { "type": "string", "enum": ["slot_keyed", "family_keyed"] },
+    "identity": {
+      "type": "object", "required": ["path", "sha256"], "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "required": ["store", "held_out_split", "texture_name_dumps", "taxonomy_revision", "rule_set_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "store": {
+          "type": "object", "required": ["path", "sha256"], "additionalProperties": false,
+          "properties": {
+            "path": { "type": "string" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
+        "held_out_split": {
+          "type": "object",
+          "required": ["path", "sha256", "verified_violation_count"],
+          "additionalProperties": false,
+          "properties": {
+            "path": { "type": "string" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "verified_violation_count": { "type": "integer", "const": 0 }
+          }
+        },
+        "texture_name_dumps": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["path", "sha256"], "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string" },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          }
+        },
+        "taxonomy_revision": { "type": "string" },
+        "rule_set_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "architecture": {
+      "type": "object",
+      "required": ["class", "base", "slot", "num_classes", "param_count"],
+      "additionalProperties": false,
+      "properties": {
+        "class": { "type": "string" },
+        "base": { "type": "integer", "minimum": 1 },
+        "slot": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "num_classes": { "type": "integer", "minimum": 2 },
+        "param_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "config": {
+      "type": "object",
+      "required": ["batch_size", "epochs", "lr", "max_class_weight", "device"],
+      "additionalProperties": false,
+      "properties": {
+        "batch_size": { "type": "integer", "minimum": 1 },
+        "epochs": { "type": "integer", "minimum": 1 },
+        "lr": { "type": "number", "exclusiveMinimum": 0 },
+        "max_class_weight": { "type": "number", "exclusiveMinimum": 0 },
+        "device": { "type": "string" }
+      }
+    },
+    "split_counts": {
+      "type": "object", "required": ["train", "held_out"], "additionalProperties": false,
+      "properties": {
+        "train": { "type": "integer", "minimum": 0 },
+        "held_out": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "baselines": {
+      "type": "object",
+      "required": ["majority_class"], "additionalProperties": false,
+      "properties": {
+        "majority_class": {
+          "type": "object",
+          "required": ["family", "per_class_iou", "per_class_recall"],
+          "additionalProperties": false,
+          "properties": {
+            "family": { "type": "string" },
+            "per_class_iou": { "type": "object" },
+            "per_class_recall": { "type": "object" }
+          }
+        }
+      }
+    },
+    "best_epoch": { "type": "integer", "minimum": 0 },
+    "metrics": {
+      "type": "object",
+      "required": ["per_class", "macro_iou", "rarest_class_iou", "rarest_class_recall", "aggregate_accuracy_reported_only"],
+      "additionalProperties": false,
+      "properties": {
+        "per_class": {
+          "type": "object",
+          "description": "family name -> {iou, recall}",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["iou", "recall"],
+            "additionalProperties": false,
+            "properties": {
+              "iou": { "type": "number", "minimum": 0, "maximum": 1 },
+              "recall": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "macro_iou": { "type": "number", "minimum": 0, "maximum": 1 },
+        "rarest_class_iou": { "type": "number", "minimum": 0, "maximum": 1 },
+        "rarest_class_recall": { "type": "number", "minimum": 0, "maximum": 1 },
+        "aggregate_accuracy_reported_only": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "promotion_verdict": { "type": "string", "enum": ["pending", "promoted", "refused"] },
+    "gate": {
+      "type": "object",
+      "required": ["rule", "rarest_class", "sc003"],
+      "additionalProperties": false,
+      "properties": {
+        "rule": { "type": "string", "const": "per_class_iou_recall" },
+        "rarest_class": { "type": "string" },
+        "sc003": { "type": "boolean" }
+      }
+    }
+  }
+}

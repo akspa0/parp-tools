@@ -1,6 +1,25 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-20
+Last updated: 2026-07-21
+
+## Active work: Spec 116 relational terrain layer reconstruction (planning complete; ready for speckit-tasks)
+
+- Spec 116 reframes terrain reconstruction as a **relational schema**: layer entries are ordered
+  rows, texture references are foreign keys into each tile's own MTEX table, and the corpus is a
+  discrete alphabet of reused pieces. Five user stories: US1 family→slot consistency (decides
+  output vocabulary, no model), US2 shape→coverage coupling (decides derivability, no model), US4
+  spatially-isolated held-out set + relief-stratified eval, US3 structure prediction from minimap
+  alone, US5 feed predicted structure into geometry.
+- **Spec Kit plan artifacts complete** (`specs/116-relational-terrain-layers/`): spec.md,
+  requirements checklist, plan.md, research.md (decisions D-01..D-10), data-model.md, contracts/
+  (cli-contract + 3 JSON schemas), quickstart.md. Constitution check PASS; Principle IV tension
+  (multi-aspect "structure" vs no-multi-task) resolved in D-04 by decomposing into one independent
+  `StructureSlotNet` per detail slot (1–3), base slot never predicted.
+- Reuses the v50 Zarr store (no new harvest), Spec 115 surface-family taxonomy (`v115.1`), and the
+  Spec 114 identity-binding / dry-run-first / model-stage-run contract pattern. All new code will
+  be Python under `data-harvester/src/harvester/spec116/` + thin `scripts/`. User runs all training
+  (FR-018). `tasks.md` generated (35 tasks, T001–T035, organized US1→US2→US4→US3→US5; MVP = US1).
+  Next: code mode, phase by phase, starting with Setup + Foundational then US1.
 
 ## Active work: Spec 114 direct minimap-to-terrain (original zarr-based spec restored)
 
