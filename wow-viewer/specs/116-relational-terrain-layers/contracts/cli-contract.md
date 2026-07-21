@@ -62,10 +62,17 @@ uv run python scripts/spec116_build_held_out_split.py \
 uv run python scripts/spec116_train_structure.py \
   --store <v50 curriculum store> \
   --split <split dir> \
-  --rescore-checkpoint <existing geometry checkpoint.pt> \
-  [--relief-threshold <std>] [--print-only]
+  --rescore-checkpoint <existing Spec 114/115 geometry checkpoint.pt> \
+  [--relief-threshold <std>] [--rescore-in-channels <int, default 3>] \
+  [--rescore-output <report.json>] [--print-only]
 ```
-- Reports flat vs relief-bearing error + trivial baseline per stratum (FR-011). No training.
+- Reports flat vs relief-bearing MAE + trivial baseline per stratum, and whether the checkpoint
+  beats the trivial baseline on relief-bearing regions (FR-011). No training; read-only.
+- `--rescore-checkpoint` switches the CLI into evaluation mode: `--dumps`/`--vocabulary`/
+  `--output`/`--slot` are not required in this mode.
+- `--rescore-in-channels`: `3` for the RGB-only baseline; a Spec 115 `--feature-store` checkpoint
+  needs its trained value.
+- Always prints the report; `--rescore-output` additionally persists it unless `--print-only`.
 
 ## US3 — structure prediction training (USER-RUN, dry-run first)
 
@@ -75,8 +82,8 @@ uv run python scripts/spec116_train_structure.py \
   --split <split dir> \
   --dumps <texture-name dump json>... \
   --slot 1 \
-  --vocabulary <US1 recommendation: family_keyed|slot_keyed> \
-  --epochs 100 --batch-size 16 --lr 1e-3 --max-class-weight 15.0 \
+  --vocabulary <US1 family_slot_consistency report JSON> \
+  --epochs 100 --batch 16 --lr 1e-3 --max-class-weight 15.0 \
   --output <run dir> \
   [--device cuda] [--confirm-run]
 ```
@@ -91,28 +98,53 @@ uv run python scripts/spec116_train_structure.py \
 
 ## US3 — structure inference + legality audit
 
+Two mutually exclusive input modes:
+
 ```
 uv run python scripts/spec116_infer_structure.py \
   --checkpoint <structure checkpoint_best.pt> \
   --inputs <tile png | dir>... \
   [--tile-table <MTEX table json>] \
-  --output <infer dir>
+  --slot 1 \
+  --output <audit.json> [--write]
 ```
-- Predicts family probabilities per chunk/slot; resolves legal local ids when a tile table is
-  supplied; emits `structure-infer.json` (see `structure-run.schema.json` infer variant).
-- OOD images (no `--tile-table`) set `legal_table_available=false` and never fabricate references
-  (D-05).
+or, batch mode over an existing v50 store:
+```
+uv run python scripts/spec116_infer_structure.py \
+  --checkpoint <structure checkpoint_best.pt> \
+  --store <v50 curriculum store> \
+  --dumps <texture-name dump json>... \
+  --slot 1 \
+  --output <audit.json> [--write]
+```
+- Predicts family probabilities per chunk/slot; resolves legal local ids when a tile table
+  (`--inputs` mode) or texture-name dump (`--store` mode) is supplied; emits `v50-structure-
+  infer-v1` (see `structure-run.schema.json` infer variant).
+- OOD images (`--inputs` with no `--tile-table`) set `legal_table_available=false` and never
+  fabricate references (D-05). `--inputs` runs unchanged on a hand-painted image with no store
+  backing at all.
 
 ## US5 — materialize predicted structure + geometry comparison
 
 ```
 uv run python scripts/spec116_materialize_structure.py \
   --store <v50 curriculum store> \
-  --split <split dir> \
   --checkpoint <structure checkpoint_best.pt> \
   --output <derived structure store> \
+  --dumps <texture-name dump json>... \
+  --slot 1 \
   [--write]
 ```
-Then the user runs the existing Spec 114 geometry trainer **with** and **without**
-`--feature-store <derived structure store>` on the same split, and the comparison is recorded in
+Bridge the derived store into the geometry trainer's feature-store shape (its `--feature-store`
+was built for Spec 115's per-pixel `v115-feature-map-v1`, not this per-chunk store):
+```
+uv run python scripts/spec116_structure_to_feature_map.py \
+  --structure-store <derived structure store> \
+  --output <feature-map store> \
+  [--write]
+```
+Then the user runs `scripts/v50_train_direct_geometry.py` (`--architecture mit_b0_regression`)
+**with** and **without** `--feature-store <feature-map store>` on the same split -- passing
+`--held-out-split <split dir>` both times to consume the Spec 116 split directly instead of the
+trainer's own `--val-key`/`--val-value` column -- and the comparison is recorded in
 `v50-structure-geometry-comparison-v1` (data-model.md).

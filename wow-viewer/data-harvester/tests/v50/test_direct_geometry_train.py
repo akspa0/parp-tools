@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -9,6 +11,7 @@ from harvester.v50.direct_geometry_train import (
     SC001_RELATIVE_MARGIN,
     SPEC112_FROZEN_BEST_VAL_MAE,
     TrainerContractError,
+    apply_held_out_split,
     build_direct_plan,
     build_stage_run_summary,
     check_sc002,
@@ -146,3 +149,79 @@ def test_direct_plan_records_recipe_and_sc001_references() -> None:
             index_rows=rows, selected_rows=[0], batch_size=16, epochs=100, seed=114,
             lr=2e-4, lr_schedule="constant", amp=False, amp_dtype="int8", clip=0.0,
         )
+
+
+class TestApplyHeldOutSplit:
+    """Spec 116 US5 5b wiring: an external held-out-split directory overrides train/val
+    selection instead of the curriculum's own (possibly stale) "split" column."""
+
+    def _build_split_dir(self, tmp_path: Path, index_rows: list[dict]) -> Path:
+        from harvester.spec116.held_out_split import build_held_out_split, write_split
+
+        tiles = [
+            {"tile_row": i, "map": r["map"], "tile_x": r["tile_x"], "tile_y": r["tile_y"]}
+            for i, r in enumerate(index_rows)
+        ]
+        split = build_held_out_split(tiles=tiles, held_out_fraction=0.2, buffer_rings=1, block_size=3, seed=7)
+        assert split["verified_violation_count"] == 0
+        split_dir = tmp_path / "split"
+        # write_split only needs store/index.parquet's sha256; a lightweight decoy is enough.
+        store = tmp_path / "decoy.zarr"
+        store.mkdir()
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        pq.write_table(pa.Table.from_pylist(index_rows), store / "index.parquet")
+        write_split(store=store, output=split_dir, split=split, build_id="test")
+        return split_dir
+
+    def _grid_index_rows(self, n: int) -> list[dict]:
+        return [
+            {"map": "Kalimdor", "tile_x": x, "tile_y": y, "split": "train", "source": "authored"}
+            for y in range(n) for x in range(n)
+        ]
+
+    def test_overrides_train_val_from_external_split(self, tmp_path: Path) -> None:
+        rows = self._grid_index_rows(10)
+        split_dir = self._build_split_dir(tmp_path, rows)
+
+        train_rows, val_rows, manifest = apply_held_out_split(
+            index_rows=rows, selected_rows=list(range(len(rows))), split_dir=split_dir,
+        )
+        assert manifest["verified_violation_count"] == 0
+        assert len(train_rows) > 0
+        assert len(val_rows) > 0
+        assert set(train_rows).isdisjoint(val_rows)
+        # Every selected row lands in train or val or neither (excluded buffer) -- never both.
+        assert len(train_rows) + len(val_rows) <= len(rows)
+
+    def test_refuses_leaky_split(self, tmp_path: Path) -> None:
+        import json as _json
+
+        from harvester.spec116.structure_contract import Spec116ContractError
+
+        rows = self._grid_index_rows(10)
+        split_dir = self._build_split_dir(tmp_path, rows)
+        manifest_path = split_dir / "split.json"
+        manifest = _json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["verified_violation_count"] = 3
+        manifest_path.write_text(_json.dumps(manifest), encoding="utf-8")
+
+        # The split contract itself already rejects a nonzero violation count on load; a leaky
+        # split can never reach apply_held_out_split's own FR-010 guard.
+        with pytest.raises((TrainerContractError, Spec116ContractError)):
+            apply_held_out_split(index_rows=rows, selected_rows=list(range(len(rows))), split_dir=split_dir)
+
+    def test_ignores_stale_split_column_on_index_rows(self, tmp_path: Path) -> None:
+        """The curriculum's own "split" column (train/val) is irrelevant once an external
+        held-out-split directory is supplied -- only (map, tile_x, tile_y) membership matters."""
+        rows = self._grid_index_rows(10)
+        for row in rows:
+            row["split"] = "val"  # every row claims val on the stale column
+        split_dir = self._build_split_dir(tmp_path, rows)
+
+        train_rows, val_rows, _manifest = apply_held_out_split(
+            index_rows=rows, selected_rows=list(range(len(rows))), split_dir=split_dir,
+        )
+        # Real assignment comes from the spatial split, not the stale "val" column.
+        assert len(train_rows) > 0

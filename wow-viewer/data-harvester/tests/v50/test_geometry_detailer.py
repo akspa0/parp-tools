@@ -209,6 +209,46 @@ def test_detailer_backward_flows_to_head() -> None:
     assert float(model.head.weight.grad.abs().sum()) > 0
 
 
+# --- Spec 116: in_channels (feature-store) extension ----------------------------
+
+
+def test_default_in_channels_is_backward_compatible() -> None:
+    """Existing callers that never pass in_channels keep the original 3-channel contract."""
+    model = GeometryDetailerNet().eval()
+    rgb = torch.rand(1, 3, 256, 256)
+    coarse = torch.rand(1, 257, 257)
+    with torch.no_grad():
+        residual = model(rgb, coarse)
+    assert residual.shape == (1, 257, 257)
+
+
+def test_wider_in_channels_accepts_concatenated_feature_map() -> None:
+    """RGB (3) + a 5-class generated feature map = 8 input channels."""
+    model = GeometryDetailerNet(in_channels=8).eval()
+    rgb_plus_features = torch.rand(2, 8, 256, 256)
+    coarse = torch.rand(2, 257, 257) * 0.5 + 0.2
+    with torch.no_grad():
+        residual = model(rgb_plus_features, coarse)
+        final = compose_final(coarse, residual, clamp=False)
+    assert torch.allclose(final, coarse, atol=1e-6)  # zero-init head still holds at any width
+    assert residual.shape == (2, 257, 257)
+
+
+def test_wrong_channel_count_refused_for_wider_model() -> None:
+    model = GeometryDetailerNet(in_channels=8).eval()
+    with pytest.raises(Exception, match="rgb must be"):
+        model(torch.rand(1, 3, 256, 256), torch.rand(1, 257, 257))
+
+
+def test_detailer_identity_records_in_channels() -> None:
+    model = GeometryDetailerNet(in_channels=8)
+    identity = detailer_identity(model, in_channels=8)
+    assert identity["parameter_count"] > 1_000_000
+    # A wider model must hash to a different identity than the 3-channel default.
+    default_identity = detailer_identity(GeometryDetailerNet(), in_channels=3)
+    assert identity["config_sha256"] != default_identity["config_sha256"]
+
+
 # --- T060 trainer gates ---------------------------------------------------------
 
 

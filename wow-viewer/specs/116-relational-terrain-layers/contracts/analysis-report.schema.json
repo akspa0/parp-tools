@@ -7,6 +7,14 @@
   "required": ["schema", "created_utc", "report_kind", "identity", "decision"],
   "additionalProperties": false,
   "properties": {
+    "row_count": { "type": "integer", "minimum": 0 },
+    "layer_entry_count": { "type": "integer", "minimum": 0 },
+    "excluded": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+    "build_id": { "type": "string" },
+    "fittable_tile_layer_count": { "type": "integer", "minimum": 0 },
+    "skipped_zero_coverage": { "type": "integer", "minimum": 0 },
+    "high_coupling_variance_threshold": { "type": "number", "minimum": 0 },
+    "bimodality_coefficient_threshold": { "type": "number", "minimum": 0 },
     "schema": { "type": "string", "const": "v116-analysis-report-v1" },
     "created_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
     "report_kind": { "type": "string", "enum": ["family_slot_consistency", "shape_coverage_coupling"] },
@@ -63,7 +71,7 @@
     },
     "shape_coverage_coupling": {
       "type": "object",
-      "required": ["per_tile_layer_explained_variance", "dip_test_p_value", "mixture_bic", "high_coupling_tile_share", "linear_underpowered_note"],
+      "required": ["per_tile_layer_explained_variance", "bimodality_coefficient", "mixture_bic", "high_coupling_tile_share", "linear_underpowered_note"],
       "additionalProperties": false,
       "properties": {
         "per_tile_layer_explained_variance": {
@@ -79,7 +87,7 @@
             }
           }
         },
-        "dip_test_p_value": { "type": "number", "minimum": 0, "maximum": 1 },
+        "bimodality_coefficient": { "type": "number", "minimum": 0, "description": "SAS bimodality coefficient (skew^2+1)/kurtosis; >~0.555 suggests bimodality" },
         "mixture_bic": {
           "type": "object", "required": ["one_component", "two_component", "two_preferred"],
           "additionalProperties": false,

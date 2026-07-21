@@ -2,16 +2,54 @@
 
 Last updated: 2026-07-21
 
-## Spec 116 — relational terrain layer reconstruction (planning complete)
+## Spec 116 — relational terrain layer reconstruction (FULLY IMPLEMENTED — all 35 tasks done)
 
-- Spec Kit plan generated for `specs/116-relational-terrain-layers/`: spec.md + requirements
-  checklist already existed; added plan.md, research.md (D-01..D-10), data-model.md, contracts/
-  (cli-contract + held-out-split / analysis-report / structure-run JSON schemas), quickstart.md.
-- Constitution check PASS; Principle IV (no multi-task) resolved by decomposing US3 into one
-  independent `StructureSlotNet` per detail slot (base slot never predicted). Reuses v50 store (no
-  new harvest), Spec 115 family taxonomy `v115.1`, Spec 114 contract/dry-run-first pattern. User
-  runs all training (FR-018). `tasks.md` generated (T001–T035, MVP = US1). Next: code phases
-  US1→US2→US4→US3→US5.
+- Spec Kit plan + all 35 tasks (T001–T035) implemented and validated. 121 spec116 tests pass;
+  ruff clean; compileall clean; full data-harvester suite 1017 passed / 46 skipped / 3
+  pre-existing failures (unrelated). No regressions.
+- **US1**: `family_slot_consistency.py` + CLI — vocabulary decision (`slot_keyed`/`family_keyed`).
+- **US2**: `shape_coverage_coupling.py` + CLI — derivability decision.
+- **US4**: `held_out_split.py` (8-neighbour isolation) + `relief_stratification.py` (chunk strata,
+  stratified MAE, tile-mean baseline, dihedral NCC overlap) + CLIs. `rescore_geometry_checkpoint`
+  (T019) re-scores an existing geometry checkpoint against the split, relief-stratified, read-only
+  (`spec116_train_structure.py --rescore-checkpoint --print-only`).
+- **US3**: `structure_model.py` (`StructureSlotNet` per detail slot, 16×16 chunk head, FR-008);
+  `structure_train.py` (dry-run-first, class-weighted CE, per-class IoU/recall gate D-08,
+  `v50-structure-run-v1`); `structure_infer.py` (legality resolver SC-004, OOD audit D-05,
+  `v50-structure-infer-v1`) + CLI with two modes: `--inputs`/`--tile-table` (loose images, no
+  store, runs on a hand-painted OOD tile) and `--store`/`--dumps` (batch).
+- **US5**: `structure_materialize.py` (frozen checkpoint → derived structure store, source
+  immutable, checkpoint sha256 bound) + CLI. New `structure_feature_bridge.py` +
+  `spec116_structure_to_feature_map.py` adapt that store into the `v115-feature-map-v1` shape the
+  existing geometry trainer's `--feature-store` requires. `direct_geometry_train.py` gained
+  `apply_held_out_split`/`--held-out-split` to consume the Spec 116 split directly (read-only,
+  overrides `--val-key`/`--val-value`, dry-run plan counts kept in sync). Geometry comparison
+  documented in quickstart.md 5b.
+- Reuses v50 store (no new harvest), Spec 115 `v115.1` taxonomy, Spec 114 sha256 helpers.
+  User runs all training (FR-018). All CLIs dry-run-first (FR-015).
+- **2026-07-21 verification pass found and fixed 3 gaps between "done" and actually runnable**:
+  T019's rescore CLI flags, T027's loose-image infer interface, and the US5 5b geometry-comparison
+  handoff (wrong script name `spec114_train_geometry.py`; real trainer had no split mechanism and
+  would reject the Spec 116 structure store's schema) were all documented/task-complete but not
+  wired into working code. Root cause: tests validated library functions in isolation, never the
+  documented CLI invocations end-to-end. Lesson: "tests pass" is not "the quickstart commands
+  work" — verify by reading the actual argparse against the docs, not just running the suite.
+- **Same day, running the real `--write`/rescore paths surfaced 3 more gaps**: `--build-id`
+  defaulted to `""` but the split schema requires non-empty (fixed: auto-derive from the store);
+  `rescore_geometry_checkpoint` only built a 3-channel RGB tensor so any 8-channel Spec 115
+  checkpoint crashed (fixed: `--feature-store` reconstructs the same generated channels, with
+  `--rescore-source` to match the feature store's row-domain coverage). `quickstart.md`'s
+  `--source authored_only` was also invalid (real choices: `all`/`authored`/`synthetic`).
+- **Rescoring all six direct-geometry checkpoints on the same 444-row authored held-out subset
+  overturned two standing findings**: (1) every checkpoint (v1 through v6) beats the trivial
+  tile-mean baseline on relief regions (v3-deconfounded best at -40.7%, v1 RGB baseline still
+  -9.9%) — the old "no model beats tile-mean" result was an artifact of the leaky split, not a
+  model property; (2) relief MAE gets monotonically WORSE from v3→v4→v5→v6 (26.7→33.8→35.0→36.8)
+  even though v6 was recorded as the best road-MAE run — brush loss/normal guidance/mcly-brush
+  weighting each optimized a leaky-split metric (road MAE) at the cost of general relief-region
+  generalization. Deconfounding itself (v3) is the real driver, not the later refinements. Full
+  per-checkpoint table in `activeContext.md`'s Spec 116 section. 125/125 spec116 tests pass after
+  all six fixes.
 
 ## Spec 110 — viewer global light is unconditional
 

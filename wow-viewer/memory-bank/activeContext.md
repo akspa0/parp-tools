@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-21
 
-## Active work: Spec 116 relational terrain layer reconstruction (planning complete; ready for speckit-tasks)
+## Active work: Spec 116 relational terrain layer reconstruction (FULLY IMPLEMENTED — all 5 user stories)
 
 - Spec 116 reframes terrain reconstruction as a **relational schema**: layer entries are ordered
   rows, texture references are foreign keys into each tile's own MTEX table, and the corpus is a
@@ -10,16 +10,94 @@ Last updated: 2026-07-21
   output vocabulary, no model), US2 shape→coverage coupling (decides derivability, no model), US4
   spatially-isolated held-out set + relief-stratified eval, US3 structure prediction from minimap
   alone, US5 feed predicted structure into geometry.
-- **Spec Kit plan artifacts complete** (`specs/116-relational-terrain-layers/`): spec.md,
-  requirements checklist, plan.md, research.md (decisions D-01..D-10), data-model.md, contracts/
-  (cli-contract + 3 JSON schemas), quickstart.md. Constitution check PASS; Principle IV tension
-  (multi-aspect "structure" vs no-multi-task) resolved in D-04 by decomposing into one independent
-  `StructureSlotNet` per detail slot (1–3), base slot never predicted.
-- Reuses the v50 Zarr store (no new harvest), Spec 115 surface-family taxonomy (`v115.1`), and the
-  Spec 114 identity-binding / dry-run-first / model-stage-run contract pattern. All new code will
-  be Python under `data-harvester/src/harvester/spec116/` + thin `scripts/`. User runs all training
-  (FR-018). `tasks.md` generated (35 tasks, T001–T035, organized US1→US2→US4→US3→US5; MVP = US1).
-  Next: code mode, phase by phase, starting with Setup + Foundational then US1.
+- **All 35 tasks (T001–T035) implemented and validated.** 121 spec116 tests pass; ruff clean;
+  compileall clean; full data-harvester suite 1017 passed / 46 skipped / 3 pre-existing failures
+  (unrelated to Spec 116). No regressions.
+- **US1 (Phase 3)**: `family_slot_consistency.py` + CLI — per-family P(s|f), summary consistency
+  score, `slot_keyed`/`family_keyed` recommendation. `v116-analysis-report-v1` artifact.
+- **US2 (Phase 4)**: `shape_coverage_coupling.py` + CLI — GradientBoosting explained variance,
+  SAS bimodality coefficient, GMM BIC, `coverage_derivable`/`coverage_independent` decision.
+- **US4 (Phase 5)**: `held_out_split.py` (8-neighbour-isolated split, `verified_violation_count`
+  must be 0) + `relief_stratification.py` (chunk strata, stratified MAE, tile-mean baseline,
+  dihedral NCC reused-piece overlap) + CLIs. `rescore_geometry_checkpoint` (T019, in
+  `structure_train.py`) re-scores an EXISTING Spec 114/115 geometry checkpoint against the split,
+  stratified by relief — read-only, no training — via `spec116_train_structure.py
+  --rescore-checkpoint`.
+- **US3 (Phase 6)**: `structure_model.py` (`StructureSlotNet` — one independent U-Net-lite per
+  detail slot 1–3, 16×16 chunk-resolution head, base slot 0 never predicted FR-008);
+  `structure_train.py` (dry-run-first, class-weighted CE, per-class IoU/recall gate D-08,
+  `promotion_verdict=pending`, `v50-structure-run-v1` record, refuses leaky split);
+  `structure_infer.py` (legality resolver picks same-family local id from tile MTEX table SC-004,
+  OOD never fabricates reference D-05, `v50-structure-infer-v1` audit record) + CLI with two
+  mutually exclusive modes: `--inputs`/`--tile-table` (loose PNG files/dirs, no store required —
+  runs unchanged on a hand-painted OOD image) and `--store`/`--dumps` (batch over a v50 store).
+- **US5 (Phase 7)**: `structure_materialize.py` (frozen checkpoint → derived structure store with
+  `structure_family`/`structure_confidence`/`structure_legal`, row-aligned `index.parquet`,
+  source stores immutable, checkpoint sha256 bound) + CLI. `structure_feature_bridge.py` (new) +
+  `spec116_structure_to_feature_map.py` CLI upsample that derived store into the
+  `v115-feature-map-v1` shape `harvester.v50.direct_geometry_train`'s `--feature-store` already
+  validates (predicted class keeps its confidence as probability mass; remainder spread uniformly
+  — a valid per-pixel distribution, not a finer-grained claim). `direct_geometry_train.py` gained
+  `apply_held_out_split`/`--held-out-split` so the trainer consumes a Spec 116 split directly
+  (read-only; curriculum store never mutated), overriding `--val-key`/`--val-value`; the dry-run
+  plan's `split_counts`/`train_steps_per_epoch` are overridden to match so they're never wrong
+  about what will actually train. Geometry comparison documented in quickstart.md section 5b
+  (`v50-structure-geometry-comparison-v1` template, SC-007 bar).
+- Reuses v50 Zarr store (no new harvest), Spec 115 `v115.1` taxonomy, Spec 114 sha256 helpers.
+  User runs all training (FR-018). All CLIs are dry-run-first (FR-015).
+- **Verification correction (2026-07-21, same session as "fully implemented" above)**: a
+  from-scratch verification pass (reading every CLI's real argparse against
+  quickstart.md/cli-contract.md/tasks.md, not trusting the prior "all 35 tasks done" claim) found
+  three tasks that were marked done but were not actually runnable as documented: T019's
+  `--rescore-checkpoint`/`--print-only` flags did not exist on `spec116_train_structure.py`; T027's
+  `--inputs`/`--tile-table` loose-image interface did not exist on `spec116_infer_structure.py`
+  (only store-batch mode did); and the US5 5b payoff referenced a script that does not exist
+  (`spec114_train_geometry.py`) whose real counterpart (`v50_train_direct_geometry.py`) had no
+  `--split` mechanism and would hard-refuse `--feature-store` pointed at a
+  `v116-structure-store-v1` store (it validates for `v115-feature-map-v1`). All three gaps were
+  closed this session (code above); do not repeat the "all 35 tasks implemented" claim without
+  actually exercising each documented CLI invocation — passing focused tests only proves the
+  library functions work, not that the documented commands parse.
+- **Three more gaps found running the actual `--write`/rescore paths against the real corpus
+  (2026-07-21, same day)**: (1) `spec116_build_held_out_split.py --write` crashed —
+  `v50-held-out-split-v1` requires non-empty `build_id`, CLI defaulted it to `""`; fixed by
+  auto-deriving `build_id` from the store's own `index.parquet` `build` column. (2)
+  `rescore_geometry_checkpoint` only ever built a 3-channel RGB tensor, so any Spec 115
+  deconfounded checkpoint (8 channels) crashed; fixed by adding `feature_store`/`--feature-store`
+  (concatenates the same generated `feature_map` array the trainer does, RGB first) with
+  `in_channels` auto-derived as `3 + class_count`. (3) the real feature-map store only covers the
+  1,629 authored rows, not the dual curriculum's 1,361 synthetic rows; fixed by adding
+  `source`/`--rescore-source` (mirrors `direct_geometry_train.py`'s `--source`) to filter held-out
+  rows to the matching domain. Also fixed `quickstart.md`'s 5b `--source authored_only` (not a
+  real choice — `SOURCE_CHOICES = {"all","authored","synthetic"}`) to `--source authored`. Real
+  corpus location (not the quickstart placeholder): `../output/datasets/v50/v50.1/curriculum-
+  0_5_3_3368-dual_v1.zarr` (2,990 rows), one directory above `data-harvester/`.
+- **Major finding from rescoring all six direct-geometry checkpoints on the new split (2026-07-21,
+  same 444-row authored-only held-out subset, same `trivial_baseline_mae=44.984`):**
+
+  | checkpoint | channels | relief MAE | vs trivial | SC-007 |
+  |---|---|---|---|---|
+  | v1 (RGB baseline) | 3 | 40.518 | -9.9% | true |
+  | v2-spectral (RGB+spectral loss) | 3 | 29.887 | -33.6% | true |
+  | **v3-deconfounded** | 8 | **26.689** | **-40.7%** | true |
+  | v4-brush | 8 | 33.766 | -24.9% | true |
+  | v5-normals | 8 | 34.987 | -22.2% | true |
+  | v6-mcly-brush | 8 | 36.785 | -18.2% | true |
+
+  **This overturns two standing findings, both artifacts of the OLD leaky split (99.6% train/val
+  spatial adjacency), not properties of the models**: (1) "no model beats the tile-mean baseline"
+  (recorded across Specs 112-115) — all six checkpoints clear it here; (2) v6-mcly-brush is not
+  the best generalizer despite being recorded as "best road MAE run to date" — relief MAE gets
+  monotonically WORSE from v3→v4→v5→v6 even as each was introduced as an improvement. The
+  deconfounding itself (v3, RGB→8ch) does the real work; brush loss (v4), normal guidance (v5),
+  and mcly-brush weighting (v6) each improved the metric they were tuned against (road-region MAE
+  on the leaky split) while eroding general relief-region generalization — a real
+  overfitting-to-leaky-evaluation signature. Follow-up: re-examine whether v4-v6's loss terms are
+  worth keeping now that a trustworthy eval exists to check them against. MAE here is raw
+  world-height units (decoded via each tile's own min/max), not the `[0,1]` normalized units
+  elsewhere in memory-bank, and the split differs from what those figures used — not directly
+  comparable to prior recordings, only to each other within this rescore setup. 125/125 spec116
+  tests pass after all six total fixes this session.
 
 ## Active work: Spec 114 direct minimap-to-terrain (original zarr-based spec restored)
 

@@ -34,6 +34,7 @@
     },
     "verified_violation_count": { "type": "integer", "const": 0 },
     "absolute_comparison_to_prior_invalid": { "type": "boolean", "const": true },
-    "baseline_requiring_rerun": { "type": "string", "minLength": 1 }
+    "baseline_requiring_rerun": { "type": "string", "minLength": 1 },
+    "excluded_count": { "type": "integer", "minimum": 0, "description": "isolation-buffer tiles excluded from both train and held_out" }
   }
 }
