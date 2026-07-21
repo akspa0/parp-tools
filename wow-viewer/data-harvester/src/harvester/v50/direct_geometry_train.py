@@ -25,10 +25,12 @@ from pathlib import Path
 
 import numpy as np
 
+from harvester.spec103.v7_inputs import brush_mask_from_alpha
 from harvester.v50.contracts import release_identity, require_store_release, validate_release
 from harvester.v50.direct_geometry_model import (
     ARCHITECTURE_IDS,
     MIT_B0_HUB_ID,
+    MIT_B0_ID,
     MIT_B0_LICENSE,
     build_geometry_model,
     load_pretrained_encoder,
@@ -58,6 +60,7 @@ from harvester.v50.model_stage_contract import (
     identity_for_path,
     validate_model_stage_run,
 )
+from harvester.v50.normal_guidance import normal_gradient_loss
 from harvester.v50.spectral_guidance import multiscale_gradient_loss, radial_spectral_loss
 
 STAGE = "direct_geometry"
@@ -251,6 +254,13 @@ def main() -> int:
     ap.add_argument("--multiscale-weight", type=float, default=0.0,
                     help="multi-octave gradient guidance weight; 0 keeps bootstrap parity")
     ap.add_argument("--workers", type=int, choices=[0], default=0)
+    ap.add_argument("--cache-samples", action="store_true",
+                    help="Hold every built sample in RAM after its first epoch. With --workers "
+                         "pinned to 0 the Zarr decompression runs on the main thread while the GPU "
+                         "idles (~31 ms/sample with the full signal set); caching removes that from "
+                         "every epoch after the first. Results are bit-identical — sample "
+                         "construction is deterministic — so runs stay comparable. Costs roughly "
+                         "3.7 MB per sample of system RAM (~6 GB for the 1629-row authored set).")
     ap.add_argument("--val-tolerance", type=float, default=0.0,
                     help="Val MAE within this fraction of best still resets stale counter "
                          "(0.0 = strict, 0.01 = within 1%% of best counts as not stale). "
@@ -263,6 +273,47 @@ def main() -> int:
     ap.add_argument("--patience", type=int, default=15)
     ap.add_argument("--seed", type=int, default=114)
     ap.add_argument("--release", default="v50.1", type=validate_release)
+    ap.add_argument("--normal-weight", type=float, default=0.0,
+                    help="Weight for normal-derived GRADIENT supervision: constrain the predicted "
+                         "height field's slope to match authored MCNR normals at real vertices. "
+                         "Directly attacks spectral-bias blur, which point-wise L1 cannot see. "
+                         "0 disables (parity). Requires normal_xyz + mcnr_mask_257.")
+    ap.add_argument("--liquid-depth-aware", action="store_true",
+                    help="Scale the liquid down-weight by WATER DEPTH instead of applying it flatly. "
+                         "Terrain is visible through shallow water and invisible under deep ocean, so "
+                         "a flat penalty throws away real learnable signal in rivers/shallows "
+                         "(measured: depth p50 ~21 units vs p90 ~514). Shallow pixels keep ~full "
+                         "loss weight; only deep water takes the full --liquid-mask-weight penalty.")
+    ap.add_argument("--liquid-deep-threshold", type=float, default=100.0,
+                    help="Depth (world units) at which the liquid penalty reaches its full value "
+                         "under --liquid-depth-aware. Below this it ramps linearly from zero.")
+    ap.add_argument("--brush-loss-weight", type=float, default=0.0,
+                    help="V7 brush signal as a LOSS WEIGHT (not an input channel): upweight point "
+                         "loss on alpha-transition strokes by this factor, so authored detail edges "
+                         "carry more gradient than flat painted interiors. 0.5 means brush pixels "
+                         "weigh 1.5x. 0 disables (parity with prior runs). Requires alpha_256.")
+    ap.add_argument("--feature-store", type=Path, default=None,
+                    help="Spec 115: a v115-feature-map-v1 store from v50_materialize_feature_maps.py. "
+                         "Concatenates the classifier's GENERATED per-pixel feature map onto the RGB "
+                         "input (mit_b0_regression only), so height prediction gets a texture-vs-"
+                         "terrain signal. Adds the road-region error metric. RGB-only without it.")
+    ap.add_argument("--label-store", type=Path, default=None,
+                    help="A v115-terrain-feature-labels-v1 store: EXACT per-layer MCLY ground-truth "
+                         "families. Loss-side only, never an inference input — which is precisely "
+                         "why ground truth is admissible here, unlike --feature-store (an input, so "
+                         "it must be predicted). Enables --flat-paint-weight/--brush-exclude-roads.")
+    ap.add_argument("--flat-paint-weight", type=float, default=0.0,
+                    help="UP-weight point loss on road-family pixels by this factor (0.5 => 1.5x). "
+                         "Roads are painted FLAT, so their height target is already flat; the model "
+                         "still sculpts them because the RGB edge is a strong relief cue. Weighting "
+                         "the truth harder is the 'do not encode this as geometry' signal. "
+                         "Requires --label-store. 0 disables (parity).")
+    ap.add_argument("--brush-exclude-roads", action="store_true",
+                    help="Withhold the --brush-loss-weight boost on road-family pixels. "
+                         "brush_mask_from_alpha collapses the 4 MCLY layers with max(axis=2), so a "
+                         "road edge and a cliff-detail edge are indistinguishable and the brush "
+                         "term currently teaches the model to put DETAIL at road borders. "
+                         "Requires --label-store.")
     ap.add_argument("--mit-hub-id", default=MIT_B0_HUB_ID)
     ap.add_argument("--mit-revision", default=None,
                     help="pinned HF revision; required with --mit-pretrained")
@@ -306,14 +357,77 @@ def main() -> int:
             f"insufficient rows after --source {args.source}: train={len(train_rows)} val={len(val_rows)}"
         )
 
+    # Optional EXACT per-layer MCLY ground-truth families, used only to shape the loss. Admissible
+    # as ground truth precisely because it never reaches the model's input.
+    label_group = None
+    road_family_index = -1
+    if args.label_store is not None:
+        label_group = zarr.open_group(str(args.label_store), mode="r")
+        label_attrs = dict(label_group.attrs)
+        if label_attrs.get("schema") != "v115-terrain-feature-labels-v1":
+            raise SystemExit(
+                f"--label-store is not a v115-terrain-feature-labels-v1 store: {args.label_store}"
+            )
+        family_names = list(label_attrs.get("family_names", []))
+        if "road" not in family_names:
+            raise SystemExit(f"--label-store taxonomy has no 'road' family: {family_names}")
+        road_family_index = family_names.index("road")
+        # Row-aligned to the curriculum rather than indexed like the feature store; assert that
+        # rather than trusting it, because a silent misalignment would weight the wrong pixels.
+        label_rows = int(label_group["labels"].shape[0])
+        if label_rows != len(index):
+            raise SystemExit(
+                f"--label-store has {label_rows} rows but the curriculum has {len(index)}; "
+                "it must be materialized from this exact curriculum"
+            )
+    if (args.flat_paint_weight > 0 or args.brush_exclude_roads) and label_group is None:
+        raise SystemExit("--flat-paint-weight/--brush-exclude-roads require --label-store")
+
+    # Spec 115: optional generated feature-map input. Loaded here so the model is built with the
+    # right input-channel count and the dataset can concatenate it. The feature store is row-aligned
+    # to the curriculum via its index.parquet's source_row_index -- validated, never assumed.
+    feature_group = None
+    feature_class_count = 0
+    feature_row_to_position: dict[int, int] = {}
+    if args.feature_store is not None:
+        if args.architecture != MIT_B0_ID:
+            raise SystemExit(f"--feature-store requires --architecture {MIT_B0_ID}")
+        feature_group = zarr.open_group(str(args.feature_store), mode="r")
+        feature_attrs = dict(feature_group.attrs)
+        if feature_attrs.get("schema") != "v115-feature-map-v1":
+            raise SystemExit(
+                f"--feature-store is not a v115-feature-map-v1 store: {args.feature_store}"
+            )
+        feature_class_count = int(feature_attrs.get("class_count", 0))
+        if feature_class_count < 1 or "feature_map" not in feature_group:
+            raise SystemExit(f"--feature-store has no usable feature_map array: {args.feature_store}")
+        feature_index = pq.read_table(args.feature_store / "index.parquet").to_pylist()
+        feature_row_to_position = {
+            int(r["source_row_index"]): pos for pos, r in enumerate(feature_index)
+        }
+        missing = [i for i in selected_rows if i not in feature_row_to_position]
+        if missing:
+            raise SystemExit(
+                f"--feature-store is missing {len(missing)} selected curriculum rows "
+                f"(e.g. {missing[:5]}); materialize it with the same --source"
+            )
+
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     try:
         model, model_identity = build_geometry_model(
-            args.architecture, pretrained_source=pretrained_record
+            args.architecture,
+            in_channels=3 + feature_class_count,
+            pretrained_source=pretrained_record
         )
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
+
+    use_normal_loss = args.normal_weight > 0
+    if use_normal_loss and not ("normal_xyz" in group and "mcnr_mask_257" in group):
+        print("WARNING: --normal-weight > 0 but normal_xyz/mcnr_mask_257 missing; "
+              "normal gradient supervision disabled.", flush=True)
+        use_normal_loss = False
 
     plan = build_direct_plan(
         architecture_identity=model_identity["architecture"],
@@ -332,6 +446,75 @@ def main() -> int:
         spectral_weight=args.spectral_weight,
         multiscale_weight=args.multiscale_weight,
     )
+    if use_normal_loss:
+        # Loss-only, like the brush term: normals never enter the model input, so
+        # deployment_inputs is unchanged.
+        plan["normal_guidance"] = {
+            "weight": args.normal_weight,
+            "signal": "mcnr_gradient_supervision",
+            "source_arrays": ["normal_xyz", "mcnr_mask_257"],
+            "evaluated_at": "real MCNR vertices only (145/chunk quincunx)",
+            "affects_inference_inputs": False,
+        }
+    if label_group is not None and (args.flat_paint_weight > 0 or args.brush_exclude_roads):
+        plan["mcly_layer_guidance"] = {
+            "flat_paint_weight": args.flat_paint_weight,
+            "brush_excludes_roads": bool(args.brush_exclude_roads),
+            "signal": "per_layer_mcly_ground_truth_families",
+            "label_store": str(args.label_store),
+            "taxonomy_revision": str(dict(label_group.attrs).get("taxonomy_revision")),
+            "rule_set_sha256": str(dict(label_group.attrs).get("rule_set_sha256")),
+            "ground_truth_admissible_because": "loss-side only; never an inference input",
+            "affects_inference_inputs": False,
+        }
+    if args.liquid_mask_weight > 0:
+        # Recorded so a run's liquid settings are recoverable from its artifacts. Without this the
+        # plan captured brush and normals but silently omitted liquid, which made it impossible to
+        # tell after the fact whether two runs differed by one knob or two.
+        plan["liquid_mask"] = {
+            "weight": args.liquid_mask_weight,
+            "depth_aware": bool(args.liquid_depth_aware),
+            "deep_threshold": args.liquid_deep_threshold if args.liquid_depth_aware else None,
+            "source_arrays": ["liquid_mask"] + (
+                ["liquid_height", "height_257"] if args.liquid_depth_aware else []
+            ),
+            "affects_inference_inputs": False,
+            "note": "requested settings; the trainer warns and disables if source arrays are absent",
+        }
+    if args.cache_samples:
+        # Report the RAM commitment up front: it scales with how many signals are switched on, and
+        # the whole point is that the user can see the cost before starting a long run.
+        # Reads args rather than the derived use_* flags: those are resolved further down, after
+        # the dry-run exit, and an estimate that runs high is the safe direction for a RAM budget.
+        per_sample = (3 + feature_class_count) * 256 * 256 * 4 + 257 * 257 * 4
+        if args.liquid_mask_weight > 0 or args.brush_loss_weight > 0:
+            per_sample += 257 * 257 * 4
+        if use_normal_loss:
+            per_sample += 257 * 257 * 3 * 4 + 257 * 257 * 4
+        plan["sample_cache"] = {
+            "enabled": True,
+            "reason": "workers pinned to 0; Zarr decompression otherwise repeats every epoch",
+            "bit_identical": True,
+            "estimated_ram_gb": round(per_sample * len(selected_rows) / 1024**3, 2),
+        }
+    if args.brush_loss_weight > 0:
+        # Loss-only: the brush signal never enters the model's input, so deployment_inputs is
+        # deliberately unchanged. Recorded here so a run's plan states why its loss differs.
+        plan["brush_loss"] = {
+            "weight": args.brush_loss_weight,
+            "signal": "v7_ch12_alpha_transition_strokes",
+            "source_array": "alpha_256",
+            "affects_inference_inputs": False,
+        }
+    if feature_group is not None:
+        plan["deployment_inputs"] = ["minimap_rgb", "generated_terrain_feature_map"]
+        plan["feature_store"] = {
+            "path": str(args.feature_store.resolve()),
+            "class_count": feature_class_count,
+            "input_channels": 3 + feature_class_count,
+            "classifier_checkpoint_sha256": str(feature_attrs.get("checkpoint_sha256")),
+            "taxonomy_revision": str(feature_attrs.get("taxonomy_revision")),
+        }
     print(json.dumps(plan, indent=2), flush=True)
     if not args.confirm_run:
         print("DRY RUN ONLY: add --confirm-run to launch user-owned CUDA training.", flush=True)
@@ -356,27 +539,129 @@ def main() -> int:
               "liquid loss masking disabled.", flush=True)
         use_liquid_mask = False
 
+    # V7's brush imprint (spec 103 research-v7-contract ch 12), reused here as a LOSS WEIGHT rather
+    # than an input channel. It marks alpha *transition* strokes -- paint edges, never solid painted
+    # interiors -- which is where authored terrain detail actually lives. V7 used the same signal to
+    # build its recovery mask (v7_losses.build_recovery_mask), so weighting loss by it is the
+    # established use, not a new invention.
+    use_depth_aware = args.liquid_depth_aware and use_liquid_mask
+    if use_depth_aware and not ("liquid_height" in group and "height_257" in group):
+        print("WARNING: --liquid-depth-aware needs 'liquid_height' and 'height_257'; "
+              "falling back to a flat liquid penalty.", flush=True)
+        use_depth_aware = False
+
+    use_brush_mask = args.brush_loss_weight > 0
+    if use_brush_mask and "alpha_256" not in group:
+        print("WARNING: --brush-loss-weight > 0 but 'alpha_256' not in store; "
+              "brush loss weighting disabled.", flush=True)
+        use_brush_mask = False
+
+    use_flat_paint = args.flat_paint_weight > 0 and label_group is not None
+    # Only meaningful when there is a brush boost to withhold in the first place.
+    exclude_roads_from_brush = args.brush_exclude_roads and use_brush_mask and label_group is not None
+
     class RowDataset(Dataset):
-        def __init__(self, rows: list[int]) -> None:
+        def __init__(self, rows: list[int], *, cache: bool = False) -> None:
             self.rows = rows
+            # `--workers` is pinned to 0 on Windows, so every Zarr read below happens on the main
+            # thread with the GPU idle (measured: ~31 ms/sample for the full signal set, ~44 s per
+            # authored epoch). Sample construction is deterministic — there is no augmentation — so
+            # memoising the built tensors is bit-exact: the same values, decompressed once instead
+            # of once per epoch. The training loop only ever does `.to(device)`, which copies, so
+            # handing back the same CPU tensors cannot be corrupted by in-place writes.
+            self._cache: dict[int, tuple] | None = {} if cache else None
 
         def __len__(self) -> int:
             return len(self.rows)
 
         def __getitem__(self, i: int):
+            if self._cache is not None:
+                cached = self._cache.get(i)
+                if cached is not None:
+                    return cached
             row = self.rows[i]
             rgb = np.asarray(group["minimap_rgb"][row], dtype=np.float32) / 255.0
-            target, _, _ = encode_relative_height(np.asarray(group["height_257"][row]))
-            if use_liquid_mask:
-                liq = np.asarray(group["liquid_mask"][row], dtype=np.float32)
-                liq_t = torch.from_numpy(liq).unsqueeze(0).unsqueeze(0)
-                liq_t = torch.nn.functional.interpolate(
-                    liq_t, size=target.shape, mode="nearest"
-                ).squeeze(0).squeeze(0)
-                liq_t = (liq_t > 0.1).float()
+            channels = torch.from_numpy(rgb).permute(2, 0, 1)
+            if feature_group is not None:
+                position = feature_row_to_position[row]
+                feats = np.asarray(feature_group["feature_map"][position], dtype=np.float32)
+                # Generated (K, 256, 256) class probabilities, concatenated onto RGB. This is the
+                # classifier's OUTPUT, never ground-truth labels (Spec 115 FR-007).
+                channels = torch.cat([channels, torch.from_numpy(feats)], dim=0)
+            target, tile_lo, tile_hi = encode_relative_height(
+                np.asarray(group["height_257"][row])
+            )
+            # v112.1 denominator: the normal-gradient target scales by 1/denom, and denom is
+            # per-tile, so it must travel with the row rather than be assumed constant.
+            scale_t = torch.tensor(max(tile_hi - tile_lo, 1.0), dtype=torch.float32)
+            if use_normal_loss:
+                normals_t = torch.from_numpy(
+                    np.asarray(group["normal_xyz"][row], dtype=np.float32)
+                )
+                nmask_t = torch.from_numpy(
+                    np.asarray(group["mcnr_mask_257"][row]).astype(np.float32)
+                )
             else:
-                liq_t = torch.empty(0)
-            return torch.from_numpy(rgb).permute(2, 0, 1), torch.from_numpy(target), liq_t
+                normals_t = torch.empty(0)
+                nmask_t = torch.empty(0)
+
+            def _to_target_grid(mask: np.ndarray) -> torch.Tensor:
+                t = torch.from_numpy(np.asarray(mask, dtype=np.float32))[None, None]
+                t = torch.nn.functional.interpolate(t, size=target.shape, mode="nearest")
+                return (t.squeeze(0).squeeze(0) > 0.1).float()
+
+            # One combined per-pixel loss weight: liquid DOWN-weights (the minimap can't see
+            # underwater terrain), brush UP-weights (authored detail edges deserve more gradient).
+            point_weight = None
+            if use_liquid_mask:
+                liq = _to_target_grid(np.asarray(group["liquid_mask"][row], dtype=np.float32))
+                penalty = args.liquid_mask_weight
+                if use_depth_aware:
+                    # Terrain IS visible through shallow water, so a flat penalty discards real
+                    # signal. Ramp the penalty with depth: shallow keeps ~full loss weight, only
+                    # deep water takes the full penalty.
+                    surface = np.asarray(group["liquid_height"][row], dtype=np.float32)
+                    terrain = np.asarray(group["height_257"][row], dtype=np.float32)
+                    side = min(surface.shape[0], terrain.shape[0])
+                    depth = np.zeros_like(terrain, dtype=np.float32)
+                    depth[:side, :side] = surface[:side, :side] - terrain[:side, :side]
+                    depth = np.nan_to_num(depth, nan=0.0, posinf=0.0, neginf=0.0)
+                    depth_norm = np.clip(depth / max(args.liquid_deep_threshold, 1e-6), 0.0, 1.0)
+                    depth_t = torch.from_numpy(depth_norm)
+                    if depth_t.shape != torch.Size(target.shape):
+                        depth_t = torch.nn.functional.interpolate(
+                            depth_t[None, None], size=target.shape, mode="bilinear",
+                            align_corners=True,
+                        ).squeeze(0).squeeze(0)
+                    penalty = args.liquid_mask_weight * depth_t
+                point_weight = 1.0 - penalty * liq
+            road_t = None
+            if label_group is not None:
+                lab = np.asarray(label_group["labels"][row])
+                ok = np.asarray(label_group["valid"][row])
+                road_t = _to_target_grid(((lab == road_family_index) & ok).astype(np.float32))
+            if use_flat_paint:
+                # Roads are painted FLAT, so the target here is already flat and correct; the model
+                # sculpts them anyway because the RGB edge reads as relief. Weighting the existing
+                # truth harder is the "do not encode this as geometry" push.
+                factor = 1.0 + args.flat_paint_weight * road_t
+                point_weight = factor if point_weight is None else point_weight * factor
+            if use_brush_mask:
+                brush = brush_mask_from_alpha(np.asarray(group["alpha_256"][row]))
+                if brush is not None:
+                    brush_t = _to_target_grid(brush)
+                    if exclude_roads_from_brush:
+                        # max(axis=2) over the 4 MCLY layers made road edges and cliff-detail edges
+                        # identical, so the boost was landing on exactly the pixels that must stay
+                        # flat. Withhold it there and let the flat-paint term own those pixels.
+                        brush_t = brush_t * (1.0 - road_t)
+                    factor = 1.0 + args.brush_loss_weight * brush_t
+                    point_weight = factor if point_weight is None else point_weight * factor
+            weight_t = point_weight if point_weight is not None else torch.empty(0)
+            built = (channels, torch.from_numpy(target), weight_t, normals_t, nmask_t, scale_t)
+            if self._cache is not None:
+                self._cache[i] = built
+            return built
 
     val_targets = [encode_relative_height(np.asarray(group["height_257"][r]))[0] for r in val_rows]
     tile_mean_baseline = compute_tile_mean_baseline(val_targets)
@@ -388,11 +673,12 @@ def main() -> int:
     train_generator = torch.Generator()
     train_generator.manual_seed(args.seed)
     train_loader = DataLoader(
-        RowDataset(train_rows), batch_size=args.batch, shuffle=True,
+        RowDataset(train_rows, cache=args.cache_samples), batch_size=args.batch, shuffle=True,
         num_workers=args.workers, pin_memory=True, generator=train_generator,
     )
     val_loader = DataLoader(
-        RowDataset(val_rows), batch_size=args.batch, num_workers=args.workers, pin_memory=True
+        RowDataset(val_rows, cache=args.cache_samples), batch_size=args.batch,
+        num_workers=args.workers, pin_memory=True,
     )
     scheduler = None
     if args.lr_schedule == "onecycle":
@@ -419,6 +705,12 @@ def main() -> int:
             "point": "smooth_l1",
             "gradient_l1_weight": 0.25,
             "liquid_mask_weight": args.liquid_mask_weight,
+            "liquid_depth_aware": bool(use_depth_aware),
+            "liquid_deep_threshold": args.liquid_deep_threshold if use_depth_aware else None,
+            "brush_loss_weight": args.brush_loss_weight,
+            "normal_weight": args.normal_weight,
+            "normal_signal": "mcnr_gradient_supervision" if use_normal_loss else None,
+            "brush_signal": "v7_ch12_alpha_transition_strokes" if use_brush_mask else None,
             "spectral_weight": args.spectral_weight,
             "multiscale_weight": args.multiscale_weight,
         },
@@ -439,17 +731,22 @@ def main() -> int:
     for epoch in range(1, args.epochs + 1):
         model.train()
         train_losses = []
-        for x, y, liq in train_loader:
+        for x, y, weight, normals, nmask, scale in train_loader:
             opt.zero_grad(set_to_none=True)
             with torch.amp.autocast("cuda", enabled=args.amp, dtype=amp_dtype):
                 x_device = x.to(device)
                 y_device = y.to(device)
                 predicted = model(x_device)
                 loss = height_loss(predicted, y_device)
-                if use_liquid_mask and liq.numel() > 0:
-                    liq_d = liq.to(device)
-                    point_weight = 1.0 - args.liquid_mask_weight * liq_d
-                    loss = (torch.abs(predicted - y_device) * point_weight).mean()
+                if weight.numel() > 0:
+                    # Per-pixel weighted L1, carrying liquid down-weighting and/or brush
+                    # up-weighting. Replaces the default point loss exactly as the liquid-only
+                    # path did before, so runs with neither flag stay bit-comparable.
+                    loss = (torch.abs(predicted - y_device) * weight.to(device)).mean()
+                if use_normal_loss and normals.numel() > 0:
+                    loss = loss + args.normal_weight * normal_gradient_loss(
+                        predicted.float(), normals.to(device), nmask.to(device), scale.to(device)
+                    )
                 if args.spectral_weight > 0:
                     loss = loss + args.spectral_weight * radial_spectral_loss(
                         predicted.float(), y_device.float()
@@ -471,7 +768,7 @@ def main() -> int:
         val_absolute_error = 0.0
         val_elements = 0
         with torch.no_grad(), torch.amp.autocast("cuda", enabled=args.amp, dtype=amp_dtype):
-            for x, y, _liq in val_loader:
+            for x, y, _liq, _n, _nm, _s in val_loader:
                 y_device = y.to(device)
                 absolute_error = torch.abs(model(x.to(device)) - y_device)
                 val_absolute_error += float(absolute_error.sum().item())
@@ -490,6 +787,7 @@ def main() -> int:
                 model, group, index, fixed_preview_rows, device,
                 args.output / "validation" / "best_previews" / f"epoch_{epoch:04d}.png",
                 epoch=epoch, val_mae=val_mae, use_amp=args.amp,
+                feature_group=feature_group, feature_row_to_position=feature_row_to_position,
             )
         elif args.val_tolerance > 0 and val_mae <= best * (1.0 + args.val_tolerance):
             stale = 0
@@ -514,6 +812,7 @@ def main() -> int:
         model, group, index, val_rows, device, args.output / "validation" / "final_best",
         batch_size=args.batch, workers=args.workers,
         checkpoint_epoch=int(best_checkpoint["epoch"]), use_amp=args.amp,
+        feature_group=feature_group, feature_row_to_position=feature_row_to_position,
     )
     per_row = json.loads(
         (args.output / "validation" / "final_best" / "per_row_metrics.json").read_text(encoding="utf-8")
@@ -524,6 +823,55 @@ def main() -> int:
         tile_mean_baseline=tile_mean_baseline,
         flat_baseline=flat_baseline,
     )
+
+    # Spec 115 FR-008: road-region height error. The whole point of the feature channel is that
+    # height error should drop specifically where the classifier says "road". Reported only when a
+    # feature store is present (the RGB-only baseline has no road signal to region against); the
+    # gate is a later comparison of two runs' road_region_mae, computed identically here.
+    road_region_metrics = None
+    if feature_group is not None:
+        from harvester.v50.terrain_feature_labels import ROAD
+
+        model.eval()
+        road_abs = 0.0
+        road_px = 0
+        nonroad_abs = 0.0
+        nonroad_px = 0
+        with torch.no_grad():
+            for row in val_rows:
+                position = feature_row_to_position[row]
+                feats = np.asarray(feature_group["feature_map"][position], dtype=np.float32)
+                rgb = np.asarray(group["minimap_rgb"][row], dtype=np.float32) / 255.0
+                channels = torch.cat(
+                    [torch.from_numpy(rgb).permute(2, 0, 1), torch.from_numpy(feats)], dim=0
+                ).unsqueeze(0).to(device)
+                predicted = model(channels)[0].float().cpu().numpy()
+                target, _, _ = encode_relative_height(np.asarray(group["height_257"][row]))
+                abs_err = np.abs(predicted - target)
+                # Road mask at the height grid: argmax of the feature map, nearest-resized 256->257.
+                road256 = (feats.argmax(axis=0) == ROAD)
+                road257 = np.asarray(
+                    torch.nn.functional.interpolate(
+                        torch.from_numpy(road256.astype(np.float32))[None, None],
+                        size=target.shape, mode="nearest",
+                    )[0, 0]
+                ) > 0.5
+                road_abs += float(abs_err[road257].sum())
+                road_px += int(road257.sum())
+                nonroad_abs += float(abs_err[~road257].sum())
+                nonroad_px += int((~road257).sum())
+        road_region_metrics = {
+            "road_region_mae": (road_abs / road_px) if road_px else None,
+            "nonroad_region_mae": (nonroad_abs / nonroad_px) if nonroad_px else None,
+            "road_pixels": road_px,
+            "nonroad_pixels": nonroad_px,
+            "feature_store": str(args.feature_store.resolve()),
+            "note": "FR-008: compare road_region_mae against the RGB-only baseline run on the same split",
+        }
+        rr = road_region_metrics["road_region_mae"]
+        print(f"road-region MAE: {rr:.6f} (over {road_px:,} road px) | "
+              f"non-road MAE: {road_region_metrics['nonroad_region_mae']:.6f}", flush=True)
+
     checkpoint_identity = identity_for_path(args.output / "checkpoint_best.pt")
     stage_run = build_stage_run_summary(
         run_id=args.run_id,
@@ -547,6 +895,7 @@ def main() -> int:
             "evaluator": evaluation,
             "sc001": sc001,
             "sc002": sc002,
+            "road_region": road_region_metrics,
             "structural_failure_epoch1_best": best_record["epoch"] == 1,
         },
         visual_evidence={

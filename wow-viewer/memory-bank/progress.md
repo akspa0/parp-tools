@@ -289,3 +289,80 @@ What's true now:
   tests/test_v50_contract.py tests/test_v50_build_command.py` → 120 passed, 2 skipped, 0 failed.
   **The v50.1 `0_5_3_3368` full corpus is now actually built and curated (both manifest flavors),
   not just documented.**
+
+- **2026-07-20 — Spec 115: texture-confound deconfounding, liquid cell classification, normal
+  supervision.** The promoted geometry chain was reading roads as slopes (colour as depth proxy),
+  visible on out-of-distribution `ek.jpg` input. Built a separate terrain-feature classifier (RGB →
+  per-pixel family), materialized its *generated* output as extra geometry input channels, and
+  retrained: **road-region height MAE 0.2075 → 0.1632 (−21.35%)**, non-road −8.18%, overall val MAE
+  0.1878 → 0.1723 (−8.3%). The baseline had been worse *inside* road regions than outside — direct
+  evidence of the confound; v3 inverts that. Then built a per-cell liquid classifier (none/river/
+  ocean): **river IoU 0.7345 at chunk resolution, 0.8244 at 128×128 quad resolution** (recall 0.955)
+  against a 0.0 majority baseline. Added normal-derived gradient supervision (`normal_guidance.py`,
+  `--normal-weight`) constraining predicted slope to authored MCNR normals — the non-adversarial
+  answer to "PatchGAN for detail", using exact ground truth instead of a discriminator. Added
+  depth-aware liquid loss weighting (effective weight 0.50 → 0.83; terrain is visible through
+  shallow water, not ocean). Key lessons: **classify at the authoring unit rather than segmenting
+  pixels** (road segmentation IoU 0.17 vs liquid cells 0.82, same architecture family) and **predict
+  at the mesh's real resolution** (128×128 quads, not 16×16 chunks). Corrected three working
+  assumptions with measurement: normals are NOT higher-resolution than heights (identical quincunx
+  mask); half of `height_257` is format-level interpolation (caps detail, does not cause blur); the
+  global tileset→name list is not persisted and the `asset_inventory` substitute is falsified. New:
+  `terrain_feature_*`, `liquid_cell_*`, `normal_guidance.py`, `feature_map_materialize.py`, C#
+  `dump-texture-names`, `relief-to-map`, `split-minimap-image`. Specs `115-terrain-feature-
+  classifier/{spec,plan,research,data-model,quickstart}.md`. Full v50 suite **331 passed, 4
+  skipped**; Ruff clean; all trainers dry-run and refuse to train without `--confirm-run`.
+
+## 2026-07-21 — Corpus structure findings + MCLY layer guidance (road MAE best-yet)
+
+**Trainer optimisation.** `--cache-samples` on `direct_geometry_train.py`: memoises built samples in
+RAM. `--workers` is pinned to `choices=[0]` on Windows, so all Zarr decompression ran on the main
+thread with the GPU at 50% util (measured 31.5 ms/sample of raw reads; ~44 s/epoch). Sample
+construction is deterministic, so caching is **bit-identical** and keeps runs comparable. Measured
+effect: full training run **~1 hour -> ~10 minutes** (~6x, larger than the ~2x predicted because the
+cache also removes per-sample derived work — `encode_relative_height`, `interpolate`,
+`brush_mask_from_alpha`, depth computation — which the I/O-only measurement missed).
+
+**MCLY per-layer loss guidance (user's idea, delivered).** `brush_mask_from_alpha` collapses the 4
+MCLY layers via `max(axis=2)`, making a road edge indistinguishable from a cliff-detail edge — so
+`--brush-loss-weight` was actively teaching the model to put *more* height detail at road borders.
+Added `--label-store` + `--flat-paint-weight` (up-weights point loss on road-family pixels, whose
+target is already flat) and `--brush-exclude-roads` (withholds the brush boost there). Ground truth
+is admissible because it is **loss-side only**; the feature map had to be *predicted* solely because
+it is an input — and its road IoU is only 0.17, so exact labels are strictly better here.
+
+| run | road MAE | non-road | best val | last-25 sd |
+|---|---|---|---|---|
+| v3-deconfounded | 0.16322 | 0.17234 | 0.17230 | 0.00156 |
+| v5-normals | 0.18164 | 0.17297 | 0.17300 | 0.00715 |
+| **v6-mcly-brush** | **0.152246** | 0.175126 | 0.175012 | 0.00158 |
+
+v6 is the best road result to date: **-6.7% vs v3, -26.6% vs the v1 baseline**. v5's normal-gradient
+term REGRESSED roads (confound signature returned: road worse than non-road) and made val 4.6x
+noisier; removing it restored v3-level stability, confirming normals as the destabiliser.
+Also fixed: `liquid_mask_weight` was applied but never recorded in `training_plan.json`, so v3/v4
+liquid settings are permanently unrecoverable. Now recorded. Note `--liquid-mask-weight` is a
+PENALTY (`point_weight = 1 - penalty*liq`), so 0.25 gives the 0.75 weight originally intended.
+
+**Corpus structure (measured, changes the modelling problem).**
+- **Copy-paste reuse confirmed**: 9.5% of L1 alpha 32x32 blocks match a block in a *different* tile
+  at >=0.99 correlation under 8 dihedral transforms (median best-match 0.662). Terrain is assembled
+  from a reused fractal brush library. Two earlier tests wrongly reported no reuse — both were
+  structurally incapable of detecting it (see the memory note on detector power).
+- **L0 has no alpha map** — always-opaque base zone texture. Three detail layers over a base.
+- L1->L3 monotonically finer (centroid 18.2->20.9 cyc/tile) but a **gradient, not a partition**.
+- Dominant layer: L0 76.35%, L1 15.30%, L2 6.21%, L3 2.13% — far better posed than road (0.53%).
+- Alpha<->height coupling weak under a *linear* test (median |r| 0.05-0.16, no bimodality), but
+  Pearson cannot see threshold rules; a per-tile (height, slope)->alpha fit is the deciding test.
+- **99.6% of val tiles have a train edge-neighbour; 42.4% fully surrounded.** Adjacent ADTs share
+  edge vertices exactly, so val measures interpolation, not generalisation. Needs a blocked split.
+- **`sc001=False` in every run: no model has beaten the tile-mean baseline** (0.1387 vs 0.1723+).
+  39% of height patches are near-flat and 51/120 tiles are >90% base-only, so a constant-per-tile
+  predictor is strong. Stratify the metric by relief content.
+
+**Reframe:** an ADT is a serialized relational schema (MTEX/MMID/MWID lookup tables,
+`MCLY.textureId` a foreign key, MDDF/MODF placement joins, MCIN an index). We are doing continuous
+raster regression on structured prediction with referential constraints — which, with the discrete
+brush alphabet above, explains blur as averaging over a categorical space.
+
+Tests **339 passed, 4 skipped**; Ruff clean.

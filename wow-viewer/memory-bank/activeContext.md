@@ -260,6 +260,62 @@ section for the condensed current-state summary — kept in one place rather tha
   manifest. **The v50.1 `0_5_3_3368` full corpus now actually exists on disk**, not just
   documented — see `progress.md`'s Phase 9 entry for exact kept-tile counts per map/manifest.
 
+## Spec 115 terrain-feature deconfounding + liquid cells + normal supervision (2026-07-20)
+
+**Motivating failure:** the promoted geometry chain read roads as slopes — colour used as a depth
+proxy. Confirmed on out-of-distribution input (hand-painted `ek.jpg` tiles).
+
+**Delivered, measured against frozen baselines (not projections):**
+
+- **Terrain-feature classifier** (`terrain_feature_{labels,model,train,infer}.py`): RGB → per-pixel
+  family (unknown/terrain/road/water/structure). Feeding its *generated* map to geometry as extra
+  input channels cut **road-region height MAE 0.2075 → 0.1632 (−21.35%)**, non-road −8.18%. The
+  baseline was worse *inside* road regions than outside (0.2075 vs 0.1877) — direct evidence it was
+  reading roads as geometry. v3 overall val MAE 0.1723 vs baseline 0.1878 (−8.3%).
+- **Liquid cell classifier** (`liquid_cell_{labels,model,train}.py`): RGB → per-cell none/river/ocean.
+  **river IoU 0.7345 at 16×16 chunk grid, 0.8244 at 128×128 quad grid** (recall 0.955), baseline 0.0.
+- **Normal gradient supervision** (`normal_guidance.py`, `--normal-weight`): constrains predicted
+  height's slope to authored MCNR normals at real vertices. Loss-only; never enters inference input.
+- **Depth-aware liquid loss** (`--liquid-depth-aware`): penalty scales with water depth, raising
+  effective liquid loss weight 0.50 → 0.83. Terrain is visible through shallow water (depth p50 ≈21)
+  and not through ocean (p90 ≈514); one flat constant cannot serve both.
+- `direct_geometry_model.py` gained `in_channels` (default 3, hashed into the config identity, so
+  existing RGB-only checkpoints stay bit-identical and cannot be confused with deconfounded ones).
+- New C# `dump-texture-names` recovers per-tile MTEX tables (verified against Kalimdor 24,40).
+
+**Two structural lessons worth keeping:**
+
+1. **Classify at the authoring unit; don't segment pixels.** Road *segmentation* topped out at IoU
+   0.17 (road is 0.26% of pixels). Liquid *cell classification* hit 0.82 with the same architecture
+   family. Predict at the mesh's real resolution — a tile is 128×128 quads, not 16×16 chunks.
+2. **A target must be visible in the RGB before class balance matters.** `impass` is a collision
+   marker with no rendered footprint; `has_mcsh` measured r=-0.006 against minimap luminance (MCSH
+   is not baked into minimaps). Both were dropped despite attractive balance.
+
+**Verified facts that corrected working assumptions:**
+
+- Normals are NOT higher-resolution than heights: `mcnr_mask_257` is bit-identical to the height
+  quincunx mask (145 samples/chunk).
+- Half of `height_257` is format-level interpolation (gap cells reconstruct from orthogonal
+  neighbours to within 0.6–5% of height std). Real, but it caps detail; it is not the blur's cause.
+- The global `mcly_tileset_ids` → name list is **not persisted** anywhere; the plausible
+  `asset_inventory.parquet` substitute was tested and falsified. Use local `mcly_texture_ids` + the
+  texture-name dump.
+- `uniqueId` is a real object-placement chronology but did NOT predict alpha↔height brush coupling
+  (r=-0.007) — it times doodad placement, not terrain authoring.
+- Alpha-brush structure and height curvature ARE coupled (mean r +0.158, top tiles +0.64), clustered
+  by zone (Wetlands high; Silithus/Desolace/placeholder-heavy negative).
+
+**Known gap, deliberately accepted:** ~9.6% of tiles have MCNR normals that disagree with their own
+heights, where normal supervision would push toward flatness. `spec103_curate_dataset.py` has a
+`height_normal_mismatch` drop reason but it only catches "flat height + relieved normals", and the
+v50.1 curation ran with no-op thresholds (`min_rgb_std: 0.0`, `max_object_coverage: 1.0`,
+951/951 kept). User's call: leave it — deployment inputs are poorly upscaled 2002 imagery, so
+tolerating imperfect rows is closer to the real inference distribution than over-curating.
+
+**Proof:** full v50 suite 331 passed / 4 skipped; Ruff clean on all new modules; every trainer
+dry-runs and refuses to train without `--confirm-run`.
+
 ## Known open bug (unrelated lane, reported 2026-07-18, not yet fixed)
 
 - Built-in map GLB export: textures are mirrored along the Y axis. User confirmed via testing GLB
@@ -272,3 +328,22 @@ section for the condensed current-state summary — kept in one place rather tha
 - User runs client-backed visual proof, training, capture, and heavy work. Report client root,
   build identity, and fingerprint with any real-data conclusion.
 - `AlphaWdtWriter.cs` is frozen. Renderer reader ownership is native M2; export conversion is separate.
+
+## Corpus structure supersedes the raster-regression framing (2026-07-21)
+
+- An ADT is a **relational schema**, not an image: MTEX/MMID/MWID are lookup tables,
+  `MCLY.textureId` is a foreign key into the tile's own MTEX, MDDF/MODF are placement joins.
+  `terrain_feature_labels.py` already performs that join. Treat terrain reconstruction as
+  structured prediction under referential constraints, not continuous raster regression.
+- **Terrain is assembled from a reused fractal brush library** (9.5% of L1 alpha blocks are >=0.99
+  cross-tile copies under rotation). With the relational framing this makes blur a symptom of
+  averaging a *discrete* target space, not just spectral bias.
+- **L0 never has an alpha map** (opaque base zone texture). Never include it in an alpha stack, and
+  never collapse MCLY layers with `max(axis=2)` — that defect in `brush_mask_from_alpha` made the
+  brush loss boost road edges, the exact opposite of the intent.
+- **Two validation problems block honest evaluation**: 99.6% train/val spatial adjacency (adjacent
+  ADTs share edge vertices, so val is interpolation), and no model has ever beaten the tile-mean
+  baseline (0.1387 vs 0.1723+), because 39% of terrain is near-flat. Stratify metrics by relief
+  before trusting any aggregate MAE.
+- Before reporting that a signal is absent, verify the detector could have found it. Two null
+  results on brush reuse were both wrong and both structurally underpowered.

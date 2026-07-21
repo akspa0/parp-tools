@@ -40,19 +40,29 @@ class GeometryModelError(ValueError):
     """Raised when a geometry architecture or weight source violates the Spec 114 contract."""
 
 
-def default_mit_config() -> Any:
-    """MiT-B0/SegFormer-B0 sizes with a single continuous output channel (from-scratch default)."""
+DEFAULT_INPUT_CHANNELS = 3
+
+
+def default_mit_config(*, in_channels: int = DEFAULT_INPUT_CHANNELS) -> Any:
+    """MiT-B0/SegFormer-B0 sizes with a single continuous output channel (from-scratch default).
+
+    ``in_channels`` defaults to 3 (RGB only), keeping every existing checkpoint bit-identical. A
+    deconfounded run (Spec 115) passes ``3 + K`` to concatenate a generated feature-map; because
+    ``num_channels`` is part of the hashed config, a wider-input model can never present the same
+    architecture identity as the RGB-only baseline.
+    """
     from transformers import SegformerConfig
 
-    return SegformerConfig(num_labels=1)
+    return SegformerConfig(num_labels=1, num_channels=in_channels)
 
 
-def tiny_mit_config() -> Any:
+def tiny_mit_config(*, in_channels: int = DEFAULT_INPUT_CHANNELS) -> Any:
     """CPU-fixture config: identical topology and output contract at a fraction of the cost."""
     from transformers import SegformerConfig
 
     return SegformerConfig(
         num_labels=1,
+        num_channels=in_channels,
         hidden_sizes=[8, 16, 32, 64],
         depths=[1, 1, 1, 1],
         decoder_hidden_size=16,
@@ -77,12 +87,13 @@ class MitB0RegressionNet(nn.Module):
             raise GeometryModelError(
                 f"mit_b0_regression must have exactly one output channel, got {self.config.num_labels}"
             )
+        self.in_channels = int(self.config.num_channels)
         self.segformer = SegformerForSemanticSegmentation(self.config)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.ndim != 4 or x.shape[1] != 3:
+        if x.ndim != 4 or x.shape[1] != self.in_channels:
             raise GeometryModelError(
-                f"mit_b0_regression consumes one RGB tile (B, 3, H, W); got shape {tuple(x.shape)}"
+                f"mit_b0_regression consumes (B, {self.in_channels}, H, W); got shape {tuple(x.shape)}"
             )
         logits = self.segformer(pixel_values=x).logits
         out = torch.sigmoid(
@@ -145,20 +156,28 @@ def build_geometry_model(
     architecture: str,
     *,
     mit_config: Any | None = None,
+    in_channels: int = DEFAULT_INPUT_CHANNELS,
     pretrained_source: dict | None = None,
 ) -> tuple[nn.Module, dict[str, Any]]:
     """Build one geometry model plus its full schema identity block.
 
     Returns ``(model, identity)`` where identity carries ``architecture`` and ``pretrained_source``
-    exactly as the ``v50-model-stage-run-v1`` contract records them.
+    exactly as the ``v50-model-stage-run-v1`` contract records them. ``in_channels`` defaults to 3
+    (RGB); a Spec 115 deconfounded run passes ``3 + K`` and the wider config hashes to a distinct
+    architecture identity. Only ``mit_b0_regression`` supports extra channels; the frozen
+    ``direct_cnn_v112`` baseline is RGB-only by contract.
     """
     if architecture == DIRECT_CNN_ID:
         if pretrained_source is not None:
             raise GeometryModelError("direct_cnn_v112 is the from-scratch baseline; no pretrained source")
+        if in_channels != DEFAULT_INPUT_CHANNELS:
+            raise GeometryModelError(
+                f"direct_cnn_v112 is RGB-only (3 channels); got in_channels={in_channels}"
+            )
         model: nn.Module = HeightRelativeNet()
         config = None
     elif architecture == MIT_B0_ID:
-        config = mit_config if mit_config is not None else default_mit_config()
+        config = mit_config if mit_config is not None else default_mit_config(in_channels=in_channels)
         model = MitB0RegressionNet(config)
     else:
         raise GeometryModelError(

@@ -67,9 +67,27 @@ def test_mit_default_config_is_compact_b0() -> None:
 
 
 def test_mit_refuses_wrong_channels() -> None:
-    model = MitB0RegressionNet(tiny_mit_config())
-    with pytest.raises(GeometryModelError, match="one RGB tile"):
+    model = MitB0RegressionNet(tiny_mit_config())  # default 3 input channels
+    with pytest.raises(GeometryModelError, match=r"consumes \(B, 3"):
         model(torch.rand(1, 4, 256, 256))
+
+
+def test_mit_accepts_configured_extra_input_channels() -> None:
+    """Spec 115: in_channels 3+K widens the SegFormer stem; the wider config must hash distinctly."""
+    from harvester.v50.direct_geometry_model import build_geometry_model, tiny_mit_config as _tiny
+
+    model = MitB0RegressionNet(tiny_mit_config(in_channels=8))
+    out = model(torch.rand(1, 8, 256, 256))
+    assert out.shape == (1, 257, 257)
+    with pytest.raises(GeometryModelError, match=r"consumes \(B, 8"):
+        model(torch.rand(1, 3, 256, 256))
+
+    _, rgb_identity = build_geometry_model("mit_b0_regression", mit_config=_tiny(in_channels=3))
+    _, wide_identity = build_geometry_model("mit_b0_regression", mit_config=_tiny(in_channels=8))
+    assert (
+        rgb_identity["architecture"]["config_sha256"]
+        != wide_identity["architecture"]["config_sha256"]
+    )
 
 
 def test_mit_is_deterministic_under_seed() -> None:

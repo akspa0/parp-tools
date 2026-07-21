@@ -175,9 +175,18 @@ def render_validation_sheet(
 
 
 class _ValidationDataset(Dataset):
-    def __init__(self, group: Any, rows: list[int]) -> None:
+    def __init__(
+        self,
+        group: Any,
+        rows: list[int],
+        *,
+        feature_group: Any | None = None,
+        feature_row_to_position: dict[int, int] | None = None,
+    ) -> None:
         self.group = group
         self.rows = rows
+        self.feature_group = feature_group
+        self.feature_row_to_position = feature_row_to_position or {}
 
     def __len__(self) -> int:
         return len(self.rows)
@@ -185,8 +194,13 @@ class _ValidationDataset(Dataset):
     def __getitem__(self, position: int) -> tuple[torch.Tensor, torch.Tensor, int]:
         row_id = int(self.rows[position])
         rgb = np.asarray(self.group["minimap_rgb"][row_id], dtype=np.float32) / 255.0
+        channels = torch.from_numpy(rgb).permute(2, 0, 1)
+        if self.feature_group is not None and row_id in self.feature_row_to_position:
+            feat_pos = self.feature_row_to_position[row_id]
+            feats = np.asarray(self.feature_group["feature_map"][feat_pos], dtype=np.float32)
+            channels = torch.cat([channels, torch.from_numpy(feats)], dim=0)
         target, _, _ = encode_relative_height(np.asarray(self.group["height_257"][row_id]))
-        return torch.from_numpy(rgb).permute(2, 0, 1), torch.from_numpy(target), row_id
+        return channels, torch.from_numpy(target), row_id
 
 
 @torch.no_grad()
@@ -198,13 +212,20 @@ def _predict_samples(
     device: torch.device,
     *,
     use_amp: bool,
+    feature_group: Any | None = None,
+    feature_row_to_position: dict[int, int] | None = None,
 ) -> list[dict[str, Any]]:
     samples: list[dict[str, Any]] = []
+    _feat_pos = feature_row_to_position or {}
     model.eval()
     for row_id in row_ids:
         rgb = np.asarray(group["minimap_rgb"][row_id], dtype=np.uint8)
         target, _, _ = encode_relative_height(np.asarray(group["height_257"][row_id]))
-        tensor = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(device)
+        channels = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1)
+        if feature_group is not None and row_id in _feat_pos:
+            feats = np.asarray(feature_group["feature_map"][_feat_pos[row_id]], dtype=np.float32)
+            channels = torch.cat([channels, torch.from_numpy(feats)], dim=0)
+        tensor = channels.unsqueeze(0).to(device)
         with torch.amp.autocast(device.type, enabled=use_amp and device.type == "cuda"):
             predicted = model(tensor)[0].float().cpu().numpy()
         record = index_rows[row_id]
@@ -233,8 +254,13 @@ def render_fixed_model_preview(
     epoch: int,
     val_mae: float,
     use_amp: bool,
+    feature_group: Any | None = None,
+    feature_row_to_position: dict[int, int] | None = None,
 ) -> None:
-    samples = _predict_samples(model, group, index_rows, row_ids, device, use_amp=use_amp)
+    samples = _predict_samples(
+        model, group, index_rows, row_ids, device, use_amp=use_amp,
+        feature_group=feature_group, feature_row_to_position=feature_row_to_position,
+    )
     render_validation_sheet(samples, output, title=f"fixed validation preview | epoch {epoch} | MAE {val_mae:.6f}")
 
 
@@ -252,10 +278,16 @@ def evaluate_height_model(
     checkpoint_epoch: int,
     use_amp: bool,
     review_count: int = 8,
+    feature_group: Any | None = None,
+    feature_row_to_position: dict[int, int] | None = None,
 ) -> dict[str, Any]:
     """Evaluate every held-out row, then render honest quantile and worst-case sheets."""
     loader = DataLoader(
-        _ValidationDataset(group, val_rows),
+        _ValidationDataset(
+            group, val_rows,
+            feature_group=feature_group,
+            feature_row_to_position=feature_row_to_position,
+        ),
         batch_size=batch_size,
         shuffle=False,
         num_workers=workers,
@@ -300,12 +332,18 @@ def evaluate_height_model(
         for record in sorted(records, key=lambda record: (-float(record["mae"]), int(record["row_id"])))[:review_count]
     ]
     render_validation_sheet(
-        _predict_samples(model, group, index_rows, quantile_rows, device, use_amp=use_amp),
+        _predict_samples(
+            model, group, index_rows, quantile_rows, device, use_amp=use_amp,
+            feature_group=feature_group, feature_row_to_position=feature_row_to_position,
+        ),
         output / "error_quantiles.png",
         title=f"all-validation error quantiles | checkpoint epoch {checkpoint_epoch}",
     )
     render_validation_sheet(
-        _predict_samples(model, group, index_rows, worst_rows, device, use_amp=use_amp),
+        _predict_samples(
+            model, group, index_rows, worst_rows, device, use_amp=use_amp,
+            feature_group=feature_group, feature_row_to_position=feature_row_to_position,
+        ),
         output / "worst_cases.png",
         title=f"worst held-out rows | checkpoint epoch {checkpoint_epoch}",
     )
