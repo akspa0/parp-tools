@@ -751,6 +751,223 @@ def rescore_geometry_checkpoint(
     }
 
 
+DETAILER_RESCORE_SCHEMA = "v116-detailer-rescore-v1"
+
+
+def rescore_detailer_checkpoint(
+    *,
+    checkpoint_path: Path,
+    store: Path,
+    split_dir: Path,
+    coarse_store: Path | None = None,
+    relief_threshold: float = RELIEF_STD_THRESHOLD,
+    feature_store: Path | None = None,
+    source: str = "all",
+    device: str = "cpu",
+) -> dict:
+    """Re-score an existing detailer (coarse + residual) checkpoint on the US4 held-out split.
+
+    ``rescore_geometry_checkpoint`` above only knows single-stage geometry checkpoints
+    (``direct_cnn_v112``/``mit_b0_regression``) -- it cannot reconstruct a detailer's coarse+
+    residual composition (``geometry_detailer_model.GeometryDetailerNet``, which needs a
+    per-row materialized coarse relief as a SECOND input alongside RGB, then adds the model's
+    residual output to it). This is that same relief-stratified honesty gate, extended to the
+    detailer stage: reuses ``chunk_strata``/``stratified_mae``/``tile_mean_baseline_mae`` verbatim,
+    only the per-row prediction step differs (coarse+residual composition instead of one forward
+    pass).
+
+    ``coarse_store`` defaults to the ``v114-coarse-relief-v1`` store path the checkpoint itself
+    recorded at train time (``run_identity["coarse_store"]``) -- pass an explicit override only if
+    that path has moved. ``feature_store`` must be the SAME store the checkpoint was trained with
+    if its ``run_identity["feature_store"]`` is not null (the checkpoint records the path and
+    class_count it used, but not the array data itself, matching the coarse rescorer's identical
+    requirement). Never trains; never writes to the checkpoint, coarse store, or curriculum store.
+    """
+    import pyarrow.parquet as pq
+    import torch
+    import zarr
+
+    from harvester.v50.direct_geometry_materialize import COARSE_ARRAY, COARSE_STORE_SCHEMA
+    from harvester.v50.geometry_detailer_model import (
+        DETAILER_ARCHITECTURE_ID,
+        GeometryDetailerNet,
+        compose_final,
+    )
+    from harvester.v50.height_relative_model import decode_relative_height, encode_relative_height
+    from harvester.v50.height_relative_train import SOURCE_CHOICES
+
+    if source not in SOURCE_CHOICES:
+        raise StructureTrainError(f"source must be one of {sorted(SOURCE_CHOICES)}, got {source!r}")
+
+    split_manifest, split_rows = load_split(split_dir)
+    if split_manifest["verified_violation_count"] != 0:
+        raise StructureTrainError(
+            f"held-out split has {split_manifest['verified_violation_count']} violations; "
+            "refusing to rescore on a leaky split (FR-010)"
+        )
+
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    variant = ckpt.get("model_variant")
+    if variant != DETAILER_ARCHITECTURE_ID:
+        raise StructureTrainError(
+            f"checkpoint model_variant {variant!r} is not a detailer checkpoint "
+            f"({DETAILER_ARCHITECTURE_ID!r}); use --rescore-checkpoint for a single-stage "
+            "direct_cnn_v112/mit_b0_regression geometry checkpoint instead"
+        )
+
+    resolved_coarse_store = coarse_store or Path(str(ckpt.get("coarse_store", "")))
+    if not str(resolved_coarse_store) or not resolved_coarse_store.exists():
+        raise StructureTrainError(
+            f"coarse store not found: {resolved_coarse_store!r} (pass --coarse-store to override "
+            "the path the checkpoint recorded at train time)"
+        )
+    coarse_group = zarr.open_group(str(resolved_coarse_store), mode="r")
+    if dict(coarse_group.attrs).get("schema") != COARSE_STORE_SCHEMA:
+        raise StructureTrainError(
+            f"--coarse-store is not a {COARSE_STORE_SCHEMA!r} store: {resolved_coarse_store}"
+        )
+    coarse_index = pq.read_table(resolved_coarse_store / "index.parquet").to_pylist()
+    coarse_row_to_position = {int(r["source_row_index"]): pos for pos, r in enumerate(coarse_index)}
+
+    checkpoint_feature_info = ckpt.get("feature_store")
+    feature_group = None
+    feature_row_to_position: dict[int, int] = {}
+    feature_class_count = 0
+    if feature_store is not None:
+        feature_group = zarr.open_group(str(feature_store), mode="r")
+        feature_attrs = dict(feature_group.attrs)
+        if feature_attrs.get("schema") != "v115-feature-map-v1":
+            raise StructureTrainError(
+                f"--feature-store is not a v115-feature-map-v1 store: {feature_store}"
+            )
+        feature_class_count = int(feature_attrs.get("class_count", 0))
+        if feature_class_count < 1 or "feature_map" not in feature_group:
+            raise StructureTrainError(f"--feature-store has no usable feature_map array: {feature_store}")
+        feature_index = pq.read_table(feature_store / "index.parquet").to_pylist()
+        feature_row_to_position = {
+            int(r["source_row_index"]): pos for pos, r in enumerate(feature_index)
+        }
+    elif checkpoint_feature_info:
+        raise StructureTrainError(
+            "checkpoint was trained with a --feature-store "
+            f"(class_count={checkpoint_feature_info.get('class_count')}, "
+            f"recorded path={checkpoint_feature_info.get('path')!r}) but none was given here; "
+            "pass --feature-store pointing at the same v115-feature-map-v1 store"
+        )
+
+    in_channels = 3 + feature_class_count
+    model = GeometryDetailerNet(in_channels=in_channels)
+    try:
+        model.load_state_dict(ckpt["model"])
+    except (KeyError, RuntimeError) as exc:
+        raise StructureTrainError(
+            f"checkpoint weights do not match detailer architecture with in_channels={in_channels}: {exc}"
+        ) from exc
+    dev = torch.device(device)
+    model = model.to(dev)
+    model.eval()
+
+    group = zarr.open_group(str(store), mode="r")
+    for required in ("minimap_rgb", "height_257"):
+        if required not in group:
+            raise StructureTrainError(f"store is missing {required!r}: {store}")
+    index_rows = pq.read_table(store / "index.parquet").to_pylist()
+
+    split_map: dict[tuple[str, int, int], str] = {}
+    for row in split_rows:
+        key = (str(row["map"]), int(row["tile_x"]), int(row["tile_y"]))
+        split_map[key] = str(row["split"])
+
+    held_out_rows: list[int] = []
+    for row_idx, meta in enumerate(index_rows):
+        key = (str(meta.get("map")), int(meta.get("tile_x", -1)), int(meta.get("tile_y", -1)))
+        if split_map.get(key, "excluded") != "held_out":
+            continue
+        if source != "all" and str(meta.get("minimap_source")) != source:
+            continue
+        held_out_rows.append(row_idx)
+    if not held_out_rows:
+        raise StructureTrainError(
+            f"held-out split has zero rows present in this store for source={source!r}"
+        )
+    missing_coarse = [row for row in held_out_rows if row not in coarse_row_to_position]
+    if missing_coarse:
+        raise StructureTrainError(
+            f"--coarse-store is missing {len(missing_coarse)} of {len(held_out_rows)} held-out "
+            f"rows (first missing source_row_index={missing_coarse[0]}) -- materialize it with "
+            f"the same --source used here"
+        )
+    if feature_group is not None:
+        missing_feature = [row for row in held_out_rows if row not in feature_row_to_position]
+        if missing_feature:
+            raise StructureTrainError(
+                f"--feature-store is missing {len(missing_feature)} of {len(held_out_rows)} "
+                f"held-out rows (first missing source_row_index={missing_feature[0]})"
+            )
+
+    predictions: list[np.ndarray] = []
+    targets: list[np.ndarray] = []
+    strata: list[np.ndarray] = []
+
+    with torch.no_grad():
+        for row in held_out_rows:
+            rgb = np.asarray(group["minimap_rgb"][row], dtype=np.float32) / 255.0
+            channels = torch.from_numpy(rgb).permute(2, 0, 1)
+            if feature_group is not None:
+                position = feature_row_to_position[row]
+                feats = np.asarray(feature_group["feature_map"][position], dtype=np.float32)
+                channels = torch.cat([channels, torch.from_numpy(feats)], dim=0)
+            rgb_t = channels.unsqueeze(0).to(dev)
+            coarse = np.asarray(
+                coarse_group[COARSE_ARRAY][coarse_row_to_position[row]], dtype=np.float32
+            )
+            coarse_t = torch.from_numpy(coarse).unsqueeze(0).to(dev)
+            height = np.asarray(group["height_257"][row], dtype=np.float32)
+            _, tile_min, tile_max = encode_relative_height(height)
+            residual = model(rgb_t, coarse_t)
+            final_norm = compose_final(coarse_t, residual, clamp=True).squeeze(0).cpu().numpy()
+            predicted_height = decode_relative_height(final_norm, tile_min, tile_max)
+            predictions.append(predicted_height)
+            targets.append(height)
+            strata.append(chunk_strata(height, threshold=relief_threshold))
+
+    stratified = stratified_mae(predictions, targets, strata)
+    trivial_baseline = tile_mean_baseline_mae(targets)
+    relief_mae = stratified["relief"]["mae"]
+    sc007_beats_trivial_on_relief = relief_mae is not None and relief_mae < trivial_baseline
+
+    return {
+        "schema": DETAILER_RESCORE_SCHEMA,
+        "source": source,
+        "checkpoint": {
+            "path": str(checkpoint_path),
+            "sha256": sha256_file(checkpoint_path),
+            "model_variant": variant,
+            "in_channels": in_channels,
+        },
+        "coarse_store": {
+            "path": str(resolved_coarse_store.resolve()),
+            "sha256": sha256_file(resolved_coarse_store / "index.parquet"),
+        },
+        "feature_store": (
+            {"path": str(feature_store.resolve()), "class_count": feature_class_count}
+            if feature_store is not None else None
+        ),
+        "store": {"path": str(store.resolve()), "sha256": sha256_file(store / "index.parquet")},
+        "held_out_split": {
+            "path": str(split_dir / "split.json"),
+            "sha256": sha256_file(split_dir / "split.json"),
+            "verified_violation_count": int(split_manifest["verified_violation_count"]),
+        },
+        "relief_threshold": relief_threshold,
+        "held_out_row_count": len(held_out_rows),
+        "stratified_mae": stratified,
+        "trivial_baseline_mae": trivial_baseline,
+        "sc007_beats_trivial_on_relief": sc007_beats_trivial_on_relief,
+        "absolute_comparison_to_prior_runs_invalid": True,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # CLI (dry-run-first; user owns every CUDA run).                               #
 # --------------------------------------------------------------------------- #
@@ -781,6 +998,15 @@ def main(argv: list[str] | None = None) -> int:
                     help="US4 T019: re-score an EXISTING Spec 114/115 geometry checkpoint on "
                          "--split, stratified by relief. Switches the CLI to read-only "
                          "evaluation mode; --dumps/--vocabulary/--output/--slot are not used.")
+    ap.add_argument("--rescore-detailer-checkpoint", type=Path, default=None,
+                    help="Rescore an EXISTING detailer (coarse + residual) checkpoint instead of "
+                         "a single-stage geometry checkpoint -- use this, not --rescore-checkpoint, "
+                         "for anything trained by v50_train_geometry_detailer.py (model_variant "
+                         "detailer_unet_v1). Mutually exclusive with --rescore-checkpoint.")
+    ap.add_argument("--coarse-store", type=Path, default=None,
+                    help="detailer rescore mode: the v114-coarse-relief-v1 store to use. Defaults "
+                         "to the path the checkpoint itself recorded at train time; pass this only "
+                         "if that path has moved.")
     ap.add_argument("--relief-threshold", type=float, default=RELIEF_STD_THRESHOLD,
                     help="per-chunk height std at/above which a chunk counts as relief-bearing")
     ap.add_argument("--feature-store", type=Path, default=None,
@@ -803,6 +1029,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="rescore mode: print the report only, never write --rescore-output")
     args = ap.parse_args(argv)
 
+    if args.rescore_checkpoint is not None and args.rescore_detailer_checkpoint is not None:
+        ap.error("--rescore-checkpoint and --rescore-detailer-checkpoint are mutually exclusive")
+
     if args.rescore_checkpoint is not None:
         device = args.device
         if device == "cuda":
@@ -815,6 +1044,29 @@ def main(argv: list[str] | None = None) -> int:
             split_dir=args.split,
             relief_threshold=args.relief_threshold,
             in_channels=args.rescore_in_channels,
+            feature_store=args.feature_store,
+            source=args.rescore_source,
+            device=device,
+        )
+        print(json.dumps(report, indent=2), flush=True)
+        if not args.print_only and args.rescore_output is not None:
+            args.rescore_output.parent.mkdir(parents=True, exist_ok=True)
+            args.rescore_output.write_text(json.dumps(report, indent=2), encoding="utf-8")
+            print(f"\nwrote report: {args.rescore_output}", flush=True)
+        return 0
+
+    if args.rescore_detailer_checkpoint is not None:
+        device = args.device
+        if device == "cuda":
+            import torch
+            if not torch.cuda.is_available():
+                device = "cpu"
+        report = rescore_detailer_checkpoint(
+            checkpoint_path=args.rescore_detailer_checkpoint,
+            store=args.store,
+            split_dir=args.split,
+            coarse_store=args.coarse_store,
+            relief_threshold=args.relief_threshold,
             feature_store=args.feature_store,
             source=args.rescore_source,
             device=device,

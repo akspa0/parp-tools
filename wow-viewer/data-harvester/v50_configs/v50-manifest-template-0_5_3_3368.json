@@ -237,6 +237,58 @@
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
       "coverage_count": 0,
       "migration_policy": "copy-if-verified"
+    },
+    {
+      "name": "wdl_outer_17",
+      "dtype": "float32",
+      "row_shape": [
+        17,
+        17
+      ],
+      "required": false,
+      "authoritative_source": "harvest-stream",
+      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "coverage_count": 0,
+      "migration_policy": "copy-if-verified"
+    },
+    {
+      "name": "wdl_inner_16",
+      "dtype": "float32",
+      "row_shape": [
+        16,
+        16
+      ],
+      "required": false,
+      "authoritative_source": "harvest-stream",
+      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "coverage_count": 0,
+      "migration_policy": "copy-if-verified"
+    },
+    {
+      "name": "wdl_outer_present",
+      "dtype": "bool",
+      "row_shape": [
+        17,
+        17
+      ],
+      "required": false,
+      "authoritative_source": "harvest-stream",
+      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "coverage_count": 0,
+      "migration_policy": "copy-if-verified"
+    },
+    {
+      "name": "wdl_inner_present",
+      "dtype": "bool",
+      "row_shape": [
+        16,
+        16
+      ],
+      "required": false,
+      "authoritative_source": "harvest-stream",
+      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "coverage_count": 0,
+      "migration_policy": "copy-if-verified"
     }
   ],
   "row_lineage_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",

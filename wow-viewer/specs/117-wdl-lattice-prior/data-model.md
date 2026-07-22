@@ -51,19 +51,30 @@ no new consumer-side schema, no trainer changes.
 
 ## Store Schema Additions (v50 curriculum store)
 
-One new array added to the existing per-build v50 curriculum store via the harvest signal-config
-widening (US1, C# side — no new store, no new tool):
+**Corrected during implementation (2026-07-21)**: `TerrainWdlLattice` was already computed in
+`AdtTensorPackBuilder` and already streamed by `RawArraySerializer.WriteTerrainVertexArrays` under
+the names below in every stream profile (Full/V16/V22) — this was discovered mid-implementation,
+not designed in advance. US1 therefore required **zero C# changes**; the only real gap was that
+these four arrays were not yet in the frozen v50 signal catalog, so the store builder's existing
+1:1 name-matched extraction never selected them. The array names are the REAL harvest-stream names,
+not the `wdl_lattice_*` placeholder names originally drafted here before that was known:
 
 | Array | Shape | Dtype | Notes |
 |-------|-------|-------|-------|
-| `wdl_lattice_outer17` | (N, 17, 17) | float32 | world height units, NaN or a documented sentinel where `outer_present=false` |
-| `wdl_lattice_inner16` | (N, 16, 16) | float32 | world height units, same absence convention |
-| `wdl_lattice_outer_present` | (N, 17, 17) | bool | per-sample validity |
-| `wdl_lattice_inner_present` | (N, 16, 16) | bool | per-sample validity |
+| `wdl_outer_17` | (N, 17, 17) | float32 | world height units; a row where this signal is genuinely absent (no terrain vertices) is handled by the existing generic store-builder row-lineage mechanism (`unavailable`), never zero-filled-and-claimed |
+| `wdl_inner_16` | (N, 16, 16) | float32 | world height units, same convention |
+| `wdl_outer_present` | (N, 17, 17) | bool | per-sample validity within a row that IS present |
+| `wdl_inner_present` | (N, 16, 16) | bool | per-sample validity within a row that IS present |
 
-Rows where every sample is absent are excluded from the exported array set entirely at harvest time
-(never a phantom all-absent row), matching the existing project-wide convention of counting
-exclusions rather than emitting degenerate rows.
+Two absence levels exist, both honest and both already exercised by existing, generic code: (1)
+row-level — a tile with no real MCVT terrain vertices at all has no `wdl_outer_17`/etc. key in its
+harvest-stream blob, so the existing store builder (`scripts/v50_build_dataset.py::_cmd_build`)
+marks the row `unavailable` for this signal and zero-fills only for on-disk shape consistency, never
+claiming real data; (2) sample-level — within a present row, `wdl_outer_present`/`wdl_inner_present`
+mark exactly which of the 545 samples are real MCVT vertices, consumed by
+`harvester.spec117.lattice_model.encode_lattice_target`/`select_lattice_rows`, which exclude
+absent samples from normalization and exclude all-absent rows from training/evaluation entirely
+(never fabricated, matching spec Edge Cases).
 
 ## Run-Record Schema
 

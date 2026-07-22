@@ -29,7 +29,13 @@ MODEL_STAGE_RUN_SCHEMA = "v50-model-stage-run-v1"
 TARGET_SIGNAL = "relative_height_257"
 SYNTHETIC_LIGHTING_CONTRACT = "NoonWhiteGlobal"
 STAGES = frozenset(
-    {"direct_geometry", "object_visibility", "terrain_features", "texture_families", "alpha_stack"}
+    {
+        "direct_geometry", "object_visibility", "terrain_features", "texture_families", "alpha_stack",
+        # Spec 117: the standalone WDL-lattice predictor is one more independently trained/
+        # checkpointed stage in this same residual chain (research.md D-01) -- reusing this schema
+        # verbatim rather than inventing a parallel one.
+        "lattice_prior",
+    }
 )
 PROMOTION_VERDICTS = frozenset({"pending", "promoted", "rejected"})
 

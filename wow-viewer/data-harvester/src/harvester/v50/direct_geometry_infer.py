@@ -71,8 +71,16 @@ def load_tile_rgb(path: Path) -> np.ndarray:
     return rgb
 
 
-def load_geometry_checkpoint(checkpoint_path: Path, *, device: str):
-    """Load a training checkpoint into its architecture; refuse identity/contract drift."""
+def load_geometry_checkpoint(checkpoint_path: Path, *, device: str, in_channels: int = 3):
+    """Load a training checkpoint into its architecture; refuse identity/contract drift.
+
+    ``in_channels`` defaults to 3 (RGB-only), matching the true deployment contract this module
+    exists for. A checkpoint trained with a Spec 115/117-style ``--feature-store`` needs its real
+    ``in_channels`` (3 + class_count) passed explicitly by the caller (e.g.
+    ``direct_geometry_materialize.py``, which has the feature store available); this function does
+    not infer it from the checkpoint on its own, so a mismatched value still fails loudly at
+    ``load_state_dict`` rather than silently reshaping.
+    """
     import torch
 
     if not checkpoint_path.is_file():
@@ -86,25 +94,24 @@ def load_geometry_checkpoint(checkpoint_path: Path, *, device: str):
             f"checkpoint target contract {checkpoint.get('target_contract_version')!r} "
             f"!= {TARGET_CONTRACT_VERSION!r}"
         )
-    model, identity = build_geometry_model(variant)
+    model, identity = build_geometry_model(variant, in_channels=in_channels)
     try:
         model.load_state_dict(checkpoint["model"])
     except (KeyError, RuntimeError) as exc:
         raise InferenceContractError(
-            f"checkpoint weights do not match architecture {variant!r}: {exc}"
+            f"checkpoint weights do not match architecture {variant!r} with in_channels="
+            f"{in_channels}: {exc}"
         ) from exc
     model.eval()
     model.to(torch.device(device))
     return model, checkpoint, identity
 
 
-def predict_relief(model, rgb: np.ndarray, *, device: str) -> np.ndarray:
-    """One RGB tile -> one float32 relief field in [0, 1] at the 257x257 world grid."""
+def _run_model(model, channels_hwc: np.ndarray, *, device: str) -> np.ndarray:
+    """Shared core: an already-assembled (H, W, C) float array -> one relief field in [0, 1]."""
     import torch
 
-    tensor = (
-        torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(device)
-    )
+    tensor = torch.from_numpy(channels_hwc.astype(np.float32)).permute(2, 0, 1).unsqueeze(0).to(device)
     with torch.no_grad():
         predicted = model(tensor)[0].float().cpu().numpy()
     if predicted.shape != (257, 257) or not np.isfinite(predicted).all():
@@ -112,6 +119,26 @@ def predict_relief(model, rgb: np.ndarray, *, device: str) -> np.ndarray:
             f"model emitted an invalid relief field: shape {predicted.shape}"
         )
     return np.clip(predicted, 0.0, 1.0).astype(np.float32)
+
+
+def predict_relief(model, rgb: np.ndarray, *, device: str) -> np.ndarray:
+    """One RGB tile -> one float32 relief field in [0, 1] at the 257x257 world grid."""
+    return _run_model(model, rgb.astype(np.float32) / 255.0, device=device)
+
+
+def predict_relief_with_feature_map(
+    model, rgb: np.ndarray, feature_map: np.ndarray, *, device: str
+) -> np.ndarray:
+    """RGB tile + a GENERATED (class_count, H, W) feature map, concatenated exactly as
+    ``direct_geometry_train.py``'s ``RowDataset`` does, -> one relief field in [0, 1].
+
+    Only for materialization against a store where the feature map already exists (never for the
+    true RGB-only deployment contract, which stays untouched — see ``predict_relief``).
+    """
+    rgb_hwc = rgb.astype(np.float32) / 255.0
+    feature_hwc = np.asarray(feature_map, dtype=np.float32).transpose(1, 2, 0)  # (C,H,W) -> (H,W,C)
+    channels = np.concatenate([rgb_hwc, feature_hwc], axis=2)
+    return _run_model(model, channels, device=device)
 
 
 def relief_to_uint16(relief: np.ndarray) -> np.ndarray:

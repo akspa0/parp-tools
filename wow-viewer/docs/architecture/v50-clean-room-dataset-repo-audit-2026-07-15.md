@@ -310,6 +310,26 @@ The v50.1 release signal catalog defines the exact, verified data elements allow
 | `mcnr_mask_257` | bool | (257,257) | copy-if-verified | no | Normal coverage mask. |
 | `ground_intent_height_257` | float32 | (257,257) | copy-if-verified | no | WDL-derived ground intent. |
 | `mcly_tileset_ids` | int32 | (16,16,4) | copy-if-verified | no | Per-chunk tileset IDs. |
+| `wdl_outer_17` | float32 | (17,17) | copy-if-verified | no | WDL-scale coarse height lattice, outer samples (`height_257[::16,::16]`, Spec 108 FR-001 / `TerrainWdlLattice`). Already streamed by the harvester; only newly cataloged (Spec 117). |
+| `wdl_inner_16` | float32 | (16,16) | copy-if-verified | no | WDL-scale coarse height lattice, inner samples (`height_257[8::16,8::16]`), offset half-step from the outer grid. |
+| `wdl_outer_present` | bool | (17,17) | copy-if-verified | no | Per-sample validity for `wdl_outer_17`: a gap is a real MCVT vertex absence, never fabricated or interpolated to fill the point. |
+| `wdl_inner_present` | bool | (16,16) | copy-if-verified | no | Per-sample validity for `wdl_inner_16`, same convention as `wdl_outer_present`. |
+
+### Catalog amendment 2026-07-21 (Spec 117) — WDL lattice signals added
+
+**Rationale**: Spec 117 needs the exact 545-point WDL-scale lattice (17×17 outer + 16×16 inner,
+Spec 108 FR-001) as a first-class per-tile signal so a standalone minimap-only predictor can be
+trained and scored before any chain-integration is attempted. `TerrainWdlLattice` was already
+computed from real MCVT vertex data in `AdtTensorPackBuilder` and already streamed by
+`RawArraySerializer.WriteTerrainVertexArrays` under these exact names in every stream profile
+(Full/V16/V22) — this amendment only adds them to the frozen catalog so the existing v50 store
+builder's 1:1 name-matched extraction (`scripts/v50_build_dataset.py::_cmd_build`) selects them.
+No new harvester code, no new store writer code: the store builder, row-lineage tracking, and
+"excluded and counted, never fabricated" behavior for a signal missing on some tiles were already
+generic before this amendment.
+
+**Approved by**: this session's Spec 117 implementation pass, 2026-07-21 (data plumbing only, no
+model decision implied).
 
 ### Catalog amendment 2026-07-18 (Spec 112) — `minimap_rgb_authored` added
 

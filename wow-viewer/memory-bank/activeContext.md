@@ -2,6 +2,59 @@
 
 Last updated: 2026-07-21
 
+## Active work: Spec 117 WDL-lattice coarse prior for terrain geometry (US1–US3(i) implemented and code-verified)
+
+- Adds a third generated input to the v50 coarse+detailer chain: a per-tile 545-point WDL-scale
+  height lattice (17×17 outer + 16×16 inner, Spec 108 FR-001), predicted from minimap RGB alone.
+  Three user stories in priority order: US1 export the lattice as a real v50 signal (data
+  plumbing) → US2 prove a standalone predictor can learn it, scored only on the honest held-out
+  split → US3 bridge the frozen predictor's output into the existing `--feature-store` contract so
+  the already-validated coarse/detailer trainers consume it with zero trainer changes. No GAN,
+  adversarial loss, or generative-image technique anywhere (explicit spec boundary).
+- **Key mid-implementation discovery: no C# work was needed for US1.** `TerrainWdlLattice` was
+  already computed in `AdtTensorPackBuilder` and already streamed by
+  `RawArraySerializer.WriteTerrainVertexArrays` as `wdl_outer_17`/`wdl_inner_16`/`wdl_outer_present`/
+  `wdl_inner_present` in every stream profile (Full/V16/V22), predating this spec entirely. The spec
+  docs were drafted before this was known and named the arrays `wdl_lattice_outer17` etc.; corrected
+  to the real names during implementation. The only real gap was the frozen v50 signal catalog
+  (`docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`) not yet declaring these four
+  arrays, so the existing 1:1-name-matched store builder never selected them. Fixed by adding four
+  catalog rows and regenerating `v50_configs/v50-manifest-template-0_5_3_3368.json` +
+  `v50-signals-0_5_3_3368.json` via the existing `v50_generate_manifest_template.py` generator —
+  zero hand-editing, zero new ingestion code, drift-guard test (`test_committed_053_template_
+  matches_the_frozen_catalog`) still passes unmodified.
+- **US2**: `harvester/spec117/{lattice_model.py, lattice_train.py}` + `scripts/spec117_train_
+  lattice.py`. `LatticeNet` (~178K params at base=8) predicts minimap RGB → 545 values. The target
+  contract (`encode_lattice_target`/`decode_lattice_target`) is a masked analogue of
+  `height_relative_model`'s v112.1 per-tile min-max floor contract — absent lattice samples never
+  contribute to the normalization range or the loss. Reuses (imports, does not reimplement)
+  `height_relative_train`'s curriculum/source validation and `direct_geometry_train.
+  apply_held_out_split`. Unlike the existing trainers, `--held-out-split` is REQUIRED with no
+  `--val-key` fallback (FR-004: refuse an unspecified split, don't default away from one).
+  `STAGES` in `harvester/v50/model_stage_contract.py` was widened to add `"lattice_prior"` — the one
+  actual schema change needed to make research.md D-01's "reuse v50-model-stage-run-v1 verbatim"
+  claim true.
+- **US3(i)**: `harvester/spec117/lattice_bridge.py` + `scripts/spec117_lattice_to_feature_map.py`
+  bridges the frozen checkpoint's output into a `v115-feature-map-v1`-shaped, `class_count=1` store
+  (independently bilinear-upsamples the two regular outer/inner grids to 256×256 and averages them
+  — a documented approximation, not a precision quincunx reconstruction).
+- **Real end-to-end proof, not just unit tests**: built a real fixture v50 store + Spec 116
+  held-out split + a real (untrained, random-init, no CUDA training) checkpoint, then actually ran
+  `spec117_train_lattice.py` (dry-run and the missing-array refusal), `spec117_lattice_to_feature_
+  map.py --write`, and dry-ran BOTH `v50_train_direct_geometry.py --feature-store` and
+  `v50_train_geometry_detailer.py --feature-store` against the bridged output — both accepted it
+  with zero code changes (`input_channels: 4`, `deployment_inputs` gained `generated_terrain_
+  feature_map`). Caught one real integration bug this way: the checkpoint's `architecture` block
+  only carries a config hash, not the raw `base` width, so `lattice_bridge.py` needed a separate
+  `lattice_config: {"base": ...}` field to reconstruct an architecturally-identical `LatticeNet`
+  before `load_state_dict` — a bug no isolated unit test would have caught.
+- Proof: 26/26 new `tests/spec117/` pass; full `data-harvester` suite green (no regressions beyond
+  pre-existing unrelated failures); ruff clean; `py_compile` clean.
+- **Remaining, explicitly user-run**: a real store rebuild against `H:\CLIENTS` to pick up the new
+  catalog signals for real tiles, real `--confirm-run` training of the standalone predictor (the
+  learnable/not-learnable verdict is not yet known against real data), and the real US3(ii) paired
+  coarse/detailer comparison against the existing structure-augmented baseline.
+
 ## Active work: Spec 116 relational terrain layer reconstruction (FULLY IMPLEMENTED — all 5 user stories)
 
 - Spec 116 reframes terrain reconstruction as a **relational schema**: layer entries are ordered

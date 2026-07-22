@@ -2,6 +2,35 @@
 
 Last updated: 2026-07-21
 
+## Spec 117 — WDL-lattice coarse prior for terrain geometry (US1–US3(i) implemented and code-verified)
+
+- Third generated input to the v50 coarse+detailer chain: a per-tile 545-point WDL-scale height
+  lattice (Spec 108 FR-001), predicted from minimap RGB alone. US1 export → US2 standalone
+  learnability → US3 bridge into the existing `--feature-store` contract, no trainer changes.
+- **Discovery**: the C# harvester already streamed the lattice (`wdl_outer_17`/`wdl_inner_16`/
+  `wdl_outer_present`/`wdl_inner_present`, `TerrainWdlLattice` in `AdtTensorPackBuilder`) before this
+  spec existed. US1 was pure catalog/config wiring (4 rows added to the frozen signal catalog +
+  regenerated manifest template/signals config) — zero new C#, zero new ingestion code.
+- **US2**: `harvester/spec117/{lattice_model.py, lattice_train.py}` — `LatticeNet` (lean conv
+  encoder + two pooled heads, ~178K params at base=8) predicts RGB → 545 values; masked
+  encode/decode target contract (absent samples never affect normalization range or loss); reuses
+  `height_relative_train`/`direct_geometry_train`'s validated curriculum/split machinery;
+  `--held-out-split` REQUIRED (no fallback, FR-004). Widened `model_stage_contract.STAGES` to add
+  `"lattice_prior"` so the reused `v50-model-stage-run-v1` schema actually validates the new stage.
+- **US3(i)**: `harvester/spec117/lattice_bridge.py` bridges the frozen checkpoint into a
+  `v115-feature-map-v1`, `class_count=1` store (bilinear-upsample outer/inner grids, average).
+- **Verified for real, not just unit tests**: built a fixture v50 store + held-out split + a
+  random-init checkpoint (no CUDA training), then actually ran the trainer dry-run, the
+  missing-array refusal, the bridge `--write`, and dry-ran BOTH `v50_train_direct_geometry.py
+  --feature-store` and `v50_train_geometry_detailer.py --feature-store` against the bridged output
+  — both existing trainers accepted it with zero code changes. Caught one real bug this way: the
+  checkpoint needed an explicit `lattice_config.base` field since `architecture.config_sha256` only
+  hashes the config, doesn't carry it — `lattice_bridge.py` couldn't otherwise reconstruct the exact
+  `LatticeNet` shape before `load_state_dict`.
+- 26/26 new tests pass; full data-harvester suite green; ruff/py_compile clean. Remaining
+  (explicitly user-run): real store rebuild against `H:\CLIENTS`, real `--confirm-run` training
+  (learnable/not-learnable verdict unknown against real data), real US3(ii) paired comparison.
+
 ## Spec 116 — relational terrain layer reconstruction (FULLY IMPLEMENTED — all 35 tasks done)
 
 - Spec Kit plan + all 35 tasks (T001–T035) implemented and validated. 121 spec116 tests pass;

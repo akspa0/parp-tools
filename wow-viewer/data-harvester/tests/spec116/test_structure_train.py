@@ -23,9 +23,12 @@ from harvester.spec116.structure_train import (
     StructureTrainError,
     compute_class_weights,
     confusion_metrics,
-    main as train_main,
+    rescore_detailer_checkpoint,
     rescore_geometry_checkpoint,
     train_structure,
+)
+from harvester.spec116.structure_train import (
+    main as train_main,
 )
 from tests.spec116.conftest import build_store, write_texture_name_dump
 
@@ -493,3 +496,227 @@ class TestRescoreWithFeatureStore:
         report = rescore_geometry_checkpoint(checkpoint_path=ckpt, store=store, split_dir=split_dir, device="cpu")
         assert report["checkpoint"]["in_channels"] == 3
         assert report["feature_store"] is None
+
+
+def _build_coarse_store(path: Path, *, row_count: int) -> Path:
+    """A minimal v114-coarse-relief-v1 store: per-row normalized [0,1] coarse relief."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    import zarr
+
+    from harvester.v50.direct_geometry_materialize import COARSE_ARRAY, COARSE_STORE_SCHEMA
+
+    path.mkdir(parents=True, exist_ok=True)
+    group = zarr.open_group(str(path), mode="w")
+    rng = np.random.default_rng(1)
+    group.create_array(COARSE_ARRAY, data=rng.random((row_count, 257, 257)).astype(np.float16))
+    group.attrs.update({"schema": COARSE_STORE_SCHEMA, "source_filter": "authored"})
+    index = [{"source_row_index": i} for i in range(row_count)]
+    pq.write_table(pa.Table.from_pylist(index), path / "index.parquet")
+    return path
+
+
+def _save_detailer_checkpoint(
+    path: Path, *, coarse_store: Path, in_channels: int = 3, feature_store: dict | None = None,
+) -> None:
+    """Save a random-weight detailer checkpoint in the real training format."""
+    import torch
+
+    from harvester.v50.geometry_detailer_model import DETAILER_ARCHITECTURE_ID, GeometryDetailerNet
+
+    model = GeometryDetailerNet(in_channels=in_channels)
+    torch.save(
+        {
+            "model": model.state_dict(),
+            "model_variant": DETAILER_ARCHITECTURE_ID,
+            "epoch": 1,
+            "val_mae": 0.5,
+            "coarse_store": str(coarse_store),
+            "feature_store": feature_store,
+        },
+        path,
+    )
+
+
+class TestRescoreDetailerCheckpoint:
+    """Extends T019's relief-stratified honesty gate to detailer (coarse + residual) checkpoints,
+    which rescore_geometry_checkpoint cannot reconstruct (it only knows single-stage geometry
+    architectures). No training; reuses the identical stratification helpers."""
+
+    def test_rescore_reports_stratified_mae_using_recorded_coarse_store(self, tmp_path: Path) -> None:
+        pytest.importorskip("torch")
+        store = tmp_path / "grid.zarr"
+        store.mkdir()
+        store, _dump, rows = _grid_store(store, n=10)
+        split_dir = tmp_path / "split"
+        _build_split(store, split_dir, n=10)
+        coarse_store = _build_coarse_store(tmp_path / "coarse.zarr", row_count=len(rows))
+        ckpt = tmp_path / "detailer.pt"
+        _save_detailer_checkpoint(ckpt, coarse_store=coarse_store)
+
+        # coarse_store is NOT passed explicitly -- must be read from the checkpoint's own record.
+        report = rescore_detailer_checkpoint(
+            checkpoint_path=ckpt, store=store, split_dir=split_dir, device="cpu",
+        )
+        assert report["schema"] == "v116-detailer-rescore-v1"
+        assert report["held_out_row_count"] > 0
+        assert report["coarse_store"]["path"] == str(coarse_store.resolve())
+        assert "flat" in report["stratified_mae"] and "relief" in report["stratified_mae"]
+        assert isinstance(report["trivial_baseline_mae"], float)
+        assert isinstance(report["sc007_beats_trivial_on_relief"], bool)
+        assert report["absolute_comparison_to_prior_runs_invalid"] is True
+
+    def test_explicit_coarse_store_overrides_the_recorded_path(self, tmp_path: Path) -> None:
+        pytest.importorskip("torch")
+        store = tmp_path / "grid.zarr"
+        store.mkdir()
+        store, _dump, rows = _grid_store(store, n=10)
+        split_dir = tmp_path / "split"
+        _build_split(store, split_dir, n=10)
+        real_coarse = _build_coarse_store(tmp_path / "coarse.zarr", row_count=len(rows))
+        ckpt = tmp_path / "detailer.pt"
+        # Checkpoint records a path that no longer exists; the override must be used instead.
+        _save_detailer_checkpoint(ckpt, coarse_store=tmp_path / "moved-away.zarr")
+
+        report = rescore_detailer_checkpoint(
+            checkpoint_path=ckpt, store=store, split_dir=split_dir,
+            coarse_store=real_coarse, device="cpu",
+        )
+        assert report["coarse_store"]["path"] == str(real_coarse.resolve())
+
+    def test_refuses_a_non_detailer_checkpoint(self, tmp_path: Path) -> None:
+        pytest.importorskip("torch")
+        store = tmp_path / "grid.zarr"
+        store.mkdir()
+        store, _dump, rows = _grid_store(store, n=10)
+        split_dir = tmp_path / "split"
+        _build_split(store, split_dir, n=10)
+        coarse_store = _build_coarse_store(tmp_path / "coarse.zarr", row_count=len(rows))
+        ckpt = tmp_path / "geometry.pt"
+        _save_geometry_checkpoint(ckpt)  # a direct_cnn_v112 checkpoint, not a detailer one
+
+        with pytest.raises(StructureTrainError, match="not a detailer checkpoint"):
+            rescore_detailer_checkpoint(
+                checkpoint_path=ckpt, store=store, split_dir=split_dir,
+                coarse_store=coarse_store, device="cpu",
+            )
+
+    def test_refuses_a_coarse_store_missing_held_out_rows(self, tmp_path: Path) -> None:
+        pytest.importorskip("torch")
+        store = tmp_path / "grid.zarr"
+        store.mkdir()
+        store, _dump, rows = _grid_store(store, n=10)
+        split_dir = tmp_path / "split"
+        _build_split(store, split_dir, n=10)
+        # Coarse store covers far fewer rows than the curriculum -- some held-out rows must miss.
+        coarse_store = _build_coarse_store(tmp_path / "coarse.zarr", row_count=3)
+        ckpt = tmp_path / "detailer.pt"
+        _save_detailer_checkpoint(ckpt, coarse_store=coarse_store)
+
+        with pytest.raises(StructureTrainError, match="coarse-store is missing"):
+            rescore_detailer_checkpoint(
+                checkpoint_path=ckpt, store=store, split_dir=split_dir, device="cpu",
+            )
+
+    def test_refuses_leaky_split(self, tmp_path: Path) -> None:
+        pytest.importorskip("torch")
+        store = tmp_path / "grid.zarr"
+        store.mkdir()
+        store, _dump, rows = _grid_store(store, n=10)
+        split_dir = tmp_path / "split"
+        _build_split(store, split_dir, n=10)
+        manifest_path = split_dir / "split.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["verified_violation_count"] = 2
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        coarse_store = _build_coarse_store(tmp_path / "coarse.zarr", row_count=len(rows))
+        ckpt = tmp_path / "detailer.pt"
+        _save_detailer_checkpoint(ckpt, coarse_store=coarse_store)
+
+        with pytest.raises((StructureTrainError, Spec116ContractError)):
+            rescore_detailer_checkpoint(
+                checkpoint_path=ckpt, store=store, split_dir=split_dir,
+                coarse_store=coarse_store, device="cpu",
+            )
+
+    def test_feature_store_required_when_checkpoint_recorded_one(self, tmp_path: Path) -> None:
+        pytest.importorskip("torch")
+        store = tmp_path / "grid.zarr"
+        store.mkdir()
+        store, _dump, rows = _grid_store(store, n=10)
+        split_dir = tmp_path / "split"
+        _build_split(store, split_dir, n=10)
+        coarse_store = _build_coarse_store(tmp_path / "coarse.zarr", row_count=len(rows))
+        ckpt = tmp_path / "detailer.pt"
+        _save_detailer_checkpoint(
+            ckpt, coarse_store=coarse_store, in_channels=4,
+            feature_store={"path": "somewhere.zarr", "class_count": 1, "input_channels": 4},
+        )
+
+        with pytest.raises(StructureTrainError, match="feature-store"):
+            rescore_detailer_checkpoint(
+                checkpoint_path=ckpt, store=store, split_dir=split_dir,
+                coarse_store=coarse_store, device="cpu",
+            )
+
+    def test_with_feature_store_reconstructs_correct_in_channels(self, tmp_path: Path) -> None:
+        pytest.importorskip("torch")
+        store = tmp_path / "grid.zarr"
+        store.mkdir()
+        store, _dump, rows = _grid_store(store, n=10)
+        split_dir = tmp_path / "split"
+        _build_split(store, split_dir, n=10)
+        coarse_store = _build_coarse_store(tmp_path / "coarse.zarr", row_count=len(rows))
+        feature_store = _build_feature_store(tmp_path / "features.zarr", row_count=len(rows), class_count=1)
+        ckpt = tmp_path / "detailer.pt"
+        _save_detailer_checkpoint(
+            ckpt, coarse_store=coarse_store, in_channels=4,
+            feature_store={"path": str(feature_store), "class_count": 1, "input_channels": 4},
+        )
+
+        report = rescore_detailer_checkpoint(
+            checkpoint_path=ckpt, store=store, split_dir=split_dir,
+            coarse_store=coarse_store, feature_store=feature_store, device="cpu",
+        )
+        assert report["checkpoint"]["in_channels"] == 4
+        assert report["feature_store"]["class_count"] == 1
+
+    def test_cli_dispatches_to_detailer_rescore(self, tmp_path: Path) -> None:
+        pytest.importorskip("torch")
+        store = tmp_path / "grid.zarr"
+        store.mkdir()
+        store, _dump, rows = _grid_store(store, n=10)
+        split_dir = tmp_path / "split"
+        _build_split(store, split_dir, n=10)
+        coarse_store = _build_coarse_store(tmp_path / "coarse.zarr", row_count=len(rows))
+        ckpt = tmp_path / "detailer.pt"
+        _save_detailer_checkpoint(ckpt, coarse_store=coarse_store)
+
+        exit_code = train_main([
+            "--store", str(store), "--split", str(split_dir),
+            "--rescore-detailer-checkpoint", str(ckpt),
+            "--coarse-store", str(coarse_store),
+            "--device", "cpu", "--print-only",
+        ])
+        assert exit_code == 0
+
+    def test_cli_refuses_both_rescore_flags_together(self, tmp_path: Path) -> None:
+        pytest.importorskip("torch")
+        store = tmp_path / "grid.zarr"
+        store.mkdir()
+        store, _dump, rows = _grid_store(store, n=10)
+        split_dir = tmp_path / "split"
+        _build_split(store, split_dir, n=10)
+        coarse_store = _build_coarse_store(tmp_path / "coarse.zarr", row_count=len(rows))
+        geometry_ckpt = tmp_path / "geometry.pt"
+        _save_geometry_checkpoint(geometry_ckpt)
+        detailer_ckpt = tmp_path / "detailer.pt"
+        _save_detailer_checkpoint(detailer_ckpt, coarse_store=coarse_store)
+
+        with pytest.raises(SystemExit):
+            train_main([
+                "--store", str(store), "--split", str(split_dir),
+                "--rescore-checkpoint", str(geometry_ckpt),
+                "--rescore-detailer-checkpoint", str(detailer_ckpt),
+                "--device", "cpu", "--print-only",
+            ])
