@@ -328,6 +328,45 @@
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
       "coverage_count": 0,
       "migration_policy": "copy-if-verified"
+    },
+    {
+      "name": "object_mask",
+      "dtype": "float32",
+      "row_shape": [
+        257,
+        257
+      ],
+      "required": false,
+      "authoritative_source": "harvest-stream",
+      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "coverage_count": 0,
+      "migration_policy": "copy-if-verified"
+    },
+    {
+      "name": "object_precise_mask",
+      "dtype": "float32",
+      "row_shape": [
+        257,
+        257
+      ],
+      "required": false,
+      "authoritative_source": "harvest-stream",
+      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "coverage_count": 0,
+      "migration_policy": "copy-if-verified"
+    },
+    {
+      "name": "object_instance_mask",
+      "dtype": "int32",
+      "row_shape": [
+        257,
+        257
+      ],
+      "required": false,
+      "authoritative_source": "harvest-stream",
+      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "coverage_count": 0,
+      "migration_policy": "copy-if-verified"
     }
   ],
   "row_lineage_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",

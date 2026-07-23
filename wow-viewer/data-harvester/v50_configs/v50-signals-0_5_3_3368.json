@@ -155,6 +155,24 @@
       "blacklisted": false,
       "blacklist_reason": "",
       "has_flag_name": null
+    },
+    {
+      "name": "object_mask",
+      "blacklisted": false,
+      "blacklist_reason": "",
+      "has_flag_name": null
+    },
+    {
+      "name": "object_precise_mask",
+      "blacklisted": false,
+      "blacklist_reason": "",
+      "has_flag_name": null
+    },
+    {
+      "name": "object_instance_mask",
+      "blacklisted": false,
+      "blacklist_reason": "",
+      "has_flag_name": null
     }
   ]
 }

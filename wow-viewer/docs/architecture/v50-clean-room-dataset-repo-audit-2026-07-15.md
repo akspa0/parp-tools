@@ -317,6 +317,9 @@ The v50.1 release signal catalog defines the exact, verified data elements allow
 | `object_geometry_visible_mask_257` | float32 | (257,257) | copy-if-verified | no | Strict visible-object mask (Spec 118 FR-001): 1.0 only where a transformed M2/WMO triangle is visible above the raw MCVT surface (+0.25 clearance, liquid-aware) — never the full placement footprint. Streamed by the harvester (Full/V16 profiles only, not V22); only newly cataloged. Tiles whose strict target is ineligible carry no array and are excluded-and-counted, never fabricated. |
 | `object_geometry_visible_source_257` | uint8 | (257,257) | copy-if-verified | no | Per-pixel class of the front-most visible object fragment (Spec 118 FR-003): 0 = none, 1 = doodad (M2Triangle), 2 = building (WmoTriangle). 0 exactly where `object_geometry_visible_mask_257` is 0. |
 | `object_geometry_visible_instance_257` | int32 | (257,257) | copy-if-verified | no | Per-object instance id of the front-most visible fragment (Spec 118 FR-002): 0 = none, 1..K = per-tile compact ids (MDDF placements first, then MODF) resolved via the per-tile `object_geometry_visible_instances` metadata table. New dense array painted by the strict rasterizer under the same front-most rule as the source tag. |
+| `object_mask` | float32 | (257,257) | copy-if-verified | no | Placement-footprint object mask, painted by `AlphaTensorPackBuilder.BuildObjectMasks` from MDDF/MODF placements alone (doodads = scale-sized circles, WMOs = MODF bounding rects) — no MDX geometry load required, so it populates on the 0.5.3 **alpha** harvest path where the strict `object_geometry_visible_*` signals (ADT-builder only) zero-fill. This is the v18-proven object mask. Serialized under this exact key by the V22 profile. |
+| `object_precise_mask` | float32 | (257,257) | copy-if-verified | no | Soft-edged variant of `object_mask` (v18 "precise object mask"): `PaintSoftCircle`/`PaintSoftRect` per placement, same alpha-builder source. Over-masks doodads (footprint, not visible-portion) but is populated on alpha where the strict signals are empty. |
+| `object_instance_mask` | int32 | (257,257) | copy-if-verified | no | Per-placement instance id (1..K) for `object_mask`, alpha-builder-painted. Lets loss/segmentation address individual objects even though the mask is footprint-based. |
 
 ### Catalog amendment 2026-07-22 (Spec 118) — strict visible-object signals added
 
@@ -327,9 +330,18 @@ already computed the visibility-correct mask and class tag and already streamed 
 exact names in the Full/V16 profiles; the instance-id array is the one new dense array, painted in
 the same raster pass under the same front-most rule. This amendment only adds the three names to
 the frozen catalog so the existing v50 store builder's 1:1 name-matched extraction selects them —
-the same gap shape as the Spec 117 amendment. The legacy `object_mask`/`object_precise_mask`/
-`object_instance_mask` stay deferred: they are footprint-based and are exactly the over-masking
-failure Spec 118 replaces, not inputs to it.
+the same gap shape as the Spec 117 amendment.
+
+**Correction 2026-07-22 (same day)**: the strict `object_geometry_visible_*` signals are produced
+ONLY by `AdtTensorPackBuilder` (Full/V16 profiles). The 0.5.3 corpus harvests through
+`AlphaTensorPackBuilder` (the alpha WDT path), which does NOT produce them — so on the real v50
+build they zero-fill (0/951 tiles). Deferring the footprint masks therefore left the alpha corpus
+with NO usable object signal at all. Re-cataloged the legacy `object_mask`/`object_precise_mask`/
+`object_instance_mask` (rows above): they are painted by `AlphaTensorPackBuilder.BuildObjectMasks`
+from placements alone (no MDX load), populate on alpha, and are the v18-proven masks. They over-mask
+(footprint, not visible-portion) — a known limitation, but a populated approximate mask beats an
+empty strict one. The strict signals stay cataloged for when an ADT-builder/model-loading path
+materializes them; on alpha they remain zero-filled and must not be used as the object signal.
 
 **Approved by**: this session's Spec 118 implementation pass, 2026-07-22 (data plumbing only, no
 model decision implied).

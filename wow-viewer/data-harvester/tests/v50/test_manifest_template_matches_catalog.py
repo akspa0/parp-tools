@@ -24,9 +24,14 @@ def test_template_for_053_omits_dropped_and_era_impossible_signals():
     declared = {s.name for s in manifest.signals}
 
     for dropped in ("mddf_mask", "modf_mask", "object_filtered_mask", "model_focus_mask",
-                    "object_roof_mask", "object_roof_confidence", "model_above_terrain_mask",
-                    "object_precise_mask", "object_instance_mask"):
+                    "object_roof_mask", "object_roof_confidence", "model_above_terrain_mask"):
         assert dropped not in declared, f"catalog-dropped signal {dropped!r} leaked into the template"
+
+    # Re-cataloged 2026-07-22: the alpha harvest (AlphaTensorPackBuilder) paints these from
+    # placements and populates them, unlike the strict object_geometry_visible_* signals which
+    # zero-fill on alpha. They are the v18-proven object masks and must be present for 0.5.3.
+    for present in ("object_mask", "object_precise_mask", "object_instance_mask"):
+        assert present in declared, f"re-cataloged object signal {present!r} missing from the template"
 
     assert "mccv_rgb" not in declared
     era_records = {u.name: u.reason for u in manifest.unavailable_signals}
