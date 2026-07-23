@@ -60,6 +60,44 @@ GATE_MEDIAN_VISIBLE_IOU = 0.40
 GATE_PER_CLASS_RECALL = 0.50
 
 
+def render_segment_preview(model, group, preview, device, output: Path, *, epoch: int, iou: float) -> None:
+    """Per-epoch validation image so training is never blind: one row per held-out tile, four
+    panels — minimap RGB (the input) | truth object mask | predicted mask | TP(green)/FP(red)/
+    FN(blue) overlay. Written whenever the best checkpoint improves."""
+    import torch
+    from PIL import Image, ImageDraw
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    panel, gap, header = 200, 4, 22
+    labels = ["minimap RGB", "truth object", "predicted", "TP=grn FP=red FN=blu"]
+    width = len(labels) * panel + (len(labels) - 1) * gap
+    height = header + len(preview) * (panel + gap)
+    canvas = Image.new("RGB", (width, height), (245, 245, 245))
+    draw = ImageDraw.Draw(canvas)
+    draw.text((4, 5), f"object segmenter | epoch {epoch} | median visible-object IoU {iou:.4f}", fill=(15, 15, 15))
+    for col, label in enumerate(labels):
+        draw.text((col * (panel + gap) + 3, header - 11), label, fill=(40, 40, 40))
+    model.eval()
+    with torch.no_grad():
+        for r, (row, target) in enumerate(preview):
+            rgb = np.asarray(group["minimap_rgb"][row], dtype=np.float32) / 255.0
+            x = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).to(device)
+            pred = model(x).squeeze(0).argmax(0).cpu().numpy()
+            truth = np.asarray(target)
+            rgb_u8 = (rgb * 255).astype(np.uint8)
+            truth_img = np.repeat(((truth > 0).astype(np.uint8) * 255)[..., None], 3, axis=2)
+            pred_img = np.repeat(((pred > 0).astype(np.uint8) * 255)[..., None], 3, axis=2)
+            overlay = np.zeros((*truth.shape, 3), np.uint8)
+            overlay[(pred > 0) & (truth > 0)] = (0, 200, 0)
+            overlay[(pred > 0) & (truth == 0)] = (220, 0, 0)
+            overlay[(pred == 0) & (truth > 0)] = (0, 0, 220)
+            y = header + r * (panel + gap)
+            for col, img in enumerate((rgb_u8, truth_img, pred_img, overlay)):
+                tile = Image.fromarray(img).resize((panel, panel), Image.NEAREST)
+                canvas.paste(tile, (col * (panel + gap), y))
+    canvas.save(output)
+
+
 def require_object_arrays(group) -> None:
     """Fail closed when the store predates the Spec 118 catalog amendment (US1)."""
     missing = [name for name in REQUIRED_ARRAYS if name not in group]
@@ -179,6 +217,11 @@ def main() -> int:
     val_targets = [derive_class_target(np.asarray(group[SOURCE_ARRAY][row])) for row in val_rows]
     touched_train = int(sum(bool((t > 0).any()) for t in train_targets))
     touched_val = int(sum(bool((t > 0).any()) for t in val_targets))
+    # Fixed held-out tiles for the per-epoch preview: prefer object-touched ones so there is
+    # always something to see; fall back to the first val tiles if none are touched.
+    preview_rows = [(r, t) for r, t in zip(val_rows, val_targets, strict=True) if (t > 0).any()][:8]
+    if not preview_rows:
+        preview_rows = list(zip(val_rows, val_targets, strict=True))[:8]
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -186,7 +229,7 @@ def main() -> int:
     identity = architecture_identity(
         model, architecture_id="object_segment_net",
         config={"class": "ObjectSegmentNet", "arch": "object_segment_net_v1",
-                "base": args.base, "input": "3x256x256", "output": "3x256x256"},
+                "base": args.base, "input": "3x256x256", "output": "2x256x256"},
     )
     plan = build_object_plan(
         architecture=identity, source=args.source,
@@ -337,6 +380,11 @@ def main() -> int:
             best = selection
             stale = 0
             torch.save(checkpoint, args.output / "checkpoint_best.pt")
+            render_segment_preview(
+                model, group, preview_rows, device,
+                args.output / "validation" / "best_previews" / f"epoch_{epoch:04d}.png",
+                epoch=epoch, iou=selection,
+            )
         elif warmup_complete(epoch, warmup_epochs):
             stale += 1
         print(
@@ -350,6 +398,13 @@ def main() -> int:
 
     best_record = max(per_epoch, key=lambda e: e["median_visible_object_iou"])
     final_metrics = _val_metrics()
+    # Reload the best checkpoint so the final image reflects the promoted weights, not the last epoch.
+    best_ckpt = torch.load(args.output / "checkpoint_best.pt", map_location=device, weights_only=False)
+    model.load_state_dict(best_ckpt["model"])
+    render_segment_preview(
+        model, group, preview_rows, device, args.output / "validation" / "final_best.png",
+        epoch=int(best_record["epoch"]), iou=float(final_metrics["median_visible_object_iou"]),
+    )
     gate_passes = (
         final_metrics["median_visible_object_iou"] >= GATE_MEDIAN_VISIBLE_IOU
         and all(
@@ -375,7 +430,11 @@ def main() -> int:
                 "note": "research D-07 first-cut gate against non-learning; promotion stays pending",
             },
         },
-        visual_evidence={},
+        visual_evidence={
+            "best_epoch_previews": "validation/best_previews",
+            "final_best": "validation/final_best.png",
+            "panels": "minimap_rgb | truth object mask | predicted mask | TP/FP/FN overlay",
+        },
     )
     (args.output / "model_stage_run.json").write_text(
         json.dumps(stage_run, indent=2), encoding="utf-8"
