@@ -135,6 +135,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--builds", nargs="+", default=None)
     parser.add_argument("--output", type=Path, required=True,
                         help="Output JSONL file path.")
+    parser.add_argument("--asset-list-json", type=Path, default=None,
+                        help="Also write a flat JSON array of unique asset paths, ready to pass "
+                             "to the viewer's --capture-roof-asset-list flag.")
     parser.add_argument("--include-mddf", action="store_true", default=False)
     parser.add_argument("--include-modf", action="store_true", default=True)
     parser.add_argument("--no-modf", action="store_false", dest="include_modf")
@@ -162,6 +165,9 @@ def main() -> int:
         return 2
 
     total_jobs = 0
+    # Unique asset paths in first-seen order, for the optional flat asset list.
+    asset_paths: list[str] = []
+    seen_assets: set[str] = set()
     with open(args.output, "w", encoding="utf-8") as handle:
         for build in builds:
             placements_path = dataset_dir / f"{build}.zarr" / "placements.parquet"
@@ -183,7 +189,17 @@ def main() -> int:
             for job in jobs:
                 handle.write(json.dumps(job, sort_keys=True) + "\n")
                 total_jobs += 1
+                asset_path = str(job.get("asset_path", "") or "")
+                key = normalize_asset_path(asset_path)
+                if asset_path and key not in seen_assets:
+                    seen_assets.add(key)
+                    asset_paths.append(asset_path)
     print(f"Wrote {total_jobs} capture job rows to {args.output}")
+
+    if args.asset_list_json is not None:
+        args.asset_list_json.parent.mkdir(parents=True, exist_ok=True)
+        args.asset_list_json.write_text(json.dumps(asset_paths, indent=2), encoding="utf-8")
+        print(f"Wrote {len(asset_paths)} unique asset paths to {args.asset_list_json}")
     return 0
 
 

@@ -96,6 +96,64 @@ public sealed class NativeMpqService : IArchiveCatalog
             string mapsDir = Path.Combine(path, "World", "Maps");
             if (Directory.Exists(mapsDir))
                 ScanMapMpqArchives(mapsDir);
+
+            if (Directory.Exists(path))
+                ScanNestedWrapperArchives(path);
+        }
+    }
+
+    // Extensions Alpha-era clients wrap as individual listfile-less single-file MPQ archives
+    // (one payload file + a small MD5 sidecar, matching the viewer MpqDataSource's
+    // ScanAlphaNestedMpqArchives convention). WMO is the one that actually needs this for the
+    // 0.5.3.3368 corpus -- MDX/M2 in this client are reachable via normal archive-internal
+    // listfiles -- but scanning the full set here keeps this path-complete rather than
+    // reproducing the exact same "one extension silently unreadable" gap for a different era.
+    private static readonly string[] NestedWrapperPatterns =
+    [
+        "*.wmo.mpq", "*.wmo.MPQ",
+        "*.mdx.mpq", "*.mdx.MPQ",
+        "*.mdl.mpq", "*.mdl.MPQ",
+        "*.m2.mpq", "*.m2.MPQ",
+    ];
+
+    /// <summary>
+    /// Scan for Alpha-era listfile-less per-model .ext.MPQ wrapper archives (WMO, MDX/M2) anywhere
+    /// under <paramref name="root"/> and register them into the same <see cref="_scannedArchives"/>
+    /// cache <see cref="ReadFile"/>/<see cref="FileExists"/> already check first -- so no dispatch
+    /// changes are needed, only widening what gets scanned into that cache.
+    /// </summary>
+    private void ScanNestedWrapperArchives(string root)
+    {
+        foreach (string pattern in NestedWrapperPatterns)
+        {
+            IEnumerable<string> matches;
+            try
+            {
+                matches = Directory.EnumerateFiles(root, pattern, SearchOption.AllDirectories);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (string file in matches)
+            {
+                string relative = Path.GetRelativePath(root, file).Replace('/', '\\');
+                string virtualPath = relative.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase)
+                    ? relative[..^4]
+                    : relative;
+                // Canonicalize: strip a leading "Data\" segment so the virtual path matches the
+                // MPQ-internal-path convention (listfile paths never include the on-disk "Data\"
+                // folder). This is also the dedup key -- ScanNestedWrapperArchives runs once per
+                // search root (both the game root and its Data subdir end up in pathsToSearch), so
+                // without this the same .wmo.mpq is registered twice (as "Data\World\wmo\X.wmo"
+                // AND "World\wmo\X.wmo"), which would make ListFiles emit every WMO twice and the
+                // capture loop render each one twice. Stripping here makes both roots produce the
+                // same key, so TryAdd collapses them to one entry.
+                if (virtualPath.Length > 5 && virtualPath.StartsWith("Data\\", StringComparison.OrdinalIgnoreCase))
+                    virtualPath = virtualPath[5..];
+                _scannedArchives.TryAdd(virtualPath, file);
+            }
         }
     }
 
@@ -207,7 +265,22 @@ public sealed class NativeMpqService : IArchiveCatalog
 
     public List<string> ListFiles(string pattern = "*")
     {
-        var all = ExtractInternalListfiles();
+        // ExtractInternalListfiles only returns entries from (listfile) blocks
+        // inside normal MPQ archives. Alpha-era per-model wrapper archives
+        // (.wmo.mpq / .mdx.mpq / .m2.mpq) are listfile-less single-file MPQs
+        // registered into _scannedArchives (readable via ReadFile) but carrying
+        // no internal (listfile), so they are invisible to that call. Without
+        // merging their virtual paths here, enumeration-based consumers (e.g.
+        // capture-objects' catalog.ListFiles("*") asset discovery) never see
+        // WMOs in the 0.5.3.3368 corpus even though ReadFile can load them --
+        // which is exactly why WMOs were absent from the initial object-library
+        // test while MDX/M2 (inside listfile-bearing archives) were captured.
+        var all = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string f in ExtractInternalListfiles())
+            all.Add(f);
+        foreach (string f in _scannedArchives.Keys)
+            all.Add(f);
+
         if (pattern == "*" || pattern == "*.*") return all.ToList();
         return all.Where(f => DoesMatchPattern(f, pattern)).ToList();
     }

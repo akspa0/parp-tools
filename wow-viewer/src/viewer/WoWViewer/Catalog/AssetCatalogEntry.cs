@@ -103,7 +103,13 @@ public class AssetCatalogEntry
 public enum AssetType
 {
     Creature,
-    GameObject
+    GameObject,
+
+    /// <summary>
+    /// A raw world model (M2/MDX/WMO) enumerated directly from the client
+    /// listfile, not sourced from the alpha-core SQL.
+    /// </summary>
+    WorldModel
 }
 
 public class SpawnLocation

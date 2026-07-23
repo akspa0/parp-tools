@@ -31,6 +31,7 @@ public class AssetCatalogView
     private string _searchText = "";
     private bool _showCreatures = true;
     private bool _showGameObjects = true;
+    private bool _showWorldModels = true;
     private bool _showOnlyWithModel = true;
     private bool _showOnlyWithSpawns = false;
     private int _selectedIndex = -1;
@@ -67,6 +68,11 @@ public class AssetCatalogView
         _texResolver = texResolver;
     }
 
+    /// <summary>
+    /// Legacy standalone floating-window wrapper (File menu toggle). The Workbench
+    /// Utilities tab calls <see cref="DrawContent"/> directly instead, so it embeds
+    /// as docked tab content rather than opening a nested floating window.
+    /// </summary>
     public void Draw()
     {
         if (!IsVisible) return;
@@ -81,6 +87,17 @@ public class AssetCatalogView
         }
         IsVisible = visible;
 
+        DrawContent();
+
+        ImGui.End();
+    }
+
+    /// <summary>
+    /// Headless body content — no window wrapper, no visibility gate. Safe to call
+    /// from inside an already-open container (a Workbench tab) or from <see cref="Draw"/>.
+    /// </summary>
+    public void DrawContent()
+    {
         DrawConnectionPanel();
         ImGui.Separator();
 
@@ -99,7 +116,45 @@ public class AssetCatalogView
         if (_isExporting)
             ProcessExportQueue();
 
+        // Small fixed-position overlay so progress stays legible even while the
+        // main catalog window/viewport looks busy mid-batch (thousands of entries,
+        // each rendering multi-angle screenshots).
+        if (_isExporting)
+            DrawExportProgressOverlay();
+    }
+
+    private void DrawExportProgressOverlay()
+    {
+        Vector2 displaySize = ImGui.GetIO().DisplaySize;
+        ImGui.SetNextWindowPos(new Vector2(MathF.Max(8f, displaySize.X - 420f), 8f), ImGuiCond.Always);
+        ImGui.SetNextWindowSizeConstraints(new Vector2(380f, 0f), new Vector2(420f, 200f));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(16f, 14f));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 2f);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 4f);
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.04f, 0.05f, 0.09f, 0.985f));
+        ImGui.PushStyleColor(ImGuiCol.Border, new Vector4(0.95f, 0.79f, 0.28f, 0.98f));
+
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoDecoration
+            | ImGuiWindowFlags.AlwaysAutoResize
+            | ImGuiWindowFlags.NoDocking
+            | ImGuiWindowFlags.NoSavedSettings
+            | ImGuiWindowFlags.NoMove
+            | ImGuiWindowFlags.NoFocusOnAppearing;
+
+        if (ImGui.Begin("##AssetExportProgressOverlay", flags))
+        {
+            ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.38f, 1.0f), "Exporting Assets");
+            ImGui.Separator();
+            float fraction = _exportTotal > 0 ? (float)_exportProgress / _exportTotal : 0f;
+            ImGui.ProgressBar(fraction, new Vector2(-1, 0), $"{_exportProgress}/{_exportTotal}");
+            ImGui.TextWrapped(_exportStatus);
+            if (ImGui.Button("Cancel"))
+                _exportCancelled = true;
+        }
         ImGui.End();
+
+        ImGui.PopStyleColor(2);
+        ImGui.PopStyleVar(3);
     }
 
     private void DrawConnectionPanel()
@@ -133,6 +188,18 @@ public class AssetCatalogView
                     _ = ConnectAndLoadAsync();
             }
 
+            // Listfile-based world models — independent of the alpha-core SQL,
+            // so the catalog can browse/export every M2/WMO in the client.
+            ImGui.BeginDisabled(_dataSource == null);
+            if (ImGui.Button("Load World Models from Listfile"))
+                LoadListfileModels();
+            ImGui.EndDisabled();
+            if (_dataSource == null)
+            {
+                ImGui.SameLine();
+                ImGui.TextDisabled("(load a client first)");
+            }
+
             ImGui.TextWrapped(_connectionStatus);
         }
     }
@@ -146,6 +213,8 @@ public class AssetCatalogView
         ImGui.Checkbox("NPCs", ref _showCreatures);
         ImGui.SameLine();
         ImGui.Checkbox("GameObjects", ref _showGameObjects);
+        ImGui.SameLine();
+        ImGui.Checkbox("World Models", ref _showWorldModels);
         ImGui.SameLine();
         ImGui.Checkbox("Has Model", ref _showOnlyWithModel);
         ImGui.SameLine();
@@ -311,6 +380,7 @@ public class AssetCatalogView
         {
             if (e.Type == AssetType.Creature && !_showCreatures) return false;
             if (e.Type == AssetType.GameObject && !_showGameObjects) return false;
+            if (e.Type == AssetType.WorldModel && !_showWorldModels) return false;
             if (_showOnlyWithModel && e.ModelPath == null) return false;
             if (_showOnlyWithSpawns && e.Spawns.Count == 0) return false;
             if (!string.IsNullOrEmpty(_searchText))
@@ -326,6 +396,39 @@ public class AssetCatalogView
         // Clamp selection
         if (_selectedIndex >= _filteredEntries.Count)
             _selectedIndex = _filteredEntries.Count - 1;
+    }
+
+    /// <summary>
+    /// Populate the catalog with every M2/WMO world model in the loaded client
+    /// listfile, merged alongside any SQL-sourced entries. Idempotent: re-running
+    /// replaces the previously loaded listfile models without duplicating them.
+    /// </summary>
+    public void LoadListfileModels()
+    {
+        if (_dataSource == null)
+        {
+            _connectionStatus = "Load a client (MPQ data source) before enumerating listfile models.";
+            return;
+        }
+
+        try
+        {
+            List<AssetCatalogEntry> models = AssetCatalogListfileLoader.LoadModelEntries(_dataSource);
+            // Drop any previously loaded listfile models so a reload is not additive.
+            _allEntries = _allEntries.Where(e => e.Type != AssetType.WorldModel).ToList();
+            _allEntries.AddRange(models);
+            _isConnected = true;
+
+            int sqlEntries = _allEntries.Count(e => e.Type != AssetType.WorldModel);
+            _connectionStatus = $"Loaded {models.Count} world models from listfile"
+                + (sqlEntries > 0 ? $" (+ {sqlEntries} SQL entries)" : "");
+            ViewerLog.Info(ViewerLog.Category.Export, $"[AssetCatalog] {_connectionStatus}");
+            ApplyFilters();
+        }
+        catch (Exception ex)
+        {
+            _connectionStatus = $"Listfile model load failed: {ex.Message}";
+        }
     }
 
     private async Task ConnectAndLoadAsync()

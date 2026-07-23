@@ -8,11 +8,15 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using StreamProfile = WowViewer.Core.IO.Maps.RawArraySerializer.StreamProfile;
+using WowViewer.Core.IO.Converters;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Lit;
 using WowViewer.Core.IO.Maps;
+using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.Maps;
+using WowViewer.Core.Renderer.Headless;
+using WowViewer.Core.Renderer.ObjectCapture;
 using WowViewer.Core.Renderer.Terrain;
 using WowViewer.Core.Runtime.World.Terrain;
 using WowViewer.Core.Terrain;
@@ -142,6 +146,9 @@ static class Program
             case "dump-texture-names":
                 RunDumpTextureNames(tail);
                 break;
+            case "capture-objects":
+                RunCaptureObjects(tail);
+                break;
             default:
                 Console.Error.WriteLine($"Unknown command '{command}'.");
                 ShowUsage();
@@ -179,6 +186,13 @@ static class Program
                                 scan/render with no client/MPQ backing) into a fixed-size tile grid
                                 for downstream model inference. Near-uniform (blank) tiles are
                                 skipped by default.
+              capture-objects   Spec 118: render every M2/MDX/WMO object in the client (or a
+                                supplied asset list) top-down, headless, and stream one
+                                (image_rgb, mask) record per object to stdout in the same
+                                ARRY/ENDS harvest-stream wire format harvest-stream uses --
+                                consumed directly by harvester.raw_reader.read_tile_blob on
+                                the Python side. No GUI, no manual per-object click; one
+                                command produces the whole object-mask library's raw signal.
               relief-to-map     Turn a folder of predicted relief16 PNGs (from
                                 v50_infer_geometry_detailer.py / v50_infer_direct_geometry.py) into
                                 a real, loadable synthetic map: one blank-textured ADT per tile with
@@ -795,6 +809,198 @@ static class Program
 
         Console.WriteLine($"Wrote texture-name dump: {outputPath}");
         Console.WriteLine($"  map={mapName} build={buildVersion ?? "(unknown)"} tiles={records.Count} skipped={skipped}");
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex WmoGroupFileSuffix =
+        new(@"_\d{3}\.wmo$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// Spec 118: render every M2/MDX/WMO in the client (or a supplied asset list) top-down,
+    /// headless, via WowViewer.Core.Renderer.ObjectCapture (no viewer, no ImGui, no GUI click
+    /// per object), and stream one (image_rgb, mask) record per object to stdout using the same
+    /// ARRY/ENDS wire format harvest-stream already uses -- harvester.raw_reader.read_tile_blob
+    /// decodes this format generically with zero Python-side changes.
+    /// </summary>
+    static void RunCaptureObjects(string[] args)
+    {
+        string? clientRoot = GetOption(args, "--client-root", "-c");
+        string? assetListPath = GetOption(args, "--asset-list", "");
+        int resolution = GetIntOption(args, "--resolution", "-r") ?? 256;
+        int maxObjects = GetIntOption(args, "--limit", "-n") ?? int.MaxValue;
+
+        if (string.IsNullOrWhiteSpace(clientRoot))
+        {
+            Console.Error.WriteLine("Error: --client-root is required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+        if (!Directory.Exists(clientRoot))
+        {
+            Console.Error.WriteLine($"Error: client root not found: {clientRoot}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        clientRoot = ResolveGameClientRoot(clientRoot);
+        string? buildVersion = DetectBuildVersionFromClientRoot(clientRoot);
+
+        // Redirect Console.Out to stderr so stdout is pure binary (matches RunHarvestStream).
+        Console.SetOut(Console.Error);
+
+        using var catalog = new NativeMpqService();
+        catalog.LoadArchives([clientRoot]);
+        TryLoadSupplementalListfile(catalog);
+        LoadMd5Translate(clientRoot, catalog);
+
+        List<string> assetPaths;
+        if (!string.IsNullOrWhiteSpace(assetListPath) && File.Exists(assetListPath))
+        {
+            assetPaths = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(assetListPath)) ?? [];
+            Console.Error.WriteLine($"Loaded {assetPaths.Count} asset paths from {assetListPath}");
+        }
+        else
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            assetPaths = [];
+            foreach (string raw in catalog.ListFiles("*"))
+            {
+                string ext = Path.GetExtension(raw).ToLowerInvariant();
+                if (ext is not (".m2" or ".mdx" or ".wmo"))
+                    continue;
+                string normalized = raw.Replace('/', '\\');
+                if (ext == ".wmo" && WmoGroupFileSuffix.IsMatch(normalized))
+                    continue; // WMO group files are not standalone objects.
+                if (seen.Add(normalized))
+                    assetPaths.Add(normalized);
+            }
+            assetPaths.Sort(StringComparer.OrdinalIgnoreCase);
+            Console.Error.WriteLine($"Enumerated {assetPaths.Count} object paths from client listfile.");
+        }
+
+        using var headless = new HeadlessContext(resolution, resolution);
+        using var capture = new ObjectCaptureRenderer(headless.GL, catalog);
+
+        var stdout = Console.OpenStandardOutput();
+        int captured = 0, skipped = 0, errors = 0;
+        string? firstError = null;
+
+        foreach (string assetPath in assetPaths)
+        {
+            if (captured + skipped + errors >= maxObjects)
+                break;
+
+            string ext = Path.GetExtension(assetPath).ToLowerInvariant();
+            try
+            {
+                ObjectCaptureResult? result = ext == ".wmo"
+                    ? CaptureWmoObject(catalog, capture, assetPath, resolution)
+                    : CaptureMdxObject(catalog, capture, assetPath, resolution);
+
+                if (result is null)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                byte[] innerBlob = BuildObjectRecordBlob(assetPath, ext, buildVersion, result);
+                WriteHarvestStreamBlob(stdout, innerBlob);
+                captured++;
+                if (captured % 100 == 0)
+                    Console.Error.WriteLine($"  captured {captured} (skipped {skipped}, errors {errors})...");
+            }
+            catch (Exception ex)
+            {
+                errors++;
+                firstError ??= $"{assetPath}: {ex.Message}";
+            }
+        }
+
+        byte[] endMarker = new byte[8];
+        System.Text.Encoding.ASCII.GetBytes("ENDS").CopyTo(endMarker, 0);
+        stdout.Write(endMarker, 0, 8);
+        stdout.Flush();
+
+        Console.Error.WriteLine($"Captured {captured} objects, {skipped} skipped, {errors} errors");
+        if (firstError is not null)
+            Console.Error.WriteLine($"First capture-objects error: {firstError}");
+        if (captured == 0)
+            Environment.ExitCode = 1;
+    }
+
+    private static ObjectCaptureResult? CaptureWmoObject(
+        NativeMpqService catalog, ObjectCaptureRenderer capture, string assetPath, int resolution)
+    {
+        WmoV14ToV17Converter.WmoV14Data? wmo = WmoFullLoader.Load(catalog, assetPath);
+        if (wmo is null || wmo.Groups.Count == 0)
+            return null;
+        return capture.CaptureWmo(wmo, resolution);
+    }
+
+    private static ObjectCaptureResult? CaptureMdxObject(
+        NativeMpqService catalog, ObjectCaptureRenderer capture, string assetPath, int resolution)
+    {
+        byte[]? data = catalog.ReadFile(assetPath);
+        if (data is null || data.Length == 0)
+            return null;
+
+        using var ms = new MemoryStream(data);
+        using var br = new BinaryReader(ms);
+        MdxFile mdx = MdxFile.Load(br);
+        if (mdx.Geosets.Count == 0)
+            return null;
+        return capture.CaptureMdx(mdx, resolution);
+    }
+
+    /// <summary>
+    /// Build one object record's inner ARRY blob: metadata (asset path, type, build, normalized
+    /// path) + image_rgb (H,W,3) + mask (H,W), both derived from the capture's RGBA passes. The
+    /// mask pass clears to black and the shader writes flat white for every covered fragment
+    /// (alpha is always 255 from the FBO's opaque clear), so RGB-channel intensity -- not alpha
+    /// -- is the coverage signal.
+    /// </summary>
+    private static byte[] BuildObjectRecordBlob(string assetPath, string extension, string? buildVersion, ObjectCaptureResult result)
+    {
+        int w = result.Width, h = result.Height;
+        var imageRgb = new byte[h, w, 3];
+        var mask = new byte[h, w];
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                int i = (y * w + x) * 4;
+                imageRgb[y, x, 0] = result.ImageRgba[i + 0];
+                imageRgb[y, x, 1] = result.ImageRgba[i + 1];
+                imageRgb[y, x, 2] = result.ImageRgba[i + 2];
+
+                byte mr = result.MaskRgba[i + 0], mg = result.MaskRgba[i + 1], mb = result.MaskRgba[i + 2];
+                mask[y, x] = (byte)(Math.Max(mr, Math.Max(mg, mb)) > 0 ? 255 : 0);
+            }
+        }
+
+        string normalized = assetPath.Replace('\\', '/').ToLowerInvariant();
+        while (normalized.Contains("//"))
+            normalized = normalized.Replace("//", "/");
+
+        var metadata = new Dictionary<string, object?>
+        {
+            ["asset_path"] = assetPath,
+            ["normalized_asset_path"] = normalized,
+            ["asset_type"] = extension.TrimStart('.'),
+            ["build"] = buildVersion,
+            ["capture_mode"] = "orthographic_topdown",
+            ["resolution"] = result.Width,
+            ["bounds_min"] = new[] { result.BoundsMin.X, result.BoundsMin.Y, result.BoundsMin.Z },
+            ["bounds_max"] = new[] { result.BoundsMax.X, result.BoundsMax.Y, result.BoundsMax.Z },
+        };
+        var arrays = new (string Name, Array Array)[]
+        {
+            ("image_rgb", imageRgb),
+            ("mask", mask),
+        };
+
+        using var ms = new MemoryStream();
+        RawArraySerializer.SerializeGeneric(metadata, arrays, ms);
+        return ms.ToArray();
     }
 
     private static readonly System.Text.RegularExpressions.Regex ReliefTileNameRegex =

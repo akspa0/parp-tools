@@ -63,6 +63,38 @@ public static class RawArraySerializer
     }
 
     /// <summary>
+    /// Write one generic inner blob (same "ARRY" + metadata JSON + named arrays + "ENDS" format
+    /// as <see cref="Serialize(TerrainTileTensorPack,Stream,StreamProfile)"/>) for callers with no
+    /// <see cref="TerrainTileTensorPack"/> -- e.g. Spec 118's per-object capture records
+    /// (<c>image_rgb</c>/<c>mask</c> arrays keyed by asset metadata rather than a tile). Reuses the
+    /// same <see cref="WriteArray"/> writer, so every consumer of the harvest-stream wire format
+    /// (``harvester.raw_reader.read_tile_blob``) decodes this with zero format-specific changes.
+    /// </summary>
+    public static void SerializeGeneric(
+        IReadOnlyDictionary<string, object?> metadata,
+        IEnumerable<(string Name, Array Array)> arrays,
+        Stream outputStream)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        ArgumentNullException.ThrowIfNull(arrays);
+        ArgumentNullException.ThrowIfNull(outputStream);
+
+        outputStream.Write(ArrayMagic);
+
+        string metadataJson = JsonSerializer.Serialize(metadata);
+        byte[] metaBytes = Encoding.UTF8.GetBytes(metadataJson);
+        byte[] metaLen = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(metaLen, metaBytes.Length);
+        outputStream.Write(metaLen);
+        outputStream.Write(metaBytes);
+
+        foreach ((string name, Array array) in arrays)
+            WriteArray(outputStream, name, array);
+
+        outputStream.Write(EndsMagic);
+    }
+
+    /// <summary>
     /// Strict union labels are meaningful only when their provenance says the
     /// target was materialized. Do not inspect fragment-trace sidecars here:
     /// incomplete geometry may legitimately retain those audit records.

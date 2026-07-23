@@ -4675,7 +4675,13 @@ public partial class ViewerApp
                 DrawCaptureAutomationContent();
                 break;
             case UtilitiesBottomTab.AssetCatalog:
-                _catalogView?.Draw();
+                if (_catalogView == null)
+                {
+                    _catalogView = new Catalog.AssetCatalogView(_gl);
+                    _catalogView.SetDataSource(_dataSource);
+                    _catalogView.OnLoadModelRequested = OnCatalogLoadModel;
+                }
+                _catalogView.DrawContent();
                 break;
             case UtilitiesBottomTab.RuntimeStats:
                 DrawRuntimeStatsPanelContent();

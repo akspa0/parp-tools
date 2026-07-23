@@ -107,8 +107,8 @@ public class AssetExporter
             }
         }
 
-        // Multi-angle screenshots
-        if (resolvedModelPath != null && !entry.IsWmo && _dataSource != null)
+        // Multi-angle screenshots (CaptureMultiAngle dispatches WMO vs MDX internally)
+        if (resolvedModelPath != null && _dataSource != null)
         {
             try
             {
@@ -181,24 +181,25 @@ public class AssetExporter
     {
         if (_dataSource == null) return null;
 
-        byte[]? wmoData = _dataSource.ReadFile(resolvedPath);
-        if (wmoData == null)
-        {
-            ViewerLog.Trace($"[AssetExporter] WMO not found: {resolvedPath}");
-            return null;
-        }
-
-        // Write to temp file, parse WMO v14, then export to GLB
+        // Reuse ScreenshotRenderer.LoadWmoData: it parses the root WMO AND loads every
+        // sibling group file (Name_000.wmo, Name_001.wmo, ...), which is where per-face
+        // material IDs (MOPY) and geometry actually live. Parsing only the root file (the
+        // prior approach here) left every group's FaceMaterials empty, so GlbExporter's
+        // per-face material lookup fell back to material 0 for every face -- one texture
+        // for the whole object, regardless of how many real materials the WMO has.
         try
         {
-            string modelDir = Path.GetDirectoryName(entry.ModelPath)?.Replace('/', '\\') ?? "";
-            string tempFile = Path.Combine(Path.GetTempPath(), $"wmo_export_{entry.EntryId}.wmo");
-            File.WriteAllBytes(tempFile, wmoData);
-            var converter = new WmoV14ToV17Converter();
-            var wmo = converter.ParseWmoV14(tempFile);
+            _screenshotRenderer ??= new ScreenshotRenderer(_gl, _dataSource, _texResolver);
+            var wmo = _screenshotRenderer.LoadWmoData(resolvedPath);
+            if (wmo == null)
+            {
+                ViewerLog.Trace($"[AssetExporter] WMO not found or unparseable: {resolvedPath}");
+                return null;
+            }
+
+            string modelDir = Path.GetDirectoryName(resolvedPath)?.Replace('/', '\\') ?? "";
             GlbExporter.ExportWmo(wmo, modelDir, outputPath, _dataSource);
-            try { File.Delete(tempFile); } catch { }
-            ViewerLog.Trace($"[AssetExporter] Exported WMO GLB: {outputPath}");
+            ViewerLog.Trace($"[AssetExporter] Exported WMO GLB: {outputPath} ({wmo.Groups.Count} groups, {wmo.Materials.Count} materials)");
             return outputPath;
         }
         catch (Exception ex)
@@ -307,17 +308,14 @@ public class AssetExporter
         if (!string.IsNullOrEmpty(entry.ModelPath))
         {
             meta["glbFile"] = "model.glb";
-            if (!entry.IsWmo)
-            {
-                meta["screenshots"] = ScreenshotRenderer.CameraAngles
-                    .Select(a => new Dictionary<string, object>
-                    {
-                        ["angle"] = a.name,
-                        ["file"] = $"{a.name}.png",
-                        ["azimuth"] = a.azimuth,
-                        ["elevation"] = a.elevation
-                    }).ToList();
-            }
+            meta["screenshots"] = ScreenshotRenderer.CameraAngles
+                .Select(a => new Dictionary<string, object>
+                {
+                    ["angle"] = a.name,
+                    ["file"] = $"{a.name}.jpg",
+                    ["azimuth"] = a.azimuth,
+                    ["elevation"] = a.elevation
+                }).ToList();
         }
 
         if (entry.Type == AssetType.Creature)

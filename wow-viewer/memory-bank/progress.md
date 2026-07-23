@@ -1,6 +1,33 @@
 # Progress — wow-viewer
 
-Last updated: 2026-07-22
+Last updated: 2026-07-23
+
+## Object-library capture pipeline — WMO exclusion root-caused + fixed + smoke-validated
+
+- Prior session built `capture-objects` (harvest C#) + `build_object_library.py
+  --from-harvest-stream` (Python zarr) + headless `ObjectCaptureRenderer`
+  (`WmoObjectRenderer`/`MdxObjectRenderer`) + `WmoFullLoader`, but terminated before
+  memory-bank sync. Initial test captured MDX/M2 but **zero WMOs**.
+- **Root cause**: 0.5.3.3368 alpha WMOs are listfile-less `.wmo.MPQ` wrapper archives
+  registered into `NativeMpqService._scannedArchives` (readable via `ReadFile`) but
+  `ListFiles("*")` only returned `ExtractInternalListfiles()` (normal-archive
+  `(listfile)` blocks) — never merging `_scannedArchives` — so `capture-objects`
+  enumeration never discovered WMOs. MDX/M2 live in listfile-bearing archives, so they
+  were found.
+- **Fix 1**: `ListFiles` now merges `_scannedArchives.Keys` into the enumerated set.
+- **Fix 2**: `ScanNestedWrapperArchives` canonicalizes virtual paths by stripping a
+  leading `Data\` — otherwise each `.wmo.mpq` registered twice (game-root scan gives
+  `Data\World\wmo\X.wmo`, Data-subdir scan gives `World\wmo\X.wmo`) → every WMO emitted
+  twice by `ListFiles` and rendered twice. Stripping collapses both to one canonical
+  key matching the MPQ-internal-path convention.
+- **Smoke (this session, H:\CLIENTS\0_5_3_3368)**: 5 curated WMOs →
+  `build_object_library.py --from-harvest-stream --run` → `Captured 5, 0 skipped, 0
+  errors` → `smoke_wmo.zarr` (`capture_rgb (5,128,128,3)`, `capture_mask (5,128,128)`,
+  both uint8). Mask coverage 0.377–0.704, image means 26.5–64.6 (non-blank). Validation
+  sheet `output/object-library-smoke/smoke_wmo_validation.png` (wmo=5, captured=5).
+  Both signals proven end-to-end for WMOs. Build 0 errors. No training touched.
+- Remaining (user-run): full-scale whole-client object-library build (data harvest —
+  hand off). CLI in activeContext.md.
 
 ## Spec 118 — per-object occlusion-aware masks (US1–US3 implemented and code-verified; user-run gates remain)
 

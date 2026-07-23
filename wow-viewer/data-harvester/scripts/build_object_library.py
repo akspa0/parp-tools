@@ -22,9 +22,11 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
+from collections.abc import Iterator
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import numpy as np
@@ -50,6 +52,7 @@ from harvester.object_library import (  # noqa: E402
     make_variant_id,
     normalize_asset_path,
 )
+from harvester.v50.build import find_harvest_dll, read_harvest_stream  # noqa: E402
 
 DEFAULT_CODEC = zarr.codecs.BloscCodec(cname="zstd", clevel=5, shuffle="bitshuffle")
 
@@ -67,6 +70,32 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _derive_jobs_from_roof_dir(roof_dir: Path) -> list[dict[str, Any]]:
+    """Build a minimal jobs ledger from a viewer roof-capture output directory.
+
+    Each per-asset subdir carries a ``metadata.json`` with the source
+    ``asset_path`` (and ``build``); this lets the library be built without the
+    (now-removed) V18 placement tables — the capture output is self-describing.
+    """
+    jobs: list[dict[str, Any]] = []
+    for meta_path in sorted(roof_dir.glob("*/metadata.json")):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        asset_path = str(meta.get("asset_path", "") or "")
+        if not asset_path:
+            continue
+        jobs.append({
+            "asset_path": asset_path,
+            "build": str(meta.get("build", "") or ""),
+            "instance_type": "modf" if asset_path.lower().endswith(".wmo") else "mddf",
+            "observation_count": 0,
+            "source_maps": [],
+        })
+    return jobs
+
+
 def _resolve_capture_files(
     captures_dir: Path,
     variant_id: str,
@@ -79,6 +108,43 @@ def _resolve_capture_files(
         image if image.exists() else None,
         mask if mask.exists() else None,
         pose if pose.exists() else None,
+    )
+
+
+# Windows-invalid filename characters, minus '/'/'\\' which the C# sanitizer
+# maps to '_' before this set is applied.
+_ROOF_INVALID_CHARS = set('<>:"|?*') | {chr(c) for c in range(32)}
+
+
+def _sanitize_roof_name(stem: str) -> str:
+    """Replicate the C# ``ViewerApp.SanitizeRoofCaptureName`` used to name each
+    per-asset roof-capture output directory, so we can join back to it."""
+    out: list[str] = []
+    for ch in stem:
+        if ch in (" ", "/", "\\"):
+            out.append("_")
+        elif ch not in _ROOF_INVALID_CHARS and ch != "\0":
+            out.append(ch)
+    result = "".join(out)
+    return result[:100] if len(result) > 100 else result
+
+
+def _resolve_roof_capture_files(
+    roof_dir: Path,
+    asset_path: str,
+) -> tuple[Path | None, Path | None, Path | None]:
+    """Locate (roof_topdown.png, roof_mask.png, metadata.json) for an asset in
+    the viewer's nested roof-capture output layout (``<dir>/<sanitized-stem>/``)."""
+    stem = PurePosixPath(asset_path.replace("\\", "/")).name
+    stem = stem.rsplit(".", 1)[0] if "." in stem else stem
+    asset_dir = roof_dir / _sanitize_roof_name(stem)
+    image = asset_dir / "roof_topdown.png"
+    mask = asset_dir / "roof_mask.png"
+    meta = asset_dir / "metadata.json"
+    return (
+        image if image.exists() else None,
+        mask if mask.exists() else None,
+        meta if meta.exists() else None,
     )
 
 
@@ -103,6 +169,7 @@ def _build_entries_and_variants(
     jobs: list[dict[str, Any]],
     captures_dir: Path | None,
     target_size: int,
+    roof_dir: Path | None = None,
 ) -> tuple[list[ObjectLibraryEntry], list[ObjectCaptureVariant], list[np.ndarray], list[np.ndarray], list[np.ndarray | None]]:
     entries: list[ObjectLibraryEntry] = []
     variants: list[ObjectCaptureVariant] = []
@@ -161,7 +228,9 @@ def _build_entries_and_variants(
         image_path: Path | None = None
         mask_path: Path | None = None
         pose_path: Path | None = None
-        if captures_dir is not None:
+        if roof_dir is not None:
+            image_path, mask_path, pose_path = _resolve_roof_capture_files(roof_dir, asset_path)
+        elif captures_dir is not None:
             image_path, mask_path, pose_path = _resolve_capture_files(captures_dir, variant_id)
 
         if image_path is not None and mask_path is not None:
@@ -173,8 +242,9 @@ def _build_entries_and_variants(
             mask = _resize_array(mask, (target_size, target_size))
 
             alpha: np.ndarray | None = None
-            alpha_path = captures_dir / f"{variant_id}_alpha.png"
-            if alpha_path.exists():
+            # Roof captures carry no separate alpha file — the mask is the silhouette.
+            alpha_path = captures_dir / f"{variant_id}_alpha.png" if captures_dir is not None else None
+            if alpha_path is not None and alpha_path.exists():
                 with Image.open(alpha_path) as a:
                     alpha = _resize_array(np.asarray(a.convert("L")), (target_size, target_size))
 
@@ -240,6 +310,136 @@ def _build_entries_and_variants(
         seen_entries[library_id] = len(entries) - 1
 
     return entries, variants, rgb_list, mask_list, alpha_list
+
+
+def find_harvest_project_dll(harvest_project_path: Path) -> Path:
+    """Thin re-export of ``harvester.v50.build.find_harvest_dll`` under this module's naming, so
+    callers of this file don't need to know the DLL lookup lives in the v50 build helper."""
+    return find_harvest_dll(harvest_project_path)
+
+
+def build_capture_objects_command(
+    harvest_project_path: Path,
+    *,
+    client_root: Path,
+    asset_list: Path | None = None,
+    resolution: int = 256,
+    limit: int | None = None,
+) -> list[str]:
+    """Construct the exact ``dotnet`` invocation for WowViewer.Tool.Harvest's
+    ``capture-objects`` command (Spec 118). Mirrors
+    ``harvester.v50.build.build_harvest_stream_command``'s shape/precedent exactly -- only
+    constructs the command; the caller decides whether to launch it."""
+    dll_path = find_harvest_dll(harvest_project_path)
+    cmd = [
+        "dotnet",
+        str(dll_path),
+        "capture-objects",
+        "--client-root",
+        str(client_root),
+        "--resolution",
+        str(resolution),
+    ]
+    if asset_list is not None:
+        cmd += ["--asset-list", str(asset_list)]
+    if limit is not None:
+        cmd += ["--limit", str(limit)]
+    return cmd
+
+
+def _build_entries_and_variants_from_stream(
+    records: Iterator[dict[str, Any]],
+    target_size: int,
+) -> tuple[list[ObjectLibraryEntry], list[ObjectCaptureVariant], list[np.ndarray], list[np.ndarray]]:
+    """Consume decoded ``capture-objects`` stream records (one per object, already parsed by
+    ``harvester.v50.build.read_harvest_stream`` -> ``harvester.raw_reader.read_tile_blob``) into
+    the same ``ObjectLibraryEntry``/``ObjectCaptureVariant`` shape the PNG-folder path builds, so
+    both paths share the same zarr writer below."""
+    entries: list[ObjectLibraryEntry] = []
+    variants: list[ObjectCaptureVariant] = []
+    rgb_list: list[np.ndarray] = []
+    mask_list: list[np.ndarray] = []
+
+    for record in records:
+        meta = record.get("_metadata", {})
+        asset_path = str(meta.get("asset_path", "") or "")
+        if not asset_path or "image_rgb" not in record or "mask" not in record:
+            continue
+
+        normalized = normalize_asset_path(asset_path)
+        if not normalized:
+            continue
+        library_id = library_id_from_asset_path(normalized)
+        capture_build = str(meta.get("build", "") or "")
+        capture_mode = str(meta.get("capture_mode", "orthographic_topdown") or "orthographic_topdown")
+        variant_id = make_variant_id(
+            library_id=library_id, capture_build=capture_build, capture_mode=capture_mode,
+            rot_x=0.0, rot_y=0.0, rot_z=0.0, scale=1.0,
+        )
+
+        rgb = _resize_array(np.asarray(record["image_rgb"], dtype=np.uint8), (target_size, target_size))
+        mask = _resize_array(np.asarray(record["mask"], dtype=np.uint8), (target_size, target_size))
+
+        visibility_class = "clutter_filtered" if is_clutter_asset(normalized) else (
+            "roof_visible" if str(meta.get("asset_type", "")).lower() == "wmo" else "likely_visible"
+        )
+        entries.append(ObjectLibraryEntry(
+            library_id=library_id,
+            original_asset_path=asset_path,
+            normalized_asset_path=normalized,
+            asset_type=detect_asset_type(normalized),
+            capture_status="captured",
+            visibility_class=visibility_class,
+            review_state="unreviewed",
+            source_builds=(capture_build,) if capture_build else (),
+            source_maps=(),
+            placement_observation_count=0,
+            preferred_variant_id=variant_id,
+        ))
+        variants.append(ObjectCaptureVariant(
+            variant_id=variant_id,
+            library_id=library_id,
+            capture_build=capture_build,
+            capture_mode=capture_mode,
+            asset_type=detect_asset_type(normalized),
+            image_key=f"capture_rgb/{len(variants)}",
+            mask_key=f"capture_mask/{len(variants)}",
+            bbox_x0=0, bbox_y0=0, bbox_x1=target_size, bbox_y1=target_size,
+            rot_x=0.0, rot_y=0.0, rot_z=0.0, scale=1.0,
+            capture_notes="",
+            capture_confidence=1.0,
+        ))
+        rgb_list.append(rgb)
+        mask_list.append(mask)
+
+    return entries, variants, rgb_list, mask_list
+
+
+def run_capture_objects_stream(
+    command: list[str],
+    *,
+    target_size: int,
+    confirm_run: bool,
+) -> tuple[list[ObjectLibraryEntry], list[ObjectCaptureVariant], list[np.ndarray], list[np.ndarray]] | None:
+    """Print the constructed command and return None unless ``confirm_run=True`` (mirrors
+    ``harvester.v50.build.run_fresh_extraction``'s gate exactly -- preparing/testing this path
+    does not authorize spending real capture time against a live client). Only when explicitly
+    confirmed does this launch the subprocess and consume its stdout stream."""
+    if not confirm_run:
+        print(f"Would run object capture: {' '.join(command)}")
+        print("NOT executing: pass --run only with explicit user authorization for this run.")
+        return None
+
+    proc = subprocess.Popen(command, stdout=subprocess.PIPE)
+    assert proc.stdout is not None
+    try:
+        entries, variants, rgb_list, mask_list = _build_entries_and_variants_from_stream(
+            read_harvest_stream(proc.stdout), target_size
+        )
+    finally:
+        proc.stdout.close()
+        proc.wait()
+    return entries, variants, rgb_list, mask_list
 
 
 def _stack_arrays(
@@ -347,10 +547,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build spec 077 per-object capture library from enumerated jobs + capture artifacts."
     )
-    parser.add_argument("--jobs", type=Path, required=True,
-                        help="JSONL of capture jobs from enumerate_object_capture_jobs.py.")
+    parser.add_argument("--jobs", type=Path, default=None,
+                        help="JSONL of capture jobs from enumerate_object_capture_jobs.py. "
+                             "Optional when --roof-captures-dir is given (jobs are then derived "
+                             "from each asset's metadata.json).")
     parser.add_argument("--captures-dir", type=Path, default=None,
                         help="Flat directory of <variant_id>_image.png / _mask.png / _pose.json files.")
+    parser.add_argument("--roof-captures-dir", type=Path, default=None,
+                        help="Nested viewer roof-capture output (<dir>/<sanitized-asset-stem>/roof_topdown.png "
+                             "+ roof_mask.png). Takes precedence over --captures-dir when set.")
     parser.add_argument("--output-root", type=Path, required=True,
                         help="Directory under which <run-name>.zarr is written.")
     parser.add_argument("--run-name", type=str, required=True,
@@ -359,15 +564,79 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Per-variant image/mask size; defaults to 128x128.")
     parser.add_argument("--empty-captures-ok", action="store_true", default=True,
                         help="Emit not_attempted entries for jobs with no capture artifacts.")
+
+    stream_group = parser.add_argument_group(
+        "harvest-stream mode (Spec 118)",
+        "Drive WowViewer.Tool.Harvest's capture-objects command directly -- no PNG folder, no "
+        "GUI click. Mutually exclusive with --jobs/--captures-dir/--roof-captures-dir.")
+    stream_group.add_argument("--from-harvest-stream", action="store_true", default=False,
+                        help="Build the library from a live capture-objects stream instead of a PNG folder.")
+    stream_group.add_argument("--harvest-project", type=Path, default=None,
+                        help="Path to WowViewer.Tool.Harvest's .csproj (or its bin output dir).")
+    stream_group.add_argument("--client-root", type=Path, default=None,
+                        help="WoW client root directory passed through to capture-objects.")
+    stream_group.add_argument("--asset-list", type=Path, default=None,
+                        help="Optional JSON array of asset paths; omit to enumerate the whole client listfile.")
+    stream_group.add_argument("--resolution", type=int, default=256,
+                        help="Per-object capture resolution (square); defaults to 256.")
+    stream_group.add_argument("--capture-limit", type=int, default=None,
+                        help="Cap the number of objects captured (testing/smoke runs).")
+    stream_group.add_argument("--run", action="store_true", default=False,
+                        help="Actually launch capture-objects and consume its stream (default: print "
+                             "the exact command and exit without running it -- Rule 0 execution gate).")
     return parser.parse_args(argv)
+
+
+def _main_from_harvest_stream(args: argparse.Namespace) -> int:
+    if args.harvest_project is None or args.client_root is None:
+        print("--from-harvest-stream requires --harvest-project and --client-root", file=sys.stderr)
+        return 2
+
+    command = build_capture_objects_command(
+        args.harvest_project,
+        client_root=args.client_root,
+        asset_list=args.asset_list,
+        resolution=args.resolution,
+        limit=args.capture_limit,
+    )
+
+    result = run_capture_objects_stream(command, target_size=args.target_size, confirm_run=args.run)
+    if result is None:
+        return 0  # Dry-run: command printed, nothing executed (Rule 0 gate).
+
+    entries, variants, rgb_list, mask_list = result
+    if not entries:
+        print("No entries produced from capture-objects stream", file=sys.stderr)
+        return 2
+
+    args.output_root.mkdir(parents=True, exist_ok=True)
+    rgb = _stack_arrays(rgb_list, args.target_size, 3)
+    mask = _stack_masks(mask_list, args.target_size)
+
+    metadata = {
+        "schema": "spec-077-object-library",
+        "schema_version": "1",
+        "run_name": args.run_name,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "target_size": args.target_size,
+        "entry_count": len(entries),
+        "variant_count": len(variants),
+        "source": "capture-objects-stream",
+        "harvest_command": " ".join(command),
+    }
+
+    store_path = _write_zarr(args.output_root, args.run_name, rgb, mask, None, metadata)
+    _write_assets_parquet(entries, store_path / "assets.parquet")
+    _write_index_parquet(variants, store_path / "index.parquet")
+    print(f"Wrote {len(entries)} entries / {len(variants)} variants to {store_path}")
+    return 0
 
 
 def main_with_args(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    jobs = _read_jsonl(args.jobs)
-    if not jobs:
-        print(f"No jobs found in {args.jobs}", file=sys.stderr)
-        return 2
+
+    if args.from_harvest_stream:
+        return _main_from_harvest_stream(args)
 
     args.output_root.mkdir(parents=True, exist_ok=True)
     captures_dir = args.captures_dir if args.captures_dir is not None else None
@@ -375,8 +644,27 @@ def main_with_args(argv: list[str] | None = None) -> int:
         print(f"Captures dir does not exist; treating as no-captures: {captures_dir}", file=sys.stderr)
         captures_dir = None
 
+    roof_dir = args.roof_captures_dir if args.roof_captures_dir is not None else None
+    if roof_dir is not None and not roof_dir.exists():
+        print(f"Roof captures dir does not exist; treating as no-captures: {roof_dir}", file=sys.stderr)
+        roof_dir = None
+
+    if args.jobs is not None:
+        jobs = _read_jsonl(args.jobs)
+    elif roof_dir is not None:
+        # No explicit jobs ledger — derive it from the roof-capture output.
+        jobs = _derive_jobs_from_roof_dir(roof_dir)
+    else:
+        print("Provide --jobs, or --roof-captures-dir to derive jobs from capture metadata.", file=sys.stderr)
+        return 2
+
+    if not jobs:
+        src = args.jobs if args.jobs is not None else roof_dir
+        print(f"No jobs found ({src})", file=sys.stderr)
+        return 2
+
     entries, variants, rgb_list, mask_list, alpha_list = _build_entries_and_variants(
-        jobs, captures_dir, args.target_size
+        jobs, captures_dir, args.target_size, roof_dir=roof_dir
     )
     if not entries:
         print("No entries produced", file=sys.stderr)
@@ -399,7 +687,8 @@ def main_with_args(argv: list[str] | None = None) -> int:
         "entry_count": len(entries),
         "variant_count": len(variants),
         "captures_dir": str(captures_dir) if captures_dir is not None else "",
-        "jobs_source": str(args.jobs),
+        "roof_captures_dir": str(roof_dir) if roof_dir is not None else "",
+        "jobs_source": str(args.jobs) if args.jobs is not None else (f"derived:{roof_dir}" if roof_dir is not None else ""),
     }
 
     store_path = _write_zarr(args.output_root, args.run_name, rgb, mask, alpha, metadata)

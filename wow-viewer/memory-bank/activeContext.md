@@ -1,6 +1,41 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-22
+Last updated: 2026-07-23
+
+## Active work: Object-library capture pipeline — WMO exclusion root-caused + fixed + smoke-validated (this session)
+
+- The Spec 118 `capture-objects` harvest command + `--from-harvest-stream` Python zarr builder
+  (`build_object_library.py`) + headless `ObjectCaptureRenderer` (`WmoObjectRenderer`/
+  `MdxObjectRenderer`) + `WmoFullLoader` were built in a prior session that terminated before
+  memory-bank sync. The initial test captured MDX/M2 but **zero WMOs**.
+- **Root cause**: in the 0.5.3.3368 alpha client, WMOs are stored as listfile-less single-file
+  `.wmo.MPQ` wrapper archives (one payload + MD5 sidecar), NOT inside normal listfile-bearing
+  MPQs. `NativeMpqService.ScanNestedWrapperArchives` (added last session) registered these into
+  `_scannedArchives` so `ReadFile`/`FileExists` could load them — but `ListFiles("*")` only
+  returned `ExtractInternalListfiles()` (the `(listfile)` blocks of normal archives) and never
+  merged `_scannedArchives` keys. So `capture-objects`' `catalog.ListFiles("*")` enumeration
+  never discovered WMOs even though they were readable → WMOs silently absent while MDX/M2
+  (inside listfile-bearing archives) were captured.
+- **Fix 1** (`NativeMpqService.ListFiles`): merge `_scannedArchives.Keys` into the enumerated
+  set so wrapper-archived objects become discoverable. Minimal, dispatch-unchanged.
+- **Fix 2** (`ScanNestedWrapperArchives`): canonicalize each wrapper's virtual path by stripping
+  a leading `Data\` segment. Without this, the same `.wmo.mpq` was registered twice (once as
+  `Data\World\wmo\X.wmo` from the game-root scan, once as `World\wmo\X.wmo` from the Data-subdir
+  scan) → `ListFiles` would emit every WMO twice and the capture loop would render each twice.
+  Stripping makes both roots produce the same key, so `TryAdd` collapses to one entry, and the
+  virtual path matches the MPQ-internal-path convention (no `Data\` prefix) used by listfiles.
+- **Smoke validation (run this session, H:\CLIENTS\0_5_3_3368)**: curated 5-WMO asset list →
+  `build_object_library.py --from-harvest-stream --run` → `Captured 5 objects, 0 skipped, 0
+  errors` → `smoke_wmo.zarr` with `capture_rgb (5,128,128,3) uint8` + `capture_mask (5,128,128)
+  uint8`. Per-WMO mask coverage 0.377–0.704, image means 26.5–64.6 (all non-blank, textured).
+  Validation contact sheet at `output/object-library-smoke/smoke_wmo_validation.png`
+  (5 panels, wmo=5, captured=5). Both `image_rgb` and `mask` signals proven to flow through
+  enumerate→read→parse(v14 root+embedded MOGP)→render→stream→zarr for WMOs.
+- Build: `dotnet build WowViewer.slnx -c Debug` → 0 errors. No trainer/training touched.
+- **Remaining, explicitly user-run**: the full-scale object-library build (whole client, no
+  `--asset-list`, no `--capture-limit`) is a data harvest — hand off, do not self-launch. The
+  exact CLI is in the completion notes. M2/MDX were already proven in the prior session; this
+  session's smoke was WMO-focused to prove the exclusion fix.
 
 ## Active work: Spec 118 per-object occlusion-aware masks (US1–US3 implemented and code-verified; user-run gates remain)
 

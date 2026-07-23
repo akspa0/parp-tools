@@ -895,7 +895,7 @@ public class ScreenshotRenderer : IDisposable
         }
     }
 
-private WmoV14ToV17Converter.WmoV14Data? LoadWmoData(string modelPath)
+internal WmoV14ToV17Converter.WmoV14Data? LoadWmoData(string modelPath)
     {
         if (_dataSource == null)
         {
