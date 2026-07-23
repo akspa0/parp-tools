@@ -231,10 +231,12 @@ public static class AdtTensorPackBuilder
             ObjectGeometryVisibleTopElevation257 = strictObjectMask.TopElevation,
             ObjectGeometryVisibleTerrainElevation257 = strictObjectMask.TerrainElevation,
             ObjectGeometryVisibleSource257 = strictObjectMask.Source,
+            ObjectGeometryVisibleInstance257 = strictObjectMask.VisibleInstance,
             ObjectGeometryTargetProvenance = strictObjectMask.Provenance,
             ObjectGeometryTargetAssets = strictObjectMask.Assets ?? Array.Empty<ObjectGeometryTargetAsset>(),
             ObjectGeometryTargetUnresolvedPlacements = strictObjectMask.UnresolvedPlacements ?? Array.Empty<ObjectGeometryTargetUnresolvedPlacement>(),
             ObjectGeometryFragmentTrace = strictObjectMask.FragmentTrace,
+            ObjectGeometryVisibleInstances = strictObjectMask.VisibleInstances ?? Array.Empty<ObjectGeometryVisibleInstance>(),
             ObjectInstanceMask257 = objectInstanceMask257,
             MddfMask257 = mddfMask257,
             ModfMask257 = modfMask257,
@@ -435,10 +437,12 @@ public static class AdtTensorPackBuilder
             ObjectGeometryVisibleTopElevation257 = strictObjectMask.TopElevation,
             ObjectGeometryVisibleTerrainElevation257 = strictObjectMask.TerrainElevation,
             ObjectGeometryVisibleSource257 = strictObjectMask.Source,
+            ObjectGeometryVisibleInstance257 = strictObjectMask.VisibleInstance,
             ObjectGeometryTargetProvenance = strictObjectMask.Provenance,
             ObjectGeometryTargetAssets = strictObjectMask.Assets ?? Array.Empty<ObjectGeometryTargetAsset>(),
             ObjectGeometryTargetUnresolvedPlacements = strictObjectMask.UnresolvedPlacements ?? Array.Empty<ObjectGeometryTargetUnresolvedPlacement>(),
             ObjectGeometryFragmentTrace = strictObjectMask.FragmentTrace,
+            ObjectGeometryVisibleInstances = strictObjectMask.VisibleInstances ?? Array.Empty<ObjectGeometryVisibleInstance>(),
             ObjectInstanceMask257 = objectInstanceMask257,
             MddfMask257 = mddfMask257,
             ModfMask257 = modfMask257,
@@ -1894,7 +1898,23 @@ public static class AdtTensorPackBuilder
         ObjectGeometryTargetProvenance Provenance,
         IReadOnlyList<ObjectGeometryTargetAsset>? Assets = null,
         IReadOnlyList<ObjectGeometryTargetUnresolvedPlacement>? UnresolvedPlacements = null,
-        ObjectGeometryFragmentTrace? FragmentTrace = null);
+        ObjectGeometryFragmentTrace? FragmentTrace = null,
+        int[,]? VisibleInstance = null,
+        IReadOnlyList<ObjectGeometryVisibleInstance>? VisibleInstances = null);
+
+    /// <summary>
+    /// Mutable ledger row for the Spec 118 compact per-tile instance id of one
+    /// placement: assigned in deterministic iteration order (MDDF first, then
+    /// MODF) before resolution is known, asset index filled in when the
+    /// placement's asset resolves.
+    /// </summary>
+    private sealed class VisibleInstanceLedgerEntry
+    {
+        public required int InstanceId { get; init; }
+        public required int UniqueId { get; init; }
+        public required ObjectGeometryPixelSource Source { get; init; }
+        public int AssetIndex { get; set; } = -1;
+    }
 
     private readonly record struct StrictLiquidEvidence(
         ObjectGeometryLiquidEvidenceStatus Status,
@@ -1996,6 +2016,7 @@ public static class AdtTensorPackBuilder
         float[,] topElevation = new float[TileHeightmapSize, TileHeightmapSize];
         float[,] terrainElevation = new float[TileHeightmapSize, TileHeightmapSize];
         byte[,] source = new byte[TileHeightmapSize, TileHeightmapSize];
+        int[,] visibleInstance = new int[TileHeightmapSize, TileHeightmapSize];
         if (liquid.Status == ObjectGeometryLiquidEvidenceStatus.Unknown)
         {
             AddStrictObjectGeometryProvenanceSignal(signals);
@@ -2027,7 +2048,9 @@ public static class AdtTensorPackBuilder
                     LiquidSurfaceUnknownPixelCount: liquid.SurfaceUnknownPixelCount),
                 FragmentTrace: ObjectGeometryFragmentTrace.Create(
                     Array.Empty<ObjectGeometryFragmentRecord>(),
-                    Array.Empty<ObjectGeometryTargetAsset>()));
+                    Array.Empty<ObjectGeometryTargetAsset>()),
+                VisibleInstance: visibleInstance,
+                VisibleInstances: Array.Empty<ObjectGeometryVisibleInstance>());
         }
 
         if (terrainVertices is null)
@@ -2121,7 +2144,8 @@ public static class AdtTensorPackBuilder
             ObjectGeometryPixelSource pixelSource,
             int placementUniqueId,
             int assetIndex,
-            int sourceTriangleIndex)
+            int sourceTriangleIndex,
+            int instanceId)
         {
             if (!TryProjectToTilePixel(w0, tileX, tileY, projectionMode, out Vector2 p0)
                 || !TryProjectToTilePixel(w1, tileX, tileY, projectionMode, out Vector2 p1)
@@ -2149,7 +2173,9 @@ public static class AdtTensorPackBuilder
                 placementUniqueId,
                 assetIndex,
                 sourceTriangleIndex,
-                fragmentRecords);
+                fragmentRecords,
+                visibleInstance,
+                instanceId);
             occludedPixels += result.OccludedPixels;
             terrainUnknownPixels += result.TerrainUnknownPixels;
             liquidCoveredFragments += result.LiquidCoveredPixels;
@@ -2159,8 +2185,16 @@ public static class AdtTensorPackBuilder
             return true;
         }
 
+        List<VisibleInstanceLedgerEntry> instanceLedger = [];
         foreach (AdtModelPlacement placement in placements.ModelPlacements)
         {
+            VisibleInstanceLedgerEntry ledgerEntry = new()
+            {
+                InstanceId = instanceLedger.Count + 1,
+                UniqueId = placement.UniqueId,
+                Source = ObjectGeometryPixelSource.M2Triangle,
+            };
+            instanceLedger.Add(ledgerEntry);
             string modelPath = NormalizeAssetPath(placement.ModelPath);
             if (!TryLoadDoodadModelMetadata(modelPath, assetReader, doodadCache, out DoodadModelMetadata? metadata)
                 || metadata?.TriangleVertices is not { Count: >= 3 } triangles
@@ -2177,6 +2211,7 @@ public static class AdtTensorPackBuilder
             }
 
             int assetIndex = ResolveAssetIndex(ObjectGeometryPixelSource.M2Triangle, modelPath);
+            ledgerEntry.AssetIndex = assetIndex;
             Matrix4x4 transform = BuildM2PlacementTransform(placement.Position, placement.Rotation, placement.Scale);
             const TileProjectionMode projectionMode = TileProjectionMode.OriginYX;
 
@@ -2191,7 +2226,8 @@ public static class AdtTensorPackBuilder
                     ObjectGeometryPixelSource.M2Triangle,
                     placement.UniqueId,
                     assetIndex,
-                    index / 3))
+                    index / 3,
+                    ledgerEntry.InstanceId))
                 {
                     invalidGeometry = true;
                     break;
@@ -2213,6 +2249,13 @@ public static class AdtTensorPackBuilder
 
         foreach (AdtWorldModelPlacement placement in placements.WorldModelPlacements)
         {
+            VisibleInstanceLedgerEntry ledgerEntry = new()
+            {
+                InstanceId = instanceLedger.Count + 1,
+                UniqueId = placement.UniqueId,
+                Source = ObjectGeometryPixelSource.WmoTriangle,
+            };
+            instanceLedger.Add(ledgerEntry);
             string modelPath = NormalizeAssetPath(placement.ModelPath);
             if (!TryLoadWmoRenderDocument(modelPath, assetReader, wmoCache, out WmoRenderDocument? document, null)
                 || document is null
@@ -2243,6 +2286,7 @@ public static class AdtTensorPackBuilder
             }
 
             int assetIndex = ResolveAssetIndex(ObjectGeometryPixelSource.WmoTriangle, modelPath);
+            ledgerEntry.AssetIndex = assetIndex;
             const TileProjectionMode projectionMode = TileProjectionMode.OriginYX;
 
             bool hasGeometryTriangle = false;
@@ -2279,7 +2323,8 @@ public static class AdtTensorPackBuilder
                         ObjectGeometryPixelSource.WmoTriangle,
                         placement.UniqueId,
                         assetIndex,
-                        currentTriangleIndex))
+                        currentTriangleIndex,
+                        ledgerEntry.InstanceId))
                     {
                         invalidGeometry = true;
                         break;
@@ -2309,6 +2354,23 @@ public static class AdtTensorPackBuilder
         // The output target is a union of triangles. Record its actual positive
         // pixels rather than a duplicate-prone sum of per-triangle fragments.
         visiblePixels = mask.Cast<float>().Count(static value => value > 0f);
+        int[] visiblePixelsByInstance = new int[instanceLedger.Count + 1];
+        for (int instanceY = 0; instanceY < TileHeightmapSize; instanceY++)
+        {
+            for (int instanceX = 0; instanceX < TileHeightmapSize; instanceX++)
+            {
+                if (visibleInstance[instanceY, instanceX] > 0)
+                    visiblePixelsByInstance[visibleInstance[instanceY, instanceX]]++;
+            }
+        }
+        List<ObjectGeometryVisibleInstance> visibleInstances = instanceLedger
+            .Select(entry => new ObjectGeometryVisibleInstance(
+                entry.InstanceId,
+                entry.UniqueId,
+                entry.AssetIndex,
+                entry.Source,
+                visiblePixelsByInstance[entry.InstanceId]))
+            .ToList();
         ObjectGeometryFragmentTrace fragmentTrace = ObjectGeometryFragmentTrace.Create(fragmentRecords, assets);
         ObjectGeometryTargetStatus status = unresolvedPlacements > 0
             ? ObjectGeometryTargetStatus.IncompleteGeometry
@@ -2349,7 +2411,9 @@ public static class AdtTensorPackBuilder
             provenance,
             assets,
             unresolvedPlacementRecords,
-            fragmentTrace);
+            fragmentTrace,
+            provenance.IsMaterialized ? visibleInstance : null,
+            visibleInstances);
     }
 
     private static void AddStrictObjectGeometrySignals(HashSet<string> signals)
@@ -2358,6 +2422,7 @@ public static class AdtTensorPackBuilder
         signals.Add("object_geometry_visible_top_elevation_257");
         signals.Add("object_geometry_visible_terrain_elevation_257");
         signals.Add("object_geometry_visible_source_257");
+        signals.Add("object_geometry_visible_instance_257");
         signals.Add("object_geometry_fragment_trace_v3");
         AddStrictObjectGeometryProvenanceSignal(signals);
     }

@@ -35,6 +35,9 @@ STAGES = frozenset(
         # checkpointed stage in this same residual chain (research.md D-01) -- reusing this schema
         # verbatim rather than inventing a parallel one.
         "lattice_prior",
+        # Spec 118: the from-scratch visible-object segmenter is likewise one more independent
+        # stage (research.md D-06), reusing this schema verbatim.
+        "object_segmentation",
     }
 )
 PROMOTION_VERDICTS = frozenset({"pending", "promoted", "rejected"})

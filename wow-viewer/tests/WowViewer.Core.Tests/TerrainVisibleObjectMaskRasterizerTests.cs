@@ -313,6 +313,141 @@ public sealed class TerrainVisibleObjectMaskRasterizerTests
         Assert.Equal((byte)ObjectGeometryPixelSource.WmoTriangle, source[0, 0]);
     }
 
+    [Fact]
+    public void PaintTriangleWithTrace_PaintsInstanceIdUnderTheFrontMostRule()
+    {
+        TerrainVisibleObjectMaskRasterizer rasterizer = new(BuildFlatTerrain(10f));
+        float[,] mask = new float[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        float[,] topElevation = new float[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        float[,] terrainElevation = new float[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        byte[,] source = new byte[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        int[,] instance = new int[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+
+        // Instance 1: the large low triangle (elevation 12).
+        rasterizer.PaintTriangleWithTrace(
+            mask, topElevation, terrainElevation, source,
+            new Vector2(0f, 0f), new Vector2(8f, 0f), new Vector2(0f, 8f),
+            new Vector3(0f, 0f, 12f), new Vector3(8f, 0f, 12f), new Vector3(0f, 8f, 12f),
+            12f, 12f, 12f,
+            ObjectGeometryPixelSource.M2Triangle,
+            placementUniqueId: 101,
+            assetIndex: 0,
+            sourceTriangleIndex: 0,
+            fragmentTrace: null,
+            visibleInstance: instance,
+            instanceId: 1);
+
+        // Instance 2: the smaller overlapping but HIGHER triangle (elevation 14).
+        rasterizer.PaintTriangleWithTrace(
+            mask, topElevation, terrainElevation, source,
+            new Vector2(0f, 0f), new Vector2(4f, 0f), new Vector2(0f, 4f),
+            new Vector3(0f, 0f, 14f), new Vector3(4f, 0f, 14f), new Vector3(0f, 4f, 14f),
+            14f, 14f, 14f,
+            ObjectGeometryPixelSource.WmoTriangle,
+            placementUniqueId: 202,
+            assetIndex: 1,
+            sourceTriangleIndex: 0,
+            fragmentTrace: null,
+            visibleInstance: instance,
+            instanceId: 2);
+
+        // Overlap pixel: the higher (front-most) fragment owns the identity.
+        Assert.Equal(1f, mask[0, 0]);
+        Assert.Equal(2, instance[0, 0]);
+        Assert.Equal((byte)ObjectGeometryPixelSource.WmoTriangle, source[0, 0]);
+
+        // Pixel covered only by instance 1 keeps instance 1's identity.
+        Assert.Equal(1f, mask[0, 5]);
+        Assert.Equal(1, instance[0, 5]);
+        Assert.Equal((byte)ObjectGeometryPixelSource.M2Triangle, source[0, 5]);
+    }
+
+    [Fact]
+    public void PaintTriangleWithTrace_OccludedTrianglePaintsNoInstanceId()
+    {
+        TerrainVisibleObjectMaskRasterizer rasterizer = new(BuildFlatTerrain(10f));
+        float[,] mask = new float[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        float[,] topElevation = new float[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        float[,] terrainElevation = new float[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        byte[,] source = new byte[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        int[,] instance = new int[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+
+        // Elevation 9 is below the 10.0 surface plus the 0.25 clearance everywhere.
+        ObjectTriangleRasterResult result = rasterizer.PaintTriangleWithTrace(
+            mask, topElevation, terrainElevation, source,
+            new Vector2(0f, 0f), new Vector2(8f, 0f), new Vector2(0f, 8f),
+            new Vector3(0f, 0f, 9f), new Vector3(8f, 0f, 9f), new Vector3(0f, 8f, 9f),
+            9f, 9f, 9f,
+            ObjectGeometryPixelSource.M2Triangle,
+            placementUniqueId: 303,
+            assetIndex: 0,
+            sourceTriangleIndex: 0,
+            fragmentTrace: null,
+            visibleInstance: instance,
+            instanceId: 5);
+
+        Assert.Equal(0, result.VisiblePixels);
+        Assert.True(result.OccludedPixels > 0);
+        Assert.Equal(0, instance[0, 0]);
+        Assert.Equal(0, instance[4, 4]);
+    }
+
+    [Fact]
+    public void PaintTriangleWithTrace_InstanceIdIsPositiveExactlyWhereTheMaskIsPositive()
+    {
+        TerrainVisibleObjectMaskRasterizer rasterizer = new(BuildFlatTerrain(10f));
+        float[,] mask = new float[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        float[,] topElevation = new float[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        float[,] terrainElevation = new float[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        byte[,] source = new byte[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        int[,] instance = new int[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+
+        rasterizer.PaintTriangleWithTrace(
+            mask, topElevation, terrainElevation, source,
+            new Vector2(0f, 0f), new Vector2(16f, 0f), new Vector2(0f, 16f),
+            new Vector3(0f, 0f, 12f), new Vector3(16f, 0f, 12f), new Vector3(0f, 16f, 12f),
+            12f, 12f, 12f,
+            ObjectGeometryPixelSource.M2Triangle,
+            placementUniqueId: 404,
+            assetIndex: 0,
+            sourceTriangleIndex: 0,
+            fragmentTrace: null,
+            visibleInstance: instance,
+            instanceId: 3);
+
+        for (int y = 0; y < 24; y++)
+        {
+            for (int x = 0; x < 24; x++)
+            {
+                Assert.Equal(mask[y, x] > 0f, instance[y, x] > 0);
+            }
+        }
+    }
+
+    [Fact]
+    public void PaintTriangleWithTrace_InstancePaintRequiresAPositiveCompactId()
+    {
+        TerrainVisibleObjectMaskRasterizer rasterizer = new(BuildFlatTerrain(10f));
+        float[,] mask = new float[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        float[,] topElevation = new float[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        float[,] terrainElevation = new float[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        byte[,] source = new byte[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+        int[,] instance = new int[TerrainVisibleObjectMaskRasterizer.Size, TerrainVisibleObjectMaskRasterizer.Size];
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => rasterizer.PaintTriangleWithTrace(
+            mask, topElevation, terrainElevation, source,
+            new Vector2(0f, 0f), new Vector2(8f, 0f), new Vector2(0f, 8f),
+            new Vector3(0f, 0f, 12f), new Vector3(8f, 0f, 12f), new Vector3(0f, 8f, 12f),
+            12f, 12f, 12f,
+            ObjectGeometryPixelSource.M2Triangle,
+            placementUniqueId: 505,
+            assetIndex: 0,
+            sourceTriangleIndex: 0,
+            fragmentTrace: null,
+            visibleInstance: instance,
+            instanceId: 0));
+    }
+
     private static TerrainVertexLattice BuildFlatTerrain(float elevation)
     {
         float[,,] z = new float[TerrainVertexLattice.ChunksPerAxis, TerrainVertexLattice.ChunksPerAxis, TerrainVertexLattice.SamplesPerChunk];

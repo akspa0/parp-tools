@@ -37,6 +37,7 @@ Short file. Current truth only. Root `../AGENTS.md` still wins on workspace poli
 ## Hard rules
 
 - The user runs training, GPU jobs, harvests, and any long/heavy/billed run. Prepare the script and hand over the exact `uv run ...` command — do NOT launch it yourself. Communicate directly and respectfully regardless of tone. See root `../AGENTS.md` RULE 0.
+- Every command you hand the user to run must be **PowerShell-ready** (their shell is `pwsh` 7): backtick `` ` `` line continuations NOT bash `\`, `$VAR = "..."` NOT `VAR=...`, no heredocs / `/tmp` / `export`. When in doubt, put it on one line. Applies to chat AND any doc/quickstart they run from. See root `../AGENTS.md` RULE 0A.
 - New code stays in `wow-viewer/`.
 - Client roots are runtime configuration. `H:\CLIENTS` is the approved fast SSD library for
   known-good builds; `output/tmp/wowarchive-clients/` is optional staging, not a mandatory hop.

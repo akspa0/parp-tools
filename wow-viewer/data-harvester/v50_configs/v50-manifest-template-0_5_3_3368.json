@@ -289,6 +289,45 @@
       "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
       "coverage_count": 0,
       "migration_policy": "copy-if-verified"
+    },
+    {
+      "name": "object_geometry_visible_mask_257",
+      "dtype": "float32",
+      "row_shape": [
+        257,
+        257
+      ],
+      "required": false,
+      "authoritative_source": "harvest-stream",
+      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "coverage_count": 0,
+      "migration_policy": "copy-if-verified"
+    },
+    {
+      "name": "object_geometry_visible_source_257",
+      "dtype": "uint8",
+      "row_shape": [
+        257,
+        257
+      ],
+      "required": false,
+      "authoritative_source": "harvest-stream",
+      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "coverage_count": 0,
+      "migration_policy": "copy-if-verified"
+    },
+    {
+      "name": "object_geometry_visible_instance_257",
+      "dtype": "int32",
+      "row_shape": [
+        257,
+        257
+      ],
+      "required": false,
+      "authoritative_source": "harvest-stream",
+      "content_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "coverage_count": 0,
+      "migration_policy": "copy-if-verified"
     }
   ],
   "row_lineage_identity": "sha256:0000000000000000000000000000000000000000000000000000000000000000",

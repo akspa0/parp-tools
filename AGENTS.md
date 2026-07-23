@@ -25,6 +25,17 @@
 - Never condescend or treat the user as incapable. Take their instructions literally and seriously. If you think something is a mistake, say so once, plainly, then follow their call.
 - Be concise. Deliver the thing asked for, not a lecture around it.
 
+### RULE 0A: WINDOWS SHELL — EVERY COMMAND YOU HAND THE USER MUST BE POWERSHELL-READY
+
+**This machine runs Windows and the user's shell is PowerShell 7 (`pwsh`). Every command you print for the user to run must copy-paste and execute in PowerShell as-is, with zero translation. Handing over bash syntax has been a repeated, explicitly-called-out failure that wastes the user's time — do not do it again.**
+
+- **Line continuation is a backtick `` ` ``, NEVER a backslash `\`.** The backtick must be the last character on the line (no trailing space). When in doubt, put the whole command on ONE line.
+- **No bash-isms in handed-off commands:** no `\` continuations, no heredocs (`<< EOF`), no inline `VAR=value cmd` assignment, no `export`, no `/tmp`, and no POSIX-only tools (`cat`/`grep`/`sed`/`awk`/`head`/`tail`) as the thing the user runs.
+- **Shell variables use PowerShell syntax:** assign on their own line as `$STORE = "..."` and reference as `$STORE`. Never emit bash `STORE="..."`. Better yet, inline the literal path so there is nothing to define first.
+- **Paths:** forward slashes are fine for Python/`uv`; Windows drive paths (`H:\...`, `I:\...`) are literal; quote anything that could contain a space.
+- This applies to commands in chat AND to any command block you write into a doc/quickstart the user will run from. (`&&` and `||` DO work in `pwsh` 7 — those are fine.)
+- The Bash tool stays available for YOUR OWN read-only/POSIX work; that is separate. The rule governs what the USER executes: that is always PowerShell/cmd.
+
 ### RULE 1: `gillijimproject_refactor` IS READ-ONLY
 
 **DO NOT WRITE NEW CODE IN `gillijimproject_refactor`. EVER.**

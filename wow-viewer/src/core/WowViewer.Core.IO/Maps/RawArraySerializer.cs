@@ -239,6 +239,7 @@ public static class RawArraySerializer
         WriteArray(outputStream, "object_geometry_visible_top_elevation_257", pack.ObjectGeometryVisibleTopElevation257);
         WriteArray(outputStream, "object_geometry_visible_terrain_elevation_257", pack.ObjectGeometryVisibleTerrainElevation257);
         WriteArray(outputStream, "object_geometry_visible_source_257", pack.ObjectGeometryVisibleSource257);
+        WriteArray(outputStream, "object_geometry_visible_instance_257", pack.ObjectGeometryVisibleInstance257);
         WriteStrictObjectGeometryFragmentTrace(pack, outputStream);
         WriteArray(outputStream, "object_instance_mask_257", pack.ObjectInstanceMask257);
         WriteArray(outputStream, "mddf_mask_257", pack.MddfMask257);
@@ -289,6 +290,7 @@ public static class RawArraySerializer
         WriteArray(outputStream, "object_geometry_visible_top_elevation_257", pack.ObjectGeometryVisibleTopElevation257);
         WriteArray(outputStream, "object_geometry_visible_terrain_elevation_257", pack.ObjectGeometryVisibleTerrainElevation257);
         WriteArray(outputStream, "object_geometry_visible_source_257", pack.ObjectGeometryVisibleSource257);
+        WriteArray(outputStream, "object_geometry_visible_instance_257", pack.ObjectGeometryVisibleInstance257);
         WriteStrictObjectGeometryFragmentTrace(pack, outputStream);
         WriteArray(outputStream, "object_instance_mask_257", pack.ObjectInstanceMask257);
         WriteArray(outputStream, "mddf_mask_257", pack.MddfMask257);
@@ -922,6 +924,14 @@ WriteArray(outputStream, "mddf_count", new[] { pack.PlacementMddfCount });
                 source = placement.Source.ToString(),
                 normalized_asset_path = placement.NormalizedAssetPath,
                 reason = placement.Reason,
+            }),
+            object_geometry_visible_instances = pack.ObjectGeometryVisibleInstances.Select(static instance => new
+            {
+                instance_id = instance.InstanceId,
+                placement_unique_id = instance.PlacementUniqueId,
+                asset_index = instance.AssetIndex,
+                source = instance.Source.ToString(),
+                visible_pixel_count = instance.VisiblePixelCount,
             }),
             placement_mddf_count = pack.PlacementMddfCount,
             placement_modf_count = pack.PlacementModfCount,

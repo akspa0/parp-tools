@@ -25,9 +25,22 @@ from pathlib import Path
 
 import numpy as np
 
+from harvester.spec118.object_loss import (
+    OBJECT_MASK_ARRAY,
+    object_mask_available,
+)
+from harvester.spec118.object_loss import (
+    subset_metrics as object_subset_metrics,
+)
 from harvester.v50.contracts import release_identity, require_store_release, validate_release
 from harvester.v50.direct_geometry_materialize import COARSE_ARRAY, COARSE_STORE_SCHEMA
 from harvester.v50.direct_geometry_train import apply_held_out_split
+from harvester.v50.feature_stores import (
+    feature_channels_for_row,
+    load_feature_stores,
+    plan_entries,
+    total_class_count,
+)
 from harvester.v50.geometry_detailer_model import (
     DETAILER_ARCHITECTURE_ID,
     GeometryDetailerNet,
@@ -54,6 +67,12 @@ from harvester.v50.height_relative_train import (
     select_training_rows,
     validate_curriculum_contract,
     validate_source_selection,
+)
+from harvester.v50.lr_schedule import (
+    PCT_START_DEFAULT,
+    make_onecycle_scheduler,
+    warmup_complete,
+    warmup_epochs_for,
 )
 from harvester.v50.model_stage_contract import (
     ContractViolationError,
@@ -246,8 +265,7 @@ def render_detailer_epoch_preview(
     val_mae: float,
     amp_enabled: bool,
     amp_dtype,
-    feature_group=None,
-    feature_row_to_position: dict[int, int] | None = None,
+    feature_bindings=None,
 ) -> None:
     """Render a comprehensive per-epoch validation sheet showing ALL signals.
 
@@ -314,9 +332,8 @@ def render_detailer_epoch_preview(
             coarse = np.asarray(coarse_group[COARSE_ARRAY][position], dtype=np.float32)
             truth, _, _ = encode_relative_height(np.asarray(group["height_257"][source_row]))
             rgb_channels = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1)
-            if feature_group is not None:
-                feature_position = feature_row_to_position[source_row]
-                feats = np.asarray(feature_group["feature_map"][feature_position], dtype=np.float32)
+            feats = feature_channels_for_row(feature_bindings or [], source_row)
+            if feats is not None:
                 rgb_channels = torch.cat([rgb_channels, torch.from_numpy(feats)], dim=0)
             tensor = rgb_channels.unsqueeze(0).to(device)
             coarse_t = torch.from_numpy(coarse).unsqueeze(0).to(device)
@@ -393,12 +410,15 @@ def main() -> int:
                     help="Spec 116 US4: a v50-held-out-split-v1 directory whose spatially-isolated "
                          "held_out rows become validation, overriding --val-key/--val-value. "
                          "Refuses a leaky split. Never mutates --store.")
-    ap.add_argument("--feature-store", type=Path, default=None,
-                    help="Spec 115/116: a v115-feature-map-v1 store (from "
-                         "v50_materialize_feature_maps.py or spec116_structure_to_feature_map.py). "
-                         "Concatenates the classifier's GENERATED per-pixel feature map onto RGB, "
-                         "so the detailer gets a texture-vs-terrain signal alongside the coarse "
-                         "field. RGB-only without it.")
+    ap.add_argument("--feature-store", type=Path, action="append", dest="feature_store", default=None,
+                    metavar="FEATURE_STORE",
+                    help="Spec 115/116/117/118: a v115-feature-map-v1 store (from a bridge/"
+                         "materializer). Concatenates the classifier's GENERATED per-pixel feature "
+                         "map onto RGB, so the detailer gets a texture-vs-terrain signal alongside "
+                         "the coarse field. RGB-only without it. REPEATABLE: pass more than once to "
+                         "concatenate several priors in CLI order (must match how the coarse "
+                         "checkpoint's feature stores were ordered). in_channels = 3 + "
+                         "sum(class_counts).")
     ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--lr", type=float, default=2e-4)
@@ -434,7 +454,23 @@ def main() -> int:
                          "(0.0 = no masking, 1.0 = zero loss where liquid_mask=1). "
                          "The minimap input is blue water in liquid regions — the model "
                          "can't see underwater terrain, so penalizing it there is noise.")
+    ap.add_argument("--object-mask-weight", type=float, default=0.0,
+                    help="Spec 118: downweight point loss on VISIBLY object-covered pixels by this "
+                         "fraction (0.0 = no masking, 1.0 = zero loss where "
+                         "object_geometry_visible_mask_257=1). The mask marks only pixels where an "
+                         "object actually pokes through the terrain, never the full footprint, so "
+                         "a mostly-underground object barely reduces trainable land (FR-006/007). "
+                         "Ground-truth signal admissible loss-side only (FR-014); the coarse-only "
+                         "baseline stays unmasked so the relative gate remains honest.")
     ap.add_argument("--patience", type=int, default=15)
+    ap.add_argument("--pct-start", type=float, default=PCT_START_DEFAULT,
+                    help="OneCycleLR warmup fraction (torch default 0.3 = 30%% of steps). The "
+                         "early-stopper is warmup-aware: it does not count stale epochs until the "
+                         "warmup phase completes. This matters most for the detailer, whose "
+                         "zero-init residual head starts AT the coarse baseline and cannot improve "
+                         "validation until the LR rises -- a patience shorter than the warmup "
+                         "previously killed runs mid-warmup (best epoch 2, early-stop epoch 17). "
+                         "For small datasets a shorter warmup (0.1) wastes less of a short run.")
     ap.add_argument("--seed", type=int, default=114)
     ap.add_argument("--init-weights", type=Path, default=None,
                     help="Path to a checkpoint .pt file to initialize model weights from "
@@ -490,29 +526,12 @@ def main() -> int:
     # Spec 115/116: optional generated feature-map input, concatenated onto RGB (never ground
     # truth). Loaded here so the model is built with the right input-channel count. Row-aligned to
     # the curriculum via its own index.parquet's source_row_index -- validated, never assumed.
-    feature_group = None
-    feature_class_count = 0
-    feature_row_to_position: dict[int, int] = {}
-    if args.feature_store is not None:
-        feature_group = zarr.open_group(str(args.feature_store), mode="r")
-        feature_attrs = dict(feature_group.attrs)
-        if feature_attrs.get("schema") != "v115-feature-map-v1":
-            raise SystemExit(
-                f"--feature-store is not a v115-feature-map-v1 store: {args.feature_store}"
-            )
-        feature_class_count = int(feature_attrs.get("class_count", 0))
-        if feature_class_count < 1 or "feature_map" not in feature_group:
-            raise SystemExit(f"--feature-store has no usable feature_map array: {args.feature_store}")
-        feature_index = pq.read_table(args.feature_store / "index.parquet").to_pylist()
-        feature_row_to_position = {
-            int(r["source_row_index"]): pos for pos, r in enumerate(feature_index)
-        }
-        missing = [r for r in selected_rows if r not in feature_row_to_position]
-        if missing:
-            raise SystemExit(
-                f"--feature-store is missing {len(missing)} selected curriculum rows "
-                f"(first missing source_row_index={missing[0]})"
-            )
+    feature_paths = list(args.feature_store) if args.feature_store else []
+    try:
+        feature_bindings = load_feature_stores(feature_paths, selected_rows=selected_rows)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    feature_class_count = total_class_count(feature_bindings)
     in_channels = 3 + feature_class_count
 
     np.random.seed(args.seed)
@@ -552,13 +571,10 @@ def main() -> int:
         band_hf_weight=args.band_hf_weight,
         band_cutoff=args.band_cutoff,
     )
-    if feature_group is not None:
+    if feature_bindings:
         plan["deployment_inputs"] = ["minimap_rgb", "generated_terrain_feature_map", "generated_coarse_relief"]
-        plan["feature_store"] = {
-            "path": str(args.feature_store.resolve()),
-            "class_count": feature_class_count,
-            "input_channels": in_channels,
-        }
+        plan["feature_stores"] = plan_entries(feature_bindings)
+        plan["feature_input_channels"] = in_channels
     if held_out_split_manifest is not None:
         plan["split_counts"] = {"train": len(train_positions), "val": len(val_positions)}
         plan["held_out_split"] = {
@@ -566,6 +582,19 @@ def main() -> int:
             "verified_violation_count": int(held_out_split_manifest["verified_violation_count"]),
             "absolute_comparison_to_prior_runs_invalid": True,
         }
+    if args.object_mask_weight > 0:
+        # Recoverability rule: two runs must differ by exactly one knob, visibly, in the plan.
+        plan["object_mask"] = {
+            "weight": args.object_mask_weight,
+            "source_arrays": [OBJECT_MASK_ARRAY],
+            "affects_inference_inputs": False,
+            "note": "requested settings; the trainer warns and disables if source arrays are absent",
+        }
+    plan["pct_start"] = args.pct_start if args.lr_schedule == "onecycle" else None
+    plan["warmup_epochs"] = (
+        warmup_epochs_for(args.pct_start, args.epochs, plan["train_steps_per_epoch"])
+        if args.lr_schedule == "onecycle" else 0
+    )
     print(json.dumps(plan, indent=2), flush=True)
     if not args.confirm_run:
         print("DRY RUN ONLY: add --confirm-run to launch user-owned CUDA training.", flush=True)
@@ -587,6 +616,12 @@ def main() -> int:
               "liquid loss masking disabled.", flush=True)
         use_liquid_mask = False
 
+    use_object_mask = args.object_mask_weight > 0
+    if use_object_mask and not object_mask_available(group):
+        print(f"WARNING: --object-mask-weight > 0 but '{OBJECT_MASK_ARRAY}' not in store; "
+              "object loss masking disabled.", flush=True)
+        use_object_mask = False
+
     class DetailerDataset(Dataset):
         def __init__(self, rows: list[int]) -> None:
             self.rows = rows
@@ -599,11 +634,10 @@ def main() -> int:
             source_row = selected_rows[position]
             rgb = np.asarray(group["minimap_rgb"][source_row], dtype=np.float32) / 255.0
             channels = torch.from_numpy(rgb).permute(2, 0, 1)
-            if feature_group is not None:
-                feature_position = feature_row_to_position[source_row]
-                feats = np.asarray(feature_group["feature_map"][feature_position], dtype=np.float32)
-                # Generated (K, 256, 256) class probabilities, concatenated onto RGB. This is the
-                # classifier's OUTPUT, never ground-truth labels (Spec 115 FR-007).
+            feats = feature_channels_for_row(feature_bindings, source_row)
+            if feats is not None:
+                # Generated (sum(K), 256, 256) class probabilities from every prior, concatenated
+                # onto RGB in CLI order. Classifiers' OUTPUTS, never ground-truth (Spec 115 FR-007).
                 channels = torch.cat([channels, torch.from_numpy(feats)], dim=0)
             coarse = np.asarray(coarse_group[COARSE_ARRAY][position], dtype=np.float32)
             truth, _, _ = encode_relative_height(np.asarray(group["height_257"][source_row]))
@@ -618,11 +652,22 @@ def main() -> int:
                 liq_t = (liq_t > 0.1).float()
             else:
                 liq_t = torch.empty(0)
+            if use_object_mask:
+                # Strict visible-object mask at 257x257; same nearest-interp convention as liquid.
+                obj = np.asarray(group[OBJECT_MASK_ARRAY][source_row], dtype=np.float32)
+                obj_t = torch.from_numpy(obj).unsqueeze(0).unsqueeze(0)
+                obj_t = torch.nn.functional.interpolate(
+                    obj_t, size=truth.shape, mode="nearest"
+                ).squeeze(0).squeeze(0)
+                obj_t = (obj_t > 0.1).float()
+            else:
+                obj_t = torch.empty(0)
             return (
                 channels,
                 torch.from_numpy(coarse),
                 torch.from_numpy(truth),
                 liq_t,
+                obj_t,
             )
 
     val_coarse = [np.asarray(coarse_group[COARSE_ARRAY][p], dtype=np.float32) for p in val_positions]
@@ -648,9 +693,11 @@ def main() -> int:
         num_workers=args.workers, pin_memory=True,
     )
     scheduler = None
+    warmup_epochs = 0
     if args.lr_schedule == "onecycle":
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            opt, max_lr=args.lr, epochs=args.epochs, steps_per_epoch=len(train_loader)
+        scheduler, warmup_epochs = make_onecycle_scheduler(
+            opt, max_lr=args.lr, epochs=args.epochs,
+            steps_per_epoch=len(train_loader), pct_start=args.pct_start,
         )
     amp_dtype = torch.bfloat16 if args.amp_dtype == "bf16" else torch.float16
     use_scaler = args.amp and args.amp_dtype == "fp16"
@@ -673,6 +720,8 @@ def main() -> int:
         "loss": {
             "point": "smooth_l1", "gradient_l1_weight": 0.25,
             "liquid_mask_weight": args.liquid_mask_weight,
+            "object_mask_weight": args.object_mask_weight,
+            "object_mask_signal": OBJECT_MASK_ARRAY if use_object_mask else None,
             "spectral_weight": args.spectral_weight,
             "multiscale_weight": args.multiscale_weight,
             "frequency_2d_weight": args.frequency_2d_weight,
@@ -688,9 +737,11 @@ def main() -> int:
             "max_epochs": args.epochs, "batch_size": args.batch,
             "patience": args.patience, "val_tolerance": args.val_tolerance,
             "workers": args.workers, "seed": args.seed, "lr_schedule": args.lr_schedule,
+            "pct_start": args.pct_start if args.lr_schedule == "onecycle" else None,
+            "warmup_epochs": warmup_epochs,
             "amp": args.amp, "amp_dtype": args.amp_dtype, "grad_clip": args.clip,
         },
-        "feature_store": plan.get("feature_store"),
+        "feature_stores": plan.get("feature_stores"),
         "held_out_split": plan.get("held_out_split"),
     }
     (args.output / "training_plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
@@ -702,7 +753,7 @@ def main() -> int:
     for epoch in range(1, args.epochs + 1):
         model.train()
         train_losses = []
-        for rgb, coarse, truth, liq in train_loader:
+        for rgb, coarse, truth, liq, obj in train_loader:
             opt.zero_grad(set_to_none=True)
             with torch.amp.autocast("cuda", enabled=args.amp, dtype=amp_dtype):
                 rgb_d = rgb.to(device)
@@ -711,10 +762,17 @@ def main() -> int:
                 residual = model(rgb_d, coarse_d)
                 final = compose_final(coarse_d, residual, clamp=False)
                 loss = height_loss(final, truth_d)
+                point_weight = None
                 if use_liquid_mask and liq.numel() > 0:
-                    liq_d = liq.to(device)
                     # Downweight point loss in liquid regions: (1 - weight * mask)
-                    point_weight = 1.0 - args.liquid_mask_weight * liq_d
+                    point_weight = 1.0 - args.liquid_mask_weight * liq.to(device)
+                if use_object_mask and obj.numel() > 0:
+                    # Spec 118 FR-006/007: visible-object pixels are down-weighted, never dropped;
+                    # the mask only ever covers the visible portion, so mostly-underground
+                    # objects keep nearly all of their tile's trainable land.
+                    obj_factor = 1.0 - args.object_mask_weight * obj.to(device)
+                    point_weight = obj_factor if point_weight is None else point_weight * obj_factor
+                if point_weight is not None:
                     loss = (torch.abs(final - truth_d) * point_weight).mean()
                 if args.spectral_weight > 0:
                     loss = loss + args.spectral_weight * radial_spectral_loss(
@@ -758,7 +816,7 @@ def main() -> int:
         val_absolute_error = 0.0
         val_elements = 0
         with torch.no_grad(), torch.amp.autocast("cuda", enabled=args.amp, dtype=amp_dtype):
-            for rgb, coarse, truth, _liq in val_loader:
+            for rgb, coarse, truth, _liq, _obj in val_loader:
                 truth_d = truth.to(device)
                 final = compose_final(
                     coarse.to(device), model(rgb.to(device), coarse.to(device)), clamp=True
@@ -785,18 +843,24 @@ def main() -> int:
                 output=preview_dir / f"epoch_{epoch:04d}.png",
                 epoch=epoch, val_mae=val_mae,
                 amp_enabled=args.amp, amp_dtype=amp_dtype,
-                feature_group=feature_group, feature_row_to_position=feature_row_to_position,
+                feature_bindings=feature_bindings,
             )
         elif args.val_tolerance > 0 and val_mae <= best * (1.0 + args.val_tolerance):
             # Within tolerance band of best: model is still in a productive region.
             # Reset stale but don't update best (only strict improvement saves a checkpoint).
             stale = 0
-        else:
+        elif warmup_complete(epoch, warmup_epochs):
+            # Past the OneCycleLR warmup: a non-improving epoch is genuinely stale.
             stale += 1
+        # else: still inside warmup -- the LR is deliberately held low, so a flat
+        # validation curve is the schedule's design, not a learning failure. The
+        # detailer's zero-init residual head starts AT the coarse baseline and cannot
+        # move until the LR rises; penalizing that as "stale" killed runs mid-warmup.
+        warmup_tag = " (warmup)" if not warmup_complete(epoch, warmup_epochs) else ""
         print(
             f"[epoch {epoch:03d}] train_loss={train_loss:.6f} val_mae={val_mae:.6f} "
             f"coarse={coarse_baseline:.6f} tile_mean={tile_mean_baseline:.6f} "
-            f"best={best:.6f} stale={stale}/{args.patience}",
+            f"best={best:.6f} stale={stale}/{args.patience}{warmup_tag}",
             flush=True,
         )
         if args.patience > 0 and stale >= args.patience:
@@ -815,6 +879,10 @@ def main() -> int:
     eval_dir.mkdir(parents=True, exist_ok=True)
     records: list[dict] = []
     samples_by_position: dict[int, dict] = {}
+    obj_abs = 0.0
+    obj_px = 0
+    free_abs = 0.0
+    free_px = 0
     with torch.no_grad():
         for position in val_positions:
             source_row = selected_rows[position]
@@ -822,9 +890,8 @@ def main() -> int:
             coarse = np.asarray(coarse_group[COARSE_ARRAY][position], dtype=np.float32)
             truth, _, _ = encode_relative_height(np.asarray(group["height_257"][source_row]))
             rgb_channels = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1)
-            if feature_group is not None:
-                feature_position = feature_row_to_position[source_row]
-                feats = np.asarray(feature_group["feature_map"][feature_position], dtype=np.float32)
+            feats = feature_channels_for_row(feature_bindings or [], source_row)
+            if feats is not None:
                 rgb_channels = torch.cat([rgb_channels, torch.from_numpy(feats)], dim=0)
             tensor = rgb_channels.unsqueeze(0).to(device)
             coarse_t = torch.from_numpy(coarse).unsqueeze(0).to(device)
@@ -833,6 +900,23 @@ def main() -> int:
             predicted = final.float().cpu().numpy()
             index_row = index[source_row]
             metrics = compute_row_metrics(predicted, truth)
+            if use_object_mask:
+                # Spec 118 FR-008: object-touched vs untouched region MAE on the best checkpoint,
+                # so the paired with/without comparison reads the confound directly. Ground-truth
+                # mask is evaluation/loss-side only here (FR-014).
+                obj257 = np.asarray(
+                    torch.nn.functional.interpolate(
+                        torch.from_numpy(
+                            np.asarray(group[OBJECT_MASK_ARRAY][source_row], dtype=np.float32)
+                        )[None, None],
+                        size=truth.shape, mode="nearest",
+                    )[0, 0]
+                ) > 0.5
+                abs_err = np.abs(predicted - truth)
+                obj_abs += float(abs_err[obj257].sum())
+                obj_px += int(obj257.sum())
+                free_abs += float(abs_err[~obj257].sum())
+                free_px += int((~obj257).sum())
             records.append({
                 "row_id": int(source_row),
                 "map": str(index_row.get("map", "unknown")),
@@ -906,6 +990,11 @@ def main() -> int:
             "evaluator": aggregate,
             "detailer_gate": gate,
             "sc002": sc002,
+            "object_region": (
+                object_subset_metrics(obj_abs, obj_px, free_abs, free_px,
+                                      weight=args.object_mask_weight)
+                if use_object_mask else None
+            ),
             "structural_failure_epoch1_best": best_record["epoch"] == 1,
         },
         visual_evidence={

@@ -149,12 +149,20 @@ public sealed class TerrainVisibleObjectMaskRasterizer
         int placementUniqueId,
         int assetIndex,
         int sourceTriangleIndex,
-        ICollection<ObjectGeometryFragmentRecord>? fragmentTrace)
+        ICollection<ObjectGeometryFragmentRecord>? fragmentTrace,
+        int[,]? visibleInstance = null,
+        int instanceId = 0)
     {
         ValidateOutputShape(visibleMask, nameof(visibleMask));
         ValidateOutputShape(visibleTopElevation, nameof(visibleTopElevation));
         ValidateOutputShape(visibleTerrainElevation, nameof(visibleTerrainElevation));
         ValidateOutputShape(visibleSource, nameof(visibleSource));
+        if (visibleInstance is not null)
+        {
+            ValidateOutputShape(visibleInstance, nameof(visibleInstance));
+            if (instanceId <= 0)
+                throw new ArgumentOutOfRangeException(nameof(instanceId), "Instance ids are 1-based compact per-tile values.");
+        }
         if (!float.IsFinite(elevation0) || !float.IsFinite(elevation1) || !float.IsFinite(elevation2))
             throw new ArgumentOutOfRangeException(nameof(elevation0), "Triangle elevations must be finite.");
         if (!IsFinite(world0) || !IsFinite(world1) || !IsFinite(world2))
@@ -245,6 +253,8 @@ public sealed class TerrainVisibleObjectMaskRasterizer
                     visibleTopElevation[y, x] = objectElevation;
                     visibleTerrainElevation[y, x] = terrainSample.Elevation;
                     visibleSource[y, x] = (byte)source;
+                    if (visibleInstance is not null)
+                        visibleInstance[y, x] = instanceId;
                 }
                 visibleMask[y, x] = 1f;
                 visible++;

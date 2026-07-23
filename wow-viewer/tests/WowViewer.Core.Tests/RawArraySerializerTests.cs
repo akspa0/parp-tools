@@ -263,6 +263,108 @@ public sealed class RawArraySerializerTests
     }
 
     [Fact]
+    public void Serialize_V16_WritesVisibleInstanceArrayAndInstanceTable()
+    {
+        float[,] strictMask = new float[257, 257];
+        float[,] strictTopElevation = new float[257, 257];
+        float[,] strictTerrainElevation = new float[257, 257];
+        byte[,] strictSource = new byte[257, 257];
+        int[,] strictInstance = new int[257, 257];
+        strictMask[12, 34] = 1f;
+        strictTopElevation[12, 34] = 42f;
+        strictTerrainElevation[12, 34] = 12f;
+        strictSource[12, 34] = (byte)ObjectGeometryPixelSource.WmoTriangle;
+        strictInstance[12, 34] = 1;
+        ObjectGeometryTargetAsset[] strictAssets =
+        [
+            new ObjectGeometryTargetAsset(
+                AssetIndex: 0,
+                Source: ObjectGeometryPixelSource.WmoTriangle,
+                NormalizedAssetPath: "world/wmo/test.wmo"),
+        ];
+        ObjectGeometryFragmentTrace strictTrace = ObjectGeometryFragmentTrace.Create(
+        [
+            new ObjectGeometryFragmentRecord(
+                RasterX: 34,
+                RasterY: 12,
+                ObjectWorldX: 100f,
+                ObjectWorldY: 200f,
+                ObjectWorldZ: 42f,
+                ObjectElevation: 42f,
+                PlacementUniqueId: 77,
+                AssetIndex: 0,
+                SourceTriangleIndex: 3,
+                Source: ObjectGeometryPixelSource.WmoTriangle,
+                Classification: ObjectGeometryFragmentClassification.TerrainVisible,
+                TerrainVertex0X: 33,
+                TerrainVertex0Y: 12,
+                TerrainVertex1X: 34,
+                TerrainVertex1Y: 11,
+                TerrainVertex2X: 35,
+                TerrainVertex2Y: 12,
+                TerrainVertex0Z: 12f,
+                TerrainVertex1Z: 12f,
+                TerrainVertex2Z: 12f,
+                TerrainVertex0Present: true,
+                TerrainVertex1Present: true,
+                TerrainVertex2Present: true,
+                TerrainWeight0: 0.5f,
+                TerrainWeight1: 0.25f,
+                TerrainWeight2: 0.25f,
+                TerrainElevation: 12f,
+                LiquidSurfaceElevation: float.NaN),
+        ],
+            strictAssets);
+
+        TerrainTileTensorPack pack = new()
+        {
+            TileName = "Azeroth_1_2",
+            ObjectGeometryVisibleMask257 = strictMask,
+            ObjectGeometryVisibleTopElevation257 = strictTopElevation,
+            ObjectGeometryVisibleTerrainElevation257 = strictTerrainElevation,
+            ObjectGeometryVisibleSource257 = strictSource,
+            ObjectGeometryVisibleInstance257 = strictInstance,
+            ObjectGeometryTargetProvenance = new ObjectGeometryTargetProvenance(
+                ObjectGeometryTargetStatus.CompleteVisible,
+                PlacementCount: 1,
+                GeometryResolvedPlacementCount: 1,
+                GeometryUnresolvedPlacementCount: 0,
+                FallbackRequiredPlacementCount: 0,
+                TriangleCount: 64,
+                VisiblePixelCount: 1,
+                OccludedPixelCount: 3,
+                TerrainUnknownPixelCount: 0,
+                LiquidEvidenceStatus: ObjectGeometryLiquidEvidenceStatus.Dry),
+            ObjectGeometryTargetAssets = strictAssets,
+            ObjectGeometryFragmentTrace = strictTrace,
+            ObjectGeometryVisibleInstances =
+            [
+                new ObjectGeometryVisibleInstance(
+                    InstanceId: 1,
+                    PlacementUniqueId: 77,
+                    AssetIndex: 0,
+                    Source: ObjectGeometryPixelSource.WmoTriangle,
+                    VisiblePixelCount: 1),
+            ],
+        };
+
+        using MemoryStream stream = new();
+        RawArraySerializer.Serialize(pack, stream, RawArraySerializer.StreamProfile.V16);
+
+        Dictionary<string, RawArrayInfo> arrays = ReadArrayIndex(stream.ToArray());
+        using JsonDocument metadata = JsonDocument.Parse(ReadMetadataJson(stream.ToArray()));
+
+        Assert.Contains("object_geometry_visible_instance_257", arrays.Keys);
+        Assert.Equal([257, 257], arrays["object_geometry_visible_instance_257"].Shape);
+        JsonElement instanceRow = metadata.RootElement.GetProperty("object_geometry_visible_instances")[0];
+        Assert.Equal(1, instanceRow.GetProperty("instance_id").GetInt32());
+        Assert.Equal(77, instanceRow.GetProperty("placement_unique_id").GetInt32());
+        Assert.Equal(0, instanceRow.GetProperty("asset_index").GetInt32());
+        Assert.Equal("WmoTriangle", instanceRow.GetProperty("source").GetString());
+        Assert.Equal(1, instanceRow.GetProperty("visible_pixel_count").GetInt32());
+    }
+
+    [Fact]
     public void Serialize_V16_IncompleteStrictGeometryWritesProvenanceButNeverAnEmptyTarget()
     {
         TerrainTileTensorPack pack = new()

@@ -21,19 +21,31 @@ from pathlib import Path
 import numpy as np
 
 from harvester.spec117.lattice_contract import (
+    INNER_DIM,
+    OUTER_DIM,
     architecture_identity,
     build_lattice_stage_run,
     identity_for_path,
+)
+from harvester.spec117.lattice_evaluate import (
+    relief_stratified_metrics,
+    tile_relief_and_baseline,
 )
 from harvester.spec117.lattice_model import (
     LatticeNet,
     compute_lattice_tile_mean_baseline,
     encode_lattice_target,
+    lattice_gradient_loss,
     lattice_loss,
     select_lattice_rows,
 )
 from harvester.v50.contracts import release_identity, require_store_release, validate_release
 from harvester.v50.direct_geometry_train import apply_held_out_split
+from harvester.v50.height_relative_evaluate import (
+    compute_row_metrics,
+    render_validation_sheet,
+    select_fixed_preview_rows,
+)
 from harvester.v50.height_relative_train import (
     SOURCE_CHOICES,
     TrainerContractError,
@@ -42,6 +54,11 @@ from harvester.v50.height_relative_train import (
     select_training_rows,
     validate_curriculum_contract,
     validate_source_selection,
+)
+from harvester.v50.lr_schedule import (
+    make_onecycle_scheduler,
+    warmup_complete,
+    warmup_epochs_for,
 )
 from harvester.v50.model_stage_contract import sha256_file
 
@@ -99,6 +116,67 @@ def build_lattice_plan(
     }
 
 
+def _dense_lattice_field(outer: np.ndarray, inner: np.ndarray, size: int = 256) -> np.ndarray:
+    """Bilinear-upsample the outer 17x17 and inner 16x16 grids to ``size`` and average them.
+
+    Identical to ``lattice_bridge.py``'s independent-bilinear-average so a preview shows exactly the
+    dense field that will be written as the downstream feature-map channel.
+    """
+    import torch
+    import torch.nn.functional as functional
+
+    o = functional.interpolate(
+        torch.from_numpy(np.asarray(outer, dtype=np.float32))[None, None],
+        size=(size, size), mode="bilinear", align_corners=True,
+    )[0, 0].numpy()
+    i = functional.interpolate(
+        torch.from_numpy(np.asarray(inner, dtype=np.float32))[None, None],
+        size=(size, size), mode="bilinear", align_corners=True,
+    )[0, 0].numpy()
+    return (o + i) / 2.0
+
+
+def _lattice_val_samples(model, group, rows: list[int], index, device) -> list[dict]:
+    """Run the model over ``rows`` and build ``render_validation_sheet`` samples.
+
+    Each sample's target/predicted is the dense 256x256 lattice field (the bridge output), so the
+    sheet's [truth, prediction, tile-mean baseline, signed/abs error] panels visualize exactly what
+    downstream trainers receive, and the per-tile MAE is comparable to the tile-mean baseline column.
+    """
+    import torch
+
+    model.eval()
+    outer_count = OUTER_DIM * OUTER_DIM
+    samples: list[dict] = []
+    with torch.no_grad():
+        for row in rows:
+            rgb = np.asarray(group["minimap_rgb"][row], dtype=np.uint8)
+            target, _mask, _tmin, _tmax = encode_lattice_target(
+                np.asarray(group["wdl_outer_17"][row]),
+                np.asarray(group["wdl_inner_16"][row]),
+                np.asarray(group["wdl_outer_present"][row]),
+                np.asarray(group["wdl_inner_present"][row]),
+            )
+            rgb_t = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(device)
+            pred = model(rgb_t).squeeze(0).cpu().numpy()
+            dense_pred = _dense_lattice_field(
+                pred[:outer_count].reshape(OUTER_DIM, OUTER_DIM),
+                pred[outer_count:].reshape(INNER_DIM, INNER_DIM),
+            )
+            dense_truth = _dense_lattice_field(
+                target[:outer_count].reshape(OUTER_DIM, OUTER_DIM),
+                target[outer_count:].reshape(INNER_DIM, INNER_DIM),
+            )
+            metrics = compute_row_metrics(dense_pred, dense_truth)
+            row_meta = index[row]
+            samples.append({
+                "rgb": rgb, "target": dense_truth, "predicted": dense_pred,
+                "label": f"row {row}  {row_meta.get('map', '?')}",
+                "metrics": metrics,
+            })
+    return samples
+
+
 def main() -> int:
     import pyarrow.parquet as pq
     import torch
@@ -122,8 +200,35 @@ def main() -> int:
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--lr-schedule", default="constant", choices=sorted(LR_SCHEDULES))
-    ap.add_argument("--base", type=int, default=24, help="LatticeNet encoder width")
-    ap.add_argument("--patience", type=int, default=15)
+    ap.add_argument("--base", type=int, default=64,
+                    help="LatticeNet encoder width (v5 native-direct double-conv encoder; base=64 "
+                         "is deliberately over-capacity so a failure is never about size -- go 96/128 "
+                         "for more headroom)")
+    ap.add_argument("--patience", type=int, default=30,
+                    help="TRAINING-loss plateau patience: stop only after this many post-warmup "
+                         "epochs with no train-loss improvement. val_mae NEVER stops a run -- it is "
+                         "recorded as a diagnostic only. Overfitting is not a concern in this regime "
+                         "(no model in this series has fit, let alone over-fit), so we drive the "
+                         "objective down and keep the best-training-loss checkpoint. 0 = never stop "
+                         "(run the full --epochs).")
+    ap.add_argument("--pct-start", type=float, default=0.1,
+                    help="OneCycleLR warmup fraction (torch default 0.3 = 30%% of steps). The "
+                         "early-stopper is warmup-aware: it does not count stale epochs until the "
+                         "warmup phase completes, so a long warmup can no longer kill a run before "
+                         "the LR reaches its peak. For this small dataset (43 steps/epoch) a shorter "
+                         "warmup (0.1) wastes less of a short run on under-LR steps.")
+    ap.add_argument("--gradient-weight", type=float, default=0.25,
+                    help="Weight for a loss-only 2D finite-difference gradient term on the lattice "
+                         "grids (ported from the V7 height regressor's gradient-consistency stack; "
+                         "0 = disable). Rewards matching the local slope field, not just per-point "
+                         "values -- a model that scrambles the arrangement of roughly-right values "
+                         "still scores poorly without it. Default 0.25 matches V50's HeightRelativeNet.")
+    ap.add_argument("--init-weights", type=Path, default=None,
+                    help="Optional checkpoint to initialize the model weights from (the detailer's "
+                         "proven resume pattern): continue a prior good run for more epochs instead "
+                         "of restarting from scratch. Must be the same --base (architecture); the "
+                         "load fails closed on a shape mismatch. A fresh OneCycle schedule still "
+                         "runs over --epochs, so pass a modest --pct-start.")
     ap.add_argument("--seed", type=int, default=117)
     ap.add_argument("--release", default="v50.1", type=validate_release)
     ap.add_argument("--workers", type=int, choices=[0], default=0)
@@ -165,7 +270,8 @@ def main() -> int:
     model = LatticeNet(base=args.base)
     identity = architecture_identity(
         model, architecture_id="lattice_net",
-        config={"class": "LatticeNet", "base": args.base, "input": "3x256x256", "output": "545"},
+        config={"class": "LatticeNet", "arch": "lattice_net_v5",
+                "base": args.base, "input": "3x256x256", "output": "545"},
     )
     plan = build_lattice_plan(
         architecture=identity, source=args.source,
@@ -174,6 +280,12 @@ def main() -> int:
         batch_size=args.batch, epochs=args.epochs, seed=args.seed,
         lr=args.lr, lr_schedule=args.lr_schedule,
     )
+    plan["pct_start"] = args.pct_start if args.lr_schedule == "onecycle" else None
+    plan["warmup_epochs"] = (
+        warmup_epochs_for(args.pct_start, args.epochs, plan["train_steps_per_epoch"])
+        if args.lr_schedule == "onecycle" else 0
+    )
+    plan["gradient_weight"] = args.gradient_weight
     plan["held_out_split"] = {
         "path": str((args.held_out_split / "split.json").resolve()),
         "sha256": sha256_file(args.held_out_split / "split.json"),
@@ -228,6 +340,18 @@ def main() -> int:
     tile_mean_baseline = compute_lattice_tile_mean_baseline(val_targets_masks)
 
     device = torch.device("cuda")
+    if args.init_weights is not None:
+        try:
+            init_ckpt = torch.load(args.init_weights, map_location="cpu", weights_only=False)
+            model.load_state_dict(init_ckpt["model"])
+        except (RuntimeError, KeyError) as exc:
+            raise SystemExit(
+                f"--init-weights {args.init_weights} is incompatible with base={args.base} "
+                f"(architecture/shape mismatch): {exc}"
+            ) from exc
+        print(f"[init-weights] initialized model from {args.init_weights} "
+              f"(source epoch {init_ckpt.get('epoch', '?')}); a fresh OneCycle runs over --epochs",
+              flush=True)
     model = model.to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     train_generator = torch.Generator()
@@ -238,9 +362,11 @@ def main() -> int:
     )
     val_loader = DataLoader(RowDataset(val_rows), batch_size=args.batch, num_workers=args.workers, pin_memory=True)
     scheduler = None
+    warmup_epochs = 0
     if args.lr_schedule == "onecycle":
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            opt, max_lr=args.lr, epochs=args.epochs, steps_per_epoch=len(train_loader)
+        scheduler, warmup_epochs = make_onecycle_scheduler(
+            opt, max_lr=args.lr, epochs=args.epochs,
+            steps_per_epoch=len(train_loader), pct_start=args.pct_start,
         )
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -254,28 +380,41 @@ def main() -> int:
         # load_state_dict, so it travels alongside identity rather than only inside the hash.
         "lattice_config": {"base": args.base},
         "source_filter": args.source,
+        "init_weights": str(args.init_weights.resolve()) if args.init_weights else None,
         "store": str(args.store.resolve()),
         "optimizer": plan["optimizer"],
         "schedule": {
             "max_epochs": args.epochs, "batch_size": args.batch,
             "patience": args.patience, "workers": args.workers, "seed": args.seed,
             "lr_schedule": args.lr_schedule,
+            "pct_start": args.pct_start if args.lr_schedule == "onecycle" else None,
+            "warmup_epochs": warmup_epochs,
         },
+        "gradient_weight": args.gradient_weight,
         "held_out_split": plan["held_out_split"],
     }
     (args.output / "training_plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
     (args.output / "run_identity.json").write_text(json.dumps(run_identity, indent=2), encoding="utf-8")
 
+    fixed_preview_rows = select_fixed_preview_rows(val_rows, 8)
     per_epoch: list[dict] = []
-    best = float("inf")
-    stale = 0
+    best_train = float("inf")
+    best_val = float("inf")
+    train_stale = 0
     for epoch in range(1, args.epochs + 1):
         model.train()
         train_losses = []
         for x, y, mask in train_loader:
             opt.zero_grad(set_to_none=True)
-            predicted = model(x.to(device))
-            loss = lattice_loss(predicted, y.to(device), mask.to(device))
+            x_device = x.to(device)
+            y_device = y.to(device)
+            mask_device = mask.to(device)
+            predicted = model(x_device)
+            loss = lattice_loss(predicted, y_device, mask_device)
+            if args.gradient_weight > 0:
+                loss = loss + args.gradient_weight * lattice_gradient_loss(
+                    predicted, y_device, mask_device
+                )
             loss.backward()
             opt.step()
             if scheduler is not None:
@@ -299,24 +438,92 @@ def main() -> int:
             "val_mae": val_mae, "curriculum_identity": curriculum_id,
         }
         torch.save(checkpoint, args.output / "checkpoint_last.pt")
-        if val_mae < best:
-            best = val_mae
-            stale = 0
+        best_val = min(best_val, val_mae)
+        # checkpoint_best.pt = best TRAINING loss. Overfitting is not a concern in this regime (no
+        # model in this series has fit, let alone over-fit), so the model that best fits the
+        # objective is the one we keep and hand downstream. val_mae is recorded every epoch as a
+        # diagnostic and governs NOTHING -- not checkpoint selection, not stopping.
+        if train_loss < best_train - 1e-4:
+            best_train = train_loss
+            train_stale = 0
             torch.save(checkpoint, args.output / "checkpoint_best.pt")
-        else:
-            stale += 1
+            preview_dir = args.output / "validation" / "best_previews"
+            preview_dir.mkdir(parents=True, exist_ok=True)
+            render_validation_sheet(
+                _lattice_val_samples(model, group, fixed_preview_rows, index, device),
+                preview_dir / f"epoch_{epoch:04d}.png",
+                title=f"lattice fixed validation | epoch {epoch} | train {train_loss:.6f} | val {val_mae:.6f}",
+            )
+        elif warmup_complete(epoch, warmup_epochs):
+            # Past warmup and the TRAINING loss did not improve -- only now is an epoch "stale".
+            # Never stop on val: held-out wobble was killing runs that were still learning.
+            train_stale += 1
+        # else: still inside warmup -- LR held low by design, so a flat curve is the schedule, not
+        # a learning failure; do not penalize it (the prior bug killed runs mid-warmup).
+        warmup_tag = " (warmup)" if not warmup_complete(epoch, warmup_epochs) else ""
         print(
             f"[epoch {epoch:03d}] train_loss={train_loss:.6f} val_mae={val_mae:.6f} "
-            f"tile_mean={tile_mean_baseline:.6f} best={best:.6f} stale={stale}/{args.patience}",
+            f"tile_mean={tile_mean_baseline:.6f} best_train={best_train:.6f} best_val={best_val:.6f} "
+            f"train_stale={train_stale}/{args.patience}{warmup_tag}",
             flush=True,
         )
-        if args.patience > 0 and stale >= args.patience:
-            print(f"[early-stop] no improvement for {stale} epochs", flush=True)
+        if args.patience > 0 and train_stale >= args.patience:
+            print(f"[stop] training loss plateaued for {train_stale} epochs "
+                  f"(val is a diagnostic, never the stopper)", flush=True)
             break
 
-    best_record = min(per_epoch, key=lambda e: e["val_mae"])
+    # Always save the final trained state alongside the best-training-loss checkpoint.
+    torch.save(checkpoint, args.output / "checkpoint_final.pt")
+    best_train_record = min(per_epoch, key=lambda e: e["train_loss"])
+    best_val_record = min(per_epoch, key=lambda e: e["val_mae"])
     best_checkpoint = torch.load(args.output / "checkpoint_best.pt", map_location=device, weights_only=False)
-    beats_tile_mean = bool(best_record["val_mae"] < tile_mean_baseline)
+    model.load_state_dict(best_checkpoint["model"])
+    model.eval()
+    # Reported for honesty (did the run EVER generalize past tile-mean?), not as a gate on this
+    # stage -- selection and stopping are train-driven.
+    beats_tile_mean = bool(best_val_record["val_mae"] < tile_mean_baseline)
+
+    # Relief-stratified honest evaluation. The aggregate val_mae is dominated by near-flat tiles
+    # where tile-mean is unbeatable (the project's known blind spot); run the kept model over every
+    # held-out tile, measure its NATIVE masked MAE, and stratify by the tile's own raw height relief
+    # so we can see whether it beats tile-mean WHERE THERE IS RELIEF (what the previews suggest).
+    per_tile_relief: list[dict] = []
+    with torch.no_grad():
+        for row in val_rows:
+            rgb = np.asarray(group["minimap_rgb"][row], dtype=np.float32) / 255.0
+            target, mask, tile_min, tile_max = encode_lattice_target(
+                np.asarray(group["wdl_outer_17"][row]),
+                np.asarray(group["wdl_inner_16"][row]),
+                np.asarray(group["wdl_outer_present"][row]),
+                np.asarray(group["wdl_inner_present"][row]),
+            )
+            rgb_t = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).to(device)
+            pred = model(rgb_t).squeeze(0).cpu().numpy()
+            present = mask > 0
+            model_mae = float(np.abs(pred[present] - target[present]).mean())
+            relief, tile_mean_mae = tile_relief_and_baseline(target, mask, tile_min, tile_max)
+            per_tile_relief.append(
+                {"row": int(row), "model_mae": model_mae,
+                 "tile_mean_mae": tile_mean_mae, "relief": relief}
+            )
+    relief_strata = relief_stratified_metrics(per_tile_relief, n_strata=4)
+    relief_top = relief_strata["relief_subset"]
+
+    eval_dir = args.output / "validation" / "final_best"
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    fixed_samples = _lattice_val_samples(model, group, fixed_preview_rows, index, device)
+    render_validation_sheet(
+        fixed_samples, eval_dir / "fixed_rows.png",
+        title=f"lattice fixed validation | best epoch {best_checkpoint['epoch']}",
+    )
+    all_val_samples = _lattice_val_samples(model, group, val_rows, index, device)
+    worst_samples = sorted(
+        all_val_samples, key=lambda s: (-float(s["metrics"]["mae"]), s["label"])
+    )[:8]
+    render_validation_sheet(
+        worst_samples, eval_dir / "worst_cases.png",
+        title=f"lattice worst held-out rows | best epoch {best_checkpoint['epoch']}",
+    )
 
     stage_run = build_lattice_stage_run(
         run_id=args.run_id,
@@ -327,13 +534,26 @@ def main() -> int:
             "best_epoch": int(best_checkpoint["epoch"]),
         },
         baselines={"tile_mean": {"val_mae": tile_mean_baseline}},
+        visual_evidence={
+            "fixed_rows": "validation/final_best/fixed_rows.png",
+            "worst_cases": "validation/final_best/worst_cases.png",
+            "best_previews": "validation/best_previews/",
+        },
         metrics={
-            "best_epoch": best_record["epoch"],
-            "best_val_mae": best_record["val_mae"],
+            "selection": "best_training_loss",
+            "checkpoint_epoch": int(best_checkpoint["epoch"]),
+            "best_train_epoch": best_train_record["epoch"],
+            "best_train_loss": best_train_record["train_loss"],
+            "final_epoch": per_epoch[-1]["epoch"],
+            "final_train_loss": per_epoch[-1]["train_loss"],
+            "final_val_mae": per_epoch[-1]["val_mae"],
+            "best_val_epoch": best_val_record["epoch"],
+            "best_val_mae": best_val_record["val_mae"],
             "beats_tile_mean_baseline": beats_tile_mean,
+            "relief_stratified": relief_strata,
             "held_out_split": plan["held_out_split"],
             "excluded_no_present_lattice": plan["excluded_no_present_lattice"],
-            "structural_failure_epoch1_best": best_record["epoch"] == 1,
+            "structural_failure_epoch1_best": best_train_record["epoch"] == 1,
         },
     )
     (args.output / "model_stage_run.json").write_text(json.dumps(stage_run, indent=2), encoding="utf-8")
@@ -341,13 +561,27 @@ def main() -> int:
         json.dumps({"per_epoch_metrics": per_epoch, "model_stage_run": stage_run["run_id"]}, indent=2),
         encoding="utf-8",
     )
+    print(
+        f"[relief-stratified] highest-relief stratum ({relief_top['n_tiles']} tiles, "
+        f"relief {relief_top['relief_min']:.1f}..{relief_top['relief_max']:.1f}): "
+        f"model_mae={relief_top['model_mae']:.6f} vs tile_mean={relief_top['tile_mean_mae']:.6f} "
+        f"beats_tile_mean={relief_top['model_beats_tile_mean']}  |  aggregate "
+        f"model_mae={relief_strata['overall']['model_mae']:.6f} "
+        f"tile_mean={relief_strata['overall']['tile_mean_mae']:.6f} "
+        f"(aggregate is flat-tile-dominated -- trust the relief stratum)",
+        flush=True,
+    )
     if stage_run["metrics"]["structural_failure_epoch1_best"]:
-        print("STRUCTURAL FAILURE: best epoch is epoch 1; this run is not a success.", flush=True)
+        print("STRUCTURAL FAILURE: training loss never improved past epoch 1; run is not a success.",
+              flush=True)
         return 1
     print(
-        f"best_epoch={best_record['epoch']} best_val_mae={best_record['val_mae']:.6f} "
+        f"selection=best_training_loss checkpoint_epoch={best_checkpoint['epoch']} "
+        f"best_train_loss={best_train_record['train_loss']:.6f} "
+        f"final_train_loss={per_epoch[-1]['train_loss']:.6f} "
+        f"best_val_mae={best_val_record['val_mae']:.6f}(epoch {best_val_record['epoch']}) "
         f"tile_mean_baseline={tile_mean_baseline:.6f} beats_tile_mean_baseline={beats_tile_mean} "
-        f"promotion=pending(user gate; US3 integration should not proceed without this being true, "
+        f"promotion=pending(user gate; US3 integration should not proceed without a real signal, "
         f"per spec US2 acceptance 3, unless explicitly overridden)",
         flush=True,
     )

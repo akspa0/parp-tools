@@ -78,12 +78,28 @@ for name in ('wdl_outer_17','wdl_inner_16','wdl_outer_present','wdl_inner_presen
 
 ## 2. US2 — standalone lattice predictor (USER-RUN; dry-run first, then confirm)
 
+> **Scheduling note (2026-07-22 fix).** The early-stopper is now **warmup-aware**: with
+> `--lr-schedule onecycle` it does not count "stale" epochs until the OneCycleLR warmup phase
+> completes. The first real run died at epoch 17 (best epoch 2) because the default 30-epoch
+> warmup was longer than `--patience 15` — the run was killed mid-warmup before the LR ever
+> reached its peak. Pass `--pct-start 0.1` for this small dataset (43 steps/epoch) so only ~10
+> epochs are spent warming up instead of 30.
+>
+> **Architecture note (2026-07-22 fix).** The first post-fix run (warmup-aware, `lattice-authored-v2`)
+> survived warmup but still plateaued at val 0.2307 vs tile-mean 0.1277 — and train MAE was *also*
+> above tile-mean, i.e. **underfit**, not overfit. v1's plain 4-conv encoder pooled to a 16×16
+> bottleneck with no skip connections, so it could not localize the 17×17 height field. `LatticeNet`
+> is now a **U-Net-lite** (v2): the bottleneck is decoded back up with skip connections (e3, e2)
+> and each head fuses all four feature levels (16/32/64/128) at the lattice resolution. Capacity
+> rose 178K → 675K params at `--base 24`; still constructable from `base` alone so the bridge is
+> unchanged. If v2 overfits 679 tiles, lower `--base` (e.g. 16) before raising any regularization.
+
 ### 2a. Dry run
 ```bash
 uv run python scripts/spec117_train_lattice.py \
   --store $STORE --held-out-split $SPLIT \
   --output "$OUT/lattice-run1" --run-id lattice-authored-v1 --source authored \
-  --epochs 100 --lr-schedule onecycle
+  --epochs 100 --lr-schedule onecycle --pct-start 0.1
 ```
 - Prints the full plan and exits without training. `--run-id`/`--source`/`--held-out-split` are all
   required (unlike the coarse/detailer trainers, this one has no `--val-key`/`--val-value`
@@ -95,12 +111,25 @@ uv run python scripts/spec117_train_lattice.py \
 ```bash
 uv run python scripts/spec117_train_lattice.py \
   --store $STORE --held-out-split $SPLIT \
-  --output "$OUT/lattice-run1" --run-id lattice-authored-v1 --source authored \
-  --epochs 100 --lr-schedule onecycle \
+  --output "$OUT/lattice-v2-run1" --run-id lattice-v2-authored-v1 --source authored \
+  --epochs 100 --lr-schedule onecycle --pct-start 0.1 --gradient-weight 0.1 \
   --confirm-run
 ```
 - **What it writes**: `checkpoint_best.pt` + `model_stage_run.json` (`v50-model-stage-run-v1`,
   `stage="lattice_prior"`).
+- **Visual output (so you are not flying blind on a number)**: every time val MAE improves the
+  trainer writes `validation/best_previews/epoch_XXXX.png` — a sheet of 8 fixed held-out tiles
+  showing [minimap RGB, truth lattice, predicted lattice, tile-mean baseline, signed error, abs
+  error], where the lattice is the dense 256×256 bilinear-average field the bridge will actually
+  emit. At the end it also writes `validation/final_best/fixed_rows.png` and `worst_cases.png`.
+  **Look at these**: if the prediction looks like a blurred/wrong-position version of truth while
+  the tile-mean baseline column is sharper-on-average, that is the underfit/localization failure
+  the v2 U-Net + `--gradient-weight` are meant to fix; if v2 overfits (train MAE ≪ val), lower
+  `--base`.
+- **`--gradient-weight 0.1`**: a loss-only 2D finite-difference gradient term (ported from the V7
+  height regressor's gradient-consistency stack). 0 = pure masked smooth-L1 (parity). It rewards
+  matching the local *slope field*, not just per-point values — directly targets the "right values,
+  wrong arrangement" failure that beats pure point loss.
 - **Read the result**: `metrics.best_val_mae` against `baselines.tile_mean.val_mae` (D-02). If the
   predictor does not beat the trivial baseline, US3 does not proceed without an explicit override
   (spec US2 acceptance 3) — this is the same honesty gate that made tonight's other results
@@ -167,10 +196,17 @@ uv run python scripts/v50_train_geometry_detailer.py \
   --feature-store "$OUT/lattice-feature-map-v1" \
   --frequency-2d-weight 0.1 --laplacian-weight 0.1 --edge-weight 0.1 \
   --transition-focus-weight 0.5 --band-lf-weight 0.05 --band-hf-weight 0.05 \
-  --lr-schedule onecycle \
+  --lr-schedule onecycle --pct-start 0.1 --val-tolerance 0.01 \
   --output "$OUT/detailer-with-lattice-run1" --run-id detailer-with-lattice-run1 \
   --confirm-run
 ```
+- **Why `--pct-start 0.1 --val-tolerance 0.01` here**: the detailer's zero-init residual head
+  starts AT the coarse baseline and cannot improve validation until the LR rises. The first run
+  (default 30-epoch warmup, strict `--val-tolerance 0.0`, `--patience 15`) early-stopped at
+  epoch 17 with best epoch 2 — frozen at the coarse baseline, killed mid-warmup. The warmup-aware
+  early-stopper (code fix) now prevents that kill regardless; `--pct-start 0.1` shortens the
+  warmup so less of a 100-epoch run is spent under-LR, and `--val-tolerance 0.01` stops
+  sub-1%-of-best validation noise from counting as stale once warmup ends.
 - **Read the result**: `metrics.best_val_mae` from `model_stage_run.json` is NOT the number to
   trust on its own — it's a raw aggregate over every held-out pixel, and ~39% of this corpus is
   near-flat terrain where a trivial per-tile constant wins easily (this project's own established

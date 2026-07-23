@@ -86,6 +86,7 @@ public static class NpzTileSerializer
         WriteArray(zip, "object_geometry_visible_top_elevation_257", pack.ObjectGeometryVisibleTopElevation257, "<f4");
         WriteArray(zip, "object_geometry_visible_terrain_elevation_257", pack.ObjectGeometryVisibleTerrainElevation257, "<f4");
         WriteArray(zip, "object_geometry_visible_source_257", pack.ObjectGeometryVisibleSource257, "|u1");
+        WriteArray(zip, "object_geometry_visible_instance_257", pack.ObjectGeometryVisibleInstance257, "<i4");
         WriteStrictObjectGeometryFragmentTrace(zip, pack);
         WriteArray(zip, "object_instance_mask_257", pack.ObjectInstanceMask257, "<i4");
         WriteArray(zip, "mcnk_flags_16", pack.McnkFlags16, "<i4");

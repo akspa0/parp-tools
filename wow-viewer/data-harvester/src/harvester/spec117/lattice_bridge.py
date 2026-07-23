@@ -85,7 +85,7 @@ def lattice_to_feature_map(
     # `architecture` (identity_for_path's config_sha256) only hashes the config; `lattice_config`
     # carries the raw `base` needed to reconstruct an architecturally-identical LatticeNet.
     lattice_config = ckpt.get("lattice_config", {})
-    base = int(lattice_config.get("base", 24)) if isinstance(lattice_config, dict) else 24
+    base = int(lattice_config.get("base", 64)) if isinstance(lattice_config, dict) else 64
 
     plan = {
         "schema": "v117-lattice-bridge-plan-v1",

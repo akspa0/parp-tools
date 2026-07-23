@@ -314,6 +314,25 @@ The v50.1 release signal catalog defines the exact, verified data elements allow
 | `wdl_inner_16` | float32 | (16,16) | copy-if-verified | no | WDL-scale coarse height lattice, inner samples (`height_257[8::16,8::16]`), offset half-step from the outer grid. |
 | `wdl_outer_present` | bool | (17,17) | copy-if-verified | no | Per-sample validity for `wdl_outer_17`: a gap is a real MCVT vertex absence, never fabricated or interpolated to fill the point. |
 | `wdl_inner_present` | bool | (16,16) | copy-if-verified | no | Per-sample validity for `wdl_inner_16`, same convention as `wdl_outer_present`. |
+| `object_geometry_visible_mask_257` | float32 | (257,257) | copy-if-verified | no | Strict visible-object mask (Spec 118 FR-001): 1.0 only where a transformed M2/WMO triangle is visible above the raw MCVT surface (+0.25 clearance, liquid-aware) — never the full placement footprint. Streamed by the harvester (Full/V16 profiles only, not V22); only newly cataloged. Tiles whose strict target is ineligible carry no array and are excluded-and-counted, never fabricated. |
+| `object_geometry_visible_source_257` | uint8 | (257,257) | copy-if-verified | no | Per-pixel class of the front-most visible object fragment (Spec 118 FR-003): 0 = none, 1 = doodad (M2Triangle), 2 = building (WmoTriangle). 0 exactly where `object_geometry_visible_mask_257` is 0. |
+| `object_geometry_visible_instance_257` | int32 | (257,257) | copy-if-verified | no | Per-object instance id of the front-most visible fragment (Spec 118 FR-002): 0 = none, 1..K = per-tile compact ids (MDDF placements first, then MODF) resolved via the per-tile `object_geometry_visible_instances` metadata table. New dense array painted by the strict rasterizer under the same front-most rule as the source tag. |
+
+### Catalog amendment 2026-07-22 (Spec 118) — strict visible-object signals added
+
+**Rationale**: Spec 118 reintroduces the object signal dropped below — correctly, as a per-object,
+occlusion-aware (visible-portion-only) mask with a class label. The strict geometry target
+(`TerrainVisibleObjectMaskRasterizer` + `AdtTensorPackBuilder.BuildStrictTerrainVisibleObjectMask`)
+already computed the visibility-correct mask and class tag and already streamed them under these
+exact names in the Full/V16 profiles; the instance-id array is the one new dense array, painted in
+the same raster pass under the same front-most rule. This amendment only adds the three names to
+the frozen catalog so the existing v50 store builder's 1:1 name-matched extraction selects them —
+the same gap shape as the Spec 117 amendment. The legacy `object_mask`/`object_precise_mask`/
+`object_instance_mask` stay deferred: they are footprint-based and are exactly the over-masking
+failure Spec 118 replaces, not inputs to it.
+
+**Approved by**: this session's Spec 118 implementation pass, 2026-07-22 (data plumbing only, no
+model decision implied).
 
 ### Catalog amendment 2026-07-21 (Spec 117) — WDL lattice signals added
 
@@ -346,7 +365,7 @@ train a model on fucking anything useful"). Training will pair BOTH sources with
 target as separate curriculum rows (user choice).
 
 ### Dropped Signals (Deferred or Removed)
-- `object_mask`, `object_precise_mask`, `object_instance_mask`: Deferred to future specs (to be replaced with precise per-object and per-tile masks generated from minimap synthesis).
+- `object_mask`, `object_precise_mask`, `object_instance_mask`: Deferred — footprint-based and replaced by the Spec 118 strict visible-object signals (`object_geometry_visible_mask_257`/`_source_257`/`_instance_257`, cataloged 2026-07-22).
 - `object_roof_mask`, `object_roof_confidence`: Removed (broken/dead signals).
 - `object_filtered_mask`, `model_focus_mask`: Removed (derivative of broken masks).
 - `mddf_mask`, `modf_mask`: Removed (synthesized/interpolated projections).

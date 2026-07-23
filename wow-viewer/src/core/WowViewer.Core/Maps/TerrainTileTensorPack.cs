@@ -211,6 +211,24 @@ public sealed class TerrainTileTensorPack
     public byte[,]? ObjectGeometryVisibleSource257 { get; init; }
 
     /// <summary>
+    /// 257×257 per-object instance label for strict geometry pixels (Spec 118
+    /// FR-002): 0 = no visible object, 1..K = per-tile compact instance id of
+    /// the front-most visible fragment, assigned deterministically (MDDF
+    /// placements first, then MODF) and resolved to placements/assets via
+    /// <see cref="ObjectGeometryVisibleInstances"/>. Painted under the same
+    /// front-most rule as <see cref="ObjectGeometryVisibleSource257"/>.
+    /// </summary>
+    public int[,]? ObjectGeometryVisibleInstance257 { get; init; }
+
+    /// <summary>
+    /// Instance table for <see cref="ObjectGeometryVisibleInstance257"/>:
+    /// compact id → placement unique id, asset index, source class, and
+    /// visible pixel count. Audit metadata only and never a model input.
+    /// </summary>
+    public IReadOnlyList<ObjectGeometryVisibleInstance> ObjectGeometryVisibleInstances { get; init; }
+        = Array.Empty<ObjectGeometryVisibleInstance>();
+
+    /// <summary>
     /// Per-tile completeness/provenance for the strict geometry target. Only
     /// complete-empty and complete-visible status may supervise M0.
     /// </summary>

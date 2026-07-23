@@ -1,6 +1,81 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-21
+Last updated: 2026-07-22
+
+## Active work: Spec 118 per-object occlusion-aware masks (US1–US3 implemented and code-verified; user-run gates remain)
+
+- Reintroduces the object signal dropped from v50 — correctly: per-object, occlusion-aware
+  (visible-portion-only) mask + class, used loss-side first (US2) then as supervision for a small
+  from-scratch segmenter whose prediction feeds the geometry chain (US3, the Spec 115 pattern).
+  Spec docs (spec/plan/research/data-model/contracts/quickstart/tasks, 30 tasks) written this
+  session under `specs/118-object-occlusion-masks/`.
+- **Key discovery (mirrors Spec 117 US1): almost no C# was needed.** The strict object-geometry
+  target (`TerrainVisibleObjectMaskRasterizer` + `AdtTensorPackBuilder.BuildStrictTerrainVisibleObjectMask`)
+  already rasterized transformed M2/WMO triangles retained only above the raw MCVT surface (+0.25
+  clearance, liquid-aware, front-most=highest-elevation overlap rule) and already streamed
+  `object_geometry_visible_mask_257`/`object_geometry_visible_source_257` in the Full/V16 profiles
+  (NOT V22). The ONE new C# addition: dense `object_geometry_visible_instance_257` (int32,
+  per-tile compact ids 1..K painted in the same raster pass under the same front-most rule, FR-002)
+  + `object_geometry_visible_instances` per-tile metadata table + serializer/NPZ writes + 5 new C#
+  tests (23/23 rasterizer+serializer pass). Legacy footprint masks stay deferred.
+- **US1**: 3 rows added to the frozen v50 signal catalog (mask float32, source uint8, instance
+  int32, all (257,257) copy-if-verified) + regenerated configs via the existing generator
+  (26 signal entries; drift guard passes unmodified). `object_mask_audit.py` + CLI emit
+  `v118-object-mask-audit-v1` (marked-fraction percentiles, per-instance consistency,
+  visible-vs-footprint reduction factor). One real test-caught bug: map-filtered audits read
+  arrays positionally against the filtered index — fixed to filter (position, row) pairs.
+- **US2**: `--object-mask-weight` (default 0.0 = bit-parity) on BOTH geometry trainers, mirroring
+  `--liquid-mask-weight` exactly (plan echo, missing-array warn+disable, per-point
+  `1 - w * mask`, run-record echo) + FR-008 object-touched vs untouched region MAE in the run
+  record. Shared helpers in `harvester/spec118/object_loss.py`. Ground truth is loss-side only
+  (FR-014); detailer's coarse-only baseline stays unmasked so the relative gate stays honest.
+- **US3**: `harvester/spec118/` package — `object_segment_model.py` (`ObjectSegmentNet` U-Net-lite
+  skip-decoder, RGB→3-class logits at 256×256, from scratch, base-only reconstructable),
+  `object_segment_train.py` + CLI (dry-run-first, `--held-out-split` REQUIRED, class-weighted CE
+  with background cap, per-class IoU/recall + median visible-object IoU selection, D-07 gate
+  thresholds 0.40/0.50 recorded, `object_config.base` in checkpoint), `object_segment_infer.py` +
+  CLI (two mutually exclusive modes: loose `--inputs` OOD with no store, `--store` batch with
+  ground-truth scoring; `v118-object-infer-v1` audit), `object_feature_bridge.py` + CLI (frozen
+  checkpoint → `v115-feature-map-v1` store, class_count=2 doodad/building softmax channels, none
+  dropped as redundant). STAGES widened with `"object_segmentation"` (one schema change).
+- **Real integration proof (T027 analogue)**: fixture store + Spec 116 split + random-init
+  checkpoint → real bridge `--write` → dry-ran BOTH `v50_train_direct_geometry.py` and
+  `v50_train_geometry_detailer.py` with `--feature-store` — both accepted with zero trainer code
+  changes (`input_channels: 5`, `generated_terrain_feature_map` in deployment inputs). FR-011
+  proven for real, not just unit tests.
+- Proof: 48/48 `tests/spec118/` pass (incl. `--help` argparse verification of both trainer CLIs);
+  full data-harvester suite 1080 passed / 3 pre-existing failures (v24 export-map fixture, 2× v25
+  h1_coarse — unchanged, unrelated); ruff clean on all touched files; compileall clean; full
+  solution Debug build 0 errors.
+- **US3 augmentation — multi-feature-store (2026-07-22, this session's in-flight work completed).**
+  The bridge produced a `v115-feature-map-v1` object store, but the geometry trainers accepted only
+  ONE `--feature-store`, and the promoted deconfounded chain (Spec 115 v3) already occupies that
+  slot with the terrain-feature map — so the object prior could only REPLACE the roads-as-slopes
+  deconfounding, never sit alongside it, even though objects occlude ground height (a different
+  confound). "Object segmenter → geometry as a real deconfounding input" was therefore NOT actually
+  wired; the T027 dry-run "proof" passed only because it exercised the single-store replacement
+  path. Fixed: new shared `harvester/v50/feature_stores.py` (`FeatureBinding`, `load_feature_stores`,
+  `total_class_count`, `feature_channels_for_row` concat-in-CLI-order, `plan_entries`,
+  `road_feature_binding` — the FR-008 road diagnostic argmaxes the terrain-feature prior's OWN
+  channels, found by its `taxonomy_revision` attr, not the concatenation); `--feature-store` is now
+  `action="append"` on `direct_geometry_train.py`, `geometry_detailer_train.py`, AND
+  `direct_geometry_materialize.py` (order-sensitive — the materializer must be fed the priors in the
+  same order the coarse checkpoint trained with); `in_channels = 3 + Σ class_counts`; plan/record
+  emit `feature_stores` (list) + `feature_input_channels`. `height_relative_evaluate.py` preview/
+  evaluate helpers gained a `feature_bindings` param, backward-compatible with the legacy
+  `feature_group`/`feature_row_to_position` via `as_bindings`, so `height_relative_train.py` is
+  untouched. 10 new `tests/v50/test_feature_stores.py` (two-store concat order, per-store coverage
+  refusal, schema refusal, road-binding selection, `plan_entries`, all 3 CLIs advertise REPEATABLE);
+  full suite 1138 passed / 3 pre-existing unrelated failures / 46 skipped; ruff clean. Tasks
+  T031–T033 (new Phase 5b), quickstart §3b. The paired terrain-only vs terrain+objects geometry
+  comparison (SC-003, relief-stratified object-touched MAE) is user-run.
+- **Remaining, explicitly user-run**: the `H:\CLIENTS` store rebuild to pick up the 3 new arrays
+  (same Spec 109 build command; Full profile required — V22 omits the strict arrays), the US1 audit
+  + eyeball proof on a city tile and an underground-heavy tile, the US2 paired with/without
+  `--object-mask-weight 1.0` training comparison (relief-stratified object-touched MAE, SC-003 —
+  a null result is a valid reportable outcome that stops the line before US3 training), US3 real
+  segmenter training + hand-painted OOD eyeball + paired geometry comparison. Exact CLIs in
+  `specs/118-object-occlusion-masks/quickstart.md`.
 
 ## Active work: Spec 117 WDL-lattice coarse prior for terrain geometry (US1–US3(i) implemented and code-verified)
 
@@ -54,6 +129,55 @@ Last updated: 2026-07-21
   catalog signals for real tiles, real `--confirm-run` training of the standalone predictor (the
   learnable/not-learnable verdict is not yet known against real data), and the real US3(ii) paired
   coarse/detailer comparison against the existing structure-augmented baseline.
+- **Scheduling bug found + fixed (2026-07-22) from the first real US2/US3 runs** (real store
+  `curriculum-0_5_3_3368-dual_v3.zarr`, train=679/val=446, 43 steps/epoch, Spec 116 split). All
+  three geometry trainers paired `OneCycleLR` (default `pct_start=0.3` → 30-epoch warmup) with a
+  patience-15 early-stopper that counted *every* non-improving epoch as stale. When `patience <
+  warmup_epochs` the run died mid-warmup, before the LR ever reached its peak. The detailer was the
+  worst case: its zero-init residual head starts AT the coarse baseline and cannot improve val until
+  the LR rises, so `detailer-with-lattice-run1` froze at val 0.2301 (coarse 0.2333), best epoch 2,
+  early-stop epoch 17 — "goes stale very early, does not progress." `lattice-run1` survived warmup
+  (no zero-init head) but still plateaued at 0.2427 vs tile-mean 0.1277 (did not beat baseline).
+  Fix: new shared `harvester/v50/lr_schedule.py` (`make_onecycle_scheduler` +
+  `warmup_complete`/`warmup_epochs_for`); the stale counter is now **suppressed until the warmup
+  phase completes**, and `--pct-start` is exposed on all three trainers (default 0.3 = torch parity;
+  quickstart recommends 0.1 for this 43-steps/epoch dataset → 10-epoch warmup). `pct_start`/
+  `warmup_epochs` now appear in the dry-run plan. 7 new `tests/v50/test_lr_schedule.py` pass
+  (incl. a reproduction of the patience<warmup kill); 63 affected tests pass; ruff/py_compile clean.
+  This is a scheduling fix, NOT a learnability verdict — whether the lattice predictor beats
+  tile-mean, and whether the lattice-augmented detailer beats coarse-only, remain user-run
+  questions. The exact rerun CLIs are in `specs/117-wdl-lattice-prior/quickstart.md` §2b/§4.
+- **Architecture fix (2026-07-22) after the first post-fix run still plateaued.**
+  `lattice-authored-v2` (warmup-aware, `--pct-start 0.1`) survived warmup — best epoch 52, ran to
+  67, early-stopped cleanly *after* warmup — but still val 0.2307 vs tile-mean 0.1277. Diagnosis:
+  train MAE was *also* above tile-mean → **underfit, not overfit**. v1 `LatticeNet` was a plain
+  4-conv encoder whose two heads read only the 16×16 bottleneck (no skip connections), so it could
+  not localize the 17×17 height field. Redesigned `LatticeNet` to a **U-Net-lite (v2)**: bottleneck
+  decoded back up with skip connections (e3, e2) and each head fuses all four feature levels
+  (16/32/64/128) at the lattice resolution. Capacity 178K → 675K params at `--base 24`; still
+  constructable from `base` alone so `lattice_bridge.py` is unchanged; `architecture_identity`
+  config now carries `"arch": "lattice_net_v2"` so run records distinguish it. 3 new v2 tests
+  (skip-decoder structure, skip-path differentiability, base-only reconstruction round-trip +
+  cross-base load refusal); 36 spec117+lr_schedule tests pass; ruff/py_compile clean; dry-run
+  confirms 675170 params. Verdict on whether v2 beats tile-mean is user-run. If it overfits 679
+  tiles, lower `--base` (e.g. 16) before adding regularization.
+- **Visibility + V7 insight (2026-07-22).** The lattice trainer previously emitted ONLY checkpoints
+  + a val_mae number — no per-epoch visuals (unlike the detailer), which is why progress was
+  disconcerting to judge. Added: per-epoch `validation/best_previews/epoch_XXXX.png` (8 fixed
+  held-out tiles: minimap RGB / truth lattice / predicted lattice / tile-mean baseline / signed +
+  abs error, where the lattice is the dense 256×256 bilinear-average the bridge actually emits) +
+  final `validation/final_best/{fixed_rows,worst_cases}.png`. Reuses
+  `height_relative_evaluate.render_validation_sheet`/`compute_row_metrics`; `visual_evidence` now
+  recorded in the stage run. Also added a loss-only `--gradient-weight` (V7-ported 2D
+  finite-difference gradient term; 0 = parity) targeting the "right values, wrong arrangement"
+  failure. **Key reframe from reading the V7 doc**: the V7 height regressor that "worked" used WDL
+  as an INPUT prior (channel 6) + normals + masks + a residual-around-WDL head — it did NOT predict
+  WDL from RGB alone; the V7 doc states outright "the minimap does not directly encode enough
+  elevation signal to reconstruct valid terrain on its own." Spec 117's RGB→WDL-alone experiment is
+  strictly harder, so a "does not beat tile-mean from RGB alone" verdict is a valid, reportable spec
+  outcome — the previews now let us SEE which failure mode it is instead of guessing. 3 new tests
+  (gradient zero-on-match/masked, dense-field averaging); 39 spec117+lr_schedule tests pass; ruff/
+  py_compile clean; dry-run confirms `gradient_weight` in the plan.
 
 ## Active work: Spec 116 relational terrain layer reconstruction (FULLY IMPLEMENTED — all 5 user stories)
 

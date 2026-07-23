@@ -78,6 +78,22 @@ public sealed record ObjectGeometryTargetUnresolvedPlacement(
     string Reason);
 
 /// <summary>
+/// Per-tile compact instance table for the strict visible-object target
+/// (Spec 118 FR-002). <see cref="InstanceId"/> is the value painted into the
+/// dense visible-instance array (1..K, deterministic assignment order: MDDF
+/// placements first, then MODF); it links back to the placement's unique id
+/// and asset. A resolved placement that is fully occluded or underground is
+/// retained with <see cref="VisiblePixelCount"/> 0 rather than dropped, so the
+/// table always accounts for every placement the dense array could name.
+/// </summary>
+public sealed record ObjectGeometryVisibleInstance(
+    int InstanceId,
+    int PlacementUniqueId,
+    int AssetIndex,
+    ObjectGeometryPixelSource Source,
+    int VisiblePixelCount);
+
+/// <summary>
 /// One uncollapsed transformed-triangle/raster-sample trace record. The three
 /// terrain nodes are the raw MCVT interpolation triangle in dense coordinates;
 /// their original chunk/local identity and world coordinates remain available

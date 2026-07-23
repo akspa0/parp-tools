@@ -137,6 +137,24 @@
       "blacklisted": false,
       "blacklist_reason": "",
       "has_flag_name": null
+    },
+    {
+      "name": "object_geometry_visible_mask_257",
+      "blacklisted": false,
+      "blacklist_reason": "",
+      "has_flag_name": null
+    },
+    {
+      "name": "object_geometry_visible_source_257",
+      "blacklisted": false,
+      "blacklist_reason": "",
+      "has_flag_name": null
+    },
+    {
+      "name": "object_geometry_visible_instance_257",
+      "blacklisted": false,
+      "blacklist_reason": "",
+      "has_flag_name": null
     }
   ]
 }

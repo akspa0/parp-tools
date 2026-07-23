@@ -12,6 +12,7 @@ import pytest
 
 from harvester.spec117.lattice_train import (
     REQUIRED_WDL_ARRAYS,
+    _dense_lattice_field,
     build_lattice_plan,
     require_wdl_arrays,
 )
@@ -71,3 +72,15 @@ def test_build_lattice_plan_rejects_nonpositive_batch_or_epochs():
             train_rows=100, val_rows=20, excluded_train=0, excluded_val=0,
             batch_size=0, epochs=100, seed=117, lr=2e-4, lr_schedule="constant",
         )
+
+
+def test_dense_lattice_field_averages_the_two_grids_to_256():
+    """The preview/bridge dense field is 256x256 and is the mean of the upsampled outer/inner grids."""
+    import numpy as np
+
+    outer = np.full((17, 17), 0.2, dtype=np.float32)
+    inner = np.full((16, 16), 0.8, dtype=np.float32)
+    dense = _dense_lattice_field(outer, inner, size=256)
+    assert dense.shape == (256, 256)
+    # Both grids upsample to constant fields; their average is (0.2 + 0.8) / 2 = 0.5 everywhere.
+    assert np.allclose(dense, 0.5, atol=1e-5)
