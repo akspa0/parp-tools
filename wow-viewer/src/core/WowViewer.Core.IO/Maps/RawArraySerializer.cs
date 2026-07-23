@@ -30,7 +30,9 @@ public static class RawArraySerializer
     {
         ArgumentNullException.ThrowIfNull(pack);
         ArgumentNullException.ThrowIfNull(outputStream);
-        ValidateStrictUnionTargetSerialization(pack, profile != StreamProfile.V22);
+        // All three profiles now serialize the strict object-geometry union targets (Spec 118 added
+        // them to V22), so validate for every profile.
+        ValidateStrictUnionTargetSerialization(pack, writesStrictUnionArrays: true);
 
         // Magic
         outputStream.Write(ArrayMagic);
@@ -351,6 +353,17 @@ public static class RawArraySerializer
         WriteArray(outputStream, "object_mask", pack.ObjectMask257);
         WriteArray(outputStream, "object_precise_mask", pack.ObjectPreciseMask257);
         WriteArray(outputStream, "object_instance_mask", pack.ObjectInstanceMask257);
+        // Strict occlusion-aware object-geometry union targets (Spec 118), under the SAME canonical
+        // _257 keys the v50 catalog expects -- identical to WriteV16/WriteFullArrays. V22 is the
+        // proven v50 dataset profile (its normal_xyz/minimap_rgb names match the catalog), so these
+        // arrays are added here to make V22 a true superset instead of forcing a switch to Full,
+        // whose renamed core signals silently zero-filled normal_xyz.
+        WriteArray(outputStream, "object_geometry_visible_mask_257", pack.ObjectGeometryVisibleMask257);
+        WriteArray(outputStream, "object_geometry_visible_top_elevation_257", pack.ObjectGeometryVisibleTopElevation257);
+        WriteArray(outputStream, "object_geometry_visible_terrain_elevation_257", pack.ObjectGeometryVisibleTerrainElevation257);
+        WriteArray(outputStream, "object_geometry_visible_source_257", pack.ObjectGeometryVisibleSource257);
+        WriteArray(outputStream, "object_geometry_visible_instance_257", pack.ObjectGeometryVisibleInstance257);
+        WriteStrictObjectGeometryFragmentTrace(pack, outputStream);
         WriteArray(outputStream, "mcnk_flags_16", pack.McnkFlags16);
         WriteArray(outputStream, "mddf_mask", pack.MddfMask257);
         WriteArray(outputStream, "modf_mask", pack.ModfMask257);

@@ -55,13 +55,13 @@ def main() -> int:
     parser.add_argument("--confirm", action="store_true", help="actually execute the pipeline commands")
     parser.add_argument("--sample", type=int, default=None, help="limit tiles processed per map (for quick smoke tests)")
     parser.add_argument(
-        "--stream-profile", default="full",
-        help="C# harvest-stream profile. 'full' (default) emits the strict object-geometry arrays "
-             "(object_geometry_visible_mask/source/instance_257) AND the WDL lattice arrays that "
-             "Specs 117/118 added to the catalog; 'v22' OMITS the object arrays (the object "
-             "segmenter would then refuse the store). The signals-config still selects only "
-             "cataloged arrays, so 'full' is a safe superset -- it only makes more arrays available "
-             "to select, never fewer.",
+        "--stream-profile", default="v22",
+        help="C# harvest-stream profile. 'v22' (default) is the PROVEN v50 profile: its array names "
+             "(normal_xyz, minimap_rgb) match the v50 catalog, and as of Spec 118 it ALSO emits the "
+             "strict object-geometry arrays (object_geometry_visible_mask/source/instance_257). Do "
+             "NOT use 'full' for a v50 build: it renames core signals (normal_xyz->mcnr_normal_xyz, "
+             "minimap_rgb->minimap_rgb_256), which the catalog's exact-name matcher does not select, "
+             "so it silently zero-fills normals and the authored minimap.",
     )
     args = parser.parse_args()
 
