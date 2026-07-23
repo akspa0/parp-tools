@@ -2,7 +2,20 @@
 
 Last updated: 2026-07-23
 
-## Spec 119 — object-library classifier/segmenter + quality lens (code-complete; user-run training gates remain)
+## Spec 119 — object-library classifier/segmenter + quality lens (TRAINED + gated on full library)
+
+- **Outcome**: full user-run pipeline completed on `objlib_0_5_3_3368.zarr` (5,841 assets;
+  mdx-majority 85.6%, no m2 class in alpha client). Classifier: held-out 0.9137 vs 0.8562
+  baseline (best_epoch=21; literal SC-001 +15pp unreachable at this majority share — per-class
+  recall is the real verdict: empty 92 / mdx 94 / wmo 43). Segmenter: held-out IoU 0.9921 vs
+  0.3529 trivial → SC-002 PASS. Quality lens: 130 mislabels / 200 near-dup pairs / 460
+  low-coverage; manual review of top-24 sheet (`mislabel_review.png`) → SC-004 PASS (all flags
+  genuine confusables or genuine junk/near-blank captures).
+- Optional follow-ups (user-run): base-64 classifier comparison for wmo recall; the
+  `empty→mdx` flags show thin-line captures near the 0.01 blank threshold may want a threshold
+  or coverage-bucket revisit. Promotion verdicts remain `pending` (user gate).
+
+## Previous: Spec 119 code-complete; user-run training gates remained
 
 - All 30 tasks (T001–T030) implemented: `harvester/spec119/` package (contract, split,
   library_data, classifier_model/train, segmenter_model/train, infer, quality_lens) + 5 thin

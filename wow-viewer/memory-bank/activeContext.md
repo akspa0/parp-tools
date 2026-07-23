@@ -2,7 +2,29 @@
 
 Last updated: 2026-07-23
 
-## Active work: Spec 119 object-library classifier/segmenter — code-complete through Phase 5 dry-runs (this session)
+## Active work: Spec 119 object-library classifier/segmenter — TRAINED + gated on the full library (this session)
+
+- **Full pipeline executed on `objlib_0_5_3_3368.zarr` (5,841 captured assets; classes present:
+  mdx 85.6% majority, wmo minority, empty from blank relabel; NO m2 class — alpha client)**.
+  Split: 4,486 train / 1,355 held-out, family-isolated, `verified_violation_count=0`.
+- **US1 classifier trained (user-run)**: best_epoch=21, held-out 0.9137 vs majority baseline
+  0.8562 (+5.75pp). Literal SC-001 (+15pp) is mathematically unreachable at 85.6% majority —
+  substantive verdict via per-class recall (baseline scores 0% on minorities): empty 92%/mdx 94%/
+  wmo 43% (wmo = genuine wmo↔mdx top-down confusability, 74 support). `sc001=False` flag is the
+  literal gate; learning is real. Base-64 capacity comparison (1.55M params) remains an optional
+  user-run (`--run-name classifier_v1_b64 --base 64`).
+- **US2 segmenter trained (user-run)**: best_epoch=39, held-out IoU **0.9921** vs better trivial
+  baseline 0.3529 → **SC-002 PASSES** (+0.64).
+- **US3 quality lens written**: 130 mislabels, 200 near-dup pairs (top-k cap), 460 low-coverage
+  flags; `embeddings.parquet` + `quality_report.json` + `mislabel_review.png` (24-capture visual
+  sheet). **SC-004 PASSES on manual review**: all 24 top flags are either genuine wmo↔mdx
+  confusables (~17) or junk/near-blank/test captures the lens correctly caught (missingwmo,
+  plaguelandsgra01, arhflt01/03/04, sivsap01 — thin-line captures near the 0.01 threshold).
+- Run artifacts under `output/object-library/runs/{classifier_v1,segmenter_v1}/`; checkpoints
+  `classifier.pt` (98,067 params) + `segmenter.pt` (482,737 params), `model_stage_run.json`
+  records with `promotion_verdict=pending` (user gate).
+
+## Previous: Spec 119 code-complete through Phase 5 dry-runs (earlier this session)
 
 - Two small from-scratch, independently checkpointed specialists trained on the object-library
   zarr itself (Spec 118 capture output), plus a quality lens. Pure Python under
