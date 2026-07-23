@@ -2,6 +2,27 @@
 
 Last updated: 2026-07-23
 
+## Spec 119 — object-library classifier/segmenter + quality lens (code-complete; user-run training gates remain)
+
+- All 30 tasks (T001–T030) implemented: `harvester/spec119/` package (contract, split,
+  library_data, classifier_model/train, segmenter_model/train, infer, quality_lens) + 5 thin
+  `scripts/spec119_*.py` CLIs + `tests/spec119/` (41 tests, all pass). Full suite 1179 passed /
+  3 pre-existing failures (unchanged, unrelated). Ruff + compileall clean. No C#.
+- Classifier: 97,938 params @ base 16 (SC-005); segmenter: 482,737 @ base 16. Both from
+  scratch, independently checkpointed, constructable from `base` alone (D-02).
+- Family-isolated split with mandatory leakage check (`verified_violation_count=0` on the real
+  smoke store); blank captures → `empty` class (classifier) / excluded (segmenter) per D-04;
+  majority-class + trivial IoU baselines always recorded (FR-005/SC-002).
+- `model_stage_contract.STAGES` widened with `object_library_classifier` +
+  `object_library_segmenter`; run records reuse `v50-model-stage-run-v1` verbatim,
+  `promotion_verdict=pending`.
+- All CLIs dry-run-first (FR-010); smoke-store dry-runs for split/train-classifier/
+  train-segmenter/quality-lens + loose-PNG infer all verified end-to-end on the real
+  `smoke_wmo.zarr` with zero heavy launches.
+- Remaining (user-run): full-library split `--write`, classifier `--confirm-run` (SC-001 gate),
+  segmenter `--confirm-run` (SC-002 gate, only if SC-001 passes), quality lens `--write` +
+  manual review (SC-004). CLIs in `specs/119-object-library-classifier/contracts/cli-contract.md`.
+
 ## Object-library capture pipeline — WMO exclusion root-caused + fixed + smoke-validated
 
 - Prior session built `capture-objects` (harvest C#) + `build_object_library.py

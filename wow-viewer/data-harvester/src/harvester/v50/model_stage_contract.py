@@ -38,6 +38,10 @@ STAGES = frozenset(
         # Spec 118: the from-scratch visible-object segmenter is likewise one more independent
         # stage (research.md D-06), reusing this schema verbatim.
         "object_segmentation",
+        # Spec 119: the object-library classifier and segmenter are two more independent,
+        # separately checkpointed stages (research.md D-02/D-05), reusing this schema verbatim.
+        "object_library_classifier",
+        "object_library_segmenter",
     }
 )
 PROMOTION_VERDICTS = frozenset({"pending", "promoted", "rejected"})

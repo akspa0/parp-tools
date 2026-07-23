@@ -2,6 +2,43 @@
 
 Last updated: 2026-07-23
 
+## Active work: Spec 119 object-library classifier/segmenter — code-complete through Phase 5 dry-runs (this session)
+
+- Two small from-scratch, independently checkpointed specialists trained on the object-library
+  zarr itself (Spec 118 capture output), plus a quality lens. Pure Python under
+  `data-harvester/src/harvester/spec119/` + `scripts/spec119_*.py` + `tests/spec119/`; no C#.
+- **Phase 0 (split, FR-004)**: `object_library_contract.py` (CoarseClassIndex
+  `{"empty":0,"m2":1,"mdx":2,"wmo":3}`, `derive_asset_family` = parent dir, blank-threshold
+  relabel 0.01, variant-stem helper) + `split.py` family-isolated held-out split with mandatory
+  leakage check (`verified_violation_count` must be 0; a leaky split is a refusal, not a
+  warning) + `spec119_build_split.py` dry-run-first CLI. `model_stage_contract.STAGES` widened
+  with `object_library_classifier` + `object_library_segmenter` (schema unchanged).
+- **Phase 1 (US1 classifier)**: `ObjectClassifier` (conv encoder 128→8 + global pool + linear,
+  97,938 params @ base 16), inverse-freq class weights, majority-class baseline, per-class
+  P/R, blank→`empty`, `--fine-labels` heuristic (run record marks it heuristic), onecycle LR
+  with warmup-aware stale counter (reuses `v50.lr_schedule`), `v50-model-stage-run-v1` record
+  with `promotion_verdict=pending`. Dry-run on real smoke store verified.
+- **Phase 2 (US2 segmenter)**: `ObjectSegmenter` U-Net-lite (128→16 + skip decoder, 482,737
+  params @ base 16), BCE, blank captures EXCLUDED from training (D-04), all-foreground/
+  all-background trivial IoU baselines, per-coverage-bucket held-out IoU. Smoke dry-run verified.
+- **Phase 3 (US3 infer + quality lens)**: `spec119_infer.py` loose-PNG inference for both
+  checkpoints (FR-013; reconstructs architecture from `base`, refuses missing `base`);
+  `spec119_quality_lens.py` frozen-classifier → penultimate embeddings (deterministic,
+  FR-009) + mislabel report (sorted by wrong-class confidence) + cosine near-duplicate pairs +
+  low-coverage flags; dry-run-first, `--write` emits `embeddings.parquet` + `quality_report.json`.
+  Smoke dry-run verified end-to-end with a random-init checkpoint (mislabels=5 expected).
+- Proof: 41/41 `tests/spec119/` pass; full data-harvester suite 1179 passed / 3 pre-existing
+  failures (v24 export-map fixture, 2× v25 h1_coarse — unchanged, unrelated; run via
+  `uv run python -m pytest` — plain `uv run pytest` hits a spec116 `tests.` import collection
+  quirk). Ruff + compileall clean on all touched files.
+- **Remaining, explicitly user-run (training gates, FR-010)**: (1) full-library
+  `spec119_build_split.py --write`; (2) `spec119_train_classifier.py --confirm-run` → SC-001
+  gate (≥15pp above majority baseline); (3) only if SC-001 passes:
+  `spec119_train_segmenter.py --confirm-run` → SC-002 gate (≥0.20 IoU above better trivial
+  baseline); (4) `spec119_quality_lens.py --write` + manual mislabel review (SC-004). Exact
+  CLIs in `specs/119-object-library-classifier/contracts/cli-contract.md`. Requires the
+  full-scale object-library build (user-run harvest, still pending from Spec 118 session).
+
 ## Active work: Object-library capture pipeline — WMO exclusion root-caused + fixed + smoke-validated (this session)
 
 - The Spec 118 `capture-objects` harvest command + `--from-harvest-stream` Python zarr builder
