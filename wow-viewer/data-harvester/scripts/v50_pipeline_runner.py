@@ -54,6 +54,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="v50 Dataset Extraction and Curation Pipeline")
     parser.add_argument("--confirm", action="store_true", help="actually execute the pipeline commands")
     parser.add_argument("--sample", type=int, default=None, help="limit tiles processed per map (for quick smoke tests)")
+    parser.add_argument(
+        "--stream-profile", default="full",
+        help="C# harvest-stream profile. 'full' (default) emits the strict object-geometry arrays "
+             "(object_geometry_visible_mask/source/instance_257) AND the WDL lattice arrays that "
+             "Specs 117/118 added to the catalog; 'v22' OMITS the object arrays (the object "
+             "segmenter would then refuse the store). The signals-config still selects only "
+             "cataloged arrays, so 'full' is a safe superset -- it only makes more arrays available "
+             "to select, never fewer.",
+    )
     args = parser.parse_args()
 
     dry_run = not args.confirm
@@ -99,7 +108,7 @@ def main() -> int:
             "--harvest-project", "../tools/harvest/WowViewer.Tool.Harvest",
             "--clients-root", "H:\\CLIENTS",
             "--map", map_name,
-            "--stream-profile", "v22",
+            "--stream-profile", args.stream_profile,
             "--signals-config", "./v50_configs/v50-signals-0_5_3_3368.json",
             "--manifest-template", "./v50_configs/v50-manifest-template-0_5_3_3368.json",
             "--report", str(report_path),
