@@ -14,11 +14,15 @@ from typing import Any
 
 import numpy as np
 
-OBJECT_MASK_ARRAY = "object_geometry_visible_mask_257"
+# The v18 placement-footprint mask, painted by AlphaTensorPackBuilder from MDDF/MODF placements —
+# populated on the 0.5.3 alpha corpus, unlike the strict `object_geometry_visible_mask_257` which
+# only ADtTensorPackBuilder produces (empty on alpha). Soft-edged (0..1), so `1 - w*mask` gives a
+# graded down-weight around each object footprint.
+OBJECT_MASK_ARRAY = "object_precise_mask"
 
 
 def object_mask_available(group: Any) -> bool:
-    """True when the store carries the strict visible-object mask (post-US1-rebuild stores)."""
+    """True when the store carries the placement-footprint object mask (post-catalog-fix stores)."""
     return OBJECT_MASK_ARRAY in group
 
 

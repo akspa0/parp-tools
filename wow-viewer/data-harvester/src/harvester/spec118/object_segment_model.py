@@ -29,24 +29,19 @@ class ObjectSegmentError(ValueError):
     """Raised when an object-segmentation target or input violates its declared contract."""
 
 
-def derive_class_target(source_257: np.ndarray) -> np.ndarray:
-    """Map a raw ``object_geometry_visible_source_257`` tile to the (256,256) int64 class target.
+def derive_class_target(object_mask_257: np.ndarray, *, threshold: float = 0.5) -> np.ndarray:
+    """Map a raw ``object_mask`` (or ``object_precise_mask``) tile to the (256,256) int64 target.
 
-    Values are already exactly the class ids (0 none / 1 doodad / 2 building, data-model.md), so
-    this is a crop + validation, never a remap. Raises on any value outside {0,1,2}: a corrupt or
-    mis-versioned array must fail closed, not silently train on a wrong vocabulary.
+    Binary vocabulary (0 none / 1 object): the v18 placement-footprint mask is a float in [0, 1]
+    (hard 1.0 for `object_mask`, soft edges for `object_precise_mask`); a pixel is class 1 wherever
+    the footprint exceeds ``threshold``. Cropped 257->256 with the top-left convention the C#
+    ``Crop257To256`` uses. Raises on the wrong shape so a mis-fed array fails closed.
     """
-    source = np.asarray(source_257)
-    if source.shape != (257, 257):
-        raise ObjectSegmentError(f"expected (257,257) source array, got {source.shape}")
-    cropped = source[:INPUT_SIZE, :INPUT_SIZE]
-    unique = np.unique(cropped)
-    if not np.isin(unique, np.arange(CLASS_COUNT)).all():
-        raise ObjectSegmentError(
-            f"source array carries values {unique.tolist()} outside the class vocabulary "
-            f"0..{CLASS_COUNT - 1} ({CLASS_NAMES})"
-        )
-    return cropped.astype(np.int64)
+    mask = np.asarray(object_mask_257, dtype=np.float32)
+    if mask.shape != (257, 257):
+        raise ObjectSegmentError(f"expected (257,257) object mask, got {mask.shape}")
+    cropped = mask[:INPUT_SIZE, :INPUT_SIZE]
+    return (cropped > threshold).astype(np.int64)
 
 
 def per_class_iou_recall(predicted: np.ndarray, target: np.ndarray) -> dict[str, dict[str, float]]:

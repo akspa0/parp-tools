@@ -29,10 +29,10 @@ from typing import Any
 import numpy as np
 
 SCHEMA = "v118-object-mask-audit-v1"
-MASK_ARRAY = "object_geometry_visible_mask_257"
-SOURCE_ARRAY = "object_geometry_visible_source_257"
-INSTANCE_ARRAY = "object_geometry_visible_instance_257"
-FOOTPRINT_ARRAY = "object_mask_257"
+MASK_ARRAY = "object_precise_mask"
+SOURCE_ARRAY = "object_geometry_visible_source_257"  # optional: absent for the binary v18 masks
+INSTANCE_ARRAY = "object_instance_mask"
+FOOTPRINT_ARRAY = "object_mask"
 
 #: Per-instance pixels whose class disagrees with the instance's modal class beyond this share
 #: count as a consistency violation. Front-most overlap seams can legitimately flip class at a
@@ -65,11 +65,10 @@ def audit_object_masks(store: Path, *, map_filter: str | None = None) -> dict[st
             f"store lacks {MASK_ARRAY!r} -- expected until a US1 rebuild lands; "
             "the audit cannot run against a store harvested before the Spec 118 catalog amendment"
         )
-    if SOURCE_ARRAY not in group or INSTANCE_ARRAY not in group:
+    if INSTANCE_ARRAY not in group:
         raise ObjectMaskAuditError(
-            f"store has {MASK_ARRAY!r} but lacks {SOURCE_ARRAY!r}/{INSTANCE_ARRAY!r}: "
-            "the three strict arrays are harvested together; a partial set indicates a "
-            "mixed-version store rebuild"
+            f"store has {MASK_ARRAY!r} but lacks {INSTANCE_ARRAY!r}: the mask and its instance ids "
+            "are painted together; a partial set indicates a mixed-version store rebuild"
         )
 
     index_path = store / "index.parquet"
@@ -85,7 +84,7 @@ def audit_object_masks(store: Path, *, map_filter: str | None = None) -> dict[st
         indexed_rows = [(i, row) for i, row in indexed_rows if row.get("map") == map_filter]
 
     masks = group[MASK_ARRAY]
-    sources = group[SOURCE_ARRAY]
+    sources = group[SOURCE_ARRAY] if SOURCE_ARRAY in group else None
     instances = group[INSTANCE_ARRAY]
     footprint = group[FOOTPRINT_ARRAY] if FOOTPRINT_ARRAY in group else None
 
@@ -98,9 +97,10 @@ def audit_object_masks(store: Path, *, map_filter: str | None = None) -> dict[st
     touched_tiles = 0
     per_map: dict[str, list[float]] = {}
 
+    class_consistency_evaluated = sources is not None
     for row_idx, row in indexed_rows:
         mask = np.asarray(masks[row_idx], dtype=np.float32)
-        source = np.asarray(sources[row_idx], dtype=np.uint8)
+        source = np.asarray(sources[row_idx], dtype=np.uint8) if sources is not None else None
         instance = np.asarray(instances[row_idx], dtype=np.int32)
         fraction = float((mask > 0).mean())
         fractions.append(fraction)
@@ -118,11 +118,12 @@ def audit_object_masks(store: Path, *, map_filter: str | None = None) -> dict[st
             region = instance == iid
             pixel_count = int(region.sum())
             instance_pixel_counts.append(pixel_count)
-            classes = source[region]
-            modal = int(np.bincount(classes, minlength=3).argmax())
-            mixed = float((classes != modal).mean()) if pixel_count else 0.0
-            if mixed > CLASS_MIX_TOLERANCE:
-                class_violations += 1
+            if source is not None:
+                classes = source[region]
+                modal = int(np.bincount(classes, minlength=3).argmax())
+                mixed = float((classes != modal).mean()) if pixel_count else 0.0
+                if mixed > CLASS_MIX_TOLERANCE:
+                    class_violations += 1
 
         if footprint is not None:
             footprint_fractions.append(float((np.asarray(footprint[row_idx]) > 0).mean()))
@@ -156,8 +157,11 @@ def audit_object_masks(store: Path, *, map_filter: str | None = None) -> dict[st
         "instance_count_per_tile": _percentiles(np.asarray(instance_counts, dtype=np.float64)),
         "instance_visible_pixel_count": _percentiles(np.asarray(instance_pixel_counts, dtype=np.float64)),
         "class_consistency": {
+            "evaluated": class_consistency_evaluated,
             "tolerance": CLASS_MIX_TOLERANCE,
-            "violation_count": class_violations,
+            "violation_count": class_violations if class_consistency_evaluated else None,
+            "note": None if class_consistency_evaluated
+            else "binary object mask carries no per-pixel class source; check skipped",
         },
         "mask_instance_mismatch_pixel_count": mask_instance_mismatches,
         "visible_vs_footprint": reduction,

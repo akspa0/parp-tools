@@ -20,10 +20,10 @@ from harvester.spec118.object_contract import (
 
 def test_class_table_matches_data_model():
     assert STAGE == "object_segmentation"
-    assert OUTPUT_SIGNAL == "object_class_3"
-    assert CLASS_NAMES == ("none", "doodad", "building")
-    assert CLASS_COUNT == 3
-    assert BRIDGE_CLASS_COUNT == 2
+    assert OUTPUT_SIGNAL == "object_class_2"
+    assert CLASS_NAMES == ("none", "object")
+    assert CLASS_COUNT == 2
+    assert BRIDGE_CLASS_COUNT == 1
 
 
 def test_architecture_identity_is_deterministic_and_content_hashed():

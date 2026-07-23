@@ -51,7 +51,7 @@ from harvester.v50.lr_schedule import (
     warmup_complete,
 )
 
-SOURCE_ARRAY = "object_geometry_visible_source_257"
+SOURCE_ARRAY = "object_mask"
 REQUIRED_ARRAYS = ("minimap_rgb", SOURCE_ARRAY)
 LR_SCHEDULES = frozenset({"constant", "onecycle"})
 
@@ -65,9 +65,9 @@ def require_object_arrays(group) -> None:
     missing = [name for name in REQUIRED_ARRAYS if name not in group]
     if missing:
         raise TrainerContractError(
-            f"store is missing object-signal arrays {missing}; rebuild the store after the Spec 118 "
-            "catalog amendment (docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md) "
-            "before training the object segmenter"
+            f"store is missing object-signal arrays {missing}; rebuild the store + curriculum after "
+            "the object-mask catalog fix (docs/architecture/v50-clean-room-dataset-repo-audit-"
+            "2026-07-15.md) so the alpha-painted object_mask is carried before training the segmenter"
         )
 
 
@@ -105,7 +105,7 @@ def build_object_plan(
         "lr_schedule": lr_schedule,
         "train_steps_per_epoch": math.ceil(max(train_rows, 1) / batch_size),
         "deployment_inputs": ["minimap_rgb"],
-        "training_target": "object_geometry_visible_source_257 -> object_class_3",
+        "training_target": "object_mask (v18 placement footprint) -> object_class_2 (none/object)",
         "gate_thresholds": {
             "median_visible_object_iou": GATE_MEDIAN_VISIBLE_IOU,
             "per_class_recall": GATE_PER_CLASS_RECALL,
@@ -121,7 +121,7 @@ def main() -> int:
     from torch.utils.data import DataLoader, Dataset
 
     ap = argparse.ArgumentParser(description="Spec 118 visible-object segmenter trainer (USER runs CUDA)")
-    ap.add_argument("--store", required=True, type=Path, help="v50 curriculum store carrying object_geometry_visible_source_257")
+    ap.add_argument("--store", required=True, type=Path, help="v50 curriculum store carrying object_mask")
     ap.add_argument("--output", required=True, type=Path)
     ap.add_argument("--run-id", required=True, help="immutable run identity, e.g. objects-authored-v1")
     ap.add_argument("--source", required=True, choices=sorted(SOURCE_CHOICES))
@@ -354,7 +354,7 @@ def main() -> int:
         final_metrics["median_visible_object_iou"] >= GATE_MEDIAN_VISIBLE_IOU
         and all(
             (final_metrics["per_class"][name]["recall"] or 0.0) >= GATE_PER_CLASS_RECALL
-            for name in ("doodad", "building")
+            for name in ("object",)
         )
     )
     checkpoint_identity = identity_for_path(args.output / "checkpoint_best.pt")

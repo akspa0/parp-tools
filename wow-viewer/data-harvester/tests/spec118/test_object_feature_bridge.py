@@ -56,7 +56,7 @@ def test_dry_run_returns_plan_and_writes_nothing(tmp_path: Path):
     plan = objects_to_feature_map(store=store, checkpoint=checkpoint, output=output, write=False)
     assert plan["schema"] == "v118-object-bridge-plan-v1"
     assert plan["output_array"]["shape"] == [3, CLASS_COUNT, 256, 256]
-    assert plan["channels"] == ["doodad_softmax", "building_softmax"]
+    assert plan["channels"] == ["object_softmax"]
     assert not output.exists()
 
 
@@ -72,13 +72,13 @@ def test_write_produces_the_exact_contract_the_trainers_already_validate(tmp_pat
 
     group = zarr.open_group(str(output), mode="r")
     assert dict(group.attrs)["schema"] == FEATURE_STORE_SCHEMA
-    assert dict(group.attrs)["class_count"] == 2
-    assert dict(group.attrs)["source_signal"] == "object_geometry_visible"
+    assert dict(group.attrs)["class_count"] == 1
+    assert dict(group.attrs)["source_signal"] == "object_mask"
     assert dict(group.attrs)["checkpoint_sha256"]
     feature = np.asarray(group[FEATURE_ARRAY])
-    assert feature.shape == (3, 2, 256, 256)
+    assert feature.shape == (3, 1, 256, 256)
     assert np.all(feature >= 0.0) and np.all(feature <= 1.0)
-    # Softmax remainder: doodad + building = 1 - none <= 1 per pixel.
+    # The single object-probability channel is 1 - none, a valid per-pixel probability.
     assert np.all(feature.sum(axis=1) <= 1.0 + 1e-2)
 
     derived_index = pq.read_table(output / "index.parquet").to_pylist()

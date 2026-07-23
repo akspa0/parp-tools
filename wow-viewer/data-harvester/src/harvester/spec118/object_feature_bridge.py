@@ -4,7 +4,7 @@
 ``direct_geometry_train.py``/``geometry_detailer_train.py`` already validate ``--feature-store``
 purely structurally: ``schema == "v115-feature-map-v1"``, ``class_count >= 1``, a ``feature_map``
 array present, full row coverage via ``source_row_index``. This bridge writes the segmenter's two
-object-class softmax channels (doodad, building -- the ``none`` channel is redundant as 1 - sum),
+object softmax channel (none-vs-object; the redundant ``none`` channel is dropped as 1 - object),
 so **no changes to either trainer are required or made**, mirroring
 ``harvester.spec117.lattice_bridge`` exactly (including the ``object_config.base`` reconstruction
 that checkpoint's raw ``architecture.config_sha256`` cannot provide).
@@ -78,7 +78,7 @@ def objects_to_feature_map(
             "shape": [row_count, CLASS_COUNT, PIXELS, PIXELS],
             "dtype": "float16",
         },
-        "channels": ["doodad_softmax", "building_softmax"],
+        "channels": ["object_softmax"],
     }
     if not write:
         return plan
@@ -106,7 +106,7 @@ def objects_to_feature_map(
         rgb_tensor = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).to(dev)
         with torch.no_grad():
             probs = torch.softmax(model(rgb_tensor).squeeze(0), dim=0).cpu().numpy()  # (3, 256, 256)
-        feature_array[row] = probs[1:].astype(np.float16)  # doodad, building; none dropped
+        feature_array[row] = probs[1:].astype(np.float16)  # object channel; redundant none dropped
 
     derived_index = [
         {
@@ -125,12 +125,12 @@ def objects_to_feature_map(
             "schema": FEATURE_STORE_SCHEMA,
             "created_utc": created_utc,
             "class_count": CLASS_COUNT,
-            "source_signal": "object_geometry_visible",
+            "source_signal": "object_mask",
             "source_store": str(store),
             "checkpoint_path": str(checkpoint),
             "checkpoint_sha256": checkpoint_sha,
             "bridge": "spec118_objects_to_feature_map_v1",
-            "channels": ["doodad_softmax", "building_softmax"],
+            "channels": ["object_softmax"],
         }
     )
 

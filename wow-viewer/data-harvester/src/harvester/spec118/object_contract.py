@@ -35,14 +35,17 @@ from harvester.v50.model_stage_contract import (
 )
 
 STAGE = "object_segmentation"
-OUTPUT_SIGNAL = "object_class_3"
+OUTPUT_SIGNAL = "object_class_2"
 
-# Harvest-side per-pixel class table (data-model.md): values of
-# ``object_geometry_visible_source_257`` map 1:1 onto these class ids.
-CLASS_NAMES = ("none", "doodad", "building")
-CLASS_COUNT = len(CLASS_NAMES)  # 3
-# The bridge drops the redundant ``none`` channel (1 - sum of the others).
-BRIDGE_CLASS_COUNT = 2
+# Binary per-pixel target: the v18 placement-footprint mask (`object_mask`) carries no
+# doodad-vs-building split (both are painted into one mask, and the count boundary needed to split
+# them via `object_instance_mask` is a 1-D per-tile field the curriculum does not copy). So the
+# segmenter predicts none-vs-object, which is exactly what deployment needs: identify object pixels
+# in a real minimap so they can be masked out of the terrain/shadow signal.
+CLASS_NAMES = ("none", "object")
+CLASS_COUNT = len(CLASS_NAMES)  # 2
+# The bridge drops the redundant ``none`` channel (1 - object), leaving one object-probability map.
+BRIDGE_CLASS_COUNT = 1
 
 
 class ObjectContractError(ValueError):

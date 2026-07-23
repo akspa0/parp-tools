@@ -12,6 +12,7 @@ import pytest
 import zarr
 
 from harvester.spec118.object_mask_audit import (
+    FOOTPRINT_ARRAY,
     INSTANCE_ARRAY,
     MASK_ARRAY,
     SOURCE_ARRAY,
@@ -39,7 +40,7 @@ def _build_store(
     if instances is not None:
         group.create_array(INSTANCE_ARRAY, data=np.stack(instances).astype(np.int32))
     if with_footprint is not None:
-        group.create_array("object_mask_257", data=np.stack(with_footprint).astype(np.float32))
+        group.create_array(FOOTPRINT_ARRAY, data=np.stack(with_footprint).astype(np.float32))
     index_rows = [{"map": "Kalimdor" if i % 2 == 0 else "Azeroth", "tile_x": i, "tile_y": 0} for i in range(n)]
     pq.write_table(pa.Table.from_pylist(index_rows), store / "index.parquet")
     return store
@@ -123,7 +124,7 @@ def test_audit_refuses_a_store_missing_the_strict_arrays(tmp_path: Path):
     zarr.open_group(str(store), mode="w")
     pq.write_table(pa.Table.from_pylist([{"map": "Kalimdor", "tile_x": 0, "tile_y": 0}]), store / "index.parquet")
 
-    with pytest.raises(ObjectMaskAuditError, match="object_geometry_visible_mask_257"):
+    with pytest.raises(ObjectMaskAuditError, match="object_precise_mask"):
         audit_object_masks(store)
 
 

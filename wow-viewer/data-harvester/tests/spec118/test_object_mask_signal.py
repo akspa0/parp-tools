@@ -39,9 +39,13 @@ def test_visible_object_signals_are_in_the_frozen_catalog():
         assert entry.available_for_build("0_5_3_3368") is True
 
 
-def test_legacy_footprint_masks_are_not_cataloged():
-    # The footprint masks are the over-masking failure Spec 118 replaces; they must stay deferred.
-    signals = {s.name for s in parse_catalog_table(_REAL_DOC)}
-    assert "object_mask" not in signals
-    assert "object_precise_mask" not in signals
-    assert "object_instance_mask" not in signals
+def test_v18_footprint_masks_are_cataloged_for_the_alpha_path():
+    # Re-cataloged 2026-07-22: the strict object_geometry_visible_* signals only populate via
+    # AdtTensorPackBuilder; the 0.5.3 alpha harvest (AlphaTensorPackBuilder) paints these footprint
+    # masks from placements instead, so they are the ones that carry real data on this corpus.
+    signals = {s.name: s for s in parse_catalog_table(_REAL_DOC)}
+    for name, dtype in (("object_mask", "float32"), ("object_precise_mask", "float32"),
+                        ("object_instance_mask", "int32")):
+        assert name in signals, f"{name} missing from the catalog"
+        assert signals[name].dtype == dtype
+        assert signals[name].shape == (257, 257)

@@ -14,7 +14,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from harvester.spec118.object_loss import OBJECT_MASK_ARRAY, object_mask_available, object_point_weight
+from harvester.spec118.object_loss import (
+    OBJECT_MASK_ARRAY,
+    object_mask_available,
+    object_point_weight,
+)
 
 _SCRIPTS = Path(__file__).parents[2] / "scripts"
 
