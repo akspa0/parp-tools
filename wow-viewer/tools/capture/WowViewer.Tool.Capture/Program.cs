@@ -23,7 +23,6 @@ internal static class Program
 
                 Usage:
                   render    --client-root <dir> --tile-name <name> --output <path>
-                            [--variant primary|no-objects|objects-only|no-liquids]
                             [--resolution <int>] [--game-time <0..1>]
                             [--lighting-source authored|lit]
                             [--lit-file <path> | --lit-virtual-path <archive-path>]
@@ -57,9 +56,6 @@ internal static class Program
             ?? (!string.IsNullOrWhiteSpace(litFile) || !string.IsNullOrWhiteSpace(litVirtualPath) ? "lit" : "authored");
         lightingSource = lightingSource.Trim().ToLowerInvariant();
         string? metadataOutput = GetOption(args, "--lighting-metadata-output");
-        // Occlusion-aware object masks come from the real renderer, not a rasterizer: render
-        // 'objects-only' (objects composited alone) or diff 'primary' against 'no-objects'.
-        string variantName = (GetOption(args, "--variant") ?? "primary").Trim().ToLowerInvariant();
 
         if (string.IsNullOrWhiteSpace(clientRoot) || string.IsNullOrWhiteSpace(tileName) || string.IsNullOrWhiteSpace(outputPath))
         {
@@ -74,11 +70,6 @@ internal static class Program
         if (lightingSource is not ("authored" or "lit"))
         {
             Console.Error.WriteLine("Error: --lighting-source must be authored or lit.");
-            return 1;
-        }
-        if (variantName is not ("primary" or "no-objects" or "objects-only" or "no-liquids"))
-        {
-            Console.Error.WriteLine("Error: --variant must be primary, no-objects, objects-only, or no-liquids.");
             return 1;
         }
         if (!string.IsNullOrWhiteSpace(litFile) && !string.IsNullOrWhiteSpace(litVirtualPath))
@@ -187,14 +178,7 @@ internal static class Program
 
         surface.Clear(lighting.FogColor.X, lighting.FogColor.Y, lighting.FogColor.Z, 1f);
 
-        RenderVariant renderVariant = variantName switch
-        {
-            "no-objects" => RenderVariant.NoObjects,
-            "objects-only" => RenderVariant.ObjectsOnly,
-            "no-liquids" => RenderVariant.NoLiquids,
-            _ => RenderVariant.Primary,
-        };
-        renderer.RenderTile(camera, tileData, renderVariant);
+        renderer.RenderTile(camera, tileData, RenderVariant.Primary);
 
         var capture = new FrameCapture(context, resolution, resolution);
         byte[] rgba = capture.CaptureRgba();
