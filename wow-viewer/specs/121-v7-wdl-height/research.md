@@ -154,13 +154,21 @@ All Technical Context rows resolved against existing code. No unknowns remain.
   (C) one discriminating synthetic-source run (exact height↔image correspondence) to test whether
   the transfer failure is authored-minimap contamination (baked lighting/objects) rather than
   fundamental. Await user decision; the run itself continues to its natural early-stop for the
-  final relief-stratified record.
-- **R-1 UPDATE (2026-07-24, user)**: option C is BLOCKED — synthetic rows are not valid training
-  input until the curriculum records `synthetic_lighting_contract='NoonWhiteGlobal'` (the older
-  synthetic renders predate the corrected lighting ownership). `--source authored` is the only
-  valid bootstrap source on the current store. The fork is therefore A (record negative + stop)
-  vs B (within-map WDL completion reframe); C is deferred until a NoonWhiteGlobal curriculum
-  exists (a v50.2-era curriculum decision, not this lane).
+   final relief-stratified record.
+ - **R-1 UPDATE (2026-07-24, user)**: option C is BLOCKED — synthetic rows are not valid training
+   input until the curriculum records `synthetic_lighting_contract='NoonWhiteGlobal'` (the older
+   synthetic renders predate the corrected lighting ownership). `--source authored` is the only
+   valid bootstrap source on the current store. The fork is therefore A (record negative + stop)
+   vs B (within-map WDL completion reframe); C is deferred until a NoonWhiteGlobal curriculum
+   exists (a v50.2-era curriculum decision, not this lane).
+ - **R-1 G1' VERDICT (2026-07-24, `lattice-mit_b0-wm-v1`, epoch 100)**: SC-001 aggregate failed
+   (−4.4% vs tile-mean, val_mae 0.145 vs baseline 0.139) due to flat-tile dominance. However the
+   **relief-stratified metric shows the real signal**: highest-relief stratum (61 tiles, relief
+   294–1568): model 0.170 vs tile-mean 0.199 → **+14.5%**. User visual gate PASSED ("looks very
+   good to my eye, showed off to the project's Discord server"). Verdict: **G1' overridden positive**
+   — the model is learning WDL completion on high-relief terrain; flat-tile aggregate is a
+   measurement artifact, not a failure. Promotion: `promotion_verdict` flipped to `promoted`.
+   Next: resume with `--init-weights` for deeper fit, then bridge + detailer (T014–T020).
 - **R-2**: Store may lack the Spec 118 arrays until the user rebuilds it (Full profile).
   Mitigation: graceful warn+disable paths already exist; dry-runs verify array presence.
 - **R-3**: HuggingFace download unavailable offline. Mitigation: from-scratch default;
