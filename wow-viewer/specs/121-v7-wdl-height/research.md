@@ -115,6 +115,21 @@ All Technical Context rows resolved against existing code. No unknowns remain.
   lattice arrays, so unweighted Stage A runs work today with `--release v50.1`; only the
   mask-weighted comparison runs require the v50.2 rebuild (USERGUIDE.md Phase 1).
 
+## D-09: Within-map completion reframe (B-reframe, user decision 2026-07-24)
+
+- **Decision**: Stage A reframed from cross-region WDL prediction (failed: −73% vs tile-mean on
+  the Spec 116 region-isolated split) to **within-map WDL completion**: train on WDL-covered
+  tiles, predict missing WDL tiles of the SAME map. This is v7's actual deployment constraint
+  (v7 worked where WDL coverage existed locally) and matches the diagnostic evidence (train tiles
+  +18.9% vs tile-mean — the model can learn zone-local color↔height mapping).
+- **Split**: new ``v121-within-map-split-v1`` schema (separate from ``v50-held-out-split-v1``
+  which hard-requires adjacency isolation). Per-map random held-out fraction; adjacent tiles
+  allowed in both splits (deployment reality for completion). Optional ``--buffer-rings 1`` for
+  a stricter eval. The trainer auto-detects the split schema via ``detect_split_schema`` and
+  dispatches to ``apply_within_map_split`` vs ``apply_held_out_split`` — zero new CLI flags.
+- **Replaces**: the original US1 cross-region prediction. The cross-region record stands as a
+  measured negative (research.md R-1); this reframe is the lane going forward.
+
 ## Open Risks
 
 - **R-1**: SC-001 may still fail if minimap RGB genuinely lacks elevation signal at WDL scale

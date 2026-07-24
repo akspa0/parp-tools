@@ -83,22 +83,61 @@ Verify the split manifest reports `verified_violation_count: 0`.
 
 ---
 
-## Phase 2 — Stage A training (user-run; works TODAY on v50.1)
+## Phase 2 — Build the within-map completion split (one-time)
 
-Dry-run first (prints plan incl. param count, split counts, baselines; trains nothing):
+The cross-region Spec 116 split proved RGB→WDL does NOT transfer across regions (research.md
+R-1). The honest reframe is **within-map completion**: train on WDL-covered tiles, predict missing
+WDL tiles of the SAME map. This split assigns a random fraction of each map's tiles to held-out —
+no region isolation, because for completion the adjacent tiles are the deployment context.
 
-```powershell
-uv run python scripts/spec121_train_lattice_prior.py --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v3.zarr --held-out-split ../output/datasets/spec116/spec116-held-out-0_5_3_3368-dual_v2 --output ../output/runs/lattice-mit_b0-v1 --run-id lattice-mit_b0-v1 --source authored --release v50.1 --architecture mit_b0_lattice
-```
-
-Real training (~679 train rows, 43 steps/epoch, up to 100 epochs, warmup-aware early stop;
-`--pretrained` pulls the `nvidia/mit-b0` encoder once from HuggingFace):
+Dry-run (prints per-map counts):
 
 ```powershell
-uv run python scripts/spec121_train_lattice_prior.py --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v3.zarr --held-out-split ../output/datasets/spec116/spec116-held-out-0_5_3_3368-dual_v2 --output ../output/runs/lattice-mit_b0-v1 --run-id lattice-mit_b0-v1 --source authored --release v50.1 --architecture mit_b0_lattice --pretrained --lr-schedule onecycle --pct-start 0.1 --confirm-run
+uv run python scripts/spec121_build_within_map_split.py --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v3.zarr --held-out-fraction 0.15 --output ../output/datasets/spec121/within-map-0_5_3_3368-dual_v3
 ```
 
-Optional sanity rerun of the from-scratch fallback (cheap; Spec 117 plateau risk is known):
+Write when the counts look right (add `--write`):
+
+```powershell
+uv run python scripts/spec121_build_within_map_split.py --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v3.zarr --held-out-fraction 0.15 --output ../output/datasets/spec121/within-map-0_5_3_3368-dual_v3 --write
+```
+
+Optional buffer (exclude tiles adjacent to held-out for a stricter within-map eval):
+
+```powershell
+uv run python scripts/spec121_build_within_map_split.py --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v3.zarr --held-out-fraction 0.15 --buffer-rings 1 --output ../output/datasets/spec121/within-map-buf1-0_5_3_3368-dual_v3 --write
+```
+
+The trainer auto-detects the split schema (v121-within-map-split-v1 vs v50-held-out-split-v1) and
+dispatches to the correct apply function. No extra flags needed.
+
+## Phase 3 — Stage A within-map training (user-run; NOW)
+
+Same CLI as before, but point at the new split. Trainer detects `v121-within-map-split-v1`
+automatically and uses the within-map apply function (no extra flags):
+
+```powershell
+uv run python scripts/spec121_train_lattice_prior.py --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v3.zarr --held-out-split ../output/datasets/spec121/within-map-0_5_3_3368-dual_v3 --output ../output/runs/lattice-mit_b0-wm-v1 --run-id lattice-mit_b0-wm-v1 --source authored --release v50.1 --architecture mit_b0_lattice
+```
+
+Real training (within-map split, buffer 0 — adjacent tiles allowed, deployment-realistic):
+
+```powershell
+uv run python scripts/spec121_train_lattice_prior.py --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v3.zarr --held-out-split ../output/datasets/spec121/within-map-0_5_3_3368-dual_v3 --output ../output/runs/lattice-mit_b0-wm-v1 --run-id lattice-mit_b0-wm-v1 --source authored --release v50.1 --architecture mit_b0_lattice --pretrained --lr-schedule onecycle --pct-start 0.1 --confirm-run
+```
+
+### Phase 3 verdict (G1' gate — within-map SC-001)
+
+```powershell
+uv run python -c "import json; m=json.load(open(r'../output/runs/lattice-mit_b0-wm-v1/model_stage_run.json'))['metrics']; print('wm_margin:', round(m['sc001_margin_vs_tile_mean'],4), '| best_val:', round(m['best_val_mae'],6), '| tile_mean:', round(open(r'../output/runs/lattice-mit_b0-wm-v1/model_stage_run.json','r') ... wait — lazy: cat then pick)" ; uv run python -c "import json; r=json.load(open(r'../output/runs/lattice-mit_b0-wm-v1/model_stage_run.json')); print('wm_margin:', round(r['metrics']['sc001_margin_vs_tile_mean'],4), '| best_val:', round(r['metrics']['best_val_mae'],6), '| baseline:', round(r['baselines']['tile_mean']['val_mae'],6))"
+```
+
+If the within-map margin is positive (model beats tile-mean on same-map held-out tiles) → Stage A
+works for WDL completion. The prior→coarse bridge + detailer phase (T014–T020) follows. If it
+does NOT beat tile-mean even within-map, then authored minimaps genuinely lack elevation signal
+at any scale → record G1' negative and stop.
+
+Optional sanity rerun of the from-scratch fallback (cheap):
 
 ```powershell
 uv run python scripts/spec121_train_lattice_prior.py --store ../output/datasets/v50/v50.1/curriculum-0_5_3_3368-dual_v3.zarr --held-out-split ../output/datasets/spec116/spec116-held-out-0_5_3_3368-dual_v2 --output ../output/runs/lattice-net-v5-rerun --run-id lattice-net-v5-rerun --source authored --release v50.1 --architecture lattice_net --base 64 --lr-schedule onecycle --pct-start 0.1 --confirm-run

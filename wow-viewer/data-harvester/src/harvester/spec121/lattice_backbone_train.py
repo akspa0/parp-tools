@@ -58,6 +58,12 @@ from harvester.spec121.object_mask_tile_loss import (
     weighted_lattice_loss,
 )
 from harvester.spec121.store_check import missing_required, object_mask_present, report
+from harvester.spec121.within_map_split import (
+    WITHIN_MAP_SPLIT_SCHEMA,
+    WithinMapSplitError,
+    apply_within_map_split,
+    detect_split_schema,
+)
 from harvester.v50.contracts import release_identity, require_store_release, validate_release
 from harvester.v50.direct_geometry_train import apply_held_out_split
 from harvester.v50.height_relative_evaluate import (
@@ -264,10 +270,19 @@ def main() -> int:
     except TrainerContractError as exc:
         raise SystemExit(str(exc)) from exc
 
+    # Dispatch: detect split schema and use the appropriate apply function.
+    # - v121-within-map-split-v1 -> within-map completion (B-reframe).
+    # - v50-held-out-split-v1 -> cross-region isolation (original Spec 116, or fallback).
+    split_schema = detect_split_schema(args.held_out_split)
     try:
-        train_rows_all, val_rows_all, split_manifest = apply_held_out_split(
-            index_rows=index, selected_rows=selected_rows, split_dir=args.held_out_split,
-        )
+        if split_schema == WITHIN_MAP_SPLIT_SCHEMA:
+            train_rows_all, val_rows_all, split_manifest = apply_within_map_split(
+                index_rows=index, selected_rows=selected_rows, split_dir=args.held_out_split,
+            )
+        else:
+            train_rows_all, val_rows_all, split_manifest = apply_held_out_split(
+                index_rows=index, selected_rows=selected_rows, split_dir=args.held_out_split,
+            )
     except TrainerContractError as exc:
         raise SystemExit(str(exc)) from exc
 
@@ -345,7 +360,7 @@ def main() -> int:
         )
     try:
         require_new_output(args.output)
-    except TrainerContractError as exc:
+    except (TrainerContractError, WithinMapSplitError) as exc:
         raise SystemExit(str(exc)) from exc
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is not available; user-run training refuses CPU.")
