@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from harvester.spec119.classifier_model import (
+    BACKBONE_CONFIGS,
     ObjectClassifier,
     compute_class_weights,
     majority_class_baseline,
@@ -77,7 +78,7 @@ def build_classifier_plan(
         "optimizer": {"name": "AdamW", "learning_rate": args.lr, "weight_decay": 1e-4},
         "lr_schedule": {"name": "onecycle", "pct_start": args.pct_start},
         "success_gate": {"sc_001": "held-out accuracy >= majority baseline + 0.15"},
-        "no_pretrained_backbone_from_scratch": True,
+        "no_pretrained_backbone_from_scratch": args.backbone == "scratch",
     }
 
 
@@ -91,8 +92,11 @@ def main() -> int:
                          "a leaky split (verified_violation_count != 0). No random fallback.")
     ap.add_argument("--output-root", required=True, type=Path)
     ap.add_argument("--run-name", required=True)
+    ap.add_argument("--backbone", default="scratch",
+                    choices=sorted(BACKBONE_CONFIGS),
+                    help="Vision backbone: scratch (from-scratch conv), dinov2_vits14, clip_vitb32")
     ap.add_argument("--base", type=int, default=16,
-                    help="ObjectClassifier width (from scratch; <1M params at 16, SC-005)")
+                    help="ObjectClassifier width (scratch backbone only; <1M params at 16, SC-005)")
     ap.add_argument("--epochs", type=int, default=60)
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--lr", type=float, default=1e-3)
@@ -137,13 +141,15 @@ def main() -> int:
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    model = ObjectClassifier(base=args.base, num_classes=len(class_index))
+    model = ObjectClassifier(backbone=args.backbone, base=args.base, num_classes=len(class_index))
+    input_size = model.input_size
     identity = architecture_identity(
         model,
         architecture_id="object_library_classifier",
-        config={"class": "ObjectClassifier", "arch": "object_library_classifier_v1",
+        config={"class": "ObjectClassifier", "backbone": args.backbone,
                 "base": args.base, "num_classes": len(class_index),
-                "input": "3x128x128", "output": f"{len(class_index)} logits"},
+                "input": f"3x{input_size}x{input_size}",
+                "output": f"{len(class_index)} logits"},
     )
     plan = build_classifier_plan(
         architecture=identity, class_index=class_index,
@@ -182,7 +188,16 @@ def main() -> int:
             return len(self.indices)
 
         def __getitem__(self, i: int):
-            rgb = read_image(group, rows[self.indices[i]]["_row_index"])
+            from PIL import Image
+            zarr_row = rows[self.indices[i]]["_row_index"]
+            rgb = read_image(group, zarr_row)  # float32 HWC [0,1]
+            # Resize to model's expected input size if different from native 128x128
+            if rgb.shape[0] != input_size or rgb.shape[1] != input_size:
+                rgb = np.asarray(
+                    Image.fromarray((rgb * 255).astype(np.uint8)).resize(
+                        (input_size, input_size), Image.BILINEAR
+                    )
+                ).astype(np.float32) / 255.0
             return (
                 torch.from_numpy(rgb).permute(2, 0, 1),
                 torch.tensor(self.targets[i], dtype=torch.long),
@@ -211,10 +226,17 @@ def main() -> int:
     def _held_out_metrics() -> dict:
         model.eval()
         predictions: list[int] = []
+        from PIL import Image
         with torch.no_grad():
             for i in held_out_idx:
-                rgb = read_image(group, rows[i]["_row_index"])
-                x = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).to(device)
+                zarr_row = rows[i]["_row_index"]
+                rgb = read_image(group, zarr_row)
+                if rgb.shape[0] != input_size or rgb.shape[1] != input_size:
+                    rgb = np.asarray(
+                        Image.fromarray((rgb * 255).astype(np.uint8)).resize(
+                            (input_size, input_size), Image.BILINEAR
+                        )
+                    ).astype(np.float32) / 255.0
                 predictions.append(int(model(x).squeeze(0).argmax().item()))
         correct = sum(1 for p, t in zip(predictions, held_out_labels, strict=True) if p == t)
         per_class = per_class_precision_recall(predictions, held_out_labels, len(class_index))
@@ -230,8 +252,9 @@ def main() -> int:
             {
                 "kind": "classifier",
                 "state_dict": model.state_dict(),
-                "architecture": {"base": args.base, "num_classes": len(class_index),
-                                 "class_index": class_index},
+                "architecture": {"backbone": args.backbone, "base": args.base,
+                                 "num_classes": len(class_index), "class_index": class_index,
+                                 "input_size": input_size},
                 "config": {"lr": args.lr, "epochs": args.epochs,
                            "blank_threshold": args.blank_threshold,
                            "fine_labels": bool(args.fine_labels),

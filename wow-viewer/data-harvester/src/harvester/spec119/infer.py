@@ -45,11 +45,13 @@ def load_classifier_checkpoint(path: Path):
     checkpoint = _load_checkpoint(path)
     if checkpoint.get("kind") != "classifier":
         raise ObjectLibraryContractError(f"{path}: not a classifier checkpoint")
-    base = _require_base(checkpoint, path)
-    class_index = dict((checkpoint.get("architecture") or {}).get("class_index") or {})
+    architecture = checkpoint.get("architecture") or {}
+    backbone = architecture.get("backbone", "scratch")
+    base = architecture.get("base", 16)
+    class_index = dict(architecture.get("class_index") or {})
     if not class_index:
         raise ObjectLibraryContractError(f"{path}: classifier checkpoint is missing class_index")
-    model = ObjectClassifier(base=base, num_classes=len(class_index))
+    model = ObjectClassifier(backbone=backbone, base=base, num_classes=len(class_index))
     model.load_state_dict(checkpoint["state_dict"])
     model.eval()
     return model, class_index

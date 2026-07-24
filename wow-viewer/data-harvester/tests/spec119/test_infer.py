@@ -89,10 +89,10 @@ def test_segmenter_mask_png_write(tmp_path, monkeypatch) -> None:
     assert set(np.unique(mask).tolist()) <= {0, 255}
 
 
-def test_refuses_checkpoint_missing_base(tmp_path) -> None:
+def test_refuses_checkpoint_missing_class_index(tmp_path) -> None:
     bad = tmp_path / "bad.pt"
     torch.save({"kind": "classifier", "state_dict": {}, "architecture": {}}, bad)
-    with pytest.raises(ObjectLibraryContractError, match="missing 'base'"):
+    with pytest.raises(ObjectLibraryContractError, match="missing class_index"):
         infer.load_classifier_checkpoint(bad)
 
 

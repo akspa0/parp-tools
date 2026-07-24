@@ -1,10 +1,13 @@
 """Spec 119 US1 object classifier (T010, research D-02).
 
-A small from-scratch conv encoder + global pool + linear head over a single 128x128x3
-object-library capture image. No pretrained backbone (FR-003/SC-005). Constructable from
-``base`` alone so inference rebuilds the exact architecture from the checkpoint's config
-(D-02, mirroring the Spec 117/118 bridge pattern). The penultimate-layer (global-pooled)
-vector doubles as the US3 per-asset embedding.
+A small classifier over a single object-library capture image. Supports multiple backbones:
+- ``scratch``: from-scratch conv encoder (98K params @ base 16, 128 input, 128-d embedding)
+- ``dinov2_vits14``: DINOv2 ViT-S/14 via transformers (21M params, 224 input, 384-d embedding)
+- ``clip_vitb32``: CLIP ViT-B/32 via transformers (150M params, 224 input, 768-d embedding)
+
+Constructable from ``backbone`` + ``base`` (scratch) or ``backbone`` alone (pretrained) so
+inference rebuilds the exact architecture from the checkpoint's config (D-02). The
+penultimate-layer vector doubles as the US3 per-asset embedding.
 """
 
 from __future__ import annotations
@@ -18,54 +21,110 @@ from torch import nn
 
 from harvester.spec119.object_library_contract import COARSE_CLASS_INDEX
 
+BACKBONE_CONFIGS: dict[str, dict] = {
+    "scratch": {"input_size": 128, "embedding_dim": None, "model_id": None},
+    "dinov2_vits14": {"input_size": 224, "embedding_dim": 384, "model_id": "facebook/dinov2-small"},
+    "clip_vitb32": {"input_size": 224, "embedding_dim": 768, "model_id": "openai/clip-vit-base-patch32"},
+}
 
-def _block(in_channels: int, out_channels: int) -> nn.Sequential:
+
+def _scratch_encoder(base: int) -> nn.Module:
+    """From-scratch conv encoder 128->64->32->16->8."""
+    def _block(in_c: int, out_c: int) -> nn.Sequential:
+        return nn.Sequential(
+            nn.Conv2d(in_c, out_c, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(out_c),
+            nn.ReLU(inplace=True),
+        )
     return nn.Sequential(
-        nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding=1, bias=False),
-        nn.BatchNorm2d(out_channels),
-        nn.ReLU(inplace=True),
+        _block(3, base),          # 128 -> 64
+        _block(base, base * 2),   # 64 -> 32
+        _block(base * 2, base * 4),  # 32 -> 16
+        _block(base * 4, base * 8),  # 16 -> 8
     )
 
 
+def _load_pretrained_backbone(backbone: str):
+    """Load a pretrained vision backbone via transformers, return (model, embed_dim)."""
+    from transformers import AutoModel, CLIPModel
+
+    cfg = BACKBONE_CONFIGS[backbone]
+    embed_dim = cfg["embedding_dim"]
+
+    if backbone.startswith("dinov2"):
+        model = AutoModel.from_pretrained(cfg["model_id"])
+        # DINOv2 returns last_hidden_state; we use the [CLS] token (first token).
+        return model, embed_dim
+
+    if backbone.startswith("clip"):
+        model = CLIPModel.from_pretrained(cfg["model_id"])
+        # CLIP's vision model is in model.vision_model; pooler output is the embedding.
+        return model.vision_model, embed_dim
+
+    raise ValueError(f"Unknown pretrained backbone: {backbone}")
+
+
 class ObjectClassifier(nn.Module):
-    """Conv encoder 128->64->32->16->8, global pool, linear head.
+    """Classifier over a single object-library capture image.
 
     ``forward`` returns class logits; ``embedding`` returns the penultimate fixed-length
     vector (the US3 per-asset embedding, FR-009).
     """
 
-    def __init__(self, base: int = 16, num_classes: int = len(COARSE_CLASS_INDEX)) -> None:
+    def __init__(
+        self,
+        backbone: str = "scratch",
+        base: int = 16,
+        num_classes: int = len(COARSE_CLASS_INDEX),
+    ) -> None:
         super().__init__()
-        if base < 1:
-            raise ValueError(f"base must be positive; got {base}")
+        if backbone not in BACKBONE_CONFIGS:
+            raise ValueError(f"Unknown backbone {backbone!r}; options: {sorted(BACKBONE_CONFIGS)}")
         if num_classes < 2:
             raise ValueError(f"num_classes must be >= 2; got {num_classes}")
+
+        self.backbone_name = backbone
         self.base = int(base)
         self.num_classes = int(num_classes)
-        width = base
-        self.encoder = nn.Sequential(
-            _block(3, width),          # 128 -> 64
-            _block(width, width * 2),  # 64 -> 32
-            _block(width * 2, width * 4),  # 32 -> 16
-            _block(width * 4, width * 8),  # 16 -> 8
-        )
-        self.pool = nn.AdaptiveAvgPool2d(1)
-        self.head = nn.Linear(width * 8, num_classes)
+        cfg = BACKBONE_CONFIGS[backbone]
+        self.input_size = cfg["input_size"]
+
+        if backbone == "scratch":
+            if base < 1:
+                raise ValueError(f"base must be positive; got {base}")
+            self.encoder = _scratch_encoder(base)
+            self.pool = nn.AdaptiveAvgPool2d(1)
+            embed_dim = base * 8
+        else:
+            self.encoder, embed_dim = _load_pretrained_backbone(backbone)
+            self.pool = nn.Identity()  # pretrained models have their own pooling
+
+        self.embed_dim = embed_dim
+        self.head = nn.Linear(embed_dim, num_classes)
 
     def embedding(self, x: torch.Tensor) -> torch.Tensor:
-        """Penultimate-layer vector ``(B, base*8)`` — the US3 per-asset embedding."""
-        return self.pool(self.encoder(x)).flatten(1)
+        """Penultimate-layer vector ``(B, embed_dim)`` — the US3 per-asset embedding."""
+        if self.backbone_name == "scratch":
+            return self.pool(self.encoder(x)).flatten(1)
+
+        if self.backbone_name.startswith("dinov2"):
+            # DINOv2: [CLS] token is first in last_hidden_state
+            out = self.encoder(pixel_values=x)
+            return out.last_hidden_state[:, 0, :]
+
+        if self.backbone_name.startswith("clip"):
+            # CLIP vision model: pooler_output is the [CLS] after projection
+            out = self.encoder(x)
+            return out.pooler_output
+
+        raise ValueError(f"Unknown backbone: {self.backbone_name}")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.head(self.embedding(x))
 
 
 def compute_class_weights(labels: Sequence[int], num_classes: int = len(COARSE_CLASS_INDEX)) -> np.ndarray:
-    """Inverse-frequency class weights (FR-007), mean-normalized to 1.0.
-
-    A class absent from the training labels gets weight 0.0 (it cannot be learned, and a
-    nonzero weight would only distort the loss scale).
-    """
+    """Inverse-frequency class weights (FR-007), mean-normalized to 1.0."""
     counts = Counter(int(label) for label in labels)
     total = sum(counts.values())
     weights = np.zeros(num_classes, dtype=np.float64)
@@ -73,7 +132,7 @@ def compute_class_weights(labels: Sequence[int], num_classes: int = len(COARSE_C
     for c in present:
         weights[c] = total / counts[c]
     if present:
-        weights[present] /= weights[present].mean()  # mean-normalize present classes to 1.0
+        weights[present] /= weights[present].mean()
     return weights
 
 
@@ -103,6 +162,7 @@ def per_class_precision_recall(
 
 
 __all__ = [
+    "BACKBONE_CONFIGS",
     "ObjectClassifier",
     "compute_class_weights",
     "majority_class_baseline",
