@@ -659,3 +659,6 @@ map-references/difference_0.5.3-prealpha.png
 map-references/Azeroth-2002-03.kra
 map-references/ek.jpg
 map-references/ek25pct.jpg
+wow-viewer/data-harvester/sidecar.parquet
+wow-viewer/data-harvester/sidecar.json
+wow-viewer/imgui.ini.bak-offscreen-layout
