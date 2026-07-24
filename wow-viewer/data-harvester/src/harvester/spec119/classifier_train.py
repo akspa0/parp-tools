@@ -19,7 +19,6 @@ from pathlib import Path
 import numpy as np
 
 from harvester.spec119.classifier_model import (
-    BACKBONE_CONFIGS,
     ObjectClassifier,
     compute_class_weights,
     majority_class_baseline,
@@ -146,11 +145,9 @@ def main() -> int:
     # A random head with near-uniform logits gives 0.0000 accuracy during warmup on imbalanced data.
     with torch.no_grad():
         total = len(train_labels)
-        priors = torch.tensor([sum(1 for l in train_labels if l == c) / total
+        priors = torch.tensor([sum(1 for label in train_labels if label == c) / total
                                 for c in range(len(class_index))])
         model.head.bias.copy_(torch.log(priors + 1e-8))
-        print(f"  [init] head bias={model.head.bias.cpu().numpy().tolist()} "
-              f"priors={priors.cpu().numpy().tolist()}", flush=True)
     input_size = model.input_size
     identity = architecture_identity(
         model,
@@ -294,7 +291,7 @@ def main() -> int:
     for epoch in range(1, args.epochs + 1):
         # Unfreeze backbone after head-only phase (linear probe → full fine-tune).
         if head_only_epochs > 0 and epoch == head_only_epochs + 1:
-            for name, p in model.named_parameters():
+            for _name, p in model.named_parameters():
                 p.requires_grad = True
             opt = torch.optim.AdamW(model.parameters(), lr=args.lr * 0.1, weight_decay=1e-4)
             scheduler, warmup_epochs = make_onecycle_scheduler(
