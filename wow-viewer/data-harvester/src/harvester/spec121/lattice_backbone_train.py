@@ -271,11 +271,10 @@ def main() -> int:
         raise SystemExit(str(exc)) from exc
 
     # Dispatch: detect split schema and use the appropriate apply function.
-    # - v121-within-map-split-v1 -> within-map completion (B-reframe).
-    # - v50-held-out-split-v1 -> cross-region isolation (original Spec 116, or fallback).
     split_schema = detect_split_schema(args.held_out_split)
+    is_within_map = split_schema == WITHIN_MAP_SPLIT_SCHEMA
     try:
-        if split_schema == WITHIN_MAP_SPLIT_SCHEMA:
+        if is_within_map:
             train_rows_all, val_rows_all, split_manifest = apply_within_map_split(
                 index_rows=index, selected_rows=selected_rows, split_dir=args.held_out_split,
             )
@@ -283,7 +282,7 @@ def main() -> int:
             train_rows_all, val_rows_all, split_manifest = apply_held_out_split(
                 index_rows=index, selected_rows=selected_rows, split_dir=args.held_out_split,
             )
-    except TrainerContractError as exc:
+    except (TrainerContractError, WithinMapSplitError) as exc:
         raise SystemExit(str(exc)) from exc
 
     train_rows, excluded_train = select_lattice_rows(group, train_rows_all)
@@ -342,11 +341,13 @@ def main() -> int:
         if args.lr_schedule == "onecycle" else 0
     )
     plan["gradient_weight"] = args.gradient_weight
+    violation_key = "verified_overlap_count" if is_within_map else "verified_violation_count"
     plan["held_out_split"] = {
         "path": str((args.held_out_split / "split.json").resolve()),
         "sha256": sha256_file(args.held_out_split / "split.json"),
-        "verified_violation_count": int(split_manifest["verified_violation_count"]),
+        "verified_violation_count": int(split_manifest[violation_key]),
         "absolute_comparison_to_prior_runs_invalid": True,
+        "absolute_comparison_to_region_isolated_runs_invalid": bool(is_within_map),
     }
     plan["store_check"] = report(group)
     print(json.dumps(plan, indent=2), flush=True)
