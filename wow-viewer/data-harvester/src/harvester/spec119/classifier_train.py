@@ -93,8 +93,8 @@ def main() -> int:
     ap.add_argument("--output-root", required=True, type=Path)
     ap.add_argument("--run-name", required=True)
     ap.add_argument("--backbone", default="scratch",
-                    choices=sorted(BACKBONE_CONFIGS),
-                    help="Vision backbone: scratch (from-scratch conv), dinov2_vits14, clip_vitb32")
+                    help="Vision backbone: scratch (from-scratch conv), dinov2_vits14, clip_vitb32, "
+                         "or timm/<name> for any timm model (e.g. timm/efficientnet_b0)")
     ap.add_argument("--base", type=int, default=16,
                     help="ObjectClassifier width (scratch backbone only; <1M params at 16, SC-005)")
     ap.add_argument("--epochs", type=int, default=60)
