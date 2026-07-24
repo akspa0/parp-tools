@@ -206,7 +206,23 @@ def main() -> int:
     device = torch.device("cuda")
     model = model.to(device)
     class_weights_t = torch.from_numpy(weights.astype(np.float32)).to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+
+    # For pretrained backbones, freeze backbone initially (linear probe) to prevent overfitting.
+    # The head (self.head) is always trainable; the backbone is trained after head-only-epochs.
+    head_only_epochs = 30 if args.backbone != "scratch" else 0
+    if head_only_epochs > 0:
+        for name, p in model.named_parameters():
+            if "head" not in name:
+                p.requires_grad = False
+        backbone_params = []
+        head_params = [p for name, p in model.named_parameters() if "head" in name]
+        opt = torch.optim.AdamW(
+            [{"params": head_params, "lr": args.lr}],
+            lr=args.lr, weight_decay=1e-4,
+        )
+        print(f"Linear probe phase: head-only for {head_only_epochs} epochs (backbone frozen)", flush=True)
+    else:
+        opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     train_generator = torch.Generator()
     train_generator.manual_seed(args.seed)
     loader = DataLoader(
@@ -269,6 +285,17 @@ def main() -> int:
     best = -1.0
     stale = 0
     for epoch in range(1, args.epochs + 1):
+        # Unfreeze backbone after head-only phase (linear probe → full fine-tune).
+        if head_only_epochs > 0 and epoch == head_only_epochs + 1:
+            for name, p in model.named_parameters():
+                p.requires_grad = True
+            opt = torch.optim.AdamW(model.parameters(), lr=args.lr * 0.1, weight_decay=1e-4)
+            scheduler, warmup_epochs = make_onecycle_scheduler(
+                opt, max_lr=args.lr * 0.1, epochs=args.epochs,
+                steps_per_epoch=len(loader), pct_start=args.pct_start,
+            )
+            print(f"[epoch {epoch}] Unfrozen backbone, LR={args.lr * 0.1}", flush=True)
+
         model.train()
         losses = []
         for x, y in loader:
