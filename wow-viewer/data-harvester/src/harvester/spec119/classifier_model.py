@@ -4,6 +4,7 @@ A small classifier over a single object-library capture image. Supports multiple
 - ``scratch``: from-scratch conv encoder (98K params @ base 16, 128 input, 128-d embedding)
 - ``dinov2_vits14``: DINOv2 ViT-S/14 via transformers (21M params, 224 input, 384-d embedding)
 - ``clip_vitb32``: CLIP ViT-B/32 via transformers (150M params, 224 input, 768-d embedding)
+- ``timm/<model_name>``: any timm model (e.g. ``timm/efficientnet_b0``, ``timm/starnet_s1``)
 
 Constructable from ``backbone`` + ``base`` (scratch) or ``backbone`` alone (pretrained) so
 inference rebuilds the exact architecture from the checkpoint's config (D-02). The
@@ -45,21 +46,34 @@ def _scratch_encoder(base: int) -> nn.Module:
 
 
 def _load_pretrained_backbone(backbone: str):
-    """Load a pretrained vision backbone via transformers, return (model, embed_dim)."""
+    """Load a pretrained vision backbone, return (model, embed_dim, input_size)."""
+    if backbone.startswith("timm/"):
+        import timm
+        model_name = backbone[len("timm/"):]
+        model = timm.create_model(model_name, pretrained=True, num_classes=0)
+        embed_dim = model.num_features if hasattr(model, "num_features") else (
+            model.head_hidden_size if hasattr(model, "head_hidden_size") else
+            model.embed_dim if hasattr(model, "embed_dim") else
+            model.config.hidden_size if hasattr(model, "config") else 512
+        )
+        # Get input size from model config
+        cfg = model.default_cfg
+        input_size = cfg.get("input_size", (3, 224, 224))[1]
+        return model, embed_dim, input_size
+
     from transformers import AutoModel, CLIPModel
 
     cfg = BACKBONE_CONFIGS[backbone]
     embed_dim = cfg["embedding_dim"]
+    input_size = cfg["input_size"]
 
     if backbone.startswith("dinov2"):
         model = AutoModel.from_pretrained(cfg["model_id"])
-        # DINOv2 returns last_hidden_state; we use the [CLS] token (first token).
-        return model, embed_dim
+        return model, embed_dim, input_size
 
     if backbone.startswith("clip"):
         model = CLIPModel.from_pretrained(cfg["model_id"])
-        # CLIP's vision model is in model.vision_model; pooler output is the embedding.
-        return model.vision_model, embed_dim
+        return model.vision_model, embed_dim, input_size
 
     raise ValueError(f"Unknown pretrained backbone: {backbone}")
 
@@ -78,25 +92,24 @@ class ObjectClassifier(nn.Module):
         num_classes: int = len(COARSE_CLASS_INDEX),
     ) -> None:
         super().__init__()
-        if backbone not in BACKBONE_CONFIGS:
-            raise ValueError(f"Unknown backbone {backbone!r}; options: {sorted(BACKBONE_CONFIGS)}")
+        if backbone not in BACKBONE_CONFIGS and not backbone.startswith("timm/"):
+            raise ValueError(f"Unknown backbone {backbone!r}; options: {sorted(BACKBONE_CONFIGS)} or timm/<model>")
         if num_classes < 2:
             raise ValueError(f"num_classes must be >= 2; got {num_classes}")
 
         self.backbone_name = backbone
         self.base = int(base)
         self.num_classes = int(num_classes)
-        cfg = BACKBONE_CONFIGS[backbone]
-        self.input_size = cfg["input_size"]
 
         if backbone == "scratch":
             if base < 1:
                 raise ValueError(f"base must be positive; got {base}")
+            self.input_size = BACKBONE_CONFIGS["scratch"]["input_size"]
             self.encoder = _scratch_encoder(base)
             self.pool = nn.AdaptiveAvgPool2d(1)
             embed_dim = base * 8
         else:
-            self.encoder, embed_dim = _load_pretrained_backbone(backbone)
+            self.encoder, embed_dim, self.input_size = _load_pretrained_backbone(backbone)
             self.pool = nn.Identity()  # pretrained models have their own pooling
 
         self.embed_dim = embed_dim
@@ -104,8 +117,16 @@ class ObjectClassifier(nn.Module):
 
     def embedding(self, x: torch.Tensor) -> torch.Tensor:
         """Penultimate-layer vector ``(B, embed_dim)`` — the US3 per-asset embedding."""
+        # Ensure input is on the same device as the model's parameters.
+        param = next(self.parameters())
+        x = x.to(param.device, dtype=param.dtype)
+
         if self.backbone_name == "scratch":
             return self.pool(self.encoder(x)).flatten(1)
+
+        if self.backbone_name.startswith("timm/"):
+            # timm models with num_classes=0 return pooled features directly
+            return self.encoder(x)
 
         if self.backbone_name.startswith("dinov2"):
             # DINOv2: [CLS] token is first in last_hidden_state
