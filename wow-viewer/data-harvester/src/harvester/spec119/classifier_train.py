@@ -142,6 +142,15 @@ def main() -> int:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     model = ObjectClassifier(backbone=args.backbone, base=args.base, num_classes=len(class_index))
+    # Initialize the head bias to log(class_priors) so the initial prediction is the majority class.
+    # A random head with near-uniform logits gives 0.0000 accuracy during warmup on imbalanced data.
+    with torch.no_grad():
+        total = len(train_labels)
+        priors = torch.tensor([sum(1 for l in train_labels if l == c) / total
+                                for c in range(len(class_index))])
+        model.head.bias.copy_(torch.log(priors + 1e-8))
+        print(f"  [init] head bias={model.head.bias.cpu().numpy().tolist()} "
+              f"priors={priors.cpu().numpy().tolist()}", flush=True)
     input_size = model.input_size
     identity = architecture_identity(
         model,
@@ -208,13 +217,11 @@ def main() -> int:
     class_weights_t = torch.from_numpy(weights.astype(np.float32)).to(device)
 
     # For pretrained backbones, freeze backbone initially (linear probe) to prevent overfitting.
-    # The head (self.head) is always trainable; the backbone is trained after head-only-epochs.
     head_only_epochs = 30 if args.backbone != "scratch" else 0
     if head_only_epochs > 0:
         for name, p in model.named_parameters():
             if "head" not in name:
                 p.requires_grad = False
-        backbone_params = []
         head_params = [p for name, p in model.named_parameters() if "head" in name]
         opt = torch.optim.AdamW(
             [{"params": head_params, "lr": args.lr}],
