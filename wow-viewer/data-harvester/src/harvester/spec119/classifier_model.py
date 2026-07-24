@@ -108,9 +108,16 @@ class ObjectClassifier(nn.Module):
             self.encoder = _scratch_encoder(base)
             self.pool = nn.AdaptiveAvgPool2d(1)
             embed_dim = base * 8
+            self.input_normalize = nn.Identity()
         else:
             self.encoder, embed_dim, self.input_size = _load_pretrained_backbone(backbone)
-            self.pool = nn.Identity()  # pretrained models have their own pooling
+            self.pool = nn.Identity()
+            # Pretrained backbones expect ImageNet-normalized input (mean=[0.485,0.456,0.406],
+            # std=[0.229,0.224,0.225]). Our input is float32 [0,1]; normalize it.
+            mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+            std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+            self.register_buffer("_normalize_mean", mean)
+            self.register_buffer("_normalize_std", std)
 
         self.embed_dim = embed_dim
         self.head = nn.Linear(embed_dim, num_classes)
@@ -121,20 +128,21 @@ class ObjectClassifier(nn.Module):
         param = next(self.parameters())
         x = x.to(param.device, dtype=param.dtype)
 
+        # Apply ImageNet normalization for pretrained backbones (scratch handles raw [0,1]).
+        if self.backbone_name != "scratch":
+            x = (x - self._normalize_mean.to(x.device)) / self._normalize_std.to(x.device)
+
         if self.backbone_name == "scratch":
             return self.pool(self.encoder(x)).flatten(1)
 
         if self.backbone_name.startswith("timm/"):
-            # timm models with num_classes=0 return pooled features directly
             return self.encoder(x)
 
         if self.backbone_name.startswith("dinov2"):
-            # DINOv2: [CLS] token is first in last_hidden_state
             out = self.encoder(pixel_values=x)
             return out.last_hidden_state[:, 0, :]
 
         if self.backbone_name.startswith("clip"):
-            # CLIP vision model: pooler_output is the [CLS] after projection
             out = self.encoder(x)
             return out.pooler_output
 
