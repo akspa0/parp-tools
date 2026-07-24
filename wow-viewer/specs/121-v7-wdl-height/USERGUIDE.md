@@ -155,6 +155,7 @@ closes the question and is a valid outcome (SC-003).
 | HF download fails (offline) | no network | drop `--pretrained` (from-scratch B0; Spec 117 showed from-scratch is weaker — treat as diagnostic) |
 | `verified_violation_count != 0` | leaky split | never override; rebuild split (Phase 1 step) |
 | `CUDA is not available` | wrong machine/env | training is GPU-only by design |
+| `--source synthetic` rejected / invalid | synthetic rows predate corrected lighting; blocked until the curriculum records `synthetic_lighting_contract='NoonWhiteGlobal'` | use `--source authored` — the only valid bootstrap source on the current store |
 
 ## What gets written where
 

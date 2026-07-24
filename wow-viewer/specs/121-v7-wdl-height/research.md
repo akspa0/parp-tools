@@ -140,6 +140,12 @@ All Technical Context rows resolved against existing code. No unknowns remain.
   the transfer failure is authored-minimap contamination (baked lighting/objects) rather than
   fundamental. Await user decision; the run itself continues to its natural early-stop for the
   final relief-stratified record.
+- **R-1 UPDATE (2026-07-24, user)**: option C is BLOCKED — synthetic rows are not valid training
+  input until the curriculum records `synthetic_lighting_contract='NoonWhiteGlobal'` (the older
+  synthetic renders predate the corrected lighting ownership). `--source authored` is the only
+  valid bootstrap source on the current store. The fork is therefore A (record negative + stop)
+  vs B (within-map WDL completion reframe); C is deferred until a NoonWhiteGlobal curriculum
+  exists (a v50.2-era curriculum decision, not this lane).
 - **R-2**: Store may lack the Spec 118 arrays until the user rebuilds it (Full profile).
   Mitigation: graceful warn+disable paths already exist; dry-runs verify array presence.
 - **R-3**: HuggingFace download unavailable offline. Mitigation: from-scratch default;
