@@ -121,6 +121,25 @@ All Technical Context rows resolved against existing code. No unknowns remain.
   (Spec 117's V7-doc reframe: v7 used WDL as INPUT, never predicted it from RGB). Mitigation:
   G1 stops the lane cheaply; previews distinguish underfit vs no-signal; a valid negative closes
   the question permanently.
+- **R-1 EVIDENCE (2026-07-24, `lattice-mit_b0-v1` epoch-54 checkpoint diagnosis,
+  `output/runs/lattice-mit_b0-v1/diagnosis_epoch_snapshot.json`)**: the failure is NOT signal
+  absence — it is **non-transfer across the region-isolated split**. On 120 TRAIN tiles the model
+  beats tile-mean by **+18.9%** (0.1061 vs 0.1308; 65.8% of rows win) — RGB→lattice mapping IS
+  learnable for seen regions. On 240 held-out tiles it is **73% WORSE** than tile-mean (0.2186 vs
+  0.1263; only 31.3% of rows win). Per-map: Azeroth 0.2295 vs baseline 0.1341, Kalimdor 0.1851 vs
+  0.1026 — both maps fail, so it is not a single-zone quirk. Predictions are not collapsed
+  (pred_std 0.14 vs target_std 0.17). This is the third architecture with the identical wall
+  (LatticeNet v2 0.2427, v5 0.2307, MiT-B0 0.2125 — val vs 0.1277 baseline), which rules out
+  capacity/inductive bias as the cause. Interpretation: the color→elevation relationship is
+  zone-local (texture palette ↔ height statistics differ per region); the Spec 116 8-neighbour
+  isolation split demands exactly the cross-region transfer that authored minimaps do not support
+  at WDL scale. Options: (A) record G1 negative and stop; (B) reframe Stage A as WITHIN-map WDL
+  completion (train on WDL-covered tiles, fill missing WDL tiles of the SAME map — v7's actual
+  deployment constraint; evaluation becomes within-map held-out, where transfer plausibly holds);
+  (C) one discriminating synthetic-source run (exact height↔image correspondence) to test whether
+  the transfer failure is authored-minimap contamination (baked lighting/objects) rather than
+  fundamental. Await user decision; the run itself continues to its natural early-stop for the
+  final relief-stratified record.
 - **R-2**: Store may lack the Spec 118 arrays until the user rebuilds it (Full profile).
   Mitigation: graceful warn+disable paths already exist; dry-runs verify array presence.
 - **R-3**: HuggingFace download unavailable offline. Mitigation: from-scratch default;
