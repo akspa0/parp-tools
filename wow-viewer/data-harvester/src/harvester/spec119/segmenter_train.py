@@ -166,16 +166,50 @@ def main() -> int:
     from torch.utils.data import DataLoader, Dataset
 
     class RowDataset(Dataset):
-        def __init__(self, indices: list[int]) -> None:
+        def __init__(self, indices: list[int], seed: int = 42) -> None:
             self.indices = indices
+            self.rng = np.random.default_rng(seed)
 
         def __len__(self) -> int:
             return len(self.indices)
 
         def __getitem__(self, i: int):
             zarr_row = rows[self.indices[i]]["_row_index"]
-            rgb = read_image(group, zarr_row)
-            target = segmentation_target(np.asarray(group[CAPTURE_MASK][zarr_row]))
+            rgb = read_image(group, zarr_row).copy()  # (128, 128, 3) float32 in [0, 1]
+            mask = np.asarray(group[CAPTURE_MASK][zarr_row]) > 0  # (128, 128) bool
+            target = segmentation_target(mask)
+
+            # 50% chance: Composite object over synthetic terrain background texture
+            if self.rng.random() < 0.5:
+                # Generate random terrain color (grass, dirt, sand, rock, water)
+                bg_type = self.rng.choice(["grass", "dirt", "sand", "rock", "water", "noise"])
+                if bg_type == "grass":
+                    base_color = np.array([0.15, 0.45, 0.15], dtype=np.float32)
+                elif bg_type == "dirt":
+                    base_color = np.array([0.45, 0.35, 0.20], dtype=np.float32)
+                elif bg_type == "sand":
+                    base_color = np.array([0.60, 0.55, 0.35], dtype=np.float32)
+                elif bg_type == "rock":
+                    base_color = np.array([0.40, 0.40, 0.40], dtype=np.float32)
+                elif bg_type == "water":
+                    base_color = np.array([0.10, 0.25, 0.55], dtype=np.float32)
+                else:
+                    base_color = self.rng.uniform(0.1, 0.6, size=3).astype(np.float32)
+
+                noise = self.rng.uniform(-0.08, 0.08, size=(128, 128, 3)).astype(np.float32)
+                bg_img = np.clip(base_color + noise, 0.0, 1.0)
+
+                # Composite: object foreground where mask is True, terrain background where mask is False
+                bg_img[mask] = rgb[mask]
+                rgb = bg_img
+
+            # 20% chance: Negative background terrain tile with ALL-ZERO mask
+            elif self.rng.random() < 0.2:
+                base_color = self.rng.uniform(0.1, 0.6, size=3).astype(np.float32)
+                noise = self.rng.uniform(-0.08, 0.08, size=(128, 128, 3)).astype(np.float32)
+                rgb = np.clip(base_color + noise, 0.0, 1.0)
+                target = np.zeros((128, 128), dtype=np.float32)
+
             return (
                 torch.from_numpy(rgb).permute(2, 0, 1),
                 torch.from_numpy(target.astype(np.float32)).unsqueeze(0),
@@ -203,10 +237,23 @@ def main() -> int:
     def _held_out_metrics() -> dict:
         model.eval()
         ious: list[float] = []
+        val_rng = np.random.default_rng(119)
         with torch.no_grad():
             for i, target in zip(kept_held_out, held_out_targets, strict=True):
-                rgb = read_image(group, rows[i]["_row_index"])
-                x = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).to(device)
+                rgb = read_image(group, rows[i]["_row_index"]).copy()
+                mask = target > 0
+
+                # Composite over terrain background
+                base_color = val_rng.choice([
+                    np.array([0.15, 0.45, 0.15], dtype=np.float32),  # grass
+                    np.array([0.45, 0.35, 0.20], dtype=np.float32),  # dirt
+                    np.array([0.40, 0.40, 0.40], dtype=np.float32),  # rock
+                ])
+                noise = val_rng.uniform(-0.05, 0.05, size=(128, 128, 3)).astype(np.float32)
+                bg_img = np.clip(base_color + noise, 0.0, 1.0)
+                bg_img[mask] = rgb[mask]
+
+                x = torch.from_numpy(bg_img).permute(2, 0, 1).unsqueeze(0).to(device)
                 prediction = (model(x).squeeze(0).squeeze(0).cpu().numpy() > 0.5)
                 ious.append(binary_iou(prediction, target))
         return {

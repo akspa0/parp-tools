@@ -33,6 +33,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+Image.MAX_IMAGE_PIXELS = None
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
