@@ -23,6 +23,20 @@ Last updated: 2026-07-23
 - Run artifacts under `output/object-library/runs/{classifier_v1,segmenter_v1}/`; checkpoints
   `classifier.pt` (98,067 params) + `segmenter.pt` (482,737 params), `model_stage_run.json`
   records with `promotion_verdict=pending` (user gate).
+- **Minimap-retrieval PoC (negative result, decisive)**: hand-cropped object instances from real
+  minimap tiles (`curriculum-0_5_3_3368-obj_v1.zarr`, `object_instance_mask`) and embedded them
+  with the frozen classifier against `embeddings.parquet`. Measured instance sizes: **p50=10px,
+  max=29px** at 257px tile scale (~2 yd/px — even buildings are ~5px blobs). Result: every crop
+  classified `mdx(1.00)`, top-3 cosine matches all ~0.99 against unrelated round blobs
+  (boulders/glow effects) — the 128px-capture embedding cannot discriminate 5–29px blobs;
+  silhouette/texture detail does not survive minimap scale, color dominates what little signal
+  remains. **Direct minimap-crop→library retrieval with the Spec 119 embedding does NOT work
+  as-is.** A future retrieval feature needs scale-matched training (re-render/downscale library
+  captures through the minimap compositor to 8–32px and train an embedding at that scale), not
+  just a resize. Sheet: `output/object-library/runs/minimap_retrieval_poc.png`. Also noted:
+  ~460/5,841 library captures (7.9%) are blank/near-blank (UI textures, nodxt details,
+  thin-line renders) — the `empty` class flags them correctly; a harvest-quality improvement
+  candidate.
 
 ## Previous: Spec 119 code-complete through Phase 5 dry-runs (earlier this session)
 
