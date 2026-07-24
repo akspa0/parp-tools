@@ -298,9 +298,10 @@ def main() -> int:
 
         model.train()
         losses = []
-        for x, y in loader:
+        for batch_idx, (x, y) in enumerate(loader):
             opt.zero_grad(set_to_none=True)
-            logits = model(x.to(device))
+            x_dev = x.to(device)
+            logits = model(x_dev)
             loss = torch.nn.functional.cross_entropy(
                 logits, y.to(device), weight=class_weights_t
             )
@@ -309,6 +310,13 @@ def main() -> int:
             opt.step()
             scheduler.step()
             losses.append(float(loss.detach().item()))
+            if epoch == 1 and batch_idx == 0:
+                with torch.no_grad():
+                    preds = logits.argmax(dim=1)
+                    print(f"  [debug epoch1 batch0] logits={logits[0].cpu().numpy().tolist()} "
+                          f"pred={preds[0].item()} true={y[0].item()} "
+                          f"head.grad={model.head.weight.grad.abs().mean().item():.6f}",
+                          flush=True)
         metrics = _held_out_metrics()
         selection = metrics["held_out_accuracy"]
         per_epoch.append({"epoch": epoch, "train_loss": float(np.mean(losses)), **metrics})
