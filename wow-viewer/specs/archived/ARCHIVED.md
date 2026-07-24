@@ -27,6 +27,8 @@ Specs moved here are obsolete (superseded by later work, replaced by refactored 
 | 052 | PM4 signature matcher — consolidated into 046 |
 | 086 | V22 consolidated dataset (per-tile stream) — never produced a populated store; C# three-message-class producer was never written; superseded by 088 (V18 substrate + separate enrich tool) |
 | 087 | V22 asset library payloads (per-tile, `Path.GetHashCode()` keys) — non-deterministic keys break cross-run dedup; per-tile design duplicates payloads; superseded by 088 (stable canonical path keys + build-wide library) |
+| 119 | Object-library classifier/segmenter — trained and passed its own gates, but the minimap retrieval PoC proved object identity does not survive minimap scale (p50=10px instances, ~0.99 cosine to unrelated blobs); minimap object segmentation/classification abandoned; masks repurposed loss-side in 121 (see CLOSED.md) |
+| 120 | Minimap OBB detector / DINOv2 placement retrieval — inherits 119's measured scale-physics failure; retrieval/detection from minimaps abandoned; superseded by 121 (see CLOSED.md) |
 
 | 005 | PM4 workbench cleanup — targets legacy MdxViewer; all PM4 work now in wow-viewer specs (046/058) |
 | 020 | Renderer culling — subsumed by 056 (GPU/LOD modernization) |

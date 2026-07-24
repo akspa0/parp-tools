@@ -1,8 +1,26 @@
 # Progress — wow-viewer
 
-Last updated: 2026-07-23
+Last updated: 2026-07-24
 
-## Spec 119 — object-library classifier/segmenter + quality lens (TRAINED + gated on full library)
+## Spec 121 — V7-Style WDL-Prior Height Reconstruction (Small Model Lane) — Stage A code complete (T001–T012)
+
+- **2026-07-24**: Stage A implemented + verified without training. `harvester/spec121/` (4 modules) + CLI + 30 tests (30/30 pass); full suite 1136 passed / 3 pre-existing unrelated failures (v24 export-map, 2× v25 h1_coarse); ruff+compileall clean. Real dry-run on dual_v3 + spec116 split: violation_count=0, lattice arrays present, object-mask absent → warn+disable path proven for real. `MitB0LatticeNet` 3,469,922 params (band-enforced). User decision: substrate named **v50.2** (v50.1 + lattice + object-mask arrays); trainer `--release` defaults v50.2.
+- Remaining: T013 USER RUN G1 (Stage A training, SC-001 ≥15% below tile-mean — fail = recorded negative, lane stops). T014–T020 bridge+detailer, T021–T023 paired mask-weight runs, T024–T027 chain materializer, T028–T031 bookkeeping (119/120 already archived).
+- Full Spec Kit set written: `specs/121-v7-wdl-height/{spec,plan,research,data-model,quickstart,tasks}.md` + `contracts/cli-contract.md` + `checklists/requirements.md` (validation passes). 31 tasks (T001–T031); T013/T020/T021/T022/T027 are USER RUN training gates.
+- **Design**: Stage A `MitB0LatticeNet` (SegFormer-B0 + 545-pt lattice heads, Spec 117 masked contract, ~3.4M params, pretrained optional) → `prior_coarse_bridge` into the detailer's existing `--coarse-store` schema → Stage B existing residual detailer (+ `detailer_mit_b0_v1` trunk option). 3–30M band per model. Object masks loss-side only (tile-coverage weight for A; Spec 118 pixel weight for B).
+- **Gates**: G1 Stage A ≥15% below tile-mean (Spec 117's failed bar; fail = recorded negative, lane stops). G2 Stage B ≥9% below prior-only. G3 paired mask-weight verdict + user visual gate.
+- Next: T001–T012 (Stage A code + tests + dry-run smoke), then user-run G1.
+
+## Specs 119 + 120 — ARCHIVED 2026-07-24
+
+- Moved to `specs/archived/` with `CLOSED.md` + ARCHIVED.md rows. Minimap object identity is a **measured** dead end (p50=10px instances; ~0.99 cosine matches to unrelated blobs). Do not retry with another backbone — input-resolution physics, not embedding quality. Precise masks survive as loss-side signal in Spec 121. Historical outcomes (classifier 0.9137, segmenter IoU 0.9921, 4,368 curated vectors) preserved in the archived dirs.
+
+## Spec 120 — Minimap OBB Object Detector & Metadata Sidecar Generator (ARCHIVED — see above)
+
+- **Outcome**: curation pipeline worked (1,473 junk pruned → 4,368 verified vectors), but the retrieval goal it served is dead per the 119 PoC scale measurement. `scripts/spec120_dinov2_retrieval.py` kept read-only.
+
+## Spec 119 — object-library classifier/segmenter + quality lens (ARCHIVED — see above)
+
 
 - **Outcome**: full user-run pipeline completed on `objlib_0_5_3_3368.zarr` (5,841 assets;
   mdx-majority 85.6%, no m2 class in alpha client). Classifier: held-out 0.9137 vs 0.8562

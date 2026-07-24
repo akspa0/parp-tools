@@ -1,8 +1,29 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-23
+Last updated: 2026-07-24
 
-## Active work: Spec 119 object-library classifier/segmenter — TRAINED + gated on the full library (this session)
+## Active work: Spec 121 — V7-Style WDL-Prior Height Reconstruction (Small Model Lane) — Stage A CODE COMPLETE, user-run G1 gate next
+
+- **Status (2026-07-24)**: T001–T012 DONE. `harvester/spec121/` (store_check, lattice_backbone_model, object_mask_tile_loss, lattice_backbone_train) + `scripts/spec121_train_lattice_prior.py` + `tests/spec121/` (30 tests, all pass). Full suite 1136 passed / 3 pre-existing unrelated failures; ruff+compileall clean. Real dry-run smoke on `curriculum-0_5_3_3368-dual_v3.zarr` + spec116 split-dual_v2: violation_count=0, lattice arrays present, object-mask absent → graceful `object_mask_signal_present=false` (documented degradation), exits without training.
+- **Key numbers**: `MitB0LatticeNet` = **3,469,922 params** at default B0 config (inside 3–30M band; plan refuses `--confirm-run` outside band). Heads are native-direct (LatticeNet v5 rule): outer 17×17 off the encoder's 32×32 stage via learned k2/s2/p1, inner 16×16 off the 16×16 stage; no interpolation in output path.
+- **v50.2 naming (user decision)**: this lane's substrate = **v50.2 release** (v50.1 signals + Spec 117 lattice + Spec 118 object-mask arrays). Trainer `--release` defaults to `v50.2`; existing dual_v3 is v50.1 (works for unweighted runs; object-mask weighted runs need the v50.2 rebuild — user-run).
+- **Next**: T013 USER RUN — Stage A real training (G1 gate: SC-001 ≥15% below tile-mean). **Full runbook: `specs/121-v7-wdl-height/USERGUIDE.md`** (Phase 0 verify → Phase 2 train-now on v50.1 → Phase 1 v50.2 rebuild for mask-weighted runs → Phase 4 paired comparison). Then Phase 4 (T014–T020): prior→coarse bridge + detailer.
+- **User decisions (2026-07-24)**: substrate named **v50.2** (research.md D-08); nothing in this lane may carry v24/v25 naming; backbone must be off-the-shelf (SegFormer-B0 HF, proven in-repo by Spec 114), not homebrew.
+- **What it is**: back to the v7 shape on v50 signals — Stage A `MitB0LatticeNet` (SegFormer-B0 encoder + 545-pt WDL lattice heads, ~3.4M params, pretrained `nvidia/mit-b0` optional, Spec 117 masked lattice contract) → bridge to the detailer's existing `--coarse-store` schema → Stage B residual detailer (existing `GeometryDetailerNet`; `detailer_mit_b0_v1` trunk option behind `--architecture`). Band: 3–30M params per model.
+- **Object masks**: loss-side ONLY. Stage A gets tile-coverage `--object-mask-weight` (new); Stage B reuses Spec 118 pixel-level `--object-mask-weight`. No minimap segmentation/classification/retrieval anywhere — that line is dead (see below).
+- **Key reuse**: `harvester/v50/direct_geometry_model.py` (MiT-B0 + pretrained loader), `harvester/spec117/lattice_model.py` (masked 545 contract), `harvester/v50/geometry_detailer_{model,train}.py` (residual detailer + `validate_coarse_store`), `harvester/spec118/object_loss.py`, `harvester/v50/spectral_guidance.py` (V7 spectral terms), Spec 116 split. `transformers>=4.52`/`timm>=1.0` already pinned. No new C#.
+- **Gates (user-run)**: G1 = Stage A ≥15% below tile-mean (the bar Spec 117 failed; fail = lane stops with recorded negative). G2 = Stage B ≥9% below prior-only. G3 = paired mask-weight verdict (null = valid close) + visual sheets.
+- **CLIs**: exact flags in `specs/121-v7-wdl-height/contracts/cli-contract.md`; run sequence (PowerShell-ready) in `specs/121-v7-wdl-height/quickstart.md`.
+
+## Specs 119 + 120 — ARCHIVED 2026-07-24 (minimap object identity is a measured dead end)
+
+- Both moved to `specs/archived/` with `CLOSED.md` notes; rows added to `specs/archived/ARCHIVED.md`.
+- **Why dead**: Spec 119's own retrieval PoC measured real minimap object instances at **p50=10px, max=29px** — the 128px library embedding matched every crop to unrelated round blobs at ~0.99 cosine. Object identity does not survive minimap scale; DINOv2 (120) inherits the same physics. Do NOT retry with another backbone — blocker is input resolution, not embedding quality.
+- **What survives**: precise masks (Spec 118 `object_geometry_visible_*` arrays) repurposed as loss-side weight in Spec 121; `curated_embeddings.parquet` + trained 119 checkpoints kept read-only as reference.
+- Historical detail (classifier 0.9137 / segmenter IoU 0.9921 / curation audit numbers) preserved in `specs/archived/119-object-library-classifier/` and the 2026-07-24 section of `progress.md` below.
+
+## Previous: Spec 119 object-library classifier/segmenter — TRAINED + gated on the full library (ARCHIVED)
+
 
 - **Full pipeline executed on `objlib_0_5_3_3368.zarr` (5,841 captured assets; classes present:
   mdx 85.6% majority, wmo minority, empty from blank relabel; NO m2 class — alpha client)**.
