@@ -32,6 +32,12 @@ from harvester.spec118.object_loss import (
 from harvester.spec118.object_loss import (
     subset_metrics as object_subset_metrics,
 )
+from harvester.spec121.within_map_split import (
+    WITHIN_MAP_SPLIT_SCHEMA,
+    WithinMapSplitError,
+    apply_within_map_split,
+    detect_split_schema,
+)
 from harvester.v50.contracts import release_identity, require_store_release, validate_release
 from harvester.v50.direct_geometry_materialize import COARSE_ARRAY, COARSE_STORE_SCHEMA
 from harvester.v50.direct_geometry_train import apply_held_out_split
@@ -511,11 +517,17 @@ def main() -> int:
     positions = list(range(len(selected_rows)))
     held_out_split_manifest: dict | None = None
     if args.held_out_split is not None:
+        split_schema = detect_split_schema(args.held_out_split)
         try:
-            train_rows, val_rows, held_out_split_manifest = apply_held_out_split(
-                index_rows=index, selected_rows=selected_rows, split_dir=args.held_out_split,
-            )
-        except TrainerContractError as exc:
+            if split_schema == WITHIN_MAP_SPLIT_SCHEMA:
+                train_rows, val_rows, held_out_split_manifest = apply_within_map_split(
+                    index_rows=index, selected_rows=selected_rows, split_dir=args.held_out_split,
+                )
+            else:
+                train_rows, val_rows, held_out_split_manifest = apply_held_out_split(
+                    index_rows=index, selected_rows=selected_rows, split_dir=args.held_out_split,
+                )
+        except (TrainerContractError, WithinMapSplitError) as exc:
             raise SystemExit(str(exc)) from exc
         row_to_position = {row: position for position, row in enumerate(selected_rows)}
         train_positions = [row_to_position[r] for r in train_rows]
