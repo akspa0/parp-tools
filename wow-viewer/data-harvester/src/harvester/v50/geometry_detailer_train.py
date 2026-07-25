@@ -43,7 +43,8 @@ from harvester.v50.feature_stores import (
 )
 from harvester.v50.geometry_detailer_model import (
     DETAILER_ARCHITECTURE_ID,
-    GeometryDetailerNet,
+    DETAILER_ARCHITECTURE_IDS,
+    build_detailer,
     compose_final,
     detailer_identity,
 )
@@ -404,6 +405,10 @@ def main() -> int:
     ap.add_argument("--run-id", required=True)
     ap.add_argument("--source", required=True, choices=sorted(SOURCE_CHOICES))
     ap.add_argument("--confirm-run", action="store_true")
+    ap.add_argument("--architecture", default="detailer_unet_v1",
+                    choices=sorted(DETAILER_ARCHITECTURE_IDS),
+                    help="detailer_unet_v1 = U-Net-lite (default, parity); "
+                         "detailer_mit_b0_v1 = SegFormer-B0 trunk (~3.8M params, in 3–30M band)")
     ap.add_argument("--val-key", default="split")
     ap.add_argument("--val-value", default="val")
     ap.add_argument("--held-out-split", type=Path, default=None,
@@ -536,12 +541,12 @@ def main() -> int:
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    model = GeometryDetailerNet(in_channels=in_channels)
+    model = build_detailer(args.architecture, in_channels=in_channels)
     if args.init_weights is not None:
         ck = torch.load(args.init_weights, map_location="cpu")
         model.load_state_dict(ck["model"])
         print(f"Loaded init weights from {args.init_weights} (epoch {ck.get('epoch', '?')})", flush=True)
-    architecture = detailer_identity(model, in_channels=in_channels)
+    architecture = detailer_identity(model, in_channels=in_channels, architecture_id=args.architecture)
     upstream_identity = {
         "path": str(coarse_group.attrs.get("checkpoint_path", "unknown")),
         "sha256": str(coarse_group.attrs.get("checkpoint_sha256", "0" * 64)),

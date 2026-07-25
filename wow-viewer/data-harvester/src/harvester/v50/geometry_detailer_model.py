@@ -108,19 +108,95 @@ def compose_final(coarse: torch.Tensor, residual: torch.Tensor, *, clamp: bool) 
     return torch.clamp(final, 0.0, 1.0) if clamp else final
 
 
-def detailer_identity(model: nn.Module, *, base: int = 32, in_channels: int = 3) -> dict:
+def detailer_identity(model: nn.Module, *, base: int = 32, in_channels: int = 3,
+                      architecture_id: str | None = None) -> dict:
     """Schema-conformant architecture block for the detailer stage."""
-    config = {
-        "class": "GeometryDetailerNet",
-        "base": base,
-        "in_channels": in_channels,
-        "input": f"rgb[+features] {in_channels}x{INPUT_SIZE}x{INPUT_SIZE} + generated coarse 1x{HEIGHT_GRID}x{HEIGHT_GRID}",
-        "output": f"residual 1x{HEIGHT_GRID}x{HEIGHT_GRID} (final = coarse + residual)",
-        "head": "linear, zero-initialized",
-        "target_contract": "v112.1 residual",
-    }
+    arch_id = architecture_id or DETAILER_ARCHITECTURE_ID
+    if arch_id == DETAILER_MIT_B0_ID:
+        config = {
+            "class": "DetailerMitB0Net",
+            "in_channels": in_channels,
+            "input": f"rgb[+features] {in_channels}x{INPUT_SIZE}x{INPUT_SIZE} + generated coarse 1x{HEIGHT_GRID}x{HEIGHT_GRID}",
+            "output": f"residual 1x{HEIGHT_GRID}x{HEIGHT_GRID} (final = coarse + residual)",
+            "head": "linear, zero-initialized",
+            "target_contract": "v112.1 residual",
+        }
+    else:
+        config = {
+            "class": "GeometryDetailerNet",
+            "base": base,
+            "in_channels": in_channels,
+            "input": f"rgb[+features] {in_channels}x{INPUT_SIZE}x{INPUT_SIZE} + generated coarse 1x{HEIGHT_GRID}x{HEIGHT_GRID}",
+            "output": f"residual 1x{HEIGHT_GRID}x{HEIGHT_GRID} (final = coarse + residual)",
+            "head": "linear, zero-initialized",
+            "target_contract": "v112.1 residual",
+        }
     return {
-        "id": DETAILER_ARCHITECTURE_ID,
+        "id": arch_id,
         "config_sha256": sha256_json(config),
         "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
     }
+
+
+DETAILER_MIT_B0_ID = "detailer_mit_b0_v1"
+DETAILER_ARCHITECTURE_IDS = frozenset({DETAILER_ARCHITECTURE_ID, DETAILER_MIT_B0_ID})
+
+
+class DetailerMitB0Net(nn.Module):
+    """SegFormer-B0 trunk residual refiner: same input/output contract as GeometryDetailerNet.
+
+    (RGB[+features] Cx256x256, coarse 1x257x257) -> residual 257x257.
+
+    The encoder produces a 1/4-resolution feature map; the head interpolates to the world grid.
+    A zero-initialized head makes the initial composition exactly the coarse prediction, matching
+    the U-Net baseline's training start point. ~3.8M params at in_channels=3 — inside the 3–30M
+    band (SC-004).
+    """
+
+    def __init__(self, in_channels: int = 3) -> None:
+        super().__init__()
+        from transformers import SegformerConfig, SegformerModel
+
+        self.in_channels = in_channels
+        config = SegformerConfig(num_labels=1, num_channels=in_channels + 1)
+        self.encoder = SegformerModel(config)
+        self.head = nn.Conv2d(config.hidden_sizes[-1], 1, kernel_size=1)
+        nn.init.zeros_(self.head.weight)
+        nn.init.zeros_(self.head.bias)
+
+    def forward(self, rgb: torch.Tensor, coarse: torch.Tensor) -> torch.Tensor:
+        if rgb.ndim != 4 or rgb.shape[1] != self.in_channels:
+            raise DetailerContractError(
+                f"rgb must be (B, {self.in_channels}, {INPUT_SIZE}, {INPUT_SIZE}), got {tuple(rgb.shape)}"
+            )
+        if coarse.ndim != 3 or coarse.shape[-2:] != (HEIGHT_GRID, HEIGHT_GRID):
+            raise DetailerContractError(
+                f"coarse must be (B, {HEIGHT_GRID}, {HEIGHT_GRID}), got {tuple(coarse.shape)}"
+            )
+        coarse_256 = nn.functional.interpolate(
+            coarse.unsqueeze(1), size=(INPUT_SIZE, INPUT_SIZE),
+            mode="bilinear", align_corners=True,
+        )
+        x = torch.cat([rgb, coarse_256], dim=1)
+        features = self.encoder(pixel_values=x).last_hidden_state  # (B, C, 64, 64)
+        residual = self.head(features)
+        return nn.functional.interpolate(
+            residual, size=(HEIGHT_GRID, HEIGHT_GRID), mode="bilinear", align_corners=True
+        ).squeeze(1)
+
+
+def build_detailer(
+    architecture: str,
+    *,
+    base: int = 32,
+    in_channels: int = 3,
+) -> nn.Module:
+    """Build one detailer model. ``detailer_unet_v1`` is the default (parity); ``detailer_mit_b0_v1``
+    is the band-compliant trunk option (3–30M params)."""
+    if architecture == DETAILER_ARCHITECTURE_ID:
+        return GeometryDetailerNet(base=base, in_channels=in_channels)
+    elif architecture == DETAILER_MIT_B0_ID:
+        return DetailerMitB0Net(in_channels=in_channels)
+    raise DetailerContractError(
+        f"unknown detailer architecture {architecture!r}; choose from {sorted(DETAILER_ARCHITECTURE_IDS)}"
+    )
