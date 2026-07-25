@@ -163,35 +163,32 @@ def bridge_prior_to_coarse(
             dense = _upsample_to_257(outer, inner)
             array[position] = dense.astype(np.float16)
 
-    # Write index.parquet matching the coarse store schema (source_group_id, split, minimap_source).
+    # Write index.parquet matching the coarse store schema exactly. The detailer trainer validates
+    # alignment via `source_row_index` (the actual store row number, not position).
     coarse_index = []
     for position, row_index in enumerate(selected):
         src = index[row_index]
         coarse_index.append({
-            "source_group_id": int(position),
+            "source_row_index": int(row_index),
+            "source_group_id": str(src.get("source_group_id", str(position))),
             "split": str(src.get("split", "train")),
             "minimap_source": str(src.get("minimap_source", "authored")),
-            "tile_row": int(src.get("tile_row", -1)),
-            "map": str(src.get("map", "?")),
-            "tile_x": int(src.get("tile_x", -1)),
-            "tile_y": int(src.get("tile_y", -1)),
         })
     pq.write_table(pa.Table.from_pylist(coarse_index), output / "index.parquet")
 
     curriculum_id = curriculum_identity(store)
-    attrs = {
+    group.attrs.update({
         "schema": COARSE_STORE_SCHEMA,
         "created_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "source_store": str(store.resolve()),
         "source_filter": source,
-        "checkpoint": {
-            "path": str(checkpoint_path.resolve()),
-            "sha256": checkpoint_sha,
-            "architecture": str(ckpt.get("backbone_config", {}).get("architecture", "?")),
-            "epoch": int(ckpt.get("epoch", 0)),
-        },
         "curriculum_identity": curriculum_id,
-    }
-    group.attrs.update(attrs)
+        "checkpoint_path": str(checkpoint_path.resolve()),
+        "checkpoint_sha256": checkpoint_sha,
+        "model_variant": str(ckpt.get("backbone_config", {}).get("architecture", "?")),
+        "checkpoint_epoch": int(ckpt.get("epoch", 0)),
+        "row_count": len(selected),
+    })
 
     return {
         "schema": COARSE_STORE_SCHEMA,
