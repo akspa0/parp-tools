@@ -516,6 +516,7 @@ def main() -> int:
 
     positions = list(range(len(selected_rows)))
     held_out_split_manifest: dict | None = None
+    split_schema: str | None = None
     if args.held_out_split is not None:
         split_schema = detect_split_schema(args.held_out_split)
         try:
@@ -593,10 +594,11 @@ def main() -> int:
         plan["feature_stores"] = plan_entries(feature_bindings)
         plan["feature_input_channels"] = in_channels
     if held_out_split_manifest is not None:
+        violation_key = "verified_overlap_count" if split_schema == WITHIN_MAP_SPLIT_SCHEMA else "verified_violation_count"
         plan["split_counts"] = {"train": len(train_positions), "val": len(val_positions)}
         plan["held_out_split"] = {
             "path": str((args.held_out_split / "split.json").resolve()),
-            "verified_violation_count": int(held_out_split_manifest["verified_violation_count"]),
+            "verified_violation_count": int(held_out_split_manifest[violation_key]),
             "absolute_comparison_to_prior_runs_invalid": True,
         }
     if args.object_mask_weight > 0:
