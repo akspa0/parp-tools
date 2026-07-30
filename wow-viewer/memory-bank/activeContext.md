@@ -1,8 +1,26 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-24
+Last updated: 2026-07-25
 
-## Active work: Spec 121 — V7-Style WDL-Prior Height Reconstruction (Small Model Lane) — Stage A CODE COMPLETE, user-run G1 gate next
+## Spec 121 — V7-Style WDL-Prior Height Reconstruction (Small Model Lane) — CLOSED (architecture failure)
+
+- **Status**: CLOSED 2026-07-25. The RGB→WDL approach is fundamentally wrong for this project's
+  needs. Three architectures (LatticeNet v2/v5, MitB0LatticeNet) hit the same wall: zone-local
+  mapping that does not transfer cross-region. The within-map reframe produced a model that
+  looked good visually but the detailer (5% improvement over the prior) confirmed the prior was
+  already at the noise floor — the detailer had nothing to refine because the RGB→WDL task is
+  harder than what v7 actually did.
+- **What was learned**: (1) RGB→WDL prediction is a fundamentally harder problem than WDL
+  consumption. v7 consumed WDL as input, never predicted it. (2) The detailer works (5%
+  improvement, sc002=True) — that piece is salvageable. (3) The correct architecture is: merged
+  WDL prior (real + synthetic, no ML) → detailer refines. No RGB→WDL model at all.
+- **Salvageable artifacts**: `DetailerMitB0Net` (SegFormer-B0 trunk, ~3.8M params), the
+  within-map split machinery, the object-mask tile loss, the store check helpers, the diagnostic
+  tooling. All in `harvester/spec121/` and `harvester/v50/geometry_detailer_model.py`.
+- **Specs 119/120/121 all closed**: the minimap object identity line (119/120) and the
+  RGB→WDL prediction line (121) are both recorded dead ends. The detailer is the only survivor.
+- **Next**: user break. When ready, the path forward is: merged WDL prior (Spec 094 Stage 0) →
+  detailer refines. No RGB→WDL model.
 
 - **Status (2026-07-24)**: T001–T012 DONE. `harvester/spec121/` (store_check, lattice_backbone_model, object_mask_tile_loss, lattice_backbone_train) + `scripts/spec121_train_lattice_prior.py` + `tests/spec121/` (30 tests, all pass). Full suite 1136 passed / 3 pre-existing unrelated failures; ruff+compileall clean. Real dry-run smoke on `curriculum-0_5_3_3368-dual_v3.zarr` + spec116 split-dual_v2: violation_count=0, lattice arrays present, object-mask absent → graceful `object_mask_signal_present=false` (documented degradation), exits without training.
 - **Key numbers**: `MitB0LatticeNet` = **3,469,922 params** at default B0 config (inside 3–30M band; plan refuses `--confirm-run` outside band). Heads are native-direct (LatticeNet v5 rule): outer 17×17 off the encoder's 32×32 stage via learned k2/s2/p1, inner 16×16 off the 16×16 stage; no interpolation in output path.

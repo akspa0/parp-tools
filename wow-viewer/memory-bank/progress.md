@@ -1,8 +1,15 @@
 # Progress — wow-viewer
 
-Last updated: 2026-07-24
+Last updated: 2026-07-25
 
-## Spec 121 — V7-Style WDL-Prior Height Reconstruction (Small Model Lane) — Stage A code complete (T001–T012)
+## Spec 121 — V7-Style WDL-Prior Height Reconstruction (Small Model Lane) — CLOSED (architecture failure)
+
+- **2026-07-25**: Closed. RGB→WDL prediction is fundamentally wrong for this project. Three
+  architectures hit the same wall. The detailer (5% improvement, sc002=True) is salvageable.
+  Full diagnosis in `specs/121-v7-wdl-height/research.md`.
+- **Salvageable**: `DetailerMitB0Net`, within-map split, object-mask tile loss, diagnostic
+  tooling. All code preserved in `harvester/spec121/` and `harvester/v50/geometry_detailer_model.py`.
+- **Next**: user break. When ready: merged WDL prior → detailer refines. No RGB→WDL model.
 
 - **2026-07-24**: Stage A implemented + verified without training. `harvester/spec121/` (4 modules) + CLI + 30 tests (30/30 pass); full suite 1136 passed / 3 pre-existing unrelated failures (v24 export-map, 2× v25 h1_coarse); ruff+compileall clean. Real dry-run on dual_v3 + spec116 split: violation_count=0, lattice arrays present, object-mask absent → warn+disable path proven for real. `MitB0LatticeNet` 3,469,922 params (band-enforced). User decision: substrate named **v50.2** (v50.1 + lattice + object-mask arrays); trainer `--release` defaults v50.2.
 - Remaining: T013 USER RUN G1 (Stage A training, SC-001 ≥15% below tile-mean — fail = recorded negative, lane stops). T014–T020 bridge+detailer, T021–T023 paired mask-weight runs, T024–T027 chain materializer, T028–T031 bookkeeping (119/120 already archived).
