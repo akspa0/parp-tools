@@ -1,6 +1,84 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-25
+Last updated: 2026-07-30
+
+## Spec 122 — Canonical Dataset Curation and Signal-Mismatch Bucketing — US1-US4 IMPLEMENTED (this session)
+
+- **What it is**: the long-requested C# curation layer. Consolidates dataset quality classification
+  (bucketing + mismatch detection), previously reimplemented ad hoc every model generation in
+  Python, into one canonical library `WowViewer.Core.Curation` + a `curate` subcommand on
+  `WowViewer.Tool.Harvest`, so it can never again get silently dropped between model versions.
+- **Full speckit docs written and then implemented same session**: `specs/122-dataset-curation/`
+  (spec, plan, research — includes two background-agent external research reports on comparable
+  aerial/satellite image-to-terrain ML projects, folded into research.md Part B — data-model,
+  contracts, quickstart, tasks).
+- **Governing principle (explicit user correction mid-session)**: curation MUST partition, never
+  filter. Every tile gets a bucket + finding record, including bad/mismatched ones; every bucket is
+  equally queryable. This directly reverses the failure mode of the pre-existing Python tooling
+  (see below).
+- **US1 (canonical classification)**: `WowViewer.Core.Curation` — `DifficultyBucketClassifier` (4
+  buckets, ports `build_v16_curation_manifest._score_row_v16_1_1`'s exact weighted formula, adapted
+  for v50: roof coverage always 0 since v50 dropped roof masks, object coverage prefers the strict
+  `ObjectGeometryVisibleMask257` else the alpha-builder footprint masks), `CoverageBucketClassifier`
+  plus `BlankTileDetector` (ports `is_blank_what_plate`), `HeightNormalMismatchDetector` (exact port of
+  `mismatch_detector.py`'s thresholds/severity bands/reason strings), `NonFiniteSignalDetector`,
+  `HasFlagTruthfulnessDetector`. Output: two Parquet tables (`curation_manifest.parquet` one row per
+  tile, `curation_findings.parquet` one row per finding) + `curation_run.json`
+  (`v50-curation-run-v1`) under `<store>/curation/<curation_run_id>/`, plus a `latest` pointer. This
+  is the repo's first C#-side Parquet **writer** (Parquet.Net was previously read-only, via
+  `V18StorePlacementsReader.cs`).
+- **`curate` orchestration**: since this codebase has no C# Zarr reader, `curate` re-derives each
+  tile's `TerrainTileTensorPack` fresh from the client (reusing the exact same
+  `AlphaTensorPackBuilder`/`BuildPackFromArchiveAdt` path `harvest-stream` already uses — extracted
+  a shared `BuildEnrichedTensorPackForTile` helper, a behavior-preserving refactor, not a rewrite)
+  and only reads the store's `index.parquet` for row identity. Dry-run-first; `--write` required to
+  persist; refuses to write a partial manifest if any tile fails re-extraction (FR-008 full coverage
+  is a hard gate, not best-effort).
+- **US2 (equal access)**: `harvester/curation_store.py` — `load_curation_manifest`/
+  `load_curation_findings`, zero default filtering, resolves `curation/latest` by default. Proven:
+  querying `coverage_bucket == "blank"` is the identical column-filter call as `"well_covered"`.
+- **US3 (synthetic fidelity)**: `SyntheticFidelityDetector` reuses `MinimapShadingMatch`'s existing
+  best-candidate correlation (no new comparison invented) as `synthetic_fidelity_score`; below 0.30
+  (same threshold `MinimapLightingProvenance.Infer` already uses for its own mcsh-correlation
+  judgement) produces a `synthetic_fidelity_gap` finding. This is the durable, queryable answer to
+  the user's mid-session observation that synthetic minimap shading doesn't match authored — it
+  measures and exposes the gap; it does not implement a loss function that consumes it (future work).
+- **US4 (legacy consolidation) — corrected mid-implementation by a real-caller search**: the
+  original plan assumed 4 scattered scripts could become thin shims. A real search found 14+3 real
+  callers across V16/V18/V23-era scripts that depend on `v16_curation.py`/`mismatch_detector.py`/
+  `spec111/lighting_buckets.py`/`build_v16_curation_manifest.py`'s current behavior for store shapes
+  `curate` was never built to read — converting them to shims would have broken real, still-needed
+  functionality. **Corrected disposition**: documentation-only pointers added to all four (plus a
+  **newly-discovered fifth scattered script**, `spec103_curate_dataset.py` — the one that actually
+  produced the real curation output already on disk under
+  `output/datasets/v50/v50.1/curation-0_5_3_3368-<Map>*/`, schema `spec103-curation-v1`, a drop
+  filter that discarded 779/951 Kalimdor tiles with only aggregate reasons — exactly the anti-pattern
+  this feature exists to fix). No logic changed in any of the five; `docs/architecture/
+  v50-clean-room-dataset-repo-audit-2026-07-15.md` gained a canonical-entrypoint pointer section.
+  One real bug caught and fixed during this pass: a docstring edit that used a truncated
+  `old_string` match accidentally closed a multi-paragraph docstring early, turning the rest of it
+  into a syntax error — caught by `py_compile`, fixed, verified clean.
+- **Real-data validation (not just fixtures)**: `curate --write` run twice against the real
+  `H:\CLIENTS\0_5_3_3368` client + the real on-disk `0_5_3_3368-PVPZone02.zarr` store (64/64 tiles,
+  ~45-53s). Real, non-degenerate output: all four difficulty buckets populated, both coverage
+  buckets populated, three of four lighting statuses populated, 25/64 tiles fidelity-evaluated
+  (score range 0.0–0.69, 22 flagged high-severity gap) — directly, quantitatively corroborating the
+  user's own synthetic-minimap-shading concern on real data, not just in principle.
+  `StoreIndexReader` needed one real-data fix mid-session: pyarrow can write an int64 index column
+  as nullable even with no actual nulls, and Parquet.Net returns `long?[]` for it — fixed with a
+  defensive reader that fails loudly on a genuine null rather than silently coercing.
+- **Proof**: 39/39 `WowViewer.Core.Curation.Tests` pass; full solution Debug build 0 errors; 9/9
+  `data-harvester/tests/test_curation_store.py` pass (includes a real C#→pyarrow cross-language
+  fixture round-trip, not just same-language self-consistency); full `data-harvester` suite 1154
+  passed / 45 skipped / 3 pre-existing unrelated failures (v24 export-map fixture, 2× v25 h1_coarse
+  — unchanged from every prior session).
+- **Not done this session (explicitly, not silently)**: the SC-003 numeric comparison between
+  `mismatch_detector.py`'s legacy output and the new C# `HeightNormalMismatchDetector` on identical
+  real tiles was not run (no real height-normal mismatches occurred on the one map validated,
+  PVPZone02 — a larger map with more terrain would be needed for a meaningful comparison). Full
+  manual visual sign-off on synthetic-fidelity scores (SC-004) is a user step per this project's
+  established convention; only the quantitative distribution was assistant-verified. Kalimdor/
+  Azeroth/Kalidar (the larger, more terrain-diverse maps) have not yet been run through `curate`.
 
 ## Spec 121 — V7-Style WDL-Prior Height Reconstruction (Small Model Lane) — CLOSED (architecture failure)
 

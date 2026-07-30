@@ -1,0 +1,32 @@
+{
+  "schema": "v50-curation-run-v1",
+  "curation_run_id": "0_5_3_3368-fixture-20260730T000000000Z",
+  "store_path": "I:\\parp\\parp-tools\\wow-viewer\\data-harvester\\tests\\fixtures\\spec122_curation_manifest",
+  "build_fingerprint": "0_5_3_3368",
+  "checks_run": [
+    "difficulty_bucket",
+    "coverage_bucket",
+    "lighting_bucket",
+    "height_normal_mismatch",
+    "non_finite_value"
+  ],
+  "tile_count": 3,
+  "bucket_counts": {
+    "difficulty_bucket": {
+      "easy": 1,
+      "hard": 1,
+      "pathological": 1
+    },
+    "coverage_bucket": {
+      "well_covered": 1,
+      "low_coverage": 1,
+      "blank": 1
+    }
+  },
+  "finding_counts": {
+    "height_normal_mismatch": 1,
+    "non_finite_value": 1
+  },
+  "tool_version": "0.0.0-fixture",
+  "created_at": "2026-07-30T00:00:00+00:00"
+}

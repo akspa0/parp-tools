@@ -8,6 +8,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using StreamProfile = WowViewer.Core.IO.Maps.RawArraySerializer.StreamProfile;
+using WowViewer.Core.Curation;
 using WowViewer.Core.IO.Converters;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
@@ -148,6 +149,9 @@ static class Program
                 break;
             case "capture-objects":
                 RunCaptureObjects(tail);
+                break;
+            case "curate":
+                RunCurate(tail);
                 break;
             default:
                 Console.Error.WriteLine($"Unknown command '{command}'.");
@@ -2214,6 +2218,39 @@ static class Program
         int tileX,
         int tileY)
     {
+        bool needsTerrainTexturePayloads = streamProfile is StreamProfile.Full or StreamProfile.V22;
+        TerrainTileTensorPack? pack = BuildEnrichedTensorPackForTile(
+            catalog, clientRoot, mapName, wdtBytes, isAlpha, buildVersion, tileX, tileY,
+            fullTextureDecode: needsTerrainTexturePayloads);
+        if (pack is null)
+            return null;
+
+        using var ms = new MemoryStream();
+        RawArraySerializer.Serialize(pack, ms, streamProfile);
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Builds a fully-enriched <see cref="TerrainTileTensorPack"/> for one tile: base ADT/alpha-WDT
+    /// decode, WL loose-liquid enrichment, authored minimap load, and (when
+    /// <paramref name="fullTextureDecode"/>) minimap lighting/shading-match analysis and
+    /// name-aligned texture pixel attachment. Factored out of <see cref="TryBuildHarvestStreamBlob"/>
+    /// so <c>curate</c> (which classifies an already-existing store's tiles by re-deriving the same
+    /// pack the harvest-stream path already builds, rather than reading Zarr array data C# has no
+    /// reader for) shares one definition of "how to build a tile's pack" instead of a second,
+    /// divergent one.
+    /// </summary>
+    private static TerrainTileTensorPack? BuildEnrichedTensorPackForTile(
+        NativeMpqService catalog,
+        string clientRoot,
+        string mapName,
+        byte[] wdtBytes,
+        bool isAlpha,
+        string? buildVersion,
+        int tileX,
+        int tileY,
+        bool fullTextureDecode)
+    {
         TerrainTileTensorPack? pack = null;
         if (isAlpha)
         {
@@ -2244,18 +2281,187 @@ static class Program
             }
         }
 
-        bool needsTerrainTexturePayloads = streamProfile is StreamProfile.Full or StreamProfile.V22;
-        if (needsTerrainTexturePayloads)
+        if (fullTextureDecode)
             AnalyzeAuthoredMinimapLighting(catalog, mapName, pack, buildVersion);
         else if (pack.MinimapRgb256 is not null)
             SetMinimapLightingProvenance(pack, MinimapLightingProvenance.NotEvaluated("analysis_requires_full_texture_decode"));
 
-        if (needsTerrainTexturePayloads)
+        if (fullTextureDecode)
             AttachNameAlignedTexturePixels(catalog, pack);
 
-        using var ms = new MemoryStream();
-        RawArraySerializer.Serialize(pack, ms, streamProfile);
-        return ms.ToArray();
+        return pack;
+    }
+
+    /// <summary>
+    /// Spec 122: canonical dataset curation. Classifies every tile already listed in an existing
+    /// v50 store's <c>index.parquet</c> -- difficulty/coverage/lighting buckets and
+    /// height-normal-mismatch/non-finite/has-flag findings (<see cref="WowViewer.Core.Curation"/>)
+    /// -- by re-deriving each tile's <see cref="TerrainTileTensorPack"/> the same way
+    /// <c>harvest-stream</c> does (this codebase has no C# Zarr reader, so the store's own already-
+    /// decoded arrays are never opened; only its row identity is read). Dry-run by default (no
+    /// <c>--write</c>): prints the plan and writes nothing. The store's own signal arrays and
+    /// <c>index.parquet</c> are never modified (FR-014).
+    /// </summary>
+    static void RunCurate(string[] args)
+    {
+        string? clientRoot = GetOption(args, "--client-root", "-c");
+        string? storePath = GetOption(args, "--store", "-s");
+        string? mapFilter = GetOption(args, "--map", "-m");
+        bool write = HasFlag(args, "--write");
+
+        if (string.IsNullOrWhiteSpace(clientRoot) || string.IsNullOrWhiteSpace(storePath))
+        {
+            Console.Error.WriteLine("Error: --client-root and --store are required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (!Directory.Exists(clientRoot))
+        {
+            Console.Error.WriteLine($"Error: client root not found: {clientRoot}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (!Directory.Exists(storePath))
+        {
+            Console.Error.WriteLine($"Error: store not found: {storePath}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        clientRoot = ResolveGameClientRoot(clientRoot);
+        string? buildVersion = DetectBuildVersionFromClientRoot(clientRoot);
+        Console.WriteLine($"Build version: {buildVersion ?? "(unknown)"}");
+
+        IReadOnlyList<StoreIndexRow> allRows;
+        try
+        {
+            allRows = StoreIndexReader.Read(storePath);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error: failed to read store index: {ex.Message}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        List<StoreIndexRow> rows = string.IsNullOrWhiteSpace(mapFilter)
+            ? allRows.ToList()
+            : allRows.Where(r => r.Map.Equals(mapFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        Console.WriteLine($"Store: {storePath}");
+        Console.WriteLine($"Planned tile count: {rows.Count}" + (mapFilter is not null ? $" (map={mapFilter})" : $" (all {allRows.Select(r => r.Map).Distinct().Count()} map(s))"));
+        Console.WriteLine($"Checks planned: {string.Join(", ", TileCurator.KnownChecks)}");
+        Console.WriteLine("Per-tile evaluability (which checks actually ran vs. were not_evaluable for a given tile) is recorded in the written findings, not predicted here.");
+
+        if (!write)
+        {
+            Console.WriteLine($"Output would be written under: {Path.Combine(storePath, "curation", "<curation_run_id>")}");
+            Console.WriteLine("Dry run complete. Pass --write to actually classify and persist.");
+            return;
+        }
+
+        using var catalog = new NativeMpqService();
+        catalog.LoadArchives([clientRoot]);
+        TryLoadSupplementalListfile(catalog);
+        LoadMd5Translate(clientRoot, catalog);
+
+        var records = new List<TileCurationRecord>();
+        var findings = new List<MismatchFinding>();
+        var failures = new List<string>();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        string runId = CurationRunRecord.GenerateRunId(buildVersion ?? "unknown", storePath, DateTimeOffset.UtcNow);
+
+        foreach (IGrouping<string, StoreIndexRow> mapGroup in rows.GroupBy(r => r.Map))
+        {
+            string mapName = mapGroup.Key;
+            string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
+            byte[]? wdtBytes = catalog.ReadFile(wdtVirtual);
+            if (wdtBytes is null)
+            {
+                failures.Add($"map '{mapName}': could not read WDT '{wdtVirtual}' from client");
+                continue;
+            }
+            bool isAlpha = AlphaWdtReader.IsAlphaWdt(wdtBytes);
+
+            foreach (StoreIndexRow row in mapGroup)
+            {
+                TerrainTileTensorPack? pack;
+                try
+                {
+                    pack = BuildEnrichedTensorPackForTile(
+                        catalog, clientRoot, mapName, wdtBytes, isAlpha, buildVersion,
+                        row.TileX, row.TileY, fullTextureDecode: true);
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"tile ({mapName},{row.TileX},{row.TileY}): {ex.Message}");
+                    continue;
+                }
+
+                if (pack is null)
+                {
+                    failures.Add($"tile ({mapName},{row.TileX},{row.TileY}): could not be re-extracted from the client");
+                    continue;
+                }
+
+                (TileCurationRecord record, IReadOnlyList<MismatchFinding> tileFindings) =
+                    TileCurator.Classify(pack, row.Build, row.Map, row.TileX, row.TileY, row.TileId, runId);
+                records.Add(record);
+                findings.AddRange(tileFindings);
+            }
+        }
+
+        sw.Stop();
+        Console.WriteLine($"Classified {records.Count}/{rows.Count} tiles in {sw.Elapsed.TotalSeconds:F0}s.");
+
+        if (failures.Count > 0)
+        {
+            Console.Error.WriteLine($"Error: {failures.Count} tile(s) could not be classified -- refusing to write a partial manifest (FR-008 full coverage is a hard gate):");
+            foreach (string failure in failures.Take(20))
+                Console.Error.WriteLine($"  - {failure}");
+            if (failures.Count > 20)
+                Console.Error.WriteLine($"  ... and {failures.Count - 20} more");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var bucketCounts = new Dictionary<string, IReadOnlyDictionary<string, int>>
+        {
+            ["difficulty_bucket"] = TallyBucket(records.Select(r => r.DifficultyBucket)),
+            ["coverage_bucket"] = TallyBucket(records.Select(r => r.CoverageBucket)),
+            ["lighting_bucket"] = TallyBucket(records.Select(r => r.LightingBucket)),
+        };
+        var findingCounts = findings
+            .GroupBy(f => f.Category)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        var runRecord = new CurationRunRecord
+        {
+            CurationRunId = runId,
+            StorePath = storePath,
+            BuildFingerprint = buildVersion ?? "unknown",
+            ChecksRun = TileCurator.KnownChecks,
+            TileCount = records.Count,
+            BucketCounts = bucketCounts,
+            FindingCounts = findingCounts,
+            ToolVersion = typeof(Program).Assembly.GetName().Version?.ToString() ?? "0.0.0",
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+        string runDir = CurationManifestWriter.Write(storePath, runRecord, records, findings);
+        Console.WriteLine($"Wrote curation manifest for {records.Count} tiles to: {runDir}");
+        Console.WriteLine($"Findings: {findings.Count} across {findingCounts.Count} categor{(findingCounts.Count == 1 ? "y" : "ies")}.");
+    }
+
+    private static Dictionary<string, int> TallyBucket(IEnumerable<string> values)
+    {
+        var counts = new Dictionary<string, int>();
+        foreach (string v in values)
+            counts[v] = counts.GetValueOrDefault(v) + 1;
+        return counts;
     }
 
     private static StreamProfile ResolveStreamProfile(string value)

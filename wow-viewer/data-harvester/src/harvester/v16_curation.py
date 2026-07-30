@@ -2,6 +2,16 @@
 
 This sits between the raw Zarr truth stores and the trainers so tile-quality
 rules can be computed once and reused across model families.
+
+Spec 122 note: for the v50 lane, the canonical curation entrypoint is now
+``WowViewer.Tool.Harvest curate`` (``wow-viewer/src/core/WowViewer.Core.Curation``), read via
+``harvester.curation_store``. This module is NOT converted to a thin shim over it: a real-caller
+search (2026-07-30) found it is still imported by V16/V18/V23-era scripts
+(``harvester.v16_1_dataset``, ``harvester.v16_2_dataset``, ``harvester.v23.dataset``,
+``scripts/build_v16_curation_manifest.py``, ``scripts/detect_height_normal_mismatch.py``, and
+others) that operate on store shapes ``curate`` was never built to read. It remains the correct
+tool for that scope. Do not add new v50-scoped curation logic here -- add it to
+``WowViewer.Core.Curation`` instead.
 """
 
 from __future__ import annotations

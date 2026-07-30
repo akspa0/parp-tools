@@ -1,3 +1,13 @@
+"""Build a V16-store curation manifest (bucket scores, kept/dropped tiles, review panels).
+
+Spec 122 note (2026-07-30): this script's own real-caller search found it is still imported by
+``harvester.test_v18_focus_masks``, ``scripts/run_v18_baseline_contract.py``, and
+``scripts/build_v18_curation_manifest.py`` -- it is NOT purely historical and is not converted to a
+shim. It remains the correct tool for V16/V18-shaped stores. For the v50 lane, the canonical
+curation entrypoint is ``WowViewer.Tool.Harvest curate`` (see
+``wow-viewer/src/core/WowViewer.Core.Curation`` and ``harvester.curation_store``).
+"""
+
 from __future__ import annotations
 
 import argparse

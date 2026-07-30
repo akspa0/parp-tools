@@ -5,12 +5,17 @@ and overall lighting-bucket distribution report.
 
 Lane note: the active dataset lane is **v50** (Spec 109). The C# harvester computes shading-match
 provenance at extraction time and attaches it to each tile's metadata regardless of lane; this
-sidecar layout is the transport the harvester writes *today*, because Spec 109's clean-room V50
-store builder does not exist yet (``v50_build_dataset.py`` fails closed). When that builder lands,
-it must carry ``minimap_lighting`` (including these shading-match fields) as one of its
-DatasetSignals, and this reader gains a V50-store path alongside -- not instead of -- the sidecar
-it can already read. No new primary storage format is introduced (constitution principle V); the
-report is a derived summary artifact, analogous to Spec 110's ``synthesis-manifest.json``.
+sidecar layout was the only transport when this module was written. Update (2026-07-30, Spec 122):
+the v50 store builder has since landed, and the same shading-match status/confidence this module
+reports on is now ALSO durably recorded per-tile by the canonical
+``WowViewer.Core.Curation.Buckets.LightingBucketClassifier`` (run via
+``WowViewer.Tool.Harvest curate``, read via ``harvester.curation_store``) as that tile's
+``lighting_bucket``. This module is not converted to a shim over it -- it reports a
+decoded-metadata-sidecar-scoped distribution (a different artifact shape/audience), and no real
+caller currently depends on it changing. New v50-lane lighting-bucket consumers should prefer
+reading ``curation_manifest.parquet``'s ``lighting_bucket`` column over this sidecar report where
+both are available. No new primary storage format is introduced (constitution principle V); this
+report remains a derived summary artifact, analogous to Spec 110's ``synthesis-manifest.json``.
 """
 
 from __future__ import annotations

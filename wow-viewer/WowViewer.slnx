@@ -5,6 +5,7 @@
       <Project Path="src/core/WowViewer.Core.Anim/WowViewer.Core.Anim.csproj" />
     </Folder>
     <Project Path="src/core/WowViewer.Core.IO/WowViewer.Core.IO.csproj" />
+    <Project Path="src/core/WowViewer.Core.Curation/WowViewer.Core.Curation.csproj" />
     <Project Path="src/core/WowViewer.Core.PM4/WowViewer.Core.PM4.csproj" />
     <Project Path="src/core/WowViewer.Core.Runtime/WowViewer.Core.Runtime.csproj" />
     <Project Path="src/core/WowViewer.Core/WowViewer.Core.csproj" />
@@ -22,6 +23,7 @@
       <Project Path="tests/WowViewer.Core.Anim.Tests/WowViewer.Core.Anim.Tests.csproj" />
     </Folder>
     <Project Path="tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj" />
+    <Project Path="tests/WowViewer.Core.Curation.Tests/WowViewer.Core.Curation.Tests.csproj" />
     <Project Path="tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/" />

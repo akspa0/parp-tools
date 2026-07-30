@@ -383,6 +383,25 @@ target as separate curriculum rows (user choice).
 - `mddf_mask`, `modf_mask`: Removed (synthesized/interpolated projections).
 - `model_above_terrain_mask`: Removed (requires volumetric redesign).
 
+## Canonical Curation Entrypoint (Spec 122, added 2026-07-30)
+
+Dataset quality curation (difficulty/coverage/lighting buckets, height-normal-mismatch/non-finite/
+has-flag-mismatch/synthetic-fidelity-gap findings) for the v50 lane now has one canonical, durable
+entrypoint: `WowViewer.Tool.Harvest curate --client-root <path> --store <v50 store>`
+(`wow-viewer/src/core/WowViewer.Core.Curation`), read from Python via
+`harvester.curation_store.load_curation_manifest`/`load_curation_findings`. It classifies every
+tile in a store's `index.parquet` — including bad/mismatched ones — into a durable, equally-
+queryable Parquet manifest under `<store>/curation/<curation_run_id>/`; it never silently drops a
+tile. Five pre-existing scattered Python curation implementations were found and are documented
+in-place (not converted to shims, since real callers on V16/V18/V23-era store shapes depend on
+their current behavior): `v16_curation.py`, `mismatch_detector.py`, `spec111/lighting_buckets.py`,
+`build_v16_curation_manifest.py`, and `spec103_curate_dataset.py` (the last is a fifth,
+previously-undocumented script — the one that actually produced the real curation output already
+on disk under `curation-0_5_3_3368-<Map>*/`, a drop-filter that discards ~80% of tiles with only
+aggregate reasons, not durable per-tile records). New v50-lane curation work should read the
+canonical manifest, not add another scattered implementation. See
+`specs/122-dataset-curation/` for the full design.
+
 ## Approved and Protected Roots (T003)
 
 To guarantee safety during clean-room dataset builds and cleanup:

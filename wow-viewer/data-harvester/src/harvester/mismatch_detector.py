@@ -3,6 +3,17 @@
 Detects tiles where normal vectors encode significant terrain variation
 but the height data is suspiciously flat — indicating poisoned supervision
 that degrades height model training.
+
+Spec 122 note: this exact check is now also ported to C# as
+``WowViewer.Core.Curation.Mismatch.HeightNormalMismatchDetector`` (same thresholds, same reason
+strings), run via ``WowViewer.Tool.Harvest curate`` against v50 stores and read via
+``harvester.curation_store``. This module is NOT converted to a thin shim: a real-caller search
+(2026-07-30) found it is still imported by ``scripts/detect_height_normal_mismatch.py``,
+``scripts/reconstruct_heights_from_normals.py``, ``scripts/build_teacher_prior_dataset.py``, and
+``harvester.test_061_mismatch_repair``, which operate on V16/V18/V23-era store shapes ``curate``
+does not read. It remains the correct tool for that scope. The SC-003 side-by-side comparison
+between this detector's output and the new C# port's output, on the same real tiles, is a tracked
+follow-up (not yet run this session).
 """
 
 from __future__ import annotations

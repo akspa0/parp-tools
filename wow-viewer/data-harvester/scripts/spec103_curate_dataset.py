@@ -1,5 +1,19 @@
 """Spec 103 — curate + bucket the training corpus into a clean, coherent tile set.
 
+Spec 122 note (2026-07-30): this script was discovered mid-session as a FIFTH scattered curation
+implementation, not previously accounted for by Spec 122's original scope (v16_curation.py,
+mismatch_detector.py, spec111/lighting_buckets.py, build_v16_curation_manifest.py). It is the
+script that actually produced the real curation output already on disk under
+``output/datasets/v50/v50.1/curation-0_5_3_3368-<Map>*/`` (schema ``spec103-curation-v1``) --
+i.e. it is the one Python script that WAS actively curating real v50 stores before this feature
+existed. Its core failure mode is exactly what this feature's User Story 2 was written to fix: it
+is a DROP filter (kept 172/951 Kalimdor tiles; the other 779 are gone except for aggregate
+drop_reason counts in a summary JSON, not a durable per-tile queryable record). The canonical v50
+curation entrypoint going forward is ``WowViewer.Tool.Harvest curate`` (see
+``wow-viewer/src/core/WowViewer.Core.Curation`` and ``harvester.curation_store``), which classifies
+and retains every tile. This script is not deleted or converted to a shim in this pass (a
+real-caller search for it was not run); do not point new v50-lane curation work at it.
+
 The governing law (spec Principle #5) makes this mandatory, not optional: a supervised target
 must contain only information the input image supports. Height under an object is occluded in
 the minimap, so an object tile is an impossible target and must be DROPPED, not learned. Blank

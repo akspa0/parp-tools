@@ -1,6 +1,40 @@
 # Progress — wow-viewer
 
-Last updated: 2026-07-25
+Last updated: 2026-07-30
+
+## Spec 122 — Canonical Dataset Curation and Signal-Mismatch Bucketing — US1-US4 shipped
+
+- **2026-07-30**: Full speckit docs (spec/plan/research/data-model/contracts/quickstart/tasks) then
+  full implementation, same session. New `WowViewer.Core.Curation` C# library (repo's first Parquet
+  *writer*) + `WowViewer.Tool.Harvest curate` subcommand classify every tile in a v50 store into
+  difficulty/coverage/lighting buckets and height-normal-mismatch/non-finite/has-flag/synthetic-
+  fidelity-gap findings — durably, partitioned (never filtered), every bucket equally queryable via
+  new `harvester/curation_store.py`. Real-data validated twice against `H:\CLIENTS\0_5_3_3368` +
+  the on-disk `0_5_3_3368-PVPZone02.zarr` store (64/64 tiles each run): non-degenerate output across
+  all buckets, and a real quantitative synthetic-fidelity gap (22/25 evaluated tiles flagged
+  high-severity) directly corroborating the session's own opening observation about synthetic
+  minimap shading not matching authored minimaps.
+- **Mid-session correction (US4)**: a real-caller search (not assumed) found 14+3 live callers of
+  the four originally-targeted legacy Python scripts on V16/V18/V23-era store shapes — converting
+  them to thin shims would have broken real functionality. Corrected to documentation-only pointers
+  in all five scripts (a fifth, previously-unknown scattered curation script,
+  `spec103_curate_dataset.py`, was discovered mid-session — it's the one that produced the real
+  `curation-0_5_3_3368-<Map>*/` output already on disk, a drop-filter losing 779/951 Kalimdor tiles
+  to aggregate-only reasons). One real bug caught by `py_compile` and fixed: a docstring edit that
+  used a too-short `old_string` match accidentally closed a multi-paragraph docstring early.
+- **Full speckit docs**: `specs/122-dataset-curation/{spec,plan,research,data-model,quickstart,
+  tasks}.md` + `contracts/cli-contract.md` + `checklists/requirements.md`. research.md Part B folds
+  in two background-agent reports comparing the v50 signal catalog against external HF/GitHub
+  aerial-to-terrain ML projects — key finding: "coarse elevation prior + RGB-guided residual" (this
+  project's already-validated v7/detailer shape) is an independently-converged-on external subfield
+  (Real-GDSR, Prompt2DEM, etc.), and no external precedent exists for discrete/categorical
+  texture-layer prediction or for cross-signal relational curation (this project is ahead there).
+- **Proof**: 39/39 `WowViewer.Core.Curation.Tests`; full solution Debug build 0 errors; 9/9
+  `test_curation_store.py` (incl. a real C#-to-pyarrow cross-language fixture round-trip); full
+  `data-harvester` suite 1154 passed / 45 skipped / 3 pre-existing unrelated failures (unchanged).
+- **Not done this session**: SC-003 legacy-vs-new numeric mismatch comparison (no real mismatches
+  occurred on the one validated map, PVPZone02, to compare against); full manual visual sign-off on
+  synthetic-fidelity scores (user step); Kalimdor/Azeroth/Kalidar not yet run through `curate`.
 
 ## Spec 121 — V7-Style WDL-Prior Height Reconstruction (Small Model Lane) — CLOSED (architecture failure)
 
