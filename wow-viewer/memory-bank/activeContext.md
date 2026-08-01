@@ -1,6 +1,26 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-07-30
+Last updated: 2026-08-01
+
+## Bugfix — ObjectCaptureShader light direction Z component inverted (marshmallow backlighting)
+
+- **Root cause**: [`ObjectCaptureShader`](wow-viewer/src/core/WowViewer.Core.Renderer/ObjectCapture/ObjectCaptureShader.cs:52) hardcoded `lightDir = (0.4, -0.5, 0.85)` with positive Z. WoW geometry normals use DirectX convention (clockwise winding), but OpenGL defaults to counter-clockwise front faces, which inverts the effective Z component of the normals. The upward-pointing light (`+0.85 Z`) therefore lit bottom surfaces instead of top surfaces, making objects look like backlit marshmallows.
+- **Fix**: negated `lightDir.Z` to `-0.85` at line 55, so the light direction correctly lights top surfaces given the inverted normals.
+- **Scope**: only the object capture shader had this issue. The terrain compositor and viewer renderers use different lighting paths that are unaffected.
+
+## Bugfix — Taxi panel pop-out button removed (duplicate entry point)
+
+- **Removed**: the [`DrawToolbarPopupButton("Taxi Panel", ...)`](wow-viewer/src/viewer/WoWViewer/ViewerApp.cs:8265) call in the toolbar — an ImGui popup with no title bar that dismissed on any outside click, making route selection impossible.
+- **Removed**: the floating [`DrawTaxiWindow()`](wow-viewer/src/viewer/WoWViewer/ViewerApp_Sidebars.cs:3350) method and its draw call.
+- **Removed**: the `_showTaxiWindow` field.
+- **Kept**: the workbench Utilities tab version (`DrawTaxiContent()` via `DrawSelectedTaxiControls()`), which has a proper title bar and stable click behavior.
+
+## Bugfix — SynthesizedTrainingService hillshade light direction had inverted Y axis
+
+- **Root cause**: [`SynthesizedTrainingService.CalculateHillshade()`](wow-viewer/src/viewer/WoWViewer/Terrain/Vlm/SynthesizedTrainingService.cs:190) used the standard hillshade formula which assumes Y increases upward (north), but in image space Y increases downward (south). The `lightY` component was not negated, so a configured 315° (north-west) azimuth produced a south-west light direction in the output image — lighting the south-west faces of mountains instead of the north-west faces.
+- **Fix**: negated `lightY` at line 205: `float lightY = -MathF.Cos(altitudeRad) * MathF.Cos(azimuthRad);`
+- **Scope**: only this one method had the bug. The [`TerrainMinimapCompositor`](wow-viewer/src/core/WowViewer.Core.IO/Maps/TerrainMinimapCompositor.cs) works in 3D world space (North/West/Up) and is unaffected. No other hillshade calculations exist in the codebase.
+- **Impact**: synthesized training pairs from the VLM pipeline now correctly light north-west facing slopes. The `TerrainSolarDirection`/compositor path (used by the current v50 dataset pipeline) was already correct.
 
 ## Spec 122 — Canonical Dataset Curation and Signal-Mismatch Bucketing — US1-US4 IMPLEMENTED (this session)
 

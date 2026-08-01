@@ -197,9 +197,12 @@ public class SynthesizedTrainingService
         float azimuthRad = LightAzimuth * MathF.PI / 180f;
         float altitudeRad = LightAltitude * MathF.PI / 180f;
         
-        // Light direction vector
+        // Light direction vector in image space.
+        // The standard hillshade formula assumes Y increases upward (north), but in image
+        // space Y increases downward (south). Negate lightY to correct for the inverted axis;
+        // otherwise a 315-degree (north-west) azimuth produces a south-west light in the output.
         float lightX = MathF.Cos(altitudeRad) * MathF.Sin(azimuthRad);
-        float lightY = MathF.Cos(altitudeRad) * MathF.Cos(azimuthRad);
+        float lightY = -MathF.Cos(altitudeRad) * MathF.Cos(azimuthRad);
         float lightZ = MathF.Sin(altitudeRad);
         
         for (int y = 0; y < h; y++)

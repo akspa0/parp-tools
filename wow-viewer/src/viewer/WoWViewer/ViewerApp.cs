@@ -774,7 +774,6 @@ public partial class ViewerApp : IDisposable
     private bool _showMcnkExplorerWindow;
     private bool _showCaptureAutomationWindow = false;
     private bool _showUniqueIdArchaeologyWindow;
-    private bool _showTaxiWindow;
     private bool _showWeakSignalWindow;
     private bool _showPm4SceneGraph = true;
 
@@ -1769,8 +1768,6 @@ void main() {
                 if (_showUniqueIdArchaeologyWindow && _worldScene != null)
                     DrawUniqueIdArchaeologyWindow();
 
-                if (_showTaxiWindow && _worldScene != null)
-                    DrawTaxiWindow();
             }
 
             // Settings (global configuration window) - must render in BOTH tabbed and legacy modes
@@ -8262,7 +8259,9 @@ void main() {
                     : _worldScene.ShowTaxi
                         ? "visible"
                         : string.Empty;
-        DrawToolbarPopupButton("Taxi Panel", taxiSummary, "##TaxiPanelPopup", DrawSelectedTaxiControls);
+        // Taxi panel is accessed via the Utilities workbench tab only.
+        // The toolbar popup was removed because ImGui popups have no title bar and
+        // dismiss on any outside click, making route selection impossible.
 
         // WL loose liquid files (WLW/WLQ/WLM) — lazy-loaded on first toggle
         if (_worldScene.WlLoader != null && _worldScene.WlLoader.HasData)

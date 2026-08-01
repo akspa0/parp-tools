@@ -49,7 +49,11 @@ void main() {
         return;
     }
     vec3 baseColor = uHasTexture != 0 ? texture(uSampler, vUv).rgb : vec3(0.75, 0.75, 0.75);
-    vec3 lightDir = normalize(vec3(0.4, -0.5, 0.85));
+    // WoW geometry normals use DirectX convention (clockwise winding). OpenGL defaults to
+    // counter-clockwise front faces, which inverts the Z component of the effective normals.
+    // Negate lightDir.Z so the upward-pointing light correctly lights top surfaces instead of
+    // bottom surfaces (the marshmallow backlighting bug).
+    vec3 lightDir = normalize(vec3(0.4, -0.5, -0.85));
     float diff = max(dot(normalize(vNormal), lightDir), 0.25);
     FragColor = vec4(baseColor * diff, 1.0);
 }";

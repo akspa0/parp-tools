@@ -3347,18 +3347,6 @@ public partial class ViewerApp
         ImGui.End();
     }
 
-    private void DrawTaxiWindow()
-    {
-        // 069 Phase 16: wrapper keeps legacy floating-window behavior.
-        // Workbench sub-tab uses DrawTaxiContent directly.
-        ImGui.SetNextWindowSize(new Vector2(460f, 500f), ImGuiCond.FirstUseEver);
-        if (ImGui.Begin("Taxi Panel", ref _showTaxiWindow))
-        {
-            DrawTaxiContent();
-        }
-        ImGui.End();
-    }
-
     private void DrawTaxiContent()
     {
         DrawSelectedTaxiControls();
