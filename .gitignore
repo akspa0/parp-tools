@@ -662,3 +662,6 @@ map-references/ek25pct.jpg
 wow-viewer/data-harvester/sidecar.parquet
 wow-viewer/data-harvester/sidecar.json
 wow-viewer/imgui.ini.bak-offscreen-layout
+wow-viewer/dusk/*
+wow-viewer/noon/*
+wow-viewer/dawn/*
