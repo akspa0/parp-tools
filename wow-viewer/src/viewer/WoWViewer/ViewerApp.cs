@@ -133,7 +133,7 @@ public partial class ViewerApp : IDisposable
         public Vector3 EditedPosition { get; set; }
     }
 
-    private const string ViewerProductName = "WoWViewer v0.5.0";
+    private const string ViewerProductName = "WoWViewer v0.5.2";
     private const string ViewerAboutPopupTitle = "About WoWViewer";
     private static readonly MethodInfo? ImGuiControllerWindowResizedMethod =
         typeof(ImGuiController).GetMethod("WindowResized", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -856,6 +856,8 @@ public partial class ViewerApp : IDisposable
     private int _synthesizedMinimapResolution = 256;
     private bool _synthesizedMinimapEmitTiles = true;
     private bool _synthesizedMinimapEmitWholeMap = true;
+    private bool _synthesizedMinimapIncludeWmos;
+    private bool _synthesizedMinimapBakeMcsh;
     private bool _synthesizedMinimapRunning;
     private bool _synthesizedMinimapDone;
     private string? _synthesizedMinimapError;

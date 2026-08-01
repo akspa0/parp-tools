@@ -1,4 +1,4 @@
-# Feature Specification: Legacy M2 model rendering (client 0.11 – 2.4.3)
+# Feature Specification: Legacy M2 model rendering (client 1.0.0 – 2.4.3)
 
 **Feature Branch**: `104-legacy-m2-rendering` (work lands on `v0.5.0-prerelease`, per project convention)
 
@@ -6,17 +6,18 @@
 
 **Status**: Active — 1.0.0 (`MD20`, version `0x100`) is the current implementation slice.
 
-**Input**: User description: "M2 model rendering support for legacy client versions 0.11 through 2.4.3 (WoW alpha through end of The Burning Crusade). 1.x client assets are M2 (`MD20`), not MDX. The viewer must dispatch each supported layout to its own M2 reader and must never advise an MDX/MDL substitute for a 1.x M2 asset."
+**Input**: User description: "M2 model rendering support for legacy client versions 1.0.0 through 2.4.3 (Vanilla through end of The Burning Crusade). 1.x client assets are M2 (`MD20`), not MDX. The viewer must dispatch each supported layout to its own M2 reader and must never advise an MDX/MDL substitute for a 1.x M2 asset. Client builds 0.11 and 0.12 use the older MDX model type (not M2) and are already handled by the MDX path."
 
 ## Overview
 
-Models from WoW client builds **0.11 through 2.4.3** currently load as empty bounding boxes in
-the viewer: the header and bounds parse, but no mesh and no materials appear. This feature is the
-investigation and implementation needed to render these legacy models correctly. It is
-research-heavy: the concrete deliverable is a per-format-version understanding of the M2 header
-layout and the **embedded skin profiles** (geometry submeshes, triangle indices, texture-unit /
-material bindings) that these older formats store inside the `.m2` file itself, plus the reader
-changes that consume them.
+Models from WoW client builds **1.0.0 through 2.4.3** currently load as empty bounding boxes in
+the viewer: the header and bounds parse, but no mesh and no materials appear. (Client builds
+0.11 and 0.12 use the older MDX model type, not M2, and render correctly — they are out of
+scope.) This feature is the investigation and implementation needed to render these legacy
+models correctly. It is research-heavy: the concrete deliverable is a per-format-version
+understanding of the M2 header layout and the **embedded skin profiles** (geometry submeshes,
+triangle indices, texture-unit / material bindings) that these older formats store inside the
+`.m2` file itself, plus the reader changes that consume them.
 
 The scope discriminator is the **M2 format version** (the `uint32` at header offset `0x04`), not
 the client build string — several builds share a format version, and the format changed at known

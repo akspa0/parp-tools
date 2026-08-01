@@ -128,9 +128,18 @@ public sealed unsafe class WmoObjectRenderer : IDisposable
 
     public unsafe void Render(Matrix4x4 viewProj, bool maskMode)
     {
+        RenderWithTransform(viewProj, Matrix4x4.Identity, maskMode);
+    }
+
+    /// <summary>
+    /// Renders this WMO with a per-instance world-space transform. Used by the tile-WMO
+    /// compositor to render placed WMOs at their actual world positions (MODF placement).
+    /// </summary>
+    public unsafe void RenderWithTransform(Matrix4x4 viewProj, Matrix4x4 model, bool maskMode)
+    {
         _shader.Use();
         _shader.SetViewProj(viewProj);
-        _shader.SetModel(Matrix4x4.Identity);
+        _shader.SetModel(model);
         _shader.SetMaskMode(maskMode);
         _shader.SetSamplerUnit(0);
 

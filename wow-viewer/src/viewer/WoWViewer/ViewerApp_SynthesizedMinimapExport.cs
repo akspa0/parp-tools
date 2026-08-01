@@ -89,6 +89,14 @@ public partial class ViewerApp
         ImGui.SameLine();
         ImGui.Checkbox("Write one stitched map PNG", ref _synthesizedMinimapEmitWholeMap);
 
+        ImGui.Checkbox("Include WMO geometry", ref _synthesizedMinimapIncludeWmos);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Render placed WMO buildings on top of the terrain minimap with matching solar lighting.");
+        ImGui.SameLine();
+        ImGui.Checkbox("Bake MCSH shadows", ref _synthesizedMinimapBakeMcsh);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Include the terrain-side static shadow map (MCSH) in the output. Without this, only Lambert hillshading is used (no cast shadows).");
+
         ImGui.Text("Output directory:");
         ImGui.SetNextItemWidth(-88);
         ImGui.InputText("##synthmin_output", ref _synthesizedMinimapOutputDirectory, 1024);
@@ -167,6 +175,8 @@ public partial class ViewerApp
         int resolution = _synthesizedMinimapResolution;
         bool emitTiles = _synthesizedMinimapEmitTiles;
         bool emitWholeMap = _synthesizedMinimapEmitWholeMap;
+        bool includeWmos = _synthesizedMinimapIncludeWmos;
+        bool bakeMcsh = _synthesizedMinimapBakeMcsh;
 
         _ = Task.Run(async () =>
         {
@@ -179,7 +189,9 @@ public partial class ViewerApp
                     timeHours,
                     resolution,
                     emitTiles,
-                    emitWholeMap);
+                    emitWholeMap,
+                    includeWmos,
+                    bakeMcsh);
             }
             catch (Exception ex)
             {
@@ -202,7 +214,9 @@ public partial class ViewerApp
         float timeHours,
         int resolution,
         bool emitTiles,
-        bool emitWholeMap)
+        bool emitWholeMap,
+        bool includeWmos,
+        bool bakeMcsh)
     {
         HarvestLaunchSpec? launch = ResolveHarvestLaunchSpec();
         if (launch is null)
@@ -239,6 +253,10 @@ public partial class ViewerApp
             startInfo.ArgumentList.Add("--per-tile");
         if (emitWholeMap)
             startInfo.ArgumentList.Add("--whole-map");
+        if (includeWmos)
+            startInfo.ArgumentList.Add("--include-wmos");
+        if (bakeMcsh)
+            startInfo.ArgumentList.Add("--bake-mcsh");
 
         AppendSynthesizedMinimapLog(
             $"> {launch.DisplayName} synthetic-minimap --map {mapName} --time-hours {TimeOfDayClock.FromHours(timeHours)}");

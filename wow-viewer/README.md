@@ -6,18 +6,10 @@ World viewer, CLI toolchain, shared format libraries, and data-harvester for sta
 
 ## Current focus
 
-- **Spec 103 `103-image-only-reconstruction` — terrain height regressor, RunPod training path ready.** Revived and re-architected the v7 U-Net: `V8LeanUNet` (ConvNeXt-V2-style, 6.2M params, default) replaces the 117M original for fast local iteration; `--arch v7` kept for ablation only. RunPod bundle + scripts ready (`specs/103-image-only-reconstruction/quickstart.md` "Start here" section) — local GPU training is off (overheating), all training moves to the cloud. Curated V18 corpus: 2,253/5,134 tiles.
-- **Spec 097 `097-v18-to-wdl-adt` — full-map V18 Zarr → stitched mesh + WDL + ADT round-trip.** Slice 1 (per-map stitched OBJ + baked atlas with edge alignment) is live as of 2026-07-10. Northrend smoke: 1,131 tiles → 7,453×10,023 heightmap, 74.7M vertices, 6.3 min wall. Slices 2/3/4 (WDL writer, ADT writer, round-trip smoke) are next-session work.
-- **Spec 096 `096-v24-minimap-deploy` — V24 minimap-to-prior deployment wiring.** Trained the minimap-only Stage A checkpoint; ships `infer_v24_stage_a_png.py` (PNG → WDL prior NPZ), `v24_prior_to_obj.py` (NPZ → textured OBJ), and `v24_run_on_png.py` (one-shot wrapper for any PNG, with `--batch-dir` for folder processing). 40/40 v24 tests pass. Honest caveat: the minimap-only regime is 158× worse than the cheat regime on the held-out V24 prior validation. Spec 095 (learned minimap cleaner) is the next step.
-- Spec 089 `089-dav2-height-predictor` — active height-model lane.
-- Spec 088 `088-v22-enrichment-from-v18` — active V22 dataset contract.
-- Spec 080 `080-wow-ui-consolidation` — active viewer-shell doc and compatibility lane.
-
-Background, not front-of-queue:
-
-- Spec 047 — focused V18 operator lane.
-- Spec 079 — shared RunPod bundle/runtime pattern.
-- Spec 076 and Spec 077 — paused/background until reopened.
+- **Spec 122 `122-dataset-curation` — canonical C# curation layer.** Consolidates dataset quality classification (difficulty/coverage/lighting buckets + height-normal-mismatch/non-finite/synthetic-fidelity findings) into `WowViewer.Core.Curation` + `WowViewer.Tool.Harvest curate` subcommand. Every tile gets a bucket + finding record; no tile is ever silently dropped. Real-data validated on PVPZone02 (64/64 tiles). This is the repo's first C# Parquet writer.
+- **Synthesized minimap export** — `WowViewer.Tool.Harvest synthetic-minimap` composes terrain-only and _liquid minimap PNGs directly from client BLP textures + MCLY/MCAL/MCNR. Supports any time of day via `--time-hours` (default 12:00 noon). The shared solar direction (`TerrainSolarDirection`) holds a fixed NW bearing with cycling elevation, matching the traced 0.5.3.3368 native client behavior.
+- **Lighting fixes (2026-08-01):** hillshade Y-axis inversion fixed in `SynthesizedTrainingService` (NW light was rendering as SW); object capture Z backlighting fixed in `ObjectCaptureShader` (DirectX-vs-OpenGL winding mismatch); taxi panel pop-up removed (broken ImGui popup with no title bar).
+- **V50 dataset pipeline** — active terrain reconstruction lane using merged WDL prior + detailer architecture. V50.2 substrate adds lattice + object-mask arrays.
 
 ## Hard boundaries
 
@@ -36,7 +28,7 @@ dotnet test wow-viewer/WowViewer.slnx -c Debug
 CI: `.github/workflows/wowviewer-build.yml` builds the solution on Windows and compile-checks
 the cross-platform target on Linux + macOS on every push/PR touching `wow-viewer/`; the test
 suite runs as an informational (non-blocking) job. A `v*` tag push (or manual dispatch with
-`publish_release`) publishes self-contained binaries for **win-x64, linux-x64, osx-arm64, and
+`workflow_dispatch`) publishes self-contained binaries for **win-x64, linux-x64, osx-arm64, and
 osx-x64** and, for tags, creates a GitHub Release with the notes from
 [docs/releases/](docs/releases/). BLP decoding uses ImageSharp everywhere (the old GDI+ path
 was Windows-only at runtime), so Linux/macOS builds are functional — with one known limitation:
@@ -70,7 +62,7 @@ Use `uv run ...` from that directory for dataset, training, and inference work.
 ## Main surfaces
 
 | Surface | Purpose | Path |
-|------|------|------|
+|---------|---------|------|
 | Viewer app | 3D world viewer | `src/viewer/WoWViewer/` |
 | Shared libraries | format/domain/runtime code | `src/core/` |
 | CLI tools | inspect, convert, harvest, validation, animfarm | `tools/` |

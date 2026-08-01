@@ -91,6 +91,7 @@ static class Program
         float TextureRepeatsPerChunk,
         bool PerTileRequested,
         bool WholeMapRequested,
+        bool WmoOverlay,
         SyntheticMinimapLightingProfile Lighting,
         string LiquidRenderProfile,
         TerrainMinimapStitchResult? WholeMap,
@@ -184,7 +185,9 @@ static class Program
                                 MPQs to PNGs + a manifest JSON (era-specific pixels)
               synthetic-minimap Compose paired terrain-only and _liquid minimaps directly from
                                 client tiles, with optional per-tile and whole-map PNG outputs.
-                                Normal RGB omits MCSH; --bake-mcsh is an exceptional-history preview only.
+                                Use --time-hours (HHmm or HH:mm) to set the sun position;
+                                defaults to 12:00 (noon, full-bright). Normal RGB omits MCSH;
+                                --bake-mcsh is an exceptional-history preview only.
               split-minimap-image
                                 Slice one standalone composite map image (e.g. a full-continent
                                 scan/render with no client/MPQ backing) into a fixed-size tile grid
@@ -1441,6 +1444,7 @@ static class Program
         bool emitPerTile = HasFlag(args, "--per-tile");
         bool emitWholeMap = HasFlag(args, "--whole-map");
         bool bakeMcsh = HasFlag(args, "--bake-mcsh");
+        bool includeWmos = HasFlag(args, "--include-wmos");
         bool emitAuthoredReference = HasFlag(args, "--authored-reference");
         if (!emitPerTile && !emitWholeMap)
         {
@@ -1460,15 +1464,6 @@ static class Program
         if (requestedTileX.HasValue && !string.IsNullOrWhiteSpace(requestedTileList))
         {
             Console.Error.WriteLine("Error: choose either --tile-x/--tile-y or --tile-list, not both.");
-            Environment.ExitCode = 1;
-            return;
-        }
-
-        if (MathF.Abs(timeOfDay.Hours - 12f) > 0.0001f)
-        {
-            Console.Error.WriteLine(
-                "Error: synthetic-minimap uses a fixed 12:00 global white light; " +
-                "--time-hours may only be 12:00 when supplied.");
             Environment.ExitCode = 1;
             return;
         }
@@ -1574,8 +1569,8 @@ static class Program
         }
 
         bool isAlpha = AlphaWdtReader.IsAlphaWdt(wdtBytes);
-        const float gameTime = 0.5f;
-        SyntheticMinimapLightingProfile lighting = ResolveSyntheticMinimapLighting();
+        float gameTime = timeOfDayHours / 24f;
+        SyntheticMinimapLightingProfile lighting = ResolveSyntheticMinimapLighting(gameTime);
         if (bakeMcsh)
         {
             lighting = lighting with
@@ -1727,6 +1722,77 @@ static class Program
             }
         });
 
+        // ── WMO OVERLAY PASS (sequential, headless GL) ──────────────────────
+        // After the parallel terrain pass, composite placed WMO geometry onto the
+        // terrain minimap tiles using the same solar lighting direction.
+        if (includeWmos && results.Any(static r => r.Status is "written" or "stitched-only"))
+        {
+            Console.WriteLine("WMO overlay pass: rendering placed WMO geometry onto minimap tiles...");
+            Vector3 wmoLightDir = Vector3.Normalize(TerrainSolarDirection.Evaluate(gameTime));
+
+            // 0.5.3 geometry uses DirectX winding (clockwise). OpenGL defaults to CCW, which
+            // inverts effective Z normals. Negate lightDir.Z to compensate.
+            // 0.6.0+ geometry uses OpenGL winding (CCW), so no negation needed.
+            if (ClientBuildKey.TryParse(buildVersion, out ClientBuildKey buildKey)
+                && buildKey.Major == 0 && buildKey.Minor == 5)
+            {
+                wmoLightDir = new Vector3(wmoLightDir.X, wmoLightDir.Y, -wmoLightDir.Z);
+                Console.WriteLine($"  WMO light direction: 0.5.x build detected, negated Z for DirectX winding");
+            }
+            else
+            {
+                Console.WriteLine($"  WMO light direction: raw solar direction (0.6.0+ or unknown build)");
+            }
+
+            try
+            {
+                using var headless = new HeadlessContext(resolution, resolution);
+                using var capture = new ObjectCaptureRenderer(headless.GL, catalog);
+                capture.SetLightDirection(wmoLightDir);
+
+                const float tileWorldSize = 533.33333f;
+                const float mapOrigin = 32f * tileWorldSize;
+
+                foreach (SyntheticMinimapTileResult tileResult in results)
+                {
+                    if (tileResult.Status is not "written" and not "stitched-only")
+                        continue;
+
+                    int tileX = tileResult.TileX;
+                    int tileY = tileResult.TileY;
+
+                    // Rebuild the pack to get placement data and terrain height.
+                    TerrainTileTensorPack? pack = TryBuildSyntheticMinimapPack(
+                        catalog, clientRoot, mapName, wdtBytes, isAlpha, tileX, tileY, buildVersion);
+                    if (pack?.PlacementModfData is null || pack.PlacementModfCount == 0)
+                        continue;
+
+                    float terrainMaxZ = ComputeTerrainMaxHeight(pack);
+                    float tileCenterX = mapOrigin - (tileY + 0.5f) * tileWorldSize;
+                    float tileCenterY = mapOrigin - (tileX + 0.5f) * tileWorldSize;
+                    float tileSpan = tileWorldSize * 0.5f;
+
+                    capture.CaptureTileWmos(
+                        pack.PlacementModfData,
+                        pack.PlacementModfNames,
+                        tileCenterX, tileCenterY, tileSpan,
+                        resolution, terrainMaxZ,
+                        out byte[] wmoImageRgba,
+                        out byte[] wmoMaskRgba);
+
+                    // Composite: terrain * (1 - mask) + wmo * mask
+                    string tilePath = tileResult.OutputPath
+                        ?? Path.Combine(tilesDirectory, $"{mapName}_{tileX:D2}_{tileY:D2}_synthesized.png");
+                    CompositeWmoOverlay(tilePath, wmoImageRgba, wmoMaskRgba, resolution);
+                    Console.WriteLine($"  WMO overlay applied to tile {tileX:D2},{tileY:D2}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"WMO overlay pass failed: {ex.Message}");
+                Console.Error.WriteLine("  Continuing with terrain-only output.");
+            }
+        }
 
         TerrainMinimapStitchResult? stitched = null;
         TerrainMinimapStitchResult? liquidStitched = null;
@@ -1765,6 +1831,7 @@ static class Program
             TerrainMinimapCompositionOptions.TextureRepeatsPerChunk,
             emitPerTile,
             emitWholeMap,
+            includeWmos,
             lighting,
             TerrainMinimapLiquidCompositor.RenderProfile,
             stitched,
@@ -3421,21 +3488,75 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         pack.AvailableSignals = signals;
     }
 
-    private static SyntheticMinimapLightingProfile ResolveSyntheticMinimapLighting()
+    /// <summary>
+    /// Computes the maximum terrain height on a tile from its Height257 array.
+    /// Used by the WMO overlay pass to skip WMOs that are entirely below ground.
+    /// </summary>
+    private static float ComputeTerrainMaxHeight(TerrainTileTensorPack pack)
     {
+        float[,]? height257 = pack.Height257;
+        if (height257 is null)
+            return float.MaxValue;
+
+        float maxZ = float.NegativeInfinity;
+        for (int y = 0; y < height257.GetLength(0); y++)
+            for (int x = 0; x < height257.GetLength(1); x++)
+                if (float.IsFinite(height257[y, x]) && height257[y, x] > maxZ)
+                    maxZ = height257[y, x];
+        return float.IsFinite(maxZ) ? maxZ : float.MaxValue;
+    }
+
+    /// <summary>
+    /// Composites a WMO overlay image onto an existing terrain-only minimap PNG.
+    /// Uses the WMO mask to blend: terrain * (1 - mask) + wmo * mask.
+    /// </summary>
+    private static void CompositeWmoOverlay(string tilePath, byte[] wmoImageRgba, byte[] wmoMaskRgba, int resolution)
+    {
+        using Image<Rgba32> terrain = Image.Load<Rgba32>(tilePath);
+        if (terrain.Width != resolution || terrain.Height != resolution)
+            return;
+
+        terrain.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < resolution; y++)
+            {
+                Span<Rgba32> row = accessor.GetRowSpan(y);
+                for (int x = 0; x < resolution; x++)
+                {
+                    int idx = (y * resolution + x) * 4;
+                    // Mask is white where a WMO fragment is visible.
+                    if (wmoMaskRgba[idx] > 128)
+                    {
+                        row[x].R = wmoImageRgba[idx + 0];
+                        row[x].G = wmoImageRgba[idx + 1];
+                        row[x].B = wmoImageRgba[idx + 2];
+                    }
+                }
+            }
+        });
+
+        terrain.SaveAsPng(tilePath);
+    }
+
+    private static SyntheticMinimapLightingProfile ResolveSyntheticMinimapLighting(float gameTime)
+    {
+        string timeLabel = TimeOfDayClock.FromHours(gameTime * 24f).CompactText;
+        // Always apply tone mapping (Reinhard exposure=20, calibrated 2026-07-20).
+        // Without it the raw linear response is ~2.79x darker than authored minimaps.
+        TerrainMinimapLighting lighting = TerrainMinimapLighting.CreateWhiteTopEdge(gameTime) with { ToneMapped = true };
         return new SyntheticMinimapLightingProfile(
-            TerrainMinimapLighting.CreateNoonWhiteGlobal(),
-            "NoonWhiteGlobal",
-            "synthetic_minimap_fixed_noon_global_white",
-            "terrain-minimap-noon-white-global-lambert-v2+renderer-space-mcnr-v2",
+            lighting,
+            $"WhiteTopEdge@{timeLabel}",
+            $"synthetic_minimap_solar_{timeLabel}_global_white",
+            "terrain-minimap-solar-white-lambert-v2+renderer-space-mcnr-v2",
             null,
             null,
             null,
             null,
-            "fixed_noon_shared_solar_direction_not_lit_or_dbc_data",
+            $"solar_{timeLabel}_shared_solar_direction_not_lit_or_dbc_data",
             "mcsh_omitted_from_normal_minimap_rgb",
-            "Synthetic minimaps use one fixed 12:00 achromatic global light; map LIT and " +
-            "Light DBC runtime profiles are intentionally excluded.");
+            "Synthetic minimaps use the shared solar direction at the requested time; " +
+            "map LIT and Light DBC runtime profiles are intentionally excluded.");
     }
 
     private static SyntheticMinimapLightingProfile WithBakedMcsh(SyntheticMinimapLightingProfile profile) =>

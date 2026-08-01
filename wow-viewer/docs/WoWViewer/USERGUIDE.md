@@ -49,6 +49,35 @@ dotnet run --project .\src\viewer\WoWViewer\WoWViewer.csproj -c Debug
 
 ## Current viewer surfaces
 
+### Synthesized minimap export
+
+The **Synthesized Terrain Minimap Export** dialog (Tools menu → Synthesized Minimap) composes
+terrain-only minimap PNGs directly from the client's BLP textures plus MCLY/MCAL/MCNR/MCSH data.
+It does not read a shipped minimap image. Settings:
+
+| Control | Purpose |
+|---------|---------|
+| Client root | Staged client directory (e.g. a build under `output/tmp/wowarchive-clients/`) |
+| Map name | Map directory name (e.g. `Kalimdor`) |
+| Time of day | Hour + minute; controls the sun elevation. Default 12:00 (noon, full-bright) |
+| Tile resolution | Per-tile PNG resolution (default 256) |
+| Write per-tile PNGs | Emit one terrain-only PNG per tile |
+| Write one stitched map PNG | Emit one stitched whole-map PNG |
+| Include WMO geometry | Composite placed WMO buildings onto the tiles (experimental, defaults off) |
+| Bake MCSH shadows | Include the terrain-side static shadow map. Without it, only Lambert hillshading (no cast shadows) |
+
+The solar direction keeps a fixed north-west bearing and only cycles elevation with time of day,
+matching the 0.5.3.3368 client. Output goes to `output/synthesized-minimaps/<map>/tod-<time>/`
+with a `synthesis-manifest.json`.
+
+Equivalent CLI:
+
+```powershell
+WowViewer.Tool.Harvest synthetic-minimap `
+  --client-root <clientRoot> --map Kalimdor --output-dir <dir> `
+  --time-hours 1800 --per-tile --whole-map
+```
+
 ### World viewing
 
 - staged-client world loading

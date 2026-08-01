@@ -164,16 +164,20 @@ NPZ files are written to disk.
 | `-c, --client-root` | Client root containing the map archives (required) |
 | `-m, --map` | Map directory name (required) |
 | `-o, --output-dir` | Directory for `synthesis-manifest.json` and PNG outputs (required) |
-| `-t, --time-hours` | Clock time in `[0, 24)`; defaults to noon |
+| `-t, --time-hours` | Clock time in `[0, 24)`; defaults to noon. Controls the solar direction (NW fixed bearing, elevation cycles with time of day) |
 | `-r, --resolution` | Per-tile PNG resolution; defaults to 256 |
 | `--per-tile` | Write one terrain-only PNG for each successfully composed tile |
 | `--whole-map` | Write one stitched PNG covering the successful tile-coordinate bounds |
+| `--include-wmos` | Composite placed WMO geometry on top of each tile using the same solar lighting. Requires a headless OpenGL context |
+| `--bake-mcsh` | Bake the terrain-side static shadow map (MCSH) into the RGB output. Without this, only Lambert hillshading is used (no cast shadows) |
 | `-n, --limit` | Process at most N occupied terrain tiles for a bounded check |
 
 If neither output flag is supplied, the command writes both output forms. It composites decoded BLP
-pixels using MCLY/MCAL weights, MCNR normals, and MCSH shadow occupancy. Global clear-weather LIT
-colors are used when their tracks can be evaluated; otherwise it uses the versioned authored
-day/night fallback. The manifest identifies that source and must accompany any derived output.
+pixels using MCLY/MCAL weights, MCNR normals, and MCSH shadow occupancy. The solar direction follows
+`TerrainSolarDirection`: a fixed north-west bearing with an elevation that cycles with the requested
+time of day (matching the traced 0.5.3.3368 native client). Global clear-weather LIT colors are used
+when their tracks can be evaluated; otherwise it uses the versioned authored day/night fallback. The
+manifest identifies that source and must accompany any derived output.
 
 ---
 

@@ -106,7 +106,8 @@ keyframes; those are database tables whose band records contain timed values.
 - Implement a time-of-day → `{sunDir, sunColor, ambientColor, fogColor, fogStart, fogEnd,
   skyColors}` evaluator from an explicitly selected exact-build source for the interactive viewer
   and runtime-scene captures. For DBC-era builds, resolve the Light* records through
-  DBCD/WoWDBDefs. `synthetic-minimap` is excluded and uses its fixed-noon white global light.
+  DBCD/WoWDBDefs. `synthetic-minimap` uses the shared solar direction at the requested
+  `--time-hours` (default noon) and deliberately excludes map LIT and Light DBC profiles.
   Use an authored fallback only when it is labeled as such.
 - Sun direction sweeps across the sky with time; do **not** hardcode a fixed sun (except
   the *shadow* projection, which the client does fix — see §5).
@@ -358,7 +359,8 @@ Source files: `DayNight.cpp`, `MapChunk.cpp`, `MapChunkRender.cpp`, `MapLight.cp
 
 - ~~Source of exact timed color values~~ — **RESOLVED**: map LIT tracks and build-scoped Light* DBC
   records through DBCD/WoWDBDefs for the runtime viewer/capture lane. `synthetic-minimap` deliberately
-  uses neither source and is fixed to an achromatic 12:00 global light. Still open:
+  uses neither source; it renders the shared solar direction at the requested `--time-hours`
+  (achromatic white light, default noon). Still open:
   exact local-LIT coordinate conversion, five-band altitude placement from the four sky float
   arrays, and the native MCSH attenuation coefficient.
 - ~~Whether terrain lighting is FFP-GPU or a CPU vertex-color bake~~ — **RESOLVED**: terrain VBO

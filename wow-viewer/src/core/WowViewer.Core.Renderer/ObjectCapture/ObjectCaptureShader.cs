@@ -19,6 +19,7 @@ public sealed unsafe class ObjectCaptureShader : IDisposable
     private readonly int _uHasTexture;
     private readonly int _uMaskMode;
     private readonly int _uSampler;
+    private readonly int _uLightDir;
     private bool _disposed;
 
     private const string VsSrc = @"#version 410 core
@@ -42,6 +43,7 @@ out vec4 FragColor;
 uniform sampler2D uSampler;
 uniform int uHasTexture;
 uniform int uMaskMode;
+uniform vec3 uLightDir;
 void main() {
     if (uMaskMode != 0) {
         // Flat unlit silhouette: every drawn fragment is a solid mask pixel.
@@ -49,11 +51,11 @@ void main() {
         return;
     }
     vec3 baseColor = uHasTexture != 0 ? texture(uSampler, vUv).rgb : vec3(0.75, 0.75, 0.75);
-    // WoW geometry normals use DirectX convention (clockwise winding). OpenGL defaults to
-    // counter-clockwise front faces, which inverts the Z component of the effective normals.
-    // Negate lightDir.Z so the upward-pointing light correctly lights top surfaces instead of
-    // bottom surfaces (the marshmallow backlighting bug).
-    vec3 lightDir = normalize(vec3(0.4, -0.5, -0.85));
+    // The caller decides the Z sign based on build version:
+    //   0.5.3: geometry uses DirectX winding (clockwise). OpenGL defaults to CCW, which
+    //          inverts effective Z normals. Caller negates lightDir.Z to compensate.
+    //   0.6.0+: geometry uses OpenGL winding (CCW). Caller passes raw solar direction.
+    vec3 lightDir = normalize(uLightDir);
     float diff = max(dot(normalize(vNormal), lightDir), 0.25);
     FragColor = vec4(baseColor * diff, 1.0);
 }";
@@ -67,6 +69,7 @@ void main() {
         _uHasTexture = gl.GetUniformLocation(_program, "uHasTexture");
         _uMaskMode = gl.GetUniformLocation(_program, "uMaskMode");
         _uSampler = gl.GetUniformLocation(_program, "uSampler");
+        _uLightDir = gl.GetUniformLocation(_program, "uLightDir");
     }
 
     public void Use() => _gl.UseProgram(_program);
@@ -75,6 +78,7 @@ void main() {
     public void SetHasTexture(bool has) => _gl.Uniform1(_uHasTexture, has ? 1 : 0);
     public void SetMaskMode(bool enabled) => _gl.Uniform1(_uMaskMode, enabled ? 1 : 0);
     public void SetSamplerUnit(int unit) => _gl.Uniform1(_uSampler, unit);
+    public void SetLightDirection(Vector3 dir) => _gl.Uniform3(_uLightDir, dir.X, dir.Y, dir.Z);
 
     private static uint CreateProgram(GL gl, string vsSrc, string fsSrc)
     {

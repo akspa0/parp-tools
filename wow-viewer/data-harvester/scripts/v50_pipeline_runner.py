@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
-"""Unified pipeline runner to build, finalize, and pre-curate the v50 dataset.
+"""Unified pipeline runner to build, finalize, and curate the v50 dataset.
 Sequentially processes Kalimdor, Azeroth, PVPZone02, and Kalidar from the client library,
-finalizes their manifests, and runs the Spec 103 curation to pre-bucket and filter out dirty tiles.
+finalizes their manifests, and runs the canonical Spec 122 curation pass (`WowViewer.Tool.Harvest
+curate`) to classify every tile into quality buckets and mismatch findings.
 
 A map's `finalize` step legitimately comes back `finalization_state=incomplete` whenever any real
 client tile lacks a required signal (e.g. a tile with terrain but no texture data to synthesize a
 minimap from, so `minimap_rgb` -- required -- has no real lineage action for that row). That is not
-a build failure: the store itself is real and mostly good, and the very next step (Spec 103
-curation) exists specifically to drop exactly those dirty rows. So a non-complete `finalize` does
-not stop this script -- it prints every reason (`finalize` now reports them, not just the bare
-state), still runs curation for that map, and continues to the next map. Only a `build` failure
-(the extraction subprocess itself erroring out) skips the rest of that map's steps; other maps still
-run. See Spec 109 Phase 9 for the incident this fixes: a single dirty tile out of 685 previously
-aborted the entire multi-map run via an unconditional `check=True`.
+a build failure: the store itself is real and mostly good, and curation classifies exactly those
+tiles rather than requiring a complete store. So a non-complete `finalize` does not stop this
+script -- it prints every reason (`finalize` now reports them, not just the bare state), still runs
+curation for that map, and continues to the next map. Only a `build` failure (the extraction
+subprocess itself erroring out) skips the rest of that map's steps; other maps still run. See Spec
+109 Phase 9 for the incident this fixes: a single dirty tile out of 685 previously aborted the
+entire multi-map run via an unconditional `check=True`.
 
-Each map gets two curation manifests, not one: the strict manifest (`curation-<build>-<Map>/`,
-`--max-object-coverage 0.0`) is correct for minimap-to-height reconstruction specifically -- an
-object occludes the ground, making "true height under it" an impossible target from the minimap
-alone -- but is not a general data-quality filter, and dropping every object-touched tile from the
-only curated view would silently discard real, wanted data for anything object-aware (v50 keeps
-`object_precise_mask`/`object_instance_mask` as first-class signals for exactly that reason). The
-object-inclusive manifest (`curation-<build>-<Map>-object-inclusive/`) applies the same
-missing_signal/blank_minimap/height_normal_mismatch checks but leaves object tiles in. Neither
-manifest duplicates array data -- both are Parquet row-reference lists over the same raw store.
+Each map gets ONE curation manifest (Spec 122: partition, never filter) under
+`<store>/curation/<curation_run_id>/` -- every tile is classified, including object-touched,
+blank, and mismatched ones; a downstream consumer selects a subset (e.g. object-excluded, for
+minimap-to-height reconstruction specifically, since an object occludes the ground and makes "true
+height under it" an impossible target from the minimap alone) by filtering the manifest's
+`coverage_bucket`/findings at read time via `harvester.curation_store`, not by requesting a second,
+separately-materialized manifest the way the retired `spec103_curate_dataset.py` two-manifest pass
+did.
 """
 
 import argparse
@@ -91,14 +91,12 @@ def main() -> int:
         print(f" Processing Map: {map_name}")
         print(f"==============================================")
 
-        outcomes[map_name] = {"build": None, "finalize": None, "curate": None, "curate_object_inclusive": None}
+        outcomes[map_name] = {"build": None, "finalize": None, "curate": None}
 
         store_path = datasets_dir / f"0_5_3_3368-{map_name}.zarr"
         build_manifest_path = reports_dir / f"build-manifest-0_5_3_3368-{map_name}.json"
         manifest_path = datasets_dir / f"0_5_3_3368-{map_name}.manifest.json"
         report_path = reports_dir / f"build-0_5_3_3368-{map_name}.json"
-        curation_path = datasets_dir / f"curation-0_5_3_3368-{map_name}"
-        curation_path_object_inclusive = datasets_dir / f"curation-0_5_3_3368-{map_name}-object-inclusive"
 
         # Step A: Build/Extract. A real failure here (the harvester subprocess itself erroring out)
         # means there is no store to finalize or curate -- skip the rest of this map, but keep
@@ -150,23 +148,30 @@ def main() -> int:
         else:
             print(f"\n!! {map_name}: finalize reported finalization_state=incomplete (see reasons above). "
                   f"This is expected when some real tiles lack a required signal -- continuing to curation, "
-                  f"which drops exactly those rows.")
+                  f"which classifies (never drops) those rows.")
             outcomes[map_name]["finalize"] = "incomplete"
 
-        # Step C: Pre-Curate and Pre-Bucket (Spec 103 Curation)
-        # Filters out:
-        #   - missing_signal
-        #   - blank_minimaps (RGB std < 1.0)
-        #   - object_contaminated (object_precise_mask coverage > 0.0)
-        #   - height_normal_mismatch (height flat but normals show relief)
+        # Step C: Canonical curation (Spec 122 -- WowViewer.Core.Curation, via the `curate`
+        # subcommand). Supersedes the old two-manifest spec103_curate_dataset.py pass: that script
+        # produced a STRICT (object-excluded) manifest and a separate OBJECT-INCLUSIVE manifest
+        # because it could only ever drop rows, never label them. `curate` classifies every tile
+        # into buckets and findings (including object coverage) in one pass and never drops a row,
+        # so a downstream consumer selects "object-touched or not" by filtering the one manifest's
+        # `coverage_bucket`/findings at read time (see harvester.curation_store) instead of needing
+        # a second, separately-materialized manifest. Nothing here duplicates array data -- like the
+        # old pass, this only writes a Parquet classification alongside the raw store.
+        # Note: `curate` has no tile-count-limiting flag (unlike the old `--batch`/args.sample path)
+        # -- it always classifies every tile already in the store's index.parquet. A --sample run
+        # still limits how many tiles `build` writes, so curation naturally runs over just that
+        # smaller store; there is no separate sample-limiting needed here.
         curate_cmd = [
-            "uv", "run", "python", "scripts/spec103_curate_dataset.py",
+            "dotnet", "run", "--project", "../tools/harvest/WowViewer.Tool.Harvest", "-c", "Debug", "--",
+            "curate",
+            "--client-root", "H:\\CLIENTS\\0_5_3_3368",
             "--store", str(store_path),
-            "--output", str(curation_path),
-            "--max-object-coverage", "0.0"  # Strictly filter out ANY object-contaminated tiles
+            "--map", map_name,
+            "--write",
         ]
-        if args.sample is not None:
-            curate_cmd.extend(["--batch", str(args.sample)])
 
         try:
             run_command(curate_cmd, dry_run, check=True)
@@ -174,33 +179,6 @@ def main() -> int:
         except subprocess.CalledProcessError as exc:
             print(f"\n!! curate FAILED for {map_name} (exit {exc.returncode}) -- continuing to the next map.")
             outcomes[map_name]["curate"] = "failed"
-
-        # Step D: Object-inclusive curation manifest. Step C's --max-object-coverage 0.0 is correct
-        # for minimap-to-height reconstruction specifically (an object occludes the ground, so
-        # "true height under it" is an impossible target from the minimap alone -- see
-        # spec103_curate_dataset.py's own docstring) but it is NOT a general data-quality filter:
-        # it silently drops every tile touched by any MDDF/MODF footprint, which is real, wanted
-        # data for anything object-aware (v50's frozen signal catalog keeps object_precise_mask /
-        # object_instance_mask as first-class signals for exactly that reason). This second manifest
-        # applies the same missing_signal / blank_minimap / height_normal_mismatch checks but leaves
-        # object tiles in, so object-aware work has a clean manifest that doesn't require reopening
-        # the raw store. Nothing here duplicates array data -- like Step C, this only writes a
-        # Parquet row-reference manifest.
-        curate_object_inclusive_cmd = [
-            "uv", "run", "python", "scripts/spec103_curate_dataset.py",
-            "--store", str(store_path),
-            "--output", str(curation_path_object_inclusive),
-            "--max-object-coverage", "1.0"  # effectively disables the object filter; coverage is bounded to [0, 1]
-        ]
-        if args.sample is not None:
-            curate_object_inclusive_cmd.extend(["--batch", str(args.sample)])
-
-        try:
-            run_command(curate_object_inclusive_cmd, dry_run, check=True)
-            outcomes[map_name]["curate_object_inclusive"] = "ok"
-        except subprocess.CalledProcessError as exc:
-            print(f"\n!! object-inclusive curate FAILED for {map_name} (exit {exc.returncode}) -- continuing to the next map.")
-            outcomes[map_name]["curate_object_inclusive"] = "failed"
 
     print(f"\n==============================================")
     print(" Pipeline Summary")
@@ -210,7 +188,7 @@ def main() -> int:
         o = outcomes[map_name]
         if o["build"] == "failed":
             any_build_failed = True
-        print(f"  {map_name}: build={o['build']} finalize={o['finalize']} curate={o['curate']} curate_object_inclusive={o['curate_object_inclusive']}")
+        print(f"  {map_name}: build={o['build']} finalize={o['finalize']} curate={o['curate']}")
 
     if dry_run:
         print("\nDry run completed successfully. Specify --confirm to run the actual extraction.")
@@ -220,7 +198,9 @@ def main() -> int:
         print("\nAt least one map's build step failed -- see per-map summary above.")
         return 1
 
-    print("\nAll maps extracted and pre-curated. Any finalize=incomplete map had curation drop its dirty rows; see reasons above and the per-map manifest JSON for detail.")
+    print("\nAll maps extracted and curated. Any finalize=incomplete map's dirty rows are still present "
+          "but classified (never dropped) by curation -- see reasons above and query the curation "
+          "manifest (harvester.curation_store) to select which buckets a given consumer wants.")
     return 0
 
 

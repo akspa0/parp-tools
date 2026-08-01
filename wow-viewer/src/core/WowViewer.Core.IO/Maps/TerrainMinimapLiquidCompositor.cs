@@ -28,6 +28,8 @@ public static class TerrainMinimapLiquidCompositor
         if (liquidMask is null || liquidMask.GetLength(0) == 0 || liquidMask.GetLength(1) == 0)
             return result;
 
+        float[,]? liquidHeight = pack.UnifiedLiquidHeight;
+        float[,]? terrainHeight = pack.Height257;
         byte[,]? liquidTypes = pack.LiquidBasicType257;
         int maskHeight = liquidMask.GetLength(0);
         int maskWidth = liquidMask.GetLength(1);
@@ -46,6 +48,20 @@ public static class TerrainMinimapLiquidCompositor
                         out int cellY,
                         out float coverage))
                 continue;
+
+                // Gate by terrain height: skip liquid pixels where the liquid surface
+                // is below the terrain surface. Liquid data is stored as planes that
+                // extend across the full cell, but terrain may rise above the water
+                // level — painting liquid over those pixels produces floating water.
+                if (liquidHeight is not null && terrainHeight is not null)
+                {
+                    int terrainY = Math.Clamp(cellY, 0, terrainHeight.GetLength(0) - 1);
+                    int terrainX = Math.Clamp(cellX, 0, terrainHeight.GetLength(1) - 1);
+                    float terrainZ = terrainHeight[terrainY, terrainX];
+                    float liquidZ = liquidHeight[cellY, cellX];
+                    if (float.IsFinite(terrainZ) && float.IsFinite(liquidZ) && liquidZ < terrainZ)
+                        continue;
+                }
 
                 liquidPixelCount++;
                 LiquidStyle style = GetStyle(ResolveType(liquidTypes, cellX, cellY, maskWidth, maskHeight));

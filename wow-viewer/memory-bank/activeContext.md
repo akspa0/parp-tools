@@ -2,6 +2,20 @@
 
 Last updated: 2026-08-01
 
+## v0.5.2 release
+
+- **Version**: `eng/Version.props` → 0.5.2.0, `ViewerProductName` → "WoWViewer v0.5.2".
+- **Release notes**: `docs/releases/v0.5.2.md` (lighting fixes, synthesized-minimap time-of-day,
+  WMO overlay option, taxi popup removal, liquid terrain-height gating, project status).
+- **Docs updated**: `README.md`, `docs/WoWViewer/USERGUIDE.md`, `docs/DOCUMENTATION-STATUS.md`,
+  `docs/dataset-preparation-userguide.md`, `docs/architecture/wow-1.0.0-world-lighting-shadow-model-2026-07-15.md`.
+- **Known WIP**: `--include-wmos` overlay is experimental (defaults off); `--bake-mcsh` enables
+  terrain static shadows in the synthesized minimap.
+
+## Future — salmiak-style object shadows (shelved)
+
+- **Object shadow rendering**: implement salmiak-style rendered shadows for WMO/MDX objects so lighting is more dynamic and not solely reliant on the MCSH terrain-shadow feature. Reference: https://github.com/ViggoL/salmiak
+
 ## Bugfix — ObjectCaptureShader light direction Z component inverted (marshmallow backlighting)
 
 - **Root cause**: [`ObjectCaptureShader`](wow-viewer/src/core/WowViewer.Core.Renderer/ObjectCapture/ObjectCaptureShader.cs:52) hardcoded `lightDir = (0.4, -0.5, 0.85)` with positive Z. WoW geometry normals use DirectX convention (clockwise winding), but OpenGL defaults to counter-clockwise front faces, which inverts the effective Z component of the normals. The upward-pointing light (`+0.85 Z`) therefore lit bottom surfaces instead of top surfaces, making objects look like backlit marshmallows.

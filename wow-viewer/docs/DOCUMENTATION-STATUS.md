@@ -1,6 +1,6 @@
 # Documentation Status
 
-Updated: 2026-07-04
+Updated: 2026-08-01
 
 This is canonical doc map for `wow-viewer/`.
 
