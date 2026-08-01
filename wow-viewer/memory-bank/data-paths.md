@@ -33,8 +33,6 @@ fingerprint used.
 
 The optional project-local staging root is:
 
-The default staging root is:
-
 ```
 <workspace>/output/tmp/wowarchive-clients/
 ```

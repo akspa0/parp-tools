@@ -4,6 +4,12 @@ Updated: 2026-08-01
 
 This is canonical doc map for `wow-viewer/`.
 
+## Spec inventory (read first)
+
+- **[docs/specs-audit-2026-08-01.md](/I:/parp/parp-tools/wow-viewer/docs/specs-audit-2026-08-01.md)** — the full
+  spec inventory: DONE (archive candidates), ACTIVE (front-of-queue), and DRAFT (backlog).
+  Use this before reading any individual spec.
+
 ## Read first
 
 - [README.md](/I:/parp/parp-tools/wow-viewer/README.md)
