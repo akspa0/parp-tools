@@ -33,6 +33,15 @@
 
 Validation performed 2026-08-02. Three iterations of self-review; issues found and corrected:
 
+**Update 2026-08-02 (second pass)**: Spec extended with two user additions. (1) The **global lighting
+normalisation** hypothesis — authored tiles of a map may share a common lighting baseline — is now a
+first-class deliverable (FR-016, SC-011, Lighting Baseline entity) rather than an inherited
+assumption, because it is a second, independent confound on top of the codec. (2) The synthesizer now
+MUST emit a **DXT1-compressed parity companion** alongside the pristine render (FR-015, SC-010, Parity
+Companion entity), so authored and synthetic tiles compare on equal terms without a comparison-time
+encode step. Both additions keep the spec technology-agnostic: they describe the outcome (a shared
+baseline measured and accounted for; a compressed variant available) without naming an implementation.
+
 1. **First pass** named DXT1/RGB565 throughout the requirements. Those are the measured properties of
    the *input data*, not a technology choice being specified, so they are retained in Background and
    Assumptions but removed from FR/SC wording in favour of behavioural phrasing ("the same lossy

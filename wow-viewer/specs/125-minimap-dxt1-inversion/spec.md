@@ -8,6 +8,17 @@
 
 **Input**: User description: "Authored 0.5.3 minimaps are DXT1-compressed. Our compositor produces pristine 24-bit output, so it has been building *better than real* minimaps — every comparison scored a clean image against a lossy one and blamed the renderer. Two consequences: synthetic output must carry the same compression for any fair comparison or dataset parity, and a learned inverse of the DXT1 degradation could restore authored tiles toward their pre-compression appearance."
 
+**Update (2026-08-02)**: Two additions from the user. First, a hypothesis: the global tile lighting may be
+**normalised across all minimap tiles** — i.e. the authored tiles of a map may share a common lighting
+baseline rather than each tile carrying its own independent exposure. If true, this is a second,
+independent source of mismatch on top of the codec, and it must be verified and accounted for before
+any per-tile comparison or calibration is trusted. Second, a concrete requirement: the synthesizer
+MUST also emit a **DXT1-compressed variant** of each tile alongside the pristine render, so a synthetic
+tile can be compared against a real authored tile on equal terms without a separate comparison-time
+encode step. Together these sharpen the restoration avenue: if the compression method is reproduced,
+restoring authored minimaps back toward their raw pre-compression form becomes a tractable layer of
+terrain reconstruction.
+
 ## Background
 
 Measured 2026-08-02 across 16 tiles of 0.5.3.3368 / Azeroth: every authored minimap is
@@ -27,6 +38,14 @@ Two things follow. Our synthetic minimaps are *higher fidelity than the source t
 against*, which biases every comparison metric and would teach any model trained on both corpora to
 distinguish them by codec damage alone. And because the degradation is a known, reproducible
 transform, its inverse can be learned from pairs we generate ourselves.
+
+A second, independent source of mismatch is suspected: **global lighting normalisation**. The authored
+tiles of a map may share a common lighting baseline — the client's minimap renderer may normalise
+brightness/contrast across all tiles of a map rather than leaving each tile at its own raw exposure.
+If that is true, then per-tile lighting differences between our synthesizer and the authored tiles are
+not purely codec damage; they are a separate systematic offset that must be measured and removed
+before any per-tile comparison or calibration decision is trusted. This hypothesis is unverified and
+is a first-class deliverable of this feature, not an assumption to inherit.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -61,6 +80,13 @@ agreement while the relative ranking of two deliberately different render settin
 4. **Given** a tile whose authored image is a single flat colour (an unrendered tile),
    **When** the comparison runs,
    **Then** the tile is excluded from aggregate scores and reported as excluded.
+5. **Given** a synthesized tile and its DXT1-compressed parity companion,
+   **When** the comparison runs against an authored tile,
+   **Then** it uses the parity companion directly, with no separate encode step at comparison time.
+6. **Given** a set of authored tiles from the same map,
+   **When** the lighting-baseline test runs,
+   **Then** the report states whether a shared lighting baseline exists, and if so the comparison
+   accounts for it rather than attributing the offset to codec damage.
 
 ---
 
@@ -169,14 +195,18 @@ without needing any authored image.
   the two MUST NOT be evaluated by a shared metric.
 - **FR-013**: The system MUST report, per build and map inspected, the distribution of encodings
   found, so the DXT1 assumption is verified rather than inherited.
-- **FR-014**: The system MUST establish, by measurement, how much its chosen encoder differs from the
-  one that produced the authored tiles — by decoding an authored tile, re-encoding it, and comparing
-  against the authored bytes. A near-exact match confirms encoder choice is not a material source of
-  error; a poor match makes encoder selection a blocking decision for restoration training rather
-  than an assumption.
-- **FR-015**: Where more than one candidate encoder is available, the system MUST be able to report
-  the re-encode agreement for each, so the closest match can be chosen on evidence rather than
-  convenience.
+- **FR-014**: The encoder MUST pass a round-trip sanity check — decode an authored tile, re-encode it,
+  and confirm the result closely reproduces the authored bytes. This is a correctness test on *our*
+  encoder, exploiting DXT1's near-idempotency on decoded data. It is explicitly **not** an attempt to
+  identify which encoder Blizzard used; close enough for the degradation to match is the bar.
+- **FR-015**: The synthesizer MUST emit, for every tile it renders, a **DXT1-compressed variant**
+  alongside the pristine render, so a synthetic tile can be compared against a real authored tile on
+  equal terms without a separate comparison-time encode step. The pristine render remains the primary
+  output; the compressed variant is a parity companion.
+- **FR-016**: The system MUST test the **global lighting normalisation** hypothesis — whether the
+  authored tiles of a map share a common lighting baseline — and report the result per map and build.
+  If a shared baseline is found, comparison and calibration MUST account for it rather than treating
+  per-tile differences as codec damage alone.
 
 ### Key Entities
 
@@ -190,6 +220,11 @@ without needing any authored image.
   re-encoding, and the hallucination measure.
 - **Era Encoding Survey**: Per build and map, the distribution of encodings observed, and whether the
   build was recognised.
+- **Lighting Baseline**: The common brightness/contrast normalisation shared across the authored tiles
+  of a map, if one exists. Measured per map and build; used to separate lighting-baseline offset from
+  codec damage in comparison and calibration.
+- **Parity Companion**: The DXT1-compressed variant of a synthesized tile, emitted alongside the
+  pristine render so authored and synthetic tiles can be compared on equal terms.
 
 ## Success Criteria *(mandatory)*
 
@@ -213,9 +248,12 @@ without needing any authored image.
 - **SC-008**: Every corpus row and comparison report generated after this feature states its parity
   status, with no row defaulting silently.
 - **SC-009**: Decoding an authored tile and re-encoding it reproduces the authored bytes for at least
-  95% of blocks, confirming encoder choice is not a material source of comparison error. If the
-  measured figure is materially lower, encoder selection is escalated to a blocking decision before
-  restoration training begins.
+  95% of blocks — a correctness check on our own encoder, not an encoder-identification exercise.
+- **SC-010**: Every synthesized tile has a DXT1-compressed variant available, and a parity comparison
+  against an authored tile can be run using that variant without a separate encode step.
+- **SC-011**: The global lighting normalisation hypothesis is tested across at least two maps and the
+  result (shared baseline present or absent) is reported per map; where a baseline is found, the
+  parity comparison accounts for it and the residual per-tile agreement improves.
 
 ## Assumptions
 
@@ -239,6 +277,12 @@ without needing any authored image.
   goal is a measurably better estimate, not recovery of destroyed information.
 - Only 0.5.3.3368 / Azeroth has been measured. Every other build and map is unverified, and the
   survey requirement (FR-013) exists to close that gap before the assumption spreads.
+- The global lighting normalisation hypothesis is **not** assumed true. It is a deliverable to test
+  (FR-016, SC-011). Until tested, per-tile comparison results carry an unquantified lighting-baseline
+  confound in addition to the codec confound.
+- The DXT1-compressed variant (FR-015) is a parity companion to the pristine render, not a
+  replacement. The pristine render remains the primary corpus output; the variant exists so authored
+  and synthetic tiles can be compared on equal terms.
 - "God view" whole-map imagery predating December 2003 is *presumed* to share this encoding, but that
   presumption is untested and is covered by the survey rather than asserted.
 - Super-resolution beyond native 256×256 has no client-side ground truth and is out of scope for this
@@ -250,7 +294,10 @@ without needing any authored image.
 ## Out of Scope
 
 - Super-resolution above the native authored resolution.
-- Writing BLP containers. This feature needs the encode/decode *cycle* to reproduce degradation; it
-  never needs to produce a loadable BLP file.
+- **Exporting BLP files. Ever.** This feature needs the DXT1 encode/decode *cycle* in memory to
+  reproduce degradation. It must never write a BLP container, and no requirement here should be read
+  as implying one.
+- Identifying which DXT1 encoder Blizzard used. Close enough to reproduce the degradation class is the
+  bar; forensic encoder matching is not wanted.
 - Re-encoding or redistributing authored client assets.
 - Changing the terrain compositor's rendering model; this feature only adds an encoding stage after it.
