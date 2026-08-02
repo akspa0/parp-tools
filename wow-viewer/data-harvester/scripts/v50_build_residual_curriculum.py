@@ -50,10 +50,10 @@ def _load_residual_png(path: Path) -> np.ndarray:
     return arr
 
 
-def _load_height_257(store: zarr.Group, map_name: str, tx: int, ty: int) -> np.ndarray | None:
+def _load_height_257(store_path: Path, store: zarr.Group, map_name: str, tx: int, ty: int) -> np.ndarray | None:
     """Find the height_257 row for a map/tile by scanning the index.parquet."""
-    index_path = Path(store.store.path) / "index.parquet" if hasattr(store.store, "path") else None
-    if index_path is None or not index_path.exists():
+    index_path = store_path / "index.parquet"
+    if not index_path.exists():
         return None
     table = pq.read_table(index_path)
     rows = table.to_pylist()
@@ -95,7 +95,7 @@ def main() -> int:
             continue
         tx, ty = int(m.group("tx")), int(m.group("ty"))
         residual = _load_residual_png(path)
-        height = _load_height_257(height_group, args.map, tx, ty)
+        height = _load_height_257(args.height_store, height_group, args.map, tx, ty)
         if height is None:
             continue
         # Residual is 256x256; height_257 is 257x257. Crop the height to the residual's grid so the

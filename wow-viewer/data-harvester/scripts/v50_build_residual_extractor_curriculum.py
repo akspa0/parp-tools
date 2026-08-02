@@ -50,9 +50,9 @@ def _load_residual_png(path: Path) -> np.ndarray:
     return arr
 
 
-def _load_minimap_rgb(store: zarr.Group, map_name: str, tx: int, ty: int) -> np.ndarray | None:
-    index_path = Path(store.store.path) / "index.parquet" if hasattr(store.store, "path") else None
-    if index_path is None or not index_path.exists():
+def _load_minimap_rgb(store_path: Path, store: zarr.Group, map_name: str, tx: int, ty: int) -> np.ndarray | None:
+    index_path = store_path / "index.parquet"
+    if not index_path.exists():
         return None
     table = pq.read_table(index_path)
     rows = table.to_pylist()
@@ -94,7 +94,7 @@ def main() -> int:
             continue
         tx, ty = int(m.group("tx")), int(m.group("ty"))
         residual = _load_residual_png(path)
-        minimap = _load_minimap_rgb(minimap_group, args.map, tx, ty)
+        minimap = _load_minimap_rgb(args.minimap_store, minimap_group, args.map, tx, ty)
         if minimap is None:
             continue
         # minimap_rgb is 256x256x3; residual is 256x256. Confirm alignment.
