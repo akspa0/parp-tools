@@ -149,6 +149,73 @@ without needing any authored image.
 
 ---
 
+### User Story 4 — Decode terrain shadow from any authored minimap and reconstruct terrain directly (Priority: P3)
+
+A reconstruction engineer takes *any* authored minimap tile and recovers the terrain that produced
+it — going **minimap RGB → heightmap → 3D mesh** with a single model that reads the terrain shadow
+and converts it into ridges, mountains, and terrain detail. This is the payoff of the whole lighting
+line: because we now know how the minimap terrain shadow is created (the synthesizer's lighting
+model), the shadow in an authored tile is no longer a black box — it is a readable signal that
+encodes the terrain's shape.
+
+**Why this priority**: This is the strategic goal the user stated on 2026-08-02. It depends on the
+parity mechanism (Story 1) and the lighting model, and it is the only story that can fail on quality
+grounds. It is deliberately the last story because it consumes everything before it. It also
+reframes the restoration story: the best residual to train against is the decoded terrain shadow
+itself, not just the pre-compression appearance.
+
+**Independent Test**: Hold out authored tiles never seen in training, decode their terrain shadow,
+run the reconstruction, and measure the recovered heightmap against the known ground-truth heightmap
+(MCVT) for those tiles — ground truth that exists without needing any authored image.
+
+**Acceptance Scenarios**:
+
+1. **Given** an authored minimap tile, **When** the terrain-shadow decoder runs,
+   **Then** it produces a shadow field consistent with the synthesizer's lighting model (same solar
+   direction, same ambient/cast-shadow semantics).
+2. **Given** a decoded shadow field, **When** the reconstruction model runs,
+   **Then** it produces a heightmap whose relief correlates with the ground-truth MCVT heightmap for
+   the same tile, measured on held-out tiles.
+3. **Given** a reconstructed heightmap, **When** it is meshed,
+   **Then** the resulting 3D mesh is a plausible terrain surface (no inverted normals, no
+   disconnected spikes) and matches the authored minimap's shading when re-lit with the synthesizer's
+   lighting model.
+4. **Given** an authored tile whose shadow is ambiguous (flat terrain, no visible relief),
+   **When** the reconstruction runs,
+   **Then** it reports low confidence rather than inventing ridges.
+
+---
+
+### User Story 5 — Super-resolve terrain and texturing data from real low/high-res pairs (Priority: P3)
+
+A reconstruction engineer upscales terrain and texturing data using a super-resolution model trained
+on real low-res/high-res pairs. Because the synthesizer can now produce both the low-res and high-res
+versions of the same terrain perfectly, from real data, without objects, the training pairs are exact
+and object-free — ideal for learning to upscale terrain and texturing data specifically.
+
+**Why this priority**: The user stated this on 2026-08-02 as another door opened by the parity and
+lighting work. It depends on the synthesizer's ability to render the same terrain at multiple
+resolutions with matching lighting, and it is separable from artifact removal (FR-012 keeps them
+apart). It is a distinct model from restoration and reconstruction.
+
+**Independent Test**: Hold out high-res renders never seen in training, downscale them to low-res,
+run the super-resolution model, and measure recovery against the known high-res originals — ground
+truth that exists without needing any authored image.
+
+**Acceptance Scenarios**:
+
+1. **Given** a low-res terrain/texture render, **When** the super-resolution model runs,
+   **Then** it produces a high-res output measurably closer to the known high-res original than
+   bicubic upscaling is, on held-out pairs.
+2. **Given** a low-res render with no objects (terrain and texturing only),
+   **When** the model runs,
+   **Then** it upscales terrain and texturing detail without inventing object-like artefacts.
+3. **Given** a super-resolved output, **When** it is compared to the high-res original,
+   **Then** the improvement is reported separately from any artifact-removal or reconstruction metric
+   (FR-012).
+
+---
+
 ### Edge Cases
 
 - An authored tile that is a single flat colour (unrendered). Must be excluded from aggregates, not
@@ -207,6 +274,18 @@ without needing any authored image.
   authored tiles of a map share a common lighting baseline — and report the result per map and build.
   If a shared baseline is found, comparison and calibration MUST account for it rather than treating
   per-tile differences as codec damage alone.
+- **FR-017**: The system MUST be able to **decode the terrain shadow** from an authored minimap tile
+  using the synthesizer's lighting model (solar direction, ambient, cast-shadow semantics), producing
+  a shadow field that is a readable terrain-shape signal rather than a black box.
+- **FR-018**: The system MUST be able to **reconstruct a heightmap from a decoded shadow field** and
+  mesh it into a 3D terrain surface, going minimap RGB → heightmap → 3D mesh with a single model.
+- **FR-019**: The reconstruction MUST be evaluated on held-out authored tiles against the known
+  ground-truth heightmap (MCVT) for those tiles, reporting relief correlation and mesh plausibility.
+- **FR-020**: The reconstruction MUST report low confidence on ambiguous tiles (flat terrain, no
+  visible relief) rather than inventing ridges.
+- **FR-021**: The system MUST be able to **super-resolve** terrain and texturing data from real
+  low-res/high-res pairs produced by the synthesizer (same terrain, matching lighting, no objects),
+  and MUST report the improvement separately from any artifact-removal or reconstruction metric.
 
 ### Key Entities
 
@@ -225,6 +304,12 @@ without needing any authored image.
   codec damage in comparison and calibration.
 - **Parity Companion**: The DXT1-compressed variant of a synthesized tile, emitted alongside the
   pristine render so authored and synthetic tiles can be compared on equal terms.
+- **Decoded Shadow Field**: The terrain-shadow signal recovered from an authored minimap tile using
+  the synthesizer's lighting model — a readable terrain-shape signal rather than a black box.
+- **Reconstructed Heightmap**: The heightmap recovered from a decoded shadow field, evaluated against
+  the ground-truth MCVT heightmap for the same tile.
+- **Super-Resolution Pair**: A low-res and high-res render of the same terrain with matching lighting
+  and no objects, produced by the synthesizer; used to train and evaluate super-resolution.
 
 ## Success Criteria *(mandatory)*
 
@@ -254,6 +339,17 @@ without needing any authored image.
 - **SC-011**: The global lighting normalisation hypothesis is tested across at least two maps and the
   result (shared baseline present or absent) is reported per map; where a baseline is found, the
   parity comparison accounts for it and the residual per-tile agreement improves.
+- **SC-012**: On held-out authored tiles, the decoded terrain shadow is consistent with the
+  synthesizer's lighting model (solar direction, ambient, cast-shadow semantics) for at least 90% of
+  tiles.
+- **SC-013**: On held-out authored tiles, the reconstructed heightmap's relief correlates with the
+  ground-truth MCVT heightmap at a level materially above chance, and the meshed surface is plausible
+  (no inverted normals, no disconnected spikes).
+- **SC-014**: The reconstruction reports low confidence on at least 90% of ambiguous (flat, no-relief)
+  tiles rather than inventing ridges.
+- **SC-015**: On held-out low-res/high-res pairs, the super-resolution output is measurably closer to
+  the known high-res original than bicubic upscaling is, and the improvement is reported separately
+  from any artifact-removal or reconstruction metric.
 
 ## Assumptions
 

@@ -21,6 +21,14 @@ separate authored from synthetic by compression damage alone. This feature:
    common lighting baseline — and accounts for it if found (FR-016).
 5. **Restores** authored tiles toward their pre-compression appearance via a learned inverse, trained
    on locally generated pristine→encoded pairs, gated on hallucination (FR-007..FR-012).
+6. **Decodes the terrain shadow** from any authored minimap using the synthesizer's lighting model and
+   **reconstructs terrain directly** — minimap RGB → heightmap → 3D mesh with a single model
+   (FR-017..FR-020). This is the strategic payoff the user stated on 2026-08-02: because we now know
+   how the minimap terrain shadow is created, the shadow in an authored tile is a readable
+   terrain-shape signal, and the best residual to train against is the decoded shadow itself.
+7. **Super-resolves** terrain and texturing data from real low-res/high-res pairs produced by the
+   synthesizer (same terrain, matching lighting, no objects), reported separately from artifact
+   removal and reconstruction (FR-021). Another door opened by the parity and lighting work.
 
 The DXT1 encoder already exists in-tree: `BCnEncoder.Net` is a dependency of `WowViewer.Core.IO`, and
 `AlphaBlpCompatibilityService.EncodeBlp2` already drives `BcEncoder` with `CompressionFormat.Bc1`

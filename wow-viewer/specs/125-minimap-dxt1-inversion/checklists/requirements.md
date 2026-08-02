@@ -33,6 +33,22 @@
 
 Validation performed 2026-08-02. Three iterations of self-review; issues found and corrected:
 
+**Update 2026-08-02 (fourth pass)**: Added **User Story 5** — super-resolve terrain and texturing
+data from real low-res/high-res pairs produced by the synthesizer (same terrain, matching lighting,
+no objects), reported separately from artifact-removal and reconstruction metrics. This is another
+door the user opened in session: because the synthesizer can now produce both low-res and high-res of
+the same terrain perfectly from real data without objects, the training pairs are exact and
+object-free. Adds FR-021, SC-015, and the Super-Resolution Pair entity. Kept technology-agnostic.
+
+**Update 2026-08-02 (third pass)**: Added **User Story 4** — decode the terrain shadow from any
+authored minimap using the synthesizer's lighting model and reconstruct terrain directly (minimap RGB
+→ heightmap → 3D mesh with a single model). This is the strategic payoff the user stated in session:
+because we now know how the minimap terrain shadow is created, the shadow in an authored tile is a
+readable terrain-shape signal, and the best residual to train against is the decoded shadow itself.
+Adds FR-017..FR-020, SC-012..SC-014, and the Decoded Shadow Field / Reconstructed Heightmap entities.
+Kept technology-agnostic: describes the outcome (a shadow field consistent with the lighting model; a
+heightmap correlating with ground-truth MCVT) without naming an implementation.
+
 **Update 2026-08-02 (second pass)**: Spec extended with two user additions. (1) The **global lighting
 normalisation** hypothesis — authored tiles of a map may share a common lighting baseline — is now a
 first-class deliverable (FR-016, SC-011, Lighting Baseline entity) rather than an inherited

@@ -100,14 +100,57 @@
 
 ---
 
+## Phase 6: User Story 4 - Decode terrain shadow and reconstruct terrain directly (Priority: P3)
+
+**Goal**: A reconstruction engineer takes any authored minimap tile and recovers the terrain that
+produced it — minimap RGB → heightmap → 3D mesh with a single model that reads the terrain shadow and
+converts it into ridges, mountains, and terrain detail. This is the strategic payoff: because we now
+know how the minimap terrain shadow is created, the shadow in an authored tile is a readable
+terrain-shape signal.
+
+**Independent Test**: Hold out authored tiles never seen in training, decode their terrain shadow,
+run the reconstruction, and measure the recovered heightmap against the known ground-truth heightmap
+(MCVT) for those tiles.
+
+### Implementation for User Story 4
+
+- [ ] T027 [P] [US4] Implement terrain-shadow decoder using the synthesizer's lighting model in `wow-viewer/data-harvester/src/harvester/terrain_shadow_decode.py` (FR-017)
+- [ ] T028 [US4] Implement the minimap-RGB → heightmap → 3D-mesh reconstruction model in `wow-viewer/data-harvester/src/harvester/terrain_reconstruct.py` (FR-018)
+- [ ] T029 [US4] Implement training script for the reconstruction model in `wow-viewer/data-harvester/scripts/train_v21_terrain_reconstruct.py` (FR-018)
+- [ ] T030 [US4] Implement evaluation against ground-truth MCVT heightmap (relief correlation + mesh plausibility) in `wow-viewer/data-harvester/src/harvester/terrain_reconstruct.py` (FR-019)
+- [ ] T031 [US4] Implement low-confidence reporting on ambiguous (flat, no-relief) tiles in `wow-viewer/data-harvester/src/harvester/terrain_reconstruct.py` (FR-020)
+
+**Checkpoint**: All user stories should now be independently functional
+
+---
+
+## Phase 7: User Story 5 - Super-resolve terrain and texturing data (Priority: P3)
+
+**Goal**: A reconstruction engineer upscales terrain and texturing data using a super-resolution
+model trained on real low-res/high-res pairs produced by the synthesizer (same terrain, matching
+lighting, no objects).
+
+**Independent Test**: Hold out high-res renders never seen in training, downscale them to low-res,
+run the super-resolution model, and measure recovery against the known high-res originals.
+
+### Implementation for User Story 5
+
+- [ ] T032 [P] [US5] Implement the super-resolution model in `wow-viewer/data-harvester/src/harvester/super_resolve.py` (FR-021)
+- [ ] T033 [US5] Implement training script for the super-resolution model in `wow-viewer/data-harvester/scripts/train_v22_super_resolve.py` (FR-021)
+- [ ] T034 [US5] Implement evaluation against known high-res originals, reported separately from artifact-removal and reconstruction metrics in `wow-viewer/data-harvester/src/harvester/super_resolve.py` (FR-021, FR-012)
+
+**Checkpoint**: All user stories should now be independently functional
+
+---
+
 ## Phase N: Polish & Cross-Cutting Concerns
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T027 [P] Add `--lighting-baseline` flag and report per-map baseline, accounting for it when scoring in `wow-viewer/tools/harvest/WowViewer.Tool.Harvest/Program.cs` (FR-016)
-- [ ] T028 [P] Unit test `MinimapLightingBaselineTests` (baseline detected, independent exposures not, normalisation works) in `wow-viewer/tests/WowViewer.Core.Tests/MinimapLightingBaselineTests.cs` (FR-016)
-- [ ] T029 Run quickstart.md validation (build + synthetic-minimap parity + score)
-- [ ] T030 Update memory bank `activeContext.md` and `progress.md` with Spec 125 state
+- [ ] T035 [P] Add `--lighting-baseline` flag and report per-map baseline, accounting for it when scoring in `wow-viewer/tools/harvest/WowViewer.Tool.Harvest/Program.cs` (FR-016)
+- [ ] T036 [P] Unit test `MinimapLightingBaselineTests` (baseline detected, independent exposures not, normalisation works) in `wow-viewer/tests/WowViewer.Core.Tests/MinimapLightingBaselineTests.cs` (FR-016)
+- [ ] T037 Run quickstart.md validation (build + synthetic-minimap parity + score)
+- [ ] T038 Update memory bank `activeContext.md` and `progress.md` with Spec 125 state
 
 ---
 
