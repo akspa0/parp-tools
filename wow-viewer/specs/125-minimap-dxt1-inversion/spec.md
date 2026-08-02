@@ -168,6 +168,15 @@ harvested residual against the ground-truth heightmap scaled by 33.334× (and ag
 band) and measure the correlation. If it holds, the residual is not just a learned prior — it is a
 near-linear transform of the heightmap, which would make reconstruction dramatically more tractable.
 
+**Scale test result (2026-08-02, 683 Azeroth pairs)**: the linear-scale hypothesis is **refuted**.
+Correlation of residual vs height/33.334 is ~0.20 (near zero), and the best-fit linear scale is
+~-0.0003 (essentially zero). The residual is **not** a direct linear transform of the heightmap. This
+is expected: the residual is a *shading* signal (Lambert N·L + cast shadows), which is a nonlinear
+function of the heightmap through its normals, not a linear scale. The user notes the weak-signal
+scale was not always 33.334 but some fraction of it, which may vary per tile. The correct comparison
+is therefore residual vs the synthesizer's own hillshade (N·L from height gradients), and a per-tile
+scale analysis to see whether a consistent per-tile scale exists even if no global one does.
+
 A reconstruction engineer takes *any* authored minimap tile and recovers the terrain that produced
 it — going **minimap RGB → heightmap → 3D mesh** with a single model that reads the terrain shadow
 and converts it into ridges, mountains, and terrain detail. This is the payoff of the whole lighting

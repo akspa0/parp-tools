@@ -1,20 +1,27 @@
-"""Test the Spec 125 scale hypothesis: is the textureless residual the heightmap scaled by ~33.334x?
+"""Test the Spec 125 residual hypotheses against the ground-truth heightmap.
 
-The user's hypothesis (2026-08-02): the residual may be the heightmap scaled down by ~33.334x — the
-same weak-signal band around +/- 2.778 Z that the weak-signal amplifier was built to restore. The
+The user's scale hypothesis (2026-08-02): the residual may be the heightmap scaled down by ~33.334x —
+the same weak-signal band around +/- 2.778 Z that the weak-signal amplifier was built to restore. The
 residuals look, visually and in the game data, like the weak signals.
 
-This script compares each harvested residual PNG against the ground-truth heightmap (height_257 from
-an existing v50 store) under several candidate transforms and reports which best explains the
-residual:
+The first run (683 Azeroth pairs) REFUTED the linear-scale hypothesis: correlation ~0.20, best-fit
+scale ~-0.0003. That is expected — the residual is a *shading* signal (Lambert N·L + cast shadows),
+which is a nonlinear function of the heightmap through its normals, not a linear scale.
+
+This script therefore tests the correct hypotheses:
 
   1. residual ~= height / 33.334            (the user's scale hypothesis)
   2. residual ~= height / 33.334, clipped to +/- 2.778 Z  (the weak-signal band)
   3. residual ~= a * height + b              (best-fit linear, to see how close 1/33.334 is)
   4. residual ~= normalized relative height  (the Spec 112 target, as a baseline)
+  5. residual ~= hillshade(height)           (Lambert N·L from height gradients — the synthesizer's
+                                             own shading model; the physically correct comparison)
+  6. per-tile best-fit scale                 (does a consistent per-tile scale exist even if no
+                                             global one does? the user notes the weak-signal scale
+                                             was not always 33.334 but some fraction of it)
 
-For each candidate it reports Pearson correlation and a scale-fit error, so the hypothesis is
-confirmed or refuted on real data rather than by eye.
+For each candidate it reports Pearson correlation, so the hypotheses are confirmed or refuted on real
+data rather than by eye.
 
 Usage (USER runs):
   uv run python scripts/v50_validate_residual_scale.py \
@@ -83,6 +90,26 @@ def _best_linear_scale(a: np.ndarray, b: np.ndarray) -> float:
     return float((a * b).sum() / denom) if denom > 1e-12 else 0.0
 
 
+def _hillshade(height: np.ndarray) -> np.ndarray:
+    """Lambert N·L hillshade of a height field, matching the synthesizer's shading model.
+
+    Computes unit normals from height gradients and dots them with a fixed NW light direction
+    (the traced 1.0.0 bearing, 45 deg from +X toward +Y). Returns a 0..1 shading field.
+    """
+    h = np.asarray(height, dtype=np.float64)
+    gy, gx = np.gradient(h)
+    # Normal = (-gx, -gy, 1), normalized.
+    nz = np.ones_like(gx)
+    norm = np.sqrt(gx * gx + gy * gy + nz * nz)
+    nx, ny, nz = -gx / norm, -gy / norm, nz / norm
+    # Fixed NW light: normalize(-0.5, -0.5, 0.72) — the traced source bearing.
+    lx, ly, lz = -0.5, -0.5, 0.72
+    lnorm = np.sqrt(lx * lx + ly * ly + lz * lz)
+    lx, ly, lz = lx / lnorm, ly / lnorm, lz / lnorm
+    shade = np.clip(nx * lx + ny * ly + nz * lz, 0.0, 1.0)
+    return shade.astype(np.float32)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Test the Spec 125 residual-scale hypothesis")
     ap.add_argument("--residual-dir", required=True, type=Path)
@@ -135,6 +162,8 @@ def main() -> int:
     # Candidate 4: normalized relative height (Spec 112 target)
     hmin, hmax = H.min(), H.max()
     cand_rel = (H - hmin) / max(hmax - hmin, 1.0)
+    # Candidate 5: hillshade(height) — the synthesizer's own Lambert N·L shading model.
+    cand_shade = np.concatenate([_hillshade(h).ravel() for h in heights])
 
     print(f"{'candidate':<46} {'corr':>8} {'scale':>10}")
     print("-" * 70)
@@ -142,15 +171,29 @@ def main() -> int:
     print(f"{'residual ~= height/33.334 clipped +/-2.778Z':<46} {_pearson(R, cand_band):8.4f} {'band':>10}")
     print(f"{'residual ~= k*height (best-fit)':<46} {_pearson(R, cand_fit):8.4f} {k_fit:10.4f}")
     print(f"{'residual ~= normalized relative height':<46} {_pearson(R, cand_rel):8.4f} {'rel':>10}")
+    print(f"{'residual ~= hillshade(height) [N.L]':<46} {_pearson(R, cand_shade):8.4f} {'N.L':>10}")
 
     print()
     print(f"Best-fit scale k = {k_fit:.4f}  (hypothesis predicts 1/33.334 = {1/SCALE_33_334:.6f})")
     print(f"Ratio k / (1/33.334) = {k_fit / (1/SCALE_33_334):.3f}x")
     print()
-    print("How to read this: a high correlation for the 1/33.334 candidate (and a best-fit k near")
-    print("1/33.334) confirms the residual is a near-linear scaled heightmap. If the clipped-band")
-    print("candidate wins, the residual is the weak-signal band specifically. If none correlate,")
-    print("the residual is a learned (nonlinear) shading signal, not a direct heightmap transform.")
+
+    # Per-tile scale analysis: does a consistent per-tile scale exist even if no global one does?
+    # The user notes the weak-signal scale was not always 33.334 but some fraction of it.
+    per_tile_k = [_best_linear_scale(r, h) for r, h in zip(residuals, heights)]
+    per_tile_k = [k for k in per_tile_k if abs(k) > 1e-9]
+    if per_tile_k:
+        k_arr = np.asarray(per_tile_k)
+        print(f"Per-tile best-fit scale k: mean={k_arr.mean():.6f} std={k_arr.std():.6f} "
+              f"min={k_arr.min():.6f} max={k_arr.max():.6f} (n={len(k_arr)})")
+        print(f"  fraction of tiles with |k| > 1e-3: {(np.abs(k_arr) > 1e-3).mean():.3f}")
+        print(f"  fraction of tiles with |k| > 1e-2: {(np.abs(k_arr) > 1e-2).mean():.3f}")
+    print()
+    print("How to read this: a high correlation for the hillshade [N.L] candidate confirms the")
+    print("residual is the synthesizer's own shading model (the physically correct comparison). A")
+    print("high per-tile scale fraction with a consistent per-tile k would suggest a per-tile scale")
+    print("even though no global one exists. If none correlate, the residual is a learned (nonlinear)")
+    print("shading signal, not a direct heightmap transform.")
     return 0
 
 
