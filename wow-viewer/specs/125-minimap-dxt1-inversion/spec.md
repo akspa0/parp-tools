@@ -160,6 +160,14 @@ residual, and training convergence on that signal should regenerate heightmap da
 solely because we know how the whole thing was originally built. This is the holy grail of minimap
 baking that no one has gotten quite right.
 
+**Scale hypothesis (user, 2026-08-02)**: the residual may be the heightmap **scaled down by ~33.334×**
+— the same weak-signal band around **±2.778 Z** that the weak-signal amplifier was built to restore
+(verts with small values that ended up being amplifiable to restore "erased" terrain). The residuals
+look, visually and in the game data, like the weak signals. This is directly testable: compare the
+harvested residual against the ground-truth heightmap scaled by 33.334× (and against the ±2.778 Z
+band) and measure the correlation. If it holds, the residual is not just a learned prior — it is a
+near-linear transform of the heightmap, which would make reconstruction dramatically more tractable.
+
 A reconstruction engineer takes *any* authored minimap tile and recovers the terrain that produced
 it — going **minimap RGB → heightmap → 3D mesh** with a single model that reads the terrain shadow
 and converts it into ridges, mountains, and terrain detail. This is the payoff of the whole lighting
