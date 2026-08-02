@@ -274,6 +274,39 @@ outputs.
 
 ---
 
+### User Story 7 — Extract the residual from any minimap RGB tile, then strip the shading layer (Priority: P1)
+
+A reconstruction engineer trains a **residual-extractor** model that takes any minimap RGB tile and
+recovers the textureless terrain-shadow residual. Once the residual is known, subtracting it from the
+minimap strips away the shading layer, revealing the albedo/texturing (MCAL/MCLY/MTEX) underneath.
+This is the natural first step: the synthesizer produces both the full minimap RGB and the textureless
+residual for the same tile, so the training pairs are exact and free.
+
+**Why this priority**: The user stated this on 2026-08-02 as the step-1 decomposition. The scale test
+refuted the direct heightmap-transform hypothesis, so the residual is a learned (nonlinear) shading
+signal — which means the way to get it from an arbitrary minimap is to *learn* the extraction. And
+because we can subtract the residual from the minimap, this also unlocks layer stripping: remove the
+shading to expose the texturing data underneath, which is the path to MCAL/MCLY recovery.
+
+**Independent Test**: Hold out minimap RGB tiles never seen in training, run the residual-extractor,
+and measure the recovered residual against the known textureless residual for the same tile (ground
+truth the synthesizer produces). Then subtract the predicted residual from the minimap and confirm the
+residual (shading) component is removed, leaving the albedo/texturing layer.
+
+**Acceptance Scenarios**:
+
+1. **Given** a minimap RGB tile, **When** the residual-extractor runs,
+   **Then** it produces a residual close to the known textureless residual for the same tile, measured
+   on held-out tiles.
+2. **Given** a minimap RGB tile and its predicted residual, **When** the residual is subtracted,
+   **Then** the shading component is removed, leaving the albedo/texturing layer (MCAL/MCLY/MTEX).
+3. **Given** a minimap RGB tile with objects, **When** the residual-extractor runs,
+   **Then** it recovers the terrain residual without being confused by object pixels.
+4. **Given** a minimap RGB tile, **When** the residual-extractor runs,
+   **Then** it reports confidence, and low-confidence tiles are flagged rather than silently used.
+
+---
+
 ### Edge Cases
 
 - An authored tile that is a single flat colour (unrendered). Must be excluded from aggregates, not
@@ -350,6 +383,13 @@ outputs.
   signal.
 - **FR-023**: The textureless-residual export MUST encode MCAL/MCLY/MTEX data as separate per-tileset
   layers, so per-tileset identity is preserved alongside the shading signal.
+- **FR-024**: The system MUST be able to **extract the textureless residual from any minimap RGB
+  tile** using a learned residual-extractor, trained on exact minimap-RGB → residual pairs the
+  synthesizer produces.
+- **FR-025**: The system MUST be able to **subtract the extracted residual from a minimap RGB tile**
+  to strip the shading layer, revealing the albedo/texturing (MCAL/MCLY/MTEX) underneath.
+- **FR-026**: The residual-extractor MUST report confidence per tile, and low-confidence tiles MUST be
+  flagged rather than silently used.
 
 ### Key Entities
 
@@ -377,6 +417,8 @@ outputs.
 - **Textureless Residual**: A per-tile shading-only image (no objects, no textures) that encodes the
   terrain shadow; the cleanest training signal for residuals-based reconstruction. Stored per-tile and
   stitched whole-map, with MCAL/MCLY/MTEX as separate per-tileset layers.
+- **Extracted Residual**: The residual recovered from a minimap RGB tile by the residual-extractor
+  model; subtracting it from the minimap strips the shading layer to reveal the albedo/texturing.
 
 ## Success Criteria *(mandatory)*
 
@@ -420,6 +462,11 @@ outputs.
 - **SC-016**: The textureless-residual export produces a per-tile shading-only image and a stitched
   whole-map image for every occupied tile of a map, with no albedo texture and no object pixels, and
   stores the signal in the v50 Zarr datastore with MCAL/MCLY/MTEX as separate per-tileset layers.
+- **SC-017**: On held-out minimap RGB tiles, the residual-extractor recovers a residual close to the
+  known textureless residual for the same tile, and subtracting it removes the shading component to
+  reveal the albedo/texturing layer.
+- **SC-018**: The residual-extractor flags low-confidence tiles rather than silently using them, and
+  recovers the terrain residual on object-bearing tiles without being confused by object pixels.
 
 ## Assumptions
 
