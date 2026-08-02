@@ -345,12 +345,14 @@ public static class Dxt1TileCodec
         if (blp[0] != 'B' || blp[1] != 'L' || blp[2] != 'P' || blp[3] != '2')
             return null;
 
-        // compression byte at offset 6 must be 2 (DXTC)
-        if (blp[6] != 2)
+        // BLP2 header layout: magic(0-3), version(4-7), compression(8), alphaDepth(9),
+        // alphaEncoding(10), hasMips(11), width(12-15), height(16-19), offsets(20-83), sizes(84-147).
+        // compression byte at offset 8 must be 2 (DXTC)
+        if (blp[8] != 2)
             return null;
 
-        // alpha encoding byte at offset 8 must be 7 (DXT1)
-        if (blp[8] != 7)
+        // alpha encoding byte at offset 10 must be 1 (DXT1)
+        if (blp[10] != 1)
             return null;
 
         // mip 0 offset at bytes 20..23, size at bytes 84..87

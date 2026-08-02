@@ -64,10 +64,12 @@ public static class MinimapEncodingSurvey
         if (!isBlp2)
             return "unknown";
 
-        byte compression = blp[6];      // 2 = DXTC
-        byte alphaDepth = blp[7];       // 0 = no alpha, 8 = alpha
-        byte alphaEncoding = blp[8];    // 7 = DXT1, 8 = DXT3, 9 = DXT5
-        byte hasMips = blp[9];
+        // BLP2 header layout: magic(0-3), version(4-7), compression(8), alphaDepth(9),
+        // alphaEncoding(10), hasMips(11), width(12-15), height(16-19), offsets(20-83), sizes(84-147).
+        byte compression = blp[8];      // 2 = DXTC
+        byte alphaDepth = blp[9];       // 0 = no alpha, 8 = alpha
+        byte alphaEncoding = blp[10];   // 1 = DXT1, 7 = DXT3, 8 = DXT5
+        byte hasMips = blp[11];
         int width = ReadInt32Le(blp, 12);
         int height = ReadInt32Le(blp, 16);
 
@@ -79,9 +81,9 @@ public static class MinimapEncodingSurvey
 
         string alphaName = alphaEncoding switch
         {
-            7 => "DXT1",
-            8 => "DXT3",
-            9 => "DXT5",
+            1 => "DXT1",
+            7 => "DXT3",
+            8 => "DXT5",
             _ => $"alpha{alphaEncoding}",
         };
 
