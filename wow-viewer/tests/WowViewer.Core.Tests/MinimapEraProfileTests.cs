@@ -131,6 +131,70 @@ public sealed class MinimapEraProfileTests
             Assert.True(direction.Y > 0.1f, $"West is +Y in world axes, got Y={direction.Y}.");
     }
 
+    /// <summary>
+    /// The traced client sun stays LOW -- phi 110..127 degrees puts the source between 20 and 37
+    /// degrees of elevation, never near overhead. A previous model pinned horizontal magnitude at
+    /// 0.5 and varied only Z, which is not a spherical direction: it produced 5.7 degrees at 06:00
+    /// jumping to 45 by 08:00 and topping out at 63.4, halving the horizontal push exactly when
+    /// shadows should have been longest.
+    /// </summary>
+    [Fact]
+    public void SolarElevation_StaysInsideTheTracedLowSunBand()
+    {
+        for (int hour = 0; hour < 24; hour++)
+        {
+            float elevation = TerrainSolarDirection.EvaluateElevationDegrees(hour / 24f);
+            Assert.InRange(
+                elevation,
+                TerrainSolarDirection.TracedMinimumElevationDegrees - 0.01f,
+                TerrainSolarDirection.TracedMaximumElevationDegrees + 0.01f);
+        }
+
+        Assert.Equal(
+            TerrainSolarDirection.TracedMaximumElevationDegrees,
+            TerrainSolarDirection.EvaluateElevationDegrees(0.5f),
+            3);
+        Assert.Equal(
+            TerrainSolarDirection.TracedMinimumElevationDegrees,
+            TerrainSolarDirection.EvaluateElevationDegrees(0f),
+            3);
+    }
+
+    /// <summary>
+    /// Horizontal magnitude must be cos(elevation), so it shrinks as the sun climbs. Pinning it to a
+    /// constant is what broke shadow length tracking with time of day.
+    /// </summary>
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(0.25f)]
+    [InlineData(0.5f)]
+    [InlineData(0.75f)]
+    public void SolarDirection_IsAProperSphericalUnitVector(float gameTime)
+    {
+        Vector3 direction = TerrainSolarDirection.Evaluate(gameTime);
+        float elevation = TerrainSolarDirection.EvaluateElevationDegrees(gameTime) * (MathF.PI / 180f);
+
+        Assert.Equal(1f, direction.Length(), 4);
+        Assert.Equal(MathF.Sin(elevation), direction.Z, 4);
+        Assert.Equal(MathF.Cos(elevation), new Vector2(direction.X, direction.Y).Length(), 4);
+    }
+
+    /// <summary>
+    /// The traced in-memory client vector is the one hard datapoint for the sun's geometry, so the
+    /// model's elevation band must contain it.
+    /// </summary>
+    [Fact]
+    public void TracedClientVectorFallsInsideTheModelledElevationBand()
+    {
+        var tracedRay = new Vector3(-0.6481626f, -0.6481628f, -0.3997127f);
+        float tracedElevation = MathF.Asin(MathF.Abs(tracedRay.Z)) * 180f / MathF.PI;
+
+        Assert.InRange(
+            tracedElevation,
+            TerrainSolarDirection.TracedMinimumElevationDegrees,
+            TerrainSolarDirection.TracedMaximumElevationDegrees);
+    }
+
     [Theory]
     [InlineData(10f, 350f, 20f)]
     [InlineData(45f, 225f, 180f)]

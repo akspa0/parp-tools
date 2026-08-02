@@ -51,7 +51,8 @@ public sealed record MinimapEraProfile(
     MinimapLiquidPalette Liquid,
     Vector3 AmbientColor,
     float CastShadowStrength,
-    float CastShadowSoftness)
+    float CastShadowSoftness,
+    bool CastShadowsEnabled = true)
 {
     /// <summary>
     /// 0.5.3.3368 -- Alpha. The current restoration target.
@@ -62,6 +63,17 @@ public sealed record MinimapEraProfile(
     /// Resolve it by measuring against authored 0.5.3 minimaps, then set
     /// <see cref="SolarModelProvenance.MeasuredFromAuthoredMinimaps"/> here.
     /// </summary>
+    /// <remarks>
+    /// CAST SHADOWS DEFAULT OFF for this era. The client shaded terrain with Lambert plus the baked
+    /// MCSH map and never ray-traced terrain shadows, so an analytic cast pass is an addition rather
+    /// than a reconstruction. It was introduced while two real bugs were making renders look flat --
+    /// a tone map that crushed shading contrast to 12.8% of albedo, and a solar elevation modelled at
+    /// 63 degrees instead of the traced 37 -- and with both fixed, Lambert at a low sun supplies the
+    /// directional signal on its own (a 30-degree slope facing away sits at N.L 0.12 against 0.92
+    /// facing the sun). Repeated visual comparison against authored tiles kept reporting too much
+    /// shadow. Re-enable per run with <c>ApplyCastShadows</c> / the absence of
+    /// <c>--no-cast-shadows</c> if a build turns out to need it.
+    /// </remarks>
     public static MinimapEraProfile Alpha053 { get; } = new(
         "alpha_0_5_3",
         "Alpha (0.5.3)",
@@ -71,7 +83,8 @@ public sealed record MinimapEraProfile(
         Liquid: MinimapLiquidPalette.PreAlpha053,
         AmbientColor: new Vector3(TerrainLightingMath.DefaultSyntheticMinimapAmbient),
         CastShadowStrength: TerrainLightingMath.DefaultCastShadowStrength,
-        CastShadowSoftness: TerrainCastShadowMap.DefaultSoftnessWorldUnits);
+        CastShadowSoftness: TerrainCastShadowMap.DefaultSoftnessWorldUnits,
+        CastShadowsEnabled: false);
 
     /// <summary>
     /// 0.6.0 -- Beta 1. Roughly five months after Alpha, with known differences in how minimaps were

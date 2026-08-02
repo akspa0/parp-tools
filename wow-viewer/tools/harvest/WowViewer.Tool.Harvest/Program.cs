@@ -8,7 +8,9 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using StreamProfile = WowViewer.Core.IO.Maps.RawArraySerializer.StreamProfile;
+using WowViewer.Core.Blp;
 using WowViewer.Core.Curation;
+using WowViewer.Core.IO.Blp;
 using WowViewer.Core.IO.Converters;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
@@ -121,6 +123,12 @@ static class Program
             case "synthetic-minimap":
                 RunSyntheticMinimap(tail);
                 break;
+            case "sun-diagnostic":
+                RunSunDiagnostic(tail);
+                break;
+            case "inspect-minimap-blp":
+                RunInspectMinimapBlp(tail);
+                break;
             case "extract-unified":
                 RunExtractUnified(tail);
                 break;
@@ -187,13 +195,19 @@ static class Program
                                 client tiles, with optional per-tile and whole-map PNG outputs.
                                 Use --time-hours (HHmm or HH:mm) to set the sun position;
                                 defaults to 12:00 (noon, full-bright). Terrain renders with Lambert
-                                hillshading plus analytic sun-driven cast shadows; --no-cast-shadows
-                                disables the cast-shadow pass and leaves hillshading only. Add
+                                hillshading; analytic cast shadows are an ADDITION the client never
+                                had and default OFF for the Alpha era (--cast-shadows enables them,
+                                --no-cast-shadows forces them off). Add
                                 --authored-reference to emit real-client side-by-side comparisons,
                                 and --match-time (requires --authored-reference) to infer each
                                 tile's best-matching time-of-day from the authored minimap's shading
                                 and render at it. Normal RGB omits the client's baked MCSH map
                                 (a separate signal); --bake-mcsh is an exceptional-history preview.
+              sun-diagnostic    Light a synthetic hill with the current sun model at 06:00-18:00 and
+                                write compass-marked PNGs. No client needed. Use this to tell a
+                                wrong lighting model apart from wrongly-oriented terrain data.
+                                Accepts --era / --sun-model / --sun-azimuth / --ambient /
+                                --cast-shadow-strength / --shadow-softness / --resolution.
               split-minimap-image
                                 Slice one standalone composite map image (e.g. a full-continent
                                 scan/render with no client/MPQ backing) into a fixed-size tile grid
@@ -239,6 +253,12 @@ static class Program
               --cast-shadow-strength <0..1>  how dark a fully cast-shadowed pixel gets. Default 0.70.
               --shadow-softness <world-units>  penumbra width of the shadow ramp. Lower = crisper,
                                           narrower shadow edges in crevices. Default 4.
+              --max-shadow-length <world-units>  clamp how far a shadow is thrown; 0 = uncapped
+                                          (default, and physically correct). The traced sun is LOW,
+                                          so shadows run 1.3-2.75x the occluder height. If you need
+                                          this to look right, try --no-cast-shadows first: the
+                                          client shaded with Lambert + baked MCSH and never
+                                          ray-traced terrain shadows at all.
               --light-gain <v>            overrides the gain that is otherwise DERIVED from
                                           --ambient to hold overall brightness steady. Only needed
                                           if you want to rebrighten/darken the whole image.
@@ -1493,7 +1513,12 @@ static class Program
         // Cast shadows are on by default: Lambert alone cannot darken flat ground behind a ridge,
         // which is why synthesized tiles read as shadowless next to authored minimaps. The opt-out
         // exists for A/B comparison and for callers that need the pre-v0.5.3 hillshade-only look.
-        bool castShadows = !HasFlag(args, "--no-cast-shadows");
+        // Cast shadows are an ADDITION, not a reconstruction: the client shaded terrain with Lambert
+        // plus baked MCSH and never ray-traced. The era profile decides the default (off for Alpha);
+        // --cast-shadows forces them on and --no-cast-shadows forces them off.
+        bool? castShadowsOverride = HasFlag(args, "--cast-shadows") ? true
+            : HasFlag(args, "--no-cast-shadows") ? false
+            : null;
         // --match-time: infer each tile's best-matching time-of-day from the authored minimap
         // (MinimapShadingMatch hour sweep) and render the synthesized tile at THAT hour, instead
         // of one global --time-hours. Requires --authored-reference.
@@ -1604,6 +1629,8 @@ static class Program
             return;
         }
 
+        bool castShadows = castShadowsOverride ?? tuning!.Era.CastShadowsEnabled;
+
         Console.WriteLine($"Minimap era profile: {tuning!.Era.EraLabel} ({tuning.Era.Name})");
         if (!tuning.ExactEraMatch)
         {
@@ -1698,7 +1725,8 @@ static class Program
             ? "  Cast shadows: analytic sun-driven ray march over this tile's MCVT heightfield " +
               $"(strength {lighting.Lighting.CastShadowStrength:0.00}, softness " +
               $"{lighting.Lighting.CastShadowSoftness:0.0}wu); shadows do not cross tile seams."
-            : "  Cast shadows: disabled (--no-cast-shadows); Lambert hillshading only.");
+            : "  Cast shadows: OFF (era default for this build; the client never ray-traced terrain "
+              + "shadows). Lambert hillshading only. Use --cast-shadows to enable.");
         Vector3 ambientColor = lighting.Lighting.AmbientColor;
         Console.WriteLine(
             $"  Contrast: ambient {ambientColor.X:0.000},{ambientColor.Y:0.000},{ambientColor.Z:0.000}" +
@@ -3568,6 +3596,432 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     }
 
     /// <summary>
+    /// Reports how a build's authored minimap BLPs are actually encoded, and whether their pixels
+    /// show the fingerprints of palette quantisation and rescaling.
+    ///
+    /// WHY: if the authored minimaps are palettized (256 colours) and dithered, then their colours
+    /// are quantisation artefacts, not an art direction to match -- and any attempt to colour-match a
+    /// full-colour render against them is chasing noise. The "spray-can" texture is the visible
+    /// signature of error-diffusion dithering, and it would also explain fine speckle that a smooth
+    /// synthesized render can never reproduce. All of this is decidable from the files themselves.
+    /// </summary>
+    static void RunInspectMinimapBlp(string[] args)
+    {
+        string? clientRoot = GetOption(args, "--client-root", "-c");
+        string? mapName = GetOption(args, "--map", "-m");
+        int limit = GetIntOption(args, "--limit", "-n") ?? 12;
+        if (string.IsNullOrWhiteSpace(clientRoot) || string.IsNullOrWhiteSpace(mapName))
+        {
+            Console.Error.WriteLine("Error: --client-root and --map are required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        clientRoot = ResolveGameClientRoot(clientRoot);
+        string? buildVersion = GetOption(args, "--build", "-b") ?? DetectBuildVersionFromClientRoot(clientRoot);
+
+        using var catalog = new NativeMpqService();
+        catalog.LoadArchives([clientRoot]);
+        TryLoadSupplementalListfile(catalog);
+        LoadMd5Translate(clientRoot, catalog);
+
+        Console.WriteLine($"Authored minimap BLP encoding report — build {buildVersion ?? "unknown"}, map {mapName}");
+        Console.WriteLine();
+
+        int inspected = 0;
+        var uniqueColorCounts = new List<int>();
+        var ditherScores = new List<double>();
+        var blockScores = new List<double>();
+        var formats = new Dictionary<string, int>(StringComparer.Ordinal);
+        var topMipSizes = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        for (int tileY = 0; tileY < 64 && inspected < limit; tileY++)
+        {
+            for (int tileX = 0; tileX < 64 && inspected < limit; tileX++)
+            {
+                byte[]? bytes = TryReadMinimapBlpBytes(catalog, mapName, tileX, tileY);
+                if (bytes is null || bytes.Length == 0)
+                    continue;
+
+                BlpSummary summary;
+                try
+                {
+                    using var stream = new MemoryStream(bytes, writable: false);
+                    summary = BlpSummaryReader.Read(stream, $"{mapName}_{tileX}_{tileY}.blp");
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"  {tileX:D2},{tileY:D2}: header unreadable ({ex.Message})");
+                    continue;
+                }
+
+                string formatKey = $"{summary.Format}/{summary.Compression}/alpha{summary.AlphaDepthBits}/{summary.PixelFormat}";
+                formats[formatKey] = formats.GetValueOrDefault(formatKey) + 1;
+                string sizeKey = $"{summary.Width}x{summary.Height}";
+                topMipSizes[sizeKey] = topMipSizes.GetValueOrDefault(sizeKey) + 1;
+
+                byte[,,]? rgb = TryLoadMinimapFromMpq(catalog, mapName, tileX, tileY);
+                int uniqueColors = -1;
+                double dither = double.NaN;
+                double blockiness = double.NaN;
+                bool degenerate = false;
+                if (rgb is not null)
+                {
+                    uniqueColors = CountUniqueColors(rgb);
+                    dither = MeasureHighFrequencyNoise(rgb);
+                    blockiness = MeasureBlockEdgeRatio(rgb);
+                    // A single-colour tile is an unrendered/empty tile, not evidence about encoding.
+                    // Averaging it in drags every aggregate toward zero and can flip the verdict.
+                    degenerate = uniqueColors <= 2;
+                    if (!degenerate)
+                    {
+                        uniqueColorCounts.Add(uniqueColors);
+                        ditherScores.Add(dither);
+                        blockScores.Add(blockiness);
+                    }
+                }
+
+                Console.WriteLine(
+                    $"  {tileX:D2},{tileY:D2}  {summary.Format,-5} {summary.Compression,-12} " +
+                    $"alpha{summary.AlphaDepthBits,-2} {summary.Width}x{summary.Height} " +
+                    $"mips={summary.InBoundsMipLevelCount,-2} palette={(summary.PaletteSizeBytes > 0 ? "YES" : "no"),-3} " +
+                    $"colors={(uniqueColors < 0 ? "?" : uniqueColors.ToString()),-6} hf-noise={dither:0.000} " +
+                    $"block4x4={blockiness:0.00}{(degenerate ? "  [empty tile, excluded]" : string.Empty)}");
+                inspected++;
+            }
+        }
+
+        if (inspected == 0)
+        {
+            Console.Error.WriteLine("No authored minimap BLP could be read for this map.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Encodings seen:");
+        foreach ((string key, int count) in formats.OrderByDescending(static kv => kv.Value))
+            Console.WriteLine($"  {count,4} x  {key}");
+        Console.WriteLine("Top-mip dimensions:");
+        foreach ((string key, int count) in topMipSizes.OrderByDescending(static kv => kv.Value))
+            Console.WriteLine($"  {count,4} x  {key}");
+
+        if (uniqueColorCounts.Count > 0)
+        {
+            int median = uniqueColorCounts.OrderBy(static c => c).ElementAt(uniqueColorCounts.Count / 2);
+            Console.WriteLine();
+            Console.WriteLine($"Unique colours per tile: min {uniqueColorCounts.Min()}, median {median}, max {uniqueColorCounts.Max()}");
+            Console.WriteLine(
+                uniqueColorCounts.Max() <= 256
+                    ? "  <= 256 everywhere: the decoded image IS palette-quantised. Its colours are\n" +
+                      "  quantisation output, so exact colour-matching a full-colour render is chasing artefacts."
+                    : "  > 256 colours present: the decoded image is NOT limited to a 256-entry palette.");
+            Console.WriteLine();
+            Console.WriteLine($"High-frequency noise (deviation from 3x3 median): {ditherScores.Average():0.000}");
+            Console.WriteLine(
+                ditherScores.Average() > 0.35
+                    ? "  High: consistent with per-pixel dithering."
+                    : "  Moderate/low: not per-pixel dithering. Note this detector is the wrong instrument\n" +
+                      "  for BLOCK codecs -- DXT artefacts sit on 4-pixel boundaries, not on single pixels.");
+
+            Console.WriteLine();
+            Console.WriteLine($"4x4 block-edge ratio (discontinuity on block boundaries vs inside blocks): {blockScores.Average():0.00}");
+            Console.WriteLine(
+                blockScores.Average() > 1.15
+                    ? "  >1: pixel differences concentrate on 4-pixel boundaries -- the signature of DXT block\n" +
+                      "  compression. THIS is the 'spray-can' texture, and no smooth render reproduces it."
+                    : "  ~1: no block-aligned structure detected in this sample.");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Reminder: a top mip smaller than 256x256 means the client's own minimaps were");
+        Console.WriteLine("upscaled for display, and our 256+ renders are strictly higher fidelity than the target.");
+    }
+
+    private static byte[]? TryReadMinimapBlpBytes(NativeMpqService catalog, string mapName, int tileX, int tileY)
+    {
+        foreach (string candidate in new[]
+        {
+            $"World\\Minimaps\\{mapName}\\map{tileX:D2}_{tileY:D2}.blp",
+            $"textures\\Minimap\\{mapName}\\map{tileX:D2}_{tileY:D2}.blp",
+            $"World\\Minimaps\\{mapName}\\{mapName}_{tileX:D2}_{tileY:D2}.blp",
+        })
+        {
+            byte[]? bytes = catalog.ReadFile(candidate);
+            if (bytes is { Length: > 0 })
+                return bytes;
+        }
+
+        return null;
+    }
+
+    private static int CountUniqueColors(byte[,,] rgb)
+    {
+        var seen = new HashSet<int>();
+        for (int y = 0; y < rgb.GetLength(0); y++)
+        {
+            for (int x = 0; x < rgb.GetLength(1); x++)
+                seen.Add((rgb[y, x, 0] << 16) | (rgb[y, x, 1] << 8) | rgb[y, x, 2]);
+        }
+
+        return seen.Count;
+    }
+
+    /// <summary>
+    /// Ratio of mean horizontal pixel difference ACROSS 4-pixel-aligned column boundaries to the mean
+    /// difference at non-aligned columns. DXT compresses in 4x4 blocks with independent endpoints, so
+    /// its error concentrates exactly on those boundaries: a ratio above ~1.15 is the fingerprint.
+    ///
+    /// This is the right detector for a block codec. A 3x3-median test measures per-PIXEL noise and
+    /// largely misses block structure, which is why it can report "low noise" on an image that is
+    /// visibly blocky.
+    /// </summary>
+    private static double MeasureBlockEdgeRatio(byte[,,] rgb)
+    {
+        int height = rgb.GetLength(0);
+        int width = rgb.GetLength(1);
+        if (height < 8 || width < 8)
+            return double.NaN;
+
+        double alignedSum = 0.0, interiorSum = 0.0;
+        int alignedCount = 0, interiorCount = 0;
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 1; x < width; x++)
+            {
+                int delta = Math.Abs(rgb[y, x, 0] - rgb[y, x - 1, 0])
+                    + Math.Abs(rgb[y, x, 1] - rgb[y, x - 1, 1])
+                    + Math.Abs(rgb[y, x, 2] - rgb[y, x - 1, 2]);
+                if (x % 4 == 0)
+                {
+                    alignedSum += delta;
+                    alignedCount++;
+                }
+                else
+                {
+                    interiorSum += delta;
+                    interiorCount++;
+                }
+            }
+        }
+
+        if (alignedCount == 0 || interiorCount == 0)
+            return double.NaN;
+
+        double interiorMean = interiorSum / interiorCount;
+        return interiorMean <= 1e-9 ? double.NaN : (alignedSum / alignedCount) / interiorMean;
+    }
+
+    /// <summary>
+    /// Fraction of pixels whose luma differs from their 3x3 neighbourhood median by more than a
+    /// small threshold. Dithering scatters isolated off-median pixels everywhere, so it scores high;
+    /// a smoothly shaded render scores low even when it has plenty of large-scale detail.
+    /// </summary>
+    private static double MeasureHighFrequencyNoise(byte[,,] rgb)
+    {
+        int height = rgb.GetLength(0);
+        int width = rgb.GetLength(1);
+        if (height < 3 || width < 3)
+            return double.NaN;
+
+        int deviating = 0;
+        int total = 0;
+        var window = new int[9];
+        for (int y = 1; y < height - 1; y++)
+        {
+            for (int x = 1; x < width - 1; x++)
+            {
+                int index = 0;
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        int ny = y + dy;
+                        int nx = x + dx;
+                        window[index++] = (rgb[ny, nx, 0] * 2126 + rgb[ny, nx, 1] * 7152 + rgb[ny, nx, 2] * 722) / 10000;
+                    }
+                }
+
+                Array.Sort(window);
+                int median = window[4];
+                int centre = (rgb[y, x, 0] * 2126 + rgb[y, x, 1] * 7152 + rgb[y, x, 2] * 722) / 10000;
+                if (Math.Abs(centre - median) > 3)
+                    deviating++;
+                total++;
+            }
+        }
+
+        return total == 0 ? double.NaN : deviating / (double)total;
+    }
+
+    /// <summary>
+    /// Renders a synthetic dome-shaped hill under the current sun model at a series of hours, with a
+    /// compass burned into each frame.
+    ///
+    /// WHY: when a real tile "looks wrong", two very different causes produce the same complaint --
+    /// the lighting model pointing the wrong way, or real terrain data being oriented differently
+    /// than assumed. A known hill separates them. There is exactly one correct answer here, it needs
+    /// no client, and it takes seconds: if these frames light the correct flank, the sun model is
+    /// right and any remaining problem is in how real tiles are oriented or shaded.
+    /// </summary>
+    static void RunSunDiagnostic(string[] args)
+    {
+        string outputDirectory = GetOption(args, "--output-dir", "-o") ?? "sun-diagnostic";
+        int resolution = GetIntOption(args, "--resolution", "-r") ?? 256;
+        resolution = Math.Clamp(resolution, 64, 1024);
+
+        SyntheticMinimapTuning? tuning = TryParseSyntheticMinimapTuning(args, buildVersion: null, out string? tuningError);
+        if (tuningError is not null)
+        {
+            Console.Error.WriteLine($"Error: {tuningError}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        Directory.CreateDirectory(outputDirectory);
+        MinimapEraProfile era = tuning!.Era;
+
+        Console.WriteLine("Sun diagnostic: a synthetic hill lit by the current sun model.");
+        Console.WriteLine($"  Era:   {era.EraLabel} ({era.Name})");
+        Console.WriteLine($"  Model: {era.AzimuthModel} at {era.NoonAzimuthDegrees:0} deg ({era.AzimuthProvenance})");
+        Console.WriteLine("  Raster orientation: NORTH is up, EAST is right (row increases south, column increases east).");
+        Console.WriteLine("  Expected under a north-west sun: the hill's UPPER-LEFT flank is lit,");
+        Console.WriteLine("  the LOWER-RIGHT flank is shaded, and shadows are thrown DOWN-RIGHT.");
+        Console.WriteLine();
+
+        TerrainTileTensorPack pack = BuildDiagnosticHillPack();
+        var textures = new Dictionary<int, byte[,,]> { [0] = new byte[1, 1, 3] { { { 190, 190, 190 } } } };
+
+        foreach (int hour in new[] { 6, 8, 10, 12, 14, 16, 18 })
+        {
+            float gameTime = hour / 24f;
+            TerrainMinimapLighting lighting = TerrainMinimapLighting.CreateShadedTerrain(
+                gameTime,
+                tuning.AmbientColor,
+                tuning.CastShadowStrength,
+                tuning.CastShadowSoftness) with
+            {
+                LightDirection = era.ResolveLightDirection(gameTime),
+            };
+
+            using Image<Rgba32> image = TerrainMinimapCompositor.Compose(
+                pack, textures, new TerrainMinimapCompositionOptions(resolution, lighting));
+            DrawCompass(image);
+
+            string path = Path.Combine(outputDirectory, $"sun-{hour:D2}00.png");
+            image.SaveAsPng(path);
+
+            Vector3 direction = lighting.LightDirection;
+            float azimuth = (MathF.Atan2(direction.Y, direction.X) * 180f / MathF.PI + 360f) % 360f;
+            float elevation = MathF.Asin(Math.Clamp(direction.Z, -1f, 1f)) * 180f / MathF.PI;
+            Console.WriteLine(
+                $"  {hour:D2}:00  azimuth {azimuth,5:0.0} deg ({DescribeBearing(azimuth)})  " +
+                $"elevation {elevation,4:0.0} deg  -> {Path.GetFileName(path)}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"Wrote 7 frames to {Path.GetFullPath(outputDirectory)}");
+        Console.WriteLine("If the lit flank moves between frames, the bearing is sweeping. If it stays put");
+        Console.WriteLine("but sits on the wrong side, the bearing is inverted. If these frames are correct");
+        Console.WriteLine("and real tiles are not, the fault is in the real tiles' orientation, not the sun.");
+    }
+
+    /// <summary>Names a bearing in world axes, where +X is North and +Y is West.</summary>
+    private static string DescribeBearing(float azimuthDegrees) => azimuthDegrees switch
+    {
+        < 22.5f or >= 337.5f => "North",
+        < 67.5f => "North-West",
+        < 112.5f => "West",
+        < 157.5f => "South-West",
+        < 202.5f => "South",
+        < 247.5f => "South-East",
+        < 292.5f => "East",
+        _ => "North-East",
+    };
+
+    /// <summary>A smooth central hill plus MCNR-equivalent normals derived from its own heights.</summary>
+    private static TerrainTileTensorPack BuildDiagnosticHillPack()
+    {
+        const int Grid = 257;
+        const float Centre = (Grid - 1) / 2f;
+        const float Sigma = Grid / 6f;
+
+        var height = new float[Grid, Grid];
+        var flat = new float[Grid * Grid];
+        for (int row = 0; row < Grid; row++)
+        {
+            for (int column = 0; column < Grid; column++)
+            {
+                float dr = (row - Centre) / Sigma;
+                float dc = (column - Centre) / Sigma;
+                float value = 400f * MathF.Exp(-0.5f * ((dr * dr) + (dc * dc)));
+                height[row, column] = value;
+                flat[(row * Grid) + column] = value;
+            }
+        }
+
+        var normals = new float[Grid, Grid, 3];
+        var mask = new bool[Grid, Grid];
+        for (int row = 0; row < Grid; row++)
+        {
+            for (int column = 0; column < Grid; column++)
+            {
+                Vector3 normal = AdtTerrainMath.ComputeNormal(flat, column, row);
+                normals[row, column, 0] = normal.X;
+                normals[row, column, 1] = normal.Y;
+                normals[row, column, 2] = normal.Z;
+                mask[row, column] = true;
+            }
+        }
+
+        var textureIds = new int[1, 1, 4];
+        textureIds[0, 0, 0] = 0;
+        textureIds[0, 0, 1] = -1;
+        textureIds[0, 0, 2] = -1;
+        textureIds[0, 0, 3] = -1;
+
+        return new TerrainTileTensorPack
+        {
+            TileX = 32,
+            TileY = 32,
+            MclyTextureIds = textureIds,
+            MclyTextureNames = ["diagnostic.blp"],
+            McnrNormalXyz = normals,
+            McnrMask257 = mask,
+            Height257 = height,
+        };
+    }
+
+    /// <summary>Burns N/E/S/W ticks into the frame so the reader never has to assume an orientation.</summary>
+    private static void DrawCompass(Image<Rgba32> image)
+    {
+        int size = image.Width;
+        int margin = Math.Max(4, size / 32);
+        var north = new Rgba32(255, 64, 64, 255);
+        var other = new Rgba32(255, 255, 255, 255);
+
+        // North marker is longer and red; the remaining three are plain ticks.
+        DrawBar(image, size / 2, margin, 3, margin * 3, north);
+        DrawBar(image, size / 2, size - margin - (margin * 2), 3, margin * 2, other);
+        DrawBar(image, margin, size / 2, margin * 2, 3, other);
+        DrawBar(image, size - margin - (margin * 2), size / 2, margin * 2, 3, other);
+    }
+
+    private static void DrawBar(Image<Rgba32> image, int x, int y, int width, int height, Rgba32 color)
+    {
+        for (int dy = 0; dy < height; dy++)
+        {
+            for (int dx = 0; dx < width; dx++)
+            {
+                int px = x + dx;
+                int py = y + dy;
+                if ((uint)px < (uint)image.Width && (uint)py < (uint)image.Height)
+                    image[px, py] = color;
+            }
+        }
+    }
+
+    /// <summary>
     /// Scores synthesized tiles against their authored counterparts, for one or more named variants,
     /// and reports whether a change actually improved agreement.
     ///
@@ -4053,6 +4507,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         Vector3 AmbientColor,
         float CastShadowStrength,
         float CastShadowSoftness,
+        float MaxCastShadowLength,
         float? LightGainOverride,
         MinimapLiquidPalette LiquidPalette,
         MinimapEraProfile Era,
@@ -4067,6 +4522,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             era.AmbientColor,
             era.CastShadowStrength,
             era.CastShadowSoftness,
+            TerrainCastShadowMap.UncappedShadowLength,
             null,
             era.Liquid,
             era,
@@ -4091,7 +4547,8 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             gameTime,
             tuning.AmbientColor,
             tuning.CastShadowStrength,
-            tuning.CastShadowSoftness) with
+            tuning.CastShadowSoftness,
+            tuning.MaxCastShadowLength) with
         {
             // Bearing comes from the era profile, not the hardcoded traced constant: whether the
             // sun holds a fixed bearing or sweeps east-to-west is era-specific and, for Alpha,
@@ -4599,6 +5056,18 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             }
 
             tuning = tuning with { CastShadowSoftness = softnessValue };
+        }
+
+        float? maxShadowLength = GetFloatOption(args, "--max-shadow-length", "");
+        if (maxShadowLength is { } maxLength)
+        {
+            if (maxLength < 0f || maxLength > 4096f)
+            {
+                error = $"--max-shadow-length expects world units in 0..4096 (0 = uncapped), got {maxLength}.";
+                return null;
+            }
+
+            tuning = tuning with { MaxCastShadowLength = maxLength };
         }
 
         float? gain = GetFloatOption(args, "--light-gain", "");

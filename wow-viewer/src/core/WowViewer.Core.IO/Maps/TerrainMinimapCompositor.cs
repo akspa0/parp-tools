@@ -65,7 +65,8 @@ public static class TerrainMinimapCompositor
             ? TerrainCastShadowMap.Compute(
                 pack.Height257,
                 options.Lighting.LightDirection,
-                options.Lighting.CastShadowSoftness)
+                options.Lighting.CastShadowSoftness,
+                options.Lighting.MaxCastShadowLength)
             : null;
 
         var image = new Image<Rgba32>(options.Resolution, options.Resolution);
@@ -625,7 +626,8 @@ public sealed record TerrainMinimapLighting(
     float CastShadowStrength = TerrainLightingMath.DefaultCastShadowStrength,
     bool LinearSpaceShading = false,
     float LinearLightGain = 1f,
-    float CastShadowSoftness = TerrainCastShadowMap.DefaultSoftnessWorldUnits)
+    float CastShadowSoftness = TerrainCastShadowMap.DefaultSoftnessWorldUnits,
+    float MaxCastShadowLength = TerrainCastShadowMap.UncappedShadowLength)
 {
     /// <summary>Visible neutral composition for callers that intentionally do not grade lighting.</summary>
     public static TerrainMinimapLighting Neutral { get; } = new(
@@ -722,7 +724,8 @@ public sealed record TerrainMinimapLighting(
         float gameTime,
         Vector3 ambientColor,
         float castShadowStrength,
-        float castShadowSoftness = TerrainCastShadowMap.DefaultSoftnessWorldUnits)
+        float castShadowSoftness = TerrainCastShadowMap.DefaultSoftnessWorldUnits,
+        float maxCastShadowLength = TerrainCastShadowMap.UncappedShadowLength)
     {
         float ambientLuminance = (ambientColor.X + ambientColor.Y + ambientColor.Z) / 3f;
         return CreateWhiteTopEdge(gameTime) with
@@ -734,6 +737,7 @@ public sealed record TerrainMinimapLighting(
             ApplyCastShadows = true,
             CastShadowStrength = castShadowStrength,
             CastShadowSoftness = castShadowSoftness,
+            MaxCastShadowLength = maxCastShadowLength,
         };
     }
 }

@@ -37,11 +37,19 @@ public sealed record MinimapLiquidPalette(
     /// signal. Rendering water as an opaque slab destroys that signal in every synthesized training
     /// row, which matters to anything that learns terrain or detects liquid from minimap RGB, not
     /// just to how the picture looks.
+    ///
+    /// Opacity has been walked down 0.82 -> 0.75 -> 0.60 across successive visual comparisons, which
+    /// is itself a signal worth reading: a flat colour needs ever more transparency to look right
+    /// because transparency is the only way this model produces any VARIATION across a water body.
+    /// Authored water additionally carries its own surface detail (ripple/wave texture) that no
+    /// opacity value can reproduce, so if 0.60 still reads wrong the missing thing is probably
+    /// surface texture, not more transparency -- past roughly 0.5 the water stops reading as water
+    /// and starts reading as tinted terrain.
     /// </summary>
     public static MinimapLiquidPalette PreAlpha053 { get; } = new(
-        "prealpha_0_5_3_teal_v2",
-        Water: new MinimapLiquidStyle(0.33f, 0.72f, 0.80f, 0.75f),
-        Ocean: new MinimapLiquidStyle(0.20f, 0.58f, 0.72f, 0.78f),
+        "prealpha_0_5_3_teal_v4",
+        Water: new MinimapLiquidStyle(0.33f, 0.72f, 0.80f, 0.66f),
+        Ocean: new MinimapLiquidStyle(0.20f, 0.58f, 0.72f, 0.70f),
         Magma: new MinimapLiquidStyle(0.85f, 0.30f, 0.05f, 0.75f),
         Slime: new MinimapLiquidStyle(0.20f, 0.70f, 0.15f, 0.65f));
 

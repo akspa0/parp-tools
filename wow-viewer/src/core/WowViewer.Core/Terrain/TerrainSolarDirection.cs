@@ -33,13 +33,14 @@ public static class TerrainSolarDirection
     /// bearing never changes, so any two hours with the same elevation are indistinguishable to
     /// every consumer of this class, including <see cref="WowViewer.Core.IO.Maps.MinimapShadingMatch"/>.
     /// </summary>
-    public static float EvaluateElevation(float gameTime)
-    {
-        float wrappedTime = gameTime - MathF.Floor(gameTime);
-        float sunAngle = wrappedTime * MathF.Tau;
-        float sunHeight = MathF.Sin(sunAngle - (MathF.PI * 0.5f));
-        return MathF.Max(sunHeight, 0.05f);
-    }
+    /// <summary>
+    /// Sine of the source elevation, i.e. the Z component of the unit light direction. Consumers
+    /// that only need to know whether two times render the SAME direction (such as
+    /// <see cref="WowViewer.Core.IO.Maps.MinimapShadingMatch"/>'s distinctness check) can compare
+    /// this scalar; consumers that need the actual vector must use <see cref="Evaluate(float)"/>.
+    /// </summary>
+    public static float EvaluateElevation(float gameTime) =>
+        MathF.Sin(EvaluateElevationDegrees(gameTime) * (MathF.PI / 180f));
 
     /// <summary>
     /// Source-bearing of the traced native ray, in degrees within the world XY plane measured from
@@ -49,11 +50,45 @@ public static class TerrainSolarDirection
     public const float TracedSourceAzimuthDegrees = 45f;
 
     /// <summary>
-    /// Fixed horizontal magnitude of the light vector before normalization. Preserved exactly as the
-    /// original hardcoded pair (0.3535534, 0.3535534), whose length is 0.5, so swapping azimuth
-    /// changes only the bearing and never the elevation the vector actually resolves to.
+    /// Lowest source elevation over the day, from the traced <c>phiTable</c> entry 1.919862 rad
+    /// (110 degrees): the ray points 20 degrees below horizontal, so the source sits 20 degrees above it.
     /// </summary>
-    private const float HorizontalMagnitude = 0.5f;
+    public const float TracedMinimumElevationDegrees = 20f;
+
+    /// <summary>
+    /// Highest source elevation over the day, from the traced <c>phiTable</c> entry 2.216568 rad
+    /// (127 degrees). The client's sun never climbs anywhere near overhead -- it stays low, which is
+    /// why authored minimaps show long, strongly directional shadows all day.
+    /// </summary>
+    public const float TracedMaximumElevationDegrees = 37f;
+
+    /// <summary>
+    /// Source elevation in degrees at a given time of day.
+    ///
+    /// THE BUG THIS REPLACED: the previous model pinned the horizontal magnitude at a constant 0.5
+    /// and varied only Z. That is not a spherical direction -- the resulting elevation is
+    /// <c>atan(z / 0.5)</c>, which produced 5.7 degrees at 06:00 and then 45 degrees by 08:00,
+    /// topping out at 63.4 degrees. So the sun leapt off the horizon in two hours, sat almost
+    /// overhead all day, and its horizontal push halved exactly when shadows should have been
+    /// longest. Rendered output read as light sliding around the terrain rather than a sun crossing
+    /// the sky.
+    ///
+    /// The traced client vector <c>(-0.6481626, -0.6481628, -0.3997127)</c> has horizontal magnitude
+    /// 0.9166 and elevation 23.6 degrees, sitting inside the phi-table band below -- roughly half our
+    /// old midday elevation with twice the horizontal component.
+    /// </summary>
+    /// <remarks>
+    /// The BAND is traced; the interpolation SHAPE across the day is modelled (a smooth peak at solar
+    /// noon), because the four sampled table entries fix the endpoints but not the curve between them.
+    /// </remarks>
+    public static float EvaluateElevationDegrees(float gameTime)
+    {
+        float wrapped = gameTime - MathF.Floor(gameTime);
+        // 0 at midnight, 1 at solar noon.
+        float dayFactor = (MathF.Sin((wrapped * MathF.Tau) - (MathF.PI * 0.5f)) + 1f) * 0.5f;
+        return TracedMinimumElevationDegrees
+            + (dayFactor * (TracedMaximumElevationDegrees - TracedMinimumElevationDegrees));
+    }
 
     public static Vector3 Evaluate(float gameTime) => Evaluate(gameTime, TracedSourceAzimuthDegrees);
 
@@ -73,13 +108,24 @@ public static class TerrainSolarDirection
     /// </param>
     public static Vector3 Evaluate(float gameTime, float azimuthDegrees)
     {
-        float sunHeight = EvaluateElevation(gameTime);
         float azimuth = float.IsFinite(azimuthDegrees) ? azimuthDegrees : TracedSourceAzimuthDegrees;
-        float radians = azimuth * (MathF.PI / 180f);
+        return FromSpherical(azimuth, EvaluateElevationDegrees(gameTime));
+    }
+
+    /// <summary>
+    /// Builds a unit light-source direction from bearing and elevation. Horizontal magnitude is
+    /// <c>cos(elevation)</c>, so it shrinks as the sun climbs -- the property the old fixed-0.5
+    /// horizontal broke, and the reason its shadow lengths did not track time of day correctly.
+    /// </summary>
+    public static Vector3 FromSpherical(float azimuthDegrees, float elevationDegrees)
+    {
+        float azimuth = azimuthDegrees * (MathF.PI / 180f);
+        float elevation = Math.Clamp(elevationDegrees, -89f, 89f) * (MathF.PI / 180f);
+        float horizontal = MathF.Cos(elevation);
         return Vector3.Normalize(new Vector3(
-            HorizontalMagnitude * MathF.Cos(radians),
-            HorizontalMagnitude * MathF.Sin(radians),
-            sunHeight));
+            horizontal * MathF.Cos(azimuth),
+            horizontal * MathF.Sin(azimuth),
+            MathF.Sin(elevation)));
     }
 
     /// <summary>

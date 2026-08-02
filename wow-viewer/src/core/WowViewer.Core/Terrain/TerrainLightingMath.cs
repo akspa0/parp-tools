@@ -31,23 +31,39 @@ public static class TerrainLightingMath
     /// client constant, and has not yet been calibrated against authored minimaps. Paired with
     /// <see cref="DefaultSyntheticMinimapAmbient"/>: together they set how deep shadows read, while
     /// <see cref="ResolveLinearLightGain"/> holds overall brightness steady as they change.
+    ///
+    /// LOWERED 0.70 -> 0.30 once the solar elevation was corrected. The 0.70 value was tuned while
+    /// the sun was wrongly modelled at 63 degrees, where Lambert supplied almost no directional
+    /// signal and cast shadows had to carry the whole effect. At the traced 37-degree sun Lambert
+    /// alone separates a 30-degree slope facing away (N.L 0.12) from one facing the sun (N.L 0.92),
+    /// a 7.5x ratio -- so a strong cast term now double-darkens pixels Lambert has already shaded,
+    /// which is what made shadows look cartoonishly heavy.
+    ///
+    /// Bear in mind the client itself never ray-traced terrain shadows: it shaded with Lambert plus
+    /// the baked MCSH map. This analytic pass is an addition, not a reconstruction, so
+    /// <c>--no-cast-shadows</c> is the client-faithful setting and worth scoring against.
     /// </summary>
-    public const float DefaultCastShadowStrength = 0.70f;
+    public const float DefaultCastShadowStrength = 0.30f;
 
     /// <summary>
     /// Ambient (sky) term for synthetic minimap export, lower than the 0.25 the shared
     /// <c>CreateWhiteTopEdge</c> diagnostic light uses.
     ///
-    /// Ambient is the single biggest control on how deep a shadow can get, because it is the floor
-    /// every shadowed pixel lands on: at ambient 0.25 a fully cast-shadowed patch of flat ground is
-    /// only ~18% darker than lit ground no matter how high the shadow strength goes. At 0.12 with
-    /// <see cref="DefaultCastShadowStrength"/> the same patch reads ~37% darker, which is in the
-    /// range authored 0.5.3 minimaps show.
+    /// Ambient is the floor every unlit pixel lands on, so it sets how dark terrain facing away from
+    /// the sun can get.
     ///
-    /// Not calibrated against authored tiles -- exposed as <c>--ambient</c> on the CLI precisely so
-    /// it can be dialled in against real comparisons without a rebuild.
+    /// RAISED 0.12 -> 0.25 once the solar elevation was corrected, for the same reason
+    /// <see cref="DefaultCastShadowStrength"/> was lowered. 0.12 was chosen while the sun was
+    /// wrongly modelled at 63 degrees, where Lambert produced almost no directional shading and the
+    /// ambient floor had to be dropped to get any shadow depth at all. At the traced 37-degree sun
+    /// an away-facing slope already falls to N.L ~= 0, so a 0.12 floor renders it at 41% of lit
+    /// ground -- far too heavy. At 0.25 it reads ~55%.
+    ///
+    /// Because <see cref="ResolveLinearLightGain"/> derives the gain from ambient, changing this
+    /// moves shadow depth without moving overall brightness. Not calibrated against authored tiles;
+    /// exposed as <c>--ambient</c> so it can be dialled in against real comparisons.
     /// </summary>
-    public const float DefaultSyntheticMinimapAmbient = 0.12f;
+    public const float DefaultSyntheticMinimapAmbient = 0.25f;
 
     public static Vector3 Evaluate(
         Vector3 normal,
@@ -103,7 +119,12 @@ public static class TerrainLightingMath
     /// fixed north-west bearing and only cycles elevation, so at solar noon this is the Z component
     /// of <c>normalize(0.3536, 0.3536, 1.0)</c>.
     /// </summary>
-    public const float FlatGroundNoonLambert = 0.8944272f;
+    /// <remarks>
+    /// sin(37 degrees), the traced maximum source elevation. The old value 0.8944 came from the
+    /// broken fixed-horizontal model that put the midday sun at 63.4 degrees; with a correctly
+    /// spherical direction, flat ground at solar noon receives far less of the directional term.
+    /// </remarks>
+    public const float FlatGroundNoonLambert = 0.601815f;
 
     /// <summary>
     /// The ambient term the legacy exposure-<see cref="ToneMapExposure"/> path ran with. The

@@ -468,17 +468,20 @@ public sealed class TerrainMinimapCompositorTests
     {
         TerrainTileTensorPack pack = new()
         {
+            // Fully wet: bilinear sampling of a per-vertex mask puts the waterline half a cell in
+            // from the last wet vertex, so a shoreline fixture no longer has any 100%-covered pixel.
+            // Liquid-type and palette behaviour is what this test is about, so keep it interior.
             UnifiedLiquidMask = new float[3, 3]
             {
-                { 1f, 1f, 0f },
-                { 1f, 1f, 0f },
-                { 0f, 0f, 0f }
+                { 1f, 1f, 1f },
+                { 1f, 1f, 1f },
+                { 1f, 1f, 1f }
             },
             LiquidBasicType257 = new byte[3, 3]
             {
-                { (byte)AdtLiquidBasicType.Ocean, (byte)AdtLiquidBasicType.Ocean, LiquidBasicTypeConstants.NoLiquid },
-                { (byte)AdtLiquidBasicType.Ocean, (byte)AdtLiquidBasicType.Ocean, LiquidBasicTypeConstants.NoLiquid },
-                { LiquidBasicTypeConstants.NoLiquid, LiquidBasicTypeConstants.NoLiquid, LiquidBasicTypeConstants.NoLiquid }
+                { (byte)AdtLiquidBasicType.Ocean, (byte)AdtLiquidBasicType.Ocean, (byte)AdtLiquidBasicType.Ocean },
+                { (byte)AdtLiquidBasicType.Ocean, (byte)AdtLiquidBasicType.Ocean, (byte)AdtLiquidBasicType.Ocean },
+                { (byte)AdtLiquidBasicType.Ocean, (byte)AdtLiquidBasicType.Ocean, (byte)AdtLiquidBasicType.Ocean }
             }
         };
         using var terrain = new Image<Rgba32>(2, 2, new Rgba32(255, 255, 255, 255));
@@ -490,9 +493,9 @@ public sealed class TerrainMinimapCompositorTests
         // ViewerFlatV1 palette explicitly: the default is now the 0.5.3-era teal, and this test is
         // about the viewer-matching palette specifically.
         Assert.Equal(new Rgba32(117, 140, 186, 255), liquid[0, 0]);
-        Assert.Equal(new Rgba32(255, 255, 255, 255), liquid[1, 1]);
+        Assert.Equal(new Rgba32(117, 140, 186, 255), liquid[1, 1]);
         Assert.Equal(new Rgba32(255, 255, 255, 255), terrain[0, 0]);
-        Assert.Equal(1, liquidPixelCount);
+        Assert.Equal(4, liquidPixelCount);
     }
 
     [Theory]
@@ -509,15 +512,15 @@ public sealed class TerrainMinimapCompositorTests
         {
             UnifiedLiquidMask = new float[3, 3]
             {
-                { 1f, 1f, 0f },
-                { 1f, 1f, 0f },
-                { 0f, 0f, 0f }
+                { 1f, 1f, 1f },
+                { 1f, 1f, 1f },
+                { 1f, 1f, 1f }
             },
             LiquidBasicType257 = new byte[3, 3]
             {
-                { basicType, basicType, LiquidBasicTypeConstants.NoLiquid },
-                { basicType, basicType, LiquidBasicTypeConstants.NoLiquid },
-                { LiquidBasicTypeConstants.NoLiquid, LiquidBasicTypeConstants.NoLiquid, LiquidBasicTypeConstants.NoLiquid }
+                { basicType, basicType, basicType },
+                { basicType, basicType, basicType },
+                { basicType, basicType, basicType }
             }
         };
         using var terrain = new Image<Rgba32>(2, 2, new Rgba32(255, 255, 255, 255));
@@ -526,7 +529,7 @@ public sealed class TerrainMinimapCompositorTests
             terrain, pack, out int liquidPixelCount, MinimapLiquidPalette.ViewerFlatV1);
 
         Assert.Equal(new Rgba32(expectedRed, expectedGreen, expectedBlue, 255), liquid[0, 0]);
-        Assert.Equal(1, liquidPixelCount);
+        Assert.Equal(4, liquidPixelCount);
     }
 
     /// <summary>
@@ -664,7 +667,10 @@ public sealed class TerrainMinimapCompositorTests
 
         TerrainTileTensorPack pack = BuildPack(layerOneAlpha: 0f, height257: height);
         var textures = new Dictionary<int, byte[,,]> { [0] = SolidTexture(200, 200, 200) };
-        TerrainMinimapLighting lighting = TerrainMinimapLighting.CreateShadedTerrain(0.5f);
+        // Pin the strength rather than inheriting the default: this test is about cast shadows
+        // existing and landing on the correct side, not about whatever the tuned default happens
+        // to be (which has moved as the solar model was corrected).
+        TerrainMinimapLighting lighting = TerrainMinimapLighting.CreateShadedTerrain(0.5f, 0.12f, 0.70f);
 
         using Image<Rgba32> withShadows = TerrainMinimapCompositor.Compose(
             pack, textures, new TerrainMinimapCompositionOptions(Size, lighting));

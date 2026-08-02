@@ -39,7 +39,7 @@ public sealed class MinimapLiquidPaletteTests
     public void Default_IsThePreAlpha053TealPalette()
     {
         Assert.Same(MinimapLiquidPalette.PreAlpha053, MinimapLiquidPalette.Default);
-        Assert.Equal("viewer_flat_liquid_overlay_prealpha_0_5_3_teal_v2", MinimapLiquidPalette.Default.RenderProfile);
+        Assert.Equal("viewer_flat_liquid_overlay_prealpha_0_5_3_teal_v4", MinimapLiquidPalette.Default.RenderProfile);
         Assert.Equal(MinimapLiquidPalette.Default.RenderProfile, TerrainMinimapLiquidCompositor.RenderProfile);
     }
 

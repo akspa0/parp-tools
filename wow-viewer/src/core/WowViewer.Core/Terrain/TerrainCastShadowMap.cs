@@ -45,10 +45,23 @@ public static class TerrainCastShadowMap
     /// The occlusion map, or <c>null</c> when no cast shadow is geometrically possible: a missing or
     /// degenerate heightfield, or a sun with no horizontal bearing (straight overhead casts nothing).
     /// </returns>
+    /// <summary>
+    /// Optional clamp on how far a shadow may be thrown, in world units. Zero or negative means
+    /// uncapped, which is the physically correct default.
+    ///
+    /// This is an ARTISTIC clamp with no basis in the client's behaviour, provided because a low sun
+    /// makes shadow length explode: at the traced 37-degree elevation a shadow runs 1.33x the
+    /// occluder's height, and 2.75x at the 20-degree end, so a 200-unit cliff throws 270-550 units --
+    /// up to a full tile. If the render needs this to look right, prefer first checking whether cast
+    /// shadows belong at all (the client had none) rather than reaching for the clamp.
+    /// </summary>
+    public const float UncappedShadowLength = 0f;
+
     public static float[,]? Compute(
         float[,]? height,
         Vector3 lightDirectionRenderer,
-        float softnessWorldUnits = DefaultSoftnessWorldUnits)
+        float softnessWorldUnits = DefaultSoftnessWorldUnits,
+        float maxShadowLengthWorldUnits = UncappedShadowLength)
     {
         if (height is null)
             return null;
@@ -119,6 +132,14 @@ public static class TerrainCastShadowMap
                 // the march is bounded by relief rather than always running the full tile diagonal.
                 int reliefLimit = (int)MathF.Ceiling((maxHeight - originHeight) / deltaHeight);
                 int maxSteps = Math.Clamp(reliefLimit, 0, size);
+                if (maxShadowLengthWorldUnits > 0f)
+                {
+                    // worldUnitsPerStep is the distance travelled ALONG the ray each iteration, so
+                    // the cap converts directly into a step budget.
+                    int lengthLimit = (int)MathF.Ceiling(maxShadowLengthWorldUnits / worldUnitsPerStep);
+                    maxSteps = Math.Min(maxSteps, Math.Max(lengthLimit, 0));
+                }
+
                 if (maxSteps <= 0)
                     continue;
 

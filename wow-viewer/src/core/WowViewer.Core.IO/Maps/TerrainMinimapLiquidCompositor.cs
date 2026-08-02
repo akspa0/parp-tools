@@ -95,15 +95,35 @@ public static class TerrainMinimapLiquidCompositor
         if (maskWidth < 2 || maskHeight < 2)
             return false;
 
-        // Liquid flags describe cells, while UnifiedLiquidMask retains vertex coverage. Render
-        // only cells whose four vertices are known liquid; directly sampling one vertex paints
-        // thin liquid strips over adjacent dry terrain along cell boundaries.
-        cellX = Math.Clamp((int)MathF.Floor((outputX + 0.5f) * (maskWidth - 1f) / outputWidth), 0, maskWidth - 2);
-        cellY = Math.Clamp((int)MathF.Floor((outputY + 0.5f) * (maskHeight - 1f) / outputHeight), 0, maskHeight - 2);
-        float topLeft = mask[cellY, cellX];
-        float topRight = mask[cellY, cellX + 1];
-        float bottomLeft = mask[cellY + 1, cellX];
-        float bottomRight = mask[cellY + 1, cellX + 1];
+        // UnifiedLiquidMask is PER-VERTEX 257x257 decoded from MH2O / MCLQ / WL* -- real
+        // sub-chunk-precision coverage, not MCNK chunk flags (which are metadata only and never
+        // invent coverage).
+        //
+        // The previous sampling threw that precision away: it took the MINIMUM of a cell's four
+        // corner vertices, so any cell touching dry land was dropped entirely. That eroded every
+        // water body by a full cell and quantised the shoreline to the cell grid, which is what
+        // makes synthesized coastlines read blocky and inset against authored minimaps.
+        //
+        // Bilinear sampling of the same vertex data instead puts the waterline at the half-way
+        // point between a wet and a dry vertex, which is the correct reading of vertex-sampled
+        // coverage: neither eroded by a cell nor smeared a cell out over dry ground (the failure
+        // the min-of-four was guarding against).
+        float sampleX = (outputX + 0.5f) * (maskWidth - 1f) / outputWidth;
+        float sampleY = (outputY + 0.5f) * (maskHeight - 1f) / outputHeight;
+        int x0 = Math.Clamp((int)MathF.Floor(sampleX), 0, maskWidth - 2);
+        int y0 = Math.Clamp((int)MathF.Floor(sampleY), 0, maskHeight - 2);
+        float fx = Math.Clamp(sampleX - x0, 0f, 1f);
+        float fy = Math.Clamp(sampleY - y0, 0f, 1f);
+
+        // Type lookup uses the nearest vertex, so a shoreline pixel takes the class of the water it
+        // actually belongs to rather than a neighbouring body's.
+        cellX = fx < 0.5f ? x0 : x0 + 1;
+        cellY = fy < 0.5f ? y0 : y0 + 1;
+
+        float topLeft = mask[y0, x0];
+        float topRight = mask[y0, x0 + 1];
+        float bottomLeft = mask[y0 + 1, x0];
+        float bottomRight = mask[y0 + 1, x0 + 1];
         if (!float.IsFinite(topLeft)
             || !float.IsFinite(topRight)
             || !float.IsFinite(bottomLeft)
@@ -112,7 +132,9 @@ public static class TerrainMinimapLiquidCompositor
             return false;
         }
 
-        coverage = MathF.Min(MathF.Min(topLeft, topRight), MathF.Min(bottomLeft, bottomRight));
+        float top = topLeft + ((topRight - topLeft) * fx);
+        float bottom = bottomLeft + ((bottomRight - bottomLeft) * fx);
+        coverage = top + ((bottom - top) * fy);
         return coverage > 0f;
     }
 
