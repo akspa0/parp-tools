@@ -853,11 +853,14 @@ public partial class ViewerApp : IDisposable
     private string _synthesizedMinimapMapName = string.Empty;
     private string _synthesizedMinimapOutputDirectory = string.Empty;
     private float _synthesizedMinimapTimeHours = 12f;
+    private int _synthesizedMinimapHour = 12;
+    private int _synthesizedMinimapMinute;
     private int _synthesizedMinimapResolution = 256;
     private bool _synthesizedMinimapEmitTiles = true;
     private bool _synthesizedMinimapEmitWholeMap = true;
     private bool _synthesizedMinimapIncludeWmos;
     private bool _synthesizedMinimapBakeMcsh;
+    private bool _synthesizedMinimapCastShadows = true;
     private bool _synthesizedMinimapRunning;
     private bool _synthesizedMinimapDone;
     private string? _synthesizedMinimapError;

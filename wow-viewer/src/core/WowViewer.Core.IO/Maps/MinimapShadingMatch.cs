@@ -118,6 +118,134 @@ public static class MinimapShadingMatch
         };
     }
 
+    /// <summary>One scored (azimuth, hour) candidate from <see cref="SweepSolarAzimuth"/>.</summary>
+    public readonly record struct AzimuthSweepSample(
+        float AzimuthDegrees,
+        float Hour,
+        float Score01,
+        float SignalStrength);
+
+    /// <summary>
+    /// Result of scoring a tile's authored minimap across sun bearings.
+    /// <paramref name="AzimuthMargin"/> is the best score minus the best score at any bearing more
+    /// than 45 degrees away, so a high margin means the bearing is genuinely pinned rather than the
+    /// scoring being flat in azimuth.
+    /// </summary>
+    public readonly record struct AzimuthSweepResult(
+        bool Evaluable,
+        float BestAzimuthDegrees,
+        float BestHour,
+        float BestScore01,
+        float AzimuthMargin,
+        float SignalStrength,
+        IReadOnlyList<AzimuthSweepSample> Samples);
+
+    /// <summary>
+    /// Scores an authored minimap against candidates spanning BOTH sun bearing and elevation, and
+    /// reports which bearing best explains its shading.
+    ///
+    /// WHY THIS EXISTS SEPARATELY FROM <see cref="Evaluate"/>: that method sweeps hours only, because
+    /// <see cref="TerrainSolarDirection"/> held a hardcoded bearing -- so it can never say anything
+    /// about azimuth, only about elevation. The fixed north-west bearing comes from a debugger trace
+    /// of WoW <b>1.0.0</b>, but the restoration target is 0.5.3 Alpha, a different era whose minimap
+    /// generation is known to differ. This sweep lets authored Alpha tiles answer the question with
+    /// data instead of inheriting a later build's constant.
+    ///
+    /// Azimuth is also a far stronger signal than elevation here: rotating the bearing changes the
+    /// DIRECTION of shading across the whole tile, which luma correlation responds to sharply, while
+    /// changing elevation alone mostly rescales contrast.
+    ///
+    /// Deliberately NOT build-gated. <see cref="Evaluate"/> is 0.5.3-only by spec because it feeds
+    /// calibrated bucketing; this is a measurement instrument and is useful precisely on the builds
+    /// whose model is unknown.
+    /// </summary>
+    public static AzimuthSweepResult SweepSolarAzimuth(
+        TerrainTileTensorPack pack,
+        IReadOnlyDictionary<int, byte[,,]> texturesById,
+        byte[,,] authoredMinimapRgb,
+        MinimapShadingMatchOptions? options = null,
+        float azimuthStepDegrees = 15f)
+    {
+        ArgumentNullException.ThrowIfNull(pack);
+        ArgumentNullException.ThrowIfNull(texturesById);
+        ArgumentNullException.ThrowIfNull(authoredMinimapRgb);
+        options ??= MinimapShadingMatchOptions.Default;
+
+        var empty = new AzimuthSweepResult(false, 0f, 0f, 0f, 0f, 0f, Array.Empty<AzimuthSweepSample>());
+        if (pack.McnrNormalXyz is null)
+            return empty;
+        if (authoredMinimapRgb.GetLength(2) < 3 || authoredMinimapRgb.GetLength(0) <= 0 || authoredMinimapRgb.GetLength(1) <= 0)
+            return empty;
+
+        float step = float.IsFinite(azimuthStepDegrees) && azimuthStepDegrees > 0.5f ? azimuthStepDegrees : 15f;
+        int resolution = authoredMinimapRgb.GetLength(0);
+        float[,]? mcshMask = pack.McshShadowMask256;
+
+        var samples = new List<AzimuthSweepSample>();
+        for (float azimuth = 0f; azimuth < 360f; azimuth += step)
+        {
+            for (float hour = 0f; hour < 24f; hour += options.TimeStepHours)
+            {
+                float gameTime = hour / 24f;
+                var candidateOptions = new TerrainMinimapCompositionOptions(
+                    resolution,
+                    TerrainMinimapLighting.CreateWhiteTopEdge(gameTime) with
+                    {
+                        LightDirection = TerrainSolarDirection.Evaluate(gameTime, azimuth),
+                    });
+
+                using Image<Rgba32> candidate = TerrainMinimapCompositor.Compose(pack, texturesById, candidateOptions);
+                float correlation = ScoreCandidate(
+                    candidate,
+                    authoredMinimapRgb,
+                    mcshMask,
+                    options.McshExclusionThreshold,
+                    out float signalStrength,
+                    out _);
+                samples.Add(new AzimuthSweepSample(
+                    azimuth,
+                    hour,
+                    Math.Clamp((correlation + 1f) * 0.5f, 0f, 1f),
+                    signalStrength));
+            }
+        }
+
+        if (samples.Count == 0)
+            return empty;
+
+        AzimuthSweepSample best = samples.MaxBy(static s => s.Score01);
+        if (best.SignalStrength <= 0f || best.SignalStrength < options.MinimumSignalStrength)
+            return empty with { Samples = samples };
+
+        // Compare against the best score at a genuinely different bearing. Without the angular
+        // separation guard the runner-up is just the neighbouring azimuth step, which always scores
+        // almost identically and would make every tile look "pinned".
+        float rivalScore = 0f;
+        foreach (AzimuthSweepSample sample in samples)
+        {
+            if (AngularSeparationDegrees(sample.AzimuthDegrees, best.AzimuthDegrees) <= 45f)
+                continue;
+            if (sample.Score01 > rivalScore)
+                rivalScore = sample.Score01;
+        }
+
+        return new AzimuthSweepResult(
+            true,
+            best.AzimuthDegrees,
+            best.Hour,
+            best.Score01,
+            best.Score01 - rivalScore,
+            best.SignalStrength,
+            samples);
+    }
+
+    /// <summary>Smallest absolute angle between two bearings, in degrees (0..180).</summary>
+    public static float AngularSeparationDegrees(float first, float second)
+    {
+        float delta = MathF.Abs(first - second) % 360f;
+        return delta > 180f ? 360f - delta : delta;
+    }
+
     /// <summary>
     /// Pure decision logic, isolated from image rendering so the matched/ambiguous/flat-terrain
     /// boundaries can be tested directly with contrived scores rather than pixel fixtures tuned to

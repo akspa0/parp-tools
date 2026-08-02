@@ -186,8 +186,14 @@ static class Program
               synthetic-minimap Compose paired terrain-only and _liquid minimaps directly from
                                 client tiles, with optional per-tile and whole-map PNG outputs.
                                 Use --time-hours (HHmm or HH:mm) to set the sun position;
-                                defaults to 12:00 (noon, full-bright). Normal RGB omits MCSH;
-                                --bake-mcsh is an exceptional-history preview only.
+                                defaults to 12:00 (noon, full-bright). Terrain renders with Lambert
+                                hillshading plus analytic sun-driven cast shadows; --no-cast-shadows
+                                disables the cast-shadow pass and leaves hillshading only. Add
+                                --authored-reference to emit real-client side-by-side comparisons,
+                                and --match-time (requires --authored-reference) to infer each
+                                tile's best-matching time-of-day from the authored minimap's shading
+                                and render at it. Normal RGB omits the client's baked MCSH map
+                                (a separate signal); --bake-mcsh is an exceptional-history preview.
               split-minimap-image
                                 Slice one standalone composite map image (e.g. a full-continent
                                 scan/render with no client/MPQ backing) into a fixed-size tile grid
@@ -215,14 +221,52 @@ static class Program
               --client-root     WoW client root directory (for extract-unified)
               --map, -m         Map name (e.g. "Azeroth") for archive-backed commands
 
-            synthetic-minimap uses one fixed 12:00 achromatic global light; map LIT and Light DBC
-              profiles belong to the viewer and are never applied to minimap generation.
+            synthetic-minimap uses one achromatic global light at --time-hours (default 12:00),
+              shaded in linear space; map LIT and Light DBC profiles belong to the viewer and are
+              never applied to minimap generation.
             synthetic-minimap notable options: --build <exact-build>, --per-tile, --whole-map,
               --tile-x/--tile-y <0..63> for one occupied tile, --tile-list "x,y;x,y;..." for a bounded set,
               --authored-reference to require and emit the real client minimap plus a side-by-side comparison,
+              --match-time (with --authored-reference) to render each tile at its inferred hour,
               --limit <emitted terrain/_liquid PNG pairs>,
-              --detail (mip-filtered real BLP texels for 1024+ SR targets), and --bake-mcsh
+              --detail (mip-filtered real BLP texels for 1024+ SR targets),
+              --no-cast-shadows (hillshading only, no ridge-cast shadows), and --bake-mcsh
               (diagnostic preview only).
+            synthetic-minimap contrast knobs (sweep these against --authored-reference):
+              --ambient <v | r,g,b>       sky term; the floor every shadowed pixel lands on.
+                                          Lower = deeper shadows. A tinted value gives shadows a
+                                          different hue from lit ground. Default 0.12.
+              --cast-shadow-strength <0..1>  how dark a fully cast-shadowed pixel gets. Default 0.70.
+              --shadow-softness <world-units>  penumbra width of the shadow ramp. Lower = crisper,
+                                          narrower shadow edges in crevices. Default 4.
+              --light-gain <v>            overrides the gain that is otherwise DERIVED from
+                                          --ambient to hold overall brightness steady. Only needed
+                                          if you want to rebrighten/darken the whole image.
+              --liquid-palette <name>     prealpha053 (default, 0.5.3 cyan-teal) | viewer (legacy).
+              --water-color <r,g,b[,a]>   override water/ocean tint in 0..1 against the palette.
+            synthetic-minimap era gating: Blizzard changed minimap generation across builds, so the
+              era profile (resolved from the build, or forced with --era) supplies every
+              era-sensitive default before the flags above override it.
+              --era <name>                alpha (0.5.3) | beta1 (0.6.0) | release (1.0.0+).
+              --sun-model <fixed|sweep>   fixed bearing all day, or an east-to-west sweep. Only the
+                                          1.0.0 era's model is traced from a client; Alpha's is
+                                          assumed and unverified.
+              --sun-azimuth <degrees>     source bearing from +X (North) toward +Y (West).
+                                          45 = north-west (traced), 270 = east, 90 = west.
+              --score                     (needs --authored-reference) measure agreement with the
+                                          authored minimap -- mean brightness, CONTRAST, luma
+                                          correlation, MAE and per-channel ratios -- and re-render
+                                          the pre-cast-shadow/pre-linear-shading configuration on the
+                                          same tiles so the report says whether the current settings
+                                          are better, worse or the same. Writes
+                                          authored-comparison.csv.
+              --light-overlay             emit a per-tile *_lights.png plotting LIT light positions
+                                          with their colour swatch and influence dome. Diagnostic
+                                          only; kept out of the terrain RGB corpus.
+              --measure-sun               (needs --authored-reference) score each authored tile
+                                          across bearings AND hours and report which bearing best
+                                          explains the real minimap's shading. This is how to settle
+                                          whether Alpha's sun is fixed or sweeps.
             harvest-stream --stream-profile v22 emits full terrain texture/model sidecars plus
               conservative minimap_lighting provenance when the client data permits it.
             split-minimap-image required: --input <image> --output-dir <dir>.
@@ -1446,6 +1490,47 @@ static class Program
         bool bakeMcsh = HasFlag(args, "--bake-mcsh");
         bool includeWmos = HasFlag(args, "--include-wmos");
         bool emitAuthoredReference = HasFlag(args, "--authored-reference");
+        // Cast shadows are on by default: Lambert alone cannot darken flat ground behind a ridge,
+        // which is why synthesized tiles read as shadowless next to authored minimaps. The opt-out
+        // exists for A/B comparison and for callers that need the pre-v0.5.3 hillshade-only look.
+        bool castShadows = !HasFlag(args, "--no-cast-shadows");
+        // --match-time: infer each tile's best-matching time-of-day from the authored minimap
+        // (MinimapShadingMatch hour sweep) and render the synthesized tile at THAT hour, instead
+        // of one global --time-hours. Requires --authored-reference.
+        bool matchTime = HasFlag(args, "--match-time");
+        if (matchTime && !emitAuthoredReference)
+        {
+            Console.Error.WriteLine("Error: --match-time requires --authored-reference (it infers the hour from the authored minimap).");
+            Environment.ExitCode = 1;
+            return;
+        }
+        // --measure-sun: score each authored tile across sun BEARINGS as well as hours, so real
+        // client data can settle whether this era's sun is fixed or sweeps east-to-west.
+        bool measureSun = HasFlag(args, "--measure-sun");
+        if (measureSun && !emitAuthoredReference)
+        {
+            Console.Error.WriteLine("Error: --measure-sun requires --authored-reference (it scores against the authored minimap).");
+            Environment.ExitCode = 1;
+            return;
+        }
+        AzimuthSweepAccumulator? azimuthSweep = measureSun ? new AzimuthSweepAccumulator() : null;
+        // --light-overlay: emit a third PNG per tile plotting LIT light positions with their colour
+        // swatches and influence domes. Diagnostic only -- deliberately a separate file so authored
+        // light annotations can never contaminate the terrain RGB corpus.
+        bool lightOverlay = HasFlag(args, "--light-overlay");
+        // --score: measure agreement with the authored minimap instead of leaving it to the eye,
+        // and render the pre-cast-shadow/pre-linear-shading configuration alongside so the report
+        // states whether the current settings are actually an improvement.
+        bool scoreAgainstAuthored = HasFlag(args, "--score");
+        if (scoreAgainstAuthored && !emitAuthoredReference)
+        {
+            Console.Error.WriteLine("Error: --score requires --authored-reference (there is nothing to score against otherwise).");
+            Environment.ExitCode = 1;
+            return;
+        }
+        SyntheticMinimapScorecard? scorecard = scoreAgainstAuthored ? new SyntheticMinimapScorecard() : null;
+        const string BaselineVariantName = "legacy";
+        const string CurrentVariantName = "current";
         if (!emitPerTile && !emitWholeMap)
         {
             emitPerTile = true;
@@ -1508,12 +1593,44 @@ static class Program
 
         clientRoot = ResolveGameClientRoot(clientRoot);
         string? buildVersion = requestedBuildVersion ?? DetectBuildVersionFromClientRoot(clientRoot);
+
+        // Parsed only once the build is known: the era profile it seeds is chosen by build, since
+        // minimap generation differs between Alpha (0.5.3), Beta 1 (0.6.0) and release (1.0.0).
+        SyntheticMinimapTuning? tuning = TryParseSyntheticMinimapTuning(args, buildVersion, out string? tuningError);
+        if (tuningError is not null)
+        {
+            Console.Error.WriteLine($"Error: {tuningError}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        Console.WriteLine($"Minimap era profile: {tuning!.Era.EraLabel} ({tuning.Era.Name})");
+        if (!tuning.ExactEraMatch)
+        {
+            Console.WriteLine(
+                $"  WARNING: build '{buildVersion ?? "unknown"}' did not match a known era; " +
+                $"falling back to {MinimapEraProfile.Default.EraLabel} rules. Pass --era to be explicit.");
+        }
+        Console.WriteLine(
+            $"  Sun: {tuning.Era.AzimuthModel} at {tuning.Era.NoonAzimuthDegrees:0}deg " +
+            $"({tuning.Era.AzimuthProvenance})");
+        if (tuning.Era.HasUnverifiedSolarModel)
+        {
+            Console.WriteLine(
+                "  NOTE: this era's solar model is carried over from a different build's trace and " +
+                "has never been verified against its own authored minimaps.");
+        }
+
         Directory.CreateDirectory(outputDirectory);
 
         using var catalog = new NativeMpqService();
         catalog.LoadArchives([clientRoot]);
         TryLoadSupplementalListfile(catalog);
         LoadMd5Translate(clientRoot, catalog);
+
+        IReadOnlyList<MinimapLightMarker> lightMarkers = lightOverlay
+            ? LoadMinimapLightMarkers(catalog, mapName, timeOfDayHours / 24f)
+            : [];
 
         string wdtPath = $"World\\Maps\\{mapName}\\{mapName}.wdt";
         byte[]? wdtBytes = catalog.ReadFile(wdtPath);
@@ -1570,22 +1687,30 @@ static class Program
 
         bool isAlpha = AlphaWdtReader.IsAlphaWdt(wdtBytes);
         float gameTime = timeOfDayHours / 24f;
-        SyntheticMinimapLightingProfile lighting = ResolveSyntheticMinimapLighting(gameTime);
+        SyntheticMinimapLightingProfile lighting = ResolveSyntheticMinimapLighting(gameTime, castShadows, tuning);
         if (bakeMcsh)
-        {
-            lighting = lighting with
-            {
-                Lighting = lighting.Lighting with { ApplyMcshToMinimap = true },
-                McshEvidenceState = $"{lighting.McshEvidenceState}; explicit_baked_mcsh_preview"
-            };
-        }
+            lighting = WithBakedMcsh(lighting);
         Console.WriteLine($"Synthetic minimap lighting: {lighting.Source} ({lighting.EvidenceState})");
         Console.WriteLine(bakeMcsh
             ? "  MCSH: explicitly baked into RGB preview (exceptional historical-minimap mode)."
-            : "  MCSH: retained as terrain/model evidence and omitted from normal minimap RGB.");
+            : "  MCSH: omitted from normal minimap RGB (real minimaps do not bake MCSH).");
+        Console.WriteLine(castShadows
+            ? "  Cast shadows: analytic sun-driven ray march over this tile's MCVT heightfield " +
+              $"(strength {lighting.Lighting.CastShadowStrength:0.00}, softness " +
+              $"{lighting.Lighting.CastShadowSoftness:0.0}wu); shadows do not cross tile seams."
+            : "  Cast shadows: disabled (--no-cast-shadows); Lambert hillshading only.");
+        Vector3 ambientColor = lighting.Lighting.AmbientColor;
         Console.WriteLine(
-            $"  Liquids: paired _liquid PNGs use {TerrainMinimapLiquidCompositor.RenderProfile}; " +
-            "the terrain baseline remains liquid-free.");
+            $"  Contrast: ambient {ambientColor.X:0.000},{ambientColor.Y:0.000},{ambientColor.Z:0.000}" +
+            $"; light gain {lighting.Lighting.LinearLightGain:0.000}" +
+            (tuning!.LightGainOverride is null ? " (derived from ambient)" : " (--light-gain override)") +
+            ". Tune with --ambient / --cast-shadow-strength; the derived gain holds overall " +
+            "brightness steady as they change.");
+        MinimapLiquidStyle water = tuning.LiquidPalette.Water;
+        Console.WriteLine(
+            $"  Liquids: paired _liquid PNGs use {tuning.LiquidPalette.RenderProfile}; " +
+            $"water {water.Red:0.00},{water.Green:0.00},{water.Blue:0.00} @ opacity {water.Opacity:0.00}; " +
+            "the terrain baseline remains liquid-free. Tune with --liquid-palette / --water-color.");
         if (!string.IsNullOrWhiteSpace(lighting.Diagnostic))
             Console.WriteLine($"  Lighting note: {lighting.Diagnostic}");
 
@@ -1650,7 +1775,44 @@ static class Program
                     }
                 }
 
+                if (azimuthSweep is not null && authoredReference is not null)
+                {
+                    stage = "sweeping solar azimuth against the authored minimap";
+                    Dictionary<int, byte[,,]> sweepTextures = LoadSyntheticMinimapTextures(catalog, pack);
+                    MinimapShadingMatch.AzimuthSweepResult sweep = MinimapShadingMatch.SweepSolarAzimuth(
+                        pack, sweepTextures, authoredReference);
+                    if (sweep.Evaluable)
+                        azimuthSweep.Add(tile.TileX, tile.TileY, sweep);
+                }
+
                 SyntheticMinimapLightingProfile tileLighting = lighting;
+                if (matchTime && authoredReference is not null)
+                {
+                    // --match-time: infer this tile's best-matching time-of-day from the authored
+                    // minimap's shading (MinimapShadingMatch sweeps every hour through the
+                    // production compositor and correlates luma patterns), then render at that
+                    // hour so the synthesized tile matches the authored sun elevation.
+                    stage = "inferring per-tile time-of-day from authored minimap";
+                    float? inferredHours = TryInferAuthoredMinimapHour(
+                        pack, catalog, mapName, authoredReference, buildVersion);
+                    if (inferredHours is { } inferred && float.IsFinite(inferred))
+                    {
+                        tileLighting = ResolveSyntheticMinimapLighting(inferred / 24f, castShadows, tuning);
+                        // Re-resolving the profile for the inferred hour rebuilds it from scratch,
+                        // which would silently drop an explicit --bake-mcsh for match-time tiles.
+                        if (bakeMcsh)
+                            tileLighting = WithBakedMcsh(tileLighting);
+                        Console.WriteLine(
+                            $"  Tile {tile.TileX:D2},{tile.TileY:D2}: inferred time-of-day {inferred:0.00}h " +
+                            $"(was {timeOfDayHours:0.00}h) from authored minimap shading");
+                    }
+                    else
+                    {
+                        Console.WriteLine(
+                            $"  Tile {tile.TileX:D2},{tile.TileY:D2}: shading match not evaluable; " +
+                            $"keeping global {timeOfDayHours:0.00}h");
+                    }
+                }
                 var compositionOptions = new TerrainMinimapCompositionOptions(
                     resolution,
                     tileLighting.Lighting,
@@ -1658,7 +1820,12 @@ static class Program
 
                 stage = "decoding terrain textures";
                 Dictionary<int, byte[,,]> textures = LoadSyntheticMinimapTextures(catalog, pack);
-                if (textures.Count == 0)
+                // A tile with no MTEX names is untextured, not broken: it still has valid MCVT
+                // heights + MCNR normals, and the compositor renders it with a neutral white base
+                // under the same lighting/cast-shadow path. Only skip when textures were declared
+                // but none could be decoded.
+                bool untextured = !pack.MclyTextureNames.Any(static n => !string.IsNullOrWhiteSpace(n));
+                if (textures.Count == 0 && !untextured)
                 {
                     results.Add(new SyntheticMinimapTileResult(tile.TileX, tile.TileY, "skipped", null, 0, "no referenced BLP texture could be decoded"));
                     return;
@@ -1678,18 +1845,59 @@ static class Program
                     throw new InvalidDataException(
                         "composed terrain RGB is entirely black; the tile is not valid visual proof");
                 stage = "compositing liquid minimap";
-                using Image<Rgba32> liquidImage = TerrainMinimapLiquidCompositor.Compose(image, pack, out int liquidPixelCount);
+                using Image<Rgba32> liquidImage = TerrainMinimapLiquidCompositor.Compose(
+                    image, pack, out int liquidPixelCount, tuning.LiquidPalette);
                 stage = "writing terrain PNG";
                 image.SaveAsPng(tilePath);
                 stage = "writing liquid PNG";
                 liquidImage.SaveAsPng(liquidTilePath);
+                if (lightOverlay)
+                {
+                    stage = "compositing LIT light overlay";
+                    using Image<Rgba32> overlayImage = TerrainMinimapLightOverlayCompositor.Compose(
+                        liquidImage, tile.TileX, tile.TileY, lightMarkers, out int visibleLights);
+                    overlayImage.SaveAsPng(Path.Combine(
+                        tilesDirectory,
+                        $"{mapName}_{tile.TileX:D2}_{tile.TileY:D2}_lights.png"));
+                    if (visibleLights > 0)
+                        Console.WriteLine($"  Tile {tile.TileX:D2},{tile.TileY:D2}: {visibleLights} LIT light(s) reach this tile");
+                }
+                if (scorecard is not null && authoredReference is not null)
+                {
+                    stage = "scoring against the authored minimap";
+                    scorecard.Add(
+                        tile.TileX,
+                        tile.TileY,
+                        CurrentVariantName,
+                        MinimapComparisonMetrics.Compare(authoredReference, liquidImage));
+
+                    // Re-render with the configuration that predates cast shadows, linear-space
+                    // shading and the era liquid palette, so the report compares like with like on
+                    // the same tile rather than against a remembered number.
+                    var legacyOptions = new TerrainMinimapCompositionOptions(
+                        resolution,
+                        TerrainMinimapLighting.CreateWhiteTopEdge(gameTime) with { ToneMapped = true },
+                        DetailTexels: detailTexels);
+                    using Image<Rgba32> legacyTerrain = TerrainMinimapCompositor.Compose(pack, textures, legacyOptions);
+                    using Image<Rgba32> legacyLiquid = TerrainMinimapLiquidCompositor.Compose(
+                        legacyTerrain, pack, out _, MinimapLiquidPalette.ViewerFlatV1);
+                    scorecard.Add(
+                        tile.TileX,
+                        tile.TileY,
+                        BaselineVariantName,
+                        MinimapComparisonMetrics.Compare(authoredReference, legacyLiquid));
+                }
+
                 if (authoredReference is not null && authoredTilePath is not null && comparisonTilePath is not null)
                 {
                     stage = "writing authored client reference";
                     using Image<Rgba32> authoredImage = CreateRgbImage(authoredReference);
                     authoredImage.SaveAsPng(authoredTilePath);
                     stage = "writing authored-versus-synthetic comparison";
-                    using Image<Rgba32> comparisonImage = CreateAuthoredSyntheticComparison(authoredImage, image);
+                    // Compare against the LIQUID-bearing synthesized tile: authored minimaps
+                    // include water, so comparing the terrain-only (no-liquid) render against
+                    // them is not a fair A/B.
+                    using Image<Rgba32> comparisonImage = CreateAuthoredSyntheticComparison(authoredImage, liquidImage);
                     comparisonImage.SaveAsPng(comparisonTilePath);
                 }
                 emittedTiles[(tile.TileX, tile.TileY)] = tilePath;
@@ -1833,7 +2041,9 @@ static class Program
             emitWholeMap,
             includeWmos,
             lighting,
-            TerrainMinimapLiquidCompositor.RenderProfile,
+            // Record the palette actually used, not the default -- a corpus rendered with a tuned
+            // water colour must state which water it has.
+            tuning.LiquidPalette.RenderProfile,
             stitched,
             liquidStitched,
             results.OrderBy(static r => r.TileY).ThenBy(static r => r.TileX).ToArray());
@@ -1845,6 +2055,8 @@ static class Program
                 manifest,
                 new System.Text.Json.JsonSerializerOptions { WriteIndented = true, IncludeFields = true }));
         Console.WriteLine($"Synthetic minimap manifest: {manifestPath}");
+        scorecard?.Report(outputDirectory, BaselineVariantName, CurrentVariantName);
+        azimuthSweep?.Report(tuning.Era);
         Console.WriteLine($"Synthetic minimap summary: written={results.Count(result => result.Status is "written" or "stitched-only")}, skipped={results.Count(result => result.Status == "skipped")}, failed={results.Count(result => result.Status == "failed")}");
 
         bool authoredProofIncomplete = emitAuthoredReference
@@ -3355,6 +3567,227 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         }
     }
 
+    /// <summary>
+    /// Scores synthesized tiles against their authored counterparts, for one or more named variants,
+    /// and reports whether a change actually improved agreement.
+    ///
+    /// Reports brightness, contrast and structure separately and never collapses them before the
+    /// per-metric lines are printed: a change can improve one and wreck another, and averaging first
+    /// would hide exactly the failure mode that produced the flat-render bug.
+    /// </summary>
+    private sealed class SyntheticMinimapScorecard
+    {
+        private readonly List<(int TileX, int TileY, string Variant, MinimapComparisonMetrics Metrics)> _rows = [];
+
+        public void Add(int tileX, int tileY, string variant, MinimapComparisonMetrics metrics)
+        {
+            if (metrics.PixelCount <= 0)
+                return;
+
+            lock (_rows)
+                _rows.Add((tileX, tileY, variant, metrics));
+        }
+
+        public void Report(string outputDirectory, string baselineVariant, string currentVariant)
+        {
+            lock (_rows)
+            {
+                if (_rows.Count == 0)
+                {
+                    Console.WriteLine();
+                    Console.WriteLine("=== Authored comparison: no tile produced a scorable comparison. ===");
+                    return;
+                }
+
+                string csvPath = Path.Combine(outputDirectory, "authored-comparison.csv");
+                var csv = new List<string> { MinimapComparisonMetrics.CsvHeader };
+                foreach ((int tileX, int tileY, string variant, MinimapComparisonMetrics metrics) in
+                    _rows.OrderBy(static r => r.TileY).ThenBy(static r => r.TileX).ThenBy(static r => r.Variant))
+                {
+                    csv.Add(metrics.ToCsvRow(tileX, tileY, variant));
+                }
+
+                File.WriteAllLines(csvPath, csv);
+
+                Console.WriteLine();
+                Console.WriteLine("=== Authored comparison ===");
+                Console.WriteLine($"Per-tile rows: {csvPath}");
+                Console.WriteLine();
+                Console.WriteLine("Target for every ratio is 1.000; correlation and score target 1.000; MAE targets 0.");
+                Console.WriteLine();
+                Console.WriteLine($"{"variant",-12} {"tiles",5} {"mean",8} {"contrast",9} {"corr",8} {"MAE",8} {"score",8}");
+
+                foreach (string variant in _rows.Select(static r => r.Variant).Distinct())
+                {
+                    List<MinimapComparisonMetrics> metrics = _rows
+                        .Where(r => r.Variant == variant)
+                        .Select(static r => r.Metrics)
+                        .ToList();
+
+                    Console.WriteLine(
+                        $"{variant,-12} {metrics.Count,5} " +
+                        $"{metrics.Average(static m => m.MeanRatio),8:0.000} " +
+                        $"{metrics.Average(static m => m.ContrastRatio),9:0.000} " +
+                        $"{metrics.Average(static m => m.LumaCorrelation),8:0.000} " +
+                        $"{metrics.Average(static m => m.MeanAbsoluteError),8:0.000} " +
+                        $"{metrics.Average(static m => m.Score),8:0.000}");
+                }
+
+                ReportDelta(baselineVariant, currentVariant);
+            }
+        }
+
+        private void ReportDelta(string baselineVariant, string currentVariant)
+        {
+            List<MinimapComparisonMetrics> baseline = _rows.Where(r => r.Variant == baselineVariant).Select(static r => r.Metrics).ToList();
+            List<MinimapComparisonMetrics> current = _rows.Where(r => r.Variant == currentVariant).Select(static r => r.Metrics).ToList();
+            if (baseline.Count == 0 || current.Count == 0)
+                return;
+
+            Console.WriteLine();
+            Console.WriteLine($"Change from '{baselineVariant}' to '{currentVariant}':");
+            ReportMetricDelta("mean ratio", baseline.Average(static m => m.MeanRatio), current.Average(static m => m.MeanRatio), 1f);
+            ReportMetricDelta("contrast ratio", baseline.Average(static m => m.ContrastRatio), current.Average(static m => m.ContrastRatio), 1f);
+            ReportMetricDelta("correlation", baseline.Average(static m => m.LumaCorrelation), current.Average(static m => m.LumaCorrelation), 1f);
+            ReportMetricDelta("MAE", baseline.Average(static m => m.MeanAbsoluteError), current.Average(static m => m.MeanAbsoluteError), 0f);
+            ReportMetricDelta("score", baseline.Average(static m => m.Score), current.Average(static m => m.Score), 1f);
+
+            int improved = 0;
+            for (int index = 0; index < Math.Min(baseline.Count, current.Count); index++)
+            {
+                if (current[index].Score > baseline[index].Score)
+                    improved++;
+            }
+
+            Console.WriteLine();
+            Console.WriteLine($"Tiles improved by score: {improved}/{Math.Min(baseline.Count, current.Count)}");
+        }
+
+        /// <summary>
+        /// Prints a metric with its distance from target, so "better" means measurably closer to the
+        /// target rather than merely larger or smaller.
+        /// </summary>
+        private static void ReportMetricDelta(string label, float baseline, float current, float target)
+        {
+            float baselineError = MathF.Abs(baseline - target);
+            float currentError = MathF.Abs(current - target);
+            string verdict = currentError < baselineError - 1e-4f
+                ? "BETTER"
+                : currentError > baselineError + 1e-4f ? "WORSE" : "same";
+            Console.WriteLine(
+                $"  {label,-16} {baseline,8:0.000} -> {current,8:0.000}   " +
+                $"(|err| {baselineError:0.000} -> {currentError:0.000})  {verdict}");
+        }
+    }
+
+    /// <summary>
+    /// Accumulates per-tile azimuth-sweep results so the run can state whether this era's sun holds
+    /// a fixed bearing or sweeps, rather than each tile reporting in isolation.
+    /// </summary>
+    private sealed class AzimuthSweepAccumulator
+    {
+        private readonly List<(int TileX, int TileY, float Azimuth, float Hour, float Score, float Margin)> _results = [];
+
+        public void Add(int tileX, int tileY, MinimapShadingMatch.AzimuthSweepResult result)
+        {
+            lock (_results)
+            {
+                _results.Add((tileX, tileY, result.BestAzimuthDegrees, result.BestHour, result.BestScore01, result.AzimuthMargin));
+            }
+        }
+
+        public void Report(MinimapEraProfile era)
+        {
+            lock (_results)
+            {
+                Console.WriteLine();
+                Console.WriteLine($"=== Solar azimuth sweep: {era.EraLabel} ===");
+                if (_results.Count == 0)
+                {
+                    Console.WriteLine("  No tile produced an evaluable match (flat terrain or missing normals).");
+                    return;
+                }
+
+                foreach ((int tileX, int tileY, float azimuth, float hour, float score, float margin) in
+                    _results.OrderBy(static r => r.TileY).ThenBy(static r => r.TileX))
+                {
+                    Console.WriteLine(
+                        $"  Tile {tileX:D2},{tileY:D2}: best azimuth {azimuth,5:0}deg  hour {hour,5:0.0}  " +
+                        $"score {score:0.000}  azimuth-margin {margin:0.000}");
+                }
+
+                // Circular mean, because bearings wrap: a naive average of 350 and 10 gives 180.
+                double sumSin = 0.0, sumCos = 0.0;
+                foreach ((_, _, float azimuth, _, _, _) in _results)
+                {
+                    double radians = azimuth * Math.PI / 180.0;
+                    sumSin += Math.Sin(radians);
+                    sumCos += Math.Cos(radians);
+                }
+
+                double meanAzimuth = (Math.Atan2(sumSin, sumCos) * 180.0 / Math.PI + 360.0) % 360.0;
+                // Circular resultant length: 1.0 means every tile agreed on one bearing, near 0
+                // means they are scattered around the compass.
+                double concentration = Math.Sqrt((sumSin * sumSin) + (sumCos * sumCos)) / _results.Count;
+                double meanMargin = _results.Average(static r => r.Margin);
+
+                Console.WriteLine();
+                Console.WriteLine($"  Tiles evaluated:      {_results.Count}");
+                Console.WriteLine($"  Circular mean bearing: {meanAzimuth:0.0} deg");
+                Console.WriteLine($"  Agreement (0..1):      {concentration:0.000}");
+                Console.WriteLine($"  Mean azimuth-margin:   {meanMargin:0.000}");
+                Console.WriteLine(
+                    $"  Traced 1.0.0 bearing:  {TerrainSolarDirection.TracedSourceAzimuthDegrees:0} deg " +
+                    $"(separation {MinimapShadingMatch.AngularSeparationDegrees((float)meanAzimuth, TerrainSolarDirection.TracedSourceAzimuthDegrees):0.0} deg)");
+                Console.WriteLine();
+                Console.WriteLine("  How to read this: high agreement means the tiles concur on one bearing. Whether");
+                Console.WriteLine("  that means the SUN is fixed depends on the tiles spanning different capture times;");
+                Console.WriteLine("  tiles all captured at one time of day would agree even under a sweeping sun.");
+                Console.WriteLine("  A low mean azimuth-margin means the scoring could not pin a bearing at all, and");
+                Console.WriteLine("  the mean above should not be trusted regardless of how tight the agreement looks.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Runs the Spec 111 shading-match hour sweep against the authored minimap and returns the
+    /// best-matching time of day (hours) for this tile, or null when the match is not evaluable
+    /// (wrong build fingerprint, missing normals/textures, or too-flat terrain). Used by
+    /// <c>synthetic-minimap --match-time</c> to render each tile at its inferred sun elevation.
+    /// </summary>
+    private static float? TryInferAuthoredMinimapHour(
+        TerrainTileTensorPack pack,
+        NativeMpqService catalog,
+        string mapName,
+        byte[,,] authoredMinimapRgb,
+        string? buildVersion)
+    {
+        if (pack.McnrNormalXyz is null)
+            return null;
+
+        Dictionary<int, byte[,,]> textures = LoadSyntheticMinimapTextures(catalog, pack);
+        bool untextured = !pack.MclyTextureNames.Any(static n => !string.IsNullOrWhiteSpace(n));
+        if (textures.Count == 0 && !untextured)
+            return null;
+
+        try
+        {
+            MinimapLightingProvenance provenance = MinimapShadingMatch.Evaluate(
+                MinimapLightingProvenance.NotEvaluated("synthetic-minimap --match-time"),
+                pack,
+                textures,
+                authoredMinimapRgb,
+                buildVersion ?? string.Empty);
+            return provenance.ShadingMatchStatus is "matched" or "low_confidence_ambiguous"
+                ? provenance.ShadingMatchedTimeOfDayHours
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static void AttachNameAlignedTexturePixels(NativeMpqService catalog, TerrainTileTensorPack pack)
     {
         if (pack.MclyTextureNames.Count == 0)
@@ -3474,6 +3907,79 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         $"World\\Maps\\{mapName}\\light.lit",
     ];
 
+    /// <summary>
+    /// Loads the map's LIT lights as world-space overlay markers, or an empty list when the map has
+    /// no readable LIT file. Colour comes from each light's clear-weather track evaluated at the
+    /// render's time of day, so the swatch shows what that light actually contributes at that hour.
+    /// </summary>
+    private static IReadOnlyList<MinimapLightMarker> LoadMinimapLightMarkers(
+        NativeMpqService catalog,
+        string mapName,
+        float gameTime)
+    {
+        foreach (string litPath in EnumerateMapLitPaths(mapName))
+        {
+            byte[]? bytes = catalog.ReadFile(litPath);
+            if (bytes is null || bytes.Length == 0)
+                continue;
+
+            try
+            {
+                using var stream = new MemoryStream(bytes, writable: false);
+                LitFileProfile profile = LitProfileReader.Read(stream, litPath);
+                var markers = new List<MinimapLightMarker>();
+                foreach (LitLightProfile light in profile.Lights)
+                {
+                    // The default entry (-1/-1/-1) is the map-wide fallback, not a placed light; it
+                    // has no meaningful position to plot.
+                    if (light.Header is not { } header || header.IsDefault)
+                        continue;
+                    if (header.WorldOuterRadius <= 0f)
+                        continue;
+
+                    markers.Add(new MinimapLightMarker(
+                        header.WorldPosition,
+                        header.WorldRadius,
+                        header.WorldOuterRadius,
+                        ResolveLightSwatchColor(light, gameTime),
+                        header.Name));
+                }
+
+                Console.WriteLine($"LIT lights: {markers.Count} placed light(s) from {litPath}");
+                return markers;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"LIT lights: {litPath} could not be decoded ({ex.Message}).");
+            }
+        }
+
+        Console.WriteLine($"LIT lights: no readable LIT file found for map '{mapName}'; overlay will be empty.");
+        return [];
+    }
+
+    /// <summary>
+    /// Colour for a light's overlay swatch: its clear-weather track at the requested time of day.
+    /// Falls back to white so a light with no evaluable colour still plots its position rather than
+    /// vanishing from the diagnostic.
+    /// </summary>
+    private static Vector3 ResolveLightSwatchColor(LitLightProfile light, float gameTime)
+    {
+        LitLightGroupProfile? clear = light.Groups.FirstOrDefault(static g => g.Kind == LitLightGroupKind.Clear)
+            ?? light.Groups.FirstOrDefault();
+        if (clear is null || clear.Tracks.Count == 0)
+            return Vector3.One;
+
+        float litTime = Math.Clamp(gameTime, 0f, 1f) * LitProfileReader.TimeUnitsPerDay;
+        foreach (LitColorTrack track in clear.Tracks)
+        {
+            if (track.TryEvaluate(litTime, out Vector3 color) && color.LengthSquared() > 1e-6f)
+                return Vector3.Clamp(color, Vector3.Zero, Vector3.One);
+        }
+
+        return Vector3.One;
+    }
+
     private static void SetMinimapLightingProvenance(
         TerrainTileTensorPack pack,
         MinimapLightingProvenance provenance)
@@ -3538,31 +4044,91 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         terrain.SaveAsPng(tilePath);
     }
 
-    private static SyntheticMinimapLightingProfile ResolveSyntheticMinimapLighting(float gameTime)
+    /// <summary>
+    /// The contrast controls for synthetic-minimap export, surfaced as CLI flags so they can be
+    /// swept against an authored comparison without a rebuild. Ambient and cast strength set how
+    /// deep shadows read; overall brightness is held steady across both by the derived light gain.
+    /// </summary>
+    private sealed record SyntheticMinimapTuning(
+        Vector3 AmbientColor,
+        float CastShadowStrength,
+        float CastShadowSoftness,
+        float? LightGainOverride,
+        MinimapLiquidPalette LiquidPalette,
+        MinimapEraProfile Era,
+        bool ExactEraMatch)
     {
+        /// <summary>
+        /// Era supplies every era-sensitive default; explicit CLI flags then override individual
+        /// values on top. Blizzard changed minimap generation between Alpha (0.5.3), Beta 1 (0.6.0)
+        /// and release (1.0.0), so a build's era -- not a global constant -- is the right source.
+        /// </summary>
+        public static SyntheticMinimapTuning FromEra(MinimapEraProfile era, bool exactEraMatch) => new(
+            era.AmbientColor,
+            era.CastShadowStrength,
+            era.CastShadowSoftness,
+            null,
+            era.Liquid,
+            era,
+            exactEraMatch);
+
+        public static SyntheticMinimapTuning Default { get; } =
+            FromEra(MinimapEraProfile.Default, exactEraMatch: false);
+    }
+
+    private static SyntheticMinimapLightingProfile ResolveSyntheticMinimapLighting(
+        float gameTime,
+        bool castShadows = true,
+        SyntheticMinimapTuning? tuningOverride = null)
+    {
+        SyntheticMinimapTuning tuning = tuningOverride ?? SyntheticMinimapTuning.Default;
         string timeLabel = TimeOfDayClock.FromHours(gameTime * 24f).CompactText;
-        // Always apply tone mapping (Reinhard exposure=20, calibrated 2026-07-20).
-        // Without it the raw linear response is ~2.79x darker than authored minimaps.
-        TerrainMinimapLighting lighting = TerrainMinimapLighting.CreateWhiteTopEdge(gameTime) with { ToneMapped = true };
+        // Lambert hillshading PLUS analytic sun-driven cast shadows, at the sun direction from
+        // --time-hours, shaded in linear space and encoded to sRGB on output. MCSH stays out of
+        // normal RGB (real authored minimaps do not bake it); --bake-mcsh is the explicit opt-in
+        // and is a separate signal from the cast-shadow pass.
+        TerrainMinimapLighting lighting = TerrainMinimapLighting.CreateShadedTerrain(
+            gameTime,
+            tuning.AmbientColor,
+            tuning.CastShadowStrength,
+            tuning.CastShadowSoftness) with
+        {
+            // Bearing comes from the era profile, not the hardcoded traced constant: whether the
+            // sun holds a fixed bearing or sweeps east-to-west is era-specific and, for Alpha,
+            // still unverified.
+            LightDirection = tuning.Era.ResolveLightDirection(gameTime),
+            ApplyMcshToMinimap = false,
+            ApplyCastShadows = castShadows
+        };
+        if (tuning.LightGainOverride is { } explicitGain)
+            lighting = lighting with { LinearLightGain = explicitGain };
+        string castLabel = castShadows ? "+cast-shadows-v1" : string.Empty;
         return new SyntheticMinimapLightingProfile(
             lighting,
-            $"WhiteTopEdge@{timeLabel}",
+            $"ShadedTerrain@{timeLabel}",
             $"synthetic_minimap_solar_{timeLabel}_global_white",
-            "terrain-minimap-solar-white-lambert-v2+renderer-space-mcnr-v2",
+            $"terrain-minimap-solar-white-lambert-v3+renderer-space-mcnr-v2{castLabel}" +
+            $"+linear-shading-v1+{tuning.Era.RenderProfile}",
             null,
             null,
             null,
             null,
             $"solar_{timeLabel}_shared_solar_direction_not_lit_or_dbc_data",
             "mcsh_omitted_from_normal_minimap_rgb",
-            "Synthetic minimaps use the shared solar direction at the requested time; " +
-            "map LIT and Light DBC runtime profiles are intentionally excluded.");
+            "Synthetic minimaps use the shared solar direction at the requested time with Lambert " +
+            (castShadows ? "hillshading plus analytic single-tile cast shadows" : "hillshading only") +
+            ", shaded in linear space; MCSH is omitted from normal RGB and map LIT / Light DBC " +
+            "profiles are excluded.");
     }
 
     private static SyntheticMinimapLightingProfile WithBakedMcsh(SyntheticMinimapLightingProfile profile) =>
         profile with
         {
-            Lighting = profile.Lighting with { ApplyMcshToMinimap = true },
+            Lighting = profile.Lighting with
+            {
+                ApplyMcshToMinimap = true,
+                McshShadowStrength = TerrainLightingMath.DefaultAuthoredMcshShadowStrength
+            },
             McshEvidenceState = $"{profile.McshEvidenceState}; explicit_baked_mcsh_preview"
         };
 
@@ -3919,6 +4485,180 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             return nestedGameRoot;
 
         return normalizedRoot;
+    }
+
+    /// <summary>
+    /// Parses the synthetic-minimap contrast knobs. <c>--ambient</c> takes either one value or an
+    /// <c>r,g,b</c> triple: shadowed ground is lit by ambient alone, so a tinted ambient is what
+    /// makes shadows a different HUE from lit ground instead of merely a darker copy of it.
+    /// </summary>
+    private static SyntheticMinimapTuning? TryParseSyntheticMinimapTuning(
+        string[] args,
+        string? buildVersion,
+        out string? error)
+    {
+        error = null;
+
+        // Era first: it seeds every era-sensitive default, and the explicit flags below then
+        // override individual values on top of it.
+        MinimapEraProfile era = MinimapEraProfile.ResolveForBuild(buildVersion, out bool exactEraMatch);
+        string? eraName = GetOption(args, "--era", "");
+        if (!string.IsNullOrWhiteSpace(eraName))
+        {
+            MinimapEraProfile? explicitEra = MinimapEraProfile.TryResolveByName(eraName);
+            if (explicitEra is null)
+            {
+                error = $"--era '{eraName}' is not recognised. Available: {MinimapEraProfile.AvailableNames}.";
+                return null;
+            }
+
+            era = explicitEra;
+            exactEraMatch = true;
+        }
+
+        SyntheticMinimapTuning tuning = SyntheticMinimapTuning.FromEra(era, exactEraMatch);
+
+        string? azimuthModel = GetOption(args, "--sun-model", "");
+        if (!string.IsNullOrWhiteSpace(azimuthModel))
+        {
+            SolarAzimuthModel? model = azimuthModel.Trim().ToLowerInvariant() switch
+            {
+                "fixed" => SolarAzimuthModel.Fixed,
+                "sweep" or "eastwest" or "east-west" => SolarAzimuthModel.EastToWestSweep,
+                _ => null,
+            };
+            if (model is null)
+            {
+                error = $"--sun-model expects 'fixed' or 'sweep', got '{azimuthModel}'.";
+                return null;
+            }
+
+            tuning = tuning with { Era = tuning.Era with { AzimuthModel = model.Value } };
+        }
+
+        float? azimuth = GetFloatOption(args, "--sun-azimuth", "");
+        if (azimuth is { } azimuthDegrees)
+        {
+            if (!float.IsFinite(azimuthDegrees))
+            {
+                error = $"--sun-azimuth expects degrees, got {azimuthDegrees}.";
+                return null;
+            }
+
+            tuning = tuning with { Era = tuning.Era with { NoonAzimuthDegrees = azimuthDegrees } };
+        }
+
+        string? ambient = GetOption(args, "--ambient", "");
+        if (!string.IsNullOrWhiteSpace(ambient))
+        {
+            string[] parts = ambient.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            var channels = new float[parts.Length];
+            for (int index = 0; index < parts.Length; index++)
+            {
+                if (!float.TryParse(parts[index], NumberStyles.Float, CultureInfo.InvariantCulture, out channels[index])
+                    || channels[index] < 0f
+                    || channels[index] > 4f)
+                {
+                    error = $"--ambient expects one value or 'r,g,b' in 0..4, got '{ambient}'.";
+                    return null;
+                }
+            }
+
+            tuning = parts.Length switch
+            {
+                1 => tuning with { AmbientColor = new Vector3(channels[0]) },
+                3 => tuning with { AmbientColor = new Vector3(channels[0], channels[1], channels[2]) },
+                _ => tuning
+            };
+            if (parts.Length is not (1 or 3))
+            {
+                error = $"--ambient expects one value or 'r,g,b', got '{ambient}'.";
+                return null;
+            }
+        }
+
+        float? castStrength = GetFloatOption(args, "--cast-shadow-strength", "");
+        if (castStrength is { } strength)
+        {
+            if (strength is < 0f or > 1f)
+            {
+                error = $"--cast-shadow-strength expects 0..1, got {strength}.";
+                return null;
+            }
+
+            tuning = tuning with { CastShadowStrength = strength };
+        }
+
+        float? softness = GetFloatOption(args, "--shadow-softness", "");
+        if (softness is { } softnessValue)
+        {
+            if (softnessValue is <= 0f or > 64f)
+            {
+                error = $"--shadow-softness expects world units in (0, 64], got {softnessValue}.";
+                return null;
+            }
+
+            tuning = tuning with { CastShadowSoftness = softnessValue };
+        }
+
+        float? gain = GetFloatOption(args, "--light-gain", "");
+        if (gain is { } explicitGain)
+        {
+            if (explicitGain <= 0f || explicitGain > 8f)
+            {
+                error = $"--light-gain expects a positive value up to 8, got {explicitGain}.";
+                return null;
+            }
+
+            tuning = tuning with { LightGainOverride = explicitGain };
+        }
+
+        string? paletteName = GetOption(args, "--liquid-palette", "");
+        if (!string.IsNullOrWhiteSpace(paletteName))
+        {
+            MinimapLiquidPalette? palette = MinimapLiquidPalette.TryResolve(paletteName);
+            if (palette is null)
+            {
+                error = $"--liquid-palette '{paletteName}' is not recognised. Available: {MinimapLiquidPalette.AvailableNames}.";
+                return null;
+            }
+
+            tuning = tuning with { LiquidPalette = palette };
+        }
+
+        string? waterColor = GetOption(args, "--water-color", "");
+        if (!string.IsNullOrWhiteSpace(waterColor))
+        {
+            string[] parts = waterColor.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length is not (3 or 4))
+            {
+                error = $"--water-color expects 'r,g,b' or 'r,g,b,opacity' in 0..1, got '{waterColor}'.";
+                return null;
+            }
+
+            var channels = new float[parts.Length];
+            for (int index = 0; index < parts.Length; index++)
+            {
+                if (!float.TryParse(parts[index], NumberStyles.Float, CultureInfo.InvariantCulture, out channels[index])
+                    || channels[index] < 0f
+                    || channels[index] > 1f)
+                {
+                    error = $"--water-color expects values in 0..1, got '{waterColor}'.";
+                    return null;
+                }
+            }
+
+            tuning = tuning with
+            {
+                LiquidPalette = tuning.LiquidPalette.WithWaterColor(
+                    channels[0],
+                    channels[1],
+                    channels[2],
+                    parts.Length == 4 ? channels[3] : null)
+            };
+        }
+
+        return tuning;
     }
 
     static string? GetOption(string[] args, string name, string shortName)

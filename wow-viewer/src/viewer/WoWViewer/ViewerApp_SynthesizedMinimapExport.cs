@@ -10,6 +10,11 @@ public partial class ViewerApp
 {
     private void PrepareSynthesizedMinimapExportDialogInputs()
     {
+        // Keep the slider hour/minute fields in sync with the persisted time-of-day value.
+        TimeOfDayClock persistedTime = TimeOfDayClock.FromHours(_synthesizedMinimapTimeHours);
+        _synthesizedMinimapHour = persistedTime.Hour;
+        _synthesizedMinimapMinute = persistedTime.Minute;
+
         string? activeClientRoot = GetActiveGamePath();
         if (!string.IsNullOrWhiteSpace(activeClientRoot))
             _synthesizedMinimapClientRoot = activeClientRoot;
@@ -62,23 +67,21 @@ public partial class ViewerApp
         ImGui.SetNextItemWidth(-1);
         ImGui.InputText("##synthmin_map", ref _synthesizedMinimapMapName, 256);
 
-        TimeOfDayClock selectedTime = TimeOfDayClock.FromHours(_synthesizedMinimapTimeHours);
-        int selectedHour = selectedTime.Hour;
-        int selectedMinute = selectedTime.Minute;
+        // Use SliderInt (not InputInt) for hour/minute: sliders commit the value to the
+        // backing field continuously as the user drags/clicks, so "Start Export" always reads
+        // the value the user set. InputInt only commits typed text on Enter/focus-loss, which
+        // can land AFTER Start reads the field — the stale noon default got baked in.
+        _synthesizedMinimapHour = Math.Clamp(_synthesizedMinimapHour, 0, 23);
+        _synthesizedMinimapMinute = Math.Clamp(_synthesizedMinimapMinute, 0, 59);
         ImGui.Text("Time of day:");
-        ImGui.SetNextItemWidth(92);
-        bool timeChanged = ImGui.InputInt("Hour##synthmin_time", ref selectedHour, 1, 1);
+        ImGui.SetNextItemWidth(120);
+        ImGui.SliderInt("Hour", ref _synthesizedMinimapHour, 0, 23, "%02d");
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(92);
-        timeChanged |= ImGui.InputInt("Minute##synthmin_time", ref selectedMinute, 1, 5);
-        if (timeChanged)
-        {
-            selectedHour = Math.Clamp(selectedHour, 0, 23);
-            selectedMinute = Math.Clamp(selectedMinute, 0, 59);
-            _synthesizedMinimapTimeHours = new TimeOfDayClock(selectedHour, selectedMinute).Hours;
-        }
+        ImGui.SetNextItemWidth(120);
+        ImGui.SliderInt("Minute", ref _synthesizedMinimapMinute, 0, 59, "%02d");
+        _synthesizedMinimapTimeHours = new TimeOfDayClock(_synthesizedMinimapHour, _synthesizedMinimapMinute).Hours;
         ImGui.SameLine();
-        ImGui.TextDisabled("12:15 is precise; midnight 00:00 · noon 12:00");
+        ImGui.TextDisabled("midnight 00:00 · noon 12:00");
 
         ImGui.Text("Tile resolution:");
         ImGui.SetNextItemWidth(160);
@@ -95,7 +98,17 @@ public partial class ViewerApp
         ImGui.SameLine();
         ImGui.Checkbox("Bake MCSH shadows", ref _synthesizedMinimapBakeMcsh);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Include the terrain-side static shadow map (MCSH) in the output. Without this, only Lambert hillshading is used (no cast shadows).");
+            ImGui.SetTooltip("Bake the client's static MCSH shadow map into the RGB output. Authored minimaps do not contain MCSH, so this is a diagnostic preview, not a match-the-client setting. Separate from the terrain cast shadows below.");
+
+        ImGui.Checkbox("Terrain cast shadows", ref _synthesizedMinimapCastShadows);
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(
+                "Ray-march the tile's own heightfield toward the sun so ridges cast shadows across "
+                + "the terrain below them. Lambert hillshading alone only darkens slopes by their "
+                + "facing and can never shadow flat ground behind a hill.\n\n"
+                + "Shadows do not cross tile seams: each tile is traced against its own heightfield only.");
+        }
 
         ImGui.Text("Output directory:");
         ImGui.SetNextItemWidth(-88);
@@ -177,6 +190,7 @@ public partial class ViewerApp
         bool emitWholeMap = _synthesizedMinimapEmitWholeMap;
         bool includeWmos = _synthesizedMinimapIncludeWmos;
         bool bakeMcsh = _synthesizedMinimapBakeMcsh;
+        bool castShadows = _synthesizedMinimapCastShadows;
 
         _ = Task.Run(async () =>
         {
@@ -191,7 +205,8 @@ public partial class ViewerApp
                     emitTiles,
                     emitWholeMap,
                     includeWmos,
-                    bakeMcsh);
+                    bakeMcsh,
+                    castShadows);
             }
             catch (Exception ex)
             {
@@ -216,7 +231,8 @@ public partial class ViewerApp
         bool emitTiles,
         bool emitWholeMap,
         bool includeWmos,
-        bool bakeMcsh)
+        bool bakeMcsh,
+        bool castShadows)
     {
         HarvestLaunchSpec? launch = ResolveHarvestLaunchSpec();
         if (launch is null)
@@ -257,6 +273,9 @@ public partial class ViewerApp
             startInfo.ArgumentList.Add("--include-wmos");
         if (bakeMcsh)
             startInfo.ArgumentList.Add("--bake-mcsh");
+        // Harvest defaults cast shadows ON, so only the opt-out needs to be forwarded.
+        if (!castShadows)
+            startInfo.ArgumentList.Add("--no-cast-shadows");
 
         AppendSynthesizedMinimapLog(
             $"> {launch.DisplayName} synthetic-minimap --map {mapName} --time-hours {TimeOfDayClock.FromHours(timeHours)}");

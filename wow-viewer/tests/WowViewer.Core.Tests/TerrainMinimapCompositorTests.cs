@@ -326,17 +326,43 @@ public sealed class TerrainMinimapCompositorTests
         Assert.Equal(new Rgba32(255, 0, 0, 255), image[0, 0]);
     }
 
+    /// <summary>
+    /// A tile with no MTEX names is UNTEXTURED, not empty: it still carries real MCVT heights and
+    /// MCNR normals. It renders on a neutral white base so its terrain shape survives, rather than
+    /// short-circuiting to a flat white image that discards it. The base must not be coloured from
+    /// an unrelated catalog BLP, which is what the supplied texture here would be.
+    /// </summary>
     [Fact]
-    public void Compose_RendersAnEmptyTilesetAsUnlitSolidWhite()
+    public void Compose_RendersAnUntexturedTileOnANeutralWhiteBase()
     {
         using Image<Rgba32> image = TerrainMinimapCompositor.Compose(
             new TerrainTileTensorPack(),
             new Dictionary<int, byte[,,]> { [0] = SolidTexture(80, 120, 40) },
-            new TerrainMinimapCompositionOptions(
-                1,
-                new TerrainMinimapLighting(Vector3.UnitZ, Vector3.Zero, Vector3.Zero, McshShadowStrength: 1f)));
+            new TerrainMinimapCompositionOptions(1, TerrainMinimapLighting.Neutral));
 
         Assert.Equal(new Rgba32(255, 255, 255, 255), image[0, 0]);
+    }
+
+    [Fact]
+    public void Compose_ShadesAnUntexturedTileInsteadOfDiscardingItsShape()
+    {
+        // Flat normals with a light 60 degrees off vertical: lambert 0.5, so a shaded untextured
+        // tile lands strictly between black and white. The pre-v0.5.2 path returned solid white
+        // here regardless of lighting, erasing the tile's terrain shape.
+        var lighting = new TerrainMinimapLighting(
+            new Vector3(MathF.Sqrt(3f) / 2f, 0f, 0.5f),
+            Vector3.One,
+            Vector3.Zero,
+            McshShadowStrength: 0f);
+
+        using Image<Rgba32> image = TerrainMinimapCompositor.Compose(
+            new TerrainTileTensorPack(),
+            new Dictionary<int, byte[,,]> { [0] = SolidTexture(80, 120, 40) },
+            new TerrainMinimapCompositionOptions(1, lighting));
+
+        Assert.InRange(image[0, 0].R, 120, 140);
+        Assert.Equal(image[0, 0].R, image[0, 0].G);
+        Assert.Equal(image[0, 0].R, image[0, 0].B);
     }
 
     [Fact]
@@ -457,9 +483,12 @@ public sealed class TerrainMinimapCompositorTests
         };
         using var terrain = new Image<Rgba32>(2, 2, new Rgba32(255, 255, 255, 255));
 
-        using Image<Rgba32> liquid = TerrainMinimapLiquidCompositor.Compose(terrain, pack, out int liquidPixelCount);
+        using Image<Rgba32> liquid = TerrainMinimapLiquidCompositor.Compose(
+            terrain, pack, out int liquidPixelCount, MinimapLiquidPalette.ViewerFlatV1);
 
-        // Ocean follows the live viewer's (0.10, 0.25, 0.55, 0.60) flat-liquid pass.
+        // Ocean follows the live viewer's (0.10, 0.25, 0.55, 0.60) flat-liquid pass. Pinned to the
+        // ViewerFlatV1 palette explicitly: the default is now the 0.5.3-era teal, and this test is
+        // about the viewer-matching palette specifically.
         Assert.Equal(new Rgba32(117, 140, 186, 255), liquid[0, 0]);
         Assert.Equal(new Rgba32(255, 255, 255, 255), liquid[1, 1]);
         Assert.Equal(new Rgba32(255, 255, 255, 255), terrain[0, 0]);
@@ -493,10 +522,161 @@ public sealed class TerrainMinimapCompositorTests
         };
         using var terrain = new Image<Rgba32>(2, 2, new Rgba32(255, 255, 255, 255));
 
-        using Image<Rgba32> liquid = TerrainMinimapLiquidCompositor.Compose(terrain, pack, out int liquidPixelCount);
+        using Image<Rgba32> liquid = TerrainMinimapLiquidCompositor.Compose(
+            terrain, pack, out int liquidPixelCount, MinimapLiquidPalette.ViewerFlatV1);
 
         Assert.Equal(new Rgba32(expectedRed, expectedGreen, expectedBlue, 255), liquid[0, 0]);
         Assert.Equal(1, liquidPixelCount);
+    }
+
+    /// <summary>
+    /// Renders one flat mid-grey pixel under a given lighting profile and light direction, and
+    /// returns its red channel. Flat (null) normals mean N is UnitZ everywhere, so the light
+    /// direction alone sets the Lambert term: UnitZ gives 1.0, a horizontal direction gives 0.0.
+    /// </summary>
+    private static byte RenderFlatGrey(TerrainMinimapLighting profile, Vector3 lightDirection)
+    {
+        using Image<Rgba32> image = TerrainMinimapCompositor.Compose(
+            BuildPack(layerOneAlpha: 0f),
+            new Dictionary<int, byte[,,]> { [0] = SolidTexture(128, 128, 128) },
+            new TerrainMinimapCompositionOptions(1, profile with { LightDirection = lightDirection }));
+        return image[0, 0].R;
+    }
+
+    /// <summary>
+    /// The regression guard for the flat-render bug: synthesized minimaps read as shadowless next
+    /// to authored ones because the exposure-20 Reinhard curve squeezed the entire Lambert range
+    /// into ~13% of albedo. Exposure 20 was fitted against MEAN authored brightness only, and a
+    /// saturating curve fixes the mean by destroying the range.
+    ///
+    /// This asserts both halves of the fix at once: linear-space shading must recover several times
+    /// the shading range WITHOUT drifting the brightness the old calibration matched.
+    /// </summary>
+    [Fact]
+    public void Compose_LinearSpaceShadingRestoresShadingRangeAtTheSameFlatGroundBrightness()
+    {
+        Vector3 fullyLit = Vector3.UnitZ;                                  // lambert 1
+        Vector3 grazing = Vector3.UnitX;                                   // lambert 0
+        Vector3 flatGroundAtNoon = TerrainSolarDirection.Evaluate(0.5f);   // lambert 0.894
+
+        TerrainMinimapLighting toneMapped = TerrainMinimapLighting.CreateNoonWhiteGlobal();
+        TerrainMinimapLighting linear = TerrainMinimapLighting.CreateShadedTerrain(0.5f);
+
+        int toneMappedRange = RenderFlatGrey(toneMapped, fullyLit) - RenderFlatGrey(toneMapped, grazing);
+        int linearRange = RenderFlatGrey(linear, fullyLit) - RenderFlatGrey(linear, grazing);
+
+        Assert.True(
+            linearRange > toneMappedRange * 4,
+            $"Linear-space shading range {linearRange} must far exceed the tone-mapped {toneMappedRange}.");
+
+        // The brightness anchor is FLAT GROUND UNDER THE NOON SUN, not an arbitrary mid-lambert.
+        // The first cut of this fix anchored at lambert 0.5 while real terrain sits at 0.894, which
+        // rendered ordinary ground 19% too bright and read as washed out.
+        Assert.InRange(
+            RenderFlatGrey(linear, flatGroundAtNoon) - RenderFlatGrey(toneMapped, flatGroundAtNoon),
+            -4,
+            4);
+    }
+
+    /// <summary>
+    /// Ambient is the floor every shadowed pixel lands on, so it is the real contrast control. The
+    /// derived gain must keep it from doubling as a brightness control: changing ambient has to move
+    /// shadow depth while leaving lit flat ground where it was, or every contrast tweak turns into a
+    /// brightness regression.
+    /// </summary>
+    [Fact]
+    public void ShadedTerrain_AmbientChangesShadowDepthWithoutChangingOverallBrightness()
+    {
+        Vector3 flatGroundAtNoon = TerrainSolarDirection.Evaluate(0.5f);
+        Vector3 grazing = Vector3.UnitX;
+
+        TerrainMinimapLighting high = TerrainMinimapLighting.CreateShadedTerrain(0.5f, 0.25f, 0.70f);
+        TerrainMinimapLighting low = TerrainMinimapLighting.CreateShadedTerrain(0.5f, 0.08f, 0.70f);
+
+        Assert.InRange(
+            RenderFlatGrey(low, flatGroundAtNoon) - RenderFlatGrey(high, flatGroundAtNoon),
+            -4,
+            4);
+        Assert.True(
+            RenderFlatGrey(low, grazing) < RenderFlatGrey(high, grazing) - 20,
+            "Lower ambient must produce materially darker unlit terrain.");
+    }
+
+    [Fact]
+    public void ShadedTerrain_TintedAmbientColorsShadowsWithoutTintingLitGround()
+    {
+        // Shadowed ground is lit by ambient alone, so a cool ambient is what makes shadows a
+        // different hue rather than just a darker copy of lit ground.
+        var coolAmbient = new Vector3(0.09f, 0.11f, 0.16f);
+        TerrainMinimapLighting tinted = TerrainMinimapLighting.CreateShadedTerrain(0.5f, coolAmbient, 0.70f);
+
+        using Image<Rgba32> unlit = TerrainMinimapCompositor.Compose(
+            BuildPack(layerOneAlpha: 0f),
+            new Dictionary<int, byte[,,]> { [0] = SolidTexture(128, 128, 128) },
+            new TerrainMinimapCompositionOptions(1, tinted with { LightDirection = Vector3.UnitX }));
+        using Image<Rgba32> lit = TerrainMinimapCompositor.Compose(
+            BuildPack(layerOneAlpha: 0f),
+            new Dictionary<int, byte[,,]> { [0] = SolidTexture(128, 128, 128) },
+            new TerrainMinimapCompositionOptions(1, tinted with { LightDirection = Vector3.UnitZ }));
+
+        Assert.True(unlit[0, 0].B > unlit[0, 0].R + 10, "Shadowed ground must take the ambient's tint.");
+        Assert.InRange(lit[0, 0].B - lit[0, 0].R, -6, 6);
+    }
+
+    [Fact]
+    public void ShadedTerrain_EnablesCastShadowsAndLinearShadingWithoutTheToneMap()
+    {
+        TerrainMinimapLighting lighting = TerrainMinimapLighting.CreateShadedTerrain(0.5f);
+
+        Assert.True(lighting.ApplyCastShadows);
+        Assert.True(lighting.LinearSpaceShading);
+        Assert.False(lighting.ToneMapped);
+        Assert.False(lighting.ApplyMcshToMinimap);
+        Assert.Equal(TerrainSolarDirection.Evaluate(0.5f), lighting.LightDirection);
+    }
+
+    /// <summary>
+    /// Cast shadows and linear shading must stay opt-in on the base factory. MinimapShadingMatch
+    /// sweeps CreateWhiteTopEdge across all 24 hours and its Spec 111 calibration is defined
+    /// against the legacy response; silently changing it would invalidate every bucketed tile.
+    /// </summary>
+    [Fact]
+    public void WhiteTopEdge_LeavesCastShadowsAndLinearShadingOff()
+    {
+        TerrainMinimapLighting lighting = TerrainMinimapLighting.CreateWhiteTopEdge(0.5f);
+
+        Assert.False(lighting.ApplyCastShadows);
+        Assert.False(lighting.LinearSpaceShading);
+        Assert.False(lighting.ToneMapped);
+    }
+
+    [Fact]
+    public void Compose_CastShadowsDarkenGroundBehindARidgeThatLambertAloneLeavesLit()
+    {
+        // Flat ground (all normals UnitZ, so Lambert is uniform across the whole tile) with one
+        // tall wall in the heightfield. Any darkening here is cast shadow by construction: Lambert
+        // cannot vary on a surface whose normal never changes.
+        const int Size = 257;
+        const int WallRow = 100;
+        var height = new float[Size, Size];
+        for (int column = 0; column < Size; column++)
+            height[WallRow, column] = 300f;
+
+        TerrainTileTensorPack pack = BuildPack(layerOneAlpha: 0f, height257: height);
+        var textures = new Dictionary<int, byte[,,]> { [0] = SolidTexture(200, 200, 200) };
+        TerrainMinimapLighting lighting = TerrainMinimapLighting.CreateShadedTerrain(0.5f);
+
+        using Image<Rgba32> withShadows = TerrainMinimapCompositor.Compose(
+            pack, textures, new TerrainMinimapCompositionOptions(Size, lighting));
+        using Image<Rgba32> withoutShadows = TerrainMinimapCompositor.Compose(
+            pack, textures, new TerrainMinimapCompositionOptions(Size, lighting with { ApplyCastShadows = false }));
+
+        // The sun bears north-west (world +X/+Y = grid -row/-column), so the wall shadows the rows
+        // below it and leaves the rows above it lit.
+        Assert.True(
+            withShadows[200, WallRow + 4].R < withoutShadows[200, WallRow + 4].R - 20,
+            "Ground behind the ridge must be materially darker once cast shadows are enabled.");
+        Assert.Equal(withoutShadows[200, WallRow - 4].R, withShadows[200, WallRow - 4].R);
     }
 
     private static TerrainTileTensorPack BuildPack(
@@ -505,7 +685,8 @@ public sealed class TerrainMinimapCompositorTests
         float shadow = 0f,
         bool[,,]? layerMask = null,
         float[,,]? normals = null,
-        bool[,]? normalMask = null)
+        bool[,]? normalMask = null,
+        float[,]? height257 = null)
     {
         var alpha = new float[2, 2, 4];
         for (int y = 0; y < 2; y++)
@@ -531,7 +712,8 @@ public sealed class TerrainMinimapCompositorTests
             MclyLayerMask = layerMask,
             McshShadowMask256 = new[,] { { shadow } },
             McnrNormalXyz = normals,
-            McnrMask257 = normalMask
+            McnrMask257 = normalMask,
+            Height257 = height257
         };
     }
 

@@ -30,9 +30,19 @@ public sealed class LitSummaryReaderTests
         Assert.Equal(2, summary.Entries.Count);
         Assert.True(summary.Entries[0].IsDefaultEntry);
         Assert.Equal("default", summary.Entries[0].Name);
-        Assert.Equal(new Vector3(100f, 200f, 300f), summary.Entries[1].Position);
-        Assert.Equal(96f, summary.Entries[1].LightRadius);
-        Assert.Equal(24f, summary.Entries[1].LightDropoff);
+        // Raw file values are preserved verbatim; decoded source data is never rewritten.
+        Assert.Equal(new Vector3(100f, 200f, 300f), summary.Entries[1].RawPosition);
+        Assert.Equal(96f, summary.Entries[1].RawLightRadius);
+        Assert.Equal(24f, summary.Entries[1].RawLightDropoff);
+
+        // LIT spatial records are client fixed-point at 1/36 world units. Without this conversion
+        // every plotted light lands ~36x off the map.
+        Assert.Equal(100f / 36f, summary.Entries[1].Position.X, 5);
+        Assert.Equal(200f / 36f, summary.Entries[1].Position.Y, 5);
+        Assert.Equal(300f / 36f, summary.Entries[1].Position.Z, 5);
+        Assert.Equal(96f / 36f, summary.Entries[1].LightRadius, 5);
+        Assert.Equal(24f / 36f, summary.Entries[1].LightDropoff, 5);
+        Assert.Equal(120f / 36f, summary.Entries[1].OuterRadius, 5);
     }
 
     [Fact]
@@ -66,7 +76,9 @@ public sealed class LitSummaryReaderTests
             2,
             [
                 new LitListEntrySummary(0, -1, -1, -1, Vector3.Zero, 0f, 0f, "default"),
-                new LitListEntrySummary(1, 0, 0, 0, new Vector3(100f, 0f, 0f), 50f, 25f, "Elwynn")
+                // Constructed in RAW fixed-point units (world * 36), so this entry sits at world
+                // (100,0,0) with a 50-unit core and 25-unit falloff.
+                new LitListEntrySummary(1, 0, 0, 0, new Vector3(3600f, 0f, 0f), 1800f, 900f, "Elwynn")
             ],
             usesSinglePartialEntry: false,
             hasDefaultFirstEntry: true,

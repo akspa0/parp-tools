@@ -11,15 +11,18 @@ namespace WowViewer.Core.IO.Maps;
 /// </summary>
 public static class TerrainMinimapLiquidCompositor
 {
-    public const string RenderProfile = "viewer_flat_liquid_overlay_v1";
+    /// <summary>Profile identifier for the default palette, recorded in the synthesis manifest.</summary>
+    public static string RenderProfile => MinimapLiquidPalette.Default.RenderProfile;
 
     public static Image<Rgba32> Compose(
         Image<Rgba32> terrainBaseline,
         TerrainTileTensorPack pack,
-        out int liquidPixelCount)
+        out int liquidPixelCount,
+        MinimapLiquidPalette? palette = null)
     {
         ArgumentNullException.ThrowIfNull(terrainBaseline);
         ArgumentNullException.ThrowIfNull(pack);
+        palette ??= MinimapLiquidPalette.Default;
 
         Image<Rgba32> result = terrainBaseline.Clone();
         liquidPixelCount = 0;
@@ -64,7 +67,7 @@ public static class TerrainMinimapLiquidCompositor
                 }
 
                 liquidPixelCount++;
-                LiquidStyle style = GetStyle(ResolveType(liquidTypes, cellX, cellY, maskWidth, maskHeight));
+                MinimapLiquidStyle style = palette.Resolve(ResolveType(liquidTypes, cellX, cellY, maskWidth, maskHeight));
                 float alpha = Math.Clamp(coverage, 0f, 1f) * style.Opacity;
                 result[x, y] = Blend(result[x, y], style, alpha);
             }
@@ -131,19 +134,7 @@ public static class TerrainMinimapLiquidCompositor
             : AdtLiquidBasicType.Water;
     }
 
-    private static LiquidStyle GetStyle(AdtLiquidBasicType type)
-    {
-        // Keep this analytically-rendered target in visual step with the live terrain liquid pass.
-        return type switch
-        {
-            AdtLiquidBasicType.Ocean => new LiquidStyle(0.10f, 0.25f, 0.55f, 0.60f),
-            AdtLiquidBasicType.Magma => new LiquidStyle(0.85f, 0.30f, 0.05f, 0.75f),
-            AdtLiquidBasicType.Slime => new LiquidStyle(0.20f, 0.70f, 0.15f, 0.65f),
-            _ => new LiquidStyle(0.15f, 0.35f, 0.65f, 0.55f),
-        };
-    }
-
-    private static Rgba32 Blend(Rgba32 terrain, LiquidStyle liquid, float alpha)
+    private static Rgba32 Blend(Rgba32 terrain, MinimapLiquidStyle liquid, float alpha)
     {
         float terrainWeight = 1f - alpha;
         return new Rgba32(
@@ -162,6 +153,4 @@ public static class TerrainMinimapLiquidCompositor
     }
 
     private static byte ToByte(float value) => (byte)Math.Clamp((int)MathF.Round(value * 255f), 0, 255);
-
-    private readonly record struct LiquidStyle(float Red, float Green, float Blue, float Opacity);
 }

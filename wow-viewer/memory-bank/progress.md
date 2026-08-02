@@ -19,7 +19,7 @@ Detailed pre-2026-08-01 history: `memory-bank/archive/2026-08-01-progress-detail
 |------|-------|
 | Viewer | Lighting/taxi/minimap fixed for v0.5.2. Global noon light unconditional. M2 gap = 1.0.0–3.0.0 (0.11/0.12 MDX work; 3.0.1+ work). Spec 104 active. |
 | v50 dataset | Feature-complete. `curriculum-0_5_3_3368-dual_v3.zarr` (2,990 rows). Coarse+detailer chain proven; detailer bandsplit-v2 11.2% relative, user promotion pending. |
-| Synthetic minimap | Solar direction at `--time-hours` (fixed NW bearing, elevation cycles), tone-mapped, MCSH optional. |
+| Synthetic minimap | Solar direction at `--time-hours` (fixed NW bearing, elevation cycles). Linear-space shading + analytic cast shadows replaced the exposure-20 tone map (2026-08-01, uncommitted); MCSH still optional and separate. |
 | PM4 | Asset matching (046) + surface correlation (065) active. |
 | UI | 069/080 active; 107 implementing. |
 | M2 | 104 active; 105 format profiles feed version dispatch. |
@@ -35,6 +35,8 @@ Debug build: 0 errors.
 - Detailer bandsplit-v2 geometry promotion (visual gate) → then object-mask phase.
 - Spec 117 lattice predictor learnability verdict; Spec 118 object-mask training comparison.
 - Spec 111 real-client bucketing pass.
+- Terrain-shadow fix calibration: re-measure `SyntheticMinimapLinearLightGain` (1.166) and
+  `DefaultCastShadowStrength` (0.45) against authored tiles, asserting contrast/std **and** mean.
 - Spec 110 real 3.x visual proof for global-light/LIT repairs.
 
 ## Historical summary (2026-07 → feature-complete declaration)

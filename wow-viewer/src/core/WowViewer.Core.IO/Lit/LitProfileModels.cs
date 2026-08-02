@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Numerics;
+using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Lit;
 
@@ -46,6 +47,16 @@ public sealed record LitFileProfile
 /// The fixed 64-byte spatial header associated with a list-based LIT light.
 /// A negative-count partial profile has no spatial header.
 /// </summary>
+/// <param name="Position">Raw fixed-point position exactly as stored on disk.</param>
+/// <param name="Radius">Raw fixed-point core radius exactly as stored on disk.</param>
+/// <param name="Dropoff">Raw fixed-point falloff distance exactly as stored on disk.</param>
+/// <remarks>
+/// The constructor parameters are the untouched disk values. Anything working in world space must
+/// use <see cref="WorldPosition"/> / <see cref="WorldRadius"/> / <see cref="WorldDropoff"/>: LIT
+/// spatial records are client fixed-point at
+/// <see cref="TerrainLightingMath.ClientFixedUnitsPerWorldUnit"/> (1/36), which is why unscaled
+/// values plot roughly 36x outside the map.
+/// </remarks>
 public sealed record LitLightHeaderProfile(
     int Index,
     int ChunkX,
@@ -57,6 +68,18 @@ public sealed record LitLightHeaderProfile(
     string Name)
 {
     public bool IsDefault => ChunkX == -1 && ChunkY == -1 && ChunkRadius == -1;
+
+    /// <summary>Light centre in renderer world units.</summary>
+    public Vector3 WorldPosition => Position / TerrainLightingMath.ClientFixedUnitsPerWorldUnit;
+
+    /// <summary>Core radius in renderer world units.</summary>
+    public float WorldRadius => Radius / TerrainLightingMath.ClientFixedUnitsPerWorldUnit;
+
+    /// <summary>Falloff distance in renderer world units.</summary>
+    public float WorldDropoff => Dropoff / TerrainLightingMath.ClientFixedUnitsPerWorldUnit;
+
+    /// <summary>Outer influence radius in renderer world units.</summary>
+    public float WorldOuterRadius => MathF.Max(WorldRadius, WorldRadius + MathF.Max(WorldDropoff, 0f));
 }
 
 /// <summary>

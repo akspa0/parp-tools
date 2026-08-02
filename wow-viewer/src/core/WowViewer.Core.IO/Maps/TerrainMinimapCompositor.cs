@@ -26,11 +26,12 @@ public static class TerrainMinimapCompositor
         options ??= TerrainMinimapCompositionOptions.Default;
         options.Validate();
 
-        // No MTEX names is an explicit empty-tile state, not a stale material reference. Preserve
-        // the empty terrain signal as unlit white rather than inventing colour from an unrelated
-        // catalog BLP or allowing lighting to turn the placeholder grey.
-        if (!HasDeclaredTileset(pack))
-            return new Image<Rgba32>(options.Resolution, options.Resolution, new Rgba32(255, 255, 255, 255));
+        // A tile with no MTEX names is an untextured terrain tile, NOT an empty tile: it still
+        // carries valid MCVT heights and MCNR normals, so it must render with its real terrain
+        // shape (Lambert hillshading + cast shadows) over a neutral white base. Do not invent
+        // colour from an unrelated catalog BLP, and do not short-circuit to a flat unlit white
+        // image that discards the tile's shape.
+        bool untextured = !HasDeclaredTileset(pack);
 
         float[,,]? alpha = pack.McalAlphaPack256;
         int[,,] textureIds = pack.MclyTextureIds ?? CreateFallbackTextureGrid();
@@ -57,6 +58,15 @@ public static class TerrainMinimapCompositor
         int alphaWidth = alpha?.GetLength(1) ?? DefaultResolution;
         if (alphaWidth <= 0 || alphaHeight <= 0)
             throw new InvalidDataException("Synthetic minimap alpha dimensions must be positive.");
+
+        // Analytic cast shadows are built once per tile over the 257x257 heightfield and then
+        // sampled per output pixel, so the cost is independent of the export resolution.
+        float[,]? castShadow = options.Lighting.ApplyCastShadows
+            ? TerrainCastShadowMap.Compute(
+                pack.Height257,
+                options.Lighting.LightDirection,
+                options.Lighting.CastShadowSoftness)
+            : null;
 
         var image = new Image<Rgba32>(options.Resolution, options.Resolution);
         var textureSampler = new TerrainTextureSampler(
@@ -97,7 +107,8 @@ public static class TerrainMinimapCompositor
                     chunkY,
                     options.DetailTexels,
                     detailU,
-                    detailV);
+                    detailV,
+                    untextured);
 
                 float lambert = ResolveInterpolatedLambert(
                     pack,
@@ -106,22 +117,38 @@ public static class TerrainMinimapCompositor
                     alphaWidth,
                     alphaHeight,
                     options.Lighting.LightDirection);
-                // MCSH is a terrain-side static-shadow signal, not normal minimap content. Keep it
-                // separate by default; the rare historically baked-shadow minimap is an explicit
-                // diagnostic/export case and must never silently contaminate a general RGB corpus.
-                float shadowMask = options.Lighting.ApplyMcshToMinimap
+                // MCSH is the client-authored terrain-side static shadow map, and is a SEPARATE
+                // signal from the analytic cast shadows below: MCSH is baked client data that
+                // authored minimaps demonstrably do not contain, while the cast-shadow pass is
+                // derived from MCVT against the current sun. Keep both opt-in and independent.
+                float mcshMask = options.Lighting.ApplyMcshToMinimap
                     ? ResolveShadowMask(pack.McshShadowMask256, sourceX, sourceY, alphaWidth, alphaHeight)
                     : 0f;
+                // Sampled from OUTPUT pixel space, not alpha space. MCAL can legitimately be far
+                // coarser than the export (and is only 2x2 in some fixtures), whereas the cast
+                // shadow map always spans the tile at heightfield resolution; routing it through
+                // the alpha grid would quantise a 257-sample shadow down to the alpha's cell count.
+                float castMask = castShadow is null
+                    ? 0f
+                    : ResolveCastShadow(castShadow, x, y, options.Resolution, options.Resolution);
+
+                // Combine the two occluders multiplicatively on visibility rather than adding or
+                // maxing their masks, so overlapping shadows cannot drive the surface past black
+                // and each keeps its own independently calibrated strength.
+                float visibility =
+                    (1f - (Math.Clamp(mcshMask, 0f, 1f) * Math.Clamp(options.Lighting.McshShadowStrength, 0f, 1f)))
+                    * (1f - (Math.Clamp(castMask, 0f, 1f) * Math.Clamp(options.Lighting.CastShadowStrength, 0f, 1f)));
+
                 Vector3 lighting = TerrainLightingMath.Evaluate(
                     lambert,
                     options.Lighting.DirectionalColor,
                     options.Lighting.AmbientColor,
-                    shadowMask,
-                    options.Lighting.McshShadowStrength,
-                    options.Lighting.ToneMapped);
+                    1f - visibility,
+                    1f,
+                    options.Lighting.ToneMapped,
+                    options.Lighting.ToneMapExposure);
 
-                Vector3 shaded = Vector3.Max(Vector3.Zero, blended * lighting);
-                image[x, y] = ToRgba(shaded);
+                image[x, y] = ToRgba(ApplyAlbedo(blended, lighting, options.Lighting));
             }
         }
 
@@ -150,8 +177,14 @@ public static class TerrainMinimapCompositor
         int chunkY,
         bool detailTexels = false,
         float detailU = 0f,
-        float detailV = 0f)
+        float detailV = 0f,
+        bool untextured = false)
     {
+        // Untextured tile (no MTEX): neutral white base so the terrain shape renders via
+        // lighting instead of being discarded.
+        if (untextured)
+            return Vector3.One;
+
         Vector3 color = Vector3.Zero;
         bool hasColor = false;
 
@@ -488,6 +521,42 @@ public static class TerrainMinimapCompositor
         return MathF.Max(0f, Vector3.Dot(normal, light));
     }
 
+    /// <summary>
+    /// Multiplies albedo by the evaluated light. In <see cref="TerrainMinimapLighting.LinearSpaceShading"/>
+    /// mode the sRGB-authored BLP albedo is decoded to linear first and the result re-encoded, which
+    /// is the only place the shading curve is physically correct; the legacy path multiplies
+    /// directly in sRGB space and is retained so <see cref="MinimapShadingMatch"/>'s hour sweep and
+    /// every other existing caller keep their exact previous response.
+    /// </summary>
+    private static Vector3 ApplyAlbedo(Vector3 albedoSrgb, Vector3 lighting, TerrainMinimapLighting profile)
+    {
+        if (!profile.LinearSpaceShading)
+            return Vector3.Max(Vector3.Zero, albedoSrgb * lighting);
+
+        float gain = float.IsFinite(profile.LinearLightGain) && profile.LinearLightGain > 0f
+            ? profile.LinearLightGain
+            : 1f;
+        Vector3 linear = TerrainLightingMath.SrgbToLinear(albedoSrgb) * lighting * gain;
+        return TerrainLightingMath.LinearToSrgb(Vector3.Max(Vector3.Zero, linear));
+    }
+
+    /// <summary>
+    /// Samples the analytic cast-shadow map bilinearly. The map is built on the 257x257 heightfield
+    /// while the pixel loop walks the output raster; nearest sampling across that rescale
+    /// reintroduces exactly the stair-stepping the softness ramp exists to remove.
+    /// </summary>
+    private static float ResolveCastShadow(float[,] castShadow, int pixelX, int pixelY, int width, int height)
+    {
+        int size = castShadow.GetLength(0);
+        if (size <= 1 || width <= 1 || height <= 1)
+            return 0f;
+
+        float row = pixelY * (size - 1f) / (height - 1f);
+        float column = pixelX * (castShadow.GetLength(1) - 1f) / (width - 1f);
+        float value = TerrainCastShadowMap.SampleBilinear(castShadow, row, column);
+        return float.IsFinite(value) ? Math.Clamp(value, 0f, 1f) : 0f;
+    }
+
     private static float ResolveShadowMask(float[,]? shadows, int sourceX, int sourceY, int sourceWidth, int sourceHeight)
     {
         if (shadows is null || shadows.GetLength(0) == 0 || shadows.GetLength(1) == 0)
@@ -519,13 +588,44 @@ public static class TerrainMinimapCompositor
 }
 
 /// <summary>Explicit lighting inputs for a derived minimap export.</summary>
+/// <param name="ApplyCastShadows">
+/// Enables the analytic <see cref="TerrainCastShadowMap"/> pass: a ray march from every heightfield
+/// sample toward <paramref name="LightDirection"/>, producing shadows that terrain throws across
+/// other terrain. Independent of <paramref name="ApplyMcshToMinimap"/> -- Lambert alone only shades
+/// slopes by their facing and can never darken flat ground sitting behind a ridge.
+/// </param>
+/// <param name="CastShadowStrength">
+/// How dark a fully occluded cast shadow gets, 0..1. Deliberately separate from
+/// <paramref name="McshShadowStrength"/>; see
+/// <see cref="TerrainLightingMath.DefaultCastShadowStrength"/>.
+/// </param>
+/// <param name="LinearSpaceShading">
+/// Decode sRGB albedo to linear, light it there, and re-encode on output. Off by default: every
+/// pre-existing caller (notably <see cref="MinimapShadingMatch"/>'s hour sweep) is calibrated
+/// against the legacy sRGB-space multiply and must not silently shift.
+/// </param>
+/// <param name="LinearLightGain">
+/// Linear-space brightness gain, used instead of the tone map when
+/// <paramref name="LinearSpaceShading"/> is set. Derive it with
+/// <see cref="TerrainLightingMath.ResolveLinearLightGain"/> rather than hardcoding a value.
+/// </param>
+/// <param name="CastShadowSoftness">
+/// Penumbra width of the cast-shadow ramp in world units. Lower values give crisper, narrower
+/// shadow edges in crevices; see <see cref="TerrainCastShadowMap.DefaultSoftnessWorldUnits"/>.
+/// </param>
 public sealed record TerrainMinimapLighting(
     Vector3 LightDirection,
     Vector3 DirectionalColor,
     Vector3 AmbientColor,
     float McshShadowStrength,
     bool ApplyMcshToMinimap = false,
-    bool ToneMapped = false)
+    bool ToneMapped = false,
+    float ToneMapExposure = TerrainLightingMath.ToneMapExposure,
+    bool ApplyCastShadows = false,
+    float CastShadowStrength = TerrainLightingMath.DefaultCastShadowStrength,
+    bool LinearSpaceShading = false,
+    float LinearLightGain = 1f,
+    float CastShadowSoftness = TerrainCastShadowMap.DefaultSoftnessWorldUnits)
 {
     /// <summary>Visible neutral composition for callers that intentionally do not grade lighting.</summary>
     public static TerrainMinimapLighting Neutral { get; } = new(
@@ -566,9 +666,76 @@ public sealed record TerrainMinimapLighting(
     /// bug. A flat linear multiplier fixed the deficit but clipped ~4% of pixels to hard white on
     /// steep, well-lit slopes; <see cref="TerrainLightingMath.ToneMapExposure"/>'s Reinhard curve
     /// (see <see cref="ToneMapped"/>) closes the same deficit without hard-clipping highlights.
+    ///
+    /// SUPERSEDED by <see cref="CreateShadedTerrain"/> for synthetic-minimap export: that
+    /// calibration only ever checked mean brightness and clipping, never shading contrast, and the
+    /// curve it settled on flattens the entire Lambert range into 12.8% of albedo.
     /// </remarks>
     public static TerrainMinimapLighting CreateNoonWhiteGlobal() =>
         CreateWhiteTopEdge(0.5f) with { ToneMapped = true };
+
+    /// <summary>
+    /// Production synthetic-minimap light with terrain shape actually visible: linear-space shading
+    /// with an sRGB output encode, plus analytic sun-driven cast shadows from the tile's own
+    /// heightfield. Replaces <see cref="CreateNoonWhiteGlobal"/> for export.
+    /// </summary>
+    /// <remarks>
+    /// Two independent fixes, both aimed at the same symptom (synthesized tiles reading as flat,
+    /// shadowless albedo next to authored minimaps):
+    /// <list type="number">
+    /// <item>The exposure-20 Reinhard curve compressed the hillshade to 12.8% of albedo. Replaced by
+    /// a linear gain in linear light space -- same mid-tone, roughly 5x the shading range. See
+    /// <see cref="TerrainLightingMath.SyntheticMinimapLinearLightGain"/>.</item>
+    /// <item>Nothing in this codebase ever cast a shadow. Lambert N·L shades slopes by facing only;
+    /// <see cref="TerrainCastShadowMap"/> adds the missing ridge-onto-ground occlusion.</item>
+    /// </list>
+    /// Neither the gain nor <see cref="DefaultCastShadowStrength"/> has been re-measured against a
+    /// real authored comparison set yet. Re-running that check is a user-run step, and it must
+    /// assert shading contrast alongside mean brightness.
+    /// </remarks>
+    public static TerrainMinimapLighting CreateShadedTerrain(float gameTime) =>
+        CreateShadedTerrain(
+            gameTime,
+            TerrainLightingMath.DefaultSyntheticMinimapAmbient,
+            TerrainLightingMath.DefaultCastShadowStrength);
+
+    /// <summary>
+    /// <see cref="CreateShadedTerrain(float)"/> with the two contrast controls exposed. The light
+    /// gain is always DERIVED from the ambient term (see
+    /// <see cref="TerrainLightingMath.ResolveLinearLightGain"/>), so raising or lowering ambient
+    /// changes how deep shadows read without shifting the image's overall brightness -- these knobs
+    /// are safe to sweep against an authored comparison one render at a time.
+    /// </summary>
+    public static TerrainMinimapLighting CreateShadedTerrain(
+        float gameTime,
+        float ambient,
+        float castShadowStrength) =>
+        CreateShadedTerrain(gameTime, new Vector3(ambient), castShadowStrength);
+
+    /// <summary>
+    /// <see cref="CreateShadedTerrain(float, float, float)"/> with a per-channel ambient, so sky
+    /// light can be tinted. Shadowed ground is lit by ambient alone, so a non-neutral ambient is
+    /// what gives shadows a different hue from lit ground rather than just a darker version of it.
+    /// The gain is derived from the ambient's luminance.
+    /// </summary>
+    public static TerrainMinimapLighting CreateShadedTerrain(
+        float gameTime,
+        Vector3 ambientColor,
+        float castShadowStrength,
+        float castShadowSoftness = TerrainCastShadowMap.DefaultSoftnessWorldUnits)
+    {
+        float ambientLuminance = (ambientColor.X + ambientColor.Y + ambientColor.Z) / 3f;
+        return CreateWhiteTopEdge(gameTime) with
+        {
+            AmbientColor = ambientColor,
+            ToneMapped = false,
+            LinearSpaceShading = true,
+            LinearLightGain = TerrainLightingMath.ResolveLinearLightGain(ambientLuminance),
+            ApplyCastShadows = true,
+            CastShadowStrength = castShadowStrength,
+            CastShadowSoftness = castShadowSoftness,
+        };
+    }
 }
 
 /// <summary>Controls deterministic terrain minimap composition without carrying client-source policy.</summary>
