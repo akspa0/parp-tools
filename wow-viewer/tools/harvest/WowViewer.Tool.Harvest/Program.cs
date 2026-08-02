@@ -1572,6 +1572,10 @@ static class Program
             Environment.ExitCode = 1;
             return;
         }
+        // --textureless-residuals: emit per-tile shading-only images (no objects, no textures) plus a
+        // stitched whole-map output — the clean terrain-shadow residual signal (FR-022). The albedo
+        // is replaced with neutral white so only the Lambert hillshade + cast shadows remain.
+        bool texturelessResiduals = HasFlag(args, "--textureless-residuals");
         if (!emitPerTile && !emitWholeMap)
         {
             emitPerTile = true;
@@ -1766,6 +1770,7 @@ static class Program
         var results = new ConcurrentBag<SyntheticMinimapTileResult>();
         var emittedTiles = new ConcurrentDictionary<(int TileX, int TileY), string>();
         var emittedLiquidTiles = new ConcurrentDictionary<(int TileX, int TileY), string>();
+        var emittedResidualTiles = new ConcurrentDictionary<(int TileX, int TileY), string>();
         // Collectors for the encoding survey (raw authored BLP bytes) and the lighting-baseline
         // survey (authored RGB tiles), populated during the parallel pass and reported after it.
         var surveyedBlpBytes = new ConcurrentBag<byte[]>();
@@ -1916,6 +1921,22 @@ static class Program
                     parityImage.SaveAsPng(Path.Combine(
                         tilesDirectory,
                         $"{mapName}_{tile.TileX:D2}_{tile.TileY:D2}_dxt1.png"));
+                }
+                if (texturelessResiduals)
+                {
+                    // Emit a textureless terrain-shadow residual: compose with a neutral white albedo
+                    // so only the Lambert hillshade + cast shadows remain (no objects, no textures).
+                    // This is the clean training signal for residuals-based reconstruction (FR-022).
+                    stage = "compositing textureless residual";
+                    Dictionary<int, byte[,,]> neutralTextures = CreateNeutralWhiteTextures(textures);
+                    using Image<Rgba32> residualImage = TerrainMinimapCompositor.Compose(
+                        pack, neutralTextures, compositionOptions);
+                    residualImage.SaveAsPng(Path.Combine(
+                        tilesDirectory,
+                        $"{mapName}_{tile.TileX:D2}_{tile.TileY:D2}_residual.png"));
+                    emittedResidualTiles[(tile.TileX, tile.TileY)] = Path.Combine(
+                        tilesDirectory,
+                        $"{mapName}_{tile.TileX:D2}_{tile.TileY:D2}_residual.png");
                 }
                 if (lightOverlay)
                 {
@@ -2070,17 +2091,24 @@ static class Program
 
         TerrainMinimapStitchResult? stitched = null;
         TerrainMinimapStitchResult? liquidStitched = null;
+        TerrainMinimapStitchResult? residualStitched = null;
         Exception? stitchFailure = null;
         if (emitWholeMap && emittedTiles.Count > 0)
         {
             string stitchedPath = Path.Combine(outputDirectory, "stitched", $"{mapName}_synthesized_minimap.png");
             string liquidStitchedPath = Path.Combine(outputDirectory, "stitched", $"{mapName}_synthesized_minimap_liquid.png");
+            string residualStitchedPath = Path.Combine(outputDirectory, "stitched", $"{mapName}_textureless_residual.png");
             try
             {
                 stitched = TerrainMinimapStitcher.Stitch(emittedTiles, stitchedPath, resolution);
                 liquidStitched = TerrainMinimapStitcher.Stitch(emittedLiquidTiles, liquidStitchedPath, resolution);
                 Console.WriteLine($"Synthetic minimap map: {stitchedPath} ({stitched.Width}x{stitched.Height}, tiles {stitched.MinTileX:D2},{stitched.MinTileY:D2} -> {stitched.MaxTileX:D2},{stitched.MaxTileY:D2})");
                 Console.WriteLine($"Synthetic minimap liquid map: {liquidStitchedPath} ({liquidStitched.Width}x{liquidStitched.Height})");
+                if (texturelessResiduals && emittedResidualTiles.Count > 0)
+                {
+                    residualStitched = TerrainMinimapStitcher.Stitch(emittedResidualTiles, residualStitchedPath, resolution);
+                    Console.WriteLine($"Textureless residual map: {residualStitchedPath} ({residualStitched.Width}x{residualStitched.Height})");
+                }
             }
             catch (Exception ex)
             {
@@ -3483,6 +3511,33 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         }
 
         return textures;
+    }
+
+    /// <summary>
+    /// Build a neutral-white albedo texture set matching the keys of the real texture set, so the
+    /// compositor renders only the terrain shadow (Lambert hillshade + cast shadows) with no albedo
+    /// texture and no objects — the textureless residual signal (FR-022).
+    /// </summary>
+    private static Dictionary<int, byte[,,]> CreateNeutralWhiteTextures(IReadOnlyDictionary<int, byte[,,]> realTextures)
+    {
+        var neutral = new Dictionary<int, byte[,,]>();
+        foreach ((int textureId, byte[,,] real) in realTextures)
+        {
+            int height = real.GetLength(0);
+            int width = real.GetLength(1);
+            var white = new byte[height, width, 3];
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                {
+                    white[y, x, 0] = 255;
+                    white[y, x, 1] = 255;
+                    white[y, x, 2] = 255;
+                }
+
+            neutral[textureId] = white;
+        }
+
+        return neutral;
     }
 
     private static byte[,,]? LoadTerrainTextureRgbProxy(
