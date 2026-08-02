@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-08-01
+Last updated: 2026-08-02
 
 ## Session: v0.5.2 release + spec audit
 
@@ -33,6 +33,7 @@ Last updated: 2026-08-01
 | 118 object-occlusion-masks | US1–US3 implemented; user-run gates remain |
 | 123 real-wdl-detailer | Draft — next lane: real WDL prior + residual detailer |
 | 124 legacy-detangle-runpod | Draft — legacy Python detangle + C# RunPod tooling |
+| 125 minimap-dxt1-inversion | Active — DXT1 parity companion + lighting baseline + restoration/reconstruction/super-res |
 
 ## v50 dataset state (feature-complete)
 
@@ -132,6 +133,22 @@ calibration did while passing its own gate. A test pins that case.
 Correlation is the metric that responds to **shadow direction** — a mirrored render matches both
 ratios perfectly and only correlation catches it. That makes it the one to watch for the sun-azimuth
 question.
+
+## Spec 125 — minimap DXT1 inversion (2026-08-02)
+
+Authored 0.5.3 minimaps are DXT1-compressed; our synthesizer produces pristine 24-bit output, so every
+comparison has been scoring clean-vs-lossy. Spec 125 adds encoding awareness:
+
+- **Pure-C# DXT1 codec** (`WowViewer.Core.IO.Blp.Dxt1TileCodec`) — encode/decode cycle + round-trip
+  check, zero external codec dependency (BCnEncoder.Net is NOT .NET 10 compatible and was rejected).
+- **`--dxt1-parity`** — synthesizer emits a `*_dxt1.png` parity companion per tile (FR-015).
+- **`--encoding-survey`** — per-build/map encoding distribution (FR-013).
+- **`--lighting-baseline`** — tests the global lighting normalisation hypothesis (FR-016).
+- **Strategic direction (user, 2026-08-02)**: because we now know how the minimap terrain shadow is
+  created, the shadow in an authored tile is a readable terrain-shape signal. This opens three
+  downstream models (all data-harvester, user-run): **US3 restoration** (pre-compression appearance),
+  **US4 terrain reconstruction** (minimap RGB → heightmap → 3D mesh, skipping WDL), and **US5
+  super-resolution** (real low/high-res pairs, no objects).
 
 ## synthetic-minimap tuning knobs (no rebuild needed to sweep)
 

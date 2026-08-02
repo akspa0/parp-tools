@@ -29,6 +29,10 @@ separate authored from synthetic by compression damage alone. This feature:
 7. **Super-resolves** terrain and texturing data from real low-res/high-res pairs produced by the
    synthesizer (same terrain, matching lighting, no objects), reported separately from artifact
    removal and reconstruction (FR-021). Another door opened by the parity and lighting work.
+8. **Exports textureless terrain-shadow residuals** — per-tile shading-only images (no objects, no
+   textures) plus a stitched whole-map output, to both image files and the v50 Zarr datastore as a
+   "textureless residuals" signal, with MCAL/MCLY/MTEX as separate per-tileset layers (FR-022,
+   FR-023). This is the cleanest training signal for the residuals-based reconstruction model.
 
 The DXT1 encoder already exists in-tree: `BCnEncoder.Net` is a dependency of `WowViewer.Core.IO`, and
 `AlphaBlpCompatibilityService.EncodeBlp2` already drives `BcEncoder` with `CompressionFormat.Bc1`

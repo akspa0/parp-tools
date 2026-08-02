@@ -1,6 +1,6 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-01
+Last updated: 2026-08-02
 
 ## v0.5.2 release (2026-08-01)
 
@@ -17,6 +17,7 @@ Detailed pre-2026-08-01 history: `memory-bank/archive/2026-08-01-progress-detail
 
 | Lane | State |
 |------|-------|
+| Spec 125 minimap DXT1 | Active — pure-C# DXT1 codec + `--dxt1-parity` + `--encoding-survey` + `--lighting-baseline` landed and tested (8 tests pass). Downstream models (restoration/reconstruction/super-res) are data-harvester, user-run. |
 | Viewer | Lighting/taxi/minimap fixed for v0.5.2. Global noon light unconditional. M2 gap = 1.0.0–3.0.0 (0.11/0.12 MDX work; 3.0.1+ work). Spec 104 active. |
 | v50 dataset | Feature-complete. `curriculum-0_5_3_3368-dual_v3.zarr` (2,990 rows). Coarse+detailer chain proven; detailer bandsplit-v2 11.2% relative, user promotion pending. |
 | Synthetic minimap | Solar direction at `--time-hours` (fixed NW bearing, elevation cycles). Linear-space shading + analytic cast shadows replaced the exposure-20 tone map (2026-08-01, uncommitted); MCSH still optional and separate. |

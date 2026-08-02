@@ -33,6 +33,13 @@
 
 Validation performed 2026-08-02. Three iterations of self-review; issues found and corrected:
 
+**Update 2026-08-02 (fifth pass)**: Added **User Story 6** — export textureless terrain-shadow
+residuals (per-tile + stitched whole-map) to both image files and the v50 Zarr datastore as a
+"textureless residuals" signal, with MCAL/MCLY/MTEX as separate per-tileset layers. This is the
+cleanest training signal for the residuals-based reconstruction model (US4) and feeds super-resolution
+(US5) for the low-res 2001–2003 imagery. Adds FR-022, FR-023, SC-016, and the Textureless Residual
+entity. Kept technology-agnostic.
+
 **Update 2026-08-02 (fourth pass)**: Added **User Story 5** — super-resolve terrain and texturing
 data from real low-res/high-res pairs produced by the synthesizer (same terrain, matching lighting,
 no objects), reported separately from artifact-removal and reconstruction metrics. This is another

@@ -143,14 +143,35 @@ run the super-resolution model, and measure recovery against the known high-res 
 
 ---
 
+## Phase 8: User Story 6 - Export textureless terrain-shadow residuals (Priority: P2)
+
+**Goal**: A dataset builder exports, for every map, tiles that are just the terrain shadow residual
+(no objects, no textures), to both image files on disk and the v50 Zarr datastore as a "textureless
+residuals" signal, with MCAL/MCLY/MTEX as separate per-tileset layers.
+
+**Independent Test**: Export textureless residuals for a map, confirm each tile is shading-only (no
+albedo texture, no objects), and confirm the stitched whole-map output aligns with the per-tile
+outputs.
+
+### Implementation for User Story 6
+
+- [ ] T035 [P] [US6] Add `--textureless-residuals` flag and emit per-tile shading-only images (no objects, no textures) in `wow-viewer/tools/harvest/WowViewer.Tool.Harvest/Program.cs` (FR-022)
+- [ ] T036 [US6] Emit a stitched whole-map textureless-residual image aligned with the per-tile outputs in `wow-viewer/tools/harvest/WowViewer.Tool.Harvest/Program.cs` (FR-022)
+- [ ] T037 [US6] Write the textureless-residual signal to the v50 Zarr datastore as a named signal in `wow-viewer/tools/harvest/WowViewer.Tool.Harvest/Program.cs` (FR-022)
+- [ ] T038 [US6] Encode MCAL/MCLY/MTEX as separate per-tileset layers in `wow-viewer/tools/harvest/WowViewer.Tool.Harvest/Program.cs` (FR-023)
+
+**Checkpoint**: All user stories should now be independently functional
+
+---
+
 ## Phase N: Polish & Cross-Cutting Concerns
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T035 [P] Add `--lighting-baseline` flag and report per-map baseline, accounting for it when scoring in `wow-viewer/tools/harvest/WowViewer.Tool.Harvest/Program.cs` (FR-016)
-- [ ] T036 [P] Unit test `MinimapLightingBaselineTests` (baseline detected, independent exposures not, normalisation works) in `wow-viewer/tests/WowViewer.Core.Tests/MinimapLightingBaselineTests.cs` (FR-016)
-- [ ] T037 Run quickstart.md validation (build + synthetic-minimap parity + score)
-- [ ] T038 Update memory bank `activeContext.md` and `progress.md` with Spec 125 state
+- [ ] T039 [P] Add `--lighting-baseline` flag and report per-map baseline, accounting for it when scoring in `wow-viewer/tools/harvest/WowViewer.Tool.Harvest/Program.cs` (FR-016)
+- [ ] T040 [P] Unit test `MinimapLightingBaselineTests` (baseline detected, independent exposures not, normalisation works) in `wow-viewer/tests/WowViewer.Core.Tests/MinimapLightingBaselineTests.cs` (FR-016)
+- [ ] T041 Run quickstart.md validation (build + synthetic-minimap parity + score)
+- [ ] T042 Update memory bank `activeContext.md` and `progress.md` with Spec 125 state
 
 ---
 

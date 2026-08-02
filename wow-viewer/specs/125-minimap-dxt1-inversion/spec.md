@@ -151,6 +151,15 @@ without needing any authored image.
 
 ### User Story 4 — Decode terrain shadow from any authored minimap and reconstruct terrain directly (Priority: P3)
 
+**Core hypothesis (user, 2026-08-02)**: the terrain shadow/residual is effectively the **heightmap
+encoded in grayscale in every minimap tile** — the signal hiding in plain sight. Because we now know
+how the minimap compositor and bake functionality work, the shadow in an authored tile is not a black
+box; it is a readable, near-grayscale encoding of the terrain's shape. Once the residual tiles are
+gathered (US6), comparing them against the ground-truth heightmap (MCVT) should reveal the REAL
+residual, and training convergence on that signal should regenerate heightmap data from any minimap —
+solely because we know how the whole thing was originally built. This is the holy grail of minimap
+baking that no one has gotten quite right.
+
 A reconstruction engineer takes *any* authored minimap tile and recovers the terrain that produced
 it — going **minimap RGB → heightmap → 3D mesh** with a single model that reads the terrain shadow
 and converts it into ridges, mountains, and terrain detail. This is the payoff of the whole lighting
@@ -213,6 +222,38 @@ truth that exists without needing any authored image.
 3. **Given** a super-resolved output, **When** it is compared to the high-res original,
    **Then** the improvement is reported separately from any artifact-removal or reconstruction metric
    (FR-012).
+
+---
+
+### User Story 6 — Export textureless terrain-shadow residuals (per-tile + stitched) (Priority: P2)
+
+A dataset builder exports, for every map, tiles that are **just the terrain shadow residual** — the
+shading signal with no objects and no textures — so a residuals-based terrain reconstruction model can
+train on the cleanest possible signal. Output goes to both image files on disk and the v50 Zarr
+datastore as a "textureless residuals" signal. The MCAL/MCLY/MTEX data is encoded as separate layers
+so per-tileset identity is preserved.
+
+**Why this priority**: The user stated this on 2026-08-02. Because we reverse-engineered the minimap
+compositor and bake functionality, we can now emit the pure terrain-shadow residual — the exact signal
+that encodes terrain shape — and use it alone to generate terrain from images. This is the cleanest
+training target for the residuals-based reconstruction model (US4), and it feeds the super-resolution
+model (US5) for the low-res 2001–2003 imagery used to restore the game to its pre-customer era.
+
+**Independent Test**: Export textureless residuals for a map, confirm each tile is shading-only (no
+albedo texture, no objects), and confirm the stitched whole-map output aligns with the per-tile
+outputs.
+
+**Acceptance Scenarios**:
+
+1. **Given** a map, **When** the textureless-residual export runs,
+   **Then** it emits a per-tile shading-only image (no objects, no textures) for every occupied tile.
+2. **Given** the same map, **When** the export runs with stitching,
+   **Then** it emits a stitched whole-map textureless-residual image aligned with the per-tile outputs.
+3. **Given** the export, **When** the v50 Zarr datastore is written,
+   **Then** the textureless-residual signal is stored as a named signal, and MCAL/MCLY/MTEX are
+   encoded as separate per-tileset layers.
+4. **Given** a textureless-residual tile, **When** it is inspected,
+   **Then** it contains no albedo texture and no object pixels — only the terrain shadow.
 
 ---
 
@@ -286,6 +327,12 @@ truth that exists without needing any authored image.
 - **FR-021**: The system MUST be able to **super-resolve** terrain and texturing data from real
   low-res/high-res pairs produced by the synthesizer (same terrain, matching lighting, no objects),
   and MUST report the improvement separately from any artifact-removal or reconstruction metric.
+- **FR-022**: The system MUST be able to **export textureless terrain-shadow residuals** — per-tile
+  shading-only images (no objects, no textures) for every occupied tile, plus a stitched whole-map
+  output — to both image files on disk and the v50 Zarr datastore as a named "textureless residuals"
+  signal.
+- **FR-023**: The textureless-residual export MUST encode MCAL/MCLY/MTEX data as separate per-tileset
+  layers, so per-tileset identity is preserved alongside the shading signal.
 
 ### Key Entities
 
@@ -310,6 +357,9 @@ truth that exists without needing any authored image.
   the ground-truth MCVT heightmap for the same tile.
 - **Super-Resolution Pair**: A low-res and high-res render of the same terrain with matching lighting
   and no objects, produced by the synthesizer; used to train and evaluate super-resolution.
+- **Textureless Residual**: A per-tile shading-only image (no objects, no textures) that encodes the
+  terrain shadow; the cleanest training signal for residuals-based reconstruction. Stored per-tile and
+  stitched whole-map, with MCAL/MCLY/MTEX as separate per-tileset layers.
 
 ## Success Criteria *(mandatory)*
 
@@ -350,6 +400,9 @@ truth that exists without needing any authored image.
 - **SC-015**: On held-out low-res/high-res pairs, the super-resolution output is measurably closer to
   the known high-res original than bicubic upscaling is, and the improvement is reported separately
   from any artifact-removal or reconstruction metric.
+- **SC-016**: The textureless-residual export produces a per-tile shading-only image and a stitched
+  whole-map image for every occupied tile of a map, with no albedo texture and no object pixels, and
+  stores the signal in the v50 Zarr datastore with MCAL/MCLY/MTEX as separate per-tileset layers.
 
 ## Assumptions
 
