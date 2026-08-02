@@ -1556,6 +1556,22 @@ static class Program
         SyntheticMinimapScorecard? scorecard = scoreAgainstAuthored ? new SyntheticMinimapScorecard() : null;
         const string BaselineVariantName = "legacy";
         const string CurrentVariantName = "current";
+        // --dxt1-parity: emit a DXT1-compressed parity companion per tile alongside the pristine
+        // render, so authored and synthetic tiles compare on equal terms (FR-015). The pristine
+        // render remains the primary output; the parity companion is a parity-only companion.
+        bool dxt1Parity = HasFlag(args, "--dxt1-parity");
+        // --encoding-survey: report the per-build/map distribution of encodings found, so the DXT1
+        // assumption is verified rather than inherited (FR-013).
+        bool encodingSurvey = HasFlag(args, "--encoding-survey");
+        // --lighting-baseline: survey authored tiles for a shared lighting baseline and account for
+        // it when scoring (FR-016).
+        bool lightingBaseline = HasFlag(args, "--lighting-baseline");
+        if (lightingBaseline && !emitAuthoredReference)
+        {
+            Console.Error.WriteLine("Error: --lighting-baseline requires --authored-reference (it surveys the authored minimap).");
+            Environment.ExitCode = 1;
+            return;
+        }
         if (!emitPerTile && !emitWholeMap)
         {
             emitPerTile = true;
@@ -1750,6 +1766,10 @@ static class Program
         var results = new ConcurrentBag<SyntheticMinimapTileResult>();
         var emittedTiles = new ConcurrentDictionary<(int TileX, int TileY), string>();
         var emittedLiquidTiles = new ConcurrentDictionary<(int TileX, int TileY), string>();
+        // Collectors for the encoding survey (raw authored BLP bytes) and the lighting-baseline
+        // survey (authored RGB tiles), populated during the parallel pass and reported after it.
+        var surveyedBlpBytes = new ConcurrentBag<byte[]>();
+        var surveyedAuthoredTiles = new ConcurrentBag<byte[,,]>();
         string tilesDirectory = emitPerTile
             ? Path.Combine(outputDirectory, "tiles")
             : Path.Combine(outputDirectory, ".stitch-cache", $"{mapName}-{Guid.NewGuid():N}");
@@ -1787,6 +1807,14 @@ static class Program
                 {
                     stage = "decoding authored client minimap";
                     authoredReference = TryLoadMinimapFromMpq(catalog, mapName, tile.TileX, tile.TileY);
+                    if (authoredReference is not null && HasVisibleRgb(authoredReference))
+                    {
+                        surveyedAuthoredTiles.Add(authoredReference);
+                        byte[]? blpBytes = TryLoadMinimapBlpBytes(catalog, mapName, tile.TileX, tile.TileY);
+                        if (blpBytes is not null)
+                            surveyedBlpBytes.Add(blpBytes);
+                    }
+
                     if (authoredReference is null || !HasVisibleRgb(authoredReference))
                     {
                         results.Add(new SyntheticMinimapTileResult(
@@ -1879,6 +1907,16 @@ static class Program
                 image.SaveAsPng(tilePath);
                 stage = "writing liquid PNG";
                 liquidImage.SaveAsPng(liquidTilePath);
+                if (dxt1Parity)
+                {
+                    // Emit a DXT1-compressed parity companion so authored and synthetic tiles compare
+                    // on equal terms (FR-015). The pristine liquid render remains the primary output.
+                    stage = "writing DXT1 parity companion";
+                    using Image<Rgba32> parityImage = Dxt1TileCodec.EncodeDecode(liquidImage);
+                    parityImage.SaveAsPng(Path.Combine(
+                        tilesDirectory,
+                        $"{mapName}_{tile.TileX:D2}_{tile.TileY:D2}_dxt1.png"));
+                }
                 if (lightOverlay)
                 {
                     stage = "compositing LIT light overlay";
@@ -2085,6 +2123,29 @@ static class Program
         Console.WriteLine($"Synthetic minimap manifest: {manifestPath}");
         scorecard?.Report(outputDirectory, BaselineVariantName, CurrentVariantName);
         azimuthSweep?.Report(tuning.Era);
+        if (encodingSurvey && surveyedBlpBytes.Count > 0)
+        {
+            EncodingSurveyResult survey = MinimapEncodingSurvey.Survey(
+                buildVersion, mapName, surveyedBlpBytes, tuning.ExactEraMatch);
+            Console.WriteLine();
+            Console.WriteLine($"=== Encoding survey: {mapName} ({buildVersion}) ===");
+            Console.WriteLine($"  Build recognised: {survey.BuildRecognised}");
+            foreach ((string label, int count) in survey.EncodingDistribution.OrderByDescending(static kv => kv.Value))
+                Console.WriteLine($"  {label,-48} {count}");
+        }
+
+        if (lightingBaseline && surveyedAuthoredTiles.Count > 0)
+        {
+            LightingBaselineResult baseline = MinimapLightingBaseline.Survey(
+                mapName, buildVersion, surveyedAuthoredTiles, tuning.ExactEraMatch);
+            Console.WriteLine();
+            Console.WriteLine($"=== Lighting baseline: {mapName} ({buildVersion}) ===");
+            Console.WriteLine($"  Build recognised: {baseline.BuildRecognised}");
+            Console.WriteLine($"  Mean luma: {baseline.MeanLuma:0.000}  cross-tile std: {baseline.StdLuma:0.000}");
+            Console.WriteLine($"  Shared lighting baseline: {(baseline.BaselinePresent ? "PRESENT" : "absent")}");
+            if (baseline.BaselinePresent)
+                Console.WriteLine("  Comparison will account for the shared baseline rather than treating per-tile differences as codec damage.");
+        }
         Console.WriteLine($"Synthetic minimap summary: written={results.Count(result => result.Status is "written" or "stitched-only")}, skipped={results.Count(result => result.Status == "skipped")}, failed={results.Count(result => result.Status == "failed")}");
 
         bool authoredProofIncomplete = emitAuthoredReference
@@ -4828,6 +4889,44 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
                 if (rgb is not null) return rgb;
             }
             catch { }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Load the raw authored minimap BLP bytes for a tile, for the encoding survey (FR-013). Mirrors
+    /// the candidate paths of <see cref="TryLoadMinimapFromMpq"/> but returns the raw bytes.
+    /// </summary>
+    static byte[]? TryLoadMinimapBlpBytes(NativeMpqService catalog, string mapName, int tileX, int tileY)
+    {
+        string mapLower = mapName.ToLowerInvariant();
+        string x2 = tileX.ToString("00");
+        string y2 = tileY.ToString("00");
+        string canonicalPath = $"textures/minimap/{mapLower}/map{x2}_{y2}.blp";
+
+        if (_md5Lookup is not null && _md5Lookup.TryGetValue(canonicalPath, out string? md5Name))
+        {
+            byte[]? blpBytes = catalog.ReadFile(md5Name);
+            if (blpBytes is not null && blpBytes.Length >= 8)
+                return blpBytes;
+        }
+
+        string[] candidates =
+        [
+            canonicalPath.Replace('/', '\\'),
+            $"textures\\minimap\\{mapLower}\\map{x2}_{y2}.blp",
+            $"textures\\Minimap\\{mapLower}\\map{x2}_{y2}.blp",
+            $"world\\minimaps\\{mapLower}\\map{x2}_{y2}.blp",
+            $"world\\Minimaps\\{mapName}\\map{x2}_{y2}.blp",
+            $"{mapLower}\\map{x2}_{y2}.blp",
+        ];
+
+        foreach (string candidate in candidates)
+        {
+            byte[]? blpBytes = catalog.ReadFile(candidate);
+            if (blpBytes is not null && blpBytes.Length >= 8)
+                return blpBytes;
         }
 
         return null;
