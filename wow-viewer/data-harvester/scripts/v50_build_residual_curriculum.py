@@ -98,6 +98,12 @@ def main() -> int:
         height = _load_height_257(height_group, args.map, tx, ty)
         if height is None:
             continue
+        # Residual is 256x256; height_257 is 257x257. Crop the height to the residual's grid so the
+        # two fields are pixel-aligned (the 257th row/col is the shared tile-edge vertex).
+        if height.shape[0] == residual.shape[0] + 1 and height.shape[1] == residual.shape[1] + 1:
+            height = height[: residual.shape[0], : residual.shape[1]]
+        if height.shape != residual.shape:
+            continue
         residuals.append(residual)
         heights.append(height)
         index_rows.append({"map": args.map, "tile_x": tx, "tile_y": ty, "source_group_id": f"{args.map}_{tx}_{ty}", "split": "train"})

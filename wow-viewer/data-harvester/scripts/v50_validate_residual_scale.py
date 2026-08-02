@@ -106,6 +106,13 @@ def main() -> int:
         height = _load_height(args.height_store, args.map, tx, ty)
         if height is None:
             continue
+        # Residual is 256x256; height_257 is 257x257. Crop the height to the residual's grid so the
+        # two fields are pixel-aligned (the 257th row/col is the shared tile-edge vertex).
+        if height.shape[0] == residual.shape[0] + 1 and height.shape[1] == residual.shape[1] + 1:
+            height = height[: residual.shape[0], : residual.shape[1]]
+        if height.shape != residual.shape:
+            print(f"  skip {path.name}: residual {residual.shape} vs height {height.shape} mismatch")
+            continue
         residuals.append(residual)
         heights.append(height)
 
