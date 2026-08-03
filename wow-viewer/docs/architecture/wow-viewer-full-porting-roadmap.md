@@ -181,9 +181,16 @@ Attach database-driven metadata to every NPZ shard:
 
 ### Phase G: ML Model Architecture (V14+)
 
+> **SUPERSEDED 2026-08-02 (constitution v2.0.0).** The mandatory per-signal residual chain below is
+> **no longer the target architecture** and is no longer required. Model topology is now an
+> engineering choice made per spec, and multi-task/shared-trunk/monolithic models are explicitly
+> permitted — see constitution Principle IV and `AGENTS.md` RULE 7. The signal decomposition below
+> is still an accurate map of how the signals depend on each other, and is worth reading as that;
+> just do not treat the "one residual signal per model" constraint as binding.
+
 Current V11 trainer (`train_v11.py`): single ConvNeXt V2 backbone predicting all outputs.
 
-V14 target architecture: **per-signal residual models**. Each model is tiny, independent, predicts one residual signal:
+The V14 chain, as originally planned — each model tiny, independent, predicting one residual signal:
 
 ```
 H1: minimap → coarse height (17×17)
