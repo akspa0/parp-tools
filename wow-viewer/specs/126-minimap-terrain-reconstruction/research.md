@@ -319,8 +319,30 @@ manifest: `object_geometry_visible_mask_257`, `object_geometry_visible_instance_
 
 What must be verified in Phase 3: that they are populated on the real corpus, and that they mark
 terrain *actually hidden in the rendered view* rather than full ground footprints.
-`object_precise_mask` is the full-footprint signal and over-masks heavily — it must not be
-substituted for the visible mask.
+
+#### Why masking was previously unusable, and why it is not any more
+
+The earlier attempt at object masking **ate too much data to train on**. That was a property of the
+mask that was available at the time, not of masking as an idea: `object_precise_mask` is each
+object's full ground footprint, which removes on the order of 80-90% of the terrain under an object
+even though only the genuinely occluded part carries no evidence. Masking with it meant discarding
+most of a tile, so the choice looked like "hallucinate under objects" versus "have no data".
+
+The `object_geometry_visible_*` signals dissolve that trade-off. They describe what the render
+actually hid, so the excluded region is the region that genuinely contains no ground evidence, and
+everything else — including most of the terrain inside an object's footprint — stays supervised.
+**The same tiles become usable at far higher coverage**, from data that already exists.
+
+This is why Phase 3 measures coverage as a first-class number rather than assuming it:
+
+| Measurement | Why it matters |
+|-------------|----------------|
+| Retained-terrain fraction under `object_geometry_visible_mask_257` | The quantity that made the old approach unusable. Must be reported per tile. |
+| Same fraction under `object_precise_mask` | The old behaviour, measured on the same tiles, so the improvement is a number rather than a claim. |
+| Tiles pushed past the occlusion threshold by each | How many tiles each mask costs us outright. |
+
+**Do not substitute `object_precise_mask` for the visible mask.** It is retained in the store for
+this comparison and for full-footprint reasoning, not as a supervision mask.
 
 ### R8 — The per-object library is outside the v50 dataset contract
 

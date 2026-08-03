@@ -120,6 +120,10 @@ masked run's error under object footprints is the measurement.
    it is routed to a bucket rather than silently contributing a near-empty loss.
 5. **Given** scored results, **When** error is reported, **Then** error under object footprints is
    reported separately from error on open terrain.
+6. **Given** the same tiles, **When** coverage is measured under the occlusion-aware visible mask and
+   under the full-footprint mask, **Then** the retained-terrain fraction is reported for both — the
+   full-footprint mask is what made masking unusable previously, and the gap between them is the
+   reason this approach is now viable.
 
 ---
 
@@ -392,6 +396,10 @@ MCAL ground truth on held-out tiles.
   gap between them is stated as a number.
 - **SC-005**: Training with occlusion masking reduces height error under object footprints relative to
   an identical unmasked run, and the improvement is reported as a number.
+- **SC-005a**: Retained-terrain fraction is reported for the occlusion-aware visible mask and for the
+  full-footprint mask over the same tiles. The visible mask must retain substantially more terrain —
+  this is the measurement that distinguishes viable masking from the earlier approach, which removed
+  so much terrain that masking and hallucinating were the only two options.
 - **SC-006**: Across a block of adjacent tiles, height disagreement at shared edges is no worse than a
   stated multiple of the disagreement present in ground truth at those same edges.
 - **SC-007**: A reconstructed tile exports to heightmap data that opens in external tooling and meshes

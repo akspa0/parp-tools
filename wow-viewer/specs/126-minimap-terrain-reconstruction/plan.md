@@ -151,9 +151,19 @@ turns a masked pixel from "something was here" into a named object.
 were made. If E5 says the difference exceeds the codec floor, the re-render must have completed before
 this phase trains anything, because object appearance is model *input*.
 
+**Why masking is viable now and was not before.** The earlier attempt at object masking removed too
+much terrain to train on — but that was a property of `object_precise_mask`, which is the full ground
+footprint and discards most of the terrain under an object even though only the genuinely hidden part
+lacks evidence. The choice looked like "hallucinate under objects" or "have no data". The
+`object_geometry_visible_*` signals describe what the render actually hid, so the excluded region is
+the region that truly carries no ground evidence and the rest stays supervised. The same tiles become
+usable at far higher coverage, from data that already exists.
+
 **Exit gate**: a masked run and an identical unmasked run are compared, and the reduction in height
 error under object footprints is reported as a number. The instance-to-asset join resolves for a
-stated fraction of masked pixels.
+stated fraction of masked pixels. **Retained-terrain fraction is reported for both the visible mask
+and the full-footprint mask on the same tiles**, so the coverage improvement that makes this approach
+viable is a measurement rather than an assumption.
 
 **STOP conditions**: if the visible-mask signals are unpopulated or encode full footprints, they must
 be regenerated before Phase 4 — an unmasked loss teaches confident hallucination under every object,
