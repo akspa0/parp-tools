@@ -225,3 +225,34 @@ tiles found by hand earlier) purely because they break a rule 640 other tiles ob
 Known limit: presence is "any non-zero", so a populated-but-degenerate signal reads as present. It
 catches missing-vs-present, not weak-vs-strong. Pairing it with `surviving_height_levels` would
 catch the second kind.
+
+## Origin-era context (user domain knowledge, 2026-08-03)
+
+Recorded because it is otherwise undocumented anywhere in the repo and it shapes what the data IS.
+
+- The game began as **ONE world named Azeroth**, fitting in a container smaller than 64x64 tiles.
+  When it outgrew that it was split into separate maps in separate map folders.
+- The only surviving artifact of that 1999-era single-world build is the original **`world.def`**,
+  containing nothing but day/night light-cycle data for the world sun — plus a hand-drawn blockout
+  map showing **both continents in one frame** with names that never shipped (Amberhorn Caverns,
+  Jaedenar as a dungeon, Kobold Lair, Tauren-Newbie, Stonetalon Peak) and difficulty tiers already
+  assigned, and a handful of other images from the same period.
+- **PM4 is NOT distilled**, unlike terrain. Shipped ADT resolution is plausibly 1/4 or 1/16 of the
+  internal authoring resolution, and the undistilled PM4s are the basis of that estimate. PM4 is
+  therefore the highest-fidelity surviving record of object placement and should be treated as the
+  reference, not a derived by-product.
+- **PM4 holds the NEGATIVE BSP** for every placed object on a tile: the surfaces players and NPCs
+  walk on and that pathfinding uses. It carries no WMO geometry yet records more per object than the
+  model file does. This reframe is Spec 128.
+
+Open hypotheses the user holds, not yet tested:
+
+- Terrain brushes may be procedural with **audio or other signals** as input — a 2000-era studio had
+  audio CDs on hand, and The WoW Diary dwells on what the team listened to. Two testable
+  discriminators exist and neither has been run: (1) an 8-bit grayscale scan source would pile tile
+  level-counts at or below 256, and `surviving_height_levels` is already in `tiles.csv` for all 1817
+  tiles — the histogram is unplotted; (2) a brush derived from a 1D waveform must be swept/revolved
+  into 2D and would leave **anisotropy**, whereas a scanned drawing or 2D fractal is isotropic, so
+  row-wise vs column-wise autocorrelation on reused brush patches separates them.
+- The competing account is that hand-drawn maps were scanned and the pencil sketch guided a
+  grayscale depth map per tile.
