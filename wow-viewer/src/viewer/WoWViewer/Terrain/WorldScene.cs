@@ -5347,6 +5347,7 @@ public class WorldScene : ISceneRenderer
 
                             if (componentSurfaceIndices.Count > 0)
                             {
+                                var wallLines = new List<Pm4LineSegment>();
                                 List<Pm4Triangle> wallTriangles = BuildMslkWallTriangles(
                                     pm4,
                                     componentSurfaceIndices,
@@ -5357,10 +5358,13 @@ public class WorldScene : ISceneRenderer
                                     ck24AxisConvention,
                                     linkedPlanarTransform,
                                     Math.Max(0, tileTriangleBudget - triangles.Count),
+                                    wallLines,
+                                    Math.Max(0, tileLineBudget - lines.Count),
                                     out int componentWallFaces);
 
                                 diagnostics.WallFaceCount += componentWallFaces;
                                 triangles.AddRange(wallTriangles);
+                                lines.AddRange(wallLines);
                             }
                         }
 
@@ -6159,6 +6163,8 @@ public class WorldScene : ISceneRenderer
         Pm4AxisConvention axisConvention,
         Pm4PlanarTransform planarTransform,
         int triangleBudget,
+        List<Pm4LineSegment> wallLines,
+        int lineBudget,
         out int wallFaceCount)
     {
         var triangles = new List<Pm4Triangle>();
@@ -6205,6 +6211,11 @@ public class WorldScene : ISceneRenderer
                         ? new Pm4Triangle(scratch[0], scratch[i + 1], scratch[i])
                         : new Pm4Triangle(scratch[0], scratch[i], scratch[i + 1]));
                 }
+
+                // The overlay draws lines unless "PM4 Solid Fill" is on, so a triangle-only wall
+                // would be invisible in the default wireframe view. Emit the quad outline too.
+                for (int i = 0; i < scratch.Count && wallLines.Count < lineBudget; i++)
+                    wallLines.Add(new Pm4LineSegment(scratch[i], scratch[(i + 1) % scratch.Count]));
             }
         }
 

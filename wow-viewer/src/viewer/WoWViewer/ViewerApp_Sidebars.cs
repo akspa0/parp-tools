@@ -4220,7 +4220,10 @@ public partial class ViewerApp
             return;
         }
 
-        switch ((Pm4BottomTab)_activeBottomTabIndex)
+        _activePm4TabIndex = DrawNestedSubTabStrip(
+            "##Pm4SubTabs", WorkbenchNavigator.GetPm4BottomTabLabels(), _activePm4TabIndex);
+
+        switch ((Pm4BottomTab)_activePm4TabIndex)
         {
             case Pm4BottomTab.Overlay:
                 DrawPm4OverlayWorkbenchContent();
