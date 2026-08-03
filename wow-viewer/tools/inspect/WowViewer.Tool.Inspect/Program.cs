@@ -2168,6 +2168,9 @@ static void RunPm4(string[] args)
 		case "cross-tile":
 			RunPm4CrossTile(tail);
 			break;
+		case "connective-geometry":
+			RunPm4ConnectiveGeometry(tail);
+			break;
 		case "export-json":
 			RunPm4ExportJson(tail);
 			break;
@@ -5462,6 +5465,121 @@ static void PrintPm4MscnReport(Pm4MscnRelationshipReport report)
 		foreach (string note in report.Notes)
 			Console.WriteLine($"  {note}");
 	}
+}
+
+static void RunPm4ConnectiveGeometry(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 file or directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4ConnectiveGeometryReport report = File.Exists(input)
+		? Pm4ConnectiveGeometryAnalyzer.AnalyzeFile(input)
+		: Pm4ConnectiveGeometryAnalyzer.AnalyzeDirectory(input);
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	PrintPm4ConnectiveGeometryReport(report);
+}
+
+static void PrintPm4ConnectiveGeometryReport(Pm4ConnectiveGeometryReport report)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 connective-geometry report");
+	Console.WriteLine($"Input: {report.InputDirectory}");
+	Console.WriteLine($"Files: {report.FileCount}, non-empty={report.NonEmptyFileCount}");
+	Console.WriteLine();
+
+	Pm4MslkWindowPopulation population = report.WindowPopulation;
+	Console.WriteLine("MSLK path-window population:");
+	Console.WriteLine($"  total MSLK entries      = {population.TotalMslkEntries}");
+	Console.WriteLine($"  active windows          = {population.ActiveWindows}");
+	Console.WriteLine($"  MspiFirstIndex < 0      = {population.NegativeFirstIndexEntries}");
+	Console.WriteLine($"  MspiIndexCount == 0     = {population.ZeroCountEntries}");
+	Console.WriteLine($"  total window indices    = {population.TotalWindowIndices}");
+	Console.WriteLine($"  mean indices per window = {population.MeanIndicesPerWindow:F3}");
+	Console.WriteLine($"  window size range       = {population.MinWindowSize}..{population.MaxWindowSize}");
+	Console.WriteLine();
+
+	Console.WriteLine("Window size histogram (top buckets):");
+	foreach (Pm4WindowSizeBucket bucket in report.SizeHistogram)
+		Console.WriteLine($"  size={bucket.Size,-4} windows={bucket.WindowCount,-8} {bucket.Fraction:P2}");
+	Console.WriteLine();
+
+	PrintPm4WindowTopology("Topology evidence (all families)", report.Topology);
+
+	PrintPm4FaceOrientation(report.SurfaceNormalOrientation);
+	PrintPm4FaceOrientation(report.PathWindowOrientation);
+
+	Pm4StreamCoincidenceSummary coincidence = report.StreamCoincidence;
+	Console.WriteLine($"MSPV <-> MSVT vertex coincidence (epsilon={coincidence.Epsilon}):");
+	Console.WriteLine($"  MSPV on MSVT = {coincidence.MspvPointsCoincidentWithMsvt}/{coincidence.MspvPointsTested} ({coincidence.CoincidentFraction:P2})");
+	Console.WriteLine($"  MSVT on MSPV = {coincidence.MsvtPointsCoincidentWithMspv}/{coincidence.MsvtPointsTested} ({coincidence.MsvtCoincidentFraction:P2})");
+	Console.WriteLine();
+
+	Console.WriteLine("Per-family (TypeFlags/Subtype):");
+	foreach (Pm4WindowFamilySummary family in report.Families.Take(12))
+	{
+		Console.WriteLine($"  {family.FamilyKey}");
+		Console.WriteLine($"    files={family.FileCount} entries={family.TotalEntries} active={family.ActiveWindows} negFirst={family.NegativeFirstIndexEntries}");
+		Console.WriteLine($"    meanSize={family.MeanWindowSize:F2} modalSize={family.ModalWindowSize} mult3={family.MultipleOfThreeFraction:P1} closed={family.ClosedFraction:P1}");
+		Console.WriteLine($"    degenerateTriples={family.Topology.DegenerateTripleFraction:P1} collinear={family.Topology.CollinearWindows} coplanar={family.Topology.CoplanarWindows}");
+		Console.WriteLine($"    topSizes: {string.Join(", ", family.TopSizes.Select(static size => $"{size.Size}x{size.WindowCount}"))}");
+	}
+	Console.WriteLine();
+
+	Pm4MscnLinkageSummary mscn = report.MscnLinkage;
+	Console.WriteLine("MSUR._0x18 -> MSCN linkage:");
+	Console.WriteLine($"  files with MSCN        = {mscn.FilesWithMscn}");
+	Console.WriteLine($"  fits={mscn.MsurToMscnFits} misses={mscn.MsurToMscnMisses}");
+	Console.WriteLine($"  MSCN points            = {mscn.TotalMscnPoints}");
+	Console.WriteLine($"  distinct referenced    = {mscn.DistinctMscnReferenced} ({mscn.ReferencedFraction:P2})");
+	Console.WriteLine($"  never referenced       = {mscn.MscnPointsUnreferenced}");
+	Console.WriteLine($"  MSCN/MSVT count ratio  = {mscn.MscnToMsvtRatio:F3}");
+	Console.WriteLine();
+
+	Console.WriteLine("Notes:");
+	foreach (string note in report.Notes)
+		Console.WriteLine($"  - {note}");
+}
+
+static void PrintPm4FaceOrientation(Pm4FaceOrientationSummary orientation)
+{
+	Console.WriteLine($"{orientation.Name} orientation:");
+	Console.WriteLine($"  faces measured          = {orientation.FacesMeasured}");
+	Console.WriteLine($"  dominant axis counts    = X:{orientation.DominantX} Y:{orientation.DominantY} Z:{orientation.DominantZ}");
+	Console.WriteLine($"  mean |normal|           = X:{orientation.MeanAbsNormalX:F3} Y:{orientation.MeanAbsNormalY:F3} Z:{orientation.MeanAbsNormalZ:F3}");
+	Console.WriteLine($"  near axis-aligned       = {orientation.NearAxisAligned}");
+	Console.WriteLine($"  perp. to reference axis = {orientation.NearPerpendicularToDominantAxis}");
+	Console.WriteLine();
+}
+
+static void PrintPm4WindowTopology(string title, Pm4WindowTopologyEvidence topology)
+{
+	Console.WriteLine($"{title}:");
+	Console.WriteLine($"  windows measured        = {topology.WindowsMeasured}");
+	Console.WriteLine($"  closed (first==last)    = {topology.ClosedWindows}");
+	Console.WriteLine($"  length multiple of 3    = {topology.MultipleOfThreeWindows}");
+	Console.WriteLine($"  duplicate vertices      = {topology.WindowsWithDuplicateVertices}");
+	Console.WriteLine($"  collinear windows       = {topology.CollinearWindows}");
+	Console.WriteLine($"  coplanar windows        = {topology.CoplanarWindows}");
+	Console.WriteLine($"  triples tested          = {topology.TriplesTested}");
+	Console.WriteLine($"  degenerate triples      = {topology.DegenerateTriples} ({topology.DegenerateTripleFraction:P2})");
+	Console.WriteLine();
 }
 
 static void PrintPm4UnknownsReport(Pm4UnknownsReport report)
