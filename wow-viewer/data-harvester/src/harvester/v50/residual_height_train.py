@@ -22,6 +22,13 @@ from pathlib import Path
 import numpy as np
 
 from harvester.v50.contracts import release_identity, require_store_release, validate_release
+from harvester.v50.regime_metrics import (
+    dead_regimes,
+    format_regime_line,
+    mean_regime_improvement,
+    per_regime_baselines,
+    regime_improvements,
+)
 from harvester.v50.residual_height_model import (
     TARGET_CONTRACT_VERSION,
     ResidualHeightNet,
@@ -326,9 +333,16 @@ def main() -> int:
             target, _, _ = encode_relative_height(np.asarray(group["height_257"][row]))
             return torch.from_numpy(residual)[None], torch.from_numpy(target)
 
-    baseline_mae = compute_tile_mean_baseline(
-        [encode_relative_height(np.asarray(group["height_257"][r]))[0] for r in val_rows]
+    val_targets = {r: encode_relative_height(np.asarray(group["height_257"][r]))[0] for r in val_rows}
+    baseline_mae = compute_tile_mean_baseline(list(val_targets.values()))
+    # Each regime scored against ITS OWN baseline; a pooled baseline next to per-regime errors
+    # invites the wrong reading (steep's MAE once coincidentally equalled the pooled baseline).
+    regime_baseline = per_regime_baselines(
+        val_rows,
+        _regime,
+        lambda r: float(np.abs(val_targets[r] - val_targets[r].mean()).mean()),
     )
+    print(f"per-regime baselines: {regime_baseline}", flush=True)
 
     device = torch.device("cuda")
     model = model.to(device)
@@ -368,6 +382,8 @@ def main() -> int:
 
     per_epoch: list[dict] = []
     best = float("inf")
+    best_score = float("-inf")
+    best_epoch = 0
     stale = 0
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -396,25 +412,34 @@ def main() -> int:
         for row, mae in zip(val_rows, per_sample_mae):
             by_regime.setdefault(_regime(row), []).append(mae)
         regime_mae = {k: float(np.mean(v)) for k, v in sorted(by_regime.items())}
+        # Pooled MAE lets a genuinely improving regime register as "stale" and burn patience.
+        # Mean relative improvement across regimes is scale-free and gives each regime equal say.
+        score = (
+            mean_regime_improvement(regime_mae, regime_baseline)
+            if regime_baseline else -val_mae
+        )
         train_loss = float(np.mean(train_losses))
         per_epoch.append({"epoch": epoch, "train_loss": train_loss, "val_mae": val_mae,
-                          "val_mae_by_regime": regime_mae})
+                          "val_mae_by_regime": regime_mae,
+                          "improvement_by_regime": regime_improvements(regime_mae, regime_baseline),
+                          "selection_score": score})
         checkpoint = {**run_identity, "model": model.state_dict(), "epoch": epoch, "val_mae": val_mae,
-                      "curriculum_identity": identity}
+                      "selection_score": score, "curriculum_identity": identity}
         torch.save(checkpoint, args.output / "checkpoint_last.pt")
-        if val_mae < best:
+        if score > best_score:
+            best_score = score
             best = val_mae
+            best_epoch = epoch
             stale = 0
             torch.save(checkpoint, args.output / "checkpoint_best.pt")
         else:
             stale += 1
-        regime_text = " ".join(f"{k}={v:.6f}" for k, v in regime_mae.items())
         print(
             f"[epoch {epoch:03d}] train_loss={train_loss:.6f} val_mae={val_mae:.6f} "
-            f"baseline={baseline_mae:.6f} best={best:.6f} stale={stale}/{args.patience} "
-            f"| by_regime {regime_text}",
+            f"score={score:+.4f} best={best_score:+.4f}@{best_epoch} stale={stale}/{args.patience}",
             flush=True,
         )
+        print(f"            {format_regime_line(regime_mae, regime_baseline)}", flush=True)
         if args.patience > 0 and stale >= args.patience:
             print(f"[early-stop] no improvement for {stale} epochs", flush=True)
             break
@@ -428,9 +453,19 @@ def main() -> int:
     summary["regimes_selected"] = sorted(selected_regimes) if selected_regimes else "all"
     summary["train_rows_by_regime"] = _count_regimes(train_rows, _regime)
     summary["val_rows_by_regime"] = _count_regimes(val_rows, _regime)
-    best_entry = min(per_epoch, key=lambda e: e["val_mae"]) if per_epoch else {}
-    summary["best_val_mae_by_regime"] = best_entry.get("val_mae_by_regime", {})
+    summary["regime_baseline"] = regime_baseline
+    selected = max(per_epoch, key=lambda e: e["selection_score"]) if per_epoch else {}
+    summary["selection_metric"] = "mean_regime_improvement" if regime_baseline else "pooled_val_mae"
+    summary["selected_epoch"] = selected.get("epoch", 0)
+    summary["selected_score"] = selected.get("selection_score")
+    summary["best_val_mae_by_regime"] = selected.get("val_mae_by_regime", {})
+    summary["best_improvement_by_regime"] = selected.get("improvement_by_regime", {})
+    stalled = dead_regimes(selected.get("val_mae_by_regime", {}), regime_baseline)
+    summary["regimes_at_baseline"] = stalled
+    summary["all_regimes_beat_baseline"] = not stalled
     (args.output / "training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    if stalled:
+        print(f"PARTIAL: regimes still at their own baseline: {stalled}", flush=True)
     if summary["structural_failure_epoch1_best"]:
         print("STRUCTURAL FAILURE: best epoch is epoch 1; this run is not a success.", flush=True)
         return 1
