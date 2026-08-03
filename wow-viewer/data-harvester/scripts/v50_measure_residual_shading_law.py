@@ -185,6 +185,14 @@ def main() -> int:
     ap.add_argument("--store", type=Path, help="v50 store with normal_xyz and height_257")
     ap.add_argument("--map")
     ap.add_argument("--limit", type=int, default=64, help="tiles to pool (sweep cost scales with this)")
+    ap.add_argument(
+        "--min-valid-fraction",
+        type=float,
+        default=0.10,
+        help="skip a tile when fewer than this fraction of its normals are valid. MCNR is a "
+             "checkerboard so ~0.5 is the expected healthy value; the default only rejects tiles "
+             "that are genuinely empty",
+    )
     ap.add_argument("--output", type=Path, help="optional JSON report path")
     args = ap.parse_args()
 
@@ -201,36 +209,62 @@ def main() -> int:
     for i, row in enumerate(pq.read_table(args.store / "index.parquet").to_pylist()):
         lookup.setdefault((str(row.get("map", "")), int(row.get("tile_x", -1)), int(row.get("tile_y", -1))), i)
 
+    has_mcnr_mask = "mcnr_mask_257" in group
+
     residual_parts: list[np.ndarray] = []
     mcnr_parts: list[np.ndarray] = []
     gradient_parts: list[np.ndarray] = []
+    valid_fractions: list[float] = []
+    skipped = {"unparsed_name": 0, "no_store_row": 0, "too_few_valid_normals": 0}
     for path in sorted(args.residual_dir.glob("*_residual.png")):
         if len(residual_parts) >= args.limit:
             break
         m = RESIDUAL_RE.match(path.name)
         if not m:
+            skipped["unparsed_name"] += 1
             continue
         row = lookup.get((args.map, int(m.group("tx")), int(m.group("ty"))))
         if row is None:
+            skipped["no_store_row"] += 1
             continue
         residual = _load_residual(path)
         normals = np.asarray(group["normal_xyz"][row], dtype=np.float64)[:256, :256]
-        norms = np.linalg.norm(normals, axis=-1, keepdims=True)
-        if not np.all(norms > 1e-6):
+        norms = np.linalg.norm(normals, axis=-1)
+
+        # MCNR stores 145 normals per chunk on two interleaved sublattices (the 9x9 outer and 8x8
+        # inner grids), so expanding to the 257 grid leaves a CHECKERBOARD: about half the entries
+        # have no normal and sit at zero length. That is the format, not missing data -- height_257
+        # is dense because it is filled, normal_xyz is not.
+        #
+        # Validity must therefore be per-pixel. An all-or-nothing `np.all(norms > 0)` check rejects
+        # every single tile in the corpus, which is how this script first reported "0 tiles matched".
+        valid = norms > 1e-6
+        if has_mcnr_mask:
+            valid &= np.asarray(group["mcnr_mask_257"][row])[:256, :256].astype(bool)
+        if valid.mean() < args.min_valid_fraction:
+            skipped["too_few_valid_normals"] += 1
             continue
-        residual_parts.append(residual.ravel())
-        mcnr_parts.append((normals / norms).reshape(-1, 3))
+
+        residual_parts.append(residual[valid])
+        mcnr_parts.append(normals[valid] / norms[valid][:, None])
         gradient_parts.append(
-            _normals_from_height(np.asarray(group["height_257"][row], dtype=np.float64))[:256, :256].reshape(-1, 3)
+            _normals_from_height(np.asarray(group["height_257"][row], dtype=np.float64))[:256, :256][valid]
         )
+        valid_fractions.append(float(valid.mean()))
 
     if len(residual_parts) < 8:
-        raise SystemExit(f"only {len(residual_parts)} tiles matched; need >= 8")
+        raise SystemExit(
+            f"only {len(residual_parts)} tiles matched; need >= 8. skipped={skipped}"
+        )
 
     residual = np.concatenate(residual_parts)
     report = {
         "tiles": len(residual_parts),
         "pixels": int(residual.size),
+        "mean_valid_normal_fraction": float(np.mean(valid_fractions)),
+        "skipped": skipped,
+        "note": "normal_xyz is a checkerboard (MCNR outer 9x9 + inner 8x8 lattices); "
+                "correlation is computed on valid normals only",
         "mcnr_normals": _sweep(np.concatenate(mcnr_parts), residual),
         "gradient_normals_world_units": _sweep(np.concatenate(gradient_parts), residual),
     }
