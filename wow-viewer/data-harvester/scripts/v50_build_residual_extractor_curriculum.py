@@ -35,6 +35,11 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from harvester.v50.contracts import release_identity  # noqa: E402
+from harvester.v50.dxt1_approx import (  # noqa: E402
+    block_edge_ratio,
+    dxt1_round_trip,
+    unique_colour_count,
+)
 
 CURRICULUM_SCHEMA = "v125-residual-extractor-curriculum-v1"
 RESIDUAL_RE = re.compile(r"^(?P<map>.+?)_(?P<tx>\d{2})_(?P<ty>\d{2})_residual\.png$")
@@ -139,8 +144,37 @@ def main() -> int:
     # zarr v3: create_array(name, data=...) infers shape/dtype; create_dataset requires an explicit shape.
     minimap_stack = np.stack(minimaps).astype(np.float32)
     residual_stack = np.stack(residuals).astype(np.float32)
+
+    # Deployment reads AUTHORED minimaps, which are DXT1. Our synthesizer emits pristine 24-bit RGB,
+    # so training on it alone leaves a codec domain gap the loss never sees. Store the degraded input
+    # alongside the pristine one — both stay queryable, neither is dropped — and let the trainer pick.
+    # The TARGET stays pristine on purpose: the model should read a codec-damaged minimap and predict
+    # the clean underlying residual.
+    degraded_stack = np.stack(
+        [dxt1_round_trip(np.clip(tile, 0, 255).astype(np.uint8)) for tile in minimap_stack]
+    ).astype(np.float32)
+
     group.create_array("minimap_rgb", data=minimap_stack, chunks=(1, *minimap_stack.shape[1:]))
+    group.create_array("minimap_rgb_dxt1", data=degraded_stack, chunks=(1, *degraded_stack.shape[1:]))
     group.create_array("residual_256", data=residual_stack, chunks=(1, *residual_stack.shape[1:]))
+
+    # Record what the degradation actually did, so a bad codec wiring is visible in the summary
+    # rather than silently training a model on the wrong domain. Authored 0.5.3 reference:
+    # 1196-5269 unique colours per tile, ~3200 median.
+    sample = min(8, len(degraded_stack))
+    codec_stats = {
+        "transform": "dxt1_round_trip",
+        "parity": "bit-exact with WowViewer.Core.IO.Blp.Dxt1TileCodec",
+        "authored_reference_unique_colours": [1196, 5269],
+        "pristine_unique_colours_median": float(np.median(
+            [unique_colour_count(minimap_stack[i].astype(np.uint8)) for i in range(sample)])),
+        "degraded_unique_colours_median": float(np.median(
+            [unique_colour_count(degraded_stack[i].astype(np.uint8)) for i in range(sample)])),
+        "pristine_block_edge_ratio_median": float(np.median(
+            [block_edge_ratio(minimap_stack[i]) for i in range(sample)])),
+        "degraded_block_edge_ratio_median": float(np.median(
+            [block_edge_ratio(degraded_stack[i]) for i in range(sample)])),
+    }
 
     table = pa.table(
         {
@@ -163,6 +197,8 @@ def main() -> int:
         "minimap_store": str(args.minimap_store),
         "residual_pngs_seen": len(residual_paths),
         "skipped": skipped,
+        "deployment_domain_input": "minimap_rgb_dxt1",
+        "codec_degradation": codec_stats,
     }
     (args.output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2), flush=True)

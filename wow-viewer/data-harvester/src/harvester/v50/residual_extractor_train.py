@@ -31,6 +31,9 @@ from harvester.v50.residual_extractor_model import (
 ALLOWED_MAPS = frozenset({"Kalimdor", "Azeroth"})
 CURRICULUM_SCHEMA = "v125-residual-extractor-curriculum-v1"
 REQUIRED_ARRAYS = frozenset({"minimap_rgb", "residual_256"})
+# Deployment reads authored DXT1 tiles, so the default training input is the codec-degraded variant.
+# Training on the pristine render instead leaves a domain gap the loss never sees.
+DEFAULT_INPUT_ARRAY = "minimap_rgb_dxt1"
 REQUIRED_INDEX_FIELDS = frozenset({"map", "source_group_id", "split"})
 ARCHITECTURE_ID = "residual_extractor_v125"
 
@@ -100,6 +103,7 @@ def build_training_plan(
     epochs: int,
     parameter_count: int,
     seed: int,
+    input_array: str = DEFAULT_INPUT_ARRAY,
 ) -> dict:
     """Build the machine-readable no-training preview printed before CUDA allocation."""
     if batch_size < 1 or epochs < 1:
@@ -125,7 +129,7 @@ def build_training_plan(
         "epochs": epochs,
         "seed": seed,
         "train_steps_per_epoch": math.ceil(split_counts["train"] / batch_size),
-        "deployment_inputs": ["minimap_rgb"],
+        "deployment_inputs": [input_array],
         "training_target": "residual_256",
     }
 
@@ -195,6 +199,15 @@ def main() -> int:
     ap.add_argument("--store", required=True, type=Path, help="paired minimap_rgb + residual_256 store")
     ap.add_argument("--output", required=True, type=Path)
     ap.add_argument(
+        "--input-array",
+        default=DEFAULT_INPUT_ARRAY,
+        help=(
+            "which minimap array to train on. Default is the DXT1-degraded variant, matching the "
+            "authored tiles the model is deployed on; pass minimap_rgb to ablate against the "
+            "pristine render."
+        ),
+    )
+    ap.add_argument(
         "--confirm-run",
         action="store_true",
         help="launch CUDA training; without this flag only print the validated plan",
@@ -241,6 +254,20 @@ def main() -> int:
             f"insufficient rows: train={len(train_rows)} val={len(val_rows)}"
         )
 
+    if args.input_array not in group:
+        raise SystemExit(
+            f"store has no {args.input_array!r} array. Stores built before the DXT1 dataset layer "
+            f"carry only 'minimap_rgb'; rebuild the curriculum, or pass --input-array minimap_rgb "
+            f"to deliberately train on the pristine render. Available: {sorted(group.array_keys())}"
+        )
+    if args.input_array != DEFAULT_INPUT_ARRAY:
+        print(
+            f"WARNING: training on {args.input_array!r}, not the DXT1-degraded "
+            f"{DEFAULT_INPUT_ARRAY!r}. Authored tiles are DXT1, so this run carries a codec domain "
+            f"gap at deployment.",
+            flush=True,
+        )
+
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     target_shape = tuple(int(d) for d in group["residual_256"].shape[1:])
@@ -256,6 +283,7 @@ def main() -> int:
         epochs=args.epochs,
         parameter_count=sum(parameter.numel() for parameter in model.parameters()),
         seed=args.seed,
+        input_array=args.input_array,
     )
     print(json.dumps(plan, indent=2), flush=True)
     if not args.confirm_run:
@@ -280,7 +308,7 @@ def main() -> int:
 
         def __getitem__(self, i: int):
             row = self.rows[i]
-            rgb = np.asarray(group["minimap_rgb"][row], dtype=np.float32) / 255.0
+            rgb = np.asarray(group[args.input_array][row], dtype=np.float32) / 255.0
             residual = np.asarray(group["residual_256"][row], dtype=np.float32) / 255.0
             if residual.ndim == 3:
                 residual = residual[..., 0]
@@ -310,6 +338,8 @@ def main() -> int:
     run_identity = {
         **release_identity(args.release),
         "model_variant": ARCHITECTURE_ID,
+        "input_array": args.input_array,
+        "trained_on_codec_degraded_input": args.input_array == DEFAULT_INPUT_ARRAY,
         "parameter_count": plan["parameter_count"],
         "target_contract_version": TARGET_CONTRACT_VERSION,
         "store": str(args.store.resolve()),
