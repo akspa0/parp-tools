@@ -309,3 +309,45 @@ It predicts things that are checkable with what is already built:
 
 Status: hypothesis recorded, nothing built. Next concrete step is the offset-cluster histogram and
 the shadow-proof known-answer case, both runnable against the existing corpus.
+
+### Direction of displacement — user's visual reading (2026-08-03, second pass)
+
+The user has eyes on this data and reports specific, directional structure. These are observations
+to test, not yet measurements, but they are far more constrained than "things moved":
+
+- **Weak-signal terrain predates the tiles two rows below it, and was shifted UP.** So displacement
+  is not random scatter: at least one family of pieces moved by a **whole number of rows in +row**,
+  and the pre-image is still present two rows away.
+- **Some border tiles belong to the TOP of the map, not the sides.** A tile sitting on a side border
+  whose content reads as top-of-map content means pieces were relocated **across edges**, not merely
+  nudged.
+- **It happened many times, not once.** Tiles were added to the quilt repeatedly, so there is no
+  single global offset to solve for — expect a **small set of discrete displacement events**, each
+  with its own offset, layered over each other.
+- **Earlier overhead shots show implied terrain that is missing later** — and it *sorta matches*
+  weak-signal tiles found on the **opposite border edge** in the data we hold. That is the
+  strongest single lead: an external, dated reference image constrains both the content and the
+  direction of travel.
+
+### What this changes about how to search
+
+The naive formulation — "score every tile pair for edge agreement" — is O(n^2) over ~1817 tiles and
+mostly wasted. The observations above turn it into a much smaller search:
+
+1. **Solve for offsets, not pairs.** For a candidate displacement (drow, dcol), score the whole
+   corpus at once by testing whether weak tiles at (r, c) agree with terrain at (r+drow, c+dcol).
+   A real resize event shows up as a **spike** at its offset. This is a vote over a small integer
+   grid, not a pairwise search.
+2. **Expect several spikes, not one** — one per resize event. Rank them and peel them off in order.
+3. **Row shifts are the first thing to try**, because the user has already seen a two-row
+   relationship. Pure-row offsets are a tiny search space and can be run immediately.
+4. **Allow cross-edge relocation.** A side-border tile matching top-of-map content means candidate
+   offsets must include large jumps and wraps, not just small neighbourhoods.
+5. **The overhead shots are ground truth for direction.** Terrain visible in an early shot and
+   absent later, matched to a weak tile on the opposite edge, gives a known-answer pair with an
+   external date attached — a second detector-power gate alongside the shadow-proof instance.
+
+Restated as the standing hazard: a matcher that finds a spike must still be shown to recover the
+shadow-proof pair and the overhead-shot pair. Brush reuse will manufacture agreement between tiles
+that were never adjacent, so a spike supported only by pattern similarity and not by edge continuity
+is not evidence of displacement.
