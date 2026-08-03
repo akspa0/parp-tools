@@ -351,3 +351,124 @@ Restated as the standing hazard: a matcher that finds a spike must still be show
 shadow-proof pair and the overhead-shot pair. Brush reuse will manufacture agreement between tiles
 that were never adjacent, so a spike supported only by pattern similarity and not by edge continuity
 is not evidence of displacement.
+
+### The tile SIZE changed — sub-tile fragments, not displaced whole tiles (user, 2026-08-03, third pass)
+
+This supersedes the "displaced whole tiles" framing above. Keep that text: the row/column offset
+search is still valid, but it is now a special case of a larger transform.
+
+**The claim.** The tile size itself changed at some point — **doubled or quadrupled**. The evidence
+is **multiple half-tiles present on a single tile** in the weak-signal data. So a modern tile can
+contain several fragments of *older, smaller* tiles, at sub-tile granularity. Fragments do not
+correspond one-to-one with tiles at all.
+
+**The proposed mechanism.** When the engine moved from **worlds** to **maps**, maps were shrunk into
+smaller containers and the "world" concept was left to the server. The server tracks layers of all
+maps at once across multiple servers — a scaled-up bookkeeping method — so the client-side container
+could be re-cut without the server-side world model changing. A re-cut of the client container is
+exactly what would strand sub-tile fragments.
+
+**Corroboration already in this repo.** The origin-era notes above record that **shipped ADT
+resolution is plausibly 1/4 or 1/16 of the internal authoring resolution**, estimated independently
+from the undistilled PM4s. `1/4` and `1/16` are the linear and areal ratios of a **2x2 tile merge**.
+Two unrelated observations landing on the same ratio is worth taking seriously — though note it is
+corroboration, not proof, and the resolution estimate was itself an estimate.
+
+### Why this is the best next test: it needs no matching
+
+Every search discussed so far — offset voting, edge agreement, jigsaw fitting — has to fight the
+brush-reuse confound, because it reasons about *similarity between* tiles. The scale hypothesis does
+not. It makes a prediction about the **internal structure of a single tile**, which can be measured
+with no pairing at all:
+
+> If modern tiles are 2x2 merges of older, smaller tiles, then the **old tile boundaries are still
+> inside the modern tile** — and old boundaries were once real edges, where terrain was authored
+> independently on each side.
+
+An ADT is 16x16 MCNK chunks. A 2x2 merge puts the seams at **MCNK row 8 and column 8**. A 4x4 merge
+puts them at **4, 8 and 12**. So:
+
+1. For each tile, measure discontinuity across every one of the 15 internal MCNK boundaries — height
+   step, normal disagreement, and texture-layer change across the boundary.
+2. Build the **mean discontinuity as a function of boundary index, 1..15**.
+3. **Read the shape.** A tile authored as one piece has no reason to prefer any index; the profile
+   should be flat. A 2x2 merge spikes at 8. A 4x4 merge spikes at 4, 8 and 12.
+
+This is a single histogram over data already on disk. It is cheap, it is falsifiable, and a flat
+profile kills the hypothesis outright.
+
+**Run it on both populations and compare.** Weak tiles versus normal tiles is the controlled
+comparison: if only weak tiles spike at 8, the merge is specific to the stranded material; if both
+spike, the whole map was re-cut and this is a global fact about the format's history.
+
+### What it changes about the jigsaw search, if the seam test passes
+
+- The unit of reassembly becomes the **sub-tile quadrant**, not the tile. Candidate offsets are in
+  half-tile (or quarter-tile) steps, and the search space grows accordingly — but it is still a
+  vote over a small grid, not a pairwise scan.
+- A **scale factor enters the match**: an old fragment may need resampling before its edge can be
+  compared against modern terrain, and resampling changes height quantisation. Any similarity
+  threshold has to be tolerant of that or it will reject true matches.
+- `surviving_height_levels` gating must be applied **per fragment**, not per tile. A tile can hold
+  one rich quadrant and three dead ones, and a per-tile gate would throw away the rich one or admit
+  the dead ones.
+- Ordering matters: **run the seam test first.** It costs one histogram and it determines whether
+  the reassembly unit is the tile or the quadrant. Building a tile-level matcher before knowing that
+  risks building the wrong tool.
+
+### Solving the original world size from the 11-minute traversal (user + arithmetic, 2026-08-03)
+
+The user supplied a quantitative constraint from The WoW Diary: **north-to-south on foot took only
+11 minutes**, alongside the claim that a "world" may have been **128x128 tiles or more**, later
+split into multiple maps because that suited the level of detail and map size they wanted, and then
+scaled up again — suspected **November 2001**.
+
+Those two facts together are solvable. Modern ADT = 533.333 yd; MCNK = ADT/16 = 33.333 yd.
+
+| assumption | implied N-S extent | in modern ADTs | in MCNK cells |
+|---|---|---|---|
+| walk, 4.5 yd/s | 2,970 yd | 5.6 | 89 |
+| run, 7.0 yd/s | 4,620 yd | 8.7 | 139 |
+
+Inverting instead — if a world really was **128x128 cells**, the cell size must have been:
+
+- at walk speed: **23.2 yd/cell**
+- at run speed: **36.1 yd/cell** — within 8% of **MCNK (33.33 yd)**
+
+**The fit.** A world of **128 x 128 MCNK-sized cells** is 4,267 yd across, which is **exactly 8
+modern ADTs**, and traverses in **10.2 minutes at run speed** against a reported 11. Three
+independent quantities — the book's duration, the user's 128 figure, and the format's own MCNK
+size — agree to within about 8%.
+
+Under that reading the modern 64x64 ADT map is **8x larger linearly and 64x larger in area** than
+the original world, which is the "they scaled the world up more" step.
+
+**Caveats, because the fit is attractive and that is exactly when to be careful.** The speed
+assumption dominates: walk (4.5) and run (7.0) differ by 55% and only run fits. "North to south" may
+mean a continent rather than the whole world. "11 minutes" is a recollection in a book, not a
+measurement. And 128 was offered as "128x128 or even more". This is a **credible working scale, not
+an established one** — the value is that it is now specific enough to be wrong in a detectable way.
+
+### The seam-profile histogram now discriminates between all the competing framings
+
+The test described above — mean discontinuity across each of the 15 internal MCNK boundaries of a
+tile — separates every hypothesis on the table, from one run:
+
+| profile shape | reading |
+|---|---|
+| flat and low | no merge happened; the whole re-cut hypothesis is dead |
+| single spike at **8** | modern tiles are **2x2** merges of half-size predecessors |
+| spikes at **4, 8, 12** | modern tiles are **4x4** merges |
+| **elevated at all 15** | original cells were **MCNK-sized** — the 128x128 world reading |
+
+That last row is why this experiment got better rather than more complicated: the 128x128 framing
+and the half-tile framing make *different* predictions about the same histogram, so the measurement
+chooses between them instead of needing to be redesigned per hypothesis.
+
+Run it on weak tiles and normal tiles separately. If only weak tiles show structure, the re-cut is
+specific to the stranded material; if both do, it is a global fact about the format's history.
+
+**Implementation note**: `LkAdtReader.Read` returns per-chunk `McvtData`, which is all the test
+needs. Prefer a **gradient** (C1) discontinuity measure over a plain height step: a stitched seam
+matches heights across the boundary but still leaves a crease in the slope, so a C0 test would
+report a false negative on exactly the case of interest.
