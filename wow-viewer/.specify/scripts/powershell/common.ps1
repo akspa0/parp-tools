@@ -106,22 +106,28 @@ function Get-CurrentBranch {
 
 # Check if we have git available at the spec-kit root level
 # Returns true only if git is installed and the repo root is inside a git work tree
-# Handles both regular repos (.git directory) and worktrees/submodules (.git file)
+# Handles regular repos, worktrees/submodules (.git file), AND the case where the
+# spec-kit root is a subdirectory of the git repository.
 function Test-HasGit {
     # First check if git command is available (before calling Get-RepoRoot which may use git)
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         return $false
     }
     $repoRoot = Get-RepoRoot
-    # Check if .git exists (directory or file for worktrees/submodules)
-    # Use -LiteralPath to handle paths with wildcard characters
-    if (-not (Test-Path -LiteralPath (Join-Path $repoRoot ".git"))) {
+    if (-not $repoRoot -or -not (Test-Path -LiteralPath $repoRoot -PathType Container)) {
         return $false
     }
-    # Verify it's actually a valid git work tree
+    # Do NOT require .git to sit at $repoRoot. Get-RepoRoot deliberately prefers the .specify
+    # root over the git root so that spec-kit can be initialized in a SUBDIRECTORY of a larger
+    # repository -- which means .git usually lives in an ancestor, not at $repoRoot. Testing for
+    # .git here produced a false negative in exactly the layout Get-RepoRoot exists to support,
+    # which silently disabled branch detection and fell back to "highest-numbered specs dir".
+    # Asking git directly covers subdirectories, worktrees, and submodules in one check.
     try {
-        $null = git -C $repoRoot rev-parse --is-inside-work-tree 2>$null
-        return ($LASTEXITCODE -eq 0)
+        $inside = git -C $repoRoot rev-parse --is-inside-work-tree 2>$null
+        # Check the answer, not just the exit code: inside a bare repo or a .git directory this
+        # command exits 0 while reporting false.
+        return ($LASTEXITCODE -eq 0 -and "$inside".Trim() -eq 'true')
     } catch {
         return $false
     }
@@ -310,6 +316,23 @@ function Get-FeaturePathsEnv {
             # Normalize relative paths to absolute under repo root
             if (-not [System.IO.Path]::IsPathRooted($featureDir)) {
                 $featureDir = Join-Path $repoRoot $featureDir
+            }
+
+            # feature.json is a pin, and pins go stale. When git is available and the CURRENT
+            # BRANCH names a feature directory that actually exists, the branch is the stronger
+            # signal -- that is the whole premise of the branch-per-feature workflow. Preferring a
+            # stale pin here silently routed work to the wrong feature (and, combined with
+            # setup-plan's unconditional template write, destroyed a completed plan).
+            if ($hasGit) {
+                $branchDir = Find-FeatureDirByPrefix -RepoRoot $repoRoot -Branch $currentBranch
+                if ($branchDir -and (Test-Path -LiteralPath $branchDir -PathType Container)) {
+                    $pinnedName = Split-Path $featureDir -Leaf
+                    $branchName = Split-Path $branchDir -Leaf
+                    if ($pinnedName -ne $branchName) {
+                        Write-Warning "[specify] .specify/feature.json pins '$pinnedName' but branch '$currentBranch' resolves to '$branchName'. Using the branch. Update or delete feature.json to silence this."
+                        $featureDir = $branchDir
+                    }
+                }
             }
         } else {
             $featureDir = Get-FeatureDirFromBranchPrefixOrExit -RepoRoot $repoRoot -CurrentBranch $currentBranch

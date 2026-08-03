@@ -359,6 +359,23 @@ if (-not $DryRun) {
         }
     }
 
+    # Keep .specify/feature.json pointing at the feature we just created.
+    # Get-FeaturePathsEnv reads this pin ahead of branch lookup, so a pin left over from an
+    # earlier feature silently routes every later command to the wrong directory. This script
+    # is the only place a new feature is created, so it is the place responsible for the pin.
+    $specifyDir = Join-Path $repoRoot '.specify'
+    if (Test-Path -LiteralPath $specifyDir -PathType Container) {
+        $featureJsonPath = Join-Path $specifyDir 'feature.json'
+        $relativeFeatureDir = "specs/$branchName"
+        try {
+            $featureJsonObj = [PSCustomObject]@{ feature_directory = $relativeFeatureDir }
+            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($featureJsonPath, (($featureJsonObj | ConvertTo-Json) + "`n"), $utf8NoBom)
+        } catch {
+            Write-Warning "[specify] Could not update .specify/feature.json: $_"
+        }
+    }
+
     # Set the SPECIFY_FEATURE environment variable for the current session
     $env:SPECIFY_FEATURE = $branchName
 }
