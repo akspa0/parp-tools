@@ -131,6 +131,8 @@ public sealed record Pm4TileBoundsRecord(
     double OutsideFraction,
     float MinX,
     float MaxX,
+    float MinY,
+    float MaxY,
     float MinZ,
     float MaxZ,
     float SpillNegX,

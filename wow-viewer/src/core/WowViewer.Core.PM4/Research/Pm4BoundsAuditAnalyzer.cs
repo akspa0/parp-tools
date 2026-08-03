@@ -47,6 +47,7 @@ public static class Pm4BoundsAuditAnalyzer
             filesWithGeometry++;
 
             float minX = float.MaxValue, maxX = float.MinValue;
+            float minY = float.MaxValue, maxY = float.MinValue;
             float minZ = float.MaxValue, maxZ = float.MinValue;
             int outside = 0;
 
@@ -54,6 +55,8 @@ public static class Pm4BoundsAuditAnalyzer
             {
                 minX = Math.Min(minX, vertex.X);
                 maxX = Math.Max(maxX, vertex.X);
+                minY = Math.Min(minY, vertex.Y);
+                maxY = Math.Max(maxY, vertex.Y);
                 minZ = Math.Min(minZ, vertex.Z);
                 maxZ = Math.Max(maxZ, vertex.Z);
 
@@ -88,7 +91,7 @@ public static class Pm4BoundsAuditAnalyzer
                 vertices.Count,
                 outside,
                 vertices.Count == 0 ? 0d : (double)outside / vertices.Count,
-                minX, maxX, minZ, maxZ,
+                minX, maxX, minY, maxY, minZ, maxZ,
                 spillNegX, spillPosX, spillNegZ, spillPosZ));
         }
 

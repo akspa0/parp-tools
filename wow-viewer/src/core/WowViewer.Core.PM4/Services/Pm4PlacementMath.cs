@@ -621,6 +621,26 @@ public static class Pm4PlacementMath
                 break;
             case Pm4AxisConvention.XYPlaneZUp:
             default:
+                // KNOWN WRONG, left in place deliberately — see the note below.
+                //
+                // Measured with `pm4 bounds-audit` over all 309 non-empty development files:
+                // MSVT.X lies inside the world band of the SECOND filename number 309/309 times,
+                // MSVT.Y inside the band of the FIRST 309/309, each spanning exactly one tile
+                // (533.33), and Z is height. MSVT is therefore ALREADY absolute world on both
+                // horizontal axes. development_22_18 is the clearest single case: X 9600.0..10133.3
+                // is exactly column 18 and Y 11733.3..12266.7 is exactly row 22, over 126,596
+                // vertices.
+                //
+                // Mapping U from Y and V from X transposes the scene about the map diagonal, so
+                // content belonging to tile (x, y) renders at (y, x). Only development_00_00 is
+                // immune, because there both indices are 0 and world equals local — which is why
+                // that one tile has always looked correct while everything else piles up near it.
+                //
+                // The one-line correction is `localU = pm4Vertex.X; localV = pm4Vertex.Y;`. It is
+                // NOT applied yet because it breaks seven Pm4ResearchIntegrationTests.PlacementMath_*
+                // tests that pin this convention, and those need to be read and either corrected or
+                // shown to encode real intent before the change lands. It also needs visual
+                // confirmation in the viewer against ADT terrain.
                 localU = pm4Vertex.Y;
                 localV = pm4Vertex.X;
                 localUp = pm4Vertex.Z;
