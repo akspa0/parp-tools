@@ -74,3 +74,39 @@ Also: `pm4 inspect` and `pm4 audit` accept `--output` and silently ignore it.
 
 - [[weak-signal-tile-archaeology]] — the terrain-side sibling, complete and parked. Same discipline:
   measure with the project's own tooling, verify detector power before trusting a null.
+
+## Coordinate frames may be REGION-scoped (user observation + hover data, 2026-08-03)
+
+After the MSVT world-coordinate finding, misplacement persists in the viewer, but not uniformly —
+and the hover overlay shows the discriminator is likely `MSHD.Field04` (exposed as `region`).
+
+Observed, via viewer hover tooltips:
+
+| object | file | region | CK24 | symptom |
+|---|---|---|---|---|
+| red props | `development_01_00.pm4` | **6** | 0x000000 | belong on the tile to the RIGHT of 0_0 |
+| yellow object | `development_00_00.pm4` | **146** | 0x41D4B1 | correct TILE, but **polar opposite** position, possibly 180 deg out |
+| M2 group | `development_00_00.pm4` | **146** | 0x000000 | polar opposite, moves WITH the yellow object |
+
+**The pattern**: the two region-146 objects are wrong *together and in the same way*, while the
+region-6 object is wrong differently. That is the signature of a per-region frame, not a single
+global transform error. The user's reading: "there are layers of data encoded that we do not decode
+properly, and they can all contain different coordinate cardinal directions."
+
+**Why this is credible.** `MSHD.Field04` is already known to be a scene/region division —
+`Pm4RegionObjectGrouper` groups by it, `Pm4MshdHeader.RegionId` names it, and `IsEmptyStubRegion`
+treats `RegionId == 1` specially. It has 227 distinct values corpus-wide and tile-coordinate packing
+was already ruled out for it. A region id that selects a coordinate frame would explain why it has
+many values, why it is not tile-derived, and why it has resisted interpretation.
+
+**The test, and it needs no new decode.** Group MSVT bounds by `MSHD.Field04` and compare each
+region's occupied range against the tile band implied by the filename. If regions fall into a small
+number of families — identity, negated, axis-swapped, 180-degree rotated — the frame is
+region-scoped and the family table is the fix. If every region behaves identically, the hypothesis
+is dead and the residual error is elsewhere.
+
+Run it per region AND per tile, because a region spans tiles: the interesting case is one region
+behaving consistently across many files.
+
+**Status**: hypothesis only. `pm4 bounds-audit` already reads every file and computes MSVT bounds,
+so adding a `--by-region` grouping is the cheapest path to testing it.
