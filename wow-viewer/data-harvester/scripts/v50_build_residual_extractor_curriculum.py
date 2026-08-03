@@ -50,16 +50,15 @@ def _load_residual_png(path: Path) -> np.ndarray:
     return arr
 
 
-def _load_minimap_rgb(store_path: Path, store: zarr.Group, map_name: str, tx: int, ty: int) -> np.ndarray | None:
+def _build_row_lookup(store_path: Path) -> dict[tuple[str, int, int], int]:
+    """Map (map, tile_x, tile_y) -> store row, read once rather than per residual tile."""
     index_path = store_path / "index.parquet"
     if not index_path.exists():
-        return None
-    table = pq.read_table(index_path)
-    rows = table.to_pylist()
-    for i, row in enumerate(rows):
-        if str(row.get("map", "")) == map_name and int(row.get("tile_x", -1)) == tx and int(row.get("tile_y", -1)) == ty:
-            return np.asarray(store["minimap_rgb"][i], dtype=np.float32)
-    return None
+        raise SystemExit(f"store has no index.parquet: {store_path}")
+    lookup: dict[tuple[str, int, int], int] = {}
+    for i, row in enumerate(pq.read_table(index_path).to_pylist()):
+        lookup.setdefault((str(row.get("map", "")), int(row.get("tile_x", -1)), int(row.get("tile_y", -1))), i)
+    return lookup
 
 
 def main() -> int:
@@ -84,21 +83,28 @@ def main() -> int:
     if not residual_paths:
         raise SystemExit(f"no *_residual.png tiles found in {args.residual_dir}")
 
+    row_lookup = _build_row_lookup(args.minimap_store)
+
     residuals: list[np.ndarray] = []
     minimaps: list[np.ndarray] = []
     index_rows: list[dict] = []
+    skipped = {"unparsed_name": 0, "no_store_row": 0, "shape_mismatch": 0}
     matched = 0
     for path in residual_paths:
         m = RESIDUAL_RE.match(path.name)
         if not m:
+            skipped["unparsed_name"] += 1
             continue
         tx, ty = int(m.group("tx")), int(m.group("ty"))
-        residual = _load_residual_png(path)
-        minimap = _load_minimap_rgb(args.minimap_store, minimap_group, args.map, tx, ty)
-        if minimap is None:
+        row = row_lookup.get((args.map, tx, ty))
+        if row is None:
+            skipped["no_store_row"] += 1
             continue
+        residual = _load_residual_png(path)
+        minimap = np.asarray(minimap_group["minimap_rgb"][row], dtype=np.float32)
         # minimap_rgb is 256x256x3; residual is 256x256. Confirm alignment.
         if minimap.shape[:2] != residual.shape:
+            skipped["shape_mismatch"] += 1
             continue
         residuals.append(residual)
         minimaps.append(minimap)
@@ -106,10 +112,15 @@ def main() -> int:
         matched += 1
 
     if matched < 40:
-        raise SystemExit(f"only {matched} residual/minimap pairs matched; need >= 40")
+        raise SystemExit(
+            f"only {matched} residual/minimap pairs matched (need >= 40) from "
+            f"{len(residual_paths)} residual PNGs; skipped={skipped}"
+        )
 
-    # Held-out split by source group: hold out the last 10% of tiles as val.
-    val_count = max(1, matched // 10)
+    # Held-out split by source group: hold out the last 10% of tiles as val, but never fewer than 8 —
+    # the trainer's gate requires train >= 32 and val >= 8, so a 10%-of-40 split would build a store
+    # that the trainer then refuses.
+    val_count = max(8, matched // 10)
     for row in index_rows[-val_count:]:
         row["split"] = "val"
 
@@ -118,11 +129,18 @@ def main() -> int:
     group.attrs["schema"] = CURRICULUM_SCHEMA
     group.attrs["map"] = args.map
     group.attrs["split_mode"] = "source_group_holdout"
-    group.attrs["release"] = args.release
-    group.attrs["release_identity"] = release_identity(args.release)
+    # model_family/release/schema must be top-level attrs: that triple is what the trainer's
+    # require_store_release gate reads (a nested release_identity dict is invisible to it).
+    identity = release_identity(args.release)
+    group.attrs["model_family"] = identity["model_family"]
+    group.attrs["release"] = identity["release"]
+    group.attrs["release_identity"] = identity
 
-    group.create_dataset("minimap_rgb", data=np.stack(minimaps), chunks=(1, 256, 256, 3), dtype="f4")
-    group.create_dataset("residual_256", data=np.stack(residuals), chunks=(1, 256, 256), dtype="f4")
+    # zarr v3: create_array(name, data=...) infers shape/dtype; create_dataset requires an explicit shape.
+    minimap_stack = np.stack(minimaps).astype(np.float32)
+    residual_stack = np.stack(residuals).astype(np.float32)
+    group.create_array("minimap_rgb", data=minimap_stack, chunks=(1, *minimap_stack.shape[1:]))
+    group.create_array("residual_256", data=residual_stack, chunks=(1, *residual_stack.shape[1:]))
 
     table = pa.table(
         {
@@ -143,6 +161,8 @@ def main() -> int:
         "val": sum(1 for r in index_rows if r["split"] == "val"),
         "residual_dir": str(args.residual_dir),
         "minimap_store": str(args.minimap_store),
+        "residual_pngs_seen": len(residual_paths),
+        "skipped": skipped,
     }
     (args.output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2), flush=True)

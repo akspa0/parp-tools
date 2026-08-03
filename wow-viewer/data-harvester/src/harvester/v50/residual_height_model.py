@@ -23,7 +23,11 @@ TARGET_CONTRACT_VERSION = "v125.1"
 # Denominator floor in world units, matching the Spec 112 relative-height contract.
 RANGE_FLOOR = 1.0
 
-HEIGHT_GRID = 257  # height_257 world grid; the model upsamples its final feature map to this
+HEIGHT_GRID = 257  # the ADT world height grid
+# The residual curriculum crops height_257 down to the residual's 256 grid (the 257th row/col is the
+# shared tile-edge vertex), so the stored supervision target — and the model's output — is 256x256.
+# Construct with ``grid=HEIGHT_GRID`` to predict the uncropped world grid instead.
+TARGET_GRID = 256
 
 
 def encode_relative_height(height: np.ndarray) -> tuple[np.ndarray, float, float]:
@@ -58,15 +62,16 @@ def _block(in_ch: int, out_ch: int, stride: int = 1) -> nn.Sequential:
 
 
 class ResidualHeightNet(nn.Module):
-    """U-Net-lite: 256x256x1 textureless residual -> 257x257 normalized relative height in [0, 1].
+    """U-Net-lite: 256x256x1 textureless residual -> ``grid``x``grid`` normalized relative height in [0, 1].
 
     Input is a single grayscale channel (the terrain-shadow residual). The default ``base=32``
     network mirrors the Spec 112/114 ``direct_cnn_v112`` architecture so the residual lane and the
-    minimap-RGB lane are directly comparable.
+    minimap-RGB lane are directly comparable. ``grid`` defaults to the curriculum's cropped 256 grid.
     """
 
-    def __init__(self, base: int = 32) -> None:
+    def __init__(self, base: int = 32, grid: int = TARGET_GRID) -> None:
         super().__init__()
+        self.grid = int(grid)
         self.enc1 = _block(1, base)                       # 256
         self.enc2 = _block(base, base * 2, stride=2)      # 128
         self.enc3 = _block(base * 2, base * 4, stride=2)  # 64
@@ -87,8 +92,8 @@ class ResidualHeightNet(nn.Module):
         u2 = self.up2(torch.cat([nn.functional.interpolate(u3, scale_factor=2, mode="bilinear", align_corners=False), e2], dim=1))
         u1 = self.up1(torch.cat([nn.functional.interpolate(u2, scale_factor=2, mode="bilinear", align_corners=False), e1], dim=1))
         out = torch.sigmoid(self.head(u1))
-        # World grid is 257x257; align the prediction to it at the very end.
-        return nn.functional.interpolate(out, size=(HEIGHT_GRID, HEIGHT_GRID), mode="bilinear", align_corners=True).squeeze(1)
+        # Align the prediction to the supervision grid at the very end.
+        return nn.functional.interpolate(out, size=(self.grid, self.grid), mode="bilinear", align_corners=True).squeeze(1)
 
 
 def height_loss(predicted: torch.Tensor, target: torch.Tensor) -> torch.Tensor:

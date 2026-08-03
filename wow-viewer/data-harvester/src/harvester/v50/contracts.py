@@ -327,16 +327,23 @@ def validate_release(value: str) -> str:
     return release
 
 
-def require_store_release(group, expected_release: str, *, store: Path) -> None:
-    """Fail before a run can consume an unversioned or mismatched store."""
+def require_store_release(
+    group, expected_release: str, *, store: Path, expected_schema: str = MIXED_STORE_SCHEMA
+) -> None:
+    """Fail before a run can consume an unversioned or mismatched store.
+
+    ``expected_schema`` defaults to the canonical mixed-curriculum store. Lanes that build their own
+    purpose-specific curriculum (Spec 125's residual stores, for example) pass their schema so the
+    release/family gate still applies without pretending to be the mixed curriculum.
+    """
     release = validate_release(expected_release)
     actual_family = str(group.attrs.get("model_family", ""))
     actual_release = str(group.attrs.get("release", ""))
     actual_schema = str(group.attrs.get("schema", ""))
-    if (actual_family, actual_release, actual_schema) != (MODEL_FAMILY, release, MIXED_STORE_SCHEMA):
+    if (actual_family, actual_release, actual_schema) != (MODEL_FAMILY, release, expected_schema):
         raise ValueError(
             "store is not the requested v50 release: "
-            f"expected family={MODEL_FAMILY!r}, release={release!r}, schema={MIXED_STORE_SCHEMA!r}; "
+            f"expected family={MODEL_FAMILY!r}, release={release!r}, schema={expected_schema!r}; "
             f"got family={actual_family!r}, release={actual_release!r}, schema={actual_schema!r} at {store}"
         )
 

@@ -22,6 +22,7 @@ import numpy as np
 
 from harvester.v50.contracts import release_identity, require_store_release, validate_release
 from harvester.v50.residual_extractor_model import (
+    RESIDUAL_GRID,
     TARGET_CONTRACT_VERSION,
     ResidualExtractorNet,
     residual_loss,
@@ -217,7 +218,7 @@ def main() -> int:
 
     group = zarr.open_group(str(args.store), mode="r")
     try:
-        require_store_release(group, args.release, store=args.store)
+        require_store_release(group, args.release, store=args.store, expected_schema=CURRICULUM_SCHEMA)
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     index = pq.read_table(args.store / "index.parquet").to_pylist()
@@ -242,6 +243,11 @@ def main() -> int:
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+    target_shape = tuple(int(d) for d in group["residual_256"].shape[1:])
+    if target_shape[:2] != (RESIDUAL_GRID, RESIDUAL_GRID):
+        raise SystemExit(
+            f"residual_256 rows must be {RESIDUAL_GRID}x{RESIDUAL_GRID}, got {target_shape}"
+        )
     model = ResidualExtractorNet()
     plan = build_training_plan(
         index_rows=index,

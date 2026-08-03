@@ -127,7 +127,7 @@ def build_training_plan(
         "seed": seed,
         "train_steps_per_epoch": math.ceil(split_counts["train"] / batch_size),
         "deployment_inputs": ["residual_256"],
-        "training_target": "height_257 -> relative_height_257",
+        "training_target": "height_257 -> relative_height",
     }
 
 
@@ -219,7 +219,7 @@ def main() -> int:
 
     group = zarr.open_group(str(args.store), mode="r")
     try:
-        require_store_release(group, args.release, store=args.store)
+        require_store_release(group, args.release, store=args.store, expected_schema=CURRICULUM_SCHEMA)
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     index = pq.read_table(args.store / "index.parquet").to_pylist()
@@ -244,7 +244,12 @@ def main() -> int:
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    model = ResidualHeightNet()
+    # The curriculum crops height_257 to the residual's grid, so size the output head from the store
+    # rather than a constant — otherwise the loss dies on a 257-vs-256 shape mismatch at step 1.
+    target_shape = tuple(int(d) for d in group["height_257"].shape[1:])
+    if len(target_shape) != 2 or target_shape[0] != target_shape[1]:
+        raise SystemExit(f"height_257 rows must be square 2D grids, got {target_shape}")
+    model = ResidualHeightNet(grid=target_shape[0])
     plan = build_training_plan(
         index_rows=index,
         selected_rows=selected_rows,
