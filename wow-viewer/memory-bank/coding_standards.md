@@ -126,7 +126,7 @@ The most important repository rules, in distilled form. The full versions live i
 
 - **All new code goes in `wow-viewer/`.** The `gillijimproject_refactor/` codebase is read-only reference.
 - **One phase at a time.** Finish and validate the current phase before starting the next.
-- **Models are small, modular, and predict residuals.** No monolithic multi-task models. No shared weights between models. Each model is one input set, one output, trained independently.
+- **Model topology is an engineering choice.** Multi-task, shared trunks, and monolithic models are allowed (constitution v2.0.0, 2026-08-02 — the old "one residual signal only" prohibition is retired). A model producing N signals must report per-signal metrics against per-signal baselines, so a strong signal can never mask a dead one.
 - **Spec Kit first.** Every non-trivial feature starts with `spec.md`, then `plan.md`, then `tasks.md`. Use the `speckit-*` skills.
-- **Staged clients only.** Game client access goes through `output/tmp/wowarchive-clients/`. Anything resembling `H:\CLIENTS` is a bug.
+- **Client roots are configured, never hardcoded.** `H:\CLIENTS` is the approved, preferred SSD client library (constitution v1.2.0 / AGENTS RULE 9); `output/tmp/wowarchive-clients/` is optional staging. Baking any machine-local client path into source is the actual bug.
 - **Paths are forward-slash, lowercase, workspace-relative in code.** Resolve absolute paths at runtime.

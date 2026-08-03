@@ -119,20 +119,29 @@ You may NOT:
 - Do not merge multiple training script changes into one commit.
 - Each training script change should be a separate, testable commit.
 
-### RULE 7: MODELS ARE SMALL, MODULAR, AND PREDICT RESIDUALS
+### RULE 7: MODEL TOPOLOGY IS AN ENGINEERING CHOICE; PER-SIGNAL EVIDENCE IS MANDATORY
 
-**No monolithic models. No multi-task training. No "predict everything at once."**
+**Multi-task training, shared trunks, multi-head and monolithic models are all ALLOWED.**
+Pick the topology on technical merit and say why in the spec.
 
-Every V14 model is a tiny, independent network that predicts ONE residual signal. Models chain together — each model's output becomes an input to downstream models.
+*Amended 2026-08-02 (constitution v2.0.0).* This rule previously forbade monolithic and multi-task
+models outright and required every V14 model to predict exactly ONE residual signal. That
+architecture was tried at length and did not beat its baselines, and the prohibition had become a
+blocker rather than a guardrail. Do not reintroduce it. Single-output specialists remain perfectly
+valid — they are now one option among several, not the only legal one.
 
-- Each model has one input set and one output. No shared weights between models.
-- Each model trains independently. If H3 improves, you replace H3's checkpoint. You do NOT retrain H1, H2, H4-H8.
-- Each model predicts a RESIDUAL (the difference between ground truth and prior model outputs), not the full signal.
-- Each model has its own training script, its own validation, its own checkpoint file.
-- DO NOT combine models into a single training script.
-- DO NOT add new heads to existing models.
-- DO NOT make models depend on each other's weights — only on each other's outputs.
-- The full V14 plan is in `wow-viewer/docs/architecture/v14-model-and-refactor-plan-2026-05-06.md`.
+What still holds, because it is about evidence rather than architecture:
+
+- A model producing N signals MUST report **per-signal** validation metrics, each against that
+  signal's own trivial baseline. An aggregate loss that improves while one output sits at baseline
+  is a partial failure — report it as one. Never let a strong signal hide a dead one.
+- Every output must be independently ablatable: you must be able to freeze or drop one head without
+  retraining the rest from scratch.
+- Whether a signal is recoverable at all is decided **per signal, empirically**. The target has to be
+  visible in the input — the way MCSH turned out not to be present in minimaps (measured r=-0.006).
+- Changes to a training script still follow RULE 6: documented reason, documented validation path.
+- The historical V14 plan is in `wow-viewer/docs/architecture/v14-model-and-refactor-plan-2026-05-06.md`.
+  It is a record of a superseded approach, not current guidance.
 
 ### RULE 9: CLIENT ROOTS ARE CONFIGURED; H:\CLIENTS IS APPROVED
 

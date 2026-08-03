@@ -17,9 +17,46 @@ configured game-client library. `H:\CLIENTS` is the current preferred fast SSD l
 builds; `output/tmp/wowarchive-clients/` remains optional staging. Mock assets are not sufficient for
 signoff. Validation evidence must record commands, configured root, build identity, and hashes.
 
-### IV. Residual Model Chain
+### IV. Model Architecture Is an Engineering Choice, Evidence Is Not
 
-Every V14+ terrain model predicts ONE residual signal. Models chain together — each model's output becomes input to downstream models. No monolithic models. No multi-task training. No shared weights between models. Each model trains independently with its own checkpoint.
+Model topology — single-output, multi-head, shared trunk, monolithic, chained — is chosen per spec
+on technical merit. **Multi-task training and shared weights are explicitly permitted.** A spec must
+state which topology it uses and why; it does not need to justify itself against a prohibition.
+
+What is NOT negotiable is that a model cannot hide a dead signal inside an aggregate win:
+
+- A model producing N signals MUST report per-signal validation metrics, each against that signal's
+  own trivial baseline. An aggregate loss that improves while one output stays at baseline is a
+  **partial failure and must be reported as one**.
+- Every output must be independently ablatable — removing or freezing one head must be possible
+  without retraining the others from scratch, so a signal that turns out not to be recoverable can
+  be dropped rather than silently carried.
+- Whether a signal is recoverable AT ALL is an empirical question answered per signal, never assumed
+  from a shared trunk's overall performance. The target must be visible in the input.
+
+**Amended 2026-08-02 (v2.0.0).** This principle previously read *"Every V14+ terrain model predicts
+ONE residual signal... No monolithic models. No multi-task training. No shared weights between
+models."*
+
+- **Rationale for the amendment**: the V14 residual-chain architecture was tried extensively and did
+  not produce the wins it promised — the tile-mean baseline remains unbeaten across much of that
+  lane. The prohibition had stopped describing a working method and had become a blocker: Spec 125
+  established that we now hold a complete, known forward model for minimap generation, which makes
+  "one minimap tile in, every signal out" a reasonable architecture to attempt. The old rule forbade
+  attempting it. A constitution should encode what works, not what was hoped for in May 2026.
+- **Approved by**: the user, 2026-08-02, in session, explicitly and after the conflict was raised.
+- **Migration**: no code change is required — every existing model remains valid under the amended
+  principle, since single-output specialists are still an allowed topology. Prior specs (117, 118,
+  123, 125) and archived specs (119) cite this principle by its old wording, often as a "PASS"
+  compliance gate; **those are historical records of decisions made under the old rule and are left
+  as written**. New specs must not cite the old prohibition. Conflicting policy text in the root
+  `AGENTS.md` (RULE 7) and `wow-viewer/memory-bank/coding_standards.md` was updated in this same
+  pass. Model docstrings referencing "constitution IV" for single-output justification are stale but
+  harmless; correct them opportunistically, not in a sweep.
+
+**What has NOT changed**: models are still validated against real data (Principle III), training
+script changes still require a documented reason and validation path, and a claimed win still needs
+a baseline it actually beats.
 
 ### V. Streaming-First Dataset Pipeline
 
@@ -102,10 +139,20 @@ Bring Your Own Data. Do not distribute proprietary client data, harvested corpor
 
 This constitution supersedes all other development practices when conflicts arise. Amendments require: (1) documented rationale, (2) user approval, (3) migration plan for affected code. The workspace `AGENTS.md` at repo root is the authoritative policy source for scope, safety, and repo boundaries.
 
-**Version**: 1.2.0 | **Ratified**: 2026-05-18 | **Last Amended**: 2026-07-15
+**Version**: 2.0.0 | **Ratified**: 2026-05-18 | **Last Amended**: 2026-08-02
 
 ### Amendment log
 
+- **2.0.0** (2026-08-02) — Principle IV replaced. The V14 residual-model-chain prohibition ("no
+  monolithic models, no multi-task training, no shared weights") is **retired**: the architecture it
+  mandated was tried at length and did not beat its baselines, while the rule itself had begun
+  blocking work the project now has the forward model to attempt. Model topology is now an
+  engineering choice made per spec. MAJOR rather than MINOR because active specs cite the removed
+  prohibition as a compliance gate, so their "PASS" claims against it no longer carry meaning. The
+  durable intent — a strong signal must never mask a dead one — is preserved and strengthened as a
+  per-signal reporting requirement. Requested and approved by the user in session after the conflict
+  was surfaced. Conflicting `AGENTS.md` RULE 7 and `coding_standards.md` text updated in the same
+  pass.
 - **1.2.0** (2026-07-15) — User confirmed `H:\CLIENTS` is the current known-good, faster SSD
   client library. It is now the preferred configured root for v50 work; project-local staging is
   optional. Per-build fingerprints and runtime configuration remain mandatory. Conflicting AGENTS

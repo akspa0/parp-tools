@@ -1,5 +1,12 @@
 # V14 Modular Residual Model System
 
+> **SUPERSEDED 2026-08-02 (constitution v2.0.0).** This document is a historical record of an
+> approach that was tried and did not beat its baselines. The architectural prohibition below — no
+> monolithic models, no multi-task training, no shared weights — **is retired and must not be cited
+> as current guidance**. Model topology is now an engineering choice made per spec; see constitution
+> Principle IV and `AGENTS.md` RULE 7. The pipeline decomposition described here is still useful
+> reading for how the signals relate to each other.
+
 **Date:** 2026-05-06
 **Branch:** `v0.4.9-strict-guards`
 **Base commit:** `971fff2`
@@ -8,7 +15,8 @@
 
 ## 0. Core Philosophy
 
-**No monolithic models. No multi-task training. No shared weights between models.**
+**[RETIRED — see the superseded banner above.]**
+*No monolithic models. No multi-task training. No shared weights between models.*
 
 The V14 system decomposes a minimap into its constituent parts, then uses the residuals to reconstruct terrain geometry. The pipeline is:
 
