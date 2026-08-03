@@ -30,7 +30,12 @@ from PIL import Image, ImageDraw, ImageFont
 
 COMPOSITE_SCHEMA = "v50-tile-composite-v1"
 
-MODES = ("absolute", "autostretch", "restored", "liquid")
+MODES = ("absolute", "autostretch", "restored", "liquid", "textured")
+
+# Minimap arrays a store may carry, in preference order. `minimap_rgb_authored` is the real client
+# art; `minimap_rgb` is the harvest's synthetic render. Measured on 0.5.3 Kalimdor, authored has
+# fuller coverage (64/64 sampled tiles vs 51/64), so it is the default albedo.
+MINIMAP_ARRAYS = ("minimap_rgb_authored", "minimap_rgb")
 
 # Liquid tint applied over the shaded surface. Multiplicative, so relief stays readable through it
 # rather than being replaced by a flat blue mask.
@@ -151,6 +156,35 @@ def flood_with_liquid(
     return surface, covered.astype(np.float64)
 
 
+def downsample_rgb(image: np.ndarray, cell: int) -> np.ndarray:
+    """Area-average an (H, W, 3) uint8 image to ``cell`` x ``cell`` x 3, still uint8."""
+    rgb = np.asarray(image, dtype=np.float64)
+    side = (rgb.shape[0] // cell) * cell
+    trimmed = rgb[:side, :side]
+    reduced = trimmed.reshape(cell, side // cell, cell, side // cell, 3).mean(axis=(1, 3))
+    return np.rint(np.clip(reduced, 0.0, 255.0)).astype(np.uint8)
+
+
+def texture_over_relief(albedo: np.ndarray, shaded: np.ndarray) -> np.ndarray:
+    """Minimap colour modulated by terrain shading -> uint8 RGB.
+
+    The hillshade is normalized to unit MEAN before multiplying, not used directly: a raw [0, 1]
+    Lambert term averages ~0.5 and would halve the minimap's brightness, turning a legible map into
+    mud. Dividing by the mean keeps the tile's overall colour where the artist put it and spends the
+    shading purely on relief.
+
+    Pair this with a RESTORED height field and a weak-signal tile keeps its authored colour while
+    finally showing the shape underneath it — which is the point: colour identifies the feature,
+    relief proves it is real.
+    """
+    colour = np.asarray(albedo, dtype=np.float64) / 255.0
+    relief = np.asarray(shaded, dtype=np.float64)
+    mean = float(relief.mean())
+    gain = relief / mean if mean > 1e-6 else np.ones_like(relief)
+    out = colour * gain[:, :, None]
+    return np.rint(np.clip(out, 0.0, 1.0) * 255.0).astype(np.uint8)
+
+
 def _tint(shaded: np.ndarray, wet: np.ndarray) -> np.ndarray:
     """Shade to RGB, tinting wet pixels so liquid extent reads without erasing relief."""
     gray = np.clip(shaded, 0.0, 1.0)[:, :, None]
@@ -161,12 +195,20 @@ def _tint(shaded: np.ndarray, wet: np.ndarray) -> np.ndarray:
     return np.rint(np.clip(blended, 0.0, 1.0) * 255.0).astype(np.uint8)
 
 
+def resolve_minimap_array(group: Any, requested: str | None = None) -> str | None:
+    """Pick the albedo source: an explicit request, else the first present in preference order."""
+    if requested:
+        return requested if requested in group else None
+    return next((name for name in MINIMAP_ARRAYS if name in group), None)
+
+
 def build_map_cells(
     group: Any,
     index_rows: list[dict[str, Any]],
     inventory: dict[str, dict[str, Any]],
     *,
     cell: int = DEFAULT_CELL,
+    minimap_array: str | None = None,
 ) -> tuple[dict[tuple[int, int], dict[str, np.ndarray]], dict[str, Any]]:
     """One read pass over the map -> a shaded cell per tile per mode, plus the map's height range."""
     cells: dict[tuple[int, int], dict[str, np.ndarray]] = {}
@@ -177,7 +219,10 @@ def build_map_cells(
 
     wet_cells: dict[tuple[int, int], np.ndarray] = {}
     flooded: dict[tuple[int, int], np.ndarray] = {}
+    albedo_cells: dict[tuple[int, int], np.ndarray] = {}
     has_liquid = "liquid_mask" in group and "liquid_height" in group
+    albedo_source = resolve_minimap_array(group, minimap_array)
+    textured_tiles = 0
 
     for row_id, row in enumerate(index_rows):
         key = (int(row["tile_x"]), int(row["tile_y"]))
@@ -196,6 +241,17 @@ def build_map_cells(
         else:
             flooded[key] = reduced
             wet_cells[key] = np.zeros((cell, cell), dtype=np.float64)
+        if albedo_source is not None:
+            art = np.asarray(group[albedo_source][row_id], dtype=np.uint8)
+            if art.any():
+                albedo_cells[key] = downsample_rgb(art, cell)
+                textured_tiles += 1
+            else:
+                # No minimap for this tile: neutral grey keeps the relief readable rather than
+                # punching a black hole in the middle of the map.
+                albedo_cells[key] = np.full((cell, cell, 3), 128, dtype=np.uint8)
+        else:
+            albedo_cells[key] = np.full((cell, cell, 3), 128, dtype=np.uint8)
         record = inventory.get(f"{row.get('map')}_{key[0]:02d}_{key[1]:02d}", {})
         meta[key] = record
         # A degenerate tile's extremes must not define the map's global scale — a single tile at
@@ -226,12 +282,22 @@ def build_map_cells(
             # What the player sees: liquid surfaces flood the basins, hiding whatever relief the
             # terrain-only render shows underneath.
             "liquid": _tint(hillshade_np(flooded[key]), wet_cells[key]),
+            # Minimap colour over RESTORED relief: the artist's palette identifies the feature,
+            # the amplified shading proves there is geometry under it.
+            "textured": texture_over_relief(
+                albedo_cells[key],
+                hillshade_np(restore_height(
+                    reduced, effective_factor(record, float(record.get("height_range", span)))
+                )),
+            ),
         }
     return cells, {
         "global_min": global_lo,
         "global_max": global_hi,
         "liquid_available": has_liquid,
         "wet_tiles": int(sum(1 for w in wet_cells.values() if w.any())),
+        "minimap_array": albedo_source,
+        "textured_tiles": textured_tiles,
     }
 
 
@@ -278,6 +344,8 @@ def render_composite(
                     "real height range, then placed back on the global scale.",
         "liquid": "LIQUID — the same terrain FLOODED to its liquid surface (blue tint = wet). Pair "
                   "this with ABSOLUTE: relief visible there and gone here is hidden under water.",
+        "textured": "TEXTURED — minimap colour over RESTORED relief. Colour identifies the feature; "
+                    "the amplified shading shows the geometry the flat view hides.",
     }
     draw.text((8, 8), f"{map_name} — {len(cells)} tiles, {degenerate} degenerate "
                       f"(x {x0}..{x1}, y {y0}..{y1})", fill=(245, 245, 245), font=font)
@@ -306,6 +374,10 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--cell", type=int, default=DEFAULT_CELL,
                         help=f"pixels per tile in the composite (default {DEFAULT_CELL})")
+    parser.add_argument("--minimap-array", default=None,
+                        help="albedo source for the 'textured' mode. Default: first of "
+                             f"{list(MINIMAP_ARRAYS)} present in the store. 'minimap_rgb_authored' "
+                             "is the real client art; 'minimap_rgb' is the synthetic render.")
     args = parser.parse_args()
     if args.cell < 8 or 257 // args.cell < 1:
         raise SystemExit("--cell must be between 8 and 257")
@@ -318,7 +390,8 @@ def main() -> int:
         group = zarr.open_group(str(store), mode="r")
         index_rows = pq.read_table(store / "index.parquet").to_pylist()
         map_name = str(index_rows[0].get("map", store.stem))
-        cells, scale = build_map_cells(group, index_rows, inventory, cell=args.cell)
+        cells, scale = build_map_cells(group, index_rows, inventory, cell=args.cell,
+                                       minimap_array=args.minimap_array)
         for mode in MODES:
             render_composite(cells, inventory, map_name=map_name, mode=mode,
                              output=args.output / f"composite-{map_name}-{mode}.png",
@@ -331,6 +404,7 @@ def main() -> int:
         summary.append({"map": map_name, "tiles": len(cells), "degenerate_tiles": degenerate, **scale})
         print(f"{map_name:12s} {len(cells):>4} tiles ({degenerate} degenerate)  "
               f"global height {scale['global_min']:.2f}..{scale['global_max']:.2f}  "
+              f"albedo={scale['minimap_array']} ({scale['textured_tiles']} textured)  "
               f"-> {len(MODES)} composites", flush=True)
 
     args.output.mkdir(parents=True, exist_ok=True)

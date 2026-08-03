@@ -156,3 +156,24 @@ def test_era_band_can_suppress_every_detection_so_both_tests_are_recorded() -> N
     # The band still does its job at alpha altitudes: full-scale relief is never "weak".
     assert is_compressed_range(0.0, 400.0) is False
     assert is_weak_signal(0.0, 400.0, near_zero_band=float("inf")) is False
+
+
+def test_both_minimap_arrays_count_as_a_visual_record() -> None:
+    """Checking only the SYNTHETIC minimap_rgb reported 220 Kalimdor tiles as having no visual
+    record when every one of them carries authored client art."""
+    from harvester.v50.tile_inventory import SIGNAL_FLAGS
+
+    assert "minimap_rgb" in SIGNAL_FLAGS and "minimap_rgb_authored" in SIGNAL_FLAGS
+
+    authored_only = {"tile_key": "K_01_01", "map": "K", "tile_x": 1, "tile_y": 1, "row_id": 0,
+                     "classification": "usable", "has_height_257": True,
+                     "has_minimap_rgb": False, "has_minimap_rgb_authored": True,
+                     "strong_neighbour_count": 0, "is_weak_signal": False,
+                     "information_class": "rich_terrain"}
+    neither = {**authored_only, "tile_key": "K_02_01", "tile_x": 2, "row_id": 1,
+               "has_minimap_rgb_authored": False}
+    s = summarize([authored_only, neither])
+
+    assert s["no_minimap"] == ["K_02_01"]              # authored art alone is a visual record
+    assert s["no_synthetic_minimap"] == ["K_01_01", "K_02_01"]
+    assert s["no_authored_minimap"] == ["K_02_01"]

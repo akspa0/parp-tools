@@ -40,9 +40,14 @@ CHUNK_SPAN = 17
 # Straight-up MCNR normals mean the chunk carried no real normal data.
 FLAT_NORMAL_Z = 0.999
 
+# Both minimap arrays are checked. `minimap_rgb` is the harvest's SYNTHETIC render;
+# `minimap_rgb_authored` is the real client art. Checking only the former reported 220 Kalimdor
+# tiles as having "no visual record" when every one of them has authored art — the synthetic
+# render just was not produced for them.
 SIGNAL_FLAGS = (
     "height_257",
     "minimap_rgb",
+    "minimap_rgb_authored",
     "normal_xyz",
     "alpha_256",
     "mcly_layer_mask",
@@ -258,7 +263,9 @@ def inventory_store(
             )
         record["classification"] = classify_tile(
             has_height=has_height,
-            has_minimap=bool(flags.get("has_minimap_rgb", False)),
+            # ANY minimap counts as a visual record, authored or synthetic.
+            has_minimap=bool(flags.get("has_minimap_rgb", False)
+                             or flags.get("has_minimap_rgb_authored", False)),
             height_range=height_range,
             weak=weak,
         )
@@ -315,10 +322,14 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "tile_count": len(rows),
         "by_classification": dict(sorted(classes.items())),
-        "no_minimap": keys(lambda r: not r.get("has_minimap_rgb", False)),
+        "no_minimap": keys(lambda r: not (r.get("has_minimap_rgb", False)
+                                          or r.get("has_minimap_rgb_authored", False))),
+        "no_synthetic_minimap": keys(lambda r: not r.get("has_minimap_rgb", False)),
+        "no_authored_minimap": keys(lambda r: not r.get("has_minimap_rgb_authored", False)),
         "no_height": keys(lambda r: not r.get("has_height_257", False)),
         "minimap_without_height": keys(
-            lambda r: r.get("has_minimap_rgb", False) and not r.get("has_height_257", False)
+            lambda r: (r.get("has_minimap_rgb", False) or r.get("has_minimap_rgb_authored", False))
+            and not r.get("has_height_257", False)
         ),
         "weak_signal": keys(lambda r: r["is_weak_signal"]),
         # Band-free. If this is large while weak_signal is empty, the band is era-wrong, not the map.
@@ -342,7 +353,8 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 CSV_COLUMNS = (
     "tile_key", "map", "tile_x", "tile_y", "row_id", "classification",
-    "has_height_257", "has_minimap_rgb", "has_alpha_256", "has_mcly_layer_mask",
+    "has_height_257", "has_minimap_rgb", "has_minimap_rgb_authored", "has_alpha_256",
+    "has_mcly_layer_mask",
     "has_mcly_texture_ids", "has_shadow_mask", "has_liquid_mask", "has_mcnk_flags_16",
     "height_min", "height_max", "height_range", "is_weak_signal", "is_compressed_range",
     "weak_severity",

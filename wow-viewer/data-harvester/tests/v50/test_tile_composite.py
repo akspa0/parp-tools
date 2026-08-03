@@ -161,3 +161,64 @@ def test_liquid_mode_is_rendered_and_reported(tmp_path: Path) -> None:
     render_composite(cells, inventory, map_name="Deepholm", mode="liquid",
                      output=tmp_path / "liq.png")
     assert (tmp_path / "liq.png").is_file()
+
+
+def test_texture_preserves_minimap_brightness_and_adds_relief() -> None:
+    """Multiplying by a raw Lambert term (mean ~0.5) would halve the map's brightness."""
+    from harvester.v50.tile_composite import texture_over_relief
+
+    albedo = np.full((16, 16, 3), 200, dtype=np.uint8)
+    rng = np.random.default_rng(0)
+    shaded = np.clip(rng.normal(0.5, 0.15, (16, 16)), 0.0, 1.0)
+
+    out = texture_over_relief(albedo, shaded)
+    # Mean brightness stays where the artist put it, rather than being halved.
+    assert abs(float(out.mean()) - 200.0) < 12.0
+    # Relief actually modulates: flat shading and varied shading differ.
+    flat = texture_over_relief(albedo, np.full((16, 16), 0.5))
+    assert np.array_equal(flat, np.full((16, 16, 3), 200, dtype=np.uint8))
+    assert not np.array_equal(out, flat)
+    # Colour is carried from the albedo, not invented by the shading.
+    tinted = np.zeros((16, 16, 3), dtype=np.uint8); tinted[..., 1] = 200
+    green = texture_over_relief(tinted, shaded)
+    assert green[..., 1].mean() > 100 and green[..., 0].max() == 0
+
+
+def test_downsample_rgb_keeps_three_channels_and_colour() -> None:
+    from harvester.v50.tile_composite import downsample_rgb
+
+    image = np.zeros((256, 256, 3), dtype=np.uint8)
+    image[..., 0] = 255
+    reduced = downsample_rgb(image, 64)
+    assert reduced.shape == (64, 64, 3)
+    assert reduced[..., 0].min() == 255 and reduced[..., 1].max() == 0
+
+
+def test_textured_mode_uses_authored_minimap_and_falls_back(tmp_path: Path) -> None:
+    from harvester.v50.tile_composite import MODES, resolve_minimap_array
+
+    assert "textured" in MODES
+    assert resolve_minimap_array({"minimap_rgb_authored": 1, "minimap_rgb": 1}) == "minimap_rgb_authored"
+    assert resolve_minimap_array({"minimap_rgb": 1}) == "minimap_rgb"
+    assert resolve_minimap_array({}) is None
+    assert resolve_minimap_array({"minimap_rgb": 1}, "minimap_rgb_authored") is None  # asked, absent
+
+    rng = np.random.default_rng(5)
+    group = {
+        "height_257": rng.random((2, 257, 257)).astype(np.float32) * 100.0,
+        "minimap_rgb_authored": rng.integers(0, 256, (2, 256, 256, 3), dtype=np.uint8),
+    }
+    index_rows = [{"map": "Kalidar", "tile_x": 1, "tile_y": 1},
+                  {"map": "Kalidar", "tile_x": 2, "tile_y": 1}]
+    inventory = {k: {"classification": "usable", "height_range": 100.0}
+                 for k in ("Kalidar_01_01", "Kalidar_02_01")}
+    cells, scale = build_map_cells(group, index_rows, inventory, cell=DEFAULT_CELL)
+    assert scale["minimap_array"] == "minimap_rgb_authored"
+    assert scale["textured_tiles"] == 2
+    render_composite(cells, inventory, map_name="Kalidar", mode="textured", output=tmp_path / "t.png")
+    assert (tmp_path / "t.png").is_file()
+
+    # A store with no minimap at all still renders; the albedo falls back to neutral grey.
+    _, bare = build_map_cells({"height_257": group["height_257"]}, index_rows, inventory,
+                              cell=DEFAULT_CELL)
+    assert bare["minimap_array"] is None and bare["textured_tiles"] == 0
