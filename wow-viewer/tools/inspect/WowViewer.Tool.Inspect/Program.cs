@@ -2174,6 +2174,9 @@ static void RunPm4(string[] args)
 		case "bounds-audit":
 			RunPm4BoundsAudit(tail);
 			break;
+		case "mprr":
+			RunPm4Mprr(tail);
+			break;
 		case "export-json":
 			RunPm4ExportJson(tail);
 			break;
@@ -5468,6 +5471,65 @@ static void PrintPm4MscnReport(Pm4MscnRelationshipReport report)
 		foreach (string note in report.Notes)
 			Console.WriteLine($"  {note}");
 	}
+}
+
+static void RunPm4Mprr(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4MprrReport report = Pm4MprrAnalyzer.AnalyzeDirectory(input);
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 MPRR analysis");
+	Console.WriteLine($"Input: {report.InputDirectory}");
+	Console.WriteLine($"Files with MPRR: {report.FilesWithMprr}");
+	Console.WriteLine($"Entries: {report.TotalEntries}  sentinels: {report.SentinelEntries}  non-sentinel: {report.NonSentinelEntries}");
+	Console.WriteLine($"Sentinel-delimited runs: {report.TotalRuns}");
+	Console.WriteLine();
+
+	Console.WriteLine("STRUCTURAL — files where run count == chunk entry count:");
+	foreach (Pm4MprrRunCountMatch match in report.RunCountMatches)
+		Console.WriteLine($"  {match.Domain,-6} {match.FilesMatching,5}/{match.FilesTotal,-5} ({match.MatchFraction:P1})");
+	Console.WriteLine();
+
+	Console.WriteLine("Value1 bound fits by domain:");
+	foreach (Pm4MprrDomainFit fit in report.Value1DomainFits)
+		Console.WriteLine($"  {fit.Domain,-6} fits={fit.Fits,12} misses={fit.Misses,12} ({fit.FitFraction:P1})");
+	Console.WriteLine();
+
+	Console.WriteLine("Value2 bound fits by domain:");
+	foreach (Pm4MprrDomainFit fit in report.Value2DomainFits)
+		Console.WriteLine($"  {fit.Domain,-6} fits={fit.Fits,12} misses={fit.Misses,12} ({fit.FitFraction:P1})");
+	Console.WriteLine();
+
+	Console.WriteLine($"Value1 < its own run length : {report.Value1WithinRunLengthFraction:P1}");
+	Console.WriteLine($"Value1 < its own run index  : {report.Value1WithinRunIndexFraction:P1}");
+	Console.WriteLine();
+
+	Console.WriteLine("Run length histogram (top):");
+	foreach (Pm4ValueFrequency bucket in report.RunLengthHistogram)
+		Console.WriteLine($"  len={bucket.Value,-6} runs={bucket.Count}");
+	Console.WriteLine();
+
+	foreach (string note in report.Notes)
+		Console.WriteLine($"  - {note}");
 }
 
 static void RunPm4BoundsAudit(string[] args)

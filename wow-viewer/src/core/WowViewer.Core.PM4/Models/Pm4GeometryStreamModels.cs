@@ -162,3 +162,27 @@ public sealed record Pm4BoundsAuditReport(
     IReadOnlyList<Pm4TileBoundsRecord> WorstTiles,
     IReadOnlyList<Pm4TileBoundsRecord> AllTiles,
     IReadOnlyList<string> Notes);
+
+/// <summary>Bound-test fit of an MPRR field against one chunk domain.</summary>
+public sealed record Pm4MprrDomainFit(string Domain, long Fits, long Misses, double FitFraction);
+
+/// <summary>
+/// How often the sentinel-delimited MPRR run count equals a chunk's entry count.
+/// A high match rate identifies MPRR's owner structurally, without decoding any value.
+/// </summary>
+public sealed record Pm4MprrRunCountMatch(string Domain, int FilesMatching, int FilesTotal, double MatchFraction);
+
+public sealed record Pm4MprrReport(
+    string InputDirectory,
+    int FilesWithMprr,
+    long TotalEntries,
+    long SentinelEntries,
+    long NonSentinelEntries,
+    long TotalRuns,
+    double Value1WithinRunLengthFraction,
+    double Value1WithinRunIndexFraction,
+    IReadOnlyList<Pm4MprrDomainFit> Value1DomainFits,
+    IReadOnlyList<Pm4MprrDomainFit> Value2DomainFits,
+    IReadOnlyList<Pm4MprrRunCountMatch> RunCountMatches,
+    IReadOnlyList<Pm4ValueFrequency> RunLengthHistogram,
+    IReadOnlyList<string> Notes);
