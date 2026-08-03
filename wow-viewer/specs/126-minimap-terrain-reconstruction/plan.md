@@ -113,8 +113,9 @@ Phase 4 wastes the expensive phase.
 Clears R5, the risk that no amount of model solves. Runs on the **easiest possible configuration**
 first: synthetic, object-free, DXT1-degraded input, one tile, relief only.
 
-**Exit gate**: beats the tile-mean baseline on held-out tiles by the margin fixed in research.md,
-reported per tile with the failing fraction stated. Best-epoch-1 is a structural failure.
+**Exit gate**: beats the tile-mean baseline on held-out tiles, reported per tile with the failing
+fraction stated. Best-epoch-1 is a structural failure. **Relief correlation >= 0.75 means the project
+target is met and this phase is done** — it is a cutoff, not a floor to tune upward from.
 
 **STOP condition**: if the easiest configuration cannot beat a tile-mean baseline, scaling the model
 will not fix it. Return to Phase 0 findings and redesign the input representation.

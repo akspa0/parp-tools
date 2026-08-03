@@ -7,19 +7,32 @@ rule here requires a new version; silently changing one invalidates every prior 
 
 ## Accuracy bands
 
-Restoration work, not metrology. Read as Pearson correlation of recovered relief against real MCVT on
-held-out tiles unless stated otherwise.
+A hobby restoration project, not metrology and not an exact-reproduction effort. Read as Pearson
+correlation of recovered relief against real MCVT on held-out tiles unless stated otherwise.
 
 | Band | Meaning |
 |------|---------|
-| ≥ 0.92 | Target — usable directly |
-| 0.85–0.92 | Acceptable — ship, note the gap |
-| 0.70–0.85 | Partial — useful as a prior, not a final answer |
-| < 0.70 | Not working — diagnose before scaling |
+| **≥ 0.75** | **Project target met — ship it and move on** |
+| 0.60–0.75 | Partial — useful as a prior, not a final answer |
+| < 0.60 | Not working — diagnose before scaling |
 
-**100% is explicitly not required by any gate.** Three effects bound it from above: the DXT1
-quantisation floor, Lambert saturation destroying back-facing slope information, and genuinely flat
-terrain containing no relief evidence at all.
+**0.75 is the cutoff, not a floor to build on.** A run that reaches it is finished. Past that the
+returns do not justify the training time, and this project explicitly declines to spend it.
+
+**100% is not required by any gate and is not reachable.** Three effects bound it from above: the
+DXT1 quantisation floor, Lambert saturation destroying back-facing slope information, and genuinely
+flat terrain containing no relief evidence at all.
+
+## Input normalization
+
+Per-tile brightness/contrast normalization is applied to the input. Measured 2026-08-02 over 83
+random Azeroth tiles: on land our synthetic renders sit roughly 8–11 lighter than authored across all
+three channels with about 15% less contrast, of which DXT1 accounts for −0.56. The offset is small
+and near-uniform, so normalizing the input removes it without a lighting recalibration or a re-render.
+
+Water is excluded from terrain relief scoring. Authored 0.5.3 water is cyan-teal (≈52/133/147) and
+our synthetic water is close to our synthetic land, but water carries no terrain relief so this does
+not affect the height target.
 
 ## Height target
 

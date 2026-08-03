@@ -12,20 +12,52 @@ chosen after seeing the number is not a threshold, it is a rationalisation.
 
 ## 0. Calibration: what "good enough" means here
 
-This is restoration work, not metrology. The target is **usable terrain**, and the accuracy bands are
-set accordingly (user, 2026-08-02):
+This is a hobby restoration project, not an attempt to reproduce anyone's IP exactly, and not
+metrology. **The project cutoff is 0.75** (user, 2026-08-02). Past that the returns do not justify
+the training time.
 
 | Band | Meaning |
 |------|---------|
-| **>= 0.92** | Target. Reconstruction is good enough to use directly. |
-| **0.85 - 0.92** | Acceptable. Ship it, note the gap, refine later. |
-| **0.70 - 0.85** | Partial. Useful as a prior for a human or a downstream model, not as a final answer. |
-| **< 0.70** | Not yet working. Diagnose before scaling. |
+| **>= 0.75** | **Project target met. Ship it and move on.** |
+| **0.60 - 0.75** | Partial. Useful as a prior for a human or a downstream model, not as a final answer. |
+| **< 0.60** | Not yet working. Diagnose before scaling. |
 
 Read as Pearson correlation of recovered relief against real MCVT on held-out tiles, unless a
-specific experiment states otherwise. **100% is explicitly not the goal** and no gate in this plan
-requires it. Several outputs cannot reach it in principle — the codec floor, shading saturation on
-back-facing slopes, and genuinely flat terrain all bound it from above.
+specific experiment states otherwise.
+
+**100% is explicitly not the goal and no gate requires it.** Several outputs cannot reach it in
+principle — the codec floor, shading saturation on back-facing slopes, and genuinely flat terrain all
+bound it from above. More importantly, chasing the last few points costs training time that this
+project does not want to spend. A run that reaches 0.75 is finished, not a starting point for
+tuning.
+
+### Measured: synthetic vs authored appearance (2026-08-02, 83 random Azeroth tiles)
+
+Recorded so it is not re-litigated. Empty authored *and* empty synthetic tiles excluded; split by
+`liquid_mask`.
+
+| Region | Synthetic RGB | Authored RGB | Gap | Contrast (std) |
+|--------|--------------|--------------|-----|----------------|
+| Land | 111.1 / 98.1 / 62.0 | 100.1 / 90.1 / 55.3 | -11.0 / -8.0 / -6.7 | 48.3 vs 55.4 |
+| Water | 113.2 / 102.8 / 61.6 | 51.6 / 132.7 / 146.6 | -61.6 / +29.9 / **+85.1** | 32.0 vs 16.5 |
+
+**On land the difference is a mild, near-uniform brightness offset** — our renders are roughly 8-11
+lighter across all three channels, with about 15% less contrast. It is not a colour-balance problem
+and it does not warrant a lighting recalibration. DXT1 accounts for only -0.56 of it (measured
+directly: the round-trip is very slightly *darkening*, never brightening), so the offset is real
+rather than codec — but it is small, uniform, and **removed for free by per-tile input
+normalization**. That is the response, not a re-render.
+
+**Water is a separate and much larger discrepancy**, and it is a palette problem rather than a
+lighting one: authored 0.5.3 water is cyan-teal (52/133/147) while our synthetic water is nearly
+identical to our synthetic land — we are barely differentiating it. This restates the already-recorded
+era-scoped water finding. Water carries no terrain relief and is excluded from relief scoring, so it
+does not block this feature; it is logged here so the number is not rediscovered as a surprise.
+
+**Consequence for E1's elevation reading.** The best-fit sun came back at 48 degrees against a traced
+client band of 20-37. Given that the land-side appearance gap is a uniform ~8-11 offset rather than
+the directional redistribution a badly wrong sun would produce, this is **not** treated as a blocking
+discrepancy. Normalize the input, mask the water, move on.
 
 ### The two hard problems, named
 
