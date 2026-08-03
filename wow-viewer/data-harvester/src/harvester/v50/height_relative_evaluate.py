@@ -23,6 +23,60 @@ from harvester.v50.height_relative_model import encode_relative_height
 DEFAULT_BORDER_WIDTH = 8
 
 
+@torch.no_grad()
+def residual_channel(
+    extractor: torch.nn.Module,
+    rgb_chw: torch.Tensor,
+    device: torch.device | None = None,
+) -> torch.Tensor:
+    """Frozen Spec 125 US7 extractor: (3, H, W) minimap -> (1, H, W) shading residual, on CPU."""
+    if device is None:
+        device = next((p.device for p in extractor.parameters()), torch.device("cpu"))
+    out = extractor(rgb_chw.unsqueeze(0).to(device)).detach().float().cpu()
+    if out.ndim == 3:
+        # The extractor squeezes its single channel away, emitting (B, H, W).
+        out = out.unsqueeze(1)
+    if out.shape[-2:] != rgb_chw.shape[-2:]:
+        # It emits at RESIDUAL_GRID; align it to the RGB grid rather than letting a silent size
+        # mismatch reach the height model's conv stack.
+        out = torch.nn.functional.interpolate(
+            out, size=tuple(rgb_chw.shape[-2:]), mode="bilinear", align_corners=True
+        )
+    return out[0]
+
+
+def build_model_input_channels(
+    rgb01: np.ndarray,
+    row_id: int,
+    *,
+    bindings: list[FeatureBinding],
+    residual_extractor: torch.nn.Module | None = None,
+    residual_device: torch.device | None = None,
+) -> torch.Tensor:
+    """Assemble one model input as ``[RGB, residual?, features?]`` -> (C, H, W) float32.
+
+    The single source of truth for input channel ORDER and COUNT, shared by the trainer's
+    ``RowDataset`` and every evaluation path. It exists because those two used to assemble inputs
+    independently: when Spec 125's frozen residual extractor added a 4th channel to training only,
+    the preview and final-evaluation paths kept handing 3 channels to a 4-channel model, and the run
+    died at its first best-epoch checkpoint. Any future extra channel belongs here, once.
+
+    ``rgb01`` is (H, W, 3) float already scaled to [0, 1] — callers own the /255.
+    """
+    rgb = np.ascontiguousarray(np.asarray(rgb01, dtype=np.float32))
+    if rgb.ndim != 3 or rgb.shape[2] != 3:
+        raise ValueError(f"rgb01 must be (H, W, 3) float in [0, 1]; got shape {rgb.shape}")
+    channels = torch.from_numpy(rgb).permute(2, 0, 1)
+    if residual_extractor is not None:
+        channels = torch.cat(
+            [channels, residual_channel(residual_extractor, channels, residual_device)], dim=0
+        )
+    feats = feature_channels_for_row(bindings, row_id)
+    if feats is not None:
+        channels = torch.cat([channels, torch.from_numpy(feats)], dim=0)
+    return channels
+
+
 def compute_row_metrics(
     predicted: np.ndarray,
     target: np.ndarray,
@@ -184,12 +238,16 @@ class _ValidationDataset(Dataset):
         feature_group: Any | None = None,
         feature_row_to_position: dict[int, int] | None = None,
         feature_bindings: list[FeatureBinding] | None = None,
+        residual_extractor: torch.nn.Module | None = None,
+        residual_device: torch.device | None = None,
     ) -> None:
         self.group = group
         self.rows = rows
         self.feature_bindings = as_bindings(
             feature_bindings, feature_group, feature_row_to_position
         )
+        self.residual_extractor = residual_extractor
+        self.residual_device = residual_device
 
     def __len__(self) -> int:
         return len(self.rows)
@@ -197,10 +255,12 @@ class _ValidationDataset(Dataset):
     def __getitem__(self, position: int) -> tuple[torch.Tensor, torch.Tensor, int]:
         row_id = int(self.rows[position])
         rgb = np.asarray(self.group["minimap_rgb"][row_id], dtype=np.float32) / 255.0
-        channels = torch.from_numpy(rgb).permute(2, 0, 1)
-        feats = feature_channels_for_row(self.feature_bindings, row_id)
-        if feats is not None:
-            channels = torch.cat([channels, torch.from_numpy(feats)], dim=0)
+        channels = build_model_input_channels(
+            rgb, row_id,
+            bindings=self.feature_bindings,
+            residual_extractor=self.residual_extractor,
+            residual_device=self.residual_device,
+        )
         target, _, _ = encode_relative_height(np.asarray(self.group["height_257"][row_id]))
         return channels, torch.from_numpy(target), row_id
 
@@ -217,6 +277,7 @@ def _predict_samples(
     feature_group: Any | None = None,
     feature_row_to_position: dict[int, int] | None = None,
     feature_bindings: list[FeatureBinding] | None = None,
+    residual_extractor: torch.nn.Module | None = None,
 ) -> list[dict[str, Any]]:
     samples: list[dict[str, Any]] = []
     bindings = as_bindings(feature_bindings, feature_group, feature_row_to_position)
@@ -224,10 +285,12 @@ def _predict_samples(
     for row_id in row_ids:
         rgb = np.asarray(group["minimap_rgb"][row_id], dtype=np.uint8)
         target, _, _ = encode_relative_height(np.asarray(group["height_257"][row_id]))
-        channels = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1)
-        feats = feature_channels_for_row(bindings, row_id)
-        if feats is not None:
-            channels = torch.cat([channels, torch.from_numpy(feats)], dim=0)
+        channels = build_model_input_channels(
+            rgb.astype(np.float32) / 255.0, row_id,
+            bindings=bindings,
+            residual_extractor=residual_extractor,
+            residual_device=device,
+        )
         tensor = channels.unsqueeze(0).to(device)
         with torch.amp.autocast(device.type, enabled=use_amp and device.type == "cuda"):
             predicted = model(tensor)[0].float().cpu().numpy()
@@ -260,11 +323,12 @@ def render_fixed_model_preview(
     feature_group: Any | None = None,
     feature_row_to_position: dict[int, int] | None = None,
     feature_bindings: list[FeatureBinding] | None = None,
+    residual_extractor: torch.nn.Module | None = None,
 ) -> None:
     samples = _predict_samples(
         model, group, index_rows, row_ids, device, use_amp=use_amp,
         feature_group=feature_group, feature_row_to_position=feature_row_to_position,
-        feature_bindings=feature_bindings,
+        feature_bindings=feature_bindings, residual_extractor=residual_extractor,
     )
     render_validation_sheet(samples, output, title=f"fixed validation preview | epoch {epoch} | MAE {val_mae:.6f}")
 
@@ -286,14 +350,24 @@ def evaluate_height_model(
     feature_group: Any | None = None,
     feature_row_to_position: dict[int, int] | None = None,
     feature_bindings: list[FeatureBinding] | None = None,
+    residual_extractor: torch.nn.Module | None = None,
 ) -> dict[str, Any]:
     """Evaluate every held-out row, then render honest quantile and worst-case sheets."""
+    if residual_extractor is not None and workers:
+        # The frozen extractor runs on the eval device inside __getitem__; a forked worker cannot
+        # share that CUDA context. Coerce rather than raise: this runs at the END of a long
+        # training run, where failing closed would throw away the whole run's evaluation.
+        print(f"NOTE: forcing workers=0 (was {workers}); the residual extractor runs in-dataset.",
+              flush=True)
+        workers = 0
     loader = DataLoader(
         _ValidationDataset(
             group, val_rows,
             feature_group=feature_group,
             feature_row_to_position=feature_row_to_position,
             feature_bindings=feature_bindings,
+            residual_extractor=residual_extractor,
+            residual_device=device,
         ),
         batch_size=batch_size,
         shuffle=False,
@@ -342,7 +416,7 @@ def evaluate_height_model(
         _predict_samples(
             model, group, index_rows, quantile_rows, device, use_amp=use_amp,
             feature_group=feature_group, feature_row_to_position=feature_row_to_position,
-            feature_bindings=feature_bindings,
+            feature_bindings=feature_bindings, residual_extractor=residual_extractor,
         ),
         output / "error_quantiles.png",
         title=f"all-validation error quantiles | checkpoint epoch {checkpoint_epoch}",
@@ -351,7 +425,7 @@ def evaluate_height_model(
         _predict_samples(
             model, group, index_rows, worst_rows, device, use_amp=use_amp,
             feature_group=feature_group, feature_row_to_position=feature_row_to_position,
-            feature_bindings=feature_bindings,
+            feature_bindings=feature_bindings, residual_extractor=residual_extractor,
         ),
         output / "worst_cases.png",
         title=f"worst held-out rows | checkpoint epoch {checkpoint_epoch}",
@@ -397,6 +471,10 @@ def main() -> int:
     parser.add_argument("--device", choices=["cuda", "cpu"], default="cuda")
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--release", default="v50.1", type=validate_release)
+    parser.add_argument("--residual-checkpoint", type=Path, default=None,
+                        help="Frozen Spec 125 US7 residual extractor. REQUIRED when the checkpoint "
+                             "under evaluation was trained with one (a 4-channel stem): the "
+                             "residual channel must be rebuilt here exactly as training built it.")
     args = parser.parse_args()
 
     if args.batch < 1:
@@ -447,7 +525,27 @@ def main() -> int:
     if checkpoint.get("curriculum_identity") != expected_identity:
         raise SystemExit("checkpoint curriculum identity does not match --store")
 
-    model = HeightRelativeNet().to(device)
+    # The stem width is a property of the checkpoint, not a flag: a run trained with a frozen
+    # residual extractor has a 4-channel enc1. Read it rather than assuming RGB-only, so a
+    # stacked checkpoint fails on a missing --residual-checkpoint (actionable) instead of on an
+    # opaque load_state_dict shape mismatch.
+    in_channels = int(checkpoint["model"]["enc1.0.weight"].shape[1])
+    if in_channels == 4 and args.residual_checkpoint is None:
+        raise SystemExit(
+            "checkpoint has a 4-channel stem (trained with a frozen residual extractor); "
+            "pass --residual-checkpoint pointing at that same extractor."
+        )
+    if in_channels == 3 and args.residual_checkpoint is not None:
+        raise SystemExit("checkpoint is RGB-only (3-channel stem); --residual-checkpoint would "
+                         "feed it a channel it was never trained on.")
+    residual_extractor = None
+    if args.residual_checkpoint is not None:
+        from harvester.v50.residual_extractor_infer import load_model as load_residual_extractor
+
+        residual_extractor = load_residual_extractor(args.residual_checkpoint, device, args.release)
+        residual_extractor.eval()
+
+    model = HeightRelativeNet(in_channels=in_channels).to(device)
     model.load_state_dict(checkpoint["model"])
     use_amp = device.type == "cuda" and not args.no_amp
     summary = evaluate_height_model(
@@ -461,6 +559,7 @@ def main() -> int:
         workers=args.workers,
         checkpoint_epoch=int(checkpoint.get("epoch", 0)),
         use_amp=use_amp,
+        residual_extractor=residual_extractor,
     )
     identity = {
         "schema": "v114-height-evaluation-v1",
@@ -469,6 +568,10 @@ def main() -> int:
         "curriculum_identity": expected_identity,
         "source_filter": args.source,
         "target_contract_version": TARGET_CONTRACT_VERSION,
+        "input_channels": in_channels,
+        "residual_checkpoint": (
+            str(args.residual_checkpoint.resolve()) if args.residual_checkpoint else None
+        ),
         "device": str(device),
         "amp_enabled": use_amp,
         "summary": summary,

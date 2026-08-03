@@ -44,13 +44,13 @@ from harvester.v50.direct_geometry_model import (
     load_pretrained_encoder,
 )
 from harvester.v50.feature_stores import (
-    feature_channels_for_row,
     load_feature_stores,
     plan_entries,
     road_feature_binding,
     total_class_count,
 )
 from harvester.v50.height_relative_evaluate import (
+    build_model_input_channels,
     evaluate_height_model,
     render_fixed_model_preview,
     select_fixed_preview_rows,
@@ -83,6 +83,7 @@ from harvester.v50.model_stage_contract import (
     validate_model_stage_run,
 )
 from harvester.v50.normal_guidance import normal_gradient_loss
+from harvester.v50.residual_extractor_infer import load_model as load_residual_extractor
 from harvester.v50.spectral_guidance import multiscale_gradient_loss, radial_spectral_loss
 
 STAGE = "direct_geometry"
@@ -405,6 +406,12 @@ def main() -> int:
     ap.add_argument("--mit-license", default=MIT_B0_LICENSE)
     ap.add_argument("--mit-pretrained", action="store_true",
                     help="USER-RUN: download pinned encoder weights (FR-013 optional ablation)")
+    ap.add_argument("--residual-checkpoint", type=Path, default=None,
+                    help="Frozen residual-extractor checkpoint (Spec 125 US7). When set, the trained "
+                         "extractor runs on each minimap tile at sample-build time and its shading "
+                         "residual is concatenated as an extra input channel, giving the height model "
+                         "an explicit 'where is the shading' signal. The extractor is frozen — only "
+                         "the height model trains. in_channels = 3 + sum(feature class_counts) + 1.")
     args = ap.parse_args()
 
     if args.mit_pretrained and (not args.mit_revision or not args.mit_sha256):
@@ -489,12 +496,37 @@ def main() -> int:
         raise SystemExit(str(exc)) from exc
     feature_class_count = total_class_count(feature_bindings)
 
+    # Optional frozen residual-extractor preprocessing (Spec 125 US7). Only its METADATA is read
+    # here — the weights load after the dry-run gate, so a plan-only invocation never allocates
+    # CUDA (this file's stated contract: the preview is printed before CUDA allocation).
+    use_residual = args.residual_checkpoint is not None
+    residual_extractor = None
+    residual_meta: dict = {}
+    if use_residual:
+        if not args.residual_checkpoint.is_file():
+            raise SystemExit(f"--residual-checkpoint not found: {args.residual_checkpoint}")
+        residual_meta = torch.load(
+            args.residual_checkpoint, map_location="cpu", weights_only=False
+        )
+        trained_on = str(residual_meta.get("input_array", "unknown"))
+        if trained_on not in ("minimap_rgb", "unknown"):
+            # The extractors on disk were all trained on minimap_rgb_dxt1, but the height
+            # curriculum only carries the pristine minimap_rgb. Feeding the frozen extractor an
+            # input distribution it never saw silently degrades the 4th channel, so say so loudly
+            # rather than letting a quiet domain shift be read as "the residual channel didn't help".
+            print(
+                f"WARNING: the residual extractor was trained on {trained_on!r}, but this "
+                "curriculum only provides 'minimap_rgb'. The frozen extractor will run "
+                "out-of-distribution; treat the residual channel's contribution as a lower bound.",
+                flush=True,
+            )
+
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     try:
         model, model_identity = build_geometry_model(
             args.architecture,
-            in_channels=3 + feature_class_count,
+            in_channels=3 + feature_class_count + (1 if use_residual else 0),
             pretrained_source=pretrained_record
         )
     except ValueError as exc:
@@ -605,10 +637,23 @@ def main() -> int:
             "source_array": "alpha_256",
             "affects_inference_inputs": False,
         }
+    if use_residual:
+        plan["residual_extractor"] = {
+            "checkpoint": str(args.residual_checkpoint.resolve()),
+            "sha256": sha256_file(args.residual_checkpoint),
+            "model_variant": residual_meta.get("model_variant"),
+            "target_contract_version": residual_meta.get("target_contract_version"),
+            "best_val_mae": residual_meta.get("val_mae"),
+            "trained_on_input_array": residual_meta.get("input_array"),
+            "inference_input_array": "minimap_rgb",
+            "input_array_matches_training": residual_meta.get("input_array") == "minimap_rgb",
+            "note": "frozen Spec 125 US7 extractor; runs as preprocessing at sample-build time",
+        }
+        plan["deployment_inputs"] = ["minimap_rgb"]  # unchanged: the extractor derives from RGB
     if feature_bindings:
         plan["deployment_inputs"] = ["minimap_rgb", "generated_terrain_feature_map"]
         plan["feature_stores"] = plan_entries(feature_bindings)
-        plan["feature_input_channels"] = 3 + feature_class_count
+        plan["feature_input_channels"] = 3 + feature_class_count + (1 if use_residual else 0)
     plan["pct_start"] = args.pct_start if args.lr_schedule == "onecycle" else None
     plan["warmup_epochs"] = (
         warmup_epochs_for(args.pct_start, args.epochs, plan["train_steps_per_epoch"])
@@ -630,6 +675,18 @@ def main() -> int:
 
     if args.mit_pretrained:
         load_pretrained_encoder(model, hub_id=args.mit_hub_id, revision=args.mit_revision)
+
+    if use_residual:
+        try:
+            residual_extractor = load_residual_extractor(
+                args.residual_checkpoint, torch.device("cuda"), args.release
+            )
+        except Exception as exc:
+            raise SystemExit(f"failed to load residual extractor: {exc}") from exc
+        residual_extractor.eval()
+        for param in residual_extractor.parameters():
+            param.requires_grad_(False)
+        print(f"frozen residual extractor loaded from {args.residual_checkpoint}", flush=True)
 
     use_liquid_mask = args.liquid_mask_weight > 0
     has_liquid_mask = "liquid_mask" in group
@@ -686,13 +743,16 @@ def main() -> int:
                     return cached
             row = self.rows[i]
             rgb = np.asarray(group["minimap_rgb"][row], dtype=np.float32) / 255.0
-            channels = torch.from_numpy(rgb).permute(2, 0, 1)
-            feats = feature_channels_for_row(feature_bindings, row)
-            if feats is not None:
-                # Generated (sum(K), 256, 256) class probabilities from every prior, concatenated
-                # onto RGB in CLI order. These are the classifiers' OUTPUTS, never ground-truth
-                # labels (Spec 115 FR-007).
-                channels = torch.cat([channels, torch.from_numpy(feats)], dim=0)
+            # [RGB, residual?, features?] — assembled by the SHARED builder so the previews and the
+            # final evaluation below cannot drift from what training feeds the model. The feature
+            # channels are the classifiers' generated OUTPUTS, never ground-truth labels
+            # (Spec 115 FR-007).
+            channels = build_model_input_channels(
+                rgb, row,
+                bindings=feature_bindings,
+                residual_extractor=residual_extractor,
+                residual_device=device,
+            )
             target, tile_lo, tile_hi = encode_relative_height(
                 np.asarray(group["height_257"][row])
             )
@@ -840,6 +900,10 @@ def main() -> int:
         },
         "pretrained_source": model_identity["pretrained_source"],
         "held_out_split": plan.get("held_out_split"),
+        # Travels with every checkpoint: a 4-channel stem is unusable without the exact extractor
+        # that produced its 4th channel, so the checkpoint must name it.
+        "residual_extractor": plan.get("residual_extractor"),
+        "input_channels": 3 + feature_class_count + (1 if use_residual else 0),
     }
     (args.output / "training_plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
     (args.output / "run_identity.json").write_text(json.dumps(run_identity, indent=2), encoding="utf-8")
@@ -907,6 +971,7 @@ def main() -> int:
                 args.output / "validation" / "best_previews" / f"epoch_{epoch:04d}.png",
                 epoch=epoch, val_mae=val_mae, use_amp=args.amp,
                 feature_bindings=feature_bindings,
+                residual_extractor=residual_extractor,
             )
         elif args.val_tolerance > 0 and val_mae <= best * (1.0 + args.val_tolerance):
             stale = 0
@@ -937,6 +1002,7 @@ def main() -> int:
         batch_size=args.batch, workers=args.workers,
         checkpoint_epoch=int(best_checkpoint["epoch"]), use_amp=args.amp,
         feature_bindings=feature_bindings,
+        residual_extractor=residual_extractor,
     )
     per_row = json.loads(
         (args.output / "validation" / "final_best" / "per_row_metrics.json").read_text(encoding="utf-8")
@@ -966,14 +1032,16 @@ def main() -> int:
             for row in val_rows:
                 # The model consumes ALL priors concatenated, but the road mask is argmaxed from the
                 # terrain-feature prior's OWN channels (its class ordering owns the ROAD id).
-                all_feats = feature_channels_for_row(feature_bindings, row)
                 road_feats = np.asarray(
                     road_binding.group["feature_map"][road_binding.row_to_position[row]],
                     dtype=np.float32,
                 )
                 rgb = np.asarray(group["minimap_rgb"][row], dtype=np.float32) / 255.0
-                channels = torch.cat(
-                    [torch.from_numpy(rgb).permute(2, 0, 1), torch.from_numpy(all_feats)], dim=0
+                channels = build_model_input_channels(
+                    rgb, row,
+                    bindings=feature_bindings,
+                    residual_extractor=residual_extractor,
+                    residual_device=device,
                 ).unsqueeze(0).to(device)
                 predicted = model(channels)[0].float().cpu().numpy()
                 target, _, _ = encode_relative_height(np.asarray(group["height_257"][row]))
@@ -1016,10 +1084,12 @@ def main() -> int:
         with torch.no_grad():
             for row in val_rows:
                 rgb = np.asarray(group["minimap_rgb"][row], dtype=np.float32) / 255.0
-                channels = torch.from_numpy(rgb).permute(2, 0, 1)
-                feats = feature_channels_for_row(feature_bindings, row)
-                if feats is not None:
-                    channels = torch.cat([channels, torch.from_numpy(feats)], dim=0)
+                channels = build_model_input_channels(
+                    rgb, row,
+                    bindings=feature_bindings,
+                    residual_extractor=residual_extractor,
+                    residual_device=device,
+                )
                 predicted = model(channels.unsqueeze(0).to(device))[0].float().cpu().numpy()
                 target, _, _ = encode_relative_height(np.asarray(group["height_257"][row]))
                 abs_err = np.abs(predicted - target)

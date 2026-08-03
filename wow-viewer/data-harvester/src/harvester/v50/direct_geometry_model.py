@@ -141,7 +141,14 @@ def architecture_identity(architecture: str, model: nn.Module, *, config: Any | 
         )
     config_payload: dict[str, Any]
     if architecture == DIRECT_CNN_ID:
-        config_payload = {"class": "HeightRelativeNet", "base": 32, "input": "3x256x256",
+        # Read the real stem width off the model instead of hardcoding 3: the 4-channel stacked
+        # variant must not hash to the same architecture identity as the RGB-only frozen baseline
+        # (the same guarantee ``num_channels`` gives the MiT path). in_channels=3 reproduces the
+        # original payload byte-for-byte, so existing baseline hashes are unchanged.
+        stem = getattr(model, "enc1", None)
+        in_channels = int(stem[0].in_channels) if stem is not None else DEFAULT_INPUT_CHANNELS
+        config_payload = {"class": "HeightRelativeNet", "base": 32,
+                          "input": f"{in_channels}x{INPUT_SIZE}x{INPUT_SIZE}",
                           "output": f"1x{HEIGHT_GRID}x{HEIGHT_GRID}", "target_contract": "v112.1"}
     else:
         config_payload = _config_dict(config if config is not None else default_mit_config())
@@ -164,17 +171,23 @@ def build_geometry_model(
     Returns ``(model, identity)`` where identity carries ``architecture`` and ``pretrained_source``
     exactly as the ``v50-model-stage-run-v1`` contract records them. ``in_channels`` defaults to 3
     (RGB); a Spec 115 deconfounded run passes ``3 + K`` and the wider config hashes to a distinct
-    architecture identity. Only ``mit_b0_regression`` supports extra channels; the frozen
-    ``direct_cnn_v112`` baseline is RGB-only by contract.
+    architecture identity. ``mit_b0_regression`` takes any width; ``direct_cnn_v112`` takes 3 (the
+    frozen RGB-only baseline) or 4 (the Spec 125 stacked variant, whose 4th channel is the frozen
+    residual extractor's output) — both hash distinctly.
     """
     if architecture == DIRECT_CNN_ID:
         if pretrained_source is not None:
             raise GeometryModelError("direct_cnn_v112 is the from-scratch baseline; no pretrained source")
-        if in_channels != DEFAULT_INPUT_CHANNELS:
+        if in_channels not in (3, 4):
             raise GeometryModelError(
-                f"direct_cnn_v112 is RGB-only (3 channels); got in_channels={in_channels}"
+                f"direct_cnn_v112 supports 3 or 4 input channels; got in_channels={in_channels}"
             )
-        model: nn.Module = HeightRelativeNet()
+        if in_channels == 4:
+            # 4-channel variant: [R, G, B, shading_residual] — the residual channel is the frozen
+            # Spec 125 US7 extractor's output, concatenated at sample-build time.
+            model: nn.Module = HeightRelativeNet(in_channels=4)
+        else:
+            model: nn.Module = HeightRelativeNet()
         config = None
     elif architecture == MIT_B0_ID:
         config = mit_config if mit_config is not None else default_mit_config(in_channels=in_channels)

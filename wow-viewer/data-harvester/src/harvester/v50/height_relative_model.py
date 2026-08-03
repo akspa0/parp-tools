@@ -67,9 +67,9 @@ class HeightRelativeNet(nn.Module):
     bakeoff use the exact same baseline architecture.
     """
 
-    def __init__(self, base: int = 32) -> None:
+    def __init__(self, base: int = 32, in_channels: int = 3) -> None:
         super().__init__()
-        self.enc1 = _block(3, base)                      # 256
+        self.enc1 = _block(in_channels, base)             # 256
         self.enc2 = _block(base, base * 2, stride=2)     # 128
         self.enc3 = _block(base * 2, base * 4, stride=2)  # 64
         self.enc4 = _block(base * 4, base * 8, stride=2)  # 32
