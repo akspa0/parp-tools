@@ -256,3 +256,56 @@ Open hypotheses the user holds, not yet tested:
   row-wise vs column-wise autocorrelation on reused brush patches separates them.
 - The competing account is that hand-drawn maps were scanned and the pencil sketch guided a
   grayscale depth map per tile.
+
+## The jigsaw hypothesis: weak tiles are displaced older terrain (user, 2026-08-03)
+
+The user's account, recorded verbatim in substance because it reframes the whole weak-tile corpus
+from "damaged leftovers" into "a recoverable earlier map."
+
+**The claim.** Weak tiles are not noise. Many of them — especially in 0.5.3 — are **leftover terrain
+from earlier versions of the game**, stranded when the map was enlarged. In November 2001 the world
+grew substantially; zones were shifted around, and terrain that had been in-bounds got pushed out
+into what now reads as weak signal. It still borders the later terrain it was separated from.
+
+**Why it should be reassemblable.** Across the weak tiles there are *a lot of similar patterns,
+randomly plastered at different relative positions on different tiles*. That repetition is the
+handle: if the same pattern appears at different offsets on different tiles, the offsets are
+evidence about how the pieces were displaced. The corpus should behave like a **jigsaw puzzle** —
+find adjacent agreements between piece edges and fit them back together.
+
+**Weak tiles may join non-weak tiles.** The reassembly is not weak-to-weak only. A displaced older
+piece is expected to abut current terrain, so edge-matching must consider the full corpus, not just
+the weak subset. **There is shadow proof in at least one instance** — a case where shadow evidence
+ties a weak tile to terrain it must once have adjoined.
+
+**What the user wants.** Automation, and soon. This is sitting unexploited. The goal is to restore
+as much of the earlier terrain as the surviving data allows, using **what is already on hand
+first** — the harvested corpus, before any new capture.
+
+### Why this is credible rather than speculative
+
+It predicts things that are checkable with what is already built:
+
+- If pieces were displaced by a map-resize, displacement offsets should **cluster**, not spread
+  uniformly. A histogram of best-match offsets is the first test and needs no new harvest.
+- Edge agreement is measurable directly: heights along a tile edge either continue into a neighbour
+  candidate or they do not, and `tiles.csv` already carries the per-tile data to try it.
+- The single shadow-proof instance is a **known-answer case** — the detector must recover that pair
+  before any of its other proposals are trusted. That is the detector-power gate this project
+  already requires, and here it comes for free.
+
+### Hazards to design against, learned from this same corpus
+
+- **Verify detector power before reporting a null.** A matcher that cannot rediscover the known
+  shadow-proof pair has not shown that other pairs are absent.
+- **Repeated brush patterns are a confound, not only a signal.** This corpus is already known to
+  contain fractal brush copy-paste reuse, so two tiles can share a pattern without ever having been
+  adjacent. Edge continuity must outrank pattern similarity, and a match supported only by a reused
+  brush must be reported as weak.
+- **Partition, never filter.** Proposed fits, rejected fits and unmatched tiles all stay queryable.
+- **`surviving_height_levels` gates trust.** Tiles holding very few distinct heights cannot support
+  edge matching; four Azeroth tiles hold exactly 2 across a 516-unit range. Exclude them from
+  matching rather than letting them match everything.
+
+Status: hypothesis recorded, nothing built. Next concrete step is the offset-cluster histogram and
+the shadow-proof known-answer case, both runnable against the existing corpus.
