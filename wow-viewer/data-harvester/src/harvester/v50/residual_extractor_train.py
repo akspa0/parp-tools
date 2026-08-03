@@ -34,6 +34,12 @@ from harvester.v50.residual_extractor_model import (
     ResidualExtractorNet,
     residual_loss,
 )
+from harvester.v50.spectral_guidance import (
+    laplacian_loss,
+    multiscale_gradient_loss,
+    radial_spectral_loss,
+    sobel_edge_loss,
+)
 
 ALLOWED_MAPS = frozenset({"Kalimdor", "Azeroth"})
 CURRICULUM_SCHEMA = "v125-residual-extractor-curriculum-v1"
@@ -242,6 +248,14 @@ def main() -> int:
     ap.add_argument("--patience", type=int, default=15)
     ap.add_argument("--seed", type=int, default=125)
     ap.add_argument("--release", default="v50.1", type=validate_release)
+    ap.add_argument("--multiscale-weight", type=float, default=0.0,
+                    help="weight for multiscale_gradient_loss (structure at each octave)")
+    ap.add_argument("--sobel-weight", type=float, default=0.0,
+                    help="weight for sobel_edge_loss (ridge/cliff edge structure)")
+    ap.add_argument("--spectral-weight", type=float, default=0.0,
+                    help="weight for radial_spectral_loss (fractal power spectrum match)")
+    ap.add_argument("--laplacian-weight", type=float, default=0.0,
+                    help="weight for laplacian_loss (curvature/second-derivative structure)")
     ap.add_argument(
         "--regimes",
         default="",
@@ -398,6 +412,12 @@ def main() -> int:
         "store": str(args.store.resolve()),
         "optimizer": {"name": "AdamW", "learning_rate": args.lr, "weight_decay": 1e-4},
         "loss": {"point": "smooth_l1", "gradient_l1_weight": 0.25},
+        "guidance": {
+            "multiscale_weight": args.multiscale_weight,
+            "sobel_weight": args.sobel_weight,
+            "spectral_weight": args.spectral_weight,
+            "laplacian_weight": args.laplacian_weight,
+        },
         "schedule": {
             "max_epochs": args.epochs,
             "batch_size": args.batch,
@@ -419,7 +439,20 @@ def main() -> int:
         train_losses = []
         for x, y in train_loader:
             opt.zero_grad(set_to_none=True)
-            loss = residual_loss(model(x.to(device)), y.to(device))
+            predicted = model(x.to(device))
+            target = y.to(device)
+            loss = residual_loss(predicted, target)
+            guidance = {}
+            if args.multiscale_weight > 0:
+                guidance["multiscale"] = args.multiscale_weight * multiscale_gradient_loss(predicted, target)
+            if args.sobel_weight > 0:
+                guidance["sobel"] = args.sobel_weight * sobel_edge_loss(predicted, target)
+            if args.spectral_weight > 0:
+                guidance["spectral"] = args.spectral_weight * radial_spectral_loss(predicted, target)
+            if args.laplacian_weight > 0:
+                guidance["laplacian"] = args.laplacian_weight * laplacian_loss(predicted, target)
+            for term in guidance.values():
+                loss = loss + term
             loss.backward()
             opt.step()
             train_losses.append(float(loss.detach().item()))
