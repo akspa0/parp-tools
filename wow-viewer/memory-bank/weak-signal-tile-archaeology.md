@@ -472,3 +472,78 @@ specific to the stranded material; if both do, it is a global fact about the for
 needs. Prefer a **gradient** (C1) discontinuity measure over a plain height step: a stitched seam
 matches heights across the boundary but still leaves a crease in the slope, so a C0 test would
 report a false negative on exactly the case of interest.
+
+## MEASURED: weak tiles concentrate at the northern edge of both maps (2026-08-03)
+
+First empirical result on the jigsaw. Run against `output/archaeology/0_5_3_3368/data/tiles.csv`
+(0.5.3 build 3368, 1,817 tiles) — no new harvest required.
+
+Weak-signal rate by latitude band, where **y increases southward**:
+
+| map | band | tiles | weak | rate |
+|---|---|---|---|---|
+| **Kalimdor** | **y 10-19** | **236** | **34** | **14.4%** |
+| Kalimdor | y 20-29 | 230 | 1 | 0.4% |
+| Kalimdor | y 30-39 | 187 | 1 | 0.5% |
+| Kalimdor | y 40-49 | 190 | 2 | 1.1% |
+| Kalimdor | y 50-59 | 108 | 2 | 1.9% |
+| **Azeroth** | **y 20-29** | **164** | **19** | **11.6%** |
+| Azeroth | y 30-39 | 176 | 3 | 1.7% |
+| Azeroth | y 40-49 | 163 | 2 | 1.2% |
+| Azeroth | y 50-59 | 147 | 3 | 2.0% |
+
+**Kalimdor's northernmost band is enriched ~30x over the rest of the map; Azeroth's ~7x.** In both
+maps the enriched band is the northernmost *substantially occupied* one (Azeroth has only 19 tiles
+above y 20, none weak). Sample sizes are large — 236 and 164 tiles — so this is not a small-count
+artifact.
+
+Spatially the weak tiles are not scattered: 34 of Kalimdor's 40 sit in two clusters, x 24-33 /
+y 10-20 and x 40-50 / y 12-16. 19 of Azeroth's 27 sit in two clusters at y 21-23.
+
+### What this confirms, and what it does not
+
+**Confirms the direction of displacement.** The user's visual reading was that weak terrain "was
+shifted up" and that border tiles "look to belong to the top of the map, not the sides". Shifted up
+= toward lower y = north, and the weak material is measurably, strongly northern in both maps
+independently. The displacement has a **direction**, and it is northward.
+
+**This gives the offset search a prior.** Candidate (drow, dcol) displacements should be tried
+**north-first and row-dominant**, and the northern band is where a matcher should be developed and
+gated before being run corpus-wide.
+
+**It does NOT support weak tiles being the 2001-era built zones.** The prediction from game history
+was that Kalimdor barely existed except The Barrens, Durotar and proto-Teldrassil. Those are
+central-eastern, mid-latitude areas; the weak material is in the far north and northeast. So weak
+signal is **not** "the bits they had already built" — it is more consistent with stranded older
+terrain that the built zones displaced. Recorded as a negative on that specific sub-prediction.
+
+**Caveat on the northern band.** An edge-of-landmass band is exactly where map-boundary effects,
+truncation and unfinished authoring would also concentrate. This measurement establishes that weak
+tiles are northern; it does not by itself establish *why*. The seam-profile test and the offset vote
+remain the discriminating experiments — but they now have a much smaller place to start looking.
+
+## Dating and provenance context (user, 2026-08-03, fourth pass)
+
+- The scale-up included **at least a 30% increase in landmass for Azeroth alone**.
+- **Kalimdor did not exist yet** except for a few worked areas: **The Barrens, Durotar**, and bits of
+  **Kalidar** (which later became Teldrassil), plus small demo scenes. Not explorable until 2002.
+- The game went to **E3 in 2002 and 2003** — both *after* the resize.
+- The game began as a **scripted WC3 map file**. The user estimates WC3 was scaled up by **at least
+  64x**, possibly more or less.
+
+**A convergence worth flagging without over-claiming.** The 11-minute arithmetic above independently
+produced a **64x area** scale-up (8x linear) from a 128x128 MCNK-cell world to the 64x64 ADT map.
+The user's WC3 estimate of "at least 64x" was arrived at separately. Two routes landing on 64 is
+suggestive, but both carry wide error bars — the 11-minute figure depends entirely on assuming run
+speed, and the WC3 figure is explicitly an assumption. **Treat the agreement as a reason to test,
+not as confirmation.** It would be easy and wrong to let two soft numbers validate each other.
+
+**The 30% landmass figure is the one that is directly checkable**, and it is checkable against data
+already held: if post-resize Azeroth is 1.3x the pre-resize landmass, then pre-resize occupied
+roughly 685 / 1.3 = ~527 tiles against the 685 present in 0.5.3. That is a prediction about how much
+terrain should look *added* rather than *inherited* — and the weak/normal split is a candidate
+signal for which is which. Note 0.5.3 is itself post-resize, so this compares against a
+reconstruction, not a survivor.
+
+Dating bound that follows: weak-signal artifacts should date to **on or before the resize**
+(suspected November 2001), since E3 2002 is already after it.
