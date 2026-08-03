@@ -1,6 +1,7 @@
 # PM4 Restoration Epic — pointer
 
-Recorded: 2026-08-03. Status: three specs written, implementation not started.
+Recorded: 2026-08-03. Status: three specs written; **130 planned** (plan + research + contracts);
+implementation not started.
 
 **Full epic doc**: `specs/epic-pm4-restoration/epic.md` — read that before touching PM4 work.
 
@@ -39,6 +40,35 @@ seals a surface set into a negative volume. A lead, not a premise.
 
 MPRR is the largest undecoded surface in the format (327,744 bytes in tile 0_0); neither candidate
 target domain explains it.
+
+## Prior art is IN THIS REPO, unported (found 2026-08-03)
+
+`AGENTS.md` line 345 already names these as extraction inputs. All on `main`:
+
+- `parpToolbox/src/parpToolbox/Services/PM4/` — ~60 files of object-assembly work from 2025-07-25..31,
+  including `Pm4CrossTileObjectAssembler.cs` (21 KB) and `Pm4GroupingTester.cs` (56 KB, a
+  grouping-rule harness). Its own commit messages say "semi-functional" and "broken" — hypotheses,
+  not authority.
+- `PM4Tool/docs/pm4/` — written findings. `PM4Tool/docs/apps/mirrormachine/bsptreegenerator.cpp` —
+  BSP generation, relevant to the negative-BSP thesis.
+- Spec 130 gained a prior-art harvest as its Phase 1 because of this.
+
+The public `akspa0/parp` repo (`scripts/pm4tool`, `scripts/old/pm4_to_obj`) is **not** where the
+geometry is — those are JSON/SQLite tools that emit no faces. Last commit 2025-03-10.
+
+## Three things the 130 planning measured and settled
+
+1. **The April 2025 "lost geometry" was never lost.** Screenshot of `output_development_00_00.obj`
+   at 15,096 verts / 7,382 faces decodes exactly: verts = MSPV(8,778) + MSVT(6,318);
+   faces = Σ(MSUR.IndexCount − 2) = 15,602 − 2×4,110 → **MSUR surfaces are triangle fans**.
+   `WorldScene.BuildCk24ObjectTriangles` already does this. **MSPI produced zero faces** — the
+   connective geometry was never decoded in any era.
+2. **MSPV/MSVT/MSCN share one coordinate frame; MPRL is the permuted chunk.** Measured on tile 0_0.
+   The nesting hypothesis is eliminated for the second geometry stream.
+3. **MSCN is a co-equal connective-geometry candidate** — prior art calls it the per-object exterior
+   boundary, `MSUR._0x18` already indexes into it, and it exceeds MSVT in count.
+
+Also: `pm4 inspect` and `pm4 audit` accept `--output` and silently ignore it.
 
 ## Related
 

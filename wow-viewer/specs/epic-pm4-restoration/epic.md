@@ -146,11 +146,43 @@ candidate domain explains it.
 
 | # | spec | status | gate |
 |---|---|---|---|
-| 130 | remaining decode | specced | grouping beats 65,819 / 1,206,977; one object reconstructed and measured against its real asset |
+| 130 | remaining decode | **planned** (spec + plan + research + contracts) | grouping beats 65,819 / 1,206,977; one object reconstructed and measured against its real asset |
 | 129 | zarr dataset | specced | corpus stats reproduced from the store match the analyzers exactly |
 | 128 | negative-BSP matching | specced | correct-match rate beats scalar-only scoring on the same segment set |
 
-Plans, tasks and implementation: not started. Next step is `/speckit.plan` on 130.
+130 has `plan.md`, `research.md`, `data-model.md`, `contracts/` and `quickstart.md` as of 2026-08-03.
+Next step is `/speckit.tasks` on 130. Implementation: not started.
+
+## What planning 130 changed about this epic
+
+Four findings from 130's Phase 0 research revise things stated above. See
+[130/research.md](../130-pm4-remaining-decode/research.md).
+
+**The April 2025 "lost geometry" was not lost** (R7). A screenshot of `output_development_00_00.obj`
+showing 15,096 vertices / 7,382 faces is fully explained: vertices = MSPV (8,778) + MSVT (6,318);
+faces = Σ(MSUR.IndexCount − 2) = 15,602 − 2×4,110, i.e. every MSUR surface as a **triangle fan**.
+Both reproduce exactly. `WorldScene.BuildCk24ObjectTriangles` already does that fan, and the current
+stack has strictly more (CK24, TypeFlags, coordinate resolution, cross-tile). **MSPI contributed no
+faces in that export** — the connective geometry was never decoded in any era, so the leading lead
+below has no shortcut.
+
+**MSPV shares MSVT's coordinate frame** (R8, measured on tile 0_0). MSPV (169.60–498.79, 31.84–363.85,
+0.85–134.55), MSVT (168.11–501.55, 31.00–450.70, −12.08–133.74) and MSCN all share axis order.
+**MPRL is the permuted chunk** — the hazard table above is an MPRL property, not a general one. The
+nesting hypothesis is eliminated for the second geometry stream.
+
+**MSCN is a co-equal candidate for the connective geometry** (R10b). Prior art calls it the
+per-object *exterior boundary*; `MSUR._0x18` already indexes into it; it exceeds MSVT in count and
+shares its frame. "Exterior boundary" fits "what seals a surface set" more literally than a second
+index stream does. MSPV/MSPI stays a lead, not a premise — as this epic already said.
+
+**~60 files of prior PM4 object-assembly work sit unported on `main`** (R9), in
+`parpToolbox/src/parpToolbox/Services/PM4/` (including `Pm4CrossTileObjectAssembler.cs` and a
+56 KB `Pm4GroupingTester.cs`) with documentation in `PM4Tool/docs/pm4/` and a vendored MirrorMachine
+(`bsptreegenerator.cpp`) relevant to the negative-BSP thesis. `AGENTS.md` line 345 already designates
+these as extraction inputs. 130 gained a prior-art harvest as its Phase 1. It also surfaced a live
+contradiction: prior art reads `MSLK`'s `0x10` field as an **MSVI anchor index**, where the current
+stack reads it as an MSUR `RefIndex` — and the 99.64% figure is a bounds test that does not settle it.
 
 ## Standing rules for this epic
 
