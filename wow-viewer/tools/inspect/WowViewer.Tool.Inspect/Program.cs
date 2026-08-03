@@ -2171,6 +2171,9 @@ static void RunPm4(string[] args)
 		case "connective-geometry":
 			RunPm4ConnectiveGeometry(tail);
 			break;
+		case "bounds-audit":
+			RunPm4BoundsAudit(tail);
+			break;
 		case "export-json":
 			RunPm4ExportJson(tail);
 			break;
@@ -5465,6 +5468,56 @@ static void PrintPm4MscnReport(Pm4MscnRelationshipReport report)
 		foreach (string note in report.Notes)
 			Console.WriteLine($"  {note}");
 	}
+}
+
+static void RunPm4BoundsAudit(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4BoundsAuditReport report = Pm4BoundsAuditAnalyzer.AnalyzeDirectory(input);
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 tile-bounds audit");
+	Console.WriteLine($"Input: {report.InputDirectory}");
+	Console.WriteLine($"Files with geometry: {report.FilesWithGeometry}, overflowing their tile: {report.FilesOverflowing}");
+	Console.WriteLine($"Vertices: {report.VerticesOutside}/{report.VerticesTotal} outside tile bounds ({report.OutsideFraction:P3})");
+	Console.WriteLine();
+
+	Pm4BoundsSideSummary side = report.SideSummary;
+	Console.WriteLine("Spill by side (yards summed over tiles / tiles affected):");
+	Console.WriteLine($"  -X {side.TotalNegX,12:F1} / {side.TilesNegX,4}");
+	Console.WriteLine($"  +X {side.TotalPosX,12:F1} / {side.TilesPosX,4}");
+	Console.WriteLine($"  -Z {side.TotalNegZ,12:F1} / {side.TilesNegZ,4}");
+	Console.WriteLine($"  +Z {side.TotalPosZ,12:F1} / {side.TilesPosZ,4}");
+	Console.WriteLine();
+
+	Console.WriteLine("Worst tiles by spill:");
+	foreach (Pm4TileBoundsRecord tile in report.WorstTiles)
+	{
+		Console.WriteLine($"  {tile.FileName} tile=({tile.TileX},{tile.TileY}) outside={tile.VerticesOutside}/{tile.VertexCount} ({tile.OutsideFraction:P1})");
+		Console.WriteLine($"    x {tile.MinX:F1}..{tile.MaxX:F1}  z {tile.MinZ:F1}..{tile.MaxZ:F1}  spill -X={tile.SpillNegX:F1} +X={tile.SpillPosX:F1} -Z={tile.SpillNegZ:F1} +Z={tile.SpillPosZ:F1}");
+	}
+
+	Console.WriteLine();
+	foreach (string note in report.Notes)
+		Console.WriteLine($"  - {note}");
 }
 
 static void RunPm4ConnectiveGeometry(string[] args)

@@ -120,3 +120,43 @@ public sealed record Pm4ConnectiveGeometryReport(
     IReadOnlyList<Pm4WindowFamilySummary> Families,
     Pm4MscnLinkageSummary MscnLinkage,
     IReadOnlyList<string> Notes);
+
+/// <summary>Per-tile horizontal bounds and how far geometry spills past each tile edge.</summary>
+public sealed record Pm4TileBoundsRecord(
+    string FileName,
+    int TileX,
+    int TileY,
+    int VertexCount,
+    int VerticesOutside,
+    double OutsideFraction,
+    float MinX,
+    float MaxX,
+    float MinZ,
+    float MaxZ,
+    float SpillNegX,
+    float SpillPosX,
+    float SpillNegZ,
+    float SpillPosZ);
+
+/// <summary>Corpus totals of tile-boundary spill, kept per side.</summary>
+public sealed record Pm4BoundsSideSummary(
+    double TotalNegX,
+    double TotalPosX,
+    double TotalNegZ,
+    double TotalPosZ,
+    int TilesNegX,
+    int TilesPosX,
+    int TilesNegZ,
+    int TilesPosZ);
+
+public sealed record Pm4BoundsAuditReport(
+    string InputDirectory,
+    int FilesWithGeometry,
+    int FilesOverflowing,
+    long VerticesTotal,
+    long VerticesOutside,
+    double OutsideFraction,
+    Pm4BoundsSideSummary SideSummary,
+    IReadOnlyList<Pm4TileBoundsRecord> WorstTiles,
+    IReadOnlyList<Pm4TileBoundsRecord> AllTiles,
+    IReadOnlyList<string> Notes);
