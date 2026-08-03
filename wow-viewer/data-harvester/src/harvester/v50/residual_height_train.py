@@ -131,6 +131,14 @@ def build_training_plan(
     }
 
 
+def _count_regimes(rows: list[int], regime_of) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        name = regime_of(row)
+        counts[name] = counts.get(name, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def require_new_output(output: Path) -> None:
     """Never overwrite an existing run directory or partial checkpoint set."""
     if output.exists() and any(output.iterdir()):
@@ -215,7 +223,16 @@ def main() -> int:
     ap.add_argument("--patience", type=int, default=15)
     ap.add_argument("--seed", type=int, default=125)
     ap.add_argument("--release", default="v50.1", type=validate_release)
+    ap.add_argument(
+        "--regimes",
+        default="",
+        help="comma-separated terrain regimes to train and validate on, e.g. 'steep,rolling'. "
+             "Empty means all. Flat terrain has almost no relief to recover, so including it spends "
+             "gradient on a near-degenerate target and drags the reported aggregate down. "
+             "Requires a curriculum built with --curation.",
+    )
     args = ap.parse_args()
+    selected_regimes = {r.strip() for r in args.regimes.split(",") if r.strip()}
 
     group = zarr.open_group(str(args.store), mode="r")
     try:
@@ -234,7 +251,28 @@ def main() -> int:
     if any(args.val_key not in row for row in index):
         raise SystemExit(f"curriculum index does not contain --val-key {args.val_key!r}")
 
-    selected_rows = list(range(len(index)))
+    if selected_regimes:
+        if "height_regime" not in index[0]:
+            raise SystemExit(
+                "--regimes requires a curriculum carrying 'height_regime'. Rebuild the curriculum "
+                "with --curation <spec122-curation-dir>."
+            )
+        available = sorted({str(row.get("height_regime")) for row in index})
+        unknown = sorted(selected_regimes - set(available))
+        if unknown:
+            raise SystemExit(f"unknown regimes {unknown}; curriculum contains {available}")
+        selected_rows = [i for i, row in enumerate(index) if str(row.get("height_regime")) in selected_regimes]
+        print(
+            f"regime selection {sorted(selected_regimes)}: {len(selected_rows)} of {len(index)} rows "
+            f"(available: {available})",
+            flush=True,
+        )
+    else:
+        selected_rows = list(range(len(index)))
+
+    def _regime(i: int) -> str:
+        return str(index[i].get("height_regime", "uncurated"))
+
     train_rows = [i for i in selected_rows if str(index[i].get(args.val_key)) != args.val_value]
     val_rows = [i for i in selected_rows if str(index[i].get(args.val_key)) == args.val_value]
     if len(train_rows) < 32 or len(val_rows) < 8:
@@ -343,15 +381,24 @@ def main() -> int:
         model.eval()
         val_absolute_error = 0.0
         val_elements = 0
+        per_sample_mae: list[float] = []
         with torch.no_grad():
             for x, y in val_loader:
                 y_device = y.to(device)
                 absolute_error = torch.abs(model(x.to(device)) - y_device)
                 val_absolute_error += float(absolute_error.sum().item())
                 val_elements += absolute_error.numel()
+                # val_loader is unshuffled, so sample order matches val_rows.
+                per_sample_mae.extend(absolute_error.mean(dim=(1, 2)).cpu().tolist())
         val_mae = val_absolute_error / val_elements
+        # Report per regime so a strong regime can never mask a dead one (constitution IV).
+        by_regime: dict[str, list[float]] = {}
+        for row, mae in zip(val_rows, per_sample_mae):
+            by_regime.setdefault(_regime(row), []).append(mae)
+        regime_mae = {k: float(np.mean(v)) for k, v in sorted(by_regime.items())}
         train_loss = float(np.mean(train_losses))
-        per_epoch.append({"epoch": epoch, "train_loss": train_loss, "val_mae": val_mae})
+        per_epoch.append({"epoch": epoch, "train_loss": train_loss, "val_mae": val_mae,
+                          "val_mae_by_regime": regime_mae})
         checkpoint = {**run_identity, "model": model.state_dict(), "epoch": epoch, "val_mae": val_mae,
                       "curriculum_identity": identity}
         torch.save(checkpoint, args.output / "checkpoint_last.pt")
@@ -361,9 +408,11 @@ def main() -> int:
             torch.save(checkpoint, args.output / "checkpoint_best.pt")
         else:
             stale += 1
+        regime_text = " ".join(f"{k}={v:.6f}" for k, v in regime_mae.items())
         print(
             f"[epoch {epoch:03d}] train_loss={train_loss:.6f} val_mae={val_mae:.6f} "
-            f"baseline={baseline_mae:.6f} best={best:.6f} stale={stale}/{args.patience}",
+            f"baseline={baseline_mae:.6f} best={best:.6f} stale={stale}/{args.patience} "
+            f"| by_regime {regime_text}",
             flush=True,
         )
         if args.patience > 0 and stale >= args.patience:
@@ -376,6 +425,11 @@ def main() -> int:
         per_epoch=per_epoch, baseline_mae=baseline_mae,
         train_rows=len(train_rows), val_rows=len(val_rows),
     )
+    summary["regimes_selected"] = sorted(selected_regimes) if selected_regimes else "all"
+    summary["train_rows_by_regime"] = _count_regimes(train_rows, _regime)
+    summary["val_rows_by_regime"] = _count_regimes(val_rows, _regime)
+    best_entry = min(per_epoch, key=lambda e: e["val_mae"]) if per_epoch else {}
+    summary["best_val_mae_by_regime"] = best_entry.get("val_mae_by_regime", {})
     (args.output / "training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     if summary["structural_failure_epoch1_best"]:
         print("STRUCTURAL FAILURE: best epoch is epoch 1; this run is not a success.", flush=True)

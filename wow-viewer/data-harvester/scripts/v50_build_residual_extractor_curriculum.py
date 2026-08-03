@@ -35,6 +35,11 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from harvester.v50.contracts import release_identity  # noqa: E402
+from harvester.v50.curation_join import (  # noqa: E402
+    curation_columns,
+    load_curation_manifest,
+    regime_counts,
+)
 from harvester.v50.dxt1_approx import (  # noqa: E402
     block_edge_ratio,
     dxt1_round_trip,
@@ -73,6 +78,20 @@ def main() -> int:
     ap.add_argument("--output", required=True, type=Path)
     ap.add_argument("--map", required=True, help="map name (Azeroth or Kalimdor)")
     ap.add_argument("--release", default="v50.1")
+    ap.add_argument(
+        "--curation",
+        type=Path,
+        help="Spec 122 curation output dir (holding curation_manifest.parquet). Tags every row with "
+             "its terrain regime so the trainer can select on it. Rows are never dropped here -- "
+             "curation partitions, it does not filter.",
+    )
+    ap.add_argument(
+        "--val-fraction",
+        type=float,
+        default=0.10,
+        help="fraction of tiles held out as a trailing spatial block. Raise it when the trainer will "
+             "select a regime subset, since that shrinks val after this split is fixed.",
+    )
     args = ap.parse_args()
 
     if not args.residual_dir.is_dir():
@@ -122,10 +141,14 @@ def main() -> int:
             f"{len(residual_paths)} residual PNGs; skipped={skipped}"
         )
 
-    # Held-out split by source group: hold out the last 10% of tiles as val, but never fewer than 8 —
-    # the trainer's gate requires train >= 32 and val >= 8, so a 10%-of-40 split would build a store
-    # that the trainer then refuses.
-    val_count = max(8, matched // 10)
+    # Held-out split: the LAST slice of spatially-sorted tiles becomes val. This is a spatial block
+    # holdout on purpose -- the corpus has measured ~99.6% train/val spatial leakage under a random
+    # split, so a contiguous block is what makes held-out numbers mean anything.
+    #
+    # Never fewer than 8: the trainer's gate requires train >= 32 and val >= 8. Raise
+    # --val-fraction when the trainer will further select a subset (e.g. --regimes steep,rolling),
+    # because that selection shrinks val after this split is already fixed.
+    val_count = max(8, int(matched * args.val_fraction))
     for row in index_rows[-val_count:]:
         row["split"] = "val"
 
@@ -176,16 +199,25 @@ def main() -> int:
             [block_edge_ratio(degraded_stack[i]) for i in range(sample)])),
     }
 
-    table = pa.table(
-        {
-            "map": [r["map"] for r in index_rows],
-            "tile_x": [r["tile_x"] for r in index_rows],
-            "tile_y": [r["tile_y"] for r in index_rows],
-            "source_group_id": [r["source_group_id"] for r in index_rows],
-            "split": [r["split"] for r in index_rows],
+    columns = {
+        "map": [r["map"] for r in index_rows],
+        "tile_x": [r["tile_x"] for r in index_rows],
+        "tile_y": [r["tile_y"] for r in index_rows],
+        "source_group_id": [r["source_group_id"] for r in index_rows],
+        "split": [r["split"] for r in index_rows],
+    }
+    curation_summary: dict = {"applied": False}
+    if args.curation:
+        records = load_curation_manifest(args.curation)
+        keys = [(r["map"], r["tile_x"], r["tile_y"]) for r in index_rows]
+        columns.update(curation_columns(keys, records))
+        curation_summary = {
+            "applied": True,
+            "source": str(args.curation),
+            "regimes": regime_counts(columns["height_regime"]),
+            "note": "rows are tagged, never dropped; the trainer selects regimes via --regimes",
         }
-    )
-    pq.write_table(table, args.output / "index.parquet")
+    pq.write_table(pa.table(columns), args.output / "index.parquet")
 
     summary = {
         "schema": CURRICULUM_SCHEMA,
@@ -199,6 +231,7 @@ def main() -> int:
         "skipped": skipped,
         "deployment_domain_input": "minimap_rgb_dxt1",
         "codec_degradation": codec_stats,
+        "curation": curation_summary,
     }
     (args.output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2), flush=True)
