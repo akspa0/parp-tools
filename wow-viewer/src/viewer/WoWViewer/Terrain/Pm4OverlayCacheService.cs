@@ -52,11 +52,14 @@ internal sealed class Pm4OverlayCacheService
         IDataSource dataSource,
         IReadOnlyList<string> pm4Candidates,
         bool splitByMscnRef,
-        bool splitByConnectivity)
+        bool splitByConnectivity,
+        bool includePathWalls)
     {
         var builder = new StringBuilder();
         builder.Append("splitByMscnRef=").Append(splitByMscnRef ? '1' : '0').Append('\n');
         builder.Append("splitByConnectivity=").Append(splitByConnectivity ? '1' : '0').Append('\n');
+        // Wall geometry changes the cached mesh, so it has to change the signature too.
+        builder.Append("includePathWalls=").Append(includePathWalls ? '1' : '0').Append('\n');
 
         for (int i = 0; i < pm4Candidates.Count; i++)
         {

@@ -233,6 +233,25 @@ public partial class ViewerApp
             _worldScene.ReloadPm4Overlay();
         }
 
+        bool showPathWalls = _worldScene.Pm4ShowPathWalls;
+        if (ImGui.Checkbox("Show MSPV/MSPI walls", ref showPathWalls))
+        {
+            _worldScene.Pm4ShowPathWalls = showPathWalls;
+            _worldScene.ReloadPm4Overlay();
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(
+                "MSLK path windows drawn as vertical faces.\n" +
+                "Measured over the 616-file development corpus: 98% of windows are exactly 4\n" +
+                "indices, 99.6% coplanar, and none of 598,790 faces has Z as its dominant normal.\n" +
+                "MSUR is the floors; this is the walls between them.");
+        }
+
+        if (_worldScene.Pm4ShowPathWalls && _worldScene.Pm4LoadAttempted)
+            ImGui.TextDisabled($"  wall faces: {_worldScene.Pm4WallFaceCount}");
+
         if (_worldScene.IsPm4Loading)
             ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), $"PM4 loading... {_worldScene.Pm4Status}");
         else if (_worldScene.Pm4LoadAttempted)

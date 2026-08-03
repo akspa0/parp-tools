@@ -1016,6 +1016,11 @@ public class WorldScene : ISceneRenderer
     private bool _showPm4Type80 = true;
     private bool _showPm4TypeOther = true;
     private bool _pm4SplitCk24ByMscnRef = true;
+    // MSPV/MSPI path windows are a vertical planar quad mesh — the walls that stand between the
+    // MSUR walkable surfaces. Measured corpus-wide: 98% of windows are exactly 4 indices, 99.6%
+    // coplanar, and not one of 598,790 faces has Z as its dominant normal. The viewer has never
+    // drawn them, so half the decoded geometry has been invisible.
+    private bool _pm4ShowPathWalls = true;
     private Pm4OverlayColorMode _pm4ColorMode = Pm4OverlayColorMode.Ck24ObjectId;
     private Vector3 _pm4OverlayTranslation = Vector3.Zero;
     private Vector3 _pm4OverlayRotationDegrees = Vector3.Zero;
@@ -1035,6 +1040,7 @@ public class WorldScene : ISceneRenderer
     private int _pm4VisiblePositionRefCount;
     private int _pm4TotalMsurCount;
     private int _pm4DroppedShortIndexCount;
+    private int _pm4WallFaceCount;
     private int _pm4DroppedOutOfRangeMsviCount;
     private int _pm4DroppedEmptyComponentCount;
     private float _pm4MinObjectZ;
@@ -1400,6 +1406,9 @@ public class WorldScene : ISceneRenderer
     public int Pm4RejectedLongEdges => _pm4RejectedLongEdges;
     public int Pm4TotalMsurCount => _pm4TotalMsurCount;
     public int Pm4DroppedShortIndexCount => _pm4DroppedShortIndexCount;
+
+    /// <summary>MSPV/MSPI wall faces emitted across the loaded tiles.</summary>
+    public int Pm4WallFaceCount => _pm4WallFaceCount;
     public int Pm4DroppedOutOfRangeMsviCount => _pm4DroppedOutOfRangeMsviCount;
     public int Pm4DroppedEmptyComponentCount => _pm4DroppedEmptyComponentCount;
     public int Pm4VisibleObjectCount => _pm4VisibleObjectCount;
@@ -1441,6 +1450,7 @@ public class WorldScene : ISceneRenderer
     public bool ShowPm4Type80 { get => _showPm4Type80; set => _showPm4Type80 = value; }
     public bool ShowPm4TypeOther { get => _showPm4TypeOther; set => _showPm4TypeOther = value; }
     public bool Pm4SplitCk24ByMscnRef { get => _pm4SplitCk24ByMscnRef; set => _pm4SplitCk24ByMscnRef = value; }
+    public bool Pm4ShowPathWalls { get => _pm4ShowPathWalls; set => _pm4ShowPathWalls = value; }
     public Pm4OverlayColorMode Pm4ColorMode { get => _pm4ColorMode; set => _pm4ColorMode = value; }
     public Vector3 Pm4OverlayTranslation { get => _pm4OverlayTranslation; set => _pm4OverlayTranslation = value; }
     public Vector3 Pm4OverlayRotationDegrees { get => _pm4OverlayRotationDegrees; set => _pm4OverlayRotationDegrees = value; }
@@ -1918,6 +1928,7 @@ public class WorldScene : ISceneRenderer
                     effectiveTileY,
                     _pm4SplitCk24ByMscnRef,
                     _pm4SplitCk24ByConnectivity,
+                    _pm4ShowPathWalls,
                     ref remainingLineBudget,
                     ref remainingTriangleBudget,
                     ref rejectedLongEdges,
@@ -2025,6 +2036,7 @@ public class WorldScene : ISceneRenderer
             exportRoot,
             splitCk24ByMscnRef = _pm4SplitCk24ByMscnRef,
             splitCk24ByConnectivity = _pm4SplitCk24ByConnectivity,
+            includePathWalls = _pm4ShowPathWalls,
             summary = new
             {
                 sourceFileCount = mapPm4Candidates.Count,
@@ -3835,7 +3847,8 @@ public class WorldScene : ISceneRenderer
                 _dataSource,
                 loadCandidates.Select(static candidate => candidate.path).ToList(),
                 _pm4SplitCk24ByMscnRef,
-                _pm4SplitCk24ByConnectivity);
+                _pm4SplitCk24ByConnectivity,
+                _pm4ShowPathWalls);
             var loadStopwatch = Stopwatch.StartNew();
             string? cacheLoadError = null;
             if (!ignoreCache
@@ -3934,7 +3947,9 @@ public class WorldScene : ISceneRenderer
                 // the loose-file write-tick for stronger stamp coverage
                 // when the data source exposes it.
                 string normalizedPm4Path = pm4Path.Replace('\\', '/');
-                long memStamp = ((_pm4SplitCk24ByMscnRef ? 1L : 0L) << 32) | (_pm4SplitCk24ByConnectivity ? 1L : 0L);
+                long memStamp = ((_pm4ShowPathWalls ? 1L : 0L) << 33)
+                    | ((_pm4SplitCk24ByMscnRef ? 1L : 0L) << 32)
+                    | (_pm4SplitCk24ByConnectivity ? 1L : 0L);
                 if (_pm4PerFileInMemoryCache.TryGet(normalizedPm4Path, bytes.Length, memStamp, out CorePm4PerFileCacheEntry? cachedEntry)
                     && cachedEntry != null
                     && cachedEntry.Tiles.Count > 0)
@@ -4009,12 +4024,14 @@ public class WorldScene : ISceneRenderer
                         effectiveTileY,
                 _pm4SplitCk24ByMscnRef,
                         _pm4SplitCk24ByConnectivity,
+                        _pm4ShowPathWalls,
                         ref remainingLineBudget,
                         ref remainingTriangleBudget,
                         ref rejectedLongEdges,
                         out Pm4TileBuildDiagnostics fileDiagnostics);
                     _pm4TotalMsurCount += fileDiagnostics.TotalMsurCount;
                     _pm4DroppedShortIndexCount += fileDiagnostics.DroppedShortIndexCount;
+                    _pm4WallFaceCount += fileDiagnostics.WallFaceCount;
                     _pm4DroppedOutOfRangeMsviCount += fileDiagnostics.DroppedOutOfRangeMsviCount;
                     _pm4DroppedEmptyComponentCount += fileDiagnostics.DroppedEmptyComponentCount;
                     if (objects.Count == 0)
@@ -4910,6 +4927,7 @@ public class WorldScene : ISceneRenderer
         _pm4RejectedLongEdges = 0;
         _pm4TotalMsurCount = 0;
         _pm4DroppedShortIndexCount = 0;
+        _pm4WallFaceCount = 0;
         _pm4DroppedOutOfRangeMsviCount = 0;
         _pm4DroppedEmptyComponentCount = 0;
         _pm4MinObjectZ = float.MaxValue;
@@ -5158,6 +5176,7 @@ public class WorldScene : ISceneRenderer
         int tileY,
         bool splitCk24ByMscnRef,
         bool splitCk24ByConnectivity,
+        bool includePathWalls,
         ref int remainingLineBudget,
         ref int remainingTriangleBudget,
         ref int rejectedLongEdges,
@@ -5180,6 +5199,11 @@ public class WorldScene : ISceneRenderer
         diagnostics.DroppedShortIndexCount = pm4.KnownChunks.Msur.Count(static s => s.IndexCount < 3);
         if (seedGroups.Count == 0)
             return objects;
+
+        // MSLK path windows, indexed once per tile by the MSUR surface they reference.
+        Dictionary<int, List<int>> mslkWindowsBySurface = includePathWalls
+            ? BuildMslkWindowsBySurface(pm4)
+            : [];
 
         var mshdGrouping = CorePm4MshdGroupingService.Describe(pm4.KnownChunks.Mshd);
         Pm4AxisConvention fileAxisConvention = DetectPm4AxisConvention(pm4);
@@ -5273,6 +5297,15 @@ public class WorldScene : ISceneRenderer
                     linkedPlanarTransform,
                     linkedWorldPivot,
                     linkedWorldYawCorrection);
+                // MSUR.MsviFirstIndex is the surface's window start, so it recovers the surface
+                // index after the split helpers have reduced indexed surfaces to bare entries.
+                Dictionary<uint, int> surfaceIndexByMsviFirst = [];
+                if (includePathWalls)
+                {
+                    foreach (Pm4IndexedSurface indexed in linkedGroup)
+                        surfaceIndexByMsviFirst[indexed.Surface.MsviFirstIndex] = indexed.SurfaceIndex;
+                }
+
                 bool allowNestedSeedSplits = !seedGroup.RequiresConnectivitySeedSplit;
                 List<List<MsurEntry>> anchorGroups = splitCk24ByMscnRef && allowNestedSeedSplits
                     ? SplitSurfaceGroupByMscnRef(linkedSurfaces)
@@ -5300,6 +5333,36 @@ public class WorldScene : ISceneRenderer
                             : new List<Pm4Triangle>();
 
                         diagnostics.DroppedOutOfRangeMsviCount += componentRejectedOutOfRange;
+
+                        // Append this component's wall faces to the same mesh, so they render,
+                        // pick and select as part of the object they stand on.
+                        if (includePathWalls && mslkWindowsBySurface.Count > 0 && tileTriangleBudget > 0)
+                        {
+                            HashSet<int> componentSurfaceIndices = [];
+                            foreach (MsurEntry componentSurface in component)
+                            {
+                                if (surfaceIndexByMsviFirst.TryGetValue(componentSurface.MsviFirstIndex, out int surfaceIndex))
+                                    componentSurfaceIndices.Add(surfaceIndex);
+                            }
+
+                            if (componentSurfaceIndices.Count > 0)
+                            {
+                                List<Pm4Triangle> wallTriangles = BuildMslkWallTriangles(
+                                    pm4,
+                                    componentSurfaceIndices,
+                                    mslkWindowsBySurface,
+                                    tileX,
+                                    tileY,
+                                    linkedUseTileLocalCoordinates,
+                                    ck24AxisConvention,
+                                    linkedPlanarTransform,
+                                    Math.Max(0, tileTriangleBudget - triangles.Count),
+                                    out int componentWallFaces);
+
+                                diagnostics.WallFaceCount += componentWallFaces;
+                                triangles.AddRange(wallTriangles);
+                            }
+                        }
 
                         if (lines.Count == 0 && triangles.Count == 0)
                         {
@@ -6074,6 +6137,110 @@ public class WorldScene : ISceneRenderer
         }
 
         return triangles;
+    }
+
+    /// <summary>
+    /// Builds the vertical wall faces that belong to a set of surfaces, from the MSLK path windows
+    /// that reference them (MSLK.RefIndex -> MSUR) through MSPI into MSPV.
+    /// </summary>
+    /// <remarks>
+    /// Each window is one planar polygon, emitted as a fan. Measured over the 616-file development
+    /// corpus: 98.05% of windows hold exactly 4 indices, 1.84% hold 6, 99.6% are coplanar, and zero
+    /// of 598,790 faces have Z as their dominant normal component. They are walls; MSUR is floors.
+    /// This is the geometry the viewer has never drawn.
+    /// </remarks>
+    private static List<Pm4Triangle> BuildMslkWallTriangles(
+        Pm4File pm4,
+        IReadOnlyCollection<int> surfaceIndices,
+        IReadOnlyDictionary<int, List<int>> mslkWindowsBySurface,
+        int tileX,
+        int tileY,
+        bool useTileLocalCoordinates,
+        Pm4AxisConvention axisConvention,
+        Pm4PlanarTransform planarTransform,
+        int triangleBudget,
+        out int wallFaceCount)
+    {
+        var triangles = new List<Pm4Triangle>();
+        wallFaceCount = 0;
+
+        IReadOnlyList<Vector3> pathVertices = pm4.KnownChunks.Mspv;
+        IReadOnlyList<uint> pathIndices = pm4.KnownChunks.Mspi;
+        if (pathVertices.Count == 0 || pathIndices.Count == 0 || mslkWindowsBySurface.Count == 0)
+            return triangles;
+
+        var scratch = new List<Vector3>(8);
+
+        foreach (int surfaceIndex in surfaceIndices)
+        {
+            if (!mslkWindowsBySurface.TryGetValue(surfaceIndex, out List<int>? linkIndices))
+                continue;
+
+            foreach (int linkIndex in linkIndices)
+            {
+                if (triangles.Count >= triangleBudget)
+                    return triangles;
+
+                MslkEntry link = pm4.KnownChunks.Mslk[linkIndex];
+                int first = link.MspiFirstIndex;
+                int count = link.MspiIndexCount;
+                if (first < 0 || count < 3 || first + count > pathIndices.Count)
+                    continue;
+
+                scratch.Clear();
+                for (int i = 0; i < count; i++)
+                {
+                    uint vertexIndex = pathIndices[first + i];
+                    if (vertexIndex < (uint)pathVertices.Count)
+                        scratch.Add(ConvertPm4VertexToRenderer(pathVertices[(int)vertexIndex], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform));
+                }
+
+                if (scratch.Count < 3)
+                    continue;
+
+                wallFaceCount++;
+                for (int i = 1; i + 1 < scratch.Count && triangles.Count < triangleBudget; i++)
+                {
+                    triangles.Add(planarTransform.InvertsWinding
+                        ? new Pm4Triangle(scratch[0], scratch[i + 1], scratch[i])
+                        : new Pm4Triangle(scratch[0], scratch[i], scratch[i + 1]));
+                }
+            }
+        }
+
+        return triangles;
+    }
+
+    /// <summary>
+    /// Indexes MSLK path windows by the MSUR surface they reference, once per tile.
+    /// </summary>
+    /// <remarks>
+    /// Entries with a negative MspiFirstIndex carry no path at all — 53% of the corpus — and are
+    /// skipped here rather than being treated as empty geometry. Prior art reads them as doodad
+    /// placements; that is a separate question from wall rendering.
+    /// </remarks>
+    private static Dictionary<int, List<int>> BuildMslkWindowsBySurface(Pm4File pm4)
+    {
+        var windowsBySurface = new Dictionary<int, List<int>>();
+        int surfaceCount = pm4.KnownChunks.Msur.Count;
+        IReadOnlyList<MslkEntry> links = pm4.KnownChunks.Mslk;
+
+        for (int i = 0; i < links.Count; i++)
+        {
+            MslkEntry link = links[i];
+            if (link.MspiFirstIndex < 0 || link.MspiIndexCount < 3 || link.RefIndex >= surfaceCount)
+                continue;
+
+            if (!windowsBySurface.TryGetValue(link.RefIndex, out List<int>? linkIndices))
+            {
+                linkIndices = [];
+                windowsBySurface[link.RefIndex] = linkIndices;
+            }
+
+            linkIndices.Add(i);
+        }
+
+        return windowsBySurface;
     }
 
     private static List<Pm4LineSegment> BuildFallbackMeshLines(
@@ -13240,6 +13407,9 @@ internal struct Pm4TileBuildDiagnostics
     public int DroppedEmptyComponentCount;
     public int DroppedLongEdgeLines;
     public int DroppedEmptyFile;
+
+    /// <summary>MSPV/MSPI wall faces emitted for this tile. Zero when wall rendering is off.</summary>
+    public int WallFaceCount;
 }
 
 internal sealed record Pm4ObjectMatchCandidate(
