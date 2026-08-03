@@ -38,12 +38,18 @@ What is NOT negotiable is that a model cannot hide a dead signal inside an aggre
 ONE residual signal... No monolithic models. No multi-task training. No shared weights between
 models."*
 
-- **Rationale for the amendment**: the V14 residual-chain architecture was tried extensively and did
-  not produce the wins it promised — the tile-mean baseline remains unbeaten across much of that
-  lane. The prohibition had stopped describing a working method and had become a blocker: Spec 125
-  established that we now hold a complete, known forward model for minimap generation, which makes
-  "one minimap tile in, every signal out" a reasonable architecture to attempt. The old rule forbade
-  attempting it. A constitution should encode what works, not what was hoped for in May 2026.
+- **Rationale for the amendment**: the rule was a response to a **bad dataset**, not to a bad
+  architecture. When it was written (May 2026) roughly 90% of the harvested signals were wrong or
+  useless and nobody knew it yet; forcing every model down to one signal was the only way to see
+  which signals were dead, because a larger model would have hidden them inside an aggregate loss.
+  It was the right instrument for that problem. That problem is now solved by other means: Spec 109
+  rebuilt the corpus clean-room, Spec 122 gave it curation and bucketing, and Spec 125 established
+  that we hold a complete, known forward model for minimap generation — we can synthesize the
+  signals the way the original process did. With trustworthy signals the diagnostic constraint costs
+  more than it returns, and it had begun forbidding the obvious next experiment ("one minimap tile
+  in, every signal out"). A constitution should encode what works now, not the workaround for a
+  problem that has been fixed. **The diagnostic intent is preserved deliberately** as the per-signal
+  reporting requirement above — that, not the size limit, was the part that was actually load-bearing.
 - **Approved by**: the user, 2026-08-02, in session, explicitly and after the conflict was raised.
 - **Migration**: no code change is required — every existing model remains valid under the amended
   principle, since single-output specialists are still an allowed topology. Prior specs (117, 118,
