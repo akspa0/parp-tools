@@ -28,20 +28,19 @@ public static partial class Pm4CoordinateService
     /// axis as if it were horizontal. For tile 00_00 both indices are zero so both errors cancel,
     /// which is why 0_0 alone appeared correct while every other tile piled up around it.
     ///
-    /// Note the filename is ordered ROW_COL: the first number indexes Y, the second indexes X.
+    /// MSVT's own X and Y are SWAPPED relative to world: world X comes from MSVT.Y and world Y
+    /// from MSVT.X. Confirmed against ground truth rather than inferred — the human tents in
+    /// development_01_00.pm4 belong on the tile to the right of 0_0 in the same row, i.e. world
+    /// (x=1, y=0). Raw MSVT has X in band 0 (41.0..52.9) and Y in band 1 (778.9..790.6), so only
+    /// the swapped reading puts them where they belong. The filename is therefore ordinary
+    /// COL_ROW; bounds measurements alone cannot separate "filename is row_col" from "MSVT axes
+    /// are swapped", and this is the observation that does.
+    ///
+    /// <see cref="Pm4PlacementMath.ConvertPm4VertexToWorld"/> already applies this swap in its
+    /// XYPlaneZUp case and is correct.
     /// </remarks>
     public static Vector3 Pm4LocalToAdtPlacement(Vector3 msvtPosition, int tileX, int tileY)
-        => msvtPosition;
-
-    /// <summary>
-    /// The world tile a filename refers to, as (x, y) rather than the raw filename order.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="TryParseTileCoordinates"/> returns the numbers in filename order, which is
-    /// ROW_COL. This converts that to axis order so callers do not have to remember the swap.
-    /// </remarks>
-    public static (int TileX, int TileY) FileOrderToTileAxes(int firstNumber, int secondNumber)
-        => (secondNumber, firstNumber);
+        => new(msvtPosition.Y, msvtPosition.X, msvtPosition.Z);
 
     public static Vector3 MprlToAdtPlacement(Vector3 mprlPosition)
     {

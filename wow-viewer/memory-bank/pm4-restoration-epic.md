@@ -172,3 +172,46 @@ same distance budget terrain already does. The overlay build is already per-tile
 exist), so the work is in gating upload/draw by tile distance rather than restructuring the build.
 
 Note wall rendering roughly doubles the triangle count, so this got more urgent this session.
+
+### CORRECTION (2026-08-03, later): the filename is COL_ROW and MSVT's axes are swapped
+
+An earlier entry in this file concluded the filename is ROW_COL. **That was wrong**, and the
+correction matters because it inverts what needs fixing.
+
+Bounds measurement establishes that MSVT.X sits in the world band of the SECOND filename number and
+MSVT.Y in the band of the FIRST, 309/309 files. But that single measurement is consistent with **two
+different readings**, and bounds alone cannot separate them:
+
+- (a) the filename is ROW_COL, and MSVT axes map straight through, or
+- (b) the filename is ordinary COL_ROW, and **MSVT's own X and Y are swapped relative to world**.
+
+**User ground truth settles it as (b).** The human tents in `development_01_00.pm4` belong on the
+tile to the **right of 0_0, in the same row** — world (x=1, y=0). Raw MSVT has X in band 0
+(41.0..52.9) and Y in band 1 (778.9..790.6). Only `world = (MSVT.Y, MSVT.X)` places them correctly.
+
+**Consequences:**
+
+- `Pm4PlacementMath.ConvertPm4VertexToWorld` was **CORRECT ALL ALONG**. Its `XYPlaneZUp` case maps
+  `localU = pm4Vertex.Y; localV = pm4Vertex.X`, which is exactly the required swap. The "one-line
+  fix" recorded earlier would have **broken** it, and the 7 `PlacementMath_*` tests that blocked it
+  were correctly defending real behaviour. Do not apply it. The misleading comment at the site has
+  been removed.
+- `Pm4CoordinateService.Pm4LocalToAdtPlacement` now performs the swap rather than passing MSVT
+  through unchanged.
+- The lesson: a bounds fit proves which *band* a value lives in, not which *axis* it means. Only
+  external ground truth distinguishes a transposed filename from transposed data.
+
+### The phasing hypothesis does NOT explain the tents
+
+Also corrected: the phased-object idea cannot be the general explanation. The region-6 human tents
+are in `development_01_00.pm4`, **which has no phased or destructible chunks at all**, and they are
+still misplaced. Phasing may still matter for 00_00 specifically, but at least one misplacement
+population has nothing to do with it.
+
+### Region 0 is shared, which weakens region-as-frame
+
+M2 content is generally a **combination of the local region and region 0**, across the whole map. So
+region 0 behaves like a global or shared bucket rather than a located area. A frame keyed purely on
+`MSHD.Field04` would have to explain what frame region 0 carries when its contents are spread
+everywhere. Region-scoped frames remain plausible for located regions but are **not settled** — the
+`--by-region` bounds audit must treat region 0 separately from the rest.

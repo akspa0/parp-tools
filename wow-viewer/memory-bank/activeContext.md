@@ -32,21 +32,36 @@ partially started. **Pick up here.**
 all 309 non-empty files: X lies inside the world band of the SECOND filename number 309/309 times,
 Y inside the band of the FIRST 309/309, each spanning exactly one tile. `development_22_18` is the
 clean case — 126,596 vertices, X = 9600.0..10133.3 (exactly column 18), Y = 11733.3..12266.7
-(exactly row 22). **The filename is ROW_COL.** Only `development_00_00` is also consistent with
+(exactly row 22). Only `development_00_00` is also consistent with
 tile-local storage, because there both indices are 0 and world equals local — which is why that one
 tile always looked right and everything else piled up around it.
 
-`Pm4CoordinateService` is corrected. **`Pm4PlacementMath` is NOT.** Its `XYPlaneZUp` case maps
-U from Y and V from X, transposing the scene about the map diagonal so tile (x,y) renders at (y,x).
-The one-line fix is `localU = pm4Vertex.X; localV = pm4Vertex.Y;` and it is documented at the site.
-It was applied, **broke 7 `Pm4ResearchIntegrationTests.PlacementMath_*` tests** that pin the old
-convention, and was reverted rather than left failing.
+**CORRECTED LATER IN THE SESSION — read this part carefully.** That bounds measurement is
+consistent with TWO readings and cannot separate them: (a) filename is ROW_COL with axes mapping
+straight through, or (b) filename is ordinary COL_ROW and **MSVT's own X and Y are swapped relative
+to world**. User ground truth settles it as **(b)**: the human tents in `development_01_00.pm4`
+belong on the tile to the right of 0_0 in the same row — world (x=1, y=0) — and raw MSVT has X in
+band 0 (41.0..52.9), Y in band 1 (778.9..790.6). Only `world = (MSVT.Y, MSVT.X)` places them right.
 
-**But that fix alone is now known to be insufficient.** Viewer hover data shows the residual error
-is not uniform: two objects sharing `region=146` are wrong together and identically (correct tile,
-polar opposite), while a `region=6` object is wrong differently (one tile off). Objects failing in
-lockstep by region is the signature of a **per-region coordinate frame**, keyed on `MSHD.Field04`.
-See `pm4-restoration-epic.md` for the full hypothesis and the test.
+So **`Pm4PlacementMath` was CORRECT ALL ALONG** — its `XYPlaneZUp` case already applies that swap,
+and the 7 `PlacementMath_*` tests that blocked the proposed "fix" were defending real behaviour.
+**Do not invert those two lines.** `Pm4CoordinateService.Pm4LocalToAdtPlacement` now applies the
+swap too. Lesson: a bounds fit proves which BAND a value is in, not which AXIS it means.
+
+**Placement is still wrong and the cause is NOT settled.** Two objects sharing `region=146` are
+wrong together and identically (correct tile, polar opposite) while a `region=6` object is wrong
+differently (one tile off) — which looks like per-region frames keyed on `MSHD.Field04`. But two
+things weaken that:
+
+- **Phasing does not explain it.** The region-6 tents live in `development_01_00.pm4`, which has
+  **no phased or destructible chunks at all**. Phasing may still matter for 00_00 specifically, but
+  at least one misplaced population has nothing to do with it.
+- **Region 0 is a shared bucket.** M2 content is generally local region PLUS region 0, spread across
+  the whole map, so region 0 is not a located area and a pure region-keyed frame has to explain what
+  frame it carries. The `--by-region` audit must treat region 0 separately.
+
+Regions ARE confirmed real: region 245 is a whole ~2006 prototype zone for what became Sholazar
+Basin, built from Feralas/vanilla plus Wrath assets. See `pm4-restoration-epic.md`.
 
 ### Next step, cheapest path
 
