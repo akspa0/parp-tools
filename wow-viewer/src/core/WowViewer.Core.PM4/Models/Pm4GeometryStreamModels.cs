@@ -386,6 +386,74 @@ public sealed record Pm4DoodadSplitReport(
     IReadOnlyList<Pm4DoodadSplitObjectRecord> MatchedDoodadSamples,
     IReadOnlyList<string> Notes);
 
+/// <summary>One spatially connected component of the CK24 0 remainder.</summary>
+public sealed record Pm4ComponentRecord(
+    string FileName,
+    int TileFirst,
+    int TileSecond,
+    uint RegionId,
+    int ComponentIndex,
+    int SurfaceCount,
+    int VertexCount,
+    float ExtentX,
+    float ExtentY,
+    float ExtentZ,
+    float NearestDoodadDistance,
+    bool LandsOnDoodad,
+    string NearestDoodadPath,
+    int DistinctGroupObjectIds,
+    int DistinctLinkIds,
+    int DistinctTypeFlags,
+    int DistinctGroupKeys,
+    int DistinctAttributeMasks,
+    int AnchorOnlyLinks,
+    uint SoleGroupObjectId,
+    uint SoleLinkId,
+    int SoleTypeFlags,
+    int SoleGroupKey,
+    int SoleAttributeMask);
+
+public sealed record Pm4ComponentTileRecord(
+    string FileName,
+    int TileFirst,
+    int TileSecond,
+    uint RegionId,
+    int ZeroBucketSurfaces,
+    int ComponentCount,
+    int DoodadPlacements,
+    int ComponentsOnDoodad);
+
+/// <summary>
+/// How well a field reproduces the geometric components.
+/// </summary>
+/// <remarks>
+/// <see cref="Purity"/> alone is not evidence — a constant field is perfectly pure and identifies
+/// nothing. It has to be read next to how often the value is reused by another component.
+/// </remarks>
+public sealed record Pm4FieldSeparatorScore(
+    string Field,
+    int PureComponents,
+    double Purity,
+    double AbsentFraction,
+    int DistinctComponents,
+    double Distinctness,
+    int DistinctValuesPerTileMedian);
+
+public sealed record Pm4ComponentIdentityReport(
+    string InputDirectory,
+    int TilesScored,
+    int ComponentCount,
+    int ComponentsOnDoodad,
+    double ComponentsOnDoodadFraction,
+    double ComponentsPerDoodadPlacement,
+    int PureGroupObjectIdComponents,
+    int ReusedGroupObjectIdComponents,
+    string Verdict,
+    IReadOnlyList<Pm4FieldSeparatorScore> SeparatorScores,
+    IReadOnlyList<Pm4ComponentTileRecord> TopTiles,
+    IReadOnlyList<Pm4ComponentRecord> ClosestMatches,
+    IReadOnlyList<string> Notes);
+
 /// <summary>Bound-test fit of an MPRR field against one chunk domain.</summary>
 public sealed record Pm4MprrDomainFit(string Domain, long Fits, long Misses, double FitFraction);
 

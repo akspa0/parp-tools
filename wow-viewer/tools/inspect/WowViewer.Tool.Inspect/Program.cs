@@ -2180,6 +2180,9 @@ static void RunPm4(string[] args)
 		case "doodad-split":
 			RunPm4DoodadSplit(tail);
 			break;
+		case "component-identity":
+			RunPm4ComponentIdentity(tail);
+			break;
 		case "mprr":
 			RunPm4Mprr(tail);
 			break;
@@ -6016,6 +6019,88 @@ static Dictionary<string, Pm4TilePlacements> LoadTilePlacements(string pm4Direct
 	}
 
 	return byFile;
+}
+
+/// <summary>
+/// `pm4 component-identity` — splits the CK24 0 remainder into geometric components, checks them
+/// against real doodad placements, and scores which field reproduces them.
+/// </summary>
+static void RunPm4ComponentIdentity(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string? placementsDirectory = GetOption(args, "--placements");
+	string resolvedInput = Pm4CoordinateService.ResolveMapDirectory(input);
+	string resolvedPlacements = string.IsNullOrWhiteSpace(placementsDirectory)
+		? resolvedInput
+		: Pm4CoordinateService.ResolveMapDirectory(placementsDirectory);
+
+	int maxTiles = 0;
+	if (int.TryParse(GetOption(args, "--max-tiles"), out int parsedMaxTiles) && parsedMaxTiles > 0)
+		maxTiles = parsedMaxTiles;
+
+	Dictionary<string, Pm4TilePlacements> placements = LoadTilePlacements(resolvedInput, resolvedPlacements);
+	if (placements.Count == 0)
+	{
+		Console.Error.WriteLine($"Error: no companion _obj0.adt placements found under '{resolvedPlacements}'.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4ComponentIdentityReport report = Pm4ComponentIdentityAnalyzer.AnalyzeDirectory(resolvedInput, placements, maxTiles);
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 CK24-0 component identity");
+	Console.WriteLine($"Input: {report.InputDirectory}");
+	Console.WriteLine($"Tiles scored: {report.TilesScored}, components found: {report.ComponentCount}");
+	Console.WriteLine();
+
+	Console.WriteLine("Q1 — are components the right unit? (geometry vs real doodad placements)");
+	Console.WriteLine($"  components landing on an MDDF placement : {report.ComponentsOnDoodad} ({report.ComponentsOnDoodadFraction:P1})");
+	Console.WriteLine($"  components per MDDF placement           : {report.ComponentsPerDoodadPlacement:F3}");
+	Console.WriteLine($"  VERDICT: {report.Verdict}");
+	Console.WriteLine();
+
+	Console.WriteLine("Q2 — which field is constant within a component AND unique between them?");
+	Console.WriteLine("  field                   pure    purity   distinct  distinctness  no-links  vals/tile");
+	foreach (Pm4FieldSeparatorScore score in report.SeparatorScores)
+	{
+		Console.WriteLine($"  {score.Field,-22} {score.PureComponents,6}   {score.Purity,7:P1}   {score.DistinctComponents,8}   {score.Distinctness,10:P1}   {score.AbsentFraction,7:P1}   {score.DistinctValuesPerTileMedian,8}");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine("  purity alone proves nothing — a field that never varies is perfectly pure and");
+	Console.WriteLine("  identifies nothing. An identity needs high purity AND high distinctness.");
+	Console.WriteLine();
+
+	Console.WriteLine("Closest component/doodad matches:");
+	foreach (Pm4ComponentRecord record in report.ClosestMatches.Take(14))
+	{
+		Console.WriteLine($"  {record.FileName} region={record.RegionId,-5} surf={record.SurfaceCount,-4} extent={record.ExtentX,6:F1}x{record.ExtentY,6:F1}x{record.ExtentZ,6:F1}  dist={record.NearestDoodadDistance,6:F2}  groupIds={record.DistinctGroupObjectIds}");
+		Console.WriteLine($"      {record.NearestDoodadPath}");
+	}
+
+	Console.WriteLine();
+	foreach (string note in report.Notes)
+		Console.WriteLine($"  - {note}");
 }
 
 static void RunPm4ConnectiveGeometry(string[] args)
