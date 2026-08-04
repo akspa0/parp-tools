@@ -2177,6 +2177,9 @@ static void RunPm4(string[] args)
 		case "yaw-evidence":
 			RunPm4YawEvidence(tail);
 			break;
+		case "doodad-split":
+			RunPm4DoodadSplit(tail);
+			break;
 		case "mprr":
 			RunPm4Mprr(tail);
 			break;
@@ -5866,6 +5869,150 @@ static Dictionary<string, IReadOnlyList<Pm4PlacementBox>> LoadAdtPlacementBoxes(
 
 		if (boxes.Count > 0)
 			byFile[Path.GetFileName(pm4Path)] = boxes;
+	}
+
+	return byFile;
+}
+
+/// <summary>
+/// `pm4 doodad-split` — tests whether CK24 0 is the bucket M2 doodad collision falls into, and
+/// screens candidate fields for the per-doodad identity inside it.
+/// </summary>
+static void RunPm4DoodadSplit(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string? placementsDirectory = GetOption(args, "--placements");
+	string resolvedInput = Pm4CoordinateService.ResolveMapDirectory(input);
+	string resolvedPlacements = string.IsNullOrWhiteSpace(placementsDirectory)
+		? resolvedInput
+		: Pm4CoordinateService.ResolveMapDirectory(placementsDirectory);
+
+	Dictionary<string, Pm4TilePlacements> placements = LoadTilePlacements(resolvedInput, resolvedPlacements);
+	if (placements.Count == 0)
+	{
+		Console.Error.WriteLine($"Error: no companion _obj0.adt placements found under '{resolvedPlacements}'.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4DoodadSplitReport report = Pm4DoodadSplitAnalyzer.AnalyzeDirectory(resolvedInput, placements);
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 doodad/object split");
+	Console.WriteLine($"Input: {report.InputDirectory}");
+	Console.WriteLine($"Tiles with ADT ground truth: {report.TilesScored}, objects scored: {report.ObjectsScored}");
+	Console.WriteLine();
+
+	Console.WriteLine("                          sits on an MDDF doodad | inside a MODF world model");
+	Console.WriteLine($"  CK24 == 0  ({report.ZeroBucketObjects,6} objects)   {report.ZeroBucketOnDoodadFraction,10:P1}   |   {report.ZeroBucketInWorldModelFraction,10:P1}");
+	Console.WriteLine($"  CK24 != 0  ({report.NonZeroObjects,6} objects)   {report.NonZeroOnDoodadFraction,10:P1}   |   {report.NonZeroInWorldModelFraction,10:P1}");
+	Console.WriteLine();
+
+	Pm4Ck24WmoCorrespondence c = report.WmoCorrespondence;
+	Console.WriteLine("Does a keyed (non-zero) CK24 count as one WMO instance?  [the falsifiable test]");
+	Console.WriteLine($"  tiles tested                                   : {c.TilesTested}");
+	Console.WriteLine($"  tiles with NO WMO placements                   : {c.WmoFreeTiles}");
+	Console.WriteLine($"  ...of those, tiles WITH a keyed object         : {c.WmoFreeTilesWithKeyedObjects}   <- must be 0");
+	Console.WriteLine($"  tiles where keyed count == WMO count exactly   : {c.TilesWithExactCountMatch}");
+	Console.WriteLine($"  tiles within +/-1                              : {c.TilesWithinOne}");
+	Console.WriteLine($"  totals: {c.TotalKeyedObjects} keyed objects vs {c.TotalWorldModelPlacements} WMO placements");
+	Console.WriteLine();
+	Console.WriteLine($"  tiles with at least one CK24 0 bucket          : {c.TilesWithAnyZeroBucket}");
+	Console.WriteLine($"  ...of those, with EXACTLY one                  : {c.TilesWithExactlyOneZeroBucket}");
+	Console.WriteLine();
+	Console.WriteLine($"VERDICT: {report.Verdict}");
+	Console.WriteLine();
+
+	Console.WriteLine("Candidate per-doodad identity fields (cardinality vs the tile's MDDF count):");
+	foreach (Pm4DoodadSeparatorFit fit in report.SeparatorFits)
+	{
+		Console.WriteLine($"  {fit.Field,-42} tiles={fit.TilesTested,4}  mean={fit.MeanRatioToDoodadCount,9:F2}x  median={fit.MedianRatioToDoodadCount,8:F2}x  exact={fit.TilesMatchingExactly}");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine("Sample CK24 0 objects that landed on a doodad:");
+	foreach (Pm4DoodadSplitObjectRecord record in report.MatchedDoodadSamples.Take(12))
+	{
+		Console.WriteLine($"  {record.FileName} region={record.RegionId,-5} surfaces={record.SurfaceCount,-4} dist={record.NearestDoodadDistance,7:F1}  groupIds={record.DistinctGroupObjectIds} anchors={record.AnchorOnlyLinks}");
+		Console.WriteLine($"      {record.NearestDoodadPath}");
+	}
+
+	Console.WriteLine();
+	foreach (string note in report.Notes)
+		Console.WriteLine($"  - {note}");
+}
+
+/// <summary>
+/// Reads each PM4's companion <c>_obj0.adt</c> and splits its placements by asset class: MDDF
+/// doodad positions and MODF world-model boxes, both already in ADT placement space.
+/// </summary>
+static Dictionary<string, Pm4TilePlacements> LoadTilePlacements(string pm4Directory, string placementsDirectory)
+{
+	Dictionary<string, Pm4TilePlacements> byFile = new(StringComparer.OrdinalIgnoreCase);
+	if (!Directory.Exists(placementsDirectory))
+		return byFile;
+
+	foreach (string pm4Path in Directory.EnumerateFiles(pm4Directory, "*.pm4", SearchOption.TopDirectoryOnly))
+	{
+		string probe = Path.Combine(placementsDirectory, Path.GetFileName(pm4Path));
+		string? obj0Path = Pm4CoordinateService.TryGetObj0PathForPm4(probe);
+		if (obj0Path is null)
+			continue;
+
+		AdtPlacementCatalog catalog;
+		try
+		{
+			catalog = AdtPlacementReader.Read(obj0Path);
+		}
+		catch (Exception ex) when (ex is InvalidDataException or IOException)
+		{
+			continue;
+		}
+
+		List<Pm4NamedPoint> doodads = [];
+		foreach (AdtModelPlacement placement in catalog.ModelPlacements)
+		{
+			doodads.Add(new Pm4NamedPoint(
+				placement.Position.X,
+				placement.Position.Y,
+				placement.Position.Z,
+				placement.ModelPath,
+				placement.UniqueId));
+		}
+
+		List<Pm4PlacementBox> boxes = [];
+		foreach (AdtWorldModelPlacement placement in catalog.WorldModelPlacements)
+		{
+			boxes.Add(new Pm4PlacementBox(
+				MathF.Min(placement.BoundsMin.X, placement.BoundsMax.X),
+				MathF.Min(placement.BoundsMin.Y, placement.BoundsMax.Y),
+				MathF.Max(placement.BoundsMin.X, placement.BoundsMax.X),
+				MathF.Max(placement.BoundsMin.Y, placement.BoundsMax.Y),
+				placement.ModelPath,
+				placement.UniqueId));
+		}
+
+		if (doodads.Count > 0 || boxes.Count > 0)
+			byFile[Path.GetFileName(pm4Path)] = new Pm4TilePlacements(doodads, boxes);
 	}
 
 	return byFile;

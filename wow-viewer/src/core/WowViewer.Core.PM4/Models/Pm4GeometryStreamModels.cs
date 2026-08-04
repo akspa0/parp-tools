@@ -298,6 +298,94 @@ public sealed record Pm4YawEvidenceReport(
     IReadOnlyList<Pm4YawEvidenceObjectRecord> WorstObjects,
     IReadOnlyList<string> Notes);
 
+/// <summary>An ADT doodad position in placement space, with the model it places.</summary>
+public readonly record struct Pm4NamedPoint(float X, float Y, float Z, string ModelPath, int UniqueId);
+
+/// <summary>One tile's ADT placements, split by asset class because the two score differently.</summary>
+public sealed record Pm4TilePlacements(
+    IReadOnlyList<Pm4NamedPoint> DoodadPositions,
+    IReadOnlyList<Pm4PlacementBox> WorldModelBoxes);
+
+/// <summary>One CK24 object scored against both asset classes.</summary>
+public sealed record Pm4DoodadSplitObjectRecord(
+    string FileName,
+    int TileFirst,
+    int TileSecond,
+    uint RegionId,
+    uint Ck24,
+    bool IsZeroBucket,
+    int SurfaceCount,
+    int VertexCount,
+    float NearestDoodadDistance,
+    bool SitsOnDoodad,
+    string NearestDoodadPath,
+    bool InsideWorldModel,
+    string WorldModelPath,
+    int DistinctGroupObjectIds,
+    int DistinctGroupKeys,
+    int AnchorOnlyLinks);
+
+/// <summary>Per-tile counts, used to screen candidate per-doodad identity fields.</summary>
+public sealed record Pm4DoodadSplitTileRecord(
+    string FileName,
+    int TileFirst,
+    int TileSecond,
+    uint RegionId,
+    int DoodadPlacements,
+    int WorldModelPlacements,
+    int ZeroBucketObjects,
+    int ZeroBucketOnDoodad,
+    int NonZeroObjects,
+    int NonZeroInWorldModel,
+    int MslkCount,
+    int AnchorOnlyLinks,
+    int MprlCount,
+    int DistinctGroupObjectIds);
+
+/// <summary>How closely a candidate field's cardinality tracks the tile's doodad count.</summary>
+public sealed record Pm4DoodadSeparatorFit(
+    string Field,
+    int TilesTested,
+    double MeanRatioToDoodadCount,
+    double MedianRatioToDoodadCount,
+    int TilesMatchingExactly);
+
+/// <summary>
+/// Whether the count of keyed (non-zero CK24) objects tracks the tile's WMO placement count.
+/// </summary>
+/// <remarks>
+/// This is the falsifiable form of "a non-zero CK24 is a WMO instance". Counting beats both spatial
+/// tests: proximity and containment can be satisfied by coincidence, but a tile with no WMOs that
+/// nonetheless carries keyed objects refutes the claim outright.
+/// </remarks>
+public sealed record Pm4Ck24WmoCorrespondence(
+    int TilesTested,
+    int WmoFreeTiles,
+    int WmoFreeTilesWithKeyedObjects,
+    int TilesWithExactCountMatch,
+    int TilesWithinOne,
+    int TilesWithAnyZeroBucket,
+    int TilesWithExactlyOneZeroBucket,
+    long TotalKeyedObjects,
+    long TotalWorldModelPlacements);
+
+public sealed record Pm4DoodadSplitReport(
+    string InputDirectory,
+    int TilesScored,
+    int ObjectsScored,
+    int ZeroBucketObjects,
+    int NonZeroObjects,
+    double ZeroBucketOnDoodadFraction,
+    double ZeroBucketInWorldModelFraction,
+    double NonZeroOnDoodadFraction,
+    double NonZeroInWorldModelFraction,
+    Pm4Ck24WmoCorrespondence WmoCorrespondence,
+    string Verdict,
+    IReadOnlyList<Pm4DoodadSeparatorFit> SeparatorFits,
+    IReadOnlyList<Pm4DoodadSplitTileRecord> TopTiles,
+    IReadOnlyList<Pm4DoodadSplitObjectRecord> MatchedDoodadSamples,
+    IReadOnlyList<string> Notes);
+
 /// <summary>Bound-test fit of an MPRR field against one chunk domain.</summary>
 public sealed record Pm4MprrDomainFit(string Domain, long Fits, long Misses, double FitFraction);
 
