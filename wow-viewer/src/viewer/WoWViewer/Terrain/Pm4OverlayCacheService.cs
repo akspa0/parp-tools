@@ -14,7 +14,14 @@ internal sealed class Pm4OverlayCacheService
     // per-file cache (separate magic PM4F, version 8) was introduced.
     // The per-window blob is still written by the load path; the per-file
     // path is the new source of truth. Old version-7 blobs become unreadable.
-    private const int CacheVersion = 8;
+    //
+    // Spec 130: bumped to 9. Cached blobs hold geometry that has already been
+    // through the placement transform, so they replay whatever placement was in
+    // effect when they were written. PM4 placement is no longer fitted per object
+    // against MPRL — it is pinned to the canonical frame — and every blob written
+    // before that carries the old fitted positions. Both caches must move together:
+    // the per-file cache (magic PM4F) is bumped to 9 in the same change.
+    private const int CacheVersion = 9;
     private readonly string _cacheRoot;
 
     public Pm4OverlayCacheService(string cacheRoot)

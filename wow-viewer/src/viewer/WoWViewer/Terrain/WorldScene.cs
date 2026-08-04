@@ -5438,6 +5438,46 @@ public class WorldScene : ISceneRenderer
         return objects;
     }
 
+    /// <summary>
+    /// The one frame PM4 geometry is drawn in. MSVT needs no fitting, so nothing is fitted.
+    /// </summary>
+    /// <remarks>
+    /// MSVT is stored in ADT placement space — an origin-relative coordinate, like a raw MDDF
+    /// position — so <c>WorldSpace</c> with the identity planar transform composes with
+    /// <see cref="ConvertWorldToRenderer"/> into <c>(MapOrigin - X, MapOrigin - Y, Z)</c>. That is
+    /// already, letter for letter, what <see cref="EnsurePm4MscnData"/> and
+    /// <see cref="EnsurePm4MspvData"/> do to place MSCN and MSPV, and those land correctly. MSPV,
+    /// MSVT and MSCN share one chunk frame, so the mesh has no business using a different one.
+    /// </remarks>
+    private static readonly CorePm4CoordinateModeResolution CanonicalCoordinateModeResolution =
+        new(
+            CorePm4CoordinateMode.WorldSpace,
+            CorePm4PlacementContract.GetDefaultPlanarTransform(CorePm4CoordinateMode.WorldSpace),
+            0f,
+            0f,
+            false);
+
+    /// <summary>
+    /// Returns the canonical frame instead of fitting one per object.
+    /// </summary>
+    /// <remarks>
+    /// This used to call <c>CorePm4PlacementMath.ResolveCoordinateMode</c>, which scored candidate
+    /// coordinate modes and planar transforms against MPRL. Measured over the whole development
+    /// corpus, that fitter was wrong in both directions:
+    ///
+    /// - it selected <c>TileLocal</c> for 18 objects whose coordinates are absolute, then added tile
+    ///   offsets to them. The human tents in <c>development_01_00.pm4</c> were one, thrown from tile
+    ///   (0,1) to (1,-1) while all three of that tile's real ADT placements sit inside the canonical
+    ///   footprint;
+    /// - the yaw correction it produced rotated 974 of 1,895 objects by 15-45 degrees. Scored
+    ///   against MODF world bounding boxes over the 127 objects whose box can actually see a
+    ///   rotation, containment fell from 93.3% to 88.2%, against 79.0% for a deliberately wrong
+    ///   45-degree control. It hurt 96 objects and helped 3.
+    ///
+    /// `pm4 bounds-audit --by-region` and `pm4 yaw-evidence` reproduce both numbers.
+    /// <c>CorePm4PlacementMath</c> keeps the fitter for callers that still want to explore it; the
+    /// render path simply no longer asks.
+    /// </remarks>
     private static CorePm4CoordinateModeResolution ResolveCk24CoordinateModeResolution(
         Pm4File pm4,
         IReadOnlyList<MsurEntry> surfaces,
@@ -5447,16 +5487,7 @@ public class WorldScene : ISceneRenderer
         Pm4AxisConvention axisConvention,
         bool fallbackTileLocalCoordinates)
     {
-        return CorePm4PlacementMath.ResolveCoordinateMode(
-            pm4.KnownChunks.Msvt,
-            pm4.KnownChunks.Msvi,
-            ConvertToCorePm4Surfaces(surfaces),
-            ConvertToCorePm4PositionRefs(pm4.KnownChunks.Mprl),
-            anchorPositionRefs.Count > 0 ? ConvertToCorePm4PositionRefs(anchorPositionRefs) : null,
-            tileX,
-            tileY,
-            ToCoreAxisConvention(axisConvention),
-            ToCoreCoordinateMode(fallbackTileLocalCoordinates));
+        return CanonicalCoordinateModeResolution;
     }
 
     private static List<List<Pm4IndexedSurface>> SplitSurfaceGroupByMslk(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)
@@ -6718,6 +6749,14 @@ public class WorldScene : ISceneRenderer
             summary.HeadingMeanDegrees);
     }
 
+    /// <summary>
+    /// Builds the placement for a surface group in the canonical frame, with no yaw correction.
+    /// </summary>
+    /// <remarks>
+    /// The pivot is still the group's real world centroid, because selection and connector merging
+    /// use it. Only the fitted rotation is dropped — see
+    /// <see cref="ResolveCk24CoordinateModeResolution"/> for the evidence that it was wrong.
+    /// </remarks>
     private static CorePm4PlacementSolution ResolvePlacementSolution(
         Pm4File pm4,
         IEnumerable<MsurEntry> surfaces,
@@ -6728,16 +6767,27 @@ public class WorldScene : ISceneRenderer
         Pm4AxisConvention axisConvention)
     {
         var surfaceList = surfaces as List<MsurEntry> ?? surfaces.ToList();
-        return CorePm4PlacementMath.ResolvePlacementSolution(
+        CorePm4CoordinateMode coordinateMode = CanonicalCoordinateModeResolution.CoordinateMode;
+        Pm4PlanarTransform planarTransform = CanonicalCoordinateModeResolution.PlanarTransform;
+
+        Vector3 worldPivot = CorePm4PlacementMath.ComputeSurfaceWorldCentroid(
             pm4.KnownChunks.Msvt,
             pm4.KnownChunks.Msvi,
             ConvertToCorePm4Surfaces(surfaceList),
-            ConvertToCorePm4PositionRefs(pm4.KnownChunks.Mprl),
-            anchorPositionRefs is not null ? ConvertToCorePm4PositionRefs(anchorPositionRefs) : null,
             tileX,
             tileY,
-            ToCoreCoordinateMode(useTileLocalCoordinates),
-            ToCoreAxisConvention(axisConvention));
+            coordinateMode,
+            ToCoreAxisConvention(axisConvention),
+            planarTransform);
+
+        return new CorePm4PlacementSolution(
+            tileX,
+            tileY,
+            coordinateMode,
+            ToCoreAxisConvention(axisConvention),
+            planarTransform,
+            worldPivot,
+            WorldYawCorrectionRadians: 0f);
     }
 
     private static float NearestPositionRefDistanceSquared(IReadOnlyList<MprlEntry> positionRefs, Vector3 world)

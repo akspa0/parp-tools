@@ -19,23 +19,38 @@ Last updated: 2026-08-03
    6 detector-power tests, corpus-wide evidence.
 5. **Walls render in the viewer**; two viewer bugs fixed (PM4 tab unreachable, walls invisible in
    wireframe).
-6. **`pm4 bounds-audit`** built; found MSVT is absolute world on both horizontal axes.
+6. **`pm4 bounds-audit`** built; the raw-band measurement it produced is correct but was
+   misinterpreted — see item 8.
 7. **`pm4 mprr`** built; structural hypothesis eliminated, run lengths found to be 94% length-3 or
    length-7.
+8. **Coordinate frames solved against ADT ground truth.** MSVT is ADT placement space —
+   `placement = (17066.666 - MSVT.X, 17066.666 - MSVT.Y, MSVT.Z)`, no axis swap, because
+   `MSVT.X == MDDF.rawY` and `MSVT.Y == MDDF.rawX`. 55,978/60,560 (92.4%) of real MDDF/MODF
+   positions land inside their paired PM4's footprint; the unswapped reading scores 0.7%.
+   `Pm4PlacementMath.ConvertPm4VertexToWorld` turns out to be correct — its swap is cancelled by
+   the viewer's world-to-renderer step — so the 7 `PlacementMath_*` tests were right to defend it.
+9. **`pm4 bounds-audit --by-region`** built; **region-scoped frames refuted** (1,877/1,895 objects
+   on one frame, 1,892/1,895 with zero tile displacement, 61 of 62 multi-file regions homogeneous).
+10. **`pm4 yaw-evidence`** built; the yaw correction is **disproven**. Scored against MODF world
+    bounding boxes over 127 objects whose box can see a rotation (each proven by a 45° control):
+    canonical 93.3% inside, fitted yaw 88.2%, control 79.0% — yaw hurts 96, helps 3, ties 28. It
+    moves geometry the same direction as a known-wrong rotation. `WG_GATE01.WMO` drops 100% → 50%.
 
-### Open — the blocking issue
+11. **The fitter is out of the render path.** `WorldScene.ResolveCk24CoordinateModeResolution` now
+    returns a constant canonical resolution and `WorldScene.ResolvePlacementSolution` uses the
+    identity planar transform with zero yaw, keeping the real world centroid as the pivot.
+    `Pm4PlacementMath` is untouched, so all 16 `PlacementMath_*` tests still pass. The clincher was
+    that **MSCN and MSPV already rendered correctly** via `(MapOrigin - p.X, MapOrigin - p.Y, p.Z)`
+    with no fitter, while the MSUR mesh — the one path that used it — did not.
 
-PM4 objects are still misplaced in the viewer. `Pm4CoordinateService` is corrected but
-`Pm4PlacementMath.ConvertPm4VertexToWorld` still transposes the scene (`XYPlaneZUp` maps U from Y,
-V from X). The one-line fix breaks 7 `PlacementMath_*` tests that pin the old convention.
+### Open
 
-**And that fix is known to be insufficient**: residual error is per-region, not global. Two objects
-sharing `MSHD.Field04 == 146` are wrong identically while a `region=6` object is wrong differently,
-which points at region-scoped coordinate frames. Next step is `--by-region` on `pm4 bounds-audit`.
+**Not visually confirmed yet.** The viewer held a file lock during the build, so the exe was not
+replaced. Close it, rebuild, and check the tents on tile 1_0.
 
 ### Test state
 
-86 passed / 1 failed (`Pm4RegionObjectGrouperTests`, pre-existing, confirmed at baseline).
+102 passed / 1 failed (`Pm4RegionObjectGrouperTests`, pre-existing, confirmed at baseline).
 
 ### Not started
 

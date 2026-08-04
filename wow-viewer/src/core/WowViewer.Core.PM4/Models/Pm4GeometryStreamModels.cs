@@ -163,6 +163,141 @@ public sealed record Pm4BoundsAuditReport(
     IReadOnlyList<Pm4TileBoundsRecord> AllTiles,
     IReadOnlyList<string> Notes);
 
+/// <summary>One CK24 object, the frame the placement fitter resolved for it, and where that puts it.</summary>
+public sealed record Pm4RegionFrameObjectRecord(
+    string FileName,
+    int TileFirst,
+    int TileSecond,
+    uint RegionId,
+    uint Ck24,
+    int SurfaceCount,
+    string ResolvedFrame,
+    bool MatchesCanonicalFrame,
+    int CanonicalTileX,
+    int CanonicalTileY,
+    int ResolvedTileX,
+    int ResolvedTileY,
+    int TileOffsetX,
+    int TileOffsetY,
+    float YawCorrectionDegrees);
+
+/// <summary>Per-file bounds in ADT placement space, plus agreement with real ADT placements.</summary>
+public sealed record Pm4RegionFrameFileRecord(
+    string FileName,
+    int TileFirst,
+    int TileSecond,
+    uint RegionId,
+    int VertexCount,
+    float PlacementMinX,
+    float PlacementMaxX,
+    float PlacementMinY,
+    float PlacementMaxY,
+    bool RawBandMatchesFileName,
+    int ObjectCount,
+    int ObjectsOffCanonicalFrame,
+    int ReferencePlacements,
+    int ReferencePlacementsInside,
+    double ReferenceAgreement);
+
+/// <summary>How many objects resolved to one frame token.</summary>
+public sealed record Pm4FrameFamilyCount(string Frame, int ObjectCount);
+
+/// <summary>How many objects the resolved frame displaced by one whole-tile offset.</summary>
+public sealed record Pm4TileOffsetFamilyCount(int OffsetX, int OffsetY, int ObjectCount);
+
+/// <summary>Everything one MSHD.Field04 region contributes, aggregated over its files.</summary>
+public sealed record Pm4RegionFrameSummary(
+    uint RegionId,
+    bool IsSharedBucket,
+    bool IsEmptyStubRegion,
+    int FileCount,
+    int VertexCount,
+    IReadOnlyList<string> Files,
+    int ObjectCount,
+    IReadOnlyList<Pm4FrameFamilyCount> Frames,
+    bool IsFrameHomogeneous,
+    IReadOnlyList<Pm4TileOffsetFamilyCount> TileOffsets,
+    bool IsTileOffsetHomogeneous,
+    int FilesOffRawBand,
+    int ReferencePlacements,
+    int ReferencePlacementsInside,
+    double ReferenceAgreement);
+
+public sealed record Pm4RegionFrameAuditReport(
+    string InputDirectory,
+    int FilesWithGeometry,
+    int ObjectCount,
+    int DistinctRegionCount,
+    int MultiFileRegionCount,
+    int MultiFileRegionsWithMixedFrames,
+    int ObjectsOnCanonicalFrame,
+    int ObjectsOffCanonicalFrame,
+    int FilesOffRawBand,
+    IReadOnlyList<Pm4FrameFamilyCount> CorpusFrames,
+    IReadOnlyList<Pm4TileOffsetFamilyCount> CorpusTileOffsets,
+    long ReferencePlacements,
+    long ReferencePlacementsInside,
+    double ReferenceAgreement,
+    IReadOnlyList<Pm4RegionFrameSummary> Regions,
+    IReadOnlyList<Pm4RegionFrameFileRecord> Files,
+    IReadOnlyList<Pm4RegionFrameObjectRecord> Objects,
+    IReadOnlyList<string> Notes);
+
+/// <summary>A WMO placement's world bounding box in ADT placement space, supplied by the caller.</summary>
+public readonly record struct Pm4PlacementBox(
+    float MinX,
+    float MinY,
+    float MaxX,
+    float MaxY,
+    string ModelPath,
+    int UniqueId);
+
+/// <summary>The yaw test's outcome for one object, including whether its box could see a rotation.</summary>
+public readonly record struct Pm4YawDecision(
+    double InsideCanonical,
+    double InsideYawOnly,
+    double InsideControl45,
+    bool HasDiscriminatingPower,
+    string Verdict);
+
+/// <summary>One object scored against the WMO box it stands in, with and without the yaw correction.</summary>
+public sealed record Pm4YawEvidenceObjectRecord(
+    string FileName,
+    int TileFirst,
+    int TileSecond,
+    uint RegionId,
+    uint Ck24,
+    int VertexCount,
+    string ModelPath,
+    int UniqueId,
+    float YawCorrectionDegrees,
+    double InsideCanonical,
+    double InsideYawOnly,
+    double InsideResolved,
+    double InsideControl45,
+    bool HasDiscriminatingPower,
+    string Verdict);
+
+public sealed record Pm4YawEvidenceReport(
+    string InputDirectory,
+    int FilesScored,
+    int ObjectsSeen,
+    int ObjectsMatched,
+    int ObjectsUnmatched,
+    int ObjectsWithYaw,
+    int ObjectsDecidable,
+    int ObjectsWithoutPower,
+    int YawHelps,
+    int YawHurts,
+    int Ties,
+    double MeanInsideCanonical,
+    double MeanInsideYawOnly,
+    double MeanInsideResolved,
+    double MeanInsideControl45,
+    string Verdict,
+    IReadOnlyList<Pm4YawEvidenceObjectRecord> WorstObjects,
+    IReadOnlyList<string> Notes);
+
 /// <summary>Bound-test fit of an MPRR field against one chunk domain.</summary>
 public sealed record Pm4MprrDomainFit(string Domain, long Fits, long Misses, double FitFraction);
 

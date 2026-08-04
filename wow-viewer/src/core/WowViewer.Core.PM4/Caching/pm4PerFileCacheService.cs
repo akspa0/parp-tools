@@ -27,7 +27,22 @@ namespace WowViewer.Core.PM4.Caching;
 public sealed class Pm4PerFileCacheService
 {
     private const string EntryMagic = "PM4F";
-    private const int EntryVersion = 8;
+
+    /// <summary>
+    /// Bump this whenever the MEANING of a cached value changes, not only its layout.
+    /// </summary>
+    /// <remarks>
+    /// Entries store geometry that has already been through the placement transform — triangles,
+    /// lines, <c>PlacementAnchor</c>, <c>BoundsMin</c>/<c>BoundsMax</c> and the resolved planar
+    /// flags are all post-transform. A cached tile therefore replays whatever placement was in
+    /// effect when it was written, so a change to placement that leaves the layout untouched will
+    /// silently keep rendering the old positions until this number moves.
+    ///
+    /// 8 -> 9: PM4 placement stopped being fitted per object against MPRL and is now pinned to the
+    /// canonical frame (WorldSpace, identity planar transform, zero yaw). Every entry written
+    /// before that carries fitted positions and must be discarded.
+    /// </remarks>
+    private const int EntryVersion = 9;
 
     private readonly string _cacheRoot;
 

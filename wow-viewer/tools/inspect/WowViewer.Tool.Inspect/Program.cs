@@ -2174,6 +2174,9 @@ static void RunPm4(string[] args)
 		case "bounds-audit":
 			RunPm4BoundsAudit(tail);
 			break;
+		case "yaw-evidence":
+			RunPm4YawEvidence(tail);
+			break;
 		case "mprr":
 			RunPm4Mprr(tail);
 			break;
@@ -4888,6 +4891,17 @@ static string? GetOption(string[] args, string longName, string? shortName = nul
 	return null;
 }
 
+static bool HasFlag(string[] args, string longName)
+{
+	foreach (string arg in args)
+	{
+		if (string.Equals(arg, longName, StringComparison.OrdinalIgnoreCase))
+			return true;
+	}
+
+	return false;
+}
+
 static IReadOnlyList<string> GetOptionValues(string[] args, string longName, string shortName)
 {
 	List<string> values = [];
@@ -5543,6 +5557,12 @@ static void RunPm4BoundsAudit(string[] args)
 		return;
 	}
 
+	if (HasFlag(args, "--by-region"))
+	{
+		RunPm4BoundsAuditByRegion(args, input, output);
+		return;
+	}
+
 	Pm4BoundsAuditReport report = Pm4BoundsAuditAnalyzer.AnalyzeDirectory(input);
 	if (!string.IsNullOrWhiteSpace(output))
 	{
@@ -5580,6 +5600,275 @@ static void RunPm4BoundsAudit(string[] args)
 	Console.WriteLine();
 	foreach (string note in report.Notes)
 		Console.WriteLine($"  - {note}");
+}
+
+/// <summary>
+/// `pm4 bounds-audit --by-region` — groups MSVT by MSHD.Field04 and reports, per region, the frame
+/// the placement fitter resolves and how far it moves geometry off the ADT-verified canonical one.
+/// </summary>
+static void RunPm4BoundsAuditByRegion(string[] args, string input, string? output)
+{
+	string? placementsDirectory = GetOption(args, "--placements");
+	string resolvedInput = Pm4CoordinateService.ResolveMapDirectory(input);
+	string resolvedPlacements = string.IsNullOrWhiteSpace(placementsDirectory)
+		? resolvedInput
+		: Pm4CoordinateService.ResolveMapDirectory(placementsDirectory);
+
+	Dictionary<string, IReadOnlyList<Vector2>>? referencePoints =
+		LoadAdtReferencePlacements(resolvedInput, resolvedPlacements, out int pairedFiles, out int missingFiles);
+
+	Pm4RegionFrameAuditReport report = Pm4RegionFrameAuditAnalyzer.AnalyzeDirectory(resolvedInput, referencePoints);
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 region frame audit");
+	Console.WriteLine($"Input: {report.InputDirectory}");
+	Console.WriteLine($"Files with geometry: {report.FilesWithGeometry}, objects: {report.ObjectCount}, regions: {report.DistinctRegionCount}");
+	Console.WriteLine($"ADT placement pairs: {pairedFiles} paired, {missingFiles} without a companion _obj0.adt");
+	Console.WriteLine();
+
+	Console.WriteLine("Is the frame region-scoped?");
+	Console.WriteLine($"  Regions spanning >1 file        : {report.MultiFileRegionCount}");
+	Console.WriteLine($"  ...of those with mixed frames   : {report.MultiFileRegionsWithMixedFrames}");
+	Console.WriteLine($"  Objects on the canonical frame  : {report.ObjectsOnCanonicalFrame}");
+	Console.WriteLine($"  Objects off the canonical frame : {report.ObjectsOffCanonicalFrame}");
+	Console.WriteLine($"  Files off their raw filename band: {report.FilesOffRawBand} (baseline; expected 0)");
+	Console.WriteLine();
+
+	Console.WriteLine("Resolved frame families (corpus):");
+	foreach (Pm4FrameFamilyCount family in report.CorpusFrames)
+		Console.WriteLine($"  {family.Frame,-22} {family.ObjectCount,8} objects");
+	Console.WriteLine();
+
+	Console.WriteLine("Whole-tile displacement caused by the resolved frame (corpus):");
+	foreach (Pm4TileOffsetFamilyCount family in report.CorpusTileOffsets.Take(16))
+		Console.WriteLine($"  ({family.OffsetX,3},{family.OffsetY,3}) {family.ObjectCount,8} objects");
+	Console.WriteLine();
+
+	if (report.ReferencePlacements > 0)
+	{
+		Console.WriteLine($"ADT placements inside their PM4's footprint: {report.ReferencePlacementsInside}/{report.ReferencePlacements} ({report.ReferenceAgreement:P1})");
+		Console.WriteLine();
+	}
+
+	Console.WriteLine("Worst regions by off-canonical objects:");
+	foreach (Pm4RegionFrameSummary region in report.Regions
+		.OrderByDescending(static region => region.Frames.Count)
+		.ThenByDescending(static region => region.ObjectCount)
+		.Take(20))
+	{
+		string label = region.IsSharedBucket ? " [shared bucket]" : region.IsEmptyStubRegion ? " [empty stub]" : string.Empty;
+		Console.WriteLine($"  region={region.RegionId,-6}{label} files={region.FileCount} objects={region.ObjectCount} frames={region.Frames.Count} homogeneous={region.IsFrameHomogeneous}");
+		foreach (Pm4FrameFamilyCount family in region.Frames.Take(4))
+			Console.WriteLine($"      {family.Frame,-22} {family.ObjectCount,7}");
+	}
+
+	Console.WriteLine();
+	foreach (string note in report.Notes)
+		Console.WriteLine($"  - {note}");
+}
+
+/// <summary>
+/// Reads each PM4's companion <c>_obj0.adt</c> and returns its MDDF/MODF positions in ADT placement
+/// space, keyed by PM4 file name. Lives in the tool because <c>WowViewer.Core.IO</c> already
+/// references <c>WowViewer.Core.PM4</c>, so the analyzer cannot read ADTs itself.
+/// </summary>
+static Dictionary<string, IReadOnlyList<Vector2>>? LoadAdtReferencePlacements(
+	string pm4Directory,
+	string placementsDirectory,
+	out int pairedFiles,
+	out int missingFiles)
+{
+	pairedFiles = 0;
+	missingFiles = 0;
+
+	if (!Directory.Exists(placementsDirectory))
+		return null;
+
+	Dictionary<string, IReadOnlyList<Vector2>> byFile = new(StringComparer.OrdinalIgnoreCase);
+
+	foreach (string pm4Path in Directory.EnumerateFiles(pm4Directory, "*.pm4", SearchOption.TopDirectoryOnly))
+	{
+		string probe = Path.Combine(placementsDirectory, Path.GetFileName(pm4Path));
+		string? obj0Path = Pm4CoordinateService.TryGetObj0PathForPm4(probe);
+		if (obj0Path is null)
+		{
+			missingFiles++;
+			continue;
+		}
+
+		AdtPlacementCatalog catalog;
+		try
+		{
+			catalog = AdtPlacementReader.Read(obj0Path);
+		}
+		catch (Exception ex) when (ex is InvalidDataException or IOException)
+		{
+			missingFiles++;
+			continue;
+		}
+
+		List<Vector2> points = [];
+		foreach (AdtModelPlacement placement in catalog.ModelPlacements)
+			points.Add(new Vector2(placement.Position.X, placement.Position.Y));
+		foreach (AdtWorldModelPlacement placement in catalog.WorldModelPlacements)
+			points.Add(new Vector2(placement.Position.X, placement.Position.Y));
+
+		if (points.Count == 0)
+			continue;
+
+		pairedFiles++;
+		byFile[Path.GetFileName(pm4Path)] = points;
+	}
+
+	return byFile.Count == 0 ? null : byFile;
+}
+
+/// <summary>
+/// `pm4 yaw-evidence` — decides whether the placement fitter's per-object yaw correction helps or
+/// hurts, by scoring each object against the world bounding box of the WMO placement it stands in.
+/// </summary>
+static void RunPm4YawEvidence(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string? placementsDirectory = GetOption(args, "--placements");
+	string resolvedInput = Pm4CoordinateService.ResolveMapDirectory(input);
+	string resolvedPlacements = string.IsNullOrWhiteSpace(placementsDirectory)
+		? resolvedInput
+		: Pm4CoordinateService.ResolveMapDirectory(placementsDirectory);
+
+	Dictionary<string, IReadOnlyList<Pm4PlacementBox>> boxes = LoadAdtPlacementBoxes(resolvedInput, resolvedPlacements);
+	if (boxes.Count == 0)
+	{
+		Console.Error.WriteLine(
+			$"Error: no MODF world-model placements found under '{resolvedPlacements}'. "
+			+ "This test needs WMO bounding boxes; MDDF doodad positions cannot score a rotation.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4YawEvidenceReport report = Pm4YawEvidenceAnalyzer.AnalyzeDirectory(resolvedInput, boxes);
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 yaw-correction evidence");
+	Console.WriteLine($"Input: {report.InputDirectory}");
+	Console.WriteLine($"Files with WMO boxes: {report.FilesScored}, objects seen: {report.ObjectsSeen}");
+	Console.WriteLine($"  matched to a WMO box : {report.ObjectsMatched}");
+	Console.WriteLine($"  unmatched            : {report.ObjectsUnmatched} (doodad collision has no box)");
+	Console.WriteLine();
+
+	Console.WriteLine("Of the matched objects:");
+	Console.WriteLine($"  carry a yaw correction        : {report.ObjectsWithYaw}");
+	Console.WriteLine($"  ...box can see a rotation     : {report.ObjectsDecidable}");
+	Console.WriteLine($"  ...box cannot (excluded)      : {report.ObjectsWithoutPower}");
+	Console.WriteLine();
+
+	Console.WriteLine("Decidable objects — mean fraction of vertices inside their WMO box:");
+	Console.WriteLine($"  canonical, no yaw        : {report.MeanInsideCanonical:P1}");
+	Console.WriteLine($"  canonical + fitted yaw   : {report.MeanInsideYawOnly:P1}");
+	Console.WriteLine($"  full resolved solution   : {report.MeanInsideResolved:P1}");
+	Console.WriteLine($"  45 deg control (wrong)   : {report.MeanInsideControl45:P1}");
+	Console.WriteLine();
+
+	Console.WriteLine($"  yaw helps : {report.YawHelps}");
+	Console.WriteLine($"  yaw hurts : {report.YawHurts}");
+	Console.WriteLine($"  tie       : {report.Ties}");
+	Console.WriteLine();
+	Console.WriteLine($"VERDICT: {report.Verdict}");
+	Console.WriteLine();
+
+	if (report.WorstObjects.Count > 0)
+	{
+		Console.WriteLine("Objects the yaw moves furthest out of their box:");
+		foreach (Pm4YawEvidenceObjectRecord record in report.WorstObjects)
+		{
+			Console.WriteLine($"  {record.FileName} ck24={record.Ck24} yaw={record.YawCorrectionDegrees,7:F1} deg  "
+				+ $"inside {record.InsideCanonical:P0} -> {record.InsideYawOnly:P0} (control {record.InsideControl45:P0})  {record.Verdict}");
+			Console.WriteLine($"      {record.ModelPath}");
+		}
+
+		Console.WriteLine();
+	}
+
+	foreach (string note in report.Notes)
+		Console.WriteLine($"  - {note}");
+}
+
+/// <summary>
+/// Reads MODF world-model placements from each PM4's companion <c>_obj0.adt</c> as bounding boxes in
+/// ADT placement space, keyed by PM4 file name.
+/// </summary>
+static Dictionary<string, IReadOnlyList<Pm4PlacementBox>> LoadAdtPlacementBoxes(
+	string pm4Directory,
+	string placementsDirectory)
+{
+	Dictionary<string, IReadOnlyList<Pm4PlacementBox>> byFile = new(StringComparer.OrdinalIgnoreCase);
+	if (!Directory.Exists(placementsDirectory))
+		return byFile;
+
+	foreach (string pm4Path in Directory.EnumerateFiles(pm4Directory, "*.pm4", SearchOption.TopDirectoryOnly))
+	{
+		string probe = Path.Combine(placementsDirectory, Path.GetFileName(pm4Path));
+		string? obj0Path = Pm4CoordinateService.TryGetObj0PathForPm4(probe);
+		if (obj0Path is null)
+			continue;
+
+		AdtPlacementCatalog catalog;
+		try
+		{
+			catalog = AdtPlacementReader.Read(obj0Path);
+		}
+		catch (Exception ex) when (ex is InvalidDataException or IOException)
+		{
+			continue;
+		}
+
+		List<Pm4PlacementBox> boxes = [];
+		foreach (AdtWorldModelPlacement placement in catalog.WorldModelPlacements)
+		{
+			boxes.Add(new Pm4PlacementBox(
+				MathF.Min(placement.BoundsMin.X, placement.BoundsMax.X),
+				MathF.Min(placement.BoundsMin.Y, placement.BoundsMax.Y),
+				MathF.Max(placement.BoundsMin.X, placement.BoundsMax.X),
+				MathF.Max(placement.BoundsMin.Y, placement.BoundsMax.Y),
+				placement.ModelPath,
+				placement.UniqueId));
+		}
+
+		if (boxes.Count > 0)
+			byFile[Path.GetFileName(pm4Path)] = boxes;
+	}
+
+	return byFile;
 }
 
 static void RunPm4ConnectiveGeometry(string[] args)

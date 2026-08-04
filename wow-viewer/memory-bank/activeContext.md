@@ -26,56 +26,139 @@ partially started. **Pick up here.**
   are exactly length 3 (75.5%) or length 7 (18.5%)** — small fixed-shape records, not a bulk index
   stream. No domain explains Value1 by bounds; MPRL is the *worst* of nine at 48.5%.
 
-### THE OPEN BUG — read this first
+### COORDINATE FRAMES — SOLVED against ADT ground truth
 
-**MSVT is stored in ABSOLUTE WORLD coordinates on both horizontal axes; Z is height.** Measured over
-all 309 non-empty files: X lies inside the world band of the SECOND filename number 309/309 times,
-Y inside the band of the FIRST 309/309, each spanning exactly one tile. `development_22_18` is the
-clean case — 126,596 vertices, X = 9600.0..10133.3 (exactly column 18), Y = 11733.3..12266.7
-(exactly row 22). Only `development_00_00` is also consistent with
-tile-local storage, because there both indices are 0 and world equals local — which is why that one
-tile always looked right and everything else piled up around it.
+**MSVT is stored in ADT placement space**: a distance-from-origin coordinate, exactly like a raw
+MDDF position, with its two horizontal fields in the **opposite order** to MDDF's
+(`MSVT.X == MDDF.rawY`, `MSVT.Y == MDDF.rawX`). The conversion is a per-axis subtraction with **no
+axis swap**:
 
-**CORRECTED LATER IN THE SESSION — read this part carefully.** That bounds measurement is
-consistent with TWO readings and cannot separate them: (a) filename is ROW_COL with axes mapping
-straight through, or (b) filename is ordinary COL_ROW and **MSVT's own X and Y are swapped relative
-to world**. User ground truth settles it as **(b)**: the human tents in `development_01_00.pm4`
-belong on the tile to the right of 0_0 in the same row — world (x=1, y=0) — and raw MSVT has X in
-band 0 (41.0..52.9), Y in band 1 (778.9..790.6). Only `world = (MSVT.Y, MSVT.X)` places them right.
+```text
+placement = (17066.666 - MSVT.X, 17066.666 - MSVT.Y, MSVT.Z)
+```
 
-So **`Pm4PlacementMath` was CORRECT ALL ALONG** — its `XYPlaneZUp` case already applies that swap,
-and the 7 `PlacementMath_*` tests that blocked the proposed "fix" were defending real behaviour.
-**Do not invert those two lines.** `Pm4CoordinateService.Pm4LocalToAdtPlacement` now applies the
-swap too. Lesson: a bounds fit proves which BAND a value is in, not which AXIS it means.
+**Evidence**: over the 179 development tiles holding both a PM4 and a correctly named `_obj0.adt`,
+**55,978 of 60,560 (92.4%)** MDDF/MODF positions fall inside their paired PM4's MSVT footprint. The
+unswapped alternative scores **412/60,560 (0.7%)** and is eliminated. Worked case —
+`development_01_00.pm4` has MSVT X = 41.0..52.9, Y = 778.9..790.6; the three MDDF entries in
+`development_1_0_obj0.adt` have rawY = 42.3..51.1 and rawX = 780.3..789.0, nested inside it.
 
-**Placement is still wrong and the cause is NOT settled.** Two objects sharing `region=146` are
-wrong together and identically (correct tile, polar opposite) while a `region=6` object is wrong
-differently (one tile off) — which looks like per-region frames keyed on `MSHD.Field04`. But two
-things weaken that:
+Every earlier reading was a **bounds fit**, which proves only which BAND a value lies in — it cannot
+see a reflection about the map centre, because reflecting a band yields a band. The raw band
+measurement still reproduces (309/309, X in the band of the filename's SECOND number, Y in the
+FIRST); what was wrong was reading a **distance-from-origin band as a map tile index**. The map tile
+index is `31 - band`.
 
-- **Phasing does not explain it.** The region-6 tents live in `development_01_00.pm4`, which has
-  **no phased or destructible chunks at all**. Phasing may still matter for 00_00 specifically, but
-  at least one misplaced population has nothing to do with it.
-- **Region 0 is a shared bucket.** M2 content is generally local region PLUS region 0, spread across
-  the whole map, so region 0 is not a located area and a pure region-keyed frame has to explain what
-  frame it carries. The `--by-region` audit must treat region 0 separately.
+**`Pm4PlacementMath.ConvertPm4VertexToWorld` is correct — do not touch it.** It emits an
+*intermediate* space the viewer finishes with `renderer = (MapOrigin - world.Y, MapOrigin - world.X,
+world.Z)`. Composing the two reproduces the transform above, so its axis swap is cancelled by the
+renderer's. The 7 `PlacementMath_*` tests are right, for that reason rather than the recorded one.
 
-Regions ARE confirmed real: region 245 is a whole ~2006 prototype zone for what became Sholazar
-Basin, built from Feralas/vanilla plus Wrath assets. See `pm4-restoration-epic.md`.
+### Region-scoped frames — REFUTED
 
-### Next step, cheapest path
+`pm4 bounds-audit --by-region` over **1,895 CK24 objects**, 309 files, 207 regions:
 
-Add `--by-region` to `pm4 bounds-audit`: group MSVT bounds by `MSHD.Field04` and compare each region
-against the tile band its filename implies. A small number of families (identity, negated,
-axis-swapped, 180 out) means the frame is region-scoped and that family table is the fix. Uniform
-behaviour kills the hypothesis. Then read the 7 PlacementMath tests and settle whether they encode
-the bug or real intent.
+| measurement | result |
+|---|---|
+| objects on the canonical frame | 1,877 / 1,895 |
+| regions spanning >1 file | 62 |
+| ...of those with mixed frames | 1 |
+| objects with zero whole-tile displacement | 1,892 / 1,895 |
+
+No frame family table exists. And `MSHD.Field04` is a **per-file** header, so "objects in one region
+fail identically" and "objects in one file fail identically" were always the same observation — the
+hypothesis was unfalsifiable on the evidence that motivated it. Regions ARE still real authored
+areas (region 245 is the ~2006 Sholazar prototype zone); they are just not a coordinate frame key.
+
+### THE REMAINING BUG — the per-object MPRL fitter
+
+The viewer runs `Pm4PlacementMath`'s fitter per CK24 group and it overrides the canonical frame:
+
+- `ResolveCoordinateMode` picks `TileLocal` for data that is never tile-local, then adds tile offsets
+  to already-absolute coordinates. 18 objects. **The human tents are one of them** —
+  `development_01_00.pm4` (region 6) resolves `TileLocal/.UV.` and moves from canonical tile (0,1) to
+  (1,-1). All 3 ADT placements for that tile sit inside its canonical footprint, so ground truth says
+  canonical is right and the fitter is wrong.
+- `TryComputeWorldYawCorrectionRadians` rotates **974 of 1,895 objects (51%)** by 15–45°, fitted
+  against MPRL packed angles — and MPRL is the one chunk in a permuted frame. **Now disproven.**
+
+### The yaw correction is wrong — `pm4 yaw-evidence`
+
+The ADT containment test could not judge the yaw: it compares a *point* to a *box*, and a centroid
+rotation moves neither. MODF carries a world bounding *box*, so rotating a non-square object inside
+it ejects vertices. Objects are matched by **centroid containment**, which a centroid rotation cannot
+change — matching on best fit would have selected for the answer it then reported.
+
+1,066 objects matched to a WMO box; **127 have a box able to see a rotation**, proven per object by
+a deliberate 45° control:
+
+| geometry | mean vertices inside its WMO box |
+|---|---|
+| canonical, no yaw | **93.3%** |
+| canonical + fitted yaw | 88.2% |
+| full resolved solution | 89.5% |
+| 45° control (known wrong) | 79.0% |
+
+**yaw hurts 96, helps 3, tie 28** — the fitted yaw moves geometry the same way the known-wrong
+control does. Worst cases are real WMOs that fit perfectly without it: `WG_GATE01.WMO` 100% → 50%,
+`WG_WALL01.WMO` 100% → 82%, `WALLPIECE01.WMO` 66% → 47%. The 401 objects whose box cannot see a
+rotation are excluded from that headline and counted separately.
+
+Reports are in `output/pm4-decode/`: `region-frame-audit.json`, `yaw-evidence.json`.
+
+### The fix — LANDED
+
+The clincher was the user's own observation: **MSCN nodes render correctly at the tents while the
+MSUR mesh does not**, in the same file. `EnsurePm4MscnData` and `EnsurePm4MspvData` place points with
+`(MapOrigin - p.X, MapOrigin - p.Y, p.Z)` — the canonical transform, applied raw, no fitter. The mesh
+was the only path going through `ResolvePlacementSolution`. MSPV/MSVT/MSCN share one chunk frame, so
+the mesh had no business using a different one.
+
+`WorldScene.ResolveCk24CoordinateModeResolution` now returns a constant canonical resolution, and
+`WorldScene.ResolvePlacementSolution` builds the solution with the identity planar transform and
+**zero yaw**, keeping only the real world centroid as the pivot (selection and connector merging need
+it). `Pm4PlacementMath` is untouched, so all 16 `PlacementMath_*` tests still pass — the render path
+simply no longer asks it to fit anything.
+
+### The cache trap — read this before debugging any placement change
+
+The code fix was correct and compiled, and the viewer **still drew the old positions**. Two disk
+caches store geometry *after* the placement transform — triangles, lines, `PlacementAnchor`, bounds
+and the resolved planar flags are all post-transform — so a cached tile replays whatever placement
+was in effect when it was written:
+
+| cache | magic | version constant |
+|---|---|---|
+| tile overlay | `PM4C` | `Pm4OverlayCacheService.CacheVersion` |
+| per-file | `PM4F` | `Pm4PerFileCacheService.EntryVersion` |
+
+959 MB across 402 blobs were being replayed. **Both versions must move together** for any change to
+placement semantics, even when the byte layout is unchanged — the version check is the only
+invalidation. Both are now at **9**. Cache root: `<app bin>/output/cache/pm4-overlay/<id>/`.
+
+**Not yet visually confirmed.** The viewer builds clean with the app closed; launch it and the stale
+blobs will be rejected and rebuilt (first load is slow).
+
+**The arithmetic that predicts success**: `development_01_00`'s MSVT centroid is ≈ (46, 784), so the
+canonical transform puts it at `(17066.666 - 46, 17066.666 - 784)` = **(17020.7, 16282.7)**. The
+viewer was drawing it at (16578.4, 16780.2) — a displacement of **≈666**, and the hover tooltip
+reported gaps of **657.4 / 658.3 / 664.2** to the three real `HU_TENT02.M2` instances. That match to
+within the tents' own ~12-unit spread is what proved the old code path was still executing rather
+than the new transform being wrong. After the cache clears, that gap should fall to near zero.
+
+### Also fixed this session
+
+`Pm4CoordinateService.GetObj0PathForPm4` built a zero-padded name (`development_01_00_obj0.adt`) that
+exists for **none** of the 616 corpus files, though 411 have a companion under the unpadded ADT
+spelling (`development_1_0_obj0.adt`). It is now `TryGetObj0PathForPm4` and returns null instead.
+**`Pm4CollisionDumper` still falls back to the first `*_obj0.adt` in the folder** — an arbitrary
+unrelated tile — and should be fixed.
 
 ### Test state
 
-`WowViewer.Core.PM4.Tests`: 86 passed, 1 failed —
+`WowViewer.Core.PM4.Tests`: **96 passed, 1 failed** —
 `Pm4RegionObjectGrouperTests.AnalyzeDirectory_DevelopmentCorpus_NonEmptyRegionsHaveObjects`,
-**pre-existing**, confirmed failing at baseline with this session's changes stashed.
+**pre-existing**, confirmed failing at baseline. The 10 new `Pm4PlacementSpaceTests` all pass.
 
 ### Incidental
 

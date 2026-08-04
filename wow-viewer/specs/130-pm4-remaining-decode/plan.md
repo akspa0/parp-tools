@@ -222,29 +222,103 @@ turned out to be blocking. Recorded here so the next session does not re-derive 
   3,171,410 runs are exactly length 3 (75.5%) or length 7 (18.5%)**, so MPRR is small fixed-shape
   records, not a bulk index stream. No domain explains Value1 by bounds; MPRL is worst of nine.
 
-### BLOCKING — coordinate frames, discovered by `pm4 bounds-audit`
+### Coordinate frames — RESOLVED against ADT ground truth
 
-**MSVT is stored in absolute world coordinates on both horizontal axes; Z is height.** X lies inside
-the world band of the SECOND filename number 309/309 files, Y inside the band of the FIRST 309/309,
-each exactly one tile wide. The filename is **ROW_COL**. `development_00_00` is the only tile also
-consistent with tile-local storage (both indices 0, world equals local), which is why it alone
-looked correct while everything else piled up around it.
+**MSVT is stored in ADT placement space**: a distance-from-origin coordinate, exactly like a raw
+MDDF position, with its two horizontal fields in the **opposite order** to MDDF's
+(`MSVT.X == MDDF.rawY`, `MSVT.Y == MDDF.rawX`). The conversion is a per-axis subtraction with **no
+axis swap**:
 
-`Pm4CoordinateService` is corrected. `Pm4PlacementMath` is **not**: its `XYPlaneZUp` case maps U
-from Y and V from X, transposing the scene about the map diagonal. The one-line fix is documented at
-the site; it breaks 7 `PlacementMath_*` tests that pin the old convention.
+```text
+placement = (17066.666 - MSVT.X, 17066.666 - MSVT.Y, MSVT.Z)
+```
 
-**That fix is insufficient on its own.** Residual misplacement is **per-region**: two objects sharing
-`MSHD.Field04 == 146` are wrong identically (correct tile, polar opposite) while a `region=6` object
-is wrong differently. That is the signature of **region-scoped coordinate frames**.
+**Evidence** — over the 179 development tiles holding both a PM4 and a correctly named `_obj0.adt`,
+**55,978 of 60,560 (92.4%)** MDDF/MODF positions fall inside their paired PM4's MSVT footprint. The
+unswapped alternative scores **412 of 60,560 (0.7%)** and is eliminated.
 
-**This blocks Phases 5, 6 and 8.** Object identity, viewer selection and reconstruction all sit on
-placement being right. It does not block Phases 2, 3, 4 or the rest of 9, which are index-domain
-work and do not depend on world coordinates.
+The earlier "MSVT is already in absolute world coordinates" reading came from a bounds fit, which
+proves only which BAND a value lies in — it cannot see a reflection about the map centre, because
+reflecting a band yields a band. Its raw measurement still reproduces (309/309 files have X inside
+the band of the filename's SECOND number and Y inside the band of its FIRST); what was wrong was
+reading a **distance-from-origin band as a map tile index**. The map tile index is `31 - band`.
 
-**Next action**: add `--by-region` to `pm4 bounds-audit`, grouping MSVT bounds by `MSHD.Field04`. A
-small number of frame families means region-scoped frames and the family table is the fix; uniform
-behaviour kills the hypothesis and sends the search elsewhere.
+`Pm4PlacementMath.ConvertPm4VertexToWorld` is **correct and must not be touched**. It emits an
+intermediate space the viewer finishes with `renderer = (MapOrigin - world.Y, MapOrigin - world.X,
+world.Z)`; composing the two reproduces the transform above, so its axis swap is cancelled by the
+renderer's. The 7 `PlacementMath_*` tests defending it are right.
+
+### Region-scoped frames — REFUTED by `pm4 bounds-audit --by-region`
+
+Over **1,895 CK24 objects** in 309 files spanning **207 regions**:
+
+| measurement | result |
+|---|---|
+| objects resolving to the canonical frame | 1,877 / 1,895 |
+| regions spanning more than one file | 62 |
+| ...of those with mixed frames | 1 |
+| objects with zero whole-tile displacement | 1,892 / 1,895 |
+
+There is no frame family table to build. Crucially, `MSHD.Field04` is a **per-file** header value, so
+"objects in one region fail identically" and "objects in one file fail identically" were always the
+same observation — the hypothesis was unfalsifiable on the evidence that motivated it. Only regions
+spanning several files can distinguish the two, and they agree.
+
+**The residual misplacement is the per-object MPRL-scored fitter**, which the viewer runs per CK24
+group:
+
+- `ResolveCoordinateMode` picks `TileLocal` for data that is never tile-local and then adds tile
+  offsets to already-absolute coordinates. 18 objects. **The human tents are one of them**:
+  `development_01_00.pm4` (region 6) resolves `TileLocal/.UV.` and moves from canonical tile (0,1)
+  to (1,-1). All 3 ADT placements for that tile sit inside its canonical footprint, so ground truth
+  confirms canonical is right and the fitter is wrong.
+- `TryComputeWorldYawCorrectionRadians` rotates **974 of 1,895 objects (51%)** by 15–45°, fitted
+  against MPRL packed angles. **Now disproven** — see below.
+
+### The yaw correction is wrong — `pm4 yaw-evidence`
+
+The transform test above compares a placement *point* against a *box*, and the correction rotates
+geometry about its own centroid, which moves neither. MODF is the way out: it carries a world
+bounding box, so rotating a non-square object inside it ejects vertices. Objects are matched to a
+box by **centroid containment**, which a centroid rotation cannot change — matching on best fit
+would have selected for the unrotated reading and then concluded in its favour.
+
+Over 1,066 objects matched to a WMO box, of which **127 have a box able to see a rotation** (proven
+per object by a deliberate 45° control):
+
+| geometry | mean fraction of vertices inside its WMO box |
+|---|---|
+| canonical, no yaw | **93.3%** |
+| canonical + fitted yaw | 88.2% |
+| full resolved solution | 89.5% |
+| 45° control (known wrong) | 79.0% |
+
+**yaw hurts 96, helps 3, tie 28.** The fitted yaw moves geometry in the same direction as the
+known-wrong control. Worst cases are real WMOs whose collision fits perfectly without it —
+`WG_GATE01.WMO` drops 100% → 50%, `WG_WALL01.WMO` 100% → 82%, `WALLPIECE01.WMO` 66% → 47%.
+
+The 401 matched objects whose box *cannot* see a rotation are excluded from that headline and
+reported separately, so "no difference" is never confused with "cannot tell".
+
+### The fix — landed
+
+The clincher was a differential the user spotted: **MSCN nodes render at the tents while the MSUR
+mesh does not**, in the same file. `EnsurePm4MscnData` and `EnsurePm4MspvData` place points with
+`(MapOrigin - p.X, MapOrigin - p.Y, p.Z)` — the canonical transform applied raw, with no fitter — and
+the mesh was the only path going through `ResolvePlacementSolution`. MSPV, MSVT and MSCN share one
+chunk frame, so that difference was never legitimate.
+
+`WorldScene.ResolveCk24CoordinateModeResolution` now returns a constant canonical resolution;
+`WorldScene.ResolvePlacementSolution` uses the identity planar transform and zero yaw, keeping the
+real world centroid as the pivot because selection and connector merging need it. **`Pm4PlacementMath`
+is deliberately untouched** — the fitter still exists for callers that want to explore it, all 16
+`PlacementMath_*` tests still pass, and the render path simply no longer asks it to fit anything.
+
+That unblocks Phases 5, 6 and 8, subject to visual confirmation in the viewer.
+
+Phases 5, 6 and 8 stay blocked until that lands, since object identity, viewer selection and
+reconstruction all sit on placement being right. Phases 2, 3, 4 and the rest of 9 are index-domain
+work and were never blocked.
 
 ### Regions are confirmed authored areas, not bookkeeping
 

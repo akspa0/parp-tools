@@ -96,6 +96,49 @@ Sweep MPRR against every domain and test the sentinel-delimited run hypothesis.
 
 ## Extended commands
 
+### `pm4 bounds-audit --by-region` — Phase 0.5
+
+Groups MSVT by `MSHD.Field04` and reports, per region, the frame the placement pipeline actually
+resolves and how far that moves geometry off the ADT-verified canonical transform.
+
+| flag | required | meaning |
+|---|---|---|
+| `--input`, `-i` | yes | PM4 corpus directory |
+| `--by-region` | — | selects this mode; without it the command behaves exactly as before |
+| `--placements` | no | directory holding the companion `_obj0.adt` files; defaults to `--input` |
+| `--output`, `-o` | no | write JSON; otherwise print to stdout |
+
+**Why it does not simply group raw bounds.** The obvious reading of the plan — group MSVT bounds by
+region, check each against the tile band its filename implies — is a test every input passes
+(309/309), so it reports "uniform" regardless of the truth. It is still emitted as the continuity
+baseline, but the discriminating measurements are the **resolved frame per CK24 object** (which
+varies) and **agreement with real ADT placements** (which is external ground truth).
+
+`--placements` is read in the tool rather than the analyzer because `WowViewer.Core.IO` already
+references `WowViewer.Core.PM4`; reading ADTs from inside the analyzer would be a reference cycle.
+The analyzer instead accepts reference points as an argument, which also makes it unit-testable.
+
+### `pm4 yaw-evidence` — Phase 0.5
+
+Decides whether the placement fitter's per-object yaw correction helps or hurts, by scoring each
+object's footprint against the world bounding box of the WMO placement it stands in.
+
+| flag | required | meaning |
+|---|---|---|
+| `--input`, `-i` | yes | PM4 corpus directory |
+| `--placements` | no | directory holding the companion `_obj0.adt` files; defaults to `--input` |
+| `--output`, `-o` | no | write JSON; otherwise print to stdout |
+
+Exits non-zero when no MODF world-model placements can be found, rather than reporting a verdict
+from nothing. MDDF doodad placements are points and cannot score a rotation, so only MODF is usable.
+
+**Detector power is built in.** Every object is also scored under a deliberate 45° control rotation.
+An object whose containment the control does not reduce is one whose box cannot see a rotation at
+all; it is excluded from the headline and counted separately, so "the yaw makes no difference" can
+never be confused with "this test cannot tell". Matching is by centroid containment, which a
+rotation about the centroid cannot change — matching on best fit would have selected for the
+unrotated reading and then concluded in its favour.
+
 ### `pm4 unknowns`
 
 **Extended, not changed.** Phase 9 adds the full-domain MPRR sweep to its findings. Every existing
