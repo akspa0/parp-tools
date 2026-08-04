@@ -2,6 +2,46 @@
 
 Last updated: 2026-08-03
 
+## Session: Spec 130 PM4 decode (2026-08-03)
+
+### Done
+
+1. **Spec 130 planned** — `plan.md`, `research.md` (10 findings), `data-model.md`, `quickstart.md`,
+   6 contracts. Nine implementation phases; Phase 1 is a prior-art harvest.
+2. **Prior art located**: ~60 files of PM4 object-assembly work sit unported on `main` in
+   `parpToolbox/src/parpToolbox/Services/PM4/` (incl. `Pm4CrossTileObjectAssembler.cs` and a 56 KB
+   `Pm4GroupingTester.cs`) plus `PM4Tool/docs/pm4/`. `AGENTS.md` line 345 already designates these
+   extraction inputs. The public `akspa0/parp` repo is a dead end for geometry.
+3. **The April 2025 "lost geometry" was never lost** — 15,096 verts = MSPV + MSVT, 7,382 faces =
+   sum(MSUR.IndexCount - 2), i.e. MSUR as triangle fans, which the viewer already does. MSPI
+   produced zero faces then, so connective geometry was never decoded in any era.
+4. **MSPV/MSPI decoded** as a vertical planar quad mesh — the walls. `pm4 connective-geometry`,
+   6 detector-power tests, corpus-wide evidence.
+5. **Walls render in the viewer**; two viewer bugs fixed (PM4 tab unreachable, walls invisible in
+   wireframe).
+6. **`pm4 bounds-audit`** built; found MSVT is absolute world on both horizontal axes.
+7. **`pm4 mprr`** built; structural hypothesis eliminated, run lengths found to be 94% length-3 or
+   length-7.
+
+### Open — the blocking issue
+
+PM4 objects are still misplaced in the viewer. `Pm4CoordinateService` is corrected but
+`Pm4PlacementMath.ConvertPm4VertexToWorld` still transposes the scene (`XYPlaneZUp` maps U from Y,
+V from X). The one-line fix breaks 7 `PlacementMath_*` tests that pin the old convention.
+
+**And that fix is known to be insufficient**: residual error is per-region, not global. Two objects
+sharing `MSHD.Field04 == 146` are wrong identically while a `region=6` object is wrong differently,
+which points at region-scoped coordinate frames. Next step is `--by-region` on `pm4 bounds-audit`.
+
+### Test state
+
+86 passed / 1 failed (`Pm4RegionObjectGrouperTests`, pre-existing, confirmed at baseline).
+
+### Not started
+
+Spec 130 Phases 1-6 and 8-9 proper (prior-art harvest, evidence register, grouping-rule harness,
+candidate rules, object identity, reconstruction). `/speckit.tasks` not yet run.
+
 ## Session: Spec 125/126 training — residual extractor + stacked height model
 
 ### What was done

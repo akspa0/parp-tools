@@ -204,6 +204,86 @@ rather than replaced: `Pm4ResearchUnknownsAnalyzer` (its published edges are the
 success criterion is measured against, so they must keep emitting identical numbers) and
 `Pm4ObjectSegmentBuilder` (Spec 128 already consumes its output).
 
+## Implementation status (updated 2026-08-03)
+
+Work started out of phase order because two things turned out to be reachable immediately and one
+turned out to be blocking. Recorded here so the next session does not re-derive it.
+
+### Done, out of order
+
+- **Phase 7 (connective geometry) is effectively resolved for MSPV/MSPI.** It is a **vertical planar
+  quad mesh — the walls between the MSUR floors**. Corpus-wide: 98.05% of windows hold exactly 4
+  indices, 99.6% coplanar, and zero of 598,790 faces have Z as their dominant normal, against MSUR's
+  91.7% Z-dominant. Polyline and triangle-list eliminated. Shipped as `pm4 connective-geometry` with
+  6 detector-power tests satisfying the gate. **MSCN remains untested** as the co-equal candidate.
+- **US1 partially delivered**: walls render in the viewer and select with their object.
+- **Phase 9 (MPRR) partially done.** Structural hypothesis **eliminated** — no chunk's entry count
+  matches the sentinel-delimited run count (best: MPRL, 5/502 files). New structure found: **94% of
+  3,171,410 runs are exactly length 3 (75.5%) or length 7 (18.5%)**, so MPRR is small fixed-shape
+  records, not a bulk index stream. No domain explains Value1 by bounds; MPRL is worst of nine.
+
+### BLOCKING — coordinate frames, discovered by `pm4 bounds-audit`
+
+**MSVT is stored in absolute world coordinates on both horizontal axes; Z is height.** X lies inside
+the world band of the SECOND filename number 309/309 files, Y inside the band of the FIRST 309/309,
+each exactly one tile wide. The filename is **ROW_COL**. `development_00_00` is the only tile also
+consistent with tile-local storage (both indices 0, world equals local), which is why it alone
+looked correct while everything else piled up around it.
+
+`Pm4CoordinateService` is corrected. `Pm4PlacementMath` is **not**: its `XYPlaneZUp` case maps U
+from Y and V from X, transposing the scene about the map diagonal. The one-line fix is documented at
+the site; it breaks 7 `PlacementMath_*` tests that pin the old convention.
+
+**That fix is insufficient on its own.** Residual misplacement is **per-region**: two objects sharing
+`MSHD.Field04 == 146` are wrong identically (correct tile, polar opposite) while a `region=6` object
+is wrong differently. That is the signature of **region-scoped coordinate frames**.
+
+**This blocks Phases 5, 6 and 8.** Object identity, viewer selection and reconstruction all sit on
+placement being right. It does not block Phases 2, 3, 4 or the rest of 9, which are index-domain
+work and do not depend on world coordinates.
+
+**Next action**: add `--by-region` to `pm4 bounds-audit`, grouping MSVT bounds by `MSHD.Field04`. A
+small number of frame families means region-scoped frames and the family table is the fix; uniform
+behaviour kills the hypothesis and sends the search elsewhere.
+
+### Regions are confirmed authored areas, not bookkeeping
+
+`MSHD.Field04` identifies **whole authored zones spanning many ADT tiles**. Region 245 is an entire
+prototype zone laid out around 2006 as a test for what became Sholazar Basin, assembled from Feralas
+and vanilla assets plus Wrath of the Lich King assets — which dates it internally. Region 73
+neighbours it. 227 distinct values plausibly means ~227 authored areas.
+
+This raises a new decode question worth adding to the open list: **does Field04 index something
+outside the PM4** — a master region table, a DBC, or a server-side list? The working theory is that
+a region is the unit the server loads and unloads for pathfinding, which would explain why it is
+not tile-derived, why it spans tiles, and why it would need a stable shared id.
+
+### A competing explanation for the rotation: phased objects
+
+The rotation appears only on **00_00**, the **only tile with the phased/destructible payload
+populated** (MDBH/MDOS/MDSF, 2,684 MDSF entries) — a fact this spec already records without
+connecting it to placement. The rotation may be a mechanism for swapping collision geometry between
+phase states, which would explain the *localisation* that a global transform error cannot.
+
+**Test**: are misplaced 00_00 surfaces disproportionately reachable via `MDSF.MsurIndex -> MSUR`
+(verified, 2,684 fits / 0 misses)? **Caution**: 00_00 is also the one tile where every coordinate
+error cancels, so there are now two independent reasons for it to look special. Separate them.
+
+### Viewer performance is now a gating concern
+
+The overlay builds and draws all 9,207 objects regardless of camera position and is very slow; wall
+rendering roughly doubled the triangle count. It must cull per tile using the existing ADT Detail
+Tiles budget. The build is already per-tile, so the work is gating upload and draw by distance, not
+restructuring. This blocks practical visual verification of any placement fix.
+
+### Revised order
+
+**0.5 (new, first): resolve coordinate frames** — `--by-region` bounds audit, plus the MDSF/phasing
+test, keeping the two 00_00 explanations separate. **0.6: per-tile PM4 culling**, because placement
+fixes cannot be verified visually until the viewer is usable. Then 1 (prior-art harvest), 2, 3, 4 as
+written. Phase 7 needs only its MSCN half. Phase 9 needs the length-3/length-7 record shapes decoded
+and should add "does Field04 reference something outside the PM4" to its open list.
+
 ## Phases
 
 Each phase ends with a **gate**. A phase is done when its gate is met on the corpus, not when its

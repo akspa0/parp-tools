@@ -2,7 +2,74 @@
 
 Last updated: 2026-08-03
 
-## Session: Spec 125/126 training — residual extractor + stacked height model
+## CURRENT: Spec 130 PM4 decode — walls decoded, coordinate frames still wrong
+
+Branch `130-pm4-remaining-decode`. Spec + plan + research + contracts committed; implementation
+partially started. **Pick up here.**
+
+### Landed and verified
+
+- **MSPV/MSPI decoded: it is a vertical planar QUAD MESH — the walls between the MSUR floors.**
+  Corpus-wide over 616 files: 98.05% of MSLK path windows hold exactly 4 indices, 99.6% coplanar,
+  and **zero of 598,790 faces have Z as their dominant normal** (mean |normal.Z| = 0.000) against
+  MSUR's 91.7% Z-dominant. Polyline and triangle-list readings eliminated with evidence.
+  `pm4 connective-geometry`, with 6 detector-power tests that prove the discriminator separates a
+  quad from a collinear run from a triangle list *before* any corpus claim.
+- **Walls now render in the viewer**, toggle at Tools > PM4 > Overlay, emitting outlines as well as
+  triangles so they appear in the default wireframe view.
+- **Two viewer bugs fixed**: `Tools > PM4` switched on `_activeBottomTabIndex` (the Tools selector),
+  so it always rendered Correlation and five panels were unreachable; and walls emitted triangles
+  only, invisible unless Solid Fill was on.
+- **`pm4 bounds-audit`** — new, and it found the coordinate bug below.
+- **`pm4 mprr`** — the structural hypothesis is ELIMINATED (no chunk's entry count matches the run
+  count; best is MPRL at 5/502 files). New finding: **94% of the 3,171,410 sentinel-delimited runs
+  are exactly length 3 (75.5%) or length 7 (18.5%)** — small fixed-shape records, not a bulk index
+  stream. No domain explains Value1 by bounds; MPRL is the *worst* of nine at 48.5%.
+
+### THE OPEN BUG — read this first
+
+**MSVT is stored in ABSOLUTE WORLD coordinates on both horizontal axes; Z is height.** Measured over
+all 309 non-empty files: X lies inside the world band of the SECOND filename number 309/309 times,
+Y inside the band of the FIRST 309/309, each spanning exactly one tile. `development_22_18` is the
+clean case — 126,596 vertices, X = 9600.0..10133.3 (exactly column 18), Y = 11733.3..12266.7
+(exactly row 22). **The filename is ROW_COL.** Only `development_00_00` is also consistent with
+tile-local storage, because there both indices are 0 and world equals local — which is why that one
+tile always looked right and everything else piled up around it.
+
+`Pm4CoordinateService` is corrected. **`Pm4PlacementMath` is NOT.** Its `XYPlaneZUp` case maps
+U from Y and V from X, transposing the scene about the map diagonal so tile (x,y) renders at (y,x).
+The one-line fix is `localU = pm4Vertex.X; localV = pm4Vertex.Y;` and it is documented at the site.
+It was applied, **broke 7 `Pm4ResearchIntegrationTests.PlacementMath_*` tests** that pin the old
+convention, and was reverted rather than left failing.
+
+**But that fix alone is now known to be insufficient.** Viewer hover data shows the residual error
+is not uniform: two objects sharing `region=146` are wrong together and identically (correct tile,
+polar opposite), while a `region=6` object is wrong differently (one tile off). Objects failing in
+lockstep by region is the signature of a **per-region coordinate frame**, keyed on `MSHD.Field04`.
+See `pm4-restoration-epic.md` for the full hypothesis and the test.
+
+### Next step, cheapest path
+
+Add `--by-region` to `pm4 bounds-audit`: group MSVT bounds by `MSHD.Field04` and compare each region
+against the tile band its filename implies. A small number of families (identity, negated,
+axis-swapped, 180 out) means the frame is region-scoped and that family table is the fix. Uniform
+behaviour kills the hypothesis. Then read the 7 PlacementMath tests and settle whether they encode
+the bug or real intent.
+
+### Test state
+
+`WowViewer.Core.PM4.Tests`: 86 passed, 1 failed —
+`Pm4RegionObjectGrouperTests.AnalyzeDirectory_DevelopmentCorpus_NonEmptyRegionsHaveObjects`,
+**pre-existing**, confirmed failing at baseline with this session's changes stashed.
+
+### Incidental
+
+`pm4 inspect` and `pm4 audit` accept `--output` and silently ignore it; the other pm4 report
+commands honour it.
+
+---
+
+## Earlier session: Spec 125/126 training — residual extractor + stacked height model
 
 - **Spec 125 US7 residual extractor** trained and validated. Best epoch 54, val_mae=0.0893, beats_baseline=True. Guidance losses (multiscale/sobel/spectral/laplacian) added to trainer but showed marginal improvement vs baseline. Extractor converges at ~0.089 MAE on the curated rolling+steep regimes.
 - **Residual→height feed-forward** (Spec 125 US4) failed conclusively: two runs (uncurated and curated) never beat the tile-mean baseline. The "learns then unlearns" oscillation confirmed the target is not learnable from single-view shading.

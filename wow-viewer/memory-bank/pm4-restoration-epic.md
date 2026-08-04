@@ -110,3 +110,65 @@ behaving consistently across many files.
 
 **Status**: hypothesis only. `pm4 bounds-audit` already reads every file and computes MSVT bounds,
 so adding a `--by-region` grouping is the cheapest path to testing it.
+
+### CONFIRMED: regions are real semantic units spanning many tiles (user, 2026-08-03)
+
+The region hypothesis above is no longer speculative. `MSHD.Field04` identifies **whole authored
+areas spanning multiple ADT tiles**, not per-file bookkeeping.
+
+- **Region 245 is an entire prototype zone**, laid out around **2006**, a test for what became
+  **Sholazar Basin** — and it is a prototype of what *could* have been, not what shipped. It is
+  assembled from **Feralas** and base-vanilla assets **plus assets added later in Wrath of the Lich
+  King** (Grizzly Hills flowers planted in its garden). That asset mix dates the region internally
+  and proves regions are authored content, not runtime partitioning artefacts.
+- **Region 73** is a different region in the same area. Regions neighbour each other spatially.
+- 227 distinct Field04 values corpus-wide is therefore plausibly ~227 authored areas.
+
+**Open question the user raises**: do these values index something **outside the PM4**? A master
+region table, a server-side list, or a DBC. The working theory is that a region is the unit the
+**server loads and unloads for pathfinding** — which would explain why it is not tile-derived, why
+it spans tiles, and why it would need a stable id shared with something else.
+
+That reading also makes region a strong candidate for the coordinate-frame key: a server that swaps
+navigation data in and out per region has every reason to store each region in its own frame.
+
+### The phased-object hypothesis for the rotation bug (user, 2026-08-03)
+
+**This is the most promising explanation for the residual misplacement, and it is testable.**
+
+The weird rotation only appears on **00_00** — and 00_00 is the **only tile in the corpus with the
+phased/destructible payload populated**, in both the ADT and the PM4. The spec already records this
+as measured fact without connecting it to placement: MDBH/MDOS/MDSF are populated on exactly one
+tile, 2,684 MDSF entries, and tile 0_0 is "explicitly unrepresentative of the general mismatch
+population".
+
+The user's reading: the rotation may be a mechanism for **swapping collision geometry in and out for
+phased objects**. A phased object needs more than one collision state, so its geometry may be stored
+in an alternate orientation or frame that only makes sense once the phase state is applied.
+
+**Why this is worth taking seriously over a plain transform bug**: it explains the *localisation*. A
+global transform error should affect every tile equally. This one concentrates on the single tile
+that has a feature no other tile has.
+
+**The test**: check whether the misplaced objects on 00_00 are reachable through
+`MDSF.MsurIndex -> MSUR` (2,684 fits, 0 misses — a verified edge). If misplaced surfaces are
+disproportionately MDSF-referenced, the phase payload is implicated. If misplacement is independent
+of MDSF membership, it is not.
+
+**Caution**: 00_00 is also the tile where every coordinate error cancels (both indices are 0, so
+world equals local). Two unrelated reasons for 00_00 to be special are now on the table, and they
+must not be conflated. Separate them before concluding.
+
+### Viewer performance — PM4 renders everything at once (user, 2026-08-03)
+
+The PM4 overlay currently builds and draws **all** loaded objects regardless of camera position:
+9,207 objects on the development map, with visibility counted but not used to cull work. It is very
+slow.
+
+**Required**: render per tile, driven by the existing **ADT Detail Tiles** slider
+(`_terrainManager.DetailedTileCountOverride` / `EffectiveDetailedTileCount`), so PM4 honours the
+same distance budget terrain already does. The overlay build is already per-tile
+(`BuildPm4TileObjects` runs per file and `Pm4MaxLinesPerTile` / `Pm4MaxTrianglesPerTile` budgets
+exist), so the work is in gating upload/draw by tile distance rather than restructuring the build.
+
+Note wall rendering roughly doubles the triangle count, so this got more urgent this session.
