@@ -60,8 +60,14 @@ Short file. Current truth only. Root `../AGENTS.md` still wins on workspace poli
 - [README.md](/I:/parp/parp-tools/wow-viewer/README.md)
 - [docs/DOCUMENTATION-STATUS.md](/I:/parp/parp-tools/wow-viewer/docs/DOCUMENTATION-STATUS.md)
 - [docs/architecture/wow-engine-modernization-plan-2026-05-14.md](/I:/parp/parp-tools/wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md)
-- [memory-bank/activeContext.md](/I:/parp/parp-tools/wow-viewer/memory-bank/activeContext.md)
-- [memory-bank/progress.md](/I:/parp/parp-tools/wow-viewer/memory-bank/progress.md)
+- [memory-bank/activeContext.md](/I:/parp/parp-tools/wow-viewer/memory-bank/activeContext.md) — dashboard: what is live, and where the detail is
+- [memory-bank/progress.md](/I:/parp/parp-tools/wow-viewer/memory-bank/progress.md) — dated ledger of what shipped
+- [memory-bank/workstream-pm4-decode.md](/I:/parp/parp-tools/wow-viewer/memory-bank/workstream-pm4-decode.md) — PM4 findings, traps, commands
+- [memory-bank/workstream-terrain-ml.md](/I:/parp/parp-tools/wow-viewer/memory-bank/workstream-terrain-ml.md) — terrain/minimap ML findings and run plan
+
+Memory bank routing rules — which file a given statement belongs in — are in
+[memory-bank/coding_standards.md](/I:/parp/parp-tools/wow-viewer/memory-bank/coding_standards.md)
+under "Memory Bank Layout". Follow them instead of appending to `activeContext.md`.
 
 ## Validation
 

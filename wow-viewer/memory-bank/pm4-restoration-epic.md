@@ -1,7 +1,11 @@
 # PM4 Restoration Epic — pointer
 
-Recorded: 2026-08-03. Status: three specs written; **130 planned** (plan + research + contracts);
-implementation not started.
+Recorded: 2026-08-03. **Status below is stale from 2026-08-04.** Spec 130's decode is largely done
+and its placement fix is confirmed in the viewer; spec 131 has decoded CK24 and the doodad identity.
+
+**Current PM4 truth lives in [workstream-pm4-decode.md](workstream-pm4-decode.md)** — findings,
+open questions, traps and commands. This file is kept for the epic's framing and spec map only; when
+the two disagree, the workstream file wins.
 
 **Full epic doc**: `specs/epic-pm4-restoration/epic.md` — read that before touching PM4 work.
 

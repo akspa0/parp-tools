@@ -120,6 +120,35 @@ See `wow-viewer/memory-bank/data-paths.md` for the authoritative list of paths a
 - Feature work starts with a spec under `wow-viewer/specs/<NNN>-<feature>/`. Use the Spec Kit skills.
 - The memory bank (`wow-viewer/memory-bank/`) is the continuity surface. After a non-trivial change, update `activeContext.md` and `progress.md`. Compress aggressively — prefer a 20-line accurate summary over a 200-line log.
 
+## Memory Bank Layout
+
+Every file has one job. Writing to the wrong one is what forces the periodic manual cleanups, so
+route by **kind of statement**, not by what you happen to be working on.
+
+| File | Holds | Does NOT hold |
+|---|---|---|
+| `activeContext.md` | A dashboard: what is live, what changed last, where the detail is. Target one screen. | Findings, measurements, narrative |
+| `progress.md` | A dated ledger, newest first. One entry per session, a few lines: what shipped and the evidence. | How anything works |
+| `workstream-<name>.md` | The durable home for one workstream: settled findings, open questions, traps, commands. | Session narrative |
+| `projectbrief.md`, `techContext.md`, `systemPatterns.md`, `coding_standards.md`, `data-paths.md` | Stable reference. Rarely changes. | Anything time-bound |
+| `archive/` | Session detail no longer worth loading. Dated filenames, indexed in `archive/README.md`. | Anything still true and load-bearing |
+
+Rules that keep it from regrowing:
+
+- **A finding goes in the workstream file the first time it is written down.** Do not stage it in
+  `activeContext.md` intending to move it later — that move is the manual work.
+- **`activeContext.md` and `progress.md` are append-and-trim, never append-only.** When you add a
+  session, delete or relocate what it superseded in the same edit.
+- **New workstream, new file.** When a second unrelated thread appears in `activeContext.md`, that is
+  the signal to split, not to add a heading.
+- **Archive on supersession, not on age.** Detail that is still load-bearing stays live however old
+  it is; detail that a later finding replaced goes to `archive/` with a dated filename and a row in
+  its README.
+- **Never delete a negative result.** Dead ends are the expensive part and get re-proposed if lost.
+  Record what was eliminated and the evidence that eliminated it.
+- `activeContext.md` and `progress.md` are referenced by name from `AGENTS.md`, `README.md`,
+  `docs/`, the constitution, and many spec task lists. **Do not rename or remove them.**
+
 ## Guardrails in One Place
 
 The most important repository rules, in distilled form. The full versions live in `wow-viewer/AGENTS.md`.
