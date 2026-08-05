@@ -40,6 +40,7 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from harvester.raw_reader import read_tile_blob  # noqa: E402
+from harvester.v50.classify import SignalTier, compute_signal_tier  # noqa: E402
 from harvester.v50.contracts import DEFAULT_RELEASE_V60, STORE_SCHEMA_V60  # noqa: E402
 
 # Terrain maps to stream per build. All builds share the same maps.
@@ -213,15 +214,49 @@ def main() -> int:
     ))
     print(f"Signals: {len(all_signal_names)}", flush=True)
 
-    # Build index
+    # Compute sidecar metadata (per-tile scalars, stored in index.parquet, not as Zarr arrays).
+    # These are derived signals that Python tools compute — they must be part of the v60 store.
+    print("Computing sidecar metadata...", flush=True)
+    sidecar_index: list[dict] = []
+    for tile_id, tile in enumerate(all_tiles):
+        height = tile.get("height_257")
+        if height is not None:
+            h = np.asarray(height, dtype=np.float32)
+            if h.size > 0:
+                levels = int(np.unique(h).size)
+                height_range = float(np.max(h) - np.min(h))
+                tier = compute_signal_tier(height_range=height_range, surviving_levels=levels)
+                sidecar_index.append({
+                    "surviving_height_levels": levels,
+                    "signal_class": tier.tier.value,
+                    "signal_class_evidence": tier.evidence,
+                })
+            else:
+                sidecar_index.append({
+                    "surviving_height_levels": 0,
+                    "signal_class": "na",
+                    "signal_class_evidence": "zero-height tile",
+                })
+        else:
+            sidecar_index.append({
+                "surviving_height_levels": 0,
+                "signal_class": "na",
+                "signal_class_evidence": "no height data",
+            })
+
+    # Build index (with sidecar metadata)
     index_rows = []
     for tile_id, tile in enumerate(all_tiles):
+        sidecar = sidecar_index[tile_id] if tile_id < len(sidecar_index) else {}
         index_rows.append({
             "build_id": tile["_build_id"],
             "map": tile["_map"],
             "tile_x": int(tile.get("tile_x", -1)),
             "tile_y": int(tile.get("tile_y", -1)),
             "tile_id": tile_id,
+            "surviving_height_levels": sidecar.get("surviving_height_levels", 0),
+            "signal_class": sidecar.get("signal_class", "na"),
+            "signal_class_evidence": sidecar.get("signal_class_evidence", ""),
         })
 
     # Write the unified v60 store
