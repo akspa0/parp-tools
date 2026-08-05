@@ -8,6 +8,19 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-05 — Spec 132 Phase 1: three-tier brush-signature classification
+
+Branch `132-terrain-brush-signature-classification`, commit `f19fc774`.
+
+- **`classify.py`** — new library module with `compute_signal_tier()`: strong/normal/weak/na with
+  published criteria (weak < 5 range, normal 5-50 range or 8-64 levels or low correlation).
+- **`v50_tile_classify.py`** — CLI: reads V50 Zarr store or NPZ dir -> per-tier CSV/JSON + summary.
+- **`tile_inventory.py`** — gains `signal_class` / `signal_class_evidence` per row + `by_signal_class`
+  summary. `tile_composite.py` gains green normal-tier outline. Both archaeology orchestrators run
+  the classifier.
+- **13 new tests pass**; 22 existing inventory/composite tests still pass (no regressions).
+- **tasks.md** covers all 6 phases; Phase 2 (nested weak signal detection) is next.
+
 ## 2026-08-04 — Archaeology pipeline built, spec 132 drafted
 
 - **Single-command archaeology pipeline** (`run-archaeology.ps1`): harvest MPQ → V50 Zarr store → tile inventory → synthesis → composites. Proven on TBC 2.0.0.5610 (Expansion01, 741 tiles).

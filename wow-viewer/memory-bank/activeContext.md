@@ -18,7 +18,8 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 
 Branch `132-terrain-brush-signature-classification`.
 
-Spec written, plan written, memory bank updated. Ready for implementation in the next session.
+Spec written, plan written, **Phase 1 (three-tier classification) implemented and committed**.
+Phases 2-6 pending.
 
 ### What was accomplished this session
 
@@ -29,6 +30,18 @@ Spec written, plan written, memory bank updated. Ready for implementation in the
 3. **Batch archaeology** — [`run-batch-archaeology.ps1`](../scripts/run-batch-archaeology.ps1) discovers all 15 1.x Windows clients in H:\CLIENTS, finds terrain maps via discover-maps, and runs the pipeline on each.
 
 4. **Spec 132 drafted** — 6 user stories for terrain brush signature classification, including the Nov 2001 rescale boundary detection (33.33% horizontal roll).
+
+### What was accomplished this session (2026-08-05)
+
+**Spec 132 Phase 1 — three-tier brush-signature classification, implemented.**
+
+- [`classify.py`](../data-harvester/src/harvester/v50/classify.py) — `compute_signal_tier()` with published criteria: weak (range < 5), normal (5-50 range OR 8-64 surviving levels OR low alpha<->height correlation), strong otherwise; `na` for zero-relief tiles. Deterministic (FR-006), never fabricates a score when alpha data is absent (FR-007).
+- [`v50_tile_classify.py`](../data-harvester/scripts/v50_tile_classify.py) — CLI over V50 Zarr store or NPZ shard dir -> classify.csv/json + summary.json.
+- `tile_inventory.py` gains `signal_class` / `signal_class_evidence` per row + `by_signal_class` summary; `tile_composite.py` gains green normal-tier outline; both archaeology orchestrators (`v50_archaeology.py`, `build_v50_store_from_npz.py`) run the classifier.
+- 13 new unit tests pass; 22 existing inventory/composite tests still pass.
+- Committed as `f19fc774` on branch `132-terrain-brush-signature-classification`. Spec/plan/tasks committed in the same change; tasks.md covers all 6 phases.
+
+Next: Phase 2 (nested weak signal detection) per `tasks.md`.
 
 ### Harvested data already on disk
 
