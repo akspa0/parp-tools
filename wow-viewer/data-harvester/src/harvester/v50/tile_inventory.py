@@ -25,6 +25,8 @@ from typing import Any
 
 import numpy as np
 
+from harvester.v50.classify import compute_signal_tier
+
 INVENTORY_SCHEMA = "v50-tile-inventory-v1"
 
 # --- WeakSignalDetector.cs parity -------------------------------------------------------------
@@ -269,6 +271,16 @@ def inventory_store(
             height_range=height_range,
             weak=weak,
         )
+        # Three-tier brush-signature classification (Spec 132 US1). The alpha<->height correlation
+        # slot is Phase 3; until then it is None and the height/levels criteria decide the tier
+        # (FR-007: never fabricate a score for a tile with no alpha data to measure).
+        tier = compute_signal_tier(
+            height_range=height_range,
+            surviving_levels=levels,
+            alpha_texture_correlation=None,
+        )
+        record["signal_class"] = tier.tier.value
+        record["signal_class_evidence"] = tier.evidence
         rows.append(record)
 
     _attach_neighbour_reference(rows)
@@ -348,6 +360,11 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
             name: sum(1 for r in rows if r.get("information_class") == name)
             for name in ("bit_exact_flat", "trace", "coarse_terrain", "rich_terrain")
         },
+        # Three-tier brush-signature classification (Spec 132 US1).
+        "by_signal_class": {
+            name: sum(1 for r in rows if r.get("signal_class") == name)
+            for name in ("strong", "normal", "weak", "na")
+        },
     }
 
 
@@ -362,6 +379,7 @@ CSV_COLUMNS = (
     "weak_chunk_count", "blank_chunk_count", "chunk_range_p50", "chunk_range_max",
     "mcnr_tilted_fraction", "strong_neighbour_count", "neighbour_height_min",
     "neighbour_height_max", "suggested_amplification_factor",
+    "signal_class", "signal_class_evidence",
 )
 
 

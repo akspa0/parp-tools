@@ -208,12 +208,18 @@ def main() -> int:
         # Signal mismatch
         _run("v50_tile_mismatch.py", [*store_args, "--output", str(data / "signal-mismatch.json")])
 
+        # Three-tier brush-signature classification (Spec 132 US1)
+        classify_out = work / "classify"
+        _run("v50_tile_classify.py", [*store_args, "--output", str(classify_out)])
+
         # Collect outputs
         from v50_archaeology import _collect
         print("\nCollecting outputs...", flush=True)
         moved = 0
         moved += _collect(inv, data, "*.csv", lambda p: p.name)
         moved += _collect(inv, data, "*.json", lambda p: p.name)
+        moved += _collect(classify_out, data, "*.csv", lambda p: p.name)
+        moved += _collect(classify_out, data, "*.json", lambda p: p.name)
         moved += _collect(synth, images, "*.png", lambda p: p.name)
         moved += _collect(comp, images, "*.png", lambda p: p.name)
         print(f"  Collected {moved} files", flush=True)
@@ -236,6 +242,9 @@ data/
   tiles.json              full tile data
   summary.json            corpus counts
   signal-mismatch.json    near-universal signal rules
+  classify.csv            three-tier signal classification (strong/normal/weak)
+  classify.json           full classification with evidence
+  summary.json            classification tier counts
 """
     (args.output / "README.txt").write_text(readme)
 

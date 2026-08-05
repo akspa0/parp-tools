@@ -43,12 +43,22 @@ LIQUID_TINT = (0.30, 0.62, 1.00)
 DEFAULT_CELL = 64
 LEGEND_HEIGHT = 96
 
-# Classification -> outline colour. Normal tiles get no outline so the degenerate ones stand out.
+# Classification -> outline colour. Full-scale terrain gets no outline so the degenerate tiles stand
+# out. Spec 132 adds the three-tier signal_class: normal-tier tiles (visible relief but compressed or
+# re-textured) get a distinct green outline so the missing middle stops being invisible.
 OUTLINE = {
     "weak_signal": (90, 170, 220),
     "weak_signal_with_minimap": (90, 170, 220),
     "white_plate": (210, 90, 90),
     "white_plate_with_minimap": (210, 90, 90),
+}
+
+# Three-tier signal_class -> outline colour (Spec 132 US1). The tier outline is drawn in ADDITION
+# to the classification outline when both exist, so a normal-tier tile that is also a white plate
+# stays visible under both lenses. Weak/strong tiers deliberately reuse the existing degenerate
+# treatment rather than adding new colours nobody has been trained to read.
+TIER_OUTLINE = {
+    "normal": (110, 200, 110),
 }
 
 
@@ -334,6 +344,11 @@ def render_composite(
         if colour is not None:
             degenerate += 1
             draw.rectangle((px, py, px + cell - 1, py + cell - 1), outline=colour)
+        # Spec 132: draw the three-tier outline too (normal gets green). Drawn after the
+        # classification outline so it reads on top; only normal is in TIER_OUTLINE today.
+        tier_colour = TIER_OUTLINE.get(record.get("signal_class", ""))
+        if tier_colour is not None:
+            draw.rectangle((px, py, px + cell - 1, py + cell - 1), outline=tier_colour)
 
     captions = {
         "absolute": "ABSOLUTE — every tile on the map's global height scale. This is what the data "
@@ -350,8 +365,8 @@ def render_composite(
     draw.text((8, 8), f"{map_name} — {len(cells)} tiles, {degenerate} degenerate "
                       f"(x {x0}..{x1}, y {y0}..{y1})", fill=(245, 245, 245), font=font)
     draw.text((8, 26), captions[mode], fill=(215, 220, 228), font=font)
-    draw.text((8, 46), "blue outline = weak signal    red outline = white plate    "
-                       "no outline = full-scale terrain", fill=(175, 182, 194), font=font)
+    draw.text((8, 46), "blue = weak signal   red = white plate   green = normal tier   "
+                       "no outline = full-scale/strong terrain", fill=(175, 182, 194), font=font)
     draw.text((8, 64), "Hillshade, raking sun at 30 deg elevation. Nothing is added in any mode; "
                        "only the scaling differs.", fill=(175, 182, 194), font=font)
     output.parent.mkdir(parents=True, exist_ok=True)

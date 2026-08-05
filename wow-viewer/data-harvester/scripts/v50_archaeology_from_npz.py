@@ -22,6 +22,8 @@ from pathlib import Path
 
 import numpy as np
 
+from harvester.v50.classify import compute_signal_tier
+
 # Constants matching v50_tile_inventory.py
 WEAK_MIN_RANGE = 5.0
 WEAK_NEAR_ZERO_BAND = 50.0
@@ -106,6 +108,13 @@ def inventory_npz(npz_dir: Path, near_zero_band: float) -> list[dict]:
         # MCNR tilt
         tilted = mcnr_tilted_fraction(normals)
         
+        # Three-tier brush-signature classification (Spec 132 US1)
+        tier = compute_signal_tier(
+            height_range=height_range,
+            surviving_levels=surviving_levels,
+            alpha_texture_correlation=None,
+        )
+
         row = {
             "tile_key": f"{map_name}_{tile_x}_{tile_y}",
             "map": map_name,
@@ -122,6 +131,8 @@ def inventory_npz(npz_dir: Path, near_zero_band: float) -> list[dict]:
             "surviving_height_levels": surviving_levels,
             "information_class": classify_information(surviving_levels),
             "mcnr_tilted_fraction": tilted,
+            "signal_class": tier.tier.value,
+            "signal_class_evidence": tier.evidence,
         }
         rows.append(row)
     
@@ -150,12 +161,19 @@ def write_inventory(rows: list[dict], output: Path) -> None:
     flat = [r for r in rows if r["information_class"] == "bit_exact_flat"]
     rich = [r for r in rows if r["information_class"] == "rich_terrain"]
     
+    # Three-tier brush-signature classification counts (Spec 132 US1)
+    by_signal_class = {
+        tier: sum(1 for r in rows if r.get("signal_class") == tier)
+        for tier in ("strong", "normal", "weak", "na")
+    }
+
     summary = {
         "total_tiles": len(rows),
         "weak_signal": len(weak),
         "compressed_range": len(compressed),
         "bit_exact_flat": len(flat),
         "rich_terrain": len(rich),
+        "by_signal_class": by_signal_class,
         "weak_tiles": [r["tile_key"] for r in weak],
         "flat_tiles": [r["tile_key"] for r in flat],
     }
@@ -163,7 +181,10 @@ def write_inventory(rows: list[dict], output: Path) -> None:
         json.dump(summary, f, indent=2)
     
     print(f"  Wrote {len(rows)} tile records to {csv_path}")
-    print(f"  Summary: {len(rows)} tiles, {len(weak)} weak, {len(flat)} flat, {len(rich)} rich")
+    tiers = {t: sum(1 for r in rows if r.get("signal_class") == t)
+             for t in ("strong", "normal", "weak", "na")}
+    print(f"  Summary: {len(rows)} tiles, {len(weak)} weak, {len(flat)} flat, {len(rich)} rich"
+          f"  tiers={tiers}")
 
 
 def main() -> int:

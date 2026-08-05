@@ -53,6 +53,9 @@ data/
                           surviving_height_levels, hole counts, neighbour refs
   tiles.json              same, plus neighbour tile keys
   inventory-summary.json  corpus counts + the tile-key lists (white plates, weak signal, ...)
+  classify.csv            three-tier signal classification (strong/normal/weak) + evidence
+  classify.json           full per-tile classification records
+  classify-summary.json   per-tier tile counts and tile-key lists
   hidden_chunks.csv       one row per HOLED chunk: position, hole mask, and the
                           relief that is hidden underneath it
   holed_tiles.csv         per-tile hole totals
@@ -121,6 +124,10 @@ def main() -> int:
              ["--inventory", str(inv), *store_args, "--output", str(comp),
               "--cell", str(args.cell)])
 
+        # Three-tier brush-signature classification (Spec 132 US1)
+        classify_out = work / "classify"
+        _run("v50_tile_classify.py", [*store_args, "--output", str(classify_out)])
+
         _run("v50_tile_mismatch.py",
              [*store_args, "--output", str(data / "signal-mismatch.json")])
 
@@ -149,6 +156,12 @@ def main() -> int:
         for name, target in (("tiles.csv", "tiles.csv"), ("tiles.json", "tiles.json"),
                              ("summary.json", "inventory-summary.json")):
             shutil.copyfile(inv / name, data / target)
+        # Three-tier classification output (Spec 132 US1)
+        for name in ("classify.csv", "classify.json", "summary.json"):
+            src = classify_out / name
+            if src.exists():
+                target_name = f"classify-{name}" if name == "summary.json" else name
+                shutil.copyfile(src, data / target_name)
         shutil.copyfile(synth / "manifest.json", data / "synthesis-manifest.json")
         if holes is not None:
             for name, target in (("hidden_chunks.csv", "hidden_chunks.csv"),
