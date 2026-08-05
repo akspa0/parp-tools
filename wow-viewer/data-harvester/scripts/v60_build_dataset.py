@@ -312,9 +312,10 @@ def _merge_into_unified(
         all_signal_names.update(g.array_keys())
     all_signal_names = sorted(all_signal_names)
 
-    # Build unified index and per-signal arrays
+    # First pass: build the unified index and determine each signal's shape/dtype.
+    # We do NOT hold all arrays in memory — we pre-allocate Zarr arrays and write
+    # row-by-row in a second pass, so memory stays bounded regardless of dataset size.
     index_rows: list[dict] = []
-    signal_arrays: dict[str, list[np.ndarray]] = {name: [] for name in all_signal_names}
     signal_shapes: dict[str, tuple] = {}
     signal_dtypes: dict[str, np.dtype] = {}
     unavailable: list[dict] = []
@@ -330,33 +331,52 @@ def _merge_into_unified(
                     if name not in signal_shapes:
                         signal_shapes[name] = arr.shape
                         signal_dtypes[name] = arr.dtype
-                    if arr.shape == signal_shapes[name]:
-                        signal_arrays[name].append(arr)
-                    else:
-                        signal_arrays[name].append(np.zeros(signal_shapes[name], dtype=signal_dtypes[name]))
-                else:
-                    if name not in signal_shapes:
-                        signal_shapes[name] = (1,)
-                        signal_dtypes[name] = np.float32
-                    signal_arrays[name].append(np.zeros(signal_shapes[name], dtype=signal_dtypes[name]))
 
     # Write index
     pq.write_table(pa.Table.from_pylist(index_rows), str(staging / "index.parquet"))
-    print(f"  Wrote unified index.parquet with {len(index_rows)} rows", flush=True)
+    total_rows = len(index_rows)
+    print(f"  Wrote unified index.parquet with {total_rows} rows", flush=True)
 
+    # Pre-allocate Zarr arrays for signals that exist in at least one store.
     written = 0
     for name in all_signal_names:
-        arrays = signal_arrays[name]
-        if not arrays or all(a.size == 0 for a in arrays):
+        if name not in signal_shapes:
             unavailable.append({"name": name, "reason": "no_source_data:not_present_in_any_store"})
             print(f"  SKIP {name}: present in zero tiles", flush=True)
             continue
         shape = signal_shapes[name]
         dtype = signal_dtypes[name]
-        stacked = np.stack(arrays, axis=0)
-        group.create_dataset(name, data=stacked, shape=stacked.shape, dtype=dtype, overwrite=True)
+        group.create_dataset(
+            name,
+            shape=(total_rows, *shape),
+            dtype=dtype,
+            chunks=(1, *shape),
+            overwrite=True,
+        )
         written += 1
-        print(f"  Wrote {name}: shape={stacked.shape} dtype={dtype}", flush=True)
+
+    # Second pass: write each signal row-by-row from the per-build stores.
+    for name in all_signal_names:
+        if name not in signal_shapes:
+            continue
+        shape = signal_shapes[name]
+        dtype = signal_dtypes[name]
+        target = group[name]
+        row = 0
+        for store in per_build_stores:
+            g = zarr.open_group(str(store), mode="r")
+            idx = pq.read_table(store / "index.parquet").to_pylist()
+            for row_id in range(len(idx)):
+                if name in g:
+                    arr = np.asarray(g[name][row_id])
+                    if arr.shape == shape:
+                        target[row] = arr.astype(dtype) if arr.dtype != dtype else arr
+                    else:
+                        target[row] = np.zeros(shape, dtype=dtype)
+                else:
+                    target[row] = np.zeros(shape, dtype=dtype)
+                row += 1
+        print(f"  Wrote {name}: shape=({total_rows}, *{shape}) dtype={dtype}", flush=True)
 
     group.attrs.update({
         "store_schema": STORE_SCHEMA_V60,
