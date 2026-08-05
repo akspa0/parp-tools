@@ -42,6 +42,11 @@ Short file. Current truth only. Root `../AGENTS.md` still wins on workspace poli
 - Client roots are runtime configuration. `H:\CLIENTS` is the approved fast SSD library for
   known-good builds; `output/tmp/wowarchive-clients/` is optional staging, not a mandatory hop.
   Record the exact build and fingerprint used.
+- **Documentation is generalized; commands are concrete.** Never put a machine-local path
+  (e.g. `H:\CLIENTS`) into committed docs, READMEs, userguides, specs, or quickstarts — those
+  must use a placeholder like `<client-root>` or `--client-root <path>`. But any CLI command
+  handed to the user in chat must be filled in with THEIR actual path (e.g. `H:\CLIENTS`), so
+  they can copy-paste and run it as-is. Docs stay portable; chat commands are ready to run.
 - No new parser clones when shared `Core` or `Core.IO` surface already exists.
 - Implement as much as possible in each session, with memory bank and speckit documentation update at every step. Do not do wasteful partial work that leaves the repo in a state that cannot be built or tested.
 - Doc sync same pass: spec, architecture note, memory-bank.
