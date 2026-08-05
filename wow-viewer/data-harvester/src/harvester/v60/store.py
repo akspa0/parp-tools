@@ -9,6 +9,9 @@ The v60 store uses the same Zarr format as v50.1 stores but with a unified index
 includes ``build_id``, ``map``, ``tile_x``, and ``tile_y`` columns. Signals that are
 missing from some builds (e.g. ``terrain_shadow_256`` on pre-Spec-133 harvests) are
 recorded as unavailable-with-reason, never silently zero-filled.
+
+This module lives in ``harvester.v60`` (not ``harvester.v50``) because the v60 line is
+a distinct dataset family from v50.
 """
 
 from __future__ import annotations
