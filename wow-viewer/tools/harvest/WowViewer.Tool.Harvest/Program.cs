@@ -2540,13 +2540,27 @@ static class Program
                 }
             }
 
+            // A single tile that hangs (e.g. a pathological texture decode) must not block the
+            // whole stream forever. Wait for each tile with a timeout; a tile that exceeds it is
+            // skipped and counted as an error so the stream keeps flowing.
+            const int TileTimeoutMs = 120_000;
             LaunchUntilWindowFull();
             for (int nextOrder = 0; nextOrder < jobs.Count; nextOrder++)
             {
-                HarvestTileResult result = inflight[nextOrder].GetAwaiter().GetResult();
+                Task<HarvestTileResult> task = inflight[nextOrder];
                 inflight.Remove(nextOrder);
                 LaunchUntilWindowFull();
 
+                Task completed = Task.WhenAny(task, Task.Delay(TileTimeoutMs)).GetAwaiter().GetResult();
+                if (completed != task)
+                {
+                    errors++;
+                    firstError ??= $"tile order {nextOrder} exceeded {TileTimeoutMs}ms timeout";
+                    Console.Error.WriteLine($"  WARNING: tile order {nextOrder} timed out after {TileTimeoutMs}ms; skipping");
+                    continue;
+                }
+
+                HarvestTileResult result = task.GetAwaiter().GetResult();
                 if (result.HadError)
                 {
                     errors++;
