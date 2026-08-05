@@ -1,22 +1,27 @@
-# WoWViewer
+# WoWViewer v0.5.2
 
 Active development target inside `parp-tools`.
 
 World viewer, CLI toolchain, shared format libraries, and data-harvester for staged World of Warcraft client data.
 
+## Current release
+
+**v0.5.2** — lighting corrections, synthesized-minimap time-of-day support, WMO overlay option, and UI cleanup. See [docs/releases/v0.5.2.md](docs/releases/v0.5.2.md) for the full release notes.
+
 ## Current focus
 
-- **Spec 122 `122-dataset-curation` — canonical C# curation layer.** Consolidates dataset quality classification (difficulty/coverage/lighting buckets + height-normal-mismatch/non-finite/synthetic-fidelity findings) into `WowViewer.Core.Curation` + `WowViewer.Tool.Harvest curate` subcommand. Every tile gets a bucket + finding record; no tile is ever silently dropped. Real-data validated on PVPZone02 (64/64 tiles). This is the repo's first C# Parquet writer.
-- **Synthesized minimap export** — `WowViewer.Tool.Harvest synthetic-minimap` composes terrain-only and _liquid minimap PNGs directly from client BLP textures + MCLY/MCAL/MCNR. Supports any time of day via `--time-hours` (default 12:00 noon). The shared solar direction (`TerrainSolarDirection`) holds a fixed NW bearing with cycling elevation, matching the traced 0.5.3.3368 native client behavior.
-- **Lighting fixes (2026-08-01):** hillshade Y-axis inversion fixed in `SynthesizedTrainingService` (NW light was rendering as SW); object capture Z backlighting fixed in `ObjectCaptureShader` (DirectX-vs-OpenGL winding mismatch); taxi panel pop-up removed (broken ImGui popup with no title bar).
-- **V50 dataset pipeline** — active terrain reconstruction lane using merged WDL prior + detailer architecture. V50.2 substrate adds lattice + object-mask arrays.
+- **Spec 134 `134-v60-unified-dataset-model` — v60 unified dataset and shadow-first terrain model.** Consolidates all harvested builds (0.5.3 through 4.0.0.11927) into a single v60 Zarr store with all signals including `terrain_shadow_256` (the textureless lighting component). Includes the shadow→height model (`direct_cnn_v112` with 1-channel input) that learns the physical relationship between terrain shadow and terrain height.
+- **Spec 133 `133-unbaked-minimap-decomposition` — terrain_shadow_256 signal.** The C# compositor now emits the textureless lighting term (Lambert N·L + ambient + cast shadows) as a separate float32 array alongside the existing `minimap_rgb`. The model can learn the shadow signal independently of the texture.
+- **Spec 132 `132-terrain-brush-signature-classification` — three-tier classification.** Every tile classified as strong, normal, or weak signal with published criteria. Integrated into the archaeology pipeline and tile inventory.
+- **Spec 131 `131-pm4-scene-graph-doodads` — PM4 scene graph restored.** Full hierarchical scene outliner (Blender-style tree view) with tile/CK24/Part hierarchy, MSLK linking summary, click-to-select.
 
 ## Hard boundaries
 
-- `wow-viewer/` owns new implementation work.
-- `gillijimproject_refactor/` is read-only reference.
-- Staged clients only: `output/tmp/wowarchive-clients/`.
-- Any `H:\CLIENTS` reference is stale and must be removed.
+- `wow-viewer/` owns all new implementation work.
+- `gillijimproject_refactor/` is read-only reference code.
+- `H:\CLIENTS` is the approved client library for validation and extraction (AGENTS.md Rule 9).
+- `output/tmp/wowarchive-clients/` is optional staging and may be pruned.
+- The user runs all training, GPU work, and client-backed proof. The assistant prepares the exact commands.
 
 ## Build
 
@@ -73,13 +78,13 @@ Use `uv run ...` from that directory for dataset, training, and inference work.
 
 ## Canonical docs
 
-- [AGENTS.md](/I:/parp/parp-tools/wow-viewer/AGENTS.md)
-- [docs/DOCUMENTATION-STATUS.md](/I:/parp/parp-tools/wow-viewer/docs/DOCUMENTATION-STATUS.md)
-- [docs/CLI-TOOLS.md](/I:/parp/parp-tools/wow-viewer/docs/CLI-TOOLS.md)
-- [data-harvester/README.md](/I:/parp/parp-tools/wow-viewer/data-harvester/README.md)
-- [docs/WoWViewer/USERGUIDE.md](/I:/parp/parp-tools/wow-viewer/docs/WoWViewer/USERGUIDE.md)
-- [memory-bank/activeContext.md](/I:/parp/parp-tools/wow-viewer/memory-bank/activeContext.md)
-- [memory-bank/progress.md](/I:/parp/parp-tools/wow-viewer/memory-bank/progress.md)
+- [AGENTS.md](AGENTS.md)
+- [docs/DOCUMENTATION-STATUS.md](docs/DOCUMENTATION-STATUS.md)
+- [docs/CLI-TOOLS.md](docs/CLI-TOOLS.md)
+- [data-harvester/README.md](data-harvester/README.md)
+- [docs/WoWViewer/USERGUIDE.md](docs/WoWViewer/USERGUIDE.md)
+- [memory-bank/activeContext.md](memory-bank/activeContext.md)
+- [memory-bank/progress.md](memory-bank/progress.md)
 
 ## Historical surfaces
 
