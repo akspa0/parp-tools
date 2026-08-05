@@ -168,6 +168,42 @@ public readonly struct Pm4ObjectDebugInfo
     public bool InvertsWinding { get; }
 }
 
+/// <summary>
+/// Summary of MSLK linking statistics across all loaded PM4 files.
+/// Produced by <see cref="WorldScene.GetPm4MslkLinkingStats"/>.
+/// </summary>
+public readonly struct Pm4MslkLinkingStats
+{
+    public Pm4MslkLinkingStats(
+        int totalFiles,
+        int totalMslkEntries,
+        int anchorOnlyLinks,
+        int pathWindowLinks,
+        int totalComponents,
+        int componentsWithLinks,
+        int componentsWithoutLinks,
+        int refIndexMismatches)
+    {
+        TotalFiles = totalFiles;
+        TotalMslkEntries = totalMslkEntries;
+        AnchorOnlyLinks = anchorOnlyLinks;
+        PathWindowLinks = pathWindowLinks;
+        TotalComponents = totalComponents;
+        ComponentsWithLinks = componentsWithLinks;
+        ComponentsWithoutLinks = componentsWithoutLinks;
+        RefIndexMismatches = refIndexMismatches;
+    }
+
+    public int TotalFiles { get; }
+    public int TotalMslkEntries { get; }
+    public int AnchorOnlyLinks { get; }
+    public int PathWindowLinks { get; }
+    public int TotalComponents { get; }
+    public int ComponentsWithLinks { get; }
+    public int ComponentsWithoutLinks { get; }
+    public int RefIndexMismatches { get; }
+}
+
 public readonly struct Pm4LinkedPositionRefSummary
 {
     public Pm4LinkedPositionRefSummary(
@@ -11203,6 +11239,90 @@ public class WorldScene : ISceneRenderer
         return true;
     }
 
+    /// <summary>
+    /// Computes MSLK linking statistics across all loaded PM4 research contexts.
+    /// Exposed as a plain record so the viewer never needs the internal context type.
+    /// </summary>
+    public Pm4MslkLinkingStats GetPm4MslkLinkingStats()
+    {
+        int totalFiles = 0;
+        int totalMslkEntries = 0;
+        int anchorOnlyLinks = 0;
+        int pathWindowLinks = 0;
+        int totalComponents = 0;
+        int componentsWithLinks = 0;
+        int componentsWithoutLinks = 0;
+        int refIndexMismatches = 0;
+
+        foreach ((string _, Pm4ResearchContext context) in _pm4ResearchBySourcePath)
+        {
+            if (context.RawDocument == null)
+                continue;
+
+            totalFiles++;
+            var chunks = context.RawDocument.KnownChunks;
+            totalMslkEntries += chunks.Mslk.Count;
+
+            foreach (var link in chunks.Mslk)
+            {
+                if (link.MspiFirstIndex < 0)
+                    anchorOnlyLinks++;
+                else
+                    pathWindowLinks++;
+            }
+
+            var linksBySurface = new Dictionary<int, List<MslkEntry>>();
+            foreach (var link in chunks.Mslk)
+            {
+                if (link.RefIndex >= 0 && link.RefIndex < chunks.Msur.Count)
+                {
+                    if (!linksBySurface.TryGetValue(link.RefIndex, out var bucket))
+                        linksBySurface[link.RefIndex] = bucket = new List<MslkEntry>();
+                    bucket.Add(link);
+                }
+                else
+                {
+                    refIndexMismatches++;
+                }
+            }
+
+            var surfacesByCk24 = new Dictionary<uint, List<int>>();
+            for (int i = 0; i < chunks.Msur.Count; i++)
+            {
+                uint ck24 = chunks.Msur[i].Ck24;
+                if (!surfacesByCk24.TryGetValue(ck24, out var bucket))
+                    surfacesByCk24[ck24] = bucket = new List<int>();
+                bucket.Add(i);
+            }
+
+            foreach ((uint _, List<int> surfaceIndices) in surfacesByCk24)
+            {
+                totalComponents++;
+                bool hasLink = false;
+                foreach (int si in surfaceIndices)
+                {
+                    if (linksBySurface.ContainsKey(si))
+                    {
+                        hasLink = true;
+                        break;
+                    }
+                }
+                if (hasLink) componentsWithLinks++;
+                else componentsWithoutLinks++;
+            }
+        }
+
+        return new Pm4MslkLinkingStats(
+            totalFiles,
+            totalMslkEntries,
+            anchorOnlyLinks,
+            pathWindowLinks,
+            totalComponents,
+            componentsWithLinks,
+            componentsWithoutLinks,
+            refIndexMismatches);
+    }
+
     private bool TryGetPm4ResearchContext(string sourcePath, out Pm4ResearchContext? context)
     {
         if (_pm4ResearchBySourcePath.TryGetValue(sourcePath, out context))
@@ -12098,6 +12218,43 @@ public class WorldScene : ISceneRenderer
                     "Categorical colors are viewer-identification buckets, not closed PM4 semantics.",
                     categoricalCounts.Count,
                     categoricalEntries);
+            }
+
+            /// <summary>
+            /// Returns the raw tile→objects dictionary for the full scene outliner.
+            /// Uses the existing tuple-based key pattern from GetPm4ObjectHierarchy.
+            /// </summary>
+            public IReadOnlyDictionary<(int tileX, int tileY), IReadOnlyList<(uint ck24, int objectPart, uint ck24ObjectId, uint mshdRegionId, uint linkGroupObjectId, byte groupKey, byte attributeMask, uint mscnRefIndex, int surfaceCount, int totalIndexCount, float avgHeight, Vector3 boundsMin, Vector3 boundsMax, int linkedPositionRefCount)>> GetPm4TileObjectSummaries()
+            {
+                var result = new Dictionary<(int tileX, int tileY), IReadOnlyList<(uint, int, uint, uint, uint, byte, byte, uint, int, int, float, Vector3, Vector3, int)>>();
+                foreach (var kv in _pm4TileObjects)
+                {
+                    var list = new List<(uint, int, uint, uint, uint, byte, byte, uint, int, int, float, Vector3, Vector3, int)>();
+                    foreach (var obj in kv.Value)
+                    {
+                        list.Add((obj.Ck24, obj.ObjectPartId, obj.Ck24ObjectId, obj.MshdRegionId,
+                            obj.LinkGroupObjectId, obj.DominantGroupKey, obj.DominantAttributeMask,
+                            obj.DominantMscnRefIndex, obj.SurfaceCount, obj.TotalIndexCount,
+                            obj.AverageSurfaceHeight, obj.BoundsMin, obj.BoundsMax,
+                            obj.LinkedPositionRefCount));
+                    }
+                    result[(kv.Key.tileX, kv.Key.tileY)] = list;
+                }
+                return result;
+            }
+
+            /// <summary>
+            /// Select a PM4 object by its tile/CK24/part key. Returns true if found.
+            /// </summary>
+            public bool SelectPm4ObjectByKey(int tileX, int tileY, uint ck24, int objectPart)
+            {
+                var key = (tileX, tileY, ck24, objectPart);
+                if (!_pm4ObjectLookup.ContainsKey(key))
+                    return false;
+
+                _selectedPm4ObjectKey = key;
+                _selectedPm4ObjectGroupKey = ResolvePm4ObjectGroupKey(key);
+                return true;
             }
 
             public IReadOnlyList<(int tileX, int tileY, uint ck24, uint ck24ObjectId, uint mshdRegionId, uint linkGroupObjectId, byte groupKey, int objectPartId)> GetPm4ObjectHierarchy()

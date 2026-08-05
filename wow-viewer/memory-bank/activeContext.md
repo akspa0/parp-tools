@@ -10,35 +10,76 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 
 | Workstream | State | Detail |
 |---|---|---|
-| PM4 decode | **active** — placement solved and confirmed in the viewer; now decoding the scene graph | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
+| PM4 decode | **active** — placement solved, scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
 | Terrain / minimap ML | **idle** — nothing training; one curation decision pending before GPU time | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
-| Tile archaeology | **parked** | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
+| Tile archaeology | **active** — harvest pipeline working on 1.x clients; spec 132 planning done | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
 
-## Now — PM4 scene graph (spec 131)
+## Now — Terrain brush signature classification (spec 132)
 
-Branch `131-pm4-scene-graph-doodads`.
+Branch `132-terrain-brush-signature-classification`.
+
+Spec written, plan written, memory bank updated. Ready for implementation in the next session.
+
+### What was accomplished this session
+
+1. **PM4 Scene Graph** — full scene outliner restored (Blender-style tree view with tile/CK24/Part hierarchy, MSLK linking summary, search filter, click-to-select). See [workstream-pm4-decode.md](workstream-pm4-decode.md).
+
+2. **Single-command archaeology pipeline** — [`run-archaeology.ps1`](../scripts/run-archaeology.ps1) does harvest MPQ → V50 Zarr store → tile inventory → synthesis → composites. Proven working on TBC 2.0.0.5610 (Expansion01, 741 tiles, 34 weak signal, 186 white plate).
+
+3. **Batch archaeology** — [`run-batch-archaeology.ps1`](../scripts/run-batch-archaeology.ps1) discovers all 15 1.x Windows clients in H:\CLIENTS, finds terrain maps via discover-maps, and runs the pipeline on each.
+
+4. **Spec 132 drafted** — 6 user stories for terrain brush signature classification, including the Nov 2001 rescale boundary detection (33.33% horizontal roll).
+
+### Harvested data already on disk
+
+- `output/archaeology/2_0_0_5610/npz/Expansion01/` — 741 NPZ shards
+- `output/archaeology/2_0_0_5610/store/Expansion01.zarr/` — V50 Zarr store
+- `output/archaeology/2_0_0_5610/archaeo/` — tile inventory + synthesis sheets
+
+### Open
+
+- **3.x terrain darkness** — procedural fallback in `TerrainLighting.Update()` produces very dark night values. DBC lighting may not load for 3.x pre-release builds.
+- **Composite images** — need to filter out non-weak tiles and add minimap overlay. The composite script renders all tiles; the `textured` mode needs minimap_rgb_256 present.
 
 PM4 placement is **fixed and visually confirmed** (2026-08-04): tiles aligned, tents correctly
 identified, previously-rotated walls and buildings correct. That unblocked the scene-graph work.
 
-Three things were established in the same push, each with a falsifiable test:
+### Scene graph tree view restored (2026-08-04)
 
-1. **A keyed (non-zero) CK24 is one placed WMO.** 47 tiles have no WMO placements and none of them
-   carries a keyed object; keyed count matches WMO count exactly on 136/179 tiles.
-2. **CK24 0 is not an object** — it is the per-tile remainder, exactly one per tile, holding
-   everything that is not a keyed WMO.
-3. **That remainder splits into per-doodad components by mesh connectivity**, and
-   **`MSLK.GroupObjectId` is the per-doodad identity**: 95.1% of 20,113 components land on an MDDF
-   placement, and 3,343 of GroupObjectId's 3,345 pure components are unique on their tile.
+The **PM4 Scene Graph** panel now shows a **full hierarchical scene outliner** (like Blender's
+outliner) with two modes:
 
-**Next**: component coverage. 34.4% of components have no MSLK link at all, so GroupObjectId names
-only a minority. The anchor-only MSLK entries (`MspiFirstIndex < 0`, 53% of 1.27M links) are the
-next place to look.
+- **Full Scene** mode — all PM4 objects organized by tile → CK24 → Part, with MSLK Group and
+  linked MPRL ref counts shown at each level. Click any item to select it and frame the camera.
+  Includes a search filter and right-click context menu (Select All Parts, Frame All Parts).
+- **Selected Object** mode — existing detailed graph decomposition (TypeBucket → LinkGroup →
+  MscnRef → Part), now with improved MSLK linking info display.
 
-New ground truth this session: user-supplied screenshots of **Blizzard's WoW Editor 1.9.0** rendering
-this data, with the Karazhan Crypts WMO loaded for comparison. Decorative M2s have no nav polygons
-beneath them — that is what makes 0.339 components per placement the expected result rather than a
-shortfall. Details and the other readings in the workstream file.
+### MSLK Linking Summary (new)
+
+The Full Scene panel now includes an **MSLK Linking Summary** section that shows corpus-wide
+statistics computed from all loaded PM4 research contexts:
+
+- Anchor-only vs path-window link counts (MspiFirstIndex < 0 vs >= 0)
+- Component coverage (CK24 groups with and without MSLK links)
+- RefIndex mismatch counts
+- Research leads section pointing to the next open questions
+
+### API additions
+
+- `WorldScene.GetPm4TileObjectSummaries()` — returns flat tuple-based summaries for the outliner
+- `WorldScene.SelectPm4ObjectByKey(int tileX, int tileY, uint ck24, int objectPart)` — direct
+  selection without region lookup
+- `WorldScene.GetPm4MslkLinkingStats()` — computes MSLK linking statistics across all loaded files
+- `Pm4MslkLinkingStats` — public readonly struct for the stats
+
+### Open
+
+- **Component coverage.** 34.4% of components have no MSLK link at all, so GroupObjectId names
+  only a minority. The anchor-only MSLK entries (`MspiFirstIndex < 0`, 53% of 1.27M links) are the
+  next place to look.
+- **MPRR.** The length-3 and length-7 record shapes are undecoded.
+- **MSCN** as a co-equal connective-geometry candidate is still untested.
 
 ## Test state
 

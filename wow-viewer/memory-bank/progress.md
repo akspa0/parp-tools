@@ -8,6 +8,30 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-04 — Archaeology pipeline built, spec 132 drafted
+
+- **Single-command archaeology pipeline** (`run-archaeology.ps1`): harvest MPQ → V50 Zarr store → tile inventory → synthesis → composites. Proven on TBC 2.0.0.5610 (Expansion01, 741 tiles).
+- **Batch archaeology** (`run-batch-archaeology.ps1`): discovers all 15 1.x Windows clients in H:\CLIENTS, runs pipeline on each.
+- **V50 store builder from NPZ** (`build_v50_store_from_npz.py`): reads NPZ shards, builds proper V50-format Zarr store with index.parquet, then runs full archaeology suite.
+- **Spec 132** (`terrain-brush-signature-classification`): 6 user stories for three-tier classification, nested signals, brush-texture correlation, cross-map alignment, rescale boundary detection, and predictive model. Plan written.
+- **Harvested data on disk**: `output/archaeology/2_0_0_5610/` with NPZ, Zarr store, and archaeology results for Expansion01.
+
+## 2026-08-04 — PM4 scene graph: tree view restored, MSLK linking summary added
+
+Spec 131, branch `131-pm4-scene-graph-doodads`. Detail:
+[workstream-pm4-decode.md](workstream-pm4-decode.md).
+
+- **PM4 Scene Graph panel restored as a full scene outliner** (Blender-style). Two modes:
+  "Full Scene" (tile → CK24 → Part hierarchy with MSLK group/MPRL refs at each level, search
+  filter, right-click select/frame-all context menu) and "Selected Object" (existing detailed
+  decomposition, now with MSLK linking info). Clicking any row selects the object and frames the
+  camera.
+- **MSLK Linking Summary** section added to the outliner: anchor-only vs path-window link counts,
+  component link coverage, RefIndex mismatch counts, and research leads — computed live from all
+  loaded PM4 research contexts via `WorldScene.GetPm4MslkLinkingStats`.
+- New public API on `WorldScene`: `GetPm4TileObjectSummaries()`, `SelectPm4ObjectByKey()`,
+  `GetPm4MslkLinkingStats()` and the `Pm4MslkLinkingStats` struct. Build passes.
+
 ## 2026-08-04 — PM4 scene graph: CK24 decoded, doodad identity found
 
 Spec 131, branch `131-pm4-scene-graph-doodads`. Detail:

@@ -780,6 +780,7 @@ public partial class ViewerApp : IDisposable
     private bool _showUniqueIdArchaeologyWindow;
     private bool _showWeakSignalWindow;
     private bool _showPm4SceneGraph = true;
+    private string _pm4SceneFilter = "";
 
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;

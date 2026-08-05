@@ -132,6 +132,47 @@ perfect separator, but takes 9 values across the whole corpus — a class enum. 
 - **Viewer performance.** The overlay builds and draws all 9,207 objects regardless of camera
   position. It must cull per tile using the existing ADT Detail Tiles budget.
 
+## Viewer changes (2026-08-04)
+
+### PM4 Scene Graph panel restored as a full scene outliner
+
+The dedicated `Pm4SceneGraph` panel (ShellPanelId.Pm4SceneGraph) now shows a **Blender-style
+outliner** with two modes selectable via a combo box:
+
+**Full Scene mode** (default): all PM4 objects organized by tile → CK24 → Part, with MSLK
+GroupObjectId and linked MPRL ref counts shown at each CK24 level. Click any item to select it
+and frame the camera. Includes a search/filter text box and right-click context menu with
+"Select All Parts" and "Frame All Parts" options.
+
+**Selected Object mode**: the existing detailed graph decomposition (TypeBucket → LinkGroup →
+MscnRef → Part), now with a summary header showing CK24, type, object id, and aggregate counts.
+
+### MSLK Linking Summary
+
+A new collapsible section at the top of the Full Scene panel computes and displays corpus-wide
+MSLK linking statistics from all loaded PM4 research contexts:
+
+- **Anchor-only links**: count and percentage of MSLK entries with `MspiFirstIndex < 0` (53% of
+  ~1.27M links per prior measurement). These are the next place to look for doodad identity.
+- **Path-window links**: count and percentage of entries with `MspiFirstIndex >= 0` (actual
+  geometry connections via MSPI/MSPV).
+- **Component coverage**: CK24 groups (components) with and without MSLK links, matching the
+  34.4% unlinked measurement from `pm4 component-identity`.
+- **RefIndex mismatches**: MSLK.RefIndex values that don't index a valid MSUR entry.
+- **Research leads**: three bullet points calling out the next open questions.
+
+### New public API on WorldScene
+
+- `GetPm4TileObjectSummaries()` — returns flat tuple-based summaries of all PM4 objects per tile
+  for the outliner. No access to internal `Pm4OverlayObject` type required.
+- `SelectPm4ObjectByKey(int tileX, int tileY, uint ck24, int objectPart)` — direct selection
+  by the full object key, without needing a region or CK24 object id lookup.
+- `GetPm4MslkLinkingStats()` — computes MSLK linking statistics across all loaded PM4 research
+  contexts. Returns a `Pm4MslkLinkingStats` struct.
+- `Pm4MslkLinkingStats` — public readonly struct with `TotalFiles`, `TotalMslkEntries`,
+  `AnchorOnlyLinks`, `PathWindowLinks`, `TotalComponents`, `ComponentsWithLinks`,
+  `ComponentsWithoutLinks`, `RefIndexMismatches`.
+
 ## Ground truth: Blizzard's WoW Editor 1.9.0 (circa 2005)
 
 User-supplied screenshots of the editor rendering this data, with the Karazhan Crypts WMO loaded in

@@ -5,6 +5,7 @@ using System.Globalization;
 using ImGuiNET;
 using WoWViewer.Logging;
 using WoWViewer.Terrain;
+using MslkEntry = WowViewer.Core.PM4.Models.Pm4MslkEntry;
 
 namespace WoWViewer;
 
@@ -3710,6 +3711,14 @@ public partial class ViewerApp
         }
     }
 
+    private enum Pm4SceneGraphMode
+    {
+        FullScene,
+        SelectedObject,
+    }
+
+    private Pm4SceneGraphMode _pm4SceneGraphMode = Pm4SceneGraphMode.FullScene;
+
     private void DrawPm4SceneGraphPanelContent()
     {
         if (_worldScene == null)
@@ -3717,6 +3726,273 @@ public partial class ViewerApp
             ImGui.TextDisabled("No world scene loaded.");
             return;
         }
+
+        // Mode toggle
+        string[] modeLabels = { "Full Scene", "Selected Object" };
+        int modeIndex = (int)_pm4SceneGraphMode;
+        if (ImGui.BeginCombo("##Pm4SceneGraphMode", modeLabels[modeIndex]))
+        {
+            for (int i = 0; i < modeLabels.Length; i++)
+            {
+                bool selected = i == modeIndex;
+                if (ImGui.Selectable(modeLabels[i], selected))
+                    _pm4SceneGraphMode = (Pm4SceneGraphMode)i;
+                if (selected)
+                    ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+        ImGui.SameLine();
+        ImGui.TextDisabled("View mode");
+
+        ImGui.Separator();
+
+        if (_pm4SceneGraphMode == Pm4SceneGraphMode.FullScene)
+        {
+            DrawPm4MslkLinkingSummary();
+            ImGui.Separator();
+            DrawPm4FullSceneOutliner();
+        }
+        else
+        {
+            DrawPm4SelectedObjectGraph();
+        }
+    }
+
+    /// <summary>
+    /// Full scene outliner — like Blender's outliner. Shows ALL PM4 objects
+    /// organized hierarchically by tile, CK24, part, MSLK group, and MscnRef.
+    /// Click any item to select it and frame the camera on it.
+    /// </summary>
+    /// <summary>
+    /// Draws a summary of MSLK linking data across all loaded PM4 files.
+    /// Shows anchor-only vs path-window link counts and component coverage.
+    /// </summary>
+    private void DrawPm4MslkLinkingSummary()
+    {
+        if (_worldScene == null) return;
+
+        if (!ImGui.CollapsingHeader("MSLK Linking Summary", ImGuiTreeNodeFlags.DefaultOpen))
+            return;
+
+        Pm4MslkLinkingStats stats = _worldScene.GetPm4MslkLinkingStats();
+
+        if (stats.TotalFiles == 0)
+        {
+            ImGui.TextDisabled("No PM4 files loaded.");
+            return;
+        }
+
+        int totalChecked = stats.AnchorOnlyLinks + stats.PathWindowLinks;
+        double anchorPct = totalChecked > 0 ? 100.0 * stats.AnchorOnlyLinks / totalChecked : 0;
+        double pathPct = totalChecked > 0 ? 100.0 * stats.PathWindowLinks / totalChecked : 0;
+        double linkedPct = stats.TotalComponents > 0 ? 100.0 * stats.ComponentsWithLinks / stats.TotalComponents : 0;
+        double unlinkedPct = stats.TotalComponents > 0 ? 100.0 * stats.ComponentsWithoutLinks / stats.TotalComponents : 0;
+
+        ImGui.TextDisabled($"Files: {stats.TotalFiles}  MSLK entries: {stats.TotalMslkEntries}");
+        ImGui.Separator();
+        ImGui.Text($"Anchor-only links: {stats.AnchorOnlyLinks} ({anchorPct:F1}%)");
+        ImGui.TextDisabled("MspiFirstIndex < 0 — prior art reads these as doodad placements carrying anchors");
+        ImGui.Text($"Path-window links: {stats.PathWindowLinks} ({pathPct:F1}%)");
+        ImGui.TextDisabled("MspiFirstIndex >= 0 — these connect surfaces via MSPI/MSPV path vertices");
+        ImGui.Separator();
+        ImGui.Text($"Components with MSLK links: {stats.ComponentsWithLinks} ({linkedPct:F1}%)");
+        ImGui.Text($"Components without links: {stats.ComponentsWithoutLinks} ({unlinkedPct:F1}%)");
+        ImGui.TextDisabled($"RefIndex mismatches: {stats.RefIndexMismatches} (MSLK.RefIndex → MSUR bounds failures)");
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.BeginTooltip();
+            ImGui.Text("MSLK.RefIndex → MSUR is 99.64% resolved (1,268,782 fits / 4,553 misses)");
+            ImGui.Text("but that is a bounds test, not a semantic one.");
+            ImGui.Text("The 4,553 misses are RefIndex values that don't index a valid MSUR entry.");
+            ImGui.EndTooltip();
+        }
+
+        ImGui.Separator();
+        ImGui.TextColored(new Vector4(0.8f, 0.9f, 1f, 1f), "Research leads:");
+        ImGui.BulletText("Anchor-only links (53% of 1.27M links) — next place to look for doodad identity");
+        ImGui.BulletText("MSLK.RefIndex semantics — 4,553 entries don't fit MSUR (gap in bounds test)");
+        ImGui.BulletText("MSLK.TypeFlags — 10 distinct values, 19 subtypes (0x03=M2, 0x10=floor, 0x12=wall)");
+    }
+
+    private void DrawPm4FullSceneOutliner()
+    {
+        if (_worldScene == null) return;
+
+        // Collect all objects grouped by tile, then by CK24, then by part
+        // Use a flat list with unnamed tuples to match GetPm4TileObjectSummaries return type
+        // Indices: 0=tx, 1=ty, 2=ck24, 3=part, 4=ck24ObjectId, 5=mshdRegionId, 6=linkGroupObjectId,
+        //          7=groupKey, 8=attributeMask, 9=mscnRefIndex, 10=surfaceCount, 11=totalIndexCount,
+        //          12=avgHeight, 13=boundsMin, 14=boundsMax, 15=linkedPositionRefCount
+        var allObjects = new List<(int tx, int ty, uint ck24, int part, uint ck24ObjectId, uint mshdRegionId, uint linkGroupObjectId, byte groupKey, byte attributeMask, uint mscnRefIndex, int surfaceCount, int totalIndexCount, float avgHeight, Vector3 boundsMin, Vector3 boundsMax, int linkedPositionRefCount)>();
+        foreach (var (tileKey, objects) in _worldScene.GetPm4TileObjectSummaries())
+        {
+            foreach (var o in objects)
+            {
+                allObjects.Add((tileKey.tileX, tileKey.tileY, o.Item1, o.Item2, o.Item3,
+                    o.Item4, o.Item5, o.Item6, o.Item7,
+                    o.Item8, o.Item9, o.Item10, o.Item11,
+                    o.Item12, o.Item13, o.Item14));
+            }
+        }
+
+        if (allObjects.Count == 0)
+        {
+            ImGui.TextDisabled("No PM4 objects loaded. Enable PM4 Overlay to populate the scene graph.");
+            return;
+        }
+
+        // Group by tile
+        var byTile = allObjects.GroupBy(static e => (e.tx, e.ty)).OrderBy(static g => g.Key.ty).ThenBy(static g => g.Key.tx).ToList();
+
+        ImGui.TextDisabled($"Total: {allObjects.Count} objects across {byTile.Count} tiles");
+
+        // Search filter
+        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+        ImGui.InputText("##Pm4SceneFilter", ref _pm4SceneFilter, 256);
+        bool hasFilter = !string.IsNullOrWhiteSpace(_pm4SceneFilter);
+        string filterLower = hasFilter ? _pm4SceneFilter.ToLowerInvariant() : "";
+
+        ImGui.Separator();
+
+        // Build tree: Tile → CK24 → Part
+        foreach (var tileGroup in byTile)
+        {
+            var (tx, ty) = tileGroup.Key;
+            var tileObjects = tileGroup.ToList();
+
+            // Group by CK24
+            var byCk24 = tileObjects
+                .GroupBy(static e => e.ck24)
+                .OrderBy(static g => g.Key)
+                .ToList();
+
+            int tileSurfaceCount = tileObjects.Sum(static e => e.surfaceCount);
+            int tileCk24Count = byCk24.Count;
+
+            string tileLabel = $"Tile ({tx}, {ty})  [{tileCk24Count} CK24 groups, {tileSurfaceCount} surfaces]";
+            if (hasFilter && !tileLabel.ToLowerInvariant().Contains(filterLower))
+            {
+                bool childMatch = byCk24.Any(g => Ck24MatchesFilter(g.Key, g.ToList(), filterLower));
+                if (!childMatch) continue;
+            }
+
+            ImGuiTreeNodeFlags tileFlags = ImGuiTreeNodeFlags.DefaultOpen;
+            if (!ImGui.TreeNodeEx($"##Tile_{tx}_{ty}", tileFlags, tileLabel))
+                continue;
+
+            foreach (var ck24Group in byCk24)
+            {
+                uint ck24 = ck24Group.Key;
+                var ck24Objects = ck24Group.ToList();
+                var first = ck24Objects[0];
+                byte ck24Type = (byte)((ck24 >> 16) & 0xFF);
+                ushort ck24ObjId = (ushort)(ck24 & 0xFFFF);
+                uint regionId = first.mshdRegionId;
+                uint linkGroupId = first.linkGroupObjectId;
+                int ck24SurfaceCount = ck24Objects.Sum(static e => e.surfaceCount);
+                int partCount = ck24Objects.Count;
+
+                string typeLabel = GetCk24TypeLabel(ck24Type);
+                string ck24Label = $"CK24 0x{ck24:X6}  Type=0x{ck24Type:X2} ({typeLabel})  ObjId={ck24ObjId}  [{partCount} parts, {ck24SurfaceCount} surfaces]  Region={regionId}  MSLK=0x{linkGroupId:X8}";
+
+                if (hasFilter && !ck24Label.ToLowerInvariant().Contains(filterLower))
+                    continue;
+
+                bool isCk24Selected = _worldScene.SelectedPm4ObjectKey.HasValue
+                    && _worldScene.SelectedPm4ObjectKey.Value.tileX == tx
+                    && _worldScene.SelectedPm4ObjectKey.Value.tileY == ty
+                    && _worldScene.SelectedPm4ObjectKey.Value.ck24 == ck24;
+
+                ImGuiTreeNodeFlags ck24Flags = isCk24Selected
+                    ? ImGuiTreeNodeFlags.DefaultOpen
+                    : ImGuiTreeNodeFlags.None;
+
+                bool ck24Open = ImGui.TreeNodeEx($"##CK24_{tx}_{ty}_{ck24}", ck24Flags, ck24Label);
+
+                if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
+                    ImGui.OpenPopup($"##CK24Ctx_{tx}_{ty}_{ck24}");
+
+                if (ImGui.BeginPopup($"##CK24Ctx_{tx}_{ty}_{ck24}"))
+                {
+                    if (ImGui.Selectable("Select All Parts"))
+                    {
+                        var f = ck24Objects[0];
+                        _worldScene.SelectPm4ObjectByKey(f.tx, f.ty, f.ck24, f.part);
+                        if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo dbg))
+                            FocusCameraOnBounds(dbg.BoundsMin, dbg.BoundsMax);
+                    }
+                    if (ImGui.Selectable("Frame All Parts"))
+                    {
+                        Vector3 bmin = new(float.MaxValue), bmax = new(float.MinValue);
+                        foreach (var o in ck24Objects)
+                        {
+                            bmin = Vector3.Min(bmin, o.boundsMin);
+                            bmax = Vector3.Max(bmax, o.boundsMax);
+                        }
+                        FocusCameraOnBounds(bmin, bmax);
+                    }
+                    ImGui.EndPopup();
+                }
+
+                if (!ck24Open) continue;
+
+                // Show MSLK linking info at CK24 level
+                uint distinctLinkGroupId = ck24Objects.Select(static e => e.linkGroupObjectId).Distinct().SingleOrDefault();
+                int totalLinkedRefs = ck24Objects.Sum(static e => e.linkedPositionRefCount);
+                if (totalLinkedRefs > 0 || distinctLinkGroupId != 0)
+                {
+                    ImGui.TextDisabled($"  MSLK Group=0x{distinctLinkGroupId:X8}  Linked MPRL refs={totalLinkedRefs}");
+                }
+
+                // Show parts
+                foreach (var o in ck24Objects.OrderBy(static e => e.part))
+                {
+                    bool isPartSelected = _worldScene.SelectedPm4ObjectKey.HasValue
+                        && _worldScene.SelectedPm4ObjectKey.Value.tileX == tx
+                        && _worldScene.SelectedPm4ObjectKey.Value.tileY == ty
+                        && _worldScene.SelectedPm4ObjectKey.Value.ck24 == ck24
+                        && _worldScene.SelectedPm4ObjectKey.Value.objectPart == o.part;
+
+                    string partLabel = $"  Part {o.part}  ({o.surfaceCount} surfs, {o.totalIndexCount} idx)  "
+                        + $"GK=0x{o.groupKey:X2}  Attr=0x{o.attributeMask:X2}  "
+                        + $"MscnRef={o.mscnRefIndex}  H={o.avgHeight:F1}"
+                        + (isPartSelected ? "  [SELECTED]" : "");
+
+                    if (hasFilter && !partLabel.ToLowerInvariant().Contains(filterLower))
+                        continue;
+
+                    if (ImGui.Selectable($"##Part_{tx}_{ty}_{ck24}_{o.part}", isPartSelected, ImGuiSelectableFlags.None, new Vector2(ImGui.GetContentRegionAvail().X, 0)))
+                    {
+                        _worldScene.SelectPm4ObjectByKey(tx, ty, ck24, o.part);
+                        if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo dbg))
+                            FocusCameraOnBounds(dbg.BoundsMin, dbg.BoundsMax);
+                    }
+
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text($"CK24: 0x{ck24:X6}  Type: 0x{ck24Type:X2}  ObjId: {ck24ObjId}");
+                        ImGui.Text($"MSLK Group: 0x{linkGroupId:X8}");
+                        ImGui.Text($"Linked MPRL refs: {o.linkedPositionRefCount}");
+                        ImGui.Text($"MSHD: F00={first.ck24ObjectId}  Region={regionId}");
+                        ImGui.Text($"GroupKey: 0x{o.groupKey:X2}  Attr: 0x{o.attributeMask:X2}  MscnRef: {o.mscnRefIndex}");
+                        ImGui.Text($"Surfaces: {o.surfaceCount}  Indices: {o.totalIndexCount}");
+                        ImGui.Text($"Bounds: ({o.boundsMin.X:F1}, {o.boundsMin.Y:F1}, {o.boundsMin.Z:F1}) - ({o.boundsMax.X:F1}, {o.boundsMax.Y:F1}, {o.boundsMax.Z:F1})");
+                        ImGui.EndTooltip();
+                    }
+                }
+
+                ImGui.TreePop();
+            }
+            ImGui.TreePop();
+        }
+    }
+
+    private void DrawPm4SelectedObjectGraph()
+    {
+        if (_worldScene == null) return;
 
         if (!_worldScene.TryGetSelectedPm4ObjectGraphInfo(out Pm4SelectedObjectGraphInfo graph))
         {
@@ -3731,6 +4007,12 @@ public partial class ViewerApp
             return;
         }
 
+        // Summary header
+        ImGui.Text($"CK24 0x{graph.Ck24:X6}  Type=0x{graph.Ck24Type:X2}  ObjId={graph.Ck24ObjectId}");
+        ImGui.TextDisabled($"Tile ({graph.SelectedTileX}, {graph.SelectedTileY})  Part {graph.SelectedObjectPartId}");
+        ImGui.TextDisabled($"{graph.LinkGroupCount} link groups, {graph.MscnRefGroupCount} mscnRef groups, {graph.PartCount} parts, {graph.SurfaceCount} surfaces, {graph.TotalIndexCount} indices");
+        ImGui.Separator();
+
         ImGui.PushTextWrapPos();
         foreach (var bucket in typeBuckets)
         {
@@ -3743,8 +4025,15 @@ public partial class ViewerApp
                 {
                     if (ImGui.TreeNodeEx($"##LG_{bucket.Ck24Type:X2}_{linkGroup.LinkGroupObjectId}",
                             ImGuiTreeNodeFlags.None,
-                            $"LinkGroup {linkGroup.LinkGroupObjectId} [{linkGroup.MscnRefGroups.Count} mscnRefs, {linkGroup.SurfaceCount} surfaces]"))
+                            $"LinkGroup 0x{linkGroup.LinkGroupObjectId:X8} [{linkGroup.MscnRefGroups.Count} mscnRefs, {linkGroup.SurfaceCount} surfaces]"))
                     {
+                        // Show linked position ref summary
+                        if (linkGroup.LinkedPositionRefCount > 0)
+                        {
+                            var lprs = linkGroup.LinkedPositionRefSummary;
+                            ImGui.TextDisabled($"  MPRL refs: {lprs.TotalCount} (normal={lprs.NormalCount}, term={lprs.TerminatorCount})  floor={lprs.FloorMin}-{lprs.FloorMax}  heading={lprs.HeadingMeanDegrees:F1}°");
+                        }
+
                         foreach (var mscnRefGroup in linkGroup.MscnRefGroups)
                         {
                             if (ImGui.TreeNodeEx($"##MR_{mscnRefGroup.MscnRefIndex}",
@@ -3754,7 +4043,11 @@ public partial class ViewerApp
                                 foreach (var part in mscnRefGroup.Parts)
                                 {
                                     string selected = part.IsSelected ? " [SELECTED]" : "";
-                                    ImGui.TextDisabled($"  Part {part.ObjectPartId} @ {part.TileX}_{part.TileY}{selected}  ({part.SurfaceCount} surfs, {part.TotalIndexCount} idx)");
+                                    string partLabel = $"Part {part.ObjectPartId} @ {part.TileX}_{part.TileY}{selected}  ({part.SurfaceCount} surfs, {part.TotalIndexCount} idx)";
+                                    if (ImGui.Selectable($"##Part_{part.TileX}_{part.TileY}_{part.ObjectPartId}", part.IsSelected))
+                                    {
+                                        _worldScene.SelectPm4ObjectByKey(part.TileX, part.TileY, graph.Ck24, part.ObjectPartId);
+                                    }
                                 }
                                 ImGui.TreePop();
                             }
@@ -3766,6 +4059,27 @@ public partial class ViewerApp
             }
         }
         ImGui.PopTextWrapPos();
+    }
+
+    private static string GetCk24TypeLabel(byte ck24Type)
+    {
+        return ck24Type switch
+        {
+            0x00 => "doodad/decor",
+            0x40 => "WMO roof",
+            0x41 => "WMO wall",
+            0x42 => "WMO structure",
+            0x43 => "WMO detail",
+            0x44 => "WMO column",
+            0x45 => "WMO arch",
+            0x46 => "WMO stair",
+            0x47 => "WMO platform",
+            0x48 => "WMO bridge",
+            0x80 => "terrain/ground",
+            0x81 => "terrain cliff",
+            0x82 => "terrain slope",
+            _ => $"0x{ck24Type:X2}"
+        };
     }
 
     private void ExportPm4OverlayReport()
@@ -3845,5 +4159,24 @@ public partial class ViewerApp
         }
 
         _statusMessage = $"Wrote PM4 overlay report: {mdPath}";
+    }
+
+    private static bool Ck24MatchesFilter(uint ck24, List<(int tx, int ty, uint ck24, int part, uint ck24ObjectId, uint mshdRegionId, uint linkGroupObjectId, byte groupKey, byte attributeMask, uint mscnRefIndex, int surfaceCount, int totalIndexCount, float avgHeight, Vector3 boundsMin, Vector3 boundsMax, int linkedPositionRefCount)> ck24Objects, string filterLower)
+    {
+        var first = ck24Objects[0];
+        byte ck24Type = (byte)((ck24 >> 16) & 0xFF);
+        ushort ck24ObjId = (ushort)(ck24 & 0xFFFF);
+        string ck24Label = $"CK24 0x{ck24:X6}  Type=0x{ck24Type:X2}  ObjId={ck24ObjId}  Region={first.mshdRegionId}  MSLK=0x{first.linkGroupObjectId:X8}";
+        if (ck24Label.ToLowerInvariant().Contains(filterLower))
+            return true;
+
+        foreach (var o in ck24Objects)
+        {
+            string partLabel = $"Part {o.part}  ({o.surfaceCount} surfs)  GK=0x{o.groupKey:X2}  Attr=0x{o.attributeMask:X2}  MscnRef={o.mscnRefIndex}";
+            if (partLabel.ToLowerInvariant().Contains(filterLower))
+                return true;
+        }
+
+        return false;
     }
 }
