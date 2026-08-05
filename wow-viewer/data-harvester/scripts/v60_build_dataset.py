@@ -143,11 +143,32 @@ def _stream_tiles(
     print(f"  Streaming {build_id} / {map_name} ...", flush=True)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
+    # If the C# tool hangs on a tile, a blocking read would wedge forever. Use select
+    # with a timeout so a wedged stream is detected and reported instead of hanging.
+    import select
+
+    STREAM_IDLE_TIMEOUT = 300.0  # seconds of no output before we declare the stream wedged
+
+    def _read_exact(n: int) -> bytes | None:
+        """Read exactly n bytes from stdout, or None on EOF/timeout."""
+        chunks = bytearray()
+        while len(chunks) < n:
+            ready, _, _ = select.select([proc.stdout], [], [], STREAM_IDLE_TIMEOUT)
+            if not ready:
+                print(f"  WARNING: no output for {STREAM_IDLE_TIMEOUT:.0f}s — stream appears "
+                      f"wedged (got {len(tiles)} tiles so far)", flush=True)
+                return None
+            chunk = proc.stdout.read(n - len(chunks))
+            if not chunk:
+                return None
+            chunks.extend(chunk)
+        return bytes(chunks)
+
     tiles: list[dict] = []
     try:
         while True:
-            header = proc.stdout.read(8)
-            if not header or len(header) < 8:
+            header = _read_exact(8)
+            if header is None or len(header) < 8:
                 break
             magic = header[:4]
             length = struct.unpack("<i", header[4:8])[0]
@@ -158,8 +179,8 @@ def _stream_tiles(
             if length <= 0 or length > 512 * 1024 * 1024:
                 print(f"  WARNING: implausible tile length {length}, aborting stream", flush=True)
                 break
-            blob = proc.stdout.read(length)
-            if len(blob) < length:
+            blob = _read_exact(length)
+            if blob is None or len(blob) < length:
                 break
             try:
                 tile = read_tile_blob(blob)
