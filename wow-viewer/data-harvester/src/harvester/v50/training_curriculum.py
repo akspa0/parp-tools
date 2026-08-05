@@ -126,6 +126,30 @@ def _assign_group_split(selected: list[dict], *, val_map: str | None, val_fracti
     return f"within_map_stratified:{val_fraction}"
 
 
+def _surviving_height_levels(group, tile_id: int) -> int:
+    """Distinct height values for a tile — the Spec 134 curation gate. A tile whose surviving shape
+    is compressed to ≤ ``max_height_levels`` distinct heights teaches the model a broken relationship
+    (measured: 4 Azeroth tiles hold exactly 2 levels across a 516-unit range); a compressed-RANGE
+    tile with full level count is real terrain worth keeping."""
+    if "height_257" not in group:
+        return 0
+    height = np.asarray(group["height_257"][tile_id], dtype=np.float32)
+    return int(np.unique(height).size)
+
+
+def _height_levels_acceptable(group, tile_id: int,
+                              min_levels: int | None, max_levels: int | None) -> bool:
+    """True when a tile's surviving height levels are within the allowed range (or no range set)."""
+    if min_levels is None and max_levels is None:
+        return True
+    levels = _surviving_height_levels(group, tile_id)
+    if min_levels is not None and levels < min_levels:
+        return False
+    if max_levels is not None and levels > max_levels:
+        return False
+    return True
+
+
 def build_training_curriculum(
     *,
     stores: list[Path],
@@ -135,12 +159,20 @@ def build_training_curriculum(
     val_map: str | None = None,
     val_fraction: float | None = None,
     min_rgb_std: float = 1.0,
+    min_height_levels: int | None = None,
+    max_height_levels: int | None = None,
 ) -> dict:
     """Write the curriculum store and return its summary dict. Exactly one of ``val_map`` (whole
     held-out map; cross-map generalization regime) or ``val_fraction`` (within-map stratified
     holdout; the standard regime) selects the split. ``min_rgb_std`` is the per-source blank-minimap
     threshold (matches the curation default); pass a terrain-quality-only curation manifest so the
-    per-source blank check here is the sole minimap gate."""
+    per-source blank check here is the sole minimap gate.
+
+    Spec 134 (US2) curation gating: ``min_height_levels``/``max_height_levels`` filter kept tiles
+    by their distinct height count (``surviving_height_levels``). The default recommendation is to
+    exclude tiles with ≤64 levels (``max_height_levels=64``) — those teach a texture edge as a
+    vertical wall — while admitting compressed-rich tiles (high level count, low range). When no
+    gate is passed the legacy behavior is unchanged (no level filtering)."""
     import zarr
 
     release = validate_release(release)
@@ -166,7 +198,19 @@ def build_training_curriculum(
             )
         source_index = len(source_groups)
         source_groups.append(group)
-        for row in _load_keep_rows(manifest_path):
+        kept_rows = _load_keep_rows(manifest_path)
+        if min_height_levels is not None or max_height_levels is not None:
+            before = len(kept_rows)
+            kept_rows = [
+                row for row in kept_rows
+                if _height_levels_acceptable(group, int(row["tile_id"]),
+                                             min_height_levels, max_height_levels)
+            ]
+            dropped = before - len(kept_rows)
+            if dropped:
+                print(f"  height-level gating: dropped {dropped}/{before} kept tiles "
+                      f"({min_height_levels}<=levels<={max_height_levels})", flush=True)
+        for row in kept_rows:
             tile_id = int(row["tile_id"])
             base = {
                 "build": str(row["build"]),
@@ -304,6 +348,13 @@ def main() -> int:
     ap.add_argument("--min-rgb-std", type=float, default=1.0,
                     help="per-source blank-minimap threshold (default 1.0, matches curation); pass a "
                          "terrain-quality-only curation manifest so this is the sole minimap gate")
+    ap.add_argument("--min-height-levels", type=int, default=None,
+                    help="Spec 134 curation gate: exclude tiles with fewer than this many distinct "
+                         "height values. Default: no min (legacy behavior).")
+    ap.add_argument("--max-height-levels", type=int, default=None,
+                    help="Spec 134 curation gate: exclude tiles with more than this many distinct "
+                         "height values. Recommended: 64 (excludes ≤64-level tiles that teach broken "
+                         "relationships). Default: no max (legacy behavior).")
     ap.add_argument("--release", default="v50.1", type=validate_release)
     args = ap.parse_args()
     try:
@@ -315,6 +366,8 @@ def main() -> int:
             val_fraction=args.val_fraction,
             min_rgb_std=args.min_rgb_std,
             release=args.release,
+            min_height_levels=args.min_height_levels,
+            max_height_levels=args.max_height_levels,
         )
     except CurriculumBuildError as exc:
         raise SystemExit(str(exc)) from exc
