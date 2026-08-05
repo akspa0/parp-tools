@@ -72,7 +72,7 @@ def _find_harvest_dll() -> Path:
 
 
 def _discover_clients(client_root: str) -> list[tuple[str, str]]:
-    """Enumerate H:\CLIENTS, return list of (build_id, client_path) for every WoW client root.
+    r"""Enumerate H:\CLIENTS, return list of (build_id, client_path) for every WoW client root.
 
     Looks for ``World of Warcraft`` subdirectory inside each folder on H:\CLIENTS.
     The build_id is the folder name (e.g. ``1.0.0.3980``, ``3_3_5_12340``).
