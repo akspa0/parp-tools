@@ -6,17 +6,14 @@ store for every build and map. No NPZ intermediates. Same pattern as the v50 pip
 ``harvest-stream`` writes raw binary tile blobs to stdout, Python reads them and writes
 the Zarr store directly.
 
-The script iterates over all configured builds and maps, streams each one, and
-accumulates every tile into one unified store with a single index across all builds.
+The script discovers all WoW clients under ``--client-root``, runs ``discover-maps``
+on each to find the actual terrain maps available, then streams each build/map and
+accumulates every tile into one unified store. Uses ``--dry-run`` to preview what
+would be harvested without running anything.
 
 Usage:
     cd wow-viewer/data-harvester
-    uv run python scripts/v60_build_dataset.py \\
-        --client-root H:/CLIENTS \\
-        --output ../output/datasets/v60/v60.1/unified.zarr
-
-This will harvest all builds and maps defined in the script. Use --dry-run to print
-what would be harvested without running anything.
+    uv run python scripts/v60_build_dataset.py --client-root <path> --output <path>
 """
 
 from __future__ import annotations
@@ -42,9 +39,6 @@ if str(_SRC) not in sys.path:
 from harvester.raw_reader import read_tile_blob  # noqa: E402
 from harvester.v50.classify import SignalTier, compute_signal_tier  # noqa: E402
 from harvester.v50.contracts import DEFAULT_RELEASE_V60, STORE_SCHEMA_V60  # noqa: E402
-
-# Terrain maps to stream per build. All builds share the same maps.
-DEFAULT_MAPS = ["Kalimdor", "Azeroth", "EasternKingdoms", "Northrend"]
 
 HARVEST_PROJECT = Path(__file__).resolve().parents[2] / "tools" / "harvest" / "WowViewer.Tool.Harvest"
 DLL_SEARCH = [
@@ -72,10 +66,10 @@ def _find_harvest_dll() -> Path:
 
 
 def _discover_clients(client_root: str) -> list[tuple[str, str]]:
-    r"""Enumerate H:\CLIENTS, return list of (build_id, client_path) for every WoW client root.
+    r"""Enumerate client root, return list of (build_id, client_path) for every WoW client root.
 
-    Looks for ``World of Warcraft`` subdirectory inside each folder on H:\CLIENTS.
-    The build_id is the folder name (e.g. ``1.0.0.3980``, ``3_3_5_12340``).
+    Looks for ``World of Warcraft`` subdirectory inside each folder.
+    The build_id is the folder name.
     """
     root = Path(client_root)
     if not root.exists():
@@ -89,10 +83,33 @@ def _discover_clients(client_root: str) -> list[tuple[str, str]]:
         if wow_path.is_dir():
             clients.append((entry.name, str(wow_path)))
         else:
-            # Try the folder itself as the client root
             if (entry / "Data").is_dir() or (entry / "WTF").is_dir():
                 clients.append((entry.name, str(entry)))
     return clients
+
+
+def _discover_maps(harvest_dll: Path, client_path: str) -> list[str]:
+    """Run discover-maps for a client and return the available map names."""
+    cmd = [
+        "dotnet", str(harvest_dll),
+        "discover-maps",
+        "--client-root", client_path,
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            stderr = result.stderr[-300:]
+            print(f"  WARNING: discover-maps failed: {stderr}", flush=True)
+            return []
+        maps = []
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line and not line.startswith("Error") and not line.startswith("Loaded"):
+                maps.append(line)
+        return maps
+    except subprocess.TimeoutExpired:
+        print(f"  WARNING: discover-maps timed out for {client_path}", flush=True)
+        return []
 
 
 def _stream_build_map(
@@ -183,23 +200,28 @@ def main() -> int:
     if not clients:
         raise SystemExit(f"ERROR: no WoW client roots found under {client_root}")
 
-    if args.dry_run:
-        print("Discovered clients:")
-        for build_id, client_path in clients:
-            print(f"  {build_id}: {client_path}")
-        print(f"\nMaps per client: {DEFAULT_MAPS}")
-        print(f"\nOutput: {args.output}")
-        return 0
-
     # Find the harvest DLL
     print("Finding harvest tool...", flush=True)
     harvest_dll = _find_harvest_dll()
     print(f"  DLL: {harvest_dll}", flush=True)
 
+    if args.dry_run:
+        print("Discovered clients:")
+        for build_id, client_path in clients:
+            maps = _discover_maps(harvest_dll, client_path)
+            print(f"  {build_id}: {client_path} -> {len(maps)} maps: {maps[:5]}{'...' if len(maps) > 5 else ''}")
+        print(f"\nOutput: {args.output}")
+        return 0
+
     # Stream all builds/maps and accumulate tiles
     all_tiles: list[dict] = []
     for build_id, client_path in clients:
-        for map_name in DEFAULT_MAPS:
+        maps = _discover_maps(harvest_dll, client_path)
+        if not maps:
+            print(f"  SKIP {build_id}: no discoverable maps", flush=True)
+            continue
+        print(f"  {build_id}: {len(maps)} maps to stream", flush=True)
+        for map_name in maps:
             tiles = _stream_build_map(harvest_dll, client_path, build_id, map_name)
             all_tiles.extend(tiles)
 
