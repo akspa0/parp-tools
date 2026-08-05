@@ -108,7 +108,31 @@ A researcher can train a model that takes `terrain_shadow_256` (single-channel, 
 
 ---
 
-### User Story 4 - v0.5.2 release and branch management (Priority: P2)
+### User Story 4 - Synthesized control tiles in the dataset (Priority: P2)
+
+A dataset operator can generate synthetic control tiles — minimaps and signals baked from
+known ground truth via the compositor — and include them in the v60 store as a control group
+for model training.
+
+**Why this priority**: Now that the compositor can bake minimaps perfectly, we can generate
+control tiles with exact known ground truth (height, normals, shadow, texture). These are
+invaluable for model training: they provide a clean, fully-supervised control group to measure
+against real-client tiles, and let us tweak lighting/reliability/precision later.
+
+**Acceptance Scenarios**:
+
+1. **Given** a set of synthetic terrain heightmaps, **When** the compositor bakes them, **Then**
+   each produces a minimap, terrain_shadow_256, normal_xyz, and height_257 with exact known
+   ground truth.
+2. **Given** the synthetic control tiles, **When** added to the v60 store, **Then** they are
+   tagged with a `source_kind=synthetic` index column so they can be selected or excluded from
+   training.
+3. **Given** a synthetic control tile, **When** the shadow→height model is evaluated on it,
+   **Then** the prediction can be compared against the exact known height (perfect ground truth).
+
+---
+
+### User Story 5 - v0.5.2 release and branch management (Priority: P2)
 
 A maintainer can tag and publish v0.5.2, merge the current feature branches into main, and start a new dev branch for continued work.
 
@@ -130,6 +154,10 @@ A maintainer can tag and publish v0.5.2, merge the current feature branches into
 - **FR-004**: The shadow→height model MUST accept a single-channel 256x256 input and produce a 257x257 height field.
 - **FR-005**: The shadow→height model MUST be trainable on a single GPU in under 24 hours.
 - **FR-006**: The v0.5.2 release MUST publish the viewer binary via GitHub Actions.
+- **FR-007**: The v60 builder MUST support adding synthetic control tiles (baked from known ground
+  truth via the compositor) tagged with a `source_kind=synthetic` index column.
+- **FR-008**: Synthetic control tiles MUST carry exact known ground truth for height, normals,
+  shadow, and texture so they can serve as a fully-supervised control group.
 
 ### Non-Functional Requirements
 
