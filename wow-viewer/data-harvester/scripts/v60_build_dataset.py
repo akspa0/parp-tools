@@ -43,13 +43,8 @@ if str(_SRC) not in sys.path:
 from harvester.raw_reader import read_tile_blob  # noqa: E402
 from harvester.v50.contracts import DEFAULT_RELEASE_V60, STORE_SCHEMA_V60  # noqa: E402
 
-# All builds and maps to harvest. Each build maps to its H:\CLIENTS directory name
-# and the terrain maps to stream from it.
-BUILDS: dict[str, tuple[str, list[str]]] = {
-    "1_0_0_3980":  ("1.0.0.3980",  ["Kalimdor", "Azeroth"]),
-    "3_3_5_12340": ("3_3_5_12340", ["Kalimdor", "Azeroth", "EasternKingdoms", "Northrend"]),
-    "4_0_0_11927": ("4.0.0.11927", ["Kalimdor", "Azeroth", "EasternKingdoms"]),
-}
+# Terrain maps to stream per build. All builds share the same maps.
+DEFAULT_MAPS = ["Kalimdor", "Azeroth", "EasternKingdoms", "Northrend"]
 
 HARVEST_PROJECT = Path(__file__).resolve().parents[2] / "tools" / "harvest" / "WowViewer.Tool.Harvest"
 DLL_SEARCH = [
@@ -76,14 +71,37 @@ def _find_harvest_dll() -> Path:
     raise RuntimeError("harvest tool DLL not found after build")
 
 
+def _discover_clients(client_root: str) -> list[tuple[str, str]]:
+    """Enumerate H:\CLIENTS, return list of (build_id, client_path) for every WoW client root.
+
+    Looks for ``World of Warcraft`` subdirectory inside each folder on H:\CLIENTS.
+    The build_id is the folder name (e.g. ``1.0.0.3980``, ``3_3_5_12340``).
+    """
+    root = Path(client_root)
+    if not root.exists():
+        print(f"  WARNING: client root not found: {root}", flush=True)
+        return []
+    clients: list[tuple[str, str]] = []
+    for entry in sorted(root.iterdir()):
+        if not entry.is_dir():
+            continue
+        wow_path = entry / "World of Warcraft"
+        if wow_path.is_dir():
+            clients.append((entry.name, str(wow_path)))
+        else:
+            # Try the folder itself as the client root
+            if (entry / "Data").is_dir() or (entry / "WTF").is_dir():
+                clients.append((entry.name, str(entry)))
+    return clients
+
+
 def _stream_build_map(
     harvest_dll: Path,
-    client_root: str,
+    client_path: str,
     build_id: str,
     map_name: str,
 ) -> list[dict]:
     """Run harvest-stream for one build/map and return all tile dicts."""
-    client_path = f"{client_root}/{build_id}/World of Warcraft"
     if not Path(client_path).exists():
         print(f"  SKIP: client not found: {client_path}", flush=True)
         return []
@@ -161,12 +179,15 @@ def main() -> int:
 
     client_root = str(args.client_root).replace("\\", "/")
 
+    clients = _discover_clients(client_root)
+    if not clients:
+        raise SystemExit(f"ERROR: no WoW client roots found under {client_root}")
+
     if args.dry_run:
-        print("Would harvest:")
-        for build_id, (client_dir, maps) in BUILDS.items():
-            client_path = f"{client_root}/{client_dir}/World of Warcraft"
-            exists = Path(client_path).exists()
-            print(f"  {build_id} ({client_dir}): {'EXISTS' if exists else 'MISSING'} -> {maps}")
+        print("Discovered clients:")
+        for build_id, client_path in clients:
+            print(f"  {build_id}: {client_path}")
+        print(f"\nMaps per client: {DEFAULT_MAPS}")
         print(f"\nOutput: {args.output}")
         return 0
 
@@ -177,9 +198,9 @@ def main() -> int:
 
     # Stream all builds/maps and accumulate tiles
     all_tiles: list[dict] = []
-    for build_id, (client_dir, maps) in BUILDS.items():
-        for map_name in maps:
-            tiles = _stream_build_map(harvest_dll, client_root, client_dir, map_name)
+    for build_id, client_path in clients:
+        for map_name in DEFAULT_MAPS:
+            tiles = _stream_build_map(harvest_dll, client_path, build_id, map_name)
             all_tiles.extend(tiles)
 
     if not all_tiles:
@@ -272,7 +293,7 @@ def main() -> int:
             "release": args.release,
             "row_count": len(all_tiles),
             "signal_count": written_signals,
-            "builds": list(BUILDS.keys()),
+            "builds": sorted({tile["_build_id"] for tile in all_tiles}),
             "unavailable_signals": unavailable_signals,
         }
         group.attrs.update(manifest)
