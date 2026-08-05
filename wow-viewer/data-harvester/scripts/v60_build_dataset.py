@@ -384,6 +384,9 @@ def main() -> int:
                         help="Output v60 Zarr store path (e.g. ../output/datasets/v60/v60/unified.zarr)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print what would be harvested without running anything")
+    parser.add_argument("--resume", action="store_true",
+                        help="Resume: keep per-build stores in a stable work dir and skip "
+                             "builds/maps already harvested")
     parser.add_argument("--release", default=DEFAULT_RELEASE_V60)
     args = parser.parse_args()
 
@@ -405,9 +408,15 @@ def main() -> int:
         print(f"\nOutput: {args.output}")
         return 0
 
-    # Per-build stores live beside the output in a temp dir
-    work_dir = args.output.parent / f".v60-work-{uuid.uuid4().hex}"
-    work_dir.mkdir(parents=True, exist_ok=True)
+    # Per-build stores live beside the output. With --resume they persist in a stable
+    # work dir so a wedged/interrupted run can be resumed without re-harvesting.
+    if args.resume:
+        work_dir = args.output.parent / ".v60-work"
+        work_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        work_dir = args.output.parent / f".v60-work-{uuid.uuid4().hex}"
+        work_dir.mkdir(parents=True, exist_ok=True)
+
     per_build_stores: list[Path] = []
 
     try:
@@ -418,10 +427,14 @@ def main() -> int:
                 continue
             print(f"  {build_id}: {len(maps)} maps to stream", flush=True)
             for map_name in maps:
+                store = work_dir / f"{build_id}-{map_name}.zarr"
+                if args.resume and store.exists():
+                    print(f"  SKIP {build_id}/{map_name}: already harvested", flush=True)
+                    per_build_stores.append(store)
+                    continue
                 tiles = _stream_tiles(harvest_dll, client_path, build_id, map_name)
                 if not tiles:
                     continue
-                store = work_dir / f"{build_id}-{map_name}.zarr"
                 n = _write_per_build_store(store, tiles, build_id, map_name)
                 per_build_stores.append(store)
                 print(f"  Wrote per-build store: {store} ({len(tiles)} tiles, {n} signals)", flush=True)
@@ -440,7 +453,9 @@ def main() -> int:
             for u in result["unavailable_signals"][:5]:
                 print(f"         {u['name']}: {u['reason']}")
     finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
+        # Only clean up the temp work dir on a non-resume run; resume keeps it for later.
+        if not args.resume:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
     return 0
 
