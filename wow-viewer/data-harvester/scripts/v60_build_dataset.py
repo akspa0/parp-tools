@@ -89,7 +89,13 @@ def _discover_clients(client_root: str) -> list[tuple[str, str]]:
 
 
 def _discover_maps(harvest_dll: Path, client_path: str) -> list[str]:
-    """Run discover-maps for a client and return the available map names."""
+    """Run discover-maps for a client and return the usable map names.
+
+    discover-maps emits a JSON array of HarvestMapDiscoveryResult records. We keep
+    maps that are marked Include (terrain-trainable) and have a usable tile.
+    """
+    import json
+
     cmd = [
         "dotnet", str(harvest_dll),
         "discover-maps",
@@ -101,11 +107,21 @@ def _discover_maps(harvest_dll: Path, client_path: str) -> list[str]:
             stderr = result.stderr[-300:]
             print(f"  WARNING: discover-maps failed: {stderr}", flush=True)
             return []
-        maps = []
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if line and not line.startswith("Error") and not line.startswith("Loaded"):
-                maps.append(line)
+        # The JSON is the last non-empty block of stdout (listfile/md5 lines precede it).
+        json_start = result.stdout.find("[")
+        if json_start < 0:
+            print(f"  WARNING: discover-maps produced no JSON for {client_path}", flush=True)
+            return []
+        try:
+            records = json.loads(result.stdout[json_start:])
+        except json.JSONDecodeError as e:
+            print(f"  WARNING: discover-maps JSON parse failed: {e}", flush=True)
+            return []
+        maps = [
+            str(record["map"])
+            for record in records
+            if record.get("include") and record.get("hasUsableTile")
+        ]
         return maps
     except subprocess.TimeoutExpired:
         print(f"  WARNING: discover-maps timed out for {client_path}", flush=True)
