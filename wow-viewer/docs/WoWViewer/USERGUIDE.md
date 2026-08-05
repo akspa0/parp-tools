@@ -20,8 +20,9 @@ dotnet run --project .\src\viewer\WoWViewer\WoWViewer.csproj -c Debug
 
 ## Client roots
 
-- Use staged clients only under `output/tmp/wowarchive-clients/`.
-- Any `H:\CLIENTS` path is stale and wrong.
+- `H:\CLIENTS` is the approved, known-good client library (AGENTS.md Rule 9).
+- `output/tmp/wowarchive-clients/` is optional staging and may be pruned.
+- Prefer `H:\CLIENTS` for current work — it contains more builds on the faster SSD.
 
 ## Useful launch flags
 
