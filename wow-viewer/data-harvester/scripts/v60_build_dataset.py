@@ -143,9 +143,11 @@ def _stream_tiles(
     print(f"  Streaming {build_id} / {map_name} ...", flush=True)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    # If the C# tool hangs on a tile, a blocking read would wedge forever. Use select
-    # with a timeout so a wedged stream is detected and reported instead of hanging.
-    import select
+    # If the C# tool hangs on a tile, a blocking read would wedge forever. select.select
+    # does not work on Windows pipes (only sockets), so use a reader thread + queue with
+    # a timeout to detect a wedged stream and report it instead of hanging.
+    import queue
+    import threading
 
     STREAM_IDLE_TIMEOUT = 300.0  # seconds of no output before we declare the stream wedged
 
@@ -153,15 +155,29 @@ def _stream_tiles(
         """Read exactly n bytes from stdout, or None on EOF/timeout."""
         chunks = bytearray()
         while len(chunks) < n:
-            ready, _, _ = select.select([proc.stdout], [], [], STREAM_IDLE_TIMEOUT)
-            if not ready:
+            want = n - len(chunks)
+            result_q: queue.Queue = queue.Queue(maxsize=1)
+
+            def _reader() -> None:
+                try:
+                    result_q.put(proc.stdout.read(want))
+                except Exception as exc:  # noqa: BLE001
+                    result_q.put(exc)
+
+            t = threading.Thread(target=_reader, daemon=True)
+            t.start()
+            try:
+                got = result_q.get(timeout=STREAM_IDLE_TIMEOUT)
+            except queue.Empty:
                 print(f"  WARNING: no output for {STREAM_IDLE_TIMEOUT:.0f}s — stream appears "
                       f"wedged (got {len(tiles)} tiles so far)", flush=True)
                 return None
-            chunk = proc.stdout.read(n - len(chunks))
-            if not chunk:
+            if isinstance(got, Exception):
+                print(f"  WARNING: stream read error: {got}", flush=True)
                 return None
-            chunks.extend(chunk)
+            if not got:
+                return None
+            chunks.extend(got)
         return bytes(chunks)
 
     tiles: list[dict] = []
