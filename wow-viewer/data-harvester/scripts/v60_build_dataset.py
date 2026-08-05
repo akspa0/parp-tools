@@ -134,7 +134,12 @@ def _stream_build_map(
     build_id: str,
     map_name: str,
 ) -> list[dict]:
-    """Run harvest-stream for one build/map and return all tile dicts."""
+    """Run harvest-stream for one build/map and return all tile dicts.
+
+    Streams the raw binary output incrementally (Popen + read) instead of buffering
+    the whole map in memory — a full map's binary stream is gigabytes and
+    ``capture_output=True`` blows up with MemoryError.
+    """
     if not Path(client_path).exists():
         print(f"  SKIP: client not found: {client_path}", flush=True)
         return []
@@ -148,37 +153,47 @@ def _stream_build_map(
     ]
 
     print(f"  Streaming {build_id} / {map_name} ...", flush=True)
-    result = subprocess.run(cmd, capture_output=True, text=False, timeout=7200)
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
 
-    if result.returncode != 0:
-        stderr = result.stderr.decode("utf-8", errors="replace")[-500:]
-        print(f"  WARNING: harvest-stream failed for {build_id}/{map_name}: {stderr}", flush=True)
-        return []
-
-    # Parse the raw binary stream from stdout
-    stdout = result.stdout
     tiles: list[dict] = []
-    offset = 0
-    while offset + 8 <= len(stdout):
-        magic = stdout[offset:offset + 4]
-        length = struct.unpack("<i", stdout[offset + 4:offset + 8])[0]
-        if magic == b"ENDS":
-            break
-        if magic != b"ARRY":
-            offset += 1
-            continue
-        blob = stdout[offset + 8:offset + 8 + length]
-        if len(blob) < length:
-            break
-        try:
-            tile = read_tile_blob(blob)
-            if tile:
-                tile["_build_id"] = build_id
-                tile["_map"] = map_name
-                tiles.append(tile)
-        except Exception as e:
-            print(f"  WARNING: tile decode error: {e}", flush=True)
-        offset += 8 + length
+    try:
+        # Read the framed stream: 8-byte header (magic + int32 length) then length bytes.
+        while True:
+            header = proc.stdout.read(8)
+            if not header or len(header) < 8:
+                break
+            magic = header[:4]
+            length = struct.unpack("<i", header[4:8])[0]
+            if magic == b"ENDS":
+                break
+            if magic != b"ARRY":
+                continue
+            if length <= 0 or length > 512 * 1024 * 1024:
+                print(f"  WARNING: implausible tile length {length}, aborting stream", flush=True)
+                break
+            blob = proc.stdout.read(length)
+            if len(blob) < length:
+                break
+            try:
+                tile = read_tile_blob(blob)
+                if tile:
+                    tile["_build_id"] = build_id
+                    tile["_map"] = map_name
+                    tiles.append(tile)
+            except Exception as e:
+                print(f"  WARNING: tile decode error: {e}", flush=True)
+    finally:
+        proc.stdout.close()
+        proc.wait()
+
+    if proc.returncode != 0:
+        stderr = proc.stderr.read().decode("utf-8", errors="replace")[-500:]
+        print(f"  WARNING: harvest-stream failed for {build_id}/{map_name}: {stderr}", flush=True)
+    proc.stderr.close()
 
     print(f"  Got {len(tiles)} tiles", flush=True)
     return tiles
