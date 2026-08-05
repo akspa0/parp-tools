@@ -48,9 +48,8 @@ DLL_SEARCH = [
 
 
 def _find_harvest_dll() -> Path:
-    for candidate in DLL_SEARCH:
-        if candidate.exists():
-            return candidate
+    # Always rebuild so the DLL reflects the current source (e.g. the per-tile timeout fix).
+    # Returning a stale DLL silently runs old behavior.
     result = subprocess.run(
         ["dotnet", "build", str(HARVEST_PROJECT / "WowViewer.Tool.Harvest.csproj"),
          "-c", "Debug", "-nologo"],
