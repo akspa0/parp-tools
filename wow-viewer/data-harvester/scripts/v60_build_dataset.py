@@ -22,7 +22,6 @@ what would be harvested without running anything.
 from __future__ import annotations
 
 import argparse
-import io
 import shutil
 import struct
 import subprocess
@@ -138,8 +137,7 @@ def _stream_build_map(
         if len(blob) < length:
             break
         try:
-            buf = io.BytesIO(blob)
-            tile = read_tile_blob(buf)
+            tile = read_tile_blob(blob)
             if tile:
                 tile["_build_id"] = build_id
                 tile["_map"] = map_name
