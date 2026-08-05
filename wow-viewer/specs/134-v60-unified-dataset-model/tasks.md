@@ -28,11 +28,11 @@ Phase 4 (release) ── independent, last
 **Tasks**:
 
 - [ ] T001 [P] Update the frozen signal catalog (`docs/architecture/v50-clean-room-dataset-repo-audit-2026-07-15.md`) to add `terrain_shadow_256`, `signal_class`, `surviving_height_levels`, and bump the release to v60.1.
-- [ ] T002 [P] Create `wow-viewer/data-harvester/scripts/v60_build_unified_store.py` — CLI that reads all existing v50.1 Zarr stores + archaeology stores, merges them into a single v60 Zarr store with a unified index.parquet. Handles schema differences and missing signals gracefully (records unavailable-with-reason, never silently zero-fills).
-- [ ] T003 [P] Create `wow-viewer/data-harvester/src/harvester/v50/v60_store.py` — library module for the v60 store builder and manifest (reuses `store.py` conventions: staging dir, atomic replace, finalize).
-- [ ] T004 [P] Create `wow-viewer/data-harvester/tests/v50/test_v60_store.py` — unit tests: merge two small fixture stores, schema reconciliation, missing-signal handling, determinism.
-- [ ] T005 [US1] **USER RUNS** re-harvest: run the spec-133-updated harvest tool on Kalimdor and Azeroth to produce NPZ shards containing `terrain_shadow_256`.
-- [ ] T006 [US1] Build the v60 store from the re-harvested NPZ shards (user runs `v60_build_unified_store.py`).
+- [x] T002 [P] Create `wow-viewer/data-harvester/scripts/v60_build_from_npz.py` — CLI that reads NPZ harvest shards directly (from `harvest-map-mpq` output), builds a single v60 Zarr store with unified index.parquet. Handles multi-build, multi-map input. All signals including `terrain_shadow_256` are included where present. Missing signals are recorded as unavailable-with-reason.
+- [x] T003 [P] Create `wow-viewer/data-harvester/src/harvester/v50/v60_store.py` — library module for the v60 store builder and manifest (reuses `store.py` conventions: staging dir, atomic replace, finalize).
+- [ ] T004 [P] Create `wow-viewer/data-harvester/tests/v50/test_v60_store.py` — unit tests: build store from fixture NPZ, signal handling, determinism.
+- [ ] T005 [US1] **USER RUNS** re-harvest: run the spec-133-updated harvest tool on each build (0.5.3, 1.0.0, 3.3.5, 4.0.0.11927) to produce NPZ shards containing `terrain_shadow_256`.
+- [ ] T006 [US1] Build the v60 store from the re-harvested NPZ shards (user runs `v60_build_from_npz.py`).
 - [ ] T007 [US1] Update `v50_tile_classify.py` / `v50_tile_inventory.py` output paths to read from the v60 store.
 
 **Checkpoint**: A single v60 store exists with `terrain_shadow_256`, `signal_class`, and `surviving_height_levels` for every tile in Kalimdor and Azeroth.

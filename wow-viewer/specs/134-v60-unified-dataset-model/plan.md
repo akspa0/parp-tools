@@ -37,13 +37,12 @@ Four phases, executed in dependency order:
 ```
 wow-viewer/
 ├── data-harvester/scripts/
-│   ├── v60_build_unified_store.py          # NEW — consolidate v50.1 stores into v60
-│   ├── v60_build_training_curriculum.py    # MODIFIED — include terrain_shadow_256 + curation fix
+│   ├── v60_build_from_npz.py              # NEW — build v60 Zarr from NPZ harvest shards
 │   └── v60_train_shadow_height.py          # NEW — shadow→height model training
 ├── data-harvester/src/harvester/v50/
 │   ├── classify.py                         # EXISTING — three-tier classification
-│   ├── tile_inventory.py                   # EXISTING — surviving_height_levels
-│   └── training_curriculum.py             # MODIFIED — curation gating
+│   ├── training_curriculum.py             # MODIFIED — curation gating (height levels)
+│   └── v60_store.py                        # NEW — v60 store builder library
 ├── output/datasets/v60/
 │   └── v60.1/
 │       └── unified.zarr/                   # NEW — single consolidated store
@@ -61,8 +60,8 @@ wow-viewer/
 
 **Implementation**:
 
-1. **Create `v60_build_unified_store.py`** — reads all existing v50.1 stores + archaeology stores, merges them into a single v60 Zarr store with a unified index. Handles schema differences, missing signals gracefully.
-2. **Re-harvest with spec 133 C# changes** — user runs the updated harvest tool to get NPZ shards with `terrain_shadow_256` for at least Kalimdor and Azeroth.
+1. **Create `v60_build_from_npz.py`** — reads NPZ shards from the harvest tool's output (harvest-map-mpq), builds a single v60 Zarr store with all signals including `terrain_shadow_256`, and writes a unified index across all builds and maps. The v60 store is the training dataset — NOT the archaeology pipeline.
+2. **Re-harvest with spec 133 C# changes** — user runs the updated harvest tool to get NPZ shards with `terrain_shadow_256` for all desired builds (0.5.3, 1.0.0, 3.3.5, 4.0.0.11927).
 3. **Build v60 store from re-harvested NPZ** — the v60 builder reads the new NPZ shards and writes the consolidated store with `terrain_shadow_256` included.
 4. **Update the signal catalog** — add `terrain_shadow_256`, `signal_class`, `surviving_height_levels` to the frozen catalog.
 5. **Validate** — verify every tile has all expected signals, check determinism.
