@@ -167,8 +167,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Build unified v60 Zarr datastore — directly from C# harvest tool, no intermediates"
     )
-    parser.add_argument("--client-root", default="H:/CLIENTS",
-                        help="Root of H:/CLIENTS (default: H:/CLIENTS)")
+    parser.add_argument("--client-root", required=True,
+                        help="Path to the directory containing WoW client build folders "
+                             "(e.g. the root where your World of Warcraft client directories live)")
     parser.add_argument("--output", required=True, type=Path,
                         help="Output v60 Zarr store path (e.g. ../output/datasets/v60/v60.1/unified.zarr)")
     parser.add_argument("--dry-run", action="store_true",
