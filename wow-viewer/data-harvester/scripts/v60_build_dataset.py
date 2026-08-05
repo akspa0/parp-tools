@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Build the unified v60 Zarr datastore — one shot, no intermediate files (Spec 134 US1).
+"""Build the unified v60 Zarr datastore — one shot, no intermediate NPZ files (Spec 134 US1).
 
-Streams tile data directly from the C# harvest tool into a single unified v60 Zarr
-store for every build and map. No NPZ intermediates. Same pattern as the v50 pipeline:
-``harvest-stream`` writes raw binary tile blobs to stdout, Python reads them and writes
-the Zarr store directly.
+Streams tile data directly from the C# harvest tool into per-build Zarr stores
+(the v50 pattern), then merges them into a single unified v60 Zarr store. No NPZ
+intermediates. Each build/map is written incrementally as it streams, so output
+appears on disk immediately and memory stays bounded.
 
 The script discovers all WoW clients under ``--client-root``, runs ``discover-maps``
-on each to find the actual terrain maps available, then streams each build/map and
-accumulates every tile into one unified store. Uses ``--dry-run`` to preview what
-would be harvested without running anything.
+on each to find the actual terrain maps available, then streams each build/map into
+its own per-build Zarr store. After all builds complete, it merges them into the
+unified v60 store. Uses ``--dry-run`` to preview what would be harvested.
 
 Usage:
     cd wow-viewer/data-harvester
@@ -37,7 +37,7 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from harvester.raw_reader import read_tile_blob  # noqa: E402
-from harvester.v50.classify import SignalTier, compute_signal_tier  # noqa: E402
+from harvester.v50.classify import compute_signal_tier  # noqa: E402
 from harvester.v50.contracts import DEFAULT_RELEASE_V60, STORE_SCHEMA_V60  # noqa: E402
 
 HARVEST_PROJECT = Path(__file__).resolve().parents[2] / "tools" / "harvest" / "WowViewer.Tool.Harvest"
@@ -51,7 +51,6 @@ def _find_harvest_dll() -> Path:
     for candidate in DLL_SEARCH:
         if candidate.exists():
             return candidate
-    # Build it
     result = subprocess.run(
         ["dotnet", "build", str(HARVEST_PROJECT / "WowViewer.Tool.Harvest.csproj"),
          "-c", "Debug", "-nologo"],
@@ -66,11 +65,7 @@ def _find_harvest_dll() -> Path:
 
 
 def _discover_clients(client_root: str) -> list[tuple[str, str]]:
-    r"""Enumerate client root, return list of (build_id, client_path) for every WoW client root.
-
-    Looks for ``World of Warcraft`` subdirectory inside each folder.
-    The build_id is the folder name.
-    """
+    r"""Enumerate client root, return list of (build_id, client_path) for every WoW client root."""
     root = Path(client_root)
     if not root.exists():
         print(f"  WARNING: client root not found: {root}", flush=True)
@@ -89,11 +84,7 @@ def _discover_clients(client_root: str) -> list[tuple[str, str]]:
 
 
 def _discover_maps(harvest_dll: Path, client_path: str) -> list[str]:
-    """Run discover-maps for a client and return the usable map names.
-
-    discover-maps emits a JSON array of HarvestMapDiscoveryResult records. We keep
-    maps that are marked Include (terrain-trainable) and have a usable tile.
-    """
+    """Run discover-maps for a client and return the usable map names (JSON output)."""
     import json
 
     cmd = [
@@ -107,7 +98,6 @@ def _discover_maps(harvest_dll: Path, client_path: str) -> list[str]:
             stderr = result.stderr[-300:]
             print(f"  WARNING: discover-maps failed: {stderr}", flush=True)
             return []
-        # The JSON is the last non-empty block of stdout (listfile/md5 lines precede it).
         json_start = result.stdout.find("[")
         if json_start < 0:
             print(f"  WARNING: discover-maps produced no JSON for {client_path}", flush=True)
@@ -117,18 +107,17 @@ def _discover_maps(harvest_dll: Path, client_path: str) -> list[str]:
         except json.JSONDecodeError as e:
             print(f"  WARNING: discover-maps JSON parse failed: {e}", flush=True)
             return []
-        maps = [
+        return [
             str(record["map"])
             for record in records
             if record.get("include") and record.get("hasUsableTile")
         ]
-        return maps
     except subprocess.TimeoutExpired:
         print(f"  WARNING: discover-maps timed out for {client_path}", flush=True)
         return []
 
 
-def _stream_build_map(
+def _stream_tiles(
     harvest_dll: Path,
     client_path: str,
     build_id: str,
@@ -137,8 +126,7 @@ def _stream_build_map(
     """Run harvest-stream for one build/map and return all tile dicts.
 
     Streams the raw binary output incrementally (Popen + read) instead of buffering
-    the whole map in memory — a full map's binary stream is gigabytes and
-    ``capture_output=True`` blows up with MemoryError.
+    the whole map in memory — a full map's binary stream is gigabytes.
     """
     if not Path(client_path).exists():
         print(f"  SKIP: client not found: {client_path}", flush=True)
@@ -153,15 +141,10 @@ def _stream_build_map(
     ]
 
     print(f"  Streaming {build_id} / {map_name} ...", flush=True)
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     tiles: list[dict] = []
     try:
-        # Read the framed stream: 8-byte header (magic + int32 length) then length bytes.
         while True:
             header = proc.stdout.read(8)
             if not header or len(header) < 8:
@@ -199,16 +182,175 @@ def _stream_build_map(
     return tiles
 
 
-def _replace_directory(staging: Path, target: Path) -> None:
+def _write_per_build_store(
+    store_path: Path,
+    tiles: list[dict],
+    build_id: str,
+    map_name: str,
+) -> int:
+    """Write one build/map's tiles to a per-build Zarr store. Returns signal count."""
+    if not tiles:
+        return 0
+    if store_path.exists():
+        shutil.rmtree(store_path)
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+
+    group = zarr.open_group(str(store_path), mode="w")
+
+    # Determine signal names present in this build/map
+    signal_names = sorted(set(
+        k for tile in tiles for k in tile
+        if isinstance(tile[k], np.ndarray) and not k.startswith("_")
+    ))
+
+    # Index rows with sidecar metadata
+    index_rows = []
+    for tile_id, tile in enumerate(tiles):
+        height = tile.get("height_257")
+        levels = 0
+        signal_class = "na"
+        evidence = "no height data"
+        if height is not None:
+            h = np.asarray(height, dtype=np.float32)
+            if h.size > 0:
+                levels = int(np.unique(h).size)
+                height_range = float(np.max(h) - np.min(h))
+                tier = compute_signal_tier(height_range=height_range, surviving_levels=levels)
+                signal_class = tier.tier.value
+                evidence = tier.evidence
+        index_rows.append({
+            "build_id": build_id,
+            "map": map_name,
+            "tile_x": int(tile.get("tile_x", -1)),
+            "tile_y": int(tile.get("tile_y", -1)),
+            "tile_id": tile_id,
+            "surviving_height_levels": levels,
+            "signal_class": signal_class,
+            "signal_class_evidence": evidence,
+        })
+
+    pq.write_table(pa.Table.from_pylist(index_rows), str(store_path / "index.parquet"))
+
+    written = 0
+    for signal_name in signal_names:
+        arrays = [np.asarray(tile[signal_name]) for tile in tiles if signal_name in tile]
+        if not arrays:
+            continue
+        shape = arrays[0].shape
+        dtype = arrays[0].dtype
+        stacked = np.stack(
+            [a.astype(dtype) if a.shape == shape else np.zeros(shape, dtype=dtype) for a in arrays],
+            axis=0,
+        )
+        group.create_dataset(signal_name, data=stacked, shape=stacked.shape, dtype=dtype, overwrite=True)
+        written += 1
+
+    group.attrs.update({
+        "store_schema": STORE_SCHEMA_V60,
+        "release": DEFAULT_RELEASE_V60,
+        "build_id": build_id,
+        "map": map_name,
+        "row_count": len(tiles),
+        "signal_count": written,
+    })
+    return written
+
+
+def _merge_into_unified(
+    per_build_stores: list[Path],
+    output_path: Path,
+    release: str,
+) -> dict:
+    """Merge all per-build stores into a single unified v60 store."""
+    if output_path.exists():
+        shutil.rmtree(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    staging = output_path.parent / f".{output_path.name}.staging-{uuid.uuid4().hex}"
+    group = zarr.open_group(str(staging), mode="w")
+
+    # Discover all signals across all per-build stores
+    all_signal_names: set[str] = set()
+    for store in per_build_stores:
+        g = zarr.open_group(str(store), mode="r")
+        all_signal_names.update(g.array_keys())
+    all_signal_names = sorted(all_signal_names)
+
+    # Build unified index and per-signal arrays
+    index_rows: list[dict] = []
+    signal_arrays: dict[str, list[np.ndarray]] = {name: [] for name in all_signal_names}
+    signal_shapes: dict[str, tuple] = {}
+    signal_dtypes: dict[str, np.dtype] = {}
+    unavailable: list[dict] = []
+
+    for store in per_build_stores:
+        g = zarr.open_group(str(store), mode="r")
+        idx = pq.read_table(store / "index.parquet").to_pylist()
+        for row_id, row in enumerate(idx):
+            index_rows.append(row)
+            for name in all_signal_names:
+                if name in g:
+                    arr = np.asarray(g[name][row_id])
+                    if name not in signal_shapes:
+                        signal_shapes[name] = arr.shape
+                        signal_dtypes[name] = arr.dtype
+                    if arr.shape == signal_shapes[name]:
+                        signal_arrays[name].append(arr)
+                    else:
+                        signal_arrays[name].append(np.zeros(signal_shapes[name], dtype=signal_dtypes[name]))
+                else:
+                    if name not in signal_shapes:
+                        signal_shapes[name] = (1,)
+                        signal_dtypes[name] = np.float32
+                    signal_arrays[name].append(np.zeros(signal_shapes[name], dtype=signal_dtypes[name]))
+
+    # Write index
+    pq.write_table(pa.Table.from_pylist(index_rows), str(staging / "index.parquet"))
+    print(f"  Wrote unified index.parquet with {len(index_rows)} rows", flush=True)
+
+    written = 0
+    for name in all_signal_names:
+        arrays = signal_arrays[name]
+        if not arrays or all(a.size == 0 for a in arrays):
+            unavailable.append({"name": name, "reason": "no_source_data:not_present_in_any_store"})
+            print(f"  SKIP {name}: present in zero tiles", flush=True)
+            continue
+        shape = signal_shapes[name]
+        dtype = signal_dtypes[name]
+        stacked = np.stack(arrays, axis=0)
+        group.create_dataset(name, data=stacked, shape=stacked.shape, dtype=dtype, overwrite=True)
+        written += 1
+        print(f"  Wrote {name}: shape={stacked.shape} dtype={dtype}", flush=True)
+
+    group.attrs.update({
+        "store_schema": STORE_SCHEMA_V60,
+        "release": release,
+        "row_count": len(index_rows),
+        "signal_count": written,
+        "builds": sorted({row["build_id"] for row in index_rows}),
+        "unavailable_signals": unavailable,
+    })
+
+    # Atomic replace
     for attempt in range(6):
         try:
-            if target.exists():
-                shutil.rmtree(target)
-            staging.rename(target)
-            return
+            if output_path.exists():
+                shutil.rmtree(output_path)
+            staging.rename(output_path)
+            break
         except OSError as exc:
             time.sleep(0.2 * (2**attempt))
-    raise RuntimeError(f"could not replace {target} with {staging}")
+    else:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise RuntimeError(f"could not replace {output_path}")
+
+    return {
+        "store_path": str(output_path),
+        "row_count": len(index_rows),
+        "signal_count": written,
+        "builds": sorted({row["build_id"] for row in index_rows}),
+        "unavailable_signals": unavailable,
+    }
 
 
 def main() -> int:
@@ -216,10 +358,9 @@ def main() -> int:
         description="Build unified v60 Zarr datastore — directly from C# harvest tool, no intermediates"
     )
     parser.add_argument("--client-root", required=True,
-                        help="Path to the directory containing WoW client build folders "
-                             "(e.g. the root where your World of Warcraft client directories live)")
+                        help="Path to the directory containing WoW client build folders")
     parser.add_argument("--output", required=True, type=Path,
-                        help="Output v60 Zarr store path (e.g. ../output/datasets/v60/v60.1/unified.zarr)")
+                        help="Output v60 Zarr store path (e.g. ../output/datasets/v60/v60/unified.zarr)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print what would be harvested without running anything")
     parser.add_argument("--release", default=DEFAULT_RELEASE_V60)
@@ -231,7 +372,6 @@ def main() -> int:
     if not clients:
         raise SystemExit(f"ERROR: no WoW client roots found under {client_root}")
 
-    # Find the harvest DLL
     print("Finding harvest tool...", flush=True)
     harvest_dll = _find_harvest_dll()
     print(f"  DLL: {harvest_dll}", flush=True)
@@ -244,156 +384,43 @@ def main() -> int:
         print(f"\nOutput: {args.output}")
         return 0
 
-    # Stream all builds/maps and accumulate tiles
-    all_tiles: list[dict] = []
-    for build_id, client_path in clients:
-        maps = _discover_maps(harvest_dll, client_path)
-        if not maps:
-            print(f"  SKIP {build_id}: no discoverable maps", flush=True)
-            continue
-        print(f"  {build_id}: {len(maps)} maps to stream", flush=True)
-        for map_name in maps:
-            tiles = _stream_build_map(harvest_dll, client_path, build_id, map_name)
-            all_tiles.extend(tiles)
-
-    if not all_tiles:
-        raise SystemExit("ERROR: no tiles harvested from any build")
-
-    print(f"\nTotal tiles: {len(all_tiles)}", flush=True)
-
-    # Determine signal names
-    all_signal_names = sorted(set(
-        k for tile in all_tiles for k in tile
-        if isinstance(tile[k], np.ndarray) and not k.startswith("_")
-    ))
-    print(f"Signals: {len(all_signal_names)}", flush=True)
-
-    # Compute sidecar metadata (per-tile scalars, stored in index.parquet, not as Zarr arrays).
-    # These are derived signals that Python tools compute — they must be part of the v60 store.
-    print("Computing sidecar metadata...", flush=True)
-    sidecar_index: list[dict] = []
-    for tile_id, tile in enumerate(all_tiles):
-        height = tile.get("height_257")
-        if height is not None:
-            h = np.asarray(height, dtype=np.float32)
-            if h.size > 0:
-                levels = int(np.unique(h).size)
-                height_range = float(np.max(h) - np.min(h))
-                tier = compute_signal_tier(height_range=height_range, surviving_levels=levels)
-                sidecar_index.append({
-                    "surviving_height_levels": levels,
-                    "signal_class": tier.tier.value,
-                    "signal_class_evidence": tier.evidence,
-                })
-            else:
-                sidecar_index.append({
-                    "surviving_height_levels": 0,
-                    "signal_class": "na",
-                    "signal_class_evidence": "zero-height tile",
-                })
-        else:
-            sidecar_index.append({
-                "surviving_height_levels": 0,
-                "signal_class": "na",
-                "signal_class_evidence": "no height data",
-            })
-
-    # Build index (with sidecar metadata)
-    index_rows = []
-    for tile_id, tile in enumerate(all_tiles):
-        sidecar = sidecar_index[tile_id] if tile_id < len(sidecar_index) else {}
-        index_rows.append({
-            "build_id": tile["_build_id"],
-            "map": tile["_map"],
-            "tile_x": int(tile.get("tile_x", -1)),
-            "tile_y": int(tile.get("tile_y", -1)),
-            "tile_id": tile_id,
-            "surviving_height_levels": sidecar.get("surviving_height_levels", 0),
-            "signal_class": sidecar.get("signal_class", "na"),
-            "signal_class_evidence": sidecar.get("signal_class_evidence", ""),
-        })
-
-    # Write the unified v60 store
-    output_path = args.output
-    if output_path.exists():
-        shutil.rmtree(output_path)
-
-    staging = output_path.parent / f".{output_path.name}.staging-{uuid.uuid4().hex}"
-    staging.parent.mkdir(parents=True, exist_ok=True)
-
-    written_signals = 0
-    unavailable_signals: list[dict] = []
+    # Per-build stores live beside the output in a temp dir
+    work_dir = args.output.parent / f".v60-work-{uuid.uuid4().hex}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    per_build_stores: list[Path] = []
 
     try:
-        group = zarr.open_group(str(staging), mode="w")
-
-        # Write index
-        index_table = pa.Table.from_pylist(index_rows)
-        pq.write_table(index_table, str(staging / "index.parquet"))
-        print(f"  Wrote index.parquet with {len(index_rows)} rows", flush=True)
-
-        # Write each signal
-        for signal_name in all_signal_names:
-            arrays: list[np.ndarray] = []
-            shape = None
-            dtype = None
-            missing = 0
-
-            for tile in all_tiles:
-                arr = tile.get(signal_name)
-                if arr is not None:
-                    a = np.asarray(arr)
-                    if shape is None:
-                        shape = a.shape
-                        dtype = a.dtype
-                    if a.shape != shape:
-                        print(f"  WARNING: {signal_name}: shape mismatch {a.shape} vs {shape}, "
-                              f"skipping tile", flush=True)
-                        missing += 1
-                        continue
-                    arrays.append(np.ascontiguousarray(a.astype(dtype) if a.dtype != dtype else a))
-                else:
-                    missing += 1
-
-            if not arrays:
-                unavailable_signals.append({
-                    "name": signal_name,
-                    "reason": "no_source_data:not_present_in_any_streamed_tile",
-                })
-                print(f"  SKIP {signal_name}: present in zero tiles", flush=True)
+        for build_id, client_path in clients:
+            maps = _discover_maps(harvest_dll, client_path)
+            if not maps:
+                print(f"  SKIP {build_id}: no discoverable maps", flush=True)
                 continue
+            print(f"  {build_id}: {len(maps)} maps to stream", flush=True)
+            for map_name in maps:
+                tiles = _stream_tiles(harvest_dll, client_path, build_id, map_name)
+                if not tiles:
+                    continue
+                store = work_dir / f"{build_id}-{map_name}.zarr"
+                n = _write_per_build_store(store, tiles, build_id, map_name)
+                per_build_stores.append(store)
+                print(f"  Wrote per-build store: {store} ({len(tiles)} tiles, {n} signals)", flush=True)
 
-            if missing > 0:
-                print(f"  {signal_name}: {missing}/{len(all_tiles)} tiles missing (zero-filled)", flush=True)
-                for _ in range(missing):
-                    arrays.append(np.zeros(shape, dtype=dtype))
+        if not per_build_stores:
+            raise SystemExit("ERROR: no tiles harvested from any build")
 
-            stacked = np.stack(arrays, axis=0)
-            group.create_dataset(signal_name, data=stacked, shape=stacked.shape,
-                                dtype=dtype, overwrite=True)
-            written_signals += 1
-            print(f"  Wrote {signal_name}: shape={stacked.shape} dtype={dtype}", flush=True)
+        print(f"\nMerging {len(per_build_stores)} per-build stores into unified v60 store...", flush=True)
+        result = _merge_into_unified(per_build_stores, args.output, args.release)
 
-        # Write manifest
-        manifest = {
-            "store_schema": STORE_SCHEMA_V60,
-            "release": args.release,
-            "row_count": len(all_tiles),
-            "signal_count": written_signals,
-            "builds": sorted({tile["_build_id"] for tile in all_tiles}),
-            "unavailable_signals": unavailable_signals,
-        }
-        group.attrs.update(manifest)
-        print(f"  Manifest: {written_signals} signals, {len(all_tiles)} tiles", flush=True)
+        print(f"\n[DONE] v60 unified store: {result['store_path']}")
+        print(f"       {result['row_count']} tiles, {result['signal_count']} signals, "
+              f"{len(result['builds'])} builds")
+        if result["unavailable_signals"]:
+            print(f"       {len(result['unavailable_signals'])} signals unavailable:")
+            for u in result["unavailable_signals"][:5]:
+                print(f"         {u['name']}: {u['reason']}")
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
-    except BaseException:
-        shutil.rmtree(staging, ignore_errors=True)
-        raise
-
-    _replace_directory(staging, output_path)
-
-    print(f"\n[DONE] v60 unified store: {output_path}")
-    print(f"       {len(all_tiles)} tiles, {written_signals} signals, {len(BUILDS)} builds")
     return 0
 
 
