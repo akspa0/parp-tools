@@ -20,9 +20,9 @@ dotnet run --project .\src\viewer\WoWViewer\WoWViewer.csproj -c Debug
 
 ## Client roots
 
-- `H:\CLIENTS` is the approved, known-good client library (AGENTS.md Rule 9).
+- The configured client library (e.g. `H:\CLIENTS`) is the approved data source.
 - `output/tmp/wowarchive-clients/` is optional staging and may be pruned.
-- Prefer `H:\CLIENTS` for current work — it contains more builds on the faster SSD.
+- Client roots are passed as CLI arguments, never hardcoded in source.
 
 ## Useful launch flags
 
