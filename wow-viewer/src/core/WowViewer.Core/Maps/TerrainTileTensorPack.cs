@@ -312,6 +312,14 @@ public sealed class TerrainTileTensorPack
     /// <summary>256×256 × 3 RGB minimap image used as the primary Stage 1 visual input.</summary>
     public byte[,,]? MinimapRgb256 { get; set; }
 
+    /// <summary>
+    /// 256×256 float32 textureless terrain-shadow signal (Spec 133). Each cell holds the luminance
+    /// of the lighting term (Lambert N·L + ambient + cast shadows) at that pixel, with neutral
+    /// white albedo. Values are in [0, 1] and are achromatic (same across R/G/B channels of the
+    /// lighting term). The terrain shadow independent of what the terrain is made of.
+    /// </summary>
+    public float[,]? TerrainShadow256 { get; set; }
+
     // ── Hole and flag data ─────────────────────────────────────────────────
 
     /// <summary>16×16 chunk grid: does this chunk have holes?</summary>

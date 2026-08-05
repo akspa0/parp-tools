@@ -586,6 +586,94 @@ public static class TerrainMinimapCompositor
             (byte)Math.Clamp(MathF.Round(color.Z * 255f), 0f, 255f),
             255);
     }
+
+    /// <summary>
+    /// Produce a textureless terrain-shadow array (Spec 133). Runs the same per-pixel lighting
+    /// computation as <see cref="Compose"/> but writes the achromatic lighting term (Lambert N·L +
+    /// ambient + cast shadows, no albedo) to a float32 array instead of an RGB image. Each cell
+    /// holds the luminance of the lighting term in [0, 1], independent of what the terrain is made
+    /// of — the terrain shadow signal that the model can learn as a separate input.
+    /// </summary>
+    /// <param name="pack">The tile tensor pack.</param>
+    /// <param name="options">Composition options (lighting profile, resolution, etc.).
+    /// Defaults to <see cref="TerrainMinimapCompositionOptions.Default"/>.</param>
+    /// <returns>A 2D float array of shape [resolution, resolution] with the textureless lighting term.</returns>
+    public static float[,] ComposeShadowArray(
+        TerrainTileTensorPack pack,
+        TerrainMinimapCompositionOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(pack);
+
+        options ??= TerrainMinimapCompositionOptions.Default;
+        options.Validate();
+
+        float[,,]? alpha = pack.McalAlphaPack256;
+        int[,,] textureIds = pack.MclyTextureIds ?? CreateFallbackTextureGrid();
+        bool[,,]? layerMask = pack.MclyLayerMask;
+
+        if (textureIds.GetLength(0) <= 0 || textureIds.GetLength(1) <= 0 || textureIds.GetLength(2) < 4)
+            textureIds = CreateFallbackTextureGrid();
+
+        int alphaHeight = alpha?.GetLength(0) ?? options.Resolution;
+        int alphaWidth = alpha?.GetLength(1) ?? options.Resolution;
+
+        // Analytic cast shadows built once per tile.
+        float[,]? castShadow = options.Lighting.ApplyCastShadows
+            ? TerrainCastShadowMap.Compute(
+                pack.Height257,
+                options.Lighting.LightDirection,
+                options.Lighting.CastShadowSoftness,
+                options.Lighting.MaxCastShadowLength)
+            : null;
+
+        var shadow = new float[options.Resolution, options.Resolution];
+
+        for (int y = 0; y < options.Resolution; y++)
+        {
+            int sourceY = ScaleCoordinate(y, options.Resolution, alphaHeight);
+            int chunkY = Math.Min(textureIds.GetLength(0) - 1, sourceY * textureIds.GetLength(0) / alphaHeight);
+
+            for (int x = 0; x < options.Resolution; x++)
+            {
+                int sourceX = ScaleCoordinate(x, options.Resolution, alphaWidth);
+                int chunkX = Math.Min(textureIds.GetLength(1) - 1, sourceX * textureIds.GetLength(1) / alphaWidth);
+
+                // Lambert term from normals.
+                float lambert = ResolveInterpolatedLambert(
+                    pack, sourceX, sourceY, alphaWidth, alphaHeight, options.Lighting.LightDirection);
+
+                // MCSH shadow mask.
+                float mcshMask = options.Lighting.ApplyMcshToMinimap
+                    ? ResolveShadowMask(pack.McshShadowMask256, sourceX, sourceY, alphaWidth, alphaHeight)
+                    : 0f;
+
+                // Analytic cast shadow.
+                float castMask = castShadow is null
+                    ? 0f
+                    : ResolveCastShadow(castShadow, x, y, options.Resolution, options.Resolution);
+
+                float visibility =
+                    (1f - (Math.Clamp(mcshMask, 0f, 1f) * Math.Clamp(options.Lighting.McshShadowStrength, 0f, 1f)))
+                    * (1f - (Math.Clamp(castMask, 0f, 1f) * Math.Clamp(options.Lighting.CastShadowStrength, 0f, 1f)));
+
+                // The lighting term is achromatic under the production profile (directional=white,
+                // ambient=uniform gray), so any channel gives the luminance.
+                Vector3 lighting = TerrainLightingMath.Evaluate(
+                    lambert,
+                    options.Lighting.DirectionalColor,
+                    options.Lighting.AmbientColor,
+                    1f - visibility,
+                    1f,
+                    options.Lighting.ToneMapped,
+                    options.Lighting.ToneMapExposure);
+
+                // Store the lighting luminance (R channel) — this is the textureless shadow signal.
+                shadow[y, x] = Math.Clamp(lighting.X, 0f, 1f);
+            }
+        }
+
+        return shadow;
+    }
 }
 
 /// <summary>Explicit lighting inputs for a derived minimap export.</summary>

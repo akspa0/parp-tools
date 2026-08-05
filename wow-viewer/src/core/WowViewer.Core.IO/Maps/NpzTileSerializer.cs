@@ -101,6 +101,7 @@ public static class NpzTileSerializer
         WriteArray(zip, "object_roof_mask_256", pack.ObjectRoofMask256, "<f4");
         WriteArray(zip, "object_roof_confidence_256", pack.ObjectRoofConfidence256, "<f4");
         WriteArray(zip, "minimap_rgb_256", pack.MinimapRgb256, "|u1");
+        WriteArray(zip, "terrain_shadow_256", pack.TerrainShadow256, "<f4");
         WriteArray(zip, "hole_mask_16", pack.HoleMask16, "|b1");
         WriteArray(zip, "mtxf_animated_mask", pack.MtxfAnimatedMask, "<i4");
         WriteArray(zip, "mtxf_transform_id", pack.MtxfTransformId, "<i4");

@@ -3206,6 +3206,25 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         // missing slot: either retain a fully name-aligned payload table or record incompleteness.
         AttachNameAlignedTexturePixels(catalog, pack);
 
+        // Spec 133: emit the textureless terrain-shadow signal (Lambert N·L + ambient + cast
+        // shadows, neutral white albedo) alongside the authored/synthesized minimap. The shadow
+        // term depends only on geometry (height + normals) and the lighting profile, so it is
+        // computable for every tile regardless of whether an authored minimap exists.
+        if (pack.Height257 is not null)
+        {
+            try
+            {
+                pack.TerrainShadow256 = TerrainMinimapCompositor.ComposeShadowArray(
+                    pack,
+                    BuildHarvestShadowCompositionOptions());
+            }
+            catch
+            {
+                // A missing/unusable shadow signal must never fail the whole tile extract.
+                pack.TerrainShadow256 = null;
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(outputPath))
             outputPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), $"{mapName}_{tileX}_{tileY}_v14.npz");
 
@@ -4646,6 +4665,33 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
 
         public static SyntheticMinimapTuning Default { get; } =
             FromEra(MinimapEraProfile.Default, exactEraMatch: false);
+    }
+
+    /// <summary>
+    /// Spec 133: build the composition options for the textureless terrain-shadow array. Uses the
+    /// production synthetic-minimap lighting (noon sun, analytic cast shadows, linear-space shading)
+    /// so the shadow signal matches the synthesized minimap the model also sees. The default tuning
+    /// is the era-agnostic production profile; a caller that wants the exact era lighting can pass
+    /// its own options instead.
+    /// </summary>
+    private static TerrainMinimapCompositionOptions BuildHarvestShadowCompositionOptions()
+    {
+        SyntheticMinimapTuning tuning = SyntheticMinimapTuning.Default;
+        // Noon clear sky, matching the production synthesized-minimap light (CreateShadedTerrain).
+        TerrainMinimapLighting lighting = TerrainMinimapLighting.CreateShadedTerrain(
+            0.5f,
+            tuning.AmbientColor,
+            tuning.CastShadowStrength,
+            tuning.CastShadowSoftness,
+            tuning.MaxCastShadowLength) with
+        {
+            LightDirection = tuning.Era.ResolveLightDirection(0.5f),
+            ApplyMcshToMinimap = false,
+            ApplyCastShadows = true,
+        };
+        return new TerrainMinimapCompositionOptions(
+            TerrainMinimapCompositor.DefaultResolution,
+            lighting);
     }
 
     private static SyntheticMinimapLightingProfile ResolveSyntheticMinimapLighting(
