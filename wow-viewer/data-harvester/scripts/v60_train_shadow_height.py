@@ -45,7 +45,7 @@ from harvester.v50.model_stage_contract import (  # noqa: E402
 )
 
 SHADOW_SIZE = 256
-TARGET_RELEASE = "v60.1"
+TARGET_RELEASE = "v60"
 BASELINE_VAL_MAE = 0.1492665126  # SPEC112_FROZEN_BEST_VAL_MAE
 
 

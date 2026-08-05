@@ -35,7 +35,7 @@ TERRAIN_CHECKPOINT_VARIANT = "v50.1-terrain-refiner-convnextv2"
 # per-build stores keep their v50 identity; the v60 unified store declares v60 explicitly so a
 # v50 store and a v60 store can never be confused (FR-002: the unified store is first-class).
 MODEL_FAMILY_V60 = "v60"
-DEFAULT_RELEASE_V60 = "v60.1"
+DEFAULT_RELEASE_V60 = "v60"
 STORE_SCHEMA_V60 = "v60-unified-store-v1"
 
 WL_LIQUID_SURFACE_QUADS_SIGNAL = "wl_liquid_surface_quads_v1"
@@ -51,7 +51,7 @@ WL_LIQUID_REQUIRED_PROVENANCE = frozenset(
 WL_LIQUID_SOURCE_SIGNALS = frozenset({"wl_liquid_mask", "wl_liquid_height"})
 V50_FRESH_ONLY_SIGNALS = frozenset({"liquid_mask", "liquid_height"})
 
-_RELEASE = re.compile(r"^v[56]0\.[1-9][0-9]*$")
+_RELEASE = re.compile(r"^v60$|^v[56]0\.[1-9][0-9]*$")
 HASH_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -330,7 +330,7 @@ class RowLineage:
 def validate_release(value: str) -> str:
     release = str(value).strip().lower()
     if not _RELEASE.fullmatch(release):
-        raise ValueError("--release must be v50.N (for example v50.1) or v60.N (for example v60.1)")
+        raise ValueError("--release must be v50.N (e.g. v50.1), v60, or v60.N (e.g. v60.1)")
     return release
 
 
