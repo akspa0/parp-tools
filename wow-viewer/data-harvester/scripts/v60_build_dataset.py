@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""Build the unified v60 Zarr datastore — one shot, no intermediate NPZ files (Spec 134 US1).
+"""Build the unified v60 Zarr datastore (Spec 134 US1).
 
-Streams tile data directly from the C# harvest tool into per-build Zarr stores
-(the v50 pattern), then merges them into a single unified v60 Zarr store. No NPZ
-intermediates. Each build/map is written incrementally as it streams, so output
-appears on disk immediately and memory stays bounded.
+Consolidates the existing v50.1 Zarr stores (which are already built and validated,
+including 0.5.3 Kalimdor) into a single unified v60 store, and harvests only the
+builds/maps that v50 does NOT already have (e.g. 1.0.0, 3.3.5) via harvest-stream.
 
-The script discovers all WoW clients under ``--client-root``, runs ``discover-maps``
-on each to find the actual terrain maps available, then streams each build/map into
-its own per-build Zarr store. After all builds complete, it merges them into the
-unified v60 store. Uses ``--dry-run`` to preview what would be harvested.
+This avoids re-harvesting maps that already work — the v50 datastore already has
+0.5.3 and 4.0.0 built. We only stream the new builds.
 
 Usage:
     cd wow-viewer/data-harvester
@@ -46,10 +43,13 @@ DLL_SEARCH = [
     for tfm in ("net10.0", "net9.0", "net8.0")
 ]
 
+# Builds that already have v50.1 stores on disk — we consolidate these, not re-harvest.
+# Maps that already exist in v50 for a build are skipped during streaming.
+V50_STORE_ROOT = Path(__file__).resolve().parents[2] / "output" / "datasets" / "v50" / "v50.1"
+
 
 def _find_harvest_dll() -> Path:
-    # Always rebuild so the DLL reflects the current source (e.g. the per-tile timeout fix).
-    # Returning a stale DLL silently runs old behavior.
+    # Always rebuild so the DLL reflects the current source.
     result = subprocess.run(
         ["dotnet", "build", str(HARVEST_PROJECT / "WowViewer.Tool.Harvest.csproj"),
          "-c", "Debug", "-nologo"],
@@ -116,6 +116,23 @@ def _discover_maps(harvest_dll: Path, client_path: str) -> list[str]:
         return []
 
 
+def _existing_v50_maps() -> dict[str, set[str]]:
+    """Return {build_id: {map_name}} for v50.1 stores already on disk."""
+    result: dict[str, set[str]] = {}
+    if not V50_STORE_ROOT.exists():
+        return result
+    for store in sorted(V50_STORE_ROOT.glob("*.zarr")):
+        if not (store / "index.parquet").exists():
+            continue
+        name = store.name
+        # e.g. 0_5_3_3368-Kalimdor.zarr -> build=0_5_3_3368, map=Kalimdor
+        if "-" not in name:
+            continue
+        build, map_name = name[:-len(".zarr")].split("-", 1)
+        result.setdefault(build, set()).add(map_name)
+    return result
+
+
 def _stream_tiles(
     harvest_dll: Path,
     client_path: str,
@@ -125,7 +142,8 @@ def _stream_tiles(
     """Run harvest-stream for one build/map and return all tile dicts.
 
     Streams the raw binary output incrementally (Popen + read) instead of buffering
-    the whole map in memory — a full map's binary stream is gigabytes.
+    the whole map in memory. Uses a reader thread + queue timeout to detect a wedged
+    stream instead of hanging forever.
     """
     if not Path(client_path).exists():
         print(f"  SKIP: client not found: {client_path}", flush=True)
@@ -142,16 +160,12 @@ def _stream_tiles(
     print(f"  Streaming {build_id} / {map_name} ...", flush=True)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    # If the C# tool hangs on a tile, a blocking read would wedge forever. select.select
-    # does not work on Windows pipes (only sockets), so use a reader thread + queue with
-    # a timeout to detect a wedged stream and report it instead of hanging.
     import queue
     import threading
 
-    STREAM_IDLE_TIMEOUT = 300.0  # seconds of no output before we declare the stream wedged
+    STREAM_IDLE_TIMEOUT = 300.0
 
     def _read_exact(n: int) -> bytes | None:
-        """Read exactly n bytes from stdout, or None on EOF/timeout."""
         chunks = bytearray()
         while len(chunks) < n:
             want = n - len(chunks)
@@ -233,13 +247,11 @@ def _write_per_build_store(
 
     group = zarr.open_group(str(store_path), mode="w")
 
-    # Determine signal names present in this build/map
     signal_names = sorted(set(
         k for tile in tiles for k in tile
         if isinstance(tile[k], np.ndarray) and not k.startswith("_")
     ))
 
-    # Index rows with sidecar metadata
     index_rows = []
     for tile_id, tile in enumerate(tiles):
         height = tile.get("height_257")
@@ -297,7 +309,7 @@ def _merge_into_unified(
     output_path: Path,
     release: str,
 ) -> dict:
-    """Merge all per-build stores into a single unified v60 store."""
+    """Merge all per-build stores into a single unified v60 store (streaming, bounded memory)."""
     if output_path.exists():
         shutil.rmtree(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -305,16 +317,13 @@ def _merge_into_unified(
     staging = output_path.parent / f".{output_path.name}.staging-{uuid.uuid4().hex}"
     group = zarr.open_group(str(staging), mode="w")
 
-    # Discover all signals across all per-build stores
     all_signal_names: set[str] = set()
     for store in per_build_stores:
         g = zarr.open_group(str(store), mode="r")
         all_signal_names.update(g.array_keys())
     all_signal_names = sorted(all_signal_names)
 
-    # First pass: build the unified index and determine each signal's shape/dtype.
-    # We do NOT hold all arrays in memory — we pre-allocate Zarr arrays and write
-    # row-by-row in a second pass, so memory stays bounded regardless of dataset size.
+    # First pass: build index + determine shapes (no arrays held in memory).
     index_rows: list[dict] = []
     signal_shapes: dict[str, tuple] = {}
     signal_dtypes: dict[str, np.dtype] = {}
@@ -332,12 +341,10 @@ def _merge_into_unified(
                         signal_shapes[name] = arr.shape
                         signal_dtypes[name] = arr.dtype
 
-    # Write index
     pq.write_table(pa.Table.from_pylist(index_rows), str(staging / "index.parquet"))
     total_rows = len(index_rows)
     print(f"  Wrote unified index.parquet with {total_rows} rows", flush=True)
 
-    # Pre-allocate Zarr arrays for signals that exist in at least one store.
     written = 0
     for name in all_signal_names:
         if name not in signal_shapes:
@@ -355,7 +362,7 @@ def _merge_into_unified(
         )
         written += 1
 
-    # Second pass: write each signal row-by-row from the per-build stores.
+    # Second pass: write each signal row-by-row.
     for name in all_signal_names:
         if name not in signal_shapes:
             continue
@@ -387,7 +394,6 @@ def _merge_into_unified(
         "unavailable_signals": unavailable,
     })
 
-    # Atomic replace
     for attempt in range(6):
         try:
             if output_path.exists():
@@ -409,9 +415,31 @@ def _merge_into_unified(
     }
 
 
+def _copy_v50_store_into_work(
+    v50_store: Path,
+    work_dir: Path,
+) -> Path | None:
+    """Copy an existing v50.1 store into the work dir as a per-build store.
+
+    Returns the work-dir path, or None if the store has no index.parquet.
+    """
+    if not (v50_store / "index.parquet").exists():
+        return None
+    name = v50_store.name
+    if "-" not in name:
+        return None
+    build, map_name = name[:-len(".zarr")].split("-", 1)
+    dest = work_dir / f"{build}-{map_name}.zarr"
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(v50_store, dest)
+    print(f"  Consolidated v50 store: {v50_store.name} -> {dest}", flush=True)
+    return dest
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Build unified v60 Zarr datastore — directly from C# harvest tool, no intermediates"
+        description="Build unified v60 Zarr datastore — consolidate v50 stores + harvest new builds"
     )
     parser.add_argument("--client-root", required=True,
                         help="Path to the directory containing WoW client build folders")
@@ -419,9 +447,6 @@ def main() -> int:
                         help="Output v60 Zarr store path (e.g. ../output/datasets/v60/v60/unified.zarr)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print what would be harvested without running anything")
-    parser.add_argument("--resume", action="store_true",
-                        help="Resume: keep per-build stores in a stable work dir and skip "
-                             "builds/maps already harvested")
     parser.add_argument("--release", default=DEFAULT_RELEASE_V60)
     args = parser.parse_args()
 
@@ -435,35 +460,48 @@ def main() -> int:
     harvest_dll = _find_harvest_dll()
     print(f"  DLL: {harvest_dll}", flush=True)
 
+    # Which builds/maps already exist in the v50 datastore?
+    existing_v50 = _existing_v50_maps()
+    print(f"Existing v50 stores: {len(existing_v50)} builds", flush=True)
+    for build, maps in existing_v50.items():
+        print(f"  {build}: {sorted(maps)}", flush=True)
+
     if args.dry_run:
-        print("Discovered clients:")
+        print("\nDiscovered clients:")
         for build_id, client_path in clients:
             maps = _discover_maps(harvest_dll, client_path)
             print(f"  {build_id}: {client_path} -> {len(maps)} maps: {maps[:5]}{'...' if len(maps) > 5 else ''}")
         print(f"\nOutput: {args.output}")
         return 0
 
-    # Per-build stores live beside the output. With --resume they persist in a stable
-    # work dir so a wedged/interrupted run can be resumed without re-harvesting.
-    if args.resume:
-        work_dir = args.output.parent / ".v60-work"
-        work_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        work_dir = args.output.parent / f".v60-work-{uuid.uuid4().hex}"
-        work_dir.mkdir(parents=True, exist_ok=True)
-
+    work_dir = args.output.parent / ".v60-work"
+    work_dir.mkdir(parents=True, exist_ok=True)
     per_build_stores: list[Path] = []
 
     try:
+        # 1. Consolidate existing v50 stores (already built, no re-harvest).
+        for v50_store in sorted(V50_STORE_ROOT.glob("*.zarr")):
+            dest = _copy_v50_store_into_work(v50_store, work_dir)
+            if dest is not None:
+                per_build_stores.append(dest)
+
+        # 2. Harvest builds/maps NOT already in v50.
         for build_id, client_path in clients:
             maps = _discover_maps(harvest_dll, client_path)
             if not maps:
                 print(f"  SKIP {build_id}: no discoverable maps", flush=True)
                 continue
-            print(f"  {build_id}: {len(maps)} maps to stream", flush=True)
-            for map_name in maps:
+            # Skip maps this build already has in v50.
+            already = existing_v50.get(build_id, set())
+            to_stream = [m for m in maps if m not in already]
+            if not to_stream:
+                print(f"  SKIP {build_id}: all maps already in v50 ({sorted(already)})", flush=True)
+                continue
+            print(f"  {build_id}: streaming {len(to_stream)} new maps "
+                  f"(skipping {len(already)} already in v50)", flush=True)
+            for map_name in to_stream:
                 store = work_dir / f"{build_id}-{map_name}.zarr"
-                if args.resume and store.exists():
+                if store.exists():
                     print(f"  SKIP {build_id}/{map_name}: already harvested", flush=True)
                     per_build_stores.append(store)
                     continue
@@ -475,9 +513,9 @@ def main() -> int:
                 print(f"  Wrote per-build store: {store} ({len(tiles)} tiles, {n} signals)", flush=True)
 
         if not per_build_stores:
-            raise SystemExit("ERROR: no tiles harvested from any build")
+            raise SystemExit("ERROR: no stores to merge")
 
-        print(f"\nMerging {len(per_build_stores)} per-build stores into unified v60 store...", flush=True)
+        print(f"\nMerging {len(per_build_stores)} stores into unified v60 store...", flush=True)
         result = _merge_into_unified(per_build_stores, args.output, args.release)
 
         print(f"\n[DONE] v60 unified store: {result['store_path']}")
@@ -488,9 +526,8 @@ def main() -> int:
             for u in result["unavailable_signals"][:5]:
                 print(f"         {u['name']}: {u['reason']}")
     finally:
-        # Only clean up the temp work dir on a non-resume run; resume keeps it for later.
-        if not args.resume:
-            shutil.rmtree(work_dir, ignore_errors=True)
+        # Keep the work dir so a later run can resume; it's small relative to the store.
+        pass
 
     return 0
 
