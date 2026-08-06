@@ -117,18 +117,32 @@ def _discover_maps(harvest_dll: Path, client_path: str) -> list[str]:
         return []
 
 
+def _is_per_build_store(store: Path) -> bool:
+    """True for a per-build/map store like 0_5_3_3368-Kalimdor.zarr.
+
+    Excludes superseded datastores (coarse-mit_*, curriculum-*, feature-map-*,
+    terrain-feature-labels-*, etc.) whose build part is not a real build ID.
+    A real build ID contains digits (e.g. 0_5_3_3368, 4_0_0_11927).
+    """
+    if not (store / "index.parquet").exists():
+        return False
+    name = store.name
+    if not name.endswith(".zarr") or "-" not in name:
+        return False
+    build = name[:-len(".zarr")].split("-", 1)[0]
+    return any(ch.isdigit() for ch in build)
+
+
 def _existing_v50_maps() -> dict[str, set[str]]:
-    """Return {build_id: {map_name}} for v50.1 stores already on disk."""
+    """Return {build_id: {map_name}} for v50.1 per-build stores already on disk."""
     result: dict[str, set[str]] = {}
     if not V50_STORE_ROOT.exists():
         return result
     for store in sorted(V50_STORE_ROOT.glob("*.zarr")):
-        if not (store / "index.parquet").exists():
+        if not _is_per_build_store(store):
             continue
         name = store.name
         # e.g. 0_5_3_3368-Kalimdor.zarr -> build=0_5_3_3368, map=Kalimdor
-        if "-" not in name:
-            continue
         build, map_name = name[:-len(".zarr")].split("-", 1)
         result.setdefault(build, set()).add(map_name)
     return result
@@ -569,15 +583,14 @@ def _copy_v50_store_into_work(
     v50_store: Path,
     work_dir: Path,
 ) -> Path | None:
-    """Copy an existing v50.1 store into the work dir as a per-build store.
+    """Copy an existing v50.1 per-build store into the work dir.
 
-    Returns the work-dir path, or None if the store has no index.parquet.
+    Returns the work-dir path, or None if the store is not a per-build store
+    (e.g. a superseded coarse-mit_* / curriculum-* datastore).
     """
-    if not (v50_store / "index.parquet").exists():
+    if not _is_per_build_store(v50_store):
         return None
     name = v50_store.name
-    if "-" not in name:
-        return None
     build, map_name = name[:-len(".zarr")].split("-", 1)
     dest = work_dir / f"{build}-{map_name}.zarr"
     if dest.exists():
