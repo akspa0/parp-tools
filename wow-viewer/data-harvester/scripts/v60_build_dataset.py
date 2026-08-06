@@ -541,9 +541,11 @@ def _merge_into_unified_dedup(
         # Write canonical unique arrays + per-row pointers.
         sig = group.create_group(name)
         stacked = np.stack(canonical, axis=0)
-        sig.create_dataset("canonical", data=stacked, shape=stacked.shape, dtype=dtype, overwrite=True)
-        sig.create_dataset("row_index", data=row_index, shape=(total_rows,), dtype=np.int32, overwrite=True)
-        sig.create_dataset("row_hash", data=np.array(row_hash, dtype=object), overwrite=True)
+        sig.create_array("canonical", data=stacked, shape=stacked.shape, dtype=dtype, overwrite=True)
+        sig.create_array("row_index", data=row_index, shape=(total_rows,), dtype=np.int32, overwrite=True)
+        # row_hash is a fixed-width string array (object dtype is not Zarr-serializable).
+        hash_arr = np.array(row_hash, dtype="U64")
+        sig.create_array("row_hash", data=hash_arr, shape=(total_rows,), dtype="U64", overwrite=True)
 
         total_unique += unique_count
         total_naive += total_rows
