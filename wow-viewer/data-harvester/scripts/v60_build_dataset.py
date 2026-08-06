@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import shutil
 import struct
 import subprocess
@@ -415,6 +416,155 @@ def _merge_into_unified(
     }
 
 
+def _merge_into_unified_dedup(
+    per_build_stores: list[Path],
+    output_path: Path,
+    release: str,
+) -> dict:
+    """Merge all per-build stores into a single unified v60 store with deduplication.
+
+    Many signal arrays (height_257, normal_xyz, minimap_rgb, terrain_shadow_256) are
+    byte-identical across builds for the same map when the terrain wasn't changed.
+    This stores each UNIQUE array once (keyed by content hash) and keeps a per-row
+    pointer into the canonical set, so identical data is never stored twice. Full
+    lineage (build_id, map, tile_x, tile_y) is preserved in the index, so every
+    build's data stays queryable and attributable.
+
+    Layout:
+      index.parquet          — one row per tile: build_id, map, tile_x, tile_y,
+                               surviving_height_levels, signal_class, evidence
+      <signal>/canonical     — [unique_count, *shape] unique arrays
+      <signal>/row_index     — [row_count] int32 pointer into canonical
+      <signal>/row_hash      — [row_count] str content hash (lineage/audit)
+    """
+    if output_path.exists():
+        shutil.rmtree(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    staging = output_path.parent / f".{output_path.name}.staging-{uuid.uuid4().hex}"
+    group = zarr.open_group(str(staging), mode="w")
+
+    all_signal_names: set[str] = set()
+    for store in per_build_stores:
+        g = zarr.open_group(str(store), mode="r")
+        all_signal_names.update(g.array_keys())
+    all_signal_names = sorted(all_signal_names)
+
+    # First pass: build the unified index (lineage) and per-signal row arrays.
+    # We hold one signal's arrays at a time, not all of them, to bound memory.
+    index_rows: list[dict] = []
+    for store in per_build_stores:
+        g = zarr.open_group(str(store), mode="r")
+        idx = pq.read_table(store / "index.parquet").to_pylist()
+        for row in idx:
+            index_rows.append(row)
+
+    pq.write_table(pa.Table.from_pylist(index_rows), str(staging / "index.parquet"))
+    total_rows = len(index_rows)
+    print(f"  Wrote unified index.parquet with {total_rows} rows", flush=True)
+
+    unavailable: list[dict] = []
+    written = 0
+    total_unique = 0
+    total_naive = 0
+
+    for name in all_signal_names:
+        # Collect this signal's per-row arrays across all stores.
+        row_arrays: list[np.ndarray | None] = []
+        shape = None
+        dtype = None
+        for store in per_build_stores:
+            g = zarr.open_group(str(store), mode="r")
+            idx = pq.read_table(store / "index.parquet").to_pylist()
+            if name in g:
+                for row_id in range(len(idx)):
+                    arr = np.asarray(g[name][row_id])
+                    if shape is None:
+                        shape = arr.shape
+                        dtype = arr.dtype
+                    row_arrays.append(arr)
+            else:
+                row_arrays.extend([None] * len(idx))
+
+        if not row_arrays or all(a is None for a in row_arrays):
+            unavailable.append({"name": name, "reason": "no_source_data:not_present_in_any_store"})
+            print(f"  SKIP {name}: present in zero tiles", flush=True)
+            continue
+
+        # Deduplicate by content hash.
+        canonical: list[np.ndarray] = []
+        hash_to_idx: dict[str, int] = {}
+        row_index = np.zeros(total_rows, dtype=np.int32)
+        row_hash: list[str] = []
+        unique_count = 0
+        for r, arr in enumerate(row_arrays):
+            if arr is None:
+                row_index[r] = -1
+                row_hash.append("")
+                continue
+            a = arr.astype(dtype) if arr.dtype != dtype else arr
+            h = hashlib.sha256(np.ascontiguousarray(a).tobytes()).hexdigest()
+            row_hash.append(h)
+            if h in hash_to_idx:
+                row_index[r] = hash_to_idx[h]
+            else:
+                hash_to_idx[h] = unique_count
+                canonical.append(a)
+                row_index[r] = unique_count
+                unique_count += 1
+
+        if unique_count == 0:
+            unavailable.append({"name": name, "reason": "no_source_data:not_present_in_any_store"})
+            continue
+
+        # Write canonical unique arrays + per-row pointers.
+        sig = group.create_group(name)
+        stacked = np.stack(canonical, axis=0)
+        sig.create_dataset("canonical", data=stacked, shape=stacked.shape, dtype=dtype, overwrite=True)
+        sig.create_dataset("row_index", data=row_index, shape=(total_rows,), dtype=np.int32, overwrite=True)
+        sig.create_dataset("row_hash", data=np.array(row_hash, dtype=object), overwrite=True)
+
+        total_unique += unique_count
+        total_naive += total_rows
+        written += 1
+        print(f"  Wrote {name}: {unique_count} unique / {total_rows} rows "
+              f"(saved {total_rows - unique_count} copies)", flush=True)
+
+    group.attrs.update({
+        "store_schema": STORE_SCHEMA_V60,
+        "release": release,
+        "row_count": total_rows,
+        "signal_count": written,
+        "dedup": True,
+        "unique_arrays": total_unique,
+        "naive_arrays": total_naive,
+        "builds": sorted({row["build_id"] for row in index_rows}),
+        "unavailable_signals": unavailable,
+    })
+
+    for attempt in range(6):
+        try:
+            if output_path.exists():
+                shutil.rmtree(output_path)
+            staging.rename(output_path)
+            break
+        except OSError as exc:
+            time.sleep(0.2 * (2**attempt))
+    else:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise RuntimeError(f"could not replace {output_path}")
+
+    return {
+        "store_path": str(output_path),
+        "row_count": total_rows,
+        "signal_count": written,
+        "builds": sorted({row["build_id"] for row in index_rows}),
+        "unavailable_signals": unavailable,
+        "unique_arrays": total_unique,
+        "naive_arrays": total_naive,
+    }
+
+
 def _copy_v50_store_into_work(
     v50_store: Path,
     work_dir: Path,
@@ -448,6 +598,8 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true",
                         help="Print what would be harvested without running anything")
     parser.add_argument("--release", default=DEFAULT_RELEASE_V60)
+    parser.add_argument("--no-dedup", action="store_true",
+                        help="Disable deduplication (store every row's array, not unique copies)")
     args = parser.parse_args()
 
     client_root = str(args.client_root).replace("\\", "/")
@@ -516,11 +668,18 @@ def main() -> int:
             raise SystemExit("ERROR: no stores to merge")
 
         print(f"\nMerging {len(per_build_stores)} stores into unified v60 store...", flush=True)
-        result = _merge_into_unified(per_build_stores, args.output, args.release)
+        if args.no_dedup:
+            result = _merge_into_unified(per_build_stores, args.output, args.release)
+        else:
+            result = _merge_into_unified_dedup(per_build_stores, args.output, args.release)
 
         print(f"\n[DONE] v60 unified store: {result['store_path']}")
         print(f"       {result['row_count']} tiles, {result['signal_count']} signals, "
               f"{len(result['builds'])} builds")
+        if "unique_arrays" in result:
+            print(f"       dedup: {result['unique_arrays']} unique arrays vs "
+                  f"{result['naive_arrays']} naive "
+                  f"(saved {result['naive_arrays'] - result['unique_arrays']} copies)")
         if result["unavailable_signals"]:
             print(f"       {len(result['unavailable_signals'])} signals unavailable:")
             for u in result["unavailable_signals"][:5]:
