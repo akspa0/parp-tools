@@ -132,7 +132,32 @@ against real-client tiles, and let us tweak lighting/reliability/precision later
 
 ---
 
-### User Story 5 - v0.5.2 release and branch management (Priority: P2)
+### User Story 5 - Deduplicated, versioned unified store (Priority: P2)
+
+A dataset operator can build a single v60 Zarr store that packs all data for all builds,
+deduplicating signals that are identical across builds for the same map, and storing
+versioned data per map.
+
+**Why this priority**: Many signals (height_257, normal_xyz, minimap_rgb, terrain_shadow_256)
+are byte-identical across builds for the same map when the terrain wasn't changed between
+builds. Storing a full copy per build wastes enormous space. Deduplicating identical signal
+arrays and storing one canonical copy per map, with per-build version pointers, gives a
+gigantic space savings while keeping every build's data queryable.
+
+**Acceptance Scenarios**:
+
+1. **Given** two builds with identical terrain for the same map, **When** the dedup pass runs,
+   **Then** the shared signal arrays are stored once, not twice.
+2. **Given** a deduplicated store, **When** a specific build's tile is queried, **Then** the
+   correct versioned data is returned (the dedup is transparent to consumers).
+3. **Given** a map that changed between builds, **When** deduplicated, **Then** only the changed
+   signals are stored per build; unchanged ones point to the canonical copy.
+4. **Given** the deduplicated store, **When** its size is compared to the naive per-build store,
+   **Then** it is smaller (the savings are measurable).
+
+---
+
+### User Story 6 - v0.5.2 release and branch management (Priority: P2)
 
 A maintainer can tag and publish v0.5.2, merge the current feature branches into main, and start a new dev branch for continued work.
 
@@ -158,6 +183,10 @@ A maintainer can tag and publish v0.5.2, merge the current feature branches into
   truth via the compositor) tagged with a `source_kind=synthetic` index column.
 - **FR-008**: Synthetic control tiles MUST carry exact known ground truth for height, normals,
   shadow, and texture so they can serve as a fully-supervised control group.
+- **FR-009**: The v60 store MUST deduplicate signal arrays that are byte-identical across builds
+  for the same map, storing one canonical copy and per-build version pointers.
+- **FR-010**: Deduplication MUST be transparent to consumers — querying a specific build's tile
+  returns the correct versioned data.
 
 ### Non-Functional Requirements
 
