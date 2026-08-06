@@ -350,7 +350,7 @@ def _merge_into_unified(
         for row_id, row in enumerate(idx):
             index_rows.append(row)
             for name in all_signal_names:
-                if name in g:
+                if name in g and row_id < g[name].shape[0]:
                     arr = np.asarray(g[name][row_id])
                     if name not in signal_shapes:
                         signal_shapes[name] = arr.shape
@@ -389,7 +389,7 @@ def _merge_into_unified(
             g = zarr.open_group(str(store), mode="r")
             idx = pq.read_table(store / "index.parquet").to_pylist()
             for row_id in range(len(idx)):
-                if name in g:
+                if name in g and row_id < g[name].shape[0]:
                     arr = np.asarray(g[name][row_id])
                     if arr.shape == shape:
                         target[row] = arr.astype(dtype) if arr.dtype != dtype else arr
@@ -484,6 +484,9 @@ def _merge_into_unified_dedup(
 
     for name in all_signal_names:
         # Collect this signal's per-row arrays across all stores.
+        # A v50 store's index.parquet can have MORE rows than a signal array when the
+        # signal is unavailable for some tiles (per-row unavailability). Guard the read
+        # so out-of-range rows become None (unavailable) rather than crashing.
         row_arrays: list[np.ndarray | None] = []
         shape = None
         dtype = None
@@ -491,7 +494,11 @@ def _merge_into_unified_dedup(
             g = zarr.open_group(str(store), mode="r")
             idx = pq.read_table(store / "index.parquet").to_pylist()
             if name in g:
+                arr_len = g[name].shape[0]
                 for row_id in range(len(idx)):
+                    if row_id >= arr_len:
+                        row_arrays.append(None)
+                        continue
                     arr = np.asarray(g[name][row_id])
                     if shape is None:
                         shape = arr.shape
