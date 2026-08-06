@@ -600,7 +600,14 @@ def main() -> int:
     parser.add_argument("--release", default=DEFAULT_RELEASE_V60)
     parser.add_argument("--no-dedup", action="store_true",
                         help="Disable deduplication (store every row's array, not unique copies)")
+    parser.add_argument("--skip-builds", default="",
+                        help="Comma-separated build IDs to skip entirely (e.g. '3.3.5.12340'). "
+                             "Matches by substring against the client folder name.")
     args = parser.parse_args()
+
+    skip_builds = [b.strip().lower() for b in args.skip_builds.split(",") if b.strip()]
+    if skip_builds:
+        print(f"Skipping builds: {skip_builds}", flush=True)
 
     client_root = str(args.client_root).replace("\\", "/")
 
@@ -639,6 +646,9 @@ def main() -> int:
 
         # 2. Harvest builds/maps NOT already in v50.
         for build_id, client_path in clients:
+            if skip_builds and any(s in build_id.lower() for s in skip_builds):
+                print(f"  SKIP {build_id}: excluded via --skip-builds", flush=True)
+                continue
             maps = _discover_maps(harvest_dll, client_path)
             if not maps:
                 print(f"  SKIP {build_id}: no discoverable maps", flush=True)
