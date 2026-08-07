@@ -354,11 +354,34 @@ def main() -> int:
 
     store = DedupStore(args.output, DEFAULT_RELEASE_V60)
 
+    # Single-writer pattern: workers stream tiles into a queue; ONE writer thread drains
+    # it into the Zarr store. Concurrent appends to the same Zarr array from multiple
+    # threads cause Windows file-lock errors (the .partial -> zarr.json rename fails with
+    # WinError 5), so all store writes are serialized through this one thread.
+    tile_queue: queue.Queue = queue.Queue(maxsize=max(1, args.workers) * 4)
+    _SENTINEL = object()
+
+    def _writer() -> None:
+        while True:
+            item = tile_queue.get()
+            if item is _SENTINEL:
+                tile_queue.task_done()
+                break
+            try:
+                store.add_tile(item)
+            except Exception as e:  # noqa: BLE001
+                print(f"  ERROR writing tile: {e}", flush=True)
+            finally:
+                tile_queue.task_done()
+
+    writer_thread = threading.Thread(target=_writer, daemon=True)
+    writer_thread.start()
+
     def _harvest_one(job: tuple[str, str, str]) -> int:
         build_id, client_path, map_name = job
         tiles = _stream_tiles(harvest_dll, client_path, build_id, map_name)
         for tile in tiles:
-            store.add_tile(tile)
+            tile_queue.put(tile)
         return len(tiles)
 
     total_tiles = 0
@@ -370,6 +393,11 @@ def main() -> int:
                 total_tiles += fut.result()
             except Exception as e:  # noqa: BLE001
                 print(f"  ERROR {job[0]}/{job[2]}: {e}", flush=True)
+
+    # Signal the writer to finish and wait for it to drain the queue.
+    tile_queue.put(_SENTINEL)
+    tile_queue.join()
+    writer_thread.join()
 
     result = store.finalize(args.output)
     print(f"\n[DONE] v61 store: {args.output}")
