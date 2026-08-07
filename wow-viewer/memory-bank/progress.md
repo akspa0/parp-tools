@@ -8,6 +8,18 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-07 — v60 unified dataset built (spec 134)
+
+Branch `134-v60-unified-dataset-model`.
+
+- **v60 datastore**: consolidates existing v50 stores + harvests new builds (0.5.3, 1.0.0,
+  4.0.0; 3.3.5 skipped as redundant with 4.0.0). ~60GB lightly-compressed, down from ~160GB raw.
+- **`v60_build_dataset.py`**: `--skip-builds`, `--resume`, `--dedup` (opt-in; fast non-dedup
+  default). Memory-bounded, multi-threaded dedup merge.
+- **C# harvest per-tile timeout** so a hanging tile doesn't block the stream.
+- **Spec 133** (terrain_shadow_256) + **spec 132** (three-tier classification) landed.
+- All tests pass: 31 C# compositor, 36 Python.
+
 ## 2026-08-05 — Spec 132 Phase 1: three-tier brush-signature classification
 
 Branch `132-terrain-brush-signature-classification`, commit `f19fc774`.

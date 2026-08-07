@@ -14,12 +14,16 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 | Terrain / minimap ML | **idle** — nothing training; one curation decision pending before GPU time | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
 | Tile archaeology | **active** — harvest pipeline working on 1.x clients; spec 132 planning done | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
 
-## Now — Terrain brush signature classification (spec 132)
+## Now — v60 unified dataset (spec 134)
 
-Branch `132-terrain-brush-signature-classification`.
+Branch `134-v60-unified-dataset-model`.
 
-Spec written, plan written, **Phase 1 (three-tier classification) implemented and committed**.
-Phases 2-6 pending.
+v60 datastore built: consolidates existing v50 stores + harvests new builds (0.5.3, 1.0.0,
+4.0.0; 3.3.5 skipped as redundant with 4.0.0). ~60GB lightly-compressed data, down from
+~160GB raw clients. Fast non-dedup merge is the default; dedup is opt-in (`--dedup`).
+
+Also landed: spec 133 (terrain_shadow_256 signal from C# compositor), spec 132 (three-tier
+classification), C# harvest per-tile timeout fix. All tests pass (31 C# compositor, 36 Python).
 
 ### What was accomplished this session
 
