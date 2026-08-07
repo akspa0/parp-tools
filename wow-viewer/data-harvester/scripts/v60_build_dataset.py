@@ -483,70 +483,99 @@ def _merge_into_unified_dedup(
     total_naive = 0
 
     for name in all_signal_names:
-        # Collect this signal's per-row arrays across all stores.
+        # Two-pass, memory-bounded dedup. Pass 1 computes each row's content hash and
+        # the canonical (unique) set WITHOUT holding all row arrays in memory — only
+        # hashes and one array at a time. Pass 2 writes the canonical arrays and the
+        # per-row pointers. This keeps memory flat regardless of dataset size.
+        #
         # A v50 store's index.parquet can have MORE rows than a signal array when the
-        # signal is unavailable for some tiles (per-row unavailability). Guard the read
-        # so out-of-range rows become None (unavailable) rather than crashing.
-        row_arrays: list[np.ndarray | None] = []
+        # signal is unavailable for some tiles (per-row unavailability). Out-of-range
+        # rows are treated as unavailable (None).
         shape = None
         dtype = None
-        for store in per_build_stores:
+        hash_to_idx: dict[str, int] = {}
+        row_hash: list[str] = []
+        row_index = np.zeros(total_rows, dtype=np.int32)
+        unique_count = 0
+
+        # Pass 1: hash every row, build the unique set. Parallelized per store with a
+        # thread pool so Zarr reads + hashing overlap across tiles (I/O-bound).
+        import concurrent.futures
+
+        def _hash_store_rows(store: Path) -> tuple[list[str], tuple | None, np.dtype | None]:
             g = zarr.open_group(str(store), mode="r")
             idx = pq.read_table(store / "index.parquet").to_pylist()
-            if name in g:
-                arr_len = g[name].shape[0]
-                for row_id in range(len(idx)):
-                    if row_id >= arr_len:
-                        row_arrays.append(None)
-                        continue
-                    arr = np.asarray(g[name][row_id])
-                    if shape is None:
-                        shape = arr.shape
-                        dtype = arr.dtype
-                    row_arrays.append(arr)
-            else:
-                row_arrays.extend([None] * len(idx))
+            if name not in g:
+                return [""] * len(idx), None, None
+            arr_len = g[name].shape[0]
+            hashes: list[str] = []
+            local_shape = None
+            local_dtype = None
+            for row_id in range(len(idx)):
+                if row_id >= arr_len:
+                    hashes.append("")
+                    continue
+                arr = np.asarray(g[name][row_id])
+                if local_shape is None:
+                    local_shape = arr.shape
+                    local_dtype = arr.dtype
+                a = arr.astype(local_dtype) if arr.dtype != local_dtype else arr
+                hashes.append(hashlib.sha256(np.ascontiguousarray(a).tobytes()).hexdigest())
+            return hashes, local_shape, local_dtype
 
-        if not row_arrays or all(a is None for a in row_arrays):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(_hash_store_rows, store): store for store in per_build_stores}
+            # Collect in STORE ORDER so row_hash aligns with pass 2's store iteration.
+            results = {store: fut.result() for fut, store in futures.items()}
+            for store in per_build_stores:
+                hashes, local_shape, local_dtype = results[store]
+                if local_shape is not None and shape is None:
+                    shape = local_shape
+                    dtype = local_dtype
+                row_hash.extend(hashes)
+                for h in hashes:
+                    if h and h not in hash_to_idx:
+                        hash_to_idx[h] = unique_count
+                        unique_count += 1
+
+        if unique_count == 0:
             unavailable.append({"name": name, "reason": "no_source_data:not_present_in_any_store"})
             print(f"  SKIP {name}: present in zero tiles", flush=True)
             continue
 
-        # Deduplicate by content hash.
-        canonical: list[np.ndarray] = []
-        hash_to_idx: dict[str, int] = {}
-        row_index = np.zeros(total_rows, dtype=np.int32)
-        row_hash: list[str] = []
-        unique_count = 0
-        for r, arr in enumerate(row_arrays):
-            if arr is None:
-                row_index[r] = -1
-                row_hash.append("")
-                continue
-            a = arr.astype(dtype) if arr.dtype != dtype else arr
-            h = hashlib.sha256(np.ascontiguousarray(a).tobytes()).hexdigest()
-            row_hash.append(h)
-            if h in hash_to_idx:
-                row_index[r] = hash_to_idx[h]
-            else:
-                hash_to_idx[h] = unique_count
-                canonical.append(a)
-                row_index[r] = unique_count
-                unique_count += 1
-
-        if unique_count == 0:
-            unavailable.append({"name": name, "reason": "no_source_data:not_present_in_any_store"})
-            continue
-
-        # Write canonical unique arrays + per-row pointers.
+        # Pre-allocate canonical + pointers.
         sig = group.create_group(name)
-        stacked = np.stack(canonical, axis=0)
-        # create_array infers shape and dtype from `data`; passing dtype too is an error.
-        sig.create_array("canonical", data=stacked, overwrite=True)
+        sig.create_array("canonical", shape=(unique_count, *shape), dtype=dtype, overwrite=True)
         sig.create_array("row_index", data=row_index, overwrite=True)
-        # row_hash is a fixed-width string array (object dtype is not Zarr-serializable).
         hash_arr = np.array(row_hash, dtype="U64")
         sig.create_array("row_hash", data=hash_arr, overwrite=True)
+
+        # Pass 2: write each unique array once, and fill row_index pointers.
+        canonical = sig["canonical"]
+        written_hashes: set[str] = set()
+        r = 0
+        for store in per_build_stores:
+            g = zarr.open_group(str(store), mode="r")
+            idx = pq.read_table(store / "index.parquet").to_pylist()
+            if name not in g:
+                r += len(idx)
+                continue
+            arr_len = g[name].shape[0]
+            for row_id in range(len(idx)):
+                if row_id >= arr_len:
+                    row_index[r] = -1
+                    r += 1
+                    continue
+                arr = np.asarray(g[name][row_id])
+                a = arr.astype(dtype) if arr.dtype != dtype else arr
+                h = row_hash[r]
+                idx_u = hash_to_idx[h]
+                row_index[r] = idx_u
+                if h not in written_hashes:
+                    canonical[idx_u] = a
+                    written_hashes.add(h)
+                r += 1
+        sig["row_index"][:] = row_index
 
         total_unique += unique_count
         total_naive += total_rows

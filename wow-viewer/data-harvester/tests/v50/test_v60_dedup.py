@@ -15,10 +15,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import zarr
 
-_SRC = Path(__file__).resolve().parent.parent / "src"
+_SRC = Path(__file__).resolve().parent.parent.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
-_SCRIPTS = Path(__file__).resolve().parent
+_SCRIPTS = Path(__file__).resolve().parent.parent.parent / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
@@ -48,7 +48,7 @@ def _make_store(path: Path, build: str, map_name: str, n: int, height_val: float
     pq.write_table(pa.Table.from_pylist(idx), str(path / "index.parquet"))
 
 
-def main() -> int:
+def test_dedup_merge_deduplicates_identical_signals():
     tmp = Path(tempfile.mkdtemp(prefix="v60test-"))
     try:
         work = tmp / "work"
@@ -63,17 +63,9 @@ def main() -> int:
         out = tmp / "unified.zarr"
         result = _merge_into_unified_dedup(stores, out, DEFAULT_RELEASE_V60)
 
-        print(f"\nrows={result['row_count']} signals={result['signal_count']} "
-              f"unique={result['unique_arrays']} naive={result['naive_arrays']}")
         assert result["row_count"] == 8, result["row_count"]
         assert result["signal_count"] == 3, result["signal_count"]
         # height: 2 unique (10.0 and 99.0), normal/minimap: 1 unique each
         assert result["unique_arrays"] == 4, result["unique_arrays"]
-        print("SMOKE TEST PASSED")
-        return 0
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
