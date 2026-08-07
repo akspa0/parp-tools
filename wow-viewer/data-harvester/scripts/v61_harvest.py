@@ -186,6 +186,13 @@ class DedupStore:
                 if not isinstance(arr, np.ndarray) or name.startswith("_"):
                     continue
                 a = np.asarray(arr)
+                # Some signals (e.g. placement arrays) vary in shape per tile. If a tile's
+                # array doesn't match the canonical shape for this signal, skip it (treat as
+                # unavailable for this row) rather than crashing the whole harvest.
+                if name in self.canonical and a.shape != self.shapes[name]:
+                    self.row_index[name].append(-1)
+                    self.row_hash[name].append("")
+                    continue
                 self._ensure_signal(name, a.shape, a.dtype)
                 h = hashlib.sha256(np.ascontiguousarray(a).tobytes()).hexdigest()
                 idx_map = self.hash_to_idx[name]
