@@ -404,6 +404,7 @@ public static class RawArraySerializer
         WriteArray(outputStream, "object_roof_mask", pack.ObjectRoofMask256);
         WriteArray(outputStream, "object_roof_confidence", pack.ObjectRoofConfidence256);
         WriteArray(outputStream, "minimap_rgb", pack.MinimapRgb256);
+        WriteArray(outputStream, "terrain_shadow_256", pack.TerrainShadow256);
         WriteArray(outputStream, "shadow_mask", pack.McshShadowMask256);
         WriteArray(outputStream, "mcly_texture_ids", pack.MclyTextureIds);
         WriteArray(outputStream, "mcly_layer_mask", BoolMaskToFloat(pack.MclyLayerMask));

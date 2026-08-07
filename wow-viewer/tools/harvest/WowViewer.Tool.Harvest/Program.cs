@@ -2699,6 +2699,27 @@ static class Program
         if (fullTextureDecode)
             AttachNameAlignedTexturePixels(catalog, pack);
 
+        // Spec 133: emit the textureless terrain-shadow signal (Lambert N·L + ambient + cast
+        // shadows, neutral white albedo) alongside the authored/synthesized minimap. The shadow
+        // term depends only on geometry (height + normals) and the lighting profile, so it is
+        // computable for every tile regardless of whether an authored minimap exists. This is the
+        // harvest-stream path (BuildEnrichedTensorPackForTile) — the same signal the single-tile
+        // path (RunExtractTileFromMpq) already emits, so both consumers get terrain_shadow_256.
+        if (pack.Height257 is not null)
+        {
+            try
+            {
+                pack.TerrainShadow256 = TerrainMinimapCompositor.ComposeShadowArray(
+                    pack,
+                    BuildHarvestShadowCompositionOptions());
+            }
+            catch
+            {
+                // A missing/unusable shadow signal must never fail the whole tile.
+                pack.TerrainShadow256 = null;
+            }
+        }
+
         return pack;
     }
 
