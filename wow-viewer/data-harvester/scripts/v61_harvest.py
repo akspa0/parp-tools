@@ -117,11 +117,17 @@ def _discover_maps(harvest_dll: Path, client_path: str) -> list[str]:
 
 
 class DedupStore:
-    """Thread-safe on-the-fly dedup writer into a single Zarr store.
+    """On-the-fly dedup writer into a single Zarr store.
 
-    Each signal has a canonical array (unique arrays, appended as discovered) plus
-    per-row pointers. A global content-hash registry maps hash -> canonical index,
-    so identical arrays across builds/maps are stored once.
+    Zarr v3's array.append is broken on Windows (the .partial -> zarr.json rename
+    fails with WinError 5 even single-threaded), so we do NOT append to Zarr during
+    harvest. Instead each unique array is written to a numbered NPY file on disk as
+    it is discovered, and the Zarr canonical array is assembled once at finalize.
+    This is disk-bounded (not memory-bounded) and avoids Zarr append entirely.
+
+    Each signal has a canonical set (unique arrays) plus per-row pointers. A global
+    content-hash registry maps hash -> canonical index, so identical arrays across
+    builds/maps are stored once.
     """
 
     def __init__(self, output_path: Path, release: str):
@@ -129,15 +135,13 @@ class DedupStore:
             shutil.rmtree(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         self.staging = output_path.parent / f".{output_path.name}.staging-{uuid.uuid4().hex}"
-        self.group = zarr.open_group(str(self.staging), mode="w")
+        self.staging.mkdir(parents=True, exist_ok=True)
         self.release = release
         self.lock = threading.Lock()
         self.index_rows: list[dict] = []
         # signal -> {hash: canonical_index}
         self.hash_to_idx: dict[str, dict[str, int]] = {}
-        # signal -> canonical array (zarr Array)
-        self.canonical: dict[str, zarr.Array] = {}
-        # signal -> count of unique arrays appended so far
+        # signal -> count of unique arrays discovered so far
         self.unique_count: dict[str, int] = {}
         # signal -> shape/dtype
         self.shapes: dict[str, tuple] = {}
@@ -147,14 +151,11 @@ class DedupStore:
         self.row_hash: dict[str, list[str]] = {}
 
     def _ensure_signal(self, name: str, shape: tuple, dtype: np.dtype) -> None:
-        if name in self.canonical:
+        if name in self.hash_to_idx:
             return
         self.shapes[name] = shape
         self.dtypes[name] = dtype
-        sig = self.group.create_group(name)
-        self.canonical[name] = sig.create_array(
-            "canonical", shape=(0, *shape), dtype=dtype, chunks=(1, *shape), overwrite=True
-        )
+        (self.staging / name).mkdir(parents=True, exist_ok=True)
         self.unique_count[name] = 0
         self.hash_to_idx[name] = {}
         self.row_index[name] = []
@@ -189,7 +190,7 @@ class DedupStore:
                 # Some signals (e.g. placement arrays) vary in shape per tile. If a tile's
                 # array doesn't match the canonical shape for this signal, skip it (treat as
                 # unavailable for this row) rather than crashing the whole harvest.
-                if name in self.canonical and a.shape != self.shapes[name]:
+                if name in self.hash_to_idx and a.shape != self.shapes[name]:
                     self.row_index[name].append(-1)
                     self.row_hash[name].append("")
                     continue
@@ -200,28 +201,40 @@ class DedupStore:
                     self.row_index[name].append(idx_map[h])
                 else:
                     idx = self.unique_count[name]
-                    self.canonical[name].append(a[np.newaxis, ...])
+                    # Write the unique array to a numbered NPY file (no Zarr append).
+                    np.save(self.staging / name / f"{idx}.npy", a)
                     self.unique_count[name] += 1
                     idx_map[h] = idx
                     self.row_index[name].append(idx)
                 self.row_hash[name].append(h)
 
     def finalize(self, output_path: Path) -> dict:
-        """Write index + row pointers, then atomically move staging into place."""
+        """Assemble Zarr canonical arrays from NPY files, write index, move into place."""
+        group = zarr.open_group(str(self.staging), mode="a")
         pq.write_table(pa.Table.from_pylist(self.index_rows),
                        str(self.staging / "index.parquet"))
         total_rows = len(self.index_rows)
         written = 0
         total_unique = 0
-        for name in self.canonical:
-            sig = self.group[name]
+        for name in self.hash_to_idx:
+            shape = self.shapes[name]
+            dtype = self.dtypes[name]
+            n = self.unique_count[name]
+            sig = group.create_group(name)
+            canonical = sig.create_array(
+                "canonical", shape=(n, *shape), dtype=dtype, chunks=(1, *shape), overwrite=True
+            )
+            # Read each NPY file and write into the canonical array (bounded memory: one at a time).
+            for idx in range(n):
+                arr = np.load(self.staging / name / f"{idx}.npy")
+                canonical[idx] = arr
             sig.create_array("row_index", data=np.array(self.row_index[name], dtype=np.int32),
                              overwrite=True)
             sig.create_array("row_hash", data=np.array(self.row_hash[name], dtype="U64"),
                              overwrite=True)
             written += 1
-            total_unique += self.unique_count[name]
-        self.group.attrs.update({
+            total_unique += n
+        group.attrs.update({
             "store_schema": STORE_SCHEMA_V60, "release": self.release,
             "row_count": total_rows, "signal_count": written,
             "dedup": True, "unique_arrays": total_unique,
