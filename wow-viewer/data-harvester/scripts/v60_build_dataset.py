@@ -65,20 +65,24 @@ def _find_harvest_dll() -> Path:
 
 
 def _discover_clients(client_root: str) -> list[tuple[str, str]]:
-    r"""Enumerate client root, return list of (build_id, client_path) for every WoW client root."""
+    r"""Enumerate client root, return list of (build_id, client_path) for every WoW client root.
+
+    Searches recursively so era-folder layouts work (e.g. ``Vanilla/0.x/<client>/World of Warcraft``
+    and ``Vanilla/1.x/<client>/World of Warcraft``). The build_id is the client folder name.
+    """
     root = Path(client_root)
     if not root.exists():
         print(f"  WARNING: client root not found: {root}", flush=True)
         return []
     clients: list[tuple[str, str]] = []
-    for entry in sorted(root.iterdir()):
-        if not entry.is_dir():
+    for wow_path in sorted(root.rglob("World of Warcraft")):
+        if not wow_path.is_dir():
             continue
-        wow_path = entry / "World of Warcraft"
-        if wow_path.is_dir():
-            clients.append((entry.name, str(wow_path)))
-        else:
-            if (entry / "Data").is_dir() or (entry / "WTF").is_dir():
+        clients.append((wow_path.parent.name, str(wow_path)))
+    # Also accept a client folder that IS the root (has Data/WTF directly).
+    if not clients:
+        for entry in sorted(root.iterdir()):
+            if entry.is_dir() and ((entry / "Data").is_dir() or (entry / "WTF").is_dir()):
                 clients.append((entry.name, str(entry)))
     return clients
 
@@ -656,6 +660,9 @@ def main() -> int:
     parser.add_argument("--skip-builds", default="",
                         help="Comma-separated build IDs to skip entirely (e.g. '3.3.5.12340'). "
                              "Matches by substring against the client folder name.")
+    parser.add_argument("--workers", type=int, default=4,
+                        help="Number of parallel harvest workers (default 4). Each worker streams "
+                             "one build/map at a time.")
     args = parser.parse_args()
 
     skip_builds = [b.strip().lower() for b in args.skip_builds.split(",") if b.strip()]
@@ -697,7 +704,11 @@ def main() -> int:
             if dest is not None:
                 per_build_stores.append(dest)
 
-        # 2. Harvest builds/maps NOT already in v50.
+        # 2. Harvest builds/maps NOT already in v50, in parallel.
+        import concurrent.futures
+
+        # Build the job list first (discover maps is quick; streaming is the slow part).
+        jobs: list[tuple[str, str, str]] = []  # (build_id, client_path, map_name)
         for build_id, client_path in clients:
             if skip_builds and any(s in build_id.lower() for s in skip_builds):
                 print(f"  SKIP {build_id}: excluded via --skip-builds", flush=True)
@@ -706,26 +717,34 @@ def main() -> int:
             if not maps:
                 print(f"  SKIP {build_id}: no discoverable maps", flush=True)
                 continue
-            # Skip maps this build already has in v50.
             already = existing_v50.get(build_id, set())
             to_stream = [m for m in maps if m not in already]
             if not to_stream:
                 print(f"  SKIP {build_id}: all maps already in v50 ({sorted(already)})", flush=True)
                 continue
-            print(f"  {build_id}: streaming {len(to_stream)} new maps "
+            print(f"  {build_id}: {len(to_stream)} new maps to stream "
                   f"(skipping {len(already)} already in v50)", flush=True)
             for map_name in to_stream:
-                store = work_dir / f"{build_id}-{map_name}.zarr"
-                if store.exists():
-                    print(f"  SKIP {build_id}/{map_name}: already harvested", flush=True)
+                jobs.append((build_id, client_path, map_name))
+
+        def _harvest_one(job: tuple[str, str, str]) -> Path | None:
+            build_id, client_path, map_name = job
+            store = work_dir / f"{build_id}-{map_name}.zarr"
+            if store.exists():
+                print(f"  SKIP {build_id}/{map_name}: already harvested", flush=True)
+                return store
+            tiles = _stream_tiles(harvest_dll, client_path, build_id, map_name)
+            if not tiles:
+                return None
+            n = _write_per_build_store(store, tiles, build_id, map_name)
+            print(f"  Wrote per-build store: {store} ({len(tiles)} tiles, {n} signals)", flush=True)
+            return store
+
+        workers = max(1, args.workers)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            for store in pool.map(_harvest_one, jobs):
+                if store is not None:
                     per_build_stores.append(store)
-                    continue
-                tiles = _stream_tiles(harvest_dll, client_path, build_id, map_name)
-                if not tiles:
-                    continue
-                n = _write_per_build_store(store, tiles, build_id, map_name)
-                per_build_stores.append(store)
-                print(f"  Wrote per-build store: {store} ({len(tiles)} tiles, {n} signals)", flush=True)
 
         if not per_build_stores:
             raise SystemExit("ERROR: no stores to merge")
