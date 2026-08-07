@@ -52,35 +52,52 @@ BASELINE_VAL_MAE = 0.1492665126  # SPEC112_FROZEN_BEST_VAL_MAE
 class ShadowRowDataset(Dataset):
     """One row per tile: terrain_shadow_256 (1x256x256) -> height_257 (257x257)."""
 
-    def __init__(self, store: Path, split: str = "train", val_fraction: float = 0.15):
+    def __init__(self, stores: list[Path], split: str = "train", val_fraction: float = 0.15):
         import pyarrow.parquet as pq
         import zarr
 
-        self.group = zarr.open_group(str(store), mode="r")
-        self.index = pq.read_table(store / "index.parquet").to_pylist()
+        # Accept one or more per-build stores (or a unified store). Each store is a
+        # (build, map) Zarr store with terrain_shadow_256 + height_257 arrays.
+        self._stores: list[tuple[zarr.Group, list[dict]]] = []
+        for store in stores:
+            group = zarr.open_group(str(store), mode="r")
+            if "terrain_shadow_256" not in group:
+                print(f"  WARNING: {store} has no terrain_shadow_256; skipping", flush=True)
+                continue
+            if "height_257" not in group:
+                print(f"  WARNING: {store} has no height_257; skipping", flush=True)
+                continue
+            index = pq.read_table(store / "index.parquet").to_pylist()
+            self._stores.append((group, index))
 
-        if "terrain_shadow_256" not in self.group:
-            raise ValueError(f"store has no terrain_shadow_256 array: {store}")
-        if "height_257" not in self.group:
-            raise ValueError(f"store has no height_257 array: {store}")
+        if not self._stores:
+            raise ValueError("no store has both terrain_shadow_256 and height_257")
 
-        # Deterministic split: last val_fraction tiles by index order (spatial holdout).
-        n = len(self.index)
+        # Flatten all rows across all stores.
+        self._rows: list[tuple[int, int]] = []  # (store_idx, row_id)
+        for store_idx, (_, index) in enumerate(self._stores):
+            for row_id in range(len(index)):
+                self._rows.append((store_idx, row_id))
+
+        # Deterministic split: last val_fraction rows by flattened order (spatial holdout).
+        n = len(self._rows)
         val_count = max(1, int(n * val_fraction))
         if split == "train":
             self.row_ids = list(range(n - val_count))
         else:
             self.row_ids = list(range(n - val_count, n))
 
-        print(f"  ShadowRowDataset ({split}): {len(self.row_ids)} rows", flush=True)
+        print(f"  ShadowRowDataset ({split}): {len(self.row_ids)} rows across {len(self._stores)} stores", flush=True)
 
     def __len__(self) -> int:
         return len(self.row_ids)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        row_id = self.row_ids[idx]
-        shadow = np.asarray(self.group["terrain_shadow_256"][row_id], dtype=np.float32)
-        height = np.asarray(self.group["height_257"][row_id], dtype=np.float32)
+        flat_idx = self.row_ids[idx]
+        store_idx, row_id = self._rows[flat_idx]
+        group = self._stores[store_idx][0]
+        shadow = np.asarray(group["terrain_shadow_256"][row_id], dtype=np.float32)
+        height = np.asarray(group["height_257"][row_id], dtype=np.float32)
 
         # Shadow: (256, 256) -> (1, 256, 256)
         shadow_t = torch.from_numpy(shadow).unsqueeze(0)
@@ -106,8 +123,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Train a shadow→height model (Spec 134 US3)"
     )
-    parser.add_argument("--store", required=True, type=Path,
-                        help="v60 unified Zarr store with terrain_shadow_256 and height_257")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--store", type=Path,
+                        help="a single v60 Zarr store with terrain_shadow_256 and height_257")
+    source.add_argument("--store-dir", type=Path,
+                        help="a directory of per-build v60 Zarr stores (e.g. the .v60-work dir); "
+                             "all *.zarr subdirs are used")
     parser.add_argument("--output", required=True, type=Path,
                         help="output run directory")
     parser.add_argument("--epochs", type=int, default=200)
@@ -120,15 +141,23 @@ def main() -> int:
                         help="build dataset + model, print shapes, exit (no CUDA)")
     args = parser.parse_args()
 
-    if not args.store.exists():
-        raise SystemExit(f"store not found: {args.store}")
+    if args.store is not None:
+        if not args.store.exists():
+            raise SystemExit(f"store not found: {args.store}")
+        stores = [args.store]
+    else:
+        if not args.store_dir.exists():
+            raise SystemExit(f"store dir not found: {args.store_dir}")
+        stores = sorted(args.store_dir.glob("*.zarr"))
+        if not stores:
+            raise SystemExit(f"no *.zarr stores found in {args.store_dir}")
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    print(f"Loading store: {args.store}", flush=True)
-    train_ds = ShadowRowDataset(args.store, split="train", val_fraction=args.val_fraction)
-    val_ds = ShadowRowDataset(args.store, split="val", val_fraction=args.val_fraction)
+    print(f"Loading {len(stores)} store(s)", flush=True)
+    train_ds = ShadowRowDataset(stores, split="train", val_fraction=args.val_fraction)
+    val_ds = ShadowRowDataset(stores, split="val", val_fraction=args.val_fraction)
 
     model = HeightRelativeNet(base=32, in_channels=1)
     n_params = sum(p.numel() for p in model.parameters())
