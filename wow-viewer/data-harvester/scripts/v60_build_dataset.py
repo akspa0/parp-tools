@@ -650,8 +650,9 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true",
                         help="Print what would be harvested without running anything")
     parser.add_argument("--release", default=DEFAULT_RELEASE_V60)
-    parser.add_argument("--no-dedup", action="store_true",
-                        help="Disable deduplication (store every row's array, not unique copies)")
+    parser.add_argument("--dedup", action="store_true",
+                        help="Enable deduplication (store unique arrays once with per-row pointers). "
+                             "SLOW on large corpora; off by default.")
     parser.add_argument("--skip-builds", default="",
                         help="Comma-separated build IDs to skip entirely (e.g. '3.3.5.12340'). "
                              "Matches by substring against the client folder name.")
@@ -730,10 +731,10 @@ def main() -> int:
             raise SystemExit("ERROR: no stores to merge")
 
         print(f"\nMerging {len(per_build_stores)} stores into unified v60 store...", flush=True)
-        if args.no_dedup:
-            result = _merge_into_unified(per_build_stores, args.output, args.release)
-        else:
+        if args.dedup:
             result = _merge_into_unified_dedup(per_build_stores, args.output, args.release)
+        else:
+            result = _merge_into_unified(per_build_stores, args.output, args.release)
 
         print(f"\n[DONE] v60 unified store: {result['store_path']}")
         print(f"       {result['row_count']} tiles, {result['signal_count']} signals, "
