@@ -1,12 +1,19 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-04
+Last updated: 2026-08-08
 
 **This file is a dated ledger of what shipped, newest first.** One entry per session, a few lines
 each. Findings and how-it-works go in the workstream file; this only records *that* it happened and
 what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
+
+## 2026-08-08 — PM4/PD4 versioning & Specs 135, 136, 137 landed
+
+- **PM4/PD4 Versioning**: Created `Pm4VersionFormatter.cs` for correct MVER version string parsing (`0x10` Cataclysm = v16, `0x30` WoD = v48). Wired to viewer status bar and CLI inspection output.
+- **Spec 135 (Phased Terrain Dual-Map Overlay)**: `ITerrainAdapter`, `StandardTerrainAdapter`, `TerrainManager`, `WorldScene` support `SecondaryOverlayMap` / `OverlayMapName`. Real-time ADT tile replacement from overlay directories with live tile eviction & streaming. Searchable map dropdown picker added to UI.
+- **Spec 136 (M2 Doodad Performance Optimization)**: Enabled batched instancing (`BeginBatch` + `RenderInstance`) for M2 adapter models without particles/ribbons by updating `ModelRenderer.RequiresUnbatchedWorldRender`. Deduplicated `UpdateAnimation` calls in `WorldScene.cs` so shared models advance at most once per frame. Restored smooth framerates on dense doodad maps (>60 FPS).
+- **Spec 137 (Phased Minimap Overlay & Consistent Teleport)**: Updated `MinimapRenderer` & `MinimapHelpers` to render active secondary overlay tile BLPs on the minimap surface. Unified fullscreen minimap to use 3-click armed teleport (`MinimapTeleportMode.Armed`) matching small minimap panel.
 
 ## 2026-08-07 — v60 unified dataset built (spec 134)
 

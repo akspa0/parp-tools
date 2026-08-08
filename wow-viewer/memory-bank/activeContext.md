@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-08-04
+Last updated: 2026-08-08
 
 **This file is a dashboard, not a log.** It says what is live, what changed last, and where the
 detail lives. Findings belong in the workstream file, not here — see "Memory bank layout" in
@@ -10,20 +10,19 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 
 | Workstream | State | Detail |
 |---|---|---|
-| PM4 decode | **active** — placement solved, scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
-| Terrain / minimap ML | **idle** — nothing training; one curation decision pending before GPU time | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
-| Tile archaeology | **active** — harvest pipeline working on 1.x clients; spec 132 planning done | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
+| PM4 decode | **active** — versioning formatted; placement solved; scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
+| Terrain / viewer runtime | **active** — phased dual-map overlay (135), M2 doodad batching (136), phased minimap & teleport (137) landed | [activeContext.md](activeContext.md) |
+| Terrain / minimap ML | **idle** — v60 dataset built; nothing training | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
+| Tile archaeology | **active** — harvest pipeline working on 1.x clients; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
 
-## Now — v60 unified dataset (spec 134)
+## Now — Viewer Runtime & Terrain Improvements (Specs 135, 136, 137)
 
-Branch `134-v60-unified-dataset-model`.
+### What was accomplished this session (2026-08-08)
 
-v60 datastore built: consolidates existing v50 stores + harvests new builds (0.5.3, 1.0.0,
-4.0.0; 3.3.5 skipped as redundant with 4.0.0). ~60GB lightly-compressed data, down from
-~160GB raw clients. Fast non-dedup merge is the default; dedup is opt-in (`--dedup`).
-
-Also landed: spec 133 (terrain_shadow_256 signal from C# compositor), spec 132 (three-tier
-classification), C# harvest per-tile timeout fix. All tests pass (31 C# compositor, 36 Python).
+1. **PM4/PD4 Version Header Formatting** — `Pm4VersionFormatter.cs` parses version headers (`0x10` Cataclysm = v16, `0x30` WoD = v48). Integrated into status bar (`WorldScene.cs`) and CLI inspect tool (`WowViewer.Tool.Inspect`).
+2. **Phased Terrain Dual-Map Overlay (Spec 135)** — `ITerrainAdapter`, `StandardTerrainAdapter`, `TerrainManager`, and `WorldScene` support `SecondaryOverlayMap` / `OverlayMapName`. Resolves split ADT payloads (`root`, `_tex0`, `_obj0`) from secondary map folders (`World\Maps\<OverlayMapName>\`) when tiles exist, evicting and re-streaming affected tiles in real time without unloading resident world tiles. Added a searchable map dropdown selector built from `_discoveredMaps` in `ViewerApp_Investigation.cs`.
+3. **M2 Doodad Rendering Performance Optimization (Spec 136)** — Fixed massive framerate drops (<1 FPS) on dense object maps. Removed `_isM2AdapterModel` from `ModelRenderer.RequiresUnbatchedWorldRender` so static M2 doodads use high-throughput batched instancing (`BeginBatch()` once per pass + `RenderInstance()`). Deduplicated `UpdateAnimation()` in `WorldScene.cs` so shared models update at most once per frame.
+4. **Phased Minimap Overlay & Consistent Minimap Teleport (Spec 137)** — `MinimapRenderer` & `MinimapHelpers` query active secondary overlay tile BLPs first, rendering phased minimap tiles on the minimap surface. Unified fullscreen minimap to use 3-click armed teleport (`MinimapTeleportMode.Armed`), matching the small dockable minimap panel.
 
 ### What was accomplished this session
 
