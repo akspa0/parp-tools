@@ -339,6 +339,7 @@ public partial class ViewerApp : IDisposable
     private bool _wantOpenFile = false;
     private bool _wantAttachLooseMapFolder = false;
     private bool _wantOpenWdtFile = false;
+    private bool _wantOpenPm4File = false;
     private bool _wantExportGlb = false;
     private bool _wantExportGlbCollision = false;
     private bool _wantExportMapGlbTiles = false;
@@ -1841,6 +1842,9 @@ void main() {
                 if (ImGui.MenuItem("Open Alpha WDT (loose map)..."))
                     _wantOpenWdtFile = true;
 
+                if (ImGui.MenuItem("Open Loose PM4 / PD4 File..."))
+                    _wantOpenPm4File = true;
+
                 if (ImGui.MenuItem("Open Game Folder (MPQ)..."))
                 {
                     _showFolderInput = true;
@@ -2391,6 +2395,30 @@ void main() {
             {
                 LoadFileFromDisk(wdtPath);
                 _statusMessage = $"Loaded alpha WDT: {wdtPath}";
+            }
+        }
+
+        if (_wantOpenPm4File)
+        {
+            _wantOpenPm4File = false;
+            string? pm4Path = ShowFileDialogSTA(
+                "Select Loose PM4 / PD4 File",
+                "PM4/PD4 files (*.pm4;*.pd4)|*.pm4;*.pd4|All files (*.*)|*.*",
+                _lastLooseOverlayPath);
+            if (!string.IsNullOrEmpty(pm4Path) && File.Exists(pm4Path))
+            {
+                _lastLooseOverlayPath = Path.GetDirectoryName(pm4Path);
+                if (_worldScene != null)
+                {
+                    if (_worldScene.LoadLoosePm4File(pm4Path))
+                        _statusMessage = _worldScene.Pm4Status;
+                    else
+                        _statusMessage = $"Failed to decode loose PM4/PD4 file: {pm4Path}";
+                }
+                else
+                {
+                    _statusMessage = $"Load a world scene or map first before displaying loose PM4/PD4 overlays: {pm4Path}";
+                }
             }
         }
 

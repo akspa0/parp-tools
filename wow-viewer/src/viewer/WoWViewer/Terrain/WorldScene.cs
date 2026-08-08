@@ -48,6 +48,7 @@ using Pm4CoordinateService = WowViewer.Core.PM4.Services.Pm4CoordinateService;
 using CorePm4ObjectHypothesis = WowViewer.Core.PM4.Models.Pm4ObjectHypothesis;
 using MprlEntry = WowViewer.Core.PM4.Models.Pm4MprlEntry;
 using MslkEntry = WowViewer.Core.PM4.Models.Pm4MslkEntry;
+using Pm4VersionFormatter = WowViewer.Core.PM4.Services.Pm4VersionFormatter;
 using MsurEntry = WowViewer.Core.PM4.Models.Pm4MsurEntry;
 using Pm4File = WowViewer.Core.PM4.Research.Pm4ResearchDocument;
 using CorePm4ReferenceAudit = WowViewer.Core.PM4.Models.Pm4ReferenceAudit;
@@ -1249,6 +1250,11 @@ public class WorldScene : ISceneRenderer
         get => _hideTerrainOccludedMdx;
         set => _hideTerrainOccludedMdx = value;
     }
+    public string? SecondaryOverlayMap
+    {
+        get => _terrainManager?.OverlayMapName;
+        set => _terrainManager?.SetOverlayMap(value);
+    }
     public bool EnableRuntimeWmoGroupVisibility
     {
         get => _assets.EnableRuntimeWmoGroupVisibility;
@@ -1301,6 +1307,53 @@ public class WorldScene : ISceneRenderer
     public int Pm4TotalFiles => _pm4TotalFiles;
     public int Pm4LoadedFiles => _pm4LoadedFiles;
     public int Pm4ObjectCount => _pm4ObjectCount;
+
+    public bool LoadLoosePm4File(string filePath)
+    {
+        if (!File.Exists(filePath))
+            return false;
+
+        try
+        {
+            byte[] bytes = File.ReadAllBytes(filePath);
+            Pm4File pm4 = CorePm4DocumentReader.Read(bytes, filePath);
+
+            Pm4CoordinateService.TryParseTileCoordinates(filePath, out int tileX, out int tileY);
+
+            int lineBudget = int.MaxValue;
+            int triBudget = int.MaxValue;
+            int rejectedLong = 0;
+            List<Pm4OverlayObject> objects = BuildPm4TileObjects(
+                pm4,
+                filePath,
+                tileX,
+                tileY,
+                _pm4SplitCk24ByMscnRef,
+                _pm4SplitCk24ByConnectivity,
+                _pm4ShowPathWalls,
+                ref lineBudget,
+                ref triBudget,
+                ref rejectedLong,
+                out _);
+
+            if (objects.Count == 0)
+                return false;
+
+            _pm4TileObjects[(tileX, tileY)] = objects;
+            _pm4LoadedCameraWindow = (tileX, tileY, tileX, tileY);
+            _pm4LoadAttempted = true;
+            _showPm4Overlay = true;
+            _pm4Status = $"Loaded loose PM4/PD4 '{Path.GetFileName(filePath)}' ({Pm4VersionFormatter.Format(pm4.Version)}): {objects.Count} objects, {pm4.KnownChunks.Msvt.Count} verts, {pm4.KnownChunks.Msur.Count} surfaces.";
+            ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _pm4Status = $"Failed to load loose PM4/PD4 '{Path.GetFileName(filePath)}': {ex.Message}";
+            ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
+            return false;
+        }
+    }
 
     public void SetUniqueIdFilterTile(int tileX, int tileY)
     {
@@ -7518,21 +7571,27 @@ public class WorldScene : ISceneRenderer
         var adapter = _terrainManager.Adapter;
         _assetLoadPolicy = ResolveTerrainAssetLoadPolicy(adapter);
 
-        if (adapter.IsWmoBased && adapter.ModfPlacements.Count > 0)
+        if (adapter.ModfPlacements.Count > 0)
         {
-            // WMO-only maps: pre-load placements + models
+            // Pre-load WDT global WMO placements + models
             var manifest = _assets.BuildManifest(
                 adapter.MdxModelNames, adapter.WmoModelNames,
                 adapter.MddfPlacements, adapter.ModfPlacements);
             _assets.LoadManifest(manifest);
             BuildInstances(adapter);
+        }
 
-            var p = adapter.ModfPlacements[0];
-            var bbCenter = (p.BoundsMin + p.BoundsMax) * 0.5f;
-            var bbExtent = p.BoundsMax - p.BoundsMin;
-            float dist = MathF.Max(bbExtent.Length() * 0.5f, 100f);
-            _wmoCameraOverride = bbCenter + new Vector3(dist, 0, bbExtent.Z * 0.3f);
-            ViewerLog.Info(ViewerLog.Category.Terrain, $"WMO-only map, camera at BB center: ({bbCenter.X:F1}, {bbCenter.Y:F1}, {bbCenter.Z:F1}), dist={dist:F0}");
+        if (adapter.IsWmoBased)
+        {
+            if (adapter.ModfPlacements.Count > 0)
+            {
+                var p = adapter.ModfPlacements[0];
+                var bbCenter = (p.BoundsMin + p.BoundsMax) * 0.5f;
+                var bbExtent = p.BoundsMax - p.BoundsMin;
+                float dist = MathF.Max(bbExtent.Length() * 0.5f, 100f);
+                _wmoCameraOverride = bbCenter + new Vector3(dist, 0, bbExtent.Z * 0.3f);
+                ViewerLog.Info(ViewerLog.Category.Terrain, $"WMO-only map, camera at BB center: ({bbCenter.X:F1}, {bbCenter.Y:F1}, {bbCenter.Z:F1}), dist={dist:F0}");
+            }
 
             // Still subscribe for any late-loaded tiles
             _terrainManager.OnTileLoaded += OnTileLoaded;

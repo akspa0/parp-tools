@@ -2189,6 +2189,9 @@ static void RunPm4(string[] args)
 		case "export-json":
 			RunPm4ExportJson(tail);
 			break;
+		case "export-obj":
+			RunPm4ExportObj(tail);
+			break;
 		case "bond-stats":
 			RunPm4BondStats(tail);
 			break;
@@ -2271,6 +2274,9 @@ static void RunPd4(string[] args)
 		case "inspect":
 			RunPd4Inspect(tail);
 			break;
+		case "export-obj":
+			RunPm4ExportObj(tail);
+			break;
 		default:
 			Console.Error.WriteLine($"Unknown pd4 command '{command}'.");
 			ShowPd4Usage();
@@ -2303,7 +2309,7 @@ static void RunPd4Inspect(string[] args)
 
 	Console.WriteLine("PD4 Report");
 	Console.WriteLine($"Input: {doc.SourcePath ?? input}");
-	Console.WriteLine($"Version: {doc.Version}");
+	Console.WriteLine($"Version: {Pm4VersionFormatter.Format(doc.Version)}");
 	Console.WriteLine($"MCRC: 0x{doc.Mcrc:X8}");
 	Console.WriteLine($"Chunks: {doc.Chunks.Count}");
 	Console.WriteLine($"Unknown chunks: {string.Join(", ", doc.Chunks
@@ -4875,6 +4881,159 @@ static void RunPm4ExportJson(string[] args)
 	Console.WriteLine(json);
 }
 
+static void RunPm4ExportObj(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? output = GetOption(args, "--output", "-o");
+
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4/PD4 file or directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (File.Exists(input))
+	{
+		string objText = ExportPm4FileToObj(input);
+		string outputPath = !string.IsNullOrWhiteSpace(output)
+			? Path.GetFullPath(output)
+			: Path.ChangeExtension(input, ".obj");
+
+		string? dir = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(dir))
+			Directory.CreateDirectory(dir);
+
+		File.WriteAllText(outputPath, objText, System.Text.Encoding.UTF8);
+		Console.WriteLine($"Wrote 3D OBJ mesh: {outputPath}");
+	}
+	else if (Directory.Exists(input))
+	{
+		string outDir = !string.IsNullOrWhiteSpace(output) ? Path.GetFullPath(output) : input;
+		Directory.CreateDirectory(outDir);
+
+		var files = Directory.EnumerateFiles(input, "*.*", SearchOption.AllDirectories)
+			.Where(f => f.EndsWith(".pm4", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".pd4", StringComparison.OrdinalIgnoreCase))
+			.ToList();
+
+		if (files.Count == 0)
+		{
+			Console.WriteLine($"No .pm4 or .pd4 files found under {input}");
+			return;
+		}
+
+		int writtenCount = 0;
+		foreach (string filePath in files)
+		{
+			try
+			{
+				string objText = ExportPm4FileToObj(filePath);
+				string relativePath = Path.GetRelativePath(input, filePath);
+				string targetObjPath = Path.Combine(outDir, Path.ChangeExtension(relativePath, ".obj"));
+				string? targetDir = Path.GetDirectoryName(targetObjPath);
+				if (!string.IsNullOrWhiteSpace(targetDir))
+					Directory.CreateDirectory(targetDir);
+
+				File.WriteAllText(targetObjPath, objText, System.Text.Encoding.UTF8);
+				writtenCount++;
+			}
+			catch (Exception ex)
+			{
+				Console.Error.WriteLine($"Failed to export '{filePath}': {ex.Message}");
+			}
+		}
+
+		Console.WriteLine($"Exported {writtenCount}/{files.Count} PM4/PD4 files as OBJ meshes under {outDir}");
+	}
+	else
+	{
+		Console.Error.WriteLine($"Error: input path '{input}' does not exist.");
+		Environment.ExitCode = 1;
+	}
+}
+
+static string ExportPm4FileToObj(string filePath)
+{
+	Pm4ResearchDocument doc = Pm4ResearchReader.ReadFile(filePath);
+	var sb = new System.Text.StringBuilder();
+	string sourceName = Path.GetFileName(filePath);
+	sb.AppendLine($"# OBJ exported from {sourceName}");
+	sb.AppendLine($"# PM4/PD4 version: {doc.Version}");
+
+	var vertices = doc.KnownChunks.Msvt;
+	var indices = doc.KnownChunks.Msvi;
+	var surfaces = doc.KnownChunks.Msur;
+
+	sb.AppendLine($"# Vertices: {vertices.Count}, Surfaces: {surfaces.Count}");
+
+	for (int i = 0; i < vertices.Count; i++)
+	{
+		Vector3 v = vertices[i];
+		sb.AppendLine(CultureInfo.InvariantCulture, $"v {v.X:F4} {v.Y:F4} {v.Z:F4}");
+	}
+
+	int triangleCount = 0;
+	foreach (var surface in surfaces)
+	{
+		int firstIndex = (int)surface.MsviFirstIndex;
+		int indexCount = surface.IndexCount;
+		if (indexCount < 3 || firstIndex < 0 || firstIndex + indexCount > indices.Count)
+			continue;
+
+		uint i0 = indices[firstIndex];
+		if (i0 >= vertices.Count)
+			continue;
+
+		for (int idx = firstIndex + 1; idx + 1 < firstIndex + indexCount; idx++)
+		{
+			uint i1 = indices[idx];
+			uint i2 = indices[idx + 1];
+			if (i1 >= vertices.Count || i2 >= vertices.Count)
+				continue;
+
+			sb.AppendLine(CultureInfo.InvariantCulture, $"f {i0 + 1} {i1 + 1} {i2 + 1}");
+			triangleCount++;
+		}
+	}
+
+	var mspv = doc.KnownChunks.Mspv;
+	var mspi = doc.KnownChunks.Mspi;
+	var mslk = doc.KnownChunks.Mslk;
+	if (mspv.Count > 0 && mspi.Count > 0)
+	{
+		sb.AppendLine($"# MSPV Path Vertices: {mspv.Count}");
+		int mspvOffset = vertices.Count;
+		for (int i = 0; i < mspv.Count; i++)
+		{
+			Vector3 v = mspv[i];
+			sb.AppendLine(CultureInfo.InvariantCulture, $"v {v.X:F4} {v.Y:F4} {v.Z:F4}");
+		}
+
+		foreach (var link in mslk)
+		{
+			if (link.MspiFirstIndex < 0 || link.MspiIndexCount < 2)
+				continue;
+
+			int firstMspi = link.MspiFirstIndex;
+			int countMspi = link.MspiIndexCount;
+			if (firstMspi + countMspi > mspi.Count)
+				continue;
+
+			sb.Append("l");
+			for (int k = 0; k < countMspi; k++)
+			{
+				uint pIdx = mspi[firstMspi + k];
+				if (pIdx < mspv.Count)
+					sb.Append(CultureInfo.InvariantCulture, $" {mspvOffset + pIdx + 1}");
+			}
+
+			sb.AppendLine();
+		}
+	}
+
+	return sb.ToString();
+}
+
 static bool TryParseUInt32Flexible(string value, out uint parsed)
 {
 	if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
@@ -5142,7 +5301,7 @@ static void PrintPm4Report(Pm4AnalysisReport report)
 	Console.WriteLine($"PM4 legacy reference: {Pm4Boundary.LegacyReference}");
 	Console.WriteLine($"Runtime boundaries: {RuntimeBoundaries.All.Length}");
 	Console.WriteLine($"Input: {report.SourcePath ?? "<memory>"}");
-	Console.WriteLine($"Version: {report.Version}");
+	Console.WriteLine($"Version: {Pm4VersionFormatter.Format(report.Version)}");
 	Console.WriteLine($"Chunks: {report.ChunkOrder.Count}");
 	Console.WriteLine($"Unknown chunks: {(report.UnknownChunks.Count == 0 ? "none" : string.Join(", ", report.UnknownChunks))}");
 	Console.WriteLine();

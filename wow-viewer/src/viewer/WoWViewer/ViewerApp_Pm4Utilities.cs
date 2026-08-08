@@ -14,6 +14,8 @@ namespace WoWViewer;
 /// </summary>
 public partial class ViewerApp
 {
+    private string _loosePm4InputPath = @"C:\WoW4-data\unk_pm4s\World\Maps\unk\unk1_00_00.pm4";
+
     private void OpenPm4Workbench(Pm4WorkbenchTab tab)
     {
         FocusShellPanel(ShellPanelId.Pm4Workbench);
@@ -114,6 +116,27 @@ public partial class ViewerApp
         ImGui.SameLine();
         if (ImGui.Button("Save Overlay Align"))
             SaveCurrentPm4Alignment();
+
+        ImGui.Separator();
+        ImGui.TextDisabled("Direct PM4/PD4 File Loader (ignores map name and naming rules)");
+        ImGui.SetNextItemWidth(340f);
+        ImGui.InputText("##LoosePm4InputPath", ref _loosePm4InputPath, 512);
+        ImGui.SameLine();
+        if (ImGui.Button("Load Loose File"))
+        {
+            if (!string.IsNullOrWhiteSpace(_loosePm4InputPath) && System.IO.File.Exists(_loosePm4InputPath))
+            {
+                if (_worldScene.LoadLoosePm4File(_loosePm4InputPath))
+                    _statusMessage = $"Loaded loose PM4/PD4 file: {System.IO.Path.GetFileName(_loosePm4InputPath)}";
+                else
+                    _statusMessage = $"Failed to decode loose PM4/PD4 file: {_loosePm4InputPath}";
+            }
+            else
+            {
+                _statusMessage = $"Loose PM4/PD4 file not found: {_loosePm4InputPath}";
+            }
+        }
+        ImGui.Separator();
 
         bool showPm4Solid = _worldScene.ShowPm4SolidOverlay;
         if (ImGui.Checkbox("PM4 Solid Fill", ref showPm4Solid))

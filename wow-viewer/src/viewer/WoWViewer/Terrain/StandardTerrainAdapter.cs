@@ -47,6 +47,12 @@ public class StandardTerrainAdapter : ITerrainAdapter
     public List<Vector3> LastLoadedChunkPositions { get; } = new();
     public IReadOnlyList<int> ExistingTiles => _existingTiles;
 
+    /// <summary>
+    /// Optional secondary overlay map name for phased terrain.
+    /// When set, tiles present in World\Maps\{OverlayMapName}\ replace the primary map's tiles.
+    /// </summary>
+    public string? OverlayMapName { get; set; }
+
     private readonly List<string> _mdxNames = new();
     private readonly List<string> _wmoNames = new();
     private readonly object _placementLock = new();
@@ -82,10 +88,16 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         _useBigAlpha = (_mphdFlags & _adtProfile.BigAlphaFlagsMask) != 0;
 
+        bool hasAnyAdtOnDisk = _existingTiles.Any(idx => {
+            int tx = idx / 64, ty = idx % 64;
+            string fn = $"{_mapDir}\\{_mapName}_{ty}_{tx}.adt";
+            return _dataSource.FileExists(fn);
+        });
+
         // The MPHD global-map-object flag is what makes a map WMO-only — the client's WDT reader
         // gates MWMO/MODF on it, and such a WDT may still flag MAIN tiles, so tile count alone
-        // misses those maps and leaves their WMO parsed but never loaded.
-        IsWmoBased = (_mphdFlags & WdtUsesGlobalMapObjFlag) != 0 || _existingTiles.Count == 0;
+        // misses those maps and leaves their WMO parsed but never loaded. Also check if ADT files exist.
+        IsWmoBased = (_mphdFlags & WdtUsesGlobalMapObjFlag) != 0 || _existingTiles.Count == 0 || !hasAnyAdtOnDisk;
 
         ViewerLog.Important(ViewerLog.Category.Terrain,
             $"Standard WDT: {_existingTiles.Count} tiles, MPHD=0x{_mphdFlags:X}, bigAlpha={_useBigAlpha}");
@@ -166,7 +178,30 @@ public class StandardTerrainAdapter : ITerrainAdapter
     public bool TileExists(int tileX, int tileY)
     {
         int idx = tileX * 64 + tileY;
-        return _existingTileSet.Contains(idx);
+        if (_existingTileSet.Contains(idx))
+            return true;
+
+        // Check overlay map for this tile
+        if (!string.IsNullOrEmpty(OverlayMapName))
+        {
+            string overlayRoot = $"World\\Maps\\{OverlayMapName}\\{OverlayMapName}_{tileY}_{tileX}.adt";
+            if (_dataSource.FileExists(overlayRoot))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Check whether the overlay map has an ADT at the given tile coordinate.
+    /// </summary>
+    private bool OverlayTileExists(int tileX, int tileY)
+    {
+        if (string.IsNullOrEmpty(OverlayMapName))
+            return false;
+
+        string overlayRoot = $"World\\Maps\\{OverlayMapName}\\{OverlayMapName}_{tileY}_{tileX}.adt";
+        return _dataSource.FileExists(overlayRoot);
     }
 
     public TileLoadResult LoadTileWithPlacements(int tileX, int tileY)
@@ -175,10 +210,21 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (!TileExists(tileX, tileY))
             return result;
 
+        // If overlay map has this tile, load from the overlay map directory instead.
+        string effectiveMapName = _mapName;
+        string effectiveMapDir = _mapDir;
+        if (OverlayTileExists(tileX, tileY))
+        {
+            effectiveMapName = OverlayMapName!;
+            effectiveMapDir = $"World\\Maps\\{OverlayMapName}";
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"[StandardADT] Overlay tile ({tileX},{tileY}) loaded from '{OverlayMapName}' instead of '{_mapName}'.");
+        }
+
         // Build ADT virtual paths
         // Raw row-major: tileX=row(y), tileY=col(x).
         // Ghidra-verified filename: MapName_x_y.adt = MapName_{tileY}_{tileX}.
-        string basePath = $"{_mapDir}\\{_mapName}_{tileY}_{tileX}";
+        string basePath = $"{effectiveMapDir}\\{effectiveMapName}_{tileY}_{tileX}";
         string rootPath = $"{basePath}.adt";
         string? texPath = _adtProfile.PreferTex0ForTextureData ? $"{basePath}_tex0.adt" : null;
         string? objPath = _adtProfile.PreferObj0ForPlacementData ? $"{basePath}_obj0.adt" : null;

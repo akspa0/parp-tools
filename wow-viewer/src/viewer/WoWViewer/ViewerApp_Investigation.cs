@@ -190,16 +190,108 @@ public partial class ViewerApp
         }
     }
 
+    private string _secondaryOverlayMapInput = "";
+    private string _secondaryOverlaySearchFilter = "";
+
     private void DrawTerrainChunkInvestigationPanel(bool defaultOpen)
     {
         if (_terrainManager == null && _vlmTerrainManager == null)
             return;
+
+        DrawPhasedTerrainOverlayControls();
 
         ImGuiTreeNodeFlags flags = defaultOpen ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None;
         if (!ImGui.CollapsingHeader("ADT Chunk Investigation", flags))
             return;
 
         DrawTerrainChunkInvestigationContent();
+    }
+
+    private void DrawPhasedTerrainOverlayControls()
+    {
+        if (_terrainManager == null && _worldScene == null)
+            return;
+
+        if (!ImGui.CollapsingHeader("Phased Terrain Secondary Overlay", ImGuiTreeNodeFlags.DefaultOpen))
+            return;
+
+        string? currentOverlay = _worldScene?.SecondaryOverlayMap ?? _terrainManager?.OverlayMapName;
+        ImGui.TextWrapped("Load a secondary map's tiles (e.g. Gilneas, Gilneas2, GilneasPhase1) over the current map without unloading the world.");
+
+        if (!string.IsNullOrEmpty(currentOverlay))
+            ImGui.TextColored(new Vector4(0.4f, 0.9f, 0.4f, 1.0f), $"Active Overlay: {currentOverlay}");
+        else
+            ImGui.TextDisabled("Active Overlay: None (showing base map tiles)");
+
+        // Map Selector Dropdown / Combo from _discoveredMaps
+        string currentBaseMap = _terrainManager?.MapName ?? "";
+        var availableOverlayMaps = _discoveredMaps
+            .Where(m => !string.Equals(m.Directory, currentBaseMap, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (availableOverlayMaps.Count > 0)
+        {
+            string comboPreview = string.IsNullOrEmpty(_secondaryOverlayMapInput)
+                ? "Choose 2nd map from discovered maps..."
+                : _secondaryOverlayMapInput;
+
+            if (ImGui.BeginCombo("Select 2nd Map", comboPreview))
+            {
+                ImGui.InputTextWithHint("##overlayFilter", "Filter maps...", ref _secondaryOverlaySearchFilter, 128);
+
+                foreach (var map in availableOverlayMaps)
+                {
+                    string displayName = map.HasDbcEntry
+                        ? $"[{map.Id:D3}] {map.Name} ({map.Directory})"
+                        : $"[custom] {map.Name} ({map.Directory})";
+
+                    if (!string.IsNullOrEmpty(_secondaryOverlaySearchFilter) &&
+                        displayName.IndexOf(_secondaryOverlaySearchFilter, StringComparison.OrdinalIgnoreCase) < 0 &&
+                        map.Directory.IndexOf(_secondaryOverlaySearchFilter, StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        continue;
+                    }
+
+                    bool isSelected = string.Equals(_secondaryOverlayMapInput, map.Directory, StringComparison.OrdinalIgnoreCase);
+                    if (ImGui.Selectable(displayName, isSelected))
+                    {
+                        _secondaryOverlayMapInput = map.Directory;
+                        if (_worldScene != null)
+                            _worldScene.SecondaryOverlayMap = _secondaryOverlayMapInput;
+                        else if (_terrainManager != null)
+                            _terrainManager.SetOverlayMap(_secondaryOverlayMapInput);
+                    }
+
+                    if (isSelected)
+                        ImGui.SetItemDefaultFocus();
+                }
+                ImGui.EndCombo();
+            }
+        }
+
+        // Manual text input override
+        ImGui.InputTextWithHint("##secondaryOverlayMap", "Manual Map Directory (e.g. Gilneas)", ref _secondaryOverlayMapInput, 256);
+        ImGui.SameLine();
+        if (ImGui.Button("Apply Overlay"))
+        {
+            if (_worldScene != null)
+                _worldScene.SecondaryOverlayMap = _secondaryOverlayMapInput;
+            else if (_terrainManager != null)
+                _terrainManager.SetOverlayMap(_secondaryOverlayMapInput);
+        }
+
+        if (!string.IsNullOrEmpty(currentOverlay))
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Clear Overlay"))
+            {
+                _secondaryOverlayMapInput = "";
+                if (_worldScene != null)
+                    _worldScene.SecondaryOverlayMap = null;
+                else if (_terrainManager != null)
+                    _terrainManager.SetOverlayMap(null);
+            }
+        }
     }
 
     private void DrawTerrainChunkInvestigationContent()

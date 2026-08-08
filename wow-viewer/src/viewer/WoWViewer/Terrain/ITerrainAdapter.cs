@@ -44,4 +44,10 @@ public interface ITerrainAdapter
 
     /// <summary>Chunk world positions for diagnostics.</summary>
     List<Vector3> LastLoadedChunkPositions { get; }
+
+    /// <summary>
+    /// Optional secondary overlay map name for phased terrain.
+    /// When set, tiles present in World\Maps\{OverlayMapName}\ replace the primary map's tiles.
+    /// </summary>
+    string? OverlayMapName { get; set; }
 }

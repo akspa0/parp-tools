@@ -339,6 +339,46 @@ public class TerrainManager : ISceneRenderer
     }
 
     /// <summary>
+    /// Get or set the current overlay map name on the terrain adapter.
+    /// </summary>
+    public string? OverlayMapName => _adapter.OverlayMapName;
+
+    /// <summary>
+    /// Set or clear the secondary overlay map. Evicts and re-streams affected tiles.
+    /// </summary>
+    public void SetOverlayMap(string? overlayMapName)
+    {
+        string? current = _adapter.OverlayMapName;
+        string? incoming = string.IsNullOrWhiteSpace(overlayMapName) ? null : overlayMapName.Trim();
+        if (string.Equals(current, incoming, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        _adapter.OverlayMapName = incoming;
+
+        // Evict all cached tiles so they reload with overlay resolution
+        var keysToEvict = _tileCache.Keys.ToList();
+        foreach (var key in keysToEvict)
+        {
+            if (_loadedTiles.TryGetValue(key, out var oldMesh))
+            {
+                _terrainRenderer.RemoveTile(key.Item1, key.Item2);
+                _liquidRenderer.RemoveChunksForTile(key.Item1, key.Item2);
+                oldMesh.Dispose();
+                _loadedTiles.Remove(key);
+                OnTileUnloaded?.Invoke(key.Item1, key.Item2);
+            }
+
+            _tileCache.TryRemove(key, out _);
+        }
+
+        InvalidateStreamingTargets();
+        ViewerLog.Important(ViewerLog.Category.Terrain,
+            incoming != null
+                ? $"[TerrainManager] Secondary overlay map set to '{incoming}'. Evicted {keysToEvict.Count} cached tiles."
+                : $"[TerrainManager] Secondary overlay map cleared. Evicted {keysToEvict.Count} cached tiles.");
+    }
+
+    /// <summary>
     /// Update terrain AOI based on camera position. Call each frame before Render.
     /// Queues new tiles for background loading and submits completed tiles to GPU.
     /// Uses a square AOI with one-ring unload hysteresis.

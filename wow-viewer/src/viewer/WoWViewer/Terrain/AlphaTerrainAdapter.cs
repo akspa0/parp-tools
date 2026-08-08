@@ -78,6 +78,9 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// <summary>True if this is a WMO-only map (no terrain tiles).</summary>
     public bool IsWmoBased { get; }
 
+    /// <summary>Phased terrain overlay is not supported for Alpha WDTs.</summary>
+    public string? OverlayMapName { get; set; }
+
     public AlphaTerrainAdapter(string wdtPath)
     {
         _wdtPath = wdtPath;
@@ -86,17 +89,14 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         _adtOffsets = _wdt.GetAdtOffsetsInMain();
         MdxModelNames = _wdt.GetMdnmFileNames();
         WmoModelNames = _wdt.GetMonmFileNames();
-        IsWmoBased = _wdt.IsWmoBased;
+        IsWmoBased = _wdt.IsWmoBased || _existingTiles.Count == 0;
 
-        // For WMO-only maps, collect the WDT-level MODF placement
-        if (IsWmoBased)
+        // Collect WDT-level MODF placement whenever available
+        var wdtModf = _wdt.GetWdtModfRaw();
+        if (wdtModf.Length > 0)
         {
-            var wdtModf = _wdt.GetWdtModfRaw();
-            if (wdtModf.Length > 0)
-            {
-                CollectModfPlacements(wdtModf);
-                ViewerLog.Trace($"[TerrainAdapter] WMO-only map: {ModfPlacements.Count} WMO placements from WDT header");
-            }
+            CollectModfPlacements(wdtModf);
+            ViewerLog.Trace($"[TerrainAdapter] WDT MODF: {ModfPlacements.Count} WMO placements from WDT header");
         }
 
         ViewerLog.Trace($"[TerrainAdapter] WDT loaded: {_existingTiles.Count} tiles, {MdxModelNames.Count} MDX names, {WmoModelNames.Count} WMO names, wmoBased={IsWmoBased}");
