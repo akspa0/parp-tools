@@ -60,7 +60,8 @@ internal static class MinimapHelpers
             bool drewTexture = false;
             if (minimapRenderer != null && !string.IsNullOrEmpty(mapName))
             {
-                uint tileTex = minimapRenderer.GetTileTexture(mapName, ty, tx);
+                string? overlayMap = worldScene?.SecondaryOverlayMap;
+                uint tileTex = minimapRenderer.GetTileTexture(mapName, ty, tx, overlayMap);
                 if (tileTex != 0)
                 {
                     var texId = (IntPtr)tileTex;

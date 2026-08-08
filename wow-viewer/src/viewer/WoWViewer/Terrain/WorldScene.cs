@@ -9502,13 +9502,14 @@ public class WorldScene : ISceneRenderer
                     // pure idle CPU cost on large maps even when only a fraction were visible.
                     frame.MdxAnimationMs = MeasureDurationMs(() =>
                     {
+                        var updatedRenderers = new HashSet<IModelRenderer>();
                         WorldObjectPassCoordinator.ExecuteVisibleMdxAnimation(frame.ObjectPasses, frame.Visibility, visible =>
                         {
                             IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
-                            if (renderer == null)
-                                return;
-
-                            renderer.UpdateAnimation();
+                            if (renderer != null && updatedRenderers.Add(renderer))
+                            {
+                                renderer.UpdateAnimation();
+                            }
                         });
                     });
 

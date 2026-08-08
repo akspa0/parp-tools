@@ -69,8 +69,15 @@ public class MinimapRenderer : IDisposable
     /// Gets the GL texture handle for a specific minimap tile.
     /// Returns 0 if the tile is not found or failed to load.
     /// </summary>
-    public uint GetTileTexture(string mapName, int tx, int ty)
+    public uint GetTileTexture(string mapName, int tx, int ty, string? overlayMapName = null)
     {
+        if (!string.IsNullOrEmpty(overlayMapName))
+        {
+            uint overlayTex = GetTileTexture(overlayMapName, tx, ty);
+            if (overlayTex != 0)
+                return overlayTex;
+        }
+
         string plainPath = MinimapService.GetMinimapTilePath(mapName, tx, ty);
         
         if (_textureCache.TryGetValue(plainPath, out uint cached))

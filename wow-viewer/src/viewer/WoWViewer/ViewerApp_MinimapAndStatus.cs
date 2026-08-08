@@ -490,7 +490,7 @@ public partial class ViewerApp
                 existingTiles,
                 isTileLoaded,
                 mapName,
-                MinimapTeleportMode.Immediate,
+                MinimapTeleportMode.Armed,
                 out _,
                 out _,
                 out _);
@@ -508,7 +508,7 @@ public partial class ViewerApp
                         : "Minimap ready");
             }
             ImGui.SameLine();
-            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "  |  Press M to close  |  Scroll to zoom  |  Drag to pan  |  Click tile to teleport");
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "  |  Press M to close  |  Scroll to zoom  |  Drag to pan  |  Triple-click tile to teleport");
 
             if (_minimapPanOffset != Vector2.Zero)
             {
