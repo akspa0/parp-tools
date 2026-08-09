@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "real-synthetic-pair-report.schema.json",
+  "title": "V60 Real/Synthetic Paired Validation Report",
+  "type": "object",
+  "required": [
+    "schema",
+    "store",
+    "input_contract",
+    "labels_used_as_inputs",
+    "selection",
+    "domain_report",
+    "validation_pairs"
+  ],
+  "properties": {
+    "schema": { "const": "v60-real-synthetic-pair-v1" },
+    "store": { "type": "string", "minLength": 1 },
+    "input_contract": {
+      "const": "authored_minimap_rgb_plus_legacy_flat_synthetic_rgb_absdiff_diagnostic"
+    },
+    "labels_used_as_inputs": { "const": false },
+    "legacy_synthetic_is_flat_fake_maptexture": { "const": true },
+    "legacy_synthetic_is_terrain_shadow_target": { "const": false },
+    "fixed_shadow_npz_dir": { "type": ["string", "null"] },
+    "selection": {
+      "type": "object",
+      "required": [
+        "candidate_groups",
+        "complete_groups",
+        "incomplete_groups",
+        "train_pairs",
+        "validation_pairs",
+        "split_policy",
+        "val_map"
+      ],
+      "properties": {
+        "candidate_groups": { "type": "integer", "minimum": 1 },
+        "complete_groups": { "type": "integer", "minimum": 1 },
+        "incomplete_groups": { "type": "integer", "minimum": 0 },
+        "train_pairs": { "type": "integer", "minimum": 1 },
+        "validation_pairs": { "type": "integer", "minimum": 1 },
+        "split_policy": { "enum": ["manifest", "map_holdout"] },
+        "val_map": { "type": "string", "minLength": 1 }
+      }
+    },
+    "domain_report": {
+      "type": "object",
+      "required": ["pair_count", "mean_mae", "mean_rmse", "diagnostic_role", "rows"],
+      "properties": {
+        "pair_count": { "type": "integer", "minimum": 1 },
+        "mean_mae": { "type": "number", "minimum": 0 },
+        "mean_rmse": { "type": "number", "minimum": 0 },
+        "diagnostic_role": { "const": "flat_synthetic_absdiff_and_optional_fixed_shadow_calibration" },
+        "rows": { "type": "array", "minItems": 1 }
+      }
+    },
+    "validation_pairs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "authored_row_index",
+          "synthetic_row_index",
+          "source_group_id",
+          "map",
+          "tile_x",
+          "tile_y",
+          "split"
+        ],
+        "properties": {
+          "authored_row_index": { "type": "integer", "minimum": 0 },
+          "synthetic_row_index": { "type": "integer", "minimum": 0 },
+          "source_group_id": { "type": "string", "minLength": 1 },
+          "map": { "type": "string", "minLength": 1 },
+          "tile_x": { "type": "integer" },
+          "tile_y": { "type": "integer" },
+          "split": { "const": "val" }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}

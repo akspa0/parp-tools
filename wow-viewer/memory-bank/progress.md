@@ -8,6 +8,19 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-08 — Spec 134 paired real/synthetic validation and mask inputs
+
+- Added the read-only v50.1 authored/legacy-flat pair selector and absolute-difference report. It
+  requires matching `source_group_id` plus map/tile identity, preserves the split, and records
+  incomplete groups. The legacy synthetic image is explicitly not a terrain-shadow target.
+- Added `v60_validate_real_synthetic_pairs.py`, which writes a small validation JSON report and
+  visual atlas. The first 16-tile Azeroth slice: 1,325 complete groups out of 1,330, mean RGB MAE
+  0.1812, mean RMSE 0.2120, and 69.4% of pixels differing by >0.10 normalized RGB.
+- Removed the invalid synthetic-input guidance route from the real object-mask trainer. A fresh
+  post-fix C# NPZ containing `terrain_shadow_256` is now required for shadow comparison. Real masks
+  are labels only; no GPU training has run.
+- Evidence: focused v60 suite 18 passed, ruff clean, JSON contracts valid, pair plan-only checks pass.
+
 ## 2026-08-08 — Spec 134 control-corpus and object-sieve implementation
 
 Branch `134-v60-unified-dataset-model`.

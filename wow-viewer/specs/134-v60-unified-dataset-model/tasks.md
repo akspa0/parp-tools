@@ -78,6 +78,24 @@ sparse, dense, overlapping, and boundary-crossing controls, with separate ablati
   metrics plus a ground-truth-mask-input leakage assertion.
 - [ ] T025a [US2] **USER RUNS** the bounded object-sieve control experiment after its corpus passes
   validation; GPU work remains user-owned.
+- [x] T026a [P] [US2] Inspect the existing v50.1 object-mask curriculum and record populated real
+  mask arrays, authored-row count, source-group split state, and empty geometry-visible evidence.
+- [x] T027a [P] [US2] Define the real v50 object-mask dataset and experiment contracts in
+  `specs/134-v60-unified-dataset-model/`.
+- [x] T028a [US2] Define the real-mask model/loss variants and minimum-requested-target checkpoint
+  selection rule in `data-harvester/src/harvester/v60/`.
+- [x] T029a [US2] Implement the lazy v50 Zarr loader, authored/map-holdout split audit, and
+  real-mask trainer/evaluator in `data-harvester/scripts/v60_train_real_object_masks.py`.
+- [x] T030a [P] [US2] Add real-mask target projection, model/loss, provenance, and leakage tests in
+  `data-harvester/tests/v60/`.
+- [x] T031a [P] [US2] Add same-tile authored/synthetic pair selection, domain-distance report, and
+  visual atlas in `data-harvester/src/harvester/v60/real_synthetic_pairs.py` and
+  `data-harvester/scripts/v60_validate_real_synthetic_pairs.py`.
+- [x] T032a [US2] Reclassify the legacy v50 synthetic minimap as a flat fake-maptexture diagnostic;
+  remove it from the real-mask trainer's terrain input contract.
+- [ ] T034a [US2] **USER RUNS** the real v50 object-mask experiment; GPU work remains user-owned.
+- [ ] T033a [US2] **USER RUNS** a bounded post-fix `harvest-map-mpq` tile set that emits
+  `terrain_shadow_256` for the same pair identities; GPU work remains user-owned.
 
 **Checkpoint**: The object sieve has independent mask and clean-terrain evidence. Do not pass its
 ground-truth mask into the height model or authorize real-client expansion from this result alone.

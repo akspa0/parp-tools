@@ -128,6 +128,39 @@ client asset identity and instance recognition are deferred until binary contami
 useful. Clean-output error and mask quality are reported separately; a strong mask cannot conceal a
 bad inpainted terrain signal.
 
+### 9. Use the real v50 masks for the first object detector
+
+The existing on-disk `curriculum-0_5_3_3368-obj_v1.zarr` contains 2,655 rows, with 1,325 authored
+minimap rows and 1,330 synthetic counterparts. Its `object_mask`, `object_precise_mask`, and
+`object_instance_mask` arrays are populated on sampled rows; the separate
+`object_geometry_visible_mask_257` array is empty in the audit and sample inspection. The object
+detector therefore uses authored `minimap_rgb` as input and trains against the real precise and
+coarse masks. It does not use the empty geometry-visible array and does not pretend that the store
+contains a clean terrain-only minimap target.
+
+The first model is a compact multi-head U-Net with selectable `precise`, `footprint`, or `both`
+heads. Checkpoint selection uses the minimum IoU across the requested heads, while reports retain
+per-head metrics. RGB is the baseline; an explicit RGB-plus-edge channel is the only first ablation.
+This is enough to answer whether real object appearance is detectable before albedo normalization,
+without coupling the first experiment to an unproven inpainting target.
+
+### 10. Use the existing same-tile flat rows as absolute-difference diagnostics
+
+The v50.1 mixed curriculum contains 1,330 source groups: 1,325 have exactly one authored and one
+synthetic minimap row, while five groups are incomplete. The authored and synthetic rows in a
+complete group share the same map/tile identity and object-mask labels. The source manifest says
+the synthetic minimap signal is produced by the legacy `synthetic-minimap` path; it is a flat fake
+maptexture with no post-fix terrain-shadow target. A deterministic 16-row Azeroth holdout sample
+measured mean authored-vs-flat RGB MAE `0.1812`, RMSE `0.2120`, and 69.4% of pixels differing by
+more than `0.10` in normalized RGB. That absolute difference is useful observed evidence of what
+the authored image adds over flat terrain, but it is not a clean shadow ground truth.
+
+The pair lane therefore writes a validation-only report and visual atlas containing authored RGB,
+flat synthetic RGB, and amplified absolute difference. A fresh NPZ from the current C# compositor
+may be supplied; it must contain `terrain_shadow_256`, and the report compares its luminance pattern
+with the absolute-difference luma as calibration evidence only. The old flat synthetic image is not
+fed to the terrain model, and the real masks remain labels only.
+
 ## Alternatives rejected
 
 ### Full v50/v60 historical harvest first
@@ -162,3 +195,6 @@ the control family or variation space is insufficient.
   `predicted_mask_guided` ablations. Keep the mask as an exported output and loss-side target; do
   not commit to a joint height/object model until the sieve's clean-output and mask metrics justify
   the extra coupling.
+- **Paired validation**: use `v60_validate_real_synthetic_pairs.py` for the small absolute-difference
+  report and atlas before GPU work; supply `--shadow-npz-dir` only with fresh post-fix NPZs containing
+  `terrain_shadow_256`. Do not use the legacy synthetic RGB as a terrain-shadow model input.

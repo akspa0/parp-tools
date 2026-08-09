@@ -58,6 +58,63 @@ The contamination mask is intentionally not the existing `object_geometry_visibl
 That 257-grid target describes visible object geometry for numeric terrain supervision; this 256-grid
 target describes screen-space minimap contamination that the sieve must remove.
 
+## RealObjectMaskDataset
+
+The immutable v50-backed supervision view used only for object-mask detection.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `store` | path | Configured canonical v50.1 Zarr store; never copied by the trainer. |
+| `release` | string | Expected v50 release, initially `v50.1`. |
+| `source_build` | string | Initial build identity, `0_5_3_3368`. |
+| `source_filter` | enum | `authored`, `synthetic`, or `all`; initial default is `authored`. |
+| `split_policy` | enum | Existing `manifest` split or explicit `map_holdout`. |
+| `targets` | string[] | One or both of `object_precise_mask`, `object_mask`. |
+| `rows` | object[] | Selected row indices, map/tile identity, source group, and split. |
+| `provenance` | object | Store identity, source-group counts, and mask availability audit. |
+
+The v50 `object_geometry_visible_mask_257` is audited separately. If it is empty, that fact is
+recorded as unavailable geometry evidence rather than relabeled as object appearance supervision.
+
+## RealSyntheticValidationPair
+
+One same-terrain authored/synthetic minimap pair selected from the v50 mixed curriculum for
+validation or explicit input guidance.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `source_group_id` | string | Pair identity shared by the authored and synthetic rows. |
+| `authored_row_index` | integer | Row containing the real/authored minimap RGB and supervision masks. |
+| `synthetic_row_index` | integer | Same-tile legacy flat fake-maptexture RGB row; not a terrain-shadow target. |
+| `map`, `tile_x`, `tile_y` | string/integer | Identity that must match on both rows. |
+| `split` | enum | `train` or `val`; the pair cannot cross the split. |
+| `domain_metrics` | object | Authored-vs-flat-synthetic MAE, RMSE, difference fractions, and optional fixed-shadow correlations. |
+
+The pair selector skips incomplete groups only in the reportable count and records that count. It
+fails closed for a selected group's mismatched map/tile identity or split assignment. The pair is
+not a clean-minimap or terrain-shadow ground-truth claim; it is an absolute-difference diagnostic.
+An optional fresh NPZ comparison is valid only when it contains the post-fix C#
+`terrain_shadow_256` signal.
+
+## RealObjectMaskExperiment
+
+The report for the user-run RGB-to-real-mask experiment.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `model_version` | string | Architecture/input variant and target-head set. |
+| `input_contract` | string | `minimap_rgb` or explicit `minimap_rgb_edge`; legacy flat synthetic RGB is not a terrain input contract. |
+| `target_metrics` | object | Independent thresholded metrics for each requested mask target. |
+| `selection_score` | number | Minimum requested-target IoU used for best-checkpoint selection. |
+| `split_audit` | object | Map/source-group leakage checks and row counts. |
+| `preview_artifacts` | string[] | RGB/truth/prediction/error review images. |
+| `geometry_visible_mask_audit` | object | Presence and nonzero coverage of the excluded geometry signal. |
+| `real_synthetic_validation` | object|null | Validation-only same-tile flat-maptexture absolute-difference report and optional fixed-shadow comparison. |
+| `training_command` | string | Exact PowerShell-ready invocation. |
+
+The experiment has no clean-minimap target. Its output is an object-mask detector, not an inpainting
+or height-reconstruction proof.
+
 ## ObjectSieveExperiment
 
 The bounded ablation report for object cleaning.

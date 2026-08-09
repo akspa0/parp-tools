@@ -8,8 +8,8 @@ Four bounded phases, in dependency order:
 
 1. **Synthetic controls** — generate a small deterministic terrain corpus with exact input/target
    pairs and family holdouts.
-2. **Object sieve and control-only model experiments** — first test object removal/decomposition,
-   then run limited height-reconstruction training sizes.
+2. **Object sieve and model experiments** — validate synthetic decomposition, then train a real-mask
+   object detector from the existing v50.1 authored rows before attempting height reconstruction.
 3. **Albedo normalization and gate** — process a tiny explicit 0.x/1.x real sample, measure how well
    texture/albedo can be removed, and admit only accepted textureless outputs.
 4. **Transfer and expansion decision** — compare the accepted real sample to controls, then hold,
@@ -29,9 +29,11 @@ equation.
 **Initial source policy**: procedural families require no client; client-backed real transfer seeds
 are limited to approved and explicitly classified `0.x`/`1.x` roots.
 **First input/target**: `terrain_shadow_256` (256x256) → `height_257` (257x257).
-**Object sieve input/targets**: `objectified_terrain_shadow_256` (256x256) → clean
+**Synthetic object sieve input/targets**: `objectified_terrain_shadow_256` (256x256) → clean
 `terrain_shadow_256` plus `object_contamination_mask_256`; the mask is an auxiliary output and
 loss-side target, never a ground-truth inference channel.
+**Real object-mask input/targets**: configured v50.1 authored `minimap_rgb` (256x256x3) → separate
+`object_precise_mask` and `object_mask` projections (256x256); no clean-minimap target is claimed.
 **Initial control size**: approximately 32–128 rows, with limited model runs at manifest-selected
 training sizes such as 8, 16, and 32.
 **Real-data route**: authored minimap → versioned albedo normalization → textureless gate → tiny
@@ -65,18 +67,23 @@ wow-viewer/
 │   ├── control_corpus.py                                 # manifest/hash/split validation
 │   ├── object_sieve.py                                    # object-overlay corpus validation
 │   ├── object_sieve_model.py                              # clean/mask/guided model variants
+│   ├── real_object_mask_model.py                           # real v50 footprint/precise mask model
+│   ├── real_synthetic_pairs.py                             # same-tile pair selection/domain report
 │   └── albedo_normalization.py                           # planned versioned real-input operation
 ├── data-harvester/scripts/
 │   ├── v60_validate_control_corpus.py                    # offline validator
 │   ├── v60_visualize_control_corpus.py                   # family/variant visual atlas
 │   ├── v60_validate_object_sieve.py                       # object-sieve validator
 │   ├── v60_visualize_object_sieve.py                     # object input/mask atlases
+│   ├── v60_validate_real_synthetic_pairs.py               # small real/synthetic validation atlas
+│   ├── v60_train_real_object_masks.py                      # user-run v50 mask trainer
 │   ├── v60_normalize_albedo.py                           # planned gate runner
 │   └── v60_run_experiment.py                             # planned bounded evaluator/trainer wrapper
 ├── data-harvester/tests/v60/
 │   ├── test_control_corpus.py                             # existing focused fixture tests
 │   ├── test_object_sieve.py                               # object-overlay contract tests
 │   ├── test_object_sieve_model.py                         # model/loss smoke tests
+│   ├── test_real_object_mask_model.py                      # real-mask model/target tests
 │   └── test_albedo_normalization.py                       # planned fail-closed gate tests
 └── specs/134-v60-unified-dataset-model/
     ├── contracts/                                        # manifest, gate, and experiment JSON contracts
@@ -135,7 +142,32 @@ contamination, then determine whether it contains enough information for useful 
 compared against the clean-only and auxiliary-loss variants. A good mask score does not hide a
 failed clean-terrain score.
 
-### Stage B — height reconstruction
+### Stage B — real v50 object-mask model
+
+1. Read the configured `curriculum-0_5_3_3368-obj_v1.zarr` through its existing `index.parquet`;
+   do not copy or rewrite the canonical store.
+2. Filter to authored rows by default and enforce either the existing manifest split or an explicit
+   map holdout. Validate that `source_group_id` never crosses the split.
+3. Train a compact RGB mask model with independently selectable `object_precise_mask` and
+   `object_mask` heads. An optional RGB-edge input is an ablation, not a hidden default.
+4. Select the best checkpoint using the minimum IoU across requested targets and report each target
+   independently by map, source type, coverage, and threshold.
+5. Render validation previews showing RGB, truth, prediction, and error for both mask targets.
+6. Record the empty geometry-visible mask as an audit finding; do not use it as the target.
+7. Select a small held-out authored/flat-synthetic pair slice by `source_group_id`, verify same-tile
+   identity and split membership, and write an absolute-difference visual/domain report before GPU
+   work.
+8. Treat the legacy synthetic image as a flat fake-maptexture diagnostic only. Compare it against a
+   fresh post-fix C# `terrain_shadow_256` NPZ when available; missing or stale shadow provenance
+   fails closed.
+
+**Stage B gate**: A user-run GPU experiment has provenance, no source-group leakage, and per-target
+metrics. The pair report separately establishes the authored-vs-flat absolute-difference signal and,
+when supplied, its comparison with the post-fix terrain shadow. This proves object-mask detectability
+and calibration evidence only; it does not prove clean terrain reconstruction or authorize real
+height transfer.
+
+### Stage C — height reconstruction
 
 1. Add a control-v1 loader/evaluator without changing historical training contracts.
 2. Select limited training sizes from the manifest, keeping the held-out families fixed.
@@ -145,7 +177,7 @@ failed clean-terrain score.
 6. Run retexturing/relighting controls with unchanged terrain targets.
 7. Mark flat/weakly informative terrain as ambiguity rather than confident success.
 
-**Stage B gate**: The result says whether the clean signal/height relationship is learnable on
+**Stage C gate**: The result says whether the clean signal/height relationship is learnable on
 controls. A failed result is a bounded diagnostic and does not trigger a return to broad harvest.
 
 ## Phase 3: Albedo normalization and textureless gate (P1)

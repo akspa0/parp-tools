@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "real-object-mask-experiment.schema.json",
+  "title": "V60 Real Object Mask Experiment",
+  "type": "object",
+  "required": [
+    "schema",
+    "store",
+    "dataset",
+    "input_contract",
+    "targets",
+    "split_audit",
+    "target_metrics",
+    "selection_score",
+    "geometry_visible_mask_audit"
+  ],
+  "properties": {
+    "schema": { "const": "v60-real-object-mask-experiment-v1" },
+    "store": { "type": "string", "minLength": 1 },
+    "dataset": {
+      "type": "object",
+      "required": ["release", "source_build", "row_count", "source_filter", "split_policy"],
+      "properties": {
+        "release": { "const": "v50.1" },
+        "source_build": { "const": "0_5_3_3368" },
+        "row_count": { "type": "integer", "minimum": 1 },
+        "source_filter": { "enum": ["authored", "synthetic", "all"] },
+        "split_policy": { "enum": ["manifest", "map_holdout"] },
+        "train_rows": { "type": "integer", "minimum": 1 },
+        "validation_rows": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "input_contract": { "enum": ["minimap_rgb", "minimap_rgb_edge"] },
+    "targets": {
+      "type": "array",
+      "items": { "enum": ["object_precise_mask", "object_mask"] },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "split_audit": {
+      "type": "object",
+      "required": ["source_group_conflicts", "map_counts"],
+      "properties": {
+        "source_group_conflicts": { "const": 0 },
+        "map_counts": { "type": "object" },
+        "source_counts": { "type": "object" }
+      }
+    },
+    "target_metrics": { "type": "object" },
+    "selection_score": { "type": "number" },
+    "geometry_visible_mask_audit": {
+      "type": "object",
+      "required": ["present", "nonzero_rows", "used_as_target"],
+      "properties": {
+        "present": { "type": "boolean" },
+        "nonzero_rows": { "type": "integer", "minimum": 0 },
+        "used_as_target": { "const": false }
+      }
+    },
+    "real_synthetic_validation": {
+      "type": ["object", "null"]
+    },
+    "preview_artifacts": { "type": "array", "items": { "type": "string" } },
+    "training_command": { "type": "string" }
+  },
+  "additionalProperties": true
+}

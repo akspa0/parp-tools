@@ -3,7 +3,8 @@
 Owner specs: 114 (direct terrain reconstruction), 125 (minimap DXT1 inversion),
 126 (minimap terrain reconstruction), 111 (minimap lighting calibration).
 Last updated: 2026-08-08. **Nothing is training right now.** The active first experiment is Spec 134's
-small synthetic control corpus; no working v60 real-data corpus has been accepted or generated.
+small synthetic control corpus plus a bounded v50 real-mask/pair validation lane; no working v60
+real-data corpus has been accepted or generated.
 
 This file is the durable home for the terrain-ML workstream. `activeContext.md` links here and
 stays short; put detail here, not there.
@@ -32,6 +33,12 @@ stays short; put detail here, not there.
   `object_contamination_mask_256`. Compare clean-only, auxiliary-mask-loss, and predicted-mask-
   guided variants. Do not conflate this screen-space contamination mask with the existing
   `object_geometry_visible_mask_257` numeric geometry target.
+- The existing v50.1 mixed curriculum has 1,325 complete authored/legacy-flat same-tile pairs out
+  of 1,330 groups. `v60_validate_real_synthetic_pairs.py` writes the validation-only JSON/atlas; the
+  first 16-tile Azeroth slice measured mean RGB MAE 0.1812 and RMSE 0.2120. The absolute difference
+  is a flat-maptexture diagnostic, not terrain-shadow ground truth. A fresh post-fix C# NPZ with
+  `terrain_shadow_256` is required for shadow comparison. Real masks remain labels only; no GPU run
+  has started.
 
 ## Settled — including the dead ends, which are the expensive part
 

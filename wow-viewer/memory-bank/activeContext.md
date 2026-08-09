@@ -12,7 +12,7 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 |---|---|---|
 | PM4 decode | **active** — versioning formatted; placement solved; scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
 | Terrain / viewer runtime | **active** — phased dual-map overlay (135), M2 doodad batching (136), phased minimap & teleport (137) landed | [activeContext.md](activeContext.md) |
-| Terrain / minimap ML | **active** — Spec 134 synthetic v60 control corpus is being finalized; no corpus generation or training has run | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
+| Terrain / minimap ML | **active** — Spec 134 synthetic v60 controls and real-mask/pair prep are implemented; no GPU training has run | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
 | Tile archaeology | **active** — harvest pipeline working on 1.x clients; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
 
 ## Now — Viewer Runtime & Terrain Improvements (Specs 135, 136, 137)
@@ -37,6 +37,12 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
   building/bridge overlays, clean terrain-shadow targets, and a separate screen-space contamination
   mask across none/sparse/dense/overlap/boundary-crossing regimes. The mask is loss-supervised and
   optionally predicted-mask-guided, never supplied as a ground-truth inference channel.
+- The real v50 mask lane now reads the existing `v50.1` authored rows read-only and projects precise
+  and coarse masks independently. Its paired validator found 1,325 complete authored/legacy-flat
+  pairs out of 1,330 groups; the first 16-tile Azeroth review measured mean normalized RGB MAE
+  0.1812. That absolute difference is diagnostic only: legacy synthetic RGB is not the fixed terrain
+  shadow target. Fresh post-fix NPZs with `terrain_shadow_256` are required for shadow comparison.
+  Real masks remain labels only. Training and client-backed work remain user-owned and unrun.
 - Detail and commands: [Spec 134 quickstart](../specs/134-v60-unified-dataset-model/quickstart.md).
 
 ### What was accomplished this session (2026-08-08)

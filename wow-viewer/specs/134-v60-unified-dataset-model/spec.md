@@ -51,6 +51,9 @@ works; a tiny transfer gate is required.
 - The initial object-removal route is `normalized textureless minimap -> object sieve -> terrain
   reconstruction`. Synthetic object controls start from the canonical terrain shadow and add
   controlled object contamination, so object removal is tested separately from albedo removal.
+- The existing v50.1 `0_5_3_3368` curriculum is an allowed supervision source for the object-mask
+  experiment only. It may be read by configured path; it is not copied into v60 and does not bypass
+  the later albedo/textureless gate for height reconstruction.
 
 ## User Stories & Testing
 
@@ -79,7 +82,7 @@ harvest output.
 6. **Given** a cross-tile fractal or lightning family, **when** visual review stitches its 2x2 rows,
    **then** the pattern crosses tile seams instead of restarting at each tile.
 
-### User Story 2 — Synthetic object sieve and contamination decomposition (Priority: P1)
+### User Story 2 — Synthetic and real object sieve supervision (Priority: P1)
 
 A researcher can generate terrain controls with procedural objects placed on top and train a sieve
 that emits the clean underlying terrain shadow plus a separately supervised object-contamination
@@ -103,6 +106,14 @@ quality separately across no-object, sparse, dense, overlapping, and boundary-cr
    are never supplied as an inference channel.
 5. **Given** a sieve output, **when** it is evaluated, **then** clean-terrain error and mask metrics
    are reported independently by object-density and placement family.
+6. **Given** the existing v50.1 curriculum, **when** the real-mask lane is planned, **then** it
+   filters to authored minimap rows, preserves the manifest split or an explicit map holdout, and
+   records the exact store and source-group provenance.
+7. **Given** `object_precise_mask` and `object_mask`, **when** the real-mask model trains, **then**
+   precise and coarse-footprint predictions remain separate outputs with independent metrics.
+8. **Given** the v50 `object_geometry_visible_mask_257` signal is empty, **when** the real-mask lane
+   is prepared, **then** it reports that evidence and does not silently substitute it for the real
+   footprint masks.
 
 ### User Story 3 — Limited control-data model experiment (Priority: P1)
 
@@ -242,6 +253,31 @@ changing the control generator or silently mixing source-era behavior.
 - **FR-030**: Non-grid control rows MUST persist deterministic field offsets and alignment mode. The
   validator MUST reject a default corpus whose non-grid families are all chunk-aligned or whose
   multi-variant family has no offset variation.
+- **FR-031**: The real object-mask lane MUST read the configured v50.1 curriculum at runtime and
+  MUST record its absolute store path, release, row count, source filter, and source-group split
+  policy in its experiment report.
+- **FR-032**: The initial real object-mask run MUST default to authored `0_5_3_3368` rows and MUST
+  keep authored/synthetic variants and map holdouts explicit; duplicate source groups MUST NOT cross
+  train/validation splits.
+- **FR-033**: `object_precise_mask` MUST be the primary real mask target and `object_mask` MUST be a
+  separate coarse-footprint target. Both MUST be projected from their native 257x257 arrays to the
+  256x256 minimap contract without inventing labels.
+- **FR-034**: Real-mask models MUST report per-target positive coverage, precision, recall, Dice, and
+  IoU. Checkpoint selection MUST use the minimum requested-target IoU so one strong head cannot hide
+  a dead head.
+- **FR-035**: An empty `object_geometry_visible_mask_257` array MUST be reported as unavailable
+  evidence for this lane; it MUST NOT be promoted to a real object-contamination target.
+- **FR-036**: The real-mask lane MUST train mask prediction only until a clean terrain target exists;
+  it MUST NOT claim that the v50 mask arrays provide an exact clean-minimap supervision pair.
+- **FR-037**: The paired validation lane MUST select authored and synthetic minimap rows from the
+  same v50 `source_group_id` and MUST verify identical map/tile identity before pairing them.
+- **FR-038**: The v50 synthetic row MUST be labeled as a legacy flat fake-maptexture diagnostic;
+  it MUST NOT be labeled or consumed as a `terrain_shadow_256` target.
+- **FR-039**: The pair report MUST preserve the train/validation group split and MUST report the
+  authored-vs-flat-synthetic absolute difference independently from object-mask metrics.
+- **FR-040**: A terrain-shadow comparison MUST accept only a fresh NPZ containing
+  `terrain_shadow_256` emitted by the post-fix C# compositor, with finite/range checks and explicit
+  producer provenance. Missing fresh shadow artifacts MUST fail closed.
 
 ### Non-Functional Requirements
 
@@ -270,12 +306,18 @@ changing the control generator or silently mixing source-era behavior.
 7. The cross-tile atlas shows the lightning/burn motifs continuing across all four tile seams.
 8. The object-sieve control report shows separate clean-terrain and contamination-mask metrics,
    including boundary-crossing and dense-object holdouts, with no ground-truth mask input leakage.
+9. The real-mask report shows provenance-backed authored v50 rows, independent precise/coarse mask
+   metrics, and no train/validation source-group leakage before any user-run GPU training.
+10. A small same-tile authored/flat-synthetic validation report exists with pair identity, absolute
+    difference statistics, visual atlas, and an optional post-fix terrain-shadow comparison; it must
+    explicitly state that the legacy synthetic image is not a shadow target.
 
 ## Key Entities
 
 See [data-model.md](./data-model.md) for `ControlSourceManifest`, `SyntheticControlRow`,
-`ObjectSieveControlRow`, `ObjectSieveExperiment`, `AlbedoOperationRun`, `TexturelessGateDecision`,
-`ExperimentRun`, and `TransferGate`.
+`ObjectSieveControlRow`, `ObjectSieveExperiment`, `RealObjectMaskDataset`,
+`RealObjectMaskExperiment`, `RealSyntheticValidationPair`, `RealSyntheticPairReport`,
+`AlbedoOperationRun`, `TexturelessGateDecision`, `ExperimentRun`, and `TransferGate`.
 
 ## Assumptions
 
@@ -283,10 +325,14 @@ See [data-model.md](./data-model.md) for `ControlSourceManifest`, `SyntheticCont
    from known terrain.
 2. Real authored minimap albedo removal is a separate operation whose quality must be measured; it
    is not assumed to exist merely because synthetic textureless rendering exists.
-3. A small number of distinct terrain families is more useful for the first proof than a large,
+3. The existing v50 object masks are valid supervision for object appearance detection, while the
+   empty v50 geometry-visible mask and absence of a clean minimap target are explicit limitations.
+4. The v50 mixed curriculum's `minimap_source=synthetic` row is a same-terrain flat fake maptexture
+   useful for absolute-difference diagnostics only. It is not a post-fix terrain-shadow render.
+5. A small number of distinct terrain families is more useful for the first proof than a large,
    mixed historical corpus.
-4. Control success is necessary but not sufficient for real-domain transfer.
-5. Later client builds may eventually be added through adapters, but they are out of scope for the
+6. Control success is necessary but not sufficient for real-domain transfer.
+7. Later client builds may eventually be added through adapters, but they are out of scope for the
    initial transfer route.
-6. The user runs full synthesis, client processing, and training commands; Codex prepares them and
+8. The user runs full synthesis, client processing, and training commands; Codex prepares them and
    validates lightweight code paths.

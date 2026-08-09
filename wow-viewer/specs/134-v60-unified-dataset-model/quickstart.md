@@ -54,6 +54,66 @@ The bounded experiment must use the emitted `object-sieve-v1` manifest and compa
 mask, never the ground-truth mask. The training/evaluation command remains withheld until its
 loader and report writer land.
 
+## 5b. Train the real v50 object-mask model
+
+The first real object experiment uses the existing v50.1 store as a read-only supervision source.
+It defaults to authored `0_5_3_3368` rows, holds out Azeroth by map, predicts both the precise and
+coarse object masks, and selects checkpoints using the weaker of the two requested IoUs. The empty
+`object_geometry_visible_mask_257` signal is reported but is not used as a target.
+
+Plan-only provenance check:
+
+```powershell
+uv run python scripts/v60_train_real_object_masks.py --store "../output/datasets/v50/v50.1/curriculum-0_5_3_3368-obj_v1.zarr" --output "../output/datasets/v60/real-object-masks-v1" --source authored --split map_holdout --val-map Azeroth --targets both --input rgb --plan-only
+```
+
+User-run GPU training:
+
+```powershell
+uv run python scripts/v60_train_real_object_masks.py --store "../output/datasets/v50/v50.1/curriculum-0_5_3_3368-obj_v1.zarr" --output "../output/datasets/v60/real-object-masks-v1" --source authored --split map_holdout --val-map Azeroth --targets both --input rgb --epochs 60 --batch 8 --confirm-run
+```
+
+The run writes a provenance report, per-target metrics, best checkpoint, and validation previews.
+This is object-mask detection evidence only; it does not authorize height training or claim a clean
+terrain-minimap target.
+
+## 5c. Review paired real/flat validation evidence
+
+The existing v50.1 mixed curriculum contains same-tile authored and legacy flat synthetic rows for
+most source groups. This command selects a deterministic 16-tile Azeroth holdout, compares authored
+RGB to the flat fake maptexture, and writes both a JSON absolute-difference report and a visual
+atlas. It does not train and it never uses the real masks as inputs.
+
+```powershell
+uv run python scripts/v60_validate_real_synthetic_pairs.py --store "../output/datasets/v50/v50.1/curriculum-0_5_3_3368-obj_v1.zarr" --output "../output/datasets/v60/real-synthetic-pair-validation-v1" --split map_holdout --val-map Azeroth --validation-rows 16
+```
+
+Review `real-synthetic-pair-atlas.png` and `real-synthetic-pair-report.json`. The report must show
+complete pair identity, no split leakage, `labels_used_as_inputs: false`, and
+`legacy_synthetic_is_terrain_shadow_target: false`. The observed initial 16-tile sample had mean
+normalized RGB MAE `0.1812`; this is flat-vs-authored absolute-difference evidence, not a shadow
+target.
+
+To compare the flat-row absolute difference with the fixed terrain-shadow renderer, first rebuild
+the harvest tool and have the user harvest only these same 16 tiles from the approved 0.5.3 client:
+
+```powershell
+dotnet build "I:/parp/parp-tools/wow-viewer/tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harvest.csproj" -c Debug --no-restore
+dotnet "I:/parp/parp-tools/wow-viewer/tools/harvest/WowViewer.Tool.Harvest/bin/Debug/net10.0/WowViewer.Tool.Harvest.dll" harvest-map-mpq --client-root "H:/CLIENTS/prealpha" --map "Azeroth" --output-dir "I:/parp/parp-tools/wow-viewer/output/datasets/v60/real-shadow-npz-v1" --tile-list "0,0;24,53;27,52;27,53;27,54;27,55;27,56;27,57;27,58;24,54;28,22;28,23;28,24;28,25;28,26;28,27" --force
+```
+
+The harvest must emit `terrain_shadow_256` in every requested NPZ. Then rerun the pair report with
+`--shadow-npz-dir`:
+
+```powershell
+uv run python scripts/v60_validate_real_synthetic_pairs.py --store "../output/datasets/v50/v50.1/curriculum-0_5_3_3368-obj_v1.zarr" --output "../output/datasets/v60/real-synthetic-pair-validation-v1" --split map_holdout --val-map Azeroth --validation-rows 16 --shadow-npz-dir "../output/datasets/v60/real-shadow-npz-v1"
+```
+
+The fixed-shadow correlations are calibration diagnostics, not a substitute target or a claim that
+flat-vs-authored absolute difference is pure terrain shadow. The real object-mask model remains the
+authored-RGB/RGB-edge experiment in section 5b until a separate post-fix paired input contract is
+validated.
+
 ## 6. Run the limited height control experiment
 
 The training command is intentionally not declared complete by this plan until the control-v1
