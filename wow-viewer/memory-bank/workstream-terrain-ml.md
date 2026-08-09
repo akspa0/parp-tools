@@ -2,10 +2,36 @@
 
 Owner specs: 114 (direct terrain reconstruction), 125 (minimap DXT1 inversion),
 126 (minimap terrain reconstruction), 111 (minimap lighting calibration).
-Last updated: 2026-08-03 (no runs since). **Nothing is training right now.**
+Last updated: 2026-08-08. **Nothing is training right now.** The active first experiment is Spec 134's
+small synthetic control corpus; no working v60 real-data corpus has been accepted or generated.
 
 This file is the durable home for the terrain-ML workstream. `activeContext.md` links here and
 stays short; put detail here, not there.
+
+## Active route — Spec 134 v60 control corpus
+
+- Start with project-owned deterministic controls, not a broad v50-derived harvest. The default
+  control run is 27 families × 4 variants = 108 rows with family-level holdouts and the four
+  `easy`/`medium`/`hard`/`pathological` complexity buckets.
+- The generator also emits a sibling `object-sieve-v1` derivative with 540 rows. The control taxonomy
+  includes mountainous relief, arbitrary-angle sheer drop-offs, zone-style blends, fBm, ridged
+  fractal, dendritic lightning-burn terrain proxies, and
+  `cross_tile_lightning`/`cross_tile_burn`. Each cross-tile family is one global 2×2 pattern whose
+  four tile rows share one `pattern_id`; the validator rejects missing, duplicate, or mixed-ID
+  quartets, and the visualizer emits a stitched atlas. Non-grid terrain records deterministic
+  sub-cell offsets; only `chunk_grid` is exactly chunk-aligned.
+- First signal contract remains `terrain_shadow_256` → `height_257`. Fractal and lightning-burn
+  controls are shape probes, not claims about a literal client semantic. The goal is to expose
+  partial patterns and high-complexity signals before attempting a tiny albedo-normalized 0.x/1.x
+  transfer sample.
+- The C# generator, Python validators, object-sieve model/loss variants, and visual reviews are
+  implemented. User runs generation,
+  client-backed transfer, and GPU training; Codex does not launch them.
+- The object-sieve lane is emitted with the terrain controls. Its synthetic input is
+  `objectified_terrain_shadow_256`; targets are clean `terrain_shadow_256` plus the distinct
+  `object_contamination_mask_256`. Compare clean-only, auxiliary-mask-loss, and predicted-mask-
+  guided variants. Do not conflate this screen-space contamination mask with the existing
+  `object_geometry_visible_mask_257` numeric geometry target.
 
 ## Settled — including the dead ends, which are the expensive part
 

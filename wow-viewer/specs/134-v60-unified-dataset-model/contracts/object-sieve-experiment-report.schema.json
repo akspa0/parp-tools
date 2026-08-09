@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "v60-object-sieve-experiment-report.schema.json",
+  "title": "V60 Object Sieve Experiment Report",
+  "type": "object",
+  "required": [
+    "schema",
+    "dataset_manifest",
+    "variant",
+    "clean_metrics",
+    "mask_metrics",
+    "metrics_by_regime",
+    "ground_truth_mask_as_input"
+  ],
+  "properties": {
+    "schema": { "const": "v60-object-sieve-experiment-v1" },
+    "dataset_manifest": { "type": "string", "minLength": 1 },
+    "variant": {
+      "enum": ["clean_only", "auxiliary_mask_loss", "predicted_mask_guided"]
+    },
+    "clean_metrics": { "type": "object" },
+    "mask_metrics": { "type": "object" },
+    "metrics_by_regime": { "type": "object" },
+    "baseline": { "type": "object" },
+    "ground_truth_mask_as_input": { "const": false }
+  },
+  "additionalProperties": true
+}

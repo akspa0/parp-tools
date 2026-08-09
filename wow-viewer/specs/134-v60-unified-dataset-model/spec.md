@@ -1,225 +1,292 @@
-# Feature Specification: V60 Unified Dataset and Shadow-First Terrain Model
+# Feature Specification: V60 Controlled Terrain Reconstruction Experiment
 
 **Feature Branch**: `134-v60-unified-dataset-model`
+**Created**: 2026-08-08
+**Status**: Draft — scope reset from harvested multi-client corpus
 
-**Created**: 2026-08-05
-
-**Status**: Draft
-
-**Input**: User direction: consolidate all scattered v50.zarr stores and archaeology outputs into a single unified v60 Zarr datastore, implement the terrain_shadow_256→height_257 model (spec 133 US3), apply the surviving-height-levels curation fix, and release v0.5.2 of the viewer.
+**Input**: Use project-owned synthetic terrain controls to test a small reconstruction experiment.
+First normalize authored minimap albedo, admit only textureless results, and then test transfer to a
+tiny 0.x/1.x sample before processing anything broader.
 
 ## Context
 
-### The current state
+The re-baked minimap path is already working. The previous v50/v60 direction treated a large
+harvested corpus as the primary product, which created avoidable problems: mixed-era inputs,
+metadata trust failures, finalize/retry hazards, and an assumption that thousands of authored tiles
+were required before the first useful model experiment.
 
-After the full v50.1 dataset pipeline (specs 109-112), the curation refactor (spec 122), the archaeology pipeline (spec 127), the brush-signature classification (spec 132), and the unbaked minimap decomposition (spec 133), the data is scattered across multiple output formats and locations:
+The next boundary is smaller and controlled. Existing terrain tooling can generate genuine-looking
+minimap/shadow signals from known terrain and can therefore provide exact targets. The first model
+lane should answer one question:
 
-- **Per-build Zarr stores** under `output/datasets/v50/v50.1/` — one per build+map (e.g., `0_5_3_3368-Azeroth.zarr`)
-- **Archaeology Zarr stores** under `output/archaeology/<build_id>/store/` — per-build with per-map sub-stores
-- **Archaeology NPZ shards** under `output/archaeology/<build_id>/npz/` — raw shards from harvest
-- **Archaeology classification output** under `output/archaeology/<build_id>/classify/` — three-tier classification
-- **Residual-extractor curricula** under `output/datasets/azeroth-residual-extractor-curriculum/`
-- **Spec-specific Zarr stores** under `output/datasets/spec116/`, `spec117/`, etc.
-- **Model checkpoints** under `output/v50/v50.1/direct_geometry/`, `output/runs/`, etc.
+```text
+canonical textureless minimap 256x256 -> terrain height 257x257
+```
 
-The dataset was labelled v50.1 but the actual signal set has grown significantly since: `terrain_shadow_256` (spec 133), the three-tier `signal_class` (spec 132), and the curation improvements (spec 122) were all added after the v50.1 manifest was frozen. A version bump to v60 is warranted.
+The canonical synthetic input is `terrain_shadow_256`. For real authored minimaps, an explicit
+versioned albedo-normalization operation must first produce a comparable textureless input. A
+synthetic control score is necessary evidence, but is not by itself proof that the real operation
+works; a tiny transfer gate is required.
 
-### The model problem
+### Initial source policy
 
-No direct minimap→height model beats the tile-mean baseline. The root cause identified in spec 133 is that `minimap_rgb = albedo × lighting` blends texture, shadow, and normals into one RGB signal. The fix is:
-1. Emit `terrain_shadow_256` as a separate signal (spec 133 US1 — **done**, C# side committed)
-2. Build a curriculum that includes the decomposed signal (spec 133 US2)
-3. Train a model that takes `terrain_shadow_256 → height_257` (spec 133 US3)
+- Client-backed source seeds initially come only from explicitly classified `0.x` and `1.x` roots.
+- Procedural control families are valid v60-control-v1 seeds and require no client.
+- The default control atlas MUST cover the existing complexity vocabulary (`easy`, `medium`, `hard`,
+  `pathological`) with explicit terrain families: flat/slope, dome/basin/plateau/rolling, ridge/valley/
+  terrace/cliff, chunk-grid discontinuities, island/archipelago, crater/canyon composition,
+  mountainous relief, arbitrary-angle sheer drop-offs, zone-style blends, fractal/fBm and
+  ridged-fractal terrain, dendritic lightning-burn strokes, and mixed/noisy pathological cases.
+- Cross-tile pattern families MUST be generated from one global 2x2 pattern coordinate system so
+  each tile contains only a partial motif and the four tiles can be stitched to prove continuity.
+- Non-grid families MUST receive deterministic sub-cell field offsets unrelated to the 16x16 chunk
+  lattice. Explicit `chunk_grid` controls remain aligned only as a diagnostic family; all other
+  families must record `subcell_shifted` or `mixed_alignment` provenance.
+- A client source supplies a small number of distinct terrain seeds; it is not recursively harvested
+  as a full training corpus.
+- Later client builds remain a planned extension point, but no later-era processing is part of the
+  initial transfer route.
+- Authored minimap pixels are not accepted directly into the first model lane. They require albedo
+  normalization and the textureless quality gate.
+- The initial object-removal route is `normalized textureless minimap -> object sieve -> terrain
+  reconstruction`. Synthetic object controls start from the canonical terrain shadow and add
+  controlled object contamination, so object removal is tested separately from albedo removal.
 
-### The curation fix
+## User Stories & Testing
 
-The workstream-terrain-ml.md identifies a concrete curation improvement: `surviving_height_levels` should gate curation in both directions. ~127 tiles currently classified as usable hold ≤64 distinct heights (some with only 2 values across a 516-unit range); 26 compressed-rich tiles are excluded from curation today when their target is already correct. This is CPU-only work that changes what the model sees.
+### User Story 1 — Small synthetic control corpus (Priority: P1)
 
-### The release
+A dataset operator can select a small set of distinct terrain families and generate deterministic
+control data containing exact synthesized inputs, targets, variant parameters, and provenance.
 
-The viewer has accumulated significant improvements since v0.5.2: PM4 scene graph (spec 131), three-tier classification (spec 132), unbaked minimap decomposition (spec 133). The tag v0.5.2 exists but hasn't been released as a GitHub Release. The repo needs a clean release, branch merge to main, and a new dev branch.
-
-## Signal catalog for v60
-
-The v60 consolidated store carries every signal from the v50.1 frozen catalog plus the new additions:
-
-| Signal | Shape | Source | Since |
-|--------|-------|--------|-------|
-| height_257 | 257x257 float32 | MCVT harvest | v50.1 |
-| normal_xyz | 257x257x3 float32 | MCNR harvest | v50.1 |
-| minimap_rgb | 256x256x3 uint8 | synthesis | v50.1 |
-| minimap_rgb_authored | 256x256x3 uint8 | MPQ BLP | v50.1 |
-| mcal_alpha_pack | 256x256x4 float32 | MCAL harvest | v50.1 |
-| mcly_texture_ids | 16x16x4 int32 | MCLY harvest | v50.1 |
-| mcly_layer_mask | 16x16x4 bool | MCLY harvest | v50.1 |
-| mcsh_shadow_mask | 256x256 float32 | MCSH harvest | v50.1 |
-| mcnk_flags_16 | 16x16 int32 | MCNK flags | v50.1 |
-| liquid_mask | 256x256 float32 | MH2O/MCLQ | v50.1 |
-| liquid_height | 256x256 float32 | MH2O/MCLQ | v50.1 |
-| ... | ... | ... | ... |
-| **terrain_shadow_256** | **256x256 float32** | **ComposeShadowArray** | **v60 NEW** |
-| **signal_class** | **string** | **classify.py** | **v60 NEW** |
-| **surviving_height_levels** | **int32** | **tile_inventory.py** | **v60 NEW** |
-
-## User Scenarios & Testing
-
-### User Story 1 - Unified v60 dataset (Priority: P1)
-
-A dataset operator can build a single v60 Zarr store that consolidates every per-build/per-map store into a unified format with a single index, manifest, and signal catalog — all new signals included.
-
-**Why this priority**: Every downstream consumer (archaeology, training, inference) currently reads from scattered stores with different schemas. A single store eliminates this friction.
+**Independent Test**: Generate the corpus twice from the same configuration and compare manifests,
+arrays, and per-row hashes. They are identical, with complete-family holdouts and no client-wide
+harvest output.
 
 **Acceptance Scenarios**:
 
-1. **Given** the old v50.1 stores, **When** the v60 builder runs, **Then** every tile from every store is present in the unified store with all signals.
-2. **Given** a v60 store, **When** `terrain_shadow_256` is queried, **Then** every tile has a non-null shadow array.
-3. **Given** a v60 store, **When** `signal_class` is queried, **Then** every tile has a valid three-tier classification.
-4. **Given** the v60 builder run twice with the same inputs, **When** the outputs are compared, **Then** they are bit-identical (deterministic).
+1. **Given** an explicit control family list, **when** the control builder runs, **then** it writes
+   only the requested families and variants.
+2. **Given** a generated terrain variant, **when** the compositor runs, **then** the input and exact
+   height target are emitted together with their parameters and hashes.
+3. **Given** a client-backed seed outside the `0.x`/`1.x` policy, **when** it is supplied, **then** it
+   is rejected or recorded as excluded and never silently included.
+4. **Given** the same configuration and generation seed, **when** the builder runs twice, **then**
+   output bytes and manifest hashes match.
+5. **Given** the default family set, **when** visual review runs, **then** it writes family and
+   variant atlases showing height, textureless shadow, normals, and height-edge structure, plus a
+   report identifying missing expected families or complexity buckets.
+6. **Given** a cross-tile fractal or lightning family, **when** visual review stitches its 2x2 rows,
+   **then** the pattern crosses tile seams instead of restarting at each tile.
 
----
+### User Story 2 — Synthetic object sieve and contamination decomposition (Priority: P1)
 
-### User Story 2 - Curation improvement: surviving_height_levels gating (Priority: P1)
+A researcher can generate terrain controls with procedural objects placed on top and train a sieve
+that emits the clean underlying terrain shadow plus a separately supervised object-contamination
+mask.
 
-A dataset operator can rebuild the training curriculum with the surviving_height_levels curation fix applied — excluding ≤64-level tiles that teach wrong relationships, admitting compressed-rich tiles that were incorrectly excluded.
-
-**Why this priority**: The curation fix is CPU-only and changes what the model sees. Running it before any GPU spend avoids wasting training time on the wrong data.
-
-**Acceptance Scenarios**:
-
-1. **Given** the old curriculum, **When** the curation fix is applied, **Then** tiles with ≤64 surviving levels are excluded from the training set.
-2. **Given** the old curriculum, **When** the curation fix is applied, **Then** tiles with `information_class=rich_terrain` that were previously excluded are now admitted.
-3. **Given** the curation fix, **When** the curriculum is rebuilt, **Then** the train/val split is deterministic.
-
----
-
-### User Story 3 - Shadow→height model (Priority: P1)
-
-A researcher can train a model that takes `terrain_shadow_256` (single-channel, 256x256) as input and predicts `height_257` (257x257) as output, learning the physical relationship between terrain shadow and terrain height without the confounding texture signal.
-
-**Why this priority**: This is the milestone — a model that beats the tile-mean baseline by learning the shadow→height relationship directly.
-
-**Independent Test**: Train on v60 tiles with intact shadow signals, evaluate on held-out tiles, measure val_mae against the tile-mean baseline.
+**Independent Test**: The report evaluates clean-terrain reconstruction and contamination-mask
+quality separately across no-object, sparse, dense, overlapping, and boundary-crossing object cases.
 
 **Acceptance Scenarios**:
 
-1. **Given** a trained shadow→height model, **When** evaluated on held-out tiles, **Then** it beats the tile-mean baseline by at least 5% relative.
-2. **Given** a trained shadow→height model, **When** fed a tile with re-textured albedo, **Then** the height prediction is unchanged (the model learned shadow, not texture).
-3. **Given** a trained shadow→height model, **When** fed a tile with no shadow (flat lighting), **Then** the model reports lower confidence.
+1. **Given** a canonical terrain control, **when** objects are placed on it, **then** the row carries
+   the contaminated input, exact clean terrain-shadow target, object-contamination mask, and object
+   placement metadata.
+2. **Given** no-object, sparse, dense, overlapping, and tile-boundary placements, **when** the sieve
+   controls are reviewed, **then** each regime is represented and object patterns do not always fit
+   inside one tile.
+3. **Given** the object-contamination mask, **when** the sieve model trains, **then** the mask is a
+   separate supervised output and is not silently mixed into the height target.
+4. **Given** mask-guided and non-guided sieve variants, **when** the ablation runs, **then** the
+   guidance variant consumes its own predicted mask at training and inference; ground-truth masks
+   are never supplied as an inference channel.
+5. **Given** a sieve output, **when** it is evaluated, **then** clean-terrain error and mask metrics
+   are reported independently by object-density and placement family.
 
----
+### User Story 3 — Limited control-data model experiment (Priority: P1)
 
-### User Story 4 - Synthesized control tiles in the dataset (Priority: P2)
+A researcher can run a deliberately small learning-curve experiment using only
+`terrain_shadow_256` as input and `height_257` as target.
 
-A dataset operator can generate synthetic control tiles — minimaps and signals baked from
-known ground truth via the compositor — and include them in the v60 store as a control group
-for model training.
-
-**Why this priority**: Now that the compositor can bake minimaps perfectly, we can generate
-control tiles with exact known ground truth (height, normals, shadow, texture). These are
-invaluable for model training: they provide a clean, fully-supervised control group to measure
-against real-client tiles, and let us tweak lighting/reliability/precision later.
-
-**Acceptance Scenarios**:
-
-1. **Given** a set of synthetic terrain heightmaps, **When** the compositor bakes them, **Then**
-   each produces a minimap, terrain_shadow_256, normal_xyz, and height_257 with exact known
-   ground truth.
-2. **Given** the synthetic control tiles, **When** added to the v60 store, **Then** they are
-   tagged with a `source_kind=synthetic` index column so they can be selected or excluded from
-   training.
-3. **Given** a synthetic control tile, **When** the shadow→height model is evaluated on it,
-   **Then** the prediction can be compared against the exact known height (perfect ground truth).
-
----
-
-### User Story 5 - Deduplicated, versioned unified store (Priority: P2)
-
-A dataset operator can build a single v60 Zarr store that packs all data for all builds,
-deduplicating signals that are identical across builds for the same map, and storing
-versioned data per map.
-
-**Why this priority**: Many signals (height_257, normal_xyz, minimap_rgb, terrain_shadow_256)
-are byte-identical across builds for the same map when the terrain wasn't changed between
-builds. Storing a full copy per build wastes enormous space. Deduplicating identical signal
-arrays and storing one canonical copy per map, with per-build version pointers, gives a
-gigantic space savings while keeping every build's data queryable.
+**Independent Test**: The report evaluates fixed held-out terrain families, compares a tile-mean
+baseline, and reports metrics for each limited training size.
 
 **Acceptance Scenarios**:
 
-1. **Given** two builds with identical terrain for the same map, **When** the dedup pass runs,
-   **Then** the shared signal arrays are stored once, not twice.
-2. **Given** a deduplicated store, **When** a specific build's tile is queried, **Then** the
-   correct versioned data is returned (the dedup is transparent to consumers).
-3. **Given** a map that changed between builds, **When** deduplicated, **Then** only the changed
-   signals are stored per build; unchanged ones point to the canonical copy.
-4. **Given** the deduplicated store, **When** its size is compared to the naive per-build store,
-   **Then** it is smaller (the savings are measurable).
+1. **Given** a control row, **when** loaded by the evaluator, **then** the input is one deterministic
+   256x256 channel and the target is its matching 257x257 height field.
+2. **Given** limited training sizes such as 8, 16, and 32 rows, **when** evaluation runs, **then**
+   the learning curve is recorded without changing the held-out families.
+3. **Given** retextured or relit variants with unchanged terrain, **when** evaluated, **then** the
+   report distinguishes terrain generalization from colour or lighting memorization.
+4. **Given** flat or weakly informative controls, **when** evaluated, **then** the report marks
+   ambiguity instead of presenting a confident reconstruction as proof.
 
----
+### User Story 4 — Albedo normalization and textureless gate (Priority: P1)
 
-### User Story 6 - v0.5.2 release and branch management (Priority: P2)
+A researcher can process a tiny explicit 0.x/1.x real sample through an albedo-removal operation and
+admit only outputs that are demonstrably close enough to the canonical textureless input contract.
 
-A maintainer can tag and publish v0.5.2, merge the current feature branches into main, and start a new dev branch for continued work.
-
-**Why this priority**: The current branches have accumulated ~3 commits of unmerged work. A clean release resets the branch topology.
+**Independent Test**: Deliberately textured, failed, missing, and valid inputs produce accepted,
+rejected, or quarantined decisions with persisted metrics and reasons; no failed row is zero-filled
+or silently passed onward.
 
 **Acceptance Scenarios**:
 
-1. **Given** the current branch state, **When** branches are merged, **Then** main contains all committed work from 131, 132, and 133.
-2. **Given** a v0.5.2 tag, **When** the CI pipeline runs, **Then** it publishes release binaries.
-3. **Given** the release, **When** the README and docs are updated, **Then** they reflect the current state.
+1. **Given** a real authored minimap, **when** albedo normalization runs, **then** it writes a
+   versioned normalized artifact and measurable residual metrics.
+2. **Given** a missing, non-finite, or visibly texture-bearing result, **when** the gate runs, **then**
+   the row is rejected or quarantined and remains visible in the report.
+3. **Given** positive synthetic controls and negative textured controls, **when** thresholds are
+   calibrated, **then** the gate records the threshold version and calibration evidence.
+4. **Given** an accepted result, **when** it enters the model lane, **then** it uses the same input
+   shape/range contract as the control input or is explicitly versioned as a new contract.
+
+### User Story 5 — Tiny real-data transfer and expansion decision (Priority: P2)
+
+A researcher can compare the accepted tiny real sample with the control result and make an evidence-
+based decision to hold, diagnose, or expand.
+
+**Independent Test**: The transfer report includes the control run, accepted sample count, input
+distribution comparison, failure cases, baseline-relative metrics, and an explicit decision.
+
+**Acceptance Scenarios**:
+
+1. **Given** a passing control experiment, **when** a tiny accepted 0.x/1.x sample is evaluated,
+   **then** transfer metrics and domain differences are reported separately.
+2. **Given** a transfer failure, **when** expansion is requested, **then** the plan remains held and
+   identifies albedo normalization or domain shift as the next diagnosis.
+3. **Given** a passing transfer gate, **when** broader processing is authorized, **then** the input
+   route remains gated and provenance-preserving.
+
+### User Story 6 — Later client support (Priority: P3)
+
+A maintainer can add later client eras as new source adapters after the control and initial transfer
+contracts are proven.
+
+**Independent Test**: A later-era adapter produces the same manifest and signal contracts without
+changing the control generator or silently mixing source-era behavior.
 
 ## Requirements
 
 ### Functional Requirements
 
-- **FR-001**: The v60 builder MUST produce a single Zarr store with a unified index across all builds and maps.
-- **FR-002**: The v60 store MUST carry `terrain_shadow_256`, `signal_class`, and `surviving_height_levels` as first-class signals.
-- **FR-003**: The curation fix MUST gate on `surviving_height_levels` — exclude ≤64 levels, admit compressed-rich tiles.
-- **FR-004**: The shadow→height model MUST accept a single-channel 256x256 input and produce a 257x257 height field.
-- **FR-005**: The shadow→height model MUST be trainable on a single GPU in under 24 hours.
-- **FR-006**: The v0.5.2 release MUST publish the viewer binary via GitHub Actions.
-- **FR-007**: The v60 builder MUST support adding synthetic control tiles (baked from known ground
-  truth via the compositor) tagged with a `source_kind=synthetic` index column.
-- **FR-008**: Synthetic control tiles MUST carry exact known ground truth for height, normals,
-  shadow, and texture so they can serve as a fully-supervised control group.
-- **FR-009**: The v60 store MUST deduplicate signal arrays that are byte-identical across builds
-  for the same map, storing one canonical copy and per-build version pointers.
-- **FR-010**: Deduplication MUST be transparent to consumers — querying a specific build's tile
-  returns the correct versioned data.
+- **FR-001**: v60-control-v1 MUST build a small synthetic control corpus, not a complete historical
+  per-client signal harvest or unified archive.
+- **FR-002**: Client-backed initial sources MUST accept only explicitly classified `0.x` and `1.x`
+  roots and MUST report rejected later or unknown roots.
+- **FR-003**: The operator MUST provide an explicit small family/seed configuration. The builder MUST
+  NOT recursively harvest every map or every client by default.
+- **FR-004**: Each control row MUST contain source identity, family identity, deterministic variant
+  parameters, generation version, split membership, and hashes for every emitted array.
+- **FR-005**: The first control contract MUST emit an albedo-stripped `terrain_shadow_256` input and
+  the exact matching `height_257` target.
+- **FR-006**: The control generator MUST support the default terrain taxonomy: flat, slope, dome,
+  basin, plateau, ridge, valley, rolling, terrace, cliff, chunk-grid, chunk-grid-mixed, island-sea,
+  archipelago, crater-field, canyon-fan, mountainous, sheer-dropoff, zone-style-blend, fractal-fBm,
+  fractal-ridged, lightning-burn,
+  cross-tile-lightning, cross-tile-burn, noise, mixed, and pathological variants while retaining a
+  baseline control.
+- **FR-007**: Lighting and albedo variation MUST be independently parameterized so the model cannot
+  win by memorizing a colour-to-height shortcut.
+- **FR-008**: Splits MUST hold out whole source families or terrain archetypes; variants of a held-out
+  family MUST NOT leak into training.
+- **FR-009**: The initial control corpus MUST target approximately 32–128 rows, with row count
+  controlled by configuration rather than a hard-coded quota.
+- **FR-010**: The builder MUST fail closed when a row lacks its declared input or exact target. Missing
+  signals MUST be generation errors, not zero-filled arrays.
+- **FR-011**: The existing deterministic compositor/synthesis path MUST remain the signal authority;
+  Python may orchestrate and validate but MUST NOT invent a second lighting implementation.
+- **FR-012**: The corpus MUST include a machine-readable manifest consumable by Python evaluation. A
+  historical v50 store is not a required input.
+- **FR-013**: The first model experiment MUST report limited-size learning curves, family metrics,
+  a trivial baseline, and ambiguity cases.
+- **FR-014**: Real authored minimaps MUST pass through a versioned albedo-normalization operation
+  before entering the first model lane.
+- **FR-015**: The textureless gate MUST persist thresholds, metrics, and accepted/rejected/quarantined
+  decisions. It MUST fail closed on missing, non-finite, or uncalibrated outputs.
+- **FR-016**: Initial real transfer MUST use only a tiny explicit `0.x`/`1.x` sample and MUST compare
+  its input distribution and failure modes with the controls.
+- **FR-017**: Broader real-data processing MUST be blocked until the transfer report explicitly says
+  `expand`; synthetic success alone MUST NOT authorize expansion.
+- **FR-018**: Additional signals and later client adapters MUST be versioned extensions and MUST NOT
+  block the first height proof.
+- **FR-019**: Every control row MUST carry one of the four established complexity buckets, and the
+  manifest MUST summarize bucket counts and family membership.
+- **FR-020**: The visual-review tool MUST fail closed on an invalid corpus or missing required visual
+  signals; it MUST NOT fabricate a preview from absent arrays.
+- **FR-021**: The visual-review output MUST include both one representative panel per family and a
+  variant strip so a human can inspect cross-family coverage and within-family variation before
+  training.
+- **FR-022**: Cross-tile families MUST carry a stable pattern ID, 2x2 tile coordinates, and
+  continuity metadata; validation MUST fail if any of the four positions is absent.
+- **FR-023**: The visual-review output MUST include a stitched cross-tile atlas for every configured
+  cross-tile family.
+- **FR-024**: The object-control extension MUST emit an `objectified_terrain_shadow_256` input,
+  exact clean `terrain_shadow_256` target, and `object_contamination_mask_256` target for every
+  object-control row.
+- **FR-025**: Object controls MUST include no-object, sparse, dense, overlapping, and tile-boundary
+  placement regimes with deterministic placement metadata. Broad object families may be labeled, but
+  exact client object identity is out of scope for the first sieve experiment.
+- **FR-026**: `object_contamination_mask_256` MUST remain a distinct exported signal and auxiliary
+  loss target. It MUST NOT be treated as a height loss term or silently substituted for the existing
+  `object_geometry_visible_mask_257` numeric geometry target.
+- **FR-027**: The sieve experiment MUST compare clean-output-only, auxiliary-mask-loss, and
+  predicted-mask-guided variants. A guided variant MUST consume its predicted mask at both training
+  and inference; ground-truth masks are loss-side supervision only.
+- **FR-028**: Sieve reports MUST provide separate clean-terrain metrics and mask metrics by object
+  density, placement regime, and held-out object family.
+- **FR-029**: A passing sieve result MUST NOT authorize real-client processing by itself. Real inputs
+  still require the versioned albedo-normalization and textureless gates.
+- **FR-030**: Non-grid control rows MUST persist deterministic field offsets and alignment mode. The
+  validator MUST reject a default corpus whose non-grid families are all chunk-aligned or whose
+  multi-variant family has no offset variation.
 
 ### Non-Functional Requirements
 
-- **NFR-001**: The v60 builder must complete in under 30 minutes (consolidating existing stores, no re-harvesting).
-- **NFR-002**: The model must be reproducible — same seed, same data, same checkpoint.
-- **NFR-003**: The README and userguide must be updated before the release tag.
+- **NFR-001**: Generation and normalization MUST be deterministic for fixed inputs, versions, and
+  seeds.
+- **NFR-002**: The control corpus MUST be buildable and inspectable before any GPU run.
+- **NFR-003**: Manifests and reports MUST make provenance, thresholds, split membership, decisions,
+  and array hashes auditable without opening binary arrays.
+- **NFR-004**: Heavy synthesis, real-client processing, and training remain user-owned operations;
+  repository work prepares commands and performs lightweight validation only.
 
 ## Success Criteria
 
-1. **Unified store**: A single v60 Zarr store exists with all signals from all builds, deterministic.
-2. **Curation fix**: Training curriculum with surviving_height_levels gating applied.
-3. **Model beats baseline**: Shadow→height model achieves val_mae < 0.142 (5% below 0.1493 baseline).
-4. **v0.5.2 released**: GitHub Release published, branches merged, README/userguide updated.
+1. A deterministic 32–128-row control corpus exists with exact `terrain_shadow_256` and `height_257`
+   pairs and held-out families.
+2. A limited control experiment shows whether the input/height relationship beats a tile-mean
+   baseline, with metrics by family and training size.
+3. The albedo operation distinguishes valid textureless outputs from textured or failed outputs and
+   persists a fail-closed gate report.
+4. A tiny accepted `0.x`/`1.x` transfer sample produces a separate domain/metric report before any
+   expansion decision.
+5. No full v50/v60 historical harvest is required to decide whether the first reconstruction lane
+   is viable.
+6. The default control run produces an inspectable atlas with complete expected-family and
+   complexity-bucket coverage, or the report explicitly names what is missing.
+7. The cross-tile atlas shows the lightning/burn motifs continuing across all four tile seams.
+8. The object-sieve control report shows separate clean-terrain and contamination-mask metrics,
+   including boundary-crossing and dense-object holdouts, with no ground-truth mask input leakage.
 
 ## Key Entities
 
-### V60Store
-- `store_id`: string — "v60-unified"
-- `builds`: list of build IDs included
-- `signals`: list of signal names with shapes and dtypes
-- `row_count`: int
-- `index`: parquet table with per-row metadata
-
-### ShadowHeightModel
-- `input_channels`: 1 (terrain_shadow_256)
-- `output`: 257x257 relative height
-- `architecture`: direct_cnn_v112 (1-channel) or mit_b0_regression (1-channel)
-- `target_contract`: v112.1 (relative height, min-max normalized)
+See [data-model.md](./data-model.md) for `ControlSourceManifest`, `SyntheticControlRow`,
+`ObjectSieveControlRow`, `ObjectSieveExperiment`, `AlbedoOperationRun`, `TexturelessGateDecision`,
+`ExperimentRun`, and `TransferGate`.
 
 ## Assumptions
 
-1. The existing v50.1 stores have valid data — no re-harvesting is needed for the consolidation.
-2. The `terrain_shadow_256` signal requires re-harvesting with the new C# code; the v60 builder can produce it by running the harvest tool or by calling the compositor from Python.
-3. The shadow→height model reuses the existing `direct_cnn_v112` architecture with `in_channels=1`.
-4. The user runs all training and harvest commands (Rule 0).
-5. The v0.5.2 release is a tag push on the main branch after merge.
+1. The current compositor can synthesize the canonical textureless input and exact height target
+   from known terrain.
+2. Real authored minimap albedo removal is a separate operation whose quality must be measured; it
+   is not assumed to exist merely because synthetic textureless rendering exists.
+3. A small number of distinct terrain families is more useful for the first proof than a large,
+   mixed historical corpus.
+4. Control success is necessary but not sufficient for real-domain transfer.
+5. Later client builds may eventually be added through adapters, but they are out of scope for the
+   initial transfer route.
+6. The user runs full synthesis, client processing, and training commands; Codex prepares them and
+   validates lightweight code paths.

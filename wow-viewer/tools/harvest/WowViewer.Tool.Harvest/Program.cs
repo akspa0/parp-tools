@@ -126,6 +126,9 @@ static class Program
             case "sun-diagnostic":
                 RunSunDiagnostic(tail);
                 break;
+            case "control-corpus":
+                RunControlCorpus(tail);
+                break;
             case "inspect-minimap-blp":
                 RunInspectMinimapBlp(tail);
                 break;
@@ -208,6 +211,10 @@ static class Program
                                 wrong lighting model apart from wrongly-oriented terrain data.
                                 Accepts --era / --sun-model / --sun-azimuth / --ambient /
                                 --cast-shadow-strength / --shadow-softness / --resolution.
+              control-corpus    Write a small deterministic, fully-supervised terrain control corpus
+                                (height_257 + terrain_shadow_256) with no client or authored minimap.
+                                Use --output-dir <dir>; optional --families comma-list,
+                                --variants N, and --holdout-families comma-list.
               split-minimap-image
                                 Slice one standalone composite map image (e.g. a full-continent
                                 scan/render with no client/MPQ backing) into a fixed-size tile grid
@@ -4094,6 +4101,773 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         Console.WriteLine("If the lit flank moves between frames, the bearing is sweeping. If it stays put");
         Console.WriteLine("but sits on the wrong side, the bearing is inverted. If these frames are correct");
         Console.WriteLine("and real tiles are not, the fault is in the real tiles' orientation, not the sun.");
+    }
+
+    /// <summary>
+    /// Writes a compact, fully supervised terrain control corpus without opening a client or
+    /// reading authored minimap pixels. The input and target are generated from the same known
+    /// height field: terrain_shadow_256 is produced by the production compositor and height_257 is
+    /// written directly from that field. This is intentionally a control lane, not a replacement
+    /// for client-backed extraction.
+    /// </summary>
+    static void RunControlCorpus(string[] args)
+    {
+        string? outputDirectory = GetOption(args, "--output-dir", "-o");
+        int variantCount = GetIntOption(args, "--variants", "-v") ?? 4;
+        string familyOption = GetOption(args, "--families", "-f")
+            ?? "flat,slope,dome,basin,plateau,ridge,valley,rolling,terrace,cliff,mountainous,sheer_dropoff,zone_style_blend,chunk_grid,chunk_grid_mixed,island_sea,archipelago,crater_field,canyon_fan,fractal_fbm,fractal_ridged,lightning_burn,cross_tile_lightning,cross_tile_burn,noise,mixed,pathological";
+        string holdoutOption = GetOption(args, "--holdout-families", "-H")
+            ?? "chunk_grid,island_sea,sheer_dropoff,zone_style_blend,cross_tile_lightning,cross_tile_burn,noise,pathological";
+
+        if (string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            Console.Error.WriteLine("Error: --output-dir <dir> is required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (variantCount is < 1 or > 32)
+        {
+            Console.Error.WriteLine("Error: --variants must be within 1..32.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        string[] families = familyOption
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        string[] knownFamilies =
+        [
+            "flat", "slope", "dome", "basin", "plateau", "ridge", "valley", "rolling", "terrace", "cliff",
+            "mountainous", "sheer_dropoff", "zone_style_blend",
+            "chunk_grid", "chunk_grid_mixed", "island_sea", "archipelago", "crater_field", "canyon_fan",
+            "fractal_fbm", "fractal_ridged", "lightning_burn", "cross_tile_lightning", "cross_tile_burn",
+            "noise", "mixed", "pathological",
+        ];
+        string[] unknownFamilies = families
+            .Where(family => !knownFamilies.Contains(family, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+        if (unknownFamilies.Length > 0 || families.Length == 0)
+        {
+            Console.Error.WriteLine(
+                $"Error: unknown or empty control family list. Known families: {string.Join(", ", knownFamilies)}.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (variantCount > 4 && families.Any(IsCrossTileControlFamily))
+        {
+            Console.Error.WriteLine(
+                "Error: --variants must be within 1..4 when a cross-tile control family is selected; " +
+                "variants 0..3 are the four tiles of one global 2x2 pattern.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        HashSet<string> holdoutFamilies = holdoutOption
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(family => family.ToLowerInvariant())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        string[] unknownHoldouts = holdoutFamilies
+            .Where(family => !families.Contains(family, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+        if (unknownHoldouts.Length > 0)
+        {
+            Console.Error.WriteLine(
+                $"Error: holdout families must be selected in --families: {string.Join(", ", unknownHoldouts)}.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        Directory.CreateDirectory(outputDirectory);
+        var entries = new List<object>();
+        var baseRows = new List<(string RowId, string Family, int Variant, int TileX, int TileY, int TileSpan, string ComplexityBucket, string Split, float[,] Height, float[,] Shadow)>();
+        var bucketCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var bucketFamilies = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        TerrainMinimapCompositionOptions options = BuildHarvestShadowCompositionOptions();
+
+        foreach (string family in families)
+        {
+            for (int variant = 0; variant < variantCount; variant++)
+            {
+                string rowId = $"{family.ToLowerInvariant()}-v{variant:D2}";
+                (string PatternId, int TileX, int TileY, int TileSpan, string Continuity) pattern = GetControlPatternInfo(family, variant);
+                (float OffsetX, float OffsetY, string Alignment) field = GetControlFieldInfo(family, variant, pattern.TileSpan);
+                float[,] height = BuildControlHeight(family, variant, pattern.TileX, pattern.TileY, pattern.TileSpan);
+                TerrainTileTensorPack pack = BuildControlPack(rowId, family, height);
+                pack.TerrainShadow256 = TerrainMinimapCompositor.ComposeShadowArray(pack, options);
+                string complexityBucket = GetControlComplexityBucket(family);
+                string split = holdoutFamilies.Contains(family) ? "validation" : "train";
+                baseRows.Add((rowId, family.ToLowerInvariant(), variant, pattern.TileX, pattern.TileY, pattern.TileSpan, complexityBucket, split, height, pack.TerrainShadow256));
+                bucketCounts[complexityBucket] = bucketCounts.GetValueOrDefault(complexityBucket) + 1;
+                if (!bucketFamilies.TryGetValue(complexityBucket, out List<string>? bucketFamilyList))
+                {
+                    bucketFamilyList = [];
+                    bucketFamilies[complexityBucket] = bucketFamilyList;
+                }
+                if (!bucketFamilyList.Contains(family, StringComparer.OrdinalIgnoreCase))
+                    bucketFamilyList.Add(family.ToLowerInvariant());
+
+                string fileName = $"{rowId}.npz";
+                string outputPath = Path.Combine(outputDirectory, fileName);
+                NpzTileSerializer.Serialize(pack, outputPath);
+                entries.Add(new
+                {
+                    row_id = rowId,
+                    source_kind = "procedural_control",
+                    control_family = family.ToLowerInvariant(),
+                    complexity_bucket = complexityBucket,
+                    variant,
+                    pattern_id = pattern.PatternId,
+                    pattern_tile_x = pattern.TileX,
+                    pattern_tile_y = pattern.TileY,
+                    pattern_tile_span = pattern.TileSpan,
+                    pattern_continuity = pattern.Continuity,
+                    field_offset_x = field.OffsetX,
+                    field_offset_y = field.OffsetY,
+                    cell_alignment = field.Alignment,
+                    input = "terrain_shadow_256",
+                    target = "height_257",
+                    input_shape = new[] { 256, 256 },
+                    target_shape = new[] { 257, 257 },
+                    split,
+                    input_sha256 = HashFloatGrid(pack.TerrainShadow256),
+                    target_sha256 = HashFloatGrid(pack.Height257),
+                    npz = fileName,
+                });
+            }
+        }
+
+        var manifest = new
+        {
+            schema = "v60-control-corpus-v1",
+            source_policy = "procedural_control_only",
+            generator = "WowViewer.Tool.Harvest control-corpus",
+            signal_contract = new[] { "terrain_shadow_256", "height_257" },
+            split_policy = "assign complete control families; no random row split",
+            row_count = entries.Count,
+            family_count = families.Length,
+            variant_count = variantCount,
+            families = families.Select(family => family.ToLowerInvariant()).ToArray(),
+            holdout_families = holdoutFamilies.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
+            complexity_bucket_vocabulary = new[] { "easy", "medium", "hard", "pathological" },
+            complexity_bucket_counts = bucketCounts,
+            complexity_bucket_families = bucketFamilies,
+            alignment_policy = "subcell_shifted_except_explicit_chunk_grid",
+            cross_tile_pattern_families = new[] { "cross_tile_lightning", "cross_tile_burn" },
+            rows = entries,
+        };
+        string manifestPath = Path.Combine(outputDirectory, "control_manifest.json");
+        File.WriteAllText(
+            manifestPath,
+            JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
+
+        WriteObjectSieveCorpus(outputDirectory, baseRows, holdoutFamilies);
+
+        Console.WriteLine($"Wrote {entries.Count} control rows to {Path.GetFullPath(outputDirectory)}");
+        Console.WriteLine($"Manifest: {manifestPath}");
+        Console.WriteLine("Signals: terrain_shadow_256 -> height_257");
+        Console.WriteLine($"Object sieve: {Path.Combine(outputDirectory, "object-sieve-v1")}");
+    }
+
+    private static bool IsCrossTileControlFamily(string family) =>
+        string.Equals(family, "cross_tile_lightning", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(family, "cross_tile_burn", StringComparison.OrdinalIgnoreCase);
+
+    private static void WriteObjectSieveCorpus(
+        string outputDirectory,
+        IReadOnlyList<(string RowId, string Family, int Variant, int TileX, int TileY, int TileSpan, string ComplexityBucket, string Split, float[,] Height, float[,] Shadow)> baseRows,
+        IReadOnlySet<string> holdoutFamilies)
+    {
+        string objectDirectory = Path.Combine(outputDirectory, "object-sieve-v1");
+        Directory.CreateDirectory(objectDirectory);
+        string[] objectFamilies = ["tree", "rock", "building", "bridge"];
+        string[] regimes = ["none", "sparse", "dense", "overlap", "boundary_crossing"];
+        var entries = new List<object>();
+
+        foreach (var baseRow in baseRows)
+        {
+            for (int objectVariant = 0; objectVariant < regimes.Length; objectVariant++)
+            {
+                string regime = regimes[objectVariant];
+                string objectFamily = objectFamilies[baseRow.Variant % objectFamilies.Length];
+                string rowId = $"{baseRow.RowId}-obj-{regime}";
+                (float[,] Objectified, float[,] Mask, int PlacementCount) overlay = BuildObjectOverlay(
+                    baseRow.Shadow,
+                    objectFamily,
+                    regime,
+                    baseRow.Variant,
+                    objectVariant,
+                    baseRow.TileX,
+                    baseRow.TileY,
+                    baseRow.TileSpan);
+
+                TerrainTileTensorPack pack = BuildControlPack(rowId, baseRow.Family, baseRow.Height);
+                pack.TerrainShadow256 = baseRow.Shadow;
+                pack.ObjectifiedTerrainShadow256 = overlay.Objectified;
+                pack.ObjectContaminationMask256 = overlay.Mask;
+                string fileName = $"{rowId}.npz";
+                NpzTileSerializer.Serialize(pack, Path.Combine(objectDirectory, fileName));
+                entries.Add(new
+                {
+                    row_id = rowId,
+                    source_kind = "procedural_object_control",
+                    terrain_control_row_id = baseRow.RowId,
+                    terrain_control_family = baseRow.Family,
+                    terrain_complexity_bucket = baseRow.ComplexityBucket,
+                    object_family = objectFamily,
+                    placement_regime = regime,
+                    placement_count = overlay.PlacementCount,
+                    pattern_tile_x = baseRow.TileX,
+                    pattern_tile_y = baseRow.TileY,
+                    pattern_tile_span = baseRow.TileSpan,
+                    input = "objectified_terrain_shadow_256",
+                    targets = new[] { "terrain_shadow_256", "object_contamination_mask_256" },
+                    input_shape = new[] { 256, 256 },
+                    target_shapes = new
+                    {
+                        terrain_shadow_256 = new[] { 256, 256 },
+                        object_contamination_mask_256 = new[] { 256, 256 },
+                    },
+                    split = holdoutFamilies.Contains(baseRow.Family) || regime == "boundary_crossing"
+                        ? "validation"
+                        : "train",
+                    input_sha256 = HashFloatGrid(overlay.Objectified),
+                    terrain_target_sha256 = HashFloatGrid(baseRow.Shadow),
+                    contamination_target_sha256 = HashFloatGrid(overlay.Mask),
+                    placement_metadata = new
+                    {
+                        seed = StableControlHash(baseRow.Family, baseRow.Variant, objectVariant, baseRow.TileX, baseRow.TileY),
+                        object_family = objectFamily,
+                        regime,
+                        placement_count = overlay.PlacementCount,
+                        cell_alignment = "subcell_shifted",
+                    },
+                    npz = fileName,
+                });
+            }
+        }
+
+        var manifest = new
+        {
+            schema = "v60-object-sieve-control-v1",
+            source_policy = "procedural_control_only",
+            generator = "WowViewer.Tool.Harvest control-corpus object-sieve",
+            source_control_manifest = "../control_manifest.json",
+            signal_contract = new[]
+            {
+                "objectified_terrain_shadow_256",
+                "terrain_shadow_256",
+                "object_contamination_mask_256",
+            },
+            row_count = entries.Count,
+            terrain_row_count = baseRows.Count,
+            object_families = objectFamilies,
+            placement_regimes = regimes,
+            alignment_policy = "subcell_shifted_and_boundary_crossing",
+            rows = entries,
+        };
+        string manifestPath = Path.Combine(objectDirectory, "object_sieve_manifest.json");
+        File.WriteAllText(
+            manifestPath,
+            JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private static (float[,] Objectified, float[,] Mask, int PlacementCount) BuildObjectOverlay(
+        float[,] clean,
+        string objectFamily,
+        string regime,
+        int terrainVariant,
+        int objectVariant,
+        int tileX,
+        int tileY,
+        int tileSpan)
+    {
+        const int resolution = 256;
+        var objectified = new float[resolution, resolution];
+        var mask = new float[resolution, resolution];
+        for (int row = 0; row < resolution; row++)
+        {
+            for (int column = 0; column < resolution; column++)
+                objectified[row, column] = clean[row, column];
+        }
+
+        int placementCount = regime switch
+        {
+            "none" => 0,
+            "sparse" => 2,
+            "dense" => 7,
+            "overlap" => 8,
+            "boundary_crossing" => 5,
+            _ => throw new ArgumentOutOfRangeException(nameof(regime), regime, "Unknown object placement regime."),
+        };
+        uint seed = StableControlHash(objectFamily, terrainVariant, objectVariant, tileSpan > 1 ? 0 : tileX, tileSpan > 1 ? 0 : tileY);
+        for (int placement = 0; placement < placementCount; placement++)
+        {
+            (float CentreX, float CentreY, float RadiusX, float RadiusY, float Rotation) objectPlacement =
+                GetObjectPlacement(seed, placement, regime, objectFamily);
+            StampObject(
+                clean,
+                objectified,
+                mask,
+                objectFamily,
+                objectPlacement.CentreX,
+                objectPlacement.CentreY,
+                objectPlacement.RadiusX,
+                objectPlacement.RadiusY,
+                objectPlacement.Rotation,
+                placement);
+        }
+
+        return (objectified, mask, placementCount);
+    }
+
+    private static (float CentreX, float CentreY, float RadiusX, float RadiusY, float Rotation) GetObjectPlacement(
+        uint seed,
+        int placement,
+        string regime,
+        string objectFamily)
+    {
+        uint placementSeed = unchecked(seed + ((uint)placement * 0x9E3779B9u));
+        float radiusBase = objectFamily switch
+        {
+            "tree" => 8.7f,
+            "rock" => 11.3f,
+            "building" => 15.8f,
+            "bridge" => 20.6f,
+            _ => 10.0f,
+        };
+        float radiusJitter = 0.72f + (0.68f * HashUnit(placementSeed ^ 0xA511E9B3u));
+        float radiusX = radiusBase * radiusJitter;
+        float radiusY = objectFamily == "bridge" ? radiusX * 0.32f : radiusX * (0.68f + (0.42f * HashUnit(placementSeed ^ 0x63D83595u)));
+        float rotation = (HashUnit(placementSeed ^ 0xC2B2AE35u) * MathF.Tau) + 0.11f;
+
+        if (regime == "boundary_crossing")
+        {
+            return (placement % 4) switch
+            {
+                0 => (-4.7f, 43.3f + (placement * 7.1f), radiusX, radiusY, rotation),
+                1 => (260.6f, 106.7f + (placement * 5.3f), radiusX, radiusY, rotation),
+                2 => (81.4f + (placement * 6.7f), -5.2f, radiusX, radiusY, rotation),
+                _ => (176.8f + (placement * 4.1f), 261.4f, radiusX, radiusY, rotation),
+            };
+        }
+
+        // Decimal offsets deliberately avoid 16-pixel chunk centers and edges.
+        float centreX = 10.7f + (234.6f * HashUnit(placementSeed ^ 0x1B873593u));
+        float centreY = 9.3f + (237.1f * HashUnit(placementSeed ^ 0x85EBCA6Bu));
+        if (regime == "overlap" && placement > 0)
+        {
+            centreX = 116.4f + (placement * 2.73f);
+            centreY = 133.7f + (placement * 1.91f);
+        }
+        return (centreX, centreY, radiusX, radiusY, rotation);
+    }
+
+    private static void StampObject(
+        float[,] clean,
+        float[,] objectified,
+        float[,] mask,
+        string objectFamily,
+        float centreX,
+        float centreY,
+        float radiusX,
+        float radiusY,
+        float rotation,
+        int placement)
+    {
+        int minColumn = Math.Max(0, (int)MathF.Floor(centreX - (radiusX * 2.3f) - 4f));
+        int maxColumn = Math.Min(255, (int)MathF.Ceiling(centreX + (radiusX * 2.3f) + 4f));
+        int minRow = Math.Max(0, (int)MathF.Floor(centreY - (radiusY * 3.0f) - 4f));
+        int maxRow = Math.Min(255, (int)MathF.Ceiling(centreY + (radiusY * 3.0f) + 4f));
+        float cosine = MathF.Cos(rotation);
+        float sine = MathF.Sin(rotation);
+        float objectTone = objectFamily switch
+        {
+            "tree" => 0.16f,
+            "rock" => 0.34f,
+            "building" => 0.72f,
+            "bridge" => 0.11f,
+            _ => 0.30f,
+        };
+
+        for (int row = minRow; row <= maxRow; row++)
+        {
+            for (int column = minColumn; column <= maxColumn; column++)
+            {
+                float dx = column - centreX;
+                float dy = row - centreY;
+                float localX = ((dx * cosine) + (dy * sine)) / MathF.Max(radiusX, 0.001f);
+                float localY = ((-dx * sine) + (dy * cosine)) / MathF.Max(radiusY, 0.001f);
+                bool body = IsObjectBody(objectFamily, localX, localY, placement);
+                float shadowX = (column - (centreX + (radiusX * 0.72f))) / MathF.Max(radiusX * 1.45f, 0.001f);
+                float shadowY = (row - (centreY + (radiusY * 0.58f))) / MathF.Max(radiusY * 1.22f, 0.001f);
+                bool castShadow = ((shadowX * shadowX) + (shadowY * shadowY)) <= 1f;
+                if (!body && !castShadow)
+                    continue;
+
+                mask[row, column] = 1f;
+                if (castShadow)
+                    objectified[row, column] = MathF.Min(objectified[row, column], clean[row, column] * 0.34f);
+                if (body)
+                    objectified[row, column] = (objectified[row, column] * 0.20f) + (objectTone * 0.80f);
+            }
+        }
+    }
+
+    private static bool IsObjectBody(string objectFamily, float x, float y, int placement)
+    {
+        return objectFamily switch
+        {
+            "tree" => (((x * x) + ((y + 0.12f) * (y + 0.12f))) <= 1.0f)
+                || (MathF.Abs(x) <= 0.16f && y > 0.25f && y < 1.25f),
+            "rock" => MathF.Sqrt((x * x) + (y * y)) <= 0.78f + (0.12f * MathF.Sin((x * 4.1f) + (y * 3.3f) + placement)),
+            "building" => MathF.Abs(x) <= 0.92f && MathF.Abs(y) <= 0.92f,
+            "bridge" => MathF.Abs(x) <= 1.0f && MathF.Abs(y) <= 0.24f,
+            _ => MathF.Sqrt((x * x) + (y * y)) <= 0.8f,
+        };
+    }
+
+    private static TerrainTileTensorPack BuildControlPack(string rowId, string family, float[,] height)
+    {
+        const int grid = 257;
+        float[] flatHeight = new float[grid * grid];
+        var normals = new float[grid, grid, 3];
+        var mask = new bool[grid, grid];
+
+        for (int row = 0; row < grid; row++)
+        {
+            for (int column = 0; column < grid; column++)
+                flatHeight[(row * grid) + column] = height[row, column];
+        }
+
+        for (int row = 0; row < grid; row++)
+        {
+            for (int column = 0; column < grid; column++)
+            {
+                Vector3 normal = AdtTerrainMath.ComputeNormal(flatHeight, column, row);
+                normals[row, column, 0] = normal.X;
+                normals[row, column, 1] = normal.Y;
+                normals[row, column, 2] = normal.Z;
+                mask[row, column] = true;
+            }
+        }
+
+        return new TerrainTileTensorPack
+        {
+            TileName = rowId,
+            MapName = "v60_control",
+            BuildKey = "v60-control-v1",
+            Height257 = height,
+            McnrNormalXyz = normals,
+            McnrMask257 = mask,
+            MclyTextureNames = [$"control-{family}.blp"],
+        };
+    }
+
+    private static (string PatternId, int TileX, int TileY, int TileSpan, string Continuity) GetControlPatternInfo(
+        string family,
+        int variant)
+    {
+        string normalized = family.ToLowerInvariant();
+        bool crossTile = normalized is "cross_tile_lightning" or "cross_tile_burn";
+        if (!crossTile)
+            return ($"{normalized}-local", 0, 0, 1, "tile_local");
+
+        int tileX = variant % 2;
+        int tileY = variant / 2;
+        return ($"{normalized}-pattern-00", tileX, tileY, 2, "continuous_global_2x2");
+    }
+
+    private static float[,] BuildControlHeight(string family, int variant, int tileX = 0, int tileY = 0, int tileSpan = 1)
+    {
+        const int grid = 257;
+        const float centre = (grid - 1) / 2f;
+        var height = new float[grid, grid];
+        bool crossTile = tileSpan > 1;
+        float scale = crossTile ? 0.82f : 0.70f + (0.10f * variant);
+        float phase = crossTile ? 0.73f : (variant + 1) * 0.73f;
+        (float offsetX, float offsetY, _) = GetControlFieldInfo(family, variant, tileSpan);
+
+        for (int row = 0; row < grid; row++)
+        {
+            float localY = (row - centre) / centre;
+            for (int column = 0; column < grid; column++)
+            {
+                float x = crossTile
+                    ? (((tileX * 256f) + column) - 256f) / 256f
+                    : (column - centre) / centre;
+                float terrainY = crossTile
+                    ? (((tileY * 256f) + row) - 256f) / 256f
+                    : localY;
+                x += offsetX;
+                terrainY += offsetY;
+                float radial = MathF.Sqrt((x * x) + (terrainY * terrainY));
+                float value = family.ToLowerInvariant() switch
+                {
+                    "flat" => 0f,
+                    "slope" => 180f * x,
+                    "dome" => 260f * Gaussian(x, terrainY, 0f, 0f, 0.62f),
+                    "ridge" => 240f * MathF.Exp(-(terrainY * terrainY) * 8f) * (0.55f + (0.45f * MathF.Cos(x * 2.4f))),
+                    "basin" => -220f * MathF.Exp(-((x * x) + (terrainY * terrainY)) * 4f),
+                    "plateau" => 180f * SmoothStep(0.72f, 0.46f, radial),
+                    "valley" => -230f * MathF.Exp(-(x * x) * 12f) * (0.55f + (0.45f * MathF.Cos(terrainY * 2.0f))),
+                    "terrace" => 24f * MathF.Floor((x + 1f) * 5f) + 40f * terrainY,
+                    "cliff" => (x < -0.12f ? -145f : 165f) + (35f * terrainY),
+                    "mountainous" => (315f * FractalField(x * 0.82f, terrainY * 0.82f, phase, ridged: true))
+                        + (190f * Gaussian(x, terrainY, -0.22f, 0.18f, 0.34f))
+                        + (120f * Gaussian(x, terrainY, 0.44f, -0.34f, 0.20f)),
+                    "sheer_dropoff" => SheerDropoffValue(x, terrainY, phase, variant),
+                    "zone_style_blend" => ZoneStyleBlendValue(x, terrainY, phase, variant),
+                    "chunk_grid" => ChunkGridValue(column, row, variant, mixed: false),
+                    "chunk_grid_mixed" => ChunkGridValue(column, row, variant, mixed: true)
+                        + (90f * Gaussian(x, terrainY, 0.18f, -0.20f, 0.36f)),
+                    "island_sea" => -155f
+                        + (430f * Gaussian(x, terrainY, -0.18f, -0.08f, 0.38f))
+                        + (125f * Gaussian(x, terrainY, 0.48f, 0.42f, 0.13f)),
+                    "archipelago" => -165f
+                        + (330f * Gaussian(x, terrainY, -0.48f, -0.20f, 0.23f))
+                        + (280f * Gaussian(x, terrainY, 0.12f, 0.18f, 0.28f))
+                        + (220f * Gaussian(x, terrainY, 0.54f, -0.48f, 0.16f))
+                        + (120f * Gaussian(x, terrainY, -0.12f, 0.64f, 0.10f)),
+                    "crater_field" => Crater(x, terrainY, -0.36f, -0.28f, 0.22f)
+                        + Crater(x, terrainY, 0.24f, -0.10f, 0.30f)
+                        + Crater(x, terrainY, 0.48f, 0.48f, 0.15f),
+                    "canyon_fan" => (130f * terrainY)
+                        - (210f * MathF.Exp(-((x + 0.18f) * (x + 0.18f)) * 24f) * (0.35f + (0.65f * ((terrainY + 1f) / 2f))))
+                        + (45f * MathF.Sin((x * 9f) + (terrainY * 3f) + phase)),
+                    "rolling" => 120f * MathF.Sin(x * 4.5f + phase) * MathF.Cos(terrainY * 3.2f - phase),
+                    "noise" => 75f * (
+                        MathF.Sin((x * 17.0f) + phase) +
+                        (0.5f * MathF.Sin((terrainY * 29.0f) - phase)) +
+                        (0.25f * MathF.Cos(((x + terrainY) * 41.0f) + phase))),
+                    "mixed" => (115f * MathF.Sin(x * 3.8f + phase) * MathF.Cos(terrainY * 4.2f - phase))
+                        + (180f * Gaussian(x, terrainY, -0.30f, 0.18f, 0.24f))
+                        - (125f * Gaussian(x, terrainY, 0.38f, -0.32f, 0.16f))
+                        + (ChunkGridValue(column, row, variant, mixed: true) * 0.45f),
+                    "fractal_fbm" => 250f * FractalField(x, terrainY, phase, ridged: false),
+                    "fractal_ridged" => 230f * FractalField(x, terrainY, phase, ridged: true),
+                    "lightning_burn" => LightningBurnField(x, terrainY, phase, woodBurn: true),
+                    "cross_tile_lightning" => LightningBurnField(x, terrainY, phase, woodBurn: false),
+                    "cross_tile_burn" => LightningBurnField(x, terrainY, phase, woodBurn: true)
+                        + (75f * FractalField(x * 1.35f, terrainY * 1.35f, phase + 0.31f, ridged: true)),
+                    "pathological" => (ChunkGridValue(column, row, variant, mixed: true) * 0.85f)
+                        + (150f * MathF.Exp(-((x + 0.22f) * (x + 0.22f)) * 90f))
+                        - (125f * MathF.Exp(-((terrainY - 0.34f) * (terrainY - 0.34f)) * 110f))
+                        + (35f * MathF.Sin((x * 47f) + (terrainY * 53f) + phase)),
+                    _ => 0f,
+                };
+
+                float boundedRipple = variant == 0 || crossTile || family.Equals("chunk_grid", StringComparison.OrdinalIgnoreCase)
+                    ? 0f
+                    : 8f * MathF.Sin((x * 11f) + (terrainY * 7f) + phase);
+                height[row, column] = (value * scale) + boundedRipple;
+            }
+        }
+
+        return height;
+    }
+
+    private static string GetControlComplexityBucket(string family) => family.ToLowerInvariant() switch
+    {
+        "flat" or "slope" => "easy",
+        "dome" or "basin" or "plateau" or "rolling" => "medium",
+        "ridge" or "valley" or "terrace" or "cliff" or "mountainous" or "chunk_grid" or "chunk_grid_mixed"
+            or "island_sea" or "archipelago" or "crater_field" or "canyon_fan" or "fractal_fbm" => "hard",
+        "sheer_dropoff" or "zone_style_blend" or "fractal_ridged" or "lightning_burn"
+            or "cross_tile_lightning" or "cross_tile_burn" or "noise" or "mixed" or "pathological" => "pathological",
+        _ => "pathological",
+    };
+
+    private static (float OffsetX, float OffsetY, string Alignment) GetControlFieldInfo(
+        string family,
+        int variant,
+        int tileSpan)
+    {
+        string normalized = family.ToLowerInvariant();
+        if (normalized == "chunk_grid")
+            return (0f, 0f, "chunk_aligned");
+
+        // Cross-tile rows share one offset so their global pattern remains continuous. All other
+        // families receive deterministic sub-cell translations that are intentionally unrelated to
+        // the 16x16 chunk lattice. This models artist-authored/copied terrain that ignores cell edges.
+        uint seed = StableControlHash(normalized, variant, tileSpan > 1 ? 0 : 1, 0, 0);
+        float offsetX = -0.39f + (0.78f * HashUnit(seed));
+        float offsetY = -0.39f + (0.78f * HashUnit(seed ^ 0x9E3779B9u));
+        string alignment = normalized == "pathological" ? "mixed_alignment" : "subcell_shifted";
+        return (offsetX, offsetY, alignment);
+    }
+
+    private static uint StableControlHash(string family, int variant, int regime, int tileX, int tileY)
+    {
+        unchecked
+        {
+            uint hash = 2166136261u;
+            foreach (char character in family)
+            {
+                hash ^= character;
+                hash *= 16777619u;
+            }
+
+            hash ^= (uint)variant;
+            hash *= 16777619u;
+            hash ^= (uint)regime;
+            hash *= 16777619u;
+            hash ^= (uint)tileX;
+            hash *= 16777619u;
+            hash ^= (uint)tileY;
+            hash *= 16777619u;
+            return hash;
+        }
+    }
+
+    private static float HashUnit(uint value) => value / (float)uint.MaxValue;
+
+    private static float SheerDropoffValue(float x, float y, float phase, int variant)
+    {
+        float angle = 0.31f + (0.47f * (variant % 4));
+        float normalX = MathF.Cos(angle);
+        float normalY = MathF.Sin(angle);
+        float boundary = (x * normalX) + (y * normalY) - (-0.11f + (0.19f * MathF.Sin(phase)));
+        float wall = SmoothStep(0.045f, -0.045f, boundary);
+        float detail = FractalField((x * 1.25f) + phase, (y * 1.25f) - phase, phase, ridged: true);
+        float low = -185f + (42f * detail);
+        float high = 225f + (65f * detail);
+        return (low * (1f - wall)) + (high * wall);
+    }
+
+    private static float ZoneStyleBlendValue(float x, float y, float phase, int variant)
+    {
+        float angle = 0.18f + (0.29f * (variant % 4));
+        float boundary = (x * MathF.Cos(angle)) + (y * MathF.Sin(angle))
+            - (0.14f * MathF.Sin((y * 3.1f) + phase));
+        float blend = SmoothStep(-0.12f, 0.12f, boundary);
+        float smoothStyle = (110f * MathF.Sin((x * 3.2f) + phase))
+            + (70f * MathF.Cos((y * 2.7f) - phase))
+            + (45f * FractalField(x * 1.4f, y * 1.4f, phase, ridged: false));
+        float roughStyle = (250f * FractalField((x * 0.9f) - phase, (y * 0.9f) + phase, phase + 0.23f, ridged: true))
+            + (95f * MathF.Sin((x * 8.0f) - (y * 2.0f) + phase));
+        return (smoothStyle * (1f - blend)) + (roughStyle * blend);
+    }
+
+    private static float Gaussian(float x, float y, float centreX, float centreY, float sigma)
+    {
+        float dx = x - centreX;
+        float dy = y - centreY;
+        float inverseVariance = 1f / MathF.Max(sigma * sigma, 0.0001f);
+        return MathF.Exp(-0.5f * ((dx * dx) + (dy * dy)) * inverseVariance);
+    }
+
+    private static float Crater(float x, float y, float centreX, float centreY, float radius)
+    {
+        float distance = MathF.Sqrt(((x - centreX) * (x - centreX)) + ((y - centreY) * (y - centreY)));
+        float rim = 155f * MathF.Exp(-MathF.Pow((distance - radius) * 8f, 2f));
+        float bowl = -220f * MathF.Exp(-MathF.Pow(distance * 5f, 2f));
+        return rim + bowl;
+    }
+
+    private static float ChunkGridValue(int column, int row, int variant, bool mixed)
+    {
+        int chunkX = Math.Min(column / 16, 15);
+        int chunkY = Math.Min(row / 16, 15);
+        int code = (chunkX * 17) + (chunkY * 31) + (variant * 13);
+        float stepped = ((code % 9) - 4) * 38f;
+        if (!mixed)
+            return stepped;
+
+        float x = (column - 128f) / 128f;
+        float y = (row - 128f) / 128f;
+        return stepped + (65f * MathF.Sin((x * 5.0f) + (y * 3.0f) + variant));
+    }
+
+    private static float FractalField(float x, float y, float phase, bool ridged)
+    {
+        float total = 0f;
+        float normalization = 0f;
+        float amplitude = 1f;
+        float frequency = 1f;
+
+        for (int octave = 0; octave < 6; octave++)
+        {
+            float sample = 0f;
+            for (int direction = 0; direction < 4; direction++)
+            {
+                float angle = (direction * 0.73f) + (octave * 0.19f);
+                float rotated = (x * MathF.Cos(angle)) - (y * MathF.Sin(angle));
+                sample += MathF.Sin((rotated * frequency * 9.0f) + phase + (direction * 0.41f));
+            }
+
+            sample /= 4f;
+            if (ridged)
+                sample = (1f - MathF.Abs(sample)) * 2f - 1f;
+
+            total += sample * amplitude;
+            normalization += amplitude;
+            frequency *= 2f;
+            amplitude *= 0.52f;
+        }
+
+        return normalization <= 0f ? 0f : total / normalization;
+    }
+
+    private static float LightningBurnField(float x, float y, float phase, bool woodBurn)
+    {
+        float shift = 0.06f * MathF.Sin(phase);
+        float distance = float.PositiveInfinity;
+
+        // A deterministic dendritic stroke: the main branch and its splinters extend beyond
+        // [-1,1], so the cross-tile families intentionally show partial motifs at tile edges.
+        distance = MathF.Min(distance, DistanceToSegment(x, y, -1.15f, -0.78f, -0.78f, -0.52f + shift));
+        distance = MathF.Min(distance, DistanceToSegment(x, y, -0.78f, -0.52f + shift, -0.46f, -0.36f));
+        distance = MathF.Min(distance, DistanceToSegment(x, y, -0.46f, -0.36f, -0.18f, -0.06f - shift));
+        distance = MathF.Min(distance, DistanceToSegment(x, y, -0.18f, -0.06f - shift, 0.10f, 0.10f));
+        distance = MathF.Min(distance, DistanceToSegment(x, y, 0.10f, 0.10f, 0.38f, 0.32f + shift));
+        distance = MathF.Min(distance, DistanceToSegment(x, y, 0.38f, 0.32f + shift, 0.72f, 0.38f));
+        distance = MathF.Min(distance, DistanceToSegment(x, y, 0.72f, 0.38f, 1.15f, 0.78f));
+
+        distance = MathF.Min(distance, DistanceToSegment(x, y, -0.78f, -0.52f, -0.94f, -0.10f));
+        distance = MathF.Min(distance, DistanceToSegment(x, y, -0.46f, -0.36f, -0.72f, -0.78f));
+        distance = MathF.Min(distance, DistanceToSegment(x, y, -0.18f, -0.06f, 0.00f, -0.56f));
+        distance = MathF.Min(distance, DistanceToSegment(x, y, 0.10f, 0.10f, 0.25f, 0.62f));
+        distance = MathF.Min(distance, DistanceToSegment(x, y, 0.38f, 0.32f, 0.70f, 0.70f));
+        distance = MathF.Min(distance, DistanceToSegment(x, y, 0.72f, 0.38f, 1.02f, 0.08f));
+
+        float stroke = MathF.Exp(-(distance * distance) * (woodBurn ? 1050f : 780f));
+        float halo = MathF.Exp(-(distance * distance) * 180f);
+        float localFractal = FractalField((x * 1.7f) + phase, (y * 1.7f) - phase, phase + 0.17f, ridged: true);
+        float trench = woodBurn ? -190f : -135f;
+        return (trench * stroke) + (48f * halo * localFractal) + (woodBurn ? 18f : 0f) * localFractal;
+    }
+
+    private static float DistanceToSegment(float x, float y, float x0, float y0, float x1, float y1)
+    {
+        float dx = x1 - x0;
+        float dy = y1 - y0;
+        float lengthSquared = (dx * dx) + (dy * dy);
+        if (lengthSquared <= 0.000001f)
+            return MathF.Sqrt(((x - x0) * (x - x0)) + ((y - y0) * (y - y0)));
+
+        float t = Math.Clamp((((x - x0) * dx) + ((y - y0) * dy)) / lengthSquared, 0f, 1f);
+        float nearestX = x0 + (t * dx);
+        float nearestY = y0 + (t * dy);
+        return MathF.Sqrt(((x - nearestX) * (x - nearestX)) + ((y - nearestY) * (y - nearestY)));
+    }
+
+    private static float SmoothStep(float edge0, float edge1, float value)
+    {
+        float t = Math.Clamp((value - edge0) / (edge1 - edge0), 0f, 1f);
+        return t * t * (3f - (2f * t));
+    }
+
+    private static string HashFloatGrid(float[,]? values)
+    {
+        if (values is null)
+            return string.Empty;
+
+        byte[] bytes = new byte[Buffer.ByteLength(values)];
+        Buffer.BlockCopy(values, 0, bytes, 0, bytes.Length);
+        return Convert.ToHexStringLower(SHA256.HashData(bytes));
     }
 
     /// <summary>Names a bearing in world axes, where +X is North and +Y is West.</summary>

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "v60-albedo-gate-report.schema.json",
+  "title": "V60 Albedo Normalization and Textureless Gate Report",
+  "type": "object",
+  "required": ["schema", "method", "gate_version", "rows", "counts"],
+  "properties": {
+    "schema": { "const": "v60-albedo-gate-report-v1" },
+    "method": { "type": "string", "minLength": 1 },
+    "method_version": { "type": "string", "minLength": 1 },
+    "gate_version": { "type": "string", "minLength": 1 },
+    "source_policy": { "const": ["0.x", "1.x"] },
+    "thresholds": { "type": "object", "additionalProperties": { "type": "number" } },
+    "counts": {
+      "type": "object",
+      "required": ["accepted", "rejected", "quarantined"],
+      "properties": {
+        "accepted": { "type": "integer", "minimum": 0 },
+        "rejected": { "type": "integer", "minimum": 0 },
+        "quarantined": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["row_id", "decision", "metrics", "reason"],
+        "properties": {
+          "row_id": { "type": "string", "minLength": 1 },
+          "input_artifact": { "type": "string" },
+          "normalized_artifact": { "type": ["string", "null"] },
+          "albedo_artifact": { "type": ["string", "null"] },
+          "decision": { "enum": ["accepted", "rejected", "quarantined"] },
+          "metrics": { "type": "object" },
+          "reason": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -304,6 +304,18 @@ public sealed class TerrainTileTensorPack
     /// <summary>256×256 per-pixel confidence for <see cref="ObjectRoofMask256"/>.</summary>
     public float[,]? ObjectRoofConfidence256 { get; init; }
 
+    /// <summary>
+    /// 256×256 synthetic or learned minimap signal after object contamination has been added.
+    /// This v60 control-lane signal is distinct from the clean terrain shadow.
+    /// </summary>
+    public float[,]? ObjectifiedTerrainShadow256 { get; set; }
+
+    /// <summary>
+    /// 256×256 screen-space contamination target for the v60 object-sieve control lane.
+    /// Includes configured object appearance, occlusion, and object-effect pixels.
+    /// </summary>
+    public float[,]? ObjectContaminationMask256 { get; set; }
+
     /// <summary>Provenance label for the roof mask source (metadata, learned, heuristic, none).</summary>
     public string ObjectRoofMaskSource { get; init; } = string.Empty;
 

@@ -1,127 +1,223 @@
-# Implementation Plan: V60 Unified Dataset and Shadow-First Terrain Model
+# Implementation Plan: V60 Controlled Terrain Reconstruction Experiment
 
-**Branch**: `134-v60-unified-dataset-model` | **Date**: 2026-08-05 | **Spec**: [spec.md](./spec.md)
+**Branch**: `134-v60-unified-dataset-model` | **Date**: 2026-08-08 | **Spec**: [spec.md](./spec.md)
 
 ## Summary
 
-Four phases, executed in dependency order:
+Four bounded phases, in dependency order:
 
-1. **Unified v60 dataset** (US1, P1) — consolidate all scattered stores into a single v60 Zarr, re-harvest with the new C# code to get `terrain_shadow_256`, update the v50 build pipeline to v60.
-2. **Curation fix** (US2, P1) — apply `surviving_height_levels` gating, rebuild the training curriculum.
-3. **Shadow→height model** (US3, P1) — train a model that takes `terrain_shadow_256 → height_257`, beats the tile-mean baseline.
-4. **Release v0.5.2** (US4, P2) — merge branches, update docs, tag release, publish via CI.
+1. **Synthetic controls** — generate a small deterministic terrain corpus with exact input/target
+   pairs and family holdouts.
+2. **Object sieve and control-only model experiments** — first test object removal/decomposition,
+   then run limited height-reconstruction training sizes.
+3. **Albedo normalization and gate** — process a tiny explicit 0.x/1.x real sample, measure how well
+   texture/albedo can be removed, and admit only accepted textureless outputs.
+4. **Transfer and expansion decision** — compare the accepted real sample to controls, then hold,
+   diagnose, or authorize broader processing.
+
+Later signals and later clients are extension phases only after the transfer route is understood.
+This plan deliberately removes full-client harvesting, v50-store consolidation, base/delta
+historical storage, and a 4,000-sample minimum from v60-control-v1.
 
 ## Technical Context
 
-**Language/Version**: Python 3.14 / uv (dataset + model), C# / .NET 10 (harvest tool)
-**Primary Dependencies**: `zarr`, `pyarrow`, `numpy`, `torch` (model, CUDA required for training)
-**Storage**: Single v60 Zarr store under `wow-viewer/output/datasets/v60/v60.1/`
-**Target Platform**: Windows desktop (existing trainer environment); user's local RTX 4070 Ti SUPER (16 GB VRAM)
-**Testing**: `pytest` for Python changes, `dotnet test` for C# changes
+**Languages**: C#/.NET for terrain decode/synthesis and ADT ownership; Python/uv for normalization
+orchestration, validation, experiment indexing, and reports.
+**Synthetic authority**: existing `TerrainMinimapCompositor.ComposeShadowArray` and the established
+synthetic-minimap path. New code must reuse those seams rather than implement a second lighting
+equation.
+**Initial source policy**: procedural families require no client; client-backed real transfer seeds
+are limited to approved and explicitly classified `0.x`/`1.x` roots.
+**First input/target**: `terrain_shadow_256` (256x256) → `height_257` (257x257).
+**Object sieve input/targets**: `objectified_terrain_shadow_256` (256x256) → clean
+`terrain_shadow_256` plus `object_contamination_mask_256`; the mask is an auxiliary output and
+loss-side target, never a ground-truth inference channel.
+**Initial control size**: approximately 32–128 rows, with limited model runs at manifest-selected
+training sizes such as 8, 16, and 32.
+**Real-data route**: authored minimap → versioned albedo normalization → textureless gate → tiny
+transfer sample. The existing metadata-derived texture identity albedo is not treated as this
+inverse operation.
+**Testing**: focused Python tests, focused C# synthesis/writer tests, JSON contract checks, and
+lightweight offline validation. Codex does not launch full harvests, real-client processing, GPU
+training, or long-running operations.
 
 ## Constitution Check
 
 | Principle | Status | Notes |
-|-----------|--------|-------|
-| Repo Independence | PASS | All new code under `wow-viewer/`. |
-| Library-First | PASS | Reuses existing `harvester.v50.*` modules. |
-| Real-Data Validation | PASS | Existing v50.1 stores on disk. |
-| Per-Signal Evidence | PASS | shadow→height model reports per-signal metrics. |
-| Streaming-First | PASS | Zarr stores are the output format. |
-| No Hardcoded Paths | PASS | Client root is CLI argument. |
-| User Runs Training | PASS | Training commands are prepared, never launched. |
-| One Phase at a Time | PASS | Four phases, each ending in validation. |
+|---|---|---|
+| Repo Independence | PASS | All new implementation remains under `wow-viewer/`. |
+| Library First | PASS | Synthesis stays owned by core terrain/compositor code. |
+| Per-Signal Evidence | PASS | Control and transfer reports separate input/height evidence from gate/domain evidence. |
+| No Hardcoded Paths | PASS | Source manifests and output roots are runtime inputs. |
+| User Runs Heavy Work | PASS | Full synthesis, real-client processing, and training commands are handed to the user. |
+| One Phase at a Time | PASS | Each gate blocks the next phase until its evidence exists. |
+| Fail Closed | PASS | Missing arrays, bad normalization, and uncalibrated textureless outputs are rejected. |
 
 ## Project Structure
 
-```
+```text
 wow-viewer/
+├── src/core/WowViewer.Core.IO/Maps/
+│   └── existing terrain synthesis/compositor seams       # reuse; extend only if required
+├── tools/harvest/WowViewer.Tool.Harvest/
+│   └── Program.cs                                        # control-corpus command
+├── data-harvester/src/harvester/v60/
+│   ├── control_corpus.py                                 # manifest/hash/split validation
+│   ├── object_sieve.py                                    # object-overlay corpus validation
+│   ├── object_sieve_model.py                              # clean/mask/guided model variants
+│   └── albedo_normalization.py                           # planned versioned real-input operation
 ├── data-harvester/scripts/
-│   ├── v60_build_from_npz.py              # NEW — build v60 Zarr from NPZ harvest shards
-│   └── v60_train_shadow_height.py          # NEW — shadow→height model training
-├── data-harvester/src/harvester/v50/
-│   ├── classify.py                         # EXISTING — three-tier classification
-│   ├── training_curriculum.py             # MODIFIED — curation gating (height levels)
-│   └── v60_store.py                        # NEW — v60 store builder library
-├── output/datasets/v60/
-│   └── v60.1/
-│       └── unified.zarr/                   # NEW — single consolidated store
-├── docs/releases/
-│   └── v0.5.2.md                           # EXISTING — update for release notes
-├── README.md                               # UPDATE
-└── docs/WoWViewer/USERGUIDE.md             # UPDATE
+│   ├── v60_validate_control_corpus.py                    # offline validator
+│   ├── v60_visualize_control_corpus.py                   # family/variant visual atlas
+│   ├── v60_validate_object_sieve.py                       # object-sieve validator
+│   ├── v60_visualize_object_sieve.py                     # object input/mask atlases
+│   ├── v60_normalize_albedo.py                           # planned gate runner
+│   └── v60_run_experiment.py                             # planned bounded evaluator/trainer wrapper
+├── data-harvester/tests/v60/
+│   ├── test_control_corpus.py                             # existing focused fixture tests
+│   ├── test_object_sieve.py                               # object-overlay contract tests
+│   ├── test_object_sieve_model.py                         # model/loss smoke tests
+│   └── test_albedo_normalization.py                       # planned fail-closed gate tests
+└── specs/134-v60-unified-dataset-model/
+    ├── contracts/                                        # manifest, gate, and experiment JSON contracts
+    ├── data-model.md
+    ├── research.md
+    └── quickstart.md
 ```
 
-## Phases
+## Phase 1: Synthetic control corpus (P1)
 
-### Phase 1: Unified v60 dataset (US1, P1)
+**Goal**: Produce a small deterministic corpus without a complete client harvest.
 
-**Goal**: Single v60 Zarr store with all signals, including `terrain_shadow_256`.
+1. Keep the explicit family/variant manifest and initial 0.x/1.x source policy visible.
+2. Reuse the existing decoded-terrain and compositor/writer seams to generate exact control rows.
+3. Emit the full default taxonomy: smooth/monotonic/plateau, ridged/valley, terraced/cliff,
+   mountainous relief, arbitrary-angle sheer drop-offs, zone-style blends, chunk-grid,
+   island/archipelago, crater/canyon, fBm/ridged-fractal, lightning-burn, cross-tile lightning/burn,
+   mixed, and pathological families.
+4. Generate cross-tile families in one global 2x2 coordinate system and persist pattern ID, tile
+   coordinates, span, and continuity metadata.
+5. Assign every family to the established `easy`, `medium`, `hard`, or `pathological` bucket and
+   summarize bucket counts in the manifest.
+6. Keep lighting/albedo controls independent from height controls in row metadata.
+7. Write `terrain_shadow_256`, `height_257`, row metadata, split membership, and hashes.
+8. Hold out complete source families, not random rows.
+9. Render family, variant, and stitched cross-tile atlases from the emitted NPZ signals and report
+   missing coverage.
+10. Validate repeatability, shape/range/finite constraints, cross-tile completeness, and absence of
+    missing signals.
+11. Record deterministic sub-cell field offsets for every non-grid row; reserve exact chunk alignment
+    for the explicit `chunk_grid` diagnostic family.
 
-**Implementation**:
+**Gate**: 32–128 deterministic terrain control rows exist; every row has an exact pair and complexity
+bucket; the visual atlas shows the intended family coverage; no v50 store or full-client harvest was
+required.
 
-1. **Create `v60_build_from_npz.py`** — reads NPZ shards from the harvest tool's output (harvest-map-mpq), builds a single v60 Zarr store with all signals including `terrain_shadow_256`, and writes a unified index across all builds and maps. The v60 store is the training dataset — NOT the archaeology pipeline.
-2. **Re-harvest with spec 133 C# changes** — user runs the updated harvest tool to get NPZ shards with `terrain_shadow_256` for all desired builds (0.5.3, 1.0.0, 3.3.5, 4.0.0.11927).
-3. **Build v60 store from re-harvested NPZ** — the v60 builder reads the new NPZ shards and writes the consolidated store with `terrain_shadow_256` included.
-4. **Update the signal catalog** — add `terrain_shadow_256`, `signal_class`, `surviving_height_levels` to the frozen catalog.
-5. **Validate** — verify every tile has all expected signals, check determinism.
+## Phase 2: Object sieve and limited control-data model experiments (P1)
 
-**Gate**: A single v60 store exists with all signals from both Kalimdor and Azeroth, deterministic.
+**Goal**: Determine whether the canonical textureless input can first be cleaned of object
+contamination, then determine whether it contains enough information for useful height reconstruction.
 
-### Phase 2: Curation fix (US2, P1)
+### Stage A — object sieve
 
-**Goal**: Training curriculum with `surviving_height_levels` gating.
+1. Add a deterministic synthetic object overlay authority on top of the canonical terrain shadow;
+   do not duplicate the terrain lighting equation.
+2. Emit no-object, sparse, dense, overlapping, and boundary-crossing object controls with placement
+   metadata and exact `object_contamination_mask_256` targets.
+3. Train/evaluate three bounded variants: clean-output-only, auxiliary mask loss, and predicted-mask
+   guidance into the clean-output head.
+4. Use the predicted mask for guidance during both training and inference. Ground-truth masks are
+   loss-side supervision only.
+5. Report clean-terrain metrics and mask metrics independently by density, placement regime, and
+   held-out object family.
 
-**Implementation**:
+**Stage A gate**: The mask head must beat its trivial baseline and the guided clean output must be
+compared against the clean-only and auxiliary-loss variants. A good mask score does not hide a
+failed clean-terrain score.
 
-1. **Implement curation gating in `training_curriculum.py`** — add `--min-height-levels` and `--max-height-levels` options that filter tiles by `surviving_height_levels`. Default: exclude ≤64, admit compressed-rich.
-2. **Rebuild curriculum** — run the curriculum builder against the v60 store with the curation fix applied.
-3. **Validate** — confirm the excluded tiles are the ones that teach wrong relationships (2-level tiles, etc.) and the admitted tiles are the compressed-rich ones with correct targets.
+### Stage B — height reconstruction
 
-**Gate**: A v60 curriculum exists with the curation fix, and the excluded/admitted tile lists are correct by manual inspection.
+1. Add a control-v1 loader/evaluator without changing historical training contracts.
+2. Select limited training sizes from the manifest, keeping the held-out families fixed.
+3. Run the first model on `terrain_shadow_256` only and target `height_257`.
+4. Compare against a tile-mean baseline.
+5. Report metrics by source family, variant family, and training size.
+6. Run retexturing/relighting controls with unchanged terrain targets.
+7. Mark flat/weakly informative terrain as ambiguity rather than confident success.
 
-### Phase 3: Shadow→height model (US3, P1)
+**Stage B gate**: The result says whether the clean signal/height relationship is learnable on
+controls. A failed result is a bounded diagnostic and does not trigger a return to broad harvest.
 
-**Goal**: A model that takes `terrain_shadow_256 → height_257` and beats the tile-mean baseline.
+## Phase 3: Albedo normalization and textureless gate (P1)
 
-**Implementation**:
+**Goal**: Build and calibrate the first real-input boundary before transfer.
 
-1. **Create `v60_train_shadow_height.py`** — training script that loads `terrain_shadow_256` as input (1 channel) and `height_257` as target. Reuses `direct_cnn_v112` architecture with `in_channels=1`.
-2. **User runs training** — exact command:
-   ```
-   cd wow-viewer/data-harvester
-   uv run python scripts/v60_train_shadow_height.py \
-       --store ../output/datasets/v60/v60.1/unified.zarr \
-       --output ../output/runs/shadow-height-v1 \
-       --epochs 200
-   ```
-3. **Evaluate** — compare val_mae against the frozen baseline (0.1493). Target: beat by 5% relative (val_mae < 0.142).
+1. Define a versioned `authored minimap → normalized textureless input` operation contract.
+2. Keep the synthetic textureless compositor output as calibration/reference data, not as a hidden
+   substitute for real input.
+3. Implement an explicit albedo estimate/removal output with method/version and residual metrics.
+4. Build positive synthetic controls and deliberately textured/failed negative controls.
+5. Calibrate and persist textureless thresholds from those controls.
+6. Fail closed for missing, non-finite, uncalibrated, or residual-textured outputs.
+7. Run only a tiny explicit 0.x/1.x sample and write accepted/rejected/quarantined decisions.
 
-**Gate**: A trained checkpoint with val_mae < 0.142 on the held-out validation set.
+**Gate**: The report proves which real rows are admitted and why; no rejected or quarantined row
+enters the model directory; thresholds and artifacts are reproducible.
 
-### Phase 4: Release v0.5.2 (US4, P2)
+## Phase 4: Tiny transfer and expansion decision (P2)
 
-**Goal**: Release v0.5.2, merge branches, update docs, start new dev branch.
+**Goal**: Determine whether the control result transfers to normalized real inputs.
 
-**Implementation**:
+1. Evaluate the accepted tiny real sample with the same input contract and evaluator.
+2. Compare input distributions, failure signatures, and baseline-relative metrics with controls.
+3. Record a `TransferGate` decision of `hold`, `diagnose`, or `expand`.
+4. If held, diagnose normalization/domain shift before changing row count.
+5. If expanded, process the next bounded batch through the same gate and preserve client provenance.
 
-1. **Update docs**: README.md, USERGUIDE.md, v0.5.2.md release notes with the current state.
-2. **Merge branches**: 131-pm4-scene-graph-doodads → main, 132-terrain-brush-signature-classification → main, 133-unbaked-minimap-decomposition → main, 134-v60-unified-dataset-model → main.
-3. **Tag v0.5.2**: `git tag v0.5.2 && git push origin v0.5.2` triggers CI to publish release.
-4. **Create new dev branch**: branch off main for continued work.
+**Gate**: Broader processing is allowed only by an explicit `expand` decision; a strong synthetic
+score alone never authorizes it.
 
-**Gate**: GitHub Release published with v0.5.2 binaries, README current, main contains all work.
+## Deferred extensions (P3)
 
-## Dependency Graph
+Only after Phase 4:
 
+1. Add one exact signal at a time: normals, texture identity, holes, or liquid.
+2. Add optional object presence/instance or object-family heads only after the binary contamination
+   sieve is proven useful.
+3. Add later client source adapters behind the same manifest and gate contracts.
+4. Expand control families or variants only in response to measured failure modes.
+
+## User-run commands (prepared, not executed here)
+
+Build the control tool:
+
+```powershell
+dotnet build "I:/parp/parp-tools/wow-viewer/tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harvest.csproj" -c Debug --no-restore
 ```
-Phase 1 (v60 store) ──> Phase 2 (curation) ──> Phase 3 (model) 
-                                                         
-Phase 4 (release) ── independent, can run in parallel with Phases 1-3
+
+Generate the initial 108-row full-taxonomy procedural control run and its 540-row object-sieve
+derivative corpus:
+
+```powershell
+dotnet "I:/parp/parp-tools/wow-viewer/tools/harvest/WowViewer.Tool.Harvest/bin/Debug/net10.0/WowViewer.Tool.Harvest.dll" control-corpus --output-dir "I:/parp/parp-tools/wow-viewer/output/datasets/v60/control-v1" --variants 4 --holdout-families chunk_grid,island_sea,sheer_dropoff,zone_style_blend,cross_tile_lightning,cross_tile_burn,noise,pathological
 ```
 
-Phase 1 must complete before Phase 2 (curriculum needs the v60 store). Phase 2 must complete before Phase 3 (model needs the curated curriculum). Phase 4 is independent but should be the last phase to complete (it's the release).
+Validate it before model work:
 
-## MVP scope
+```powershell
+Set-Location "I:/parp/parp-tools/wow-viewer/data-harvester"
+uv run python scripts/v60_validate_control_corpus.py --corpus "../output/datasets/v60/control-v1" --write-report
+```
 
-Phase 1 (v60 unified store) + Phase 2 (curation fix) + Phase 3 (shadow→height model) are the P1 deliverables. Phase 4 (release) is P2 and can be deferred if needed.
+Render the visual family/variant atlases:
+
+```powershell
+uv run python scripts/v60_visualize_control_corpus.py --corpus "../output/datasets/v60/control-v1" --output-dir "../output/datasets/v60/control-v1/visual-review" --variants-per-family 4
+```
+
+Review `control-family-atlas.png`, `control-variant-atlas.png`, and
+`control-visual-review.json`. If `coverage_complete` is false or a family/bucket is visually
+uninteresting, adjust the control generator before training.
+
+Albedo normalization, model training, and real transfer commands are intentionally withheld until
+their implementation tasks land. They will remain PowerShell-ready and user-run.

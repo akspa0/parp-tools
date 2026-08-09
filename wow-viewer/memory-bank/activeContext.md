@@ -12,10 +12,32 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 |---|---|---|
 | PM4 decode | **active** — versioning formatted; placement solved; scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
 | Terrain / viewer runtime | **active** — phased dual-map overlay (135), M2 doodad batching (136), phased minimap & teleport (137) landed | [activeContext.md](activeContext.md) |
-| Terrain / minimap ML | **idle** — v60 dataset built; nothing training | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
+| Terrain / minimap ML | **active** — Spec 134 synthetic v60 control corpus is being finalized; no corpus generation or training has run | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
 | Tile archaeology | **active** — harvest pipeline working on 1.x clients; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
 
 ## Now — Viewer Runtime & Terrain Improvements (Specs 135, 136, 137)
+
+## Now — Spec 134 v60 control corpus
+
+- The earlier v50/multi-client harvest direction is not the active v60 deliverable. No working v60
+  real-data corpus has been accepted or generated in this lane.
+- The current first experiment is a project-owned, deterministic control corpus: 27 terrain families
+  × 4 variants = 108 rows, with complete-family holdouts and `easy`/`medium`/`hard`/`pathological`
+  buckets. It also emits a sibling `object-sieve-v1` derivative with 540 rows.
+- The control taxonomy now includes mountainous relief, arbitrary-angle sheer drop-offs, zone-style
+  blends, fBm, ridged fractal, dendritic lightning-burn terrain proxies, and two global 2×2
+  cross-tile families. Non-grid families carry deterministic sub-cell offsets; only `chunk_grid` is
+  exactly cell-aligned. Cross-tile metadata and stitched visual atlases are required before any
+  model run.
+- The C# generator, Python validators, visual reviews, and object-sieve model/loss variants are
+  implemented and focused checks are being finalized.
+  The user still runs the actual corpus generation, any 0.x/1.x client transfer sample, and all
+  training/GPU work.
+- The object-sieve control lane is now emitted alongside the terrain corpus: synthetic tree/rock/
+  building/bridge overlays, clean terrain-shadow targets, and a separate screen-space contamination
+  mask across none/sparse/dense/overlap/boundary-crossing regimes. The mask is loss-supervised and
+  optionally predicted-mask-guided, never supplied as a ground-truth inference channel.
+- Detail and commands: [Spec 134 quickstart](../specs/134-v60-unified-dataset-model/quickstart.md).
 
 ### What was accomplished this session (2026-08-08)
 

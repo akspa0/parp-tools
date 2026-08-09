@@ -8,6 +8,37 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-08 — Spec 134 control-corpus and object-sieve implementation
+
+Branch `134-v60-unified-dataset-model`.
+
+- Reframed the initial v60 experiment around a small synthetic control corpus; the abandoned
+  multi-client v50 harvest is not evidence of a working v60 dataset.
+- Added deterministic fBm/ridged-fractal, dendritic lightning-burn, global 2×2 cross-tile
+  lightning/burn, mountainous, arbitrary-angle sheer-dropoff, and zone-style-blend families to the
+  C# control generator. The default taxonomy is 27 families × 4 variants = 108 rows across four
+  complexity buckets. Non-grid fields carry deterministic sub-cell offsets; `chunk_grid` is the
+  explicit aligned diagnostic.
+- Added fail-closed cross-tile metadata validation, shared-pattern-ID checks, duplicate-position
+  checks, alignment metadata validation, stitched height/shadow visual atlas output, and visual
+  coverage contract fields.
+- Added a sibling `object-sieve-v1` writer with 540 deterministic rows: four object families across
+  none/sparse/dense/overlap/boundary-crossing regimes, plus clean terrain and contamination-mask
+  targets. Added object manifest/hash validation, input/mask atlases, and clean-only,
+  auxiliary-mask-loss, and predicted-mask-guided model variants.
+- Evidence: harvest tool build 0 errors; focused Python checks remain the final local gate. No corpus
+  generation, client harvest, or training was run by Codex.
+
+## 2026-08-08 — Spec 134 object-sieve design extension
+
+- Added the next bounded signal lane to the Spec 134 plan: synthetic objects over canonical terrain,
+  exact clean terrain-shadow targets, and a separate screen-space contamination mask.
+- Defined three ablations: clean-output-only, auxiliary mask loss, and predicted-mask guidance. The
+  ground-truth mask remains loss-side supervision only; it is never an inference input.
+- Added object-control data-model and experiment contracts, placement regimes (none/sparse/dense/
+  overlap/boundary-crossing), task decomposition, and continuity notes. Implementation waits for the
+  user-run terrain control corpus gate.
+
 ## 2026-08-08 — PM4/PD4 versioning & Specs 135, 136, 137 landed
 
 - **PM4/PD4 Versioning**: Created `Pm4VersionFormatter.cs` for correct MVER version string parsing (`0x10` Cataclysm = v16, `0x30` WoD = v48). Wired to viewer status bar and CLI inspection output.
@@ -15,17 +46,14 @@ Current state and open work: [activeContext.md](activeContext.md).
 - **Spec 136 (M2 Doodad Performance Optimization)**: Enabled batched instancing (`BeginBatch` + `RenderInstance`) for M2 adapter models without particles/ribbons by updating `ModelRenderer.RequiresUnbatchedWorldRender`. Deduplicated `UpdateAnimation` calls in `WorldScene.cs` so shared models advance at most once per frame. Restored smooth framerates on dense doodad maps (>60 FPS).
 - **Spec 137 (Phased Minimap Overlay & Consistent Teleport)**: Updated `MinimapRenderer` & `MinimapHelpers` to render active secondary overlay tile BLPs on the minimap surface. Unified fullscreen minimap to use 3-click armed teleport (`MinimapTeleportMode.Armed`) matching small minimap panel.
 
-## 2026-08-07 — v60 unified dataset built (spec 134)
+## 2026-08-07 — Spec 134 route reset (not a working v60 dataset)
 
 Branch `134-v60-unified-dataset-model`.
 
-- **v60 datastore**: consolidates existing v50 stores + harvests new builds (0.5.3, 1.0.0,
-  4.0.0; 3.3.5 skipped as redundant with 4.0.0). ~60GB lightly-compressed, down from ~160GB raw.
-- **`v60_build_dataset.py`**: `--skip-builds`, `--resume`, `--dedup` (opt-in; fast non-dedup
-  default). Memory-bounded, multi-threaded dedup merge.
-- **C# harvest per-tile timeout** so a hanging tile doesn't block the stream.
-- **Spec 133** (terrain_shadow_256) + **spec 132** (three-tier classification) landed.
-- All tests pass: 31 C# compositor, 36 Python.
+- The earlier datastore/harvest consolidation was not accepted as a working v60 dataset and is no
+  longer the first experiment.
+- Spec 134 now gates on the synthetic control corpus, followed only later by a tiny explicit 0.x/1.x
+  albedo-normalized transfer sample. Later client builds remain out of the initial scope.
 
 ## 2026-08-05 — Spec 132 Phase 1: three-tier brush-signature classification
 

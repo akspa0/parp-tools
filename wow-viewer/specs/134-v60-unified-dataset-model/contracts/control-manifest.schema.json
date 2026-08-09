@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "v60-control-manifest.schema.json",
+  "title": "V60 Control Corpus Manifest",
+  "type": "object",
+  "required": ["schema", "row_count", "families", "holdout_families", "complexity_bucket_vocabulary", "complexity_bucket_counts", "rows"],
+  "properties": {
+    "schema": { "const": "v60-control-corpus-v1" },
+    "source_policy": { "type": "string" },
+    "generator": { "type": "string" },
+    "signal_contract": {
+      "type": "array",
+      "const": ["terrain_shadow_256", "height_257"]
+    },
+    "row_count": { "type": "integer", "minimum": 1 },
+    "family_count": { "type": "integer", "minimum": 1 },
+    "variant_count": { "type": "integer", "minimum": 1 },
+    "families": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "holdout_families": { "type": "array", "items": { "type": "string" } },
+    "complexity_bucket_vocabulary": {
+      "type": "array",
+      "const": ["easy", "medium", "hard", "pathological"]
+    },
+    "complexity_bucket_counts": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "cross_tile_pattern_families": {
+      "type": "array",
+      "items": { "enum": ["cross_tile_lightning", "cross_tile_burn"] }
+    },
+    "alignment_policy": {
+      "const": "subcell_shifted_except_explicit_chunk_grid"
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["row_id", "control_family", "complexity_bucket", "input", "target", "split", "npz", "input_sha256", "target_sha256"],
+        "properties": {
+          "row_id": { "type": "string", "minLength": 1 },
+          "source_kind": { "type": "string" },
+          "source_seed_id": { "type": "string" },
+          "control_family": { "type": "string", "minLength": 1 },
+          "complexity_bucket": { "enum": ["easy", "medium", "hard", "pathological"] },
+          "variant": { "type": "integer", "minimum": 0 },
+          "pattern_id": { "type": "string" },
+          "pattern_tile_x": { "type": "integer", "minimum": 0, "maximum": 1 },
+          "pattern_tile_y": { "type": "integer", "minimum": 0, "maximum": 1 },
+          "pattern_tile_span": { "type": "integer", "minimum": 1 },
+          "pattern_continuity": { "type": "string" },
+          "field_offset_x": { "type": "number" },
+          "field_offset_y": { "type": "number" },
+          "cell_alignment": { "enum": ["chunk_aligned", "subcell_shifted", "mixed_alignment"] },
+          "input": { "const": "terrain_shadow_256" },
+          "target": { "const": "height_257" },
+          "input_shape": { "const": [256, 256] },
+          "target_shape": { "const": [257, 257] },
+          "split": { "enum": ["train", "validation", "test"] },
+          "input_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "target_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "npz": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

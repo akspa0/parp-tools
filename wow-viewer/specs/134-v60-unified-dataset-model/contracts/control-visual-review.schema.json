@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "v60-control-visual-review.schema.json",
+  "title": "V60 Control Visual Coverage Review",
+  "type": "object",
+  "required": ["schema", "signals_rendered", "row_count", "family_count", "missing_expected_families", "complexity_bucket_family_counts", "coverage_complete", "cross_tile_complete", "cross_tile_coverage", "outputs", "families"],
+  "properties": {
+    "schema": { "const": "v60-control-visual-review-v1" },
+    "signals_rendered": {
+      "const": ["height_257", "terrain_shadow_256", "mcnr_normal_xyz", "height_edges"]
+    },
+    "row_count": { "type": "integer", "minimum": 1 },
+    "family_count": { "type": "integer", "minimum": 1 },
+    "expected_family_count": { "type": "integer", "minimum": 1 },
+    "missing_expected_families": { "type": "array", "items": { "type": "string" } },
+    "unexpected_families": { "type": "array", "items": { "type": "string" } },
+    "complexity_bucket_family_counts": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "coverage_complete": { "type": "boolean" },
+    "cross_tile_complete": { "type": "boolean" },
+    "cross_tile_coverage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["family", "tile_positions"],
+        "properties": {
+          "family": { "type": "string", "minLength": 1 },
+          "tile_positions": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "prefixItems": [
+                { "type": "integer", "minimum": 0, "maximum": 1 },
+                { "type": "integer", "minimum": 0, "maximum": 1 }
+              ],
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "outputs": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 2 },
+    "families": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["family", "complexity_bucket", "variant_count", "height_min", "height_max", "height_gradient_mean", "shadow_std_mean"],
+        "properties": {
+          "family": { "type": "string", "minLength": 1 },
+          "complexity_bucket": { "enum": ["easy", "medium", "hard", "pathological"] },
+          "variant_count": { "type": "integer", "minimum": 1 },
+          "height_min": { "type": "number" },
+          "height_max": { "type": "number" },
+          "height_gradient_mean": { "type": "number", "minimum": 0 },
+          "shadow_std_mean": { "type": "number", "minimum": 0 }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
