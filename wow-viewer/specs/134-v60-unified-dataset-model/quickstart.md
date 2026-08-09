@@ -99,7 +99,7 @@ the harvest tool and have the user harvest only these same 16 tiles from the app
 
 ```powershell
 dotnet build "I:/parp/parp-tools/wow-viewer/tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harvest.csproj" -c Debug --no-restore
-dotnet "I:/parp/parp-tools/wow-viewer/tools/harvest/WowViewer.Tool.Harvest/bin/Debug/net10.0/WowViewer.Tool.Harvest.dll" harvest-map-mpq --client-root "H:/CLIENTS/prealpha" --map "Azeroth" --output-dir "I:/parp/parp-tools/wow-viewer/output/datasets/v60/real-shadow-npz-v1" --tile-list "0,0;24,53;27,52;27,53;27,54;27,55;27,56;27,57;27,58;24,54;28,22;28,23;28,24;28,25;28,26;28,27" --force
+dotnet "I:/parp/parp-tools/wow-viewer/tools/harvest/WowViewer.Tool.Harvest/bin/Debug/net10.0/WowViewer.Tool.Harvest.dll" harvest-map-mpq --client-root "H:/CLIENTS/Vanilla/0.x/0_5_3_3368/World of Warcraft" --map "Azeroth" --output-dir "I:/parp/parp-tools/wow-viewer/output/datasets/v60/real-shadow-npz-v1" --tile-list "0,0;24,53;27,52;27,53;27,54;27,55;27,56;27,57;27,58;24,54;28,22;28,23;28,24;28,25;28,26;28,27" --force
 ```
 
 The harvest must emit `terrain_shadow_256` in every requested NPZ. Then rerun the pair report with
