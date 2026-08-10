@@ -577,10 +577,14 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
 - `WorldScene` now exposes `UseHierarchicalSceneTraversal` as an opt-in selector. When enabled,
   one conservative graph traversal feeds the existing WMO/MDX visibility collectors; graph
   snapshots and traversal diagnostics are exposed for later capture reporting.
-- Focused graph/workload/traversal/adapter proof is 15 passing tests; the runtime and viewer
+- `WorldScenePortalGraph` now provides a graph-only portal adjacency contract. It rejects malformed
+  or unknown-endpoint links and reports deterministic cycle, missing-entry, absent-data, and
+  maximum-depth fallback diagnostics. It does not construct portal view volumes or replace the
+  existing WMO renderer's portal behavior.
+- Focused graph/workload/traversal/adapter/portal proof is 19 passing tests; the runtime and viewer
   projects build with only existing repository warnings.
 
 This is an opt-in integration proof, not a renderer promotion. The legacy `WorldScene` traversal
-remains the default, terrain chunks are not yet mounted, and WMO portal traversal remains owned by
-the existing `WmoRenderer` until the graph-side portal contract is proven. No FPS/GPU or real-client
-parity claim exists until the later evidence tasks are run.
+remains the default, terrain chunks are not yet mounted, and WMO portal geometry/traversal remains
+owned by the existing `WmoRenderer` until the graph-side adapter and doorway parity are proven. No
+FPS/GPU or real-client parity claim exists until the later evidence tasks are run.

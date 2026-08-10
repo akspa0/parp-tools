@@ -8,6 +8,16 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 bounded portal adjacency contract
+
+- Added `WorldScenePortalGraph`, a graph-only adjacency contract for stable WMO-group-like node
+  IDs and portal links. Malformed/unknown links are rejected; traversal reports cycles, missing
+  entries, absent portal data, and maximum-depth fallback deterministically.
+- Four portal graph tests pass, bringing focused Spec 142 graph/workload/traversal/adapter/portal
+  proof to 19 passing tests. The viewer build remains at 0 errors with existing warnings.
+- This does not implement portal geometry, doorway clipping, renderer parity, or `WorldScene`
+  integration. Existing `WmoRenderer` behavior remains the owner; no heavy capture was launched.
+
 ## 2026-08-10 — Spec 142 nested WMO group mounting
 
 - Extended the scene-graph object adapter with nested child nodes and mounted client-backed

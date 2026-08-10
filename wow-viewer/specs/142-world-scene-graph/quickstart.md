@@ -15,7 +15,7 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --fi
 The graph/traversal foundation can be checked together with:
 
 ```powershell
-dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldSceneGraphTests|FullyQualifiedName~SyntheticWorldWorkloadTests|FullyQualifiedName~WorldSceneTraversalTests|FullyQualifiedName~WorldSceneGraphObjectAdapterTests"
+dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldSceneGraphTests|FullyQualifiedName~SyntheticWorldWorkloadTests|FullyQualifiedName~WorldSceneTraversalTests|FullyQualifiedName~WorldSceneGraphObjectAdapterTests|FullyQualifiedName~WorldScenePortalGraphTests"
 ```
 
 The viewer integration seam can be compile-checked without launching a client or capture:
@@ -45,11 +45,13 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
 - Existing `WorldObjectInstance` placements adapt into stable tile/external graph buckets.
 - Client-backed WMO group summaries mount beneath their placement node as nested `WmoGroup` nodes;
   missing or malformed group bounds remain fail-open.
+- Graph-only portal adjacency rejects malformed links and reports cycle, missing-entry, absent-data,
+  and depth-limit fallback diagnostics without claiming portal geometry or renderer parity.
 - Unknown object bounds keep their bucket and map fail-open.
 - The viewer project compiles with the opt-in `WorldScene.UseHierarchicalSceneTraversal` seam.
 
 ## Not yet run by this phase
 
-The four-scale performance ladder, current-vs-new traversal comparison, portal/pass/query parity,
-real-client capture, GPU timing, and whole-map residency work remain later user-run gates. Do not
-interpret this test/build pass as an FPS result.
+The four-scale performance ladder, WMO portal read-model/doorway integration, current-vs-new
+traversal comparison, pass/query parity, real-client capture, GPU timing, and whole-map residency
+work remain later user-run gates. Do not interpret this test/build pass as an FPS result.

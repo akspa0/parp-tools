@@ -158,13 +158,26 @@ default; no FPS, GPU, portal-traversal, pass-order, or real-client parity claim 
 5. Prove the adapter with stable IDs, tile grouping, unknown-bound fail-open, and replay tests;
    compile the viewer project to verify the integration seam.
 
+## Phase 4 — Bounded Portal Adjacency Contract
+
+**Status**: Complete for the graph-only adjacency slice on 2026-08-10. `WorldScenePortalGraph`
+accepts stable group IDs and read-model links, rejects malformed edges without inventing
+connectivity, and reports deterministic bounded traversal diagnostics for absent portal data,
+cycles, missing entries, and maximum-depth fallback. Four new focused tests bring the Spec 142
+graph proof to 19 passing tests.
+
+This does not claim WMO portal geometry, doorway clipping, nested frustum construction, or
+`WorldScene` integration. The existing `WmoRenderer` remains the runtime portal behavior owner
+until an adapter can consume its existing read models without changing format readers.
+
 ## Later Phases (Not Started In This Slice)
 
-- **Phase 4**: WMO portal-restricted nested view volumes and fallback diagnostics.
-- **Phase 5**: Per-pass visible/non-visible queues, shared animation update ownership, and query
+- **Phase 5**: Integrate WMO portal read models and doorway geometry into the graph adapter, then
+  prove parity with the existing renderer's interior traversal.
+- **Phase 6**: Per-pass visible/non-visible queues, shared animation update ownership, and query
   reuse.
-- **Phase 6**: Incremental terrain/chunk graph migration, synthetic four-scale measurements, and named
-  real-client parity captures.
+- **Phase 7**: Incremental terrain/chunk graph migration, synthetic four-scale measurements, and
+  named real-client parity captures.
 
 ## Complexity Tracking
 

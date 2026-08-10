@@ -5,9 +5,10 @@
 **Prerequisites**: `spec.md`, `plan.md`, `research.md`, `data-model.md`,
 `contracts/synthetic-world-workload.schema.md`, `quickstart.md`
 
-**Current execution rule**: Phases 1-3 are validated and committed. The current bounded result is
-an opt-in `WorldScene` object adapter and traversal selector; portal, pass, query, and performance
-promotion tasks remain unchecked.
+**Current execution rule**: The graph foundation, conservative traversal, opt-in `WorldScene`
+object adapter, nested WMO group mounting, and the graph-only portal adjacency contract are
+validated and committed. WMO portal geometry integration, pass, query, and performance promotion
+tasks remain unchecked.
 
 ## Phase 1: Setup
 
@@ -65,9 +66,9 @@ identity; no FPS or GPU claim is made.
 
 ## Phase 6: User Story 3 — Interiors Cull Through Portals (Priority: P2)
 
-- [ ] T017 [US3] Add portal adjacency metadata and bounded nested-view diagnostics in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldScenePortalGraph.cs`.
+- [x] T017 [US3] Add graph-only portal adjacency metadata and bounded nested-view diagnostics in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldScenePortalGraph.cs`; reject malformed links and report cycle, missing-entry, absent-data, and depth-limit fallback.
 - [ ] T018 [US3] Integrate WMO portal read models into the graph adapter without changing format readers in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldScenePortalAdapter.cs`.
-- [ ] T019 [US3] Add malformed, cyclic, depth-limited, and doorway parity tests in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldScenePortalTests.cs`.
+- [ ] T019 [US3] Extend portal tests with doorway geometry and existing-renderer parity coverage in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldScenePortalTests.cs`; current `WorldScenePortalGraphTests` cover the graph-only malformed, cyclic, absent-data, and depth-limited contract.
 
 ## Phase 7: User Story 4 — Ordered Visibility Results (Priority: P2)
 
