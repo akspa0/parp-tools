@@ -181,8 +181,10 @@ weights are explicitly excluded after the prior non-repeatable failed attempt.
   identities, target-free four-channel loading, independent final/coarse/detail reports,
   family/bucket metrics, and checkpoint binding. The PowerShell-ready CLI is dry-run by default and
   refuses nonempty output roots. Focused loss/trainer/CLI proof is 9 tests; full `tests/v60` passes
-  76 tests. No user corpus has been generated or visually accepted. Real transfer and every
-  corpus/GPU run remain unproven and user-owned where applicable.
+  76 tests. The user has completed the six-cell within-family CUDA matrix: best
+  `pyramid_cnn/v7_structural_v1` MAE `0.145868` versus parity `0.150999` and tile-mean `0.181995`.
+  Structural lift was positive but below 10% in every architecture, so the next gate is the
+  prepared full-profile `pyramid_cnn` complete-family run. Real transfer remains blocked.
 - Overlap handling is explicit: `object_instance_id_256` stores only the visible winner per pixel,
   so fully occluded instances are skipped and recorded rather than treated as positives. Marker
   corpus publication is atomic through `<output>.partial`; a failed build cannot be validated as a

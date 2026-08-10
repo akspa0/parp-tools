@@ -25,9 +25,21 @@ slice is implemented as a family/variant/cross-tile atlas with provenance JSON. 
 provides versioned parity and v7 structural profiles, differentiable point/gradient, frequency,
 curvature, edge, transition, border, and LF/HF terms, and independent component tensors. The shared
 trainer slice now fixes deterministic within-family/complete-family split identities, four-channel
-NPZ loading, per-signal/per-family/per-bucket evaluation, and best/last checkpoint binding. The next
-slice is implemented as a PowerShell-ready dry-run/user-run CLI with fresh-output refusal. The next
-gate is the user-owned matrix execution; this agent does not launch it.
+NPZ loading, per-signal/per-family/per-bucket evaluation, and best/last checkpoint binding. The
+PowerShell-ready dry-run/user-run CLI is implemented with fresh-output refusal.
+
+## User-run checkpoint — 2026-08-10
+
+The user completed the six-cell CUDA within-family matrix at `train-size=32` and `epochs=80`.
+`pyramid_cnn/v7_structural_v1` is the best cell at validation MAE `0.145868`, versus the same
+architecture/parity cell at `0.150999` and the within-family tile-mean baseline at `0.181995`.
+Structural guidance improved every architecture, but the same-architecture lift was 3.40% for
+pyramid, 4.23% for SegFormer, and 7.72% for U-Net, below the 10% success threshold. This justifies
+a larger-capacity confirmation run while keeping promotion gated on the complete-family holdout.
+
+The next user-owned command is one fresh full-profile `pyramid_cnn` structural cell over all 76
+complete-family training rows and 32 held-out rows. Its dry run was verified locally; the plan
+reports 1,579,586 parameters and no forbidden signals. The command is recorded in the quickstart.
 
 ## Technical Context
 

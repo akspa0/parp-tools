@@ -81,8 +81,20 @@ forbidden-signal audit, then exits without training.
 ## 5. User-owned training
 
 After inspecting the dry run, add `--confirm-run`. Use a fresh output directory for every matrix
-cell. The first meaningful matrix is the within-family learnability split. Only after a structural
-loss/architecture cell clears that gate should the user run the complete-family transfer split.
+cell. The six-cell within-family learnability matrix has now completed; the next gate is the
+larger-capacity complete-family run below.
+
+## 5. Full-profile complete-family confirmation
+
+The best within-family cell was `pyramid_cnn` with `v7_structural_v1` at validation MAE `0.145868`.
+Run the larger-capacity complete-family gate with the same structural profile:
+
+```powershell
+uv run --no-cache python scripts/v60_train_clean_signal.py --corpus "../output/datasets/v60/v7-clean-signal-v1" --output "../output/datasets/v60/v7-clean-signal-runs/pyramid-full-structural-complete-v1" --architectures "pyramid_cnn" --loss-profiles "v7_structural_v1" --model-profile full --split complete_family --train-size 76 --epochs 80 --batch-size 8 --seed 7137 --device cuda
+```
+
+This is a dry run. After inspecting the one-cell plan, append `--confirm-run` to launch the
+user-owned CUDA job. It writes a fresh output root; do not reuse the existing six-cell directory.
 
 ## 6. Real transfer
 

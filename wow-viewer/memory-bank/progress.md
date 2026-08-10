@@ -79,6 +79,18 @@ visually accepted by the user.
   `tests/v60` passes 76 tests, with changed-file Ruff and `py_compile` clean. No user corpus or
   training cell was launched.
 
+## 2026-08-10 — Spec 139 within-family matrix result and promotion gate
+
+- User-run CUDA matrix completed six cells (`pyramid_cnn`, `segformer_b0`, `unet_lite_v2` x parity/
+  structural) on the within-family split with 32 training rows and 27 validation rows. Best:
+  `pyramid_cnn/v7_structural_v1`, validation MAE `0.145868` at epoch 48; parity control was
+  `0.150999`, and the tile-mean baseline was `0.181995`.
+- Structural guidance improved every architecture but missed the 10% same-architecture lift gate
+  (3.40% pyramid, 4.23% SegFormer, 7.72% U-Net). This is not a promotion failure: it is a reason to
+  run the prepared full-profile `pyramid_cnn` complete-family confirmation before transfer.
+- Codex verified the dry-run plan only: full profile, 1,579,586 parameters, all 76 train rows, 32
+  held-out rows, fresh output root. No additional GPU run was launched.
+
 ## 2026-08-10 — reset v60 to terrain-only learning
 
 - Parked object-sieve and object-marker work after the user-run marker experiment failed identity

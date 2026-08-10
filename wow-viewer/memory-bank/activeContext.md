@@ -106,8 +106,10 @@ loss stack or a deployment-safe albedo-normalized input.
   reports, family/bucket metrics, and best/last checkpoint binding. Focused loss/trainer/CLI proof is
   9 tests and the full v60 folder is 76 passing after this slice. The clean corpus builder publishes
   a hash-bound synthetic manifest atomically and visual review emits family/variant/cross-tile
-  atlases with provenance JSON. No user corpus has been generated or visually accepted; the dry-run
-  CLI is ready, while real transfer and all user-run training remain ahead.
+  atlases with provenance JSON. The user has now completed the six-cell CUDA within-family matrix:
+  best `pyramid_cnn/v7_structural_v1` final-height MAE `0.145868` versus `0.150999` parity and
+  `0.181995` tile-mean baseline. The full-profile `pyramid_cnn` complete-family confirmation plan
+  is prepared in a fresh output root; no further training was launched by Codex.
 - Detail and commands: [Spec 139 quickstart](../specs/139-v7-clean-signal-reconstruction/quickstart.md).
 
 ## Now — Spec 140 terrain paste and fractal motif archaeology

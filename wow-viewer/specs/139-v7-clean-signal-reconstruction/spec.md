@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-10
 
-**Status**: Phase 5 loss/trainer/CLI contracts implemented; corpus execution, visual acceptance, and training remain unimplemented
+**Status**: Phase 5 implementation and within-family matrix complete; full-profile complete-family gate remains user-owned
 
 **Input**: User description: "Build the old v7 model idea with a modern architecture, guided by
 clean synthetic data and a sane signal set. Remove the WDL-prior dependency so any minimap can be
@@ -40,8 +40,12 @@ The first bounded implementation slice is now present under `data-harvester/src/
   bucket reports, and best/last checkpoints bound to model/loss/split identities.
 - `v60_train_clean_signal.py` is dry-run by default, reports the shared split/model/loss matrix,
   refuses nonempty output roots, and requires `--confirm-run` before invoking the trainer.
-- CPU-focused contract proof passes: 36 new tests and 76 tests across `tests/v60`. No corpus
-  generation, real-client processing, visual acceptance, or GPU training has run.
+- User-run evidence is now recorded: six CUDA cells completed on the within-family split. The best
+  cell is `pyramid_cnn` + `v7_structural_v1` at final-height MAE `0.145868`; its same-architecture
+  parity control is `0.150999`, and the tile-mean baseline is `0.181995`. This is a strong absolute
+  baseline result, but the structural lift is below the 10% criterion, so it is not yet promoted.
+- CPU-focused contract proof passes: 36 new tests and 76 tests across `tests/v60`. The full-profile
+  complete-family confirmation plan is prepared; no additional run was launched by Codex.
 
 Model adapters and the synthetic corpus builder stay behind this contract gate.
 
