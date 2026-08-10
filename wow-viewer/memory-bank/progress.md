@@ -1,12 +1,147 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-08
+Last updated: 2026-08-09
 
 **This file is a dated ledger of what shipped, newest first.** One entry per session, a few lines
 each. Findings and how-it-works go in the workstream file; this only records *that* it happened and
 what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
+
+## 2026-08-10 — reset v60 to terrain-only learning
+
+- Parked object-sieve and object-marker work after the user-run marker experiment failed identity
+  retrieval; its checkpoint is diagnostic only.
+- Added `v60/control_experiment.py` and `scripts/v60_run_experiment.py` for the validated
+  `control-v1` NPZ corpus: fixed family holdouts, deterministic 8/16/32-row learning-curve plans,
+  tile-mean baseline, and per-family/per-variant report metrics.
+- Offline proof: focused control-experiment tests passed; Ruff and py_compile passed. No training
+  was launched.
+
+## 2026-08-09 — v60 footprint-guided object marker pivot
+
+- Amended Spec 134 so object identity is a separate specialist from the optional terrain sieve.
+- Added `v60-object-marker-v1`: deterministic candidate corpus derivation from the corrected
+  real-library sieve, a small image-plus-footprint knownness/embedding model, frozen-gallery
+  retrieval, `known_object_marker_256` export, and an identity sidecar table.
+- Added PowerShell-ready build/validate/train/mark CLIs. Training and corpus generation remain
+  user-run; no marker corpus or GPU work was launched.
+- Focused offline proof: `tests/v60/test_object_marker.py` passed 6 tests; Ruff and py_compile
+  passed for the new marker modules/scripts.
+- Corrected the marker builder's overlap handling: fully occluded/overwritten source instances are
+  recorded in `skipped_instances` instead of aborting the corpus, and builds publish atomically
+  from a `.partial` directory. The focused v60 suite now passes 31 tests after this regression fix.
+
+## 2026-08-09 — v60 object lane corrected to use the v50 object library
+
+- Rejected the `real-object-masks-v1` result for the precision-object lane: it trained on v50
+  curriculum tile-level placement projections, which are dot-like labels, and never read the actual
+  object library.
+- Added `v60-object-library-sieve-v1`: a read-only compositor over the 5,349-entry
+  `object_mask_library_0_5_3_3368.zarr`, using real `capture_rgb`/`capture_mask` silhouettes over
+  clean v60 terrain controls. Rows carry exact union masks, per-instance IDs, library identity,
+  deterministic transforms, and family-isolated splits.
+- Added PowerShell-ready builder/validator/visual-review/trainer CLIs and a deterministic focused
+  test. Offline proof: v60 suite 20 passed; Ruff and py_compile passed. No real corpus generation or
+  CUDA training was run by Codex.
+- The user's first two corpus builds stopped after 251 NPZs before writing their manifests when the
+  thin `world/nodxt/detail/elwgra06.mdx` silhouette was erased by nearest-neighbour downsampling;
+  both partial directories are invalid and were left untouched. Replaced mask resizing with
+  coverage-preserving BOX/BILINEAR rasterization and kept contextual failure text; the next user
+  run should use a fresh output directory.
+
+## 2026-08-09 — v60 real-library sieve corpus passed
+
+- User-run `object-library-sieve-v3` completed and passed validation: 540 rows from 108 terrain
+  controls, five complete placement regimes, 304 train / 236 validation rows, 1,033 sampled library
+  objects, and 115 isolated library families. Visual atlas was generated successfully.
+- The next gate is the user-run three-variant CUDA object-sieve ablation. No training has started.
+
+## 2026-08-09 — first object-sieve training readout and residual correction
+
+- User-run `library-guided-v1` reached non-empty mask IoU 0.4183 at epoch 35, with final precision
+  0.6622 and recall 0.5038. This is useful mask evidence.
+- Its clean output failed the identity test: best clean MAE 0.0372 versus 0.0066 for simply passing
+  the contaminated input through. The model was rewriting clean terrain outside the small object
+  regions, so the run is not a functional sieve despite the mask head learning.
+- Changed `ObjectSieveNet` to a zero-initialized residual clean head (`input + learned correction`),
+  added the identity-baseline gate to the report, and added focused tests. User must rerun with a
+  fresh output directory; no residual model training has run yet.
+
+## 2026-08-09 — v50 stale synthesis correction
+
+- The active failure was stale synthesized minimap data in the old v50 datastore; the 0.5.3
+  renderer remains the control.
+- The old builder did not provide a synthesis-only refresh, so old RGB arrays survived later
+  compositor lighting fixes.
+- Added `scripts/refresh_v50_synthetic_minimaps.py` to regenerate only `minimap_rgb` and
+  `minimap_rgb_1024` from existing tile indices, with fatal written/non-black validation and a new
+  output store.
+- Fixed its Windows/Zarr patch step to recreate the two refreshed arrays with one tile per chunk;
+  the historical multi-row chunks caused `PermissionError` during repeated row replacement.
+- Existing `0_5_3_3368-Azeroth.zarr` has 43 all-zero rows in both synthetic resolutions, proving
+  the old synthesis needed regeneration.
+- No refresh, harvest, training, or heavy run was started by Codex.
+
+## 2026-08-09 — Spec 138 0.5.3 dataset audit from WoWClient.exe
+
+- Queried the loaded 0.5.3.3368 binary in Ghidra and confirmed that authored minimap BLP tiles,
+  terrain MCSH/LIT rendering, and object/icon overlays are separate native paths.
+- Found blocking harvest defects: MCAL `MCLY.offsAlpha` is ignored; zero-valued absolute MCVT
+  heights can be overwritten by gap filling; raw MCSH is overclaimed as a 256 terrain-shadow
+  target; and Alpha shadow composition forces synthetic cast shadows without native LIT data.
+- Found that Alpha MDDF/MODF masks are heuristic placement labels and omit MCRF/visibility
+  semantics. The shared Alpha adapter also transposes WDT `MAIN` indexing, although the direct
+  harvester reader is row-major and matches the client.
+- Confirmed current MCVT absolute heights, MCNR transform, and minimap BLP path. No accepted
+  0.5.3 real corpus, harvest, training run, or heavy build resulted from this audit.
+
+## 2026-08-08 — Spec 138 archive-source research and plan
+
+- Researched CascLib, WoW-Tools/CascLib, TACTSharp, TACT.Net, WoWTools.Minimaps, wow.export,
+  wow-listfile, and pywowlib through their GitHub repositories and local reference checkout.
+- Recorded the source matrix: existing MPQ for 0.x–5.x, CascLib as the early-CASC baseline,
+  TACTSharp as a later-CASC candidate, and wow.export/WoWTools.Minimaps as comparative authorities.
+- Corrected the plan to treat DBCD, WoWDBDefs, and wow-listfile as existing integrated authorities,
+  not future work. TACT.Net remains isolated pending its GPL-3.0 boundary review.
+- Added Spec 138 `research.md`, `plan.md`, `data-model.md`, `quickstart.md`, and the source-profile
+  JSON schema. No archive adapter or heavy extraction was run.
+
+## 2026-08-08 — Spec 138 scope widened to the cross-era terrain foundation
+
+- Reframed the epic from a primarily 4.x renderer roadmap into a profile-gated basic-terrain
+  foundation intended to span 0.5.3 through 11.x with minimal follow-up per era.
+- 4.0.0.11792 remains the first modern evidence anchor because it exposes the vertex, lighting,
+  shadow, and shader-permutation boundaries. 0.5.3 parity is downstream, not the first branch.
+- Later client tools such as wow.export may supply comparative evidence, but remain outside the
+  repo-independent runtime contract.
+
+## 2026-08-08 — Spec 138 Build 11792 Ghidra evidence pass
+
+- Queried the live `WOW-11792patch4.0.0_Alpha-INTERNAL.exe` Ghidra project and traced
+  MCNK parsing, terrain vertex construction, shader permutation setup, `mapShadows`,
+  MCSH composition, and the `TerrainBlend` shadow render-target path.
+- Confirmed that this build uses separate `MCLV`, `MCCV`, and `MCSH` terrain signals;
+  `MCTV`/`MCMT` were not observed. The CPU vertex builder preserves MCNR byte order,
+  leaving the normal-axis transform unproven until the Terrain shader path is traced.
+- No renderer code, harvest, training, or long-running work was run. The next proof owner
+  is the Terrain shader input/constant path.
+
+## 2026-08-08 — Spec 138 renderer baseline clarified
+
+- Recorded that existing 4.0.0 support is partial but usable: terrain/world content and basic
+  WMO/M2 paths work, while shaders, visual effects, lava-effect models, fog, lighting/point lights,
+  batching, and CPU-bound submission are the main gaps.
+- Spec 138 now requires separate visual-parity and frame-time proof; basic loading is not signoff.
+
+## 2026-08-08 — Spec 138 Cataclysm 4.x renderer evolution note
+
+- Added `specs/138-cataclysm-renderer-evolution/spec.md` and its requirements checklist.
+- Captured the 4.0.0.11792 19-module audit as reference input for a future evidence-led epic:
+  terrain layer/chunk evolution, 4.x M2/WMO paths, dense-scene performance, and provenance-
+  preserving synthesis across client eras.
+- First gate is source/profile inventory. No renderer rewrite, harvest, training, or long-running
+  benchmark was run.
 
 ## 2026-08-08 — Spec 134 paired real/synthetic validation and mask inputs
 
@@ -152,6 +287,46 @@ Specs 114/125/126. Detail: [workstream-terrain-ml.md](workstream-terrain-ml.md).
 - Stacked height model (4-channel `direct_cnn_v112`) implemented; the channel-count crash is fixed
   via one shared `build_model_input_channels`. **Not yet trained** — user-run gate.
 - Full data-harvester suite: ~1150 passed / ~45 skipped / 3 pre-existing unrelated failures.
+
+## 2026-08-10 — v60 terrain architecture bakeoff prepared
+
+Spec 134. The old U-Net-only v60 control run was rejected against its tile-mean baseline
+(`0.228693` best MAE vs `0.191047`). Implemented a shared random-init bakeoff registry and trainer
+for `unet_lite_v2`, ConvNeXtV2/FPN `pyramid_cnn`, local HF DPT `dpt_small`, and from-scratch HF
+SegFormer-B0. The trainer uses one seeded nested training schedule and writes per-architecture,
+per-family metrics. Tiny CPU contract tests pass (`9 passed`); the real-corpus dry run reports the
+four contracts and parameter counts without training. User must run the CUDA command in Spec 134
+quickstart and record whether any candidate beats the baseline.
+
+## 2026-08-10 — Spec 139 v7 clean-signal pivot planned
+
+Created branch `139-v7-clean-signal-reconstruction` and the complete Speckit design package under
+`specs/139-v7-clean-signal-reconstruction/`. The plan preserves v7's coarse/detail outputs and
+structural loss guidance but removes its WDL trestle, height hints, normals, liquid/object channels,
+and all target-derived inference inputs. The new deployment contract is an albedo-normalized
+observation plus deterministic luma gradients and albedo confidence. No implementation or training
+has started; next is the small contract/model/corpus slice, followed by a user-owned loss/architecture
+matrix and only then tiny 0.x/1.x transfer.
+
+## 2026-08-10 — Spec 140 paste/fractal/tileset evidence pipeline planned
+
+Created branch `140-terrain-paste-motif-archaeology` and the Speckit design package under
+`specs/140-terrain-paste-motif-archaeology/`. The new lane decomposes minimap-to-terrain work into
+observation normalization, tileset profiling, alpha/fractal descriptors, cross-tile paste
+retrieval, Spec 139 terrain guidance, and a deferred object-slot/refinement lane. The 10.2 workflow
+map is recorded as corroborating workflow evidence only; recurrence must be proven against actual
+client-backed data and deterministic synthetic controls. No implementation, harvest, or training
+started. First gate: visual atlas plus transformed-motif retrieval and leakage report.
+
+## 2026-08-10 — Spec 140 paint-order hypothesis added
+
+Updated Spec 140 to test a stronger authoring model: opaque layer-0 base/“brain” texture, layer-1
+recurring rocky paste, later alpha-painted terrain intent, then sculpted relief and refinement.
+Ordered alpha evidence is now an intermediate paint/sculpt scaffold, with MCLY order, MCAL offsets,
+layer-0/layer-1 distinction, cumulative/incremental occupancy, paste references, and explicit
+intact/retextured/resculpted/unknown status. Source-side alpha remains supervision/evidence; the
+minimap-only deployment contract must predict the scaffold rather than consume client alpha.
+No implementation or training started; the next gate is synthetic known-order validation.
 
 ## Before 2026-08-01
 

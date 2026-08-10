@@ -54,11 +54,71 @@ One deterministic terrain control with synthetic object contamination and exact 
 | `placement_metadata` | object | Deterministic positions, scale, rotation, and object-family parameters. |
 | `split` | enum | `train`, `validation`, or `test`; complete regimes/families stay together. |
 
+`v60-object-library-sieve-v1` is the promoted object corpus. It is separate from the historical
+procedural `object-sieve-v1` rows below.
+
+## ObjectLibrarySieveRow
+
+One clean terrain control with one or more real v50 object-library captures composited into it.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `source_library` | object | Read-only Zarr path, schema, release, eligible count, and parquet hashes. |
+| `objectified_terrain_shadow_256` | float32[256,256] | Clean terrain shadow with real library object pixels composited in. |
+| `terrain_shadow_256` | float32[256,256] | Unmodified clean terrain control target. |
+| `object_contamination_mask_256` | float32[256,256] | Exact union of transformed `capture_mask` silhouettes. |
+| `object_instance_id_256` | uint16[256,256] | Per-pixel placed-object identity; zero is background. |
+| `object_instances` | object[] | Library ID, asset path/family, source row, scale, rotation, and screen-space centre. |
+| `split` | enum | Terrain split plus library-family isolation; no library family crosses train/validation. |
+
+The derived row is immutable and never writes back into the v50 object library. The ground-truth
+mask and instance map are loss-side/evaluation targets only; neither is supplied to the sieve model
+as an input channel.
+
 The contamination mask is intentionally not the existing `object_geometry_visible_mask_257`.
 That 257-grid target describes visible object geometry for numeric terrain supervision; this 256-grid
 target describes screen-space minimap contamination that the sieve must remove.
 
-## RealObjectMaskDataset
+## ObjectMarkerCandidate
+
+One image-plus-footprint candidate used by the separate object identification specialist.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `row_id` | string | Stable candidate row identifier. |
+| `minimap_rgb_256` | float32[3,256,256] | Image presented to the marker model; synthetic controls may use the canonical textureless terrain as the background. |
+| `object_candidate_mask_256` | uint8[256,256] | One proposed object footprint; it is an input proposal, not the identity target. |
+| `known_object` | uint8 | `1` for a candidate generated from a known library capture, `0` for shifted/empty/unknown controls. |
+| `library_id` | string/null | Target identity for positive training/evaluation rows; never supplied to the model. |
+| `library_family` | string/null | Family split key; no family crosses train/validation. |
+| `placement_metadata` | object | Source row, scale, rotation, centre, and clipping provenance. |
+| `split` | enum | `train`, `validation`, or `test`. |
+
+The first corpus derives positive candidates from the exact per-instance masks and real capture RGB
+records in `v60-object-library-sieve-v1`. Shifted/empty candidates provide negative knownness
+examples without pretending the rejected v50 curriculum dots are precise silhouettes.
+
+## ObjectMarkerMap
+
+The export artifact that marks known objects on one input minimap.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `known_object_marker_256` | uint16[256,256] | Zero is background/unaccepted; positive values are per-tile marker instance IDs. |
+| `identity_rows` | object[] | One row per accepted candidate: marker instance ID, library ID, asset path, bounds/coverage, confidence, retrieval score, and split/provenance. |
+| `rejected_candidates` | object[] | Candidate IDs, confidence, nearest library ID/score, and rejection reason. |
+| `input_sha256` | string | Hash of the marked minimap input. |
+| `checkpoint` | object | Marker checkpoint identity and architecture/config hash. |
+| `gallery` | object | Read-only v50 library identity, schema, release, and gallery hash. |
+| `skipped_instances` | object[] | Source instances with no visible pixels, including the explicit occlusion/overwrite reason. |
+
+The marker map is deliberately an instance index rather than a library-ID raster. Library IDs are
+variable-length strings and cannot safely be represented as pixels; the sidecar table is the
+authoritative identity mapping. Marker corpus builders write through an incomplete `.partial`
+directory and publish the final directory only after the manifest is complete; a partial directory
+is never a trainable corpus.
+
+## HistoricalRealObjectMaskDiagnostic
 
 The immutable v50-backed supervision view used only for object-mask detection.
 
@@ -75,6 +135,9 @@ The immutable v50-backed supervision view used only for object-mask detection.
 
 The v50 `object_geometry_visible_mask_257` is audited separately. If it is empty, that fact is
 recorded as unavailable geometry evidence rather than relabeled as object appearance supervision.
+The curriculum `object_mask`/`object_precise_mask` projections are tile-level diagnostic labels;
+they are not the promoted precision object target and are not interchangeable with
+`ObjectLibrarySieveRow`.
 
 ## RealSyntheticValidationPair
 

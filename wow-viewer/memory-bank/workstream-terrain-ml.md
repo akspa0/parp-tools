@@ -1,15 +1,125 @@
 # Workstream — terrain / minimap ML
 
 Owner specs: 114 (direct terrain reconstruction), 125 (minimap DXT1 inversion),
-126 (minimap terrain reconstruction), 111 (minimap lighting calibration).
-Last updated: 2026-08-08. **Nothing is training right now.** The active first experiment is Spec 134's
-small synthetic control corpus plus a bounded v50 real-mask/pair validation lane; no working v60
-real-data corpus has been accepted or generated.
+126 (minimap terrain reconstruction), 111 (minimap lighting calibration), 139 (clean-signal
+reconstruction), 140 (paste/fractal/tileset evidence).
+Last updated: 2026-08-10. **Nothing is training right now.** The active first experiment is the
+terrain-only Spec 134 control-v1 learning curve; object-sieve and object-marker work is parked.
+No working v60 real-data corpus has been accepted or generated.
 
 This file is the durable home for the terrain-ML workstream. `activeContext.md` links here and
 stays short; put detail here, not there.
 
-## Active route — Spec 134 v60 control corpus
+## v50 construction correction — stale synthesized minimaps
+
+The active failure is stale synthesis in the old v50 datastore. The synthesized minimap arrays
+were not regenerated after the renderer's lighting fixes. The raw harvested terrain is not the
+thing to re-diagnose here, and the 0.5.3 renderer remains the known-good control.
+
+The old builder coupled synthesis to a fresh client-backed build, so there was no narrow refresh
+operation. The existing `0_5_3_3368-Azeroth.zarr` has 43 all-zero rows in both synthesized
+resolutions, which is direct evidence that its synthetic output needs regeneration.
+
+`scripts/refresh_v50_synthetic_minimaps.py` now provides the bounded repair: use the existing tile
+index, render fresh 256/1024 synthetic tiles, require every tile to be written and non-black, copy
+the old store to a new path, and replace only `minimap_rgb` and `minimap_rgb_1024`. Raw terrain,
+object masks, and other harvested signals remain untouched. The refreshed signal content identities
+and coverage metadata are recomputed. The copied arrays use one tile per Zarr chunk because the
+historical multi-row chunks caused Windows atomic-replacement collisions during row patching. The
+0.5.3 Ghidra findings are separate future archaeology gates, not the explanation for this
+stale-synthesis failure.
+
+## 0.5.3 audit gate — no accepted real transfer corpus yet
+
+The 2026-08-09 Ghidra audit of `WoWClient.exe` 0.5.3.3368 does not validate the existing v50/v60
+real harvest as a training corpus. Native minimap BLP loading (`BuildPathName`/`SetupTextureHandles`)
+is separate from terrain MCSH/LIT rendering and from WMO/dynamic object overlays. The current
+pipeline therefore has these required repairs before a 0.5.3 transfer sample can be accepted:
+
+- `AlphaWdtReader` must honor each `MCLY.offsAlpha`; sequential MCAL consumption can shift layers.
+- Height extraction needs a written/presence mask; `FillHeightmapGaps` currently treats valid
+  absolute zero heights as missing.
+- Raw MCSH must stay a separately named, per-chunk packed-mask diagnostic. It is not native
+  minimap shading and must not silently become `terrain_shadow_256`.
+- Harvested `terrain_shadow_256` is currently synthetic and target-derived: the helper forces
+  analytic cast shadows, uses the default tuning rather than the Alpha profile, and does not use
+  `lights.lit`. It is not a real observed 0.5.3 label.
+- Alpha MDDF/MODF masks are heuristic placement labels without MCRF, geometry visibility, or
+  overlay semantics. Keep them auxiliary and separate from the requested screen-space sieve mask.
+
+The direct Alpha harvester tile index, MCVT absolute-height mapping, MCNR transform, and minimap
+BLP path are binary-consistent. The shared `AlphaTerrainAdapter` still needs its transposed `MAIN`
+index fixed before viewer validation. External WDL and exact MCLQ vertex fields remain separate
+proof tasks. Until these gates close, v60 remains a control corpus plus validation tooling, not a
+working 0.5.3 real-data corpus.
+
+## Active route — Spec 139 v7 clean-signal reconstruction
+
+## Parallel route — Spec 140 paste/fractal/tileset evidence pipeline
+
+The reconstruction architecture is now explicitly staged rather than monolithic. Spec 140 owns
+the evidence and guidance surfaces around Spec 139: albedo-normalized observation confidence,
+tileset/biome profiles, alpha and texture-layer descriptors, multiscale FBM/fractal descriptors,
+cross-tile paste retrieval, and optional normalized object slots. It does not replace the clean
+terrain model and does not make object identity a terrain prerequisite.
+
+The first proof is classical/descriptive retrieval on deterministic synthetic controls: flat,
+smooth, hilly/mountainous, island, sheer-dropoff, FBM/ridged, lightning/burn, and patterns that
+cross tile boundaries with arbitrary offsets. The atlas must show height, alpha, texture-layer
+identity, albedo-normalized observation, auxiliary tileset channels when present, and object
+evidence as separate rows. Real 0.x/1.x samples are a small transfer/validation slice, not a
+reason to resurrect the broad v50 harvest as training truth.
+
+Guidance is accepted only when it carries a family ID or explicit unconfirmed state, transform,
+source provenance, confidence, and content hash. The downstream comparison is parity versus
+motif-guided versus tileset-guided Spec 139, with per-signal and seam metrics. The first user-run
+gate is the visual atlas and retrieval report; no training command is yet valid.
+
+### New hypothesis: alpha-painted intent precedes sculpted relief
+
+The developer-map evidence now suggests the ordering to test is opaque layer-0 base/“brain”
+texture, layer-1 pasted rock/mountain motifs, later alpha painting of intended regions, then height
+sculpting and surface refinement. This changes alpha from a passive correlated channel into a
+possible upstream latent scaffold for geometry reconstruction.
+
+The first implementation must recover an evidence-bearing paint order, not claim literal editor
+history. Preserve MCLY layer order, MCAL offsets, texture IDs, and the layer-0/layer-1 boundary.
+Layer 0 is opaque base; layer 1 is the first paste/paint candidate. Derive cumulative and
+incremental occupancy hypotheses, then compare them to height curvature/slope and paste families.
+A real tile is classified `intact`, `retextured`, `resculpted`, `unknown`, or
+`insufficient_data`; a retextured zone is useful evidence of a broken relationship, not a reason
+to force current alpha to explain current relief.
+
+The deployment distinction is strict: source-side alpha is supervision/archaeology, while a
+minimap-only system must predict a confidence-bearing paint/sculpt-intent scaffold before the
+Spec 139 geometry stage. Opaque layer 0 must never become a fabricated `alpha_0` tensor; layer 1
+is the first paste/paint candidate. The first new proof is synthetic known-order controls plus a small real
+0.x/1.x analysis slice; no GPU run is authorized by this hypothesis alone.
+
+### Terrain-only reset and v7 pivot (2026-08-10)
+
+The former active experiment was `terrain_shadow_256` → `height_257` from the validated project-owned
+`control-v1` NPZ corpus. Its four-model bakeoff rejected all candidates against the tile-mean
+baseline (`0.191047`); `pyramid_cnn` reached `0.236665`, and cross-tile lightning/burn were the
+dominant failures. Keep that report as negative evidence.
+
+Spec 139 now owns the next lane. It carries forward v7's coarse/detail decomposition and full
+frequency/curvature/edge/transition guidance, but the only deployment input is a four-channel
+albedo-normalized observation package: luma, x/y gradients, and albedo confidence. WDL, height
+hints, normals, liquid, object, alpha, and all other target-derived arrays are forbidden at
+inference. The first architecture candidates are `pyramid_cnn`, `segformer_b0`, and `unet_lite_v2`.
+
+The object sieve, real-library silhouette compositor, and footprint-guided marker are deferred.
+They are not terrain inputs, not dependencies, and not evidence for this run. The marker user run
+was a failed identity diagnostic: final held-out retrieval top-1 was 0, while 668/708 negatives
+were predicted known. Do not reuse its checkpoint.
+
+The first terrain-only model is also not promoted: best held-out MAE `0.228693` versus the
+`0.191047` tile-mean baseline. The architecture bakeoff is now implemented with nested control
+subsets and one shared evaluator: U-Net control, hierarchical CNN/pyramid, compact DPT-style
+multi-scale decoder, and SegFormer comparison. The dry run on `control-v1` reports 1.56M, 15.47M,
+3.51M, and 3.71M parameters respectively. All are random-initialized; Depth Anything code and
+weights are explicitly excluded after the prior non-repeatable failed attempt.
 
 - Start with project-owned deterministic controls, not a broad v50-derived harvest. The default
   control run is 27 families × 4 variants = 108 rows with family-level holdouts and the four
@@ -33,12 +143,29 @@ stays short; put detail here, not there.
   `object_contamination_mask_256`. Compare clean-only, auxiliary-mask-loss, and predicted-mask-
   guided variants. Do not conflate this screen-space contamination mask with the existing
   `object_geometry_visible_mask_257` numeric geometry target.
-- The existing v50.1 mixed curriculum has 1,325 complete authored/legacy-flat same-tile pairs out
-  of 1,330 groups. `v60_validate_real_synthetic_pairs.py` writes the validation-only JSON/atlas; the
-  first 16-tile Azeroth slice measured mean RGB MAE 0.1812 and RMSE 0.2120. The absolute difference
-  is a flat-maptexture diagnostic, not terrain-shadow ground truth. A fresh post-fix C# NPZ with
-  `terrain_shadow_256` is required for shadow comparison. Real masks remain labels only; no GPU run
-  has started.
+- The promoted derived lane is `v60-object-library-sieve-v1`. It reads the 5,349-entry
+  `object_mask_library_0_5_3_3368.zarr` read-only, composites real `capture_rgb`/`capture_mask`
+  silhouettes onto clean controls, and emits a union mask plus `object_instance_id_256` and
+  per-object library provenance. Library families are isolated between train and validation.
+- The prior `real-object-masks-v1` run used tile-level curriculum placement projections and produced
+  dot-like targets. It is rejected as precision-object evidence; do not train or promote from its
+  `experiment_report.json`.
+- The object lane remains split into sieve and marker concerns for later, but neither is active in
+  the current terrain experiment. The failed marker result is preserved only as a negative record.
+- The old v7 13-channel contract is historical reference only. Its structural loss stack is
+  transferable guidance; its WDL trestle and answer-side channels are explicitly rejected.
+- Spec 139 is design-only until the clean observation corpus, target decomposition, model adapters,
+  and parity-vs-structural loss matrix are implemented and validated.
+- Overlap handling is explicit: `object_instance_id_256` stores only the visible winner per pixel,
+  so fully occluded instances are skipped and recorded rather than treated as positives. Marker
+  corpus publication is atomic through `<output>.partial`; a failed build cannot be validated as a
+  manifest-bearing corpus. The user's existing failed `object-marker-v1` directory is partial and
+  should be left untouched; rerun with a fresh `object-marker-v2` output.
+- The existing v50.1 mixed curriculum still has 1,325 complete authored/legacy-flat same-tile pairs
+  out of 1,330 groups. `v60_validate_real_synthetic_pairs.py` remains a validation-only JSON/atlas;
+  the first 16-tile Azeroth slice measured mean RGB MAE 0.1812 and RMSE 0.2120. The absolute
+  difference is a flat-maptexture diagnostic, not terrain-shadow ground truth. A fresh post-fix C#
+  NPZ with `terrain_shadow_256` is required for shadow comparison.
 
 ## Settled — including the dead ends, which are the expensive part
 
@@ -150,7 +277,9 @@ parked) and is the one training-relevant result from it.
 
 - **The user runs all training, capture, and GPU work.** Hand over the exact command; never launch
   it.
-- No DepthAnything / multi-head / shared-weight model paths.
+- No DepthAnything or shared weights across terrain and object stages. The marker specialist's
+  knownness and retrieval outputs are independently reported; they do not become a hidden joint
+  height/sieve model.
 - Never validate on PVPZone02 or Kalidar; use Kalimdor and Azeroth.
 - Constitution IV: per-signal evidence. A strong signal must never mask a dead one, so every signal
   is reported against its own baseline, never rolled into an aggregate score.

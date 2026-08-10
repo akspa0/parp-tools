@@ -120,29 +120,29 @@ The first object lane therefore uses an `objectified_terrain_shadow_256` input w
 clean `terrain_shadow_256` and `object_contamination_mask_256`. The mask is both a separately reported
 signal and an auxiliary loss target. A third ablation feeds the model's predicted mask into its clean
 output head. It never feeds the ground-truth mask as an input, which would create an inference-only
-oracle.
+oracle. Because the object contamination occupies a small fraction of a tile, the clean head is
+identity-preserving and predicts a residual correction from the objectified input; the contaminated
+input's clean MAE is a mandatory baseline.
 
-The initial object vocabulary is deliberately broad and procedural: tree/rock/building/bridge/
-cluster-like silhouettes with controlled scale, density, overlap, and tile-boundary placement. Exact
-client asset identity and instance recognition are deferred until binary contamination removal proves
-useful. Clean-output error and mask quality are reported separately; a strong mask cannot conceal a
-bad inpainted terrain signal.
+The initial procedural vocabulary remains a useful baseline, but the promoted object vocabulary is
+the real v50 library. Each row uses real captured RGB/mask silhouettes with controlled scale,
+rotation, density, overlap, and tile-boundary placement. Exact library identity and instance
+recognition are retained in metadata and an instance-ID target. Clean-output error and mask quality
+are reported separately; a strong mask cannot conceal a bad inpainted terrain signal.
 
-### 9. Use the real v50 masks for the first object detector
+### 9. Use the real v50 object library for the first object sieve
 
-The existing on-disk `curriculum-0_5_3_3368-obj_v1.zarr` contains 2,655 rows, with 1,325 authored
-minimap rows and 1,330 synthetic counterparts. Its `object_mask`, `object_precise_mask`, and
-`object_instance_mask` arrays are populated on sampled rows; the separate
-`object_geometry_visible_mask_257` array is empty in the audit and sample inspection. The object
-detector therefore uses authored `minimap_rgb` as input and trains against the real precise and
-coarse masks. It does not use the empty geometry-visible array and does not pretend that the store
-contains a clean terrain-only minimap target.
+The precision source is the existing `object_mask_library_0_5_3_3368.zarr`: 5,349 captured 0.5.3
+object images paired with 128x128 renderer masks and library metadata. The v50 curriculum's
+`object_mask`/`object_precise_mask` arrays are tile-level placement projections; they are useful as
+a historical diagnostic but are not per-object silhouette supervision and must not drive the
+promoted v60 object lane.
 
-The first model is a compact multi-head U-Net with selectable `precise`, `footprint`, or `both`
-heads. Checkpoint selection uses the minimum IoU across the requested heads, while reports retain
-per-head metrics. RGB is the baseline; an explicit RGB-plus-edge channel is the only first ablation.
-This is enough to answer whether real object appearance is detectable before albedo normalization,
-without coupling the first experiment to an unproven inpainting target.
+The corrected corpus therefore composites library captures over clean project-owned terrain-shadow
+controls. It preserves the transformed union mask and an instance-ID map, plus the library ID/path
+for every placement. Library families are split independently from terrain families so a held-out
+result cannot be explained by seeing the same object in training. This gives the sieve real object
+appearance and exact masks without pretending the library itself is a minimap tile dataset.
 
 ### 10. Use the existing same-tile flat rows as absolute-difference diagnostics
 
@@ -161,7 +161,81 @@ may be supplied; it must contain `terrain_shadow_256`, and the report compares i
 with the absolute-difference luma as calibration evidence only. The old flat synthetic image is not
 fed to the terrain model, and the real masks remain labels only.
 
+### 11. Use a footprint-guided marker specialist for known-object identity
+
+The sieve's union mask is useful for removal but is the wrong ownership boundary for object
+identity. A candidate row should therefore contain the minimap image and exactly one proposed
+footprint. The marker specialist predicts knownness and an embedding; a frozen gallery built from
+the real v50 `capture_rgb`/`capture_mask` library resolves the nearest `library_id`. This avoids a
+large flat classifier with one class per asset, preserves unknown/rejection behavior, and makes
+identity quality measurable independently of proposal recall.
+
+The export is a dense integer `known_object_marker_256` instance map plus a sidecar identity table.
+The integer map only answers which accepted candidate occupies a pixel; variable-length library IDs,
+asset paths, scores, and rejection reasons remain in the table. The first slice consumes explicit
+candidate footprints and deliberately does not claim automatic footprint discovery. The optional
+sieve may consume the predicted marker map later, but neither model receives ground-truth masks or
+identity targets as input.
+
+The corrected sieve's per-pixel instance map is a visible-winner map, not an occlusion stack. In an
+overlap row a later object can overwrite every pixel of an earlier object, leaving that metadata
+instance with no visible footprint. Such an instance is not an identifiable marker candidate and is
+recorded as skipped rather than converted into a fake positive or allowed to abort the full corpus.
+
 ## Alternatives rejected
+
+## 12. Architecture selection for terrain-only dense regression
+
+The current `HeightRelativeNet` is a 1.56M-parameter U-Net-lite. Its 40-epoch control result was
+not useful: the best held-out MAE was `0.228693`, worse than the `0.191047` tile-mean baseline.
+That rejects the current configuration as a champion, but does not distinguish architecture failure
+from the single-view shadow ambiguity or the very small control sample.
+
+The external architecture review uses official Hugging Face documentation and the corresponding
+upstream GitHub implementations as references:
+
+- [Hugging Face DPT](https://huggingface.co/docs/transformers/model_doc/dpt) assembles intermediate
+  vision-transformer stages into multi-resolution image features and uses a convolutional dense
+  prediction decoder. Its global receptive field and multi-scale reconstruction are a strong fit
+  for terrain patterns that cross tile boundaries.
+- Depth Anything is explicitly rejected. The prior local attempt produced non-repeatable,
+  seed-sensitive outputs and did not provide useful terrain evidence. Its code, weights, and
+  training recipe are not part of this project. The generic DPT structure remains a paper/API
+  reference only; any local `dpt_small` candidate is randomly initialized and must be deterministic
+  under the project seed.
+- [Hugging Face SegFormer](https://huggingface.co/docs/transformers/model_doc/segformer) provides a
+  hierarchical MiT encoder with a lightweight all-MLP decoder. It is an efficient comparison model,
+  but it is not the default champion because a prior local MiT-B0 regression run did not beat its
+  baseline.
+- [Hugging Face UPerNet](https://huggingface.co/docs/transformers/model_doc/upernet) supports
+  multi-scale pyramid pooling over interchangeable backbones such as ConvNeXt and Swin. It is the
+  most practical high-capacity CNN/transformer hybrid for the small-data bakeoff.
+- [segmentation_models.pytorch](https://github.com/qubvel-org/segmentation_models.pytorch) and
+  [OpenMMLab MMSegmentation](https://github.com/open-mmlab/mmsegmentation) provide maintained
+  implementation references for U-Net, FPN, UPerNet, SegFormer, and DPT-style encoder/decoder
+  boundaries. They are references, not new runtime authorities or required dataset dependencies.
+
+### Decision
+
+Implement a four-way architecture bakeoff with one shared terrain-only trainer and one shared output
+contract:
+
+1. `unet_lite_v2` — the current model, retained as the low-capacity control.
+2. `pyramid_cnn` — a ResNet/ConvNeXt-style hierarchical encoder with FPN/UPerNet-like multi-scale
+   fusion and a 1-channel input stem. This is the first practical candidate for the current data.
+3. `dpt_small` — a compact, locally implemented DPT-style encoder with intermediate feature taps
+   and a convolutional reassembly decoder. It uses no Depth Anything code or weights and is trained
+   from project-owned controls only.
+4. `segformer_b0` — the efficient hierarchical-transformer comparison and a useful negative control.
+
+All candidates must emit exactly `height_257`, use the same relative-height target, fixed family
+holdout, nested training subsets, optimizer budget, and tile-mean baseline. Architecture selection
+must use median and worst-family MAE, not aggregate loss alone. A model that fails the baseline on
+the held-out families is not promoted regardless of parameter count.
+
+The first bakeoff should use architecture definitions and randomly initialized weights. External
+weights are out of scope for this terrain lane: they introduce domain shortcuts and, in the case of
+the prior Depth Anything attempt, failed the project's repeatability expectations.
 
 ### Full v50/v60 historical harvest first
 
@@ -191,10 +265,10 @@ the control family or variation space is insufficient.
   threshold is assumed before the first calibration run.
 - **Real seed count**: begin with a tiny explicit 0.x/1.x manifest and expand only after transfer
   evidence. Later client builds remain out of the initial route.
-- **Object guidance**: implement `clean_only`, `auxiliary_mask_loss`, and
-  `predicted_mask_guided` ablations. Keep the mask as an exported output and loss-side target; do
-  not commit to a joint height/object model until the sieve's clean-output and mask metrics justify
-  the extra coupling.
+- **Object guidance**: keep the sieve ablations (`clean_only`, `auxiliary_mask_loss`, and
+  `predicted_mask_guided`) separate from the new footprint-guided marker specialist. The marker
+  reports knownness and retrieval identity independently; do not commit to a joint height/object
+  model until both specialist contracts justify the extra coupling.
 - **Paired validation**: use `v60_validate_real_synthetic_pairs.py` for the small absolute-difference
   report and atlas before GPU work; supply `--shadow-npz-dir` only with fresh post-fix NPZs containing
   `terrain_shadow_256`. Do not use the legacy synthetic RGB as a terrain-shadow model input.

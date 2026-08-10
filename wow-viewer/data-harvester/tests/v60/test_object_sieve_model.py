@@ -25,3 +25,13 @@ def test_object_sieve_variants_keep_ground_truth_out_of_forward(variant: str) ->
         assert float(losses["mask_loss"]) == 0.0
     else:
         assert float(losses["mask_loss"].detach()) > 0.0
+
+
+@pytest.mark.parametrize("variant", ["clean_only", "auxiliary_mask_loss", "predicted_mask_guided"])
+def test_object_sieve_clean_head_starts_at_identity_baseline(variant: str) -> None:
+    model = ObjectSieveNet(variant=variant)
+    input_signal = torch.rand((2, 1, 32, 32))
+
+    predictions = model(input_signal)
+
+    assert torch.allclose(predictions.clean_terrain, input_signal)

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/wow-viewer/spec-138/source-profile.schema.json",
+  "title": "Spec 138 client source profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "profileId",
+    "eraBand",
+    "sourceKind",
+    "adapterId",
+    "adapterVersion",
+    "capabilities",
+    "probe"
+  ],
+  "properties": {
+    "profileId": { "type": "string", "minLength": 1 },
+    "eraBand": {
+      "type": "string",
+      "enum": ["alpha-mpq", "classic-mpq", "casc-6x", "casc-7x", "casc-modern", "unknown"]
+    },
+    "buildIdentity": { "type": ["object", "null"] },
+    "sourceKind": {
+      "type": "string",
+      "enum": ["loose", "mpq", "casc-casclib", "casc-tactsharp", "remote-cdn"]
+    },
+    "configuredRoot": { "type": ["string", "null"] },
+    "product": { "type": ["string", "null"] },
+    "locale": { "type": ["string", "null"] },
+    "installTag": { "type": ["string", "null"] },
+    "adapterId": { "type": "string", "minLength": 1 },
+    "adapterVersion": { "type": "string", "minLength": 1 },
+    "listfileSource": { "type": ["object", "null"] },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "contentProbeSha256"],
+      "properties": {
+        "status": { "type": "string", "enum": ["passed", "failed", "partial"] },
+        "testedVirtualPaths": { "type": "array", "items": { "type": "string" } },
+        "testedFileDataIds": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+        "missingCapabilities": { "type": "array", "items": { "type": "string" } },
+        "errors": { "type": "array", "items": { "type": "string" } },
+        "contentProbeSha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+        "timestampUtc": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

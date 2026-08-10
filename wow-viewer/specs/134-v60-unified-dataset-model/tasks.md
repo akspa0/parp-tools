@@ -10,11 +10,14 @@
 | 1 | Setup and contracts | Complete |
 | 2 | Foundational control validation | In progress |
 | 3 | Small deterministic synthetic control corpus | In progress |
-| 4A | Synthetic object sieve and contamination decomposition | In progress |
-| 4B | Limited control-data model experiment | Pending |
+| 4A | Synthetic object sieve and contamination decomposition | Deferred |
+| 4B | Limited terrain-only control-data model experiment | **Next** |
 | 5 | Albedo normalization and textureless gate | Pending |
 | 6 | Tiny real transfer and expansion decision | Pending |
 | 7 | Later signals and client adapters | Deferred |
+
+**Current route (2026-08-10):** execute T019–T025 now. Object-sieve, object-library, and marker
+tasks remain parked artifacts; they are not prerequisites for the terrain-only experiment.
 
 ## Phase 1: Setup
 
@@ -74,18 +77,46 @@ sparse, dense, overlapping, and boundary-crossing controls, with separate ablati
   `data-harvester/scripts/`.
 - [x] T023a [US2] Implement clean-only, auxiliary-mask-loss, and predicted-mask-guided sieve model
   variants; the guided variant must consume predicted masks during training and inference.
-- [ ] T024a [P] [US2] Add separate clean-output, mask, density, placement, and held-out-family
+- [x] T023b [US2] Add a separate `v60-object-library-sieve-v1` builder that reads the real v50
+  `capture_rgb`/`capture_mask` library without mutating it and composites real silhouettes onto
+  clean control shadows.
+- [x] T023c [US2] Emit exact union masks, per-pixel instance IDs, library provenance, deterministic
+  transforms, and library-family-isolated splits for the derived corpus.
+- [x] T023d [US2] Add library-sieve validation, four-panel visual review, focused tests, and a
+  user-run object-sieve trainer with independent clean/mask metrics.
+- [x] T023e [US2] Make the clean sieve head an identity-preserving residual and add a gate/report
+  comparing best clean error against the contaminated-input identity baseline.
+- [ ] T023f [DEFERRED] [US2] Define the footprint-guided `v60-object-marker-v1` candidate and marker-map
+  contracts in `specs/134-v60-unified-dataset-model/data-model.md` and
+  `data-harvester/src/harvester/v60/object_marker.py`.
+- [ ] T023g [DEFERRED] [US2] Build deterministic positive, shifted/empty, and unknown candidate rows from the
+  read-only v50 object library and validated control composites, preserving library-family and
+  terrain-family splits.
+- [ ] T023h [DEFERRED] [US2] Implement the small image-plus-footprint marker specialist with knownness and
+  retrieval-embedding heads; exact library identity must resolve through a frozen gallery rather
+  than a flat library-ID classifier.
+- [ ] T023i [DEFERRED] [US2] Implement marker validation and export of `known_object_marker_256` plus the
+  sidecar identity/rejection table, including knownness and top-k retrieval metrics.
+- [ ] T023j [DEFERRED] [P] [US2] Add focused marker corpus, model, retrieval, marker-map, provenance, and
+  negative-candidate tests in `data-harvester/tests/v60/test_object_marker.py`.
+- [ ] T023k [DEFERRED] [US2] Add dry-run-first user commands for marker corpus build, user-run training, and
+  image-plus-footprint marking in `data-harvester/scripts/`.
+- [ ] T023l [DEFERRED] [US2] **USER RUNS** the bounded marker experiment after the corpus and visual marker
+  export pass; GPU work remains user-owned.
+- [ ] T024a [DEFERRED] [P] [US2] Add separate clean-output, mask, density, placement, and held-out-family
   metrics plus a ground-truth-mask-input leakage assertion.
-- [ ] T025a [US2] **USER RUNS** the bounded object-sieve control experiment after its corpus passes
-  validation; GPU work remains user-owned.
+- [ ] T025a [DEFERRED] [US2] **USER RUNS** the bounded library-derived object-sieve experiment after its
+  corpus passes validation; GPU work remains user-owned.
 - [x] T026a [P] [US2] Inspect the existing v50.1 object-mask curriculum and record populated real
   mask arrays, authored-row count, source-group split state, and empty geometry-visible evidence.
-- [x] T027a [P] [US2] Define the real v50 object-mask dataset and experiment contracts in
-  `specs/134-v60-unified-dataset-model/`.
-- [x] T028a [US2] Define the real-mask model/loss variants and minimum-requested-target checkpoint
-  selection rule in `data-harvester/src/harvester/v60/`.
-- [x] T029a [US2] Implement the lazy v50 Zarr loader, authored/map-holdout split audit, and
-  real-mask trainer/evaluator in `data-harvester/scripts/v60_train_real_object_masks.py`.
+- [x] T027a [P] [US2] Record that the old curriculum tile-level object-mask projections are
+  diagnostic only and cannot substitute for the v50 object-library silhouettes.
+- [x] T028a [US2] Define the historical real-mask diagnostic variants and minimum-requested-target
+  checkpoint selection rule in `data-harvester/src/harvester/v60/`; this is not the promoted
+  library-sieve route.
+- [x] T029a [US2] Implement the lazy v50 curriculum diagnostic trainer/evaluator in
+  `data-harvester/scripts/v60_train_real_object_masks.py`; its tile-projection targets are not
+  precision object silhouettes.
 - [x] T030a [P] [US2] Add real-mask target projection, model/loss, provenance, and leakage tests in
   `data-harvester/tests/v60/`.
 - [x] T031a [P] [US2] Add same-tile authored/synthetic pair selection, domain-distance report, and
@@ -93,8 +124,10 @@ sparse, dense, overlapping, and boundary-crossing controls, with separate ablati
   `data-harvester/scripts/v60_validate_real_synthetic_pairs.py`.
 - [x] T032a [US2] Reclassify the legacy v50 synthetic minimap as a flat fake-maptexture diagnostic;
   remove it from the real-mask trainer's terrain input contract.
-- [ ] T034a [US2] **USER RUNS** the real v50 object-mask experiment; GPU work remains user-owned.
-- [ ] T033a [US2] **USER RUNS** a bounded post-fix `harvest-map-mpq` tile set that emits
+- [x] T034a [US2] **USER RUNS** the historical real v50 object-mask diagnostic; its result is
+  rejected for the v60 precision-object lane because the targets are tile-level dots rather than
+  the v50 object-library silhouettes.
+- [ ] T033a [DEFERRED] [US2] **USER RUNS** a bounded post-fix `harvest-map-mpq` tile set that emits
   `terrain_shadow_256` for the same pair identities; GPU work remains user-owned.
 
 **Checkpoint**: The object sieve has independent mask and clean-terrain evidence. Do not pass its
@@ -107,14 +140,29 @@ ground-truth mask into the height model or authorize real-client expansion from 
 **Independent Test**: The report contains fixed holdout-family metrics, a tile-mean baseline,
 per-training-size results, retexturing controls, and ambiguity labels.
 
-- [ ] T019 [P] [US3] Implement a control-v1 loader that reads `terrain_shadow_256` and `height_257` without changing historical contracts in `data-harvester/src/harvester/v60/control_experiment.py`.
-- [ ] T020 [P] [US3] Implement fixed-family split selection and limited training-size schedules in `data-harvester/src/harvester/v60/control_experiment.py`.
-- [ ] T021 [US3] Implement tile-mean baseline and per-family/per-variant metrics in `data-harvester/src/harvester/v60/control_experiment.py`.
-- [ ] T022 [US3] Add the bounded experiment CLI and `experiment-report-v1` writer in `data-harvester/scripts/v60_run_experiment.py`.
-- [ ] T023 [P] [US3] Add loader, split, baseline, and unchanged-target retexturing tests in `data-harvester/tests/v60/test_control_experiment.py`.
-- [ ] T024 [US3] **USER RUNS** limited clean-height control training/evaluation after T025a and T018
-  pass; GPU work remains user-owned.
+- [x] T019 [P] [US3] Implement a control-v1 loader that reads `terrain_shadow_256` and `height_257` without changing historical contracts in `data-harvester/src/harvester/v60/control_experiment.py`.
+- [x] T020 [P] [US3] Implement fixed-family split selection and limited training-size schedules in `data-harvester/src/harvester/v60/control_experiment.py`.
+- [x] T021 [US3] Implement tile-mean baseline and per-family/per-variant metrics in `data-harvester/src/harvester/v60/control_experiment.py`.
+- [x] T022 [US3] Add the bounded experiment CLI and `experiment-report-v1` writer in `data-harvester/scripts/v60_run_experiment.py`.
+- [x] T023 [P] [US3] Add loader, split, baseline, and terrain-signal-isolation tests in `data-harvester/tests/v60/test_control_experiment.py`.
+- [ ] T024 [US3] **USER RUNS** limited terrain-only height control training/evaluation after T018
+  passes; GPU work remains user-owned. Object-sieve tasks are not a dependency.
 - [ ] T025 [US3] Record the held-out result and ambiguity cases in the experiment report before real-data work in `specs/134-v60-unified-dataset-model/`.
+
+### Architecture bakeoff
+
+- [x] T046 [P] [US3] Define the terrain architecture registry and shared model-output contract for
+  `unet_lite_v2`, `pyramid_cnn`, `dpt_small`, and `segformer_b0` in `data-harvester/src/harvester/v60/`.
+- [x] T047 [US3] Implement the hierarchical CNN/pyramid candidate with a 1-channel shadow stem and
+  exact `height_257` output.
+- [x] T048 [US3] Implement the compact locally-owned DPT-style multi-scale candidate without using
+  Depth Anything code/weights, downloading external weights, or changing the terrain target contract.
+- [x] T049 [US3] Add the SegFormer comparison candidate and make all four candidates selectable from
+  the terrain-only experiment CLI.
+- [x] T050 [P] [US3] Add parameter-count, shape, nested-subset, per-family, and baseline-relative
+  architecture comparison tests.
+- [ ] T051 [US3] **USER RUNS** the architecture bakeoff; GPU work remains user-owned.
+- [ ] T052 [US3] Record the winner or information-limit result before any real-data transfer.
 
 **Checkpoint**: Control evidence says whether the first relationship is learnable. Do not expand the
 corpus merely because the score is disappointing.
@@ -173,16 +221,15 @@ normalization or domain shift first.
 ```text
 Phase 1 setup
     -> Phase 2 foundation
-        -> US1 control corpus
-            -> US2 object sieve
-                -> US3 height control experiment
-                    -> US4 albedo normalization/gate
+    -> US1 control corpus
+        -> US3 terrain-only height control experiment
+            -> US4 albedo normalization/gate
                         -> US5 tiny transfer gate
                             -> US6 extensions
 ```
 
-- US1 blocks US2 because the object-sieve evaluator needs a validated terrain/control manifest.
-- US2 blocks US3 because the height evaluator should consume the proven clean signal contract.
+- US1 blocks US3 because the height evaluator needs a validated terrain/control manifest.
+- US2 object work is parked and does not block US3.
 - US3 blocks US4 because the real-input gate must target a measured canonical input contract.
 - US4 blocks US5 because only accepted normalized rows may transfer.
 - US5 blocks broader processing and all later-era expansion.

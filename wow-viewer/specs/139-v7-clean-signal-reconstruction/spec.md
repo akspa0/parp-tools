@@ -1,0 +1,255 @@
+# Feature Specification: V7-Inspired Clean-Signal Terrain Reconstruction
+
+**Feature Branch**: `139-v7-clean-signal-reconstruction`
+
+**Created**: 2026-08-10
+
+**Status**: Draft — Speckit design pivot; implementation not started
+
+**Input**: User description: "Build the old v7 model idea with a modern architecture, guided by
+clean synthetic data and a sane signal set. Remove the WDL-prior dependency so any minimap can be
+processed after albedo normalization."
+
+## Problem Statement
+
+The April v7 model was the closest previous attempt to useful terrain reconstruction, but its
+contract was not deployable. It consumed a WDL height prior, height-derived min/max hints, normals,
+liquid fields, and object masks. Several of those channels were unavailable at inference or were
+derived from the answer being predicted. Its large model and old training corpus also mixed dirty
+signals with useful supervision.
+
+The current v60 control corpus is structurally valid, but the first one-channel architecture
+bakeoff still failed the tile-mean baseline on held-out procedural families. That result does not
+invalidate v7's multi-scale structural idea; it shows that architecture selection alone is not
+enough. This feature tests the transferable v7 idea against a clean, reproducible observation and
+exact synthetic height targets.
+
+The deployment boundary is:
+
+```text
+arbitrary authored minimap
+    -> versioned albedo normalization and textureless gate
+    -> clean observation + image-derived confidence/gradient signals
+    -> v7-inspired coarse structure + detail reconstruction
+    -> relative height_257
+```
+
+No WDL prior, ground-truth height, ground-truth normals, liquid field, object mask, or other
+target-derived signal may enter inference.
+
+## Design Boundary
+
+The first model input is a deployment-safe observation package:
+
+- `clean_observation_luma_256`: one finite `[0,1]` channel representing the albedo-normalized
+  terrain observation;
+- `clean_observation_gradient_256`: two finite channels containing deterministic x/y gradients of
+  that observation;
+- `clean_observation_confidence_256`: one finite `[0,1]` channel emitted by the albedo operation,
+  where low values identify pixels whose texture removal is uncertain.
+
+The four channels are all computable from an arbitrary minimap before inference. The confidence
+channel is allowed to be all zeros only when the operation explicitly records that confidence was
+unavailable; it must never contain height or mask truth. Synthetic controls must produce the same
+package and record the perturbation and confidence provenance.
+
+The model predicts two training-visible components:
+
+- `coarse_relief_257`: low-frequency relative relief;
+- `detail_residual_257`: signed residual that completes the coarse field.
+
+The exported product is `height_257 = coarse_relief_257 + detail_residual_257`, clamped only at the
+published relative-height boundary. The two components are internal guidance surfaces, not
+additional deployment inputs or separate terrain products.
+
+## User Scenarios & Testing
+
+### User Story 1 — Reproduce the v7 structural advantage without leakage (Priority: P1)
+
+A researcher can train a v7-inspired terrain model whose input is limited to the clean observation
+package and whose exact height target comes from project-owned synthetic terrain. The researcher can
+compare a modern architecture against a small U-Net control using the same data, split, optimizer,
+and final-height metric.
+
+**Why this priority**: This isolates the part of v7 that appeared useful—multi-scale structure and
+detail guidance—from the old WDL trestle and dirty signal contract.
+
+**Independent Test**: Build a deterministic synthetic corpus, run the dry-run contract audit, and
+verify that every model forward pass accepts only the four clean observation channels and emits the
+two components plus a recomposed `height_257`.
+
+**Acceptance Scenarios**:
+
+1. **Given** a valid synthetic observation/height pair, **when** the model is initialized and run,
+   **then** it produces finite coarse, detail, and recomposed 257×257 fields.
+2. **Given** an inference input with WDL, height, normal, liquid, or object arrays attached,
+   **when** the model is invoked, **then** those arrays are ignored or rejected and cannot alter the
+   input tensor.
+3. **Given** the same seed, corpus manifest, and architecture configuration, **when** the experiment
+   is repeated, **then** the split, model identity, and synthesized observation hashes match.
+
+### User Story 2 — Use synthetic terrain as guidance, not as a shortcut (Priority: P1)
+
+A researcher can generate varied terrain observations with independent albedo-removal quality,
+illumination, relief, cross-tile, fractal, island, flat, and sheer-dropoff controls. Exact height
+targets and multi-scale structural targets are available for training, while observation-only input
+features stay within the deployment contract.
+
+**Why this priority**: The old v7 result may have come from its structural losses rather than its
+unavailable auxiliary signals. Synthetic data lets that hypothesis be tested with exact evidence.
+
+**Independent Test**: Generate the corpus twice from one configuration and compare row hashes,
+observation hashes, target hashes, and provenance. Review visual panels for both observations and
+coarse/detail targets.
+
+**Acceptance Scenarios**:
+
+1. **Given** a known height field and a synthesis configuration, **when** an observation is rendered,
+   **then** the package carries the exact target, albedo/illumination parameters, confidence
+   provenance, and a reproducible row hash.
+2. **Given** a deliberately textured, partially normalized, or failed observation, **when** the
+   gate is evaluated, **then** it is labeled rejected or quarantined rather than silently admitted.
+3. **Given** a cross-tile pattern, **when** its four tiles are reviewed together, **then** the
+   pattern remains continuous and is not restarted independently per tile.
+
+### User Story 3 — Compare v7 guidance losses and modern architectures (Priority: P1)
+
+A researcher can compare the current point/gradient loss against a v7-inspired structural loss
+stack containing full-spectrum, Laplacian, edge, transition, tile-border, and multi-scale
+low/high-frequency guidance. The same comparison can run with the pyramid CNN, SegFormer, and small
+U-Net architecture candidates.
+
+**Why this priority**: The architecture bakeoff showed that the pyramid CNN was only marginally
+better than the U-Net and still worse than the trivial baseline. The next evidence must identify
+whether v7's loss-side structural prior is the missing lever.
+
+**Independent Test**: Run a dry-run ablation matrix and then a user-owned training run on a fixed
+synthetic split. The report must expose final-height MAE, coarse MAE, detail MAE, frequency/edge/
+curvature diagnostics, and per-family baseline-relative metrics for each cell.
+
+**Acceptance Scenarios**:
+
+1. **Given** identical model and split settings, **when** the structural stack is disabled or
+   enabled, **then** the only changed training authority is the documented loss configuration.
+2. **Given** a candidate architecture, **when** training completes, **then** the report identifies
+   its parameter count, seed, input contract, loss weights, best epoch, and per-family metrics.
+3. **Given** a model that improves aggregate MAE while degrading cross-tile or sheer-dropoff
+   families, **when** the report is evaluated, **then** it is not promoted as a generalized winner.
+
+### User Story 4 — Transfer to arbitrary albedo-normalized minimaps (Priority: P2)
+
+A researcher can run the selected synthetic-trained model on a tiny accepted sample of real 0.x/1.x
+minimaps after albedo normalization, without supplying WDL or any ground-truth terrain signal.
+
+**Why this priority**: Synthetic success matters only if the input contract survives the transition to
+real minimaps. This is the first deployability check for the v7-inspired lane.
+
+**Independent Test**: The transfer command reads only accepted normalized observations and writes
+height outputs, confidence/provenance, and visual validation artifacts. A separate audit proves
+that target-side arrays were not read during inference.
+
+**Acceptance Scenarios**:
+
+1. **Given** an accepted normalized real minimap, **when** inference runs, **then** it produces a
+   finite relative height field using only the four observation channels.
+2. **Given** a rejected or quarantined albedo result, **when** transfer is attempted, **then** the
+   row is refused and remains visible in the gate report.
+3. **Given** a synthetic checkpoint that passes the control gate but fails the real transfer gate,
+   **when** expansion is considered, **then** the report names albedo/domain shift as the next
+   diagnosis rather than authorizing broad processing.
+
+### Edge Cases
+
+- Flat or near-flat terrain: the relative-height target keeps its range floor and reports ambiguity;
+  the model must not invent high-relief structure merely to satisfy the structural losses.
+- Sheer drop-offs and cross-tile motifs: edge and border metrics are reported separately; aggregate
+  MAE cannot hide a family failure.
+- Missing albedo confidence: the row is allowed only with an explicit absence flag and a zero-filled
+  confidence channel; the model report must distinguish this from true high confidence.
+- Non-finite, out-of-range, wrong-shape, or stale observation/target arrays: fail closed.
+- Object-heavy real minimaps: object masks are not model inputs in this phase; the albedo gate or a
+  later separately authorized object-sieve stage must determine whether the row is admissible.
+- Any attempt to provide WDL, height, normal, liquid, or object arrays to inference: reject the
+  invocation rather than silently using them.
+
+## Requirements
+
+### Functional Requirements
+
+- **FR-001**: The feature MUST preserve v7's multi-scale coarse-plus-detail reconstruction idea
+  without preserving its WDL trestle, 13-channel input order, or target-derived inputs.
+- **FR-002**: Deployment inference MUST accept only the versioned four-channel clean observation
+  package and MUST support any 256×256 minimap that passes the albedo/textureless gate.
+- **FR-003**: The observation package MUST contain luma, x/y image gradients, and albedo-operation
+  confidence, all finite and normalized under a versioned contract.
+- **FR-004**: Synthetic generation MUST emit exact `height_257` supervision, deterministic
+  coarse/detail target decomposition, independent observation perturbation parameters, and hashes.
+- **FR-005**: Synthetic controls MUST include flat, smooth relief, mountainous, sheer-dropoff,
+  fractal/ridged, lightning/burn, island/sea, chunk-grid, and cross-tile families, with whole-family
+  and within-family split modes.
+- **FR-006**: The model MUST emit coarse relief, signed detail residual, and recomposed relative
+  `height_257`; every output MUST have independent validation metrics.
+- **FR-007**: The loss system MUST provide a documented baseline and independently ablatable v7
+  guidance terms for point error, gradient, full 2D frequency, Laplacian, Sobel edge, transition
+  focus, tile border, and low/high-frequency bands.
+- **FR-008**: The initial architecture registry MUST support `pyramid_cnn`, `segformer_b0`, and
+  `unet_lite_v2` under one model/output contract. DPT is not required for the first lane because
+  the prior control run was flat from epoch one.
+- **FR-009**: Architecture and loss comparisons MUST use the same seeded corpus, split, training
+  budget, and tile-mean baseline; reports MUST include per-family and per-complexity metrics.
+- **FR-010**: The model MUST NOT read WDL, height, normal, liquid, object, alpha, or any other
+  target-derived signal during inference, even if those arrays are present beside an input row.
+- **FR-011**: Albedo normalization MUST write a versioned observation, confidence/absence status,
+  residual quality metrics, and accepted/rejected/quarantined decision before inference admission.
+- **FR-012**: The transfer evaluator MUST prove image-only inference and keep synthetic control,
+  real transfer, and visual acceptance metrics separate.
+- **FR-013**: Checkpoints and reports MUST bind architecture, loss configuration, input contract,
+  corpus manifest, split, seed, and upstream albedo-operation identity.
+- **FR-014**: Heavy training, synthetic corpus generation, real-client processing, and transfer runs
+  MUST remain user-launched behind dry-run and fail-closed commands.
+
+### Key Entities
+
+- **CleanObservationRow**: One albedo-normalized observation package, confidence state, synthesis or
+  real provenance, split membership, and content hashes.
+- **StructuralTarget**: Exact height target plus deterministic coarse relief and signed detail
+  residual derived from the target for training and validation only.
+- **V7GuidanceConfig**: Versioned point, gradient, frequency, Laplacian, edge, transition, border,
+  and low/high-frequency loss weights.
+- **ArchitectureRun**: One model/loss/split run with parameter count, checkpoint identity, best epoch,
+  final-height metrics, component metrics, and per-family results.
+- **TransferDecision**: Synthetic gate result, accepted real-row count, domain comparison, visual
+  artifacts, and hold/diagnose/expand decision.
+
+## Success Criteria
+
+### Measurable Outcomes
+
+- **SC-001**: Rebuilding the same synthetic configuration twice produces identical observation,
+  target, manifest, and split hashes for 100% of rows.
+- **SC-002**: A clean-observation model forward pass uses exactly four input channels and produces
+  finite 257×257 coarse, detail, and recomposed fields; an inference audit finds zero reads of
+  forbidden target-derived arrays.
+- **SC-003**: On the within-family learnability split, the best structural-guidance run improves
+  final-height MAE by at least 10% over the same architecture with only point and gradient losses.
+- **SC-004**: On the held-out-family synthetic split, the promoted run beats the tile-mean baseline
+  by at least 5% overall and does not regress any complexity bucket by more than 5% relative to that
+  bucket's baseline.
+- **SC-005**: The selected checkpoint processes 100% of accepted transfer rows without shape or
+  finite-value failures and writes visual review artifacts for every row.
+- **SC-006**: The transfer report records an explicit `hold`, `diagnose`, or `expand` decision and
+  never treats synthetic success alone as authorization for broad real-data processing.
+
+## Assumptions
+
+- The existing C# terrain compositor remains the authority for synthetic terrain observations and
+  exact heights; Python only validates, derives training-only targets, and orchestrates runs.
+- Albedo normalization is a separate versioned operation owned by the v60 real-input lane. This
+  feature consumes its accepted artifact and does not silently substitute a synthetic image.
+- The first implementation uses the existing v60 architecture registry as the starting point and
+  wraps the selected encoder with v7-inspired structural heads; it does not revive the 117M v7
+  monolith.
+- Real transfer initially remains limited to explicit 0.x/1.x rows. Later client eras are out of
+  scope until this control and transfer gate passes.
+- Object masks may later become loss-side evidence, but object identification, object prediction,
+  and object-guided inference are out of scope for this first clean-signal lane.

@@ -2,7 +2,8 @@
 
 The model is deliberately a bounded control experiment. It consumes the canonical one-channel
 textureless/objectified terrain signal and predicts clean terrain plus an object-contamination mask.
-It never accepts a ground-truth mask as an input channel.
+The clean head is an identity-preserving residual: it starts as ``clean = input`` and learns only a
+correction. It never accepts a ground-truth mask as an input channel.
 """
 
 from __future__ import annotations
@@ -46,6 +47,11 @@ class ObjectSieveNet(nn.Module):
             nn.SiLU(inplace=True),
             nn.Conv2d(32, 1, kernel_size=1),
         )
+        # The contaminated input is already a strong clean-terrain baseline because object pixels
+        # occupy a small fraction of a tile. Start exactly at that baseline and let training learn
+        # a bounded correction instead of rewriting uncontaminated terrain everywhere.
+        nn.init.zeros_(self.clean_head[-1].weight)
+        nn.init.zeros_(self.clean_head[-1].bias)
 
     def forward(self, objectified_terrain: Tensor) -> ObjectSievePredictions:
         if objectified_terrain.ndim != 4 or objectified_terrain.shape[1] != 1:
@@ -57,7 +63,8 @@ class ObjectSieveNet(nn.Module):
         clean_features = features
         if self.variant == "predicted_mask_guided":
             clean_features = torch.cat((features, torch.sigmoid(contamination_logits)), dim=1)
-        clean_terrain = self.clean_head(clean_features).sigmoid()
+        clean_delta = self.clean_head(clean_features)
+        clean_terrain = torch.clamp(objectified_terrain + clean_delta, 0.0, 1.0)
         return ObjectSievePredictions(clean_terrain=clean_terrain, contamination_logits=contamination_logits)
 
 

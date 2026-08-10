@@ -137,12 +137,12 @@ def _is_per_build_store(store: Path) -> bool:
     return any(ch.isdigit() for ch in build)
 
 
-def _existing_v50_maps() -> dict[str, set[str]]:
+def _existing_v50_maps(v50_store_root: Path = V50_STORE_ROOT) -> dict[str, set[str]]:
     """Return {build_id: {map_name}} for v50.1 per-build stores already on disk."""
     result: dict[str, set[str]] = {}
-    if not V50_STORE_ROOT.exists():
+    if not v50_store_root.exists():
         return result
-    for store in sorted(V50_STORE_ROOT.glob("*.zarr")):
+    for store in sorted(v50_store_root.glob("*.zarr")):
         if not _is_per_build_store(store):
             continue
         name = store.name
@@ -651,6 +651,8 @@ def main() -> int:
                         help="Path to the directory containing WoW client build folders")
     parser.add_argument("--output", required=True, type=Path,
                         help="Output v60 Zarr store path (e.g. ../output/datasets/v60/v60/unified.zarr)")
+    parser.add_argument("--v50-store-root", type=Path, default=V50_STORE_ROOT,
+                        help="v50 per-build store directory to consolidate (default: the canonical v50.1 root)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print what would be harvested without running anything")
     parser.add_argument("--release", default=DEFAULT_RELEASE_V60)
@@ -680,7 +682,8 @@ def main() -> int:
     print(f"  DLL: {harvest_dll}", flush=True)
 
     # Which builds/maps already exist in the v50 datastore?
-    existing_v50 = _existing_v50_maps()
+    v50_store_root = args.v50_store_root
+    existing_v50 = _existing_v50_maps(v50_store_root)
     print(f"Existing v50 stores: {len(existing_v50)} builds", flush=True)
     for build, maps in existing_v50.items():
         print(f"  {build}: {sorted(maps)}", flush=True)
@@ -699,7 +702,7 @@ def main() -> int:
 
     try:
         # 1. Consolidate existing v50 stores (already built, no re-harvest).
-        for v50_store in sorted(V50_STORE_ROOT.glob("*.zarr")):
+        for v50_store in sorted(v50_store_root.glob("*.zarr")):
             dest = _copy_v50_store_into_work(v50_store, work_dir)
             if dest is not None:
                 per_build_stores.append(dest)

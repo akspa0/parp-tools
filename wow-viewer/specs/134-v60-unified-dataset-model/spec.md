@@ -2,11 +2,24 @@
 
 **Feature Branch**: `134-v60-unified-dataset-model`
 **Created**: 2026-08-08
-**Status**: Draft — scope reset from harvested multi-client corpus
+**Status**: Draft — terrain-only control learning is active; object lanes are parked
 
 **Input**: Use project-owned synthetic terrain controls to test a small reconstruction experiment.
 First normalize authored minimap albedo, admit only textureless results, and then test transfer to a
 tiny 0.x/1.x sample before processing anything broader.
+
+### Current execution route (2026-08-10)
+
+The immediate experiment is only:
+
+```text
+terrain_shadow_256 -> height_257
+```
+
+It reads the validated `control-v1` NPZ corpus, preserves its complete-family validation holdout,
+and compares limited training sizes against a tile-mean baseline. Object contamination, object
+identity, object markers, real-client rows, and albedo normalization are not inputs or gates for
+this experiment. Those artifacts remain parked for a later, separately authorized phase.
 
 ## Context
 
@@ -48,12 +61,48 @@ works; a tiny transfer gate is required.
   initial transfer route.
 - Authored minimap pixels are not accepted directly into the first model lane. They require albedo
   normalization and the textureless quality gate.
-- The initial object-removal route is `normalized textureless minimap -> object sieve -> terrain
-  reconstruction`. Synthetic object controls start from the canonical terrain shadow and add
-  controlled object contamination, so object removal is tested separately from albedo removal.
+- The initial object-removal route is `normalized textureless minimap -> optional object sieve ->
+  terrain reconstruction`. Object identification/marking is a separate specialist and is not
+  hidden inside the sieve. Synthetic object controls start from the canonical terrain shadow and
+  add controlled object contamination, so object marking and object removal are tested separately
+  from albedo removal.
+  The object controls MUST use the existing v50 object-library `capture_rgb`/`capture_mask` pairs
+  for the placed silhouettes; procedural geometric stamps are retained only as a comparison
+  baseline.
 - The existing v50.1 `0_5_3_3368` curriculum is an allowed supervision source for the object-mask
   experiment only. It may be read by configured path; it is not copied into v60 and does not bypass
   the later albedo/textureless gate for height reconstruction.
+
+### Object-lane correction (2026-08-09)
+
+The earlier `real-object-masks-v1` run is not a valid precision-object result. It used the
+curriculum's tile-level placement projections (`object_mask`/`object_precise_mask`), which appear as
+placement dots at minimap scale, and did not read the v50 object library. The corrected v60 lane is
+`v60-object-library-sieve-v1`: it reads the 5,349-entry 0.5.3 object library, composites real
+top-down object captures onto project-owned clean terrain controls, and emits the exact library
+silhouette union plus a per-instance ID map as loss-side targets. The old run remains on disk as a
+diagnostic artifact but MUST NOT be used to claim object segmentation quality.
+
+### Object identification-marker pivot (2026-08-09, parked)
+
+The sieve-only experiment answers whether object pixels can be removed, but it cannot answer which
+known library object produced those pixels. The next object slice therefore consumes a minimap image
+and one candidate footprint at a time. It predicts whether the footprint contains a known library
+object and emits an embedding used to retrieve the best matching v50 library entry. Accepted
+candidates are rasterized into a dense marker map; the library ID, match score, asset path, and
+candidate geometry remain in a sidecar identity table rather than being encoded as a fragile
+5,349-way pixel value.
+
+The marker model is deliberately not an end-to-end proposal detector in this slice. Candidate
+footprints come from an explicit upstream source (for the first control run, the precise synthetic
+instance masks from `v60-object-library-sieve-v1`). Later proposal sources may include a real
+renderer/object pass or a separate footprint detector. This keeps identity evidence separate from
+proposal recall and makes a marked input minimap directly inspectable.
+
+This lane is now explicitly deferred. Its user-run result was not useful identity evidence: held-out
+retrieval top-1 was effectively zero, negatives were frequently accepted as known, and the input
+corpus did not preserve the real object RGB signal needed for identity. Do not feed this checkpoint
+or any object marker into the terrain experiment.
 
 ## User Stories & Testing
 
@@ -82,14 +131,16 @@ harvest output.
 6. **Given** a cross-tile fractal or lightning family, **when** visual review stitches its 2x2 rows,
    **then** the pattern crosses tile seams instead of restarting at each tile.
 
-### User Story 2 — Synthetic and real object sieve supervision (Priority: P1)
+### User Story 2 — Object identification, marking, and optional sieve supervision (Priority: P2, deferred)
 
-A researcher can generate terrain controls with procedural objects placed on top and train a sieve
-that emits the clean underlying terrain shadow plus a separately supervised object-contamination
-mask.
+A researcher can provide a minimap image plus candidate object footprints, identify known objects
+against the real v50 object library, and write a dense known-object marker map and identity table.
+The existing sieve remains an optional downstream consumer for removing the marked pixels before
+terrain reconstruction.
 
-**Independent Test**: The report evaluates clean-terrain reconstruction and contamination-mask
-quality separately across no-object, sparse, dense, overlapping, and boundary-crossing object cases.
+**Independent Test**: A held-out marker report evaluates known/unknown detection and library
+retrieval per candidate, then writes a marker map whose nonzero regions exactly correspond to the
+accepted candidate footprints. Sieve clean-terrain and contamination-mask metrics remain separate.
 
 **Acceptance Scenarios**:
 
@@ -106,14 +157,24 @@ quality separately across no-object, sparse, dense, overlapping, and boundary-cr
    are never supplied as an inference channel.
 5. **Given** a sieve output, **when** it is evaluated, **then** clean-terrain error and mask metrics
    are reported independently by object-density and placement family.
-6. **Given** the existing v50.1 curriculum, **when** the real-mask lane is planned, **then** it
-   filters to authored minimap rows, preserves the manifest split or an explicit map holdout, and
-   records the exact store and source-group provenance.
-7. **Given** `object_precise_mask` and `object_mask`, **when** the real-mask model trains, **then**
-   precise and coarse-footprint predictions remain separate outputs with independent metrics.
-8. **Given** the v50 `object_geometry_visible_mask_257` signal is empty, **when** the real-mask lane
-   is prepared, **then** it reports that evidence and does not silently substitute it for the real
-   footprint masks.
+6. **Given** the existing v50 object library, **when** the library-sieve corpus is built, **then**
+   each placed object comes from a real `capture_rgb`/`capture_mask` pair and carries its library ID
+   and transform provenance.
+7. **Given** a derived library-sieve row, **when** its targets are inspected, **then** the mask is
+   a visible silhouette union with a per-instance ID map, not a tile-level placement dot.
+8. **Given** the old curriculum `object_precise_mask`/`object_mask` arrays, **when** the historical
+   diagnostic is reviewed, **then** its dot-like targets are reported as rejected evidence and are
+   not promoted to the precision object lane.
+9. **Given** a minimap image and a candidate footprint, **when** the marker model evaluates it,
+   **then** it emits known/unknown confidence, a retrieval embedding, and the best matching library
+   ID without receiving the ground-truth library ID as an input.
+10. **Given** accepted candidate results, **when** marker export runs, **then** it writes a dense
+    `known_object_marker_256` map and a sidecar identity table mapping each marker instance to its
+    library ID, asset path, footprint, confidence, and retrieval score.
+11. **Given** an unknown object or a shifted/empty candidate footprint, **when** marker inference
+    runs, **then** it can reject the candidate instead of forcing a nearest-library identity.
+12. **Given** a marker map, **when** the optional sieve consumes it, **then** the sieve sees only
+    the exported prediction and never the marker target or library identity target.
 
 ### User Story 3 — Limited control-data model experiment (Priority: P1)
 
@@ -253,21 +314,25 @@ changing the control generator or silently mixing source-era behavior.
 - **FR-030**: Non-grid control rows MUST persist deterministic field offsets and alignment mode. The
   validator MUST reject a default corpus whose non-grid families are all chunk-aligned or whose
   multi-variant family has no offset variation.
-- **FR-031**: The real object-mask lane MUST read the configured v50.1 curriculum at runtime and
-  MUST record its absolute store path, release, row count, source filter, and source-group split
-  policy in its experiment report.
-- **FR-032**: The initial real object-mask run MUST default to authored `0_5_3_3368` rows and MUST
-  keep authored/synthetic variants and map holdouts explicit; duplicate source groups MUST NOT cross
-  train/validation splits.
-- **FR-033**: `object_precise_mask` MUST be the primary real mask target and `object_mask` MUST be a
-  separate coarse-footprint target. Both MUST be projected from their native 257x257 arrays to the
-  256x256 minimap contract without inventing labels.
-- **FR-034**: Real-mask models MUST report per-target positive coverage, precision, recall, Dice, and
-  IoU. Checkpoint selection MUST use the minimum requested-target IoU so one strong head cannot hide
-  a dead head.
-- **FR-035**: An empty `object_geometry_visible_mask_257` array MUST be reported as unavailable
-  evidence for this lane; it MUST NOT be promoted to a real object-contamination target.
-- **FR-036**: The real-mask lane MUST train mask prediction only until a clean terrain target exists;
+- **FR-031**: The promoted object-sieve lane MUST read the configured v50 object-library Zarr at
+  runtime, MUST leave it unchanged, and MUST record its absolute path, library schema, release,
+  eligible row count, `assets.parquet` hash, and `index.parquet` hash.
+- **FR-032**: The object-library builder MUST keep library families isolated between train and
+  validation and MUST preserve terrain-family holdouts; no library family may cross the derived
+  split.
+- **FR-033**: Each derived row MUST emit the exact transformed library-mask union as
+  `object_contamination_mask_256` and a deterministic `object_instance_id_256` map, with one
+  metadata record per placed library object.
+- **FR-034**: Library-sieve reports MUST provide clean-terrain error, mask IoU/Dice or equivalent,
+  precision, recall, coverage, and regime/family breakdowns. A good aggregate score MUST NOT hide a
+  dead non-empty-mask signal.
+- **FR-035**: The old curriculum `object_precise_mask`/`object_mask` projections and empty
+  `object_geometry_visible_mask_257` evidence MUST remain diagnostic only; neither may be promoted
+  as the precision object-library target.
+- **FR-036**: The sieve's clean-terrain head MUST preserve the contaminated-input identity baseline
+  at initialization and MUST report whether its best clean error beats that baseline. A mask score
+  MUST NOT promote a model whose clean output damages uncontaminated terrain relative to identity.
+- **FR-036a**: The real-mask lane MUST train mask prediction only until a clean terrain target exists;
   it MUST NOT claim that the v50 mask arrays provide an exact clean-minimap supervision pair.
 - **FR-037**: The paired validation lane MUST select authored and synthetic minimap rows from the
   same v50 `source_group_id` and MUST verify identical map/tile identity before pairing them.
@@ -278,6 +343,35 @@ changing the control generator or silently mixing source-era behavior.
 - **FR-040**: A terrain-shadow comparison MUST accept only a fresh NPZ containing
   `terrain_shadow_256` emitted by the post-fix C# compositor, with finite/range checks and explicit
   producer provenance. Missing fresh shadow artifacts MUST fail closed.
+- **FR-041**: The promoted marker corpus MUST derive positive candidate examples from the real v50
+  object-library `capture_rgb`/`capture_mask` pairs and MUST preserve the corresponding `library_id`
+  and transform/footprint provenance. The rejected v50 curriculum dot projections MUST NOT be used
+  as precision identity targets.
+- **FR-042**: The marker model MUST consume a 256x256 minimap image plus one 256x256 candidate
+  footprint channel and MUST emit at least a known-object confidence and a fixed-length retrieval
+  embedding. The ground-truth mask, library ID, or gallery match MUST NOT be an input channel.
+- **FR-043**: Exact identity MUST be resolved by nearest-neighbour retrieval against a frozen,
+  provenance-bound v50 library gallery; a flat 5,349-way classifier is not the primary identity
+  contract.
+- **FR-044**: Marker export MUST write `known_object_marker_256` as an integer instance map with
+  zero meaning background/unaccepted candidate, plus an identity table with marker instance ID,
+  library ID, asset path, candidate footprint bounds/coverage, known confidence, retrieval score,
+  and rejection reason when applicable.
+- **FR-045**: Marker train/validation splits MUST isolate library families and terrain control
+  families. Positive, shifted/empty, and unknown candidates MUST be represented and reported
+  separately so identity quality cannot be hidden by candidate prevalence.
+- **FR-046**: Marker evaluation MUST report known/unknown precision, recall, and coverage together
+  with top-1/top-k library retrieval accuracy and per-family breakdowns. A marker model is not
+  promoted from aggregate loss alone.
+- **FR-047**: Marker inference MUST fail closed when the input image, candidate footprint, gallery,
+  or checkpoint contract is missing, non-finite, shape-incompatible, or provenance-mismatched.
+- **FR-048**: The sieve MAY consume the marker map as an optional predicted guidance artifact, but
+  marker identity and sieve cleaning MUST remain independently checkpointed and independently
+  ablatable.
+- **FR-049**: A candidate instance with no visible pixels in the source per-instance map MUST be
+  excluded from marker training, recorded as `occluded_or_overwritten_in_instance_id_map`, and
+  MUST NOT cause the entire marker corpus build to fail. A failed build MUST NOT present a partial
+  output directory as a valid corpus.
 
 ### Non-Functional Requirements
 
@@ -304,18 +398,25 @@ changing the control generator or silently mixing source-era behavior.
 6. The default control run produces an inspectable atlas with complete expected-family and
    complexity-bucket coverage, or the report explicitly names what is missing.
 7. The cross-tile atlas shows the lightning/burn motifs continuing across all four tile seams.
-8. The object-sieve control report shows separate clean-terrain and contamination-mask metrics,
+8. The parked object-sieve control report shows separate clean-terrain and contamination-mask metrics,
    including boundary-crossing and dense-object holdouts, with no ground-truth mask input leakage.
 9. The real-mask report shows provenance-backed authored v50 rows, independent precise/coarse mask
    metrics, and no train/validation source-group leakage before any user-run GPU training.
 10. A small same-tile authored/flat-synthetic validation report exists with pair identity, absolute
     difference statistics, visual atlas, and an optional post-fix terrain-shadow comparison; it must
     explicitly state that the legacy synthetic image is not a shadow target.
+11. A marker control corpus and held-out report exist in which each candidate has known/unknown
+    labels, library provenance, and family-isolated retrieval metrics.
+12. Marker export produces a nonzero instance map only for accepted candidates and a sidecar table
+    that resolves every nonzero marker instance to a known library ID and score.
+13. An unknown/shifted-candidate control is rejectable, and no marker result depends on the old
+    dot-like v50 curriculum projections.
 
 ## Key Entities
 
 See [data-model.md](./data-model.md) for `ControlSourceManifest`, `SyntheticControlRow`,
-`ObjectSieveControlRow`, `ObjectSieveExperiment`, `RealObjectMaskDataset`,
+`ObjectSieveControlRow`, `ObjectLibrarySieveRow`, `ObjectMarkerCandidate`, `ObjectMarkerMap`,
+`ObjectSieveExperiment`, `RealObjectMaskDataset`,
 `RealObjectMaskExperiment`, `RealSyntheticValidationPair`, `RealSyntheticPairReport`,
 `AlbedoOperationRun`, `TexturelessGateDecision`, `ExperimentRun`, and `TransferGate`.
 
@@ -325,7 +426,8 @@ See [data-model.md](./data-model.md) for `ControlSourceManifest`, `SyntheticCont
    from known terrain.
 2. Real authored minimap albedo removal is a separate operation whose quality must be measured; it
    is not assumed to exist merely because synthetic textureless rendering exists.
-3. The existing v50 object masks are valid supervision for object appearance detection, while the
+3. The existing v50 object library captures/masks are valid supervision for object appearance and
+   identity-marker controls, while the
    empty v50 geometry-visible mask and absence of a clean minimap target are explicit limitations.
 4. The v50 mixed curriculum's `minimap_source=synthetic` row is a same-terrain flat fake maptexture
    useful for absolute-difference diagnostics only. It is not a post-fix terrain-shadow render.
@@ -336,3 +438,5 @@ See [data-model.md](./data-model.md) for `ControlSourceManifest`, `SyntheticCont
    initial transfer route.
 8. The user runs full synthesis, client processing, and training commands; Codex prepares them and
    validates lightweight code paths.
+9. The first marker slice receives candidate footprints explicitly. Proposal recall and automatic
+   footprint discovery are separate later work, not silently claimed by marker precision/recall.

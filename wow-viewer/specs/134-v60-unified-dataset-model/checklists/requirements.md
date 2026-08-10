@@ -31,9 +31,11 @@
 
 ## Notes
 
-- The spec covers four user stories across data consolidation, curation, model,
-  and release management. US1 (v60 dataset) blocks US2 (curation) which blocks
-  US3 (model). US4 (release) is independent of the other three.
-- US1 requires re-harvesting with the spec 133 C# changes to get terrain_shadow_256.
-  The spec assumes the user runs this harvest.
+- The spec covers the controlled corpus, object identification/marking plus optional sieve,
+  limited model experiments, albedo gating, and later client extensions. The marker model is
+  conditional on explicit candidate footprints; proposal discovery is intentionally separate.
+- The v50 curriculum dot projections remain diagnostic only. Precision marker supervision comes
+  from the read-only v50 object-library captures/masks and the corrected v60 library-sieve corpus.
+- The user runs corpus generation, real-client processing, and GPU training; the repository only
+  prepares dry-run-first commands and lightweight validation.
 - Ready for `speckit-plan`.

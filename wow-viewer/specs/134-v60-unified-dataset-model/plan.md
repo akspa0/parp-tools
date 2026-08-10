@@ -4,12 +4,16 @@
 
 ## Summary
 
+Current execution reset (2026-08-10): terrain learning is the only active model lane. The object
+sieve, object-library compositor, and footprint-guided marker are parked experiments and are not
+dependencies for the terrain result.
+
 Four bounded phases, in dependency order:
 
 1. **Synthetic controls** — generate a small deterministic terrain corpus with exact input/target
    pairs and family holdouts.
-2. **Object sieve and model experiments** — validate synthetic decomposition, then train a real-mask
-   object detector from the existing v50.1 authored rows before attempting height reconstruction.
+2. **Terrain-only model experiment** — evaluate `terrain_shadow_256` → `height_257` on the NPZ
+   control corpus with fixed family holdouts, limited training sizes, and a tile-mean baseline.
 3. **Albedo normalization and gate** — process a tiny explicit 0.x/1.x real sample, measure how well
    texture/albedo can be removed, and admit only accepted textureless outputs.
 4. **Transfer and expansion decision** — compare the accepted real sample to controls, then hold,
@@ -66,7 +70,9 @@ wow-viewer/
 ├── data-harvester/src/harvester/v60/
 │   ├── control_corpus.py                                 # manifest/hash/split validation
 │   ├── object_sieve.py                                    # object-overlay corpus validation
+│   ├── object_library_sieve.py                             # real v50 object-library compositor/validator
 │   ├── object_sieve_model.py                              # clean/mask/guided model variants
+│   ├── object_marker.py                                   # footprint-guided known-object identity/marker contract
 │   ├── real_object_mask_model.py                           # real v50 footprint/precise mask model
 │   ├── real_synthetic_pairs.py                             # same-tile pair selection/domain report
 │   └── albedo_normalization.py                           # planned versioned real-input operation
@@ -75,14 +81,24 @@ wow-viewer/
 │   ├── v60_visualize_control_corpus.py                   # family/variant visual atlas
 │   ├── v60_validate_object_sieve.py                       # object-sieve validator
 │   ├── v60_visualize_object_sieve.py                     # object input/mask atlases
+│   ├── v60_build_object_library_sieve.py                  # real-library derived corpus builder
+│   ├── v60_validate_object_library_sieve.py               # real-library corpus validator
+│   ├── v60_visualize_object_library_sieve.py               # silhouette/instance visual review
+│   ├── v60_train_object_sieve.py                          # user-run object-sieve ablations
+│   ├── v60_build_object_marker.py                         # marker corpus from library composites
+│   ├── v60_validate_object_marker.py                      # marker corpus contract validation
+│   ├── v60_train_object_marker.py                         # user-run marker specialist training
+│   ├── v60_mark_known_objects.py                          # image+footprint marker export/inference
 │   ├── v60_validate_real_synthetic_pairs.py               # small real/synthetic validation atlas
 │   ├── v60_train_real_object_masks.py                      # user-run v50 mask trainer
 │   ├── v60_normalize_albedo.py                           # planned gate runner
-│   └── v60_run_experiment.py                             # planned bounded evaluator/trainer wrapper
+│   └── v60_run_experiment.py                             # bounded architecture bakeoff wrapper
 ├── data-harvester/tests/v60/
 │   ├── test_control_corpus.py                             # existing focused fixture tests
 │   ├── test_object_sieve.py                               # object-overlay contract tests
+│   ├── test_object_library_sieve.py                        # real-library compositor tests
 │   ├── test_object_sieve_model.py                         # model/loss smoke tests
+│   ├── test_object_marker.py                               # marker contract/model/retrieval tests
 │   ├── test_real_object_mask_model.py                      # real-mask model/target tests
 │   └── test_albedo_normalization.py                       # planned fail-closed gate tests
 └── specs/134-v60-unified-dataset-model/
@@ -120,10 +136,44 @@ wow-viewer/
 bucket; the visual atlas shows the intended family coverage; no v50 store or full-client harvest was
 required.
 
-## Phase 2: Object sieve and limited control-data model experiments (P1)
+## Phase 2: Terrain-only limited control-data model experiment (P1)
 
-**Goal**: Determine whether the canonical textureless input can first be cleaned of object
-contamination, then determine whether it contains enough information for useful height reconstruction.
+**Current goal**: Determine whether the clean synthetic terrain signal contains enough information
+for useful height reconstruction. Object identification and object removal are explicitly out of
+scope for this gate.
+
+### Active Stage — height reconstruction
+
+1. Load the validated `control-v1` NPZ manifest without changing historical Zarr training contracts.
+2. Keep the manifest's complete-family validation holdout fixed.
+3. Evaluate limited training sizes such as 8, 16, and 32 rows.
+4. Train only on `terrain_shadow_256` and target only `height_257`.
+5. Compare against the per-tile mean baseline and report family/variant metrics.
+6. Mark flat or weakly informative controls as ambiguous rather than confident success.
+
+**Active gate**: The report says whether the clean control relationship is learnable. A failure is a
+bounded diagnostic and does not authorize object work or broad real-data processing.
+
+### Architecture bakeoff (active next slice)
+
+The current U-Net-lite is retained as the low-capacity control, not the assumed solution. Add a
+shared architecture registry and compare four candidates on exactly the same nested training rows:
+`unet_lite_v2`, `pyramid_cnn`, locally implemented `dpt_small`, and `segformer_b0`. Every candidate
+must produce the same `height_257` tensor and report median/worst-family MAE against the tile-mean
+baseline. The first bakeoff uses project-owned random initialization. Depth Anything code and
+weights are explicitly excluded; external weights are not part of this lane.
+
+**Architecture gate**: promote only a candidate that beats the tile-mean baseline on the fixed
+held-out families and does not hide a failed family behind an aggregate score. If none wins, record
+the result as an information/target limitation rather than selecting the largest model.
+
+### Parked Stages — object supervision
+
+The procedural object sieve, real-library silhouette compositor, and footprint-guided marker remain
+implemented as isolated experiments for later. Their code and artifacts are preserved, but they are
+not part of the current terrain input contract and must not block T019–T025.
+
+### Historical Stage A — object sieve (parked)
 
 ### Stage A — object sieve
 
@@ -142,32 +192,53 @@ contamination, then determine whether it contains enough information for useful 
 compared against the clean-only and auxiliary-loss variants. A good mask score does not hide a
 failed clean-terrain score.
 
-### Stage B — real v50 object-mask model
+### Stage B — corrected v50 object-library compositor
 
-1. Read the configured `curriculum-0_5_3_3368-obj_v1.zarr` through its existing `index.parquet`;
-   do not copy or rewrite the canonical store.
-2. Filter to authored rows by default and enforce either the existing manifest split or an explicit
-   map holdout. Validate that `source_group_id` never crosses the split.
-3. Train a compact RGB mask model with independently selectable `object_precise_mask` and
-   `object_mask` heads. An optional RGB-edge input is an ablation, not a hidden default.
-4. Select the best checkpoint using the minimum IoU across requested targets and report each target
-   independently by map, source type, coverage, and threshold.
-5. Render validation previews showing RGB, truth, prediction, and error for both mask targets.
-6. Record the empty geometry-visible mask as an audit finding; do not use it as the target.
-7. Select a small held-out authored/flat-synthetic pair slice by `source_group_id`, verify same-tile
-   identity and split membership, and write an absolute-difference visual/domain report before GPU
-   work.
-8. Treat the legacy synthetic image as a flat fake-maptexture diagnostic only. Compare it against a
-   fresh post-fix C# `terrain_shadow_256` NPZ when available; missing or stale shadow provenance
-   fails closed.
+1. Read the existing v50 `object_mask_library_0_5_3_3368.zarr` as a read-only source. Its
+   `capture_rgb` and `capture_mask` arrays are the precision object-image/mask contract.
+2. Place real library captures over the project-owned clean `terrain_shadow_256` control rows with
+   deterministic scale, rotation, overlap, and boundary-crossing transforms. Do not use the v50
+   curriculum's tile-level placement projections as these targets.
+3. Emit `object_contamination_mask_256` as the exact union of the transformed library masks and
+   `object_instance_id_256` as a deterministic per-pixel instance map. Preserve each library ID,
+   asset path, family, and transform in row metadata.
+4. Isolate library families between train and validation, in addition to the terrain-family holdout.
+   Refuse a corpus with missing source provenance, blank captures, or a family crossing the split.
+5. Render a four-panel visual review: objectified input, clean terrain target, exact union mask, and
+   instance-ID map. A dot-like or empty overlay fails before training.
+6. Train the three object-sieve variants on the derived corpus and report clean-terrain and mask
+   signals independently by placement regime and held-out family. The clean head must use an
+   identity-preserving residual so it is compared against, and cannot silently lose to, the
+   contaminated-input baseline.
+7. Keep the old curriculum `real-object-masks-v1` run as a failed diagnostic. It may inform why the
+   tile-level labels were inadequate, but it cannot be promoted as a model result.
 
-**Stage B gate**: A user-run GPU experiment has provenance, no source-group leakage, and per-target
-metrics. The pair report separately establishes the authored-vs-flat absolute-difference signal and,
-when supplied, its comparison with the post-fix terrain shadow. This proves object-mask detectability
-and calibration evidence only; it does not prove clean terrain reconstruction or authorize real
-height transfer.
+**Stage B gate**: A user-run GPU experiment has source-library provenance, no terrain-family or
+library-family leakage, a visual review with non-dot silhouettes, and per-signal metrics. This proves
+library-derived object contamination decomposition only; it does not prove clean terrain
+reconstruction or authorize real height transfer.
 
-### Stage C — height reconstruction
+### Historical Stage B2 — footprint-guided object identification and marking (parked)
+
+1. Derive one-candidate rows from the corrected library composites. Each row contains a minimap
+   image, one candidate footprint, a known/unknown target, and the positive library ID in metadata.
+2. Train a small, independently checkpointed marker specialist with a knownness head and a fixed
+   embedding head. Do not train a 5,349-way pixel classifier; the library is the retrieval gallery.
+3. Build the gallery from the same read-only v50 captures and resolve exact identity by nearest
+   embedding match with a persisted threshold.
+4. Export `known_object_marker_256` plus an identity table for accepted candidates. Zero is
+   background/unaccepted, and table rows—not pixel values—carry library IDs.
+5. Include shifted/empty/unknown candidates and report known precision/recall, top-1/top-k
+   retrieval, coverage, and family-isolated results independently.
+6. Require explicit candidate footprints at inference. Proposal discovery is a later, separate
+   stage and is not hidden in marker metrics.
+
+**Stage B2 gate**: A held-out candidate report demonstrates that the marker can reject negative
+candidate footprints and retrieve known library identities, and a visual marker export resolves
+every nonzero marker instance through its sidecar table. The marker checkpoint may feed the sieve,
+but neither stage may consume the other's ground-truth targets.
+
+### Historical Stage C — height reconstruction (superseded by the active stage above)
 
 1. Add a control-v1 loader/evaluator without changing historical training contracts.
 2. Select limited training sizes from the manifest, keeping the held-out families fixed.
@@ -251,5 +322,12 @@ Review `control-family-atlas.png`, `control-variant-atlas.png`, and
 `control-visual-review.json`. If `coverage_complete` is false or a family/bucket is visually
 uninteresting, adjust the control generator before training.
 
-Albedo normalization, model training, and real transfer commands are intentionally withheld until
-their implementation tasks land. They will remain PowerShell-ready and user-run.
+Print the one-of-each terrain architecture bakeoff plan:
+
+```powershell
+Set-Location "I:/parp/parp-tools/wow-viewer/data-harvester"
+uv run --no-cache python scripts/v60_run_experiment.py --corpus "../output/datasets/v60/control-v1" --output "../output/datasets/v60/terrain-architecture-runs/control-v1" --architectures "unet_lite_v2,pyramid_cnn,dpt_small,segformer_b0" --train-sizes 32 --epochs 40 --batch-size 8 --lr 1e-3 --seed 6001
+```
+
+After reviewing the dry run, the user may add `--confirm-run` to launch the CUDA experiment. The
+object lanes and real transfer remain parked until this terrain result is recorded.

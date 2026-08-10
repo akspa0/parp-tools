@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-08-08
+Last updated: 2026-08-10
 
 **This file is a dashboard, not a log.** It says what is live, what changed last, and where the
 detail lives. Findings belong in the workstream file, not here — see "Memory bank layout" in
@@ -11,13 +11,51 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 | Workstream | State | Detail |
 |---|---|---|
 | PM4 decode | **active** — versioning formatted; placement solved; scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
-| Terrain / viewer runtime | **active** — phased dual-map overlay (135), M2 doodad batching (136), phased minimap & teleport (137) landed | [activeContext.md](activeContext.md) |
-| Terrain / minimap ML | **active** — Spec 134 synthetic v60 controls and real-mask/pair prep are implemented; no GPU training has run | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
-| Tile archaeology | **active** — harvest pipeline working on 1.x clients; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
+| Terrain / viewer runtime | **active** — phased dual-map overlay (135), M2 doodad batching (136), phased minimap & teleport (137) landed; 4.x renderer evolution (138) is an evidence-gated epic note | [activeContext.md](activeContext.md) |
+| Terrain / minimap ML | **active** — Spec 139 clean-signal reconstruction plus Spec 140 paste/fractal/tileset evidence pipeline; object identity remains parked | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
+| Tile archaeology | **active** — old v50 synthetic minimap output needs fresh regeneration after renderer fixes; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
 
 ## Now — Viewer Runtime & Terrain Improvements (Specs 135, 136, 137)
 
-## Now — Spec 134 v60 control corpus
+## Next — Cross-era terrain foundation (Spec 138)
+
+- The new reference dossier is preserved at `.reference_data/4.0.0.11792/` and indexes 19 Ghidra
+  audit modules for Build 11792. It is reference input, not yet production proof.
+- The priority is now a reusable, profile-gated terrain core spanning basic terrain support from
+  0.5.3 through 11.x. Build 11792 is the first modern evidence anchor; 0.5.3 parity follows this
+  foundation rather than becoming a separate first renderer lane.
+- Existing 4.0.0 support is partial but usable: terrain/world content and basic WMO/M2 rendering
+  work, while shaders, visual effects, some lava-effect models, fog, proper lighting/point lights,
+  batching, and CPU-bound submission remain the main renderer gaps.
+- Spec 138 owns the cross-era profile, terrain-signal, M2/WMO, synthesis-lineage, and performance
+  roadmap. File ownership, chunk availability, vertex layout, and optional signals must be profile
+  capabilities; no broad renderer rewrite, harvest, training, or long benchmark is authorized by
+  the note.
+- Live Ghidra evidence for Build 11792 now confirms active `MCLV`/`MCCV`/`MCNR`/`MCSH`
+  consumers and terrain shader axes for vertex color, shadows, PCF, layer count, point lights,
+  environment mapping, and tessellation. `MCTV`/`MCMT` were not observed in this build. The
+  CPU vertex builder preserves raw MCNR order; trace the Terrain shader before changing the
+  normal transform. Detailed addresses and implications are recorded in Spec 138.
+- Priority findings to verify against real clients: 8+ observed `MCLY` capacity, `MCLV`, `MCTV`,
+  `MCMT`, `MCLY` `0x100`/`0x200`, `MD21`, 4.x WMO materials, instancing, and monolithic versus
+  split ADT ownership.
+- wow.export is an allowed comparative reference for modern 12.x-era behavior, but not a runtime
+  dependency or a reason to fork the repo-independent viewer contract.
+- DBCD, WoWDBDefs, and wowdev listfiles are already integrated project authorities. Spec 138 must
+  reuse them; only the missing MPQ/CASC source-adapter and build-profile capability seams are new.
+
+## Now — Spec 139 v7 clean-signal reconstruction
+
+**Current route pivot (2026-08-10):** the one-channel `terrain_shadow_256` → `height_257` experiment
+is retained as negative evidence, not the active model contract. Spec 139 now owns the next lane:
+recover v7's coarse/detail and structural-loss bias while replacing its WDL trestle, height hints,
+normals, liquid, object, and other target-derived channels with a four-channel albedo-normalized
+observation package: luma, x/y gradients, and albedo confidence.
+
+The first v60 architecture bakeoff rejected all four candidates against the `0.191047` tile-mean
+baseline; `pyramid_cnn` was best at `0.236665`, while cross-tile lightning/burn drove the failure.
+That result does not close the v7 hypothesis because it did not test v7's coarse/detail structural
+loss stack or a deployment-safe albedo-normalized input.
 
 - The earlier v50/multi-client harvest direction is not the active v60 deliverable. No working v60
   real-data corpus has been accepted or generated in this lane.
@@ -37,13 +75,56 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
   building/bridge overlays, clean terrain-shadow targets, and a separate screen-space contamination
   mask across none/sparse/dense/overlap/boundary-crossing regimes. The mask is loss-supervised and
   optionally predicted-mask-guided, never supplied as a ground-truth inference channel.
-- The real v50 mask lane now reads the existing `v50.1` authored rows read-only and projects precise
-  and coarse masks independently. Its paired validator found 1,325 complete authored/legacy-flat
-  pairs out of 1,330 groups; the first 16-tile Azeroth review measured mean normalized RGB MAE
-  0.1812. That absolute difference is diagnostic only: legacy synthetic RGB is not the fixed terrain
-  shadow target. Fresh post-fix NPZs with `terrain_shadow_256` are required for shadow comparison.
-  Real masks remain labels only. Training and client-backed work remain user-owned and unrun.
-- Detail and commands: [Spec 134 quickstart](../specs/134-v60-unified-dataset-model/quickstart.md).
+- The promoted object lane is now `v60-object-library-sieve-v1`: it reads the real
+  `object_mask_library_0_5_3_3368.zarr` (5,349 captured 0.5.3 top-down objects with RGB + masks),
+  composites exact silhouettes over clean controls, and emits union masks plus per-instance IDs and
+  library provenance. The old v50 curriculum `object_mask`/`object_precise_mask` experiment
+  produced tile-level dots and is diagnostic/rejected, not model evidence.
+- New builder, validator, visual atlas, trainer, and focused tests are under `data-harvester/`.
+  The user still runs corpus generation and all CUDA training; no real-library corpus or GPU run has
+  been launched by Codex. The user's first two builds stopped at 251 NPZs before their manifests
+  because a thin library silhouette was erased by nearest-neighbour downsampling; both partial
+  outputs are invalid and untouched. The corrected user run `object-library-sieve-v3` now passes:
+  540 rows, 304 train / 236 validation, five complete regimes, 1,033 sampled objects, and 115
+  library families.
+- First user-run `library-guided-v1` training proved the mask head learns (`nonempty_mask_iou`
+  peaked at 0.4183, versus 0.0 for the non-empty zero-mask baseline), but the absolute clean head
+  lost to the identity baseline (best clean MAE 0.0372 versus contaminated-input MAE 0.0066).
+  The clean head is now an identity-preserving residual with a required clean-vs-identity gate;
+  `library-guided-residual-v1` is the next user-run experiment.
+- The object lane is parked. The user-run marker experiment did not learn identity: held-out
+  retrieval top-1 ended at 0, negatives were frequently accepted as known, and the input corpus did
+  not preserve the real object RGB signal required for identity. Its checkpoint and reports remain
+  diagnostic only and must not enter the terrain model.
+- Spec 139 is design-only so far. Its first candidates are `pyramid_cnn`, `segformer_b0`, and
+  `unet_lite_v2` under a shared v7-style coarse/detail output; DPT is deferred after its flat v60
+  run. Heavy corpus generation, training, and 0.x/1.x transfer remain user-run gates.
+- Detail and commands: [Spec 139 quickstart](../specs/139-v7-clean-signal-reconstruction/quickstart.md).
+
+## Now — Spec 140 terrain paste and fractal motif archaeology
+
+Spec 140 is the parallel evidence lane for the multi-stage reconstruction workflow. It treats
+observation normalization, tileset identity, alpha/texturing, fractal descriptors, recurring
+cross-tile pastes, geometry reconstruction, and object placement as separate signals with explicit
+availability, provenance, confidence, and ablation ownership. The leaked 10.2 workflow map is
+corroborating workflow evidence only; 0.x/1.x client data remains authoritative.
+
+The first gate is a deterministic synthetic/real visual atlas and transformed-motif retrieval
+benchmark. No neural motif model, broad harvest, or GPU run is authorized until recurrence and
+cross-family leakage checks pass. Validated guidance may later feed Spec 139; unconfirmed matches
+must remain soft evidence or be omitted. Exact object identity is deferred behind normalized
+object-slot evidence.
+
+The current authoring-order hypothesis is now explicit: opaque layer-0 base/“brain” texture,
+recurring layer-1 rocky paste, later alpha-painted additions, terrain sculpting, then
+surface/object refinement. Source-side alpha is therefore a candidate upstream paint/sculpt
+scaffold, not merely a texture correlate. The implementation must preserve MCLY order and MCAL
+offsets, treat layer 0 as opaque base rather than paste evidence, inspect layer 1 as the first
+paste/paint candidate, and classify paint/relief links as intact, retextured, resculpted, unknown,
+or insufficient-data.
+
+- Spec: [140 terrain paste and fractal motif archaeology](../specs/140-terrain-paste-motif-archaeology/spec.md)
+- Plan: [Spec 140 plan](../specs/140-terrain-paste-motif-archaeology/plan.md)
 
 ### What was accomplished this session (2026-08-08)
 
