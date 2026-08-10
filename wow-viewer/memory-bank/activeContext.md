@@ -125,8 +125,11 @@ loss stack or a deployment-safe albedo-normalized input.
   full-profile within-family run using all 81 training rows to distinguish missing family coverage
   from missing clean-signal information. The existing 16-row Alpha/Azeroth real-terrain bridge was
   also materialized and evaluated: MAE `0.323879` versus `0.157124` tile-mean baseline
-  (`-106.13%`), with zero forbidden reads. This is diagnostic only; authored RGB still needs the
-  albedo-normalization gate. Codex launched no training.
+  (`-106.13%`), with zero forbidden reads. The user then trained on 15 bridge rows; best epoch 4
+  reached `0.313952` versus `0.109902` baseline, and all-16 evaluation was `0.293371` versus
+  `0.157124` (`-86.71%`). Two rows are effectively flat and the source has large height/shadow
+  variation, so the next gate is source-integrity auditing plus multi-map expansion. Authored RGB
+  still needs the albedo-normalization gate. Codex launched no training.
 - Detail and commands: [Spec 139 quickstart](../specs/139-v7-clean-signal-reconstruction/quickstart.md).
 
 ## Now — Spec 140 terrain paste and fractal motif archaeology

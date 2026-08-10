@@ -172,6 +172,11 @@ That probe tests whether the model can adapt to actual terrain geometry; it does
 authored RGB training. Authored minimaps remain outside the model until the versioned albedo
 normalization and textureless gate produce accepted four-channel artifacts.
 
+The first 16-row probe is not a promotion gate: its best epoch was 4 at MAE `0.313952` versus
+`0.109902` baseline, and all-16 evaluation was `0.293371` versus `0.157124`. Do not rerun this
+same one-map corpus. Preserve its flat-target, height-range, shadow-dynamics, and mask-coverage
+bands, add approved rows from more maps/builds, and then repeat the bridge training/evaluation.
+
 ## 6. Real transfer
 
 ```powershell

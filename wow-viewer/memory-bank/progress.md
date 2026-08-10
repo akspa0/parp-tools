@@ -8,6 +8,17 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 139 real-terrain bridge training result
+
+- The user-run full `pyramid_cnn`/`v7_structural_v1` probe trained on 15 Alpha/Azeroth bridge rows
+  with one validation row. Best epoch 4 reached MAE `0.313952` versus `0.109902` baseline
+  (`-185.66%`); the epoch-24 snapshot was `0.380639`.
+- CPU all-row evaluation of the best checkpoint reached MAE `0.293371` versus `0.157124`
+  baseline (`-86.71%`). Coarse error dominates detail error, confirming a real-domain/bridge
+  mismatch rather than a late-epoch fluctuation.
+- The next action is to preserve source-integrity bands and expand to additional approved
+  maps/builds. No repeat training on the same 16 rows; authored RGB remains behind albedo gating.
+
 ## 2026-08-10 — Spec 139 real-terrain synthetic bridge diagnostic
 
 - Added the source-preserving `real_terrain_synthetic` bridge builder and dry-run CLI. It converts

@@ -72,6 +72,11 @@ The first bounded implementation slice is now present under `data-harvester/src/
   tile-mean baseline (`-106.13%`) with the reflect-padding checkpoint. This is real-domain
   diagnostic evidence only: the bridge uses harvested terrain geometry and synthesized clean
   shading, while authored minimap RGB still requires a versioned albedo-normalization gate.
+- The user-run real-bridge training probe used 15 rows with one validation row. Its best epoch 4
+  scored `0.313952` versus a `0.109902` validation baseline (`-185.66%`); all-16 evaluation of
+  that checkpoint scored `0.293371` versus `0.157124` (`-86.71%`). Coarse error dominates detail
+  error, so the next action is source-integrity auditing and multi-map expansion, not another run
+  on the same 16 rows.
 
 Model adapters and the synthetic corpus builder stay behind this contract gate.
 

@@ -107,6 +107,22 @@ rows (`-106.13%` relative improvement), so this is diagnostic evidence of a real
 not a promotion result. A larger multi-map bridge and a user-owned real-bridge training probe are
 the next actions; authored RGB remains blocked on the missing albedo-normalization gate.
 
+## User-run checkpoint — 2026-08-10 (real-terrain bridge probe)
+
+The user trained the full `pyramid_cnn`/`v7_structural_v1` model on 15 Alpha/Azeroth bridge rows
+with one validation row. The best checkpoint was epoch 4 at MAE `0.313952` versus the one-row
+`0.109902` tile-mean baseline (`-185.66%`); the pasted epoch-24 snapshot was worse at `0.380639`.
+Evaluating that best checkpoint across all 16 bridge rows produced MAE `0.293371` versus the
+`0.157124` all-row baseline (`-86.71%`). The coarse error dominates while detail error is small,
+so this is not merely a late-epoch fluctuation.
+
+## Next bounded slice — bridge source integrity and multi-map expansion
+
+Do not retrain the same 16 rows again. The current bridge contains two effectively flat targets,
+large height-range variation, and non-uniform shadow/mask coverage. Audit and preserve those source
+quality bands, then add approved rows from additional maps/builds before another real-bridge run.
+Authored RGB normalization remains a separate implementation gate.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11; existing C# harvest/compositor remains the signal authority.

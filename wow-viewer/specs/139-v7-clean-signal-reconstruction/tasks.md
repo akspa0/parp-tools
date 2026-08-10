@@ -64,6 +64,8 @@ per-component and per-family metrics recorded under one report schema.
 - [ ] T026E [US3] **USER RUNS** one full-profile `reflect-3x3-v1` within-family confirmation using all 81 training rows and 27 held-out variants to test cross-tile learnability with family coverage.
 - [x] T026F [US3] Add the source-preserving `real_terrain_synthetic` bridge corpus builder and dry-run CLI from harvested `terrain_shadow_256` plus `height_257` NPZ rows; authored RGB is not admitted by this task.
 - [x] T026G [US3] Add image-only checkpoint evaluation with source-kind filtering, per-row predictions, baseline-relative metrics, atlas output, and an explicit forbidden-read audit for prepared bridge corpora.
+- [x] T026H [US3] **USER RUNS** the real-terrain bridge training probe and all-row checkpoint evaluation; the one-map bridge fails its baseline gate and is not promoted.
+- [ ] T026I [US3] Audit bridge source-integrity bands and add approved rows from additional maps/builds before another real-terrain training run.
 
 ## Phase 6: User Story 4 — Real albedo-normalized transfer (P2)
 
@@ -97,7 +99,8 @@ T001-T009 foundational contracts
     -> T026A-T026B checkpoint failure diagnosis
     -> T026C-T026D constant-field stability correction
     -> T026E within-family cross-tile learnability confirmation
-    -> T026F-T026G real-terrain synthetic bridge diagnostic
+    -> T026F-T026H real-terrain synthetic bridge diagnostic
+    -> T026I bridge source-integrity and multi-map expansion
     -> T027-T032 real transfer
     -> T033-T036 polish and continuity
 ```

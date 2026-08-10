@@ -199,8 +199,11 @@ weights are explicitly excluded after the prior non-repeatable failed attempt.
   separate `real_terrain_synthetic` bridge builder/evaluator now handles harvested
   `terrain_shadow_256` plus `height_257` without treating authored RGB as normalized. The first
   16-row Alpha/Azeroth bridge scored MAE `0.323879` versus `0.157124` baseline (`-106.13%`) with
-  zero forbidden reads; it is diagnostic only and needs more maps/builds before any real-data
-  training conclusion.
+  zero forbidden reads; it is diagnostic only. The user-run bridge probe trained on 15 rows with
+  one validation row and best epoch 4 scored `0.313952` versus `0.109902` baseline; all-16 CPU
+  evaluation scored `0.293371` versus `0.157124` (`-86.71%`). Two rows are effectively flat and
+  height/shadow dynamics vary widely, so source-integrity bands and more maps/builds are required
+  before another real-bridge run.
 - Overlap handling is explicit: `object_instance_id_256` stores only the visible winner per pixel,
   so fully occluded instances are skipped and recorded rather than treated as positives. Marker
   corpus publication is atomic through `<output>.partial`; a failed build cannot be validated as a
