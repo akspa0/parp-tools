@@ -117,8 +117,12 @@ loss stack or a deployment-safe albedo-normalized input.
   user-run diagnostic exposed a constant-field failure: `flat-v00` and
   `cross_tile_lightning-v01` have nearly identical inputs, but the legacy zero-padding checkpoint
   emits the same non-flat ramp for both near-zero targets. New model identities now use
-  `reflect-3x3-v1` padding; old identities remain loadable for comparison. The targeted fresh
-  `v2-reflect-padding` full-profile run is the next user-owned gate. Codex did not launch training.
+  `reflect-3x3-v1` padding; old identities remain loadable for comparison. The user completed the
+  `v2-reflect-padding` full-profile run at best epoch 80 with MAE `0.137891` versus the `0.191047`
+  baseline (`27.82%` improvement). The flat-input ramp is gone, but cross-tile lightning and burn
+  still regress `61.17%` and `30.15%` against their baselines. The next user-owned gate is a
+  full-profile within-family run using all 81 training rows to distinguish missing family coverage
+  from missing clean-signal information. Codex did not launch training.
 - Detail and commands: [Spec 139 quickstart](../specs/139-v7-clean-signal-reconstruction/quickstart.md).
 
 ## Now — Spec 140 terrain paste and fractal motif archaeology

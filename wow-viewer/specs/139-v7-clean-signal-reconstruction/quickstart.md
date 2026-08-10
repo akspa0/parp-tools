@@ -129,6 +129,21 @@ and a new diagnostic output directory. The success test is that the flat-input r
 the cross-tile-lightning family no longer collapses against its baseline. Real transfer remains
 blocked until that report is evaluated.
 
+## 5C. Cross-tile learnability confirmation
+
+The reflect-padding complete-family result is a strong base model, but both cross-tile families
+still regress against their trivial baselines because they were entirely held out. Run one
+within-family confirmation with all three training variants from every family:
+
+```powershell
+Set-Location "I:/parp/parp-tools/wow-viewer/data-harvester"
+uv run --no-cache python scripts/v60_train_clean_signal.py --corpus "../output/datasets/v60/v7-clean-signal-v1" --output "../output/datasets/v60/v7-clean-signal-runs/pyramid-full-structural-within-family-v2-reflect-padding" --architectures "pyramid_cnn" --loss-profiles "v7_structural_v1" --model-profile full --split within_family --train-size 81 --epochs 80 --batch-size 8 --seed 7137 --device cuda --confirm-run
+```
+
+Then run Section 5A's diagnostic command against that checkpoint with a fresh diagnostic output
+directory. This run tells us whether cross-tile failure is lack of family coverage or missing
+information in the four-channel input. Do not begin real transfer until that distinction is known.
+
 ## 6. Real transfer
 
 ```powershell

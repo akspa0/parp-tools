@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-10
 
-**Status**: Phase 5 implementation and complete-family evidence complete; promotion is held pending the reflect-padding confirmation run
+**Status**: Phase 5 implementation and complete-family evidence complete; promotion is held pending within-family cross-tile learnability evidence
 
 **Input**: User description: "Build the old v7 model idea with a modern architecture, guided by
 clean synthetic data and a sane signal set. Remove the WDL-prior dependency so any minimap can be
@@ -62,6 +62,11 @@ The first bounded implementation slice is now present under `data-harvester/src/
   versioned `reflect-3x3-v1` padding for new checkpoints; legacy zero-padding identities remain
   reconstructable for comparison. One fresh full-profile confirmation run is required before any
   promotion decision changes.
+- The reflect-padding confirmation completed at best epoch 80 with MAE `0.137891` versus the
+  `0.191047` baseline (`27.82%` aggregate improvement). The flat-input ramp is fixed, but
+  `cross_tile_lightning` remains `61.17%` below its baseline and `cross_tile_burn` remains `30.15%`
+  below baseline. The next evidence is a full-profile within-family run with all 81 available
+  training rows; real transfer remains blocked.
 
 Model adapters and the synthetic corpus builder stay behind this contract gate.
 

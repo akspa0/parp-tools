@@ -73,6 +73,24 @@ constant-input regression test covers all three architectures, and identity reco
 legacy zero-padding support for existing checkpoints. The targeted user-run retraining command is
 recorded in the quickstart under a fresh `v2-reflect-padding` output root.
 
+## User-run checkpoint — 2026-08-10 (reflect-padding result)
+
+The user completed the fresh `v2-reflect-padding` full-profile CUDA run. The best checkpoint was
+epoch 80 with final-height MAE `0.137891` versus the same `0.191047` tile-mean baseline, a `27.82%`
+aggregate improvement compared with `8.97%` for the zero-padding checkpoint. The CPU diagnostic
+confirmed the invented flat-input ramp is gone: `cross_tile_lightning-v01` now predicts a nearly
+constant field, but still has MAE `0.229543` against a near-zero target. `cross_tile_lightning`
+remains `61.17%` worse than its baseline and `cross_tile_burn` remains `30.15%` worse, so the
+cross-family promotion hold remains active.
+
+## Next bounded slice — within-family cross-tile learnability
+
+The next run is not another complete-family rerun. It uses all 81 within-family training rows
+(three variants from each family) and 27 one-variant validation rows to determine whether the
+cross-tile patterns are learnable once the model sees examples from those families. If they pass
+within-family but fail complete-family, this is a family-coverage/generalization limit. If they
+still fail, the clean observation does not expose enough information for those targets.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11; existing C# harvest/compositor remains the signal authority.

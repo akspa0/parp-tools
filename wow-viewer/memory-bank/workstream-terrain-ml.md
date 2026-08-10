@@ -190,8 +190,11 @@ weights are explicitly excluded after the prior non-repeatable failed attempt.
   prediction-only consumer now exports exact held-out per-row errors and full/cross-tile atlases;
   the user-run atlas review identified a constant-field padding artifact: `flat-v00` and
   `cross_tile_lightning-v01` have nearly identical inputs while the legacy model emits the same
-  ramp for both near-zero targets. New model identities use `reflect-3x3-v1`; the targeted fresh
-  `v2-reflect-padding` full-profile run is the next bounded gate before any transfer change.
+  ramp for both near-zero targets. New model identities use `reflect-3x3-v1`. The user completed
+  the `v2-reflect-padding` full-profile run at best epoch 80 with MAE `0.137891` versus `0.191047`
+  baseline (`27.82%` improvement); the flat ramp is fixed, but cross-tile lightning and burn still
+  regress `61.17%` and `30.15%`. The next bounded user run is full-profile within-family training
+  with all 81 training rows to test family coverage versus missing clean-signal information.
 - Overlap handling is explicit: `object_instance_id_256` stores only the visible winner per pixel,
   so fully occluded instances are skipped and recorded rather than treated as positives. Marker
   corpus publication is atomic through `<output>.partial`; a failed build cannot be validated as a

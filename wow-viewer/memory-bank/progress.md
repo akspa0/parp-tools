@@ -8,6 +8,18 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 139 reflect-padding confirmation result
+
+- The user-run `pyramid-full-structural-complete-v2-reflect-padding` checkpoint completed on CUDA
+  at best epoch 80: MAE `0.137891` versus `0.191047` baseline, improving the aggregate gate from
+  `8.97%` to `27.82%`.
+- CPU checkpoint diagnosis confirmed the invented flat-input ramp is gone. Cross-tile lightning is
+  still `61.17%` worse than its baseline and cross-tile burn `30.15%` worse, so promotion and real
+  transfer remain blocked.
+- The next user-owned experiment is full-profile reflect-padding within-family training with all
+  81 training rows and 27 held-out variants. It separates family-coverage failure from missing
+  four-channel information; no further complete-family rerun is needed now.
+
 ## 2026-08-10 — Spec 139 complete-family confirmation result
 
 - The user-run full-profile `pyramid_cnn` + `v7_structural_v1` CUDA gate completed at

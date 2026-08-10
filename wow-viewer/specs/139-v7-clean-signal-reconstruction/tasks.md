@@ -60,7 +60,8 @@ per-component and per-family metrics recorded under one report schema.
 - [x] T026A [US3] Add image-only checkpoint loading, held-out-row prediction export, and cross-tile failure atlases in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_diagnostics.py` and `wow-viewer/data-harvester/scripts/v60_diagnose_clean_signal_checkpoint.py`.
 - [x] T026B [US3] **USER RUNS** the checkpoint diagnostic on the completed full-profile run and reviews the per-row NPZs plus cross-tile atlas before any model or transfer change.
 - [x] T026C [US3] Replace zero-padded spatial 3×3 convolutions with versioned reflective padding by default, preserve legacy checkpoint reconstruction, and add constant-field stability tests.
-- [ ] T026D [US3] **USER RUNS** one fresh full-profile `pyramid_cnn` structural retraining with `reflect-3x3-v1`, then runs the checkpoint diagnostic before any further architecture or transfer change.
+- [x] T026D [US3] **USER RUNS** one fresh full-profile `pyramid_cnn` structural retraining with `reflect-3x3-v1`, then runs the checkpoint diagnostic before any further architecture or transfer change. The ramp failure is fixed, but cross-tile family promotion remains held.
+- [ ] T026E [US3] **USER RUNS** one full-profile `reflect-3x3-v1` within-family confirmation using all 81 training rows and 27 held-out variants to test cross-tile learnability with family coverage.
 
 ## Phase 6: User Story 4 — Real albedo-normalized transfer (P2)
 
@@ -93,6 +94,7 @@ T001-T009 foundational contracts
     -> T021-T026 architecture/loss bakeoff
     -> T026A-T026B checkpoint failure diagnosis
     -> T026C-T026D constant-field stability correction
+    -> T026E within-family cross-tile learnability confirmation
     -> T027-T032 real transfer
     -> T033-T036 polish and continuity
 ```
