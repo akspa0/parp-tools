@@ -591,10 +591,14 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
 - Loaded `WmoRenderer` instances expose their existing portal read models to the opt-in
   `WorldScene` graph rebuild. `SceneGraphPortalAdapters` is keyed by placement and uses the same
   nested group IDs as the graph children; the current WMO visibility path is unchanged.
-- Focused graph/workload/traversal/adapter/portal proof is 26 passing tests; the runtime and viewer
+- `WorldScenePortalVisibilityEvaluator` now finds the camera's containing group, walks adjacency
+  through bounded child volumes, and returns all graph groups on uncertain data. Opt-in `WorldScene`
+  traversal applies this only to nested `WmoGroup` nodes; whole-WMO collection and legacy
+  `WmoRenderer` submission remain unchanged.
+- Focused graph/workload/traversal/adapter/portal proof is 29 passing tests; the runtime and viewer
   projects build with only existing repository warnings.
 
 This is an opt-in integration proof, not a renderer promotion. The legacy `WorldScene` traversal
-remains the default, terrain chunks are not yet mounted, and WMO portal runtime traversal remains
-owned by the existing `WmoRenderer` until graph-side integration and doorway parity are proven. No
-FPS/GPU or real-client parity claim exists until the later evidence tasks are run.
+remains the default, terrain chunks are not yet mounted, and WMO portal runtime submission remains
+owned by the existing `WmoRenderer` until doorway parity is proven. No FPS/GPU or real-client
+parity claim exists until the later evidence tasks are run.

@@ -36,6 +36,17 @@ public sealed class WorldScenePortalGraph
 
     public int LinkCount => _outgoing.Values.Sum(static links => links.Count);
 
+    public IReadOnlyList<string> NodeIds
+        => _nodeIds.OrderBy(static nodeId => nodeId, StringComparer.Ordinal).ToArray();
+
+    public IReadOnlyList<WorldScenePortalLink> GetOutgoingLinks(string nodeId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(nodeId);
+        return _outgoing.TryGetValue(nodeId, out List<WorldScenePortalLink>? links)
+            ? links.ToArray()
+            : Array.Empty<WorldScenePortalLink>();
+    }
+
     public static WorldScenePortalGraphBuildResult Build(
         IEnumerable<string> nodeIds,
         IEnumerable<WorldScenePortalLink> links)

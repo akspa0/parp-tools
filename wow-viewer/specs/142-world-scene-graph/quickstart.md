@@ -9,7 +9,7 @@ benchmark. The legacy viewer traversal remains the default.
 From `I:\parp\parp-tools\wow-viewer`:
 
 ```powershell
-dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldSceneGraphTests|FullyQualifiedName~SyntheticWorldWorkloadTests|FullyQualifiedName~WorldSceneGraphObjectAdapterTests|FullyQualifiedName~WorldScenePortalGraphTests|FullyQualifiedName~WorldScenePortalAdapterTests|FullyQualifiedName~WorldScenePortalViewVolumeTests"
+dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldSceneGraphTests|FullyQualifiedName~SyntheticWorldWorkloadTests|FullyQualifiedName~WorldSceneGraphObjectAdapterTests|FullyQualifiedName~WorldScenePortalGraphTests|FullyQualifiedName~WorldScenePortalAdapterTests|FullyQualifiedName~WorldScenePortalViewVolumeTests|FullyQualifiedName~WorldScenePortalVisibilityEvaluatorTests"
 ```
 
 The graph/traversal foundation can be checked together with:
@@ -55,11 +55,13 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
 - With the opt-in graph selector, already-loaded WMO renderers can populate placement-keyed portal
   adapter diagnostics using the same nested group IDs; this is a compile-checked bridge only and
   does not change WMO visibility.
+- The opt-in graph traversal evaluates reachable WMO groups through nested portal volumes; uncertain
+  camera/portal data returns all groups, and WMO placement collection/submission remains unchanged.
 - Unknown object bounds keep their bucket and map fail-open.
 - The viewer project compiles with the opt-in `WorldScene.UseHierarchicalSceneTraversal` seam.
 
 ## Not yet run by this phase
 
-The four-scale performance ladder, runtime nested portal traversal/doorway parity, current-vs-new
+The four-scale performance ladder, runtime WMO portal submission/doorway parity, current-vs-new
 traversal comparison, pass/query parity, real-client capture, GPU timing, and whole-map residency
 work remain later user-run gates. Do not interpret this test/build pass as an FPS result.

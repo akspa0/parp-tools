@@ -8,6 +8,16 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 graph-side runtime portal traversal
+
+- Added `WorldScenePortalVisibilityEvaluator`: it selects the containing WMO group, traverses
+  adjacency through bounded portal volumes, and fails open to all graph groups on uncertainty.
+- Opt-in `WorldScene` traversal applies the result to nested `WmoGroup` graph nodes only; whole-WMO
+  collection and `WmoRenderer` submission remain unchanged. Focused proof is 29 passing tests and
+  the viewer build has 0 errors with existing warnings.
+- Runtime WMO submission/doorway parity, pass/query integration, and performance evidence remain
+  open; no real-client or GPU capture was launched.
+
 ## 2026-08-10 — Spec 142 opt-in runtime portal bridge
 
 - Exposed the existing loaded `WmoRenderer` portal data through the graph read-model contract and

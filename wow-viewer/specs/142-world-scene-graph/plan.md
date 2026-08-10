@@ -202,13 +202,23 @@ children. The viewer build is the proof owner for this bridge; no visibility beh
 Unloaded WMOs remain absent from the bridge and therefore fail open. Runtime nested-volume
 traversal, renderer parity, and performance evidence are still not claimed.
 
+## Phase 8 — Graph-Side Runtime Portal Traversal
+
+**Status**: Complete for the opt-in diagnostic traversal slice on 2026-08-10. The portal
+visibility evaluator finds the camera's containing group, walks graph adjacency through nested
+portal volumes, and fail-opens to all graph groups when camera ownership, geometry, depth, or
+portal data is uncertain. Opt-in `WorldScene` traversal applies this result to `WmoGroup` graph
+nodes while preserving whole-WMO collection and legacy `WmoRenderer` submission.
+
+This proves graph traversal mechanics only; it is not doorway parity or a performance result.
+
 ## Later Phases (Not Started In This Slice)
 
-- **Phase 8**: Integrate graph portal volumes into runtime nested traversal and prove doorway
+- **Phase 9**: Integrate graph portal volumes into runtime WMO submission and prove doorway
   parity with the existing renderer.
-- **Phase 9**: Per-pass visible/non-visible queues, shared animation update ownership, and query
+- **Phase 10**: Per-pass visible/non-visible queues, shared animation update ownership, and query
   reuse.
-- **Phase 10**: Incremental terrain/chunk graph migration, synthetic four-scale measurements, and
+- **Phase 11**: Incremental terrain/chunk graph migration, synthetic four-scale measurements, and
   named real-client parity captures.
 
 ## Complexity Tracking
