@@ -106,10 +106,12 @@ directory came from an older quickstart diagnostic, not from the complete v50.1 
 reflect-padding checkpoint scored MAE `0.323879` versus a `0.157124` tile-mean baseline on all 16
 rows (`-106.13%` relative improvement), so this is diagnostic evidence of a real-domain failure,
 not a promotion result. The complete v50.1 mixed curriculum store contains 1,330 synthetic rows:
-688 Kalimdor and 642 Azeroth. A new Zarr-backed builder now reads that source without mutating it,
-preserves original `index.parquet` row indices in provenance, and creates a complete-family
-map-held-out split (Kalimdor train, Azeroth validation). Authored RGB remains blocked on the
-missing albedo-normalization gate.
+688 Kalimdor and 642 Azeroth, but this particular pre-Spec-133 store has raw `shadow_mask` and no
+`terrain_shadow_256`. The Zarr-backed builder now reads that source without mutating it, preserves
+original `index.parquet` row indices in provenance, and creates a complete-family map-held-out
+split (Kalimdor train, Azeroth validation). Its explicit `shadow_mask` mode is a geometry-only raw
+MCSH diagnostic; it is not the deployment-clean signal and must not be silently relabeled as one.
+Authored RGB remains blocked on the missing albedo-normalization gate.
 
 ## User-run checkpoint — 2026-08-10 (real-terrain bridge probe)
 
@@ -127,8 +129,10 @@ side only after `--confirm-build`. The 2026-08-10 dry run against
 `v50/v50.1/curriculum-0_5_3_3368-obj_v1.zarr` reported 1,330 source rows, 688 train rows from
 Kalimdor, and 642 validation rows from Azeroth. This fixes the previous scope error: the 16-row
 NPZ directory remains a small failure diagnostic, while the Zarr bridge is the usable multi-map
-diagnostic corpus. The builder still uses real terrain shadow as the synthesized clean observation;
-it does not admit authored minimap RGB.
+diagnostic corpus. Because this store lacks `terrain_shadow_256`, use the explicit
+`--input-signal shadow_mask` mode for a raw-MCSH geometry diagnostic. A deployment-clean bridge
+still requires a post-Spec-133 store containing `terrain_shadow_256`; authored minimap RGB remains
+excluded.
 
 ## Next bounded slice — bridge source integrity and multi-map expansion
 

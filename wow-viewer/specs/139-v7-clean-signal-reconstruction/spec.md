@@ -76,7 +76,10 @@ The first bounded implementation slice is now present under `data-harvester/src/
 - Added a Zarr-backed bridge builder for the complete v50.1 synthetic side. The verified dry run
   reports 1,330 rows (688 Kalimdor train, 642 Azeroth validation) with a complete-family,
   map-held-out split. Original source row indices and the source index hash are preserved in
-  provenance; the source store is read-only and authored RGB remains excluded.
+  provenance; the source store is read-only and authored RGB remains excluded. The available
+  v50.1 store is pre-Spec-133 and has raw `shadow_mask` rather than `terrain_shadow_256`. The
+  builder therefore requires explicit `--input-signal shadow_mask` for a geometry-only raw-MCSH
+  diagnostic and never silently aliases it to the deployment-clean signal.
 - The user-run real-bridge training probe used 15 rows with one validation row. Its best epoch 4
   scored `0.313952` versus a `0.109902` validation baseline (`-185.66%`); all-16 evaluation of
   that checkpoint scored `0.293371` versus `0.157124` (`-86.71%`). Coarse error dominates detail

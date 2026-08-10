@@ -21,6 +21,8 @@ from harvester.v60.clean_signal_targets import decompose_relative_height
 
 ZARR_BRIDGE_SCHEMA = "v7-clean-signal-real-terrain-synthetic-zarr-v1"
 SOURCE_KIND = "real_terrain_synthetic"
+DEFAULT_INPUT_SIGNAL = "terrain_shadow_256"
+SUPPORTED_INPUT_SIGNALS = frozenset({"terrain_shadow_256", "shadow_mask"})
 
 
 def _sha256_bytes(path: Path) -> str:
@@ -58,6 +60,7 @@ def zarr_real_terrain_synthetic_build_plan(
     *,
     validation_map: str,
     source_filter: str = "synthetic",
+    input_signal: str = DEFAULT_INPUT_SIGNAL,
     confidence_value: float = 1.0,
 ) -> dict[str, Any]:
     """Return a no-write map-held-out build plan for the complete v50.1 synthetic side."""
@@ -66,6 +69,8 @@ def zarr_real_terrain_synthetic_build_plan(
     rows = _load_rows(source, source_filter)
     if not validation_map:
         raise ValueError("validation_map is required")
+    if input_signal not in SUPPORTED_INPUT_SIGNALS:
+        raise ValueError(f"input_signal must be one of {sorted(SUPPORTED_INPUT_SIGNALS)}")
     if not np.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
         raise ValueError("confidence_value must be finite and within [0, 1]")
     maps = sorted({str(row["map"]) for _, row in rows})
@@ -85,8 +90,13 @@ def zarr_real_terrain_synthetic_build_plan(
         "train_row_count": len(rows) - counts[validation_map],
         "validation_row_count": counts[validation_map],
         "split_mode": "complete_family",
-        "input_signal": "terrain_shadow_256",
+        "input_signal": input_signal,
         "target_signal": "height_257",
+        "input_contract": (
+            "deployment_clean_signal"
+            if input_signal == DEFAULT_INPUT_SIGNAL
+            else "geometry_only_diagnostic_raw_mcsh"
+        ),
         "confidence_status": "measured",
         "confidence_value": float(confidence_value),
         "forbidden_signals_seen": [],
@@ -100,6 +110,7 @@ def build_zarr_real_terrain_synthetic_corpus(
     *,
     validation_map: str,
     source_filter: str = "synthetic",
+    input_signal: str = DEFAULT_INPUT_SIGNAL,
     confidence_value: float = 1.0,
 ) -> dict[str, Any]:
     """Materialize a complete-family bridge corpus without mutating the source Zarr."""
@@ -109,6 +120,7 @@ def build_zarr_real_terrain_synthetic_corpus(
         source,
         validation_map=validation_map,
         source_filter=source_filter,
+        input_signal=input_signal,
         confidence_value=confidence_value,
     )
     rows = _load_rows(source, source_filter)
@@ -119,24 +131,30 @@ def build_zarr_real_terrain_synthetic_corpus(
     if partial.exists():
         raise FileExistsError(f"refusing to reuse partial clean-signal corpus: {partial}")
     group = zarr.open_group(str(source), mode="r")
-    for name in ("terrain_shadow_256", "height_257"):
+    for name in (input_signal, "height_257"):
         if name not in group:
+            if name == DEFAULT_INPUT_SIGNAL and "shadow_mask" in group:
+                raise ValueError(
+                    "Zarr store is missing required array 'terrain_shadow_256'; it only has "
+                    "raw 'shadow_mask'. Rerun with --input-signal shadow_mask for the explicit "
+                    "geometry-only diagnostic, or provide a post-Spec-133 store."
+                )
             raise ValueError(f"Zarr store is missing required array {name!r}")
     partial.mkdir(parents=True)
     confidence = np.full(IMAGE_SHAPE, confidence_value, dtype=np.float32)
     manifest_rows: list[dict[str, Any]] = []
     try:
         for source_index, source_row in rows:
-            shadow = np.asarray(group["terrain_shadow_256"][source_index], dtype=np.float32)
+            shadow = np.asarray(group[input_signal][source_index], dtype=np.float32)
             height = np.asarray(group["height_257"][source_index], dtype=np.float32)
             if shadow.shape != IMAGE_SHAPE:
-                raise ValueError(f"source row {source_index}: terrain_shadow_256 shape {shadow.shape}")
+                raise ValueError(f"source row {source_index}: {input_signal} shape {shadow.shape}")
             if height.shape != (257, 257):
                 raise ValueError(f"source row {source_index}: height_257 shape {height.shape}")
             if not np.isfinite(shadow).all() or not np.isfinite(height).all():
                 raise ValueError(f"source row {source_index}: non-finite source array")
             if float(shadow.min()) < 0.0 or float(shadow.max()) > 1.0:
-                raise ValueError(f"source row {source_index}: terrain_shadow_256 outside [0, 1]")
+                raise ValueError(f"source row {source_index}: {input_signal} outside [0, 1]")
             map_name = str(source_row["map"])
             build = str(source_row.get("build") or "unknown")
             row_id = (
@@ -146,8 +164,9 @@ def build_zarr_real_terrain_synthetic_corpus(
             family = f"{build}:{map_name}"
             provenance = {
                 "operation": "real_terrain_synthetic_zarr_observation_v1",
-                "source_signal": "terrain_shadow_256",
+                "source_signal": input_signal,
                 "target_signal": "height_257",
+                "input_contract": plan["input_contract"],
                 "source_store": str(source.resolve()),
                 "source_index_sha256": plan["source_index_sha256"],
                 "source_row_index": source_index,
@@ -193,6 +212,8 @@ def build_zarr_real_terrain_synthetic_corpus(
             "source_real_terrain_synthetic_index_sha256": plan["source_index_sha256"],
             "source_schema": ZARR_BRIDGE_SCHEMA,
             "source_filter": source_filter,
+            "source_observation_signal": input_signal,
+            "input_contract": plan["input_contract"],
             "validation_map": validation_map,
             "required_families": sorted({str(row["family"]) for row in manifest_rows}),
             "forbidden_signals_seen": [],
@@ -223,6 +244,8 @@ def build_zarr_real_terrain_synthetic_corpus(
 __all__ = [
     "SOURCE_KIND",
     "ZARR_BRIDGE_SCHEMA",
+    "DEFAULT_INPUT_SIGNAL",
+    "SUPPORTED_INPUT_SIGNALS",
     "build_zarr_real_terrain_synthetic_corpus",
     "zarr_real_terrain_synthetic_build_plan",
 ]

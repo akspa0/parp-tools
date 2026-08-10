@@ -8,6 +8,16 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 139 source-signal correction
+
+- The first full-store command exposed a source mismatch: `curriculum-0_5_3_3368-obj_v1.zarr`
+  has `shadow_mask` and `height_257`, but no `terrain_shadow_256`. The builder now fails with an
+  actionable message instead of silently relabeling raw MCSH.
+- Added explicit `--input-signal shadow_mask` support, labeled as
+  `geometry_only_diagnostic_raw_mcsh`; the verified dry run still reports 1,330 rows with 688
+  Kalimdor train and 642 Azeroth validation. Deployment-clean evidence still requires a
+  post-Spec-133 store containing `terrain_shadow_256`.
+
 ## 2026-08-10 — Spec 139 complete v50.1 bridge correction
 
 - Corrected the scope error: the 16-row `real-shadow-npz-v1` directory is an old Alpha/Azeroth

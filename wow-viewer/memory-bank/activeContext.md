@@ -129,10 +129,12 @@ loss stack or a deployment-safe albedo-normalized input.
   reached `0.313952` versus `0.109902` baseline, and all-16 evaluation was `0.293371` versus
   `0.157124` (`-86.71%`). That 16-row directory was an old diagnostic subset, not the intended
   real-data scale. The complete v50.1 mixed curriculum Zarr store has 1,330 synthetic rows
-  (688 Kalimdor, 642 Azeroth); the new Zarr bridge builder preserves source row indices and uses
-  Kalimdor train/Azeroth validation. Two old-subset rows are effectively flat and source dynamics
-  vary widely, so source-integrity auditing remains the next gate. Authored RGB still needs the
-  albedo-normalization gate. Codex launched no training.
+  (688 Kalimdor, 642 Azeroth), but it is pre-Spec-133 and lacks `terrain_shadow_256`; it exposes
+  raw `shadow_mask` instead. The new Zarr bridge builder preserves source row indices and uses
+  Kalimdor train/Azeroth validation. Its explicit raw-MCSH mode is geometry-only diagnostic
+  evidence, not deployment-clean input. Two old-subset rows are effectively flat and source
+  dynamics vary widely, so source-integrity auditing remains the next gate. Authored RGB still
+  needs the albedo-normalization gate. Codex launched no training.
 - Detail and commands: [Spec 139 quickstart](../specs/139-v7-clean-signal-reconstruction/quickstart.md).
 
 ## Now — Spec 140 terrain paste and fractal motif archaeology

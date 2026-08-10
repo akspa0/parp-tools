@@ -38,6 +38,7 @@ def _write_store(root: Path) -> Path:
         )
     group = zarr.open_group(str(root), mode="w")
     group.create_array("terrain_shadow_256", data=shadows)
+    group.create_array("shadow_mask", data=shadows)
     group.create_array("height_257", data=heights)
     pq.write_table(pa.Table.from_pylist(rows), root / "index.parquet")
     return root
@@ -78,3 +79,16 @@ def test_zarr_bridge_uses_original_zarr_indices_and_publishes_valid_corpus(tmp_p
         source_indices[row["map"]].append(row["observation_provenance"]["source_row_index"])
     assert source_indices["Azeroth"] == [2, 0]
     assert source_indices["Kalimdor"] == [3, 1]
+
+
+def test_zarr_bridge_explicitly_labels_raw_shadow_mask_diagnostic(tmp_path: Path) -> None:
+    store = _write_store(tmp_path / "store.zarr")
+
+    plan = zarr_real_terrain_synthetic_build_plan(
+        store,
+        validation_map="Azeroth",
+        input_signal="shadow_mask",
+    )
+
+    assert plan["input_signal"] == "shadow_mask"
+    assert plan["input_contract"] == "geometry_only_diagnostic_raw_mcsh"
