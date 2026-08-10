@@ -58,9 +58,9 @@ identity; no FPS or GPU claim is made.
 
 ## Phase 5: User Story 2 — Cull By Subtree, Not By Instance (Priority: P1)
 
-- [ ] T014 [US2] Define a shared hierarchical traversal result and rejection attribution contract in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldSceneTraversal.cs`.
-- [ ] T015 [US2] Implement a first conservative region traversal over `WorldSceneGraph` in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldSceneTraversal.cs`.
-- [ ] T016 [US2] Add fixed-camera resident-scale traversal tests in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldSceneTraversalTests.cs`.
+- [x] T014 [US2] Define a shared hierarchical traversal result and rejection attribution contract in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldSceneTraversal.cs`.
+- [x] T015 [US2] Implement a first conservative region traversal over `WorldSceneGraph` in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldSceneTraversal.cs`.
+- [x] T016 [US2] Add fixed-camera resident-scale traversal tests in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldSceneTraversalTests.cs`.
 
 ## Phase 6: User Story 3 — Interiors Cull Through Portals (Priority: P2)
 

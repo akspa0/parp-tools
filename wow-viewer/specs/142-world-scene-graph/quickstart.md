@@ -11,6 +11,12 @@ From `I:\parp\parp-tools\wow-viewer`:
 dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldSceneGraphTests|FullyQualifiedName~SyntheticWorldWorkloadTests"
 ```
 
+The graph/traversal foundation can be checked together with:
+
+```powershell
+dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldSceneGraphTests|FullyQualifiedName~SyntheticWorldWorkloadTests|FullyQualifiedName~WorldSceneTraversalTests"
+```
+
 ## Full runtime-library proof
 
 ```powershell
@@ -27,6 +33,8 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
 - Invalid duplicate IDs, cycles, second-parent attachment, and non-finite rejectable bounds fail
   closed.
 - A synthetic minimap/image record is not accepted as a synthetic world workload.
+- A rejected synthetic region skips all descendant visibility tests and reports the skipped count.
+- A node with unknown bounds is included without being passed to the visibility predicate.
 
 ## Not yet run by this phase
 

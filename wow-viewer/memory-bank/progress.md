@@ -19,6 +19,13 @@ Current state and open work: [activeContext.md](activeContext.md).
   repository warnings. The active renderer traversal is unchanged; next slice is shared
   conservative traversal behind a selector.
 
+## 2026-08-10 — Spec 142 Phase 2 conservative traversal
+
+- Added `WorldSceneTraversal` with injected visibility testing, renderable-node selection, subtree
+  rejection attribution, skipped-descendant counts, and fail-open handling for unknown bounds.
+- Focused graph/workload/traversal proof is 11 passing tests. The active `WorldScene` renderer is
+  still unchanged; the next bounded slice is the runtime selector/adapter, not portal math yet.
+
 ## 2026-08-10 — Spec 142 renderer performance grounding
 
 - Expanded `specs/142-world-scene-graph/spec.md` with a deterministic synthetic world-scene

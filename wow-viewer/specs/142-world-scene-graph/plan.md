@@ -85,6 +85,7 @@ wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/
 ├── WorldSceneNodeKind.cs
 ├── WorldSceneGraph.cs
 ├── WorldSceneGraphSnapshot.cs
+├── WorldSceneTraversal.cs
 ├── SyntheticWorldWorkload.cs
 └── SyntheticWorldWorkloadBuilder.cs
 
@@ -127,13 +128,24 @@ performance claim is made.
 5. Add focused tests for identity, bounds containment, cycle prevention, detach cleanup,
    deterministic replay, and explicit separation from image-only minimap workloads.
 
+## Phase 2 — Conservative Shared Traversal
+
+**Status**: Complete for the library-only slice on 2026-08-10. The traversal rejects a complete
+subtree after one failed node test, preserves non-rejectable nodes, and reports visited/tested/
+skipped/visible counts. It is not yet wired into `WorldScene`.
+
+1. Traverse one graph with an injected visibility predicate and a renderable-node selector.
+2. Attribute the rejected region and count descendants skipped without visiting them.
+3. Preserve unknown/incomplete bounds as visible-but-non-rejectable.
+4. Prove the behavior with synthetic fixed-camera-style tests before viewer integration.
+
 ## Later Phases (Not Started In This Slice)
 
-- **Phase 2**: Spatial index and shared hierarchical visibility traversal behind a runtime selector.
-- **Phase 3**: WMO portal-restricted nested view volumes and fallback diagnostics.
-- **Phase 4**: Per-pass visible/non-visible queues, shared animation update ownership, and query
+- **Phase 3**: Spatial index and shared hierarchical visibility traversal behind a runtime selector.
+- **Phase 4**: WMO portal-restricted nested view volumes and fallback diagnostics.
+- **Phase 5**: Per-pass visible/non-visible queues, shared animation update ownership, and query
   reuse.
-- **Phase 5**: Incremental `WorldScene` migration, synthetic four-scale measurements, and named
+- **Phase 6**: Incremental `WorldScene` migration, synthetic four-scale measurements, and named
   real-client parity captures.
 
 ## Complexity Tracking

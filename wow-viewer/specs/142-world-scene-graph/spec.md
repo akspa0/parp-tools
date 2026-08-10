@@ -568,7 +568,9 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
   closed to non-rejectable when bounds are unknown or descendants are not safely contained.
 - `SyntheticWorldWorkloadBuilder` produces deterministic sparse map/tile/chunk/WMO/M2/PM4 fixture
   graphs and a versioned, hashed JSON manifest.
-- Focused graph/workload proof is 8 passing tests; the runtime project builds with only existing
+- `WorldSceneTraversal` rejects complete subtrees through one injected visibility test and reports
+  visited, individually tested, non-rejectable, rejected, skipped-descendant, and visible counts.
+- Focused graph/workload/traversal proof is 11 passing tests; the runtime project builds with only existing
   repository warnings.
 
 This is a foundation proof, not renderer integration. The current `WorldScene` path still owns
