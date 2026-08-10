@@ -8,6 +8,16 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 bounded portal view-volume contract
+
+- Added `WorldScenePortalViewVolumeBuilder`: parent planes are preserved, portal-edge planes form
+  a bounded doorway cone, and the decoded destination-side portal plane is retained.
+- Depth limits, unknown sides, invalid geometry, degenerate edges, and camera-on-plane cases fail
+  open with explicit reasons. Focused Spec 142 proof is now 26 passing tests; viewer build remains
+  0 errors with existing warnings.
+- `WorldScene` and `WmoRenderer` do not consume this contract yet; runtime doorway parity and all
+  heavy capture/performance evidence remain open.
+
 ## 2026-08-10 — Spec 142 WMO portal read-model adapter
 
 - Added `WorldScenePortalAdapter` to consume existing `WmoRenderDocument` portal vertices,

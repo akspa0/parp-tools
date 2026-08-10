@@ -181,13 +181,24 @@ bring the focused Spec 142 proof to 23 passing tests.
 This still does not change a format reader, duplicate `WmoRenderer`'s current portal handling,
 construct nested frusta, or enable graph portal traversal in `WorldScene`.
 
+## Phase 6 — Bounded Portal View-Volume Contract
+
+**Status**: Complete for the library-only nested-volume slice on 2026-08-10. The view-volume
+builder preserves parent planes, adds a camera-to-doorway edge cone and destination-side portal
+plane, and returns explicit fallback for depth limits, unknown sides, invalid geometry, degenerate
+edges, and camera-on-plane cases. Three new focused tests bring the Spec 142 proof to 26 passing
+tests.
+
+This contract is not yet consumed by `WorldScene` or `WmoRenderer`, and it does not establish
+doorway parity or a performance result.
+
 ## Later Phases (Not Started In This Slice)
 
-- **Phase 6**: Integrate graph portal geometry into nested view-volume traversal and prove doorway
+- **Phase 7**: Integrate graph portal volumes into runtime nested traversal and prove doorway
   parity with the existing renderer.
-- **Phase 7**: Per-pass visible/non-visible queues, shared animation update ownership, and query
+- **Phase 8**: Per-pass visible/non-visible queues, shared animation update ownership, and query
   reuse.
-- **Phase 8**: Incremental terrain/chunk graph migration, synthetic four-scale measurements, and
+- **Phase 9**: Incremental terrain/chunk graph migration, synthetic four-scale measurements, and
   named real-client parity captures.
 
 ## Complexity Tracking

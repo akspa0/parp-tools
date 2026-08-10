@@ -585,10 +585,13 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
   geometry, and group references without changing a reader. It maps stable group IDs, preserves
   accepted geometry for later clipping, and converts malformed geometry or unknown groups into
   graph fallback diagnostics.
-- Focused graph/workload/traversal/adapter/portal proof is 23 passing tests; the runtime and viewer
+- `WorldScenePortalViewVolumeBuilder` now preserves parent planes and builds a bounded child volume
+  from portal-edge planes plus the destination-side portal plane. Depth, invalid geometry,
+  degenerate edge, unknown-side, and camera-on-plane cases fail open with reasons.
+- Focused graph/workload/traversal/adapter/portal proof is 26 passing tests; the runtime and viewer
   projects build with only existing repository warnings.
 
 This is an opt-in integration proof, not a renderer promotion. The legacy `WorldScene` traversal
-remains the default, terrain chunks are not yet mounted, and WMO portal geometry/traversal remains
-owned by the existing `WmoRenderer` until graph-side nested view volumes and doorway parity are
-proven. No FPS/GPU or real-client parity claim exists until the later evidence tasks are run.
+remains the default, terrain chunks are not yet mounted, and WMO portal runtime traversal remains
+owned by the existing `WmoRenderer` until graph-side integration and doorway parity are proven. No
+FPS/GPU or real-client parity claim exists until the later evidence tasks are run.

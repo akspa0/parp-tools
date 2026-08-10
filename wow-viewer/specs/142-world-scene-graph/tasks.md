@@ -7,8 +7,9 @@
 
 **Current execution rule**: The graph foundation, conservative traversal, opt-in `WorldScene`
 object adapter, nested WMO group mounting, and the graph-only portal adjacency contract are
-validated and committed. The WMO portal read-model adapter is also complete; nested portal geometry
-traversal, doorway parity, pass, query, and performance promotion tasks remain unchecked.
+validated and committed. The WMO portal read-model adapter and bounded graph-side portal
+view-volume contract are also complete; runtime nested portal traversal, doorway parity, pass,
+query, and performance promotion tasks remain unchecked.
 
 ## Phase 1: Setup
 
@@ -68,7 +69,8 @@ identity; no FPS or GPU claim is made.
 
 - [x] T017 [US3] Add graph-only portal adjacency metadata and bounded nested-view diagnostics in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldScenePortalGraph.cs`; reject malformed links and report cycle, missing-entry, absent-data, and depth-limit fallback.
 - [x] T018 [US3] Integrate existing `WmoRenderDocument` portal vertices, geometry, and group references into the graph adapter without changing format readers in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldScenePortalAdapter.cs`.
-- [ ] T019 [US3] Extend portal tests with doorway geometry and existing-renderer parity coverage in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldScenePortalTests.cs`; current `WorldScenePortalGraphTests` cover the graph-only malformed, cyclic, absent-data, and depth-limited contract.
+- [ ] T019 [US3] Add runtime doorway geometry and existing-renderer parity coverage in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldScenePortalTests.cs`; graph and view-volume tests now cover the library-only malformed, cyclic, absent-data, depth-limited, and geometry fallback contracts.
+- [x] T030 [US3] Add the bounded parent-plane/portal-edge/destination-side view-volume contract and fallback diagnostics in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldScenePortalViewVolume.cs`.
 
 ## Phase 7: User Story 4 — Ordered Visibility Results (Priority: P2)
 

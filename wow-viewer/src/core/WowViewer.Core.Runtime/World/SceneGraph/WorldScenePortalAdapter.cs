@@ -17,6 +17,8 @@ public readonly record struct WorldSceneWmoPortalReferenceReadModel(
     int GroupIndex,
     short Side);
 
+public readonly record struct WorldScenePortalGroupSide(int GroupIndex, short Side);
+
 /// <summary>
 /// Portal geometry and its existing group references, copied from an already-decoded WMO read
 /// model. This type does not read client files and does not reinterpret portal coordinates.
@@ -37,7 +39,8 @@ public sealed record WorldScenePortalGeometry(
     IReadOnlyList<Vector3> Vertices,
     Vector3 Normal,
     float PlaneDistance,
-    IReadOnlyList<int> GroupIndices);
+    IReadOnlyList<int> GroupIndices,
+    IReadOnlyList<WorldScenePortalGroupSide> GroupSides);
 
 public sealed record WorldScenePortalAdapterResult(
     WorldScenePortalGraph Graph,
@@ -174,7 +177,12 @@ public static class WorldScenePortalAdapter
                 portal.Vertices!,
                 portal.Normal,
                 portal.PlaneDistance,
-                groupIndices));
+                groupIndices,
+                references
+                    .GroupBy(reference => reference.GroupIndex)
+                    .OrderBy(group => group.Key)
+                    .Select(group => new WorldScenePortalGroupSide(group.Key, group.First().Side))
+                    .ToArray()));
 
             for (int sourceIndex = 0; sourceIndex < groupIndices.Length; sourceIndex++)
             {
