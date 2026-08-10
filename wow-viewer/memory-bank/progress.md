@@ -560,11 +560,14 @@ real-observation folders and marks them reference-only. RGB-only observations ar
 inputs but never targets or terrain renderers; missing liquid/alpha/tileset/object/height signals
 remain unknown. Source-preserving manifest/materialization and image inspection are the next tasks.
 
-## 2026-08-10 — Spec 141 terrain-method translation planned
+## 2026-08-10 — Spec 141 terrain-method translation Phase 0/1 complete
 
 Created branch `141-terrain-method-translation` and its Speckit design package. The plan records
 DSM2DTM and ResDepth as height-prior architecture references, SMRF/CSF as point-cloud diagnostics,
 and aerial segmentation models as predicted-mask auxiliaries. It explicitly separates those lanes
 from the current RGB-only minimap contract and adds a provenance-bound research-lead workflow for
-new signal discoveries. No implementation, external-weight use, harvest, or training started.
-Next: implement the ledger and fail-closed modality audit, then produce the RGB benchmark dry plan.
+new signal discoveries. Implemented `terrain_method_translation.py` and
+`v60_audit_terrain_methods.py` with six method records, four input branches, canonical aliases, and
+forbidden-read audits. Focused proof is `17 passed`; the full v60 regression is `106 passed`; Ruff,
+`py_compile`, and the dry-run CLI pass. No external-weight use, harvest, or training occurred.
+Next: build the RGB benchmark dry plan for no-mask, predicted-mask, and withheld-mask conditions.

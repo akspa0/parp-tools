@@ -304,7 +304,7 @@ catalog recognizes explicitly named real-observation folders as reference-only, 
 non-renderable/non-target entries. The next bounded slice is an observation manifest/materializer
 and original-versus-derived inspection surface; it is independent of direct Zarr tile decoding.
 
-## 2026-08-10 — Spec 141 terrain-method translation planned
+## 2026-08-10 — Spec 141 terrain-method translation Phase 0/1 complete
 
 Created branch `141-terrain-method-translation` and the Speckit package under
 `specs/141-terrain-method-translation/`. The lane translates external DSM/DTM, LiDAR ground-filter,
@@ -312,5 +312,8 @@ aerial object-mask, and geospatial-encoder research into explicit method records
 DSM2DTM/ResDepth/SMRF/CSF remain offline/reference methods; the first executable WoW branch is
 RGB-only object-aware terrain completion with no-mask, predicted-mask, and withheld-mask conditions.
 The package also adds bounded research-lead records so novel signal observations retain provenance,
-falsification tests, confidence, and next actions. No code, harvest, weights, or training was run in
-this planning slice. Next gate: implement and validate the method ledger and forbidden-read audit.
+falsification tests, confidence, and next actions. The v60 implementation now exposes six method
+records, four input-contract branches, canonical signal aliases, translation decisions, and fail-closed
+input-read audits. The dry-run CLI and focused/full regression proof pass (`17` focused, `106` v60). No external weights,
+client data, corpus build, or training was run. Next gate: prepare the RGB-only no-mask/predicted-mask/
+withheld-mask benchmark dry plan.

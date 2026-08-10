@@ -55,6 +55,19 @@ from harvester.v60.real_terrain_synthetic_zarr import (
     build_zarr_real_terrain_synthetic_corpus,
     zarr_real_terrain_synthetic_build_plan,
 )
+from harvester.v60.terrain_method_translation import (
+    ExternalMethodRecord,
+    InputContract,
+    TranslationDecision,
+    audit_input_reads,
+    build_method_translation_report,
+    build_rgb_only_contract,
+    canonical_signal_name,
+    initial_input_contracts,
+    initial_method_records,
+    validate_input_contract,
+    validate_method_records,
+)
 
 __all__ = [
     "CleanObservationPackage",
@@ -89,4 +102,15 @@ __all__ = [
     "recompose_height",
     "validate_clean_observation",
     "validate_clean_signal_corpus",
+    "ExternalMethodRecord",
+    "InputContract",
+    "TranslationDecision",
+    "audit_input_reads",
+    "build_method_translation_report",
+    "build_rgb_only_contract",
+    "canonical_signal_name",
+    "initial_input_contracts",
+    "initial_method_records",
+    "validate_input_contract",
+    "validate_method_records",
 ]

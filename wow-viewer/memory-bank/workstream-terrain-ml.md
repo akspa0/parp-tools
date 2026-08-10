@@ -373,9 +373,11 @@ supervision/evaluation only. Every result needs clean, contaminated, mask, cross
 baseline-relative metrics. A separate research-lead record keeps novel observations as hypotheses
 with source/build/tile provenance, falsification tests, confidence, and next action.
 
-Current status: planning complete; no code, external weights, harvest, or training run. Gate 0 is
-method-ledger completeness. Gate 1 is zero forbidden deployment reads. Gate 2 is a reproducible
-RGB-only dry plan before any user-owned heavy run.
+Current status: Phase 0/1 implemented and validated. The ledger contains six methods and the audit
+contains four branches with canonical signal aliases and translation decisions; the RGB+`height_257`
+sample is rejected. The focused Spec 141 proof is `17 passed`, full v60 is `106 passed`, and Ruff/`py_compile` pass. No code
+downloads external weights, harvests client data, or trains a model. Gate 0 and Gate 1 are complete;
+Gate 2 is the next RGB-only dry plan for no-mask, predicted-mask, and withheld-mask conditions.
 
 ## Dataset-backed viewer boundary (2026-08-10)
 

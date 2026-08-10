@@ -11,6 +11,21 @@ uv run --no-cache python scripts/v60_audit_terrain_methods.py --dry-run
 
 Expected output includes six initial method records, their modality classifications, source URLs, and translation statuses. DSM2DTM, ResDepth, SMRF, and CSF must remain offline/reference or diagnostic entries; they are not RGB-only candidates by analogy.
 
+Observed proof on 2026-08-10:
+
+- Six methods classified: four `reference`, two `diagnostic`.
+- Four contracts classified: `rgb_only`, `height_prior`, `point_cloud`, and `combined`.
+- The RGB+`height_257` sample was rejected with a forbidden-read report.
+- Focused Spec 141 tests: `17 passed`.
+- Full `tests/v60` regression: `106 passed`.
+- `ruff` and `py_compile`: passed.
+
+To write the same report instead of printing a dry-run artifact:
+
+```powershell
+uv run --no-cache python scripts/v60_audit_terrain_methods.py --write --output "../output/datasets/v60/v7-clean-signal-method-audit-v1/method_translation_report.json"
+```
+
 ## Validate the RGB-only benchmark plan
 
 ```powershell

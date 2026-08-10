@@ -6,6 +6,11 @@
 
 Create a small, project-owned evidence lane that records external LiDAR/DSM and aerial-image methods, enforces their input modality, and compares only the methods that can be translated honestly into WoW minimap reconstruction. The first executable branch is RGB-only object-aware terrain completion. DSM and point-cloud methods remain offline diagnostic references until a legitimate source and contract exist.
 
+**Implementation status (2026-08-10)**: Phase 0 and Phase 1 are complete. The v60 library now exposes
+six versioned external method records, four input-contract branches, canonical signal aliases, and
+fail-closed input-read audits. The dry-run CLI and 17 focused tests are proven; no external weights,
+client data, corpus build, or training run was used.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11+
@@ -54,7 +59,7 @@ wow-viewer/specs/141-terrain-method-translation/
 └── tasks.md
 ```
 
-### Future Source Code
+### Current Source Code
 
 ```text
 wow-viewer/data-harvester/

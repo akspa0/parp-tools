@@ -8,18 +8,18 @@
 
 **Purpose**: Establish the v60 method-translation identity without changing the existing model or reader contracts.
 
-- [ ] T001 Record the Spec 141 feature identity and artifact roots in `wow-viewer/.specify/feature.json` and `wow-viewer/specs/141-terrain-method-translation/`.
-- [ ] T002 [P] Add method-translation schema constants and exports in `wow-viewer/data-harvester/src/harvester/v60/__init__.py`.
-- [ ] T003 [P] Add the initial method source fixtures in `wow-viewer/data-harvester/tests/v60/fixtures/terrain_method_translation_methods.json`.
+- [x] T001 Record the Spec 141 feature identity and artifact roots in `wow-viewer/.specify/feature.json` and `wow-viewer/specs/141-terrain-method-translation/`.
+- [x] T002 [P] Add method-translation schema constants and exports in `wow-viewer/data-harvester/src/harvester/v60/__init__.py`.
+- [x] T003 [P] Add the initial method source fixtures in `wow-viewer/data-harvester/tests/v60/fixtures/terrain_method_translation_methods.json`.
 
 ## Phase 2: Foundational Contracts
 
 **Purpose**: Define the shared entities and fail-closed signal boundary before any benchmark work.
 
-- [ ] T004 Implement `ExternalMethodRecord`, `InputContract`, and `TranslationDecision` validation in `wow-viewer/data-harvester/src/harvester/v60/terrain_method_translation.py`.
-- [ ] T005 Implement input-modality and forbidden-read validation for `rgb_only`, `height_prior`, `point_cloud`, and `combined` in `wow-viewer/data-harvester/src/harvester/v60/terrain_method_translation.py`.
-- [ ] T006 [P] Add accepted, diagnostic, combined, and forbidden contract fixtures in `wow-viewer/data-harvester/tests/v60/test_terrain_method_translation.py`.
-- [ ] T007 [P] Add manifest contract assertions for `v60-terrain-method-translation-v1` in `wow-viewer/data-harvester/tests/v60/test_terrain_method_translation_contract.py`.
+- [x] T004 Implement `ExternalMethodRecord`, `InputContract`, and `TranslationDecision` validation in `wow-viewer/data-harvester/src/harvester/v60/terrain_method_translation.py`.
+- [x] T005 Implement input-modality and forbidden-read validation for `rgb_only`, `height_prior`, `point_cloud`, and `combined` in `wow-viewer/data-harvester/src/harvester/v60/terrain_method_translation.py`.
+- [x] T006 [P] Add accepted, diagnostic, combined, and forbidden contract fixtures in `wow-viewer/data-harvester/tests/v60/test_terrain_method_translation.py`.
+- [x] T007 [P] Add manifest contract assertions for `v60-terrain-method-translation-v1` in `wow-viewer/data-harvester/tests/v60/test_terrain_method_translation_contract.py`.
 
 **Checkpoint**: The modality contract rejects target-derived deployment inputs and can classify a valid offline DSM/point-cloud diagnostic.
 
@@ -29,10 +29,10 @@
 
 **Independent Test**: The ledger dry-run validates the six initial method families and emits complete provenance, modality, domain-gap, weights, and translation fields.
 
-- [ ] T008 [P] [US1] Encode DSM2DTM, ResDepth, SMRF, CSF, aerial object-mask, and Prithvi records in `wow-viewer/data-harvester/src/harvester/v60/terrain_method_translation.py` using the links and decisions in `specs/141-terrain-method-translation/research.md`.
-- [ ] T009 [US1] Implement deterministic ledger validation and status reporting in `wow-viewer/data-harvester/src/harvester/v60/terrain_method_translation.py`.
-- [ ] T010 [US1] Add the PowerShell-ready ledger audit CLI in `wow-viewer/data-harvester/scripts/v60_audit_terrain_methods.py`.
-- [ ] T011 [P] [US1] Add ledger completeness and unknown-license tests in `wow-viewer/data-harvester/tests/v60/test_terrain_method_ledger.py`.
+- [x] T008 [P] [US1] Encode DSM2DTM, ResDepth, SMRF, CSF, aerial object-mask, and Prithvi records in `wow-viewer/data-harvester/src/harvester/v60/terrain_method_translation.py` using the links and decisions in `specs/141-terrain-method-translation/research.md`.
+- [x] T009 [US1] Implement deterministic ledger validation and status reporting in `wow-viewer/data-harvester/src/harvester/v60/terrain_method_translation.py`.
+- [x] T010 [US1] Add the PowerShell-ready ledger audit CLI in `wow-viewer/data-harvester/scripts/v60_audit_terrain_methods.py`.
+- [x] T011 [P] [US1] Add ledger completeness and unknown-license tests in `wow-viewer/data-harvester/tests/v60/test_terrain_method_translation.py`.
 
 **Checkpoint**: Every initial method is explicitly reference-only, diagnostic, candidate, held, rejected, or promoted.
 
@@ -42,10 +42,10 @@
 
 **Independent Test**: Representative manifests classify correctly and a forbidden deployment manifest fails with the exact signal name.
 
-- [ ] T012 [US2] Implement per-run input-read recording and forbidden-read audit output in `wow-viewer/data-harvester/src/harvester/v60/terrain_method_translation.py`.
-- [ ] T013 [US2] Add predicted-mask versus supervision-mask provenance fields to `wow-viewer/data-harvester/src/harvester/v60/terrain_method_translation.py`.
-- [ ] T014 [P] [US2] Add failure tests for `height_257`, `terrain_shadow_256`, `shadow_mask`, WDL, and target-side object-mask reads in `wow-viewer/data-harvester/tests/v60/test_terrain_method_forbidden_reads.py`.
-- [ ] T015 [US2] Add deterministic contract audit output and fresh-output refusal to `wow-viewer/data-harvester/scripts/v60_audit_terrain_methods.py`.
+- [x] T012 [US2] Implement per-run input-read recording and forbidden-read audit output in `wow-viewer/data-harvester/src/harvester/v60/terrain_method_translation.py`.
+- [x] T013 [US2] Add predicted-mask versus supervision-mask provenance fields to `wow-viewer/data-harvester/src/harvester/v60/terrain_method_translation.py`.
+- [x] T014 [P] [US2] Add failure tests for `height_257`, `terrain_shadow_256`, `shadow_mask`, WDL, and target-side object-mask reads in `wow-viewer/data-harvester/tests/v60/test_terrain_method_translation.py`.
+- [x] T015 [US2] Add deterministic contract audit output and fresh-output refusal to `wow-viewer/data-harvester/scripts/v60_audit_terrain_methods.py`.
 
 **Checkpoint**: A result cannot claim RGB-only deployment compatibility when it reads DSM, point-cloud, target, or source-side supervision data.
 
@@ -81,9 +81,9 @@
 
 - [ ] T026 [P] Add CLI help and dry-run smoke tests in `wow-viewer/data-harvester/tests/v60/test_terrain_method_cli.py`.
 - [ ] T027 [P] Update `wow-viewer/specs/141-terrain-method-translation/research.md` with any source-access or reproduction changes discovered during implementation.
-- [ ] T028 Run focused `ruff`, `py_compile`, and v60 pytest checks; record exact commands and results in `wow-viewer/specs/141-terrain-method-translation/quickstart.md`.
-- [ ] T029 Update `wow-viewer/memory-bank/activeContext.md`, `wow-viewer/memory-bank/progress.md`, and `wow-viewer/memory-bank/workstream-terrain-ml.md` after each completed implementation slice.
-- [ ] T030 Commit each bounded implementation slice with only its intended files staged and report the commit hash.
+- [x] T028 Run focused `ruff`, `py_compile`, and v60 pytest checks; record exact commands and results in `wow-viewer/specs/141-terrain-method-translation/quickstart.md`.
+- [x] T029 Update `wow-viewer/memory-bank/activeContext.md`, `wow-viewer/memory-bank/progress.md`, and `wow-viewer/memory-bank/workstream-terrain-ml.md` after each completed implementation slice.
+- [x] T030 Commit each bounded implementation slice with only its intended files staged and report the commit hash.
 
 ## Dependencies and Execution Order
 

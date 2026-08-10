@@ -1,0 +1,30 @@
+[
+  {
+    "method_id": "fixture-rgb-mask",
+    "name": "Fixture RGB object mask",
+    "source_urls": ["https://example.invalid/rgb-mask"],
+    "source_kind": "huggingface",
+    "accessed_at": "2026-08-10",
+    "input_modalities": ["rgb"],
+    "output_signals": ["predicted_object_mask"],
+    "domain": "fixture aerial RGB",
+    "license_status": "needs_review",
+    "weights_status": "available",
+    "translation_status": "reference",
+    "translation_reason": "Fixture only."
+  },
+  {
+    "method_id": "fixture-dsm",
+    "name": "Fixture DSM filter",
+    "source_urls": ["https://example.invalid/dsm"],
+    "source_kind": "paper",
+    "accessed_at": "2026-08-10",
+    "input_modalities": ["dsm"],
+    "output_signals": ["dtm"],
+    "domain": "fixture DSM",
+    "license_status": "not_applicable",
+    "weights_status": "not_required",
+    "translation_status": "diagnostic",
+    "translation_reason": "Fixture offline diagnostic."
+  }
+]
