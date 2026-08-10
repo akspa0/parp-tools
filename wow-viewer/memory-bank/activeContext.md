@@ -12,7 +12,7 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 |---|---|---|
 | PM4 decode | **active** — versioning formatted; placement solved; scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
 | Terrain / viewer runtime | **active** — phased dual-map overlay (135), M2 doodad batching (136), phased minimap & teleport (137) landed; 4.x renderer evolution (138) is an evidence-gated epic note | [activeContext.md](activeContext.md) |
-| Terrain / minimap ML | **active** — Spec 139 clean-signal reconstruction plus Spec 140 paste/fractal/tileset evidence pipeline; object identity remains parked | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
+| Terrain / minimap ML | **active** — Spec 139 clean-signal reconstruction, Spec 140 paste/fractal/tileset evidence, and Spec 141 external-method translation; object identity remains parked | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
 | Tile archaeology | **active** — old v50 synthetic minimap output needs fresh regeneration after renderer fixes; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
 
 ## Now — Viewer Runtime & Terrain Improvements (Specs 135, 136, 137)
@@ -303,3 +303,14 @@ Added `RealTileObservation` and `RealTileObservationKind` to the shared dataset 
 catalog recognizes explicitly named real-observation folders as reference-only, input-eligible but
 non-renderable/non-target entries. The next bounded slice is an observation manifest/materializer
 and original-versus-derived inspection surface; it is independent of direct Zarr tile decoding.
+
+## 2026-08-10 — Spec 141 terrain-method translation planned
+
+Created branch `141-terrain-method-translation` and the Speckit package under
+`specs/141-terrain-method-translation/`. The lane translates external DSM/DTM, LiDAR ground-filter,
+aerial object-mask, and geospatial-encoder research into explicit method records and modality gates.
+DSM2DTM/ResDepth/SMRF/CSF remain offline/reference methods; the first executable WoW branch is
+RGB-only object-aware terrain completion with no-mask, predicted-mask, and withheld-mask conditions.
+The package also adds bounded research-lead records so novel signal observations retain provenance,
+falsification tests, confidence, and next actions. No code, harvest, weights, or training was run in
+this planning slice. Next gate: implement and validate the method ledger and forbidden-read audit.

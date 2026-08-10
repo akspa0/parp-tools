@@ -358,6 +358,25 @@ parked) and is the one training-relevant result from it.
 - Constitution IV: per-signal evidence. A strong signal must never mask a dead one, so every signal
   is reported against its own baseline, never rolled into an aggregate score.
 
+## Spec 141 — external terrain-method translation (2026-08-10)
+
+Spec 141 is the evidence lane for adjacent LiDAR/DSM and aerial-image research. It does not claim
+that DSM2DTM, ResDepth, SMRF, or CSF can consume WoW RGB minimaps. Those methods are recorded as
+height-prior or point-cloud references until a legitimate matching source exists. Hugging Face
+tree/building segmentation models are candidate predicted-mask auxiliaries only; external weights
+and datasets are not first-benchmark dependencies.
+
+The first implementation slice is the method ledger plus a fail-closed modality/provenance audit.
+The next RGB-only benchmark must compare no-mask, predicted-mask, and withheld-mask conditions using
+project-owned object-library controls and authored raw RGB, while preserving target-side masks as
+supervision/evaluation only. Every result needs clean, contaminated, mask, cross-tile, family, and
+baseline-relative metrics. A separate research-lead record keeps novel observations as hypotheses
+with source/build/tile provenance, falsification tests, confidence, and next action.
+
+Current status: planning complete; no code, external weights, harvest, or training run. Gate 0 is
+method-ledger completeness. Gate 1 is zero forbidden deployment reads. Gate 2 is a reproducible
+RGB-only dry plan before any user-owned heavy run.
+
 ## Dataset-backed viewer boundary (2026-08-10)
 
 The v50.1 stores are signal-bearing map evidence, including liquid mask/height arrays, variable
