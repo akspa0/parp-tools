@@ -31,6 +31,18 @@ Current state and open work: [activeContext.md](activeContext.md).
 - Next user action is the CPU diagnostic command in the Spec 139 quickstart. Review the cross-tile
   atlas before changing architecture, data, loss, or transfer scope.
 
+## 2026-08-10 — Spec 139 constant-field stability correction
+
+- Atlas review found `flat-v00` and `cross_tile_lightning-v01` have almost identical four-channel
+  inputs and the legacy checkpoint emits the same non-flat ramp for both near-zero targets. This is
+  a model padding artifact, not evidence that 2×2 context is immediately required.
+- New clean-signal models use versioned `reflect-3x3-v1` padding for spatial 3×3 convolutions.
+  Legacy zero-padding checkpoint identities remain reconstructable for before/after comparison.
+  Constant-field stability tests pass for `pyramid_cnn`, `segformer_b0`, and `unet_lite_v2`.
+- The user-owned next step is one fresh full-profile `pyramid_cnn` structural run under
+  `pyramid-full-structural-complete-v2-reflect-padding`, followed by the checkpoint diagnostic.
+  No training was launched by Codex.
+
 ## 2026-08-10 — Spec 139 clean-signal foundational contracts
 
 - Implemented the v60 four-channel clean observation package: luma, deterministic x/y gradients,

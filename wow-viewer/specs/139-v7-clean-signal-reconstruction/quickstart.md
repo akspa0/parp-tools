@@ -112,6 +112,23 @@ at tile boundaries, the next model change needs cross-tile context. If the predi
 throughout despite a visible clean observation, the signal or synthetic observation contract needs
 investigation. Do not retrain or begin real transfer until that diagnosis is recorded.
 
+## 5B. Targeted reflect-padding confirmation run
+
+The atlas identified a padding-induced ramp on a near-constant input. The model contract now uses
+`reflect-3x3-v1` padding by default, so the old checkpoint must remain a legacy diagnostic and this
+run needs a fresh output root. This is the one targeted user-owned CUDA retraining run:
+
+```powershell
+Set-Location "I:/parp/parp-tools/wow-viewer/data-harvester"
+uv run --no-cache python scripts/v60_train_clean_signal.py --corpus "../output/datasets/v60/v7-clean-signal-v1" --output "../output/datasets/v60/v7-clean-signal-runs/pyramid-full-structural-complete-v2-reflect-padding" --architectures "pyramid_cnn" --loss-profiles "v7_structural_v1" --model-profile full --split complete_family --train-size 76 --epochs 80 --batch-size 8 --seed 7137 --device cuda --confirm-run
+```
+
+After it completes, run the diagnostic command from Section 5A against the new
+`pyramid-full-structural-complete-v2-reflect-padding/pyramid_cnn/v7_structural_v1/checkpoint_best.pt`
+and a new diagnostic output directory. The success test is that the flat-input ramp disappears and
+the cross-tile-lightning family no longer collapses against its baseline. Real transfer remains
+blocked until that report is evaluated.
+
 ## 6. Real transfer
 
 ```powershell

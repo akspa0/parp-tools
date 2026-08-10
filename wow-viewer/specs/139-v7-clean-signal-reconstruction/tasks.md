@@ -58,7 +58,9 @@ per-component and per-family metrics recorded under one report schema.
 - [x] T025 [US3] Add report tests proving identical splits across architectures/losses and independent family/bucket metrics in `wow-viewer/data-harvester/tests/v60/test_clean_signal_train.py`.
 - [x] T026 [US3] **USER RUNS** the within-family parity/structural matrix, then the complete-family gate for the best cells; both user-owned runs are recorded. The full-profile gate is held from promotion because cross-tile families regress; Codex did not launch training.
 - [x] T026A [US3] Add image-only checkpoint loading, held-out-row prediction export, and cross-tile failure atlases in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_diagnostics.py` and `wow-viewer/data-harvester/scripts/v60_diagnose_clean_signal_checkpoint.py`.
-- [ ] T026B [US3] **USER RUNS** the checkpoint diagnostic on the completed full-profile run and reviews the per-row NPZs plus cross-tile atlas before any model or transfer change.
+- [x] T026B [US3] **USER RUNS** the checkpoint diagnostic on the completed full-profile run and reviews the per-row NPZs plus cross-tile atlas before any model or transfer change.
+- [x] T026C [US3] Replace zero-padded spatial 3×3 convolutions with versioned reflective padding by default, preserve legacy checkpoint reconstruction, and add constant-field stability tests.
+- [ ] T026D [US3] **USER RUNS** one fresh full-profile `pyramid_cnn` structural retraining with `reflect-3x3-v1`, then runs the checkpoint diagnostic before any further architecture or transfer change.
 
 ## Phase 6: User Story 4 — Real albedo-normalized transfer (P2)
 
@@ -90,6 +92,7 @@ T001-T009 foundational contracts
     -> T016-T020 synthetic corpus
     -> T021-T026 architecture/loss bakeoff
     -> T026A-T026B checkpoint failure diagnosis
+    -> T026C-T026D constant-field stability correction
     -> T027-T032 real transfer
     -> T033-T036 polish and continuity
 ```

@@ -3,7 +3,9 @@
 The model consumes exactly four channels from ``clean_signal_inputs`` and returns two independently
 named training heads plus their recomposed published height.  The architecture candidates are
 small local implementations so CPU contract tests do not download or initialize external model
-weights.  The models are random-initialized; this module does not provide a training entrypoint.
+weights. Spatial 3x3 convolutions use reflective padding by default so spatially constant clean
+observations cannot acquire a padding-induced position ramp. The models are random-initialized;
+this module does not provide a training entrypoint.
 """
 
 from __future__ import annotations
@@ -25,6 +27,9 @@ INPUT_SIZE = 256
 INPUT_CHANNELS = 4
 OUTPUT_SIZE = 257
 DETAIL_RESIDUAL_SCALE = 0.5
+LEGACY_SPATIAL_PADDING_POLICY = "zero-3x3-v1"
+REFLECT_SPATIAL_PADDING_POLICY = "reflect-3x3-v1"
+DEFAULT_SPATIAL_PADDING_POLICY = REFLECT_SPATIAL_PADDING_POLICY
 
 UNET_LITE_ID = "unet_lite_v2"
 PYRAMID_CNN_ID = "pyramid_cnn"
@@ -61,21 +66,44 @@ class CleanSignalPredictions:
         }
 
 
+def _torch_padding_mode(policy: str) -> str:
+    if policy == LEGACY_SPATIAL_PADDING_POLICY:
+        return "zeros"
+    if policy == REFLECT_SPATIAL_PADDING_POLICY:
+        return "reflect"
+    raise CleanSignalModelError(f"unknown spatial padding policy: {policy!r}")
+
+
 class _ConvNormAct(nn.Sequential):
-    def __init__(self, in_channels: int, out_channels: int, *, stride: int = 1) -> None:
+    def __init__(self, in_channels: int, out_channels: int, *, stride: int = 1, spatial_padding: str) -> None:
         super().__init__(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False),
+            nn.Conv2d(
+                in_channels,
+                out_channels,
+                kernel_size=3,
+                stride=stride,
+                padding=1,
+                padding_mode=_torch_padding_mode(spatial_padding),
+                bias=False,
+            ),
             nn.GroupNorm(min(8, out_channels), out_channels),
             nn.SiLU(inplace=True),
         )
 
 
 class _ResidualConvBlock(nn.Module):
-    def __init__(self, channels: int) -> None:
+    def __init__(self, channels: int, *, spatial_padding: str) -> None:
         super().__init__()
         self.body = nn.Sequential(
-            _ConvNormAct(channels, channels),
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
+            _ConvNormAct(channels, channels, spatial_padding=spatial_padding),
+            nn.Conv2d(
+                channels,
+                channels,
+                kernel_size=3,
+                padding=1,
+                padding_mode=_torch_padding_mode(spatial_padding),
+                bias=False,
+            ),
             nn.GroupNorm(min(8, channels), channels),
         )
         self.activation = nn.SiLU(inplace=True)
@@ -85,22 +113,26 @@ class _ResidualConvBlock(nn.Module):
 
 
 class _PyramidStage(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int, *, residual: bool) -> None:
+    def __init__(self, in_channels: int, out_channels: int, *, residual: bool, spatial_padding: str) -> None:
         super().__init__()
-        self.downsample = _ConvNormAct(in_channels, out_channels, stride=2)
-        self.refine = _ResidualConvBlock(out_channels) if residual else _ConvNormAct(out_channels, out_channels)
+        self.downsample = _ConvNormAct(in_channels, out_channels, stride=2, spatial_padding=spatial_padding)
+        self.refine = (
+            _ResidualConvBlock(out_channels, spatial_padding=spatial_padding)
+            if residual
+            else _ConvNormAct(out_channels, out_channels, spatial_padding=spatial_padding)
+        )
 
     def forward(self, x: Tensor) -> Tensor:
         return self.refine(self.downsample(x))
 
 
 class _PyramidEncoder(nn.Module):
-    def __init__(self, channels: tuple[int, ...]) -> None:
+    def __init__(self, channels: tuple[int, ...], *, spatial_padding: str) -> None:
         super().__init__()
         stages: list[nn.Module] = []
         in_channels = INPUT_CHANNELS
         for out_channels in channels:
-            stages.append(_PyramidStage(in_channels, out_channels, residual=True))
+            stages.append(_PyramidStage(in_channels, out_channels, residual=True, spatial_padding=spatial_padding))
             in_channels = out_channels
         self.stages = nn.ModuleList(stages)
         self.channels = channels
@@ -114,12 +146,12 @@ class _PyramidEncoder(nn.Module):
 
 
 class _UnetEncoder(_PyramidEncoder):
-    def __init__(self, channels: tuple[int, ...]) -> None:
+    def __init__(self, channels: tuple[int, ...], *, spatial_padding: str) -> None:
         nn.Module.__init__(self)
         stages: list[nn.Module] = []
         in_channels = INPUT_CHANNELS
         for out_channels in channels:
-            stages.append(_PyramidStage(in_channels, out_channels, residual=False))
+            stages.append(_PyramidStage(in_channels, out_channels, residual=False, spatial_padding=spatial_padding))
             in_channels = out_channels
         self.stages = nn.ModuleList(stages)
         self.channels = channels
@@ -128,11 +160,19 @@ class _UnetEncoder(_PyramidEncoder):
 class _MixingBlock(nn.Module):
     """Compact SegFormer-like overlap patch plus channel-mixing block."""
 
-    def __init__(self, channels: int) -> None:
+    def __init__(self, channels: int, *, spatial_padding: str) -> None:
         super().__init__()
         expanded = channels * 2
         self.norm = nn.GroupNorm(min(8, channels), channels)
-        self.depthwise = nn.Conv2d(channels, channels, kernel_size=3, padding=1, groups=channels, bias=False)
+        self.depthwise = nn.Conv2d(
+            channels,
+            channels,
+            kernel_size=3,
+            padding=1,
+            padding_mode=_torch_padding_mode(spatial_padding),
+            groups=channels,
+            bias=False,
+        )
         self.mlp = nn.Sequential(
             nn.Conv2d(channels, expanded, kernel_size=1),
             nn.GELU(),
@@ -145,15 +185,15 @@ class _MixingBlock(nn.Module):
 
 
 class _SegformerEncoder(nn.Module):
-    def __init__(self, channels: tuple[int, ...]) -> None:
+    def __init__(self, channels: tuple[int, ...], *, spatial_padding: str) -> None:
         super().__init__()
         stages: list[nn.Module] = []
         in_channels = INPUT_CHANNELS
         for out_channels in channels:
             stages.append(
                 nn.Sequential(
-                    _ConvNormAct(in_channels, out_channels, stride=2),
-                    _MixingBlock(out_channels),
+                    _ConvNormAct(in_channels, out_channels, stride=2, spatial_padding=spatial_padding),
+                    _MixingBlock(out_channels, spatial_padding=spatial_padding),
                 )
             )
             in_channels = out_channels
@@ -171,14 +211,15 @@ class _SegformerEncoder(nn.Module):
 class CleanSignalFeatureAdapter(nn.Module):
     """Project arbitrary candidate encoder features into one shared decoder width."""
 
-    def __init__(self, feature_channels: tuple[int, ...], fusion_channels: int) -> None:
+    def __init__(self, feature_channels: tuple[int, ...], fusion_channels: int, *, spatial_padding: str) -> None:
         super().__init__()
         self.projections = nn.ModuleList(
             nn.Conv2d(channels, fusion_channels, kernel_size=1)
             for channels in feature_channels
         )
         self.refine = nn.ModuleList(
-            _ConvNormAct(fusion_channels, fusion_channels) for _ in feature_channels
+            _ConvNormAct(fusion_channels, fusion_channels, spatial_padding=spatial_padding)
+            for _ in feature_channels
         )
 
     def forward(self, features: list[Tensor]) -> Tensor:
@@ -200,10 +241,14 @@ class CleanSignalFeatureAdapter(nn.Module):
 class CleanSignalTwoHeadDecoder(nn.Module):
     """Shared decoder with independent coarse and signed-detail heads."""
 
-    def __init__(self, feature_channels: tuple[int, ...], fusion_channels: int) -> None:
+    def __init__(self, feature_channels: tuple[int, ...], fusion_channels: int, *, spatial_padding: str) -> None:
         super().__init__()
-        self.adapter = CleanSignalFeatureAdapter(feature_channels, fusion_channels)
-        self.refine = _ConvNormAct(fusion_channels, fusion_channels)
+        self.adapter = CleanSignalFeatureAdapter(
+            feature_channels,
+            fusion_channels,
+            spatial_padding=spatial_padding,
+        )
+        self.refine = _ConvNormAct(fusion_channels, fusion_channels, spatial_padding=spatial_padding)
         self.coarse_head = nn.Conv2d(fusion_channels, 1, kernel_size=1)
         self.detail_head = nn.Conv2d(fusion_channels, 1, kernel_size=1)
 
@@ -221,7 +266,13 @@ class CleanSignalTwoHeadDecoder(nn.Module):
 class CleanSignalModel(nn.Module):
     """Candidate architecture under the shared four-channel coarse/detail contract."""
 
-    def __init__(self, architecture: CleanSignalArchitecture, *, profile: str = "tiny") -> None:
+    def __init__(
+        self,
+        architecture: CleanSignalArchitecture,
+        *,
+        profile: str = "tiny",
+        spatial_padding: str = DEFAULT_SPATIAL_PADDING_POLICY,
+    ) -> None:
         super().__init__()
         if architecture not in CLEAN_SIGNAL_ARCHITECTURES:
             raise CleanSignalModelError(
@@ -229,23 +280,29 @@ class CleanSignalModel(nn.Module):
             )
         if profile not in {"tiny", "full"}:
             raise CleanSignalModelError(f"unknown clean-signal profile {profile!r}")
+        _torch_padding_mode(spatial_padding)
         channels = (16, 24, 32, 48) if profile == "tiny" else (32, 64, 128, 192)
         fusion_channels = 24 if profile == "tiny" else 64
         if architecture == UNET_LITE_ID:
-            self.encoder = _UnetEncoder(channels)
+            self.encoder = _UnetEncoder(channels, spatial_padding=spatial_padding)
             encoder_kind = "local_unet_encoder"
         elif architecture == PYRAMID_CNN_ID:
-            self.encoder = _PyramidEncoder(channels)
+            self.encoder = _PyramidEncoder(channels, spatial_padding=spatial_padding)
             encoder_kind = "local_pyramid_encoder"
         else:
-            self.encoder = _SegformerEncoder(channels)
+            self.encoder = _SegformerEncoder(channels, spatial_padding=spatial_padding)
             encoder_kind = "local_segformer_encoder"
-        self.decoder = CleanSignalTwoHeadDecoder(channels, fusion_channels)
+        self.decoder = CleanSignalTwoHeadDecoder(
+            channels,
+            fusion_channels,
+            spatial_padding=spatial_padding,
+        )
         self.architecture = architecture
         self.profile = profile
         self.encoder_kind = encoder_kind
         self.feature_channels = channels
         self.fusion_channels = fusion_channels
+        self.spatial_padding = spatial_padding
         # Start the detail branch at zero so the initial prediction is the coarse branch only.
         nn.init.zeros_(self.decoder.detail_head.weight)
         nn.init.zeros_(self.decoder.detail_head.bias)
@@ -265,7 +322,7 @@ class CleanSignalModel(nn.Module):
 
 
 def _model_config(model: CleanSignalModel) -> dict[str, Any]:
-    return {
+    config = {
         "architecture": model.architecture,
         "profile": model.profile,
         "encoder": model.encoder_kind,
@@ -279,6 +336,9 @@ def _model_config(model: CleanSignalModel) -> dict[str, Any]:
         "weights": "random_init",
         "pretrained": False,
     }
+    if model.spatial_padding != LEGACY_SPATIAL_PADDING_POLICY:
+        config["spatial_padding"] = model.spatial_padding
+    return config
 
 
 def model_identity(model: CleanSignalModel) -> dict[str, Any]:
@@ -305,10 +365,11 @@ def build_clean_signal_model(
     architecture: CleanSignalArchitecture,
     *,
     profile: str = "tiny",
+    spatial_padding: str = DEFAULT_SPATIAL_PADDING_POLICY,
 ) -> tuple[CleanSignalModel, dict[str, Any]]:
     """Build one random-initialized clean-signal candidate and its identity."""
 
-    model = CleanSignalModel(architecture, profile=profile)
+    model = CleanSignalModel(architecture, profile=profile, spatial_padding=spatial_padding)
     return model, model_identity(model)
 
 
@@ -325,6 +386,7 @@ def build_clean_signal_model_from_identity(identity: dict[str, Any]) -> tuple[Cl
     model, rebuilt = build_clean_signal_model(
         str(identity.get("architecture", "")),
         profile=str(identity.get("profile", "")),
+        spatial_padding=str(config.get("spatial_padding", LEGACY_SPATIAL_PADDING_POLICY)),
     )
     if rebuilt["config_sha256"] != identity["config_sha256"]:
         raise CleanSignalModelError("model identity configuration does not reconstruct the same model")
@@ -349,8 +411,11 @@ __all__ = [
     "CleanSignalPredictions",
     "CleanSignalTwoHeadDecoder",
     "DETAIL_RESIDUAL_SCALE",
+    "DEFAULT_SPATIAL_PADDING_POLICY",
     "INPUT_CHANNELS",
+    "LEGACY_SPATIAL_PADDING_POLICY",
     "MODEL_IDENTITY_SCHEMA",
+    "REFLECT_SPATIAL_PADDING_POLICY",
     "build_clean_signal_model",
     "build_clean_signal_model_from_identity",
     "identity_json",

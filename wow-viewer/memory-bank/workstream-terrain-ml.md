@@ -188,7 +188,10 @@ weights are explicitly excluded after the prior non-repeatable failed attempt.
   and the pathological bucket regressed `2.81%`, so the explicit cross-tile acceptance scenario
   holds promotion. The checkpoint is diagnostic only and real transfer remains blocked. A new
   prediction-only consumer now exports exact held-out per-row errors and full/cross-tile atlases;
-  the user-run atlas review is the next bounded gate before any training or transfer change.
+  the user-run atlas review identified a constant-field padding artifact: `flat-v00` and
+  `cross_tile_lightning-v01` have nearly identical inputs while the legacy model emits the same
+  ramp for both near-zero targets. New model identities use `reflect-3x3-v1`; the targeted fresh
+  `v2-reflect-padding` full-profile run is the next bounded gate before any transfer change.
 - Overlap handling is explicit: `object_instance_id_256` stores only the visible winner per pixel,
   so fully occluded instances are skipped and recorded rather than treated as positives. Marker
   corpus publication is atomic through `<output>.partial`; a failed build cannot be validated as a

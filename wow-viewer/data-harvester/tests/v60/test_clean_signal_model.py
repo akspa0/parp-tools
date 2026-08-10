@@ -7,6 +7,7 @@ import torch
 
 from harvester.v60.clean_signal_model import (
     CLEAN_SIGNAL_ARCHITECTURES,
+    LEGACY_SPATIAL_PADDING_POLICY,
     CleanSignalModelError,
     build_clean_signal_model,
     build_clean_signal_model_from_identity,
@@ -97,3 +98,33 @@ def test_clean_signal_identity_rejects_tampered_configuration() -> None:
     tampered["config"]["fusion_channels"] = 99
     with pytest.raises(CleanSignalModelError, match="config_sha256"):
         build_clean_signal_model_from_identity(tampered)
+
+
+@pytest.mark.parametrize("architecture", CLEAN_SIGNAL_ARCHITECTURES)
+def test_reflective_padding_preserves_constant_input_fields(architecture: str) -> None:
+    model, identity = build_clean_signal_model(architecture, profile="tiny")
+    assert identity["config"]["spatial_padding"] == "reflect-3x3-v1"
+    model.eval()
+    input_tensor = torch.zeros((1, 4, 256, 256))
+    input_tensor[:, 0] = 0.85
+    input_tensor[:, 3] = 1.0
+    with torch.no_grad():
+        predictions = model(input_tensor)
+    for field in (
+        predictions.coarse_prediction_257,
+        predictions.detail_prediction_257,
+        predictions.height_prediction_257,
+    ):
+        assert float(field.max() - field.min()) < 1e-5
+
+
+def test_legacy_zero_padding_identity_remains_reconstructable() -> None:
+    model, identity = build_clean_signal_model(
+        "pyramid_cnn",
+        profile="tiny",
+        spatial_padding=LEGACY_SPATIAL_PADDING_POLICY,
+    )
+    assert "spatial_padding" not in identity["config"]
+    rebuilt, rebuilt_identity = build_clean_signal_model_from_identity(identity)
+    rebuilt.load_state_dict(model.state_dict())
+    assert rebuilt_identity == identity

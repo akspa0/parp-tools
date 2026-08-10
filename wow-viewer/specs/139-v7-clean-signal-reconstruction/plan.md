@@ -63,6 +63,16 @@ context failure from a signal that is not recoverable from one 256×256 clean ob
 `v60_diagnose_clean_signal_checkpoint.py` command performs prediction only; it does not train or
 admit real transfer. The user-run command is recorded in the quickstart.
 
+## Implementation slice — constant-field stability
+
+The diagnostic atlas showed a concrete model failure rather than an unexplained cross-tile gap:
+`flat-v00` and `cross_tile_lightning-v01` have nearly identical four-channel inputs, but the
+zero-padding checkpoint emits the same large spatial ramp while both targets are effectively flat
+zero. The model now defaults to `reflect-3x3-v1` padding for every spatial 3×3 convolution. A
+constant-input regression test covers all three architectures, and identity reconstruction retains
+legacy zero-padding support for existing checkpoints. The targeted user-run retraining command is
+recorded in the quickstart under a fresh `v2-reflect-padding` output root.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11; existing C# harvest/compositor remains the signal authority.
@@ -142,6 +152,9 @@ wow-viewer/data-harvester/
 5. The loss registry keeps point/gradient parity separate from the v7 structural stack. The first
    structural run excludes adversarial and recovery/object terms, and every enabled or disabled term
    remains available as an independent metric.
+6. Spatially constant clean observations must remain spatially constant through the model; the
+   default `reflect-3x3-v1` padding policy prevents zero-padding boundary information from becoming
+   a learned position prior. Legacy zero-padding identities remain loadable for diagnosis only.
 
 ## Phase 0 — Contract and evidence
 

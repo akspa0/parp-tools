@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-10
 
-**Status**: Phase 5 implementation and complete-family evidence complete; promotion is held on cross-tile family regressions
+**Status**: Phase 5 implementation and complete-family evidence complete; promotion is held pending the reflect-padding confirmation run
 
 **Input**: User description: "Build the old v7 model idea with a modern architecture, guided by
 clean synthetic data and a sane signal set. Remove the WDL-prior dependency so any minimap can be
@@ -56,6 +56,12 @@ The first bounded implementation slice is now present under `data-harvester/src/
   from checkpoint identity, selects the exact recorded held-out rows, writes per-row prediction and
   absolute-error NPZs, and renders full and cross-tile atlases. The user-run diagnostic is the next
   bounded gate; no model change or real transfer follows until its failure mode is understood.
+- The diagnostic atlas identified a constant-field stability failure: `flat-v00` and
+  `cross_tile_lightning-v01` have nearly identical four-channel inputs, while the zero-padding
+  checkpoint emits the same non-flat ramp for both near-zero targets. The model contract now uses
+  versioned `reflect-3x3-v1` padding for new checkpoints; legacy zero-padding identities remain
+  reconstructable for comparison. One fresh full-profile confirmation run is required before any
+  promotion decision changes.
 
 Model adapters and the synthetic corpus builder stay behind this contract gate.
 
