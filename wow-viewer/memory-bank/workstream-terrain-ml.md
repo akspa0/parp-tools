@@ -172,10 +172,11 @@ weights are explicitly excluded after the prior non-repeatable failed attempt.
   the current terrain experiment. The failed marker result is preserved only as a negative record.
 - The old v7 13-channel contract is historical reference only. Its structural loss stack is
   transferable guidance; its WDL trestle and answer-side channels are explicitly rejected.
-- Spec 139 Phase 2 foundational contracts are implemented: four-channel image-only observation
-  packing/gates, deterministic range-floor plus box9 coarse/detail targets, NPZ/hash/split/
-  recomposition validation, and a fail-closed validator CLI. Focused proof is 15 new tests; full
-  `tests/v60` passes 55 tests. Model adapters, synthetic corpus builder, loss matrix, real
+- Spec 139 Phase 2 and the Phase 3 model contract are implemented: four-channel image-only
+  observation packing/gates, deterministic range-floor plus box9 coarse/detail targets,
+  NPZ/hash/split/recomposition validation, fail-closed validator CLI, and local random-initialized
+  `pyramid_cnn`/`segformer_b0`/`unet_lite_v2` coarse/detail adapters. Focused proof is 23 new
+  tests; full `tests/v60` passes 63 tests. The synthetic corpus builder, loss matrix, real
   transfer, and every corpus/GPU run remain unproven and user-owned where applicable.
 - Overlap handling is explicit: `object_instance_id_256` stores only the visible winner per pixel,
   so fully occluded instances are skipped and recorded rather than treated as positives. Marker

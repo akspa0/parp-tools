@@ -22,12 +22,12 @@
 **Independent test**: A tiny CPU fixture accepts exactly four input channels, emits coarse/detail/
 height outputs, and completes forward/backward without reading forbidden arrays.
 
-- [ ] T010 [P] [US1] Define the shared encoder feature adapter and two-head output contract in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_model.py`.
-- [ ] T011 [US1] Adapt `pyramid_cnn` features to the v7-style coarse/detail decoder in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_model.py`.
-- [ ] T012 [P] [US1] Adapt `segformer_b0` features to the same v7-style coarse/detail decoder in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_model.py`.
-- [ ] T013 [P] [US1] Adapt `unet_lite_v2` as the low-capacity control under the same output contract in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_model.py`.
-- [ ] T014 [US1] Add forward/backward, parameter-count, output-range, and forbidden-input tests in `wow-viewer/data-harvester/tests/v60/test_clean_signal_model.py`.
-- [ ] T015 [US1] Add model identity serialization and checkpoint reconstruction tests in `wow-viewer/data-harvester/tests/v60/test_clean_signal_model.py`.
+- [x] T010 [P] [US1] Define the shared encoder feature adapter and two-head output contract in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_model.py`.
+- [x] T011 [US1] Adapt `pyramid_cnn` features to the v7-style coarse/detail decoder in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_model.py`.
+- [x] T012 [P] [US1] Adapt `segformer_b0` features to the same v7-style coarse/detail decoder in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_model.py`.
+- [x] T013 [P] [US1] Adapt `unet_lite_v2` as the low-capacity control under the same output contract in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_model.py`.
+- [x] T014 [US1] Add forward/backward, parameter-count, output-range, and forbidden-input tests in `wow-viewer/data-harvester/tests/v60/test_clean_signal_model.py`.
+- [x] T015 [US1] Add model identity serialization and checkpoint reconstruction tests in `wow-viewer/data-harvester/tests/v60/test_clean_signal_model.py`.
 
 ## Phase 4: User Story 2 — Synthetic clean observation guidance (P1)
 

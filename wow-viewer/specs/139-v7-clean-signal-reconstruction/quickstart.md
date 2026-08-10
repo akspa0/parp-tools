@@ -12,8 +12,14 @@ Set-Location "I:/parp/parp-tools/wow-viewer/data-harvester"
 uv run --no-cache python -m pytest tests/v60/test_clean_signal_inputs.py tests/v60/test_clean_signal_targets.py tests/v60/test_clean_signal_contract.py -q --basetemp "I:/parp/parp-tools/output/tmp/pytest-v60-clean-signal-user"
 ```
 
-The current proof is 15 passing tests. Use a fresh writable `--basetemp` path on Windows if a
-previous pytest process still owns files in an older temp directory.
+Run the model contract proof separately:
+
+```powershell
+uv run --no-cache python -m pytest tests/v60/test_clean_signal_model.py -q --basetemp "I:/parp/parp-tools/output/tmp/pytest-v60-clean-model-user"
+```
+
+The current combined proof is 23 passing tests. Use a fresh writable `--basetemp` path on Windows
+if a previous pytest process still owns files in an older temp directory.
 
 ## 1. Validate the design inputs
 

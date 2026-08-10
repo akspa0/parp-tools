@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-10
 
-**Status**: Phase 2 foundational contracts implemented; model, corpus builder, and training remain unimplemented
+**Status**: Phase 3 model contract implemented; corpus builder, losses, trainer, and training remain unimplemented
 
 **Input**: User description: "Build the old v7 model idea with a modern architecture, guided by
 clean synthetic data and a sane signal set. Remove the WDL-prior dependency so any minimap can be
@@ -21,8 +21,11 @@ The first bounded implementation slice is now present under `data-harvester/src/
   versioned edge-replicated box low-pass coarse field plus signed detail residual.
 - `clean_signal_corpus.py` validates NPZ shapes, finite/range constraints, array hashes,
   recomposition, source-group leakage, split mode, and forbidden-signal provenance.
+- `clean_signal_model.py` adapts `pyramid_cnn`, `segformer_b0`, and `unet_lite_v2` to one
+  four-channel input and independent coarse/detail heads. Identities are JSON-serializable,
+  hash-bound, random-initialized, and reconstructable without external weights.
 - `v60_validate_clean_signal_corpus.py` is a fail-closed report CLI. CPU-focused contract proof
-  passes: 15 new tests and 55 tests across `tests/v60`. No corpus generation, real-client
+  passes: 23 new tests and 63 tests across `tests/v60`. No corpus generation, real-client
   processing, visual acceptance, or GPU training has run.
 
 Model adapters and the synthetic corpus builder stay behind this contract gate.

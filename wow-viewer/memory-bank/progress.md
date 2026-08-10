@@ -23,6 +23,15 @@ Current state and open work: [activeContext.md](activeContext.md).
   basetemp. Changed-file Ruff and py_compile passed. Full-folder Ruff still reports unrelated
   pre-existing findings in `v60/store.py`. No corpus generation or GPU work was launched.
 
+## 2026-08-10 — Spec 139 clean-signal model contract
+
+- Added `clean_signal_model.py` with one shared four-channel feature adapter and independent
+  coarse/detail heads for local `pyramid_cnn`, `segformer_b0`, and `unet_lite_v2` candidates.
+- Outputs are finite coarse relief, signed detail residual, and clamped recomposed `height_257`;
+  the detail head starts at zero for a coarse-only initial prediction.
+- Added JSON identity/config hashing and reconstruction tests; no external or pretrained weights
+  are loaded. Evidence: 8 model tests passed, with full v60 verification pending this slice.
+
 ## 2026-08-10 — reset v60 to terrain-only learning
 
 - Parked object-sieve and object-marker work after the user-run marker experiment failed identity

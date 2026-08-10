@@ -11,6 +11,15 @@ contract. The model will consume only a versioned albedo-normalized observation 
 exact synthetic height supervision, compare the existing pyramid CNN/SegFormer/U-Net candidates,
 and transfer only after the real albedo gate accepts a tiny 0.x/1.x sample.
 
+## Implementation checkpoint — 2026-08-10
+
+Phase 2 foundational contracts and Phase 3 model contracts are implemented. The clean model slice
+uses local random-initialized encoders for `pyramid_cnn`, `segformer_b0`, and `unet_lite_v2`, one
+shared feature adapter, independent coarse/detail heads, and a clamped recomposed height output.
+The model identity records its input/output schemas, architecture, profile, parameter count, and
+configuration hash; reconstruction tests load the saved state into a rebuilt identity. The next
+slice is the synthetic corpus packaging/builder, not a user-run training command.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11; existing C# harvest/compositor remains the signal authority.

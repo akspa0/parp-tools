@@ -29,6 +29,11 @@ floor of `1.0`, followed by `box9-edge-replicate-v1`. The stored detail is exact
 `relative_height_257 - coarse_relief_257` within the published float tolerance; it is not an
 inference input.
 
+The model identity uses `v7-clean-signal-model-identity-v1` and binds architecture, profile,
+feature widths, input/output schemas, detail scale, random-initialized status, parameter count,
+and `config_sha256`. A checkpoint may be reconstructed only when the identity hash and parameter
+count match the rebuilt model. No external or pretrained weights are admitted in this phase.
+
 Corpus manifests use `v7-clean-signal-corpus-v1`. Each row stores the seven named arrays, SHA-256
 hashes, source kind/group, split, confidence/gate status, observation provenance, and an explicit
 empty forbidden-signal list.
