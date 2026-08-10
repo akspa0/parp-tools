@@ -8,6 +8,16 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 ADT M2 doodad chunk partition
+
+- Added deterministic spatial-bucket metadata to the opt-in scene-graph object adapter and
+  mounted resident, non-skybox ADT M2 placements as map → tile → chunk → M2 nodes.
+- Chunk bounds union resolved placement bounds; unresolved M2 bounds keep the chunk and ancestors
+  fail open. A rejected chunk skips its ordinary doodad descendants in focused traversal proof.
+- Seven adapter tests pass and the runtime/viewer builds have 0 errors with existing warnings.
+  Legacy traversal, WMO group submission, WMO doodad-set submission, real-client capture, and
+  GPU performance evidence remain unchanged and unproven.
+
 ## 2026-08-10 — Spec 142 graph-side runtime portal traversal
 
 - Added `WorldScenePortalVisibilityEvaluator`: it selects the containing WMO group, traverses

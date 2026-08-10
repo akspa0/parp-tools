@@ -57,6 +57,11 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
   does not change WMO visibility.
 - The opt-in graph traversal evaluates reachable WMO groups through nested portal volumes; uncertain
   camera/portal data returns all groups, and WMO placement collection/submission remains unchanged.
+- Resident non-skybox ADT M2 placements receive deterministic `map -> tile -> chunk -> M2` graph
+  ownership; rejecting a known chunk skips its ordinary doodad descendants, while unknown bounds fail
+  open.
+- External M2 spawns, skyboxes, WMO placements, and WMO-internal doodad-set submission remain
+  outside this chunk-bucket slice.
 - Unknown object bounds keep their bucket and map fail-open.
 - The viewer project compiles with the opt-in `WorldScene.UseHierarchicalSceneTraversal` seam.
 

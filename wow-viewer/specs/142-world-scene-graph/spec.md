@@ -147,6 +147,9 @@ descendants as culled without those descendants being individually tested.
 5. **Given** the same scene rendered with the new traversal and with the current path, **When**
    the two outputs are compared, **Then** the visible content matches within a declared tolerance
    and any difference is attributable to a named, intentional behavior change.
+6. **Given** a resident ADT tile with many ordinary M2 doodad placements, **When** the opt-in graph
+   is built, **Then** placements are grouped beneath deterministic terrain-chunk region nodes so a
+   rejected chunk skips its doodad descendants without changing the legacy path.
 
 ---
 
@@ -325,6 +328,10 @@ submission, GPU/driver wait, and spatial-query time.
   internal complexity.
 - **FR-004**: The world MUST be spatially partitioned so that traversal can reject a region and all
   its contents in one test; the partition MUST NOT assume a dense or contiguous set of tiles.
+- **FR-004A**: The opt-in migration MUST provide a terrain-chunk region level for resident,
+  tile-owned M2 placements when their tile/chunk coordinates are known. External spawns, skybox
+  M2 placements, and WMO-internal doodad sets MUST NOT be silently assigned to this bucket type.
+  Unknown placement bounds MUST keep the chunk and its ancestors non-rejectable.
 - **FR-005**: Traversal MUST evaluate visibility hierarchically, and a rejected node MUST NOT cause
   any descendant to be individually evaluated.
 - **FR-006**: Traversal MUST support a nestable view volume, so that a restricted volume derived
@@ -572,7 +579,10 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
   visited, individually tested, non-rejectable, rejected, skipped-descendant, and visible counts.
 - `WorldSceneGraphObjectAdapter` maps the existing runtime placement lists into stable
   `map -> tile/external bucket -> placement` nodes without reopening format readers or fabricating
-  WMO group bounds. When a client-backed `WmoMeshSummary` is available, its group summaries mount
+  WMO group bounds. Resident non-skybox ADT M2 placements can additionally carry deterministic
+  `Chunk` spatial buckets beneath their tile; child bucket bounds are the union of resolved
+  placement bounds and remain non-rejectable when any member is unresolved. When a client-backed
+  `WmoMeshSummary` is available, its group summaries mount
   as `WmoGroup` children with local bounds, stable IDs, asset keys, and portal-group metadata.
 - `WorldScene` now exposes `UseHierarchicalSceneTraversal` as an opt-in selector. When enabled,
   one conservative graph traversal feeds the existing WMO/MDX visibility collectors; graph
@@ -595,10 +605,15 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
   through bounded child volumes, and returns all graph groups on uncertain data. Opt-in `WorldScene`
   traversal applies this only to nested `WmoGroup` nodes; whole-WMO collection and legacy
   `WmoRenderer` submission remain unchanged.
-- Focused graph/workload/traversal/adapter/portal proof is 29 passing tests; the runtime and viewer
+- The opt-in `WorldScene` adapter now assigns resident, non-skybox ADT M2 placements to stable
+  `map -> tile -> chunk -> M2` buckets using the existing terrain coordinate convention. The graph
+  traversal can reject a chunk before testing its ordinary doodad descendants; external spawns,
+  skyboxes, WMO placements, and WMO doodad-set submission remain unchanged.
+- Focused graph/workload/traversal/adapter/portal proof is 32 passing tests; the runtime and viewer
   projects build with only existing repository warnings.
 
 This is an opt-in integration proof, not a renderer promotion. The legacy `WorldScene` traversal
-remains the default, terrain chunks are not yet mounted, and WMO portal runtime submission remains
-owned by the existing `WmoRenderer` until doorway parity is proven. No FPS/GPU or real-client
+remains the default, and the graph currently mounts object-population chunk buckets rather than
+owning terrain mesh chunk submission. WMO portal runtime submission and WMO-internal doodad-set
+submission remain owned by the existing renderer until parity is proven. No FPS/GPU or real-client
 parity claim exists until the later evidence tasks are run.

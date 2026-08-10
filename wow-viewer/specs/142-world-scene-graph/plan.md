@@ -212,14 +212,26 @@ nodes while preserving whole-WMO collection and legacy `WmoRenderer` submission.
 
 This proves graph traversal mechanics only; it is not doorway parity or a performance result.
 
+## Phase 8A — ADT M2 Doodad Chunk Partition
+
+**Status**: Complete for the bounded opt-in object-population slice on 2026-08-10. Existing
+resident, non-skybox ADT M2 placements now receive deterministic spatial-bucket metadata and
+mount as `map -> tile -> chunk -> M2` nodes. Chunk bounds are unions of resolved placement bounds;
+unknown members keep the chunk and its ancestors non-rejectable. The opt-in traversal can reject a
+chunk before testing its ordinary doodad descendants, while external M2 spawns, skyboxes, WMOs, and
+WMO-internal doodad-set submission remain unchanged.
+
+The focused adapter proof is 7 passing tests and the runtime/viewer builds are clean apart from
+existing repository warnings. This is still not a real-scene performance result.
+
 ## Later Phases (Not Started In This Slice)
 
 - **Phase 9**: Integrate graph portal volumes into runtime WMO submission and prove doorway
   parity with the existing renderer.
 - **Phase 10**: Per-pass visible/non-visible queues, shared animation update ownership, and query
   reuse.
-- **Phase 11**: Incremental terrain/chunk graph migration, synthetic four-scale measurements, and
-  named real-client parity captures.
+- **Phase 11**: Terrain mesh/chunk graph migration beyond the ADT M2 object-population buckets,
+  synthetic four-scale measurements, and named real-client parity captures.
 
 ## Complexity Tracking
 

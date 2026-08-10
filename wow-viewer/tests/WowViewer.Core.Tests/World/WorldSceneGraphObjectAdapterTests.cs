@@ -116,6 +116,102 @@ public sealed class WorldSceneGraphObjectAdapterTests
         Assert.Equal("world/wmo/interior.asset", placementNode.AssetKey);
     }
 
+    [Fact]
+    public void SpatialBucketsNestResidentDoodadsUnderTerrainChunks()
+    {
+        WorldSceneGraphBuildResult result = WorldSceneGraphObjectAdapter.Build(
+        [
+            Placement("m2/a", WorldSceneNodeKind.M2Placement, 3, 4, new Vector3(10f, 0f, 0f)) with
+            {
+                SpatialBucket = new WorldSceneGraphSpatialBucket(WorldSceneNodeKind.Chunk, "02/03")
+            },
+            Placement("m2/b", WorldSceneNodeKind.M2Placement, 3, 4, new Vector3(20f, 0f, 0f)) with
+            {
+                SpatialBucket = new WorldSceneGraphSpatialBucket(WorldSceneNodeKind.Chunk, "02/03")
+            },
+            Placement("m2/c", WorldSceneNodeKind.M2Placement, 3, 4, new Vector3(40f, 0f, 0f)) with
+            {
+                SpatialBucket = new WorldSceneGraphSpatialBucket(WorldSceneNodeKind.Chunk, "02/04")
+            },
+        ]);
+
+        Assert.True(result.Graph.TryGetNode("world/tile/03/04", out WorldSceneNode? tile));
+        Assert.NotNull(tile);
+        Assert.Equal(2, tile!.Children.Count);
+        Assert.All(tile.Children, child => Assert.Equal(WorldSceneNodeKind.Chunk, child.Kind));
+        Assert.Equal(
+            "world/tile/03/04/chunk/02/03",
+            tile.Children[0].Id);
+        Assert.Equal(2, tile.Children[0].Children.Count);
+        Assert.All(tile.Children[0].Children, child => Assert.Equal(WorldSceneNodeKind.M2Placement, child.Kind));
+        Assert.Equal(3, result.Graph.CreateSnapshot().MaxDepth);
+        Assert.Equal(7, result.Graph.CreateSnapshot().NodeCount);
+    }
+
+    [Fact]
+    public void UnknownSpatialBucketBoundsKeepChunkAndAncestorsFailOpen()
+    {
+        WorldSceneGraphObjectPlacement placement = Placement(
+            "m2/unknown",
+            WorldSceneNodeKind.M2Placement,
+            1,
+            2,
+            Vector3.Zero) with
+        {
+            Instance = Placement(
+                "m2/unknown",
+                WorldSceneNodeKind.M2Placement,
+                1,
+                2,
+                Vector3.Zero).Instance with
+            {
+                BoundsResolved = false,
+                BoundsMin = Vector3.Zero,
+                BoundsMax = Vector3.Zero,
+            },
+            SpatialBucket = new WorldSceneGraphSpatialBucket(WorldSceneNodeKind.Chunk, "01/01")
+        };
+
+        WorldSceneGraphBuildResult result = WorldSceneGraphObjectAdapter.Build([placement]);
+
+        Assert.True(result.Graph.TryGetNode("world/tile/01/02/chunk/01/01", out WorldSceneNode? chunk));
+        Assert.NotNull(chunk);
+        Assert.False(chunk!.CanRejectSubtree);
+        Assert.False(result.Graph.Root.CanRejectSubtree);
+    }
+
+    [Fact]
+    public void RejectedTerrainChunkSkipsItsDoodadDescendants()
+    {
+        WorldSceneGraphBuildResult result = WorldSceneGraphObjectAdapter.Build(
+        [
+            Placement("m2/a", WorldSceneNodeKind.M2Placement, 3, 4, new Vector3(10f, 0f, 0f)) with
+            {
+                SpatialBucket = new WorldSceneGraphSpatialBucket(WorldSceneNodeKind.Chunk, "02/03")
+            },
+            Placement("m2/b", WorldSceneNodeKind.M2Placement, 3, 4, new Vector3(20f, 0f, 0f)) with
+            {
+                SpatialBucket = new WorldSceneGraphSpatialBucket(WorldSceneNodeKind.Chunk, "02/03")
+            },
+        ]);
+        HashSet<string> testedIds = new(StringComparer.Ordinal);
+
+        WorldSceneTraversalResult traversal = WorldSceneTraversal.Traverse(
+            result.Graph,
+            node =>
+            {
+                testedIds.Add(node.Id);
+                return !node.Id.Equals("world/tile/03/04/chunk/02/03", StringComparison.Ordinal);
+            });
+
+        Assert.DoesNotContain("m2/a", testedIds);
+        Assert.DoesNotContain("m2/b", testedIds);
+        Assert.Contains(
+            traversal.RejectedNodes,
+            node => node.Id == "world/tile/03/04/chunk/02/03");
+        Assert.Equal(2, traversal.Diagnostics.SkippedDescendantCount);
+    }
+
     private static WorldSceneGraphObjectPlacement Placement(
         string id,
         WorldSceneNodeKind kind,

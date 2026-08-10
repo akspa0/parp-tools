@@ -8099,8 +8099,33 @@ public class WorldScene : ISceneRenderer
                 IsQueryable: true,
                 RequiresUpdate: requiresUpdate,
                 IsSkybox: isSkybox,
-                Children: childFactory?.Invoke(id, instance)));
+                Children: childFactory?.Invoke(id, instance),
+                SpatialBucket: GetSceneGraphSpatialBucket(kind, isSkybox, isExternal, tileKey, instance)));
         }
+    }
+
+    private static WorldSceneGraphSpatialBucket? GetSceneGraphSpatialBucket(
+        WorldSceneNodeKind kind,
+        bool isSkybox,
+        bool isExternal,
+        (int tileX, int tileY)? tileKey,
+        in ObjectInstance instance)
+    {
+        if (kind != WorldSceneNodeKind.M2Placement
+            || isSkybox
+            || isExternal
+            || !tileKey.HasValue
+            || !instance.HasTileCoordinate
+            || !TryGetSceneObjectChunkKey(instance, out (int tileX, int tileY, int chunkX, int chunkY) chunkKey)
+            || chunkKey.tileX != tileKey.Value.tileX
+            || chunkKey.tileY != tileKey.Value.tileY)
+        {
+            return null;
+        }
+
+        return new WorldSceneGraphSpatialBucket(
+            WorldSceneNodeKind.Chunk,
+            $"{chunkKey.chunkX:D2}/{chunkKey.chunkY:D2}");
     }
 
     private IReadOnlyList<WorldSceneGraphChildNode>? BuildWmoSceneGraphChildren(

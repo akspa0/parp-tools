@@ -12,7 +12,7 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 |---|---|---|
 | PM4 decode | **active** — versioning formatted; placement solved; scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
 | Terrain / viewer runtime | **active** — phased dual-map overlay (135), M2 doodad batching (136), phased minimap & teleport (137) landed; 4.x renderer evolution (138) is an evidence-gated epic note | [activeContext.md](activeContext.md) |
-| World scene graph / renderer performance | **active** — Spec 142 graph, conservative traversal, opt-in `WorldScene` object adapter/selector, nested WMO groups, WMO read-model portal adapter, bounded portal view volumes, and graph-side runtime portal traversal implemented; WMO submission parity, pass/query reuse, and stage evidence remain pending | [Spec 142](../specs/142-world-scene-graph/spec.md) |
+| World scene graph / renderer performance | **active** — Spec 142 graph, conservative traversal, opt-in `WorldScene` object adapter/selector, ADT M2 doodads partitioned beneath terrain chunk buckets, nested WMO groups, WMO read-model portal adapter, bounded portal view volumes, and graph-side runtime portal traversal implemented; WMO submission parity, pass/query reuse, terrain-mesh ownership, and stage evidence remain pending | [Spec 142](../specs/142-world-scene-graph/spec.md) |
 | Terrain / minimap ML | **active** — Spec 139 clean-signal reconstruction, Spec 140 paste/fractal/tileset evidence, and Spec 141 external-method translation; object identity remains parked | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
 | Tile archaeology | **active** — old v50 synthetic minimap output needs fresh regeneration after renderer fixes; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
 
@@ -44,11 +44,13 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
   `SceneGraphPortalAdapters` during opt-in graph rebuilds; the current WMO visibility path is
   unchanged. `WorldScenePortalVisibilityEvaluator` now walks reachable groups through nested
   volumes and applies only to opt-in `WmoGroup` graph traversal, failing open to all groups when
-  uncertain. Focused proof is 29 tests.
-- The adapter does not invent missing group bounds, and terrain chunks are not mounted yet. The
-  existing `WmoRenderer` still owns WMO group submission. Heavy real-scene captures and GPU
-  measurements remain user-run; next gaps are runtime WMO submission/doorway parity, pass/query
-  ownership, terrain/chunk mounting, and stage-level parity evidence.
+  uncertain. Focused proof is 32 tests.
+- The adapter does not invent missing group bounds. Resident non-skybox ADT M2 placements now mount
+  beneath deterministic terrain chunk buckets in the opt-in graph; unresolved bounds keep the chunk
+  fail-open. This is object-population partitioning, not terrain mesh ownership. The existing
+  `WmoRenderer` still owns WMO group and WMO-internal doodad-set submission. Heavy real-scene
+  captures and GPU measurements remain user-run; next gaps are runtime WMO submission/doorway
+  parity, pass/query ownership, terrain-mesh mounting, and stage-level parity evidence.
 
 ## Now — Viewer Runtime & Terrain Improvements (Specs 135, 136, 137)
 

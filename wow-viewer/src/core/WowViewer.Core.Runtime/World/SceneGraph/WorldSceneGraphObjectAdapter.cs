@@ -16,7 +16,12 @@ public readonly record struct WorldSceneGraphObjectPlacement(
     bool IsQueryable = true,
     bool RequiresUpdate = false,
     bool IsSkybox = false,
-    IReadOnlyList<WorldSceneGraphChildNode>? Children = null);
+    IReadOnlyList<WorldSceneGraphChildNode>? Children = null,
+    WorldSceneGraphSpatialBucket? SpatialBucket = null);
+
+public readonly record struct WorldSceneGraphSpatialBucket(
+    WorldSceneNodeKind Kind,
+    string Key);
 
 public readonly record struct WorldSceneGraphChildNode(
     string Id,
@@ -111,55 +116,7 @@ public static class WorldSceneGraphObjectAdapter
         WorldSceneGraph graph = new(root);
 
         foreach (SceneBucket bucket in buckets)
-        {
-            WorldSceneNode bucketNode = new(
-                bucket.Id,
-                bucket.Kind,
-                Matrix4x4.Identity,
-                bucket.BoundsMin,
-                bucket.BoundsMax,
-                boundsKnown: bucket.BoundsKnown,
-                isQueryable: true);
-            graph.Attach(rootId, bucketNode);
-
-            foreach (WorldSceneGraphObjectPlacement placement in bucket.Placements)
-            {
-                WorldSceneNode objectNode = new(
-                    placement.Id,
-                    placement.Kind,
-                    placement.Instance.Transform,
-                    placement.Instance.LocalBoundsMin,
-                    placement.Instance.LocalBoundsMax,
-                    boundsKnown: placement.Instance.BoundsResolved,
-                    isRenderable: true,
-                    isQueryable: placement.IsQueryable,
-                    requiresUpdate: placement.RequiresUpdate,
-                    assetKey: placement.Instance.ModelKey,
-                    renderPassMask: placement.RenderPassMask);
-                graph.Attach(bucket.Id, objectNode);
-
-                if (placement.Children is null)
-                    continue;
-
-                foreach (WorldSceneGraphChildNode child in placement.Children)
-                {
-                    WorldSceneNode childNode = new(
-                        child.Id,
-                        child.Kind,
-                        child.LocalTransform,
-                        child.LocalBoundsMin,
-                        child.LocalBoundsMax,
-                        boundsKnown: child.BoundsKnown,
-                        isRenderable: child.IsRenderable,
-                        isQueryable: child.IsQueryable,
-                        requiresUpdate: child.RequiresUpdate,
-                        assetKey: child.AssetKey,
-                        renderPassMask: child.RenderPassMask,
-                        portalGroup: child.PortalGroup);
-                    graph.Attach(objectNode.Id, childNode);
-                }
-            }
-        }
+            AttachBucket(graph, rootId, bucket);
 
         graph.ValidateInvariants();
         return new WorldSceneGraphBuildResult(
@@ -193,7 +150,39 @@ public static class WorldSceneGraphObjectAdapter
             WorldSceneNodeKind kind = group[0].IsExternal
                 ? WorldSceneNodeKind.SyntheticProxy
                 : WorldSceneNodeKind.Tile;
-            buckets.Add(new SceneBucket(bucketId, kind, boundsKnown, boundsMin, boundsMax, group));
+
+            List<WorldSceneGraphObjectPlacement> directPlacements = group
+                .Where(placement => placement.SpatialBucket is null)
+                .ToList();
+            List<SceneBucket> childBuckets = [];
+            foreach (IGrouping<(WorldSceneNodeKind Kind, string Key), WorldSceneGraphObjectPlacement> childGroup
+                in group
+                    .Where(placement => placement.SpatialBucket is not null)
+                    .GroupBy(placement =>
+                    {
+                        WorldSceneGraphSpatialBucket spatialBucket = placement.SpatialBucket!.Value;
+                        return (spatialBucket.Kind, spatialBucket.Key.Trim());
+                    })
+                    .OrderBy(pair => pair.Key.Kind)
+                    .ThenBy(pair => pair.Key.Item2, StringComparer.Ordinal))
+            {
+                List<WorldSceneGraphObjectPlacement> childPlacements = childGroup.ToList();
+                bool childBoundsKnown = childPlacements.All(placement => placement.Instance.BoundsResolved);
+                (Vector3 childBoundsMin, Vector3 childBoundsMax) = childBoundsKnown
+                    ? UnionBounds(childPlacements.Select(placement => (placement.Instance.BoundsMin, placement.Instance.BoundsMax)))
+                    : (Vector3.Zero, Vector3.Zero);
+                string childId = $"{bucketId}/{GetKindToken(childGroup.Key.Kind)}/{childGroup.Key.Item2.Trim('/')}";
+                childBuckets.Add(new SceneBucket(
+                    childId,
+                    childGroup.Key.Kind,
+                    childBoundsKnown,
+                    childBoundsMin,
+                    childBoundsMax,
+                    childPlacements,
+                    []));
+            }
+
+            buckets.Add(new SceneBucket(bucketId, kind, boundsKnown, boundsMin, boundsMax, directPlacements, childBuckets));
         }
 
         return buckets;
@@ -205,6 +194,66 @@ public static class WorldSceneGraphObjectAdapter
             return $"world/external/{GetKindToken(placement.Kind)}";
 
         return $"world/tile/{placement.Instance.TileX:D2}/{placement.Instance.TileY:D2}";
+    }
+
+    private static void AttachBucket(WorldSceneGraph graph, string parentId, SceneBucket bucket)
+    {
+        WorldSceneNode bucketNode = new(
+            bucket.Id,
+            bucket.Kind,
+            Matrix4x4.Identity,
+            bucket.BoundsMin,
+            bucket.BoundsMax,
+            boundsKnown: bucket.BoundsKnown,
+            isQueryable: true);
+        graph.Attach(parentId, bucketNode);
+
+        foreach (SceneBucket childBucket in bucket.Children)
+            AttachBucket(graph, bucket.Id, childBucket);
+
+        foreach (WorldSceneGraphObjectPlacement placement in bucket.Placements)
+            AttachPlacement(graph, bucket.Id, placement);
+    }
+
+    private static void AttachPlacement(
+        WorldSceneGraph graph,
+        string parentId,
+        WorldSceneGraphObjectPlacement placement)
+    {
+        WorldSceneNode objectNode = new(
+            placement.Id,
+            placement.Kind,
+            placement.Instance.Transform,
+            placement.Instance.LocalBoundsMin,
+            placement.Instance.LocalBoundsMax,
+            boundsKnown: placement.Instance.BoundsResolved,
+            isRenderable: true,
+            isQueryable: placement.IsQueryable,
+            requiresUpdate: placement.RequiresUpdate,
+            assetKey: placement.Instance.ModelKey,
+            renderPassMask: placement.RenderPassMask);
+        graph.Attach(parentId, objectNode);
+
+        if (placement.Children is null)
+            return;
+
+        foreach (WorldSceneGraphChildNode child in placement.Children)
+        {
+            WorldSceneNode childNode = new(
+                child.Id,
+                child.Kind,
+                child.LocalTransform,
+                child.LocalBoundsMin,
+                child.LocalBoundsMax,
+                boundsKnown: child.BoundsKnown,
+                isRenderable: child.IsRenderable,
+                isQueryable: child.IsQueryable,
+                requiresUpdate: child.RequiresUpdate,
+                assetKey: child.AssetKey,
+                renderPassMask: child.RenderPassMask,
+                portalGroup: child.PortalGroup);
+            graph.Attach(objectNode.Id, childNode);
+        }
     }
 
     private static string GetKindToken(WorldSceneNodeKind kind)
@@ -228,6 +277,26 @@ public static class WorldSceneGraphObjectAdapter
     private static void ValidatePlacement(WorldSceneGraphObjectPlacement placement)
     {
         ValidateVector(placement.Instance.Transform.Translation, $"placement '{placement.Id}' translation");
+        if (placement.SpatialBucket is WorldSceneGraphSpatialBucket spatialBucket)
+        {
+            if (spatialBucket.Kind is WorldSceneNodeKind.Map
+                or WorldSceneNodeKind.Tile
+                or WorldSceneNodeKind.SyntheticProxy)
+            {
+                throw new ArgumentException(
+                    $"Placement '{placement.Id}' uses invalid spatial bucket kind '{spatialBucket.Kind}'.",
+                    nameof(placement));
+            }
+
+            if (string.IsNullOrWhiteSpace(spatialBucket.Key)
+                || spatialBucket.Key.Contains('\\')
+                || spatialBucket.Key.Contains("..", StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    $"Placement '{placement.Id}' uses an invalid spatial bucket key.",
+                    nameof(placement));
+            }
+        }
         if (placement.Instance.BoundsResolved)
         {
             ValidateBounds(placement.Instance.LocalBoundsMin, placement.Instance.LocalBoundsMax, $"placement '{placement.Id}' local bounds");
@@ -270,5 +339,6 @@ public static class WorldSceneGraphObjectAdapter
         bool BoundsKnown,
         Vector3 BoundsMin,
         Vector3 BoundsMax,
-        IReadOnlyList<WorldSceneGraphObjectPlacement> Placements);
+        IReadOnlyList<WorldSceneGraphObjectPlacement> Placements,
+        IReadOnlyList<SceneBucket> Children);
 }
