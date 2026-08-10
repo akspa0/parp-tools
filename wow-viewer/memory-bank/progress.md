@@ -8,6 +8,18 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 139 complete-family confirmation result
+
+- The user-run full-profile `pyramid_cnn` + `v7_structural_v1` CUDA gate completed at
+  `output/datasets/v60/v7-clean-signal-runs/pyramid-full-structural-complete-v1` with 76 train
+  rows, 32 held-out rows, and best epoch 37.
+- Best final-height MAE was `0.173904` versus the `0.191047` tile-mean baseline, an `8.97%`
+  aggregate improvement. The family report still rejects promotion: `cross_tile_burn` regressed
+  `15.52%` and `cross_tile_lightning` regressed `229.79%`; the pathological bucket regressed
+  `2.81%`.
+- This satisfies the user-run execution evidence but not the generalized-winner acceptance scenario.
+  The checkpoint is diagnostic; real transfer remains blocked. Codex launched no training.
+
 ## 2026-08-10 — Spec 139 clean-signal foundational contracts
 
 - Implemented the v60 four-channel clean observation package: luma, deterministic x/y gradients,

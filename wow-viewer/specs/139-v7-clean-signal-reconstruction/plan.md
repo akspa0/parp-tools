@@ -37,9 +37,23 @@ Structural guidance improved every architecture, but the same-architecture lift 
 pyramid, 4.23% for SegFormer, and 7.72% for U-Net, below the 10% success threshold. This justifies
 a larger-capacity confirmation run while keeping promotion gated on the complete-family holdout.
 
-The next user-owned command is one fresh full-profile `pyramid_cnn` structural cell over all 76
-complete-family training rows and 32 held-out rows. Its dry run was verified locally; the plan
-reports 1,579,586 parameters and no forbidden signals. The command is recorded in the quickstart.
+That confirmation is now complete. It used one fresh full-profile `pyramid_cnn` structural cell over
+all 76 complete-family training rows and 32 held-out rows. The plan reported 1,579,586 parameters
+and no forbidden signals before the user-owned CUDA run.
+
+## User-run checkpoint — 2026-08-10 (complete-family result)
+
+The completed run is recorded under
+`output/datasets/v60/v7-clean-signal-runs/pyramid-full-structural-complete-v1`. At best epoch 37,
+`pyramid_cnn/v7_structural_v1` reached final-height MAE `0.173904` against the complete-family
+tile-mean baseline `0.191047`, an `8.97%` aggregate improvement. The run used CUDA, 76 train rows,
+and 32 held-out rows; best and last checkpoints plus the JSON report exist on disk.
+
+The promotion gate is held: `cross_tile_burn` regressed `15.52%`, `cross_tile_lightning` regressed
+`229.79%`, and the pathological bucket regressed `2.81%`. The aggregate SC-004 improvement clears
+the 5% floor, but the cross-tile family regressions trigger the explicit no-promotion acceptance
+scenario. Real transfer remains blocked; this checkpoint is diagnostic evidence for the next
+bounded failure-analysis slice.
 
 ## Technical Context
 
@@ -153,6 +167,7 @@ wow-viewer/data-harvester/
 ## Constitution Re-check
 
 The design remains within the constitution: it removes the old WDL dependency, keeps all signals
-visible and ablatable, uses project-owned data, and leaves heavy execution to the user. The only
-remaining gate is implementation validation of the exact four-channel artifact and target
-decomposition before any training command is authorized.
+visible and ablatable, uses project-owned data, and leaves heavy execution to the user. The
+four-channel artifact and target decomposition are validated, and the user-owned complete-family
+run is recorded. The remaining gate is a promotion decision after cross-tile failure analysis;
+real transfer is not authorized by the aggregate improvement alone.

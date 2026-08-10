@@ -56,7 +56,7 @@ per-component and per-family metrics recorded under one report schema.
 - [x] T023 [US3] Implement the shared trainer, evaluator, best-checkpoint selection, and per-signal report in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_train.py`.
 - [x] T024 [US3] Add the PowerShell-ready dry-run/user-run CLI and fresh-output refusal in `wow-viewer/data-harvester/scripts/v60_train_clean_signal.py`.
 - [x] T025 [US3] Add report tests proving identical splits across architectures/losses and independent family/bucket metrics in `wow-viewer/data-harvester/tests/v60/test_clean_signal_train.py`.
-- [ ] T026 [US3] **USER RUNS** the within-family parity/structural matrix, then the complete-family gate for the best cells; the within-family matrix is recorded, and the full-profile `pyramid_cnn` structural complete-family gate remains user-owned; Codex does not launch training.
+- [x] T026 [US3] **USER RUNS** the within-family parity/structural matrix, then the complete-family gate for the best cells; both user-owned runs are recorded. The full-profile gate is held from promotion because cross-tile families regress; Codex did not launch training.
 
 ## Phase 6: User Story 4 — Real albedo-normalized transfer (P2)
 
@@ -78,7 +78,7 @@ accepted rows and refuses rejected/quarantined rows.
 - [ ] T033 [P] Add schema/report validation fixtures in `wow-viewer/data-harvester/tests/v60/test_clean_signal_reports.py`.
 - [ ] T034 [P] Add CLI help/dry-run smoke tests in `wow-viewer/data-harvester/tests/v60/test_clean_signal_cli.py`.
 - [ ] T035 Run focused `ruff`, `py_compile`, and v60 pytest checks and record results in `wow-viewer/specs/139-v7-clean-signal-reconstruction/quickstart.md`.
-- [ ] T036 Update `wow-viewer/memory-bank/activeContext.md`, `wow-viewer/memory-bank/progress.md`, and `wow-viewer/memory-bank/workstream-terrain-ml.md` with the implemented contract and promotion state.
+- [x] T036 Update `wow-viewer/memory-bank/activeContext.md`, `wow-viewer/memory-bank/progress.md`, and `wow-viewer/memory-bank/workstream-terrain-ml.md` with the implemented contract and promotion state.
 
 ## Dependencies
 

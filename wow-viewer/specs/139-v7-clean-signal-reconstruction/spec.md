@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-10
 
-**Status**: Phase 5 implementation and within-family matrix complete; full-profile complete-family gate remains user-owned
+**Status**: Phase 5 implementation and complete-family evidence complete; promotion is held on cross-tile family regressions
 
 **Input**: User description: "Build the old v7 model idea with a modern architecture, guided by
 clean synthetic data and a sane signal set. Remove the WDL-prior dependency so any minimap can be
@@ -44,8 +44,14 @@ The first bounded implementation slice is now present under `data-harvester/src/
   cell is `pyramid_cnn` + `v7_structural_v1` at final-height MAE `0.145868`; its same-architecture
   parity control is `0.150999`, and the tile-mean baseline is `0.181995`. This is a strong absolute
   baseline result, but the structural lift is below the 10% criterion, so it is not yet promoted.
-- CPU-focused contract proof passes: 36 new tests and 76 tests across `tests/v60`. The full-profile
-  complete-family confirmation plan is prepared; no additional run was launched by Codex.
+- The user then completed the full-profile `pyramid_cnn` + `v7_structural_v1` complete-family run
+  at `pyramid-full-structural-complete-v1`: best epoch 37, final-height MAE `0.173904` versus the
+  `0.191047` tile-mean baseline (`8.97%` overall improvement), with 76 train and 32 held-out rows
+  on CUDA. `cross_tile_burn` regressed `15.52%` and `cross_tile_lightning` regressed `229.79%`;
+  the pathological bucket regressed `2.81%`. Under the explicit cross-tile acceptance scenario,
+  the checkpoint remains diagnostic and is not promoted; real transfer stays blocked.
+- CPU-focused contract proof passes: 36 new tests and 76 tests across `tests/v60`. Codex did not
+  launch the user-owned CUDA run.
 
 Model adapters and the synthetic corpus builder stay behind this contract gate.
 
