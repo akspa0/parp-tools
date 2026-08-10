@@ -62,6 +62,8 @@ per-component and per-family metrics recorded under one report schema.
 - [x] T026C [US3] Replace zero-padded spatial 3×3 convolutions with versioned reflective padding by default, preserve legacy checkpoint reconstruction, and add constant-field stability tests.
 - [x] T026D [US3] **USER RUNS** one fresh full-profile `pyramid_cnn` structural retraining with `reflect-3x3-v1`, then runs the checkpoint diagnostic before any further architecture or transfer change. The ramp failure is fixed, but cross-tile family promotion remains held.
 - [ ] T026E [US3] **USER RUNS** one full-profile `reflect-3x3-v1` within-family confirmation using all 81 training rows and 27 held-out variants to test cross-tile learnability with family coverage.
+- [x] T026F [US3] Add the source-preserving `real_terrain_synthetic` bridge corpus builder and dry-run CLI from harvested `terrain_shadow_256` plus `height_257` NPZ rows; authored RGB is not admitted by this task.
+- [x] T026G [US3] Add image-only checkpoint evaluation with source-kind filtering, per-row predictions, baseline-relative metrics, atlas output, and an explicit forbidden-read audit for prepared bridge corpora.
 
 ## Phase 6: User Story 4 — Real albedo-normalized transfer (P2)
 
@@ -95,6 +97,7 @@ T001-T009 foundational contracts
     -> T026A-T026B checkpoint failure diagnosis
     -> T026C-T026D constant-field stability correction
     -> T026E within-family cross-tile learnability confirmation
+    -> T026F-T026G real-terrain synthetic bridge diagnostic
     -> T027-T032 real transfer
     -> T033-T036 polish and continuity
 ```

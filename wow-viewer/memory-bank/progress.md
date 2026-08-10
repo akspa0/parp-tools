@@ -8,6 +8,19 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 139 real-terrain synthetic bridge diagnostic
+
+- Added the source-preserving `real_terrain_synthetic` bridge builder and dry-run CLI. It converts
+  harvested `terrain_shadow_256` plus independent `height_257` NPZ rows into the v60 four-channel
+  corpus without mutating source files; the authored RGB route remains separate.
+- Added image-only checkpoint evaluation with source-kind filtering, per-row predictions, atlas,
+  baseline-relative metrics, and an explicit empty forbidden-read audit. Full v60 verification is
+  84 passing tests; changed-file Ruff and py_compile pass.
+- Materialized the existing 16-row Alpha/Azeroth bridge and evaluated the reflect-padding
+  checkpoint: MAE `0.323879` versus `0.157124` tile-mean baseline (`-106.13%`). This is a real
+  domain failure diagnostic, not a promotion result. More map/build rows and the user-owned real
+  bridge training probe are next; authored minimap RGB still requires albedo normalization.
+
 ## 2026-08-10 — Spec 139 reflect-padding confirmation result
 
 - The user-run `pyramid-full-structural-complete-v2-reflect-padding` checkpoint completed on CUDA

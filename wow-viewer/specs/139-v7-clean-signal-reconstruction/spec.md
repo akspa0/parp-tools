@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-10
 
-**Status**: Phase 5 implementation and complete-family evidence complete; promotion is held pending within-family cross-tile learnability evidence
+**Status**: Phase 5 implementation and real-terrain bridge diagnostic complete; promotion and authored-real transfer remain held pending within-family and albedo-gate evidence
 
 **Input**: User description: "Build the old v7 model idea with a modern architecture, guided by
 clean synthetic data and a sane signal set. Remove the WDL-prior dependency so any minimap can be
@@ -67,6 +67,11 @@ The first bounded implementation slice is now present under `data-harvester/src/
   `cross_tile_lightning` remains `61.17%` below its baseline and `cross_tile_burn` remains `30.15%`
   below baseline. The next evidence is a full-profile within-family run with all 81 available
   training rows; real transfer remains blocked.
+- Added a separate `real_terrain_synthetic` bridge corpus and image-only checkpoint evaluator.
+  The first existing 16-row Alpha/Azeroth bridge scored MAE `0.323879` versus a `0.157124`
+  tile-mean baseline (`-106.13%`) with the reflect-padding checkpoint. This is real-domain
+  diagnostic evidence only: the bridge uses harvested terrain geometry and synthesized clean
+  shading, while authored minimap RGB still requires a versioned albedo-normalization gate.
 
 Model adapters and the synthetic corpus builder stay behind this contract gate.
 

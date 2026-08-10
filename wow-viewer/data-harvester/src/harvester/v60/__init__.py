@@ -42,6 +42,11 @@ from harvester.v60.clean_signal_train import (
     select_clean_signal_training_rows,
     train_clean_signal_model,
 )
+from harvester.v60.clean_signal_transfer import evaluate_clean_signal_checkpoint
+from harvester.v60.real_terrain_synthetic import (
+    build_real_terrain_synthetic_corpus,
+    real_terrain_synthetic_build_plan,
+)
 
 __all__ = [
     "CleanObservationPackage",
@@ -66,6 +71,9 @@ __all__ = [
     "evaluate_clean_signal_model",
     "select_clean_signal_training_rows",
     "train_clean_signal_model",
+    "build_real_terrain_synthetic_corpus",
+    "real_terrain_synthetic_build_plan",
+    "evaluate_clean_signal_checkpoint",
     "recompose_height",
     "validate_clean_observation",
     "validate_clean_signal_corpus",

@@ -91,6 +91,22 @@ cross-tile patterns are learnable once the model sees examples from those famili
 within-family but fail complete-family, this is a family-coverage/generalization limit. If they
 still fail, the clean observation does not expose enough information for those targets.
 
+## Implementation slice — real-terrain synthetic bridge
+
+The existing v50/v60 real/synthetic pair store is not a clean v60 training corpus: its synthetic
+side is a legacy flat fake maptexture, and its authored side has not passed albedo normalization.
+The bounded bridge therefore consumes only the harvested `terrain_shadow_256` plus independently
+extracted `height_257` from real-client terrain NPZs and labels the rows
+`real_terrain_synthetic`. `v60_build_real_terrain_synthetic_corpus.py` publishes a normal
+four-channel corpus without mutating source NPZs; `v60_evaluate_clean_signal_checkpoint.py` runs
+image-only checkpoint evaluation with an explicit forbidden-read audit.
+
+The first existing sample contains 16 Alpha/Azeroth rows (15 train, 1 validation). The current
+reflect-padding checkpoint scored MAE `0.323879` versus a `0.157124` tile-mean baseline on all 16
+rows (`-106.13%` relative improvement), so this is diagnostic evidence of a real-domain failure,
+not a promotion result. A larger multi-map bridge and a user-owned real-bridge training probe are
+the next actions; authored RGB remains blocked on the missing albedo-normalization gate.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11; existing C# harvest/compositor remains the signal authority.
@@ -142,11 +158,14 @@ wow-viewer/data-harvester/
 │   ├── clean_signal_diagnostics.py   # checkpoint predictions and failure atlases
 │   ├── clean_signal_model.py        # architecture adapters and v7-style heads
 │   ├── clean_signal_train.py        # shared trainer/evaluator/report writer
-│   └── clean_signal_transfer.py     # accepted-real transfer audit
+│   ├── clean_signal_transfer.py     # prepared-corpus transfer audit
+│   └── real_terrain_synthetic.py    # real-client terrain synthetic bridge corpus
 ├── scripts/
 │   ├── v60_build_clean_signal_corpus.py
 │   ├── v60_validate_clean_signal_corpus.py
 │   ├── v60_train_clean_signal.py
+│   ├── v60_build_real_terrain_synthetic_corpus.py
+│   ├── v60_evaluate_clean_signal_checkpoint.py
 │   ├── v60_visualize_clean_signal.py
 │   └── v60_transfer_clean_signal.py
 └── tests/v60/

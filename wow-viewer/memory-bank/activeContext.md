@@ -57,8 +57,9 @@ baseline; `pyramid_cnn` was best at `0.236665`, while cross-tile lightning/burn 
 That result does not close the v7 hypothesis because it did not test v7's coarse/detail structural
 loss stack or a deployment-safe albedo-normalized input.
 
-- The earlier v50/multi-client harvest direction is not the active v60 deliverable. No working v60
-  real-data corpus has been accepted or generated in this lane.
+- The earlier v50/multi-client harvest direction is not the active v60 deliverable. No authored
+  real-data corpus has passed the albedo gate; a separate `real_terrain_synthetic` bridge now
+  exists for diagnostic testing on real-client terrain geometry.
 - The current first experiment is a project-owned, deterministic control corpus: 27 terrain families
   × 4 variants = 108 rows, with complete-family holdouts and `easy`/`medium`/`hard`/`pathological`
   buckets. It also emits a sibling `object-sieve-v1` derivative with 540 rows.
@@ -122,7 +123,10 @@ loss stack or a deployment-safe albedo-normalized input.
   baseline (`27.82%` improvement). The flat-input ramp is gone, but cross-tile lightning and burn
   still regress `61.17%` and `30.15%` against their baselines. The next user-owned gate is a
   full-profile within-family run using all 81 training rows to distinguish missing family coverage
-  from missing clean-signal information. Codex did not launch training.
+  from missing clean-signal information. The existing 16-row Alpha/Azeroth real-terrain bridge was
+  also materialized and evaluated: MAE `0.323879` versus `0.157124` tile-mean baseline
+  (`-106.13%`), with zero forbidden reads. This is diagnostic only; authored RGB still needs the
+  albedo-normalization gate. Codex launched no training.
 - Detail and commands: [Spec 139 quickstart](../specs/139-v7-clean-signal-reconstruction/quickstart.md).
 
 ## Now — Spec 140 terrain paste and fractal motif archaeology

@@ -6,7 +6,8 @@ reconstruction), 140 (paste/fractal/tileset evidence).
 Last updated: 2026-08-10. **Nothing is training right now.** Spec 139 is the active implementation
 route after the terrain-only Spec 134 control-v1 bakeoff; object-sieve and object-marker work is
 parked.
-No working v60 real-data corpus has been accepted or generated.
+No authored v60 real-data corpus has passed the albedo gate. A separate real-terrain synthetic
+bridge now exists for diagnostic testing on actual client-terrain geometry.
 
 This file is the durable home for the terrain-ML workstream. `activeContext.md` links here and
 stays short; put detail here, not there.
@@ -194,7 +195,12 @@ weights are explicitly excluded after the prior non-repeatable failed attempt.
   the `v2-reflect-padding` full-profile run at best epoch 80 with MAE `0.137891` versus `0.191047`
   baseline (`27.82%` improvement); the flat ramp is fixed, but cross-tile lightning and burn still
   regress `61.17%` and `30.15%`. The next bounded user run is full-profile within-family training
-  with all 81 training rows to test family coverage versus missing clean-signal information.
+  with all 81 training rows to test family coverage versus missing clean-signal information. A
+  separate `real_terrain_synthetic` bridge builder/evaluator now handles harvested
+  `terrain_shadow_256` plus `height_257` without treating authored RGB as normalized. The first
+  16-row Alpha/Azeroth bridge scored MAE `0.323879` versus `0.157124` baseline (`-106.13%`) with
+  zero forbidden reads; it is diagnostic only and needs more maps/builds before any real-data
+  training conclusion.
 - Overlap handling is explicit: `object_instance_id_256` stores only the visible winner per pixel,
   so fully occluded instances are skipped and recorded rather than treated as positives. Marker
   corpus publication is atomic through `<output>.partial`; a failed build cannot be validated as a

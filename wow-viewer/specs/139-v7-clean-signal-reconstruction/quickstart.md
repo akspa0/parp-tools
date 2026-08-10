@@ -144,6 +144,34 @@ Then run Section 5A's diagnostic command against that checkpoint with a fresh di
 directory. This run tells us whether cross-tile failure is lack of family coverage or missing
 information in the four-channel input. Do not begin real transfer until that distinction is known.
 
+## 5D. Test the checkpoint on real-terrain synthetic rows
+
+The existing `real-shadow-npz-v1` directory is a real-client terrain bridge, not authored-minimap
+acceptance. It contains clean synthesized shading plus independently harvested terrain targets.
+Materialize it into the v60 contract first:
+
+```powershell
+Set-Location "I:/parp/parp-tools/wow-viewer/data-harvester"
+uv run --no-cache python scripts/v60_build_real_terrain_synthetic_corpus.py --inputs "../output/datasets/v60/real-shadow-npz-v1" --output "../output/datasets/v60/v7-clean-signal-real-terrain-synthetic-v1" --confirm-build
+```
+
+Evaluate the current reflect-padding checkpoint without training:
+
+```powershell
+uv run --no-cache python scripts/v60_evaluate_clean_signal_checkpoint.py --checkpoint "../output/datasets/v60/v7-clean-signal-runs/pyramid-full-structural-complete-v2-reflect-padding/pyramid_cnn/v7_structural_v1/checkpoint_best.pt" --corpus "../output/datasets/v60/v7-clean-signal-real-terrain-synthetic-v1" --output "../output/datasets/v60/v7-clean-signal-transfer-diagnostics/real-terrain-synthetic-v2" --device cpu --source-kind real_terrain_synthetic
+```
+
+The first existing sample is only 16 Alpha/Azeroth rows and is diagnostic, not a generalized real
+result. After adding more approved map/build NPZs, the user may run a real-bridge training probe:
+
+```powershell
+uv run --no-cache python scripts/v60_train_clean_signal.py --corpus "../output/datasets/v60/v7-clean-signal-real-terrain-synthetic-v1" --output "../output/datasets/v60/v7-clean-signal-runs/pyramid-full-structural-real-terrain-synthetic-v1" --architectures "pyramid_cnn" --loss-profiles "v7_structural_v1" --model-profile full --split within_family --train-size 15 --epochs 80 --batch-size 8 --seed 7137 --device cuda --confirm-run
+```
+
+That probe tests whether the model can adapt to actual terrain geometry; it does not authorize
+authored RGB training. Authored minimaps remain outside the model until the versioned albedo
+normalization and textureless gate produce accepted four-channel artifacts.
+
 ## 6. Real transfer
 
 ```powershell
