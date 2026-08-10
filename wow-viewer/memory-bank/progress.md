@@ -8,6 +8,16 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 nested WMO group mounting
+
+- Extended the scene-graph object adapter with nested child nodes and mounted client-backed
+  `WmoMeshSummary.GroupSummaries` beneath WMO placements in the opt-in `WorldScene` graph.
+- Group IDs, local bounds, asset keys, and portal-group metadata are preserved; malformed bounds
+  are fail-open. Existing `WmoRenderer` portal traversal remains the behavior owner for now.
+- Focused graph/workload/traversal/adapter proof is 15 passing tests and the viewer build has 0
+  errors. Terrain chunks, graph-side portals, pass/query reuse, and performance evidence remain
+  open; no heavy capture was launched.
+
 ## 2026-08-10 — Spec 142 opt-in WorldScene adapter and traversal selector
 
 - Added `WorldSceneGraphObjectAdapter`, which maps existing resolved object placements into stable

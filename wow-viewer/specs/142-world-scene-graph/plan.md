@@ -144,12 +144,13 @@ pay a full invariant walk on every frame.
 ## Phase 3 — Runtime Object Adapter and Opt-In WorldScene Traversal
 
 **Status**: Complete for the bounded selector slice on 2026-08-10. Existing `WorldScene` object
-lists can be adapted to `map -> tile/external bucket -> placement`, and the opt-in selector uses
-one graph traversal before the existing WMO/MDX visibility and asset-readiness checks. The legacy
-path remains the default; no FPS, GPU, portal, pass-order, or real-client parity claim is made.
+lists can be adapted to `map -> tile/external bucket -> placement`, and client-backed WMO group
+summaries mount as nested children when available. The opt-in selector uses one graph traversal
+before the existing WMO/MDX visibility and asset-readiness checks. The legacy path remains the
+default; no FPS, GPU, portal-traversal, pass-order, or real-client parity claim is made.
 
-1. Adapt resolved `WorldObjectInstance` placements without reopening format readers or inventing
-   WMO group bounds.
+1. Adapt resolved `WorldObjectInstance` placements without reopening format readers; use existing
+   client-backed WMO group summaries when available and fail open for malformed bounds.
 2. Rebuild the graph only when object residency or resolved bounds change.
 3. Use one conservative frustum traversal to feed the existing WMO and M2 collectors when
    `UseHierarchicalSceneTraversal` is enabled.

@@ -76,6 +76,46 @@ public sealed class WorldSceneGraphObjectAdapterTests
         Assert.Equal(first.Graph.CreateSnapshot().RootBoundsMax, second.Graph.CreateSnapshot().RootBoundsMax);
     }
 
+    [Fact]
+    public void PlacementChildrenBecomeNestedNodesWithoutDuplicatingPlacementState()
+    {
+        WorldSceneGraphObjectPlacement placement = Placement(
+            "wmo/interior",
+            WorldSceneNodeKind.WmoPlacement,
+            1,
+            1,
+            Vector3.Zero) with
+        {
+            Children =
+            [
+                new WorldSceneGraphChildNode(
+                    "wmo/interior/group/0000",
+                    WorldSceneNodeKind.WmoGroup,
+                    Matrix4x4.Identity,
+                    Vector3.Zero,
+                    new Vector3(1f, 1f, 1f),
+                    PortalGroup: 0),
+                new WorldSceneGraphChildNode(
+                    "wmo/interior/group/0001",
+                    WorldSceneNodeKind.WmoGroup,
+                    Matrix4x4.CreateTranslation(0.5f, 0f, 0f),
+                    new Vector3(-0.25f),
+                    new Vector3(0.25f),
+                    PortalGroup: 1),
+            ]
+        };
+
+        WorldSceneGraphBuildResult result = WorldSceneGraphObjectAdapter.Build([placement]);
+
+        Assert.True(result.Graph.TryGetNode("wmo/interior", out WorldSceneNode? placementNode));
+        Assert.NotNull(placementNode);
+        Assert.Equal(2, placementNode!.Children.Count);
+        Assert.Equal(WorldSceneNodeKind.WmoGroup, placementNode.Children[0].Kind);
+        Assert.Equal(1, placementNode.Children[1].PortalGroup);
+        Assert.Equal(5, result.Graph.CreateSnapshot().NodeCount);
+        Assert.Equal("world/wmo/interior.asset", placementNode.AssetKey);
+    }
+
     private static WorldSceneGraphObjectPlacement Placement(
         string id,
         WorldSceneNodeKind kind,

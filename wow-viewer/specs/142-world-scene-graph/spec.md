@@ -572,14 +572,15 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
   visited, individually tested, non-rejectable, rejected, skipped-descendant, and visible counts.
 - `WorldSceneGraphObjectAdapter` maps the existing runtime placement lists into stable
   `map -> tile/external bucket -> placement` nodes without reopening format readers or fabricating
-  WMO group bounds.
+  WMO group bounds. When a client-backed `WmoMeshSummary` is available, its group summaries mount
+  as `WmoGroup` children with local bounds, stable IDs, asset keys, and portal-group metadata.
 - `WorldScene` now exposes `UseHierarchicalSceneTraversal` as an opt-in selector. When enabled,
   one conservative graph traversal feeds the existing WMO/MDX visibility collectors; graph
   snapshots and traversal diagnostics are exposed for later capture reporting.
-- Focused graph/workload/traversal/adapter proof is 14 passing tests; the runtime and viewer
+- Focused graph/workload/traversal/adapter proof is 15 passing tests; the runtime and viewer
   projects build with only existing repository warnings.
 
 This is an opt-in integration proof, not a renderer promotion. The legacy `WorldScene` traversal
-remains the default, the adapter is object-placement-only (terrain chunks and WMO portal groups
-are not yet mounted), and no FPS/GPU or real-client parity claim exists until the later evidence
-tasks are run.
+remains the default, terrain chunks are not yet mounted, and WMO portal traversal remains owned by
+the existing `WmoRenderer` until the graph-side portal contract is proven. No FPS/GPU or real-client
+parity claim exists until the later evidence tasks are run.

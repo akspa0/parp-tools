@@ -8035,16 +8035,16 @@ public class WorldScene : ISceneRenderer
         {
             AppendSceneGraphPlacements(placements, _tileMdxInstances, WorldSceneNodeKind.M2Placement, isSkybox: false, isExternal: false, requiresUpdate: true);
             AppendSceneGraphPlacements(placements, _tileSkyboxInstances, WorldSceneNodeKind.M2Placement, isSkybox: true, isExternal: false, requiresUpdate: true);
-            AppendSceneGraphPlacements(placements, _tileWmoInstances, WorldSceneNodeKind.WmoPlacement, isSkybox: false, isExternal: false, requiresUpdate: false);
+            AppendSceneGraphPlacements(placements, _tileWmoInstances, WorldSceneNodeKind.WmoPlacement, isSkybox: false, isExternal: false, requiresUpdate: false, childFactory: BuildWmoSceneGraphChildren);
             AppendSceneGraphPlacements(placements, _externalMdxInstances, WorldSceneNodeKind.M2Placement, isSkybox: false, isExternal: true, requiresUpdate: true);
             AppendSceneGraphPlacements(placements, _externalSkyboxInstances, WorldSceneNodeKind.M2Placement, isSkybox: true, isExternal: true, requiresUpdate: true);
-            AppendSceneGraphPlacements(placements, _externalWmoInstances, WorldSceneNodeKind.WmoPlacement, isSkybox: false, isExternal: true, requiresUpdate: false);
+            AppendSceneGraphPlacements(placements, _externalWmoInstances, WorldSceneNodeKind.WmoPlacement, isSkybox: false, isExternal: true, requiresUpdate: false, childFactory: BuildWmoSceneGraphChildren);
         }
         else
         {
             AppendSceneGraphPlacements(placements, _mdxInstances, WorldSceneNodeKind.M2Placement, isSkybox: false, isExternal: true, requiresUpdate: true);
             AppendSceneGraphPlacements(placements, _skyboxInstances, WorldSceneNodeKind.M2Placement, isSkybox: true, isExternal: true, requiresUpdate: true);
-            AppendSceneGraphPlacements(placements, _wmoInstances, WorldSceneNodeKind.WmoPlacement, isSkybox: false, isExternal: true, requiresUpdate: false);
+            AppendSceneGraphPlacements(placements, _wmoInstances, WorldSceneNodeKind.WmoPlacement, isSkybox: false, isExternal: true, requiresUpdate: false, childFactory: BuildWmoSceneGraphChildren);
         }
 
         _sceneGraphBuild = WorldSceneGraphObjectAdapter.Build(placements);
@@ -8058,11 +8058,12 @@ public class WorldScene : ISceneRenderer
         WorldSceneNodeKind kind,
         bool isSkybox,
         bool isExternal,
-        bool requiresUpdate)
+        bool requiresUpdate,
+        Func<string, ObjectInstance, IReadOnlyList<WorldSceneGraphChildNode>?>? childFactory = null)
     {
         foreach (KeyValuePair<(int, int), List<ObjectInstance>> tile in tileInstances)
         {
-            AppendSceneGraphPlacements(destination, tile.Value, kind, isSkybox, isExternal, requiresUpdate, tile.Key);
+            AppendSceneGraphPlacements(destination, tile.Value, kind, isSkybox, isExternal, requiresUpdate, childFactory, tile.Key);
         }
     }
 
@@ -8073,6 +8074,7 @@ public class WorldScene : ISceneRenderer
         bool isSkybox,
         bool isExternal,
         bool requiresUpdate,
+        Func<string, ObjectInstance, IReadOnlyList<WorldSceneGraphChildNode>?>? childFactory = null,
         (int tileX, int tileY)? tileKey = null)
     {
         for (int index = 0; index < instances.Count; index++)
@@ -8090,8 +8092,49 @@ public class WorldScene : ISceneRenderer
                 WorldSceneRenderPass.Opaque,
                 IsQueryable: true,
                 RequiresUpdate: requiresUpdate,
-                IsSkybox: isSkybox));
+                IsSkybox: isSkybox,
+                Children: childFactory?.Invoke(id, instance)));
         }
+    }
+
+    private IReadOnlyList<WorldSceneGraphChildNode>? BuildWmoSceneGraphChildren(
+        string parentId,
+        ObjectInstance instance)
+    {
+        if (!_assets.TryGetWmoMeshSummary(instance.ModelKey, out WmoMeshSummary summary)
+            || summary.GroupSummaries is null
+            || summary.GroupSummaries.Length == 0)
+        {
+            return null;
+        }
+
+        List<WorldSceneGraphChildNode> children = new(summary.GroupSummaries.Length);
+        foreach (WmoGroupMeshSummary group in summary.GroupSummaries.OrderBy(group => group.GroupIndex))
+        {
+            bool boundsKnown = AreFiniteOrderedBounds(group.BoundsMin, group.BoundsMax);
+            children.Add(new WorldSceneGraphChildNode(
+                $"{parentId}/group/{group.GroupIndex:D4}",
+                WorldSceneNodeKind.WmoGroup,
+                Matrix4x4.Identity,
+                boundsKnown ? group.BoundsMin : Vector3.Zero,
+                boundsKnown ? group.BoundsMax : Vector3.Zero,
+                BoundsKnown: boundsKnown,
+                IsRenderable: true,
+                IsQueryable: true,
+                RequiresUpdate: false,
+                AssetKey: $"{instance.ModelKey}#group/{group.GroupIndex:D4}",
+                RenderPassMask: WorldSceneRenderPass.Opaque,
+                PortalGroup: group.GroupIndex));
+        }
+
+        return children;
+    }
+
+    private static bool AreFiniteOrderedBounds(Vector3 min, Vector3 max)
+    {
+        return float.IsFinite(min.X) && float.IsFinite(min.Y) && float.IsFinite(min.Z)
+            && float.IsFinite(max.X) && float.IsFinite(max.Y) && float.IsFinite(max.Z)
+            && min.X <= max.X && min.Y <= max.Y && min.Z <= max.Z;
     }
 
     private static string GetSceneGraphKindToken(WorldSceneNodeKind kind, bool isSkybox)

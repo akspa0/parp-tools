@@ -15,7 +15,22 @@ public readonly record struct WorldSceneGraphObjectPlacement(
     WorldSceneRenderPass RenderPassMask = WorldSceneRenderPass.Opaque,
     bool IsQueryable = true,
     bool RequiresUpdate = false,
-    bool IsSkybox = false);
+    bool IsSkybox = false,
+    IReadOnlyList<WorldSceneGraphChildNode>? Children = null);
+
+public readonly record struct WorldSceneGraphChildNode(
+    string Id,
+    WorldSceneNodeKind Kind,
+    Matrix4x4 LocalTransform,
+    Vector3 LocalBoundsMin,
+    Vector3 LocalBoundsMax,
+    bool BoundsKnown = true,
+    bool IsRenderable = true,
+    bool IsQueryable = true,
+    bool RequiresUpdate = false,
+    string? AssetKey = null,
+    WorldSceneRenderPass RenderPassMask = WorldSceneRenderPass.Opaque,
+    int? PortalGroup = null);
 
 public sealed class WorldSceneGraphAdapterOptions
 {
@@ -122,6 +137,27 @@ public static class WorldSceneGraphObjectAdapter
                     assetKey: placement.Instance.ModelKey,
                     renderPassMask: placement.RenderPassMask);
                 graph.Attach(bucket.Id, objectNode);
+
+                if (placement.Children is null)
+                    continue;
+
+                foreach (WorldSceneGraphChildNode child in placement.Children)
+                {
+                    WorldSceneNode childNode = new(
+                        child.Id,
+                        child.Kind,
+                        child.LocalTransform,
+                        child.LocalBoundsMin,
+                        child.LocalBoundsMax,
+                        boundsKnown: child.BoundsKnown,
+                        isRenderable: child.IsRenderable,
+                        isQueryable: child.IsQueryable,
+                        requiresUpdate: child.RequiresUpdate,
+                        assetKey: child.AssetKey,
+                        renderPassMask: child.RenderPassMask,
+                        portalGroup: child.PortalGroup);
+                    graph.Attach(objectNode.Id, childNode);
+                }
             }
         }
 

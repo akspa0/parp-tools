@@ -43,6 +43,8 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
 - A rejected synthetic region skips all descendant visibility tests and reports the skipped count.
 - A node with unknown bounds is included without being passed to the visibility predicate.
 - Existing `WorldObjectInstance` placements adapt into stable tile/external graph buckets.
+- Client-backed WMO group summaries mount beneath their placement node as nested `WmoGroup` nodes;
+  missing or malformed group bounds remain fail-open.
 - Unknown object bounds keep their bucket and map fail-open.
 - The viewer project compiles with the opt-in `WorldScene.UseHierarchicalSceneTraversal` seam.
 

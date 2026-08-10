@@ -30,13 +30,15 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 - Phase 2 now provides `WorldSceneTraversal`: one injected visibility test can reject an entire
   region, with explicit skipped-descendant attribution and fail-open handling for unknown bounds.
   Focused graph/workload/traversal proof is 11 tests.
-- The current bounded integration now adapts existing `WorldObjectInstance` lists into stable
-  `map -> tile/external bucket -> placement` nodes. `WorldScene.UseHierarchicalSceneTraversal`
-  opt-in feeds one conservative graph traversal into the existing WMO/MDX collectors; the legacy
-  path remains default. Focused proof is 14 tests and the viewer project compiles.
-- The adapter deliberately does not invent WMO group bounds or terrain chunk nodes. Heavy
-  real-scene captures and GPU measurements remain user-run; the next gaps are portal/pass/query
-  ownership, terrain/chunk mounting, and stage-level parity evidence.
+- The current bounded integration adapts existing `WorldObjectInstance` lists into stable
+  `map -> tile/external bucket -> placement` nodes. Client-backed `WmoMeshSummary.GroupSummaries`
+  now mount as nested `WmoGroup` children. `WorldScene.UseHierarchicalSceneTraversal` opt-in feeds
+  one conservative graph traversal into the existing WMO/MDX collectors; the legacy path remains
+  default. Focused proof is 15 tests and the viewer project compiles.
+- The adapter does not invent missing group bounds, and terrain chunks are not mounted yet. The
+  existing `WmoRenderer` still owns portal traversal. Heavy real-scene captures and GPU
+  measurements remain user-run; next gaps are graph-side portal/pass/query ownership,
+  terrain/chunk mounting, and stage-level parity evidence.
 
 ## Now — Viewer Runtime & Terrain Improvements (Specs 135, 136, 137)
 
