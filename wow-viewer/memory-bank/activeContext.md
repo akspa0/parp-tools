@@ -100,11 +100,13 @@ loss stack or a deployment-safe albedo-normalized input.
   `data-harvester/src/harvester/v60/`, with fail-closed validator/builder/visual CLIs in `scripts/`.
   The shared model contract covers `pyramid_cnn`, `segformer_b0`, and `unet_lite_v2`; the loss
   contract now exposes versioned parity and v7 structural profiles with independent differentiable
-  point/gradient/frequency/curvature/edge/transition/border/LF/HF metrics. Focused loss proof is 4
-  tests and the full v60 folder is 71 passing after this slice. The clean corpus builder publishes
+  point/gradient/frequency/curvature/edge/transition/border/LF/HF metrics. The shared trainer now
+  fixes deterministic split identities, four-channel lazy loading, independent final/coarse/detail
+  reports, family/bucket metrics, and best/last checkpoint binding. Focused loss/trainer proof is 7
+  tests and the full v60 folder is 74 passing after this slice. The clean corpus builder publishes
   a hash-bound synthetic manifest atomically and visual review emits family/variant/cross-tile
-  atlases with provenance JSON. No user corpus has been generated or visually accepted; the shared
-  trainer, real transfer, and all user-run training remain ahead.
+  atlases with provenance JSON. No user corpus has been generated or visually accepted; the dry-run
+  CLI, real transfer, and all user-run training remain ahead.
 - Detail and commands: [Spec 139 quickstart](../specs/139-v7-clean-signal-reconstruction/quickstart.md).
 
 ## Now — Spec 140 terrain paste and fractal motif archaeology

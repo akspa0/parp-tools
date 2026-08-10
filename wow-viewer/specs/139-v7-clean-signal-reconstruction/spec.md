@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-10
 
-**Status**: Phase 5 loss contract implemented; trainer, corpus execution, visual acceptance, and training remain unimplemented
+**Status**: Phase 5 loss/trainer contracts implemented; CLI, corpus execution, visual acceptance, and training remain unimplemented
 
 **Input**: User description: "Build the old v7 model idea with a modern architecture, guided by
 clean synthetic data and a sane signal set. Remove the WDL-prior dependency so any minimap can be
@@ -35,7 +35,10 @@ The first bounded implementation slice is now present under `data-harvester/src/
   gradient, full-spectrum, Laplacian, Sobel edge, transition, border, and low/high-frequency
   components remain independently measurable and differentiable; adversarial and object/recovery
   terms are excluded from the first clean lane.
-- CPU-focused contract proof passes: 31 new tests and 71 tests across `tests/v60`. No corpus
+- `clean_signal_train.py` fixes deterministic within-family and complete-family split identities,
+  lazy four-channel NPZ loading, independent final/coarse/detail evaluation, family and complexity
+  bucket reports, and best/last checkpoints bound to model/loss/split identities.
+- CPU-focused contract proof passes: 34 new tests and 74 tests across `tests/v60`. No corpus
   generation, real-client processing, visual acceptance, or GPU training has run.
 
 Model adapters and the synthetic corpus builder stay behind this contract gate.

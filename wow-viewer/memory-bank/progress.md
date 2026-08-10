@@ -60,6 +60,15 @@ visually accepted by the user.
   4 focused loss tests passed; full `tests/v60` passes 71 tests, with changed-file Ruff and
   `py_compile` clean. No corpus generation or training was launched.
 
+## 2026-08-10 — Spec 139 clean-signal trainer/evaluator contract
+
+- Added `clean_signal_train.py` with deterministic within-family and complete-family split
+  identities, lazy four-channel NPZ loading, independent final/coarse/detail metrics, per-family
+  and per-complexity reports, and best/last checkpoints bound to model/loss/split provenance.
+- Added report, split, checkpoint, and fresh-output refusal tests. Evidence: 3 focused trainer tests
+  passed; full `tests/v60` passes 74 tests, with changed-file Ruff and `py_compile` clean. The tests
+  inject a tiny CPU model only for contract proof; no real training run was launched.
+
 ## 2026-08-10 — reset v60 to terrain-only learning
 
 - Parked object-sieve and object-marker work after the user-run marker experiment failed identity

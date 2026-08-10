@@ -23,8 +23,10 @@ builder consumes only validated control NPZs, derives the declared synthetic obs
 materializes structural targets, and publishes a hash-bound manifest atomically. The visual-review
 slice is implemented as a family/variant/cross-tile atlas with provenance JSON. The loss slice now
 provides versioned parity and v7 structural profiles, differentiable point/gradient, frequency,
-curvature, edge, transition, border, and LF/HF terms, and independent component tensors. The next
-slice is the shared evaluator/trainer contract, not a user-run training command.
+curvature, edge, transition, border, and LF/HF terms, and independent component tensors. The shared
+trainer slice now fixes deterministic within-family/complete-family split identities, four-channel
+NPZ loading, per-signal/per-family/per-bucket evaluation, and best/last checkpoint binding. The next
+slice is the PowerShell dry-run/user-run CLI, not a user-run training command from this agent.
 
 ## Technical Context
 

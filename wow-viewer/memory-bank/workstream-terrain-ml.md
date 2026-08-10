@@ -177,9 +177,11 @@ weights are explicitly excluded after the prior non-repeatable failed attempt.
   targets, NPZ/hash/split/recomposition validation, atomic builder, family/variant/cross-tile
   review, and local random-initialized `pyramid_cnn`/`segformer_b0`/`unet_lite_v2` adapters. The
   loss module provides independently ablatable parity and v7 structural point/gradient/frequency/
-  curvature/edge/transition/border/LF/HF terms. Focused loss proof is 4 tests; full `tests/v60`
-  passes 71 tests. No user corpus has been generated or visually accepted. The shared trainer,
-  real transfer, and every corpus/GPU run remain unproven and user-owned where applicable.
+  curvature/edge/transition/border/LF/HF terms. The shared trainer now fixes deterministic split
+  identities, target-free four-channel loading, independent final/coarse/detail reports,
+  family/bucket metrics, and checkpoint binding. Focused loss/trainer proof is 7 tests; full
+  `tests/v60` passes 74 tests. No user corpus has been generated or visually accepted. The dry-run
+  CLI, real transfer, and every corpus/GPU run remain unproven and user-owned where applicable.
 - Overlap handling is explicit: `object_instance_id_256` stores only the visible winner per pixel,
   so fully occluded instances are skipped and recorded rather than treated as positives. Marker
   corpus publication is atomic through `<output>.partial`; a failed build cannot be validated as a
