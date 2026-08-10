@@ -20,6 +20,17 @@ Current state and open work: [activeContext.md](activeContext.md).
 - This satisfies the user-run execution evidence but not the generalized-winner acceptance scenario.
   The checkpoint is diagnostic; real transfer remains blocked. Codex launched no training.
 
+## 2026-08-10 — Spec 139 checkpoint diagnosis consumer
+
+- Added `clean_signal_diagnostics.py` and `v60_diagnose_clean_signal_checkpoint.py`. The command
+  reconstructs the saved model identity, uses the checkpoint's exact held-out row IDs, performs
+  image-only prediction, and writes compact per-row prediction/error NPZs plus full and cross-tile
+  PNG atlases and `diagnostic_report.json`.
+- Focused proof: diagnostics plus trainer tests pass (4 tests); changed-file Ruff and `py_compile`
+  pass; CLI help passes. No training or GPU work was launched.
+- Next user action is the CPU diagnostic command in the Spec 139 quickstart. Review the cross-tile
+  atlas before changing architecture, data, loss, or transfer scope.
+
 ## 2026-08-10 — Spec 139 clean-signal foundational contracts
 
 - Implemented the v60 four-channel clean observation package: luma, deterministic x/y gradients,

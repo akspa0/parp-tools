@@ -186,7 +186,9 @@ weights are explicitly excluded after the prior non-repeatable failed attempt.
   `0.173904` versus tile-mean `0.191047` (`8.97%` overall improvement) across 76 train and 32
   held-out rows. `cross_tile_burn` regressed `15.52%`, `cross_tile_lightning` regressed `229.79%`,
   and the pathological bucket regressed `2.81%`, so the explicit cross-tile acceptance scenario
-  holds promotion. The checkpoint is diagnostic only and real transfer remains blocked.
+  holds promotion. The checkpoint is diagnostic only and real transfer remains blocked. A new
+  prediction-only consumer now exports exact held-out per-row errors and full/cross-tile atlases;
+  the user-run atlas review is the next bounded gate before any training or transfer change.
 - Overlap handling is explicit: `object_instance_id_256` stores only the visible winner per pixel,
   so fully occluded instances are skipped and recorded rather than treated as positives. Marker
   corpus publication is atomic through `<output>.partial`; a failed build cannot be validated as a

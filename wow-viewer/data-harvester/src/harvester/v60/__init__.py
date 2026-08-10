@@ -8,6 +8,7 @@ deployment-safe v7-inspired observation and target contracts without changing hi
 """
 
 from harvester.v60.clean_signal_corpus import validate_clean_signal_corpus
+from harvester.v60.clean_signal_diagnostics import diagnose_clean_signal_checkpoint
 from harvester.v60.clean_signal_inputs import (
     CleanObservationPackage,
     build_clean_observation,
@@ -55,6 +56,7 @@ __all__ = [
     "StructuralTarget",
     "V7GuidanceConfig",
     "build_clean_observation",
+    "diagnose_clean_signal_checkpoint",
     "build_clean_signal_model",
     "build_clean_signal_model_from_identity",
     "decompose_relative_height",

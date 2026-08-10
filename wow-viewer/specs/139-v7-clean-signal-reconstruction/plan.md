@@ -55,6 +55,14 @@ the 5% floor, but the cross-tile family regressions trigger the explicit no-prom
 scenario. Real transfer remains blocked; this checkpoint is diagnostic evidence for the next
 bounded failure-analysis slice.
 
+## Next bounded slice — checkpoint failure diagnosis
+
+The checkpoint is useful as a frozen probe: load it against the exact held-out rows, export each
+prediction and absolute-error field, and inspect the cross-tile atlas. This distinguishes a seam or
+context failure from a signal that is not recoverable from one 256×256 clean observation. The new
+`v60_diagnose_clean_signal_checkpoint.py` command performs prediction only; it does not train or
+admit real transfer. The user-run command is recorded in the quickstart.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11; existing C# harvest/compositor remains the signal authority.
@@ -103,6 +111,7 @@ wow-viewer/data-harvester/
 │   ├── clean_signal_inputs.py       # four-channel deployment-safe input assembly
 │   ├── clean_signal_targets.py      # coarse/detail target decomposition
 │   ├── clean_signal_losses.py       # parity and v7 guidance loss components
+│   ├── clean_signal_diagnostics.py   # checkpoint predictions and failure atlases
 │   ├── clean_signal_model.py        # architecture adapters and v7-style heads
 │   ├── clean_signal_train.py        # shared trainer/evaluator/report writer
 │   └── clean_signal_transfer.py     # accepted-real transfer audit

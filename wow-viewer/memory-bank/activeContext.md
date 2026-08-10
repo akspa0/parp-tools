@@ -112,7 +112,9 @@ loss stack or a deployment-safe albedo-normalized input.
   (`8.97%` overall improvement) across 76 train and 32 held-out rows. `cross_tile_burn` regressed
   `15.52%`, `cross_tile_lightning` regressed `229.79%`, and the pathological bucket regressed
   `2.81%`; the explicit cross-tile acceptance scenario therefore holds promotion. The checkpoint
-  is diagnostic evidence only and real transfer remains blocked. Codex did not launch training.
+  is diagnostic evidence only and real transfer remains blocked. A prediction-only checkpoint
+  diagnostic CLI now exports held-out per-row predictions/errors and full/cross-tile atlases; the
+  user-run diagnostic is the next gate. Codex did not launch training.
 - Detail and commands: [Spec 139 quickstart](../specs/139-v7-clean-signal-reconstruction/quickstart.md).
 
 ## Now — Spec 140 terrain paste and fractal motif archaeology

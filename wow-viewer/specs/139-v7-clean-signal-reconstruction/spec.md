@@ -52,6 +52,10 @@ The first bounded implementation slice is now present under `data-harvester/src/
   the checkpoint remains diagnostic and is not promoted; real transfer stays blocked.
 - CPU-focused contract proof passes: 36 new tests and 76 tests across `tests/v60`. Codex did not
   launch the user-owned CUDA run.
+- The checkpoint is now consumable by the prediction-only diagnostic CLI. It reconstructs the model
+  from checkpoint identity, selects the exact recorded held-out rows, writes per-row prediction and
+  absolute-error NPZs, and renders full and cross-tile atlases. The user-run diagnostic is the next
+  bounded gate; no model change or real transfer follows until its failure mode is understood.
 
 Model adapters and the synthetic corpus builder stay behind this contract gate.
 

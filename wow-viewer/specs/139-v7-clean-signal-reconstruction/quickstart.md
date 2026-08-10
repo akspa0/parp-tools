@@ -95,6 +95,23 @@ with checkpoints beside it. Best epoch 37 reached final-height MAE `0.173904` ve
 not promoted: `cross_tile_burn` regressed `15.52%`, `cross_tile_lightning` regressed `229.79%`,
 and the pathological bucket regressed `2.81%`. Do not start real transfer from this checkpoint.
 
+## 5A. Use the checkpoint for failure diagnosis
+
+This is the next step. It performs inference only on the exact 32 held-out rows recorded inside
+the checkpoint. It writes one compressed prediction/error NPZ per row, a full validation atlas, a
+focused cross-tile atlas, and a compact `diagnostic_report.json`. Use CPU to keep this diagnostic
+separate from the user-owned training/GPU work:
+
+```powershell
+Set-Location "I:/parp/parp-tools/wow-viewer/data-harvester"
+uv run --no-cache python scripts/v60_diagnose_clean_signal_checkpoint.py --checkpoint "../output/datasets/v60/v7-clean-signal-runs/pyramid-full-structural-complete-v1/pyramid_cnn/v7_structural_v1/checkpoint_best.pt" --corpus "../output/datasets/v60/v7-clean-signal-v1" --output "../output/datasets/v60/v7-clean-signal-diagnostics/pyramid-full-structural-complete-v1" --device cpu
+```
+
+Inspect `cross-tile-diagnostic-atlas.png` first. If the prediction is locally correct but breaks
+at tile boundaries, the next model change needs cross-tile context. If the prediction is wrong
+throughout despite a visible clean observation, the signal or synthetic observation contract needs
+investigation. Do not retrain or begin real transfer until that diagnosis is recorded.
+
 ## 6. Real transfer
 
 ```powershell
