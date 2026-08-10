@@ -11,6 +11,11 @@ clean_observation_confidence_256 float32[1,256,256] in [0,1]
 The concatenated model input is exactly `[4,256,256]`. The model must not accept or inspect WDL,
 height, normals, liquid, object, alpha, material, or target-derived arrays in inference mode.
 
+The input artifact uses `v7-clean-signal-input-v1`. Gradients use the deterministic
+`finite-difference-edge-v1` transform. `confidence_status` is `measured` or `absent_explicit` for
+admitted rows; the latter requires a zero-filled confidence channel. `rejected` and `quarantined`
+rows remain visible to the gate report but cannot be assembled for inference.
+
 ## Model output
 
 ```text
@@ -18,6 +23,15 @@ coarse_relief_257      float32[257,257]
 detail_residual_257    float32[257,257]
 height_prediction_257  clamp(coarse + detail) under the relative-height contract
 ```
+
+Training targets use `v7-clean-signal-target-v1`: per-tile relative height with a denominator
+floor of `1.0`, followed by `box9-edge-replicate-v1`. The stored detail is exactly
+`relative_height_257 - coarse_relief_257` within the published float tolerance; it is not an
+inference input.
+
+Corpus manifests use `v7-clean-signal-corpus-v1`. Each row stores the seven named arrays, SHA-256
+hashes, source kind/group, split, confidence/gate status, observation provenance, and an explicit
+empty forbidden-signal list.
 
 The coarse/detail fields are supervision and diagnostics. Only `height_prediction_257` is the
 published terrain result.

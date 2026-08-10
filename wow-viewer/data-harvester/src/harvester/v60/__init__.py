@@ -1,7 +1,30 @@
-"""v60 unified dataset package (Spec 134).
+"""v60 unified dataset package (Specs 134 and 139).
 
 The v60 line is a distinct dataset family from v50. It consolidates all harvested
 builds into a single unified Zarr store with the decomposed terrain signals
 (terrain_shadow_256, signal_class, surviving_height_levels). Code that is
-v60-specific lives here, not in ``harvester.v50``.
+v60-specific lives here, not in ``harvester.v50``.  The clean-signal modules add the
+deployment-safe v7-inspired observation and target contracts without changing historical imports.
 """
+
+from harvester.v60.clean_signal_corpus import validate_clean_signal_corpus
+from harvester.v60.clean_signal_inputs import (
+    CleanObservationPackage,
+    build_clean_observation,
+    validate_clean_observation,
+)
+from harvester.v60.clean_signal_targets import (
+    StructuralTarget,
+    decompose_relative_height,
+    recompose_height,
+)
+
+__all__ = [
+    "CleanObservationPackage",
+    "StructuralTarget",
+    "build_clean_observation",
+    "decompose_relative_height",
+    "recompose_height",
+    "validate_clean_observation",
+    "validate_clean_signal_corpus",
+]

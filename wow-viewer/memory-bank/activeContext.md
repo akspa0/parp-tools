@@ -96,9 +96,12 @@ loss stack or a deployment-safe albedo-normalized input.
   retrieval top-1 ended at 0, negatives were frequently accepted as known, and the input corpus did
   not preserve the real object RGB signal required for identity. Its checkpoint and reports remain
   diagnostic only and must not enter the terrain model.
-- Spec 139 is design-only so far. Its first candidates are `pyramid_cnn`, `segformer_b0`, and
-  `unet_lite_v2` under a shared v7-style coarse/detail output; DPT is deferred after its flat v60
-  run. Heavy corpus generation, training, and 0.x/1.x transfer remain user-run gates.
+- Spec 139 Phase 2 is now partially implemented: clean observation packing/gates, deterministic
+  coarse/detail targets, corpus hashes/splits, and CPU fixtures are in
+  `data-harvester/src/harvester/v60/`, with a fail-closed validator CLI in `scripts/`. Focused
+  proof is 15 new tests and the full v60 folder is 55 passing. Model adapters, clean corpus
+  builder, structural losses, and all user-run generation/training remain ahead; no real corpus
+  or GPU run is accepted from this slice.
 - Detail and commands: [Spec 139 quickstart](../specs/139-v7-clean-signal-reconstruction/quickstart.md).
 
 ## Now — Spec 140 terrain paste and fractal motif archaeology

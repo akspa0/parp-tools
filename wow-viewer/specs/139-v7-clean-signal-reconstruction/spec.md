@@ -4,11 +4,28 @@
 
 **Created**: 2026-08-10
 
-**Status**: Draft — Speckit design pivot; implementation not started
+**Status**: Phase 2 foundational contracts implemented; model, corpus builder, and training remain unimplemented
 
 **Input**: User description: "Build the old v7 model idea with a modern architecture, guided by
 clean synthetic data and a sane signal set. Remove the WDL-prior dependency so any minimap can be
 processed after albedo normalization."
+
+## Implementation checkpoint — 2026-08-10
+
+The first bounded implementation slice is now present under `data-harvester/src/harvester/v60/`:
+
+- `clean_signal_inputs.py` validates and packages exactly four deployment channels: luma, x/y
+  finite-difference gradients, and albedo confidence. Rejected, quarantined, stale, and
+  target-contaminated observations fail closed.
+- `clean_signal_targets.py` preserves the existing per-tile range-floor semantics and emits a
+  versioned edge-replicated box low-pass coarse field plus signed detail residual.
+- `clean_signal_corpus.py` validates NPZ shapes, finite/range constraints, array hashes,
+  recomposition, source-group leakage, split mode, and forbidden-signal provenance.
+- `v60_validate_clean_signal_corpus.py` is a fail-closed report CLI. CPU-focused contract proof
+  passes: 15 new tests and 55 tests across `tests/v60`. No corpus generation, real-client
+  processing, visual acceptance, or GPU training has run.
+
+Model adapters and the synthetic corpus builder stay behind this contract gate.
 
 ## Problem Statement
 

@@ -3,8 +3,9 @@
 Owner specs: 114 (direct terrain reconstruction), 125 (minimap DXT1 inversion),
 126 (minimap terrain reconstruction), 111 (minimap lighting calibration), 139 (clean-signal
 reconstruction), 140 (paste/fractal/tileset evidence).
-Last updated: 2026-08-10. **Nothing is training right now.** The active first experiment is the
-terrain-only Spec 134 control-v1 learning curve; object-sieve and object-marker work is parked.
+Last updated: 2026-08-10. **Nothing is training right now.** Spec 139 is the active implementation
+route after the terrain-only Spec 134 control-v1 bakeoff; object-sieve and object-marker work is
+parked.
 No working v60 real-data corpus has been accepted or generated.
 
 This file is the durable home for the terrain-ML workstream. `activeContext.md` links here and
@@ -171,8 +172,11 @@ weights are explicitly excluded after the prior non-repeatable failed attempt.
   the current terrain experiment. The failed marker result is preserved only as a negative record.
 - The old v7 13-channel contract is historical reference only. Its structural loss stack is
   transferable guidance; its WDL trestle and answer-side channels are explicitly rejected.
-- Spec 139 is design-only until the clean observation corpus, target decomposition, model adapters,
-  and parity-vs-structural loss matrix are implemented and validated.
+- Spec 139 Phase 2 foundational contracts are implemented: four-channel image-only observation
+  packing/gates, deterministic range-floor plus box9 coarse/detail targets, NPZ/hash/split/
+  recomposition validation, and a fail-closed validator CLI. Focused proof is 15 new tests; full
+  `tests/v60` passes 55 tests. Model adapters, synthetic corpus builder, loss matrix, real
+  transfer, and every corpus/GPU run remain unproven and user-owned where applicable.
 - Overlap handling is explicit: `object_instance_id_256` stores only the visible winner per pixel,
   so fully occluded instances are skipped and recorded rather than treated as positives. Marker
   corpus publication is atomic through `<output>.partial`; a failed build cannot be validated as a

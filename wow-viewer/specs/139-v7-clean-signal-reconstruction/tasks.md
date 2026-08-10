@@ -3,17 +3,17 @@
 ## Phase 1: Setup
 
 - [ ] T001 Record the v7 clean-signal feature identity and artifact paths in `wow-viewer/.specify/feature.json` and `wow-viewer/specs/139-v7-clean-signal-reconstruction/`.
-- [ ] T002 [P] Add the v7 clean-signal schema contract to `wow-viewer/specs/139-v7-clean-signal-reconstruction/contracts/v7-clean-signal.schema.md` and keep it aligned with the model/data code.
-- [ ] T003 [P] Add the clean-signal package exports in `wow-viewer/data-harvester/src/harvester/v60/__init__.py` without changing historical v50/spec103 imports.
+- [x] T002 [P] Add the v7 clean-signal schema contract to `wow-viewer/specs/139-v7-clean-signal-reconstruction/contracts/v7-clean-signal.schema.md` and keep it aligned with the model/data code.
+- [x] T003 [P] Add the clean-signal package exports in `wow-viewer/data-harvester/src/harvester/v60/__init__.py` without changing historical v50/spec103 imports.
 
 ## Phase 2: Foundational contracts
 
-- [ ] T004 Implement the four-channel observation validator in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_inputs.py`, including shape, range, finite-value, confidence-status, and forbidden-array checks.
-- [ ] T005 [P] Implement deterministic relative-height coarse/detail decomposition in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_targets.py` with a versioned low-pass kernel/cutoff and range-floor semantics.
-- [ ] T006 [P] Add corpus manifest and row-hash validation in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_corpus.py`, including source-group leakage and within-family/held-out-family split contracts.
-- [ ] T007 Add focused input/target/manifest fixtures in `wow-viewer/data-harvester/tests/v60/test_clean_signal_contract.py` for accepted, missing-confidence, textured-rejected, stale, malformed, and forbidden-signal rows.
-- [ ] T008 Add deterministic reproducibility tests in `wow-viewer/data-harvester/tests/v60/test_clean_signal_targets.py` for target decomposition and recomposition.
-- [ ] T009 Add the dry-run validator entrypoint in `wow-viewer/data-harvester/scripts/v60_validate_clean_signal_corpus.py` and fail closed on any contract violation.
+- [x] T004 Implement the four-channel observation validator in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_inputs.py`, including shape, range, finite-value, confidence-status, and forbidden-array checks.
+- [x] T005 [P] Implement deterministic relative-height coarse/detail decomposition in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_targets.py` with a versioned low-pass kernel/cutoff and range-floor semantics.
+- [x] T006 [P] Add corpus manifest and row-hash validation in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_corpus.py`, including source-group leakage and within-family/held-out-family split contracts.
+- [x] T007 Add focused input/target/manifest fixtures in `wow-viewer/data-harvester/tests/v60/test_clean_signal_contract.py` for accepted, missing-confidence, textured-rejected, stale, malformed, and forbidden-signal rows.
+- [x] T008 Add deterministic reproducibility tests in `wow-viewer/data-harvester/tests/v60/test_clean_signal_targets.py` for target decomposition and recomposition.
+- [x] T009 Add the dry-run validator entrypoint in `wow-viewer/data-harvester/scripts/v60_validate_clean_signal_corpus.py` and fail closed on any contract violation.
 
 ## Phase 3: User Story 1 — Clean v7-style model (P1)
 

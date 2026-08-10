@@ -1,12 +1,27 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-09
+Last updated: 2026-08-10
 
 **This file is a dated ledger of what shipped, newest first.** One entry per session, a few lines
 each. Findings and how-it-works go in the workstream file; this only records *that* it happened and
 what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
+
+## 2026-08-10 — Spec 139 clean-signal foundational contracts
+
+- Implemented the v60 four-channel clean observation package: luma, deterministic x/y gradients,
+  and measured or explicitly absent confidence, with stale/rejected/quarantined and forbidden
+  target-signal gates.
+- Implemented versioned per-tile relative-height targets with `box9-edge-replicate-v1` coarse
+  relief and signed detail residual, plus corpus NPZ/hash/split/recomposition validation.
+- Added the fail-closed `scripts/v60_validate_clean_signal_corpus.py` entrypoint; it writes
+  `validation.json` only when requested and returns nonzero for invalid corpus evidence.
+- Added CPU contract fixtures for malformed, stale, textured-rejected, missing-confidence,
+  forbidden-signal, altitude-invariance, and source-group leakage cases.
+- Evidence: 15 focused tests passed; full `tests/v60` passed 55 tests with a fresh writable
+  basetemp. Changed-file Ruff and py_compile passed. Full-folder Ruff still reports unrelated
+  pre-existing findings in `v60/store.py`. No corpus generation or GPU work was launched.
 
 ## 2026-08-10 — reset v60 to terrain-only learning
 
