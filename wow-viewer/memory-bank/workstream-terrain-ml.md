@@ -9,6 +9,14 @@ parked.
 No authored v60 real-data corpus has passed the albedo gate. A separate real-terrain synthetic
 bridge now exists for diagnostic testing on actual client-terrain geometry.
 
+The previous 16-row `real-shadow-npz-v1` bridge was an old Alpha/Azeroth diagnostic subset and was
+not an appropriate scale for generalized training. The v50.1 mixed curriculum Zarr store contains
+1,330 synthetic rows (688 Kalimdor, 642 Azeroth). The new
+`real_terrain_synthetic_zarr` builder reads `terrain_shadow_256` plus `height_257`, preserves the
+original `index.parquet` row index and source hash, and assigns a complete-family map holdout:
+Kalimdor train, Azeroth validation. This expands the bridge source without pretending that the
+legacy authored/flat maptexture is accepted real RGB.
+
 This file is the durable home for the terrain-ML workstream. `activeContext.md` links here and
 stays short; put detail here, not there.
 
@@ -204,6 +212,10 @@ weights are explicitly excluded after the prior non-repeatable failed attempt.
   evaluation scored `0.293371` versus `0.157124` (`-86.71%`). Two rows are effectively flat and
   height/shadow dynamics vary widely, so source-integrity bands and more maps/builds are required
   before another real-bridge run.
+- The full-store bridge dry run on `v50/v50.1/curriculum-0_5_3_3368-obj_v1.zarr` passed with
+  1,330 synthetic rows, 688 Kalimdor train rows, and 642 Azeroth validation rows. This is the
+  corrected data-scale route; it is prepared for a user-owned corpus build and CUDA training, not
+  yet a promoted model or authored-RGB result.
 - Overlap handling is explicit: `object_instance_id_256` stores only the visible winner per pixel,
   so fully occluded instances are skipped and recorded rather than treated as positives. Marker
   corpus publication is atomic through `<output>.partial`; a failed build cannot be validated as a

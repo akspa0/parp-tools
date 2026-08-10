@@ -177,6 +177,39 @@ The first 16-row probe is not a promotion gate: its best epoch was 4 at MAE `0.3
 same one-map corpus. Preserve its flat-target, height-range, shadow-dynamics, and mask-coverage
 bands, add approved rows from more maps/builds, and then repeat the bridge training/evaluation.
 
+## 5E. Build the complete v50.1 synthetic-side bridge
+
+The 16-row `real-shadow-npz-v1` directory above is an old Alpha/Azeroth diagnostic subset. The
+larger source already on disk is the v50.1 mixed curriculum Zarr store. Its synthetic side has
+1,330 rows: 688 Kalimdor and 642 Azeroth. The builder holds out one complete map so validation
+tests map-level generalization rather than tile leakage. The command below is dry-run only:
+
+```powershell
+Set-Location "I:/parp/parp-tools/wow-viewer/data-harvester"
+uv run --no-cache python scripts/v60_build_real_terrain_synthetic_zarr.py --store "../output/datasets/v50/v50.1/curriculum-0_5_3_3368-obj_v1.zarr" --validation-map "Azeroth" --output "../output/datasets/v60/v7-clean-signal-real-terrain-synthetic-zarr-v1"
+```
+
+After reviewing the plan, the user may publish the 1,330-row corpus:
+
+```powershell
+uv run --no-cache python scripts/v60_build_real_terrain_synthetic_zarr.py --store "../output/datasets/v50/v50.1/curriculum-0_5_3_3368-obj_v1.zarr" --validation-map "Azeroth" --output "../output/datasets/v60/v7-clean-signal-real-terrain-synthetic-zarr-v1" --confirm-build
+```
+
+Then the user may train a map-held-out bridge checkpoint (Codex does not launch this CUDA run):
+
+```powershell
+uv run --no-cache python scripts/v60_train_clean_signal.py --corpus "../output/datasets/v60/v7-clean-signal-real-terrain-synthetic-zarr-v1" --output "../output/datasets/v60/v7-clean-signal-runs/pyramid-full-structural-real-terrain-synthetic-zarr-v1" --architectures "pyramid_cnn" --loss-profiles "v7_structural_v1" --model-profile full --split complete_family --train-size 688 --epochs 80 --batch-size 8 --seed 7137 --device cuda --confirm-run
+```
+
+Evaluate that checkpoint on all 1,330 bridge rows:
+
+```powershell
+uv run --no-cache python scripts/v60_evaluate_clean_signal_checkpoint.py --checkpoint "../output/datasets/v60/v7-clean-signal-runs/pyramid-full-structural-real-terrain-synthetic-zarr-v1/pyramid_cnn/v7_structural_v1/checkpoint_best.pt" --corpus "../output/datasets/v60/v7-clean-signal-real-terrain-synthetic-zarr-v1" --output "../output/datasets/v60/v7-clean-signal-transfer-diagnostics/real-terrain-synthetic-zarr-v1" --device cpu --source-kind real_terrain_synthetic
+```
+
+This is still a terrain-geometry bridge diagnostic, not authored-minimap RGB transfer. Source
+quality-band auditing and additional approved maps/builds remain required before promotion.
+
 ## 6. Real transfer
 
 ```powershell

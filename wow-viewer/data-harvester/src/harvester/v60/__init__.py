@@ -47,6 +47,10 @@ from harvester.v60.real_terrain_synthetic import (
     build_real_terrain_synthetic_corpus,
     real_terrain_synthetic_build_plan,
 )
+from harvester.v60.real_terrain_synthetic_zarr import (
+    build_zarr_real_terrain_synthetic_corpus,
+    zarr_real_terrain_synthetic_build_plan,
+)
 
 __all__ = [
     "CleanObservationPackage",
@@ -73,6 +77,8 @@ __all__ = [
     "train_clean_signal_model",
     "build_real_terrain_synthetic_corpus",
     "real_terrain_synthetic_build_plan",
+    "build_zarr_real_terrain_synthetic_corpus",
+    "zarr_real_terrain_synthetic_build_plan",
     "evaluate_clean_signal_checkpoint",
     "recompose_height",
     "validate_clean_observation",

@@ -8,6 +8,16 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 139 complete v50.1 bridge correction
+
+- Corrected the scope error: the 16-row `real-shadow-npz-v1` directory is an old Alpha/Azeroth
+  diagnostic subset, not the full real-data bridge. The v50.1 mixed curriculum Zarr store contains
+  1,330 synthetic rows: 688 Kalimdor and 642 Azeroth.
+- Added the dry-run-first Zarr bridge builder with original `index.parquet` row-index provenance,
+  source-index hashing, read-only source access, and a complete-family map-held-out split.
+- Verified the actual dry run and focused contract tests: 2 new tests pass; the plan reports 688
+  train rows and 642 validation rows. No corpus materialization or training was launched by Codex.
+
 ## 2026-08-10 — Spec 139 real-terrain bridge training result
 
 - The user-run full `pyramid_cnn`/`v7_structural_v1` probe trained on 15 Alpha/Azeroth bridge rows

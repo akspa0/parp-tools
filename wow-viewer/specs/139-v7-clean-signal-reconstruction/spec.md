@@ -71,7 +71,12 @@ The first bounded implementation slice is now present under `data-harvester/src/
   The first existing 16-row Alpha/Azeroth bridge scored MAE `0.323879` versus a `0.157124`
   tile-mean baseline (`-106.13%`) with the reflect-padding checkpoint. This is real-domain
   diagnostic evidence only: the bridge uses harvested terrain geometry and synthesized clean
-  shading, while authored minimap RGB still requires a versioned albedo-normalization gate.
+  shading, while authored minimap RGB still requires a versioned albedo-normalization gate. The
+  16 rows were an older diagnostic subset, not the intended corpus size.
+- Added a Zarr-backed bridge builder for the complete v50.1 synthetic side. The verified dry run
+  reports 1,330 rows (688 Kalimdor train, 642 Azeroth validation) with a complete-family,
+  map-held-out split. Original source row indices and the source index hash are preserved in
+  provenance; the source store is read-only and authored RGB remains excluded.
 - The user-run real-bridge training probe used 15 rows with one validation row. Its best epoch 4
   scored `0.313952` versus a `0.109902` validation baseline (`-185.66%`); all-16 evaluation of
   that checkpoint scored `0.293371` versus `0.157124` (`-86.71%`). Coarse error dominates detail

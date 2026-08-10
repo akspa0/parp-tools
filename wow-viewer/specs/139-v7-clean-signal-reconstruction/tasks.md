@@ -66,6 +66,7 @@ per-component and per-family metrics recorded under one report schema.
 - [x] T026G [US3] Add image-only checkpoint evaluation with source-kind filtering, per-row predictions, baseline-relative metrics, atlas output, and an explicit forbidden-read audit for prepared bridge corpora.
 - [x] T026H [US3] **USER RUNS** the real-terrain bridge training probe and all-row checkpoint evaluation; the one-map bridge fails its baseline gate and is not promoted.
 - [ ] T026I [US3] Audit bridge source-integrity bands and add approved rows from additional maps/builds before another real-terrain training run.
+- [x] T026J [US3] Add the full v50.1 Zarr-backed `real_terrain_synthetic` bridge with source-row provenance and a complete-family map-held-out split; verify its dry-run counts and focused contract tests.
 
 ## Phase 6: User Story 4 — Real albedo-normalized transfer (P2)
 
@@ -100,7 +101,8 @@ T001-T009 foundational contracts
     -> T026C-T026D constant-field stability correction
     -> T026E within-family cross-tile learnability confirmation
     -> T026F-T026H real-terrain synthetic bridge diagnostic
-    -> T026I bridge source-integrity and multi-map expansion
+    -> T026J complete v50.1 Zarr bridge
+    -> T026I bridge source-integrity and quality-band expansion
     -> T027-T032 real transfer
     -> T033-T036 polish and continuity
 ```

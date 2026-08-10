@@ -101,11 +101,15 @@ extracted `height_257` from real-client terrain NPZs and labels the rows
 four-channel corpus without mutating source NPZs; `v60_evaluate_clean_signal_checkpoint.py` runs
 image-only checkpoint evaluation with an explicit forbidden-read audit.
 
-The first existing sample contains 16 Alpha/Azeroth rows (15 train, 1 validation). The current
+The first existing NPZ sample contains only 16 Alpha/Azeroth rows (15 train, 1 validation). That
+directory came from an older quickstart diagnostic, not from the complete v50.1 store. The current
 reflect-padding checkpoint scored MAE `0.323879` versus a `0.157124` tile-mean baseline on all 16
 rows (`-106.13%` relative improvement), so this is diagnostic evidence of a real-domain failure,
-not a promotion result. A larger multi-map bridge and a user-owned real-bridge training probe are
-the next actions; authored RGB remains blocked on the missing albedo-normalization gate.
+not a promotion result. The complete v50.1 mixed curriculum store contains 1,330 synthetic rows:
+688 Kalimdor and 642 Azeroth. A new Zarr-backed builder now reads that source without mutating it,
+preserves original `index.parquet` row indices in provenance, and creates a complete-family
+map-held-out split (Kalimdor train, Azeroth validation). Authored RGB remains blocked on the
+missing albedo-normalization gate.
 
 ## User-run checkpoint — 2026-08-10 (real-terrain bridge probe)
 
@@ -115,6 +119,16 @@ with one validation row. The best checkpoint was epoch 4 at MAE `0.313952` versu
 Evaluating that best checkpoint across all 16 bridge rows produced MAE `0.293371` versus the
 `0.157124` all-row baseline (`-86.71%`). The coarse error dominates while detail error is small,
 so this is not merely a late-epoch fluctuation.
+
+## Implementation slice — complete v50.1 bridge source
+
+`v60_build_real_terrain_synthetic_zarr.py` is dry-run by default and publishes the full synthetic
+side only after `--confirm-build`. The 2026-08-10 dry run against
+`v50/v50.1/curriculum-0_5_3_3368-obj_v1.zarr` reported 1,330 source rows, 688 train rows from
+Kalimdor, and 642 validation rows from Azeroth. This fixes the previous scope error: the 16-row
+NPZ directory remains a small failure diagnostic, while the Zarr bridge is the usable multi-map
+diagnostic corpus. The builder still uses real terrain shadow as the synthesized clean observation;
+it does not admit authored minimap RGB.
 
 ## Next bounded slice — bridge source integrity and multi-map expansion
 
