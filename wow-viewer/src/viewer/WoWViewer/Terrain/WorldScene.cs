@@ -65,6 +65,7 @@ using WorldObjectPassFrame = WowViewer.Core.Runtime.World.Passes.WorldObjectPass
 using VisibleMdxInstance = WowViewer.Core.Runtime.World.Visibility.WorldVisibleMdxEntry;
 using VisibleWmoInstance = WowViewer.Core.Runtime.World.Visibility.WorldVisibleWmoEntry;
 using WowViewer.Core.Runtime.World;
+using WowViewer.Core.Runtime.World.SceneGraph;
 using WowViewer.Core.Runtime.World.Visibility;
 
 namespace WoWViewer.Terrain;
@@ -807,6 +808,11 @@ public class WorldScene : ISceneRenderer
     private readonly List<ObjectInstance> _externalSkyboxInstances = new();
     private readonly List<ObjectInstance> _externalWmoInstances = new();
     private readonly List<ObjectInstance> _taxiActorInstances = new();
+    private WorldSceneGraphBuildResult? _sceneGraphBuild;
+    private readonly List<ObjectInstance> _sceneGraphVisibleMdxInstances = new();
+    private readonly List<ObjectInstance> _sceneGraphVisibleWmoInstances = new();
+    private bool _sceneGraphFrameVisibilityPrepared;
+    private WorldSceneTraversalDiagnostics _lastSceneGraphTraversalDiagnostics = new();
     private bool _instancesDirty = false;
     private readonly Dictionary<string, float> _pendingVisibleMdxLoadDistances = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, float> _pendingVisibleWmoLoadDistances = new(StringComparer.OrdinalIgnoreCase);
@@ -1183,6 +1189,9 @@ public class WorldScene : ISceneRenderer
     public int MdxCulledCount { get; private set; }
     public WorldRenderFrameStats LastRenderFrameStats { get; private set; } = WorldRenderFrameStats.Empty;
     public string RendererOptimizationHint => WorldRenderOptimizationAdvisor.BuildHint(LastRenderFrameStats);
+    public bool UseHierarchicalSceneTraversal { get; set; }
+    public WorldSceneGraphSnapshot? SceneGraphSnapshot => _sceneGraphBuild?.Graph.CreateSnapshot();
+    public WorldSceneTraversalDiagnostics SceneGraphTraversalDiagnostics => _lastSceneGraphTraversalDiagnostics;
 
     // Stats
     public int MdxInstanceCount => _mdxInstances.Count;
@@ -8003,8 +8012,94 @@ public class WorldScene : ISceneRenderer
         _wmoInstances.AddRange(_externalWmoInstances);
 
         RestoreSelectedSceneObjectAfterRebuild();
+        if (UseHierarchicalSceneTraversal)
+            RebuildSceneGraphObjectIndex();
+        else
+            _sceneGraphBuild = null;
 
         _instancesDirty = false;
+    }
+
+    private void RebuildSceneGraphObjectIndex()
+    {
+        List<WorldSceneGraphObjectPlacement> placements = new(
+            _mdxInstances.Count + _skyboxInstances.Count + _wmoInstances.Count);
+
+        bool hasPartitionedSources = _tileMdxInstances.Count > 0
+            || _tileSkyboxInstances.Count > 0
+            || _tileWmoInstances.Count > 0
+            || _externalMdxInstances.Count > 0
+            || _externalSkyboxInstances.Count > 0
+            || _externalWmoInstances.Count > 0;
+        if (hasPartitionedSources)
+        {
+            AppendSceneGraphPlacements(placements, _tileMdxInstances, WorldSceneNodeKind.M2Placement, isSkybox: false, isExternal: false, requiresUpdate: true);
+            AppendSceneGraphPlacements(placements, _tileSkyboxInstances, WorldSceneNodeKind.M2Placement, isSkybox: true, isExternal: false, requiresUpdate: true);
+            AppendSceneGraphPlacements(placements, _tileWmoInstances, WorldSceneNodeKind.WmoPlacement, isSkybox: false, isExternal: false, requiresUpdate: false);
+            AppendSceneGraphPlacements(placements, _externalMdxInstances, WorldSceneNodeKind.M2Placement, isSkybox: false, isExternal: true, requiresUpdate: true);
+            AppendSceneGraphPlacements(placements, _externalSkyboxInstances, WorldSceneNodeKind.M2Placement, isSkybox: true, isExternal: true, requiresUpdate: true);
+            AppendSceneGraphPlacements(placements, _externalWmoInstances, WorldSceneNodeKind.WmoPlacement, isSkybox: false, isExternal: true, requiresUpdate: false);
+        }
+        else
+        {
+            AppendSceneGraphPlacements(placements, _mdxInstances, WorldSceneNodeKind.M2Placement, isSkybox: false, isExternal: true, requiresUpdate: true);
+            AppendSceneGraphPlacements(placements, _skyboxInstances, WorldSceneNodeKind.M2Placement, isSkybox: true, isExternal: true, requiresUpdate: true);
+            AppendSceneGraphPlacements(placements, _wmoInstances, WorldSceneNodeKind.WmoPlacement, isSkybox: false, isExternal: true, requiresUpdate: false);
+        }
+
+        _sceneGraphBuild = WorldSceneGraphObjectAdapter.Build(placements);
+        _sceneGraphFrameVisibilityPrepared = false;
+        _lastSceneGraphTraversalDiagnostics = new WorldSceneTraversalDiagnostics();
+    }
+
+    private static void AppendSceneGraphPlacements(
+        List<WorldSceneGraphObjectPlacement> destination,
+        IEnumerable<KeyValuePair<(int, int), List<ObjectInstance>>> tileInstances,
+        WorldSceneNodeKind kind,
+        bool isSkybox,
+        bool isExternal,
+        bool requiresUpdate)
+    {
+        foreach (KeyValuePair<(int, int), List<ObjectInstance>> tile in tileInstances)
+        {
+            AppendSceneGraphPlacements(destination, tile.Value, kind, isSkybox, isExternal, requiresUpdate, tile.Key);
+        }
+    }
+
+    private static void AppendSceneGraphPlacements(
+        List<WorldSceneGraphObjectPlacement> destination,
+        IReadOnlyList<ObjectInstance> instances,
+        WorldSceneNodeKind kind,
+        bool isSkybox,
+        bool isExternal,
+        bool requiresUpdate,
+        (int tileX, int tileY)? tileKey = null)
+    {
+        for (int index = 0; index < instances.Count; index++)
+        {
+            ObjectInstance instance = instances[index];
+            string sourceToken = isExternal
+                ? "external"
+                : $"tile/{tileKey!.Value.tileX:D2}/{tileKey.Value.tileY:D2}";
+            string id = $"world/object/{GetSceneGraphKindToken(kind, isSkybox)}/{sourceToken}/{index:D6}";
+            destination.Add(new WorldSceneGraphObjectPlacement(
+                id,
+                kind,
+                instance,
+                isExternal,
+                WorldSceneRenderPass.Opaque,
+                IsQueryable: true,
+                RequiresUpdate: requiresUpdate,
+                IsSkybox: isSkybox));
+        }
+    }
+
+    private static string GetSceneGraphKindToken(WorldSceneNodeKind kind, bool isSkybox)
+    {
+        if (kind == WorldSceneNodeKind.WmoPlacement)
+            return "wmo";
+
+        return isSkybox ? "m2-skybox" : "m2";
     }
 
     private bool TryGetSelectedSceneInstance(out ObjectInstance instance)
@@ -9046,8 +9141,73 @@ public class WorldScene : ISceneRenderer
         return (tileX, tileY);
     }
 
+    private void PrepareSceneGraphFrameVisibility(
+        Vector3 cameraPos,
+        Vector3 cameraForward,
+        float fogEnd,
+        float verticalFieldOfViewRadians)
+    {
+        if (_sceneGraphFrameVisibilityPrepared)
+            return;
+
+        _sceneGraphVisibleMdxInstances.Clear();
+        _sceneGraphVisibleWmoInstances.Clear();
+        _lastSceneGraphTraversalDiagnostics = new WorldSceneTraversalDiagnostics();
+
+        if (_sceneGraphBuild is null)
+        {
+            _sceneGraphFrameVisibilityPrepared = true;
+            return;
+        }
+
+        WorldSceneTraversalResult traversal = WorldSceneTraversal.Traverse(
+            _sceneGraphBuild.Graph,
+            node => _frustumCuller.TestAABB(node.WorldBoundsMin, node.WorldBoundsMax),
+            node => node.Kind is WorldSceneNodeKind.M2Placement or WorldSceneNodeKind.WmoPlacement,
+            validateGraph: false);
+        _lastSceneGraphTraversalDiagnostics = traversal.Diagnostics;
+
+        foreach (WorldSceneNode node in traversal.VisibleNodes)
+        {
+            if (!_sceneGraphBuild.PlacementsByNodeId.TryGetValue(node.Id, out WorldSceneGraphObjectPlacement placement)
+                || placement.IsSkybox)
+            {
+                continue;
+            }
+
+            if (node.Kind == WorldSceneNodeKind.WmoPlacement)
+                _sceneGraphVisibleWmoInstances.Add(placement.Instance);
+            else if (node.Kind == WorldSceneNodeKind.M2Placement)
+                _sceneGraphVisibleMdxInstances.Add(placement.Instance);
+        }
+
+        _sceneGraphFrameVisibilityPrepared = true;
+    }
+
     private void CollectVisibleWmoInstances(WorldRenderFrame frame, Vector3 cameraPos, Vector3 cameraForward, float fogEnd, float verticalFieldOfViewRadians)
     {
+        if (UseHierarchicalSceneTraversal && _sceneGraphBuild is not null)
+        {
+            PrepareSceneGraphFrameVisibility(cameraPos, cameraForward, fogEnd, verticalFieldOfViewRadians);
+            WmoCulledCount += WorldObjectVisibilityCollector.CollectVisibleWmos(
+                frame.Visibility,
+                _sceneGraphVisibleWmoInstances,
+                new WorldObjectVisibilityContext(
+                    cameraPos,
+                    cameraForward,
+                    fogEnd,
+                    _objectStreamingRangeMultiplier,
+                    CullSmallDoodadsOnly: false,
+                    CountAsTaxiActor: false,
+                    VerticalFieldOfViewRadians: verticalFieldOfViewRadians,
+                    VisibilityProfile: _objectVisibilityProfile),
+                inst => ShouldHideObjectInstanceByUniqueId(inst),
+                (min, max) => _frustumCuller.TestAABB(min, max),
+                modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
+                (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore));
+            return;
+        }
+
         var context = new WorldObjectVisibilityContext(
             cameraPos,
             cameraForward,
@@ -9126,6 +9286,21 @@ public class WorldScene : ISceneRenderer
         float fogEnd,
         float verticalFieldOfViewRadians)
     {
+        if (UseHierarchicalSceneTraversal && _sceneGraphBuild is not null)
+        {
+            PrepareSceneGraphFrameVisibility(cameraPos, cameraForward, fogEnd, verticalFieldOfViewRadians);
+            CollectVisibleMdxInstances(
+                frame,
+                _sceneGraphVisibleMdxInstances,
+                cameraPos,
+                cameraForward,
+                fogEnd,
+                verticalFieldOfViewRadians,
+                cullSmallDoodadsOnly: true,
+                countAsTaxiActor: false);
+            return;
+        }
+
         foreach (var pair in _tileMdxInstances)
         {
             if (_tileMdxBounds.TryGetValue(pair.Key, out var bounds)
@@ -9236,12 +9411,17 @@ public class WorldScene : ISceneRenderer
         var frameTimer = Stopwatch.StartNew();
         _pendingVisibleMdxLoadDistances.Clear();
         _pendingVisibleWmoLoadDistances.Clear();
+        _sceneGraphFrameVisibilityPrepared = false;
+        _sceneGraphVisibleMdxInstances.Clear();
+        _sceneGraphVisibleWmoInstances.Clear();
 
         TryFinalizePm4OverlayLoad();
 
         // Rebuild flat instance lists if tiles changed
         if (_instancesDirty)
             RebuildInstanceLists();
+        else if (UseHierarchicalSceneTraversal && _sceneGraphBuild is null)
+            RebuildSceneGraphObjectIndex();
 
         frame.DeferredAssetLoadMs = MeasureDurationMs(ProcessDeferredAssetLoads);
         frame.TaxiActorUpdateMs = MeasureDurationMs(UpdateTaxiActorInstances);

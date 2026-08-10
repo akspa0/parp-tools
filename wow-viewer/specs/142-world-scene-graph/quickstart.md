@@ -1,20 +1,27 @@
-# Spec 142 Phase 1 Quickstart
+# Spec 142 Graph and Opt-In Traversal Quickstart
 
-This slice proves the scene-graph and synthetic-workload contract only. It does not launch the
-viewer, a GPU capture, a real-client load, training, or a long benchmark.
+This slice proves the scene-graph, synthetic-workload, object-adapter, and opt-in traversal
+contracts. It does not launch the viewer, a GPU capture, a real-client load, training, or a long
+benchmark. The legacy viewer traversal remains the default.
 
 ## Focused proof
 
 From `I:\parp\parp-tools\wow-viewer`:
 
 ```powershell
-dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldSceneGraphTests|FullyQualifiedName~SyntheticWorldWorkloadTests"
+dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldSceneGraphTests|FullyQualifiedName~SyntheticWorldWorkloadTests|FullyQualifiedName~WorldSceneGraphObjectAdapterTests"
 ```
 
 The graph/traversal foundation can be checked together with:
 
 ```powershell
-dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldSceneGraphTests|FullyQualifiedName~SyntheticWorldWorkloadTests|FullyQualifiedName~WorldSceneTraversalTests"
+dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldSceneGraphTests|FullyQualifiedName~SyntheticWorldWorkloadTests|FullyQualifiedName~WorldSceneTraversalTests|FullyQualifiedName~WorldSceneGraphObjectAdapterTests"
+```
+
+The viewer integration seam can be compile-checked without launching a client or capture:
+
+```powershell
+dotnet build src/viewer/WoWViewer/WoWViewer.csproj -c Debug
 ```
 
 ## Full runtime-library proof
@@ -35,9 +42,12 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
 - A synthetic minimap/image record is not accepted as a synthetic world workload.
 - A rejected synthetic region skips all descendant visibility tests and reports the skipped count.
 - A node with unknown bounds is included without being passed to the visibility predicate.
+- Existing `WorldObjectInstance` placements adapt into stable tile/external graph buckets.
+- Unknown object bounds keep their bucket and map fail-open.
+- The viewer project compiles with the opt-in `WorldScene.UseHierarchicalSceneTraversal` seam.
 
 ## Not yet run by this phase
 
-The four-scale performance ladder, current-vs-new traversal comparison, real-client parity capture,
-GPU timing, and whole-map residency work remain later user-run gates. Do not interpret this test
-pass as an FPS result.
+The four-scale performance ladder, current-vs-new traversal comparison, portal/pass/query parity,
+real-client capture, GPU timing, and whole-map residency work remain later user-run gates. Do not
+interpret this test/build pass as an FPS result.

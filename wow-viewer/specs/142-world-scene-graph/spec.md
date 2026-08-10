@@ -570,9 +570,16 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
   graphs and a versioned, hashed JSON manifest.
 - `WorldSceneTraversal` rejects complete subtrees through one injected visibility test and reports
   visited, individually tested, non-rejectable, rejected, skipped-descendant, and visible counts.
-- Focused graph/workload/traversal proof is 11 passing tests; the runtime project builds with only existing
-  repository warnings.
+- `WorldSceneGraphObjectAdapter` maps the existing runtime placement lists into stable
+  `map -> tile/external bucket -> placement` nodes without reopening format readers or fabricating
+  WMO group bounds.
+- `WorldScene` now exposes `UseHierarchicalSceneTraversal` as an opt-in selector. When enabled,
+  one conservative graph traversal feeds the existing WMO/MDX visibility collectors; graph
+  snapshots and traversal diagnostics are exposed for later capture reporting.
+- Focused graph/workload/traversal/adapter proof is 14 passing tests; the runtime and viewer
+  projects build with only existing repository warnings.
 
-This is a foundation proof, not renderer integration. The current `WorldScene` path still owns
-the active frame traversal until the next phase adds a shared conservative traversal behind a
-selector.
+This is an opt-in integration proof, not a renderer promotion. The legacy `WorldScene` traversal
+remains the default, the adapter is object-placement-only (terrain chunks and WMO portal groups
+are not yet mounted), and no FPS/GPU or real-client parity claim exists until the later evidence
+tasks are run.

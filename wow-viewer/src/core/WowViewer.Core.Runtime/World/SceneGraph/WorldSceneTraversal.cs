@@ -27,12 +27,14 @@ public static class WorldSceneTraversal
     public static WorldSceneTraversalResult Traverse(
         WorldSceneGraph graph,
         Func<WorldSceneNode, bool> isVisible,
-        Func<WorldSceneNode, bool>? includeNode = null)
+        Func<WorldSceneNode, bool>? includeNode = null,
+        bool validateGraph = true)
     {
         ArgumentNullException.ThrowIfNull(graph);
         ArgumentNullException.ThrowIfNull(isVisible);
 
-        graph.ValidateInvariants();
+        if (validateGraph)
+            graph.ValidateInvariants();
         includeNode ??= static node => node.IsRenderable;
 
         List<WorldSceneNode> visibleNodes = [];

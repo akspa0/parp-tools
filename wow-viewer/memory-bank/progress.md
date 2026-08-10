@@ -8,6 +8,17 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 opt-in WorldScene adapter and traversal selector
+
+- Added `WorldSceneGraphObjectAdapter`, which maps existing resolved object placements into stable
+  map/tile/external bucket nodes and preserves unknown bounds as fail-open.
+- Wired `WorldScene.UseHierarchicalSceneTraversal` behind the existing WMO/MDX visibility
+  collectors. The graph is rebuilt on residency/bounds changes and traversed once per frame when
+  enabled; the legacy path remains default.
+- Focused graph/workload/traversal/adapter proof is 14 passing tests and the `WoWViewer` project
+  builds with existing warnings. This is not an FPS or GPU result; terrain chunks, WMO portals,
+  pass/query reuse, and real-client parity remain open.
+
 ## 2026-08-10 — Spec 142 Phase 1 graph foundation
 
 - Implemented `WorldSceneGraph` and `WorldSceneNode` in `WowViewer.Core.Runtime` with stable IDs,

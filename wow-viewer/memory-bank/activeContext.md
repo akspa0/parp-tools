@@ -12,7 +12,7 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 |---|---|---|
 | PM4 decode | **active** — versioning formatted; placement solved; scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
 | Terrain / viewer runtime | **active** — phased dual-map overlay (135), M2 doodad batching (136), phased minimap & teleport (137) landed; 4.x renderer evolution (138) is an evidence-gated epic note | [activeContext.md](activeContext.md) |
-| World scene graph / renderer performance | **active** — Spec 142 foundation plus conservative subtree traversal implemented; active `WorldScene` integration, portals, and stage instrumentation still pending | [Spec 142](../specs/142-world-scene-graph/spec.md) |
+| World scene graph / renderer performance | **active** — Spec 142 graph, conservative traversal, and opt-in `WorldScene` object adapter/selector implemented; portals, pass/query reuse, and stage evidence remain pending | [Spec 142](../specs/142-world-scene-graph/spec.md) |
 | Terrain / minimap ML | **active** — Spec 139 clean-signal reconstruction, Spec 140 paste/fractal/tileset evidence, and Spec 141 external-method translation; object identity remains parked | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
 | Tile archaeology | **active** — old v50 synthetic minimap output needs fresh regeneration after renderer fixes; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
 
@@ -30,8 +30,13 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 - Phase 2 now provides `WorldSceneTraversal`: one injected visibility test can reject an entire
   region, with explicit skipped-descendant attribution and fail-open handling for unknown bounds.
   Focused graph/workload/traversal proof is 11 tests.
-- Heavy real-scene captures and GPU measurements remain user-run. The current gap is
-  wiring this traversal into `WorldScene`, then adding portal and stage instrumentation.
+- The current bounded integration now adapts existing `WorldObjectInstance` lists into stable
+  `map -> tile/external bucket -> placement` nodes. `WorldScene.UseHierarchicalSceneTraversal`
+  opt-in feeds one conservative graph traversal into the existing WMO/MDX collectors; the legacy
+  path remains default. Focused proof is 14 tests and the viewer project compiles.
+- The adapter deliberately does not invent WMO group bounds or terrain chunk nodes. Heavy
+  real-scene captures and GPU measurements remain user-run; the next gaps are portal/pass/query
+  ownership, terrain/chunk mounting, and stage-level parity evidence.
 
 ## Now — Viewer Runtime & Terrain Improvements (Specs 135, 136, 137)
 

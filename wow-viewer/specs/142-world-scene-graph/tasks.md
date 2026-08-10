@@ -5,8 +5,9 @@
 **Prerequisites**: `spec.md`, `plan.md`, `research.md`, `data-model.md`,
 `contracts/synthetic-world-workload.schema.md`, `quickstart.md`
 
-**Current execution rule**: Only Phase 1 is in scope for the current slice. Later phases remain
-unchecked until Phase 1 is validated and committed.
+**Current execution rule**: Phases 1-3 are validated and committed. The current bounded result is
+an opt-in `WorldScene` object adapter and traversal selector; portal, pass, query, and performance
+promotion tasks remain unchecked.
 
 ## Phase 1: Setup
 
@@ -82,7 +83,7 @@ identity; no FPS or GPU claim is made.
 
 ## Phase 9: Integration and Evidence
 
-- [ ] T026 Integrate graph ownership behind a runtime selector in `wow-viewer/src/viewer/WoWViewer/Terrain/WorldScene.cs`.
+- [x] T026 Integrate graph ownership behind an opt-in runtime selector in `wow-viewer/src/viewer/WoWViewer/Terrain/WorldScene.cs`; keep the legacy path as the default until parity evidence exists.
 - [ ] T027 Add synthetic workload replay and stage-level report output in `wow-viewer/tools/validation-capture/WowViewer.Tool.ValidationCapture/ValidationWorldSceneAdapter.cs`.
 - [ ] T028 Add current-vs-new parity and performance report tests in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldScenePerformanceReportTests.cs`.
 - [ ] T029 Run the focused and full test commands from `wow-viewer/specs/142-world-scene-graph/quickstart.md` and record evidence in `wow-viewer/memory-bank/progress.md`.
@@ -94,6 +95,8 @@ identity; no FPS or GPU claim is made.
 - US1 and US6 form the MVP foundation and must pass before traversal integration.
 - US2 precedes US3, US4, and US5 because portals, pass queues, and queries consume shared traversal.
 - Phase 9 begins only after the earlier story checkpoints are validated.
+- T026 is a bounded ownership seam that may land after the shared traversal contract; it does not
+  promote the selector, establish portal/pass/query parity, or authorize a heavy capture.
 
 ## Implementation Strategy
 

@@ -86,6 +86,7 @@ wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/
 ├── WorldSceneGraph.cs
 ├── WorldSceneGraphSnapshot.cs
 ├── WorldSceneTraversal.cs
+├── WorldSceneGraphObjectAdapter.cs
 ├── SyntheticWorldWorkload.cs
 └── SyntheticWorldWorkloadBuilder.cs
 
@@ -130,22 +131,38 @@ performance claim is made.
 
 ## Phase 2 — Conservative Shared Traversal
 
-**Status**: Complete for the library-only slice on 2026-08-10. The traversal rejects a complete
-subtree after one failed node test, preserves non-rejectable nodes, and reports visited/tested/
-skipped/visible counts. It is not yet wired into `WorldScene`.
+**Status**: Complete for the library slice on 2026-08-10. The traversal rejects a complete subtree
+after one failed node test, preserves non-rejectable nodes, and reports visited/tested/skipped/
+visible counts. Its graph-validation pass is optional so a graph proven at rebuild time does not
+pay a full invariant walk on every frame.
 
 1. Traverse one graph with an injected visibility predicate and a renderable-node selector.
 2. Attribute the rejected region and count descendants skipped without visiting them.
 3. Preserve unknown/incomplete bounds as visible-but-non-rejectable.
 4. Prove the behavior with synthetic fixed-camera-style tests before viewer integration.
 
+## Phase 3 — Runtime Object Adapter and Opt-In WorldScene Traversal
+
+**Status**: Complete for the bounded selector slice on 2026-08-10. Existing `WorldScene` object
+lists can be adapted to `map -> tile/external bucket -> placement`, and the opt-in selector uses
+one graph traversal before the existing WMO/MDX visibility and asset-readiness checks. The legacy
+path remains the default; no FPS, GPU, portal, pass-order, or real-client parity claim is made.
+
+1. Adapt resolved `WorldObjectInstance` placements without reopening format readers or inventing
+   WMO group bounds.
+2. Rebuild the graph only when object residency or resolved bounds change.
+3. Use one conservative frustum traversal to feed the existing WMO and M2 collectors when
+   `UseHierarchicalSceneTraversal` is enabled.
+4. Expose graph snapshot and traversal diagnostics for later validation-capture reporting.
+5. Prove the adapter with stable IDs, tile grouping, unknown-bound fail-open, and replay tests;
+   compile the viewer project to verify the integration seam.
+
 ## Later Phases (Not Started In This Slice)
 
-- **Phase 3**: Spatial index and shared hierarchical visibility traversal behind a runtime selector.
 - **Phase 4**: WMO portal-restricted nested view volumes and fallback diagnostics.
 - **Phase 5**: Per-pass visible/non-visible queues, shared animation update ownership, and query
   reuse.
-- **Phase 6**: Incremental `WorldScene` migration, synthetic four-scale measurements, and named
+- **Phase 6**: Incremental terrain/chunk graph migration, synthetic four-scale measurements, and named
   real-client parity captures.
 
 ## Complexity Tracking
