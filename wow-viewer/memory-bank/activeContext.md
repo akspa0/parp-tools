@@ -12,7 +12,7 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 |---|---|---|
 | PM4 decode | **active** — versioning formatted; placement solved; scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
 | Terrain / viewer runtime | **active** — phased dual-map overlay (135), M2 doodad batching (136), phased minimap & teleport (137) landed; 4.x renderer evolution (138) is an evidence-gated epic note | [activeContext.md](activeContext.md) |
-| World scene graph / renderer performance | **active** — Spec 142 is now grounded around deterministic synthetic world-scene scaling plus named real-client parity; image-only synthetic minimap previews are explicitly not renderer proof | [Spec 142](../specs/142-world-scene-graph/spec.md) |
+| World scene graph / renderer performance | **active** — Spec 142 foundation implemented: stable nested graph, conservative bounds, deterministic hashed synthetic workload manifests; active renderer traversal still pending | [Spec 142](../specs/142-world-scene-graph/spec.md) |
 | Terrain / minimap ML | **active** — Spec 139 clean-signal reconstruction, Spec 140 paste/fractal/tileset evidence, and Spec 141 external-method translation; object identity remains parked | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
 | Tile archaeology | **active** — old v50 synthetic minimap output needs fresh regeneration after renderer fixes; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
 
@@ -25,8 +25,10 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 - The required order is baseline current path, deterministic synthetic identity, synthetic
   scaling, real-client parity, then promotion. Reports must separate CPU traversal, submission,
   GPU/driver wait, upload, and query stages with median and p95 samples.
+- Phase 1 now builds `WorldSceneGraph` plus nested WMO/M2/PM4 synthetic fixtures in
+  `WowViewer.Core.Runtime`; focused proof is 8 passing tests. This does not yet change `WorldScene`.
 - Heavy real-scene captures and GPU measurements remain user-run. The current gap is
-  implementation of the versioned fixture/benchmark manifest and stage instrumentation.
+  the shared conservative traversal and stage instrumentation behind a runtime selector.
 
 ## Now — Viewer Runtime & Terrain Improvements (Specs 135, 136, 137)
 

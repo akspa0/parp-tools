@@ -8,6 +8,17 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 Phase 1 graph foundation
+
+- Implemented `WorldSceneGraph` and `WorldSceneNode` in `WowViewer.Core.Runtime` with stable IDs,
+  nested attachment, complete subtree detach, transform propagation, conservative bounds, and
+  explicit non-rejectable handling.
+- Implemented deterministic hashed synthetic-world manifests covering sparse regions, chunks,
+  nested WMO groups, repeated M2 assets, PM4 overlays, render-pass mix, and portal metadata.
+- Focused Spec 142 proof is 8 passing graph/workload tests; runtime build passes with existing
+  repository warnings. The active renderer traversal is unchanged; next slice is shared
+  conservative traversal behind a selector.
+
 ## 2026-08-10 — Spec 142 renderer performance grounding
 
 - Expanded `specs/142-world-scene-graph/spec.md` with a deterministic synthetic world-scene

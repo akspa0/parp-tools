@@ -557,3 +557,20 @@ training, harvesting, or broad capture work as part of ordinary tests.
   the full interactive viewer.
 - PM4 overlay structures mount into the graph using the coordinate frame already established for
   them; this spec does not revisit PM4 coordinate resolution.
+
+## Implementation Status
+
+The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
+
+- `WorldSceneGraph` owns stable-ID nested nodes with parent/child attach and complete subtree
+  detach.
+- `WorldSceneNode` propagates transforms, computes conservative transformed bounds, and fails
+  closed to non-rejectable when bounds are unknown or descendants are not safely contained.
+- `SyntheticWorldWorkloadBuilder` produces deterministic sparse map/tile/chunk/WMO/M2/PM4 fixture
+  graphs and a versioned, hashed JSON manifest.
+- Focused graph/workload proof is 8 passing tests; the runtime project builds with only existing
+  repository warnings.
+
+This is a foundation proof, not renderer integration. The current `WorldScene` path still owns
+the active frame traversal until the next phase adds a shared conservative traversal behind a
+selector.
