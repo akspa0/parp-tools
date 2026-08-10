@@ -192,13 +192,23 @@ tests.
 This contract is not yet consumed by `WorldScene` or `WmoRenderer`, and it does not establish
 doorway parity or a performance result.
 
+## Phase 7 — Opt-In Runtime Portal Bridge
+
+**Status**: Complete for the preparatory bridge slice on 2026-08-10. Loaded `WmoRenderer` portal
+data is exposed through the existing graph read-model contract, and opt-in `WorldScene` graph
+rebuilds cache placement-keyed portal adapters whose group IDs align with nested `WmoGroup`
+children. The viewer build is the proof owner for this bridge; no visibility behavior changed.
+
+Unloaded WMOs remain absent from the bridge and therefore fail open. Runtime nested-volume
+traversal, renderer parity, and performance evidence are still not claimed.
+
 ## Later Phases (Not Started In This Slice)
 
-- **Phase 7**: Integrate graph portal volumes into runtime nested traversal and prove doorway
+- **Phase 8**: Integrate graph portal volumes into runtime nested traversal and prove doorway
   parity with the existing renderer.
-- **Phase 8**: Per-pass visible/non-visible queues, shared animation update ownership, and query
+- **Phase 9**: Per-pass visible/non-visible queues, shared animation update ownership, and query
   reuse.
-- **Phase 9**: Incremental terrain/chunk graph migration, synthetic four-scale measurements, and
+- **Phase 10**: Incremental terrain/chunk graph migration, synthetic four-scale measurements, and
   named real-client parity captures.
 
 ## Complexity Tracking

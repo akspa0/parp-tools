@@ -588,6 +588,9 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
 - `WorldScenePortalViewVolumeBuilder` now preserves parent planes and builds a bounded child volume
   from portal-edge planes plus the destination-side portal plane. Depth, invalid geometry,
   degenerate edge, unknown-side, and camera-on-plane cases fail open with reasons.
+- Loaded `WmoRenderer` instances expose their existing portal read models to the opt-in
+  `WorldScene` graph rebuild. `SceneGraphPortalAdapters` is keyed by placement and uses the same
+  nested group IDs as the graph children; the current WMO visibility path is unchanged.
 - Focused graph/workload/traversal/adapter/portal proof is 26 passing tests; the runtime and viewer
   projects build with only existing repository warnings.
 

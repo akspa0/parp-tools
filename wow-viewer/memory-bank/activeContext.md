@@ -12,7 +12,7 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 |---|---|---|
 | PM4 decode | **active** — versioning formatted; placement solved; scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
 | Terrain / viewer runtime | **active** — phased dual-map overlay (135), M2 doodad batching (136), phased minimap & teleport (137) landed; 4.x renderer evolution (138) is an evidence-gated epic note | [activeContext.md](activeContext.md) |
-| World scene graph / renderer performance | **active** — Spec 142 graph, conservative traversal, opt-in `WorldScene` object adapter/selector, nested WMO groups, WMO read-model portal adapter, and bounded portal view volumes implemented; runtime portal traversal, pass/query reuse, and stage evidence remain pending | [Spec 142](../specs/142-world-scene-graph/spec.md) |
+| World scene graph / renderer performance | **active** — Spec 142 graph, conservative traversal, opt-in `WorldScene` object adapter/selector, nested WMO groups, WMO read-model portal adapter, bounded portal view volumes, and an opt-in runtime bridge implemented; runtime portal traversal, pass/query reuse, and stage evidence remain pending | [Spec 142](../specs/142-world-scene-graph/spec.md) |
 | Terrain / minimap ML | **active** — Spec 139 clean-signal reconstruction, Spec 140 paste/fractal/tileset evidence, and Spec 141 external-method translation; object identity remains parked | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
 | Tile archaeology | **active** — old v50 synthetic minimap output needs fresh regeneration after renderer fixes; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
 
@@ -40,7 +40,9 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
   changing readers, preserving valid geometry and failing open for malformed geometry or unknown
   groups. `WorldScenePortalViewVolumeBuilder` now preserves parent planes and creates bounded
   child portal volumes with explicit fallback reasons. Focused proof is 26 tests and the viewer
-  project compiles.
+  project compiles. Loaded `WmoRenderer` portal read models now populate placement-keyed
+  `SceneGraphPortalAdapters` during opt-in graph rebuilds; the current WMO visibility path is
+  unchanged.
 - The adapter does not invent missing group bounds, and terrain chunks are not mounted yet. The
   existing `WmoRenderer` still owns runtime nested portal traversal. Heavy real-scene captures and
   GPU measurements remain user-run; next gaps are `WorldScene` view-volume integration/doorway

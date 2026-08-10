@@ -9,6 +9,7 @@ using WoWViewer.Logging;
 using WoWViewer.Terrain;
 using Silk.NET.OpenGL;
 using WowViewer.Core.Runtime.M2;
+using WowViewer.Core.Runtime.World.SceneGraph;
 using WowViewer.Core.Wmo;
 using WowViewer.Core.IO.Converters;
 
@@ -202,6 +203,55 @@ public class WmoRenderer : ISceneRenderer
     /// <summary>MOHD bounding box max in WMO local space.</summary>
     public Vector3 BoundsMax => _wmo.BoundsMax;
     public int GroupRenderCount => _groups.Count;
+
+    /// <summary>
+    /// Exposes the already-loaded WMO portal read model for the opt-in scene-graph bridge.
+    /// This does not change the renderer's existing portal visibility path.
+    /// </summary>
+    public IReadOnlyList<WorldSceneWmoPortalGroupReadModel> GetSceneGraphPortalGroups()
+        => _wmo.Groups
+            .Select((_, groupIndex) => new WorldSceneWmoPortalGroupReadModel(groupIndex))
+            .ToArray();
+
+    /// <summary>
+    /// Converts the existing renderer-owned WMO portal data to the graph adapter contract.
+    /// Invalid vertex ranges are represented as missing geometry so the adapter can fail open.
+    /// </summary>
+    public IReadOnlyList<WorldSceneWmoPortalReadModel> GetSceneGraphPortalReadModels()
+    {
+        List<WorldSceneWmoPortalReadModel> portals = new(_wmo.Portals.Count);
+        for (int portalIndex = 0; portalIndex < _wmo.Portals.Count; portalIndex++)
+        {
+            WmoV14ToV17Converter.WmoPortal portal = _wmo.Portals[portalIndex];
+            IReadOnlyList<Vector3>? vertices = null;
+            int startVertex = portal.StartVertex;
+            int vertexCount = portal.Count;
+            if (vertexCount >= 3 && startVertex <= _wmo.PortalVertices.Count - vertexCount)
+            {
+                vertices = _wmo.PortalVertices
+                    .Skip(startVertex)
+                    .Take(vertexCount)
+                    .ToArray();
+            }
+
+            portals.Add(new WorldSceneWmoPortalReadModel(
+                portalIndex,
+                vertices,
+                new Vector3(portal.PlaneA, portal.PlaneB, portal.PlaneC),
+                portal.PlaneD,
+                _wmo.PortalRefs
+                    .Select((reference, referenceIndex) => (reference, referenceIndex))
+                    .Where(item => item.reference.PortalIndex == portalIndex)
+                    .Select(item => new WorldSceneWmoPortalReferenceReadModel(
+                        item.referenceIndex,
+                        item.reference.PortalIndex,
+                        item.reference.GroupIndex,
+                        item.reference.Side))
+                    .ToArray()));
+        }
+
+        return portals;
+    }
 
     // Sub-object visibility: WMO groups + doodad toggle
     // Layout: [0..N-1] = WMO groups, [N] = "Doodads" toggle, [N+1..] = individual doodad models

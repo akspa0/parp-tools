@@ -809,6 +809,7 @@ public class WorldScene : ISceneRenderer
     private readonly List<ObjectInstance> _externalWmoInstances = new();
     private readonly List<ObjectInstance> _taxiActorInstances = new();
     private WorldSceneGraphBuildResult? _sceneGraphBuild;
+    private readonly Dictionary<string, WorldScenePortalAdapterResult> _sceneGraphPortalAdapters = new(StringComparer.Ordinal);
     private readonly List<ObjectInstance> _sceneGraphVisibleMdxInstances = new();
     private readonly List<ObjectInstance> _sceneGraphVisibleWmoInstances = new();
     private bool _sceneGraphFrameVisibilityPrepared;
@@ -1192,6 +1193,7 @@ public class WorldScene : ISceneRenderer
     public bool UseHierarchicalSceneTraversal { get; set; }
     public WorldSceneGraphSnapshot? SceneGraphSnapshot => _sceneGraphBuild?.Graph.CreateSnapshot();
     public WorldSceneTraversalDiagnostics SceneGraphTraversalDiagnostics => _lastSceneGraphTraversalDiagnostics;
+    public IReadOnlyDictionary<string, WorldScenePortalAdapterResult> SceneGraphPortalAdapters => _sceneGraphPortalAdapters;
 
     // Stats
     public int MdxInstanceCount => _mdxInstances.Count;
@@ -8022,6 +8024,7 @@ public class WorldScene : ISceneRenderer
 
     private void RebuildSceneGraphObjectIndex()
     {
+        _sceneGraphPortalAdapters.Clear();
         List<WorldSceneGraphObjectPlacement> placements = new(
             _mdxInstances.Count + _skyboxInstances.Count + _wmoInstances.Count);
 
@@ -8101,6 +8104,14 @@ public class WorldScene : ISceneRenderer
         string parentId,
         ObjectInstance instance)
     {
+        if (_assets.TryGetLoadedWmo(instance.ModelKey, out WmoRenderer? renderer) && renderer is not null)
+        {
+            _sceneGraphPortalAdapters[parentId] = WorldScenePortalAdapter.Build(
+                renderer.GetSceneGraphPortalGroups(),
+                renderer.GetSceneGraphPortalReadModels(),
+                parentId);
+        }
+
         if (!_assets.TryGetWmoMeshSummary(instance.ModelKey, out WmoMeshSummary summary)
             || summary.GroupSummaries is null
             || summary.GroupSummaries.Length == 0)

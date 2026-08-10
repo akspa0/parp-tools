@@ -8,6 +8,15 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 opt-in runtime portal bridge
+
+- Exposed the existing loaded `WmoRenderer` portal data through the graph read-model contract and
+  cached placement-keyed `WorldScenePortalAdapter` results during opt-in `WorldScene` graph rebuilds.
+- Nested group IDs align with the graph children; unloaded WMOs fail open and the current WMO
+  visibility path is unchanged. Viewer build passed with 0 errors; no runtime capture was launched.
+- Runtime nested-volume traversal, doorway parity, pass/query integration, and performance proof
+  remain open.
+
 ## 2026-08-10 — Spec 142 bounded portal view-volume contract
 
 - Added `WorldScenePortalViewVolumeBuilder`: parent planes are preserved, portal-edge planes form

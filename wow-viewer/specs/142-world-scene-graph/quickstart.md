@@ -52,11 +52,14 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
 - A child portal volume preserves its parent planes and adds doorway-cone planes; depth limits,
   unknown sides, degenerate edges, invalid geometry, and camera-on-plane cases return fallback
   diagnostics instead of narrowing visibility.
+- With the opt-in graph selector, already-loaded WMO renderers can populate placement-keyed portal
+  adapter diagnostics using the same nested group IDs; this is a compile-checked bridge only and
+  does not change WMO visibility.
 - Unknown object bounds keep their bucket and map fail-open.
 - The viewer project compiles with the opt-in `WorldScene.UseHierarchicalSceneTraversal` seam.
 
 ## Not yet run by this phase
 
-The four-scale performance ladder, runtime nested portal integration/doorway parity, current-vs-new
+The four-scale performance ladder, runtime nested portal traversal/doorway parity, current-vs-new
 traversal comparison, pass/query parity, real-client capture, GPU timing, and whole-map residency
 work remain later user-run gates. Do not interpret this test/build pass as an FPS result.

@@ -87,6 +87,7 @@ identity; no FPS or GPU claim is made.
 ## Phase 9: Integration and Evidence
 
 - [x] T026 Integrate graph ownership behind an opt-in runtime selector in `wow-viewer/src/viewer/WoWViewer/Terrain/WorldScene.cs`, mount client-backed `WmoGroup` children when summaries are available, and keep the legacy path as the default until parity evidence exists.
+- [x] T031 Add a build-checked opt-in bridge from loaded `WmoRenderer` portal read models to placement-keyed `WorldScenePortalAdapter` results in `wow-viewer/src/viewer/WoWViewer/Rendering/WmoRenderer.cs` and `wow-viewer/src/viewer/WoWViewer/Terrain/WorldScene.cs`; do not change runtime visibility behavior.
 - [ ] T027 Add synthetic workload replay and stage-level report output in `wow-viewer/tools/validation-capture/WowViewer.Tool.ValidationCapture/ValidationWorldSceneAdapter.cs`.
 - [ ] T028 Add current-vs-new parity and performance report tests in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldScenePerformanceReportTests.cs`.
 - [ ] T029 Run the focused and full test commands from `wow-viewer/specs/142-world-scene-graph/quickstart.md` and record evidence in `wow-viewer/memory-bank/progress.md`.
