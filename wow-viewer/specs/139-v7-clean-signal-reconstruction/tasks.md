@@ -39,7 +39,7 @@ rows and visual review identifies all required families and cross-tile continuit
 
 - [x] T016 [P] [US2] Implement clean observation packaging from the authoritative C# synthetic observation in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_inputs.py`, deriving only luma, gradients, and declared confidence.
 - [x] T017 [US2] Implement the synthetic clean-signal corpus builder in `wow-viewer/data-harvester/scripts/v60_build_clean_signal_corpus.py`, preserving terrain, observation, albedo, confidence, and split provenance.
-- [ ] T018 [P] [US2] Add family/variant/cross-tile visual review in `wow-viewer/data-harvester/scripts/v60_visualize_clean_signal.py`.
+- [x] T018 [P] [US2] Add family/variant/cross-tile visual review in `wow-viewer/data-harvester/scripts/v60_visualize_clean_signal.py`.
 - [x] T019 [US2] Add corpus validation and reproducibility tests in `wow-viewer/data-harvester/tests/v60/test_clean_signal_corpus.py`.
 - [ ] T020 [US2] **USER RUNS** the synthetic corpus build and visual review after the dry-run command reports the expected source and output contracts.
 

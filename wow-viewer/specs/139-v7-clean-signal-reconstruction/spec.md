@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-10
 
-**Status**: Phase 4 synthetic corpus packaging implemented; visual review, losses, trainer, and training remain unimplemented
+**Status**: Phase 4 synthetic corpus and visual review implemented; losses, trainer, and training remain unimplemented
 
 **Input**: User description: "Build the old v7 model idea with a modern architecture, guided by
 clean synthetic data and a sane signal set. Remove the WDL-prior dependency so any minimap can be
@@ -29,8 +29,10 @@ The first bounded implementation slice is now present under `data-harvester/src/
   named arrays plus hashes. It refuses existing output and leaves any failed `.partial` root
   non-validating for inspection.
 - `v60_validate_clean_signal_corpus.py` is a fail-closed report CLI. CPU-focused contract proof
-  passes: 26 new tests and 66 tests across `tests/v60`. No corpus generation, real-client
-  processing, visual acceptance, or GPU training has run.
+- `v60_visualize_clean_signal.py` renders family, variant, and complete cross-tile atlases while
+  retaining validation metrics and row provenance in a JSON review report.
+- CPU-focused contract proof passes: 27 new tests and 67 tests across `tests/v60`. No corpus
+  generation, real-client processing, visual acceptance, or GPU training has run.
 
 Model adapters and the synthetic corpus builder stay behind this contract gate.
 

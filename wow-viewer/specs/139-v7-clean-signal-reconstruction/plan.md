@@ -21,7 +21,9 @@ The model identity records its input/output schemas, architecture, profile, para
 configuration hash; reconstruction tests load the saved state into a rebuilt identity. The corpus
 builder consumes only validated control NPZs, derives the declared synthetic observation,
 materializes structural targets, and publishes a hash-bound manifest atomically. The next slice is
-visual review, not a user-run training command.
+visual review and is also implemented as a family/variant/cross-tile atlas with provenance JSON.
+The next slice is the independently ablatable parity/structural loss matrix, not a user-run
+training command.
 
 ## Technical Context
 

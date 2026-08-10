@@ -176,9 +176,10 @@ weights are explicitly excluded after the prior non-repeatable failed attempt.
   observation packing/gates, deterministic range-floor plus box9 coarse/detail targets,
   NPZ/hash/split/recomposition validation, fail-closed validator CLI, and local random-initialized
   `pyramid_cnn`/`segformer_b0`/`unet_lite_v2` coarse/detail adapters. Focused proof is 23 new
-  tests; full `tests/v60` passes 66 tests. The synthetic builder is implemented but no user corpus
-  has been generated or visually accepted. The visual atlas, loss matrix, real transfer, and every
-  corpus/GPU run remain unproven and user-owned where applicable.
+  tests; full `tests/v60` passes 67 tests. The synthetic builder and family/variant/cross-tile
+  visual-review code are implemented, but no user corpus has been generated or visually accepted.
+  The loss matrix, real transfer, and every corpus/GPU run remain unproven and user-owned where
+  applicable.
 - Overlap handling is explicit: `object_instance_id_256` stores only the visible winner per pixel,
   so fully occluded instances are skipped and recorded rather than treated as positives. Marker
   corpus publication is atomic through `<output>.partial`; a failed build cannot be validated as a

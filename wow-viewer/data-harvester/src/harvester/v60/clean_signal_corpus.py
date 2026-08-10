@@ -151,8 +151,7 @@ def build_clean_signal_corpus(
             npz_path = partial / relative_npz
             npz_path.parent.mkdir(parents=True, exist_ok=True)
             np.savez(npz_path, **arrays)
-            rows.append(
-                {
+            output_row = {
                     "row_id": str(source_row["row_id"]),
                     "source_kind": "synthetic_control",
                     "source_group_id": str(source_row.get("source_group_id", source_row["control_family"])),
@@ -167,7 +166,19 @@ def build_clean_signal_corpus(
                     "forbidden_signals": [],
                     "array_hashes": {name: array_sha256(array) for name, array in arrays.items()},
                 }
-            )
+            for metadata_key in (
+                "pattern_id",
+                "pattern_tile_x",
+                "pattern_tile_y",
+                "pattern_tile_span",
+                "pattern_continuity",
+                "cell_alignment",
+                "field_offset_x",
+                "field_offset_y",
+            ):
+                if metadata_key in source_row:
+                    output_row[metadata_key] = source_row[metadata_key]
+            rows.append(output_row)
         manifest = {
             "schema": CORPUS_SCHEMA,
             "row_count": len(rows),
