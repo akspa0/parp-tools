@@ -11,9 +11,11 @@ import numpy as np
 
 from harvester.v60.clean_signal_inputs import (
     IMAGE_SHAPE,
+    build_clean_observation,
     validate_clean_observation,
 )
-from harvester.v60.clean_signal_targets import TARGET_SHAPE
+from harvester.v60.clean_signal_targets import TARGET_SHAPE, decompose_relative_height
+from harvester.v60.control_corpus import load_control_manifest, validate_control_corpus
 
 CORPUS_SCHEMA = "v7-clean-signal-corpus-v1"
 VALID_SOURCE_KINDS = frozenset({"synthetic_control", "accepted_real"})
@@ -37,9 +39,15 @@ REQUIRED_ARRAYS = (
 )
 
 
-def _sha256_array(array: np.ndarray) -> str:
+def array_sha256(array: np.ndarray) -> str:
     canonical = np.ascontiguousarray(np.asarray(array, dtype="<f4"))
     return hashlib.sha256(canonical.tobytes(order="C")).hexdigest()
+
+
+def _sha256_array(array: np.ndarray) -> str:
+    """Backward-compatible private alias for validators written during the contract slice."""
+
+    return array_sha256(array)
 
 
 def load_clean_signal_manifest(corpus_root: str | Path) -> dict[str, Any]:
@@ -57,6 +65,138 @@ def load_clean_signal_manifest(corpus_root: str | Path) -> dict[str, Any]:
     if int(manifest.get("row_count", -1)) != len(rows):
         raise ValueError("clean-signal manifest row_count does not match rows")
     return manifest
+
+
+def clean_signal_build_plan(
+    control_root: str | Path,
+    *,
+    confidence_value: float = 1.0,
+) -> dict[str, Any]:
+    """Validate the source control manifest and return a no-write corpus build plan."""
+
+    root = Path(control_root)
+    validation = validate_control_corpus(root)
+    if not validation["valid"]:
+        failures = "; ".join(str(value) for value in validation["failures"][:8])
+        raise ValueError(f"invalid control corpus: {failures}")
+    if not np.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
+        raise ValueError("confidence_value must be finite and within [0, 1]")
+    manifest = load_control_manifest(root)
+    families = sorted({str(row["control_family"]) for row in manifest["rows"]})
+    return {
+        "schema": "v7-clean-signal-build-plan-v1",
+        "source_root": str(root.resolve()),
+        "source_schema": manifest["schema"],
+        "source_manifest": str((root / "control_manifest.json").resolve()),
+        "source_row_count": len(manifest["rows"]),
+        "row_count": len(manifest["rows"]),
+        "families": families,
+        "family_count": len(families),
+        "split_mode": "complete_family",
+        "confidence_status": "measured",
+        "confidence_value": float(confidence_value),
+        "input_observation": "terrain_shadow_256_as_synthetic_luma",
+        "forbidden_signals_seen": [],
+        "dry_run": True,
+    }
+
+
+def build_clean_signal_corpus(
+    control_root: str | Path,
+    output_root: str | Path,
+    *,
+    confidence_value: float = 1.0,
+) -> dict[str, Any]:
+    """Materialize a clean-signal corpus atomically from an already validated control corpus."""
+
+    plan = clean_signal_build_plan(control_root, confidence_value=confidence_value)
+    source_root = Path(control_root)
+    output = Path(output_root)
+    partial = output.with_name(f"{output.name}.partial")
+    if output.exists():
+        raise FileExistsError(f"refusing to overwrite existing clean-signal corpus: {output}")
+    if partial.exists():
+        raise FileExistsError(f"refusing to reuse existing partial clean-signal corpus: {partial}")
+    partial.mkdir(parents=True)
+    rows: list[dict[str, Any]] = []
+    source_manifest_bytes = (source_root / "control_manifest.json").read_bytes()
+    source_manifest_sha256 = hashlib.sha256(source_manifest_bytes).hexdigest()
+    source_manifest = load_control_manifest(source_root)
+    confidence = np.full(IMAGE_SHAPE, confidence_value, dtype=np.float32)
+    try:
+        for position, source_row in enumerate(source_manifest["rows"]):
+            source_npz = source_root / str(source_row["npz"])
+            with np.load(source_npz, allow_pickle=False) as payload:
+                if "terrain_shadow_256" not in payload or "height_257" not in payload:
+                    raise ValueError(f"source row {source_row['row_id']!r} is missing the control pair")
+                shadow = np.asarray(payload["terrain_shadow_256"], dtype=np.float32)
+                height = np.asarray(payload["height_257"], dtype=np.float32)
+            provenance = {
+                "operation": "synthetic_control_observation_v1",
+                "source_signal": "terrain_shadow_256",
+                "source_manifest_sha256": source_manifest_sha256,
+                "source_row_id": str(source_row["row_id"]),
+                "artifact_status": "fresh",
+            }
+            package = build_clean_observation(
+                shadow,
+                confidence,
+                "measured",
+                provenance=provenance,
+            )
+            target = decompose_relative_height(height)
+            arrays = {**package.arrays(), **target.arrays}
+            slug = "".join(character if character.isalnum() or character in "-_" else "_" for character in str(source_row["row_id"]))
+            relative_npz = Path("rows") / f"{position:06d}-{slug}.npz"
+            npz_path = partial / relative_npz
+            npz_path.parent.mkdir(parents=True, exist_ok=True)
+            np.savez(npz_path, **arrays)
+            rows.append(
+                {
+                    "row_id": str(source_row["row_id"]),
+                    "source_kind": "synthetic_control",
+                    "source_group_id": str(source_row.get("source_group_id", source_row["control_family"])),
+                    "family": str(source_row["control_family"]),
+                    "complexity_bucket": str(source_row.get("complexity_bucket", "")),
+                    "variant": int(source_row.get("variant", 0)),
+                    "split": str(source_row["split"]),
+                    "npz": relative_npz.as_posix(),
+                    "confidence_status": "measured",
+                    "observation_status": "accepted",
+                    "observation_provenance": provenance,
+                    "forbidden_signals": [],
+                    "array_hashes": {name: array_sha256(array) for name, array in arrays.items()},
+                }
+            )
+        manifest = {
+            "schema": CORPUS_SCHEMA,
+            "row_count": len(rows),
+            "split_mode": "complete_family",
+            "source_control_manifest": str((source_root / "control_manifest.json").resolve()),
+            "source_control_manifest_sha256": source_manifest_sha256,
+            "source_control_schema": source_manifest["schema"],
+            "required_families": sorted({str(row["family"]) for row in rows}),
+            "forbidden_signals_seen": [],
+            "builder": "harvester.v60.clean_signal_corpus.build_clean_signal_corpus",
+            "confidence_status": "measured",
+            "confidence_value": float(confidence_value),
+            "rows": rows,
+        }
+        (partial / "clean_signal_manifest.json").write_text(
+            json.dumps(manifest, indent=2),
+            encoding="utf-8",
+        )
+        partial.replace(output)
+    except Exception:
+        # Leave the exact partial root for inspection; it has no manifest-bearing valid corpus.
+        raise
+    return {
+        **plan,
+        "dry_run": False,
+        "output_root": str(output.resolve()),
+        "manifest": str((output / "clean_signal_manifest.json").resolve()),
+        "row_count": len(rows),
+    }
 
 
 def _read_array(payload: Any, name: str, expected_shape: tuple[int, ...], failures: list[str], prefix: str) -> np.ndarray | None:
@@ -226,6 +366,9 @@ __all__ = [
     "LUMA_SIGNAL",
     "RELATIVE_HEIGHT_SIGNAL",
     "REQUIRED_ARRAYS",
+    "array_sha256",
+    "build_clean_signal_corpus",
+    "clean_signal_build_plan",
     "load_clean_signal_manifest",
     "validate_clean_signal_corpus",
 ]

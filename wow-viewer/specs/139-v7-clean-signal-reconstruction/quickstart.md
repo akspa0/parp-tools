@@ -18,10 +18,22 @@ Run the model contract proof separately:
 uv run --no-cache python -m pytest tests/v60/test_clean_signal_model.py -q --basetemp "I:/parp/parp-tools/output/tmp/pytest-v60-clean-model-user"
 ```
 
-The current combined proof is 23 passing tests. Use a fresh writable `--basetemp` path on Windows
+The current combined contract/model proof is 23 passing tests. Use a fresh writable `--basetemp` path on Windows
 if a previous pytest process still owns files in an older temp directory.
 
-## 1. Validate the design inputs
+## 1. Build the synthetic clean-signal corpus
+
+The builder reads the already validated C# control corpus. It is dry-run by default:
+
+```powershell
+Set-Location "I:/parp/parp-tools/wow-viewer/data-harvester"
+uv run --no-cache python scripts/v60_build_clean_signal_corpus.py --control-corpus "../output/datasets/v60/control-v1" --output "../output/datasets/v60/v7-clean-signal-v1"
+```
+
+After inspecting the source count, families, confidence status, and output path, the user may add
+`--confirm-build` to publish the corpus. Every build needs a fresh output path.
+
+## 2. Validate the design inputs
 
 ```powershell
 Set-Location "I:/parp/parp-tools/wow-viewer/data-harvester"
@@ -31,7 +43,7 @@ uv run --no-cache python scripts/v60_validate_clean_signal_corpus.py --corpus ".
 The validator must report finite four-channel observations, exact target hashes, complete required
 families, and zero forbidden inference signals.
 
-## 2. Print the synthetic training plan
+## 3. Print the synthetic training plan
 
 ```powershell
 uv run --no-cache python scripts/v60_train_clean_signal.py --corpus "../output/datasets/v60/v7-clean-signal-v1" --output "../output/datasets/v60/v7-clean-signal-runs/pyramid-structural-v1" --architectures "pyramid_cnn,segformer_b0,unet_lite_v2" --loss-profiles "parity,v7_structural_v1" --split within_family --train-size 32 --epochs 80 --batch-size 8 --seed 7137
@@ -40,13 +52,13 @@ uv run --no-cache python scripts/v60_train_clean_signal.py --corpus "../output/d
 Without `--confirm-run`, this prints parameter counts, split identities, loss weights, and the
 forbidden-signal audit, then exits without training.
 
-## 3. User-owned training
+## 4. User-owned training
 
 After inspecting the dry run, add `--confirm-run`. Use a fresh output directory for every matrix
 cell. The first meaningful matrix is the within-family learnability split. Only after a structural
 loss/architecture cell clears that gate should the user run the complete-family transfer split.
 
-## 4. Real transfer
+## 5. Real transfer
 
 ```powershell
 uv run --no-cache python scripts/v60_transfer_clean_signal.py --checkpoint "../output/datasets/v60/v7-clean-signal-runs/pyramid-structural-v1/pyramid_cnn/v7_structural_v1/checkpoint_best.pt" --normalized-corpus "../output/datasets/v60/albedo-accepted-0x-1x-v1" --output "../output/datasets/v60/v7-clean-signal-transfer-v1"

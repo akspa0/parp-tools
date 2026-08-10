@@ -13,12 +13,15 @@ and transfer only after the real albedo gate accepts a tiny 0.x/1.x sample.
 
 ## Implementation checkpoint — 2026-08-10
 
-Phase 2 foundational contracts and Phase 3 model contracts are implemented. The clean model slice
+Phase 2 foundational contracts, Phase 3 model contracts, and the synthetic packaging core of Phase
+4 are implemented. The clean model slice
 uses local random-initialized encoders for `pyramid_cnn`, `segformer_b0`, and `unet_lite_v2`, one
 shared feature adapter, independent coarse/detail heads, and a clamped recomposed height output.
 The model identity records its input/output schemas, architecture, profile, parameter count, and
-configuration hash; reconstruction tests load the saved state into a rebuilt identity. The next
-slice is the synthetic corpus packaging/builder, not a user-run training command.
+configuration hash; reconstruction tests load the saved state into a rebuilt identity. The corpus
+builder consumes only validated control NPZs, derives the declared synthetic observation,
+materializes structural targets, and publishes a hash-bound manifest atomically. The next slice is
+visual review, not a user-run training command.
 
 ## Technical Context
 
