@@ -43,6 +43,10 @@ from harvester.v60.clean_signal_train import (
     train_clean_signal_model,
 )
 from harvester.v60.clean_signal_transfer import evaluate_clean_signal_checkpoint
+from harvester.v60.real_minimap_rgb import (
+    build_real_minimap_rgb_corpus,
+    real_minimap_rgb_build_plan,
+)
 from harvester.v60.real_terrain_synthetic import (
     build_real_terrain_synthetic_corpus,
     real_terrain_synthetic_build_plan,
@@ -79,6 +83,8 @@ __all__ = [
     "real_terrain_synthetic_build_plan",
     "build_zarr_real_terrain_synthetic_corpus",
     "zarr_real_terrain_synthetic_build_plan",
+    "build_real_minimap_rgb_corpus",
+    "real_minimap_rgb_build_plan",
     "evaluate_clean_signal_checkpoint",
     "recompose_height",
     "validate_clean_observation",

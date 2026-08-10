@@ -7,7 +7,7 @@ One row in the new synthetic or accepted-real corpus.
 | Field | Type | Contract |
 |---|---|---|
 | `row_id` | string | Globally unique within the corpus. |
-| `source_kind` | enum | `synthetic_control`, `real_terrain_synthetic`, or `accepted_real`. The bridge kind uses real-client terrain geometry with a synthesized clean observation; it is not authored-minimap acceptance. |
+| `source_kind` | enum | `synthetic_control`, `real_terrain_synthetic`, `real_minimap_diagnostic`, or `accepted_real`. The diagnostic minimap kind uses observable `minimap_rgb` without claiming albedo-gate acceptance. |
 | `source_group_id` | string | Split/leakage identity; variants in one group never cross a family holdout. |
 | `clean_observation_luma_256` | float32[256,256] | Finite `[0,1]`, albedo-normalized terrain observation. |
 | `clean_observation_gradient_256` | float32[2,256,256] | Finite deterministic x/y gradients of luma. |

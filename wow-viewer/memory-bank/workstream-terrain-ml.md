@@ -19,6 +19,13 @@ the original `index.parquet` row index and source hash, assigns a complete-famil
 the legacy authored/flat maptexture or raw MCSH is accepted real minimap RGB or deployment-clean
 terrain shadow.
 
+Raw MCSH is now explicitly rejected as an inference route because minimaps do not carry it. The
+active observable baseline is `real_minimap_rgb`: it reads actual authored or synthetic
+`minimap_rgb`, derives raw luma/gradients, and marks `albedo_gate_status=not_run`. The authored side
+has 1,325 rows (688 Kalimdor, 637 Azeroth), so the next user-owned gate is map-held-out authored
+raw-pixel learnability. This expands useful real-data evidence without pretending raw RGB is
+already albedo-normalized.
+
 This file is the durable home for the terrain-ML workstream. `activeContext.md` links here and
 stays short; put detail here, not there.
 
@@ -219,6 +226,10 @@ weights are explicitly excluded after the prior non-repeatable failed attempt.
   source lacks `terrain_shadow_256`, the user must explicitly choose raw `shadow_mask` for a
   geometry-only diagnostic; this is prepared for a user-owned corpus build and CUDA training, not
   yet a promoted model, deployment-clean result, or authored-RGB result.
+- The raw-MCSH route is a rejected negative branch. The minimap-observable raw-RGB dry runs passed
+  for 1,330 synthetic rows (688/642 map split) and 1,325 authored rows (688/637 split). The raw
+  RGB corpus is the active diagnostic because its input is actually present at inference; absent
+  confidence and `not_run` albedo status keep it out of promotion.
 - Overlap handling is explicit: `object_instance_id_256` stores only the visible winner per pixel,
   so fully occluded instances are skipped and recorded rather than treated as positives. Marker
   corpus publication is atomic through `<output>.partial`; a failed build cannot be validated as a

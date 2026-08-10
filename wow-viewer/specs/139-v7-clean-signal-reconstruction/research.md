@@ -91,3 +91,14 @@ architecture-only detour.
 - Reusing the old v50 synthetic RGB as if it were a terrain-shadow target.
 - Using a GAN or external image corpus to make outputs look plausible.
 - Calling synthetic success a real-data transfer result without the albedo gate.
+- Treating raw MCSH/`shadow_mask` as a minimap input. It is absent from the minimap observation and
+  is retained only as rejected negative diagnostic evidence.
+
+### Raw minimap RGB baseline
+
+The v50.1 store contains actual authored and synthetic `minimap_rgb` arrays paired with height
+targets. A bounded `raw_luma_v1` preparation now derives only luma and image gradients from those
+pixels, fills confidence with explicit zeros, and records `albedo_gate_status=not_run`. This does
+not solve albedo normalization; it establishes the honest observable baseline before investing in
+an inverse albedo method. A map-held-out authored run tests real-pixel learnability, while a
+synthetic-trained checkpoint evaluated on authored rows measures domain shift.

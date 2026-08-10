@@ -18,7 +18,9 @@ from harvester.v60.clean_signal_targets import TARGET_SHAPE, decompose_relative_
 from harvester.v60.control_corpus import load_control_manifest, validate_control_corpus
 
 CORPUS_SCHEMA = "v7-clean-signal-corpus-v1"
-VALID_SOURCE_KINDS = frozenset({"synthetic_control", "accepted_real", "real_terrain_synthetic"})
+VALID_SOURCE_KINDS = frozenset(
+    {"synthetic_control", "accepted_real", "real_terrain_synthetic", "real_minimap_diagnostic"}
+)
 VALID_SPLITS = frozenset({"train", "validation", "test"})
 VALID_SPLIT_MODES = frozenset({"within_family", "complete_family"})
 LUMA_SIGNAL = "clean_observation_luma_256"

@@ -8,6 +8,17 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 139 reject MCSH and add observable RGB baseline
+
+- Rejected the raw-MCSH route as a model-input path: minimaps do not carry `shadow_mask`, so it
+  cannot answer the real inference question. No raw-MCSH corpus or training should be run.
+- Added `real_minimap_rgb` preparation from actual Zarr `minimap_rgb`: deterministic raw luma and
+  gradients, explicit absent confidence, `albedo_gate_status=not_run`, source filtering, and
+  map-held-out splits. The real store has 1,325 authored rows (688 Kalimdor, 637 Azeroth).
+- Verified the new focused tests and both actual dry runs. The next heavy action is user-owned
+  authored raw-RGB training/evaluation; this is a learnability baseline, not albedo-normalized
+  promotion evidence.
+
 ## 2026-08-10 — Spec 139 source-signal correction
 
 - The first full-store command exposed a source mismatch: `curriculum-0_5_3_3368-obj_v1.zarr`

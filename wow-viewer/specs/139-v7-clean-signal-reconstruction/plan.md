@@ -134,6 +134,20 @@ diagnostic corpus. Because this store lacks `terrain_shadow_256`, use the explic
 still requires a post-Spec-133 store containing `terrain_shadow_256`; authored minimap RGB remains
 excluded.
 
+## Correction — reject MCSH as an inference route
+
+The pre-Spec-133 v50.1 store exposes raw `shadow_mask`/MCSH, but minimaps do not carry that signal.
+The explicit raw-MCSH builder mode is therefore retained only as negative diagnostic code and is
+not a useful model-input or transfer route. It must not be trained as the next real-data result.
+
+The useful next baseline is observable `minimap_rgb` itself. The new raw-RGB builder converts only
+the image into luma and image gradients, records confidence as `absent_explicit`, and marks the
+albedo gate as `not_run`. This is intentionally not an accepted clean observation; it answers a
+bounded question: can the target relation be learned from actual minimap pixels at all? The v50.1
+store supplies 1,325 authored rows (688 Kalimdor, 637 Azeroth) and 1,330 synthetic rows (688
+Kalimdor, 642 Azeroth), enabling map-held-out authored training and synthetic-to-authored transfer
+diagnostics without reading MCSH or target-derived arrays into the input.
+
 ## Next bounded slice — bridge source integrity and multi-map expansion
 
 Do not retrain the same 16 rows again. The current bridge contains two effectively flat targets,

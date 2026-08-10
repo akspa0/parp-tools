@@ -130,11 +130,13 @@ loss stack or a deployment-safe albedo-normalized input.
   `0.157124` (`-86.71%`). That 16-row directory was an old diagnostic subset, not the intended
   real-data scale. The complete v50.1 mixed curriculum Zarr store has 1,330 synthetic rows
   (688 Kalimdor, 642 Azeroth), but it is pre-Spec-133 and lacks `terrain_shadow_256`; it exposes
-  raw `shadow_mask` instead. The new Zarr bridge builder preserves source row indices and uses
-  Kalimdor train/Azeroth validation. Its explicit raw-MCSH mode is geometry-only diagnostic
-  evidence, not deployment-clean input. Two old-subset rows are effectively flat and source
-  dynamics vary widely, so source-integrity auditing remains the next gate. Authored RGB still
-  needs the albedo-normalization gate. Codex launched no training.
+  raw `shadow_mask` instead. Raw MCSH is rejected as an inference route because minimaps do not
+  carry it. The active real-observable baseline now reads `minimap_rgb`: the store has 1,325
+  authored rows (688 Kalimdor, 637 Azeroth), and the builder derives raw luma/gradients with
+  explicit absent confidence and no albedo-gate claim. Two old-subset rows are effectively flat
+  and source dynamics vary widely, so authored raw-pixel learnability is the next user-owned gate.
+  Authored RGB remains unaccepted until albedo normalization is implemented and measured. Codex
+  launched no training.
 - Detail and commands: [Spec 139 quickstart](../specs/139-v7-clean-signal-reconstruction/quickstart.md).
 
 ## Now — Spec 140 terrain paste and fractal motif archaeology

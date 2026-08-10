@@ -177,41 +177,43 @@ The first 16-row probe is not a promotion gate: its best epoch was 4 at MAE `0.3
 same one-map corpus. Preserve its flat-target, height-range, shadow-dynamics, and mask-coverage
 bands, add approved rows from more maps/builds, and then repeat the bridge training/evaluation.
 
-## 5E. Build the complete v50.1 synthetic-side bridge
+## 5E. Rejected route: raw MCSH
 
 The 16-row `real-shadow-npz-v1` directory above is an old Alpha/Azeroth diagnostic subset. The
 larger source already on disk is the v50.1 mixed curriculum Zarr store. Its synthetic side has
 1,330 rows: 688 Kalimdor and 642 Azeroth. This store is pre-Spec-133: it contains raw `shadow_mask`
-(MCSH), not the deployment-clean `terrain_shadow_256`. The builder holds out one complete map so
-validation tests map-level generalization rather than tile leakage. For this existing store, the
-explicit raw-MCSH diagnostic command is:
+(MCSH), not the deployment-clean `terrain_shadow_256`. MCSH is not carried by minimaps, so do not
+train this route or use it as inference evidence. It is retained only as a negative diagnostic.
+
+Do not publish or train this raw-MCSH corpus. A deployment-clean bridge requires a post-Spec-133
+store containing `terrain_shadow_256`.
+
+## 5F. Build the minimap-observable raw-RGB baseline
+
+This is the useful immediate diagnostic. It reads actual `minimap_rgb` pixels, derives raw luma and
+gradients, and records confidence as `absent_explicit` because albedo normalization has not run.
+The authored source has 1,325 rows: 688 Kalimdor training and 637 Azeroth validation.
+
+Build the authored corpus:
 
 ```powershell
-Set-Location "I:/parp/parp-tools/wow-viewer/data-harvester"
-uv run --no-cache python scripts/v60_build_real_terrain_synthetic_zarr.py --store "../output/datasets/v50/v50.1/curriculum-0_5_3_3368-obj_v1.zarr" --validation-map "Azeroth" --input-signal shadow_mask --output "../output/datasets/v60/v7-clean-signal-real-terrain-shadow-mask-zarr-v1"
+uv run --no-cache python scripts/v60_build_real_minimap_rgb_corpus.py --store "../output/datasets/v50/v50.1/curriculum-0_5_3_3368-obj_v1.zarr" --source-filter authored --validation-map Azeroth --output "../output/datasets/v60/v7-clean-signal-real-minimap-rgb-authored-v1" --confirm-build
 ```
 
-After reviewing the plan, the user may publish the 1,330-row corpus:
+Then train directly on authored minimaps with Azeroth held out (Codex does not launch this CUDA run):
 
 ```powershell
-uv run --no-cache python scripts/v60_build_real_terrain_synthetic_zarr.py --store "../output/datasets/v50/v50.1/curriculum-0_5_3_3368-obj_v1.zarr" --validation-map "Azeroth" --input-signal shadow_mask --output "../output/datasets/v60/v7-clean-signal-real-terrain-shadow-mask-zarr-v1" --confirm-build
+uv run --no-cache python scripts/v60_train_clean_signal.py --corpus "../output/datasets/v60/v7-clean-signal-real-minimap-rgb-authored-v1" --output "../output/datasets/v60/v7-clean-signal-runs/pyramid-full-structural-real-minimap-rgb-authored-v1" --architectures "pyramid_cnn" --loss-profiles "v7_structural_v1" --model-profile full --split complete_family --train-size 688 --epochs 80 --batch-size 8 --seed 7137 --device cuda --confirm-run
 ```
 
-Then the user may train a map-held-out bridge checkpoint (Codex does not launch this CUDA run):
+Evaluate the held-out authored rows:
 
 ```powershell
-uv run --no-cache python scripts/v60_train_clean_signal.py --corpus "../output/datasets/v60/v7-clean-signal-real-terrain-shadow-mask-zarr-v1" --output "../output/datasets/v60/v7-clean-signal-runs/pyramid-full-structural-real-terrain-shadow-mask-zarr-v1" --architectures "pyramid_cnn" --loss-profiles "v7_structural_v1" --model-profile full --split complete_family --train-size 688 --epochs 80 --batch-size 8 --seed 7137 --device cuda --confirm-run
+uv run --no-cache python scripts/v60_evaluate_clean_signal_checkpoint.py --checkpoint "../output/datasets/v60/v7-clean-signal-runs/pyramid-full-structural-real-minimap-rgb-authored-v1/pyramid_cnn/v7_structural_v1/checkpoint_best.pt" --corpus "../output/datasets/v60/v7-clean-signal-real-minimap-rgb-authored-v1" --output "../output/datasets/v60/v7-clean-signal-transfer-diagnostics/real-minimap-rgb-authored-v1" --device cpu --source-kind real_minimap_diagnostic
 ```
 
-Evaluate that checkpoint on all 1,330 bridge rows:
-
-```powershell
-uv run --no-cache python scripts/v60_evaluate_clean_signal_checkpoint.py --checkpoint "../output/datasets/v60/v7-clean-signal-runs/pyramid-full-structural-real-terrain-shadow-mask-zarr-v1/pyramid_cnn/v7_structural_v1/checkpoint_best.pt" --corpus "../output/datasets/v60/v7-clean-signal-real-terrain-shadow-mask-zarr-v1" --output "../output/datasets/v60/v7-clean-signal-transfer-diagnostics/real-terrain-shadow-mask-zarr-v1" --device cpu --source-kind real_terrain_synthetic
-```
-
-This is a raw-MCSH terrain-geometry bridge diagnostic, not authored-minimap RGB transfer and not
-deployment-clean `terrain_shadow_256` evidence. Source quality-band auditing and a post-Spec-133
-clean-shadow source remain required before promotion.
+This answers raw real-pixel learnability. It does not authorize albedo-normalized transfer; if it
+fails, the next engineering task is the measurable albedo-normalization method, not MCSH input.
 
 ## 6. Real transfer
 

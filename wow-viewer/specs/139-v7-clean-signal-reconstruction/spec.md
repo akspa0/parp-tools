@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-10
 
-**Status**: Phase 5 implementation and real-terrain bridge diagnostic complete; promotion and authored-real transfer remain held pending within-family and albedo-gate evidence
+**Status**: Phase 5 implementation and minimap-observable raw-RGB diagnostic preparation complete; promotion and albedo-normalized transfer remain held pending user-run evidence
 
 **Input**: User description: "Build the old v7 model idea with a modern architecture, guided by
 clean synthetic data and a sane signal set. Remove the WDL-prior dependency so any minimap can be
@@ -80,6 +80,10 @@ The first bounded implementation slice is now present under `data-harvester/src/
   v50.1 store is pre-Spec-133 and has raw `shadow_mask` rather than `terrain_shadow_256`. The
   builder therefore requires explicit `--input-signal shadow_mask` for a geometry-only raw-MCSH
   diagnostic and never silently aliases it to the deployment-clean signal.
+- Added a minimap-observable raw-RGB diagnostic builder. It reads only `minimap_rgb`, derives
+  luma/gradients, emits explicit absent confidence, and preserves the albedo gate as `not_run`.
+  The actual v50.1 source contains 1,325 authored rows and 1,330 synthetic rows. This baseline is
+  useful for measuring raw-pixel learnability, but it is not accepted albedo-normalized transfer.
 - The user-run real-bridge training probe used 15 rows with one validation row. Its best epoch 4
   scored `0.313952` versus a `0.109902` validation baseline (`-185.66%`); all-16 evaluation of
   that checkpoint scored `0.293371` versus `0.157124` (`-86.71%`). Coarse error dominates detail
