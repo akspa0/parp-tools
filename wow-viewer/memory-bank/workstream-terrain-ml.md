@@ -375,9 +375,13 @@ with source/build/tile provenance, falsification tests, confidence, and next act
 
 Current status: Phase 0/1 implemented and validated. The ledger contains six methods and the audit
 contains four branches with canonical signal aliases and translation decisions; the RGB+`height_257`
-sample is rejected. The focused Spec 141 proof is `17 passed`, full v60 is `106 passed`, and Ruff/`py_compile` pass. No code
-downloads external weights, harvests client data, or trains a model. Gate 0 and Gate 1 are complete;
-Gate 2 is the next RGB-only dry plan for no-mask, predicted-mask, and withheld-mask conditions.
+sample is rejected. The focused Spec 141 proof is `17 passed`, full v60 is `106 passed`, and Ruff/`py_compile` pass. The RGB planner
+now preserves authored/object-library modality separation, condition availability, baseline declarations,
+and split hashes. Real `object-library-sieve-v3` proof is 540 rows with 304 train / 236 validation and
+zero runtime-eligible RGB conditions because its input is `objectified_terrain_shadow_256`. The planner
+adds 5 focused tests; total Spec 141 proof is now 22 tests and full v60 is 111 passing. No code downloads external weights, harvests client
+data, or trains a model. Gate 0, Gate 1, and planner Gate 2 are complete; the next gate is the user-built
+authored RGB corpus and combined dry plan.
 
 ## Dataset-backed viewer boundary (2026-08-10)
 

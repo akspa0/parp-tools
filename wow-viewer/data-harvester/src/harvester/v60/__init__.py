@@ -55,6 +55,9 @@ from harvester.v60.real_terrain_synthetic_zarr import (
     build_zarr_real_terrain_synthetic_corpus,
     zarr_real_terrain_synthetic_build_plan,
 )
+from harvester.v60.rgb_method_benchmark import (
+    build_rgb_method_benchmark_plan,
+)
 from harvester.v60.terrain_method_translation import (
     ExternalMethodRecord,
     InputContract,
@@ -98,6 +101,7 @@ __all__ = [
     "zarr_real_terrain_synthetic_build_plan",
     "build_real_minimap_rgb_corpus",
     "real_minimap_rgb_build_plan",
+    "build_rgb_method_benchmark_plan",
     "evaluate_clean_signal_checkpoint",
     "recompose_height",
     "validate_clean_observation",

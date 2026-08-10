@@ -569,5 +569,9 @@ from the current RGB-only minimap contract and adds a provenance-bound research-
 new signal discoveries. Implemented `terrain_method_translation.py` and
 `v60_audit_terrain_methods.py` with six method records, four input branches, canonical aliases, and
 forbidden-read audits. Focused proof is `17 passed`; the full v60 regression is `106 passed`; Ruff,
-`py_compile`, and the dry-run CLI pass. No external-weight use, harvest, or training occurred.
-Next: build the RGB benchmark dry plan for no-mask, predicted-mask, and withheld-mask conditions.
+`py_compile`, and the dry-run CLI pass. The manifest-only RGB planner now handles authored and
+object-library sources, preserves separate split hashes, and fails closed on target reads. The real
+`object-library-sieve-v3` plan is valid at 540 rows (304 train / 236 validation) but has zero runtime-
+eligible RGB rows because its input is `objectified_terrain_shadow_256`. The planner tests add `5`
+passing cases; full v60 is now `111` passing. No external-weight use, harvest, or training occurred.
+Next: build the authored RGB corpus and review the combined plan.

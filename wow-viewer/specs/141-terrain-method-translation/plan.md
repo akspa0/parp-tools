@@ -11,6 +11,12 @@ six versioned external method records, four input-contract branches, canonical s
 fail-closed input-read audits. The dry-run CLI and 17 focused tests are proven; no external weights,
 client data, corpus build, or training run was used.
 
+Phase 2 is now implemented as a manifest-only planner. The real `object-library-sieve-v3` artifact
+produced a valid 540-row control plan (304 train / 236 validation), but it is explicitly not runtime
+RGB-compatible because its input is `objectified_terrain_shadow_256`. The authored raw-RGB condition
+remains pending until its user-built corpus exists. The planner adds 5 focused tests; full v60 proof is
+111 passing tests.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11+
@@ -55,6 +61,7 @@ wow-viewer/specs/141-terrain-method-translation/
 ├── data-model.md
 ├── quickstart.md
 ├── contracts/method-translation.schema.md
+├── contracts/rgb-method-benchmark.schema.md
 ├── checklists/requirements.md
 └── tasks.md
 ```

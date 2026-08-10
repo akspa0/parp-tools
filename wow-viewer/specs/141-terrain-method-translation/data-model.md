@@ -69,6 +69,39 @@ The final classification of a method or experiment.
 - `reviewed_at`: timestamp.
 - `reviewer_artifacts`: report and visual evidence references.
 
+## RGBMethodBenchmarkPlan
+
+A deterministic, manifest-only plan for the three RGB/object-mask conditions.
+
+- `schema`: `v60-rgb-method-benchmark-v1`.
+- `source_selection`: `authored`, `object_library`, or `both`.
+- `source_reports`: source modality, row counts, split identity, model inputs, evaluation-only arrays, and runtime compatibility.
+- `conditions`: `no_mask`, `predicted_mask`, and `withheld_mask` with per-source availability.
+- `baselines`: tile mean, identity observation, and zero predicted mask declarations.
+- `metric_groups`: final height, clean identity, contaminated input, object mask, cross-tile, and family metrics.
+- `runtime_eligible_conditions`: conditions backed by a runtime-compatible source.
+- `forbidden_reads`: any model-input signal that violates the source contract.
+- `next_gate`: the required user review or run before training.
+
+## BenchmarkCondition
+
+One model-input policy within the plan.
+
+- `condition_id`: one of `no_mask`, `predicted_mask`, or `withheld_mask`.
+- `model_input_policy`: observation-only or observation plus predicted mask.
+- `mask_role`: not provided, predicted only, or evaluation-only withheld from the model.
+- `required_predicted_artifact`: whether a separately proven predicted-mask artifact is required.
+- `source_reports`: eligible counts and runtime status for each source.
+
+## BaselineDefinition
+
+A named comparison with an explicit metric scope and target-read requirement.
+
+- `baseline_id`: stable identifier.
+- `scope`: final height, clean head, or predicted mask.
+- `description`: exact comparison behavior.
+- `requires_target_for_evaluation`: whether targets are evaluation-only inputs.
+
 ## Invariants
 
 1. `deployment_candidate` contracts cannot contain supervision-only or forbidden inputs.
@@ -76,3 +109,5 @@ The final classification of a method or experiment.
 3. A method with an unresolved license or weight status cannot be a project dependency.
 4. A promoted decision requires a linked evidence run and independent baseline-relative metrics.
 5. A research lead cannot leave `unconfirmed` without provenance and a falsification result.
+6. A synthetic luma/object-control source cannot be labeled runtime-compatible with RGB minimap inference.
+7. A target-side mask can support withheld-mask evaluation but cannot appear in `model_input_arrays`.

@@ -314,6 +314,10 @@ RGB-only object-aware terrain completion with no-mask, predicted-mask, and withh
 The package also adds bounded research-lead records so novel signal observations retain provenance,
 falsification tests, confidence, and next actions. The v60 implementation now exposes six method
 records, four input-contract branches, canonical signal aliases, translation decisions, and fail-closed
-input-read audits. The dry-run CLI and focused/full regression proof pass (`17` focused, `106` v60). No external weights,
-client data, corpus build, or training was run. Next gate: prepare the RGB-only no-mask/predicted-mask/
-withheld-mask benchmark dry plan.
+input-read audits. The Phase 0/1 dry-run CLI and regression proof passed (`17` focused, `106` v60). The
+manifest-only RGB planner now produces no-mask/predicted-mask/withheld-mask plans and correctly marks
+the real `object-library-sieve-v3` as synthetic luma control-only: 540 rows, 304 train / 236 validation,
+zero runtime-eligible RGB rows. The authored RGB planner remains blocked only by the missing user-built
+corpus. Focused Spec 141 proof is now `22` tests total; full v60 is `111` passing. No external weights,
+client data, corpus build, or training was run. Next gate: user materializes
+the authored RGB corpus, then reviews the combined benchmark dry plan.

@@ -55,11 +55,11 @@
 
 **Independent Test**: A CPU dry-run emits deterministic splits, baselines, provenance, and independent metric conditions without serializing ground-truth object masks as inference inputs.
 
-- [ ] T016 [US3] Implement benchmark-condition planning for no-mask, predicted-mask, and withheld-mask in `wow-viewer/data-harvester/src/harvester/v60/rgb_method_benchmark.py`.
-- [ ] T017 [US3] Connect the benchmark planner to the existing object-library sieve and authored raw-RGB manifest contracts in `wow-viewer/data-harvester/src/harvester/v60/rgb_method_benchmark.py`.
-- [ ] T018 [US3] Add identity, tile-mean, clean-height, contaminated-input, mask, family, and cross-tile metric declarations in `wow-viewer/data-harvester/src/harvester/v60/rgb_method_benchmark.py`.
-- [ ] T019 [US3] Add the PowerShell-ready dry-run CLI in `wow-viewer/data-harvester/scripts/v60_build_rgb_method_benchmark.py`.
-- [ ] T020 [P] [US3] Add benchmark planning and no-leak tests in `wow-viewer/data-harvester/tests/v60/test_rgb_method_benchmark.py`.
+- [x] T016 [US3] Implement benchmark-condition planning for no-mask, predicted-mask, and withheld-mask in `wow-viewer/data-harvester/src/harvester/v60/rgb_method_benchmark.py`.
+- [x] T017 [US3] Connect the benchmark planner to the existing object-library sieve and authored raw-RGB manifest contracts in `wow-viewer/data-harvester/src/harvester/v60/rgb_method_benchmark.py`.
+- [x] T018 [US3] Add identity, tile-mean, clean-height, contaminated-input, mask, family, and cross-tile metric declarations in `wow-viewer/data-harvester/src/harvester/v60/rgb_method_benchmark.py`.
+- [x] T019 [US3] Add the PowerShell-ready dry-run CLI in `wow-viewer/data-harvester/scripts/v60_build_rgb_method_benchmark.py`.
+- [x] T020 [P] [US3] Add benchmark planning and no-leak tests in `wow-viewer/data-harvester/tests/v60/test_rgb_method_benchmark.py`.
 - [ ] T021 [US3] **USER RUNS** the dry plan, then any explicitly confirmed corpus/training/evaluation command after the contract tests pass; record the result in `specs/141-terrain-method-translation/quickstart.md`.
 
 **Checkpoint**: No RGB-only branch is recommended for training until all three mask conditions and declared baselines are present in the dry report.
