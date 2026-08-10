@@ -172,14 +172,14 @@ weights are explicitly excluded after the prior non-repeatable failed attempt.
   the current terrain experiment. The failed marker result is preserved only as a negative record.
 - The old v7 13-channel contract is historical reference only. Its structural loss stack is
   transferable guidance; its WDL trestle and answer-side channels are explicitly rejected.
-- Spec 139 Phase 2 and the Phase 3 model contract are implemented: four-channel image-only
-  observation packing/gates, deterministic range-floor plus box9 coarse/detail targets,
-  NPZ/hash/split/recomposition validation, fail-closed validator CLI, and local random-initialized
-  `pyramid_cnn`/`segformer_b0`/`unet_lite_v2` coarse/detail adapters. Focused proof is 23 new
-  tests; full `tests/v60` passes 67 tests. The synthetic builder and family/variant/cross-tile
-  visual-review code are implemented, but no user corpus has been generated or visually accepted.
-  The loss matrix, real transfer, and every corpus/GPU run remain unproven and user-owned where
-  applicable.
+- Spec 139 contract/model/synthetic/visual slices plus the loss contract are implemented:
+  four-channel image-only observation gates, deterministic range-floor plus box9 coarse/detail
+  targets, NPZ/hash/split/recomposition validation, atomic builder, family/variant/cross-tile
+  review, and local random-initialized `pyramid_cnn`/`segformer_b0`/`unet_lite_v2` adapters. The
+  loss module provides independently ablatable parity and v7 structural point/gradient/frequency/
+  curvature/edge/transition/border/LF/HF terms. Focused loss proof is 4 tests; full `tests/v60`
+  passes 71 tests. No user corpus has been generated or visually accepted. The shared trainer,
+  real transfer, and every corpus/GPU run remain unproven and user-owned where applicable.
 - Overlap handling is explicit: `object_instance_id_256` stores only the visible winner per pixel,
   so fully occluded instances are skipped and recorded rather than treated as positives. Marker
   corpus publication is atomic through `<output>.partial`; a failed build cannot be validated as a

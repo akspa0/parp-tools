@@ -21,6 +21,15 @@ uv run --no-cache python -m pytest tests/v60/test_clean_signal_model.py -q --bas
 The current combined contract/model proof is 23 passing tests. Use a fresh writable `--basetemp` path on Windows
 if a previous pytest process still owns files in an older temp directory.
 
+Run the loss contract proof separately:
+
+```powershell
+uv run --no-cache python -m pytest tests/v60/test_clean_signal_losses.py -q --basetemp "I:/parp/parp-tools/output/tmp/pytest-v60-clean-losses-user"
+```
+
+This proves identity zeros, structural penalties for smoothed high-frequency targets,
+differentiability, and independent component isolation. It does not launch training.
+
 ## 1. Build the synthetic clean-signal corpus
 
 The builder reads the already validated C# control corpus. It is dry-run by default:

@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-10
 
-**Status**: Phase 4 synthetic corpus and visual review implemented; losses, trainer, and training remain unimplemented
+**Status**: Phase 5 loss contract implemented; trainer, corpus execution, visual acceptance, and training remain unimplemented
 
 **Input**: User description: "Build the old v7 model idea with a modern architecture, guided by
 clean synthetic data and a sane signal set. Remove the WDL-prior dependency so any minimap can be
@@ -28,10 +28,14 @@ The first bounded implementation slice is now present under `data-harvester/src/
   `control_manifest.json`; it preserves family/variant/split provenance and writes all seven
   named arrays plus hashes. It refuses existing output and leaves any failed `.partial` root
   non-validating for inspection.
-- `v60_validate_clean_signal_corpus.py` is a fail-closed report CLI. CPU-focused contract proof
+- `v60_validate_clean_signal_corpus.py` is a fail-closed report CLI.
 - `v60_visualize_clean_signal.py` renders family, variant, and complete cross-tile atlases while
   retaining validation metrics and row provenance in a JSON review report.
-- CPU-focused contract proof passes: 27 new tests and 67 tests across `tests/v60`. No corpus
+- `clean_signal_losses.py` defines versioned `parity` and `v7_structural_v1` profiles. Point,
+  gradient, full-spectrum, Laplacian, Sobel edge, transition, border, and low/high-frequency
+  components remain independently measurable and differentiable; adversarial and object/recovery
+  terms are excluded from the first clean lane.
+- CPU-focused contract proof passes: 31 new tests and 71 tests across `tests/v60`. No corpus
   generation, real-client processing, visual acceptance, or GPU training has run.
 
 Model adapters and the synthetic corpus builder stay behind this contract gate.

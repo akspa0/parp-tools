@@ -96,15 +96,15 @@ loss stack or a deployment-safe albedo-normalized input.
   retrieval top-1 ended at 0, negatives were frequently accepted as known, and the input corpus did
   not preserve the real object RGB signal required for identity. Its checkpoint and reports remain
   diagnostic only and must not enter the terrain model.
-- Spec 139 Phase 2 is now partially implemented: clean observation packing/gates, deterministic
-  coarse/detail targets, corpus hashes/splits, and CPU fixtures are in
-  `data-harvester/src/harvester/v60/`, with a fail-closed validator CLI in `scripts/`. The shared
-  model contract now covers `pyramid_cnn`, `segformer_b0`, and `unet_lite_v2` with reconstructable
-  identities and CPU forward/backward proof. Focused proof is 23 new tests and the full v60 folder
-  is 67 passing. The clean corpus builder publishes a hash-bound synthetic manifest atomically and
-  the visual-review code emits family/variant/cross-tile atlases with provenance JSON. No user
-  corpus has been generated or visually accepted; structural losses and all user-run training
-  remain ahead.
+- Spec 139 contract, model, synthetic packaging, visual-review, and loss slices are implemented in
+  `data-harvester/src/harvester/v60/`, with fail-closed validator/builder/visual CLIs in `scripts/`.
+  The shared model contract covers `pyramid_cnn`, `segformer_b0`, and `unet_lite_v2`; the loss
+  contract now exposes versioned parity and v7 structural profiles with independent differentiable
+  point/gradient/frequency/curvature/edge/transition/border/LF/HF metrics. Focused loss proof is 4
+  tests and the full v60 folder is 71 passing after this slice. The clean corpus builder publishes
+  a hash-bound synthetic manifest atomically and visual review emits family/variant/cross-tile
+  atlases with provenance JSON. No user corpus has been generated or visually accepted; the shared
+  trainer, real transfer, and all user-run training remain ahead.
 - Detail and commands: [Spec 139 quickstart](../specs/139-v7-clean-signal-reconstruction/quickstart.md).
 
 ## Now — Spec 140 terrain paste and fractal motif archaeology

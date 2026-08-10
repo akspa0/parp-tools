@@ -48,7 +48,17 @@ Current state and open work: [activeContext.md](activeContext.md).
   cross-tile atlas.
 - Added a visual-review fixture proving family, variant, and cross-tile outputs. Evidence: 1 new
   visual-review test passed; full v60 verification is 67 passing tests. No generated atlas has been
-  visually accepted by the user.
+visually accepted by the user.
+
+## 2026-08-10 — Spec 139 clean-signal loss contract
+
+- Added `clean_signal_losses.py` with versioned `parity` and `v7_structural_v1` configurations.
+  Point, first-derivative, full log-spectrum, Laplacian, Sobel edge, transition-focus, tile-border,
+  and low/high-frequency band terms are independently weighted and reported; adversarial and
+  object/recovery terms remain excluded from the clean lane.
+- Added identity-zero, smoothing penalty, differentiability, and component-isolation tests. Evidence:
+  4 focused loss tests passed; full `tests/v60` passes 71 tests, with changed-file Ruff and
+  `py_compile` clean. No corpus generation or training was launched.
 
 ## 2026-08-10 — reset v60 to terrain-only learning
 

@@ -13,6 +13,13 @@ from harvester.v60.clean_signal_inputs import (
     build_clean_observation,
     validate_clean_observation,
 )
+from harvester.v60.clean_signal_losses import (
+    CLEAN_SIGNAL_LOSS_PROFILES,
+    CleanSignalLossError,
+    V7GuidanceConfig,
+    clean_signal_loss,
+    get_clean_signal_loss_config,
+)
 from harvester.v60.clean_signal_model import (
     CleanSignalModel,
     CleanSignalModelError,
@@ -31,11 +38,16 @@ __all__ = [
     "CleanSignalModel",
     "CleanSignalModelError",
     "CleanSignalPredictions",
+    "CleanSignalLossError",
+    "CLEAN_SIGNAL_LOSS_PROFILES",
     "StructuralTarget",
+    "V7GuidanceConfig",
     "build_clean_observation",
     "build_clean_signal_model",
     "build_clean_signal_model_from_identity",
     "decompose_relative_height",
+    "clean_signal_loss",
+    "get_clean_signal_loss_config",
     "recompose_height",
     "validate_clean_observation",
     "validate_clean_signal_corpus",

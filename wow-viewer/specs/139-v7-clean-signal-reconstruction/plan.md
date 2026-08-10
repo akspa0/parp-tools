@@ -20,10 +20,11 @@ shared feature adapter, independent coarse/detail heads, and a clamped recompose
 The model identity records its input/output schemas, architecture, profile, parameter count, and
 configuration hash; reconstruction tests load the saved state into a rebuilt identity. The corpus
 builder consumes only validated control NPZs, derives the declared synthetic observation,
-materializes structural targets, and publishes a hash-bound manifest atomically. The next slice is
-visual review and is also implemented as a family/variant/cross-tile atlas with provenance JSON.
-The next slice is the independently ablatable parity/structural loss matrix, not a user-run
-training command.
+materializes structural targets, and publishes a hash-bound manifest atomically. The visual-review
+slice is implemented as a family/variant/cross-tile atlas with provenance JSON. The loss slice now
+provides versioned parity and v7 structural profiles, differentiable point/gradient, frequency,
+curvature, edge, transition, border, and LF/HF terms, and independent component tensors. The next
+slice is the shared evaluator/trainer contract, not a user-run training command.
 
 ## Technical Context
 
@@ -101,7 +102,8 @@ wow-viewer/data-harvester/
 4. `pyramid_cnn` is the first implementation candidate, `segformer_b0` is the transformer
    comparison, and `unet_lite_v2` is the control. No DPT or external checkpoint is needed here.
 5. The loss registry keeps point/gradient parity separate from the v7 structural stack. The first
-   structural run excludes adversarial and recovery/object terms.
+   structural run excludes adversarial and recovery/object terms, and every enabled or disabled term
+   remains available as an independent metric.
 
 ## Phase 0 — Contract and evidence
 

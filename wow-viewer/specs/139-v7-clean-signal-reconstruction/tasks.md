@@ -51,8 +51,8 @@ current baseline gap.
 **Independent test**: A fixed split and model can run parity and structural loss profiles with
 per-component and per-family metrics recorded under one report schema.
 
-- [ ] T021 [P] [US3] Implement parity and structural loss components in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_losses.py` for point, gradient, frequency, Laplacian, edge, transition, border, and LF/HF bands.
-- [ ] T022 [US3] Add zero/identity, smoothing-penalty, differentiability, and component-isolation tests in `wow-viewer/data-harvester/tests/v60/test_clean_signal_losses.py`.
+- [x] T021 [P] [US3] Implement parity and structural loss components in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_losses.py` for point, gradient, frequency, Laplacian, edge, transition, border, and LF/HF bands.
+- [x] T022 [US3] Add zero/identity, smoothing-penalty, differentiability, and component-isolation tests in `wow-viewer/data-harvester/tests/v60/test_clean_signal_losses.py`.
 - [ ] T023 [US3] Implement the shared trainer, evaluator, best-checkpoint selection, and per-signal report in `wow-viewer/data-harvester/src/harvester/v60/clean_signal_train.py`.
 - [ ] T024 [US3] Add the PowerShell-ready dry-run/user-run CLI and fresh-output refusal in `wow-viewer/data-harvester/scripts/v60_train_clean_signal.py`.
 - [ ] T025 [US3] Add report tests proving identical splits across architectures/losses and independent family/bucket metrics in `wow-viewer/data-harvester/tests/v60/test_clean_signal_train.py`.
