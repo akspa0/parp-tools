@@ -69,6 +69,16 @@ visually accepted by the user.
   passed; full `tests/v60` passes 74 tests, with changed-file Ruff and `py_compile` clean. The tests
   inject a tiny CPU model only for contract proof; no real training run was launched.
 
+## 2026-08-10 — Spec 139 clean-signal training CLI
+
+- Added `v60_train_clean_signal.py`, a PowerShell-ready dry-run matrix planner for the shared
+  architecture/loss split. It reports model identities, parameter counts, loss weights, split hash,
+  and empty forbidden-signal audit; `--confirm-run` is required and nonempty output roots fail
+  closed before any trainer call.
+- Added dry-run/no-write and fresh-output refusal tests. Evidence: 2 focused CLI tests passed; full
+  `tests/v60` passes 76 tests, with changed-file Ruff and `py_compile` clean. No user corpus or
+  training cell was launched.
+
 ## 2026-08-10 — reset v60 to terrain-only learning
 
 - Parked object-sieve and object-marker work after the user-run marker experiment failed identity

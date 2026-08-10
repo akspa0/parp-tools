@@ -185,6 +185,21 @@ def build_clean_signal_split(
     return CleanSignalSplit(tuple(train_rows), tuple(validation_rows), mode, seed, identity)
 
 
+def select_clean_signal_training_rows(
+    rows: Iterable[CleanSignalRow],
+    *,
+    count: int,
+    seed: int,
+) -> tuple[CleanSignalRow, ...]:
+    """Select one deterministic training subset reused by every matrix cell."""
+
+    candidates = sorted(rows, key=lambda row: row.row_id)
+    if count < 1 or count > len(candidates):
+        raise CleanSignalTrainError(f"train size {count} must be within 1..{len(candidates)}")
+    order = np.random.default_rng(seed).permutation(len(candidates))
+    return tuple(sorted((candidates[int(index)] for index in order[:count]), key=lambda row: row.row_id))
+
+
 class CleanSignalDataset(Dataset[dict[str, Any]]):
     """Lazy NPZ dataset that assembles exactly four observation channels."""
 
@@ -346,6 +361,7 @@ def train_clean_signal_model(
     config: CleanSignalTrainConfig | None = None,
     split: CleanSignalSplit | Mapping[str, Any] | None = None,
     model_builder: ModelBuilder | None = None,
+    model_profile: str = "tiny",
 ) -> dict[str, Any]:
     """Train one architecture/profile cell and persist best/last checkpoints."""
 
@@ -360,7 +376,7 @@ def train_clean_signal_model(
     _set_seed(selected_config.seed)
     device = _device(selected_config)
     builder = model_builder or build_clean_signal_model
-    model, identity = builder(architecture, profile="tiny")
+    model, identity = builder(architecture, profile=model_profile)
     model = model.to(device)
     train_loader = DataLoader(
         CleanSignalDataset(train_selection),
@@ -457,6 +473,7 @@ def train_clean_signal_model(
     report = {
         "schema": TRAIN_SCHEMA,
         "architecture": architecture,
+        "model_profile": model_profile,
         "model_identity": identity,
         "loss_profile": selected_loss.as_dict(),
         "seed": selected_config.seed,
@@ -486,5 +503,6 @@ __all__ = [
     "build_clean_signal_split",
     "evaluate_clean_signal_model",
     "load_clean_signal_rows",
+    "select_clean_signal_training_rows",
     "train_clean_signal_model",
 ]

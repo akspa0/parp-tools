@@ -179,9 +179,10 @@ weights are explicitly excluded after the prior non-repeatable failed attempt.
   loss module provides independently ablatable parity and v7 structural point/gradient/frequency/
   curvature/edge/transition/border/LF/HF terms. The shared trainer now fixes deterministic split
   identities, target-free four-channel loading, independent final/coarse/detail reports,
-  family/bucket metrics, and checkpoint binding. Focused loss/trainer proof is 7 tests; full
-  `tests/v60` passes 74 tests. No user corpus has been generated or visually accepted. The dry-run
-  CLI, real transfer, and every corpus/GPU run remain unproven and user-owned where applicable.
+  family/bucket metrics, and checkpoint binding. The PowerShell-ready CLI is dry-run by default and
+  refuses nonempty output roots. Focused loss/trainer/CLI proof is 9 tests; full `tests/v60` passes
+  76 tests. No user corpus has been generated or visually accepted. Real transfer and every
+  corpus/GPU run remain unproven and user-owned where applicable.
 - Overlap handling is explicit: `object_instance_id_256` stores only the visible winner per pixel,
   so fully occluded instances are skipped and recorded rather than treated as positives. Marker
   corpus publication is atomic through `<output>.partial`; a failed build cannot be validated as a

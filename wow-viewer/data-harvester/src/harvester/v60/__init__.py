@@ -38,6 +38,7 @@ from harvester.v60.clean_signal_train import (
     CleanSignalTrainConfig,
     build_clean_signal_split,
     evaluate_clean_signal_model,
+    select_clean_signal_training_rows,
     train_clean_signal_model,
 )
 
@@ -61,6 +62,7 @@ __all__ = [
     "get_clean_signal_loss_config",
     "build_clean_signal_split",
     "evaluate_clean_signal_model",
+    "select_clean_signal_training_rows",
     "train_clean_signal_model",
     "recompose_height",
     "validate_clean_observation",

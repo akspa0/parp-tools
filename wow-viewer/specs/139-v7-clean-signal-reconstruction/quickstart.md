@@ -30,10 +30,10 @@ uv run --no-cache python -m pytest tests/v60/test_clean_signal_losses.py -q --ba
 This proves identity zeros, structural penalties for smoothed high-frequency targets,
 differentiability, and independent component isolation. It does not launch training.
 
-The shared trainer/evaluator is now implemented behind the upcoming CLI. It uses one deterministic
+The shared trainer/evaluator and CLI are implemented. The CLI uses one deterministic
 split identity across architecture/loss cells, reports final/coarse/detail metrics by family and
-complexity bucket, and binds best/last checkpoints to the model and loss contracts. No training
-command is authorized until the dry-run CLI slice is complete.
+complexity bucket, and binds best/last checkpoints to the model and loss contracts. It performs no
+training until `--confirm-run` is added.
 
 ## 1. Build the synthetic clean-signal corpus
 
