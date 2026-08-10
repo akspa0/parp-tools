@@ -9,6 +9,8 @@ The pipeline is deliberately staged:
 ```text
 source arrays
   -> observation/albedo normalization
+  -> lossless alpha/provenance preservation
+  -> parallel alpha views (occupancy, transitions, atomic, block, macro, ordered, cross-tile)
   -> tileset and ordered alpha descriptors
   -> multiscale fractal/motif descriptors
   -> transformed cross-boundary retrieval
@@ -28,10 +30,17 @@ source arrays
   `alpha_0` tensor.
 - Classify paint/relief relationships as intact, retextured, resculpted, unknown, or insufficient.
 - Treat the first motif index as a deterministic retrieval system; neural motif learning is conditional on retrieval proof.
+- Preserve three linked spatial scales: Python-derived atomic brush components, C#-derived paste
+  blocks, and C# full-map macro-prefab context. Do not collapse parent context into atomic labels.
+- Make complete alpha preservation the fan-out boundary: never discard a source layer because one
+  derived interpretation is unhelpful. Keep raw, transition, atomic, block, macro, ordered-layer,
+  and cross-tile views independently available with their own validity and confidence.
 - Make every signal optional at ingestion but explicit in the manifest.
 - Split by `source_group_id` and `paste_family_id`, not by individual overlapping windows.
 - Preserve arbitrary spatial offsets and cross-tile context.
 - Emit one guidance bundle with independent evidence heads so Spec 139 can run parity and ablations.
+- Allow a frozen synthetic reference model to emit curriculum-only difficulty guidance. It may
+  change sampling weights, never labels, provenance, split ownership, or staleness status.
 
 ## Phase 1: Contract and corpus inventory
 
@@ -49,7 +58,8 @@ source arrays
 4. Implement fractal and transition descriptors without declaring historical brush identities.
 5. Implement tileset profiles and auxiliary-channel correlation reports.
 6. Implement paint/relief relationship classification.
-7. Implement optional normalized object-slot descriptors.
+7. Join atomic brush, paste-block, and macro-prefab-context records by spatial and provenance links.
+8. Implement optional normalized object-slot descriptors.
 
 ## Phase 3: Retrieval proof
 
@@ -57,7 +67,7 @@ source arrays
 2. Implement deterministic nearest-neighbor and correlation baselines.
 3. Add cross-tile matching and transform estimation.
 4. Calibrate recurring/unconfirmed/rejected status.
-5. Produce retrieval metrics and visual match sheets.
+5. Produce separate atomic, block, and macro retrieval metrics and visual match sheets.
 
 ## Phase 4: Spec 139 guidance ablation
 
@@ -66,6 +76,13 @@ source arrays
 3. Evaluate within-family learnability and held-out-family transfer separately.
 4. Add the small real 0.x/1.x validation slice only after synthetic gates pass.
 5. Record whether guidance improves reconstruction and seam metrics.
+
+## Phase 4A: Curriculum difficulty guidance
+
+1. Freeze a versioned synthetic reference checkpoint and scoring configuration.
+2. Score candidate controls with per-signal, seam/boundary, confidence, and coverage metrics.
+3. Assign reproducible `easy`, `learnable_hard`, or `pathological` bands and write sampling weights.
+4. Verify that difficulty guidance cannot alter labels, provenance, split ownership, or staleness state.
 
 ## Phase 5: Deferred object and iterative refinement lane
 

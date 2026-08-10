@@ -21,6 +21,7 @@ using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
+using WowViewer.Core.Maps;
 using WoWViewer.Terrain.Vlm;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.M2Chunked;
@@ -2382,6 +2383,22 @@ void main() {
 
             if (!string.IsNullOrEmpty(zarrPath) && Directory.Exists(zarrPath))
                 LoadZarrDataset(zarrPath);
+        }
+
+        if (_wantSelectDatasetCatalogRoot)
+        {
+            _wantSelectDatasetCatalogRoot = false;
+            string? catalogRoot = ShowFolderDialogSTA(
+                "Select dataset catalog root",
+                initialDir: _datasetCatalogRoot,
+                showNewFolderButton: false);
+
+            if (!string.IsNullOrWhiteSpace(catalogRoot) && Directory.Exists(catalogRoot))
+            {
+                _datasetCatalogRoot = catalogRoot;
+                RefreshDatasetCatalog();
+                SaveViewerSettings();
+            }
         }
 
         if (_wantOpenWdtFile)
@@ -12216,9 +12233,15 @@ void main() {
             var loader = new ZarrTileDatasetLoader(datasetRoot);
             ZarrStoreSummary summary = loader.Open();
             _statusMessage =
-                $"Zarr store '{summary.MapName}' discovered: {summary.Arrays.Count} arrays " +
-                $"(liquid_basic_type_257: {(summary.HasLiquidBasicType ? "yes" : "MISSING — rebuild tiles")}). " +
-                "Per-tile loading is the spec 041 T-10 implementation slice.";
+                $"Zarr store '{summary.MapName}' discovered: {summary.Arrays.Count} arrays; " +
+                $"liquid mask={(summary.HasLiquidMask ? "yes" : "no")}, " +
+                $"height={(summary.HasLiquidHeight ? "yes" : "no")}, " +
+                $"type={(summary.HasLiquidType256 || summary.HasLiquidBasicType || summary.HasMh2oTypeMask ? "yes" : "no")}; " +
+                $"objects={(summary.HasObjectSignals ? "yes" : "no")}, " +
+                $"tilesets={(summary.HasTilesetSignals ? "yes" : "no")}, " +
+                $"textures={(summary.HasTextureSignals ? "yes" : "no")}, " +
+                $"placements={(summary.HasPlacementSignals ? "yes" : "no")}. " +
+                "Summary only: per-tile loading still requires the Zarr decoder/rehydration slice.";
         }
         catch (Exception ex)
         {
@@ -14643,6 +14666,7 @@ void main() {
             {
                 _hasExplicitWmoMliqRotationOverride = false;
                 WmoRenderer.MliqRotationQuarterTurns = 0;
+                RefreshDatasetCatalog();
                 return;
             }
 
@@ -14676,6 +14700,12 @@ void main() {
 
             _lastGameFolderPath = settings.LastGameFolderPath ?? "";
             _lastLooseOverlayPath = settings.LastLooseOverlayPath ?? "";
+            _datasetCatalogRoot = string.IsNullOrWhiteSpace(settings.LastDatasetCatalogRoot)
+                ? _datasetCatalogRoot
+                : settings.LastDatasetCatalogRoot;
+            _selectedDatasetVersionRoot = settings.LastDatasetVersionRoot ?? string.Empty;
+            _activeDatasetVersionRoot = settings.LastActiveDatasetVersionRoot ?? string.Empty;
+            RefreshDatasetCatalog();
             _knownGoodClientPaths = NormalizeKnownGoodClientPaths(settings.KnownGoodClientPaths);
             _selectedBuildOptionIndex = FindBuildOptionIndex(settings.LastSelectedBuildVersion);
             _textureFilteringMode = Enum.IsDefined(typeof(TextureFilteringMode), settings.TextureFilteringMode)
@@ -14911,6 +14941,13 @@ void main() {
                 HasExplicitWmoMliqRotationOverride = _hasExplicitWmoMliqRotationOverride,
                 LastGameFolderPath = _lastGameFolderPath,
                 LastLooseOverlayPath = _lastLooseOverlayPath,
+                LastDatasetCatalogRoot = _datasetCatalogRoot,
+                LastDatasetVersionRoot = string.IsNullOrWhiteSpace(_selectedDatasetVersionRoot)
+                    ? null
+                    : _selectedDatasetVersionRoot,
+                LastActiveDatasetVersionRoot = string.IsNullOrWhiteSpace(_activeDatasetVersionRoot)
+                    ? null
+                    : _activeDatasetVersionRoot,
                 LastSelectedBuildVersion = _clientBuildOptions.Count > 0
                     ? _clientBuildOptions[Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1)].BuildVersion
                     : null,
@@ -15182,6 +15219,9 @@ void main() {
         public bool HasExplicitWmoMliqRotationOverride { get; set; }
         public string? LastGameFolderPath { get; set; }
         public string? LastLooseOverlayPath { get; set; }
+        public string? LastDatasetCatalogRoot { get; set; }
+        public string? LastDatasetVersionRoot { get; set; }
+        public string? LastActiveDatasetVersionRoot { get; set; }
         public string? LastSelectedBuildVersion { get; set; }
         public int TextureFilteringMode { get; set; } = (int)Rendering.TextureFilteringMode.Trilinear;
         public bool EnableMultisample { get; set; } = true;

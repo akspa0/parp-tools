@@ -216,6 +216,52 @@ normalization or domain shift first.
 - [ ] T044 Run `git diff --check` and focused Python/C# checks after each bounded implementation slice.
 - [ ] T045 Keep `specs/134-v60-unified-dataset-model/spec.md`, `plan.md`, and `tasks.md` aligned with the current gate status.
 
+## Phase 9: Viewer dataset catalog and version switching (P2)
+
+**Goal**: Discover real dataset roots, show their actual signal surface, and switch between
+renderable dataset-backed terrain sessions without changing client-source or overlay state.
+
+- [x] T053 [P] Define `DatasetVersionCatalogEntry` and `DatasetVersionSelection` in the shared C#
+  dataset contract surface, including source kind, map/tile summary, recognized signals,
+  renderability, and fail-closed diagnostics.
+- [x] T054 [P] Implement bounded catalog discovery for VLM/MK project roots and Zarr roots. Ignore
+  control NPZ and experiment/model-run directories unless an explicit renderable manifest exists.
+- [x] T055 Extend `ZarrTileDatasetLoader.Open()` summary detection for v50/v60 liquid names and
+  object/tileset/texture/placement signals while retaining the older Spec 041 aliases.
+- [x] T056 Add focused catalog and Zarr-summary tests covering VLM roots, control- and run-directory
+  exclusion, current liquid aliases, and missing-signal diagnostics.
+- [x] T057 Add the persisted Settings catalog-root field, refresh action, version selector, signal
+  summary, and explicit activation button. Do not auto-switch the client root/build on startup.
+- [x] T058 Activate renderable project entries through the existing VLM loader/terrain manager and
+  preserve camera state when a switch succeeds; recognized but unreadable Zarr roots remain
+  summary-only and fail closed.
+- [x] T059 Keep the existing secondary client-map overlay controls separate from dataset selection;
+  document dataset-overlay composition as a later task after direct Zarr tile loading is proven.
+- [x] T060 Run focused C# tests/build and record the catalog/switch proof before starting direct Zarr
+  tile decoding or dataset-overlay composition.
+
+## Phase 10: Real-tile observation intake (P1)
+
+**Goal**: Preserve incomplete real evidence, including low-resolution leaked/reference imagery,
+without promoting it to terrain ground truth.
+
+- [x] T061 [P] Add `RealTileObservation`, provenance kinds, and explicit unknown/available signal
+  fields to the shared C# data contract.
+- [x] T062 [P] Extend catalog discovery for explicitly named real-observation folders while
+  excluding visual-review atlases, control NPZs, and model-run output.
+- [x] T063 [P] Add focused tests proving a real JPG is reference-only, input-eligible, target-free,
+  and never renderable terrain.
+- [ ] T064 Define the versioned real-observation manifest with source SHA-256, native dimensions,
+  optional map/tile/build hints, and preprocessing lineage.
+- [ ] T065 Add a source-preserving observation registration/materialization command for client tiles,
+  authored minimaps, and media/reference images; never overwrite or silently upscale the source.
+- [ ] T066 Add the viewer inspection surface for original/derived real observations and explicit
+  input-resolution/provenance display.
+- [ ] T067 **USER RUNS** a tiny mixed real-observation intake containing at least one client tile,
+  authored minimap, and low-resolution reference image; GPU work is not required.
+- [ ] T068 Record the observation manifest/inspection proof before albedo normalization or model
+  transfer consumes the real inputs.
+
 ## Dependencies and execution order
 
 ```text
@@ -233,6 +279,10 @@ Phase 1 setup
 - US3 blocks US4 because the real-input gate must target a measured canonical input contract.
 - US4 blocks US5 because only accepted normalized rows may transfer.
 - US5 blocks broader processing and all later-era expansion.
+- Viewer Phase 9 depends on the existing VLM project loader contract. Direct Zarr tile loading and
+  dataset-overlay composition remain downstream of the Phase 9 summary/selector gate.
+- Real-observation intake can begin from source files independently of direct Zarr rendering, but
+  albedo normalization and reconstruction transfer must consume its manifest rather than raw paths.
 
 ## Parallel execution opportunities
 

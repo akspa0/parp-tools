@@ -243,6 +243,63 @@ model lane.
 Missing normalized artifacts, non-finite pixels, or uncalibrated thresholds are gate failures, not
 implicit acceptance.
 
+## DatasetVersionCatalogEntry
+
+The viewer-facing summary for one explicitly discoverable dataset root. This is metadata and
+selection state, not a promise that every listed signal has complete row coverage.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | string | Stable normalized path identity for the current machine. |
+| `display_name` | string | Human-readable version/root label, such as `v50.1 / 0.5.3.3368-Kalimdor`. |
+| `root` | string | Configured dataset root. |
+| `source_kind` | enum | `vlm_project` or `zarr_store`. |
+| `map` | string|null | Map inferred from the project or store when available. |
+| `tile_count` | integer | Discoverable tile count; zero is valid for a summary-only store. |
+| `signals` | string[] | Recognized signal names or project signal groups. |
+| `renderable` | boolean | True only when the current viewer can load terrain tiles from this root. |
+| `diagnostic` | string|null | Missing contract, unsupported codec, or other fail-closed reason. |
+
+Control NPZ folders and model-run folders are not catalog entries. A Zarr entry may list liquid,
+object, tileset, texture, and placement arrays while still reporting `renderable=false` until its
+tile decoder and tensor-pack rehydration are proven.
+
+## DatasetVersionSelection
+
+The persisted viewer choice, intentionally separate from client source and secondary map overlay.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `catalog_root` | string | Folder searched for versioned dataset roots. |
+| `selected_root` | string|null | User-selected catalog entry, not an inferred client path. |
+| `active_root` | string|null | Last successfully activated renderable project. |
+| `client_source_unchanged` | boolean | Selection must not mutate the game-client root/build. |
+| `secondary_overlay_unchanged` | boolean | Selection must not silently clear or replace the client map overlay. |
+
+## RealTileObservation
+
+One immutable real image supplied as evidence for reconstruction. The observation may be a full
+client-backed tile, an authored minimap, or a low-resolution reference recovered from media.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | string | Stable source-file identity. |
+| `file_path` | string | Original local source path or imported source URI. |
+| `kind` | enum | `client_harvest`, `authored_minimap`, `media_reference`, or `unknown`. |
+| `map_hint` | string|null | Optional inferred or human-supplied map name; not a proof. |
+| `tile_x_hint`, `tile_y_hint` | integer|null | Optional coordinate hints; not a proof of alignment. |
+| `source_build_hint` | string|null | Optional client/build or publication context. |
+| `source_sha256` | string | Hash of the immutable source bytes. |
+| `width`, `height` | integer|null | Native dimensions when decoded; unknown is valid. |
+| `available_signals` | string[] | Signals actually present, initially often only `real_rgb`. |
+| `unknown_signals` | string[] | Height, normal, liquid, alpha, object, tileset, or texture targets not present/proven. |
+| `preprocessing` | object[] | Crop, alignment, de-albedo, upscale, or resampling operations and versions. |
+| `usable_as_model_input` | boolean | Whether an explicit input contract admits this observation. |
+| `usable_as_target` | boolean | False unless an independent ground-truth artifact is attached. |
+
+The source observation is never overwritten by derived artifacts. A low-resolution media reference
+can be a valuable model input while remaining non-renderable and target-free.
+
 ## ExperimentRun
 
 One bounded model/evaluation invocation.

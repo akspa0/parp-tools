@@ -34,6 +34,35 @@ confidence-bearing paint scaffold before geometry reconstruction. The implementa
 the distinction between opaque layer 0 and alpha-bearing layer 1 rather than inventing an
 `alpha_0` tensor.
 
+### Complementary brush and paste scales
+
+The early Python brush extractor and the later C# full-map segmentation are complementary
+representations of the same authored terrain, not competing implementations:
+
+- **Atomic brush** is a localized connected alpha component or hand-painted rock-surface patch.
+  It is useful for shape-level descriptors, small brush candidates, and fine correspondence.
+- **Paste block** is a middle-scale grouped arrangement, such as a blocky 16x16-cell region or a
+  transformed local assembly. It preserves nearby atomic members and is a candidate reusable unit.
+- **Macro prefab context** is a broad full-map parent region that preserves cross-tile placement,
+  neighboring relationships, mesh response, and tileset context. It is not an atomic brush label.
+
+The pipeline MUST retain all three scales and their parent/child links. Python atomic components
+must not be promoted to complete prefabs solely because they are connected, and C# macro or blocky
+regions must not be discarded as bugs merely because they contain multiple atomic components. Each
+scale receives separate descriptors, retrieval metrics, review labels, and confidence. A guidance
+bundle may carry a macro parent, paste-block children, and atomic evidence together.
+
+### Alpha-first evidence rule
+
+Alpha masks are the primary authored-terrain evidence surface for this lane. The extractor MUST
+preserve the complete available alpha payload and its layer, offset, texture, tile, and build
+provenance before deriving any summary or mask. Derived views are a fan-out, not a destructive
+choice: the same source may be represented as raw occupancy, alpha transitions, atomic connected
+components, grouped paste blocks, macro parent regions, cumulative/incremental layer additions,
+and cross-tile relationships. A view that is unhelpful for one terrain family must not erase the
+other views. Missing or opaque data remains explicitly unavailable; it is never replaced with a
+zero mask and never used to claim that the tile contains no authored structure.
+
 ## User Scenarios & Testing
 
 ### User Story 1 - Build a motif atlas from controlled and real evidence (Priority: P1)
@@ -169,15 +198,25 @@ an intact/retextured/resculpted/unknown status are reported separately.
 - **FR-019**: The system MUST report the relationship between paint evidence and relief as `intact`, `retextured`, `resculpted`, `unknown`, or `insufficient_data`.
 - **FR-020**: The system MUST expose a paint/sculpt-intent scaffold as an intermediate output that can guide Spec 139, while keeping source-side alpha arrays out of the minimap-only deployment input contract.
 - **FR-021**: The system MUST measure whether alpha additions, paste families, curvature, and relief improve reconstruction independently; a correlation MUST NOT be treated as causal authoring proof.
+- **FR-022**: The system MUST preserve atomic-brush, paste-block, and macro-prefab-context records as separate scales with separate labels, metrics, and confidence.
+- **FR-023**: The system MUST link records across scales using spatial overlap, layer order, map/tile provenance, and available height/normal or texture evidence, while allowing a record to have no parent or children.
+- **FR-024**: A frozen synthetic reference-model score MAY guide curriculum sampling through reproducible `easy`, `learnable_hard`, and `pathological` bands, but MUST NOT be used as a staleness indicator, pseudo-target, or provenance substitute.
+- **FR-025**: Difficulty guidance MUST report per-signal error, seam/boundary error, confidence, and coverage so that one aggregate score cannot hide a dead or pathological signal.
+- **FR-026**: The system MUST preserve every available alpha layer payload and its layer, offset, texture, tile, map, build, and decoder provenance before generating derived descriptors.
+- **FR-027**: The system MUST expose raw occupancy, transition/stroke, atomic, paste-block, macro-context, ordered-layer, and cross-tile alpha interpretations as independently selectable views.
+- **FR-028**: No alpha interpretation may erase another interpretation or silently convert unavailable/opaque data into an empty mask; each view MUST carry its own availability and confidence.
 
 ### Key Entities
 
 - **ObservationWindow**: A spatially bounded, possibly cross-tile window with normalized observation, coordinates, source group, and boundary context.
 - **SignalBundle**: The available height, albedo-normalized observation, gradients, alpha summaries, texture-layer identity, auxiliary channels, and object evidence for one window.
+- **AlphaEvidenceBundle**: The lossless available alpha layers and provenance plus independently derived occupancy, transition, atomic, block, macro, ordered-layer, and cross-tile views.
 - **TilesetProfile**: A versioned description of the texture family, layer ordering, alpha statistics, albedo statistics, and optional auxiliary channels.
 - **MotifCandidate**: A repeated-pattern hypothesis with descriptors, matched channels, transform, source provenance, and confidence.
 - **PasteFamily**: A confirmed or unconfirmed group of motif candidates with recurrence counts and held-out split ownership.
+- **BrushScaleRecord**: A scale-specific atomic, paste-block, or macro-prefab-context record with spatial extent, parent/child references, descriptors, provenance, and confidence.
 - **GuidanceBundle**: The bounded output consumed by Spec 139, containing optional motif and tileset scaffolds plus uncertainty and provenance.
+- **DifficultyGuidance**: A reproducible curriculum-only assessment from a frozen reference model, including per-signal errors, seam/boundary errors, confidence, coverage, and a difficulty band.
 - **PipelineRun**: The deterministic run manifest recording corpus hashes, configuration, stage outputs, metrics, and ablation mode.
 
 ## Success Criteria
@@ -195,6 +234,9 @@ an intact/retextured/resculpted/unknown status are reported separately.
 - **SC-009**: On synthetic controls with known paint order, the analyzer recovers opaque layer 0 as the base and layer 1 plus later layers as ordered additions deterministically.
 - **SC-010**: On real 0.x/1.x evidence, the report can distinguish an intact paint/relief relationship from a retextured or resculpted relationship, or explicitly records that the distinction is unproven.
 - **SC-011**: A Spec 139 paint-scaffold ablation reports whether the intermediate improves held-out-family structure and seams over parity without using source-side alpha as a deployment input.
+- **SC-012**: The visual atlas can show at least one linked atomic brush, paste block, and macro parent across synthetic cross-tile controls, while preserving unlinked and boundary-truncated cases.
+- **SC-013**: Re-running curriculum scoring with the same frozen reference checkpoint, corpus, and seed produces identical difficulty bands and per-signal guidance without changing labels, provenance, or validation freshness state.
+- **SC-014**: An alpha coverage audit proves that every available source layer is either preserved or explicitly reported unavailable, and that no derived view silently replaces another view or fabricates an empty mask.
 
 ## Assumptions
 
@@ -204,6 +246,7 @@ an intact/retextured/resculpted/unknown status are reported separately.
 - Texture alpha and auxiliary channels may correlate with terrain depth, but their semantics must be measured per client/build and may be absent.
 - Exact object identity is deferred; normalized footprint or slot structure is the initial object evidence.
 - The first implementation is classical/descriptive retrieval plus small ablations. A large end-to-end multi-model training run is out of scope until the recurrence and visual gates pass.
+- A frozen synthetic reference model can provide difficulty guidance for curriculum sampling. Its error is not a dataset-staleness signal and cannot rewrite labels, provenance, or split ownership.
 - The 10.2 workflow-map screenshot is corroborating workflow evidence only; the 0.x/1.x client data remains the authority for the initial reconstruction contract.
 - “Paint first, sculpt second” is a motivating hypothesis. The system must test opaque layer 0, alpha-bearing layer 1, later layer order, spatial recurrence, and relief correlation rather than treating the developer map as direct 0.x/1.x ground truth.
 

@@ -18,11 +18,14 @@ This is the boundary between evidence extraction/retrieval and downstream terrai
     "tileset_auxiliary": "available | unavailable | invalid",
     "object_slots": "available | unavailable | invalid"
   },
+  "alpha_evidence": null,
   "tileset_profile": null,
   "motif_hypotheses": [],
+  "brush_scale_records": [],
   "paint_order_hypothesis": null,
   "fractal_descriptor": null,
   "object_evidence": null,
+  "difficulty_guidance": null,
   "provenance": {},
   "content_hash": "sha256:..."
 }
@@ -55,6 +58,29 @@ Each item in `motif_hypotheses` MUST contain:
 - `paint_relief_score`;
 - `confidence` and `evidence_hash`.
 
+## Brush-scale records
+
+`brush_scale_records` is optional. Each record MUST declare one of
+`atomic_brush`, `paste_block`, or `macro_prefab_context`, plus its spatial extent, provenance,
+confidence, and parent/child references when known. Atomic records may be linked to broader C#
+parent regions; a parent region MUST NOT be serialized as an atomic label merely because it has
+connected alpha coverage.
+
+## Alpha evidence
+
+`alpha_evidence` is optional only when the source has no usable alpha. When alpha exists, the
+bundle MUST preserve source-layer references and provenance before emitting any derived view. The
+available views are raw occupancy, transition/stroke, atomic, paste-block, macro-context,
+ordered-layer, and cross-tile. Each view MUST carry availability and confidence. An unavailable or
+opaque layer MUST NOT be serialized as a fabricated all-zero mask.
+
+## Difficulty guidance
+
+`difficulty_guidance` is optional and curriculum-only. When present it MUST contain a frozen
+reference model ID, reference corpus hash, score configuration hash, per-signal errors,
+seam/boundary error, confidence/coverage, a difficulty band, and a sampling weight. It MUST also
+contain `not_staleness: true`.
+
 ## Fail-closed rules
 
 - A missing signal is never replaced with a target array.
@@ -64,3 +90,5 @@ Each item in `motif_hypotheses` MUST contain:
 - A guidance bundle without source provenance, split ownership, or content hash is invalid.
 - Real height may be used to score validation, but it MUST be marked `validation_only` when the bundle is built for inference.
 - Object evidence is optional and cannot make a terrain bundle valid or invalid.
+- Difficulty guidance MUST NOT change labels, provenance, split ownership, or signal availability;
+  it only changes curriculum sampling or review priority.

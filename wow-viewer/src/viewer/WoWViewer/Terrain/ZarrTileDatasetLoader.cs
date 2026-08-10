@@ -100,15 +100,31 @@ public sealed class ZarrTileDatasetLoader
             .OrderBy(static s => s, StringComparer.Ordinal)
             .ToList();
 
+        bool hasLiquidMask = arrays.Contains("liquid_mask", StringComparer.Ordinal);
+        bool hasLiquidHeight = arrays.Contains("liquid_height", StringComparer.Ordinal);
+        bool hasLiquidType256 = arrays.Contains("liquid_type_256", StringComparer.Ordinal);
         bool hasLiquidBasicType = arrays.Contains("liquid_basic_type_257", StringComparer.Ordinal);
         bool hasMh2oTypeMask = arrays.Contains("mh2o_type_mask", StringComparer.Ordinal);
+        bool hasObjectSignals = arrays.Any(static name =>
+            name.StartsWith("object_", StringComparison.Ordinal)
+            || name.StartsWith("mddf_", StringComparison.Ordinal)
+            || name.StartsWith("modf_", StringComparison.Ordinal));
+        bool hasTilesetSignals = arrays.Any(static name =>
+            name.StartsWith("mcly_", StringComparison.Ordinal)
+            || name.Equals("alpha_256", StringComparison.Ordinal));
+        bool hasTextureSignals = arrays.Any(static name =>
+            name.StartsWith("minimap_rgb", StringComparison.Ordinal)
+            || name.StartsWith("mcly_texture", StringComparison.Ordinal));
+        bool hasPlacementSignals = arrays.Any(static name =>
+            name.StartsWith("mddf_", StringComparison.Ordinal)
+            || name.StartsWith("modf_", StringComparison.Ordinal));
 
-        if (!hasLiquidBasicType)
+        if (!hasLiquidBasicType && !hasLiquidType256 && !hasMh2oTypeMask)
         {
             Console.Error.WriteLine(
-                $"[Zarr] '{storeRoot}' is missing the canonical 'liquid_basic_type_257' array (spec 041). " +
-                "The harvester will populate it on the next run; rebuild tiles with WowViewer.Tool.Harvest harvest-stream " +
-                "and re-run the dataset build to get the resolved liquid type field.");
+                $"[Zarr] '{storeRoot}' has no recognized liquid type array " +
+                "(liquid_type_256, liquid_basic_type_257, or mh2o_type_mask). " +
+                "Liquid presence may still be available through liquid_mask/liquid_height.");
         }
 
         return new ZarrStoreSummary(
@@ -117,7 +133,14 @@ public sealed class ZarrTileDatasetLoader
             MapName: storeKind,
             Arrays: arrays,
             HasLiquidBasicType: hasLiquidBasicType,
-            HasMh2oTypeMask: hasMh2oTypeMask);
+            HasMh2oTypeMask: hasMh2oTypeMask,
+            HasLiquidMask: hasLiquidMask,
+            HasLiquidHeight: hasLiquidHeight,
+            HasLiquidType256: hasLiquidType256,
+            HasObjectSignals: hasObjectSignals,
+            HasTilesetSignals: hasTilesetSignals,
+            HasTextureSignals: hasTextureSignals,
+            HasPlacementSignals: hasPlacementSignals);
     }
 
     /// <summary>
@@ -142,4 +165,11 @@ public sealed record ZarrStoreSummary(
     string MapName,
     IReadOnlyList<string> Arrays,
     bool HasLiquidBasicType,
-    bool HasMh2oTypeMask);
+    bool HasMh2oTypeMask,
+    bool HasLiquidMask,
+    bool HasLiquidHeight,
+    bool HasLiquidType256,
+    bool HasObjectSignals,
+    bool HasTilesetSignals,
+    bool HasTextureSignals,
+    bool HasPlacementSignals);

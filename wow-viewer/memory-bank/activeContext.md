@@ -123,6 +123,20 @@ offsets, treat layer 0 as opaque base rather than paste evidence, inspect layer 
 paste/paint candidate, and classify paint/relief links as intact, retextured, resculpted, unknown,
 or insufficient-data.
 
+The early Python connected-component extractor and later C# full-map segmentation are now treated
+as complementary scales: `atomic_brush` components, `paste_block` groupings, and
+`macro_prefab_context` parent regions. The C# macro/block result is not a bug or a replacement for
+the Python atomic evidence. Spec 140 must preserve parent/child links, separate per-scale metrics,
+and allow one-off or boundary-truncated records to remain unconfirmed. A frozen synthetic reference
+model may score per-signal and seam difficulty for curriculum sampling (`easy`, `learnable_hard`,
+`pathological`), but that score is explicitly not a staleness indicator or pseudo-target.
+
+Alpha is the primary evidence substrate for this lane. Preserve every available layer and its
+MCLY/MCAL/tile/map/build provenance before deriving any interpretation. Raw occupancy,
+transition/stroke, atomic, paste-block, macro-context, ordered-layer, and cross-tile views are all
+kept open; an unhelpful view must not erase the others, and unavailable/opaque data must not become
+an invented empty mask.
+
 - Spec: [140 terrain paste and fractal motif archaeology](../specs/140-terrain-paste-motif-archaeology/spec.md)
 - Plan: [Spec 140 plan](../specs/140-terrain-paste-motif-archaeology/plan.md)
 
@@ -224,3 +238,30 @@ statistics computed from all loaded PM4 research contexts:
 
 `pm4 inspect` and `pm4 audit` accept `--output` and silently ignore it; the other `pm4` report
 commands honour it.
+
+## 2026-08-10 — v60 dataset viewer consumption boundary
+
+Spec 134 now records the verified dataset boundary: v50.1 Zarr stores contain liquid mask/height
+signals, per-build liquid type coverage, object placement/mask evidence, MCLY layer/tileset
+metadata, and minimap/texture path evidence, but the current `output/datasets/v60` tree contains
+control NPZ and experiment artifacts rather than a built unified v60 map Zarr.
+
+Implemented the first viewer slice in `wow-viewer`: shared `DatasetVersionCatalog` discovery,
+catalog tests, current liquid/object/tileset/texture/placement reporting in
+`ZarrTileDatasetLoader`, and a persistent Settings selector with explicit VLM activation. Control
+NPZ/run directories are excluded. VLM switching preserves camera state; current Zarr entries are
+summary-only and fail closed because `LoadTile`/tensor rehydration remains unimplemented. Client
+source/build and secondary client-map overlay remain separate authorities.
+
+## 2026-08-10 — real tile observation boundary
+
+Real reconstruction inputs are not limited to client-harvested tiles. Spec 134 now distinguishes
+client-backed tiles, authored minimaps, and low-resolution media/reference imagery. A real image may
+provide only RGB; unknown height, normal, liquid, alpha, object, tileset, and texture targets must
+remain unknown. Native resolution, source bytes/hash, provenance, optional map/tile hints, and every
+crop/alignment/de-albedo/upscale operation must be preserved separately from derived artifacts.
+
+Added `RealTileObservation` and `RealTileObservationKind` to the shared dataset contract. The viewer
+catalog recognizes explicitly named real-observation folders as reference-only, input-eligible but
+non-renderable/non-target entries. The next bounded slice is an observation manifest/materializer
+and original-versus-derived inspection surface; it is independent of direct Zarr tile decoding.

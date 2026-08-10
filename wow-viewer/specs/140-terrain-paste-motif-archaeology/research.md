@@ -43,6 +43,38 @@ The initial topology is a workflow of small specialists:
 
 Each stage emits a signal, confidence, provenance, and an explicit unavailable state. The stages can be ablated independently.
 
+### Decision: retain complementary extraction scales
+
+The April 12 Python brush-imprint path is valuable as an atomic extractor: it thresholds one
+alpha layer, finds localized connected components, and preserves centered alpha/mask patches for
+shape descriptors. The later C# full-map path is valuable as a parent-context extractor: it groups
+nearby alpha evidence into macro paste/scar regions and middle-scale blocky children while retaining
+map-wide and cross-tile relationships. The C# result is not a bug; it answers a different question.
+
+Spec 140 therefore keeps `atomic_brush`, `paste_block`, and `macro_prefab_context` as distinct
+ontologies. The join is through spatial overlap, layer/MCLY provenance, map coordinates, and
+height/normal or texture response. An atomic component can be a child of a block or macro region,
+but neither is automatically the historical identity of the component. Every scale remains
+independently reviewable and ablatable.
+
+### Decision: make alpha preservation the fan-out boundary
+
+Alpha is the strongest shared substrate available across the competing interpretations. Preserve
+all source layers and their provenance first, then derive multiple views: raw occupancy,
+transition/stroke evidence, atomic components, paste blocks, macro context, ordered additions, and
+cross-tile relationships. These views may disagree or be useful for different terrain families;
+that disagreement is evidence to analyze, not a reason to discard one implementation. An absent or
+opaque layer is an availability state, never a fabricated empty mask.
+
+### Decision: use validation error only for curriculum difficulty
+
+A frozen reference model trained on the synthetic control corpus may score candidate controls and
+produce a reproducible difficulty guide. Per-signal error, seam/boundary error, confidence, and
+coverage can place a sample in `easy`, `learnable_hard`, or `pathological` bands and adjust future
+synthetic sampling weights. This score is not a staleness check, a pseudo-target, a replacement for
+ground truth, or evidence that a corpus changed. The reference checkpoint, corpus hash, and scoring
+configuration must travel with the guidance report.
+
 ### Decision: start with classical recurrence proof
 
 The first implementation should compare descriptors and transformed synthetic controls before training a large motif model. If a nearest-neighbor or correlation baseline cannot retrieve known transformed motifs, a neural model will only make the failure less legible.
@@ -58,6 +90,16 @@ Windows are sampled independently of chunk and tile boundaries. A motif family o
 ### Decision: keep tileset evidence separate
 
 Texture IDs, alpha masks, albedo, normals, specular-like channels, and height are stored as related but distinct signals. Auxiliary channels can guide a later stage only after their correlation with geometry is measured for the relevant build.
+
+### Hypothesis: Warcraft III lineage and recursive pattern reuse
+
+The early WoW mapping workflow may have inherited more than engine code from Warcraft III: base
+tileset textures, Photoshop-like pattern overlays, alpha-layer brushes, and macro terrain motifs may
+share a reusable visual vocabulary across scales. A green brain-like base texture is therefore a
+valid observation of an early authoring state, not evidence of completed terrain relief. Similar
+patterns appearing in tiled textures, alpha masks, and macro terrain should be tested through
+transformed recurrence and spatial/height correlation, not assumed to be the same brush. Client
+evidence, real media references, and synthetic controls must remain separate provenance classes.
 
 ### Decision: defer exact object identity
 

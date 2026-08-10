@@ -23,6 +23,11 @@ Later signals and later clients are extension phases only after the transfer rou
 This plan deliberately removes full-client harvesting, v50-store consolidation, base/delta
 historical storage, and a 4,000-sample minimum from v60-control-v1.
 
+The viewer consumption slice is a bounded companion to this plan. It does not make the control
+corpus a map dataset or claim that Zarr tile decoding is complete. It adds a versioned catalog and
+selector around already-renderable project roots, reports recognized Zarr signal coverage, and
+leaves direct v50/v60 Zarr tile rehydration as a separate implementation gate.
+
 ## Technical Context
 
 **Languages**: C#/.NET for terrain decode/synthesis and ADT ownership; Python/uv for normalization
@@ -289,6 +294,54 @@ Only after Phase 4:
    sieve is proven useful.
 3. Add later client source adapters behind the same manifest and gate contracts.
 4. Expand control families or variants only in response to measured failure modes.
+
+## Phase 5: Viewer dataset catalog and version switching (P2)
+
+**Goal**: Let the viewer discover, inspect, and explicitly activate renderable dataset versions
+without conflating them with the client source or secondary map overlay.
+
+1. Define a small dataset-version catalog contract in shared C# code. Entries identify the root,
+   source kind, map, tile count, recognized signals, and whether the current viewer can render it.
+2. Discover only renderable VLM/MK project roots and recognized Zarr roots. Ignore control NPZ and
+   model-run directories unless they later acquire an explicit renderable manifest.
+3. Extend Zarr summary detection to recognize the current v50/v60 liquid names (`liquid_mask`,
+   `liquid_height`, and `liquid_type_256`) alongside the older Spec 041 names. Report object,
+   tileset, texture, and placement arrays without treating presence as complete coverage.
+4. Add a Settings selector with a browsable catalog root, refresh action, selected-version summary,
+   and explicit activation. Persist the catalog root and selected path, but do not auto-switch the
+   game-client source on startup.
+5. Activate renderable project versions through the existing `VlmProjectLoader`/`VlmTerrainManager`
+   path. Recognized Zarr entries may be summarized, but activation MUST fail closed until tile
+   decoding and `TerrainTileTensorPack` rehydration are implemented for their schema.
+6. Preserve camera state across a successful dataset switch where possible. Keep the existing
+   secondary client-map overlay authority separate and visible; dataset overlay composition is a
+   later phase after one dataset source can be rendered reliably.
+
+**Gate**: The viewer can switch between two renderable project versions in one session, shows which
+signals are actually available, and refuses control NPZs or unreadable Zarr stores as terrain
+sources. Focused C# tests/build prove catalog detection and the existing VLM load path remains
+intact.
+
+## Phase 6: Real-tile observation intake (P1)
+
+**Goal**: Preserve the actual inputs available in reconstruction work, including incomplete or
+low-resolution media references, without manufacturing missing supervision.
+
+1. Register client-backed tiles, authored minimaps, and media/reference images as immutable real
+   observations with source hash, provenance kind, optional map/tile hints, and native dimensions.
+2. Keep `real_rgb` input evidence separate from height, normal, liquid, alpha, object, tileset, and
+   texture targets. Unknown signals stay unknown.
+3. Treat crop, alignment, de-albedo, upscale, and resampling as versioned derived artifacts linked
+   to the source observation. Never overwrite the source bytes or relabel a low-resolution image as
+   natively model-sized.
+4. Let the viewer catalog list explicit real-observation folders as reference-only entries. They
+   can be inspected and selected as inputs, but cannot be activated as terrain renderers or targets.
+5. Add a later image-inspection surface that shows the original and derived observation side by side
+   before any reconstruction output is accepted.
+
+**Gate**: A manifest and viewer catalog can distinguish real client tiles, authored minimaps, and
+media references, while a RGB-only or low-resolution source remains honest about missing signals and
+resolution.
 
 ## User-run commands (prepared, not executed here)
 

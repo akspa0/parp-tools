@@ -90,11 +90,28 @@ A real tile is classified `intact`, `retextured`, `resculpted`, `unknown`, or
 `insufficient_data`; a retextured zone is useful evidence of a broken relationship, not a reason
 to force current alpha to explain current relief.
 
+The brush evidence has three linked resolutions. The early Python alpha-component path supplies
+localized `atomic_brush` candidates. The later C# full-map path supplies `paste_block` children and
+`macro_prefab_context` parents that preserve cross-tile and mesh relationships. Both remain valid;
+the C# path is not a failed atomic extractor. Parent/child links, provenance, and per-scale metrics
+are required before any record is used as guidance.
+
+Alpha is the fan-out boundary for these analyses: retain every source alpha layer and provenance
+first, then derive raw occupancy, transition/stroke, atomic, paste-block, macro-context,
+ordered-layer, and cross-tile views independently. The pipeline must preserve disagreement between
+views because different terrain families may expose different parts of the authored structure.
+Missing or opaque alpha is an explicit availability state, never a fabricated empty mask.
+
 The deployment distinction is strict: source-side alpha is supervision/archaeology, while a
 minimap-only system must predict a confidence-bearing paint/sculpt-intent scaffold before the
 Spec 139 geometry stage. Opaque layer 0 must never become a fabricated `alpha_0` tensor; layer 1
 is the first paste/paint candidate. The first new proof is synthetic known-order controls plus a small real
 0.x/1.x analysis slice; no GPU run is authorized by this hypothesis alone.
+
+The existing synthetic validation workflow can later provide curriculum difficulty guidance from a
+frozen reference checkpoint. It may prioritize `easy`, `learnable_hard`, and `pathological`
+synthetics using per-signal and seam/boundary error, confidence, and coverage. It must not be used
+to declare data stale, rewrite labels, or stand in for provenance.
 
 ### Terrain-only reset and v7 pivot (2026-08-10)
 
@@ -283,3 +300,15 @@ parked) and is the one training-relevant result from it.
 - Never validate on PVPZone02 or Kalidar; use Kalimdor and Azeroth.
 - Constitution IV: per-signal evidence. A strong signal must never mask a dead one, so every signal
   is reported against its own baseline, never rolled into an aggregate score.
+
+## Dataset-backed viewer boundary (2026-08-10)
+
+The v50.1 stores are signal-bearing map evidence, including liquid mask/height arrays, variable
+liquid type coverage, MCLY layer/tileset metadata, object placement/mask evidence, and texture/path
+inventories. The current v60 output tree is not yet a unified renderable map store; its control NPZ
+and experiment folders must not be presented as viewer datasets.
+
+Spec 134 now owns a shared C# dataset-version catalog and viewer Settings selector. Renderable VLM
+projects can be switched in-session with camera preservation. Zarr roots expose recognized signal
+names, including current liquid aliases, but remain summary-only until the C# decoder and tensor-pack
+rehydration are implemented and validated.

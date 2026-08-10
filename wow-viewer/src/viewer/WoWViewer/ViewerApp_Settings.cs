@@ -43,6 +43,13 @@ public partial class ViewerApp
 
         ImGui.Separator();
 
+        if (ImGui.CollapsingHeader("Dataset Versions", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            DrawDatasetVersionSettingsContent();
+        }
+
+        ImGui.Separator();
+
         if (ImGui.CollapsingHeader("Camera", ImGuiTreeNodeFlags.DefaultOpen))
         {
             DrawCameraDefaultsContent();

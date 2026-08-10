@@ -328,8 +328,49 @@ intact/retextured/resculpted/unknown status. Source-side alpha remains supervisi
 minimap-only deployment contract must predict the scaffold rather than consume client alpha.
 No implementation or training started; the next gate is synthetic known-order validation.
 
+## 2026-08-10 — Spec 140 complementary brush scales recorded
+
+Refined Spec 140 to retain both historical approaches: the early Python connected-alpha extractor
+is the atomic brush scale, while the later C# full-map implementation supplies middle-scale
+paste-block children and broad macro-prefab context. The C# implementation is a different spatial
+ontology, not a bug. Added parent/child hierarchy records, per-scale metrics, and fail-closed
+review rules. Also specified frozen-reference validation scoring as curriculum difficulty guidance
+only (`easy`, `learnable_hard`, `pathological`), never as staleness, pseudo-target, or provenance.
+No implementation, harvest, or training started; next gate remains synthetic known-order and
+hierarchy validation.
+
+## 2026-08-10 — Spec 140 alpha-first evidence boundary recorded
+
+Promoted alpha preservation to the fan-out boundary. Spec 140 now requires lossless source-layer
+references and provenance before deriving raw occupancy, transition/stroke, atomic, paste-block,
+macro-context, ordered-layer, or cross-tile views. The interpretations remain independently
+available so a weak view cannot erase useful evidence elsewhere; unavailable/opaque alpha cannot be
+replaced with an empty mask. No implementation, harvest, or training started.
+
 ## Before 2026-08-01
 
 Condensed into [archive/2026-08-01-progress-detail.md](archive/2026-08-01-progress-detail.md) at the
 feature-complete declaration and spec audit. Older session history is in
 [archive/](archive/README.md).
+
+## 2026-08-10 — v60 dataset catalog and viewer selector
+
+Spec 134 was extended with the viewer-consumption boundary. Verified on-disk v50.1 stores include
+liquid masks/heights, variable liquid-type coverage, object placement/mask evidence, MCLY
+layer/tileset IDs, and texture/path inventories. The v60 output tree currently has no unified map
+Zarr; control NPZs and model runs are not renderable datasets.
+
+Added `WowViewer.Core.Maps.DatasetVersionCatalog`, focused catalog tests, current liquid aliases and
+object/tileset/texture/placement summary fields to `ZarrTileDatasetLoader`, and a Settings dataset
+version selector with persistent catalog/selection paths. VLM projects can be activated in-session
+and preserve camera state. Zarr stores remain summary-only until compressed chunk decoding and
+`TerrainTileTensorPack` rehydration are proven. Viewer build passed; the two new catalog tests
+passed. Existing repository warnings remain, including the known Snappier advisory.
+
+## 2026-08-10 — real tile observations added
+
+The viewer/data contract now has an explicit `RealTileObservation` class for client tiles, authored
+minimaps, and low-resolution media/reference imagery. Catalog discovery recognizes explicitly named
+real-observation folders and marks them reference-only. RGB-only observations are eligible as model
+inputs but never targets or terrain renderers; missing liquid/alpha/tileset/object/height signals
+remain unknown. Source-preserving manifest/materialization and image inspection are the next tasks.

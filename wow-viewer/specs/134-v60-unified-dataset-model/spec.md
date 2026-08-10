@@ -21,6 +21,37 @@ and compares limited training sizes against a tile-mean baseline. Object contami
 identity, object markers, real-client rows, and albedo normalization are not inputs or gates for
 this experiment. Those artifacts remain parked for a later, separately authorized phase.
 
+### Viewer dataset consumption extension (2026-08-10)
+
+The v50 stores already on disk are evidence-bearing map stores, not merely model corpora. They
+contain liquid masks/heights (and liquid types where the source populated them), terrain height and
+normal signals, alpha/MCLY layer data, tileset and texture path metadata, object masks/IDs, and
+MDDF/MODF placement records. They do not imply that decoded texture pixels or complete object mesh
+payloads are embedded in every row. Coverage is per signal and per build; missing coverage remains
+missing and is never zero-filled.
+
+The current v60 output directory is not yet a unified renderable map store: it contains control
+NPZs and experiment artifacts, but no built v60 Zarr map roots. A control corpus therefore MUST NOT
+appear in the viewer's map-dataset selector merely because it lives under `output/datasets/v60`.
+The selector admits only a versioned renderable project or a recognized Zarr store and shows the
+signal/coverage summary before activation.
+
+Viewer dataset selection is a separate authority from the game-client root/build selector and from
+the secondary client-map overlay. Switching a renderable dataset version may replace the active
+dataset-backed terrain session while preserving the viewer camera and leaving client overlay state
+explicitly unchanged. A recognized but not-yet-readable Zarr store is selectable for inspection and
+coverage reporting only; it MUST fail closed with a diagnostic rather than silently falling back to
+client terrain or pretending to render from an empty store.
+
+Real tiles are a third source class alongside synthetic controls and harvested dataset versions.
+They include client-backed tiles, authored minimaps, and low-resolution reference imagery recovered
+from books, screenshots, or other media. A real observation can be useful model input even when it
+has no height, normal, liquid, object, alpha, or tileset target. Its original bytes, source context,
+resolution, map/tile hints, and uncertainty MUST be preserved. Resizing a low-resolution image to the
+model input size is a versioned preprocessing operation, not evidence that the source was natively a
+256x256 tile. Real observations are listable in the viewer catalog but are never promoted to terrain
+ground truth or renderable meshes without an explicit reconstruction artifact.
+
 ## Context
 
 The re-baked minimap path is already working. The previous v50/v60 direction treated a large
@@ -240,6 +271,30 @@ contracts are proven.
 **Independent Test**: A later-era adapter produces the same manifest and signal contracts without
 changing the control generator or silently mixing source-era behavior.
 
+### User Story 7 — Real-tile observation intake (Priority: P1)
+
+A researcher can register a real tile image, including a low-resolution image recovered from
+published media, without pretending that missing terrain signals are known.
+
+**Independent Test**: Register client-backed, authored, and low-resolution reference images, then
+inspect a manifest that preserves original paths/bytes, resolution when known, map/tile hints,
+source kind, available signals, preprocessing status, and explicit target availability.
+
+**Acceptance Scenarios**:
+
+1. **Given** a client tile or authored minimap, **when** it is registered, **then** its source
+   identity and available signals are recorded independently from any derived reconstruction.
+2. **Given** a low-resolution JPG from a book, screenshot, or other media, **when** it is registered,
+   **then** it remains a `media_reference` observation at its native resolution and is not silently
+   relabeled as a 256x256 minimap tile.
+3. **Given** a real observation with only RGB, **when** the manifest is written, **then** liquid,
+   alpha, tileset, object, normal, and height targets are absent/unknown rather than zero-filled.
+4. **Given** a real observation, **when** it is shown in the viewer catalog, **then** it is marked
+   reference-only and cannot be activated as a terrain renderer or ground-truth dataset.
+5. **Given** a preprocessing step such as de-albedo, crop, upscale, or tile alignment, **when** it
+   produces a derived artifact, **then** the original observation remains immutable and the method,
+   version, source dimensions, and output dimensions are recorded.
+
 ## Requirements
 
 ### Functional Requirements
@@ -372,6 +427,21 @@ changing the control generator or silently mixing source-era behavior.
   excluded from marker training, recorded as `occluded_or_overwritten_in_instance_id_map`, and
   MUST NOT cause the entire marker corpus build to fail. A failed build MUST NOT present a partial
   output directory as a valid corpus.
+- **FR-050**: Real tile observations MUST be represented separately from synthetic controls and
+  renderable dataset versions, with source kind, immutable source path/hash, optional map/tile
+  hints, native resolution when known, and available-signal declarations.
+- **FR-051**: Supported real observation kinds MUST include client-backed tile, authored minimap,
+  and media/reference imagery. A media/reference image MAY be low resolution and MUST NOT be
+  relabeled as a native model-sized tile after resizing.
+- **FR-052**: Real observations with RGB only MUST preserve unknown height, normal, liquid, alpha,
+  object, tileset, and texture-target states. Missing signals MUST NOT be zero-filled or inferred
+  from the source class alone.
+- **FR-053**: Every derived real-observation artifact MUST retain a link to its immutable source
+  observation and record preprocessing method/version, input dimensions, output dimensions, and
+  any crop/alignment/resampling decision.
+- **FR-054**: The viewer catalog MAY list real observations as reference-only entries, but MUST NOT
+  activate them as terrain renderers or ground-truth datasets without a separate reconstruction
+  artifact contract.
 
 ### Non-Functional Requirements
 
@@ -411,6 +481,9 @@ changing the control generator or silently mixing source-era behavior.
     that resolves every nonzero marker instance to a known library ID and score.
 13. An unknown/shifted-candidate control is rejectable, and no marker result depends on the old
     dot-like v50 curriculum projections.
+14. A real-tile observation manifest can preserve client-backed, authored, and low-resolution
+    media/reference imagery as RGB-only evidence without claiming missing terrain targets or native
+    model resolution.
 
 ## Key Entities
 
@@ -418,7 +491,8 @@ See [data-model.md](./data-model.md) for `ControlSourceManifest`, `SyntheticCont
 `ObjectSieveControlRow`, `ObjectLibrarySieveRow`, `ObjectMarkerCandidate`, `ObjectMarkerMap`,
 `ObjectSieveExperiment`, `RealObjectMaskDataset`,
 `RealObjectMaskExperiment`, `RealSyntheticValidationPair`, `RealSyntheticPairReport`,
-`AlbedoOperationRun`, `TexturelessGateDecision`, `ExperimentRun`, and `TransferGate`.
+`AlbedoOperationRun`, `TexturelessGateDecision`, `RealTileObservation`,
+`DatasetVersionCatalogEntry`, `ExperimentRun`, and `TransferGate`.
 
 ## Assumptions
 
