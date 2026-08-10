@@ -8,6 +8,16 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 renderer performance grounding
+
+- Expanded `specs/142-world-scene-graph/spec.md` with a deterministic synthetic world-scene
+  workload, explicit separation from synthetic minimap/2-D preview data, stage-level timing and
+  provenance requirements, four-scale replay gates, and real-client parity promotion gates.
+- Added the Spec Kit quality checklist at
+  `specs/142-world-scene-graph/checklists/requirements.md`; no unresolved clarifications remain.
+- The next implementation slice is the versioned fixture/benchmark manifest and instrumentation;
+  no heavy capture or GPU run was launched.
+
 ## 2026-08-10 — Spec 139 reject MCSH and add observable RGB baseline
 
 - Rejected the raw-MCSH route as a model-input path: minimaps do not carry `shadow_mask`, so it

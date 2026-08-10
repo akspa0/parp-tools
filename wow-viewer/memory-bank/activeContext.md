@@ -12,8 +12,21 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 |---|---|---|
 | PM4 decode | **active** — versioning formatted; placement solved; scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
 | Terrain / viewer runtime | **active** — phased dual-map overlay (135), M2 doodad batching (136), phased minimap & teleport (137) landed; 4.x renderer evolution (138) is an evidence-gated epic note | [activeContext.md](activeContext.md) |
+| World scene graph / renderer performance | **active** — Spec 142 is now grounded around deterministic synthetic world-scene scaling plus named real-client parity; image-only synthetic minimap previews are explicitly not renderer proof | [Spec 142](../specs/142-world-scene-graph/spec.md) |
 | Terrain / minimap ML | **active** — Spec 139 clean-signal reconstruction, Spec 140 paste/fractal/tileset evidence, and Spec 141 external-method translation; object identity remains parked | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
 | Tile archaeology | **active** — old v50 synthetic minimap output needs fresh regeneration after renderer fixes; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
+
+## Now — Spec 142 renderer grounding
+
+- Spec 142 now distinguishes `synthetic_world_scene`, `synthetic_minimap_asset`,
+  `real_client_scene`, and `mixed_validation_scene` as separate evidence classes.
+- The synthetic renderer lane must use the same runtime graph, visibility, pass, and query
+  contracts as real content; a generated minimap or 2-D preview cannot satisfy 3-D renderer proof.
+- The required order is baseline current path, deterministic synthetic identity, synthetic
+  scaling, real-client parity, then promotion. Reports must separate CPU traversal, submission,
+  GPU/driver wait, upload, and query stages with median and p95 samples.
+- Heavy real-scene captures and GPU measurements remain user-run. The current gap is
+  implementation of the versioned fixture/benchmark manifest and stage instrumentation.
 
 ## Now — Viewer Runtime & Terrain Improvements (Specs 135, 136, 137)
 
