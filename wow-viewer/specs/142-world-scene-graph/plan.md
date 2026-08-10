@@ -170,13 +170,24 @@ This does not claim WMO portal geometry, doorway clipping, nested frustum constr
 `WorldScene` integration. The existing `WmoRenderer` remains the runtime portal behavior owner
 until an adapter can consume its existing read models without changing format readers.
 
+## Phase 5 — WMO Portal Read-Model Adapter
+
+**Status**: Complete for the read-model adaptation slice on 2026-08-10. `WorldScenePortalAdapter`
+consumes existing `WmoRenderDocument` portal vertices, portal geometry, and group references,
+maps them to stable graph IDs, preserves accepted geometry for later clipping, and converts
+unknown groups or malformed geometry into explicit graph fallback diagnostics. Four adapter tests
+bring the focused Spec 142 proof to 23 passing tests.
+
+This still does not change a format reader, duplicate `WmoRenderer`'s current portal handling,
+construct nested frusta, or enable graph portal traversal in `WorldScene`.
+
 ## Later Phases (Not Started In This Slice)
 
-- **Phase 5**: Integrate WMO portal read models and doorway geometry into the graph adapter, then
-  prove parity with the existing renderer's interior traversal.
-- **Phase 6**: Per-pass visible/non-visible queues, shared animation update ownership, and query
+- **Phase 6**: Integrate graph portal geometry into nested view-volume traversal and prove doorway
+  parity with the existing renderer.
+- **Phase 7**: Per-pass visible/non-visible queues, shared animation update ownership, and query
   reuse.
-- **Phase 7**: Incremental terrain/chunk graph migration, synthetic four-scale measurements, and
+- **Phase 8**: Incremental terrain/chunk graph migration, synthetic four-scale measurements, and
   named real-client parity captures.
 
 ## Complexity Tracking

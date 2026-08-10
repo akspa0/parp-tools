@@ -8,6 +8,16 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 WMO portal read-model adapter
+
+- Added `WorldScenePortalAdapter` to consume existing `WmoRenderDocument` portal vertices,
+  geometry, and group references without changing format readers or duplicating `WmoRenderer`.
+- Valid portal geometry is preserved with stable group IDs; malformed geometry and unknown groups
+  become explicit graph fallback diagnostics. Focused Spec 142 proof is now 23 passing tests and
+  the viewer build has 0 errors with existing warnings.
+- Nested view-volume clipping, doorway parity, runtime `WorldScene` integration, and heavy capture
+  remain open; no GPU or real-client capture was launched.
+
 ## 2026-08-10 — Spec 142 bounded portal adjacency contract
 
 - Added `WorldScenePortalGraph`, a graph-only adjacency contract for stable WMO-group-like node

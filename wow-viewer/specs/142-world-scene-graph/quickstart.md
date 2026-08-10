@@ -9,7 +9,7 @@ benchmark. The legacy viewer traversal remains the default.
 From `I:\parp\parp-tools\wow-viewer`:
 
 ```powershell
-dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldSceneGraphTests|FullyQualifiedName~SyntheticWorldWorkloadTests|FullyQualifiedName~WorldSceneGraphObjectAdapterTests"
+dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldSceneGraphTests|FullyQualifiedName~SyntheticWorldWorkloadTests|FullyQualifiedName~WorldSceneGraphObjectAdapterTests|FullyQualifiedName~WorldScenePortalGraphTests|FullyQualifiedName~WorldScenePortalAdapterTests"
 ```
 
 The graph/traversal foundation can be checked together with:
@@ -47,11 +47,13 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
   missing or malformed group bounds remain fail-open.
 - Graph-only portal adjacency rejects malformed links and reports cycle, missing-entry, absent-data,
   and depth-limit fallback diagnostics without claiming portal geometry or renderer parity.
+- Existing `WmoRenderDocument` portal read models adapt to stable group IDs and preserve valid
+  geometry; malformed geometry and unknown groups remain explicit fallback cases.
 - Unknown object bounds keep their bucket and map fail-open.
 - The viewer project compiles with the opt-in `WorldScene.UseHierarchicalSceneTraversal` seam.
 
 ## Not yet run by this phase
 
-The four-scale performance ladder, WMO portal read-model/doorway integration, current-vs-new
+The four-scale performance ladder, nested portal view-volume/doorway parity, current-vs-new
 traversal comparison, pass/query parity, real-client capture, GPU timing, and whole-map residency
 work remain later user-run gates. Do not interpret this test/build pass as an FPS result.

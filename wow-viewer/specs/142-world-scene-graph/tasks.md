@@ -7,8 +7,8 @@
 
 **Current execution rule**: The graph foundation, conservative traversal, opt-in `WorldScene`
 object adapter, nested WMO group mounting, and the graph-only portal adjacency contract are
-validated and committed. WMO portal geometry integration, pass, query, and performance promotion
-tasks remain unchecked.
+validated and committed. The WMO portal read-model adapter is also complete; nested portal geometry
+traversal, doorway parity, pass, query, and performance promotion tasks remain unchecked.
 
 ## Phase 1: Setup
 
@@ -67,7 +67,7 @@ identity; no FPS or GPU claim is made.
 ## Phase 6: User Story 3 — Interiors Cull Through Portals (Priority: P2)
 
 - [x] T017 [US3] Add graph-only portal adjacency metadata and bounded nested-view diagnostics in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldScenePortalGraph.cs`; reject malformed links and report cycle, missing-entry, absent-data, and depth-limit fallback.
-- [ ] T018 [US3] Integrate WMO portal read models into the graph adapter without changing format readers in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldScenePortalAdapter.cs`.
+- [x] T018 [US3] Integrate existing `WmoRenderDocument` portal vertices, geometry, and group references into the graph adapter without changing format readers in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldScenePortalAdapter.cs`.
 - [ ] T019 [US3] Extend portal tests with doorway geometry and existing-renderer parity coverage in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldScenePortalTests.cs`; current `WorldScenePortalGraphTests` cover the graph-only malformed, cyclic, absent-data, and depth-limited contract.
 
 ## Phase 7: User Story 4 — Ordered Visibility Results (Priority: P2)
