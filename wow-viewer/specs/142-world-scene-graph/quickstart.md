@@ -60,6 +60,9 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
 - Resident non-skybox ADT M2 placements receive deterministic `map -> tile -> chunk -> M2` graph
   ownership; rejecting a known chunk skips its ordinary doodad descendants, while unknown bounds fail
   open.
+- Traversal diagnostics attribute individually tested nodes, rejected subtree roots, and skipped
+  descendants by node kind; the focused chunk proof reports one rejected Chunk and two skipped M2
+  descendants.
 - External M2 spawns, skyboxes, WMO placements, and WMO-internal doodad-set submission remain
   outside this chunk-bucket slice.
 - Unknown object bounds keep their bucket and map fail-open.

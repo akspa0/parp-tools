@@ -92,6 +92,7 @@ identity; no FPS or GPU claim is made.
 - [x] T033 [US2] Add optional spatial-bucket metadata and nested tile-to-region attachment in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldSceneGraphObjectAdapter.cs`; preserve deterministic ordering and fail-open bounds.
 - [x] T034 [US2] Assign resident non-skybox ADT M2 placements to terrain chunk buckets from the existing `WorldScene` coordinate convention; keep external, skybox, WMO, and WMO-internal doodad-set paths unchanged.
 - [x] T035 [US2] Add stable-ID, unknown-bounds, and rejected-chunk descendant-skip coverage in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldSceneGraphObjectAdapterTests.cs`.
+- [x] T036 [US2] Attribute individually tested nodes, rejected subtree roots, and skipped descendants by node kind in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldSceneTraversal.cs`, with focused chunk/M2 assertions.
 - [ ] T027 Add synthetic workload replay and stage-level report output in `wow-viewer/tools/validation-capture/WowViewer.Tool.ValidationCapture/ValidationWorldSceneAdapter.cs`.
 - [ ] T028 Add current-vs-new parity and performance report tests in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldScenePerformanceReportTests.cs`.
 - [ ] T029 Run the focused and full test commands from `wow-viewer/specs/142-world-scene-graph/quickstart.md` and record evidence in `wow-viewer/memory-bank/progress.md`.

@@ -2,6 +2,10 @@ namespace WowViewer.Core.Runtime.World.SceneGraph;
 
 public sealed class WorldSceneTraversalDiagnostics
 {
+    private readonly Dictionary<WorldSceneNodeKind, int> _individuallyTestedNodeCountsByKind = [];
+    private readonly Dictionary<WorldSceneNodeKind, int> _rejectedNodeCountsByKind = [];
+    private readonly Dictionary<WorldSceneNodeKind, int> _skippedDescendantCountsByKind = [];
+
     public int VisitedNodeCount { get; internal set; }
 
     public int IndividuallyTestedNodeCount { get; internal set; }
@@ -15,6 +19,46 @@ public sealed class WorldSceneTraversalDiagnostics
     public int SkippedDescendantCount { get; internal set; }
 
     public int MaxDepthReached { get; internal set; }
+
+    public IReadOnlyDictionary<WorldSceneNodeKind, int> IndividuallyTestedNodeCountsByKind =>
+        _individuallyTestedNodeCountsByKind;
+
+    public IReadOnlyDictionary<WorldSceneNodeKind, int> RejectedNodeCountsByKind =>
+        _rejectedNodeCountsByKind;
+
+    public IReadOnlyDictionary<WorldSceneNodeKind, int> SkippedDescendantCountsByKind =>
+        _skippedDescendantCountsByKind;
+
+    internal void RecordIndividualTest(WorldSceneNodeKind kind)
+    {
+        Increment(_individuallyTestedNodeCountsByKind, kind);
+    }
+
+    internal int RecordRejectedSubtree(WorldSceneNode node)
+    {
+        Increment(_rejectedNodeCountsByKind, node.Kind);
+        return RecordDescendantKinds(node, _skippedDescendantCountsByKind);
+    }
+
+    private static int RecordDescendantKinds(
+        WorldSceneNode node,
+        Dictionary<WorldSceneNodeKind, int> counts)
+    {
+        int descendantCount = 0;
+        foreach (WorldSceneNode child in node.Children)
+        {
+            descendantCount++;
+            Increment(counts, child.Kind);
+            descendantCount += RecordDescendantKinds(child, counts);
+        }
+
+        return descendantCount;
+    }
+
+    private static void Increment(Dictionary<WorldSceneNodeKind, int> counts, WorldSceneNodeKind kind)
+    {
+        counts[kind] = counts.GetValueOrDefault(kind) + 1;
+    }
 }
 
 public sealed record WorldSceneTraversalResult(
@@ -58,10 +102,11 @@ public static class WorldSceneTraversal
         if (node.CanRejectSubtree)
         {
             diagnostics.IndividuallyTestedNodeCount++;
+            diagnostics.RecordIndividualTest(node.Kind);
             if (!isVisible(node))
             {
                 diagnostics.RejectedNodeCount++;
-                diagnostics.SkippedDescendantCount += CountDescendants(node);
+                diagnostics.SkippedDescendantCount += diagnostics.RecordRejectedSubtree(node);
                 rejectedNodes.Add(node);
                 return;
             }
@@ -81,11 +126,4 @@ public static class WorldSceneTraversal
             Visit(child, isVisible, includeNode, visibleNodes, rejectedNodes, diagnostics);
     }
 
-    private static int CountDescendants(WorldSceneNode node)
-    {
-        int count = 0;
-        foreach (WorldSceneNode child in node.Children)
-            count += 1 + CountDescendants(child);
-        return count;
-    }
 }

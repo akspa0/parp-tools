@@ -361,7 +361,9 @@ submission, GPU/driver wait, and spatial-query time.
   parent-level rejection.
 - **FR-016**: The viewer MUST expose per-frame traversal diagnostics including nodes visited,
   nodes rejected with the level at which rejection occurred, subtree rejections, visible counts per
-  pass, nesting depth reached, and the time spent in each traversal stage.
+  pass, nesting depth reached, and the time spent in each traversal stage. Rejection and skipped
+  descendant attribution MUST be available by node kind so a terrain-chunk rejection can be
+  distinguished from an individual M2 rejection.
 - **FR-017**: Frame-to-frame reuse of visibility results MUST be correctness-preserving, MUST be
   invalidated by camera, transform, residency, or visibility-state changes, and MUST be
   independently disableable for comparison measurement.
@@ -577,6 +579,8 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
   graphs and a versioned, hashed JSON manifest.
 - `WorldSceneTraversal` rejects complete subtrees through one injected visibility test and reports
   visited, individually tested, non-rejectable, rejected, skipped-descendant, and visible counts.
+  `WorldSceneTraversalDiagnostics` also attributes individually tested nodes, rejected roots, and
+  skipped descendants by node kind, making ADT chunk-level M2 savings directly inspectable.
 - `WorldSceneGraphObjectAdapter` maps the existing runtime placement lists into stable
   `map -> tile/external bucket -> placement` nodes without reopening format readers or fabricating
   WMO group bounds. Resident non-skybox ADT M2 placements can additionally carry deterministic

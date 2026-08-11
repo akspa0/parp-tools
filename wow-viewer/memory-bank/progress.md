@@ -8,6 +8,14 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 traversal rejection attribution
+
+- Added per-node-kind diagnostics for individually tested nodes, rejected subtree roots, and
+  skipped descendants. The existing rejected terrain-chunk test now proves one Chunk rejection
+  skipped two M2 descendants.
+- This is diagnostic evidence only; M2 submission, WMO submission, real-client parity, and GPU
+  timing remain unproven. The focused suite remains 32 passing tests.
+
 ## 2026-08-10 — Spec 142 ADT M2 doodad chunk partition
 
 - Added deterministic spatial-bucket metadata to the opt-in scene-graph object adapter and

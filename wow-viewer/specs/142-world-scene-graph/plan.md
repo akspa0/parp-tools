@@ -224,6 +224,13 @@ WMO-internal doodad-set submission remain unchanged.
 The focused adapter proof is 7 passing tests and the runtime/viewer builds are clean apart from
 existing repository warnings. This is still not a real-scene performance result.
 
+## Phase 8B — Traversal Rejection Attribution
+
+**Status**: Complete for the ADT M2 chunk evidence slice on 2026-08-10. Aggregate traversal counters do not
+show whether the new terrain-chunk buckets actually saved individual M2 tests. This slice adds
+per-node-kind counts for individually tested nodes, rejected subtree roots, and skipped descendants.
+The proof owner remains the core traversal diagnostics; no renderer submission behavior changes.
+
 ## Later Phases (Not Started In This Slice)
 
 - **Phase 9**: Integrate graph portal volumes into runtime WMO submission and prove doorway

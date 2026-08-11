@@ -210,6 +210,9 @@ public sealed class WorldSceneGraphObjectAdapterTests
             traversal.RejectedNodes,
             node => node.Id == "world/tile/03/04/chunk/02/03");
         Assert.Equal(2, traversal.Diagnostics.SkippedDescendantCount);
+        Assert.Equal(1, traversal.Diagnostics.RejectedNodeCountsByKind[WorldSceneNodeKind.Chunk]);
+        Assert.Equal(2, traversal.Diagnostics.SkippedDescendantCountsByKind[WorldSceneNodeKind.M2Placement]);
+        Assert.Equal(1, traversal.Diagnostics.IndividuallyTestedNodeCountsByKind[WorldSceneNodeKind.Chunk]);
     }
 
     private static WorldSceneGraphObjectPlacement Placement(
