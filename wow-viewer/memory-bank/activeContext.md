@@ -37,7 +37,10 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
   checklist, plan, research, data model, in-process contract, quickstart, and ordered tasks.
 - The first implementation gate is ADT area context: Alpha and standard adapters already populate
   raw MCNK area IDs, while the current status path can erase no-chunk, zero-ID, map-mismatch, and
-  row-miss states into an empty/Unknown display. The next code slice must expose those distinctions.
+  row-miss states into an empty/Unknown display. The bounded first slice now preserves Alpha's full
+  packed AreaNumber, resolves map-aware packed/direct entries, rejects unrelated nearest chunks, and
+  refreshes context as the camera/residency changes. Focused proof is 3 tests and an isolated viewer
+  build with 0 errors; DBCD-backed fixture and real-client SubzoneText proof remain open.
 - Local 3.3.5 client reference data exposes `lua_GetSubZoneText` alongside `lua_GetZoneText` and
   `lua_GetMinimapZoneText`. Spec 143 now treats `SubzoneText` as the native-style display result:
   resolve the leaf/subzone from client area data, fall back to the parent zone when needed, and

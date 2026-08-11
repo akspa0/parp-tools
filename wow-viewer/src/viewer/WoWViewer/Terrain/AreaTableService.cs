@@ -1,6 +1,7 @@
 using DBCD;
 using DBCD.Providers;
 using WoWViewer.Logging;
+using WowViewer.Core.World;
 
 namespace WoWViewer.Terrain;
 
@@ -11,12 +12,21 @@ namespace WoWViewer.Terrain;
 public class AreaTableService
 {
     private readonly Dictionary<int, AreaEntry> _areas = new();
+    private readonly Dictionary<(int MapId, int AreaNumber), AreaEntry> _areasByMapAndNumber = new();
+    private readonly Dictionary<int, List<AreaEntry>> _areasByNumber = new();
     private int _rowCount;
     private int _primaryKeyCount;
     private int _fallbackAliasCount;
     private int _fallbackAliasCollisions;
 
-    public record AreaEntry(int Id, string Name, int ParentAreaId, int MapId, int Flags);
+    public record AreaEntry(
+        int Id,
+        string Name,
+        int ParentAreaId,
+        int MapId,
+        int Flags,
+        int AreaNumber = 0,
+        int ParentAreaNumber = 0);
 
     public int Count => _primaryKeyCount;
     public string? LoadedBuild { get; private set; }
@@ -33,6 +43,8 @@ public class AreaTableService
     public void Load(IDBCProvider dbcProvider, string dbdDir, string build)
     {
         _areas.Clear();
+        _areasByMapAndNumber.Clear();
+        _areasByNumber.Clear();
         _rowCount = 0;
         _primaryKeyCount = 0;
         _fallbackAliasCount = 0;
@@ -75,6 +87,7 @@ public class AreaTableService
         string? idCol = DetectColumn(availableColumns, "ID", "AreaID", "AreaNumber");
         string? areaNumberCol = DetectColumn(availableColumns, "AreaNumber");
         string? parentCol = DetectColumn(availableColumns, "ParentAreaID", "ParentAreaNum");
+        string? parentNumberCol = DetectColumn(availableColumns, "ParentAreaNum");
         string? mapCol = DetectColumn(availableColumns, "ContinentID", "MapID", "Continent");
         string? flagsCol = DetectColumn(availableColumns, "Flags", "AreaFlags");
         NameColumn = nameCol;
@@ -99,12 +112,14 @@ public class AreaTableService
             int mapId = SafeField<int>(row, mapCol, 0);
             int flags = SafeField<int>(row, flagsCol, 0);
             int areaNumber = SafeField<int>(row, areaNumberCol, 0);
+            int parentAreaNumber = SafeField<int>(row, parentNumberCol, 0);
 
-            var entry = new AreaEntry(areaId, name, parentId, mapId, flags);
+            var entry = new AreaEntry(areaId, name, parentId, mapId, flags, areaNumber, parentAreaNumber);
             RegisterPrimary(areaId, entry);
             RegisterAlias(key, entry);
             RegisterAlias(areaNumber, entry);
             RegisterLegacyPackedAreaNumberAliases(build, areaNumber, entry);
+            RegisterAreaNumber(entry);
         }
 
         ViewerLog.Important(ViewerLog.Category.General,
@@ -132,13 +147,13 @@ public class AreaTableService
     /// </summary>
     public string GetAreaDisplayName(int areaId)
     {
-        if (!_areas.TryGetValue(areaId, out var entry))
+        AreaLookupResult result = ResolveArea(areaId, mapId: -1);
+        if (result.PrimaryText is null)
             return $"Unknown ({areaId})";
 
-        if (entry.ParentAreaId != 0 && _areas.TryGetValue(entry.ParentAreaId, out var parent))
-            return $"{parent.Name} > {entry.Name}";
-
-        return entry.Name;
+        return result.ZoneText == result.SubzoneText || result.ZoneText is null
+            ? result.SubzoneText!
+            : $"{result.ZoneText} > {result.SubzoneText}";
     }
 
     /// <summary>
@@ -148,12 +163,69 @@ public class AreaTableService
     /// </summary>
     public string? GetAreaDisplayNameForMap(int areaId, int mapId)
     {
-        if (!_areas.TryGetValue(areaId, out var entry) || entry.MapId != mapId)
+        AreaLookupResult result = ResolveArea(areaId, mapId);
+        if (result.PrimaryText is null)
             return null;
 
-        if (entry.ParentAreaId != 0 && _areas.TryGetValue(entry.ParentAreaId, out var parent))
-            return $"{parent.Name} > {entry.Name}";
-        return entry.Name;
+        return result.ZoneText == result.SubzoneText || result.ZoneText is null
+            ? result.SubzoneText
+            : $"{result.ZoneText} > {result.SubzoneText}";
+    }
+
+    /// <summary>
+    /// Resolve a raw MCNK area value into native-style ZoneText/SubzoneText roles.
+    /// Standard-era values resolve by AreaTable ID; Alpha packed AreaNumber values resolve by
+    /// map-aware AreaNumber first. Map mismatch remains visible in the result instead of erasing
+    /// an otherwise valid table row.
+    /// </summary>
+    public AreaLookupResult ResolveArea(int rawAreaId, int mapId)
+    {
+        if (rawAreaId == 0)
+            return AreaLookupResult.Unresolved(rawAreaId, mapId, AreaResolutionReason.MissingAreaId);
+
+        AreaEntry? entry = null;
+        AreaContextSource source = AreaContextSource.DirectAreaId;
+
+        if (_areasByMapAndNumber.TryGetValue((mapId, rawAreaId), out var packedEntry))
+        {
+            entry = packedEntry;
+            source = AreaContextSource.PackedAreaNumber;
+        }
+        else if (mapId < 0 && TryGetUniqueAreaNumber(rawAreaId, out packedEntry))
+        {
+            entry = packedEntry;
+            source = AreaContextSource.PackedAreaNumber;
+        }
+        else if (_areas.TryGetValue(rawAreaId, out var directEntry))
+        {
+            entry = directEntry;
+        }
+
+        if (entry is null)
+            return AreaLookupResult.Unresolved(rawAreaId, mapId, AreaResolutionReason.AreaRowMissing);
+
+        bool mapMatched = mapId < 0 || entry.MapId == mapId;
+        AreaResolutionReason reason = mapMatched
+            ? AreaResolutionReason.Resolved
+            : AreaResolutionReason.MapMismatch;
+
+        AreaEntry? parent = TryGetParent(entry);
+        AreaContextEntry contextEntry = ToContextEntry(entry);
+        AreaContextEntry? contextParent = parent is null ? null : ToContextEntry(parent);
+        AreaDisplayText display = AreaDisplayTextResolver.Resolve(contextEntry, contextParent, source, reason);
+
+        return new AreaLookupResult(
+            rawAreaId,
+            mapId,
+            entry.Id,
+            parent?.Id,
+            entry.AreaNumber == 0 ? null : entry.AreaNumber,
+            string.IsNullOrWhiteSpace(entry.Name) ? null : entry.Name,
+            display.ZoneText,
+            display.SubzoneText,
+            source,
+            display.Reason,
+            mapMatched);
     }
 
     public string DescribeLoadContext()
@@ -163,15 +235,60 @@ public class AreaTableService
 
     public string DescribeLookup(int areaId, int mapId)
     {
-        if (!_areas.TryGetValue(areaId, out var entry))
-            return $"[AreaTable] Lookup miss: AreaId={areaId}, MapId={mapId}, {DescribeLoadContext()}";
+        AreaLookupResult result = ResolveArea(areaId, mapId);
+        return $"[AreaTable] Lookup AreaId={areaId} MapId={mapId} source={result.Source} reason={result.Reason} zone='{result.ZoneText ?? ""}' subzone='{result.SubzoneText ?? ""}' canonicalId={result.CanonicalAreaId?.ToString() ?? "n/a"} {DescribeLoadContext()}";
+    }
 
-        if (entry.MapId != mapId)
+    private void RegisterAreaNumber(AreaEntry entry)
+    {
+        if (entry.AreaNumber == 0)
+            return;
+
+        _areasByMapAndNumber.TryAdd((entry.MapId, entry.AreaNumber), entry);
+        if (!_areasByNumber.TryGetValue(entry.AreaNumber, out var entries))
         {
-            return $"[AreaTable] Map mismatch: AreaId={areaId} resolved='{entry.Name}' entryMapId={entry.MapId} requestedMapId={mapId} parentAreaId={entry.ParentAreaId} flags=0x{entry.Flags:X} {DescribeLoadContext()}";
+            entries = new List<AreaEntry>();
+            _areasByNumber[entry.AreaNumber] = entries;
         }
 
-        return $"[AreaTable] Lookup resolved: AreaId={areaId} -> '{entry.Name}' on MapId={mapId} {DescribeLoadContext()}";
+        if (entries.All(existing => existing.Id != entry.Id))
+            entries.Add(entry);
+    }
+
+    private bool TryGetUniqueAreaNumber(int areaNumber, out AreaEntry entry)
+    {
+        if (_areasByNumber.TryGetValue(areaNumber, out var entries) && entries.Count == 1)
+        {
+            entry = entries[0];
+            return true;
+        }
+
+        entry = null!;
+        return false;
+    }
+
+    private AreaEntry? TryGetParent(AreaEntry entry)
+    {
+        if (entry.ParentAreaNumber != 0
+            && _areasByMapAndNumber.TryGetValue((entry.MapId, entry.ParentAreaNumber), out var packedParent))
+            return packedParent;
+
+        if (entry.ParentAreaId != 0 && _areas.TryGetValue(entry.ParentAreaId, out var directParent))
+            return directParent;
+
+        return null;
+    }
+
+    private static AreaContextEntry ToContextEntry(AreaEntry entry)
+    {
+        return new AreaContextEntry(
+            entry.Id,
+            entry.Name,
+            entry.ParentAreaId,
+            entry.ParentAreaNumber,
+            entry.MapId,
+            entry.Flags,
+            entry.AreaNumber);
     }
 
     private void RegisterPrimary(int areaId, AreaEntry entry)

@@ -16,6 +16,10 @@ The focused tests must cover at least: standard and Alpha MCNK IDs, coordinate-t
 map mismatch diagnostics, DBD logical-column selection, WMO evidence unavailable fallback, stable
 WMO candidate ordering, camera-head snapshot reuse, and lighting fallback attribution.
 
+The current bounded implementation proof is narrower: the pure `AreaDisplayTextResolver` tests pass
+and the isolated viewer build passes. The DBCD-backed AreaTable fixture and real-client `SubzoneText`
+proof remain open until the next validation slice.
+
 ## User-run real-client matrix
 
 Use a configured approved client root such as `H:\CLIENTS\...` or another explicitly selected root;

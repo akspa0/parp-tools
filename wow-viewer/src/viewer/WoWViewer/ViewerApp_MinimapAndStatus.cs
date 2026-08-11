@@ -326,9 +326,7 @@ public partial class ViewerApp
     private string BuildCompactRuntimeStatus()
     {
         string fps = _currentFps > 0 ? $"FPS {_currentFps:0}" : "FPS --";
-        string area = string.IsNullOrWhiteSpace(_currentAreaName)
-            ? "Area: Unknown"
-            : $"Area: {_currentAreaName}";
+        string area = BuildAreaStatusText();
         int loadedTiles = _terrainManager?.LoadedTileCount ?? _vlmTerrainManager?.LoadedTileCount ?? 0;
 
         if (_worldScene != null)
@@ -343,7 +341,26 @@ public partial class ViewerApp
         TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
         return renderer == null
             ? $"{fps} | {area} | Tiles {loadedTiles}"
-            : $"{fps} | {area} | Tiles {loadedTiles} | Chunks {renderer.ChunksRendered}/{renderer.ChunksCulled}";
+                : $"{fps} | {area} | Tiles {loadedTiles} | Chunks {renderer.ChunksRendered}/{renderer.ChunksCulled}";
+    }
+
+    private string BuildAreaStatusText()
+    {
+        if (_currentAreaLookup is null)
+            return "Area: Unknown";
+
+        string? primary = _currentAreaLookup.PrimaryText;
+        if (string.IsNullOrWhiteSpace(primary))
+            return $"Area: Unknown ({_currentAreaLookup.Reason})";
+
+        string label = _currentAreaLookup.ZoneText is { Length: > 0 } zone
+            && !string.Equals(zone, primary, StringComparison.Ordinal)
+            ? $"{primary} [{zone}]"
+            : primary;
+
+        return _currentAreaLookup.IsResolved
+            ? $"Area: {label}"
+            : $"Area: {label} ({_currentAreaLookup.Reason})";
     }
 
     private static float GetImGuiTextWidth(string? text)

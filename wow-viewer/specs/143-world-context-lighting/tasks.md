@@ -41,10 +41,10 @@ whole-map loads, native OpenGL runtime tests, and GPU profiling are user-run ope
 **Independent Test**: Synthetic Alpha/standard chunk metadata plus an AreaTable fixture produces a resolved name, while missing/zero/map-mismatch cases produce explicit reasons.
 
 - [ ] T009 [P] [US1] Add failing unit cases for Alpha MCNK `Unknown3` area extraction, standard MCNK `AreaId`, coordinate-to-chunk selection, and map mismatch in `tests/WowViewer.Core.Tests/WorldAreaContextTests.cs`.
-- [ ] T010 [US1] Refactor `src/viewer/WoWViewer/Terrain/AreaTableService.cs` to return `AreaResolution` plus native-style `ZoneText`/`SubzoneText` roles while preserving DBCD logical-column detection and parent-chain provenance.
+- [x] T010 [US1] Refactor `src/viewer/WoWViewer/Terrain/AreaTableService.cs` to return `AreaResolution` plus native-style `ZoneText`/`SubzoneText` roles while preserving DBCD logical-column detection and parent-chain provenance.
 - [ ] T011 [US1] Add a profile-aware resident terrain context evaluator under `src/core/WowViewer.Core.Runtime/World/` that records camera coordinates, tile/chunk source, raw ID, table key, and unresolved reason.
-- [ ] T012 [US1] Correct the `src/viewer/WoWViewer/ViewerApp.cs` camera-to-chunk/map-context call site to consume the structured evaluator result instead of treating all misses as an empty `_currentAreaName`.
-- [ ] T013 [US1] Update `src/viewer/WoWViewer/ViewerApp_MinimapAndStatus.cs` to display `SubzoneText` as the primary area label plus compact raw-ID/source diagnostics and explicit unresolved state.
+- [x] T012 [US1] Correct the `src/viewer/WoWViewer/ViewerApp.cs` camera-to-chunk/map-context call site to consume the structured evaluator result instead of treating all misses as an empty `_currentAreaName`.
+- [x] T013 [US1] Update `src/viewer/WoWViewer/ViewerApp_MinimapAndStatus.cs` to display `SubzoneText` as the primary area label plus compact raw-ID/source diagnostics and explicit unresolved state.
 - [ ] T014 [P] [US1] Add lookup diagnostics assertions for `AreaTableService.DescribeLoadContext` and `DescribeLookup` in `tests/WowViewer.Core.Tests/AreaTableServiceTests.cs`.
 - [ ] T015 [US1] Run the focused area-context tests and isolated viewer build; record the proof and remaining real-client gap in `specs/143-world-context-lighting/quickstart.md`.
 

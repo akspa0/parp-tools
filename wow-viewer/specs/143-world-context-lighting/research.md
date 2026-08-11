@@ -15,8 +15,13 @@
   lookup.
 - `AreaTableService` already loads DBCD storage and detects logical columns, but the status path
   collapses a missing chunk, zero ID, map mismatch, and unresolved row into an empty name.
+- The Alpha adapter previously truncated `Unknown3` to its low 16 bits, while the checked-in Alpha
+  reference describes the full packed `AreaNumber` as zone high-word plus subzone low-word.
+- `TerrainRenderer.GetChunkAt` previously returned the nearest resident chunk after exact/bounds
+  lookup failed, which could assign an unrelated area's name while the camera was over an unloaded
+  tile.
 
-**Decision**: Phase 1 will introduce a structured lookup result and instrument the coordinate,
+**Decision**: Phase 1 introduces a structured lookup result and instruments the coordinate,
 tile/chunk, raw ID, map ID, table row, and unresolved reason before changing lookup semantics. The
 existing parsers remain the source of raw IDs. The map filter will be treated as validation/context,
 not as permission to erase a valid row; a map mismatch will remain visible as a diagnostic state.

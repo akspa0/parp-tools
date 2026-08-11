@@ -450,8 +450,9 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             ShadowMap = shadowMap,
             Liquid = liquid,
             WorldPosition = new Vector3(worldX, worldY, 0f),
-            // Alpha 0.5.3 AreaID is packed in Unknown3 — low 16 bits = AreaID
-            AreaId = mcnk.Header.Unknown3 & 0xFFFF,
+            // Alpha 0.5.3 stores the complete packed AreaNumber in Unknown3:
+            // high 16 bits = zone and low 16 bits = subzone.
+            AreaId = mcnk.Header.Unknown3,
             McnkFlags = mcnk.Header.Flags
         };
     }

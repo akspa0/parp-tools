@@ -125,22 +125,9 @@ public class TerrainRenderer : IDisposable
         if (TryGetTileKey(worldX, worldY, out var tileKey) && TryFindChunkMeshByBounds(tileKey, worldX, worldY, out var byBounds))
             return byBounds;
 
-        TerrainChunkMesh? best = null;
-        float bestDist = float.MaxValue;
-        foreach (var chunk in _chunks)
-        {
-            var center = (chunk.BoundsMin + chunk.BoundsMax) * 0.5f;
-            float dx = center.X - worldX;
-            float dy = center.Y - worldY;
-            float dist = dx * dx + dy * dy;
-            if (dist < bestDist)
-            {
-                bestDist = dist;
-                best = chunk;
-            }
-        }
-
-        return best;
+        // Area context must never use the nearest unrelated resident chunk. A camera over an
+        // unloaded tile is unresolved until the correct resident chunk arrives.
+        return null;
     }
 
     public TerrainChunkInfo? GetChunkInfoAt(float worldX, float worldY)

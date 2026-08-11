@@ -20,7 +20,7 @@ status bar, visibility, fog, and renderer consume one same-frame answer.
 
 Contains the camera sample coordinates, coordinate-space/profile name, resolved tile/chunk key,
 raw MCNK area ID, AreaTable lookup key, map-validation result, and `ResolutionReason`.
-`ResolutionReason` is a closed set such as `Resolved`, `NoTerrainChunk`, `ZeroAreaId`,
+`ResolutionReason` is a closed set such as `Resolved`, `NoTerrainChunk`, `MissingAreaId`,
 `AreaRowMissing`, `MapMismatch`, `MissingLocalizedName`, or `MalformedSource`.
 
 ## `WmoAreaContext`

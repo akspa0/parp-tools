@@ -191,6 +191,12 @@ public partial class ViewerApp : IDisposable
     private string _statusMessage = "No data source loaded. Use File > Open Game Folder (MPQ) first, then Open File for standalone assets.";
     private AreaTableService? _areaTableService;
     private string _currentAreaName = "";
+    private string _currentZoneName = "";
+    private WowViewer.Core.World.AreaLookupResult? _currentAreaLookup;
+    private Vector3 _lastAreaLookupCameraPosition = new(float.NaN);
+    private int _areaLookupTick;
+    private int _lastAreaLookupLoadedTileCount = -1;
+    private int _lastAreaLookupMapId = int.MinValue;
     private int _currentMapId = -1; // MapID of the currently loaded world
     private string? _lastWorldSceneWdtPath;
     private Vector3 _lastWorldSceneCameraPosition;
@@ -1503,29 +1509,11 @@ var seq = animator.Sequences[animator.CurrentSequence];
             if (_worldScene != null)
                 UpdateWorldSceneHoveredAssetInfo(view, proj);
 
-            // Update current area name from chunk under camera (throttled to avoid per-frame overhead).
-            // Covers BOTH terrain paths: the status bar shows coordinates for _terrainManager and
-            // _vlmTerrainManager alike, so the area lookup must too (it previously only ran for
-            // _terrainManager, leaving the Area segment permanently blank in VLM sessions).
+            // Update native-style ZoneText/SubzoneText from the resident chunk under the camera.
+            // The lookup retries while tiles stream in, but never substitutes an unrelated nearest
+            // chunk when the camera is over an unloaded tile.
             var areaChunkRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-            if (_areaTableService != null && areaChunkRenderer != null && _frameCount == 0)
-            {
-                var chunk = areaChunkRenderer.GetChunkAt(_camera.Position.X, _camera.Position.Y);
-                if (chunk != null && chunk.AreaId != 0)
-                {
-                    // Filter by MapID to avoid showing areas from other continents
-                    var name = _areaTableService.GetAreaDisplayNameForMap(chunk.AreaId, _currentMapId);
-                    if (name == null)
-                    {
-                        ReportAreaLookupDiagnostic(chunk.AreaId);
-                        // Fallback if MapID filtering fails
-                        name = _areaTableService.GetAreaDisplayName(chunk.AreaId);
-                    }
-                    _currentAreaName = name ?? "";
-                }
-                else
-                    _currentAreaName = "";
-            }
+            UpdateCurrentAreaContext(areaChunkRenderer);
 
             // Render the scene
             if (_renderer is IModelRenderer modelRenderer)
@@ -10858,6 +10846,42 @@ void main() {
         string diagnostic = _areaTableService.DescribeLookup(areaId, _currentMapId);
         if (_reportedAreaDiagnostics.Add(diagnostic))
             ViewerLog.Important(ViewerLog.Category.General, diagnostic);
+    }
+
+    private void UpdateCurrentAreaContext(TerrainRenderer? renderer)
+    {
+        if (_areaTableService == null || renderer == null)
+        {
+            _currentAreaLookup = null;
+            _currentAreaName = string.Empty;
+            _currentZoneName = string.Empty;
+            return;
+        }
+
+        int loadedTileCount = _terrainManager?.LoadedTileCount ?? _vlmTerrainManager?.LoadedTileCount ?? 0;
+        bool cameraMoved = float.IsNaN(_lastAreaLookupCameraPosition.X)
+            || Vector3.DistanceSquared(_camera.Position, _lastAreaLookupCameraPosition) >= 16f;
+        bool mapChanged = _currentMapId != _lastAreaLookupMapId;
+        bool residencyChanged = loadedTileCount != _lastAreaLookupLoadedTileCount;
+
+        if (++_areaLookupTick < 10 && !cameraMoved && !mapChanged && !residencyChanged)
+            return;
+
+        _areaLookupTick = 0;
+        _lastAreaLookupCameraPosition = _camera.Position;
+        _lastAreaLookupLoadedTileCount = loadedTileCount;
+        _lastAreaLookupMapId = _currentMapId;
+
+        var chunk = renderer.GetChunkAt(_camera.Position.X, _camera.Position.Y);
+        _currentAreaLookup = chunk is null
+            ? WowViewer.Core.World.AreaLookupResult.Unresolved(0, _currentMapId, WowViewer.Core.World.AreaResolutionReason.NoTerrainChunk)
+            : _areaTableService.ResolveArea(chunk.AreaId, _currentMapId);
+
+        _currentZoneName = _currentAreaLookup.ZoneText ?? string.Empty;
+        _currentAreaName = _currentAreaLookup.SubzoneText ?? _currentAreaLookup.ZoneText ?? string.Empty;
+
+        if (_currentAreaLookup.Reason != WowViewer.Core.World.AreaResolutionReason.Resolved)
+            ReportAreaLookupDiagnostic(_currentAreaLookup.RawAreaId);
     }
 
     private static ModelContainerKind DetectModelContainer(byte[] modelBytes)

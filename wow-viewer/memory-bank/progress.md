@@ -917,3 +917,10 @@ Next: build the authored RGB corpus and review the combined plan.
    reference inventory exposes `lua_GetSubZoneText`, `lua_GetZoneText`, and
    `lua_GetMinimapZoneText`. `SubzoneText` is now modeled as a derived leaf-or-parent fallback
    display role, not as a guessed DBC field or replacement for raw AreaID provenance.
+ - 2026-08-11: Implemented the first bounded Spec 143 area-context slice. Added core
+   `AreaLookupResult`/`AreaDisplayText` contracts and tests; Alpha terrain now preserves the full
+   packed `Unknown3` AreaNumber instead of truncating to low 16 bits; `AreaTableService` indexes
+   map-aware AreaNumber values and derives ZoneText/SubzoneText; the viewer retries context as the
+   camera or tile residency changes and reports explicit reasons in the lower status line. Removed
+   nearest-unrelated-chunk fallback from area lookup. Focused proof: 3 tests passed and isolated
+   viewer build passed with 0 errors; DBCD fixture and real-client proof remain open.

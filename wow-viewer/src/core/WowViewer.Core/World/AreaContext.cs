@@ -1,0 +1,95 @@
+namespace WowViewer.Core.World;
+
+public enum AreaResolutionReason
+{
+    Resolved,
+    NoTerrainChunk,
+    MissingAreaId,
+    AreaRowMissing,
+    MapMismatch,
+    MissingLocalizedName
+}
+
+public enum AreaContextSource
+{
+    DirectAreaId,
+    PackedAreaNumber,
+    Unresolved
+}
+
+public sealed record AreaContextEntry(
+    int Id,
+    string Name,
+    int ParentAreaId,
+    int ParentAreaNumber,
+    int MapId,
+    int Flags,
+    int AreaNumber);
+
+public sealed record AreaDisplayText(
+    string? ZoneText,
+    string? SubzoneText,
+    AreaContextSource Source,
+    AreaResolutionReason Reason)
+{
+    public string? PrimaryText => SubzoneText ?? ZoneText;
+}
+
+public sealed record AreaLookupResult(
+    int RawAreaId,
+    int MapId,
+    int? CanonicalAreaId,
+    int? ParentAreaId,
+    int? AreaNumber,
+    string? AreaName,
+    string? ZoneText,
+    string? SubzoneText,
+    AreaContextSource Source,
+    AreaResolutionReason Reason,
+    bool MapMatched)
+{
+    public bool IsResolved => Reason == AreaResolutionReason.Resolved;
+    public string? PrimaryText => SubzoneText ?? ZoneText;
+
+    public static AreaLookupResult Unresolved(int rawAreaId, int mapId, AreaResolutionReason reason)
+    {
+        return new AreaLookupResult(
+            rawAreaId,
+            mapId,
+            CanonicalAreaId: null,
+            ParentAreaId: null,
+            AreaNumber: null,
+            AreaName: null,
+            ZoneText: null,
+            SubzoneText: null,
+            Source: AreaContextSource.Unresolved,
+            Reason: reason,
+            MapMatched: false);
+    }
+}
+
+public static class AreaDisplayTextResolver
+{
+    public static AreaDisplayText Resolve(
+        AreaContextEntry entry,
+        AreaContextEntry? parent,
+        AreaContextSource source,
+        AreaResolutionReason reason)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        string entryName = entry.Name.Trim();
+        string parentName = parent?.Name.Trim() ?? string.Empty;
+        string zoneText = string.IsNullOrWhiteSpace(parentName) ? entryName : parentName;
+        string subzoneText = string.IsNullOrWhiteSpace(entryName) ? zoneText : entryName;
+
+        if (string.IsNullOrWhiteSpace(entryName))
+            reason = AreaResolutionReason.MissingLocalizedName;
+
+        return new AreaDisplayText(
+            string.IsNullOrWhiteSpace(zoneText) ? null : zoneText,
+            string.IsNullOrWhiteSpace(subzoneText) ? null : subzoneText,
+            source,
+            reason);
+    }
+}
