@@ -347,6 +347,10 @@ are rebuilding, why their cache invalidated, and how much work is admitted per f
 **Exit evidence**: no un-attributed overlay duration; unchanged frames do not run a full overlay
 rebuild; the report proves whether overlay work is complete, cached, or deliberately deferred.
 
+The fresh-session execution contract is [phase-8j-overlay-recovery.md](phase-8j-overlay-recovery.md).
+It freezes the first slice to attribution only and lists the owner taxonomy, explicit non-goals,
+cache/invalidation rules, later admission conditions, commands, and commit/documentation boundary.
+
 ## Phase 8K — Index-First, Budgeted Whole-Map Residency
 
 **Status**: Planned; blocked by Phase 8J attribution. The 66.4-second `--load-all-tiles` workload

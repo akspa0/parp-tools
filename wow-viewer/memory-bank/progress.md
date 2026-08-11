@@ -781,3 +781,6 @@ Next: build the authored RGB corpus and review the combined plan.
    expanded Spec 142 with Phase 8J overlay attribution/admission, 8K index-first budgeted residency,
    and 8L modern capability-gated submission coordinated with Spec 138. Next implementation is
    strictly Phase 8J; no performance win is claimed.
+ - 2026-08-10: Added the fresh-session Phase 8J handoff (`phase-8j-overlay-recovery.md`) and
+   expanded task ordering. T052-T059 are the first bounded attribution slice; T060-T061 are
+   explicitly blocked on its real owner-attributed capture. No renderer code changed.

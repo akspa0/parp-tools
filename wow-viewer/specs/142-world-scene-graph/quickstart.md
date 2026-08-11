@@ -52,6 +52,12 @@ viewer startup path. Phase 8J first attributes/fixes overlay admission; Phase 8K
 whole-map operation index-first and budgeted. Keep the command available as an explicit stress
 comparison after each bounded phase.
 
+For a fresh implementation session, start with
+[Phase 8J overlay recovery](phase-8j-overlay-recovery.md), not generic renderer optimization.
+Its first slice is attribution only; it supplies the exact focused build/test and user-run capture
+commands and blocks queues, caching, residency, and modern GPU work until one overlay owner is
+proven dominant.
+
 `Azeroth` tile `32_32` is the standard cross-client anchor for this diagnostic. When a tile is
 specified, `profile-render` verifies that exact ADT exists in the configured client and positions
 its production camera at the tile center instead of using the map's inferred startup camera.

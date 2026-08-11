@@ -415,3 +415,7 @@ the authored RGB corpus, then reviews the combined benchmark dry plan.
    for 39.5-44.0 s (P95 frame 44.2 s). Spec 142 now orders work as overlay-owner attribution and
    bounded admission, then index-first/budgeted residency, then Spec 138-coordinated modern
    capability-gated instance submission. No code change in this planning slice.
+ - Fresh-chat handoff is now `specs/142-world-scene-graph/phase-8j-overlay-recovery.md`. It locks
+   the next slice to owner-level overlay attribution: record PM4/object-wireframe/bounds/POI-taxi/
+   trigger owners separately before caching, queues, residency, or GPU work. Use its focused test,
+   build, and user-run capture commands; update this memory and commit only that slice afterward.
