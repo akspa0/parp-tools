@@ -129,8 +129,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
             int tx = idx / 64, ty = idx % 64; // tx=row(y), ty=col(x)
             string fn = $"{_mapDir}\\{_mapName}_{ty}_{tx}.adt"; // MapName_x_y = MapName_{col}_{row}
             bool exists = _dataSource.FileExists(fn);
-            ViewerLog.Important(ViewerLog.Category.Terrain,
-                $"  Tile[{di}]: rawIdx={idx}, tx={tx}(row), ty={ty}(col), file={fn}, exists={exists}");
+            if (ViewerLog.Verbose)
+                ViewerLog.Trace($"[Terrain] Tile[{di}]: rawIdx={idx}, tx={tx}(row), ty={ty}(col), file={fn}, exists={exists}");
         }
     }
 
@@ -405,8 +405,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
         {
             if (TryBuildMcnkIndexMap(texBytes, _mcnkParseOptions, out texMcnkByIndex, out texMhdrStart, out texMhdr))
             {
-                ViewerLog.Important(ViewerLog.Category.Terrain,
-                    $"  Tile({tileX},{tileY}) split: parsed {texMcnkByIndex.Count} texture MCNKs from _tex0.adt");
+                if (ViewerLog.Verbose)
+                    ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) split: parsed {texMcnkByIndex.Count} texture MCNKs from _tex0.adt");
             }
             else
             {
@@ -490,8 +490,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
             if (mcinAbsPos + 8 <= adtBytes.Length)
             {
                 string mcinSig = Encoding.ASCII.GetString(adtBytes, mcinAbsPos, 4);
-                ViewerLog.Important(ViewerLog.Category.Terrain,
-                    $"MCIN at file pos {mcinAbsPos}: sig='{mcinSig}' (mhdrOff={mhdrOffset}, mhdrStart={mhdrStart}, mcinOff={mcinOff})");
+                if (ViewerLog.Verbose)
+                    ViewerLog.Trace($"[Terrain] MCIN at file pos {mcinAbsPos}: sig='{mcinSig}' (mhdrOff={mhdrOffset}, mhdrStart={mhdrStart}, mcinOff={mcinOff})");
 
                 int mcinSize = BitConverter.ToInt32(adtBytes, mcinAbsPos + 4);
                 if (mcinSig != "NICM")
@@ -543,8 +543,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
             1 => $"{mcnkOffsets[0]}",
             _ => "<none>"
         };
-        ViewerLog.Important(ViewerLog.Category.Terrain,
-            $"MCIN offsets: {mcinOffsetPreview} (fileLen={adtBytes.Length})");
+        if (ViewerLog.Verbose)
+            ViewerLog.Trace($"[Terrain] MCIN offsets: {mcinOffsetPreview} (fileLen={adtBytes.Length})");
 
         int mcnkEntryCount = Math.Min(256, mcnkOffsets.Count);
         for (int ci = 0; ci < mcnkEntryCount; ci++)
@@ -593,8 +593,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     string posStr = pos != null && pos.Length >= 3
                         ? $"Z={pos[0]:F1}, X={pos[1]:F1}, Y={pos[2]:F1}"
                         : "null";
-                    ViewerLog.Important(ViewerLog.Category.Terrain,
-                        $"  Tile({tileX},{tileY}) chunk0: idx=({chunkX},{chunkY}), pos=[{posStr}], baseZ={((pos != null && pos.Length >= 1) ? pos[0] : 0f):F1}");
+                    if (ViewerLog.Verbose)
+                        ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) chunk0: idx=({chunkX},{chunkY}), pos=[{posStr}], baseZ={((pos != null && pos.Length >= 1) ? pos[0] : 0f):F1}");
                 }
 
                 // Heights (already interleaved in LK format)
@@ -678,7 +678,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     sb.Append($" liquid={liquid != null}");
                     if (liquid != null)
                         sb.Append($" minH={liquid.MinHeight:F2} maxH={liquid.MaxHeight:F2} h[0]={liquid.Heights[0]:F2} h[40]={liquid.Heights[40]:F2}");
-                    ViewerLog.Important(ViewerLog.Category.Terrain, sb.ToString());
+                    if (ViewerLog.Verbose)
+                        ViewerLog.Trace($"[Terrain] {sb}");
                 }
 
                 chunks.Add(new TerrainChunkData
@@ -722,8 +723,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         int mclqCount = chunks.Count(c => c.Liquid != null);
         if (chunks.Count > 0)
-            ViewerLog.Important(ViewerLog.Category.Terrain,
-                $"ADT ({tileX},{tileY}): parsed {chunks.Count} chunks with heightmaps, {mclqCount} with MCLQ liquid");
+        {
+            if (ViewerLog.Verbose)
+                ViewerLog.Trace($"[Terrain] ADT ({tileX},{tileY}): parsed {chunks.Count} chunks with heightmaps, {mclqCount} with MCLQ liquid");
+        }
         else
             ViewerLog.Important(ViewerLog.Category.Terrain,
                 $"ADT ({tileX},{tileY}): WARNING - 0 chunks parsed (no heightmaps found)");
@@ -1535,8 +1538,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
         int mh2oOff = mhdr.GetOffset(GillijimProject.WowFiles.Mhdr.Mh2oOffset);
         if (mh2oOff == 0)
         {
-            ViewerLog.Important(ViewerLog.Category.Terrain,
-                $"  Tile({tileX},{tileY}) MH2O: MHDR offset is 0 (no MH2O)");
+            if (ViewerLog.Verbose)
+                ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) MH2O: MHDR offset is 0 (no MH2O)");
             return;
         }
 
@@ -1551,8 +1554,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
         // Check FourCC at the position
         string mh2oSig = Encoding.ASCII.GetString(adt, mh2oAbs, 4);
         int mh2oSize = BitConverter.ToInt32(adt, mh2oAbs + 4);
-        ViewerLog.Important(ViewerLog.Category.Terrain,
-            $"  Tile({tileX},{tileY}) MH2O: mhdrOff={mh2oOff}, absPos={mh2oAbs}, sig='{mh2oSig}', size={mh2oSize}");
+        if (ViewerLog.Verbose)
+            ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) MH2O: mhdrOff={mh2oOff}, absPos={mh2oAbs}, sig='{mh2oSig}', size={mh2oSize}");
 
         // MH2O chunk: skip FourCC(4) + size(4) to get data start
         int mh2oDataStart = mh2oAbs + 8;
@@ -1600,9 +1603,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
             }
         }
 
-        if (liquidCount > 0)
-            ViewerLog.Important(ViewerLog.Category.Terrain,
-                $"  Tile({tileX},{tileY}) MH2O: {liquidCount} liquid chunks");
+        if (liquidCount > 0 && ViewerLog.Verbose)
+            ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) MH2O: {liquidCount} liquid chunks");
     }
 
     private LiquidChunkData? BuildMh2oLiquid(
@@ -2073,9 +2075,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 ParseModfViaMwid(adt, modfDataStart, modfSize, mwmoData, mwidEntries, result, _adtProfile.ModfRecordSize);
         }
 
-        ViewerLog.Important(ViewerLog.Category.Terrain,
-            $"  Tile({tileX},{tileY}) MHDR placements: mddf={mddfOff != 0}, modf={modfOff != 0}, " +
-            $"mmid={mmidEntries?.Count ?? 0}, mwid={mwidEntries?.Count ?? 0}");
+        if (ViewerLog.Verbose)
+            ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) MHDR placements: mddf={mddfOff != 0}, modf={modfOff != 0}, mmid={mmidEntries?.Count ?? 0}, mwid={mwidEntries?.Count ?? 0}");
     }
 
     /// <summary>

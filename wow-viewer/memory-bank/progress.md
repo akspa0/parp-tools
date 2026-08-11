@@ -768,3 +768,5 @@ Next: build the authored RGB corpus and review the combined plan.
    durable phase/frame progress output; observed trace entered the tile-32_32 AOI, not full 839-ADT residency.
  - 2026-08-10: First completed tile-32_32 probe reported 577.7 ms CPU with mostly unaccounted
    `WorldScene` pre-pass time; added explicit `scene_maintenance` stage before changing renderer behavior.
+ - 2026-08-10: Converted normal Cata per-ADT/chunk/liquid/placement logging to verbose-only before
+   whole-Azeroth profiling; default output retains malformed-data/contract diagnostics.

@@ -109,6 +109,8 @@ identity; no FPS or GPU claim is made.
   path with client-coherent WDT/tile validation and an on-disk progress report so a stalled stage is visible.
 - [x] T049 Attribute `WorldScene` pre-pass maintenance separately from draw/pass timing so scene-graph
   rebuild work cannot be misreported as unexplained frame time.
+- [x] T050 Gate normal per-ADT/chunk/liquid/placement console diagnostics behind verbose mode before
+  full-map profiling; retain malformed-data diagnostics at the default level.
       `WorldScene.Render` path in a hidden OpenGL context and writing a versioned per-stage JSON
       report with workload, queue, and client-read counters.
 - [x] T047 Add focused `WorldRenderDiagnostics` report-contract tests covering stage inventory,

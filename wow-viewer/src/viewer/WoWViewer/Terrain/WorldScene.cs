@@ -8000,8 +8000,8 @@ public class WorldScene : ISceneRenderer
         // Hide WDL low-res tile now that detailed ADT is loaded
         _wdlTerrain?.HideTile(tileX, tileY);
 
-        if (tileMdx.Count > 0 || tileSkyboxes.Count > 0 || tileWmo.Count > 0)
-            ViewerLog.Info(ViewerLog.Category.Terrain, $"Tile ({tileX},{tileY}) loaded: {tileMdx.Count} MDX, {tileSkyboxes.Count} skybox, {tileWmo.Count} WMO instances");
+        if ((tileMdx.Count > 0 || tileSkyboxes.Count > 0 || tileWmo.Count > 0) && ViewerLog.Verbose)
+            ViewerLog.Trace($"[Terrain] Tile ({tileX},{tileY}) loaded: {tileMdx.Count} MDX, {tileSkyboxes.Count} skybox, {tileWmo.Count} WMO instances");
     }
 
     /// <summary>

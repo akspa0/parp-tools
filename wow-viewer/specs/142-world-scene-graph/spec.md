@@ -660,6 +660,12 @@ client build; pairing an extracted/custom WDT with unrelated client MPQs is inva
 Archive-backed Alpha WDTs remain unsupported because the Alpha terrain adapter requires a local
 path.
 
+### 2026-08-10 correction: normal ADT logging is not benchmark work
+
+Normal full-map loading MUST NOT synchronously emit per-ADT, per-chunk, per-liquid, or per-tile
+placement logs at the default log level. Those diagnostics are verbose-only; malformed-data and
+contract-failure reports remain visible by default.
+
 For the cross-client performance gate, `Azeroth` tile `32_32` is the canonical anchor. The
 diagnostic MUST verify the matching ADT exists in the configured client and MUST report/profile
 from its tile-centered camera position rather than a map-wide inferred default.

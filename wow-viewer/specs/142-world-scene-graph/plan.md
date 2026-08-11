@@ -297,6 +297,10 @@ The `scene_maintenance` CPU stage owns the otherwise hidden pre-pass costs of PM
 instance/scene-graph rebuilding; it is the first follow-up attribution point after a 577.7 ms
 tile-32_32 frame reported only ~12.8 ms across the prior named stages.
 
+Before judging full-map frame cost, normal ADT success-path logging is verbose-only: console output
+and its shared history lock must not become benchmark workload. Invalid or malformed ADT findings
+remain visible by default.
+
 **Status**: Complete for the CPU-stage diagnostic harness on 2026-08-10. The
 `ValidationCapture` tool now has `profile-render`, which opens a hidden OpenGL surface and invokes
 the actual `WorldScene.Render` loop after production scene construction. It records all existing

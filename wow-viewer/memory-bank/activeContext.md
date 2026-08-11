@@ -402,3 +402,5 @@ the authored RGB corpus, then reviews the combined benchmark dry plan.
  - First live Azeroth 32_32 probe: 577.7 ms frame with 685 MDX/8 WMO placements but zero admitted
    objects and 10 terrain/15 asset loads pending; old named stages summed to ~12.8 ms. `scene_maintenance`
    now attributes graph/instance rebuild work separately before any renderer change.
+ - Default Cata ADT loading no longer prints normal per-tile MCIN/chunk/liquid/placement summaries:
+   these were thousands of console/history-lock writes over Azeroth and are now verbose-only.
