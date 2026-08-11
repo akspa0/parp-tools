@@ -8,6 +8,16 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 136/142 scene-wide client I/O containment
+
+- Deferred WMO doodad model loading no longer runs from every visible WMO placement. The shared
+  `WorldAssetManager` advances one bounded doodad load pass per `WorldScene` frame, preventing
+  placement count from multiplying synchronous client reads.
+- Minimap archive/loose-file reads now use one background reader against the shared `IDataSource`;
+  completed BLPs retain the existing bounded render-thread upload path.
+- The viewer project builds with 0 errors. This fixes an identified I/O fan-out path but does not
+  claim real-scene FPS, visual parity, or GPU/driver performance; those remain user-run gates.
+
 ## 2026-08-10 — Spec 136 GPU-instanced opaque doodad submission
 
 - Replaced the per-placement indexed-draw path for compatible opaque M2/MDX batches with a dynamic

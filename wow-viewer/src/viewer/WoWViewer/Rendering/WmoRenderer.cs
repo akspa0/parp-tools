@@ -113,8 +113,8 @@ public class WmoRenderer : ISceneRenderer
     private int _currentDoodadSubmissions;
     private int _currentVisibleGroupSubmissions;
     private int _currentVisibleLiquidMeshes;
-    private const int DeferredDoodadLoadsPerFrame = 1;
-    private const double DeferredDoodadLoadBudgetMs = 2.0;
+    private const int DefaultDeferredDoodadLoads = 1;
+    private const double DefaultDeferredDoodadBudgetMs = 2.0;
     private const float GroupVisibilityBoundsPadding = 32f;
     private const float NearRootFullVisibilityDistance = 192f;
     private const float ExteriorPortalRevealDistance = 1024f;
@@ -600,7 +600,6 @@ public class WmoRenderer : ISceneRenderer
         ResetRenderStats();
         ProcessDeferredMaterialTextureLoads();
         EnsureLiquidMeshesUpToDate();
-        ProcessDeferredDoodadLoads();
 
         bool renderOpaquePass = pass != WmoRenderPass.Transparent;
         bool renderTransparentPass = pass != WmoRenderPass.Opaque;
@@ -2024,15 +2023,20 @@ void main() {
         }
     }
 
-    private void ProcessDeferredDoodadLoads()
+    public int ProcessDeferredDoodadLoads(
+        int maxLoads = DefaultDeferredDoodadLoads,
+        double maxBudgetMs = DefaultDeferredDoodadBudgetMs)
     {
         if (!_deferInitialDoodadLoads || _pendingDoodadModelLoads.Count == 0)
-            return;
+            return 0;
+
+        if (maxLoads <= 0 || maxBudgetMs <= 0)
+            return 0;
 
         var stopwatch = Stopwatch.StartNew();
         int loadsCompleted = 0;
-        while (loadsCompleted < DeferredDoodadLoadsPerFrame
-            && stopwatch.Elapsed.TotalMilliseconds < DeferredDoodadLoadBudgetMs
+        while (loadsCompleted < maxLoads
+            && stopwatch.Elapsed.TotalMilliseconds < maxBudgetMs
             && _pendingDoodadModelLoads.TryDequeue(out string? normalizedModelPath))
         {
             _queuedDoodadModelLoads.Remove(normalizedModelPath);
@@ -2048,6 +2052,8 @@ void main() {
 
             loadsCompleted++;
         }
+
+        return loadsCompleted;
     }
 
     private enum DoodadLoadResult { Loaded, NotFound, ParseError }

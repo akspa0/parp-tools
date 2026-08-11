@@ -65,6 +65,12 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
   VBO carries model matrices/fade values, and each compatible geoset uses `glDrawElementsInstanced`.
   Native-runtime state, transparent/effect-heavy paths, and unsupported fades remain fallback-safe.
   Runtime visual parity and frame-time proof are still user-run.
+- A second runtime-loading multiplier was then found: deferred WMO doodad loads were being advanced
+  from every visible `WmoRenderer.RenderWithTransform` call. `WorldAssetManager` now owns one
+  scene-wide deferred-doodad budget per frame, and `MinimapRenderer` uses one background reader
+  against the shared client data source instead of four. This is an I/O fan-out containment fix;
+  user-run stage diagnostics still own the proof of whether parsing, terrain upload, or GPU wait is
+  the remaining bottleneck.
 - The adapter does not invent missing group bounds. Resident non-skybox ADT M2 placements now mount
   beneath deterministic terrain chunk buckets in the opt-in graph; unresolved bounds keep the chunk
   fail-open. This is object-population partitioning, not terrain mesh ownership. The existing

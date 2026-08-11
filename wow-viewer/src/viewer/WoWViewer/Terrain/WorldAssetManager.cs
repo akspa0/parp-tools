@@ -133,7 +133,7 @@ public class WorldAssetManager : IDisposable
     public int FileCacheCount => _fileDataCache.Count;
     public long FileCacheBytes => _fileDataCacheBytes;
     public int PendingAssetLoadCount => _queuedMdxLoads.Count + _queuedWmoLoads.Count;
-public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer => renderer?.PendingDoodadModelLoadCount ?? 0);
+    public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer => renderer?.PendingDoodadModelLoadCount ?? 0);
     public int KnownMissingM2SkinCount => _knownMissingM2SkinPaths.Count;
     public long SuppressedFailedMdxRetryCount => _suppressedFailedMdxRetryCount;
 
@@ -690,6 +690,35 @@ public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer =
             }
 
             loadsCompleted++;
+        }
+
+        return loadsCompleted;
+    }
+
+    /// <summary>
+    /// Advances deferred WMO doodad model loading once per scene frame.
+    /// The previous placement-owned call site ran this work from every
+    /// WmoRenderer.RenderWithTransform invocation, multiplying synchronous
+    /// client reads by the number of visible WMO placements.
+    /// </summary>
+    public int ProcessDeferredWmoDoodadLoads(int maxLoads = 1, double maxBudgetMs = 2.0)
+    {
+        if (maxLoads <= 0 || maxBudgetMs <= 0)
+            return 0;
+
+        var stopwatch = Stopwatch.StartNew();
+        int loadsCompleted = 0;
+
+        foreach (WmoRenderer? renderer in _wmoModels.Values)
+        {
+            if (renderer == null)
+                continue;
+
+            double remainingBudgetMs = maxBudgetMs - stopwatch.Elapsed.TotalMilliseconds;
+            if (loadsCompleted >= maxLoads || remainingBudgetMs <= 0)
+                break;
+
+            loadsCompleted += renderer.ProcessDeferredDoodadLoads(maxLoads - loadsCompleted, remainingBudgetMs);
         }
 
         return loadsCompleted;

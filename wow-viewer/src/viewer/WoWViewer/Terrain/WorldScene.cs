@@ -9567,7 +9567,11 @@ public class WorldScene : ISceneRenderer
         else if (UseHierarchicalSceneTraversal && _sceneGraphBuild is null)
             RebuildSceneGraphObjectIndex();
 
-        frame.DeferredAssetLoadMs = MeasureDurationMs(ProcessDeferredAssetLoads);
+        frame.DeferredAssetLoadMs = MeasureDurationMs(() =>
+        {
+            ProcessDeferredAssetLoads();
+            _assets.ProcessDeferredWmoDoodadLoads();
+        });
         frame.TaxiActorUpdateMs = MeasureDurationMs(UpdateTaxiActorInstances);
 
         // Extract camera position for sky dome

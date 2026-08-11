@@ -271,6 +271,18 @@ resident WMO merely to rebuild graph metadata. Missing summaries remain fail-ope
 on a later graph rebuild after the asset is already loaded. The focused graph suite remains 34
 passing tests; no runtime FPS claim is made by this phase.
 
+## Phase 8G — Scene-Wide Deferred Asset I/O Bound
+
+**Status**: Complete for the bounded runtime ownership slice on 2026-08-10. The graph rebuild path
+remains metadata-only, and deferred WMO doodad model loading is now advanced once per `WorldScene`
+frame through `WorldAssetManager`; it is no longer triggered by each visible WMO placement. The
+minimap reader is also limited to one background client-data reader because it shares the active
+`IDataSource` with terrain/object streaming.
+
+This prevents placement count from multiplying synchronous client reads, but does not establish
+that model parsing, terrain uploads, GPU submission, or driver wait are within budget. The next
+proof owner is a user-run real-client capture using the existing stage and asset I/O diagnostics.
+
 ## Later Phases (Not Started In This Slice)
 
 - **Phase 9**: Integrate graph portal volumes into runtime WMO submission and prove doorway

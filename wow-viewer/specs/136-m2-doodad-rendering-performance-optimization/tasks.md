@@ -23,3 +23,13 @@
       batches through `wow-viewer/src/viewer/WoWViewer/Rendering/WmoRenderer.cs`.
 - [ ] T008 Prove visual parity and measure CPU, upload, driver-wait, and GPU stages on synthetic and
       user-run real-client scenes before promoting GPU instancing or multi-draw submission.
+
+## Phase 4 — Client I/O Contention Containment
+
+- [x] T009 Move deferred WMO doodad model loading behind one scene-wide
+      `WorldAssetManager` budget; remove placement-owned loading from `WmoRenderer.RenderWithTransform`.
+- [x] T010 Reduce minimap client-data readers to one background worker while retaining bounded
+      render-thread texture uploads.
+- [ ] T011 Run the user-owned real-client comparison and record whether deferred asset CPU time,
+      pending doodad depth, minimap progress, and frame rate recover; do not promote an FPS claim
+      from the compile/build proof alone.

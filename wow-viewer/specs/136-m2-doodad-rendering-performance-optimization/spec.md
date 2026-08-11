@@ -8,6 +8,10 @@ Audit of the rendering pipeline reveals three related bottlenecks:
 1. **Forced Unbatched Rendering**: the legacy M2 adapter path historically forced every M2 instance onto the unbatched `RenderWithTransform` fallback path, causing full OpenGL shader program rebinding (`glUseProgram`), 8–10 GL uniform uploads, and state changes per object instance per frame.
 2. **WMO Doodad Submission Churn**: `WmoRenderer` historically submitted every opaque doodad placement independently, repeating batch setup for each visible object even when placements shared the same `IModelRenderer`.
 3. **Redundant Animation Updates**: `WorldScene` iterates over all $N$ visible placement instances every frame and calls `renderer.UpdateAnimation()`. When dozens or hundreds of placed instances share the same model (e.g. 500 instances of `tree.m2`), `UpdateAnimation()` is executed 500 times per frame on the exact same renderer object.
+4. **Placement-Multiplied Client I/O**: deferred WMO doodad model loads were advanced from every
+   `WmoRenderer.RenderWithTransform` call. A WMO placed many times could therefore perform one
+   synchronous model read per placement in one frame, multiplying the intended load budget. The
+   minimap loader also used four background readers against the shared client data source.
 
 ## User Stories
 
@@ -47,6 +51,22 @@ As a viewer developer, I want to verify that batched M2 rendering maintains exac
 1. Opaque and alpha-tested M2 doodads render identically under batched and unbatched modes.
 2. Automated test suites pass without regression.
 
+### User Story 4 - Bound Client I/O During Rendering (Priority: P1)
+
+As a viewer user, I want deferred WMO doodad loading and minimap reads to obey scene-wide limits,
+so that the number of visible placements or minimap tiles cannot turn client-file I/O into a
+render-loop stall.
+
+**Acceptance Criteria**:
+
+1. Deferred WMO doodad model loads are advanced at most once per scene frame through the shared
+   `WorldAssetManager` budget, independent of the number of visible WMO placements.
+2. `WmoRenderer.RenderWithTransform` performs no deferred doodad model read.
+3. Minimap decoding keeps archive reads bounded to one background reader and uploads completed
+   textures through the existing render-thread upload budget.
+4. Runtime diagnostics continue to distinguish pending asset loads, deferred WMO doodad loads,
+   minimap pending/uploaded/failed tiles, and stage CPU time.
+
 ---
 
 ## Technical Approach
@@ -73,3 +93,8 @@ uploads model matrices and fade values to a per-model instance VBO, and each vis
 legacy-backed M2 path. The native runtime backend, transparent layers, particle/ribbon models, and
 unsupported fade/material states retain the existing CPU fallback. Visual parity and real-scene
 frame-time proof remain user-run gates.
+
+Deferred client I/O is now scene-bounded: `WorldAssetManager` advances WMO doodad model loads once
+per frame instead of once per WMO placement, and `MinimapRenderer` uses one shared-data-source
+reader. This containment slice does not claim that model parsing, terrain upload, or GPU time is
+now within budget; the user-run real-client capture remains the proof owner.

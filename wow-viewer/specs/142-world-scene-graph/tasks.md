@@ -100,6 +100,11 @@ identity; no FPS or GPU claim is made.
 - [x] T041 Promote hierarchical traversal to the default `WorldScene` path with a state-invalidating runtime toggle in `wow-viewer/src/viewer/WoWViewer/Terrain/WorldScene.cs`.
 - [x] T042 Expose graph, AOI, and last WMO-bearing ADT unload diagnostics in `wow-viewer/src/viewer/WoWViewer/Terrain/TerrainManager.cs`, `wow-viewer/src/viewer/WoWViewer/Terrain/WorldScene.cs`, `wow-viewer/src/viewer/WoWViewer/ViewerApp_Investigation.cs`, and `wow-viewer/src/viewer/WoWViewer/ViewerApp_Sidebars.cs`.
 - [x] T043 Keep per-residency graph rebuilds metadata-only by using cached WMO summaries in `wow-viewer/src/viewer/WoWViewer/Terrain/WorldAssetManager.cs` and `wow-viewer/src/viewer/WoWViewer/Terrain/WorldScene.cs`; preserve fail-open behavior when optional group metadata is not cached.
+- [x] T044 Advance deferred WMO doodad model loads once per scene frame through
+      `WorldAssetManager`; do not perform that synchronous client read from each WMO placement
+      render call.
+- [x] T045 Bound minimap client-data reads to one background reader while retaining the existing
+      render-thread texture-upload queue.
 - [ ] T027 Add synthetic workload replay and stage-level report output in `wow-viewer/tools/validation-capture/WowViewer.Tool.ValidationCapture/ValidationWorldSceneAdapter.cs`.
 - [ ] T028 Add current-vs-new parity and performance report tests in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldScenePerformanceReportTests.cs`.
 - [ ] T029 Run the focused and full test commands from `wow-viewer/specs/142-world-scene-graph/quickstart.md` and record evidence in `wow-viewer/memory-bank/progress.md`.

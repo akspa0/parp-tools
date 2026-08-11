@@ -79,6 +79,10 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
   plus its WMO placement count.
 - Residency-triggered graph rebuilds use cached WMO summaries only; a rebuild must not synchronously
   read or parse resident WMO files merely to mount optional `WmoGroup` metadata.
+- Deferred WMO doodad model loads are advanced once per scene frame through `WorldAssetManager`,
+  independent of the number of visible WMO placements.
+- Minimap archive/loose-file reads use one background reader against the shared client data source;
+  completed BLP textures still upload through the existing bounded render-thread queue.
 
 ## Not yet run by this phase
 

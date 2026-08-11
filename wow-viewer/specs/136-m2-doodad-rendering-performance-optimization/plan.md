@@ -26,3 +26,14 @@ and issue one `glDrawElementsInstanced` call per compatible geoset. Keep native-
 transparent layers, particle/ribbon renderers, and unsupported fade/material states on the fallback.
 The implementation is complete; synthetic scaling, visual parity, and user-witnessed real-client
 capture remain the proof gate.
+
+## Phase 4 — Client I/O Contention Containment
+
+**Status**: Complete for the bounded ownership slice on 2026-08-10. Deferred WMO doodad loading
+now advances once per `WorldScene` frame through `WorldAssetManager`, rather than once for every
+visible WMO placement. Minimap archive reads are serialized to one background reader because the
+loader shares the active `IDataSource` with terrain and object streaming. This is an I/O fan-out
+fix, not a claim that all model parsing or GPU work is solved.
+
+The proof gate is a user-run real-client comparison that records deferred asset CPU time, pending
+WMO doodad count, minimap pending/uploaded/failed counts, and the existing render-stage timings.

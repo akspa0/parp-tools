@@ -18,7 +18,10 @@ namespace WoWViewer.Rendering;
 /// </summary>
 public class MinimapRenderer : IDisposable
 {
-    private const int BackgroundWorkerCount = 4;
+    // Minimap reads share the active IDataSource with terrain/object streaming.
+    // Keep client reads serialized here so the minimap cannot multiply archive
+    // contention while the render thread is resolving world assets.
+    private const int BackgroundWorkerCount = 1;
 
     private readonly GL _gl;
     private readonly IDataSource _dataSource;
