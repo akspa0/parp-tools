@@ -48,9 +48,37 @@ public sealed class WorldSceneGraphAdapterOptions
     public bool MapBoundsKnown { get; init; }
 }
 
-public sealed record WorldSceneGraphBuildResult(
-    WorldSceneGraph Graph,
-    IReadOnlyDictionary<string, WorldSceneGraphObjectPlacement> PlacementsByNodeId);
+public sealed class WorldSceneGraphBuildResult
+{
+    private readonly Dictionary<string, WorldSceneGraphObjectPlacement> _placementsByNodeId;
+
+    public WorldSceneGraphBuildResult(
+        WorldSceneGraph graph,
+        IReadOnlyDictionary<string, WorldSceneGraphObjectPlacement> placementsByNodeId)
+    {
+        ArgumentNullException.ThrowIfNull(graph);
+        ArgumentNullException.ThrowIfNull(placementsByNodeId);
+
+        Graph = graph;
+        _placementsByNodeId = new Dictionary<string, WorldSceneGraphObjectPlacement>(
+            placementsByNodeId,
+            StringComparer.Ordinal);
+        PlacementsByNodeId = new ReadOnlyDictionary<string, WorldSceneGraphObjectPlacement>(_placementsByNodeId);
+    }
+
+    public WorldSceneGraph Graph { get; }
+
+    public IReadOnlyDictionary<string, WorldSceneGraphObjectPlacement> PlacementsByNodeId { get; }
+
+    public bool TryUpdatePlacementInstance(string placementId, WorldObjectInstance instance)
+    {
+        if (!_placementsByNodeId.TryGetValue(placementId, out WorldSceneGraphObjectPlacement placement))
+            return false;
+
+        _placementsByNodeId[placementId] = placement with { Instance = instance };
+        return true;
+    }
+}
 
 public sealed record WorldSceneGraphBuildSet(
     IReadOnlyDictionary<(int TileX, int TileY), WorldSceneGraphBuildResult> AdtGraphs,

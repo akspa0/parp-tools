@@ -669,3 +669,4 @@ wow-viewer/compare/*
 wow-viewer/data-harvester/out/*
 map-references/*.kra
 .reference_data/*
+.pytest-*

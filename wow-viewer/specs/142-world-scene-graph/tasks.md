@@ -122,16 +122,16 @@ identity; no FPS or GPU claim is made.
       dominant-stage attribution, unsettled queues, and uncovered object paths.
 - [ ] T048 Add timer-query-backed GPU and driver-wait attribution to the production report; until
       then the CPU-stage report MUST label that gap explicitly.
-- [ ] T052 [US2] Add serializable per-owner overlay frame records and aggregate report summaries in
+- [x] T052 [US2] Add serializable per-owner overlay frame records and aggregate report summaries in
   `src/core/WowViewer.Core.Runtime/World/WorldRenderDiagnostics.cs` with focused coverage in
   `tests/WowViewer.Core.Tests/World/WorldRenderDiagnosticsTests.cs`.
-- [ ] T053 [US2] Instrument the existing object-wireframe, bounds, PM4, POI/taxi, area-trigger,
+- [x] T053 [US2] Instrument the existing object-wireframe, bounds, PM4, POI/taxi, area-trigger,
   and remaining overlay blocks in `src/viewer/WoWViewer/Terrain/WorldScene.cs` without moving their
   rendering behavior; every owner must emit a disabled or measured record each frame.
-- [ ] T058 [US2] Add a report-contract proof that owner durations reconcile to coarse `overlay`,
+- [x] T058 [US2] Add a report-contract proof that owner durations reconcile to coarse `overlay`,
   disabled owners do no work, and a dominant owner is named in
   `tests/WowViewer.Core.Tests/World/WorldRenderDiagnosticsTests.cs`.
-- [ ] T059 [US2] Build the validation-capture seam and hand off the owner-attribution capture from
+- [x] T059 [US2] Build the validation-capture seam and hand off the owner-attribution capture from
   `specs/142-world-scene-graph/phase-8j-overlay-recovery.md`; record only user-run evidence.
 - [ ] T060 [US2] After T052-T059 identify the real dominant owner, extract only that owner behind a
   narrow invalidation/cache seam in `src/viewer/WoWViewer/Rendering/` or `Terrain/`, with focused

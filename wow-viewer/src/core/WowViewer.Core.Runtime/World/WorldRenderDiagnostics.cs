@@ -12,6 +12,7 @@ public sealed record WorldRenderDiagnosticReport(
     IReadOnlyList<WorldRenderDiagnosticFrame> Frames,
     WorldRenderDiagnosticWorkload Workload,
     IReadOnlyList<WorldRenderDiagnosticStageSummary> Stages,
+    IReadOnlyList<WorldRenderDiagnosticOverlayOwnerSummary> OverlayOwners,
     IReadOnlyList<WorldRenderDiagnosticFinding> Findings);
 
 public readonly record struct WorldRenderDiagnosticFrame(int FrameIndex, WorldRenderFrameStats Stats);
@@ -42,6 +43,18 @@ public readonly record struct WorldRenderDiagnosticStageSummary(
     int MaxVisibleCount,
     int MaxSubmittedCount);
 
+public readonly record struct WorldRenderDiagnosticOverlayOwnerSummary(
+    string OwnerId,
+    int SampleCount,
+    int EnabledSampleCount,
+    double AverageDurationMs,
+    double P95DurationMs,
+    double MaxDurationMs,
+    int MaxPreparedPrimitiveCount,
+    int MaxSubmittedPrimitiveCount,
+    int MaxDeferredCount,
+    IReadOnlyList<string> CacheStatuses);
+
 public readonly record struct WorldRenderDiagnosticFinding(
     string Code,
     string Severity,
@@ -64,14 +77,26 @@ public static class WorldRenderDiagnostics
         WorldRenderDiagnosticStageSummary[] stages = StageDefinitions
             .Select(definition => Summarize(definition.Name, frames, definition.Select))
             .ToArray();
-        WorldRenderDiagnosticFinding[] findings = BuildFindings(frames, workload, stages).ToArray();
-        return new WorldRenderDiagnosticReport(Schema, renderer, warmupFrameCount, frames, workload, stages, findings);
+        WorldRenderDiagnosticOverlayOwnerSummary[] overlayOwners = WorldOverlayOwners.All
+            .Select(ownerId => SummarizeOverlayOwner(ownerId, frames))
+            .ToArray();
+        WorldRenderDiagnosticFinding[] findings = BuildFindings(frames, workload, stages, overlayOwners).ToArray();
+        return new WorldRenderDiagnosticReport(
+            Schema,
+            renderer,
+            warmupFrameCount,
+            frames,
+            workload,
+            stages,
+            overlayOwners,
+            findings);
     }
 
     private static IEnumerable<WorldRenderDiagnosticFinding> BuildFindings(
         IReadOnlyList<WorldRenderDiagnosticFrame> frames,
         WorldRenderDiagnosticWorkload workload,
-        IReadOnlyList<WorldRenderDiagnosticStageSummary> stages)
+        IReadOnlyList<WorldRenderDiagnosticStageSummary> stages,
+        IReadOnlyList<WorldRenderDiagnosticOverlayOwnerSummary> overlayOwners)
     {
         if (frames.Count == 0)
         {
@@ -117,6 +142,18 @@ public static class WorldRenderDiagnostics
         if (dominant is { P95DurationMs: > 1.0 })
             yield return new("dominant-cpu-stage", "info", $"P95 dominant CPU stage is {dominant.Value.Name} at {dominant.Value.P95DurationMs:F1} ms.");
 
+        WorldRenderDiagnosticOverlayOwnerSummary? dominantOverlayOwner = overlayOwners
+            .Where(static owner => owner.EnabledSampleCount > 0)
+            .OrderByDescending(static owner => owner.P95DurationMs)
+            .FirstOrDefault();
+        if (dominantOverlayOwner is { P95DurationMs: > 1.0 })
+        {
+            yield return new(
+                "dominant-overlay-owner",
+                "info",
+                $"P95 dominant overlay owner is {dominantOverlayOwner.Value.OwnerId} at {dominantOverlayOwner.Value.P95DurationMs:F1} ms.");
+        }
+
         yield return new(
             "gpu-timing-not-yet-attributed",
             "info",
@@ -141,6 +178,48 @@ public static class WorldRenderDiagnostics
             durations.Max(),
             samples.Max(static sample => sample.VisibleCount),
             samples.Max(static sample => sample.SubmittedCount));
+    }
+
+    private static WorldRenderDiagnosticOverlayOwnerSummary SummarizeOverlayOwner(
+        string ownerId,
+        IReadOnlyList<WorldRenderDiagnosticFrame> frames)
+    {
+        WorldOverlayOwnerFrameStats[] samples = frames
+            .SelectMany(static frame => frame.Stats.OverlayOwners)
+            .Where(sample => string.Equals(sample.OwnerId, ownerId, StringComparison.Ordinal))
+            .ToArray();
+
+        if (samples.Length == 0)
+        {
+            return new(
+                ownerId,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                Array.Empty<string>());
+        }
+
+        double[] durations = samples.Select(static sample => sample.DurationMs).ToArray();
+        return new(
+            ownerId,
+            samples.Length,
+            samples.Count(static sample => sample.Enabled),
+            durations.Average(),
+            Percentile(durations, 0.95),
+            durations.Max(),
+            samples.Max(static sample => sample.PreparedPrimitiveCount),
+            samples.Max(static sample => sample.SubmittedPrimitiveCount),
+            samples.Max(static sample => sample.DeferredCount),
+            samples.Select(static sample => sample.CacheStatus)
+                .Where(static status => !string.IsNullOrWhiteSpace(status))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(static status => status, StringComparer.Ordinal)
+                .ToArray());
     }
 
     private static double Percentile(double[] values, double percentile)

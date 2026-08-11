@@ -95,6 +95,60 @@ public sealed class WorldSceneGraphObjectAdapterTests
     }
 
     [Fact]
+    public void StreamingPlacementBoundsUpdatePreservesAuthoritativeTileAndUpdatesPlacementState()
+    {
+        WorldSceneGraphObjectPlacement placement = Placement(
+            "m2/streamed",
+            WorldSceneNodeKind.M2Placement,
+            1,
+            2,
+            new Vector3(10f, 20f, 30f)) with
+        {
+            Instance = Placement(
+                "m2/streamed",
+                WorldSceneNodeKind.M2Placement,
+                1,
+                2,
+                new Vector3(10f, 20f, 30f)).Instance with
+            {
+                BoundsResolved = false,
+                LocalBoundsMin = Vector3.Zero,
+                LocalBoundsMax = Vector3.Zero,
+                BoundsMin = Vector3.Zero,
+                BoundsMax = Vector3.Zero,
+            }
+        };
+
+        WorldSceneGraphBuildSet result = WorldSceneGraphObjectAdapter.BuildPerAdt([placement]);
+        WorldSceneGraphBuildResult tile = result.AdtGraphs[(1, 2)];
+        Vector3 authoritativeTileMin = tile.Graph.Root.LocalBoundsMin;
+        Vector3 authoritativeTileMax = tile.Graph.Root.LocalBoundsMax;
+
+        Assert.True(tile.Graph.TryGetNode("m2/streamed", out WorldSceneNode? node));
+        Assert.NotNull(node);
+        Assert.False(node!.CanRejectSubtree);
+
+        WorldObjectInstance resolved = placement.Instance with
+        {
+            BoundsResolved = true,
+            LocalBoundsMin = new Vector3(-2f, -3f, -4f),
+            LocalBoundsMax = new Vector3(2f, 3f, 4f),
+            BoundsMin = new Vector3(8f, 17f, 26f),
+            BoundsMax = new Vector3(12f, 23f, 34f),
+        };
+
+        Assert.True(tile.TryUpdatePlacementInstance("m2/streamed", resolved));
+        node.UpdateLocalBoundsForStreaming(resolved.LocalBoundsMin, resolved.LocalBoundsMax, resolved.BoundsResolved);
+
+        Assert.Equal(resolved, tile.PlacementsByNodeId["m2/streamed"].Instance);
+        Assert.True(node.CanRejectSubtree);
+        Assert.Equal(resolved.LocalBoundsMin, node.LocalBoundsMin);
+        Assert.Equal(resolved.LocalBoundsMax, node.LocalBoundsMax);
+        Assert.Equal(authoritativeTileMin, tile.Graph.Root.LocalBoundsMin);
+        Assert.Equal(authoritativeTileMax, tile.Graph.Root.LocalBoundsMax);
+    }
+
+    [Fact]
     public void BuildPerAdtUsesAuthoritativeTileBoundsWhenChildModelBoundsAreUnresolved()
     {
         WorldSceneGraphObjectPlacement unknown = new(

@@ -1,7 +1,8 @@
 # Phase 8J: Overlay Recovery — Fresh-Session Handoff
 
 **Feature**: Spec 142 World Scene Graph and Spatial Partitioning
-**Status**: Ready to implement, starting with 8J.1 only
+**Status**: `selection_bounds` root cause identified; synchronous full-world rebuild removed from
+asset-bound promotion path; user rerun pending
 **Evidence**: `output/diagnostics/azeroth-32-32-full-post-tile-cull.json`
 **Proof owner**: Production `profile-render`, then focused unit/build proof
 
@@ -15,6 +16,32 @@ geometry/bounds/markers, POI pins, taxi paths, area triggers, and other visual d
 The first implementation must not guess that PM4 is the culprit or “optimize overlays” globally.
 It must make every owner visible in the report, then fix the proven owner without changing terrain,
 WMO, M2, minimap, dual-map, or visual-fidelity behavior.
+
+## Owner evidence (user-run)
+
+The user supplied the dominant record from the full-map owner capture:
+
+```json
+{
+  "OwnerId": "selection_bounds",
+  "DurationMs": 36820.6569,
+  "Enabled": true,
+  "PreparedPrimitiveCount": 0,
+  "SubmittedPrimitiveCount": 0,
+  "CacheStatus": "not_cached",
+  "DeferredCount": 0
+}
+```
+
+This proves the stall is CPU admission/filter traversal, not box geometry or GPU submission:
+the owner spent 36.8 seconds while producing and submitting zero primitives.
+
+The post-mitigation report still alternated between fast and slow frames. Slow frames had only
+1,144-1,469 visible MDX placements and 3-11 visible WMOs, so the visible-list bounds loop was not
+the 43-second operation. The remaining cost was `SelectedInstance`: deferred asset promotion set
+`_instancesDirty` after frame maintenance, and the selected-bounds read accessor synchronously
+called `RebuildInstanceLists`, rebuilding the full placement/scene-graph index while emitting zero
+selected primitives.
 
 ## Scope and non-goals
 
@@ -71,6 +98,42 @@ output or work scheduling.
 
 **Done means**: a report identifies the owner, enabled state, primitive count, and cache/deferred
 state responsible for each multi-second overlay frame. No optimization claim is allowed yet.
+
+### 8J.1 implementation proof (2026-08-10)
+
+- Added the serializable `WorldOverlayOwnerFrameStats` contract and stable nine-owner taxonomy in
+  `WowViewer.Core.Runtime`.
+- `WorldRenderFrameStats` retains one record for every owner on every frame, including disabled
+  owners. The coarse `overlay` stage is now the sum of those owner durations; `other_overlay`
+  carries remaining state/light/flush work until it is split further.
+- `WorldRenderDiagnostics` retains per-frame owner records and emits owner summaries with enabled
+  samples, average/P95/max duration, primitive counts, deferred counts, and cache statuses.
+- `WorldScene.Render` instruments the existing object-wireframe, selection/bounds, PM4 bounds,
+  PM4 preparation/submission/nodes, POI/taxi, and area-trigger blocks without moving their render
+  behavior. No cache or scheduling change is included.
+- Focused diagnostics proof passes 3/3; the validation-capture project builds with 0 errors.
+  The user-run owner evidence identifies `selection_bounds` as dominant at 36.8 seconds with zero
+  prepared/submitted primitives.
+
+## 8J.2 first mitigation — selection-bounds admission
+
+The global bounding-box path now consumes the existing camera-admitted
+`frame.Visibility.VisibleMdx` and `frame.Visibility.VisibleWmos` lists instead of rescanning the
+full `_mdxInstances` and `_wmoInstances` placement arrays every frame. Selected-object bounds remain
+independent. This is an owner-specific admission correction, not a cache or measured performance
+claim; the next slice must extract the owner invalidation/cache seam and prove unchanged-frame reuse.
+
+The cross-platform viewer target builds with 0 errors and the focused diagnostics tests pass 3/3.
+The Windows target was not compiled with `--no-restore` because its existing assets file lacks the
+`net10.0-windows` target; this is a checkout restore-state limitation, not a source error.
+
+## 8J.2 root-cause correction — bounds promotion
+
+`TryGetSelectedSceneInstance` now fails closed while the structural lists are dirty instead of
+rebuilding them from a render/query accessor. Bounds promotion also updates the existing scene-graph
+placement node and its ancestors in place, and no longer marks the structural `_instancesDirty` flag.
+Tile add/remove and external-spawn changes retain the full rebuild path. This keeps deferred asset
+resolution from rebuilding all 243,585 placements every other frame.
 
 ## 8J.2 — Owner isolation and invalidation (only after 8J.1)
 

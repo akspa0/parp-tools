@@ -783,4 +783,17 @@ Next: build the authored RGB corpus and review the combined plan.
    strictly Phase 8J; no performance win is claimed.
  - 2026-08-10: Added the fresh-session Phase 8J handoff (`phase-8j-overlay-recovery.md`) and
    expanded task ordering. T052-T059 are the first bounded attribution slice; T060-T061 are
-   explicitly blocked on its real owner-attributed capture. No renderer code changed.
+   explicitly blocked on its real owner-attributed capture.
+ - 2026-08-10: Implemented Phase 8J.1. Added the nine-owner serializable overlay contract,
+   per-frame retention, aggregate JSON summaries, and production WorldScene instrumentation for
+   object wireframe, selection/bounds, PM4 bounds/geometry/nodes, POI/taxi, area triggers, and
+   residual overlay work. Owner durations reconcile to coarse `overlay`; disabled owners emit zero
+   work. Focused diagnostics proof: 3/3. Validation-capture build: 0 errors. User evidence then
+   identified `selection_bounds` as the dominant owner: 36.8 seconds with zero prepared/submitted
+   primitives. The first visible-list mitigation still reported alternating 41-43 second frames;
+   with only 1,144-1,469 visible MDX and 3-11 WMO entries, the remaining work was not box batching.
+   Deferred asset bounds marked `_instancesDirty` after maintenance, and `SelectedInstance` then
+   synchronously rebuilt the full placement/scene-graph index inside `selection_bounds`. The read
+   accessor now fails closed while dirty, while bounds promotion updates graph nodes/ancestors in
+   place and leaves structural dirty clear. Focused diagnostics proof: 3/3; cross-platform viewer
+   build: 0 errors. User rerun is still required; no speedup claim yet.

@@ -415,7 +415,14 @@ the authored RGB corpus, then reviews the combined benchmark dry plan.
    for 39.5-44.0 s (P95 frame 44.2 s). Spec 142 now orders work as overlay-owner attribution and
    bounded admission, then index-first/budgeted residency, then Spec 138-coordinated modern
    capability-gated instance submission. No code change in this planning slice.
- - Fresh-chat handoff is now `specs/142-world-scene-graph/phase-8j-overlay-recovery.md`. It locks
-   the next slice to owner-level overlay attribution: record PM4/object-wireframe/bounds/POI-taxi/
-   trigger owners separately before caching, queues, residency, or GPU work. Use its focused test,
-   build, and user-run capture commands; update this memory and commit only that slice afterward.
+ - Phase 8J.1 owner attribution is implemented in `WorldScene.Render` and the runtime diagnostic
+   contract. Every frame retains nine owner records, including disabled owners; the coarse
+   `overlay` stage is their duration sum, with `other_overlay` as the temporary residual.
+   User evidence identifies `selection_bounds` as the blocker: 36.8 seconds with zero prepared or
+   submitted primitives. The first visible-list mitigation still produced 41-43 second alternating
+   frames; the report showed only 1,144-1,469 visible MDX and 3-11 WMO entries. Root cause was the
+   `SelectedInstance` accessor synchronously rebuilding the full placement/scene graph after
+   deferred asset bounds marked `_instancesDirty`. The accessor now fails closed while dirty, and
+   bounds promotion updates existing scene-graph nodes in place without setting structural dirty.
+   Focused diagnostics proof is 3/3 and the cross-platform viewer build has 0 errors. User rerun is
+   required before claiming the stall is gone.

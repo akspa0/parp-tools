@@ -442,8 +442,11 @@ submission, GPU/driver wait, and spatial-query time.
   missing WMO/MDX coverage, and CPU budget overruns, and MUST state when GPU timing has not yet
   been attributed.
 - **FR-036**: `overlay` MUST be decomposed into named owners before any performance conclusion is
-  drawn. An overlay owner MUST expose its invalidation key, item count, cache/rebuild result,
-  deferred-work count, and CPU duration; a multi-second opaque overlay stage is a blocking failure.
+  drawn. The attribution phase MUST expose each owner's enabled state, primitive/item counts,
+  cache status, deferred-work count, and CPU duration in every frame and in the aggregate report.
+  Before owner isolation or caching is promoted, the owner MUST additionally expose its named
+  invalidation key and cache/rebuild result. A multi-second opaque overlay stage is a blocking
+  failure.
 - **FR-037**: Full-map discovery MUST be index-first. Discovering all valid tiles may create
   lightweight residency records and bounds, but MUST NOT synchronously decode every ADT, upload
   every terrain mesh, or materialize every object placement on normal viewer startup.

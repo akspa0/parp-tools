@@ -111,6 +111,22 @@ public sealed class WorldSceneNode
         RefreshRoot();
     }
 
+    /// <summary>
+    /// Updates a streamed placement's bounds without refreshing unrelated graph branches.
+    /// Ancestor aggregate bounds are intentionally left unchanged; callers use this for a
+    /// false-to-true placement bounds promotion while the authoritative tile root remains valid.
+    /// </summary>
+    public void UpdateLocalBoundsForStreaming(Vector3 localBoundsMin, Vector3 localBoundsMax, bool boundsKnown = true)
+    {
+        if (boundsKnown)
+            ValidateBounds(localBoundsMin, localBoundsMax, nameof(localBoundsMin));
+
+        _localBoundsMin = boundsKnown ? localBoundsMin : Vector3.Zero;
+        _localBoundsMax = boundsKnown ? localBoundsMax : Vector3.Zero;
+        BoundsKnown = boundsKnown;
+        RefreshWorldState(Parent?.WorldTransform ?? Matrix4x4.Identity);
+    }
+
     internal void AttachChild(WorldSceneNode child)
     {
         ArgumentNullException.ThrowIfNull(child);

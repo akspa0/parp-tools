@@ -926,6 +926,7 @@ public class WorldScene : ISceneRenderer
         public double MdxTransparentSubmissionMs { get; set; }
         public double OverlayMs { get; set; }
         public double SceneMaintenanceMs { get; set; }
+        public List<WorldOverlayOwnerFrameStats> OverlayOwners { get; } = new(WorldOverlayOwners.All.Count);
 
         public void Reset()
         {
@@ -961,7 +962,42 @@ public class WorldScene : ISceneRenderer
             MdxTransparentSubmissionMs = 0;
             OverlayMs = 0;
             SceneMaintenanceMs = 0;
+            OverlayOwners.Clear();
+            foreach (string ownerId in WorldOverlayOwners.All)
+                OverlayOwners.Add(WorldOverlayOwnerFrameStats.Disabled(ownerId));
         }
+
+        public void SetOverlayOwner(
+            string ownerId,
+            double durationMs,
+            bool enabled,
+            int preparedPrimitiveCount = 0,
+            int submittedPrimitiveCount = 0,
+            string cacheStatus = "not_cached",
+            int deferredCount = 0)
+        {
+            WorldOverlayOwnerFrameStats stats = new(
+                ownerId,
+                Math.Max(0, durationMs),
+                enabled,
+                Math.Max(0, preparedPrimitiveCount),
+                Math.Max(0, submittedPrimitiveCount),
+                cacheStatus,
+                Math.Max(0, deferredCount));
+
+            for (int i = 0; i < OverlayOwners.Count; i++)
+            {
+                if (string.Equals(OverlayOwners[i].OwnerId, ownerId, StringComparison.Ordinal))
+                {
+                    OverlayOwners[i] = stats;
+                    return;
+                }
+            }
+
+            throw new InvalidOperationException($"Unknown world overlay owner '{ownerId}'.");
+        }
+
+        public double OverlayOwnerDurationSum => OverlayOwners.Sum(static owner => owner.DurationMs);
 
         public WorldRenderFrameStats ToStats(
             double totalCpuMs,
@@ -1009,7 +1045,10 @@ public class WorldScene : ISceneRenderer
                 new WorldRenderStageStats(MdxTransparentSortMs, ObjectPasses.TransparentVisibleMdxRoutes.Count),
                 new WorldRenderStageStats(MdxTransparentSubmissionMs, ObjectPasses.TransparentVisibleMdxRoutes.Count, TransparentBatchedMdxCount + TransparentUnbatchedMdxCount),
                 new WorldRenderStageStats(OverlayMs),
-                new WorldRenderStageStats(SceneMaintenanceMs));
+                new WorldRenderStageStats(SceneMaintenanceMs))
+            {
+                OverlayOwners = OverlayOwners.ToArray(),
+            };
         }
     }
 
@@ -8217,8 +8256,15 @@ public class WorldScene : ISceneRenderer
 
     private bool TryGetSelectedSceneInstance(out ObjectInstance instance)
     {
+        // Asset promotion can resolve bounds after the frame-maintenance pass and mark the
+        // placement lists dirty. Never rebuild the full world synchronously from a read/query
+        // accessor (the render-time selected-bounds overlay is one such accessor); let the next
+        // frame's scene-maintenance pass perform the rebuild once.
         if (_instancesDirty)
-            RebuildInstanceLists();
+        {
+            instance = default;
+            return false;
+        }
 
         if (TryGetSceneObjectByIndex(_selectedObjectType, _selectedObjectIndex, out instance))
         {
@@ -8516,33 +8562,28 @@ public class WorldScene : ISceneRenderer
         if (processed <= 0)
             return;
 
-        bool boundsChanged = false;
         foreach (var pair in _tileMdxInstances)
         {
-            if (!RefreshMdxInstanceBounds(pair.Value))
+            if (!RefreshMdxInstanceBounds(pair.Value, pair.Key, isSkybox: false, isExternal: false))
                 continue;
 
             UpdateObjectBucketBounds(_tileMdxBounds, pair.Key, pair.Value);
-            boundsChanged = true;
         }
 
-        foreach (var list in _tileSkyboxInstances.Values)
-            boundsChanged |= RefreshMdxInstanceBounds(list);
+        foreach (var pair in _tileSkyboxInstances)
+            RefreshMdxInstanceBounds(pair.Value, pair.Key, isSkybox: true, isExternal: false);
+
         foreach (var pair in _tileWmoInstances)
         {
-            if (!RefreshWmoInstanceBounds(pair.Value))
+            if (!RefreshWmoInstanceBounds(pair.Value, pair.Key, isSkybox: false, isExternal: false))
                 continue;
 
             UpdateObjectBucketBounds(_tileWmoBounds, pair.Key, pair.Value);
-            boundsChanged = true;
         }
 
-        boundsChanged |= RefreshMdxInstanceBounds(_externalMdxInstances);
-        boundsChanged |= RefreshMdxInstanceBounds(_externalSkyboxInstances);
-        boundsChanged |= RefreshWmoInstanceBounds(_externalWmoInstances);
-
-        if (boundsChanged)
-            _instancesDirty = true;
+        RefreshMdxInstanceBounds(_externalMdxInstances, tileKey: null, isSkybox: false, isExternal: true);
+        RefreshMdxInstanceBounds(_externalSkyboxInstances, tileKey: null, isSkybox: true, isExternal: true);
+        RefreshWmoInstanceBounds(_externalWmoInstances, tileKey: null, isSkybox: false, isExternal: true);
     }
 
     private static void UpdateObjectBucketBounds(
@@ -8598,7 +8639,11 @@ public class WorldScene : ISceneRenderer
         return centerDistanceSq <= MaxWorldObjectViewDistanceSq;
     }
 
-    private bool RefreshMdxInstanceBounds(List<ObjectInstance> instances)
+    private bool RefreshMdxInstanceBounds(
+        List<ObjectInstance> instances,
+        (int tileX, int tileY)? tileKey,
+        bool isSkybox,
+        bool isExternal)
     {
         bool changed = false;
 
@@ -8618,13 +8663,18 @@ public class WorldScene : ISceneRenderer
             inst.BoundsMax = worldMax;
             inst.BoundsResolved = true;
             instances[i] = inst;
+            UpdateSceneGraphPlacementBounds(tileKey, WorldSceneNodeKind.M2Placement, i, inst, isSkybox, isExternal);
             changed = true;
         }
 
         return changed;
     }
 
-    private bool RefreshWmoInstanceBounds(List<ObjectInstance> instances)
+    private bool RefreshWmoInstanceBounds(
+        List<ObjectInstance> instances,
+        (int tileX, int tileY)? tileKey,
+        bool isSkybox,
+        bool isExternal)
     {
         bool changed = false;
 
@@ -8644,10 +8694,47 @@ public class WorldScene : ISceneRenderer
             inst.BoundsMax = worldMax;
             inst.BoundsResolved = true;
             instances[i] = inst;
+            UpdateSceneGraphPlacementBounds(tileKey, WorldSceneNodeKind.WmoPlacement, i, inst, isSkybox, isExternal);
             changed = true;
         }
 
         return changed;
+    }
+
+    private void UpdateSceneGraphPlacementBounds(
+        (int tileX, int tileY)? tileKey,
+        WorldSceneNodeKind kind,
+        int instanceIndex,
+        in ObjectInstance instance,
+        bool isSkybox,
+        bool isExternal)
+    {
+        if (!UseHierarchicalSceneTraversal || _sceneGraphBuild is null)
+            return;
+
+        string kindToken = GetSceneGraphKindToken(kind, isSkybox);
+        string sourceToken = isExternal
+            ? "external"
+            : tileKey.HasValue
+                ? $"tile/{tileKey.Value.tileX:D2}/{tileKey.Value.tileY:D2}"
+                : string.Empty;
+        if (string.IsNullOrEmpty(sourceToken))
+            return;
+
+        string placementId = $"world/object/{kindToken}/{sourceToken}/{instanceIndex:D6}";
+        if (!_sceneGraphBuild.TryGetGraphForPlacement(placementId, out WorldSceneGraphBuildResult? graph)
+            || graph is null
+            || !graph.Graph.TryGetNode(placementId, out WorldSceneNode? node)
+            || node is null)
+        {
+            return;
+        }
+
+        // Bounds promotion changes the placement payload, not the scene topology. Update only
+        // this placement node; the streaming-safe node API deliberately avoids refreshing every
+        // sibling branch, and the authoritative tile root remains unchanged.
+        graph.TryUpdatePlacementInstance(placementId, instance);
+        node.UpdateLocalBoundsForStreaming(instance.LocalBoundsMin, instance.LocalBoundsMax, instance.BoundsResolved);
     }
 
     private static int FindPlacementInstanceIndex(List<ObjectInstance> instances, ObjectInstance current)
@@ -9598,6 +9685,26 @@ public class WorldScene : ISceneRenderer
         Vector3 cameraPos = Vector3.Zero;
         Vector3 cameraForward = Vector3.UnitZ;
         float verticalFieldOfViewRadians = ExtractVerticalFieldOfViewRadians(proj);
+        double overlayElapsedMs = 0;
+        double objectWireframeMs = 0;
+        int objectWireframePreparedCount = 0;
+        int objectWireframeSubmittedCount = 0;
+        bool objectWireframeEnabled = false;
+        double selectionBoundsMs = 0;
+        int selectionBoundsPreparedCount = 0;
+        double pm4BoundsMs = 0;
+        int pm4BoundsPreparedCount = 0;
+        double pm4GeometryPrepareMs = 0;
+        double pm4GeometrySubmitMs = 0;
+        double pm4NodesMs = 0;
+        int pm4GeometryPreparedCount = 0;
+        int pm4GeometrySubmittedCount = 0;
+        int pm4NodesPreparedCount = 0;
+        int poiTaxiPreparedCount = 0;
+        double poiTaxiMs = 0;
+        int areaTriggerPreparedCount = 0;
+        double areaTriggersMs = 0;
+
         bool continuedPastTerrain = WorldFramePassCoordinator.Execute(
             new WorldFramePassOptions(_objectsVisible, _wmosVisible, _doodadsVisible),
             new WorldFramePasses(
@@ -9997,24 +10104,46 @@ public class WorldScene : ISceneRenderer
                     });
                     if (!_renderDiagPrinted) _renderDiagPrinted = true;
                 },
-                () => frame.OverlayMs = MeasureDurationMs(() =>
+                () =>
                 {
-            if (_assets.ObjectWireframeEnabled)
-                RenderVisibleObjectWireframeOverlay(frame, view, proj, cameraPos, fogColor, fogStart, fogEnd, lighting);
-            else if (_wireframeRevealEnabled)
-                RenderWireframeReveal(view, proj, cameraPos, fogColor, fogStart, fogEnd, lighting);
+                    overlayElapsedMs = MeasureDurationMs(() =>
+                    {
+                        objectWireframeEnabled = _assets.ObjectWireframeEnabled || _wireframeRevealEnabled;
+                        if (_assets.ObjectWireframeEnabled)
+                        {
+                            objectWireframeMs = MeasureDurationMs(() =>
+                            {
+                                (objectWireframePreparedCount, objectWireframeSubmittedCount) =
+                                    RenderVisibleObjectWireframeOverlay(frame, view, proj, cameraPos, fogColor, fogStart, fogEnd, lighting);
+                            });
+                        }
+                        else if (_wireframeRevealEnabled)
+                        {
+                            objectWireframeMs = MeasureDurationMs(() =>
+                            {
+                                (objectWireframePreparedCount, objectWireframeSubmittedCount) =
+                                    RenderWireframeReveal(view, proj, cameraPos, fogColor, fogStart, fogEnd, lighting);
+                            });
+                        }
 
-            // Reset GL state before bounding boxes
-            _gl.Disable(EnableCap.Blend);
-            _gl.DepthMask(true);
-            _gl.Enable(EnableCap.DepthTest);
-            _gl.DepthFunc(DepthFunction.Lequal);
-            _gl.UseProgram(0);
-            _gl.BindVertexArray(0);
+                        // Reset GL state before bounding boxes
+                        _gl.Disable(EnableCap.Blend);
+                        _gl.DepthMask(true);
+                        _gl.Enable(EnableCap.DepthTest);
+                        _gl.DepthFunc(DepthFunction.Lequal);
+                        _gl.UseProgram(0);
+                        _gl.BindVertexArray(0);
 
-            // 4. Debug bounding boxes for all placements
-            if ((_showSelectedObjectBounds || _showBoundingBoxes || _showPm4ObjectBounds) && _bbRenderer != null)
-            {
+                        // 4. Debug bounding boxes for camera-admitted placements.
+                        //
+                        // The visibility pass has already paid the placement admission cost.
+                        // Walking _mdxInstances/_wmoInstances here made the debug overlay rescan
+                        // every loaded placement on every frame, including placements that could
+                        // never produce a box. On full-map scenes that scan was the dominant
+                        // overlay cost. Keep selected bounds independent, but consume the
+                        // visibility frame for the global debug boxes.
+                        if ((_showSelectedObjectBounds || _showBoundingBoxes || _showPm4ObjectBounds) && _bbRenderer != null)
+                        {
                 // Depth test ON so boxes behind terrain/objects are hidden,
                 // depth write OFF so box lines don't occlude models
                 _gl.Enable(EnableCap.DepthTest);
@@ -10027,63 +10156,74 @@ public class WorldScene : ISceneRenderer
                 Vector3 selectedBoundsAccentA = Pm4ColorSelection;       // saturated yellow
                 Vector3 selectedBoundsAccentB = Pm4ColorHighlight;       // saturated teal
 
-                if (_showSelectedObjectBounds)
+                selectionBoundsMs = MeasureDurationMs(() =>
                 {
-                    if (SelectedInstance is ObjectInstance selectedInstance && !ShouldHideObjectInstanceByUniqueId(selectedInstance))
-                        _bbRenderer.BatchHighlightedBoxMinMax(
-                            selectedInstance.BoundsMin,
-                            selectedInstance.BoundsMax,
-                            selectedBoundsTime,
-                            selectedBoundsInnerColor,
-                            selectedBoundsAccentA,
-                            selectedBoundsAccentB);
-
-                    if (_showPm4Overlay
-                        && _selectedPm4ObjectKey.HasValue
-                        && _pm4ObjectLookup.TryGetValue(_selectedPm4ObjectKey.Value, out Pm4OverlayObject? selectedPm4Object))
+                    if (_showSelectedObjectBounds)
                     {
-                        Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
-                        bool applyPm4Transform = _pm4OverlayTranslation != Vector3.Zero
-                            || _pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
-                            || _pm4OverlayScale != Vector3.One;
-                        Matrix4x4 objectTransform = BuildPm4ObjectTransform(_selectedPm4ObjectKey.Value, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
-                        Vector3 boundsMin = selectedPm4Object.BoundsMin;
-                        Vector3 boundsMax = selectedPm4Object.BoundsMax;
-                        if (applyObjectTransform)
-                            TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
+                        if (SelectedInstance is ObjectInstance selectedInstance && !ShouldHideObjectInstanceByUniqueId(selectedInstance))
+                        {
+                            _bbRenderer.BatchHighlightedBoxMinMax(
+                                selectedInstance.BoundsMin,
+                                selectedInstance.BoundsMax,
+                                selectedBoundsTime,
+                                selectedBoundsInnerColor,
+                                selectedBoundsAccentA,
+                                selectedBoundsAccentB);
+                            selectionBoundsPreparedCount++;
+                        }
 
-                        _bbRenderer.BatchHighlightedBoxMinMax(
-                            boundsMin,
-                            boundsMax,
-                            selectedBoundsTime,
-                            selectedBoundsInnerColor,
-                            selectedBoundsAccentA,
-                            selectedBoundsAccentB);
+                        if (_showPm4Overlay
+                            && _selectedPm4ObjectKey.HasValue
+                            && _pm4ObjectLookup.TryGetValue(_selectedPm4ObjectKey.Value, out Pm4OverlayObject? selectedPm4Object))
+                        {
+                            Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
+                            bool applyPm4Transform = _pm4OverlayTranslation != Vector3.Zero
+                                || _pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
+                                || _pm4OverlayScale != Vector3.One;
+                            Matrix4x4 objectTransform = BuildPm4ObjectTransform(_selectedPm4ObjectKey.Value, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
+                            Vector3 boundsMin = selectedPm4Object.BoundsMin;
+                            Vector3 boundsMax = selectedPm4Object.BoundsMax;
+                            if (applyObjectTransform)
+                                TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
+
+                            _bbRenderer.BatchHighlightedBoxMinMax(
+                                boundsMin,
+                                boundsMax,
+                                selectedBoundsTime,
+                                selectedBoundsInnerColor,
+                                selectedBoundsAccentA,
+                                selectedBoundsAccentB);
+                            selectionBoundsPreparedCount++;
+                        }
                     }
-                }
 
-                if (_showBoundingBoxes)
-                {
-                    var adapter = _terrainManager.Adapter;
-                    if (!_renderDiagPrinted)
-                    ViewerLog.Debug(ViewerLog.Category.Terrain, $"BB render: {adapter.MddfPlacements.Count} MDDF + {adapter.ModfPlacements.Count} MODF markers");
-
-                    // MDDF bounding boxes (light pastel magenta)
-                    foreach (var inst in _mdxInstances)
+                    if (_showBoundingBoxes)
                     {
-                        if (!ShouldHideObjectInstanceByUniqueId(inst))
+                        var adapter = _terrainManager.Adapter;
+                        if (!_renderDiagPrinted)
+                            ViewerLog.Debug(ViewerLog.Category.Terrain, $"BB render: {adapter.MddfPlacements.Count} MDDF + {adapter.ModfPlacements.Count} MODF markers");
+
+                        // MDDF bounding boxes (light pastel magenta)
+                        foreach (VisibleMdxInstance visible in frame.Visibility.VisibleMdx)
+                        {
+                            ObjectInstance inst = visible.Instance;
                             _bbRenderer.BatchBoxMinMax(inst.BoundsMin, inst.BoundsMax, Pm4ColorMddfBounds);
-                    }
-                    // MODF bounding boxes (light pastel cyan)
-                    foreach (var inst in _wmoInstances)
-                    {
-                        if (!ShouldHideObjectInstanceByUniqueId(inst))
+                            selectionBoundsPreparedCount++;
+                        }
+                        // MODF bounding boxes (light pastel cyan)
+                        foreach (VisibleWmoInstance visible in frame.Visibility.VisibleWmos)
+                        {
+                            ObjectInstance inst = visible.Instance;
                             _bbRenderer.BatchBoxMinMax(inst.BoundsMin, inst.BoundsMax, Pm4ColorModfBounds);
+                            selectionBoundsPreparedCount++;
+                        }
                     }
-                }
+                });
 
                 if (_showPm4ObjectBounds && _showPm4Overlay && _pm4TileObjects.Count > 0)
                 {
+                    pm4BoundsMs += MeasureDurationMs(() =>
+                    {
                     Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
                     bool applyPm4Transform = _pm4OverlayTranslation != Vector3.Zero
                         || _pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
@@ -10117,13 +10257,17 @@ public class WorldScene : ISceneRenderer
                                 boxColor = Pm4ColorSelection;        // saturated — selection
 
                             _bbRenderer.BatchBoxMinMax(boundsMin, boundsMax, boxColor);
+                            pm4BoundsPreparedCount++;
                         }
                     }
+                    });
                 }
 
                 // CK24-level bounding boxes: one merged box per CK24 object across all sub-objects.
                 if (_showPm4Ck24Bounds && _showPm4Overlay && _pm4TileObjects.Count > 0)
                 {
+                    pm4BoundsMs += MeasureDurationMs(() =>
+                    {
                     Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
                     bool applyPm4Transform = _pm4OverlayTranslation != Vector3.Zero
                         || _pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
@@ -10191,7 +10335,9 @@ public class WorldScene : ISceneRenderer
                         }
 
                         _bbRenderer.BatchBoxMinMax(boundsMin, boundsMax, boxColor);
+                        pm4BoundsPreparedCount++;
                     }
+                    });
                 }
 
                 _bbRenderer.FlushBatch(view, proj);
@@ -10210,6 +10356,8 @@ public class WorldScene : ISceneRenderer
                 _pm4VisibleTriangleCount = 0;
                 _pm4VisiblePositionRefCount = 0;
 
+                pm4GeometryPrepareMs = MeasureDurationMs(() =>
+                {
                 if (_showPm4Overlay && _pm4TileObjects.Count > 0)
                 {
                     Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
@@ -10286,6 +10434,9 @@ public class WorldScene : ISceneRenderer
                         }
                     }
                 }
+                });
+                pm4GeometryPreparedCount = _pm4VisibleLineCount + _pm4VisibleTriangleCount;
+                pm4GeometrySubmittedCount = pm4GeometryPreparedCount;
 
                 if (_showPm4Overlay)
                 {
@@ -10307,13 +10458,15 @@ public class WorldScene : ISceneRenderer
 
                         _gl.DepthMask(false);
                         _gl.Disable(EnableCap.CullFace);
-                        _bbRenderer.FlushSolidBatch(view, proj);
+                        pm4GeometrySubmitMs += MeasureDurationMs(() => _bbRenderer.FlushSolidBatch(view, proj));
                         _gl.Enable(EnableCap.CullFace);
                         _gl.Disable(EnableCap.Blend);
                     }
 
                     // MSCN/MSPV node markers — solid filled cubes. Bright saturated colors
                     // (cyan/magenta) so they pop against the pastel mesh.
+                    pm4NodesMs += MeasureDurationMs(() =>
+                    {
                     if (_pm4RenderNodesAsCubes && (_showPm4MscnNodes || _showPm4MspvNodes))
                     {
                         if (_showPm4MscnNodes)
@@ -10371,11 +10524,13 @@ public class WorldScene : ISceneRenderer
                             {
                                 _bbRenderer.FlushSolidBatch(view, proj);
                                 _pm4VisiblePositionRefCount += mscnDrawn + mspvDrawn;
+                                pm4NodesPreparedCount += mscnDrawn + mspvDrawn;
                             }
                             _gl.Enable(EnableCap.CullFace);
                             _gl.Disable(EnableCap.Blend);
                         }
                     }
+                    });
 
                     bool hasPm4LineGeometry = _pm4VisibleLineCount > 0
                         || _pm4VisiblePositionRefCount > 0
@@ -10396,39 +10551,47 @@ public class WorldScene : ISceneRenderer
                         // MSCN node overlay (legacy wireframe pin mode)
                         if (!_pm4RenderNodesAsCubes && _showPm4MscnNodes && _pm4TileMscnPoints.Count > 0)
                         {
-                            EnsurePm4MscnData();
-                            int limit = 15000, drawn = 0;
-                            foreach (var kv in _pm4TileMscnPoints)
+                            pm4NodesMs += MeasureDurationMs(() =>
                             {
-                                var pts = kv.Value;
-                                if (pts == null) continue;
-                                for (int i = 0; i < pts.Count && drawn < limit; i++)
+                                EnsurePm4MscnData();
+                                int limit = 15000, drawn = 0;
+                                foreach (var kv in _pm4TileMscnPoints)
                                 {
-                                    _bbRenderer.BatchPin(pts[i], _pm4MscnCubeSize * 2.0f, _pm4MscnCubeSize * 0.5f, Pm4ColorMscn);
-                                    drawn++;
+                                    var pts = kv.Value;
+                                    if (pts == null) continue;
+                                    for (int i = 0; i < pts.Count && drawn < limit; i++)
+                                    {
+                                        _bbRenderer.BatchPin(pts[i], _pm4MscnCubeSize * 2.0f, _pm4MscnCubeSize * 0.5f, Pm4ColorMscn);
+                                        drawn++;
+                                    }
                                 }
-                            }
-                            _pm4VisiblePositionRefCount += drawn;
+                                _pm4VisiblePositionRefCount += drawn;
+                                pm4NodesPreparedCount += drawn;
+                            });
                         }
                         if (!_pm4RenderNodesAsCubes && _showPm4MspvNodes && _pm4TileMspvPoints.Count > 0)
                         {
-                            EnsurePm4MspvData();
-                            int limit = 8000, drawn = 0;
-                            foreach (var kv in _pm4TileMspvPoints)
+                            pm4NodesMs += MeasureDurationMs(() =>
                             {
-                                var pts = kv.Value;
-                                if (pts == null) continue;
-                                for (int i = 0; i < pts.Count && drawn < limit; i++)
+                                EnsurePm4MspvData();
+                                int limit = 8000, drawn = 0;
+                                foreach (var kv in _pm4TileMspvPoints)
                                 {
-                                    _bbRenderer.BatchPin(pts[i], _pm4MspvCubeSize * 2.0f, _pm4MspvCubeSize * 0.5f, Pm4ColorMspv);
-                                    drawn++;
+                                    var pts = kv.Value;
+                                    if (pts == null) continue;
+                                    for (int i = 0; i < pts.Count && drawn < limit; i++)
+                                    {
+                                        _bbRenderer.BatchPin(pts[i], _pm4MspvCubeSize * 2.0f, _pm4MspvCubeSize * 0.5f, Pm4ColorMspv);
+                                        drawn++;
+                                    }
                                 }
-                            }
-                            _pm4VisiblePositionRefCount += drawn;
+                                _pm4VisiblePositionRefCount += drawn;
+                                pm4NodesPreparedCount += drawn;
+                            });
                         }
 
                         _gl.DepthMask(false);
-                        _bbRenderer.FlushBatch(view, proj);
+                        pm4GeometrySubmitMs += MeasureDurationMs(() => _bbRenderer.FlushBatch(view, proj));
                         _gl.LineWidth(1.0f);
                     }
 
@@ -10442,12 +10605,17 @@ public class WorldScene : ISceneRenderer
                     _bbRenderer.BeginSolidBatch();
                 }
 
+                poiTaxiMs = MeasureDurationMs(() =>
+                {
                 // POI pin markers (magenta)
                 if (_showPoi && _poiLoader != null && _poiLoader.Entries.Count > 0)
                 {
                     var poiColor = new Vector3(1f, 0f, 1f);
                     foreach (var poi in _poiLoader.Entries)
+                    {
                         _bbRenderer.BatchPin(poi.Position, 56f, 9f, poiColor);
+                        poiTaxiPreparedCount++;
+                    }
                 }
 
                 // Taxi paths — filtered by selection
@@ -10466,10 +10634,12 @@ public class WorldScene : ISceneRenderer
                     {
                         if (!IsTaxiNodeVisible(node)) continue;
                         _bbRenderer.BatchPin(node.Position, 64f, 12f, nodeColor);
+                        poiTaxiPreparedCount++;
                         _bbRenderer.BatchBoxMinMax(
                             node.Position - new Vector3(36f, 36f, 18f),
                             node.Position + new Vector3(36f, 36f, 96f),
                             nodeBoxColor);
+                        poiTaxiPreparedCount++;
                     }
 
                     foreach (var route in _taxiLoader.Routes)
@@ -10477,7 +10647,10 @@ public class WorldScene : ISceneRenderer
                         if (!IsTaxiRouteVisible(route)) continue;
                         Vector3 routeColor = route.PathId == _selectedTaxiRouteId ? selectedRouteColor : lineColor;
                         for (int i = 0; i < route.Waypoints.Count - 1; i++)
+                        {
                             _bbRenderer.BatchLine(route.Waypoints[i], route.Waypoints[i + 1], routeColor);
+                            poiTaxiPreparedCount++;
+                        }
 
                         if (showRouteHandles && TryGetTaxiRouteSelectionPoint(route, out Vector3 selectionPoint))
                         {
@@ -10485,15 +10658,20 @@ public class WorldScene : ISceneRenderer
                             float headSize = route.PathId == _selectedTaxiRouteId ? 12f : 10f;
                             _bbRenderer.BatchPin(selectionPoint, pinHeight, headSize,
                                 route.PathId == _selectedTaxiRouteId ? selectedRouteColor : routeHandleColor);
+                            poiTaxiPreparedCount++;
                             _bbRenderer.BatchBoxMinMax(
                                 selectionPoint - new Vector3(34f, 34f, 20f),
                                 selectionPoint + new Vector3(34f, 34f, 72f),
                                 route.PathId == _selectedTaxiRouteId ? selectedRouteColor : routeBoxColor);
+                            poiTaxiPreparedCount++;
                         }
                     }
                 }
+                });
 
                 // AreaTriggers (green wireframe shapes for portals and event markers)
+                areaTriggersMs = MeasureDurationMs(() =>
+                {
                 if (_showAreaTriggers && _areaTriggerLoader != null && _areaTriggerLoader.Count > 0)
                 {
                     var triggerColor = new Vector3(0f, 1f, 0f); // Green
@@ -10535,6 +10713,7 @@ public class WorldScene : ISceneRenderer
                                 var p2 = c + new Vector3(0f, MathF.Cos(a2) * r, MathF.Sin(a2) * r);
                                 _bbRenderer.BatchLine(p1, p2, triggerColor);
                             }
+                            areaTriggerPreparedCount += segments * 3;
                         }
                         else if (trigger.BoxLength > 0f && trigger.BoxWidth > 0f && trigger.BoxHeight > 0f)
                         {
@@ -10571,9 +10750,11 @@ public class WorldScene : ISceneRenderer
                             _bbRenderer.BatchLine(v1, v5, triggerColor);
                             _bbRenderer.BatchLine(v2, v6, triggerColor);
                             _bbRenderer.BatchLine(v3, v7, triggerColor);
+                            areaTriggerPreparedCount += 12;
                         }
                     }
                 }
+                });
 
                 if (_showLitLights && _litLoader != null && _litLoader.HasData)
                 {
@@ -10607,7 +10788,74 @@ public class WorldScene : ISceneRenderer
                 _bbRenderer.FlushBatch(view, proj);
                 _gl.LineWidth(1.0f);
             }
-                })));
+                    });
+
+                    frame.SetOverlayOwner(
+                        WorldOverlayOwners.ObjectWireframe,
+                        objectWireframeMs,
+                        objectWireframeEnabled,
+                        objectWireframePreparedCount,
+                        objectWireframeSubmittedCount,
+                        objectWireframeEnabled ? "not_cached" : "disabled");
+                    frame.SetOverlayOwner(
+                        WorldOverlayOwners.SelectionBounds,
+                        selectionBoundsMs,
+                        _bbRenderer != null && (_showSelectedObjectBounds || _showBoundingBoxes),
+                        selectionBoundsPreparedCount,
+                        selectionBoundsPreparedCount,
+                        _bbRenderer != null && (_showSelectedObjectBounds || _showBoundingBoxes) ? "not_cached" : "disabled");
+                    frame.SetOverlayOwner(
+                        WorldOverlayOwners.Pm4Bounds,
+                        pm4BoundsMs,
+                        _bbRenderer != null && _showPm4Overlay && (_showPm4ObjectBounds || _showPm4Ck24Bounds),
+                        pm4BoundsPreparedCount,
+                        pm4BoundsPreparedCount,
+                        _bbRenderer != null && _showPm4Overlay && (_showPm4ObjectBounds || _showPm4Ck24Bounds) ? "not_cached" : "disabled");
+                    frame.SetOverlayOwner(
+                        WorldOverlayOwners.Pm4GeometryPrepare,
+                        pm4GeometryPrepareMs,
+                        _bbRenderer != null && _showPm4Overlay,
+                        pm4GeometryPreparedCount,
+                        0,
+                        _bbRenderer != null && _showPm4Overlay ? "not_cached" : "disabled");
+                    frame.SetOverlayOwner(
+                        WorldOverlayOwners.Pm4GeometrySubmit,
+                        pm4GeometrySubmitMs,
+                        _bbRenderer != null && _showPm4Overlay,
+                        pm4GeometryPreparedCount,
+                        pm4GeometrySubmittedCount,
+                        _bbRenderer != null && _showPm4Overlay ? "not_cached" : "disabled");
+                    frame.SetOverlayOwner(
+                        WorldOverlayOwners.Pm4Nodes,
+                        pm4NodesMs,
+                        _bbRenderer != null && _showPm4Overlay && (_showPm4MscnNodes || _showPm4MspvNodes),
+                        pm4NodesPreparedCount,
+                        pm4NodesPreparedCount,
+                        _bbRenderer != null && _showPm4Overlay && (_showPm4MscnNodes || _showPm4MspvNodes) ? "not_cached" : "disabled");
+                    frame.SetOverlayOwner(
+                        WorldOverlayOwners.PoiTaxi,
+                        poiTaxiMs,
+                        _bbRenderer != null && (_showPoi || _showTaxi),
+                        poiTaxiPreparedCount,
+                        poiTaxiPreparedCount,
+                        _bbRenderer != null && (_showPoi || _showTaxi) ? "not_cached" : "disabled");
+                    frame.SetOverlayOwner(
+                        WorldOverlayOwners.AreaTriggers,
+                        areaTriggersMs,
+                        _bbRenderer != null && _showAreaTriggers,
+                        areaTriggerPreparedCount,
+                        areaTriggerPreparedCount,
+                        _bbRenderer != null && _showAreaTriggers ? "not_cached" : "disabled");
+
+                    double accountedOverlayMs = frame.OverlayOwnerDurationSum;
+                    double otherOverlayMs = Math.Max(0, overlayElapsedMs - accountedOverlayMs);
+                    frame.SetOverlayOwner(
+                        WorldOverlayOwners.OtherOverlay,
+                        otherOverlayMs,
+                        otherOverlayMs > 0,
+                        cacheStatus: otherOverlayMs > 0 ? "not_applicable" : "disabled");
+                    frame.OverlayMs = frame.OverlayOwnerDurationSum;
+                }));
 
         if (!continuedPastTerrain)
         {
@@ -12193,11 +12441,14 @@ public class WorldScene : ISceneRenderer
         return MathF.Min((worldRadius * yScale / depth) * (viewportHeight * 0.5f), WireframeRevealMaxScreenRadius);
     }
 
-    private void RenderWireframeReveal(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos,
+    private (int PreparedPrimitiveCount, int SubmittedPrimitiveCount) RenderWireframeReveal(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos,
         Vector3 fogColor, float fogStart, float fogEnd, TerrainLighting lighting)
     {
         if (_wireframeRevealWmoIndices.Count == 0 && _wireframeRevealMdxIndices.Count == 0)
-            return;
+            return (0, 0);
+
+        int preparedPrimitiveCount = _wireframeRevealWmoIndices.Count + _wireframeRevealMdxIndices.Count;
+        int submittedPrimitiveCount = 0;
 
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
@@ -12217,6 +12468,7 @@ public class WorldScene : ISceneRenderer
             renderer.RenderWireframeOverlay(inst.Transform, view, proj,
                 fogColor, fogStart, fogEnd, cameraPos,
                 lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+            submittedPrimitiveCount++;
         }
 
         foreach (int idx in _wireframeRevealMdxIndices)
@@ -12232,17 +12484,22 @@ public class WorldScene : ISceneRenderer
             renderer.RenderWireframeOverlay(inst.Transform, view, proj,
                 fogColor, fogStart, fogEnd, cameraPos,
                 lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+            submittedPrimitiveCount++;
         }
 
         _gl.DepthMask(true);
         _gl.DepthFunc(DepthFunction.Lequal);
+        return (preparedPrimitiveCount, submittedPrimitiveCount);
     }
 
-    private void RenderVisibleObjectWireframeOverlay(WorldRenderFrame frame, Matrix4x4 view, Matrix4x4 proj,
+    private (int PreparedPrimitiveCount, int SubmittedPrimitiveCount) RenderVisibleObjectWireframeOverlay(WorldRenderFrame frame, Matrix4x4 view, Matrix4x4 proj,
         Vector3 cameraPos, Vector3 fogColor, float fogStart, float fogEnd, TerrainLighting lighting)
     {
         if (frame.Visibility.VisibleWmos.Count == 0 && frame.Visibility.VisibleMdx.Count == 0)
-            return;
+            return (0, 0);
+
+        int preparedPrimitiveCount = frame.Visibility.VisibleWmos.Count + frame.Visibility.VisibleMdx.Count;
+        int submittedPrimitiveCount = 0;
 
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
@@ -12258,6 +12515,7 @@ public class WorldScene : ISceneRenderer
             renderer.RenderWireframeOverlay(visible.Instance.Transform, view, proj,
                 fogColor, fogStart, fogEnd, cameraPos,
                 lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+            submittedPrimitiveCount++;
         }
 
         foreach (VisibleMdxInstance visible in frame.Visibility.VisibleMdx)
@@ -12269,10 +12527,12 @@ public class WorldScene : ISceneRenderer
             renderer.RenderWireframeOverlay(visible.Instance.Transform, view, proj,
                 fogColor, fogStart, fogEnd, cameraPos,
                 lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+            submittedPrimitiveCount++;
         }
 
         _gl.DepthMask(true);
         _gl.DepthFunc(DepthFunction.Lequal);
+        return (preparedPrimitiveCount, submittedPrimitiveCount);
     }
 
     /// <summary>

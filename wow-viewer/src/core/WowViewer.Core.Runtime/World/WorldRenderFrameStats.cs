@@ -41,6 +41,9 @@ public readonly record struct WorldRenderFrameStats(
     WorldRenderStageStats Overlay,
     WorldRenderStageStats SceneMaintenance)
 {
+    public IReadOnlyList<WorldOverlayOwnerFrameStats> OverlayOwners { get; init; } =
+        Array.Empty<WorldOverlayOwnerFrameStats>();
+
     public static WorldRenderFrameStats Empty { get; } = new(
         0,
         0,

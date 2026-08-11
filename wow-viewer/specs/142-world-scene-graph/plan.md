@@ -329,10 +329,13 @@ no measured speedup is claimed until that report exists.
 
 ## Phase 8J — Overlay Work Attribution and Admission
 
-**Status**: Planned from real-client evidence on 2026-08-10. The first post-cull production report
-proves an unexpected blocking owner: `overlay` takes 39.5-44.0 seconds on alternating full-map
-frames. This phase does not optimize an unknown bucket. It first establishes which overlay owners
-are rebuilding, why their cache invalidated, and how much work is admitted per frame.
+**Status**: `selection_bounds` was identified from user-run owner evidence on 2026-08-10/11. Its
+36.8-second sample prepared/submitted zero primitives, proving full-placement admission/filter work
+as the immediate blocker. A follow-up report proved the visible-list loop was not sufficient: the
+slow frames still had only 1,144-1,469 visible MDX and 3-11 WMO entries. The root cause was a
+render-time `SelectedInstance` read synchronously rebuilding the full placement/scene-graph index
+after deferred bounds promotion. That accessor now fails closed while dirty, and bounds promotion
+updates existing graph nodes in place. User rerun and no-change/cache proof remain pending.
 
 1. Split the `overlay` frame stage into named owner records with invalidation key, cache/rebuild
    result, input/output counts, and duration; add report-contract tests.

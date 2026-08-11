@@ -1,0 +1,51 @@
+{
+  "entryId": 1,
+  "type": "worldmodel",
+  "typeLabel": "Unknown",
+  "name": "Abyssal_Maw_CameraFly_01",
+  "displayId": 0,
+  "modelPath": "Cameras\\Abyssal_Maw_CameraFly_01.M2",
+  "scale": 1,
+  "isWmo": false,
+  "glbFile": "model.glb",
+  "screenshots": [
+    {
+      "angle": "front",
+      "file": "front.jpg",
+      "azimuth": 0,
+      "elevation": 15
+    },
+    {
+      "angle": "back",
+      "file": "back.jpg",
+      "azimuth": 180,
+      "elevation": 15
+    },
+    {
+      "angle": "left",
+      "file": "left.jpg",
+      "azimuth": 90,
+      "elevation": 15
+    },
+    {
+      "angle": "right",
+      "file": "right.jpg",
+      "azimuth": 270,
+      "elevation": 15
+    },
+    {
+      "angle": "top",
+      "file": "top.jpg",
+      "azimuth": 0,
+      "elevation": 80
+    },
+    {
+      "angle": "three_quarter",
+      "file": "three_quarter.jpg",
+      "azimuth": 35,
+      "elevation": 25
+    }
+  ],
+  "gameObjectType": 0,
+  "flags": 0
+}
