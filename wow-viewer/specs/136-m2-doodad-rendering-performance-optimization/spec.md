@@ -67,6 +67,9 @@ As a viewer developer, I want to verify that batched M2 rendering maintains exac
      issuing their `RenderInstance()` submissions. Keep transparent placements in their existing
      back-to-front order.
 
-This first implementation is shared CPU/state submission batching, not GPU instancing or a
-multi-draw-indirect path: each placement still receives a `RenderInstance()` call. A later GPU
-batching phase must group by geometry, material, texture, and backend state and prove visual parity.
+The GPU phase is now implemented for compatible opaque M2/MDX renderer batches. `MdxRenderer`
+uploads model matrices and fade values to a per-model instance VBO, and each visible geoset uses
+`glDrawElementsInstanced` once for the batch. `M2Renderer` delegates this capability for its
+legacy-backed M2 path. The native runtime backend, transparent layers, particle/ribbon models, and
+unsupported fade/material states retain the existing CPU fallback. Visual parity and real-scene
+frame-time proof remain user-run gates.

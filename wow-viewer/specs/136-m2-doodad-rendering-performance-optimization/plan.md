@@ -2,8 +2,9 @@
 
 ## Status
 
-The safe CPU/state-submission slice is complete on 2026-08-10. The viewer still requires a user-run
-real-scene capture before any FPS or GPU claim is promoted.
+The CPU/state-submission slice and the first GPU-instancing implementation are complete on
+2026-08-10. The viewer still requires a user-run real-scene capture and visual parity check before
+any FPS claim is promoted.
 
 ## Phase 1 — Static M2 Batch Eligibility
 
@@ -17,9 +18,11 @@ Group visible opaque WMO doodads by their shared `IModelRenderer`, call `BeginBa
 renderer group, and submit each placement through `RenderInstance()`. Preserve transparent
 back-to-front order and unbatched particle/ribbon behavior.
 
-## Phase 3 — GPU Batch Investigation (Not Started)
+## Phase 3 — GPU Instanced Opaque Submission
 
-Measure whether true instancing or multi-draw submission is justified. The candidate key must include
-geometry, material, texture, render backend, and any per-instance data required for visual parity.
-This phase requires synthetic scaling plus user-witnessed real-client capture and must not be inferred
-from CPU submission counts alone.
+Use a renderer-scoped compatibility contract for opaque M2/MDX batches. Upload model matrices and
+fade values through a dynamic instance VBO, add per-instance vertex attributes to the existing shader,
+and issue one `glDrawElementsInstanced` call per compatible geoset. Keep native-runtime state,
+transparent layers, particle/ribbon renderers, and unsupported fade/material states on the fallback.
+The implementation is complete; synthetic scaling, visual parity, and user-witnessed real-client
+capture remain the proof gate.

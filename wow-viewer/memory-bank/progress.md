@@ -8,6 +8,14 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 136 GPU-instanced opaque doodad submission
+
+- Replaced the per-placement indexed-draw path for compatible opaque M2/MDX batches with a dynamic
+  instance VBO and `glDrawElementsInstanced` once per geoset. `M2Renderer` delegates the path to its
+  legacy-backed renderer; WMO opaque doodad groups use it too.
+- Transparent, particle/ribbon, native-runtime, and unsupported fade/material paths retain CPU
+  fallback behavior. Viewer build passes with 0 errors; GPU visual parity and FPS remain unproven.
+
 ## 2026-08-10 — Spec 136 safe doodad submission batching
 
 - Static legacy-backed M2s now expose the existing batch path unless particle/ribbon state requires

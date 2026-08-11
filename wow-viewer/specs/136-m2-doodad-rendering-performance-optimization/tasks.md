@@ -13,8 +13,13 @@
 - [x] T004 Preserve transparent distance order and particle/ribbon unbatched fallback behavior.
 - [x] T005 Update the Spec 136 acceptance contract and memory-bank handoff with the proof boundary.
 
-## Phase 3 — GPU Submission (Not Started)
+## Phase 3 — GPU Submission
 
-- [ ] T006 Add a backend-specific batch key covering geometry/material/texture/state compatibility.
-- [ ] T007 Prove visual parity and measure CPU, upload, driver-wait, and GPU stages on synthetic and
+- [x] T006 Add a renderer-scoped GPU batch compatibility contract covering geometry/material/texture/
+      state compatibility in `wow-viewer/src/viewer/WoWViewer/Rendering/IGpuInstancedModelRenderer.cs`.
+- [x] T007 Upload per-placement model matrices/fade values and issue instanced opaque geoset draws
+      in `wow-viewer/src/viewer/WoWViewer/Rendering/ModelRenderer.cs`; delegate legacy-backed M2
+      support through `wow-viewer/src/viewer/WoWViewer/Rendering/M2Renderer.cs` and WMO placement
+      batches through `wow-viewer/src/viewer/WoWViewer/Rendering/WmoRenderer.cs`.
+- [ ] T008 Prove visual parity and measure CPU, upload, driver-wait, and GPU stages on synthetic and
       user-run real-client scenes before promoting GPU instancing or multi-draw submission.

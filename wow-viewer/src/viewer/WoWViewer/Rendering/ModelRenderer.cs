@@ -78,7 +78,7 @@ public enum RenderPass
 /// Renders an MDX model using OpenGL.
 /// Handles per-geoset VAO/VBO setup, shader management, BLP2 textured rendering.
 /// </summary>
-public class MdxRenderer : IModelRenderer
+public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
 {
     private readonly GL _gl;
     private readonly MdxFile _mdx;
@@ -107,6 +107,7 @@ public class MdxRenderer : IModelRenderer
     private static int _uUseUvTransform, _uUvTranslation, _uUvScale, _uUvRotationRow0, _uUvRotationRow1;
     private static int _uBones; // Bone matrix array uniform location
     private static int _uHasBones; // Enable skinning flag
+    private static int _uUseInstanceModel;
     private static bool _shaderInitialized;
     private static uint _whiteFallbackTexture;
 
@@ -121,6 +122,12 @@ public class MdxRenderer : IModelRenderer
     private DateTime _lastFrameTime = DateTime.UtcNow;
     private readonly bool _deferInitialTextureLoads;
     private readonly Queue<int> _pendingTextureLoads = new();
+    private readonly List<GpuInstanceData> _gpuInstanceData = new();
+    private float[] _gpuInstanceUploadScratch = Array.Empty<float>();
+    private uint _gpuInstanceVbo;
+    private bool _gpuInstanceBatchActive;
+    private bool _gpuInstanceDrawActive;
+    private uint _gpuInstanceCount;
 
     private const int DeferredTextureLoadsPerFrame = 1;
     private const double DeferredTextureLoadBudgetMs = 2.0;
@@ -171,6 +178,7 @@ public class MdxRenderer : IModelRenderer
     public bool IsM2AdapterModel => _isM2AdapterModel;
     public bool HasTransparentWorldPass => !_forceM2SolidDebug && ComputeHasTransparentWorldPass();
     public bool RequiresUnbatchedWorldRender => _particleEmitters.Count > 0 || _mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0;
+    public bool SupportsGpuInstancedOpaque => !RequiresUnbatchedWorldRender && !_forceM2SolidDebug;
 
     /// <summary>Animation controller (null if model has no bones)</summary>
     public IAnimationController? Animator => _animator;
@@ -704,6 +712,7 @@ public class MdxRenderer : IModelRenderer
         _cachedCameraPos = cameraPos;
 
         _gl.UseProgram(_shaderProgram);
+        _gl.Uniform1(_uUseInstanceModel, 0);
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthMask(true);
@@ -723,6 +732,54 @@ public class MdxRenderer : IModelRenderer
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
     }
 
+    public void BeginGpuInstanceBatch(Matrix4x4 view, Matrix4x4 proj,
+        Vector3 fogColor, float fogStart, float fogEnd, Vector3 cameraPos,
+        Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor)
+    {
+        BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
+        _gpuInstanceData.Clear();
+        _gpuInstanceBatchActive = true;
+    }
+
+    public void QueueGpuInstance(Matrix4x4 modelMatrix, float fadeAlpha = 1.0f)
+    {
+        if (!_gpuInstanceBatchActive || !SupportsGpuInstancedOpaque || fadeAlpha < 0.999f)
+            return;
+
+        _gpuInstanceData.Add(new GpuInstanceData(modelMatrix, fadeAlpha));
+    }
+
+    public unsafe void EndGpuInstanceBatch()
+    {
+        if (!_gpuInstanceBatchActive)
+            return;
+
+        _gpuInstanceBatchActive = false;
+        if (_gpuInstanceData.Count == 0 || _gpuInstanceVbo == 0)
+            return;
+
+        UploadGpuInstanceData();
+        _gpuInstanceCount = (uint)_gpuInstanceData.Count;
+        _gpuInstanceDrawActive = true;
+
+        try
+        {
+            _gl.UseProgram(_shaderProgram);
+            _gl.Uniform1(_uUseInstanceModel, 1);
+            UploadBoneMatricesForGpuInstanceDraw();
+            _currentModelMatrix = Matrix4x4.Identity;
+            RenderGeosets(RenderPass.Opaque, 1.0f);
+        }
+        finally
+        {
+            _gpuInstanceDrawActive = false;
+            _gpuInstanceCount = 0;
+            _gl.Uniform1(_uUseInstanceModel, 0);
+            _gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
+            _gl.BindVertexArray(0);
+        }
+    }
+
     /// <summary>
     /// Lightweight per-instance render — only uploads model matrix, bones, and draws.
     /// Assumes BeginBatch() was called earlier this frame to set shared state.
@@ -731,6 +788,7 @@ public class MdxRenderer : IModelRenderer
     public unsafe void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha = 1.0f)
     {
         _currentModelMatrix = modelMatrix;
+        _gl.Uniform1(_uUseInstanceModel, 0);
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
 
@@ -770,6 +828,7 @@ public class MdxRenderer : IModelRenderer
         Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
     {
         _gl.UseProgram(_shaderProgram);
+        _gl.Uniform1(_uUseInstanceModel, 0);
 
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.DepthTest);
@@ -844,6 +903,7 @@ public class MdxRenderer : IModelRenderer
         Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor)
     {
         _gl.UseProgram(_shaderProgram);
+        _gl.Uniform1(_uUseInstanceModel, 0);
 
         _gl.Disable(EnableCap.CullFace);
         _gl.Disable(EnableCap.DepthTest);
@@ -1114,7 +1174,10 @@ if (isAlphaCutout)
                     _gl.Uniform4(_uColor, layerColor.R, layerColor.G, layerColor.B, alpha);
 
                     _gl.BindVertexArray(gb.Vao);
-                    _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
+                    if (_gpuInstanceDrawActive)
+                        _gl.DrawElementsInstanced(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null, _gpuInstanceCount);
+                    else
+                        _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
                     _gl.BindVertexArray(0);
                     anyLayerRendered = true;
 
@@ -1145,7 +1208,10 @@ if (isAlphaCutout)
                 ResetLayerUvTransform();
                 _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 1.0f);
                 _gl.BindVertexArray(gb.Vao);
-                _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
+                if (_gpuInstanceDrawActive)
+                    _gl.DrawElementsInstanced(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null, _gpuInstanceCount);
+                else
+                    _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
                 _gl.BindVertexArray(0);
             }
         }
@@ -1178,13 +1244,74 @@ if (isAlphaCutout)
         _gl.Uniform4(_uColor, 1.0f, 0.2f, 0.2f, 1.0f);
 
         _gl.BindVertexArray(gb.Vao);
-        _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
+        if (_gpuInstanceDrawActive)
+            _gl.DrawElementsInstanced(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null, _gpuInstanceCount);
+        else
+            _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
         _gl.BindVertexArray(0);
 
         if (!forceBackdropState)
         {
             _gl.Enable(EnableCap.DepthTest);
             _gl.DepthMask(true);
+        }
+    }
+
+    private unsafe void UploadGpuInstanceData()
+    {
+        int requiredFloatCount = _gpuInstanceData.Count * 17;
+        if (_gpuInstanceUploadScratch.Length < requiredFloatCount)
+            _gpuInstanceUploadScratch = new float[requiredFloatCount];
+
+        for (int index = 0; index < _gpuInstanceData.Count; index++)
+        {
+            Matrix4x4 model = _gpuInstanceData[index].ModelMatrix;
+            int offset = index * 17;
+            _gpuInstanceUploadScratch[offset + 0] = model.M11;
+            _gpuInstanceUploadScratch[offset + 1] = model.M12;
+            _gpuInstanceUploadScratch[offset + 2] = model.M13;
+            _gpuInstanceUploadScratch[offset + 3] = model.M14;
+            _gpuInstanceUploadScratch[offset + 4] = model.M21;
+            _gpuInstanceUploadScratch[offset + 5] = model.M22;
+            _gpuInstanceUploadScratch[offset + 6] = model.M23;
+            _gpuInstanceUploadScratch[offset + 7] = model.M24;
+            _gpuInstanceUploadScratch[offset + 8] = model.M31;
+            _gpuInstanceUploadScratch[offset + 9] = model.M32;
+            _gpuInstanceUploadScratch[offset + 10] = model.M33;
+            _gpuInstanceUploadScratch[offset + 11] = model.M34;
+            _gpuInstanceUploadScratch[offset + 12] = model.M41;
+            _gpuInstanceUploadScratch[offset + 13] = model.M42;
+            _gpuInstanceUploadScratch[offset + 14] = model.M43;
+            _gpuInstanceUploadScratch[offset + 15] = model.M44;
+            _gpuInstanceUploadScratch[offset + 16] = _gpuInstanceData[index].FadeAlpha;
+        }
+
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _gpuInstanceVbo);
+        fixed (float* data = _gpuInstanceUploadScratch)
+        {
+            _gl.BufferData(
+                BufferTargetARB.ArrayBuffer,
+                (nuint)(requiredFloatCount * sizeof(float)),
+                data,
+                BufferUsageARB.StreamDraw);
+        }
+    }
+
+    private unsafe void UploadBoneMatricesForGpuInstanceDraw()
+    {
+        if (ShouldUploadBoneMatrices())
+        {
+            _gl.Uniform1(_uHasBones, 1);
+            Matrix4x4[] matrices = _animator!.BoneMatrices;
+            int boneCount = Math.Min(matrices.Length, 128);
+            fixed (Matrix4x4* ptr = matrices)
+            {
+                _gl.UniformMatrix4(_uBones, (uint)boneCount, false, (float*)ptr);
+            }
+        }
+        else
+        {
+            _gl.Uniform1(_uHasBones, 0);
         }
     }
 
@@ -1399,18 +1526,22 @@ layout(location = 2) in vec2 aTexCoord0;
 layout(location = 3) in vec2 aTexCoord1;
 layout(location = 4) in vec4 aBoneIndices;
 layout(location = 5) in vec4 aBoneWeights;
+layout(location = 6) in mat4 aInstanceModel;
+layout(location = 10) in float aInstanceFadeAlpha;
 
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProj;
 uniform mat4 uBones[128];
 uniform int uHasBones;
+uniform int uUseInstanceModel;
 
 out vec3 vNormal;
 out vec2 vTexCoord0;
 out vec2 vTexCoord1;
 out vec3 vFragPos;
 out vec3 vViewNormal;
+out float vInstanceFadeAlpha;
 
 void main() {
     vec4 position = vec4(aPos, 1.0);
@@ -1437,12 +1568,14 @@ void main() {
         }
     }
     
-    vec4 worldPos = uModel * position;
+    mat4 model = uUseInstanceModel == 1 ? aInstanceModel : uModel;
+    vec4 worldPos = model * position;
     vFragPos = worldPos.xyz;
-    vNormal = mat3(transpose(inverse(uModel))) * normal;
+    vNormal = mat3(transpose(inverse(model))) * normal;
     vViewNormal = mat3(uView) * vNormal;
     vTexCoord0 = aTexCoord0;
     vTexCoord1 = aTexCoord1;
+    vInstanceFadeAlpha = uUseInstanceModel == 1 ? aInstanceFadeAlpha : 1.0;
     gl_Position = uProj * uView * worldPos;
 }
 ";
@@ -1454,6 +1587,7 @@ in vec2 vTexCoord0;
 in vec2 vTexCoord1;
 in vec3 vFragPos;
 in vec3 vViewNormal;
+in float vInstanceFadeAlpha;
 
 uniform sampler2D uSampler;
 uniform int uHasTexture;
@@ -1546,7 +1680,7 @@ void main() {
     }
 
     float outAlpha = (uUseTextureAlpha == 1) ? texColor.a : 1.0;
-    FragColor = vec4(finalColor, outAlpha) * uColor;
+    FragColor = vec4(finalColor, outAlpha) * uColor * vInstanceFadeAlpha;
 }
 ";
 
@@ -1595,6 +1729,7 @@ void main() {
         _uUvRotationRow1 = _gl.GetUniformLocation(_shaderProgram, "uUvRotationRow1");
         _uBones = _gl.GetUniformLocation(_shaderProgram, "uBones[0]");
         _uHasBones = _gl.GetUniformLocation(_shaderProgram, "uHasBones");
+        _uUseInstanceModel = _gl.GetUniformLocation(_shaderProgram, "uUseInstanceModel");
 
         int samplerLoc = _gl.GetUniformLocation(_shaderProgram, "uSampler");
         _gl.Uniform1(samplerLoc, 0);
@@ -1726,6 +1861,9 @@ void main() {
         _bufferDiagValidVaos = 0;
         _bufferDiagIndexRejected = 0;
         _bufferDiagEmptySkipped = 0;
+
+        if (_gpuInstanceVbo == 0)
+            _gpuInstanceVbo = _gl.GenBuffer();
 
         for (int i = 0; i < _mdx.Geosets.Count; i++)
         {
@@ -1901,6 +2039,24 @@ void main() {
             // Bone weights (location 5)
             _gl.EnableVertexAttribArray(5);
             _gl.VertexAttribPointer(5, 4, VertexAttribPointerType.Float, false, stride, (void*)(14 * sizeof(float)));
+
+            // Per-instance model matrix (locations 6-9) and fade alpha (location 10).
+            // The instance buffer is shared by all geoset VAOs belonging to this model.
+            _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _gpuInstanceVbo);
+            uint instanceStride = 17 * sizeof(float);
+            for (uint column = 0; column < 4; column++)
+            {
+                uint location = 6 + column;
+                _gl.EnableVertexAttribArray(location);
+                _gl.VertexAttribPointer(location, 4, VertexAttribPointerType.Float, false, instanceStride,
+                    (void*)(column * 4 * sizeof(float)));
+                _gl.VertexAttribDivisor(location, 1);
+            }
+
+            _gl.EnableVertexAttribArray(10);
+            _gl.VertexAttribPointer(10, 1, VertexAttribPointerType.Float, false, instanceStride,
+                (void*)(16 * sizeof(float)));
+            _gl.VertexAttribDivisor(10, 1);
 
             _gl.BindVertexArray(0);
 
@@ -2829,6 +2985,12 @@ void main() {
             _gl.DeleteBuffer(gb.Ebo);
         }
 
+        if (_gpuInstanceVbo != 0)
+        {
+            _gl.DeleteBuffer(_gpuInstanceVbo);
+            _gpuInstanceVbo = 0;
+        }
+
         ReleaseLoadedTextures();
 
         // Don't delete the shared static shader program — other renderers still use it
@@ -2843,4 +3005,6 @@ void main() {
         public Vector3 BoundsCenter;
         public bool Visible = true;
     }
+
+    private readonly record struct GpuInstanceData(Matrix4x4 ModelMatrix, float FadeAlpha);
 }

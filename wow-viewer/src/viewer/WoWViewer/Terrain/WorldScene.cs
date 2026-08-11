@@ -9588,8 +9588,6 @@ public class WorldScene : ISceneRenderer
         Vector3 cameraPos = Vector3.Zero;
         Vector3 cameraForward = Vector3.UnitZ;
         float verticalFieldOfViewRadians = ExtractVerticalFieldOfViewRadians(proj);
-        IModelRenderer? batchRenderer = null;
-
         bool continuedPastTerrain = WorldFramePassCoordinator.Execute(
             new WorldFramePassOptions(_objectsVisible, _wmosVisible, _doodadsVisible),
             new WorldFramePasses(
@@ -9784,7 +9782,6 @@ public class WorldScene : ISceneRenderer
                     WmoCulledCount = 0;
                     MdxRenderedCount = 0;
                     MdxCulledCount = 0;
-                    batchRenderer = null;
                 },
                 () =>
                 {
@@ -9841,11 +9838,12 @@ public class WorldScene : ISceneRenderer
 
                     frame.MdxOpaqueSubmissionMs = MeasureDurationMs(() =>
                     {
-                        batchRenderer = ResolveFirstOpaqueBatchedVisibleMdxRenderer(frame);
-                        batchRenderer?.BeginBatch(view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
-                            lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                        var gpuBatchRenderers = new HashSet<IGpuInstancedModelRenderer>();
+                        var immediateBatchRenderers = new HashSet<IModelRenderer>();
 
-(frame.OpaqueBatchedMdxCount, frame.OpaqueUnbatchedMdxCount) =
+                        try
+                        {
+                            (frame.OpaqueBatchedMdxCount, frame.OpaqueUnbatchedMdxCount) =
                             WorldObjectPassCoordinator.ExecutePlannedOpaqueMdx(
                                 frame.ObjectPasses,
                                 frame.Visibility,
@@ -9872,9 +9870,39 @@ public class WorldScene : ISceneRenderer
                                     if (renderer == null)
                                         return;
 
-                                    renderer.RenderInstance(visible.Instance.Transform, RenderPass.Opaque, visible.OpaqueFade);
+                                    if (renderer is IGpuInstancedModelRenderer gpuRenderer
+                                        && gpuRenderer.SupportsGpuInstancedOpaque
+                                        && visible.OpaqueFade >= 0.999f)
+                                    {
+                                        if (gpuBatchRenderers.Add(gpuRenderer))
+                                        {
+                                            gpuRenderer.BeginGpuInstanceBatch(
+                                                view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
+                                                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                                        }
+
+                                        gpuRenderer.QueueGpuInstance(visible.Instance.Transform, visible.OpaqueFade);
+                                    }
+                                    else
+                                    {
+                                        if (immediateBatchRenderers.Add(renderer))
+                                        {
+                                            renderer.BeginBatch(
+                                                view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
+                                                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                                        }
+
+                                        renderer.RenderInstance(visible.Instance.Transform, RenderPass.Opaque, visible.OpaqueFade);
+                                    }
+
                                     MdxRenderedCount++;
                                 });
+                        }
+                        finally
+                        {
+                            foreach (IGpuInstancedModelRenderer gpuRenderer in gpuBatchRenderers)
+                                gpuRenderer.EndGpuInstanceBatch();
+                        }
                     });
 
                     if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Mdx, $"MDX opaque: {MdxRenderedCount} drawn, {MdxCulledCount} culled");

@@ -11,7 +11,7 @@ using WowViewer.Core.Runtime.M2;
 
 namespace WoWViewer.Rendering;
 
-public sealed class M2Renderer : IModelRenderer
+public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
 {
     private readonly GL? _gl;
     private readonly IDataSource? _dataSource;
@@ -162,6 +162,10 @@ public sealed class M2Renderer : IModelRenderer
     // runtime backend owns a different shader/state path, so keep it isolated
     // until a backend-specific batch key exists.
     public bool RequiresUnbatchedWorldRender => _legacyRenderer is null || _legacyRenderer.RequiresUnbatchedWorldRender;
+
+    public bool SupportsGpuInstancedOpaque
+        => _legacyRenderer is IGpuInstancedModelRenderer gpuRenderer
+            && gpuRenderer.SupportsGpuInstancedOpaque;
 
     public IAnimationController? Animator => _legacyRenderer?.Animator ?? _runtimeAnimator;
 
@@ -328,6 +332,36 @@ public sealed class M2Renderer : IModelRenderer
         _batchLightColor = lightColor;
         _batchAmbientColor = ambientColor;
         _batchStateValid = true;
+    }
+
+    public void BeginGpuInstanceBatch(
+        Matrix4x4 view,
+        Matrix4x4 proj,
+        Vector3 fogColor,
+        float fogStart,
+        float fogEnd,
+        Vector3 cameraPos,
+        Vector3 lightDir,
+        Vector3 lightColor,
+        Vector3 ambientColor)
+    {
+        if (_legacyRenderer is IGpuInstancedModelRenderer gpuRenderer)
+        {
+            gpuRenderer.BeginGpuInstanceBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos,
+                lightDir, lightColor, ambientColor);
+        }
+    }
+
+    public void QueueGpuInstance(Matrix4x4 modelMatrix, float fadeAlpha = 1.0f)
+    {
+        if (_legacyRenderer is IGpuInstancedModelRenderer gpuRenderer)
+            gpuRenderer.QueueGpuInstance(modelMatrix, fadeAlpha);
+    }
+
+    public void EndGpuInstanceBatch()
+    {
+        if (_legacyRenderer is IGpuInstancedModelRenderer gpuRenderer)
+            gpuRenderer.EndGpuInstanceBatch();
     }
 
 public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha = 1.0f)

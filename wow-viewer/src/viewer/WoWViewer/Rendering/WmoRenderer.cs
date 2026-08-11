@@ -751,13 +751,29 @@ public class WmoRenderer : ISceneRenderer
 
                 foreach (IModelRenderer renderer in _opaqueDoodadBatchRenderers)
                 {
-                    renderer.BeginBatch(view, proj, fc, fogStart, fogEnd, cp, ld, lc, ac);
                     List<int> indices = _opaqueDoodadBatchGroups[renderer];
-                    foreach (int doodadIndex in indices)
+                    if (renderer is IGpuInstancedModelRenderer gpuRenderer
+                        && gpuRenderer.SupportsGpuInstancedOpaque)
                     {
-                        DoodadInstance inst = _doodadInstances[doodadIndex];
-                        renderer.RenderInstance(inst.Transform * modelMatrix, RenderPass.Opaque, 1.0f);
-                        _currentDoodadSubmissions++;
+                        gpuRenderer.BeginGpuInstanceBatch(view, proj, fc, fogStart, fogEnd, cp, ld, lc, ac);
+                        foreach (int doodadIndex in indices)
+                        {
+                            DoodadInstance inst = _doodadInstances[doodadIndex];
+                            gpuRenderer.QueueGpuInstance(inst.Transform * modelMatrix, 1.0f);
+                            _currentDoodadSubmissions++;
+                        }
+
+                        gpuRenderer.EndGpuInstanceBatch();
+                    }
+                    else
+                    {
+                        renderer.BeginBatch(view, proj, fc, fogStart, fogEnd, cp, ld, lc, ac);
+                        foreach (int doodadIndex in indices)
+                        {
+                            DoodadInstance inst = _doodadInstances[doodadIndex];
+                            renderer.RenderInstance(inst.Transform * modelMatrix, RenderPass.Opaque, 1.0f);
+                            _currentDoodadSubmissions++;
+                        }
                     }
                 }
             }
