@@ -13,7 +13,7 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 | PM4 decode | **active** — versioning formatted; placement solved; scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
 | Terrain / viewer runtime | **active** — phased dual-map overlay (135), CPU and GPU M2 doodad batching (136), phased minimap & teleport (137) landed; 4.x renderer evolution (138) is an evidence-gated epic note | [activeContext.md](activeContext.md) |
 | World scene graph / renderer performance | **active** — Spec 142 graph, conservative default-off traversal, metadata-only graph rebuilds, graph-guided flat buckets, fog-window WDL residency, ADT M2 doodads partitioned beneath terrain chunk buckets, nested WMO groups, WMO read-model portal adapter, bounded portal view volumes, graph-side runtime portal traversal, safe opaque WMO doodad batching, and production headless CPU-stage reporting implemented; WMO submission parity, pass/query reuse, terrain-mesh ownership, and GPU-stage evidence remain pending | [Spec 142](../specs/142-world-scene-graph/spec.md) |
-| World context / lighting parity | **planned** — Spec 143 design package complete; ADT IDs are already parsed, but the camera-to-chunk/map lookup is not yet trustworthy, WMOAreaID is not represented by a proven read-model field, and WMO/M2 lighting still uses generic/default inputs in parts of the path | [Spec 143](../specs/143-world-context-lighting/spec.md) |
+| World context / lighting parity | **active** — Spec 143 first ADT context slice landed; WMOAreaID and native WMO/M2 lighting remain evidence-gated | [Spec 143](../specs/143-world-context-lighting/spec.md) |
 | Terrain / minimap ML | **active** — Spec 139 clean-signal reconstruction, Spec 140 paste/fractal/tileset evidence, and Spec 141 external-method translation; object identity remains parked | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
 | Tile archaeology | **active** — old v50 synthetic minimap output needs fresh regeneration after renderer fixes; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
 
@@ -38,7 +38,8 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 - The first implementation gate is ADT area context: Alpha and standard adapters already populate
   raw MCNK area IDs, while the current status path can erase no-chunk, zero-ID, map-mismatch, and
   row-miss states into an empty/Unknown display. The bounded first slice now preserves Alpha's full
-  packed AreaNumber, resolves map-aware packed/direct entries, rejects unrelated nearest chunks, and
+  packed AreaNumber, resolves map-aware packed/direct entries, uses batched terrain's resident
+  chunk-info index (not the legacy per-chunk GPU list), rejects unrelated nearest chunks, and
   refreshes context as the camera/residency changes. Focused proof is 3 tests and an isolated viewer
   build with 0 errors; DBCD-backed fixture and real-client SubzoneText proof remain open.
 - Local 3.3.5 client reference data exposes `lua_GetSubZoneText` alongside `lua_GetZoneText` and
@@ -51,6 +52,10 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 - WMO and M2 lighting has generic uniform plumbing and existing baked/vertex/light data, but native
   or BLS parity is not proven. Lighting remains downstream of the context/camera contracts and Specs
   106/138 evidence.
+- The current Cataclysm test client's LiquidType schema is not present in the checked-in WoWDBDefs
+  definitions. The runtime therefore reports missing exact-build rows with the native safe-water
+  default; no new numeric family list should be added. Ghidra layout recovery and a WoWDBDefs update
+  are required before claiming Cataclysm liquid-family parity.
 - Speckit branch creation was blocked by the shared `.git/index.lock` permission boundary; artifacts
   are currently on `142-world-scene-graph` and no implementation signoff is claimed.
 

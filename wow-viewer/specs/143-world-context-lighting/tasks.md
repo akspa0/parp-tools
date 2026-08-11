@@ -46,7 +46,7 @@ whole-map loads, native OpenGL runtime tests, and GPU profiling are user-run ope
 - [x] T012 [US1] Correct the `src/viewer/WoWViewer/ViewerApp.cs` camera-to-chunk/map-context call site to consume the structured evaluator result instead of treating all misses as an empty `_currentAreaName`.
 - [x] T013 [US1] Update `src/viewer/WoWViewer/ViewerApp_MinimapAndStatus.cs` to display `SubzoneText` as the primary area label plus compact raw-ID/source diagnostics and explicit unresolved state.
 - [ ] T014 [P] [US1] Add lookup diagnostics assertions for `AreaTableService.DescribeLoadContext` and `DescribeLookup` in `tests/WowViewer.Core.Tests/AreaTableServiceTests.cs`.
-- [ ] T015 [US1] Run the focused area-context tests and isolated viewer build; record the proof and remaining real-client gap in `specs/143-world-context-lighting/quickstart.md`.
+- [x] T015 [US1] Run the focused area-context tests and isolated viewer build; record the proof and remaining real-client gap in `specs/143-world-context-lighting/quickstart.md`.
 
 **Checkpoint**: The status bar can distinguish no resident chunk, zero/malformed ADT ID, AreaTable row miss, map mismatch, and a valid localized AreaName.
 

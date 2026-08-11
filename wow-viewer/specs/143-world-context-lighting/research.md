@@ -19,12 +19,16 @@
   reference describes the full packed `AreaNumber` as zone high-word plus subzone low-word.
 - `TerrainRenderer.GetChunkAt` previously returned the nearest resident chunk after exact/bounds
   lookup failed, which could assign an unrelated area's name while the camera was over an unloaded
-  tile.
+  tile. The status path also queried that legacy GPU-mesh list even though the active batched terrain
+  path stores resident chunk metadata in `_chunkInfosByTile`, producing `NoTerrainChunk` over visible
+  terrain.
 
 **Decision**: Phase 1 introduces a structured lookup result and instruments the coordinate,
 tile/chunk, raw ID, map ID, table row, and unresolved reason before changing lookup semantics. The
-existing parsers remain the source of raw IDs. The map filter will be treated as validation/context,
-not as permission to erase a valid row; a map mismatch will remain visible as a diagnostic state.
+existing parsers remain the source of raw IDs. The status path consumes resident chunk metadata so
+batched tile rendering and context selection share the same residency authority. The map filter will
+be treated as validation/context, not as permission to erase a valid row; a map mismatch will remain
+visible as a diagnostic state.
 
 **Alternatives considered**
 

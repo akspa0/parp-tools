@@ -8,6 +8,17 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-11 — Batched terrain area-context lookup
+
+- Fixed the status-bar context query to use `TerrainRenderer.GetChunkInfoAt`, which is populated by
+  the resident batched-tile metadata path. The previous call asked for a legacy GPU-resident
+  `TerrainChunkMesh`, so a fully visible batched terrain scene reported `NoTerrainChunk`.
+- Removed the nearest-chunk fallback from metadata lookup so an unloaded/coordinate-mismatched
+  camera position cannot display an unrelated AreaName.
+- Focused `AreaDisplayTextResolverTests` passed 3/3; isolated viewer build passed with 0 errors
+  (warnings remain pre-existing). Cataclysm LiquidType parity is blocked on the missing WoWDBDefs
+  schema and requires Ghidra evidence plus an upstream definitions update.
+
 ## 2026-08-11 — Compact runtime status strip and release warning plan
 
 - Moved the FPS/chunk summary out of the bottom action bar into the lower status bar and

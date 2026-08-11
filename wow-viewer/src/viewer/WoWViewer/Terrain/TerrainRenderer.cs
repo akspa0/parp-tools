@@ -138,25 +138,9 @@ public class TerrainRenderer : IDisposable
         if (TryGetTileKey(worldX, worldY, out var tileKey) && TryFindChunkInfoByBounds(tileKey, worldX, worldY, out var byBounds))
             return new TerrainChunkInfo(byBounds);
 
-        TerrainChunkInfo? best = null;
-        float bestDist = float.MaxValue;
-        foreach (var tileInfos in _chunkInfosByTile.Values)
-        {
-            foreach (var chunk in tileInfos)
-            {
-                var center = (chunk.BoundsMin + chunk.BoundsMax) * 0.5f;
-                float dx = center.X - worldX;
-                float dy = center.Y - worldY;
-                float dist = dx * dx + dy * dy;
-                if (dist < bestDist)
-                {
-                    bestDist = dist;
-                    best = new TerrainChunkInfo(chunk);
-                }
-            }
-        }
-
-        return best;
+        // Do not report the nearest unrelated chunk. That makes the UI claim an AreaName for
+        // terrain that is not resident and hides coordinate/residency bugs in the streaming path.
+        return null;
     }
 
     public bool TryGetChunkInfo(int tileX, int tileY, int chunkX, int chunkY, out TerrainChunkInfo info)

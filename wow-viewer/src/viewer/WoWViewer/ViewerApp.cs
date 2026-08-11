@@ -1509,9 +1509,9 @@ var seq = animator.Sequences[animator.CurrentSequence];
             if (_worldScene != null)
                 UpdateWorldSceneHoveredAssetInfo(view, proj);
 
-            // Update native-style ZoneText/SubzoneText from the resident chunk under the camera.
-            // The lookup retries while tiles stream in, but never substitutes an unrelated nearest
-            // chunk when the camera is over an unloaded tile.
+            // Update native-style ZoneText/SubzoneText from the resident chunk metadata under the
+            // camera. Batched terrain owns one GPU mesh per tile, so the area lookup must use the
+            // resident chunk-info index instead of the legacy per-chunk GPU mesh list.
             var areaChunkRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
             UpdateCurrentAreaContext(areaChunkRenderer);
 
@@ -10872,10 +10872,10 @@ void main() {
         _lastAreaLookupLoadedTileCount = loadedTileCount;
         _lastAreaLookupMapId = _currentMapId;
 
-        var chunk = renderer.GetChunkAt(_camera.Position.X, _camera.Position.Y);
+        var chunk = renderer.GetChunkInfoAt(_camera.Position.X, _camera.Position.Y);
         _currentAreaLookup = chunk is null
             ? WowViewer.Core.World.AreaLookupResult.Unresolved(0, _currentMapId, WowViewer.Core.World.AreaResolutionReason.NoTerrainChunk)
-            : _areaTableService.ResolveArea(chunk.AreaId, _currentMapId);
+            : _areaTableService.ResolveArea(chunk.Value.AreaId, _currentMapId);
 
         _currentZoneName = _currentAreaLookup.ZoneText ?? string.Empty;
         _currentAreaName = _currentAreaLookup.SubzoneText ?? _currentAreaLookup.ZoneText ?? string.Empty;
