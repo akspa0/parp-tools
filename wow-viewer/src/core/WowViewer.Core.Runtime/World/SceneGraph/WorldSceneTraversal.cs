@@ -5,6 +5,7 @@ public sealed class WorldSceneTraversalDiagnostics
     private readonly Dictionary<WorldSceneNodeKind, int> _individuallyTestedNodeCountsByKind = [];
     private readonly Dictionary<WorldSceneNodeKind, int> _rejectedNodeCountsByKind = [];
     private readonly Dictionary<WorldSceneNodeKind, int> _skippedDescendantCountsByKind = [];
+    private readonly Dictionary<WorldSceneNodeKind, int> _deferredVisibilityTestCountsByKind = [];
 
     public int VisitedNodeCount { get; internal set; }
 
@@ -20,6 +21,8 @@ public sealed class WorldSceneTraversalDiagnostics
 
     public int MaxDepthReached { get; internal set; }
 
+    public int DeferredVisibilityTestCount { get; internal set; }
+
     public IReadOnlyDictionary<WorldSceneNodeKind, int> IndividuallyTestedNodeCountsByKind =>
         _individuallyTestedNodeCountsByKind;
 
@@ -28,6 +31,9 @@ public sealed class WorldSceneTraversalDiagnostics
 
     public IReadOnlyDictionary<WorldSceneNodeKind, int> SkippedDescendantCountsByKind =>
         _skippedDescendantCountsByKind;
+
+    public IReadOnlyDictionary<WorldSceneNodeKind, int> DeferredVisibilityTestCountsByKind =>
+        _deferredVisibilityTestCountsByKind;
 
     internal void RecordIndividualTest(WorldSceneNodeKind kind)
     {
@@ -38,6 +44,12 @@ public sealed class WorldSceneTraversalDiagnostics
     {
         Increment(_rejectedNodeCountsByKind, node.Kind);
         return RecordDescendantKinds(node, _skippedDescendantCountsByKind);
+    }
+
+    internal void RecordDeferredVisibilityTest(WorldSceneNodeKind kind)
+    {
+        DeferredVisibilityTestCount++;
+        Increment(_deferredVisibilityTestCountsByKind, kind);
     }
 
     private static int RecordDescendantKinds(
@@ -72,6 +84,7 @@ public static class WorldSceneTraversal
         WorldSceneGraph graph,
         Func<WorldSceneNode, bool> isVisible,
         Func<WorldSceneNode, bool>? includeNode = null,
+        Func<WorldSceneNode, bool>? shouldEvaluateVisibility = null,
         bool validateGraph = true)
     {
         ArgumentNullException.ThrowIfNull(graph);
@@ -84,7 +97,14 @@ public static class WorldSceneTraversal
         List<WorldSceneNode> visibleNodes = [];
         List<WorldSceneNode> rejectedNodes = [];
         WorldSceneTraversalDiagnostics diagnostics = new();
-        Visit(graph.Root, isVisible, includeNode, visibleNodes, rejectedNodes, diagnostics);
+        Visit(
+            graph.Root,
+            isVisible,
+            includeNode,
+            shouldEvaluateVisibility,
+            visibleNodes,
+            rejectedNodes,
+            diagnostics);
         return new WorldSceneTraversalResult(visibleNodes, rejectedNodes, diagnostics);
     }
 
@@ -92,6 +112,7 @@ public static class WorldSceneTraversal
         WorldSceneNode node,
         Func<WorldSceneNode, bool> isVisible,
         Func<WorldSceneNode, bool> includeNode,
+        Func<WorldSceneNode, bool>? shouldEvaluateVisibility,
         List<WorldSceneNode> visibleNodes,
         List<WorldSceneNode> rejectedNodes,
         WorldSceneTraversalDiagnostics diagnostics)
@@ -99,7 +120,9 @@ public static class WorldSceneTraversal
         diagnostics.VisitedNodeCount++;
         diagnostics.MaxDepthReached = Math.Max(diagnostics.MaxDepthReached, node.Depth);
 
-        if (node.CanRejectSubtree)
+        bool evaluateVisibility = node.CanRejectSubtree
+            && (shouldEvaluateVisibility is null || shouldEvaluateVisibility(node));
+        if (evaluateVisibility)
         {
             diagnostics.IndividuallyTestedNodeCount++;
             diagnostics.RecordIndividualTest(node.Kind);
@@ -111,9 +134,13 @@ public static class WorldSceneTraversal
                 return;
             }
         }
-        else
+        else if (!node.CanRejectSubtree)
         {
             diagnostics.NonRejectableNodeCount++;
+        }
+        else
+        {
+            diagnostics.RecordDeferredVisibilityTest(node.Kind);
         }
 
         if (includeNode(node))
@@ -123,7 +150,14 @@ public static class WorldSceneTraversal
         }
 
         foreach (WorldSceneNode child in node.Children)
-            Visit(child, isVisible, includeNode, visibleNodes, rejectedNodes, diagnostics);
+            Visit(
+                child,
+                isVisible,
+                includeNode,
+                shouldEvaluateVisibility,
+                visibleNodes,
+                rejectedNodes,
+                diagnostics);
     }
 
 }

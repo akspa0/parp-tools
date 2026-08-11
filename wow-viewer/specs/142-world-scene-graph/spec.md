@@ -363,7 +363,9 @@ submission, GPU/driver wait, and spatial-query time.
   nodes rejected with the level at which rejection occurred, subtree rejections, visible counts per
   pass, nesting depth reached, and the time spent in each traversal stage. Rejection and skipped
   descendant attribution MUST be available by node kind so a terrain-chunk rejection can be
-  distinguished from an individual M2 rejection.
+  distinguished from an individual M2 rejection. The traversal MAY defer leaf visibility testing
+  to an existing content-specific collector when the parent region remains responsible for subtree
+  rejection; deferred nodes MUST be reported by kind and remain included for that collector.
 - **FR-017**: Frame-to-frame reuse of visibility results MUST be correctness-preserving, MUST be
   invalidated by camera, transform, residency, or visibility-state changes, and MUST be
   independently disableable for comparison measurement.
@@ -581,6 +583,10 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
   visited, individually tested, non-rejectable, rejected, skipped-descendant, and visible counts.
   `WorldSceneTraversalDiagnostics` also attributes individually tested nodes, rejected roots, and
   skipped descendants by node kind, making ADT chunk-level M2 savings directly inspectable.
+- The opt-in `WorldScene` traversal defers graph-level leaf visibility for ordinary ADT M2 nodes
+  under Chunk regions, avoiding a duplicate graph frustum test before the existing M2 collector.
+  Chunk rejection remains graph-owned; external M2, skybox, WMO, and WMO-internal doodad-set paths
+  do not use this deferral policy.
 - `WorldSceneGraphObjectAdapter` maps the existing runtime placement lists into stable
   `map -> tile/external bucket -> placement` nodes without reopening format readers or fabricating
   WMO group bounds. Resident non-skybox ADT M2 placements can additionally carry deterministic
@@ -613,7 +619,7 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
   `map -> tile -> chunk -> M2` buckets using the existing terrain coordinate convention. The graph
   traversal can reject a chunk before testing its ordinary doodad descendants; external spawns,
   skyboxes, WMO placements, and WMO doodad-set submission remain unchanged.
-- Focused graph/workload/traversal/adapter/portal proof is 32 passing tests; the runtime and viewer
+- Focused graph/workload/traversal/adapter/portal proof is 33 passing tests; the runtime and viewer
   projects build with only existing repository warnings.
 
 This is an opt-in integration proof, not a renderer promotion. The legacy `WorldScene` traversal

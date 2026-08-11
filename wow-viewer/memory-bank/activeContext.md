@@ -44,9 +44,12 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
   `SceneGraphPortalAdapters` during opt-in graph rebuilds; the current WMO visibility path is
   unchanged. `WorldScenePortalVisibilityEvaluator` now walks reachable groups through nested
   volumes and applies only to opt-in `WmoGroup` graph traversal, failing open to all groups when
-  uncertain. Focused proof is 32 tests.
+  uncertain. Focused proof is 33 tests.
 - Traversal diagnostics now expose individually tested nodes, rejected subtree roots, and skipped
   descendants by node kind, so ADT Chunk rejection can be separated from individual M2 culling.
+- Opt-in graph traversal now defers exact visibility of M2 leaves under Chunk nodes to the existing
+  M2 collector, while retaining graph-owned chunk rejection; external, skybox, WMO, and WMO doodad-set
+  paths are unchanged.
 - The adapter does not invent missing group bounds. Resident non-skybox ADT M2 placements now mount
   beneath deterministic terrain chunk buckets in the opt-in graph; unresolved bounds keep the chunk
   fail-open. This is object-population partitioning, not terrain mesh ownership. The existing

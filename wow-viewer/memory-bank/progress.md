@@ -8,6 +8,13 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 deferred ADT M2 leaf visibility
+
+- The opt-in graph keeps terrain-chunk subtree rejection but defers ordinary ADT M2 leaf visibility
+  to the existing M2 collector, removing the duplicate graph-level leaf predicate.
+- Deferred leaves are attributed by node kind; focused proof is 33 passing tests and the viewer
+ build has 0 errors. No renderer submission or real-client/GPU performance claim exists.
+
 ## 2026-08-10 — Spec 142 traversal rejection attribution
 
 - Added per-node-kind diagnostics for individually tested nodes, rejected subtree roots, and

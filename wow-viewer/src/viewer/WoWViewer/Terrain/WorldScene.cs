@@ -9259,6 +9259,9 @@ public class WorldScene : ISceneRenderer
             _sceneGraphBuild.Graph,
             IsSceneGraphNodeVisible,
             node => node.Kind is WorldSceneNodeKind.M2Placement or WorldSceneNodeKind.WmoPlacement,
+            shouldEvaluateVisibility: static node =>
+                node.Kind != WorldSceneNodeKind.M2Placement
+                || node.Parent?.Kind != WorldSceneNodeKind.Chunk,
             validateGraph: false);
         _lastSceneGraphTraversalDiagnostics = traversal.Diagnostics;
 

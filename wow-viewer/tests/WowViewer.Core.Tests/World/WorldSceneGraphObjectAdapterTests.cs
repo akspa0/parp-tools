@@ -215,6 +215,40 @@ public sealed class WorldSceneGraphObjectAdapterTests
         Assert.Equal(1, traversal.Diagnostics.IndividuallyTestedNodeCountsByKind[WorldSceneNodeKind.Chunk]);
     }
 
+    [Fact]
+    public void DeferredM2VisibilityLeavesChunkCullingToTheGraph()
+    {
+        WorldSceneGraphBuildResult result = WorldSceneGraphObjectAdapter.Build(
+        [
+            Placement("m2/a", WorldSceneNodeKind.M2Placement, 3, 4, new Vector3(10f, 0f, 0f)) with
+            {
+                SpatialBucket = new WorldSceneGraphSpatialBucket(WorldSceneNodeKind.Chunk, "02/03")
+            },
+            Placement("m2/b", WorldSceneNodeKind.M2Placement, 3, 4, new Vector3(20f, 0f, 0f)) with
+            {
+                SpatialBucket = new WorldSceneGraphSpatialBucket(WorldSceneNodeKind.Chunk, "02/03")
+            },
+        ]);
+        HashSet<string> testedIds = new(StringComparer.Ordinal);
+
+        WorldSceneTraversalResult traversal = WorldSceneTraversal.Traverse(
+            result.Graph,
+            node =>
+            {
+                testedIds.Add(node.Id);
+                return true;
+            },
+            shouldEvaluateVisibility: static node => node.Kind != WorldSceneNodeKind.M2Placement);
+
+        Assert.Contains("world/tile/03/04/chunk/02/03", testedIds);
+        Assert.DoesNotContain("m2/a", testedIds);
+        Assert.DoesNotContain("m2/b", testedIds);
+        Assert.Equal(2, traversal.Diagnostics.DeferredVisibilityTestCount);
+        Assert.Equal(2, traversal.Diagnostics.DeferredVisibilityTestCountsByKind[WorldSceneNodeKind.M2Placement]);
+        Assert.Contains(traversal.VisibleNodes, node => node.Id == "m2/a");
+        Assert.Contains(traversal.VisibleNodes, node => node.Id == "m2/b");
+    }
+
     private static WorldSceneGraphObjectPlacement Placement(
         string id,
         WorldSceneNodeKind kind,

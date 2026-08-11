@@ -231,6 +231,13 @@ show whether the new terrain-chunk buckets actually saved individual M2 tests. T
 per-node-kind counts for individually tested nodes, rejected subtree roots, and skipped descendants.
 The proof owner remains the core traversal diagnostics; no renderer submission behavior changes.
 
+## Phase 8C — Deferred ADT M2 Leaf Visibility
+
+**Status**: Complete for the opt-in ADT M2 path on 2026-08-10. Graph traversal retains terrain-chunk subtree
+rejection but defers exact visibility of M2 leaves under those chunks to the existing M2 collector,
+preventing a duplicate graph-level leaf frustum test. Deferred leaf counts are attributed by kind.
+No external spawn, skybox, WMO, WMO doodad-set, or renderer submission behavior changes.
+
 ## Later Phases (Not Started In This Slice)
 
 - **Phase 9**: Integrate graph portal volumes into runtime WMO submission and prove doorway
