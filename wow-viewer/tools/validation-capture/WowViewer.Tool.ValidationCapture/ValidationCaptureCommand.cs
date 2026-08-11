@@ -49,6 +49,8 @@ internal static class ValidationCaptureCommand
         int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
         int warmupFrames = GetIntOption(args, "--warmup-frames") ?? 8;
         int frames = GetIntOption(args, "--frames") ?? 12;
+        int? tileX = GetIntOption(args, "--tile-x");
+        int? tileY = GetIntOption(args, "--tile-y");
         bool loadAllTiles = HasFlag(args, "--load-all-tiles");
         bool dryRun = HasFlag(args, "--dry-run");
 
@@ -67,16 +69,22 @@ internal static class ValidationCaptureCommand
             return 1;
         }
 
+        if (tileX.HasValue != tileY.HasValue || tileX is < 0 or > 63 || tileY is < 0 or > 63)
+        {
+            Console.Error.WriteLine("Error: --tile-x and --tile-y must be supplied together and each must be in [0, 63].");
+            return 1;
+        }
+
         if (dryRun)
         {
             try
             {
-                string resolved = ProductionWorldSceneProfiler.ValidateWdtInput(clientRoot, wdtPath, listfilePath, looseOverlayRoot);
+                string resolved = ProductionWorldSceneProfiler.ValidateWdtInput(clientRoot, wdtPath, listfilePath, looseOverlayRoot, tileX, tileY);
                 Console.WriteLine("Production WorldScene profile dry-run succeeded.");
                 Console.WriteLine($"Client root: {clientRoot}");
                 Console.WriteLine($"Resolved: {resolved}");
                 Console.WriteLine($"Output: {outputPath}");
-                Console.WriteLine($"Frames: warmup={warmupFrames}, measured={frames}, loadAllTiles={loadAllTiles}");
+                Console.WriteLine($"Frames: warmup={warmupFrames}, measured={frames}, tile={tileX?.ToString() ?? "map-default"}_{tileY?.ToString() ?? "map-default"}, loadAllTiles={loadAllTiles}");
                 return 0;
             }
             catch (Exception ex)
@@ -98,7 +106,9 @@ internal static class ValidationCaptureCommand
                 resolution,
                 warmupFrames,
                 frames,
-                loadAllTiles);
+                loadAllTiles,
+                tileX,
+                tileY);
             Console.WriteLine($"Production WorldScene profile completed: {report.Frames.Count} measured frames, {report.Findings.Count} findings.");
             Console.WriteLine($"Report: {outputPath}");
             return report.Findings.Any(static finding => finding.Severity == "error") ? 2 : 0;
@@ -744,6 +754,8 @@ private static ValidationCaptureScenePolicy CreateDefaultScenePolicy(int resolut
               --resolution <int>     Hidden render target size; default: 512
               --warmup-frames <int>  Production frames before sampling; default: 8
               --frames <int>         Production frames to measure; default: 12
+              --tile-x <int>         Target ADT tile column; pair with --tile-y
+              --tile-y <int>         Target ADT tile row; pair with --tile-x
               --load-all-tiles       Opt into synchronous full terrain residency before sampling
               --dry-run              Verify client/map input without opening a GPU context
 

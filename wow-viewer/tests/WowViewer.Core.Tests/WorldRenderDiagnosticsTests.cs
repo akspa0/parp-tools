@@ -18,7 +18,7 @@ public sealed class WorldRenderDiagnosticsTests
             "headless-production-world-scene",
             warmupFrameCount: 2,
             [new WorldRenderDiagnosticFrame(0, stats), new WorldRenderDiagnosticFrame(1, stats)],
-            new WorldRenderDiagnosticWorkload(12, 0, 0, 0, 3, 2, 10, 4, true, 9, 5, 4, 1.5));
+            new WorldRenderDiagnosticWorkload(12, 0, 0, 0, 3, 2, 10, 4, true, 32, 32, 9, 5, 4, 1.5));
 
         Assert.Equal(WorldRenderDiagnostics.Schema, report.Schema);
         Assert.Equal(17, report.Stages.Count);
@@ -34,7 +34,7 @@ public sealed class WorldRenderDiagnosticsTests
             "headless-production-world-scene",
             warmupFrameCount: 0,
             [new WorldRenderDiagnosticFrame(0, WorldRenderFrameStats.Empty)],
-            new WorldRenderDiagnosticWorkload(0, 2, 3, 4, 0, 0, 7, 8, false, 0, 0, 0, 0));
+            new WorldRenderDiagnosticWorkload(0, 2, 3, 4, 0, 0, 7, 8, false, null, null, 0, 0, 0, 0));
 
         Assert.Contains(report.Findings, finding => finding.Code == "scene-not-settled");
         Assert.Contains(report.Findings, finding => finding.Code == "wmo-path-not-covered");

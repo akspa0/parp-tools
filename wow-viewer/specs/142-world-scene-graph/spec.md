@@ -659,3 +659,7 @@ the configured client data source. Standard-era diagnostic runs MUST use a WDT f
 client build; pairing an extracted/custom WDT with unrelated client MPQs is invalid evidence.
 Archive-backed Alpha WDTs remain unsupported because the Alpha terrain adapter requires a local
 path.
+
+For the cross-client performance gate, `Azeroth` tile `32_32` is the canonical anchor. The
+diagnostic MUST verify the matching ADT exists in the configured client and MUST report/profile
+from its tile-centered camera position rather than a map-wide inferred default.

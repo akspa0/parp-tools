@@ -288,6 +288,8 @@ proof owner is a user-run real-client capture using the existing stage and asset
 The diagnostic accepts either a local WDT or a standard-client virtual WDT path. Standard runs use
 the latter so the WDT, ADTs, WMO/M2 assets, and minimaps are sourced from one client build; the
 no-GPU `--dry-run` verifies that archive resolution before a renderer profile begins.
+The canonical runtime anchor is `Azeroth` tile `32_32`; its tile coordinates are verified against
+the same client catalog and directly determine the profiling camera position.
 
 **Status**: Complete for the CPU-stage diagnostic harness on 2026-08-10. The
 `ValidationCapture` tool now has `profile-render`, which opens a hidden OpenGL surface and invokes

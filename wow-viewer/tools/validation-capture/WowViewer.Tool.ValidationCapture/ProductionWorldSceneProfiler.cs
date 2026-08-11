@@ -20,7 +20,9 @@ internal static class ProductionWorldSceneProfiler
         string clientRoot,
         string wdtInput,
         string? listfilePath,
-        string? looseOverlayRoot)
+        string? looseOverlayRoot,
+        int? targetTileX,
+        int? targetTileY)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(clientRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(wdtInput);
@@ -28,7 +30,9 @@ internal static class ProductionWorldSceneProfiler
         string[] overlays = string.IsNullOrWhiteSpace(looseOverlayRoot) ? [] : [looseOverlayRoot];
         using var dataSource = new MpqDataSource(clientRoot, listfilePath, overlays);
         ResolvedWdt resolved = ResolveWdt(wdtInput, dataSource);
-        return $"{(resolved.IsLocalFile ? "local" : "client-archive")} WDT '{resolved.Source}' ({resolved.Bytes.Length:N0} bytes)";
+        ValidateTargetTile(resolved, dataSource, targetTileX, targetTileY);
+        string target = targetTileX.HasValue ? $", tile {targetTileX}_{targetTileY}" : string.Empty;
+        return $"{(resolved.IsLocalFile ? "local" : "client-archive")} WDT '{resolved.Source}' ({resolved.Bytes.Length:N0} bytes){target}";
     }
 
     public static WorldRenderDiagnosticReport Run(
@@ -41,7 +45,9 @@ internal static class ProductionWorldSceneProfiler
         int resolution,
         int warmupFrameCount,
         int measuredFrameCount,
-        bool loadAllTiles)
+        bool loadAllTiles,
+        int? targetTileX,
+        int? targetTileY)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(clientRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(wdtInput);
@@ -53,6 +59,7 @@ internal static class ProductionWorldSceneProfiler
         string[] overlays = string.IsNullOrWhiteSpace(looseOverlayRoot) ? [] : [looseOverlayRoot];
         using var dataSource = new MpqDataSource(clientRoot, listfilePath, overlays);
         ResolvedWdt resolvedWdt = ResolveWdt(wdtInput, dataSource);
+        ValidateTargetTile(resolvedWdt, dataSource, targetTileX, targetTileY);
         using var context = new HeadlessContext(resolution, resolution);
         using var surface = new RenderSurface(context.GL, resolution, resolution);
 
@@ -65,7 +72,7 @@ internal static class ProductionWorldSceneProfiler
                 scene.Terrain.LoadAllTiles();
             initializationTimer.Stop();
 
-            Vector3 cameraPosition = scene.WmoCameraOverride ?? scene.Terrain.GetInitialCameraPosition();
+            Vector3 cameraPosition = ResolveCameraPosition(scene, targetTileX, targetTileY);
             Vector3 forward = BuildCameraForward(cameraPosition);
             Matrix4x4 view = Matrix4x4.CreateLookAt(cameraPosition, cameraPosition + forward, Vector3.UnitZ);
             Matrix4x4 projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3f, 1f, 0.1f, 20000f);
@@ -91,6 +98,8 @@ internal static class ProductionWorldSceneProfiler
                 scene.MdxInstanceCount,
                 scene.WmoInstanceCount,
                 scene.IsHierarchicalSceneTraversalActive,
+                targetTileX,
+                targetTileY,
                 sourceStats.ReadRequests,
                 sourceStats.ReadCacheHits,
                 sourceStats.ReadCacheMisses,
@@ -165,6 +174,36 @@ internal static class ProductionWorldSceneProfiler
         var adapter = new StandardTerrainAdapter(wdtBytes, mapName, dataSource, buildLabel);
         var terrain = new TerrainManager(gl, adapter, mapName, dataSource);
         return new WorldScene(gl, terrain, dataSource, buildVersion: buildLabel);
+    }
+
+    private static void ValidateTargetTile(ResolvedWdt wdt, MpqDataSource dataSource, int? tileX, int? tileY)
+    {
+        if (!tileX.HasValue)
+            return;
+
+        if (wdt.IsLocalFile && IsAlphaWdt(wdt.Bytes))
+            return;
+
+        string mapName = Path.GetFileNameWithoutExtension(wdt.Source);
+        string? mapDirectory = Path.GetDirectoryName(wdt.Source);
+        if (string.IsNullOrWhiteSpace(mapDirectory))
+            throw new InvalidOperationException($"Cannot derive a map directory from WDT input '{wdt.Source}'.");
+
+        string rootAdtPath = Path.Combine(mapDirectory, $"{mapName}_{tileY}_{tileX}.adt").Replace('/', '\\');
+        if (!dataSource.FileExists(rootAdtPath))
+            throw new FileNotFoundException($"Target tile {tileX}_{tileY} is not present in map '{mapName}' in the configured client.", rootAdtPath);
+    }
+
+    private static Vector3 ResolveCameraPosition(WorldScene scene, int? tileX, int? tileY)
+    {
+        if (!tileX.HasValue)
+            return scene.WmoCameraOverride ?? scene.Terrain.GetInitialCameraPosition();
+
+        const float tileSize = 533.33333f;
+        const float mapOrigin = 32f * tileSize;
+        float x = mapOrigin - ((tileX.Value + 0.5f) * tileSize);
+        float y = mapOrigin - ((tileY!.Value + 0.5f) * tileSize);
+        return new Vector3(x, y, 200f);
     }
 
     private static bool IsAlphaWdt(byte[] bytes)

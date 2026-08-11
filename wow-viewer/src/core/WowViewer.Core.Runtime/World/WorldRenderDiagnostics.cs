@@ -26,6 +26,8 @@ public readonly record struct WorldRenderDiagnosticWorkload(
     int MdxInstanceCount,
     int WmoInstanceCount,
     bool HierarchicalSceneTraversalActive,
+    int? TargetTileX,
+    int? TargetTileY,
     long DataSourceReadRequestCount,
     long DataSourceReadCacheHitCount,
     long DataSourceReadCacheMissCount,

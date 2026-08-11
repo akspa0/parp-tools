@@ -32,10 +32,10 @@ loop; it is not the terrain-only native adapter or a 2-D preview. It opens a hid
 so run it yourself against a named client and local WDT after the build/test proof above.
 
 ```powershell
-$ClientRoot = "H:\CLIENTS\<client>"
+$ClientRoot = "H:\CLIENTS\World of Warcraft Cata beta 11927"
 $Wdt = "World\Maps\Azeroth\Azeroth.wdt"
-$BuildLabel = "4.0.0.11792"
-dotnet run --project tools/validation-capture/WowViewer.Tool.ValidationCapture/WowViewer.Tool.ValidationCapture.csproj -- profile-render --client-root $ClientRoot --map-input $Wdt --output output\diagnostics\world-render.json --build $BuildLabel --warmup-frames 8 --frames 12
+$BuildLabel = "4.0.0.11927"
+dotnet run --project tools/validation-capture/WowViewer.Tool.ValidationCapture/WowViewer.Tool.ValidationCapture.csproj -- profile-render --client-root $ClientRoot --map-input $Wdt --output output\diagnostics\azeroth-32-32.json --build $BuildLabel --tile-x 32 --tile-y 32 --warmup-frames 30 --frames 120
 ```
 
 For a standard-era client, `--map-input` should be the WDT virtual path inside that same client,
@@ -44,6 +44,10 @@ whose terrain adapter requires a disk path. Use `--load-all-tiles` only when int
 `world-render-diagnostic-v1`; inspect `findings`, `stages`, `workload`, and the raw per-frame stats.
 The command currently attributes CPU stages and client I/O counters. It explicitly reports that
 per-stage GPU/driver timing is not yet captured.
+
+`Azeroth` tile `32_32` is the standard cross-client anchor for this diagnostic. When a tile is
+specified, `profile-render` verifies that exact ADT exists in the configured client and positions
+its production camera at the tile center instead of using the map's inferred startup camera.
 
 ## Full runtime-library proof
 

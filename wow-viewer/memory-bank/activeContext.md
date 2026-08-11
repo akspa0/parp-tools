@@ -395,3 +395,5 @@ the authored RGB corpus, then reviews the combined benchmark dry plan.
  - `profile-render` now resolves standard WDTs through the configured client when passed a virtual
    path (for example `World\\Maps\\Azeroth\\Azeroth.wdt`); never pair a custom/extracted WDT with
    unrelated client assets. Alpha remains local-WDT only.
+ - The canonical Spec 142 runtime diagnostic anchor is client-backed `Azeroth` tile `32_32`; the
+   profiler validates its ADT and places the production camera at that tile center.

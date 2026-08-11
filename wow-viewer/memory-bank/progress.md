@@ -762,3 +762,5 @@ passing cases; full v60 is now `111` passing. No external-weight use, harvest, o
 Next: build the authored RGB corpus and review the combined plan.
  - 2026-08-10: Corrected production diagnostic map sourcing after an invalid custom-WDT/stock-client
    command. Standard profiles now accept client-archive WDT virtual paths; no runtime profile run by Codex.
+ - 2026-08-10: Added explicit cross-client `Azeroth` tile `32_32` targeting and validation to
+   `profile-render`; profile reports now carry the requested target tile.
