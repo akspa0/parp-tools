@@ -410,3 +410,8 @@ the authored RGB corpus, then reviews the combined benchmark dry plan.
    tile bounds, expanded by known placement bounds; only these authoritative roots may ignore
    unresolved descendants. Focused graph/diagnostic proof: 19 passed. Next proof is user-run
    post-fix `profile-render --load-all-tiles`; no speedup claimed yet.
+ - Post-fix full-map capture (`azeroth-32-32-full-post-tile-cull.json`) proves tile-root culling
+   did not solve runtime viability: initialization is 66.4 s and `overlay` stalls alternating frames
+   for 39.5-44.0 s (P95 frame 44.2 s). Spec 142 now orders work as overlay-owner attribution and
+   bounded admission, then index-first/budgeted residency, then Spec 138-coordinated modern
+   capability-gated instance submission. No code change in this planning slice.

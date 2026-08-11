@@ -352,6 +352,16 @@ one early client, one 1.x client, one 3.x client, and the 4.0.0.11792 reference 
 The first implementation slice is the evidence/profile gate. This epic does not authorize a
 broad renderer rewrite or a training run by itself.
 
+### Coordination with Spec 142 full-map runtime recovery
+
+Spec 142 owns the immediate full-map runtime recovery: it has production evidence that normal
+full-residency materialization takes 66.4 seconds and that an opaque overlay owner stalls frames
+for 40-44 seconds. That spec first establishes overlay attribution/work admission, then index-first
+budgeted tile residency. This epic consumes those stabilized contracts for Cataclysm dense-scene
+work: shared immutable asset buffers, instance data, texture/material grouping, and capability-gated
+multi-draw or indirect submission. Do not start modern GPU submission work while a CPU overlay owner
+can still block a frame for seconds; preserve all 4.x material/effect fallbacks throughout.
+
 ### Key Entities
 
 - **4.x capability profile**: A build-scoped description of file layout, chunks, flags, asset

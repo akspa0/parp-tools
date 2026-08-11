@@ -776,3 +776,8 @@ Next: build the authored RGB corpus and review the combined plan.
    finite bounds expanded around resolved placements and may reject unresolved children; ordinary
    graph nodes remain fail-open. Focused graph/diagnostic suite: 19 passed. Await user-run post-fix
    whole-map diagnostic before claiming a performance result.
+ - 2026-08-10: Post-cull full-map evidence remains unusable: 66,388.8 ms initialization and an
+   alternating 39.5-44.0 second `overlay` frame-stage stall (P95 total 44,178.7 ms). Speckit
+   expanded Spec 142 with Phase 8J overlay attribution/admission, 8K index-first budgeted residency,
+   and 8L modern capability-gated submission coordinated with Spec 138. Next implementation is
+   strictly Phase 8J; no performance win is claimed.

@@ -45,6 +45,13 @@ whose terrain adapter requires a disk path. Use `--load-all-tiles` only when int
 The command currently attributes CPU stages and client I/O counters. It explicitly reports that
 per-stage GPU/driver timing is not yet captured.
 
+The current full-map evidence is a failure, not a benchmark win: `Azeroth 32_32` on
+4.0.0.11927 took 66.4 seconds to synchronously materialize 839 ADTs, and its `overlay` stage
+stalled for roughly 40-44 seconds on alternating frames. Do not use `--load-all-tiles` as a normal
+viewer startup path. Phase 8J first attributes/fixes overlay admission; Phase 8K then makes normal
+whole-map operation index-first and budgeted. Keep the command available as an explicit stress
+comparison after each bounded phase.
+
 `Azeroth` tile `32_32` is the standard cross-client anchor for this diagnostic. When a tile is
 specified, `profile-render` verifies that exact ADT exists in the configured client and positions
 its production camera at the tile center instead of using the map's inferred startup camera.

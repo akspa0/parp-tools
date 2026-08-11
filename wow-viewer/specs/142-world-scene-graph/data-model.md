@@ -65,3 +65,21 @@ GPU measurements exist.
 6. Detaching a subtree removes every descendant from lookup and snapshot enumeration.
 7. A synthetic minimap/image record cannot be loaded as a `SyntheticWorldWorkload` without an
    explicit world-runtime adapter; this phase has no such adapter.
+
+## Full-Map Runtime Entities
+
+| Entity | States / fields | Rule |
+|---|---|---|
+| `TileResidencyRecord` | tile ID, bounds, `indexed`, `cpu_decoded`, `gpu_ready`, `retained`, priority, last-used frame | Map discovery creates only `indexed`; the camera/admission policy alone promotes later states. |
+| `FrameWorkBudget` | CPU decode ms, GPU-upload count/ms, object/overlay preparation ms | Expensive work is admitted incrementally and reported when deferred; a frame may not synchronously drain an unbounded queue. |
+| `OverlayWorkRecord` | owner, invalidation key, requested/started/completed frame, CPU ms, output count, deferred reason | Every overlay operation must have a named owner and cache key; a broad `overlay` duration is invalid evidence. |
+| `RendererCapabilityRecord` | GL feature support, instance-buffer path, indirect/multi-draw support, fallback reason | Modern submission is selected only through this record and preserves a tested legacy fallback. |
+
+Additional invariants:
+
+8. Full-map index discovery does not decode ADT payloads, create terrain meshes, or instantiate world
+   objects.
+9. A tile becomes GPU-ready only after its CPU data and object graph are complete; eviction removes
+   all higher-residency state but retains the lightweight index.
+10. Overlay work may be reused only when its declared invalidation key matches; otherwise it must be
+    budgeted and attributed rather than recomputed invisibly.

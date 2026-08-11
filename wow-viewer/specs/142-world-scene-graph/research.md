@@ -63,3 +63,32 @@ itself remains in-memory; no JSON parsing is placed inside frame traversal.
 
 - Binary-only fixture: rejected for the first phase because it makes evidence review harder.
 - Runtime reflection serialization: rejected because stable schema fields and validation are needed.
+
+## Decision: Eliminate the observed overlay stall before full-residency redesign
+
+**Rationale**: The real `Azeroth 32_32` full-map capture on the production path establishes a
+clear first limiter: full residency took 66,388.8 ms, but steady frames were also catastrophically
+blocked by `overlay` at 39.5-44.0 seconds on alternating samples. That is not a visibility or GPU
+claim; it is repeatable CPU work hidden behind one broad stage. Streaming every ADT first would
+leave the viewer unusable whenever that overlay path runs.
+
+**Alternatives considered**:
+
+- Begin GPU-driven instancing immediately: deferred. It cannot compensate for a 40-second CPU
+  overlay rebuild, and requires a settled CPU submission contract first.
+- Treat `--load-all-tiles` as normal startup behavior: rejected. It is an explicit stress mode;
+  normal viewer startup remains camera-first streaming.
+
+## Decision: Use a capability-gated modern submission ladder after CPU work admission
+
+**Rationale**: Cataclysm's dense-detail direction and modern OpenGL offer compatible tools:
+immutable shared asset buffers, texture/material arrays, per-instance buffers, and multi-draw or
+indirect submission. They must be introduced behind a renderer capability record with an explicit
+legacy fallback, after overlay and residency work prove which content is ready for a stable batch.
+
+**Alternatives considered**:
+
+- One universal GPU path: rejected because animated, transparent, particle, ribbon, WMO-group,
+  and unsupported-driver paths require correctness-preserving fallbacks.
+- CPU batching only as the end state: rejected. It remains useful as a fallback and staging
+  contract, but cannot be the long-term dense-scene path.

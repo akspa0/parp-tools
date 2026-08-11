@@ -441,6 +441,19 @@ submission, GPU/driver wait, and spatial-query time.
   time, and client-read cache counters. It MUST issue explicit findings for an unsettled scene,
   missing WMO/MDX coverage, and CPU budget overruns, and MUST state when GPU timing has not yet
   been attributed.
+- **FR-036**: `overlay` MUST be decomposed into named owners before any performance conclusion is
+  drawn. An overlay owner MUST expose its invalidation key, item count, cache/rebuild result,
+  deferred-work count, and CPU duration; a multi-second opaque overlay stage is a blocking failure.
+- **FR-037**: Full-map discovery MUST be index-first. Discovering all valid tiles may create
+  lightweight residency records and bounds, but MUST NOT synchronously decode every ADT, upload
+  every terrain mesh, or materialize every object placement on normal viewer startup.
+- **FR-038**: Tile decode, GPU upload, graph materialization, and overlay preparation MUST use
+  declared per-frame work budgets. Explicit diagnostic full-residency mode may exceed those
+  budgets, but it MUST remain labeled as a stress workload rather than normal streaming.
+- **FR-039**: Modern instance submission MUST be capability-gated and preserve a tested fallback.
+  Candidate paths include shared immutable asset buffers, instance buffers, texture/material arrays,
+  and multi-draw/indirect submission; animated, transparent, effect-bearing, WMO-group, and
+  unsupported-driver cases MUST retain an explicit correct path.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -687,3 +700,14 @@ one render call must therefore expose its last completed phase instead of appear
 The diagnostic MUST attribute pre-pass scene maintenance separately from visibility and submission:
 PM4 finalization, resident-instance rebuilds, and scene-graph rebuilds must not disappear into
 `TotalCpuMs` without a named stage.
+
+### 2026-08-10 full-map production evidence
+
+The post-tile-root-cull `Azeroth 32_32` full-residency capture used the Cata 4.0.0.11927 client and
+loaded 839 ADTs, 243,585 M2 placements, and 3,173 WMO placements. It took **66,388.8 ms** before
+sampling. Tile-root rejection is active, but the scene is not fast: `overlay` consumed 39.5-44.0
+seconds on alternating measured frames, yielding a 44,178.7 ms P95 CPU frame. The steady visible
+object stages remain material (`wmo_visibility` 117.3 ms average; `mdx_visibility` 92.4 ms average)
+and 18 asset loads remained pending. This evidence changes the implementation order: attribute and
+admit overlay work first, then make full-map residency index-first/budgeted, then introduce modern
+submission paths behind measured capability gates. It is not a Cataclysm visual-parity claim.

@@ -327,6 +327,66 @@ rejects off-camera ADTs before their WMO/M2 buckets are visited while leaving or
 placements fail-open. The next proof owner is a user-run, post-fix full-map `profile-render` report;
 no measured speedup is claimed until that report exists.
 
+## Phase 8J — Overlay Work Attribution and Admission
+
+**Status**: Planned from real-client evidence on 2026-08-10. The first post-cull production report
+proves an unexpected blocking owner: `overlay` takes 39.5-44.0 seconds on alternating full-map
+frames. This phase does not optimize an unknown bucket. It first establishes which overlay owners
+are rebuilding, why their cache invalidated, and how much work is admitted per frame.
+
+1. Split the `overlay` frame stage into named owner records with invalidation key, cache/rebuild
+   result, input/output counts, and duration; add report-contract tests.
+2. Identify the owner from a real `Azeroth 32_32` capture and add a focused no-change-frame test
+   proving it does not rebuild without an invalidation event.
+3. Introduce a bounded overlay work queue with a visible per-frame budget and deferred-work
+   diagnostic; preserve the current output after convergence.
+4. Add a cache-key contract that invalidates only on named map, camera, renderer-setting, or source
+   content changes; fail visibly on ambiguous ownership.
+5. Compile and run focused diagnostic/overlay tests; hand off one user-run real-client capture.
+
+**Exit evidence**: no un-attributed overlay duration; unchanged frames do not run a full overlay
+rebuild; the report proves whether overlay work is complete, cached, or deliberately deferred.
+
+## Phase 8K — Index-First, Budgeted Whole-Map Residency
+
+**Status**: Planned; blocked by Phase 8J attribution. The 66.4-second `--load-all-tiles` workload
+is useful stress evidence but not an acceptable normal startup model. This phase changes normal
+map ownership from synchronous all-ADT materialization to lightweight full-map indexing plus
+camera-prioritized, budgeted promotions.
+
+1. Define `TileResidencyRecord` state transitions and invariant tests in the runtime library.
+2. Build a full-map tile/bounds index without ADT decode, terrain mesh upload, or object-instance
+   creation; prove inventory parity against the configured client map.
+3. Route camera/AOI selection through an explicit priority queue and a per-frame CPU decode budget.
+4. Separate CPU decode completion from bounded render-thread GPU upload and graph materialization.
+5. Add retained-tile eviction that detaches graph, terrain, liquid, and object state together while
+   preserving the index record.
+6. Make `--load-all-tiles` an explicitly labeled stress admission mode with per-substage timing;
+   it must not become viewer startup behavior.
+7. Prove stream-in/out leak safety and target-tile visual parity; hand off a real-client movement
+   capture after focused tests/build pass.
+
+**Exit evidence**: map selection becomes interactive after index discovery; no normal frame drains
+unbounded tile/object work; full-map stress reports decode, mesh, upload, object, and graph time
+separately.
+
+## Phase 8L — Capability-Gated Modern Dense Submission
+
+**Status**: Planned after Phase 8K. This phase coordinates with Spec 138; it does not change 4.x
+format/profile semantics. It consumes stabilized visible lists and residency states.
+
+1. Add a renderer capability record and deterministic fallback selection tests.
+2. Build shared immutable asset buffers plus a static-compatible instance-buffer path.
+3. Add material/texture-array grouping only where the selected GL capability and asset contract
+   permit it; retain current binding fallback.
+4. Add multi-draw or indirect submission behind the capability record and count calls/state changes.
+5. Keep animated, transparent, particle/ribbon, WMO-group, and unsupported-driver paths on named
+   correctness fallbacks.
+6. Compare dense 4.x and older-client scenes with exact visible identities before accepting a win.
+
+**Exit evidence**: each modern path has a real-scene before/after report, GPU/driver attribution
+where available, and a tested fallback with no unexplained visual difference.
+
 ## Later Phases (Not Started In This Slice)
 
 - **Phase 9**: Integrate graph portal volumes into runtime WMO submission and prove doorway

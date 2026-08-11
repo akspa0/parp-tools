@@ -122,6 +122,18 @@ identity; no FPS or GPU claim is made.
       dominant-stage attribution, unsettled queues, and uncovered object paths.
 - [ ] T048 Add timer-query-backed GPU and driver-wait attribution to the production report; until
       then the CPU-stage report MUST label that gap explicitly.
+- [ ] T052 [US2] Split `overlay` into named owner-level diagnostic records with invalidation,
+  cache/rebuild, count, and duration fields; reject opaque multi-owner timing in the report.
+- [ ] T053 [US2] Add a no-change-frame overlay cache/reuse proof and a bounded overlay work queue
+  with deferred-work diagnostics.
+- [ ] T054 [US2] Define and test index-only/CPU-decoded/GPU-ready/retained tile residency records
+  in the runtime library.
+- [ ] T055 [US2] Implement map-wide index-first discovery and camera-prioritized budgeted tile
+  promotion without synchronous all-ADT normal startup.
+- [ ] T056 [US2] Attribute explicit full-residency stress mode by decode, mesh, upload, object, and
+  graph materialization substage; keep it distinct from normal streaming evidence.
+- [ ] T057 [US4] Define a capability-gated modern static-instance submission contract and legacy
+  fallback proof, coordinated with Spec 138.
 - [ ] T027 Add synthetic workload replay and stage-level report output in `wow-viewer/tools/validation-capture/WowViewer.Tool.ValidationCapture/ValidationWorldSceneAdapter.cs`.
 - [ ] T028 Add current-vs-new parity and performance report tests in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldScenePerformanceReportTests.cs`.
 - [ ] T029 Run the focused and full test commands from `wow-viewer/specs/142-world-scene-graph/quickstart.md` and record evidence in `wow-viewer/memory-bank/progress.md`.
