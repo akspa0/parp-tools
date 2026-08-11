@@ -4,9 +4,10 @@
 
 On maps with high density of placed M2 doodads (trees, rocks, fences, grass, clutter), rendering framerates drop from 60+ FPS down to <1 FPS when doodad rendering is enabled. Toggling doodad rendering off (`DoodadsVisible = false`) immediately restores performance to 30-3000 FPS.
 
-Audit of the rendering pipeline reveals two major bottlenecks:
-1. **Forced Unbatched Rendering**: `ModelRenderer.RequiresUnbatchedWorldRender` returns `true` for all `_isM2AdapterModel` instances (100% of M2 models loaded in the viewer). This forces every single M2 doodad instance onto the unbatched `RenderWithTransform` fallback path, causing full OpenGL shader program rebinding (`glUseProgram`), 8–10 GL uniform uploads, and state changes per object instance per frame.
-2. **Redundant Animation Updates**: `WorldScene` iterates over all $N$ visible placement instances every frame and calls `renderer.UpdateAnimation()`. When dozens or hundreds of placed instances share the same model (e.g. 500 instances of `tree.m2`), `UpdateAnimation()` is executed 500 times per frame on the exact same renderer object.
+Audit of the rendering pipeline reveals three related bottlenecks:
+1. **Forced Unbatched Rendering**: the legacy M2 adapter path historically forced every M2 instance onto the unbatched `RenderWithTransform` fallback path, causing full OpenGL shader program rebinding (`glUseProgram`), 8–10 GL uniform uploads, and state changes per object instance per frame.
+2. **WMO Doodad Submission Churn**: `WmoRenderer` historically submitted every opaque doodad placement independently, repeating batch setup for each visible object even when placements shared the same `IModelRenderer`.
+3. **Redundant Animation Updates**: `WorldScene` iterates over all $N$ visible placement instances every frame and calls `renderer.UpdateAnimation()`. When dozens or hundreds of placed instances share the same model (e.g. 500 instances of `tree.m2`), `UpdateAnimation()` is executed 500 times per frame on the exact same renderer object.
 
 ## User Stories
 
@@ -17,7 +18,18 @@ As a viewer user, I want M2 doodad models without active particle or ribbon emit
 **Acceptance Criteria**:
 1. `ModelRenderer.RequiresUnbatchedWorldRender` returns `false` for M2 models that do not have active particle or ribbon emitters.
 2. `WorldObjectPassCoordinator` groups opaque M2 doodad instances by model key and renders them via `BeginBatch()` + `RenderInstance()` per instance.
-3. Framerates on dense doodad maps remain high (>60 FPS) when doodad rendering is enabled.
+3. `M2Renderer` exposes the wrapped legacy renderer's particle/ribbon fallback requirement; native-runtime M2s remain isolated until a backend-specific batch key exists.
+4. Framerates on dense doodad maps remain high (>60 FPS) when doodad rendering is enabled.
+
+### User Story 1A - Batch Opaque WMO Doodads (Priority: P1)
+
+As a viewer user, I want opaque WMO doodad placements that share a renderer to share one batch
+setup, so that doodad sets do not repeat shader and uniform state work for every placement.
+
+**Acceptance Criteria**:
+1. Opaque visible WMO doodads group by `IModelRenderer` and use one `BeginBatch()` call per group.
+2. Particle/ribbon renderers retain the unbatched fallback.
+3. Transparent doodads retain distance-ordered submission and are not reordered by opaque grouping.
 
 ### User Story 2 - Deduplicate Per-Frame Model Animation Updates (Priority: P1)
 
@@ -47,3 +59,14 @@ As a viewer developer, I want to verify that batched M2 rendering maintains exac
 2. **`WorldScene.cs`**:
    - In `WorldPassCoordinator` / `ExecuteVisibleMdxAnimation`:
      - Deduplicate the set of `IModelRenderer` targets before calling `UpdateAnimation()`.
+
+3. **`M2Renderer.cs` and `WmoRenderer.cs`**:
+   - Allow static legacy-backed M2s to use the existing shared batch path while preserving the
+     particle/ribbon fallback and isolating the native runtime backend's distinct state path.
+   - Group compatible opaque WMO doodad placements by renderer and call `BeginBatch()` once before
+     issuing their `RenderInstance()` submissions. Keep transparent placements in their existing
+     back-to-front order.
+
+This first implementation is shared CPU/state submission batching, not GPU instancing or a
+multi-draw-indirect path: each placement still receives a `RenderInstance()` call. A later GPU
+batching phase must group by geometry, material, texture, and backend state and prove visual parity.

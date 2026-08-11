@@ -77,6 +77,8 @@ public class WmoRenderer : ISceneRenderer
     private readonly HashSet<int> _visibilityVisited = new();
     private readonly HashSet<string> _updatedDoodadModelsScratch = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<(int idx, float distSq)> _visibleDoodadsScratch = new();
+    private readonly Dictionary<IModelRenderer, List<int>> _opaqueDoodadBatchGroups = new();
+    private readonly List<IModelRenderer> _opaqueDoodadBatchRenderers = new();
     private bool _wireframe;
 
     // Material textures: materialIndex → GL texture handle
@@ -718,16 +720,45 @@ public class WmoRenderer : ISceneRenderer
 
             visibleDoodadRenderCount = Math.Min(_visibleDoodadsScratch.Count, (int)DoodadMaxRenderCount);
 
-            for (int vi = 0; vi < visibleDoodadRenderCount; vi++)
+            if (renderOpaquePass)
             {
-                var inst = _doodadInstances[_visibleDoodadsScratch[vi].idx];
-                var doodadWorld = inst.Transform * modelMatrix;
-                if (renderOpaquePass)
+                _opaqueDoodadBatchGroups.Clear();
+                _opaqueDoodadBatchRenderers.Clear();
+
+                for (int vi = 0; vi < visibleDoodadRenderCount; vi++)
                 {
-                    _currentDoodadSubmissions++;
-                    inst.Renderer!.RenderWithTransform(doodadWorld, view, proj, RenderPass.Opaque, 1.0f,
-                        fogColor, fogStart, fogEnd, cameraPos,
-                        lightDir, lightColor, ambientColor);
+                    int doodadIndex = _visibleDoodadsScratch[vi].idx;
+                    DoodadInstance inst = _doodadInstances[doodadIndex];
+                    IModelRenderer renderer = inst.Renderer!;
+                    if (renderer.RequiresUnbatchedWorldRender)
+                    {
+                        _currentDoodadSubmissions++;
+                        renderer.RenderWithTransform(inst.Transform * modelMatrix, view, proj, RenderPass.Opaque, 1.0f,
+                            fogColor, fogStart, fogEnd, cameraPos,
+                            lightDir, lightColor, ambientColor);
+                        continue;
+                    }
+
+                    if (!_opaqueDoodadBatchGroups.TryGetValue(renderer, out List<int>? indices))
+                    {
+                        indices = new List<int>();
+                        _opaqueDoodadBatchGroups.Add(renderer, indices);
+                        _opaqueDoodadBatchRenderers.Add(renderer);
+                    }
+
+                    indices.Add(doodadIndex);
+                }
+
+                foreach (IModelRenderer renderer in _opaqueDoodadBatchRenderers)
+                {
+                    renderer.BeginBatch(view, proj, fc, fogStart, fogEnd, cp, ld, lc, ac);
+                    List<int> indices = _opaqueDoodadBatchGroups[renderer];
+                    foreach (int doodadIndex in indices)
+                    {
+                        DoodadInstance inst = _doodadInstances[doodadIndex];
+                        renderer.RenderInstance(inst.Transform * modelMatrix, RenderPass.Opaque, 1.0f);
+                        _currentDoodadSubmissions++;
+                    }
                 }
             }
         }

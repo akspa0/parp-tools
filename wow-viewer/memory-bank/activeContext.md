@@ -12,7 +12,7 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 |---|---|---|
 | PM4 decode | **active** — versioning formatted; placement solved; scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
 | Terrain / viewer runtime | **active** — phased dual-map overlay (135), M2 doodad batching (136), phased minimap & teleport (137) landed; 4.x renderer evolution (138) is an evidence-gated epic note | [activeContext.md](activeContext.md) |
-| World scene graph / renderer performance | **active** — Spec 142 graph, conservative traversal, default-on `WorldScene` object adapter/selector, metadata-only graph rebuilds, ADT M2 doodads partitioned beneath terrain chunk buckets, nested WMO groups, WMO read-model portal adapter, bounded portal view volumes, and graph-side runtime portal traversal implemented; WMO submission parity, pass/query reuse, terrain-mesh ownership, and stage evidence remain pending | [Spec 142](../specs/142-world-scene-graph/spec.md) |
+| World scene graph / renderer performance | **active** — Spec 142 graph, conservative traversal, default-on `WorldScene` object adapter/selector, metadata-only graph rebuilds, ADT M2 doodads partitioned beneath terrain chunk buckets, nested WMO groups, WMO read-model portal adapter, bounded portal view volumes, graph-side runtime portal traversal, and safe opaque WMO doodad batching implemented; WMO submission parity, pass/query reuse, terrain-mesh ownership, and stage evidence remain pending | [Spec 142](../specs/142-world-scene-graph/spec.md) |
 | Terrain / minimap ML | **active** — Spec 139 clean-signal reconstruction, Spec 140 paste/fractal/tileset evidence, and Spec 141 external-method translation; object identity remains parked | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
 | Tile archaeology | **active** — old v50 synthetic minimap output needs fresh regeneration after renderer fixes; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
 
@@ -57,6 +57,10 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
   synchronously read and parsed each resident WMO just to discover optional group children.
   Rebuilds now use `TryGetCachedWmoMeshSummary`; missing metadata remains fail-open and does not
   block tile residency on WMO I/O.
+- The first safe submission-batching slice is now wired: static legacy-backed M2s can use the
+  existing shared batch path, while native-runtime M2s remain isolated behind their distinct state
+  path. Opaque WMO doodads group by `IModelRenderer`; transparent and particle/ribbon cases retain
+  ordered or unbatched fallbacks. This is CPU/state batching, not GPU instancing proof.
 - The adapter does not invent missing group bounds. Resident non-skybox ADT M2 placements now mount
   beneath deterministic terrain chunk buckets in the opt-in graph; unresolved bounds keep the chunk
   fail-open. This is object-population partitioning, not terrain mesh ownership. The existing

@@ -8,6 +8,15 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 136 safe doodad submission batching
+
+- Static legacy-backed M2s now expose the existing batch path unless particle/ribbon state requires
+  unbatched rendering; native-runtime M2s remain isolated until a backend-specific batch key exists.
+- Opaque WMO doodads sharing an `IModelRenderer` now share one batch setup. Transparent doodads keep
+  distance order, and particle/ribbon renderers keep the unbatched fallback.
+- Focused Spec 142 proof remains 34 passing tests. This is CPU/state submission batching, not GPU
+  instancing or a measured FPS result; the runtime capture remains user-run.
+
 ## 2026-08-10 — Spec 142 residency-safe graph rebuild
 
 - Removed synchronous WMO summary reads from residency-triggered scene-graph rebuilds. The graph

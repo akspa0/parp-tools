@@ -158,7 +158,10 @@ public sealed class M2Renderer : IModelRenderer
         }
     }
 
-    public bool RequiresUnbatchedWorldRender => true;
+    // Static legacy-backed M2s can use the shared world batch path. The native
+    // runtime backend owns a different shader/state path, so keep it isolated
+    // until a backend-specific batch key exists.
+    public bool RequiresUnbatchedWorldRender => _legacyRenderer is null || _legacyRenderer.RequiresUnbatchedWorldRender;
 
     public IAnimationController? Animator => _legacyRenderer?.Animator ?? _runtimeAnimator;
 
