@@ -118,9 +118,22 @@ specs/106-native-daynight-lighting/
 ## Deferred, explicitly out of scope
 
 - Recovering direction models for builds other than 0.5.3.3368.
-- Local-zone LIT spatial blending until its coordinate transform is proven.
+- Local-zone LIT/Light* spatial blending until its coordinate transform is proven. The interactive
+  viewer keeps exact local Light* evaluation available for diagnostics, but does not apply that
+  overlay to terrain by default; the global viewer light is the identity case.
 - Five-sky-band altitude thresholds and native MCSH attenuation until captured comparison evidence exists.
 - WMO interior lighting, dynamic local lights, liquid shading, unit-shadow implementation, and any training run.
+
+## Bounded runtime correction — 2026-08-11
+
+- A 4.0.0.11927 live probe showed local Light* values can be strongly orange/dim at noon. Because
+  the local-zone spatial contract is not yet proven, `WorldScene` now leaves that overlay opt-in
+  instead of allowing it to darken ordinary outdoor terrain.
+- MH2O liquid families are resolved from the exact-build `LiquidType` DBC records. The loader uses
+  the table's actual ID field and DBC row names/class fields; numeric family guesses are not used
+  for the active runtime path. A missing DBC row follows the documented safe water default.
+- Focused liquid/lighting tests and the viewer build are the validation gate for this slice; a
+  user-run real-scene screenshot remains required for visual signoff.
 
 ## Complexity Tracking
 

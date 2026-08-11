@@ -49,7 +49,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
     /// <summary>
     /// Optional secondary overlay map name for phased terrain.
-    /// When set, tiles present in World\Maps\{OverlayMapName}\ replace the primary map's tiles.
+    /// When set, sparse MCNK data present in World\Maps\{OverlayMapName}\ patches the
+    /// primary map at matching chunk coordinates. The primary map remains authoritative for
+    /// liquid data because phase maps do not own the parent map's liquids.
     /// </summary>
     public string? OverlayMapName { get; set; }
 
@@ -181,13 +183,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (_existingTileSet.Contains(idx))
             return true;
 
-        // Check overlay map for this tile
-        if (!string.IsNullOrEmpty(OverlayMapName))
-        {
-            string overlayRoot = $"World\\Maps\\{OverlayMapName}\\{OverlayMapName}_{tileY}_{tileX}.adt";
-            if (_dataSource.FileExists(overlayRoot))
-                return true;
-        }
+        if (!string.IsNullOrEmpty(OverlayMapName) && OverlayTileExists(tileX, tileY))
+            return true;
 
         return false;
     }
@@ -200,8 +197,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (string.IsNullOrEmpty(OverlayMapName))
             return false;
 
-        string overlayRoot = $"World\\Maps\\{OverlayMapName}\\{OverlayMapName}_{tileY}_{tileX}.adt";
-        return _dataSource.FileExists(overlayRoot);
+        string overlayBase = $"World\\Maps\\{OverlayMapName}\\{OverlayMapName}_{tileY}_{tileX}";
+        return HasTilePayload(overlayBase);
     }
 
     public TileLoadResult LoadTileWithPlacements(int tileX, int tileY)
@@ -210,29 +207,34 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (!TileExists(tileX, tileY))
             return result;
 
-        // If overlay map has this tile, load from the overlay map directory instead.
-        string effectiveMapName = _mapName;
-        string effectiveMapDir = _mapDir;
-        if (OverlayTileExists(tileX, tileY))
+        ParsedTileSource parent = LoadMapTile(_mapName, tileX, tileY);
+        if (string.IsNullOrEmpty(OverlayMapName) || !OverlayTileExists(tileX, tileY))
         {
-            effectiveMapName = OverlayMapName!;
-            effectiveMapDir = $"World\\Maps\\{OverlayMapName}";
-            ViewerLog.Important(ViewerLog.Category.Terrain,
-                $"[StandardADT] Overlay tile ({tileX},{tileY}) loaded from '{OverlayMapName}' instead of '{_mapName}'.");
+            PublishTileTextures(tileX, tileY, parent.Textures);
+            PostProcessTileAlpha(parent.Result.Chunks);
+            return parent.Result;
         }
 
-        // Build ADT virtual paths
-        // Raw row-major: tileX=row(y), tileY=col(x).
-        // Ghidra-verified filename: MapName_x_y.adt = MapName_{tileY}_{tileX}.
-        string basePath = $"{effectiveMapDir}\\{effectiveMapName}_{tileY}_{tileX}";
+        ParsedTileSource phase = LoadMapTile(OverlayMapName!, tileX, tileY);
+        MergePhaseTile(parent, phase, tileX, tileY);
+        PublishTileTextures(tileX, tileY, parent.Textures);
+        PostProcessTileAlpha(parent.Result.Chunks);
+        return parent.Result;
+    }
+
+    private ParsedTileSource LoadMapTile(string mapName, int tileX, int tileY)
+    {
+        var result = new TileLoadResult();
+        string mapDir = $"World\\Maps\\{mapName}";
+        string basePath = $"{mapDir}\\{mapName}_{tileY}_{tileX}";
         string rootPath = $"{basePath}.adt";
         string? texPath = _adtProfile.PreferTex0ForTextureData ? $"{basePath}_tex0.adt" : null;
         string? objPath = _adtProfile.PreferObj0ForPlacementData ? $"{basePath}_obj0.adt" : null;
 
-        var texBytes = texPath != null && _dataSource.FileExists(texPath) ? _dataSource.ReadFile(texPath) : null;
-        var objBytes = objPath != null && _dataSource.FileExists(objPath) ? _dataSource.ReadFile(objPath) : null;
+        byte[]? texBytes = texPath != null && _dataSource.FileExists(texPath) ? _dataSource.ReadFile(texPath) : null;
+        byte[]? objBytes = objPath != null && _dataSource.FileExists(objPath) ? _dataSource.ReadFile(objPath) : null;
+        byte[]? adtBytes = _dataSource.ReadFile(rootPath);
 
-        var adtBytes = _dataSource.ReadFile(rootPath);
         if (adtBytes == null || adtBytes.Length == 0)
         {
             bool rootIsEmptyPlaceholder = adtBytes != null && adtBytes.Length == 0;
@@ -251,20 +253,96 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     : $"[StandardADT] ADT not found or empty: {rootPath}");
             }
 
-            return result;
+            return new ParsedTileSource(result, []);
         }
-        ViewerLog.Trace($"[StandardADT] Loaded {rootPath}: {adtBytes.Length} bytes, first4='{Encoding.ASCII.GetString(adtBytes, 0, Math.Min(4, adtBytes.Length))}'");
 
+        ViewerLog.Trace($"[StandardADT] Loaded {rootPath}: {adtBytes.Length} bytes, first4='{Encoding.ASCII.GetString(adtBytes, 0, Math.Min(4, adtBytes.Length))}'");
         try
         {
-            ParseAdt(adtBytes, texBytes, objBytes, tileX, tileY, result);
+            List<string> textures = ParseAdt(adtBytes, texBytes, objBytes, tileX, tileY, result);
+            return new ParsedTileSource(result, textures);
         }
         catch (Exception ex)
         {
-            ViewerLog.Error(ViewerLog.Category.Terrain, $"Failed to parse ADT ({tileX},{tileY}): {ex.Message}");
+            ViewerLog.Error(ViewerLog.Category.Terrain, $"Failed to parse ADT ({tileX},{tileY}) from '{mapName}': {ex.Message}");
+            return new ParsedTileSource(result, []);
+        }
+    }
+
+    private void MergePhaseTile(ParsedTileSource parent, ParsedTileSource phase, int tileX, int tileY)
+    {
+        var mergedTextures = new List<string>(parent.Textures);
+        var textureIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < mergedTextures.Count; i++)
+            textureIndices.TryAdd(mergedTextures[i], i);
+
+        foreach (TerrainChunkData phaseChunk in phase.Result.Chunks)
+        {
+            for (int layerIndex = 0; layerIndex < phaseChunk.Layers.Length; layerIndex++)
+            {
+                TerrainLayer layer = phaseChunk.Layers[layerIndex];
+                if ((uint)layer.TextureIndex < (uint)phase.Textures.Count)
+                {
+                    string textureName = phase.Textures[layer.TextureIndex];
+                    if (!textureIndices.TryGetValue(textureName, out int mergedIndex))
+                    {
+                        mergedIndex = mergedTextures.Count;
+                        mergedTextures.Add(textureName);
+                        textureIndices.Add(textureName, mergedIndex);
+                    }
+
+                    layer.TextureIndex = mergedIndex;
+                    phaseChunk.Layers[layerIndex] = layer;
+                }
+            }
+
+            TerrainChunkData? parentChunk = parent.Result.Chunks.FirstOrDefault(candidate =>
+                candidate.ChunkX == phaseChunk.ChunkX && candidate.ChunkY == phaseChunk.ChunkY);
+            phaseChunk.Liquid = parentChunk?.Liquid;
+
+            if (parentChunk == null)
+                parent.Result.Chunks.Add(phaseChunk);
+            else
+            {
+                int parentIndex = parent.Result.Chunks.IndexOf(parentChunk);
+                parent.Result.Chunks[parentIndex] = phaseChunk;
+            }
         }
 
-        return result;
+        parent.Result.MddfPlacements.AddRange(phase.Result.MddfPlacements);
+        parent.Result.ModfPlacements.AddRange(phase.Result.ModfPlacements);
+
+        parent.Textures = mergedTextures;
+        ViewerLog.Important(ViewerLog.Category.Terrain,
+            $"[StandardADT] Phase patch ({tileX},{tileY}) from '{OverlayMapName}': phaseChunks={phase.Result.Chunks.Count}, mergedChunks={parent.Result.Chunks.Count}, parentLiquidsPreserved=true");
+    }
+
+    private void PublishTileTextures(int tileX, int tileY, IReadOnlyList<string> textures)
+    {
+        TileTextures[(tileX, tileY)] = textures.ToList();
+    }
+
+    private void PostProcessTileAlpha(List<TerrainChunkData> chunks)
+    {
+        if (_adtProfile.AlphaDecodeMode == TerrainAlphaDecodeMode.Cataclysm400)
+            PostProcessCataclysm400AlphaMaps(chunks, _useBigAlpha);
+    }
+
+    private bool HasTilePayload(string basePath)
+        => _dataSource.FileExists($"{basePath}.adt")
+            || _dataSource.FileExists($"{basePath}_obj0.adt")
+            || _dataSource.FileExists($"{basePath}_tex0.adt");
+
+    private sealed class ParsedTileSource
+    {
+        public ParsedTileSource(TileLoadResult result, IReadOnlyList<string> textures)
+        {
+            Result = result;
+            Textures = textures.ToList();
+        }
+
+        public TileLoadResult Result { get; }
+        public IReadOnlyList<string> Textures { get; set; }
     }
 
     public bool TryGetPlacementSourceData(int tileX, int tileY, out string sourcePath, out byte[] sourceBytes)
@@ -392,7 +470,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                _dataSource.FileExists($"{basePath}_tex0.adt");
     }
 
-    private void ParseAdt(byte[] adtBytes, byte[]? texBytes, byte[]? objBytes,
+    private List<string> ParseAdt(byte[] adtBytes, byte[]? texBytes, byte[]? objBytes,
         int tileX, int tileY, TileLoadResult result)
     {
         // Parse top-level MTEX chunk for texture names
@@ -419,7 +497,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (mhdrOffset < 0)
         {
             ViewerLog.Info(ViewerLog.Category.Terrain, $"MHDR not found in ADT ({tileX},{tileY})");
-            return;
+            return textures;
         }
 
         var mhdr = new GillijimProject.WowFiles.Mhdr(adtBytes, mhdrOffset);
@@ -463,9 +541,6 @@ public class StandardTerrainAdapter : ITerrainAdapter
             }
         }
 
-        if (textures.Count > 0)
-            TileTextures.TryAdd((tileX, tileY), textures);
-
         // Use MHDR to find MCIN; later 4.x roots can omit it and still contain top-level MCNK chunks.
         List<int> mcnkOffsets;
         int mcinOff = mhdr.GetOffset(GillijimProject.WowFiles.Mhdr.McinOffset);
@@ -477,7 +552,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 Build335Diagnostics.Increment("MissingRequiredChunkCount");
                 ViewerLog.Info(ViewerLog.Category.Terrain,
                     $"MCIN offset zero in ADT ({tileX},{tileY}) and no top-level MCNK fallback was found");
-                return;
+                return textures;
             }
 
             ViewerLog.Important(ViewerLog.Category.Terrain,
@@ -499,7 +574,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     Build335Diagnostics.Increment("InvalidChunkSignatureCount");
                     ViewerLog.Info(ViewerLog.Category.Terrain,
                         $"MCIN signature mismatch in ADT ({tileX},{tileY}): '{mcinSig}'");
-                    return;
+                    return textures;
                 }
 
                 if (mcinSize <= 0 || mcinAbsPos + 8 + mcinSize > adtBytes.Length)
@@ -507,7 +582,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     Build335Diagnostics.Increment("InvalidChunkSizeCount");
                     ViewerLog.Info(ViewerLog.Category.Terrain,
                         $"MCIN size invalid in ADT ({tileX},{tileY}): size={mcinSize}, file={adtBytes.Length}");
-                    return;
+                    return textures;
                 }
 
                 if ((mcinSize % _adtProfile.McinEntrySize) != 0)
@@ -731,9 +806,6 @@ public class StandardTerrainAdapter : ITerrainAdapter
             ViewerLog.Important(ViewerLog.Category.Terrain,
                 $"ADT ({tileX},{tileY}): WARNING - 0 chunks parsed (no heightmaps found)");
 
-        if (_adtProfile.AlphaDecodeMode == TerrainAlphaDecodeMode.Cataclysm400)
-            PostProcessCataclysm400AlphaMaps(chunks, _useBigAlpha);
-
         result.Chunks.AddRange(chunks);
 
         // Ghidra-verified (FUN_007d6ef0): MH2O located via MHDR offset +0x28.
@@ -748,6 +820,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
             CollectPlacementsViaMhdr(objBytes, objMhdrStart, objMhdr, tileX, tileY, result);
         else
             CollectPlacementsViaMhdr(adtBytes, mhdrStart, mhdr, tileX, tileY, result);
+
+        return textures;
     }
 
     private static bool TryGetMhdr(byte[] adtBytes, out int mhdrStart, out GillijimProject.WowFiles.Mhdr mhdr)
@@ -1750,11 +1824,11 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (_mh2oLiquidTypesById.TryGetValue(liquidTypeId, out var liquidType))
             return liquidType;
 
-        liquidType = MapMh2oLiquidTypeFallback(liquidTypeId);
+        liquidType = MapMh2oLiquidTypeFallback();
         if (_mh2oLiquidTypeLookupAttempted && _reportedUnknownMh2oLiquidTypeIds.Add(liquidTypeId))
         {
             ViewerLog.Important(ViewerLog.Category.Terrain,
-                $"[MH2O] LiquidType.dbc ID {liquidTypeId} was not present in the loaded LiquidType table for build {_buildVersion ?? "unknown"}; falling back to static family mapping as {liquidType}.");
+                $"[MH2O] LiquidType.dbc ID {liquidTypeId} was not present in the loaded LiquidType table for build {_buildVersion ?? "unknown"}; using the native missing-row default as {liquidType}.");
         }
 
         return liquidType;
@@ -1781,65 +1855,53 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
             var availableColumns = new HashSet<string>(storage.AvailableColumns, StringComparer.OrdinalIgnoreCase);
             string? typeColumn = DetectColumn(availableColumns, "Type", "LiquidType", "TypeID");
+            string? idColumn = DetectColumn(availableColumns, "ID", "Id", "LiquidTypeID", "LiquidTypeId");
             string? nameColumn = DetectColumn(availableColumns, "Name");
             string classificationRoute;
 
             if (!string.IsNullOrWhiteSpace(typeColumn))
             {
-                foreach (var key in storage.Keys)
+                foreach (var row in storage.Values)
                 {
-                    if ((uint)key > ushort.MaxValue)
+                    int rowId = SafeField<int>(row, idColumn, row.ID);
+                    if ((uint)rowId > ushort.MaxValue)
                         continue;
 
-                    var row = storage[key];
                     int liquidClass = SafeField<int>(row, typeColumn, -1);
                     if (!TryMapLiquidTypeClass(liquidClass, out var mappedLiquidType))
                         continue;
 
-                    _mh2oLiquidTypesById[(ushort)key] = mappedLiquidType;
+                    _mh2oLiquidTypesById[(ushort)rowId] = mappedLiquidType;
                 }
 
-                // Build-aware trust gate:
-                // some builds expose a "Type"-like column that does not map to canonical
-                // water/ocean/magma/slime families consistently. Validate against known
-                // anchor IDs from LiquidConverter before accepting class-column mapping.
-                if (!IsLiquidTypeClassMappingTrustworthy())
-                {
-                    _mh2oLiquidTypesById.Clear();
-                    ViewerLog.Important(ViewerLog.Category.Dbc,
-                        $"[MH2O] LiquidType.dbc class-column mapping failed trust checks for build {build}; retrying with DBC row-name heuristics plus ID-family fallback.");
-                }
-                else
-                {
-                    classificationRoute = $"class column '{typeColumn}'";
-                    ViewerLog.Important(ViewerLog.Category.Dbc,
-                        $"[MH2O] Loaded {_mh2oLiquidTypesById.Count} LiquidType.dbc family mappings for build {build} via {classificationRoute}.");
-                    return;
-                }
+                classificationRoute = $"class column '{typeColumn}'";
+                ViewerLog.Important(ViewerLog.Category.Dbc,
+                    $"[MH2O] Resolved {_mh2oLiquidTypesById.Count} LiquidType.dbc rows for build {build} via {classificationRoute}; idColumn='{idColumn ?? "<row.ID>"}' nameColumn='{nameColumn ?? "<none>"}'.");
+                return;
             }
 
             if (string.IsNullOrWhiteSpace(typeColumn))
             {
                 ViewerLog.Important(ViewerLog.Category.Dbc,
-                    $"[MH2O] LiquidType.dbc loaded for build {build}, but no recognizable family column was found. Falling back to DBC row-name heuristics plus ID-family mapping.");
+                    $"[MH2O] LiquidType.dbc loaded for build {build}, but no recognizable family column was found. Resolving family from DBC row names.");
             }
 
-            foreach (var key in storage.Keys)
+            foreach (var row in storage.Values)
             {
-                if ((uint)key > ushort.MaxValue)
+                int rowId = SafeField<int>(row, idColumn, row.ID);
+                if ((uint)rowId > ushort.MaxValue)
                     continue;
 
-                ushort id = (ushort)key;
-                var row = storage[key];
-                _mh2oLiquidTypesById[id] = ClassifyLiquidTypeFromDbcRow(id, row, nameColumn);
+                ushort id = (ushort)rowId;
+                _mh2oLiquidTypesById[id] = ClassifyLiquidTypeFromDbcRow(row, nameColumn);
             }
 
             classificationRoute = string.IsNullOrWhiteSpace(nameColumn)
-                ? "ID-family fallback over loaded LiquidType.dbc IDs"
-                : $"DBC row-name heuristics ('{nameColumn}') with ID-family fallback";
+                ? "DBC row records without a family column"
+                : $"DBC row-name heuristics ('{nameColumn}')";
 
             ViewerLog.Important(ViewerLog.Category.Dbc,
-                $"[MH2O] Loaded {_mh2oLiquidTypesById.Count} LiquidType.dbc family mappings for build {build} via {classificationRoute}.");
+                $"[MH2O] Resolved {_mh2oLiquidTypesById.Count} LiquidType.dbc rows for build {build} via {classificationRoute}; idColumn='{idColumn ?? "<row.ID>"}' nameColumn='{nameColumn ?? "<none>"}'.");
         }
         catch (Exception ex)
         {
@@ -1862,19 +1924,12 @@ public class StandardTerrainAdapter : ITerrainAdapter
         return liquidClass is >= 0 and <= 3;
     }
 
-    private static LiquidType MapMh2oLiquidTypeFallback(ushort liquidTypeId)
-    {
-        var mclqType = LiquidConverter.MapLiquidTypeIdToMclqType(liquidTypeId);
-        return mclqType switch
-        {
-            MclqLiquidType.Ocean => LiquidType.Ocean,
-            MclqLiquidType.Magma => LiquidType.Magma,
-            MclqLiquidType.Slime => LiquidType.Slime,
-            _ => LiquidType.Water,
-        };
-    }
+    private static LiquidType MapMh2oLiquidTypeFallback() =>
+        // The native missing-row behavior is the water family. Do not infer
+        // lava/slime from a guessed numeric ID; exact DBC rows own that data.
+        LiquidType.Water;
 
-    private static LiquidType ClassifyLiquidTypeFromDbcRow(ushort liquidTypeId, dynamic row, string? nameColumn)
+    private static LiquidType ClassifyLiquidTypeFromDbcRow(dynamic row, string? nameColumn)
     {
         string name = SafeField<string>(row, nameColumn, string.Empty) ?? string.Empty;
         if (!string.IsNullOrWhiteSpace(name))
@@ -1889,7 +1944,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 return LiquidType.Water;
         }
 
-        return MapMh2oLiquidTypeFallback(liquidTypeId);
+        return MapMh2oLiquidTypeFallback();
     }
 
     private static bool ContainsAnyInsensitive(string text, params string[] needles)
@@ -1913,54 +1968,6 @@ public class StandardTerrainAdapter : ITerrainAdapter
             LiquidType.Ocean => 3,
             _ => int.MaxValue,
         };
-    }
-
-    private bool IsLiquidTypeClassMappingTrustworthy()
-    {
-        // Canonical anchor IDs in legacy clients:
-        // 2=ocean, 3=water, 4=slime, 5=magma.
-        // If class-column decoding contradicts these anchors, treat it as unsafe.
-        int anchorsPresent = 0;
-        int anchorsMatching = 0;
-
-        if (MatchesExpectedLiquidAnchor(2, LiquidType.Ocean, out bool present2))
-            anchorsMatching++;
-        if (present2)
-            anchorsPresent++;
-
-        if (MatchesExpectedLiquidAnchor(3, LiquidType.Water, out bool present3))
-            anchorsMatching++;
-        if (present3)
-            anchorsPresent++;
-
-        if (MatchesExpectedLiquidAnchor(4, LiquidType.Slime, out bool present4))
-            anchorsMatching++;
-        if (present4)
-            anchorsPresent++;
-
-        if (MatchesExpectedLiquidAnchor(5, LiquidType.Magma, out bool present5))
-            anchorsMatching++;
-        if (present5)
-            anchorsPresent++;
-
-        // If no anchors are present in the table projection, we cannot trust the class-column route.
-        if (anchorsPresent == 0)
-            return false;
-
-        return anchorsMatching == anchorsPresent;
-    }
-
-    private bool MatchesExpectedLiquidAnchor(ushort id, LiquidType expected, out bool present)
-    {
-        if (!_mh2oLiquidTypesById.TryGetValue(id, out var actual))
-        {
-            present = false;
-            return false;
-        }
-
-        present = true;
-
-        return actual == expected;
     }
 
     private static string? DetectColumn(ISet<string> availableColumns, params string[] candidates)

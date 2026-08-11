@@ -145,16 +145,19 @@ pay a full invariant walk on every frame.
 
 **Status**: Complete for the bounded selector slice on 2026-08-10. Existing `WorldScene` object
 lists can be adapted to `map -> tile/external bucket -> placement`, and client-backed WMO group
-summaries mount as nested children when available. The default-on selector uses one graph traversal
-before the existing WMO/MDX visibility and asset-readiness checks; the legacy path remains a
-reversible diagnostic fallback. No FPS, GPU, portal-traversal, pass-order, or real-client parity
-claim is made.
+summaries mount as nested children when available. The selector uses one graph traversal before the
+existing WMO/MDX visibility and asset-readiness checks, but real Azeroth captures measured roughly
+68 ms of WMO visibility plus 82 ms of MDX visibility per frame on this path. The selector is now
+default-off; the flat collectors remain the production runtime path until graph traversal has a
+bounded measured cost. No FPS, GPU, portal-traversal, pass-order, or real-client parity claim is
+made.
 
 1. Adapt resolved `WorldObjectInstance` placements without reopening format readers; use existing
    client-backed WMO group summaries when available and fail open for malformed bounds.
 2. Rebuild the graph only when object residency or resolved bounds change.
 3. Use one conservative frustum traversal to feed the existing WMO and M2 collectors when
-   `UseHierarchicalSceneTraversal` is enabled by default.
+   `UseHierarchicalSceneTraversal` is explicitly enabled; keep the flat collectors as the default
+   until real-scene cost is bounded.
 4. Expose graph snapshot and traversal diagnostics for later validation-capture reporting.
 5. Prove the adapter with stable IDs, tile grouping, unknown-bound fail-open, and replay tests;
    compile the viewer project to verify the integration seam.
@@ -292,7 +295,10 @@ The canonical runtime anchor is `Azeroth` tile `32_32`; its tile coordinates are
 the same client catalog and directly determine the profiling camera position.
 The requested output path is an in-progress `world-render-diagnostic-progress-v1` document until
 the final report is complete, with stdout phase markers around data-source construction, GL setup,
-scene construction, full-residency opt-in, warmup, and measurement.
+scene construction, full-residency opt-in, warmup, and measurement. Progress writes are atomic;
+managed failures replace the running document with a terminal `status: failed` record containing
+the last completed frame and exception stack trace. A native/process-level crash may still leave
+the last running checkpoint, which is evidence of the crash boundary rather than a completed run.
 The `scene_maintenance` CPU stage owns the otherwise hidden pre-pass costs of PM4 completion and
 instance/scene-graph rebuilding; it is the first follow-up attribution point after a 577.7 ms
 tile-32_32 frame reported only ~12.8 ms across the prior named stages.
@@ -327,15 +333,51 @@ rejects off-camera ADTs before their WMO/M2 buckets are visited while leaving or
 placements fail-open. The next proof owner is a user-run, post-fix full-map `profile-render` report;
 no measured speedup is claimed until that report exists.
 
+## Phase 8I.1 — Flat Collector Spatial Admission
+
+**Status**: Implemented as a bounded runtime slice on 2026-08-11; real-client performance proof is
+pending. The graph's `tile -> chunk -> placement` structure now guides maintenance-time flat
+visibility buckets for resident WMO and M2 placements. The production render loop does not traverse
+graph nodes: it rejects only conservative bucket AABBs, then delegates surviving instances to the
+existing collectors. Unresolved bounds and cross-tile ownership remain fail-open. Viewer build
+passes with 0 errors; no FPS improvement is claimed until a user-run capture measures the stages.
+
+1. Build flat tile/chunk candidate buckets when residency or resolved bounds change.
+2. Reject only whole buckets whose aggregate AABB is safely outside frustum/range; retain the
+   existing per-instance visibility collector as the correctness authority.
+3. Keep the graph selector default-off and compare flat-bucket and pre-bucket visibility counts on
+   the canonical `Azeroth 32_32` client scene.
+
+## Phase 8I.2 — Fog-Window WDL Residency
+
+**Status**: Implemented as a bounded far-field residency slice on 2026-08-11; real-client frame
+time and visual movement proof are pending. `WdlTerrainRenderer` now retains parsed WDL height data
+as a compact CPU index and builds/evicts GPU tile meshes around the camera using the active fog range
+with hysteresis. Draw-time frustum and fog-distance admission remain in place. Detailed ADT
+streaming and object residency ownership are unchanged.
+
+1. Keep WDL map inventory discoverable without constructing every tile's GPU mesh at world load.
+2. Build a bounded number of nearest fog-window meshes per render frame.
+3. Evict GPU meshes outside the retained fog window while preserving CPU WDL data for re-entry.
+4. Preserve ADT hide/show transitions for WDL meshes that are built after detailed terrain arrives.
+
+**Exit evidence**: the viewer build passes; a user-run `profile-render` or interactive movement
+check must confirm that WDL residency stays near the fog window and that no visual seam/regression
+appears while crossing tile boundaries.
+
 ## Phase 8J — Overlay Work Attribution and Admission
 
-**Status**: `selection_bounds` was identified from user-run owner evidence on 2026-08-10/11. Its
+**Status**: `selection_bounds` was identified from user-run owner evidence on 2026-08-10/11 and is
+now fixed, confirmed by a second user-run capture. Its
 36.8-second sample prepared/submitted zero primitives, proving full-placement admission/filter work
 as the immediate blocker. A follow-up report proved the visible-list loop was not sufficient: the
 slow frames still had only 1,144-1,469 visible MDX and 3-11 WMO entries. The root cause was a
 render-time `SelectedInstance` read synchronously rebuilding the full placement/scene-graph index
 after deferred bounds promotion. That accessor now fails closed while dirty, and bounds promotion
-updates existing graph nodes in place. User rerun and no-change/cache proof remain pending.
+updates existing graph nodes in place. The follow-up report shows 0.0021 ms P95 for
+`selection_bounds` and 0.0068 ms P95 for coarse `overlay`; the remaining stress-path bottlenecks
+are 66.2 s scene initialization, 93.7 ms P95 WMO visibility, and 85.7 ms P95 M2 visibility.
+No-change/cache proof remains pending as a separate Phase 8J concern.
 
 1. Split the `overlay` frame stage into named owner records with invalidation key, cache/rebuild
    result, input/output counts, and duration; add report-contract tests.

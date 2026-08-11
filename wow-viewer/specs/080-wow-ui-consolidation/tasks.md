@@ -12,6 +12,35 @@
 
 **Tests**: Build validation is required for each source-changing phase. Manual viewer checks are required for UI behavior.
 
+## Phase 0R: Legacy Panel And Warning Disposition (P1)
+
+**Goal**: Inventory and disposition old-panel migration debt before the next
+GitHub release. Do not resolve it with blanket warning suppression.
+
+**Independent Test**: The active viewer projects have a repeatable warning
+report with every warning assigned to an active route, duplicate, retired
+surface, or documented compatibility path.
+
+- [ ] T031 [US6] Capture Debug and release-configuration warning inventories for `WowViewer.slnx` with project, warning ID, source location, and branch baseline.
+- [ ] T032 [US2] Cross-reference warning locations with `docs/architecture/viewer-ui-surface-inventory.md` and classify old panel methods and dispatches.
+- [ ] T033 [US2] Complete or remove active tab/sidebar routes whose warnings identify missing ownership; preserve legacy mode until its retirement gate passes.
+- [ ] T034 [US2] Remove duplicate launchers and stale dispatch only after the replacement/retirement row is recorded in the surface inventory.
+- [ ] T035 [US6] Resolve bounded active-viewer warning batches, starting with unused locals and dead methods, with a warning-delta check after each batch.
+- [ ] T036 [US6] Add a release warning disposition report and explicit warning budget to the Spec 080 release proof package.
+- [ ] T037 [US6] Verify the final GitHub release candidate in both supported UI modes and record restored, migrated, disabled, retired, and compatibility-only surfaces.
+
+## Phase 0S: Runtime Status Strip (P1)
+
+**Goal**: Keep the small set of high-value runtime facts visible without
+opening the Runtime Stats tab.
+
+**Independent Test**: With a world loaded, the lower status bar shows FPS,
+AreaName, CPU frame time, tile/chunk counts, WMO/MDX visibility, and pending
+asset loads in one compact right-aligned line.
+
+- [x] T038 [US6] Move the compact runtime line from the bottom action bar to the lower status bar and reuse `WorldScene.LastRenderFrameStats` as its source.
+- [ ] T039 [US6] Manually verify the line after world load, camera movement, tile streaming, and standalone terrain load; verify it does not overlap the coordinate text at supported window sizes.
+
 ## Phase 1: Bottom Bar And WMO Inspection (P1)
 
 **Goal**: Make the existing high-value inspection controls visible and independently usable.

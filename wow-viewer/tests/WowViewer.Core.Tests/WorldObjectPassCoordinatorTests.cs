@@ -173,6 +173,43 @@ public sealed class WorldObjectPassCoordinatorTests
         Assert.Equal(["w1", "w2"], drawn);
     }
 
+    [Fact]
+    public void PlanOpaqueWmoBatches_GroupsEligiblePlacementsAndPreservesFallbackOrder()
+    {
+        var candidates = new[]
+        {
+            new WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate("World\\House.wmo", true, 0),
+            new WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate("world\\house.wmo", true, 1),
+            new WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate("World\\Portal.wmo", false, 2),
+            new WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate("World\\Barn.wmo", true, 3),
+        };
+
+        WorldObjectPassCoordinator.WorldWmoOpaqueBatchPlan plan =
+            WorldObjectPassCoordinator.PlanOpaqueWmoBatches(candidates);
+
+        Assert.Equal([2], plan.FallbackVisibleIndices);
+        Assert.Equal(2, plan.Batches.Count);
+        Assert.Equal("World\\House.wmo", plan.Batches[0].ModelKey);
+        Assert.Equal([0, 1], plan.Batches[0].VisibleIndices);
+        Assert.Equal([3], plan.Batches[1].VisibleIndices);
+    }
+
+    [Fact]
+    public void PlanOpaqueWmoBatches_RejectsBlankKeysAndIneligibleEntries()
+    {
+        var candidates = new[]
+        {
+            new WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate("", true, 4),
+            new WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate("World\\Portal.wmo", false, 5),
+        };
+
+        WorldObjectPassCoordinator.WorldWmoOpaqueBatchPlan plan =
+            WorldObjectPassCoordinator.PlanOpaqueWmoBatches(candidates);
+
+        Assert.Empty(plan.Batches);
+        Assert.Equal([4, 5], plan.FallbackVisibleIndices);
+    }
+
     private static WorldVisibleMdxEntry CreateMdx(string modelKey, float distanceSq, bool hasOpaqueRenderContent = true, bool hasTransparentRenderContent = true)
     {
         return new WorldVisibleMdxEntry(CreateInstance(modelKey, hasOpaqueRenderContent, hasTransparentRenderContent), distanceSq, 1.0f, 1.0f, false);

@@ -629,10 +629,10 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
   placement bounds and remain non-rejectable when any member is unresolved. When a client-backed
   `WmoMeshSummary` is available, its group summaries mount
   as `WmoGroup` children with local bounds, stable IDs, asset keys, and portal-group metadata.
-- `WorldScene` now exposes `UseHierarchicalSceneTraversal` as a default-on selector with a runtime
-  fallback toggle. When enabled, the per-ADT graph set feeds the existing WMO/MDX visibility
-  collectors independently; aggregate snapshots and traversal diagnostics are exposed for capture
-  reporting.
+- `WorldScene` exposes `UseHierarchicalSceneTraversal` as a runtime selector. It is default-off
+  until bounded real-scene cost is proven; when explicitly enabled, the per-ADT graph set feeds the
+  existing WMO/MDX visibility collectors independently, and aggregate snapshots and traversal
+  diagnostics are exposed for capture reporting.
 - `WorldScenePortalGraph` now provides a graph-only portal adjacency contract. It rejects malformed
   or unknown-endpoint links and reports deterministic cycle, missing-entry, absent-data, and
   maximum-depth fallback diagnostics. It does not construct portal view volumes or replace the
@@ -668,15 +668,22 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
   not synchronously read or parse a WMO file.
 - Focused graph/workload/traversal/adapter/portal proof is 34 passing tests; the runtime and viewer
   projects build with only existing repository warnings.
+- WDL far-field terrain is an index-first residency surface: the renderer may retain parsed WDL
+  height data for the map, but it MUST build and retain GPU WDL meshes only within a fog-centered
+  camera window with bounded per-frame promotion and eviction. WDL draw admission also applies
+  frustum and fog-distance culling. Detailed ADT residency remains owned by `TerrainManager`'s
+  AOI stream.
 
 This is a runtime activation and instrumentation slice, not a performance promotion. The graph
-path is now the default, while the legacy `WorldScene` traversal remains available through the
-runtime toggle for A/B diagnosis. The graph currently mounts object-population chunk buckets rather
-than owning terrain mesh chunk submission. WMO portal runtime submission and WMO-internal doodad-set
-submission remain owned by the existing renderer until parity is proven. No FPS/GPU or real-client
-parity claim exists until the later evidence tasks are run. Runtime stats now expose graph rejection
-counts and the last ADT unload/WMO-placement event so visual WMO loss can be classified as residency
-or culling.
+selector is default-off after real-client evidence showed the direct graph traversal path was slower;
+the legacy `WorldScene` collectors remain the production path and the selector remains available
+for A/B diagnosis. The graph currently mounts object-population chunk buckets rather than owning
+terrain mesh chunk submission. Its tile/chunk structure now also guides maintenance-time flat
+visibility buckets, which reject only conservative aggregate AABBs before the existing per-instance
+collectors run. WMO portal runtime submission and WMO-internal doodad-set submission remain owned by
+the existing renderer until parity is proven. No FPS/GPU or real-client parity claim exists until
+the later evidence tasks are run. Runtime stats now expose graph rejection counts and the last ADT
+unload/WMO-placement event so visual WMO loss can be classified as residency or culling.
 ### 2026-08-10 correction: client-coherent diagnostic map input
 
 `profile-render` map input may be either a local WDT file or a virtual WDT path resolved through

@@ -287,9 +287,12 @@ public partial class ViewerApp
         if (ImGui.Begin("##statusbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
             ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
         {
-            string rightStatusText = string.IsNullOrWhiteSpace(_statusMessage)
-                ? "Ready"
-                : _statusMessage.Replace(Environment.NewLine, " ").Trim();
+            bool hasRuntimeScene = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
+            string rightStatusText = hasRuntimeScene
+                ? BuildCompactRuntimeStatus()
+                : string.IsNullOrWhiteSpace(_statusMessage)
+                    ? "Ready"
+                    : _statusMessage.Replace(Environment.NewLine, " ").Trim();
 
             string leftText = string.Empty;
             if (_terrainManager != null || _vlmTerrainManager != null)
@@ -301,32 +304,48 @@ public partial class ViewerApp
                 float facingDegrees = GetWorldFacingDegrees(_camera.Yaw);
                 string facingLabel = GetWorldFacingLabel(facingDegrees);
                 leftText = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})  Facing: {facingDegrees:F1}° {facingLabel ?? string.Empty}";
-                if (!string.IsNullOrWhiteSpace(_currentAreaName))
-                    leftText = $"{leftText}  |  Area: {_currentAreaName}";
-            }
-            else if (!string.IsNullOrWhiteSpace(_currentAreaName))
-            {
-                leftText = $"Area: {_currentAreaName}";
             }
 
-            float leftWidth = string.IsNullOrEmpty(leftText) ? 0f : GetImGuiTextWidth(leftText) + 8f;
             float rightWidth = GetImGuiTextWidth(rightStatusText) + 8f;
 
             if (!string.IsNullOrEmpty(leftText))
                 ImGui.TextUnformatted(leftText);
 
-            // Push right text to the right edge
-            float pad = io.DisplaySize.X - rightWidth - 16f;
-            if (pad > 0f)
-            {
+            // Push right text to the right edge without moving it back over the
+            // coordinate text when the window is narrower than the full line.
+            if (!string.IsNullOrEmpty(leftText))
                 ImGui.SameLine();
-                ImGui.SetCursorPosX(pad);
-            }
+            float rightX = MathF.Max(ImGui.GetCursorPosX(), io.DisplaySize.X - rightWidth - 16f);
+            ImGui.SetCursorPosX(rightX);
             ImGui.TextUnformatted(rightStatusText);
         }
         ImGui.End();
         ImGui.PopStyleVar();
     }
+
+    private string BuildCompactRuntimeStatus()
+    {
+        string fps = _currentFps > 0 ? $"FPS {_currentFps:0}" : "FPS --";
+        string area = string.IsNullOrWhiteSpace(_currentAreaName)
+            ? "Area: Unknown"
+            : $"Area: {_currentAreaName}";
+        int loadedTiles = _terrainManager?.LoadedTileCount ?? _vlmTerrainManager?.LoadedTileCount ?? 0;
+
+        if (_worldScene != null)
+        {
+            var stats = _worldScene.LastRenderFrameStats;
+            return $"{fps} | {area} | CPU {stats.TotalCpuMs:0.0}ms | Tiles {loadedTiles} | " +
+                $"Chunks {stats.TerrainChunksRendered}/{stats.TerrainChunksCulled} | " +
+                $"WMO {stats.VisibleWmoCount}/{_worldScene.WmoInstanceCount} | " +
+                $"MDX {stats.VisibleMdxCount}/{_worldScene.MdxInstanceCount} | Pending {stats.PendingAssetLoadCount}";
+        }
+
+        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        return renderer == null
+            ? $"{fps} | {area} | Tiles {loadedTiles}"
+            : $"{fps} | {area} | Tiles {loadedTiles} | Chunks {renderer.ChunksRendered}/{renderer.ChunksCulled}";
+    }
+
     private static float GetImGuiTextWidth(string? text)
     {
         return string.IsNullOrEmpty(text) ? 0f : ImGui.CalcTextSize(text).X;

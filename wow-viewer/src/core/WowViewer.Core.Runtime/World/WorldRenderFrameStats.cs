@@ -18,6 +18,7 @@ public readonly record struct WorldRenderFrameStats(
     int TransparentUnbatchedMdxCount,
     int WmoDrawCallCount,
     int WmoBatchDrawCallCount,
+    int WmoOpaqueBatchInstanceCount,
     int WmoGroupFallbackDrawCallCount,
     int WmoLiquidDrawCallCount,
     int WmoDoodadSubmissionCount,
@@ -45,6 +46,7 @@ public readonly record struct WorldRenderFrameStats(
         Array.Empty<WorldOverlayOwnerFrameStats>();
 
     public static WorldRenderFrameStats Empty { get; } = new(
+        0,
         0,
         0,
         0,

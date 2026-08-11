@@ -1,8 +1,8 @@
 # Phase 8J: Overlay Recovery — Fresh-Session Handoff
 
 **Feature**: Spec 142 World Scene Graph and Spatial Partitioning
-**Status**: `selection_bounds` root cause identified; synchronous full-world rebuild removed from
-asset-bound promotion path; user rerun pending
+**Status**: `selection_bounds` stall fixed and confirmed by user-run capture; remaining bottlenecks
+are scene initialization and WMO/MDX visibility
 **Evidence**: `output/diagnostics/azeroth-32-32-full-post-tile-cull.json`
 **Proof owner**: Production `profile-render`, then focused unit/build proof
 
@@ -134,6 +134,21 @@ rebuilding them from a render/query accessor. Bounds promotion also updates the 
 placement node and its ancestors in place, and no longer marks the structural `_instancesDirty` flag.
 Tile add/remove and external-spawn changes retain the full rebuild path. This keeps deferred asset
 resolution from rebuilding all 243,585 placements every other frame.
+
+## 8J.2 confirmation — selection-bounds stall removed
+
+User capture `output/diagnostics/azeroth-32-32-selection-bounds-post-fix-2.json` confirms the
+specific overlay failure is fixed:
+
+- `selection_bounds`: 0.00157 ms average, 0.0021 ms P95, 0.0021 ms max across 10 frames;
+- coarse `overlay`: 0.00585 ms average, 0.0068 ms P95, with no alternating multi-second frames;
+- sampled total CPU frames: 237.3-276.0 ms, so the old 39.5-44.0 second overlay stall is gone.
+
+This closes the immediate `selection_bounds` incident, but not whole-viewer performance. The same
+stress capture still spends 66,156 ms in scene initialization; during sampling the dominant stage
+is now `wmo_visibility` at 93.7 ms P95, followed by `mdx_visibility` at 85.7 ms P95. Phase 8J
+cache/invalidation work remains separate from this incident, and Phase 8K still owns the
+unbounded `--load-all-tiles` startup model.
 
 ## 8J.2 — Owner isolation and invalidation (only after 8J.1)
 

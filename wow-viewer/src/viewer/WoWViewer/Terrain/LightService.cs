@@ -372,6 +372,17 @@ public class LightService
         ActiveLightId = -1;
         HasActiveLocalOverlay = false;
         ActiveLocalWeight = 0f;
+
+        // Do not let a departed local profile leak its colors into diagnostics
+        // or a future opt-in overlay evaluation. The renderer's global viewer
+        // light remains the authoritative identity case when no local profile
+        // is active.
+        DirectColor = new Vector3(1.0f, 0.95f, 0.85f);
+        AmbientColor = new Vector3(0.5f, 0.5f, 0.5f);
+        SkyTopColor = new Vector3(0.4f, 0.6f, 0.9f);
+        FogColor = new Vector3(0.6f, 0.7f, 0.85f);
+        FogEnd = 1500f;
+        FogScaler = 1.0f;
     }
 
     /// <summary>

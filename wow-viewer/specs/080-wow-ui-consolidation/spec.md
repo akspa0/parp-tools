@@ -141,7 +141,7 @@ The goal is to make the UI feel like World of Warcraft's interface: clean, consi
 - FR-011: Bottom bar is the single action bar for all scene toggles
 - FR-012: Bottom bar contains: Chunks, Tiles, Cells, Alpha, Shadows, MCCV, Contours, Base, L1, L2, L3, Holes, Liquid, WL*, Wireframe
 - FR-013: Bottom bar height: ~40px, full window width
-- FR-014: Above bottom bar: status bar (FPS, chunks, camera pos, tile pos)
+- FR-014: Above bottom bar: status bar with camera coordinates on the left and a compact runtime line on the right containing FPS, AreaName, CPU frame time, tile/chunk residency, WMO/MDX visibility, and pending asset loads
 - FR-015: Top toolbar (`DrawToolbar()`) only shows investigation mode buttons when no terrain is loaded
 
 ### FR-016 to FR-020: Duplicate Removal
@@ -183,7 +183,7 @@ The goal is to make the UI feel like World of Warcraft's interface: clean, consi
 4. Taxi panel: open it, click viewport, still there
 5. `_showLeftSidebar` and `_showRightSidebar` are false for new sessions
 6. No dead buttons, no "not implemented" states
-7. Build: 0 errors, no new unused-method warnings
+7. Build: 0 errors, no new unused-method warnings; every remaining warning is inventoried and assigned a release disposition
 
 ## Files to Change
 

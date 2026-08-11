@@ -4,6 +4,45 @@ namespace WowViewer.Core.Runtime.World.Passes;
 
 public static class WorldObjectPassCoordinator
 {
+    public readonly record struct WorldWmoOpaqueBatchCandidate(string ModelKey, bool CanBatch, int VisibleIndex);
+
+    public readonly record struct WorldWmoOpaqueBatch(string ModelKey, IReadOnlyList<int> VisibleIndices);
+
+    public readonly record struct WorldWmoOpaqueBatchPlan(
+        IReadOnlyList<WorldWmoOpaqueBatch> Batches,
+        IReadOnlyList<int> FallbackVisibleIndices);
+
+    public static WorldWmoOpaqueBatchPlan PlanOpaqueWmoBatches(
+        IReadOnlyList<WorldWmoOpaqueBatchCandidate> candidates)
+    {
+        var batchIndicesByModel = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+        var fallbackVisibleIndices = new List<int>();
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            WorldWmoOpaqueBatchCandidate candidate = candidates[i];
+            if (!candidate.CanBatch || string.IsNullOrWhiteSpace(candidate.ModelKey))
+            {
+                fallbackVisibleIndices.Add(candidate.VisibleIndex);
+                continue;
+            }
+
+            if (!batchIndicesByModel.TryGetValue(candidate.ModelKey, out List<int>? visibleIndices))
+            {
+                visibleIndices = new List<int>();
+                batchIndicesByModel.Add(candidate.ModelKey, visibleIndices);
+            }
+
+            visibleIndices.Add(candidate.VisibleIndex);
+        }
+
+        var batches = new List<WorldWmoOpaqueBatch>(batchIndicesByModel.Count);
+        foreach ((string modelKey, List<int> visibleIndices) in batchIndicesByModel)
+            batches.Add(new WorldWmoOpaqueBatch(modelKey, visibleIndices));
+
+        return new WorldWmoOpaqueBatchPlan(batches, fallbackVisibleIndices);
+    }
+
     public static int ExecuteVisibleWmoOpaque(WorldVisibilityFrame visibility, Action<WorldVisibleWmoEntry> renderVisibleWmo)
     {
         int renderedCount = 0;

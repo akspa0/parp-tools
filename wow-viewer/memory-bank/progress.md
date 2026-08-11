@@ -8,6 +8,18 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-11 — Compact runtime status strip and release warning plan
+
+- Moved the FPS/chunk summary out of the bottom action bar into the lower status bar and
+  replaced it with a compact line sourced from `WorldScene.LastRenderFrameStats`: FPS, AreaName,
+  CPU frame time, tile/chunk residency, WMO/MDX visibility, and pending asset loads.
+- Updated Spec 080 requirements/tasks and its canonical release-convergence plan with a
+  warning/legacy-panel disposition phase. The plan requires inventory and ownership mapping
+  before removing old panel routes; it does not use blanket warning suppression.
+- Isolated viewer build: 0 errors, 255 warnings. Full solution attempt: 696 warnings and 14
+  output-lock errors because `ParpToolsWoWViewer` PID 50040 was running. Manual status-bar
+  layout/runtime proof remains user-run.
+
 ## 2026-08-11 — WMO doodad per-placement hot-path reduction
 
 - Added a world-frame boundary around unique visible `WmoRenderer` assets so internal doodad
@@ -590,7 +602,7 @@ Branch `134-v60-unified-dataset-model`.
 ## 2026-08-08 — PM4/PD4 versioning & Specs 135, 136, 137 landed
 
 - **PM4/PD4 Versioning**: Created `Pm4VersionFormatter.cs` for correct MVER version string parsing (`0x10` Cataclysm = v16, `0x30` WoD = v48). Wired to viewer status bar and CLI inspection output.
-- **Spec 135 (Phased Terrain Dual-Map Overlay)**: `ITerrainAdapter`, `StandardTerrainAdapter`, `TerrainManager`, `WorldScene` support `SecondaryOverlayMap` / `OverlayMapName`. Real-time ADT tile replacement from overlay directories with live tile eviction & streaming. Searchable map dropdown picker added to UI.
+- **Spec 135 (Phased Terrain Dual-Map Overlay)**: `ITerrainAdapter`, `StandardTerrainAdapter`, `TerrainManager`, `WorldScene` support `SecondaryOverlayMap` / `OverlayMapName`. The corrected route parses parent terrain first, applies sparse phase MCNK patches by chunk coordinate, remaps phase texture indices into a merged tile table, preserves parent liquids, and retains parent plus phase placements. Focused runtime proof remains pending.
 - **Spec 136 (M2 Doodad Performance Optimization)**: Enabled batched instancing (`BeginBatch` + `RenderInstance`) for M2 adapter models without particles/ribbons by updating `ModelRenderer.RequiresUnbatchedWorldRender`. Deduplicated `UpdateAnimation` calls in `WorldScene.cs` so shared models advance at most once per frame. Restored smooth framerates on dense doodad maps (>60 FPS).
 - **Spec 137 (Phased Minimap Overlay & Consistent Teleport)**: Updated `MinimapRenderer` & `MinimapHelpers` to render active secondary overlay tile BLPs on the minimap surface. Unified fullscreen minimap to use 3-click armed teleport (`MinimapTeleportMode.Armed`) matching small minimap panel.
 
@@ -893,3 +905,15 @@ Next: build the authored RGB corpus and review the combined plan.
    rejects only conservative bucket AABBs and then uses the existing per-instance collectors.
    Unknown bounds and cross-tile ownership fail open. The viewer builds with 0 errors in an isolated
    output directory; no FPS improvement is claimed until the user reruns the real client.
+ - 2026-08-11: Created the complete Speckit design package for Spec 143,
+   `143-world-context-lighting`. The package separates ADT area resolution, WMO interior context,
+   player-head camera state, and evidence-gated WMO/M2 lighting. Code inspection confirms Alpha and
+   standard adapters already populate raw MCNK AreaIds; the current gap is the camera-to-chunk/map
+   lookup and its loss of unresolved reasons. Current WMO root/group read models do not expose a
+   proven WMOAreaID field, so no field was guessed. Lighting inputs exist but native/BLS parity is
+   unproven. Branch creation failed because `.git/index.lock` is read-only; artifacts are on the
+   current branch. No implementation or real-client runtime signoff has started for Spec 143.
+ - 2026-08-11: Added the native UI display contract to Spec 143 after confirming the local 3.3.5
+   reference inventory exposes `lua_GetSubZoneText`, `lua_GetZoneText`, and
+   `lua_GetMinimapZoneText`. `SubzoneText` is now modeled as a derived leaf-or-parent fallback
+   display role, not as a guessed DBC field or replacement for raw AreaID provenance.

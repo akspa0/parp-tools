@@ -1,8 +1,10 @@
 # Spec 142 Graph and Opt-In Traversal Quickstart
 
 This slice proves the scene-graph, synthetic-workload, object-adapter, and runtime traversal
-contracts. The per-ADT graph traversal is now default-on in the viewer, with `Use ADT Scene Graph`
-available as a runtime fallback toggle. This quickstart does not launch the viewer, a GPU capture,
+contracts. The per-ADT graph traversal is default-off in the viewer, with `Use ADT Scene Graph`
+available as an explicit runtime investigation toggle. The flat path now uses conservative
+maintenance-time tile/chunk buckets, and WDL GPU meshes stream around the camera's fog window.
+This quickstart does not launch the viewer, a GPU capture,
 a real-client load, training, or a long benchmark.
 
 ## Focused proof
@@ -63,7 +65,11 @@ specified, `profile-render` verifies that exact ADT exists in the configured cli
 its production camera at the tile center instead of using the map's inferred startup camera.
 While the profile is running, its requested JSON path contains `world-render-diagnostic-progress-v1`
 with the last entered phase and completed-frame counts. It is replaced by the final
-`world-render-diagnostic-v1` report only after the measured frames finish.
+`world-render-diagnostic-v1` report only after the measured frames finish, or by a terminal
+`status: failed` progress document containing the exception and stack trace if managed execution
+fails before the report is written. The capture tool also registers an unhandled-exception
+checkpoint for native access violations surfaced through CoreCLR; a hard fail-fast or external
+termination can still stop before any failure document is possible.
 
 ## Full runtime-library proof
 
@@ -115,8 +121,11 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
 - External M2 spawns, skyboxes, WMO placements, and WMO-internal doodad-set submission remain
   outside this chunk-bucket slice.
 - Unknown object bounds keep their bucket and map fail-open.
-- The viewer project compiles with the default-on `WorldScene.UseHierarchicalSceneTraversal` seam
-  and its reversible legacy-path toggle.
+- The viewer project compiles with the reversible `WorldScene.UseHierarchicalSceneTraversal` seam
+  and its legacy-path toggle. The selector is default-off because real Azeroth captures showed
+  graph traversal adding roughly 150 ms per frame to WMO/MDX visibility.
+- WDL loading indexes the available low-resolution height tiles but only builds GPU meshes inside
+  a fog-centered residency window; detailed ADTs continue to use the existing AOI stream.
 - Runtime stats expose graph active/inactive state, resident ADT graph roots, traversal
   visited/tested/rejected/skipped counts, AOI camera and retained counts, and the last unloaded ADT
   plus its WMO placement count.

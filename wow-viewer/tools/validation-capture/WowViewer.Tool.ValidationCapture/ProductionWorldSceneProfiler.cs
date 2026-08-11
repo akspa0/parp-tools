@@ -61,82 +61,93 @@ internal static class ProductionWorldSceneProfiler
         if (!string.IsNullOrWhiteSpace(outputDirectory))
             Directory.CreateDirectory(outputDirectory);
 
-        PublishProgress(outputPath, "initializing-data-source", 0, warmupFrameCount, 0, measuredFrameCount, null);
-        Console.WriteLine("[Profile] Initializing MPQ data source...");
-        using var dataSource = new MpqDataSource(clientRoot, listfilePath, overlays);
-        ResolvedWdt resolvedWdt = ResolveWdt(wdtInput, dataSource);
-        ValidateTargetTile(resolvedWdt, dataSource, targetTileX, targetTileY);
-        PublishProgress(outputPath, "creating-hidden-gl-context", 0, warmupFrameCount, 0, measuredFrameCount, null);
-        Console.WriteLine("[Profile] Creating hidden OpenGL context...");
-        using var context = new HeadlessContext(resolution, resolution);
-        using var surface = new RenderSurface(context.GL, resolution, resolution);
-
-        WorldScene? scene = null;
-        Stopwatch initializationTimer = Stopwatch.StartNew();
+        var progressState = new ProfileProgressState(warmupFrameCount, measuredFrameCount);
         try
         {
-            PublishProgress(outputPath, "constructing-world-scene", 0, warmupFrameCount, 0, measuredFrameCount, null);
-            Console.WriteLine("[Profile] Constructing production WorldScene...");
-            scene = CreateWorldScene(context.GL, resolvedWdt, dataSource, buildLabel);
-            if (loadAllTiles && !scene.IsWmoBased)
+            PublishProgress(outputPath, progressState, "initializing-data-source", 0, warmupFrameCount, 0, measuredFrameCount, "starting data-source construction");
+            Console.WriteLine("[Profile] Initializing MPQ data source...");
+            using var dataSource = new MpqDataSource(clientRoot, listfilePath, overlays);
+            ResolvedWdt resolvedWdt = ResolveWdt(wdtInput, dataSource);
+            ValidateTargetTile(resolvedWdt, dataSource, targetTileX, targetTileY);
+            PublishProgress(outputPath, progressState, "creating-hidden-gl-context", 0, warmupFrameCount, 0, measuredFrameCount, "starting hidden OpenGL context creation");
+            Console.WriteLine("[Profile] Creating hidden OpenGL context...");
+            using var context = new HeadlessContext(resolution, resolution);
+            using var surface = new RenderSurface(context.GL, resolution, resolution);
+
+            WorldScene? scene = null;
+            Stopwatch initializationTimer = Stopwatch.StartNew();
+            try
             {
-                PublishProgress(outputPath, "loading-all-terrain-tiles", 0, warmupFrameCount, 0, measuredFrameCount, null);
-                Console.WriteLine("[Profile] Loading all terrain tiles (explicit --load-all-tiles request)...");
-                scene.Terrain.LoadAllTiles();
+                    PublishProgress(outputPath, progressState, "constructing-world-scene", 0, warmupFrameCount, 0, measuredFrameCount, "starting production WorldScene construction");
+                    Console.WriteLine("[Profile] Constructing production WorldScene...");
+                    scene = CreateWorldScene(context.GL, resolvedWdt, dataSource, buildLabel);
+                    if (loadAllTiles && !scene.IsWmoBased)
+                    {
+                        PublishProgress(outputPath, progressState, "loading-all-terrain-tiles", 0, warmupFrameCount, 0, measuredFrameCount, "starting explicit all-terrain-tile load");
+                        Console.WriteLine("[Profile] Loading all terrain tiles (explicit --load-all-tiles request)...");
+                        scene.Terrain.LoadAllTiles();
+                    }
+                    initializationTimer.Stop();
+
+                    Vector3 cameraPosition = ResolveCameraPosition(scene, targetTileX, targetTileY);
+                    Vector3 forward = BuildCameraForward(cameraPosition);
+                    Matrix4x4 view = Matrix4x4.CreateLookAt(cameraPosition, cameraPosition + forward, Vector3.UnitZ);
+                    Matrix4x4 projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3f, 1f, 0.1f, 20000f);
+
+                    for (int frame = 0; frame < warmupFrameCount; frame++)
+                    {
+                        PublishProgress(outputPath, progressState, "warming-up", frame, warmupFrameCount, 0, measuredFrameCount, $"before warmup frame {frame + 1}/{warmupFrameCount}");
+                        Console.WriteLine($"[Profile] Warmup {frame + 1}/{warmupFrameCount}...");
+                        RenderFrame(context, surface, scene, cameraPosition, forward, view, projection);
+                        PublishProgress(outputPath, progressState, "warming-up", frame + 1, warmupFrameCount, 0, measuredFrameCount, $"completed warmup frame {frame + 1}/{warmupFrameCount}", scene.LastRenderFrameStats);
+                    }
+
+                    var frames = new List<WorldRenderDiagnosticFrame>(measuredFrameCount);
+                    for (int frame = 0; frame < measuredFrameCount; frame++)
+                    {
+                        PublishProgress(outputPath, progressState, "measuring", warmupFrameCount, warmupFrameCount, frame, measuredFrameCount, $"before measured frame {frame + 1}/{measuredFrameCount}");
+                        Console.WriteLine($"[Profile] Measured frame {frame + 1}/{measuredFrameCount}...");
+                        RenderFrame(context, surface, scene, cameraPosition, forward, view, projection);
+                        frames.Add(new WorldRenderDiagnosticFrame(frame, scene.LastRenderFrameStats));
+                        PublishProgress(outputPath, progressState, "measuring", warmupFrameCount, warmupFrameCount, frame + 1, measuredFrameCount, $"completed measured frame {frame + 1}/{measuredFrameCount}", scene.LastRenderFrameStats);
+                    }
+
+                    MpqDataSourceStats sourceStats = dataSource.GetStatsSnapshot();
+                    WorldRenderDiagnosticWorkload workload = new(
+                        initializationTimer.Elapsed.TotalMilliseconds,
+                        scene.PendingAssetLoadCount,
+                        scene.Terrain.PendingTerrainLoadCount,
+                        scene.PendingDeferredWmoDoodadLoadCount,
+                        scene.UniqueMdxModels,
+                        scene.UniqueWmoModels,
+                        scene.MdxInstanceCount,
+                        scene.WmoInstanceCount,
+                        scene.IsHierarchicalSceneTraversalActive,
+                        targetTileX,
+                        targetTileY,
+                        sourceStats.ReadRequests,
+                        sourceStats.ReadCacheHits,
+                        sourceStats.ReadCacheMisses,
+                        sourceStats.AverageUncachedReadMs);
+                    WorldRenderDiagnosticReport report = WorldRenderDiagnostics.Build(
+                        "headless-production-world-scene",
+                        warmupFrameCount,
+                        frames,
+                        workload);
+
+                    WriteJsonAtomically(outputPath, report);
+                    Console.WriteLine("[Profile] Completed and wrote final diagnostic JSON.");
+                    return report;
             }
-            initializationTimer.Stop();
-
-            Vector3 cameraPosition = ResolveCameraPosition(scene, targetTileX, targetTileY);
-            Vector3 forward = BuildCameraForward(cameraPosition);
-            Matrix4x4 view = Matrix4x4.CreateLookAt(cameraPosition, cameraPosition + forward, Vector3.UnitZ);
-            Matrix4x4 projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3f, 1f, 0.1f, 20000f);
-
-            for (int frame = 0; frame < warmupFrameCount; frame++)
+            finally
             {
-                PublishProgress(outputPath, "warming-up", frame, warmupFrameCount, 0, measuredFrameCount, null);
-                Console.WriteLine($"[Profile] Warmup {frame + 1}/{warmupFrameCount}...");
-                RenderFrame(context, surface, scene, cameraPosition, forward, view, projection);
+                scene?.Dispose();
             }
-
-            var frames = new List<WorldRenderDiagnosticFrame>(measuredFrameCount);
-            for (int frame = 0; frame < measuredFrameCount; frame++)
-            {
-                PublishProgress(outputPath, "measuring", warmupFrameCount, warmupFrameCount, frame, measuredFrameCount, null);
-                Console.WriteLine($"[Profile] Measured frame {frame + 1}/{measuredFrameCount}...");
-                RenderFrame(context, surface, scene, cameraPosition, forward, view, projection);
-                frames.Add(new WorldRenderDiagnosticFrame(frame, scene.LastRenderFrameStats));
-            }
-
-            MpqDataSourceStats sourceStats = dataSource.GetStatsSnapshot();
-            WorldRenderDiagnosticWorkload workload = new(
-                initializationTimer.Elapsed.TotalMilliseconds,
-                scene.PendingAssetLoadCount,
-                scene.Terrain.PendingTerrainLoadCount,
-                scene.PendingDeferredWmoDoodadLoadCount,
-                scene.UniqueMdxModels,
-                scene.UniqueWmoModels,
-                scene.MdxInstanceCount,
-                scene.WmoInstanceCount,
-                scene.IsHierarchicalSceneTraversalActive,
-                targetTileX,
-                targetTileY,
-                sourceStats.ReadRequests,
-                sourceStats.ReadCacheHits,
-                sourceStats.ReadCacheMisses,
-                sourceStats.AverageUncachedReadMs);
-            WorldRenderDiagnosticReport report = WorldRenderDiagnostics.Build(
-                "headless-production-world-scene",
-                warmupFrameCount,
-                frames,
-                workload);
-
-            File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
-            Console.WriteLine("[Profile] Completed and wrote final diagnostic JSON.");
-            return report;
         }
-        finally
+        catch (Exception ex)
         {
-            scene?.Dispose();
+            PublishFailure(outputPath, progressState, ex);
+            throw;
         }
     }
 
@@ -255,26 +266,160 @@ internal static class ProductionWorldSceneProfiler
 
     private static void PublishProgress(
         string outputPath,
+        ProfileProgressState state,
         string phase,
         int completedWarmupFrames,
         int plannedWarmupFrames,
         int completedMeasuredFrames,
         int plannedMeasuredFrames,
-        string? detail)
+        string? detail,
+        WorldRenderFrameStats? latestFrameStats = null)
     {
+        state.Phase = phase;
+        state.CompletedWarmupFrames = completedWarmupFrames;
+        state.CompletedMeasuredFrames = completedMeasuredFrames;
+        state.Detail = detail;
+        if (latestFrameStats.HasValue)
+        {
+            state.HasLatestFrameStats = true;
+            state.LatestFrameStats = latestFrameStats.Value;
+        }
+
         var progress = new
         {
             schema = "world-render-diagnostic-progress-v1",
             status = "running",
-            phase,
-            completed_warmup_frames = completedWarmupFrames,
-            planned_warmup_frames = plannedWarmupFrames,
-            completed_measured_frames = completedMeasuredFrames,
-            planned_measured_frames = plannedMeasuredFrames,
+            phase = state.Phase,
+            completed_warmup_frames = state.CompletedWarmupFrames,
+            planned_warmup_frames = state.PlannedWarmupFrames,
+            completed_measured_frames = state.CompletedMeasuredFrames,
+            planned_measured_frames = state.PlannedMeasuredFrames,
             updated_utc = DateTimeOffset.UtcNow,
-            detail,
+            detail = state.Detail,
+            last_frame = state.HasLatestFrameStats ? (WorldRenderFrameStats?)state.LatestFrameStats : null,
         };
-        File.WriteAllText(outputPath, JsonSerializer.Serialize(progress, new JsonSerializerOptions { WriteIndented = true }));
+        WriteJsonAtomically(outputPath, progress);
+    }
+
+    private static void PublishFailure(string outputPath, ProfileProgressState state, Exception exception)
+    {
+        var failure = new
+        {
+            schema = "world-render-diagnostic-progress-v1",
+            status = "failed",
+            phase = state.Phase,
+            completed_warmup_frames = state.CompletedWarmupFrames,
+            planned_warmup_frames = state.PlannedWarmupFrames,
+            completed_measured_frames = state.CompletedMeasuredFrames,
+            planned_measured_frames = state.PlannedMeasuredFrames,
+            updated_utc = DateTimeOffset.UtcNow,
+            detail = state.Detail,
+            last_frame = state.HasLatestFrameStats ? (WorldRenderFrameStats?)state.LatestFrameStats : null,
+            error = new
+            {
+                type = exception.GetType().FullName ?? exception.GetType().Name,
+                message = exception.Message,
+                stack_trace = exception.ToString(),
+            },
+        };
+
+        try
+        {
+            WriteJsonAtomically(outputPath, failure);
+            Console.Error.WriteLine($"[Profile] Wrote failure checkpoint to '{outputPath}'.");
+        }
+        catch (Exception writeException)
+        {
+            Console.Error.WriteLine($"[Profile] Could not write failure checkpoint: {writeException.GetType().Name}: {writeException.Message}");
+        }
+    }
+
+    public static void PublishUnhandledFailure(string outputPath, Exception exception)
+    {
+        try
+        {
+            int completedWarmupFrames = 0;
+            int plannedWarmupFrames = 0;
+            int completedMeasuredFrames = 0;
+            int plannedMeasuredFrames = 0;
+            string phase = "unhandled-exception";
+            string? detail = "process-level unhandled exception";
+            JsonElement? lastFrame = null;
+
+            if (File.Exists(outputPath))
+            {
+                using JsonDocument document = JsonDocument.Parse(File.ReadAllText(outputPath));
+                JsonElement root = document.RootElement;
+                phase = ReadString(root, "phase") ?? phase;
+                detail = ReadString(root, "detail") ?? detail;
+                completedWarmupFrames = ReadInt(root, "completed_warmup_frames");
+                plannedWarmupFrames = ReadInt(root, "planned_warmup_frames");
+                completedMeasuredFrames = ReadInt(root, "completed_measured_frames");
+                plannedMeasuredFrames = ReadInt(root, "planned_measured_frames");
+                if (root.TryGetProperty("last_frame", out JsonElement lastFrameElement)
+                    && lastFrameElement.ValueKind != JsonValueKind.Null)
+                {
+                    lastFrame = lastFrameElement.Clone();
+                }
+            }
+
+            var failure = new
+            {
+                schema = "world-render-diagnostic-progress-v1",
+                status = "failed",
+                phase,
+                completed_warmup_frames = completedWarmupFrames,
+                planned_warmup_frames = plannedWarmupFrames,
+                completed_measured_frames = completedMeasuredFrames,
+                planned_measured_frames = plannedMeasuredFrames,
+                updated_utc = DateTimeOffset.UtcNow,
+                detail,
+                last_frame = lastFrame,
+                error = new
+                {
+                    type = exception.GetType().FullName ?? exception.GetType().Name,
+                    message = exception.Message,
+                    stack_trace = exception.ToString(),
+                    native_exception_checkpoint = true,
+                },
+            };
+
+            WriteJsonAtomically(outputPath, failure);
+        }
+        catch
+        {
+            // The process is already terminating; never replace the original native failure with
+            // a checkpoint-writing exception.
+        }
+    }
+
+    private static string? ReadString(JsonElement root, string propertyName)
+        => root.TryGetProperty(propertyName, out JsonElement value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static int ReadInt(JsonElement root, string propertyName)
+        => root.TryGetProperty(propertyName, out JsonElement value) && value.TryGetInt32(out int result)
+            ? result
+            : 0;
+
+    private static void WriteJsonAtomically(string outputPath, object document)
+    {
+        string temporaryPath = outputPath + ".tmp";
+        File.WriteAllText(temporaryPath, JsonSerializer.Serialize(document, new JsonSerializerOptions { WriteIndented = true }));
+        File.Move(temporaryPath, outputPath, overwrite: true);
+    }
+
+    private sealed class ProfileProgressState(int plannedWarmupFrames, int plannedMeasuredFrames)
+    {
+        public string Phase { get; set; } = "starting";
+        public int CompletedWarmupFrames { get; set; }
+        public int PlannedWarmupFrames { get; } = plannedWarmupFrames;
+        public int CompletedMeasuredFrames { get; set; }
+        public int PlannedMeasuredFrames { get; } = plannedMeasuredFrames;
+        public string? Detail { get; set; }
+        public bool HasLatestFrameStats { get; set; }
+        public WorldRenderFrameStats LatestFrameStats { get; set; }
     }
 
     private sealed record ResolvedWdt(string Source, byte[] Bytes, bool IsLocalFile);

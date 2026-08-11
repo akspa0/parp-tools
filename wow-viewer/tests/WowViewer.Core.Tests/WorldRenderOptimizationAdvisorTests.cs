@@ -86,6 +86,7 @@ public sealed class WorldRenderOptimizationAdvisorTests
             TransparentUnbatchedMdxCount: 0,
             WmoDrawCallCount: 0,
             WmoBatchDrawCallCount: 0,
+            WmoOpaqueBatchInstanceCount: 0,
             WmoGroupFallbackDrawCallCount: 0,
             WmoLiquidDrawCallCount: 0,
             WmoDoodadSubmissionCount: 0,

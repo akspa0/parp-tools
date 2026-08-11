@@ -13,8 +13,43 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 | PM4 decode | **active** — versioning formatted; placement solved; scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
 | Terrain / viewer runtime | **active** — phased dual-map overlay (135), CPU and GPU M2 doodad batching (136), phased minimap & teleport (137) landed; 4.x renderer evolution (138) is an evidence-gated epic note | [activeContext.md](activeContext.md) |
 | World scene graph / renderer performance | **active** — Spec 142 graph, conservative default-off traversal, metadata-only graph rebuilds, graph-guided flat buckets, fog-window WDL residency, ADT M2 doodads partitioned beneath terrain chunk buckets, nested WMO groups, WMO read-model portal adapter, bounded portal view volumes, graph-side runtime portal traversal, safe opaque WMO doodad batching, and production headless CPU-stage reporting implemented; WMO submission parity, pass/query reuse, terrain-mesh ownership, and GPU-stage evidence remain pending | [Spec 142](../specs/142-world-scene-graph/spec.md) |
+| World context / lighting parity | **planned** — Spec 143 design package complete; ADT IDs are already parsed, but the camera-to-chunk/map lookup is not yet trustworthy, WMOAreaID is not represented by a proven read-model field, and WMO/M2 lighting still uses generic/default inputs in parts of the path | [Spec 143](../specs/143-world-context-lighting/spec.md) |
 | Terrain / minimap ML | **active** — Spec 139 clean-signal reconstruction, Spec 140 paste/fractal/tileset evidence, and Spec 141 external-method translation; object identity remains parked | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
 | Tile archaeology | **active** — old v50 synthetic minimap output needs fresh regeneration after renderer fixes; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
+
+## Now — Spec 080 UI release convergence
+
+- The lower status bar now owns a compact right-aligned runtime line: FPS, DBC-backed
+  AreaName, CPU frame time, loaded tiles, terrain chunks rendered/culled, visible/total WMO
+  and MDX instances, and pending asset loads. The bottom action bar is controls-only; the
+  verbose Runtime Stats tab remains the deep-diagnostic surface.
+- The isolated viewer build passed with 0 errors and 255 warnings. A full-solution build
+  reached 696 warnings but its viewer output copy was blocked by the live `ParpToolsWoWViewer`
+  process (PID 50040); the warning volume is now a release workstream, not something to hide
+  with `NoWarn`.
+- Spec 080 now contains Phase 0R for warning/legacy-panel inventory and disposition, plus a
+  manual overlap/runtime proof gate for the new status strip. No viewer runtime signoff has
+  been claimed from the compile-only proof.
+
+## Now — Spec 143 world context and lighting parity
+
+- The complete Speckit package is under `specs/143-world-context-lighting/`: specification,
+  checklist, plan, research, data model, in-process contract, quickstart, and ordered tasks.
+- The first implementation gate is ADT area context: Alpha and standard adapters already populate
+  raw MCNK area IDs, while the current status path can erase no-chunk, zero-ID, map-mismatch, and
+  row-miss states into an empty/Unknown display. The next code slice must expose those distinctions.
+- Local 3.3.5 client reference data exposes `lua_GetSubZoneText` alongside `lua_GetZoneText` and
+  `lua_GetMinimapZoneText`. Spec 143 now treats `SubzoneText` as the native-style display result:
+  resolve the leaf/subzone from client area data, fall back to the parent zone when needed, and
+  retain raw IDs/provenance separately.
+- WMOAreaID is intentionally not guessed. Current WMO root/group read models do not carry a proven
+  area field; Phase 0 must establish the exact chunk/offset/profile from fixtures or client evidence
+  before extending the reader.
+- WMO and M2 lighting has generic uniform plumbing and existing baked/vertex/light data, but native
+  or BLS parity is not proven. Lighting remains downstream of the context/camera contracts and Specs
+  106/138 evidence.
+- Speckit branch creation was blocked by the shared `.git/index.lock` permission boundary; artifacts
+  are currently on `142-world-scene-graph` and no implementation signoff is claimed.
 
 ## Now — Spec 142 renderer grounding
 
@@ -257,7 +292,7 @@ an invented empty mask.
 ### What was accomplished this session (2026-08-08)
 
 1. **PM4/PD4 Version Header Formatting** — `Pm4VersionFormatter.cs` parses version headers (`0x10` Cataclysm = v16, `0x30` WoD = v48). Integrated into status bar (`WorldScene.cs`) and CLI inspect tool (`WowViewer.Tool.Inspect`).
-2. **Phased Terrain Dual-Map Overlay (Spec 135)** — `ITerrainAdapter`, `StandardTerrainAdapter`, `TerrainManager`, and `WorldScene` support `SecondaryOverlayMap` / `OverlayMapName`. Resolves split ADT payloads (`root`, `_tex0`, `_obj0`) from secondary map folders (`World\Maps\<OverlayMapName>\`) when tiles exist, evicting and re-streaming affected tiles in real time without unloading resident world tiles. Added a searchable map dropdown selector built from `_discoveredMaps` in `ViewerApp_Investigation.cs`.
+2. **Phased Terrain Dual-Map Overlay (Spec 135)** — `ITerrainAdapter`, `StandardTerrainAdapter`, `TerrainManager`, and `WorldScene` support `SecondaryOverlayMap` / `OverlayMapName`. The corrected loader parses the parent split ADT payloads first, applies sparse phase MCNK patches by chunk coordinate, remaps phase MTEX indices into the merged tile table, preserves parent liquids, and retains parent plus phase placements. A searchable map dropdown selector remains in `ViewerApp_Investigation.cs`; real-client alpha/liquid parity is still pending.
 3. **M2 Doodad Rendering Performance Optimization (Spec 136)** — Fixed massive framerate drops (<1 FPS) on dense object maps. Removed `_isM2AdapterModel` from `ModelRenderer.RequiresUnbatchedWorldRender` so static M2 doodads use high-throughput batched instancing (`BeginBatch()` once per pass + `RenderInstance()`). Deduplicated `UpdateAnimation()` in `WorldScene.cs` so shared models update at most once per frame.
 4. **Phased Minimap Overlay & Consistent Minimap Teleport (Spec 137)** — `MinimapRenderer` & `MinimapHelpers` query active secondary overlay tile BLPs first, rendering phased minimap tiles on the minimap surface. Unified fullscreen minimap to use 3-click armed teleport (`MinimapTeleportMode.Armed`), matching the small dockable minimap panel.
 

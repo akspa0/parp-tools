@@ -1,0 +1,16 @@
+<Project>
+  <!-- Both viewer targets intentionally share this source directory. Keep their restore and
+       intermediate assets separate so a solution build can materialize net10.0 and
+       net10.0-windows together. This file is imported before Microsoft.Common.props, which is
+       required for MSBuildProjectExtensionsPath. -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WoWViewer'">
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)obj\windows\</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>$(MSBuildThisFileDirectory)obj\windows\</MSBuildProjectExtensionsPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);$(MSBuildThisFileDirectory)obj\**</DefaultItemExcludes>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WoWViewer.CrossPlatform'">
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)obj\cross-platform\</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>$(MSBuildThisFileDirectory)obj\cross-platform\</MSBuildProjectExtensionsPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);$(MSBuildThisFileDirectory)obj\**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>

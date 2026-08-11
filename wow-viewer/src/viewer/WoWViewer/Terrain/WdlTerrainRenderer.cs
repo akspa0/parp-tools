@@ -34,10 +34,18 @@ public class WdlTerrainRenderer : IDisposable
 
     // Per-tile GPU mesh data
     private readonly Dictionary<int, WdlTileMesh> _tileMeshes = new(); // tileIndex → mesh
+    private readonly Dictionary<int, WdlParser.WdlTile> _tileData = new(); // parsed CPU height data
     private readonly Dictionary<int, float> _tileAlphas = new();
     private readonly Dictionary<int, float> _tileTargetAlphas = new();
     private readonly Dictionary<int, long> _tileShowReadyTimestamps = new();
+    private readonly HashSet<int> _hiddenTileIndices = new();
+    private readonly List<(int index, float distanceSq)> _tileResidencyScratch = new();
+    private readonly List<int> _tileEvictionScratch = new();
     private long _lastFadeTimestamp;
+
+    private const int MaxTileMeshBuildsPerFrame = 8;
+    private const float TileResidencyLoadPadding = 1.0f;
+    private const float TileResidencyUnloadPadding = 2.0f;
 
     // Stats
     public int TotalTiles => _tileMeshes.Count;
@@ -53,7 +61,8 @@ public class WdlTerrainRenderer : IDisposable
     }
 
     /// <summary>
-    /// Load WDL data and build 3D meshes for all tiles that have height data.
+    /// Load WDL data and retain compact CPU height data. GPU tile meshes are streamed
+    /// around the camera during Render instead of being built for the whole map here.
     /// </summary>
     public bool Load(IDataSource dataSource, string mapDirectory)
     {
@@ -77,7 +86,7 @@ public class WdlTerrainRenderer : IDisposable
         if (!string.IsNullOrWhiteSpace(resolvedPath))
             ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL 3D] Loaded {mapDirectory} from {resolvedPath}");
 
-        int built = 0;
+        int indexed = 0;
         for (int tileY = 0; tileY < 64; tileY++)
         {
             for (int tileX = 0; tileX < 64; tileX++)
@@ -86,19 +95,13 @@ public class WdlTerrainRenderer : IDisposable
                 var tile = wdlData.Tiles[idx];
                 if (tile?.HasData != true) continue;
 
-                var mesh = BuildTileMesh(tile, tileX, tileY);
-                if (mesh != null)
-                {
-                    _tileMeshes[idx] = mesh;
-                    _tileAlphas[idx] = 1.0f;
-                    _tileTargetAlphas[idx] = 1.0f;
-                    built++;
-                }
+                _tileData[idx] = tile;
+                indexed++;
             }
         }
 
-        ViewerLog.Important(ViewerLog.Category.Terrain, $"[WDL 3D] Built {built} low-res terrain tiles for {mapDirectory}");
-        return built > 0;
+        ViewerLog.Important(ViewerLog.Category.Terrain, $"[WDL 3D] Indexed {indexed} low-res terrain tiles for {mapDirectory}; GPU meshes stream by fog range");
+        return indexed > 0;
     }
 
     /// <summary>
@@ -106,7 +109,9 @@ public class WdlTerrainRenderer : IDisposable
     /// </summary>
     public void HideTile(int tileX, int tileY)
     {
-        SetTileTargetAlpha(GetTileIndex(tileX, tileY), 0.0f);
+        int tileIndex = GetTileIndex(tileX, tileY);
+        _hiddenTileIndices.Add(tileIndex);
+        SetTileTargetAlpha(tileIndex, 0.0f);
     }
 
     /// <summary>
@@ -114,7 +119,9 @@ public class WdlTerrainRenderer : IDisposable
     /// </summary>
     public void ShowTile(int tileX, int tileY)
     {
-        SetTileTargetAlpha(GetTileIndex(tileX, tileY), 1.0f);
+        int tileIndex = GetTileIndex(tileX, tileY);
+        _hiddenTileIndices.Remove(tileIndex);
+        SetTileTargetAlpha(tileIndex, 1.0f);
     }
 
     /// <summary>
@@ -123,7 +130,11 @@ public class WdlTerrainRenderer : IDisposable
     public unsafe void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos,
         TerrainLighting lighting, FrustumCuller? frustum = null, bool opaqueFallback = false)
     {
-        if (_tileMeshes.Count == 0) return;
+        if (_tileData.Count == 0) return;
+
+        UpdateTileResidency(cameraPos, lighting.FogEnd);
+        if (_tileMeshes.Count == 0)
+            return;
 
         long now = Stopwatch.GetTimestamp();
         float deltaSeconds = (float)(now - _lastFadeTimestamp) / Stopwatch.Frequency;
@@ -166,6 +177,15 @@ public class WdlTerrainRenderer : IDisposable
         _gl.Enable(EnableCap.PolygonOffsetFill);
         _gl.PolygonOffset(1.0f, 1.0f);
 
+        // WDL is a far-field fallback, not a second full-map render pass. The WDL
+        // loader intentionally has cheap height data for every populated tile, but
+        // tiles beyond the active fog range cannot contribute visible pixels. Keep
+        // the frustum test and add the same distance admission the detailed terrain
+        // streamer uses so a wide camera frustum does not turn 839 tiles into 839
+        // draw calls every frame.
+        float fogDistance = MathF.Max(lighting.FogEnd, WoWConstants.ChunkSize * 1.5f);
+        float fogDistanceSq = fogDistance * fogDistance;
+
         foreach (var (idx, mesh) in _tileMeshes)
         {
             if (!_tileAlphas.TryGetValue(idx, out float alpha) || alpha <= 0.01f)
@@ -173,6 +193,9 @@ public class WdlTerrainRenderer : IDisposable
 
             // Frustum cull
             if (frustum != null && !frustum.TestAABB(mesh.BoundsMin, mesh.BoundsMax))
+                continue;
+
+            if (DistanceSquaredPointToAabb(cameraPos, mesh.BoundsMin, mesh.BoundsMax) > fogDistanceSq)
                 continue;
 
             uint minimapTexture = 0;
@@ -192,6 +215,80 @@ public class WdlTerrainRenderer : IDisposable
         _gl.Disable(EnableCap.Blend);
         _gl.BindTexture(TextureTarget.Texture2D, 0);
         _gl.BindVertexArray(0);
+    }
+
+    private void UpdateTileResidency(Vector3 cameraPos, float fogEnd)
+    {
+        float fogDistance = MathF.Max(fogEnd, WoWConstants.ChunkSize * 1.5f);
+        float loadDistance = fogDistance + (TileResidencyLoadPadding * WoWConstants.ChunkSize);
+        float unloadDistance = fogDistance + (TileResidencyUnloadPadding * WoWConstants.ChunkSize);
+        float loadDistanceSq = loadDistance * loadDistance;
+        float unloadDistanceSq = unloadDistance * unloadDistance;
+
+        _tileResidencyScratch.Clear();
+        foreach (int tileIndex in _tileData.Keys)
+        {
+            GetTileCoordinates(tileIndex, out int tileX, out int tileY);
+            GetTileGridBounds(tileX, tileY, out Vector3 boundsMin, out Vector3 boundsMax);
+            float distanceSq = DistanceSquaredPointToAabb(cameraPos, boundsMin, boundsMax);
+            if (distanceSq <= loadDistanceSq)
+                _tileResidencyScratch.Add((tileIndex, distanceSq));
+        }
+
+        _tileResidencyScratch.Sort(static (left, right) => left.distanceSq.CompareTo(right.distanceSq));
+
+        int builtThisFrame = 0;
+        foreach ((int tileIndex, _) in _tileResidencyScratch)
+        {
+            if (_tileMeshes.ContainsKey(tileIndex)
+                || !_tileData.TryGetValue(tileIndex, out WdlParser.WdlTile? tile))
+            {
+                continue;
+            }
+
+            GetTileCoordinates(tileIndex, out int tileX, out int tileY);
+            WdlTileMesh? mesh = BuildTileMesh(tile, tileX, tileY);
+            if (mesh == null)
+                continue;
+
+            _tileMeshes[tileIndex] = mesh;
+            float initialAlpha = _hiddenTileIndices.Contains(tileIndex) ? 0.0f : 1.0f;
+            _tileAlphas[tileIndex] = initialAlpha;
+            _tileTargetAlphas[tileIndex] = initialAlpha;
+            if (initialAlpha <= 0.0f)
+                _tileShowReadyTimestamps.Remove(tileIndex);
+
+            builtThisFrame++;
+            if (builtThisFrame >= MaxTileMeshBuildsPerFrame)
+                break;
+        }
+
+        _tileEvictionScratch.Clear();
+        foreach ((int tileIndex, WdlTileMesh mesh) in _tileMeshes)
+        {
+            float distanceSq = DistanceSquaredPointToAabb(cameraPos, mesh.BoundsMin, mesh.BoundsMax);
+            if (distanceSq > unloadDistanceSq)
+                _tileEvictionScratch.Add(tileIndex);
+        }
+
+        foreach (int tileIndex in _tileEvictionScratch)
+        {
+            if (!_tileMeshes.Remove(tileIndex, out WdlTileMesh? mesh))
+                continue;
+
+            DisposeTileMesh(mesh);
+            _tileAlphas.Remove(tileIndex);
+            _tileTargetAlphas.Remove(tileIndex);
+            _tileShowReadyTimestamps.Remove(tileIndex);
+        }
+    }
+
+    private static float DistanceSquaredPointToAabb(Vector3 point, Vector3 min, Vector3 max)
+    {
+        float dx = point.X < min.X ? min.X - point.X : point.X > max.X ? point.X - max.X : 0f;
+        float dy = point.Y < min.Y ? min.Y - point.Y : point.Y > max.Y ? point.Y - max.Y : 0f;
+        float dz = point.Z < min.Z ? min.Z - point.Z : point.Z > max.Z ? point.Z - max.Z : 0f;
+        return dx * dx + dy * dy + dz * dz;
     }
 
     private void SetTileTargetAlpha(int tileIndex, float targetAlpha)
@@ -243,6 +340,27 @@ public class WdlTerrainRenderer : IDisposable
     // ── Mesh building ────────────────────────────────────────────────────
 
     private static int GetTileIndex(int tileX, int tileY) => tileX * 64 + tileY;
+
+    private static void GetTileCoordinates(int tileIndex, out int tileX, out int tileY)
+    {
+        tileX = tileIndex / 64;
+        tileY = tileIndex % 64;
+    }
+
+    private static void GetTileGridBounds(int tileX, int tileY, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        float worldX = WoWConstants.MapOrigin - (tileX * WoWConstants.ChunkSize);
+        float worldY = WoWConstants.MapOrigin - (tileY * WoWConstants.ChunkSize);
+        float minX = worldX - WoWConstants.ChunkSize;
+        float maxX = worldX;
+        float minY = worldY - WoWConstants.ChunkSize;
+        float maxY = worldY;
+
+        // Z is intentionally broad for residency admission; the actual mesh AABB is
+        // used for draw-time distance culling after the tile is built.
+        boundsMin = new Vector3(minX, minY, -10000f);
+        boundsMax = new Vector3(maxX, maxY, 10000f);
+    }
 
     private unsafe WdlTileMesh? BuildTileMesh(WdlParser.WdlTile tile, int tileX, int tileY)
     {
@@ -499,18 +617,23 @@ void main() {
 
     // ── Cleanup ──────────────────────────────────────────────────────────
 
+    private void DisposeTileMesh(WdlTileMesh mesh)
+    {
+        _gl.DeleteVertexArray(mesh.Vao);
+        _gl.DeleteBuffer(mesh.Vbo);
+        _gl.DeleteBuffer(mesh.Ebo);
+    }
+
     public void Dispose()
     {
         foreach (var mesh in _tileMeshes.Values)
-        {
-            _gl.DeleteVertexArray(mesh.Vao);
-            _gl.DeleteBuffer(mesh.Vbo);
-            _gl.DeleteBuffer(mesh.Ebo);
-        }
+            DisposeTileMesh(mesh);
         _tileMeshes.Clear();
+        _tileData.Clear();
         _tileAlphas.Clear();
         _tileTargetAlphas.Clear();
         _tileShowReadyTimestamps.Clear();
+        _hiddenTileIndices.Clear();
         _shader.Dispose();
     }
 

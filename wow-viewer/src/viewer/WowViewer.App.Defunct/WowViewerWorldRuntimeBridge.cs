@@ -642,6 +642,7 @@ internal static class WowViewerWorldRuntimeBridge
             TransparentUnbatchedMdxCount: transparentUnbatchedMdxCount,
             WmoDrawCallCount: renderedWmoCount,
             WmoBatchDrawCallCount: renderedWmoCount,
+            WmoOpaqueBatchInstanceCount: 0,
             WmoGroupFallbackDrawCallCount: 0,
             WmoLiquidDrawCallCount: 0,
             WmoDoodadSubmissionCount: 0,

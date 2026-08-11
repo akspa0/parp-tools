@@ -51,6 +51,9 @@ public class TerrainManager : ISceneRenderer
     private const double MaxGpuUploadBudgetMs = 7.0;
     private const int MaxConcurrentMpqReads = 4; // Limit concurrent MPQ reads to avoid frame drops
     private readonly SemaphoreSlim _mpqReadSemaphore = new(MaxConcurrentMpqReads);
+    // Terrain adapters retain parse-time lookup/reporting state. Keep the adapter boundary
+    // serialized while allowing the surrounding streaming scheduler to remain asynchronous.
+    private readonly object _adapterLoadLock = new();
 
     /// <summary>Called when a tile is loaded, with per-tile placement data.</summary>
     public event Action<int, int, TileLoadResult>? OnTileLoaded;
@@ -143,7 +146,7 @@ public class TerrainManager : ISceneRenderer
 
         if (!_tileCache.TryGetValue((tileX, tileY), out var cached))
         {
-            cached = _adapter.LoadTileWithPlacements(tileX, tileY);
+            cached = LoadTileWithPlacementsSerialized(tileX, tileY);
             _tileCache[(tileX, tileY)] = cached;
         }
 
@@ -240,7 +243,7 @@ public class TerrainManager : ISceneRenderer
 
         if (!_tileCache.TryGetValue((tileX, tileY), out var result))
         {
-            result = _adapter.LoadTileWithPlacements(tileX, tileY);
+            result = LoadTileWithPlacementsSerialized(tileX, tileY);
             _tileCache[(tileX, tileY)] = result;
         }
 
@@ -306,7 +309,7 @@ public class TerrainManager : ISceneRenderer
         if (!_adapter.TileExists(tileX, tileY))
             return new TileLoadResult();
 
-        var loaded = _adapter.LoadTileWithPlacements(tileX, tileY);
+        var loaded = LoadTileWithPlacementsSerialized(tileX, tileY);
         _tileCache[(tileX, tileY)] = loaded;
         return loaded;
     }
@@ -585,7 +588,7 @@ public class TerrainManager : ISceneRenderer
                 _mpqReadSemaphore.Wait();
                 try
                 {
-                    var result = _adapter.LoadTileWithPlacements(capturedTx, capturedTy);
+                    var result = LoadTileWithPlacementsSerialized(capturedTx, capturedTy);
                     _tileCache[(capturedTx, capturedTy)] = result; // Cache for future re-entry
                     if (!_disposed)
                         _pendingTiles.Enqueue((capturedTx, capturedTy, result));
@@ -722,7 +725,7 @@ public class TerrainManager : ISceneRenderer
 
     private void LoadTileSynchronous(int tileX, int tileY)
     {
-        var result = _adapter.LoadTileWithPlacements(tileX, tileY);
+        var result = LoadTileWithPlacementsSerialized(tileX, tileY);
         _tileCache[(tileX, tileY)] = result; // Cache for consistency with AOI path
 
         var (tileMesh, chunkInfos) = BuildTileMesh(tileX, tileY, result.Chunks);
@@ -736,6 +739,12 @@ public class TerrainManager : ISceneRenderer
         _liquidRenderer.AddChunks(result.Chunks);
 
         OnTileLoaded?.Invoke(tileX, tileY, result);
+    }
+
+    private TileLoadResult LoadTileWithPlacementsSerialized(int tileX, int tileY)
+    {
+        lock (_adapterLoadLock)
+            return _adapter.LoadTileWithPlacements(tileX, tileY);
     }
 
     private void FindInitialCameraPosition(out Vector3 cameraPos)

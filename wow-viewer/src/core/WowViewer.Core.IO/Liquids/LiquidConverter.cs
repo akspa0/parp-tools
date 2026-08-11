@@ -217,6 +217,8 @@ public static class LiquidConverter
 
     /// <summary>
     /// Map LiquidType.dbc ID to MCLQ liquid type.
+    /// Runtime MH2O rendering resolves the exact-build DBC before using this
+    /// legacy conversion fallback.
     /// </summary>
     public static MclqLiquidType MapLiquidTypeIdToMclqType(ushort liquidTypeId) => liquidTypeId switch
     {

@@ -47,7 +47,8 @@ public interface ITerrainAdapter
 
     /// <summary>
     /// Optional secondary overlay map name for phased terrain.
-    /// When set, tiles present in World\Maps\{OverlayMapName}\ replace the primary map's tiles.
+    /// When set, sparse phase MCNK data patches matching primary-map chunks. Parent-map liquid
+    /// data remains authoritative.
     /// </summary>
     string? OverlayMapName { get; set; }
 }

@@ -66,6 +66,38 @@ proven.
 controls. The known initial defect is Settings: tabbed mode sets
 `_showSettingsWindow` but omits its draw dispatch.
 
+## Phase 0R — Legacy Panel And Warning Disposition
+
+**Goal**: Make the next release honest about old panels and compiler warnings
+instead of hiding unfinished migration behind a successful build.
+
+1. Capture a warning inventory for the active solution in the release
+configuration and the normal development configuration. Record project,
+warning ID, source file/line, owning panel or runtime surface, and whether the
+warning is pre-existing or introduced by the current branch.
+2. Cross-reference every warning in viewer sources with the UI surface
+inventory. In particular, classify old panel methods as `active-route`,
+`duplicate-route`, `legacy-compatibility`, `retired`, or `unclassified`.
+3. Resolve `active-route` warnings in the owning slice. Typical fixes include
+removing unused locals, completing the tab dispatch, or moving content into its
+declared frame; do not silence a warning when the underlying route is missing.
+4. For `duplicate-route` and `retired` panels, remove the stale launcher and
+dead dispatch only after the inventory records the replacement or intentional
+retirement. Keep legacy mode intact until its separate retirement gate passes.
+5. For `legacy-compatibility` warnings, isolate the compatibility surface and
+document why it remains compiled. It must not be counted as a clean active UI
+surface without a release note.
+6. Add a release warning budget and disposition report to the final proof
+package. `TreatWarningsAsErrors=false` remains a temporary repository policy,
+not a substitute for triage; do not add blanket `NoWarn` entries for panel
+migration debt.
+7. Repeat the inventory after each bounded cleanup batch and require the
+warning delta to be explainable before the GitHub release is cut.
+
+**Gate**: Zero unclassified warnings in active viewer/UI projects, no newly
+introduced warnings, and every compiled legacy panel has a recorded owner or
+retirement decision. A clean build without this inventory is not release proof.
+
 ## Phase 1 — Route Integrity And Dead-Control Repair
 
 **Goal**: Make every existing promised route honest before adding surfaces.
@@ -167,7 +199,8 @@ retired by a separate approved slice.
 6. Build `WowViewer.slnx`, capture the manual evidence, update Spec 080 tasks,
 and write concise release notes listing restored, migrated, disabled, and
 retired surfaces.
-7. Attach the performance baseline and post-change comparison to the same
+7. Attach the warning disposition report alongside the performance baseline
+and post-change comparison to the same
 release package. A UI route is not signed off merely because it renders.
 
 **Release gate**: Zero dead/misrouted visible controls; zero unclassified

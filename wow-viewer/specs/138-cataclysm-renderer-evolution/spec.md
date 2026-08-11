@@ -362,6 +362,12 @@ work: shared immutable asset buffers, instance data, texture/material grouping, 
 multi-draw or indirect submission. Do not start modern GPU submission work while a CPU overlay owner
 can still block a frame for seconds; preserve all 4.x material/effect fallbacks throughout.
 
+The first bounded submission slice is recorded in
+[`wmo-doodad-batching-slice.md`](./wmo-doodad-batching-slice.md). It adds conservative opaque WMO
+shell instancing for portal-free, manually visible groups and retains per-placement handling for
+transparent, liquid, portal-sensitive, and WMO-internal doodad content. Its real-scene performance
+status remains pending user-run capture.
+
 ### Key Entities
 
 - **4.x capability profile**: A build-scoped description of file layout, chunks, flags, asset

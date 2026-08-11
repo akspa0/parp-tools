@@ -9,18 +9,18 @@
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - Secondary Overlay Map Tile Replacement (Priority: P1)
+### User Story 1 - Secondary Overlay Map Terrain Patch (Priority: P1)
 
-As a WoW map researcher or viewer user, when I load a primary terrain map (such as `Azeroth`), I want to specify an active secondary overlay map folder (such as `Gilneas`, `Gilneas2`, `GilneasPhase1`, or `GilneasPhase2`), so that any tile positions $(X, Y)$ present in the secondary map folder automatically replace the primary map's tiles at those coordinates, while retaining the primary map's tiles everywhere else without unloading the world.
+As a WoW map researcher or viewer user, when I load a primary terrain map (such as `Azeroth`), I want to specify an active secondary overlay map folder (such as `Gilneas`, `Gilneas2`, `GilneasPhase1`, or `GilneasPhase2`), so that sparse phase data present in the secondary map folder patches the primary map at matching tile/chunk coordinates, while retaining parent terrain and parent-owned liquids everywhere the phase map does not provide a patch.
 
-**Why this priority**: Core requirement for inspecting Cataclysm 4.x phased terrain where phase-specific ADTs replace continent tiles locally.
+**Why this priority**: Core requirement for inspecting Cataclysm 4.x phased terrain where phase-specific ADTs provide sparse changes over continent terrain locally.
 
 **Independent Test**: Can be tested by loading map `Azeroth` with overlay map `Gilneas` configured. Tiles at Gilneas coordinates (e.g. tile row/col $(48, 20)$) load from `World\Maps\Gilneas\Gilneas_20_48.adt`, while surrounding Eastern Kingdoms tiles load from `World\Maps\Azeroth\Azeroth_X_Y.adt`.
 
 **Acceptance Scenarios**:
 
-1. **Given** primary map `Azeroth` and secondary overlay map `Gilneas` are configured, **When** tile $(tileX, tileY)$ is requested and `World\Maps\Gilneas\Gilneas_{tileY}_{tileX}.adt` exists, **Then** the terrain mesh, texture layers, MH2O liquids, M2 doodads, and WMO placements for $(tileX, tileY)$ are loaded from `Gilneas`.
-2. **Given** primary map `Azeroth` and secondary overlay map `Gilneas` are configured, **When** tile $(tileX, tileY)$ is requested and `Gilneas` has no tile at $(tileX, tileY)$, **Then** the tile is loaded from `Azeroth`.
+1. **Given** primary map `Azeroth` and secondary overlay map `Gilneas` are configured, **When** a phase MCNK exists at a matching coordinate, **Then** that MCNK's terrain/layer/alpha payload and phase placements are merged into the parent tile, while the parent MCNK's liquid remains authoritative.
+2. **Given** primary map `Azeroth` and secondary overlay map `Gilneas` are configured, **When** `Gilneas` has no tile or MCNK patch at a coordinate, **Then** the corresponding parent tile/chunk remains loaded from `Azeroth`.
 3. **Given** a phased tile is loaded from `Gilneas`, **Then** the rest of the resident world tiles from `Azeroth` remain loaded without unloading or resetting camera state.
 
 ---
@@ -68,11 +68,11 @@ As a viewer developer, I want secondary overlay map tile resolution to respect C
 
 - **FR-001**: `ITerrainAdapter` / `StandardTerrainAdapter` MUST support an optional `OverlayMapName` property or parameter representing a secondary map folder.
 - **FR-002**: When `OverlayMapName` is non-null/non-empty, `StandardTerrainAdapter.TileExists(tileX, tileY)` MUST return `true` if either the primary map or the secondary overlay map has an ADT tile at $(tileX, tileY)$.
-- **FR-003**: `StandardTerrainAdapter.LoadTileWithPlacements(tileX, tileY)` MUST check if the overlay map has an ADT tile (and companion split ADT files) at $(tileX, tileY)$, loading from the overlay map if present, and falling back to the primary map if absent.
+- **FR-003**: `StandardTerrainAdapter.LoadTileWithPlacements(tileX, tileY)` MUST parse the parent tile first, merge sparse overlay MCNKs by chunk coordinate, remap overlay MTEX indices into the merged tile texture table, and preserve parent liquid data.
 - **FR-004**: `TerrainManager` MUST provide a method `SetOverlayMap(string? overlayMapName)` that updates the terrain adapter's overlay map setting, invalidates tile cache entries for tiles affected by the overlay map, and triggers tile re-streaming/re-upload.
 - **FR-005**: `WorldScene` MUST expose `SecondaryOverlayMap` and forward overlay map updates to `TerrainManager`.
 - **FR-006**: `ViewerApp` UI (World Scene / Terrain panel) MUST display an input field for `Secondary Overlay Map` allowing users to type or clear an overlay map name and apply it to the active scene.
-- **FR-007**: Overlay map tile loading MUST preserve terrain normals, texture blending, MH2O liquids, M2 doodads, and WMO placements for the swapped tile.
+- **FR-007**: Overlay map loading MUST preserve parent terrain/liquid data not covered by a phase patch, merge phase terrain normals and texture/alpha layers at matching MCNK coordinates, and retain both parent and phase placements.
 - **FR-008**: Overlay map resolution MUST operate without unloading or resetting resident primary map tiles outside the overlay map's footprint.
 
 ---
@@ -81,7 +81,7 @@ As a viewer developer, I want secondary overlay map tile resolution to respect C
 
 ### Measurable Outcomes
 
-- **SC-001**: Swapping a secondary overlay map (e.g. `Azeroth` + `Gilneas`) replaces only the affected tiles (e.g. Gilneas region) while 100% of surrounding resident continent tiles remain loaded and rendered without visual disruption.
+- **SC-001**: Swapping a secondary overlay map (e.g. `Azeroth` + `Gilneas`) patches only the affected MCNKs (e.g. the Gilneas region), preserves parent liquids, and leaves 100% of surrounding resident continent terrain loaded and rendered without visual disruption.
 - **SC-002**: Tile load time for overlay tiles is identical to standard ADT tile load time (< 50ms per tile on SSD).
 - **SC-003**: Reverting or clearing the secondary overlay map restores primary map tiles at those coordinates in a single frame update pass.
 
