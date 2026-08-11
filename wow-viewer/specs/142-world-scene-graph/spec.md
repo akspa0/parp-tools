@@ -663,3 +663,8 @@ path.
 For the cross-client performance gate, `Azeroth` tile `32_32` is the canonical anchor. The
 diagnostic MUST verify the matching ADT exists in the configured client and MUST report/profile
 from its tile-centered camera position rather than a map-wide inferred default.
+
+`profile-render` MUST write a machine-readable running-progress document to its requested output
+path before production scene construction, then update its phase/frame counters before each
+warmup and measured frame. A profile that blocks in client I/O, construction, terrain upload, or
+one render call must therefore expose its last completed phase instead of appearing silent.

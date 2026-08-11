@@ -48,6 +48,9 @@ per-stage GPU/driver timing is not yet captured.
 `Azeroth` tile `32_32` is the standard cross-client anchor for this diagnostic. When a tile is
 specified, `profile-render` verifies that exact ADT exists in the configured client and positions
 its production camera at the tile center instead of using the map's inferred startup camera.
+While the profile is running, its requested JSON path contains `world-render-diagnostic-progress-v1`
+with the last entered phase and completed-frame counts. It is replaced by the final
+`world-render-diagnostic-v1` report only after the measured frames finish.
 
 ## Full runtime-library proof
 

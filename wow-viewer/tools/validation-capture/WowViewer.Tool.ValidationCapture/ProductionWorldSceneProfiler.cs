@@ -57,9 +57,17 @@ internal static class ProductionWorldSceneProfiler
         ArgumentOutOfRangeException.ThrowIfLessThan(measuredFrameCount, 1);
 
         string[] overlays = string.IsNullOrWhiteSpace(looseOverlayRoot) ? [] : [looseOverlayRoot];
+        string? outputDirectory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
+        if (!string.IsNullOrWhiteSpace(outputDirectory))
+            Directory.CreateDirectory(outputDirectory);
+
+        PublishProgress(outputPath, "initializing-data-source", 0, warmupFrameCount, 0, measuredFrameCount, null);
+        Console.WriteLine("[Profile] Initializing MPQ data source...");
         using var dataSource = new MpqDataSource(clientRoot, listfilePath, overlays);
         ResolvedWdt resolvedWdt = ResolveWdt(wdtInput, dataSource);
         ValidateTargetTile(resolvedWdt, dataSource, targetTileX, targetTileY);
+        PublishProgress(outputPath, "creating-hidden-gl-context", 0, warmupFrameCount, 0, measuredFrameCount, null);
+        Console.WriteLine("[Profile] Creating hidden OpenGL context...");
         using var context = new HeadlessContext(resolution, resolution);
         using var surface = new RenderSurface(context.GL, resolution, resolution);
 
@@ -67,9 +75,15 @@ internal static class ProductionWorldSceneProfiler
         Stopwatch initializationTimer = Stopwatch.StartNew();
         try
         {
+            PublishProgress(outputPath, "constructing-world-scene", 0, warmupFrameCount, 0, measuredFrameCount, null);
+            Console.WriteLine("[Profile] Constructing production WorldScene...");
             scene = CreateWorldScene(context.GL, resolvedWdt, dataSource, buildLabel);
             if (loadAllTiles && !scene.IsWmoBased)
+            {
+                PublishProgress(outputPath, "loading-all-terrain-tiles", 0, warmupFrameCount, 0, measuredFrameCount, null);
+                Console.WriteLine("[Profile] Loading all terrain tiles (explicit --load-all-tiles request)...");
                 scene.Terrain.LoadAllTiles();
+            }
             initializationTimer.Stop();
 
             Vector3 cameraPosition = ResolveCameraPosition(scene, targetTileX, targetTileY);
@@ -78,11 +92,17 @@ internal static class ProductionWorldSceneProfiler
             Matrix4x4 projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3f, 1f, 0.1f, 20000f);
 
             for (int frame = 0; frame < warmupFrameCount; frame++)
+            {
+                PublishProgress(outputPath, "warming-up", frame, warmupFrameCount, 0, measuredFrameCount, null);
+                Console.WriteLine($"[Profile] Warmup {frame + 1}/{warmupFrameCount}...");
                 RenderFrame(context, surface, scene, cameraPosition, forward, view, projection);
+            }
 
             var frames = new List<WorldRenderDiagnosticFrame>(measuredFrameCount);
             for (int frame = 0; frame < measuredFrameCount; frame++)
             {
+                PublishProgress(outputPath, "measuring", warmupFrameCount, warmupFrameCount, frame, measuredFrameCount, null);
+                Console.WriteLine($"[Profile] Measured frame {frame + 1}/{measuredFrameCount}...");
                 RenderFrame(context, surface, scene, cameraPosition, forward, view, projection);
                 frames.Add(new WorldRenderDiagnosticFrame(frame, scene.LastRenderFrameStats));
             }
@@ -110,10 +130,8 @@ internal static class ProductionWorldSceneProfiler
                 frames,
                 workload);
 
-            string? outputDirectory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
-            if (!string.IsNullOrWhiteSpace(outputDirectory))
-                Directory.CreateDirectory(outputDirectory);
             File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+            Console.WriteLine("[Profile] Completed and wrote final diagnostic JSON.");
             return report;
         }
         finally
@@ -233,6 +251,30 @@ internal static class ProductionWorldSceneProfiler
         Vector3 target = new(cameraPosition.X + 96f, cameraPosition.Y + 96f, cameraPosition.Z - 48f);
         Vector3 forward = target - cameraPosition;
         return forward.LengthSquared() > 0.0001f ? Vector3.Normalize(forward) : -Vector3.UnitZ;
+    }
+
+    private static void PublishProgress(
+        string outputPath,
+        string phase,
+        int completedWarmupFrames,
+        int plannedWarmupFrames,
+        int completedMeasuredFrames,
+        int plannedMeasuredFrames,
+        string? detail)
+    {
+        var progress = new
+        {
+            schema = "world-render-diagnostic-progress-v1",
+            status = "running",
+            phase,
+            completed_warmup_frames = completedWarmupFrames,
+            planned_warmup_frames = plannedWarmupFrames,
+            completed_measured_frames = completedMeasuredFrames,
+            planned_measured_frames = plannedMeasuredFrames,
+            updated_utc = DateTimeOffset.UtcNow,
+            detail,
+        };
+        File.WriteAllText(outputPath, JsonSerializer.Serialize(progress, new JsonSerializerOptions { WriteIndented = true }));
     }
 
     private sealed record ResolvedWdt(string Source, byte[] Bytes, bool IsLocalFile);

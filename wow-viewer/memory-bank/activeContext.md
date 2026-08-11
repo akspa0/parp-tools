@@ -397,3 +397,5 @@ the authored RGB corpus, then reviews the combined benchmark dry plan.
    unrelated client assets. Alpha remains local-WDT only.
  - The canonical Spec 142 runtime diagnostic anchor is client-backed `Azeroth` tile `32_32`; the
    profiler validates its ADT and places the production camera at that tile center.
+ - `profile-render` now writes progress JSON at the requested output path before scene construction
+   and logs phase/frame markers; a blocking stage is observable rather than producing silent no-output.

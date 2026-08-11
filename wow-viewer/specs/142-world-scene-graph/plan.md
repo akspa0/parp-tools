@@ -290,6 +290,9 @@ the latter so the WDT, ADTs, WMO/M2 assets, and minimaps are sourced from one cl
 no-GPU `--dry-run` verifies that archive resolution before a renderer profile begins.
 The canonical runtime anchor is `Azeroth` tile `32_32`; its tile coordinates are verified against
 the same client catalog and directly determine the profiling camera position.
+The requested output path is an in-progress `world-render-diagnostic-progress-v1` document until
+the final report is complete, with stdout phase markers around data-source construction, GL setup,
+scene construction, full-residency opt-in, warmup, and measurement.
 
 **Status**: Complete for the CPU-stage diagnostic harness on 2026-08-10. The
 `ValidationCapture` tool now has `profile-render`, which opens a hidden OpenGL surface and invokes

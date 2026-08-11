@@ -764,3 +764,5 @@ Next: build the authored RGB corpus and review the combined plan.
    command. Standard profiles now accept client-archive WDT virtual paths; no runtime profile run by Codex.
  - 2026-08-10: Added explicit cross-client `Azeroth` tile `32_32` targeting and validation to
    `profile-render`; profile reports now carry the requested target tile.
+ - 2026-08-10: Console capture showed `profile-render` could appear hung before final JSON. Added
+   durable phase/frame progress output; observed trace entered the tile-32_32 AOI, not full 839-ADT residency.

@@ -106,6 +106,7 @@ identity; no FPS or GPU claim is made.
 - [x] T045 Bound minimap client-data reads to one background reader while retaining the existing
       render-thread texture-upload queue.
 - [x] T046 Add `profile-render` to `WowViewer.Tool.ValidationCapture`, executing the production
+  path with client-coherent WDT/tile validation and an on-disk progress report so a stalled stage is visible.
       `WorldScene.Render` path in a hidden OpenGL context and writing a versioned per-stage JSON
       report with workload, queue, and client-read counters.
 - [x] T047 Add focused `WorldRenderDiagnostics` report-contract tests covering stage inventory,
