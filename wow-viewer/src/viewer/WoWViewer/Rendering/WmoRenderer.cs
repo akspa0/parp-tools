@@ -33,6 +33,7 @@ public enum WmoRenderPass
 public readonly record struct WmoRenderStats(
     int DrawCalls,
     int BatchDrawCalls,
+    int OpaqueBatchInstanceCount,
     int GroupFallbackDrawCalls,
     int LiquidDrawCalls,
     int DoodadSubmissions,
@@ -44,7 +45,7 @@ public readonly record struct WmoRenderStats(
 /// Uses WowViewer.Core.IO.Converters' WmoV14Data model for geometry.
 /// Supports loading and rendering MDX doodads from DoodadSets.
 /// </summary>
-public class WmoRenderer : ISceneRenderer
+public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
 {
     private readonly GL _gl;
     private readonly WmoV14ToV17Converter.WmoV14Data _wmo;
@@ -62,7 +63,12 @@ public class WmoRenderer : ISceneRenderer
     private static int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest;
     private static int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos;
     private static int _uLightDir, _uLightColor, _uAmbientColor;
+    private static int _uUseInstanceModel;
     private static int _shaderRefCount;
+    private uint _gpuInstanceVbo;
+    private readonly List<Matrix4x4> _gpuInstanceMatrices = new();
+    private float[] _gpuInstanceUploadScratch = Array.Empty<float>();
+    private bool _gpuInstanceBatchActive;
 
     private readonly List<GroupBuffers> _groups = new();
     private readonly List<(int groupBufferIndex, float distSq)> _transparentGroupSortScratch = new();
@@ -79,13 +85,17 @@ public class WmoRenderer : ISceneRenderer
     private readonly List<(int idx, float distSq)> _visibleDoodadsScratch = new();
     private readonly Dictionary<IModelRenderer, List<int>> _opaqueDoodadBatchGroups = new();
     private readonly List<IModelRenderer> _opaqueDoodadBatchRenderers = new();
+    private bool _doodadAnimationsPreparedForWorldFrame;
     private bool _wireframe;
 
     // Material textures: materialIndex → GL texture handle
     private readonly Dictionary<int, uint> _materialTextures = new();
     private readonly HashSet<string> _materialFallbackLogKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _invalidBatchRangeLogKeys = new(StringComparer.OrdinalIgnoreCase);
     private int _materialFallbackLogCount;
+    private int _invalidBatchRangeLogCount;
     private const int MaxMaterialFallbackLogs = 200;
+    private const int MaxInvalidBatchRangeLogs = 100;
     private readonly Queue<int> _pendingMaterialTextureLoads = new();
     private const int DeferredMaterialTextureLoadsPerFrame = 1;
     private const double DeferredMaterialTextureLoadBudgetMs = 2.0;
@@ -108,6 +118,7 @@ public class WmoRenderer : ISceneRenderer
     private bool _runtimeGroupLiquidsVisible = true;
     private int _currentDrawCalls;
     private int _currentBatchDrawCalls;
+    private int _currentOpaqueBatchInstanceCount;
     private int _currentGroupFallbackDrawCalls;
     private int _currentLiquidDrawCalls;
     private int _currentDoodadSubmissions;
@@ -128,6 +139,16 @@ public class WmoRenderer : ISceneRenderer
 
     public int PendingDoodadModelLoadCount => _pendingDoodadModelLoads.Count;
     public WmoRenderStats LastRenderStats { get; private set; }
+
+    /// <summary>
+    /// Opaque WMO shells can be instanced when portal visibility cannot distinguish individual
+    /// placements. Group-level frustum admission is intentionally traded for a conservative
+    /// object-level batch; transparent/liquid/doodad work remains placement-aware.
+    /// </summary>
+    public bool SupportsGpuInstancedOpaque
+        => _groups.Count > 0
+            && _wmo.Portals.Count == 0
+            && _groups.All(static group => group.ManualVisible);
 
     public M2RouteDecision? GetDoodadRouteDecision(string normalizedPath)
         => _doodadRouteDecisions.TryGetValue(normalizedPath, out var decision) ? decision : null;
@@ -482,6 +503,22 @@ public class WmoRenderer : ISceneRenderer
         _runtimeDoodadsVisible = visible;
     }
 
+    /// <summary>
+    /// Prepares shared WMO doodad animation state once for the current world frame.
+    /// WMO placements share this renderer, so doing this inside every placement draw
+    /// scales animation CPU cost with placement count instead of unique assets.
+    /// </summary>
+    public void BeginWorldFrame()
+    {
+        _doodadAnimationsPreparedForWorldFrame = true;
+        UpdateDoodadAnimations();
+    }
+
+    public void EndWorldFrame()
+    {
+        _doodadAnimationsPreparedForWorldFrame = false;
+    }
+
     public void SetRuntimeGroupVisibilityEnabled(bool enabled)
     {
         _enableRuntimeGroupVisibility = enabled;
@@ -607,6 +644,7 @@ public class WmoRenderer : ISceneRenderer
         // WMO render order: opaque shell → doodad opaque → liquids → doodad transparent → transparent shell.
         _gl.UseProgram(_shaderProgram);
         ApplySurfaceCulling();
+        _gl.Uniform1(_uUseInstanceModel, 0);
 
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
@@ -690,92 +728,14 @@ public class WmoRenderer : ISceneRenderer
         int visibleDoodadRenderCount = 0;
         if (_doodadsVisible && _runtimeDoodadsVisible && _doodadInstances.Count > 0)
         {
-            _updatedDoodadModelsScratch.Clear();
-            _visibleDoodadsScratch.Clear();
-
-            // Build list of visible doodads with world-space distance to camera
-            float doodadCullDistance = MathF.Max(DoodadCullDistance, MathF.Min(fogEnd + 800f, 6000f));
-            float cullDistSq = doodadCullDistance * doodadCullDistance;
-            for (int di = 0; di < _doodadInstances.Count; di++)
-            {
-                var inst = _doodadInstances[di];
-                if (!inst.Visible || inst.Renderer == null) continue;
-                if (_runtimeVisibleDoodadDefIndices.Count > 0 && !_runtimeVisibleDoodadDefIndices.Contains(inst.DoodadDefIndex))
-                    continue;
-
-                if (renderOpaquePass && _updatedDoodadModelsScratch.Add(inst.ModelPath))
-                    inst.Renderer.UpdateAnimation();
-
-                // Transform local position to world space
-                var worldPos = Vector3.Transform(inst.LocalPosition, modelMatrix);
-                float distSq = Vector3.DistanceSquared(cp, worldPos);
-                if (distSq > cullDistSq) continue; // Distance cull
-                _visibleDoodadsScratch.Add((di, distSq));
-            }
-
-            // Sort nearest-first and cap at max render count
-            if (_visibleDoodadsScratch.Count > 1)
-                _visibleDoodadsScratch.Sort((a, b) => a.distSq.CompareTo(b.distSq));
-
-            visibleDoodadRenderCount = Math.Min(_visibleDoodadsScratch.Count, (int)DoodadMaxRenderCount);
+            if (renderOpaquePass)
+                visibleDoodadRenderCount = PrepareVisibleDoodads(modelMatrix, cp, fogEnd, updateAnimation: true);
+            else
+                visibleDoodadRenderCount = PrepareVisibleDoodads(modelMatrix, cp, fogEnd, updateAnimation: false);
 
             if (renderOpaquePass)
-            {
-                _opaqueDoodadBatchGroups.Clear();
-                _opaqueDoodadBatchRenderers.Clear();
-
-                for (int vi = 0; vi < visibleDoodadRenderCount; vi++)
-                {
-                    int doodadIndex = _visibleDoodadsScratch[vi].idx;
-                    DoodadInstance inst = _doodadInstances[doodadIndex];
-                    IModelRenderer renderer = inst.Renderer!;
-                    if (renderer.RequiresUnbatchedWorldRender)
-                    {
-                        _currentDoodadSubmissions++;
-                        renderer.RenderWithTransform(inst.Transform * modelMatrix, view, proj, RenderPass.Opaque, 1.0f,
-                            fogColor, fogStart, fogEnd, cameraPos,
-                            lightDir, lightColor, ambientColor);
-                        continue;
-                    }
-
-                    if (!_opaqueDoodadBatchGroups.TryGetValue(renderer, out List<int>? indices))
-                    {
-                        indices = new List<int>();
-                        _opaqueDoodadBatchGroups.Add(renderer, indices);
-                        _opaqueDoodadBatchRenderers.Add(renderer);
-                    }
-
-                    indices.Add(doodadIndex);
-                }
-
-                foreach (IModelRenderer renderer in _opaqueDoodadBatchRenderers)
-                {
-                    List<int> indices = _opaqueDoodadBatchGroups[renderer];
-                    if (renderer is IGpuInstancedModelRenderer gpuRenderer
-                        && gpuRenderer.SupportsGpuInstancedOpaque)
-                    {
-                        gpuRenderer.BeginGpuInstanceBatch(view, proj, fc, fogStart, fogEnd, cp, ld, lc, ac);
-                        foreach (int doodadIndex in indices)
-                        {
-                            DoodadInstance inst = _doodadInstances[doodadIndex];
-                            gpuRenderer.QueueGpuInstance(inst.Transform * modelMatrix, 1.0f);
-                            _currentDoodadSubmissions++;
-                        }
-
-                        gpuRenderer.EndGpuInstanceBatch();
-                    }
-                    else
-                    {
-                        renderer.BeginBatch(view, proj, fc, fogStart, fogEnd, cp, ld, lc, ac);
-                        foreach (int doodadIndex in indices)
-                        {
-                            DoodadInstance inst = _doodadInstances[doodadIndex];
-                            renderer.RenderInstance(inst.Transform * modelMatrix, RenderPass.Opaque, 1.0f);
-                            _currentDoodadSubmissions++;
-                        }
-                    }
-                }
-            }
+                RenderOpaqueDoodads(visibleDoodadRenderCount, modelMatrix, view, proj,
+                    fc, fogStart, fogEnd, cp, ld, lc, ac);
         }
 
         // Pass 3: Liquid surfaces (semi-transparent, before transparent WMO geometry)
@@ -906,6 +866,254 @@ public class WmoRenderer : ISceneRenderer
         LastRenderStats = new WmoRenderStats(
             _currentDrawCalls,
             _currentBatchDrawCalls,
+            _currentOpaqueBatchInstanceCount,
+            _currentGroupFallbackDrawCalls,
+            _currentLiquidDrawCalls,
+            _currentDoodadSubmissions,
+            _currentVisibleGroupSubmissions,
+            _currentVisibleLiquidMeshes);
+    }
+
+    public unsafe void BeginGpuInstanceBatch(Matrix4x4 view, Matrix4x4 proj,
+        Vector3 fogColor, float fogStart, float fogEnd, Vector3 cameraPos,
+        Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor)
+    {
+        ResetRenderStats();
+        ProcessDeferredMaterialTextureLoads();
+        EnsureGpuInstanceBuffer();
+
+        _gpuInstanceMatrices.Clear();
+        _gpuInstanceBatchActive = SupportsGpuInstancedOpaque;
+        if (!_gpuInstanceBatchActive)
+            return;
+
+        _gl.UseProgram(_shaderProgram);
+        ApplySurfaceCulling();
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthMask(true);
+        _gl.Disable(EnableCap.Blend);
+        _gl.PolygonMode(TriangleFace.FrontAndBack, _wireframe ? PolygonMode.Line : PolygonMode.Fill);
+        _gl.Uniform1(_uUseInstanceModel, 0);
+
+        var identity = Matrix4x4.Identity;
+        _gl.UniformMatrix4(_uModel, 1, false, (float*)&identity);
+        _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
+        _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
+        _gl.Uniform3(_uFogColor, fogColor.X, fogColor.Y, fogColor.Z);
+        _gl.Uniform1(_uFogStart, fogStart);
+        _gl.Uniform1(_uFogEnd, fogEnd);
+        _gl.Uniform3(_uCameraPos, cameraPos.X, cameraPos.Y, cameraPos.Z);
+        _gl.Uniform3(_uLightDir, lightDir.X, lightDir.Y, lightDir.Z);
+        _gl.Uniform3(_uLightColor, lightColor.X, lightColor.Y, lightColor.Z);
+        _gl.Uniform3(_uAmbientColor, ambientColor.X, ambientColor.Y, ambientColor.Z);
+        _gl.Uniform1(_uAlphaTest, 0.0f);
+    }
+
+    public void QueueGpuInstance(Matrix4x4 modelMatrix)
+    {
+        if (_gpuInstanceBatchActive)
+            _gpuInstanceMatrices.Add(modelMatrix);
+    }
+
+    public unsafe void EndGpuInstanceBatch()
+    {
+        if (!_gpuInstanceBatchActive)
+            return;
+
+        _gpuInstanceBatchActive = false;
+        if (_gpuInstanceMatrices.Count == 0)
+            return;
+
+        UploadGpuInstanceData();
+        uint instanceCount = (uint)_gpuInstanceMatrices.Count;
+        _currentOpaqueBatchInstanceCount = (int)instanceCount;
+        _gl.UseProgram(_shaderProgram);
+        _gl.Uniform1(_uUseInstanceModel, 1);
+        _gl.Uniform1(_uAlphaTest, 0.0f);
+
+        try
+        {
+            foreach (GroupBuffers gb in _groups)
+            {
+                if (!gb.ManualVisible)
+                    continue;
+
+                _currentVisibleGroupSubmissions += (int)instanceCount;
+                var group = _wmo.Groups[gb.GroupIndex];
+                _gl.BindVertexArray(gb.Vao);
+
+                if (group.Batches.Count > 0)
+                {
+                    foreach (var batch in group.Batches)
+                    {
+                        int matId = ResolveBatchMaterialId(group, batch);
+                        uint rawBlendMode = matId < _wmo.Materials.Count ? _wmo.Materials[matId].BlendMode : 0;
+                        EGxBlend blendMode = ResolveWmoBlendMode(rawBlendMode);
+                        if (blendMode != EGxBlend.Opaque && blendMode != EGxBlend.AlphaKey)
+                            continue;
+
+                        _gl.Uniform1(_uAlphaTest,
+                            blendMode == EGxBlend.AlphaKey ? WoWConstants.AlphaKeyThreshold : 0.0f);
+                        DrawInstancedBatch(gb, batch, matId, instanceCount);
+                    }
+                }
+                else
+                {
+                    DrawInstancedGroupFallback(gb, instanceCount);
+                }
+
+                _gl.BindVertexArray(0);
+            }
+        }
+        finally
+        {
+            _gl.Uniform1(_uUseInstanceModel, 0);
+            _gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
+            _gl.BindVertexArray(0);
+            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+            UpdateLastRenderStats();
+        }
+    }
+
+    public unsafe void RenderOpaqueDoodadsForPlacement(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj,
+        Vector3 fogColor, float fogStart, float fogEnd, Vector3 cameraPos,
+        Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor)
+    {
+        if (!SupportsGpuInstancedOpaque || !_doodadsVisible || !_runtimeDoodadsVisible || _doodadInstances.Count == 0)
+            return;
+
+        // The opaque WMO shell was admitted to a shared instance batch. For this
+        // route the renderer has no portals and all manual groups are visible, so
+        // repeating placement-local portal/frustum traversal is redundant.
+        int visibleDoodadRenderCount = PrepareVisibleDoodads(
+            modelMatrix,
+            cameraPos,
+            fogEnd,
+            updateAnimation: false,
+            sortByDistance: false,
+            respectRuntimeDoodadVisibility: false);
+        RenderOpaqueDoodads(visibleDoodadRenderCount, modelMatrix, view, proj,
+            fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
+        UpdateLastRenderStats();
+    }
+
+    private int PrepareVisibleDoodads(
+        Matrix4x4 modelMatrix,
+        Vector3 cameraPos,
+        float fogEnd,
+        bool updateAnimation,
+        bool sortByDistance = true,
+        bool respectRuntimeDoodadVisibility = true)
+    {
+        _updatedDoodadModelsScratch.Clear();
+        _visibleDoodadsScratch.Clear();
+
+        if (updateAnimation && !_doodadAnimationsPreparedForWorldFrame)
+            UpdateDoodadAnimations();
+
+        float doodadCullDistance = MathF.Max(DoodadCullDistance, MathF.Min(fogEnd + 800f, 6000f));
+        float cullDistSq = doodadCullDistance * doodadCullDistance;
+        for (int di = 0; di < _doodadInstances.Count; di++)
+        {
+            DoodadInstance inst = _doodadInstances[di];
+            if (!inst.Visible || inst.Renderer == null)
+                continue;
+            if (respectRuntimeDoodadVisibility
+                && _runtimeVisibleDoodadDefIndices.Count > 0
+                && !_runtimeVisibleDoodadDefIndices.Contains(inst.DoodadDefIndex))
+                continue;
+
+            Vector3 worldPos = Vector3.Transform(inst.LocalPosition, modelMatrix);
+            float distSq = Vector3.DistanceSquared(cameraPos, worldPos);
+            if (distSq > cullDistSq)
+                continue;
+
+            _visibleDoodadsScratch.Add((di, distSq));
+        }
+
+        if (sortByDistance && _visibleDoodadsScratch.Count > 1)
+            _visibleDoodadsScratch.Sort((a, b) => a.distSq.CompareTo(b.distSq));
+
+        return Math.Min(_visibleDoodadsScratch.Count, (int)DoodadMaxRenderCount);
+    }
+
+    private void UpdateDoodadAnimations()
+    {
+        _updatedDoodadModelsScratch.Clear();
+        foreach (DoodadInstance inst in _doodadInstances)
+        {
+            if (inst.Renderer != null && _updatedDoodadModelsScratch.Add(inst.ModelPath))
+                inst.Renderer.UpdateAnimation();
+        }
+    }
+
+    private unsafe void RenderOpaqueDoodads(int visibleDoodadRenderCount, Matrix4x4 modelMatrix,
+        Matrix4x4 view, Matrix4x4 proj, Vector3 fogColor, float fogStart, float fogEnd,
+        Vector3 cameraPos, Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor)
+    {
+        _opaqueDoodadBatchGroups.Clear();
+        _opaqueDoodadBatchRenderers.Clear();
+
+        for (int vi = 0; vi < visibleDoodadRenderCount; vi++)
+        {
+            int doodadIndex = _visibleDoodadsScratch[vi].idx;
+            DoodadInstance inst = _doodadInstances[doodadIndex];
+            IModelRenderer renderer = inst.Renderer!;
+            if (renderer.RequiresUnbatchedWorldRender)
+            {
+                _currentDoodadSubmissions++;
+                renderer.RenderWithTransform(inst.Transform * modelMatrix, view, proj, RenderPass.Opaque, 1.0f,
+                    fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
+                continue;
+            }
+
+            if (!_opaqueDoodadBatchGroups.TryGetValue(renderer, out List<int>? indices))
+            {
+                indices = new List<int>();
+                _opaqueDoodadBatchGroups.Add(renderer, indices);
+                _opaqueDoodadBatchRenderers.Add(renderer);
+            }
+
+            indices.Add(doodadIndex);
+        }
+
+        foreach (IModelRenderer renderer in _opaqueDoodadBatchRenderers)
+        {
+            List<int> indices = _opaqueDoodadBatchGroups[renderer];
+            if (renderer is IGpuInstancedModelRenderer gpuRenderer
+                && gpuRenderer.SupportsGpuInstancedOpaque)
+            {
+                gpuRenderer.BeginGpuInstanceBatch(view, proj, fogColor, fogStart, fogEnd,
+                    cameraPos, lightDir, lightColor, ambientColor);
+                foreach (int doodadIndex in indices)
+                {
+                    DoodadInstance inst = _doodadInstances[doodadIndex];
+                    gpuRenderer.QueueGpuInstance(inst.Transform * modelMatrix, 1.0f);
+                    _currentDoodadSubmissions++;
+                }
+
+                gpuRenderer.EndGpuInstanceBatch();
+            }
+            else
+            {
+                renderer.BeginBatch(view, proj, fogColor, fogStart, fogEnd,
+                    cameraPos, lightDir, lightColor, ambientColor);
+                foreach (int doodadIndex in indices)
+                {
+                    DoodadInstance inst = _doodadInstances[doodadIndex];
+                    renderer.RenderInstance(inst.Transform * modelMatrix, RenderPass.Opaque, 1.0f);
+                    _currentDoodadSubmissions++;
+                }
+            }
+        }
+    }
+
+    private void UpdateLastRenderStats()
+    {
+        LastRenderStats = new WmoRenderStats(
+            _currentDrawCalls,
+            _currentBatchDrawCalls,
+            _currentOpaqueBatchInstanceCount,
             _currentGroupFallbackDrawCalls,
             _currentLiquidDrawCalls,
             _currentDoodadSubmissions,
@@ -917,6 +1125,7 @@ public class WmoRenderer : ISceneRenderer
     {
         _currentDrawCalls = 0;
         _currentBatchDrawCalls = 0;
+        _currentOpaqueBatchInstanceCount = 0;
         _currentGroupFallbackDrawCalls = 0;
         _currentLiquidDrawCalls = 0;
         _currentDoodadSubmissions = 0;
@@ -950,6 +1159,12 @@ public class WmoRenderer : ISceneRenderer
 
     private unsafe void DrawBatch(GroupBuffers gb, WmoV14ToV17Converter.WmoBatch batch, int matId)
     {
+        if (!TryValidateBatchDrawRange(gb, batch))
+            return;
+
+        if (!TryBindGroupGeometry(gb, batch))
+            return;
+
         if (_materialTextures.TryGetValue(matId, out uint glTex))
         {
             _gl.ActiveTexture(TextureUnit.Texture0);
@@ -968,7 +1183,131 @@ public class WmoRenderer : ISceneRenderer
         _currentDrawCalls++;
         _currentBatchDrawCalls++;
         _gl.DrawElements(PrimitiveType.Triangles, batch.IndexCount,
-            DrawElementsType.UnsignedShort, (void*)(batch.FirstIndex * sizeof(ushort)));
+            DrawElementsType.UnsignedShort, null);
+    }
+
+    private unsafe void DrawInstancedBatch(GroupBuffers gb, WmoV14ToV17Converter.WmoBatch batch,
+        int matId, uint instanceCount)
+    {
+        if (!TryValidateBatchDrawRange(gb, batch))
+            return;
+
+        if (!TryBindGroupGeometry(gb, batch))
+            return;
+
+        if (_materialTextures.TryGetValue(matId, out uint glTex))
+        {
+            _gl.ActiveTexture(TextureUnit.Texture0);
+            _gl.BindTexture(TextureTarget.Texture2D, glTex);
+            _gl.Uniform1(_uHasTexture, 1);
+            _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 1.0f);
+        }
+        else
+        {
+            _gl.Uniform1(_uHasTexture, 0);
+            float r = ((gb.GroupIndex * 67 + 13) % 255) / 255f;
+            float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
+            float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
+            _gl.Uniform4(_uColor, r, g, b, 1.0f);
+        }
+
+        _currentDrawCalls++;
+        _currentBatchDrawCalls++;
+        _gl.DrawElementsInstanced(PrimitiveType.Triangles, batch.IndexCount,
+            DrawElementsType.UnsignedShort, null, instanceCount);
+    }
+
+    private bool TryBindGroupGeometry(GroupBuffers gb, WmoV14ToV17Converter.WmoBatch batch)
+    {
+        if (!gb.BatchEbos.TryGetValue((batch.FirstIndex, batch.IndexCount), out uint batchEbo))
+        {
+            LogInvalidBatchRange(gb, batch, "no compact batch EBO was uploaded");
+            return false;
+        }
+
+        if (gb.Vao == 0 || batchEbo == 0 || !_gl.IsVertexArray(gb.Vao) || !_gl.IsBuffer(batchEbo))
+        {
+            LogInvalidBatchRange(gb, batch,
+                $"GPU geometry handle is not live (vao={gb.Vao}, batchEbo={batchEbo})");
+            return false;
+        }
+
+        // Rebind both objects at the draw site. Doodad/model passes can change the active
+        // VAO and an element-array binding belongs to the currently bound VAO in OpenGL.
+        _gl.BindVertexArray(gb.Vao);
+        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, batchEbo);
+
+        long bufferSizeBytes = _gl.GetBufferParameter(
+            BufferTargetARB.ElementArrayBuffer,
+            BufferPNameARB.BufferSize);
+        ulong requiredBytes = (ulong)batch.IndexCount * sizeof(ushort);
+        if (bufferSizeBytes < 0 || (ulong)bufferSizeBytes < requiredBytes)
+        {
+            LogInvalidBatchRange(gb, batch,
+                $"GPU EBO size {bufferSizeBytes} bytes is smaller than required {requiredBytes} bytes");
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool TryValidateBatchDrawRange(GroupBuffers gb, WmoV14ToV17Converter.WmoBatch batch)
+    {
+        ulong firstIndex = batch.FirstIndex;
+        ulong indexCount = batch.IndexCount;
+        ulong indexEnd = firstIndex + indexCount;
+        bool validRange = gb.Ebo != 0
+            && indexCount > 0
+            && indexEnd <= gb.IndexCount
+            && gb.GroupIndex >= 0
+            && gb.GroupIndex < _wmo.Groups.Count;
+
+        if (validRange)
+        {
+            var group = _wmo.Groups[gb.GroupIndex];
+            validRange = indexEnd <= (ulong)group.Indices.Count;
+            if (validRange)
+            {
+                int first = (int)firstIndex;
+                int end = (int)indexEnd;
+                for (int index = first; index < end; index++)
+                {
+                    if (group.Indices[index] < gb.VertexCount)
+                        continue;
+
+                    LogInvalidBatchRange(
+                        gb,
+                        batch,
+                        $"vertex index {group.Indices[index]} exceeds vertex count {gb.VertexCount}");
+                    return false;
+                }
+
+                return true;
+            }
+        }
+
+        LogInvalidBatchRange(gb, batch, "index range exceeds uploaded or source index data");
+        return false;
+    }
+
+    private void LogInvalidBatchRange(
+        GroupBuffers gb,
+        WmoV14ToV17Converter.WmoBatch batch,
+        string reason)
+    {
+        if (_invalidBatchRangeLogCount >= MaxInvalidBatchRangeLogs)
+            return;
+
+        string key = $"{gb.GroupIndex}|{batch.FirstIndex}|{batch.IndexCount}|{gb.IndexCount}|{gb.VertexCount}|{gb.Ebo}";
+        if (_invalidBatchRangeLogKeys.Add(key))
+        {
+            _invalidBatchRangeLogCount++;
+            ViewerLog.Error(
+                ViewerLog.Category.Wmo,
+                $"[WMO] Skipping invalid batch draw: model='{_modelDir}' group={gb.GroupIndex} firstIndex={batch.FirstIndex} " +
+                $"indexCount={batch.IndexCount} indexBufferCount={gb.IndexCount} vertexCount={gb.VertexCount} " +
+                $"ebo={gb.Ebo} reason={reason}");
+        }
     }
 
     private unsafe void DrawGroupFallback(GroupBuffers gb)
@@ -983,6 +1322,101 @@ public class WmoRenderer : ISceneRenderer
         _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
     }
 
+    private unsafe void DrawInstancedGroupFallback(GroupBuffers gb, uint instanceCount)
+    {
+        _gl.Uniform1(_uHasTexture, 0);
+        float r = ((gb.GroupIndex * 67 + 13) % 255) / 255f;
+        float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
+        float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
+        _gl.Uniform4(_uColor, r, g, b, 1.0f);
+        _currentDrawCalls++;
+        _currentGroupFallbackDrawCalls++;
+        _gl.DrawElementsInstanced(PrimitiveType.Triangles, gb.IndexCount,
+            DrawElementsType.UnsignedShort, null, instanceCount);
+    }
+
+    private unsafe void EnsureGpuInstanceBuffer()
+    {
+        if (_gpuInstanceVbo != 0)
+            return;
+
+        _gpuInstanceVbo = _gl.GenBuffer();
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _gpuInstanceVbo);
+
+        // Every WMO VAO carries the divisor-1 instance attributes so it can be reused by
+        // opaque instanced draws. Ordinary DrawElements calls still traverse those enabled
+        // attributes on some drivers, even when uUseInstanceModel selects uModel. Seed the
+        // buffer with one complete matrix so the non-instanced path never fetches from a
+        // zero-byte buffer before the first real batch upload.
+        float[] identity =
+        {
+            1f, 0f, 0f, 0f,
+            0f, 1f, 0f, 0f,
+            0f, 0f, 1f, 0f,
+            0f, 0f, 0f, 1f,
+        };
+        fixed (float* data = identity)
+        {
+            _gl.BufferData(
+                BufferTargetARB.ArrayBuffer,
+                (nuint)(identity.Length * sizeof(float)),
+                data,
+                BufferUsageARB.StreamDraw);
+        }
+    }
+
+    private unsafe void UploadGpuInstanceData()
+    {
+        int requiredFloatCount = _gpuInstanceMatrices.Count * 16;
+        if (_gpuInstanceUploadScratch.Length < requiredFloatCount)
+            _gpuInstanceUploadScratch = new float[requiredFloatCount];
+
+        for (int index = 0; index < _gpuInstanceMatrices.Count; index++)
+        {
+            Matrix4x4 model = _gpuInstanceMatrices[index];
+            int offset = index * 16;
+            _gpuInstanceUploadScratch[offset + 0] = model.M11;
+            _gpuInstanceUploadScratch[offset + 1] = model.M12;
+            _gpuInstanceUploadScratch[offset + 2] = model.M13;
+            _gpuInstanceUploadScratch[offset + 3] = model.M14;
+            _gpuInstanceUploadScratch[offset + 4] = model.M21;
+            _gpuInstanceUploadScratch[offset + 5] = model.M22;
+            _gpuInstanceUploadScratch[offset + 6] = model.M23;
+            _gpuInstanceUploadScratch[offset + 7] = model.M24;
+            _gpuInstanceUploadScratch[offset + 8] = model.M31;
+            _gpuInstanceUploadScratch[offset + 9] = model.M32;
+            _gpuInstanceUploadScratch[offset + 10] = model.M33;
+            _gpuInstanceUploadScratch[offset + 11] = model.M34;
+            _gpuInstanceUploadScratch[offset + 12] = model.M41;
+            _gpuInstanceUploadScratch[offset + 13] = model.M42;
+            _gpuInstanceUploadScratch[offset + 14] = model.M43;
+            _gpuInstanceUploadScratch[offset + 15] = model.M44;
+        }
+
+        EnsureGpuInstanceBuffer();
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _gpuInstanceVbo);
+        fixed (float* data = _gpuInstanceUploadScratch)
+        {
+            _gl.BufferData(BufferTargetARB.ArrayBuffer,
+                (nuint)(requiredFloatCount * sizeof(float)), data, BufferUsageARB.StreamDraw);
+        }
+    }
+
+    private unsafe void ConfigureGpuInstanceAttributes()
+    {
+        EnsureGpuInstanceBuffer();
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _gpuInstanceVbo);
+        uint instanceStride = 16 * sizeof(float);
+        for (uint column = 0; column < 4; column++)
+        {
+            uint location = 5 + column;
+            _gl.EnableVertexAttribArray(location);
+            _gl.VertexAttribPointer(location, 4, VertexAttribPointerType.Float, false,
+                instanceStride, (void*)(column * 4 * sizeof(float)));
+            _gl.VertexAttribDivisor(location, 1);
+        }
+    }
+
     private void InitShaders()
     {
         _shaderRefCount++;
@@ -995,10 +1429,15 @@ layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aTexCoord;
 layout(location = 3) in vec4 aVertexLight;
 layout(location = 4) in float aBakedWeight;
+layout(location = 5) in vec4 aInstanceModel0;
+layout(location = 6) in vec4 aInstanceModel1;
+layout(location = 7) in vec4 aInstanceModel2;
+layout(location = 8) in vec4 aInstanceModel3;
 
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProj;
+uniform int uUseInstanceModel;
 
 out vec3 vNormal;
 out vec2 vTexCoord;
@@ -1007,9 +1446,12 @@ out vec4 vVertexLight;
 out float vBakedWeight;
 
 void main() {
-    vec4 worldPos = uModel * vec4(aPos, 1.0);
+    mat4 model = uUseInstanceModel == 1
+        ? mat4(aInstanceModel0, aInstanceModel1, aInstanceModel2, aInstanceModel3)
+        : uModel;
+    vec4 worldPos = model * vec4(aPos, 1.0);
     vFragPos = worldPos.xyz;
-    vNormal = mat3(transpose(inverse(uModel))) * aNormal;
+    vNormal = mat3(transpose(inverse(model))) * aNormal;
     vTexCoord = aTexCoord;
     vVertexLight = aVertexLight;
     vBakedWeight = aBakedWeight;
@@ -1090,6 +1532,7 @@ void main() {
         _uModel = _gl.GetUniformLocation(_shaderProgram, "uModel");
         _uView = _gl.GetUniformLocation(_shaderProgram, "uView");
         _uProj = _gl.GetUniformLocation(_shaderProgram, "uProj");
+        _uUseInstanceModel = _gl.GetUniformLocation(_shaderProgram, "uUseInstanceModel");
         _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
         _uColor = _gl.GetUniformLocation(_shaderProgram, "uColor");
         _uAlphaTest = _gl.GetUniformLocation(_shaderProgram, "uAlphaTest");
@@ -1435,6 +1878,7 @@ void main() {
 
     private unsafe void InitBuffers()
     {
+        EnsureGpuInstanceBuffer();
         for (int gi = 0; gi < _wmo.Groups.Count; gi++)
         {
             var group = _wmo.Groups[gi];
@@ -1507,6 +1951,32 @@ void main() {
             fixed (ushort* ptr = indices)
                 _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(ushort)), ptr, BufferUsageARB.StaticDraw);
 
+            foreach (var batch in group.Batches)
+            {
+                ulong batchEnd = batch.FirstIndex + (ulong)batch.IndexCount;
+                if (batch.IndexCount == 0 || batchEnd > (ulong)indices.Length)
+                    continue;
+
+                ushort[] batchIndices = new ushort[batch.IndexCount];
+                Array.Copy(indices, (int)batch.FirstIndex, batchIndices, 0, batchIndices.Length);
+
+                uint batchEbo = _gl.GenBuffer();
+                _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, batchEbo);
+                fixed (ushort* batchPtr = batchIndices)
+                {
+                    _gl.BufferData(
+                        BufferTargetARB.ElementArrayBuffer,
+                        (nuint)(batchIndices.Length * sizeof(ushort)),
+                        batchPtr,
+                        BufferUsageARB.StaticDraw);
+                }
+
+                gb.BatchEbos[(batch.FirstIndex, batch.IndexCount)] = batchEbo;
+            }
+
+            // Keep the full-group EBO attached for the no-batch fallback path.
+            _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, gb.Ebo);
+
             uint stride = 12 * sizeof(float);
             _gl.EnableVertexAttribArray(0);
             _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, stride, (void*)0);
@@ -1517,9 +1987,12 @@ void main() {
             _gl.EnableVertexAttribArray(3);
             _gl.VertexAttribPointer(3, 4, VertexAttribPointerType.Float, false, stride, (void*)(8 * sizeof(float)));
 
+            ConfigureGpuInstanceAttributes();
+
             _gl.BindVertexArray(0);
 
             gb.IndexCount = (uint)indices.Length;
+            gb.VertexCount = (uint)group.Vertices.Count;
             _groups.Add(gb);
         }
     }
@@ -2833,6 +3306,14 @@ void main() {
             _gl.DeleteVertexArray(gb.Vao);
             _gl.DeleteBuffer(gb.Vbo);
             _gl.DeleteBuffer(gb.Ebo);
+            foreach (uint batchEbo in gb.BatchEbos.Values)
+                _gl.DeleteBuffer(batchEbo);
+        }
+
+        if (_gpuInstanceVbo != 0)
+        {
+            _gl.DeleteBuffer(_gpuInstanceVbo);
+            _gpuInstanceVbo = 0;
         }
 
         // Delete material textures
@@ -2872,7 +3353,8 @@ void main() {
         public int GroupIndex;
         public Vector3 GroupCenter;
         public uint Vao, Vbo, Ebo;
-        public uint IndexCount;
+        public uint IndexCount, VertexCount;
+        public Dictionary<(uint FirstIndex, ushort IndexCount), uint> BatchEbos { get; } = new();
         public bool ManualVisible = true;
         public bool RuntimeVisible = true;
         public bool IsVisible => ManualVisible && RuntimeVisible;

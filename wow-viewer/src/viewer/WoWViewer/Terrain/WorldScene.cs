@@ -802,6 +802,10 @@ public class WorldScene : ISceneRenderer
     private readonly Dictionary<(int, int), List<ObjectInstance>> _tileMdxInstances = new();
     private readonly Dictionary<(int, int), List<ObjectInstance>> _tileSkyboxInstances = new();
     private readonly Dictionary<(int, int), List<ObjectInstance>> _tileWmoInstances = new();
+    // These buckets mirror the graph's tile/chunk partition, but remain a flat collector aid.
+    // They reject whole candidate lists; the existing per-instance collector stays authoritative.
+    private readonly Dictionary<(int, int), List<FlatVisibilityBucket>> _tileMdxVisibilityBuckets = new();
+    private readonly Dictionary<(int, int), List<FlatVisibilityBucket>> _tileWmoVisibilityBuckets = new();
     private readonly Dictionary<(int, int), (Vector3 Min, Vector3 Max)> _tileMdxBounds = new();
     private readonly Dictionary<(int, int), (Vector3 Min, Vector3 Max)> _tileWmoBounds = new();
     private readonly List<ObjectInstance> _externalMdxInstances = new();
@@ -815,12 +819,38 @@ public class WorldScene : ISceneRenderer
     private readonly List<ObjectInstance> _sceneGraphVisibleWmoInstances = new();
     private bool _sceneGraphFrameVisibilityPrepared;
     private WorldSceneTraversalDiagnostics _lastSceneGraphTraversalDiagnostics = new();
-    private bool _useHierarchicalSceneTraversal = true;
+    // The hierarchical graph remains available as an explicit investigation path, but it is
+    // not yet a proven replacement for the production flat visibility collectors. Real Azeroth
+    // captures measured tens of milliseconds in graph traversal per object pass, so keep the
+    // stable legacy path as the runtime default until the graph has a bounded cost budget.
+    private bool _useHierarchicalSceneTraversal;
     private bool _instancesDirty = false;
     private readonly Dictionary<string, float> _pendingVisibleMdxLoadDistances = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, float> _pendingVisibleWmoLoadDistances = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<KeyValuePair<string, float>> _pendingVisibleMdxLoadScratch = new();
     private readonly List<KeyValuePair<string, float>> _pendingVisibleWmoLoadScratch = new();
+
+    private sealed class FlatVisibilityBucket
+    {
+        public List<ObjectInstance> Instances { get; } = new();
+        public Vector3 Min { get; private set; } = new(float.MaxValue);
+        public Vector3 Max { get; private set; } = new(float.MinValue);
+        public bool BoundsKnown { get; private set; } = true;
+
+        public void Add(in ObjectInstance instance)
+        {
+            Instances.Add(instance);
+            if (!instance.BoundsResolved
+                || !AreFiniteOrderedBounds(instance.BoundsMin, instance.BoundsMax))
+            {
+                BoundsKnown = false;
+                return;
+            }
+
+            Min = Vector3.Min(Min, instance.BoundsMin);
+            Max = Vector3.Max(Max, instance.BoundsMax);
+        }
+    }
 
     private bool _objectsVisible = true;
     private bool _wmosVisible = true;
@@ -903,6 +933,7 @@ public class WorldScene : ISceneRenderer
         public int TransparentUnbatchedMdxCount { get; set; }
         public int WmoDrawCallCount { get; set; }
         public int WmoBatchDrawCallCount { get; set; }
+        public int WmoOpaqueBatchInstanceCount { get; set; }
         public int WmoGroupFallbackDrawCallCount { get; set; }
         public int WmoLiquidDrawCallCount { get; set; }
         public int WmoDoodadSubmissionCount { get; set; }
@@ -940,6 +971,7 @@ public class WorldScene : ISceneRenderer
             TransparentUnbatchedMdxCount = 0;
             WmoDrawCallCount = 0;
             WmoBatchDrawCallCount = 0;
+            WmoOpaqueBatchInstanceCount = 0;
             WmoGroupFallbackDrawCallCount = 0;
             WmoLiquidDrawCallCount = 0;
             WmoDoodadSubmissionCount = 0;
@@ -1024,6 +1056,7 @@ public class WorldScene : ISceneRenderer
                 TransparentUnbatchedMdxCount,
                 WmoDrawCallCount,
                 WmoBatchDrawCallCount,
+                WmoOpaqueBatchInstanceCount,
                 WmoGroupFallbackDrawCallCount,
                 WmoLiquidDrawCallCount,
                 WmoDoodadSubmissionCount,
@@ -1054,6 +1087,7 @@ public class WorldScene : ISceneRenderer
 
     // Scratch collections reused every frame to avoid hot-path allocations.
     private readonly WorldRenderFrame _renderFrame = new();
+    private readonly HashSet<WmoRenderer> _worldFrameWmoRenderers = new();
     private readonly List<int> _wireframeRevealWmoIndices = new();
     private readonly List<int> _wireframeRevealMdxIndices = new();
     private readonly MinimapRenderer? _minimapRenderer;
@@ -3432,6 +3466,10 @@ public class WorldScene : ISceneRenderer
     private bool _showLitMinimapMarkers;
     private bool _litLoadAttempted;
     private bool _useLitFogOverride;
+    // Local Light* spatial selection is retained for diagnostics, but its
+    // renderer application remains opt-in until the native local-zone
+    // transform/falloff contract is proven for the active build.
+    private bool _useLocalDbcLightingOverlay;
     private bool _hasGlobalViewerFogRange;
     private float _globalViewerFogStart;
     private float _globalViewerFogEnd;
@@ -3486,6 +3524,13 @@ public class WorldScene : ISceneRenderer
                 LazyLoadLit();
         }
     }
+
+    public bool UseLocalDbcLightingOverlay
+    {
+        get => _useLocalDbcLightingOverlay;
+        set => _useLocalDbcLightingOverlay = value;
+    }
+
     public LitLoader? LitLoader => _litLoader;
     public bool LitLoadAttempted => _litLoadAttempted;
     public string LitStatus => _litStatus;
@@ -8085,6 +8130,8 @@ public class WorldScene : ISceneRenderer
             _wmoInstances.AddRange(list);
         _wmoInstances.AddRange(_externalWmoInstances);
 
+        RebuildFlatVisibilityBuckets();
+
         RestoreSelectedSceneObjectAfterRebuild();
         if (UseHierarchicalSceneTraversal)
             RebuildSceneGraphObjectIndex();
@@ -8092,6 +8139,49 @@ public class WorldScene : ISceneRenderer
             _sceneGraphBuild = null;
 
         _instancesDirty = false;
+    }
+
+    private void RebuildFlatVisibilityBuckets()
+    {
+        RebuildFlatVisibilityBuckets(_tileMdxInstances, _tileMdxVisibilityBuckets);
+        RebuildFlatVisibilityBuckets(_tileWmoInstances, _tileWmoVisibilityBuckets);
+    }
+
+    private static void RebuildFlatVisibilityBuckets(
+        IReadOnlyDictionary<(int, int), List<ObjectInstance>> source,
+        Dictionary<(int, int), List<FlatVisibilityBucket>> destination)
+    {
+        destination.Clear();
+        foreach (KeyValuePair<(int, int), List<ObjectInstance>> tile in source)
+        {
+            Dictionary<(int chunkX, int chunkY), FlatVisibilityBucket> byChunk = new();
+            FlatVisibilityBucket? fallback = null;
+            foreach (ObjectInstance instance in tile.Value)
+            {
+                if (!TryGetSceneObjectChunkKey(instance, out (int tileX, int tileY, int chunkX, int chunkY) chunkKey)
+                    || chunkKey.tileX != tile.Key.Item1
+                    || chunkKey.tileY != tile.Key.Item2)
+                {
+                    fallback ??= new FlatVisibilityBucket();
+                    fallback.Add(instance);
+                    continue;
+                }
+
+                if (!byChunk.TryGetValue((chunkKey.chunkX, chunkKey.chunkY), out FlatVisibilityBucket? bucket))
+                {
+                    bucket = new FlatVisibilityBucket();
+                    byChunk.Add((chunkKey.chunkX, chunkKey.chunkY), bucket);
+                }
+
+                bucket.Add(instance);
+            }
+
+            List<FlatVisibilityBucket> buckets = new(byChunk.Count + (fallback is null ? 0 : 1));
+            buckets.AddRange(byChunk.Values);
+            if (fallback is not null)
+                buckets.Add(fallback);
+            destination[tile.Key] = buckets;
+        }
     }
 
     private void RebuildSceneGraphObjectIndex()
@@ -8452,6 +8542,7 @@ public class WorldScene : ISceneRenderer
     {
         frame.WmoDrawCallCount += stats.DrawCalls;
         frame.WmoBatchDrawCallCount += stats.BatchDrawCalls;
+        frame.WmoOpaqueBatchInstanceCount += stats.OpaqueBatchInstanceCount;
         frame.WmoGroupFallbackDrawCallCount += stats.GroupFallbackDrawCalls;
         frame.WmoLiquidDrawCallCount += stats.LiquidDrawCalls;
         frame.WmoDoodadSubmissionCount += stats.DoodadSubmissions;
@@ -8562,12 +8653,14 @@ public class WorldScene : ISceneRenderer
         if (processed <= 0)
             return;
 
+        bool flatVisibilityBucketsDirty = false;
         foreach (var pair in _tileMdxInstances)
         {
             if (!RefreshMdxInstanceBounds(pair.Value, pair.Key, isSkybox: false, isExternal: false))
                 continue;
 
             UpdateObjectBucketBounds(_tileMdxBounds, pair.Key, pair.Value);
+            flatVisibilityBucketsDirty = true;
         }
 
         foreach (var pair in _tileSkyboxInstances)
@@ -8579,11 +8672,15 @@ public class WorldScene : ISceneRenderer
                 continue;
 
             UpdateObjectBucketBounds(_tileWmoBounds, pair.Key, pair.Value);
+            flatVisibilityBucketsDirty = true;
         }
 
         RefreshMdxInstanceBounds(_externalMdxInstances, tileKey: null, isSkybox: false, isExternal: true);
         RefreshMdxInstanceBounds(_externalSkyboxInstances, tileKey: null, isSkybox: true, isExternal: true);
         RefreshWmoInstanceBounds(_externalWmoInstances, tileKey: null, isSkybox: false, isExternal: true);
+
+        if (flatVisibilityBucketsDirty)
+            RebuildFlatVisibilityBuckets();
     }
 
     private static void UpdateObjectBucketBounds(
@@ -8637,6 +8734,32 @@ public class WorldScene : ISceneRenderer
             return false;
 
         return centerDistanceSq <= MaxWorldObjectViewDistanceSq;
+    }
+
+    private bool ShouldVisitFlatVisibilityBucket(
+        FlatVisibilityBucket bucket,
+        Vector3 cameraPos,
+        float fogEnd,
+        bool isWmo)
+    {
+        // Unresolved or malformed members remain fail-open. The bucket is only a coarse
+        // accelerator and must never become a second correctness culler.
+        if (!bucket.BoundsKnown || bucket.Instances.Count == 0)
+            return true;
+
+        float boundsDistSq = DistanceSquaredPointToAabb(cameraPos, bucket.Min, bucket.Max);
+        bool frustumVisible = _frustumCuller.TestAABB(bucket.Min, bucket.Max);
+        if (!frustumVisible && boundsDistSq > ComputeNoCullDistanceSq(bucket.Min, bucket.Max))
+            return false;
+
+        float bucketDiagonal = (bucket.Max - bucket.Min).Length();
+        float baseCullDistance = isWmo
+            ? ComputeWmoCullDistance(fogEnd, _objectStreamingRangeMultiplier)
+            : ComputeMdxCullDistance(fogEnd, bucketDiagonal, isTaxiActor: false, _objectStreamingRangeMultiplier);
+        if (boundsDistSq > baseCullDistance * baseCullDistance)
+            return false;
+
+        return boundsDistSq <= MaxWorldObjectViewDistanceSq;
     }
 
     private bool RefreshMdxInstanceBounds(
@@ -9462,14 +9585,36 @@ public class WorldScene : ISceneRenderer
                 continue;
             }
 
-            WmoCulledCount += WorldObjectVisibilityCollector.CollectVisibleWmos(
-                frame.Visibility,
-                pair.Value,
-                context,
-                inst => ShouldHideObjectInstanceByUniqueId(inst),
-                (min, max) => _frustumCuller.TestAABB(min, max),
-                modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
-                (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore));
+            if (!_tileWmoVisibilityBuckets.TryGetValue(pair.Key, out List<FlatVisibilityBucket>? buckets))
+            {
+                WmoCulledCount += WorldObjectVisibilityCollector.CollectVisibleWmos(
+                    frame.Visibility,
+                    pair.Value,
+                    context,
+                    inst => ShouldHideObjectInstanceByUniqueId(inst),
+                    (min, max) => _frustumCuller.TestAABB(min, max),
+                    modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
+                    (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore));
+                continue;
+            }
+
+            foreach (FlatVisibilityBucket bucket in buckets)
+            {
+                if (!ShouldVisitFlatVisibilityBucket(bucket, cameraPos, fogEnd, isWmo: true))
+                {
+                    WmoCulledCount += bucket.Instances.Count;
+                    continue;
+                }
+
+                WmoCulledCount += WorldObjectVisibilityCollector.CollectVisibleWmos(
+                    frame.Visibility,
+                    bucket.Instances,
+                    context,
+                    inst => ShouldHideObjectInstanceByUniqueId(inst),
+                    (min, max) => _frustumCuller.TestAABB(min, max),
+                    modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
+                    (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore));
+            }
         }
 
         if (_externalWmoInstances.Count > 0)
@@ -9544,7 +9689,22 @@ public class WorldScene : ISceneRenderer
                 continue;
             }
 
-            CollectVisibleMdxInstances(frame, pair.Value, cameraPos, cameraForward, fogEnd, verticalFieldOfViewRadians, cullSmallDoodadsOnly: true, countAsTaxiActor: false);
+            if (!_tileMdxVisibilityBuckets.TryGetValue(pair.Key, out List<FlatVisibilityBucket>? buckets))
+            {
+                CollectVisibleMdxInstances(frame, pair.Value, cameraPos, cameraForward, fogEnd, verticalFieldOfViewRadians, cullSmallDoodadsOnly: true, countAsTaxiActor: false);
+                continue;
+            }
+
+            foreach (FlatVisibilityBucket bucket in buckets)
+            {
+                if (!ShouldVisitFlatVisibilityBucket(bucket, cameraPos, fogEnd, isWmo: false))
+                {
+                    MdxCulledCount += bucket.Instances.Count;
+                    continue;
+                }
+
+                CollectVisibleMdxInstances(frame, bucket.Instances, cameraPos, cameraForward, fogEnd, verticalFieldOfViewRadians, cullSmallDoodadsOnly: true, countAsTaxiActor: false);
+            }
         }
 
         if (_externalMdxInstances.Count > 0)
@@ -9730,7 +9890,8 @@ public class WorldScene : ISceneRenderer
                         _skyDome.UpdateFromLighting(lighting.GameTime);
                         fogRecommendationSource = "Global viewer light";
 
-                        if (_lightService is { HasActiveLocalOverlay: true } localLighting)
+                        if (_useLocalDbcLightingOverlay
+                            && _lightService is { HasActiveLocalOverlay: true } localLighting)
                         {
                             (float dbcFogStart, float dbcFogEnd) =
                                 TerrainLightingMath.ComputeClientFogRange(
@@ -9912,17 +10073,74 @@ public class WorldScene : ISceneRenderer
                         _gl.Disable(EnableCap.Blend);
                         _gl.DepthMask(true);
 
-                        WmoRenderedCount = WorldObjectPassCoordinator.ExecuteVisibleWmoOpaque(frame.Visibility, visible =>
+                        var visibleWmoRenderers = new WmoRenderer?[frame.Visibility.VisibleWmos.Count];
+                        var wmoBatchCandidates = new List<WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate>(
+                            frame.Visibility.VisibleWmos.Count);
+                        _worldFrameWmoRenderers.Clear();
+                        WmoRenderedCount = 0;
+                        for (int visibleIndex = 0; visibleIndex < frame.Visibility.VisibleWmos.Count; visibleIndex++)
                         {
+                            VisibleWmoInstance visible = frame.Visibility.VisibleWmos[visibleIndex];
+                            WmoRenderedCount++;
                             WmoRenderer? renderer = ResolveVisibleWmoRenderer(frame, visible.Instance.ModelKey);
+                            visibleWmoRenderers[visibleIndex] = renderer;
+                            if (renderer != null)
+                                _worldFrameWmoRenderers.Add(renderer);
+
+                            bool canBatch = renderer is IGpuInstancedWmoRenderer gpuRenderer
+                                && gpuRenderer.SupportsGpuInstancedOpaque;
+                            wmoBatchCandidates.Add(new(
+                                visible.Instance.ModelKey,
+                                canBatch,
+                                visibleIndex));
+                        }
+
+                        foreach (WmoRenderer renderer in _worldFrameWmoRenderers)
+                            renderer.BeginWorldFrame();
+
+                        WorldObjectPassCoordinator.WorldWmoOpaqueBatchPlan wmoBatchPlan =
+                            WorldObjectPassCoordinator.PlanOpaqueWmoBatches(wmoBatchCandidates);
+                        foreach (int visibleIndex in wmoBatchPlan.FallbackVisibleIndices)
+                        {
+                            VisibleWmoInstance visible = frame.Visibility.VisibleWmos[visibleIndex];
+                            WmoRenderer? renderer = visibleWmoRenderers[visibleIndex];
                             if (renderer == null)
-                                return;
+                                continue;
 
                             renderer.RenderWithTransform(visible.Instance.Transform, view, proj, WmoRenderPass.Opaque,
                                 fogColor, objectFogStart, objectFogEnd, cameraPos,
                                 lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
                             AccumulateWmoRenderStats(frame, renderer.LastRenderStats);
-                        });
+                        }
+
+                        foreach (WorldObjectPassCoordinator.WorldWmoOpaqueBatch batch in wmoBatchPlan.Batches)
+                        {
+                            int firstVisibleIndex = batch.VisibleIndices[0];
+                            WmoRenderer renderer = visibleWmoRenderers[firstVisibleIndex]!;
+                            IGpuInstancedWmoRenderer gpuRenderer = (IGpuInstancedWmoRenderer)renderer;
+                            var instances = new List<VisibleWmoInstance>(batch.VisibleIndices.Count);
+                            foreach (int visibleIndex in batch.VisibleIndices)
+                                instances.Add(frame.Visibility.VisibleWmos[visibleIndex]);
+
+                            gpuRenderer.BeginGpuInstanceBatch(
+                                view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
+                                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                            foreach (VisibleWmoInstance visible in instances)
+                                gpuRenderer.QueueGpuInstance(visible.Instance.Transform);
+                            gpuRenderer.EndGpuInstanceBatch();
+
+                            // The shell is shared across placements, but WMO-internal doodads
+                            // retain placement-local visibility, animation, and M2 fallback rules.
+                            foreach (VisibleWmoInstance visible in instances)
+                            {
+                                gpuRenderer.RenderOpaqueDoodadsForPlacement(
+                                    visible.Instance.Transform, view, proj,
+                                    fogColor, objectFogStart, objectFogEnd, cameraPos,
+                                    lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                            }
+
+                            AccumulateWmoRenderStats(frame, gpuRenderer.LastRenderStats);
+                        }
                     });
                     if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Wmo, $"WMO render: {WmoRenderedCount} drawn, {WmoCulledCount} culled");
                 },
@@ -10101,6 +10319,10 @@ public class WorldScene : ISceneRenderer
                             frame.MdxTransparentSubmissionMs += mdxTransparentMs;
                             frame.TransparentUnbatchedMdxCount++;
                         }
+
+                        foreach (WmoRenderer renderer in _worldFrameWmoRenderers)
+                            renderer.EndWorldFrame();
+                        _worldFrameWmoRenderers.Clear();
                     });
                     if (!_renderDiagPrinted) _renderDiagPrinted = true;
                 },
@@ -13835,6 +14057,8 @@ public class WorldScene : ISceneRenderer
         _tileMdxInstances.Clear();
         _tileSkyboxInstances.Clear();
         _tileWmoInstances.Clear();
+        _tileMdxVisibilityBuckets.Clear();
+        _tileWmoVisibilityBuckets.Clear();
         _externalMdxInstances.Clear();
         _externalSkyboxInstances.Clear();
         _externalWmoInstances.Clear();

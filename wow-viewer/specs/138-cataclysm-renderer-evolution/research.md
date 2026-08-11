@@ -194,3 +194,27 @@ consolidated directly without overwriting the original v50 datastore.
 
 The old 0.5.3 Ghidra findings remain separate future archaeology gates. They are not the
 explanation for this stale-synthesis failure.
+
+## 4.x runtime correctness correction — 2026-08-11
+
+- The active 4.0 terrain path must resolve MH2O `LiquidTypeId` through the exact-build
+  `LiquidType` DBC loaded by DBCD. Numeric ID-family tables are not an acceptable runtime owner.
+- The loader now reads the DBC row's actual ID field and classifies the exact row using its DBC
+  class/name data. A missing DBC row uses the documented safe water default instead of guessing
+  magma from the numeric ID.
+- Exact local Light* zone data remains diagnostic-only by default. Until the local-zone transform
+  and falloff contract is proven, applying it to ordinary outdoor terrain can produce a dark/orange
+  noon frame; the global viewer light remains the renderer identity case.
+
+## 4.x WMO placement reuse correction — 2026-08-11
+
+- Stormwind profiling exposed duplicate work after residency settled: a shared `WmoRenderer` was
+  updating each internal doodad model once per placed WMO, re-running placement-local visibility,
+  and sorting the same opaque doodad list for every placement.
+- `WorldScene` now brackets each visible unique WMO renderer with `BeginWorldFrame` and
+  `EndWorldFrame`. Doodad animation advances once per unique WMO asset per frame; placement
+  transforms remain per-instance for rendering.
+- The already-safe opaque WMO instance route skips redundant portal/frustum traversal and distance
+  sorting for its placement-local doodads. Portal-aware/fallback WMO rendering remains unchanged.
+- Viewer build passed with 0 errors and focused world-pass tests passed 14/14. Sustained Stormwind
+  FPS and GPU timing remain user-run proof requirements.

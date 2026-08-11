@@ -1,0 +1,41 @@
+using System.Numerics;
+
+namespace WoWViewer.Rendering;
+
+/// <summary>
+/// GPU instancing contract for opaque WMO shell placements.
+/// Implementations must keep transparent, portal-sensitive, liquid, and doodad paths separate.
+/// </summary>
+public interface IGpuInstancedWmoRenderer
+{
+    bool SupportsGpuInstancedOpaque { get; }
+
+    WmoRenderStats LastRenderStats { get; }
+
+    void BeginGpuInstanceBatch(
+        Matrix4x4 view,
+        Matrix4x4 proj,
+        Vector3 fogColor,
+        float fogStart,
+        float fogEnd,
+        Vector3 cameraPos,
+        Vector3 lightDir,
+        Vector3 lightColor,
+        Vector3 ambientColor);
+
+    void QueueGpuInstance(Matrix4x4 modelMatrix);
+
+    void EndGpuInstanceBatch();
+
+    void RenderOpaqueDoodadsForPlacement(
+        Matrix4x4 modelMatrix,
+        Matrix4x4 view,
+        Matrix4x4 proj,
+        Vector3 fogColor,
+        float fogStart,
+        float fogEnd,
+        Vector3 cameraPos,
+        Vector3 lightDir,
+        Vector3 lightColor,
+        Vector3 ambientColor);
+}

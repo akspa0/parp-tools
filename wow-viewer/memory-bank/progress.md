@@ -1,12 +1,42 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
 **This file is a dated ledger of what shipped, newest first.** One entry per session, a few lines
 each. Findings and how-it-works go in the workstream file; this only records *that* it happened and
 what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
+
+## 2026-08-11 — WMO doodad per-placement hot-path reduction
+
+- Added a world-frame boundary around unique visible `WmoRenderer` assets so internal doodad
+  animation is evaluated once per asset instead of once per placed WMO instance.
+- Batched opaque WMO placements no longer repeat placement-local portal/frustum traversal or sort
+  their opaque doodad list by distance; placement transforms and rendering remain instance-specific.
+- Viewer build passed with 0 errors and focused world-pass tests passed 14/14. The user must rerun
+  Stormwind after full residency to measure sustained FPS and WMO submission time.
+
+## 2026-08-11 — 4.x terrain lighting and MH2O lookup correction
+
+- Removed the active runtime's numeric LiquidType family guess from the 2.x+/4.x MH2O path.
+  `StandardTerrainAdapter` now uses the exact-build DBCD `LiquidType` row ID and class/name data;
+  a missing row follows the documented safe water default.
+- Made exact local Light* overlays opt-in for rendering and reset cached local colors/fog when no
+  local profile is active. The global viewer light remains the default outdoor identity case until
+  the native local-zone transform is proven.
+- Focused DBC/lighting tests passed (27 tests) and the viewer project built with 0 errors.
+  Real-scene visual signoff remains user-run.
+
+## 2026-08-11 — Spec 142 fog-window WDL residency
+
+- Changed `WdlTerrainRenderer` from building GPU meshes for every indexed WDL tile at world load to
+  retaining parsed CPU height data and promoting only nearest fog-window tiles, with a bounded
+  eight-mesh-per-frame build budget and hysteretic GPU eviction.
+- WDL draw admission now applies both frustum and fog-distance culling; detailed ADT residency and
+  object streaming remain owned by `TerrainManager`'s existing AOI path.
+- Viewer build passes with 0 errors in an isolated output directory. User-run movement/profile proof
+  is still required for seam correctness, residency counts, and FPS impact.
 
 ## 2026-08-10 — Spec 142 production headless render diagnostics
 
@@ -794,6 +824,72 @@ Next: build the authored RGB corpus and review the combined plan.
    with only 1,144-1,469 visible MDX and 3-11 WMO entries, the remaining work was not box batching.
    Deferred asset bounds marked `_instancesDirty` after maintenance, and `SelectedInstance` then
    synchronously rebuilt the full placement/scene-graph index inside `selection_bounds`. The read
-   accessor now fails closed while dirty, while bounds promotion updates graph nodes/ancestors in
-   place and leaves structural dirty clear. Focused diagnostics proof: 3/3; cross-platform viewer
-   build: 0 errors. User rerun is still required; no speedup claim yet.
+   accessor now fails closed while dirty, while bounds promotion updates existing graph placement
+   nodes in place and leaves structural dirty clear. User capture `azeroth-32-32-selection-bounds-
+   post-fix-2.json` confirms the fix: `selection_bounds` is 0.0021 ms P95 and coarse `overlay` is
+   0.0068 ms P95 across 10 frames, with no 40-second alternation. Whole stress-path performance
+   remains limited by 66.2 s initialization, 93.7 ms P95 WMO visibility, and 85.7 ms P95 M2
+   visibility; no whole-viewer performance claim is made.
+ - 2026-08-11: Implemented the bounded Spec 138 WMO shell batching slice using a shared instance
+   VBO and `DrawElementsInstanced` for portal-free, manually visible opaque WMO groups. WorldScene
+   groups eligible placements by model key; WMO-internal doodads remain placement-local and all
+   transparent/liquid/portal-sensitive paths remain fallback. Added WMO batch-instance telemetry
+   and planner tests. Fixed the shared-directory `WoWViewer`/`WoWViewer.CrossPlatform` MSBuild
+   intermediate-assets collision with early target-specific `Directory.Build.props` paths and an
+   explicit stale-obj exclusion. Full solution build now passes; no real-client performance result
+   is claimed until the user runs the capture.
+ - 2026-08-11: Hardened `profile-render` failure evidence. Progress JSON is atomically replaced,
+   frame counts advance only after successful renders, and managed exceptions now write terminal
+   `status: failed` JSON with the phase, last completed frame stats, and stack trace before preserving
+   the nonzero process exit. Native/process-level exits remain a separate unresolved boundary.
+ - 2026-08-11: User reran the full-map WMO batching profile. It completed one 64,071 ms warmup frame
+   before the process left the durable `running` checkpoint at `before warmup frame 2/3`. The frame
+   spent 62,237 ms in `scene_maintenance`, had 839 WDL tiles and 8,960 terrain chunks resident, but
+   zero visible WMO/MDX objects and zero WMO batch instances. The next batching proof must omit
+   `--load-all-tiles`; full-map residency remains Phase 8K work.
+ - 2026-08-11: AOI-only WMO profile reached `before warmup frame 4/20` after a normal frame with 503
+   visible MDX instances, zero visible WMO instances, zero WMO batch instances, 582.6 ms total CPU,
+   and 429.2 ms scene maintenance. Windows event 1026 records the repeatable native `c0000005`
+   access violation at `00007FFAF1251374`. Added an unhandled-exception checkpoint in the capture
+   entrypoint; the next run should persist `status: failed` for CoreCLR-surfaced AVs.
+ - 2026-08-11: User-run `azeroth-32-32-native-crash-check.json` completed five warmups and one
+   measured frame without a new crash event. Real-client WMO-shell smoke proof now shows 3 visible
+   WMOs, `WmoOpaqueBatchInstanceCount=3`, `WmoBatchDrawCallCount=16`, and `WmoDrawCallCount=16`.
+   Internal WMO doodads were not submitted (`WmoDoodadSubmissionCount=0`); doodad and sustained
+   performance proof remain open.
+ - 2026-08-11: The first interactive viewer run against `C:\WoW4-data\WoW-12025` crashed at
+   `WmoRenderer.DrawBatch -> GL.DrawElements` during world load. Added fail-closed batch index-range
+   validation against each uploaded EBO and explicit EBO rebinding for normal and instanced WMO
+   draws. The viewer project builds with 0 errors; user rerun is required to prove stability.
+ - 2026-08-11: The next interactive rerun emitted concurrent ADT parser corruption for tiles
+   `(60,31)` and `(59,31)` before the same native `WmoRenderer.DrawBatch -> GL.DrawElements` crash;
+   no WMO range-skip diagnostic was emitted, so the numeric batch range was valid. Serialized all
+   `TerrainManager` adapter tile-load entry points and strengthened draw-site VAO/EBO rebinding.
+   Viewer build remains 0 errors; user rerun is required to prove whether the native fault is gone.
+ - 2026-08-11: The subsequent viewer run showed no ADT corruption, briefly reached roughly 67 FPS,
+   then exited at the same native `WmoRenderer.DrawBatch -> GL.DrawElements` boundary. Added
+   fail-closed validation of every batch source vertex index against its uploaded vertex count and
+   included the WMO model path in skip diagnostics. Viewer build remains 0 errors; the next rerun
+   must distinguish malformed WMO geometry from remaining GPU state/lifetime corruption.
+ - 2026-08-11: The next viewer run sustained 70+ FPS while stationary but crashed immediately after
+   camera movement at the same native WMO draw boundary. Added live VAO/EBO validation and a driver
+   EBO byte-size check before batch submission. The trigger is now camera-driven visibility/streaming
+   admission; viewer build remains 0 errors and movement stability is still pending.
+ - 2026-08-11: The following user run regressed to an immediate load-time access violation at the
+   same `WmoRenderer.DrawBatch -> GL.DrawElements` boundary. Replaced nonzero batch index offsets
+   with compact per-batch EBOs and zero-offset draws; full-group EBOs remain for fallback groups.
+   Viewer build remains 0 errors. The remaining likely GPU-state hazard was then isolated: every WMO
+   VAO enables divisor-one instance-matrix attributes, but the shared instance VBO could be zero bytes
+   before the first instanced draw. Seeded that VBO with one identity matrix during buffer setup;
+   viewer build remains 0 errors and user rerun is required to prove the driver boundary is stable.
+ - 2026-08-11: The user reran the viewer without a native crash, but camera movement drove the
+   displayed FPS to zero and idle settled near 12 FPS. Comparing existing real-client captures
+   showed the hierarchical graph path costs roughly 68 ms WMO visibility plus 82 ms MDX visibility
+   per frame, versus roughly 2 ms each on the flat collectors. Changed `UseHierarchicalSceneTraversal`
+   to default-off and updated Spec 142 to keep the graph as an explicit, measured investigation
+   path. Stable interactive FPS remains pending a user rerun.
+ - 2026-08-11: Implemented the first graph-guided flat-path optimization. Resident WMO and M2
+   placements now receive maintenance-time tile/chunk candidate buckets; the flat render path
+   rejects only conservative bucket AABBs and then uses the existing per-instance collectors.
+   Unknown bounds and cross-tile ownership fail open. The viewer builds with 0 errors in an isolated
+   output directory; no FPS improvement is claimed until the user reruns the real client.
