@@ -392,3 +392,6 @@ zero runtime-eligible RGB rows. The authored RGB planner remains blocked only by
 corpus. Focused Spec 141 proof is now `22` tests total; full v60 is `111` passing. No external weights,
 client data, corpus build, or training was run. Next gate: user materializes
 the authored RGB corpus, then reviews the combined benchmark dry plan.
+ - `profile-render` now resolves standard WDTs through the configured client when passed a virtual
+   path (for example `World\\Maps\\Azeroth\\Azeroth.wdt`); never pair a custom/extracted WDT with
+   unrelated client assets. Alpha remains local-WDT only.

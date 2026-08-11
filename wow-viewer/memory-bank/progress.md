@@ -760,3 +760,5 @@ object-library sources, preserves separate split hashes, and fails closed on tar
 eligible RGB rows because its input is `objectified_terrain_shadow_256`. The planner tests add `5`
 passing cases; full v60 is now `111` passing. No external-weight use, harvest, or training occurred.
 Next: build the authored RGB corpus and review the combined plan.
+ - 2026-08-10: Corrected production diagnostic map sourcing after an invalid custom-WDT/stock-client
+   command. Standard profiles now accept client-archive WDT virtual paths; no runtime profile run by Codex.

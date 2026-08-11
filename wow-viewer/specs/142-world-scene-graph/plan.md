@@ -285,6 +285,10 @@ proof owner is a user-run real-client capture using the existing stage and asset
 
 ## Phase 8H — Production Headless Render Diagnostics
 
+The diagnostic accepts either a local WDT or a standard-client virtual WDT path. Standard runs use
+the latter so the WDT, ADTs, WMO/M2 assets, and minimaps are sourced from one client build; the
+no-GPU `--dry-run` verifies that archive resolution before a renderer profile begins.
+
 **Status**: Complete for the CPU-stage diagnostic harness on 2026-08-10. The
 `ValidationCapture` tool now has `profile-render`, which opens a hidden OpenGL surface and invokes
 the actual `WorldScene.Render` loop after production scene construction. It records all existing

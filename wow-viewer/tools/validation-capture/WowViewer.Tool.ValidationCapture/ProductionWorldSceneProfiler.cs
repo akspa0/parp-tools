@@ -16,9 +16,24 @@ namespace WowViewer.Tools.ValidationCapture;
 /// </summary>
 internal static class ProductionWorldSceneProfiler
 {
+    public static string ValidateWdtInput(
+        string clientRoot,
+        string wdtInput,
+        string? listfilePath,
+        string? looseOverlayRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(clientRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(wdtInput);
+
+        string[] overlays = string.IsNullOrWhiteSpace(looseOverlayRoot) ? [] : [looseOverlayRoot];
+        using var dataSource = new MpqDataSource(clientRoot, listfilePath, overlays);
+        ResolvedWdt resolved = ResolveWdt(wdtInput, dataSource);
+        return $"{(resolved.IsLocalFile ? "local" : "client-archive")} WDT '{resolved.Source}' ({resolved.Bytes.Length:N0} bytes)";
+    }
+
     public static WorldRenderDiagnosticReport Run(
         string clientRoot,
-        string wdtPath,
+        string wdtInput,
         string outputPath,
         string? buildLabel,
         string? listfilePath,
@@ -29,17 +44,15 @@ internal static class ProductionWorldSceneProfiler
         bool loadAllTiles)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(clientRoot);
-        ArgumentException.ThrowIfNullOrWhiteSpace(wdtPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(wdtInput);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
         ArgumentOutOfRangeException.ThrowIfLessThan(resolution, 1);
         ArgumentOutOfRangeException.ThrowIfNegative(warmupFrameCount);
         ArgumentOutOfRangeException.ThrowIfLessThan(measuredFrameCount, 1);
 
-        if (!File.Exists(wdtPath))
-            throw new FileNotFoundException("The production renderer profile requires a local WDT file.", wdtPath);
-
         string[] overlays = string.IsNullOrWhiteSpace(looseOverlayRoot) ? [] : [looseOverlayRoot];
         using var dataSource = new MpqDataSource(clientRoot, listfilePath, overlays);
+        ResolvedWdt resolvedWdt = ResolveWdt(wdtInput, dataSource);
         using var context = new HeadlessContext(resolution, resolution);
         using var surface = new RenderSurface(context.GL, resolution, resolution);
 
@@ -47,7 +60,7 @@ internal static class ProductionWorldSceneProfiler
         Stopwatch initializationTimer = Stopwatch.StartNew();
         try
         {
-            scene = CreateWorldScene(context.GL, wdtPath, dataSource, buildLabel);
+            scene = CreateWorldScene(context.GL, resolvedWdt, dataSource, buildLabel);
             if (loadAllTiles && !scene.IsWmoBased)
                 scene.Terrain.LoadAllTiles();
             initializationTimer.Stop();
@@ -115,13 +128,40 @@ internal static class ProductionWorldSceneProfiler
         context.RenderSingleFrame();
     }
 
-    private static WorldScene CreateWorldScene(GL gl, string wdtPath, MpqDataSource dataSource, string? buildLabel)
+    private static ResolvedWdt ResolveWdt(string wdtInput, MpqDataSource dataSource)
     {
-        byte[] wdtBytes = File.ReadAllBytes(wdtPath);
-        if (IsAlphaWdt(wdtBytes))
-            return new WorldScene(gl, wdtPath, dataSource, buildVersion: buildLabel);
+        if (File.Exists(wdtInput))
+            return new ResolvedWdt(wdtInput, File.ReadAllBytes(wdtInput), IsLocalFile: true);
 
-        string mapName = Path.GetFileNameWithoutExtension(wdtPath);
+        string virtualPath = wdtInput.Replace('/', '\\').TrimStart('\\');
+        byte[]? bytes = dataSource.ReadFile(virtualPath) ?? dataSource.ReadFile(virtualPath.Replace('\\', '/'));
+        if (bytes is null || bytes.Length == 0)
+        {
+            throw new FileNotFoundException(
+                "WDT input was neither a local file nor an asset in the configured client. " +
+                "Use a client-backed path such as World\\Maps\\Azeroth\\Azeroth.wdt.",
+                wdtInput);
+        }
+
+        return new ResolvedWdt(virtualPath, bytes, IsLocalFile: false);
+    }
+
+    private static WorldScene CreateWorldScene(GL gl, ResolvedWdt wdt, MpqDataSource dataSource, string? buildLabel)
+    {
+        byte[] wdtBytes = wdt.Bytes;
+        if (IsAlphaWdt(wdtBytes))
+        {
+            if (!wdt.IsLocalFile)
+            {
+                throw new NotSupportedException(
+                    "Archive-backed Alpha WDT input is not supported because AlphaTerrainAdapter requires a local WDT path. " +
+                    "Use a local Alpha WDT file for that client family.");
+            }
+
+            return new WorldScene(gl, wdt.Source, dataSource, buildVersion: buildLabel);
+        }
+
+        string mapName = Path.GetFileNameWithoutExtension(wdt.Source);
         var adapter = new StandardTerrainAdapter(wdtBytes, mapName, dataSource, buildLabel);
         var terrain = new TerrainManager(gl, adapter, mapName, dataSource);
         return new WorldScene(gl, terrain, dataSource, buildVersion: buildLabel);
@@ -155,4 +195,6 @@ internal static class ProductionWorldSceneProfiler
         Vector3 forward = target - cameraPosition;
         return forward.LengthSquared() > 0.0001f ? Vector3.Normalize(forward) : -Vector3.UnitZ;
     }
+
+    private sealed record ResolvedWdt(string Source, byte[] Bytes, bool IsLocalFile);
 }

@@ -69,12 +69,21 @@ internal static class ValidationCaptureCommand
 
         if (dryRun)
         {
-            Console.WriteLine("Production WorldScene profile dry-run succeeded.");
-            Console.WriteLine($"Client root: {clientRoot}");
-            Console.WriteLine($"Local WDT: {wdtPath}");
-            Console.WriteLine($"Output: {outputPath}");
-            Console.WriteLine($"Frames: warmup={warmupFrames}, measured={frames}, loadAllTiles={loadAllTiles}");
-            return 0;
+            try
+            {
+                string resolved = ProductionWorldSceneProfiler.ValidateWdtInput(clientRoot, wdtPath, listfilePath, looseOverlayRoot);
+                Console.WriteLine("Production WorldScene profile dry-run succeeded.");
+                Console.WriteLine($"Client root: {clientRoot}");
+                Console.WriteLine($"Resolved: {resolved}");
+                Console.WriteLine($"Output: {outputPath}");
+                Console.WriteLine($"Frames: warmup={warmupFrames}, measured={frames}, loadAllTiles={loadAllTiles}");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Production WorldScene profile dry-run failed: {ex.GetType().Name}: {ex.Message}");
+                return 2;
+            }
         }
 
         try
@@ -725,7 +734,7 @@ private static ValidationCaptureScenePolicy CreateDefaultScenePolicy(int resolut
 
             Required:
               --client-root <dir>    Client directory used by the production MpqDataSource
-              --map-input <path>     Local Alpha or standard WDT file
+              --map-input <path>     Local WDT file or WDT virtual path inside the configured client
               --output <path>        JSON diagnostic report to write
 
             Optional:
@@ -736,7 +745,11 @@ private static ValidationCaptureScenePolicy CreateDefaultScenePolicy(int resolut
               --warmup-frames <int>  Production frames before sampling; default: 8
               --frames <int>         Production frames to measure; default: 12
               --load-all-tiles       Opt into synchronous full terrain residency before sampling
-              --dry-run              Validate arguments without opening a client or GPU context
+              --dry-run              Verify client/map input without opening a GPU context
+
+            For standard-era clients, prefer a client-backed map path such as
+            World\\Maps\\Azeroth\\Azeroth.wdt so terrain and assets come from the same build.
+            Archive-backed Alpha WDT input is not supported; provide its local WDT file instead.
 
             This runs the current WorldScene.Render path, including terrain streaming, graph traversal,
             WMO/MDX visibility and submission, deferred asset loading, and all existing frame-stage timers.

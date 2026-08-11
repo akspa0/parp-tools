@@ -33,12 +33,14 @@ so run it yourself against a named client and local WDT after the build/test pro
 
 ```powershell
 $ClientRoot = "H:\CLIENTS\<client>"
-$Wdt = "H:\CLIENTS\<client>\World\Maps\<map>\<map>.wdt"
+$Wdt = "World\Maps\Azeroth\Azeroth.wdt"
 $BuildLabel = "4.0.0.11792"
 dotnet run --project tools/validation-capture/WowViewer.Tool.ValidationCapture/WowViewer.Tool.ValidationCapture.csproj -- profile-render --client-root $ClientRoot --map-input $Wdt --output output\diagnostics\world-render.json --build $BuildLabel --warmup-frames 8 --frames 12
 ```
 
-Use `--load-all-tiles` only when intentionally profiling full terrain residency. The JSON schema is
+For a standard-era client, `--map-input` should be the WDT virtual path inside that same client,
+not an unrelated extracted or custom map file. Local WDT input remains supported for Alpha clients
+whose terrain adapter requires a disk path. Use `--load-all-tiles` only when intentionally profiling full terrain residency. The JSON schema is
 `world-render-diagnostic-v1`; inspect `findings`, `stages`, `workload`, and the raw per-frame stats.
 The command currently attributes CPU stages and client I/O counters. It explicitly reports that
 per-stage GPU/driver timing is not yet captured.

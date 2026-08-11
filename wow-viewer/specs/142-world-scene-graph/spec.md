@@ -652,3 +652,10 @@ submission remain owned by the existing renderer until parity is proven. No FPS/
 parity claim exists until the later evidence tasks are run. Runtime stats now expose graph rejection
 counts and the last ADT unload/WMO-placement event so visual WMO loss can be classified as residency
 or culling.
+### 2026-08-10 correction: client-coherent diagnostic map input
+
+`profile-render` map input may be either a local WDT file or a virtual WDT path resolved through
+the configured client data source. Standard-era diagnostic runs MUST use a WDT from that same
+client build; pairing an extracted/custom WDT with unrelated client MPQs is invalid evidence.
+Archive-backed Alpha WDTs remain unsupported because the Alpha terrain adapter requires a local
+path.
