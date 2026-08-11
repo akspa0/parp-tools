@@ -2270,6 +2270,10 @@ void main() {
             ImGui.TextWrapped("World/model viewer and debugging surface for WoW Alpha, Wrath, and early Cataclysm data.");
             ImGui.Spacing();
             ImGui.TextWrapped("Author: github.com/akspa0/parp-tools");
+            ImGui.TextWrapped("Discord: discord.gg/6YdUksuKuU");
+            ImGui.Spacing();
+            ImGui.TextUnformatted("In memory of Hayven Games");
+            ImGui.TextWrapped("An inspiration for this project and a friend, whose short films explored World of Warcraft's secrets and little-known details through game footage.");
             ImGui.Spacing();
             ImGui.TextWrapped("Special thanks to WoWdev.wiki, Exploration Reboot, The Alpha Project, and everyone in the Pre-Alpha Restoration Project discord!");
             ImGui.Spacing();
