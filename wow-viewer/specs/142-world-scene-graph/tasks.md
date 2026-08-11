@@ -5,11 +5,11 @@
 **Prerequisites**: `spec.md`, `plan.md`, `research.md`, `data-model.md`,
 `contracts/synthetic-world-workload.schema.md`, `quickstart.md`
 
-**Current execution rule**: The graph foundation, conservative traversal, opt-in `WorldScene`
-object adapter, nested WMO group mounting, and the graph-only portal adjacency contract are
-validated and committed. The WMO portal read-model adapter and bounded graph-side portal
-view-volume contract are also complete; runtime nested portal traversal, doorway parity, pass,
-query, and performance promotion tasks remain unchecked.
+**Current execution rule**: The graph foundation, conservative traversal, default-on `WorldScene`
+object adapter, nested WMO group mounting, graph-only portal adjacency contract, and runtime
+residency diagnostics are validated and committed. The WMO portal read-model adapter and bounded
+graph-side portal view-volume contract are also complete; runtime nested portal traversal, doorway
+parity, pass, query, and performance promotion tasks remain unchecked.
 
 ## Phase 1: Setup
 
@@ -86,7 +86,7 @@ identity; no FPS or GPU claim is made.
 
 ## Phase 9: Integration and Evidence
 
-- [x] T026 Integrate graph ownership behind an opt-in runtime selector in `wow-viewer/src/viewer/WoWViewer/Terrain/WorldScene.cs`, mount client-backed `WmoGroup` children when summaries are available, and keep the legacy path as the default until parity evidence exists.
+- [x] T026 Integrate graph ownership behind a default-on runtime selector in `wow-viewer/src/viewer/WoWViewer/Terrain/WorldScene.cs`, mount client-backed `WmoGroup` children when summaries are available, and retain a reversible legacy fallback.
 - [x] T031 Add a build-checked opt-in bridge from loaded `WmoRenderer` portal read models to placement-keyed `WorldScenePortalAdapter` results in `wow-viewer/src/viewer/WoWViewer/Rendering/WmoRenderer.cs` and `wow-viewer/src/viewer/WoWViewer/Terrain/WorldScene.cs`; do not change runtime visibility behavior.
 - [x] T032 Add graph-side portal visibility evaluation through nested view volumes and fail-open diagnostics in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldScenePortalVisibilityEvaluator.cs`; apply it only to opt-in `WmoGroup` graph traversal in `WorldScene.cs`.
 - [x] T033 [US2] Add optional spatial-bucket metadata and nested tile-to-region attachment in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldSceneGraphObjectAdapter.cs`; preserve deterministic ordering and fail-open bounds.
@@ -97,6 +97,8 @@ identity; no FPS or GPU claim is made.
 - [x] T038 [US2] Add a partitioned graph-set build result with one independent `Tile`-rooted graph per resident ADT and a separate external graph path in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldSceneGraphObjectAdapter.cs`.
 - [x] T039 [US2] Switch opt-in `WorldScene` graph rebuild, portal lookup, visibility traversal, and snapshot aggregation to the per-ADT graph set without changing the legacy path.
 - [x] T040 [US2] Add focused tests proving independent ADT roots, no cross-tile descendants, external-graph separation, deterministic partitioning, and per-graph chunk rejection.
+- [x] T041 Promote hierarchical traversal to the default `WorldScene` path with a state-invalidating runtime toggle in `wow-viewer/src/viewer/WoWViewer/Terrain/WorldScene.cs`.
+- [x] T042 Expose graph, AOI, and last WMO-bearing ADT unload diagnostics in `wow-viewer/src/viewer/WoWViewer/Terrain/TerrainManager.cs`, `wow-viewer/src/viewer/WoWViewer/Terrain/WorldScene.cs`, `wow-viewer/src/viewer/WoWViewer/ViewerApp_Investigation.cs`, and `wow-viewer/src/viewer/WoWViewer/ViewerApp_Sidebars.cs`.
 - [ ] T027 Add synthetic workload replay and stage-level report output in `wow-viewer/tools/validation-capture/WowViewer.Tool.ValidationCapture/ValidationWorldSceneAdapter.cs`.
 - [ ] T028 Add current-vs-new parity and performance report tests in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldScenePerformanceReportTests.cs`.
 - [ ] T029 Run the focused and full test commands from `wow-viewer/specs/142-world-scene-graph/quickstart.md` and record evidence in `wow-viewer/memory-bank/progress.md`.
@@ -108,8 +110,8 @@ identity; no FPS or GPU claim is made.
 - US1 and US6 form the MVP foundation and must pass before traversal integration.
 - US2 precedes US3, US4, and US5 because portals, pass queues, and queries consume shared traversal.
 - Phase 9 begins only after the earlier story checkpoints are validated.
-- T026 is a bounded ownership seam that may land after the shared traversal contract; it does not
-  promote the selector, establish portal/pass/query parity, or authorize a heavy capture.
+- T026/T041/T042 activate and instrument the selector but do not establish portal/pass/query
+  parity, change terrain AOI policy, or authorize a heavy capture.
 
 ## Implementation Strategy
 

@@ -85,6 +85,10 @@ public partial class ViewerApp
         if (ImGui.SliderFloat("Object Stream Range", ref objectRangeMultiplier, 0.25f, 4.00f, "%.2fx"))
             _worldScene.ObjectStreamingRangeMultiplier = objectRangeMultiplier;
 
+        bool useHierarchicalSceneTraversal = _worldScene.UseHierarchicalSceneTraversal;
+        if (ImGui.Checkbox("Use ADT Scene Graph", ref useHierarchicalSceneTraversal))
+            _worldScene.UseHierarchicalSceneTraversal = useHierarchicalSceneTraversal;
+
         int visibilityProfileIndex = (int)_worldScene.ObjectVisibilityProfile;
         if (ImGui.Combo("Object Detail", ref visibilityProfileIndex, WorldObjectVisibilityProfileLabels, WorldObjectVisibilityProfileLabels.Length))
             _worldScene.ObjectVisibilityProfile = (WorldObjectVisibilityProfile)visibilityProfileIndex;
@@ -107,6 +111,7 @@ public partial class ViewerApp
             ? $"WMO scene-pass extraction is still the larger measured object-side cost ({wmoObjectCostMs:0.00} ms)."
             : $"MDX visibility/submission is currently larger ({mdxObjectCostMs:0.00} ms).";
         ImGui.TextDisabled(hotspot);
+        ImGui.TextDisabled($"ADT graph: {(_worldScene.IsHierarchicalSceneTraversalActive ? "active" : "inactive")}  roots={_worldScene.SceneGraphResidentAdtCount}");
         ImGui.TextDisabled("Visibility admission and queued object loads use this multiplier. Default is 0.50x.");
         ImGui.TextDisabled("Balanced/Performance also use FOV-aware projected-size culling and stop queueing tiny off-view assets.");
         ImGui.TextDisabled("MDX 'batched' counts in the stats are shared-shader submissions, not true GPU instancing.");

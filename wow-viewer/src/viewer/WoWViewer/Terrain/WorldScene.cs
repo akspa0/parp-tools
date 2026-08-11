@@ -815,6 +815,7 @@ public class WorldScene : ISceneRenderer
     private readonly List<ObjectInstance> _sceneGraphVisibleWmoInstances = new();
     private bool _sceneGraphFrameVisibilityPrepared;
     private WorldSceneTraversalDiagnostics _lastSceneGraphTraversalDiagnostics = new();
+    private bool _useHierarchicalSceneTraversal = true;
     private bool _instancesDirty = false;
     private readonly Dictionary<string, float> _pendingVisibleMdxLoadDistances = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, float> _pendingVisibleWmoLoadDistances = new(StringComparer.OrdinalIgnoreCase);
@@ -1189,9 +1190,29 @@ public class WorldScene : ISceneRenderer
     public int WmoCulledCount { get; private set; }
     public int MdxRenderedCount { get; private set; }
     public int MdxCulledCount { get; private set; }
+    public int LastUnloadedWmoTileX { get; private set; } = -1;
+    public int LastUnloadedWmoTileY { get; private set; } = -1;
+    public int LastUnloadedWmoInstanceCount { get; private set; }
+    public int WmoTileUnloadEventCount { get; private set; }
     public WorldRenderFrameStats LastRenderFrameStats { get; private set; } = WorldRenderFrameStats.Empty;
     public string RendererOptimizationHint => WorldRenderOptimizationAdvisor.BuildHint(LastRenderFrameStats);
-    public bool UseHierarchicalSceneTraversal { get; set; }
+    public bool UseHierarchicalSceneTraversal
+    {
+        get => _useHierarchicalSceneTraversal;
+        set
+        {
+            if (_useHierarchicalSceneTraversal == value)
+                return;
+
+            _useHierarchicalSceneTraversal = value;
+            _sceneGraphBuild = null;
+            _sceneGraphFrameVisibilityPrepared = false;
+            _instancesDirty = true;
+        }
+    }
+    public bool IsHierarchicalSceneTraversalActive => UseHierarchicalSceneTraversal && _sceneGraphBuild is not null;
+    public int SceneGraphResidentAdtCount => _sceneGraphBuild?.AdtGraphs.Count ?? 0;
+    public bool SceneGraphHasExternalRoot => _sceneGraphBuild?.ExternalGraph is not null;
     public WorldSceneGraphSnapshot? SceneGraphSnapshot => _sceneGraphBuild?.CreateSnapshot();
     public WorldSceneTraversalDiagnostics SceneGraphTraversalDiagnostics => _lastSceneGraphTraversalDiagnostics;
     public IReadOnlyDictionary<string, WorldScenePortalAdapterResult> SceneGraphPortalAdapters => _sceneGraphPortalAdapters;
@@ -7985,12 +8006,19 @@ public class WorldScene : ISceneRenderer
     /// </summary>
     private void OnTileUnloaded(int tileX, int tileY)
     {
+        int wmoInstanceCount = _tileWmoInstances.TryGetValue((tileX, tileY), out List<ObjectInstance>? wmoInstances)
+            ? wmoInstances.Count
+            : 0;
         _tileMdxInstances.Remove((tileX, tileY));
         _tileSkyboxInstances.Remove((tileX, tileY));
         _tileWmoInstances.Remove((tileX, tileY));
         _tileMdxBounds.Remove((tileX, tileY));
         _tileWmoBounds.Remove((tileX, tileY));
         _wdlTerrain?.ShowTile(tileX, tileY);
+        LastUnloadedWmoTileX = tileX;
+        LastUnloadedWmoTileY = tileY;
+        LastUnloadedWmoInstanceCount = wmoInstanceCount;
+        WmoTileUnloadEventCount++;
         _instancesDirty = true;
     }
 

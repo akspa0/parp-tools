@@ -141,19 +141,20 @@ pay a full invariant walk on every frame.
 3. Preserve unknown/incomplete bounds as visible-but-non-rejectable.
 4. Prove the behavior with synthetic fixed-camera-style tests before viewer integration.
 
-## Phase 3 — Runtime Object Adapter and Opt-In WorldScene Traversal
+## Phase 3 — Runtime Object Adapter and WorldScene Traversal
 
 **Status**: Complete for the bounded selector slice on 2026-08-10. Existing `WorldScene` object
 lists can be adapted to `map -> tile/external bucket -> placement`, and client-backed WMO group
-summaries mount as nested children when available. The opt-in selector uses one graph traversal
-before the existing WMO/MDX visibility and asset-readiness checks. The legacy path remains the
-default; no FPS, GPU, portal-traversal, pass-order, or real-client parity claim is made.
+summaries mount as nested children when available. The default-on selector uses one graph traversal
+before the existing WMO/MDX visibility and asset-readiness checks; the legacy path remains a
+reversible diagnostic fallback. No FPS, GPU, portal-traversal, pass-order, or real-client parity
+claim is made.
 
 1. Adapt resolved `WorldObjectInstance` placements without reopening format readers; use existing
    client-backed WMO group summaries when available and fail open for malformed bounds.
 2. Rebuild the graph only when object residency or resolved bounds change.
 3. Use one conservative frustum traversal to feed the existing WMO and M2 collectors when
-   `UseHierarchicalSceneTraversal` is enabled.
+   `UseHierarchicalSceneTraversal` is enabled by default.
 4. Expose graph snapshot and traversal diagnostics for later validation-capture reporting.
 5. Prove the adapter with stable IDs, tile grouping, unknown-bound fail-open, and replay tests;
    compile the viewer project to verify the integration seam.
@@ -246,6 +247,21 @@ This slice changes the ownership boundary to one independently traversable `Tile
 resident ADT, with external content kept separate; it does not rewrite terrain loading, WMO/M2
 submission, or claim a measured performance win before capture.
 The graph-set contract is the proof owner for partitioning; `WorldScene` is the integration proof owner.
+
+## Phase 8E — Runtime Activation and Residency Diagnostics
+
+**Status**: In progress on 2026-08-10. The per-ADT graph path is now default-on in `WorldScene`, with
+a runtime toggle back to the legacy path for A/B diagnosis. Viewer runtime stats expose graph
+activation and rejection counts, camera/retained ADT counts, and the last ADT unload with its WMO
+placement count. This identifies whether a disappearing WMO is a residency event or an object-cull
+event before changing retention policy. No runtime capture or measured performance claim is made.
+
+1. Keep the selector transition invalidating graph state so toggling paths cannot reuse stale
+   visibility or placement lists.
+2. Expose graph roots, traversal counts, AOI camera/retention counts, and last WMO-bearing tile
+   unload in existing investigation/runtime-stat surfaces.
+3. Run the focused graph proof and viewer build; defer real-client A/B capture and any AOI/cull
+   policy change until the user witnesses the diagnostics on the affected map.
 
 ## Later Phases (Not Started In This Slice)
 

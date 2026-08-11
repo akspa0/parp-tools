@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-10
 
-**Status**: Draft
+**Status**: In progress
 
 **Input**: User description: "Runtime scene graph and spatial partitioning architecture for the viewer, modeled on the client's CWorld scene graph (reference module 09). Replace the current type-partitioned flat per-instance culling with a unified hierarchical scene node model where the world is a scene graph of nested sub-scene-graphs: map -> tile -> chunk -> object node, and each asset (WMO with its groups, M2 with its attachments, PM4 structures) is itself a sub-graph mounted into a parent node. Provide a nestable view frustum stack with WMO portal-based occlusion culling, visible/non-visible node lists, state-sorted render pass buckets, and a single shared traversal used by both rendering and spatial queries (picking/raycast). Goal is to fix the god-awful CPU-bound performance of the current implementation and make the viewer able to hold whole maps."
 
@@ -147,9 +147,10 @@ descendants as culled without those descendants being individually tested.
 5. **Given** the same scene rendered with the new traversal and with the current path, **When**
    the two outputs are compared, **Then** the visible content matches within a declared tolerance
    and any difference is attributable to a named, intentional behavior change.
-6. **Given** a resident ADT tile with many ordinary M2 doodad placements, **When** the opt-in graph
+6. **Given** a resident ADT tile with many ordinary M2 doodad placements, **When** the graph path
    is built, **Then** placements are grouped beneath deterministic terrain-chunk region nodes so a
-   rejected chunk skips its doodad descendants without changing the legacy path.
+   rejected chunk skips its doodad descendants; the legacy path remains available as a diagnostic
+   fallback.
 
 ---
 
@@ -598,9 +599,10 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
   placement bounds and remain non-rejectable when any member is unresolved. When a client-backed
   `WmoMeshSummary` is available, its group summaries mount
   as `WmoGroup` children with local bounds, stable IDs, asset keys, and portal-group metadata.
-- `WorldScene` now exposes `UseHierarchicalSceneTraversal` as an opt-in selector. When enabled,
-  the per-ADT graph set feeds the existing WMO/MDX visibility collectors independently; aggregate
-  snapshots and traversal diagnostics are exposed for later capture reporting.
+- `WorldScene` now exposes `UseHierarchicalSceneTraversal` as a default-on selector with a runtime
+  fallback toggle. When enabled, the per-ADT graph set feeds the existing WMO/MDX visibility
+  collectors independently; aggregate snapshots and traversal diagnostics are exposed for capture
+  reporting.
 - `WorldScenePortalGraph` now provides a graph-only portal adjacency contract. It rejects malformed
   or unknown-endpoint links and reports deterministic cycle, missing-entry, absent-data, and
   maximum-depth fallback diagnostics. It does not construct portal view volumes or replace the
@@ -629,8 +631,11 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
 - Focused graph/workload/traversal/adapter/portal proof is 34 passing tests; the runtime and viewer
   projects build with only existing repository warnings.
 
-This is an opt-in integration proof, not a renderer promotion. The legacy `WorldScene` traversal
-remains the default, and the graph currently mounts object-population chunk buckets rather than
-owning terrain mesh chunk submission. WMO portal runtime submission and WMO-internal doodad-set
+This is a runtime activation and instrumentation slice, not a performance promotion. The graph
+path is now the default, while the legacy `WorldScene` traversal remains available through the
+runtime toggle for A/B diagnosis. The graph currently mounts object-population chunk buckets rather
+than owning terrain mesh chunk submission. WMO portal runtime submission and WMO-internal doodad-set
 submission remain owned by the existing renderer until parity is proven. No FPS/GPU or real-client
-parity claim exists until the later evidence tasks are run.
+parity claim exists until the later evidence tasks are run. Runtime stats now expose graph rejection
+counts and the last ADT unload/WMO-placement event so visual WMO loss can be classified as residency
+or culling.

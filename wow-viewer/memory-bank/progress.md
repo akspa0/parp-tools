@@ -8,6 +8,16 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 runtime activation and residency diagnostics
+
+- Promoted `WorldScene.UseHierarchicalSceneTraversal` to default-on while retaining a state-invalidating
+  runtime toggle back to the legacy path for A/B diagnosis.
+- Added viewer diagnostics for graph roots/traversal rejection, AOI camera and detailed/retained tile
+  counts, and the last ADT unload with its WMO placement count. This distinguishes tile residency loss
+  from WMO visibility culling before changing policy.
+- Viewer build passes with 0 errors and existing warnings. No real-client capture, GPU measurement, or
+  AOI/cull-policy change has been run.
+
 ## 2026-08-10 — Spec 142 independent ADT scene-graph roots
 
 - Added `WorldSceneGraphBuildSet`: each resident ADT tile now owns an independent `Tile`-rooted

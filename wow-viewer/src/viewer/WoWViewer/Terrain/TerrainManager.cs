@@ -84,6 +84,11 @@ public class TerrainManager : ISceneRenderer
     public int LoadedChunkCount => _terrainRenderer.LoadedChunkCount;
     public bool IsTileLoaded(int tileX, int tileY) => _loadedTiles.ContainsKey((tileX, tileY));
     public IEnumerable<(int tileX, int tileY)> LoadedTiles => _loadedTiles.Keys;
+    public int CameraTileX => _lastCameraTileX;
+    public int CameraTileY => _lastCameraTileY;
+    public int LastUnloadedTileX { get; private set; } = -1;
+    public int LastUnloadedTileY { get; private set; } = -1;
+    public int TileUnloadEventCount { get; private set; }
     /// <summary>True while background tile loads or pending GPU uploads remain.</summary>
     public bool IsStreaming => !_loadingTiles.IsEmpty || !_pendingTiles.IsEmpty;
     public int BackgroundTileLoadCount => _loadingTiles.Count;
@@ -534,6 +539,9 @@ public class TerrainManager : ISceneRenderer
             _liquidRenderer.RemoveChunksForTile(key.Item1, key.Item2);
             tileMesh.Dispose();
             _loadedTiles.Remove(key);
+            LastUnloadedTileX = key.Item1;
+            LastUnloadedTileY = key.Item2;
+            TileUnloadEventCount++;
             // NOTE: _tileCache retains the parsed data so re-entry is instant
             OnTileUnloaded?.Invoke(key.Item1, key.Item2);
         }

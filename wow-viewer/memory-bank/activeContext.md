@@ -32,9 +32,9 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
   Focused graph/workload/traversal proof is 11 tests.
 - The current bounded integration adapts existing `WorldObjectInstance` lists into stable
   `map -> tile/external bucket -> placement` nodes. Client-backed `WmoMeshSummary.GroupSummaries`
-  now mount as nested `WmoGroup` children. `WorldScene.UseHierarchicalSceneTraversal` opt-in feeds
-  one conservative graph traversal into the existing WMO/MDX collectors; the legacy path remains
-  default. `WorldScenePortalGraph` now provides graph-only adjacency and bounded traversal
+  now mount as nested `WmoGroup` children. `WorldScene.UseHierarchicalSceneTraversal` is now
+  default-on and feeds one conservative graph traversal into the existing WMO/MDX collectors; the
+  legacy path remains available as a runtime fallback. `WorldScenePortalGraph` now provides graph-only adjacency and bounded traversal
   diagnostics for malformed, cyclic, missing-entry, absent-data, and depth-limited cases.
   `WorldScenePortalAdapter` consumes existing `WmoRenderDocument` portal read models without
   changing readers, preserving valid geometry and failing open for malformed geometry or unknown
@@ -57,8 +57,10 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
   beneath deterministic terrain chunk buckets in the opt-in graph; unresolved bounds keep the chunk
   fail-open. This is object-population partitioning, not terrain mesh ownership. The existing
   `WmoRenderer` still owns WMO group and WMO-internal doodad-set submission. Heavy real-scene
-  captures and GPU measurements remain user-run; next gaps are runtime WMO submission/doorway
-  parity, pass/query ownership, terrain-mesh mounting, and stage-level parity evidence.
+  captures and GPU measurements remain user-run. Runtime stats now expose graph roots and rejection
+  counts plus AOI camera/retention and last WMO-bearing tile-unload evidence. Next gaps are runtime
+  WMO submission/doorway parity, pass/query ownership, terrain-mesh mounting, and stage-level
+  parity evidence.
 
 ## Now — Viewer Runtime & Terrain Improvements (Specs 135, 136, 137)
 

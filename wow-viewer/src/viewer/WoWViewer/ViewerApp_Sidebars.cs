@@ -3098,6 +3098,12 @@ public partial class ViewerApp
         ImGui.Text($"Visible WMO: {renderStats.VisibleWmoCount}  Visible MDX: {renderStats.VisibleMdxCount}  Taxi actors: {renderStats.VisibleTaxiMdxCount}");
         ImGui.Text($"Object stream range: {_worldScene.ObjectStreamingRangeMultiplier:0.00}x");
         ImGui.Text($"Object detail: {_worldScene.ObjectVisibilityProfile}");
+        var graphDiagnostics = _worldScene.SceneGraphTraversalDiagnostics;
+        ImGui.Text($"ADT graph: {(_worldScene.IsHierarchicalSceneTraversalActive ? "active" : "inactive")}  roots={_worldScene.SceneGraphResidentAdtCount}  external={(_worldScene.SceneGraphHasExternalRoot ? "yes" : "no")}");
+        ImGui.Text($"Graph visited/tested/rejected/skipped: {graphDiagnostics.VisitedNodeCount}/{graphDiagnostics.IndividuallyTestedNodeCount}/{graphDiagnostics.RejectedNodeCount}/{graphDiagnostics.SkippedDescendantCount}");
+        ImGui.Text($"AOI camera tile: ({_worldScene.Terrain.CameraTileX},{_worldScene.Terrain.CameraTileY})  loaded={_worldScene.Terrain.LoadedTileCount}  detailed/retained={_worldScene.Terrain.EffectiveDetailedTileCount}/{_worldScene.Terrain.EffectiveRetainedTileCount}");
+        if (_worldScene.Terrain.TileUnloadEventCount > 0)
+            ImGui.Text($"Last ADT unload: ({_worldScene.Terrain.LastUnloadedTileX},{_worldScene.Terrain.LastUnloadedTileY})  WMO placements={_worldScene.LastUnloadedWmoInstanceCount}");
         ImGui.Text($"Terrain chunks rendered/culled: {renderStats.TerrainChunksRendered}/{renderStats.TerrainChunksCulled}  WDL visible/hidden: {renderStats.WdlVisibleTileCount}/{renderStats.WdlHiddenTileCount}");
         if (terrainRenderer != null)
             ImGui.Text($"Terrain draw/uniform/tex-bind: {terrainRenderer.LastFrameDrawCalls}/{terrainRenderer.LastFrameUniform1Calls}/{terrainRenderer.LastFrameBindTextureCalls}");

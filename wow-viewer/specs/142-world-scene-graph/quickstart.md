@@ -1,8 +1,9 @@
 # Spec 142 Graph and Opt-In Traversal Quickstart
 
-This slice proves the scene-graph, synthetic-workload, object-adapter, and opt-in traversal
-contracts. It does not launch the viewer, a GPU capture, a real-client load, training, or a long
-benchmark. The legacy viewer traversal remains the default.
+This slice proves the scene-graph, synthetic-workload, object-adapter, and runtime traversal
+contracts. The per-ADT graph traversal is now default-on in the viewer, with `Use ADT Scene Graph`
+available as a runtime fallback toggle. This quickstart does not launch the viewer, a GPU capture,
+a real-client load, training, or a long benchmark.
 
 ## Focused proof
 
@@ -71,7 +72,11 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
 - External M2 spawns, skyboxes, WMO placements, and WMO-internal doodad-set submission remain
   outside this chunk-bucket slice.
 - Unknown object bounds keep their bucket and map fail-open.
-- The viewer project compiles with the opt-in `WorldScene.UseHierarchicalSceneTraversal` seam.
+- The viewer project compiles with the default-on `WorldScene.UseHierarchicalSceneTraversal` seam
+  and its reversible legacy-path toggle.
+- Runtime stats expose graph active/inactive state, resident ADT graph roots, traversal
+  visited/tested/rejected/skipped counts, AOI camera and retained counts, and the last unloaded ADT
+  plus its WMO placement count.
 
 ## Not yet run by this phase
 
