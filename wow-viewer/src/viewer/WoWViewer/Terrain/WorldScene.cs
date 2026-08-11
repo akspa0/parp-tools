@@ -808,7 +808,7 @@ public class WorldScene : ISceneRenderer
     private readonly List<ObjectInstance> _externalSkyboxInstances = new();
     private readonly List<ObjectInstance> _externalWmoInstances = new();
     private readonly List<ObjectInstance> _taxiActorInstances = new();
-    private WorldSceneGraphBuildResult? _sceneGraphBuild;
+    private WorldSceneGraphBuildSet? _sceneGraphBuild;
     private readonly Dictionary<string, WorldScenePortalAdapterResult> _sceneGraphPortalAdapters = new(StringComparer.Ordinal);
     private readonly Dictionary<string, WorldScenePortalVisibilityResult> _sceneGraphPortalVisibility = new(StringComparer.Ordinal);
     private readonly List<ObjectInstance> _sceneGraphVisibleMdxInstances = new();
@@ -1192,7 +1192,7 @@ public class WorldScene : ISceneRenderer
     public WorldRenderFrameStats LastRenderFrameStats { get; private set; } = WorldRenderFrameStats.Empty;
     public string RendererOptimizationHint => WorldRenderOptimizationAdvisor.BuildHint(LastRenderFrameStats);
     public bool UseHierarchicalSceneTraversal { get; set; }
-    public WorldSceneGraphSnapshot? SceneGraphSnapshot => _sceneGraphBuild?.Graph.CreateSnapshot();
+    public WorldSceneGraphSnapshot? SceneGraphSnapshot => _sceneGraphBuild?.CreateSnapshot();
     public WorldSceneTraversalDiagnostics SceneGraphTraversalDiagnostics => _lastSceneGraphTraversalDiagnostics;
     public IReadOnlyDictionary<string, WorldScenePortalAdapterResult> SceneGraphPortalAdapters => _sceneGraphPortalAdapters;
     public IReadOnlyDictionary<string, WorldScenePortalVisibilityResult> SceneGraphPortalVisibility => _sceneGraphPortalVisibility;
@@ -8053,7 +8053,7 @@ public class WorldScene : ISceneRenderer
             AppendSceneGraphPlacements(placements, _wmoInstances, WorldSceneNodeKind.WmoPlacement, isSkybox: false, isExternal: true, requiresUpdate: false, childFactory: BuildWmoSceneGraphChildren);
         }
 
-        _sceneGraphBuild = WorldSceneGraphObjectAdapter.Build(placements);
+        _sceneGraphBuild = WorldSceneGraphObjectAdapter.BuildPerAdt(placements);
         _sceneGraphFrameVisibilityPrepared = false;
         _lastSceneGraphTraversalDiagnostics = new WorldSceneTraversalDiagnostics();
     }
@@ -9245,7 +9245,8 @@ public class WorldScene : ISceneRenderer
 
         foreach ((string placementId, WorldScenePortalAdapterResult adapter) in _sceneGraphPortalAdapters)
         {
-            if (_sceneGraphBuild.Graph.TryGetNode(placementId, out WorldSceneNode? placementNode))
+            if (_sceneGraphBuild.TryGetGraphForPlacement(placementId, out WorldSceneGraphBuildResult? placementGraph)
+                && placementGraph.Graph.TryGetNode(placementId, out WorldSceneNode? placementNode))
             {
                 _sceneGraphPortalVisibility[placementId] = WorldScenePortalVisibilityEvaluator.Evaluate(
                     adapter,
@@ -9255,28 +9256,31 @@ public class WorldScene : ISceneRenderer
             }
         }
 
-        WorldSceneTraversalResult traversal = WorldSceneTraversal.Traverse(
-            _sceneGraphBuild.Graph,
-            IsSceneGraphNodeVisible,
-            node => node.Kind is WorldSceneNodeKind.M2Placement or WorldSceneNodeKind.WmoPlacement,
-            shouldEvaluateVisibility: static node =>
-                node.Kind != WorldSceneNodeKind.M2Placement
-                || node.Parent?.Kind != WorldSceneNodeKind.Chunk,
-            validateGraph: false);
-        _lastSceneGraphTraversalDiagnostics = traversal.Diagnostics;
-
-        foreach (WorldSceneNode node in traversal.VisibleNodes)
+        foreach (WorldSceneGraphBuildResult graphBuild in _sceneGraphBuild.EnumerateGraphs())
         {
-            if (!_sceneGraphBuild.PlacementsByNodeId.TryGetValue(node.Id, out WorldSceneGraphObjectPlacement placement)
-                || placement.IsSkybox)
-            {
-                continue;
-            }
+            WorldSceneTraversalResult traversal = WorldSceneTraversal.Traverse(
+                graphBuild.Graph,
+                IsSceneGraphNodeVisible,
+                node => node.Kind is WorldSceneNodeKind.M2Placement or WorldSceneNodeKind.WmoPlacement,
+                shouldEvaluateVisibility: static node =>
+                    node.Kind != WorldSceneNodeKind.M2Placement
+                    || node.Parent?.Kind != WorldSceneNodeKind.Chunk,
+                validateGraph: false);
+            _lastSceneGraphTraversalDiagnostics.Accumulate(traversal.Diagnostics);
 
-            if (node.Kind == WorldSceneNodeKind.WmoPlacement)
-                _sceneGraphVisibleWmoInstances.Add(placement.Instance);
-            else if (node.Kind == WorldSceneNodeKind.M2Placement)
-                _sceneGraphVisibleMdxInstances.Add(placement.Instance);
+            foreach (WorldSceneNode node in traversal.VisibleNodes)
+            {
+                if (!graphBuild.PlacementsByNodeId.TryGetValue(node.Id, out WorldSceneGraphObjectPlacement placement)
+                    || placement.IsSkybox)
+                {
+                    continue;
+                }
+
+                if (node.Kind == WorldSceneNodeKind.WmoPlacement)
+                    _sceneGraphVisibleWmoInstances.Add(placement.Instance);
+                else if (node.Kind == WorldSceneNodeKind.M2Placement)
+                    _sceneGraphVisibleMdxInstances.Add(placement.Instance);
+            }
         }
 
         _sceneGraphFrameVisibilityPrepared = true;

@@ -238,6 +238,15 @@ rejection but defers exact visibility of M2 leaves under those chunks to the exi
 preventing a duplicate graph-level leaf frustum test. Deferred leaf counts are attributed by kind.
 No external spawn, skybox, WMO, WMO doodad-set, or renderer submission behavior changes.
 
+## Phase 8D — Independent ADT Scene-Graph Roots
+
+**Status**: Complete for the contract, viewer integration, and focused proof on 2026-08-10. The current opt-in
+adapter no longer materializes one global map graph whose tile nodes own every ADT placement.
+This slice changes the ownership boundary to one independently traversable `Tile`-rooted graph per
+resident ADT, with external content kept separate; it does not rewrite terrain loading, WMO/M2
+submission, or claim a measured performance win before capture.
+The graph-set contract is the proof owner for partitioning; `WorldScene` is the integration proof owner.
+
 ## Later Phases (Not Started In This Slice)
 
 - **Phase 9**: Integrate graph portal volumes into runtime WMO submission and prove doorway

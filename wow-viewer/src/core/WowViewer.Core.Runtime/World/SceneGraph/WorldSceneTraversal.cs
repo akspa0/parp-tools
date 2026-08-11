@@ -35,6 +35,24 @@ public sealed class WorldSceneTraversalDiagnostics
     public IReadOnlyDictionary<WorldSceneNodeKind, int> DeferredVisibilityTestCountsByKind =>
         _deferredVisibilityTestCountsByKind;
 
+    public void Accumulate(WorldSceneTraversalDiagnostics other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+
+        VisitedNodeCount += other.VisitedNodeCount;
+        IndividuallyTestedNodeCount += other.IndividuallyTestedNodeCount;
+        NonRejectableNodeCount += other.NonRejectableNodeCount;
+        VisibleRenderableNodeCount += other.VisibleRenderableNodeCount;
+        RejectedNodeCount += other.RejectedNodeCount;
+        SkippedDescendantCount += other.SkippedDescendantCount;
+        MaxDepthReached = Math.Max(MaxDepthReached, other.MaxDepthReached);
+        DeferredVisibilityTestCount += other.DeferredVisibilityTestCount;
+        AccumulateCounts(_individuallyTestedNodeCountsByKind, other._individuallyTestedNodeCountsByKind);
+        AccumulateCounts(_rejectedNodeCountsByKind, other._rejectedNodeCountsByKind);
+        AccumulateCounts(_skippedDescendantCountsByKind, other._skippedDescendantCountsByKind);
+        AccumulateCounts(_deferredVisibilityTestCountsByKind, other._deferredVisibilityTestCountsByKind);
+    }
+
     internal void RecordIndividualTest(WorldSceneNodeKind kind)
     {
         Increment(_individuallyTestedNodeCountsByKind, kind);
@@ -70,6 +88,14 @@ public sealed class WorldSceneTraversalDiagnostics
     private static void Increment(Dictionary<WorldSceneNodeKind, int> counts, WorldSceneNodeKind kind)
     {
         counts[kind] = counts.GetValueOrDefault(kind) + 1;
+    }
+
+    private static void AccumulateCounts(
+        Dictionary<WorldSceneNodeKind, int> destination,
+        IReadOnlyDictionary<WorldSceneNodeKind, int> source)
+    {
+        foreach ((WorldSceneNodeKind kind, int count) in source)
+            destination[kind] = destination.GetValueOrDefault(kind) + count;
     }
 }
 

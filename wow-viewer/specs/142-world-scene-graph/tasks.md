@@ -94,6 +94,9 @@ identity; no FPS or GPU claim is made.
 - [x] T035 [US2] Add stable-ID, unknown-bounds, and rejected-chunk descendant-skip coverage in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldSceneGraphObjectAdapterTests.cs`.
 - [x] T036 [US2] Attribute individually tested nodes, rejected subtree roots, and skipped descendants by node kind in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldSceneTraversal.cs`, with focused chunk/M2 assertions.
 - [x] T037 [US2] Add an opt-in traversal policy that defers ordinary ADT M2 leaf visibility under Chunk nodes to the existing collector, with deferred-by-kind diagnostics and focused proof.
+- [x] T038 [US2] Add a partitioned graph-set build result with one independent `Tile`-rooted graph per resident ADT and a separate external graph path in `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldSceneGraphObjectAdapter.cs`.
+- [x] T039 [US2] Switch opt-in `WorldScene` graph rebuild, portal lookup, visibility traversal, and snapshot aggregation to the per-ADT graph set without changing the legacy path.
+- [x] T040 [US2] Add focused tests proving independent ADT roots, no cross-tile descendants, external-graph separation, deterministic partitioning, and per-graph chunk rejection.
 - [ ] T027 Add synthetic workload replay and stage-level report output in `wow-viewer/tools/validation-capture/WowViewer.Tool.ValidationCapture/ValidationWorldSceneAdapter.cs`.
 - [ ] T028 Add current-vs-new parity and performance report tests in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldScenePerformanceReportTests.cs`.
 - [ ] T029 Run the focused and full test commands from `wow-viewer/specs/142-world-scene-graph/quickstart.md` and record evidence in `wow-viewer/memory-bank/progress.md`.

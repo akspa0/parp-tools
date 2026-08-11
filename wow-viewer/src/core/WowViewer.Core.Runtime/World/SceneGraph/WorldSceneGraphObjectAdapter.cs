@@ -52,6 +52,86 @@ public sealed record WorldSceneGraphBuildResult(
     WorldSceneGraph Graph,
     IReadOnlyDictionary<string, WorldSceneGraphObjectPlacement> PlacementsByNodeId);
 
+public sealed record WorldSceneGraphBuildSet(
+    IReadOnlyDictionary<(int TileX, int TileY), WorldSceneGraphBuildResult> AdtGraphs,
+    WorldSceneGraphBuildResult? ExternalGraph,
+    IReadOnlyDictionary<string, WorldSceneGraphBuildResult> GraphByPlacementId)
+{
+    public IEnumerable<WorldSceneGraphBuildResult> EnumerateGraphs()
+    {
+        foreach (WorldSceneGraphBuildResult build in AdtGraphs.Values)
+            yield return build;
+
+        if (ExternalGraph is not null)
+            yield return ExternalGraph;
+    }
+
+    public bool TryGetGraphForPlacement(string placementId, out WorldSceneGraphBuildResult? build)
+    {
+        if (string.IsNullOrWhiteSpace(placementId))
+        {
+            build = null;
+            return false;
+        }
+
+        return GraphByPlacementId.TryGetValue(placementId, out build);
+    }
+
+    public WorldSceneGraphSnapshot CreateSnapshot()
+    {
+        int nodeCount = 0;
+        int renderableCount = 0;
+        int queryableCount = 0;
+        int updateRequiredCount = 0;
+        int nonRejectableCount = 0;
+        int maxDepth = 0;
+        Dictionary<WorldSceneNodeKind, int> nodeKindCounts = [];
+        Dictionary<WorldSceneRenderPass, int> renderPassCounts = [];
+        List<string> nodeIds = [];
+        Vector3 rootBoundsMin = new(float.MaxValue);
+        Vector3 rootBoundsMax = new(float.MinValue);
+        bool foundBounds = false;
+
+        foreach (WorldSceneGraphBuildResult build in EnumerateGraphs())
+        {
+            WorldSceneGraphSnapshot snapshot = build.Graph.CreateSnapshot();
+            nodeCount += snapshot.NodeCount;
+            renderableCount += snapshot.RenderableCount;
+            queryableCount += snapshot.QueryableCount;
+            updateRequiredCount += snapshot.UpdateRequiredCount;
+            nonRejectableCount += snapshot.NonRejectableCount;
+            maxDepth = Math.Max(maxDepth, snapshot.MaxDepth);
+            nodeIds.AddRange(snapshot.NodeIds);
+
+            foreach ((WorldSceneNodeKind kind, int count) in snapshot.NodeKindCounts)
+                nodeKindCounts[kind] = nodeKindCounts.GetValueOrDefault(kind) + count;
+
+            foreach ((WorldSceneRenderPass pass, int count) in snapshot.RenderPassCounts)
+                renderPassCounts[pass] = renderPassCounts.GetValueOrDefault(pass) + count;
+
+            if (snapshot.NodeCount > 0)
+            {
+                rootBoundsMin = Vector3.Min(rootBoundsMin, snapshot.RootBoundsMin);
+                rootBoundsMax = Vector3.Max(rootBoundsMax, snapshot.RootBoundsMax);
+                foundBounds = true;
+            }
+        }
+
+        return new WorldSceneGraphSnapshot(
+            nodeCount,
+            renderableCount,
+            queryableCount,
+            updateRequiredCount,
+            nonRejectableCount,
+            maxDepth,
+            new ReadOnlyDictionary<WorldSceneNodeKind, int>(nodeKindCounts),
+            new ReadOnlyDictionary<WorldSceneRenderPass, int>(renderPassCounts),
+            nodeIds,
+            foundBounds ? rootBoundsMin : Vector3.Zero,
+            foundBounds ? rootBoundsMax : Vector3.Zero);
+    }
+}
+
 /// <summary>
 /// Adapts the current runtime object lists into the graph hierarchy:
 /// map -> tile or external bucket -> placement.
@@ -124,6 +204,113 @@ public static class WorldSceneGraphObjectAdapter
             new ReadOnlyDictionary<string, WorldSceneGraphObjectPlacement>(placementIndex));
     }
 
+    public static WorldSceneGraphBuildSet BuildPerAdt(
+        IEnumerable<WorldSceneGraphObjectPlacement> placements,
+        WorldSceneGraphAdapterOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(placements);
+        options ??= new WorldSceneGraphAdapterOptions();
+
+        ValidateMapOptions(options);
+        List<WorldSceneGraphObjectPlacement> orderedPlacements = OrderAndValidatePlacements(placements);
+
+        Dictionary<(int TileX, int TileY), WorldSceneGraphBuildResult> adtGraphs = [];
+        foreach (IGrouping<(int TileX, int TileY), WorldSceneGraphObjectPlacement> tileGroup in orderedPlacements
+            .Where(placement => !placement.IsExternal && placement.Instance.HasTileCoordinate)
+            .GroupBy(placement => (placement.Instance.TileX, placement.Instance.TileY))
+            .OrderBy(group => group.Key.TileX)
+            .ThenBy(group => group.Key.TileY))
+        {
+            WorldSceneGraphBuildResult build = BuildAdtGraph(tileGroup.Key, tileGroup.ToList());
+            adtGraphs.Add(tileGroup.Key, build);
+        }
+
+        List<WorldSceneGraphObjectPlacement> externalPlacements = orderedPlacements
+            .Where(placement => placement.IsExternal)
+            .ToList();
+        WorldSceneGraphBuildResult? externalGraph = externalPlacements.Count == 0
+            ? null
+            : Build(externalPlacements, options);
+
+        Dictionary<string, WorldSceneGraphBuildResult> graphByPlacementId = new(StringComparer.Ordinal);
+        foreach (WorldSceneGraphBuildResult build in adtGraphs.Values)
+        {
+            foreach (string placementId in build.PlacementsByNodeId.Keys)
+                graphByPlacementId.Add(placementId, build);
+        }
+
+        if (externalGraph is not null)
+        {
+            foreach (string placementId in externalGraph.PlacementsByNodeId.Keys)
+                graphByPlacementId.Add(placementId, externalGraph);
+        }
+
+        return new WorldSceneGraphBuildSet(
+            new ReadOnlyDictionary<(int TileX, int TileY), WorldSceneGraphBuildResult>(adtGraphs),
+            externalGraph,
+            new ReadOnlyDictionary<string, WorldSceneGraphBuildResult>(graphByPlacementId));
+    }
+
+    private static WorldSceneGraphBuildResult BuildAdtGraph(
+        (int TileX, int TileY) tileKey,
+        IReadOnlyList<WorldSceneGraphObjectPlacement> placements)
+    {
+        string rootId = $"world/tile/{tileKey.TileX:D2}/{tileKey.TileY:D2}";
+        bool boundsKnown = placements.All(placement => placement.Instance.BoundsResolved);
+        (Vector3 boundsMin, Vector3 boundsMax) = boundsKnown
+            ? UnionBounds(placements.Select(placement => (placement.Instance.BoundsMin, placement.Instance.BoundsMax)))
+            : (Vector3.Zero, Vector3.Zero);
+
+        WorldSceneNode root = new(
+            rootId,
+            WorldSceneNodeKind.Tile,
+            Matrix4x4.Identity,
+            boundsMin,
+            boundsMax,
+            boundsKnown: boundsKnown,
+            isQueryable: true);
+        WorldSceneGraph graph = new(root);
+
+        IEnumerable<IGrouping<(WorldSceneNodeKind Kind, string Key), WorldSceneGraphObjectPlacement>> bucketGroups =
+            placements
+                .Where(placement => placement.SpatialBucket is not null)
+                .GroupBy(placement =>
+                {
+                    WorldSceneGraphSpatialBucket bucket = placement.SpatialBucket!.Value;
+                    return (bucket.Kind, bucket.Key.Trim('/'));
+                })
+                .OrderBy(group => group.Key.Kind)
+                .ThenBy(group => group.Key.Item2, StringComparer.Ordinal);
+
+        foreach (IGrouping<(WorldSceneNodeKind Kind, string Key), WorldSceneGraphObjectPlacement> bucketGroup in bucketGroups)
+        {
+            List<WorldSceneGraphObjectPlacement> bucketPlacements = bucketGroup.ToList();
+            bool bucketBoundsKnown = bucketPlacements.All(placement => placement.Instance.BoundsResolved);
+            (Vector3 bucketBoundsMin, Vector3 bucketBoundsMax) = bucketBoundsKnown
+                ? UnionBounds(bucketPlacements.Select(placement => (placement.Instance.BoundsMin, placement.Instance.BoundsMax)))
+                : (Vector3.Zero, Vector3.Zero);
+            SceneBucket bucket = new(
+                $"{rootId}/{GetKindToken(bucketGroup.Key.Item1)}/{bucketGroup.Key.Item2}",
+                bucketGroup.Key.Item1,
+                bucketBoundsKnown,
+                bucketBoundsMin,
+                bucketBoundsMax,
+                bucketPlacements,
+                []);
+            AttachBucket(graph, rootId, bucket);
+        }
+
+        foreach (WorldSceneGraphObjectPlacement placement in placements.Where(placement => placement.SpatialBucket is null))
+            AttachPlacement(graph, rootId, placement);
+
+        graph.ValidateInvariants();
+        Dictionary<string, WorldSceneGraphObjectPlacement> placementIndex = placements
+            .ToDictionary(placement => placement.Id, StringComparer.Ordinal);
+        return new WorldSceneGraphBuildResult(
+            graph,
+            new ReadOnlyDictionary<string, WorldSceneGraphObjectPlacement>(placementIndex));
+    }
+
     private static List<SceneBucket> BuildBuckets(
         IReadOnlyList<WorldSceneGraphObjectPlacement> placements)
     {
@@ -186,6 +373,30 @@ public static class WorldSceneGraphObjectAdapter
         }
 
         return buckets;
+    }
+
+    private static List<WorldSceneGraphObjectPlacement> OrderAndValidatePlacements(
+        IEnumerable<WorldSceneGraphObjectPlacement> placements)
+    {
+        List<WorldSceneGraphObjectPlacement> orderedPlacements = placements
+            .OrderBy(placement => placement.Id, StringComparer.Ordinal)
+            .ToList();
+        HashSet<string> placementIds = new(StringComparer.Ordinal);
+        foreach (WorldSceneGraphObjectPlacement placement in orderedPlacements)
+        {
+            if (string.IsNullOrWhiteSpace(placement.Id))
+                throw new ArgumentException("Every scene placement must have a stable id.", nameof(placements));
+            if (!placement.IsExternal && !placement.Instance.HasTileCoordinate)
+                throw new ArgumentException(
+                    $"Placement '{placement.Id}' is not external and has no tile coordinate.",
+                    nameof(placements));
+            if (!placementIds.Add(placement.Id))
+                throw new InvalidOperationException($"Duplicate scene placement id '{placement.Id}'.");
+
+            ValidatePlacement(placement);
+        }
+
+        return orderedPlacements;
     }
 
     private static string GetBucketId(WorldSceneGraphObjectPlacement placement)

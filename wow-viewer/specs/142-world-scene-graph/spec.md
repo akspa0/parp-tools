@@ -332,6 +332,10 @@ submission, GPU/driver wait, and spatial-query time.
   tile-owned M2 placements when their tile/chunk coordinates are known. External spawns, skybox
   M2 placements, and WMO-internal doodad sets MUST NOT be silently assigned to this bucket type.
   Unknown placement bounds MUST keep the chunk and its ancestors non-rejectable.
+- **FR-004B**: The opt-in runtime MUST isolate each resident ADT tile into its own scene-graph root.
+  The world-level graph set MAY index those roots, but it MUST NOT attach every ADT placement beneath
+  one global map graph. External placements MAY remain in a separate graph. A tile graph MUST be
+  independently traversable and independently attachable/detachable as residency changes.
 - **FR-005**: Traversal MUST evaluate visibility hierarchically, and a rejected node MUST NOT cause
   any descendant to be individually evaluated.
 - **FR-006**: Traversal MUST support a nestable view volume, so that a restricted volume derived
@@ -595,7 +599,7 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
   `WmoMeshSummary` is available, its group summaries mount
   as `WmoGroup` children with local bounds, stable IDs, asset keys, and portal-group metadata.
 - `WorldScene` now exposes `UseHierarchicalSceneTraversal` as an opt-in selector. When enabled,
-  one conservative graph traversal feeds the existing WMO/MDX visibility collectors; graph
+  the per-ADT graph set feeds the existing WMO/MDX visibility collectors independently; aggregate
   snapshots and traversal diagnostics are exposed for later capture reporting.
 - `WorldScenePortalGraph` now provides a graph-only portal adjacency contract. It rejects malformed
   or unknown-endpoint links and reports deterministic cycle, missing-entry, absent-data, and
@@ -619,7 +623,10 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
   `map -> tile -> chunk -> M2` buckets using the existing terrain coordinate convention. The graph
   traversal can reject a chunk before testing its ordinary doodad descendants; external spawns,
   skyboxes, WMO placements, and WMO doodad-set submission remain unchanged.
-- Focused graph/workload/traversal/adapter/portal proof is 33 passing tests; the runtime and viewer
+- The opt-in partitioned build now gives each resident ADT tile an independent `Tile`-rooted graph
+  and keeps external placements in a separate graph. WorldScene traverses only those per-ADT roots
+  and never builds one global map graph containing every ADT object.
+- Focused graph/workload/traversal/adapter/portal proof is 34 passing tests; the runtime and viewer
   projects build with only existing repository warnings.
 
 This is an opt-in integration proof, not a renderer promotion. The legacy `WorldScene` traversal

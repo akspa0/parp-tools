@@ -8,6 +8,14 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 independent ADT scene-graph roots
+
+- Added `WorldSceneGraphBuildSet`: each resident ADT tile now owns an independent `Tile`-rooted
+  graph, while external content remains in the existing separate graph path.
+- Opt-in `WorldScene` traversal, portal lookup, visibility aggregation, and snapshot reporting now
+  operate across those per-ADT graphs without changing the legacy path. Focused proof is 34 passing
+  tests and the viewer build has 0 errors. No real-scene/GPU performance claim exists yet.
+
 ## 2026-08-10 — Spec 142 deferred ADT M2 leaf visibility
 
 - The opt-in graph keeps terrain-chunk subtree rejection but defers ordinary ADT M2 leaf visibility

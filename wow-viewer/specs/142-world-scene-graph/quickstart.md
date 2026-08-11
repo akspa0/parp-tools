@@ -66,6 +66,8 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
 - The opt-in traversal defers graph-level leaf visibility only for ordinary ADT M2 placements under
   Chunk nodes; the existing M2 collector still performs exact leaf visibility and asset-readiness
   checks.
+- The opt-in graph set gives every resident ADT tile its own `Tile`-rooted scene graph. WorldScene
+  traverses those graphs independently; external M2/WMO content remains in a separate graph.
 - External M2 spawns, skyboxes, WMO placements, and WMO-internal doodad-set submission remain
   outside this chunk-bucket slice.
 - Unknown object bounds keep their bucket and map fail-open.

@@ -7,6 +7,41 @@ namespace WowViewer.Core.Tests.World;
 public sealed class WorldSceneGraphObjectAdapterTests
 {
     [Fact]
+    public void BuildPerAdtIsolatesResidentTilesFromEachOtherAndFromExternalContent()
+    {
+        WorldSceneGraphBuildSet result = WorldSceneGraphObjectAdapter.BuildPerAdt(
+        [
+            Placement("m2/tile-a", WorldSceneNodeKind.M2Placement, 3, 4, new Vector3(10f, 0f, 0f)),
+            Placement("wmo/tile-b", WorldSceneNodeKind.WmoPlacement, 8, 9, new Vector3(80f, 0f, 0f)),
+            Placement("m2/external", WorldSceneNodeKind.M2Placement, null, null, new Vector3(-20f, 0f, 0f), external: true),
+        ]);
+
+        Assert.Equal(2, result.AdtGraphs.Count);
+        Assert.True(result.AdtGraphs.TryGetValue((3, 4), out WorldSceneGraphBuildResult? tileA));
+        Assert.True(result.AdtGraphs.TryGetValue((8, 9), out WorldSceneGraphBuildResult? tileB));
+        Assert.NotNull(tileA);
+        Assert.NotNull(tileB);
+        Assert.Equal("world/tile/03/04", tileA!.Graph.Root.Id);
+        Assert.Equal(WorldSceneNodeKind.Tile, tileA.Graph.Root.Kind);
+        Assert.Equal("world/tile/08/09", tileB!.Graph.Root.Id);
+        Assert.DoesNotContain(tileA.Graph.EnumerateDepthFirst(), node => node.Id == "wmo/tile-b");
+        Assert.DoesNotContain(tileB.Graph.EnumerateDepthFirst(), node => node.Id == "m2/tile-a");
+
+        Assert.NotNull(result.ExternalGraph);
+        Assert.Equal(WorldSceneNodeKind.Map, result.ExternalGraph!.Graph.Root.Kind);
+        Assert.True(result.ExternalGraph.Graph.TryGetNode("m2/external", out _));
+        Assert.True(result.TryGetGraphForPlacement("m2/tile-a", out WorldSceneGraphBuildResult? tileAGraph));
+        Assert.Same(tileA, tileAGraph);
+        Assert.True(result.TryGetGraphForPlacement("m2/external", out WorldSceneGraphBuildResult? externalGraph));
+        Assert.Same(result.ExternalGraph, externalGraph);
+
+        WorldSceneGraphSnapshot snapshot = result.CreateSnapshot();
+        Assert.Equal(7, snapshot.NodeCount);
+        Assert.Equal(2, snapshot.NodeKindCounts[WorldSceneNodeKind.Tile]);
+        Assert.Equal(1, snapshot.NodeKindCounts[WorldSceneNodeKind.SyntheticProxy]);
+    }
+
+    [Fact]
     public void BuildGroupsPlacementsByTileAndPreservesStablePlacementMetadata()
     {
         WorldSceneGraphBuildResult result = WorldSceneGraphObjectAdapter.Build(

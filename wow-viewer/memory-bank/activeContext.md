@@ -50,6 +50,9 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 - Opt-in graph traversal now defers exact visibility of M2 leaves under Chunk nodes to the existing
   M2 collector, while retaining graph-owned chunk rejection; external, skybox, WMO, and WMO doodad-set
   paths are unchanged.
+- The opt-in graph set now gives each resident ADT its own `Tile`-rooted graph and keeps external
+  content separate; WorldScene traverses those graphs independently. This is an ownership and
+  traversal-boundary change, not yet a measured performance result.
 - The adapter does not invent missing group bounds. Resident non-skybox ADT M2 placements now mount
   beneath deterministic terrain chunk buckets in the opt-in graph; unresolved bounds keep the chunk
   fail-open. This is object-population partitioning, not terrain mesh ownership. The existing
