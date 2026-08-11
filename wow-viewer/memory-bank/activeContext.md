@@ -399,3 +399,6 @@ the authored RGB corpus, then reviews the combined benchmark dry plan.
    profiler validates its ADT and places the production camera at that tile center.
  - `profile-render` now writes progress JSON at the requested output path before scene construction
    and logs phase/frame markers; a blocking stage is observable rather than producing silent no-output.
+ - First live Azeroth 32_32 probe: 577.7 ms frame with 685 MDX/8 WMO placements but zero admitted
+   objects and 10 terrain/15 asset loads pending; old named stages summed to ~12.8 ms. `scene_maintenance`
+   now attributes graph/instance rebuild work separately before any renderer change.

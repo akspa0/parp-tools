@@ -668,3 +668,7 @@ from its tile-centered camera position rather than a map-wide inferred default.
 path before production scene construction, then update its phase/frame counters before each
 warmup and measured frame. A profile that blocks in client I/O, construction, terrain upload, or
 one render call must therefore expose its last completed phase instead of appearing silent.
+
+The diagnostic MUST attribute pre-pass scene maintenance separately from visibility and submission:
+PM4 finalization, resident-instance rebuilds, and scene-graph rebuilds must not disappear into
+`TotalCpuMs` without a named stage.

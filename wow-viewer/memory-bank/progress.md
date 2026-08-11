@@ -766,3 +766,5 @@ Next: build the authored RGB corpus and review the combined plan.
    `profile-render`; profile reports now carry the requested target tile.
  - 2026-08-10: Console capture showed `profile-render` could appear hung before final JSON. Added
    durable phase/frame progress output; observed trace entered the tile-32_32 AOI, not full 839-ADT residency.
+ - 2026-08-10: First completed tile-32_32 probe reported 577.7 ms CPU with mostly unaccounted
+   `WorldScene` pre-pass time; added explicit `scene_maintenance` stage before changing renderer behavior.

@@ -106,6 +106,7 @@ public sealed class WorldRenderOptimizationAdvisorTests
             Liquid: new WorldRenderStageStats(liquidMs),
             MdxTransparentSort: new WorldRenderStageStats(mdxTransparentSortMs),
             MdxTransparentSubmission: new WorldRenderStageStats(mdxTransparentSubmissionMs),
-            Overlay: new WorldRenderStageStats(overlayMs));
+            Overlay: new WorldRenderStageStats(overlayMs),
+            SceneMaintenance: new WorldRenderStageStats(0));
     }
 }

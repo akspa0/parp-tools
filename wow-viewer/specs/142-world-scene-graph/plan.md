@@ -293,6 +293,9 @@ the same client catalog and directly determine the profiling camera position.
 The requested output path is an in-progress `world-render-diagnostic-progress-v1` document until
 the final report is complete, with stdout phase markers around data-source construction, GL setup,
 scene construction, full-residency opt-in, warmup, and measurement.
+The `scene_maintenance` CPU stage owns the otherwise hidden pre-pass costs of PM4 completion and
+instance/scene-graph rebuilding; it is the first follow-up attribution point after a 577.7 ms
+tile-32_32 frame reported only ~12.8 ms across the prior named stages.
 
 **Status**: Complete for the CPU-stage diagnostic harness on 2026-08-10. The
 `ValidationCapture` tool now has `profile-render`, which opens a hidden OpenGL surface and invokes

@@ -38,7 +38,8 @@ public readonly record struct WorldRenderFrameStats(
     WorldRenderStageStats Liquid,
     WorldRenderStageStats MdxTransparentSort,
     WorldRenderStageStats MdxTransparentSubmission,
-    WorldRenderStageStats Overlay)
+    WorldRenderStageStats Overlay,
+    WorldRenderStageStats SceneMaintenance)
 {
     public static WorldRenderFrameStats Empty { get; } = new(
         0,
@@ -60,6 +61,7 @@ public readonly record struct WorldRenderFrameStats(
         0,
         0,
         0,
+        new WorldRenderStageStats(0),
         new WorldRenderStageStats(0),
         new WorldRenderStageStats(0),
         new WorldRenderStageStats(0),

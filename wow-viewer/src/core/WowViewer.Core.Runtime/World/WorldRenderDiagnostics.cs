@@ -174,5 +174,6 @@ public static class WorldRenderDiagnostics
         new("mdx_transparent_sort", static stats => stats.MdxTransparentSort),
         new("mdx_transparent_submission", static stats => stats.MdxTransparentSubmission),
         new("overlay", static stats => stats.Overlay),
+        new("scene_maintenance", static stats => stats.SceneMaintenance),
     ];
 }

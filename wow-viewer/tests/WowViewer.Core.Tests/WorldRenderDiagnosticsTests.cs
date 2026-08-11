@@ -21,7 +21,7 @@ public sealed class WorldRenderDiagnosticsTests
             new WorldRenderDiagnosticWorkload(12, 0, 0, 0, 3, 2, 10, 4, true, 32, 32, 9, 5, 4, 1.5));
 
         Assert.Equal(WorldRenderDiagnostics.Schema, report.Schema);
-        Assert.Equal(17, report.Stages.Count);
+        Assert.Equal(18, report.Stages.Count);
         Assert.All(report.Stages, stage => Assert.Equal(2, stage.SampleCount));
         Assert.Contains(report.Findings, finding => finding.Code == "cpu-frame-budget-exceeded");
         Assert.Contains(report.Findings, finding => finding.Code == "dominant-cpu-stage" && finding.Detail.Contains("wmo_submission"));

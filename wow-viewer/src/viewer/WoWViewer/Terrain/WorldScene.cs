@@ -925,6 +925,7 @@ public class WorldScene : ISceneRenderer
         public double MdxTransparentSortMs { get; set; }
         public double MdxTransparentSubmissionMs { get; set; }
         public double OverlayMs { get; set; }
+        public double SceneMaintenanceMs { get; set; }
 
         public void Reset()
         {
@@ -959,6 +960,7 @@ public class WorldScene : ISceneRenderer
             MdxTransparentSortMs = 0;
             MdxTransparentSubmissionMs = 0;
             OverlayMs = 0;
+            SceneMaintenanceMs = 0;
         }
 
         public WorldRenderFrameStats ToStats(
@@ -1006,7 +1008,8 @@ public class WorldScene : ISceneRenderer
                 new WorldRenderStageStats(LiquidMs),
                 new WorldRenderStageStats(MdxTransparentSortMs, ObjectPasses.TransparentVisibleMdxRoutes.Count),
                 new WorldRenderStageStats(MdxTransparentSubmissionMs, ObjectPasses.TransparentVisibleMdxRoutes.Count, TransparentBatchedMdxCount + TransparentUnbatchedMdxCount),
-                new WorldRenderStageStats(OverlayMs));
+                new WorldRenderStageStats(OverlayMs),
+                new WorldRenderStageStats(SceneMaintenanceMs));
         }
     }
 
@@ -9559,13 +9562,16 @@ public class WorldScene : ISceneRenderer
         _sceneGraphVisibleMdxInstances.Clear();
         _sceneGraphVisibleWmoInstances.Clear();
 
-        TryFinalizePm4OverlayLoad();
+        frame.SceneMaintenanceMs = MeasureDurationMs(() =>
+        {
+            TryFinalizePm4OverlayLoad();
 
-        // Rebuild flat instance lists if tiles changed
-        if (_instancesDirty)
-            RebuildInstanceLists();
-        else if (UseHierarchicalSceneTraversal && _sceneGraphBuild is null)
-            RebuildSceneGraphObjectIndex();
+            // Rebuild flat instance lists if tiles changed.
+            if (_instancesDirty)
+                RebuildInstanceLists();
+            else if (UseHierarchicalSceneTraversal && _sceneGraphBuild is null)
+                RebuildSceneGraphObjectIndex();
+        });
 
         frame.DeferredAssetLoadMs = MeasureDurationMs(() =>
         {

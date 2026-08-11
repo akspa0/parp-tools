@@ -662,7 +662,8 @@ internal static class WowViewerWorldRuntimeBridge
             Liquid: new WorldRenderStageStats(liquidMs, activeLiquidChunkCount, activeLiquidVisibleTileCount),
             MdxTransparentSort: new WorldRenderStageStats(mdxTransparentSortMs, visibility.VisibleMdx.Count, passFrame.TransparentVisibleMdxRoutes.Count),
             MdxTransparentSubmission: new WorldRenderStageStats(mdxTransparentSubmissionMs, passFrame.TransparentVisibleMdxRoutes.Count, transparentBatchedMdxCount + transparentUnbatchedMdxCount),
-            Overlay: new WorldRenderStageStats(0));
+            Overlay: new WorldRenderStageStats(0),
+            SceneMaintenance: new WorldRenderStageStats(0));
 
         WowViewerWorldLoadPipelineDiagnostics loadPipeline = new(
             totalBuildMs: buildStopwatch.Elapsed.TotalMilliseconds,
