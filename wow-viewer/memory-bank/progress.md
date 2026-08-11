@@ -8,6 +8,16 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 production headless render diagnostics
+
+- Added `ValidationCapture profile-render`: a hidden OpenGL host that constructs and renders the
+  real `WorldScene`, including terrain streaming, graph traversal, WMO/MDX visibility/submission,
+  and deferred asset work. It emits `world-render-diagnostic-v1` JSON with every current CPU stage,
+  raw frame stats, queue state, initialization time, and MPQ read-cache counters.
+- The report emits explicit findings for a CPU stall, unsettled scene, missing WMO/MDX coverage,
+  client-read pressure, and the still-open GPU/driver timing gap. Focused diagnostic tests pass and
+  the validation-capture tool builds with 0 errors. No client profile or GPU capture was launched.
+
 ## 2026-08-10 — Spec 136/142 scene-wide client I/O containment
 
 - Deferred WMO doodad model loading no longer runs from every visible WMO placement. The shared

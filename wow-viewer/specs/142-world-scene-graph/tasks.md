@@ -105,6 +105,13 @@ identity; no FPS or GPU claim is made.
       render call.
 - [x] T045 Bound minimap client-data reads to one background reader while retaining the existing
       render-thread texture-upload queue.
+- [x] T046 Add `profile-render` to `WowViewer.Tool.ValidationCapture`, executing the production
+      `WorldScene.Render` path in a hidden OpenGL context and writing a versioned per-stage JSON
+      report with workload, queue, and client-read counters.
+- [x] T047 Add focused `WorldRenderDiagnostics` report-contract tests covering stage inventory,
+      dominant-stage attribution, unsettled queues, and uncovered object paths.
+- [ ] T048 Add timer-query-backed GPU and driver-wait attribution to the production report; until
+      then the CPU-stage report MUST label that gap explicitly.
 - [ ] T027 Add synthetic workload replay and stage-level report output in `wow-viewer/tools/validation-capture/WowViewer.Tool.ValidationCapture/ValidationWorldSceneAdapter.cs`.
 - [ ] T028 Add current-vs-new parity and performance report tests in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldScenePerformanceReportTests.cs`.
 - [ ] T029 Run the focused and full test commands from `wow-viewer/specs/142-world-scene-graph/quickstart.md` and record evidence in `wow-viewer/memory-bank/progress.md`.

@@ -9,7 +9,7 @@ internal static class ValidationCaptureCommand
 {
     public static int Execute(string[] args)
     {
-        if (args.Length == 0 || HasFlag(args, "--help", "-h"))
+        if (args.Length == 0)
         {
             ShowUsage();
             return 0;
@@ -23,10 +23,81 @@ internal static class ValidationCaptureCommand
                 return RunCapture(tail);
             case "capture-batch":
                 return RunCaptureBatch(tail);
+            case "profile-render":
+                return RunProductionRendererProfile(tail);
             default:
                 Console.Error.WriteLine($"Unknown validation-capture command '{command}'.");
                 ShowUsage();
                 return 1;
+        }
+    }
+
+    private static int RunProductionRendererProfile(string[] args)
+    {
+        if (args.Length == 0 || HasFlag(args, "--help", "-h"))
+        {
+            ShowProductionRendererProfileUsage();
+            return 0;
+        }
+
+        string? clientRoot = GetOption(args, "--client-root", "-c");
+        string? wdtPath = GetOption(args, "--map-input", "-m");
+        string? outputPath = GetOption(args, "--output", "-o");
+        string? buildLabel = GetOption(args, "--build", "-b");
+        string? listfilePath = GetOption(args, "--listfile");
+        string? looseOverlayRoot = GetOption(args, "--loose-overlay-root");
+        int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
+        int warmupFrames = GetIntOption(args, "--warmup-frames") ?? 8;
+        int frames = GetIntOption(args, "--frames") ?? 12;
+        bool loadAllTiles = HasFlag(args, "--load-all-tiles");
+        bool dryRun = HasFlag(args, "--dry-run");
+
+        if (string.IsNullOrWhiteSpace(clientRoot)
+            || string.IsNullOrWhiteSpace(wdtPath)
+            || string.IsNullOrWhiteSpace(outputPath))
+        {
+            Console.Error.WriteLine("Error: profile-render requires --client-root, --map-input, and --output.");
+            ShowProductionRendererProfileUsage();
+            return 1;
+        }
+
+        if (resolution <= 0 || warmupFrames < 0 || frames <= 0)
+        {
+            Console.Error.WriteLine("Error: --resolution and --frames must be positive; --warmup-frames cannot be negative.");
+            return 1;
+        }
+
+        if (dryRun)
+        {
+            Console.WriteLine("Production WorldScene profile dry-run succeeded.");
+            Console.WriteLine($"Client root: {clientRoot}");
+            Console.WriteLine($"Local WDT: {wdtPath}");
+            Console.WriteLine($"Output: {outputPath}");
+            Console.WriteLine($"Frames: warmup={warmupFrames}, measured={frames}, loadAllTiles={loadAllTiles}");
+            return 0;
+        }
+
+        try
+        {
+            var report = ProductionWorldSceneProfiler.Run(
+                clientRoot,
+                wdtPath,
+                outputPath,
+                buildLabel,
+                listfilePath,
+                looseOverlayRoot,
+                resolution,
+                warmupFrames,
+                frames,
+                loadAllTiles);
+            Console.WriteLine($"Production WorldScene profile completed: {report.Frames.Count} measured frames, {report.Findings.Count} findings.");
+            Console.WriteLine($"Report: {outputPath}");
+            return report.Findings.Any(static finding => finding.Severity == "error") ? 2 : 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Production WorldScene profile failed: {ex.GetType().Name}: {ex.Message}");
+            return 2;
         }
     }
 
@@ -641,8 +712,35 @@ private static ValidationCaptureScenePolicy CreateDefaultScenePolicy(int resolut
             Commands:
               capture        Validate one bounded validation-capture request and build a shared-runtime session
               capture-batch  Execute a manifest/ledger-driven bounded validation-capture batch
+              profile-render Render the production WorldScene in a hidden OpenGL context and emit stage diagnostics
 
-            Use 'capture --help' or 'capture-batch --help' for argument details.
+            Use 'capture --help', 'capture-batch --help', or 'profile-render --help' for argument details.
+            """);
+    }
+
+    private static void ShowProductionRendererProfileUsage()
+    {
+        Console.WriteLine("""
+            Usage: WowViewer.Tool.ValidationCapture profile-render [options]
+
+            Required:
+              --client-root <dir>    Client directory used by the production MpqDataSource
+              --map-input <path>     Local Alpha or standard WDT file
+              --output <path>        JSON diagnostic report to write
+
+            Optional:
+              --build <label>        Format-build hint passed to WorldScene
+              --listfile <path>      Supplemental MPQ listfile
+              --loose-overlay-root <dir>
+              --resolution <int>     Hidden render target size; default: 512
+              --warmup-frames <int>  Production frames before sampling; default: 8
+              --frames <int>         Production frames to measure; default: 12
+              --load-all-tiles       Opt into synchronous full terrain residency before sampling
+              --dry-run              Validate arguments without opening a client or GPU context
+
+            This runs the current WorldScene.Render path, including terrain streaming, graph traversal,
+            WMO/MDX visibility and submission, deferred asset loading, and all existing frame-stage timers.
+            It does not claim per-stage GPU timing yet; the JSON report calls that gap out explicitly.
             """);
     }
 

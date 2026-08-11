@@ -427,6 +427,15 @@ submission, GPU/driver wait, and spatial-query time.
 - **FR-033**: The viewer MUST provide an explicit diagnostic state for "not a renderer
   benchmark" when a workload measures only image decoding, tensor preparation, texture upload,
   or a 2-D preview surface.
+- **FR-034**: The diagnostic command for a `real_client_scene` MUST create a hidden OpenGL context
+  and invoke the production `WorldScene.Render` path. A terrain-only renderer, render-plan builder,
+  image preview, or synthetic adapter MUST identify itself as a different workload and MUST NOT
+  satisfy production world-renderer stage coverage.
+- **FR-035**: A production render diagnostic report MUST retain every instrumented frame stage,
+  each frame's `WorldRenderFrameStats`, visible/submitted counts, queue state, scene initialization
+  time, and client-read cache counters. It MUST issue explicit findings for an unsettled scene,
+  missing WMO/MDX coverage, and CPU budget overruns, and MUST state when GPU timing has not yet
+  been attributed.
 
 ### Key Entities *(include if feature involves data)*
 

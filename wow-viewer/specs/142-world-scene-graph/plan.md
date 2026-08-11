@@ -283,6 +283,20 @@ This prevents placement count from multiplying synchronous client reads, but doe
 that model parsing, terrain uploads, GPU submission, or driver wait are within budget. The next
 proof owner is a user-run real-client capture using the existing stage and asset I/O diagnostics.
 
+## Phase 8H — Production Headless Render Diagnostics
+
+**Status**: Complete for the CPU-stage diagnostic harness on 2026-08-10. The
+`ValidationCapture` tool now has `profile-render`, which opens a hidden OpenGL surface and invokes
+the actual `WorldScene.Render` loop after production scene construction. It records all existing
+frame-stage timings, per-frame visibility/submission counts, streaming queues, initialization time,
+and `MpqDataSource` cache statistics in `world-render-diagnostic-v1` JSON. The report also names
+unsettled streaming, absent object-path coverage, CPU budget stalls, and the current missing
+per-stage GPU timer-query attribution.
+
+The focused runtime report tests and validation-capture build prove the contract and command
+wiring. A named real-client profile remains user-run evidence; this phase neither launches that
+profile nor claims GPU timing or an FPS improvement.
+
 ## Later Phases (Not Started In This Slice)
 
 - **Phase 9**: Integrate graph portal volumes into runtime WMO submission and prove doorway
@@ -290,7 +304,8 @@ proof owner is a user-run real-client capture using the existing stage and asset
 - **Phase 10**: Per-pass visible/non-visible queues, shared animation update ownership, and query
   reuse.
 - **Phase 11**: Terrain mesh/chunk graph migration beyond the ADT M2 object-population buckets,
-  synthetic four-scale measurements, and named real-client parity captures.
+  synthetic four-scale measurements, per-stage GPU timer-query attribution, and named real-client
+  parity captures.
 
 ## Complexity Tracking
 

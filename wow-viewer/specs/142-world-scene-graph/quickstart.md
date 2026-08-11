@@ -25,6 +25,24 @@ The viewer integration seam can be compile-checked without launching a client or
 dotnet build src/viewer/WoWViewer/WoWViewer.csproj -c Debug
 ```
 
+## User-run production render diagnostic
+
+`profile-render` is the first headless path that invokes the current production `WorldScene.Render`
+loop; it is not the terrain-only native adapter or a 2-D preview. It opens a hidden OpenGL context,
+so run it yourself against a named client and local WDT after the build/test proof above.
+
+```powershell
+$ClientRoot = "H:\CLIENTS\<client>"
+$Wdt = "H:\CLIENTS\<client>\World\Maps\<map>\<map>.wdt"
+$BuildLabel = "4.0.0.11792"
+dotnet run --project tools/validation-capture/WowViewer.Tool.ValidationCapture/WowViewer.Tool.ValidationCapture.csproj -- profile-render --client-root $ClientRoot --map-input $Wdt --output output\diagnostics\world-render.json --build $BuildLabel --warmup-frames 8 --frames 12
+```
+
+Use `--load-all-tiles` only when intentionally profiling full terrain residency. The JSON schema is
+`world-render-diagnostic-v1`; inspect `findings`, `stages`, `workload`, and the raw per-frame stats.
+The command currently attributes CPU stages and client I/O counters. It explicitly reports that
+per-stage GPU/driver timing is not yet captured.
+
 ## Full runtime-library proof
 
 ```powershell
@@ -83,9 +101,12 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
   independent of the number of visible WMO placements.
 - Minimap archive/loose-file reads use one background reader against the shared client data source;
   completed BLP textures still upload through the existing bounded render-thread queue.
+- `profile-render` executes the production `WorldScene.Render` path in a hidden OpenGL context and
+  emits every existing CPU-stage timer plus visibility/submission, queue, initialization, and
+  client-read evidence. A terrain-only adapter or 2-D preview does not satisfy this proof.
 
 ## Not yet run by this phase
 
 The four-scale performance ladder, runtime WMO portal submission/doorway parity, current-vs-new
-traversal comparison, pass/query parity, real-client capture, GPU timing, and whole-map residency
-work remain later user-run gates. Do not interpret this test/build pass as an FPS result.
+traversal comparison, pass/query parity, per-stage GPU timing, and whole-map residency work remain
+later user-run gates. Do not interpret this test/build pass as an FPS result.

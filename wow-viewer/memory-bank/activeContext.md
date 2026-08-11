@@ -12,7 +12,7 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 |---|---|---|
 | PM4 decode | **active** — versioning formatted; placement solved; scene graph tree view restored | [workstream-pm4-decode.md](workstream-pm4-decode.md) |
 | Terrain / viewer runtime | **active** — phased dual-map overlay (135), CPU and GPU M2 doodad batching (136), phased minimap & teleport (137) landed; 4.x renderer evolution (138) is an evidence-gated epic note | [activeContext.md](activeContext.md) |
-| World scene graph / renderer performance | **active** — Spec 142 graph, conservative traversal, default-on `WorldScene` object adapter/selector, metadata-only graph rebuilds, ADT M2 doodads partitioned beneath terrain chunk buckets, nested WMO groups, WMO read-model portal adapter, bounded portal view volumes, graph-side runtime portal traversal, and safe opaque WMO doodad batching implemented; WMO submission parity, pass/query reuse, terrain-mesh ownership, and stage evidence remain pending | [Spec 142](../specs/142-world-scene-graph/spec.md) |
+| World scene graph / renderer performance | **active** — Spec 142 graph, conservative traversal, default-on `WorldScene` object adapter/selector, metadata-only graph rebuilds, ADT M2 doodads partitioned beneath terrain chunk buckets, nested WMO groups, WMO read-model portal adapter, bounded portal view volumes, graph-side runtime portal traversal, safe opaque WMO doodad batching, and production headless CPU-stage reporting implemented; WMO submission parity, pass/query reuse, terrain-mesh ownership, and GPU-stage evidence remain pending | [Spec 142](../specs/142-world-scene-graph/spec.md) |
 | Terrain / minimap ML | **active** — Spec 139 clean-signal reconstruction, Spec 140 paste/fractal/tileset evidence, and Spec 141 external-method translation; object identity remains parked | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
 | Tile archaeology | **active** — old v50 synthetic minimap output needs fresh regeneration after renderer fixes; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
 
@@ -71,6 +71,12 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
   against the shared client data source instead of four. This is an I/O fan-out containment fix;
   user-run stage diagnostics still own the proof of whether parsing, terrain upload, or GPU wait is
   the remaining bottleneck.
+- `WowViewer.Tool.ValidationCapture profile-render` now creates a hidden OpenGL surface and calls
+  the real `WorldScene.Render` loop rather than a terrain-only or render-plan stand-in. Its
+  `world-render-diagnostic-v1` report preserves all current CPU stages, frame/submission counts,
+  streaming queues, initialization time, and MPQ read-cache counters, then emits actionable
+  findings. Per-stage GPU/driver timer queries remain explicitly unproven and are the next report
+  expansion rather than an assumption about the bottleneck.
 - The adapter does not invent missing group bounds. Resident non-skybox ADT M2 placements now mount
   beneath deterministic terrain chunk buckets in the opt-in graph; unresolved bounds keep the chunk
   fail-open. This is object-population partitioning, not terrain mesh ownership. The existing
