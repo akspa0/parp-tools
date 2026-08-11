@@ -140,7 +140,8 @@ public sealed class WorldSceneGraph
             {
                 foreach (WorldSceneNode descendant in node.Children)
                 {
-                    if (!descendant.CanRejectSubtree || !Contains(node, descendant.WorldBoundsMin, descendant.WorldBoundsMax))
+                    if ((!descendant.CanRejectSubtree && !node.AllowsUnresolvedDescendants)
+                        || (descendant.CanRejectSubtree && !Contains(node, descendant.WorldBoundsMin, descendant.WorldBoundsMax)))
                         throw new InvalidOperationException($"Rejectable node '{node.Id}' does not conservatively contain child '{descendant.Id}'.");
                 }
             }

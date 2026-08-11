@@ -337,6 +337,11 @@ submission, GPU/driver wait, and spatial-query time.
   The world-level graph set MAY index those roots, but it MUST NOT attach every ADT placement beneath
   one global map graph. External placements MAY remain in a separate graph. A tile graph MUST be
   independently traversable and independently attachable/detachable as residency changes.
+- **FR-004C**: An ADT root MUST retain authoritative finite tile bounds even when streamed child
+  model bounds are unresolved. The root bounds MUST include the native ADT footprint and every
+  resolved child bound, so an off-camera tile can reject unresolved descendants without clipping a
+  known cross-tile placement. This exception is limited to authoritative spatial roots; ordinary
+  buckets and placements remain fail-open for unresolved bounds.
 - **FR-005**: Traversal MUST evaluate visibility hierarchically, and a rejected node MUST NOT cause
   any descendant to be individually evaluated.
 - **FR-006**: Traversal MUST support a nestable view volume, so that a restricted volume derived
@@ -637,6 +642,10 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
 - The opt-in partitioned build now gives each resident ADT tile an independent `Tile`-rooted graph
   and keeps external placements in a separate graph. WorldScene traverses only those per-ADT roots
   and never builds one global map graph containing every ADT object.
+- ADT roots now use their native finite tile footprint as authoritative bounds and expand around
+  resolved child bounds. They may reject unresolved streamed descendants, while every non-root
+  bucket preserves the existing fail-open rule. This removes the full-map case where one unresolved
+  M2 made each of 839 resident tile roots non-rejectable.
 - Graph rebuilds are metadata-only with respect to WMO summaries: `WorldScene` requests only cached
   summaries from `WorldAssetManager` while residency changes rebuild the graph. A missing summary
   leaves optional `WmoGroup` children absent and keeps traversal fail-open; graph rebuild itself does

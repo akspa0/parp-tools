@@ -95,6 +95,56 @@ public sealed class WorldSceneGraphObjectAdapterTests
     }
 
     [Fact]
+    public void BuildPerAdtUsesAuthoritativeTileBoundsWhenChildModelBoundsAreUnresolved()
+    {
+        WorldSceneGraphObjectPlacement unknown = new(
+            "m2/unknown",
+            WorldSceneNodeKind.M2Placement,
+            new WorldObjectInstance
+            {
+                ModelKey = "world/unknown.m2",
+                Transform = Matrix4x4.CreateTranslation(10f, 0f, 0f),
+                HasTileCoordinate = true,
+                TileX = 1,
+                TileY = 2,
+                BoundsResolved = false,
+            });
+
+        WorldSceneGraphBuildSet result = WorldSceneGraphObjectAdapter.BuildPerAdt([unknown]);
+        WorldSceneGraph graph = result.AdtGraphs[(1, 2)].Graph;
+
+        Assert.True(graph.Root.CanRejectSubtree);
+        Assert.Equal(15466.666f, graph.Root.LocalBoundsMin.X, 2);
+        Assert.Equal(16000f, graph.Root.LocalBoundsMin.Y, 2);
+        Assert.Equal(-100000f, graph.Root.LocalBoundsMin.Z);
+        Assert.Equal(16000f, graph.Root.LocalBoundsMax.X, 2);
+        Assert.Equal(16533.333f, graph.Root.LocalBoundsMax.Y, 2);
+        Assert.Equal(100000f, graph.Root.LocalBoundsMax.Z);
+        Assert.True(graph.TryGetNode("m2/unknown", out WorldSceneNode? node));
+        Assert.False(node!.CanRejectSubtree);
+
+        WorldSceneTraversalResult traversal = WorldSceneTraversal.Traverse(graph, static _ => false);
+        Assert.Empty(traversal.VisibleNodes);
+        Assert.Equal(1, traversal.Diagnostics.SkippedDescendantCount);
+        Assert.Contains(traversal.RejectedNodes, candidate => candidate.Id == "world/tile/01/02");
+    }
+
+    [Fact]
+    public void BuildPerAdtExpandsAuthoritativeTileBoundsForResolvedCrossTilePlacement()
+    {
+        WorldSceneGraphBuildSet result = WorldSceneGraphObjectAdapter.BuildPerAdt(
+        [
+            Placement("wmo/cross-tile", WorldSceneNodeKind.WmoPlacement, 1, 2, new Vector3(20000f, 0f, 0f)),
+        ]);
+
+        WorldSceneNode root = result.AdtGraphs[(1, 2)].Graph.Root;
+
+        Assert.True(root.CanRejectSubtree);
+        Assert.Equal(15466.666f, root.LocalBoundsMin.X, 2);
+        Assert.Equal(20001f, root.LocalBoundsMax.X, 2);
+    }
+
+    [Fact]
     public void RebuildingTheSamePlacementsProducesTheSameNodeInventory()
     {
         WorldSceneGraphObjectPlacement[] placements =

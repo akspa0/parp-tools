@@ -770,3 +770,9 @@ Next: build the authored RGB corpus and review the combined plan.
    `WorldScene` pre-pass time; added explicit `scene_maintenance` stage before changing renderer behavior.
  - 2026-08-10: Converted normal Cata per-ADT/chunk/liquid/placement logging to verbose-only before
    whole-Azeroth profiling; default output retains malformed-data/contract diagnostics.
+ - 2026-08-10: Whole-Azeroth report (839 ADTs; 243,585 M2; 3,173 WMO) identified non-rejectable ADT
+   roots as the active visibility failure: unresolved streamed children forced every tile to traverse,
+   yielding 91.2 ms M2 and 107.8 ms WMO visibility with zero admitted M2s. ADT roots now use native
+   finite bounds expanded around resolved placements and may reject unresolved children; ordinary
+   graph nodes remain fail-open. Focused graph/diagnostic suite: 19 passed. Await user-run post-fix
+   whole-map diagnostic before claiming a performance result.

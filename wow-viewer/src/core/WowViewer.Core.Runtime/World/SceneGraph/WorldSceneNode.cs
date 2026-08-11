@@ -23,7 +23,8 @@ public sealed class WorldSceneNode
         bool requiresUpdate = false,
         string? assetKey = null,
         WorldSceneRenderPass renderPassMask = WorldSceneRenderPass.None,
-        int? portalGroup = null)
+        int? portalGroup = null,
+        bool allowsUnresolvedDescendants = false)
     {
         if (string.IsNullOrWhiteSpace(id))
             throw new ArgumentException("Scene node id must not be empty.", nameof(id));
@@ -44,6 +45,7 @@ public sealed class WorldSceneNode
         AssetKey = assetKey;
         RenderPassMask = renderPassMask;
         PortalGroup = portalGroup;
+        AllowsUnresolvedDescendants = allowsUnresolvedDescendants;
 
         RefreshWorldState(Matrix4x4.Identity);
     }
@@ -83,6 +85,13 @@ public sealed class WorldSceneNode
     public WorldSceneRenderPass RenderPassMask { get; }
 
     public int? PortalGroup { get; }
+
+    /// <summary>
+    /// Allows an authoritative spatial container (currently an ADT tile root)
+    /// to reject its subtree even while streamed child assets have no bounds.
+    /// Known descendants must still remain contained by this node's bounds.
+    /// </summary>
+    public bool AllowsUnresolvedDescendants { get; }
 
     public void UpdateLocalTransform(Matrix4x4 localTransform)
     {
@@ -194,7 +203,8 @@ public sealed class WorldSceneNode
         foreach (WorldSceneNode child in _children)
             child.RefreshWorldState(WorldTransform);
 
-        if (_children.Any(child => !child.CanRejectSubtree || !ContainsWorldBoundsUnchecked(child.WorldBoundsMin, child.WorldBoundsMax)))
+        if (_children.Any(child => (!child.CanRejectSubtree && !AllowsUnresolvedDescendants)
+            || (child.CanRejectSubtree && !ContainsWorldBoundsUnchecked(child.WorldBoundsMin, child.WorldBoundsMax))))
             CanRejectSubtree = false;
     }
 

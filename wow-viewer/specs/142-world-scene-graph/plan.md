@@ -313,6 +313,20 @@ The focused runtime report tests and validation-capture build prove the contract
 wiring. A named real-client profile remains user-run evidence; this phase neither launches that
 profile nor claims GPU timing or an FPS improvement.
 
+## Phase 8I — Authoritative ADT Root Rejection
+
+**Status**: Complete for the graph contract and focused proof on 2026-08-10. A whole-Azeroth
+diagnostic loaded 839 ADTs containing 243,585 M2 and 3,173 WMO placements, then spent 91.2 ms in
+M2 visibility and 107.8 ms in WMO visibility despite admitting zero M2 instances. The cause was
+contractual: any unresolved streamed child disabled `CanRejectSubtree` on its ADT root, forcing
+all resident tiles into traversal.
+
+Each per-ADT root now owns finite native tile bounds, expanded by resolved placement bounds, and is
+the only node allowed to retain rejection authority when descendants are unresolved. This safely
+rejects off-camera ADTs before their WMO/M2 buckets are visited while leaving ordinary buckets and
+placements fail-open. The next proof owner is a user-run, post-fix full-map `profile-render` report;
+no measured speedup is claimed until that report exists.
+
 ## Later Phases (Not Started In This Slice)
 
 - **Phase 9**: Integrate graph portal volumes into runtime WMO submission and prove doorway

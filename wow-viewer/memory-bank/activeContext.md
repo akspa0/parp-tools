@@ -404,3 +404,9 @@ the authored RGB corpus, then reviews the combined benchmark dry plan.
    now attributes graph/instance rebuild work separately before any renderer change.
  - Default Cata ADT loading no longer prints normal per-tile MCIN/chunk/liquid/placement summaries:
    these were thousands of console/history-lock writes over Azeroth and are now verbose-only.
+ - Whole-Azeroth evidence then found the primary remaining graph failure: 839 resident ADT roots
+   became non-rejectable whenever any streamed child model lacked bounds, causing 91.2 ms M2 and
+   107.8 ms WMO visibility even with zero admitted M2 instances. ADT roots now retain native finite
+   tile bounds, expanded by known placement bounds; only these authoritative roots may ignore
+   unresolved descendants. Focused graph/diagnostic proof: 19 passed. Next proof is user-run
+   post-fix `profile-render --load-all-tiles`; no speedup claimed yet.

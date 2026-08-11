@@ -142,6 +142,14 @@ public sealed record WorldSceneGraphBuildSet(
 /// </summary>
 public static class WorldSceneGraphObjectAdapter
 {
+    // Terrain uses the native ADT grid: tile Y maps to world X and tile X maps
+    // to world Y. These bounds are authoritative even while child model assets
+    // are unresolved, allowing an off-camera ADT to reject its full subtree.
+    private const float AdtTileWorldSize = 533.33333f;
+    private const float AdtMapOrigin = 32f * AdtTileWorldSize;
+    private const float AdtCullMinZ = -100_000f;
+    private const float AdtCullMaxZ = 100_000f;
+
     public static WorldSceneGraphBuildResult Build(
         IEnumerable<WorldSceneGraphObjectPlacement> placements,
         WorldSceneGraphAdapterOptions? options = null)
@@ -256,10 +264,14 @@ public static class WorldSceneGraphObjectAdapter
         IReadOnlyList<WorldSceneGraphObjectPlacement> placements)
     {
         string rootId = $"world/tile/{tileKey.TileX:D2}/{tileKey.TileY:D2}";
-        bool boundsKnown = placements.All(placement => placement.Instance.BoundsResolved);
-        (Vector3 boundsMin, Vector3 boundsMax) = boundsKnown
-            ? UnionBounds(placements.Select(placement => (placement.Instance.BoundsMin, placement.Instance.BoundsMax)))
-            : (Vector3.Zero, Vector3.Zero);
+        (Vector3 tileBoundsMin, Vector3 tileBoundsMax) = GetAdtTileBounds(tileKey);
+        (Vector3 boundsMin, Vector3 boundsMax) = UnionBounds(
+        [
+            (tileBoundsMin, tileBoundsMax),
+            .. placements
+                .Where(placement => placement.Instance.BoundsResolved)
+                .Select(placement => (placement.Instance.BoundsMin, placement.Instance.BoundsMax)),
+        ]);
 
         WorldSceneNode root = new(
             rootId,
@@ -267,8 +279,9 @@ public static class WorldSceneGraphObjectAdapter
             Matrix4x4.Identity,
             boundsMin,
             boundsMax,
-            boundsKnown: boundsKnown,
-            isQueryable: true);
+            boundsKnown: true,
+            isQueryable: true,
+            allowsUnresolvedDescendants: true);
         WorldSceneGraph graph = new(root);
 
         IEnumerable<IGrouping<(WorldSceneNodeKind Kind, string Key), WorldSceneGraphObjectPlacement>> bucketGroups =
@@ -309,6 +322,15 @@ public static class WorldSceneGraphObjectAdapter
         return new WorldSceneGraphBuildResult(
             graph,
             new ReadOnlyDictionary<string, WorldSceneGraphObjectPlacement>(placementIndex));
+    }
+
+    private static (Vector3 min, Vector3 max) GetAdtTileBounds((int TileX, int TileY) tileKey)
+    {
+        float minX = AdtMapOrigin - ((tileKey.TileY + 1) * AdtTileWorldSize);
+        float maxX = AdtMapOrigin - (tileKey.TileY * AdtTileWorldSize);
+        float minY = AdtMapOrigin - ((tileKey.TileX + 1) * AdtTileWorldSize);
+        float maxY = AdtMapOrigin - (tileKey.TileX * AdtTileWorldSize);
+        return (new Vector3(minX, minY, AdtCullMinZ), new Vector3(maxX, maxY, AdtCullMaxZ));
     }
 
     private static List<SceneBucket> BuildBuckets(

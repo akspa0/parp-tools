@@ -111,6 +111,11 @@ identity; no FPS or GPU claim is made.
   rebuild work cannot be misreported as unexplained frame time.
 - [x] T050 Gate normal per-ADT/chunk/liquid/placement console diagnostics behind verbose mode before
   full-map profiling; retain malformed-data diagnostics at the default level.
+- [x] T051 [US2] Keep each per-ADT root rejectable from authoritative native tile bounds while
+  streamed child bounds remain unresolved; expand the root around resolved placements and prove an
+  off-camera root skips its unresolved descendant in
+  `wow-viewer/src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldSceneGraphObjectAdapter.cs` and
+  `wow-viewer/tests/WowViewer.Core.Tests/World/WorldSceneGraphObjectAdapterTests.cs`.
       `WorldScene.Render` path in a hidden OpenGL context and writing a versioned per-stage JSON
       report with workload, queue, and client-read counters.
 - [x] T047 Add focused `WorldRenderDiagnostics` report-contract tests covering stage inventory,

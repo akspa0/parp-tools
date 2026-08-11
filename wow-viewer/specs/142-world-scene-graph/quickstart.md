@@ -96,6 +96,9 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
   checks.
 - The opt-in graph set gives every resident ADT tile its own `Tile`-rooted scene graph. WorldScene
   traverses those graphs independently; external M2/WMO content remains in a separate graph.
+- An ADT root retains authoritative finite tile bounds even if streamed M2/WMO descendants have not
+  resolved bounds. It expands around all resolved placements, so an off-camera tile rejects its
+  unresolved subtree before object visibility runs; ordinary child buckets remain fail-open.
 - External M2 spawns, skyboxes, WMO placements, and WMO-internal doodad-set submission remain
   outside this chunk-bucket slice.
 - Unknown object bounds keep their bucket and map fail-open.
