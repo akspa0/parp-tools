@@ -263,6 +263,14 @@ event before changing retention policy. No runtime capture or measured performan
 3. Run the focused graph proof and viewer build; defer real-client A/B capture and any AOI/cull
    policy change until the user witnesses the diagnostics on the affected map.
 
+## Phase 8F — Residency-Safe Graph Rebuild
+
+**Status**: Complete on 2026-08-10. Graph rebuilds now use only cached WMO summaries when mounting
+optional nested group nodes. A residency event no longer synchronously reads and parses every
+resident WMO merely to rebuild graph metadata. Missing summaries remain fail-open and can be mounted
+on a later graph rebuild after the asset is already loaded. The focused graph suite remains 34
+passing tests; no runtime FPS claim is made by this phase.
+
 ## Later Phases (Not Started In This Slice)
 
 - **Phase 9**: Integrate graph portal volumes into runtime WMO submission and prove doorway

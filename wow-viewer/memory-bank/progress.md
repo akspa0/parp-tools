@@ -8,6 +8,13 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-10 — Spec 142 residency-safe graph rebuild
+
+- Removed synchronous WMO summary reads from residency-triggered scene-graph rebuilds. The graph
+  now consumes cached summaries only; missing optional WMO group metadata remains fail-open.
+- Focused graph/workload/traversal/adapter/portal proof passes all 34 tests. Isolated viewer build
+  passes with 0 errors; the normal output was locked by the user's running viewer process.
+
 ## 2026-08-10 — Spec 142 runtime activation and residency diagnostics
 
 - Promoted `WorldScene.UseHierarchicalSceneTraversal` to default-on while retaining a state-invalidating

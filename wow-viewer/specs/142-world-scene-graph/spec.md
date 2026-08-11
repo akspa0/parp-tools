@@ -628,6 +628,10 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
 - The opt-in partitioned build now gives each resident ADT tile an independent `Tile`-rooted graph
   and keeps external placements in a separate graph. WorldScene traverses only those per-ADT roots
   and never builds one global map graph containing every ADT object.
+- Graph rebuilds are metadata-only with respect to WMO summaries: `WorldScene` requests only cached
+  summaries from `WorldAssetManager` while residency changes rebuild the graph. A missing summary
+  leaves optional `WmoGroup` children absent and keeps traversal fail-open; graph rebuild itself does
+  not synchronously read or parse a WMO file.
 - Focused graph/workload/traversal/adapter/portal proof is 34 passing tests; the runtime and viewer
   projects build with only existing repository warnings.
 

@@ -455,6 +455,17 @@ public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer =
         return true;
     }
 
+    /// <summary>
+    /// Returns a previously built WMO mesh summary without reading or parsing client data.
+    /// Scene-graph rebuilds use this metadata-only path so tile residency never performs
+    /// synchronous WMO I/O just to mount optional group children.
+    /// </summary>
+    public bool TryGetCachedWmoMeshSummary(string normalizedKey, out WmoMeshSummary summary)
+    {
+        normalizedKey = NormalizeKey(normalizedKey);
+        return _wmoMeshSummaries.TryGetValue(normalizedKey, out summary);
+    }
+
     public bool TryGetMdxCollisionSummary(string normalizedKey, out MdxCollisionMeshSummary summary)
     {
         normalizedKey = NormalizeKey(normalizedKey);

@@ -8168,7 +8168,7 @@ public class WorldScene : ISceneRenderer
                 parentId);
         }
 
-        if (!_assets.TryGetWmoMeshSummary(instance.ModelKey, out WmoMeshSummary summary)
+        if (!_assets.TryGetCachedWmoMeshSummary(instance.ModelKey, out WmoMeshSummary summary)
             || summary.GroupSummaries is null
             || summary.GroupSummaries.Length == 0)
         {
