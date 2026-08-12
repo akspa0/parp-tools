@@ -8082,7 +8082,7 @@ public class WorldScene : ISceneRenderer
             QueueTileAssetLoads(tileMdx, tileSkyboxes, tileWmo);
 
         // Hide WDL low-res tile now that detailed ADT is loaded
-        _wdlTerrain?.HideTile(tileX, tileY);
+        _wdlTerrain?.MarkDetailedTileResident(tileX, tileY);
 
         if ((tileMdx.Count > 0 || tileSkyboxes.Count > 0 || tileWmo.Count > 0) && ViewerLog.Verbose)
             ViewerLog.Trace($"[Terrain] Tile ({tileX},{tileY}) loaded: {tileMdx.Count} MDX, {tileSkyboxes.Count} skybox, {tileWmo.Count} WMO instances");
@@ -8101,7 +8101,7 @@ public class WorldScene : ISceneRenderer
         _tileWmoInstances.Remove((tileX, tileY));
         _tileMdxBounds.Remove((tileX, tileY));
         _tileWmoBounds.Remove((tileX, tileY));
-        _wdlTerrain?.ShowTile(tileX, tileY);
+        _wdlTerrain?.MarkDetailedTileUnloaded(tileX, tileY);
         LastUnloadedWmoTileX = tileX;
         LastUnloadedWmoTileY = tileY;
         LastUnloadedWmoInstanceCount = wmoInstanceCount;
@@ -9902,7 +9902,7 @@ public class WorldScene : ISceneRenderer
                         RestoreGlobalViewerFogRange(lighting);
                         lighting.ClearExternalLighting();
                         lighting.Update();
-                        _skyDome.UpdateFromLighting(lighting.GameTime);
+                        _skyDome.UpdateFromLighting(lighting.GameTime, lighting.LightDirection);
                         fogRecommendationSource = "Global viewer light";
 
                         if (_useLocalDbcLightingOverlay
@@ -9974,6 +9974,7 @@ public class WorldScene : ISceneRenderer
                         }
 
                         ResolveActiveFogRange(lighting, fogRecommendationSource);
+                        _skyDome.UpdateFromLighting(lighting.GameTime, lighting.LightDirection);
                         fogColor = lighting.FogColor;
                         fogStart = lighting.FogStart;
                         fogEnd = lighting.FogEnd;

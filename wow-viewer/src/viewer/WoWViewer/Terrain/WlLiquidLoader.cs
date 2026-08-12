@@ -259,6 +259,7 @@ public class WlLiquidLoader
             GroupLabel = groupLabel,
             Vertices = allVertices.ToArray(),
             Indices = allIndices.ToArray(),
+            TileFragments = BuildTileFragments(blocks),
             BoundsMin = min,
             BoundsMax = max,
             BlockCount = blocks.Count,
@@ -274,6 +275,119 @@ public class WlLiquidLoader
             MetadataNonZeroMin = metadataNonZeroMin == int.MaxValue ? 0 : metadataNonZeroMin,
             MetadataNonZeroMax = metadataNonZeroMax == int.MinValue ? 0 : metadataNonZeroMax
         };
+    }
+
+    private static WlLiquidTileFragment[] BuildTileFragments(List<WlBodyBlock> blocks)
+    {
+        var groups = new Dictionary<(int tileX, int tileY), List<WlBodyBlock>>();
+        var external = new List<WlBodyBlock>();
+
+        foreach (WlBodyBlock block in blocks)
+        {
+            Vector3 min = new(float.MaxValue);
+            Vector3 max = new(float.MinValue);
+            foreach (Vector3 vertex in block.TransformedVertices)
+            {
+                min = Vector3.Min(min, vertex);
+                max = Vector3.Max(max, vertex);
+            }
+
+            Vector3 center = (min + max) * 0.5f;
+            int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - center.X) / WoWConstants.ChunkSize);
+            int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - center.Y) / WoWConstants.ChunkSize);
+            if ((uint)tileX >= 64u || (uint)tileY >= 64u)
+            {
+                external.Add(block);
+                continue;
+            }
+
+            var key = (tileX, tileY);
+            if (!groups.TryGetValue(key, out List<WlBodyBlock>? group))
+            {
+                group = new List<WlBodyBlock>();
+                groups.Add(key, group);
+            }
+
+            group.Add(block);
+        }
+
+        var fragments = new List<WlLiquidTileFragment>(groups.Count + (external.Count > 0 ? 1 : 0));
+        foreach (var pair in groups.OrderBy(static pair => pair.Key.tileX).ThenBy(static pair => pair.Key.tileY))
+        {
+            BuildFragmentGeometry(pair.Value, out Vector3[] vertices, out int[] indices,
+                out Vector3 boundsMin, out Vector3 boundsMax);
+            fragments.Add(new WlLiquidTileFragment
+            {
+                TileX = pair.Key.tileX,
+                TileY = pair.Key.tileY,
+                Vertices = vertices,
+                Indices = indices,
+                BoundsMin = boundsMin,
+                BoundsMax = boundsMax
+            });
+        }
+
+        if (external.Count > 0)
+        {
+            BuildFragmentGeometry(external, out Vector3[] vertices, out int[] indices,
+                out Vector3 boundsMin, out Vector3 boundsMax);
+            fragments.Add(new WlLiquidTileFragment
+            {
+                TileX = -1,
+                TileY = -1,
+                Vertices = vertices,
+                Indices = indices,
+                BoundsMin = boundsMin,
+                BoundsMax = boundsMax
+            });
+        }
+
+        return fragments.ToArray();
+    }
+
+    private static void BuildFragmentGeometry(
+        List<WlBodyBlock> blocks,
+        out Vector3[] vertices,
+        out int[] indices,
+        out Vector3 boundsMin,
+        out Vector3 boundsMax)
+    {
+        var fragmentVertices = new List<Vector3>(blocks.Count * 16);
+        var fragmentIndices = new List<int>(blocks.Count * 54);
+        boundsMin = new Vector3(float.MaxValue);
+        boundsMax = new Vector3(float.MinValue);
+
+        foreach (WlBodyBlock block in blocks)
+        {
+            int baseIndex = fragmentVertices.Count;
+            fragmentVertices.AddRange(block.TransformedVertices);
+            foreach (Vector3 vertex in block.TransformedVertices)
+            {
+                boundsMin = Vector3.Min(boundsMin, vertex);
+                boundsMax = Vector3.Max(boundsMax, vertex);
+            }
+
+            for (int row = 0; row < 3; row++)
+            {
+                for (int col = 0; col < 3; col++)
+                {
+                    int tl = 15 - (row * 4 + col);
+                    int tr = 15 - (row * 4 + col + 1);
+                    int bl = 15 - ((row + 1) * 4 + col);
+                    int br = 15 - ((row + 1) * 4 + col + 1);
+
+                    fragmentIndices.Add(baseIndex + tl);
+                    fragmentIndices.Add(baseIndex + tr);
+                    fragmentIndices.Add(baseIndex + bl);
+                    fragmentIndices.Add(baseIndex + tr);
+                    fragmentIndices.Add(baseIndex + br);
+                    fragmentIndices.Add(baseIndex + bl);
+                }
+            }
+        }
+
+        vertices = fragmentVertices.ToArray();
+        indices = fragmentIndices.ToArray();
     }
 
     private static List<WlBodyBlock> BuildBodyBlocks(WlFile wl)
@@ -511,6 +625,7 @@ public class WlLiquidBody
     public string GroupLabel { get; init; } = "";
     public Vector3[] Vertices { get; init; } = Array.Empty<Vector3>();
     public int[] Indices { get; init; } = Array.Empty<int>();
+    public WlLiquidTileFragment[] TileFragments { get; init; } = Array.Empty<WlLiquidTileFragment>();
     public Vector3 BoundsMin { get; init; }
     public Vector3 BoundsMax { get; init; }
     public int BlockCount { get; init; }
@@ -525,4 +640,18 @@ public class WlLiquidBody
     public int MetadataPatternCount { get; init; }
     public int MetadataNonZeroMin { get; init; }
     public int MetadataNonZeroMax { get; init; }
+}
+
+/// <summary>
+/// A WL liquid body's geometry partitioned to the viewer's 64x64 terrain tile grid.
+/// The source body remains the ownership/visibility key; fragments are the draw units.
+/// </summary>
+public sealed class WlLiquidTileFragment
+{
+    public int TileX { get; init; }
+    public int TileY { get; init; }
+    public Vector3[] Vertices { get; init; } = Array.Empty<Vector3>();
+    public int[] Indices { get; init; } = Array.Empty<int>();
+    public Vector3 BoundsMin { get; init; }
+    public Vector3 BoundsMax { get; init; }
 }

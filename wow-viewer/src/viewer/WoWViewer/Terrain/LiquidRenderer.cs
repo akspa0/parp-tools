@@ -24,6 +24,8 @@ public class LiquidRenderer : IDisposable
 
     // WL liquid body meshes (from loose WLW/WLQ/WLM files)
     private readonly List<LiquidMesh> _wlMeshes = new();
+    private readonly Dictionary<(int tileX, int tileY), List<LiquidMesh>> _wlMeshesByTile = new();
+    private readonly List<LiquidMesh> _wlExternalMeshes = new();
     private readonly HashSet<string> _hiddenWlBodies = new(StringComparer.OrdinalIgnoreCase);
 
     // Global toggles
@@ -175,7 +177,7 @@ public class LiquidRenderer : IDisposable
         // Render WL liquid bodies (loose project files)
         if (renderWlLiquids)
         {
-            foreach (var mesh in _wlMeshes)
+            foreach (var mesh in EnumerateWlMeshesInRange(cameraPos, maxRenderDistance))
             {
                 if (!string.IsNullOrWhiteSpace(mesh.WlBodyKey) && _hiddenWlBodies.Contains(mesh.WlBodyKey))
                     continue;
@@ -192,7 +194,7 @@ public class LiquidRenderer : IDisposable
             }
 
             if (ShowSelectedWlWireframeOverlay && !string.IsNullOrWhiteSpace(SelectedWlBodyKey))
-                RenderSelectedWlWireframe(view, proj);
+                RenderSelectedWlWireframe(view, proj, cameraPos, maxRenderDistance, maxRenderDistanceSq);
         }
 
         LastVisibleTerrainMeshCount = visibleTerrainMeshCount;
@@ -206,7 +208,12 @@ public class LiquidRenderer : IDisposable
         _gl.Enable(EnableCap.CullFace);
     }
 
-    private unsafe void RenderSelectedWlWireframe(Matrix4x4 view, Matrix4x4 proj)
+    private unsafe void RenderSelectedWlWireframe(
+        Matrix4x4 view,
+        Matrix4x4 proj,
+        Vector3 cameraPos,
+        float maxRenderDistance,
+        float maxRenderDistanceSq)
     {
         _wireframeShader.Use();
         _wireframeShader.SetMat4("uView", view);
@@ -220,11 +227,13 @@ public class LiquidRenderer : IDisposable
         _gl.LineWidth(1.8f);
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
 
-        foreach (var mesh in _wlMeshes)
+        foreach (var mesh in EnumerateWlMeshesInRange(cameraPos, maxRenderDistance))
         {
             if (!string.Equals(mesh.WlBodyKey, SelectedWlBodyKey, StringComparison.OrdinalIgnoreCase))
                 continue;
             if (!string.IsNullOrWhiteSpace(mesh.WlBodyKey) && _hiddenWlBodies.Contains(mesh.WlBodyKey))
+                continue;
+            if (!ShouldRenderMesh(mesh, cameraPos, maxRenderDistanceSq))
                 continue;
 
             Vector4 color = mesh.Type switch
@@ -488,67 +497,127 @@ void main() {
         int added = 0;
         foreach (var body in bodies)
         {
-            if (body.Vertices.Length == 0 || body.Indices.Length == 0) continue;
+            WlLiquidTileFragment[] fragments = body.TileFragments.Length > 0
+                ? body.TileFragments
+                : new[]
+                {
+                    new WlLiquidTileFragment
+                    {
+                        TileX = -1,
+                        TileY = -1,
+                        Vertices = body.Vertices,
+                        Indices = body.Indices,
+                        BoundsMin = body.BoundsMin,
+                        BoundsMax = body.BoundsMax
+                    }
+                };
 
-            // Build flat vertex array: 3 floats per vertex
-            var verts = new float[body.Vertices.Length * 3];
-            Vector3 boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
-            Vector3 boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
-            for (int i = 0; i < body.Vertices.Length; i++)
+            foreach (WlLiquidTileFragment fragment in fragments)
             {
-                Vector3 vertex = body.Vertices[i];
-                verts[i * 3 + 0] = vertex.X;
-                verts[i * 3 + 1] = vertex.Y;
-                verts[i * 3 + 2] = vertex.Z;
-                boundsMin = Vector3.Min(boundsMin, vertex);
-                boundsMax = Vector3.Max(boundsMax, vertex);
+                if (fragment.Vertices.Length == 0 || fragment.Indices.Length == 0)
+                    continue;
+
+                LiquidMesh? mesh = UploadWlFragment(body, fragment);
+                if (mesh == null)
+                    continue;
+
+                _wlMeshes.Add(mesh);
+                if (fragment.TileX >= 0 && fragment.TileY >= 0)
+                {
+                    var key = (fragment.TileX, fragment.TileY);
+                    if (!_wlMeshesByTile.TryGetValue(key, out List<LiquidMesh>? tileMeshes))
+                    {
+                        tileMeshes = new List<LiquidMesh>();
+                        _wlMeshesByTile.Add(key, tileMeshes);
+                    }
+
+                    tileMeshes.Add(mesh);
+                }
+                else
+                {
+                    _wlExternalMeshes.Add(mesh);
+                }
+
+                added++;
             }
 
-            uint vao = _gl.GenVertexArray();
-            uint vbo = _gl.GenBuffer();
-            uint ebo = _gl.GenBuffer();
-
-            _gl.BindVertexArray(vao);
-
-            _gl.BindBuffer(BufferTargetARB.ArrayBuffer, vbo);
-            fixed (float* ptr = verts)
-                _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(verts.Length * sizeof(float)), ptr, BufferUsageARB.StaticDraw);
-
-            // Use uint32 indices since WL bodies can have >65k vertices
-            _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, ebo);
-            var indices = body.Indices;
-            fixed (int* ptr = indices)
-                _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(int)), ptr, BufferUsageARB.StaticDraw);
-
-            _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), (void*)0);
-            _gl.EnableVertexAttribArray(0);
-
-            _gl.BindVertexArray(0);
-
-            _wlMeshes.Add(new LiquidMesh
-            {
-                Vao = vao,
-                Vbo = vbo,
-                Ebo = ebo,
-                IndexCount = (uint)indices.Length,
-                Type = body.Type,
-                TileX = -1, // WL bodies are not tile-specific
-                TileY = -1,
-                UseUint32Indices = true,
-                WlBodyKey = body.BodyKey,
-                WlBodyName = body.Name,
-                WlSourcePath = body.SourcePath,
-                BoundsMin = boundsMin - new Vector3(LiquidVisibilityPadding),
-                BoundsMax = boundsMax + new Vector3(LiquidVisibilityPadding)
-            });
-            added++;
-
             ViewerLog.Info(ViewerLog.Category.Terrain,
-                $"[WlLoader] Uploaded '{body.Name}' ({body.FileType}, {body.GroupLabel}): {body.BlockCount} blocks, {body.Vertices.Length} verts, type={body.Type}");
+                $"[WlLoader] Uploaded '{body.Name}' ({body.FileType}, {body.GroupLabel}): {body.BlockCount} blocks, {fragments.Length} tile fragments, type={body.Type}");
         }
 
         if (added > 0)
-            ViewerLog.Info(ViewerLog.Category.Terrain, $"[LiquidRenderer] Added {added} WL liquid bodies (total WL: {_wlMeshes.Count})");
+            ViewerLog.Info(ViewerLog.Category.Terrain,
+                $"[LiquidRenderer] Added {added} WL tile meshes across {_wlMeshesByTile.Count} terrain tiles (total WL: {_wlMeshes.Count})");
+    }
+
+    private unsafe LiquidMesh? UploadWlFragment(WlLiquidBody body, WlLiquidTileFragment fragment)
+    {
+        var verts = new float[fragment.Vertices.Length * 3];
+        for (int i = 0; i < fragment.Vertices.Length; i++)
+        {
+            Vector3 vertex = fragment.Vertices[i];
+            verts[i * 3 + 0] = vertex.X;
+            verts[i * 3 + 1] = vertex.Y;
+            verts[i * 3 + 2] = vertex.Z;
+        }
+
+        uint vao = _gl.GenVertexArray();
+        uint vbo = _gl.GenBuffer();
+        uint ebo = _gl.GenBuffer();
+        _gl.BindVertexArray(vao);
+
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, vbo);
+        fixed (float* ptr = verts)
+            _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(verts.Length * sizeof(float)), ptr, BufferUsageARB.StaticDraw);
+
+        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, ebo);
+        fixed (int* ptr = fragment.Indices)
+            _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(fragment.Indices.Length * sizeof(int)), ptr, BufferUsageARB.StaticDraw);
+
+        _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), (void*)0);
+        _gl.EnableVertexAttribArray(0);
+        _gl.BindVertexArray(0);
+
+        return new LiquidMesh
+        {
+            Vao = vao,
+            Vbo = vbo,
+            Ebo = ebo,
+            IndexCount = (uint)fragment.Indices.Length,
+            Type = body.Type,
+            TileX = fragment.TileX,
+            TileY = fragment.TileY,
+            UseUint32Indices = true,
+            WlBodyKey = body.BodyKey,
+            WlBodyName = body.Name,
+            WlSourcePath = body.SourcePath,
+            BoundsMin = fragment.BoundsMin - new Vector3(LiquidVisibilityPadding),
+            BoundsMax = fragment.BoundsMax + new Vector3(LiquidVisibilityPadding)
+        };
+    }
+
+    private IEnumerable<LiquidMesh> EnumerateWlMeshesInRange(Vector3 cameraPos, float maxRenderDistance)
+    {
+        int cameraTileX = Math.Clamp(
+            (int)MathF.Floor((WoWConstants.MapOrigin - cameraPos.X) / WoWConstants.ChunkSize), 0, 63);
+        int cameraTileY = Math.Clamp(
+            (int)MathF.Floor((WoWConstants.MapOrigin - cameraPos.Y) / WoWConstants.ChunkSize), 0, 63);
+        int tileRadius = Math.Max(1, (int)MathF.Ceiling(maxRenderDistance / WoWConstants.ChunkSize) + 1);
+
+        for (int tileX = Math.Max(0, cameraTileX - tileRadius); tileX <= Math.Min(63, cameraTileX + tileRadius); tileX++)
+        {
+            for (int tileY = Math.Max(0, cameraTileY - tileRadius); tileY <= Math.Min(63, cameraTileY + tileRadius); tileY++)
+            {
+                if (_wlMeshesByTile.TryGetValue((tileX, tileY), out List<LiquidMesh>? meshes))
+                {
+                    foreach (LiquidMesh mesh in meshes)
+                        yield return mesh;
+                }
+            }
+        }
+
+        foreach (LiquidMesh mesh in _wlExternalMeshes)
+            yield return mesh;
     }
 
     /// <summary>Remove all WL liquid body meshes.</summary>
@@ -557,6 +626,8 @@ void main() {
         foreach (var mesh in _wlMeshes)
             mesh.Dispose(_gl);
         _wlMeshes.Clear();
+        _wlMeshesByTile.Clear();
+        _wlExternalMeshes.Clear();
         SelectedWlBodyKey = null;
         _hiddenWlBodies.Clear();
     }
@@ -569,6 +640,8 @@ void main() {
         foreach (var mesh in _wlMeshes)
             mesh.Dispose(_gl);
         _wlMeshes.Clear();
+        _wlMeshesByTile.Clear();
+        _wlExternalMeshes.Clear();
         _shader.Dispose();
         _wireframeShader.Dispose();
     }

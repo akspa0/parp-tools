@@ -14,8 +14,8 @@ namespace WoWViewer.Terrain;
 /// Each WDL tile has a 17×17 outer + 16×16 inner height grid — same layout as MCNK
 /// but at tile scale (each WDL "cell" = one ADT chunk = 533.33 world units).
 /// 
-/// Used as background/far terrain: rendered for all tiles at startup, then individual
-/// tiles are hidden as high-detail ADT meshes stream in via TerrainManager.
+/// Used as background/far terrain: parsed map-wide as compact CPU data, promoted to GPU
+/// meshes inside the horizon window, and kept as an underlay while detailed ADT meshes stream.
 /// </summary>
 public class WdlTerrainRenderer : IDisposable
 {
@@ -31,6 +31,7 @@ public class WdlTerrainRenderer : IDisposable
     private const float DistanceHazeEndFactor = 0.96f;
     private const float DistanceHazeColorBlend = 0.92f;
     private const float DistanceHazeOpacityFloor = 0.18f;
+    private const float HorizonDistancePadding = 2500f;
 
     // Per-tile GPU mesh data
     private readonly Dictionary<int, WdlTileMesh> _tileMeshes = new(); // tileIndex → mesh
@@ -38,7 +39,7 @@ public class WdlTerrainRenderer : IDisposable
     private readonly Dictionary<int, float> _tileAlphas = new();
     private readonly Dictionary<int, float> _tileTargetAlphas = new();
     private readonly Dictionary<int, long> _tileShowReadyTimestamps = new();
-    private readonly HashSet<int> _hiddenTileIndices = new();
+    private readonly HashSet<int> _detailedTileIndices = new();
     private readonly List<(int index, float distanceSq)> _tileResidencyScratch = new();
     private readonly List<int> _tileEvictionScratch = new();
     private long _lastFadeTimestamp;
@@ -105,30 +106,30 @@ public class WdlTerrainRenderer : IDisposable
     }
 
     /// <summary>
-    /// Hide a WDL tile (called when the corresponding ADT is loaded at full detail).
+    /// Record that detailed terrain is resident. WDL remains available as the far-field
+    /// underlay; depth-tested detailed terrain occludes it nearby.
     /// </summary>
-    public void HideTile(int tileX, int tileY)
+    public void MarkDetailedTileResident(int tileX, int tileY)
     {
         int tileIndex = GetTileIndex(tileX, tileY);
-        _hiddenTileIndices.Add(tileIndex);
-        SetTileTargetAlpha(tileIndex, 0.0f);
+        _detailedTileIndices.Add(tileIndex);
     }
 
     /// <summary>
-    /// Show a WDL tile again (called when the corresponding ADT is unloaded).
+    /// Record that detailed terrain left a tile so WDL can cover the gap again.
     /// </summary>
-    public void ShowTile(int tileX, int tileY)
+    public void MarkDetailedTileUnloaded(int tileX, int tileY)
     {
         int tileIndex = GetTileIndex(tileX, tileY);
-        _hiddenTileIndices.Remove(tileIndex);
-        SetTileTargetAlpha(tileIndex, 1.0f);
+        _detailedTileIndices.Remove(tileIndex);
     }
 
     /// <summary>
     /// Render all visible WDL tiles.
     /// </summary>
     public unsafe void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos,
-        TerrainLighting lighting, FrustumCuller? frustum = null, bool opaqueFallback = false)
+        TerrainLighting lighting, FrustumCuller? frustum = null, bool opaqueFallback = false,
+        float? horizonDistance = null)
     {
         if (_tileData.Count == 0) return;
 
@@ -183,8 +184,12 @@ public class WdlTerrainRenderer : IDisposable
         // the frustum test and add the same distance admission the detailed terrain
         // streamer uses so a wide camera frustum does not turn 839 tiles into 839
         // draw calls every frame.
-        float fogDistance = MathF.Max(lighting.FogEnd, WoWConstants.ChunkSize * 1.5f);
+        float fogDistance = MathF.Max(
+            horizonDistance ?? (lighting.FogEnd + HorizonDistancePadding),
+            WoWConstants.ChunkSize * 1.5f);
         float fogDistanceSq = fogDistance * fogDistance;
+        float detailedOverlapDistance = MathF.Max(lighting.FogEnd, WoWConstants.ChunkSize * 0.5f);
+        float detailedOverlapDistanceSq = detailedOverlapDistance * detailedOverlapDistance;
 
         foreach (var (idx, mesh) in _tileMeshes)
         {
@@ -195,7 +200,11 @@ public class WdlTerrainRenderer : IDisposable
             if (frustum != null && !frustum.TestAABB(mesh.BoundsMin, mesh.BoundsMax))
                 continue;
 
-            if (DistanceSquaredPointToAabb(cameraPos, mesh.BoundsMin, mesh.BoundsMax) > fogDistanceSq)
+            float distanceSq = DistanceSquaredPointToAabb(cameraPos, mesh.BoundsMin, mesh.BoundsMax);
+            if (distanceSq > fogDistanceSq)
+                continue;
+
+            if (_detailedTileIndices.Contains(idx) && distanceSq <= detailedOverlapDistanceSq)
                 continue;
 
             uint minimapTexture = 0;
@@ -219,7 +228,7 @@ public class WdlTerrainRenderer : IDisposable
 
     private void UpdateTileResidency(Vector3 cameraPos, float fogEnd)
     {
-        float fogDistance = MathF.Max(fogEnd, WoWConstants.ChunkSize * 1.5f);
+        float fogDistance = MathF.Max(fogEnd + HorizonDistancePadding, WoWConstants.ChunkSize * 1.5f);
         float loadDistance = fogDistance + (TileResidencyLoadPadding * WoWConstants.ChunkSize);
         float unloadDistance = fogDistance + (TileResidencyUnloadPadding * WoWConstants.ChunkSize);
         float loadDistanceSq = loadDistance * loadDistance;
@@ -252,11 +261,8 @@ public class WdlTerrainRenderer : IDisposable
                 continue;
 
             _tileMeshes[tileIndex] = mesh;
-            float initialAlpha = _hiddenTileIndices.Contains(tileIndex) ? 0.0f : 1.0f;
-            _tileAlphas[tileIndex] = initialAlpha;
-            _tileTargetAlphas[tileIndex] = initialAlpha;
-            if (initialAlpha <= 0.0f)
-                _tileShowReadyTimestamps.Remove(tileIndex);
+            _tileAlphas[tileIndex] = 1.0f;
+            _tileTargetAlphas[tileIndex] = 1.0f;
 
             builtThisFrame++;
             if (builtThisFrame >= MaxTileMeshBuildsPerFrame)
@@ -633,7 +639,7 @@ void main() {
         _tileAlphas.Clear();
         _tileTargetAlphas.Clear();
         _tileShowReadyTimestamps.Clear();
-        _hiddenTileIndices.Clear();
+        _detailedTileIndices.Clear();
         _shader.Dispose();
     }
 

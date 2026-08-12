@@ -2,6 +2,7 @@ using System.Numerics;
 using WoWViewer.Logging;
 using Silk.NET.OpenGL;
 using WowViewer.Core.Runtime.World.Sky;
+using WowViewer.Core.Terrain;
 
 namespace WoWViewer.Rendering;
 
@@ -17,7 +18,13 @@ public class SkyDomeRenderer : IDisposable
     private uint _shaderProgram;
     private int _uView, _uProj, _uCameraPos;
     private int _uZenithColor, _uHorizonColor, _uFogColor;
+    private int _uSunDirection, _uMoonDirection, _uSunColor, _uMoonColor;
+    private int _uSunVisibility, _uMoonVisibility;
     private int _indexCount;
+    private Vector3 _sunDirection = Vector3.UnitZ;
+    private Vector3 _moonDirection = Vector3.UnitZ;
+    private float _sunVisibility;
+    private float _moonVisibility;
 
     // Sky colors (set externally from TerrainLighting)
     public Vector3 ZenithColor { get; set; } = new(0.3f, 0.5f, 0.9f);   // deep blue
@@ -36,9 +43,25 @@ public class SkyDomeRenderer : IDisposable
     /// </summary>
     public void UpdateFromLighting(float gameTime)
     {
+        UpdateFromLighting(gameTime, TerrainSolarDirection.Evaluate(gameTime));
+    }
+
+    /// <summary>
+    /// Update sky colors and celestial directions from the final active lighting state.
+    /// The direction may come from a build-scoped LIT/DBC profile; the solar profile is only
+    /// the fallback supplied by the overload above.
+    /// </summary>
+    public void UpdateFromLighting(float gameTime, Vector3 sunDirection)
+    {
         float sunAngle = gameTime * MathF.PI * 2f;
         float sunHeight = MathF.Sin(sunAngle - MathF.PI * 0.5f);
         float dayFactor = MathF.Max(0, sunHeight);
+        _sunDirection = sunDirection.LengthSquared() > 1e-6f
+            ? Vector3.Normalize(sunDirection)
+            : TerrainSolarDirection.Evaluate(gameTime);
+        _moonDirection = Vector3.Normalize(new Vector3(-_sunDirection.X, -_sunDirection.Y, MathF.Abs(_sunDirection.Z)));
+        _sunVisibility = SmoothVisibility(dayFactor, 0.08f, 0.25f);
+        _moonVisibility = SmoothVisibility(1f - dayFactor, 0.10f, 0.35f);
 
         // Zenith: dark blue at night, sky blue at day
         ZenithColor = Vector3.Lerp(
@@ -85,6 +108,12 @@ public class SkyDomeRenderer : IDisposable
         _gl.Uniform3(_uZenithColor, ZenithColor.X, ZenithColor.Y, ZenithColor.Z);
         _gl.Uniform3(_uHorizonColor, HorizonColor.X, HorizonColor.Y, HorizonColor.Z);
         _gl.Uniform3(_uFogColor, SkyFogColor.X, SkyFogColor.Y, SkyFogColor.Z);
+        _gl.Uniform3(_uSunDirection, _sunDirection.X, _sunDirection.Y, _sunDirection.Z);
+        _gl.Uniform3(_uMoonDirection, _moonDirection.X, _moonDirection.Y, _moonDirection.Z);
+        _gl.Uniform3(_uSunColor, 1.0f, 0.86f, 0.58f);
+        _gl.Uniform3(_uMoonColor, 0.62f, 0.72f, 1.0f);
+        _gl.Uniform1(_uSunVisibility, _sunVisibility);
+        _gl.Uniform1(_uMoonVisibility, _moonVisibility);
 
         _gl.BindVertexArray(_vao);
         _gl.DrawElements(PrimitiveType.Triangles, (uint)_indexCount, DrawElementsType.UnsignedShort, null);
@@ -93,6 +122,12 @@ public class SkyDomeRenderer : IDisposable
         // Restore state
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthMask(true);
+    }
+
+    private static float SmoothVisibility(float value, float edgeStart, float edgeEnd)
+    {
+        float t = Math.Clamp((value - edgeStart) / MathF.Max(edgeEnd - edgeStart, 1e-4f), 0f, 1f);
+        return t * t * (3f - (2f * t));
     }
 
     private unsafe void BuildDome(int segments, int rings, float radius)
@@ -139,22 +174,31 @@ uniform mat4 uProj;
 uniform vec3 uCameraPos;
 
 out float vHeight;
+out vec3 vDirection;
 
 void main() {
     // Sky dome follows camera position
     vec3 worldPos = aPos + uCameraPos;
     gl_Position = uProj * uView * vec4(worldPos, 1.0);
     vHeight = aHeight;
+    vDirection = normalize(aPos);
 }
 ";
 
         string fragSrc = @"
 #version 330 core
 in float vHeight;
+in vec3 vDirection;
 
 uniform vec3 uZenithColor;
 uniform vec3 uHorizonColor;
 uniform vec3 uFogColor;
+uniform vec3 uSunDirection;
+uniform vec3 uMoonDirection;
+uniform vec3 uSunColor;
+uniform vec3 uMoonColor;
+uniform float uSunVisibility;
+uniform float uMoonVisibility;
 
 out vec4 FragColor;
 
@@ -167,6 +211,16 @@ void main() {
     // Blend toward fog color near the very bottom (below horizon line)
     float fogBlend = smoothstep(0.15, 0.0, vHeight);
     skyColor = mix(skyColor, uFogColor, fogBlend);
+
+    vec3 direction = normalize(vDirection);
+    float sunDot = dot(direction, normalize(uSunDirection));
+    float moonDot = dot(direction, normalize(uMoonDirection));
+    float sunDisc = smoothstep(0.9984, 0.9997, sunDot) * uSunVisibility;
+    float moonDisc = smoothstep(0.9988, 0.9998, moonDot) * uMoonVisibility;
+    float sunGlow = smoothstep(0.96, 0.999, sunDot) * uSunVisibility * 0.22;
+    float moonGlow = smoothstep(0.97, 0.999, moonDot) * uMoonVisibility * 0.12;
+    skyColor += uSunColor * (sunDisc + sunGlow);
+    skyColor += uMoonColor * (moonDisc + moonGlow);
 
     FragColor = vec4(skyColor, 1.0);
 }
@@ -197,6 +251,12 @@ void main() {
         _uZenithColor = _gl.GetUniformLocation(_shaderProgram, "uZenithColor");
         _uHorizonColor = _gl.GetUniformLocation(_shaderProgram, "uHorizonColor");
         _uFogColor = _gl.GetUniformLocation(_shaderProgram, "uFogColor");
+        _uSunDirection = _gl.GetUniformLocation(_shaderProgram, "uSunDirection");
+        _uMoonDirection = _gl.GetUniformLocation(_shaderProgram, "uMoonDirection");
+        _uSunColor = _gl.GetUniformLocation(_shaderProgram, "uSunColor");
+        _uMoonColor = _gl.GetUniformLocation(_shaderProgram, "uMoonColor");
+        _uSunVisibility = _gl.GetUniformLocation(_shaderProgram, "uSunVisibility");
+        _uMoonVisibility = _gl.GetUniformLocation(_shaderProgram, "uMoonVisibility");
     }
 
     private uint CompileShader(ShaderType type, string source)

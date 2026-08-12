@@ -673,6 +673,17 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
   camera window with bounded per-frame promotion and eviction. WDL draw admission also applies
   frustum and fog-distance culling. Detailed ADT residency remains owned by `TerrainManager`'s
   AOI stream.
+- WLW/WLQ/WLM/WLL editor liquid data MAY be discovered map-wide as CPU source data, but normal
+  rendering MUST partition each logical body into the existing 64x64 terrain-tile draw buckets and
+  enumerate only buckets intersecting the camera render window. Geometry that cannot be assigned
+  to a safe tile MUST remain in an explicit external bucket and retain conservative AABB culling.
+- WDL is a far-field underlay, not a permanently replaced copy of detailed ADT terrain. A resident
+  ADT tile MUST NOT permanently suppress its WDL tile; detailed terrain depth wins in the near field
+  while the WDL mesh remains eligible for distant horizon coverage. Synthesized minimaps remain
+  terrain-only raster products and use the shared solar/shadow compositor rather than a 3D skybox.
+- The shared sky-dome composition MUST consume the final active world light direction, including a
+  build-scoped LIT/DBC override when present, and MAY provide procedural sun/moon discs as a fallback
+  celestial layer. This layer is separate from tile residency and from top-down minimap export.
 
 This is a runtime activation and instrumentation slice, not a performance promotion. The graph
 selector is default-off after real-client evidence showed the direct graph traversal path was slower;

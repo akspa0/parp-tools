@@ -558,3 +558,12 @@ the authored RGB corpus, then reviews the combined benchmark dry plan.
    established per-instance `RenderWithTransform()` path for direct MDX and adapted M2 wrappers;
    shared/GPU MDX batching is held out until visual parity is proven. WMO shell and WMO-internal
    doodad batching remain independent.
+ - 2026-08-11 WL*/WDL horizon slice: WLW/WLQ/WLM/WLL bodies are still discovered map-wide as CPU
+   source data, but each logical body is partitioned into 64x64 terrain-tile GPU fragments and the
+   normal liquid pass enumerates only camera-window buckets; out-of-grid fragments remain in an
+   explicit conservative external bucket. WDL detailed-tile events now record ADT residency without
+   permanently suppressing the WDL underlay, and WDL GPU residency/draw admission extends through
+   the existing horizon projection window. The shared sky dome now consumes final active lighting
+   direction and renders procedural sun/moon discs. Viewer build passed with 0 errors; user-run
+   visual/FPS proof remains pending. Synthesized minimaps remain terrain-only and retain the shared
+   solar/shadow compositor path.

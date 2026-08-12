@@ -365,6 +365,26 @@ streaming and object residency ownership are unchanged.
 check must confirm that WDL residency stays near the fog window and that no visual seam/regression
 appears while crossing tile boundaries.
 
+## Phase 8I.3 — Tile-Windowed WL* Liquids and WDL Horizon
+
+**Status**: Implemented as a bounded render-admission correction on 2026-08-11; real-client
+frame-time and visual horizon proof remain user-owned.
+
+1. Preserve map-wide WL* source discovery, but partition each logical liquid body's geometry into
+   the existing 64x64 terrain tile buckets before GPU upload.
+2. Enumerate only camera-window WL* buckets for the normal liquid pass; retain an explicit
+   out-of-grid bucket for editor data that cannot be assigned safely.
+3. Keep WDL GPU residency bounded by the existing fog/horizon window, but do not permanently
+   remove a WDL tile merely because its detailed ADT is resident. WDL is an underlay and detailed
+   terrain depth should win in the near field while the WDL mesh remains available at the horizon.
+4. Keep synthesized minimaps terrain-only: their shared compositor already applies the selected
+   solar direction, ambient, baked shadow, and optional cast-shadow signals. A skybox is a 3D
+   world-composition concern and must not be painted into top-down terrain minimap pixels.
+
+**Exit evidence**: viewer build passes; the user-run viewer confirms WL* visible draw counts track
+the camera tile window, WDL survives as a distant horizon after ADT residency, and the sky dome
+shows the active sun/moon composition without reintroducing the prior native draw crash.
+
 ## Phase 8J — Overlay Work Attribution and Admission
 
 **Status**: `selection_bounds` was identified from user-run owner evidence on 2026-08-10/11 and is

@@ -965,6 +965,13 @@ Next: build the authored RGB corpus and review the combined plan.
    this is not an admission or tile-residency failure. The production world MDX route now forces
    per-instance `RenderWithTransform()` for direct MDX and adapted M2 wrappers; shared/GPU MDX
    batching is held out pending a user visual check. WMO batching is unchanged.
+ - 2026-08-11: Implemented the bounded WL*/WDL horizon pass from Spec 142 Phase 8I.3. WL* body
+   geometry now partitions into 64x64 terrain-tile fragments and normal liquid rendering walks
+   only camera-window buckets, with an explicit external fallback bucket. WDL GPU residency now
+   uses the existing horizon projection window and detailed ADT residency no longer permanently
+   hides the distant WDL underlay. Added procedural sun/moon discs to the shared sky dome using
+   the final active TerrainLighting direction. Viewer build passed with 0 errors; the user must
+   validate real-client draw counts, horizon visibility, and FPS stability.
  - 2026-08-11: Created the complete Speckit design package for Spec 143,
    `143-world-context-lighting`. The package separates ADT area resolution, WMO interior context,
    player-head camera state, and evidence-gated WMO/M2 lighting. Code inspection confirms Alpha and

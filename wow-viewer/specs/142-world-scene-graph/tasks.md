@@ -144,6 +144,15 @@ identity; no FPS or GPU claim is made.
   promotion without synchronous all-ADT normal startup.
 - [ ] T056 [US2] Attribute explicit full-residency stress mode by decode, mesh, upload, object, and
   graph materialization substage; keep it distinct from normal streaming evidence.
+- [x] T062 [US2] Partition WL* liquid bodies into terrain-tile GPU fragments and enumerate only
+  camera-window buckets in `src/viewer/WoWViewer/Terrain/LiquidRenderer.cs`, retaining an explicit
+  external bucket for data without a safe 64x64 tile assignment.
+- [x] T063 [US2] Keep resident WDL meshes available as a far-field underlay, extend their bounded
+  residency to the existing horizon projection window, and retain detailed ADT hide/show events
+  as residency metadata rather than permanent WDL suppression in `src/viewer/WoWViewer/Terrain/WdlTerrainRenderer.cs`.
+- [x] T064 [US2] Add procedural sun/moon discs to the existing shared sky-dome pass, consuming the
+  final active TerrainLighting direction while keeping synthesized minimap output terrain-only
+  in `src/viewer/WoWViewer/Rendering/SkyDomeRenderer.cs`.
 - [ ] T057 [US4] Define a capability-gated modern static-instance submission contract and legacy
   fallback proof, coordinated with Spec 138.
 - [ ] T027 Add synthetic workload replay and stage-level report output in `wow-viewer/tools/validation-capture/WowViewer.Tool.ValidationCapture/ValidationWorldSceneAdapter.cs`.
