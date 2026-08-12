@@ -8,6 +8,14 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-11 — Keep unresolved MDX tiles out of the coarse cull deadlock
+
+- Fixed the second MDX streaming gate: the flat per-tile bounds culler could reject an entire tile
+  using placeholder MDDF AABBs before the per-placement unresolved-bounds admission ran.
+- Unresolved MDX tiles now fail open at the coarse gate and retain per-instance frustum, distance,
+  projected-size, and bounded queue controls. The compact status line now exposes MDX asset
+  success/failure counts. Viewer runtime proof remains user-run.
+
 ## 2026-08-11 — Prevent unresolved MDX placements from starving the load queue
 
 - Fixed the MDX visibility admission deadlock where the performance profile applied projected-size

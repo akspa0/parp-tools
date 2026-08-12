@@ -8709,6 +8709,17 @@ public class WorldScene : ISceneRenderer
         boundsByTile[tileKey] = (min, max);
     }
 
+    private static bool AreMdxTileBoundsResolved(IReadOnlyList<ObjectInstance> instances)
+    {
+        for (int i = 0; i < instances.Count; i++)
+        {
+            if (!instances[i].BoundsResolved)
+                return false;
+        }
+
+        return true;
+    }
+
     private bool ShouldVisitObjectBucket(
         Vector3 bucketMin,
         Vector3 bucketMax,
@@ -9686,6 +9697,7 @@ public class WorldScene : ISceneRenderer
         foreach (var pair in _tileMdxInstances)
         {
             if (_tileMdxBounds.TryGetValue(pair.Key, out var bounds)
+                && AreMdxTileBoundsResolved(pair.Value)
                 && !ShouldVisitObjectBucket(bounds.Min, bounds.Max, cameraPos, cameraForward, fogEnd, isWmo: false, countAsTaxiActor: false))
             {
                 MdxCulledCount += pair.Value.Count;

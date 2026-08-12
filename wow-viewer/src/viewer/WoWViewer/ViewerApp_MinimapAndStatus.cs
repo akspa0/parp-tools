@@ -335,7 +335,9 @@ public partial class ViewerApp
             return $"{fps} | {area} | CPU {stats.TotalCpuMs:0.0}ms | Tiles {loadedTiles} | " +
                 $"Chunks {stats.TerrainChunksRendered}/{stats.TerrainChunksCulled} | " +
                 $"WMO {stats.VisibleWmoCount}/{_worldScene.WmoInstanceCount} | " +
-                $"MDX {stats.VisibleMdxCount}/{_worldScene.MdxInstanceCount} | Pending {stats.PendingAssetLoadCount}";
+                $"MDX {stats.VisibleMdxCount}/{_worldScene.MdxInstanceCount} " +
+                $"({_worldScene.Assets.MdxModelsLoaded} ok/{_worldScene.Assets.MdxModelsFailed} fail) | " +
+                $"Pending {stats.PendingAssetLoadCount}";
         }
 
         TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;

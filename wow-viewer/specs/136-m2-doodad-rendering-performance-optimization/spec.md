@@ -105,3 +105,6 @@ without model bounds starts with a small placement-centered fallback AABB; perfo
 size culling must not reject that placeholder before the model can be queued. Such instances are
 admitted from placement/frustum visibility into the existing per-frame unique-asset queue, then
 return to normal projected-size culling after the loaded model supplies transformed bounds.
+The coarse per-tile MDX gate also remains fail-open until every placement in that tile has resolved
+bounds; otherwise an aggregate placeholder AABB could reject the tile before per-placement
+admission runs.
