@@ -437,18 +437,18 @@ public class TerrainRenderer : IDisposable
 
     public unsafe void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, FrustumCuller? frustum = null)
     {
-        if (_tiles.Count == 0 && _chunks.Count == 0)
-            return;
-
-        if (_alphaSamplingDirty)
-            ApplyAlphaSamplingMode();
-
         LastFrameDrawCalls = 0;
         LastFrameUniform1Calls = 0;
         LastFrameActiveTextureCalls = 0;
         LastFrameActiveTextureSkips = 0;
         LastFrameBindTextureCalls = 0;
         LastFrameBindTextureSkips = 0;
+
+        if (_tiles.Count == 0 && _chunks.Count == 0)
+            return;
+
+        if (_alphaSamplingDirty)
+            ApplyAlphaSamplingMode();
 
         _activeTextureUnit = -1;
         Array.Clear(_boundTexture2DByUnit, 0, _boundTexture2DByUnit.Length);
