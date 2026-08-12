@@ -1173,6 +1173,7 @@ var seq = animator.Sequences[animator.CurrentSequence];
         FlushPendingImGuiMouseButtonEvents();
         HandleSceneMouseWheelInput();
         HandleKeyboardInput((float)dt);
+        UpdateCameraPathPlayback(dt);
         UpdateTaxiRideCamera();
         UpdateArcheologyPlayback(dt);
         _minimapRenderer?.ProcessPendingLoads(
@@ -2031,7 +2032,9 @@ void main() {
                     if (ImGui.MenuItem("Asset Catalog"))
                         OpenWorkbenchTab(ToolsBottomTab.Utilities);
                     if (ImGui.MenuItem("Capture Automation"))
-                        OpenWorkbenchTab(ToolsBottomTab.Utilities);
+                        OpenCaptureSidebarTab(CaptureSidebarTab.Automation);
+                    if (ImGui.MenuItem("Camera Path"))
+                        OpenCaptureSidebarTab(CaptureSidebarTab.CameraPath);
                     if (ImGui.MenuItem("Taxi", hasWorld))
                         OpenWorkbenchTab(ToolsBottomTab.Utilities);
 
@@ -6033,13 +6036,14 @@ void main() {
     private void DrawEditorOverlays(Matrix4x4 view, Matrix4x4 proj)
     {
         var renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-        if (renderer == null)
+        bool drawCameraPathOverlay = _showCameraPathOverlay && _cameraPath.Keyframes.Count > 0;
+        if (renderer == null && !drawCameraPathOverlay)
             return;
 
-        bool drawChunkClipboardOverlay = _chunkClipboardShowOverlay
+        bool drawChunkClipboardOverlay = renderer != null && _chunkClipboardShowOverlay
             && (_selectedChunks.Count > 0 || _chunkClipboardLockedTargetKey != null || _chunkClipboardCopiedKey != null);
-        bool drawMcnkOverlay = ShouldDrawMcnkFlagOverlay(renderer);
-        if (!drawChunkClipboardOverlay && !drawMcnkOverlay)
+        bool drawMcnkOverlay = renderer != null && ShouldDrawMcnkFlagOverlay(renderer);
+        if (!drawChunkClipboardOverlay && !drawMcnkOverlay && !drawCameraPathOverlay)
             return;
 
         _editorOverlayBb ??= new Terrain.BoundingBoxRenderer(_gl);
@@ -6086,6 +6090,13 @@ void main() {
 
             if (_chunkClipboardCopiedKey is (int copiedTx, int copiedTy, int copiedCx, int copiedCy) copied && renderer.TryGetChunkInfo(copiedTx, copiedTy, copiedCx, copiedCy, out var copiedInfo))
                 _editorOverlayBb.BatchBoxMinMax(copiedInfo.BoundsMin, copiedInfo.BoundsMax, new Vector3(1f, 1f, 0f));
+        }
+
+        if (drawCameraPathOverlay)
+        {
+            if (!drawMcnkOverlay && !drawChunkClipboardOverlay)
+                _editorOverlayBb.BeginBatch();
+            DrawCameraPathOverlay(_editorOverlayBb);
         }
 
         _editorOverlayBb.FlushBatch(view, proj);

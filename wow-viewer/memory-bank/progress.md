@@ -1,12 +1,24 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-11
+Last updated: 2026-08-12
 
 **This file is a dated ledger of what shipped, newest first.** One entry per session, a few lines
 each. Findings and how-it-works go in the workstream file; this only records *that* it happened and
 what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
+
+## 2026-08-12 — Restore left-sidebar capture automation and M2 camera paths
+
+- Added Spec 144 for map-bound camera path authoring, playback, capture, and native M2
+  interoperability.
+- Added the reusable M2 path document/evaluator/importer and camera-only native M2 writer, with
+  focused interpolation and read-back tests passing 3/3.
+- Added the left-sidebar Capture tabs, editable key points, batched 3D spline overlay, map/build
+  guard, key still queueing through the existing capture queue, path video through the existing
+  ffmpeg recorder, JSON save/load, and M2 import/export with sidecar metadata.
+- Isolated viewer Debug build passed with 0 errors and 288 warnings. No interactive viewer or
+  real-client capture signoff is claimed from compile/test proof.
 
 ## 2026-08-11 — Contain MDX fragment-shader parser failure
 

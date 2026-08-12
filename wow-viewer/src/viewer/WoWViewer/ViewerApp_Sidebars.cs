@@ -527,6 +527,12 @@ public partial class ViewerApp
 
             ImGui.Separator();
 
+            ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+            if (ImGui.CollapsingHeader("Capture", ImGuiTreeNodeFlags.DefaultOpen))
+                DrawCaptureSidebarContent();
+
+            ImGui.Separator();
+
             if (hasWorldLoaded)
             {
                 ImGui.SetNextItemOpen(true, ImGuiCond.Once);

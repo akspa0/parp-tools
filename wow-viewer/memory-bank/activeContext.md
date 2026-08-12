@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-08-11
+Last updated: 2026-08-12
 
 **This file is a dashboard, not a log.** It says what is live, what changed last, and where the
 detail lives. Findings belong in the workstream file, not here — see "Memory bank layout" in
@@ -16,6 +16,21 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 | World context / lighting parity | **active** — Spec 143 first ADT context slice landed; WMOAreaID and native WMO/M2 lighting remain evidence-gated | [Spec 143](../specs/143-world-context-lighting/spec.md) |
 | Terrain / minimap ML | **active** — Spec 139 clean-signal reconstruction, Spec 140 paste/fractal/tileset evidence, and Spec 141 external-method translation; object identity remains parked | [workstream-terrain-ml.md](workstream-terrain-ml.md) |
 | Tile archaeology | **active** — old v50 synthetic minimap output needs fresh regeneration after renderer fixes; spec 132 phase 1 landed | [weak-signal-tile-archaeology.md](weak-signal-tile-archaeology.md) |
+
+## Now — Spec 144 camera capture paths
+
+- The left sidebar now has a Capture category with Capture Automation and Camera Path tabs.
+  The existing still-capture queue and ffmpeg video recorder remain the output owners; the old
+  right-side Utilities route remains available for compatibility.
+- Camera paths are map/build-bound JSON documents with authored keyframes, linear/Catmull-Rom
+  evaluation, optional batched 3D spline/key/target overlays, playback, key still queueing, and
+  automatic path-video completion. Playback refuses a mismatched active map/build.
+- Native camera-only M2 export/import is implemented through the existing M2 reader/sampler. The
+  JSON and `.m2.json` sidecar are authoritative for map/build/FOV/roll metadata; the classic
+  binary camera layout carries interoperable position, target, roll, and first-key static FOV.
+- Focused `M2CameraPathTests` passed 3/3 and the isolated viewer Debug build passed with 0 errors
+  and 288 warnings. Interactive map playback, OpenGL overlay visibility, ffmpeg availability,
+  and real-client capture output remain user-run proof gates.
 
 ## Now — Spec 080 UI release convergence
 
