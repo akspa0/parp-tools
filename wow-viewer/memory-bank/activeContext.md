@@ -104,12 +104,12 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
   existing shared batch path, while native-runtime M2s remain isolated behind their distinct state
   path. Opaque WMO doodads group by `IModelRenderer`; transparent and particle/ribbon cases retain
   ordered or unbatched fallbacks.
-- The first true GPU slice is now wired for compatible opaque adapted-M2 batches: one dynamic
-  instance VBO carries model matrices/fade values, and each compatible geoset uses
-  `glDrawElementsInstanced`. Direct Alpha MDX stays on the proven shared CPU/state batch path
-  until legacy material and vertex-state parity is verified. Native-runtime state,
-  transparent/effect-heavy paths, and unsupported fades remain fallback-safe. Runtime visual
-  parity and frame-time proof are still user-run.
+- The first true GPU slice remains dormant infrastructure. Its MDX shader inputs caused model
+  construction failures on the user's OpenGL runtime, so `MdxRenderer` now uses the restored
+  non-instanced compatibility shader and reports GPU-instanced support as false. All direct MDX
+  and adapted-M2 world models therefore stay on the proven per-instance CPU/state path until a
+  separate portable shader compile and visual-parity proof reopens the GPU route. Native-runtime
+  state, transparent/effect-heavy paths, and unsupported fades remain fallback-safe.
 - A second runtime-loading multiplier was then found: deferred WMO doodad loads were being advanced
   from every visible `WmoRenderer.RenderWithTransform` call. `WorldAssetManager` now owns one
   scene-wide deferred-doodad budget per frame, and `MinimapRenderer` uses one background reader

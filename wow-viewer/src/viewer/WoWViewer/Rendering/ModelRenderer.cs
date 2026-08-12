@@ -107,7 +107,6 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     private static int _uUseUvTransform, _uUvTranslation, _uUvScale, _uUvRotationRow0, _uUvRotationRow1;
     private static int _uBones; // Bone matrix array uniform location
     private static int _uHasBones; // Enable skinning flag
-    private static int _uUseInstanceModel;
     private static bool _shaderInitialized;
     private static uint _whiteFallbackTexture;
 
@@ -178,11 +177,9 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     public bool IsM2AdapterModel => _isM2AdapterModel;
     public bool HasTransparentWorldPass => !_forceM2SolidDebug && ComputeHasTransparentWorldPass();
     public bool RequiresUnbatchedWorldRender => _particleEmitters.Count > 0 || _mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0;
-    // Direct Alpha MDX remains on the proven shared BeginBatch/RenderInstance path.
-    // Its legacy material/vertex state has not passed the GPU instance-attribute parity
-    // gate; adapted M2 models are the only models currently eligible for this path.
-    public bool SupportsGpuInstancedOpaque
-        => _isM2AdapterModel && !RequiresUnbatchedWorldRender && !_forceM2SolidDebug;
+    // The GPU-instanced MDX shader is held out until it has portable compile and visual
+    // parity proof. Keep every MDX variant on the established CPU/state path meanwhile.
+    public bool SupportsGpuInstancedOpaque => false;
 
     /// <summary>Animation controller (null if model has no bones)</summary>
     public IAnimationController? Animator => _animator;
@@ -716,7 +713,6 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         _cachedCameraPos = cameraPos;
 
         _gl.UseProgram(_shaderProgram);
-        _gl.Uniform1(_uUseInstanceModel, 0);
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthMask(true);
@@ -769,7 +765,6 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         try
         {
             _gl.UseProgram(_shaderProgram);
-            _gl.Uniform1(_uUseInstanceModel, 1);
             UploadBoneMatricesForGpuInstanceDraw();
             _currentModelMatrix = Matrix4x4.Identity;
             RenderGeosets(RenderPass.Opaque, 1.0f);
@@ -778,7 +773,6 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         {
             _gpuInstanceDrawActive = false;
             _gpuInstanceCount = 0;
-            _gl.Uniform1(_uUseInstanceModel, 0);
             _gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
             _gl.BindVertexArray(0);
         }
@@ -792,7 +786,6 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     public unsafe void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha = 1.0f)
     {
         _currentModelMatrix = modelMatrix;
-        _gl.Uniform1(_uUseInstanceModel, 0);
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
 
@@ -832,8 +825,6 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
     {
         _gl.UseProgram(_shaderProgram);
-        _gl.Uniform1(_uUseInstanceModel, 0);
-
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthMask(true);
@@ -907,8 +898,6 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor)
     {
         _gl.UseProgram(_shaderProgram);
-        _gl.Uniform1(_uUseInstanceModel, 0);
-
         _gl.Disable(EnableCap.CullFace);
         _gl.Disable(EnableCap.DepthTest);
         _gl.DepthMask(false);
@@ -1530,22 +1519,18 @@ layout(location = 2) in vec2 aTexCoord0;
 layout(location = 3) in vec2 aTexCoord1;
 layout(location = 4) in vec4 aBoneIndices;
 layout(location = 5) in vec4 aBoneWeights;
-layout(location = 6) in mat4 aInstanceModel;
-layout(location = 10) in float aInstanceFadeAlpha;
 
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProj;
 uniform mat4 uBones[128];
 uniform int uHasBones;
-uniform int uUseInstanceModel;
 
 out vec3 vNormal;
 out vec2 vTexCoord0;
 out vec2 vTexCoord1;
 out vec3 vFragPos;
 out vec3 vViewNormal;
-out float vInstanceFadeAlpha;
 
 void main() {
     vec4 position = vec4(aPos, 1.0);
@@ -1572,14 +1557,12 @@ void main() {
         }
     }
     
-    mat4 model = uUseInstanceModel == 1 ? aInstanceModel : uModel;
-    vec4 worldPos = model * position;
+    vec4 worldPos = uModel * position;
     vFragPos = worldPos.xyz;
-    vNormal = mat3(transpose(inverse(model))) * normal;
+    vNormal = mat3(transpose(inverse(uModel))) * normal;
     vViewNormal = mat3(uView) * vNormal;
     vTexCoord0 = aTexCoord0;
     vTexCoord1 = aTexCoord1;
-    vInstanceFadeAlpha = uUseInstanceModel == 1 ? aInstanceFadeAlpha : 1.0;
     gl_Position = uProj * uView * worldPos;
 }
 ";
@@ -1591,7 +1574,6 @@ in vec2 vTexCoord0;
 in vec2 vTexCoord1;
 in vec3 vFragPos;
 in vec3 vViewNormal;
-in float vInstanceFadeAlpha;
 
 uniform sampler2D uSampler;
 uniform int uHasTexture;
@@ -1684,7 +1666,7 @@ void main() {
     }
 
     float outAlpha = (uUseTextureAlpha == 1) ? texColor.a : 1.0;
-    FragColor = vec4(finalColor, outAlpha) * uColor * vInstanceFadeAlpha;
+    FragColor = vec4(finalColor, outAlpha) * uColor;
 }
 ";
 
@@ -1733,7 +1715,6 @@ void main() {
         _uUvRotationRow1 = _gl.GetUniformLocation(_shaderProgram, "uUvRotationRow1");
         _uBones = _gl.GetUniformLocation(_shaderProgram, "uBones[0]");
         _uHasBones = _gl.GetUniformLocation(_shaderProgram, "uHasBones");
-        _uUseInstanceModel = _gl.GetUniformLocation(_shaderProgram, "uUseInstanceModel");
 
         int samplerLoc = _gl.GetUniformLocation(_shaderProgram, "uSampler");
         _gl.Uniform1(samplerLoc, 0);

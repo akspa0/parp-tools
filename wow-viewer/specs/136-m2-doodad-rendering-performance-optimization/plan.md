@@ -3,9 +3,11 @@
 ## Status
 
 The CPU/state-submission slice and the first GPU-instancing implementation are present, but the
-production world MDX route is temporarily held on per-instance `RenderWithTransform()` until a
-real-client visual regression check proves the batch path safe. The viewer still requires a
-user-run real-scene capture and visual parity check before any FPS claim is promoted.
+production world MDX route is held on per-instance `RenderWithTransform()` until a real-client
+visual regression check proves the batch path safe. The first GPU shader caused MDX model
+construction failures on the user's OpenGL runtime, so the compatibility shader is restored and
+GPU-instanced MDX is explicitly disabled pending a separate shader proof. The viewer still
+requires a user-run real-scene capture and visual parity check before any FPS claim is promoted.
 
 ## Phase 1 — Static M2 Batch Eligibility
 
@@ -29,8 +31,9 @@ shader, and issue one `glDrawElementsInstanced` call per compatible geoset. Keep
 on the proven shared CPU/state batch path until legacy material and vertex-state parity is proven.
 Keep native-runtime state, transparent layers, particle/ribbon renderers, and unsupported
 fade/material states on the fallback.
-The implementation is complete; synthetic scaling, visual parity, and user-witnessed real-client
-capture remain the proof gate.
+The implementation remains available as dormant infrastructure, but its MDX shader inputs are not
+active in the production route. Synthetic scaling, shader compilation, visual parity, and
+user-witnessed real-client capture remain the proof gate before re-enabling it.
 
 ## Phase 4 — Client I/O Contention Containment
 

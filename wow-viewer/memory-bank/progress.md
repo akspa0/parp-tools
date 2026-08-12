@@ -8,6 +8,15 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-11 — Restore MDX shader compatibility after instancing regression
+
+- The user's runtime log showed `MDX 0/24571 (0 ok/21 fail)` and the red shader source panel;
+  the queue was active, but `MdxRenderer` construction was failing during GLSL setup.
+- Restored the pre-instancing MDX vertex/fragment shader contract and disabled the dormant GPU
+  instanced MDX capability so no caller can issue instance draws against that shader.
+- Updated Spec 136 to make the shader compile/parity gate explicit. Viewer build proof is next;
+  real-client launch remains user-run.
+
 ## 2026-08-11 — Keep unresolved MDX tiles out of the coarse cull deadlock
 
 - Fixed the second MDX streaming gate: the flat per-tile bounds culler could reject an entire tile
