@@ -9,13 +9,13 @@ namespace WoWViewer;
 
 public partial class ViewerApp
 {
-    private enum CaptureSidebarTab
+    private enum CapturePanelTab
     {
         Automation,
         CameraPath,
     }
 
-    private CaptureSidebarTab? _pendingCaptureSidebarTab;
+    private CapturePanelTab? _pendingCapturePanelTab;
     private readonly M2CameraPathDocument _cameraPath = new();
     private int _selectedCameraPathKey = -1;
     private string _cameraPathName = "camera_path";
@@ -28,18 +28,30 @@ public partial class ViewerApp
     private int _cameraPathDefaultKeySpacingMs = 1000;
     private string _cameraPathImportPath = string.Empty;
 
-    private void OpenCaptureSidebarTab(CaptureSidebarTab tab)
+    private void OpenCapturePanelTab(CapturePanelTab tab)
     {
-        _pendingCaptureSidebarTab = tab;
-        _showLeftSidebar = true;
+        _pendingCapturePanelTab = tab;
+        if (_useTabUi)
+        {
+            _activeUtilitiesTabIndex = (int)Workbench.UtilitiesBottomTab.Capture;
+            OpenWorkbenchTab(Workbench.ToolsBottomTab.Utilities);
+        }
+        else if (tab == CapturePanelTab.Automation)
+        {
+            _showCaptureAutomationWindow = true;
+        }
+        else
+        {
+            _showCameraPathWindow = true;
+        }
     }
 
-    private void DrawCaptureSidebarContent()
+    private void DrawCapturePanelContent()
     {
-        if (ImGui.BeginTabBar("##CaptureSidebarTabs", ImGuiTabBarFlags.FittingPolicyScroll))
+        if (ImGui.BeginTabBar("##CapturePanelTabs", ImGuiTabBarFlags.FittingPolicyScroll))
         {
             bool automationTabOpen = true;
-            ImGuiTabItemFlags automationFlags = _pendingCaptureSidebarTab == CaptureSidebarTab.Automation
+            ImGuiTabItemFlags automationFlags = _pendingCapturePanelTab == CapturePanelTab.Automation
                 ? ImGuiTabItemFlags.SetSelected
                 : ImGuiTabItemFlags.None;
             if (ImGui.BeginTabItem("Capture Automation", ref automationTabOpen, automationFlags))
@@ -49,7 +61,7 @@ public partial class ViewerApp
             }
 
             bool cameraPathTabOpen = true;
-            ImGuiTabItemFlags cameraPathFlags = _pendingCaptureSidebarTab == CaptureSidebarTab.CameraPath
+            ImGuiTabItemFlags cameraPathFlags = _pendingCapturePanelTab == CapturePanelTab.CameraPath
                 ? ImGuiTabItemFlags.SetSelected
                 : ImGuiTabItemFlags.None;
             if (ImGui.BeginTabItem("Camera Path", ref cameraPathTabOpen, cameraPathFlags))
@@ -58,9 +70,21 @@ public partial class ViewerApp
                 ImGui.EndTabItem();
             }
 
-            _pendingCaptureSidebarTab = null;
+            _pendingCapturePanelTab = null;
             ImGui.EndTabBar();
         }
+    }
+
+    private void DrawCameraPathWindow()
+    {
+        if (!ImGui.Begin("Camera Path", ref _showCameraPathWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        DrawCameraPathContent();
+        ImGui.End();
     }
 
     private void DrawCameraPathContent()

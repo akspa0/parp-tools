@@ -46,7 +46,7 @@ public enum UtilitiesBottomTab
     Perf = 2,
     RenderQuality = 3,
     Taxi = 4,
-    CaptureAutomation = 5,
+    Capture = 5,
     AssetCatalog = 6,
     RuntimeStats = 7,
     Lighting = 8,

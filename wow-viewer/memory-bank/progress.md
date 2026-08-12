@@ -1007,3 +1007,9 @@ Next: build the authored RGB corpus and review the combined plan.
    camera or tile residency changes and reports explicit reasons in the lower status line. Removed
    nearest-unrelated-chunk fallback from area lookup. Focused proof: 3 tests passed and isolated
    viewer build passed with 0 errors; DBCD fixture and real-client proof remain open.
+ - 2026-08-12: Moved Spec 144 capture controls out of the left sidebar and into the existing Tools
+   > Utilities > Capture panel. Capture Automation and Camera Path remain tabbed, while the legacy
+   floating routes are compatibility-only. Client-browser MDX/M2 loads now tear down the resident
+   world/terrain scene when the standalone model renderer is installed, preventing the world path
+   from masking the selected virtual client asset. Focused build and real-client MDX proof remain
+   pending.

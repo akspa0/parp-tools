@@ -29,7 +29,8 @@ Recover the existing capture automation route in the left sidebar and add a reus
 
 - `src/core/WowViewer.Core.Runtime/M2/M2CameraPath.cs`: path model, evaluator, M2 import sampling.
 - `src/core/WowViewer.Core.Runtime/M2/M2CameraPathWriter.cs`: camera-only native M2 writer.
-- `src/viewer/WoWViewer/ViewerApp_CameraPaths.cs`: editor, playback, save/load, capture integration.
+- `src/viewer/WoWViewer/ViewerApp_CameraPaths.cs`: editor, playback, save/load, capture integration,
+  and the Tools > Utilities > Capture panel route.
 - `src/viewer/WoWViewer/ViewerApp_Sidebars.cs`: left Capture category route.
 - `tests/WowViewer.Core.Tests/M2CameraPathTests.cs`: interpolation and native round-trip proof.
 

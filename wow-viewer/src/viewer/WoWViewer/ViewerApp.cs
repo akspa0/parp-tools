@@ -785,6 +785,7 @@ public partial class ViewerApp : IDisposable
     private bool _showTerrainToolsWindow;
     private bool _showMcnkExplorerWindow;
     private bool _showCaptureAutomationWindow = false;
+    private bool _showCameraPathWindow;
     private bool _showUniqueIdArchaeologyWindow;
     private bool _showWeakSignalWindow;
     private bool _showPm4SceneGraph = true;
@@ -1761,6 +1762,9 @@ void main() {
                 if (_showCaptureAutomationWindow)
                     DrawCaptureAutomationWindow();
 
+                if (_showCameraPathWindow)
+                    DrawCameraPathWindow();
+
                 // PM4 alignment (advanced fallback) - only in legacy mode; tabbed mode uses PM4 > Alignment sub-tab
                 if (_showPm4AlignmentWindow && !_useTabUi)
                     DrawPm4AlignmentWindow();
@@ -2032,9 +2036,9 @@ void main() {
                     if (ImGui.MenuItem("Asset Catalog"))
                         OpenWorkbenchTab(ToolsBottomTab.Utilities);
                     if (ImGui.MenuItem("Capture Automation"))
-                        OpenCaptureSidebarTab(CaptureSidebarTab.Automation);
+                        OpenCapturePanelTab(CapturePanelTab.Automation);
                     if (ImGui.MenuItem("Camera Path"))
-                        OpenCaptureSidebarTab(CaptureSidebarTab.CameraPath);
+                        OpenCapturePanelTab(CapturePanelTab.CameraPath);
                     if (ImGui.MenuItem("Taxi", hasWorld))
                         OpenWorkbenchTab(ToolsBottomTab.Utilities);
 
@@ -11652,6 +11656,9 @@ void main() {
     private void LoadMdxModel(MdxFile mdx, string dir, string? virtualPath = null, bool isM2AdapterModel = false,
         MdxRuntimeSharedInfo? sharedRuntimeInfo = null, IReadOnlyList<string>? explicitTextureVariations = null)
     {
+        CaptureWorldReturnState();
+        ExitToStandaloneView();
+
         _loadedWmo = null;
         _loadedMdx = mdx;
         _loadedM2Runtime = null;
@@ -11748,6 +11755,9 @@ void main() {
     {
         ArgumentNullException.ThrowIfNull(runtimeModel);
 
+        CaptureWorldReturnState();
+        ExitToStandaloneView();
+
         _loadedWmo = null;
         _loadedMdx = null;
         _loadedM2Runtime = runtimeModel;
@@ -11813,6 +11823,9 @@ void main() {
     {
         ArgumentNullException.ThrowIfNull(cameraModel);
         ArgumentNullException.ThrowIfNull(visualization);
+
+        CaptureWorldReturnState();
+        ExitToStandaloneView();
 
         _loadedWmo = null;
         _loadedMdx = null;
@@ -11907,6 +11920,7 @@ void main() {
     /// </summary>
     private void ExitToStandaloneView()
     {
+        _loadingScreen?.Disable();
         _worldScene?.Dispose();
         _worldScene = null;
         _terrainManager?.Dispose();

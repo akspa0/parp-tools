@@ -321,7 +321,7 @@ public partial class ViewerApp
             QueueCurrentCameraCapture(includeUi: true);
 
         if (ImGui.Button("Open Capture Automation"))
-            _showCaptureAutomationWindow = true;
+            OpenCapturePanelTab(CapturePanelTab.Automation);
 
         ImGui.Separator();
         ImGui.Text("Export");

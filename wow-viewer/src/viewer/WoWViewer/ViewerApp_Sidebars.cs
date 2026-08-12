@@ -527,10 +527,6 @@ public partial class ViewerApp
 
             ImGui.Separator();
 
-            ImGui.SetNextItemOpen(true, ImGuiCond.Once);
-            if (ImGui.CollapsingHeader("Capture", ImGuiTreeNodeFlags.DefaultOpen))
-                DrawCaptureSidebarContent();
-
             ImGui.Separator();
 
             if (hasWorldLoaded)
@@ -4663,8 +4659,8 @@ public partial class ViewerApp
                 if (_worldScene != null) DrawTaxiContent();
                 else ImGui.TextDisabled("Load a world to enable taxi tools.");
                 break;
-            case UtilitiesBottomTab.CaptureAutomation:
-                DrawCaptureAutomationContent();
+            case UtilitiesBottomTab.Capture:
+                DrawCapturePanelContent();
                 break;
             case UtilitiesBottomTab.AssetCatalog:
                 if (_catalogView == null)

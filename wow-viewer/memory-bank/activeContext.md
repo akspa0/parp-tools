@@ -19,9 +19,12 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 
 ## Now — Spec 144 camera capture paths
 
-- The left sidebar now has a Capture category with Capture Automation and Camera Path tabs.
-  The existing still-capture queue and ffmpeg video recorder remain the output owners; the old
-  right-side Utilities route remains available for compatibility.
+- Capture now lives outside the left sidebar in Tools > Utilities > Capture, with Capture Automation
+  and Camera Path tabs. The existing still-capture queue and ffmpeg video recorder remain the
+  output owners; legacy floating windows remain available only for compatibility.
+- Client file-browser MDX/M2 loads now tear down the active world/terrain scene at the model-load
+  boundary, so a virtual path selected from the open client becomes the active standalone renderer
+  instead of competing with the resident map scene.
 - Camera paths are map/build-bound JSON documents with authored keyframes, linear/Catmull-Rom
   evaluation, optional batched 3D spline/key/target overlays, playback, key still queueing, and
   automatic path-video completion. Playback refuses a mismatched active map/build.

@@ -12,7 +12,7 @@ The viewer UI has grown organically through 79+ specs. The current state has:
 - **7 levels of nested tabs**: Top tabs (Model/World/Tools) → Tools sub-tabs (Quick/Archeology/PM4/Terrain/Utilities) → sub-sub-tabs (Layers/Clipboard/Analysis/etc.)
 - **3+ places for the same toggle**: Layer visibility, grid lines, surface overlays are in Bottom Bar, World > Overlays, Tools > Terrain > Layers simultaneously
 - **Ephemeral windows** (Taxi) that disappear on click-away
-- **Left sidebar** crammed with unrelated content: file browser + map discovery + minimap + world overview
+- **Left sidebar** crammed with unrelated content: file browser + map discovery + minimap + world overview; capture controls do not belong there
 - **Right sidebar (workbench)** has no spatial persistence — everything is nested behind tabs, no way to see two things at once
 - **No WoW-like design language**: chaotic information density, no visual hierarchy
 
@@ -51,7 +51,7 @@ The goal is to make the UI feel like World of Warcraft's interface: clean, consi
 - `DrawPm4Frame()` → Overlay/Selection/Correlation/Info/Match/Alignment
 - `DrawArcheologyFrame()` → Range/Layers/Playback/Capture
 - `DrawModelFrame()` → Info/Animations/Actions/LOD
-- `DrawUtilitiesFrame()` → Minimap/Log/Perf/CaptureAutomation/Taxi/AssetCatalog
+- `DrawUtilitiesFrame()` → Minimap/Log/Perf/Capture/Taxi/AssetCatalog; Capture owns the automation and camera-path tabs
 - Each frame has `_showWorldFrame`, `_showTerrainFrame`, etc. bools persisted in settings
 - No more right sidebar (workbench) — replaced by individually-addressable frames
 - No more left sidebar — file browser becomes a dialog or frame

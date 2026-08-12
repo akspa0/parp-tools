@@ -3,7 +3,7 @@
 **Feature Branch**: `144-camera-capture-paths`
 **Created**: 2026-08-11
 **Status**: Implementing
-**Input**: Restore capture automation in the left sidebar and author/play back map-bound M2-style camera paths.
+**Input**: Restore capture automation as a stable Utilities panel and author/play back map-bound M2-style camera paths.
 
 ## User Scenarios
 
@@ -21,7 +21,7 @@ The user can save an authored path as a readable project document and as a nativ
 
 ### User Story 3 - Drive capture automation from a path (P1)
 
-The user can reach the existing still/video capture automation from the left sidebar and start playback with video recording or queue captures at authored keys.
+The user can reach the existing still/video capture automation from Tools > Utilities > Capture, outside the left sidebar, and start playback with video recording or queue captures at authored keys.
 
 **Independent Test**: Start path playback plus video recording, then stop both; the capture output is produced by the existing framebuffer/ffmpeg route and the camera path remains reusable.
 
@@ -41,7 +41,7 @@ The user can import a readable M2 camera asset, bind its sampled tracks to the c
 
 ## Requirements
 
-- **FR-001**: The left sidebar MUST expose a tabbed Capture category containing Capture Automation and Camera Path tabs.
+- **FR-001**: The viewer MUST expose a stable Capture panel outside the left sidebar, reachable from Tools > Utilities, containing Capture Automation and Camera Path tabs.
 - **FR-002**: Users MUST be able to add, select, delete, and retime camera key points from the active world camera.
 - **FR-003**: Playback MUST evaluate position, target direction, and field of view over the authored duration and update the viewer camera.
 - **FR-003a**: The active path MUST be optionally visible in the 3D world as a batched editor overlay with key markers and target guides.
@@ -61,7 +61,7 @@ The user can import a readable M2 camera asset, bind its sampled tracks to the c
 
 ## Success Criteria
 
-- **SC-001**: A user can reach Capture Automation and Camera Path from the left sidebar in one click each.
+- **SC-001**: A user can reach the Capture panel from Tools > Utilities and reach Capture Automation and Camera Path from its tabs without opening the left sidebar.
 - **SC-002**: A three-key path starts, runs, and stops without changing the active map or losing the authored keys.
 - **SC-002a**: The user can see the authored spline and key/target markers over the active world before recording.
 - **SC-003**: Save/reload preserves all authored keys and map/build metadata.
