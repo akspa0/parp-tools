@@ -1344,7 +1344,21 @@ public class WorldScene : ISceneRenderer
     public bool UseDynamicHoveredAssetRange { get => _useDynamicHoveredAssetRange; set => _useDynamicHoveredAssetRange = value; }
     public int PendingAssetLoadCount => _assets.PendingAssetLoadCount;
     public int PendingDeferredWmoDoodadLoadCount => _assets.PendingDeferredWmoDoodadLoadCount;
+    public int PendingDeferredWmoMaterialTextureLoadCount => _assets.PendingDeferredWmoMaterialTextureLoadCount;
     public int PendingWorldObjectLoadCount => PendingAssetLoadCount + PendingDeferredWmoDoodadLoadCount;
+    public int PendingCapturePreloadLoadCount => PendingWorldObjectLoadCount + PendingDeferredWmoMaterialTextureLoadCount;
+    private bool _capturePreloadActive;
+    private readonly HashSet<(int tileX, int tileY)> _capturePreloadTiles = new();
+    public bool CapturePreloadActive
+    {
+        get => _capturePreloadActive;
+        set
+        {
+            _capturePreloadActive = value;
+            if (!value)
+                _capturePreloadTiles.Clear();
+        }
+    }
     public float ObjectStreamingRangeMultiplier
     {
         get => _objectStreamingRangeMultiplier;
@@ -8082,7 +8096,8 @@ public class WorldScene : ISceneRenderer
         UpdateObjectBucketBounds(_tileWmoBounds, (tileX, tileY), tileWmo);
         _instancesDirty = true;
 
-        if (_assetLoadPolicy.PrewarmTileAssets)
+        if (_assetLoadPolicy.PrewarmTileAssets
+            || (CapturePreloadActive && _capturePreloadTiles.Contains((tileX, tileY))))
             QueueTileAssetLoads(tileMdx, tileSkyboxes, tileWmo);
 
         // Hide WDL low-res tile now that detailed ADT is loaded
@@ -8576,6 +8591,38 @@ public class WorldScene : ISceneRenderer
             _assets.QueueMdxLoad(tileSkyboxes[i].ModelKey);
     }
 
+    /// <summary>
+    /// Queue every unique world asset referenced by the supplied resident tiles.
+    /// This is the capture-path warmup seam: it uses the same placement lists and
+    /// asset queues as normal streaming, but does not make the render path visit
+    /// or submit the objects early.
+    /// </summary>
+    public void QueueCapturePreloadAssets(IEnumerable<(int tileX, int tileY)> tiles)
+    {
+        ArgumentNullException.ThrowIfNull(tiles);
+
+        _capturePreloadTiles.Clear();
+        foreach (var tile in tiles)
+        {
+            _capturePreloadTiles.Add(tile);
+            if (_tileMdxInstances.TryGetValue(tile, out List<ObjectInstance>? mdx)
+                && _tileSkyboxInstances.TryGetValue(tile, out List<ObjectInstance>? skyboxes)
+                && _tileWmoInstances.TryGetValue(tile, out List<ObjectInstance>? wmo)
+                )
+            {
+                QueueTileAssetLoads(mdx, skyboxes, wmo);
+                continue;
+            }
+
+            if (_tileMdxInstances.TryGetValue(tile, out mdx))
+                QueueTileAssetLoads(mdx, [], []);
+            if (_tileSkyboxInstances.TryGetValue(tile, out skyboxes))
+                QueueTileAssetLoads([], skyboxes, []);
+            if (_tileWmoInstances.TryGetValue(tile, out wmo))
+                QueueTileAssetLoads([], [], wmo);
+        }
+    }
+
     private void FlushPendingVisibleMdxLoads()
     {
         if (_pendingVisibleMdxLoadDistances.Count == 0)
@@ -8656,6 +8703,12 @@ public class WorldScene : ISceneRenderer
             }
         }
 
+        if (CapturePreloadActive)
+        {
+            maxLoads = Math.Max(maxLoads, 24);
+            maxBudgetMs = Math.Max(maxBudgetMs, 16.0);
+        }
+
         int processed = _assets.ProcessPendingLoads(maxLoads, maxBudgetMs);
         if (processed <= 0)
             return;
@@ -8688,6 +8741,12 @@ public class WorldScene : ISceneRenderer
 
         if (flatVisibilityBucketsDirty)
             RebuildFlatVisibilityBuckets();
+
+        if (CapturePreloadActive)
+        {
+            _assets.ProcessDeferredWmoDoodadLoads(maxLoads: 24, maxBudgetMs: 12.0);
+            _assets.ProcessDeferredWmoMaterialTextureLoads(maxLoads: 24, maxBudgetMs: 12.0);
+        }
     }
 
     private static void UpdateObjectBucketBounds(

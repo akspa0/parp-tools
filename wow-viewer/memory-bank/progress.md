@@ -1013,3 +1013,9 @@ Next: build the authored RGB corpus and review the combined plan.
    world/terrain scene when the standalone model renderer is installed, preventing the world path
    from masking the selected virtual client asset. Focused build and real-client MDX proof remain
    pending.
+ - 2026-08-12: Added the bounded Spec 144 path-preload lease. Camera-path video and queued key
+   captures can sample the authored path, retain only its available terrain tiles, queue every
+   placement asset in those tiles through the existing MDX/WMO/doodad/material queues, and wait
+   for two stable ready frames before recording. The lease is released on stop/completion so normal
+   AOI eviction resumes; this deliberately does not restore full-map residency. Viewer build passed
+   with 0 errors; real-client frame-stability proof remains user-owned.

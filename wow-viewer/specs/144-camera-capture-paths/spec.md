@@ -25,6 +25,12 @@ The user can reach the existing still/video capture automation from Tools > Util
 
 **Independent Test**: Start path playback plus video recording, then stop both; the capture output is produced by the existing framebuffer/ffmpeg route and the camera path remains reusable.
 
+### User Story 3a - Warm a capture path before recording (P1)
+
+Before video capture or queued key stills begin, the user can ask the viewer to sample the authored path, retain the bounded terrain-tile footprint, and warm the existing MDX/WMO/doodad/material queues. Capture starts only after the pinned tiles and queued world assets have remained ready for a short stability window.
+
+**Independent Test**: Enable path preload, start a path video, and verify the status reaches “Path preload ready” before the camera begins moving; moving through the path does not trigger first-use tile/object loads for the warmed footprint.
+
 ### User Story 4 - Reuse existing M2 camera assets on a map (P2)
 
 The user can import a readable M2 camera asset, bind its sampled tracks to the current map, and play the imported path through the world.
@@ -51,6 +57,8 @@ The user can import a readable M2 camera asset, bind its sampled tracks to the c
 - **FR-007**: The viewer MUST support importing readable M2 camera tracks and exporting a camera-only native M2 representation.
 - **FR-008**: The authored JSON and `.m2.json` sidecar MUST preserve camera, target, FOV, roll, timing, map, and build data. The native classic camera-only M2 MUST preserve the interoperable position, target, and roll tracks; its static binary FOV is the first-key baseline because the classic camera layout has no animated FOV track.
 - **FR-009**: Focused tests MUST cover interpolation, map binding, and native M2 round-trip camera data.
+- **FR-010**: Path-driven video and queued key captures MUST support an opt-in bounded preload lease that samples the path, pins only its available terrain tiles, queues the placements in those tiles through the existing asset manager, and waits for terrain/object readiness before capture starts.
+- **FR-011**: Releasing or completing path capture MUST clear the preload lease so ordinary camera-driven AOI eviction resumes; preload MUST NOT imply full-map residency.
 
 ## Key Entities
 
@@ -67,6 +75,7 @@ The user can import a readable M2 camera asset, bind its sampled tracks to the c
 - **SC-003**: Save/reload preserves all authored keys and map/build metadata.
 - **SC-004**: A native M2 exported by the viewer is readable by the existing M2 reader and exposes the same camera key timing within the chosen sampling resolution.
 - **SC-005**: Path-driven video uses the existing capture output and does not require a second capture pipeline.
+- **SC-006**: With preload enabled, path capture reports a bounded tile footprint and a ready gate before recording; after capture, the lease is released and the normal AOI stream remains active.
 
 ## Assumptions
 

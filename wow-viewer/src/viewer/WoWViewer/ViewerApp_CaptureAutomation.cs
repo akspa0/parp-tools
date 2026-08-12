@@ -92,6 +92,7 @@ public partial class ViewerApp
         public bool HideTerrainLiquids { get; set; }
         public bool HideObjects { get; set; }
         public bool HideTerrain { get; set; }
+        public bool RequiresCameraPathPreload { get; set; }
         // 069 Phase 7: archeology playback per-shot
         public bool ApplyArcheologyPlayback { get; set; }
     }
@@ -109,6 +110,7 @@ public partial class ViewerApp
         public bool HideTerrainLiquids { get; init; }
         public bool HideObjects { get; init; }
         public bool HideTerrain { get; init; }
+        public bool RequiresCameraPathPreload { get; init; }
         public bool AllowWindowCloseOnCapture { get; init; }
     }
 
@@ -562,6 +564,7 @@ public partial class ViewerApp
             HideTerrainLiquids = options?.HideTerrainLiquids == true,
             HideObjects = options?.HideObjects == true,
             HideTerrain = options?.HideTerrain == true,
+            RequiresCameraPathPreload = options?.RequiresCameraPathPreload == true,
             ApplyArcheologyPlayback = _archeologyApplyToNextCapture,
         });
 
@@ -668,6 +671,14 @@ public partial class ViewerApp
             Environment.ExitCode = 1;
         }
 
+        if (request.RequiresCameraPathPreload
+            && _captureQueue.Count == 0
+            && _activeCaptureRequest == null
+            && !_cameraPathVideoCaptureActive)
+        {
+            EndCameraPathPreload();
+        }
+
         if (request.IsMkHarvestViewerValidationCapture)
         {
             if (ok)
@@ -705,6 +716,19 @@ public partial class ViewerApp
             return true;
 
         request.FramesSinceApplied++;
+
+        if (request.RequiresCameraPathPreload
+            && (_cameraPathPreload == null || !_cameraPathPreload.Ready))
+        {
+            request.SettledFrames = 0;
+            if (request.FramesSinceApplied < request.MaxFramesBeforeCapture)
+                return false;
+
+            request.TimedOutWaitingForScene = true;
+            ViewerLog.Error(ViewerLog.Category.Export,
+                $"[Capture] Camera-path preload timeout: ready={_cameraPathPreload?.Ready == true} frames={request.FramesSinceApplied}/{request.MaxFramesBeforeCapture}");
+            return true;
+        }
 
         if (!HasCaptureSceneContent() || !HasCaptureFramebufferReady(request.IncludeUi))
         {

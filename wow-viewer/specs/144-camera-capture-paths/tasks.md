@@ -7,3 +7,5 @@
 - [x] T005 Add the Utilities Capture panel tabs, path editor, and batched 3D overlay in `src/viewer/WoWViewer/ViewerApp_CameraPaths.cs` and `ViewerApp_Sidebars.cs`; keep capture out of the left sidebar.
 - [x] T006 Drive playback and path capture through the existing `OnUpdate`, capture queue, and video recorder.
 - [x] T007 Build, update memory-bank continuity, and commit the bounded slice.
+- [x] T008 Add bounded path-footprint preload for path video and queued key captures using the existing TerrainManager and WorldAssetManager queues; keep the lease capture-scoped and outside full-map residency.
+- [ ] T009 User-run real-client validation: warm a multi-key path, confirm the ready gate precedes recording, and compare frame stability/object pending counts before and after preload.

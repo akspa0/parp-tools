@@ -36,6 +36,10 @@ public class TerrainManager : ISceneRenderer
     private readonly List<(int tileX, int tileY)> _unloadScratch = new();
     private readonly List<(int tx, int ty, float priority)> _tilesToLoadScratch = new();
     private readonly HashSet<(int tileX, int tileY)> _ignoreTerrainHolesTiles = new();
+    // Explicit capture-path pins extend the normal AOI retention lease without
+    // changing the camera-driven detailed-tile budget. They are cleared when
+    // capture preparation ends.
+    private readonly HashSet<(int tileX, int tileY)> _capturePreloadTiles = new();
 
     // AOI: keep a fog-driven high-detail near field and rely on textured WDL for distance terrain.
     // Shorter fog should shrink the detailed ADT footprint instead of always holding the same
@@ -97,6 +101,8 @@ public class TerrainManager : ISceneRenderer
     public int BackgroundTileLoadCount => _loadingTiles.Count;
     public int PendingGpuTileUploadCount => _pendingTiles.Count;
     public int PendingTerrainLoadCount => _loadingTiles.Count + _pendingTiles.Count;
+    public int CapturePreloadTileCount => _capturePreloadTiles.Count;
+    public IReadOnlyCollection<(int tileX, int tileY)> CapturePreloadTiles => _capturePreloadTiles;
     public TerrainLighting Lighting => _terrainRenderer.Lighting;
     public TerrainRenderer Renderer => _terrainRenderer;
     public LiquidRenderer LiquidRenderer => _liquidRenderer;
@@ -114,6 +120,35 @@ public class TerrainManager : ISceneRenderer
             _detailedTileCountOverride = clamped;
             InvalidateStreamingTargets();
         }
+    }
+
+    /// <summary>
+    /// Pins a bounded set of tiles for an explicit capture-path preload. The
+    /// normal AOI still controls the camera-facing detailed set; pinned tiles
+    /// are only added to the load/retention sets while the lease is active.
+    /// </summary>
+    public void SetCapturePreloadTiles(IEnumerable<(int tileX, int tileY)> tiles)
+    {
+        ArgumentNullException.ThrowIfNull(tiles);
+
+        _capturePreloadTiles.Clear();
+        foreach (var (tileX, tileY) in tiles)
+        {
+            if (tileX >= 0 && tileX < 64 && tileY >= 0 && tileY < 64 && _adapter.TileExists(tileX, tileY))
+                _capturePreloadTiles.Add((tileX, tileY));
+        }
+
+        InvalidateStreamingTargets();
+    }
+
+    /// <summary>Release the current capture-path tile lease.</summary>
+    public void ClearCapturePreloadTiles()
+    {
+        if (_capturePreloadTiles.Count == 0)
+            return;
+
+        _capturePreloadTiles.Clear();
+        InvalidateStreamingTargets();
     }
 
     public int EffectiveDetailedTileCount => _effectiveDetailedTileCount;
@@ -517,6 +552,12 @@ public class TerrainManager : ISceneRenderer
             desiredTiles.Add((candidate.tx, candidate.ty));
         }
 
+        // Capture-path tiles are deliberately loaded in addition to the
+        // camera-facing set. This is an explicit, user-requested residency
+        // lease; it must not turn ordinary world navigation into full-map load.
+        foreach (var tile in _capturePreloadTiles)
+            desiredTiles.Add(tile);
+
         var unloadKeepTiles = new HashSet<(int, int)>();
         foreach (var candidate in rankedCandidates)
         {
@@ -525,6 +566,9 @@ public class TerrainManager : ISceneRenderer
 
             unloadKeepTiles.Add((candidate.tx, candidate.ty));
         }
+
+        foreach (var tile in _capturePreloadTiles)
+            unloadKeepTiles.Add(tile);
 
         // Unload tiles outside retention radius — dispose GPU meshes but keep parsed data in cache.
         // Reuse a scratch list to avoid per-update LINQ/ToList allocations.

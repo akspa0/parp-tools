@@ -138,6 +138,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
     private const float DoodadMaxRenderCount = 1024; // Soft cap to avoid large WMO doodad sets dropping out too early
 
     public int PendingDoodadModelLoadCount => _pendingDoodadModelLoads.Count;
+    public int PendingMaterialTextureLoadCount => _pendingMaterialTextureLoads.Count;
     public WmoRenderStats LastRenderStats { get; private set; }
 
     /// <summary>
@@ -2154,22 +2155,29 @@ void main() {
         }
     }
 
-    private void ProcessDeferredMaterialTextureLoads()
+    public int ProcessDeferredMaterialTextureLoads(
+        int maxLoads = DeferredMaterialTextureLoadsPerFrame,
+        double maxBudgetMs = DeferredMaterialTextureLoadBudgetMs)
     {
         if (!_deferInitialMaterialTextureLoads || _pendingMaterialTextureLoads.Count == 0 || _dataSource == null)
-            return;
+            return 0;
+
+        if (maxLoads <= 0 || maxBudgetMs <= 0)
+            return 0;
 
         var stopwatch = Stopwatch.StartNew();
         int loadsCompleted = 0;
         int loaded = 0, failed = 0;
 
-        while (loadsCompleted < DeferredMaterialTextureLoadsPerFrame
-            && stopwatch.Elapsed.TotalMilliseconds < DeferredMaterialTextureLoadBudgetMs
+        while (loadsCompleted < maxLoads
+            && stopwatch.Elapsed.TotalMilliseconds < maxBudgetMs
             && _pendingMaterialTextureLoads.TryDequeue(out int materialIndex))
         {
             TryLoadMaterialTexture(materialIndex, ref loaded, ref failed);
             loadsCompleted++;
         }
+
+        return loadsCompleted;
     }
 
     private void TryLoadMaterialTexture(int i, ref int loaded, ref int failed)

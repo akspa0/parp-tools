@@ -590,3 +590,13 @@ the authored RGB corpus, then reviews the combined benchmark dry plan.
    backdrop. When LightSkybox is unavailable, it probes `Environments/Stars/Stars` in the
    configured data source rather than synthesizing stars. The existing placed-skybox path remains
    the fallback; focused build and real-client visual proof are still pending.
+
+## Now — Spec 144 path preload
+
+Camera-path video and queued key captures now have an opt-in bounded preload lease. The viewer
+samples the authored path, pins only available terrain tiles through `TerrainManager`, and queues
+resident-tile MDX/WMO assets plus deferred WMO doodads/materials through the existing
+`WorldScene`/`WorldAssetManager` path. Capture waits for two stable ready frames before starting;
+stop/completion clears the lease so ordinary AOI eviction resumes. This is deliberately not
+full-map residency. Viewer build passes with 0 errors; real-client frame-stability proof remains
+user-owned.

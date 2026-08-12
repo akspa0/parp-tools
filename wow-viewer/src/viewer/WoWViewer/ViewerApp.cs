@@ -1175,6 +1175,7 @@ var seq = animator.Sequences[animator.CurrentSequence];
         HandleSceneMouseWheelInput();
         HandleKeyboardInput((float)dt);
         UpdateCameraPathPlayback(dt);
+        UpdateCameraPathPreload();
         UpdateTaxiRideCamera();
         UpdateArcheologyPlayback(dt);
         _minimapRenderer?.ProcessPendingLoads(

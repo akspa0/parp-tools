@@ -134,6 +134,7 @@ public class WorldAssetManager : IDisposable
     public long FileCacheBytes => _fileDataCacheBytes;
     public int PendingAssetLoadCount => _queuedMdxLoads.Count + _queuedWmoLoads.Count;
     public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer => renderer?.PendingDoodadModelLoadCount ?? 0);
+    public int PendingDeferredWmoMaterialTextureLoadCount => _wmoModels.Values.Sum(renderer => renderer?.PendingMaterialTextureLoadCount ?? 0);
     public int KnownMissingM2SkinCount => _knownMissingM2SkinPaths.Count;
     public long SuppressedFailedMdxRetryCount => _suppressedFailedMdxRetryCount;
 
@@ -719,6 +720,28 @@ public class WorldAssetManager : IDisposable
                 break;
 
             loadsCompleted += renderer.ProcessDeferredDoodadLoads(maxLoads - loadsCompleted, remainingBudgetMs);
+        }
+
+        return loadsCompleted;
+    }
+
+    public int ProcessDeferredWmoMaterialTextureLoads(int maxLoads = 1, double maxBudgetMs = 2.0)
+    {
+        if (maxLoads <= 0 || maxBudgetMs <= 0)
+            return 0;
+
+        var stopwatch = Stopwatch.StartNew();
+        int loadsCompleted = 0;
+        foreach (WmoRenderer? renderer in _wmoModels.Values)
+        {
+            if (renderer == null)
+                continue;
+
+            double remainingBudgetMs = maxBudgetMs - stopwatch.Elapsed.TotalMilliseconds;
+            if (loadsCompleted >= maxLoads || remainingBudgetMs <= 0)
+                break;
+
+            loadsCompleted += renderer.ProcessDeferredMaterialTextureLoads(maxLoads - loadsCompleted, remainingBudgetMs);
         }
 
         return loadsCompleted;

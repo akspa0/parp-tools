@@ -4,6 +4,7 @@ using ImGuiNET;
 using WowViewer.Core.M2;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.Runtime.M2;
+using WoWViewer.Rendering;
 
 namespace WoWViewer;
 
@@ -27,6 +28,20 @@ public partial class ViewerApp
     private double _cameraPathTimeSeconds;
     private int _cameraPathDefaultKeySpacingMs = 1000;
     private string _cameraPathImportPath = string.Empty;
+    private bool _cameraPathPreloadEnabled = true;
+    private int _cameraPathPreloadTileRadius = 1;
+    private int _cameraPathPreloadSampleSpacingMs = 500;
+    private CameraPathPreloadState? _cameraPathPreload;
+    private bool _cameraPathVideoCapturePending;
+
+    private const int MaxCameraPathPreloadTiles = 512;
+
+    private sealed class CameraPathPreloadState
+    {
+        public required HashSet<(int tileX, int tileY)> Tiles { get; init; }
+        public int StableFrames { get; set; }
+        public bool Ready { get; set; }
+    }
 
     private void OpenCapturePanelTab(CapturePanelTab tab)
     {
@@ -101,6 +116,26 @@ public partial class ViewerApp
         int spacing = _cameraPathDefaultKeySpacingMs;
         if (ImGui.DragInt("New Key Spacing (ms)", ref spacing, 10f, 100, 60000))
             _cameraPathDefaultKeySpacingMs = Math.Clamp(spacing, 100, 60000);
+
+        ImGui.Checkbox("Preload path before capture", ref _cameraPathPreloadEnabled);
+        ImGui.SameLine();
+        int radius = _cameraPathPreloadTileRadius;
+        if (ImGui.DragInt("Tile Radius", ref radius, 0.05f, 0, 2))
+            _cameraPathPreloadTileRadius = Math.Clamp(radius, 0, 2);
+        int sampleSpacing = _cameraPathPreloadSampleSpacingMs;
+        if (ImGui.DragInt("Preload Sample Spacing (ms)", ref sampleSpacing, 10f, 100, 5000))
+            _cameraPathPreloadSampleSpacingMs = Math.Clamp(sampleSpacing, 100, 5000);
+        if (ImGui.Button("Warm Path") && _cameraPathPreloadEnabled)
+            BeginCameraPathPreload();
+        ImGui.SameLine();
+        if (ImGui.Button("Release Warmup"))
+            EndCameraPathPreload();
+        if (_cameraPathPreload is { } preload)
+        {
+            string state = preload.Ready ? "ready" : "warming";
+            int pending = _worldScene?.PendingCapturePreloadLoadCount ?? 0;
+            ImGui.TextDisabled($"Path preload: {state}  tiles {preload.Tiles.Count}  pending {pending}  stable {preload.StableFrames}/2");
+        }
 
         if (ImGui.Button("Add Current Camera Key"))
             AddCameraPathKeyFromCurrentCamera();
@@ -257,6 +292,24 @@ public partial class ViewerApp
 
     private void StartCameraPathVideoCapture()
     {
+        if (!ValidateCameraPathForPlayback())
+            return;
+
+        if (_cameraPathPreloadEnabled)
+        {
+            if (!BeginCameraPathPreload())
+                return;
+
+            _cameraPathVideoCapturePending = true;
+            _statusMessage = $"Warming {_cameraPathPreload?.Tiles.Count ?? 0} path tiles and their objects before video capture.";
+            return;
+        }
+
+        StartCameraPathVideoCaptureNow();
+    }
+
+    private void StartCameraPathVideoCaptureNow()
+    {
         if (!StartCameraPathPlayback())
             return;
 
@@ -269,15 +322,36 @@ public partial class ViewerApp
         _cameraPathPlaying = false;
     }
 
+    private bool ValidateCameraPathForPlayback()
+    {
+        if (_cameraPath.Keyframes.Count < 2)
+        {
+            _statusMessage = "Camera path playback requires at least two keys.";
+            return false;
+        }
+
+        if (!IsCameraPathBoundToCurrentMap())
+        {
+            _statusMessage = $"Camera path is bound to {_cameraPath.MapName}/{_cameraPath.BuildVersion}; load that map/build before playback.";
+            return false;
+        }
+
+        return true;
+    }
+
     private void StopCameraPathPlayback()
     {
         _cameraPathPlaying = false;
         _cameraPathTimeSeconds = 0;
+        _cameraPathVideoCapturePending = false;
         if (_cameraPathVideoCaptureActive)
         {
             StopVideoRecording("Camera path video capture stopped.");
             _cameraPathVideoCaptureActive = false;
         }
+
+        if (_captureQueue.Count == 0 && _activeCaptureRequest == null)
+            EndCameraPathPreload();
     }
 
     private void UpdateCameraPathPlayback(double dt)
@@ -301,6 +375,7 @@ public partial class ViewerApp
             {
                 StopVideoRecording("Camera path video capture completed.");
                 _cameraPathVideoCaptureActive = false;
+                EndCameraPathPreload();
             }
         }
 
@@ -331,6 +406,9 @@ public partial class ViewerApp
         }
 
         M2CameraPathEvaluator.NormalizeAndValidate(_cameraPath);
+        if (_cameraPathPreloadEnabled && !BeginCameraPathPreload())
+            return;
+
         int queued = 0;
         for (int index = 0; index < _cameraPath.Keyframes.Count; index++)
         {
@@ -362,11 +440,131 @@ public partial class ViewerApp
                     RequiredSettledFrames = 2,
                     MaxFramesBeforeCapture = 120,
                     CaptureLabel = shot.Name,
+                    RequiresCameraPathPreload = _cameraPathPreloadEnabled,
                 });
             queued++;
         }
 
         _statusMessage = $"Queued {queued} camera path key capture{(queued == 1 ? string.Empty : "s")} through the existing capture queue.";
+    }
+
+    private bool BeginCameraPathPreload()
+    {
+        if (_terrainManager == null || _worldScene == null)
+        {
+            _statusMessage = "Path preload requires an active streamed world scene.";
+            return false;
+        }
+
+        if (_cameraPath.Keyframes.Count == 0)
+        {
+            _statusMessage = "Add at least one camera key before warming a path.";
+            return false;
+        }
+
+        if (!IsCameraPathBoundToCurrentMap())
+        {
+            _statusMessage = $"Camera path is bound to {_cameraPath.MapName}/{_cameraPath.BuildVersion}; load that map/build before warming it.";
+            return false;
+        }
+
+        M2CameraPathEvaluator.NormalizeAndValidate(_cameraPath);
+        HashSet<(int tileX, int tileY)> tiles = BuildCameraPathPreloadTiles();
+        if (tiles.Count == 0)
+        {
+            _statusMessage = "The camera path does not intersect any available terrain tiles.";
+            return false;
+        }
+
+        if (tiles.Count > MaxCameraPathPreloadTiles)
+        {
+            _statusMessage = $"Path warmup needs {tiles.Count} tiles; reduce the path length, tile radius, or sample spacing (limit {MaxCameraPathPreloadTiles}).";
+            return false;
+        }
+
+        _terrainManager.SetCapturePreloadTiles(tiles);
+        _worldScene.CapturePreloadActive = true;
+        _worldScene.QueueCapturePreloadAssets(tiles);
+        _cameraPathPreload = new CameraPathPreloadState { Tiles = tiles };
+        return true;
+    }
+
+    private void UpdateCameraPathPreload()
+    {
+        if (_cameraPathPreload is not { } preload || _terrainManager == null || _worldScene == null)
+            return;
+
+        bool tilesReady = preload.Tiles.All(tile => _terrainManager.IsTileLoaded(tile.tileX, tile.tileY));
+        bool terrainReady = tilesReady && !_terrainManager.IsStreaming;
+        bool objectsReady = _worldScene.PendingCapturePreloadLoadCount == 0;
+        if (!terrainReady || !objectsReady)
+        {
+            preload.StableFrames = 0;
+            return;
+        }
+
+        preload.StableFrames++;
+        if (!preload.Ready && preload.StableFrames >= 2)
+        {
+            preload.Ready = true;
+            _statusMessage = $"Path preload ready: {preload.Tiles.Count} tiles and all queued world objects are resident.";
+        }
+
+        if (_cameraPathVideoCapturePending && preload.Ready)
+        {
+            _cameraPathVideoCapturePending = false;
+            StartCameraPathVideoCaptureNow();
+        }
+    }
+
+    private void EndCameraPathPreload()
+    {
+        _cameraPathVideoCapturePending = false;
+        if (_worldScene != null)
+            _worldScene.CapturePreloadActive = false;
+        _terrainManager?.ClearCapturePreloadTiles();
+        _cameraPathPreload = null;
+    }
+
+    private HashSet<(int tileX, int tileY)> BuildCameraPathPreloadTiles()
+    {
+        HashSet<(int tileX, int tileY)> tiles = new();
+        int durationMs = Math.Max(0, _cameraPath.DurationMs);
+        int stepMs = Math.Max(100, _cameraPathPreloadSampleSpacingMs);
+        int sampleCount = durationMs == 0
+            ? 1
+            : Math.Min(2048, (int)MathF.Ceiling(durationMs / (float)stepMs) + 1);
+
+        for (int index = 0; index < sampleCount; index++)
+        {
+            int timeMs = sampleCount == 1
+                ? 0
+                : Math.Min(durationMs, (int)MathF.Round(durationMs * (index / (float)(sampleCount - 1))));
+            Vector3 position = M2CameraPathEvaluator.Sample(_cameraPath, timeMs).Position;
+            if (!TryGetCameraPathTile(position, out int tileX, out int tileY))
+                continue;
+
+            for (int dy = -_cameraPathPreloadTileRadius; dy <= _cameraPathPreloadTileRadius; dy++)
+            {
+                for (int dx = -_cameraPathPreloadTileRadius; dx <= _cameraPathPreloadTileRadius; dx++)
+                {
+                    int candidateX = tileX + dx;
+                    int candidateY = tileY + dy;
+                    if (candidateX >= 0 && candidateX < 64 && candidateY >= 0 && candidateY < 64
+                        && _terrainManager?.Adapter.TileExists(candidateX, candidateY) == true)
+                        tiles.Add((candidateX, candidateY));
+                }
+            }
+        }
+
+        return tiles;
+    }
+
+    private bool TryGetCameraPathTile(Vector3 position, out int tileX, out int tileY)
+    {
+        tileX = Math.Clamp((int)((WoWConstants.MapOrigin - position.X) / WoWConstants.ChunkSize), 0, 63);
+        tileY = Math.Clamp((int)((WoWConstants.MapOrigin - position.Y) / WoWConstants.ChunkSize), 0, 63);
+        return _terrainManager?.Adapter.TileExists(tileX, tileY) == true;
     }
 
     private void DrawCameraPathOverlay(Terrain.BoundingBoxRenderer overlay)

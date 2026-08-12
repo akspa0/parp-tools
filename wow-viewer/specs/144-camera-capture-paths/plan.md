@@ -4,7 +4,7 @@
 
 ## Summary
 
-Recover the existing capture automation route in the left sidebar and add a reusable M2-style camera path contract. The core owns map-bound keyframes, spline evaluation, M2 import/export, and round-trip tests. The viewer owns ImGui editing, active-map validation, playback, and integration with the existing still/video capture queue.
+Recover the existing capture automation route in the Tools > Utilities panel and add a reusable M2-style camera path contract. The core owns map-bound keyframes, spline evaluation, M2 import/export, and round-trip tests. The viewer owns ImGui editing, active-map validation, playback, bounded path preloading, and integration with the existing still/video capture queue.
 
 ## Technical Context
 
@@ -14,7 +14,7 @@ Recover the existing capture automation route in the left sidebar and add a reus
 **Testing**: xUnit focused core tests and Debug project build
 **Target Platform**: Windows desktop viewer, with non-Windows file-picker fallback unchanged
 **Project Type**: Desktop viewer and reusable core libraries
-**Performance Goals**: Path evaluation is constant-time over the key list and adds no world loading work beyond normal camera movement
+**Performance Goals**: Path evaluation is constant-time over the key list; capture warmup retains only sampled path tiles and queues their objects before recording without enabling full-map residency
 **Constraints**: Do not replace the existing capture queue, do not rewrite format readers, and do not claim interactive runtime proof from compilation alone
 **Scale/Scope**: One active authored path at a time, with arbitrary ordered key points and imported M2 camera samples
 
@@ -24,6 +24,7 @@ Recover the existing capture automation route in the left sidebar and add a reus
 - Existing M2 readers and capture backend are reused.
 - Viewer runtime proof remains user-run; this slice provides focused tests/build only.
 - The existing sidebar remains available; this is additive route recovery, not a shell rewrite.
+- Capture warmup is a scoped lease over sampled available tiles. `TerrainManager` owns tile retention and `WorldScene`/`WorldAssetManager` own placement-asset queues; the lease is released on stop or completion.
 
 ## Source Structure
 
