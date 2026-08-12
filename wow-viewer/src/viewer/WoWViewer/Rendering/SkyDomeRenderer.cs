@@ -26,6 +26,11 @@ public class SkyDomeRenderer : IDisposable
     private float _sunVisibility;
     private float _moonVisibility;
 
+    /// <summary>
+    /// Night visibility driven by the same sun-height curve as the native-style moon pass.
+    /// </summary>
+    public float NightVisibility => _moonVisibility;
+
     // Sky colors (set externally from TerrainLighting)
     public Vector3 ZenithColor { get; set; } = new(0.3f, 0.5f, 0.9f);   // deep blue
     public Vector3 HorizonColor { get; set; } = new(0.6f, 0.7f, 0.85f); // light blue

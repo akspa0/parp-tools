@@ -684,6 +684,11 @@ The Phase 1 foundation is implemented in `WowViewer.Core.Runtime`:
 - The shared sky-dome composition MUST consume the final active world light direction, including a
   build-scoped LIT/DBC override when present, and MAY provide procedural sun/moon discs as a fallback
   celestial layer. This layer is separate from tile residency and from top-down minimap export.
+- When the exact-build LightSkybox DBC evaluation resolves a model name, the world renderer MUST
+  queue that client asset and render it as a camera-anchored night backdrop using the existing M2/
+  MDX route. If no LightSkybox model is available, the renderer MAY discover the client-owned
+  `Environments/Stars/Stars` model from the data source. It MUST NOT replace the client star asset
+  with a procedural starfield.
 
 This is a runtime activation and instrumentation slice, not a performance promotion. The graph
 selector is default-off after real-client evidence showed the direct graph traversal path was slower;

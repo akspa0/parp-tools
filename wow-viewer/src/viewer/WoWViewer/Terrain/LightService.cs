@@ -42,6 +42,10 @@ public class LightService
         : _classicCatalog.Zones.Count(zone => zone.ContinentId == _mapId);
     public int DataEntryCount => _classicCatalog?.TimedSampleCount ?? _lightData.Values.Sum(v => v.Count);
     public LightDbcEvaluationEvidence? LastDbcEvidence { get; private set; }
+    /// <summary>
+    /// Client model selected by the active exact-build LightSkybox record, when present.
+    /// </summary>
+    public string? ActiveSkyboxModelPath { get; private set; }
     public string Source { get; private set; } = "not loaded";
     public string Status { get; private set; } = "Lighting database not loaded.";
     public int BandCountRecoveryCount => _classicCatalog?.BandCountRecoveries.Length ?? 0;
@@ -58,6 +62,7 @@ public class LightService
         _lightData.Clear();
         _classicCatalog = null;
         LastDbcEvidence = null;
+        ActiveSkyboxModelPath = null;
         ResetActiveLocalOverlayState();
         _mapId = mapId;
         Source = "loading";
@@ -241,6 +246,7 @@ public class LightService
     {
         ResetActiveLocalOverlayState();
         LastDbcEvidence = null;
+        ActiveSkyboxModelPath = null;
 
         if (_classicCatalog is not null)
         {
@@ -330,6 +336,7 @@ public class LightService
                 worldPosition,
                 TimeOfDay);
             LastDbcEvidence = value.Evidence;
+            ActiveSkyboxModelPath = value.PrimarySkybox?.Name;
             if (!value.HasLocalProfile || value.Evidence.LocalWeight <= 0f)
             {
                 Status = $"Global viewer light active; no in-range local DBC overlay at time " +
@@ -360,6 +367,7 @@ public class LightService
         {
             ResetActiveLocalOverlayState();
             LastDbcEvidence = null;
+            ActiveSkyboxModelPath = null;
             Status = $"Global viewer light active; exact-build local Light* evaluation failed: {ex.Message}";
             ViewerLog.Trace(
                 $"[LightService] Exact-build Light* evaluation failed for map {_mapId}, " +

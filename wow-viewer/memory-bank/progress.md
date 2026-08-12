@@ -984,6 +984,10 @@ Next: build the authored RGB corpus and review the combined plan.
    hides the distant WDL underlay. Added procedural sun/moon discs to the shared sky dome using
    the final active TerrainLighting direction. Viewer build passed with 0 errors; the user must
    validate real-client draw counts, horizon visibility, and FPS stability.
+ - 2026-08-12: Implemented Spec 142 T065. `LightService` now preserves the active exact-build
+   `LightSkybox` model name; `WorldScene` prioritizes that client M2/MDX/MDL asset for the
+   night backdrop and otherwise probes the client `Environments/Stars/Stars` asset. Placed
+   skybox rendering remains the fallback. Build and real-client visual proof are pending.
  - 2026-08-11: Created the complete Speckit design package for Spec 143,
    `143-world-context-lighting`. The package separates ADT area resolution, WMO interior context,
    player-head camera state, and evidence-gated WMO/M2 lighting. Code inspection confirms Alpha and

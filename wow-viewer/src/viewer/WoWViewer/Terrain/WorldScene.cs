@@ -3437,6 +3437,10 @@ public class WorldScene : ISceneRenderer
     private bool _showWlLiquids = true; // Auto-enable by default
     private bool _wlLoadAttempted = false;
     private IDataSource? _dataSource;
+    private bool _clientStarsProbeComplete;
+    private string? _clientStarsFallbackModelPath;
+    private string? _activeLightSkyboxSourcePath;
+    private string? _activeLightSkyboxModelKey;
     public bool ShowWlLiquids
     {
         get => _showWlLiquids;
@@ -9890,6 +9894,7 @@ public class WorldScene : ISceneRenderer
                         LitLoader.LitLightingSample? litSample = null;
                         string fogRecommendationSource;
                         _lightService?.Update(camPos);
+                        UpdateActiveSkyboxModel();
                         if (_lightService != null && !lighting.HasManualGameTimeOverride)
                             lighting.GameTime = Math.Clamp(_lightService.TimeOfDay / 2880f, 0f, 1f);
 
@@ -11110,6 +11115,17 @@ public class WorldScene : ISceneRenderer
     private void RenderSkyboxBackdrop(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos,
         Vector3 fogColor, float fogStart, float fogEnd, TerrainLighting lighting)
     {
+        bool renderedActiveClientSky = false;
+        if (_skyDome.NightVisibility > 0.001f
+            && TryGetQueuedMdx(_activeLightSkyboxModelKey ?? string.Empty) is { } lightSkyboxRenderer)
+        {
+            lightSkyboxRenderer.UpdateAnimation();
+            lightSkyboxRenderer.RenderBackdrop(Matrix4x4.CreateTranslation(cameraPos), view, proj,
+                fogColor, fogStart, fogEnd, cameraPos,
+                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+            renderedActiveClientSky = true;
+        }
+
         if (_skyboxInstances.Count == 0)
             return;
 
@@ -11129,6 +11145,12 @@ public class WorldScene : ISceneRenderer
             return;
 
         var skybox = nearestSkybox.Value;
+        if (renderedActiveClientSky
+            && string.Equals(skybox.ModelKey, _activeLightSkyboxModelKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
         var renderer = TryGetQueuedMdx(skybox.ModelKey);
         if (renderer == null)
             return;
@@ -11149,21 +11171,97 @@ public class WorldScene : ISceneRenderer
 
     internal static bool IsSkyboxModelPath(string modelPath)
     {
-        if (string.IsNullOrWhiteSpace(modelPath))
-            return false;
+        return WorldSkyboxBackdropClassifier.IsBackdropModelPath(modelPath);
+    }
 
-        string normalized = modelPath.Replace('\\', '/').ToLowerInvariant();
-        if (!normalized.EndsWith(".m2", StringComparison.OrdinalIgnoreCase) &&
-            !normalized.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
-            return false;
+    private void UpdateActiveSkyboxModel()
+    {
+        string? sourcePath = _lightService?.ActiveSkyboxModelPath;
+        sourcePath = ResolveClientSkyboxPath(sourcePath);
+        if (string.IsNullOrWhiteSpace(sourcePath))
+            sourcePath = ResolveClientStarsFallback();
 
-        if (normalized.Contains("skylight"))
-            return false;
+        if (string.Equals(sourcePath, _activeLightSkyboxSourcePath, StringComparison.OrdinalIgnoreCase))
+            return;
 
-        return normalized.Contains("environments/stars/") ||
-               normalized.Contains("/skybox/") ||
-               normalized.Contains("skybox") ||
-               normalized.Contains("skybowl");
+        _activeLightSkyboxSourcePath = sourcePath;
+        _activeLightSkyboxModelKey = string.IsNullOrWhiteSpace(sourcePath)
+            ? null
+            : WorldAssetManager.NormalizeKey(sourcePath);
+
+        if (string.IsNullOrWhiteSpace(_activeLightSkyboxModelKey))
+            return;
+
+        _assets.PrioritizeMdxLoad(_activeLightSkyboxModelKey);
+        ViewerLog.Info(
+            ViewerLog.Category.Mdx,
+            $"[Sky] Active client sky model: {sourcePath} (source={(_lightService?.ActiveSkyboxModelPath is null ? "client-stars fallback" : "LightSkybox DBC")})");
+    }
+
+    private string? ResolveClientSkyboxPath(string? sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath) || _dataSource == null)
+            return null;
+
+        if (_dataSource.FileExists(sourcePath))
+            return sourcePath;
+
+        if (!string.IsNullOrWhiteSpace(Path.GetExtension(sourcePath)))
+            return null;
+
+        foreach (string extension in new[] { ".m2", ".mdx", ".mdl" })
+        {
+            string candidate = sourcePath + extension;
+            if (_dataSource.FileExists(candidate))
+                return candidate;
+        }
+
+        return null;
+    }
+
+    private string? ResolveClientStarsFallback()
+    {
+        if (_clientStarsProbeComplete)
+            return _clientStarsFallbackModelPath;
+
+        _clientStarsProbeComplete = true;
+        if (_dataSource == null)
+            return null;
+
+        string[] candidates =
+        [
+            @"Environments\Stars\Stars.m2",
+            @"Environments\Stars\Stars.mdx",
+            @"Environments\Stars\Stars.mdl",
+        ];
+        foreach (string path in candidates)
+        {
+            if (!_dataSource.FileExists(path))
+                continue;
+
+            _clientStarsFallbackModelPath = path;
+            ViewerLog.Info(ViewerLog.Category.Mdx, $"[Sky] Discovered client stars fallback: {path}");
+            return path;
+        }
+
+        // Some extracted clients retain a World prefix around the same asset.
+        foreach (string path in new[]
+        {
+            @"World\Environments\Stars\Stars.m2",
+            @"World\Environments\Stars\Stars.mdx",
+            @"World\Environments\Stars\Stars.mdl",
+        })
+        {
+            if (_dataSource.FileExists(path))
+            {
+                _clientStarsFallbackModelPath = path;
+                ViewerLog.Info(ViewerLog.Category.Mdx, $"[Sky] Discovered client stars fallback: {path}");
+                return path;
+            }
+        }
+
+        ViewerLog.Debug(ViewerLog.Category.Mdx, "[Sky] Client stars fallback was not present in the data source file list.");
+        return null;
     }
 
     public void ToggleWireframe()

@@ -153,6 +153,10 @@ identity; no FPS or GPU claim is made.
 - [x] T064 [US2] Add procedural sun/moon discs to the existing shared sky-dome pass, consuming the
   final active TerrainLighting direction while keeping synthesized minimap output terrain-only
   in `src/viewer/WoWViewer/Rendering/SkyDomeRenderer.cs`.
+- [x] T065 [US2] Resolve the active client sky model from the exact-build LightSkybox DBC record,
+  discover the client `Environments/Stars/Stars` asset only when that record is unavailable, and
+  render the selected M2/MDX/MDL asset as a night-only camera-anchored backdrop in
+  `src/viewer/WoWViewer/Terrain/WorldScene.cs`.
 - [ ] T057 [US4] Define a capability-gated modern static-instance submission contract and legacy
   fallback proof, coordinated with Spec 138.
 - [ ] T027 Add synthetic workload replay and stage-level report output in `wow-viewer/tools/validation-capture/WowViewer.Tool.ValidationCapture/ValidationWorldSceneAdapter.cs`.

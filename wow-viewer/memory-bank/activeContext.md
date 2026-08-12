@@ -582,3 +582,8 @@ the authored RGB corpus, then reviews the combined benchmark dry plan.
    direction and renders procedural sun/moon discs. Viewer build passed with 0 errors; user-run
    visual/FPS proof remains pending. Synthesized minimaps remain terrain-only and retain the shared
    solar/shadow compositor path.
+ - 2026-08-12 night sky follow-up: the shared sky pass now retains the active exact-build
+   LightSkybox model name and queues the client-owned sky asset for a night-only, camera-anchored
+   backdrop. When LightSkybox is unavailable, it probes `Environments/Stars/Stars` in the
+   configured data source rather than synthesizing stars. The existing placed-skybox path remains
+   the fallback; focused build and real-client visual proof are still pending.

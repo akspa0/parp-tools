@@ -39,7 +39,7 @@ public static class WorldRenderCompositionBuilder
                 passOptions.SkyVisible,
                 passOptions.SkyVisible ? 1 : 0,
                 passOptions.SkyVisible ? 1 : 0,
-                "Procedural camera-centered backdrop until client sky records are decoded."),
+                "Procedural camera-centered backdrop with optional client sky assets."),
             new(
                 WorldRenderLayerKind.SkyboxBackdrop,
                 "Skybox Backdrop",
@@ -48,7 +48,7 @@ public static class WorldRenderCompositionBuilder
                 skyboxBackdropSourceCount,
                 stats.SkyboxBackdrop.SubmittedCount,
                 stats.SkyboxBackdrop.SubmittedCount > 0
-                    ? "Backdrop-like model placements feed the current procedural spherical backdrop layer; decoded client skybox geometry is still future work."
+                    ? "Backdrop-like model placements and decoded client sky assets feed the spherical backdrop layer."
                     : !passOptions.SkyVisible
                     ? "Backdrop-like model placements were classified but sky rendering is disabled for this frame."
                     : skyboxBackdropSourceCount > 0

@@ -100,7 +100,7 @@ public sealed class WorldRenderCompositionBuilderTests
         Assert.True(skybox.Ready);
         Assert.Equal(2, skybox.SourceCount);
         Assert.Equal(2, skybox.SubmittedCount);
-        Assert.Contains("procedural spherical backdrop", skybox.Note);
+        Assert.Contains("decoded client sky assets", skybox.Note);
     }
 
     [Theory]
