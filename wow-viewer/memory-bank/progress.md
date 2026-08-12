@@ -924,6 +924,11 @@ Next: build the authored RGB corpus and review the combined plan.
    rejects only conservative bucket AABBs and then uses the existing per-instance collectors.
    Unknown bounds and cross-tile ownership fail open. The viewer builds with 0 errors in an isolated
    output directory; no FPS improvement is claimed until the user reruns the real client.
+ - 2026-08-11: MDX still did not render in the interactive viewer after the direct-MDX instancing
+   restriction. Existing diagnostics showed visible MDX instances reaching opaque submission, so
+   this is not an admission or tile-residency failure. The production world MDX route now forces
+   per-instance `RenderWithTransform()` for direct MDX and adapted M2 wrappers; shared/GPU MDX
+   batching is held out pending a user visual check. WMO batching is unchanged.
  - 2026-08-11: Created the complete Speckit design package for Spec 143,
    `143-world-context-lighting`. The package separates ADT area resolution, WMO interior context,
    player-head camera state, and evidence-gated WMO/M2 lighting. Code inspection confirms Alpha and

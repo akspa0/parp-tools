@@ -8515,8 +8515,11 @@ public class WorldScene : ISceneRenderer
             frame.Visibility,
             visible =>
             {
-                IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
-                return renderer == null || renderer.RequiresUnbatchedWorldRender;
+                // Keep world MDX on the established per-instance RenderWithTransform
+                // contract until the shared/GPU batch paths have visual parity proof for
+                // every direct MDX and adapted M2 material route. WMO shell/doodad batching
+                // remains independent of this fallback.
+                return true;
             });
 
         WorldObjectPassCoordinator.PlanTransparentMdxRoutes(

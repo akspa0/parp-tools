@@ -550,3 +550,8 @@ the authored RGB corpus, then reviews the combined benchmark dry plan.
    internal doodad animations once per world frame, and the opaque instanced WMO placement path
    avoids repeating portal visibility and distance sorting. Build and focused tests pass; real
    Stormwind frame-time proof remains open.
+ - 2026-08-11 MDX regression containment: diagnostics admitted and submitted visible MDX instances,
+   so the failure was downstream of tile visibility. The production world MDX route now forces the
+   established per-instance `RenderWithTransform()` path for direct MDX and adapted M2 wrappers;
+   shared/GPU MDX batching is held out until visual parity is proven. WMO shell and WMO-internal
+   doodad batching remain independent.
