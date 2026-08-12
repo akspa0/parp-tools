@@ -178,7 +178,11 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     public bool IsM2AdapterModel => _isM2AdapterModel;
     public bool HasTransparentWorldPass => !_forceM2SolidDebug && ComputeHasTransparentWorldPass();
     public bool RequiresUnbatchedWorldRender => _particleEmitters.Count > 0 || _mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0;
-    public bool SupportsGpuInstancedOpaque => !RequiresUnbatchedWorldRender && !_forceM2SolidDebug;
+    // Direct Alpha MDX remains on the proven shared BeginBatch/RenderInstance path.
+    // Its legacy material/vertex state has not passed the GPU instance-attribute parity
+    // gate; adapted M2 models are the only models currently eligible for this path.
+    public bool SupportsGpuInstancedOpaque
+        => _isM2AdapterModel && !RequiresUnbatchedWorldRender && !_forceM2SolidDebug;
 
     /// <summary>Animation controller (null if model has no bones)</summary>
     public IAnimationController? Animator => _animator;

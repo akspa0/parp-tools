@@ -87,12 +87,14 @@ render-loop stall.
      issuing their `RenderInstance()` submissions. Keep transparent placements in their existing
      back-to-front order.
 
-The GPU phase is now implemented for compatible opaque M2/MDX renderer batches. `MdxRenderer`
-uploads model matrices and fade values to a per-model instance VBO, and each visible geoset uses
-`glDrawElementsInstanced` once for the batch. `M2Renderer` delegates this capability for its
-legacy-backed M2 path. The native runtime backend, transparent layers, particle/ribbon models, and
-unsupported fade/material states retain the existing CPU fallback. Visual parity and real-scene
-frame-time proof remain user-run gates.
+The GPU phase is now implemented only for compatible opaque adapted-M2 renderer batches.
+`MdxRenderer` uploads model matrices and fade values to a per-model instance VBO, and each visible
+geoset uses `glDrawElementsInstanced` once for the batch. `M2Renderer` delegates this capability
+for its legacy-backed M2 path. Direct Alpha MDX remains on the proven shared
+`BeginBatch()` / `RenderInstance()` path until its legacy material and vertex-state parity is
+verified. The native runtime backend, transparent layers, particle/ribbon models, and unsupported
+fade/material states retain the existing CPU fallback. Visual parity and real-scene frame-time
+proof remain user-run gates.
 
 Deferred client I/O is now scene-bounded: `WorldAssetManager` advances WMO doodad model loads once
 per frame instead of once per WMO placement, and `MinimapRenderer` uses one shared-data-source

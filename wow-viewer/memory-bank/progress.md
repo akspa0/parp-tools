@@ -8,6 +8,14 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-11 — Restore direct Alpha MDX world rendering
+
+- Narrowed `MdxRenderer` GPU-instanced eligibility to adapted M2 models. Direct 0.5.x MDLX assets
+  return to the proven shared `BeginBatch()` / `RenderInstance()` path; this avoids promoting
+  their unverified legacy material/vertex state to the new instance-attribute route.
+- Updated Spec 136 and its plan to preserve this compatibility boundary. Focused viewer build:
+  0 errors, existing warnings only. User-run Alpha client render proof remains required.
+
 ## 2026-08-11 — Batched terrain area-context lookup
 
 - Fixed the status-bar context query to use `TerrainRenderer.GetChunkInfoAt`, which is populated by

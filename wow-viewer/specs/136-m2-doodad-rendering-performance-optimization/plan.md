@@ -20,10 +20,12 @@ back-to-front order and unbatched particle/ribbon behavior.
 
 ## Phase 3 — GPU Instanced Opaque Submission
 
-Use a renderer-scoped compatibility contract for opaque M2/MDX batches. Upload model matrices and
-fade values through a dynamic instance VBO, add per-instance vertex attributes to the existing shader,
-and issue one `glDrawElementsInstanced` call per compatible geoset. Keep native-runtime state,
-transparent layers, particle/ribbon renderers, and unsupported fade/material states on the fallback.
+Use a renderer-scoped compatibility contract for opaque adapted-M2 batches. Upload model matrices
+and fade values through a dynamic instance VBO, add per-instance vertex attributes to the existing
+shader, and issue one `glDrawElementsInstanced` call per compatible geoset. Keep direct Alpha MDX
+on the proven shared CPU/state batch path until legacy material and vertex-state parity is proven.
+Keep native-runtime state, transparent layers, particle/ribbon renderers, and unsupported
+fade/material states on the fallback.
 The implementation is complete; synthetic scaling, visual parity, and user-witnessed real-client
 capture remain the proof gate.
 
