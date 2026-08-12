@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics;
+using WowViewer.Core.Runtime.World;
 using WoWViewer.DataSources;
 using WoWViewer.Logging;
 using WoWViewer.Rendering;
@@ -21,6 +22,7 @@ public class TerrainManager : ISceneRenderer
     private readonly TerrainTileMeshBuilder _tileMeshBuilder;
     private readonly TerrainRenderer _terrainRenderer;
     private readonly LiquidRenderer _liquidRenderer;
+    private readonly DirectionalTileSelector _directionalTileSelector;
     private readonly IDataSource? _dataSource;
 
     // Loaded tiles: (tileX, tileY) → batched tile mesh (GPU-resident)
@@ -41,16 +43,18 @@ public class TerrainManager : ISceneRenderer
     // capture preparation ends.
     private readonly HashSet<(int tileX, int tileY)> _capturePreloadTiles = new();
 
-    // AOI: keep a fog-driven high-detail near field and rely on textured WDL for distance terrain.
-    // Shorter fog should shrink the detailed ADT footprint instead of always holding the same
-    // high-detail footprint resident.
+    // Strict directional baseline: the normal camera-driven detailed set is the
+    // active tile plus at most three immediately forward-facing neighbors.
+    // Fog/radial expansion is intentionally deferred until this baseline has
+    // real-client performance evidence.
     private const int MinDetailedTileCandidateRadius = 1;
-    private const int MaxDetailedTileCandidateRadius = 4;
-    private const int MinDetailedTileCount = 6;
-    private const int MaxDetailedTileCount = 25;
-    private const int MinRetainedTileCount = 10;
-    private const int MaxRetainedTileCount = 36;
-    public const int MaxManualDetailedTileCount = ((MaxDetailedTileCandidateRadius * 2) + 1) * ((MaxDetailedTileCandidateRadius * 2) + 1);
+    private const int MaxDetailedTileCandidateRadius = 1;
+    private const int MinDetailedTileCount = 1;
+    private const int MaxDetailedTileCount = 4;
+    private const int MinRetainedTileCount = 1;
+    private const int MaxRetainedTileCount = 4;
+    public const int MaxManualDetailedTileCount = 4;
+    public const float DirectionalTileFovDegrees = 45f;
     private const int MaxGpuUploadsPerFrame = 6;
     private const double MaxGpuUploadBudgetMs = 7.0;
     private const int MaxConcurrentMpqReads = 4; // Limit concurrent MPQ reads to avoid frame drops
@@ -71,8 +75,6 @@ public class TerrainManager : ISceneRenderer
     // Camera tracking for AOI updates
     private int _lastCameraTileX = -1;
     private int _lastCameraTileY = -1;
-    private int _lastCornerBiasX;
-    private int _lastCornerBiasY;
     private int _lastDetailedTileCandidateRadius = -1;
     private int _lastTargetDetailedTileCount = -1;
     private int _lastTargetRetainedTileCount = -1;
@@ -82,9 +84,9 @@ public class TerrainManager : ISceneRenderer
     private Vector3 _cameraPos;
     private Vector3 _lastCameraPos;
     private Vector2 _cameraHeading;
+    private Vector2 _lastSelectedHeading;
+    private readonly List<(int tileX, int tileY)> _lastSelectedTiles = new(4);
     private bool _disposed;
-
-    private const float CornerLoadBand = 0.28f;
 
     // Stats
     public int LoadedTileCount => _loadedTiles.Count;
@@ -103,6 +105,12 @@ public class TerrainManager : ISceneRenderer
     public int PendingTerrainLoadCount => _loadingTiles.Count + _pendingTiles.Count;
     public int CapturePreloadTileCount => _capturePreloadTiles.Count;
     public IReadOnlyCollection<(int tileX, int tileY)> CapturePreloadTiles => _capturePreloadTiles;
+    public IReadOnlyList<(int tileX, int tileY)> LastSelectedTiles => _lastSelectedTiles;
+    public int LastFrameActiveTileCount => _lastSelectedTiles.Count;
+    public int LastFrameDetailedTileDrawCalls => _terrainRenderer.LastFrameDrawCalls;
+    public bool LastDirectionalTileInvariantPassed
+        => LastFrameActiveTileCount <= 4
+            && (_capturePreloadTiles.Count > 0 || LastFrameDetailedTileDrawCalls <= 4);
     public TerrainLighting Lighting => _terrainRenderer.Lighting;
     public TerrainRenderer Renderer => _terrainRenderer;
     public LiquidRenderer LiquidRenderer => _liquidRenderer;
@@ -356,6 +364,11 @@ public class TerrainManager : ISceneRenderer
         MapName = Path.GetFileNameWithoutExtension(wdtPath);
 
         _adapter = new AlphaTerrainAdapter(wdtPath);
+        _directionalTileSelector = new DirectionalTileSelector(
+            WoWConstants.MapOrigin,
+            WoWConstants.ChunkSize,
+            64,
+            (tileX, tileY) => _adapter.TileExists(tileX, tileY));
         _tileMeshBuilder = new TerrainTileMeshBuilder(gl);
         _terrainRenderer = new TerrainRenderer(gl, dataSource, new TerrainLighting());
         _liquidRenderer = new LiquidRenderer(gl);
@@ -374,6 +387,11 @@ public class TerrainManager : ISceneRenderer
         MapName = mapName;
 
         _adapter = adapter;
+        _directionalTileSelector = new DirectionalTileSelector(
+            WoWConstants.MapOrigin,
+            WoWConstants.ChunkSize,
+            64,
+            (tileX, tileY) => _adapter.TileExists(tileX, tileY));
         _tileMeshBuilder = new TerrainTileMeshBuilder(gl);
         _terrainRenderer = new TerrainRenderer(gl, dataSource, new TerrainLighting());
         _liquidRenderer = new LiquidRenderer(gl);
@@ -424,7 +442,8 @@ public class TerrainManager : ISceneRenderer
     /// <summary>
     /// Update terrain AOI based on camera position. Call each frame before Render.
     /// Queues new tiles for background loading and submits completed tiles to GPU.
-    /// Uses a square AOI with one-ring unload hysteresis.
+    /// Uses the strict directional baseline: active tile plus at most three
+    /// adjacent tiles in the camera-facing 45-degree cone.
     /// </summary>
     public void UpdateAOI(Vector3 cameraPos, Vector3? cameraForward = null)
     {
@@ -460,11 +479,6 @@ public class TerrainManager : ISceneRenderer
         tileX = Math.Clamp(tileX, 0, 63);
         tileY = Math.Clamp(tileY, 0, 63);
 
-        float tileCoordX = (WoWConstants.MapOrigin - cameraPos.X) / WoWConstants.ChunkSize;
-        float tileCoordY = (WoWConstants.MapOrigin - cameraPos.Y) / WoWConstants.ChunkSize;
-        float tileFracX = tileCoordX - tileX;
-        float tileFracY = tileCoordY - tileY;
-
         ComputeStreamingTargets(
             _terrainRenderer.Lighting.FogEnd,
             out int detailedTileCandidateRadius,
@@ -473,84 +487,38 @@ public class TerrainManager : ISceneRenderer
         _effectiveDetailedTileCount = targetDetailedTileCount;
         _effectiveRetainedTileCount = targetRetainedTileCount;
 
-        int cornerBiasX = tileFracX <= CornerLoadBand ? -1 : tileFracX >= 1f - CornerLoadBand ? 1 : 0;
-        int cornerBiasY = tileFracY <= CornerLoadBand ? -1 : tileFracY >= 1f - CornerLoadBand ? 1 : 0;
-
-        // Re-evaluate AOI when the camera crosses a tile boundary or when it moves close enough
-        // to a tile corner that a diagonal detailed tile should replace nearby WDL terrain.
+        // Re-evaluate when the camera crosses a tile boundary, the requested
+        // budget changes, or the camera turns far enough to change admission.
         if (tileX == _lastCameraTileX
             && tileY == _lastCameraTileY
-            && cornerBiasX == _lastCornerBiasX
-            && cornerBiasY == _lastCornerBiasY
             && detailedTileCandidateRadius == _lastDetailedTileCandidateRadius
             && targetDetailedTileCount == _lastTargetDetailedTileCount
-            && targetRetainedTileCount == _lastTargetRetainedTileCount)
+            && targetRetainedTileCount == _lastTargetRetainedTileCount
+            && Vector2.DistanceSquared(_cameraHeading, _lastSelectedHeading) <= 1e-4f)
             return;
 
         _lastCameraTileX = tileX;
         _lastCameraTileY = tileY;
-        _lastCornerBiasX = cornerBiasX;
-        _lastCornerBiasY = cornerBiasY;
         _lastDetailedTileCandidateRadius = detailedTileCandidateRadius;
         _lastTargetDetailedTileCount = targetDetailedTileCount;
         _lastTargetRetainedTileCount = targetRetainedTileCount;
 
-        int headDx = 0;
-        int headDy = 0;
-        if (_cameraHeading.LengthSquared() > 0.25f)
-        {
-            headDx = _cameraHeading.X > 0.3f ? -1 : _cameraHeading.X < -0.3f ? 1 : 0;
-            headDy = _cameraHeading.Y > 0.3f ? -1 : _cameraHeading.Y < -0.3f ? 1 : 0;
-        }
+        float yaw = _cameraHeading.LengthSquared() > 1e-4f
+            ? MathF.Atan2(_cameraHeading.Y, _cameraHeading.X) * (180f / MathF.PI)
+            : 0f;
+        List<DirectionalTileCoord> selectedTiles = _directionalTileSelector.GetVisibleTiles(
+            cameraPos,
+            yaw,
+            DirectionalTileFovDegrees);
 
-        var rankedCandidates = new List<(int tx, int ty, float score, int chebyshev, int manhattan)>();
-        for (int dy = -detailedTileCandidateRadius; dy <= detailedTileCandidateRadius; dy++)
-        {
-            for (int dx = -detailedTileCandidateRadius; dx <= detailedTileCandidateRadius; dx++)
-            {
-                int tx = tileX + dx;
-                int ty = tileY + dy;
-                if (tx < 0 || tx >= 64 || ty < 0 || ty >= 64 || !_adapter.TileExists(tx, ty))
-                    continue;
-
-                int chebyshev = Math.Max(Math.Abs(dx), Math.Abs(dy));
-                int manhattan = Math.Abs(dx) + Math.Abs(dy);
-                float score = chebyshev * 8f + manhattan;
-
-                if (dx == 0 && dy == 0)
-                    score -= 100f;
-
-                if (headDx != 0 || headDy != 0)
-                    score -= (dx * headDx + dy * headDy) * 1.75f;
-
-                if (cornerBiasX != 0 || cornerBiasY != 0)
-                    score -= (dx * cornerBiasX + dy * cornerBiasY) * 0.5f;
-
-                rankedCandidates.Add((tx, ty, score, chebyshev, manhattan));
-            }
-        }
-
-        rankedCandidates.Sort((left, right) =>
-        {
-            int scoreCompare = left.score.CompareTo(right.score);
-            if (scoreCompare != 0)
-                return scoreCompare;
-
-            int ringCompare = left.chebyshev.CompareTo(right.chebyshev);
-            if (ringCompare != 0)
-                return ringCompare;
-
-            return left.manhattan.CompareTo(right.manhattan);
-        });
+        _lastSelectedTiles.Clear();
+        foreach (DirectionalTileCoord selected in selectedTiles.Take(targetDetailedTileCount))
+            _lastSelectedTiles.Add((selected.TileX, selected.TileY));
+        _lastSelectedHeading = _cameraHeading;
 
         var desiredTiles = new HashSet<(int, int)>();
-        foreach (var candidate in rankedCandidates)
-        {
-            if (desiredTiles.Count >= targetDetailedTileCount)
-                break;
-
-            desiredTiles.Add((candidate.tx, candidate.ty));
-        }
+        foreach (var selected in _lastSelectedTiles)
+            desiredTiles.Add(selected);
 
         // Capture-path tiles are deliberately loaded in addition to the
         // camera-facing set. This is an explicit, user-requested residency
@@ -559,13 +527,8 @@ public class TerrainManager : ISceneRenderer
             desiredTiles.Add(tile);
 
         var unloadKeepTiles = new HashSet<(int, int)>();
-        foreach (var candidate in rankedCandidates)
-        {
-            if (unloadKeepTiles.Count >= targetRetainedTileCount)
-                break;
-
-            unloadKeepTiles.Add((candidate.tx, candidate.ty));
-        }
+        foreach (var selected in _lastSelectedTiles)
+            unloadKeepTiles.Add(selected);
 
         foreach (var tile in _capturePreloadTiles)
             unloadKeepTiles.Add(tile);
@@ -663,46 +626,21 @@ public class TerrainManager : ISceneRenderer
         out int targetDetailedTileCount,
         out int targetRetainedTileCount)
     {
+        // The strict baseline intentionally ignores fog distance. Fog remains
+        // a render effect; it does not enlarge the normal tile admission set.
+        _ = fogEnd;
+
         if (_detailedTileCountOverride > 0)
         {
             targetDetailedTileCount = Math.Clamp(_detailedTileCountOverride, 1, MaxManualDetailedTileCount);
-            detailedTileCandidateRadius = ComputeDetailedTileCandidateRadius(targetDetailedTileCount);
-            targetRetainedTileCount = Math.Clamp(
-                targetDetailedTileCount + 4,
-                targetDetailedTileCount,
-                MaxManualDetailedTileCount);
+            detailedTileCandidateRadius = MaxDetailedTileCandidateRadius;
+            targetRetainedTileCount = targetDetailedTileCount;
             return;
         }
 
-        float fogTileDistance = fogEnd > 0f
-            ? fogEnd / WoWConstants.ChunkSize
-            : 1.5f;
-
-        fogTileDistance = Math.Clamp(fogTileDistance, 1.25f, 6.25f);
-        targetDetailedTileCount = Math.Clamp(
-            (int)MathF.Round(fogTileDistance * 4.0f),
-            MinDetailedTileCount,
-            MaxDetailedTileCount);
-
-        detailedTileCandidateRadius = ComputeDetailedTileCandidateRadius(targetDetailedTileCount);
-
-        targetRetainedTileCount = Math.Clamp(
-            targetDetailedTileCount + 4,
-            MinRetainedTileCount,
-            MaxRetainedTileCount);
-    }
-
-    private static int ComputeDetailedTileCandidateRadius(int tileCount)
-    {
-        if (tileCount <= 0)
-            return MinDetailedTileCandidateRadius;
-
-        int sideLength = (int)MathF.Ceiling(MathF.Sqrt(tileCount));
-        if ((sideLength & 1) == 0)
-            sideLength++;
-
-        int radius = (sideLength - 1) / 2;
-        return Math.Clamp(radius, MinDetailedTileCandidateRadius, MaxDetailedTileCandidateRadius);
+        targetDetailedTileCount = Math.Clamp(MaxDetailedTileCount, MinDetailedTileCount, MaxDetailedTileCount);
+        detailedTileCandidateRadius = MinDetailedTileCandidateRadius;
+        targetRetainedTileCount = Math.Clamp(targetDetailedTileCount, MinRetainedTileCount, MaxRetainedTileCount);
     }
 
     /// <summary>
@@ -838,6 +776,7 @@ public class TerrainManager : ISceneRenderer
             return;
 
         _terrainRenderer.Render(view, proj, _cameraPos);
+        TraceDirectionalFrameDiagnostics();
         // Liquid is rendered separately AFTER all opaque geometry (WMOs, MDX)
         // so objects below the water surface are visible through the transparent water.
         // See WorldScene.Render() or call RenderLiquid() explicitly.
@@ -853,6 +792,7 @@ public class TerrainManager : ISceneRenderer
             return;
 
         _terrainRenderer.Render(view, proj, cameraPos, frustum);
+        TraceDirectionalFrameDiagnostics();
     }
 
     /// <summary>
@@ -883,6 +823,11 @@ public class TerrainManager : ISceneRenderer
 
     public bool GetSubObjectVisible(int index) => true; // All tiles always visible for now
     public void SetSubObjectVisible(int index, bool visible) { } // per-tile visibility is a future feature; tracked but not yet specced
+
+    private void TraceDirectionalFrameDiagnostics()
+    {
+        ViewerLog.Trace($"[TerrainSelection] Active Tiles: {LastFrameActiveTileCount}; Detailed Draw Calls: {LastFrameDetailedTileDrawCalls}; Invariant: {LastDirectionalTileInvariantPassed}");
+    }
 
     public void Dispose()
     {

@@ -129,6 +129,11 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
 - Runtime stats expose graph active/inactive state, resident ADT graph roots, traversal
   visited/tested/rejected/skipped counts, AOI camera and retained counts, and the last unloaded ADT
   plus its WMO placement count.
+- The strict directional tile baseline exposes `TerrainManager.LastSelectedTiles`,
+  `LastFrameActiveTileCount`, `LastFrameDetailedTileDrawCalls`, and
+  `LastDirectionalTileInvariantPassed`. With verbose logging enabled, the render boundary emits
+  the paired `Active Tiles` and `Detailed Draw Calls` values. Normal camera admission is capped at
+  four tiles; capture preloads and `--full-load` remain explicit exceptions.
 - Residency-triggered graph rebuilds use cached WMO summaries only; a rebuild must not synchronously
   read or parse resident WMO files merely to mount optional `WmoGroup` metadata.
 - Deferred WMO doodad model loads are advanced once per scene frame through `WorldAssetManager`,

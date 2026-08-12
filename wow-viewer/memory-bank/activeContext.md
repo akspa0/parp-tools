@@ -7,23 +7,21 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 146, Phase 1 audio/camera contracts and capability tests.
+- **Next implementation target:** Spec 142 Phase 8M real-client validation of the strict directional four-tile ADT baseline.
 - **Proof owner:** focused C# tests and a Debug build for source-level contracts; the user owns real
   client, OpenGL, audio-device, capture, and performance proof.
-- **Main unproven gap:** no playback backend or capability contract has been selected yet. Do not
-  claim audio playback, emitter behavior, or camera-video integration from the planning package.
-- **Explicitly out of scope for the next slice:** single-player server behavior, broad renderer
-  rewrites, and unrelated UI or terrain work.
+- **Main unproven gap:** no user-run capture has yet shown the normal viewer holding no more than four active detailed tiles/draws while moving.
+- **Explicitly out of scope for the next slice:** FOV radiation, unique-model submission redesign, broad renderer rewrites, audio, UI, and full-load stress mode as normal admission.
 
 ## Active spec lanes
 
 | Spec | State | Next handoff |
 |---|---|---|
-| 146 Audio/camera playback | Draft/planned | Implement Phase 1 contracts and capability tests from `tasks.md`. |
+| 146 Audio/camera playback | Draft/planned | Parked while the active renderer baseline gate is validated. |
 | 144 Camera capture paths | Implemented with user gates | Finish user-run built-in camera, collision, JSON, preload, and capture proof before extensions. |
 | 145 WoW UI overhaul | First slice implemented | Continue only the remaining persistent-window and placeholder audit tasks. |
 | 143 World context and lighting | First area slice landed | Resolve evidence/setup tasks before WMO area or lighting claims. |
-| 142 World scene graph | In progress | Continue unchecked graph/performance tasks after reading current evidence. |
+| 142 World scene graph | In progress | Validate Phase 8M strict directional four-tile admission before widening FOV. |
 | 139–141 Terrain/minimap reconstruction | Active/parked ML lanes | Reopen only for the named spec and user-run training/validation. |
 | 138 Cross-era renderer research | Evidence/planning | Do not generalize one client build to every era. |
 | 128–131 PM4 | Established research lane | Use the PM4 spec pack and `workstream-pm4-decode.md`. |

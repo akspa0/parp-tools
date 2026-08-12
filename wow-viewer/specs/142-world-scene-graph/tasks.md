@@ -163,6 +163,21 @@ identity; no FPS or GPU claim is made.
 - [ ] T028 Add current-vs-new parity and performance report tests in `wow-viewer/tests/WowViewer.Core.Tests/World/WorldScenePerformanceReportTests.cs`.
 - [ ] T029 Run the focused and full test commands from `wow-viewer/specs/142-world-scene-graph/quickstart.md` and record evidence in `wow-viewer/memory-bank/progress.md`.
 
+## Phase 8M: Strict Directional Tile Admission Baseline
+
+- [x] T066 [US2] Add the pure `DirectionalTileSelector.GetVisibleTiles` contract in
+  `src/core/WowViewer.Core.Runtime/World/DirectionalTileSelector.cs`, returning the active tile
+  and at most three immediately forward-facing neighbors without radial expansion.
+- [x] T067 [US2] Route normal `TerrainManager.UpdateAOI` admission through the strict selector and
+  cap fog/manual detailed residency at four tiles; keep explicit capture preloads and full-load
+  stress mode as named exceptions.
+- [x] T068 [US2] Expose active-tile and detailed-terrain-draw diagnostics at the terrain render
+  boundary, including a bounded invariant result and verbose trace output.
+- [ ] T069 [US2] Run a user-owned real-client movement capture proving active tiles never exceed
+  four during normal navigation and report the paired detailed draw count.
+- [ ] T070 [US2] Only after T069 passes, design the next bounded FOV-radiation slice; it must
+  expand within the directional cone rather than restore radial or map-wide admission.
+
 ## Dependencies and Execution Order
 
 - Phase 1 documentation/setup precedes all implementation.
@@ -174,6 +189,8 @@ identity; no FPS or GPU claim is made.
   parity, change terrain AOI policy, or authorize a heavy capture.
 - T043 makes graph rebuild metadata-only for WMO group summaries; it does not change WMO asset
   loading or renderer submission ownership.
+- T066-T068 establish the bounded spatial baseline before any future FOV-radiation or dense
+  submission work. T069 is a real-client gate; T070 must not start before it passes.
 
 ## Implementation Strategy
 

@@ -5,6 +5,16 @@ Last updated: 2026-08-12
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-12 — Spec 142 strict directional tile baseline
+
+- Added the pure `DirectionalTileSelector` contract and four focused geometry tests.
+- Replaced normal fog/radial ADT admission with the active tile plus at most three immediately
+  forward-facing neighbors; normal detailed/manual budgets are capped at four.
+- Added render-boundary active-tile/detailed-draw diagnostics. Capture preloads and `--full-load`
+  remain explicit exceptions and are not normal camera admission.
+- Focused selector proof passes 4/4 and the viewer dependency graph builds with existing warnings;
+  user-run movement/FPS proof remains open before any FOV-radiation work.
+
 ## 2026-08-12 — Documentation continuity cleanup
 
 - Replaced the oversized root and viewer agent guides with short operational guides.
