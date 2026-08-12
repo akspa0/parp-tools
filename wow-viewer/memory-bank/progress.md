@@ -1019,3 +1019,10 @@ Next: build the authored RGB corpus and review the combined plan.
    for two stable ready frames before recording. The lease is released on stop/completion so normal
    AOI eviction resumes; this deliberately does not restore full-map residency. Viewer build passed
    with 0 errors; real-client frame-stability proof remains user-owned.
+ - 2026-08-12: Extended Spec 144 for built-in client camera reuse. The Camera Path panel now imports
+   selected virtual-client M2 or MDX assets through the active data source, samples camera/sequence
+   tracks with shared readers, and exposes a timeline playhead with playhead-based key authoring and
+   retiming. Path documents persist opt-in terrain-height and conservative resident-WMO-bound collision
+   settings; playback and scrubbing apply the collision sweep. Focused camera/importer tests pass 8/8
+   and the Windows viewer build passes with 0 errors. User-run client camera, collision, and capture
+   validation remain open; triangle-accurate WMO collision is not claimed.

@@ -34,6 +34,12 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
 - Focused `M2CameraPathTests` passed 3/3 and the isolated viewer Debug build passed with 0 errors
   and 288 warnings. Interactive map playback, OpenGL overlay visibility, ffmpeg availability,
   and real-client capture output remain user-run proof gates.
+- Camera Path now imports selected virtual-client `.m2` and binary `.mdx` assets through the active
+  data source, using shared M2/MDX readers with camera/sequence/sample controls. The editor adds a
+  timeline playhead plus playhead key authoring/retiming, and persists opt-in terrain-height and
+  conservative resident-WMO-bounds collision settings for scrubbing/playback. Focused proof is
+  8 passing camera/importer tests and the Windows viewer build passes with 0 errors; built-in client
+  camera selection, collision behavior, and capture output remain user-run validation.
 
 ## Now — Spec 080 UI release convergence
 

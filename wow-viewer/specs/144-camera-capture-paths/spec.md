@@ -37,6 +37,12 @@ The user can import a readable M2 camera asset, bind its sampled tracks to the c
 
 **Independent Test**: Import a camera-only M2 with at least one camera track and verify that sampled keys appear and can be played on the matching active map.
 
+### User Story 5 - Reuse cameras from the loaded client and keep shots inside the world (P1)
+
+The user can select an M2 or MDX camera asset in the loaded client's file browser, import a chosen camera/sequence into the active map, scrub its timeline, and optionally constrain playback against loaded terrain height and resident WMO placement bounds.
+
+**Independent Test**: Select a client camera asset, import it, scrub to a middle key, enable terrain/WMO collision, and play the path through the active scene without the camera entering loaded world bounds.
+
 ## Edge Cases
 
 - Playback refuses a path whose map binding does not match the active world, instead of silently moving the camera in the wrong scene.
@@ -59,6 +65,9 @@ The user can import a readable M2 camera asset, bind its sampled tracks to the c
 - **FR-009**: Focused tests MUST cover interpolation, map binding, and native M2 round-trip camera data.
 - **FR-010**: Path-driven video and queued key captures MUST support an opt-in bounded preload lease that samples the path, pins only its available terrain tiles, queues the placements in those tiles through the existing asset manager, and waits for terrain/object readiness before capture starts.
 - **FR-011**: Releasing or completing path capture MUST clear the preload lease so ordinary camera-driven AOI eviction resumes; preload MUST NOT imply full-map residency.
+- **FR-012**: The Camera Path panel MUST import `.m2` and binary `.mdx` camera assets selected from the loaded client file browser through the active data source, without requiring extraction to a loose filesystem path.
+- **FR-013**: Client camera import MUST expose camera index, sequence index, and bounded sample interval, and MUST use the existing M2/MDX readers and track samplers.
+- **FR-014**: The path editor MUST provide a timeline playhead and MUST support opt-in collision resolution during scrubbing and playback. Terrain collision MUST use the loaded terrain heightfield; WMO collision MUST use conservative resident placement bounds and MUST be labeled as such.
 
 ## Key Entities
 
@@ -76,6 +85,8 @@ The user can import a readable M2 camera asset, bind its sampled tracks to the c
 - **SC-004**: A native M2 exported by the viewer is readable by the existing M2 reader and exposes the same camera key timing within the chosen sampling resolution.
 - **SC-005**: Path-driven video uses the existing capture output and does not require a second capture pipeline.
 - **SC-006**: With preload enabled, path capture reports a bounded tile footprint and a ready gate before recording; after capture, the lease is released and the normal AOI stream remains active.
+- **SC-007**: A selected client `.m2` or `.mdx` camera imports into the path editor with its decoded camera tracks and a usable timeline; no loose extraction is required.
+- **SC-008**: With collision enabled, a path sample crossing loaded terrain is lifted above the terrain height, and a swept sample entering a resident WMO exterior-bounds volume from outside is stopped before the volume; paths already inside a WMO remain playable.
 
 ## Assumptions
 

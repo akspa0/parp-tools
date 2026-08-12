@@ -1,6 +1,8 @@
 using System.Numerics;
 using System.Text.Json;
 using ImGuiNET;
+using WowViewer.Core.IO.Mdx;
+using WowViewer.Core.Mdx;
 using WowViewer.Core.M2;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.Runtime.M2;
@@ -28,6 +30,9 @@ public partial class ViewerApp
     private double _cameraPathTimeSeconds;
     private int _cameraPathDefaultKeySpacingMs = 1000;
     private string _cameraPathImportPath = string.Empty;
+    private int _cameraPathImportCameraIndex;
+    private int _cameraPathImportSequenceIndex;
+    private int _cameraPathImportSampleIntervalMs = 125;
     private bool _cameraPathPreloadEnabled = true;
     private int _cameraPathPreloadTileRadius = 1;
     private int _cameraPathPreloadSampleSpacingMs = 500;
@@ -113,6 +118,21 @@ public partial class ViewerApp
             _cameraPathName = name;
 
         ImGui.TextDisabled($"Keys: {_cameraPath.Keyframes.Count}  Duration: {_cameraPath.DurationMs / 1000f:F2}s");
+        float playhead = (float)Math.Clamp(_cameraPathTimeSeconds, 0d, _cameraPath.DurationMs / 1000d);
+        if (ImGui.SliderFloat("Timeline", ref playhead, 0f, Math.Max(0.01f, _cameraPath.DurationMs / 1000f), $"{playhead:F2}s"))
+        {
+            _cameraPathTimeSeconds = playhead;
+            ApplyCameraPathAtCurrentTime();
+        }
+        if (ImGui.Button("Add Key At Playhead"))
+            AddCameraPathKeyAtTime((int)MathF.Round(playhead * 1000f));
+        ImGui.SameLine();
+        if (ImGui.Button("Set Selected To Playhead") && _selectedCameraPathKey >= 0 && _selectedCameraPathKey < _cameraPath.Keyframes.Count)
+        {
+            _cameraPath.Keyframes[_selectedCameraPathKey].TimeMs = (int)MathF.Round(playhead * 1000f);
+            M2CameraPathEvaluator.NormalizeAndValidate(_cameraPath);
+            _selectedCameraPathKey = Math.Clamp(_selectedCameraPathKey, 0, _cameraPath.Keyframes.Count - 1);
+        }
         int spacing = _cameraPathDefaultKeySpacingMs;
         if (ImGui.DragInt("New Key Spacing (ms)", ref spacing, 10f, 100, 60000))
             _cameraPathDefaultKeySpacingMs = Math.Clamp(spacing, 100, 60000);
@@ -136,6 +156,20 @@ public partial class ViewerApp
             int pending = _worldScene?.PendingCapturePreloadLoadCount ?? 0;
             ImGui.TextDisabled($"Path preload: {state}  tiles {preload.Tiles.Count}  pending {pending}  stable {preload.StableFrames}/2");
         }
+
+        ImGui.Separator();
+        ImGui.TextDisabled("Path collision");
+        bool terrainCollision = _cameraPath.TerrainCollisionEnabled;
+        if (ImGui.Checkbox("Terrain height collision", ref terrainCollision))
+            _cameraPath.TerrainCollisionEnabled = terrainCollision;
+        ImGui.SameLine();
+        bool wmoCollision = _cameraPath.WmoCollisionEnabled;
+        if (ImGui.Checkbox("WMO bounds collision", ref wmoCollision))
+            _cameraPath.WmoCollisionEnabled = wmoCollision;
+        float clearance = _cameraPath.CollisionClearance;
+        if (ImGui.DragFloat("Camera clearance", ref clearance, 0.05f, 0f, 10f, "%.2f m"))
+            _cameraPath.CollisionClearance = Math.Clamp(clearance, 0f, 10f);
+        ImGui.TextDisabled("WMO collision uses loaded placement bounds; it is conservative and opt-in.");
 
         if (ImGui.Button("Add Current Camera Key"))
             AddCameraPathKeyFromCurrentCamera();
@@ -207,9 +241,21 @@ public partial class ViewerApp
             LoadCameraPathJson();
 
         string importPath = _cameraPathImportPath;
-        if (ImGui.InputText("Import M2 Path", ref importPath, 1024))
+        if (ImGui.InputText("Import Client Asset", ref importPath, 1024))
             _cameraPathImportPath = importPath;
-        if (ImGui.Button("Import M2 Camera"))
+        int cameraIndex = _cameraPathImportCameraIndex;
+        if (ImGui.DragInt("Camera Index", ref cameraIndex, 0.1f, 0, 64))
+            _cameraPathImportCameraIndex = Math.Clamp(cameraIndex, 0, 64);
+        int sequenceIndex = _cameraPathImportSequenceIndex;
+        if (ImGui.DragInt("Sequence Index", ref sequenceIndex, 0.1f, 0, 64))
+            _cameraPathImportSequenceIndex = Math.Clamp(sequenceIndex, 0, 64);
+        int importInterval = _cameraPathImportSampleIntervalMs;
+        if (ImGui.DragInt("Import Sample (ms)", ref importInterval, 1f, 16, 1000))
+            _cameraPathImportSampleIntervalMs = Math.Clamp(importInterval, 16, 1000);
+        if (ImGui.Button("Import Selected Client Camera"))
+            ImportSelectedClientCameraPath();
+        ImGui.SameLine();
+        if (ImGui.Button("Import Loose Camera Asset"))
             ImportCameraPathM2();
 
         ImGui.TextDisabled("JSON is the lossless authored path; native M2 is an interoperability export with map/build metadata in the sidecar JSON.");
@@ -242,9 +288,17 @@ public partial class ViewerApp
         int time = _cameraPath.Keyframes.Count == 0
             ? 0
             : _cameraPath.DurationMs + _cameraPathDefaultKeySpacingMs;
+        AddCameraPathKeyAtTime(time);
+    }
+
+    private void AddCameraPathKeyAtTime(int time)
+    {
+        if (_cameraPath.Keyframes.Count == 0)
+            BindCameraPathToCurrentMap();
+
         M2CameraPathKeyframe key = new()
         {
-            TimeMs = time,
+            TimeMs = Math.Max(0, time),
             Position = _camera.Position,
             Target = _camera.Position + _camera.Forward * 100f,
             FovDegrees = _fovDegrees,
@@ -379,9 +433,30 @@ public partial class ViewerApp
             }
         }
 
+        ApplyCameraPathAtCurrentTime();
+    }
+
+    private void ApplyCameraPathAtCurrentTime()
+    {
+        if (_cameraPath.Keyframes.Count == 0)
+            return;
+
         M2CameraPathSample sample = M2CameraPathEvaluator.Sample(_cameraPath, (int)Math.Round(_cameraPathTimeSeconds * 1000.0), _cameraPathLoop);
-        _camera.Position = sample.Position;
-        Vector3 direction = sample.Target - sample.Position;
+        Vector3 previousPosition = _camera.Position;
+        Vector3 resolvedPosition = sample.Position;
+        if (_worldScene != null && (_cameraPath.TerrainCollisionEnabled || _cameraPath.WmoCollisionEnabled))
+        {
+            _worldScene.TryResolveCameraPathCollision(
+                previousPosition,
+                sample.Position,
+                _cameraPath.CollisionClearance,
+                _cameraPath.TerrainCollisionEnabled,
+                _cameraPath.WmoCollisionEnabled,
+                out resolvedPosition);
+        }
+
+        _camera.Position = resolvedPosition;
+        Vector3 direction = sample.Target - resolvedPosition;
         if (direction.LengthSquared() > 0.0001f)
         {
             direction = Vector3.Normalize(direction);
@@ -665,6 +740,9 @@ public partial class ViewerApp
             _cameraPath.MapName = loaded.MapName;
             _cameraPath.BuildVersion = loaded.BuildVersion;
             _cameraPath.Interpolation = loaded.Interpolation;
+            _cameraPath.TerrainCollisionEnabled = loaded.TerrainCollisionEnabled;
+            _cameraPath.WmoCollisionEnabled = loaded.WmoCollisionEnabled;
+            _cameraPath.CollisionClearance = loaded.CollisionClearance;
             _cameraPath.Keyframes = loaded.Keyframes;
             _cameraPathName = loaded.Name;
             _cameraPathFilePath = path;
@@ -722,6 +800,77 @@ public partial class ViewerApp
         {
             _statusMessage = $"Failed to import M2 camera: {ex.Message}";
         }
+    }
+
+    private void ImportSelectedClientCameraPath()
+    {
+        string assetPath;
+        if (!TryGetSelectedBrowserAssetPath(out assetPath))
+        {
+            assetPath = _cameraPathImportPath.Trim();
+            if (string.IsNullOrWhiteSpace(assetPath))
+            {
+                _statusMessage = "Select an .m2 or .mdx camera asset in the loaded client file browser first.";
+                return;
+            }
+        }
+
+        string extension = Path.GetExtension(assetPath).ToLowerInvariant();
+        if (extension is not ".m2" and not ".mdx")
+        {
+            _statusMessage = "The selected client asset is not an M2 or MDX camera asset.";
+            return;
+        }
+
+        byte[]? bytes = ReadStandaloneFileData(assetPath);
+        if (bytes == null || bytes.Length == 0)
+        {
+            _statusMessage = $"Could not read client asset '{assetPath}' from the loaded data source.";
+            return;
+        }
+
+        try
+        {
+            M2CameraPathDocument imported;
+            if (extension == ".m2")
+            {
+                using MemoryStream stream = new(bytes, writable: false);
+                M2ModelDocument model = M2ModelReader.Read(stream, assetPath);
+                imported = M2CameraPathImporter.Import(model, _cameraPathImportCameraIndex, _cameraPathImportSequenceIndex, _cameraPathImportSampleIntervalMs);
+            }
+            else
+            {
+                using MemoryStream stream = new(bytes, writable: false);
+                imported = MdxCameraPathImporter.Import(stream, assetPath, _cameraPathImportCameraIndex, _cameraPathImportSequenceIndex, _cameraPathImportSampleIntervalMs);
+            }
+
+            imported.MapName = GetCurrentCaptureMapName();
+            imported.BuildVersion = GetCurrentCaptureBuildVersion();
+            ApplyImportedCameraPath(imported, assetPath);
+            _statusMessage = $"Imported client {extension.TrimStart('.').ToUpperInvariant()} camera '{Path.GetFileName(assetPath)}' as {imported.Keyframes.Count} keys.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Failed to import client camera '{Path.GetFileName(assetPath)}': {ex.Message}";
+        }
+    }
+
+    private void ApplyImportedCameraPath(M2CameraPathDocument imported, string sourcePath)
+    {
+        _cameraPath.Format = imported.Format;
+        _cameraPath.Name = imported.Name;
+        _cameraPath.MapName = imported.MapName;
+        _cameraPath.BuildVersion = imported.BuildVersion;
+        _cameraPath.Interpolation = imported.Interpolation;
+        _cameraPath.TerrainCollisionEnabled = imported.TerrainCollisionEnabled;
+        _cameraPath.WmoCollisionEnabled = imported.WmoCollisionEnabled;
+        _cameraPath.CollisionClearance = imported.CollisionClearance;
+        _cameraPath.Keyframes = imported.Keyframes;
+        _cameraPathName = imported.Name;
+        _cameraPathImportPath = sourcePath;
+        _cameraPathFilePath = string.Empty;
+        _selectedCameraPathKey = -1;
+        _cameraPathTimeSeconds = 0;
     }
 
     private void BindCameraPathToCurrentMap()

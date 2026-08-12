@@ -16,6 +16,9 @@ public sealed class M2CameraPathDocument
     public string MapName { get; set; } = "unknown";
     public string BuildVersion { get; set; } = "unknown";
     public M2CameraPathInterpolation Interpolation { get; set; } = M2CameraPathInterpolation.CatmullRom;
+    public bool TerrainCollisionEnabled { get; set; }
+    public bool WmoCollisionEnabled { get; set; }
+    public float CollisionClearance { get; set; } = 1.5f;
     public List<M2CameraPathKeyframe> Keyframes { get; set; } = new();
 
     public int DurationMs => Keyframes.Count == 0 ? 0 : Math.Max(0, Keyframes[^1].TimeMs);
@@ -86,6 +89,9 @@ public static class M2CameraPathEvaluator
     public static void NormalizeAndValidate(M2CameraPathDocument path)
     {
         ArgumentNullException.ThrowIfNull(path);
+        path.CollisionClearance = float.IsFinite(path.CollisionClearance)
+            ? Math.Clamp(path.CollisionClearance, 0f, 32f)
+            : 1.5f;
         if (path.Keyframes.Count == 0)
             return;
 

@@ -9441,6 +9441,111 @@ public class WorldScene : ISceneRenderer
         return terrainHeight >= objectTop + terrainOcclusionMargin;
     }
 
+    /// <summary>
+    /// Resolves a camera-path sample against the loaded world. Terrain collision is
+    /// heightfield-only; WMO collision uses the resident placement bounds as a
+    /// conservative sweep volume. Both are deliberately opt-in because the viewer
+    /// also supports free-fly inspection through geometry.
+    /// </summary>
+    public bool TryResolveCameraPathCollision(
+        Vector3 previousPosition,
+        Vector3 desiredPosition,
+        float clearance,
+        bool terrainCollision,
+        bool wmoCollision,
+        out Vector3 resolvedPosition)
+    {
+        resolvedPosition = desiredPosition;
+        float safeClearance = float.IsFinite(clearance) ? Math.Clamp(clearance, 0f, 32f) : 0f;
+        bool collided = false;
+
+        if (terrainCollision && TrySampleLoadedTerrainHeight(desiredPosition.X, desiredPosition.Y, out float terrainHeight))
+        {
+            float minimumCameraZ = terrainHeight + safeClearance;
+            if (resolvedPosition.Z < minimumCameraZ)
+            {
+                resolvedPosition.Z = minimumCameraZ;
+                collided = true;
+            }
+        }
+
+        if (wmoCollision)
+        {
+            if (_instancesDirty)
+                RebuildInstanceLists();
+
+            Vector3 segmentStart = previousPosition;
+            Vector3 segmentEnd = resolvedPosition;
+            foreach (ObjectInstance instance in _wmoInstances)
+            {
+                if (!AreFiniteOrderedBounds(instance.BoundsMin, instance.BoundsMax))
+                    continue;
+
+                Vector3 boundsMin = instance.BoundsMin - new Vector3(safeClearance);
+                Vector3 boundsMax = instance.BoundsMax + new Vector3(safeClearance);
+                if (!TrySegmentAabb(segmentStart, segmentEnd, boundsMin, boundsMax, out float entryT))
+                    continue;
+
+                bool startInside = IsPointInsideAabb(segmentStart, boundsMin, boundsMax);
+                // A placement AABB is an exterior shell, not an indoor collision mesh.
+                // Preserve paths that start inside a WMO instead of ejecting them from
+                // the entire building; only stop an outside-to-inside sweep here.
+                if (startInside)
+                    continue;
+
+                if (entryT > 0f)
+                {
+                    float stopT = Math.Clamp(entryT - 0.0025f, 0f, 1f);
+                    resolvedPosition = Vector3.Lerp(segmentStart, segmentEnd, stopT);
+                }
+                else if (IsPointInsideAabb(segmentEnd, boundsMin, boundsMax))
+                    resolvedPosition = segmentStart;
+
+                collided = true;
+                segmentEnd = resolvedPosition;
+            }
+        }
+
+        return collided;
+    }
+
+    private static bool IsPointInsideAabb(Vector3 point, Vector3 min, Vector3 max)
+        => point.X >= min.X && point.X <= max.X
+            && point.Y >= min.Y && point.Y <= max.Y
+            && point.Z >= min.Z && point.Z <= max.Z;
+
+    private static bool TrySegmentAabb(Vector3 start, Vector3 end, Vector3 min, Vector3 max, out float entryT)
+    {
+        entryT = 0f;
+        float exitT = 1f;
+        Vector3 delta = end - start;
+        for (int axis = 0; axis < 3; axis++)
+        {
+            float origin = start[axis];
+            float direction = delta[axis];
+            float axisMin = min[axis];
+            float axisMax = max[axis];
+            if (MathF.Abs(direction) < 0.000001f)
+            {
+                if (origin < axisMin || origin > axisMax)
+                    return false;
+                continue;
+            }
+
+            float inverse = 1f / direction;
+            float near = (axisMin - origin) * inverse;
+            float far = (axisMax - origin) * inverse;
+            if (near > far)
+                (near, far) = (far, near);
+            entryT = MathF.Max(entryT, near);
+            exitT = MathF.Min(exitT, far);
+            if (entryT > exitT)
+                return false;
+        }
+
+        return entryT >= 0f && entryT <= 1f;
+    }
+
     private bool TrySampleLoadedTerrainHeight(float worldX, float worldY, out float height)
     {
         height = 0f;
