@@ -1215,9 +1215,13 @@ public partial class ViewerApp
                 SaveViewerSettings();
             }
 
+            int retainedTileRadius = _terrainManager.RetainedTileRadius;
+            if (ImGui.SliderInt("ADT Retain Radius", ref retainedTileRadius, TerrainManager.MinRetainedTileRadius, TerrainManager.MaxRetainedTileRadius))
+                _terrainManager.RetainedTileRadius = retainedTileRadius;
+
             ImGui.TextDisabled(autoAdtBudget
-                ? $"Auto from fog: {_terrainManager.EffectiveDetailedTileCount} detailed / {_terrainManager.EffectiveRetainedTileCount} retained"
-                : $"Manual override: {_terrainManager.DetailedTileCountOverride} detailed / {_terrainManager.EffectiveRetainedTileCount} retained");
+                ? $"Active submission: {_terrainManager.EffectiveDetailedTileCount} / retained window: {_terrainManager.EffectiveRetainedTileCount} (radius {_terrainManager.EffectiveRetainedTileRadius})"
+                : $"Active submission: {_terrainManager.DetailedTileCountOverride} / retained window: {_terrainManager.EffectiveRetainedTileCount} (radius {_terrainManager.EffectiveRetainedTileRadius})");
         }
     }
 
@@ -4484,9 +4488,13 @@ public partial class ViewerApp
                 SaveViewerSettings();
             }
 
+            int retainedTileRadius = _terrainManager.RetainedTileRadius;
+            if (ImGui.SliderInt("ADT Retain Radius##WorldLod", ref retainedTileRadius, TerrainManager.MinRetainedTileRadius, TerrainManager.MaxRetainedTileRadius))
+                _terrainManager.RetainedTileRadius = retainedTileRadius;
+
             ImGui.TextDisabled(_terrainManager.DetailedTileCountOverride <= 0
-                ? $"Auto from fog: {_terrainManager.EffectiveDetailedTileCount} detailed / {_terrainManager.EffectiveRetainedTileCount} retained"
-                : $"Manual override: {_terrainManager.DetailedTileCountOverride} detailed / {_terrainManager.EffectiveRetainedTileCount} retained");
+                ? $"Active submission: {_terrainManager.EffectiveDetailedTileCount} / retained window: {_terrainManager.EffectiveRetainedTileCount} (radius {_terrainManager.EffectiveRetainedTileRadius})"
+                : $"Active submission: {_terrainManager.DetailedTileCountOverride} / retained window: {_terrainManager.EffectiveRetainedTileCount} (radius {_terrainManager.EffectiveRetainedTileRadius})");
         }
 
         ImGui.Separator();

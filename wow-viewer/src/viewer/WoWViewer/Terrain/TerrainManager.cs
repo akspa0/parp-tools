@@ -23,6 +23,7 @@ public class TerrainManager : ISceneRenderer
     private readonly TerrainRenderer _terrainRenderer;
     private readonly LiquidRenderer _liquidRenderer;
     private readonly DirectionalTileSelector _directionalTileSelector;
+    private readonly CameraTileWindowSelector _cameraTileWindowSelector;
     private readonly IDataSource? _dataSource;
 
     // Loaded tiles: (tileX, tileY) → batched tile mesh (GPU-resident)
@@ -43,16 +44,16 @@ public class TerrainManager : ISceneRenderer
     // capture preparation ends.
     private readonly HashSet<(int tileX, int tileY)> _capturePreloadTiles = new();
 
-    // Strict directional baseline: the normal camera-driven detailed set is the
-    // active tile plus at most three immediately forward-facing neighbors.
-    // Fog/radial expansion is intentionally deferred until this baseline has
-    // real-client performance evidence.
+    // Visibility remains strict and directional. Residency is a separate,
+    // camera-centered bounded window so nearby tiles can stream in without
+    // expanding the per-frame object/terrain submission set.
     private const int MinDetailedTileCandidateRadius = 1;
     private const int MaxDetailedTileCandidateRadius = 1;
     private const int MinDetailedTileCount = 1;
     private const int MaxDetailedTileCount = 4;
-    private const int MinRetainedTileCount = 1;
-    private const int MaxRetainedTileCount = 4;
+    public const int MinRetainedTileRadius = 1;
+    private const int DefaultRetainedTileRadius = 2;
+    public const int MaxRetainedTileRadius = 3;
     public const int MaxManualDetailedTileCount = 4;
     public const float DirectionalTileFovDegrees = 45f;
     private const int MaxGpuUploadsPerFrame = 6;
@@ -77,15 +78,17 @@ public class TerrainManager : ISceneRenderer
     private int _lastCameraTileY = -1;
     private int _lastDetailedTileCandidateRadius = -1;
     private int _lastTargetDetailedTileCount = -1;
-    private int _lastTargetRetainedTileCount = -1;
+    private int _lastTargetRetainedTileRadius = -1;
     private int _detailedTileCountOverride;
     private int _effectiveDetailedTileCount = MaxDetailedTileCount;
-    private int _effectiveRetainedTileCount = MaxRetainedTileCount;
+    private int _effectiveRetainedTileCount;
+    private int _retainedTileRadius = DefaultRetainedTileRadius;
     private Vector3 _cameraPos;
     private Vector3 _lastCameraPos;
     private Vector2 _cameraHeading;
     private Vector2 _lastSelectedHeading;
     private readonly List<(int tileX, int tileY)> _lastSelectedTiles = new(4);
+    private readonly List<(int tileX, int tileY)> _lastRetainedTiles = new(25);
     private bool _disposed;
 
     // Stats
@@ -106,7 +109,9 @@ public class TerrainManager : ISceneRenderer
     public int CapturePreloadTileCount => _capturePreloadTiles.Count;
     public IReadOnlyCollection<(int tileX, int tileY)> CapturePreloadTiles => _capturePreloadTiles;
     public IReadOnlyList<(int tileX, int tileY)> LastSelectedTiles => _lastSelectedTiles;
+    public IReadOnlyList<(int tileX, int tileY)> LastRetainedTiles => _lastRetainedTiles;
     public int LastFrameActiveTileCount => _lastSelectedTiles.Count;
+    public int LastFrameRetainedTileCount => _lastRetainedTiles.Count;
     public int LastFrameDetailedTileDrawCalls => _terrainRenderer.LastFrameDrawCalls;
     public bool LastDirectionalTileInvariantPassed
         => LastFrameActiveTileCount <= 4
@@ -161,6 +166,20 @@ public class TerrainManager : ISceneRenderer
 
     public int EffectiveDetailedTileCount => _effectiveDetailedTileCount;
     public int EffectiveRetainedTileCount => _effectiveRetainedTileCount;
+    public int EffectiveRetainedTileRadius => _retainedTileRadius;
+    public int RetainedTileRadius
+    {
+        get => _retainedTileRadius;
+        set
+        {
+            int clamped = Math.Clamp(value, MinRetainedTileRadius, MaxRetainedTileRadius);
+            if (_retainedTileRadius == clamped)
+                return;
+
+            _retainedTileRadius = clamped;
+            InvalidateStreamingTargets();
+        }
+    }
     public bool IgnoreTerrainHolesGlobally
     {
         get => _ignoreTerrainHolesGlobally;
@@ -369,6 +388,11 @@ public class TerrainManager : ISceneRenderer
             WoWConstants.ChunkSize,
             64,
             (tileX, tileY) => _adapter.TileExists(tileX, tileY));
+        _cameraTileWindowSelector = new CameraTileWindowSelector(
+            WoWConstants.MapOrigin,
+            WoWConstants.ChunkSize,
+            64,
+            (tileX, tileY) => _adapter.TileExists(tileX, tileY));
         _tileMeshBuilder = new TerrainTileMeshBuilder(gl);
         _terrainRenderer = new TerrainRenderer(gl, dataSource, new TerrainLighting());
         _liquidRenderer = new LiquidRenderer(gl);
@@ -388,6 +412,11 @@ public class TerrainManager : ISceneRenderer
 
         _adapter = adapter;
         _directionalTileSelector = new DirectionalTileSelector(
+            WoWConstants.MapOrigin,
+            WoWConstants.ChunkSize,
+            64,
+            (tileX, tileY) => _adapter.TileExists(tileX, tileY));
+        _cameraTileWindowSelector = new CameraTileWindowSelector(
             WoWConstants.MapOrigin,
             WoWConstants.ChunkSize,
             64,
@@ -479,9 +508,8 @@ public class TerrainManager : ISceneRenderer
             _terrainRenderer.Lighting.FogEnd,
             out int detailedTileCandidateRadius,
             out int targetDetailedTileCount,
-            out int targetRetainedTileCount);
+            out int targetRetainedTileRadius);
         _effectiveDetailedTileCount = targetDetailedTileCount;
-        _effectiveRetainedTileCount = targetRetainedTileCount;
 
         // Re-evaluate when the camera crosses a tile boundary, the requested
         // budget changes, or the camera turns far enough to change admission.
@@ -489,7 +517,7 @@ public class TerrainManager : ISceneRenderer
             && tileY == _lastCameraTileY
             && detailedTileCandidateRadius == _lastDetailedTileCandidateRadius
             && targetDetailedTileCount == _lastTargetDetailedTileCount
-            && targetRetainedTileCount == _lastTargetRetainedTileCount
+            && targetRetainedTileRadius == _lastTargetRetainedTileRadius
             && Vector2.DistanceSquared(_cameraHeading, _lastSelectedHeading) <= 1e-4f)
             return;
 
@@ -497,7 +525,7 @@ public class TerrainManager : ISceneRenderer
         _lastCameraTileY = tileY;
         _lastDetailedTileCandidateRadius = detailedTileCandidateRadius;
         _lastTargetDetailedTileCount = targetDetailedTileCount;
-        _lastTargetRetainedTileCount = targetRetainedTileCount;
+        _lastTargetRetainedTileRadius = targetRetainedTileRadius;
 
         float yaw = _cameraHeading.LengthSquared() > 1e-4f
             ? MathF.Atan2(_cameraHeading.Y, _cameraHeading.X) * (180f / MathF.PI)
@@ -512,6 +540,11 @@ public class TerrainManager : ISceneRenderer
             _lastSelectedTiles.Add((selected.TileX, selected.TileY));
         _lastSelectedHeading = _cameraHeading;
 
+        _lastRetainedTiles.Clear();
+        foreach (DirectionalTileCoord retained in _cameraTileWindowSelector.GetTiles(cameraPos, targetRetainedTileRadius))
+            _lastRetainedTiles.Add((retained.TileX, retained.TileY));
+        _effectiveRetainedTileCount = _lastRetainedTiles.Count;
+
         // Full-load is an explicit residency stress mode, not a visibility
         // mode. Keep the camera-facing selection current so object admission
         // can still reject inactive resident tiles.
@@ -519,8 +552,8 @@ public class TerrainManager : ISceneRenderer
             return;
 
         var desiredTiles = new HashSet<(int, int)>();
-        foreach (var selected in _lastSelectedTiles)
-            desiredTiles.Add(selected);
+        foreach (var retained in _lastRetainedTiles)
+            desiredTiles.Add(retained);
 
         // Capture-path tiles are deliberately loaded in addition to the
         // camera-facing set. This is an explicit, user-requested residency
@@ -529,8 +562,8 @@ public class TerrainManager : ISceneRenderer
             desiredTiles.Add(tile);
 
         var unloadKeepTiles = new HashSet<(int, int)>();
-        foreach (var selected in _lastSelectedTiles)
-            unloadKeepTiles.Add(selected);
+        foreach (var retained in _lastRetainedTiles)
+            unloadKeepTiles.Add(retained);
 
         foreach (var tile in _capturePreloadTiles)
             unloadKeepTiles.Add(tile);
@@ -619,14 +652,14 @@ public class TerrainManager : ISceneRenderer
     {
         _lastDetailedTileCandidateRadius = -1;
         _lastTargetDetailedTileCount = -1;
-        _lastTargetRetainedTileCount = -1;
+        _lastTargetRetainedTileRadius = -1;
     }
 
     private void ComputeStreamingTargets(
         float fogEnd,
         out int detailedTileCandidateRadius,
         out int targetDetailedTileCount,
-        out int targetRetainedTileCount)
+        out int targetRetainedTileRadius)
     {
         // The strict baseline intentionally ignores fog distance. Fog remains
         // a render effect; it does not enlarge the normal tile admission set.
@@ -636,13 +669,13 @@ public class TerrainManager : ISceneRenderer
         {
             targetDetailedTileCount = Math.Clamp(_detailedTileCountOverride, 1, MaxManualDetailedTileCount);
             detailedTileCandidateRadius = MaxDetailedTileCandidateRadius;
-            targetRetainedTileCount = targetDetailedTileCount;
+            targetRetainedTileRadius = _retainedTileRadius;
             return;
         }
 
         targetDetailedTileCount = Math.Clamp(MaxDetailedTileCount, MinDetailedTileCount, MaxDetailedTileCount);
         detailedTileCandidateRadius = MinDetailedTileCandidateRadius;
-        targetRetainedTileCount = Math.Clamp(targetDetailedTileCount, MinRetainedTileCount, MaxRetainedTileCount);
+        targetRetainedTileRadius = _retainedTileRadius;
     }
 
     /// <summary>
@@ -777,7 +810,7 @@ public class TerrainManager : ISceneRenderer
         if (!TerrainVisible)
             return;
 
-        _terrainRenderer.Render(view, proj, _cameraPos);
+        _terrainRenderer.Render(view, proj, _cameraPos, visibleTileKeys: _lastSelectedTiles);
         TraceDirectionalFrameDiagnostics();
         // Liquid is rendered separately AFTER all opaque geometry (WMOs, MDX)
         // so objects below the water surface are visible through the transparent water.
@@ -793,7 +826,7 @@ public class TerrainManager : ISceneRenderer
         if (!TerrainVisible)
             return;
 
-        _terrainRenderer.Render(view, proj, cameraPos, frustum);
+        _terrainRenderer.Render(view, proj, cameraPos, frustum, _lastSelectedTiles);
         TraceDirectionalFrameDiagnostics();
     }
 
@@ -803,7 +836,7 @@ public class TerrainManager : ISceneRenderer
     /// </summary>
     public void RenderLiquid(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, float deltaTime = 0.016f)
     {
-        _liquidRenderer.Render(view, proj, cameraPos, _terrainRenderer.Lighting, deltaTime);
+        _liquidRenderer.Render(view, proj, cameraPos, _terrainRenderer.Lighting, deltaTime, _lastSelectedTiles);
     }
 
     public bool IsWireframe => _terrainRenderer.IsWireframe;
@@ -828,7 +861,7 @@ public class TerrainManager : ISceneRenderer
 
     private void TraceDirectionalFrameDiagnostics()
     {
-        ViewerLog.Trace($"[TerrainSelection] Active Tiles: {LastFrameActiveTileCount}; Detailed Draw Calls: {LastFrameDetailedTileDrawCalls}; Invariant: {LastDirectionalTileInvariantPassed}");
+        ViewerLog.Trace($"[TerrainSelection] Active Tiles: {LastFrameActiveTileCount}; Retained Tiles: {LastFrameRetainedTileCount}; Detailed Draw Calls: {LastFrameDetailedTileDrawCalls}; Invariant: {LastDirectionalTileInvariantPassed}");
     }
 
     public void Dispose()

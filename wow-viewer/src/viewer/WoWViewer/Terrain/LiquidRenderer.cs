@@ -120,7 +120,13 @@ public class LiquidRenderer : IDisposable
     /// <summary>
     /// Render all liquid surfaces. Call after terrain rendering.
     /// </summary>
-    public unsafe void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, TerrainLighting lighting, float deltaTime)
+    public unsafe void Render(
+        Matrix4x4 view,
+        Matrix4x4 proj,
+        Vector3 cameraPos,
+        TerrainLighting lighting,
+        float deltaTime,
+        IReadOnlyList<(int tileX, int tileY)>? visibleTileKeys = null)
     {
         bool renderTerrainLiquids = ShowLiquid && _meshes.Count > 0;
         bool renderWlLiquids = ShowWlLiquids && _wlMeshes.Count > 0;
@@ -162,6 +168,9 @@ public class LiquidRenderer : IDisposable
         {
             foreach (var mesh in _meshes)
             {
+                if (visibleTileKeys is { Count: > 0 } && !ContainsTile(visibleTileKeys, (mesh.TileX, mesh.TileY)))
+                    continue;
+
                 if (!ShouldRenderMesh(mesh, cameraPos, maxRenderDistanceSq))
                     continue;
 
@@ -206,6 +215,17 @@ public class LiquidRenderer : IDisposable
         _gl.DepthMask(true);
         _gl.Disable(EnableCap.Blend);
         _gl.Enable(EnableCap.CullFace);
+    }
+
+    private static bool ContainsTile(IReadOnlyList<(int tileX, int tileY)> visibleTileKeys, (int tileX, int tileY) tile)
+    {
+        for (int i = 0; i < visibleTileKeys.Count; i++)
+        {
+            if (visibleTileKeys[i] == tile)
+                return true;
+        }
+
+        return false;
     }
 
     private unsafe void RenderSelectedWlWireframe(

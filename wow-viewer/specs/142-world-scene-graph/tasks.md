@@ -190,6 +190,17 @@ identity; no FPS or GPU claim is made.
   traversed/submitted, capture-preload tiles remain available, and WMO/MDX visibility timing
   improves without a visual regression.
 
+## Phase 8O: Bounded Camera-Centered Residency Window
+
+- [x] T074 [US2] Add the pure `CameraTileWindowSelector` contract and focused tests for bounded,
+  camera-centered retention with deterministic ordering and missing-tile exclusion.
+- [x] T075 [US2] Route `TerrainManager` desired-tile admission and unload protection through the
+  retained window while keeping `LastSelectedTiles` as the directional active-render contract.
+- [x] T076 [US2] Apply the active-tile gate to detailed terrain/liquid rendering and expose retained
+  count/radius diagnostics plus a runtime radius control.
+- [ ] T077 [US2] Run a user-owned production capture at retained radius two and three, proving that
+  nearby tiles stream without widening object/detail submission or regressing visual parity.
+
 ## Dependencies and Execution Order
 
 - Phase 1 documentation/setup precedes all implementation.
@@ -205,6 +216,8 @@ identity; no FPS or GPU claim is made.
   submission work. T069 is a real-client gate; T070 must not start before it passes.
 - T071-T072 consume the strict active-tile selection to bound object work; T073 is the real-client
   performance/correctness gate before any further renderer redesign.
+- T074-T076 consume the Phase 8M/8N active-render contract and add residency only around the camera;
+  T077 is the real-client gate before any FOV radiation or dense submission work.
 
 ## Implementation Strategy
 

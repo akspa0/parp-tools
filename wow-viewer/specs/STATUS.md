@@ -11,7 +11,7 @@ task file are authoritative; this file only tells a new agent where to start.
 | 2 | [144 Camera capture paths](144-camera-capture-paths/spec.md) | Implemented with user gates | Complete user-run built-in-camera, collision, JSON, and capture proof before extensions |
 | 3 | [145 WoW UI overhaul](145-wow-ui-overhaul/spec.md) | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks |
 | 4 | [143 World context and lighting](143-world-context-lighting/spec.md) | Draft with first area slice landed | Resolve evidence/setup tasks before WMOAreaID or lighting claims |
-| 5 | [142 World scene graph](142-world-scene-graph/spec.md) | In progress | Validate active-tile WMO/MDX object admission with a user-run production capture before further renderer redesign |
+| 5 | [142 World scene graph](142-world-scene-graph/spec.md) | In progress | Validate retained radius 2/3 with a user-run capture while active terrain/object submission remains directional |
 
 ## Other lanes
 

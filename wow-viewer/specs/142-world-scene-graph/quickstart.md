@@ -27,6 +27,19 @@ The viewer integration seam can be compile-checked without launching a client or
 dotnet build src/viewer/WoWViewer/WoWViewer.csproj -c Debug
 ```
 
+The normal runtime now has two deliberately separate tile sets:
+
+- `LastSelectedTiles` is the directional active submission set. It remains capped at the active
+  tile plus up to three forward neighbors and gates detailed terrain, liquids, scene-graph work,
+  and WMO/MDX object admission.
+- `LastRetainedTiles` is the bounded camera-centered residency window. Its default radius is two
+  tiles and the runtime control permits radius three. It controls streaming and unload protection;
+  retained tiles do not become visible objects merely because they are resident.
+
+The viewer diagnostics report `Active Tiles`, `Retained Tiles`, `Retained Radius`, and detailed
+draw-call counts together. Compare those values when evaluating performance; a larger retained
+count is expected without a corresponding increase in active submission.
+
 ## User-run production render diagnostic
 
 `profile-render` is the first headless path that invokes the current production `WorldScene.Render`

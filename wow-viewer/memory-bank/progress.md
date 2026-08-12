@@ -5,6 +5,15 @@ Last updated: 2026-08-12
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-12 — Spec 142 bounded camera-centered residency
+
+- Added a pure `CameraTileWindowSelector` with deterministic bounded retention; radius two is the
+  default and radius three is the explicit maximum.
+- `TerrainManager` now uses the retained window for streaming/unload protection while preserving
+  the directional active list for detailed terrain, liquids, scene graphs, and WMO/MDX objects.
+- Added retained count/radius diagnostics and runtime controls. Focused tests and the full solution
+  build are the source-level proof; radius 2/3 production capture remains user-owned.
+
 ## 2026-08-12 — Spec 142 active-tile object admission
 
 - Scene-graph traversal and portal preparation now enumerate only the camera-selected ADT graphs

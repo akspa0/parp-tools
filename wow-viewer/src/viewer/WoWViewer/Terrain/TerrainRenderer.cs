@@ -435,7 +435,12 @@ public class TerrainRenderer : IDisposable
     public int LastFrameBindTextureCalls { get; private set; }
     public int LastFrameBindTextureSkips { get; private set; }
 
-    public unsafe void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, FrustumCuller? frustum = null)
+    public unsafe void Render(
+        Matrix4x4 view,
+        Matrix4x4 proj,
+        Vector3 cameraPos,
+        FrustumCuller? frustum = null,
+        IReadOnlyList<(int tileX, int tileY)>? visibleTileKeys = null)
     {
         LastFrameDrawCalls = 0;
         LastFrameUniform1Calls = 0;
@@ -457,7 +462,7 @@ public class TerrainRenderer : IDisposable
 
         if (_tiles.Count > 0)
         {
-            RenderTiles(view, proj, cameraPos, frustum);
+            RenderTiles(view, proj, cameraPos, frustum, visibleTileKeys);
             return;
         }
 
@@ -632,7 +637,12 @@ public class TerrainRenderer : IDisposable
         }
     }
 
-    private unsafe void RenderTiles(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, FrustumCuller? frustum)
+    private unsafe void RenderTiles(
+        Matrix4x4 view,
+        Matrix4x4 proj,
+        Vector3 cameraPos,
+        FrustumCuller? frustum,
+        IReadOnlyList<(int tileX, int tileY)>? visibleTileKeys)
     {
         UpdateTileFades();
 
@@ -682,6 +692,12 @@ public class TerrainRenderer : IDisposable
         {
             var tileKey = (tile.TileX, tile.TileY);
             float tileOpacity = _tileAlphas.TryGetValue(tileKey, out float storedAlpha) ? storedAlpha : 1.0f;
+
+            if (visibleTileKeys is { Count: > 0 } && !ContainsTile(visibleTileKeys, tileKey))
+            {
+                ChunksCulled += tile.ChunkCount;
+                continue;
+            }
 
             var center = (tile.BoundsMin + tile.BoundsMax) * 0.5f;
             float distanceSq = Vector3.DistanceSquared(cameraPos, center);
@@ -735,6 +751,17 @@ public class TerrainRenderer : IDisposable
         _gl.DepthMask(true);
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
         _gl.Enable(EnableCap.CullFace);
+    }
+
+    private static bool ContainsTile(IReadOnlyList<(int tileX, int tileY)> visibleTileKeys, (int tileX, int tileY) tile)
+    {
+        for (int i = 0; i < visibleTileKeys.Count; i++)
+        {
+            if (visibleTileKeys[i] == tile)
+                return true;
+        }
+
+        return false;
     }
 
     private void ApplySurfaceCulling()

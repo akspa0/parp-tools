@@ -482,6 +482,28 @@ inactive resident tiles are not traversed or submitted, capture pins remain visi
 measured WMO/MDX visibility stages materially improve without a correctness regression. No FPS
 claim is made until that capture exists.
 
+## Phase 8O — Bounded Camera-Centered Residency Window
+
+**Status**: Source slice landed after the user reported the strict active-tile baseline sustaining
+over 200 FPS with up to three active tiles. This phase separates nearby tile residency from the
+directional render submission gate; it does not widen per-frame object admission.
+
+1. Select a deterministic, camera-centered Chebyshev window for streaming and GPU residency. The
+   default radius is two tiles (up to 25 existing tiles); the runtime control allows radius three
+   (up to 49 existing tiles) without changing the active render set.
+2. Keep `LastSelectedTiles` as the directional active list: terrain, detailed liquids, scene-graph
+   traversal, and flat WMO/MDX object admission continue to submit only those tiles plus named
+   capture exceptions.
+3. Use the retained window for desired-tile admission and unload protection, and expose active,
+   retained-count, and retained-radius diagnostics so residency cannot be confused with rendering.
+4. Hand off a user-run capture comparing retained radius two and three while reporting loaded tiles,
+   active tiles, detailed draw calls, WMO/MDX counts, and frame time. Do not infer an FPS win from
+   source-level tests or from residency counts alone.
+
+**Exit evidence**: focused selector tests and the viewer build pass; the user-run capture shows
+nearby tiles stream and remain resident while inactive retained tiles do not enter detailed terrain
+or object submission, with visual parity preserved.
+
 ## Phase 8L — Capability-Gated Modern Dense Submission
 
 **Status**: Planned after Phase 8K and the Phase 8M baseline gate. This phase coordinates with Spec 138; it does not change 4.x
