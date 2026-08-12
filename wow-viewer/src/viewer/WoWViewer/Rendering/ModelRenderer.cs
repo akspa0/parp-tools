@@ -1567,29 +1567,22 @@ void main() {
 }
 ";
 
+        // Keep this program deliberately small. Some OpenGL drivers used by the viewer
+        // accept the WMO shader but reject the legacy MDX fragment program with an unhelpful
+        // "unexpected $end" parser error. This is the minimum MDX material path: texture,
+        // alpha test, diffuse light, fog, and the material color multiplier.
         string fragSrc = @"
 #version 330 core
 in vec3 vNormal;
 in vec2 vTexCoord0;
-in vec2 vTexCoord1;
 in vec3 vFragPos;
-in vec3 vViewNormal;
 
 uniform sampler2D uSampler;
 uniform int uHasTexture;
 uniform int uAlphaTest;
 uniform int uUseTextureAlpha;
 uniform float uAlphaThreshold;
-uniform int uPremultiplyAlpha;
 uniform int uUnshaded;
-uniform int uSphereEnvMap;
-uniform int uFlipTexU;
-uniform int uUvSet;
-uniform int uUseUvTransform;
-uniform vec2 uUvTranslation;
-uniform vec2 uUvScale;
-uniform vec2 uUvRotationRow0;
-uniform vec2 uUvRotationRow1;
 uniform vec4 uColor;
 uniform vec3 uFogColor;
 uniform float uFogStart;
@@ -1601,77 +1594,70 @@ uniform vec3 uAmbientColor;
 
 out vec4 FragColor;
 
-void main() {
-    vec3 norm = normalize(vNormal);
-    vec3 viewNorm = normalize(vViewNormal);
-    if (uSphereEnvMap == 1 && !gl_FrontFacing) {
-        norm = -norm;
-        viewNorm = -viewNorm;
+void main()
+{
+    vec4 texColor = uHasTexture == 1
+        ? texture(uSampler, vTexCoord0)
+        : vec4(1.0, 0.0, 1.0, 1.0);
+
+    if (uAlphaTest == 1 && texColor.a < uAlphaThreshold)
+        discard;
+
+    float diffuseStrength = 1.0;
+    if (uUnshaded == 0)
+    {
+        float nDotL = dot(normalize(vNormal), normalize(uLightDir));
+        diffuseStrength = max(nDotL, 0.0);
     }
 
-    // Sphere environment map: generate UVs from view-space normals
-    vec2 texCoord = (uUvSet == 1) ? vTexCoord1 : vTexCoord0;
-    if (uSphereEnvMap == 1) {
-        texCoord = viewNorm.xy * 0.5 + 0.5;
-    } else if (uUseUvTransform == 1) {
-        vec2 centered = (texCoord - vec2(0.5, 0.5)) * uUvScale;
-        texCoord = vec2(
-            dot(centered, uUvRotationRow0),
-            dot(centered, uUvRotationRow1)) + vec2(0.5, 0.5) + uUvTranslation;
-    }
-
-    if (uFlipTexU == 1) {
-        texCoord.x = 1.0 - texCoord.x;
-    }
-
-    vec4 texColor;
-    if (uHasTexture == 1) {
-        texColor = texture(uSampler, texCoord);
-        if (uAlphaTest == 1 && texColor.a < uAlphaThreshold) discard;
-    } else {
-        texColor = vec4(1.0, 0.0, 1.0, 1.0);
-    }
-
-    vec3 texRgb = texColor.rgb;
-    if (uPremultiplyAlpha == 1)
-        texRgb *= texColor.a;
-
-    // Lighting: skip if Unshaded flag (MDLGEO 0x1) is set
-    vec3 litColor = texRgb;
-    if (uUnshaded == 0) {
-        vec3 lightDir = normalize(uLightDir);
-        // Half-Lambert diffuse: wraps lighting around surfaces for softer shading
-        // WoW models don't have harsh black shadows — this approximates that look
-        float NdotL = dot(norm, lightDir);
-        float diff = NdotL * 0.5 + 0.5; // remap [-1,1] to [0,1]
-        diff = diff * diff; // squared for slightly sharper falloff while staying soft
-        vec3 diffuse = uLightColor * diff;
-
-        // Blinn-Phong specular (subtle)
-        vec3 viewDir = normalize(uCameraPos - vFragPos);
-        vec3 halfDir = normalize(lightDir + viewDir);
-        float spec = pow(max(dot(norm, halfDir), 0.0), 32.0);
-        vec3 specular = uLightColor * spec * 0.15;
-
-        litColor = texRgb * (uAmbientColor + diffuse) + specular;
-    }
-
-    // Fog: blend to fog color based on distance from camera (matches terrain fog)
-    // Skip fog for untextured (magenta fallback) fragments
-    vec3 finalColor = litColor;
-    if (uHasTexture == 1) {
-        float dist = length(vFragPos - uCameraPos);
-        float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
-        finalColor = mix(uFogColor, litColor, fogFactor);
-    }
-
-    float outAlpha = (uUseTextureAlpha == 1) ? texColor.a : 1.0;
-    FragColor = vec4(finalColor, outAlpha) * uColor;
+    vec3 litColor = texColor.rgb * (uAmbientColor + uLightColor * diffuseStrength);
+    float distanceToCamera = distance(vFragPos, uCameraPos);
+    float fogRange = max(uFogEnd - uFogStart, 0.001);
+    float fogFactor = clamp((uFogEnd - distanceToCamera) / fogRange, 0.0, 1.0);
+    vec3 finalColor = mix(uFogColor, litColor, fogFactor);
+    float outputAlpha = uUseTextureAlpha == 1 ? texColor.a : 1.0;
+    FragColor = vec4(finalColor, outputAlpha) * uColor;
 }
 ";
 
+        const string compatibilityFragSrc = """
+#version 330 core
+in vec2 vTexCoord0;
+
+uniform sampler2D uSampler;
+uniform int uHasTexture;
+uniform int uAlphaTest;
+uniform float uAlphaThreshold;
+uniform vec4 uColor;
+
+out vec4 FragColor;
+
+void main()
+{
+    vec4 texColor = vec4(1.0, 0.0, 1.0, 1.0);
+    if (uHasTexture == 1)
+        texColor = texture(uSampler, vTexCoord0);
+
+    if (uAlphaTest == 1 && texColor.a < uAlphaThreshold)
+        discard;
+
+    FragColor = texColor * uColor;
+}
+""";
+
         uint vert = CompileShader(ShaderType.VertexShader, vertSrc);
-        uint frag = CompileShader(ShaderType.FragmentShader, fragSrc);
+        uint frag;
+        try
+        {
+            frag = CompileShader(ShaderType.FragmentShader, fragSrc);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Important(
+                ViewerLog.Category.Shader,
+                $"MDX fragment shader rejected; using compatibility fragment shader: {ex.Message}");
+            frag = CompileShader(ShaderType.FragmentShader, compatibilityFragSrc);
+        }
 
         _shaderProgram = _gl.CreateProgram();
         _gl.AttachShader(_shaderProgram, vert);
@@ -1682,6 +1668,7 @@ void main() {
         if (status == 0)
         {
             string log = _gl.GetProgramInfoLog(_shaderProgram);
+            _gl.DeleteProgram(_shaderProgram);
             throw new Exception($"Shader link error: {log}");
         }
 
@@ -1733,11 +1720,18 @@ void main() {
         {
             string log = _gl.GetShaderInfoLog(shader);
             ViewerLog.Error(ViewerLog.Category.Shader, $"MDX {type} shader compile error: {log}");
-            ViewerLog.Error(ViewerLog.Category.Shader, $"Shader source:\n{source}");
+            ViewerLog.Error(ViewerLog.Category.Shader, $"Shader source (numbered):\n{NumberShaderSource(source)}");
+            _gl.DeleteShader(shader);
             throw new Exception($"Shader compile error ({type}): {log}");
         }
 
         return shader;
+    }
+
+    private static string NumberShaderSource(string source)
+    {
+        string[] lines = source.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        return string.Join(Environment.NewLine, lines.Select((line, index) => $"{index + 1,4}: {line}"));
     }
 
     /// <summary>

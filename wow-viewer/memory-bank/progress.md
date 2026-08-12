@@ -8,6 +8,15 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-11 — Contain MDX fragment-shader parser failure
+
+- The user's pasted log identified `unexpected $end at token "<EOF>"` in the MDX fragment
+  compiler, despite balanced source. This is a driver/parser rejection, not an MDX queue stall.
+- Reduced the active MDX fragment program to conservative GLSL 330 constructs and added a
+  minimal texture/alpha/color fallback if the richer fragment shader is rejected.
+- Shader diagnostics now print numbered source lines. Viewer project build passed with 0 errors;
+  real-client shader/runtime proof remains user-run.
+
 ## 2026-08-11 — Restore MDX shader compatibility after instancing regression
 
 - The user's runtime log showed `MDX 0/24571 (0 ok/21 fail)` and the red shader source panel;

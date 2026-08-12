@@ -109,7 +109,10 @@ detail lives. Findings belong in the workstream file, not here — see "Memory b
   non-instanced compatibility shader and reports GPU-instanced support as false. All direct MDX
   and adapted-M2 world models therefore stay on the proven per-instance CPU/state path until a
   separate portable shader compile and visual-parity proof reopens the GPU route. Native-runtime
-  state, transparent/effect-heavy paths, and unsupported fades remain fallback-safe.
+  state, transparent/effect-heavy paths, and unsupported fades remain fallback-safe. If the
+  richer MDX fragment shader is rejected, the renderer now compiles a minimal texture/alpha/color
+  fragment fallback so model admission is not lost to a driver parser limitation; the numbered
+  rich-shader source and error remain in the shader log for follow-up.
 - A second runtime-loading multiplier was then found: deferred WMO doodad loads were being advanced
   from every visible `WmoRenderer.RenderWithTransform` call. `WorldAssetManager` now owns one
   scene-wide deferred-doodad budget per frame, and `MinimapRenderer` uses one background reader

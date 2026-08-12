@@ -6,8 +6,10 @@ The CPU/state-submission slice and the first GPU-instancing implementation are p
 production world MDX route is held on per-instance `RenderWithTransform()` until a real-client
 visual regression check proves the batch path safe. The first GPU shader caused MDX model
 construction failures on the user's OpenGL runtime, so the compatibility shader is restored and
-GPU-instanced MDX is explicitly disabled pending a separate shader proof. The viewer still
-requires a user-run real-scene capture and visual parity check before any FPS claim is promoted.
+GPU-instanced MDX is explicitly disabled pending a separate shader proof. The MDX fragment path
+now falls back to a minimal texture/alpha/color shader when the richer fragment program is
+rejected by a driver. The viewer still requires a user-run real-scene capture and visual parity
+check before any FPS claim is promoted.
 
 ## Phase 1 — Static M2 Batch Eligibility
 
