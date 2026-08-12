@@ -1,90 +1,89 @@
-<!-- SPECKIT START -->
-Read current spec pack before non-trivial work. If no pack fits, create one.
-<!-- SPECKIT END -->
+# wow-viewer Agent Guide
 
-# wow-viewer AGENTS
+`wow-viewer/` is the active, standalone development target. Keep this guide operational; feature
+history belongs in specs and opt-in workstream notes.
 
-Short file. Current truth only. Root `../AGENTS.md` still wins on workspace policy.
+## Required handoff order
 
-## Mission
+1. Read this file.
+2. Read `specs/STATUS.md`.
+3. Read `memory-bank/activeContext.md`.
+4. Open the selected spec's `spec.md`, `plan.md`, and `tasks.md`.
+5. Read only the linked research/workstream note needed for the current task.
 
-- `wow-viewer/` is active repo.
-- `gillijimproject_refactor/` is read-only reference. DO NOT ALTER THE CODE IN THIS FOLDER! IT IS FOR REFERENCE ONLY.
-- Goal: keep `wow-viewer` extractable, spec-driven, and proof-backed.
+For non-trivial work use Spec Kit: specify → plan → tasks → implement one phase at a time. Do not
+start a later phase until the current phase has focused validation.
 
-## Current active lanes
+## Non-negotiable boundaries
 
-- Spec 103 `103-image-only-reconstruction` — active model lane: revive v7
-  (`MultiChannelUNetV7`) on clean signals, synthetic-first. Lane ported + tested;
-  USER runs capture/training (see `specs/103-.../quickstart.md` and memory-bank).
-- Spec 080 `080-wow-ui-consolidation` — active viewer-shell doc and compatibility lane.
+- New code and tests stay in `wow-viewer/`.
+- `gillijimproject_refactor/` is read-only reference. Do not add features or refactor it.
+- Reuse existing ADT, WDT, WMO, M2, MDX, BLP, DBC/DB2, MPQ, PM4, and chunk readers. Add missing
+  shared behavior in `src/core/` rather than cloning parser logic in the viewer or tools.
+- The user owns training, GPU/heavy jobs, broad harvests, long-running captures, and real-client
+  visual/FPS/audio proof. Do not launch them; prepare PowerShell-ready commands instead.
+- Client roots are configured at runtime. Never hardcode `H:\CLIENTS` or another machine-local path
+  into source or portable docs. Report root, build, and fingerprint for validation.
+- Preserve unrelated dirty changes. Do not use destructive git commands or broad staging.
+- Build/test proof is not runtime/rendering/performance/audio proof.
 
-## Background / paused model lanes
+## Ownership map
 
-- Spec 102 `102-v25-terrain-convergence` — PAUSED/superseded by 103. Simple M0 trainer
-  and strict fragment-trace target are committed but parked. See memory-bank.
+| Surface | Owner |
+|---|---|
+| Shared models | `src/core/WowViewer.Core/` |
+| Format I/O | `src/core/WowViewer.Core.IO/` |
+| Runtime/M2/world contracts | `src/core/WowViewer.Core.Runtime/` |
+| PM4 | `src/core/WowViewer.Core.PM4/` |
+| Viewer shell/rendering | `src/viewer/WoWViewer/` |
+| CLI tools | `tools/` |
+| C# tests | `tests/` |
+| Python ML/data tooling | `data-harvester/` |
 
-## Background / historical lanes
+Keep core libraries free of UI ownership; keep tools thin; preserve the Alpha/Standard terrain
+adapter split. `src/core/WowViewer.Core.IO/Maps/AlphaWdtWriter.cs` is frozen unless explicitly
+reopened for a proven compatibility fix.
 
-- Spec 089 `089-dav2-height-predictor` — HISTORICAL/PAUSED. DA-family (Depth
-  Anything) models are blacklisted for terrain work (non-deterministic). Do not
-  reopen without an explicit instruction.
-- Spec 088 `088-v22-enrichment-from-v18` — historical dataset contract; superseded by 102.
-- Spec 047 `047-v18-distill-corpus-open-source-loop` — focused V18 operator path.
-- Spec 079 `079-runpod-integration-guide` — shared remote bundle/runtime pattern.
-- Spec 076 and Spec 077 — paused/background; reuse only when explicitly reopened.
+## Python and client data
 
-## Hard rules
-
-- The user runs training, GPU jobs, harvests, and any long/heavy/billed run. Prepare the script and hand over the exact `uv run ...` command — do NOT launch it yourself. Communicate directly and respectfully regardless of tone. See root `../AGENTS.md` RULE 0.
-- Every command you hand the user to run must be **PowerShell-ready** (their shell is `pwsh` 7): backtick `` ` `` line continuations NOT bash `\`, `$VAR = "..."` NOT `VAR=...`, no heredocs / `/tmp` / `export`. When in doubt, put it on one line. Applies to chat AND any doc/quickstart they run from. See root `../AGENTS.md` RULE 0A.
-- New code stays in `wow-viewer/`.
-- Client roots are runtime configuration. `H:\CLIENTS` is the approved fast SSD library for
-  known-good builds; `output/tmp/wowarchive-clients/` is optional staging, not a mandatory hop.
-  Record the exact build and fingerprint used.
-- **Documentation is generalized; commands are concrete.** Never put a machine-local path
-  (e.g. `H:\CLIENTS`) into committed docs, READMEs, userguides, specs, or quickstarts — those
-  must use a placeholder like `<client-root>` or `--client-root <path>`. But any CLI command
-  handed to the user in chat must be filled in with THEIR actual path (e.g. `H:\CLIENTS`), so
-  they can copy-paste and run it as-is. Docs stay portable; chat commands are ready to run.
-- No new parser clones when shared `Core` or `Core.IO` surface already exists.
-- Implement as much as possible in each session, with memory bank and speckit documentation update at every step. Do not do wasteful partial work that leaves the repo in a state that cannot be built or tested.
-- Doc sync same pass: spec, architecture note, memory-bank.
-- Consolidate implemented speckit plans when little work or testing remains. Do not leave half-implemented plans in the repo.
-- Implement small wins first, then larger wins. Avoid large refactors that break the repo for days.
-- C# first, python second for ML tasks. C# is our main tooling for a reason - scalability and maintainability. Python is for ML tasks only. Do not implement new C# features in Python unless the feature is ML-specific and cannot be implemented in C#.
-
-## Spec flow
-
-- Check existing spec first: `wow-viewer/specs/<NNN>-<name>/`.
-- If behavior changes, update `spec.md`, `plan.md`, or `tasks.md` in same pass.
-- If no spec fits, create spec -> plan -> tasks before broad implementation.
-
-## Canonical docs
-
-- [README.md](/I:/parp/parp-tools/wow-viewer/README.md)
-- [docs/DOCUMENTATION-STATUS.md](/I:/parp/parp-tools/wow-viewer/docs/DOCUMENTATION-STATUS.md)
-- [docs/architecture/wow-engine-modernization-plan-2026-05-14.md](/I:/parp/parp-tools/wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md)
-- [memory-bank/activeContext.md](/I:/parp/parp-tools/wow-viewer/memory-bank/activeContext.md) — dashboard: what is live, and where the detail is
-- [memory-bank/progress.md](/I:/parp/parp-tools/wow-viewer/memory-bank/progress.md) — dated ledger of what shipped
-- [memory-bank/workstream-pm4-decode.md](/I:/parp/parp-tools/wow-viewer/memory-bank/workstream-pm4-decode.md) — PM4 findings, traps, commands
-- [memory-bank/workstream-terrain-ml.md](/I:/parp/parp-tools/wow-viewer/memory-bank/workstream-terrain-ml.md) — terrain/minimap ML findings and run plan
-
-Memory bank routing rules — which file a given statement belongs in — are in
-[memory-bank/coding_standards.md](/I:/parp/parp-tools/wow-viewer/memory-bank/coding_standards.md)
-under "Memory Bank Layout". Follow them instead of appending to `activeContext.md`.
+- Python environments, scripts, and libraries live only under `data-harvester/` and are managed by
+  `uv`.
+- Run Python from `data-harvester/`, not the repository root, when package imports require it.
+- Use configured client roots directly when available; project-local staging is optional.
+- Keep proprietary client data, harvested corpora, model outputs, and weights out of commits.
 
 ## Validation
 
-- C#: `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
-- C# tests: `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
-- Python: run from `wow-viewer/data-harvester/` with `uv run ...`
-- Do not run Python entrypoints from repo root when package imports depend on `data-harvester/src/`.
+```powershell
+dotnet build I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug
+dotnet test I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug
+```
 
-## Historical docs
+Use focused tests before solution-wide checks. For viewer runtime testing use the active WoWViewer
+project, not the legacy `MdxViewer`. For PM4 inspection use the existing `WowViewer.Tool.Inspect`
+commands and the checked-in development fixtures when the changed surface requires it.
 
-- `specs/archived/` = closed or superseded.
-- `specs/086-*` and `specs/087-*` stay on disk only as superseded evidence.
-- `plans/` = old planning notes unless current spec links them.
-- `docs/WoWViewer/` = viewer-facing guide layer; keep current if edited.
-- `docs/MdxViewer-legacy-documentation.tar.gz` = archive only.
+## Continuity rules
+
+- `memory-bank/activeContext.md`: current dashboard only—active specs, next bounded task, proof
+  owner, main unproven gap, and explicit out-of-scope items.
+- `memory-bank/progress.md`: newest-first compact ledger; one entry per completed slice, with proof
+  level and next handoff. Do not append command transcripts or old history.
+- Durable findings, traps, measurements, and commands belong in a named workstream file or the
+  owning spec's research/quickstart document.
+- Update the owning spec and continuity dashboard in the same pass as non-trivial implementation.
+- Archive superseded detail under `memory-bank/archive/`; preserve negative results that prevent
+  repeated dead ends.
+
+## Handoff format
+
+End a substantive session with:
+
+```text
+Current target: <spec and task>
+Proof owner: <tests/build/user/runtime>
+Completed: <small factual summary>
+Unproven: <one or two concrete gaps>
+Next step: <one bounded task>
+Out of scope: <explicit exclusions>
+```

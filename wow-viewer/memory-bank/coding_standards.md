@@ -111,7 +111,9 @@ See `wow-viewer/memory-bank/data-paths.md` for the authoritative list of paths a
 - One logical change per commit. A bug fix, a refactor, and a feature do not belong in the same commit.
 - A spec implementation lands as a series of small commits, one per phase or per task. The full diff for a spec is reviewed commit-by-commit.
 - Stage by name, not by wildcard. `git add .` is a smell.
-- No secrets, no private paths, no `H:\CLIENTS` references.
+- No secrets. Do not bake machine-local client paths into source or portable configuration; a
+  runtime validation document may name the approved `H:\CLIENTS` library when it records the exact
+  build and proof context.
 
 ## Documentation
 

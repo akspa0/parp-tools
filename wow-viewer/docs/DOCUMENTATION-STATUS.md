@@ -1,65 +1,32 @@
 # Documentation Status
 
-Updated: 2026-08-01
+Updated: 2026-08-12
 
-This is canonical doc map for `wow-viewer/`.
+This is a routing page, not a project history. The owning spec is authoritative for behavior and
+validation.
 
-## Spec inventory (read first)
+## Default handoff
 
-- **[docs/specs-audit-2026-08-01.md](/I:/parp/parp-tools/wow-viewer/docs/specs-audit-2026-08-01.md)** — the full
-  spec inventory: DONE (archive candidates), ACTIVE (front-of-queue), and DRAFT (backlog).
-  Use this before reading any individual spec.
+1. [AGENTS.md](/I:/parp/parp-tools/wow-viewer/AGENTS.md)
+2. [specs/STATUS.md](/I:/parp/parp-tools/wow-viewer/specs/STATUS.md)
+3. [memory-bank/activeContext.md](/I:/parp/parp-tools/wow-viewer/memory-bank/activeContext.md)
+4. The selected spec's `spec.md`, `plan.md`, and `tasks.md`
+5. Only notes explicitly linked by that spec
 
-## Read first
+## Operator references
 
 - [README.md](/I:/parp/parp-tools/wow-viewer/README.md)
-- [AGENTS.md](/I:/parp/parp-tools/wow-viewer/AGENTS.md)
-- [memory-bank/activeContext.md](/I:/parp/parp-tools/wow-viewer/memory-bank/activeContext.md)
-- [memory-bank/progress.md](/I:/parp/parp-tools/wow-viewer/memory-bank/progress.md)
-- [docs/architecture/wow-engine-modernization-plan-2026-05-14.md](/I:/parp/parp-tools/wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md)
-
-## Current operator docs
-
 - [docs/CLI-TOOLS.md](/I:/parp/parp-tools/wow-viewer/docs/CLI-TOOLS.md)
 - [docs/WoWViewer/USERGUIDE.md](/I:/parp/parp-tools/wow-viewer/docs/WoWViewer/USERGUIDE.md)
 - [data-harvester/README.md](/I:/parp/parp-tools/wow-viewer/data-harvester/README.md)
-- [docs/runpod-integration-cookbook.md](/I:/parp/parp-tools/wow-viewer/docs/runpod-integration-cookbook.md)
 
-## Current spec docs
+## Background references
 
-- `specs/089-dav2-height-predictor/`
-- `specs/088-v22-enrichment-from-v18/`
-- `specs/080-wow-ui-consolidation/`
-- `specs/047-v18-distill-corpus-open-source-loop/` when focused V18 operator work is reopened
+- `docs/architecture/` contains durable design and research notes; read only the file linked by the
+  active spec.
+- `memory-bank/workstream-*.md` contains durable findings and traps; it is not default context.
+- `memory-bank/archive/`, `docs/audits/`, `docs/validation/`, and `plans/` are historical unless a
+  live spec links them.
 
-## Background only
-
-- `specs/076-full-map-fractal-brush-library/`
-- `specs/077-minimap-deconstruction-engine/`
-- `specs/079-runpod-integration-guide/`
-
-## Historical only
-
-- `specs/archived/`
-- `specs/086-v22-consolidated-dataset/`
-- `specs/087-v22-asset-library-payloads/`
-- `plans/`
-- `docs/audits/`
-- `docs/validation/` older V9/V16-era notes
-- `docs/MdxViewer-legacy-documentation.tar.gz`
-
-## Repo-wide doc rules
-
-- No `H:\CLIENTS`.
-- No new ownership claims for `gillijimproject_refactor`.
-- If a doc points to a missing file, fix link or remove claim in same pass.
-- Do not keep stale active-spec counts. Use status categories instead.
-- When code behavior changes, update matching spec, architecture doc, and memory-bank same pass.
-
-## Audit results from this pass
-
-- Rewrote `AGENTS.md` to current repo truth.
-- Rewrote root `README.md`.
-- Replaced stale `PLANS-OVERVIEW.md` active-spec counter with current lane map.
-- Rewrote `data-harvester/README.md` around Spec 088 / 089 reality.
-- Rewrote `docs/WoWViewer/README.md` and `USERGUIDE.md` to remove stale root paths and dead links.
+When a lane changes, update `specs/STATUS.md`, the owning spec, and the short memory-bank handoff
+in the same pass. Do not maintain a second active-spec inventory here.
