@@ -99,3 +99,9 @@ Deferred client I/O is now scene-bounded: `WorldAssetManager` advances WMO dooda
 per frame instead of once per WMO placement, and `MinimapRenderer` uses one shared-data-source
 reader. This containment slice does not claim that model parsing, terrain upload, or GPU time is
 now within budget; the user-run real-client capture remains the proof owner.
+
+The MDX streaming admission path also keeps unresolved placements loadable. An MDDF instance
+without model bounds starts with a small placement-centered fallback AABB; performance projected-
+size culling must not reject that placeholder before the model can be queued. Such instances are
+admitted from placement/frustum visibility into the existing per-frame unique-asset queue, then
+return to normal projected-size culling after the loaded model supplies transformed bounds.

@@ -160,7 +160,14 @@ public static class WorldObjectVisibilityCollector
             }
 
             float projectedFraction = ComputeProjectedHeightFraction(inst.BoundsMin, inst.BoundsMax, centerDistanceSq, context.VerticalFieldOfViewRadians);
-            if (!context.IgnoreProjectedSizeCulling
+            // A placement without model bounds only has the conservative fallback
+            // AABB built by WorldScene (currently a small box around the MDDF
+            // position). Do not let that placeholder size prevent the model from
+            // ever entering the load queue: the real bounds cannot exist until the
+            // model has been loaded. Once the asset resolves, projected-size culling
+            // resumes against its actual transformed bounds.
+            if (inst.BoundsResolved
+                && !context.IgnoreProjectedSizeCulling
                 && ShouldCullByProjectedSize(context, projectedFraction, centerDistanceSq, isWmo: false))
             {
                 culledCount++;
@@ -169,7 +176,14 @@ public static class WorldObjectVisibilityCollector
 
             if (!isAssetReady(inst.ModelKey))
             {
-                if (ShouldQueuePendingAsset(context, frustumVisible, coneFactor, projectedFraction, centerDistanceSq, isWmo: false))
+                if (ShouldQueuePendingAsset(
+                    context,
+                    frustumVisible,
+                    coneFactor,
+                    projectedFraction,
+                    centerDistanceSq,
+                    isWmo: false,
+                    allowUnresolvedBounds: !inst.BoundsResolved))
                     queuePendingAsset(inst.ModelKey, ComputeLoadPriorityScore(centerDistanceSq, coneFactor));
 
                 continue;
@@ -323,10 +337,18 @@ public static class WorldObjectVisibilityCollector
         float coneFactor,
         float projectedFraction,
         float centerDistanceSq,
-        bool isWmo)
+        bool isWmo,
+        bool allowUnresolvedBounds = false)
     {
         if (centerDistanceSq <= ObjectNearHoldRadiusSq)
             return true;
+
+        // Unresolved model bounds are placeholders, not evidence that the asset is
+        // visually insignificant. Admit a placement that is in the camera frustum
+        // (or clearly in the forward cone); the per-frame WorldScene budget still
+        // limits how many unique assets can actually be queued and loaded.
+        if (allowUnresolvedBounds)
+            return frustumVisible || coneFactor >= GetLoadConeFactorThreshold(context.VisibilityProfile, isWmo);
 
         float minProjectedFraction = GetLoadProjectedFractionThreshold(context.VisibilityProfile, isWmo);
         if (projectedFraction < minProjectedFraction)

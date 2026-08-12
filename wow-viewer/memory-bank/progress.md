@@ -8,6 +8,16 @@ what the evidence was. See "Memory bank layout" in `coding_standards.md`.
 
 Current state and open work: [activeContext.md](activeContext.md).
 
+## 2026-08-11 — Prevent unresolved MDX placements from starving the load queue
+
+- Fixed the MDX visibility admission deadlock where the performance profile applied projected-size
+  culling to the placeholder `±2` placement bounds before the model could load. Visible unresolved
+  MDDF placements now enter the existing bounded unique-asset queue using frustum/forward-cone
+  admission; resolved models retain normal projected-size culling.
+- Added a focused regression test. `WorldObjectVisibilityCollectorTests` passed 11/11. The user-run
+  real-client test must confirm MDX counts advance above `0/32972` and that loaded model failures,
+  if any, are then visible in the existing runtime diagnostics.
+
 ## 2026-08-11 — Restore direct Alpha MDX world rendering
 
 - Narrowed `MdxRenderer` GPU-instanced eligibility to adapted M2 models. Direct 0.5.x MDLX assets

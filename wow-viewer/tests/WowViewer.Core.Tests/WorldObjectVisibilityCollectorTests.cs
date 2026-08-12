@@ -186,6 +186,32 @@ public sealed class WorldObjectVisibilityCollectorTests
     }
 
     [Fact]
+    public void CollectVisibleMdx_UnresolvedBoundsDoNotDeadlockVisibleLoad()
+    {
+        WorldVisibilityFrame frame = new();
+        WorldObjectVisibilityContext context = CreateContext(
+            fogEnd: 5000f,
+            visibilityProfile: WorldObjectVisibilityProfile.Performance,
+            verticalFieldOfViewRadians: MathF.PI / 3f);
+        WorldObjectInstance instance = CreateInstance("mdx://unresolved", new Vector3(0f, 1800f, 0f), halfExtent: 2f);
+        instance.BoundsResolved = false;
+        bool queued = false;
+
+        int culled = WorldObjectVisibilityCollector.CollectVisibleMdx(
+            frame,
+            [instance],
+            context,
+            static _ => false,
+            static (_, _) => true,
+            static _ => false,
+            (_, _) => queued = true);
+
+        Assert.Equal(0, culled);
+        Assert.True(queued);
+        Assert.Empty(frame.VisibleMdx);
+    }
+
+    [Fact]
     public void CollectVisibleMdx_RespectsMaxVisibleMdxBoundsHeight()
     {
         WorldVisibilityFrame frame = new();
