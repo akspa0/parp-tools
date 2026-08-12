@@ -8715,6 +8715,9 @@ public class WorldScene : ISceneRenderer
             bool flatVisibilityBucketsDirty = false;
             foreach (var pair in _tileMdxInstances)
             {
+                if (!IsActiveObjectTile(pair.Key) && !_capturePreloadTiles.Contains(pair.Key))
+                    continue;
+
                 if (!RefreshMdxInstanceBounds(pair.Value, pair.Key, isSkybox: false, isExternal: false))
                     continue;
 
@@ -8727,6 +8730,9 @@ public class WorldScene : ISceneRenderer
 
             foreach (var pair in _tileWmoInstances)
             {
+                if (!IsActiveObjectTile(pair.Key) && !_capturePreloadTiles.Contains(pair.Key))
+                    continue;
+
                 if (!RefreshWmoInstanceBounds(pair.Value, pair.Key, isSkybox: false, isExternal: false))
                     continue;
 
@@ -9666,9 +9672,14 @@ public class WorldScene : ISceneRenderer
             return;
         }
 
+        List<WorldSceneGraphBuildResult> activeGraphs = EnumerateActiveSceneGraphs().ToList();
+        HashSet<WorldSceneGraphBuildResult> activeGraphSet =
+            new(activeGraphs, ReferenceEqualityComparer.Instance);
+
         foreach ((string placementId, WorldScenePortalAdapterResult adapter) in _sceneGraphPortalAdapters)
         {
             if (_sceneGraphBuild.TryGetGraphForPlacement(placementId, out WorldSceneGraphBuildResult? placementGraph)
+                && activeGraphSet.Contains(placementGraph)
                 && placementGraph.Graph.TryGetNode(placementId, out WorldSceneNode? placementNode))
             {
                 _sceneGraphPortalVisibility[placementId] = WorldScenePortalVisibilityEvaluator.Evaluate(
@@ -9679,7 +9690,7 @@ public class WorldScene : ISceneRenderer
             }
         }
 
-        foreach (WorldSceneGraphBuildResult graphBuild in _sceneGraphBuild.EnumerateGraphs())
+        foreach (WorldSceneGraphBuildResult graphBuild in activeGraphs)
         {
             WorldSceneTraversalResult traversal = WorldSceneTraversal.Traverse(
                 graphBuild.Graph,
@@ -9707,6 +9718,38 @@ public class WorldScene : ISceneRenderer
         }
 
         _sceneGraphFrameVisibilityPrepared = true;
+    }
+
+    private IEnumerable<WorldSceneGraphBuildResult> EnumerateActiveSceneGraphs()
+    {
+        if (_sceneGraphBuild is null)
+            yield break;
+
+        foreach (KeyValuePair<(int TileX, int TileY), WorldSceneGraphBuildResult> entry in _sceneGraphBuild.AdtGraphs)
+        {
+            if (IsActiveObjectTile(entry.Key))
+                yield return entry.Value;
+        }
+
+        // External spawns do not have an ADT coordinate and remain visible
+        // through their dedicated graph.
+        if (_sceneGraphBuild.ExternalGraph is not null)
+            yield return _sceneGraphBuild.ExternalGraph;
+    }
+
+    private bool IsActiveObjectTile((int tileX, int tileY) tile)
+    {
+        IReadOnlyList<(int tileX, int tileY)> activeTiles = _terrainManager.LastSelectedTiles;
+        for (int i = 0; i < activeTiles.Count; i++)
+        {
+            if (activeTiles[i] == tile)
+                return true;
+        }
+
+        // Capture warmup is an explicit render-path lease. Keep its pinned
+        // tiles eligible for object admission while normal navigation remains
+        // limited to the camera-facing AOI.
+        return CapturePreloadActive && _capturePreloadTiles.Contains(tile);
     }
 
     private bool IsSceneGraphNodeVisible(WorldSceneNode node)
@@ -9760,6 +9803,12 @@ public class WorldScene : ISceneRenderer
         WmoCulledCount = 0;
         foreach (var pair in _tileWmoInstances)
         {
+            if (!IsActiveObjectTile(pair.Key))
+            {
+                WmoCulledCount += pair.Value.Count;
+                continue;
+            }
+
             if (_tileWmoBounds.TryGetValue(pair.Key, out var bounds)
                 && !ShouldVisitObjectBucket(bounds.Min, bounds.Max, cameraPos, cameraForward, fogEnd, isWmo: true, countAsTaxiActor: false))
             {
@@ -9864,6 +9913,12 @@ public class WorldScene : ISceneRenderer
 
         foreach (var pair in _tileMdxInstances)
         {
+            if (!IsActiveObjectTile(pair.Key))
+            {
+                MdxCulledCount += pair.Value.Count;
+                continue;
+            }
+
             if (_tileMdxBounds.TryGetValue(pair.Key, out var bounds)
                 && AreMdxTileBoundsResolved(pair.Value)
                 && !ShouldVisitObjectBucket(bounds.Min, bounds.Max, cameraPos, cameraForward, fogEnd, isWmo: false, countAsTaxiActor: false))

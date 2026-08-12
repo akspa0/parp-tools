@@ -7,11 +7,11 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 142 Phase 8M real-client validation of the strict directional four-tile ADT baseline.
+- **Next implementation target:** Spec 142 Phase 8N real-client validation of active-tile WMO/MDX object admission.
 - **Proof owner:** focused C# tests and a Debug build for source-level contracts; the user owns real
   client, OpenGL, audio-device, capture, and performance proof.
-- **Main unproven gap:** no user-run capture has yet shown the normal viewer holding no more than four active detailed tiles/draws while moving.
-- **Explicitly out of scope for the next slice:** FOV radiation, unique-model submission redesign, broad renderer rewrites, audio, UI, and full-load stress mode as normal admission.
+- **Main unproven gap:** no user-run capture has yet shown inactive resident ADT objects leaving graph/flat visibility work while capture-preload tiles remain correct.
+- **Explicitly out of scope for the next slice:** FOV radiation, unique-model submission redesign, broad renderer rewrites, audio, UI, and FPS claims without production capture evidence.
 
 ## Active spec lanes
 
@@ -21,7 +21,7 @@ the owning spec for requirements and proof; read a workstream only when the spec
 | 144 Camera capture paths | Implemented with user gates | Finish user-run built-in camera, collision, JSON, preload, and capture proof before extensions. |
 | 145 WoW UI overhaul | First slice implemented | Continue only the remaining persistent-window and placeholder audit tasks. |
 | 143 World context and lighting | First area slice landed | Resolve evidence/setup tasks before WMO area or lighting claims. |
-| 142 World scene graph | In progress | Validate Phase 8M strict directional four-tile admission before widening FOV. |
+| 142 World scene graph | In progress | Validate Phase 8N active-tile WMO/MDX object admission before further renderer redesign. |
 | 139–141 Terrain/minimap reconstruction | Active/parked ML lanes | Reopen only for the named spec and user-run training/validation. |
 | 138 Cross-era renderer research | Evidence/planning | Do not generalize one client build to every era. |
 | 128–131 PM4 | Established research lane | Use the PM4 spec pack and `workstream-pm4-decode.md`. |

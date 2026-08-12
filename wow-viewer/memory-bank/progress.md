@@ -5,6 +5,15 @@ Last updated: 2026-08-12
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-12 — Spec 142 active-tile object admission
+
+- Scene-graph traversal and portal preparation now enumerate only the camera-selected ADT graphs
+  plus external content; flat WMO/MDX collection and deferred bounds promotion use the same gate.
+- Full-load retains residency for stress work without turning every resident tile into an object
+  visibility candidate. Explicit capture-preload tiles remain admitted.
+- The viewer builds with 0 errors and the focused directional-selector proof passes 4/4. A user-run
+  production capture is still required to prove frame-time improvement and visual parity.
+
 ## 2026-08-12 — Spec 142 strict directional tile baseline
 
 - Added the pure `DirectionalTileSelector` contract and four focused geometry tests.

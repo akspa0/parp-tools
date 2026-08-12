@@ -178,6 +178,18 @@ identity; no FPS or GPU claim is made.
 - [ ] T070 [US2] Only after T069 passes, design the next bounded FOV-radiation slice; it must
   expand within the directional cone rather than restore radial or map-wide admission.
 
+## Phase 8N: Active-Tile Object Admission
+
+- [x] T071 [US2] Restrict hierarchical scene-graph traversal and portal preparation to the
+  camera-selected ADT graphs plus the dedicated external graph in
+  `src/viewer/WoWViewer/Terrain/WorldScene.cs`.
+- [x] T072 [US2] Apply the same active-tile admission to flat WMO/MDX visibility collection and
+  deferred bounds promotion, preserving explicit capture-preload tiles while keeping full-load
+  residency separate from object visibility.
+- [ ] T073 [US2] Run a user-owned production capture proving inactive resident tiles are not
+  traversed/submitted, capture-preload tiles remain available, and WMO/MDX visibility timing
+  improves without a visual regression.
+
 ## Dependencies and Execution Order
 
 - Phase 1 documentation/setup precedes all implementation.
@@ -191,6 +203,8 @@ identity; no FPS or GPU claim is made.
   loading or renderer submission ownership.
 - T066-T068 establish the bounded spatial baseline before any future FOV-radiation or dense
   submission work. T069 is a real-client gate; T070 must not start before it passes.
+- T071-T072 consume the strict active-tile selection to bound object work; T073 is the real-client
+  performance/correctness gate before any further renderer redesign.
 
 ## Implementation Strategy
 

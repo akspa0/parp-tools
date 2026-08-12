@@ -449,10 +449,6 @@ public class TerrainManager : ISceneRenderer
     {
         _cameraPos = cameraPos;
 
-        // If all tiles are pre-loaded, skip AOI streaming entirely
-        if (_allTilesResident)
-            return;
-
         // Submit any background-loaded tiles to GPU (render thread only)
         SubmitPendingTiles();
 
@@ -515,6 +511,12 @@ public class TerrainManager : ISceneRenderer
         foreach (DirectionalTileCoord selected in selectedTiles.Take(targetDetailedTileCount))
             _lastSelectedTiles.Add((selected.TileX, selected.TileY));
         _lastSelectedHeading = _cameraHeading;
+
+        // Full-load is an explicit residency stress mode, not a visibility
+        // mode. Keep the camera-facing selection current so object admission
+        // can still reject inactive resident tiles.
+        if (_allTilesResident)
+            return;
 
         var desiredTiles = new HashSet<(int, int)>();
         foreach (var selected in _lastSelectedTiles)

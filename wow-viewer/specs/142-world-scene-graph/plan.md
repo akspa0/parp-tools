@@ -461,6 +461,27 @@ work and does not replace the existing WMO/M2 batching fallbacks.
 capture reports no more than four active detailed tiles and no more than four detailed terrain
 draw calls per frame. FOV radiation, unique-model submission redesign, and FPS claims remain open.
 
+## Phase 8N — Active-Tile Object Admission
+
+**Status**: Source slice landed after the full-load diagnostic showed the scene graph still
+traversed resident objects from every ADT. Real-client frame-time and visual-parity evidence is
+still user-owned. This phase consumes the strict active-tile selection; it does not widen the
+selection or redesign model submission.
+
+1. Restrict per-frame scene-graph traversal and portal preparation to the selected camera tiles
+   plus the dedicated external graph.
+2. Apply the same active-tile gate to the flat WMO/MDX collectors and deferred bounds promotion,
+   while preserving explicit capture-preload tiles as a named exception.
+3. Keep `--full-load` as a residency stress mode: it may retain all parsed tiles, but it must not
+   silently turn every resident tile into an object-visibility candidate.
+4. Hand off a user-run production capture comparing WMO/MDX visibility timing, visible/cull
+   counts, capture-preload behavior, and visual parity before any further renderer optimization.
+
+**Exit evidence**: focused selector tests and the viewer build pass; the user-run report shows
+inactive resident tiles are not traversed or submitted, capture pins remain visible, and the
+measured WMO/MDX visibility stages materially improve without a correctness regression. No FPS
+claim is made until that capture exists.
+
 ## Phase 8L — Capability-Gated Modern Dense Submission
 
 **Status**: Planned after Phase 8K and the Phase 8M baseline gate. This phase coordinates with Spec 138; it does not change 4.x

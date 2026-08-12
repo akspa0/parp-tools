@@ -134,6 +134,10 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
   `LastDirectionalTileInvariantPassed`. With verbose logging enabled, the render boundary emits
   the paired `Active Tiles` and `Detailed Draw Calls` values. Normal camera admission is capped at
   four tiles; capture preloads and `--full-load` remain explicit exceptions.
+- WorldScene object admission consumes the selected camera tiles instead of traversing every
+  resident ADT graph. The flat WMO/MDX collectors and deferred bounds promotion use the same gate;
+  capture-preload tiles remain an explicit render-path lease. `--full-load` retains residency for
+  stress analysis but does not make every resident tile object-visible.
 - Residency-triggered graph rebuilds use cached WMO summaries only; a rebuild must not synchronously
   read or parse resident WMO files merely to mount optional `WmoGroup` metadata.
 - Deferred WMO doodad model loads are advanced once per scene frame through `WorldAssetManager`,
