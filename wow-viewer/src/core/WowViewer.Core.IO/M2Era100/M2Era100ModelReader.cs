@@ -87,16 +87,16 @@ public static class M2Era100ModelReader
         }
 
         // --- Build the document ---
-        // Animation blocks (colors, lights, cameras, ribbons, particles, bones) are read
-        // with the correct 1.0.0 strides where feasible; empty lists are provided for
-        // blocks whose per-field layout is not yet fully recovered. These can be filled
-        // in follow-up slices without changing the geometry contract.
+        // Camera tracks are the one early animation block needed by the camera-import
+        // path. Normalize their old flat arrays into the shared sampler's per-sequence
+        // reference tables; the later M2 reader is never involved in this route.
+        CameraReadResult cameraResult = ReadCameras(data, sequences.Count, globalLoops.Count, sourcePath);
 
         M2ModelIdentity identity = M2ModelIdentity.FromPath(sourcePath);
 
         M2ModelDocument document = new(
             identity,
-            data,
+            cameraResult.Payload,
             "MD20",
             0x100u,
             flags,
@@ -109,7 +109,7 @@ public static class M2Era100ModelReader
             textureWeights: [],
             textureTransforms: [],
             lights: [],
-            cameras: null,
+            cameras: cameraResult.Cameras,
             boundsMin,
             boundsMax,
             boundsRadius,
@@ -123,6 +123,180 @@ public static class M2Era100ModelReader
             document.InlineEra100Geometry = geometry;
 
         return document;
+    }
+
+    private static CameraReadResult ReadCameras(byte[] data, int sequenceCount, int globalLoopCount, string sourcePath)
+    {
+        uint count = ReadUInt32At(data, M2Era100Constants.CameraCountOffset);
+        uint offset = ReadUInt32At(data, M2Era100Constants.CameraOffsetOffset);
+        if (count == 0)
+            return new CameraReadResult(data, []);
+
+        ValidateSpan(count, offset, M2Era100Constants.CameraStride, data.Length, sourcePath, "cameras");
+
+        // Validate the native id -> record lookup even though the shared document exposes
+        // cameras by record index. A broken lookup must not be mistaken for a cameraIndex
+        // problem later in the importer.
+        _ = ReadInt16Table(data, sourcePath, "cameraLookup",
+            M2Era100Constants.CameraLookupCountOffset, M2Era100Constants.CameraLookupOffsetOffset);
+
+        CameraPayloadAppender appender = new(data);
+        List<M2CameraDefinition> cameras = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * M2Era100Constants.CameraStride));
+            OldTrack positionTrack = ReadOldTrack(data, entryOffset + 0x10, 12, globalLoopCount, sourcePath, $"cameras[{index}].positionTrack");
+            OldTrack targetTrack = ReadOldTrack(data, entryOffset + 0x38, 12, globalLoopCount, sourcePath, $"cameras[{index}].targetPositionTrack");
+            OldTrack rollTrack = ReadOldTrack(data, entryOffset + 0x60, 4, globalLoopCount, sourcePath, $"cameras[{index}].rollTrack");
+
+            cameras.Add(new M2CameraDefinition(
+                index,
+                unchecked((int)ReadUInt32At(data, entryOffset + 0x00)),
+                ReadLenientSingleAt(data, entryOffset + 0x04, sourcePath, $"cameras[{index}].fieldOfView"),
+                ReadLenientSingleAt(data, entryOffset + 0x08, sourcePath, $"cameras[{index}].farClip"),
+                ReadLenientSingleAt(data, entryOffset + 0x0C, sourcePath, $"cameras[{index}].nearClip"),
+                appender.NormalizeVectorTrack(positionTrack, sequenceCount),
+                ReadLenientVector3At(data, entryOffset + 0x2C, sourcePath, $"cameras[{index}].positionBase"),
+                appender.NormalizeVectorTrack(targetTrack, sequenceCount),
+                ReadLenientVector3At(data, entryOffset + 0x54, sourcePath, $"cameras[{index}].targetPositionBase"),
+                appender.NormalizeFloatTrack(rollTrack, sequenceCount)));
+        }
+
+        return new CameraReadResult(appender.ToPayload(), cameras);
+    }
+
+    private static OldTrack ReadOldTrack(byte[] data, int offset, int scalarSize, int globalLoopCount, string sourcePath, string label)
+    {
+        EnsureReadable(data, offset, M2Era100Constants.TrackStride, sourcePath, label);
+
+        ushort interpolationValue = ReadUInt16At(data, offset + 0x00);
+        ushort globalSequenceValue = ReadUInt16At(data, offset + 0x02);
+        if (interpolationValue > (ushort)M2TrackInterpolation.Bezier)
+            throw new InvalidDataException($"1.0.0 M2 file '{sourcePath}' has unsupported interpolation {interpolationValue} in '{label}'.");
+
+        M2TrackInterpolation interpolation = (M2TrackInterpolation)interpolationValue;
+        int globalSequence = globalSequenceValue == ushort.MaxValue || globalSequenceValue >= globalLoopCount
+            ? -1
+            : globalSequenceValue;
+        uint rangeCount = ReadUInt32At(data, offset + 0x04);
+        uint rangeOffset = ReadUInt32At(data, offset + 0x08);
+        uint timestampCount = ReadUInt32At(data, offset + 0x0C);
+        uint timestampOffset = ReadUInt32At(data, offset + 0x10);
+        uint valueCount = ReadUInt32At(data, offset + 0x14);
+        uint valueOffset = ReadUInt32At(data, offset + 0x18);
+
+        ValidateSpan(rangeCount, rangeOffset, 0x08, data.Length, sourcePath, $"{label}.ranges");
+        ValidateSpan(timestampCount, timestampOffset, sizeof(uint), data.Length, sourcePath, $"{label}.timestamps");
+        int valueStride = interpolation is M2TrackInterpolation.Hermite or M2TrackInterpolation.Bezier
+            ? checked(scalarSize * 3)
+            : scalarSize;
+        ValidateSpan(valueCount, valueOffset, valueStride, data.Length, sourcePath, $"{label}.values");
+
+        return new OldTrack(interpolation, globalSequence, rangeCount, rangeOffset, timestampCount, timestampOffset, valueCount, valueOffset);
+    }
+
+    private readonly record struct OldTrack(
+        M2TrackInterpolation Interpolation,
+        int GlobalSequenceIndex,
+        uint RangeCount,
+        uint RangeOffset,
+        uint TimestampCount,
+        uint TimestampOffset,
+        uint ValueCount,
+        uint ValueOffset);
+
+    private readonly record struct CameraReadResult(byte[] Payload, IReadOnlyList<M2CameraDefinition> Cameras);
+
+    private sealed class CameraPayloadAppender
+    {
+        private readonly byte[] _source;
+        private readonly List<byte> _extension = [];
+
+        public CameraPayloadAppender(byte[] source) => _source = source;
+
+        public M2TrackDefinition<Vector3> NormalizeVectorTrack(OldTrack track, int sequenceCount)
+            => Normalize<Vector3>(track, sequenceCount, 12, static normalized => new M2TrackDefinition<Vector3>(normalized.Interpolation, normalized.GlobalSequenceIndex, normalized.TimestampReferences, normalized.ValueReferences));
+
+        public M2TrackDefinition<float> NormalizeFloatTrack(OldTrack track, int sequenceCount)
+            => Normalize<float>(track, sequenceCount, 4, static normalized => new M2TrackDefinition<float>(normalized.Interpolation, normalized.GlobalSequenceIndex, normalized.TimestampReferences, normalized.ValueReferences));
+
+        private M2TrackDefinition<T> Normalize<T>(OldTrack track, int sequenceCount, int scalarSize, Func<NormalizedTrack<T>, M2TrackDefinition<T>> create)
+        {
+            int referenceCount = track.GlobalSequenceIndex >= 0 ? 1 : Math.Max(sequenceCount, 1);
+            List<M2TrackArrayReference> timestamps = new(referenceCount);
+            List<M2TrackArrayReference> values = new(referenceCount);
+            uint availableCount = Math.Min(track.TimestampCount, track.ValueCount);
+
+            for (int index = 0; index < referenceCount; index++)
+            {
+                uint first = 0;
+                uint last = availableCount == 0 ? 0 : availableCount - 1;
+                if (track.RangeCount > 0)
+                {
+                    int rangeIndex = track.GlobalSequenceIndex >= 0 ? 0 : Math.Min(index, checked((int)track.RangeCount - 1));
+                    int rangeOffset = checked((int)track.RangeOffset + (rangeIndex * 0x08));
+                    first = ReadUInt32At(_source, rangeOffset + 0x00);
+                    last = ReadUInt32At(_source, rangeOffset + 0x04);
+                    if (first > last || last >= availableCount)
+                        throw new InvalidDataException($"1.0.0 M2 camera track range [{first}, {last}] is outside {availableCount} keys.");
+                }
+
+                uint keyCount = availableCount == 0 ? 0 : last - first + 1;
+                timestamps.Add(new M2TrackArrayReference(
+                    keyCount,
+                    keyCount == 0 ? 0 : checked(track.TimestampOffset + (first * sizeof(uint)))));
+                int valueStride = track.Interpolation is M2TrackInterpolation.Hermite or M2TrackInterpolation.Bezier
+                    ? checked(scalarSize * 3)
+                    : scalarSize;
+                values.Add(new M2TrackArrayReference(
+                    keyCount,
+                    keyCount == 0 ? 0 : checked(track.ValueOffset + (first * (uint)valueStride))));
+            }
+
+            uint timestampReferencesOffset = AppendReferences(timestamps);
+            uint valueReferencesOffset = AppendReferences(values);
+            return create(new NormalizedTrack<T>(
+                track.Interpolation,
+                track.GlobalSequenceIndex,
+                new M2TrackArrayReference((uint)referenceCount, timestampReferencesOffset),
+                new M2TrackArrayReference((uint)referenceCount, valueReferencesOffset)));
+        }
+
+        public byte[] ToPayload()
+        {
+            byte[] payload = new byte[_source.Length + _extension.Count];
+            Buffer.BlockCopy(_source, 0, payload, 0, _source.Length);
+            _extension.CopyTo(payload, _source.Length);
+            return payload;
+        }
+
+        private uint AppendReferences(IReadOnlyList<M2TrackArrayReference> references)
+        {
+            while ((_extension.Count & 3) != 0)
+                _extension.Add(0);
+
+            uint offset = checked((uint)(_source.Length + _extension.Count));
+            foreach (M2TrackArrayReference reference in references)
+            {
+                AppendUInt32(reference.Count);
+                AppendUInt32(reference.Offset);
+            }
+
+            return offset;
+        }
+
+        private void AppendUInt32(uint value)
+        {
+            Span<byte> bytes = stackalloc byte[sizeof(uint)];
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes, value);
+            _extension.AddRange(bytes.ToArray());
+        }
+
+        private readonly record struct NormalizedTrack<T>(
+            M2TrackInterpolation Interpolation,
+            int GlobalSequenceIndex,
+            M2TrackArrayReference TimestampReferences,
+            M2TrackArrayReference ValueReferences);
     }
 
     // ─── Geometry: M2Vertex + M2Division ─────────────────────────────────────

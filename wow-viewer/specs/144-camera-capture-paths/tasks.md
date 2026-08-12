@@ -21,4 +21,5 @@
 - [ ] T019 User-run validation: import the Undead FlyBy from the loaded client, confirm the Camera Path panel reports DBC tile `(28,28)`, and verify playback begins at the crypt WMO and ends over the Undead starting zone.
 - [x] T020 Correct path preload tile conversion to use ADT tile size and add swept tile-line coverage between path samples; keep the lease separate from active rendering.
 - [x] T021 Make ordinary path playback wait for the enabled preload lease and release it on playback completion.
+- [x] T023 Route cross-era client `.m2` camera import through the dispatcher; parse modern `0x109+` records and early `0x100` `0x7c`/`0x1c` camera tracks with focused coverage.
 - [ ] T022 User-run validation: warm and play a multi-tile path, verify no expected ADT unloads during playback, and confirm Stop/completion returns to normal AOI eviction.

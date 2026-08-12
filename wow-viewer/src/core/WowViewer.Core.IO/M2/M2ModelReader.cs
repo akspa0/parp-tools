@@ -494,9 +494,6 @@ public static class M2ModelReader
 
     private static List<M2CameraDefinition> ReadCameras(byte[] data, int globalLoopCount, uint version, string sourcePath)
     {
-        if (version >= CataVersionThreshold)
-            return [];
-
         if (!TryReadUInt32At(data, CameraCountOffset, out uint count)
             || !TryReadUInt32At(data, CameraOffsetOffset, out uint offset)
             || count == 0)
@@ -504,15 +501,43 @@ public static class M2ModelReader
             return [];
         }
 
+        if (version >= CataVersionThreshold)
+            return ReadModernCameras(data, globalLoopCount, count, offset, sourcePath);
+
         int preferredStride = version > 264u ? CameraStrideModern : CameraStrideClassic;
         int fallbackStride = preferredStride == CameraStrideModern ? CameraStrideClassic : CameraStrideModern;
         int stride = ResolveAvailableStride(count, offset, data.Length, preferredStride, fallbackStride, sourcePath, "cameras");
 
+        return ReadCameraRecords(data, globalLoopCount, count, offset, stride, stride >= CameraStrideModern, sourcePath);
+    }
+
+    private static List<M2CameraDefinition> ReadModernCameras(
+        byte[] data,
+        int globalLoopCount,
+        uint count,
+        uint offset,
+        string sourcePath)
+    {
+        // MD20 v0x109+ uses the modern camera record, including the animated
+        // field-of-view track. Do not fall back to the classic stride here:
+        // accepting a shorter record would shift every camera after index zero.
+        ValidateSpan(count, offset, CameraStrideModern, data.Length, sourcePath, "modern cameras");
+        return ReadCameraRecords(data, globalLoopCount, count, offset, CameraStrideModern, modernCamera: true, sourcePath: sourcePath);
+    }
+
+    private static List<M2CameraDefinition> ReadCameraRecords(
+        byte[] data,
+        int globalLoopCount,
+        uint count,
+        uint offset,
+        int stride,
+        bool modernCamera,
+        string sourcePath)
+    {
         List<M2CameraDefinition> values = new(checked((int)count));
         for (int index = 0; index < count; index++)
         {
             int entryOffset = checked((int)offset + (index * stride));
-            bool modernCamera = stride >= CameraStrideModern;
             float? staticFieldOfView = modernCamera
                 ? null
                 : ReadFiniteSingleAt(data, entryOffset + 0x04, sourcePath, $"cameras[{index}].fieldOfView");

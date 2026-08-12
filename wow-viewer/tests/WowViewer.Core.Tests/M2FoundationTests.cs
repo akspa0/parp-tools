@@ -2,6 +2,8 @@ using System.Buffers.Binary;
 using System.Numerics;
 using System.Text;
 using WowViewer.Core.IO.M2;
+using WowViewer.Core.IO.M2Chunked;
+using WowViewer.Core.IO.M2Era1121;
 using WowViewer.Core.M2;
 using WowViewer.Core.Runtime.M2;
 
@@ -141,6 +143,51 @@ public sealed class M2FoundationTests
         Assert.Equal(M2TrackInterpolation.Linear, camera.TargetPositionTrack.Interpolation);
         Assert.Equal(M2TrackInterpolation.None, camera.RollTrack.Interpolation);
         Assert.False(camera.HasAnimatedFieldOfView);
+    }
+
+    [Fact]
+    public void Dispatcher_CataMd20Camera_ParsesModernCameraAndImportsPath()
+    {
+        byte[] bytes = CreateMd20BytesWithCamera(0x109u);
+
+        using MemoryStream stream = new(bytes, writable: false);
+        M2DispatchResult result = M2ModelReaderDispatcher.ReadDetailed(stream, "Cameras\\Synthetic_cata.m2");
+
+        Assert.Equal(M2Era1121EraTag.Md20_4X_V109, result.Era);
+        M2CameraDefinition camera = Assert.Single(result.Document.Cameras);
+        Assert.Null(camera.StaticFieldOfView);
+        Assert.True(camera.HasAnimatedFieldOfView);
+        Assert.Equal(new Vector3(100.0f, 200.0f, 300.0f), camera.PositionBase);
+        Assert.Equal(new Vector3(110.0f, 220.0f, 295.0f), camera.TargetPositionBase);
+
+        M2CameraPathDocument imported = M2CameraPathImporter.Import(result.Document, sampleIntervalMs: 500);
+
+        Assert.Equal(2, imported.Keyframes.Count);
+        Assert.Equal(new Vector3(100.0f, 200.0f, 300.0f), imported.Keyframes[0].Position);
+        Assert.Equal(new Vector3(110.0f, 220.0f, 295.0f), imported.Keyframes[0].Target);
+    }
+
+    [Fact]
+    public void Read_CataMd20Camera_RejectsTruncatedModernRecord()
+    {
+        byte[] bytes = CreateMd20Bytes(
+            0x109u,
+            modelName: "SyntheticTruncatedCamera",
+            boundsMin: new Vector3(-1.0f),
+            boundsMax: new Vector3(1.0f),
+            boundsRadius: 1.0f,
+            embeddedSkinProfileCount: 0,
+            embeddedSkinProfileOffset: 0);
+        const int cameraOffset = 0x120;
+        Array.Resize(ref bytes, cameraOffset + 0x73);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x110, 4), 1u);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x114, 4), cameraOffset);
+
+        using MemoryStream stream = new(bytes, writable: false);
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(() =>
+            M2ModelReader.Read(stream, "Cameras\\Synthetic_truncated.m2"));
+
+        Assert.Contains("modern cameras", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -874,10 +921,11 @@ public sealed class M2FoundationTests
         return data;
     }
 
-    private static byte[] CreateMd20BytesWithCamera()
+    private static byte[] CreateMd20BytesWithCamera(uint version = 0x108u)
     {
+        bool modernCamera = version >= 0x109u;
         byte[] data = CreateMd20Bytes(
-            version: 0x108u,
+            version,
             modelName: "SyntheticCamera",
             boundsMin: new Vector3(-4.0f, -4.0f, -4.0f),
             boundsMax: new Vector3(4.0f, 4.0f, 4.0f),
@@ -891,7 +939,8 @@ public sealed class M2FoundationTests
             sequenceLookup: [(short)0]);
 
         int cameraOffset = Align(data.Length, 4);
-        int positionTimestampRefOffset = cameraOffset + 0x64;
+        int cameraStride = modernCamera ? 0x74 : 0x64;
+        int positionTimestampRefOffset = cameraOffset + cameraStride;
         int positionValueRefOffset = positionTimestampRefOffset + 0x08;
         int targetTimestampRefOffset = positionValueRefOffset + 0x08;
         int targetValueRefOffset = targetTimestampRefOffset + 0x08;
@@ -910,14 +959,27 @@ public sealed class M2FoundationTests
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x114, 4), (uint)cameraOffset);
 
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(cameraOffset + 0x00, 4), unchecked((uint)-1));
-        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(cameraOffset + 0x04, 4), BitConverter.SingleToInt32Bits(1.2f));
-        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(cameraOffset + 0x08, 4), BitConverter.SingleToInt32Bits(750.0f));
-        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(cameraOffset + 0x0C, 4), BitConverter.SingleToInt32Bits(1.5f));
-        WriteTrackHeader(data, cameraOffset + 0x10, interpolation: 1, globalSequence: ushort.MaxValue, timestampArrayCount: 1, timestampArrayOffset: (uint)positionTimestampRefOffset, valueArrayCount: 1, valueArrayOffset: (uint)positionValueRefOffset);
-        WriteVector3(data, cameraOffset + 0x24, new Vector3(100.0f, 200.0f, 300.0f));
-        WriteTrackHeader(data, cameraOffset + 0x30, interpolation: 1, globalSequence: ushort.MaxValue, timestampArrayCount: 1, timestampArrayOffset: (uint)targetTimestampRefOffset, valueArrayCount: 1, valueArrayOffset: (uint)targetValueRefOffset);
-        WriteVector3(data, cameraOffset + 0x44, new Vector3(110.0f, 220.0f, 295.0f));
-        WriteTrackHeader(data, cameraOffset + 0x50, interpolation: 0, globalSequence: ushort.MaxValue, timestampArrayCount: 1, timestampArrayOffset: (uint)rollTimestampRefOffset, valueArrayCount: 1, valueArrayOffset: (uint)rollValueRefOffset);
+        if (modernCamera)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(cameraOffset + 0x04, 4), BitConverter.SingleToInt32Bits(750.0f));
+            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(cameraOffset + 0x08, 4), BitConverter.SingleToInt32Bits(1.5f));
+            WriteTrackHeader(data, cameraOffset + 0x0C, interpolation: 1, globalSequence: ushort.MaxValue, timestampArrayCount: 1, timestampArrayOffset: (uint)positionTimestampRefOffset, valueArrayCount: 1, valueArrayOffset: (uint)positionValueRefOffset);
+            WriteVector3(data, cameraOffset + 0x20, new Vector3(100.0f, 200.0f, 300.0f));
+            WriteTrackHeader(data, cameraOffset + 0x2C, interpolation: 1, globalSequence: ushort.MaxValue, timestampArrayCount: 1, timestampArrayOffset: (uint)targetTimestampRefOffset, valueArrayCount: 1, valueArrayOffset: (uint)targetValueRefOffset);
+            WriteVector3(data, cameraOffset + 0x40, new Vector3(110.0f, 220.0f, 295.0f));
+            WriteTrackHeader(data, cameraOffset + 0x4C, interpolation: 0, globalSequence: ushort.MaxValue, timestampArrayCount: 1, timestampArrayOffset: (uint)rollTimestampRefOffset, valueArrayCount: 1, valueArrayOffset: (uint)rollValueRefOffset);
+        }
+        else
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(cameraOffset + 0x04, 4), BitConverter.SingleToInt32Bits(1.2f));
+            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(cameraOffset + 0x08, 4), BitConverter.SingleToInt32Bits(750.0f));
+            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(cameraOffset + 0x0C, 4), BitConverter.SingleToInt32Bits(1.5f));
+            WriteTrackHeader(data, cameraOffset + 0x10, interpolation: 1, globalSequence: ushort.MaxValue, timestampArrayCount: 1, timestampArrayOffset: (uint)positionTimestampRefOffset, valueArrayCount: 1, valueArrayOffset: (uint)positionValueRefOffset);
+            WriteVector3(data, cameraOffset + 0x24, new Vector3(100.0f, 200.0f, 300.0f));
+            WriteTrackHeader(data, cameraOffset + 0x30, interpolation: 1, globalSequence: ushort.MaxValue, timestampArrayCount: 1, timestampArrayOffset: (uint)targetTimestampRefOffset, valueArrayCount: 1, valueArrayOffset: (uint)targetValueRefOffset);
+            WriteVector3(data, cameraOffset + 0x44, new Vector3(110.0f, 220.0f, 295.0f));
+            WriteTrackHeader(data, cameraOffset + 0x50, interpolation: 0, globalSequence: ushort.MaxValue, timestampArrayCount: 1, timestampArrayOffset: (uint)rollTimestampRefOffset, valueArrayCount: 1, valueArrayOffset: (uint)rollValueRefOffset);
+        }
 
         WriteTrackArrayReference(data, positionTimestampRefOffset, 2u, (uint)positionTimesOffset);
         WriteTrackArrayReference(data, positionValueRefOffset, 2u, (uint)positionValuesOffset);

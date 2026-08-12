@@ -7,10 +7,10 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 142 Phase 8O user-run validation of the bounded camera-centered residency window.
+- **Next implementation target:** Spec 144 T014/T019 user-run validation of built-in 4.x and early-era camera playback.
 - **Proof owner:** focused C# tests and a Debug build for source-level contracts; the user owns real
   client, OpenGL, audio-device, capture, and performance proof.
-- **Main unproven gap:** no user-run capture has yet compared retained radius two versus three, or shown that nearby retained tiles stream without widening active terrain/object submission.
+- **Main unproven gap:** source tests and archived Cata inspection prove camera records are now discovered, but no user-run viewer playback has yet confirmed the imported FlyBy coordinates, origin placement, or stable path playback.
 - **Explicitly out of scope for the next slice:** FOV radiation, unique-model submission redesign, broad renderer rewrites, audio, and FPS claims without production capture evidence.
 
 ## Active spec lanes

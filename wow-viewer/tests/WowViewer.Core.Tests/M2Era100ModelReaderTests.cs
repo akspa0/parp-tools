@@ -1,8 +1,10 @@
 using System.Buffers.Binary;
+using System.Numerics;
 using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.IO.M2Era100;
 using WowViewer.Core.IO.M2Era1121;
 using WowViewer.Core.M2;
+using WowViewer.Core.Runtime.M2;
 
 namespace WowViewer.Core.Tests;
 
@@ -80,6 +82,28 @@ public sealed class M2Era100ModelReaderTests
         Assert.NotNull(result.Document.InlineEra100Geometry);
     }
 
+    [Fact]
+    public void Era100Reader_NormalizesOldCameraTracksForSharedImporter()
+    {
+        byte[] m2 = CreateSyntheticEra100CameraM2();
+
+        using MemoryStream stream = new(m2, writable: false);
+        M2DispatchResult result = M2ModelReaderDispatcher.ReadDetailed(stream, "Cameras\\SyntheticEra100.m2");
+
+        M2CameraDefinition camera = Assert.Single(result.Document.Cameras);
+        Assert.Equal(0x100u, result.Document.Version);
+        Assert.Equal(1, result.Document.SequenceCount);
+        Assert.Equal(1, camera.Type);
+
+        M2CameraPathDocument imported = M2CameraPathImporter.Import(result.Document, sampleIntervalMs: 500);
+
+        Assert.Equal(2, imported.Keyframes.Count);
+        Assert.Equal(new Vector3(1f, 2f, 3f), imported.Keyframes[0].Position);
+        Assert.Equal(new Vector3(14f, 15f, 16f), imported.Keyframes[1].Target, new Vector3EqualityComparer(0.02f));
+        Assert.Equal(1f * (180f / MathF.PI), imported.Keyframes[0].FovDegrees, 3);
+        Assert.Equal(0.5f * (180f / MathF.PI), imported.Keyframes[1].RollDegrees, 0.05f);
+    }
+
     /// <summary>
     /// Builds a minimal but structurally valid 1.0.0 M2: a 0x144 header, four M2Vertex
     /// records, one division whose vertexLookup/indices/sections/batches describe two
@@ -143,6 +167,87 @@ public sealed class M2Era100ModelReaderTests
         WriteArray(span, divisionOfs + M2Era100Constants.DivisionBatchesCountOffset, 1, batchesOfs);
 
         return data;
+    }
+
+    private static byte[] CreateSyntheticEra100CameraM2()
+    {
+        const int headerSize = 0x144;
+        const int sequenceOffset = headerSize;
+        const int cameraOffset = sequenceOffset + M2Era100Constants.SequenceStride;
+        int cursor = cameraOffset + M2Era100Constants.CameraStride;
+
+        int positionRanges = cursor; cursor += 0x08;
+        int positionTimes = cursor; cursor += 0x08;
+        int positionValues = cursor; cursor += 0x18;
+        int targetRanges = cursor; cursor += 0x08;
+        int targetTimes = cursor; cursor += 0x08;
+        int targetValues = cursor; cursor += 0x18;
+        int rollRanges = cursor; cursor += 0x08;
+        int rollTimes = cursor; cursor += 0x08;
+        int rollValues = cursor; cursor += 0x08;
+        int cameraLookup = cursor; cursor += sizeof(short);
+
+        byte[] data = new byte[cursor];
+        Span<byte> span = data;
+        BinaryPrimitives.WriteUInt32LittleEndian(span[..4], M2Era100Constants.Md20Magic);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(M2Era100Constants.VersionOffset, 4), 0x100u);
+        WriteArray(span, M2Era100Constants.SequenceCountOffset, 1, sequenceOffset);
+        WriteArray(span, M2Era100Constants.CameraCountOffset, 1, cameraOffset);
+        WriteArray(span, M2Era100Constants.CameraLookupCountOffset, 1, cameraLookup);
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(sequenceOffset + 0x00, 2), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(sequenceOffset + 0x04, 4), 1000);
+
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(cameraOffset + 0x00, 4), 1);
+        WriteSingle(span, cameraOffset + 0x04, 1f);
+        WriteSingle(span, cameraOffset + 0x08, 1000f);
+        WriteSingle(span, cameraOffset + 0x0C, 1f);
+        WriteOldTrack(span, cameraOffset + 0x10, positionRanges, positionTimes, positionValues, valueCount: 2);
+        WriteVector3(span, cameraOffset + 0x2C, 0f, 0f, 0f);
+        WriteOldTrack(span, cameraOffset + 0x38, targetRanges, targetTimes, targetValues, valueCount: 2);
+        WriteVector3(span, cameraOffset + 0x54, 0f, 0f, 0f);
+        WriteOldTrack(span, cameraOffset + 0x60, rollRanges, rollTimes, rollValues, valueCount: 2);
+
+        WriteRange(span, positionRanges); WriteRange(span, targetRanges); WriteRange(span, rollRanges);
+        WriteTimes(span, positionTimes); WriteTimes(span, targetTimes); WriteTimes(span, rollTimes);
+        WriteVector3(span, positionValues, 1f, 2f, 3f);
+        WriteVector3(span, positionValues + 0x0C, 11f, 12f, 13f);
+        WriteVector3(span, targetValues, 4f, 5f, 6f);
+        WriteVector3(span, targetValues + 0x0C, 14f, 15f, 16f);
+        WriteSingle(span, rollValues, 0f); WriteSingle(span, rollValues + 4, 0.5f);
+        BinaryPrimitives.WriteInt16LittleEndian(span.Slice(cameraLookup, 2), 0);
+        return data;
+    }
+
+    private static void WriteOldTrack(Span<byte> span, int offset, int ranges, int times, int values, int valueCount)
+    {
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(offset + 0x00, 2), 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(offset + 0x02, 2), ushort.MaxValue);
+        WriteArray(span, offset + 0x04, 1, ranges);
+        WriteArray(span, offset + 0x0C, 2, times);
+        WriteArray(span, offset + 0x14, valueCount, values);
+    }
+
+    private static void WriteRange(Span<byte> span, int offset)
+    {
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(offset, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(offset + 4, 4), 1);
+    }
+
+    private static void WriteTimes(Span<byte> span, int offset)
+    {
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(offset, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(offset + 4, 4), 1000);
+    }
+
+    private static void WriteSingle(Span<byte> span, int offset, float value)
+        => BinaryPrimitives.WriteInt32LittleEndian(span.Slice(offset, 4), BitConverter.SingleToInt32Bits(value));
+
+    private sealed class Vector3EqualityComparer(float tolerance) : IEqualityComparer<Vector3>
+    {
+        public bool Equals(Vector3 left, Vector3 right)
+            => Vector3.DistanceSquared(left, right) <= tolerance * tolerance;
+
+        public int GetHashCode(Vector3 value) => value.GetHashCode();
     }
 
     private static void WriteArray(Span<byte> span, int countOffset, int count, int offset)

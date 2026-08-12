@@ -14,6 +14,17 @@ belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
   capture completion/stop release it. Active directional rendering remains separate.
 - Focused core proof and real-client playback/unload proof remain separate; the latter is user-owned.
 
+## 2026-08-12 — Spec 144 cross-era client camera import repair
+
+- Routed loose and loaded-client `.m2` camera imports through `M2ModelReaderDispatcher` instead of
+  the later-era reader directly.
+- Added explicit MD20 `0x109+` modern camera records with strict `0x74` span validation; removed
+  the prior unconditional camera suppression that caused `cameraIndex` failures.
+- Added the documented MD20 `0x100` early camera layout: `0x7c` records, old `0x1c` tracks, range
+  slicing, and normalization into the shared sampler without changing later M2 track semantics.
+- Focused source proof is 35 passing tests. Archived Cata `FlybyUndead` and `FlybyDwarf` both inspect
+  as MD20 `0x109` with `cameras=1`; viewer playback/origin placement remains user-owned proof.
+
 ## 2026-08-12 — Spec 142 bounded camera-centered residency
 
 - Added a pure `CameraTileWindowSelector` with deterministic bounded retention; radius two is the

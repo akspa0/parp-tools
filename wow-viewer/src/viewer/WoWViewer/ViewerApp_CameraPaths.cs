@@ -5,6 +5,7 @@ using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.Mdx;
 using WowViewer.Core.M2;
 using WowViewer.Core.IO.M2;
+using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.Runtime.M2;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
@@ -982,7 +983,7 @@ public partial class ViewerApp
         try
         {
             using FileStream stream = File.OpenRead(path);
-            M2ModelDocument model = M2ModelReader.Read(stream, path);
+            M2ModelDocument model = M2ModelReaderDispatcher.Read(stream, path);
             M2CameraPathDocument imported = M2CameraPathImporter.Import(model);
             string metadataPath = path + ".json";
             if (File.Exists(metadataPath))
@@ -1044,7 +1045,7 @@ public partial class ViewerApp
             if (extension == ".m2")
             {
                 using MemoryStream stream = new(bytes, writable: false);
-                M2ModelDocument model = M2ModelReader.Read(stream, assetPath);
+                M2ModelDocument model = M2ModelReaderDispatcher.Read(stream, assetPath);
                 imported = M2CameraPathImporter.Import(model, _cameraPathImportCameraIndex, _cameraPathImportSequenceIndex, _cameraPathImportSampleIntervalMs);
             }
             else
