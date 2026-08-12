@@ -4,7 +4,8 @@
 
 **Created**: 2026-07-14
 
-**Status**: Active — 1.0.0 (`MD20`, version `0x100`) is the current implementation slice.
+**Status**: Active — 1.0.0 (`MD20`, version `0x100`) remains the completed native slice; the
+2.x/3.0.x embedded-profile route is now the next implementation slice.
 
 **Input**: User description: "M2 model rendering support for legacy client versions 1.0.0 through 2.4.3 (Vanilla through end of The Burning Crusade). 1.x client assets are M2 (`MD20`), not MDX. The viewer must dispatch each supported layout to its own M2 reader and must never advise an MDX/MDL substitute for a 1.x M2 asset. Client builds 0.11 and 0.12 use the older MDX model type (not M2) and are already handled by the MDX path."
 
@@ -148,6 +149,14 @@ the recovered header/skin layout for each is captured in the research notes with
 - **FR-011**: The 1.0.0 era-100 route MUST submit its embedded M2 division through `M2Renderer` from
   an `M2StaticRenderModel`. It MUST NOT construct `MdxFile`, `MdxRenderer`, or an M2-to-MDX
   compatibility model on that route.
+- **FR-012**: The profiled 2.x and 3.0.x embedded-profile route MUST submit its embedded geometry
+  through the native `M2StaticRenderModel` path when no external `.skin` is present. The world and
+  WMO doodad loaders MUST NOT make the M2-to-MDX conversion path the normal implementation for
+  these profiles.
+- **FR-013**: Legacy embedded-profile material state MUST preserve the decoded render-flag blend
+  mode and texture lookup decision when it crosses into the native runtime model. Alpha blend,
+  additive, modulation, and alpha-key materials MUST remain distinguishable; missing or ambiguous
+  material metadata MUST be reported as a route/parse failure rather than silently relabeled opaque.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -181,6 +190,9 @@ the recovered header/skin layout for each is captured in the research notes with
 - **SC-006**: No regression: WotLK+ (264+) models that render today still render after the changes.
 - **SC-007**: No malformed or misidentified legacy M2 causes the viewer to crash; worst case is a
   graceful fallback to bounding-box or partial render.
+- **SC-008**: A profiled 2.x/3.0.x M2 with an embedded root profile and no external `.skin` records
+  `NativeEmbeddedProfile` for both world placements and WMO doodads, with zero M2-to-MDX conversion
+  required on the successful route.
 
 ## Assumptions
 
@@ -197,5 +209,8 @@ the recovered header/skin layout for each is captured in the research notes with
 - Animation, particles, ribbons, attachments, and bone-driven deformation correctness are out of scope
   for this feature — the goal is static mesh + material rendering. Vertex-packing/deformation issues, if
   they surface, are tracked separately from the empty-box problem.
+- Full multi-stage M2 effect/shader parity remains a separate renderer slice. The native runtime
+  currently consumes the primary texture binding while retaining the complete decoded batch metadata
+  for subsequent shader work; this slice is about removing the incorrect MDX runtime ownership.
 - This is deliberately investigation-first: understanding and documenting each version's layout is a
   first-class deliverable, not just the code changes.

@@ -68,6 +68,7 @@ public partial class ViewerApp
         public float PositionZ { get; set; }
         public float Yaw { get; set; }
         public float Pitch { get; set; }
+        public float Roll { get; set; }
         public float FovDegrees { get; set; }
     }
 
@@ -423,7 +424,7 @@ public partial class ViewerApp
         float facingDegrees = GetWorldFacingDegrees(shot.Yaw);
         string facingLabel = GetWorldFacingLabel(facingDegrees);
 
-        return $"Scene: map={shot.MapName} build={shot.BuildVersion} WoW=({wowX:F1}, {wowY:F1}, {wowZ:F1}) Facing={facingDegrees:F1}° {facingLabel} Local=({shot.PositionX:F1}, {shot.PositionY:F1}, {shot.PositionZ:F1}) Yaw={shot.Yaw:F1} Pitch={shot.Pitch:F1} FOV={shot.FovDegrees:F1}";
+        return $"Scene: map={shot.MapName} build={shot.BuildVersion} WoW=({wowX:F1}, {wowY:F1}, {wowZ:F1}) Facing={facingDegrees:F1}° {facingLabel} Local=({shot.PositionX:F1}, {shot.PositionY:F1}, {shot.PositionZ:F1}) Yaw={shot.Yaw:F1} Pitch={shot.Pitch:F1} Roll={shot.Roll:F1} FOV={shot.FovDegrees:F1}";
     }
 
     private void LogSceneBookmark(CameraShotPoint shot)
@@ -457,6 +458,7 @@ public partial class ViewerApp
             PositionZ = _camera.Position.Z,
             Yaw = _camera.Yaw,
             Pitch = _camera.Pitch,
+            Roll = _camera.Roll,
             FovDegrees = _fovDegrees,
         };
     }
@@ -466,6 +468,7 @@ public partial class ViewerApp
         _camera.Position = new Vector3(shot.PositionX, shot.PositionY, shot.PositionZ);
         _camera.Yaw = shot.Yaw;
         _camera.Pitch = shot.Pitch;
+        _camera.Roll = shot.Roll;
         _fovDegrees = Math.Clamp(shot.FovDegrees, 20f, 90f);
     }
 
@@ -548,6 +551,7 @@ public partial class ViewerApp
                 PositionZ = shot.PositionZ,
                 Yaw = shot.Yaw,
                 Pitch = shot.Pitch,
+                Roll = shot.Roll,
                 FovDegrees = shot.FovDegrees,
             },
             OutputPath = outputPath,

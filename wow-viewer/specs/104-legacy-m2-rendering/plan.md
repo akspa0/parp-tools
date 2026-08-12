@@ -97,6 +97,20 @@ check. Until then, Plan 104 is not done.
 - **TBC 0x101–0x107**: one format boundary at a time after the 1.x route is signed off.
 - **0.11/0.12**: retain their working pre-`0x100` route; only trace if a real regression is found.
 
+## Phase 3 — Native 2.x/3.0.x embedded-profile handoff
+
+1. Reuse the existing profiled embedded-root parser and material metadata extraction; do not
+   introduce a second legacy M2 reader in the viewer.
+2. Convert its parsed geometry, batches, render flags, and texture lookup tables into the shared
+   `M2GeometryDocument`/`M2SkinDocument` shape used by the native static runtime builder.
+3. Route world placements and WMO M2 doodads with no external `.skin` through
+   `M2Renderer(GL, M2StaticRenderModel, ...)`; retain M2-to-MDX only as an explicit failure fallback.
+4. Record the route as `NativeEmbeddedProfile` so a real-client capture can prove whether the
+   legacy model avoided the compatibility renderer.
+
+**Gate**: focused build/test proof plus a user-run 2.x or 3.0.x client capture showing the native
+route, visible geometry, and material blend counts. This is not visual shader parity signoff.
+
 ## Evidence and operator rules
 
 - Ghidra static evidence: [research-1.0.0-ghidra-trace.md](research-1.0.0-ghidra-trace.md).

@@ -85,7 +85,7 @@ public partial class ViewerApp
         ImGui.Separator();
 
         // Log entries in scrollable child window
-        if (ImGui.BeginChild("LogEntries", new Vector2(0, 0), true))
+        if (ImGui.BeginChild("LogEntries", new Vector2(0, 0), true, ImGuiWindowFlags.None))
         {
             var history = ViewerLog.GetHistory();
 
@@ -106,7 +106,7 @@ public partial class ViewerApp
                 string levelStr = entry.Lvl.ToString().PadRight(9);
                 string catStr = entry.Cat.ToString().PadRight(10);
 
-                ImGui.TextUnformatted($"[{timestamp}] [{levelStr}] [{catStr}] {entry.Message}");
+                ImGui.TextWrapped($"[{timestamp}] [{levelStr}] [{catStr}] {entry.Message}");
 
                 ImGui.PopStyleColor();
             }

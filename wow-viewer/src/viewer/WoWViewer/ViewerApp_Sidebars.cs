@@ -533,7 +533,13 @@ public partial class ViewerApp
             {
                 ImGui.SetNextItemOpen(true, ImGuiCond.Once);
                 if (ImGui.CollapsingHeader("World Overview", ImGuiTreeNodeFlags.DefaultOpen))
-                    DrawWorldOverviewContent();
+                {
+                    float overviewHeight = MathF.Min(340f, MathF.Max(210f, ImGui.GetContentRegionAvail().Y * 0.42f));
+                    if (ImGui.BeginChild("##LeftWorldOverview", new Vector2(0f, overviewHeight), true,
+                        ImGuiWindowFlags.None))
+                        DrawWorldOverviewContent();
+                    ImGui.EndChild();
+                }
                 ImGui.Separator();
             }
 
@@ -683,7 +689,7 @@ public partial class ViewerApp
             ImGui.TextDisabled($"WDL previews: {previewWarmup.ready}/{previewWarmup.total} cached, {previewWarmup.loading} warming, {previewWarmup.failed} failed");
         ImGui.Separator();
 
-        float listHeight = 300f;
+        float listHeight = MathF.Min(300f, MathF.Max(120f, ImGui.GetContentRegionAvail().Y - 34f));
         if (ImGui.BeginChild("MapList", new Vector2(0, listHeight), true))
         {
             var style = ImGui.GetStyle();
@@ -3742,19 +3748,35 @@ public partial class ViewerApp
 
     private void DrawWorkbenchContent()
     {
-        // Top tab bar inside the workbench (071: Model / World / Tools)
-        // Use FittingPolicyScroll to prevent text scaling when many tabs
-        if (ImGui.BeginTabBar("##WorkbenchTopTabs", ImGuiTabBarFlags.FittingPolicyScroll))
+        // Main pages use a vertical rail so the page hierarchy remains visible
+        // at compact widths. Nested page strips remain inside the content region.
+        if (ImGui.BeginChild("##WorkbenchPageRail", new Vector2(92f, 0f), true,
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
         {
+            ImGui.TextDisabled("Pages");
+            ImGui.Separator();
             DrawTopTabButton(WorkbenchTab.Model, "Model");
             DrawTopTabButton(WorkbenchTab.World, "World");
             DrawTopTabButton(WorkbenchTab.Tools, "Tools");
-            ImGui.EndTabBar();
+        }
+        ImGui.EndChild();
+        ImGui.SameLine();
+
+        if (!ImGui.BeginChild("##WorkbenchPageContent", new Vector2(0f, 0f), false,
+            ImGuiWindowFlags.None))
+        {
+            ImGui.EndChild();
+            return;
         }
 
         // Sub-tab bar inside the workbench
         string[] labels = WorkbenchNavigator.GetBottomTabLabels(_activeTopTab);
-        if (labels.Length == 0) return;
+        if (labels.Length == 0)
+        {
+            ImGui.TextDisabled("No pages are available for this workspace.");
+            ImGui.EndChild();
+            return;
+        }
 
         if (_activeBottomTabIndex < 0 || _activeBottomTabIndex >= labels.Length)
             _activeBottomTabIndex = 0;
@@ -3775,7 +3797,7 @@ public partial class ViewerApp
 
         // Active sub-tab content (in a child for scrollability)
         if (ImGui.BeginChild("##WorkbenchSubTabContent", new Vector2(0, 0), false,
-            ImGuiWindowFlags.HorizontalScrollbar))
+            ImGuiWindowFlags.None))
         {
             switch (_activeTopTab)
             {
@@ -3791,12 +3813,19 @@ public partial class ViewerApp
             }
         }
         ImGui.EndChild();
+        ImGui.EndChild();
     }
 
     private void DrawTopTabButton(WorkbenchTab tab, string label)
     {
         bool selected = _activeTopTab == tab;
-        if (ImGui.TabItemButton(label, selected ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+        if (selected)
+            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.38f, 0.25f, 0.08f, 1f));
+        bool clicked = ImGui.Button(label, new Vector2(-1f, 0f));
+        if (selected)
+            ImGui.PopStyleColor();
+
+        if (clicked)
         {
             _activeTopTab = tab;
             _activeBottomTabIndex = 0;

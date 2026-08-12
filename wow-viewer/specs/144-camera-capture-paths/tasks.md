@@ -14,3 +14,8 @@
 - [x] T012 Add persisted opt-in terrain-height and conservative resident-WMO-bounds collision resolution for path scrubbing/playback.
 - [x] T013 Add MDX camera sampling proof, build/test the viewer slice, and update continuity docs.
 - [ ] T014 User-run real-client validation: select built-in client cameras, verify imported tracks, scrub/play with collision enabled, and confirm capture output follows the constrained path.
+- [x] T015 Fix path JSON serialization for numeric Vector3 position/target components and apply roll in the free-camera view.
+- [x] T016 Add opt-in keyboard-only camera-path authoring with visible keybindings for movement, roll, timeline, key lifecycle, playback, and save/export.
+- [ ] T017 User-run validation: create a path with WASD and keyboard shortcuts, verify numeric camera positions and roll in JSON, reload it, and confirm rolled playback.
+- [x] T018 Resolve built-in client FlyBy origins from `CinematicCamera.dbc`, apply origin/facing to local M2/MDX camera tracks once, persist origin/tile provenance, and add focused placement coverage.
+- [ ] T019 User-run validation: import the Undead FlyBy from the loaded client, confirm the Camera Path panel reports DBC tile `(28,28)`, and verify playback begins at the crypt WMO and ends over the Undead starting zone.

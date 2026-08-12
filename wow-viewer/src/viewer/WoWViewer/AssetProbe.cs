@@ -317,6 +317,35 @@ var runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(modelBytes, s
             }
         }
 
+        if (WarcraftNetM2Adapter.SupportsEmbeddedNativeRoute(buildVersion))
+        {
+            try
+            {
+                M2StaticRenderModel runtimeModel = WarcraftNetM2Adapter.BuildEmbeddedStaticRenderModel(
+                    modelBytes,
+                    normalizedModelPath,
+                    buildVersion);
+                int vertexCount = runtimeModel.Sections.Sum(static section => section.Vertices.Count);
+                int triangleCount = runtimeModel.Sections.Sum(static section => section.Indices.Count / 3);
+                int transparentSectionCount = runtimeModel.Sections.Count(static section => section.Material.IsTransparent);
+                var runtimeRoute = M2RouteDecision.Create(
+                    normalizedModelPath,
+                    profile.ProfileId,
+                    M2RouteType.NativeEmbeddedProfile,
+                    M2RouteType.NativeEmbeddedProfile,
+                    fallbackReason: "No external .skin resolved; native embedded root-profile");
+                Console.WriteLine(M2RouteDiagnostics.FormatRouteDecision(runtimeRoute));
+                Console.WriteLine("[M2-RUNTIME-PROBE] Selected embedded root profile");
+                Console.WriteLine($"[M2-RUNTIME-PROBE] sections={runtimeModel.Sections.Count} transparentSections={transparentSectionCount} vertices={vertexCount} triangles={triangleCount} boundsMin={runtimeModel.BoundsMin} boundsMax={runtimeModel.BoundsMax}");
+                return;
+            }
+            catch (Exception ex)
+            {
+                lastSkinFailure = ex;
+                Console.WriteLine($"[M2-RUNTIME-PROBE] Embedded native route failed: {ex.Message}");
+            }
+        }
+
         throw new InvalidDataException(
             $"No usable .skin for runtime probe {Path.GetFileName(normalizedModelPath)}. candidates={skinCandidates.Count}, missing={missingSkinCount}, failed={failedSkinCount}.",
             lastSkinFailure);

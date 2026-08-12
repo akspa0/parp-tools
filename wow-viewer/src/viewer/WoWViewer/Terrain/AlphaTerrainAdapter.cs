@@ -707,34 +707,15 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         if (MathF.Abs(liquidHeight) > 50000f)
             return null;
 
-        // Build flat 9×9 grid at the liquid height
+        // Alpha MCLQ does not contain the later 81-vertex height grid. The bytes
+        // after min/max are flow state, so treating them as vertex heights turns
+        // arbitrary flow values into huge Z excursions and produces the stretched
+        // triangles visible whenever the camera is not looking straight down.
+        // Keep Alpha liquids planar at the decoded surface height. Later clients
+        // use StandardTerrainAdapter's profile-aware MCLQ decoder instead.
+        // Build flat 9×9 grid at the liquid height.
         var heights = new float[81];
         Array.Fill(heights, liquidHeight);
-
-        // Try to read 81 vertex heights if data is large enough (LK-style 804 bytes)
-        // Some Alpha chunks may have the full vertex grid
-        if (mclqData.Length >= 8 + 81 * 8)
-        {
-            bool hasNonZeroVertex = false;
-            var vertHeights = new float[81];
-            int off = 8;
-            for (int i = 0; i < 81; i++)
-            {
-                // Each vertex is 8 bytes: first 4 = flow/depth union, second 4 = float height
-                vertHeights[i] = BitConverter.ToSingle(mclqData, off + 4);
-                off += 8;
-                if (MathF.Abs(vertHeights[i]) > 0.01f)
-                    hasNonZeroVertex = true;
-            }
-            // Only use vertex heights if they contain actual data (not all zeros)
-            if (hasNonZeroVertex)
-            {
-                for (int i = 0; i < 81; i++)
-                    heights[i] = vertHeights[i];
-                if (chunkX == 0 && chunkY == 0)
-                    ViewerLog.Trace($"[MCLQ]   Using per-vertex heights: h[0]={heights[0]:F2} h[40]={heights[40]:F2}");
-            }
-        }
 
         return new LiquidChunkData
         {

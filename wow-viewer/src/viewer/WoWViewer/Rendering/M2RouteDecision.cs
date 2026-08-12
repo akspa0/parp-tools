@@ -10,6 +10,8 @@ public enum M2RouteType
     AdapterSkin,
     /// <summary>Primary for early builds: embedded root-profile geometry (no external .skin).</summary>
     AdapterEmbeddedProfile,
+    /// <summary>Native static M2 renderer fed by an embedded legacy root profile.</summary>
+    NativeEmbeddedProfile,
     /// <summary>Fallback: byte-level M2-to-MDX conversion.</summary>
     ConversionFallback,
     /// <summary>Legacy: standard MDX loader (non-M2 model).</summary>

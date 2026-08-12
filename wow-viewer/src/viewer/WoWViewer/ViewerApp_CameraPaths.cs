@@ -7,6 +7,8 @@ using WowViewer.Core.M2;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.Runtime.M2;
 using WoWViewer.Rendering;
+using WoWViewer.Terrain;
+using Silk.NET.Input;
 
 namespace WoWViewer;
 
@@ -38,6 +40,24 @@ public partial class ViewerApp
     private int _cameraPathPreloadSampleSpacingMs = 500;
     private CameraPathPreloadState? _cameraPathPreload;
     private bool _cameraPathVideoCapturePending;
+    private bool _cameraPathKeyboardAuthoring;
+    private int _cameraPathKeyboardTimeStepMs = 100;
+    private float _cameraPathKeyboardRollStepDegrees = 1f;
+
+    private bool _cameraPathKeyWasPressed;
+    private bool _cameraPathUpdateWasPressed;
+    private bool _cameraPathDeleteWasPressed;
+    private bool _cameraPathPlayWasPressed;
+    private bool _cameraPathSaveWasPressed;
+    private bool _cameraPathExportWasPressed;
+    private bool _cameraPathLeftWasPressed;
+    private bool _cameraPathRightWasPressed;
+    private bool _cameraPathHomeWasPressed;
+    private bool _cameraPathEndWasPressed;
+    private bool _cameraPathRetimingLeftWasPressed;
+    private bool _cameraPathRetimingRightWasPressed;
+    private bool _cameraPathPreviousTimeWasPressed;
+    private bool _cameraPathNextTimeWasPressed;
 
     private const int MaxCameraPathPreloadTiles = 512;
 
@@ -112,12 +132,27 @@ public partial class ViewerApp
         string currentMap = GetCurrentCaptureMapName();
         string currentBuild = GetCurrentCaptureBuildVersion();
         ImGui.TextDisabled($"Map: {currentMap}  Build: {currentBuild}");
+        if (_cameraPath.HasCinematicCameraOrigin)
+        {
+            ImGui.TextDisabled(
+                $"DBC origin: {_cameraPath.CinematicCameraModel}  tile " +
+                $"({_cameraPath.CinematicCameraOriginTileX}, {_cameraPath.CinematicCameraOriginTileY})");
+        }
 
         string name = _cameraPathName;
         if (ImGui.InputText("Path Name", ref name, 128))
             _cameraPathName = name;
 
         ImGui.TextDisabled($"Keys: {_cameraPath.Keyframes.Count}  Duration: {_cameraPath.DurationMs / 1000f:F2}s");
+        ImGui.Checkbox("Keyboard authoring mode", ref _cameraPathKeyboardAuthoring);
+        ImGui.SameLine();
+        int keyboardStep = _cameraPathKeyboardTimeStepMs;
+        if (ImGui.DragInt("Time Step (ms)", ref keyboardStep, 1f, 10, 5000))
+            _cameraPathKeyboardTimeStepMs = Math.Clamp(keyboardStep, 10, 5000);
+        float rollStep = _cameraPathKeyboardRollStepDegrees;
+        if (ImGui.DragFloat("Roll Step (deg)", ref rollStep, 0.25f, 0.1f, 45f))
+            _cameraPathKeyboardRollStepDegrees = Math.Clamp(rollStep, 0.1f, 45f);
+        ImGui.TextDisabled("Keyboard: WASD move | Z/X roll | K add at playhead | U update | Delete remove | Ctrl+Up/Down time | arrows select | Ctrl+Left/Right retime | Space play | Ctrl+S save | Ctrl+E export");
         float playhead = (float)Math.Clamp(_cameraPathTimeSeconds, 0d, _cameraPath.DurationMs / 1000d);
         if (ImGui.SliderFloat("Timeline", ref playhead, 0f, Math.Max(0.01f, _cameraPath.DurationMs / 1000f), $"{playhead:F2}s"))
         {
@@ -156,6 +191,13 @@ public partial class ViewerApp
             int pending = _worldScene?.PendingCapturePreloadLoadCount ?? 0;
             ImGui.TextDisabled($"Path preload: {state}  tiles {preload.Tiles.Count}  pending {pending}  stable {preload.StableFrames}/2");
         }
+
+        if (_cameraPathVideoCapturePending)
+            ImGui.TextColored(new Vector4(1f, 0.8f, 0.25f, 1f), "Play + Video is waiting for the path warmup to finish.");
+        else if (_cameraPathVideoCaptureActive)
+            ImGui.TextColored(new Vector4(0.3f, 1f, 0.5f, 1f), "Play + Video is recording.");
+        else if (!string.IsNullOrWhiteSpace(_statusMessage))
+            ImGui.TextWrapped($"Status: {_statusMessage}");
 
         ImGui.Separator();
         ImGui.TextDisabled("Path collision");
@@ -197,11 +239,7 @@ public partial class ViewerApp
             QueueCameraPathKeyCaptures(includeUi: true);
 
         if (ImGui.Button("Delete Selected") && _selectedCameraPathKey >= 0 && _selectedCameraPathKey < _cameraPath.Keyframes.Count)
-        {
-            _cameraPath.Keyframes.RemoveAt(_selectedCameraPathKey);
-            _selectedCameraPathKey = Math.Clamp(_selectedCameraPathKey, -1, _cameraPath.Keyframes.Count - 1);
-            M2CameraPathEvaluator.NormalizeAndValidate(_cameraPath);
-        }
+            DeleteSelectedCameraPathKey();
 
         ImGui.SameLine();
         if (ImGui.Button("Clear Path"))
@@ -222,7 +260,7 @@ public partial class ViewerApp
                 if (ImGui.Selectable($"{index + 1:D2}  {key.TimeMs / 1000f:F2}s##camera_path_key_{index}", index == _selectedCameraPathKey))
                     _selectedCameraPathKey = index;
                 if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip($"pos={key.Position}\ntarget={key.Target}\nfov={key.FovDegrees:F1}");
+                    ImGui.SetTooltip($"pos={key.Position}\ntarget={key.Target}\nfov={key.FovDegrees:F1}\nroll={key.RollDegrees:F1}");
             }
         }
         ImGui.EndChild();
@@ -261,6 +299,165 @@ public partial class ViewerApp
         ImGui.TextDisabled("JSON is the lossless authored path; native M2 is an interoperability export with map/build metadata in the sidecar JSON.");
     }
 
+    private bool HandleCameraPathKeyboardInput(IKeyboard keyboard, bool ctrlDown, bool shiftDown)
+    {
+        if (!_cameraPathKeyboardAuthoring || !IsCaptureKeyboardContextActive())
+            return false;
+
+        ImGuiIOPtr io = ImGui.GetIO();
+        if (io.WantTextInput)
+            return false;
+
+        bool action = false;
+        if (PressedOnce(keyboard.IsKeyPressed(Key.K), ref _cameraPathKeyWasPressed))
+        {
+            AddCameraPathKeyAtTime((int)Math.Round(_cameraPathTimeSeconds * 1000d));
+            action = true;
+        }
+        if (PressedOnce(keyboard.IsKeyPressed(Key.U), ref _cameraPathUpdateWasPressed))
+        {
+            UpdateSelectedCameraPathKey();
+            action = true;
+        }
+        if (PressedOnce(keyboard.IsKeyPressed(Key.Delete), ref _cameraPathDeleteWasPressed))
+        {
+            DeleteSelectedCameraPathKey();
+            action = true;
+        }
+        if (PressedOnce(keyboard.IsKeyPressed(Key.Space), ref _cameraPathPlayWasPressed))
+        {
+            if (_cameraPathPlaying)
+                StopCameraPathPlayback();
+            else
+                StartCameraPathPlayback();
+            action = true;
+        }
+        if (PressedOnce(ctrlDown && keyboard.IsKeyPressed(Key.S), ref _cameraPathSaveWasPressed))
+        {
+            SaveCameraPathJson();
+            action = true;
+        }
+        if (PressedOnce(ctrlDown && keyboard.IsKeyPressed(Key.E), ref _cameraPathExportWasPressed))
+        {
+            SaveCameraPathM2();
+            action = true;
+        }
+        bool retimeLeft = ctrlDown && keyboard.IsKeyPressed(Key.Left);
+        bool retimeRight = ctrlDown && keyboard.IsKeyPressed(Key.Right);
+        if (PressedOnce(retimeLeft, ref _cameraPathRetimingLeftWasPressed))
+        {
+            NudgeSelectedCameraPathKeyTime(-_cameraPathKeyboardTimeStepMs);
+            action = true;
+        }
+        if (PressedOnce(retimeRight, ref _cameraPathRetimingRightWasPressed))
+        {
+            NudgeSelectedCameraPathKeyTime(_cameraPathKeyboardTimeStepMs);
+            action = true;
+        }
+        if (!ctrlDown && PressedOnce(keyboard.IsKeyPressed(Key.Left), ref _cameraPathLeftWasPressed))
+        {
+            SelectCameraPathKey(-1);
+            action = true;
+        }
+        if (!ctrlDown && PressedOnce(keyboard.IsKeyPressed(Key.Right), ref _cameraPathRightWasPressed))
+        {
+            SelectCameraPathKey(1);
+            action = true;
+        }
+        if (PressedOnce(keyboard.IsKeyPressed(Key.Home), ref _cameraPathHomeWasPressed))
+        {
+            _cameraPathTimeSeconds = 0d;
+            ApplyCameraPathAtCurrentTime();
+            action = true;
+        }
+        if (PressedOnce(keyboard.IsKeyPressed(Key.End), ref _cameraPathEndWasPressed))
+        {
+            _cameraPathTimeSeconds = _cameraPath.DurationMs / 1000d;
+            ApplyCameraPathAtCurrentTime();
+            action = true;
+        }
+        if (PressedOnce(ctrlDown && keyboard.IsKeyPressed(Key.Down), ref _cameraPathPreviousTimeWasPressed))
+        {
+            NudgeCameraPathPlayhead(-_cameraPathKeyboardTimeStepMs);
+            action = true;
+        }
+        if (PressedOnce(ctrlDown && keyboard.IsKeyPressed(Key.Up), ref _cameraPathNextTimeWasPressed))
+        {
+            NudgeCameraPathPlayhead(_cameraPathKeyboardTimeStepMs);
+            action = true;
+        }
+
+        bool rollLeft = keyboard.IsKeyPressed(Key.Z);
+        bool rollRight = keyboard.IsKeyPressed(Key.X);
+        if (rollLeft || rollRight)
+        {
+            float direction = (rollRight ? 1f : 0f) - (rollLeft ? 1f : 0f);
+            _camera.Roll = NormalizeRollDegrees(_camera.Roll + direction * _cameraPathKeyboardRollStepDegrees * (shiftDown ? 5f : 1f));
+            action = true;
+        }
+        return action;
+    }
+
+    private static bool PressedOnce(bool pressed, ref bool wasPressed)
+    {
+        bool triggered = pressed && !wasPressed;
+        wasPressed = pressed;
+        return triggered;
+    }
+
+    private void SelectCameraPathKey(int delta)
+    {
+        if (_cameraPath.Keyframes.Count == 0)
+        {
+            _selectedCameraPathKey = -1;
+            return;
+        }
+
+        int current = _selectedCameraPathKey < 0 ? (delta < 0 ? 0 : -1) : _selectedCameraPathKey;
+        _selectedCameraPathKey = Math.Clamp(current + delta, 0, _cameraPath.Keyframes.Count - 1);
+    }
+
+    private void NudgeCameraPathPlayhead(int deltaMs)
+    {
+        _cameraPathTimeSeconds = Math.Clamp(
+            _cameraPathTimeSeconds + deltaMs / 1000d,
+            0d,
+            Math.Max(0d, _cameraPath.DurationMs / 1000d));
+        ApplyCameraPathAtCurrentTime();
+    }
+
+    private void NudgeSelectedCameraPathKeyTime(int deltaMs)
+    {
+        if (_selectedCameraPathKey < 0 || _selectedCameraPathKey >= _cameraPath.Keyframes.Count)
+            return;
+
+        M2CameraPathKeyframe key = _cameraPath.Keyframes[_selectedCameraPathKey];
+        key.TimeMs = Math.Max(0, key.TimeMs + deltaMs);
+        M2CameraPathEvaluator.NormalizeAndValidate(_cameraPath);
+        _selectedCameraPathKey = _cameraPath.Keyframes.IndexOf(key);
+        _statusMessage = $"Retimed camera path key {_selectedCameraPathKey + 1} to {key.TimeMs} ms.";
+    }
+
+    private void DeleteSelectedCameraPathKey()
+    {
+        if (_selectedCameraPathKey < 0 || _selectedCameraPathKey >= _cameraPath.Keyframes.Count)
+            return;
+
+        _cameraPath.Keyframes.RemoveAt(_selectedCameraPathKey);
+        _selectedCameraPathKey = Math.Clamp(_selectedCameraPathKey, -1, _cameraPath.Keyframes.Count - 1);
+        M2CameraPathEvaluator.NormalizeAndValidate(_cameraPath);
+        _statusMessage = "Deleted selected camera path key.";
+    }
+
+    private static float NormalizeRollDegrees(float roll)
+    {
+        while (roll > 180f)
+            roll -= 360f;
+        while (roll < -180f)
+            roll += 360f;
+        return roll;
+    }
+
     private void DrawSelectedCameraPathKey(M2CameraPathKeyframe key)
     {
         M2CameraPathKeyframe selectedKey = key;
@@ -270,6 +467,9 @@ public partial class ViewerApp
         float fov = key.FovDegrees;
         if (ImGui.DragFloat("FOV", ref fov, 0.25f, 1f, 179f))
             key.FovDegrees = fov;
+        float roll = key.RollDegrees;
+        if (ImGui.DragFloat("Roll (deg)", ref roll, 0.25f, -180f, 180f))
+            key.RollDegrees = NormalizeRollDegrees(roll);
         Vector3 position = key.Position;
         if (ImGui.DragFloat3("Position", ref position, 0.5f))
             key.Position = position;
@@ -302,6 +502,7 @@ public partial class ViewerApp
             Position = _camera.Position,
             Target = _camera.Position + _camera.Forward * 100f,
             FovDegrees = _fovDegrees,
+            RollDegrees = _camera.Roll,
         };
         _cameraPath.Keyframes.Add(key);
         _selectedCameraPathKey = _cameraPath.Keyframes.Count - 1;
@@ -316,6 +517,7 @@ public partial class ViewerApp
         key.Position = _camera.Position;
         key.Target = _camera.Position + _camera.Forward * 100f;
         key.FovDegrees = _fovDegrees;
+        key.RollDegrees = _camera.Roll;
         _statusMessage = $"Updated camera path key {_selectedCameraPathKey + 1}.";
     }
 
@@ -331,6 +533,7 @@ public partial class ViewerApp
             return false;
         }
 
+        EnsureCameraPathBindingForCurrentMap();
         if (!IsCameraPathBoundToCurrentMap())
         {
             _statusMessage = $"Camera path is bound to {_cameraPath.MapName}/{_cameraPath.BuildVersion}; load that map/build before playback.";
@@ -374,6 +577,7 @@ public partial class ViewerApp
         }
 
         _cameraPathPlaying = false;
+        EndCameraPathPreload();
     }
 
     private bool ValidateCameraPathForPlayback()
@@ -384,6 +588,7 @@ public partial class ViewerApp
             return false;
         }
 
+        EnsureCameraPathBindingForCurrentMap();
         if (!IsCameraPathBoundToCurrentMap())
         {
             _statusMessage = $"Camera path is bound to {_cameraPath.MapName}/{_cameraPath.BuildVersion}; load that map/build before playback.";
@@ -456,6 +661,7 @@ public partial class ViewerApp
         }
 
         _camera.Position = resolvedPosition;
+        _camera.Roll = sample.RollDegrees;
         Vector3 direction = sample.Target - resolvedPosition;
         if (direction.LengthSquared() > 0.0001f)
         {
@@ -503,6 +709,7 @@ public partial class ViewerApp
                 PositionZ = key.Position.Z,
                 Yaw = MathF.Atan2(direction.Y, direction.X) * (180f / MathF.PI),
                 Pitch = MathF.Asin(Math.Clamp(direction.Z, -1f, 1f)) * (180f / MathF.PI),
+                Roll = key.RollDegrees,
                 FovDegrees = key.FovDegrees,
             };
             EnqueueShotCapture(
@@ -570,7 +777,10 @@ public partial class ViewerApp
             return;
 
         bool tilesReady = preload.Tiles.All(tile => _terrainManager.IsTileLoaded(tile.tileX, tile.tileY));
-        bool terrainReady = tilesReady && !_terrainManager.IsStreaming;
+        // Normal AOI streaming may still be loading unrelated tiles. The capture
+        // gate only needs the bounded path tile set resident; waiting on the
+        // global stream made Play + Video look dead on large maps.
+        bool terrainReady = tilesReady;
         bool objectsReady = _worldScene.PendingCapturePreloadLoadCount == 0;
         if (!terrainReady || !objectsReady)
         {
@@ -688,7 +898,7 @@ public partial class ViewerApp
         try
         {
             M2CameraPathEvaluator.NormalizeAndValidate(_cameraPath);
-            File.WriteAllText(path, JsonSerializer.Serialize(_cameraPath, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(path, JsonSerializer.Serialize(_cameraPath, M2CameraPathJson.CreateOptions(writeIndented: true)));
             _cameraPathFilePath = path;
             _statusMessage = $"Saved camera path: {path}";
         }
@@ -714,7 +924,7 @@ public partial class ViewerApp
         {
             M2CameraPathWriter.Write(path, _cameraPath);
             string sidecar = path + ".json";
-            File.WriteAllText(sidecar, JsonSerializer.Serialize(_cameraPath, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(sidecar, JsonSerializer.Serialize(_cameraPath, M2CameraPathJson.CreateOptions(writeIndented: true)));
             _cameraPathFilePath = path;
             _statusMessage = $"Saved native M2 camera path and metadata sidecar: {path}";
         }
@@ -731,7 +941,7 @@ public partial class ViewerApp
             return;
         try
         {
-            M2CameraPathDocument? loaded = JsonSerializer.Deserialize<M2CameraPathDocument>(File.ReadAllText(path));
+            M2CameraPathDocument? loaded = JsonSerializer.Deserialize<M2CameraPathDocument>(File.ReadAllText(path), M2CameraPathJson.CreateOptions());
             if (loaded == null)
                 throw new InvalidDataException("The camera path document was empty.");
             M2CameraPathEvaluator.NormalizeAndValidate(loaded);
@@ -743,6 +953,15 @@ public partial class ViewerApp
             _cameraPath.TerrainCollisionEnabled = loaded.TerrainCollisionEnabled;
             _cameraPath.WmoCollisionEnabled = loaded.WmoCollisionEnabled;
             _cameraPath.CollisionClearance = loaded.CollisionClearance;
+            _cameraPath.CoordinatesAreWorldSpace = loaded.CoordinatesAreWorldSpace;
+            _cameraPath.HasCinematicCameraOrigin = loaded.HasCinematicCameraOrigin;
+            _cameraPath.CinematicCameraId = loaded.CinematicCameraId;
+            _cameraPath.CinematicCameraModel = loaded.CinematicCameraModel;
+            _cameraPath.CinematicCameraOrigin = loaded.CinematicCameraOrigin;
+            _cameraPath.CinematicCameraOriginFacingRadians = loaded.CinematicCameraOriginFacingRadians;
+            _cameraPath.CinematicCameraOriginTileX = loaded.CinematicCameraOriginTileX;
+            _cameraPath.CinematicCameraOriginTileY = loaded.CinematicCameraOriginTileY;
+            _cameraPath.CinematicCameraOriginSource = loaded.CinematicCameraOriginSource;
             _cameraPath.Keyframes = loaded.Keyframes;
             _cameraPathName = loaded.Name;
             _cameraPathFilePath = path;
@@ -772,7 +991,7 @@ public partial class ViewerApp
             string metadataPath = path + ".json";
             if (File.Exists(metadataPath))
             {
-                M2CameraPathDocument? metadata = JsonSerializer.Deserialize<M2CameraPathDocument>(File.ReadAllText(metadataPath));
+                M2CameraPathDocument? metadata = JsonSerializer.Deserialize<M2CameraPathDocument>(File.ReadAllText(metadataPath), M2CameraPathJson.CreateOptions());
                 if (metadata != null)
                 {
                     imported.MapName = metadata.MapName;
@@ -785,15 +1004,9 @@ public partial class ViewerApp
                 imported.MapName = GetCurrentCaptureMapName();
                 imported.BuildVersion = GetCurrentCaptureBuildVersion();
             }
-            _cameraPath.Format = imported.Format;
-            _cameraPath.Name = imported.Name;
-            _cameraPath.MapName = imported.MapName;
-            _cameraPath.BuildVersion = imported.BuildVersion;
-            _cameraPath.Interpolation = imported.Interpolation;
-            _cameraPath.Keyframes = imported.Keyframes;
+            imported.CoordinatesAreWorldSpace = true;
+            ApplyImportedCameraPath(imported, path);
             _cameraPathName = imported.Name;
-            _cameraPathFilePath = string.Empty;
-            _selectedCameraPathKey = -1;
             _statusMessage = $"Imported M2 camera '{Path.GetFileName(path)}' as {imported.Keyframes.Count} keys for {imported.MapName}.";
         }
         catch (Exception ex)
@@ -846,8 +1059,26 @@ public partial class ViewerApp
 
             imported.MapName = GetCurrentCaptureMapName();
             imported.BuildVersion = GetCurrentCaptureBuildVersion();
+            CinematicCameraOrigin? origin = TryResolveCinematicCameraOrigin(assetPath);
+            if (origin != null)
+            {
+                M2CameraPathPlacement.ApplyCinematicCameraOrigin(
+                    imported,
+                    origin.Id,
+                    origin.Model,
+                    origin.Origin,
+                    origin.OriginFacingRadians,
+                    origin.TileX,
+                    origin.TileY);
+                _statusMessage = $"Resolved {Path.GetFileName(assetPath)} to CinematicCamera.dbc origin tile ({origin.TileX}, {origin.TileY}).";
+            }
+            else
+            {
+                imported.CoordinatesAreWorldSpace = true;
+                _statusMessage = $"Imported {extension.TrimStart('.').ToUpperInvariant()} camera without CinematicCamera.dbc origin; left track coordinates unchanged.";
+            }
             ApplyImportedCameraPath(imported, assetPath);
-            _statusMessage = $"Imported client {extension.TrimStart('.').ToUpperInvariant()} camera '{Path.GetFileName(assetPath)}' as {imported.Keyframes.Count} keys.";
+            _statusMessage += $" Imported client {extension.TrimStart('.').ToUpperInvariant()} camera '{Path.GetFileName(assetPath)}' as {imported.Keyframes.Count} keys.";
         }
         catch (Exception ex)
         {
@@ -865,6 +1096,15 @@ public partial class ViewerApp
         _cameraPath.TerrainCollisionEnabled = imported.TerrainCollisionEnabled;
         _cameraPath.WmoCollisionEnabled = imported.WmoCollisionEnabled;
         _cameraPath.CollisionClearance = imported.CollisionClearance;
+        _cameraPath.CoordinatesAreWorldSpace = imported.CoordinatesAreWorldSpace;
+        _cameraPath.HasCinematicCameraOrigin = imported.HasCinematicCameraOrigin;
+        _cameraPath.CinematicCameraId = imported.CinematicCameraId;
+        _cameraPath.CinematicCameraModel = imported.CinematicCameraModel;
+        _cameraPath.CinematicCameraOrigin = imported.CinematicCameraOrigin;
+        _cameraPath.CinematicCameraOriginFacingRadians = imported.CinematicCameraOriginFacingRadians;
+        _cameraPath.CinematicCameraOriginTileX = imported.CinematicCameraOriginTileX;
+        _cameraPath.CinematicCameraOriginTileY = imported.CinematicCameraOriginTileY;
+        _cameraPath.CinematicCameraOriginSource = imported.CinematicCameraOriginSource;
         _cameraPath.Keyframes = imported.Keyframes;
         _cameraPathName = imported.Name;
         _cameraPathImportPath = sourcePath;
@@ -873,10 +1113,34 @@ public partial class ViewerApp
         _cameraPathTimeSeconds = 0;
     }
 
+    private CinematicCameraOrigin? TryResolveCinematicCameraOrigin(string assetPath)
+    {
+        if (_dbcProvider == null
+            || string.IsNullOrWhiteSpace(_dbdDir)
+            || string.IsNullOrWhiteSpace(_dbcBuild))
+            return null;
+
+        var resolver = new CinematicCameraOriginResolver();
+        return resolver.TryResolve(_dbcProvider, _dbdDir, _dbcBuild, assetPath, out CinematicCameraOrigin? origin)
+            ? origin
+            : null;
+    }
+
     private void BindCameraPathToCurrentMap()
     {
         _cameraPath.Name = string.IsNullOrWhiteSpace(_cameraPathName) ? "camera_path" : _cameraPathName.Trim();
         _cameraPath.MapName = GetCurrentCaptureMapName();
         _cameraPath.BuildVersion = GetCurrentCaptureBuildVersion();
+    }
+
+    private void EnsureCameraPathBindingForCurrentMap()
+    {
+        bool missingMap = string.IsNullOrWhiteSpace(_cameraPath.MapName)
+            || string.Equals(_cameraPath.MapName, "unknown", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(_cameraPath.MapName, "standalone", StringComparison.OrdinalIgnoreCase);
+        bool missingBuild = string.IsNullOrWhiteSpace(_cameraPath.BuildVersion)
+            || string.Equals(_cameraPath.BuildVersion, "unknown_build", StringComparison.OrdinalIgnoreCase);
+        if (missingMap || missingBuild)
+            BindCameraPathToCurrentMap();
     }
 }

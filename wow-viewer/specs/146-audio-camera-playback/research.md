@@ -1,0 +1,77 @@
+# Research: World Audio and Camera Playback
+
+## Decision: Reuse the existing audio data contracts as the first boundary
+
+The repository already contains `AlphaAreaAudioCatalog`, `AlphaAreaAudioAssetResolver`,
+`AlphaAreaAudioCatalogReader`, and `AdtMcseReader`. These establish useful data ownership:
+area and MIDI-ambience metadata comes from build-aware DBC definitions, referenced assets can be
+resolved through loose or archive-backed client data, and MCSE records can preserve raw emitter
+bytes plus decoded standard-era positions. The new work should add runtime playback contracts on
+top of these readers rather than duplicate or replace them.
+
+## Decision: Make playback backend-neutral before selecting libraries
+
+The requested format range crosses several eras and runtime concerns: PCM/WAV, compressed MP3 and
+OGG, MIDI sequences, DLS/DirectSound banks, positional mixing, and audio capture/muxing. No single
+library has been proven in this repository to cover all of those requirements on every target
+platform. The first implementation phase therefore owns a small C# playback/mixing contract and a
+capability probe. Format-specific backends can be added behind that boundary after focused
+research and real-client samples identify the required decode and bank behavior.
+
+Python or command-line tooling may assist with offline inspection or conversion, but interactive
+viewer playback and the camera/capture transport remain C#-owned. This prevents the viewer from
+depending on a Python process for basic world audio and keeps the future world/session boundary
+usable by the eventual single-player client direction.
+
+## Decision: Camera audio is an explicit binding, not filename inference
+
+An M2/MDX camera track supplies camera motion, not necessarily a complete soundtrack declaration.
+The viewer may use proven client metadata, a project sidecar, or an explicit user selection. It
+must not infer a soundtrack merely because a similarly named MP3/OGG/WAV exists. `CinematicCamera`
+and `CinematicSequences` remain camera placement/sequence metadata; the audio source must be
+resolved from the client’s actual audio tables/assets or an authored project binding.
+
+## Decision: One logical transport owns preview and capture
+
+Camera preview, Play + Video, looping, pause, scrub, and stop need one timebase. The viewer should
+not start an independent audio player beside the camera transport. The transport reports its
+playhead, lifecycle, loop state, and capture relationship to both the camera evaluator and the
+audio runtime. If the capture path cannot ingest the live mix, the system reports a separate audio
+artifact or silent capture before finalization rather than implying muxed audio.
+
+## Decision: Area ambience and positional emitters are separate source classes
+
+Area ambience is a low-frequency state selected from the resolved area and time/underwater context.
+MCSE records are positional candidates tied to resident ADT tile/chunk content. They share buses and
+transport controls but have different lifetime, transition, attenuation, and streaming rules.
+The emitter evaluator must use the camera/player-head world position and bounded resident content;
+it must not load the whole map to produce sound.
+
+## Decision: Preserve unresolved audio evidence and fail closed
+
+Missing client files, archive failures, unsupported decoders, missing DLS banks, and DBC/DB2 schema
+gaps must remain distinguishable. Raw MCSE bytes may be retained for later archaeology, but no
+positional sound may be invented from an unproven field layout. A source failure must not disable
+unrelated ambience, emitters, rendering, or video capture.
+
+## Decision: Record the single-player client/server direction as a separate roadmap boundary
+
+The viewer is moving toward a drop-in single-player client experience. The eventual system may
+reuse Alpha-Core SQL data for NPCs and game objects and add a local server/session authority, while
+terrain reconstruction models and the viewer remain important upstream capabilities. That is a
+major architecture program, not a deliverable of the audio MVP. Spec 146 therefore exposes a
+world/session event seam and records the direction, but explicitly excludes server, login, AI,
+quest, and authoritative world-mutation implementation.
+
+## Open research gates before runtime implementation
+
+- Identify representative client-era samples and exact DBC/DB2 layouts for area music, sound IDs,
+  emitter identities, and any camera-specific audio associations.
+- Compare candidate C# playback backends for WAV/MP3/OGG, low-latency mixing, spatial attenuation,
+  Windows support, and cross-platform viability.
+- Determine whether MIDI/DLS playback is viable in-process, requires a platform bridge, or should
+  initially be an offline/diagnostic capability.
+- Determine whether the existing ffmpeg capture route can accept a live mixed audio stream without
+  introducing a second clock or drift.
+- Establish a focused fixture set and a user-run audible proof matrix before claiming format or
+  client-era support.

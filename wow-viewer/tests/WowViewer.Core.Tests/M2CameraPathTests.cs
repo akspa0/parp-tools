@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Text.Json;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.Runtime.M2;
 
@@ -73,5 +74,87 @@ public sealed class M2CameraPathTests
         Assert.Equal(path.Keyframes[0].Position, imported.Keyframes[0].Position);
         Assert.Equal(path.Keyframes[1].Target, imported.Keyframes[1].Target);
         Assert.Equal(35f, imported.Keyframes[0].FovDegrees, 2);
+    }
+
+    [Fact]
+    public void JsonOptions_PersistVectorCameraPositionTargetAndRoll()
+    {
+        M2CameraPathDocument path = new()
+        {
+            Keyframes =
+            [
+                new()
+                {
+                    TimeMs = 250,
+                    Position = new Vector3(1.25f, -2.5f, 3.75f),
+                    Target = new Vector3(4.5f, 5.5f, 6.5f),
+                    FovDegrees = 52f,
+                    RollDegrees = -17.5f,
+                },
+            ],
+        };
+
+        string json = JsonSerializer.Serialize(path, M2CameraPathJson.CreateOptions());
+        M2CameraPathDocument? roundTrip = JsonSerializer.Deserialize<M2CameraPathDocument>(json, M2CameraPathJson.CreateOptions());
+
+        Assert.NotNull(roundTrip);
+        M2CameraPathKeyframe key = Assert.Single(roundTrip!.Keyframes);
+        Assert.Equal(path.Keyframes[0].Position, key.Position);
+        Assert.Equal(path.Keyframes[0].Target, key.Target);
+        Assert.Equal(path.Keyframes[0].RollDegrees, key.RollDegrees);
+        Assert.Contains("\"X\":1.25", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Placement_AppliesCinematicCameraOriginAndFacingOnce()
+    {
+        M2CameraPathDocument path = new()
+        {
+            CoordinatesAreWorldSpace = false,
+            Keyframes =
+            [
+                new()
+                {
+                    Position = new Vector3(1f, 0f, 2f),
+                    Target = new Vector3(1f, 1f, 2f),
+                },
+            ],
+        };
+
+        M2CameraPathPlacement.ApplyCinematicCameraOrigin(
+            path,
+            cameraId: 2,
+            modelPath: "Cameras\\FlybyUndead.mdx",
+            origin: new Vector3(1658.58f, 1662.91f, 141.234f),
+            facingRadians: MathF.PI,
+            tileX: 28,
+            tileY: 28);
+
+        M2CameraPathKeyframe key = Assert.Single(path.Keyframes);
+        Assert.Equal(new Vector3(1657.58f, 1662.91f, 143.234f), key.Position, new Vector3EqualityComparer(0.001f));
+        Assert.Equal(new Vector3(1657.58f, 1661.91f, 143.234f), key.Target, new Vector3EqualityComparer(0.001f));
+        Assert.True(path.CoordinatesAreWorldSpace);
+        Assert.True(path.HasCinematicCameraOrigin);
+        Assert.Equal(28, path.CinematicCameraOriginTileX);
+        Assert.Equal(28, path.CinematicCameraOriginTileY);
+
+        M2CameraPathPlacement.ApplyCinematicCameraOrigin(
+            path,
+            cameraId: 2,
+            modelPath: "Cameras\\FlybyUndead.mdx",
+            origin: new Vector3(999f),
+            facingRadians: 0f,
+            tileX: 0,
+            tileY: 0);
+
+        Assert.Equal(new Vector3(1657.58f, 1662.91f, 143.234f), key.Position, new Vector3EqualityComparer(0.001f));
+    }
+
+    private sealed class Vector3EqualityComparer(float tolerance) : IEqualityComparer<Vector3>
+    {
+        public bool Equals(Vector3 left, Vector3 right)
+            => Vector3.DistanceSquared(left, right) <= tolerance * tolerance;
+
+        public int GetHashCode(Vector3 value) => value.GetHashCode();
     }
 }

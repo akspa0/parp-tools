@@ -68,6 +68,9 @@ The user can select an M2 or MDX camera asset in the loaded client's file browse
 - **FR-012**: The Camera Path panel MUST import `.m2` and binary `.mdx` camera assets selected from the loaded client file browser through the active data source, without requiring extraction to a loose filesystem path.
 - **FR-013**: Client camera import MUST expose camera index, sequence index, and bounded sample interval, and MUST use the existing M2/MDX readers and track samplers.
 - **FR-014**: The path editor MUST provide a timeline playhead and MUST support opt-in collision resolution during scrubbing and playback. Terrain collision MUST use the loaded terrain heightfield; WMO collision MUST use conservative resident placement bounds and MUST be labeled as such.
+- **FR-015**: The Camera Path panel MUST provide an opt-in keyboard-authoring mode. While enabled, WASD movement remains available and the user MUST be able to add, update, select, delete, retime the selected key, move the playhead, play/pause, save JSON, export native M2, and adjust camera roll without relying on mouse controls. The keymap MUST be visible in the panel and MUST not fire while a text field is being edited.
+- **FR-016**: Camera-path JSON and native-M2 sidecars MUST serialize world-space `Position` and `Target` vector components as numeric values, not empty objects. Playback and free-camera view construction MUST apply the authored roll around the camera forward axis.
+- **FR-017**: When importing a client M2 or MDX FlyBy camera, the viewer MUST resolve the matching `CinematicCamera.dbc` row by model path, derive its ADT tile with the active WoW map projection, and transform every local position and target key by the DBC origin and facing exactly once. If no matching row is available, the viewer MUST leave the decoded track unchanged and report that placement metadata was unavailable.
 
 ## Key Entities
 
@@ -87,9 +90,11 @@ The user can select an M2 or MDX camera asset in the loaded client's file browse
 - **SC-006**: With preload enabled, path capture reports a bounded tile footprint and a ready gate before recording; after capture, the lease is released and the normal AOI stream remains active.
 - **SC-007**: A selected client `.m2` or `.mdx` camera imports into the path editor with its decoded camera tracks and a usable timeline; no loose extraction is required.
 - **SC-008**: With collision enabled, a path sample crossing loaded terrain is lifted above the terrain height, and a swept sample entering a resident WMO exterior-bounds volume from outside is stopped before the volume; paths already inside a WMO remain playable.
+- **SC-009**: Importing the built-in Undead FlyBy resolves its `CinematicCamera.dbc` origin to ADT tile `(28,28)`, stores world-space keys, and does not double-translate the path on subsequent playback or save/load.
 
 ## Assumptions
 
 - The active map name and selected client build are the binding authority; a native M2 file alone does not contain a reliable map identity.
+- Classic FlyBy assets contain local camera coordinates; `CinematicCamera.dbc` is the authority for their map-space origin and facing. `CinematicSequences.dbc` links cinematic sequences to camera IDs but does not replace the camera-origin lookup.
 - The project JSON is the lossless authored representation; native M2 export is an interoperability artifact.
-- Camera roll is preserved in data/export even though the current free camera has no roll axis; position, target, and field of view are applied during playback.
+- Camera roll is stored in degrees in authored JSON and sidecars, converted to the native track's radians at export, and applied around the camera forward axis during playback and view construction.

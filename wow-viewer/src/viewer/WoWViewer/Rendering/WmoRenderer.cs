@@ -2667,6 +2667,40 @@ private IModelRenderer? LoadM2DoodadRenderer(string originalModelPath, string re
 
         if (!anySkinFound)
         {
+            if (WarcraftNetM2Adapter.SupportsEmbeddedNativeRoute(_buildVersion))
+            {
+                try
+                {
+                    M2StaticRenderModel runtimeModel = WarcraftNetM2Adapter.BuildEmbeddedStaticRenderModel(modelData, resolvedModelPath, _buildVersion);
+                    var route = M2RouteDecision.Create(
+                        originalModelPath,
+                        buildProfileId,
+                        M2RouteType.NativeEmbeddedProfile,
+                        M2RouteType.NativeEmbeddedProfile,
+                        fallbackReason: "No external .skin resolved for WMO doodad; using native embedded root-profile geometry");
+                    _doodadRouteDecisions[NormalizeDoodadPath(originalModelPath)] = route;
+                    M2RouteDiagnostics.LogRouteDecision(route);
+
+                    ViewerLog.Info(ViewerLog.Category.Mdx,
+                        $"[M2] Loaded native embedded root-profile geometry for WMO doodad {Path.GetFileName(originalModelPath)} after no external .skin resolved");
+                    return WowViewerM2RuntimeBridge.CreateRenderer(
+                        _gl,
+                        runtimeModel,
+                        adaptedMdx: null,
+                        modelDir: Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir,
+                        dataSource: _dataSource,
+                        texResolver: _texResolver,
+                        buildVersion: _buildVersion,
+                        sourceModelPath: resolvedModelPath);
+                }
+                catch (Exception ex)
+                {
+                    lastSkinError = ex;
+                    ViewerLog.Debug(ViewerLog.Category.Mdx,
+                        $"[M2] Native embedded root-profile WMO doodad route failed for {Path.GetFileName(originalModelPath)}: {ex.Message}");
+                }
+            }
+
             if (string.Equals(FormatProfileRegistry.ResolveModelProfile(_buildVersion)?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
             {
                 try

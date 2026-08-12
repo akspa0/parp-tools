@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Text.Json;
 using WowViewer.Core.M2;
 
 namespace WowViewer.Core.Runtime.M2;
@@ -19,9 +20,69 @@ public sealed class M2CameraPathDocument
     public bool TerrainCollisionEnabled { get; set; }
     public bool WmoCollisionEnabled { get; set; }
     public float CollisionClearance { get; set; } = 1.5f;
+    /// <summary>
+    /// True when Position and Target are in the viewer's world coordinate space.
+    /// Raw M2/MDX camera imports start as local coordinates and must be placed
+    /// with the matching CinematicCamera.dbc origin before playback.
+    /// </summary>
+    public bool CoordinatesAreWorldSpace { get; set; } = true;
+    public bool HasCinematicCameraOrigin { get; set; }
+    public int CinematicCameraId { get; set; } = -1;
+    public string CinematicCameraModel { get; set; } = string.Empty;
+    public Vector3 CinematicCameraOrigin { get; set; }
+    public float CinematicCameraOriginFacingRadians { get; set; }
+    public int CinematicCameraOriginTileX { get; set; } = -1;
+    public int CinematicCameraOriginTileY { get; set; } = -1;
+    public string CinematicCameraOriginSource { get; set; } = string.Empty;
     public List<M2CameraPathKeyframe> Keyframes { get; set; } = new();
 
     public int DurationMs => Keyframes.Count == 0 ? 0 : Math.Max(0, Keyframes[^1].TimeMs);
+}
+
+/// <summary>
+/// Applies the world transform supplied by CinematicCamera.dbc to an imported
+/// camera track. The native camera file contains coordinates relative to the
+/// camera asset; the DBC record supplies the map-space origin and facing.
+/// </summary>
+public static class M2CameraPathPlacement
+{
+    public static void ApplyCinematicCameraOrigin(
+        M2CameraPathDocument path,
+        int cameraId,
+        string modelPath,
+        Vector3 origin,
+        float facingRadians,
+        int tileX,
+        int tileY,
+        string source = "CinematicCamera.dbc")
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        if (path.CoordinatesAreWorldSpace)
+            return;
+        if (!float.IsFinite(facingRadians) || !IsFinite(origin))
+            throw new ArgumentException("The cinematic camera origin must contain finite values.", nameof(origin));
+
+        Matrix4x4 rotation = Matrix4x4.CreateRotationZ(facingRadians);
+        foreach (M2CameraPathKeyframe key in path.Keyframes)
+        {
+            key.Position = Vector3.Transform(key.Position, rotation) + origin;
+            key.Target = Vector3.Transform(key.Target, rotation) + origin;
+        }
+
+        path.CoordinatesAreWorldSpace = true;
+        path.HasCinematicCameraOrigin = true;
+        path.CinematicCameraId = cameraId;
+        path.CinematicCameraModel = modelPath ?? string.Empty;
+        path.CinematicCameraOrigin = origin;
+        path.CinematicCameraOriginFacingRadians = facingRadians;
+        path.CinematicCameraOriginTileX = tileX;
+        path.CinematicCameraOriginTileY = tileY;
+        path.CinematicCameraOriginSource = source ?? string.Empty;
+        M2CameraPathEvaluator.NormalizeAndValidate(path);
+    }
+
+    private static bool IsFinite(Vector3 value)
+        => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
 }
 
 public sealed class M2CameraPathKeyframe
@@ -31,6 +92,17 @@ public sealed class M2CameraPathKeyframe
     public Vector3 Target { get; set; }
     public float FovDegrees { get; set; } = 45f;
     public float RollDegrees { get; set; }
+}
+
+public static class M2CameraPathJson
+{
+    public static JsonSerializerOptions CreateOptions(bool writeIndented = false)
+        => new()
+        {
+            IncludeFields = true,
+            PropertyNameCaseInsensitive = true,
+            WriteIndented = writeIndented,
+        };
 }
 
 public readonly record struct M2CameraPathSample(
@@ -184,6 +256,7 @@ public static class M2CameraPathImporter
         M2CameraPathDocument result = new()
         {
             Name = string.IsNullOrWhiteSpace(model.ModelName) ? Path.GetFileNameWithoutExtension(model.Identity.CanonicalModelPath) : model.ModelName,
+            CoordinatesAreWorldSpace = false,
             Keyframes = keys,
         };
         M2CameraPathEvaluator.NormalizeAndValidate(result);

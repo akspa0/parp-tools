@@ -74,6 +74,7 @@ public static class MdxCameraPathImporter
             Name = string.IsNullOrWhiteSpace(camera.Name)
                 ? (cameraFile.ModelName ?? Path.GetFileNameWithoutExtension(cameraFile.SourcePath))
                 : camera.Name,
+            CoordinatesAreWorldSpace = false,
             Keyframes = keys,
         };
         M2CameraPathEvaluator.NormalizeAndValidate(result);

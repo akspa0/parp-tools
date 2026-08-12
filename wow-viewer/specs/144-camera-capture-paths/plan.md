@@ -32,13 +32,15 @@ Recover the existing capture automation route in the Tools > Utilities panel and
 - `src/core/WowViewer.Core.Runtime/M2/MdxCameraPathImporter.cs`: shared MDX CAMS sampling into the path model.
 - `src/core/WowViewer.Core.Runtime/M2/M2CameraPathWriter.cs`: camera-only native M2 writer.
 - `src/viewer/WoWViewer/ViewerApp_CameraPaths.cs`: editor, playback, save/load, capture integration,
-  and the Tools > Utilities > Capture panel route.
+  keyboard authoring, roll editing, and the Tools > Utilities > Capture panel route.
 - `src/viewer/WoWViewer/ViewerApp_Sidebars.cs`: existing Utilities tab host and compatibility routing.
 - `tests/WowViewer.Core.Tests/M2CameraPathTests.cs` and `MdxCameraPathImporterTests.cs`: interpolation, native round-trip, and MDX sampling proof.
 - `src/viewer/WoWViewer/Terrain/WorldScene.cs`: opt-in heightfield and resident-WMO-bound camera-path collision sweep.
+- `src/viewer/WoWViewer/Terrain/CinematicCameraOriginResolver.cs`: exact-build `CinematicCamera.dbc` lookup, model-path matching, and ADT origin-tile derivation for built-in FlyBy cameras.
 
 ## Validation Gates
 
-1. Core tests prove path evaluation and native M2 read-back.
+1. Core tests prove path evaluation, vector/roll JSON round-trip, and native M2 read-back.
 2. Viewer Debug build passes with no errors.
-3. User manually loads a map, selects a client M2/MDX camera, imports and scrubs it, verifies collision-constrained playback, and runs path video capture.
+3. User manually loads a map, selects a client M2/MDX camera, imports and scrubs it, verifies collision-constrained playback, exercises keyboard authoring, and runs path video capture.
+4. User imports the built-in Undead FlyBy and verifies the origin read from the active client's `CinematicCamera.dbc` reports tile `(28,28)` and places the crypt sequence over the intended WMO/terrain.

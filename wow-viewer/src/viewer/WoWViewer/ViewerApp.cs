@@ -1314,6 +1314,7 @@ var seq = animator.Sequences[animator.CurrentSequence];
         bool vDown = kb.IsKeyPressed(Key.V);
         bool ctrlCDown = ctrlDown && cDown;
         bool ctrlVDown = ctrlDown && vDown;
+        bool cameraPathKeyboardAction = HandleCameraPathKeyboardInput(kb, ctrlDown, shiftDown: kb.IsKeyPressed(Key.ShiftLeft) || kb.IsKeyPressed(Key.ShiftRight));
 
         if (_chunkToolEnabled && canSceneConsumeKeyboard)
         {
@@ -1362,7 +1363,7 @@ var seq = animator.Sequences[animator.CurrentSequence];
         _mKeyWasPressed = mPressed;
 
         // Arrow keys and spacebar for MDX animation control
-        if (_renderer is IModelRenderer modelRenderer && modelRenderer.Animator != null && modelRenderer.Animator.Sequences.Count > 0)
+        if (!cameraPathKeyboardAction && _renderer is IModelRenderer modelRenderer && modelRenderer.Animator != null && modelRenderer.Animator.Sequences.Count > 0)
         {
             var animator = modelRenderer.Animator;
             int currentSeq = animator.CurrentSequence;
@@ -1410,10 +1411,10 @@ var seq = animator.Sequences[animator.CurrentSequence];
 
         bool w = kb.IsKeyPressed(Key.W);
         bool a = kb.IsKeyPressed(Key.A);
-        bool s = kb.IsKeyPressed(Key.S);
+        bool s = !ctrlDown && kb.IsKeyPressed(Key.S);
         bool d = kb.IsKeyPressed(Key.D);
         bool q = kb.IsKeyPressed(Key.Q);
-        bool e = kb.IsKeyPressed(Key.E);
+        bool e = !ctrlDown && kb.IsKeyPressed(Key.E);
 
         if (w || a || s || d || q || e)
         {
@@ -2246,6 +2247,9 @@ void main() {
 
             if (ImGui.BeginMenu("Help"))
             {
+                if (ImGui.MenuItem("Keyboard Shortcuts"))
+                    _showKeyboardShortcutsWindow = true;
+
                 if (ImGui.MenuItem("About"))
                 {
                     _openAboutPopup = true;
@@ -2256,6 +2260,8 @@ void main() {
 
             ImGui.EndMainMenuBar();
         }
+
+        DrawKeyboardShortcutsWindow();
 
         if (_openForgetKnownGoodClientConfirm)
         {

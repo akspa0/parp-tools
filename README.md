@@ -2,7 +2,7 @@
 
 Preservation, conversion, analysis, and visualization tooling for World of Warcraft game data.
 
-**Active development branch**: `v0.5.0-dev`
+**Current viewer release line**: `v0.5.2`
 **Active project**: `wow-viewer/`
 
 The repository also contains `gillijimproject_refactor/` — a legacy codebase that is **read-only reference**. All new code, features, tools, tests, and fixes go in `wow-viewer/`.
@@ -13,7 +13,7 @@ The repository also contains `gillijimproject_refactor/` — a legacy codebase t
 
 A .NET 10 toolkit for WoW format analysis, terrain reconstruction, PM4-based object matching, and ML dataset generation. Includes a full-featured 3D world viewer (`WoWViewer`), CLI format tools, and a Python ML pipeline.
 
-**Support range**: Alpha 0.5.3 through LK 3.3.5, with partial Cataclysm-era terrain and PM4 support.
+**Support range**: Alpha 0.5.3 through Cataclysm-era 4.0.x, with client-era differences called out in the support table below. Rendering and FPS claims remain build/map-specific and require real-client validation.
 
 ### Quick Start
 
@@ -63,11 +63,11 @@ wow-viewer/
 - [Memory Bank](wow-viewer/memory-bank/activeContext.md) — current focus and status
 - [Architecture Docs](wow-viewer/docs/architecture/) — PM4 semantics, render plans, model specs
 
-### What's Supported
+### What's Implemented
 
-- **Terrain**: Alpha 0.5.3 monolithic WDT, 0.6.0 split ADTs, LK 3.3.5 split ADTs
-- **WMO**: V14 (Alpha), V17 (LK), with round-trip conversion
-- **M2/MDX**: Classic MD20, era-1121 MD20, chunked MDLX; animation extraction and BVH export
+- **Terrain**: Alpha monolithic WDT, early split ADTs, LK/Cataclysm ADTs, WDL/WL* and minimap routes
+- **WMO**: V14/V17 parsing, rendering, placement inspection, batching work, and round-trip conversion paths
+- **M2/MDX**: Classic/era-specific M2 profiles, embedded early-M2 route, MDLX/MDX routes, animation extraction, and BVH export; cross-era visual proof is incomplete
 - **PM4**: Full decode, per-file caching, MSCN/MSPV visualization, WMO group matching
 - **BLP**: Pixel decode and summary inspection
 - **DBC/DB2**: Crosswalk generation and lookup
@@ -109,21 +109,21 @@ What `gillijimproject_refactor` is NOT:
 
 ---
 
-## Supported Game Versions
+## Supported Game Versions and proof boundary
 
 | Version | Era | Support |
 |---------|-----|---------|
-| 0.5.3 | Alpha | Terrain, WMO, MDX, BLP, DBC — full read/write |
-| 0.6.0 | Alpha | Terrain, split ADTs — full |
-| 0.7.0 / 0.8.0 | Pre-Release | MDX (chunked) — partial |
-| 1.12.1 | Vanilla | M2 (era-1121 MD20) — full (spec 048) |
-| 2.x | TBC | Not yet supported |
-| 3.0.1 / 3.3.5 | WotLK | Terrain, WMO, M2, PM4 — full |
-| 4.0.0+ | Cataclysm | ADT, PM4 partial; terrain reconstruction path exists |
+| 0.5.3 | Alpha | Terrain/WMO/MDX/BLP/DBC routes; MDX visual coverage is not fully release-proven |
+| 0.6.0–0.10.x | Alpha/pre-release | Early terrain and chunked-model routes with partial client-specific coverage |
+| 1.12.1 | Vanilla | Era-specific M2 route; broad in-viewer visual proof remains incomplete |
+| 2.x | TBC | Profiled embedded-native M2 route implemented; material/visibility proof pending |
+| 3.0.x | WotLK transition | Profiled early-M2 route implemented; visual coverage provisional |
+| 3.3.5 | WotLK | Strongest current late-client terrain/WMO/M2/PM4 path |
+| 4.0.0+ | Cataclysm | ADT/WMO/PM4 and terrain reconstruction paths; client-specific rendering/performance partial |
 
 ## Branch History
 
-- `v0.5.0-dev` — **Current active branch.** All wow-viewer work.
+- `v0.5.2` — **Current viewer release line.** UI overhaul and cross-era rendering proof continue in `wow-viewer`.
 - `v0.4.9` — Previous branch, freeze point before the wow-viewer split.
 - `main` / `v0.4.5` — Older branches, legacy MdxViewer era.
 

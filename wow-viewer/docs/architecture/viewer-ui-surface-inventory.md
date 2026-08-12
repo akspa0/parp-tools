@@ -5,6 +5,12 @@
 **Generated**: 2026-07-11  
 **Source**: `wow-viewer/src/viewer/WoWViewer/ViewerApp.cs` (active) vs `gillijimproject_refactor/src/MdxViewer/ViewerApp.cs` (legacy reference)
 
+**Follow-up**: Spec 145 (`specs/145-wow-ui-overhaul/`) owns the next bounded shell slice:
+context-aware keybindings, visual shortcut help, the vertical main workbench rail, bounded
+navigator/minimap layout, wrapped logs, persistent-window audit, and release-truth synchronization.
+Spec 080 remains the historical consolidation owner; working routes are preserved until replacements
+pass independent proof.
+
 ---
 
 ## Legend

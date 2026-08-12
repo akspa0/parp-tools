@@ -50,9 +50,22 @@ with a reference render.
 - [ ] T018 [US3] After T017 passes, define a separate 1.12.1 `0x100` layout slice in `wow-viewer/specs/104-legacy-m2-rendering/plan.md` before changing its reader.
 - [ ] T019 [US3] After the 1.12.1 slice is signed off, create one bounded TBC version-boundary slice in `wow-viewer/specs/104-legacy-m2-rendering/plan.md`.
 
+## Phase 6: Native 2.x/3.0.x embedded-profile handoff
+
+- [x] T020 Reuse the existing profiled embedded-root parse result to construct native static M2
+  geometry/material documents without creating an `MdxFile`.
+- [x] T021 Route world M2 placements and WMO M2 doodads with no external `.skin` through
+  `NativeEmbeddedProfile`, retaining conversion only as a failure fallback.
+- [x] T022 Preserve the adapter's direct-vs-lookup texture decision and decoded render-flag blend
+  modes in the native document handoff.
+- [x] T023 Run the focused viewer build and existing embedded-profile tests; record that this is
+  code proof only until the user performs a real 2.x/3.0.x client capture.
+
 ## Dependencies and MVP
 
 - T001–T005 block T006–T013.
 - T014–T017 require T013 and user-run viewer access.
 - T018 and T019 are explicitly out of scope until the 1.0.0 phase gate passes.
+- T020–T023 are the active 2.x/3.0.x handoff slice; they do not establish visual parity or complete
+  multi-stage shader support.
 - MVP: T001–T013. It proves correct M2 ownership and safe failure but does not claim visual signoff.

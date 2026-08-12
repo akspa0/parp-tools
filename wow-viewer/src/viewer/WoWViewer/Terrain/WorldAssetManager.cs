@@ -1273,6 +1273,41 @@ private int _mdxLoadFailCount = 0;
 
                 if (!anySkinFound)
                 {
+                    if (WarcraftNetM2Adapter.SupportsEmbeddedNativeRoute(_buildVersion))
+                    {
+                        try
+                        {
+                            M2StaticRenderModel runtimeModel = WarcraftNetM2Adapter.BuildEmbeddedStaticRenderModel(data, resolvedModelPath, _buildVersion);
+                            var route = M2RouteDecision.Create(
+                                normalizedKey,
+                                buildProfileId,
+                                M2RouteType.NativeEmbeddedProfile,
+                                M2RouteType.NativeEmbeddedProfile,
+                                fallbackReason: "No external .skin resolved; using native embedded root-profile geometry");
+                            _mdxRouteDecisions[normalizedKey] = route;
+                            M2RouteDiagnostics.LogRouteDecision(route);
+
+                            ViewerLog.Info(ViewerLog.Category.Mdx,
+                                $"[M2] Loaded native embedded root-profile geometry for {Path.GetFileName(normalizedKey)} after no external .skin resolved");
+                            return WowViewerM2RuntimeBridge.CreateRenderer(
+                                _gl,
+                                runtimeModel,
+                                adaptedMdx: null,
+                                modelDir: Path.GetDirectoryName(resolvedModelPath),
+                                dataSource: _dataSource,
+                                texResolver: _texResolver,
+                                buildVersion: _buildVersion,
+                                sourceModelPath: resolvedModelPath,
+                                deferInitialTextureLoads: true);
+                        }
+                        catch (Exception ex)
+                        {
+                            lastSkinError = ex;
+                            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                                $"[M2] Native embedded root-profile world route failed for {Path.GetFileName(normalizedKey)}: {ex.Message}");
+                        }
+                    }
+
                     if (string.Equals(FormatProfileRegistry.ResolveModelProfile(_buildVersion)?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
                     {
                         try

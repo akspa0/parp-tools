@@ -5,6 +5,7 @@ using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.M2Era1121;
 using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.M2;
+using WowViewer.Core.Runtime.M2;
 using WoWViewer.Logging;
 using WoWViewer.Terrain;
 using Warcraft.NET.Files.M2;
@@ -229,6 +230,285 @@ internal static class WarcraftNetM2Adapter
             throw new InvalidDataException("M2 adapter produced no renderable geosets.");
 
         return mdx;
+    }
+
+    /// <summary>
+    /// Builds the native static M2 render model for the embedded skin/profile layout used by
+    /// the profiled 2.x and 3.0.x routes. This is intentionally separate from
+    /// <see cref="BuildRuntimeModel"/>: the latter exists for explicit compatibility/export
+    /// consumers and must not be the world renderer's default for these assets.
+    /// </summary>
+    public static M2StaticRenderModel BuildEmbeddedStaticRenderModel(
+        byte[] m2Bytes,
+        string modelPath,
+        string? buildVersion = null)
+    {
+        ArgumentNullException.ThrowIfNull(m2Bytes);
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelPath);
+
+        M2Profile? profile = FormatProfileRegistry.ResolveModelProfile(buildVersion);
+        if (profile == null || !IsEmbeddedProfileRoute(profile))
+        {
+            throw new InvalidDataException(
+                $"Embedded native M2 rendering requires a profiled 2.x/3.0.x build; build '{buildVersion ?? "unknown"}' did not resolve to one.");
+        }
+
+        ParsedModelData parsedModel = ParseModelInformation(m2Bytes, modelPath, profile, buildVersion);
+        SkinData skin = parsedModel.EmbeddedSkin
+            ?? throw new InvalidDataException(
+                $"M2 '{Path.GetFileName(modelPath)}' did not contain a valid embedded root skin/profile.");
+
+        if (parsedModel.Vertices.Count == 0 || skin.TriangleIndices.Count < 3)
+        {
+            throw new InvalidDataException(
+                $"M2 '{Path.GetFileName(modelPath)}' embedded profile has no drawable vertex/index data.");
+        }
+
+        ValidateEmbeddedMaterialMetadata(parsedModel, skin, modelPath);
+
+        M2ModelDocument model = BuildEmbeddedModelDocument(m2Bytes, modelPath, parsedModel, skin);
+        M2GeometryDocument geometry = BuildEmbeddedGeometryDocument(model, parsedModel, skin);
+        M2SkinDocument skinDocument = BuildEmbeddedSkinDocument(model, parsedModel, skin);
+        M2SkinProfileSelection selection = new(0, skinDocument.SourcePath);
+        M2ActiveSkinProfile activeProfile = new(model, selection, skinDocument, usesCompatibilityFallback: false);
+        M2StaticRenderModel runtimeModel = M2StaticRenderModelBuilder.Build(geometry, activeProfile);
+
+        if (runtimeModel.Sections.Count == 0)
+        {
+            throw new InvalidDataException(
+                $"M2 '{Path.GetFileName(modelPath)}' embedded profile produced no drawable native sections.");
+        }
+
+        ViewerLog.Info(
+            ViewerLog.Category.Mdx,
+            $"[M2] Native embedded-profile renderer ready for {Path.GetFileName(modelPath)} " +
+            $"(profile={profile.ProfileId}, version=0x{model.Version:X}, sections={runtimeModel.Sections.Count}, " +
+            $"transparentSections={runtimeModel.Sections.Count(static section => section.Material.IsTransparent)})");
+        return runtimeModel;
+    }
+
+    public static bool SupportsEmbeddedNativeRoute(string? buildVersion)
+    {
+        M2Profile? profile = FormatProfileRegistry.ResolveModelProfile(buildVersion);
+        return profile != null && IsEmbeddedProfileRoute(profile);
+    }
+
+    private static bool IsEmbeddedProfileRoute(M2Profile profile)
+    {
+        return string.Equals(profile.ProfileId, FormatProfileRegistry.M2Profile20xUnknown.ProfileId, StringComparison.Ordinal)
+            || string.Equals(profile.ProfileId, FormatProfileRegistry.M2Profile30xUnknown.ProfileId, StringComparison.Ordinal)
+            || string.Equals(profile.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal);
+    }
+
+    private static void ValidateEmbeddedMaterialMetadata(ParsedModelData model, SkinData skin, string modelPath)
+    {
+        if (skin.TextureUnits.Count == 0)
+            throw new InvalidDataException(
+                $"M2 '{Path.GetFileName(modelPath)}' embedded profile has no material batches.");
+
+        int missingRenderFlagIndex = skin.TextureUnits
+            .Select(static batch => batch.MaterialIndex)
+            .FirstOrDefault(materialIndex => materialIndex < 0 || materialIndex >= model.RenderFlags.Count, -1);
+        if (missingRenderFlagIndex >= 0)
+        {
+            throw new InvalidDataException(
+                $"M2 '{Path.GetFileName(modelPath)}' embedded profile references render flag {missingRenderFlagIndex}, " +
+                $"but only {model.RenderFlags.Count} render flags were decoded.");
+        }
+    }
+
+    private static M2ModelDocument BuildEmbeddedModelDocument(
+        byte[] modelBytes,
+        string modelPath,
+        ParsedModelData parsedModel,
+        SkinData skin)
+    {
+        uint version = modelBytes.Length >= 8 ? BitConverter.ToUInt32(modelBytes, 4) : 0;
+        uint flags = modelBytes.Length >= 0x14 ? BitConverter.ToUInt32(modelBytes, 0x10) : 0;
+        Vector3 boundsMin = new(parsedModel.BoundingBox.Minimum.X, parsedModel.BoundingBox.Minimum.Y, parsedModel.BoundingBox.Minimum.Z);
+        Vector3 boundsMax = new(parsedModel.BoundingBox.Maximum.X, parsedModel.BoundingBox.Maximum.Y, parsedModel.BoundingBox.Maximum.Z);
+
+        return new M2ModelDocument(
+            M2ModelIdentity.FromPath(modelPath),
+            modelBytes,
+            "MD20",
+            version,
+            flags,
+            viewCount: 1,
+            modelName: string.IsNullOrWhiteSpace(parsedModel.Name) ? Path.GetFileNameWithoutExtension(modelPath) : parsedModel.Name,
+            globalLoops: [],
+            sequences: [],
+            sequenceLookup: [],
+            colors: [],
+            textureWeights: [],
+            textureTransforms: [],
+            lights: [],
+            cameras: [],
+            boundsMin: boundsMin,
+            boundsMax: boundsMax,
+            boundsRadius: parsedModel.BoundingBoxRadius,
+            embeddedSkinProfileCount: 1u,
+            embeddedSkinProfileOffset: 0);
+    }
+
+    private static M2GeometryDocument BuildEmbeddedGeometryDocument(
+        M2ModelDocument model,
+        ParsedModelData parsedModel,
+        SkinData skin)
+    {
+        List<M2GeometryVertex> vertices = parsedModel.Vertices
+            .Select(static vertex => new M2GeometryVertex(
+                vertex.Position,
+                vertex.Normal,
+                new Vector2(vertex.TextureCoord0X, vertex.TextureCoord0Y),
+                new Vector2(vertex.TextureCoord1X, vertex.TextureCoord1Y),
+                new Vector4(vertex.BoneIndex0, vertex.BoneIndex1, vertex.BoneIndex2, vertex.BoneIndex3),
+                new Vector4(
+                    vertex.BoneWeight0 / 255.0f,
+                    vertex.BoneWeight1 / 255.0f,
+                    vertex.BoneWeight2 / 255.0f,
+                    vertex.BoneWeight3 / 255.0f)))
+            .ToList();
+
+        List<M2GeometryTexture> textures = parsedModel.Textures
+            .Select(static texture => new M2GeometryTexture(
+                texture.Filename,
+                (uint)texture.Type,
+                (uint)texture.Flags))
+            .ToList();
+
+        List<M2GeometryRenderFlag> renderFlags = parsedModel.RenderFlags
+            .Select(static renderFlag => new M2GeometryRenderFlag(renderFlag.Flags, renderFlag.BlendingMode))
+            .ToList();
+
+        bool preferDirectTextureIndices = ShouldPreferDirectTextureIndices(parsedModel, skin);
+        int directLookupCount = skin.TextureUnits.Count == 0
+            ? 0
+            : skin.TextureUnits.Max(static batch => batch.TextureComboIndex + Math.Max(1, batch.TextureCount));
+        int textureLookupCount = Math.Max(parsedModel.TextureLookup.Count, directLookupCount);
+        List<M2GeometryTextureLookup> textureLookup = Enumerable.Range(0, textureLookupCount)
+            .Select(index => new M2GeometryTextureLookup(ToLookupIndex(
+                preferDirectTextureIndices && index < parsedModel.Textures.Count
+                    ? index
+                    : index < parsedModel.TextureLookup.Count
+                        ? parsedModel.TextureLookup[index].TextureId
+                        : -1)))
+            .ToList();
+
+        List<M2GeometryTextureUnitLookup> textureUnitLookup = parsedModel.TextureCoordLookup
+            .Select(static lookup => new M2GeometryTextureUnitLookup(ToLookupIndex(lookup.CoordId)))
+            .ToList();
+
+        List<M2GeometryTransparencyLookup> transparencyLookup = parsedModel.TransparencyLookup
+            .Select(static lookup => new M2GeometryTransparencyLookup(ToLookupIndex(lookup.TransparencyId)))
+            .ToList();
+
+        List<M2GeometryTextureAnimationLookup> textureAnimationLookup = parsedModel.UvAnimationLookup
+            .Select(static lookup => new M2GeometryTextureAnimationLookup(ToLookupIndex(lookup.TextureAnimationId)))
+            .ToList();
+
+        List<M2GeometryBoneLookup> boneLookup = parsedModel.BoneLookupTable
+            .Select(static bone => new M2GeometryBoneLookup(bone))
+            .ToList();
+
+        return new M2GeometryDocument(
+            model,
+            vertices,
+            textures,
+            renderFlags,
+            textureLookup,
+            textureUnitLookup,
+            transparencyLookup,
+            textureAnimationLookup,
+            boneLookup);
+    }
+
+    private static M2SkinDocument BuildEmbeddedSkinDocument(
+        M2ModelDocument model,
+        ParsedModelData parsedModel,
+        SkinData skin)
+    {
+        List<M2SkinBoneEntry> boneEntries = new(skin.Vertices.Count);
+        foreach (ushort vertexIndex in skin.Vertices)
+        {
+            if (vertexIndex >= parsedModel.Vertices.Count)
+            {
+                boneEntries.Add(new M2SkinBoneEntry(0, 0, 0, 0));
+                continue;
+            }
+
+            ParsedVertexData vertex = parsedModel.Vertices[vertexIndex];
+            boneEntries.Add(new M2SkinBoneEntry(
+                vertex.BoneIndex0,
+                vertex.BoneIndex1,
+                vertex.BoneIndex2,
+                vertex.BoneIndex3));
+        }
+
+        List<M2SkinSubmesh> submeshes = parsedModel.EmbeddedSkin == null
+            ? []
+            : skin.Submeshes.Select(static submesh => new M2SkinSubmesh(
+                ToUShort(submesh.SkinSectionId),
+                ToUShort(submesh.Level),
+                ToUShort(submesh.VertexStart),
+                ToUShort(submesh.VertexCount),
+                ToUShort(submesh.IndexStart),
+                ToUShort(submesh.IndexCount),
+                boneComboIndex: ToUShort(submesh.BoneComboIndex))).ToList();
+
+        List<M2SkinBatch> batches = skin.TextureUnits
+            .Select(static batch => new M2SkinBatch(
+                flags: ToByte(batch.Flags),
+                priorityPlane: ToByte(batch.PriorityPlane),
+                shaderId: 0,
+                skinSectionIndex: ToUShort(batch.SkinSectionIndex),
+                geosetIndex: 0,
+                colorIndex: ToShort(batch.ColorIndex),
+                renderFlagsIndex: ToLookupIndex(batch.MaterialIndex),
+                materialLayer: ToUShort(batch.MaterialLayer),
+                textureCount: ToUShort(batch.TextureCount),
+                textureComboIndex: ToLookupIndex(batch.TextureComboIndex),
+                textureCoordComboIndex: ToLookupIndex(batch.TextureCoordComboIndex),
+                transparencyComboIndex: ToLookupIndex(batch.TransparencyComboIndex),
+                textureAnimationLookupIndex: ToLookupIndex(batch.TextureAnimationLookupIndex)))
+            .ToList();
+
+        return new M2SkinDocument(
+            model.Identity.BuildSkinPath(0),
+            "SKIN",
+            skin.Vertices,
+            0,
+            skin.TriangleIndices,
+            0,
+            boneEntries,
+            0,
+            submeshes,
+            0,
+            batches,
+            0,
+            skin.GlobalVertexOffset,
+            0,
+            0);
+    }
+
+    private static ushort ToLookupIndex(int value)
+    {
+        return value < 0 || value >= ushort.MaxValue ? ushort.MaxValue : (ushort)value;
+    }
+
+    private static ushort ToUShort(int value)
+    {
+        return (ushort)Math.Clamp(value, 0, ushort.MaxValue);
+    }
+
+    private static byte ToByte(int value)
+    {
+        return (byte)Math.Clamp(value, 0, byte.MaxValue);
+    }
+
+    private static short ToShort(int value)
+    {
+        return (short)Math.Clamp(value, short.MinValue, short.MaxValue);
     }
 
     private static SkinData ResolveSkinData(ParsedModelData model, byte[]? skinBytes, string modelPath, M2Profile? profile, string? buildVersion)
@@ -1821,6 +2101,7 @@ internal static class WarcraftNetM2Adapter
             for (uint i = 0; i < selected.Value.BatchCount; i++)
             {
                 int batchOffset = checked((int)(selected.Value.BatchOffset + (i * 0x18u)));
+                byte batchFlags = modelBytes[batchOffset + 0x00];
                 short colorIndex = BitConverter.ToInt16(modelBytes, batchOffset + 0x08);
                 ushort materialIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x0A);
                 ushort materialLayer = BitConverter.ToUInt16(modelBytes, batchOffset + 0x0C);
@@ -1834,6 +2115,7 @@ internal static class WarcraftNetM2Adapter
                 {
                     skin.TextureUnits.Add(new SkinTextureUnitData
                     {
+                        Flags = batchFlags,
                         PriorityPlane = modelBytes[batchOffset + 0x01],
                         MaterialLayer = materialLayer,
                         TextureCount = textureCount == 0 ? 1 : textureCount,
@@ -2076,10 +2358,9 @@ internal static class WarcraftNetM2Adapter
                     ? br.ReadUInt16()
                     : (ushort)0;
 
-                _ = flags;
-
                 data.TextureUnits.Add(new SkinTextureUnitData
                 {
+                    Flags = flags,
                     PriorityPlane = priority,
                     MaterialLayer = materialLayer,
                     TextureCount = textureCount == 0 ? 1 : textureCount,
@@ -2247,10 +2528,9 @@ internal static class WarcraftNetM2Adapter
                     ? br.ReadUInt16()
                     : (ushort)0;
 
-                _ = flags;
-
                 data.TextureUnits.Add(new SkinTextureUnitData
                 {
+                    Flags = flags,
                     PriorityPlane = priority,
                     MaterialLayer = materialLayer,
                     TextureCount = textureCount == 0 ? 1 : textureCount,
@@ -2348,6 +2628,7 @@ internal static class WarcraftNetM2Adapter
             {
                 data.TextureUnits.Add(new SkinTextureUnitData
                 {
+                    Flags = 0,
                     PriorityPlane = tu.PriorityPlane < 0 ? (ushort)0 : (ushort)tu.PriorityPlane,
                     MaterialLayer = tu.MaterialLayer,
                     TextureCount = 1,
@@ -2378,6 +2659,7 @@ internal static class WarcraftNetM2Adapter
 
     private sealed class SkinTextureUnitData
     {
+        public int Flags { get; set; }
         public int ColorIndex { get; set; } = -1;
         public int MaterialIndex { get; set; }
         public int MaterialLayer { get; set; }

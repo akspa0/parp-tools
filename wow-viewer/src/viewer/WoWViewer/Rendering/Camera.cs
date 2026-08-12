@@ -16,6 +16,10 @@ public class Camera
     public float Yaw { get; set; } = 180f; // Face toward origin initially
     public float Pitch { get; set; } = -10f; // Slight downward angle
 
+    // Roll around the view direction, in degrees. Free-fly input leaves this at zero;
+    // camera-path authoring and playback may use it for cinematic banking.
+    public float Roll { get; set; }
+
     public Vector3 Forward
     {
         get
@@ -35,8 +39,12 @@ public class Camera
         // LookAt target is camera position + forward direction
         var target = Position + Forward;
 
-        // Up vector is Z-up
-        return Matrix4x4.CreateLookAt(Position, target, Vector3.UnitZ);
+        Vector3 forward = Forward;
+        float rollRadians = Roll * (MathF.PI / 180f);
+        Vector3 up = Vector3.Transform(
+            Vector3.UnitZ,
+            Quaternion.CreateFromAxisAngle(forward, rollRadians));
+        return Matrix4x4.CreateLookAt(Position, target, up);
     }
 
     /// <summary>Move camera in its local space (WASD).</summary>

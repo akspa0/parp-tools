@@ -8710,37 +8710,37 @@ public class WorldScene : ISceneRenderer
         }
 
         int processed = _assets.ProcessPendingLoads(maxLoads, maxBudgetMs);
-        if (processed <= 0)
-            return;
-
-        bool flatVisibilityBucketsDirty = false;
-        foreach (var pair in _tileMdxInstances)
+        if (processed > 0)
         {
-            if (!RefreshMdxInstanceBounds(pair.Value, pair.Key, isSkybox: false, isExternal: false))
-                continue;
+            bool flatVisibilityBucketsDirty = false;
+            foreach (var pair in _tileMdxInstances)
+            {
+                if (!RefreshMdxInstanceBounds(pair.Value, pair.Key, isSkybox: false, isExternal: false))
+                    continue;
 
-            UpdateObjectBucketBounds(_tileMdxBounds, pair.Key, pair.Value);
-            flatVisibilityBucketsDirty = true;
+                UpdateObjectBucketBounds(_tileMdxBounds, pair.Key, pair.Value);
+                flatVisibilityBucketsDirty = true;
+            }
+
+            foreach (var pair in _tileSkyboxInstances)
+                RefreshMdxInstanceBounds(pair.Value, pair.Key, isSkybox: true, isExternal: false);
+
+            foreach (var pair in _tileWmoInstances)
+            {
+                if (!RefreshWmoInstanceBounds(pair.Value, pair.Key, isSkybox: false, isExternal: false))
+                    continue;
+
+                UpdateObjectBucketBounds(_tileWmoBounds, pair.Key, pair.Value);
+                flatVisibilityBucketsDirty = true;
+            }
+
+            RefreshMdxInstanceBounds(_externalMdxInstances, tileKey: null, isSkybox: false, isExternal: true);
+            RefreshMdxInstanceBounds(_externalSkyboxInstances, tileKey: null, isSkybox: true, isExternal: true);
+            RefreshWmoInstanceBounds(_externalWmoInstances, tileKey: null, isSkybox: false, isExternal: true);
+
+            if (flatVisibilityBucketsDirty)
+                RebuildFlatVisibilityBuckets();
         }
-
-        foreach (var pair in _tileSkyboxInstances)
-            RefreshMdxInstanceBounds(pair.Value, pair.Key, isSkybox: true, isExternal: false);
-
-        foreach (var pair in _tileWmoInstances)
-        {
-            if (!RefreshWmoInstanceBounds(pair.Value, pair.Key, isSkybox: false, isExternal: false))
-                continue;
-
-            UpdateObjectBucketBounds(_tileWmoBounds, pair.Key, pair.Value);
-            flatVisibilityBucketsDirty = true;
-        }
-
-        RefreshMdxInstanceBounds(_externalMdxInstances, tileKey: null, isSkybox: false, isExternal: true);
-        RefreshMdxInstanceBounds(_externalSkyboxInstances, tileKey: null, isSkybox: true, isExternal: true);
-        RefreshWmoInstanceBounds(_externalWmoInstances, tileKey: null, isSkybox: false, isExternal: true);
-
-        if (flatVisibilityBucketsDirty)
-            RebuildFlatVisibilityBuckets();
 
         if (CapturePreloadActive)
         {
