@@ -63,7 +63,7 @@ The user can select an M2 or MDX camera asset in the loaded client's file browse
 - **FR-007**: The viewer MUST support importing readable M2 camera tracks and exporting a camera-only native M2 representation.
 - **FR-008**: The authored JSON and `.m2.json` sidecar MUST preserve camera, target, FOV, roll, timing, map, and build data. The native classic camera-only M2 MUST preserve the interoperable position, target, and roll tracks; its static binary FOV is the first-key baseline because the classic camera layout has no animated FOV track.
 - **FR-009**: Focused tests MUST cover interpolation, map binding, and native M2 round-trip camera data.
-- **FR-010**: Path-driven video and queued key captures MUST support an opt-in bounded preload lease that samples the path, pins only its available terrain tiles, queues the placements in those tiles through the existing asset manager, and waits for terrain/object readiness before capture starts.
+- **FR-010**: Path-driven playback, video, and queued key captures MUST support an opt-in bounded preload lease that samples the path, pins only its available terrain tiles, closes gaps between samples in tile space, queues the placements in those tiles through the existing asset manager, and waits for terrain/object readiness before motion or capture starts.
 - **FR-011**: Releasing or completing path capture MUST clear the preload lease so ordinary camera-driven AOI eviction resumes; preload MUST NOT imply full-map residency.
 - **FR-012**: The Camera Path panel MUST import `.m2` and binary `.mdx` camera assets selected from the loaded client file browser through the active data source, without requiring extraction to a loose filesystem path.
 - **FR-013**: Client camera import MUST expose camera index, sequence index, and bounded sample interval, and MUST use the existing M2/MDX readers and track samplers.
@@ -87,7 +87,7 @@ The user can select an M2 or MDX camera asset in the loaded client's file browse
 - **SC-003**: Save/reload preserves all authored keys and map/build metadata.
 - **SC-004**: A native M2 exported by the viewer is readable by the existing M2 reader and exposes the same camera key timing within the chosen sampling resolution.
 - **SC-005**: Path-driven video uses the existing capture output and does not require a second capture pipeline.
-- **SC-006**: With preload enabled, path capture reports a bounded tile footprint and a ready gate before recording; after capture, the lease is released and the normal AOI stream remains active.
+- **SC-006**: With preload enabled, path playback/capture reports a bounded swept tile footprint and a ready gate before motion or recording; after playback/capture, the lease is released and the normal AOI stream remains active.
 - **SC-007**: A selected client `.m2` or `.mdx` camera imports into the path editor with its decoded camera tracks and a usable timeline; no loose extraction is required.
 - **SC-008**: With collision enabled, a path sample crossing loaded terrain is lifted above the terrain height, and a swept sample entering a resident WMO exterior-bounds volume from outside is stopped before the volume; paths already inside a WMO remain playable.
 - **SC-009**: Importing the built-in Undead FlyBy resolves its `CinematicCamera.dbc` origin to ADT tile `(28,28)`, stores world-space keys, and does not double-translate the path on subsequent playback or save/load.

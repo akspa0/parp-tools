@@ -5,6 +5,15 @@ Last updated: 2026-08-12
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-12 — Spec 144 swept camera-path residency correction
+
+- Corrected camera-path tile conversion to use ADT `TileSize` rather than terrain `ChunkSize`.
+- Added a core swept-footprint selector that connects path samples in tile space and applies the
+  configured tile radius, preventing fast/spline paths from skipping ADTs that then unload.
+- Enabled ordinary Play to wait on the existing bounded preload lease when enabled; playback and
+  capture completion/stop release it. Active directional rendering remains separate.
+- Focused core proof and real-client playback/unload proof remain separate; the latter is user-owned.
+
 ## 2026-08-12 — Spec 142 bounded camera-centered residency
 
 - Added a pure `CameraTileWindowSelector` with deterministic bounded retention; radius two is the

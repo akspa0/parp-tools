@@ -19,3 +19,6 @@
 - [ ] T017 User-run validation: create a path with WASD and keyboard shortcuts, verify numeric camera positions and roll in JSON, reload it, and confirm rolled playback.
 - [x] T018 Resolve built-in client FlyBy origins from `CinematicCamera.dbc`, apply origin/facing to local M2/MDX camera tracks once, persist origin/tile provenance, and add focused placement coverage.
 - [ ] T019 User-run validation: import the Undead FlyBy from the loaded client, confirm the Camera Path panel reports DBC tile `(28,28)`, and verify playback begins at the crypt WMO and ends over the Undead starting zone.
+- [x] T020 Correct path preload tile conversion to use ADT tile size and add swept tile-line coverage between path samples; keep the lease separate from active rendering.
+- [x] T021 Make ordinary path playback wait for the enabled preload lease and release it on playback completion.
+- [ ] T022 User-run validation: warm and play a multi-tile path, verify no expected ADT unloads during playback, and confirm Stop/completion returns to normal AOI eviction.

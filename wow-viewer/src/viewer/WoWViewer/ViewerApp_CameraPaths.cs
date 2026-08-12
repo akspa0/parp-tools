@@ -39,6 +39,7 @@ public partial class ViewerApp
     private int _cameraPathPreloadTileRadius = 1;
     private int _cameraPathPreloadSampleSpacingMs = 500;
     private CameraPathPreloadState? _cameraPathPreload;
+    private bool _cameraPathPlaybackPending;
     private bool _cameraPathVideoCapturePending;
     private bool _cameraPathKeyboardAuthoring;
     private int _cameraPathKeyboardTimeStepMs = 100;
@@ -540,6 +541,19 @@ public partial class ViewerApp
             return false;
         }
 
+        if (_cameraPathPreloadEnabled)
+        {
+            if (_cameraPathPreload == null && !BeginCameraPathPreload())
+                return false;
+            if (_cameraPathPreload is { Ready: false })
+            {
+                _cameraPathPlaybackPending = true;
+                _statusMessage = $"Warming {_cameraPathPreload.Tiles.Count} path tiles before playback.";
+                return false;
+            }
+        }
+
+        _cameraPathPlaybackPending = false;
         _cameraPathTimeSeconds = 0;
         _cameraPathPlaying = true;
         _taxiRideCameraEnabled = false;
@@ -602,6 +616,7 @@ public partial class ViewerApp
     {
         _cameraPathPlaying = false;
         _cameraPathTimeSeconds = 0;
+        _cameraPathPlaybackPending = false;
         _cameraPathVideoCapturePending = false;
         if (_cameraPathVideoCaptureActive)
         {
@@ -634,6 +649,10 @@ public partial class ViewerApp
             {
                 StopVideoRecording("Camera path video capture completed.");
                 _cameraPathVideoCaptureActive = false;
+                EndCameraPathPreload();
+            }
+            else if (_captureQueue.Count == 0 && _activeCaptureRequest == null)
+            {
                 EndCameraPathPreload();
             }
         }
@@ -800,11 +819,17 @@ public partial class ViewerApp
             _cameraPathVideoCapturePending = false;
             StartCameraPathVideoCaptureNow();
         }
+        else if (_cameraPathPlaybackPending && preload.Ready)
+        {
+            _cameraPathPlaybackPending = false;
+            StartCameraPathPlayback();
+        }
     }
 
     private void EndCameraPathPreload()
     {
         _cameraPathVideoCapturePending = false;
+        _cameraPathPlaybackPending = false;
         if (_worldScene != null)
             _worldScene.CapturePreloadActive = false;
         _terrainManager?.ClearCapturePreloadTiles();
@@ -813,43 +838,14 @@ public partial class ViewerApp
 
     private HashSet<(int tileX, int tileY)> BuildCameraPathPreloadTiles()
     {
-        HashSet<(int tileX, int tileY)> tiles = new();
-        int durationMs = Math.Max(0, _cameraPath.DurationMs);
-        int stepMs = Math.Max(100, _cameraPathPreloadSampleSpacingMs);
-        int sampleCount = durationMs == 0
-            ? 1
-            : Math.Min(2048, (int)MathF.Ceiling(durationMs / (float)stepMs) + 1);
-
-        for (int index = 0; index < sampleCount; index++)
-        {
-            int timeMs = sampleCount == 1
-                ? 0
-                : Math.Min(durationMs, (int)MathF.Round(durationMs * (index / (float)(sampleCount - 1))));
-            Vector3 position = M2CameraPathEvaluator.Sample(_cameraPath, timeMs).Position;
-            if (!TryGetCameraPathTile(position, out int tileX, out int tileY))
-                continue;
-
-            for (int dy = -_cameraPathPreloadTileRadius; dy <= _cameraPathPreloadTileRadius; dy++)
-            {
-                for (int dx = -_cameraPathPreloadTileRadius; dx <= _cameraPathPreloadTileRadius; dx++)
-                {
-                    int candidateX = tileX + dx;
-                    int candidateY = tileY + dy;
-                    if (candidateX >= 0 && candidateX < 64 && candidateY >= 0 && candidateY < 64
-                        && _terrainManager?.Adapter.TileExists(candidateX, candidateY) == true)
-                        tiles.Add((candidateX, candidateY));
-                }
-            }
-        }
-
-        return tiles;
-    }
-
-    private bool TryGetCameraPathTile(Vector3 position, out int tileX, out int tileY)
-    {
-        tileX = Math.Clamp((int)((WoWConstants.MapOrigin - position.X) / WoWConstants.ChunkSize), 0, 63);
-        tileY = Math.Clamp((int)((WoWConstants.MapOrigin - position.Y) / WoWConstants.ChunkSize), 0, 63);
-        return _terrainManager?.Adapter.TileExists(tileX, tileY) == true;
+        return CameraPathTileFootprintSelector.GetTiles(
+            _cameraPath,
+            WoWConstants.MapOrigin,
+            WoWConstants.TileSize,
+            WoWConstants.TilesPerMapEdge,
+            Math.Max(100, _cameraPathPreloadSampleSpacingMs),
+            _cameraPathPreloadTileRadius,
+            (tileX, tileY) => _terrainManager?.Adapter.TileExists(tileX, tileY) == true);
     }
 
     private void DrawCameraPathOverlay(Terrain.BoundingBoxRenderer overlay)

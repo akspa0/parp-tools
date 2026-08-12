@@ -14,7 +14,7 @@ Recover the existing capture automation route in the Tools > Utilities panel and
 **Testing**: xUnit focused core tests and Debug project build
 **Target Platform**: Windows desktop viewer, with non-Windows file-picker fallback unchanged
 **Project Type**: Desktop viewer and reusable core libraries
-**Performance Goals**: Path evaluation is constant-time over the key list; capture warmup retains only sampled path tiles and queues their objects before recording without enabling full-map residency
+**Performance Goals**: Path evaluation is constant-time over the key list; path warmup retains only the bounded swept path footprint and queues its objects before motion/recording without enabling full-map residency
 **Constraints**: Do not replace the existing capture queue, do not rewrite format readers, and do not claim interactive runtime proof from compilation alone
 **Scale/Scope**: One active authored path at a time, with arbitrary ordered key points and imported M2 camera samples
 
@@ -24,7 +24,7 @@ Recover the existing capture automation route in the Tools > Utilities panel and
 - Existing M2 readers and capture backend are reused.
 - Viewer runtime proof remains user-run; this slice provides focused tests/build only.
 - The existing sidebar remains available; this is additive route recovery, not a shell rewrite.
-- Capture warmup is a scoped lease over sampled available tiles. `TerrainManager` owns tile retention and `WorldScene`/`WorldAssetManager` own placement-asset queues; the lease is released on stop or completion.
+- Capture/path warmup is a scoped lease over available tiles in the swept sampled footprint. `TerrainManager` owns tile retention and `WorldScene`/`WorldAssetManager` own placement-asset queues; the lease is released on explicit stop, playback completion, or capture completion.
 
 ## Source Structure
 
@@ -44,3 +44,11 @@ Recover the existing capture automation route in the Tools > Utilities panel and
 2. Viewer Debug build passes with no errors.
 3. User manually loads a map, selects a client M2/MDX camera, imports and scrubs it, verifies collision-constrained playback, exercises keyboard authoring, and runs path video capture.
 4. User imports the built-in Undead FlyBy and verifies the origin read from the active client's `CinematicCamera.dbc` reports tile `(28,28)` and places the crypt sequence over the intended WMO/terrain.
+
+## Follow-up warmup correction
+
+The path footprint selector now uses the ADT tile size, not the 533-unit chunk size, and connects
+successive sampled positions with a tile-space line. This prevents fast or spline-smoothed paths
+from skipping an intermediate ADT and then losing it to normal AOI eviction. When preload is enabled,
+ordinary Play waits for this lease to become ready; active rendering remains directional and the lease
+does not make every retained tile a visible object candidate.
