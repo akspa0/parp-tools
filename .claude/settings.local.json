@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(if \\(Test-Path \"C:\\\\Users\\\\akspa\\\\.claude\\\\projects\\\\i--parp-parp-tools\\\\memory\"\\) { Get-ChildItem \"C:\\\\Users\\\\akspa\\\\.claude\\\\projects\\\\i--parp-parp-tools\\\\memory\" -Recurse | Select-Object FullName } else { Write-Host \"no memory dir\" }; foreach \\($p in @\\(\"i:\\\\parp\\\\parp-tools\\\\memory-bank\", \"i:\\\\parp\\\\parp-tools\\\\wow-viewer\\\\memory-bank\", \"i:\\\\parp\\\\parp-tools\\\\.memory-bank\", \"i:\\\\parp\\\\parp-tools\\\\wow-viewer\\\\.specify\"\\)\\) { if \\(Test-Path $p\\) { Write-Host \"EXISTS: $p\" } })",
+      "PowerShell(\\(Get-Content \"i:\\\\parp\\\\parp-tools\\\\wow-viewer\\\\tools\\\\harvest\\\\WowViewer.Tool.Harvest\\\\Program.cs\" | Measure-Object -Line\\).Lines; Get-Content \"i:\\\\parp\\\\parp-tools\\\\wow-viewer\\\\tools\\\\harvest\\\\WowViewer.Tool.Harvest\\\\WowViewer.Tool.Harvest.csproj\")"
+    ]
+  }
+}
