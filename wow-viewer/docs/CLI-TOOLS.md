@@ -47,8 +47,16 @@ dotnet run --project tools/inspect -c Debug -- pm4 match-assets --input <file.pm
 dotnet run --project tools/inspect -c Debug -- wmo inspect --input <file.wmo>
 dotnet run --project tools/inspect -c Debug -- map inspect --input <tile_00_00.adt>
 dotnet run --project tools/inspect -c Debug -- blp inspect --input <file.blp>
-dotnet run --project tools/inspect -c Debug -- audio alpha-area --archive-root <staged>
+dotnet run --project tools/inspect -c Debug -- audio alpha-area --archive-root <client-root> --build 0.5.3.3368 --limit 20
 ```
+
+`audio alpha-area` inspects the earliest-client area ambience catalog. It joins
+`AreaTable.dbc` to `AreaMIDIAmbiences.dbc`, then checks the referenced day/night
+and underwater MIDI sequences plus DLS bank in the loose client files and MPQ
+archives. It reports metadata and asset provenance; it does not play audio.
+Use `--area-id <id>` or `--search <text>` to narrow the report. See the
+[Alpha audio catalog guide](architecture/alpha-audio-catalog.md) for the data
+model and the playback boundary.
 
 ### Archive / Listfile
 

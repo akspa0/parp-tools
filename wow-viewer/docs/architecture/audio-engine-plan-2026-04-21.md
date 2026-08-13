@@ -24,7 +24,7 @@
   - world-session and world-runtime consumers already reopen root ADTs in `WowViewer.App/WowViewerWorldRuntimeBridge.cs`
   - DB client tables are already reachable through shared `DbClientFileReader`
 - the missing seam is not general file access anymore; it is typed audio ownership across:
-  - Alpha area-audio lookup and asset discovery
+  - Alpha area-audio lookup and asset discovery (the catalog and inspect proof now exist; playback does not)
   - ADT `MCSE` parsing across Alpha and later layouts
   - audio lookup tables and sound-entry resolution for later FMOD-era families
   - decoded-audio support for `wav`, `ogg`, and `flac`
@@ -40,11 +40,13 @@ Today `wow-viewer` has:
 - bounded world runtime tile reads in `WowViewerWorldRuntimeBridge`
 - shared terrain, liquid, and placement readers in `src/core/WowViewer.Core.IO/Maps`
 - shared DB client table access through `src/core/WowViewer.Core.IO/Files/DbClientFileReader.cs`
+- a build-aware Alpha area-audio catalog and inspect command; see
+  [`alpha-audio-catalog.md`](alpha-audio-catalog.md)
+- loose-file and archive-backed probing for the catalog's referenced `.mid` and
+  `.dls` assets
 
 Today `wow-viewer` does not have:
 
- - typed Alpha area-audio contracts for `MIDIAmbience`, `MIDIAmbienceUnderwater`, or `AreaMIDIAmbiences`
- - a shared inspect/report path for `.mid` or `.dls` discovery on Alpha client roots
 - an `MCSE` chunk id or reader in shared ADT ownership
 - typed world-sound emitter contracts in `WowViewer.Core`
 - an audio-scene runtime in `WowViewer.Core.Runtime`
@@ -123,7 +125,7 @@ The rationale is repo-local evidence:
 ## Slice 00 - Alpha Area MIDI/DLS Discovery And Inspect Proof
 
 - target problem:
-  - `wow-viewer` currently has no shared Alpha audio ownership even though the earliest client path is area-bound MIDI ambience plus DLS soundbanks
+- the earliest client path is area-bound MIDI ambience plus DLS soundbanks; the catalog now owns the metadata join and asset-discovery proof, while runtime playback remains open
 - implementation scope:
   - add shared Alpha area-audio contracts under `WowViewer.Core`, centered on `AreaTable` `MIDIAmbience` fields and `AreaMIDIAmbiences` records
   - add shared readers or resolver seams in `WowViewer.Core.IO` that can shape:

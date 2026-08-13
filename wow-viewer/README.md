@@ -104,5 +104,7 @@ configured `--game-path`, `--build`, and `--world` arguments.
 - [Release notes](docs/releases/v0.5.2.md)
 - [Viewer user guide](docs/WoWViewer/USERGUIDE.md)
 - [CLI tools](docs/CLI-TOOLS.md)
+- [Alpha audio catalog: what it is and how to inspect it](docs/architecture/alpha-audio-catalog.md)
+- [Audio engine plan](docs/architecture/audio-engine-plan-2026-04-21.md)
 - [UI surface inventory](docs/architecture/viewer-ui-surface-inventory.md)
 - [Memory bank](memory-bank/activeContext.md)

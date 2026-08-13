@@ -5,6 +5,12 @@ implemented yet.
 
 ## Phase 1 proof
 
+The Alpha catalog is the existing metadata/source-resolution foundation for
+area ambience. It joins `AreaTable.dbc` to `AreaMIDIAmbiences.dbc` and checks the
+referenced `.mid`/`.dls` files; it does not provide playback. See the
+[Alpha audio catalog guide](../../docs/architecture/alpha-audio-catalog.md)
+before running the client proof below.
+
 Run focused C# tests for:
 
 - transport state transitions and generation invalidation;

@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-08-12
+Last updated: 2026-08-13
 
 This file is the interchange for the next agent. It records only the current routing state. Read
 the owning spec for requirements and proof; read a workstream only when the spec links it.
@@ -16,6 +16,9 @@ the owning spec for requirements and proof; read a workstream only when the spec
 - **Explicitly out of scope for the next slice:** global cross-object light transport, animated Direct/
   LITE tracks, native full particle/ribbon parity, terrain/WDL streaming changes, scene-graph redesign,
   audio, and FPS claims without production capture evidence.
+- **Documentation correction:** the Alpha audio catalog is now documented as existing metadata and
+  loose/archive asset-resolution proof only; MIDI/DLS playback and the world-audio runtime remain
+  unimplemented and must not be inferred from an inspect result.
 
 ## Active spec lanes
 

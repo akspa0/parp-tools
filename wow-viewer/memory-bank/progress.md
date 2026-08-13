@@ -5,6 +5,15 @@ Last updated: 2026-08-13
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-13 — Alpha audio catalog documentation
+
+- Added a plain-language guide for the Alpha area-audio catalog, including the `AreaTable` to
+  `AreaMIDIAmbiences` join, day/night/underwater semantics, loose/archive asset resolution, exact
+  `audio alpha-area` inspect commands, and the boundary between metadata proof and playback.
+- Linked the guide from the viewer README, CLI guide, Spec 146 quickstart, and audio-engine plan;
+  corrected the plan/audit wording that incorrectly described the existing catalog proof as absent.
+- No playback backend or runtime audio claim was added; user-run audible proof remains out of scope.
+
 ## 2026-08-12 — Spec 104 MDX material/effect artifact repair
 
 - Added classic `LITE` parsing to `MdxFile`, including static Omni/Ambient values and deferred
