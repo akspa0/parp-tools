@@ -60,6 +60,56 @@ public sealed class DirectionalTileSelectorTests
         Assert.Equal(new[] { new DirectionalTileCoord(32, 32) }, visible);
     }
 
+    [Fact]
+    public void RequestedDetailCountExpandsAcrossForwardRings()
+    {
+        List<DirectionalTileCoord> visible = Selector.GetVisibleTiles(
+            CameraAt(32, 32),
+            yaw: 0f,
+            fovDegrees: 45f,
+            maxTileCount: 9);
+
+        Assert.Equal(9, visible.Count);
+        Assert.Contains(new DirectionalTileCoord(30, 32), visible);
+        Assert.Contains(new DirectionalTileCoord(30, 31), visible);
+        Assert.Contains(new DirectionalTileCoord(30, 33), visible);
+        Assert.DoesNotContain(visible, tile => tile.TileX > 32);
+    }
+
+    [Fact]
+    public void RequestedDetailCountCanExceedTheLegacyFourTileBaseline()
+    {
+        List<DirectionalTileCoord> visible = Selector.GetVisibleTiles(
+            CameraAt(32, 32),
+            yaw: 0f,
+            fovDegrees: 45f,
+            maxTileCount: 25);
+
+        Assert.Equal(25, visible.Count);
+        Assert.Contains(new DirectionalTileCoord(28, 32), visible);
+        Assert.All(visible, tile => Assert.InRange(tile.TileX, 28, 32));
+    }
+
+    [Fact]
+    public void CameraTileUsesTheConfiguredAdtSpan()
+    {
+        var selector = new DirectionalTileSelector(
+            mapOrigin: 17066.666f,
+            tileSize: 533.333f,
+            mapEdge: 64);
+
+        List<DirectionalTileCoord> visible = selector.GetVisibleTiles(
+            new Vector3(
+                17066.666f - (32.5f * 533.333f),
+                17066.666f - (31.5f * 533.333f),
+                0f),
+            yaw: 0f,
+            fovDegrees: 45f,
+            maxTileCount: 1);
+
+        Assert.Equal(new DirectionalTileCoord(32, 31), Assert.Single(visible));
+    }
+
     private static Vector3 CameraAt(int tileX, int tileY)
         => new(
             100f - ((tileX + 0.5f) * 10f),

@@ -439,27 +439,31 @@ camera-prioritized, budgeted promotions.
 unbounded tile/object work; full-map stress reports decode, mesh, upload, object, and graph time
 separately.
 
-## Phase 8M — Strict Directional Tile Admission Baseline
+## Phase 8M — Bounded Directional Tile Admission
 
-**Status**: Source slice landed; real-client movement evidence is still required before widening
-the visible tile cone. This is intentionally a smaller prerequisite than the later dense-submit
-work and does not replace the existing WMO/M2 batching fallbacks.
+**Status**: Source slice landed; real-client movement evidence is still required before further
+FOV radiation. This remains bounded and does not replace the existing WMO/M2 batching fallbacks.
 
-1. Select the active tile and at most three immediately forward-facing neighbors with a pure,
-   deterministic selector. The baseline uses a 45-degree cone half-angle and never searches a
-   second ring or radial fog footprint.
-2. Route normal ADT admission and retention through that selector. Fog distance and the manual
-   detail control may reduce the set but cannot expand it beyond four normal tiles.
+1. Select a caller-sized set from 1 through 25 existing tiles with a pure, deterministic selector.
+   The baseline uses a 45-degree cone half-angle and expands only through bounded forward rings;
+   it never searches a radial fog footprint or the whole map.
+2. Route normal ADT admission through that selector while keeping camera-centered retention
+   separate. The manual ADT detail control owns the active submission budget.
 3. Keep explicit capture-path preload leases and `--full-load` stress mode separate and labeled;
    they are not normal camera-driven admission.
-4. Expose paired active-tile and detailed-terrain-draw diagnostics at the render boundary and
-   fail the baseline invariant if either normal count exceeds four.
-5. Hand off a user-run real-client movement capture. Only after it passes may a later slice radiate
+4. Keep the established renderer coordinate contract: `WoWConstants.ChunkSize` is the 533.333-yard
+   ADT span used by camera/object placement; do not substitute the legacy aggregate `TileSize`.
+5. Pin selected detail tiles in desired residency and unload protection so a neighboring selected
+   tile cannot be evicted before submission.
+6. Expose paired active-tile and detailed-terrain-draw diagnostics at the render boundary and
+   fail the bounded invariant if either normal count exceeds 25.
+7. Hand off a user-run real-client movement capture. Only after it passes may a later slice radiate
    admission outward inside the directional cone.
 
 **Exit evidence**: focused selector tests pass; the viewer builds; a user-run normal movement
-capture reports no more than four active detailed tiles and no more than four detailed terrain
-draw calls per frame. FOV radiation, unique-model submission redesign, and FPS claims remain open.
+capture reports the selected count follows the detail control, selected neighboring tiles remain
+resident, and detailed terrain draw calls remain within the 25-tile bound. FOV radiation,
+unique-model submission redesign, and FPS claims remain open.
 
 ## Phase 8N — Active-Tile Object Admission
 
@@ -486,7 +490,7 @@ claim is made until that capture exists.
 
 **Status**: Source slice landed after the user reported the strict active-tile baseline sustaining
 over 200 FPS with up to three active tiles. This phase separates nearby tile residency from the
-directional render submission gate; it does not widen per-frame object admission.
+bounded directional render submission gate; it does not widen per-frame object admission.
 
 1. Select a deterministic, camera-centered Chebyshev window for streaming and GPU residency. The
    default radius is two tiles (up to 25 existing tiles); the runtime control allows radius three

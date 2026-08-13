@@ -21,7 +21,7 @@ the owning spec for requirements and proof; read a workstream only when the spec
 | 144 Camera capture paths | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions. |
 | 145 WoW UI overhaul | First slice implemented | Continue only the remaining persistent-window and placeholder audit tasks. |
 | 143 World context and lighting | First area slice landed | Resolve evidence/setup tasks before WMO area or lighting claims. |
-| 142 World scene graph | In progress | Validate Phase 8O retained radius 2/3 while active terrain/object submission remains directional. |
+| 142 World scene graph | In progress | Validate bounded directional ADT detail (1–25) with retained radius 2/3; the established ADT span remains intact and selected-set residency pin is explicit. |
 | 139–141 Terrain/minimap reconstruction | Active/parked ML lanes | Reopen only for the named spec and user-run training/validation. |
 | 138 Cross-era renderer research | Evidence/planning | Do not generalize one client build to every era. |
 | 128–131 PM4 | Established research lane | Use the PM4 spec pack and `workstream-pm4-decode.md`. |

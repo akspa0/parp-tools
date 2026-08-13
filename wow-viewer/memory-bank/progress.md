@@ -5,6 +5,16 @@ Last updated: 2026-08-12
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-12 — Spec 142 restored bounded detail and selected-tile residency
+
+- Preserved the renderer's established ADT coordinate span (`WoWConstants.ChunkSize`, 533.333
+  yards) while widening directional selection; `WoWConstants.TileSize` is a legacy aggregate and
+  is not interchangeable with the camera's ADT span.
+- Selected detail tiles now participate in both desired residency and unload protection, while the
+  separate retained window remains the camera-centered streaming policy.
+- Added focused proof for the 1–25 selector and the established ADT coordinate span; real-client
+  movement/FPS validation remains user-owned.
+
 ## 2026-08-12 — Spec 144 swept camera-path residency correction
 
 - Corrected camera-path tile conversion to use ADT `TileSize` rather than terrain `ChunkSize`.

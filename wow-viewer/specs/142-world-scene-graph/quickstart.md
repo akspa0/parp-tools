@@ -29,9 +29,11 @@ dotnet build src/viewer/WoWViewer/WoWViewer.csproj -c Debug
 
 The normal runtime now has two deliberately separate tile sets:
 
-- `LastSelectedTiles` is the directional active submission set. It remains capped at the active
-  tile plus up to three forward neighbors and gates detailed terrain, liquids, scene-graph work,
-  and WMO/MDX object admission.
+- `LastSelectedTiles` is the directional active submission set. Its size follows the ADT Detail
+  Tiles control from 1 through 25 and gates detailed terrain, liquids, scene-graph work, and
+  WMO/MDX object admission. Selection expands through bounded forward-cone rings only. The
+  selector and camera tile conversion use the established 533.333-yard ADT span represented by
+  `WoWConstants.ChunkSize` in this renderer.
 - `LastRetainedTiles` is the bounded camera-centered residency window. Its default radius is two
   tiles and the runtime control permits radius three. It controls streaming and unload protection;
   retained tiles do not become visible objects merely because they are resident.
@@ -142,11 +144,14 @@ dotnet test tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug
 - Runtime stats expose graph active/inactive state, resident ADT graph roots, traversal
   visited/tested/rejected/skipped counts, AOI camera and retained counts, and the last unloaded ADT
   plus its WMO placement count.
-- The strict directional tile baseline exposes `TerrainManager.LastSelectedTiles`,
+- The bounded directional tile contract exposes `TerrainManager.LastSelectedTiles`,
   `LastFrameActiveTileCount`, `LastFrameDetailedTileDrawCalls`, and
   `LastDirectionalTileInvariantPassed`. With verbose logging enabled, the render boundary emits
-  the paired `Active Tiles` and `Detailed Draw Calls` values. Normal camera admission is capped at
-  four tiles; capture preloads and `--full-load` remain explicit exceptions.
+  the paired `Active Tiles` and `Detailed Draw Calls` values. Normal camera admission follows the
+  ADT Detail Tiles control from 1 through 25; capture preloads and `--full-load` remain explicit
+  exceptions. In this renderer's established coordinate contract, `WoWConstants.ChunkSize` is
+  the 533.333-yard ADT span; `WoWConstants.TileSize` is a legacy 16-span aggregate and must not
+  be used for camera ADT selection.
 - WorldScene object admission consumes the selected camera tiles instead of traversing every
   resident ADT graph. The flat WMO/MDX collectors and deferred bounds promotion use the same gate;
   capture-preload tiles remain an explicit render-path lease. `--full-load` retains residency for

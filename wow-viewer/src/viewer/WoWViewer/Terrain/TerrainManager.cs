@@ -44,17 +44,18 @@ public class TerrainManager : ISceneRenderer
     // capture preparation ends.
     private readonly HashSet<(int tileX, int tileY)> _capturePreloadTiles = new();
 
-    // Visibility remains strict and directional. Residency is a separate,
-    // camera-centered bounded window so nearby tiles can stream in without
-    // expanding the per-frame object/terrain submission set.
+    // Visibility remains directional and bounded by the detail control.
+    // Residency is a separate, camera-centered window so neighboring tiles
+    // remain available without turning the whole map into a submission set.
     private const int MinDetailedTileCandidateRadius = 1;
-    private const int MaxDetailedTileCandidateRadius = 1;
+    private const int MaxDetailedTileCandidateRadius = 4;
     private const int MinDetailedTileCount = 1;
-    private const int MaxDetailedTileCount = 4;
+    private const int DefaultDetailedTileCount = 9;
+    private const int MaxDetailedTileCount = 25;
     public const int MinRetainedTileRadius = 1;
     private const int DefaultRetainedTileRadius = 2;
     public const int MaxRetainedTileRadius = 3;
-    public const int MaxManualDetailedTileCount = 4;
+    public const int MaxManualDetailedTileCount = MaxDetailedTileCount;
     public const float DirectionalTileFovDegrees = 45f;
     private const int MaxGpuUploadsPerFrame = 6;
     private const double MaxGpuUploadBudgetMs = 7.0;
@@ -87,8 +88,8 @@ public class TerrainManager : ISceneRenderer
     private Vector3 _lastCameraPos;
     private Vector2 _cameraHeading;
     private Vector2 _lastSelectedHeading;
-    private readonly List<(int tileX, int tileY)> _lastSelectedTiles = new(4);
-    private readonly List<(int tileX, int tileY)> _lastRetainedTiles = new(25);
+    private readonly List<(int tileX, int tileY)> _lastSelectedTiles = new(MaxDetailedTileCount);
+    private readonly List<(int tileX, int tileY)> _lastRetainedTiles = new(49);
     private bool _disposed;
 
     // Stats
@@ -114,8 +115,9 @@ public class TerrainManager : ISceneRenderer
     public int LastFrameRetainedTileCount => _lastRetainedTiles.Count;
     public int LastFrameDetailedTileDrawCalls => _terrainRenderer.LastFrameDrawCalls;
     public bool LastDirectionalTileInvariantPassed
-        => LastFrameActiveTileCount <= 4
-            && (_capturePreloadTiles.Count > 0 || LastFrameDetailedTileDrawCalls <= 4);
+        => LastFrameActiveTileCount <= MaxManualDetailedTileCount
+            && (_capturePreloadTiles.Count > 0
+                || LastFrameDetailedTileDrawCalls <= MaxManualDetailedTileCount);
     public TerrainLighting Lighting => _terrainRenderer.Lighting;
     public TerrainRenderer Renderer => _terrainRenderer;
     public LiquidRenderer LiquidRenderer => _liquidRenderer;
@@ -471,8 +473,8 @@ public class TerrainManager : ISceneRenderer
     /// <summary>
     /// Update terrain AOI based on camera position. Call each frame before Render.
     /// Queues new tiles for background loading and submits completed tiles to GPU.
-    /// Uses the strict directional baseline: active tile plus at most three
-    /// adjacent tiles in the camera-facing 45-degree cone.
+    /// Uses a bounded directional cone whose depth is controlled by the ADT
+    /// detail count; retention remains a separate camera-centered window.
     /// </summary>
     public void UpdateAOI(Vector3 cameraPos, Vector3? cameraForward = null)
     {
@@ -533,7 +535,8 @@ public class TerrainManager : ISceneRenderer
         List<DirectionalTileCoord> selectedTiles = _directionalTileSelector.GetVisibleTiles(
             cameraPos,
             yaw,
-            DirectionalTileFovDegrees);
+            DirectionalTileFovDegrees,
+            targetDetailedTileCount);
 
         _lastSelectedTiles.Clear();
         foreach (DirectionalTileCoord selected in selectedTiles.Take(targetDetailedTileCount))
@@ -555,6 +558,13 @@ public class TerrainManager : ISceneRenderer
         foreach (var retained in _lastRetainedTiles)
             desiredTiles.Add(retained);
 
+        // The detailed set is always part of the residency lease. This keeps
+        // the slider useful when its bounded forward cone reaches beyond the
+        // separately configured retention radius, and prevents a selected
+        // neighboring tile from being unloaded before it can be submitted.
+        foreach (var selected in _lastSelectedTiles)
+            desiredTiles.Add(selected);
+
         // Capture-path tiles are deliberately loaded in addition to the
         // camera-facing set. This is an explicit, user-requested residency
         // lease; it must not turn ordinary world navigation into full-map load.
@@ -564,6 +574,9 @@ public class TerrainManager : ISceneRenderer
         var unloadKeepTiles = new HashSet<(int, int)>();
         foreach (var retained in _lastRetainedTiles)
             unloadKeepTiles.Add(retained);
+
+        foreach (var selected in _lastSelectedTiles)
+            unloadKeepTiles.Add(selected);
 
         foreach (var tile in _capturePreloadTiles)
             unloadKeepTiles.Add(tile);
@@ -667,16 +680,22 @@ public class TerrainManager : ISceneRenderer
 
         if (_detailedTileCountOverride > 0)
         {
-            targetDetailedTileCount = Math.Clamp(_detailedTileCountOverride, 1, MaxManualDetailedTileCount);
-            detailedTileCandidateRadius = MaxDetailedTileCandidateRadius;
+            targetDetailedTileCount = Math.Clamp(_detailedTileCountOverride, MinDetailedTileCount, MaxManualDetailedTileCount);
+            detailedTileCandidateRadius = GetCandidateRadius(targetDetailedTileCount);
             targetRetainedTileRadius = _retainedTileRadius;
             return;
         }
 
-        targetDetailedTileCount = Math.Clamp(MaxDetailedTileCount, MinDetailedTileCount, MaxDetailedTileCount);
-        detailedTileCandidateRadius = MinDetailedTileCandidateRadius;
+        targetDetailedTileCount = Math.Clamp(DefaultDetailedTileCount, MinDetailedTileCount, MaxDetailedTileCount);
+        detailedTileCandidateRadius = GetCandidateRadius(targetDetailedTileCount);
         targetRetainedTileRadius = _retainedTileRadius;
     }
+
+    private static int GetCandidateRadius(int requestedTileCount)
+        => Math.Clamp(
+            (int)MathF.Ceiling(MathF.Sqrt(Math.Max(1, requestedTileCount))) - 1,
+            MinDetailedTileCandidateRadius,
+            MaxDetailedTileCandidateRadius);
 
     /// <summary>
     /// Submit background-loaded tiles to GPU. Must be called on the render thread.
