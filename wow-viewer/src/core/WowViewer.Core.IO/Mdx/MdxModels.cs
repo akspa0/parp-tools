@@ -47,6 +47,11 @@ public class MdlTexLayer
     public int TransformId { get; set; } = -1;
     public int CoordId { get; set; } = -1;
     public float StaticAlpha { get; set; } = 1.0f;
+    /// <summary>
+    /// Static self-illumination gain from the MDX material layer. This is material
+    /// emission, not a scene light and must not be used to illuminate other objects.
+    /// </summary>
+    public float StaticEmissiveGain { get; set; }
     public C3Color StaticColor { get; set; } = new C3Color(1.0f, 1.0f, 1.0f);
     public float StaticColorAlpha { get; set; } = 1.0f;
     public List<MdlAnimKey<float>> AlphaKeys { get; } = new();

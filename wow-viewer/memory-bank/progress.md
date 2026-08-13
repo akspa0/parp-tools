@@ -5,6 +5,17 @@ Last updated: 2026-08-12
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-12 — Spec 104 MDX material/effect artifact repair
+
+- Implemented the missing premultiplied-alpha shader output that the transparent MDX blend state
+  already requested; the compatibility fragment path now follows the same alpha contract.
+- Preserved classic MTLS static emissive gain in the runtime MDX material layer and applied it as
+  self-illumination only, without introducing dynamic scene lighting.
+- Removed white 1x1 fallbacks from transparent MDX geosets and unresolved particle emitters; missing
+  effect textures now fail closed instead of drawing invented white squares/webs. Alpha-key particles
+  still use an explicit discard threshold.
+- Focused parser/build proof and real-client visual proof remain separate; the user owns the latter.
+
 ## 2026-08-12 — Spec 142 shared WMO placement transform
 
 - Routed global and tile-local MDX/WMO placement creation plus translation-only editing through one

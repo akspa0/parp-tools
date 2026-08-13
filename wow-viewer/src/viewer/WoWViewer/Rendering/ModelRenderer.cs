@@ -98,7 +98,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
 
     // ── Shared shader program (all MdxRenderers use identical shader source) ──
     private static uint _shaderProgram;
-    private static int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUseTextureAlpha, _uUnshaded, _uPremultiplyAlpha;
+    private static int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUseTextureAlpha, _uUnshaded, _uPremultiplyAlpha, _uEmissiveGain;
     private static int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos, _uAlphaThreshold;
     private static int _uLightDir, _uLightColor, _uAmbientColor;
     private static int _uSphereEnvMap;
@@ -108,7 +108,6 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     private static int _uBones; // Bone matrix array uniform location
     private static int _uHasBones; // Enable skinning flag
     private static bool _shaderInitialized;
-    private static uint _whiteFallbackTexture;
 
     private readonly List<GeosetBuffers> _geosets = new();
     private readonly List<int> _transparentGeosetOrder = new();
@@ -1047,6 +1046,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
 
                     // Unshaded (0x1): skip lighting in shader
                     _gl.Uniform1(_uUnshaded, geoFlags.HasFlag(MdlGeoFlags.Unshaded) ? 1 : 0);
+                    _gl.Uniform1(_uEmissiveGain, Math.Max(layer.StaticEmissiveGain, 0.0f));
 
                     // SphereEnvMap (0x2): generate UVs from view-space normals for reflective surfaces
                     _gl.Uniform1(_uSphereEnvMap, usesSphereEnvMap ? 1 : 0);
@@ -1144,17 +1144,28 @@ if (isAlphaCutout)
                         _gl.BindTexture(TextureTarget.Texture2D, glTex);
                         _gl.Uniform1(_uHasTexture, 1);
                     }
-                    else if (ShouldUseNeutralMissingTextureFallback(l, layer, effectiveBlendMode))
-                    {
-                        _gl.ActiveTexture(TextureUnit.Texture0);
-                        _gl.BindTexture(TextureTarget.Texture2D, EnsureWhiteFallbackTexture());
-                        _gl.Uniform1(_uHasTexture, 1);
-                    }
                     else
                     {
-                        _gl.Uniform1(_uHasTexture, l == 0 ? 0 : 1);
-                        if (ShouldSkipLayerWhenTextureIsMissing(l))
+                        // A missing transparent/effect texture is not a valid white
+                        // material. Rendering a neutral 1x1 texture creates the exact
+                        // opaque squares and spiderweb halos seen on MDX/M2 effects.
+                        _gl.Uniform1(_uHasTexture, 0);
+                        if (ShouldSkipLayerWhenTextureIsMissing(l, needsBlend))
+                        {
+                            if (needsBlend)
+                            {
+                                _gl.Disable(EnableCap.Blend);
+                                _gl.DepthMask(!forceBackdropState);
+                            }
+                            else if (noDepthWrite)
+                            {
+                                _gl.DepthMask(!forceBackdropState);
+                            }
+
+                            if (!forceBackdropState && geoFlags.HasFlag(MdlGeoFlags.NoDepthTest))
+                                _gl.Enable(EnableCap.DepthTest);
                             continue;
+                        }
                     }
 
                     ApplyLayerUvTransform(layer);
@@ -1197,6 +1208,7 @@ if (isAlphaCutout)
                 && pass != RenderPass.Transparent)
             {
                 _gl.Uniform1(_uHasTexture, 0);
+                _gl.Uniform1(_uEmissiveGain, 0.0f);
                 _gl.Uniform1(_uUvSet, 0);
                 ResetLayerUvTransform();
                 _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 1.0f);
@@ -1230,6 +1242,7 @@ if (isAlphaCutout)
         _gl.Uniform1(_uAlphaTest, 0);
         _gl.Uniform1(_uUseTextureAlpha, 0);
         _gl.Uniform1(_uPremultiplyAlpha, 0);
+        _gl.Uniform1(_uEmissiveGain, 0.0f);
         _gl.Uniform1(_uUnshaded, 1);
         _gl.Uniform1(_uSphereEnvMap, 0);
         _gl.Uniform1(_uUvSet, 0);
@@ -1583,6 +1596,8 @@ uniform int uAlphaTest;
 uniform int uUseTextureAlpha;
 uniform float uAlphaThreshold;
 uniform int uUnshaded;
+uniform int uPremultiplyAlpha;
+uniform float uEmissiveGain;
 uniform vec4 uColor;
 uniform vec3 uFogColor;
 uniform float uFogStart;
@@ -1611,12 +1626,17 @@ void main()
     }
 
     vec3 litColor = texColor.rgb * (uAmbientColor + uLightColor * diffuseStrength);
+    litColor += texColor.rgb * max(uEmissiveGain, 0.0);
     float distanceToCamera = distance(vFragPos, uCameraPos);
     float fogRange = max(uFogEnd - uFogStart, 0.001);
     float fogFactor = clamp((uFogEnd - distanceToCamera) / fogRange, 0.0, 1.0);
     vec3 finalColor = mix(uFogColor, litColor, fogFactor);
     float outputAlpha = uUseTextureAlpha == 1 ? texColor.a : 1.0;
-    FragColor = vec4(finalColor, outputAlpha) * uColor;
+    float finalAlpha = outputAlpha * uColor.a;
+    vec3 finalRgb = finalColor * uColor.rgb;
+    if (uPremultiplyAlpha == 1)
+        finalRgb *= finalAlpha;
+    FragColor = vec4(finalRgb, finalAlpha);
 }
 ";
 
@@ -1628,6 +1648,7 @@ uniform sampler2D uSampler;
 uniform int uHasTexture;
 uniform int uAlphaTest;
 uniform float uAlphaThreshold;
+uniform int uPremultiplyAlpha;
 uniform vec4 uColor;
 
 out vec4 FragColor;
@@ -1641,7 +1662,11 @@ void main()
     if (uAlphaTest == 1 && texColor.a < uAlphaThreshold)
         discard;
 
-    FragColor = texColor * uColor;
+    float finalAlpha = texColor.a * uColor.a;
+    vec3 finalRgb = texColor.rgb * uColor.rgb;
+    if (uPremultiplyAlpha == 1)
+        finalRgb *= finalAlpha;
+    FragColor = vec4(finalRgb, finalAlpha);
 }
 """;
 
@@ -1684,6 +1709,7 @@ void main()
         _uUseTextureAlpha = _gl.GetUniformLocation(_shaderProgram, "uUseTextureAlpha");
         _uAlphaThreshold = _gl.GetUniformLocation(_shaderProgram, "uAlphaThreshold");
         _uPremultiplyAlpha = _gl.GetUniformLocation(_shaderProgram, "uPremultiplyAlpha");
+        _uEmissiveGain = _gl.GetUniformLocation(_shaderProgram, "uEmissiveGain");
         _uUnshaded = _gl.GetUniformLocation(_shaderProgram, "uUnshaded");
         _uColor = _gl.GetUniformLocation(_shaderProgram, "uColor");
         _uFogColor = _gl.GetUniformLocation(_shaderProgram, "uFogColor");
@@ -2465,65 +2491,12 @@ void main()
         textureEntry.WrapT = TextureWrapMode.ClampToEdge;
     }
 
-    private bool ShouldUseNeutralMissingTextureFallback(int layerIndex, MdlTexLayer layer, MdlTexOp effectiveBlendMode)
+    private static bool ShouldSkipLayerWhenTextureIsMissing(int layerIndex, bool needsBlend)
     {
-        if (!_isM2AdapterModel)
-            return false;
-
-        if (_mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0)
-            return true;
-
-        if (layerIndex != 0)
-            return false;
-
-        if (effectiveBlendMode == MdlTexOp.Load)
-            return false;
-
-        return effectiveBlendMode is MdlTexOp.Add
-            or MdlTexOp.AddAlpha
-            or MdlTexOp.Blend
-            or MdlTexOp.Transparent
-            or MdlTexOp.Modulate
-            or MdlTexOp.Modulate2X
-            || layer.TransformId >= 0
-            || layer.AlphaKeys.Count > 0
-            || layer.ColorKeys.Count > 0
-            || layer.ColorAlphaKeys.Count > 0;
-    }
-
-    private static bool ShouldSkipLayerWhenTextureIsMissing(int layerIndex)
-    {
-        // Keep the primary layer visible even when texture resolution is incomplete.
-        // Secondary layers without a bound texture cannot contribute meaningful output.
-        return layerIndex > 0;
-    }
-
-    private unsafe uint EnsureWhiteFallbackTexture()
-    {
-        if (_whiteFallbackTexture != 0)
-            return _whiteFallbackTexture;
-
-        byte[] pixel = { 255, 255, 255, 255 };
-        _whiteFallbackTexture = _gl.GenTexture();
-        _gl.BindTexture(TextureTarget.Texture2D, _whiteFallbackTexture);
-        fixed (byte* ptr = pixel)
-        {
-            _gl.TexImage2D(
-                TextureTarget.Texture2D,
-                0,
-                InternalFormat.Rgba,
-                1,
-                1,
-                0,
-                PixelFormat.Rgba,
-                PixelType.UnsignedByte,
-                ptr);
-        }
-
-        RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: false,
-            TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge);
-        _gl.BindTexture(TextureTarget.Texture2D, 0);
-        return _whiteFallbackTexture;
+        // Secondary layers and every blended layer need a real texture. Keeping a
+        // textureless primary opaque layer visible is useful for mesh diagnostics;
+        // transparent geometry without its texture is only an invented artifact.
+        return layerIndex > 0 || needsBlend;
     }
 
     public void ApplyTextureSamplingSettings()
@@ -2551,13 +2524,6 @@ void main()
 
             _gl.BindTexture(TextureTarget.Texture2D, textureId);
             RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: true, wrapS, wrapT);
-        }
-
-        if (_whiteFallbackTexture != 0)
-        {
-            _gl.BindTexture(TextureTarget.Texture2D, _whiteFallbackTexture);
-            RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: false,
-                TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge);
         }
 
         _gl.BindTexture(TextureTarget.Texture2D, 0);

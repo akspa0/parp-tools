@@ -8,6 +8,28 @@ namespace WowViewer.Core.Tests;
 public sealed class MdxMaterialReaderTests
 {
     [Fact]
+    public void MdxFileLoad_MaterialLayerPreservesStaticEmissiveGain()
+    {
+        byte[] bytes = CreateBinaryMdxBytes(
+            version: 1300,
+            modelName: "SyntheticBinaryMaterial",
+            materials:
+            [
+                (0,
+                    [
+                        (3u, 0u, -1, -1, 0, 1.0f, 2.5f, null, null, null)
+                    ])
+            ]);
+
+        using MemoryStream stream = new(bytes);
+        MdxFile mdx = MdxFile.Load(stream);
+
+        Assert.Single(mdx.Materials);
+        Assert.Single(mdx.Materials[0].Layers);
+        Assert.Equal(2.5f, mdx.Materials[0].Layers[0].StaticEmissiveGain, 5);
+    }
+
+    [Fact]
     public void Read_SyntheticClassicMaterialPayload_AssignsLayerTracks()
     {
         byte[] bytes = CreateMdxBytes(
@@ -60,6 +82,22 @@ public sealed class MdxMaterialReaderTests
         bytes.AddRange(Encoding.ASCII.GetBytes("MDLX"));
         bytes.AddRange(CreateChunk("VERS", CreateUInt32Payload(version)));
         bytes.AddRange(CreateChunk("MODL", CreateModlPayload(modelName)));
+        bytes.AddRange(CreateChunk("MTLS", CreateMtlsPayload(materials)));
+        return [.. bytes];
+    }
+
+    private static byte[] CreateBinaryMdxBytes(
+        uint version,
+        string modelName,
+        IReadOnlyList<(int PriorityPlane, IReadOnlyList<(uint BlendMode, uint Flags, int TextureId, int TransformId, int CoordId, float StaticAlpha, float StaticEmissiveGain, (string Tag, uint InterpolationType, int GlobalSequenceId, IReadOnlyList<(int Time, float Value, float? InTangent, float? OutTangent)> Keys)? EmissiveTrack, (string Tag, uint InterpolationType, int GlobalSequenceId, IReadOnlyList<(int Time, float Value, float? InTangent, float? OutTangent)> Keys)? AlphaTrack, (string Tag, uint InterpolationType, int GlobalSequenceId, IReadOnlyList<(int Time, int Value, int? InTangent, int? OutTangent)> Keys)? TextureLayerTrack)> Layers)> materials)
+    {
+        List<byte> bytes = [];
+        bytes.AddRange(Encoding.ASCII.GetBytes("MDLX"));
+        bytes.AddRange(CreateChunk("VERS", CreateUInt32Payload(version)));
+
+        byte[] modl = new byte[0x70];
+        Encoding.ASCII.GetBytes(modelName[..Math.Min(modelName.Length, 0x50)]).CopyTo(modl, 0);
+        bytes.AddRange(CreateChunk("MODL", modl));
         bytes.AddRange(CreateChunk("MTLS", CreateMtlsPayload(materials)));
         return [.. bytes];
     }

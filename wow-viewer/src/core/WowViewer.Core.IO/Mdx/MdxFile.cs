@@ -669,6 +669,17 @@ public class MdxFile
                 layer.TransformId = br.ReadInt32();
                 layer.CoordId = br.ReadInt32();
                 layer.StaticAlpha = br.ReadSingle();
+                // Newer MDX material records append a static emissive gain before
+                // their animation tracks. Older records put the first track tag here;
+                // do not interpret that FourCC as a float.
+                if (br.BaseStream.Position + sizeof(uint) <= layerEnd)
+                {
+                    long optionalValuePosition = br.BaseStream.Position;
+                    string nextTag = ReadTag(br);
+                    br.BaseStream.Position = optionalValuePosition;
+                    if (nextTag is not "KMTE" and not "KMTA" and not "KMTF")
+                        layer.StaticEmissiveGain = Math.Max(br.ReadSingle(), 0.0f);
+                }
                     
                 // Skip animation tracks in layer
                 br.BaseStream.Position = layerEnd;

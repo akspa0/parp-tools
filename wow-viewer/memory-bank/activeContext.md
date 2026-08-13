@@ -7,13 +7,14 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 142 user-run validation of near-field terrain/WDL visibility and stable camera-turn visibility.
+- **Next implementation target:** Spec 104 Phase 4 MDX material/effect compatibility repair, starting with user-run validation of the premultiplied-alpha and fail-closed texture changes.
 - **Proof owner:** focused C# tests and a Debug build for source-level contracts; the user owns real
   client, OpenGL, audio-device, capture, and performance proof.
-- **Main unproven gap:** focused source proof now covers bounds-based terrain fog admission and WDL suppression
-  tied to selected-and-resident ADTs, but no user-run movement or camera-track test has yet confirmed that
-  nearby detailed tiles remain visible while the WDL horizon stays stable.
-- **Explicitly out of scope for the next slice:** FOV radiation, whole-window object submission, unique-model submission redesign, broad renderer rewrites, audio, and FPS claims without production capture evidence.
+- **Main unproven gap:** source proof can establish the MDX material contracts, but only the user’s real
+  client scene can confirm that effect quads and transparent ghosting are gone without regressing valid
+  emissive or alpha-key assets.
+- **Explicitly out of scope for the next slice:** native full particle/ribbon parity, dynamic point lights,
+  terrain/WDL streaming changes, scene-graph redesign, audio, and FPS claims without production capture evidence.
 
 ## Active spec lanes
 

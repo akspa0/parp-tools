@@ -19,6 +19,7 @@ public unsafe class ParticleRenderer : IDisposable
     private int _uCameraRight, _uCameraUp;
     private int _uParticlePos, _uParticleColor, _uParticleSize;
     private int _uHasTexture;
+    private int _uAlphaTest;
     private int _uRows, _uColumns, _uCellIndex;
 
     private bool _disposed;
@@ -78,12 +79,17 @@ out vec4 FragColor;
 uniform sampler2D uTexture;
 uniform vec4 uParticleColor;
 uniform int uHasTexture;
+uniform int uAlphaTest;
 
 void main()
 {
-    vec4 texColor = (uHasTexture == 1) ? texture(uTexture, vTexCoord) : vec4(1.0);
-    FragColor = texColor * uParticleColor;
-    if (FragColor.a < 0.01) discard;
+    vec4 texColor = (uHasTexture == 1) ? texture(uTexture, vTexCoord) : vec4(0.0);
+    vec4 color = texColor * uParticleColor;
+    if (uAlphaTest == 1 && color.a < 0.5)
+        discard;
+    FragColor = color;
+    if (FragColor.a < 0.01)
+        discard;
 }
 ";
 
@@ -115,6 +121,7 @@ void main()
         _uParticleColor= _gl.GetUniformLocation(_shaderProgram, "uParticleColor");
         _uParticleSize = _gl.GetUniformLocation(_shaderProgram, "uParticleSize");
         _uHasTexture   = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
+        _uAlphaTest    = _gl.GetUniformLocation(_shaderProgram, "uAlphaTest");
         _uRows         = _gl.GetUniformLocation(_shaderProgram, "uRows");
         _uColumns      = _gl.GetUniformLocation(_shaderProgram, "uColumns");
         _uCellIndex    = _gl.GetUniformLocation(_shaderProgram, "uCellIndex");
@@ -223,12 +230,30 @@ void main()
 
             // Bind emitter texture
             bool hasTex = false;
-            if (def.TextureId >= 0 && textureMap.TryGetValue(def.TextureId, out uint glTex))
+            uint glTex = 0;
+            if (def.TextureId >= 0 && textureMap.TryGetValue(def.TextureId, out glTex))
             {
-                _gl.BindTexture(TextureTarget.Texture2D, glTex);
                 hasTex = true;
             }
+            else if (def.ReplaceableId > 0)
+            {
+                for (int textureIndex = 0; textureIndex < textureDefs.Count; textureIndex++)
+                {
+                    if (textureDefs[textureIndex].ReplaceableId != def.ReplaceableId
+                        || !textureMap.TryGetValue(textureIndex, out glTex))
+                        continue;
+
+                    hasTex = true;
+                    break;
+                }
+            }
+            // Never draw a particle quad without its source texture. A white
+            // fallback is visually indistinguishable from a broken effect sprite.
+            if (!hasTex)
+                continue;
+            _gl.BindTexture(TextureTarget.Texture2D, glTex);
             _gl.Uniform1(_uHasTexture, hasTex ? 1 : 0);
+            _gl.Uniform1(_uAlphaTest, def.FilterMode == ParticleFilterMode.AlphaKey ? 1 : 0);
 
             // Atlas subdivisions
             int rows = Math.Max(def.Rows, 1);

@@ -127,9 +127,15 @@ public static class MdxMaterialReader
                     int transformId = ReadInt32(stream);
                     int coordId = ReadInt32(stream);
                     float staticAlpha = ReadSingle(stream);
-                    float staticEmissiveGain = layerEnd - stream.Position >= 4
-                        ? ReadSingle(stream)
-                        : 0.0f;
+                    float staticEmissiveGain = 0.0f;
+                    if (layerEnd - stream.Position >= sizeof(uint))
+                    {
+                        long optionalValuePosition = stream.Position;
+                        string nextTag = ReadTag(stream);
+                        stream.Position = optionalValuePosition;
+                        if (nextTag is not "KMTE" and not "KMTA" and not "KMTF")
+                            staticEmissiveGain = Math.Max(ReadSingle(stream), 0.0f);
+                    }
 
                     MdxScalarTrack? emissiveTrack = null;
                     MdxScalarTrack? alphaTrack = null;

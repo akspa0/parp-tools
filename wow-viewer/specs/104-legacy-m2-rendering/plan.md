@@ -97,6 +97,26 @@ check. Until then, Plan 104 is not done.
 - **TBC 0x101–0x107**: one format boundary at a time after the 1.x route is signed off.
 - **0.11/0.12**: retain their working pre-`0x100` route; only trace if a real regression is found.
 
+## Phase 4 — MDX material/effect compatibility repair
+
+This is a bounded compatibility slice for the existing MDX runtime and the explicit M2-to-MDX
+fallback. It does not reopen the native M2 ownership work above and does not claim full native
+particle, ribbon, or multi-stage shader parity.
+
+1. Preserve static material emissive gain when reading classic MTLS layers, without mistaking
+   animation-track FourCCs for the optional scalar.
+2. Apply emissive gain as material self-illumination only; it must not become a scene light.
+3. Implement the premultiplied-alpha fragment output promised by the transparent blend state.
+4. Fail closed when a transparent geoset or particle emitter has no resolved texture; never
+   synthesize a white 1x1 texture for effect geometry.
+5. Preserve alpha-key discard behavior for particle emitters and keep additive particles on the
+   existing additive blend route.
+6. Run focused parser tests and a Debug build. User-run viewer/capture proof owns visual signoff.
+
+**Gate**: no source-level white fallback remains in the MDX material/effect path; focused tests
+and build pass; the user confirms lamp/effect quads and transparent ghosting are gone in a real
+client scene. Any remaining visual mismatch is a separate native-effect parity slice.
+
 ## Phase 3 — Native 2.x/3.0.x embedded-profile handoff
 
 1. Reuse the existing profiled embedded-root parser and material metadata extraction; do not
