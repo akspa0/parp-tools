@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
+using WowViewer.Core.Mdx;
 using WowViewer.Core.IO.Mdx;
 using WoWViewer.DataSources;
 using WoWViewer.Logging;
@@ -101,6 +102,14 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     private static int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUseTextureAlpha, _uUnshaded, _uPremultiplyAlpha, _uEmissiveGain;
     private static int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos, _uAlphaThreshold;
     private static int _uLightDir, _uLightColor, _uAmbientColor;
+    private const int MaxMdxLocalLights = 8;
+    private static int _uLocalLightCount, _uLocalAmbientColor;
+    private static readonly int[] _uLocalLightType = new int[MaxMdxLocalLights];
+    private static readonly int[] _uLocalLightPos = new int[MaxMdxLocalLights];
+    private static readonly int[] _uLocalLightColor = new int[MaxMdxLocalLights];
+    private static readonly int[] _uLocalLightIntensity = new int[MaxMdxLocalLights];
+    private static readonly int[] _uLocalLightStart = new int[MaxMdxLocalLights];
+    private static readonly int[] _uLocalLightEnd = new int[MaxMdxLocalLights];
     private static int _uSphereEnvMap;
     private static int _uFlipTexU;
     private static int _uUvSet;
@@ -299,7 +308,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         }
 
         // Log material→texture mapping for debugging
-        ViewerLog.Info(ViewerLog.Category.Mdx, $"Materials: {_mdx.Materials.Count}, Textures: {_mdx.Textures.Count}, Geosets: {_mdx.Geosets.Count}, GeosetAnimations: {_mdx.GeosetAnimations.Count}");
+        ViewerLog.Info(ViewerLog.Category.Mdx, $"Materials: {_mdx.Materials.Count}, Textures: {_mdx.Textures.Count}, Geosets: {_mdx.Geosets.Count}, GeosetAnimations: {_mdx.GeosetAnimations.Count}, Lights: {_mdx.Lights.Count}");
         
         // Log geoset animation info
         if (_mdx.GeosetAnimations.Count > 0)
@@ -727,6 +736,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         _gl.Uniform3(_uLightDir, lightDir.X, lightDir.Y, lightDir.Z);
         _gl.Uniform3(_uLightColor, lightColor.X, lightColor.Y, lightColor.Z);
         _gl.Uniform3(_uAmbientColor, ambientColor.X, ambientColor.Y, ambientColor.Z);
+        UploadMdxLights(Matrix4x4.Identity);
 
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
     }
@@ -787,6 +797,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         _currentModelMatrix = modelMatrix;
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
+        UploadMdxLights(modelMatrix);
 
         // Upload bone matrices if animated.
         if (ShouldUploadBoneMatrices())
@@ -868,6 +879,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         _gl.Uniform3(_uLightDir, ld.X, ld.Y, ld.Z);
         _gl.Uniform3(_uLightColor, lc.X, lc.Y, lc.Z);
         _gl.Uniform3(_uAmbientColor, ac.X, ac.Y, ac.Z);
+        UploadMdxLights(modelMatrix);
 
         if (_wireframe)
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
@@ -931,6 +943,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         _gl.Uniform3(_uLightDir, lightDir.X, lightDir.Y, lightDir.Z);
         _gl.Uniform3(_uLightColor, lightColor.X, lightColor.Y, lightColor.Z);
         _gl.Uniform3(_uAmbientColor, ambientColor.X, ambientColor.Y, ambientColor.Z);
+        UploadMdxLights(modelMatrix);
 
         _gl.PolygonMode(TriangleFace.FrontAndBack, _wireframe ? PolygonMode.Line : PolygonMode.Fill);
         RenderGeosets(RenderPass.Both, 1.0f, forceBackdropState: true);
@@ -938,6 +951,43 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthMask(true);
+    }
+
+    /// <summary>Shared geoset rendering logic used by both RenderWithTransform and RenderInstance.</summary>
+    private void UploadMdxLights(Matrix4x4 modelMatrix)
+    {
+        if (_uLocalLightCount < 0)
+            return;
+
+        int count = Math.Min(_mdx.Lights.Count, MaxMdxLocalLights);
+        _gl.Uniform1(_uLocalLightCount, count);
+
+        Vector3 ambient = Vector3.Zero;
+        for (int i = 0; i < count; i++)
+        {
+            MdlLight light = _mdx.Lights[i];
+            Vector3 position = Vector3.Transform(
+                new Vector3(light.Pivot.X, light.Pivot.Y, light.Pivot.Z), modelMatrix);
+            Vector3 color = new(light.Color.X, light.Color.Y, light.Color.Z);
+            float intensity = MathF.Max(light.Intensity, 0.0f);
+            float start = MathF.Max(light.AttenuationStart, 0.0f);
+            float end = MathF.Max(light.AttenuationEnd, start + 0.001f);
+
+            _gl.Uniform1(_uLocalLightType[i], light.Type);
+            _gl.Uniform3(_uLocalLightPos[i], position.X, position.Y, position.Z);
+            _gl.Uniform3(_uLocalLightColor[i], color.X, color.Y, color.Z);
+            _gl.Uniform1(_uLocalLightIntensity[i], intensity);
+            _gl.Uniform1(_uLocalLightStart[i], start);
+            _gl.Uniform1(_uLocalLightEnd[i], end);
+
+            if (light.Type == (int)MdxLightType.Ambient)
+            {
+                Vector3 ambientColor = new(light.AmbientColor.X, light.AmbientColor.Y, light.AmbientColor.Z);
+                ambient += ambientColor * MathF.Max(light.AmbientIntensity, 0.0f);
+            }
+        }
+
+        _gl.Uniform3(_uLocalAmbientColor, ambient.X, ambient.Y, ambient.Z);
     }
 
     /// <summary>Shared geoset rendering logic used by both RenderWithTransform and RenderInstance.</summary>
@@ -1606,6 +1656,14 @@ uniform vec3 uCameraPos;
 uniform vec3 uLightDir;
 uniform vec3 uLightColor;
 uniform vec3 uAmbientColor;
+uniform int uLocalLightCount;
+uniform int uLocalLightType[8];
+uniform vec3 uLocalLightPos[8];
+uniform vec3 uLocalLightColor[8];
+uniform float uLocalLightIntensity[8];
+uniform float uLocalLightStart[8];
+uniform float uLocalLightEnd[8];
+uniform vec3 uLocalAmbientColor;
 
 out vec4 FragColor;
 
@@ -1625,7 +1683,27 @@ void main()
         diffuseStrength = max(nDotL, 0.0);
     }
 
-    vec3 litColor = texColor.rgb * (uAmbientColor + uLightColor * diffuseStrength);
+    vec3 localLight = uLocalAmbientColor;
+    vec3 surfaceNormal = normalize(vNormal);
+    for (int i = 0; i < 8; i++)
+    {
+        if (i >= uLocalLightCount)
+            break;
+
+        // LITE Omni lights are point emitters. Direct lights require an animated
+        // orientation track that this bounded compatibility path does not yet own.
+        if (uLocalLightType[i] != 0)
+            continue;
+
+        vec3 toLight = uLocalLightPos[i] - vFragPos;
+        float distanceToLight = length(toLight);
+        float attenuationRange = max(uLocalLightEnd[i] - uLocalLightStart[i], 0.001);
+        float attenuation = clamp((uLocalLightEnd[i] - distanceToLight) / attenuationRange, 0.0, 1.0);
+        float localDiffuse = max(dot(surfaceNormal, normalize(toLight)), 0.0);
+        localLight += uLocalLightColor[i] * uLocalLightIntensity[i] * attenuation * localDiffuse;
+    }
+
+    vec3 litColor = texColor.rgb * (uAmbientColor + uLightColor * diffuseStrength + localLight);
     litColor += texColor.rgb * max(uEmissiveGain, 0.0);
     float distanceToCamera = distance(vFragPos, uCameraPos);
     float fogRange = max(uFogEnd - uFogStart, 0.001);
@@ -1719,6 +1797,17 @@ void main()
         _uLightDir = _gl.GetUniformLocation(_shaderProgram, "uLightDir");
         _uLightColor = _gl.GetUniformLocation(_shaderProgram, "uLightColor");
         _uAmbientColor = _gl.GetUniformLocation(_shaderProgram, "uAmbientColor");
+        _uLocalLightCount = _gl.GetUniformLocation(_shaderProgram, "uLocalLightCount");
+        _uLocalAmbientColor = _gl.GetUniformLocation(_shaderProgram, "uLocalAmbientColor");
+        for (int i = 0; i < MaxMdxLocalLights; i++)
+        {
+            _uLocalLightType[i] = _gl.GetUniformLocation(_shaderProgram, $"uLocalLightType[{i}]");
+            _uLocalLightPos[i] = _gl.GetUniformLocation(_shaderProgram, $"uLocalLightPos[{i}]");
+            _uLocalLightColor[i] = _gl.GetUniformLocation(_shaderProgram, $"uLocalLightColor[{i}]");
+            _uLocalLightIntensity[i] = _gl.GetUniformLocation(_shaderProgram, $"uLocalLightIntensity[{i}]");
+            _uLocalLightStart[i] = _gl.GetUniformLocation(_shaderProgram, $"uLocalLightStart[{i}]");
+            _uLocalLightEnd[i] = _gl.GetUniformLocation(_shaderProgram, $"uLocalLightEnd[{i}]");
+        }
         _uSphereEnvMap = _gl.GetUniformLocation(_shaderProgram, "uSphereEnvMap");
         _uUvSet = _gl.GetUniformLocation(_shaderProgram, "uUvSet");
         _uUseUvTransform = _gl.GetUniformLocation(_shaderProgram, "uUseUvTransform");

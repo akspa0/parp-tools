@@ -1,11 +1,18 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-12
+Last updated: 2026-08-13
 
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
 ## 2026-08-12 — Spec 104 MDX material/effect artifact repair
+
+- Added classic `LITE` parsing to `MdxFile`, including static Omni/Ambient values and deferred
+  `PIVT` resolution; the MDX shader now receives up to eight model-local light records.
+- Added a focused synthetic parser test for the light entry/pivot contract. Source validation
+  passes; the full Windows solution build remains blocked in this sandbox by denied access to
+  `C:\Users\akspa\AppData\Local\Microsoft SDKs`, while the core I/O build passes.
+- User-run viewer proof remains required to confirm visible MDX lamp/effect illumination.
 
 - Implemented the missing premultiplied-alpha shader output that the transparent MDX blend state
   already requested; the compatibility fragment path now follows the same alpha contract.

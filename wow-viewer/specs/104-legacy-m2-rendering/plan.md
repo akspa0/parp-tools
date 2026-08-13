@@ -105,17 +105,22 @@ particle, ribbon, or multi-stage shader parity.
 
 1. Preserve static material emissive gain when reading classic MTLS layers, without mistaking
    animation-track FourCCs for the optional scalar.
-2. Apply emissive gain as material self-illumination only; it must not become a scene light.
-3. Implement the premultiplied-alpha fragment output promised by the transparent blend state.
-4. Fail closed when a transparent geoset or particle emitter has no resolved texture; never
+2. Parse classic `LITE` records and resolve their node pivots after `PIVT`; keep material
+   self-illumination separate from native light records.
+3. Apply static Omni and Ambient `LITE` values to the bounded MDX model-local lighting path;
+   do not promote them to global scene lights until a separate ownership slice proves the
+   cross-object light transport contract.
+4. Implement the premultiplied-alpha fragment output promised by the transparent blend state.
+5. Fail closed when a transparent geoset or particle emitter has no resolved texture; never
    synthesize a white 1x1 texture for effect geometry.
-5. Preserve alpha-key discard behavior for particle emitters and keep additive particles on the
+6. Preserve alpha-key discard behavior for particle emitters and keep additive particles on the
    existing additive blend route.
-6. Run focused parser tests and a Debug build. User-run viewer/capture proof owns visual signoff.
+7. Run focused parser tests and a Debug build. User-run viewer/capture proof owns visual signoff.
 
 **Gate**: no source-level white fallback remains in the MDX material/effect path; focused tests
-and build pass; the user confirms lamp/effect quads and transparent ghosting are gone in a real
-client scene. Any remaining visual mismatch is a separate native-effect parity slice.
+and the viewer dependency build pass; the user confirms model-local MDX light contribution and
+transparent effect behavior in a real client scene. Global cross-object light propagation,
+animated light tracks, and remaining native-effect mismatch are separate slices.
 
 ## Phase 3 — Native 2.x/3.0.x embedded-profile handoff
 

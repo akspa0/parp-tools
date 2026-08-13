@@ -30,6 +30,27 @@ public sealed class MdxMaterialReaderTests
     }
 
     [Fact]
+    public void MdxFileLoad_ParsesStaticLiteLightAndPivot()
+    {
+        byte[] bytes = CreateBinaryMdxWithLightBytes();
+
+        using MemoryStream stream = new(bytes);
+        MdxFile mdx = MdxFile.Load(stream);
+
+        Assert.Single(mdx.Lights);
+        MdlLight light = mdx.Lights[0];
+        Assert.Equal("LampLight", light.Name);
+        Assert.Equal(0, light.ObjectId);
+        Assert.Equal((int)MdxLightType.Omni, light.Type);
+        Assert.Equal(2.0f, light.Pivot.X, 5);
+        Assert.Equal(3.0f, light.Pivot.Y, 5);
+        Assert.Equal(4.0f, light.Pivot.Z, 5);
+        Assert.Equal(8.0f, light.AttenuationEnd, 5);
+        Assert.Equal(1.5f, light.Intensity, 5);
+        Assert.Equal(0.8f, light.Color.X, 5);
+    }
+
+    [Fact]
     public void Read_SyntheticClassicMaterialPayload_AssignsLayerTracks()
     {
         byte[] bytes = CreateMdxBytes(
@@ -99,6 +120,49 @@ public sealed class MdxMaterialReaderTests
         Encoding.ASCII.GetBytes(modelName[..Math.Min(modelName.Length, 0x50)]).CopyTo(modl, 0);
         bytes.AddRange(CreateChunk("MODL", modl));
         bytes.AddRange(CreateChunk("MTLS", CreateMtlsPayload(materials)));
+        return [.. bytes];
+    }
+
+    private static byte[] CreateBinaryMdxWithLightBytes()
+    {
+        List<byte> bytes = [];
+        bytes.AddRange(Encoding.ASCII.GetBytes("MDLX"));
+        bytes.AddRange(CreateChunk("VERS", CreateUInt32Payload(1300)));
+
+        byte[] pivot = new byte[12];
+        BinaryPrimitives.WriteSingleLittleEndian(pivot.AsSpan(0, 4), 2.0f);
+        BinaryPrimitives.WriteSingleLittleEndian(pivot.AsSpan(4, 4), 3.0f);
+        BinaryPrimitives.WriteSingleLittleEndian(pivot.AsSpan(8, 4), 4.0f);
+        bytes.AddRange(CreateChunk("PIVT", pivot));
+
+        List<byte> node = [];
+        node.AddRange(CreateUInt32Payload(96));
+        byte[] nodeName = new byte[0x50];
+        Encoding.ASCII.GetBytes("LampLight").CopyTo(nodeName, 0);
+        node.AddRange(nodeName);
+        node.AddRange(CreateInt32Payload(0));
+        node.AddRange(CreateInt32Payload(-1));
+        node.AddRange(CreateUInt32Payload(0));
+
+        List<byte> entry = [];
+        entry.AddRange(node);
+        entry.AddRange(CreateUInt32Payload((uint)MdxLightType.Omni));
+        entry.AddRange(CreateSinglePayload(0.5f));
+        entry.AddRange(CreateSinglePayload(8.0f));
+        entry.AddRange(CreateSinglePayload(0.8f));
+        entry.AddRange(CreateSinglePayload(0.6f));
+        entry.AddRange(CreateSinglePayload(0.4f));
+        entry.AddRange(CreateSinglePayload(1.5f));
+        entry.AddRange(CreateSinglePayload(0.1f));
+        entry.AddRange(CreateSinglePayload(0.1f));
+        entry.AddRange(CreateSinglePayload(0.1f));
+        entry.AddRange(CreateSinglePayload(0.2f));
+
+        List<byte> lite = [];
+        lite.AddRange(CreateUInt32Payload(1));
+        lite.AddRange(CreateUInt32Payload((uint)(entry.Count + 4)));
+        lite.AddRange(entry);
+        bytes.AddRange(CreateChunk("LITE", [.. lite]));
         return [.. bytes];
     }
 

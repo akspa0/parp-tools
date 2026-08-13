@@ -1,4 +1,5 @@
 using System.Text;
+using WowViewer.Core.Mdx;
 
 namespace WowViewer.Core.IO.Mdx;
 
@@ -112,6 +113,7 @@ public class MdxFile
     public List<C3Vector> PivotPoints { get; } = new();
     public List<MdlAttachment> Attachments { get; } = new();
     public List<MdlCamera> Cameras { get; } = new();
+    public List<MdlLight> Lights { get; } = new();
     public List<MdlGeosetAnimation> GeosetAnimations { get; } = new();
     public List<MdlParticleEmitter2> ParticleEmitters2 { get; } = new();
     public List<MdlRibbonEmitter> RibbonEmitters { get; } = new();
@@ -222,6 +224,8 @@ public class MdxFile
                         break;
 
                     case MdxHeaders.LITE:
+                        ReadLite(br, size, mdx.Lights, mdx.PivotPoints);
+                        break;
                     case MdxHeaders.ATCH:
                     case MdxHeaders.CAMS:
                     case MdxHeaders.EVTS:
@@ -262,6 +266,13 @@ public class MdxFile
             var bone = mdx.Bones[i];
             if (bone.ObjectId >= 0 && bone.ObjectId < mdx.PivotPoints.Count)
                 bone.Pivot = mdx.PivotPoints[bone.ObjectId];
+        }
+
+        for (int i = 0; i < mdx.Lights.Count; i++)
+        {
+            var light = mdx.Lights[i];
+            if (light.ObjectId >= 0 && light.ObjectId < mdx.PivotPoints.Count)
+                light.Pivot = mdx.PivotPoints[light.ObjectId];
         }
 
         return mdx;
@@ -1791,6 +1802,90 @@ public class MdxFile
 
         br.BaseStream.Position = chunkEnd;
         if (Verbose) Console.WriteLine($"[HELP] Parsed helpers, total bones now: {bones.Count}");
+    }
+
+    /// <summary>Parse LITE chunk — classic MDX light nodes and their static lighting values.</summary>
+    static void ReadLite(BinaryReader br, uint chunkSize, List<MdlLight> lights, List<C3Vector> pivots)
+    {
+        long chunkEnd = br.BaseStream.Position + chunkSize;
+        if (chunkSize < 4)
+            throw new InvalidDataException("Invalid LITE chunk: missing light count.");
+
+        uint count = br.ReadUInt32();
+        if (count > 100000)
+            throw new InvalidDataException($"Invalid LITE light count {count}.");
+
+        for (uint i = 0; i < count && br.BaseStream.Position < chunkEnd; i++)
+        {
+            long entryStart = br.BaseStream.Position;
+            if (chunkEnd - entryStart < 8)
+                throw new InvalidDataException($"LITE entry {i} is truncated.");
+
+            uint entrySize = br.ReadUInt32();
+            long entryEnd = checked(entryStart + entrySize);
+            if (entrySize < 4 || entryEnd > chunkEnd)
+                throw new InvalidDataException($"LITE entry {i} has invalid size 0x{entrySize:X}.");
+
+            var node = ReadNodeWithTracks(br);
+            if (entryEnd - br.BaseStream.Position < 44)
+                throw new InvalidDataException($"LITE entry {i} is missing its static light fields.");
+
+            uint typeValue = br.ReadUInt32();
+            if (typeValue > (uint)MdxLightType.Ambient)
+                throw new InvalidDataException($"LITE entry {i} has invalid light type {typeValue}.");
+
+            var light = new MdlLight
+            {
+                Name = node.name,
+                ObjectId = node.objectId,
+                ParentId = node.parentId,
+                Flags = node.flags,
+                TranslationTrack = node.translation,
+                RotationTrack = node.rotation,
+                ScalingTrack = node.scaling,
+                Type = (int)typeValue,
+                AttenuationStart = br.ReadSingle(),
+                AttenuationEnd = br.ReadSingle(),
+                Color = new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()),
+                Intensity = br.ReadSingle(),
+                AmbientColor = new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()),
+                AmbientIntensity = br.ReadSingle()
+            };
+
+            if (light.ObjectId >= 0 && light.ObjectId < pivots.Count)
+                light.Pivot = pivots[light.ObjectId];
+
+            // Animated LITE fields are retained as a future animation concern. Consume their
+            // payloads so later entries remain correctly framed.
+            while (br.BaseStream.Position + 4 <= entryEnd)
+            {
+                string tag = ReadTag(br);
+                switch (tag)
+                {
+                    case "KLAS":
+                    case "KLAE":
+                    case "KLAI":
+                    case "KLBI":
+                    case "KVIS":
+                    case "KATV":
+                        SkipAnimVector(br, 4);
+                        break;
+                    case "KLAC":
+                    case "KLBC":
+                        SkipAnimVector(br, 12);
+                        break;
+                    default:
+                        br.BaseStream.Position = entryEnd;
+                        break;
+                }
+            }
+
+            br.BaseStream.Position = entryEnd;
+            lights.Add(light);
+        }
+
+        br.BaseStream.Position = chunkEnd;
+        if (Verbose) Console.WriteLine($"[LITE] Parsed {lights.Count} lights");
     }
 
     /// <summary>Parse PRE2 chunk — Particle Emitter 2 entries</summary>

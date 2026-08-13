@@ -7,14 +7,15 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 104 Phase 4 MDX material/effect compatibility repair, starting with user-run validation of the premultiplied-alpha and fail-closed texture changes.
+- **Next implementation target:** Spec 104 Phase 4 MDX material/effect compatibility repair, starting with user-run validation of parsed `LITE` model-local lighting plus the premultiplied-alpha and fail-closed texture changes.
 - **Proof owner:** focused C# tests and a Debug build for source-level contracts; the user owns real
   client, OpenGL, audio-device, capture, and performance proof.
-- **Main unproven gap:** source proof can establish the MDX material contracts, but only the user’s real
-  client scene can confirm that effect quads and transparent ghosting are gone without regressing valid
+- **Main unproven gap:** source proof can establish LITE parsing and shader upload, but only the user’s
+  real client scene can confirm that model-local light contribution is visible without regressing valid
   emissive or alpha-key assets.
-- **Explicitly out of scope for the next slice:** native full particle/ribbon parity, dynamic point lights,
-  terrain/WDL streaming changes, scene-graph redesign, audio, and FPS claims without production capture evidence.
+- **Explicitly out of scope for the next slice:** global cross-object light transport, animated Direct/
+  LITE tracks, native full particle/ribbon parity, terrain/WDL streaming changes, scene-graph redesign,
+  audio, and FPS claims without production capture evidence.
 
 ## Active spec lanes
 
