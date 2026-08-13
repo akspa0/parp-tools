@@ -17,6 +17,21 @@ For `wow-viewer` work, read in this order:
 Use Spec Kit for non-trivial work: specify → plan → tasks → implement one validated phase at a
 time. If the request is a small fix, use the existing spec/checklist when one applies.
 
+## Sub-agents
+
+- Use sub-agents by default for independent, safely parallelizable discovery, analysis, focused
+  verification, or bounded implementation slices. Look for these opportunities before starting
+  the main work, and run independent slices in parallel when that improves throughput.
+- Give every sub-agent an explicit question or deliverable and a clearly bounded read/write scope.
+  Do not assign overlapping write sets or unrelated repository cleanup.
+- Keep the critical path with the primary agent: select and interpret the spec, make architecture
+  decisions, resolve conflicts, review and integrate patches, own final validation and commits,
+  and perform all user-owned runtime or heavy-work handoffs.
+- Sub-agents may return findings, patches, and focused test results. The primary agent must inspect
+  their changes and evidence before integration or reporting completion.
+- Do not delegate training, GPU/heavy jobs, broad harvests, long captures, billed operations, or
+  real-client visual/FPS/audio proof. Prepare those commands for the user instead.
+
 ## Ownership and safety
 
 - All new code, tests, tools, and docs for the viewer go under `wow-viewer/`.

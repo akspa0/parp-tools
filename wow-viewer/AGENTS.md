@@ -14,6 +14,19 @@ history belongs in specs and opt-in workstream notes.
 For non-trivial work use Spec Kit: specify → plan → tasks → implement one phase at a time. Do not
 start a later phase until the current phase has focused validation.
 
+## Sub-agents
+
+- Use sub-agents by default for independent, safely parallelizable discovery, analysis, focused
+  verification, or bounded implementation slices. Keep delegated work inside the active Spec Kit
+  phase and run independent slices in parallel when practical.
+- Give each sub-agent one concrete deliverable and an explicit read/write scope. Use disjoint write
+  sets; do not ask multiple agents to edit the same unresolved files or to perform unrelated cleanup.
+- The primary agent owns spec selection, architecture decisions, integration, conflict resolution,
+  final validation, commits, and the user-facing handoff. Review every delegated patch and result
+  before treating it as complete.
+- Do not delegate training, GPU/heavy jobs, broad harvests, long captures, billed operations, or
+  real-client visual/FPS/audio proof. Prepare PowerShell-ready commands for the user instead.
+
 ## Non-negotiable boundaries
 
 - New code and tests stay in `wow-viewer/`.
