@@ -9,6 +9,7 @@ using WoWViewer.Logging;
 using WoWViewer.Terrain;
 using Silk.NET.OpenGL;
 using WowViewer.Core.Runtime.M2;
+using WowViewer.Core.Runtime.World;
 using WowViewer.Core.Runtime.World.SceneGraph;
 using WowViewer.Core.Wmo;
 using WowViewer.Core.IO.Converters;
@@ -76,6 +77,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
     private readonly List<PortalNeighbor>[] _groupPortalNeighbors;
     private readonly List<int>[] _groupPortalRefs;
     private readonly Vector3[] _portalCenters;
+    private readonly (Vector3 Min, Vector3 Max)[] _groupBounds;
     private readonly bool[] _runtimeVisibleGroups;
     private readonly bool[] _frustumVisibleScratch;
     private readonly HashSet<int> _runtimeVisibleDoodadDefIndices = new();
@@ -198,6 +200,10 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
         _groupPortalNeighbors = new List<PortalNeighbor>[_wmo.Groups.Count];
         _groupPortalRefs = new List<int>[_wmo.Groups.Count];
         _portalCenters = new Vector3[_wmo.Portals.Count];
+        _groupBounds = new (Vector3 Min, Vector3 Max)[_wmo.Groups.Count];
+        for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
+            _groupBounds[groupIndex] = (_wmo.Groups[groupIndex].BoundsMin, _wmo.Groups[groupIndex].BoundsMax);
+
         _runtimeVisibleGroups = new bool[_wmo.Groups.Count];
         _frustumVisibleScratch = new bool[_wmo.Groups.Count];
 
@@ -1668,7 +1674,15 @@ void main() {
     float nearRootFullVisibilityDistance = ComputeNearRootFullVisibilityDistance(_wmo.BoundsMin, _wmo.BoundsMax, fogEnd);
     float nearRootFullVisibilityDistanceSq = nearRootFullVisibilityDistance * nearRootFullVisibilityDistance;
         bool anyExteriorGroups = false;
-        bool cameraInsideRoot = ContainsPointExpanded(localCameraPos, _wmo.BoundsMin, _wmo.BoundsMax, GroupVisibilityBoundsPadding);
+        // Some client-era MOHD root bounds do not cover the playable interior even though the
+        // group bounds do. Treat containment in either root or group bounds as an inside-WMO
+        // state; otherwise portal traversal starts without a valid interior group and hides it.
+        bool cameraInsideRoot = WmoCameraVisibility.IsInsideRootOrGroup(
+            localCameraPos,
+            _wmo.BoundsMin,
+            _wmo.BoundsMax,
+            _groupBounds,
+            GroupVisibilityBoundsPadding);
         float nearRootDistanceSq = DistanceSquaredPointToAabb(localCameraPos, _wmo.BoundsMin, _wmo.BoundsMax);
     bool cameraNearRoot = nearRootDistanceSq <= nearRootFullVisibilityDistanceSq;
         int nearestGroupIndex = -1;

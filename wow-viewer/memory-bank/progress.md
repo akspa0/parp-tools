@@ -86,6 +86,14 @@ belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 - The viewer builds with 0 errors and the focused directional-selector proof passes 4/4. A user-run
   production capture is still required to prove frame-time improvement and visual parity.
 
+## 2026-08-12 — Spec 142 camera-inside WMO group admission
+
+- WMO runtime group visibility now treats containment in any local group bounds as an inside-WMO
+  state, even when the root MOHD bounds miss the camera; this keeps interior groups visible instead
+  of entering portal traversal with no valid starting group.
+- Focused inside/outside policy tests pass. Camera-track playback/video remains the real-client
+  proof owner because the recorder is the benchmark for path stability.
+
 ## 2026-08-12 — Spec 142 strict directional tile baseline
 
 - Added the pure `DirectionalTileSelector` contract and four focused geometry tests.

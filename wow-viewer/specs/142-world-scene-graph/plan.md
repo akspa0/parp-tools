@@ -534,6 +534,9 @@ not rotated onto a different side of the camera than its culling bounds.
 6. Permit object admission from the retained camera window as well as the directional detailed
    set. Keep detailed terrain directional, then let object bounds/frustum tests determine which
    resident-neighbor objects are actually submitted.
+7. Treat camera containment in any local WMO group bounds as an inside-placement state even when
+   the root MOHD bounds miss the camera; keep the placement's groups visible instead of entering
+   portal traversal with no valid starting group.
 
 **Exit evidence**: focused collector and placement-transform tests and source build pass; a user-run
 camera movement test must show that selected neighbor tiles reach GPU/object readiness without WMO
