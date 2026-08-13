@@ -203,6 +203,9 @@ identity; no FPS or GPU claim is made.
   count/radius diagnostics plus a runtime radius control.
 - [ ] T077 [US2] Run a user-owned production capture at retained radius two and three, proving that
   nearby tiles stream without widening object/detail submission or regressing visual parity.
+- [x] T077a [US2] Keep WDL suppression tied to selected-and-resident detailed ADT submission,
+  and use bounds-distance fog admission for detailed terrain/chunk draw culling so retained-only
+  neighbors cannot leave a near-field hole while the WDL horizon remains visible.
 
 ## Dependencies and Execution Order
 

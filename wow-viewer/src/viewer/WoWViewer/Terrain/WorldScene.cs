@@ -8051,9 +8051,6 @@ public class WorldScene : ISceneRenderer
             || (CapturePreloadActive && _capturePreloadTiles.Contains((tileX, tileY))))
             QueueTileAssetLoads(tileMdx, tileSkyboxes, tileWmo);
 
-        // Hide WDL low-res tile now that detailed ADT is loaded
-        _wdlTerrain?.MarkDetailedTileResident(tileX, tileY);
-
         if ((tileMdx.Count > 0 || tileSkyboxes.Count > 0 || tileWmo.Count > 0) && ViewerLog.Verbose)
             ViewerLog.Trace($"[Terrain] Tile ({tileX},{tileY}) loaded: {tileMdx.Count} MDX, {tileSkyboxes.Count} skybox, {tileWmo.Count} WMO instances");
     }
@@ -8071,7 +8068,6 @@ public class WorldScene : ISceneRenderer
         _tileWmoInstances.Remove((tileX, tileY));
         _tileMdxBounds.Remove((tileX, tileY));
         _tileWmoBounds.Remove((tileX, tileY));
-        _wdlTerrain?.MarkDetailedTileUnloaded(tileX, tileY);
         LastUnloadedWmoTileX = tileX;
         LastUnloadedWmoTileY = tileY;
         LastUnloadedWmoInstanceCount = wmoInstanceCount;
@@ -10217,6 +10213,13 @@ public class WorldScene : ISceneRenderer
                     {
                         if (ShowWdlTerrain && _wdlTerrain != null)
                         {
+                            // WDL suppression follows actual detailed ADT submission,
+                            // not merely GPU residency. Retained neighbors stay loaded
+                            // for streaming but keep their low-resolution underlay until
+                            // the directional detail set submits them.
+                            _wdlTerrain.SetDetailedTileSubmission(
+                                _terrainManager.LastSelectedTiles,
+                                _terrainManager.IsTileLoaded);
                             bool renderWdlAsOpaqueFallback = _terrainManager.LoadedTileCount == 0;
                             _wdlTerrain.Render(view, proj, camPos, _terrainManager.Lighting, _frustumCuller, renderWdlAsOpaqueFallback);
                         }

@@ -27,6 +27,16 @@ belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 - WMO visibility remains bounded by active tile admission, bounds/frustum checks, and distance;
   focused collector proof and a viewer build are required before user movement validation.
 
+## 2026-08-12 — Spec 142 fog admission and detailed/WDL ownership correction
+
+- Terrain tile and legacy chunk distance admission now measures the nearest point on the
+  geometry bounds, not the tile/chunk center. A camera near a tile edge can no longer lose
+  that nearby terrain merely because the center lies beyond the fog cutoff.
+- WDL suppression now follows the selected-and-GPU-resident detailed ADT set each frame.
+  Retained-only neighbors remain streamable and keep their WDL underlay until detailed terrain
+  is actually submitted. Three focused bounds-distance tests pass; viewer runtime proof remains
+  user-owned.
+
 ## 2026-08-12 — Spec 142 near-field WMO readiness ordering
 
 - Pending GPU tile uploads are now ranked by selected active tiles before retained and stale

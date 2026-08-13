@@ -6,6 +6,7 @@ using WoWViewer.Rendering;
 using SereniaBLPLib;
 using Silk.NET.OpenGL;
 using WowViewer.Core.Maps;
+using WowViewer.Core.Runtime.World;
 
 namespace WoWViewer.Terrain;
 
@@ -505,8 +506,10 @@ public class TerrainRenderer : IDisposable
 
         foreach (var chunk in _chunks)
         {
-            var center = (chunk.BoundsMin + chunk.BoundsMax) * 0.5f;
-            float distanceSq = Vector3.DistanceSquared(cameraPos, center);
+            float distanceSq = WorldDistanceMath.DistanceSquaredPointToAabb(
+                cameraPos,
+                chunk.BoundsMin,
+                chunk.BoundsMax);
             if (distanceSq > chunkCullDistanceSq)
             {
                 ChunksCulled++;
@@ -699,8 +702,10 @@ public class TerrainRenderer : IDisposable
                 continue;
             }
 
-            var center = (tile.BoundsMin + tile.BoundsMax) * 0.5f;
-            float distanceSq = Vector3.DistanceSquared(cameraPos, center);
+            float distanceSq = WorldDistanceMath.DistanceSquaredPointToAabb(
+                cameraPos,
+                tile.BoundsMin,
+                tile.BoundsMax);
             if (distanceSq > cullDistanceSq)
             {
                 ChunksCulled += tile.ChunkCount;

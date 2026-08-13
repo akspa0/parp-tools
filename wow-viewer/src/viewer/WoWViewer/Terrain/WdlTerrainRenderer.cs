@@ -106,22 +106,24 @@ public class WdlTerrainRenderer : IDisposable
     }
 
     /// <summary>
-    /// Record that detailed terrain is resident. WDL remains available as the far-field
-    /// underlay; depth-tested detailed terrain occludes it nearby.
+    /// Replaces the WDL suppression set with the detailed ADT tiles that will
+    /// actually be submitted this frame. GPU residency alone is not enough:
+    /// retained neighboring tiles remain loaded for streaming, but the terrain
+    /// selector may intentionally omit them from detailed rendering.
     /// </summary>
-    public void MarkDetailedTileResident(int tileX, int tileY)
+    public void SetDetailedTileSubmission(
+        IReadOnlyList<(int tileX, int tileY)> selectedTiles,
+        Func<int, int, bool> isTileResident)
     {
-        int tileIndex = GetTileIndex(tileX, tileY);
-        _detailedTileIndices.Add(tileIndex);
-    }
+        ArgumentNullException.ThrowIfNull(selectedTiles);
+        ArgumentNullException.ThrowIfNull(isTileResident);
 
-    /// <summary>
-    /// Record that detailed terrain left a tile so WDL can cover the gap again.
-    /// </summary>
-    public void MarkDetailedTileUnloaded(int tileX, int tileY)
-    {
-        int tileIndex = GetTileIndex(tileX, tileY);
-        _detailedTileIndices.Remove(tileIndex);
+        _detailedTileIndices.Clear();
+        foreach (var (tileX, tileY) in selectedTiles)
+        {
+            if (isTileResident(tileX, tileY))
+                _detailedTileIndices.Add(GetTileIndex(tileX, tileY));
+        }
     }
 
     /// <summary>

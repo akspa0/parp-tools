@@ -501,6 +501,8 @@ bounded directional render submission gate; it does not widen per-frame object a
    capture exceptions.
 3. Use the retained window for desired-tile admission and unload protection, and expose active,
    retained-count, and retained-radius diagnostics so residency cannot be confused with rendering.
+   WDL suppression must follow the selected-and-resident detailed set; retained-only tiles keep
+   their low-resolution underlay until detailed ADT submission actually includes them.
 4. Hand off a user-run capture comparing retained radius two and three while reporting loaded tiles,
    active tiles, detailed draw calls, WMO/MDX counts, and frame time. Do not infer an FPS win from
    source-level tests or from residency counts alone.

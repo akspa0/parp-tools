@@ -7,12 +7,12 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 142 Phase 8P user-run validation of WMO near-field residency and stable camera-turn visibility.
+- **Next implementation target:** Spec 142 user-run validation of near-field terrain/WDL visibility and stable camera-turn visibility.
 - **Proof owner:** focused C# tests and a Debug build for source-level contracts; the user owns real
   client, OpenGL, audio-device, capture, and performance proof.
-- **Main unproven gap:** focused source proof now covers resident-WMO cone correction, near-field ordering,
-  shared MDX/MODF placement transforms, retained-window object admission, and camera-inside-group fallback,
-  but no user-run movement or camera-track test has yet confirmed that WMO groups remain visible.
+- **Main unproven gap:** focused source proof now covers bounds-based terrain fog admission and WDL suppression
+  tied to selected-and-resident ADTs, but no user-run movement or camera-track test has yet confirmed that
+  nearby detailed tiles remain visible while the WDL horizon stays stable.
 - **Explicitly out of scope for the next slice:** FOV radiation, whole-window object submission, unique-model submission redesign, broad renderer rewrites, audio, and FPS claims without production capture evidence.
 
 ## Active spec lanes
