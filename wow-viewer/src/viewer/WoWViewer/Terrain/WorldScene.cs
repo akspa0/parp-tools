@@ -8591,6 +8591,28 @@ public class WorldScene : ISceneRenderer
             _assets.QueueMdxLoad(tileSkyboxes[i].ModelKey);
     }
 
+    private void QueueNearFieldWmoAssetLoads()
+    {
+        int cameraTileX = _terrainManager.CameraTileX;
+        int cameraTileY = _terrainManager.CameraTileY;
+        if (cameraTileX < 0 || cameraTileY < 0)
+            return;
+
+        IReadOnlyList<(int tileX, int tileY)> retainedTiles = _terrainManager.LastRetainedTiles;
+        for (int tileIndex = 0; tileIndex < retainedTiles.Count; tileIndex++)
+        {
+            (int tileX, int tileY) tile = retainedTiles[tileIndex];
+            if (Math.Abs(tile.tileX - cameraTileX) > 1 || Math.Abs(tile.tileY - cameraTileY) > 1)
+                continue;
+
+            if (!_tileWmoInstances.TryGetValue(tile, out List<ObjectInstance>? wmoInstances))
+                continue;
+
+            for (int instanceIndex = 0; instanceIndex < wmoInstances.Count; instanceIndex++)
+                _assets.PrioritizeWmoLoad(wmoInstances[instanceIndex].ModelKey);
+        }
+    }
+
     /// <summary>
     /// Queue every unique world asset referenced by the supplied resident tiles.
     /// This is the capture-path warmup seam: it uses the same placement lists and
@@ -10056,6 +10078,11 @@ public class WorldScene : ISceneRenderer
                 RebuildInstanceLists();
             else if (UseHierarchicalSceneTraversal && _sceneGraphBuild is null)
                 RebuildSceneGraphObjectIndex();
+
+            // Keep WMO admission ahead of visibility. The near retained window
+            // is still rendered through the selected-tile gate, but its models
+            // must be prioritized before a camera turn exposes the tile.
+            QueueNearFieldWmoAssetLoads();
         });
 
         frame.DeferredAssetLoadMs = MeasureDurationMs(() =>

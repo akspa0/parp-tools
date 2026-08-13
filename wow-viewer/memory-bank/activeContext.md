@@ -7,11 +7,11 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 144 T014/T019 user-run validation of built-in 4.x and early-era camera playback.
+- **Next implementation target:** Spec 142 Phase 8P user-run validation of WMO near-field residency ordering.
 - **Proof owner:** focused C# tests and a Debug build for source-level contracts; the user owns real
   client, OpenGL, audio-device, capture, and performance proof.
-- **Main unproven gap:** source tests and archived Cata inspection prove camera records are now discovered, but no user-run viewer playback has yet confirmed the imported FlyBy coordinates, origin placement, or stable path playback.
-- **Explicitly out of scope for the next slice:** FOV radiation, unique-model submission redesign, broad renderer rewrites, audio, and FPS claims without production capture evidence.
+- **Main unproven gap:** source build proves selected GPU uploads and immediate-neighbor WMO prioritization compile, but no user-run movement test has yet confirmed that WMO flash-in is gone.
+- **Explicitly out of scope for the next slice:** FOV radiation, whole-window object submission, unique-model submission redesign, broad renderer rewrites, audio, and FPS claims without production capture evidence.
 
 ## Active spec lanes
 
@@ -21,7 +21,7 @@ the owning spec for requirements and proof; read a workstream only when the spec
 | 144 Camera capture paths | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions. |
 | 145 WoW UI overhaul | First slice implemented | Continue only the remaining persistent-window and placeholder audit tasks. |
 | 143 World context and lighting | First area slice landed | Resolve evidence/setup tasks before WMO area or lighting claims. |
-| 142 World scene graph | In progress | Validate bounded directional ADT detail (1–25) with retained radius 2/3; the established ADT span remains intact and selected-set residency pin is explicit. |
+| 142 World scene graph | In progress | Validate Phase 8P near-field WMO readiness ordering, then continue retained-radius movement proof. |
 | 139–141 Terrain/minimap reconstruction | Active/parked ML lanes | Reopen only for the named spec and user-run training/validation. |
 | 138 Cross-era renderer research | Evidence/planning | Do not generalize one client build to every era. |
 | 128–131 PM4 | Established research lane | Use the PM4 spec pack and `workstream-pm4-decode.md`. |

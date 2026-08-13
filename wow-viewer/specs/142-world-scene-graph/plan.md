@@ -509,6 +509,23 @@ bounded directional render submission gate; it does not widen per-frame object a
 nearby tiles stream and remain resident while inactive retained tiles do not enter detailed terrain
 or object submission, with visual parity preserved.
 
+## Phase 8P — Near-Field WMO Residency Ordering
+
+**Status**: Source slice landed on 2026-08-12 after WMO placements were reported flashing while
+their owning ADTs remained in the bounded residency window.
+
+1. Prioritize pending GPU tile uploads by the current selected active set, then the retained
+   camera window, instead of consuming background parse completions in arbitrary order.
+2. Prioritize WMO model loads for the retained camera tile and its immediate neighbors before the
+   WMO visibility pass asks whether those placements are ready. The existing selected-tile object
+   admission remains unchanged, so this does not traverse or submit the whole retained window.
+3. Keep WMO renderer cache eviction unlimited for world placements; a cache eviction policy is not
+   a valid explanation for this regression unless a later diagnostic proves otherwise.
+
+**Exit evidence**: source build passes; a user-run camera movement test must show that selected
+neighbor tiles reach GPU/object readiness without WMO flash-in, while reporting WMO pending loads,
+loaded tile count, selected/retained counts, and frame time. No runtime FPS claim is made here.
+
 ## Phase 8L — Capability-Gated Modern Dense Submission
 
 **Status**: Planned after Phase 8K and the Phase 8M baseline gate. This phase coordinates with Spec 138; it does not change 4.x

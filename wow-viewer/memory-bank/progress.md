@@ -5,6 +5,15 @@ Last updated: 2026-08-12
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-12 — Spec 142 near-field WMO readiness ordering
+
+- Pending GPU tile uploads are now ranked by selected active tiles before retained and stale
+  completions, preventing background parse completion order from delaying neighboring ADTs.
+- WMO assets for the camera tile and immediate retained neighbors are prioritized before WMO
+  visibility collection; inactive retained tiles remain admission-gated and are not submitted.
+- Source build passes in an isolated output directory; runtime movement/WMO flash-in proof remains
+  user-owned.
+
 ## 2026-08-12 — Spec 142 restored bounded detail and selected-tile residency
 
 - Preserved the renderer's established ADT coordinate span (`WoWConstants.ChunkSize`, 533.333

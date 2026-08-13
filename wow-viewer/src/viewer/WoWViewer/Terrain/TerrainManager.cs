@@ -34,6 +34,9 @@ public class TerrainManager : ISceneRenderer
 
     // Async streaming: background-parsed tiles waiting for GPU upload
     private readonly ConcurrentQueue<(int tx, int ty, TileLoadResult result)> _pendingTiles = new();
+    // Background completion order is not spatial order. Keep a render-thread scratch
+    // list so the near-camera residency lease reaches the GPU before forward tiles.
+    private readonly List<(int tx, int ty, TileLoadResult result)> _pendingUploadScratch = new();
     // Tiles currently being loaded on background thread
     private readonly ConcurrentDictionary<(int, int), byte> _loadingTiles = new();
     private readonly List<(int tileX, int tileY)> _unloadScratch = new();
@@ -703,16 +706,39 @@ public class TerrainManager : ISceneRenderer
     /// </summary>
     private void SubmitPendingTiles()
     {
+        _pendingUploadScratch.Clear();
+        while (_pendingTiles.TryDequeue(out var pendingTile))
+            _pendingUploadScratch.Add(pendingTile);
+
+        if (_pendingUploadScratch.Count == 0)
+            return;
+
+        _pendingUploadScratch.Sort((left, right) =>
+        {
+            int priority = GetPendingUploadPriority(left.tx, left.ty)
+                .CompareTo(GetPendingUploadPriority(right.tx, right.ty));
+            if (priority != 0)
+                return priority;
+
+            priority = left.tx.CompareTo(right.tx);
+            return priority != 0 ? priority : left.ty.CompareTo(right.ty);
+        });
+
         int uploaded = 0;
         var uploadBudget = Stopwatch.StartNew();
-        while (uploaded < MaxGpuUploadsPerFrame)
+        for (int pendingIndex = 0; pendingIndex < _pendingUploadScratch.Count; pendingIndex++)
         {
-            if (uploaded > 0 && uploadBudget.Elapsed.TotalMilliseconds >= MaxGpuUploadBudgetMs)
+            if (uploaded >= MaxGpuUploadsPerFrame
+                || (uploaded > 0 && uploadBudget.Elapsed.TotalMilliseconds >= MaxGpuUploadBudgetMs))
+            {
+                // Preserve work that did not fit this frame. It will be re-ranked
+                // against the current camera lease on the next submission pass.
+                for (int remainingIndex = pendingIndex; remainingIndex < _pendingUploadScratch.Count; remainingIndex++)
+                    _pendingTiles.Enqueue(_pendingUploadScratch[remainingIndex]);
                 break;
+            }
 
-            if (!_pendingTiles.TryDequeue(out var pending))
-                break;
-
+            var pending = _pendingUploadScratch[pendingIndex];
             var (tx, ty, result) = pending;
 
             if (_loadedTiles.ContainsKey((tx, ty)))
@@ -732,6 +758,30 @@ public class TerrainManager : ISceneRenderer
             OnTileLoaded?.Invoke(tx, ty, result);
             uploaded++;
         }
+
+        _pendingUploadScratch.Clear();
+    }
+
+    private int GetPendingUploadPriority(int tileX, int tileY)
+    {
+        for (int index = 0; index < _lastSelectedTiles.Count; index++)
+        {
+            if (_lastSelectedTiles[index] == (tileX, tileY))
+                return index;
+        }
+
+        for (int index = 0; index < _lastRetainedTiles.Count; index++)
+        {
+            if (_lastRetainedTiles[index] == (tileX, tileY))
+                return 100 + index;
+        }
+
+        // A stale completion may still be in the queue after the camera moves.
+        // Keep it behind the current lease; UpdateAOI will unload it if it is no
+        // longer wanted, without allowing it to delay the near field.
+        return 1000
+            + Math.Abs(tileX - _lastCameraTileX)
+            + Math.Abs(tileY - _lastCameraTileY);
     }
 
     /// <summary>

@@ -42,6 +42,10 @@ The viewer diagnostics report `Active Tiles`, `Retained Tiles`, `Retained Radius
 draw-call counts together. Compare those values when evaluating performance; a larger retained
 count is expected without a corresponding increase in active submission.
 
+Near-field residency also prioritizes GPU uploads for selected tiles and WMO asset loads for the
+camera tile plus immediate retained neighbors. This is a readiness ordering guarantee, not a
+whole-window object submission path: inactive retained tiles remain excluded from WMO visibility.
+
 ## User-run production render diagnostic
 
 `profile-render` is the first headless path that invokes the current production `WorldScene.Render`
