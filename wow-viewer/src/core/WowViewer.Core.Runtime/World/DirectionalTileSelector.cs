@@ -3,9 +3,11 @@ using System.Numerics;
 namespace WowViewer.Core.Runtime.World;
 
 /// <summary>
-/// Selects a bounded set of tiles in the camera-facing cone. The selector
-/// deliberately has no fog-distance or whole-map expansion; the caller owns
-/// the requested detail count and therefore controls the bounded cone depth.
+/// Selects a bounded set of tiles around the camera. The active tile and its
+/// immediate neighborhood are admitted first as a near-field safety ring so
+/// close terrain cannot disappear at a tile seam. Remaining budget expands
+/// only through the camera-facing cone; there is no fog-distance or whole-map
+/// expansion.
 /// </summary>
 public readonly record struct DirectionalTileCoord(int TileX, int TileY);
 
@@ -48,8 +50,10 @@ public sealed class DirectionalTileSelector
 
     /// <summary>
     /// Returns the active tile and up to <paramref name="maxTileCount"/>
-    /// existing tiles inside the forward cone. The search expands only along
-    /// bounded forward rings; it does not perform radial or map-wide admission.
+    /// existing tiles. The active tile's immediate 3x3 neighborhood is filled
+    /// first, then any remaining budget expands through bounded forward rings.
+    /// The near-field ring intentionally has priority over the FOV so adjacent
+    /// terrain and objects cannot pop out beside the camera.
     /// </summary>
     public List<DirectionalTileCoord> GetVisibleTiles(
         Vector3 camPos,
@@ -80,7 +84,48 @@ public sealed class DirectionalTileSelector
         float yawRadians = yaw * (MathF.PI / 180f);
         Vector2 forward = new(MathF.Cos(yawRadians), MathF.Sin(yawRadians));
 
-        var candidates = new List<(DirectionalTileCoord Coord, float Dot, int Manhattan)>(8);
+        var selectedSet = new HashSet<DirectionalTileCoord>(selected);
+
+        // When the budget can cover a complete near-field ring, protect that
+        // ring before spending the remaining detail budget on distant forward
+        // tiles. The legacy four-tile overload intentionally keeps its old
+        // directional behavior; the safety-ring guarantee begins at 9 tiles.
+        if (maxTileCount >= 9)
+        {
+            var nearCandidates = new List<(DirectionalTileCoord Coord, float Dot, int Manhattan)>(8);
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    if (dx == 0 && dy == 0)
+                        continue;
+
+                    int tileX = activeTileX + dx;
+                    int tileY = activeTileY + dy;
+                    if (!IsInBounds(tileX, tileY) || !_tileExists(tileX, tileY))
+                        continue;
+
+                    DirectionalTileCoord coord = new(tileX, tileY);
+                    if (selectedSet.Contains(coord))
+                        continue;
+
+                    float dot = GetHeadingDot(forward, dx, dy);
+                    nearCandidates.Add((coord, dot, Math.Abs(dx) + Math.Abs(dy)));
+                }
+            }
+
+            SortCandidates(nearCandidates);
+            foreach (var candidate in nearCandidates)
+            {
+                if (selected.Count >= maxTileCount)
+                    return selected;
+
+                selected.Add(candidate.Coord);
+                selectedSet.Add(candidate.Coord);
+            }
+        }
+
+        var candidates = new List<(DirectionalTileCoord Coord, float Dot, int Manhattan)>(16);
         for (int dy = -candidateRadius; dy <= candidateRadius; dy++)
         {
             for (int dx = -candidateRadius; dx <= candidateRadius; dx++)
@@ -92,18 +137,41 @@ public sealed class DirectionalTileSelector
                 int tileY = activeTileY + dy;
                 if (!IsInBounds(tileX, tileY) || !_tileExists(tileX, tileY))
                     continue;
+                DirectionalTileCoord coord = new(tileX, tileY);
+                if (selectedSet.Contains(coord))
+                    continue;
 
                 // Tile coordinates run opposite to world X/Y in the WoW map
                 // transform, so negate the grid offset before testing yaw.
-                Vector2 direction = Vector2.Normalize(new Vector2(-dx, -dy));
-                float dot = Vector2.Dot(forward, direction);
+                float dot = GetHeadingDot(forward, dx, dy);
                 if (dot + 1e-5f < minimumDot)
                     continue;
 
-                candidates.Add((new DirectionalTileCoord(tileX, tileY), dot, Math.Abs(dx) + Math.Abs(dy)));
+                candidates.Add((coord, dot, Math.Abs(dx) + Math.Abs(dy)));
             }
         }
 
+        SortCandidates(candidates);
+
+        foreach (var candidate in candidates)
+        {
+            if (selected.Count >= maxTileCount)
+                break;
+
+            selected.Add(candidate.Coord);
+        }
+
+        return selected;
+    }
+
+    private static float GetHeadingDot(Vector2 forward, int dx, int dy)
+    {
+        Vector2 direction = Vector2.Normalize(new Vector2(-dx, -dy));
+        return Vector2.Dot(forward, direction);
+    }
+
+    private static void SortCandidates(List<(DirectionalTileCoord Coord, float Dot, int Manhattan)> candidates)
+    {
         candidates.Sort(static (left, right) =>
         {
             int dotCompare = right.Dot.CompareTo(left.Dot);
@@ -119,16 +187,6 @@ public sealed class DirectionalTileSelector
                 ? xCompare
                 : left.Coord.TileY.CompareTo(right.Coord.TileY);
         });
-
-        foreach (var candidate in candidates)
-        {
-            if (selected.Count >= maxTileCount)
-                break;
-
-            selected.Add(candidate.Coord);
-        }
-
-        return selected;
     }
 
     private int ToTileCoordinate(float distanceFromMapOrigin)

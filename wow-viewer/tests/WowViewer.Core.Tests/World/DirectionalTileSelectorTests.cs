@@ -61,7 +61,7 @@ public sealed class DirectionalTileSelectorTests
     }
 
     [Fact]
-    public void RequestedDetailCountExpandsAcrossForwardRings()
+    public void RequestedDetailCountFillsTheImmediateNeighborhoodBeforeForwardRings()
     {
         List<DirectionalTileCoord> visible = Selector.GetVisibleTiles(
             CameraAt(32, 32),
@@ -70,10 +70,28 @@ public sealed class DirectionalTileSelectorTests
             maxTileCount: 9);
 
         Assert.Equal(9, visible.Count);
-        Assert.Contains(new DirectionalTileCoord(30, 32), visible);
-        Assert.Contains(new DirectionalTileCoord(30, 31), visible);
-        Assert.Contains(new DirectionalTileCoord(30, 33), visible);
-        Assert.DoesNotContain(visible, tile => tile.TileX > 32);
+        Assert.Contains(new DirectionalTileCoord(31, 31), visible);
+        Assert.Contains(new DirectionalTileCoord(31, 33), visible);
+        Assert.Contains(new DirectionalTileCoord(33, 31), visible);
+        Assert.Contains(new DirectionalTileCoord(33, 33), visible);
+        Assert.DoesNotContain(visible, tile => tile.TileX < 31 || tile.TileX > 33 || tile.TileY < 31 || tile.TileY > 33);
+    }
+
+    [Fact]
+    public void TwelveTileBudgetIncludesEveryAdjacentTile()
+    {
+        List<DirectionalTileCoord> visible = Selector.GetVisibleTiles(
+            CameraAt(32, 32),
+            yaw: 0f,
+            fovDegrees: 45f,
+            maxTileCount: 12);
+
+        Assert.Equal(12, visible.Count);
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+                Assert.Contains(new DirectionalTileCoord(32 + dx, 32 + dy), visible);
+        }
     }
 
     [Fact]
@@ -87,7 +105,8 @@ public sealed class DirectionalTileSelectorTests
 
         Assert.Equal(25, visible.Count);
         Assert.Contains(new DirectionalTileCoord(28, 32), visible);
-        Assert.All(visible, tile => Assert.InRange(tile.TileX, 28, 32));
+        Assert.Contains(new DirectionalTileCoord(33, 32), visible);
+        Assert.All(visible, tile => Assert.InRange(tile.TileX, 28, 33));
     }
 
     [Fact]

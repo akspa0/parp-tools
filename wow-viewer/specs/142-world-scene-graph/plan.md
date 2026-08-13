@@ -445,8 +445,9 @@ separately.
 FOV radiation. This remains bounded and does not replace the existing WMO/M2 batching fallbacks.
 
 1. Select a caller-sized set from 1 through 25 existing tiles with a pure, deterministic selector.
-   The baseline uses a 45-degree cone half-angle and expands only through bounded forward rings;
-   it never searches a radial fog footprint or the whole map.
+   The active tile and immediate 3×3 neighborhood have priority as a near-field safety ring; only
+   remaining budget expands through bounded 45-degree forward-cone rings. It never searches a
+   radial fog footprint or the whole map.
 2. Route normal ADT admission through that selector while keeping camera-centered retention
    separate. The manual ADT detail control owns the active submission budget.
 3. Keep explicit capture-path preload leases and `--full-load` stress mode separate and labeled;

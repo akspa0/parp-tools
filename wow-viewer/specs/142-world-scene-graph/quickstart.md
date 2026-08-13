@@ -31,9 +31,9 @@ The normal runtime now has two deliberately separate tile sets:
 
 - `LastSelectedTiles` is the directional active submission set. Its size follows the ADT Detail
   Tiles control from 1 through 25 and gates detailed terrain, liquids, scene-graph work, and
-  WMO/MDX object admission. Selection expands through bounded forward-cone rings only. The
-  selector and camera tile conversion use the established 533.333-yard ADT span represented by
-  `WoWConstants.ChunkSize` in this renderer.
+  WMO/MDX object admission. The active tile and immediate 3×3 neighborhood are admitted before
+  remaining budget expands through bounded forward-cone rings. The selector and camera tile
+  conversion use the established 533.333-yard ADT span represented by `WoWConstants.ChunkSize`.
 - `LastRetainedTiles` is the bounded camera-centered residency window. Its default radius is two
   tiles and the runtime control permits radius three. It controls streaming and unload protection;
   retained tiles do not become visible objects merely because they are resident.

@@ -12,6 +12,8 @@ belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
   is not interchangeable with the camera's ADT span.
 - Selected detail tiles now participate in both desired residency and unload protection, while the
   separate retained window remains the camera-centered streaming policy.
+- The selector now fills the active tile's immediate 3×3 safety ring before spending remaining
+  budget forward, preventing close side/rear ADTs from popping out when the slider is 12 or lower.
 - Added focused proof for the 1–25 selector and the established ADT coordinate span; real-client
   movement/FPS validation remains user-owned.
 
