@@ -7791,35 +7791,16 @@ public class WorldScene : ISceneRenderer
         // Placement transform for terrain maps.
         // Positions are already converted to renderer coords in AlphaTerrainAdapter:
         //   rendererX = MapOrigin - wowY, rendererY = MapOrigin - wowX, rendererZ = wowZ
-        // Triangle winding is reversed at upload (CW→CCW for OpenGL), which flips the
-        // model's facing direction by 180°. Compensate with a 180° Z rotation.
-        var rot180Z = Matrix4x4.CreateRotationZ(MathF.PI);
-        bool wmoBased = adapter.IsWmoBased;
-
-        // MDX (doodad) placements — same rotation as WMO (wiki confirms "same as MODF"),
-        // with scale added. Rotation stored as degrees in file.
+        // MDX and WMO placements share one renderer-space transform. Keeping
+        // this in Core.Runtime is important because bounds and mesh submission
+        // must agree about which side of a placement is in front of the camera.
         foreach (var p in adapter.MddfPlacements)
         {
             if (p.NameIndex < 0 || p.NameIndex >= mdxNames.Count) continue;
 
             string key = WorldAssetManager.NormalizeKey(mdxNames[p.NameIndex]);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
-            // Rotation stored as degrees in WoW coords (X=North, Y=West, Z=Up).
-            // Position axes are swapped: wowX→rendererY, wowY→rendererX (both negated).
-            // Rotation axes must follow the same swap:
-            //   WoW rotX (tilt around North) → renderer RotationY (negated)
-            //   WoW rotY (tilt around West)  → renderer RotationX (negated)
-            //   WoW rotZ (heading around Up)  → renderer RotationZ (as-is)
-            float rx = -p.Rotation.Y * MathF.PI / 180f;
-            float ry = -p.Rotation.X * MathF.PI / 180f;
-            float rz = p.Rotation.Z * MathF.PI / 180f;
-
-            var transform = rot180Z
-                * Matrix4x4.CreateScale(scale)
-                * Matrix4x4.CreateRotationX(rx)
-                * Matrix4x4.CreateRotationY(ry)
-                * Matrix4x4.CreateRotationZ(rz)
-                * Matrix4x4.CreateTranslation(p.Position);
+            var transform = WorldPlacementTransform.Build(p.Position, p.Rotation, scale);
 
             // Use actual model bounds if available, transformed to world space
             Vector3 bbMin, bbMax;
@@ -7872,15 +7853,7 @@ public class WorldScene : ISceneRenderer
             if (p.NameIndex < 0 || p.NameIndex >= wmoNames.Count) continue;
 
             string key = WorldAssetManager.NormalizeKey(wmoNames[p.NameIndex]);
-            float rx = p.Rotation.X * MathF.PI / 180f;
-            float ry = p.Rotation.Y * MathF.PI / 180f;
-            float rz = p.Rotation.Z * MathF.PI / 180f;
-
-            var transform = rot180Z
-                * Matrix4x4.CreateRotationX(rx)
-                * Matrix4x4.CreateRotationY(ry)
-                * Matrix4x4.CreateRotationZ(rz)
-                * Matrix4x4.CreateTranslation(p.Position);
+            var transform = WorldPlacementTransform.Build(p.Position, p.Rotation);
 
             // Get geometry-tight local bounds for the WMO placement and transform them to world space.
             // Falls back to MODF file bounds if the model summary is unavailable.
@@ -7987,19 +7960,7 @@ public class WorldScene : ISceneRenderer
             string key = WorldAssetManager.NormalizeKey(mdxNames[p.NameIndex]);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
 
-            // Rotation stored as degrees in WoW coords — axes swapped to match position swap.
-            float rx = -p.Rotation.Y * MathF.PI / 180f;
-            float ry = -p.Rotation.X * MathF.PI / 180f;
-            float rz = p.Rotation.Z * MathF.PI / 180f;
-
-            // 180° Z rotation compensates for winding reversal (CW→CCW)
-            var rot180Z = Matrix4x4.CreateRotationZ(MathF.PI);
-            var transform = rot180Z
-                * Matrix4x4.CreateScale(scale)
-                * Matrix4x4.CreateRotationX(rx)
-                * Matrix4x4.CreateRotationY(ry)
-                * Matrix4x4.CreateRotationZ(rz)
-                * Matrix4x4.CreateTranslation(p.Position);
+            var transform = WorldPlacementTransform.Build(p.Position, p.Rotation, scale);
             Vector3 bbMin, bbMax;
             Vector3 localMin = Vector3.Zero;
             Vector3 localMax = Vector3.Zero;
@@ -8042,17 +8003,7 @@ public class WorldScene : ISceneRenderer
         {
             if (p.NameIndex < 0 || p.NameIndex >= wmoNames.Count) continue;
             string key = WorldAssetManager.NormalizeKey(wmoNames[p.NameIndex]);
-            float rx = p.Rotation.X * MathF.PI / 180f;
-            float ry = p.Rotation.Y * MathF.PI / 180f;
-            float rz = p.Rotation.Z * MathF.PI / 180f;
-
-            // 180° Z rotation compensates for winding reversal (CW→CCW)
-            var rot180Z = Matrix4x4.CreateRotationZ(MathF.PI);
-            var transform = rot180Z
-                * Matrix4x4.CreateRotationX(rx)
-                * Matrix4x4.CreateRotationY(ry)
-                * Matrix4x4.CreateRotationZ(rz)
-                * Matrix4x4.CreateTranslation(p.Position);
+            var transform = WorldPlacementTransform.Build(p.Position, p.Rotation);
 
             // Get geometry-tight local bounds and transform to world space.
             Vector3 localMin, localMax, worldMin, worldMax;
@@ -8996,15 +8947,10 @@ public class WorldScene : ISceneRenderer
         {
             case ObjectType.Mdx:
             {
-                float rx = -current.PlacementRotation.Y * MathF.PI / 180f;
-                float ry = -current.PlacementRotation.X * MathF.PI / 180f;
-                float rz = current.PlacementRotation.Z * MathF.PI / 180f;
-                var transform = Matrix4x4.CreateRotationZ(MathF.PI)
-                    * Matrix4x4.CreateScale(current.PlacementScale)
-                    * Matrix4x4.CreateRotationX(rx)
-                    * Matrix4x4.CreateRotationY(ry)
-                    * Matrix4x4.CreateRotationZ(rz)
-                    * Matrix4x4.CreateTranslation(newPosition);
+                var transform = WorldPlacementTransform.Build(
+                    newPosition,
+                    current.PlacementRotation,
+                    current.PlacementScale);
 
                 current.Transform = transform;
                 if (_assets.TryGetMdxBounds(current.ModelKey, out Vector3 localMin, out Vector3 localMax))
@@ -9028,14 +8974,9 @@ public class WorldScene : ISceneRenderer
 
             case ObjectType.Wmo:
             {
-                float rx = current.PlacementRotation.X * MathF.PI / 180f;
-                float ry = current.PlacementRotation.Y * MathF.PI / 180f;
-                float rz = current.PlacementRotation.Z * MathF.PI / 180f;
-                var transform = Matrix4x4.CreateRotationZ(MathF.PI)
-                    * Matrix4x4.CreateRotationX(rx)
-                    * Matrix4x4.CreateRotationY(ry)
-                    * Matrix4x4.CreateRotationZ(rz)
-                    * Matrix4x4.CreateTranslation(newPosition);
+                var transform = WorldPlacementTransform.Build(
+                    newPosition,
+                    current.PlacementRotation);
 
                 current.Transform = transform;
                 if (_assets.TryGetWmoPlacementBounds(current.ModelKey, out Vector3 localMin, out Vector3 localMax))

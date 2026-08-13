@@ -512,9 +512,11 @@ or object submission, with visual parity preserved.
 ## Phase 8P — Near-Field WMO Residency Ordering
 
 **Status**: Source slice landed on 2026-08-12 after WMO placements were reported flashing while
-their owning ADTs remained in the bounded residency window. The follow-up visibility correction
-keeps the camera cone for pending-load priority but disables rear-cone draw-distance culling for
-resident WMOs; active-tile admission, frustum checks, and distance limits remain in force.
+their owning ADTs remained in the bounded residency window. The visibility correction keeps the
+camera cone for pending-load priority but disables rear-cone draw-distance culling for resident
+WMOs; active-tile admission, frustum checks, and distance limits remain in force. Placement mesh
+and bounds transforms now use one shared renderer-space MDDF/MODF convention, so WMO geometry is
+not rotated onto a different side of the camera than its culling bounds.
 
 1. Prioritize pending GPU tile uploads by the current selected active set, then the retained
    camera window, instead of consuming background parse completions in arbitrary order.
@@ -526,11 +528,14 @@ resident WMOs; active-tile admission, frustum checks, and distance limits remain
 4. Do not use the camera cone as a second WMO visibility gate after active-tile admission. Use it
    to prioritize missing WMO loads, while resident building geometry uses bounds/frustum and
    distance checks so camera turns cannot make it flash out of the active tile set.
+5. Build MDX and WMO placement transforms through the same normalized axis-swapped rotation
+   helper for global placements, tile placements, and translation-only editing. Keep bounds
+   transformation on that same matrix.
 
-**Exit evidence**: focused collector tests and source build pass; a user-run camera movement test
-must show that selected neighbor tiles reach GPU/object readiness without WMO flash-in, while
-reporting WMO pending loads, loaded tile count, selected/retained counts, and frame time. No
-runtime FPS claim is made here.
+**Exit evidence**: focused collector and placement-transform tests and source build pass; a user-run
+camera movement test must show that selected neighbor tiles reach GPU/object readiness without WMO
+flash-in, while reporting WMO pending loads, loaded tile count, selected/retained counts, and frame
+time. No runtime FPS claim is made here.
 
 ## Phase 8L — Capability-Gated Modern Dense Submission
 

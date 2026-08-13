@@ -5,6 +5,13 @@ Last updated: 2026-08-12
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-12 — Spec 142 shared WMO placement transform
+
+- Routed global and tile-local MDX/WMO placement creation plus translation-only editing through one
+  renderer-space transform, correcting the prior WMO-only positive-axis rotation path.
+- Bounds use the same transform as mesh submission; focused transform tests pass. Real-client camera
+  movement remains user-owned proof for WMO flash-in behavior.
+
 ## 2026-08-12 — Spec 142 resident WMO camera-turn stability
 
 - Kept camera heading as a pending WMO-load priority signal, but removed rear-cone draw-distance
