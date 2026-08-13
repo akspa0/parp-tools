@@ -3773,7 +3773,8 @@ public partial class ViewerApp
             return;
         }
 
-        // Sub-tab bar inside the workbench
+        // The main page selector is vertical so it never relies on ImGui's
+        // horizontal tab overflow arrows.
         string[] labels = WorkbenchNavigator.GetBottomTabLabels(_activeTopTab);
         if (labels.Length == 0)
         {
@@ -3785,21 +3786,13 @@ public partial class ViewerApp
         if (_activeBottomTabIndex < 0 || _activeBottomTabIndex >= labels.Length)
             _activeBottomTabIndex = 0;
 
-        // Use FittingPolicyScroll to prevent text scaling when many tabs
-        if (ImGui.BeginTabBar("##WorkbenchBottomTabs", ImGuiTabBarFlags.FittingPolicyScroll))
-        {
-            for (int i = 0; i < labels.Length; i++)
-            {
-                bool selected = _activeBottomTabIndex == i;
-                if (ImGui.TabItemButton(labels[i], selected ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
-                    _activeBottomTabIndex = i;
-            }
-            ImGui.EndTabBar();
-        }
+        _activeBottomTabIndex = DrawVerticalTabRail(
+            "##WorkbenchBottomTabRail",
+            _activeTopTab.ToString(),
+            labels,
+            _activeBottomTabIndex,
+            132f);
 
-        ImGui.Separator();
-
-        // Active sub-tab content (in a child for scrollability)
         if (ImGui.BeginChild("##WorkbenchSubTabContent", new Vector2(0, 0), false,
             ImGuiWindowFlags.None))
         {
@@ -4057,23 +4050,52 @@ public partial class ViewerApp
     /// The parent strip in DrawWorkbenchContent only covers the first level, so without this
     /// a nested section can never select anything but its parent's index.
     /// </summary>
-    private static int DrawNestedSubTabStrip(string id, string[] labels, int activeIndex)
+    private int DrawNestedSubTabStrip(string id, string[] labels, int activeIndex)
+    {
+        if (labels.Length == 0)
+            return 0;
+
+        return DrawVerticalTabRail(id + "Rail", null, labels, activeIndex, 132f);
+    }
+
+    private static int DrawVerticalTabRail(
+        string id,
+        string? title,
+        string[] labels,
+        int activeIndex,
+        float width)
     {
         if (labels.Length == 0)
             return 0;
 
         int selected = Math.Clamp(activeIndex, 0, labels.Length - 1);
-        if (ImGui.BeginTabBar(id, ImGuiTabBarFlags.FittingPolicyScroll))
+        if (ImGui.BeginChild(
+            id,
+            new Vector2(width, 0f),
+            true,
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
         {
+            if (!string.IsNullOrWhiteSpace(title))
+            {
+                ImGui.TextDisabled(title);
+                ImGui.Separator();
+            }
+
             for (int i = 0; i < labels.Length; i++)
             {
-                if (ImGui.TabItemButton(labels[i], i == selected ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
-                    selected = i;
-            }
-            ImGui.EndTabBar();
-        }
+                bool isSelected = selected == i;
+                if (isSelected)
+                    ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.38f, 0.25f, 0.08f, 1f));
 
-        ImGui.Separator();
+                if (ImGui.Button($"{labels[i]}##{id}_{i}", new Vector2(-1f, 0f)))
+                    selected = i;
+
+                if (isSelected)
+                    ImGui.PopStyleColor();
+            }
+        }
+        ImGui.EndChild();
+        ImGui.SameLine();
         return selected;
     }
 
