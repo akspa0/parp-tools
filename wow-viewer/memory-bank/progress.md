@@ -5,6 +5,13 @@ Last updated: 2026-08-12
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-12 — Spec 142 resident WMO camera-turn stability
+
+- Kept camera heading as a pending WMO-load priority signal, but removed rear-cone draw-distance
+  culling for resident WMOs already admitted by active ADT tiles.
+- WMO visibility remains bounded by active tile admission, bounds/frustum checks, and distance;
+  focused collector proof and a viewer build are required before user movement validation.
+
 ## 2026-08-12 — Spec 142 near-field WMO readiness ordering
 
 - Pending GPU tile uploads are now ranked by selected active tiles before retained and stale

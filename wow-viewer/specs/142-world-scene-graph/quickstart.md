@@ -45,6 +45,9 @@ count is expected without a corresponding increase in active submission.
 Near-field residency also prioritizes GPU uploads for selected tiles and WMO asset loads for the
 camera tile plus immediate retained neighbors. This is a readiness ordering guarantee, not a
 whole-window object submission path: inactive retained tiles remain excluded from WMO visibility.
+For active-tile WMO placements, the camera cone remains a pending-load priority signal but is not a
+second rear-cone draw-distance gate; resident buildings use their bounds/frustum and distance
+checks so turning the camera does not make them flash out of an admitted tile.
 
 ## User-run production render diagnostic
 

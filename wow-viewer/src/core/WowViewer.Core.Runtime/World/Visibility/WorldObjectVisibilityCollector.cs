@@ -45,8 +45,14 @@ public static class WorldObjectVisibilityCollector
 
             float boundsDistSq = DistanceSquaredPointToAabb(context.CameraPosition, inst.BoundsMin, inst.BoundsMax);
             float centerDistanceSq = Vector3.DistanceSquared(context.CameraPosition, inst.PlacementPosition);
-            float coneFactor = ComputeVisionConeFactor(context.CameraPosition, context.CameraForward, inst.PlacementPosition, centerDistanceSq);
-            float coneCullDistance = ComputeConeCullDistance(wmoCullDistance, coneFactor);
+            // Keep the camera cone for pending-load prioritization, but allow the
+            // WMO caller to disable cone-based visibility culling. A resident WMO
+            // is a building-sized object; shrinking its draw distance on the rear
+            // side of the camera causes it to flash as the camera turns even when
+            // its bounds are still in the active tile window.
+            float loadConeFactor = ComputeVisionConeFactor(context.CameraPosition, context.CameraForward, inst.PlacementPosition, centerDistanceSq);
+            float visibilityConeFactor = context.IgnoreVisionConeCulling ? 1.0f : loadConeFactor;
+            float coneCullDistance = ComputeConeCullDistance(wmoCullDistance, visibilityConeFactor);
             float coneCullDistanceSq = coneCullDistance * coneCullDistance;
             float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
             bool frustumVisible = context.IgnoreFrustumCulling || isBoundsVisible(inst.BoundsMin, inst.BoundsMax);
@@ -55,7 +61,7 @@ public static class WorldObjectVisibilityCollector
                 && !context.IgnoreVisionConeCulling
                 && boundsDistSq > noCullDistanceSq
                 && !frustumVisible
-                && coneFactor < MinOffFrustumConeFactor)
+                && loadConeFactor < MinOffFrustumConeFactor)
             {
                 culledCount++;
                 continue;
@@ -82,8 +88,8 @@ public static class WorldObjectVisibilityCollector
 
             if (!isAssetReady(inst.ModelKey))
             {
-                if (ShouldQueuePendingAsset(context, frustumVisible, coneFactor, projectedFraction, centerDistanceSq, isWmo: true))
-                    queuePendingAsset(inst.ModelKey, ComputeLoadPriorityScore(centerDistanceSq, coneFactor));
+                if (ShouldQueuePendingAsset(context, frustumVisible, loadConeFactor, projectedFraction, centerDistanceSq, isWmo: true))
+                    queuePendingAsset(inst.ModelKey, ComputeLoadPriorityScore(centerDistanceSq, loadConeFactor));
 
                 continue;
             }

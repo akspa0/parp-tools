@@ -27,6 +27,29 @@ public sealed class WorldObjectVisibilityCollectorTests
     }
 
     [Fact]
+    public void CollectVisibleWmos_CanKeepRearResidentBuildingWithinDistance()
+    {
+        WorldVisibilityFrame frame = new();
+        WorldObjectVisibilityContext context = CreateContext(
+            cameraForward: -Vector3.UnitY,
+            fogEnd: 1200f,
+            ignoreVisionConeCulling: true);
+        WorldObjectInstance instance = CreateInstance("wmo://rear-resident", new Vector3(0f, 1200f, 0f), halfExtent: 10f);
+
+        int culled = WorldObjectVisibilityCollector.CollectVisibleWmos(
+            frame,
+            [instance],
+            context,
+            static _ => false,
+            static (_, _) => false,
+            static _ => true,
+            static (_, _) => { });
+
+        Assert.Equal(0, culled);
+        Assert.Single(frame.VisibleWmos);
+    }
+
+    [Fact]
     public void CollectVisibleMdx_PreservesNearHoldCandidate()
     {
         WorldVisibilityFrame frame = new();

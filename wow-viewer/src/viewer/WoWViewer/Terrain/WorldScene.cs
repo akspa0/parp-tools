@@ -8825,7 +8825,12 @@ public class WorldScene : ISceneRenderer
         bool frustumVisible = _frustumCuller.TestAABB(bucketMin, bucketMax);
         Vector3 bucketCenter = (bucketMin + bucketMax) * 0.5f;
         float centerDistanceSq = Vector3.DistanceSquared(cameraPos, bucketCenter);
-        float coneFactor = ComputeVisionConeFactor(cameraPos, cameraForward, bucketCenter, centerDistanceSq);
+        // Active-tile admission already bounds WMO residency. Do not shrink a
+        // resident building's bucket by the camera cone; heading remains an
+        // asset-load priority signal, not a second visibility gate.
+        float coneFactor = isWmo
+            ? 1.0f
+            : ComputeVisionConeFactor(cameraPos, cameraForward, bucketCenter, centerDistanceSq);
 
         if (boundsDistSq > noCullDistanceSq && !frustumVisible && coneFactor < MinOffFrustumConeFactor)
             return false;
@@ -9804,7 +9809,8 @@ public class WorldScene : ISceneRenderer
                     CullSmallDoodadsOnly: false,
                     CountAsTaxiActor: false,
                     VerticalFieldOfViewRadians: verticalFieldOfViewRadians,
-                    VisibilityProfile: _objectVisibilityProfile),
+                    VisibilityProfile: _objectVisibilityProfile,
+                    IgnoreVisionConeCulling: true),
                 inst => ShouldHideObjectInstanceByUniqueId(inst),
                 (min, max) => _frustumCuller.TestAABB(min, max),
                 modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
@@ -9820,7 +9826,8 @@ public class WorldScene : ISceneRenderer
             CullSmallDoodadsOnly: false,
             CountAsTaxiActor: false,
             VerticalFieldOfViewRadians: verticalFieldOfViewRadians,
-            VisibilityProfile: _objectVisibilityProfile);
+            VisibilityProfile: _objectVisibilityProfile,
+            IgnoreVisionConeCulling: true);
 
         WmoCulledCount = 0;
         foreach (var pair in _tileWmoInstances)

@@ -7,10 +7,10 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 142 Phase 8P user-run validation of WMO near-field residency ordering.
+- **Next implementation target:** Spec 142 Phase 8P user-run validation of WMO near-field residency and stable camera-turn visibility.
 - **Proof owner:** focused C# tests and a Debug build for source-level contracts; the user owns real
   client, OpenGL, audio-device, capture, and performance proof.
-- **Main unproven gap:** source build proves selected GPU uploads and immediate-neighbor WMO prioritization compile, but no user-run movement test has yet confirmed that WMO flash-in is gone.
+- **Main unproven gap:** focused source proof covers the resident-WMO cone correction and near-field ordering, but no user-run movement test has yet confirmed that WMO flash-in is gone.
 - **Explicitly out of scope for the next slice:** FOV radiation, whole-window object submission, unique-model submission redesign, broad renderer rewrites, audio, and FPS claims without production capture evidence.
 
 ## Active spec lanes
