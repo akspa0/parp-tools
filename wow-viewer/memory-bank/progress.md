@@ -12,6 +12,14 @@ belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 - Bounds use the same transform as mesh submission; focused transform tests pass. Real-client camera
   movement remains user-owned proof for WMO flash-in behavior.
 
+## 2026-08-12 — Spec 142 retained-window object admission
+
+- Resident neighbor tiles now remain eligible for MDX/WMO collection even when they are outside the
+  directional detailed-terrain list; object bounds and frustum tests remain the submission gate.
+- This closes the path where a 25-tile resident window still made nearby buildings disappear on camera
+  turns because WorldScene admitted objects from selected tiles only. Real-client movement proof remains
+  user-owned.
+
 ## 2026-08-12 — Spec 142 resident WMO camera-turn stability
 
 - Kept camera heading as a pending WMO-load priority signal, but removed rear-cone draw-distance

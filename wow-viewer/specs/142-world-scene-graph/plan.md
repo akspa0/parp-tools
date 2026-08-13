@@ -531,6 +531,9 @@ not rotated onto a different side of the camera than its culling bounds.
 5. Build MDX and WMO placement transforms through the same normalized axis-swapped rotation
    helper for global placements, tile placements, and translation-only editing. Keep bounds
    transformation on that same matrix.
+6. Permit object admission from the retained camera window as well as the directional detailed
+   set. Keep detailed terrain directional, then let object bounds/frustum tests determine which
+   resident-neighbor objects are actually submitted.
 
 **Exit evidence**: focused collector and placement-transform tests and source build pass; a user-run
 camera movement test must show that selected neighbor tiles reach GPU/object readiness without WMO

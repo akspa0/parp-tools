@@ -9707,16 +9707,20 @@ public class WorldScene : ISceneRenderer
 
     private bool IsActiveObjectTile((int tileX, int tileY) tile)
     {
-        IReadOnlyList<(int tileX, int tileY)> activeTiles = _terrainManager.LastSelectedTiles;
-        for (int i = 0; i < activeTiles.Count; i++)
-        {
-            if (activeTiles[i] == tile)
-                return true;
-        }
+        // Detailed terrain remains directional, but resident neighbor tiles
+        // must also be eligible for object admission. The actual frustum and
+        // object bounds tests below decide what is submitted. Restricting
+        // objects to the directional list made buildings disappear as soon as
+        // the camera turned, even though their tile was still resident.
+        if (WorldObjectTileAdmission.IsResident(
+                _terrainManager.LastSelectedTiles,
+                _terrainManager.LastRetainedTiles,
+                tile))
+            return true;
 
         // Capture warmup is an explicit render-path lease. Keep its pinned
         // tiles eligible for object admission while normal navigation remains
-        // limited to the camera-facing AOI.
+        // bounded by the camera-centered residency window.
         return CapturePreloadActive && _capturePreloadTiles.Contains(tile);
     }
 
