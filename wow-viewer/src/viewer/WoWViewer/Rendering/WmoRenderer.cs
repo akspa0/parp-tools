@@ -24,6 +24,10 @@ public readonly record struct WmoDoodadInfo(
     bool Visible,
     bool IsLoaded);
 
+public readonly record struct WmoOpaqueDoodadBatchItem(
+    IModelRenderer Renderer,
+    Matrix4x4 ModelMatrix);
+
 public enum WmoRenderPass
 {
     Both,
@@ -1001,6 +1005,36 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
             respectRuntimeDoodadVisibility: false);
         RenderOpaqueDoodads(visibleDoodadRenderCount, modelMatrix, view, proj,
             fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
+        UpdateLastRenderStats();
+    }
+
+    public void CollectOpaqueDoodadsForPlacement(
+        Matrix4x4 modelMatrix,
+        Vector3 cameraPos,
+        float fogEnd,
+        Action<WmoOpaqueDoodadBatchItem> collect)
+    {
+        ArgumentNullException.ThrowIfNull(collect);
+        if (!SupportsGpuInstancedOpaque || !_doodadsVisible || !_runtimeDoodadsVisible || _doodadInstances.Count == 0)
+            return;
+
+        int visibleDoodadRenderCount = PrepareVisibleDoodads(
+            modelMatrix,
+            cameraPos,
+            fogEnd,
+            updateAnimation: false,
+            sortByDistance: false,
+            respectRuntimeDoodadVisibility: false);
+        for (int vi = 0; vi < visibleDoodadRenderCount; vi++)
+        {
+            DoodadInstance inst = _doodadInstances[_visibleDoodadsScratch[vi].idx];
+            if (inst.Renderer is not IModelRenderer renderer)
+                continue;
+
+            _currentDoodadSubmissions++;
+            collect(new WmoOpaqueDoodadBatchItem(renderer, inst.Transform * modelMatrix));
+        }
+
         UpdateLastRenderStats();
     }
 

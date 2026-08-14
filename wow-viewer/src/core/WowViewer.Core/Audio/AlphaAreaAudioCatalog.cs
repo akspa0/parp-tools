@@ -49,6 +49,33 @@ public sealed class AlphaAreaAudioCatalog
         return new AlphaAreaAudioBinding(area, midiAmbience, underwaterMidiAmbience);
     }
 
+    /// <summary>
+    /// Resolve the most specific area with audio metadata, walking the active
+    /// area's parent chain when the child row has no usable music assignment.
+    /// This mirrors the game's area inheritance instead of treating an
+    /// MCNK/WMO area as an isolated sound zone.
+    /// </summary>
+    public AlphaAreaAudioBinding? TryResolveWithParents(int areaId)
+    {
+        HashSet<int> visited = [];
+        int currentId = areaId;
+
+        while (currentId > 0 && visited.Add(currentId) && Areas.TryGetValue(currentId, out AlphaAreaRecord? area))
+        {
+            AlphaAreaAudioBinding binding = TryResolve(currentId)!;
+            if (area.ZoneMusicId > 0
+                || binding.MidiAmbience is not null
+                || binding.UnderwaterMidiAmbience is not null)
+            {
+                return binding;
+            }
+
+            currentId = area.ParentAreaId;
+        }
+
+        return null;
+    }
+
     public IEnumerable<AlphaAreaAudioBinding> EnumerateBindings()
     {
         foreach (AlphaAreaRecord area in Areas.Values.OrderBy(static area => area.Id))

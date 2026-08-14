@@ -8,11 +8,16 @@ proof from source tests/builds.
 Run from PowerShell 7:
 
 ```powershell
-dotnet test I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter FullyQualifiedName~Minimap
+dotnet test I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter FullyQualifiedName~MinimapInteraction
 dotnet test I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter FullyQualifiedName~Tile
 dotnet test I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter FullyQualifiedName~Batch
 dotnet build I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug
 ```
+
+The current focused source proof is six tests: four MinimapInteractionTests and two
+AlphaAreaAudioCatalogTests. The full solution build remains the release check; the cross-platform
+viewer build is sufficient for the bounded viewer source slice when the Windows target is blocked
+by environment-specific packaging.
 
 If the implementation uses different test names, the task owner must update these filters rather
 than silently treating a zero-test result as proof.

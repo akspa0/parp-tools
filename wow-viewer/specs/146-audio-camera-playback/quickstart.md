@@ -6,7 +6,9 @@ one bounded playback path: resident MCSE emitters whose build-aware
 and spatially played through OpenAL. The Tools > Utilities > Audio page also
 provides a SoundEntries preview at the current camera listener, stop control,
 gain controls, resident-ID discovery, and the last runtime diagnostic. This is
-not yet the full Alpha MIDI/DLS or capture-audio system.
+not yet the full Alpha MIDI/DLS or capture-audio system. The active-build
+AreaTable ZoneMusic field is now resolved through SoundEntries when the
+referenced client asset is supported by the existing OpenAL decoder path.
 
 ## Phase 1 proof
 
@@ -33,17 +35,22 @@ proof.
 ## User-run client proof
 
 1. Load a configured client and record the exact build/root.
-2. Load a zone with an `AreaMIDIAmbiences` binding and inspect day/night/underwater resolution.
-3. Load a tile containing decoded MCSE entries. The lower status bar reports
+2. Load a zone and inspect the Audio panel's DBC area-music status. If the active
+   AreaTable row has a ZoneMusic ID, the viewer resolves its SoundEntries file
+   and loops it; if the row selects MIDI/DLS, the viewer reports the exact
+   metadata and an explicit unsupported-backend status.
+3. Load a zone with an `AreaMIDIAmbiences` binding and inspect day/night/underwater metadata
+   resolution. This remains metadata-only until a MIDI/DLS backend is proven.
+4. Load a tile containing decoded MCSE entries. The lower status bar reports
    active/resident emitter counts; the Log tab reports the OpenAL backend,
    missing SoundEntries files, unsupported WAV shapes, and backend failures.
    Open Tools > Utilities > Audio, select a resident SoundEntries ID, and use
    Preview at Camera to prove the resolved client file path before relying on
    automatic spatial admission.
-4. Import the Undead FlyBy and verify its existing `CinematicCamera.dbc` placement still resolves tile `(28,28)`.
-5. Exercise Play, pause, scrub, loop, and stop while observing the audio diagnostics surface.
-6. Exercise Play + Video and record whether audio is muxed, separate, or unavailable.
-7. Repeat with an archive-backed asset and a missing/unsupported asset to verify honest diagnostics.
+5. Import the Undead FlyBy and verify its existing `CinematicCamera.dbc` placement still resolves tile `(28,28)`.
+6. Exercise Play, pause, scrub, loop, and stop while observing the audio diagnostics surface.
+7. Exercise Play + Video and record whether audio is muxed, separate, or unavailable.
+8. Repeat with an archive-backed asset and a missing/unsupported asset to verify honest diagnostics.
 
 ## Capability matrix
 

@@ -75,3 +75,17 @@ quest, and authoritative world-mutation implementation.
   introducing a second clock or drift.
 - Establish a focused fixture set and a user-run audible proof matrix before claiming format or
   client-era support.
+
+## 2026-08-14 implementation checkpoint
+
+- WorldAudioRuntime now loads AreaTable and optional AreaMIDIAmbiences from the exact active DBC
+  build. The optional MIDI table matters because later clients can carry usable ZoneMusic IDs even
+  when the historical MIDI ambience table is absent.
+- Area music resolution uses the current resident terrain chunk's AreaID, walks parent areas when a
+  child has no assignment, and resolves ZoneMusic through the build-scoped SoundEntries row.
+  Paths still come only from DBC metadata and the active client source.
+- The runtime loops a resolvable ZoneMusic asset through the existing OpenAL path and exposes an
+  area-music diagnostic in the Audio panel. MIDI/DLS selections remain explicit unsupported states;
+  no fake PCM conversion or filename inference was added.
+- Audible playback, area transition behavior, WMO-area selection, and camera/capture transport
+  synchronization remain user-run or future gates.

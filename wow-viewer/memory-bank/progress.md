@@ -5,6 +5,29 @@ Last updated: 2026-08-14
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-14 — Spec 147 minimap interaction, LIT coverage, and WMO doodad batching
+
+- Removed duplicate fullscreen minimap ownership and routed docked/fullscreen input through a pure
+  gesture state. Focused proof covers drag classification, target changes, timeout, invalid tiles,
+  and exactly-once third-click teleport; real-client input proof remains user-owned.
+- Added a low-alpha fog-colored LIT radius fill and outline to minimap markers. The color comes
+  from the active LIT fog track.
+- Added a cross-WMO opaque internal-doodad collection path that groups shared renderers across
+  visible WMO placements, using GPU instance batches where supported and renderer-level CPU batches
+  otherwise. Transparent/effect-sensitive fallbacks remain unchanged.
+- Cross-platform viewer build passes with 0 errors; focused minimap and area-catalog tests pass
+  (6/6). Dense Stormwind draw/CPU/FPS comparison is still user-owned.
+
+## 2026-08-14 — DBC-driven area music resolution
+
+- The active-build DBC provider now feeds AreaTable and optional AreaMIDIAmbiences into the viewer
+  audio runtime. A resident terrain chunk's AreaID selects the most specific area or parent area.
+- ZoneMusic IDs resolve through the existing SoundEntries catalog and active client file paths, then
+  loop through the existing OpenAL source path. MIDI/DLS choices are reported explicitly as
+  unsupported instead of being converted or guessed.
+- Focused catalog inheritance tests pass; audible client proof and camera/capture synchronization
+  remain open.
+
 ## 2026-08-14 — Spec 143 pre-alpha v2 LIT compatibility
 
 - Added an evidence-bounded parser profile for the observed 0.5.3 `areatest.lit` payload:

@@ -3477,6 +3477,7 @@ public class WorldScene : ISceneRenderer
     private WorldAudioRuntime? _audioRuntime;
     public string AudioStatus => _audioRuntime?.Status ?? "Audio runtime not configured.";
     public string AudioLastDiagnostic => _audioRuntime?.LastDiagnostic ?? "Audio runtime not configured.";
+    public string AreaMusicStatus => _audioRuntime?.AreaMusicStatus ?? "Area music runtime not configured.";
     public bool AudioBackendReady => _audioRuntime?.BackendReady ?? false;
     public string? AudioPreviewPath => _audioRuntime?.PreviewPath;
     public int ResidentAudioEmitterCount => _audioRuntime?.ResidentEmitterCount ?? 0;
@@ -10330,7 +10331,8 @@ public class WorldScene : ISceneRenderer
                     cameraForward = ExtractCameraForward(viewInv);
                     _lastRenderedCameraPosition = cameraPos;
                     _hasLastRenderedCameraPosition = true;
-                    _audioRuntime?.Update(cameraPos, cameraForward);
+                    int audioAreaId = _terrainManager.Renderer.GetChunkInfoAt(cameraPos.X, cameraPos.Y)?.AreaId ?? 0;
+                    _audioRuntime?.Update(cameraPos, cameraForward, audioAreaId, lighting.GameTime);
 
                     EnsurePm4OverlayMatchesCameraWindow(cameraPos);
 
@@ -10390,6 +10392,8 @@ public class WorldScene : ISceneRenderer
 
                         WorldObjectPassCoordinator.WorldWmoOpaqueBatchPlan wmoBatchPlan =
                             WorldObjectPassCoordinator.PlanOpaqueWmoBatches(wmoBatchCandidates);
+                        var wmoDoodadBatchGroups = new Dictionary<IModelRenderer, List<Matrix4x4>>();
+                        var wmoDoodadUnbatched = new List<WmoOpaqueDoodadBatchItem>();
                         foreach (int visibleIndex in wmoBatchPlan.FallbackVisibleIndices)
                         {
                             VisibleWmoInstance visible = frame.Visibility.VisibleWmos[visibleIndex];
@@ -10423,13 +10427,81 @@ public class WorldScene : ISceneRenderer
                             // retain placement-local visibility, animation, and M2 fallback rules.
                             foreach (VisibleWmoInstance visible in instances)
                             {
-                                gpuRenderer.RenderOpaqueDoodadsForPlacement(
-                                    visible.Instance.Transform, view, proj,
-                                    fogColor, objectFogStart, objectFogEnd, cameraPos,
-                                    lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                                gpuRenderer.CollectOpaqueDoodadsForPlacement(
+                                    visible.Instance.Transform,
+                                    cameraPos, objectFogEnd,
+                                    item =>
+                                    {
+                                        if (item.Renderer.RequiresUnbatchedWorldRender)
+                                        {
+                                            wmoDoodadUnbatched.Add(item);
+                                            return;
+                                        }
+
+                                        if (!wmoDoodadBatchGroups.TryGetValue(item.Renderer, out List<Matrix4x4>? transforms))
+                                        {
+                                            transforms = new List<Matrix4x4>();
+                                            wmoDoodadBatchGroups.Add(item.Renderer, transforms);
+                                        }
+
+                                        transforms.Add(item.ModelMatrix);
+                                    });
                             }
 
                             AccumulateWmoRenderStats(frame, gpuRenderer.LastRenderStats);
+                        }
+
+                        foreach (WmoOpaqueDoodadBatchItem item in wmoDoodadUnbatched)
+                        {
+                            item.Renderer.RenderWithTransform(
+                                item.ModelMatrix,
+                                view,
+                                proj,
+                                RenderPass.Opaque,
+                                1.0f,
+                                fogColor,
+                                objectFogStart,
+                                objectFogEnd,
+                                cameraPos,
+                                lighting.LightDirection,
+                                lighting.LightColor,
+                                lighting.AmbientColor);
+                        }
+
+                        foreach ((IModelRenderer renderer, List<Matrix4x4> transforms) in wmoDoodadBatchGroups)
+                        {
+                            if (renderer is IGpuInstancedModelRenderer gpuDoodadRenderer
+                                && gpuDoodadRenderer.SupportsGpuInstancedOpaque)
+                            {
+                                gpuDoodadRenderer.BeginGpuInstanceBatch(
+                                    view,
+                                    proj,
+                                    fogColor,
+                                    objectFogStart,
+                                    objectFogEnd,
+                                    cameraPos,
+                                    lighting.LightDirection,
+                                    lighting.LightColor,
+                                    lighting.AmbientColor);
+                                foreach (Matrix4x4 transform in transforms)
+                                    gpuDoodadRenderer.QueueGpuInstance(transform);
+                                gpuDoodadRenderer.EndGpuInstanceBatch();
+                            }
+                            else
+                            {
+                                renderer.BeginBatch(
+                                    view,
+                                    proj,
+                                    fogColor,
+                                    objectFogStart,
+                                    objectFogEnd,
+                                    cameraPos,
+                                    lighting.LightDirection,
+                                    lighting.LightColor,
+                                    lighting.AmbientColor);
+                                foreach (Matrix4x4 transform in transforms)
+                                    renderer.RenderInstance(transform, RenderPass.Opaque, 1.0f);
+                            }
                         }
                     });
                     if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Wmo, $"WMO render: {WmoRenderedCount} drawn, {WmoCulledCount} culled");

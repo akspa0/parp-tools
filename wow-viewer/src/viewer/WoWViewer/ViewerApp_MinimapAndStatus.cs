@@ -2,6 +2,7 @@ using System.Numerics;
 using ImGuiNET;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
+using WowViewer.Core.Runtime.World.Minimap;
 
 namespace WoWViewer;
 
@@ -12,6 +13,7 @@ public partial class ViewerApp
 {
     private const float MinimapTileCount = 64f;
     private const float MinimapWorldTileSize = WoWConstants.ChunkSize;
+    private readonly MinimapInteractionState _minimapInteractionState = new();
 
     private enum MinimapTeleportMode
     {
@@ -59,51 +61,102 @@ public partial class ViewerApp
         bool isHovered = ImGui.IsItemHovered();
         bool isActive = ImGui.IsItemActive();
         Vector2 mousePos = ImGui.GetMousePos();
+        bool pointerCaptured = isHovered || isActive || _minimapInteractionState.PointerDown;
 
-        if (isHovered || isActive)
+        if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
-            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-            {
-                _minimapDragging = true;
-                _minimapDragStart = mousePos;
-                _minimapDragOrigin = mousePos;
-            }
-            else if (ImGui.IsMouseDown(ImGuiMouseButton.Left) && _minimapDragging)
-            {
-                Vector2 delta = mousePos - _minimapDragStart;
-                if (delta.LengthSquared() > 0.01f)
-                {
-                    _minimapPanOffset -= new Vector2(delta.Y / cellSize, delta.X / cellSize);
-                    _minimapDragStart = mousePos;
-                }
-            }
-            else if (ImGui.IsMouseReleased(ImGuiMouseButton.Left) && _minimapDragging)
-            {
-                Vector2 totalDelta = mousePos - _minimapDragOrigin;
-                if (totalDelta.Length() <= MinimapClickMovementThresholdPixels
-                    && MinimapHelpers.TryGetLitMarkerAtPoint(_worldScene, mousePos, cursorPos, mapSize, viewMinTx, viewMinTy, cellSize, out int litLightIndex))
-                {
-                    _worldScene!.SelectedLitLightIndex = litLightIndex;
-                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                        FocusCameraOnLitLight(litLightIndex, closeFullscreenAfterFocus: true);
-                    else
-                        _statusMessage = $"Selected LIT entry [{litLightIndex}] from minimap.";
-                }
-                else if (totalDelta.Length() <= MinimapClickMovementThresholdPixels
-                    && TryGetMinimapClickTarget(mousePos, cursorPos, cellSize, viewMinTx, viewMinTy, out float clickTileX, out float clickTileY))
-                {
-                    if (teleportMode == MinimapTeleportMode.Immediate)
-                        TeleportCameraToMinimapTile(clickTileX, clickTileY, closeFullscreenAfterTeleport: true);
-                    else
-                        RegisterMinimapTeleportClick(clickTileX, clickTileY);
-                }
-
-                _minimapDragging = false;
-            }
-        }
-        else if (_minimapDragging)
-        {
+            _minimapInteractionState.Process(MinimapPointerPhase.Pressed, mousePos);
             _minimapDragging = false;
+        }
+        else if (pointerCaptured && ImGui.IsMouseDown(ImGuiMouseButton.Left)
+            && _minimapInteractionState.PointerDown)
+        {
+            MinimapInteractionResult moved = _minimapInteractionState.Process(
+                MinimapPointerPhase.Moved,
+                mousePos);
+            if (moved.PanDeltaPixels != Vector2.Zero)
+            {
+                _minimapPanOffset -= new Vector2(
+                    moved.PanDeltaPixels.Y / cellSize,
+                    moved.PanDeltaPixels.X / cellSize);
+            }
+            _minimapDragging = moved.WasDragging;
+        }
+        else if (pointerCaptured && ImGui.IsMouseReleased(ImGuiMouseButton.Left)
+            && _minimapInteractionState.PointerDown)
+        {
+            bool hasTarget = TryGetMinimapClickTarget(
+                mousePos,
+                cursorPos,
+                cellSize,
+                viewMinTx,
+                viewMinTy,
+                out float clickTileX,
+                out float clickTileY);
+            int litLightIndex = -1;
+            bool hitLitMarker = hasTarget
+                && MinimapHelpers.TryGetLitMarkerAtPoint(
+                    _worldScene,
+                    mousePos,
+                    cursorPos,
+                    mapSize,
+                    viewMinTx,
+                    viewMinTy,
+                    cellSize,
+                    out litLightIndex);
+            MinimapInteractionResult released = _minimapInteractionState.Process(
+                MinimapPointerPhase.Released,
+                mousePos,
+                hasTarget: hasTarget && !hitLitMarker,
+                targetTileX: clickTileX,
+                targetTileY: clickTileY,
+                timestampMilliseconds: Environment.TickCount64);
+
+            _minimapDragging = false;
+            if (released.WasDragging)
+            {
+                return;
+            }
+
+            if (hitLitMarker)
+            {
+                _worldScene!.SelectedLitLightIndex = litLightIndex;
+                if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    FocusCameraOnLitLight(litLightIndex, closeFullscreenAfterFocus: true);
+                else
+                    _statusMessage = $"Selected LIT entry [{litLightIndex}] from minimap.";
+                return;
+            }
+
+            if (!released.ClickAccepted)
+                return;
+
+            if (teleportMode == MinimapTeleportMode.Immediate)
+            {
+                TeleportCameraToMinimapTile(
+                    released.TargetTileX,
+                    released.TargetTileY,
+                    closeFullscreenAfterTeleport: true);
+            }
+            else if (released.TeleportExecuted)
+            {
+                TeleportCameraToMinimapTile(
+                    released.TargetTileX,
+                    released.TargetTileY,
+                    closeFullscreenAfterTeleport: teleportMode == MinimapTeleportMode.Immediate || _fullscreenMinimap);
+            }
+            else
+            {
+                int tileX = (int)MathF.Floor(released.TargetTileX);
+                int tileY = (int)MathF.Floor(released.TargetTileY);
+                _pendingMinimapTeleportTile = (tileX, tileY);
+                _pendingMinimapTeleportClickCount = released.ClickCount;
+                _pendingMinimapTeleportLastClickUtc = DateTime.UtcNow;
+                int remainingClicks = MinimapTeleportConfirmClicks - released.ClickCount;
+                _statusMessage = $"Minimap teleport armed for tile ({tileX},{tileY}) "
+                    + $"{released.ClickCount}/{MinimapTeleportConfirmClicks}. "
+                    + $"Click {remainingClicks} more time{(remainingClicks == 1 ? string.Empty : "s")} to teleport.";
+            }
         }
     }
 
@@ -206,8 +259,7 @@ public partial class ViewerApp
     private void PrepareFullscreenMinimapState()
     {
         _minimapDragging = false;
-        _minimapDragStart = Vector2.Zero;
-        _minimapDragOrigin = Vector2.Zero;
+        _minimapInteractionState.Reset();
         ClampMinimapPanOffset();
     }
 
@@ -230,37 +282,6 @@ public partial class ViewerApp
             Math.Clamp(_minimapPanOffset.Y, minPanY, maxPanY));
     }
 
-    private void RegisterMinimapTeleportClick(float clickTileX, float clickTileY)
-    {
-        int tileX = (int)MathF.Floor(clickTileX);
-        int tileY = (int)MathF.Floor(clickTileY);
-        DateTime now = DateTime.UtcNow;
-
-        if (!_pendingMinimapTeleportTile.HasValue
-            || _pendingMinimapTeleportTile.Value.tileX != tileX
-            || _pendingMinimapTeleportTile.Value.tileY != tileY
-            || now - _pendingMinimapTeleportLastClickUtc > MinimapTeleportConfirmWindow)
-        {
-            _pendingMinimapTeleportTile = (tileX, tileY);
-            _pendingMinimapTeleportClickCount = 1;
-            _pendingMinimapTeleportLastClickUtc = now;
-            _statusMessage = $"Minimap teleport armed for tile ({tileX},{tileY}) 1/{MinimapTeleportConfirmClicks}. Click the same tile {MinimapTeleportConfirmClicks - 1} more times to teleport.";
-            return;
-        }
-
-        _pendingMinimapTeleportClickCount++;
-        _pendingMinimapTeleportLastClickUtc = now;
-
-        if (_pendingMinimapTeleportClickCount < MinimapTeleportConfirmClicks)
-        {
-            int remainingClicks = MinimapTeleportConfirmClicks - _pendingMinimapTeleportClickCount;
-            _statusMessage = $"Minimap teleport still armed for tile ({tileX},{tileY}) {_pendingMinimapTeleportClickCount}/{MinimapTeleportConfirmClicks}. Click {remainingClicks} more time{(remainingClicks == 1 ? string.Empty : "s")} to teleport.";
-            return;
-        }
-
-        TeleportCameraToMinimapTile(clickTileX, clickTileY, closeFullscreenAfterTeleport: _fullscreenMinimap);
-    }
-
     private void ToggleFullscreenMinimap()
     {
         _fullscreenMinimap = !_fullscreenMinimap;
@@ -275,6 +296,7 @@ public partial class ViewerApp
         _pendingMinimapTeleportTile = null;
         _pendingMinimapTeleportClickCount = 0;
         _pendingMinimapTeleportLastClickUtc = DateTime.MinValue;
+        _minimapInteractionState.Reset();
     }
 
     private void DrawStatusBar()

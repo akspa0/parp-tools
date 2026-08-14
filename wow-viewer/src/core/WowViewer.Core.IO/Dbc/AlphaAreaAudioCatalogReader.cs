@@ -21,7 +21,7 @@ public sealed class AlphaAreaAudioCatalogReader
         byte[]? areaMidiData = TryReadFromDisk(searchPaths, "AreaMIDIAmbiences")
             ?? TryReadFromArchive(archiveReader, "AreaMIDIAmbiences");
 
-        if (areaTableData is null || areaMidiData is null)
+        if (areaTableData is null)
         {
             return null;
         }
@@ -37,13 +37,54 @@ public sealed class AlphaAreaAudioCatalogReader
             definitionsDirectory,
             "AreaTable",
             buildVersion);
-        IDBCDStorage areaMidi = LoadTableWithDbcd(
-            new InMemoryDbcProvider(("AreaMIDIAmbiences", areaMidiData)),
-            definitionsDirectory,
-            "AreaMIDIAmbiences",
-            buildVersion);
+        Dictionary<int, AlphaAreaMidiAmbience> midiAmbiences = areaMidiData is null
+            ? []
+            : ParseMidiAmbiences(LoadTableWithDbcd(
+                new InMemoryDbcProvider(("AreaMIDIAmbiences", areaMidiData)),
+                definitionsDirectory,
+                "AreaMIDIAmbiences",
+                buildVersion));
 
-        return new AlphaAreaAudioCatalog(ParseAreas(areaTable), ParseMidiAmbiences(areaMidi));
+        return new AlphaAreaAudioCatalog(ParseAreas(areaTable), midiAmbiences);
+    }
+
+    /// <summary>
+    /// Load the area-audio tables directly from the active DBC provider. The
+    /// viewer uses this overload so area music follows the selected client
+    /// build rather than the reader's historical archive-probe default.
+    /// </summary>
+    public AlphaAreaAudioCatalog Load(
+        IDBCProvider dbcProvider,
+        string definitionsDirectory,
+        string buildVersion)
+    {
+        ArgumentNullException.ThrowIfNull(dbcProvider);
+        if (string.IsNullOrWhiteSpace(definitionsDirectory))
+            throw new ArgumentException("A WoWDBDefs definitions directory is required.", nameof(definitionsDirectory));
+        if (string.IsNullOrWhiteSpace(buildVersion))
+            throw new ArgumentException("An exact client build is required.", nameof(buildVersion));
+
+        IDBCDStorage areaTable = LoadTableWithDbcd(dbcProvider, definitionsDirectory, "AreaTable", buildVersion);
+        IDBCDStorage? areaMidi = TryLoadOptionalTable(dbcProvider, definitionsDirectory, "AreaMIDIAmbiences", buildVersion);
+        return new AlphaAreaAudioCatalog(
+            ParseAreas(areaTable),
+            areaMidi is null ? new Dictionary<int, AlphaAreaMidiAmbience>() : ParseMidiAmbiences(areaMidi));
+    }
+
+    private static IDBCDStorage? TryLoadOptionalTable(
+        IDBCProvider dbcProvider,
+        string definitionsDirectory,
+        string tableName,
+        string buildVersion)
+    {
+        try
+        {
+            return LoadTableWithDbcd(dbcProvider, definitionsDirectory, tableName, buildVersion);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static byte[]? TryReadFromArchive(IArchiveReader? archiveReader, string tableName)

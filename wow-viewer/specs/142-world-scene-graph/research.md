@@ -92,3 +92,13 @@ legacy fallback, after overlay and residency work prove which content is ready f
   and unsupported-driver paths require correctness-preserving fallbacks.
 - CPU batching only as the end state: rejected. It remains useful as a fallback and staging
   contract, but cannot be the long-term dense-scene path.
+
+## 2026-08-14 implementation checkpoint
+
+- The opaque WMO path now collects internal doodad transforms across visible WMO placements before
+  submitting them. Shared IModelRenderer instances use one GPU instance batch where supported or
+  one renderer-level CPU batch otherwise.
+- WMO shell batching and internal doodad batching remain separate passes. Transparent and
+  correctness-sensitive doodads stay on the existing placement-aware path.
+- This is not yet a performance claim: the next proof is a user-run dense-WMO/Stormwind capture
+  comparing unique doodad renderers, instance counts, draw submissions, and CPU stage time.

@@ -53,3 +53,18 @@
 - No claim is made here about WDL horizon quality, sky, stars, audio, shader parity, or a fixed FPS.
 - No client-specific DBC schema or hardcoded client root is introduced.
 - No whole-map load, whole-map scene graph rewrite, or reader duplication is authorized.
+
+## 2026-08-14 implementation checkpoint
+
+- The pre-existing dirty boundary was wow-viewer/imgui.ini; it remains intentionally unstaged.
+- The fullscreen minimap now has one draw owner and one interaction ID. Docked and fullscreen
+  surfaces feed the same pure MinimapInteractionState, with drag capture and exact third-click
+  teleport decisions covered by focused tests.
+- LIT minimap markers now draw a low-alpha fog-colored radius fill plus an outline. The color still
+  comes from the active LIT fog track; no client-specific color is hardcoded.
+- WMO internal opaque doodads can be collected across visible WMO placements and grouped by the
+  shared renderer instance before submission. Transparent, animated/effect-sensitive, portal, and
+  other unbatchable paths retain their named fallbacks.
+- Fog-bounded tile selection and structured doodad compatibility/count diagnostics remain open.
+  The WMO change is source/build proof only until a dense Stormwind capture compares draw and CPU
+  stages.

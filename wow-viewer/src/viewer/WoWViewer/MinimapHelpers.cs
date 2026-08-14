@@ -135,6 +135,9 @@ internal static class MinimapHelpers
                     MathF.Max(3f, mapSize * 0.4f));
                 float markerRadius = selected ? MathF.Max(5f, cellSize * 0.12f) : MathF.Max(3.5f, cellSize * 0.08f);
 
+                // The ring alone disappears against authored minimap art. A low-alpha fog-color
+                // fill makes the LIT radius readable without turning the diagnostic into a map tint.
+                drawList.AddCircleFilled(markerPos, coverageRadius, WithAlpha(color, selected ? 0x38u : 0x24u), 32);
                 drawList.AddCircle(markerPos, coverageRadius, color, 24, selected ? 2.5f : 1.25f);
                 drawList.AddCircleFilled(markerPos, markerRadius, selected ? 0xFFFFFFFF : color);
                 if (selected)
@@ -281,4 +284,7 @@ internal static class MinimapHelpers
         uint blue = (uint)Math.Clamp((int)MathF.Round(color.Z * 255f), 0, 255);
         return 0xFF000000u | blue << 16 | green << 8 | red;
     }
+
+    private static uint WithAlpha(uint color, uint alpha)
+        => (color & 0x00FFFFFFu) | ((alpha & 0xFFu) << 24);
 }

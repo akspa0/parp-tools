@@ -38,4 +38,10 @@ public interface IGpuInstancedWmoRenderer
         Vector3 lightDir,
         Vector3 lightColor,
         Vector3 ambientColor);
+
+    void CollectOpaqueDoodadsForPlacement(
+        Matrix4x4 modelMatrix,
+        Vector3 cameraPos,
+        float fogEnd,
+        Action<WmoOpaqueDoodadBatchItem> collect);
 }

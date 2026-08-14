@@ -7,7 +7,7 @@ real-client visual/FPS/capture proof remain separate gates owned by the user.
 
 ## Phase 1: Contract setup and baseline protection
 
-- [ ] T001 Record the current dirty-tree boundary in `wow-viewer/specs/147-minimap-fog-instancing/research.md`; preserve `wow-viewer/imgui.ini` and unrelated changes.
+- [x] T001 Record the current dirty-tree boundary in `wow-viewer/specs/147-minimap-fog-instancing/research.md`; preserve `wow-viewer/imgui.ini` and unrelated changes.
 - [ ] T002 Review the existing Spec 136, 137, and 142 task ownership and add cross-links in `wow-viewer/specs/147-minimap-fog-instancing/plan.md` without changing those specs' completed claims.
 - [ ] T003 Add the pure contract types described in `wow-viewer/specs/147-minimap-fog-instancing/data-model.md` only where an existing core/runtime owner does not already provide the same state; do not create duplicate format or lighting readers.
 - [ ] T004 Add a focused validation entrypoint or test naming convention for Spec 147 in `wow-viewer/specs/147-minimap-fog-instancing/quickstart.md`, so a zero-test filter cannot be mistaken for proof.
@@ -20,14 +20,14 @@ real-client visual/FPS/capture proof remain separate gates owned by the user.
 
 ### Tests first
 
-- [ ] T005 [P] [US1] Add failing pure gesture tests for drag classification, pan deltas, release reset, same-target click counts, timeout, changed target, invalid target, and exactly-once third-click execution in `wow-viewer/tests/WowViewer.Core.Tests/MinimapInteractionTests.cs`.
+- [x] T005 [P] [US1] Add pure gesture tests for drag classification, pan deltas, release reset, same-target click counts, timeout, changed target, invalid target, and exactly-once third-click execution in `wow-viewer/tests/WowViewer.Core.Tests/World/MinimapInteractionTests.cs`.
 
 ### Implementation
 
-- [ ] T006 [US1] Implement the pure minimap gesture state/decision contract in `wow-viewer/src/core/WowViewer.Core.Runtime/World/Minimap/MinimapInteractionState.cs` (or the existing runtime minimap owner if the audit finds one), following `contracts/minimap-interaction.md`.
-- [ ] T007 [US1] Make fullscreen minimap rendering single-owner by removing the duplicate call path and preserving one unique interaction ID in `wow-viewer/src/viewer/WoWViewer/ViewerApp.cs` and `wow-viewer/src/viewer/WoWViewer/ViewerApp_MinimapAndStatus.cs`.
-- [ ] T008 [US1] Adapt the shared ImGui minimap surface to feed the pure gesture contract, preserve drag capture while held, reset teleport after a drag, and call the existing map/world transform only for `TeleportExecuted` in `wow-viewer/src/viewer/WoWViewer/ViewerApp_MinimapAndStatus.cs`.
-- [ ] T009 [US1] Run the focused minimap tests and a Debug build; stop and repair any fullscreen/docked interaction divergence before starting fog work.
+- [x] T006 [US1] Implement the pure minimap gesture state/decision contract in `wow-viewer/src/core/WowViewer.Core.Runtime/World/Minimap/MinimapInteractionState.cs` (or the existing runtime minimap owner if the audit finds one), following `contracts/minimap-interaction.md`.
+- [x] T007 [US1] Make fullscreen minimap rendering single-owner by removing the duplicate call path and preserving one unique interaction ID in `wow-viewer/src/viewer/WoWViewer/ViewerApp.cs` and `wow-viewer/src/viewer/WoWViewer/ViewerApp_MinimapAndStatus.cs`.
+- [x] T008 [US1] Adapt the shared ImGui minimap surface to feed the pure gesture contract, preserve drag capture while held, reset teleport after a drag, and call the existing map/world transform only for `TeleportExecuted` in `wow-viewer/src/viewer/WoWViewer/ViewerApp_MinimapAndStatus.cs`.
+- [x] T009 [US1] Run the focused minimap tests and a Debug build; stop and repair any fullscreen/docked interaction divergence before starting fog work. Source proof passed; real-client input proof remains user-owned.
 
 ## Phase 3: User Story 2 — Fog-bounded coverage (P1)
 

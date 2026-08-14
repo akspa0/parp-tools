@@ -26,9 +26,13 @@ public sealed class WorldAudioRuntime : IDisposable
     private AudioContext? _context;
     private AL? _al;
     private AlphaSoundEntriesCatalog? _soundEntries;
+    private AlphaAreaAudioCatalog? _areaAudioCatalog;
     private uint? _previewSource;
     private string? _previewPath;
     private float _previewBaseGain = 1f;
+    private uint? _areaMusicSource;
+    private int _areaMusicSoundEntryId;
+    private bool _areaMusicNight;
     private Vector3 _listenerPosition;
     private bool _disposed;
     private bool _loggedNoBackend;
@@ -41,6 +45,8 @@ public sealed class WorldAudioRuntime : IDisposable
     public string Status { get; private set; } = "Audio runtime not configured.";
 
     public string LastDiagnostic { get; private set; } = "No audio diagnostic yet.";
+
+    public string AreaMusicStatus { get; private set; } = "Area music metadata not loaded.";
 
     public bool BackendReady => _al is not null;
 
@@ -71,12 +77,26 @@ public sealed class WorldAudioRuntime : IDisposable
         ThrowIfDisposed();
         StopAll();
         _soundEntries = null;
+        _areaAudioCatalog = null;
+        AreaMusicStatus = $"Area music metadata not loaded for {buildVersion}.";
         _loggedNoBackend = false;
 
         try
         {
             _soundEntries = new AlphaSoundEntriesCatalogReader()
                 .Load(dbcProvider, definitionsDirectory, buildVersion);
+
+            try
+            {
+                _areaAudioCatalog = new AlphaAreaAudioCatalogReader()
+                    .Load(dbcProvider, definitionsDirectory, buildVersion);
+                AreaMusicStatus = $"AreaTable/AreaMIDIAmbiences loaded: {_areaAudioCatalog.Areas.Count} areas.";
+            }
+            catch (Exception ex)
+            {
+                AreaMusicStatus = $"Area music metadata unavailable for {buildVersion}: {ex.Message}";
+                ViewerLog.Info(ViewerLog.Category.General, $"[Audio] {AreaMusicStatus}");
+            }
         }
         catch (Exception ex)
         {
@@ -227,7 +247,7 @@ public sealed class WorldAudioRuntime : IDisposable
         _heardInRange.RemoveWhere(key => key.TileX == tileX && key.TileY == tileY);
     }
 
-    public void Update(Vector3 listenerPosition, Vector3 listenerForward)
+    public void Update(Vector3 listenerPosition, Vector3 listenerForward, int areaId = 0, float gameTime = 0.5f)
     {
         if (_disposed || _al is null || _soundEntries is null)
             return;
@@ -256,6 +276,8 @@ public sealed class WorldAudioRuntime : IDisposable
             DisableBackend($"listener update failed: {ex.Message}");
             return;
         }
+
+        UpdateAreaMusic(areaId, gameTime);
 
         HashSet<EmitterKey> inRange = [];
         foreach ((int tileX, int tileY, IReadOnlyList<TerrainSoundEmitter> emitters) in _tileEmitters.Select(static pair => (pair.Key.TileX, pair.Key.TileY, pair.Value)))
@@ -311,6 +333,19 @@ public sealed class WorldAudioRuntime : IDisposable
             }
         }
 
+        if (_areaMusicSource is uint areaMusicSource)
+        {
+            try
+            {
+                _al.SetSourceProperty(areaMusicSource, SourceVector3.Position, listenerPosition);
+            }
+            catch (Exception ex)
+            {
+                DisableBackend($"area music update failed: {ex.Message}");
+                return;
+            }
+        }
+
         foreach (EmitterKey key in _active.Keys.Where(key => !inRange.Contains(key)).ToArray())
             StopEmitter(key);
 
@@ -321,6 +356,7 @@ public sealed class WorldAudioRuntime : IDisposable
     {
         foreach (EmitterKey key in _active.Keys.ToArray())
             StopEmitter(key);
+        StopAreaMusic();
         StopPreview();
         _heardInRange.Clear();
     }
@@ -392,6 +428,106 @@ public sealed class WorldAudioRuntime : IDisposable
         }
     }
 
+    private void UpdateAreaMusic(int areaId, float gameTime)
+    {
+        if (_al is null || _soundEntries is null || _areaAudioCatalog is null)
+            return;
+
+        AlphaAreaAudioBinding? binding = _areaAudioCatalog.TryResolveWithParents(areaId);
+        if (binding is null)
+        {
+            StopAreaMusic();
+            AreaMusicStatus = areaId > 0
+                ? $"Area {areaId} has no DBC music assignment."
+                : "No terrain/WMO area is active for music resolution.";
+            return;
+        }
+
+        bool night = gameTime < 0.25f || gameTime >= 0.75f;
+        int soundEntryId = binding.Area.ZoneMusicId;
+        if (soundEntryId <= 0)
+        {
+            StopAreaMusic();
+            string midi = night
+                ? binding.MidiAmbience?.NightSequence ?? binding.MidiAmbience?.DaySequence ?? string.Empty
+                : binding.MidiAmbience?.DaySequence ?? string.Empty;
+            string dls = binding.MidiAmbience?.DlsFile ?? string.Empty;
+            AreaMusicStatus = string.IsNullOrWhiteSpace(midi)
+                ? $"Area {binding.Area.Id} has no ZoneMusic or MIDI sequence."
+                : $"Area {binding.Area.Id} selects MIDI '{midi}'" +
+                  (string.IsNullOrWhiteSpace(dls) ? ". MIDI+DLS playback is unavailable." : $" with DLS '{dls}'. MIDI+DLS playback is unavailable.");
+            return;
+        }
+
+        if (_areaMusicSoundEntryId == soundEntryId && _areaMusicNight == night && _areaMusicSource is not null)
+        {
+            AreaMusicStatus = $"Playing DBC ZoneMusic {soundEntryId} for area {binding.Area.Id}.";
+            return;
+        }
+
+        if (!_soundEntries.TryResolve((uint)soundEntryId, out AlphaSoundEntry? soundEntry))
+        {
+            StopAreaMusic();
+            AreaMusicStatus = $"Area {binding.Area.Id} selects ZoneMusic {soundEntryId}, missing from SoundEntries.";
+            return;
+        }
+
+        string? virtualPath = soundEntry.EnumerateVirtualPaths()
+            .FirstOrDefault(path => _dataSource.FileExists(path));
+        if (virtualPath is null)
+        {
+            StopAreaMusic();
+            AreaMusicStatus = $"Area {binding.Area.Id} selects ZoneMusic {soundEntryId}, but its DBC file is not present.";
+            LogOnce($"area-music-missing:{soundEntryId}", $"[Audio] {AreaMusicStatus}");
+            return;
+        }
+
+        try
+        {
+            StopAreaMusic();
+            uint buffer = GetOrCreateBuffer(virtualPath);
+            if (buffer == 0)
+            {
+                AreaMusicStatus = $"ZoneMusic {soundEntryId} could not be decoded: {virtualPath}.";
+                return;
+            }
+
+            uint source = _al.GenSource();
+            _al.SetSourceProperty(source, SourceInteger.Buffer, buffer);
+            _al.SetSourceProperty(source, SourceVector3.Position, _listenerPosition);
+            _al.SetSourceProperty(source, SourceFloat.Gain, soundEntry.Volume * MasterGain);
+            _al.SetSourceProperty(source, SourceBoolean.Looping, true);
+            _al.SourcePlay(source);
+            _areaMusicSource = source;
+            _areaMusicSoundEntryId = soundEntryId;
+            _areaMusicNight = night;
+            AreaMusicStatus = $"Playing DBC ZoneMusic {soundEntryId} for area {binding.Area.Id}: {virtualPath}.";
+        }
+        catch (Exception ex)
+        {
+            StopAreaMusic();
+            AreaMusicStatus = $"ZoneMusic {soundEntryId} failed to start: {ex.Message}";
+            LogOnce($"area-music-start:{soundEntryId}", $"[Audio] {AreaMusicStatus}");
+        }
+    }
+
+    private void StopAreaMusic()
+    {
+        if (_areaMusicSource is uint source && _al is not null)
+        {
+            try
+            {
+                _al.SourceStop(source);
+                _al.DeleteSource(source);
+            }
+            catch { }
+        }
+
+        _areaMusicSource = null;
+        _areaMusicSoundEntryId = 0;
+        _areaMusicNight = false;
+    }
+
     private uint GetOrCreateBuffer(string virtualPath)
     {
         if (_al is null)
@@ -443,8 +579,30 @@ public sealed class WorldAudioRuntime : IDisposable
         Status = $"Audio backend disabled: {reason}";
         LastDiagnostic = Status;
         AL? failedAl = _al;
-        _al = null;
         _active.Clear();
+        if (_areaMusicSource is uint areaMusicSource && failedAl is not null)
+        {
+            try
+            {
+                failedAl.SourceStop(areaMusicSource);
+                failedAl.DeleteSource(areaMusicSource);
+            }
+            catch { }
+        }
+
+        _areaMusicSource = null;
+        _areaMusicSoundEntryId = 0;
+        if (_previewSource is uint previewSource && failedAl is not null)
+        {
+            try
+            {
+                failedAl.SourceStop(previewSource);
+                failedAl.DeleteSource(previewSource);
+            }
+            catch { }
+        }
+
+        _al = null;
         _previewSource = null;
         _previewPath = null;
         _previewBaseGain = 1f;

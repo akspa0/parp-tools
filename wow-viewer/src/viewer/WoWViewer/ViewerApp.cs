@@ -227,8 +227,6 @@ public partial class ViewerApp : IDisposable
     private bool _fullscreenMinimap = false; // M key toggles fullscreen minimap
     private Vector2 _minimapPanOffset = Vector2.Zero; // Pan offset for click-and-drag
     private bool _minimapDragging = false;
-    private Vector2 _minimapDragStart = Vector2.Zero;
-    private Vector2 _minimapDragOrigin = Vector2.Zero;
     private (int tileX, int tileY)? _pendingMinimapTeleportTile;
     private int _pendingMinimapTeleportClickCount;
     private DateTime _pendingMinimapTeleportLastClickUtc = DateTime.MinValue;
@@ -243,8 +241,6 @@ public partial class ViewerApp : IDisposable
     private static readonly string ViewerSettingsPath = Path.Combine(SettingsDir, "viewer_settings.json");
     private const int CurrentShellPanelLayoutVersion = 4;
     private const int MinimapTeleportConfirmClicks = 3;
-    private const float MinimapClickMovementThresholdPixels = 3f;
-    private static readonly TimeSpan MinimapTeleportConfirmWindow = TimeSpan.FromSeconds(3);
 
     // File browser state
     private List<string> _filteredFiles = new();
@@ -1716,8 +1712,6 @@ void main() {
             {
                 if (_showWdlPreview)
                     DrawWdlPreviewDialog();
-                if (_fullscreenMinimap)
-                    DrawFullscreenMinimap();
                 // All other tools are routed into tab sub-tabs. The
                 // _show*Window flags still exist for users who want the
                 // legacy window, but tab system renders its own sub-tab body.

@@ -26,6 +26,7 @@ public partial class ViewerApp
         }
 
         ImGui.TextWrapped(scene.AudioStatus);
+        ImGui.TextWrapped($"Area music: {scene.AreaMusicStatus}");
         ImGui.Text($"Resident emitters: {scene.ResidentAudioEmitterCount}  |  Active: {scene.ActiveAudioEmitterCount}");
         ImGui.Text($"SoundEntries rows: {scene.ResolvedAudioSoundEntryCount}");
 
@@ -97,6 +98,6 @@ public partial class ViewerApp
             scene.SetAudioEmitterGain(_audioEmitterGain);
 
         ImGui.Separator();
-        ImGui.TextDisabled("Automatic resident MCSE playback is bounded to loaded tiles. MIDI/DLS ambience and Play + Video audio are not wired yet.");
+        ImGui.TextDisabled("Automatic MCSE playback is bounded to loaded tiles. DBC ZoneMusic is resolved from the active area; MIDI/DLS synthesis and Play + Video audio remain separate work.");
     }
 }
