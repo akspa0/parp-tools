@@ -50,10 +50,11 @@ public sealed class DirectionalTileSelector
 
     /// <summary>
     /// Returns the active tile and up to <paramref name="maxTileCount"/>
-    /// existing tiles. The active tile's immediate 3x3 neighborhood is filled
-    /// first, then any remaining budget expands through bounded forward rings.
-    /// The near-field ring intentionally has priority over the FOV so adjacent
-    /// terrain and objects cannot pop out beside the camera.
+    /// existing tiles. The largest complete near-field square that fits in the
+    /// requested budget is filled first, then any remaining budget expands
+    /// through bounded forward rings. The near-field ring intentionally has
+    /// priority over the FOV so adjacent terrain and objects cannot pop out
+    /// beside the camera.
     /// </summary>
     public List<DirectionalTileCoord> GetVisibleTiles(
         Vector3 camPos,
@@ -86,16 +87,25 @@ public sealed class DirectionalTileSelector
 
         var selectedSet = new HashSet<DirectionalTileCoord>(selected);
 
-        // When the budget can cover a complete near-field ring, protect that
-        // ring before spending the remaining detail budget on distant forward
-        // tiles. The legacy four-tile overload intentionally keeps its old
-        // directional behavior; the safety-ring guarantee begins at 9 tiles.
-        if (maxTileCount >= 9)
+        // Protect the largest complete camera-centered square that fits inside
+        // the requested budget before spending the remaining slots on distant
+        // forward tiles. This gives 9/12 tiles a 3x3 near field and 25 tiles a
+        // full 5x5 near field, instead of letting the FOV consume the budget
+        // while close side/rear ADTs disappear.
+        int nearFieldRadius = 0;
+        while ((nearFieldRadius * 2 + 3) * (nearFieldRadius * 2 + 3) <= maxTileCount
+            && nearFieldRadius < candidateRadius)
         {
-            var nearCandidates = new List<(DirectionalTileCoord Coord, float Dot, int Manhattan)>(8);
-            for (int dy = -1; dy <= 1; dy++)
+            nearFieldRadius++;
+        }
+
+        if (nearFieldRadius > 0)
+        {
+            var nearCandidates = new List<(DirectionalTileCoord Coord, float Dot, int Manhattan)>(
+                (nearFieldRadius * 2 + 1) * (nearFieldRadius * 2 + 1) - 1);
+            for (int dy = -nearFieldRadius; dy <= nearFieldRadius; dy++)
             {
-                for (int dx = -1; dx <= 1; dx++)
+                for (int dx = -nearFieldRadius; dx <= nearFieldRadius; dx++)
                 {
                     if (dx == 0 && dy == 0)
                         continue;

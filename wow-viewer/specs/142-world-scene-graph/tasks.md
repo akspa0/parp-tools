@@ -167,7 +167,10 @@ identity; no FPS or GPU claim is made.
 
 - [x] T066 [US2] Add the pure `DirectionalTileSelector.GetVisibleTiles` contract in
   `src/core/WowViewer.Core.Runtime/World/DirectionalTileSelector.cs`, returning a caller-sized
-  bounded set from forward-cone rings without radial or map-wide expansion.
+  bounded set with the largest complete camera-centered near-field square first, then bounded
+  forward-cone rings without radial or map-wide expansion.
+- [x] T066a [US2] Add regression coverage proving a 25-tile budget protects the complete nearest
+  5×5 terrain footprint before any forward-cone expansion.
 - [x] T067 [US2] Route normal `TerrainManager.UpdateAOI` admission through the bounded selector;
   make the ADT detail slider support 1–25 tiles and keep explicit capture preloads/full-load as
   named exceptions.

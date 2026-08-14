@@ -104,9 +104,25 @@ public sealed class DirectionalTileSelectorTests
             maxTileCount: 25);
 
         Assert.Equal(25, visible.Count);
-        Assert.Contains(new DirectionalTileCoord(28, 32), visible);
-        Assert.Contains(new DirectionalTileCoord(33, 32), visible);
-        Assert.All(visible, tile => Assert.InRange(tile.TileX, 28, 33));
+        Assert.Contains(new DirectionalTileCoord(30, 32), visible);
+        Assert.Contains(new DirectionalTileCoord(34, 32), visible);
+        Assert.All(visible, tile => Assert.InRange(tile.TileX, 30, 34));
+    }
+
+    [Fact]
+    public void TwentyFiveTileBudgetProtectsTheEntireNearestFiveByFiveRing()
+    {
+        List<DirectionalTileCoord> visible = Selector.GetVisibleTiles(
+            CameraAt(32, 32),
+            yaw: 0f,
+            fovDegrees: 45f,
+            maxTileCount: 25);
+
+        for (int dy = -2; dy <= 2; dy++)
+        {
+            for (int dx = -2; dx <= 2; dx++)
+                Assert.Contains(new DirectionalTileCoord(32 + dx, 32 + dy), visible);
+        }
     }
 
     [Fact]

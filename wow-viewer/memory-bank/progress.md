@@ -5,6 +5,16 @@ Last updated: 2026-08-13
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-13 — Spec 142 near-field detail selection correction
+
+- The focused regression reproduced the reported failure: a 25-tile budget kept only the immediate
+  3×3 ring, then spent the remaining slots on forward tiles, allowing nearby side/rear ADTs to be
+  removed while distant terrain remained visible.
+- `DirectionalTileSelector` now protects the largest complete camera-centered square supported by
+  the budget: 3×3 for 9–24 tiles and 5×5 at 25, before bounded forward-cone expansion.
+- Focused selector tests pass (9/9). Viewer build and real-client movement/camera-path proof remain
+  open and user-owned.
+
 ## 2026-08-13 — Spec 146 SoundEntries preview and diagnostics slice
 
 - Added a reachable Tools > Utilities > Audio page with resident SoundEntries ID discovery,

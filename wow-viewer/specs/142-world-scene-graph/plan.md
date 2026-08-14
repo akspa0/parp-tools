@@ -445,7 +445,8 @@ separately.
 FOV radiation. This remains bounded and does not replace the existing WMO/M2 batching fallbacks.
 
 1. Select a caller-sized set from 1 through 25 existing tiles with a pure, deterministic selector.
-   The active tile and immediate 3×3 neighborhood have priority as a near-field safety ring; only
+   The active tile and the largest complete camera-centered square supported by the budget have
+   priority as a near-field safety ring: 3×3 for budgets from 9 through 24, and 5×5 at 25. Only
    remaining budget expands through bounded 45-degree forward-cone rings. It never searches a
    radial fog footprint or the whole map.
 2. Route normal ADT admission through that selector while keeping camera-centered retention

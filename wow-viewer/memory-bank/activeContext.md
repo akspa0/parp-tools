@@ -7,19 +7,19 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 146 Phase 3/5: bind the shared audio transport to camera-path
-  preview and Play + Video after the user validates the new SoundEntries preview against a real client.
-- **Proof owner:** focused C# tests and an isolated viewer build prove source contracts; the user owns
-  real-client audible playback, audio-device behavior, camera synchronization, and capture proof.
-- **Completed slice:** resident MCSE sources are admitted per loaded tile; OpenAL preview/stop,
-  resident SoundEntries discovery, gain controls, and last-diagnostic reporting are available under
-  Tools > Utilities > Audio.
-- **Main unproven gap:** no real-client audible proof yet, and Alpha area MIDI/DLS ambience, camera
-  transport, and Play + Video audio remain unimplemented.
-- **Explicitly out of scope for the next slice:** DLS synthesis guesses, whole-map audio loading,
-  audio claims from build success alone, and the future single-player server/session boundary.
-- **Documentation correction:** the Alpha audio catalog remains metadata and loose/archive
-  asset-resolution proof; the new preview proves only resolved SoundEntries decoded-audio paths.
+- **Next implementation target:** Spec 142 Phase 8M/8O: user-run camera movement proof that the
+  nearest terrain footprint remains selected, resident, and rendered while the detail and retained
+  radius controls change.
+- **Proof owner:** focused selector tests and an isolated viewer build prove source contracts; the
+  user owns real-client movement, camera-path, visual, and FPS proof.
+- **Completed slice:** `DirectionalTileSelector` now protects the largest complete camera-centered
+  square supported by the detail budget before forward-cone expansion: 3×3 for 9–24 tiles and 5×5
+  at 25. The regression suite covers the 25-tile near-field case.
+- **Main unproven gap:** the user must confirm that nearby ADTs no longer unload or disappear in the
+  viewer. If holes remain after this selector correction, inspect detailed terrain bounds/fog culling
+  and renderer-space tile mapping separately from admission.
+- **Explicitly out of scope for the next slice:** FOV radiation redesign, whole-map loading, new
+  scene-graph traversal, audio playback work, and FPS claims from source tests alone.
 
 ## Active spec lanes
 
@@ -29,7 +29,7 @@ the owning spec for requirements and proof; read a workstream only when the spec
 | 144 Camera capture paths | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions. |
 | 145 WoW UI overhaul | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks. |
 | 143 World context and lighting | First area slice landed | Resolve evidence/setup tasks before WMO area or lighting claims. |
-| 142 World scene graph | In progress | Validate Phase 8P near-field WMO readiness ordering, then continue retained-radius movement proof. |
+| 142 World scene graph | In progress | Validate the Phase 8M near-field selector correction, then continue retained-radius and WMO movement proof. |
 | 139–141 Terrain/minimap reconstruction | Active/parked ML lanes | Reopen only for the named spec and user-run training/validation. |
 | 138 Cross-era renderer research | Evidence/planning | Do not generalize one client build to every era. |
 | 128–131 PM4 | Established research lane | Use the PM4 spec pack and `workstream-pm4-decode.md`. |
