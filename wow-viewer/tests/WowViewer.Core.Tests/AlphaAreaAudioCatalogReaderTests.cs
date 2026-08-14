@@ -47,6 +47,8 @@ public sealed class AlphaAreaAudioCatalogReaderTests
         var binding = catalog.TryResolve(1);
         Assert.NotNull(binding);
         Assert.Equal("Elwynn Forest", binding.Area.AreaName);
+        Assert.Equal(1, binding.Area.AreaNumber);
+        Assert.Equal(0, binding.Area.ParentAreaNumber);
         Assert.Equal(7, binding.Area.MidiAmbienceId);
         Assert.Equal(8, binding.Area.MidiAmbienceUnderwaterId);
         Assert.Equal("Sound\\Ambience\\MIDI\\ElwynnDay.mid", binding.MidiAmbience?.DaySequence);

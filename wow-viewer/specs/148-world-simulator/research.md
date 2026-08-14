@@ -24,6 +24,11 @@
   profile label; it does not change the existing transform.
 - Standard MCSE entries expose IDs and position; range fields are not populated by the common reader.
   Alpha 0.5.3 entries have additional min/max/cutoff/start/end/mode fields.
+- `DBCTool.V2` establishes the Alpha area contract: `MCNK.Unknown3` is the packed
+  `AreaNumber` `(zone << 16) | subzone`, and an Alpha child is parented through `ParentAreaNum`
+  after the row is matched by `ContinentID`. The viewer's ZoneMusic catalog now follows that
+  numeric contract before falling back to modern direct `ID`/`ParentAreaID` resolution; it does
+  not treat the packed value as an unrelated single AreaTable ID.
 - `WorldScene` obtains the audio area from the terrain chunk under the camera. WMO area context is
   not yet the same audio lookup path.
 - The first diagnostic phase must make these gaps visible before changing a transform or assuming

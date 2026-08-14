@@ -269,7 +269,12 @@ public sealed class WorldAudioRuntime : IDisposable
         RefreshEmitterDiagnostics();
     }
 
-    public void Update(Vector3 listenerPosition, Vector3 listenerForward, int areaId = 0, float gameTime = 0.5f)
+    public void Update(
+        Vector3 listenerPosition,
+        Vector3 listenerForward,
+        int areaId = 0,
+        float gameTime = 0.5f,
+        int continentId = -1)
     {
         if (_disposed)
             return;
@@ -304,7 +309,7 @@ public sealed class WorldAudioRuntime : IDisposable
             return;
         }
 
-        UpdateAreaMusic(areaId, gameTime);
+        UpdateAreaMusic(areaId, gameTime, continentId);
 
         HashSet<EmitterKey> inRange = [];
         KeyValuePair<(int TileX, int TileY), IReadOnlyList<TerrainSoundEmitter>>[] tileSnapshot;
@@ -791,21 +796,27 @@ public sealed class WorldAudioRuntime : IDisposable
         }
     }
 
-    private void UpdateAreaMusic(int areaId, float gameTime)
+    private void UpdateAreaMusic(int areaId, float gameTime, int continentId)
     {
-        if (_al is null || _soundEntries is null || _areaAudioCatalog is null)
+        if (_soundEntries is null || _areaAudioCatalog is null)
+        {
+            AreaMusicStatus = "Area music metadata is unavailable for the active build.";
             return;
+        }
 
-        AlphaAreaAudioBinding? binding = _areaAudioCatalog.TryResolveWithParents(areaId);
+        AlphaAreaAudioBinding? binding = _areaAudioCatalog.TryResolveWithParents(
+            areaId,
+            continentId >= 0 ? continentId : null);
         if (binding is null)
         {
             StopAreaMusic();
             AreaMusicStatus = areaId > 0
-                ? $"Area {areaId} has no DBC music assignment."
+                ? $"AreaNumber/ID {areaId} has no DBC music assignment (continent={continentId})."
                 : "No terrain/WMO area is active for music resolution.";
             return;
         }
 
+        string areaLabel = $"Area {binding.Area.Id} (AreaNumber={binding.Area.AreaNumber})";
         bool night = gameTime < 0.25f || gameTime >= 0.75f;
         int soundEntryId = binding.Area.ZoneMusicId;
         if (soundEntryId <= 0)
@@ -816,22 +827,36 @@ public sealed class WorldAudioRuntime : IDisposable
                 : binding.MidiAmbience?.DaySequence ?? string.Empty;
             string dls = binding.MidiAmbience?.DlsFile ?? string.Empty;
             AreaMusicStatus = string.IsNullOrWhiteSpace(midi)
-                ? $"Area {binding.Area.Id} has no ZoneMusic or MIDI sequence."
-                : $"Area {binding.Area.Id} selects MIDI '{midi}'" +
+                ? $"{areaLabel} has no ZoneMusic or MIDI sequence."
+                : $"{areaLabel} selects MIDI '{midi}'" +
                   (string.IsNullOrWhiteSpace(dls) ? ". MIDI+DLS playback is unavailable." : $" with DLS '{dls}'. MIDI+DLS playback is unavailable.");
+            return;
+        }
+
+        if (_al is null)
+        {
+            bool soundEntryResolved = _soundEntries.TryResolve((uint)soundEntryId, out AlphaSoundEntry? unavailableBackendEntry);
+            string? backendPath = soundEntryResolved
+                ? unavailableBackendEntry!.EnumerateVirtualPaths().FirstOrDefault(path => _dataSource.FileExists(path))
+                : null;
+            AreaMusicStatus = soundEntryResolved
+                ? backendPath is null
+                    ? $"{areaLabel} selects ZoneMusic {soundEntryId}, but no DBC-declared file is present; {Status}"
+                    : $"{areaLabel} selects ZoneMusic {soundEntryId}: {backendPath}; {Status}"
+                : $"{areaLabel} selects ZoneMusic {soundEntryId}, missing from SoundEntries; {Status}";
             return;
         }
 
         if (_areaMusicSoundEntryId == soundEntryId && _areaMusicNight == night && _areaMusicSource is not null)
         {
-            AreaMusicStatus = $"Playing DBC ZoneMusic {soundEntryId} for area {binding.Area.Id}.";
+            AreaMusicStatus = $"Playing DBC ZoneMusic {soundEntryId} for {areaLabel}.";
             return;
         }
 
         if (!_soundEntries.TryResolve((uint)soundEntryId, out AlphaSoundEntry? soundEntry))
         {
             StopAreaMusic();
-            AreaMusicStatus = $"Area {binding.Area.Id} selects ZoneMusic {soundEntryId}, missing from SoundEntries.";
+            AreaMusicStatus = $"{areaLabel} selects ZoneMusic {soundEntryId}, missing from SoundEntries.";
             return;
         }
 
@@ -840,7 +865,7 @@ public sealed class WorldAudioRuntime : IDisposable
         if (virtualPath is null)
         {
             StopAreaMusic();
-            AreaMusicStatus = $"Area {binding.Area.Id} selects ZoneMusic {soundEntryId}, but its DBC file is not present.";
+            AreaMusicStatus = $"{areaLabel} selects ZoneMusic {soundEntryId}, but its DBC file is not present.";
             LogOnce($"area-music-missing:{soundEntryId}", $"[Audio] {AreaMusicStatus}");
             return;
         }
@@ -864,7 +889,7 @@ public sealed class WorldAudioRuntime : IDisposable
             _areaMusicSource = source;
             _areaMusicSoundEntryId = soundEntryId;
             _areaMusicNight = night;
-            AreaMusicStatus = $"Playing DBC ZoneMusic {soundEntryId} for area {binding.Area.Id}: {virtualPath}.";
+            AreaMusicStatus = $"Playing DBC ZoneMusic {soundEntryId} for {areaLabel}: {virtualPath}.";
         }
         catch (Exception ex)
         {

@@ -10347,7 +10347,7 @@ public class WorldScene : ISceneRenderer
                     _lastRenderedCameraPosition = cameraPos;
                     _hasLastRenderedCameraPosition = true;
                     int audioAreaId = _terrainManager.Renderer.GetChunkInfoAt(cameraPos.X, cameraPos.Y)?.AreaId ?? 0;
-                    _audioRuntime?.Update(cameraPos, cameraForward, audioAreaId, lighting.GameTime);
+                    _audioRuntime?.Update(cameraPos, cameraForward, audioAreaId, lighting.GameTime, _mapId);
 
                     EnsurePm4OverlayMatchesCameraWindow(cameraPos);
 

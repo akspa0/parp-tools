@@ -5,6 +5,16 @@ Last updated: 2026-08-14
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-14 — Alpha packed AreaNumber ZoneMusic resolution
+
+- Corrected the active area-audio lookup to match the repository's DBCTool contract: Alpha
+  `MCNK.Unknown3` is packed `(zone << 16) | subzone`, rows are matched by continent and
+  `AreaNumber`, and parent audio inheritance follows `ParentAreaNum` before modern ID fallback.
+- Preserved `AreaNumber`/`ParentAreaNum` in the shared DBC audio catalog and exposed both values in
+  ZoneMusic status, including when the OpenAL backend is unavailable.
+- Added packed-parent, continent-ambiguity, and reader-preservation regression coverage. Focused
+  tests and the cross-platform Debug build pass; real-client ZoneMusic playback remains user-owned.
+
 ## 2026-08-14 — Spec 148 world-simulator plan and audio diagnostic slice
 
 - Created the provenance-first `148-world-simulator` Spec Kit pack: audio truth, explicit camera

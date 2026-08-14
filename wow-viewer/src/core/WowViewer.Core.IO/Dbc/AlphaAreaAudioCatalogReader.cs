@@ -140,6 +140,9 @@ public sealed class AlphaAreaAudioCatalogReader
         foreach (DBCDRow row in storage.Values)
         {
             int id = GetIntField(row, "ID") ?? 0;
+            int areaNumber = GetIntField(row, "AreaNumber") ?? 0;
+            if (id <= 0 && areaNumber > 0)
+                id = areaNumber;
             if (id <= 0)
             {
                 continue;
@@ -154,7 +157,9 @@ public sealed class AlphaAreaAudioCatalogReader
                 GetIntField(row, "MIDIAmbienceUnderwater") ?? 0,
                 GetIntField(row, "ZoneMusic") ?? 0,
                 GetIntField(row, "IntroSound") ?? 0,
-                GetIntField(row, "IntroPriority") ?? 0);
+                GetIntField(row, "IntroPriority") ?? 0,
+                areaNumber,
+                GetIntField(row, "ParentAreaNum") ?? 0);
 
             areas[id] = entry;
         }

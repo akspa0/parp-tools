@@ -35,4 +35,67 @@ public sealed class AlphaAreaAudioCatalogTests
 
         Assert.Null(catalog.TryResolveWithParents(10));
     }
+
+    [Fact]
+    public void TryResolveWithParents_ResolvesAlphaPackedAreaNumberAndParentAreaNumber()
+    {
+        const int continentId = 0;
+        const int zoneAreaNumber = 0x000A0000;
+        const int subzoneAreaNumber = 0x000A0001;
+
+        AlphaAreaAudioCatalog catalog = new(
+            new Dictionary<int, AlphaAreaRecord>
+            {
+                [100] = new(
+                    100,
+                    continentId,
+                    0,
+                    "Zone",
+                    0,
+                    0,
+                    321,
+                    0,
+                    0,
+                    zoneAreaNumber,
+                    zoneAreaNumber),
+                [101] = new(
+                    101,
+                    continentId,
+                    0,
+                    "Subzone",
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    subzoneAreaNumber,
+                    zoneAreaNumber),
+            },
+            new Dictionary<int, AlphaAreaMidiAmbience>());
+
+        AlphaAreaAudioBinding? binding = catalog.TryResolveWithParents(subzoneAreaNumber, continentId);
+
+        Assert.NotNull(binding);
+        Assert.Equal(100, binding!.Area.Id);
+        Assert.Equal(zoneAreaNumber, binding.Area.AreaNumber);
+        Assert.Equal(321, binding.Area.ZoneMusicId);
+    }
+
+    [Fact]
+    public void TryResolve_RequiresContinentWhenAlphaAreaNumberIsAmbiguous()
+    {
+        const int areaNumber = 0x000A0001;
+
+        AlphaAreaAudioCatalog catalog = new(
+            new Dictionary<int, AlphaAreaRecord>
+            {
+                [100] = new(100, 0, 0, "Eastern", 0, 0, 321, 0, 0, areaNumber, 0),
+                [200] = new(200, 1, 0, "Kalimdor", 0, 0, 654, 0, 0, areaNumber, 0),
+            },
+            new Dictionary<int, AlphaAreaMidiAmbience>());
+
+        Assert.Null(catalog.TryResolve(areaNumber));
+        Assert.Equal(321, catalog.TryResolve(areaNumber, 0)!.Area.ZoneMusicId);
+        Assert.Equal(654, catalog.TryResolve(areaNumber, 1)!.Area.ZoneMusicId);
+    }
 }

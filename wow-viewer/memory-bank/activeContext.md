@@ -7,13 +7,16 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 148 Phase 1 audio truth surface: finish source/read/decode
-  diagnostics, then have the user run a configured client and inspect current-tile MCSE rows.
+- **Next implementation target:** Spec 148 Phase 1 audio truth surface: have the user run a
+  configured client and inspect packed Alpha AreaNumber/ZoneMusic resolution, then finish the
+  remaining source/read/decode diagnostics.
 - **Proof owner:** Focused audio/coordinate tests and cross-platform viewer build pass; the user owns
   real-client archive provenance, audible playback, and FPS/near-field visual proof.
 - **Completed slice:** Spec 148 now has a provenance-first world-simulator spec/plan/tasks pack;
-  MCSE emitters preserve raw and transformed positions; the runtime exposes non-playing diagnostic
-  rows; the audio panel shows IDs, coordinates, path/source, decode/backend state, and terminal reason.
+  MCSE emitters preserve raw and transformed positions; Alpha AreaNumber resolution follows the
+  DBCTool packed zone/subzone and `ParentAreaNum` contract; the runtime exposes non-playing
+  diagnostic rows; the audio panel shows IDs, coordinates, path/source, decode/backend state, and
+  terminal reason.
 - **Main unproven gap:** The current slice does not yet prove exact `sounds.mpq` provenance, does not
   enumerate WMO-area triggers, and has not changed any MCSE coordinate transform or MIDI/DLS backend.
 - **Explicitly out of scope for the next slice:** Camera model rendering, whole-map loading,
@@ -25,7 +28,7 @@ the owning spec for requirements and proof; read a workstream only when the spec
 |---|---|---|
 | 148 Artifact world simulator runtime | Phase 1 diagnostics in progress; user gate open | Finish read/decode/source-stage coverage, then inspect a real client before actor/residency work. |
 | 147 Minimap/fog/doodad instancing | Phase 2 implemented; Phase 3/4 open | User-run minimap proof, then implement fog coverage and structured batching diagnostics. |
-| 146 Audio/camera playback | Area music resolution and master mute control implemented; playback gates open | User-run mute/unmute and DBC ZoneMusic proof; MIDI/DLS remains unsupported. |
+| 146 Audio/camera playback | AreaNumber-aware ZoneMusic resolution and master mute control implemented; playback gates open | User-run packed Alpha AreaNumber/ZoneMusic proof; MIDI/DLS remains unsupported. |
 | 144 Camera capture paths | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions. |
 | 145 WoW UI overhaul | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks. |
 | 143 World context and lighting | LIT source/fallback and pre-alpha v2 parser implemented with user gate | Validate the v2 viewer path, then continue WMO area and lighting evidence. |

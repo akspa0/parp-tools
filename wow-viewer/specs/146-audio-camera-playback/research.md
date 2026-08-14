@@ -81,9 +81,10 @@ quest, and authoritative world-mutation implementation.
 - WorldAudioRuntime now loads AreaTable and optional AreaMIDIAmbiences from the exact active DBC
   build. The optional MIDI table matters because later clients can carry usable ZoneMusic IDs even
   when the historical MIDI ambience table is absent.
-- Area music resolution uses the current resident terrain chunk's AreaID, walks parent areas when a
-  child has no assignment, and resolves ZoneMusic through the build-scoped SoundEntries row.
-  Paths still come only from DBC metadata and the active client source.
+- For Alpha terrain, the area value from `MCNK.Unknown3` is the packed `AreaNumber`
+  `(zone << 16) | subzone`; resolution is continent-qualified and follows `ParentAreaNum` before
+  using modern direct `ID`/`ParentAreaID` fallback. Paths still come only from DBC metadata and
+  the active client source.
 - The runtime loops a resolvable ZoneMusic asset through the existing OpenAL path and exposes an
   area-music diagnostic in the Audio panel. MIDI/DLS selections remain explicit unsupported states;
   no fake PCM conversion or filename inference was added.
