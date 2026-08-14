@@ -20,6 +20,13 @@ The current bounded implementation proof is narrower: the pure `AreaDisplayTextR
 and the isolated viewer build passes. The DBCD-backed AreaTable fixture and real-client `SubzoneText`
 proof remain open until the next validation slice.
 
+The LIT spatial contract is now explicit: list-header positions are fixed-point client XZY values.
+Decode them by dividing by 36, swap the file Y/Z components into semantic game XYZ, then convert to
+renderer coordinates with `renderer=(mapOrigin-gameY, mapOrigin-gameX, gameZ)`. The viewer's LIT
+tooltip reports raw XZY, decoded WoW coordinates, and renderer coordinates separately. The same
+conversion is used by LIT minimap markers and camera focus; source/build proof is automated, while
+real-client marker placement remains user-owned.
+
 ## User-run real-client matrix
 
 Use a configured approved client root such as `H:\CLIENTS\...` or another explicitly selected root;

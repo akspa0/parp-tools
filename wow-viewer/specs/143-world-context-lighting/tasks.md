@@ -89,6 +89,9 @@ whole-map loads, native OpenGL runtime tests, and GPU profiling are user-run ope
 
 - [ ] T029 [P] [US4] Add `LightingSelection` fixture tests for WMO root/group inputs, vertex/baked/lightmap inputs, M2 scene inputs, and equivalent fallback in `tests/WowViewer.Core.Tests/LightingSelectionTests.cs`.
 - [ ] T030 [US4] Add a profile-scoped lighting input selector under `src/core/WowViewer.Core.Runtime/World/` that consumes existing Spec 106/138 contracts and rejects unproven BLS claims.
+- [x] T030a [US4] Correct LIT list-header spatial decoding in the shared core contract: divide fixed-point
+  XZY values by 36, expose decoded WoW XYZ, and apply the map-origin transform for viewer/minimap
+  consumers with focused regression coverage.
 - [ ] T031 [US4] Wire selected WMO root/group ambient, light references, vertex colors, baked weights, lightmap data, and fog inputs through `src/viewer/WoWViewer/Rendering/WmoRenderer.cs`.
 - [ ] T032 [US4] Replace only the WMO shader fallback behavior required by the selected inputs in `src/viewer/WoWViewer/Rendering/WmoRenderer.cs`; preserve batching, alpha, portal, liquid, and transparent paths.
 - [ ] T033 [US4] Wire attributable directional, ambient, local-light, fog, and effect-route inputs through `src/viewer/WoWViewer/Rendering/M2Renderer.cs` without changing animation or placement ownership.

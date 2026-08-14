@@ -1362,7 +1362,7 @@ public partial class ViewerApp
         ImGui.Text(light.DisplayName);
         ImGui.TextDisabled($"Chunk=({light.ChunkX}, {light.ChunkY}) chunkRadius={light.ChunkRadius}  Groups={light.Groups.Count}");
         ImGui.TextDisabled(light.HasMeaningfulPosition
-            ? $"Position: ({light.Position.X:F2}, {light.Position.Y:F2}, {light.Position.Z:F2})"
+            ? $"Renderer: ({light.Position.X:F2}, {light.Position.Y:F2}, {light.Position.Z:F2})  WoW: ({light.GamePosition.X:F2}, {light.GamePosition.Y:F2}, {light.GamePosition.Z:F2})"
             : "Position: none");
         ImGui.TextDisabled($"Radius={light.Radius:F2} (raw {light.RadiusRaw:F2})  Dropoff={light.Dropoff:F2} (raw {light.DropoffRaw:F2})");
 

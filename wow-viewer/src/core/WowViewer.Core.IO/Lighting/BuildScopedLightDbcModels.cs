@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Numerics;
+using WowViewer.Core.Lit;
 
 namespace WowViewer.Core.IO.Lighting;
 
@@ -104,10 +105,7 @@ public sealed record LightDbcZoneRecord(
 {
     public const float GameUnitsPerWorldUnit = 36f;
 
-    public Vector3 WorldPosition => new(
-        RawGameCoordsXzy.X / GameUnitsPerWorldUnit,
-        RawGameCoordsXzy.Z / GameUnitsPerWorldUnit,
-        RawGameCoordsXzy.Y / GameUnitsPerWorldUnit);
+    public Vector3 WorldPosition => LitCoordinateTransform.ToGameWorldPosition(RawGameCoordsXzy);
 
     public float FalloffStart => RawFalloffStart / GameUnitsPerWorldUnit;
 
@@ -116,10 +114,8 @@ public sealed record LightDbcZoneRecord(
     public int ClearWeatherLightParamsId =>
         LightParamsIds.IsDefaultOrEmpty ? 0 : LightParamsIds[BuildScopedLightDbcProfileResolver.ClearWeatherParamsIndex];
 
-    public Vector3 ToRendererPosition(float mapOrigin) => new(
-        mapOrigin - WorldPosition.Y,
-        mapOrigin - WorldPosition.X,
-        WorldPosition.Z);
+    public Vector3 ToRendererPosition(float mapOrigin) =>
+        LitCoordinateTransform.ToRendererPosition(WorldPosition, mapOrigin);
 }
 
 public sealed record LightDbcProfileEvidence(

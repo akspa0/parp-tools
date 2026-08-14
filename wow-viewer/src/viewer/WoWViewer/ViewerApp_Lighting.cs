@@ -114,7 +114,9 @@ public partial class ViewerApp
             if (ImGui.IsItemHovered())
             {
                 ImGui.BeginTooltip();
-                ImGui.Text($"Position: ({light.Position.X:F1}, {light.Position.Y:F1}, {light.Position.Z:F1})");
+                ImGui.Text($"Renderer: ({light.Position.X:F1}, {light.Position.Y:F1}, {light.Position.Z:F1})");
+                ImGui.Text($"WoW: ({light.GamePosition.X:F1}, {light.GamePosition.Y:F1}, {light.GamePosition.Z:F1})");
+                ImGui.Text($"Raw XZY: ({light.RawPosition.X:F0}, {light.RawPosition.Y:F0}, {light.RawPosition.Z:F0})");
                 ImGui.Text($"Radius: {light.Radius:F1}  Dropoff: {light.Dropoff:F1}");
                 ImGui.Text($"Chunk: ({light.ChunkX}, {light.ChunkY}) r={light.ChunkRadius}");
                 ImGui.TextDisabled(light.IsNavigable

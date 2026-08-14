@@ -5336,7 +5336,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
                         continue;
 
                     markers.Add(new MinimapLightMarker(
-                        header.WorldPosition,
+                        header.ToRendererPosition(MinimapTileProjection.MapOrigin),
                         header.WorldRadius,
                         header.WorldOuterRadius,
                         ResolveLightSwatchColor(light, gameTime),

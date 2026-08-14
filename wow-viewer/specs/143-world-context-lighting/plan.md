@@ -155,6 +155,11 @@ shader/effect change that makes contributions attributable and non-flat. Origina
 used only where the active build evidence and compatible inputs support it; otherwise diagnostics say
 `equivalent fallback` with the missing contract.
 
+The first bounded lighting correction is the LIT spatial coordinate contract. `lights.lit` list
+headers use client fixed-point XZY positions: divide by 36, decode semantic game XYZ, and then apply
+the active map-origin transform for renderer-space consumers. Raw, decoded WoW, and renderer values
+remain separately diagnosable; this correction does not claim local-light visual parity.
+
 ### Phase 5 — Cross-era and performance proof
 
 Run focused tests/builds in the workspace, then hand the user exact PowerShell commands for the

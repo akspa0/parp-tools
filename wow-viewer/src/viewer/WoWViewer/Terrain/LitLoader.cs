@@ -1,8 +1,10 @@
 using System.Numerics;
+using WowViewer.Core.Lit;
 using WowViewer.Core.IO.Lit;
 using WowViewer.Core.Maps;
 using WoWViewer.DataSources;
 using WoWViewer.Logging;
+using WoWViewer.Rendering;
 
 namespace WoWViewer.Terrain;
 
@@ -180,6 +182,7 @@ public sealed class LitLoader
             Vector3 position,
             float radiusRaw,
             float dropoffRaw,
+            Vector3 gamePosition,
             string name,
             IReadOnlyList<LitGroup> groups)
         {
@@ -187,7 +190,9 @@ public sealed class LitLoader
             ChunkX = chunkX;
             ChunkY = chunkY;
             ChunkRadius = chunkRadius;
-            Position = position;
+            RawPosition = position;
+            GamePosition = gamePosition;
+            Position = LitCoordinateTransform.ToRendererPosition(gamePosition, WoWConstants.MapOrigin);
             RadiusRaw = radiusRaw;
             DropoffRaw = dropoffRaw;
             Radius = NormalizeDistance(radiusRaw);
@@ -203,6 +208,10 @@ public sealed class LitLoader
         public int ChunkY { get; }
 
         public int ChunkRadius { get; }
+
+        public Vector3 RawPosition { get; }
+
+        public Vector3 GamePosition { get; }
 
         public Vector3 Position { get; }
 
@@ -312,7 +321,7 @@ public sealed class LitLoader
         LitLightHeaderProfile? header = source.Header;
         IReadOnlyList<LitGroup> groups = source.Groups.Select(ConvertGroup).ToArray();
         return header == null
-            ? new LitLight(source.Index, -1, -1, -1, Vector3.Zero, 0f, 0f, "Default", groups)
+            ? new LitLight(source.Index, -1, -1, -1, Vector3.Zero, 0f, 0f, Vector3.Zero, "Default", groups)
             : new LitLight(
                 source.Index,
                 header.ChunkX,
@@ -321,6 +330,7 @@ public sealed class LitLoader
                 header.Position,
                 header.Radius,
                 header.Dropoff,
+                header.WorldPosition,
                 header.Name,
                 groups);
     }

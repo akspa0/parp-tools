@@ -38,8 +38,12 @@ public sealed class LitSummaryReaderTests
         // LIT spatial records are client fixed-point at 1/36 world units. Without this conversion
         // every plotted light lands ~36x off the map.
         Assert.Equal(100f / 36f, summary.Entries[1].Position.X, 5);
-        Assert.Equal(200f / 36f, summary.Entries[1].Position.Y, 5);
-        Assert.Equal(300f / 36f, summary.Entries[1].Position.Z, 5);
+        Assert.Equal(300f / 36f, summary.Entries[1].Position.Y, 5);
+        Assert.Equal(200f / 36f, summary.Entries[1].Position.Z, 5);
+        Vector3 rendererPosition = summary.Entries[1].ToRendererPosition(17066.66666f);
+        Assert.Equal(17066.66666f - (300f / 36f), rendererPosition.X, 4);
+        Assert.Equal(17066.66666f - (100f / 36f), rendererPosition.Y, 4);
+        Assert.Equal(200f / 36f, rendererPosition.Z, 5);
         Assert.Equal(96f / 36f, summary.Entries[1].LightRadius, 5);
         Assert.Equal(24f / 36f, summary.Entries[1].LightDropoff, 5);
         Assert.Equal(120f / 36f, summary.Entries[1].OuterRadius, 5);

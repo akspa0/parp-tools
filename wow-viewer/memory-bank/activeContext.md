@@ -7,19 +7,17 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 142 Phase 8M/8O: user-run camera movement proof that the
-  nearest terrain footprint remains selected, resident, and rendered while the detail and retained
-  radius controls change.
-- **Proof owner:** focused selector tests and an isolated viewer build prove source contracts; the
-  user owns real-client movement, camera-path, visual, and FPS proof.
-- **Completed slice:** `DirectionalTileSelector` now protects the largest complete camera-centered
-  square supported by the detail budget before forward-cone expansion: 3×3 for 9–24 tiles and 5×5
-  at 25. The regression suite covers the 25-tile near-field case.
-- **Main unproven gap:** the user must confirm that nearby ADTs no longer unload or disappear in the
-  viewer. If holes remain after this selector correction, inspect detailed terrain bounds/fog culling
-  and renderer-space tile mapping separately from admission.
-- **Explicitly out of scope for the next slice:** FOV radiation redesign, whole-map loading, new
-  scene-graph traversal, audio playback work, and FPS claims from source tests alone.
+- **Next implementation target:** Spec 143 LIT coordinate proof: user-run placement and camera-focus
+  validation against a loaded client `lights.lit`, then continue the named lighting/context slice.
+- **Proof owner:** focused core tests and an isolated viewer build prove the coordinate contract; the
+  user owns real-client minimap placement, camera focus, visual lighting, and cross-era proof.
+- **Completed slice:** LIT list-header positions now decode client fixed-point XZY values by `/36`,
+  expose semantic WoW XYZ, and transform to renderer coordinates with the active map origin. The
+  viewer tooltip reports raw, WoW, and renderer values; minimap and focus paths share the conversion.
+- **Main unproven gap:** real-client confirmation is still required that the corrected markers and
+  focus camera land on the owning map locations. This does not claim local-light or shader parity.
+- **Explicitly out of scope for the next slice:** BLS shader reconstruction, audio playback, whole-map
+  loading, and runtime visual/FPS claims from source tests alone.
 
 ## Active spec lanes
 
@@ -28,7 +26,7 @@ the owning spec for requirements and proof; read a workstream only when the spec
 | 146 Audio/camera playback | Draft/planned | Parked while the active renderer baseline gate is validated. |
 | 144 Camera capture paths | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions. |
 | 145 WoW UI overhaul | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks. |
-| 143 World context and lighting | First area slice landed | Resolve evidence/setup tasks before WMO area or lighting claims. |
+| 143 World context and lighting | Coordinate slice implemented with user gate | Validate LIT raw/decoded/renderer positions, then continue WMO area and lighting evidence. |
 | 142 World scene graph | In progress | Validate the Phase 8M near-field selector correction, then continue retained-radius and WMO movement proof. |
 | 139–141 Terrain/minimap reconstruction | Active/parked ML lanes | Reopen only for the named spec and user-run training/validation. |
 | 138 Cross-era renderer research | Evidence/planning | Do not generalize one client build to every era. |

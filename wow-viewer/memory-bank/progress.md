@@ -5,6 +5,14 @@ Last updated: 2026-08-13
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-13 — Spec 143 LIT spatial coordinate correction
+
+- LIT list-header positions now decode client fixed-point XZY values by dividing by 36, swapping
+  file Y/Z into semantic WoW XYZ, and applying the map-origin transform for renderer consumers.
+- Viewer LIT diagnostics now distinguish raw XZY, decoded WoW, and renderer coordinates; minimap
+  markers and camera focus use the same shared conversion.
+- Focused source proof passes (23 tests); real-client marker/focus placement is user-owned.
+
 ## 2026-08-13 — Spec 142 near-field detail selection correction
 
 - The focused regression reproduced the reported failure: a 25-tile budget kept only the immediate

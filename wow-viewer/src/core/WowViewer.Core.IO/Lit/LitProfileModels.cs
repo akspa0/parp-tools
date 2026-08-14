@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Numerics;
+using WowViewer.Core.Lit;
 using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Lit;
@@ -47,15 +48,16 @@ public sealed record LitFileProfile
 /// The fixed 64-byte spatial header associated with a list-based LIT light.
 /// A negative-count partial profile has no spatial header.
 /// </summary>
-/// <param name="Position">Raw fixed-point position exactly as stored on disk.</param>
+/// <param name="Position">Raw fixed-point XZY position exactly as stored on disk.</param>
 /// <param name="Radius">Raw fixed-point core radius exactly as stored on disk.</param>
 /// <param name="Dropoff">Raw fixed-point falloff distance exactly as stored on disk.</param>
 /// <remarks>
-/// The constructor parameters are the untouched disk values. Anything working in world space must
-/// use <see cref="WorldPosition"/> / <see cref="WorldRadius"/> / <see cref="WorldDropoff"/>: LIT
-/// spatial records are client fixed-point at
-/// <see cref="TerrainLightingMath.ClientFixedUnitsPerWorldUnit"/> (1/36), which is why unscaled
-/// values plot roughly 36x outside the map.
+/// The constructor parameters are the untouched disk values. Anything working in game-world space
+/// must use <see cref="WorldPosition"/> / <see cref="WorldRadius"/> / <see cref="WorldDropoff"/>:
+/// LIT spatial records are client fixed-point at
+/// <see cref="TerrainLightingMath.ClientFixedUnitsPerWorldUnit"/> (1/36), and the file stores the
+/// spatial vector as XZY. Renderer consumers must then call <see cref="ToRendererPosition"/> with
+/// the active map origin.
 /// </remarks>
 public sealed record LitLightHeaderProfile(
     int Index,
@@ -69,8 +71,12 @@ public sealed record LitLightHeaderProfile(
 {
     public bool IsDefault => ChunkX == -1 && ChunkY == -1 && ChunkRadius == -1;
 
-    /// <summary>Light centre in renderer world units.</summary>
-    public Vector3 WorldPosition => Position / TerrainLightingMath.ClientFixedUnitsPerWorldUnit;
+    /// <summary>Light centre in semantic game-world XYZ units.</summary>
+    public Vector3 WorldPosition => LitCoordinateTransform.ToGameWorldPosition(Position);
+
+    /// <summary>Light centre in renderer-space coordinates for the active map.</summary>
+    public Vector3 ToRendererPosition(float mapOrigin) =>
+        LitCoordinateTransform.ToRendererPosition(WorldPosition, mapOrigin);
 
     /// <summary>Core radius in renderer world units.</summary>
     public float WorldRadius => Radius / TerrainLightingMath.ClientFixedUnitsPerWorldUnit;

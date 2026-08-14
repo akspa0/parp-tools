@@ -6,8 +6,8 @@ namespace WowViewer.Core.Lit;
 /// <summary>
 /// One LIT light-list entry.
 ///
-/// COORDINATE SCALE: the file stores position and both radii in the client's fixed-point spatial
-/// units, the same 1/36 scale <see cref="TerrainLightingMath.ClientFixedUnitsPerWorldUnit"/> already
+/// COORDINATE SCALE: the file stores position in client XZY order and both radii in the client's
+/// fixed-point spatial units, the same 1/36 scale <see cref="TerrainLightingMath.ClientFixedUnitsPerWorldUnit"/> already
 /// documents ("the same 1/36 fixed scale as the outdoor-light spatial records"). Fog distances were
 /// being converted through <see cref="TerrainLightingMath.ComputeClientFogRange"/> while these
 /// spatial records were not, so every consumer saw positions ~36x too large -- far outside any real
@@ -63,11 +63,12 @@ public sealed class LitListEntrySummary
     /// <summary>Falloff distance in client fixed-point units, exactly as stored in the file.</summary>
     public float RawLightDropoff { get; }
 
-    /// <summary>
-    /// Position in renderer world units. Note the file's Z is the vertical axis, which the viewer
-    /// displays as its Y; consumers plotting onto a top-down minimap want X and Y.
-    /// </summary>
-    public Vector3 Position => RawPosition / TerrainLightingMath.ClientFixedUnitsPerWorldUnit;
+    /// <summary>Position in semantic game-world XYZ units.</summary>
+    public Vector3 Position => LitCoordinateTransform.ToGameWorldPosition(RawPosition);
+
+    /// <summary>Position in renderer-space coordinates for the active map.</summary>
+    public Vector3 ToRendererPosition(float mapOrigin) =>
+        LitCoordinateTransform.ToRendererPosition(Position, mapOrigin);
 
     /// <summary>Core radius in renderer world units.</summary>
     public float LightRadius => RawLightRadius / TerrainLightingMath.ClientFixedUnitsPerWorldUnit;

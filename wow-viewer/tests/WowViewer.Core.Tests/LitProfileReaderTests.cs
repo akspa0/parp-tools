@@ -24,6 +24,13 @@ public sealed class LitProfileReaderTests
         Assert.True(profile.Lights[0].Header!.IsDefault);
         Assert.Equal("Local", profile.Lights[1].Header!.Name);
         Assert.Equal(new Vector3(100f, 200f, 300f), profile.Lights[1].Header!.Position);
+        Assert.Equal(100f / 36f, profile.Lights[1].Header!.WorldPosition.X, 5);
+        Assert.Equal(300f / 36f, profile.Lights[1].Header!.WorldPosition.Y, 5);
+        Assert.Equal(200f / 36f, profile.Lights[1].Header!.WorldPosition.Z, 5);
+        Vector3 rendererPosition = profile.Lights[1].Header!.ToRendererPosition(17066.66666f);
+        Assert.Equal(17066.66666f - (300f / 36f), rendererPosition.X, 4);
+        Assert.Equal(17066.66666f - (100f / 36f), rendererPosition.Y, 4);
+        Assert.Equal(200f / 36f, rendererPosition.Z, 5);
         Assert.All(profile.Lights, light => Assert.Equal(4, light.Groups.Count));
 
         LitLightGroupProfile clear = profile.Lights[0].Groups[0];
