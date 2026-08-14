@@ -26,6 +26,10 @@ public sealed class WorldAudioRuntime : IDisposable
     private AudioContext? _context;
     private AL? _al;
     private AlphaSoundEntriesCatalog? _soundEntries;
+    private uint? _previewSource;
+    private string? _previewPath;
+    private float _previewBaseGain = 1f;
+    private Vector3 _listenerPosition;
     private bool _disposed;
     private bool _loggedNoBackend;
 
@@ -36,15 +40,38 @@ public sealed class WorldAudioRuntime : IDisposable
 
     public string Status { get; private set; } = "Audio runtime not configured.";
 
+    public string LastDiagnostic { get; private set; } = "No audio diagnostic yet.";
+
+    public bool BackendReady => _al is not null;
+
+    public string? PreviewPath => _previewPath;
+
+    public float MasterGain { get; private set; } = 1f;
+
+    public float EmitterGain { get; private set; } = 1f;
+
     public int ResidentEmitterCount => _tileEmitters.Values.Sum(static emitters => emitters.Count);
 
     public int ActiveEmitterCount => _active.Count;
+
+    public int ResolvedSoundEntryCount => _soundEntries?.Entries.Count ?? 0;
+
+    public IReadOnlyList<int> ResidentSoundEntryIds
+        => _tileEmitters.Values
+            .SelectMany(static emitters => emitters)
+            .Select(static emitter => emitter.SoundNameId)
+            .Where(static id => id <= int.MaxValue)
+            .Select(static id => (int)id)
+            .Distinct()
+            .OrderBy(static id => id)
+            .ToArray();
 
     public void Configure(DBCD.Providers.IDBCProvider dbcProvider, string definitionsDirectory, string buildVersion)
     {
         ThrowIfDisposed();
         StopAll();
         _soundEntries = null;
+        _loggedNoBackend = false;
 
         try
         {
@@ -54,6 +81,7 @@ public sealed class WorldAudioRuntime : IDisposable
         catch (Exception ex)
         {
             Status = $"SoundEntries unavailable for {buildVersion}: {ex.Message}";
+            LastDiagnostic = Status;
             ViewerLog.Info(ViewerLog.Category.General, $"[Audio] {Status}");
             return;
         }
@@ -61,6 +89,7 @@ public sealed class WorldAudioRuntime : IDisposable
         if (!OpenAlNativeLibraryProbe.TryFind(out string? libraryName))
         {
             Status = "Audio backend unavailable: OpenAL native library was not found; audio playback is disabled.";
+            LastDiagnostic = Status;
             ViewerLog.Info(ViewerLog.Category.General, $"[Audio] {Status}");
             return;
         }
@@ -73,7 +102,8 @@ public sealed class WorldAudioRuntime : IDisposable
             AL al = AL.GetApi();
             _context = context;
             _al = al;
-            Status = $"OpenAL ready ({libraryName}); SoundEntries={_soundEntries.Entries.Count}; WAV/OGG/MP3 playback enabled; MIDI+DLS pair renderer pending.";
+            Status = $"OpenAL ready ({libraryName}); SoundEntries={_soundEntries.Entries.Count}; WAV/OGG/MP3 decoders available; MIDI+DLS pair renderer pending.";
+            LastDiagnostic = Status;
             ViewerLog.Important(ViewerLog.Category.General, $"[Audio] {Status}");
         }
         catch (Exception ex)
@@ -82,8 +112,102 @@ public sealed class WorldAudioRuntime : IDisposable
             _context = null;
             _al = null;
             Status = $"Audio backend unavailable: {ex.Message}";
+            LastDiagnostic = Status;
             ViewerLog.Info(ViewerLog.Category.General, $"[Audio] {Status}");
         }
+    }
+
+    public void SetMasterGain(float gain)
+    {
+        MasterGain = Math.Clamp(gain, 0f, 2f);
+        ApplyActiveGains();
+    }
+
+    public void SetEmitterGain(float gain)
+    {
+        EmitterGain = Math.Clamp(gain, 0f, 2f);
+        ApplyActiveGains();
+    }
+
+    public bool TryPlaySoundEntry(uint soundEntryId, bool loop, out string reason)
+    {
+        reason = string.Empty;
+        if (_al is null || _soundEntries is null)
+        {
+            reason = "OpenAL and SoundEntries must be ready before previewing a sound.";
+            LastDiagnostic = reason;
+            return false;
+        }
+
+        if (!_soundEntries.TryResolve(soundEntryId, out AlphaSoundEntry? soundEntry))
+        {
+            reason = $"SoundEntries {soundEntryId} is not present in the loaded client schema.";
+            LastDiagnostic = reason;
+            return false;
+        }
+
+        string? virtualPath = soundEntry.EnumerateVirtualPaths()
+            .FirstOrDefault(path => _dataSource.FileExists(path));
+        if (virtualPath is null)
+        {
+            reason = $"SoundEntries {soundEntryId} has no resolvable client audio file.";
+            LastDiagnostic = reason;
+            LogOnce($"preview-missing:{soundEntryId}", $"[Audio] {reason}");
+            return false;
+        }
+
+        try
+        {
+            StopPreview();
+            uint buffer = GetOrCreateBuffer(virtualPath);
+            if (buffer == 0)
+            {
+                reason = LastDiagnostic;
+                return false;
+            }
+
+            uint source = _al.GenSource();
+            _al.SetSourceProperty(source, SourceInteger.Buffer, buffer);
+            _al.SetSourceProperty(source, SourceVector3.Position, _listenerPosition);
+            _al.SetSourceProperty(source, SourceFloat.Gain, soundEntry.Volume * MasterGain);
+            _al.SetSourceProperty(source, SourceFloat.ReferenceDistance, MathF.Max(1f, soundEntry.MinDistance));
+            _al.SetSourceProperty(source, SourceFloat.MaxDistance, MathF.Max(1f, soundEntry.MaxDistance));
+            _al.SetSourceProperty(source, SourceBoolean.Looping, loop);
+            _al.SourcePlay(source);
+            _previewSource = source;
+            _previewPath = virtualPath;
+            _previewBaseGain = soundEntry.Volume;
+            reason = $"Playing SoundEntries {soundEntryId}: {virtualPath}";
+            LastDiagnostic = reason;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            reason = $"SoundEntries {soundEntryId} preview failed: {ex.Message}";
+            LastDiagnostic = reason;
+            DisableBackend(reason);
+            return false;
+        }
+    }
+
+    public void StopPreview()
+    {
+        if (_previewSource is uint source && _al is not null)
+        {
+            try
+            {
+                _al.SourceStop(source);
+                _al.DeleteSource(source);
+            }
+            catch (Exception ex)
+            {
+                LastDiagnostic = $"Audio preview stop failed: {ex.Message}";
+            }
+        }
+
+        _previewSource = null;
+        _previewPath = null;
+        _previewBaseGain = 1f;
     }
 
     public void AddTile(int tileX, int tileY, IReadOnlyList<TerrainSoundEmitter> emitters)
@@ -107,6 +231,8 @@ public sealed class WorldAudioRuntime : IDisposable
     {
         if (_disposed || _al is null || _soundEntries is null)
             return;
+
+        _listenerPosition = listenerPosition;
 
         try
         {
@@ -157,9 +283,31 @@ public sealed class WorldAudioRuntime : IDisposable
 
                 if (_active.TryGetValue(key, out ActiveEmitter? active))
                 {
-                    _al.SetSourceProperty(active.Source, SourceVector3.Position, emitter.Position);
-                    _al.SetSourceProperty(active.Source, SourceFloat.Gain, gain);
+                    try
+                    {
+                        active.BaseGain = gain;
+                        _al.SetSourceProperty(active.Source, SourceVector3.Position, emitter.Position);
+                        _al.SetSourceProperty(active.Source, SourceFloat.Gain, gain * MasterGain * EmitterGain);
+                    }
+                    catch (Exception ex)
+                    {
+                        DisableBackend($"emitter update failed: {ex.Message}");
+                        return;
+                    }
                 }
+            }
+        }
+
+        if (_previewSource is uint previewSource)
+        {
+            try
+            {
+                _al.SetSourceProperty(previewSource, SourceVector3.Position, listenerPosition);
+            }
+            catch (Exception ex)
+            {
+                DisableBackend($"preview update failed: {ex.Message}");
+                return;
             }
         }
 
@@ -173,6 +321,7 @@ public sealed class WorldAudioRuntime : IDisposable
     {
         foreach (EmitterKey key in _active.Keys.ToArray())
             StopEmitter(key);
+        StopPreview();
         _heardInRange.Clear();
     }
 
@@ -191,6 +340,7 @@ public sealed class WorldAudioRuntime : IDisposable
         }
 
         _buffers.Clear();
+        StopPreview();
         try { _al?.Dispose(); } catch { }
         _al = null;
         try { _context?.Dispose(); } catch { }
@@ -227,16 +377,18 @@ public sealed class WorldAudioRuntime : IDisposable
             uint source = _al.GenSource();
             _al.SetSourceProperty(source, SourceInteger.Buffer, buffer);
             _al.SetSourceProperty(source, SourceVector3.Position, emitter.Position);
-            _al.SetSourceProperty(source, SourceFloat.Gain, gain);
+            _al.SetSourceProperty(source, SourceFloat.Gain, gain * MasterGain * EmitterGain);
             _al.SetSourceProperty(source, SourceFloat.ReferenceDistance, MathF.Max(1f, minDistance));
             _al.SetSourceProperty(source, SourceFloat.MaxDistance, MathF.Max(1f, maxDistance));
             _al.SetSourceProperty(source, SourceBoolean.Looping, true);
             _al.SourcePlay(source);
-            _active[key] = new ActiveEmitter(source, virtualPath);
+            _active[key] = new ActiveEmitter(source, virtualPath, gain);
         }
         catch (Exception ex)
         {
-            LogOnce($"start:{soundEntry.Id}", $"[Audio] Failed to start SoundEntries {soundEntry.Id} ({virtualPath}): {ex.Message}");
+            string message = $"[Audio] Failed to start SoundEntries {soundEntry.Id} ({virtualPath}): {ex.Message}";
+            LastDiagnostic = message;
+            LogOnce($"start:{soundEntry.Id}", message);
         }
     }
 
@@ -289,13 +441,45 @@ public sealed class WorldAudioRuntime : IDisposable
             return;
         _loggedNoBackend = true;
         Status = $"Audio backend disabled: {reason}";
+        LastDiagnostic = Status;
+        AL? failedAl = _al;
+        _al = null;
+        _active.Clear();
+        _previewSource = null;
+        _previewPath = null;
+        _previewBaseGain = 1f;
+        try { failedAl?.Dispose(); } catch { }
+        try { _context?.Dispose(); } catch { }
+        _context = null;
         ViewerLog.Info(ViewerLog.Category.General, $"[Audio] {Status}");
     }
 
     private void LogOnce(string key, string message)
     {
         if (_diagnosticKeys.Add(key))
+        {
+            LastDiagnostic = message;
             ViewerLog.Info(ViewerLog.Category.General, message);
+        }
+    }
+
+    private void ApplyActiveGains()
+    {
+        if (_al is null)
+            return;
+
+        try
+        {
+            foreach (ActiveEmitter active in _active.Values)
+                _al.SetSourceProperty(active.Source, SourceFloat.Gain, active.BaseGain * MasterGain * EmitterGain);
+
+            if (_previewSource is uint previewSource)
+                _al.SetSourceProperty(previewSource, SourceFloat.Gain, _previewBaseGain * MasterGain);
+        }
+        catch (Exception ex)
+        {
+            DisableBackend($"gain update failed: {ex.Message}");
+        }
     }
 
     private static float FirstPositive(params float[] values)
@@ -316,5 +500,10 @@ public sealed class WorldAudioRuntime : IDisposable
     }
 
     private readonly record struct EmitterKey(int TileX, int TileY, int Index);
-    private sealed record ActiveEmitter(uint Source, string VirtualPath);
+    private sealed class ActiveEmitter(uint source, string virtualPath, float baseGain)
+    {
+        public uint Source { get; } = source;
+        public string VirtualPath { get; } = virtualPath;
+        public float BaseGain { get; set; } = baseGain;
+    }
 }

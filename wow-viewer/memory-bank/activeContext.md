@@ -7,18 +7,19 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 104 Phase 4 MDX material/effect compatibility repair, starting with user-run validation of parsed `LITE` model-local lighting plus the premultiplied-alpha and fail-closed texture changes.
-- **Proof owner:** focused C# tests and a Debug build for source-level contracts; the user owns real
-  client, OpenGL, audio-device, capture, and performance proof.
-- **Main unproven gap:** source proof can establish LITE parsing and shader upload, but only the user’s
-  real client scene can confirm that model-local light contribution is visible without regressing valid
-  emissive or alpha-key assets.
-- **Explicitly out of scope for the next slice:** global cross-object light transport, animated Direct/
-  LITE tracks, native full particle/ribbon parity, terrain/WDL streaming changes, scene-graph redesign,
-  audio, and FPS claims without production capture evidence.
-- **Documentation correction:** the Alpha audio catalog is now documented as existing metadata and
-  loose/archive asset-resolution proof only; MIDI/DLS playback and the world-audio runtime remain
-  unimplemented and must not be inferred from an inspect result.
+- **Next implementation target:** Spec 146 Phase 3/5: bind the shared audio transport to camera-path
+  preview and Play + Video after the user validates the new SoundEntries preview against a real client.
+- **Proof owner:** focused C# tests and an isolated viewer build prove source contracts; the user owns
+  real-client audible playback, audio-device behavior, camera synchronization, and capture proof.
+- **Completed slice:** resident MCSE sources are admitted per loaded tile; OpenAL preview/stop,
+  resident SoundEntries discovery, gain controls, and last-diagnostic reporting are available under
+  Tools > Utilities > Audio.
+- **Main unproven gap:** no real-client audible proof yet, and Alpha area MIDI/DLS ambience, camera
+  transport, and Play + Video audio remain unimplemented.
+- **Explicitly out of scope for the next slice:** DLS synthesis guesses, whole-map audio loading,
+  audio claims from build success alone, and the future single-player server/session boundary.
+- **Documentation correction:** the Alpha audio catalog remains metadata and loose/archive
+  asset-resolution proof; the new preview proves only resolved SoundEntries decoded-audio paths.
 
 ## Active spec lanes
 

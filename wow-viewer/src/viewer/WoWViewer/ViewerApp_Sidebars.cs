@@ -4721,6 +4721,9 @@ public partial class ViewerApp
             case UtilitiesBottomTab.Lighting:
                 DrawLightingContent();
                 break;
+            case UtilitiesBottomTab.Audio:
+                DrawAudioContent();
+                break;
         }
     }
 

@@ -3476,8 +3476,30 @@ public class WorldScene : ISceneRenderer
     private int _mapId = -1;
     private WorldAudioRuntime? _audioRuntime;
     public string AudioStatus => _audioRuntime?.Status ?? "Audio runtime not configured.";
+    public string AudioLastDiagnostic => _audioRuntime?.LastDiagnostic ?? "Audio runtime not configured.";
+    public bool AudioBackendReady => _audioRuntime?.BackendReady ?? false;
+    public string? AudioPreviewPath => _audioRuntime?.PreviewPath;
     public int ResidentAudioEmitterCount => _audioRuntime?.ResidentEmitterCount ?? 0;
     public int ActiveAudioEmitterCount => _audioRuntime?.ActiveEmitterCount ?? 0;
+    public int ResolvedAudioSoundEntryCount => _audioRuntime?.ResolvedSoundEntryCount ?? 0;
+    public IReadOnlyList<int> ResidentAudioSoundEntryIds
+        => _audioRuntime?.ResidentSoundEntryIds ?? Array.Empty<int>();
+
+    public bool TryPreviewAudioSoundEntry(uint soundEntryId, bool loop, out string reason)
+        => _audioRuntime?.TryPlaySoundEntry(soundEntryId, loop, out reason) ??
+            FailAudioPreview("Audio runtime is not configured.", out reason);
+
+    public void StopAudioPreview() => _audioRuntime?.StopPreview();
+
+    public void SetAudioMasterGain(float gain) => _audioRuntime?.SetMasterGain(gain);
+
+    public void SetAudioEmitterGain(float gain) => _audioRuntime?.SetEmitterGain(gain);
+
+    private static bool FailAudioPreview(string message, out string reason)
+    {
+        reason = message;
+        return false;
+    }
 
     // DBC Lighting
     private LightService? _lightService;

@@ -2,9 +2,11 @@
 
 This document is for implementation and user validation. The viewer now has
 one bounded playback path: resident MCSE emitters whose build-aware
-`SoundEntries` row resolves to client WAV/OGG/MP3 data are decoded to PCM and
-spatially played through OpenAL. This is not yet the full Alpha MIDI/DLS or
-capture-audio system.
+`SoundEntries` row resolves to client WAV/OGG/MP3 data can be decoded to PCM
+and spatially played through OpenAL. The Tools > Utilities > Audio page also
+provides a SoundEntries preview at the current camera listener, stop control,
+gain controls, resident-ID discovery, and the last runtime diagnostic. This is
+not yet the full Alpha MIDI/DLS or capture-audio system.
 
 ## Phase 1 proof
 
@@ -35,6 +37,9 @@ proof.
 3. Load a tile containing decoded MCSE entries. The lower status bar reports
    active/resident emitter counts; the Log tab reports the OpenAL backend,
    missing SoundEntries files, unsupported WAV shapes, and backend failures.
+   Open Tools > Utilities > Audio, select a resident SoundEntries ID, and use
+   Preview at Camera to prove the resolved client file path before relying on
+   automatic spatial admission.
 4. Import the Undead FlyBy and verify its existing `CinematicCamera.dbc` placement still resolves tile `(28,28)`.
 5. Exercise Play, pause, scrub, loop, and stop while observing the audio diagnostics surface.
 6. Exercise Play + Video and record whether audio is muxed, separate, or unavailable.

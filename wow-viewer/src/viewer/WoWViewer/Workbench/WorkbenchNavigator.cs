@@ -50,6 +50,7 @@ public enum UtilitiesBottomTab
     AssetCatalog = 6,
     RuntimeStats = 7,
     Lighting = 8,
+    Audio = 9,
 }
 
 /// <summary>
@@ -112,5 +113,5 @@ public static class WorkbenchNavigator
 
     /// <summary>Labels for <see cref="UtilitiesBottomTab"/>; order must match the enum.</summary>
     public static string[] GetUtilitiesBottomTabLabels() =>
-        ["Minimap", "Log", "Perf", "Render Quality", "Taxi", "Capture", "Asset Catalog", "Runtime Stats", "Lighting"];
+        ["Minimap", "Log", "Perf", "Render Quality", "Taxi", "Capture", "Asset Catalog", "Runtime Stats", "Lighting", "Audio"];
 }

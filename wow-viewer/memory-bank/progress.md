@@ -5,6 +5,16 @@ Last updated: 2026-08-13
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-13 — Spec 146 SoundEntries preview and diagnostics slice
+
+- Added a reachable Tools > Utilities > Audio page with resident SoundEntries ID discovery,
+  camera-local preview/stop, master/emitter gain controls, backend status, and last diagnostics.
+- Hardened OpenAL source updates so listener/emitter/preview failures disable audio cleanly instead of
+  escaping into the render loop; active source gain now tracks current attenuation and bus changes.
+- Focused audio tests pass (10/10) and the cross-platform viewer build passes with 0 errors. User-run
+  audible proof against a configured client remains open; MIDI/DLS, camera transport, and capture
+  muxing remain out of scope for this slice.
+
 ## 2026-08-13 — Spec 146 packaged OpenAL Soft MCSE runtime
 
 - Added the OpenAL Soft native package to both viewer targets and copy the selected desktop DLL

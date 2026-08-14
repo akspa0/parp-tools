@@ -63,6 +63,24 @@ public sealed class AudioRuntimeContractTests
     }
 
     [Fact]
+    public void SoundEntriesMetadata_UsesDeclaredClientPathsWithoutGuessing()
+    {
+        AlphaSoundEntry entry = new(
+            Id: 42,
+            Files: ["Forest\u002fBird.wav", "Forest\u002fBird.ogg"],
+            DirectoryBase: "Sound\\Ambience",
+            Volume: 0.75f,
+            MinDistance: 2f,
+            MaxDistance: 30f,
+            DistanceCutoff: 40f);
+
+        Assert.Equal(
+            ["Sound\\Ambience\\Forest\\Bird.wav", "Sound\\Ambience\\Forest\\Bird.ogg"],
+            entry.EnumerateVirtualPaths().ToArray());
+        Assert.DoesNotContain(entry.EnumerateVirtualPaths(), static path => path.Contains("42", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void StandardMidiFileProbe_RecognizesSmfHeader()
     {
         byte[] midi = [

@@ -7,7 +7,7 @@ task file are authoritative; this file only tells a new agent where to start.
 
 | Priority | Spec | State | Next bounded action |
 |---|---|---|---|
-| 1 | [146 Audio and camera playback](146-audio-camera-playback/spec.md) | Draft/planned | Start Phase 1 contracts and capability tests; no backend selected yet |
+| 1 | [146 Audio and camera playback](146-audio-camera-playback/spec.md) | In progress | User-run SoundEntries preview proof; then bind camera-path transport before MIDI/DLS synthesis |
 | 2 | [144 Camera capture paths](144-camera-capture-paths/spec.md) | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions |
 | 3 | [145 WoW UI overhaul](145-wow-ui-overhaul/spec.md) | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks |
 | 4 | [143 World context and lighting](143-world-context-lighting/spec.md) | Draft with first area slice landed | Resolve evidence/setup tasks before WMOAreaID or lighting claims |
