@@ -597,6 +597,21 @@ public partial class ViewerApp
         if (ImGui.Checkbox("Show LIT Overlay", ref showLitLights))
             _worldScene.ShowLitLights = showLitLights;
 
+        bool showAreaRegions = _worldScene.ShowAreaRegionOverlay;
+        if (ImGui.Checkbox("Show Area Boundaries", ref showAreaRegions))
+            _worldScene.ShowAreaRegionOverlay = showAreaRegions;
+        if (_worldScene.AreaOverlayResidentChunkCount > 0)
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled($"{_worldScene.AreaOverlayRegions.Count} groups / {_worldScene.AreaOverlayResidentChunkCount} resident chunks");
+        }
+        if (_worldScene.AreaOverlayUnresolvedChunkCount > 0)
+        {
+            ImGui.TextColored(
+                new Vector4(1f, 0.72f, 0.35f, 1f),
+                $"Unresolved area chunks: {_worldScene.AreaOverlayUnresolvedChunkCount} (no guessed labels)");
+        }
+
         ImGui.SameLine();
         bool useLitFogOverride = _worldScene.UseLitFogOverride;
         if (ImGui.Checkbox("Use LIT Lighting Override", ref useLitFogOverride))

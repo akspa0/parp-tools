@@ -55,11 +55,18 @@
 ### Tests for User Story 2
 
 - [x] T015 [P] [US2] Add area ambience binding tests for day/night and underwater selection using `AlphaAreaAudioCatalog` in `wow-viewer/tests/WowViewer.Core.Tests/Audio/` (catalog inheritance coverage is in `AlphaAreaAudioCatalogTests.cs`).
-- [x] T016 [P] [US2] Add focused MCSE emitter decoding tests for source identity, decoded position, ranges, and raw-entry preservation in `wow-viewer/tests/WowViewer.Core.Tests/`.
+- [x] T016 [P] [US2] Add focused MCSE emitter decoding tests for source identity, decoded position,
+  ranges, the proven Alpha 0.5.3 scheduler fields, and raw-entry preservation in
+  `wow-viewer/tests/WowViewer.Core.Tests/`.
 
 ### Implementation for User Story 2
 
-- [x] T017 [US2] Adapt `wow-viewer/src/core/WowViewer.Core/Audio/AlphaAreaAudioCatalog.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Audio/AlphaAreaAudioAssetResolver.cs` into runtime-ready area ambience bindings without changing reader ownership. The viewer now loads active-build AreaTable/AreaMIDIAmbiences metadata and resolves DBC ZoneMusic with parent inheritance.
+- [x] T017 [US2] Adapt `wow-viewer/src/core/WowViewer.Core/Audio/AlphaAreaAudioCatalog.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Audio/AlphaAreaAudioAssetResolver.cs` into runtime-ready area ambience bindings without changing reader ownership. The viewer now loads active-build AreaTable/AreaMIDIAmbiences metadata and preserves the AreaTable ZoneMusic reference with parent inheritance; direct ZoneMusic row resolution is tracked separately in T017a.
+- [x] T017b [US2] Make Alpha AreaNumber matching use shared high/low `ushort` components and feed the
+  status-bar's resolved Zone/SubZone result into terrain area-music diagnostics without registering
+  either component as an independent area ID.
+- [ ] T017a [US2] Add a build-aware ZoneMusic reader/model so `AreaTable.ZoneMusic` resolves to the
+  client row's day/night SoundEntries IDs before playback or diagnostic claims.
 - [ ] T018 [US2] Add `WorldAudioEmitter` and unresolved-provenance contracts for existing `AdtMcseReader` output in `wow-viewer/src/core/WowViewer.Core/Audio/` and `wow-viewer/src/core/WowViewer.Core.IO/Audio/`.
 - [x] T019 [US2] Add bounded resident tile/chunk and camera/player-head emitter admission in `wow-viewer/src/viewer/WoWViewer/Terrain/` without whole-map audio loading.
 - [x] T020 [US2] Add resident-emitter attenuation, edge-triggered source start/stop, and failure-isolated diagnostics in the viewer audio runtime under `wow-viewer/src/viewer/WoWViewer/`.

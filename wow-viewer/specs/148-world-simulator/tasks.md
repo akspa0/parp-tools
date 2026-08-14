@@ -30,7 +30,14 @@ relevant trigger, including raw/transformed coordinates and a terminal stage sta
   active area music/ambience decision in `AreaMusicStatus`, without starting playback in
   `wow-viewer/src/viewer/WoWViewer/Audio/`.
 - [ ] T006 [P] [US1] Add focused tests for unresolved SoundEntries, missing resources, decode failure,
-  OpenAL unavailable, out-of-range, muted, active, and unsupported MIDI/DLS states.
+  OpenAL unavailable, out-of-range, muted, active, unsupported MIDI/DLS states, and
+  `AreaTable.ZoneMusic -> ZoneMusic -> day/night SoundEntries` indirection.
+- [ ] T006a [US1] Add a build-aware ZoneMusic reader/model and diagnostic resolver so a ZoneMusic ID
+  is never treated as a direct SoundEntries ID in `wow-viewer/src/core/WowViewer.Core.IO/Dbc/` and
+  `wow-viewer/src/viewer/WoWViewer/Audio/`.
+- [x] T006b [US1] Align Alpha AreaNumber resolution across the status-bar and terrain audio paths:
+  decode high/low `ushort` words, prefer `AreaNumber`/`ParentAreaNum` for Alpha rows, remove
+  standalone half-word aliases, and forward the shared Zone/SubZone lookup context.
 - [x] T007 [US1] Expose current-tile/WMO audio diagnostics from `WorldScene` using the active
   listener/actor position while retaining the existing audio playback path.
 - [x] T008 [US1] Render a scrollable audio-trigger table with IDs, tile/chunk, raw XYZ, world XYZ,

@@ -5,6 +5,75 @@ Last updated: 2026-08-14
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-14 — Spec 149 resident Zone/SubZone overlay slice
+
+- Queried the restarted Ghidra bridge's open 0.5.3 program and confirmed `CMapChunk::Create @
+  0x00698e10` stores the MCNK area value, while `AreaTableRec::Read @ 0x00585e20` exposes
+  `AreaNumber`/`ContinentID`/`ParentAreaNum` and the native script getters keep ZoneText and
+  SubZoneText separate.
+- Added the Spec 149 resident-area story and handoff. `TerrainRenderer` now exposes a revisioned
+  resident chunk snapshot; `AreaOverlayRegionBuilder` groups map-aware AreaTable results into finite
+  Zone/Subzone footprint regions with deterministic colors and unresolved counts; `WorldScene` renders
+  opt-in footprint outlines/pins; `ViewerApp` projects one label per group; the investigation panel
+  exposes `Show Area Boundaries`, default off.
+- The viewer project compiles with 0 errors using an alternate output directory because the normal
+  running viewer executable is locked by PID 46216. Focused aggregation tests remain open; live visual
+  streaming proof remains user-owned.
+
+## 2026-08-14 — Spec 150 Alpha 0.5.3 renderer performance planning
+
+- Created an evidence-first Spec Kit pack for learning from the 0.5.3 OpenGL renderer without
+  porting original code: `specs/150-alpha-renderer-performance/`.
+- Reused the existing production `profile-render` path and current WorldScene/TerrainRenderer/object
+  counters as the baseline seam. The new lane requires native Ghidra anchors, explicit CPU versus
+  GPU/driver timing classification, one reversible optimization at a time, and user-owned real
+  client visual/FPS proof.
+- Current retained tile VAOs/texture arrays, bounded tile admission, object visibility collectors,
+  opaque batching, and GPU-instancing seams are foundations to measure, not proof of performance.
+- No renderer source optimization or native performance claim was made. Next step: record 0.5.3
+  renderer anchors and run two unchanged-source profiles before selecting the first owner.
+
+## 2026-08-14 — Spec 149 PM4 region navigation and audio trigger controls
+
+- Created the Spec Kit specification, research, data model, contracts, quickstart, and dependency-
+  ordered tasks for replacing PM4 correlation UI with decoded resident-region navigation and double-
+  click camera focus.
+- Amended the audio scope after live viewer evidence: decoded MCNK flags/liquid data are first-class
+  legacy environmental/water trigger inputs even when Alpha 0.5.3 has no MCSE, and later MCSE data is
+  additive. MCSE raw/local positions must be normalized with the owning tile/chunk before range checks
+  or OpenAL placement; diagnostics retain both forms.
+- Audited the music path against the 0.5.3 client contract: AreaMIDIAmbiences pairing is represented
+  correctly as day/night MIDI plus shared DLS metadata, but AreaTable.ZoneMusic is still incorrectly
+  treated as a direct SoundEntries ID. Spec 149 now requires ZoneMusic row -> Sounds[day/night] ->
+  SoundEntries indirection and explicit underwater ambience selection before playback claims.
+- Defined a default-off master/per-trigger world-audio policy covering MCNK, MCSE, and current-area
+  ZoneMusic inspection, while preserving explicit preview, provenance diagnostics, and MIDI/DLS gates.
+- Player-height/game-mode movement is explicitly deferred. Implementation, focused tests, build proof,
+  and user-run visual/streaming/audible proof remain open.
+
+## 2026-08-14 — Shared Alpha AreaNumber high/low resolution
+
+- Fixed the Alpha area contract across status and terrain audio: raw `AreaNumber` values are
+  decoded as `high16=zone` and `low16=subzone`, with unsigned bit preservation and continent/map
+  qualification. `AreaNumber`/`ParentAreaNum` are preferred for Alpha rows.
+- Removed the unsafe legacy aliases that treated the two component words as standalone area IDs.
+  Audio receives the status-bar's resolved ZoneText/SubzoneText context, so display and music row
+  selection cannot drift to different Zone/SubZone rows.
+- Added packed-word, high-bit, parent/inheritance, ambiguity, and reader regression coverage;
+  focused tests pass. Real-client audio/archive/audible proof remains user-owned.
+
+## 2026-08-14 — Alpha 0.5.3 Ghidra audio contract correction
+
+- Read the open 0.5.3 client in Ghidra and recorded the evidence in
+  `memory-bank/workstream-audio-client-053-ghidra.md`.
+- Confirmed `AreaMIDIAmbiences` row-level MIDI/DLS pairing and DirectMusic hand-off; confirmed that
+  `ZoneMusic` selects ordinary SoundEntries IDs rather than mapping a missing SoundEntries ID to MIDI.
+- Confirmed Alpha MCSE’s 0x34-byte on-disk record versus the client’s 0x4c-byte in-memory
+  `CWSoundEmitter`; corrected the reader and preserved its scheduler fields through the Alpha terrain
+  hand-off. Focused decoder coverage is the next validation target.
+- Confirmed the client’s map-emitter callback slots are cleared at initialization with no in-process
+  registration xref. Native callback equivalence and audible proof remain open.
+
 ## 2026-08-14 — Alpha packed AreaNumber ZoneMusic resolution
 
 - Corrected the active area-audio lookup to match the repository's DBCTool contract: Alpha

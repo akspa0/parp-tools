@@ -65,7 +65,15 @@ public sealed record TerrainSoundEmitter(
     uint StartTime,
     uint EndTime,
     uint Mode,
-    byte[] RawEntry);
+    byte[] RawEntry,
+    byte LoopCountMin = 0,
+    byte LoopCountMax = 0,
+    ushort GroupSilenceMin = 0,
+    ushort GroupSilenceMax = 0,
+    ushort PlayInstancesMin = 0,
+    ushort PlayInstancesMax = 0,
+    ushort InterSoundGapMin = 0,
+    ushort InterSoundGapMax = 0);
 
 public class AlphaTerrainAdapter : ITerrainAdapter
 {
@@ -238,7 +246,15 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                             emitter.StartTime,
                             emitter.EndTime,
                             emitter.Mode,
-                            emitter.RawEntry));
+                            emitter.RawEntry,
+                            emitter.LoopCountMin,
+                            emitter.LoopCountMax,
+                            emitter.GroupSilenceMin,
+                            emitter.GroupSilenceMax,
+                            emitter.PlayInstancesMin,
+                            emitter.PlayInstancesMax,
+                            emitter.InterSoundGapMin,
+                            emitter.InterSoundGapMax));
                     }
                 }
                 var chunkData = ExtractChunkData(mcnk, tileX, tileY, tileIdx);

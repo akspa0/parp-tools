@@ -45,7 +45,7 @@ public sealed class AlphaAreaAudioCatalogReader
                 "AreaMIDIAmbiences",
                 buildVersion));
 
-        return new AlphaAreaAudioCatalog(ParseAreas(areaTable), midiAmbiences);
+        return new AlphaAreaAudioCatalog(ParseAreas(areaTable, buildVersion), midiAmbiences);
     }
 
     /// <summary>
@@ -67,7 +67,7 @@ public sealed class AlphaAreaAudioCatalogReader
         IDBCDStorage areaTable = LoadTableWithDbcd(dbcProvider, definitionsDirectory, "AreaTable", buildVersion);
         IDBCDStorage? areaMidi = TryLoadOptionalTable(dbcProvider, definitionsDirectory, "AreaMIDIAmbiences", buildVersion);
         return new AlphaAreaAudioCatalog(
-            ParseAreas(areaTable),
+            ParseAreas(areaTable, buildVersion),
             areaMidi is null ? new Dictionary<int, AlphaAreaMidiAmbience>() : ParseMidiAmbiences(areaMidi));
     }
 
@@ -133,17 +133,18 @@ public sealed class AlphaAreaAudioCatalogReader
         }
     }
 
-    private static Dictionary<int, AlphaAreaRecord> ParseAreas(IDBCDStorage storage)
+    private static Dictionary<int, AlphaAreaRecord> ParseAreas(IDBCDStorage storage, string buildVersion)
     {
         Dictionary<int, AlphaAreaRecord> areas = [];
+        bool alphaAreaNumberLayout = buildVersion.StartsWith("0.5.", StringComparison.OrdinalIgnoreCase);
 
         foreach (DBCDRow row in storage.Values)
         {
+            int areaNumber = GetPackedIntField(row, "AreaNumber");
             int id = GetIntField(row, "ID") ?? 0;
-            int areaNumber = GetIntField(row, "AreaNumber") ?? 0;
-            if (id <= 0 && areaNumber > 0)
+            if (id == 0 && areaNumber != 0)
                 id = areaNumber;
-            if (id <= 0)
+            if (id == 0)
             {
                 continue;
             }
@@ -151,7 +152,9 @@ public sealed class AlphaAreaAudioCatalogReader
             AlphaAreaRecord entry = new(
                 id,
                 GetIntField(row, "ContinentID") ?? 0,
-                GetIntField(row, "ParentAreaID", "ParentAreaNum") ?? 0,
+                alphaAreaNumberLayout
+                    ? GetPackedIntField(row, "ParentAreaNum")
+                    : GetIntField(row, "ParentAreaID", "ParentAreaNum") ?? 0,
                 GetStringField(row, "AreaName_lang", "AreaName", "ZoneName") ?? string.Empty,
                 GetIntField(row, "MIDIAmbience") ?? 0,
                 GetIntField(row, "MIDIAmbienceUnderwater") ?? 0,
@@ -159,7 +162,7 @@ public sealed class AlphaAreaAudioCatalogReader
                 GetIntField(row, "IntroSound") ?? 0,
                 GetIntField(row, "IntroPriority") ?? 0,
                 areaNumber,
-                GetIntField(row, "ParentAreaNum") ?? 0);
+                GetPackedIntField(row, "ParentAreaNum"));
 
             areas[id] = entry;
         }
@@ -206,12 +209,12 @@ public sealed class AlphaAreaAudioCatalogReader
 
                 if (value is uint uintValue)
                 {
-                    return checked((int)uintValue);
+                    return unchecked((int)uintValue);
                 }
 
                 if (value is long longValue)
                 {
-                    return checked((int)longValue);
+                    return unchecked((int)longValue);
                 }
 
                 if (value is short shortValue)
@@ -245,6 +248,11 @@ public sealed class AlphaAreaAudioCatalogReader
         }
 
         return null;
+    }
+
+    private static int GetPackedIntField(DBCDRow row, params string[] fieldNames)
+    {
+        return GetIntField(row, fieldNames) ?? 0;
     }
 
     private static float? GetFloatField(DBCDRow row, params string[] fieldNames)

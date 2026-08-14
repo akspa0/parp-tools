@@ -83,13 +83,31 @@ quest, and authoritative world-mutation implementation.
   when the historical MIDI ambience table is absent.
 - For Alpha terrain, the area value from `MCNK.Unknown3` is the packed `AreaNumber`
   `(zone << 16) | subzone`; resolution is continent-qualified and follows `ParentAreaNum` before
-  using modern direct `ID`/`ParentAreaID` fallback. Paths still come only from DBC metadata and
-  the active client source.
+  using modern direct `ID`/`ParentAreaID` fallback. The viewer decodes this as two `ushort`
+  components through `AreaNumberParts`; the old high-word/low-word aliasing path is removed, and
+  the audio runtime receives the same resolved Zone/SubZone context used by the status bar. Paths
+  still come only from DBC metadata and the active client source.
 - The runtime loops a resolvable ZoneMusic asset through the existing OpenAL path and exposes an
   area-music diagnostic in the Audio panel. MIDI/DLS selections remain explicit unsupported states;
   no fake PCM conversion or filename inference was added.
 - Audible playback, area transition behavior, WMO-area selection, and camera/capture transport
   synchronization remain user-run or future gates.
+
+## 2026-08-14 client reverse-engineering checkpoint
+
+- In the open Alpha 0.5.3 client, `AreaMIDIAmbiences` is the authoritative MIDI/DLS pairing table:
+  the row provides day sequence, night sequence, and one shared DLS bank. The client asynchronously
+  loads both through `SFile`, connects the DLS collection to the MIDI segment through DirectMusic,
+  and starts the segment with the standard audio path.
+- `ZoneMusic` is separate from `SoundEntries`. A ZoneMusic row selects day/night SoundEntries IDs;
+  the ordinary SoundEntries table then chooses among up to ten declared filename/frequency pairs.
+  The observed missing SoundEntries ID 1 is genuine absence, not a MIDI mapping.
+- MCSE Alpha 0.5.3 records are 0x34 bytes on disk. The prior 76-byte assumption was the client’s
+  in-memory `CWSoundEmitter` size, not the file record size; the reader now decodes the proven
+  0x34-byte fields and preserves scheduler metadata.
+- The client has create/destroy callback slots for map sound emitters, but this executable clears
+  the slots and exposes no in-process registration xref. The viewer must not claim that its local
+  resident-emitter path is a native-equivalent client callback implementation.
 
 ## 2026-08-14 mute control checkpoint
 

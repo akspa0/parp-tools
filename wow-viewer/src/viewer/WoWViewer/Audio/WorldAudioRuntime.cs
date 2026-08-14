@@ -7,6 +7,7 @@ using WoWViewer.Terrain;
 using WowViewer.Core.Audio;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Maps;
+using WowViewer.Core.World;
 
 namespace WoWViewer.Audio;
 
@@ -274,7 +275,8 @@ public sealed class WorldAudioRuntime : IDisposable
         Vector3 listenerForward,
         int areaId = 0,
         float gameTime = 0.5f,
-        int continentId = -1)
+        int continentId = -1,
+        AreaLookupResult? areaLookup = null)
     {
         if (_disposed)
             return;
@@ -309,7 +311,7 @@ public sealed class WorldAudioRuntime : IDisposable
             return;
         }
 
-        UpdateAreaMusic(areaId, gameTime, continentId);
+        UpdateAreaMusic(areaId, gameTime, continentId, areaLookup);
 
         HashSet<EmitterKey> inRange = [];
         KeyValuePair<(int TileX, int TileY), IReadOnlyList<TerrainSoundEmitter>>[] tileSnapshot;
@@ -796,7 +798,11 @@ public sealed class WorldAudioRuntime : IDisposable
         }
     }
 
-    private void UpdateAreaMusic(int areaId, float gameTime, int continentId)
+    private void UpdateAreaMusic(
+        int areaId,
+        float gameTime,
+        int continentId,
+        AreaLookupResult? areaLookup)
     {
         if (_soundEntries is null || _areaAudioCatalog is null)
         {
@@ -804,19 +810,30 @@ public sealed class WorldAudioRuntime : IDisposable
             return;
         }
 
+        int areaNumber = areaLookup is
+            { Source: AreaContextSource.PackedAreaNumber, AreaNumber: int resolvedAreaNumber }
+            ? resolvedAreaNumber
+            : areaId;
+        AreaNumberParts areaNumberParts = AreaNumberParts.FromRaw(areaNumber);
         AlphaAreaAudioBinding? binding = _areaAudioCatalog.TryResolveWithParents(
-            areaId,
+            areaNumber,
             continentId >= 0 ? continentId : null);
         if (binding is null)
         {
             StopAreaMusic();
-            AreaMusicStatus = areaId > 0
-                ? $"AreaNumber/ID {areaId} has no DBC music assignment (continent={continentId})."
+            AreaMusicStatus = areaNumber != 0
+                ? $"AreaNumber 0x{areaNumberParts.Raw:X8} (zone={areaNumberParts.Zone}, subzone={areaNumberParts.Subzone}) has no DBC music assignment (continent={continentId})."
                 : "No terrain/WMO area is active for music resolution.";
             return;
         }
 
-        string areaLabel = $"Area {binding.Area.Id} (AreaNumber={binding.Area.AreaNumber})";
+        string areaLabel = areaLookup?.PrimaryText is { Length: > 0 } primaryText
+            ? areaLookup.ZoneText is { Length: > 0 } zoneText
+                && !string.Equals(zoneText, primaryText, StringComparison.Ordinal)
+                ? $"{primaryText} [{zoneText}]"
+                : primaryText
+            : $"Area {binding.Area.Id}";
+        areaLabel += $" (AreaNumber=0x{areaNumberParts.Raw:X8}, zone={areaNumberParts.Zone}, subzone={areaNumberParts.Subzone})";
         bool night = gameTime < 0.25f || gameTime >= 0.75f;
         int soundEntryId = binding.Area.ZoneMusicId;
         if (soundEntryId <= 0)

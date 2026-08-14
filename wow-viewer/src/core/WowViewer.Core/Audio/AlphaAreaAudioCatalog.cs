@@ -1,3 +1,5 @@
+using WowViewer.Core.World;
+
 namespace WowViewer.Core.Audio;
 
 public sealed record AlphaAreaMidiAmbience(
@@ -27,8 +29,8 @@ public sealed record AlphaAreaAudioBinding(
 
 public sealed class AlphaAreaAudioCatalog
 {
-    private readonly Dictionary<(int ContinentId, int AreaNumber), AlphaAreaRecord> _areasByContinentAreaNumber = [];
-    private readonly Dictionary<int, List<AlphaAreaRecord>> _areasByAreaNumber = [];
+    private readonly Dictionary<(int ContinentId, AreaNumberParts AreaNumber), AlphaAreaRecord> _areasByContinentAreaNumber = [];
+    private readonly Dictionary<AreaNumberParts, List<AlphaAreaRecord>> _areasByAreaNumber = [];
 
     public AlphaAreaAudioCatalog(
         IReadOnlyDictionary<int, AlphaAreaRecord> areas,
@@ -42,11 +44,12 @@ public sealed class AlphaAreaAudioCatalog
             if (area.AreaNumber == 0)
                 continue;
 
-            _areasByContinentAreaNumber[(area.ContinentId, area.AreaNumber)] = area;
-            if (!_areasByAreaNumber.TryGetValue(area.AreaNumber, out List<AlphaAreaRecord>? matches))
+            AreaNumberParts areaNumber = AreaNumberParts.FromRaw(area.AreaNumber);
+            _areasByContinentAreaNumber[(area.ContinentId, areaNumber)] = area;
+            if (!_areasByAreaNumber.TryGetValue(areaNumber, out List<AlphaAreaRecord>? matches))
             {
                 matches = [];
-                _areasByAreaNumber[area.AreaNumber] = matches;
+                _areasByAreaNumber[areaNumber] = matches;
             }
 
             if (matches.All(existing => existing.Id != area.Id))
@@ -60,24 +63,23 @@ public sealed class AlphaAreaAudioCatalog
 
     public AlphaAreaAudioBinding? TryResolve(int areaId, int? continentId = null)
     {
-        if (areaId <= 0)
+        if (areaId == 0)
             return null;
 
-        // DBCTool defines Alpha MCNK.Unknown3 as the packed AreaNumber
-        // (zone << 16) | subzone. The packed form is preferred for values
-        // outside the 16-bit ID range. For ordinary direct IDs, keep the
-        // canonical ID row authoritative and use AreaNumber only as a
-        // fallback so a modern ID cannot be hijacked by an alias.
-        bool packedAreaNumber = areaId > ushort.MaxValue;
+        // DBCTool defines Alpha MCNK.Unknown3 as AreaNumber with two 16-bit
+        // components: high16=zone and low16=subzone. Keep the two halves as
+        // the lookup key instead of treating the storage field as one ID.
+        AreaNumberParts areaNumber = AreaNumberParts.FromRaw(areaId);
+        bool packedAreaNumber = areaNumber.Zone != 0;
         if (packedAreaNumber)
         {
             if (continentId is int qualifiedContinent
-                && _areasByContinentAreaNumber.TryGetValue((qualifiedContinent, areaId), out AlphaAreaRecord? qualifiedArea))
+                && _areasByContinentAreaNumber.TryGetValue((qualifiedContinent, areaNumber), out AlphaAreaRecord? qualifiedArea))
             {
                 return CreateBinding(qualifiedArea);
             }
 
-            if (_areasByAreaNumber.TryGetValue(areaId, out List<AlphaAreaRecord>? areaNumberMatches)
+            if (_areasByAreaNumber.TryGetValue(areaNumber, out List<AlphaAreaRecord>? areaNumberMatches)
                 && areaNumberMatches.Count == 1)
             {
                 return CreateBinding(areaNumberMatches[0]);
@@ -91,13 +93,13 @@ public sealed class AlphaAreaAudioCatalog
 
         if (!packedAreaNumber
             && continentId is int fallbackContinent
-            && _areasByContinentAreaNumber.TryGetValue((fallbackContinent, areaId), out AlphaAreaRecord? fallbackQualifiedArea))
+            && _areasByContinentAreaNumber.TryGetValue((fallbackContinent, areaNumber), out AlphaAreaRecord? fallbackQualifiedArea))
         {
             return CreateBinding(fallbackQualifiedArea);
         }
 
         if (!packedAreaNumber
-            && _areasByAreaNumber.TryGetValue(areaId, out List<AlphaAreaRecord>? fallbackAreaNumberMatches)
+            && _areasByAreaNumber.TryGetValue(areaNumber, out List<AlphaAreaRecord>? fallbackAreaNumberMatches)
             && fallbackAreaNumberMatches.Count == 1)
         {
             return CreateBinding(fallbackAreaNumberMatches[0]);

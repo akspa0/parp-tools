@@ -24,7 +24,7 @@ public sealed class AlphaAreaAudioCatalogReaderTests
                     fieldCount: 14,
                     rows:
                     [
-                        [1u, 1u, 0u, 0u, 0u, 0u, 0u, 0u, 7u, 8u, 0u, 0u, 0u, strings["Elwynn Forest"]],
+                        [42u, 0x000A0001u, 0u, 0x000A0000u, 0u, 0u, 0u, 0u, 7u, 8u, 0u, 0u, 0u, strings["Elwynn Forest"]],
                     ],
                     stringBlockEntries: strings.Keys),
                 ["DBFilesClient\\AreaMIDIAmbiences.dbc"] = BuildDbc(
@@ -44,11 +44,12 @@ public sealed class AlphaAreaAudioCatalogReaderTests
         Assert.Single(catalog.Areas);
         Assert.Equal(2, catalog.MidiAmbiences.Count);
 
-        var binding = catalog.TryResolve(1);
+        var binding = catalog.TryResolve(0x000A0001, continentId: 0);
         Assert.NotNull(binding);
+        Assert.Equal(42, binding.Area.Id);
         Assert.Equal("Elwynn Forest", binding.Area.AreaName);
-        Assert.Equal(1, binding.Area.AreaNumber);
-        Assert.Equal(0, binding.Area.ParentAreaNumber);
+        Assert.Equal(0x000A0001, binding.Area.AreaNumber);
+        Assert.Equal(0x000A0000, binding.Area.ParentAreaNumber);
         Assert.Equal(7, binding.Area.MidiAmbienceId);
         Assert.Equal(8, binding.Area.MidiAmbienceUnderwaterId);
         Assert.Equal("Sound\\Ambience\\MIDI\\ElwynnDay.mid", binding.MidiAmbience?.DaySequence);

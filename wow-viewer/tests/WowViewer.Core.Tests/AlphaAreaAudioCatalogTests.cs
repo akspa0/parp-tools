@@ -98,4 +98,22 @@ public sealed class AlphaAreaAudioCatalogTests
         Assert.Equal(321, catalog.TryResolve(areaNumber, 0)!.Area.ZoneMusicId);
         Assert.Equal(654, catalog.TryResolve(areaNumber, 1)!.Area.ZoneMusicId);
     }
+
+    [Fact]
+    public void TryResolve_UsesHighAndLowWordsForUnsignedPackedAreaNumbers()
+    {
+        const int areaNumber = unchecked((int)0x80010002);
+
+        AlphaAreaAudioCatalog catalog = new(
+            new Dictionary<int, AlphaAreaRecord>
+            {
+                [areaNumber] = new(areaNumber, 0, 0, "Unsigned packed area", 0, 0, 777, 0, 0, areaNumber, 0)
+            },
+            new Dictionary<int, AlphaAreaMidiAmbience>());
+
+        AlphaAreaAudioBinding? binding = catalog.TryResolve(areaNumber, 0);
+
+        Assert.NotNull(binding);
+        Assert.Equal(777, binding!.Area.ZoneMusicId);
+    }
 }

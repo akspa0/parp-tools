@@ -1,5 +1,28 @@
 namespace WowViewer.Core.World;
 
+/// <summary>
+/// Alpha AreaNumber storage is a 32-bit value whose identity is two 16-bit
+/// values: the zone in the high word and the subzone in the low word.
+/// </summary>
+public readonly record struct AreaNumberParts(ushort Zone, ushort Subzone)
+{
+    public uint Raw => ((uint)Zone << 16) | Subzone;
+
+    public uint ZoneBase => (uint)Zone << 16;
+
+    public int SignedRaw => unchecked((int)Raw);
+
+    public int SignedZoneBase => unchecked((int)ZoneBase);
+
+    public static AreaNumberParts FromRaw(int raw)
+    {
+        uint value = unchecked((uint)raw);
+        return new AreaNumberParts(
+            (ushort)(value >> 16),
+            (ushort)(value & ushort.MaxValue));
+    }
+}
+
 public enum AreaResolutionReason
 {
     Resolved,

@@ -12,8 +12,8 @@ namespace WoWViewer.Terrain;
 public class AreaTableService
 {
     private readonly Dictionary<int, AreaEntry> _areas = new();
-    private readonly Dictionary<(int MapId, int AreaNumber), AreaEntry> _areasByMapAndNumber = new();
-    private readonly Dictionary<int, List<AreaEntry>> _areasByNumber = new();
+    private readonly Dictionary<(int MapId, AreaNumberParts AreaNumber), AreaEntry> _areasByMapAndNumber = new();
+    private readonly Dictionary<AreaNumberParts, List<AreaEntry>> _areasByNumber = new();
     private int _rowCount;
     private int _primaryKeyCount;
     private int _fallbackAliasCount;
@@ -84,9 +84,12 @@ public class AreaTableService
 
         // Detect column names from the active DBD-backed layout rather than probing a row.
         string? nameCol = DetectColumn(availableColumns, "AreaName_lang", "AreaName", "Name");
+        bool alphaAreaNumberLayout = build.StartsWith("0.5.", StringComparison.OrdinalIgnoreCase);
         string? idCol = DetectColumn(availableColumns, "ID", "AreaID", "AreaNumber");
         string? areaNumberCol = DetectColumn(availableColumns, "AreaNumber");
-        string? parentCol = DetectColumn(availableColumns, "ParentAreaID", "ParentAreaNum");
+        string? parentCol = alphaAreaNumberLayout
+            ? DetectColumn(availableColumns, "ParentAreaNum", "ParentAreaID")
+            : DetectColumn(availableColumns, "ParentAreaID", "ParentAreaNum");
         string? parentNumberCol = DetectColumn(availableColumns, "ParentAreaNum");
         string? mapCol = DetectColumn(availableColumns, "ContinentID", "MapID", "Continent");
         string? flagsCol = DetectColumn(availableColumns, "Flags", "AreaFlags");
@@ -96,29 +99,28 @@ public class AreaTableService
         MapColumn = mapCol;
         FlagsColumn = flagsCol;
 
-        // MCNK AreaId should resolve against the canonical AreaTable ID for the active layout.
-        // Older tables also expose AreaNumber-style aliases, so keep those as fallbacks instead
-        // of treating them as the primary key for every build.
+        // Standard MCNK values are direct AreaTable IDs. Alpha MCNK values use
+        // AreaNumber with high16=zone and low16=subzone, so AreaNumber is the
+        // primary key for the Alpha layout and is indexed by both halves.
         foreach (var key in storage.Keys)
         {
             _rowCount++;
             var row = storage[key];
-            int areaId = SafeField<int>(row, idCol, key);
+            int areaId = SafeIntField(row, idCol, key);
             if (areaId == 0 && key != 0)
                 areaId = key;
 
             string name = Sanitize(SafeField<string>(row, nameCol, string.Empty) ?? string.Empty);
-            int parentId = SafeField<int>(row, parentCol, 0);
-            int mapId = SafeField<int>(row, mapCol, 0);
-            int flags = SafeField<int>(row, flagsCol, 0);
-            int areaNumber = SafeField<int>(row, areaNumberCol, 0);
-            int parentAreaNumber = SafeField<int>(row, parentNumberCol, 0);
+            int parentId = SafeIntField(row, parentCol, 0);
+            int mapId = SafeIntField(row, mapCol, 0);
+            int flags = SafeIntField(row, flagsCol, 0);
+            int areaNumber = SafeIntField(row, areaNumberCol, 0);
+            int parentAreaNumber = SafeIntField(row, parentNumberCol, 0);
 
             var entry = new AreaEntry(areaId, name, parentId, mapId, flags, areaNumber, parentAreaNumber);
             RegisterPrimary(areaId, entry);
             RegisterAlias(key, entry);
             RegisterAlias(areaNumber, entry);
-            RegisterLegacyPackedAreaNumberAliases(build, areaNumber, entry);
             RegisterAreaNumber(entry);
         }
 
@@ -159,7 +161,8 @@ public class AreaTableService
     /// <summary>
     /// Get area name with parent context, but only if the area belongs to the given MapID.
     /// Returns null if the area belongs to a different map or AreaID is not found.
-    /// MCNK AreaID maps directly to AreaTable.dbc ID — no byte packing.
+    /// Alpha MCNK values are packed AreaNumbers: high16 is the zone and low16
+    /// is the subzone. Standard MCNK values remain direct AreaTable IDs.
     /// </summary>
     public string? GetAreaDisplayNameForMap(int areaId, int mapId)
     {
@@ -186,12 +189,13 @@ public class AreaTableService
         AreaEntry? entry = null;
         AreaContextSource source = AreaContextSource.DirectAreaId;
 
-        if (_areasByMapAndNumber.TryGetValue((mapId, rawAreaId), out var packedEntry))
+        AreaNumberParts rawAreaNumber = AreaNumberParts.FromRaw(rawAreaId);
+        if (_areasByMapAndNumber.TryGetValue((mapId, rawAreaNumber), out var packedEntry))
         {
             entry = packedEntry;
             source = AreaContextSource.PackedAreaNumber;
         }
-        else if (mapId < 0 && TryGetUniqueAreaNumber(rawAreaId, out packedEntry))
+        else if (mapId < 0 && TryGetUniqueAreaNumber(rawAreaNumber, out packedEntry))
         {
             entry = packedEntry;
             source = AreaContextSource.PackedAreaNumber;
@@ -244,18 +248,19 @@ public class AreaTableService
         if (entry.AreaNumber == 0)
             return;
 
-        _areasByMapAndNumber.TryAdd((entry.MapId, entry.AreaNumber), entry);
-        if (!_areasByNumber.TryGetValue(entry.AreaNumber, out var entries))
+        AreaNumberParts areaNumber = AreaNumberParts.FromRaw(entry.AreaNumber);
+        _areasByMapAndNumber.TryAdd((entry.MapId, areaNumber), entry);
+        if (!_areasByNumber.TryGetValue(areaNumber, out var entries))
         {
             entries = new List<AreaEntry>();
-            _areasByNumber[entry.AreaNumber] = entries;
+            _areasByNumber[areaNumber] = entries;
         }
 
         if (entries.All(existing => existing.Id != entry.Id))
             entries.Add(entry);
     }
 
-    private bool TryGetUniqueAreaNumber(int areaNumber, out AreaEntry entry)
+    private bool TryGetUniqueAreaNumber(AreaNumberParts areaNumber, out AreaEntry entry)
     {
         if (_areasByNumber.TryGetValue(areaNumber, out var entries) && entries.Count == 1)
         {
@@ -270,7 +275,8 @@ public class AreaTableService
     private AreaEntry? TryGetParent(AreaEntry entry)
     {
         if (entry.ParentAreaNumber != 0
-            && _areasByMapAndNumber.TryGetValue((entry.MapId, entry.ParentAreaNumber), out var packedParent))
+            && _areasByMapAndNumber.TryGetValue(
+                (entry.MapId, AreaNumberParts.FromRaw(entry.ParentAreaNumber)), out var packedParent))
             return packedParent;
 
         if (entry.ParentAreaId != 0 && _areas.TryGetValue(entry.ParentAreaId, out var directParent))
@@ -318,17 +324,6 @@ public class AreaTableService
         _fallbackAliasCount++;
     }
 
-    private void RegisterLegacyPackedAreaNumberAliases(string? build, int areaNumber, AreaEntry entry)
-    {
-        if (areaNumber == 0 || string.IsNullOrWhiteSpace(build) || !build.StartsWith("0.5.", StringComparison.OrdinalIgnoreCase))
-            return;
-
-        int lowWord = areaNumber & 0xFFFF;
-        int highWord = (int)((uint)areaNumber >> 16);
-        RegisterAlias(lowWord, entry);
-        RegisterAlias(highWord, entry);
-    }
-
     private static string? DetectColumn(ISet<string> availableColumns, params string[] candidates)
     {
         foreach (var col in candidates)
@@ -347,6 +342,33 @@ public class AreaTableService
 
         try { return (T)row[col]; }
         catch { return fallback; }
+    }
+
+    private static int SafeIntField(dynamic row, string? col, int fallback)
+    {
+        if (string.IsNullOrWhiteSpace(col))
+            return fallback;
+
+        try
+        {
+            object value = row[col];
+            return value switch
+            {
+                int intValue => intValue,
+                uint uintValue => unchecked((int)uintValue),
+                long longValue => unchecked((int)longValue),
+                ulong ulongValue => unchecked((int)ulongValue),
+                short shortValue => shortValue,
+                ushort ushortValue => ushortValue,
+                byte byteValue => byteValue,
+                sbyte sbyteValue => sbyteValue,
+                _ => Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture)
+            };
+        }
+        catch
+        {
+            return fallback;
+        }
     }
 
     private static string FormatColumn(string? col)

@@ -35,6 +35,17 @@ public sealed class AudioRuntimeContractTests
         BinaryPrimitives.WriteSingleLittleEndian(emitter.Slice(0x14, 4), 4f);
         BinaryPrimitives.WriteSingleLittleEndian(emitter.Slice(0x18, 4), 25f);
         BinaryPrimitives.WriteSingleLittleEndian(emitter.Slice(0x1C, 4), 30f);
+        BinaryPrimitives.WriteUInt16LittleEndian(emitter.Slice(0x20, 2), 100);
+        BinaryPrimitives.WriteUInt16LittleEndian(emitter.Slice(0x22, 2), 200);
+        BinaryPrimitives.WriteUInt16LittleEndian(emitter.Slice(0x24, 2), 3);
+        emitter[0x26] = 1;
+        emitter[0x27] = 4;
+        BinaryPrimitives.WriteUInt16LittleEndian(emitter.Slice(0x28, 2), 10);
+        BinaryPrimitives.WriteUInt16LittleEndian(emitter.Slice(0x2A, 2), 20);
+        BinaryPrimitives.WriteUInt16LittleEndian(emitter.Slice(0x2C, 2), 2);
+        BinaryPrimitives.WriteUInt16LittleEndian(emitter.Slice(0x2E, 2), 5);
+        BinaryPrimitives.WriteUInt16LittleEndian(emitter.Slice(0x30, 2), 30);
+        BinaryPrimitives.WriteUInt16LittleEndian(emitter.Slice(0x32, 2), 40);
 
         AdtMcseData result = AdtMcseReader.ReadAlpha053Mcnk(payload);
 
@@ -47,6 +58,17 @@ public sealed class AudioRuntimeContractTests
         Assert.Equal(4f, decoded.MinDistance);
         Assert.Equal(25f, decoded.MaxDistance);
         Assert.Equal(30f, decoded.CutoffDistance);
+        Assert.Equal((uint)100, decoded.StartTime);
+        Assert.Equal((uint)200, decoded.EndTime);
+        Assert.Equal((uint)3, decoded.Mode);
+        Assert.Equal((byte)1, decoded.LoopCountMin);
+        Assert.Equal((byte)4, decoded.LoopCountMax);
+        Assert.Equal((ushort)10, decoded.GroupSilenceMin);
+        Assert.Equal((ushort)20, decoded.GroupSilenceMax);
+        Assert.Equal((ushort)2, decoded.PlayInstancesMin);
+        Assert.Equal((ushort)5, decoded.PlayInstancesMax);
+        Assert.Equal((ushort)30, decoded.InterSoundGapMin);
+        Assert.Equal((ushort)40, decoded.InterSoundGapMax);
         Assert.Equal(AdtMcseReader.Alpha053EntrySize, decoded.RawEntry.Length);
     }
 

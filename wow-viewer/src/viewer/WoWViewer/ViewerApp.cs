@@ -197,6 +197,10 @@ public partial class ViewerApp : IDisposable
     private int _areaLookupTick;
     private int _lastAreaLookupLoadedTileCount = -1;
     private int _lastAreaLookupMapId = int.MinValue;
+    private TerrainRenderer? _areaOverlayRenderer;
+    private AreaTableService? _areaOverlayAreaTableService;
+    private int _areaOverlayRevision = int.MinValue;
+    private int _areaOverlayMapId = int.MinValue;
     private int _currentMapId = -1; // MapID of the currently loaded world
     private string? _lastWorldSceneWdtPath;
     private Vector3 _lastWorldSceneCameraPosition;
@@ -1514,6 +1518,8 @@ var seq = animator.Sequences[animator.CurrentSequence];
             // resident chunk-info index instead of the legacy per-chunk GPU mesh list.
             var areaChunkRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
             UpdateCurrentAreaContext(areaChunkRenderer);
+            _worldScene?.SetCurrentAreaLookup(_currentAreaLookup);
+            UpdateAreaOverlay(areaChunkRenderer);
 
             // Render the scene
             if (_renderer is IModelRenderer modelRenderer)
@@ -1555,6 +1561,16 @@ var seq = animator.Sequences[animator.CurrentSequence];
                 // WorldScene / VLM terrain — handles its own lighting
                 _renderer.Render(view, proj);
                 DrawEditorOverlays(view, proj);
+                if (hasSceneViewportRect)
+                {
+                    DrawAreaOverlayLabels(
+                        view,
+                        proj,
+                        sceneViewportX,
+                        sceneViewportY,
+                        sceneViewportWidth,
+                        sceneViewportHeight);
+                }
             }
 
             if (hasSceneViewport)
@@ -10902,6 +10918,94 @@ void main() {
 
         if (_currentAreaLookup.Reason != WowViewer.Core.World.AreaResolutionReason.Resolved)
             ReportAreaLookupDiagnostic(_currentAreaLookup.RawAreaId);
+    }
+
+    private void UpdateAreaOverlay(TerrainRenderer? renderer)
+    {
+        if (_worldScene == null || !_worldScene.ShowAreaRegionOverlay)
+            return;
+
+        if (_areaTableService == null || renderer == null)
+        {
+            _worldScene.SetAreaOverlay(new AreaOverlayBuildResult(
+                Array.Empty<AreaOverlayRegion>(),
+                0,
+                0));
+            _areaOverlayRenderer = renderer;
+            _areaOverlayAreaTableService = _areaTableService;
+            _areaOverlayRevision = int.MinValue;
+            _areaOverlayMapId = _currentMapId;
+            return;
+        }
+
+        if (ReferenceEquals(_areaOverlayRenderer, renderer)
+            && ReferenceEquals(_areaOverlayAreaTableService, _areaTableService)
+            && _areaOverlayRevision == renderer.ResidentChunkRevision
+            && _areaOverlayMapId == _currentMapId)
+        {
+            return;
+        }
+
+        AreaOverlayBuildResult result = AreaOverlayRegionBuilder.Build(
+            renderer.EnumerateResidentChunkInfos(),
+            _areaTableService,
+            _currentMapId);
+        _worldScene.SetAreaOverlay(result);
+        _areaOverlayRenderer = renderer;
+        _areaOverlayAreaTableService = _areaTableService;
+        _areaOverlayRevision = renderer.ResidentChunkRevision;
+        _areaOverlayMapId = _currentMapId;
+    }
+
+    private void DrawAreaOverlayLabels(
+        Matrix4x4 view,
+        Matrix4x4 proj,
+        float viewportX,
+        float viewportY,
+        float viewportWidth,
+        float viewportHeight)
+    {
+        if (_worldScene is not { ShowAreaRegionOverlay: true } scene || scene.AreaOverlayRegions.Count == 0)
+            return;
+
+        var drawList = ImGui.GetForegroundDrawList();
+        foreach (AreaOverlayRegion region in scene.AreaOverlayRegions)
+        {
+            if (!TryProjectWorldToViewport(
+                    region.LabelPosition,
+                    view,
+                    proj,
+                    viewportWidth,
+                    viewportHeight,
+                    out Vector2 projected))
+            {
+                continue;
+            }
+
+            if (projected.X < -80f || projected.X > viewportWidth + 80f
+                || projected.Y < -40f || projected.Y > viewportHeight + 40f)
+            {
+                continue;
+            }
+
+            string label = $"{(region.Kind == AreaOverlayRegionKind.Zone ? "Zone" : "Subzone")}: {region.Name}";
+            Vector2 textSize = ImGui.CalcTextSize(label);
+            Vector2 textPos = new(
+                viewportX + projected.X - textSize.X * 0.5f,
+                viewportY + projected.Y - textSize.Y - 16f);
+            Vector2 rectMin = textPos - new Vector2(8f, 5f);
+            Vector2 rectMax = textPos + textSize + new Vector2(8f, 5f);
+            Vector4 color = new(region.Color, 1f);
+            Vector4 background = new(region.Color * 0.32f + new Vector3(0.05f), 0.92f);
+
+            drawList.AddCircleFilled(
+                new(viewportX + projected.X, viewportY + projected.Y),
+                4f,
+                ImGui.ColorConvertFloat4ToU32(color));
+            drawList.AddRectFilled(rectMin, rectMax, ImGui.ColorConvertFloat4ToU32(background), 4f);
+            drawList.AddRect(rectMin, rectMax, ImGui.ColorConvertFloat4ToU32(color), 4f, ImDrawFlags.None, 1.5f);
+            drawList.AddText(textPos, ImGui.ColorConvertFloat4ToU32(new Vector4(0.98f, 0.99f, 1f, 1f)), label);
+        }
     }
 
     private static ModelContainerKind DetectModelContainer(byte[] modelBytes)

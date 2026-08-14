@@ -46,6 +46,7 @@ public class TerrainRenderer : IDisposable
     private readonly Dictionary<(int tileX, int tileY, int chunkX, int chunkY), global::WoWViewer.Terrain.TerrainChunkInfo> _chunkInfoByKey = new();
     private readonly Dictionary<(int tileX, int tileY, int chunkX, int chunkY), TerrainChunkMesh> _chunkMeshByKey = new();
     private int _loadedTileChunkCount;
+    private int _residentChunkRevision;
 
     private readonly Dictionary<(int, int), List<string>> _tileTextures = new();
     private readonly Dictionary<(int, int), float> _tileAlphas = new();
@@ -89,6 +90,7 @@ public class TerrainRenderer : IDisposable
     public float ContourInterval { get; set; } = 2.0f;
 
     public int LoadedChunkCount => _loadedTileChunkCount > 0 ? _loadedTileChunkCount : _chunks.Count;
+    public int ResidentChunkRevision => _residentChunkRevision;
     public TerrainLighting Lighting => _lighting;
 
     public readonly struct TerrainChunkInfo
@@ -154,6 +156,15 @@ public class TerrainRenderer : IDisposable
 
         info = default;
         return false;
+    }
+
+    public IEnumerable<TerrainChunkInfo> EnumerateResidentChunkInfos()
+    {
+        foreach (List<global::WoWViewer.Terrain.TerrainChunkInfo> infos in _chunkInfosByTile.Values)
+        {
+            foreach (global::WoWViewer.Terrain.TerrainChunkInfo info in infos)
+                yield return new TerrainChunkInfo(info);
+        }
     }
 
     private static bool TryGetTileKey(float worldX, float worldY, out (int tileX, int tileY) tileKey)
@@ -345,6 +356,7 @@ public class TerrainRenderer : IDisposable
             _chunkInfoByKey[(chunkInfo.TileX, chunkInfo.TileY, chunkInfo.ChunkX, chunkInfo.ChunkY)] = chunkInfo;
 
         _loadedTileChunkCount += chunkInfos.Count;
+        _residentChunkRevision++;
 
         ViewerLog.Trace($"[TerrainRenderer] Now rendering {_tiles.Count} batched tiles ({_loadedTileChunkCount} chunks)");
     }
@@ -367,6 +379,7 @@ public class TerrainRenderer : IDisposable
             foreach (var chunkInfo in infos)
                 _chunkInfoByKey.Remove((chunkInfo.TileX, chunkInfo.TileY, chunkInfo.ChunkX, chunkInfo.ChunkY));
             _chunkInfosByTile.Remove(key);
+            _residentChunkRevision++;
         }
     }
 
@@ -1784,6 +1797,8 @@ void main() {
         _tiles.Clear();
         _tileMap.Clear();
         _chunkInfosByTile.Clear();
+        _chunkInfoByKey.Clear();
+        _residentChunkRevision++;
         _loadedTileChunkCount = 0;
 
         foreach (var chunk in _chunks)

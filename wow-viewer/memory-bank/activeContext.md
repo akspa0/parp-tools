@@ -7,28 +7,42 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 148 Phase 1 audio truth surface: have the user run a
-  configured client and inspect packed Alpha AreaNumber/ZoneMusic resolution, then finish the
-  remaining source/read/decode diagnostics.
-- **Proof owner:** Focused audio/coordinate tests and cross-platform viewer build pass; the user owns
-  real-client archive provenance, audible playback, and FPS/near-field visual proof.
-- **Completed slice:** Spec 148 now has a provenance-first world-simulator spec/plan/tasks pack;
-  MCSE emitters preserve raw and transformed positions; Alpha AreaNumber resolution follows the
-  DBCTool packed zone/subzone and `ParentAreaNum` contract; the runtime exposes non-playing
-  diagnostic rows; the audio panel shows IDs, coordinates, path/source, decode/backend state, and
-  terminal reason.
-- **Main unproven gap:** The current slice does not yet prove exact `sounds.mpq` provenance, does not
-  enumerate WMO-area triggers, and has not changed any MCSE coordinate transform or MIDI/DLS backend.
-- **Explicitly out of scope for the next slice:** Camera model rendering, whole-map loading,
-  renderer rewrite, shader reconstruction, fake audio conversion, and claims of audible/FPS gains.
+- **Next implementation target:** Continue Spec 149 from the new resident Zone/SubZone overlay slice:
+  add focused aggregation coverage, then implement the PM4 region contracts/navigation and audio trigger
+  controls in their checkpoints. The overlay is already wired as opt-in resident-footprint evidence.
+- **Performance planning target:** Spec 150 now owns the Alpha 0.5.3 renderer performance lane. Recover
+  native render anchors in the open client and run repeated `profile-render` baselines before selecting
+  one reversible optimization; do not infer a win from the interactive 23 FPS screenshot.
+- **Proof owner:** Focused PM4/audio contract tests and cross-platform viewer build pass; the user owns
+  real-client region-camera, streaming, archive-provenance, and audible proof.
+- **Completed slice:** Spec 149 now has an opt-in resident Zone/SubZone overlay slice: Ghidra-backed
+  MCNK AreaNumber evidence, revisioned resident chunk enumeration, AreaTable-grouped footprint regions,
+  distinct Zone/Subzone styling, projected labels, and unresolved-count diagnostics. Spec 148 now has a
+  provenance-first world-simulator spec/plan/tasks pack;
+  MCSE emitters preserve raw/transformed positions and the proven Alpha 0.5.3 0x34-byte scheduler
+  fields; shared Alpha AreaNumber resolution splits high/low `ushort` zone/subzone words and follows
+  `ParentAreaNum` without half-word aliases; status-bar and terrain audio now consume the same
+  resolved Zone/SubZone result; the runtime exposes non-playing diagnostic rows; the audio panel
+  shows IDs, coordinates, path/source, decode/backend state, and terminal reason.
+- **Main unproven gap:** Spec 149's PM4 region bounds/focus, correlation UI retirement, focused area
+  aggregation tests, MCNK/liquid environmental audio, MCSE tile/chunk coordinate normalization, and
+  default-off per-trigger audio controls remain open. The area overlay is resident chunk coverage, not
+  a proven complete polygon. ZoneMusic table indirection, exact `sounds.mpq` provenance, MIDI/DLS
+  playback, and native MCSE callback installation remain separate proof gates. Spec 150 still lacks
+  native renderer anchors, repeatable 0.5.3 baseline capture, and CPU/GPU attribution.
+- **Explicitly out of scope for the next slice:** Player/game-mode camera, player height, walking/running
+  speed, jumping, collision, camera model rendering, whole-map loading, renderer rewrite, shader
+  reconstruction, fake audio conversion, and claims of audible/FPS gains.
 
 ## Active spec lanes
 
 | Spec | State | Next handoff |
 |---|---|---|
-| 148 Artifact world simulator runtime | Phase 1 diagnostics in progress; user gate open | Finish read/decode/source-stage coverage, then inspect a real client before actor/residency work. |
+| 149 PM4 region navigation/audio trigger controls | Draft pack; resident area overlay slice implemented, focused tests open | Add area aggregation tests, then implement contracts/caller audit and resident PM4 region list + double-click camera focus; retire correlation UI only after that checkpoint; gate audio triggers default-off. |
+| 150 Alpha 0.5.3 renderer performance | Draft evidence/planning pack complete; no source optimization started | Recover native world/terrain/object/resource/LOD anchors and run two repeated production `profile-render` baselines before choosing one owner. |
+| 148 Artifact world simulator runtime | Phase 1 diagnostics in progress; client contract correction landed | Add ZoneMusic indirection, then finish read/decode/source-stage coverage and user real-client inspection. |
 | 147 Minimap/fog/doodad instancing | Phase 2 implemented; Phase 3/4 open | User-run minimap proof, then implement fog coverage and structured batching diagnostics. |
-| 146 Audio/camera playback | AreaNumber-aware ZoneMusic resolution and master mute control implemented; playback gates open | User-run packed Alpha AreaNumber/ZoneMusic proof; MIDI/DLS remains unsupported. |
+| 146 Audio/camera playback | AreaNumber-aware area selection and master mute control implemented; client audio contracts recovered | Add ZoneMusic row resolution; MIDI/DLS and native MCSE callback proof remain gated. |
 | 144 Camera capture paths | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions. |
 | 145 WoW UI overhaul | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks. |
 | 143 World context and lighting | LIT source/fallback and pre-alpha v2 parser implemented with user gate | Validate the v2 viewer path, then continue WMO area and lighting evidence. |

@@ -69,6 +69,7 @@ using VisibleWmoInstance = WowViewer.Core.Runtime.World.Visibility.WorldVisibleW
 using WowViewer.Core.Runtime.World;
 using WowViewer.Core.Runtime.World.SceneGraph;
 using WowViewer.Core.Runtime.World.Visibility;
+using WowViewer.Core.World;
 
 namespace WoWViewer.Terrain;
 
@@ -3476,6 +3477,7 @@ public class WorldScene : ISceneRenderer
     private string? _dbcBuild;
     private int _mapId = -1;
     private WorldAudioRuntime? _audioRuntime;
+    private AreaLookupResult? _currentAreaLookup;
     private bool _audioMuted;
     public string AudioStatus => _audioRuntime?.Status ?? "Audio runtime not configured.";
     public string AudioLastDiagnostic => _audioRuntime?.LastDiagnostic ?? "Audio runtime not configured.";
@@ -3510,6 +3512,14 @@ public class WorldScene : ISceneRenderer
 
     public void SetAudioEmitterGain(float gain) => _audioRuntime?.SetEmitterGain(gain);
 
+    /// <summary>
+    /// Supplies the same Zone/SubZone resolution used by the viewer status bar
+    /// to the audio runtime. This keeps packed Alpha AreaNumber handling in one
+    /// lookup path instead of making audio reinterpret the raw chunk value.
+    /// </summary>
+    public void SetCurrentAreaLookup(AreaLookupResult? areaLookup)
+        => _currentAreaLookup = areaLookup;
+
     private static bool FailAudioPreview(string message, out string reason)
     {
         reason = message;
@@ -3523,6 +3533,10 @@ public class WorldScene : ISceneRenderer
     // Alpha LIT lighting (lazy-loaded on first request)
     private LitLoader? _litLoader;
     private bool _showLitLights;
+    private bool _showAreaRegionOverlay;
+    private IReadOnlyList<AreaOverlayRegion> _areaOverlayRegions = Array.Empty<AreaOverlayRegion>();
+    private int _areaOverlayResidentChunkCount;
+    private int _areaOverlayUnresolvedChunkCount;
     private bool _showLitMinimapMarkers;
     private bool _litLoadAttempted;
     private bool _useLitFogOverride;
@@ -3585,6 +3599,24 @@ public class WorldScene : ISceneRenderer
             if (value && !_litLoadAttempted)
                 LazyLoadLit();
         }
+    }
+
+    public bool ShowAreaRegionOverlay
+    {
+        get => _showAreaRegionOverlay;
+        set => _showAreaRegionOverlay = value;
+    }
+
+    public IReadOnlyList<AreaOverlayRegion> AreaOverlayRegions => _areaOverlayRegions;
+    public int AreaOverlayResidentChunkCount => _areaOverlayResidentChunkCount;
+    public int AreaOverlayUnresolvedChunkCount => _areaOverlayUnresolvedChunkCount;
+
+    public void SetAreaOverlay(AreaOverlayBuildResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        _areaOverlayRegions = result.Regions;
+        _areaOverlayResidentChunkCount = result.ResidentChunkCount;
+        _areaOverlayUnresolvedChunkCount = result.UnresolvedChunkCount;
     }
 
     public bool UseLocalDbcLightingOverlay
@@ -10347,7 +10379,13 @@ public class WorldScene : ISceneRenderer
                     _lastRenderedCameraPosition = cameraPos;
                     _hasLastRenderedCameraPosition = true;
                     int audioAreaId = _terrainManager.Renderer.GetChunkInfoAt(cameraPos.X, cameraPos.Y)?.AreaId ?? 0;
-                    _audioRuntime?.Update(cameraPos, cameraForward, audioAreaId, lighting.GameTime, _mapId);
+                    _audioRuntime?.Update(
+                        cameraPos,
+                        cameraForward,
+                        audioAreaId,
+                        lighting.GameTime,
+                        _mapId,
+                        _currentAreaLookup);
 
                     EnsurePm4OverlayMatchesCameraWindow(cameraPos);
 
@@ -11380,6 +11418,29 @@ public class WorldScene : ISceneRenderer
                         var max = new Vector3(light.Position.X + footprintRadius, light.Position.Y + footprintRadius, light.Position.Z + footprintHeight * 0.25f);
                         _bbRenderer.BatchBoxMinMax(min, max,
                             isHighlighted ? new Vector3(1f, 1f, 1f) : lightColor);
+                    }
+                }
+
+                if (_showAreaRegionOverlay && _areaOverlayRegions.Count > 0)
+                {
+                    foreach (AreaOverlayRegion region in _areaOverlayRegions)
+                    {
+                        foreach (AreaOverlayFootprintCell cell in region.Cells)
+                        {
+                            Vector3 min = cell.BoundsMin;
+                            Vector3 max = cell.BoundsMax;
+                            float z = MathF.Max(min.Z, max.Z) + 1.5f;
+                            Vector3 v0 = new(MathF.Min(min.X, max.X), MathF.Min(min.Y, max.Y), z);
+                            Vector3 v1 = new(MathF.Max(min.X, max.X), MathF.Min(min.Y, max.Y), z);
+                            Vector3 v2 = new(MathF.Max(min.X, max.X), MathF.Max(min.Y, max.Y), z);
+                            Vector3 v3 = new(MathF.Min(min.X, max.X), MathF.Max(min.Y, max.Y), z);
+                            _bbRenderer.BatchLine(v0, v1, region.Color);
+                            _bbRenderer.BatchLine(v1, v2, region.Color);
+                            _bbRenderer.BatchLine(v2, v3, region.Color);
+                            _bbRenderer.BatchLine(v3, v0, region.Color);
+                        }
+
+                        _bbRenderer.BatchPin(region.LabelPosition, 30f, 5f, region.Color);
                     }
                 }
 

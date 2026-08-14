@@ -17,20 +17,41 @@
   resident-MCSE decision list; area music remains a compact active-area status until the later
   per-trigger area/WMO context slice.
 
+### 2026-08-14 Alpha 0.5.3 client contract checkpoint
+
+- Live Ghidra tracing proves that `SoundEntries` is a ten-file/ten-frequency ordinary sound table;
+  a missing SoundEntries ID is not a MIDI alias. `ZoneMusic` is a separate table whose day/night
+  IDs then resolve through SoundEntries. The current direct `AreaTable.ZoneMusic -> SoundEntries`
+  path is therefore only a diagnostic approximation and must not be promoted as client-equivalent.
+- Live Ghidra tracing proves the `AreaMIDIAmbiences` pairing and hand-off: one row supplies the
+  day/night MIDI sequence paths and one shared DLS path; the client opens both through `SFile`,
+  connects the DLS collection to the DirectMusic segment, and plays the prepared segment.
+- `CMapChunk::Create` copies Alpha MCSE records with a 0x34-byte on-disk stride into a 0x4c-byte
+  `CWSoundEmitter`. It hands each allocated emitter to a create callback and purges it through a
+  destroy callback. The live executable clears those callback slots during map initialization and
+  has no in-process xref proving that `SetSoundEmitterHandlers` installs them.
+- The viewer Alpha MCSE reader now follows this proven 0x34-byte record and preserves the scheduler
+  fields. This is source-level contract correction, not audible or native-client proof.
+
 ### Current MCSE and area context
 
 - Alpha and Standard terrain adapters own MCSE extraction and convert positions into renderer-world
   coordinates. The Phase 1 slice preserves both raw and transformed positions with an explicit
   profile label; it does not change the existing transform.
 - Standard MCSE entries expose IDs and position; range fields are not populated by the common reader.
-  Alpha 0.5.3 entries have additional min/max/cutoff/start/end/mode fields.
+- Alpha 0.5.3 MCSE records use the proven 0x34-byte on-disk layout and include min/max/cutoff,
+  16-bit start/end/mode, loop, group-silence, play-instance, and inter-sound-gap fields.
 - `DBCTool.V2` establishes the Alpha area contract: `MCNK.Unknown3` is the packed
   `AreaNumber` `(zone << 16) | subzone`, and an Alpha child is parented through `ParentAreaNum`
   after the row is matched by `ContinentID`. The viewer's ZoneMusic catalog now follows that
-  numeric contract before falling back to modern direct `ID`/`ParentAreaID` resolution; it does
-  not treat the packed value as an unrelated single AreaTable ID.
+  numeric contract before falling back to modern direct `ID`/`ParentAreaID` resolution. The
+  shared `AreaNumberParts` contract treats the storage as `high16=zone` and `low16=subzone`
+  (including unsigned/high-bit values), and neither status nor audio registers either half as a
+  standalone AreaTable ID.
 - `WorldScene` obtains the audio area from the terrain chunk under the camera. WMO area context is
-  not yet the same audio lookup path.
+  not yet the same audio lookup path. For terrain, it now forwards the status-bar's resolved
+  ZoneText/SubzoneText context into area music so the displayed area and selected audio row share
+  one lookup result.
 - The first diagnostic phase must make these gaps visible before changing a transform or assuming
   that an era uses the same MCSE layout.
 
@@ -65,6 +86,8 @@
 
 - Prove the current pipeline through diagnostics before changing archive selection, MCSE transforms,
   or audio backend dependencies.
+- Keep `AreaTable.ZoneMusic` as a table reference until a build-aware ZoneMusic reader resolves its
+  day/night SoundEntries IDs; never alias a missing SoundEntries ID to MIDI or infer a DLS pairing.
 - Treat the camera actor as a shared state/lifecycle contract. Rendering a camera M2 is optional and
   is not considered a performance optimization by itself.
 - Use leases and stage attribution to make fog/doodad performance changes reversible and measurable.

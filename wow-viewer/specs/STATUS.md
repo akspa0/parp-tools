@@ -7,13 +7,15 @@ task file are authoritative; this file only tells a new agent where to start.
 
 | Priority | Spec | State | Next bounded action |
 |---|---|---|---|
-| 1 | [148 Artifact world simulator runtime](148-world-simulator/spec.md) | Phase 1 audio diagnostics partially implemented; user gate open | Run a configured client to inspect packed Alpha AreaNumber/ZoneMusic resolution, then finish source/read/decode coverage |
-| 2 | [147 Minimap, fog, and doodad instancing](147-minimap-fog-instancing/spec.md) | Phase 2 implemented; Phase 3/4 open | User-run fullscreen drag/triple-click proof, then implement fog coverage before expanding doodad batch diagnostics |
-| 3 | [146 Audio and camera playback](146-audio-camera-playback/spec.md) | AreaNumber-aware ZoneMusic resolution and master mute control implemented; playback gates open | User-run packed Alpha AreaNumber/ZoneMusic proof; MIDI/DLS remains explicitly unsupported until a backend is proven |
-| 4 | [144 Camera capture paths](144-camera-capture-paths/spec.md) | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions |
-| 5 | [145 WoW UI overhaul](145-wow-ui-overhaul/spec.md) | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks |
-| 6 | [143 World context and lighting](143-world-context-lighting/spec.md) | LIT source/fallback and pre-alpha v2 parser implemented with user gate | Validate variant switching and no-Light-DBC fallback, then continue WMOAreaID and lighting evidence |
-| 7 | [142 World scene graph](142-world-scene-graph/spec.md) | In progress | User-run dense-WMO capture to compare internal-doodad batch submissions against the previous placement-local path |
+| 1 | [149 PM4 region navigation and audio trigger controls](149-pm4-region-audio-controls/spec.md) | Implementing; resident Zone/SubZone overlay slice wired, focused tests and PM4/audio stories open | Add area aggregation tests, then implement Phase 1 contracts/caller audit and validate region navigation before retiring correlation UI |
+| 2 | [150 Alpha 0.5.3 renderer performance](150-alpha-renderer-performance/spec.md) | Draft evidence/planning pack complete; no source optimization started | Recover native render anchors and run repeated `profile-render` baseline before selecting one owner |
+| 3 | [148 Artifact world simulator runtime](148-world-simulator/spec.md) | Phase 1 audio diagnostics partially implemented; Alpha 0.5.3 MCSE and packed AreaNumber contracts landed | Add ZoneMusic row indirection, then finish source/read/decode coverage and user client inspection |
+| 4 | [147 Minimap, fog, and doodad instancing](147-minimap-fog-instancing/spec.md) | Phase 2 implemented; Phase 3/4 open | User-run fullscreen drag/triple-click proof, then implement fog coverage before expanding doodad batch diagnostics |
+| 5 | [146 Audio and camera playback](146-audio-camera-playback/spec.md) | Shared high/low AreaNumber Zone/SubZone selection and master mute control implemented; client audio contracts recovered | Add ZoneMusic row resolution; MIDI/DLS remains explicitly unsupported until a backend is proven |
+| 6 | [144 Camera capture paths](144-camera-capture-paths/spec.md) | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions |
+| 7 | [145 WoW UI overhaul](145-wow-ui-overhaul/spec.md) | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks |
+| 8 | [143 World context and lighting](143-world-context-lighting/spec.md) | LIT source/fallback and pre-alpha v2 parser implemented with user gate | Validate variant switching and no-Light-DBC fallback, then continue WMOAreaID and lighting evidence |
+| 9 | [142 World scene graph](142-world-scene-graph/spec.md) | In progress | User-run dense-WMO capture to compare internal-doodad batch submissions against the previous placement-local path |
 
 ## Other lanes
 
@@ -22,6 +24,8 @@ task file are authoritative; this file only tells a new agent where to start.
 - Cross-era renderer research: Spec 138. Evidence/planning lane; do not generalize one client build
   to all 4.x clients.
 - PM4: Specs 128–131 and `memory-bank/workstream-pm4-decode.md`; use the PM4 spec pack before code.
+- PM4 region navigation/audio controls: Spec 149 owns the replacement UI and default-off trigger policy;
+  it does not reopen PM4 decode or implement game mode/MIDI/DLS.
 - Older numbered specs not listed above are background, superseded, or archived unless their task
   file is explicitly named.
 

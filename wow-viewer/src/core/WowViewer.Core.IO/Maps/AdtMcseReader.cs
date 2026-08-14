@@ -15,7 +15,9 @@ namespace WowViewer.Core.IO.Maps;
 public static class AdtMcseReader
 {
     public const int StandardEntrySize = 0x1C;
-    public const int Alpha053EntrySize = 76;
+    // CWSoundEmitter in the 0.5.3 client is 0x4C bytes in memory, but the
+    // on-disk MCSE record copied by CMapChunk::Create is 0x34 bytes.
+    public const int Alpha053EntrySize = 0x34;
 
     public static AdtMcseData Read(byte[] payload, int declaredEmitterCount)
     {
@@ -87,8 +89,9 @@ public static class AdtMcseReader
 
     /// <summary>
     /// Reads the Alpha 0.5.3 MCNK representation. Alpha stores MCSE as raw
-    /// entries at an offset relative to the end of the 128-byte MCNK header;
-    /// there is no MCSE FourCC/size wrapper.
+    /// entries at an offset relative to the 128-byte MCNK header; there is no
+    /// MCSE FourCC/size wrapper. CMapChunk::Create reads the offset/count from
+    /// the same header fields and copies 0x34-byte records into CWSoundEmitter.
     /// </summary>
     public static AdtMcseData ReadAlpha053Mcnk(ReadOnlySpan<byte> mcnkPayload)
     {
@@ -131,10 +134,18 @@ public static class AdtMcseReader
                 MinDistance: BitConverter.ToSingle(entry.Slice(0x14, 4)),
                 MaxDistance: BitConverter.ToSingle(entry.Slice(0x18, 4)),
                 CutoffDistance: BitConverter.ToSingle(entry.Slice(0x1C, 4)),
-                StartTime: BinaryPrimitives.ReadUInt32LittleEndian(entry.Slice(0x20, 4)),
-                EndTime: BinaryPrimitives.ReadUInt32LittleEndian(entry.Slice(0x24, 4)),
-                Mode: BinaryPrimitives.ReadUInt32LittleEndian(entry.Slice(0x28, 4)),
-                RawEntry: entry.ToArray()));
+                StartTime: BinaryPrimitives.ReadUInt16LittleEndian(entry.Slice(0x20, 2)),
+                EndTime: BinaryPrimitives.ReadUInt16LittleEndian(entry.Slice(0x22, 2)),
+                Mode: BinaryPrimitives.ReadUInt16LittleEndian(entry.Slice(0x24, 2)),
+                RawEntry: entry.ToArray(),
+                LoopCountMin: entry[0x26],
+                LoopCountMax: entry[0x27],
+                GroupSilenceMin: BinaryPrimitives.ReadUInt16LittleEndian(entry.Slice(0x28, 2)),
+                GroupSilenceMax: BinaryPrimitives.ReadUInt16LittleEndian(entry.Slice(0x2A, 2)),
+                PlayInstancesMin: BinaryPrimitives.ReadUInt16LittleEndian(entry.Slice(0x2C, 2)),
+                PlayInstancesMax: BinaryPrimitives.ReadUInt16LittleEndian(entry.Slice(0x2E, 2)),
+                InterSoundGapMin: BinaryPrimitives.ReadUInt16LittleEndian(entry.Slice(0x30, 2)),
+                InterSoundGapMax: BinaryPrimitives.ReadUInt16LittleEndian(entry.Slice(0x32, 2))));
         }
 
         return emitters;
@@ -235,4 +246,12 @@ public sealed record AdtMcseEmitter(
     uint StartTime,
     uint EndTime,
     uint Mode,
-    byte[] RawEntry);
+    byte[] RawEntry,
+    byte LoopCountMin = 0,
+    byte LoopCountMax = 0,
+    ushort GroupSilenceMin = 0,
+    ushort GroupSilenceMax = 0,
+    ushort PlayInstancesMin = 0,
+    ushort PlayInstancesMax = 0,
+    ushort InterSoundGapMin = 0,
+    ushort InterSoundGapMax = 0);
