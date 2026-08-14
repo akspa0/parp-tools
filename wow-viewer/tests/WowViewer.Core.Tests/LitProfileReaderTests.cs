@@ -91,10 +91,10 @@ public sealed class LitProfileReaderTests
     }
 
     [Fact]
-    public void Read_NegativeCountVersion02_ProducesSinglePartialLegacyShape()
+    public void Read_NegativeCountVersion02_ProducesObservedPreAlphaPartialShape()
     {
-        byte[] bytes = CreateVersion02PartialFixture();
-        Assert.Equal(8 + 0x14C4, bytes.Length);
+        byte[] bytes = CreateVersion02PreAlphaPartialFixture();
+        Assert.Equal(8 + 64 + 0x1484, bytes.Length);
         using var stream = new MemoryStream(bytes, writable: false);
 
         LitFileProfile profile = LitProfileReader.Read(stream, "legacy.lit");
@@ -102,23 +102,30 @@ public sealed class LitProfileReaderTests
         Assert.Equal(LitProfileReader.Version02, profile.VersionNumber);
         Assert.Equal(-1, profile.RawLightCount);
         Assert.True(profile.IsSinglePartialProfile);
-        Assert.Equal(17, profile.TrackCount);
-        Assert.Equal(0x14C4, profile.GroupStride);
+        Assert.Equal(9, profile.TrackCount);
+        Assert.Equal(0x1484, profile.GroupStride);
 
         LitLightProfile light = Assert.Single(profile.Lights);
         Assert.True(light.IsPartial);
-        Assert.Null(light.Header);
-        LitLightGroupProfile group = Assert.Single(light.Groups);
+        Assert.Equal("Global Light", light.Header!.Name);
+        Assert.True(light.Header.IsDefault);
+        Assert.Equal(2, light.Groups.Count);
+        LitLightGroupProfile group = light.Groups[0];
         Assert.Equal(LitLightGroupKind.Partial, group.Kind);
-        Assert.Equal(17, group.Tracks.Count);
-        Assert.Equal(7, group.FloatBands.Count);
+        Assert.Equal(0xA24, group.EncodedSize);
+        Assert.Equal(9, group.Tracks.Count);
+        Assert.Equal(2, group.FloatBands.Count);
         Assert.All(group.FloatBands, band => Assert.Equal(32, band.Samples.Count));
-        Assert.Equal(0.25f, group.FloatBands[0].Samples[0]);
-        Assert.Equal(6.25f, group.FloatBands[6].Samples[0]);
+        Assert.Equal(10000f, group.FloatBands[0].Samples[0]);
+        Assert.Equal(0.25f, group.FloatBands[1].Samples[0]);
         Assert.Null(group.HighlightSky);
         Assert.Null(group.CloudMask);
         Assert.Empty(group.ParameterBands);
-        Assert.Equal(new Vector3(128f / 255f, 0f, 32f / 255f), group.Tracks[0].Evaluate(1200f));
+        Assert.Equal(4, group.Tracks[0].DeclaredLength);
+        Assert.Equal(3, group.Tracks[8].DeclaredLength);
+        Assert.Equal(new Vector3(0x0C / 255f, 0x3E / 255f, 0xFB / 255f), group.Tracks[0].Evaluate(0f));
+        Assert.Equal(LitLightGroupKind.LegacyPartialAlternate, light.Groups[1].Kind);
+        Assert.Equal(9, light.Groups[1].Tracks.Count);
     }
 
     [Fact]
@@ -214,33 +221,82 @@ public sealed class LitProfileReaderTests
         return stream.ToArray();
     }
 
-    private static byte[] CreateVersion02PartialFixture()
+    private static byte[] CreateVersion02PreAlphaPartialFixture()
     {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         writer.Write(LitProfileReader.Version02);
         writer.Write(-1);
 
-        for (int trackIndex = 0; trackIndex < 17; trackIndex++)
-            writer.Write(trackIndex == 0 ? 1 : 0);
+        writer.Write(-1);
+        writer.Write(-1);
+        writer.Write(-1);
+        writer.Write(0f);
+        writer.Write(0f);
+        writer.Write(0f);
+        writer.Write(0f);
+        byte[] nameBytes = new byte[32];
+        Encoding.UTF8.GetBytes("Global Light").CopyTo(nameBytes, 0);
+        writer.Write(nameBytes);
+        writer.Write(0);
 
-        for (int trackIndex = 0; trackIndex < 17; trackIndex++)
+        for (int index = 0; index < 15; index++)
+            writer.Write(0);
+
+        WriteVersion02PreAlphaDataSet(
+            writer,
+            new Dictionary<int, IReadOnlyList<(int Time, uint Color)>>
+            {
+                [0] =
+                [
+                    (0, PackBgrx(0x0C, 0x3E, 0xFB)),
+                    (720, PackBgrx(0x00, 0x8B, 0xF0)),
+                    (1440, PackBgrx(0x99, 0xCD, 0xFF)),
+                    (2160, PackBgrx(0x00, 0x89, 0xFF)),
+                ],
+                [8] =
+                [
+                    (0, PackBgrx(0x42, 0x42, 0x42)),
+                    (720, PackBgrx(0x7F, 0x7F, 0x7F)),
+                    (1440, PackBgrx(0x4D, 0x4D, 0x4D)),
+                ],
+            },
+            firstFloatBandValue: 10000f,
+            secondFloatBandValue: 0.25f);
+
+        WriteVersion02PreAlphaDataSet(
+            writer,
+            new Dictionary<int, IReadOnlyList<(int Time, uint Color)>>(),
+            firstFloatBandValue: 12000f,
+            secondFloatBandValue: 0.5f);
+
+        return stream.ToArray();
+    }
+
+    private static void WriteVersion02PreAlphaDataSet(
+        BinaryWriter writer,
+        IReadOnlyDictionary<int, IReadOnlyList<(int Time, uint Color)>> tracks,
+        float firstFloatBandValue,
+        float secondFloatBandValue)
+    {
+        long start = writer.BaseStream.Position;
+        for (int trackIndex = 0; trackIndex < 9; trackIndex++)
+            writer.Write(tracks.TryGetValue(trackIndex, out IReadOnlyList<(int Time, uint Color)>? samples) ? samples.Count : 0);
+
+        for (int trackIndex = 0; trackIndex < 9; trackIndex++)
         {
+            tracks.TryGetValue(trackIndex, out IReadOnlyList<(int Time, uint Color)>? samples);
             for (int slotIndex = 0; slotIndex < 32; slotIndex++)
             {
-                bool populated = trackIndex == 0 && slotIndex == 0;
-                writer.Write(populated ? 1200 : 0);
-                writer.Write(populated ? PackBgrx(128, 0, 32) : 0u);
+                bool populated = samples != null && slotIndex < samples.Count;
+                writer.Write(populated ? samples![slotIndex].Time : 0);
+                writer.Write(populated ? samples![slotIndex].Color : 0u);
             }
         }
 
-        for (int bandIndex = 0; bandIndex < 7; bandIndex++)
-        {
-            for (int sampleIndex = 0; sampleIndex < 32; sampleIndex++)
-                writer.Write(sampleIndex == 0 ? bandIndex + 0.25f : 0f);
-        }
-
-        return stream.ToArray();
+        WriteFloatBand(writer, firstFloatBandValue);
+        WriteFloatBand(writer, secondFloatBandValue);
+        Assert.Equal(0xA24, writer.BaseStream.Position - start);
     }
 
     private static byte[] CreateModernPartialFixture(uint version, int trackCount, bool includeParameterBands)

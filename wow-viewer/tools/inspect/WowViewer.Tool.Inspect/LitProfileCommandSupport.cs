@@ -57,7 +57,7 @@ internal static class LitProfileCommandSupport
                         header.Position.Z,
                         header.Radius,
                         header.Dropoff,
-                        header.IsDefault),
+                        light.IsPartial || header.IsDefault),
                 group.Index,
                 group.Kind.ToString(),
                 contributingTrackIds),
@@ -73,10 +73,10 @@ internal static class LitProfileCommandSupport
                 ? profile.Lights[0]
                 : throw new InvalidDataException(
                     $"LIT partial profile must contain exactly one light; found {profile.Lights.Count}.");
-            LitLightGroupProfile partialGroup = partialLight.Groups.Count == 1
-                && partialLight.Groups[0].Kind == LitLightGroupKind.Partial
-                ? partialLight.Groups[0]
-                : throw new InvalidDataException("LIT partial profile does not contain its required partial group.");
+            LitLightGroupProfile partialGroup = partialLight.Groups
+                .FirstOrDefault(group => group.Kind == LitLightGroupKind.Partial)
+                ?? throw new InvalidDataException(
+                    "LIT partial profile does not contain its required primary partial group.");
             return (partialLight, partialGroup);
         }
 

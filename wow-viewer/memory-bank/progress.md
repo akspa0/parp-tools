@@ -5,6 +5,18 @@ Last updated: 2026-08-14
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-14 — Spec 143 pre-alpha v2 LIT compatibility
+
+- Added an evidence-bounded parser profile for the observed 0.5.3 `areatest.lit` payload:
+  embedded 64-byte Global Light header, 60-byte legacy prefix, and two `0xA24` nine-track data
+  sets inside a `0x1484` group payload.
+- Retained the secondary data set as `LegacyPartialAlternate`; only the primary `Partial` group
+  drives lighting selection. Modern v8.3–v8.5 track lengths remain strict `0..32`.
+- Focused LIT tests pass (8/8), inspect tool builds, and archive-backed `lit profile` proof decodes
+  `H:\\053-client` Azeroth `areatest.lit`. Viewer visual/runtime proof remains user-owned.
+- Next: validate the active viewer's v2 LIT lighting/fog path, then resume evidence-backed WMO/M2
+  lighting work.
+
 ## 2026-08-14 — Spec 147 minimap, fog residency, and doodad instancing plan
 
 - Authored the bounded Spec Kit feature, research, data model, interaction/fog/batching contracts,

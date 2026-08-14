@@ -177,3 +177,37 @@ the source of truth.
   same fallback behavior as the client UI.
 - Treat `SubzoneText` as a new DBC column: rejected; it is a UI result derived from area context,
   parent relationships, flags, and build-specific packing.
+
+## Decision 8: Decode the observed pre-alpha version-2 partial LIT shape separately
+
+**Evidence**
+
+- The configured `H:\\053-client` archive contains
+  `World\\Maps\\Azeroth\\areatest.lit` with a 5,324-byte payload, version `0x00000002`, and raw
+  light count `-1`.
+- The first 64 bytes after the file header are not a modern group-length array. They contain an
+  embedded `Global Light` header: three signed chunk fields, four scalar fields, a 32-byte name,
+  and a reserved word. The first two chunk fields and the file count are `-1`; the third chunk
+  field is `0` in this observed file.
+- The remaining `0x1484` bytes contain a 60-byte legacy prefix followed by two consecutive
+  `0xA24` data sets. Each data set has nine 32-slot time/BGRX tracks and two 32-sample float
+  arrays. The primary set has track lengths `4,4,4,4,4,4,4,4,3`; the second set is retained but
+  its semantic selector is not established.
+- The previous reader interpreted the embedded header's first `-1` as track 0's length, which
+  produced the reported `expected 0..32` parse failure before `LitLoader.Version` was assigned.
+
+**Decision**: Add a version-2 negative-count layout profile in `LitProfileReader` rather than
+loosening modern track validation. Decode the embedded header with its observed pre-alpha field
+shape, skip the legacy prefix without inventing field names, expose the primary set as
+`LitLightGroupKind.Partial`, and expose the second as `LegacyPartialAlternate` for inspection.
+The primary set alone drives the global partial-light selection. This is an observed compatibility
+slice, not a claim that every version-2 client uses the same payload; additional v2 variants require
+their own evidence and fixture before acceptance.
+
+**Validation**
+
+- `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~LitProfileReaderTests`: 8 passed.
+- `dotnet build wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug --no-restore --no-dependencies`: passed with the existing warning set.
+- `lit profile --archive-root H:\\053-client --virtual-path World\\Maps\\Azeroth\\areatest.lit`: decoded
+  `Global Light`, version `2`, raw count `-1`, track count `9`, stride `0x1484`, and primary
+  `Partial` samples successfully. Viewer visual/runtime proof remains user-owned.

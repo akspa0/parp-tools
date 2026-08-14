@@ -184,7 +184,8 @@ public sealed class LitLoader
             float dropoffRaw,
             Vector3 gamePosition,
             string name,
-            IReadOnlyList<LitGroup> groups)
+            IReadOnlyList<LitGroup> groups,
+            bool isDefaultLight = false)
         {
             Index = index;
             ChunkX = chunkX;
@@ -199,6 +200,7 @@ public sealed class LitLoader
             Dropoff = NormalizeDistance(dropoffRaw);
             Name = string.IsNullOrWhiteSpace(name) ? $"Light {index}" : name;
             Groups = groups;
+            IsDefaultLight = isDefaultLight || chunkX == -1 && chunkY == -1 && chunkRadius == -1;
         }
 
         public int Index { get; }
@@ -227,7 +229,7 @@ public sealed class LitLoader
 
         public IReadOnlyList<LitGroup> Groups { get; }
 
-        public bool IsDefaultLight => ChunkX == -1 && ChunkY == -1 && ChunkRadius == -1;
+        public bool IsDefaultLight { get; }
 
         public bool HasMeaningfulPosition => float.IsFinite(Position.X) && float.IsFinite(Position.Y) && float.IsFinite(Position.Z);
 
@@ -336,7 +338,8 @@ public sealed class LitLoader
                 header.Dropoff,
                 header.WorldPosition,
                 header.Name,
-                groups);
+                groups,
+                isDefaultLight: source.IsPartial);
     }
 
     private static LitGroup ConvertGroup(LitLightGroupProfile source)

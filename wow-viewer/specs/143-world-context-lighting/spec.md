@@ -112,6 +112,7 @@ As a viewer developer, I want context and lighting improvements to remain profil
 - **FR-013**: Existing early, 1.x/3.x, and 4.x profile paths MUST remain available; a newer area or lighting capability MUST NOT become a universal assumption.
 - **FR-014**: Heavy client harvesting, GPU work, and long-running real-scene captures MUST remain user-run operations with exact PowerShell commands handed off after bounded code and validation work is prepared.
 - **FR-015**: The viewer MUST distinguish observed, inferred, fallback, unsupported, malformed, and visually unverified context/lighting/shader states in diagnostics and release notes.
+- **FR-016**: For the observed negative-count pre-alpha version-2 partial layout, the shared reader MUST decode the embedded 64-byte Global Light header, legacy prefix, two 9-track data sets, and their float bands as a profile-scoped shape; it MUST NOT reinterpret the embedded header's `-1` fields as track lengths or relax the normal 0..32 track-length contract for later layouts.
 
 ### Key Entities
 

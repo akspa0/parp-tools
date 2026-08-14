@@ -39,6 +39,20 @@ override by default. The user can still turn the override off; LIT marker visual
 explicitly opt-in. If no LIT profile exists either, the status reports that the automatic fallback
 has no source rather than claiming lighting parity.
 
+The pre-alpha version-2 `areatest.lit` compatibility proof can be reproduced with the inspect tool
+against the approved 0.5.3 client root:
+
+```powershell
+dotnet wow-viewer/tools/inspect/WowViewer.Tool.Inspect/bin/Debug/net10.0/WowViewer.Tool.Inspect.dll `
+  lit profile `
+  --archive-root H:\\053-client `
+  --virtual-path World\\Maps\\Azeroth\\areatest.lit
+```
+
+Expected decoded shape: version `0x00000002`, raw light count `-1`, track count `9`, group stride
+`0x1484`, selected light `Global Light`, and a primary `Partial` group. This is library/tool proof
+against the named client build; viewer appearance and lighting parity remain user-run validation.
+
 ## User-run real-client matrix
 
 Use a configured approved client root such as `H:\CLIENTS\...` or another explicitly selected root;

@@ -166,6 +166,13 @@ for profile comparison. If the active map has no usable map-scoped Light DBC pro
 automatically and its lighting/fog override starts enabled; marker overlays remain explicit user
 choices.
 
+The pre-alpha version-2 exception is now a separate reader profile, based on the observed
+`H:\\053-client` `World\\Maps\\Azeroth\\areatest.lit` payload: version `0x00000002`, raw count `-1`,
+an embedded 64-byte Global Light header, a 60-byte legacy prefix, and two `0xA24` nine-track data
+sets within a `0x1484` group payload. The second data set is retained as an explicitly unnamed
+alternate for inspection; only the primary set drives the global partial-light selection. Normal
+modern LIT groups remain strict and do not accept negative track lengths.
+
 ### Phase 5 — Cross-era and performance proof
 
 Run focused tests/builds in the workspace, then hand the user exact PowerShell commands for the

@@ -124,11 +124,11 @@ public static class LitTerrainDayNightProfile
                 : throw new InvalidDataException(
                     $"LIT partial profile must contain exactly one light; found {profile.Lights.Count}.");
             LitLightGroupProfile group = partial.IsPartial
-                && partial.Groups.Count == 1
-                && partial.Groups[0].Kind == LitLightGroupKind.Partial
-                    ? partial.Groups[0]
-                    : throw new InvalidDataException(
-                        "LIT partial profile does not contain exactly one partial group.");
+                ? partial.Groups.FirstOrDefault(candidate => candidate.Kind == LitLightGroupKind.Partial)
+                    ?? throw new InvalidDataException(
+                        "LIT partial profile does not contain a primary partial group.")
+                : throw new InvalidDataException(
+                    "LIT partial profile is not marked as partial.");
             return (partial, group);
         }
 

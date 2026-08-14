@@ -95,6 +95,9 @@ whole-map loads, native OpenGL runtime tests, and GPU profiling are user-run ope
 - [x] T030b [US4] Discover all direct-map `.lit` variants, expose the existing source switcher even when
   a selected profile fails to parse, and automatically enable LIT lighting/fog when no usable
   map-scoped Light DBC profile is available, with focused path-resolution coverage.
+- [x] T030c [US4] Add the evidence-bounded pre-alpha version-2 partial reader profile for the embedded
+  Global Light header and two nine-track data sets; retain the alternate set for inspection, keep
+  modern track validation strict, and add focused plus `H:\\053-client` archive proof.
 - [ ] T031 [US4] Wire selected WMO root/group ambient, light references, vertex colors, baked weights, lightmap data, and fog inputs through `src/viewer/WoWViewer/Rendering/WmoRenderer.cs`.
 - [ ] T032 [US4] Replace only the WMO shader fallback behavior required by the selected inputs in `src/viewer/WoWViewer/Rendering/WmoRenderer.cs`; preserve batching, alpha, portal, liquid, and transparent paths.
 - [ ] T033 [US4] Wire attributable directional, ambient, local-light, fog, and effect-route inputs through `src/viewer/WoWViewer/Rendering/M2Renderer.cs` without changing animation or placement ownership.

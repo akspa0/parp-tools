@@ -11,7 +11,7 @@ task file are authoritative; this file only tells a new agent where to start.
 | 2 | [146 Audio and camera playback](146-audio-camera-playback/spec.md) | In progress | User-run SoundEntries preview proof; then bind camera-path transport before MIDI/DLS synthesis |
 | 3 | [144 Camera capture paths](144-camera-capture-paths/spec.md) | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions |
 | 4 | [145 WoW UI overhaul](145-wow-ui-overhaul/spec.md) | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks |
-| 5 | [143 World context and lighting](143-world-context-lighting/spec.md) | LIT source/fallback slice implemented with user gate | Validate LIT variant switching and no-Light-DBC fallback, then continue WMOAreaID and lighting evidence |
+| 5 | [143 World context and lighting](143-world-context-lighting/spec.md) | LIT source/fallback and pre-alpha v2 parser implemented with user gate | Validate variant switching and no-Light-DBC fallback, then continue WMOAreaID and lighting evidence |
 | 6 | [142 World scene graph](142-world-scene-graph/spec.md) | In progress | Validate retained radius 2/3 with a user-run capture while active terrain/object submission remains directional |
 
 ## Other lanes

@@ -46,7 +46,8 @@ public sealed record LitFileProfile
 
 /// <summary>
 /// The fixed 64-byte spatial header associated with a list-based LIT light.
-/// A negative-count partial profile has no spatial header.
+/// The pre-alpha version-2 partial layout also carries an embedded legacy
+/// global-light header, but its final field layout differs from later files.
 /// </summary>
 /// <param name="Position">Raw fixed-point XZY position exactly as stored on disk.</param>
 /// <param name="Radius">Raw fixed-point core radius exactly as stored on disk.</param>
@@ -97,13 +98,15 @@ public sealed record LitLightProfile
     public LitLightProfile(
         int index,
         LitLightHeaderProfile? header,
-        IEnumerable<LitLightGroupProfile> groups)
+        IEnumerable<LitLightGroupProfile> groups,
+        bool isPartial = false)
     {
         ArgumentNullException.ThrowIfNull(groups);
 
         Index = index;
         Header = header;
         Groups = LitReadOnly.Copy(groups);
+        IsPartial = isPartial || header is null;
     }
 
     public int Index { get; }
@@ -112,7 +115,7 @@ public sealed record LitLightProfile
 
     public IReadOnlyList<LitLightGroupProfile> Groups { get; }
 
-    public bool IsPartial => Header is null;
+    public bool IsPartial { get; }
 }
 
 public enum LitLightGroupKind
@@ -122,13 +125,20 @@ public enum LitLightGroupKind
     ClearWater = 2,
     StormWater = 3,
     Partial = 4,
+    /// <summary>
+    /// The second legacy data set in the pre-alpha version-2 partial layout.
+    /// Its semantic selector is not established; it is retained for inspection
+    /// instead of being discarded.
+    /// </summary>
+    LegacyPartialAlternate = 5,
 }
 
 /// <summary>
 /// One fixed-stride lighting group. Float bands retain their disk order:
-/// fog end, fog-start scalar, and four sky bands for v8.3-v8.5; v2 exposes
-/// all seven legacy bands without assigning semantics that the format does
-/// not establish.
+/// fog end, fog-start scalar, and four sky bands for v8.3-v8.5. The observed
+/// pre-alpha v2 data sets expose two float bands; their remaining legacy
+/// prefix is retained by the reader for alignment but is not assigned guessed
+/// semantics.
 /// </summary>
 public sealed record LitLightGroupProfile
 {
