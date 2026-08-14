@@ -7,8 +7,11 @@ area, which day/night and underwater MIDI ambience records does the client
 reference, and can the referenced MIDI sequences and DLS instrument bank be
 found?”**
 
-It is an inspection and asset-resolution layer. It is not an audio player and
-it is not a catalog of every sound file in the client.
+It remains an inspection and asset-resolution layer for area ambience. It is
+not a catalog of every sound file in the client. The viewer's separate world
+audio runtime now consumes positional MCSE records and can decode supported
+WAV/OGG/MP3 SoundEntries to PCM for OpenAL; that does not yet make the Alpha
+MIDI/DLS catalog itself playable.
 
 ## Why it exists
 
@@ -45,9 +48,13 @@ report from being mistaken for working playback:
    virtual paths against loose files and the active MPQ/archive source. Each
    result says whether the asset is on disk, in an archive, missing, or not
    referenced.
-3. **Playback runtime** — a future audio backend must decode/play MIDI and
-   provide the DLS/DirectMusic instrument-bank behavior. That backend is not
-   implemented merely because the catalog can resolve a `.mid` or `.dls` path.
+3. **Playback runtime** — the viewer currently has a bounded OpenAL backend
+   for resident MCSE entries whose build-aware SoundEntries record resolves to
+   a client WAV/OGG/MP3 asset. `MidiDlsAssetPair` validates the exact sequence
+   and bank pair required by Alpha ambience, but MIDI sequencing and
+   DLS/DirectMusic instrument-bank behavior are still a separate backend
+   requirement. Resolving a `.mid` or `.dls` path does not claim that those
+   assets play.
 
 The current inspect command proves layers 1 and 2. It does not play audio.
 
@@ -62,9 +69,10 @@ The current inspect command proves layers 1 and 2. It does not play audio.
 - **Not a filename guesser.** A similarly named WAV/MP3/OGG file is not treated
   as the soundtrack unless client metadata or an explicit authored binding says
   so.
-- **Not proof that playback works.** “Resolved” means the client data source
-  contains the referenced file. Decoder, bank compatibility, audible output,
-  and video muxing still need separate proof.
+- **Not proof that area ambience playback works.** “Resolved” means the client
+  data source contains the referenced file. MIDI decoding, bank compatibility,
+  audible output, and video muxing still need separate proof. Positional MCSE
+  PCM-WAV playback is owned by the viewer runtime, not this catalog.
 
 ## How data is found
 
@@ -111,8 +119,10 @@ The report includes:
 An output such as `day=path.mid [missing]` means the DBC link was understood but
 the file was not found. It does **not** mean that the DBC row failed to decode.
 An output such as `day=path.mid [archive]` proves source discovery only; it does
-not claim that the viewer can synthesize or play that MIDI sequence. Loose-file
-results also include the resolved disk path after the `[disk:...]` marker.
+not claim that the viewer can synthesize or play that MIDI sequence. The runtime
+requires the matching `.dls` path from the same ambience record before a future
+sequencer can consume it. Loose-file results also include the resolved disk path
+after the `[disk:...]` marker.
 
 ## Code ownership
 
@@ -124,9 +134,13 @@ results also include the resolved disk path after the `[disk:...]` marker.
   — loose-file and archive asset probing.
 - [`Program.cs`](../../tools/inspect/WowViewer.Tool.Inspect/Program.cs)
   — `audio alpha-area` inspection output.
+- [`WorldAudioRuntime.cs`](../../src/viewer/WoWViewer/Audio/WorldAudioRuntime.cs)
+  — resident MCSE admission, SoundEntries resolution, spatial attenuation, and
+  OpenAL decoded-PCM playback in the viewer.
 
 For the future playback/runtime work, see
 [`audio-engine-plan-2026-04-21.md`](audio-engine-plan-2026-04-21.md) and
 [Spec 146](../../specs/146-audio-camera-playback/spec.md). The current
-capability boundary is intentionally “metadata and source resolution proven;
-playback not yet proven.”
+capability boundary is “MCSE decoded-PCM runtime path implemented; audible
+client and synchronized capture proof still user-run; Alpha MIDI+DLS pairs are
+validated but their renderer is not yet wired.”

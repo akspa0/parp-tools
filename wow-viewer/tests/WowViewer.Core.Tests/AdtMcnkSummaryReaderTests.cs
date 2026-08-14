@@ -7,6 +7,30 @@ namespace WowViewer.Core.Tests;
 public sealed class AdtMcnkSummaryReaderTests
 {
     [Fact]
+    public void Mcnk_SparseChunkRecoversMccvAfterShortMcnrWithoutMclyOrMcal()
+    {
+        byte[] expectedMccv = new byte[145 * 4];
+        for (int index = 0; index < expectedMccv.Length; index++)
+            expectedMccv[index] = (byte)(index % 251);
+
+        byte[] header = new byte[128];
+        using MemoryStream stream = new();
+        stream.Write(header, 0, header.Length);
+        stream.Write(CreateChunk("MCVT", new byte[145 * sizeof(float)]));
+        // A sparse client chunk can declare only the 145 MCNR records and
+        // place MCCV directly after them. This is the layout that the padded
+        // MCNR walk must not make us lose.
+        stream.Write(CreateChunk("MCNR", new byte[145 * 3]));
+        stream.Write(CreateChunk("MCCV", expectedMccv));
+
+        var mcnk = new WowViewer.Core.IO.Lk.Mcnk(stream.ToArray());
+
+        Assert.True(mcnk.TextureLayers is null || mcnk.TextureLayers.Count == 0);
+        Assert.Null(mcnk.McalRawData);
+        Assert.Equal(expectedMccv, mcnk.MccvData);
+    }
+
+    [Fact]
     public void Read_RootAdtBuffer_ProducesMcnkSemanticSummary()
     {
         byte[] bytes =

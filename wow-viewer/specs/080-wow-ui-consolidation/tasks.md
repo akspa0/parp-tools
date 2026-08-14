@@ -110,6 +110,7 @@ asset loads in one compact right-aligned line.
 - [x] T028 [US6] Update `wow-viewer/memory-bank/activeContext.md` with the current 080 owner and phase state.
 - [x] T029 [US6] Update `wow-viewer/memory-bank/progress.md` with completed source and proof status.
 - [ ] T030 [US6] Update `spec.md` status once Phase 1 build/manual proof is complete.
+- [x] T031 [US6] Replace compact-width horizontal workbench and capture tab strips with visible vertical rails so every page remains directly reachable.
 
 ## Dependencies
 

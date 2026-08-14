@@ -39,6 +39,7 @@ namespace WowViewer.Core.IO.Lk
         public byte[] MccvData;  // MCV? vertex color
         public byte[] McnrData;
         public byte[] McshData;
+        public byte[] McseData;  // MCSE positional sound emitters
         public byte[] MclqData;  // MCLQ legacy liquid
         private readonly ParseOptions _parseOptions;
 
@@ -185,6 +186,14 @@ namespace WowViewer.Core.IO.Lk
                         }
                         break;
 
+                    case 0x4D435345: // MCSE
+                        if (size > 0 && dataStart + size <= data.Length)
+                        {
+                            McseData = new byte[size];
+                            Array.Copy(data, dataStart, McseData, 0, (int)size);
+                        }
+                        break;
+
                     case 0x4D434356: // MCCV vertex color
                         if (size > 0 && dataStart + size <= data.Length)
                         {
@@ -241,10 +250,55 @@ namespace WowViewer.Core.IO.Lk
                 }
             }
 
+            // Some 3.x/4.x MCNKs omit both MCLY and MCAL and place MCCV
+            // immediately after a short MCNR payload. The client-side MCNR
+            // reader consumes a padded 0x1C0-byte span, so the normal walk can
+            // step over the following MCCV header in those sparse chunks.
+            // MCCV is independent vertex data; recover it without requiring
+            // any texture-layer or alpha subchunk to exist.
+            if (MccvData == null)
+                RecoverMccvFromRawScan(data, startOffset);
+
             if (diag && dl != null)
             {
-                dl.Add($"RESULT: MCVT={Heightmap != null} MCNR={McnrData != null} MCLY={TextureLayers?.Count ?? -1} MCAL={McalRawData != null}({McalRawData?.Length ?? 0}) MCSH={McshData != null} MCLQ={MclqData != null}({MclqData?.Length ?? 0}) flags=0x{(uint)Header.Flags:X} ofsMclq=0x{Header.OfsMclq:X}");
+                dl.Add($"RESULT: MCVT={Heightmap != null} MCNR={McnrData != null} MCLY={TextureLayers?.Count ?? -1} MCAL={McalRawData != null}({McalRawData?.Length ?? 0}) MCSH={McshData != null} MCCV={MccvData != null}({MccvData?.Length ?? 0}) MCLQ={MclqData != null}({MclqData?.Length ?? 0}) flags=0x{(uint)Header.Flags:X} ofsMclq=0x{Header.OfsMclq:X}");
                 try { File.AppendAllLines(Path.Combine(Path.GetTempPath(), "mcnk_scan.txt"), dl); } catch { }
+            }
+        }
+
+        private void RecoverMccvFromRawScan(byte[] data, int startOffset)
+        {
+            const uint MccvFourCc = 0x4D434356;
+            const int MccvPayloadSize = 145 * 4;
+
+            // The normal walk deliberately inflates MCNR to the client-sized
+            // 0x1C0-byte span. Sparse chunks can omit that padding, so use the
+            // declared subchunk sizes for this recovery pass. This keeps the
+            // fallback bounded to valid subchunk boundaries instead of
+            // searching arbitrary vertex bytes for an MCCV-looking sequence.
+            for (int pos = Math.Max(0, startOffset); pos + 8 <= data.Length;)
+            {
+                uint fourcc = BitConverter.ToUInt32(data, pos);
+                uint declaredSize = BitConverter.ToUInt32(data, pos + 4);
+                if (declaredSize > (uint)(data.Length - pos - 8))
+                {
+                    break;
+                }
+
+                if (fourcc == MccvFourCc)
+                {
+                    if (declaredSize < MccvPayloadSize)
+                        return;
+
+                    MccvData = new byte[declaredSize];
+                    Array.Copy(data, pos + 8, MccvData, 0, (int)declaredSize);
+                    return;
+                }
+
+                int next = pos + 8 + (int)declaredSize;
+                if (next <= pos)
+                    break;
+                pos = next;
             }
         }
 
@@ -276,6 +330,7 @@ namespace WowViewer.Core.IO.Lk
                 h.OfsMcsh = BitConverter.ToUInt32(data, 0x2C);
                 h.SizeMcsh = BitConverter.ToUInt32(data, 0x30);
                 h.OfsMcse = BitConverter.ToUInt32(data, 0x58);
+                h.NSndEmitters = BitConverter.ToUInt32(data, 0x5C);
                 h.OfsMclq = BitConverter.ToUInt32(data, 0x60);
                 h.SizeMclq = BitConverter.ToUInt32(data, 0x64);
             }
@@ -348,6 +403,7 @@ namespace WowViewer.Core.IO.Lk
         public uint OfsMcsh;  // 0x2c
         public uint SizeMcsh; // 0x30 (sizeShadow)
         public uint OfsMcse;  // 0x58
+        public uint NSndEmitters; // 0x5C
         public uint OfsMclq;  // 0x60
         public uint SizeMclq; // 0x64 (size of MCLQ data, from 0.5.3 header)
     }

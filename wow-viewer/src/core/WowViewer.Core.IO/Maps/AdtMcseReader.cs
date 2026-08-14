@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Numerics;
 using WowViewer.Core.Chunks;
 using WowViewer.Core.IO.Chunked;
 using WowViewer.Core.Maps;
@@ -38,6 +39,7 @@ public static class AdtMcseReader
                 EntryCount = entryCount,
                 EntrySize = entrySize,
                 EntryBytes = entryBytes,
+                Emitters = ReadAlphaEmitters(payload, entryCount, entrySize),
             };
         }
 
@@ -52,6 +54,26 @@ public static class AdtMcseReader
             positionXyz[entryIndex, 2] = BitConverter.ToSingle(entry.Slice(0x0C, 4));
         }
 
+        List<AdtMcseEmitter> emitters = new(entryCount);
+        for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
+        {
+            ReadOnlySpan<byte> entry = payload.AsSpan(entryIndex * entrySize, entrySize);
+            emitters.Add(new AdtMcseEmitter(
+                SoundPointId: 0,
+                SoundNameId: unchecked((uint)entryIds[entryIndex]),
+                Position: new Vector3(
+                    positionXyz[entryIndex, 0],
+                    positionXyz[entryIndex, 1],
+                    positionXyz[entryIndex, 2]),
+                MinDistance: 0f,
+                MaxDistance: 0f,
+                CutoffDistance: 0f,
+                StartTime: 0,
+                EndTime: 0,
+                Mode: 0,
+                RawEntry: entry.ToArray()));
+        }
+
         return new AdtMcseData
         {
             EntryCount = entryCount,
@@ -59,7 +81,63 @@ public static class AdtMcseReader
             EntryBytes = entryBytes,
             EntryIds = entryIds,
             PositionXyz = positionXyz,
+            Emitters = emitters,
         };
+    }
+
+    /// <summary>
+    /// Reads the Alpha 0.5.3 MCNK representation. Alpha stores MCSE as raw
+    /// entries at an offset relative to the end of the 128-byte MCNK header;
+    /// there is no MCSE FourCC/size wrapper.
+    /// </summary>
+    public static AdtMcseData ReadAlpha053Mcnk(ReadOnlySpan<byte> mcnkPayload)
+    {
+        const int headerSize = 0x80;
+        const int offsetField = 0x5C;
+        const int countField = 0x60;
+
+        if (mcnkPayload.Length < headerSize)
+            return new AdtMcseData();
+
+        int relativeOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(mcnkPayload.Slice(offsetField, 4)));
+        int declaredCount = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(mcnkPayload.Slice(countField, 4)));
+        if (relativeOffset <= 0 || declaredCount <= 0)
+            return new AdtMcseData();
+
+        long byteCount = (long)declaredCount * Alpha053EntrySize;
+        long start = (long)headerSize + relativeOffset;
+        if (start < 0 || byteCount > int.MaxValue || start + byteCount > mcnkPayload.Length)
+            return new AdtMcseData();
+
+        return Read(mcnkPayload.Slice((int)start, (int)byteCount).ToArray(), declaredCount);
+    }
+
+    private static List<AdtMcseEmitter> ReadAlphaEmitters(byte[] payload, int entryCount, int entrySize)
+    {
+        if (entrySize != Alpha053EntrySize)
+            return [];
+
+        List<AdtMcseEmitter> emitters = new(entryCount);
+        for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
+        {
+            ReadOnlySpan<byte> entry = payload.AsSpan(entryIndex * entrySize, entrySize);
+            emitters.Add(new AdtMcseEmitter(
+                SoundPointId: BinaryPrimitives.ReadUInt32LittleEndian(entry.Slice(0x00, 4)),
+                SoundNameId: BinaryPrimitives.ReadUInt32LittleEndian(entry.Slice(0x04, 4)),
+                Position: new Vector3(
+                    BitConverter.ToSingle(entry.Slice(0x08, 4)),
+                    BitConverter.ToSingle(entry.Slice(0x0C, 4)),
+                    BitConverter.ToSingle(entry.Slice(0x10, 4))),
+                MinDistance: BitConverter.ToSingle(entry.Slice(0x14, 4)),
+                MaxDistance: BitConverter.ToSingle(entry.Slice(0x18, 4)),
+                CutoffDistance: BitConverter.ToSingle(entry.Slice(0x1C, 4)),
+                StartTime: BinaryPrimitives.ReadUInt32LittleEndian(entry.Slice(0x20, 4)),
+                EndTime: BinaryPrimitives.ReadUInt32LittleEndian(entry.Slice(0x24, 4)),
+                Mode: BinaryPrimitives.ReadUInt32LittleEndian(entry.Slice(0x28, 4)),
+                RawEntry: entry.ToArray()));
+        }
+
+        return emitters;
     }
 
     public static bool TryLocateMcsePayload(ReadOnlySpan<byte> payload, out int payloadOffset, out int payloadSize)
@@ -143,4 +221,18 @@ public sealed class AdtMcseData
     public int[]? EntryIds { get; init; }
 
     public float[,]? PositionXyz { get; init; }
+
+    public IReadOnlyList<AdtMcseEmitter> Emitters { get; init; } = Array.Empty<AdtMcseEmitter>();
 }
+
+public sealed record AdtMcseEmitter(
+    uint SoundPointId,
+    uint SoundNameId,
+    Vector3 Position,
+    float MinDistance,
+    float MaxDistance,
+    float CutoffDistance,
+    uint StartTime,
+    uint EndTime,
+    uint Mode,
+    byte[] RawEntry);

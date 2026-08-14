@@ -18,19 +18,19 @@
 
 ## Why This Plan Exists
 
-- `wow-viewer` already has bounded world bootstrap, tile terrain, liquid, placement, and visibility seams, but no first-class audio runtime yet
+- `wow-viewer` already has bounded world bootstrap, tile terrain, liquid, placement, visibility, and a first resident MCSE PCM-WAV runtime seam
 - the repo already carries enough shared access to make audio planning concrete:
   - root ADT and tile-family reads already flow through shared `MapFileSummaryReader`, `AdtSummaryReader`, `AdtMcnkSummaryReader`, `AdtLiquidReader`, and `WorldTerrainTileBuilder`
   - world-session and world-runtime consumers already reopen root ADTs in `WowViewer.App/WowViewerWorldRuntimeBridge.cs`
   - DB client tables are already reachable through shared `DbClientFileReader`
 - the missing seam is not general file access anymore; it is typed audio ownership across:
-  - Alpha area-audio lookup and asset discovery (the catalog and inspect proof now exist; playback does not)
-  - ADT `MCSE` parsing across Alpha and later layouts
+  - Alpha area-audio lookup and asset discovery (the catalog and inspect proof now exist; MIDI/DLS playback does not)
+  - ADT `MCSE` parsing across Alpha and later layouts, with viewer admission for resident tile emitters
   - audio lookup tables and sound-entry resolution for later FMOD-era families
-  - decoded-audio support for `wav`, `ogg`, and `flac`
+  - decoded-audio support beyond the initial PCM-WAV slice (`ogg`, `mp3`, and `flac` remain open)
   - MIDI sequencing plus instrument-bank support for `SFP0` and `DLS`
-  - listener/emitter runtime state
-  - backend playback and debug surfaces
+  - listener/emitter runtime state and a first OpenAL PCM-WAV backend
+  - backend diagnostics and capture integration
 
 ## Current Concrete Boundary
 
@@ -44,14 +44,17 @@ Today `wow-viewer` has:
   [`alpha-audio-catalog.md`](alpha-audio-catalog.md)
 - loose-file and archive-backed probing for the catalog's referenced `.mid` and
   `.dls` assets
+- build-aware MCSE extraction for standard named payloads and Alpha 0.5.3 raw
+  payloads
+- a viewer-owned resident MCSE runtime that resolves `SoundEntries` and plays
+  PCM WAV through OpenAL
 
 Today `wow-viewer` does not have:
 
-- an `MCSE` chunk id or reader in shared ADT ownership
-- typed world-sound emitter contracts in `WowViewer.Core`
-- an audio-scene runtime in `WowViewer.Core.Runtime`
-- a backend abstraction for playback, streaming, or listener updates
-- a viewer-side audio diagnostics or capture surface
+- Alpha MIDI sequencing with DLS/DirectMusic instrument-bank playback
+- compressed `ogg`/`mp3`/`flac` decoding in the world-audio runtime
+- camera-track transport/capture audio synchronization
+- a cross-platform backend abstraction suitable for every future host
 
 ## Ownership Rule
 
@@ -96,15 +99,19 @@ The target stack should be:
 
 ## First Narrow Slice
 
-The first slice should not try to play sound yet.
-
-The first slice should prove that `wow-viewer` can read and report real Alpha area-audio bindings before it tries to model later-era emitter playback.
+The first implemented runtime slice is resident MCSE PCM-WAV playback. It
+proves that `wow-viewer` can carry decoded emitter records from loaded tiles,
+resolve their build-specific `SoundEntries` rows from the active DBC provider,
+load the referenced client file, and update spatial OpenAL sources from the
+camera listener. It deliberately does not pretend that area MIDI/DLS playback
+or every compressed sound family is solved.
 
 That keeps the proof cheap and falsifiable:
 
 - if Alpha `AreaTable` or `AreaMIDIAmbiences` linkage is wrong, the inspect output will be wrong before any backend work exists
 - if `.mid` and `.dls` asset discovery is wrong, the runtime will not even know which oldest assets it is supposed to restore
-- once that is proven, Alpha-aware `MCSE` and later FMOD-era table resolution can land without guessing across eras
+- once this bounded path is user-validated, area MIDI/DLS and later compressed
+  sound families can land as separate backend slices without guessing across eras
 
 ## Alpha-First Override
 
@@ -141,6 +148,19 @@ The rationale is repo-local evidence:
   - no promise that later FMOD-era audio tables are already unified
 
 ## Ordered Slices
+
+### Implemented Slice - Resident MCSE PCM-WAV Playback
+
+- `AdtMcseReader` now exposes standard named MCSE emitters and the Alpha 0.5.3
+  raw 76-byte emitter layout without changing the underlying file-reader owner.
+- Alpha and standard terrain tile results carry emitters only for loaded tiles.
+- `WorldAudioRuntime` resolves the emitter's build-specific `SoundEntries` row,
+  finds the exact client file path from DBC metadata, decodes supported PCM WAV,
+  and updates OpenAL source position/gain from the camera listener.
+- Tile unload, map replacement, and viewer dispose stop sources and release the
+  OpenAL resources owned by this runtime.
+- The viewer status bar exposes active/resident emitter counts. This is source
+  proof plus a user-run audible gate, not proof of MIDI/DLS or capture audio.
 
 ### Slice 01 - Shared `MCSE` Reader And Inspect Proof
 

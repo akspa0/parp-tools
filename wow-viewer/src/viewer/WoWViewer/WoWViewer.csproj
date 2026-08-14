@@ -25,6 +25,11 @@
     <PackageReference Include="Silk.NET.OpenGL" />
     <PackageReference Include="Silk.NET.Windowing" />
     <PackageReference Include="Silk.NET.Input" />
+    <PackageReference Include="Silk.NET.OpenAL" />
+    <PackageReference Include="Silk.NET.OpenAL.Soft.Native" />
+    <PackageReference Include="MeltySynth" />
+    <PackageReference Include="NLayer" />
+    <PackageReference Include="NVorbis" />
     <PackageReference Include="SixLabors.ImageSharp" />
     <PackageReference Include="SharpGLTF.Toolkit" />
     <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" />
@@ -41,6 +46,33 @@
     <ProjectReference Include="..\..\..\libs\wowdev\DBCD\DBCD.IO\DBCD.IO.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
 
   </ItemGroup>
+
+  <!-- Silk.NET's native package keeps OpenAL Soft under runtimes/<rid>/native.
+       AudioContext resolves the DLL by its canonical name, so also place the
+       selected desktop backend beside the executable. -->
+  <PropertyGroup>
+    <OpenALSoftNativeRuntime Condition="'$(RuntimeIdentifier)' == 'win-x86'">win-x86</OpenALSoftNativeRuntime>
+    <OpenALSoftNativeRuntime Condition="'$(RuntimeIdentifier)' == 'win-arm64'">win-arm64</OpenALSoftNativeRuntime>
+    <OpenALSoftNativeRuntime Condition="'$(OpenALSoftNativeRuntime)' == '' and '$(PlatformTarget)' == 'x86'">win-x86</OpenALSoftNativeRuntime>
+    <OpenALSoftNativeRuntime Condition="'$(OpenALSoftNativeRuntime)' == '' and '$(PlatformTarget)' == 'ARM64'">win-arm64</OpenALSoftNativeRuntime>
+    <OpenALSoftNativeRuntime Condition="'$(OpenALSoftNativeRuntime)' == ''">win-x64</OpenALSoftNativeRuntime>
+  </PropertyGroup>
+
+  <Target Name="CopyOpenALSoftNativeToAppRoot" AfterTargets="Build">
+    <ItemGroup>
+      <OpenALSoftNative Include="$(TargetDir)runtimes\$(OpenALSoftNativeRuntime)\native\soft_oal.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(OpenALSoftNative)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" Condition="Exists('%(OpenALSoftNative.Identity)')" />
+    <Copy SourceFiles="@(OpenALSoftNative)" DestinationFiles="$(TargetDir)openal32.dll" SkipUnchangedFiles="true" Condition="Exists('%(OpenALSoftNative.Identity)')" />
+  </Target>
+
+  <Target Name="CopyOpenALSoftNativeToPublishRoot" AfterTargets="Publish">
+    <ItemGroup>
+      <OpenALSoftPublishedNative Include="$(PublishDir)runtimes\$(OpenALSoftNativeRuntime)\native\soft_oal.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(OpenALSoftPublishedNative)" DestinationFiles="$(PublishDir)soft_oal.dll" SkipUnchangedFiles="true" Condition="Exists('%(OpenALSoftPublishedNative.Identity)')" />
+    <Copy SourceFiles="@(OpenALSoftPublishedNative)" DestinationFiles="$(PublishDir)openal32.dll" SkipUnchangedFiles="true" Condition="Exists('%(OpenALSoftPublishedNative.Identity)')" />
+  </Target>
 
   <!-- Bundle WoWDBDefs definitions with the output (required for DBC parsing via DBCD) -->
   <ItemGroup>

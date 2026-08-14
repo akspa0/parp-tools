@@ -3,6 +3,7 @@ using System.Numerics;
 using GillijimProject.WowFiles.Alpha;
 using WoWViewer.Logging;
 using WoWViewer.Rendering;
+using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 
 namespace WoWViewer.Terrain;
@@ -46,7 +47,24 @@ public class TileLoadResult
     public List<TerrainChunkData> Chunks { get; init; } = new();
     public List<MddfPlacement> MddfPlacements { get; init; } = new();
     public List<ModfPlacement> ModfPlacements { get; init; } = new();
+    public List<TerrainSoundEmitter> SoundEmitters { get; init; } = new();
 }
+
+public sealed record TerrainSoundEmitter(
+    int TileX,
+    int TileY,
+    int ChunkX,
+    int ChunkY,
+    uint SoundPointId,
+    uint SoundNameId,
+    Vector3 Position,
+    float MinDistance,
+    float MaxDistance,
+    float CutoffDistance,
+    uint StartTime,
+    uint EndTime,
+    uint Mode,
+    byte[] RawEntry);
 
 public class AlphaTerrainAdapter : ITerrainAdapter
 {
@@ -185,6 +203,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         TileTextures.TryAdd((tileX, tileY), mtexNames);
 
         var chunks = new List<TerrainChunkData>(256);
+        var soundEmitters = new List<TerrainSoundEmitter>();
 
         // Use AdtAlpha's internal MCIN to get MCNK offsets (same pattern as ToAdtLk)
         var offsets = adt.GetMcnkOffsets();
@@ -198,6 +217,28 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             try
             {
                 var mcnk = new McnkAlpha(fs, off, headerSize: 0, adtNum: tileIdx);
+                if (TryReadAlphaMcnkPayload(fs, off, out byte[]? mcnkPayload))
+                {
+                    AdtMcseData mcse = AdtMcseReader.ReadAlpha053Mcnk(mcnkPayload);
+                    foreach (AdtMcseEmitter emitter in mcse.Emitters)
+                    {
+                        soundEmitters.Add(new TerrainSoundEmitter(
+                            tileX,
+                            tileY,
+                            mcnk.IndexX,
+                            mcnk.IndexY,
+                            emitter.SoundPointId,
+                            emitter.SoundNameId,
+                            ConvertSoundPosition(emitter.Position),
+                            emitter.MinDistance,
+                            emitter.MaxDistance,
+                            emitter.CutoffDistance,
+                            emitter.StartTime,
+                            emitter.EndTime,
+                            emitter.Mode,
+                            emitter.RawEntry));
+                    }
+                }
                 var chunkData = ExtractChunkData(mcnk, tileX, tileY, tileIdx);
                 if (chunkData != null)
                     chunks.Add(chunkData);
@@ -232,7 +273,43 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         }
 
         ViewerLog.Trace($"[TerrainAdapter] Tile ({tileX},{tileY}): {chunks.Count} chunks, {mtexNames.Count} textures, {tileMddf.Count} MDDF, {tileModf.Count} MODF");
-        return new TileLoadResult { Chunks = chunks, MddfPlacements = tileMddf, ModfPlacements = tileModf };
+        return new TileLoadResult
+        {
+            Chunks = chunks,
+            MddfPlacements = tileMddf,
+            ModfPlacements = tileModf,
+            SoundEmitters = soundEmitters
+        };
+    }
+
+    private static bool TryReadAlphaMcnkPayload(FileStream stream, int chunkOffset, out byte[]? payload)
+    {
+        payload = null;
+        if (chunkOffset < 0 || chunkOffset + 8 > stream.Length)
+            return false;
+
+        Span<byte> header = stackalloc byte[8];
+        stream.Seek(chunkOffset, SeekOrigin.Begin);
+        if (stream.Read(header) != header.Length)
+            return false;
+
+        int size = BitConverter.ToInt32(header.Slice(4, 4));
+        if (size < 0 || chunkOffset + 8L + size > stream.Length)
+            return false;
+
+        payload = new byte[size];
+        stream.Seek(chunkOffset + 8L, SeekOrigin.Begin);
+        return stream.Read(payload, 0, size) == size;
+    }
+
+    private static Vector3 ConvertSoundPosition(Vector3 position)
+    {
+        // Alpha MCSE uses the same C3Vector axis order as world placements:
+        // file (X, Z, Y) -> renderer (MapOrigin-Y, MapOrigin-X, Z).
+        return new Vector3(
+            WoWConstants.MapOrigin - position.Y,
+            WoWConstants.MapOrigin - position.X,
+            position.Z);
     }
 
     /// <summary>

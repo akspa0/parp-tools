@@ -159,12 +159,15 @@ The goal is to make the UI feel like World of Warcraft's interface: clean, consi
 - FR-025: Fog defaults apply on load when no active world override is selected; the Lighting surface
   exposes the active start/end range, its source, and reset-to-lighting behavior
 
-### FR-026 to FR-030: Window Behavior
+### FR-026 to FR-031: Window Behavior
 - FR-026: All frames use `ImGuiWindowFlags.NoDocking` to prevent docking collapse
 - FR-027: All frames use `ImGui.Begin(..., ref _showFlag)` with proper close button
 - FR-028: Taxi window: debug and fix the ephemeral behavior (ensure it's a Begin/End window with ref bool)
 - FR-029: ImGui .ini saves window positions automatically
 - FR-030: On next launch, frames restore to their last position
+- FR-031: Workbench page navigation MUST use visible vertical rails for primary
+  and nested page sets; no required page may depend on a clipped horizontal
+  tab strip or an unlabeled scroll arrow.
 
 ## Out of Scope
 

@@ -132,6 +132,29 @@ public static class AdtMccvTileImageBuilder
             position = checked((int)nextOffset);
         }
 
+        // Some sparse 3.x/4.x chunks omit the MCNR padding consumed by the
+        // normal client walk. Follow declared sizes once more so the MCCV
+        // guide image still includes a valid payload after a short MCNR.
+        position = RootMcnkSubchunkOffset;
+        while (position <= payload.Length - ChunkHeader.SizeInBytes)
+        {
+            if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
+                break;
+
+            long nextOffset = (long)position + ChunkHeader.SizeInBytes + header.Size;
+            if (nextOffset > payload.Length)
+                break;
+
+            if (header.Id == AdtChunkIds.Mccv)
+            {
+                if (header.Size < VerticesPerChunk * 4)
+                    return -1;
+                return position + ChunkHeader.SizeInBytes;
+            }
+
+            position = checked((int)nextOffset);
+        }
+
         return -1;
     }
 

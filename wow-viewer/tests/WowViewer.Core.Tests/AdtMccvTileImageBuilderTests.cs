@@ -23,6 +23,18 @@ public sealed class AdtMccvTileImageBuilderTests
     }
 
     [Fact]
+    public void ReadChunkColors_RecoversMccvAfterShortMcnrWithoutLayersOrAlpha()
+    {
+        byte[] expectedMccv = CreateChunkColors(40, 80, 120, 255);
+        byte[] sourceBytes = CreateSyntheticAdt(chunkX: 2, chunkY: 3, expectedMccv, shortMcnr: true);
+
+        IReadOnlyDictionary<int, byte[]> chunkColors = AdtMccvTileImageBuilder.ReadChunkColors(sourceBytes, "synthetic_sparse.adt");
+
+        Assert.True(chunkColors.TryGetValue((3 * 16) + 2, out byte[]? actualMccv));
+        Assert.Equal(expectedMccv, actualMccv);
+    }
+
+    [Fact]
     public void RenderTileImageRgba_PreservesRawStoredChannelOrder()
     {
         byte[] chunkColors = CreateChunkColors(1, 2, 3, 255);
@@ -49,9 +61,9 @@ public sealed class AdtMccvTileImageBuilderTests
         Assert.Equal((byte)127, image[3]);
     }
 
-    private static byte[] CreateSyntheticAdt(int chunkX, int chunkY, byte[] mccvPayload)
+    private static byte[] CreateSyntheticAdt(int chunkX, int chunkY, byte[] mccvPayload, bool shortMcnr = false)
     {
-        byte[] mcnkPayload = CreateSyntheticMcnk(chunkX, chunkY, mccvPayload);
+        byte[] mcnkPayload = CreateSyntheticMcnk(chunkX, chunkY, mccvPayload, shortMcnr);
         byte[] mver = CreateChunk(MapChunkIds.Mver, CreateUInt32Payload(18));
         byte[] mhdr = CreateChunk(MapChunkIds.Mhdr, new byte[64]);
         byte[] mcin = CreateChunk(MapChunkIds.Mcin, new byte[256 * McinEntrySize]);
@@ -77,7 +89,7 @@ public sealed class AdtMccvTileImageBuilderTests
         return stream.ToArray();
     }
 
-    private static byte[] CreateSyntheticMcnk(int chunkX, int chunkY, byte[] mccvPayload)
+    private static byte[] CreateSyntheticMcnk(int chunkX, int chunkY, byte[] mccvPayload, bool shortMcnr)
     {
         byte[] header = new byte[RootMcnkHeaderSize];
         BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0x04, 4), checked((uint)chunkX));
@@ -86,7 +98,7 @@ public sealed class AdtMccvTileImageBuilderTests
         List<(FourCC id, byte[] data)> subchunks =
         [
             (AdtChunkIds.Mcvt, new byte[145 * sizeof(float)]),
-            (AdtChunkIds.Mcnr, new byte[0x1C0]),
+            (AdtChunkIds.Mcnr, new byte[shortMcnr ? 145 * 3 : 0x1C0]),
             (AdtChunkIds.Mccv, mccvPayload)
         ];
 

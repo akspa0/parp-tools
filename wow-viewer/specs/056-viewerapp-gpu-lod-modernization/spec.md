@@ -29,6 +29,7 @@
 | D6 | Supersede `specs/036-renderer-improvements`. |
 | D7 | v0.5.0-dev scope: full recommended core. |
 | D8 | **Correctness oracle**: the Ghidra-confirmed 3.3.5 renderer research at `docs/architecture/wmo-render-pass-architecture-2026-05-30.md` is a **correctness oracle** for the new WMO renderer — it tells us *what the renderer must do* (interior/exterior dispatch, per-batch MOMT flag testing, lightmap pass split, liquid type dispatch, portal-walk visibility). It is **not** a code source. The new renderer conforms to it because the native client does; we do not "port" the Ghidra-disassembly patterns. |
+| D9 | MCCV vertex color data is an independent terrain input. A valid 145-entry MCCV payload MUST survive when an MCNK has no MCLY or MCAL, when sparse MCNR omits the usual padding, and when the payload is present only in a split `_tex0.adt`/`_obj0.adt` source. Live rendering, MCCV guide-image export, and tensor extraction consume the preserved payload. |
 
 ## Out of Scope (Hard)
 
@@ -78,6 +79,7 @@ As a viewer user, I need distant terrain to render at lower mesh resolution than
 2. **Given** the camera is mid-distance from a tile, **When** the terrain mesh is built, **Then** it uses a reduced vertex density (configurable, default 33×33 or 17×17) without visible popping.
 3. **Given** the camera is far from a tile, **When** the terrain LOD selector picks the far-distance bucket, **Then** the WDL is used as the visible representation and no per-chunk ADT mesh is built for that tile.
 4. **Given** a tile crosses the LOD threshold during camera movement, **When** the LOD transition happens, **Then** the change is gradual (no sudden popping) and verified by a deterministic capture at the threshold distance.
+5. **Given** a 3.x–4.x MCNK has MCCV but no MCLY or MCAL, **When** the terrain mesh or MCCV guide image is built, **Then** the 145 vertex colors are preserved and applied without requiring texture layers or alpha maps.
 
 ---
 
@@ -203,6 +205,7 @@ As a maintainer, I need the existing real-data validation surfaces (terrain alph
 - **FR-018**: The shared renderer MUST NOT regress `specs/020-renderer-culling-and-tile-capture` (the P1 frustum culling fix is a hard prerequisite for tile capture correctness).
 - **FR-019**: The shared renderer MUST be repo-independent (no source file references a path outside `wow-viewer/`).
 - **FR-020**: The shared renderer MUST be cross-platform (Windows and Linux; macOS best-effort) and MUST NOT introduce a CUDA-only assumption (per `wow-viewer` AGENTS.md "open backend seams" rule).
+- **FR-021**: Terrain ingestion and reconstruction tooling MUST preserve valid MCCV payloads independently of MCLY/MCAL presence, including sparse MCNR layouts and split ADT sources; focused regression tests MUST cover each case.
 
 ### Key Entities
 
@@ -228,6 +231,7 @@ As a maintainer, I need the existing real-data validation surfaces (terrain alph
 - **SC-008**: `WowViewer.Tool.ValidationCapture` continues to produce the same `object_visibility_mask` for `Azeroth_30_48` on `3_3_5_12340` after the cutover (within documented tolerance).
 - **SC-009**: A staged `0_5_3_3368` (Alpha) capture still passes the Alpha MCAL alpha-mask parity check after every cutover step (terrain alpha risk area).
 - **SC-010**: `wow-viewer/src/viewer/WoWViewer/Rendering/*` is empty or absent after the cutover; the viewer-app project no longer compiles any renderer implementation code outside the shared library.
+- **SC-011**: A sparse MCNK containing MCCV but no MCLY/MCAL produces the same 580-byte vertex-color payload through the live terrain input, MCCV guide-image extraction, and split-ADT merge paths, verified by focused tests.
 
 ---
 

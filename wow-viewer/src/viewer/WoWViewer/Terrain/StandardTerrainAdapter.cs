@@ -660,6 +660,27 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
                 int chunkX = (int)mcnk.Header.IndexX;
                 int chunkY = (int)mcnk.Header.IndexY;
+                AdtMcseData mcse = AdtMcseReader.Read(
+                    mcnk.McseData ?? Array.Empty<byte>(),
+                    mcnk.Header.NSndEmitters > int.MaxValue ? 0 : (int)mcnk.Header.NSndEmitters);
+                foreach (AdtMcseEmitter emitter in mcse.Emitters)
+                {
+                    result.SoundEmitters.Add(new TerrainSoundEmitter(
+                        tileX,
+                        tileY,
+                        chunkX,
+                        chunkY,
+                        emitter.SoundPointId,
+                        emitter.SoundNameId,
+                        ConvertSoundPosition(emitter.Position),
+                        emitter.MinDistance,
+                        emitter.MaxDistance,
+                        emitter.CutoffDistance,
+                        emitter.StartTime,
+                        emitter.EndTime,
+                        emitter.Mode,
+                        emitter.RawEntry));
+                }
 
                 // Diagnostic: log first chunk of each tile
                 if (ci == 0)
@@ -713,9 +734,12 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 byte[]? shadowMap = ExtractShadowMap(layerSource.McshData ?? mcnk.McshData);
 
                 // MCCV vertex colors (WotLK+)
-                byte[]? mccvColors = null;
-                if (mcnk.MccvData != null && mcnk.MccvData.Length >= 145 * 4)
-                    mccvColors = mcnk.MccvData;
+                // MCCV is independent from MCLY/MCAL. In split 3.x/4.x ADTs
+                // it may be carried by the texture MCNK even when the root
+                // MCNK has no layer or alpha payload, so preserve either
+                // valid source instead of making vertex color availability
+                // depend on texture-layer presence.
+                byte[]? mccvColors = SelectMccvData(mcnk, layerSource);
 
                 // Hole mask
                 int holeMask = (int)mcnk.Header.Holes;
@@ -822,6 +846,14 @@ public class StandardTerrainAdapter : ITerrainAdapter
             CollectPlacementsViaMhdr(adtBytes, mhdrStart, mhdr, tileX, tileY, result);
 
         return textures;
+    }
+
+    private static Vector3 ConvertSoundPosition(Vector3 position)
+    {
+        return new Vector3(
+            WoWConstants.MapOrigin - position.Y,
+            WoWConstants.MapOrigin - position.X,
+            position.Z);
     }
 
     private static bool TryGetMhdr(byte[] adtBytes, out int mhdrStart, out GillijimProject.WowFiles.Mhdr mhdr)
@@ -970,6 +1002,19 @@ public class StandardTerrainAdapter : ITerrainAdapter
             };
         }
         return layers;
+    }
+
+    private static byte[]? SelectMccvData(Mcnk rootChunk, Mcnk? textureChunk)
+    {
+        const int minimumMccvSize = 145 * 4;
+
+        if (rootChunk.MccvData is { Length: >= minimumMccvSize })
+            return rootChunk.MccvData;
+
+        if (textureChunk is not null && textureChunk.MccvData is { Length: >= minimumMccvSize })
+            return textureChunk.MccvData;
+
+        return null;
     }
 
     private static Dictionary<int, byte[]> ExtractAlphaMaps(Mcnk mcnk, TerrainAlphaDecodeMode decodeMode, bool useBigAlpha, bool doNotFixAlphaMap = false)

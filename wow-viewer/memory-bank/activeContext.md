@@ -26,7 +26,7 @@ the owning spec for requirements and proof; read a workstream only when the spec
 |---|---|---|
 | 146 Audio/camera playback | Draft/planned | Parked while the active renderer baseline gate is validated. |
 | 144 Camera capture paths | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions. |
-| 145 WoW UI overhaul | First slice implemented | Continue only the remaining persistent-window and placeholder audit tasks. |
+| 145 WoW UI overhaul | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks. |
 | 143 World context and lighting | First area slice landed | Resolve evidence/setup tasks before WMO area or lighting claims. |
 | 142 World scene graph | In progress | Validate Phase 8P near-field WMO readiness ordering, then continue retained-radius movement proof. |
 | 139–141 Terrain/minimap reconstruction | Active/parked ML lanes | Reopen only for the named spec and user-run training/validation. |

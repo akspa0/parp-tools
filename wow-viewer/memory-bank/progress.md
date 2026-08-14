@@ -5,6 +5,17 @@ Last updated: 2026-08-13
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-13 — Spec 146 packaged OpenAL Soft MCSE runtime
+
+- Added the OpenAL Soft native package to both viewer targets and copy the selected desktop DLL
+  beside Debug and publish executables as `soft_oal.dll` plus Silk.NET's `openal32.dll` name.
+- The production native probe retains the loaded module before Silk.NET constructs `AudioContext`,
+  preventing the prior missing-library and premature-unload failures; cleanup remains guarded.
+- Focused audio tests pass (3/3), both viewer targets build with 0 errors, and a process-level
+  `AudioContext` create/dispose smoke test passes against the packaged Windows output.
+- Proven scope is resident MCSE positional PCM-WAV playback. User-run audible client proof remains
+  required; MIDI/DLS/MP3/OGG playback and Play + Video audio muxing remain explicitly unsupported.
+
 ## 2026-08-13 — Alpha audio catalog documentation
 
 - Added a plain-language guide for the Alpha area-audio catalog, including the `AreaTable` to
@@ -157,6 +168,27 @@ belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
   future client/server seams. It does not select or implement a backend yet.
 - Next: Phase 1 contracts and capability tests only.
 
+## 2026-08-13 — Spec 146 resident MCSE playback slice
+
+- Added build-aware standard/Alpha 0.5.3 MCSE emitter extraction to tile load results, including raw
+  Alpha 76-byte identity, position, range, timing, mode, and preservation bytes.
+- Added `SoundEntries` catalog loading from the active DBC provider, dependency-free PCM WAV decoding,
+  and a viewer-owned OpenAL runtime that admits only resident tile emitters and releases them on unload.
+- Added lower status-bar `Audio active/resident` diagnostics and focused Alpha MCSE/WAV contract tests.
+- Source proof: focused audio tests pass (2/2), focused MCSE tests pass (2/2), and the cross-platform
+  viewer Debug build passes with existing warnings. User-owned proof remains audible playback in the
+  configured client; MIDI/DLS, MP3/OGG/FLAC, camera-track audio, and capture muxing remain open.
+
+## 2026-08-13 — Sparse MCCV terrain preservation correction
+
+- Fixed the 3.x–4.x sparse-MCNK loss where a short MCNR declaration caused the padded subchunk walk to
+  skip a following 580-byte MCCV payload, even when MCLY and MCAL were absent.
+- Split root/texture/object sources now retain whichever valid MCCV payload exists, and the live terrain
+  adapter selects MCCV independently from the layer/alpha source. MCCV guide-image and tensor extraction
+  retry using declared subchunk sizes for the same sparse layout.
+- Focused source proof passes 8/8 across parser, guide-image, tensor-adjacent, and split-ADT tests. User
+  still owns real 3.x–4.x client visual validation on a tile with MCCV but no MCLY/MCAL.
+
 ## 2026-08-12 — Spec 144 capture path slice
 
 - Camera path authoring, JSON camera state, roll/time controls, contextual keybinds, path preload,
@@ -181,3 +213,20 @@ belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
 When a task completes, update the owning spec first, then adjust this ledger only if the next-agent
 routing changed. Move superseded detail to the owning archive rather than appending more history.
+## 2026-08-13 — OpenAL absence must fail closed
+
+- Added a platform-aware native OpenAL probe in `WowViewer.Core.Audio`.
+- `WorldAudioRuntime` now avoids Silk.NET `AudioContext` construction when the
+  optional native library is absent and guards cleanup after backend failure.
+- Added a missing-library contract test and documented the no-OpenAL acceptance
+  path in Spec 146.
+- Remaining proof: run the viewer without OpenAL installed and verify it stays
+  alive; then validate actual emitter playback with an OpenAL-enabled client.
+## 2026-08-13 — Workbench tab rails replace unreachable overflow arrows
+
+- Replaced the workbench's horizontal primary and nested sub-tab strips with
+  directly clickable vertical rails.
+- Capture Automation and Camera Path now use the same reachable rail when
+  opened inside the Utilities surface.
+- Updated Spec 080 with the reachable-navigation requirement and task proof
+  row. Remaining proof is compact-window UI validation by the user.

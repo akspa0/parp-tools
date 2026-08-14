@@ -7,6 +7,7 @@ using WoWViewer.DataSources;
 using WoWViewer.Logging;
 using WoWViewer.Population;
 using WoWViewer.Rendering;
+using WoWViewer.Audio;
 using WowViewer.Core.Maps;
 using Silk.NET.OpenGL;
 using CorePm4AxisConvention = WowViewer.Core.PM4.Models.Pm4AxisConvention;
@@ -3473,6 +3474,10 @@ public class WorldScene : ISceneRenderer
     private string? _dbdDir;
     private string? _dbcBuild;
     private int _mapId = -1;
+    private WorldAudioRuntime? _audioRuntime;
+    public string AudioStatus => _audioRuntime?.Status ?? "Audio runtime not configured.";
+    public int ResidentAudioEmitterCount => _audioRuntime?.ResidentEmitterCount ?? 0;
+    public int ActiveAudioEmitterCount => _audioRuntime?.ActiveEmitterCount ?? 0;
 
     // DBC Lighting
     private LightService? _lightService;
@@ -3792,6 +3797,18 @@ public class WorldScene : ISceneRenderer
         _dbcBuild = build;
         _mapId = mapId;
         _assets.SetBuildVersion(build);
+
+        _audioRuntime?.Dispose();
+        _audioRuntime = _dataSource is null ? null : new WorldAudioRuntime(_dataSource);
+        if (_audioRuntime is not null)
+        {
+            _audioRuntime.Configure(dbcProvider, dbdDir, build);
+            foreach ((int tileX, int tileY) in _terrainManager.LoadedTiles.ToArray())
+            {
+                if (_terrainManager.TryGetTileLoadResult(tileX, tileY, out TileLoadResult result))
+                    _audioRuntime.AddTile(tileX, tileY, result.SoundEmitters);
+            }
+        }
     }
 
     private void LazyLoadWlLiquids()
@@ -7946,6 +7963,7 @@ public class WorldScene : ISceneRenderer
     /// </summary>
     private void OnTileLoaded(int tileX, int tileY, TileLoadResult result)
     {
+        _audioRuntime?.AddTile(tileX, tileY, result.SoundEmitters);
         var adapter = _terrainManager.Adapter;
         var mdxNames = adapter.MdxModelNames;
         var wmoNames = adapter.WmoModelNames;
@@ -8060,6 +8078,7 @@ public class WorldScene : ISceneRenderer
     /// </summary>
     private void OnTileUnloaded(int tileX, int tileY)
     {
+        _audioRuntime?.RemoveTile(tileX, tileY);
         int wmoInstanceCount = _tileWmoInstances.TryGetValue((tileX, tileY), out List<ObjectInstance>? wmoInstances)
             ? wmoInstances.Count
             : 0;
@@ -10263,6 +10282,7 @@ public class WorldScene : ISceneRenderer
                     cameraForward = ExtractCameraForward(viewInv);
                     _lastRenderedCameraPosition = cameraPos;
                     _hasLastRenderedCameraPosition = true;
+                    _audioRuntime?.Update(cameraPos, cameraForward);
 
                     EnsurePm4OverlayMatchesCameraWindow(cameraPos);
 
@@ -14359,6 +14379,8 @@ public class WorldScene : ISceneRenderer
     public void Dispose()
     {
         ReleasePm4LoadCancellation(cancelPendingLoad: true);
+        _audioRuntime?.Dispose();
+        _audioRuntime = null;
         _terrainManager.OnTileLoaded -= OnTileLoaded;
         _terrainManager.OnTileUnloaded -= OnTileUnloaded;
         _terrainManager.Dispose();

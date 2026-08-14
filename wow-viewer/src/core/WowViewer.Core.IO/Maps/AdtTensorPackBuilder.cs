@@ -4286,6 +4286,28 @@ private static int LocateMccvDataOffset(ReadOnlySpan<byte> payload)
             position = (int)nextOffset;
         }
 
+        // Sparse 3.x/4.x chunks can omit MCNR padding. Retry with declared
+        // sizes so MCCV remains available to tensor/export reconstruction.
+        position = RootMcnkSubchunkOffset;
+        while (position <= payload.Length - ChunkHeader.SizeInBytes)
+        {
+            if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
+                break;
+
+            long nextOffset = (long)position + ChunkHeader.SizeInBytes + header.Size;
+            if (nextOffset > payload.Length)
+                break;
+
+            if (header.Id == AdtChunkIds.Mccv)
+            {
+                if (header.Size < McvtSampleCount * 4)
+                    return -1;
+                return position + ChunkHeader.SizeInBytes;
+            }
+
+            position = (int)nextOffset;
+        }
+
         return -1;
     }
 

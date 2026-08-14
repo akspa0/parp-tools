@@ -337,6 +337,7 @@ public partial class ViewerApp
                 $"WMO {stats.VisibleWmoCount}/{_worldScene.WmoInstanceCount} | " +
                 $"MDX {stats.VisibleMdxCount}/{_worldScene.MdxInstanceCount} " +
                 $"({_worldScene.Assets.MdxModelsLoaded} ok/{_worldScene.Assets.MdxModelsFailed} fail) | " +
+                $"Audio {_worldScene.ActiveAudioEmitterCount}/{_worldScene.ResidentAudioEmitterCount} | " +
                 $"Pending {stats.PendingAssetLoadCount}";
         }
 

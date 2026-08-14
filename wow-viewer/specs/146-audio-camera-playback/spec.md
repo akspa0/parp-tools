@@ -34,6 +34,7 @@ As a viewer user, I want terrain area ambience and client sound emitters to cont
 1. **Given** the camera is over a resolved area, **when** time-of-day or underwater state changes, **then** the selected day/night or underwater ambience follows the client data for that area.
 2. **Given** an MCSE emitter is resident and its sound identity resolves, **when** the camera enters or leaves its spatial range, **then** the emitter is audible only within the configured attenuation range.
 3. **Given** an emitter record or sound identity cannot be decoded for the active build, **when** the scene updates, **then** the emitter is skipped with a diagnostic reason and other audio continues.
+4. **Given** the client has no native OpenAL library, **when** the viewer configures world audio, **then** audio is reported unavailable and the viewer remains running without an initialization or finalizer exception.
 
 ### User Story 3 - Capture audio with camera videos (Priority: P1)
 
@@ -110,6 +111,7 @@ As a project maintainer, I want the audio system to become a reusable world-runt
 - **FR-015**: Python or external tooling MAY provide offline inspection, conversion, or capability probes, but the interactive viewer's authoritative playback/session contract MUST remain available to the C# runtime.
 - **FR-016**: Audio diagnostics MUST expose enough provenance to distinguish absent client data, unresolved DBC/DB2 schema, unsupported decoder, missing bank, archive-read failure, and successful playback.
 - **FR-017**: The design MUST keep a future integration seam for world/session events supplied by the Alpha-Core SQL-backed single-player server direction without implementing that server as part of this feature.
+- **FR-018**: The audio runtime MUST probe for the optional native OpenAL library before constructing Silk.NET's `AudioContext`, and cleanup MUST tolerate a partially initialized backend without allowing startup or finalization to terminate the viewer.
 
 ### Key Entities
 

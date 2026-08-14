@@ -91,7 +91,10 @@ public static class LkAdtReader
                     DoodadRefs = (kvp.Value.DoodadRefs != null && kvp.Value.DoodadRefs.Count > 0) ? kvp.Value.DoodadRefs : rootChunk.DoodadRefs,
                     WorldModelRefs = (kvp.Value.WorldModelRefs != null && kvp.Value.WorldModelRefs.Count > 0) ? kvp.Value.WorldModelRefs : rootChunk.WorldModelRefs,
                     LiquidData = rootChunk.LiquidData,
-                    MccvColors = rootChunk.MccvColors,
+                    // MCCV is independent vertex data. A split texture/object
+                    // source may be the only source carrying it, even when
+                    // the root MCNK has no MCLY/MCAL payload.
+                    MccvColors = kvp.Value.MccvColors ?? rootChunk.MccvColors,
                     MclvLighting = rootChunk.MclvLighting,
                     PosX = rootChunk.PosX,
                     PosY = rootChunk.PosY,
@@ -510,7 +513,7 @@ public static class LkAdtReader
                     if (subSize < 0 || pos + 8 + subSize > scanEnd)
                         break;
 
-                    if (subTag == "MCCV" && subSize >= 580)
+                    if ((subTag == "MCCV" || subTag == "VCCM") && subSize >= 580)
                     {
                         int dataOffset = pos + 8;
                         if (dataOffset + 580 <= adtBytes.Length)
@@ -519,7 +522,7 @@ public static class LkAdtReader
                             Buffer.BlockCopy(adtBytes, dataOffset, mccvData, 0, 580);
                         }
                     }
-                    else if (subTag == "MCLV" && subSize >= 580)
+                    else if ((subTag == "MCLV" || subTag == "VLCM") && subSize >= 580)
                     {
                         int dataOffset = pos + 8;
                         if (dataOffset + 580 <= adtBytes.Length)
@@ -536,6 +539,13 @@ public static class LkAdtReader
             }
             else break;
         }
+
+        // A sparse 3.x/4.x MCNK may place MCCV immediately after a short
+        // MCNR payload. The regular scan preserves four-byte alignment, while
+        // this recovery pass follows declared sizes so that valid vertex color
+        // data is not lost when the MCNR padding is absent.
+        if (mccvData == null)
+            mccvData = TryRecoverMccvData(adtBytes, scanStart, scanEnd);
 
         br.BaseStream.Position = mcnkStart + 8 + declaredSize;
 
@@ -566,5 +576,32 @@ public static class LkAdtReader
             PosY = posY,
             PosZ = baseHeight
         };
+    }
+
+    private static byte[]? TryRecoverMccvData(byte[] data, int start, int end)
+    {
+        const int minimumPayloadSize = 145 * 4;
+
+        for (int pos = Math.Max(start, 0); pos + 8 <= end;)
+        {
+            string tag = Encoding.ASCII.GetString(data, pos, 4);
+            int size = BitConverter.ToInt32(data, pos + 4);
+            if (size < 0 || pos + 8L + size > end)
+                break;
+
+            if ((tag == "MCCV" || tag == "VCCM") && size >= minimumPayloadSize)
+            {
+                byte[] payload = new byte[minimumPayloadSize];
+                Buffer.BlockCopy(data, pos + 8, payload, 0, payload.Length);
+                return payload;
+            }
+
+            int next = checked(pos + 8 + size);
+            if (next <= pos)
+                break;
+            pos = next;
+        }
+
+        return null;
     }
 }
