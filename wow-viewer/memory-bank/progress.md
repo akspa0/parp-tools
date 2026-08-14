@@ -5,6 +5,17 @@ Last updated: 2026-08-14
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-14 — Spec 147 minimap, fog residency, and doodad instancing plan
+
+- Authored the bounded Spec Kit feature, research, data model, interaction/fog/batching contracts,
+  quickstart, requirements checklist, and dependency-ordered tasks.
+- The read-only audit found duplicate fullscreen minimap draw ownership, `TerrainManager` explicitly
+  discarding `fogEnd` for streaming targets, and WMO-internal doodad batching remaining
+  placement-local.
+- No production code changed. Branch creation was blocked by the shared workspace's
+  `.git/index.lock` permission; the user-owned `wow-viewer/imgui.ini` change remains untouched.
+- Next: implement and validate Spec 147 Phase 1 only.
+
 ## 2026-08-14 — Spec 143 LIT source switching and fallback
 
 - LIT discovery now enumerates every `.lit` file directly in the active map folder while retaining

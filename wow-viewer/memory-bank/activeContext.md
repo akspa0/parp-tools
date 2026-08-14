@@ -7,25 +7,25 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 143 user-run validation of LIT variant switching and the
-  automatic no-Light-DBC fallback, then continue the named WMO/lighting context slice.
-- **Proof owner:** 25 focused core tests and an isolated viewer build prove path resolution and the
-  source/fallback wiring; the user owns real-client variant selection, fallback appearance, marker
-  placement, camera focus, visual lighting, and cross-era proof.
-- **Completed slice:** LIT list-header positions decode client fixed-point XZY values by `/36`, expose
-  semantic WoW XYZ, and transform to renderer coordinates with the active map origin. All direct-map
-  `.lit` variants are discoverable through the data-source index, switchable in the UI, and LIT
-  override starts automatically when no usable map-scoped Light DBC profile exists.
-- **Main unproven gap:** real-client confirmation is still required that variant selection and the
-  automatic fallback choose the expected profile and appearance. This does not claim local-light or
-  shader parity.
-- **Explicitly out of scope for the next slice:** BLS shader reconstruction, audio playback, whole-map
-  loading, and runtime visual/FPS claims from source tests alone.
+- **Next implementation target:** Spec 147 Phase 1: make the fullscreen minimap a single-owned
+  surface and implement/test deterministic drag versus same-target triple-click teleport behavior.
+- **Proof owner:** Spec 147 focused interaction tests and a Debug build first; the user owns the
+  fullscreen drag/teleport runtime check, then the fog-residency and dense-doodad captures.
+- **Completed slice:** Spec 147 planning artifacts define minimap interaction, active-fog-bounded
+  tile/object coverage, compatibility-aware doodad instancing, diagnostics, tasks, and proof gates.
+  The read-only audit identified duplicate fullscreen draw ownership as the first concrete input
+  risk.
+- **Main unproven gap:** no production code has changed for Spec 147. `TerrainManager` still
+  discards its supplied `fogEnd` for streaming targets, and dense WMO-internal doodad batching is
+  still placement-local until its phases are implemented and tested.
+- **Explicitly out of scope for the next slice:** WDL/sky/stars, audio, shader reconstruction,
+  format readers, whole-map loading, and runtime FPS/visual claims from source tests alone.
 
 ## Active spec lanes
 
 | Spec | State | Next handoff |
 |---|---|---|
+| 147 Minimap/fog/doodad instancing | Draft/planned | Review the plan, then implement the Phase 1 fullscreen minimap ownership and pure interaction contract. |
 | 146 Audio/camera playback | Draft/planned | Parked while the active renderer baseline gate is validated. |
 | 144 Camera capture paths | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions. |
 | 145 WoW UI overhaul | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks. |
