@@ -5,6 +5,13 @@ Last updated: 2026-08-14
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-14 — Spec 146 visible audio mute control
+
+- Added a clearly labeled, color-coded `AUDIO: ON` / `AUDIO: MUTED` button to the bottom status bar.
+- Routed mute through the runtime master bus so resident emitters, preview audio, and ZoneMusic
+  all silence together while preserving the configured master gain.
+- Viewer cross-platform Debug build passes with 0 errors; audible mute/unmute remains user-owned.
+
 ## 2026-08-14 — Spec 147 minimap interaction, LIT coverage, and WMO doodad batching
 
 - Removed duplicate fullscreen minimap ownership and routed docked/fullscreen input through a pure

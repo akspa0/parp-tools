@@ -89,3 +89,11 @@ quest, and authoritative world-mutation implementation.
   no fake PCM conversion or filename inference was added.
 - Audible playback, area transition behavior, WMO-area selection, and camera/capture transport
   synchronization remain user-run or future gates.
+
+## 2026-08-14 mute control checkpoint
+
+- Added an explicit `AUDIO: ON` / `AUDIO: MUTED` button to the bottom status bar. The control is
+  intentionally outside the crowded diagnostic tabs so audio output state is always visible.
+- Mute is owned by the viewer audio runtime's master bus and applies to resident emitters, sound
+  preview, and resolved ZoneMusic. The configured master gain is retained while muted.
+- Source/build proof is the viewer Debug build; audible mute/unmute behavior remains user-owned.

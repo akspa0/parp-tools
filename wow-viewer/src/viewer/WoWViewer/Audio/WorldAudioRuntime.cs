@@ -56,6 +56,8 @@ public sealed class WorldAudioRuntime : IDisposable
 
     public float EmitterGain { get; private set; } = 1f;
 
+    public bool IsMuted { get; private set; }
+
     public int ResidentEmitterCount => _tileEmitters.Values.Sum(static emitters => emitters.Count);
 
     public int ActiveEmitterCount => _active.Count;
@@ -149,6 +151,13 @@ public sealed class WorldAudioRuntime : IDisposable
         ApplyActiveGains();
     }
 
+    public void SetMuted(bool muted)
+    {
+        IsMuted = muted;
+        ApplyActiveGains();
+        LastDiagnostic = muted ? "Audio output muted." : "Audio output unmuted.";
+    }
+
     public bool TryPlaySoundEntry(uint soundEntryId, bool loop, out string reason)
     {
         reason = string.Empty;
@@ -189,7 +198,7 @@ public sealed class WorldAudioRuntime : IDisposable
             uint source = _al.GenSource();
             _al.SetSourceProperty(source, SourceInteger.Buffer, buffer);
             _al.SetSourceProperty(source, SourceVector3.Position, _listenerPosition);
-            _al.SetSourceProperty(source, SourceFloat.Gain, soundEntry.Volume * MasterGain);
+            _al.SetSourceProperty(source, SourceFloat.Gain, soundEntry.Volume * EffectiveMasterGain);
             _al.SetSourceProperty(source, SourceFloat.ReferenceDistance, MathF.Max(1f, soundEntry.MinDistance));
             _al.SetSourceProperty(source, SourceFloat.MaxDistance, MathF.Max(1f, soundEntry.MaxDistance));
             _al.SetSourceProperty(source, SourceBoolean.Looping, loop);
@@ -309,7 +318,7 @@ public sealed class WorldAudioRuntime : IDisposable
                     {
                         active.BaseGain = gain;
                         _al.SetSourceProperty(active.Source, SourceVector3.Position, emitter.Position);
-                        _al.SetSourceProperty(active.Source, SourceFloat.Gain, gain * MasterGain * EmitterGain);
+                        _al.SetSourceProperty(active.Source, SourceFloat.Gain, gain * EffectiveMasterGain * EmitterGain);
                     }
                     catch (Exception ex)
                     {
@@ -413,7 +422,7 @@ public sealed class WorldAudioRuntime : IDisposable
             uint source = _al.GenSource();
             _al.SetSourceProperty(source, SourceInteger.Buffer, buffer);
             _al.SetSourceProperty(source, SourceVector3.Position, emitter.Position);
-            _al.SetSourceProperty(source, SourceFloat.Gain, gain * MasterGain * EmitterGain);
+            _al.SetSourceProperty(source, SourceFloat.Gain, gain * EffectiveMasterGain * EmitterGain);
             _al.SetSourceProperty(source, SourceFloat.ReferenceDistance, MathF.Max(1f, minDistance));
             _al.SetSourceProperty(source, SourceFloat.MaxDistance, MathF.Max(1f, maxDistance));
             _al.SetSourceProperty(source, SourceBoolean.Looping, true);
@@ -495,7 +504,7 @@ public sealed class WorldAudioRuntime : IDisposable
             uint source = _al.GenSource();
             _al.SetSourceProperty(source, SourceInteger.Buffer, buffer);
             _al.SetSourceProperty(source, SourceVector3.Position, _listenerPosition);
-            _al.SetSourceProperty(source, SourceFloat.Gain, soundEntry.Volume * MasterGain);
+            _al.SetSourceProperty(source, SourceFloat.Gain, soundEntry.Volume * EffectiveMasterGain);
             _al.SetSourceProperty(source, SourceBoolean.Looping, true);
             _al.SourcePlay(source);
             _areaMusicSource = source;
@@ -629,16 +638,24 @@ public sealed class WorldAudioRuntime : IDisposable
         try
         {
             foreach (ActiveEmitter active in _active.Values)
-                _al.SetSourceProperty(active.Source, SourceFloat.Gain, active.BaseGain * MasterGain * EmitterGain);
+                _al.SetSourceProperty(active.Source, SourceFloat.Gain, active.BaseGain * EffectiveMasterGain * EmitterGain);
 
             if (_previewSource is uint previewSource)
-                _al.SetSourceProperty(previewSource, SourceFloat.Gain, _previewBaseGain * MasterGain);
+                _al.SetSourceProperty(previewSource, SourceFloat.Gain, _previewBaseGain * EffectiveMasterGain);
+
+            if (_areaMusicSource is uint areaMusicSource && _soundEntries is not null &&
+                _soundEntries.TryResolve((uint)_areaMusicSoundEntryId, out AlphaSoundEntry? areaMusicEntry))
+            {
+                _al.SetSourceProperty(areaMusicSource, SourceFloat.Gain, areaMusicEntry.Volume * EffectiveMasterGain);
+            }
         }
         catch (Exception ex)
         {
             DisableBackend($"gain update failed: {ex.Message}");
         }
     }
+
+    private float EffectiveMasterGain => IsMuted ? 0f : MasterGain;
 
     private static float FirstPositive(params float[] values)
         => values.FirstOrDefault(value => value > 0f);

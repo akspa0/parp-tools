@@ -27,6 +27,7 @@ public partial class ViewerApp
 
         ImGui.TextWrapped(scene.AudioStatus);
         ImGui.TextWrapped($"Area music: {scene.AreaMusicStatus}");
+        ImGui.Text(scene.AudioMuted ? "Output: MUTED" : "Output: ON");
         ImGui.Text($"Resident emitters: {scene.ResidentAudioEmitterCount}  |  Active: {scene.ActiveAudioEmitterCount}");
         ImGui.Text($"SoundEntries rows: {scene.ResolvedAudioSoundEntryCount}");
 

@@ -3475,10 +3475,12 @@ public class WorldScene : ISceneRenderer
     private string? _dbcBuild;
     private int _mapId = -1;
     private WorldAudioRuntime? _audioRuntime;
+    private bool _audioMuted;
     public string AudioStatus => _audioRuntime?.Status ?? "Audio runtime not configured.";
     public string AudioLastDiagnostic => _audioRuntime?.LastDiagnostic ?? "Audio runtime not configured.";
     public string AreaMusicStatus => _audioRuntime?.AreaMusicStatus ?? "Area music runtime not configured.";
     public bool AudioBackendReady => _audioRuntime?.BackendReady ?? false;
+    public bool AudioMuted => _audioMuted;
     public string? AudioPreviewPath => _audioRuntime?.PreviewPath;
     public int ResidentAudioEmitterCount => _audioRuntime?.ResidentEmitterCount ?? 0;
     public int ActiveAudioEmitterCount => _audioRuntime?.ActiveEmitterCount ?? 0;
@@ -3493,6 +3495,12 @@ public class WorldScene : ISceneRenderer
     public void StopAudioPreview() => _audioRuntime?.StopPreview();
 
     public void SetAudioMasterGain(float gain) => _audioRuntime?.SetMasterGain(gain);
+
+    public void SetAudioMuted(bool muted)
+    {
+        _audioMuted = muted;
+        _audioRuntime?.SetMuted(muted);
+    }
 
     public void SetAudioEmitterGain(float gain) => _audioRuntime?.SetEmitterGain(gain);
 
@@ -3830,6 +3838,7 @@ public class WorldScene : ISceneRenderer
         if (_audioRuntime is not null)
         {
             _audioRuntime.Configure(dbcProvider, dbdDir, build);
+            _audioRuntime.SetMuted(_audioMuted);
             foreach ((int tileX, int tileY) in _terrainManager.LoadedTiles.ToArray())
             {
                 if (_terrainManager.TryGetTileLoadResult(tileX, tileY, out TileLoadResult result))

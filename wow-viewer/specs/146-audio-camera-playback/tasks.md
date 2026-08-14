@@ -102,7 +102,7 @@
 
 - [ ] T030 [US4] Record representative client/build samples and candidate backend findings in `wow-viewer/specs/146-audio-camera-playback/research.md` before adding historical-format support.
 - [ ] T031 [US4] Add audio capability and source diagnostics export to the viewer inspection surface in `wow-viewer/src/viewer/WoWViewer/`.
-- [ ] T032 [US4] Add master, music/ambience, emitter/effects, UI, and optional test bus controls with persisted viewer settings in `wow-viewer/src/viewer/WoWViewer/`.
+- [ ] T032 [US4] Add master, music/ambience, emitter/effects, UI, and optional test bus controls with persisted viewer settings in `wow-viewer/src/viewer/WoWViewer/` (the visible master mute toggle is implemented; category buses and persistence remain open).
 - [x] T033 [US4] Add only evidence-backed MIDI/DLS/DirectSound support, or retain explicit offline/unsupported states, in `wow-viewer/src/viewer/WoWViewer/Audio/`.
 - [x] T041 [US4] Add a bounded SoundEntries preview/stop surface, resident-ID discovery, gain controls, and last-diagnostic reporting in `wow-viewer/src/viewer/WoWViewer/`.
 

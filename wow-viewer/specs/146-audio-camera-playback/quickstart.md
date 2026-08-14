@@ -35,22 +35,26 @@ proof.
 ## User-run client proof
 
 1. Load a configured client and record the exact build/root.
-2. Load a zone and inspect the Audio panel's DBC area-music status. If the active
+2. Verify the bottom status bar shows a clearly labeled green `AUDIO: ON` button.
+   Press it once and confirm it changes to red `AUDIO: MUTED`; press it again to
+   restore output. This mutes emitters, preview audio, and resolved ZoneMusic
+   without changing the configured master gain.
+3. Load a zone and inspect the Audio panel's DBC area-music status. If the active
    AreaTable row has a ZoneMusic ID, the viewer resolves its SoundEntries file
    and loops it; if the row selects MIDI/DLS, the viewer reports the exact
    metadata and an explicit unsupported-backend status.
-3. Load a zone with an `AreaMIDIAmbiences` binding and inspect day/night/underwater metadata
+4. Load a zone with an `AreaMIDIAmbiences` binding and inspect day/night/underwater metadata
    resolution. This remains metadata-only until a MIDI/DLS backend is proven.
-4. Load a tile containing decoded MCSE entries. The lower status bar reports
+5. Load a tile containing decoded MCSE entries. The lower status bar reports
    active/resident emitter counts; the Log tab reports the OpenAL backend,
    missing SoundEntries files, unsupported WAV shapes, and backend failures.
    Open Tools > Utilities > Audio, select a resident SoundEntries ID, and use
    Preview at Camera to prove the resolved client file path before relying on
    automatic spatial admission.
-5. Import the Undead FlyBy and verify its existing `CinematicCamera.dbc` placement still resolves tile `(28,28)`.
-6. Exercise Play, pause, scrub, loop, and stop while observing the audio diagnostics surface.
-7. Exercise Play + Video and record whether audio is muxed, separate, or unavailable.
-8. Repeat with an archive-backed asset and a missing/unsupported asset to verify honest diagnostics.
+6. Import the Undead FlyBy and verify its existing `CinematicCamera.dbc` placement still resolves tile `(28,28)`.
+7. Exercise Play, pause, scrub, loop, and stop while observing the audio diagnostics surface.
+8. Exercise Play + Video and record whether audio is muxed, separate, or unavailable.
+9. Repeat with an archive-backed asset and a missing/unsupported asset to verify honest diagnostics.
 
 ## Capability matrix
 

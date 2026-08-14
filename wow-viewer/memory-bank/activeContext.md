@@ -10,10 +10,11 @@ the owning spec for requirements and proof; read a workstream only when the spec
 - **Next implementation target:** Spec 147 Phase 3 fog-bounded coverage, after the user checks
   fullscreen minimap drag/triple-click behavior and the new WMO doodad submission path.
 - **Proof owner:** Focused minimap/audio tests and cross-platform viewer build pass; the user owns
-  real-client input, audible DBC ZoneMusic, and Stormwind FPS/draw-call comparison.
+  real-client input, audible DBC ZoneMusic, mute/unmute behavior, and Stormwind FPS/draw-call comparison.
 - **Completed slice:** Fullscreen minimap now has one draw owner and a shared pure gesture state;
   LIT markers show fog-colored radius coverage; active-build AreaTable ZoneMusic is resolved
-  through SoundEntries; opaque WMO internal doodads are grouped across visible WMO placements.
+  through SoundEntries; opaque WMO internal doodads are grouped across visible WMO placements; the
+  bottom status bar exposes a master `AUDIO: ON`/`AUDIO: MUTED` control.
 - **Main unproven gap:** FogEnd still does not define normal tile coverage, WMO transparent/effect
   paths remain placement-sensitive, and MIDI/DLS plus WMO-area audio are not implemented.
 - **Explicitly out of scope for the next slice:** Whole-map loading, shader reconstruction, fake
@@ -24,7 +25,7 @@ the owning spec for requirements and proof; read a workstream only when the spec
 | Spec | State | Next handoff |
 |---|---|---|
 | 147 Minimap/fog/doodad instancing | Phase 2 implemented; Phase 3/4 open | User-run minimap proof, then implement fog coverage and structured batching diagnostics. |
-| 146 Audio/camera playback | Area music resolution implemented; playback gates open | User-run DBC ZoneMusic proof; MIDI/DLS remains unsupported. |
+| 146 Audio/camera playback | Area music resolution and master mute control implemented; playback gates open | User-run mute/unmute and DBC ZoneMusic proof; MIDI/DLS remains unsupported. |
 | 144 Camera capture paths | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions. |
 | 145 WoW UI overhaul | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks. |
 | 143 World context and lighting | LIT source/fallback and pre-alpha v2 parser implemented with user gate | Validate the v2 viewer path, then continue WMO area and lighting evidence. |

@@ -330,6 +330,32 @@ public partial class ViewerApp
 
             float rightWidth = GetImGuiTextWidth(rightStatusText) + 8f;
 
+            if (_worldScene is not null)
+            {
+                bool muted = _worldScene.AudioMuted;
+                ImGui.PushStyleColor(ImGuiCol.Button, muted
+                    ? new Vector4(0.42f, 0.18f, 0.12f, 1f)
+                    : new Vector4(0.12f, 0.38f, 0.20f, 1f));
+                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, muted
+                    ? new Vector4(0.58f, 0.24f, 0.14f, 1f)
+                    : new Vector4(0.18f, 0.52f, 0.28f, 1f));
+                string audioLabel = muted ? "AUDIO: MUTED" : "AUDIO: ON";
+                if (ImGui.Button(audioLabel))
+                {
+                    _worldScene.SetAudioMuted(!muted);
+                    _statusMessage = muted
+                        ? "Audio output enabled."
+                        : "Audio output muted.";
+                }
+
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(muted
+                        ? "Click to unmute all viewer audio output."
+                        : "Click to mute all viewer audio output.");
+                ImGui.PopStyleColor(2);
+                ImGui.SameLine();
+            }
+
             if (!string.IsNullOrEmpty(leftText))
                 ImGui.TextUnformatted(leftText);
 
