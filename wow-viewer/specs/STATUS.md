@@ -7,12 +7,13 @@ task file are authoritative; this file only tells a new agent where to start.
 
 | Priority | Spec | State | Next bounded action |
 |---|---|---|---|
-| 1 | [147 Minimap, fog, and doodad instancing](147-minimap-fog-instancing/spec.md) | Phase 2 implemented; Phase 3/4 open | User-run fullscreen drag/triple-click proof, then implement fog coverage before expanding doodad batch diagnostics |
-| 2 | [146 Audio and camera playback](146-audio-camera-playback/spec.md) | Area music resolution and master mute control implemented; playback gates open | User-run mute/unmute and DBC ZoneMusic proof; MIDI/DLS remains explicitly unsupported until a backend is proven |
-| 3 | [144 Camera capture paths](144-camera-capture-paths/spec.md) | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions |
-| 4 | [145 WoW UI overhaul](145-wow-ui-overhaul/spec.md) | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks |
-| 5 | [143 World context and lighting](143-world-context-lighting/spec.md) | LIT source/fallback and pre-alpha v2 parser implemented with user gate | Validate variant switching and no-Light-DBC fallback, then continue WMOAreaID and lighting evidence |
-| 6 | [142 World scene graph](142-world-scene-graph/spec.md) | In progress | User-run dense-WMO capture to compare internal-doodad batch submissions against the previous placement-local path |
+| 1 | [148 Artifact world simulator runtime](148-world-simulator/spec.md) | Phase 1 audio diagnostics partially implemented; user gate open | Finish source/read/decode coverage and run a configured client to inspect current-tile MCSE rows |
+| 2 | [147 Minimap, fog, and doodad instancing](147-minimap-fog-instancing/spec.md) | Phase 2 implemented; Phase 3/4 open | User-run fullscreen drag/triple-click proof, then implement fog coverage before expanding doodad batch diagnostics |
+| 3 | [146 Audio and camera playback](146-audio-camera-playback/spec.md) | Area music resolution and master mute control implemented; playback gates open | User-run mute/unmute and DBC ZoneMusic proof; MIDI/DLS remains explicitly unsupported until a backend is proven |
+| 4 | [144 Camera capture paths](144-camera-capture-paths/spec.md) | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions |
+| 5 | [145 WoW UI overhaul](145-wow-ui-overhaul/spec.md) | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks |
+| 6 | [143 World context and lighting](143-world-context-lighting/spec.md) | LIT source/fallback and pre-alpha v2 parser implemented with user gate | Validate variant switching and no-Light-DBC fallback, then continue WMOAreaID and lighting evidence |
+| 7 | [142 World scene graph](142-world-scene-graph/spec.md) | In progress | User-run dense-WMO capture to compare internal-doodad batch submissions against the previous placement-local path |
 
 ## Other lanes
 

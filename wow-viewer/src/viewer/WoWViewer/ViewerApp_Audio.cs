@@ -1,12 +1,13 @@
 using ImGuiNET;
 using WoWViewer.Terrain;
+using WowViewer.Core.Audio;
 
 namespace WoWViewer;
 
 /// <summary>
 /// Viewer controls for proving the active client's resident audio path.
 /// This is intentionally a small diagnostic surface; camera transport and
-/// MIDI/DLS synthesis remain separate Spec 146 slices.
+/// MIDI/DLS synthesis remain separate Spec 148 slices.
 /// </summary>
 public partial class ViewerApp
 {
@@ -35,6 +36,51 @@ public partial class ViewerApp
             ImGui.TextColored(new System.Numerics.Vector4(0.45f, 0.9f, 0.55f, 1f), "OpenAL backend ready");
         else
             ImGui.TextColored(new System.Numerics.Vector4(1f, 0.65f, 0.35f, 1f), "OpenAL backend unavailable");
+
+        ImGui.Separator();
+        ImGui.Text("Emitter diagnostics");
+        ImGui.TextDisabled("This inspects current resident MCSE records without starting audio sources.");
+        if (ImGui.Button("Refresh decisions"))
+            scene.RefreshAudioEmitterDiagnostics(probeFiles: false);
+        ImGui.SameLine();
+        if (ImGui.Button("Probe current emitters"))
+            scene.RefreshAudioEmitterDiagnostics(probeFiles: true);
+
+        IReadOnlyList<AudioTriggerDiagnostic> diagnostics = scene.AudioEmitterDiagnostics;
+        ImGui.Text($"Resident trigger rows: {diagnostics.Count}");
+        if (ImGui.BeginChild("##audio_emitter_diagnostics", new System.Numerics.Vector2(0f, 250f), true))
+        {
+            foreach (AudioTriggerDiagnostic diagnostic in diagnostics)
+            {
+                System.Numerics.Vector4 color = diagnostic.TerminalState switch
+                {
+                    AudioTriggerTerminalState.Active or AudioTriggerTerminalState.Ready
+                        => new System.Numerics.Vector4(0.45f, 0.9f, 0.55f, 1f),
+                    AudioTriggerTerminalState.OutOfRange or AudioTriggerTerminalState.Muted
+                        => new System.Numerics.Vector4(0.85f, 0.8f, 0.35f, 1f),
+                    _ => new System.Numerics.Vector4(1f, 0.45f, 0.35f, 1f)
+                };
+
+                ImGui.TextColored(
+                    color,
+                    $"{diagnostic.TerminalState}  SoundPoint={diagnostic.SoundPointId} SoundName={diagnostic.SoundNameId}");
+                ImGui.Text(
+                    $"Tile=({diagnostic.TileX},{diagnostic.TileY}) Chunk=({diagnostic.ChunkX},{diagnostic.ChunkY}) " +
+                    $"Distance={diagnostic.DistanceToListener:F1}/{diagnostic.MaxDistance:F1}");
+                ImGui.TextWrapped(
+                    $"Raw XYZ=({diagnostic.RawPosition.X:F1}, {diagnostic.RawPosition.Y:F1}, {diagnostic.RawPosition.Z:F1})  " +
+                    $"World XYZ=({diagnostic.WorldPosition.X:F1}, {diagnostic.WorldPosition.Y:F1}, {diagnostic.WorldPosition.Z:F1})");
+                ImGui.TextWrapped(
+                    $"Profile={diagnostic.CoordinateProfile}  Source={diagnostic.ResourceSource}  " +
+                    $"Read={(diagnostic.BytesRead ? "yes" : "no")}  Decode={diagnostic.DecodeStatus}");
+                if (!string.IsNullOrWhiteSpace(diagnostic.SelectedVirtualPath))
+                    ImGui.TextWrapped($"Path: {diagnostic.SelectedVirtualPath}");
+                ImGui.TextWrapped($"Backend={diagnostic.BackendStatus}  {diagnostic.Detail}");
+                ImGui.Separator();
+            }
+
+            ImGui.EndChild();
+        }
 
         ImGui.Separator();
         ImGui.Text("SoundEntries preview");

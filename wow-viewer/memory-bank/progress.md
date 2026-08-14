@@ -5,6 +5,19 @@ Last updated: 2026-08-14
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-14 — Spec 148 world-simulator plan and audio diagnostic slice
+
+- Created the provenance-first `148-world-simulator` Spec Kit pack: audio truth, explicit camera
+  actor, lease-based residency/batching, and local artifact-museum boundaries.
+- Preserved raw MCSE coordinates alongside the existing renderer-world transform and exposed
+  current resident emitter diagnostics for SoundEntries resolution, path/source, optional read/decode,
+  distance, mute, and backend states in the audio panel. Diagnostics refresh on a bounded cadence
+  instead of doing file-existence work on every render frame; explicit probing still reads/decodes
+  only when requested.
+- Cross-platform viewer Debug build passes with 0 errors; focused AudioRuntimeContractTests pass
+  (9/9). Real MPQ provenance, audible playback, coordinate correctness, and performance remain
+  user-owned gates.
+
 ## 2026-08-14 — Spec 146 visible audio mute control
 
 - Added a clearly labeled, color-coded `AUDIO: ON` / `AUDIO: MUTED` button to the bottom status bar.

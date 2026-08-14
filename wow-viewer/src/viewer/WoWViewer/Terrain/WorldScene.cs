@@ -8,6 +8,7 @@ using WoWViewer.Logging;
 using WoWViewer.Population;
 using WoWViewer.Rendering;
 using WoWViewer.Audio;
+using WowViewer.Core.Audio;
 using WowViewer.Core.Maps;
 using Silk.NET.OpenGL;
 using CorePm4AxisConvention = WowViewer.Core.PM4.Models.Pm4AxisConvention;
@@ -3485,6 +3486,8 @@ public class WorldScene : ISceneRenderer
     public int ResidentAudioEmitterCount => _audioRuntime?.ResidentEmitterCount ?? 0;
     public int ActiveAudioEmitterCount => _audioRuntime?.ActiveEmitterCount ?? 0;
     public int ResolvedAudioSoundEntryCount => _audioRuntime?.ResolvedSoundEntryCount ?? 0;
+    public IReadOnlyList<AudioTriggerDiagnostic> AudioEmitterDiagnostics
+        => _audioRuntime?.EmitterDiagnostics ?? Array.Empty<AudioTriggerDiagnostic>();
     public IReadOnlyList<int> ResidentAudioSoundEntryIds
         => _audioRuntime?.ResidentSoundEntryIds ?? Array.Empty<int>();
 
@@ -3493,6 +3496,9 @@ public class WorldScene : ISceneRenderer
             FailAudioPreview("Audio runtime is not configured.", out reason);
 
     public void StopAudioPreview() => _audioRuntime?.StopPreview();
+
+    public void RefreshAudioEmitterDiagnostics(bool probeFiles)
+        => _audioRuntime?.RefreshEmitterDiagnostics(probeFiles);
 
     public void SetAudioMasterGain(float gain) => _audioRuntime?.SetMasterGain(gain);
 

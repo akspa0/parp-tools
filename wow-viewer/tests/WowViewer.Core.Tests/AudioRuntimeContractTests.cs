@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Numerics;
 using WowViewer.Core.Audio;
 using WowViewer.Core.IO.Maps;
 
@@ -78,6 +79,42 @@ public sealed class AudioRuntimeContractTests
             ["Sound\\Ambience\\Forest\\Bird.wav", "Sound\\Ambience\\Forest\\Bird.ogg"],
             entry.EnumerateVirtualPaths().ToArray());
         Assert.DoesNotContain(entry.EnumerateVirtualPaths(), static path => path.Contains("42", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AudioTriggerDiagnostic_PreservesRawAndWorldCoordinatesSeparately()
+    {
+        AudioTriggerDiagnostic diagnostic = new(
+            AudioTriggerKind.Mcse,
+            TileX: 28,
+            TileY: 28,
+            ChunkX: 3,
+            ChunkY: 7,
+            SoundPointId: 4,
+            SoundNameId: 9,
+            RawPosition: new Vector3(12f, 24f, 36f),
+            WorldPosition: new Vector3(100f, 200f, 36f),
+            CoordinateProfile: "test-profile",
+            MinDistance: 2f,
+            MaxDistance: 30f,
+            CutoffDistance: 40f,
+            DistanceToListener: 10f,
+            InRange: true,
+            SoundEntryResolved: true,
+            CandidateVirtualPaths: ["Sound\\Test.wav"],
+            SelectedVirtualPath: "Sound\\Test.wav",
+            ResourceSource: "archive/cache",
+            ResourceExists: true,
+            BytesRead: false,
+            DecodeStatus: "Not probed",
+            BackendStatus: "OpenAL unavailable",
+            TerminalState: AudioTriggerTerminalState.BackendUnavailable,
+            Detail: "test");
+
+        Assert.Equal(new Vector3(12f, 24f, 36f), diagnostic.RawPosition);
+        Assert.Equal(new Vector3(100f, 200f, 36f), diagnostic.WorldPosition);
+        Assert.Equal(AudioTriggerTerminalState.BackendUnavailable, diagnostic.TerminalState);
+        Assert.NotEqual(diagnostic.RawPosition, diagnostic.WorldPosition);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using Silk.NET.OpenAL;
 using WoWViewer.DataSources;
@@ -18,10 +19,15 @@ public sealed class WorldAudioRuntime : IDisposable
 {
     private readonly IDataSource _dataSource;
     private readonly Dictionary<(int TileX, int TileY), IReadOnlyList<TerrainSoundEmitter>> _tileEmitters = [];
+    private readonly object _tileEmittersLock = new();
     private readonly Dictionary<string, uint> _buffers = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<EmitterKey, ActiveEmitter> _active = [];
     private readonly HashSet<EmitterKey> _heardInRange = [];
     private readonly HashSet<string> _diagnosticKeys = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<AudioTriggerDiagnostic> _emitterDiagnostics = Array.Empty<AudioTriggerDiagnostic>();
+    private long _nextDiagnosticRefreshTimestamp;
+
+    private static long DiagnosticRefreshIntervalTicks => Math.Max(1L, Stopwatch.Frequency / 4L);
 
     private AudioContext? _context;
     private AL? _al;
@@ -61,6 +67,8 @@ public sealed class WorldAudioRuntime : IDisposable
     public int ResidentEmitterCount => _tileEmitters.Values.Sum(static emitters => emitters.Count);
 
     public int ActiveEmitterCount => _active.Count;
+
+    public IReadOnlyList<AudioTriggerDiagnostic> EmitterDiagnostics => _emitterDiagnostics;
 
     public int ResolvedSoundEntryCount => _soundEntries?.Entries.Count ?? 0;
 
@@ -242,7 +250,9 @@ public sealed class WorldAudioRuntime : IDisposable
     public void AddTile(int tileX, int tileY, IReadOnlyList<TerrainSoundEmitter> emitters)
     {
         ThrowIfDisposed();
-        _tileEmitters[(tileX, tileY)] = emitters ?? Array.Empty<TerrainSoundEmitter>();
+        lock (_tileEmittersLock)
+            _tileEmitters[(tileX, tileY)] = emitters ?? Array.Empty<TerrainSoundEmitter>();
+        InvalidateEmitterDiagnostics();
     }
 
     public void RemoveTile(int tileX, int tileY)
@@ -250,18 +260,26 @@ public sealed class WorldAudioRuntime : IDisposable
         if (_disposed)
             return;
 
-        _tileEmitters.Remove((tileX, tileY));
+        lock (_tileEmittersLock)
+            _tileEmitters.Remove((tileX, tileY));
         foreach (EmitterKey key in _active.Keys.Where(key => key.TileX == tileX && key.TileY == tileY).ToArray())
             StopEmitter(key);
         _heardInRange.RemoveWhere(key => key.TileX == tileX && key.TileY == tileY);
+        InvalidateEmitterDiagnostics();
+        RefreshEmitterDiagnostics();
     }
 
     public void Update(Vector3 listenerPosition, Vector3 listenerForward, int areaId = 0, float gameTime = 0.5f)
     {
-        if (_disposed || _al is null || _soundEntries is null)
+        if (_disposed)
             return;
 
         _listenerPosition = listenerPosition;
+        if (_al is null || _soundEntries is null)
+        {
+            RefreshEmitterDiagnosticsIfDue();
+            return;
+        }
 
         try
         {
@@ -289,8 +307,15 @@ public sealed class WorldAudioRuntime : IDisposable
         UpdateAreaMusic(areaId, gameTime);
 
         HashSet<EmitterKey> inRange = [];
-        foreach ((int tileX, int tileY, IReadOnlyList<TerrainSoundEmitter> emitters) in _tileEmitters.Select(static pair => (pair.Key.TileX, pair.Key.TileY, pair.Value)))
+        KeyValuePair<(int TileX, int TileY), IReadOnlyList<TerrainSoundEmitter>>[] tileSnapshot;
+        lock (_tileEmittersLock)
+            tileSnapshot = _tileEmitters.ToArray();
+
+        foreach (KeyValuePair<(int TileX, int TileY), IReadOnlyList<TerrainSoundEmitter>> pair in tileSnapshot)
         {
+            int tileX = pair.Key.TileX;
+            int tileY = pair.Key.TileY;
+            IReadOnlyList<TerrainSoundEmitter> emitters = pair.Value;
             for (int index = 0; index < emitters.Count; index++)
             {
                 TerrainSoundEmitter emitter = emitters[index];
@@ -359,6 +384,334 @@ public sealed class WorldAudioRuntime : IDisposable
             StopEmitter(key);
 
         _heardInRange.RemoveWhere(key => !inRange.Contains(key));
+        RefreshEmitterDiagnosticsIfDue();
+    }
+
+    /// <summary>
+    /// Rebuilds the inspectable MCSE decision list without starting an OpenAL source. File reads and
+    /// decodes are opt-in because probing every resident emitter every frame would reintroduce the
+    /// performance problem this surface is intended to diagnose.
+    /// </summary>
+    public void RefreshEmitterDiagnostics(bool probeFiles = false)
+    {
+        if (_disposed)
+            return;
+
+        List<AudioTriggerDiagnostic> diagnostics = [];
+        KeyValuePair<(int TileX, int TileY), IReadOnlyList<TerrainSoundEmitter>>[] tileSnapshot;
+        lock (_tileEmittersLock)
+            tileSnapshot = _tileEmitters.ToArray();
+
+        foreach (KeyValuePair<(int TileX, int TileY), IReadOnlyList<TerrainSoundEmitter>> pair in tileSnapshot)
+        {
+            int tileX = pair.Key.TileX;
+            int tileY = pair.Key.TileY;
+            IReadOnlyList<TerrainSoundEmitter> emitters = pair.Value;
+            for (int index = 0; index < emitters.Count; index++)
+            {
+                TerrainSoundEmitter emitter = emitters[index];
+                diagnostics.Add(BuildEmitterDiagnostic(tileX, tileY, index, emitter, probeFiles));
+            }
+        }
+
+        _emitterDiagnostics = diagnostics;
+        Interlocked.Exchange(
+            ref _nextDiagnosticRefreshTimestamp,
+            Stopwatch.GetTimestamp() + DiagnosticRefreshIntervalTicks);
+    }
+
+    private void InvalidateEmitterDiagnostics()
+    {
+        Interlocked.Exchange(ref _nextDiagnosticRefreshTimestamp, 0L);
+    }
+
+    private void RefreshEmitterDiagnosticsIfDue()
+    {
+        long now = Stopwatch.GetTimestamp();
+        if (now < Interlocked.Read(ref _nextDiagnosticRefreshTimestamp))
+            return;
+
+        RefreshEmitterDiagnostics();
+    }
+
+    private AudioTriggerDiagnostic BuildEmitterDiagnostic(
+        int tileX,
+        int tileY,
+        int index,
+        TerrainSoundEmitter emitter,
+        bool probeFiles)
+    {
+        string backendStatus = _al is null ? Status : "OpenAL ready";
+        EmitterKey key = new(tileX, tileY, index);
+        if (_soundEntries is null || !_soundEntries.TryResolve(emitter.SoundNameId, out AlphaSoundEntry? soundEntry))
+        {
+            return new AudioTriggerDiagnostic(
+                AudioTriggerKind.Mcse,
+                tileX,
+                tileY,
+                emitter.ChunkX,
+                emitter.ChunkY,
+                emitter.SoundPointId,
+                emitter.SoundNameId,
+                emitter.RawPosition,
+                emitter.Position,
+                "TerrainSoundEmitter.RawPosition -> renderer world",
+                emitter.MinDistance,
+                emitter.MaxDistance,
+                emitter.CutoffDistance,
+                Vector3.Distance(_listenerPosition, emitter.Position),
+                false,
+                false,
+                Array.Empty<string>(),
+                null,
+                "Not resolved",
+                false,
+                false,
+                "Not attempted",
+                backendStatus,
+                AudioTriggerTerminalState.UnresolvedSoundEntry,
+                $"SoundEntries {emitter.SoundNameId} is not present in the active schema.");
+        }
+
+        string[] candidatePaths = soundEntry.EnumerateVirtualPaths().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        string? selectedPath = null;
+        foreach (string candidate in candidatePaths)
+        {
+            try
+            {
+                if (_dataSource.FileExists(candidate))
+                {
+                    selectedPath = candidate;
+                    break;
+                }
+            }
+            catch (Exception ex)
+            {
+                return CreateEmitterDiagnostic(
+                    emitter,
+                    tileX,
+                    tileY,
+                    emitter.ChunkX,
+                    emitter.ChunkY,
+                    soundEntry.Id,
+                    candidatePaths,
+                    candidate,
+                    $"{_dataSource.Name} (probe failed)",
+                    false,
+                    false,
+                    "Not attempted",
+                    backendStatus,
+                    AudioTriggerTerminalState.ReadFailed,
+                    ex.Message);
+            }
+        }
+
+        float maxDistance = FirstPositive(emitter.CutoffDistance, emitter.MaxDistance, soundEntry.DistanceCutoff, soundEntry.MaxDistance, 100f);
+        float minDistance = Math.Clamp(FirstPositive(emitter.MinDistance, soundEntry.MinDistance, 0f), 0f, maxDistance);
+        float distance = Vector3.Distance(_listenerPosition, emitter.Position);
+        bool inRange = distance <= maxDistance;
+        string source = selectedPath is null
+            ? "Missing"
+            : DescribeResourceSource(selectedPath);
+
+        if (selectedPath is null)
+        {
+            return CreateEmitterDiagnostic(
+                emitter,
+                tileX,
+                tileY,
+                emitter.ChunkX,
+                emitter.ChunkY,
+                soundEntry.Id,
+                candidatePaths,
+                null,
+                source,
+                false,
+                false,
+                "Not attempted",
+                backendStatus,
+                AudioTriggerTerminalState.MissingResource,
+                $"SoundEntries {soundEntry.Id} has no readable candidate path.",
+                minDistance,
+                maxDistance,
+                distance,
+                inRange);
+        }
+
+        bool bytesRead = false;
+        string decodeStatus = probeFiles ? "Not decoded" : "Not probed";
+        if (probeFiles)
+        {
+            byte[]? bytes = _dataSource.ReadFile(selectedPath);
+            if (bytes is null)
+            {
+                return CreateEmitterDiagnostic(
+                    emitter,
+                    tileX,
+                    tileY,
+                    emitter.ChunkX,
+                    emitter.ChunkY,
+                    soundEntry.Id,
+                    candidatePaths,
+                    selectedPath,
+                    source,
+                    true,
+                    false,
+                    "Read failed",
+                    backendStatus,
+                    AudioTriggerTerminalState.ReadFailed,
+                    $"{selectedPath} was catalog-visible but returned no bytes.",
+                    minDistance,
+                    maxDistance,
+                    distance,
+                    inRange);
+            }
+
+            bytesRead = true;
+            if (!ClientAudioDecoder.TryDecode(bytes, selectedPath, out _, out string reason))
+            {
+                return CreateEmitterDiagnostic(
+                    emitter,
+                    tileX,
+                    tileY,
+                    emitter.ChunkX,
+                    emitter.ChunkY,
+                    soundEntry.Id,
+                    candidatePaths,
+                    selectedPath,
+                    source,
+                    true,
+                    true,
+                    reason,
+                    backendStatus,
+                    AudioTriggerTerminalState.DecodeFailed,
+                    $"Decoder rejected {selectedPath}: {reason}",
+                    minDistance,
+                    maxDistance,
+                    distance,
+                    inRange);
+            }
+
+            decodeStatus = "Decoded";
+        }
+
+        AudioTriggerTerminalState terminalState;
+        string detail;
+        if (!inRange)
+        {
+            terminalState = AudioTriggerTerminalState.OutOfRange;
+            detail = $"Distance {distance:F1} exceeds max {maxDistance:F1}.";
+        }
+        else if (IsMuted)
+        {
+            terminalState = AudioTriggerTerminalState.Muted;
+            detail = "Emitter is in range but master audio is muted.";
+        }
+        else if (_al is null)
+        {
+            terminalState = AudioTriggerTerminalState.BackendUnavailable;
+            detail = backendStatus;
+        }
+        else if (_active.ContainsKey(key))
+        {
+            terminalState = AudioTriggerTerminalState.Active;
+            detail = "OpenAL source is active.";
+        }
+        else if (!probeFiles)
+        {
+            terminalState = AudioTriggerTerminalState.DecodePending;
+            detail = "Path resolved; press Probe current emitters to read and decode it.";
+        }
+        else
+        {
+            terminalState = AudioTriggerTerminalState.Ready;
+            detail = "Resource read and decoded; no active source is currently associated.";
+        }
+
+        return CreateEmitterDiagnostic(
+            emitter,
+            tileX,
+            tileY,
+            emitter.ChunkX,
+            emitter.ChunkY,
+            soundEntry.Id,
+            candidatePaths,
+            selectedPath,
+            source,
+            true,
+            bytesRead,
+            decodeStatus,
+            backendStatus,
+            terminalState,
+            detail,
+            minDistance,
+            maxDistance,
+            distance,
+            inRange);
+    }
+
+    private static AudioTriggerDiagnostic CreateEmitterDiagnostic(
+        TerrainSoundEmitter emitter,
+        int tileX,
+        int tileY,
+        int chunkX,
+        int chunkY,
+        int soundEntryId,
+        IReadOnlyList<string> candidatePaths,
+        string? selectedPath,
+        string source,
+        bool resourceExists,
+        bool bytesRead,
+        string decodeStatus,
+        string backendStatus,
+        AudioTriggerTerminalState terminalState,
+        string detail,
+        float? minDistance = null,
+        float? maxDistance = null,
+        float? distance = null,
+        bool? inRange = null
+        )
+    {
+        return new AudioTriggerDiagnostic(
+            AudioTriggerKind.Mcse,
+            tileX,
+            tileY,
+            chunkX,
+            chunkY,
+            emitter.SoundPointId,
+            emitter.SoundNameId,
+            emitter.RawPosition,
+            emitter.Position,
+            "TerrainSoundEmitter.RawPosition -> renderer world",
+            minDistance ?? emitter.MinDistance,
+            maxDistance ?? emitter.MaxDistance,
+            emitter.CutoffDistance,
+            distance ?? 0f,
+            inRange ?? false,
+            soundEntryId > 0,
+            candidatePaths,
+            selectedPath,
+            source,
+            resourceExists,
+            bytesRead,
+            decodeStatus,
+            backendStatus,
+            terminalState,
+            detail);
+    }
+
+    private string DescribeResourceSource(string virtualPath)
+    {
+        if (_dataSource.TryResolveWritablePath(virtualPath, out string? loosePath) && loosePath is not null)
+            return $"Loose file: {loosePath}";
+
+        if (_dataSource is MpqDataSource mpqDataSource &&
+            mpqDataSource.TryGetFileSource(virtualPath, out string sourcePath))
+        {
+            return $"Archive: {sourcePath}";
+        }
+
+        return $"{_dataSource.Name} (archive source unknown)";
     }
 
     public void StopAll()
@@ -390,7 +743,8 @@ public sealed class WorldAudioRuntime : IDisposable
         _al = null;
         try { _context?.Dispose(); } catch { }
         _context = null;
-        _tileEmitters.Clear();
+        lock (_tileEmittersLock)
+            _tileEmitters.Clear();
         _disposed = true;
     }
 

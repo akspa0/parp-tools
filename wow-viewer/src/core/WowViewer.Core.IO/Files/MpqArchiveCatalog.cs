@@ -4,7 +4,7 @@ using ICSharpCode.SharpZipLib.BZip2;
 
 namespace WowViewer.Core.IO.Files;
 
-public sealed class MpqArchiveCatalog : IArchiveCatalog
+public sealed class MpqArchiveCatalog : IArchiveCatalog, IArchiveFileSourceResolver
 {
     private const uint HashTableIndex = 0;
     private const uint HashNameA = 1;
@@ -486,6 +486,29 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
         }
 
         return null;
+    }
+
+    public bool TryResolveFileSource(string virtualPath, out string sourcePath)
+    {
+        string normalized = NormalizeVirtualPath(virtualPath);
+        if (_scannedFiles.TryGetValue(normalized, out ScannedFileEntry scannedInfo) &&
+            scannedInfo.BlockOffset == 0 && File.Exists(scannedInfo.ArchivePath))
+        {
+            sourcePath = scannedInfo.ArchivePath;
+            return true;
+        }
+
+        for (int i = _archives.Count - 1; i >= 0; i--)
+        {
+            if (FindFileInArchive(_archives[i], normalized) is not null)
+            {
+                sourcePath = _archives[i].Path;
+                return true;
+            }
+        }
+
+        sourcePath = string.Empty;
+        return false;
     }
 
     public byte[]? ReadScannedFile(string placeholderPath)

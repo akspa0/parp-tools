@@ -7,23 +7,23 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 147 Phase 3 fog-bounded coverage, after the user checks
-  fullscreen minimap drag/triple-click behavior and the new WMO doodad submission path.
-- **Proof owner:** Focused minimap/audio tests and cross-platform viewer build pass; the user owns
-  real-client input, audible DBC ZoneMusic, mute/unmute behavior, and Stormwind FPS/draw-call comparison.
-- **Completed slice:** Fullscreen minimap now has one draw owner and a shared pure gesture state;
-  LIT markers show fog-colored radius coverage; active-build AreaTable ZoneMusic is resolved
-  through SoundEntries; opaque WMO internal doodads are grouped across visible WMO placements; the
-  bottom status bar exposes a master `AUDIO: ON`/`AUDIO: MUTED` control.
-- **Main unproven gap:** FogEnd still does not define normal tile coverage, WMO transparent/effect
-  paths remain placement-sensitive, and MIDI/DLS plus WMO-area audio are not implemented.
-- **Explicitly out of scope for the next slice:** Whole-map loading, shader reconstruction, fake
-  audio conversion, and claims of audible/FPS improvement without user-run client proof.
+- **Next implementation target:** Spec 148 Phase 1 audio truth surface: finish source/read/decode
+  diagnostics, then have the user run a configured client and inspect current-tile MCSE rows.
+- **Proof owner:** Focused audio/coordinate tests and cross-platform viewer build pass; the user owns
+  real-client archive provenance, audible playback, and FPS/near-field visual proof.
+- **Completed slice:** Spec 148 now has a provenance-first world-simulator spec/plan/tasks pack;
+  MCSE emitters preserve raw and transformed positions; the runtime exposes non-playing diagnostic
+  rows; the audio panel shows IDs, coordinates, path/source, decode/backend state, and terminal reason.
+- **Main unproven gap:** The current slice does not yet prove exact `sounds.mpq` provenance, does not
+  enumerate WMO-area triggers, and has not changed any MCSE coordinate transform or MIDI/DLS backend.
+- **Explicitly out of scope for the next slice:** Camera model rendering, whole-map loading,
+  renderer rewrite, shader reconstruction, fake audio conversion, and claims of audible/FPS gains.
 
 ## Active spec lanes
 
 | Spec | State | Next handoff |
 |---|---|---|
+| 148 Artifact world simulator runtime | Phase 1 diagnostics in progress; user gate open | Finish read/decode/source-stage coverage, then inspect a real client before actor/residency work. |
 | 147 Minimap/fog/doodad instancing | Phase 2 implemented; Phase 3/4 open | User-run minimap proof, then implement fog coverage and structured batching diagnostics. |
 | 146 Audio/camera playback | Area music resolution and master mute control implemented; playback gates open | User-run mute/unmute and DBC ZoneMusic proof; MIDI/DLS remains unsupported. |
 | 144 Camera capture paths | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions. |

@@ -672,6 +672,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                         chunkY,
                         emitter.SoundPointId,
                         emitter.SoundNameId,
+                        emitter.Position,
                         ConvertSoundPosition(emitter.Position),
                         emitter.MinDistance,
                         emitter.MaxDistance,

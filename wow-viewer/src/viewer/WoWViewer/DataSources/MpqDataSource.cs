@@ -602,6 +602,39 @@ public class MpqDataSource : IDataSource
         return CacheExistsResult(normalized, false);
     }
 
+    /// <summary>
+    /// Returns the concrete loose or archive path that currently owns a virtual file when the
+    /// underlying archive catalog can expose it. This is diagnostic provenance, not a new lookup
+    /// path; callers must tolerate an unknown source for native/opaque backends.
+    /// </summary>
+    public bool TryGetFileSource(string virtualPath, out string sourcePath)
+    {
+        sourcePath = string.Empty;
+        if (string.IsNullOrWhiteSpace(virtualPath))
+            return false;
+
+        if (TryResolveLoosePath(virtualPath) is string loosePath)
+        {
+            sourcePath = loosePath;
+            return true;
+        }
+
+        string normalized = virtualPath.Replace('/', '\\');
+        if (_alphaMpqCache.TryGetValue(normalized, out string? alphaPath))
+        {
+            sourcePath = alphaPath;
+            return true;
+        }
+
+        if (_archiveCatalog is IArchiveFileSourceResolver resolver &&
+            resolver.TryResolveFileSource(normalized, out sourcePath))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
     private bool CacheExistsResult(string normalizedPath, bool value)
     {
         lock (_existsCacheLock)
