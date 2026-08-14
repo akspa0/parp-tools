@@ -1,9 +1,19 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-13
+Last updated: 2026-08-14
 
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
+
+## 2026-08-14 — Spec 143 LIT source switching and fallback
+
+- LIT discovery now enumerates every `.lit` file directly in the active map folder while retaining
+  conventional archive probes; `.lit` is included in loose-file indexing.
+- The Lighting and investigation panels can switch variants even when the selected profile failed
+  to parse. When no usable map-scoped Light DBC profile exists, LIT loads automatically and its
+  lighting/fog override starts enabled; marker overlays remain opt-in.
+- Focused source proof passes (25 tests); the isolated viewer build passes with 0 errors and the
+  existing warning set. Real-client variant/fallback appearance remains user-owned.
 
 ## 2026-08-13 — Spec 143 LIT spatial coordinate correction
 

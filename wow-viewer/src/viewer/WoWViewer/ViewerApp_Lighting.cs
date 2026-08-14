@@ -32,7 +32,7 @@ public partial class ViewerApp
     {
         ImGui.SeparatorText("LIT source");
 
-        bool loaded = scene.LitLoader != null;
+        bool loaded = scene.LitLoader is { HasData: true };
         ImGui.TextColored(
             loaded ? new Vector4(0.45f, 0.85f, 0.45f, 1f) : new Vector4(0.85f, 0.55f, 0.35f, 1f),
             loaded ? "LOADED" : (scene.LitLoadAttempted ? "NOT LOADED" : "NOT ATTEMPTED"));
@@ -54,11 +54,46 @@ public partial class ViewerApp
             ImGui.TextWrapped(source);
 
         var available = scene.AvailableLitSourcePaths;
+        if (available.Count > 1)
+        {
+            string currentSource = source ?? available[0];
+            if (ImGui.BeginCombo("LIT file", currentSource))
+            {
+                for (int index = 0; index < available.Count; index++)
+                {
+                    string candidate = available[index];
+                    bool selected = string.Equals(
+                        currentSource,
+                        candidate,
+                        StringComparison.OrdinalIgnoreCase);
+                    if (ImGui.Selectable(candidate, selected))
+                    {
+                        scene.ReloadLit(candidate);
+                        ImGui.EndCombo();
+                        return;
+                    }
+
+                    if (selected)
+                        ImGui.SetItemDefaultFocus();
+                }
+
+                ImGui.EndCombo();
+            }
+        }
+
         if (available.Count > 0 && ImGui.TreeNode($"Available LIT files ({available.Count})###LitAvailable"))
         {
             foreach (string path in available)
                 ImGui.BulletText(path);
             ImGui.TreePop();
+        }
+
+        if (scene.LitAutoFallbackActive)
+        {
+            ImGui.TextColored(
+                new Vector4(0.75f, 0.85f, 0.45f, 1f),
+                "Automatic fallback: LIT override enabled");
+            ImGui.TextWrapped(scene.LitAutoFallbackReason);
         }
 
         // These toggles lazy-load the LIT, so they double as the way to force a load attempt.

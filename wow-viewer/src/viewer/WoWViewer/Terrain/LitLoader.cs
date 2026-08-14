@@ -9,7 +9,7 @@ using WoWViewer.Rendering;
 namespace WoWViewer.Terrain;
 
 /// <summary>
-/// Loads Alpha-era World\<map>\lights.lit files and exposes enough structure for
+/// Loads Alpha-era LIT profiles from the active map folder and exposes enough structure for
 /// inspection, overlay visualization, and experimental runtime fog/light sampling.
 /// </summary>
 public sealed class LitLoader
@@ -303,8 +303,12 @@ public sealed class LitLoader
             foreach (LitLightProfile sourceLight in profile.Lights)
                 Lights.Add(ConvertLight(sourceLight));
 
-            Status = $"LIT: loaded {Lights.Count} light entries from {SourcePath}.";
-            ViewerLog.Info(ViewerLog.Category.Terrain, $"[LIT] Loaded {Lights.Count} light entries from {SourcePath} (version=0x{Version:X8}, rawCount={RawLightCount}).");
+            Status = $"LIT: loaded {Lights.Count} light entries from {SourcePath} " +
+                $"({_availableSourcePaths.Count} map variants found).";
+            ViewerLog.Info(
+                ViewerLog.Category.Terrain,
+                $"[LIT] Loaded {Lights.Count} light entries from {SourcePath} " +
+                $"(variants={_availableSourcePaths.Count}, version=0x{Version:X8}, rawCount={RawLightCount}).");
             return Lights.Count > 0;
         }
         catch (Exception ex)
@@ -553,25 +557,21 @@ public sealed class LitLoader
 
     private IReadOnlyList<string> ResolveAvailableSourcePaths()
     {
-        string[] candidates =
+        IReadOnlyList<string> knownPaths;
+        try
         {
-            $"World\\{_mapName}\\lights.lit",
-            $"World\\Maps\\{_mapName}\\lights.lit",
-            $"World\\{_mapName}\\areatest.lit",
-            $"World\\Maps\\{_mapName}\\areatest.lit",
-            $"World\\{_mapName}\\light.lit",
-            $"World\\Maps\\{_mapName}\\light.lit",
-        };
-
-        var available = new List<string>(candidates.Length);
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        for (int i = 0; i < candidates.Length; i++)
+            knownPaths = _dataSource.GetFileList(".lit");
+        }
+        catch (Exception ex)
         {
-            string candidate = candidates[i];
-            if (!seen.Add(candidate))
-                continue;
+            knownPaths = Array.Empty<string>();
+            ViewerLog.Trace($"[LIT] Could not enumerate known .lit files for '{_mapName}': {ex.Message}");
+        }
 
+        IReadOnlyList<string> candidates = LitSourcePathResolver.Resolve(knownPaths, _mapName);
+        var available = new List<string>(candidates.Count);
+        foreach (string candidate in candidates)
+        {
             if (_dataSource.FileExists(candidate))
                 available.Add(candidate);
         }

@@ -160,6 +160,12 @@ headers use client fixed-point XZY positions: divide by 36, decode semantic game
 the active map-origin transform for renderer-space consumers. Raw, decoded WoW, and renderer values
 remain separately diagnosable; this correction does not claim local-light visual parity.
 
+The LIT source contract also enumerates every `.lit` file directly inside the active map folder,
+retains the conventional filename probes for archive compatibility, and exposes a source switcher
+for profile comparison. If the active map has no usable map-scoped Light DBC profile, LIT is loaded
+automatically and its lighting/fog override starts enabled; marker overlays remain explicit user
+choices.
+
 ### Phase 5 — Cross-era and performance proof
 
 Run focused tests/builds in the workspace, then hand the user exact PowerShell commands for the

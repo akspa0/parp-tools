@@ -69,6 +69,7 @@ public class MpqDataSource : IDataSource
         ".wlw",
         ".wlq",
         ".wlm",
+        ".lit",
         ".pm4"
     };
 

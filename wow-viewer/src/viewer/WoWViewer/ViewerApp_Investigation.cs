@@ -602,23 +602,13 @@ public partial class ViewerApp
         if (ImGui.Checkbox("Use LIT Lighting Override", ref useLitFogOverride))
             _worldScene.UseLitFogOverride = useLitFogOverride;
 
-        if (!_worldScene.LitLoadAttempted)
-        {
-            ImGui.TextDisabled("World\\<map>\\lights.lit, areatest.lit, and light.lit are lazy-loaded when present for the current map.");
-            if (ImGui.Button("Load LIT Lighting"))
-                _worldScene.ShowLitLights = true;
-            return;
-        }
-
-        LitLoader? loader = _worldScene.LitLoader;
-        if (loader == null || !loader.HasData)
-        {
-            ImGui.TextDisabled(_worldScene.LitStatus);
-            return;
-        }
+        if (_worldScene.LitAutoFallbackActive)
+            ImGui.TextDisabled($"Automatic LIT fallback: {_worldScene.LitAutoFallbackReason}");
 
         IReadOnlyList<string> sourcePaths = _worldScene.AvailableLitSourcePaths;
-        string currentSourcePath = _worldScene.SelectedLitSourcePath ?? loader.SourcePath ?? string.Empty;
+        string currentSourcePath = _worldScene.SelectedLitSourcePath
+            ?? _worldScene.LitLoader?.SourcePath
+            ?? string.Empty;
         if (sourcePaths.Count > 1)
         {
             if (ImGui.BeginCombo("LIT Source", currentSourcePath))
@@ -626,7 +616,10 @@ public partial class ViewerApp
                 for (int i = 0; i < sourcePaths.Count; i++)
                 {
                     string sourcePath = sourcePaths[i];
-                    bool isSelectedSource = string.Equals(currentSourcePath, sourcePath, StringComparison.OrdinalIgnoreCase);
+                    bool isSelectedSource = string.Equals(
+                        currentSourcePath,
+                        sourcePath,
+                        StringComparison.OrdinalIgnoreCase);
                     if (ImGui.Selectable(sourcePath, isSelectedSource))
                     {
                         _worldScene.ReloadLit(sourcePath);
@@ -640,6 +633,21 @@ public partial class ViewerApp
 
                 ImGui.EndCombo();
             }
+        }
+
+        if (!_worldScene.LitLoadAttempted)
+        {
+            ImGui.TextDisabled("All .lit profiles directly inside World\\<map> or World\\Maps\\<map> are discovered and lazy-loaded when present.");
+            if (ImGui.Button("Load LIT Lighting"))
+                _worldScene.ShowLitLights = true;
+            return;
+        }
+
+        LitLoader? loader = _worldScene.LitLoader;
+        if (loader == null || !loader.HasData)
+        {
+            ImGui.TextDisabled(_worldScene.LitStatus);
+            return;
         }
 
         ImGui.TextDisabled($"Path: {loader.SourcePath}");

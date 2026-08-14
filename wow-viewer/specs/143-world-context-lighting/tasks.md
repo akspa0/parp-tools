@@ -92,6 +92,9 @@ whole-map loads, native OpenGL runtime tests, and GPU profiling are user-run ope
 - [x] T030a [US4] Correct LIT list-header spatial decoding in the shared core contract: divide fixed-point
   XZY values by 36, expose decoded WoW XYZ, and apply the map-origin transform for viewer/minimap
   consumers with focused regression coverage.
+- [x] T030b [US4] Discover all direct-map `.lit` variants, expose the existing source switcher even when
+  a selected profile fails to parse, and automatically enable LIT lighting/fog when no usable
+  map-scoped Light DBC profile is available, with focused path-resolution coverage.
 - [ ] T031 [US4] Wire selected WMO root/group ambient, light references, vertex colors, baked weights, lightmap data, and fog inputs through `src/viewer/WoWViewer/Rendering/WmoRenderer.cs`.
 - [ ] T032 [US4] Replace only the WMO shader fallback behavior required by the selected inputs in `src/viewer/WoWViewer/Rendering/WmoRenderer.cs`; preserve batching, alpha, portal, liquid, and transparent paths.
 - [ ] T033 [US4] Wire attributable directional, ambient, local-light, fog, and effect-route inputs through `src/viewer/WoWViewer/Rendering/M2Renderer.cs` without changing animation or placement ownership.

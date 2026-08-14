@@ -3511,6 +3511,8 @@ public class WorldScene : ISceneRenderer
     private bool _showLitMinimapMarkers;
     private bool _litLoadAttempted;
     private bool _useLitFogOverride;
+    private bool _litAutoFallback;
+    private string _litAutoFallbackReason = string.Empty;
     // Local Light* spatial selection is retained for diagnostics, but its
     // renderer application remains opt-in until the native local-zone
     // transform/falloff contract is proven for the active build.
@@ -3579,6 +3581,8 @@ public class WorldScene : ISceneRenderer
     public LitLoader? LitLoader => _litLoader;
     public bool LitLoadAttempted => _litLoadAttempted;
     public string LitStatus => _litStatus;
+    public bool LitAutoFallbackActive => _litAutoFallback;
+    public string LitAutoFallbackReason => _litAutoFallbackReason;
     public int SelectedLitLightIndex { get => _selectedLitLightIndex; set => _selectedLitLightIndex = value; }
     public string? SelectedLitSourcePath => _selectedLitSourcePath ?? _litLoader?.SourcePath;
     public IReadOnlyList<string> AvailableLitSourcePaths => _litLoader?.AvailableSourcePaths ?? Array.Empty<string>();
@@ -3875,6 +3879,23 @@ public class WorldScene : ISceneRenderer
         _litLoadAttempted = false;
         _litStatus = "LIT reload queued.";
         LazyLoadLit();
+    }
+
+    /// <summary>
+    /// Activates the map's LIT lighting source when no usable map-scoped Light DBC profile exists.
+    /// This is an automatic default only; the user can still turn the override off in the UI.
+    /// </summary>
+    public void EnableLitFallback(string reason)
+    {
+        _litAutoFallback = true;
+        _litAutoFallbackReason = string.IsNullOrWhiteSpace(reason)
+            ? "No usable map-scoped Light DBC profile is available."
+            : reason.Trim();
+
+        if (!_useLitFogOverride)
+            UseLitFogOverride = true;
+        else if (!_litLoadAttempted)
+            LazyLoadLit();
     }
 
     private void BeginPm4OverlayLoad(bool ignoreCache = false)
@@ -7698,6 +7719,11 @@ public class WorldScene : ISceneRenderer
     {
         _lightService = new LightService();
         _lightService.Load(dbcProvider, dbdDir, build, mapId);
+        if (!_lightService.HasUsableLightingForMap)
+        {
+            EnableLitFallback(
+                $"No usable Light DBC profile exists for map {mapId}; LIT is enabled automatically.");
+        }
     }
 
     public WorldScene(GL gl, string wdtPath, IDataSource? dataSource,

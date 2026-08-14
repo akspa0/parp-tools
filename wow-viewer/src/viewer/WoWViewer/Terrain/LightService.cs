@@ -52,6 +52,14 @@ public class LightService
     public int MissingOptionalSkyboxCount => _classicCatalog?.MissingSkyboxReferences.Length ?? 0;
 
     /// <summary>
+    /// True when the active map has a usable Light DBC profile and timed samples. A loaded table
+    /// chain with no rows for this map is not enough to replace the map's LIT lighting source.
+    /// </summary>
+    public bool HasUsableLightingForMap => _classicCatalog is not null
+        ? ZoneCount > 0 && DataEntryCount > 0
+        : _zones.Count > 0 && _lightData.Count > 0;
+
+    /// <summary>
     /// Load the exact-build lighting database chain. Classic builds use the native
     /// Light/LightParams/LightIntBand/LightFloatBand/LightSkybox contract first. The
     /// flattened LightData path is retained only as a later-build compatibility fallback.

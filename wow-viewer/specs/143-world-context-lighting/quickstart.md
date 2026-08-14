@@ -16,9 +16,9 @@ The focused tests must cover at least: standard and Alpha MCNK IDs, coordinate-t
 map mismatch diagnostics, DBD logical-column selection, WMO evidence unavailable fallback, stable
 WMO candidate ordering, camera-head snapshot reuse, and lighting fallback attribution.
 
-The current bounded implementation proof is narrower: the pure `AreaDisplayTextResolver` tests pass
-and the isolated viewer build passes. The DBCD-backed AreaTable fixture and real-client `SubzoneText`
-proof remain open until the next validation slice.
+The current bounded implementation proof is narrower: the pure `AreaDisplayTextResolver` tests pass,
+the LIT coordinate/source tests pass, and the isolated viewer build passes. The DBCD-backed AreaTable
+fixture and real-client `SubzoneText` proof remain open until the next validation slice.
 
 The LIT spatial contract is now explicit: list-header positions are fixed-point client XZY values.
 Decode them by dividing by 36, swap the file Y/Z components into semantic game XYZ, then convert to
@@ -26,6 +26,18 @@ renderer coordinates with `renderer=(mapOrigin-gameY, mapOrigin-gameX, gameZ)`. 
 tooltip reports raw XZY, decoded WoW coordinates, and renderer coordinates separately. The same
 conversion is used by LIT minimap markers and camera focus; source/build proof is automated, while
 real-client marker placement remains user-owned.
+
+LIT source selection is map-folder based rather than filename based. The viewer keeps the known
+`lights.lit`, `areatest.lit`, and `light.lit` probes, then adds every `.lit` file directly under
+`World\\<map>` or `World\\Maps\\<map>` from the active data-source index. The Lighting page and LIT
+investigation panel expose the discovered files in a switcher; selecting one reparses that profile,
+including when the currently selected profile failed to parse.
+
+When the active map has no usable map-scoped Light DBC profile—or no Light DBC provider is available—
+the viewer loads the first available LIT profile automatically and enables the LIT lighting/fog
+override by default. The user can still turn the override off; LIT marker visualization remains
+explicitly opt-in. If no LIT profile exists either, the status reports that the automatic fallback
+has no source rather than claiming lighting parity.
 
 ## User-run real-client matrix
 

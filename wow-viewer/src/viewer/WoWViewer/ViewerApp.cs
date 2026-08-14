@@ -12119,8 +12119,12 @@ void main() {
                 int mapId = curMapDef?.HasDbcEntry == true ? curMapDef.Id : -1;
                 _worldScene.SetDbcCredentials(_dbcProvider, _dbdDir, _dbcBuild, mapId);
 
-                if (curMapDef?.HasDbcEntry == true)
-                    _worldScene.LoadLighting(_dbcProvider, _dbdDir, _dbcBuild, curMapDef.Id);
+                _worldScene.LoadLighting(_dbcProvider, _dbdDir, _dbcBuild, mapId);
+            }
+            else
+            {
+                _worldScene.EnableLitFallback(
+                    "No Light DBC provider is available for this client; LIT is enabled automatically.");
             }
 
             // Position camera — WMO-only maps use the WMO position, terrain maps use tile center
