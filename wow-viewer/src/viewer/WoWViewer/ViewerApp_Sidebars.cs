@@ -3752,46 +3752,48 @@ public partial class ViewerApp
 
     private void DrawWorkbenchContent()
     {
-        // Main pages use a vertical rail so the page hierarchy remains visible
-        // at compact widths. Nested page strips remain inside the content region.
-        if (ImGui.BeginChild("##WorkbenchPageRail", new Vector2(92f, 0f), true,
-            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
+        // Keep navigation in one compact header. A rail for every hierarchy
+        // level consumed the content width and made the workbench unusable.
+        ImGui.TextDisabled("Workspace");
+        if (!ImGui.GetIO().WantTextInput)
         {
-            ImGui.TextDisabled("Pages");
-            ImGui.Separator();
-            DrawTopTabButton(WorkbenchTab.Model, "Model");
-            DrawTopTabButton(WorkbenchTab.World, "World");
-            DrawTopTabButton(WorkbenchTab.Tools, "Tools");
+            if (ImGui.IsKeyPressed(ImGuiKey.F1))
+            {
+                _activeTopTab = WorkbenchTab.Model;
+                _activeBottomTabIndex = 0;
+            }
+            else if (ImGui.IsKeyPressed(ImGuiKey.F2))
+            {
+                _activeTopTab = WorkbenchTab.World;
+                _activeBottomTabIndex = 0;
+            }
+            else if (ImGui.IsKeyPressed(ImGuiKey.F3))
+            {
+                _activeTopTab = WorkbenchTab.Tools;
+                _activeBottomTabIndex = 0;
+            }
         }
-        ImGui.EndChild();
+
+        DrawTopTabButton(WorkbenchTab.Model, "Model");
         ImGui.SameLine();
+        DrawTopTabButton(WorkbenchTab.World, "World");
+        ImGui.SameLine();
+        DrawTopTabButton(WorkbenchTab.Tools, "Tools");
+        ImGui.Separator();
 
-        if (!ImGui.BeginChild("##WorkbenchPageContent", new Vector2(0f, 0f), false,
-            ImGuiWindowFlags.None))
-        {
-            ImGui.EndChild();
-            return;
-        }
-
-        // The main page selector is vertical so it never relies on ImGui's
-        // horizontal tab overflow arrows.
         string[] labels = WorkbenchNavigator.GetBottomTabLabels(_activeTopTab);
         if (labels.Length == 0)
         {
             ImGui.TextDisabled("No pages are available for this workspace.");
-            ImGui.EndChild();
             return;
         }
 
         if (_activeBottomTabIndex < 0 || _activeBottomTabIndex >= labels.Length)
             _activeBottomTabIndex = 0;
 
-        _activeBottomTabIndex = DrawVerticalTabRail(
-            "##WorkbenchBottomTabRail",
-            _activeTopTab.ToString(),
-            labels,
-            _activeBottomTabIndex,
-            132f);
+        _activeBottomTabIndex = DrawPageCombo(
+            "##WorkbenchBottomPage", labels, _activeBottomTabIndex);
+        ImGui.Separator();
 
         if (ImGui.BeginChild("##WorkbenchSubTabContent", new Vector2(0, 0), false,
             ImGuiWindowFlags.None))
@@ -3810,7 +3812,6 @@ public partial class ViewerApp
             }
         }
         ImGui.EndChild();
-        ImGui.EndChild();
     }
 
     private void DrawTopTabButton(WorkbenchTab tab, string label)
@@ -3818,7 +3819,7 @@ public partial class ViewerApp
         bool selected = _activeTopTab == tab;
         if (selected)
             ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.38f, 0.25f, 0.08f, 1f));
-        bool clicked = ImGui.Button(label, new Vector2(-1f, 0f));
+        bool clicked = ImGui.Button($"{label}##WorkbenchTop_{tab}");
         if (selected)
             ImGui.PopStyleColor();
 
@@ -4055,47 +4056,31 @@ public partial class ViewerApp
         if (labels.Length == 0)
             return 0;
 
-        return DrawVerticalTabRail(id + "Rail", null, labels, activeIndex, 132f);
+        return DrawPageCombo(id, labels, activeIndex);
     }
 
-    private static int DrawVerticalTabRail(
+    private static int DrawPageCombo(
         string id,
-        string? title,
         string[] labels,
-        int activeIndex,
-        float width)
+        int activeIndex)
     {
         if (labels.Length == 0)
             return 0;
 
         int selected = Math.Clamp(activeIndex, 0, labels.Length - 1);
-        if (ImGui.BeginChild(
-            id,
-            new Vector2(width, 0f),
-            true,
-            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
+        ImGui.SetNextItemWidth(-1f);
+        if (ImGui.BeginCombo(id, labels[selected]))
         {
-            if (!string.IsNullOrWhiteSpace(title))
-            {
-                ImGui.TextDisabled(title);
-                ImGui.Separator();
-            }
-
             for (int i = 0; i < labels.Length; i++)
             {
                 bool isSelected = selected == i;
-                if (isSelected)
-                    ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.38f, 0.25f, 0.08f, 1f));
-
-                if (ImGui.Button($"{labels[i]}##{id}_{i}", new Vector2(-1f, 0f)))
+                if (ImGui.Selectable(labels[i], isSelected))
                     selected = i;
-
                 if (isSelected)
-                    ImGui.PopStyleColor();
+                    ImGui.SetItemDefaultFocus();
             }
+            ImGui.EndCombo();
         }
-        ImGui.EndChild();
-        ImGui.SameLine();
         return selected;
     }
 

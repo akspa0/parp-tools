@@ -22,6 +22,7 @@ public partial class ViewerApp
     }
 
     private CapturePanelTab? _pendingCapturePanelTab;
+    private int _activeCapturePanelTabIndex;
     private readonly M2CameraPathDocument _cameraPath = new();
     private int _selectedCameraPathKey = -1;
     private string _cameraPathName = "camera_path";
@@ -73,6 +74,7 @@ public partial class ViewerApp
     private void OpenCapturePanelTab(CapturePanelTab tab)
     {
         _pendingCapturePanelTab = tab;
+        _activeCapturePanelTabIndex = (int)tab;
         if (_useTabUi)
         {
             _activeUtilitiesTabIndex = (int)Workbench.UtilitiesBottomTab.Capture;
@@ -90,31 +92,25 @@ public partial class ViewerApp
 
     private void DrawCapturePanelContent()
     {
-        if (ImGui.BeginTabBar("##CapturePanelTabs", ImGuiTabBarFlags.FittingPolicyScroll))
+        string[] labels = ["Capture Automation", "Camera Path"];
+        _activeCapturePanelTabIndex = DrawPageCombo(
+            "##CapturePanelTabs",
+            labels,
+            _pendingCapturePanelTab.HasValue
+                ? (int)_pendingCapturePanelTab.Value
+                : _activeCapturePanelTabIndex);
+
+        switch ((CapturePanelTab)_activeCapturePanelTabIndex)
         {
-            bool automationTabOpen = true;
-            ImGuiTabItemFlags automationFlags = _pendingCapturePanelTab == CapturePanelTab.Automation
-                ? ImGuiTabItemFlags.SetSelected
-                : ImGuiTabItemFlags.None;
-            if (ImGui.BeginTabItem("Capture Automation", ref automationTabOpen, automationFlags))
-            {
+            case CapturePanelTab.Automation:
                 DrawCaptureAutomationContent();
-                ImGui.EndTabItem();
-            }
-
-            bool cameraPathTabOpen = true;
-            ImGuiTabItemFlags cameraPathFlags = _pendingCapturePanelTab == CapturePanelTab.CameraPath
-                ? ImGuiTabItemFlags.SetSelected
-                : ImGuiTabItemFlags.None;
-            if (ImGui.BeginTabItem("Camera Path", ref cameraPathTabOpen, cameraPathFlags))
-            {
+                break;
+            case CapturePanelTab.CameraPath:
                 DrawCameraPathContent();
-                ImGui.EndTabItem();
-            }
-
-            _pendingCapturePanelTab = null;
-            ImGui.EndTabBar();
+                break;
         }
+
+        _pendingCapturePanelTab = null;
     }
 
     private void DrawCameraPathWindow()
