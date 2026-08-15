@@ -3443,6 +3443,14 @@ public partial class ViewerApp
             ImGui.Text($"{"Prologue (setup before passes)",-32} now {_worldScene.RenderPrologueMs,7:0.00}  peak {_worldScene.RenderProloguePeakMs,8:0.00} ms");
             ImGui.Text($"{"Pass gap (between stage timers)",-32} now {_worldScene.RenderPassGapMs,7:0.00}  peak {_worldScene.RenderPassGapPeakMs,8:0.00} ms");
             ImGui.Text($"{"Epilogue (after passes)",-32} now {_worldScene.RenderEpilogueMs,7:0.00}  peak {_worldScene.RenderEpiloguePeakMs,8:0.00} ms");
+
+            // PrepareObjectPhase is the only pass with no stage timer, so its whole cost sits in the
+            // pass gap above. These attribute it.
+            ImGui.Separator();
+            ImGui.TextDisabled("Inside the pass gap: PrepareObjectPhase (the untimed pass)");
+            ImGui.Text($"{"  PrepareObjectPhase total",-32} now {_worldScene.ObjectPhasePrepareMs,7:0.00}  peak {_worldScene.ObjectPhasePreparePeakMs,8:0.00} ms");
+            ImGui.Text($"{"    AudioRuntime.Update",-32} now {_worldScene.AudioRuntimeUpdateMs,7:0.00}  peak {_worldScene.AudioRuntimeUpdatePeakMs,8:0.00} ms");
+            ImGui.Text($"{"    PM4 overlay window",-32} now {_worldScene.Pm4OverlayWindowMs,7:0.00}  peak {_worldScene.Pm4OverlayWindowPeakMs,8:0.00} ms");
             if (ImGui.Button("Reset region peaks"))
                 _worldScene.ResetRenderRegionPeaks();
             ImGui.TreePop();

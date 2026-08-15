@@ -1356,11 +1356,26 @@ public class WorldScene : ISceneRenderer
     public double RenderPassGapPeakMs { get; private set; }
     public double RenderEpiloguePeakMs { get; private set; }
 
+    /// <summary>
+    /// PrepareObjectPhase is the one pass in <see cref="WorldFramePasses"/> with no stage timer, so
+    /// all of its cost lands in the pass gap. These sub-probes attribute it. Peaks are retained
+    /// because the suspected work (PM4 overlay window changes, audio residency) is periodic.
+    /// </summary>
+    public double ObjectPhasePrepareMs { get; private set; }
+    public double ObjectPhasePreparePeakMs { get; private set; }
+    public double AudioRuntimeUpdateMs { get; private set; }
+    public double AudioRuntimeUpdatePeakMs { get; private set; }
+    public double Pm4OverlayWindowMs { get; private set; }
+    public double Pm4OverlayWindowPeakMs { get; private set; }
+
     public void ResetRenderRegionPeaks()
     {
         RenderProloguePeakMs = 0;
         RenderPassGapPeakMs = 0;
         RenderEpiloguePeakMs = 0;
+        ObjectPhasePreparePeakMs = 0;
+        AudioRuntimeUpdatePeakMs = 0;
+        Pm4OverlayWindowPeakMs = 0;
     }
 
     // Per-frame scratch, reused rather than reallocated. Named scratch, not cache: they are rebuilt
@@ -10223,6 +10238,8 @@ public class WorldScene : ISceneRenderer
         return centerDistanceSq * penalty;
     }
 
+    private static double TicksToMs(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;
+
     private static double MeasureDurationMs(Action action)
     {
         var stageTimer = Stopwatch.StartNew();
@@ -10590,6 +10607,12 @@ public class WorldScene : ISceneRenderer
                     _lastRenderedCameraPosition = cameraPos;
                     _hasLastRenderedCameraPosition = true;
                     int audioAreaId = _terrainManager.Renderer.GetChunkInfoAt(cameraPos.X, cameraPos.Y)?.AreaId ?? 0;
+
+                    // Sub-probes: PrepareObjectPhase has no stage timer, so everything here lands in
+                    // the pass gap. Both of these do periodic residency work and are prime suspects.
+                    long objectPhaseStart = Stopwatch.GetTimestamp();
+
+                    long audioStart = Stopwatch.GetTimestamp();
                     _audioRuntime?.Update(
                         cameraPos,
                         cameraForward,
@@ -10597,8 +10620,16 @@ public class WorldScene : ISceneRenderer
                         lighting.GameTime,
                         _mapId,
                         _currentAreaLookup);
+                    AudioRuntimeUpdateMs = TicksToMs(Stopwatch.GetTimestamp() - audioStart);
+                    AudioRuntimeUpdatePeakMs = Math.Max(AudioRuntimeUpdatePeakMs, AudioRuntimeUpdateMs);
 
+                    long pm4Start = Stopwatch.GetTimestamp();
                     EnsurePm4OverlayMatchesCameraWindow(cameraPos);
+                    Pm4OverlayWindowMs = TicksToMs(Stopwatch.GetTimestamp() - pm4Start);
+                    Pm4OverlayWindowPeakMs = Math.Max(Pm4OverlayWindowPeakMs, Pm4OverlayWindowMs);
+
+                    ObjectPhasePrepareMs = TicksToMs(Stopwatch.GetTimestamp() - objectPhaseStart);
+                    ObjectPhasePreparePeakMs = Math.Max(ObjectPhasePreparePeakMs, ObjectPhasePrepareMs);
 
                     // Update frustum planes for culling
                     var vp = view * proj;
