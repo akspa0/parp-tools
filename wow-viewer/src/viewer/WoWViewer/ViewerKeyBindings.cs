@@ -5,10 +5,12 @@ namespace WoWViewer;
 internal enum ViewerKeyContext
 {
     Global,
-    Model,
-    World,
-    Tools,
+    Quick,
+    Inspect,
+    Scene,
     Utilities,
+    Audio,
+    Experimental,
     Capture,
 }
 
@@ -29,8 +31,8 @@ internal static class ViewerKeyBindingCatalog
         new("ui.focus_pm4", "Global", "P", "Focus PM4 tools when available.", ViewerKeyContext.Global, true),
         new("ui.toggle_minimap", "Global", "M", "Toggle the fullscreen minimap when terrain is loaded.", ViewerKeyContext.Global, true),
         new("camera.free_fly", "Global", "WASD / Q E", "Move the free-fly camera; hold Shift for a speed boost.", ViewerKeyContext.Global, true),
-        new("model.animation", "Model", "Left / Right / Space", "Step or play the loaded model animation.", ViewerKeyContext.Model),
-        new("world.navigation", "World", "WASD / Q E", "Navigate the loaded world with the camera.", ViewerKeyContext.World),
+        new("model.animation", "Inspect", "Left / Right / Space", "Step or play the loaded model animation.", ViewerKeyContext.Inspect),
+        new("world.navigation", "Scene", "WASD / Q E", "Navigate the loaded world with the camera.", ViewerKeyContext.Scene),
         new("capture.add_key", "Capture", "K", "Add a camera-path key at the current playhead.", ViewerKeyContext.Capture),
         new("capture.update_key", "Capture", "U", "Update the selected camera-path key.", ViewerKeyContext.Capture),
         new("capture.delete_key", "Capture", "Delete", "Delete the selected camera-path key.", ViewerKeyContext.Capture),
@@ -61,12 +63,13 @@ public partial class ViewerApp
 
         return _activeTopTab switch
         {
-            Workbench.WorkbenchTab.Model => ViewerKeyContext.Model,
-            Workbench.WorkbenchTab.World => ViewerKeyContext.World,
-            Workbench.WorkbenchTab.Tools when (Workbench.ToolsBottomTab)_activeBottomTabIndex == Workbench.ToolsBottomTab.Utilities
-                && (Workbench.UtilitiesBottomTab)_activeUtilitiesTabIndex == Workbench.UtilitiesBottomTab.Capture => ViewerKeyContext.Capture,
-            Workbench.WorkbenchTab.Tools when (Workbench.ToolsBottomTab)_activeBottomTabIndex == Workbench.ToolsBottomTab.Utilities => ViewerKeyContext.Utilities,
-            Workbench.WorkbenchTab.Tools => ViewerKeyContext.Tools,
+            Workbench.WorkbenchTab.Quick => ViewerKeyContext.Quick,
+            Workbench.WorkbenchTab.Inspect => ViewerKeyContext.Inspect,
+            Workbench.WorkbenchTab.Scene => ViewerKeyContext.Scene,
+            Workbench.WorkbenchTab.Utilities when (Workbench.UtilitiesBottomTab)_activeBottomTabIndex == Workbench.UtilitiesBottomTab.Audio => ViewerKeyContext.Audio,
+            Workbench.WorkbenchTab.Utilities when (Workbench.UtilitiesBottomTab)_activeBottomTabIndex == Workbench.UtilitiesBottomTab.Capture => ViewerKeyContext.Capture,
+            Workbench.WorkbenchTab.Utilities => ViewerKeyContext.Utilities,
+            Workbench.WorkbenchTab.Experimental => ViewerKeyContext.Experimental,
             _ => ViewerKeyContext.Global,
         };
     }
@@ -95,10 +98,12 @@ public partial class ViewerApp
                 DrawKeyboardBindingGroup("Global", ViewerKeyBindingCatalog.All.Where(binding => binding.IsGlobal));
                 foreach (ViewerKeyContext context in new[]
                 {
-                    ViewerKeyContext.Model,
-                    ViewerKeyContext.World,
-                    ViewerKeyContext.Tools,
+                    ViewerKeyContext.Quick,
+                    ViewerKeyContext.Inspect,
+                    ViewerKeyContext.Scene,
                     ViewerKeyContext.Utilities,
+                    ViewerKeyContext.Audio,
+                    ViewerKeyContext.Experimental,
                     ViewerKeyContext.Capture,
                 })
                 {

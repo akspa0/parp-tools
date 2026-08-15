@@ -218,3 +218,75 @@ The goal is to make the UI feel like World of Warcraft's interface: clean, consi
 - Phases A+B can be done together as they're interdependent (removing duplicates requires deciding WHERE the control lives)
 - Phase C is the biggest change (removing sidebars entirely) and should be validated carefully
 - After Phase C, the UI is: menu bar + 3D viewport + bottom action bar + status bar + named frames + fullscreen minimap. This matches WoW's layout closely.
+
+## Current IA Amendment — 2026-08-14
+
+The previous `Model / World / Tools` workbench is not the release information
+architecture. It exposes implementation history as navigation, then compounds
+the problem with nested page strips and duplicated inspector surfaces. The
+active tabbed sidebar now converges on five destinations:
+
+| Destination | Purpose | Canonical content owner |
+|---|---|---|
+| Quick | The default, compact camera, lighting, fog, scene, and interface controls | `DrawQuickControlsContent()` |
+| Inspect | One always-available context inspector for the selected model/object, current ADT/MCNK context, and selected PM4 facts | `DrawUnifiedInspectorContent()` |
+| Scene | World placements, tile targeting, LOD facts, and scene-level visibility | existing World sub-tab bodies, with one Scene page selector |
+| Utilities | Minimap, log/perf, render quality, taxi, capture, asset catalog, runtime stats, lighting, and audio | `DrawUtilitiesSubTabContent()` |
+| Experimental | PM4 evidence, terrain lab, archaeology, and converters that are useful but not part of the normal viewing path | existing tool bodies, with one Experimental page selector |
+
+The top row must not expose `Model`, `World`, or `Tools`. Model/object facts
+are not separate competing panels: the Inspect destination owns the common
+summary and appends the relevant model, ADT/MCNK, or PM4 facts inline. Detail
+controls may be visually compact, but they remain in the inspector body; they
+must not require a popup, nested modal, or a button that only reveals the
+identity of the current selection.
+
+Terrain tile selection and MCNK/chunk clipboard operations share one
+`Terrain Lab` page under Experimental. PM4 correlation/matching remains
+experimental and is not shown in the common inspector or a PM4 tooltip.
+
+### Current IA acceptance
+
+- A new tabbed session opens on `Quick` and the right sidebar contains exactly
+  the five destinations above.
+- The old `Model`, `World`, and `Tools` labels are absent from the tabbed
+  navigation; old route helpers may remain only as compatibility adapters for
+  existing menu/hotkey callers.
+- `Inspect` has one body and one owner for model, object, ADT/MCNK, and PM4
+  context. No required identity or coordinate fact is available only through a
+  popup or a nested button.
+- `Terrain Lab` visibly contains tile/chunk targeting and clipboard controls
+  in the same page, with no second top-level route for either operation.
+- Utilities is directly reachable from the top row, and Audio is reachable only
+  as the Audio page under Utilities. Selecting either page remains opt-in and
+  default-off according to the audio spec; navigation does not start playback.
+- Utilities and Experimental are the only destinations that retain page
+  selectors; Quick, Inspect, and Scene do not add another nested navigation
+  layer.
+- Scene's selector contains only Placements, Tiles, and LOD. Source and
+  file/map loading remain exclusively in the left Navigator sidebar.
+- The legacy/dockspace route remains behaviorally unchanged in this slice.
+
+This amendment is the current bounded Phase 2A implementation target. It does
+not retire legacy window methods until the route inventory and manual proof
+gate in the convergence plan pass.
+
+## Current IA Follow-up — 2026-08-15
+
+The main Panels menu is also part of the sidebar navigation contract. A menu
+entry that opens Utilities must select the requested utility
+page directly; it must not land on a generic Utilities page and require a
+second navigation action. The canonical mappings are Log Viewer -> Log, Perf
+-> Perf, Asset Catalog -> Asset Catalog, Taxi -> Taxi, and Capture/Camera Path
+-> Capture.
+
+This follow-up is limited to route landing and inline labels. It does not
+change renderer, ADT/object streaming, fog, or frame-time behavior.
+
+## Current IA Follow-up — Utilities and animation restoration — 2026-08-15
+
+Utilities is now a top-level destination rather than an Experimental page.
+Its single page selector owns the existing diagnostic and capture tools plus
+Audio. The Inspect body also restores the existing MDX/M2 animation controls
+for standalone model selection and selected world MDX instances, without
+creating a second model-information route.

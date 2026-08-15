@@ -1,12 +1,15 @@
 namespace WoWViewer.Workbench;
 
 /// <summary>
-/// Top-level tab categories in the 071 right-sidebar workbench.
-/// Replaces the 069 six-tab model with three focused workspaces.
+/// User-facing top-level destinations in the right-sidebar workbench.
+/// These are task-oriented destinations rather than implementation/history
+/// buckets. Older Model/World/Tools callers are adapted by ViewerApp.
 /// </summary>
 public enum WorkbenchTab
 {
-    Model = 0,
-    World = 1,
-    Tools = 2,
+    Quick = 0,
+    Inspect = 1,
+    Scene = 2,
+    Utilities = 3,
+    Experimental = 4,
 }

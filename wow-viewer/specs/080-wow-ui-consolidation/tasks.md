@@ -79,6 +79,49 @@ asset loads in one compact right-aligned line.
 - [ ] T016 [US6] Hide or disable dead controls with tooltips instead of showing fake working buttons.
 - [x] T017 [US2] Add `WorldBottomTab.Lod` and label it `LOD` in `Workbench/WorkbenchNavigator.cs`.
 
+## Phase 2A: Current Sidebar Information Architecture (P1)
+
+**Goal**: Replace the implementation-history top row with five deliberate
+destinations and give context facts one inline inspector owner.
+
+**Independent Test**: In tabbed mode, the top row is exactly Quick, Inspect,
+Scene, Utilities, Experimental. Each route opens a visible body, Inspect shows
+available model/MCNK/PM4 context inline, and Experimental > Terrain Lab shows
+tile/chunk targeting beside clipboard controls.
+
+- [x] T040 [US2] Update `wow-viewer/src/viewer/WoWViewer/Workbench/WorkbenchTab.cs` and `Workbench/WorkbenchNavigator.cs` with the five canonical categories and page labels; retain compatibility enums only where existing callers require them.
+- [x] T041 [US2] Route the tabbed workbench in `wow-viewer/src/viewer/WoWViewer/ViewerApp_Sidebars.cs` to Quick, Inspect, Scene, Utilities, and Experimental without rendering Model/World/Tools labels or duplicating Audio outside Utilities.
+- [x] T042 [US2] Add `DrawUnifiedInspectorContent()` in `wow-viewer/src/viewer/WoWViewer/ViewerApp_Sidebars.cs` so selection/model, current ADT/MCNK, and selected PM4 summaries share one inline owner.
+- [x] T043 [US2] Merge tile/chunk targeting and clipboard actions into the Experimental Terrain Lab route in `wow-viewer/src/viewer/WoWViewer/ViewerApp_Sidebars.cs`, with no duplicate top-level tile or clipboard destination.
+- [x] T044 [US2] Adapt existing menu, hotkey, capture, PM4, terrain, and model callers in `wow-viewer/src/viewer/WoWViewer/ViewerApp_Sidebars.cs`, `ViewerApp.cs`, `ViewerApp_CameraPaths.cs`, and `ViewerKeyBindings.cs` to the compatibility mapping and new labels.
+- [x] T045 [US2] Remove popup-only inspector navigation for the migrated context summaries and replace any required identity/coordinate reveal with inline text in `wow-viewer/src/viewer/WoWViewer/ViewerApp_Sidebars.cs`.
+- [x] T046 [US2] Update `wow-viewer/docs/architecture/viewer-ui-surface-inventory.md` with the five canonical tabbed destinations and the retired visible Model/World/Tools ownership rows.
+- [x] T047 [US6] Run focused source checks and `dotnet build I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`; record that visual/runtime/manual proof remains open. The full solution test command timed out; the focused core suite remains red on nine pre-existing failures unrelated to this UI slice.
+
+## Phase 2B: Sidebar Entry-Point Convergence (P1)
+
+**Goal**: Make every main Panels menu item land on the exact canonical page it names.
+
+**Independent Test**: In tabbed mode, opening Log Viewer, Perf, Asset Catalog, or Taxi selects
+Utilities and the matching utility page without a second navigation action.
+
+- [x] T048 [US2] Add a typed `UtilitiesBottomTab` workbench adapter that selects Utilities and the requested utility page.
+- [x] T049 [US2] Route the main Panels menu's Log Viewer, Perf, Asset Catalog, and Taxi entries through the typed adapter; preserve Capture/Camera Path routing through the existing Capture adapter.
+- [ ] T050 [US6] Manually verify each Panels entry lands on the named page at normal and compact sidebar widths.
+
+## Phase 2C: Utilities Ownership And Animation Restoration (P1)
+
+**Goal**: Keep diagnostics and audio under one Utilities destination and restore
+the existing MDX/M2 animation surface in the unified Inspect body.
+
+**Independent Test**: The top row contains Utilities but not Audio; Utilities
+has one page selector containing Audio; Inspect exposes animation controls for
+a standalone model and a selected world MDX instance when available.
+
+- [x] T051 [US2] Promote Utilities to a canonical top-level workbench destination and move Audio ownership under its page selector without changing playback policy.
+- [x] T052 [US2] Restore the existing MDX/M2 animation controls inside the unified Inspect body for standalone and selected world-model contexts.
+- [ ] T053 [US6] Manually verify Utilities -> Audio, Experimental pages, and Inspect animation controls at normal and compact sidebar widths.
+
 ## Phase 4: Model And World Info Tabs (P2)
 
 **Goal**: Put factual inspection panels where users expect them.
@@ -120,6 +163,9 @@ asset loads in one compact right-aligned line.
 - Phase 4 depends on Phase 3 classification.
 - Phase 5 depends on Phase 3 and should not include left-sidebar removal.
 - Phase 6 happens after each completed phase, not only at the end.
+- Phase 2A depends on the Phase 3 route inventory but does not retire legacy
+  dispatch. It must pass its source/build/manual gate before any old top-level
+  label or content method is deleted.
 
 ## Notes
 

@@ -15,6 +15,20 @@ is an evidence source and control, not a code source. The work must preserve the
 render path as a correctness fallback and must not become a renderer rewrite, an audio change, a
 game-mode movement feature, or a cross-era generalization.
 
+### Deferred observation — 2026-08-15
+
+The user reports that camera movement now hitches or jerks at nearly every movement, independent of
+fog settings, and suspects regression in ADT/object rendering or residency behavior. This is a
+deferred performance investigation, not evidence of a particular owner. The current sidebar pass
+must not modify renderer, ADT admission, object submission, fog, or streaming code. When reopened,
+begin with repeated frame profiles and stage attribution before changing the render path.
+
+The supplied follow-up screenshot adds a concrete WMO symptom: distant WMO content, including old
+Ironforge, remains visible or fully submitted beyond the effective fog end while terrain has already
+been culled. Treat this as a hypothesis about WMO visibility/submission admission, not proof of the
+responsible layer. Reopen with WMO placement/group counters and a camera-to-bounds distance trace
+against the active fog plane before changing culling or residency behavior.
+
 ## User Scenarios & Testing
 
 ### User Story 1 - Identify the actual frame owner (Priority: P1)

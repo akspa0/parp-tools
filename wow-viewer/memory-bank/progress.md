@@ -1,6 +1,45 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-14
+Last updated: 2026-08-15
+
+## 2026-08-15 — Sidebar entry-point convergence; renderer hitch deferred
+
+- Main Panels entries now land directly on their named Utilities page: Log Viewer,
+  Perf, Asset Catalog, and Taxi. Capture and Camera Path continue to land on the shared Capture page.
+- Recorded the reported camera-movement hitch as a deferred Spec 150 observation. No renderer, fog,
+  ADT admission, object submission, or streaming code was changed during this sidebar pass.
+- Sidebar-only source checks and the full Debug build pass with 0 errors; compact-window manual proof
+  remains open.
+
+## 2026-08-15 — Utilities ownership and animation restoration
+
+- Promoted Utilities to the canonical fourth right-sidebar destination. Audio now exists only as
+  Utilities -> Audio; it is no longer a duplicate top-level destination or an Experimental page.
+- Restored the existing MDX/M2 animation controls inside Inspect for standalone models and selected
+  world MDX instances without adding another model-information route.
+- The WMO-beyond-fog symptom remains deferred to Spec 150; no renderer or streaming code changed.
+
+## 2026-08-15 — Keep source navigation in the left sidebar
+
+- Removed the right-sidebar Scene `Source` page and its dead source-body route. The right Scene
+  selector now contains only Placements, Tiles, and LOD.
+- Kept compatibility mapping for placements, tiles, selection, and LOD; source/file/map loading is
+  owned exclusively by the left Navigator sidebar.
+
+## 2026-08-15 — Spec 080 Phase 2A sidebar IA and unified inspector
+
+- Replaced the visible tabbed `Model / World / Tools` top row with five deliberate destinations:
+  `Quick`, `Inspect`, `Scene`, `Utilities`, and `Experimental`. Quick, Inspect, and Scene now render
+  their bodies directly without a second page strip; Utilities and Experimental retain only their
+  purpose-specific page selectors.
+- Added one inline unified inspector for selected models/objects, PM4 context, and current ADT/MCNK
+  facts. Area-trigger and WL-liquid loading actions are inline rather than nested popup-only controls.
+- Combined tile targeting, chunk selection, and MCNK/chunk clipboard operations in Experimental >
+  Terrain Lab. Existing legacy callers map into the new destinations, while legacy route retirement
+  remains a separate inventory/manual-proof gate.
+- Focused source checks and the full Debug build pass with 0 errors. The full solution test command
+  timed out after two minutes; the focused core suite completed with 1,019 passing, 9 unrelated
+  baseline failures, and 1 skipped test. User-owned visual proof remains open.
 
 ## 2026-08-14 — Mute unproven automatic ZoneMusic playback
 

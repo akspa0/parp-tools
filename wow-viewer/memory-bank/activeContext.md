@@ -1,19 +1,28 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-08-14
+Last updated: 2026-08-15
 
 This file is the interchange for the next agent. It records only the current routing state. Read
 the owning spec for requirements and proof; read a workstream only when the spec links it.
 
 ## Current handoff
 
-- **Next implementation target:** User-run Alpha 0.5.3 audio proof with the corrected MCSE/MCNK
-  positions and the new speaker overlay: enable 3D sound-emitter markers near a working water
-  emitter, confirm the cyan pin follows the visible chunk, then enable one row and verify audible
-  range behavior. Keep unresolved SoundWaterType rows and default-off trigger controls explicit.
+- **Next implementation target:** User-run right-sidebar visual proof for the new five-destination
+  tabbed IA: Quick, Inspect, Scene, Utilities, and Experimental. Verify Inspect with a selected
+  model, MDX/M2 animation controls, MCNK/ADT context, and PM4 context; verify Utilities > Audio
+  remains default-off and Experimental > Terrain Lab keeps tile targeting beside chunk clipboard
+  actions; verify compact-window reachability.
 - **Performance planning target:** Spec 150 remains the broad Alpha 0.5.3 renderer evidence lane. Spec
   151 owns the first concrete portal-specific optimization; use its counters and fallback evidence to
   inform later repeated `profile-render` baselines. Do not infer a win from an interactive screenshot.
+- **Deferred renderer observation:** The user reports camera movement hitching at nearly every move,
+  independent of fog settings, with suspected ADT/object rendering or residency regression. Do not
+  touch renderer, fog, ADT admission, object submission, or streaming during the sidebar pass; reopen
+  Spec 150 with repeated stage-attributed profiles.
+- **Deferred WMO/fog observation:** The supplied screenshot shows distant WMO content, including old
+  Ironforge, still visible beyond the effective fog end while terrain has already been culled. Treat
+  this as a concrete symptom, not a proven owner; reopen with WMO visibility/submission counters and
+  a trace of camera-to-bounds distance against the fog plane before changing admission logic.
 - **Proof owner:** Focused PM4/audio contract tests and cross-platform viewer build pass; the user owns
   real-client region-camera, streaming, archive-provenance, and audible proof. The current camera
   slice updates active tiles on mouse-look without reopening the residency lease.
@@ -42,7 +51,18 @@ the owning spec for requirements and proof; read a workstream only when the spec
   panel can opt into source-colored 3D speaker pins without starting playback.
   Automatic ZoneMusic playback is now hard-muted behind a tested policy; its area assignment remains
   diagnostic-only so the working MCNK/MCSE water path is not affected.
-- **Main unproven gap:** The time-of-day slice still needs live early-client visual proof and a
+  The current Spec 080 Phase 2A/2C sidebar slice replaces the visible Model/World/Tools top row with
+  Quick/Inspect/Scene/Utilities/Experimental, gives selection/model/ADT/MCNK/PM4 facts one inline
+  inspector route, restores MDX/M2 animation controls in Inspect, and combines terrain targeting
+  with MCNK/chunk clipboard actions in Experimental Terrain Lab. Audio is owned only by Utilities.
+  The viewer build and source checks pass; the full test command timed out and the
+  focused core suite reports nine unrelated baseline failures.
+  Main Panels utility entries now select their exact Utilities page; compact-window
+  manual proof remains open. Source/file/map loading is explicitly left-sidebar-only; the right
+  Scene selector now contains only Placements, Tiles, and LOD.
+- **Main unproven gap:** The sidebar slice still needs user-owned visual proof at normal and compact
+  window sizes, including selected-context transitions and legacy caller reachability. The time-of-day
+  slice still needs live early-client visual proof and a
   comparison of authored minimap tint behavior; the theory that shipped minimaps captured a moving
   clock remains unproven. Spec 104's restored MDX material shader inputs still need real model/shader
   compilation and visual proof. Full BLS bytecode parity remains out of scope. Spec 151's game-mode head anchor/physics, simple-surface policy, and
@@ -75,6 +95,7 @@ the owning spec for requirements and proof; read a workstream only when the spec
 | 146 Audio/camera playback | AreaNumber-aware area selection and master mute control implemented; client audio contracts recovered | Add ZoneMusic row resolution; MIDI/DLS and native MCSE callback proof remain gated. |
 | 144 Camera capture paths | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions. |
 | 145 WoW UI overhaul | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks. |
+| 080 WoW UI consolidation | Phase 2A tabbed sidebar IA and unified inspector source slice implemented; manual proof open | Run the five-tab visual/compact-window check, then resume the legacy route inventory before deleting old methods. |
 | 143 World context and lighting | LIT source/fallback, pre-alpha v2 parser, and default-on 0.5.3 time cycle implemented with user gate | Validate live clock/manual freeze and authored-minimap tint boundaries, then continue WMO area and lighting evidence. |
 | 142 World scene graph | In progress | User-run dense-WMO capture to compare internal-doodad batching against the prior placement-local path. |
 | 139–141 Terrain/minimap reconstruction | Active/parked ML lanes | Reopen only for the named spec and user-run training/validation. |

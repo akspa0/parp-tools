@@ -975,6 +975,95 @@ public partial class ViewerApp
         }
     }
 
+    /// <summary>
+    /// Single inline owner for the current world/model context. The full
+    /// evidence tools remain available under Experimental, but identity and
+    /// coordinate facts are never hidden behind a popup or a second inspector.
+    /// </summary>
+    private void DrawUnifiedInspectorContent()
+    {
+        ImGui.TextDisabled("Current context");
+        bool hasContext = false;
+
+        if (_worldScene?.HasSelectedPm4Object == true)
+        {
+            DrawSelectedPm4ContextSummary();
+            hasContext = true;
+        }
+        else if (_worldScene?.SelectedInstance.HasValue == true)
+        {
+            hasContext = DrawSelectedObjectSummaryContent();
+        }
+        else if (!string.IsNullOrWhiteSpace(_modelInfo))
+        {
+            DrawModelInfoCoreContent();
+            hasContext = true;
+        }
+
+        if (DrawCompactTerrainContextSummary())
+            hasContext = true;
+
+        bool hasWorldMdxAnimation = _worldScene?.SelectedInstance.HasValue == true
+            && _worldScene.SelectedObjectType == Terrain.ObjectType.Mdx;
+        if (_renderer is IModelRenderer || hasWorldMdxAnimation)
+        {
+            ImGui.Separator();
+            DrawModelAnimationsSubTab();
+            hasContext = true;
+        }
+
+        if (_renderer is IModelRenderer || _renderer is WmoRenderer)
+        {
+            ImGui.Separator();
+            DrawModelActionsSubTab();
+            hasContext = true;
+        }
+
+        if (!hasContext)
+            ImGui.TextDisabled("Move the camera over a loaded ADT/MCNK or select a model, world object, or PM4 surface.");
+    }
+
+    private void DrawSelectedPm4ContextSummary()
+    {
+        if (_worldScene?.SelectedPm4ObjectKey is not { } key)
+            return;
+
+        ImGui.Text($"PM4 tile ({key.tileX}, {key.tileY})  CK24 0x{key.ck24:X6}  part {key.objectPart}");
+        if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debug))
+        {
+            ImGui.TextDisabled($"Type 0x{debug.Ck24Type:X2}  Object {debug.Ck24ObjectId}  Region {debug.MshdRegionId}");
+            ImGui.TextDisabled($"Group 0x{debug.DominantGroupKey:X2}  Attr 0x{debug.DominantAttributeMask:X2}  MSCN {debug.DominantMscnRefIndex}");
+            ImGui.TextDisabled($"MSLK group 0x{debug.LinkGroupObjectId:X8}  refs {debug.LinkedPositionRefCount}");
+        }
+    }
+
+    private bool DrawCompactTerrainContextSummary()
+    {
+        if (_terrainManager == null && _vlmTerrainManager == null)
+            return false;
+
+        if (!TryGetTerrainChunkInspectionTarget(preferHoveredChunk: true, out TerrainRenderer.TerrainChunkInfo chunkInfo, out bool usingHoveredChunk))
+        {
+            ImGui.TextDisabled("ADT/MCNK: no loaded camera or hovered chunk.");
+            return true;
+        }
+
+        if (!TryResolveTerrainChunkInspectionData(chunkInfo, out TerrainChunkData? chunkData, out _)
+            || chunkData == null)
+        {
+            ImGui.TextDisabled($"ADT ({chunkInfo.TileX}, {chunkInfo.TileY})  MCNK ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})  data unavailable");
+            return true;
+        }
+
+        ImGui.Separator();
+        ImGui.Text($"ADT ({chunkInfo.TileX}, {chunkInfo.TileY})  MCNK ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})");
+        ImGui.TextDisabled(usingHoveredChunk ? "Target: hovered chunk" : "Target: camera chunk");
+        ImGui.TextDisabled($"Area {chunkData.AreaId}  Flags 0x{(uint)chunkData.McnkFlags:X8}  {DescribeMcnkFlags(chunkData.McnkFlags)}");
+        ImGui.TextDisabled($"Layers {chunkData.Layers.Length}  Holes 0x{chunkData.HoleMask:X4}  Alpha {chunkData.AlphaMaps.Count}  Shadow {(chunkData.ShadowMap != null ? "yes" : "no")}  MCCV {(chunkData.MccvColors != null ? "yes" : "no")}");
+        ImGui.TextDisabled($"World ({chunkData.WorldPosition.X:F1}, {chunkData.WorldPosition.Y:F1}, {chunkData.WorldPosition.Z:F1})");
+        return true;
+    }
+
     private void DrawUnifiedWorldToolsSidebarContent()
     {
         DrawWorldObjectsPanelContent();
@@ -3748,62 +3837,62 @@ public partial class ViewerApp
 
     private void DrawWorkbenchContent()
     {
-        // Keep navigation in one compact header. A rail for every hierarchy
-        // level consumed the content width and made the workbench unusable.
-        ImGui.TextDisabled("Workspace");
+        ImGui.TextDisabled("Viewer workspace");
         if (!ImGui.GetIO().WantTextInput)
         {
             if (ImGui.IsKeyPressed(ImGuiKey.F1))
-            {
-                _activeTopTab = WorkbenchTab.Model;
-                _activeBottomTabIndex = 0;
-            }
+                OpenWorkbenchTab(WorkbenchTab.Quick);
             else if (ImGui.IsKeyPressed(ImGuiKey.F2))
-            {
-                _activeTopTab = WorkbenchTab.World;
-                _activeBottomTabIndex = 0;
-            }
+                OpenWorkbenchTab(WorkbenchTab.Inspect);
             else if (ImGui.IsKeyPressed(ImGuiKey.F3))
-            {
-                _activeTopTab = WorkbenchTab.Tools;
-                _activeBottomTabIndex = 0;
-            }
+                OpenWorkbenchTab(WorkbenchTab.Scene);
+            else if (ImGui.IsKeyPressed(ImGuiKey.F4))
+                OpenWorkbenchTab(WorkbenchTab.Utilities);
+            else if (ImGui.IsKeyPressed(ImGuiKey.F5))
+                OpenWorkbenchTab(WorkbenchTab.Experimental);
         }
 
-        DrawTopTabButton(WorkbenchTab.Model, "Model");
+        DrawTopTabButton(WorkbenchTab.Quick, "Quick");
         ImGui.SameLine();
-        DrawTopTabButton(WorkbenchTab.World, "World");
+        DrawTopTabButton(WorkbenchTab.Inspect, "Inspect");
         ImGui.SameLine();
-        DrawTopTabButton(WorkbenchTab.Tools, "Tools");
+        DrawTopTabButton(WorkbenchTab.Scene, "Scene");
+        ImGui.SameLine();
+        DrawTopTabButton(WorkbenchTab.Utilities, "Utilities");
+        ImGui.SameLine();
+        DrawTopTabButton(WorkbenchTab.Experimental, "Experimental");
         ImGui.Separator();
 
         string[] labels = WorkbenchNavigator.GetBottomTabLabels(_activeTopTab);
-        if (labels.Length == 0)
+        if (labels.Length > 0)
         {
-            ImGui.TextDisabled("No pages are available for this workspace.");
-            return;
+            if (_activeBottomTabIndex < 0 || _activeBottomTabIndex >= labels.Length)
+                _activeBottomTabIndex = 0;
+
+            _activeBottomTabIndex = DrawPageCombo(
+                "##WorkbenchPage", labels, _activeBottomTabIndex);
+            ImGui.Separator();
         }
-
-        if (_activeBottomTabIndex < 0 || _activeBottomTabIndex >= labels.Length)
-            _activeBottomTabIndex = 0;
-
-        _activeBottomTabIndex = DrawPageCombo(
-            "##WorkbenchBottomPage", labels, _activeBottomTabIndex);
-        ImGui.Separator();
 
         if (ImGui.BeginChild("##WorkbenchSubTabContent", new Vector2(0, 0), false,
             ImGuiWindowFlags.None))
         {
             switch (_activeTopTab)
             {
-                case WorkbenchTab.Model:
-                    DrawModelSubTabContent();
+                case WorkbenchTab.Quick:
+                    DrawQuickControlsContent();
                     break;
-                case WorkbenchTab.World:
-                    DrawWorldSubTabContent();
+                case WorkbenchTab.Inspect:
+                    DrawUnifiedInspectorContent();
                     break;
-                case WorkbenchTab.Tools:
-                    DrawToolsSubTabContent();
+                case WorkbenchTab.Scene:
+                    DrawSceneSubTabContent();
+                    break;
+                case WorkbenchTab.Utilities:
+                    DrawUtilitiesSubTabContent();
+                    break;
+                case WorkbenchTab.Experimental:
+                    DrawExperimentalSubTabContent();
                     break;
             }
         }
@@ -3858,9 +3947,60 @@ public partial class ViewerApp
         _workbenchOpen = true;
     }
 
-    private void OpenWorkbenchTab(ModelBottomTab tab) => OpenWorkbenchTab(WorkbenchTab.Model, (int)tab);
-    private void OpenWorkbenchTab(WorldBottomTab tab) => OpenWorkbenchTab(WorkbenchTab.World, (int)tab);
-    private void OpenWorkbenchTab(ToolsBottomTab tab) => OpenWorkbenchTab(WorkbenchTab.Tools, (int)tab);
+    private void OpenWorkbenchTab(ModelBottomTab tab) => OpenWorkbenchTab(WorkbenchTab.Inspect);
+
+    private void OpenWorkbenchTab(WorldBottomTab tab)
+    {
+        if (tab == WorldBottomTab.SelectionTools)
+        {
+            OpenWorkbenchTab(WorkbenchTab.Inspect);
+            return;
+        }
+
+        int page = tab switch
+        {
+            WorldBottomTab.Placements => 0,
+            WorldBottomTab.Tiles => 1,
+            WorldBottomTab.Lod => 2,
+            _ => 0,
+        };
+        OpenWorkbenchTab(WorkbenchTab.Scene, page);
+    }
+
+    private void OpenWorkbenchTab(ToolsBottomTab tab)
+    {
+        switch (tab)
+        {
+            case ToolsBottomTab.Quick:
+                OpenWorkbenchTab(WorkbenchTab.Quick);
+                break;
+            case ToolsBottomTab.Pm4:
+                OpenWorkbenchTab(WorkbenchTab.Experimental, 1);
+                break;
+            case ToolsBottomTab.Archeology:
+                OpenWorkbenchTab(WorkbenchTab.Experimental, 2);
+                break;
+            case ToolsBottomTab.Utilities:
+                OpenWorkbenchTab((UtilitiesBottomTab)Math.Clamp(
+                    _activeUtilitiesTabIndex,
+                    0,
+                    (int)UtilitiesBottomTab.Audio));
+                break;
+            case ToolsBottomTab.Converters:
+                OpenWorkbenchTab(WorkbenchTab.Experimental, 3);
+                break;
+            case ToolsBottomTab.Terrain:
+            default:
+                OpenWorkbenchTab(WorkbenchTab.Experimental, 0);
+                break;
+        }
+    }
+
+    private void OpenWorkbenchTab(UtilitiesBottomTab tab)
+    {
+        _activeUtilitiesTabIndex = (int)tab;
+        OpenWorkbenchTab(WorkbenchTab.Utilities, (int)tab);
+    }
 
     private void DrawModelSubTabContent()
     {
@@ -3883,7 +4023,7 @@ public partial class ViewerApp
         ImGui.TextDisabled("Model Viewer — Info");
         ImGui.Separator();
 
-        // If a world model object is selected, show its details in the Model tab.
+        // If a world model object is selected, show its details in the Inspect destination.
         if (_worldScene?.SelectedInstance.HasValue == true
             && _worldScene.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo
             && !string.IsNullOrWhiteSpace(_selectedObjectInfo))
@@ -3908,7 +4048,7 @@ public partial class ViewerApp
 
     private void DrawModelAnimationsSubTab()
     {
-        ImGui.TextDisabled("Model Viewer — Animations");
+        ImGui.TextDisabled("Animations");
         ImGui.Separator();
 
         DrawModelAnimationControls();
@@ -4025,7 +4165,7 @@ public partial class ViewerApp
 
     private void DrawModelActionsSubTab()
     {
-        ImGui.TextDisabled("Model Viewer — Actions");
+        ImGui.TextDisabled("Actions");
         ImGui.Separator();
 
         if (_renderer == null || (!(_renderer is IModelRenderer) && !(_renderer is WmoRenderer)))
@@ -4098,68 +4238,52 @@ public partial class ViewerApp
         return selected;
     }
 
-    private void DrawToolsSubTabContent()
+    private void DrawExperimentalSubTabContent()
     {
-        switch ((ToolsBottomTab)_activeBottomTabIndex)
+        switch (_activeBottomTabIndex)
         {
-            case ToolsBottomTab.Quick:
-                DrawQuickControlsContent();
+            case 0:
+                DrawTerrainLabSubTab();
                 break;
-            case ToolsBottomTab.Archeology:
-                DrawArcheologySubTabContent();
-                break;
-            case ToolsBottomTab.Pm4:
+            case 1:
                 DrawPm4SubTabContent();
                 break;
-            case ToolsBottomTab.Terrain:
-                DrawTerrainSubTabContent();
+            case 2:
+                DrawArcheologySubTabContent();
                 break;
-            case ToolsBottomTab.Utilities:
-                DrawUtilitiesSubTabContent();
-                break;
-            case ToolsBottomTab.Converters:
+            case 3:
                 DrawConvertersSubTabContent();
                 break;
         }
     }
 
-    // (DrawQuickControlsPopoutBody removed — replaced by DrawQuickControlsContent in Scene > Quick sub-tab)
+    // (DrawQuickControlsPopoutBody removed — Quick is now a direct workbench destination.)
     // (DrawSubTabWindow removed — replaced by single Workbench popout)
 
     // ── Scene sub-tab content ──────────────────────────────────────────────
-    private void DrawTerrainSubTabContent()
+    private void DrawTerrainLabSubTab()
     {
         TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
         if (renderer == null && !HasTerrainOrWorldLoaded())
         {
-            ImGui.TextDisabled("Load a terrain-backed world to use the Terrain tab.");
+            ImGui.TextDisabled("Load a terrain-backed world to use Terrain Lab.");
             return;
         }
 
-        _activeTerrainTabIndex = DrawNestedSubTabStrip(
-            "##TerrainSubTabs", WorkbenchNavigator.GetTerrainBottomTabLabels(), _activeTerrainTabIndex);
-
-        switch ((TerrainBottomTab)_activeTerrainTabIndex)
+        ImGui.TextDisabled("Tile targeting and MCNK/chunk clipboard operations share this experimental surface.");
+        ImGui.Separator();
+        if (renderer == null)
         {
-            case TerrainBottomTab.Clipboard:
-                DrawTerrainClipboardSubTab(renderer);
-                break;
-            case TerrainBottomTab.Analysis:
-                DrawTerrainAnalysisSubTab();
-                break;
-            case TerrainBottomTab.Mcnk:
-                DrawTerrainMcnkSubTab();
-                break;
-            case TerrainBottomTab.WeakSignal:
-                DrawTerrainWeakSignalSubTab();
-                break;
-            case TerrainBottomTab.Export:
-                DrawTerrainExportSubTab(renderer!);
-                break;
-            case TerrainBottomTab.Tools:
-                DrawTerrainToolsSubTab(renderer);
-                break;
+            ImGui.TextDisabled("Terrain renderer is not available for the clipboard or selection map.");
+            return;
         }
+
+        DrawTerrainWorkbenchSelectionContent(renderer);
+        ImGui.Separator();
+        ImGui.Text("Chunk Clipboard + Save");
+        DrawChunkClipboardContent(renderer);
+        ImGui.Separator();
+        DrawTerrainControlsAdjustmentContent();
     }
 
     private bool HasTerrainOrWorldLoaded() => _terrainManager != null || _vlmTerrainManager != null || _worldScene != null;
@@ -4334,55 +4458,19 @@ public partial class ViewerApp
         }
     }
 
-    private void DrawWorldSubTabContent()
+    private void DrawSceneSubTabContent()
     {
-        switch ((WorldBottomTab)_activeBottomTabIndex)
+        switch (_activeBottomTabIndex)
         {
-            case WorldBottomTab.Source:
-                DrawWorldSourceSubTab();
-                break;
-            case WorldBottomTab.Placements:
+            case 0:
                 DrawWorldPlacementsSubTab();
                 break;
-            case WorldBottomTab.Tiles:
+            case 1:
                 DrawWorldTilesSubTab();
                 break;
-            case WorldBottomTab.SelectionTools:
-                DrawWorldSelectionToolsSubTab();
-                break;
-            case WorldBottomTab.Lod:
+            case 2:
                 DrawWorldLodSubTab();
                 break;
-        }
-    }
-
-    private void DrawWorldSourceSubTab()
-    {
-        // Source sub-tab: file browser + map discovery + workspace bars.
-        // This is the user's primary entry point for loading a world.
-        DrawWorkspaceBarsPanelContent();
-        ImGui.Separator();
-
-        // File browser
-        ImGui.Text("File Browser");
-        if (!_showFileBrowser)
-        {
-            if (ImGui.SmallButton("Show File Browser"))
-                _showFileBrowser = true;
-        }
-        if (_showFileBrowser)
-            DrawFileBrowserContent(0f);
-        ImGui.Separator();
-
-        // Map discovery
-        if (_discoveredMaps.Count > 0)
-        {
-            ImGui.Text("World Maps");
-            DrawMapDiscoveryContent();
-        }
-        else
-        {
-            ImGui.TextDisabled("No maps discovered. Load a game folder first.");
         }
     }
 
@@ -4397,7 +4485,7 @@ public partial class ViewerApp
         TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
         if (renderer == null)
         {
-            ImGui.TextDisabled("Load a terrain-backed world to target tiles and chunks in the world tab.");
+            ImGui.TextDisabled("Load a terrain-backed world to target tiles and chunks in the Scene tab.");
             return;
         }
 
@@ -4600,13 +4688,7 @@ public partial class ViewerApp
                 bool useLitFog = _worldScene.UseLitFogOverride;
                 if (ImGui.Checkbox("Use LIT fog", ref useLitFog))
                     _worldScene.UseLitFogOverride = useLitFog;
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Open detailed LIT lighting"))
-                {
-                    OpenWorkbenchTab(ToolsBottomTab.Utilities);
-                    _activeUtilitiesTabIndex = (int)UtilitiesBottomTab.Lighting;
-                }
-                ImGui.TextDisabled($"Fog/detail range: {lighting.FogStart:F0}–{lighting.FogEnd:F0}; WDL horizon clips at {ComputeSceneFarPlane(lighting.FogEnd):F0} (+2500).");
+                ImGui.TextDisabled($"Fog/detail range: {lighting.FogStart:F0}–{lighting.FogEnd:F0}; WDL horizon clips at {ComputeSceneFarPlane(lighting.FogEnd):F0} (+2500). Detailed LIT facts are under Utilities > Lighting.");
             }
         }
 
@@ -4686,14 +4768,13 @@ public partial class ViewerApp
         }
     }
 
-    // ── Utilities sub-tab content ──────────────────────────────────────────
+    // ── Utilities page content ─────────────────────────────────────────────
     private void DrawUtilitiesSubTabContent()
     {
-        // 069 Phase 16: use headless variants (Draw*Content) so no nested
-        // window opens inside the workbench. The legacy Draw*Window
-        // wrappers still work for users who toggle the old menu items.
-        _activeUtilitiesTabIndex = DrawNestedSubTabStrip(
-            "##UtilitiesSubTabs", WorkbenchNavigator.GetUtilitiesBottomTabLabels(), _activeUtilitiesTabIndex);
+        // Utilities is a top-level destination with one explicit utility page
+        // selector. DrawWorkbenchContent owns that selector; keep the legacy
+        // field synchronized for menu and keyboard compatibility.
+        _activeUtilitiesTabIndex = _activeBottomTabIndex;
 
         switch ((UtilitiesBottomTab)_activeUtilitiesTabIndex)
         {

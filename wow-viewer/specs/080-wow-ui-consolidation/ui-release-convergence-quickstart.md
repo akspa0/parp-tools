@@ -20,3 +20,15 @@
 6. Before optimizing, capture the same staged dense-map camera state with the
    minimap closed/open and each high-pressure overlay off/on. Select the next
    performance change only from the largest measured cost.
+
+## Current sidebar IA check
+
+With tabbed UI enabled, the right sidebar must show exactly:
+
+`Quick | Inspect | Scene | Utilities | Experimental`
+
+Open `Inspect` and confirm its body keeps selection/model context, camera or
+hovered MCNK facts, and selected PM4 facts inline when those contexts exist.
+Open `Experimental -> Terrain Lab` and confirm tile/chunk targeting and
+clipboard operations are in the same page. Open `Utilities -> Audio` and
+confirm it does not start playback merely because the page was selected.

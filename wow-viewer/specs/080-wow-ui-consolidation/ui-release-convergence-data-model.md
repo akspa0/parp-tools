@@ -52,3 +52,20 @@ One fixed-camera measurement for a named surface configuration.
 | `minimap_activity` | Cache hit/miss, decode/upload, and load-budget activity. |
 | `memory` | Process, managed heap, MPQ cache, and world raw-cache counters. |
 | `evidence` | Runtime Stats capture and reviewer note. |
+
+## UiNavigationCategory
+
+The canonical tabbed-sidebar destination. The current allowed values are
+`Quick`, `Inspect`, `Scene`, `Utilities`, and `Experimental`. Compatibility enums
+used by older menu callers are not user-visible categories.
+
+## InspectorContextRecord
+
+The compact context record rendered by the Inspect destination. It may include
+the current camera tile/chunk, selected world model/object identity, selected
+PM4 surface facts, and source/coordinate evidence. Missing context is rendered
+as an explicit unavailable line; it is not deferred to a popup-only route.
+
+Validation rule: each context kind has one inline summary owner. Full evidence
+tools may remain under Experimental, but they must not create a second identity
+panel or replace the common summary.

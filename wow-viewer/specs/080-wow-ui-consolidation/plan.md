@@ -13,7 +13,14 @@
 
 ## Summary
 
-Consolidate the viewer UI around one reliable bottom action bar plus named Model, World, Tools, and Settings information surfaces. The immediate correction is to keep all new work in `wow-viewer`, expose WMO group boxes and group names for standalone WMO inspection, split wireframe controls into independent terrain/object modes, and make the right sidebar audit actionable before broad panel migration.
+Consolidate the viewer UI around one reliable bottom action bar plus a small
+set of deliberate tabbed destinations. The current bounded slice replaces the
+implementation-history `Model / World / Tools` header with `Quick / Inspect /
+Scene / Utilities / Experimental`, merges model/object/ADT/MCNK/PM4 context into
+one inspector body, and keeps terrain tile selection with MCNK/chunk clipboard
+operations in one Experimental terrain-lab page. Existing bodies remain the
+runtime owners; this phase changes routing and removes duplicate navigation,
+not the underlying readers or renderer.
 
 ## Technical Context
 
@@ -77,6 +84,55 @@ wow-viewer/
 ```
 
 **Structure Decision**: Keep the current partial-class layout for the small fixes. For the larger migration, extract named frame draw methods from the right-sidebar content without moving left-sidebar loading logic in the same phase.
+
+## Current Phase 2A — Sidebar IA And Unified Inspector
+
+### Route model
+
+`WorkbenchNavigator` owns the visible top-level labels and compatibility
+mapping. `ViewerApp_Sidebars.cs` owns the tabbed dispatch. The five routes are:
+
+1. `Quick`: direct `DrawQuickControlsContent()` body.
+2. `Inspect`: direct `DrawUnifiedInspectorContent()` body. It shows the current
+   selection summary, loaded/selected model facts, current ADT/MCNK facts, and
+   selected PM4 facts inline when available.
+3. `Scene`: a single page selector for placements, tiles, and LOD. Source and
+   map/file loading remain exclusively in the left Navigator sidebar.
+4. `Utilities`: a single page selector for diagnostics, capture, lighting,
+   and Audio. Audio remains opt-in/default-off and selecting its page does not
+   start playback.
+5. `Experimental`: a single page selector for Terrain Lab, PM4, Archeology,
+   and Converters. Terrain Lab calls the existing tile/chunk target
+   body and clipboard body in one page.
+
+Legacy `ModelBottomTab`, `WorldBottomTab`, and `ToolsBottomTab` callers are
+adapted at `OpenWorkbenchTab(...)` rather than left as visible routes. This
+keeps menu/hotkey call sites safe while giving the user one canonical IA.
+
+### Phase 2A validation
+
+- Source check: tabbed labels are exactly Quick, Inspect, Scene, Utilities, and
+  Experimental; the three retired top labels do not appear in the dispatch.
+- Build check: `dotnet build I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`.
+- Manual check: open each destination with a terrain-backed world, select an
+  object and a PM4 surface, inspect a camera/hovered MCNK, open Utilities >
+  Audio without starting playback, and open Experimental > Terrain Lab.
+- Compatibility check: menu callers for model info, world placement, PM4,
+  terrain, utilities, and capture still open a reachable destination.
+- Out of scope: retiring legacy/dockspace dispatch, deleting old content
+  methods, or claiming visual/runtime proof from source/build checks.
+
+## Current Phase 2B — Sidebar Entry-Point Convergence
+
+The tabbed workbench routes are now canonical, but the main Panels menu still
+has several callers that open the Utilities destination without selecting the utility
+they name. Add a typed `UtilitiesBottomTab` overload to the workbench adapter
+and route each caller to its exact page. Keep capture routing on the existing
+Capture page adapter, and keep legacy/dockspace behavior unchanged.
+
+This phase is intentionally sidebar-only. Renderer hitching, ADT/object
+admission, fog, and streaming changes are deferred to Spec 150 and are not
+part of this navigation pass.
 
 ## Phased Delivery
 

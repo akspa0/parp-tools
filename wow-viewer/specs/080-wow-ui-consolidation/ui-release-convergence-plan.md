@@ -168,6 +168,39 @@ and passes manual proof. Do not remove the current sidebar route first.
 **Gate**: Every release surface has one discoverable home and a stable window
 or sidebar destination; no content method has hidden duplicate dispatch.
 
+## Phase 2A — Current Tabbed Sidebar IA Amendment
+
+The active implementation slice makes the tabbed sidebar understandable
+without opening a competing frame system. Its only top-level destinations are
+`Quick`, `Inspect`, `Scene`, `Utilities`, and `Experimental`.
+
+- `Quick` is the default and directly owns the compact camera, lighting, fog,
+  scene, and interface controls.
+- `Inspect` directly owns one condensed context body. It combines selection,
+  model/object identity, current ADT/MCNK facts, and selected PM4 facts. A
+  required identity/coordinate fact cannot be reachable only from a popup or a
+  nested reveal button.
+- `Scene` owns world placements, tile navigation, and LOD through one page
+  selector. Source and map/file loading remain exclusively in the left
+  Navigator sidebar.
+- `Utilities` owns the existing diagnostic, capture, lighting, and audio
+  pages through one utility selector. Audio remains opt-in/default-off and
+  selecting its page does not start playback.
+- `Experimental` owns terrain lab, PM4 evidence, archaeology, and converters.
+  Terrain tile selection and MCNK/chunk clipboard operations are one `Terrain
+  Lab` page, not separate navigation destinations.
+
+Old `Model`, `World`, and `Tools` enum/call-site names may survive as private
+compatibility adapters while callers migrate, but they must not be rendered as
+top-level labels. The legacy/dockspace route is preserved until the separate
+route-inventory retirement gate passes.
+
+**Phase 2A gate**: a source/build check proves the five visible labels and the
+single-owner dispatch; a manual check opens each route, verifies the unified
+inspector with model/MCNK/PM4 context, verifies Terrain Lab contains both
+selection and clipboard controls, and verifies Utilities -> Audio opens
+without playback.
+
 ## Phase 3 — Converter Surface (073b)
 
 **Goal**: Restore the missing user-facing converter commands without rewriting

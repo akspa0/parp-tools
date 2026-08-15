@@ -1,7 +1,7 @@
 namespace WoWViewer.Workbench;
 
 /// <summary>
-/// Sub-tab identifiers for the Model top tab.
+/// Compatibility page identifiers for the former Model route.
 /// </summary>
 public enum ModelBottomTab
 {
@@ -11,20 +11,19 @@ public enum ModelBottomTab
 }
 
 /// <summary>
-/// Sub-tab identifiers for the World top tab.
+/// Compatibility page identifiers for the former World route.
 /// </summary>
 public enum WorldBottomTab
 {
-    Source = 0,
-    Placements = 1,
-    Tiles = 2,
-    SelectionTools = 3,
-    Lod = 4,
+    Placements = 0,
+    Tiles = 1,
+    SelectionTools = 2,
+    Lod = 3,
 }
 
 /// <summary>
-/// Sub-tab identifiers for the Tools top tab.
-/// Each value maps to a former 069 top tab's content.
+/// Compatibility page identifiers for the former Tools route.
+/// Each value maps to a former 069 page's content.
 /// </summary>
 public enum ToolsBottomTab
 {
@@ -37,7 +36,7 @@ public enum ToolsBottomTab
 }
 
 /// <summary>
-/// Sub-tab identifiers under Tools &gt; Utilities.
+/// Page identifiers under the Utilities destination.
 /// </summary>
 public enum UtilitiesBottomTab
 {
@@ -54,7 +53,7 @@ public enum UtilitiesBottomTab
 }
 
 /// <summary>
-/// Sub-tab identifiers under Tools &gt; Terrain.
+/// Page identifiers under Experimental &gt; Terrain Lab.
 /// </summary>
 public enum TerrainBottomTab
 {
@@ -67,7 +66,7 @@ public enum TerrainBottomTab
 }
 
 /// <summary>
-/// Sub-tab identifiers under Tools &gt; PM4.
+/// Page identifiers under Experimental &gt; PM4.
 /// </summary>
 public enum Pm4BottomTab
 {
@@ -80,7 +79,7 @@ public enum Pm4BottomTab
 }
 
 /// <summary>
-/// Sub-tab identifiers under Tools &gt; Archeology.
+/// Page identifiers under Experimental &gt; Archeology.
 /// </summary>
 public enum ArcheologyBottomTab
 {
@@ -91,15 +90,18 @@ public enum ArcheologyBottomTab
 }
 
 /// <summary>
-/// Helpers for mapping between 071 workbench tabs and their sub-tab labels.
+/// Helpers for mapping the task-oriented workbench destinations to their
+/// single optional page selector.
 /// </summary>
 public static class WorkbenchNavigator
 {
     public static string[] GetBottomTabLabels(WorkbenchTab tab) => tab switch
     {
-        WorkbenchTab.Model => ["Info", "Animations", "Actions"],
-        WorkbenchTab.World => ["Source", "Placements", "Tiles", "Selection Tools", "LOD"],
-        WorkbenchTab.Tools => ["Quick", "Archeology", "PM4", "Terrain", "Utilities", "Converters"],
+        WorkbenchTab.Quick => [],
+        WorkbenchTab.Inspect => [],
+        WorkbenchTab.Scene => ["Placements", "Tiles", "LOD"],
+        WorkbenchTab.Utilities => GetUtilitiesBottomTabLabels(),
+        WorkbenchTab.Experimental => ["Terrain Lab", "PM4", "Archeology", "Converters"],
         _ => [],
     };
 

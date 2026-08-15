@@ -244,6 +244,7 @@ public partial class ViewerApp : IDisposable
     private static readonly string SettingsDir = Path.Combine(OutputDir, "settings");
     private static readonly string ViewerSettingsPath = Path.Combine(SettingsDir, "viewer_settings.json");
     private const int CurrentShellPanelLayoutVersion = 4;
+    private const int CurrentWorkbenchNavigationVersion = 3;
     private const int MinimapTeleportConfirmClicks = 3;
 
     // File browser state
@@ -305,18 +306,13 @@ public partial class ViewerApp : IDisposable
 
     // 069 Phase 1: tab system state. On by default; can toggle off via View > Legacy Sidebar UI.
     private bool _useTabUi = true;
-    private WorkbenchTab _activeTopTab = WorkbenchTab.Tools;
+    private WorkbenchTab _activeTopTab = WorkbenchTab.Quick;
     private int _activeBottomTabIndex = 0;
 
-    // Nested sub-tab selection. These must be separate from _activeBottomTabIndex: Tools >
-    // Archeology, Terrain, and Utilities are a second nesting level, so reusing the parent's index
-    // pins the child to whatever slot the parent occupies and makes its other tabs unreachable.
+    // Experimental pages retain their existing internal selectors while the
+    // top-level destination owns the only visible category switch.
     private int _activeArcheologyTabIndex = 0;
-    private int _activeTerrainTabIndex = 0;
     private int _activeUtilitiesTabIndex = 0;
-    // PM4 needs its own nested index like every other Tools sub-tab. Without one it read
-    // _activeBottomTabIndex, which selects the Tools sub-tab, so picking PM4 (index 2) always
-    // landed on Pm4BottomTab.Correlation and the other five panels were unreachable.
     private int _activePm4TabIndex = 0;
 
     // Workbench popout (069 Phase 14: single resizable panel, no window sprawl)
@@ -2037,22 +2033,22 @@ void main() {
                     ImGui.Separator();
 
                     if (ImGui.MenuItem("Log Viewer"))
-                        OpenWorkbenchTab(ToolsBottomTab.Utilities);
+                        OpenWorkbenchTab(UtilitiesBottomTab.Log);
                     if (ImGui.MenuItem("Perf"))
-                        OpenWorkbenchTab(ToolsBottomTab.Utilities);
+                        OpenWorkbenchTab(UtilitiesBottomTab.Perf);
                     if (ImGui.MenuItem("Settings..."))
                         _showSettingsWindow = true;
 
                     ImGui.Separator();
 
                     if (ImGui.MenuItem("Asset Catalog"))
-                        OpenWorkbenchTab(ToolsBottomTab.Utilities);
+                        OpenWorkbenchTab(UtilitiesBottomTab.AssetCatalog);
                     if (ImGui.MenuItem("Capture Automation"))
                         OpenCapturePanelTab(CapturePanelTab.Automation);
                     if (ImGui.MenuItem("Camera Path"))
                         OpenCapturePanelTab(CapturePanelTab.CameraPath);
                     if (ImGui.MenuItem("Taxi", hasWorld))
-                        OpenWorkbenchTab(ToolsBottomTab.Utilities);
+                        OpenWorkbenchTab(UtilitiesBottomTab.Taxi);
 
                     ImGui.Separator();
 
@@ -8575,14 +8571,10 @@ void main() {
 
         if (!_worldScene.WlLoadAttempted)
         {
-            DrawToolbarPopupButton("WL Actions", "load", "##WlActionsPopup", () =>
+            if (ImGui.Button("Load WL Liquids"))
             {
-                if (ImGui.Button("Load WL Liquids"))
-                {
-                    _worldScene.ShowWlLiquids = true;
-                    ImGui.CloseCurrentPopup();
-                }
-            });
+                _worldScene.ShowWlLiquids = true;
+            }
         }
         else if (_worldScene.WlLoadAttempted && (_worldScene.WlLoader == null || !_worldScene.WlLoader.HasData))
         {
@@ -8600,14 +8592,10 @@ void main() {
         }
         else if (!_worldScene.AreaTriggerLoadAttempted)
         {
-            DrawToolbarPopupButton("AreaTrigger Actions", "load", "##AreaTriggerActionsPopup", () =>
+            if (ImGui.Button("Load AreaTriggers"))
             {
-                if (ImGui.Button("Load AreaTriggers"))
-                {
-                    _worldScene.ShowAreaTriggers = true;
-                    ImGui.CloseCurrentPopup();
-                }
-            });
+                _worldScene.ShowAreaTriggers = true;
+            }
         }
         else if (_worldScene.AreaTriggerLoadAttempted && (_worldScene.AreaTriggerLoader == null || _worldScene.AreaTriggerLoader.Count == 0))
         {
@@ -14904,8 +14892,11 @@ void main() {
             _archeologyApplyToNextCapture = settings.ArcheologyApplyToNextCapture;
             _archeologyApplyToVideoRecording = settings.ArcheologyApplyToVideoRecording;
             _useTabUi = settings.UseTabUi;
-            if (Enum.IsDefined(typeof(WorkbenchTab), settings.ActiveTopTab))
+            if (settings.WorkbenchNavigationVersion >= CurrentWorkbenchNavigationVersion
+                && Enum.IsDefined(typeof(WorkbenchTab), settings.ActiveTopTab))
                 _activeTopTab = (WorkbenchTab)settings.ActiveTopTab;
+            else
+                _activeTopTab = WorkbenchTab.Quick;
             _activeBottomTabIndex = Math.Max(0, settings.ActiveBottomTab);
             _showLeftSidebar = settings.ShowLeftSidebar;
             _showRightSidebar = settings.ShowRightSidebar;
@@ -15212,6 +15203,7 @@ void main() {
                 ArcheologyApplyToNextCapture = _archeologyApplyToNextCapture,
                 ArcheologyApplyToVideoRecording = _archeologyApplyToVideoRecording,
                 UseTabUi = _useTabUi,
+                WorkbenchNavigationVersion = CurrentWorkbenchNavigationVersion,
                 ActiveTopTab = (int)_activeTopTab,
                 ActiveBottomTab = _activeBottomTabIndex
             };
@@ -15445,6 +15437,7 @@ void main() {
 
         // 069 tab system persistence
         public bool UseTabUi { get; set; } = true;
+        public int WorkbenchNavigationVersion { get; set; }
         public int ActiveTopTab { get; set; }
         public int ActiveBottomTab { get; set; }
 

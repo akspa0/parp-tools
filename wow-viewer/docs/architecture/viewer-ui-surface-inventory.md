@@ -5,11 +5,11 @@
 **Generated**: 2026-07-11  
 **Source**: `wow-viewer/src/viewer/WoWViewer/ViewerApp.cs` (active) vs `gillijimproject_refactor/src/MdxViewer/ViewerApp.cs` (legacy reference)
 
-**Follow-up**: Spec 145 (`specs/145-wow-ui-overhaul/`) owns the next bounded shell slice:
-context-aware keybindings, visual shortcut help, the vertical main workbench rail, bounded
-navigator/minimap layout, wrapped logs, persistent-window audit, and release-truth synchronization.
-Spec 080 remains the historical consolidation owner; working routes are preserved until replacements
-pass independent proof.
+**Follow-up**: Spec 080 remains the sole active UI convergence owner. Spec 145 is
+historical implementation input. The current bounded tabbed-shell amendment
+uses five destinations: `Quick`, `Inspect`, `Scene`, `Utilities`, and
+`Experimental`; working routes remain preserved until replacements pass
+independent proof.
 
 ---
 
@@ -179,16 +179,33 @@ pass independent proof.
 
 ## 10. Right Sidebar (Legacy) / Inspector + Workbench (Tabbed)
 
+### 10.1 Current tabbed destination map (2026-08-14)
+
+| Destination | Direct body | Page selector | Canonical ownership |
+|---|---|---|---|
+| Quick | `DrawQuickControlsContent` | none | compact camera, lighting, fog, scene, and interface controls |
+| Inspect | `DrawUnifiedInspectorContent` | none | selection/model, ADT/MCNK, and PM4 context summaries |
+| Scene | existing `DrawWorld*SubTab` bodies | Placements / Tiles / LOD | world placements, tile navigation, and LOD; source remains in the left Navigator |
+| Utilities | `DrawUtilitiesSubTabContent` | Minimap / Log / Perf / Render Quality / Taxi / Capture / Asset Catalog / Runtime Stats / Lighting / Audio | diagnostics, capture, lighting, and audio; Audio has no duplicate top-level route |
+| Experimental | existing tool bodies | Terrain Lab / PM4 / Archeology / Converters | evidence, terrain lab, archaeology, and conversion tools |
+
+`Model`, `World`, and `Tools` are compatibility concepts only and are not
+rendered as tabbed destinations. Terrain Lab owns tile/chunk selection,
+MCNK/chunk clipboard, and terrain adjustment controls together. The legacy
+rows below remain historical route inventory until the separate retirement gate.
+
 | # | User Label | Source Method | Panel | Tabbed Route | Legacy Route | Required State | Owner Frame | Status | Predecessor Spec |
 |---|------------|---------------|-------|--------------|--------------|----------------|-------------|--------|------------------|
-| 73 | Viewer Settings | `DrawUnifiedViewerSettingsSidebarContent` | Inspector | ✅ (Model → Info) | ✅ | — | Right | working | 060/071 |
-| 74 | Selection Summary | `DrawViewerSelectionSummary` | Inspector | ✅ (World → Selection) | ✅ | — | Right | working | 071 |
-| 75 | Camera Controls | `DrawCameraControlsContent` | Inspector | ✅ (Model → Info / World → Selection) | ✅ | — | Right | working | 060/071 |
-| 76 | Model Info | `DrawModelInfoPanelContent` | Inspector | ✅ (Model → Info) | ✅ | `_loadedMdx != null || _loadedM2Runtime != null` | Right | working | 060/071 |
-| 77 | World Objects | `DrawWorldObjectsPanelContent` | Inspector | ✅ (World → Placements) | ✅ | `_worldScene != null` | Right | working | 071 |
-| 78 | Terrain Controls | `DrawTerrainControlsPanelContent` | Inspector | ✅ (Terrain tab) | ✅ | `hasTerrain` | Right | working | 053/054 |
-| 79 | Runtime Stats | `DrawRuntimeStatsPanelContent` | Inspector | ✅ (Diagnostics → RuntimeStats) | ✅ | — | Right | working | 090 |
-| 80 | PM4 Workbench | `DrawPm4WorkbenchInspector` | Inspector | ✅ (PM4 tab) | ✅ | `_worldScene != null` | Right | working | 049/051 |
+| A73 | Viewer Settings | `DrawUnifiedViewerSettingsSidebarContent` | Inspector | ✅ (separate Settings surface) | ✅ | — | Right | working | 060/071 |
+| A74 | Selection Summary | `DrawViewerSelectionSummary` | Inspector | ✅ (Inspect) | ✅ | — | Right | working | 071 |
+| A75 | Camera Controls | `DrawCameraControlsContent` | Inspector | ✅ (Quick) | ✅ | — | Right | working | 060/071 |
+| A76 | Model/Object Info | `DrawUnifiedInspectorContent` | Inspector | ✅ (Inspect, inline) | ✅ | selection or loaded model | Right | working | 060/071 |
+| A77 | ADT/MCNK Context | `DrawCompactTerrainContextSummary` | Inspector | ✅ (Inspect, inline) | ✅ | `hasTerrain` | Right | working | 053/054 |
+| A78 | PM4 Context | `DrawSelectedPm4ContextSummary` | Inspector | ✅ (Inspect, inline) | ✅ | selected PM4 surface | Right | working | 049/051 |
+| A79 | World Objects | `DrawWorldObjectsPanelContent` | Inspector | ✅ (Scene → Placements) | ✅ | `_worldScene != null` | Scene | working | 071 |
+| A80 | Audio | `DrawAudioContent` | Utilities | ✅ (Utilities → Audio) | ✅ | `_worldScene != null` | Utilities | working | 146/149 |
+| A81 | Runtime Stats | `DrawRuntimeStatsPanelContent` | Utilities | ✅ (Utilities → Runtime Stats) | ✅ | — | Utilities | working | 090 |
+| A82 | PM4 Workbench | `DrawPm4WorkbenchInspector` | Inspector | ✅ (Experimental → PM4) | ✅ | `_worldScene != null` | Experimental | working | 049/051 |
 
 ---
 
@@ -244,7 +261,11 @@ pass independent proof.
 
 ---
 
-## 14. Workbench Tabs (Tabbed Mode Only)
+## 14. Historical Workbench Tabs (Tabbed Mode Only)
+
+The following rows describe the pre-Phase-2A `Model / World / Tools` layout.
+They are retained as source lineage and compatibility evidence, not as current
+user-facing destinations.
 
 ### 14.1 Model Tab (Bottom Sub-tabs)
 
@@ -259,7 +280,7 @@ pass independent proof.
 
 | # | Sub-tab | Source Method | Status | Predecessor Spec |
 |---|---------|---------------|--------|------------------|
-| 116 | Source | `DrawWorldSourceSubTab` → `DrawWorkspaceBarsPanelContent` + `DrawFileBrowserContent` + `DrawMapDiscoveryContent` | working | 057/071 |
+| 116 | Source | `DrawNavigatorPanelContent` → workspace, file browser, and map discovery | retired from right sidebar; owned by left Navigator | 057/071 |
 | 117 | Placements | `DrawWorldPlacementsSubTab` → `DrawWorldObjectsContentCore` | working | 071 |
 | 118 | Tiles | `DrawWorldTilesSubTab` → `DrawTerrainWorkbenchSelectionContent` + `DrawTerrainControlsAdjustmentContent` | working | 053/054 |
 | 119 | Selection Tools | `DrawWorldSelectionToolsSubTab` → `DrawSelectedObjectSummaryContent` | working | 071 |
@@ -335,3 +356,17 @@ pass independent proof.
 3. Implement Converters sub-tab (073b)
 4. Port PM4 Overlay/Correlation tabs and PM4 Evidence task
 5. Replace placeholder LOD tabs with factual content or disable with reason
+
+## 19. Phase 2A Current Route Gate
+
+- ✅ Five canonical tabbed destinations are declared: Quick, Inspect, Scene,
+  Utilities, Experimental.
+- ✅ Quick, Inspect, and Scene have direct bodies with no additional page strip;
+  Utilities owns the single utility page selector, including Audio.
+- ✅ Terrain Lab combines tile/chunk targeting, clipboard/save, and terrain
+  adjustment controls.
+- ✅ AreaTrigger and WL lazy-load actions are inline controls rather than
+  popup-only action buttons.
+- ⚠️ Runtime/manual proof remains open for each destination and for legacy-mode
+  route parity. Existing historical sub-tab rows must not be deleted until
+  that proof is recorded.
