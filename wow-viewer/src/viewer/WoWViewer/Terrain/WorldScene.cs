@@ -1343,6 +1343,26 @@ public class WorldScene : ISceneRenderer
     private Vector3 _frameHistoryPreviousCameraPosition = new(float.NaN, float.NaN, float.NaN);
     private Vector3 _frameHistoryPreviousCameraForward = new(float.NaN, float.NaN, float.NaN);
 
+    /// <summary>
+    /// Localises unaccounted frame time — the cost inside <see cref="Render"/> that no stage timer
+    /// covers. Measured directly rather than derived, and split three ways so a hitch points at a
+    /// region instead of at "somewhere". Peaks are retained because hitches are transient and a
+    /// live value will almost never be sampled on the bad frame.
+    /// </summary>
+    public double RenderPrologueMs { get; private set; }
+    public double RenderPassGapMs { get; private set; }
+    public double RenderEpilogueMs { get; private set; }
+    public double RenderProloguePeakMs { get; private set; }
+    public double RenderPassGapPeakMs { get; private set; }
+    public double RenderEpiloguePeakMs { get; private set; }
+
+    public void ResetRenderRegionPeaks()
+    {
+        RenderProloguePeakMs = 0;
+        RenderPassGapPeakMs = 0;
+        RenderEpiloguePeakMs = 0;
+    }
+
     // Per-frame scratch, reused rather than reallocated. Named scratch, not cache: they are rebuilt
     // every frame by design, so calling them a cache would misrepresent their lifetime.
     private readonly List<WorldSceneGraphBuildResult> _activeSceneGraphScratch = [];
@@ -10226,6 +10246,34 @@ public class WorldScene : ISceneRenderer
         lighting.AdvanceAutomaticTime(elapsedSeconds);
     }
 
+    /// <summary>
+    /// Split the frame's untimed remainder into prologue / pass-gap / epilogue so an unaccounted
+    /// hitch names a region. <paramref name="preCoordinatorMs"/> and
+    /// <paramref name="postCoordinatorMs"/> are elapsed-since-frame-start boundary readings.
+    /// </summary>
+    private void RecordRenderRegionBreakdown(
+        WorldRenderFrame frame, double preCoordinatorMs, double postCoordinatorMs, double totalMs)
+    {
+        // Stages timed before the coordinator runs.
+        double timedPrologue = frame.SceneMaintenanceMs + frame.DeferredAssetLoadMs + frame.TaxiActorUpdateMs;
+
+        // Stages timed inside the coordinator.
+        double timedInCoordinator =
+            frame.LightingMs + frame.SkyMs + frame.SkyboxBackdropMs + frame.WdlMs + frame.TerrainMs
+            + frame.WmoVisibilityMs + frame.WmoSubmissionMs + frame.WmoTransparentSubmissionMs
+            + frame.MdxAnimationMs + frame.MdxVisibilityMs + frame.MdxOpaqueSubmissionMs
+            + frame.LiquidMs + frame.MdxTransparentSortMs + frame.MdxTransparentSubmissionMs
+            + frame.OverlayMs;
+
+        RenderPrologueMs = Math.Max(0, preCoordinatorMs - timedPrologue);
+        RenderPassGapMs = Math.Max(0, (postCoordinatorMs - preCoordinatorMs) - timedInCoordinator);
+        RenderEpilogueMs = Math.Max(0, totalMs - postCoordinatorMs);
+
+        RenderProloguePeakMs = Math.Max(RenderProloguePeakMs, RenderPrologueMs);
+        RenderPassGapPeakMs = Math.Max(RenderPassGapPeakMs, RenderPassGapMs);
+        RenderEpiloguePeakMs = Math.Max(RenderEpiloguePeakMs, RenderEpilogueMs);
+    }
+
     private void FinalizeRenderFrameStats(WorldRenderFrame frame, Stopwatch frameTimer, Matrix4x4 view)
     {
         int terrainChunksRendered = _terrainManager.Renderer.ChunksRendered;
@@ -10346,6 +10394,10 @@ public class WorldScene : ISceneRenderer
         double areaTriggersMs = 0;
         int audioEmitterMarkerPreparedCount = 0;
         double audioEmitterMarkersMs = 0;
+
+        // Boundary probe: everything before this point that is not one of the three timed prologue
+        // stages is untimed setup.
+        double preCoordinatorMs = frameTimer.Elapsed.TotalMilliseconds;
 
         bool continuedPastTerrain = WorldFramePassCoordinator.Execute(
             new WorldFramePassOptions(_objectsVisible, _wmosVisible, _doodadsVisible),
@@ -11714,8 +11766,14 @@ public class WorldScene : ISceneRenderer
                     frame.OverlayMs = frame.OverlayOwnerDurationSum;
                 }));
 
+        // Boundary probe: the coordinator has returned, so anything after this is epilogue.
+        double postCoordinatorMs = frameTimer.Elapsed.TotalMilliseconds;
+
         if (!continuedPastTerrain)
         {
+            RecordRenderRegionBreakdown(
+                frame, preCoordinatorMs, frameTimer.Elapsed.TotalMilliseconds,
+                frameTimer.Elapsed.TotalMilliseconds);
             FinalizeRenderFrameStats(frame, frameTimer, view);
             return;
         }
@@ -11723,6 +11781,8 @@ public class WorldScene : ISceneRenderer
         if (!_doodadsVisible && !_renderDiagPrinted)
             _renderDiagPrinted = true;
 
+        RecordRenderRegionBreakdown(
+            frame, preCoordinatorMs, postCoordinatorMs, frameTimer.Elapsed.TotalMilliseconds);
         FinalizeRenderFrameStats(frame, frameTimer, view);
     }
 

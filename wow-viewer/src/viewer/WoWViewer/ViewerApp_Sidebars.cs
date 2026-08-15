@@ -3410,6 +3410,19 @@ public partial class ViewerApp
                 + "explain it - the work is happening between or outside the timers.");
         }
 
+        // Localise the unaccounted time to a region of Render(). Peaks are what matter: hitches are
+        // transient, so a live reading will almost never land on the bad frame.
+        if (ImGui.TreeNode("Unaccounted breakdown (peaks)###FrameHistoryRegions"))
+        {
+            ImGui.TextDisabled("Untimed time inside Render(), split by region. Peak since reset.");
+            ImGui.Text($"{"Prologue (setup before passes)",-32} now {_worldScene.RenderPrologueMs,7:0.00}  peak {_worldScene.RenderProloguePeakMs,8:0.00} ms");
+            ImGui.Text($"{"Pass gap (between stage timers)",-32} now {_worldScene.RenderPassGapMs,7:0.00}  peak {_worldScene.RenderPassGapPeakMs,8:0.00} ms");
+            ImGui.Text($"{"Epilogue (after passes)",-32} now {_worldScene.RenderEpilogueMs,7:0.00}  peak {_worldScene.RenderEpiloguePeakMs,8:0.00} ms");
+            if (ImGui.Button("Reset region peaks"))
+                _worldScene.ResetRenderRegionPeaks();
+            ImGui.TreePop();
+        }
+
         // The real per-frame series, copied without allocating. This is live every UI frame even
         // though the statistics above refresh on a cadence.
         int plotCount = history.CopyRecentTotalMs(_frameHistoryPlotBuffer);
