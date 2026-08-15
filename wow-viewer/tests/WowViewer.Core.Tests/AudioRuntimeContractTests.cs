@@ -9,6 +9,12 @@ namespace WowViewer.Core.Tests;
 public sealed class AudioRuntimeContractTests
 {
     [Fact]
+    public void AutomaticZoneMusicPlayback_IsMutedUntilClientHandoffIsProven()
+    {
+        Assert.False(WorldAudioPlaybackPolicy.AutomaticZoneMusicPlaybackEnabled);
+    }
+
+    [Fact]
     public void OpenAlProbe_MissingOptionalLibraryFailsClosed()
     {
         bool available = OpenAlNativeLibraryProbe.TryFind(

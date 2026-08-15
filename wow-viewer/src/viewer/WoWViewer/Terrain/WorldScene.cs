@@ -3491,6 +3491,7 @@ public class WorldScene : ISceneRenderer
     public int ResolvedAudioSoundEntryCount => _audioRuntime?.ResolvedSoundEntryCount ?? 0;
     public int ResolvedAudioSoundWaterTypeCount => _audioRuntime?.ResolvedSoundWaterTypeCount ?? 0;
     public bool AudioWorldTriggersEnabled => _audioRuntime?.WorldTriggersEnabled ?? false;
+    public bool AreaMusicPlaybackEnabled => _audioRuntime?.AreaMusicPlaybackEnabled ?? false;
     public IReadOnlyList<AudioTriggerDiagnostic> AudioEmitterDiagnostics
         => _audioRuntime?.EmitterDiagnostics ?? Array.Empty<AudioTriggerDiagnostic>();
     public IReadOnlyList<TerrainSoundEmitter> AudioEmitterMarkers

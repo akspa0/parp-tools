@@ -40,6 +40,8 @@ the owning spec for requirements and proof; read a workstream only when the spec
   shows IDs, coordinates, path/source, decode/backend state, terminal reason, and coordinate provenance.
   The audio runtime also exposes a residency-change-only normalized emitter snapshot and the audio
   panel can opt into source-colored 3D speaker pins without starting playback.
+  Automatic ZoneMusic playback is now hard-muted behind a tested policy; its area assignment remains
+  diagnostic-only so the working MCNK/MCSE water path is not affected.
 - **Main unproven gap:** The time-of-day slice still needs live early-client visual proof and a
   comparison of authored minimap tint behavior; the theory that shipped minimaps captured a moving
   clock remains unproven. Spec 104's restored MDX material shader inputs still need real model/shader
@@ -51,7 +53,9 @@ the owning spec for requirements and proof; read a workstream only when the spec
   normalization and MCNK liquid-center placement now have focused source/test proof, pending live
   runtime/audible proof. Speaker-marker placement is source-tested through the normalized snapshot
   path, pending live visual proof. The area overlay is resident chunk coverage, not a
-  proven complete polygon. ZoneMusic table indirection, exact `sounds.mpq` provenance, MIDI/DLS
+  proven complete polygon. Automatic ZoneMusic playback is intentionally muted until its handoff is
+  proven; area resolution remains diagnostic-only.
+  ZoneMusic table indirection, exact `sounds.mpq` provenance, MIDI/DLS
   playback, and native MCSE callback installation remain separate proof gates. Spec 150 still lacks
   native renderer anchors, repeatable 0.5.3 baseline capture, and CPU/GPU attribution.
 - **Explicitly out of scope for the next slice:** Simple-surface UI, logging-policy retirement,

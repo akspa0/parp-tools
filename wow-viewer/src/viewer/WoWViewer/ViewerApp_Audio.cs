@@ -28,6 +28,8 @@ public partial class ViewerApp
 
         ImGui.TextWrapped(scene.AudioStatus);
         ImGui.TextWrapped($"Area music: {scene.AreaMusicStatus}");
+        if (!scene.AreaMusicPlaybackEnabled)
+            ImGui.TextDisabled("Automatic ZoneMusic playback is muted; MCNK/MCSE emitters remain independently testable.");
         ImGui.Text(scene.AudioMuted ? "Output: MUTED" : "Output: ON");
         ImGui.Text($"Resident emitters: {scene.ResidentAudioEmitterCount}  |  Active: {scene.ActiveAudioEmitterCount}");
         ImGui.Text($"SoundEntries rows: {scene.ResolvedAudioSoundEntryCount}  |  SoundWaterType rows: {scene.ResolvedAudioSoundWaterTypeCount}");

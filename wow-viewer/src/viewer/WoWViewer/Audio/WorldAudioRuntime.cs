@@ -92,6 +92,8 @@ public sealed class WorldAudioRuntime : IDisposable
     /// </summary>
     public bool WorldTriggersEnabled => _worldTriggersEnabled;
 
+    public bool AreaMusicPlaybackEnabled => WorldAudioPlaybackPolicy.AutomaticZoneMusicPlaybackEnabled;
+
     public int ResolvedSoundWaterTypeCount => _soundWaterTypes?.Entries.Count ?? 0;
 
     public IReadOnlyList<int> ResidentSoundEntryIds
@@ -942,6 +944,15 @@ public sealed class WorldAudioRuntime : IDisposable
         }
         bool night = gameTime < 0.25f || gameTime >= 0.75f;
         int soundEntryId = binding.Area.ZoneMusicId;
+        if (!WorldAudioPlaybackPolicy.AutomaticZoneMusicPlaybackEnabled)
+        {
+            StopAreaMusic();
+            AreaMusicStatus = soundEntryId > 0
+                ? $"{areaLabel} selects ZoneMusic {soundEntryId}; automatic ZoneMusic playback is muted."
+                : $"{areaLabel} has area music metadata; automatic ZoneMusic playback is muted.";
+            return;
+        }
+
         if (soundEntryId <= 0)
         {
             StopAreaMusic();

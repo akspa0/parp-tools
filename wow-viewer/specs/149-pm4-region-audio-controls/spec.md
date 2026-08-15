@@ -76,8 +76,8 @@ including legacy MCNK environmental/water triggers derived from chunk flags and 
 MCSE emitters when present, and the active area/ZoneMusic trigger when its metadata is available. Each
 row shows its source and diagnostic state and has an enable toggle. Trigger playback is disabled by
 default, and no looping emitter, liquid/environment trigger, or area track starts merely because the
-camera entered a loaded tile or area. The user can enable one trigger, several triggers, or the master
-trigger playback control and can turn them off again without losing diagnostics.
+camera entered a loaded tile or area. ZoneMusic remains diagnostic-only and muted until its client
+handoff is proven; MCNK/MCSE emitters remain independently testable.
 
 **Why this priority**: Automatic looping playback currently makes map inspection unpleasant and hides
 whether a sound is actually proven, resolved, and supported. A visible, opt-in trigger surface makes
@@ -85,8 +85,8 @@ silence safe while preserving a path to test each decoded source.
 
 **Independent Test**: Load a client-backed scene containing resident MCSE records and an area audio
 assignment, open the audio panel, and verify that all listed trigger controls are off and no source is
-active. Enable one row, verify its normal resolution/playback attempt, then disable it and verify that it
-stops and remains disabled while the camera moves.
+active. Confirm ZoneMusic remains muted while its area resolution is still shown, then enable one
+MCNK/MCSE row, verify its normal resolution/playback attempt, and disable it again.
 
 **Acceptance Scenarios**:
 
@@ -110,6 +110,9 @@ stops and remains disabled while the camera moves.
    marker toggle, **then** each finite normalized emitter position is shown as a source-colored pin in
    the world without probing files or starting playback; disabling the toggle submits no marker
    geometry.
+7. **Given** an area with a resolved ZoneMusic assignment, **when** world triggers are enabled, **then**
+   the area assignment remains visible in diagnostics but no automatic ZoneMusic source is created;
+   resident MCNK/MCSE water and environmental emitters remain unaffected.
 
 ### User Story 4 - Inspect resident zone and subzone boundaries (Priority: P2)
 
@@ -251,6 +254,10 @@ resident tile changes without changing terrain, camera, lighting, or audio behav
   MCSE and MCNK/liquid emitter position, using the normalized renderer position and source-distinct
   colors. Marker rendering MUST use the cached resident snapshot, MUST submit no geometry while
   disabled, and MUST not probe files, enable world triggers, or start playback.
+- **FR-024**: Automatic ZoneMusic playback MUST remain muted while its client-era area-to-track handoff
+  is unproven. The runtime MUST continue resolving and reporting the active area/ZoneMusic assignment,
+  MUST stop any previously created ZoneMusic source, and MUST leave MCNK/MCSE emitter playback policy
+  independent.
 
 ### Key Entities
 
@@ -303,6 +310,9 @@ resident tile changes without changing terrain, camera, lighting, or audio behav
 - **SC-010**: On a resident fixture with MCSE and/or MCNK/liquid records, enabling speaker markers
   submits one finite source-colored 3D pin per resident emitter from the normalized world position;
   with the toggle disabled, marker submission is zero and OpenAL/file-probe state is unchanged.
+- **SC-011**: With world triggers enabled in an area that resolves ZoneMusic, zero ZoneMusic sources
+  are created while the diagnostic status identifies the selected assignment as muted; MCNK/MCSE
+  emitter behavior is unchanged.
 
 ## Assumptions
 
@@ -322,6 +332,8 @@ resident tile changes without changing terrain, camera, lighting, or audio behav
   rather than an override.
 - Existing WAV/OGG/MP3 decoding and capability diagnostics remain unchanged. MIDI/DLS pairing and native
   MCSE callback installation remain explicit unsupported/unproven gates.
+- Automatic ZoneMusic playback is intentionally muted until its area-to-track handoff is proven; this
+  does not mute resident MCNK/MCSE water or environmental emitters.
 - The feature is additive to working rendering and audio diagnostics until the replacement UI is proven;
   no renderer rewrite or client-archive mutation is implied.
 - The area overlay uses chunk footprints as the available 0.5.3 spatial evidence. It is an inspection

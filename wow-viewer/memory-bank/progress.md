@@ -2,6 +2,13 @@
 
 Last updated: 2026-08-14
 
+## 2026-08-14 — Mute unproven automatic ZoneMusic playback
+
+- Added an explicit world-audio policy that keeps automatic ZoneMusic playback disabled.
+- Area/ZoneMusic resolution and status diagnostics remain visible, while MCNK/MCSE water and
+  environmental emitter behavior remains independent and testable.
+- Added a focused policy regression test; live water/audio proof remains user-owned.
+
 ## 2026-08-14 — Resident audio speaker-marker overlay
 
 - Added a residency-change-only normalized emitter snapshot to WorldAudioRuntime and forwarded it

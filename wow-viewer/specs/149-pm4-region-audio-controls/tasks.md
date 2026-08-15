@@ -250,6 +250,8 @@ from compilation alone.
   MCSE/MCNK emitter records. WorldScene exposes an opt-in, default-off 3D speaker overlay that uses
   the existing batched pin renderer with amber MCSE, cyan MCNK water, and purple MCNK environment
   markers. Marker rendering does not probe files, enable playback, or create OpenAL sources.
+- Automatic ZoneMusic playback is now explicitly muted behind a tested world-audio policy. Area
+  resolution and status diagnostics remain active, while MCNK/MCSE emitter playback remains separate.
 - Alpha MCLQ preserves its packed 9x9 vertex records and 8x8 tile flags. Camera rotation no longer
   rebuilds residency, terrain keeps one capped unload-hysteresis ring, and WMO frustum-visible groups
   are admitted after portal evaluation to avoid spotty interiors.
