@@ -115,7 +115,11 @@ particle, ribbon, or multi-stage shader parity.
    synthesize a white 1x1 texture for effect geometry.
 6. Preserve alpha-key discard behavior for particle emitters and keep additive particles on the
    existing additive blend route.
-7. Run focused parser tests and a Debug build. User-run viewer/capture proof owns visual signoff.
+7. Translate the recovered legacy material inputs into the active GLSL path: UV-set selection,
+   animated UV transforms, sphere-environment lookup, bounded reflective highlight, and finite
+   local-light/emissive values. Do not load or port `.bls` bytecode.
+8. Run focused parser/material-policy tests and a Debug build. User-run viewer/capture proof owns
+   shader compilation and visual signoff.
 
 **Gate**: no source-level white fallback remains in the MDX material/effect path; focused tests
 and the viewer dependency build pass; the user confirms model-local MDX light contribution and

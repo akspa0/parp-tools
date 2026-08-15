@@ -435,3 +435,24 @@ identify the families; a full dynamic trace of the draw loop is optional follow-
   ground truth for 1.0.0 specifically).
 - Full dynamic trace of the `M2Scene.cpp` draw loop (optional; static families identified).
 - `.bls` bytecode format (if a faithful shader reimplementation is ever wanted).
+
+## 14. MDX material shader repair checkpoint
+
+The native evidence names the relevant legacy material families (`MapObjTransDiffuse.bls`,
+`MapObjTransSpecular.bls`, `MapObjSpecular.bls`, `MapObjMetal.bls`, and `MapObjOverbright.bls`),
+and the existing viewer CPU path already decoded blend flags, UV coordinate IDs/transforms, and
+the `SphereEnvMap` flag. The active MDX fragment shader had been reduced to a minimal compatibility
+program after an earlier compile failure; it declared only texture/alpha/diffuse/fog inputs and
+silently ignored the CPU uploads for sphere mapping, UV-set selection, and UV transforms. That
+explains the combination of missing highlights and texture-pattern artifacts in reflective or
+translucent MDX materials.
+
+Decision: keep `.bls` as build-scoped native evidence and translate the proven material inputs into
+the viewer's GLSL shader. The repair restores UV0/UV1 selection, animated UV transforms, view-normal
+sphere mapping, and a bounded reflective highlight only for `SphereEnvMap` layers. Local-light
+components and material emissive gain are finite and bounded before they reach the shader, so a
+bad optional MTLS scalar cannot turn the whole model into saturated output.
+
+Rejected: embedding a `.bls` loader or copying native shader code. The current GLSL path remains
+reversible through its existing compile fallback, and real shader compilation/model appearance is
+still a user-owned proof gate.

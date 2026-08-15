@@ -5,6 +5,16 @@ Last updated: 2026-08-14
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-14 — MDX material shader parity checkpoint
+
+- Restored the live GLSL MDX material inputs that the CPU path was already uploading: UV0/UV1
+  selection, animated UV transforms, and view-normal sphere-environment mapping.
+- Added a bounded `SphereEnvMap` reflective highlight, finite/clamped model-local lighting and
+  emissive values, and a shared/tested material policy. The implementation translates the native
+  BLS material contract; it does not load or port BLS bytecode.
+- Viewer build passes with 0 errors. Real shader compilation, translucent/reflective model appearance,
+  and comparison against the configured client/build remain user-owned proof gates.
+
 ## 2026-08-14 — MCNK liquid audio and camera residency stability checkpoint
 
 - Projected resident MCNK flags/MCLQ/MH2O liquid state into typed environmental audio candidates.

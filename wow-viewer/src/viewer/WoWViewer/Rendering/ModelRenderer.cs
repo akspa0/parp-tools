@@ -968,10 +968,13 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
             MdlLight light = _mdx.Lights[i];
             Vector3 position = Vector3.Transform(
                 new Vector3(light.Pivot.X, light.Pivot.Y, light.Pivot.Z), modelMatrix);
-            Vector3 color = new(light.Color.X, light.Color.Y, light.Color.Z);
-            float intensity = MathF.Max(light.Intensity, 0.0f);
-            float start = MathF.Max(light.AttenuationStart, 0.0f);
-            float end = MathF.Max(light.AttenuationEnd, start + 0.001f);
+            Vector3 color = new(
+                MdxMaterialRenderPolicy.ClampFinite(light.Color.X, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                MdxMaterialRenderPolicy.ClampFinite(light.Color.Y, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                MdxMaterialRenderPolicy.ClampFinite(light.Color.Z, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent));
+            float intensity = MdxMaterialRenderPolicy.ClampFinite(light.Intensity, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent);
+            float start = MdxMaterialRenderPolicy.ClampFinite(light.AttenuationStart, 0.0f, 100000.0f);
+            float end = MathF.Max(MdxMaterialRenderPolicy.ClampFinite(light.AttenuationEnd, 0.0f, 100000.0f), start + 0.001f);
 
             _gl.Uniform1(_uLocalLightType[i], light.Type);
             _gl.Uniform3(_uLocalLightPos[i], position.X, position.Y, position.Z);
@@ -982,8 +985,11 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
 
             if (light.Type == (int)MdxLightType.Ambient)
             {
-                Vector3 ambientColor = new(light.AmbientColor.X, light.AmbientColor.Y, light.AmbientColor.Z);
-                ambient += ambientColor * MathF.Max(light.AmbientIntensity, 0.0f);
+                Vector3 ambientColor = new(
+                    MdxMaterialRenderPolicy.ClampFinite(light.AmbientColor.X, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                    MdxMaterialRenderPolicy.ClampFinite(light.AmbientColor.Y, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                    MdxMaterialRenderPolicy.ClampFinite(light.AmbientColor.Z, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent));
+                ambient += ambientColor * MdxMaterialRenderPolicy.ClampFinite(light.AmbientIntensity, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent);
             }
         }
 
@@ -1073,7 +1079,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
                     // ── Per-layer geometry flags (Ghidra-verified MDLGEO) ──
                     var geoFlags = layer.Flags;
                     string materialFamily = DescribeMaterialFamily(isAlphaCutout, effectiveBlendMode, geoFlags);
-                    bool usesSphereEnvMap = geoFlags.HasFlag(MdlGeoFlags.SphereEnvMap);
+                    bool usesSphereEnvMap = MdxMaterialRenderPolicy.UsesSphereEnvironmentMap((uint)geoFlags);
 
                     // Last known-good MDX path kept model culling disabled globally.
                     _gl.Disable(EnableCap.CullFace);
@@ -1096,7 +1102,15 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
 
                     // Unshaded (0x1): skip lighting in shader
                     _gl.Uniform1(_uUnshaded, geoFlags.HasFlag(MdlGeoFlags.Unshaded) ? 1 : 0);
-                    _gl.Uniform1(_uEmissiveGain, Math.Max(layer.StaticEmissiveGain, 0.0f));
+                    // Bad/absent optional MTLS fields must never put NaN or an
+                    // unbounded HDR gain into the compatibility shader. Native
+                    // self-illumination is a material contribution, not a second
+                    // scene light.
+                    float emissiveGain = MdxMaterialRenderPolicy.ClampFinite(
+                        layer.StaticEmissiveGain,
+                        0.0f,
+                        MdxMaterialRenderPolicy.MaxEmissiveGain);
+                    _gl.Uniform1(_uEmissiveGain, emissiveGain);
 
                     // SphereEnvMap (0x2): generate UVs from view-space normals for reflective surfaces
                     _gl.Uniform1(_uSphereEnvMap, usesSphereEnvMap ? 1 : 0);
@@ -1104,7 +1118,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
                     // Select UV set for this layer (CoordId).
                     // Current shader path supports UV0/UV1; higher CoordId falls back to UV0.
                     int requestedUvSet = layer.CoordId >= 0 ? layer.CoordId : 0;
-                    int activeUvSet = requestedUvSet == 1 && gb.UvSetCount > 1 ? 1 : 0;
+                    int activeUvSet = MdxMaterialRenderPolicy.SelectUvSet(requestedUvSet, gb.UvSetCount);
                     _gl.Uniform1(_uUvSet, activeUvSet);
 
                     if (_mdxDebugFocus && _isM2AdapterModel)
@@ -1630,15 +1644,17 @@ void main() {
 }
 ";
 
-        // Keep this program deliberately small. Some OpenGL drivers used by the viewer
-        // accept the WMO shader but reject the legacy MDX fragment program with an unhelpful
-        // "unexpected $end" parser error. This is the minimum MDX material path: texture,
-        // alpha test, diffuse light, fog, and the material color multiplier.
+        // This is a GLSL translation of the bounded legacy material contract. It
+        // deliberately models the native BLS material families as data-driven
+        // inputs (blend, UV set/transform, sphere environment map, lighting),
+        // rather than loading or porting Blizzard shader bytecode.
         string fragSrc = @"
 #version 330 core
 in vec3 vNormal;
 in vec2 vTexCoord0;
+in vec2 vTexCoord1;
 in vec3 vFragPos;
+in vec3 vViewNormal;
 
 uniform sampler2D uSampler;
 uniform int uHasTexture;
@@ -1656,6 +1672,13 @@ uniform vec3 uCameraPos;
 uniform vec3 uLightDir;
 uniform vec3 uLightColor;
 uniform vec3 uAmbientColor;
+uniform int uSphereEnvMap;
+uniform int uUvSet;
+uniform int uUseUvTransform;
+uniform vec2 uUvTranslation;
+uniform vec2 uUvScale;
+uniform vec2 uUvRotationRow0;
+uniform vec2 uUvRotationRow1;
 uniform int uLocalLightCount;
 uniform int uLocalLightType[8];
 uniform vec3 uLocalLightPos[8];
@@ -1667,24 +1690,53 @@ uniform vec3 uLocalAmbientColor;
 
 out vec4 FragColor;
 
+vec3 safeNormalize(vec3 value)
+{
+    float lengthSquared = dot(value, value);
+    return lengthSquared > 0.000001 ? value * inversesqrt(lengthSquared) : vec3(0.0, 0.0, 1.0);
+}
+
 void main()
 {
+    vec2 texCoord = uUvSet == 1 ? vTexCoord1 : vTexCoord0;
+    if (uSphereEnvMap == 1)
+    {
+        vec3 viewNormal = safeNormalize(vViewNormal);
+        if (!gl_FrontFacing)
+            viewNormal = -viewNormal;
+
+        // Legacy sphere-environment materials derive their lookup from the
+        // view-space normal instead of the model UVs.
+        texCoord = viewNormal.xy * 0.5 + 0.5;
+    }
+    else if (uUseUvTransform == 1)
+    {
+        vec2 centered = (texCoord - vec2(0.5, 0.5)) * uUvScale;
+        texCoord = vec2(
+            dot(centered, uUvRotationRow0),
+            dot(centered, uUvRotationRow1))
+            + vec2(0.5, 0.5) + uUvTranslation;
+    }
+
     vec4 texColor = uHasTexture == 1
-        ? texture(uSampler, vTexCoord0)
+        ? texture(uSampler, texCoord)
         : vec4(1.0, 0.0, 1.0, 1.0);
 
     if (uAlphaTest == 1 && texColor.a < uAlphaThreshold)
         discard;
 
+    vec3 surfaceNormal = safeNormalize(vNormal);
+    if (!gl_FrontFacing)
+        surfaceNormal = -surfaceNormal;
+
     float diffuseStrength = 1.0;
     if (uUnshaded == 0)
     {
-        float nDotL = dot(normalize(vNormal), normalize(uLightDir));
+        float nDotL = dot(surfaceNormal, safeNormalize(uLightDir));
         diffuseStrength = max(nDotL, 0.0);
     }
 
-    vec3 localLight = uLocalAmbientColor;
-    vec3 surfaceNormal = normalize(vNormal);
+    vec3 localLight = max(uLocalAmbientColor, vec3(0.0));
     for (int i = 0; i < 8; i++)
     {
         if (i >= uLocalLightCount)
@@ -1699,12 +1751,31 @@ void main()
         float distanceToLight = length(toLight);
         float attenuationRange = max(uLocalLightEnd[i] - uLocalLightStart[i], 0.001);
         float attenuation = clamp((uLocalLightEnd[i] - distanceToLight) / attenuationRange, 0.0, 1.0);
-        float localDiffuse = max(dot(surfaceNormal, normalize(toLight)), 0.0);
-        localLight += uLocalLightColor[i] * uLocalLightIntensity[i] * attenuation * localDiffuse;
+        float localDiffuse = max(dot(surfaceNormal, safeNormalize(toLight)), 0.0);
+        localLight += max(uLocalLightColor[i], vec3(0.0))
+            * clamp(uLocalLightIntensity[i], 0.0, 4.0)
+            * attenuation * localDiffuse;
     }
 
-    vec3 litColor = texColor.rgb * (uAmbientColor + uLightColor * diffuseStrength + localLight);
-    litColor += texColor.rgb * max(uEmissiveGain, 0.0);
+    vec3 lighting = max(uAmbientColor, vec3(0.0))
+        + max(uLightColor, vec3(0.0)) * diffuseStrength
+        + localLight;
+    lighting = clamp(lighting, vec3(0.0), vec3(2.0));
+    vec3 litColor = texColor.rgb * lighting;
+
+    // SphereEnvMap is the legacy reflective/specular material bit. The
+    // environment lookup above supplies the broad reflection; this bounded
+    // Blinn-Phong term restores the missing highlight without making every
+    // ordinary MDX surface glossy.
+    if (uSphereEnvMap == 1 && uUnshaded == 0)
+    {
+        vec3 viewDir = safeNormalize(uCameraPos - vFragPos);
+        vec3 halfDir = safeNormalize(safeNormalize(uLightDir) + viewDir);
+        float specular = pow(max(dot(surfaceNormal, halfDir), 0.0), 32.0) * 0.2;
+        litColor += max(uLightColor, vec3(0.0)) * specular;
+    }
+
+    litColor += texColor.rgb * clamp(uEmissiveGain, 0.0, 1.0);
     float distanceToCamera = distance(vFragPos, uCameraPos);
     float fogRange = max(uFogEnd - uFogStart, 0.001);
     float fogFactor = clamp((uFogEnd - distanceToCamera) / fogRange, 0.0, 1.0);
@@ -1721,21 +1792,40 @@ void main()
         const string compatibilityFragSrc = """
 #version 330 core
 in vec2 vTexCoord0;
+in vec2 vTexCoord1;
+in vec3 vViewNormal;
 
 uniform sampler2D uSampler;
 uniform int uHasTexture;
 uniform int uAlphaTest;
 uniform float uAlphaThreshold;
 uniform int uPremultiplyAlpha;
+uniform int uSphereEnvMap;
+uniform int uUvSet;
 uniform vec4 uColor;
 
 out vec4 FragColor;
 
+vec3 safeNormalize(vec3 value)
+{
+    float lengthSquared = dot(value, value);
+    return lengthSquared > 0.000001 ? value * inversesqrt(lengthSquared) : vec3(0.0, 0.0, 1.0);
+}
+
 void main()
 {
+    vec2 texCoord = uUvSet == 1 ? vTexCoord1 : vTexCoord0;
+    if (uSphereEnvMap == 1)
+    {
+        vec3 viewNormal = safeNormalize(vViewNormal);
+        if (!gl_FrontFacing)
+            viewNormal = -viewNormal;
+        texCoord = viewNormal.xy * 0.5 + 0.5;
+    }
+
     vec4 texColor = vec4(1.0, 0.0, 1.0, 1.0);
     if (uHasTexture == 1)
-        texColor = texture(uSampler, vTexCoord0);
+        texColor = texture(uSampler, texCoord);
 
     if (uAlphaTest == 1 && texColor.a < uAlphaThreshold)
         discard;

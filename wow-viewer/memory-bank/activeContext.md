@@ -7,10 +7,10 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Finish the bounded Spec 149 legacy-water audio/control checkpoint
-  and user-run smooth-camera proof on branch `151-portal-game-mode-surface`; then return to Spec 151
-  Phase 2 for the pure game-mode state/physics and character-head anchor. Preserve editor camera state
-  and keep game mode opt-in.
+- **Next implementation target:** Finish the bounded Spec 104 MDX material/effect shader checkpoint
+  and user-run model visual proof on branch `151-portal-game-mode-surface`; then return to Spec 149's
+  audio controls or Spec 151 Phase 2 according to the next user handoff. Preserve the current GLSL
+  renderer and keep any native-material experiment reversible.
 - **Performance planning target:** Spec 150 remains the broad Alpha 0.5.3 renderer evidence lane. Spec
   151 owns the first concrete portal-specific optimization; use its counters and fallback evidence to
   inform later repeated `profile-render` baselines. Do not infer a win from an interactive screenshot.
@@ -35,7 +35,8 @@ the owning spec for requirements and proof; read a workstream only when the spec
   direct AreaTable IDs cannot be captured by Alpha AreaNumber aliases; status-bar and terrain audio now
   consume the same resolved Zone/SubZone result; the runtime exposes non-playing diagnostic rows; the audio panel
   shows IDs, coordinates, path/source, decode/backend state, and terminal reason.
-- **Main unproven gap:** Spec 151's game-mode head anchor/physics, simple-surface policy, and
+- **Main unproven gap:** Spec 104's restored MDX material shader inputs still need real model/shader
+  compilation and visual proof. Full BLS bytecode parity remains out of scope. Spec 151's game-mode head anchor/physics, simple-surface policy, and
   diagnostic budget remain unimplemented. Portal admission is source-tested but still needs the
   user-owned real-client visual/submission/FPS comparison. Spec 149's PM4 region
   bounds/focus, correlation UI retirement, focused area
@@ -46,14 +47,15 @@ the owning spec for requirements and proof; read a workstream only when the spec
   playback, and native MCSE callback installation remain separate proof gates. Spec 150 still lacks
   native renderer anchors, repeatable 0.5.3 baseline capture, and CPU/GPU attribution.
 - **Explicitly out of scope for the next slice:** Simple-surface UI, logging-policy retirement,
-  whole renderer rewrite, shader reconstruction, fake audio conversion, and claims of visual/FPS/
-  audible gains. Game-mode input/UI follows the pure Phase 2 runtime-core checkpoint.
+  whole renderer rewrite, `.bls` bytecode loading/porting, fake audio conversion, and claims of
+  visual/FPS/audible gains. Game-mode input/UI follows the pure Phase 2 runtime-core checkpoint.
 
 ## Active spec lanes
 
 | Spec | State | Next handoff |
 |---|---|---|
 | 151 Portal-aware rendering/game mode/simple surface | Phase 1 portal checkpoint implemented; Phase 2 open | Add pure game-mode state/physics and character-head anchor; preserve editor camera state and stop at the focused physics checkpoint. |
+| 104 Legacy M2/MDX rendering | 1.0.0 route complete; MDX material/effect shader checkpoint implemented with visual proof open | Validate shader compilation and translucent/reflective models against the configured client/build; keep full BLS parity separate. |
 | 149 PM4 region navigation/audio trigger controls | Draft pack; resident area overlay and MCNK liquid producer slices implemented, focused tests partly open | Add area aggregation/audio-control tests, then complete per-trigger toggles and ZoneMusic indirection; retire correlation UI only after the region checkpoint; keep world triggers default-off. |
 | 150 Alpha 0.5.3 renderer performance | Draft evidence/planning pack complete; no source optimization started | Recover native world/terrain/object/resource/LOD anchors and run two repeated production `profile-render` baselines before choosing one owner. |
 | 148 Artifact world simulator runtime | Phase 1 diagnostics in progress; client contract correction landed | Add ZoneMusic indirection, then finish read/decode/source-stage coverage and user real-client inspection. |

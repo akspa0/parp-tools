@@ -69,3 +69,16 @@ with a reference render.
 - T020–T023 are the active 2.x/3.0.x handoff slice; they do not establish visual parity or complete
   multi-stage shader support.
 - MVP: T001–T013. It proves correct M2 ownership and safe failure but does not claim visual signoff.
+
+## Phase 7: MDX material/effect shader parity checkpoint
+
+- [x] T024 Restore the live GLSL material inputs that the MDX CPU path already uploads: UV-set
+  selection, animated UV transforms, and sphere-environment mapping in
+  `src/viewer/WoWViewer/Rendering/ModelRenderer.cs`.
+- [x] T025 Restore a bounded reflective/specular highlight for `SphereEnvMap` materials and keep
+  ordinary MDX surfaces non-glossy by default.
+- [x] T026 Reject non-finite/unbounded local-light and emissive values through the shared
+  `WowViewer.Core.Mdx.MdxMaterialRenderPolicy` contract; preserve the transparent blend/fallback
+  path and do not load or port native `.bls` bytecode.
+- [ ] T027 Run focused material-policy/parser tests and a viewer shader-compilation/model capture;
+  record the exact configured client/build and visual result. Build proof alone does not close this.
