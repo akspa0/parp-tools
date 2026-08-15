@@ -132,11 +132,17 @@ What `gillijimproject_refactor` is NOT:
 | 3.3.5 | WotLK | Strongest current late-client terrain/WMO/M2/PM4 path |
 | 4.0.0+ | Cataclysm | ADT/WMO/PM4 and terrain reconstruction paths; client-specific rendering/performance partial |
 
-## Branch History
+## Branches and releases
 
-- `v0.5.2` — **Current viewer release line.** UI overhaul and cross-era rendering proof continue in `wow-viewer`.
-- `v0.4.9` — Previous branch, freeze point before the wow-viewer split.
-- `main` / `v0.4.5` — Older branches, legacy MdxViewer era.
+- `main` — **Current trunk.** Brought up to the v0.5.2 release line on 2026-08-15; it had previously
+  lagged behind the working branches. New work branches from here.
+- Releases are cut by pushing a `v*` tag. That triggers
+  [`wowviewer-release.yml`](.github/workflows/wowviewer-release.yml), which builds all four platforms
+  and publishes a GitHub Release using `wow-viewer/docs/releases/<tag>.md` as the notes — add that
+  file before tagging.
+- `main-pre-v0.5.2` — Snapshot of the previous `main` tip, kept for history.
+- `v0.4.9`, `v0.4.5` — Older release branches from the legacy MdxViewer era.
+- Numbered branches (e.g. `151-portal-game-mode-surface`) are per-spec working branches.
 
 ## Disclaimer
 
