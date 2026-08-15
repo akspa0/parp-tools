@@ -2,8 +2,12 @@ name: WoWViewer build
 
 # wow-viewer/ is a .NET 10 solution inside this repo (the GitHub repo is akspa0/parp-tools,
 # not a submodule). Every push that touches the build inputs produces downloadable,
-# self-contained binaries for all four targets as workflow artifacts; pushing a v* tag
-# additionally cuts a permanent GitHub Release with those binaries attached.
+# self-contained binaries for all four targets as workflow artifacts.
+#
+# Releases live in wowviewer-release.yml, which calls this workflow via workflow_call and
+# then attaches the artifacts to a GitHub Release. The tag trigger deliberately does NOT
+# live here: `on.push` applies its `paths` filter to tag pushes too, so a release tag whose
+# commit happens to touch only docs would silently build nothing.
 #
 # Platform layout:
 #   - Windows publishes WoWViewer.csproj (net10.0-windows) — the full viewer incl. native
@@ -26,8 +30,6 @@ on:
       - 'wow-viewer/*.props'
       - 'wow-viewer/*.slnx'
       - '.github/workflows/wowviewer-build.yml'
-    tags:
-      - 'v*'
   pull_request:
     paths:
       - 'wow-viewer/src/**'
@@ -37,6 +39,7 @@ on:
       - 'wow-viewer/*.slnx'
       - '.github/workflows/wowviewer-build.yml'
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
   group: wowviewer-build-${{ github.workflow }}-${{ github.ref }}
@@ -95,13 +98,22 @@ jobs:
           -c Release -r ${{ matrix.rid }} --self-contained true
           -p:PublishSingleFile=false
           -o publish/${{ matrix.rid }}
+      # Notes are selected by tag when this runs for a release, and otherwise fall back to the
+      # highest-versioned notes file. Never hardcode a version here — a stale filename ships the
+      # wrong changelog inside every platform archive.
       - name: Bundle README and release notes
         shell: bash
         run: |
+          set -euo pipefail
           cp wow-viewer/README.md "publish/${{ matrix.rid }}/README.md"
-          if [ -f wow-viewer/docs/releases/v0.5.0.md ]; then
-            cp wow-viewer/docs/releases/v0.5.0.md "publish/${{ matrix.rid }}/CHANGES-v0.5.0.md"
+          notes=""
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ -f "wow-viewer/docs/releases/${GITHUB_REF_NAME}.md" ]; then
+            notes="wow-viewer/docs/releases/${GITHUB_REF_NAME}.md"
+          else
+            notes="$(ls -1 wow-viewer/docs/releases/v*.md | sort -V | tail -1)"
           fi
+          echo "Bundling release notes: $notes"
+          cp "$notes" "publish/${{ matrix.rid }}/CHANGES-$(basename "$notes" .md).md"
       # upload-artifact zips the directory automatically, so downloading this artifact from the
       # Actions run yields ParpToolsWoWViewer-<rid>.zip with the self-contained build inside.
       # No manual zip step (avoids per-runner shell differences for zip/Compress-Archive).
@@ -111,36 +123,3 @@ jobs:
           name: ParpToolsWoWViewer-${{ matrix.rid }}
           path: publish/${{ matrix.rid }}/
           if-no-files-found: error
-
-  create-release:
-    name: Create GitHub Release
-    needs: build
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download all build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: ParpToolsWoWViewer-*
-          path: dist
-      - name: Zip each platform build
-        # Each artifact downloaded into dist/ParpToolsWoWViewer-<rid>/ ; re-zip per platform.
-        # Runs on ubuntu, so `zip` is always available.
-        run: |
-          cd dist
-          for d in ParpToolsWoWViewer-*/; do
-            name="${d%/}"
-            (cd "$d" && zip -qr "../${name}.zip" .)
-          done
-          ls -la *.zip
-      - name: Create GitHub Release
-        run: >
-          gh release create "${{ github.ref_name }}" dist/ParpToolsWoWViewer-*.zip
-          --notes-file wow-viewer/docs/releases/v0.5.0.md
-          --title "parp-tools WoW Viewer ${{ github.ref_name }}"
-        env:
-          GH_TOKEN: ${{ github.token }}

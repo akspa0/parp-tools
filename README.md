@@ -15,6 +15,12 @@ A .NET 10 toolkit for WoW format analysis, terrain reconstruction, PM4-based obj
 
 **Support range**: Alpha 0.5.3 through Cataclysm-era 4.0.x, with client-era differences called out in the support table below. Rendering and FPS claims remain build/map-specific and require real-client validation.
 
+### Download
+
+Prebuilt, self-contained viewer binaries for **Windows x64, Linux x64, macOS arm64, and macOS x64** are attached to every tagged release on the [releases page](https://github.com/akspa0/parp-tools/releases). No .NET install is required.
+
+Native file dialogs are Windows-only; on Linux and macOS load content with `--game-path`, `--build`, and `--world`. See the [v0.5.2 release notes](wow-viewer/docs/releases/v0.5.2.md) for what changed.
+
 ### Quick Start
 
 ```powershell
@@ -58,21 +64,26 @@ wow-viewer/
 ### Key Documentation
 
 - [WoWViewer README](wow-viewer/README.md) — viewer app overview and quick start
+- [User Guide](wow-viewer/docs/WoWViewer/USERGUIDE.md) — controls, UI layout, and common workflows
+- [Release Notes — v0.5.2](wow-viewer/docs/releases/v0.5.2.md) — what changed since v0.5.1
 - [CLI Tools Guide](wow-viewer/docs/CLI-TOOLS.md) — advanced usage for all CLI tools
+- [Spec Status](wow-viewer/specs/STATUS.md) — the current-spec router
 - [Plans Overview](wow-viewer/docs/PLANS-OVERVIEW.md) — summary of remaining specs
 - [Memory Bank](wow-viewer/memory-bank/activeContext.md) — current focus and status
 - [Architecture Docs](wow-viewer/docs/architecture/) — PM4 semantics, render plans, model specs
 
 ### What's Implemented
 
-- **Terrain**: Alpha monolithic WDT, early split ADTs, LK/Cataclysm ADTs, WDL/WL* and minimap routes
-- **WMO**: V14/V17 parsing, rendering, placement inspection, batching work, and round-trip conversion paths
-- **M2/MDX**: Classic/era-specific M2 profiles, embedded early-M2 route, MDLX/MDX routes, animation extraction, and BVH export; cross-era visual proof is incomplete
-- **PM4**: Full decode, per-file caching, MSCN/MSPV visualization, WMO group matching
-- **BLP**: Pixel decode and summary inspection
-- **DBC/DB2**: Crosswalk generation and lookup
-- **Audio**: Alpha-area audio catalog inspection
-- **ML Datasets**: V16/V18 terrain tensor extraction and model training pipeline
+- **Terrain**: Alpha monolithic WDT, early split ADTs, LK/Cataclysm ADTs, WDL/WL* and minimap routes, bounded camera-centered streaming
+- **WMO**: V14/V17 parsing, rendering, portal-aware visibility, placement inspection, doodad batching, and round-trip conversion paths
+- **M2/MDX**: Classic/era-specific M2 profiles, embedded early-M2 route, MDLX/MDX routes, material/light parity work, animation extraction, and BVH export; cross-era visual proof is incomplete
+- **PM4**: Full decode with solved coordinate frames, wall-mesh geometry, per-doodad identity, per-file caching, MSCN/MSPV visualization, WMO group matching
+- **BLP**: Pixel decode, summary inspection, pure-C# DXT1 codec
+- **DBC/DB2**: Crosswalk generation and lookup, dual-era AreaTable identity routing
+- **Lighting**: LIT profile decode with DBC fallback, native Alpha 0.5.3 time-of-day clock
+- **Audio**: OpenAL runtime for positional MCSE/MCNK emitters, `SoundEntries` preview, Alpha-area audio catalog inspection
+- **Camera**: Path authoring, cross-era `.m2` camera import, native M2 export, capture automation
+- **ML Datasets**: v50/v60 terrain tensor extraction into Zarr, synthesized minimaps, and model training pipeline
 
 ### Build & Test
 

@@ -83,7 +83,9 @@ dotnet run --project tools/converter -c Debug -- lk-to-alpha --input <lk.wdt> --
 
 ## 3. Terrain Tensor Harvester (`WowViewer.Tool.Harvest`)
 
-Extracts terrain tensors (height, normals, textures, alpha, liquids) from staged game clients into NPZ or Zarr stores. Used by the V16/V18 ML training pipeline.
+Extracts terrain tensors (height, normals, textures, alpha, liquids) from staged game clients into NPZ or Zarr stores, and composes synthesized minimaps. Feeds the v50/v60 dataset and training pipeline.
+
+Run the tool with no arguments to print the authoritative command list — it is the source of truth if this guide drifts.
 
 ```powershell
 # Single map from loose files
@@ -129,6 +131,64 @@ Notes:
 - `harvest-stream` does **not** write `--output`; stdout redirection is the transport seam.
 - `build_v22_dataset.py harvest-build` is now the canonical single-command operator path.
 - `build_v22_dataset.py build` remains the low-level "I already have a stream file" entrypoint.
+
+### Map discovery
+
+`discover-maps` lists terrain-trainable maps from a staged client using WDT summary plus tile probe
+checks. Prefer it over hardcoding map names — it emits JSON that downstream builders parse.
+
+```powershell
+dotnet run --project tools/harvest -c Debug -- discover-maps --client-root <staged>
+```
+
+### Synthesized minimaps (`synthetic-minimap`)
+
+Composes paired terrain-only and `_liquid` minimaps directly from client tiles. It does **not** read
+a shipped minimap image.
+
+```powershell
+dotnet run --project tools/harvest -c Debug -- synthetic-minimap `
+  --client-root <staged> --map Kalimdor --output-dir <dir> `
+  --time-hours 1800 --per-tile --whole-map
+```
+
+| Option | Purpose |
+| --- | --- |
+| `--time-hours <HHmm\|HH:mm\|decimal>` | Frozen sun position; default 12:00 |
+| `--per-tile` / `--whole-map` | Emit per-tile PNGs and/or one stitched map PNG |
+| `--tile-x` / `--tile-y <0..63>` | Render one occupied tile |
+| `--tile-list "x,y;x,y;..."` | Render a bounded tile set |
+| `--limit <n>` | Cap emitted terrain/`_liquid` PNG pairs |
+| `--detail` | Mip-filtered real BLP texels, for 1024+ super-resolution targets |
+| `--authored-reference` | Require and emit the real client minimap plus a side-by-side comparison |
+| `--match-time` | With `--authored-reference`, infer each tile's best-matching hour from authored shading |
+| `--score` | Score output against the authored minimap |
+| `--cast-shadows` / `--no-cast-shadows` | Explicitly enable/disable analytic cast shadows |
+| `--bake-mcsh` | Exceptional-history preview of the client's baked MCSH map |
+| `--include-wmos` | Composite placed WMO geometry (experimental, needs headless GL) |
+| `--measure-sun` / `--light-overlay` | Lighting diagnostics |
+
+Behavior worth knowing before you interpret output:
+
+- One achromatic global light at the frozen `--time-hours` value, shaded in linear space. Map LIT and
+  Light DBC profiles belong to the viewer and are **never** applied to minimap generation. The
+  manifest records `timeOfDayMode=frozen`.
+- The solar bearing is fixed north-west; only elevation cycles with time. Changing the time changes
+  brightness and contrast, not shadow direction.
+- Terrain renders with Lambert hillshading. Analytic cast shadows are an **addition the original
+  client never had** and default OFF for the Alpha era.
+- Normal RGB omits the client's baked MCSH map — that is a separate signal, not shading.
+
+### Lighting diagnostics without a client
+
+```powershell
+# Light a synthetic hill at 06:00-18:00, write compass-marked PNGs. No client needed.
+# Use this to tell a wrong lighting model apart from wrongly-oriented terrain data.
+dotnet run --project tools/harvest -c Debug -- sun-diagnostic --output-dir <dir>
+
+# Deterministic fully-supervised terrain control corpus (height_257 + terrain_shadow_256)
+dotnet run --project tools/harvest -c Debug -- control-corpus --output-dir <dir>
+```
 
 ---
 

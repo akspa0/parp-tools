@@ -1,0 +1,71 @@
+name: WoWViewer release
+
+# Cuts a permanent GitHub Release from a v* tag, with self-contained binaries for all four
+# targets attached.
+#
+# This is a separate workflow from wowviewer-build.yml on purpose. `on.push` applies its
+# `paths` filter to tag pushes as well, so keeping the tag trigger in the paths-filtered
+# build workflow makes releases depend on whether the tagged commit happened to touch
+# wow-viewer/src/**. A release tag pointing at a docs-only commit is completely normal, so
+# the tag trigger lives here with no path filter and calls the build workflow for the matrix.
+#
+# Release notes come from wow-viewer/docs/releases/<tag>.md. Add that file before tagging;
+# without it the release falls back to GitHub's auto-generated commit notes.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build
+    uses: ./.github/workflows/wowviewer-build.yml
+
+  create-release:
+    name: Create GitHub Release
+    needs: build
+    # workflow_dispatch can be fired from a branch; only ever cut a release from a tag,
+    # otherwise `gh release create` would name a release after the branch.
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ParpToolsWoWViewer-*
+          path: dist
+      - name: Zip each platform build
+        # Each artifact downloaded into dist/ParpToolsWoWViewer-<rid>/ ; re-zip per platform.
+        # Runs on ubuntu, so `zip` is always available.
+        run: |
+          set -euo pipefail
+          cd dist
+          for d in ParpToolsWoWViewer-*/; do
+            name="${d%/}"
+            (cd "$d" && zip -qr "../${name}.zip" .)
+          done
+          ls -la *.zip
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          notes="wow-viewer/docs/releases/${TAG}.md"
+          if [ -f "$notes" ]; then
+            echo "Using release notes: $notes"
+            gh release create "$TAG" dist/ParpToolsWoWViewer-*.zip \
+              --title "parp-tools WoW Viewer ${TAG}" \
+              --notes-file "$notes"
+          else
+            echo "No notes file at $notes; falling back to generated notes."
+            gh release create "$TAG" dist/ParpToolsWoWViewer-*.zip \
+              --title "parp-tools WoW Viewer ${TAG}" \
+              --generate-notes
+          fi

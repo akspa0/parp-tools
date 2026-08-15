@@ -1,27 +1,28 @@
 # WoWViewer viewer docs
 
-This folder is viewer-facing guide layer for current `wow-viewer` app.
+This folder is the viewer-facing guide layer for the current `wow-viewer` app.
 
 ## Read order
 
-1. [../../README.md](/I:/parp/parp-tools/wow-viewer/README.md)
-2. [USERGUIDE.md](/I:/parp/parp-tools/wow-viewer/docs/WoWViewer/USERGUIDE.md)
-3. [../../docs/CLI-TOOLS.md](/I:/parp/parp-tools/wow-viewer/docs/CLI-TOOLS.md)
-4. [../../specs/080-wow-ui-consolidation/spec.md](/I:/parp/parp-tools/wow-viewer/specs/080-wow-ui-consolidation/spec.md)
+1. [Viewer README](../../README.md)
+2. [USERGUIDE.md](USERGUIDE.md)
+3. [CLI-TOOLS.md](../CLI-TOOLS.md)
+4. [Release notes — v0.5.2](../releases/v0.5.2.md)
+5. [Spec 080 — UI consolidation](../../specs/080-wow-ui-consolidation/spec.md)
 
 ## Current viewer truth
 
-- Viewer app lives at `src/viewer/WoWViewer/`.
+- The viewer app lives at `src/viewer/WoWViewer/`.
 - Start with staged client roots only.
-- Legacy `MdxViewer` is reference/compatibility lane, not primary app.
-- Current UI doc lane is Spec 080.
-- Current shell proof is mixed: active `wow-viewer` app is canonical, but latest landed compatibility slice for Spec 080 is still source-only in legacy `MdxViewer`.
+- Legacy `MdxViewer` is a reference/compatibility lane, not the primary app.
+- The current UI doc lane is Spec 080; Spec 145 owns the surrounding shell work.
 
 ## What this folder should contain
 
 - End-user quickstart
-- controls
-- viewer workflows
-- troubleshooting
+- Controls
+- Viewer workflows
+- Troubleshooting
 
-It should not carry stale release notes, old fixed-path machine commands, or dead links to removed exporter docs.
+It should not carry stale release notes, machine-local absolute paths, or dead links to removed
+exporter docs. Release notes belong in [`docs/releases/`](../releases/).

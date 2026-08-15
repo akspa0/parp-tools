@@ -13,21 +13,44 @@ The viewer is functional but not feature-complete across every client era. Runti
 claims below distinguish implemented routes from visual/client proof that is still
 pending.
 
+## Download
+
+Self-contained builds for Windows x64, Linux x64, macOS arm64, and macOS x64 are
+attached to each tagged release on the
+[releases page](https://github.com/akspa0/parp-tools/releases). No .NET install is
+required. Native file dialogs are Windows-only — on Linux and macOS, load content
+with `--game-path`, `--build`, and `--world`.
+
+See [docs/releases/v0.5.2.md](docs/releases/v0.5.2.md) for what changed in this
+release.
+
 ## Current viewer surfaces
 
-- World loading uses configured client roots and explicit build selection.
+- World loading uses configured client roots and explicit build selection. The left
+  Navigator sidebar owns all source/file/map loading and the Phase Map selector.
 - Terrain, WMO placements, doodads, liquids, WDL/WL* data, minimap surfaces, and
   lower status/runtime statistics are available through the viewer shell.
-- The bottom action and status bars remain the stable home for scene toggles and
-  compact runtime facts.
-- The right workbench contains Model, World, and Tools pages. The active UI-overhaul
-  work presents those main pages in a vertical rail; nested pages remain incremental.
-- Capture Automation and Camera Path are under Tools > Utilities > Capture.
+- The bottom action and status bars remain the stable home for scene toggles, the
+  area/subzone readout, and the audio mute control.
+- The right workbench has five destinations, each with its own page dropdown:
+  **Quick**, **Inspect** (context, scene investigation, MCNK/ADT, world context,
+  archeology, animations, actions), **Scene** (placements, LOD), **Utilities**
+  (minimap, audio, capture, log viewer, perf, asset catalog, taxi), and
+  **Experimental** (terrain lab, PM4, converters, population).
+- Terrain streams as a bounded camera-centered window rather than a whole map:
+  a retained residency ring (radius 2 default, 3 maximum) plus a directional
+  selector for detailed geometry.
+- WMO visibility uses bounded portal traversal from the camera's group, fail-open on
+  invalid geometry or boundary cameras.
+- Audio is under Utilities > Audio: resident MCSE/MCNK positional emitters,
+  `SoundEntries` preview, gain controls, and an off-by-default emitter marker overlay.
+  Automatic ZoneMusic playback is muted by policy pending proof.
+- Capture Automation and Camera Path are under Utilities > Capture.
 - Camera paths can be authored from the current camera, imported from loose/native
   camera assets, saved as JSON, and exported as native M2. JSON preserves position,
   target, timing, FOV, and roll. Camera-path keyboard authoring is opt-in and scoped
   to the active Capture page.
-- Camera-path preloading is bounded to sampled tiles/objects along the path. It is
+- Camera-path preloading is bounded to the swept tile footprint along the path. It is
   not a whole-map residency guarantee.
 - Help > Keyboard Shortcuts shows global and active-page controls.
 
@@ -50,19 +73,27 @@ build identity, and observed result.
 ## Lighting, horizon, and liquids
 
 The viewer has client/build-aware lighting, terrain fog, WDL low-detail terrain,
-WL*/liquid routes, and synthesized-minimap time-of-day controls. These paths are
-still under visual audit across client eras. DBC/DBD layout data is authoritative;
-fallback behavior is diagnostic compatibility only and is not a substitute for a
-correct build schema. Night sky/stars and final WDL horizon presentation remain
-open visual-proof work.
+WL*/liquid routes, LIT profile decode with DBC fallback, and synthesized-minimap
+time-of-day controls. Alpha 0.5.3 lighting advances on the native world clock
+(2,880 units per cycle, 24 real minutes); the manual slider freezes it until
+resumed, and Light DBC/LIT/sky/audio all read one same-frame value.
+
+These paths are still under visual audit across client eras. DBC/DBD layout data is
+authoritative; fallback behavior is diagnostic compatibility only and is not a
+substitute for a correct build schema. Night sky/stars and final WDL horizon
+presentation remain open visual-proof work.
 
 ## UI overhaul status
 
-Spec 145 extends the earlier UI consolidation work. It covers contextual keybinds,
-shortcut help, vertical workbench navigation, bounded navigator/minimap layout,
-wrapped logs, persistent utility windows, honest placeholder pages, and release
-documentation. Existing viewer routes and bottom bars remain in place while those
-changes are proven incrementally. See [specs/145-wow-ui-overhaul/spec.md](specs/145-wow-ui-overhaul/spec.md).
+Spec 080 owns the current consolidation: five right-sidebar destinations, one
+unified inline inspector, page dropdowns per destination, and left-sidebar-only
+loading. Spec 145 covers the surrounding shell work — contextual keybinds, shortcut
+help, vertical navigation rails, bounded navigator/minimap layout, wrapped logs,
+persistent utility windows, and honest placeholder pages.
+
+Compact-window reachability and selected-context transitions remain user-owned
+visual proof. See [specs/080-wow-ui-consolidation/spec.md](specs/080-wow-ui-consolidation/spec.md)
+and [specs/145-wow-ui-overhaul/spec.md](specs/145-wow-ui-overhaul/spec.md).
 
 ## Hard boundaries
 
