@@ -164,6 +164,26 @@ public sealed class WorldRenderFrameHistory
         _recordedFrames++;
     }
 
+    /// <summary>
+    /// Copy the most recent total-frame-time samples into <paramref name="destination"/>, oldest
+    /// first, and return how many were written. Allocation-free, so a plot can read the real series
+    /// every UI frame instead of reconstructing an approximation of it.
+    /// </summary>
+    public int CopyRecentTotalMs(float[] destination)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        int take = Math.Min(destination.Length, _count);
+        if (take == 0)
+            return 0;
+
+        // _next is one past the newest sample; walk back `take` entries from there.
+        int start = ((_next - take) % _capacity + _capacity) % _capacity;
+        for (int i = 0; i < take; i++)
+            destination[i] = (float)_totalMs[(start + i) % _capacity];
+
+        return take;
+    }
+
     public void Clear()
     {
         _count = 0;

@@ -246,6 +246,52 @@ public class WorldRenderFrameHistoryTests
     }
 
     [Fact]
+    public void CopyRecentTotalMs_ReturnsRealSeriesOldestFirst_AcrossWraparound()
+    {
+        var history = new WorldRenderFrameHistory(capacity: 8);
+        for (int i = 0; i < 12; i++)
+            history.Record(FrameOf(i), cameraMoved: true);
+
+        var buffer = new float[8];
+        int written = history.CopyRecentTotalMs(buffer);
+
+        // Newest 8 of 12 recorded, oldest first: 4,5,6,7,8,9,10,11.
+        Assert.Equal(8, written);
+        Assert.Equal(new float[] { 4, 5, 6, 7, 8, 9, 10, 11 }, buffer);
+    }
+
+    [Fact]
+    public void CopyRecentTotalMs_HandlesBufferSmallerThanWindow()
+    {
+        var history = new WorldRenderFrameHistory(capacity: 16);
+        for (int i = 0; i < 10; i++)
+            history.Record(FrameOf(i), cameraMoved: true);
+
+        var buffer = new float[3];
+        int written = history.CopyRecentTotalMs(buffer);
+
+        Assert.Equal(3, written);
+        Assert.Equal(new float[] { 7, 8, 9 }, buffer);
+    }
+
+    [Fact]
+    public void CopyRecentTotalMs_DoesNotAllocate()
+    {
+        var history = new WorldRenderFrameHistory(capacity: 256);
+        for (int i = 0; i < 256; i++)
+            history.Record(FrameOf(i), cameraMoved: true);
+        var buffer = new float[240];
+        history.CopyRecentTotalMs(buffer);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 500; i++)
+            history.CopyRecentTotalMs(buffer);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0, allocated);
+    }
+
+    [Fact]
     public void Recording_DoesNotAllocate()
     {
         // FR-002: the recorder must not become the kind of per-frame churn it exists to measure.

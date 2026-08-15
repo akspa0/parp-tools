@@ -3321,6 +3321,128 @@ public partial class ViewerApp
             _renderer?.ToggleWireframe();
     }
 
+    // Snapshot state for the frame-history view. Snapshot() allocates, so it is refreshed on a
+    // bounded cadence rather than every UI frame — a diagnostic that churns every frame would be
+    // the same mistake this view exists to expose.
+    private WorldRenderFrameHistorySnapshot? _frameHistorySnapshot;
+    private double _frameHistoryNextRefreshSeconds;
+    private float _frameHistoryHitchThresholdMs = 33.3f;
+    private readonly float[] _frameHistoryPlotBuffer = new float[240];
+    private double _frameHistoryInjectStallMs = 250;
+
+    /// <summary>
+    /// Frame timing over time, with hitches marked and attributed to a stage.
+    /// <para>
+    /// The single-frame "World CPU" readout above cannot show a periodic hitch: by the time you
+    /// read it the spike is gone. This is the surface that makes the gallop observable.
+    /// </para>
+    /// </summary>
+    private void DrawFrameHistoryContent()
+    {
+        if (_worldScene == null)
+            return;
+
+        if (!ImGui.CollapsingHeader("Frame history (hitch detection)", ImGuiTreeNodeFlags.DefaultOpen))
+            return;
+
+        WorldRenderFrameHistory history = _worldScene.FrameHistory;
+
+        double now = ImGui.GetTime();
+        if (_frameHistorySnapshot is null || now >= _frameHistoryNextRefreshSeconds)
+        {
+            _frameHistorySnapshot = history.Snapshot(_frameHistoryHitchThresholdMs);
+            _frameHistoryNextRefreshSeconds = now + 0.25;
+        }
+
+        WorldRenderFrameHistorySnapshot snapshot = _frameHistorySnapshot;
+
+        ImGui.SetNextItemWidth(140f);
+        ImGui.SliderFloat("Hitch threshold (ms)", ref _frameHistoryHitchThresholdMs, 8f, 100f, "%.1f");
+
+        if (snapshot.FrameCount == 0)
+        {
+            ImGui.TextDisabled("No frames recorded yet.");
+            return;
+        }
+
+        // A stationary window cannot demonstrate movement-induced behavior. Say so rather than
+        // letting a quiet result be read as "no hitching".
+        if (!snapshot.CanDemonstrateMovementBehavior)
+        {
+            ImGui.TextColored(new Vector4(1f, 0.75f, 0.2f, 1f),
+                "Camera stationary for this window - cannot show movement hitching. Move the camera.");
+        }
+
+        WorldRenderTimingDistribution total = snapshot.Total;
+        ImGui.Text($"Frames {snapshot.FrameCount}  median {total.MedianMs:0.00}  p95 {total.P95Ms:0.00}  p99 {total.P99Ms:0.00}  max {total.MaxMs:0.00} ms");
+
+        Vector4 hitchColor = total.OverThresholdCount > 0
+            ? new Vector4(1f, 0.4f, 0.35f, 1f)
+            : new Vector4(0.5f, 0.9f, 0.5f, 1f);
+        ImGui.TextColored(hitchColor,
+            $"Hitches over {_frameHistoryHitchThresholdMs:0.0} ms: {total.OverThresholdCount} of {snapshot.FrameCount} frames");
+
+        // The real per-frame series, copied without allocating. This is live every UI frame even
+        // though the statistics above refresh on a cadence.
+        int plotCount = history.CopyRecentTotalMs(_frameHistoryPlotBuffer);
+        if (plotCount > 0)
+        {
+            ImGui.PlotLines(
+                "##FrameHistoryPlot",
+                ref _frameHistoryPlotBuffer[0],
+                plotCount,
+                0,
+                $"frame ms (last {plotCount})",
+                0f,
+                (float)Math.Max(total.MaxMs * 1.1, _frameHistoryHitchThresholdMs * 1.5),
+                new Vector2(0, 60f));
+        }
+
+        if (snapshot.Hitches.Count > 0 && ImGui.TreeNode($"Recent hitches ({snapshot.Hitches.Count})"))
+        {
+            int shown = 0;
+            for (int i = snapshot.Hitches.Count - 1; i >= 0 && shown < 12; i--, shown++)
+            {
+                WorldRenderHitch hitch = snapshot.Hitches[i];
+                ImGui.Text($"frame {hitch.FrameIndex}: {hitch.TotalCpuMs:0.0} ms  <- {hitch.DominantStage} ({hitch.DominantStageMs:0.0} ms)");
+            }
+            ImGui.TreePop();
+        }
+
+        if (ImGui.TreeNode("Stage cost (p99, worst first)"))
+        {
+            int shown = 0;
+            foreach ((WorldRenderStage stage, WorldRenderTimingDistribution dist) in snapshot.StagesByP99Descending())
+            {
+                if (dist.MaxMs <= 0.0001 || shown++ >= 10)
+                    continue;
+                ImGui.Text($"{stage,-26} median {dist.MedianMs,6:0.00}  p99 {dist.P99Ms,6:0.00}  max {dist.MaxMs,6:0.00} ms");
+            }
+            ImGui.TreePop();
+        }
+
+        if (ImGui.TreeNode("Detector self-check"))
+        {
+            ImGui.TextWrapped(
+                "Stall one frame by a known amount. If it does not appear above at that magnitude, "
+                + "this view is not trustworthy and no measurement taken from it counts.");
+            ImGui.SetNextItemWidth(120f);
+            float stallMs = (float)_frameHistoryInjectStallMs;
+            if (ImGui.SliderFloat("Stall (ms)", ref stallMs, 50f, 1000f, "%.0f"))
+                _frameHistoryInjectStallMs = stallMs;
+            if (ImGui.Button("Inject stall into next frame"))
+                _worldScene.DebugInjectStallMs = _frameHistoryInjectStallMs;
+            ImGui.SameLine();
+            if (ImGui.Button("Reset history"))
+            {
+                history.Clear();
+                _frameHistorySnapshot = null;
+            }
+            ImGui.TextDisabled($"Recorder overhead: {snapshot.RecorderOverheadMsPerFrame * 1000.0:0.00} us/frame");
+            ImGui.TreePop();
+        }
+    }
+
     private void DrawRuntimeStatsPanelContent()
     {
         using Process process = Process.GetCurrentProcess();
@@ -3351,6 +3473,9 @@ public partial class ViewerApp
         LiquidRenderer? renderStatsLiquidRenderer = _terrainManager?.LiquidRenderer;
         ImGui.TextDisabled("World render CPU only. UI/layout/input/swap are not included.");
         ImGui.Text($"World CPU: {renderStats.TotalCpuMs:0.00} ms  Pending asset loads: {renderStats.PendingAssetLoadCount}");
+
+        DrawFrameHistoryContent();
+
         ImGui.Text($"Visible WMO: {renderStats.VisibleWmoCount}  Visible MDX: {renderStats.VisibleMdxCount}  Taxi actors: {renderStats.VisibleTaxiMdxCount}");
         ImGui.Text($"Object stream range: {_worldScene.ObjectStreamingRangeMultiplier:0.00}x");
         ImGui.Text($"Object detail: {_worldScene.ObjectVisibilityProfile}");
