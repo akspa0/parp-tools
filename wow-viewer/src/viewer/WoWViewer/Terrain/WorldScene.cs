@@ -1274,6 +1274,31 @@ public class WorldScene : ISceneRenderer
     public int LastUnloadedWmoInstanceCount { get; private set; }
     public int WmoTileUnloadEventCount { get; private set; }
     public WorldRenderFrameStats LastRenderFrameStats { get; private set; } = WorldRenderFrameStats.Empty;
+
+    /// <summary>
+    /// Rolling per-frame timing history. <see cref="LastRenderFrameStats"/> holds a single frame,
+    /// which cannot show a periodic hitch; this retains a bounded window so behavior is observable
+    /// over time. Recording is always on and allocation-free.
+    /// </summary>
+    public WorldRenderFrameHistory FrameHistory { get; } = new();
+
+    /// <summary>
+    /// Detector-power check: stall one upcoming frame by a known amount. If the history does not
+    /// flag that frame with that magnitude, the detector is not trusted and no renderer measurement
+    /// derived from it is valid. Diagnostics only; never set during normal use.
+    /// </summary>
+    public double DebugInjectStallMs { get; set; }
+
+    /// <summary>
+    /// Opt-in per-kind scene-graph attribution. Off by default because collecting it requires
+    /// recursively walking every rejected subtree — the work culling exists to avoid — on every
+    /// frame. Enable it only while a diagnostics surface is actually reading the per-kind
+    /// breakdown.
+    /// </summary>
+    public bool SceneGraphDetailedDiagnosticsEnabled { get; set; }
+
+    private Vector3 _frameHistoryPreviousCameraPosition = new(float.NaN, float.NaN, float.NaN);
+    private Vector3 _frameHistoryPreviousCameraForward = new(float.NaN, float.NaN, float.NaN);
     public string RendererOptimizationHint => WorldRenderOptimizationAdvisor.BuildHint(LastRenderFrameStats);
     public bool UseHierarchicalSceneTraversal
     {
@@ -9798,7 +9823,8 @@ public class WorldScene : ISceneRenderer
                 shouldEvaluateVisibility: static node =>
                     node.Kind != WorldSceneNodeKind.M2Placement
                     || node.Parent?.Kind != WorldSceneNodeKind.Chunk,
-                validateGraph: false);
+                validateGraph: false,
+                collectDetailedDiagnostics: SceneGraphDetailedDiagnosticsEnabled);
             _lastSceneGraphTraversalDiagnostics.Accumulate(traversal.Diagnostics);
 
             foreach (WorldSceneNode node in traversal.VisibleNodes)
@@ -10134,7 +10160,7 @@ public class WorldScene : ISceneRenderer
         lighting.AdvanceAutomaticTime(elapsedSeconds);
     }
 
-    private void FinalizeRenderFrameStats(WorldRenderFrame frame, Stopwatch frameTimer)
+    private void FinalizeRenderFrameStats(WorldRenderFrame frame, Stopwatch frameTimer, Matrix4x4 view)
     {
         int terrainChunksRendered = _terrainManager.Renderer.ChunksRendered;
         int terrainChunksCulled = _terrainManager.Renderer.ChunksCulled;
@@ -10147,6 +10173,21 @@ public class WorldScene : ISceneRenderer
             terrainChunksCulled,
             wdlVisibleTiles,
             wdlHiddenTiles);
+
+        // Retain the frame. Without this the stats are produced and immediately discarded, which is
+        // why a periodic hitch was invisible to every consumer.
+        // Camera pose comes from the view matrix so this does not depend on where in Render the
+        // local cameraPos happens to be resolved.
+        Matrix4x4.Invert(view, out Matrix4x4 frameHistoryViewInverse);
+        Vector3 cameraPosition = frameHistoryViewInverse.Translation;
+        Vector3 cameraForward = new(
+            -frameHistoryViewInverse.M31, -frameHistoryViewInverse.M32, -frameHistoryViewInverse.M33);
+        bool cameraMoved =
+            cameraPosition != _frameHistoryPreviousCameraPosition
+            || cameraForward != _frameHistoryPreviousCameraForward;
+        _frameHistoryPreviousCameraPosition = cameraPosition;
+        _frameHistoryPreviousCameraForward = cameraForward;
+        FrameHistory.Record(LastRenderFrameStats, cameraMoved);
     }
 
     // ── ISceneRenderer ──────────────────────────────────────────────────
@@ -10157,6 +10198,20 @@ public class WorldScene : ISceneRenderer
         WorldRenderFrame frame = _renderFrame;
         frame.Reset();
         var frameTimer = Stopwatch.StartNew();
+
+        // Detector-power check (diagnostics only): stall this frame by a known amount so the frame
+        // history can be verified to flag it. Inside the timer so the stall is measured as real work.
+        if (DebugInjectStallMs > 0)
+        {
+            double stallMs = DebugInjectStallMs;
+            DebugInjectStallMs = 0;
+            long stallUntil = Stopwatch.GetTimestamp() + (long)(stallMs / 1000.0 * Stopwatch.Frequency);
+            while (Stopwatch.GetTimestamp() < stallUntil)
+            {
+                // Busy-wait: a sleep would yield the thread and measure scheduler latency instead of
+                // frame cost, which is not what the check is proving.
+            }
+        }
         _pendingVisibleMdxLoadDistances.Clear();
         _pendingVisibleWmoLoadDistances.Clear();
         _sceneGraphFrameVisibilityPrepared = false;
@@ -11593,14 +11648,14 @@ public class WorldScene : ISceneRenderer
 
         if (!continuedPastTerrain)
         {
-            FinalizeRenderFrameStats(frame, frameTimer);
+            FinalizeRenderFrameStats(frame, frameTimer, view);
             return;
         }
 
         if (!_doodadsVisible && !_renderDiagPrinted)
             _renderDiagPrinted = true;
 
-        FinalizeRenderFrameStats(frame, frameTimer);
+        FinalizeRenderFrameStats(frame, frameTimer, view);
     }
 
     private void RenderSkyboxBackdrop(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos,

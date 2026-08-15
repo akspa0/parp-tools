@@ -3356,7 +3356,18 @@ public partial class ViewerApp
         ImGui.Text($"Object detail: {_worldScene.ObjectVisibilityProfile}");
         var graphDiagnostics = _worldScene.SceneGraphTraversalDiagnostics;
         ImGui.Text($"ADT graph: {(_worldScene.IsHierarchicalSceneTraversalActive ? "active" : "inactive")}  roots={_worldScene.SceneGraphResidentAdtCount}  external={(_worldScene.SceneGraphHasExternalRoot ? "yes" : "no")}");
-        ImGui.Text($"Graph visited/tested/rejected/skipped: {graphDiagnostics.VisitedNodeCount}/{graphDiagnostics.IndividuallyTestedNodeCount}/{graphDiagnostics.RejectedNodeCount}/{graphDiagnostics.SkippedDescendantCount}");
+        // "skipped" requires per-kind attribution, which recursively walks every rejected subtree.
+        // That is off on production frames, so it is opt-in here rather than a permanent frame cost.
+        bool detailedGraphDiagnostics = _worldScene.SceneGraphDetailedDiagnosticsEnabled;
+        if (ImGui.Checkbox("Detailed graph attribution (costs frame time)", ref detailedGraphDiagnostics))
+            _worldScene.SceneGraphDetailedDiagnosticsEnabled = detailedGraphDiagnostics;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Collecting skipped-descendant counts walks every culled subtree each frame.\nLeave off unless you are reading the breakdown.");
+
+        string skippedText = graphDiagnostics.DetailedCollectionEnabled
+            ? graphDiagnostics.SkippedDescendantCount.ToString()
+            : "off";
+        ImGui.Text($"Graph visited/tested/rejected/skipped: {graphDiagnostics.VisitedNodeCount}/{graphDiagnostics.IndividuallyTestedNodeCount}/{graphDiagnostics.RejectedNodeCount}/{skippedText}");
         ImGui.Text($"AOI camera tile: ({_worldScene.Terrain.CameraTileX},{_worldScene.Terrain.CameraTileY})  loaded={_worldScene.Terrain.LoadedTileCount}  detailed/retained={_worldScene.Terrain.EffectiveDetailedTileCount}/{_worldScene.Terrain.EffectiveRetainedTileCount}");
         if (_worldScene.Terrain.TileUnloadEventCount > 0)
             ImGui.Text($"Last ADT unload: ({_worldScene.Terrain.LastUnloadedTileX},{_worldScene.Terrain.LastUnloadedTileY})  WMO placements={_worldScene.LastUnloadedWmoInstanceCount}");

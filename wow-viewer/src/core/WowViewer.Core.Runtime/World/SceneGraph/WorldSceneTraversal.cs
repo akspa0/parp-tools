@@ -35,6 +35,13 @@ public sealed class WorldSceneTraversalDiagnostics
     public IReadOnlyDictionary<WorldSceneNodeKind, int> DeferredVisibilityTestCountsByKind =>
         _deferredVisibilityTestCountsByKind;
 
+    /// <summary>
+    /// False when the traversal ran without per-kind attribution and rejected-node collection.
+    /// The scalar counters remain valid; the per-kind dictionaries,
+    /// <see cref="SkippedDescendantCount"/>, and the rejected-node list do not.
+    /// </summary>
+    public bool DetailedCollectionEnabled { get; init; } = true;
+
     public void Accumulate(WorldSceneTraversalDiagnostics other)
     {
         ArgumentNullException.ThrowIfNull(other);
@@ -106,12 +113,21 @@ public sealed record WorldSceneTraversalResult(
 
 public static class WorldSceneTraversal
 {
+    /// <param name="collectDetailedDiagnostics">
+    /// When true (the default, preserving existing callers and tests), per-kind attribution and the
+    /// rejected-node list are gathered. That requires recursively walking every rejected subtree,
+    /// so a production render loop should pass <c>false</c>: it keeps the cheap scalar counters and
+    /// drops the work that scales with what was culled. Check
+    /// <see cref="WorldSceneTraversalDiagnostics.DetailedCollectionEnabled"/> before reading the
+    /// per-kind dictionaries or <see cref="WorldSceneTraversalResult.RejectedNodes"/>.
+    /// </param>
     public static WorldSceneTraversalResult Traverse(
         WorldSceneGraph graph,
         Func<WorldSceneNode, bool> isVisible,
         Func<WorldSceneNode, bool>? includeNode = null,
         Func<WorldSceneNode, bool>? shouldEvaluateVisibility = null,
-        bool validateGraph = true)
+        bool validateGraph = true,
+        bool collectDetailedDiagnostics = true)
     {
         ArgumentNullException.ThrowIfNull(graph);
         ArgumentNullException.ThrowIfNull(isVisible);
@@ -122,7 +138,10 @@ public static class WorldSceneTraversal
 
         List<WorldSceneNode> visibleNodes = [];
         List<WorldSceneNode> rejectedNodes = [];
-        WorldSceneTraversalDiagnostics diagnostics = new();
+        WorldSceneTraversalDiagnostics diagnostics = new()
+        {
+            DetailedCollectionEnabled = collectDetailedDiagnostics,
+        };
         Visit(
             graph.Root,
             isVisible,
@@ -130,7 +149,8 @@ public static class WorldSceneTraversal
             shouldEvaluateVisibility,
             visibleNodes,
             rejectedNodes,
-            diagnostics);
+            diagnostics,
+            collectDetailedDiagnostics);
         return new WorldSceneTraversalResult(visibleNodes, rejectedNodes, diagnostics);
     }
 
@@ -141,7 +161,8 @@ public static class WorldSceneTraversal
         Func<WorldSceneNode, bool>? shouldEvaluateVisibility,
         List<WorldSceneNode> visibleNodes,
         List<WorldSceneNode> rejectedNodes,
-        WorldSceneTraversalDiagnostics diagnostics)
+        WorldSceneTraversalDiagnostics diagnostics,
+        bool collectDetail)
     {
         diagnostics.VisitedNodeCount++;
         diagnostics.MaxDepthReached = Math.Max(diagnostics.MaxDepthReached, node.Depth);
@@ -151,12 +172,22 @@ public static class WorldSceneTraversal
         if (evaluateVisibility)
         {
             diagnostics.IndividuallyTestedNodeCount++;
-            diagnostics.RecordIndividualTest(node.Kind);
+            if (collectDetail)
+                diagnostics.RecordIndividualTest(node.Kind);
+
             if (!isVisible(node))
             {
                 diagnostics.RejectedNodeCount++;
-                diagnostics.SkippedDescendantCount += diagnostics.RecordRejectedSubtree(node);
-                rejectedNodes.Add(node);
+
+                // Attributing the rejected subtree means recursively walking the very subtree that
+                // culling just decided to skip, which makes rejecting a large region cost MORE than
+                // accepting it. That is diagnostic-only work and must not run on production frames.
+                if (collectDetail)
+                {
+                    diagnostics.SkippedDescendantCount += diagnostics.RecordRejectedSubtree(node);
+                    rejectedNodes.Add(node);
+                }
+
                 return;
             }
         }
@@ -164,9 +195,13 @@ public static class WorldSceneTraversal
         {
             diagnostics.NonRejectableNodeCount++;
         }
-        else
+        else if (collectDetail)
         {
             diagnostics.RecordDeferredVisibilityTest(node.Kind);
+        }
+        else
+        {
+            diagnostics.DeferredVisibilityTestCount++;
         }
 
         if (includeNode(node))
@@ -183,7 +218,8 @@ public static class WorldSceneTraversal
                 shouldEvaluateVisibility,
                 visibleNodes,
                 rejectedNodes,
-                diagnostics);
+                diagnostics,
+                collectDetail);
     }
 
 }
