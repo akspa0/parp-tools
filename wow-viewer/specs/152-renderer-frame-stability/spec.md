@@ -59,6 +59,36 @@ them is US1/US2 work.
 Periodic allocation of this shape produces exactly the symptom reported: mostly acceptable frames
 punctuated by regular hitches, worst when the resident tile set changes.
 
+### Churn inventory: where per-frame work is rebuilt instead of retained
+
+Every item below was read from source on this branch. Together these are the candidate churn
+surfaces; Phase 1 measurement decides which actually dominate.
+
+| # | Surface | Churn per frame | Why caching is not helping |
+| --- | --- | --- | --- |
+| C1 | Scene graph traversal | 2 `List<WorldSceneNode>` + 4 `Dictionary` + result record + diagnostics object, **per graph** | Nothing is retained between frames; every frame rebuilds from the root |
+| C2 | Rejected subtree attribution | Full recursive walk of every rejected subtree | Culling is supposed to skip work; here rejection cost scales with what was rejected |
+| C3 | Scene graph visibility caller | LINQ `.ToList()` + `HashSet` of active graphs | Active graph set changes only on residency change, but is rebuilt every frame |
+| C4 | WMO/doodad batching in `Render()` | `Dictionary<IModelRenderer, List<Matrix4x4>>`, three `HashSet`s, plus per-batch `List`s allocated inside loops | The batching pass — added to *improve* performance — rebuilds all its intermediate structures from scratch each frame |
+| C5 | Transparent sort | `List<(bool, int, float)>` rebuilt per frame | Sort input changes slowly; the buffer is not reused |
+| C6 | Visible renderer caches | `VisibleWmoRendererCache` / `VisibleMdxRendererCache` are **cleared every frame** in `Reset()` | These are `Dictionary<string, …>` with `OrdinalIgnoreCase` keys. Clearing each frame gives them a one-frame lifetime, so they only ever help for duplicate paths *within* one frame. Across frames — where the visible set barely changes — they provide no benefit while still paying clear, re-insert, and case-insensitive string hashing per visible object per frame |
+| C7 | Frame statistics | `LastRenderFrameStats` holds exactly one frame | All timing data is discarded every frame, so nothing can observe behavior over time |
+
+C6 is the clearest instance of "caching just isn't doing it": the cache exists, is named a cache, and
+is destroyed before it can ever amortize.
+
+### The instrumentation already exists; nothing retains it
+
+`WorldRenderFrameStats` already carries `TotalCpuMs` plus **18 per-stage `WorldRenderStageStats`
+timers** (deferred asset loads, lighting, sky, WDL, terrain, WMO visibility/submission, MDX
+animation/visibility/submission, liquid, transparent sort, overlay, scene maintenance, and more).
+
+The data needed to diagnose the gallop is therefore already produced every frame — and then thrown
+away, because `LastRenderFrameStats` is a single-frame property with no history anywhere in the
+codebase. This is why the defect is invisible in-app: every consumer (status bar, sidebars, external
+profiler) reads only the instantaneous last frame, which is the wrong instrument for a *periodic*
+hitch.
+
 ### Measured evidence for the UI duplication complaint
 
 - 214 distinct `Draw*` methods across the `ViewerApp*` files (~35,685 lines total).
@@ -73,33 +103,61 @@ rendered from many routes, with no single owner.
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - Prove the harness can see a hitch (Priority: P1)
+### User Story 1 - The viewer records its own behavior over time (Priority: P1)
 
-As the maintainer, I need the automated profiler to reproduce the gallop I can see with my own eyes,
-so that every later claim about the renderer rests on a measurement instead of an opinion.
+As the maintainer, I need the viewer itself to retain a rolling record of its per-frame runtime
+stats during real use, so behavior can be observed **over time** instead of as a single instantaneous
+frame, and so automated tests can assert against that record.
 
-**Why this priority**: Every other story in this feature depends on a trustworthy detector. Shipping
-an optimization measured by a blind harness is worse than shipping nothing, because it manufactures
-false confidence. This story is the only one that can be done first.
+**Why this priority**: Everything else depends on a trustworthy detector, and the detector must live
+where the defect lives — in the running viewer, accumulating across a real session. The previous
+approach was external CLI profiling that spun up a separate short-lived process and sampled a
+handful of frames; that is what has already been tried and it did not surface this. The instrumentation
+already exists (`TotalCpuMs` plus 18 per-stage timers); only retention is missing.
 
-**Independent Test**: Run the profiler along a moving-camera trajectory that crosses ADT tile
-boundaries, then inject a synthetic delay of known size into a known frame and confirm the report
-flags it at the right frame index and the right magnitude. Delivers a detector whose power is
-demonstrated rather than assumed.
+**Independent Test**: Run the viewer, move the camera across tile boundaries, and confirm the rolling
+record contains the frame history with hitch statistics, then confirm an injected synthetic stall of
+known size appears in that record at the right place and magnitude.
 
 **Acceptance Scenarios**:
 
-1. **Given** a staged client and a camera trajectory that crosses at least one ADT tile boundary,
-   **When** the profiler runs, **Then** the report contains a per-frame wall-clock series plus
-   median, maximum, p95, p99, and a count of frames exceeding a stated hitch threshold.
-2. **Given** a synthetic delay of known duration injected at a known frame index, **When** the
-   profiler runs, **Then** the report identifies that frame as a hitch and reports its magnitude
-   within a stated tolerance.
-3. **Given** a run with no injected delay, **When** the profiler runs twice on identical inputs,
-   **Then** the reported hitch statistics are stable enough that run-to-run noise cannot be mistaken
-   for a real regression, and the noise floor is stated in the report.
-4. **Given** a stationary camera, **When** the profiler runs, **Then** the report explicitly labels
-   the trajectory as stationary so a stationary result can never be read as movement evidence.
+1. **Given** the viewer is running, **When** frames render, **Then** a bounded rolling history of
+   per-frame stats is retained in-process, covering enough frames to observe periodic behavior, with
+   fixed memory and no per-frame allocation of its own.
+2. **Given** the rolling history, **When** it is read, **Then** it exposes median, maximum, p95, p99,
+   and a count of frames over a hitch threshold, for the total frame and for each of the existing
+   per-stage timers.
+3. **Given** a synthetic stall of known duration is injected, **When** the history is inspected,
+   **Then** that frame is flagged as a hitch with the correct magnitude, proving detector power.
+4. **Given** an automated test drives the viewer along a defined camera path, **When** the run ends,
+   **Then** the test can assert on the accumulated record, and the record can be exported for
+   comparison against a later run.
+5. **Given** a session where the camera never moves, **When** the record is reported, **Then** it is
+   labelled as stationary so it can never be read as movement evidence.
+6. **Given** the recorder is active, **When** its own overhead is measured, **Then** that overhead is
+   reported, so the instrument cannot be confused with the thing it measures.
+
+---
+
+### User Story 1b - Surface the record in the viewer (Priority: P1)
+
+As the maintainer, I want to see the rolling frame history while the viewer is running, so I can
+correlate a hitch I feel with the stage that caused it, without exporting anything.
+
+**Why this priority**: The fastest diagnostic loop is seeing the spike as it happens, next to the
+stage timings that explain it. It is a small addition once US1 exists.
+
+**Independent Test**: Move the camera until a hitch is felt and confirm it appears in the in-viewer
+history view with its dominant stage identified.
+
+**Acceptance Scenarios**:
+
+1. **Given** the rolling history exists, **When** the viewer displays it, **Then** recent frame times
+   are shown over time with hitches marked, not just the current frame's value.
+2. **Given** a marked hitch, **When** it is inspected, **Then** the per-stage breakdown for that
+   frame is available.
+3. **Given** the history view is closed, **When** frames render, **Then** recording continues, so the
+   record does not depend on a panel being open.
 
 ---
 
@@ -290,21 +348,29 @@ panel.
 
 #### Detector capability (must be satisfied before any renderer change)
 
-- **FR-001**: The profiler MUST support camera trajectories that move over time, including at least
-  one trajectory that crosses ADT tile boundaries.
-- **FR-002**: The profiler MUST record a per-frame wall-clock time series for every measured frame.
-- **FR-003**: The profiler MUST report median, maximum, p95, p99, and a count of frames exceeding a
-  stated hitch threshold, in addition to any aggregate counters it already reports.
-- **FR-004**: The profiler MUST support injecting a synthetic delay of known magnitude at a known
-  frame, and MUST correctly flag that frame, so detector power is demonstrated rather than assumed.
-- **FR-005**: The profiler MUST report its run-to-run noise floor so that a difference smaller than
-  the noise floor cannot be presented as an improvement.
-- **FR-006**: The profiler MUST label each run with its trajectory type, and MUST mark stationary
-  runs as incapable of demonstrating movement-induced behavior.
-- **FR-007**: The profiler MUST record the client root, build identity, map, trajectory, and frame
-  counts in every report, so two reports can be compared only when they are comparable.
-- **FR-008**: The default measured-frame count MUST be large enough to observe periodic hitches
-  across at least one full tile-crossing cycle.
+- **FR-001**: The viewer MUST retain a bounded, in-process rolling history of per-frame runtime stats
+  during normal operation, covering enough frames to observe periodic behavior.
+- **FR-002**: The rolling history MUST use fixed memory and MUST NOT allocate per frame; the recorder
+  must not become a churn source itself.
+- **FR-003**: The history MUST expose median, maximum, p95, p99, and a count of frames over a stated
+  hitch threshold, for the total frame time and for each existing per-stage timer.
+- **FR-004**: The system MUST support injecting a synthetic stall of known magnitude at a known frame
+  and MUST correctly flag it, so detector power is demonstrated rather than assumed.
+- **FR-005**: The system MUST report a run-to-run noise floor so a difference smaller than the noise
+  floor cannot be presented as an improvement.
+- **FR-006**: Every record MUST be labelled with whether the camera moved, and stationary records MUST
+  be marked as incapable of demonstrating movement-induced behavior.
+- **FR-007**: Every record MUST carry client root, build identity, map, camera path, and frame counts,
+  so two records can be compared only when they are comparable.
+- **FR-008**: Automated tests MUST be able to drive the viewer along a defined camera path and assert
+  on the accumulated record, and records MUST be exportable for before/after comparison.
+- **FR-009**: Camera paths used for measurement MUST include at least one that crosses ADT tile
+  boundaries and one that continuously changes heading.
+- **FR-010**: The recorder's own overhead MUST be measured and reported.
+- **FR-011**: The viewer MUST be able to display the rolling history over time with hitches marked,
+  and recording MUST continue whether or not that view is open.
+- **FR-012**: External CLI profiling, where retained, MUST be a driver of this same in-process
+  recorder rather than a second, separate measurement system.
 
 #### Attribution
 
@@ -325,6 +391,20 @@ panel.
   profile MUST NOT override them.
 - **FR-016**: Era profile selection MUST carry provenance, not just values, so a rendered result can
   be traced to the profile and build that produced it.
+
+#### Churn and caching
+
+- **FR-039**: Every churn surface in the inventory (C1–C7) MUST be measured for per-frame cost and
+  either retained across frames, made incremental, or justified in writing as genuinely per-frame.
+- **FR-040**: A structure whose inputs change only on residency or visibility change MUST NOT be
+  rebuilt on frames where those inputs did not change.
+- **FR-041**: Any structure named a cache MUST outlive a single frame, or MUST be renamed to reflect
+  that it is a per-frame scratch buffer.
+- **FR-042**: Per-frame scratch buffers MUST be reused across frames rather than reallocated.
+- **FR-043**: Hot-path lookups MUST NOT require per-object case-insensitive string hashing on every
+  frame; stable identities MUST be resolved once and reused.
+- **FR-044**: Cache effectiveness MUST be observable — hit rate, size, and eviction cause — so a
+  cache that is not working is visible rather than assumed to be working.
 
 #### Flattened render pipeline
 
