@@ -113,6 +113,7 @@ As a viewer developer, I want context and lighting improvements to remain profil
 - **FR-014**: Heavy client harvesting, GPU work, and long-running real-scene captures MUST remain user-run operations with exact PowerShell commands handed off after bounded code and validation work is prepared.
 - **FR-015**: The viewer MUST distinguish observed, inferred, fallback, unsupported, malformed, and visually unverified context/lighting/shader states in diagnostics and release notes.
 - **FR-016**: For the observed negative-count pre-alpha version-2 partial layout, the shared reader MUST decode the embedded 64-byte Global Light header, legacy prefix, two 9-track data sets, and their float bands as a profile-scoped shape; it MUST NOT reinterpret the embedded header's `-1` fields as track lengths or relax the normal 0..32 track-length contract for later layouts.
+- **FR-017**: The interactive viewer MUST advance the observed Alpha 0.5.3 world clock by one 2,880-unit day every 24 real minutes by default. A manual time-of-day control MUST freeze the clock until explicitly resumed, and synthetic minimap generation MUST remain deterministic at its requested fixed time.
 
 ### Key Entities
 
@@ -134,6 +135,7 @@ As a viewer developer, I want context and lighting improvements to remain profil
 - **SC-005**: Lighting and shader changes produce no more than a 10% regression in p95 frame time on the named baseline scene unless an approved evidence record explains the tradeoff; older-client comparison scenes show no new missing-content failure.
 - **SC-006**: Focused profile/context/lighting checks pass for one early client, one 1.x/3.x client, and one 4.x client before the feature advances beyond its corresponding phase gate.
 - **SC-007**: Every accepted context or lighting result records client build, map/WMO identity, camera state, source inputs, fallback/proof state, and before/after performance evidence.
+- **SC-008**: A focused clock test MUST prove the 2,880-unit/24-minute rate, and the synthetic-minimap manifest MUST identify its time-of-day mode as frozen; live viewer timing and minimap tint behavior remain separate runtime proof gates.
 
 ## Assumptions
 
@@ -144,6 +146,9 @@ As a viewer developer, I want context and lighting improvements to remain profil
 - Spec 142 remains the owner of scene residency, graph traversal, and dense-scene performance admission.
 - Real-client validation uses configured approved client roots such as `H:\CLIENTS`; proprietary client files, harvested corpora, and generated outputs are not committed.
 - The user runs heavy captures, broad client sweeps, GPU work, and long performance tests.
+- The 0.5.3 day/night rate is treated as the existing checked-in client contract: LightService documents
+  the 24-minute cycle and shared LIT parsing uses 2,880 units per day. This slice does not claim a new
+  native-client reverse-engineering result.
 
 ## Out Of Scope For The Initial Feature
 

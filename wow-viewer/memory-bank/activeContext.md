@@ -7,16 +7,18 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Finish the bounded Spec 104 MDX material/effect shader checkpoint
-  and user-run model visual proof on branch `151-portal-game-mode-surface`; then return to Spec 149's
-  audio controls or Spec 151 Phase 2 according to the next user handoff. Preserve the current GLSL
-  renderer and keep any native-material experiment reversible.
+- **Next implementation target:** User-run proof of the new default-on Alpha 0.5.3 time-of-day cycle
+  in the live viewer, including manual freeze/resume and Light DBC/LIT synchronization. Keep the
+  synthetic-minimap path explicitly frozen and investigate authored minimap tint history separately.
 - **Performance planning target:** Spec 150 remains the broad Alpha 0.5.3 renderer evidence lane. Spec
   151 owns the first concrete portal-specific optimization; use its counters and fallback evidence to
   inform later repeated `profile-render` baselines. Do not infer a win from an interactive screenshot.
 - **Proof owner:** Focused PM4/audio contract tests and cross-platform viewer build pass; the user owns
   real-client region-camera, streaming, archive-provenance, and audible proof. The current camera
   slice updates active tiles on mouse-look without reopening the residency lease.
+- **Time-of-day checkpoint:** The interactive lighting path has a pure 2,880-unit/24-minute Alpha
+  clock enabled by default, with manual slider freeze/resume; Light DBC and LIT consume the same frame
+  time, while synthetic minimap manifests record a frozen time-of-day mode.
 - **Completed slice:** Checkpoint commits `3bfbbba4` (accumulated audio, AreaNumber, Ghidra, and
   Zone/SubZone overlay work), `de41b183` (Spec Kit design pack), and `c70e1945` (portal phase)
   contain the work completed on this lane. Spec 151 Phase 1 now has a pure, fail-open WMO portal
@@ -35,7 +37,9 @@ the owning spec for requirements and proof; read a workstream only when the spec
   direct AreaTable IDs cannot be captured by Alpha AreaNumber aliases; status-bar and terrain audio now
   consume the same resolved Zone/SubZone result; the runtime exposes non-playing diagnostic rows; the audio panel
   shows IDs, coordinates, path/source, decode/backend state, and terminal reason.
-- **Main unproven gap:** Spec 104's restored MDX material shader inputs still need real model/shader
+- **Main unproven gap:** The time-of-day slice still needs live early-client visual proof and a
+  comparison of authored minimap tint behavior; the theory that shipped minimaps captured a moving
+  clock remains unproven. Spec 104's restored MDX material shader inputs still need real model/shader
   compilation and visual proof. Full BLS bytecode parity remains out of scope. Spec 151's game-mode head anchor/physics, simple-surface policy, and
   diagnostic budget remain unimplemented. Portal admission is source-tested but still needs the
   user-owned real-client visual/submission/FPS comparison. Spec 149's PM4 region
@@ -63,7 +67,7 @@ the owning spec for requirements and proof; read a workstream only when the spec
 | 146 Audio/camera playback | AreaNumber-aware area selection and master mute control implemented; client audio contracts recovered | Add ZoneMusic row resolution; MIDI/DLS and native MCSE callback proof remain gated. |
 | 144 Camera capture paths | Implemented with user gates | Validate swept path residency during playback and confirm lease release before extensions. |
 | 145 WoW UI overhaul | First slice implemented | Continue only the remaining persistent-window/placeholder audit tasks. |
-| 143 World context and lighting | LIT source/fallback and pre-alpha v2 parser implemented with user gate | Validate the v2 viewer path, then continue WMO area and lighting evidence. |
+| 143 World context and lighting | LIT source/fallback, pre-alpha v2 parser, and default-on 0.5.3 time cycle implemented with user gate | Validate live clock/manual freeze and authored-minimap tint boundaries, then continue WMO area and lighting evidence. |
 | 142 World scene graph | In progress | User-run dense-WMO capture to compare internal-doodad batching against the prior placement-local path. |
 | 139–141 Terrain/minimap reconstruction | Active/parked ML lanes | Reopen only for the named spec and user-run training/validation. |
 | 138 Cross-era renderer research | Evidence/planning | Do not generalize one client build to every era. |

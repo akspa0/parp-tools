@@ -204,6 +204,27 @@ The primary set alone drives the global partial-light selection. This is an obse
 slice, not a claim that every version-2 client uses the same payload; additional v2 variants require
 their own evidence and fixture before acceptance.
 
+## Decision 9: Keep the interactive 0.5.3 clock separate from minimap synthesis
+
+**Evidence**
+
+- LightService already documents the native time domain as 0..2880, with 1440 at noon in a
+  24-minute cycle.
+- LitProfileReader independently defines 2880 time units per day for LIT keyframes. These existing
+  contracts agree on the conversion used by this slice.
+- The harvest tool accepts an explicit --time-hours value and uses a separate achromatic minimap
+  lighting profile; it does not run the viewer frame loop or consume LightService.
+
+**Decision**: Add a pure WorldTimeCycle conversion/advance contract and drive it from the interactive
+WorldScene monotonic frame clock. TerrainLighting is the same-frame authority for global lighting,
+Light DBC overlays, LIT samples, sky, and audio time. Manual UI input freezes that clock. Synthetic
+minimap generation remains frozen at its requested time and writes timeOfDayMode=frozen to its manifest.
+
+**Open evidence**: The suspicion that shipped authored minimaps were captured while their time-of-day
+clock was moving remains unproven. The manifest boundary prevents new synthesis nondeterminism; an
+authored-minimap tint audit still requires user-run client/output comparison and is not inferred from
+this implementation.
+
 **Validation**
 
 - `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~LitProfileReaderTests`: 8 passed.

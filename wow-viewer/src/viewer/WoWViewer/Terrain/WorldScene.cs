@@ -3533,6 +3533,8 @@ public class WorldScene : ISceneRenderer
     // DBC Lighting
     private LightService? _lightService;
     public LightService? LightService => _lightService;
+    private long _lastAutomaticTimeTick;
+    private bool _automaticTimeTickInitialized;
 
     // Alpha LIT lighting (lazy-loaded on first request)
     private LitLoader? _litLoader;
@@ -10102,6 +10104,22 @@ public class WorldScene : ISceneRenderer
         return stageTimer.Elapsed.TotalMilliseconds;
     }
 
+    private void AdvanceAutomaticTimeOfDay(TerrainLighting lighting)
+    {
+        long currentTick = Stopwatch.GetTimestamp();
+        if (!_automaticTimeTickInitialized)
+        {
+            _lastAutomaticTimeTick = currentTick;
+            _automaticTimeTickInitialized = true;
+            return;
+        }
+
+        long previousTick = _lastAutomaticTimeTick;
+        _lastAutomaticTimeTick = currentTick;
+        double elapsedSeconds = (currentTick - previousTick) / (double)Stopwatch.Frequency;
+        lighting.AdvanceAutomaticTime(elapsedSeconds);
+    }
+
     private void FinalizeRenderFrameStats(WorldRenderFrame frame, Stopwatch frameTimer)
     {
         int terrainChunksRendered = _terrainManager.Renderer.ChunksRendered;
@@ -10201,10 +10219,15 @@ public class WorldScene : ISceneRenderer
                     {
                         LitLoader.LitLightingSample? litSample = null;
                         string fogRecommendationSource;
-                        _lightService?.Update(camPos);
+                        AdvanceAutomaticTimeOfDay(lighting);
+                        if (_lightService != null)
+                        {
+                            // Light.dbc and LIT use the same native 0..2880 clock. Keep the DBC
+                            // overlay on the same frame/time as the global terrain lighting.
+                            _lightService.TimeOfDay = lighting.TimeOfDayUnits;
+                            _lightService.Update(camPos);
+                        }
                         UpdateActiveSkyboxModel();
-                        if (_lightService != null && !lighting.HasManualGameTimeOverride)
-                            lighting.GameTime = Math.Clamp(_lightService.TimeOfDay / 2880f, 0f, 1f);
 
                         if (_litLoader != null && _litLoader.HasData)
                             litSample = _litLoader.EvaluateLighting(camPos, lighting.GameTime);

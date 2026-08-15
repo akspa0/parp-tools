@@ -2879,12 +2879,8 @@ public partial class ViewerApp
         TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
         if (lighting == null || renderer == null) return;
 
+        DrawTimeOfDayControl(lighting);
         float gameTime = lighting.GameTime;
-        if (ImGui.SliderFloat("Time of Day", ref gameTime, 0f, 1f, "%.2f"))
-        {
-            lighting.GameTime = gameTime;
-            lighting.HasManualGameTimeOverride = true;
-        }
         string timeLabel = gameTime switch
         {
             < 0.15f => "Night",
@@ -3814,6 +3810,24 @@ public partial class ViewerApp
         ImGui.EndChild();
     }
 
+    private static void DrawTimeOfDayControl(TerrainLighting lighting)
+    {
+        bool automatic = lighting.IsAutomaticTimeOfDay;
+        if (ImGui.Checkbox("Automatic 24-minute cycle", ref automatic))
+            lighting.SetAutomaticTimeOfDay(automatic);
+
+        float gameTime = lighting.GameTime;
+        if (ImGui.SliderFloat("Time of Day", ref gameTime, 0f, 1f, "%.2f"))
+        {
+            lighting.GameTime = gameTime;
+            lighting.HasManualGameTimeOverride = true;
+        }
+
+        ImGui.TextDisabled(lighting.IsAutomaticTimeOfDay
+            ? "Live Alpha 0.5.3 clock: one game day per 24 real minutes."
+            : "Time frozen at the selected value; enable the cycle to resume.");
+    }
+
     private void DrawTopTabButton(WorkbenchTab tab, string label)
     {
         bool selected = _activeTopTab == tab;
@@ -4550,12 +4564,8 @@ public partial class ViewerApp
             ImGui.Spacing();
             ImGui.Text("Lighting + LIT fog");
             ImGui.Separator();
+            DrawTimeOfDayControl(lighting);
             float gameTime = lighting.GameTime;
-            if (ImGui.SliderFloat("Time of Day", ref gameTime, 0f, 1f, "%.2f"))
-            {
-                lighting.GameTime = gameTime;
-                lighting.HasManualGameTimeOverride = true;
-            }
             string timeLabel = gameTime switch
             {
                 < 0.15f => "Night",

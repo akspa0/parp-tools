@@ -74,4 +74,31 @@ public sealed class TerrainLightingMathTests
         Assert.Equal(375f, start);
         Assert.Equal(500f, end);
     }
+
+    [Fact]
+    public void WorldTimeCycle_AdvancesOneFullDayInTwentyFourRealMinutes()
+    {
+        float advanced = WorldTimeCycle.AdvanceNormalized(0.5f, WorldTimeCycle.RealSecondsPerDay);
+
+        Assert.Equal(0.5f, advanced, 5);
+        Assert.Equal(1440, WorldTimeCycle.ToTimeUnits(advanced));
+    }
+
+    [Fact]
+    public void WorldTimeCycle_ConvertsHalfDayToTheNativeNoonUnit()
+    {
+        float advanced = WorldTimeCycle.AdvanceNormalized(0f, WorldTimeCycle.RealSecondsPerDay / 2d);
+
+        Assert.Equal(0.5f, advanced, 5);
+        Assert.Equal(1440, WorldTimeCycle.ToTimeUnits(advanced));
+        Assert.Equal(0.5f, WorldTimeCycle.FromTimeUnits(1440), 5);
+    }
+
+    [Fact]
+    public void WorldTimeCycle_IgnoresInvalidOrNonPositiveElapsedTime()
+    {
+        Assert.Equal(0.25f, WorldTimeCycle.AdvanceNormalized(0.25f, 0d));
+        Assert.Equal(0.25f, WorldTimeCycle.AdvanceNormalized(0.25f, double.NaN));
+        Assert.Equal(0.25f, WorldTimeCycle.AdvanceNormalized(0.25f, -1d));
+    }
 }

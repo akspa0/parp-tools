@@ -173,6 +173,13 @@ sets within a `0x1484` group payload. The second data set is retained as an expl
 alternate for inspection; only the primary set drives the global partial-light selection. Normal
 modern LIT groups remain strict and do not accept negative track lengths.
 
+The live viewer now also owns one monotonic world-time clock: the existing Alpha contract advances
+2,880 Light/LIT units over 24 real minutes, feeds Light DBC and LIT from the same frame value, and
+starts enabled for interactive inspection. Moving the time slider marks the value manual/frozen until
+the user resumes the cycle. The synthetic-minimap harvest path remains a separate deterministic
+renderer at the requested --time-hours value and records timeOfDayMode=frozen; it must never consume
+the interactive wall clock.
+
 ### Phase 5 — Cross-era and performance proof
 
 Run focused tests/builds in the workspace, then hand the user exact PowerShell commands for the

@@ -1,4 +1,5 @@
 using System.Numerics;
+using WowViewer.Core.Maps;
 using WowViewer.Core.Terrain;
 
 namespace WoWViewer.Terrain;
@@ -21,13 +22,38 @@ public class TerrainLighting
     public float GameTime { get; set; } = 0.5f; // Default: noon so an unprofiled world remains legible.
 
     /// <summary>
-    /// True once the user has manually set <see cref="GameTime"/> from a UI control (e.g. the
-    /// "Time of Day" slider). Callers that also drive GameTime from a live clock/light service
-    /// (<c>WorldScene</c>'s per-frame <c>_lightService.TimeOfDay</c> sync) must skip their own
-    /// assignment while this is set, or the automatic sync silently overwrites manual input on the
-    /// very next frame, making the slider appear locked/unresponsive.
+    /// True once the user has manually set <see cref="GameTime"/> from a UI control. Manual input
+    /// freezes the automatic clock until the user explicitly resumes it.
     /// </summary>
     public bool HasManualGameTimeOverride { get; set; }
+
+    /// <summary>
+    /// Whether the Alpha 0.5.3 real-time clock is enabled. It is on by default for the interactive
+    /// viewer; synthetic minimap generation uses its own frozen lighting contract.
+    /// </summary>
+    public bool AutomaticTimeOfDayEnabled { get; private set; } = true;
+
+    public bool IsAutomaticTimeOfDay => AutomaticTimeOfDayEnabled && !HasManualGameTimeOverride;
+
+    /// <summary>Current game time in the native Light/LIT 0..2880 unit range.</summary>
+    public int TimeOfDayUnits => WorldTimeCycle.ToTimeUnits(GameTime);
+
+    public void SetAutomaticTimeOfDay(bool enabled)
+    {
+        AutomaticTimeOfDayEnabled = enabled;
+        if (enabled)
+            HasManualGameTimeOverride = false;
+        else
+            HasManualGameTimeOverride = true;
+    }
+
+    public void AdvanceAutomaticTime(double realSeconds)
+    {
+        if (!IsAutomaticTimeOfDay)
+            return;
+
+        GameTime = WorldTimeCycle.AdvanceNormalized(GameTime, realSeconds);
+    }
 
     /// <summary>Current sun/light direction (normalized, pointing toward light).</summary>
     public Vector3 LightDirection { get; private set; } = TerrainSolarDirection.Evaluate(0.5f);

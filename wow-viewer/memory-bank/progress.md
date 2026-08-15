@@ -2,6 +2,15 @@
 
 Last updated: 2026-08-14
 
+## 2026-08-14 — Alpha 0.5.3 time-of-day cycle checkpoint
+
+- Added the existing 2,880-unit / 24-real-minute world clock as a pure tested contract.
+- Interactive WorldScene lighting now advances it from a monotonic frame clock by default; manual
+  slider input freezes it until resumed, and Light DBC/LIT/sky/audio receive one same-frame value.
+- Synthetic minimap generation remains fixed at its requested time and records
+  timeOfDayMode=frozen in its manifest. Focused clock tests (10), viewer build, and harvest build
+  pass with 0 errors; live early-client timing and authored-minimap tint history remain user-owned.
+
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 

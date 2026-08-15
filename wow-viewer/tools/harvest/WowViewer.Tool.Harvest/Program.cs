@@ -88,6 +88,7 @@ static class Program
         string TimeOfDay,
         float TimeOfDayHours,
         float NormalizedGameTime,
+        string TimeOfDayMode,
         int TileResolution,
         string RenderMode,
         float TextureRepeatsPerChunk,
@@ -196,8 +197,9 @@ static class Program
                                 MPQs to PNGs + a manifest JSON (era-specific pixels)
               synthetic-minimap Compose paired terrain-only and _liquid minimaps directly from
                                 client tiles, with optional per-tile and whole-map PNG outputs.
-                                Use --time-hours (HHmm or HH:mm) to set the sun position;
-                                defaults to 12:00 (noon, full-bright). Terrain renders with Lambert
+                                Use --time-hours (HHmm or HH:mm) to set the frozen sun position;
+                                defaults to 12:00 (noon, full-bright). Synthetic minimap output never
+                                advances a live clock. Terrain renders with Lambert
                                 hillshading; analytic cast shadows are an ADDITION the client never
                                 had and default OFF for the Alpha era (--cast-shadows enables them,
                                 --no-cast-shadows forces them off). Add
@@ -242,9 +244,10 @@ static class Program
               --client-root     WoW client root directory (for extract-unified)
               --map, -m         Map name (e.g. "Azeroth") for archive-backed commands
 
-            synthetic-minimap uses one achromatic global light at --time-hours (default 12:00),
-              shaded in linear space; map LIT and Light DBC profiles belong to the viewer and are
-              never applied to minimap generation.
+            synthetic-minimap uses one achromatic global light at the frozen --time-hours value
+              (default 12:00), shaded in linear space; map LIT and Light DBC profiles belong to the
+              viewer and are never applied to minimap generation. The manifest records
+              timeOfDayMode=frozen.
             synthetic-minimap notable options: --build <exact-build>, --per-tile, --whole-map,
               --tile-x/--tile-y <0..63> for one occupied tile, --tile-list "x,y;x,y;..." for a bounded set,
               --authored-reference to require and emit the real client minimap plus a side-by-side comparison,
@@ -2135,6 +2138,7 @@ static class Program
             timeOfDay.ToString(),
             timeOfDayHours,
             gameTime,
+            "frozen",
             resolution,
             detailTexels ? "detail" : "material_average",
             TerrainMinimapCompositionOptions.TextureRepeatsPerChunk,

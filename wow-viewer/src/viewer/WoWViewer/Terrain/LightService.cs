@@ -2,6 +2,7 @@ using System.Numerics;
 using DBCD;
 using DBCD.Providers;
 using WowViewer.Core.IO.Lighting;
+using WowViewer.Core.Maps;
 using WoWViewer.Logging;
 using WoWViewer.Rendering;
 
@@ -33,9 +34,9 @@ public class LightService
     public bool HasActiveLocalOverlay { get; private set; }
     public float ActiveLocalWeight { get; private set; }
 
-    // Fixed time of day (0-2880, where 1440 = noon in WoW's 24-minute cycle)
-    // 1440 = noon, 0 = midnight
-    public int TimeOfDay { get; set; } = 1440;
+    // Fixed time of day (0-2880, where 1440 = noon in WoW's 24-minute cycle).
+    // The live viewer supplies this from TerrainLighting; 1440 = noon, 0 = midnight.
+    public int TimeOfDay { get; set; } = WorldTimeCycle.TimeUnitsPerDay / 2;
 
     public int ZoneCount => _classicCatalog is null
         ? _zones.Count
@@ -348,7 +349,7 @@ public class LightService
             if (!value.HasLocalProfile || value.Evidence.LocalWeight <= 0f)
             {
                 Status = $"Global viewer light active; no in-range local DBC overlay at time " +
-                    $"{value.Evidence.NormalizedTime}/2880.";
+                    $"{value.Evidence.NormalizedTime}/{WorldTimeCycle.TimeUnitsPerDay}.";
                 return;
             }
 
@@ -368,7 +369,7 @@ public class LightService
             HasActiveLocalOverlay = true;
             ActiveLocalWeight = Math.Clamp(value.Evidence.LocalWeight, 0f, 1f);
             Status = $"Local exact-build DBC overlay {ActiveLightId} active at weight {ActiveLocalWeight:F3}, " +
-                $"time {value.Evidence.NormalizedTime}/2880 " +
+                $"time {value.Evidence.NormalizedTime}/{WorldTimeCycle.TimeUnitsPerDay} " +
                 $"({BandCountRecoveryCount} recorded band-count recoveries).";
         }
         catch (Exception ex)
@@ -423,8 +424,12 @@ public class LightService
         if (a.Time == b.Time) return a;
 
         // Handle wrap-around (midnight crossing)
-        int range = b.Time > a.Time ? b.Time - a.Time : (2880 - a.Time) + b.Time;
-        int elapsed = time >= a.Time ? time - a.Time : (2880 - a.Time) + time;
+        int range = b.Time > a.Time
+            ? b.Time - a.Time
+            : (WorldTimeCycle.TimeUnitsPerDay - a.Time) + b.Time;
+        int elapsed = time >= a.Time
+            ? time - a.Time
+            : (WorldTimeCycle.TimeUnitsPerDay - a.Time) + time;
         float t = range > 0 ? (float)elapsed / range : 0f;
         t = Math.Clamp(t, 0f, 1f);
 

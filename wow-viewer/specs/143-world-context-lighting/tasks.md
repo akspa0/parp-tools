@@ -98,6 +98,13 @@ whole-map loads, native OpenGL runtime tests, and GPU profiling are user-run ope
 - [x] T030c [US4] Add the evidence-bounded pre-alpha version-2 partial reader profile for the embedded
   Global Light header and two nine-track data sets; retain the alternate set for inspection, keep
   modern track validation strict, and add focused plus `H:\\053-client` archive proof.
+- [x] T030d [US4] Add the pure Alpha world-time contract: 2,880 Light/LIT units over 24 real minutes,
+  with focused advance, conversion, and invalid-delta tests.
+- [x] T030e [US4] Drive the interactive viewer clock from a monotonic frame timer by default, preserve
+  manual time-of-day freeze/resume behavior, and feed the same time into Light DBC and LIT evaluation.
+- [ ] T030f [US4] Run the configured early-client visual timing check and confirm that the viewer clock,
+  local Light DBC overlays, LIT colors, sky, and audio time advance together without a user-visible
+  regression.
 - [ ] T031 [US4] Wire selected WMO root/group ambient, light references, vertex colors, baked weights, lightmap data, and fog inputs through `src/viewer/WoWViewer/Rendering/WmoRenderer.cs`.
 - [ ] T032 [US4] Replace only the WMO shader fallback behavior required by the selected inputs in `src/viewer/WoWViewer/Rendering/WmoRenderer.cs`; preserve batching, alpha, portal, liquid, and transparent paths.
 - [ ] T033 [US4] Wire attributable directional, ambient, local-light, fog, and effect-route inputs through `src/viewer/WoWViewer/Rendering/M2Renderer.cs` without changing animation or placement ownership.
