@@ -3,8 +3,9 @@
 ## Producer and owner
 
 Terrain loading supplies the decoded MCNK flag/liquid candidates and MCSE records for resident tiles.
-`WorldAudioRuntime` owns spatial normalization, source-to-SoundEntries diagnostics, source lifecycle,
-and effective start permission. `WorldScene` forwards the control/query methods. `ViewerApp_Audio.cs`
+The terrain adapters own source-coordinate normalization into `TerrainSoundEmitter.Position` while
+`WorldAudioRuntime` owns source-to-SoundEntries diagnostics, range decisions, source lifecycle, and
+effective start permission. `WorldScene` forwards the control/query methods. `ViewerApp_Audio.cs`
 renders controls and sends explicit user intent.
 
 ## Required operations

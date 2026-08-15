@@ -72,7 +72,8 @@ internal static class LegacyLiquidSoundEmitterFactory
             TriggerKind: AudioTriggerKind.McnkLiquid,
             McnkFlags: mcnkFlags,
             LiquidFamily: liquidFamily,
-            SoundWaterSubtype: soundSubtype));
+            SoundWaterSubtype: soundSubtype,
+            CoordinateProfile: "MCNK chunk corner -> liquid center -> renderer world"));
     }
 
     private static int ResolveSoundSubtype(uint mcnkFlags, AdtLiquidBasicType liquidType)
@@ -98,10 +99,7 @@ internal static class LegacyLiquidSoundEmitterFactory
             : AverageFiniteHeight(chunk.Heights);
 
         float chunkSize = WoWConstants.ChunkSize / 16f;
-        return new Vector3(
-            chunk.WorldPosition.X + chunkSize * 0.5f,
-            chunk.WorldPosition.Y + chunkSize * 0.5f,
-            surface);
+        return TerrainCoordinateTransform.ChunkCenter(chunk.WorldPosition, chunkSize, surface);
     }
 
     private static float AverageFiniteHeight(float[] heights)

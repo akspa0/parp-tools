@@ -40,9 +40,10 @@ owner intact and remove only the workbench presentation.
   and `AreaAmbience` and has terminal states for unresolved, missing, decode, backend, range, muted,
   ready, active, and stopped decisions.
 - `AlphaTerrainAdapter.LoadTileWithPlacements()` reads the Alpha 0.5.3 MCNK sound records into
-  `TileLoadResult.SoundEmitters` through `AdtMcseReader.ReadAlpha053Mcnk()`. The current hand-off
-  forwards only this MCSE list; `TerrainChunkData.McnkFlags` and `LiquidChunkData.Type` are decoded for
-  rendering but are not projected into audio candidates.
+  `TileLoadResult.SoundEmitters` through `AdtMcseReader.ReadAlpha053Mcnk()`. The hand-off now keeps
+  raw MCSE coordinates and supplies a renderer-facing position anchored to the owning chunk; the
+  same contract is used by the standard adapter. `TerrainChunkData.McnkFlags` and
+  `LiquidChunkData.Type` are also projected into bounded MCNK/liquid audio candidates.
 - `WorldAudioRuntime` owns resident tile emitter registration, diagnostic refresh, OpenAL source
   lifecycle, area music resolution, and explicit SoundEntries preview. `Update()` currently calls
   `TryStartEmitter()` for every newly in-range emitter and `UpdateAreaMusic()` can start a looping area
@@ -53,11 +54,16 @@ owner intact and remove only the workbench presentation.
 - `WorldScene` already forwards audio runtime state and preserves the packed Zone/SubZone lookup used by
   the status bar. The new control API must be forwarded through this facade rather than having ImGui own
   source state.
-- `AlphaTerrainAdapter.ConvertSoundPosition()` and the standard adapter's equivalent apply the global
-  `MapOrigin - raw` conversion directly. The screenshot evidence shows Alpha MCSE raw values near
+- The earlier `AlphaTerrainAdapter.ConvertSoundPosition()` and standard equivalent applied the global
+  `MapOrigin - raw` conversion directly. The screenshot evidence showed Alpha MCSE raw values near
   `(3, -3, 62.5)` being reported as approximately `(17069.7, 17063.7, 62.5)` for tile `(31,31)` and
-  therefore compared against the wrong world frame. The audio contract must compose the MCSE local
-  position with the owning tile/chunk origin before range checks and preserve both coordinate forms.
+  therefore compared against the wrong world frame. The shared `TerrainCoordinateTransform` now
+  composes MCSE local position with the owning chunk origin before range checks/OpenAL placement while
+  preserving both coordinate forms. The diagnostic profile names this hand-off explicitly.
+- The same screenshot exposed a second legacy path error: `LegacyLiquidSoundEmitterFactory` placed
+  MCNK liquid centers at `chunk.WorldPosition + halfChunk`, while terrain/liquid vertices extend from
+  the chunk corner toward decreasing renderer X/Y. The factory now uses `corner - halfChunk`, matching
+  the renderer geometry and reporting `MCNK chunk corner -> liquid center -> renderer world`.
 - `LiquidChunkData` documents Alpha 0.5.3 liquid family selection from MCNK flag bits `2..5`; standard
   loading also retains raw MCNK flags and resolves MH2O liquid IDs into a basic family. This is enough
   to establish the producer seam, but client-proven SoundEntries selection for each legacy flag/liquid

@@ -2,6 +2,17 @@
 
 Last updated: 2026-08-14
 
+## 2026-08-14 — Spatial audio emitter coordinate correction
+
+- Added the shared `TerrainCoordinateTransform` contract. Alpha and standard MCSE records retain
+  raw/local positions but now anchor renderer positions to their owning chunk before range checks,
+  OpenAL placement, and diagnostics.
+- Corrected legacy MCNK liquid marker placement from `chunk corner + halfChunk` to the terrain
+  convention `chunk corner - halfChunk`; diagnostics now identify the MCSE or MCNK coordinate path.
+- Focused audio-contract tests pass (11/11). The Windows viewer project builds with 0 errors in an
+  isolated output directory because the live viewer owns the normal Debug binaries. Live visual and
+  audible proof against the configured 0.5.3 client remains user-owned.
+
 ## 2026-08-14 — Alpha 0.5.3 time-of-day cycle checkpoint
 
 - Added the existing 2,880-unit / 24-real-minute world clock as a pure tested contract.

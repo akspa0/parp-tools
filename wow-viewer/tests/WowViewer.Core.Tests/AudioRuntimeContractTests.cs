@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Numerics;
 using WowViewer.Core.Audio;
 using WowViewer.Core.IO.Maps;
+using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.Tests;
 
@@ -140,6 +141,36 @@ public sealed class AudioRuntimeContractTests
     }
 
     [Fact]
+    public void TerrainSoundPosition_AnchorsChunkLocalMcseToOwningChunk()
+    {
+        Vector3 chunkCorner = TerrainCoordinateTransform.ChunkCorner(
+            tileX: 31,
+            tileY: 31,
+            chunkX: 0,
+            chunkY: 0,
+            mapOrigin: 17066.66666f,
+            tileSpacing: 533.33333f,
+            chunksPerTileEdge: 16);
+
+        Vector3 world = TerrainCoordinateTransform.FromChunkLocal(
+            new Vector3(3f, -3f, 62.5f),
+            chunkCorner);
+
+        AssertVectorNear(new Vector3(536.3333f, 530.3333f, 62.5f), world);
+    }
+
+    [Fact]
+    public void TerrainSoundPosition_UsesCornerMinusHalfForLiquidCenter()
+    {
+        Vector3 center = TerrainCoordinateTransform.ChunkCenter(
+            new Vector3(-4266.6667f, 0f, 0f),
+            33.33333f,
+            12.5f);
+
+        AssertVectorNear(new Vector3(-4283.3333f, -16.6667f, 12.5f), center);
+    }
+
+    [Fact]
     public void StandardMidiFileProbe_RecognizesSmfHeader()
     {
         byte[] midi = [
@@ -215,6 +246,13 @@ public sealed class AudioRuntimeContractTests
 
         Assert.False(DlsFileProbe.TryRead(truncated, out _, out string reason));
         Assert.NotEmpty(reason);
+    }
+
+    private static void AssertVectorNear(Vector3 expected, Vector3 actual)
+    {
+        Assert.InRange(MathF.Abs(expected.X - actual.X), 0f, 0.001f);
+        Assert.InRange(MathF.Abs(expected.Y - actual.Y), 0f, 0.001f);
+        Assert.InRange(MathF.Abs(expected.Z - actual.Z), 0f, 0.001f);
     }
 
     private static byte[] CreatePcmWav(int sampleRate, ushort channels, ushort bitsPerSample, byte[] pcm)

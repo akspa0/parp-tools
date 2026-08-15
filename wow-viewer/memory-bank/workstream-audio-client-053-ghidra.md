@@ -103,8 +103,14 @@ approximately `(17069.7,17063.7,62.5)` and rejected as roughly 23k units from a 
 The raw values must remain available, but the audio path must compose them with the owning tile/chunk
 origin before range checks, OpenAL placement, and `WorldPosition` diagnostics.
 
-The terrain path already decodes Alpha MCNK flag bits and produces `LiquidChunkData.Type`; those values
-currently feed rendering only. They are therefore the producer seam for legacy environmental and water
-trigger candidates on 0.5.3 maps where MCSE is absent. This note does not claim the client-proven
+The viewer-side correction is now implemented in the shared `TerrainCoordinateTransform`: Alpha and
+standard MCSE producers keep `RawPosition` and derive `Position` from the owning chunk corner using
+the established axis convention. The legacy MCNK liquid producer also now places its candidate at
+the chunk center using `corner - halfChunk`, matching the terrain/liquid renderer. Focused audio
+contract tests pass; configured-client audible proof remains user-owned.
+
+The terrain path decodes Alpha MCNK flag bits and produces `LiquidChunkData.Type`; those values now
+feed both rendering and the bounded legacy environmental/water candidate producer on 0.5.3 maps where
+MCSE is absent. This note does not claim the client-proven
 SoundEntries mapping for each MCNK/liquid variant; unresolved mappings must remain visible rather than
 being guessed. Later MCSE records are additive until a client-proven identity establishes a safe merge.

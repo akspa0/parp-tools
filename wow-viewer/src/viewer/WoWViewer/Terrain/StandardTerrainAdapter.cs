@@ -673,14 +673,15 @@ public class StandardTerrainAdapter : ITerrainAdapter
                         emitter.SoundPointId,
                         emitter.SoundNameId,
                         emitter.Position,
-                        ConvertSoundPosition(emitter.Position),
+                        ConvertSoundPosition(emitter.Position, tileX, tileY, chunkX, chunkY),
                         emitter.MinDistance,
                         emitter.MaxDistance,
                         emitter.CutoffDistance,
                         emitter.StartTime,
                         emitter.EndTime,
                         emitter.Mode,
-                        emitter.RawEntry));
+                        emitter.RawEntry,
+                        CoordinateProfile: "MCSE chunk-local -> owning chunk -> renderer world"));
                 }
 
                 // Diagnostic: log first chunk of each tile
@@ -851,12 +852,24 @@ public class StandardTerrainAdapter : ITerrainAdapter
         return textures;
     }
 
-    private static Vector3 ConvertSoundPosition(Vector3 position)
+    private static Vector3 ConvertSoundPosition(
+        Vector3 position,
+        int tileX,
+        int tileY,
+        int chunkX,
+        int chunkY)
     {
-        return new Vector3(
-            WoWConstants.MapOrigin - position.Y,
-            WoWConstants.MapOrigin - position.X,
-            position.Z);
+        Vector3 chunkWorldPosition = TerrainCoordinateTransform.ChunkCorner(
+            tileX,
+            tileY,
+            chunkX,
+            chunkY,
+            WoWConstants.MapOrigin,
+            WoWConstants.ChunkSize,
+            WoWConstants.ChunksPerTileEdge);
+        // Standard MCSE uses the same resident chunk-local hand-off as the
+        // Alpha reader; keep the transform in the shared core owner.
+        return TerrainCoordinateTransform.FromChunkLocal(position, chunkWorldPosition);
     }
 
     private static bool TryGetMhdr(byte[] adtBytes, out int mhdrStart, out GillijimProject.WowFiles.Mhdr mhdr)

@@ -104,7 +104,7 @@ fixture with MCSE and area audio data; verify all rows are off with zero automat
 coordinates normalize into the owning tile/chunk, enable one supported row, then disable it and verify
 stop/no-restart behavior.
 
-- [ ] T018 [US3] Add a canonical MCSE local-position normalization helper and focused tests, using the
+- [x] T018 [US3] Add a canonical MCSE local-position normalization helper and focused tests, using the
   owning tile/chunk origin and existing renderer axis convention before range checks or OpenAL placement;
   preserve raw/local values for diagnostics in `AlphaTerrainAdapter`, `StandardTerrainAdapter`, and the
   audio runtime seam.
@@ -225,6 +225,13 @@ from compilation alone.
 
 ## Implementation checkpoint — 2026-08-14
 
+- T018 is implemented: Alpha and standard MCSE records now preserve raw local coordinates while their
+  renderer-facing positions are anchored to the owning chunk corner through the shared core transform.
+  MCNK liquid candidates now use the same terrain corner convention for their center position; the
+  previous `+ halfChunk` placement put the audio marker on the opposite side of the liquid chunk.
+  Focused coordinate/audio-contract coverage is 11/11, and the Windows viewer project builds with
+  0 errors using isolated output because the live viewer owns the normal Debug binaries. This is not
+  audible or visual real-client proof.
 - T019 is implemented: resident MCNK/MCLQ/MH2O liquid state now produces inspectable candidates;
   exact-build `SoundWaterType` resolves supported rows and leaves missing mappings unresolved.
 - Alpha MCLQ preserves its packed 9x9 vertex records and 8x8 tile flags. Camera rotation no longer

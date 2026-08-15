@@ -78,7 +78,8 @@ public sealed record TerrainSoundEmitter(
     AudioTriggerKind TriggerKind = AudioTriggerKind.Mcse,
     uint McnkFlags = 0,
     int LiquidFamily = -1,
-    int SoundWaterSubtype = 0);
+    int SoundWaterSubtype = 0,
+    string CoordinateProfile = "TerrainSoundEmitter.RawPosition -> renderer world");
 
 public class AlphaTerrainAdapter : ITerrainAdapter
 {
@@ -244,7 +245,12 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                             emitter.SoundPointId,
                             emitter.SoundNameId,
                             emitter.Position,
-                            ConvertSoundPosition(emitter.Position),
+                            ConvertSoundPosition(
+                                emitter.Position,
+                                tileX,
+                                tileY,
+                                mcnk.IndexX,
+                                mcnk.IndexY),
                             emitter.MinDistance,
                             emitter.MaxDistance,
                             emitter.CutoffDistance,
@@ -259,7 +265,8 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                             emitter.PlayInstancesMin,
                             emitter.PlayInstancesMax,
                             emitter.InterSoundGapMin,
-                            emitter.InterSoundGapMax));
+                            emitter.InterSoundGapMax,
+                            CoordinateProfile: "MCSE chunk-local -> owning chunk -> renderer world"));
                     }
                 }
                 var chunkData = ExtractChunkData(mcnk, tileX, tileY, tileIdx);
@@ -328,14 +335,24 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         return stream.Read(payload, 0, size) == size;
     }
 
-    private static Vector3 ConvertSoundPosition(Vector3 position)
+    private static Vector3 ConvertSoundPosition(
+        Vector3 position,
+        int tileX,
+        int tileY,
+        int chunkX,
+        int chunkY)
     {
-        // Alpha MCSE uses the same C3Vector axis order as world placements:
-        // file (X, Z, Y) -> renderer (MapOrigin-Y, MapOrigin-X, Z).
-        return new Vector3(
-            WoWConstants.MapOrigin - position.Y,
-            WoWConstants.MapOrigin - position.X,
-            position.Z);
+        // Alpha MCSE stores a chunk-local C3Vector. The existing terrain
+        // convention is corner-minus-local with the X/Y axis swap.
+        Vector3 chunkWorldPosition = TerrainCoordinateTransform.ChunkCorner(
+            tileX,
+            tileY,
+            chunkX,
+            chunkY,
+            WoWConstants.MapOrigin,
+            WoWConstants.ChunkSize,
+            WoWConstants.ChunksPerTileEdge);
+        return TerrainCoordinateTransform.FromChunkLocal(position, chunkWorldPosition);
     }
 
     /// <summary>
