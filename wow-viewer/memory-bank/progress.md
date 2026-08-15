@@ -5,6 +5,21 @@ Last updated: 2026-08-14
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-14 — Spec 151 portal/game-mode/simple-surface planning
+
+- Checkpointed the accumulated prior work as `3bfbbba4` before opening branch
+  `151-portal-game-mode-surface`.
+- Created the Spec Kit specification, Ghidra-backed research, data model, contracts, quickstart,
+  plan, checklist, and dependency-ordered tasks for WMO portal-aware visibility, an opt-in character
+  head/game-mode physics path, a low-information interactive surface, and interactive/forensic
+  diagnostic profiles.
+- Queried the live 0.5.3 Ghidra REST bridge directly (no GUI driving) and recorded native anchors for
+  `RRenderThruPortals`, `RTransformPortal`, `ClipPortal`, `StabPortals`, and portal intersection.
+  The current renderer's center-distance/depth heuristic and inside-root full-visibility fallback are
+  documented as the first implementation gap.
+- No source implementation or runtime/FPS claim has been made. Next bounded action is Spec 151 Phase
+  1 portal decision/tests; game-mode and UI work wait for that checkpoint.
+
 ## 2026-08-14 — Spec 149 resident Zone/SubZone overlay slice
 
 - Queried the restarted Ghidra bridge's open 0.5.3 program and confirmed `CMapChunk::Create @

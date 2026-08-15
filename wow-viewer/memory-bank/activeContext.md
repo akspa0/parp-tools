@@ -7,15 +7,17 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Continue Spec 149 from the new resident Zone/SubZone overlay slice:
-  add focused aggregation coverage, then implement the PM4 region contracts/navigation and audio trigger
-  controls in their checkpoints. The overlay is already wired as opt-in resident-footprint evidence.
-- **Performance planning target:** Spec 150 now owns the Alpha 0.5.3 renderer performance lane. Recover
-  native render anchors in the open client and run repeated `profile-render` baselines before selecting
-  one reversible optimization; do not infer a win from the interactive 23 FPS screenshot.
+- **Next implementation target:** Spec 151 Phase 1 on branch `151-portal-game-mode-surface`: implement
+  the bounded WMO portal visibility decision and focused tests from the recorded 0.5.3 Ghidra anchors.
+  Stop after the portal checkpoint before starting game-mode physics or the simple surface.
+- **Performance planning target:** Spec 150 remains the broad Alpha 0.5.3 renderer evidence lane. Spec
+  151 owns the first concrete portal-specific optimization; use its counters and fallback evidence to
+  inform later repeated `profile-render` baselines. Do not infer a win from an interactive screenshot.
 - **Proof owner:** Focused PM4/audio contract tests and cross-platform viewer build pass; the user owns
   real-client region-camera, streaming, archive-provenance, and audible proof.
-- **Completed slice:** Spec 149 now has an opt-in resident Zone/SubZone overlay slice: Ghidra-backed
+- **Completed slice:** Checkpoint commit `3bfbbba4` contains the accumulated audio, AreaNumber,
+  Ghidra, and resident Zone/SubZone overlay work. Spec 149 now has an opt-in resident Zone/SubZone
+  overlay slice: Ghidra-backed
   MCNK AreaNumber evidence, revisioned resident chunk enumeration, AreaTable-grouped footprint regions,
   distinct Zone/Subzone styling, projected labels, and unresolved-count diagnostics. Spec 148 now has a
   provenance-first world-simulator spec/plan/tasks pack;
@@ -24,20 +26,23 @@ the owning spec for requirements and proof; read a workstream only when the spec
   `ParentAreaNum` without half-word aliases; status-bar and terrain audio now consume the same
   resolved Zone/SubZone result; the runtime exposes non-playing diagnostic rows; the audio panel
   shows IDs, coordinates, path/source, decode/backend state, and terminal reason.
-- **Main unproven gap:** Spec 149's PM4 region bounds/focus, correlation UI retirement, focused area
+- **Main unproven gap:** Spec 151's portal-volume final renderer admission, game-mode head anchor/
+  physics, simple-surface policy, and diagnostic budget remain unimplemented. Spec 149's PM4 region
+  bounds/focus, correlation UI retirement, focused area
   aggregation tests, MCNK/liquid environmental audio, MCSE tile/chunk coordinate normalization, and
   default-off per-trigger audio controls remain open. The area overlay is resident chunk coverage, not
   a proven complete polygon. ZoneMusic table indirection, exact `sounds.mpq` provenance, MIDI/DLS
   playback, and native MCSE callback installation remain separate proof gates. Spec 150 still lacks
   native renderer anchors, repeatable 0.5.3 baseline capture, and CPU/GPU attribution.
-- **Explicitly out of scope for the next slice:** Player/game-mode camera, player height, walking/running
-  speed, jumping, collision, camera model rendering, whole-map loading, renderer rewrite, shader
-  reconstruction, fake audio conversion, and claims of audible/FPS gains.
+- **Explicitly out of scope for the next slice:** Game-mode input/UI, simple-surface implementation,
+  whole renderer rewrite, shader reconstruction, fake audio conversion, and claims of visual/FPS/
+  audible gains. These are later Spec 151 phases or separate proof gates.
 
 ## Active spec lanes
 
 | Spec | State | Next handoff |
 |---|---|---|
+| 151 Portal-aware rendering/game mode/simple surface | Draft pack complete; Phase 1 ready | Implement shared bounded portal visibility decision and WMO final-admission tests from `research.md`; stop at the validation checkpoint. |
 | 149 PM4 region navigation/audio trigger controls | Draft pack; resident area overlay slice implemented, focused tests open | Add area aggregation tests, then implement contracts/caller audit and resident PM4 region list + double-click camera focus; retire correlation UI only after that checkpoint; gate audio triggers default-off. |
 | 150 Alpha 0.5.3 renderer performance | Draft evidence/planning pack complete; no source optimization started | Recover native world/terrain/object/resource/LOD anchors and run two repeated production `profile-render` baselines before choosing one owner. |
 | 148 Artifact world simulator runtime | Phase 1 diagnostics in progress; client contract correction landed | Add ZoneMusic indirection, then finish read/decode/source-stage coverage and user real-client inspection. |
