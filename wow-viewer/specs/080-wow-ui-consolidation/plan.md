@@ -93,17 +93,18 @@ wow-viewer/
 mapping. `ViewerApp_Sidebars.cs` owns the tabbed dispatch. The five routes are:
 
 1. `Quick`: direct `DrawQuickControlsContent()` body.
-2. `Inspect`: direct `DrawUnifiedInspectorContent()` body. It shows the current
-   selection summary, loaded/selected model facts, current ADT/MCNK facts, and
-   selected PM4 facts inline when available.
-3. `Scene`: a single page selector for placements, tiles, and LOD. Source and
-   map/file loading remain exclusively in the left Navigator sidebar.
+2. `Inspect`: `DrawUnifiedInspectorContent()` with a compact page selector for
+   context, investigation, MCNK/ADT, world context, Archeology, animations,
+   and actions. Current selection/model and terrain summaries remain inline.
+3. `Scene`: a single page selector for placements and LOD. Tile/chunk targeting
+   and clipboard/save remain together under Experimental > Terrain Lab. Source
+   and map/file loading remain exclusively in the left Navigator sidebar.
 4. `Utilities`: a single page selector for diagnostics, capture, lighting,
    and Audio. Audio remains opt-in/default-off and selecting its page does not
    start playback.
-5. `Experimental`: a single page selector for Terrain Lab, PM4, Archeology,
-   and Converters. Terrain Lab calls the existing tile/chunk target
-   body and clipboard body in one page.
+5. `Experimental`: a single page selector for Terrain Lab, PM4, Converters,
+   and Population. Terrain Lab calls the existing tile/chunk target body and
+   clipboard body in one page; Archeology is promoted to Inspect.
 
 Legacy `ModelBottomTab`, `WorldBottomTab`, and `ToolsBottomTab` callers are
 adapted at `OpenWorkbenchTab(...)` rather than left as visible routes. This
@@ -115,8 +116,9 @@ keeps menu/hotkey call sites safe while giving the user one canonical IA.
   Experimental; the three retired top labels do not appear in the dispatch.
 - Build check: `dotnet build I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`.
 - Manual check: open each destination with a terrain-backed world, select an
-  object and a PM4 surface, inspect a camera/hovered MCNK, open Utilities >
-  Audio without starting playback, and open Experimental > Terrain Lab.
+  object and a PM4 surface, inspect a camera/hovered MCNK, open Inspect's
+  Archeology page, open Utilities > Audio without starting playback, and open
+  Experimental > Terrain Lab.
 - Compatibility check: menu callers for model info, world placement, PM4,
   terrain, utilities, and capture still open a reachable destination.
 - Out of scope: retiring legacy/dockspace dispatch, deleting old content
@@ -133,6 +135,42 @@ Capture page adapter, and keep legacy/dockspace behavior unchanged.
 This phase is intentionally sidebar-only. Renderer hitching, ADT/object
 admission, fog, and streaming changes are deferred to Spec 150 and are not
 part of this navigation pass.
+
+## Current Phase 2D — Placement Ownership Cleanup
+
+The historical `DrawWorldObjectsContentCore()` combines placement lists with
+selection editing, visual investigation, MCNK analysis, SQL population, PM4,
+liquid, lighting, area-trigger, and POI controls. The canonical Scene route
+must not expose that composite body. Keep the existing method for legacy
+compatibility while routing the tabbed workbench through named owners:
+
+1. Move the Phase Map/secondary overlay selector into the left Navigator's
+   World Maps content and remove it from MCNK analysis.
+2. Route selected-placement editing, visual investigation, and full MCNK/ADT
+   analysis into Inspect. Keep the compact terrain summary above the detailed
+   analysis.
+3. Make Scene > Placements render only WMO/MDX placement lists and focus
+   actions. Add Experimental > Population for the SQL world-population body.
+4. Keep PM4 and lighting on their existing Experimental and Utilities pages;
+   the legacy composite body is compatibility-only and is not a canonical
+   destination.
+
+The phase stops after focused source checks and the isolated viewer build. No
+renderer, streaming, fog, or residency behavior changes are included.
+
+## Current Phase 2E — Inspect And Terrain Page Consolidation
+
+1. Remove the canonical Scene Tiles page; route its compatibility opener to
+   Experimental > Terrain Lab, which already combines tile/chunk targeting with
+   clipboard/save controls.
+2. Remove Archeology from the Experimental selector and map its compatibility
+   opener to the Inspect Archeology page.
+3. Give Inspect one compact dropdown selector for context, investigation,
+   MCNK/ADT, world context, Archeology, animations, and actions. Keep the
+   current selection/terrain summaries inline above that selector.
+
+Stop at source checks and the isolated viewer build. Runtime visual proof of
+the dropdown reachability remains user-owned.
 
 ## Phased Delivery
 

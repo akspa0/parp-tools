@@ -22,6 +22,20 @@ public enum WorldBottomTab
 }
 
 /// <summary>
+/// Compact pages exposed by the canonical Inspect destination.
+/// </summary>
+public enum InspectBottomTab
+{
+    Context = 0,
+    SceneInvestigation = 1,
+    Mcnk = 2,
+    WorldContext = 3,
+    Archeology = 4,
+    Animations = 5,
+    Actions = 6,
+}
+
+/// <summary>
 /// Compatibility page identifiers for the former Tools route.
 /// Each value maps to a former 069 page's content.
 /// </summary>
@@ -98,12 +112,16 @@ public static class WorkbenchNavigator
     public static string[] GetBottomTabLabels(WorkbenchTab tab) => tab switch
     {
         WorkbenchTab.Quick => [],
-        WorkbenchTab.Inspect => [],
-        WorkbenchTab.Scene => ["Placements", "Tiles", "LOD"],
+        WorkbenchTab.Inspect => GetInspectBottomTabLabels(),
+        WorkbenchTab.Scene => ["Placements", "LOD"],
         WorkbenchTab.Utilities => GetUtilitiesBottomTabLabels(),
-        WorkbenchTab.Experimental => ["Terrain Lab", "PM4", "Archeology", "Converters"],
+        WorkbenchTab.Experimental => ["Terrain Lab", "PM4", "Converters", "Population"],
         _ => [],
     };
+
+    /// <summary>Labels for <see cref="InspectBottomTab"/>; order must match the enum.</summary>
+    public static string[] GetInspectBottomTabLabels() =>
+        ["Context", "Scene Investigation", "MCNK / ADT", "World Context", "Archeology", "Animations", "Actions"];
 
     public static string[] GetTerrainBottomTabLabels() => ["Clipboard", "Analysis", "MCNK", "Weak Signal", "Export", "Tools"];
 

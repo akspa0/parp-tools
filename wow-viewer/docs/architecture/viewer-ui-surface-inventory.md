@@ -184,10 +184,10 @@ independent proof.
 | Destination | Direct body | Page selector | Canonical ownership |
 |---|---|---|---|
 | Quick | `DrawQuickControlsContent` | none | compact camera, lighting, fog, scene, and interface controls |
-| Inspect | `DrawUnifiedInspectorContent` | none | selection/model, ADT/MCNK, and PM4 context summaries |
-| Scene | existing `DrawWorld*SubTab` bodies | Placements / Tiles / LOD | world placements, tile navigation, and LOD; source remains in the left Navigator |
+| Inspect | `DrawUnifiedInspectorContent` | Context / Scene Investigation / MCNK / ADT / World Context / Archeology / Animations / Actions | selection/model, investigation, terrain facts, world context, and core model/archeology actions |
+| Scene | existing `DrawWorld*SubTab` bodies | Placements / LOD | list-only WMO/MDX placements and LOD; tile/chunk tools live in Experimental Terrain Lab; source remains in the left Navigator |
 | Utilities | `DrawUtilitiesSubTabContent` | Minimap / Log / Perf / Render Quality / Taxi / Capture / Asset Catalog / Runtime Stats / Lighting / Audio | diagnostics, capture, lighting, and audio; Audio has no duplicate top-level route |
-| Experimental | existing tool bodies | Terrain Lab / PM4 / Archeology / Converters | evidence, terrain lab, archaeology, and conversion tools |
+| Experimental | existing tool bodies | Terrain Lab / PM4 / Converters / Population | tile/chunk lab, PM4 evidence, conversion, and optional SQL population tools |
 
 `Model`, `World`, and `Tools` are compatibility concepts only and are not
 rendered as tabbed destinations. Terrain Lab owns tile/chunk selection,
@@ -202,7 +202,9 @@ rows below remain historical route inventory until the separate retirement gate.
 | A76 | Model/Object Info | `DrawUnifiedInspectorContent` | Inspector | ✅ (Inspect, inline) | ✅ | selection or loaded model | Right | working | 060/071 |
 | A77 | ADT/MCNK Context | `DrawCompactTerrainContextSummary` | Inspector | ✅ (Inspect, inline) | ✅ | `hasTerrain` | Right | working | 053/054 |
 | A78 | PM4 Context | `DrawSelectedPm4ContextSummary` | Inspector | ✅ (Inspect, inline) | ✅ | selected PM4 surface | Right | working | 049/051 |
-| A79 | World Objects | `DrawWorldObjectsPanelContent` | Inspector | ✅ (Scene → Placements) | ✅ | `_worldScene != null` | Scene | working | 071 |
+| A79 | WMO/MDX Placements | `DrawPlacementListsContent` | Scene | ✅ (Scene → Placements, list-only) | ✅ (legacy composite) | `_worldScene != null` | Scene | working | 071 |
+| A83 | MCNK/ADT Analysis | `DrawTerrainChunkInvestigationContent` | Inspector | ✅ (Inspect, detailed) | ✅ | `hasTerrain` | Right | working | 053/054 |
+| A84 | SQL Population | `DrawPopulationSubTabContent` | Experimental | ✅ (Experimental → Population) | ✅ (legacy composite) | `_worldScene != null` | Experimental | working | 071 |
 | A80 | Audio | `DrawAudioContent` | Utilities | ✅ (Utilities → Audio) | ✅ | `_worldScene != null` | Utilities | working | 146/149 |
 | A81 | Runtime Stats | `DrawRuntimeStatsPanelContent` | Utilities | ✅ (Utilities → Runtime Stats) | ✅ | — | Utilities | working | 090 |
 | A82 | PM4 Workbench | `DrawPm4WorkbenchInspector` | Inspector | ✅ (Experimental → PM4) | ✅ | `_worldScene != null` | Experimental | working | 049/051 |
@@ -225,7 +227,7 @@ rows below remain historical route inventory until the separate retirement gate.
 | 90 | MCNK Explorer | `DrawMcnkExplorerWindow` | `_showMcnkExplorerWindow` | ✅ (Terrain → MCNK) | ✅ | `hasTerrain` | working | 053/054 |
 | 91 | Capture Automation | `DrawCaptureAutomationWindow` | `_showCaptureAutomationWindow` | ✅ (Utilities → Capture) | ✅ | — | working | 053/054 |
 | 92 | PM4 Alignment | `DrawPm4AlignmentWindow` | `_showPm4AlignmentWindow` | ❌ (no tab route) | ✅ | — | **missing in tabbed** | 049/051 |
-| 93 | UniqueId Archeology | `DrawUniqueIdArchaeologyWindow` | `_showUniqueIdArchaeologyWindow` | ✅ (Archeology) | ✅ | `_worldScene != null` | working | 049/051 |
+| 93 | UniqueId Archeology | `DrawUniqueIdArchaeologyWindow` | `_showUniqueIdArchaeologyWindow` | ✅ (Inspect → Archeology) | ✅ | `_worldScene != null` | working | 049/051 |
 | 94 | Taxi | `DrawTaxiWindow` | `_showTaxiWindow` | ✅ (Utilities → Taxi) | ✅ | `_worldScene != null` | working | 053/054 |
 | 95 | Weak Signal | `DrawWeakSignalWindow` | `_showWeakSignalWindow` | ✅ (Terrain → Weak Signal) | ✅ | `hasTerrain` | working | 053/054 |
 
@@ -281,8 +283,8 @@ user-facing destinations.
 | # | Sub-tab | Source Method | Status | Predecessor Spec |
 |---|---------|---------------|--------|------------------|
 | 116 | Source | `DrawNavigatorPanelContent` → workspace, file browser, and map discovery | retired from right sidebar; owned by left Navigator | 057/071 |
-| 117 | Placements | `DrawWorldPlacementsSubTab` → `DrawWorldObjectsContentCore` | working | 071 |
-| 118 | Tiles | `DrawWorldTilesSubTab` → `DrawTerrainWorkbenchSelectionContent` + `DrawTerrainControlsAdjustmentContent` | working | 053/054 |
+| 117 | Placements | `DrawWorldPlacementsSubTab` → `DrawPlacementListsContent` | list-only WMO/MDX focus lists; legacy composite retained for compatibility | 071 |
+| 118 | Tiles | `DrawTerrainLabSubTab` → `DrawTerrainWorkbenchSelectionContent` + `DrawChunkClipboardContent` | moved to Experimental → Terrain Lab; compatibility opener preserved | 053/054 |
 | 119 | Selection Tools | `DrawWorldSelectionToolsSubTab` → `DrawSelectedObjectSummaryContent` | working | 071 |
 | 120 | LOD | `DrawWorldLodSubTab` | **placeholder** (first pass only) | 056/080 |
 
@@ -291,8 +293,8 @@ user-facing destinations.
 | # | Sub-tab | Source Method | Status | Predecessor Spec |
 |---|---------|---------------|--------|------------------|
 | 121 | Quick Controls | `DrawQuickControlsContent` | working | 060 |
-| 122 | Archeology | `DrawArcheologySubTabContent` (Range/Layers/Playback/Capture) | working | 049/051 |
-| 123 | Terrain | `DrawTerrainSubTabContent` (Clipboard/Analysis/MCNK/WeakSignal/Export) | working | 053/054 |
+| 122 | Archeology | `DrawArcheologySubTabContent` (Range/Layers/Playback/Capture) | promoted to Inspect dropdown; compatibility body retained | 049/051 |
+| 123 | Terrain | `DrawTerrainSubTabContent` (Clipboard/Analysis/MCNK/WeakSignal/Export) | compatibility body; canonical Terrain Lab owns tile/chunk page | 053/054 |
 | 124 | Utilities | `DrawUtilitiesSubTabContent` (Minimap/Log/Perf/RenderQuality/Taxi/Capture/RuntimeStats) | working | 090/093 |
 | 125 | Converters | **NOT IMPLEMENTED** | **missing** | 073b |
 
@@ -370,3 +372,25 @@ user-facing destinations.
 - ⚠️ Runtime/manual proof remains open for each destination and for legacy-mode
   route parity. Existing historical sub-tab rows must not be deleted until
   that proof is recorded.
+
+## 20. Phase 2D Ownership Gate
+
+- ✅ Phase Map/secondary overlay selection is called from left Navigator World
+  Maps and is no longer called by the MCNK analysis panel.
+- ✅ Inspect owns the detailed MCNK/ADT body, selected-placement editing, and
+  scene investigation controls.
+- ✅ Scene Placements uses a list-only WMO/MDX body; the historical composite
+  remains legacy compatibility code only.
+- ✅ SQL population has a named Experimental → Population page; PM4 and
+  Lighting retain their existing named owners.
+- ⚠️ Compact-window and runtime visual proof remain open.
+
+## 21. Phase 2E Ownership Gate
+
+- ✅ Scene's canonical selector contains Placements and LOD only.
+- ✅ Tile/chunk targeting and clipboard/save remain together under
+  Experimental → Terrain Lab.
+- ✅ Inspect has a single dropdown page selector, with Archeology directly
+  reachable from that information surface.
+- ✅ Experimental no longer buries Archeology as a top-level page.
+- ⚠️ Compact-window and runtime visual proof remain open.

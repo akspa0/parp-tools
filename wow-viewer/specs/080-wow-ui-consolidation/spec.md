@@ -229,10 +229,10 @@ active tabbed sidebar now converges on five destinations:
 | Destination | Purpose | Canonical content owner |
 |---|---|---|
 | Quick | The default, compact camera, lighting, fog, scene, and interface controls | `DrawQuickControlsContent()` |
-| Inspect | One always-available context inspector for the selected model/object, current ADT/MCNK context, and selected PM4 facts | `DrawUnifiedInspectorContent()` |
-| Scene | World placements, tile targeting, LOD facts, and scene-level visibility | existing World sub-tab bodies, with one Scene page selector |
+| Inspect | Compact dropdown-driven context inspector for the selected model/object, ADT/MCNK facts, world context, Archeology, and model actions | `DrawUnifiedInspectorContent()` |
+| Scene | World placements, LOD facts, and scene-level visibility | existing World sub-tab bodies, with one Scene page selector |
 | Utilities | Minimap, log/perf, render quality, taxi, capture, asset catalog, runtime stats, lighting, and audio | `DrawUtilitiesSubTabContent()` |
-| Experimental | PM4 evidence, terrain lab, archaeology, and converters that are useful but not part of the normal viewing path | existing tool bodies, with one Experimental page selector |
+| Experimental | PM4 evidence, tile/chunk terrain lab, converters, and optional population tools | existing tool bodies, with one Experimental page selector |
 
 The top row must not expose `Model`, `World`, or `Tools`. Model/object facts
 are not separate competing panels: the Inspect destination owns the common
@@ -260,10 +260,11 @@ experimental and is not shown in the common inspector or a PM4 tooltip.
 - Utilities is directly reachable from the top row, and Audio is reachable only
   as the Audio page under Utilities. Selecting either page remains opt-in and
   default-off according to the audio spec; navigation does not start playback.
-- Utilities and Experimental are the only destinations that retain page
-  selectors; Quick, Inspect, and Scene do not add another nested navigation
-  layer.
-- Scene's selector contains only Placements, Tiles, and LOD. Source and
+- Inspect, Utilities, and Experimental retain compact page selectors; Quick
+  and Scene do not add another nested navigation layer beyond their own named
+  Scene pages.
+- Scene's selector contains only Placements and LOD. Tile/chunk targeting and
+  clipboard remain under Experimental > Terrain Lab. Source and
   file/map loading remain exclusively in the left Navigator sidebar.
 - The legacy/dockspace route remains behaviorally unchanged in this slice.
 
@@ -282,6 +283,44 @@ second navigation action. The canonical mappings are Log Viewer -> Log, Perf
 
 This follow-up is limited to route landing and inline labels. It does not
 change renderer, ADT/object streaming, fog, or frame-time behavior.
+
+## Current IA Follow-up — 2026-08-15 — Placement ownership cleanup
+
+The historical `DrawWorldObjectsContentCore()` combines placement lists with
+selection editing, visual investigation, MCNK analysis, SQL population, PM4,
+liquid, lighting, area-trigger, and POI controls. The canonical tabbed route
+must not expose that composite body. The visible ownership contract for this
+phase is:
+
+- `Scene > Placements` contains only WMO and MDX placement lists and their
+  camera-focus actions.
+- `Inspect` owns selected-placement editing, scene investigation controls,
+  and the full MCNK/ADT analysis body. MCNK facts must not require opening the
+  Scene route or a popup-only explorer.
+- `Navigator > World Maps` is the only place for the Phase Map/secondary
+  overlay selector. It is part of source/map selection, not terrain chunk
+  inspection and not Scene Placements.
+- PM4 controls remain under `Experimental > PM4`; lighting/LIT controls remain
+  under `Utilities > Lighting`; SQL world population controls are exposed by a
+  named `Experimental > Population` page.
+- Existing legacy composite callers remain compatibility-only until their
+  separate retirement gate; they must not define the canonical tabbed IA.
+
+This is a source/build-validated sidebar phase. Compact-window and runtime
+visual proof remain user-owned.
+
+## Current IA Follow-up — 2026-08-15 — Inspect and terrain page consolidation
+
+- `Scene` exposes only `Placements` and `LOD`. Tile targeting, chunk targeting,
+  and chunk clipboard/save operations share the existing `Experimental > Terrain
+  Lab` page.
+- `Inspect` exposes a compact dropdown with `Context`, `Scene Investigation`,
+  `MCNK / ADT`, `World Context`, `Archeology`, `Animations`, and `Actions`.
+  Archeology is therefore a first-class Info/Inspect page rather than an
+  Experimental top-level destination.
+- `Experimental` retains only Terrain Lab, PM4, Converters, and Population.
+  Existing compatibility callers map Tiles to Terrain Lab and Archeology to
+  Inspect without changing their underlying operations.
 
 ## Current IA Follow-up — Utilities and animation restoration — 2026-08-15
 

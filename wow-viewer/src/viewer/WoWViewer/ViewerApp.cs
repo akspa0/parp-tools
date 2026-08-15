@@ -8201,6 +8201,102 @@ void main() {
         });
     }
 
+    /// <summary>
+    /// Canonical Scene > Placements body. Keep this list-only so scene
+    /// navigation does not also become the owner for diagnostics or tools.
+    /// </summary>
+    private void DrawPlacementListsContent()
+    {
+        if (_worldScene == null)
+            return;
+
+        if (_worldScene.ModfPlacements.Count > 0 && ImGui.TreeNode($"WMO Placements ({_worldScene.ModfPlacements.Count})"))
+        {
+            if (ImGui.BeginChild("##CanonicalWmoPlacements", new Vector2(0, 220f), true))
+            {
+                float rowHeight = GetUniformListRowHeight();
+                GetVisibleListRange(_worldScene.ModfPlacements.Count, rowHeight, out int startIndex, out int endIndex);
+                if (startIndex > 0)
+                    ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
+
+                for (int i = startIndex; i < endIndex; i++)
+                {
+                    var p = _worldScene.ModfPlacements[i];
+                    string name = p.NameIndex < _worldScene.WmoModelNames.Count
+                        ? Path.GetFileName(_worldScene.WmoModelNames[p.NameIndex]) : "?";
+                    string label = $"[{i}] {name}";
+                    if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick)
+                        && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    {
+                        _camera.Position = p.Position + new Vector3(0, 0, 50);
+                        _camera.Pitch = -30f;
+                    }
+
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
+                        ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
+                        ImGui.Text($"Flags: 0x{p.Flags:X4}");
+                        ImGui.Text($"Bounds: ({p.BoundsMin.X:F0},{p.BoundsMin.Y:F0},{p.BoundsMin.Z:F0}) - ({p.BoundsMax.X:F0},{p.BoundsMax.Y:F0},{p.BoundsMax.Z:F0})");
+                        ImGui.EndTooltip();
+                    }
+                }
+
+                if (endIndex < _worldScene.ModfPlacements.Count)
+                    ImGui.Dummy(new Vector2(0, (_worldScene.ModfPlacements.Count - endIndex) * rowHeight));
+
+                ImGui.EndChild();
+            }
+            ImGui.TreePop();
+        }
+
+        int mddfCount = _worldScene.MddfPlacements.Count;
+        int mddfShow = Math.Min(mddfCount, 200);
+        if (mddfCount > 0 && ImGui.TreeNode($"MDX Placements ({mddfCount}{(mddfCount > mddfShow ? $", showing {mddfShow}" : "")})"))
+        {
+            if (ImGui.BeginChild("##CanonicalMdxPlacements", new Vector2(0, 220f), true))
+            {
+                float rowHeight = GetUniformListRowHeight();
+                GetVisibleListRange(mddfShow, rowHeight, out int startIndex, out int endIndex);
+                if (startIndex > 0)
+                    ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
+
+                for (int i = startIndex; i < endIndex; i++)
+                {
+                    var p = _worldScene.MddfPlacements[i];
+                    string name = p.NameIndex < _worldScene.MdxModelNames.Count
+                        ? Path.GetFileName(_worldScene.MdxModelNames[p.NameIndex]) : "?";
+                    string label = $"[{i}] {name} s={p.Scale:F2}";
+                    if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick)
+                        && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    {
+                        _camera.Position = p.Position + new Vector3(0, 0, 20);
+                        _camera.Pitch = -30f;
+                    }
+
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
+                        ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
+                        ImGui.Text($"Scale: {p.Scale:F3}");
+                        ImGui.EndTooltip();
+                    }
+                }
+
+                if (endIndex < mddfShow)
+                    ImGui.Dummy(new Vector2(0, (mddfShow - endIndex) * rowHeight));
+
+                ImGui.EndChild();
+            }
+            ImGui.TreePop();
+        }
+
+        if (mddfCount == 0 && _worldScene.ModfPlacements.Count == 0)
+            ImGui.TextDisabled("No WMO or MDX placements are loaded for the current world.");
+    }
+
     private void DrawWorldObjectsContentCore()
     {
         if (_worldScene == null) return;
@@ -8214,58 +8310,7 @@ void main() {
         LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
 
         ImGui.Separator();
-        ImGui.Text("SQL World Population");
-        ImGui.InputTextWithHint("##sqlroot", "Path to alpha-core root (example: external/alpha-core)", ref _sqlAlphaCoreRoot, 1024);
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("WoWViewer reads NPC/GameObject spawns from alpha-core SQL dumps (etc/databases/world + dbc).");
-
-        DrawToolbarPopupButton("SQL Actions", string.Empty, "##SqlWorldActionsPopup", () =>
-        {
-            if (ImGui.Button("Use Submodule Path"))
-            {
-                string candidate = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "..", "..", "external", "alpha-core"));
-                _sqlAlphaCoreRoot = candidate;
-                ImGui.CloseCurrentPopup();
-            }
-
-            bool canLoadSqlFromPopup = _currentMapId >= 0 && !string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot);
-            if (!canLoadSqlFromPopup)
-                ImGui.BeginDisabled();
-            if (ImGui.Button("Load SQL Spawns (Current Map)"))
-            {
-                LoadSqlSpawnsForCurrentMap();
-                ImGui.CloseCurrentPopup();
-            }
-            if (!canLoadSqlFromPopup)
-                ImGui.EndDisabled();
-
-            if (ImGui.Button("Clear SQL Spawns"))
-            {
-                ResetSqlSpawnStreamingState(clearSceneSpawns: true);
-                _sqlSpawnStatus = "Cleared SQL spawns.";
-                ImGui.CloseCurrentPopup();
-            }
-        });
-        bool sqlSettingsChanged = false;
-        sqlSettingsChanged |= ImGui.Checkbox("NPC Spawns", ref _sqlIncludeCreatures);
-        ImGui.SameLine();
-        sqlSettingsChanged |= ImGui.Checkbox("GameObject Spawns", ref _sqlIncludeGameObjects);
-        sqlSettingsChanged |= ImGui.Checkbox("AOI Tile Filter", ref _sqlUseAoiFilter);
-        if (_sqlUseAoiFilter)
-            sqlSettingsChanged |= ImGui.SliderInt("AOI Tile Radius", ref _sqlAoiTileRadius, 1, 16);
-        sqlSettingsChanged |= ImGui.Checkbox("Stream With Camera", ref _sqlStreamWithCamera);
-        sqlSettingsChanged |= ImGui.SliderInt("Max SQL Spawns", ref _sqlMaxSpawns, 100, 20000);
-        sqlSettingsChanged |= ImGui.SliderFloat("GO MDX Scale", ref _sqlGameObjectMdxScaleMultiplier, 0.10f, 3.00f, "%.2fx");
-        _worldScene.SqlGameObjectMdxScaleMultiplier = _sqlGameObjectMdxScaleMultiplier;
-        if (sqlSettingsChanged && _sqlMapSpawnsCache != null)
-        {
-            _sqlForceStreamRefresh = true;
-            if (!_sqlStreamWithCamera || !_sqlUseAoiFilter)
-                ApplySqlSpawnsToScene(_sqlMapSpawnsCache, updateStatus: true);
-        }
-
-        ImGui.TextDisabled($"Status: {_sqlSpawnStatus}");
-        ImGui.TextDisabled($"Injected: {_worldScene.ExternalSpawnInstanceCount} total ({_worldScene.ExternalSpawnMdxCount} MDX, {_worldScene.ExternalSpawnWmoCount} WMO)");
+        DrawPopulationSubTabContent();
 
         bool showPm4Overlay = _worldScene.ShowPm4Overlay;
         if (ImGui.Checkbox("PM4 Overlay", ref showPm4Overlay))
@@ -14898,6 +14943,9 @@ void main() {
             else
                 _activeTopTab = WorkbenchTab.Quick;
             _activeBottomTabIndex = Math.Max(0, settings.ActiveBottomTab);
+            _activeUtilitiesTabIndex = _activeTopTab == WorkbenchTab.Utilities
+                ? _activeBottomTabIndex
+                : 0;
             _showLeftSidebar = settings.ShowLeftSidebar;
             _showRightSidebar = settings.ShowRightSidebar;
             _showWorkspaceBarsPanel = settings.ShowWorkspaceBarsPanel;

@@ -764,6 +764,9 @@ public partial class ViewerApp
                 ImGui.Dummy(new Vector2(0, (_discoveredMaps.Count - endIndex) * rowHeight));
             ImGui.EndChild();
         }
+
+        ImGui.Separator();
+        DrawPhasedTerrainOverlayControls();
     }
 
     private void DrawFileBrowserContent(float reservedFooterHeight = 0f)
@@ -976,9 +979,8 @@ public partial class ViewerApp
     }
 
     /// <summary>
-    /// Single inline owner for the current world/model context. The full
-    /// evidence tools remain available under Experimental, but identity and
-    /// coordinate facts are never hidden behind a popup or a second inspector.
+    /// Single inline owner for the current world/model context. Detail surfaces
+    /// use the same compact dropdown pattern as the other canonical routes.
     /// </summary>
     private void DrawUnifiedInspectorContent()
     {
@@ -1003,24 +1005,192 @@ public partial class ViewerApp
         if (DrawCompactTerrainContextSummary())
             hasContext = true;
 
-        bool hasWorldMdxAnimation = _worldScene?.SelectedInstance.HasValue == true
-            && _worldScene.SelectedObjectType == Terrain.ObjectType.Mdx;
-        if (_renderer is IModelRenderer || hasWorldMdxAnimation)
-        {
-            ImGui.Separator();
-            DrawModelAnimationsSubTab();
+        if (DrawUnifiedInspectorDiagnosticsContent())
             hasContext = true;
-        }
-
-        if (_renderer is IModelRenderer || _renderer is WmoRenderer)
-        {
-            ImGui.Separator();
-            DrawModelActionsSubTab();
-            hasContext = true;
-        }
 
         if (!hasContext)
             ImGui.TextDisabled("Move the camera over a loaded ADT/MCNK or select a model, world object, or PM4 surface.");
+    }
+
+    private bool DrawUnifiedInspectorDiagnosticsContent()
+    {
+        switch ((InspectBottomTab)_activeBottomTabIndex)
+        {
+            case InspectBottomTab.SceneInvestigation:
+                if (_worldScene == null)
+                {
+                    ImGui.TextDisabled("Load a world to use scene investigation.");
+                    return false;
+                }
+
+                DrawSelectedPlacementEditControls();
+                ImGui.Separator();
+                DrawVisualInvestigationToolbox(showWorldObjectRangeControls: true);
+                return true;
+
+            case InspectBottomTab.Mcnk:
+                if (_terrainManager == null && _vlmTerrainManager == null)
+                {
+                    ImGui.TextDisabled("Load a terrain-backed world to inspect MCNK / ADT data.");
+                    return false;
+                }
+
+                DrawTerrainChunkInvestigationContent();
+                return true;
+
+            case InspectBottomTab.WorldContext:
+                if (_worldScene == null)
+                {
+                    ImGui.TextDisabled("Load a world to inspect world context.");
+                    return false;
+                }
+
+                DrawWlLiquidInvestigationPanel(defaultOpen: true);
+                ImGui.Separator();
+                DrawInspectorWorldContextContent();
+                return true;
+
+            case InspectBottomTab.Archeology:
+                DrawArcheologySubTabContent();
+                return _worldScene != null;
+
+            case InspectBottomTab.Animations:
+                if (_renderer is IModelRenderer
+                    || (_worldScene?.SelectedInstance.HasValue == true
+                        && _worldScene.SelectedObjectType == Terrain.ObjectType.Mdx))
+                {
+                    DrawModelAnimationsSubTab();
+                    return true;
+                }
+
+                ImGui.TextDisabled("Load a model or select a world MDX/M2 placement to inspect animations.");
+                return false;
+
+            case InspectBottomTab.Actions:
+                if (_renderer is IModelRenderer || _renderer is WmoRenderer)
+                {
+                    DrawModelActionsSubTab();
+                    return true;
+                }
+
+                ImGui.TextDisabled("Load a model (M2/MDX/WMO) to use model actions.");
+                return false;
+
+            case InspectBottomTab.Context:
+            default:
+                ImGui.TextDisabled("Select a model, world object, PM4 surface, or terrain chunk for more context.");
+                return _worldScene?.HasSelectedPm4Object == true
+                    || _worldScene?.SelectedInstance.HasValue == true
+                    || !string.IsNullOrWhiteSpace(_modelInfo)
+                    || _terrainManager != null
+                    || _vlmTerrainManager != null;
+        }
+    }
+
+    private void DrawInspectorWorldContextContent()
+    {
+        if (_worldScene == null)
+            return;
+
+        bool objectFogEnabled = _worldScene.ObjectFogEnabled;
+        if (ImGui.Checkbox("Fog Objects", ref objectFogEnabled))
+            _worldScene.ObjectFogEnabled = objectFogEnabled;
+
+        bool showHoverTooltips = _worldScene.ShowHoveredAssetTooltips;
+        if (ImGui.Checkbox("Hover Tooltips", ref showHoverTooltips))
+            _worldScene.ShowHoveredAssetTooltips = showHoverTooltips;
+
+        bool limitHoverPickRange = _worldScene.LimitHoveredAssetRange;
+        if (ImGui.Checkbox("Limit Hover/Pick Range", ref limitHoverPickRange))
+            _worldScene.LimitHoveredAssetRange = limitHoverPickRange;
+
+        if (_worldScene.LimitHoveredAssetRange)
+        {
+            bool useDynamicHoverRange = _worldScene.UseDynamicHoveredAssetRange;
+            if (ImGui.Checkbox("Dynamic Hover Range", ref useDynamicHoverRange))
+                _worldScene.UseDynamicHoveredAssetRange = useDynamicHoverRange;
+
+            float hoverPickRange = _worldScene.HoveredAssetMaxDistance;
+            if (ImGui.SliderFloat("Hover/Pick Range", ref hoverPickRange, 100f, MaxTerrainFogDistance, "%.2f yd"))
+                _worldScene.HoveredAssetMaxDistance = hoverPickRange;
+
+            ImGui.TextDisabled($"Effective range: {_worldScene.EffectiveHoveredAssetMaxDistance:F2} yd");
+        }
+
+        bool showSelectedObjectBounds = _worldScene.ShowSelectedObjectBounds;
+        if (ImGui.Checkbox("Show Selected Object Bounds", ref showSelectedObjectBounds))
+            _worldScene.ShowSelectedObjectBounds = showSelectedObjectBounds;
+
+        DrawObjectPathFilterControls();
+
+        ImGui.Separator();
+        if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0)
+        {
+            bool showPoi = _worldScene.ShowPoi;
+            if (ImGui.Checkbox($"Area POIs ({_worldScene.PoiLoader.Entries.Count})", ref showPoi))
+                _worldScene.ShowPoi = showPoi;
+        }
+        else if (!_worldScene.PoiLoadAttempted)
+        {
+            if (ImGui.Button("Load Area POIs"))
+                _worldScene.ShowPoi = true;
+        }
+        else
+        {
+            ImGui.TextDisabled("Area POIs: none found");
+        }
+
+        if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0
+            && ImGui.TreeNode($"Area POI Details ({_worldScene.PoiLoader.Entries.Count})"))
+        {
+            int poiCount = _worldScene.PoiLoader.Entries.Count;
+            if (ImGui.BeginChild("##InspectAreaPoiList", new Vector2(0, 200f), true))
+            {
+                float rowHeight = GetUniformListRowHeight();
+                GetVisibleListRange(poiCount, rowHeight, out int startIndex, out int endIndex);
+                if (startIndex > 0)
+                    ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
+
+                for (int i = startIndex; i < endIndex; i++)
+                {
+                    var poi = _worldScene.PoiLoader.Entries[i];
+                    bool selected = _selectedAreaPoiId == poi.Id;
+                    if (ImGui.Selectable($"[{poi.Id}] {poi.Name}", selected, ImGuiSelectableFlags.AllowDoubleClick))
+                    {
+                        SelectAreaPoi(poi.Id, toggle: false);
+                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                        {
+                            _camera.Position = poi.Position + new Vector3(0, 0, 50);
+                            _camera.Pitch = -30f;
+                        }
+                    }
+                }
+
+                if (endIndex < poiCount)
+                    ImGui.Dummy(new Vector2(0, (poiCount - endIndex) * rowHeight));
+                ImGui.EndChild();
+            }
+            ImGui.TreePop();
+        }
+
+        ImGui.Separator();
+        if (_worldScene.AreaTriggerLoader != null && _worldScene.AreaTriggerLoader.Count > 0)
+        {
+            bool showTriggers = _worldScene.ShowAreaTriggers;
+            if (ImGui.Checkbox($"AreaTriggers ({_worldScene.AreaTriggerLoader.Count})", ref showTriggers))
+                _worldScene.ShowAreaTriggers = showTriggers;
+            if (_worldScene.ShowAreaTriggers && ImGui.IsItemHovered())
+                ImGui.SetTooltip("Instance portals, event markers, and script triggers.\nGreen spheres/boxes from AreaTrigger.dbc");
+        }
+        else if (!_worldScene.AreaTriggerLoadAttempted)
+        {
+            if (ImGui.Button("Load AreaTriggers"))
+                _worldScene.ShowAreaTriggers = true;
+        }
+        else
+        {
+            ImGui.TextDisabled("AreaTriggers: none found");
+        }
     }
 
     private void DrawSelectedPm4ContextSummary()
@@ -3866,11 +4036,26 @@ public partial class ViewerApp
         string[] labels = WorkbenchNavigator.GetBottomTabLabels(_activeTopTab);
         if (labels.Length > 0)
         {
-            if (_activeBottomTabIndex < 0 || _activeBottomTabIndex >= labels.Length)
-                _activeBottomTabIndex = 0;
+            // Utilities owns its own page state. The other canonical routes
+            // continue to use the legacy shared field for compatibility with
+            // persisted settings and keyboard/menu callers.
+            int activePageIndex = _activeTopTab == WorkbenchTab.Utilities
+                ? _activeUtilitiesTabIndex
+                : _activeBottomTabIndex;
+            if (activePageIndex < 0 || activePageIndex >= labels.Length)
+                activePageIndex = 0;
 
-            _activeBottomTabIndex = DrawPageCombo(
-                "##WorkbenchPage", labels, _activeBottomTabIndex);
+            activePageIndex = DrawPageCombo(
+                "##WorkbenchPage", labels, activePageIndex);
+            if (_activeTopTab == WorkbenchTab.Utilities)
+            {
+                _activeUtilitiesTabIndex = activePageIndex;
+                _activeBottomTabIndex = activePageIndex;
+            }
+            else
+            {
+                _activeBottomTabIndex = activePageIndex;
+            }
             ImGui.Separator();
         }
 
@@ -3930,6 +4115,8 @@ public partial class ViewerApp
         {
             _activeTopTab = tab;
             _activeBottomTabIndex = 0;
+            if (tab == WorkbenchTab.Utilities)
+                _activeUtilitiesTabIndex = 0;
         }
     }
 
@@ -3940,28 +4127,45 @@ public partial class ViewerApp
 
         _activeTopTab = topTab;
         string[] labels = WorkbenchNavigator.GetBottomTabLabels(topTab);
-        _activeBottomTabIndex = labels.Length > 0
+        int pageIndex = labels.Length > 0
             ? Math.Clamp(bottomIndex, 0, labels.Length - 1)
             : 0;
+        _activeBottomTabIndex = pageIndex;
+        if (topTab == WorkbenchTab.Utilities)
+            _activeUtilitiesTabIndex = pageIndex;
         _showRightSidebar = true;
         _workbenchOpen = true;
     }
 
-    private void OpenWorkbenchTab(ModelBottomTab tab) => OpenWorkbenchTab(WorkbenchTab.Inspect);
+    private void OpenWorkbenchTab(ModelBottomTab tab)
+    {
+        int page = tab switch
+        {
+            ModelBottomTab.Animations => (int)InspectBottomTab.Animations,
+            ModelBottomTab.Actions => (int)InspectBottomTab.Actions,
+            _ => (int)InspectBottomTab.Context,
+        };
+        OpenWorkbenchTab(WorkbenchTab.Inspect, page);
+    }
 
     private void OpenWorkbenchTab(WorldBottomTab tab)
     {
         if (tab == WorldBottomTab.SelectionTools)
         {
-            OpenWorkbenchTab(WorkbenchTab.Inspect);
+            OpenWorkbenchTab(WorkbenchTab.Inspect, (int)InspectBottomTab.Context);
+            return;
+        }
+
+        if (tab == WorldBottomTab.Tiles)
+        {
+            OpenWorkbenchTab(WorkbenchTab.Experimental, 0);
             return;
         }
 
         int page = tab switch
         {
             WorldBottomTab.Placements => 0,
-            WorldBottomTab.Tiles => 1,
-            WorldBottomTab.Lod => 2,
+            WorldBottomTab.Lod => 1,
             _ => 0,
         };
         OpenWorkbenchTab(WorkbenchTab.Scene, page);
@@ -3978,7 +4182,7 @@ public partial class ViewerApp
                 OpenWorkbenchTab(WorkbenchTab.Experimental, 1);
                 break;
             case ToolsBottomTab.Archeology:
-                OpenWorkbenchTab(WorkbenchTab.Experimental, 2);
+                OpenWorkbenchTab(WorkbenchTab.Inspect, (int)InspectBottomTab.Archeology);
                 break;
             case ToolsBottomTab.Utilities:
                 OpenWorkbenchTab((UtilitiesBottomTab)Math.Clamp(
@@ -3987,7 +4191,7 @@ public partial class ViewerApp
                     (int)UtilitiesBottomTab.Audio));
                 break;
             case ToolsBottomTab.Converters:
-                OpenWorkbenchTab(WorkbenchTab.Experimental, 3);
+                OpenWorkbenchTab(WorkbenchTab.Experimental, 2);
                 break;
             case ToolsBottomTab.Terrain:
             default:
@@ -4249,12 +4453,75 @@ public partial class ViewerApp
                 DrawPm4SubTabContent();
                 break;
             case 2:
-                DrawArcheologySubTabContent();
-                break;
-            case 3:
                 DrawConvertersSubTabContent();
                 break;
+            case 3:
+                DrawPopulationSubTabContent();
+                break;
         }
+    }
+
+    private void DrawPopulationSubTabContent()
+    {
+        if (_worldScene == null)
+        {
+            ImGui.TextDisabled("Load a world to use SQL Population.");
+            return;
+        }
+
+        ImGui.TextDisabled("Optional alpha-core SQL population. This is separate from ADT/WMO/MDX placement data.");
+        ImGui.InputTextWithHint("##populationSqlRoot", "Path to alpha-core root (example: external/alpha-core)", ref _sqlAlphaCoreRoot, 1024);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("WoWViewer reads NPC/GameObject spawns from alpha-core SQL dumps (etc/databases/world + dbc).");
+
+        DrawToolbarPopupButton("SQL Actions", string.Empty, "##PopulationSqlActionsPopup", () =>
+        {
+            if (ImGui.Button("Use Submodule Path"))
+            {
+                string candidate = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "..", "..", "external", "alpha-core"));
+                _sqlAlphaCoreRoot = candidate;
+                ImGui.CloseCurrentPopup();
+            }
+
+            bool canLoadSql = _currentMapId >= 0 && !string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot);
+            if (!canLoadSql)
+                ImGui.BeginDisabled();
+            if (ImGui.Button("Load SQL Spawns (Current Map)"))
+            {
+                LoadSqlSpawnsForCurrentMap();
+                ImGui.CloseCurrentPopup();
+            }
+            if (!canLoadSql)
+                ImGui.EndDisabled();
+
+            if (ImGui.Button("Clear SQL Spawns"))
+            {
+                ResetSqlSpawnStreamingState(clearSceneSpawns: true);
+                _sqlSpawnStatus = "Cleared SQL spawns.";
+                ImGui.CloseCurrentPopup();
+            }
+        });
+
+        bool settingsChanged = false;
+        settingsChanged |= ImGui.Checkbox("NPC Spawns", ref _sqlIncludeCreatures);
+        ImGui.SameLine();
+        settingsChanged |= ImGui.Checkbox("GameObject Spawns", ref _sqlIncludeGameObjects);
+        settingsChanged |= ImGui.Checkbox("AOI Tile Filter", ref _sqlUseAoiFilter);
+        if (_sqlUseAoiFilter)
+            settingsChanged |= ImGui.SliderInt("AOI Tile Radius", ref _sqlAoiTileRadius, 1, 16);
+        settingsChanged |= ImGui.Checkbox("Stream With Camera", ref _sqlStreamWithCamera);
+        settingsChanged |= ImGui.SliderInt("Max SQL Spawns", ref _sqlMaxSpawns, 100, 20000);
+        settingsChanged |= ImGui.SliderFloat("GO MDX Scale", ref _sqlGameObjectMdxScaleMultiplier, 0.10f, 3.00f, "%.2fx");
+        _worldScene.SqlGameObjectMdxScaleMultiplier = _sqlGameObjectMdxScaleMultiplier;
+        if (settingsChanged && _sqlMapSpawnsCache != null)
+        {
+            _sqlForceStreamRefresh = true;
+            if (!_sqlStreamWithCamera || !_sqlUseAoiFilter)
+                ApplySqlSpawnsToScene(_sqlMapSpawnsCache, updateStatus: true);
+        }
+
+        ImGui.TextDisabled($"Status: {_sqlSpawnStatus}");
+        ImGui.TextDisabled($"Injected: {_worldScene.ExternalSpawnInstanceCount} total ({_worldScene.ExternalSpawnMdxCount} MDX, {_worldScene.ExternalSpawnWmoCount} WMO)");
     }
 
     // (DrawQuickControlsPopoutBody removed — Quick is now a direct workbench destination.)
@@ -4466,9 +4733,6 @@ public partial class ViewerApp
                 DrawWorldPlacementsSubTab();
                 break;
             case 1:
-                DrawWorldTilesSubTab();
-                break;
-            case 2:
                 DrawWorldLodSubTab();
                 break;
         }
@@ -4476,8 +4740,14 @@ public partial class ViewerApp
 
     private void DrawWorldPlacementsSubTab()
     {
-        // Reuses the full World Objects body (MDDF/MODF/WMO list + filters).
-        DrawWorldObjectsContentCore();
+        if (_worldScene == null)
+        {
+            ImGui.TextDisabled("Load a world to inspect WMO and MDX placements.");
+            return;
+        }
+
+        ImGui.TextDisabled("WMO and MDX placements. Double-click a row to focus the camera.");
+        DrawPlacementListsContent();
     }
 
     private void DrawWorldTilesSubTab()
@@ -4771,11 +5041,6 @@ public partial class ViewerApp
     // ── Utilities page content ─────────────────────────────────────────────
     private void DrawUtilitiesSubTabContent()
     {
-        // Utilities is a top-level destination with one explicit utility page
-        // selector. DrawWorkbenchContent owns that selector; keep the legacy
-        // field synchronized for menu and keyboard compatibility.
-        _activeUtilitiesTabIndex = _activeBottomTabIndex;
-
         switch ((UtilitiesBottomTab)_activeUtilitiesTabIndex)
         {
             case UtilitiesBottomTab.Minimap:

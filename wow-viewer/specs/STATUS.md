@@ -18,6 +18,8 @@ task file are authoritative; this file only tells a new agent where to start.
 | 9 | [143 World context and lighting](143-world-context-lighting/spec.md) | LIT source/fallback and pre-alpha v2 parser implemented with user gate | Validate variant switching and no-Light-DBC fallback, then continue WMOAreaID and lighting evidence |
 | 10 | [142 World scene graph](142-world-scene-graph/spec.md) | In progress | User-run dense-WMO capture to compare internal-doodad batch submissions against the previous placement-local path |
 
+| 11 | [080 WoW UI consolidation](080-wow-ui-consolidation/spec.md) | Phase 2E Inspect/terrain page consolidation in progress | Validate Scene Placements/LOD, Experimental Terrain Lab tiles+clipboard, and Inspect Archeology dropdown |
+
 ## Other lanes
 
 - Terrain/minimap reconstruction: Specs 139–141. Use only when the user names that lane or the

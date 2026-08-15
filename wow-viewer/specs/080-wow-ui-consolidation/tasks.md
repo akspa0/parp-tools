@@ -122,6 +122,39 @@ a standalone model and a selected world MDX instance when available.
 - [x] T052 [US2] Restore the existing MDX/M2 animation controls inside the unified Inspect body for standalone and selected world-model contexts.
 - [ ] T053 [US6] Manually verify Utilities -> Audio, Experimental pages, and Inspect animation controls at normal and compact sidebar widths.
 
+## Phase 2D: Placement Ownership Cleanup (P1)
+
+**Goal**: Remove the historical catch-all body from the canonical Scene
+Placements route and put each remaining control under one named destination.
+
+**Independent Test**: Scene -> Placements shows only WMO/MDX placement lists;
+Inspect shows MCNK/ADT analysis and selection diagnostics; Navigator -> World
+Maps shows the Phase Map selector; Experimental -> Population shows SQL
+population controls; PM4 and Lighting remain reachable only from their named
+owners.
+
+- [x] T054 [US2] Add the Phase 2D ownership contract to the Spec 080 route and surface inventory.
+- [x] T055 [US2] Move the Phase Map/secondary overlay selector into left Navigator -> World Maps and remove its MCNK-panel call site.
+- [x] T056 [US2] Add the full MCNK/ADT analysis, selected-placement editing, and scene investigation bodies to Inspect.
+- [x] T057 [US2] Add a list-only Scene Placements body for WMO/MDX placement focus actions; stop using the monolithic world-object body on the canonical route.
+- [x] T058 [US2] Expose SQL world population through Experimental -> Population and keep PM4/Lighting on their existing named pages.
+- [x] T059 [US6] Run route/source checks and the isolated viewer build; leave compact-window and runtime visual proof open.
+
+## Phase 2E: Inspect And Terrain Page Consolidation (P1)
+
+**Goal**: Keep tile/chunk tools together and make core Archeology directly
+reachable from the compact Inspect information dropdown.
+
+**Independent Test**: Scene contains only Placements and LOD; Experimental >
+Terrain Lab contains tile/chunk targeting and clipboard/save; Inspect's page
+dropdown exposes Archeology, MCNK/ADT, scene investigation, world context,
+animations, and actions without another top-level Archeology route.
+
+- [x] T060 [US2] Remove Scene Tiles from the canonical selector and route `WorldBottomTab.Tiles` compatibility calls to Experimental > Terrain Lab.
+- [x] T061 [US2] Remove Archeology from Experimental and route `ToolsBottomTab.Archeology` to Inspect > Archeology.
+- [x] T062 [US2] Add the Inspect dropdown pages and route existing model/animation/action content through the selected page.
+- [x] T063 [US6] Run source checks and the isolated viewer build; leave compact-window and runtime visual proof open.
+
 ## Phase 4: Model And World Info Tabs (P2)
 
 **Goal**: Put factual inspection panels where users expect them.

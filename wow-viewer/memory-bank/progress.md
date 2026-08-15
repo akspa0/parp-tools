@@ -2,6 +2,33 @@
 
 Last updated: 2026-08-15
 
+## 2026-08-15 — Repair Utilities minimap routing after sidebar consolidation
+
+- Isolated the Utilities page selector from the shared Inspect/Scene/Experimental index. Legacy
+  menu, keyboard, and persisted-settings paths remain synchronized, while opening Utilities defaults
+  to Minimap again.
+- The minimap renderer and tile data path were not changed. The focused cross-platform viewer build
+  passes with 0 errors; live loaded-world and interaction proof remains user-owned.
+
+## 2026-08-15 — Spec 080 Phase 2D placement ownership cleanup
+
+- Implemented the ownership contract: Scene Placements is a list-only WMO/MDX route, Inspect owns
+  selected-placement editing, scene investigation, world context, and full MCNK/ADT analysis,
+  Phase Map selection is under left World Maps, and SQL population has a named Experimental page.
+- The historical composite world-object body remains compatibility-only. Focused route checks,
+  diff checks, and the isolated cross-platform viewer build pass with 0 errors; compact-window and
+  runtime visual proof remain open.
+- Renderer, fog, ADT admission, object submission, and streaming behavior remain out of scope.
+
+## 2026-08-15 — Spec 080 Phase 2E Inspect and terrain page consolidation
+
+- Scene now keeps Placements/LOD only, Terrain Lab owns tiles with chunk clipboard/save, and Inspect
+  exposes Archeology as a direct dropdown page alongside MCNK/ADT, world context, investigation,
+  animation, and action pages.
+- Compatibility callers map legacy Tiles to Experimental Terrain Lab and legacy Archeology to
+  Inspect. Focused route checks and the isolated viewer build pass with 0 errors; compact-window
+  and runtime visual proof remain open. Renderer and streaming behavior remain out of scope.
+
 ## 2026-08-15 — Sidebar entry-point convergence; renderer hitch deferred
 
 - Main Panels entries now land directly on their named Utilities page: Log Viewer,

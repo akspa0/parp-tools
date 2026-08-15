@@ -203,8 +203,6 @@ public partial class ViewerApp
         if (_terrainManager == null && _vlmTerrainManager == null)
             return;
 
-        DrawPhasedTerrainOverlayControls();
-
         ImGuiTreeNodeFlags flags = defaultOpen ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None;
         if (!ImGui.CollapsingHeader("ADT Chunk Investigation", flags))
             return;

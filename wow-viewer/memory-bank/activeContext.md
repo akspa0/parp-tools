@@ -7,11 +7,11 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** User-run right-sidebar visual proof for the new five-destination
-  tabbed IA: Quick, Inspect, Scene, Utilities, and Experimental. Verify Inspect with a selected
-  model, MDX/M2 animation controls, MCNK/ADT context, and PM4 context; verify Utilities > Audio
-  remains default-off and Experimental > Terrain Lab keeps tile targeting beside chunk clipboard
-  actions; verify compact-window reachability.
+- **Next implementation target:** User-run visual/compact-window proof for the Spec 080 Phase 2E
+  IA. Check Scene for only Placements/LOD, Experimental > Terrain Lab for tiles plus chunk clipboard,
+  Inspect's dropdown for Archeology, MCNK/ADT, scene investigation, world context, animations, and
+  actions, Utilities > Minimap for the restored route, and Navigator > World Maps for the Phase Map
+  selector.
 - **Performance planning target:** Spec 150 remains the broad Alpha 0.5.3 renderer evidence lane. Spec
   151 owns the first concrete portal-specific optimization; use its counters and fallback evidence to
   inform later repeated `profile-render` baselines. Do not infer a win from an interactive screenshot.
@@ -59,7 +59,8 @@ the owning spec for requirements and proof; read a workstream only when the spec
   focused core suite reports nine unrelated baseline failures.
   Main Panels utility entries now select their exact Utilities page; compact-window
   manual proof remains open. Source/file/map loading is explicitly left-sidebar-only; the right
-  Scene selector now contains only Placements, Tiles, and LOD.
+  Scene selector now contains only Placements and LOD, while Utilities keeps an isolated page index
+  so Inspect/Scene page selection cannot hide or misroute the Minimap page.
 - **Main unproven gap:** The sidebar slice still needs user-owned visual proof at normal and compact
   window sizes, including selected-context transitions and legacy caller reachability. The time-of-day
   slice still needs live early-client visual proof and a
