@@ -71,11 +71,36 @@ surfaces; Phase 1 measurement decides which actually dominate.
 | C3 | Scene graph visibility caller | LINQ `.ToList()` + `HashSet` of active graphs | Active graph set changes only on residency change, but is rebuilt every frame |
 | C4 | WMO/doodad batching in `Render()` | `Dictionary<IModelRenderer, List<Matrix4x4>>`, three `HashSet`s, plus per-batch `List`s allocated inside loops | The batching pass — added to *improve* performance — rebuilds all its intermediate structures from scratch each frame |
 | C5 | Transparent sort | `List<(bool, int, float)>` rebuilt per frame | Sort input changes slowly; the buffer is not reused |
-| C6 | Visible renderer caches | `VisibleWmoRendererCache` / `VisibleMdxRendererCache` are **cleared every frame** in `Reset()` | These are `Dictionary<string, …>` with `OrdinalIgnoreCase` keys. Clearing each frame gives them a one-frame lifetime, so they only ever help for duplicate paths *within* one frame. Across frames — where the visible set barely changes — they provide no benefit while still paying clear, re-insert, and case-insensitive string hashing per visible object per frame |
+| C6 | Visible renderer caches | `VisibleWmoRendererCache` / `VisibleMdxRendererCache` are **cleared every frame** in `Reset()` | **Partly justified — see correction below.** The real residual cost is `OrdinalIgnoreCase` string hashing per visible object per frame |
 | C7 | Frame statistics | `LastRenderFrameStats` holds exactly one frame | All timing data is discarded every frame, so nothing can observe behavior over time |
 
-C6 is the clearest instance of "caching just isn't doing it": the cache exists, is named a cache, and
-is destroyed before it can ever amortize.
+#### Correction: C6 is not the easy win it first appeared
+
+An earlier reading of this file called C6 "the clearest instance of caching just isn't doing it,"
+on the grounds that a cache cleared every frame can never amortize. Closer reading of what sits
+behind it shows that is **partly wrong**, and the record should say so.
+
+`WorldAssetManager.TryGetLoadedMdx` / `TryGetLoadedWmo` are not bare dictionary lookups. Each also
+performs an LRU touch — a second dictionary lookup plus a linked-list remove and re-append. When
+many doodads share a model (the common case: hundreds of placements over a few dozen models), the
+per-frame cache converts hundreds of lookups into a few dozen misses plus cheap hits, and it
+suppresses redundant LRU churn within the frame. That is real work saved, and clearing per frame is
+a defensible correctness choice: it cannot serve a renderer that was unloaded or replaced between
+frames.
+
+What remains genuinely wasteful is the key type. Every lookup — hit or miss — hashes a model path
+string case-insensitively, once per visible object per frame. Persisting the cache across frames
+would not fix that; it would only remove the per-frame misses, which are the smaller half, while
+adding a staleness-invalidation burden.
+
+The correct fix is therefore **not** "make the cache live longer". It is to resolve a stable model
+identity (an integer handle) once per placement and key the hot path on that, leaving path strings
+for load time. That is an architectural change belonging with the flattening work, not a local churn
+fix, and it is tracked as such rather than being attempted cheaply here.
+
+This correction is kept in the spec deliberately: the cost of assuming a churn surface is wasteful
+without checking what sits behind it is exactly the kind of error this feature exists to stop
+repeating.
 
 ### The instrumentation already exists; nothing retains it
 

@@ -922,6 +922,48 @@ public class WorldScene : ISceneRenderer
         public Dictionary<string, WmoRenderer> VisibleWmoRendererCache { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, IModelRenderer> VisibleMdxRendererCache { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+        // Opaque-pass scratch, reused across frames and cleared in place. These were allocated fresh
+        // every frame inside the batching pass — the pass that exists to reduce work. Named scratch,
+        // not cache: they are rebuilt every frame by design.
+        public List<WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate> WmoBatchCandidateScratch { get; } = [];
+        public Dictionary<IModelRenderer, List<Matrix4x4>> WmoDoodadBatchGroupScratch { get; } = [];
+        public List<WmoOpaqueDoodadBatchItem> WmoDoodadUnbatchedScratch { get; } = [];
+        public HashSet<IModelRenderer> UpdatedRendererScratch { get; } = [];
+        public HashSet<IGpuInstancedModelRenderer> GpuBatchRendererScratch { get; } = [];
+        public HashSet<IModelRenderer> ImmediateBatchRendererScratch { get; } = [];
+        public List<(bool IsWmo, int Index, float DistanceSq)> TransparentSortScratch { get; } = [];
+        public List<VisibleWmoInstance> WmoInstanceBatchScratch { get; } = [];
+
+        // The batch-group values are themselves per-frame lists; pool them so clearing the group
+        // dictionary does not drop a list per renderer per frame onto the heap.
+        private readonly Stack<List<Matrix4x4>> _matrixListPool = new();
+
+        public List<Matrix4x4> RentMatrixList()
+            => _matrixListPool.Count > 0 ? _matrixListPool.Pop() : [];
+
+        private void ReturnMatrixLists()
+        {
+            foreach (List<Matrix4x4> list in WmoDoodadBatchGroupScratch.Values)
+            {
+                list.Clear();
+                _matrixListPool.Push(list);
+            }
+
+            WmoDoodadBatchGroupScratch.Clear();
+        }
+
+        private void ResetOpaquePassScratch()
+        {
+            WmoBatchCandidateScratch.Clear();
+            ReturnMatrixLists();
+            WmoDoodadUnbatchedScratch.Clear();
+            UpdatedRendererScratch.Clear();
+            GpuBatchRendererScratch.Clear();
+            ImmediateBatchRendererScratch.Clear();
+            TransparentSortScratch.Clear();
+            WmoInstanceBatchScratch.Clear();
+        }
+
         public List<VisibleWmoInstance> VisibleWmoInstances => Visibility.VisibleWmos;
         public List<VisibleMdxInstance> VisibleMdxInstances => Visibility.VisibleMdx;
         public int VisibleTaxiMdxCount
@@ -968,6 +1010,7 @@ public class WorldScene : ISceneRenderer
             ObjectPasses.Reset();
             VisibleWmoRendererCache.Clear();
             VisibleMdxRendererCache.Clear();
+            ResetOpaquePassScratch();
             OpaqueBatchedMdxCount = 0;
             OpaqueUnbatchedMdxCount = 0;
             TransparentBatchedMdxCount = 0;
@@ -10535,8 +10578,8 @@ public class WorldScene : ISceneRenderer
                         _gl.DepthMask(true);
 
                         var visibleWmoRenderers = new WmoRenderer?[frame.Visibility.VisibleWmos.Count];
-                        var wmoBatchCandidates = new List<WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate>(
-                            frame.Visibility.VisibleWmos.Count);
+                        List<WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate> wmoBatchCandidates =
+                            frame.WmoBatchCandidateScratch;
                         _worldFrameWmoRenderers.Clear();
                         WmoRenderedCount = 0;
                         for (int visibleIndex = 0; visibleIndex < frame.Visibility.VisibleWmos.Count; visibleIndex++)
@@ -10561,8 +10604,8 @@ public class WorldScene : ISceneRenderer
 
                         WorldObjectPassCoordinator.WorldWmoOpaqueBatchPlan wmoBatchPlan =
                             WorldObjectPassCoordinator.PlanOpaqueWmoBatches(wmoBatchCandidates);
-                        var wmoDoodadBatchGroups = new Dictionary<IModelRenderer, List<Matrix4x4>>();
-                        var wmoDoodadUnbatched = new List<WmoOpaqueDoodadBatchItem>();
+                        Dictionary<IModelRenderer, List<Matrix4x4>> wmoDoodadBatchGroups = frame.WmoDoodadBatchGroupScratch;
+                        List<WmoOpaqueDoodadBatchItem> wmoDoodadUnbatched = frame.WmoDoodadUnbatchedScratch;
                         foreach (int visibleIndex in wmoBatchPlan.FallbackVisibleIndices)
                         {
                             VisibleWmoInstance visible = frame.Visibility.VisibleWmos[visibleIndex];
@@ -10581,7 +10624,9 @@ public class WorldScene : ISceneRenderer
                             int firstVisibleIndex = batch.VisibleIndices[0];
                             WmoRenderer renderer = visibleWmoRenderers[firstVisibleIndex]!;
                             IGpuInstancedWmoRenderer gpuRenderer = (IGpuInstancedWmoRenderer)renderer;
-                            var instances = new List<VisibleWmoInstance>(batch.VisibleIndices.Count);
+                            // Reused across batches within the frame, not one list per batch.
+                            List<VisibleWmoInstance> instances = frame.WmoInstanceBatchScratch;
+                            instances.Clear();
                             foreach (int visibleIndex in batch.VisibleIndices)
                                 instances.Add(frame.Visibility.VisibleWmos[visibleIndex]);
 
@@ -10609,7 +10654,7 @@ public class WorldScene : ISceneRenderer
 
                                         if (!wmoDoodadBatchGroups.TryGetValue(item.Renderer, out List<Matrix4x4>? transforms))
                                         {
-                                            transforms = new List<Matrix4x4>();
+                                            transforms = frame.RentMatrixList();
                                             wmoDoodadBatchGroups.Add(item.Renderer, transforms);
                                         }
 
@@ -10689,7 +10734,7 @@ public class WorldScene : ISceneRenderer
                     // pure idle CPU cost on large maps even when only a fraction were visible.
                     frame.MdxAnimationMs = MeasureDurationMs(() =>
                     {
-                        var updatedRenderers = new HashSet<IModelRenderer>();
+                        HashSet<IModelRenderer> updatedRenderers = frame.UpdatedRendererScratch;
                         WorldObjectPassCoordinator.ExecuteVisibleMdxAnimation(frame.ObjectPasses, frame.Visibility, visible =>
                         {
                             IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
@@ -10704,8 +10749,8 @@ public class WorldScene : ISceneRenderer
 
                     frame.MdxOpaqueSubmissionMs = MeasureDurationMs(() =>
                     {
-                        var gpuBatchRenderers = new HashSet<IGpuInstancedModelRenderer>();
-                        var immediateBatchRenderers = new HashSet<IModelRenderer>();
+                        HashSet<IGpuInstancedModelRenderer> gpuBatchRenderers = frame.GpuBatchRendererScratch;
+                        HashSet<IModelRenderer> immediateBatchRenderers = frame.ImmediateBatchRendererScratch;
 
                         try
                         {
@@ -10796,8 +10841,8 @@ public class WorldScene : ISceneRenderer
                         _gl.Enable(EnableCap.DepthTest);
                         _gl.DepthFunc(DepthFunction.Lequal);
 
-                        var transparentObjectSort = new List<(bool IsWmo, int Index, float DistanceSq)>(
-                            frame.Visibility.VisibleWmos.Count + frame.ObjectPasses.TransparentVisibleMdxRoutes.Count);
+                        List<(bool IsWmo, int Index, float DistanceSq)> transparentObjectSort =
+                            frame.TransparentSortScratch;
 
                         for (int i = 0; i < frame.Visibility.VisibleWmos.Count; i++)
                             transparentObjectSort.Add((true, i, frame.Visibility.VisibleWmos[i].CenterDistanceSq));
