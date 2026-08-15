@@ -12,14 +12,14 @@ before starting the next phase. `[P]` tasks have disjoint write scopes and may r
 **Purpose**: Replace the current center-distance-only heuristic where portal evidence is trustworthy,
 while preserving conservative rendering for unknown or malformed client-era data.
 
-- [ ] T001 [P] [US1] Add focused portal-volume fixture builders and expected visibility cases in `tests/WowViewer.Core.Tests/World/WmoPortalVisibilityDecisionTests.cs` covering exterior rejection, interior reachability, camera-on-boundary, cycles, and depth/capacity limits.
-- [ ] T002 [P] [US1] Add a pure `WmoPortalVisibilityDecision`/diagnostics model in `src/core/WowViewer.Core.Runtime/World/WmoPortalVisibilityDecision.cs` using existing decoded portal/group read models and no file reads.
-- [ ] T003 [US1] Implement bounded portal plane/clip-volume traversal in `src/core/WowViewer.Core.Runtime/World/WmoPortalVisibilityEvaluator.cs`, documenting the native 0.5.3 evidence mapping and returning a conservative visible set for invalid transforms, missing side data, malformed geometry, or overflow.
-- [ ] T004 [US1] Reconcile `src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldScenePortalVisibilityEvaluator.cs` with the shared decision contract or make its bridge explicit so graph diagnostics and final renderer admission cannot silently disagree.
-- [ ] T005 [US1] Integrate the decision into `src/viewer/WoWViewer/Rendering/WmoRenderer.cs` at `UpdateRuntimeVisibility`, replacing center-distance admission only when the decision reports trusted portal clipping and retaining the existing fail-open path otherwise.
-- [ ] T006 [US1] Apply the final group decision consistently to WMO group geometry, doodad definitions, and liquid buffers in `src/viewer/WoWViewer/Rendering/WmoRenderer.cs`; record portal-tested, fallback, and admitted-group counts in existing render stats.
-- [ ] T007 [US1] Add/extend renderer-independent tests in `tests/WowViewer.Core.Tests/World/WorldScenePortalVisibilityEvaluatorTests.cs` for invalid/singular transforms, missing geometry, malformed edges, and conservative fallback.
-- [ ] T008 [US1] Run focused portal tests and a Debug build; record the result and remaining real-client proof boundary in `specs/151-portal-game-mode-surface/quickstart.md` and the continuity files.
+- [x] T001 [P] [US1] Add focused portal-volume fixture builders and expected visibility cases in `tests/WowViewer.Core.Tests/World/WmoPortalVisibilityDecisionTests.cs` covering exterior rejection, interior reachability, camera-on-boundary, cycles, and depth/capacity limits.
+- [x] T002 [P] [US1] Add a pure `WmoPortalVisibilityDecision`/diagnostics model in `src/core/WowViewer.Core.Runtime/World/WmoPortalVisibilityDecision.cs` using existing decoded portal/group read models and no file reads.
+- [x] T003 [US1] Implement bounded portal plane/clip-volume traversal in `src/core/WowViewer.Core.Runtime/World/WmoPortalVisibilityDecision.cs`, documenting the native 0.5.3 evidence mapping and returning a conservative visible set for invalid transforms, missing side data, malformed geometry, or overflow.
+- [x] T004 [US1] Make the diagnostic-only graph evaluator bridge explicit in `src/core/WowViewer.Core.Runtime/World/SceneGraph/WorldScenePortalVisibilityEvaluator.cs`; final renderer admission is owned by the shared decision.
+- [x] T005 [US1] Integrate the decision into `src/viewer/WoWViewer/Rendering/WmoRenderer.cs` at `UpdateRuntimeVisibility`, replacing center-distance admission with the bounded portal decision and retaining the fail-open path otherwise.
+- [x] T006 [US1] Apply the final group decision consistently to WMO group geometry, doodad definitions, and liquid buffers in `src/viewer/WoWViewer/Rendering/WmoRenderer.cs`; record portal-tested, fallback, and admitted-group counts in existing render stats.
+- [x] T007 [US1] Add/extend renderer-independent tests in `tests/WowViewer.Core.Tests/World/WorldScenePortalVisibilityEvaluatorTests.cs` for invalid/singular transforms, missing geometry, malformed edges, and conservative fallback.
+- [x] T008 [US1] Run focused portal tests and a Debug build; record the result and remaining real-client proof boundary in `specs/151-portal-game-mode-surface/quickstart.md` and the continuity files.
 
 **Checkpoint**: Portal visibility is unit-tested and structurally integrated. Do not begin game-mode
 input work until this checkpoint passes.
@@ -60,9 +60,9 @@ remain reachable.
 
 ## Phase 4: Documentation, Integration, and Handoff
 
-- [ ] T026 [P] Update `wow-viewer/specs/STATUS.md` with Spec 151 phase/proof status and the next bounded task.
-- [ ] T027 [P] Update `wow-viewer/memory-bank/activeContext.md` with the active branch, phase, Ghidra evidence, proof owner, and out-of-scope boundaries.
-- [ ] T028 [P] Add a newest-first entry to `wow-viewer/memory-bank/progress.md` for each completed implementation checkpoint.
+- [x] T026 [P] Update `wow-viewer/specs/STATUS.md` with Spec 151 phase/proof status and the next bounded task.
+- [x] T027 [P] Update `wow-viewer/memory-bank/activeContext.md` with the active branch, phase, Ghidra evidence, proof owner, and out-of-scope boundaries.
+- [x] T028 [P] Add a newest-first entry to `wow-viewer/memory-bank/progress.md` for each completed implementation checkpoint.
 - [ ] T029 Run `dotnet test I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` and `dotnet build I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` after the bounded slice is complete.
 - [ ] T030 Prepare the user-owned real-client validation handoff with exact client root/build, WMO fixture, camera positions, surface/profile, and expected counters in `specs/151-portal-game-mode-surface/quickstart.md`.
 

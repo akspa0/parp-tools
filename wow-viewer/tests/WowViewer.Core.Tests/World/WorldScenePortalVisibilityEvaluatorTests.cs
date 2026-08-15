@@ -100,14 +100,104 @@ public sealed class WorldScenePortalVisibilityEvaluatorTests
         Assert.Equal(["wmo/group/0000"], result.VisibleNodeIds);
     }
 
+    [Fact]
+    public void SingularPlacementTransformFailsOpen()
+    {
+        WorldScenePortalAdapterResult adapter = ValidAdapter();
+        WorldScenePortalVisibilityResult result = WorldScenePortalVisibilityEvaluator.Evaluate(
+            adapter,
+            PlacementNode(transform: Matrix4x4.CreateScale(0f)),
+            Vector3.Zero);
+
+        Assert.True(result.Diagnostics.FallbackRequired);
+        Assert.Equal("placement_transform_invalid", result.Diagnostics.FallbackReason);
+        Assert.Equal(adapter.Graph.NodeIds, result.VisibleNodeIds);
+    }
+
+    [Fact]
+    public void MissingPortalGeometryFailsOpen()
+    {
+        WorldScenePortalAdapterResult adapter = WorldScenePortalAdapter.Build(
+            [new WorldSceneWmoPortalGroupReadModel(0), new WorldSceneWmoPortalGroupReadModel(1)],
+            [new WorldSceneWmoPortalReadModel(
+                3,
+                Vertices: null,
+                Normal: Vector3.UnitX,
+                PlaneDistance: -5f,
+                References: [
+                    new WorldSceneWmoPortalReferenceReadModel(0, 3, 0, -1),
+                    new WorldSceneWmoPortalReferenceReadModel(1, 3, 1, 1),
+                ])],
+            "wmo");
+
+        WorldScenePortalVisibilityResult result = WorldScenePortalVisibilityEvaluator.Evaluate(
+            adapter,
+            PlacementNode(),
+            Vector3.Zero);
+
+        Assert.True(result.Diagnostics.FallbackRequired);
+        Assert.Equal("malformed_portal_edge", result.Diagnostics.FallbackReason);
+        Assert.Equal(adapter.Graph.NodeIds, result.VisibleNodeIds);
+    }
+
+    [Fact]
+    public void MalformedPortalEdgeFailsOpen()
+    {
+        WorldScenePortalAdapterResult adapter = WorldScenePortalAdapter.Build(
+            [new WorldSceneWmoPortalGroupReadModel(0), new WorldSceneWmoPortalGroupReadModel(1)],
+            [new WorldSceneWmoPortalReadModel(
+                3,
+                [
+                    new Vector3(5f, -1f, -1f),
+                    new Vector3(5f, 1f, -1f),
+                    new Vector3(5f, 1f, 1f),
+                ],
+                Vector3.UnitX,
+                -5f,
+                [
+                    new WorldSceneWmoPortalReferenceReadModel(0, 3, 0, -1),
+                    new WorldSceneWmoPortalReferenceReadModel(1, 3, 2, 1),
+                ])],
+            "wmo");
+
+        WorldScenePortalVisibilityResult result = WorldScenePortalVisibilityEvaluator.Evaluate(
+            adapter,
+            PlacementNode(),
+            Vector3.Zero);
+
+        Assert.True(result.Diagnostics.FallbackRequired);
+        Assert.Equal("malformed_portal_edge", result.Diagnostics.FallbackReason);
+        Assert.Equal(adapter.Graph.NodeIds, result.VisibleNodeIds);
+    }
+
+    private static WorldScenePortalAdapterResult ValidAdapter()
+        => WorldScenePortalAdapter.Build(
+            [new WorldSceneWmoPortalGroupReadModel(0), new WorldSceneWmoPortalGroupReadModel(1)],
+            [new WorldSceneWmoPortalReadModel(
+                3,
+                [
+                    new Vector3(5f, -1f, -1f),
+                    new Vector3(5f, 1f, -1f),
+                    new Vector3(5f, 1f, 1f),
+                    new Vector3(5f, -1f, 1f),
+                ],
+                Vector3.UnitX,
+                -5f,
+                [
+                    new WorldSceneWmoPortalReferenceReadModel(0, 3, 0, -1),
+                    new WorldSceneWmoPortalReferenceReadModel(1, 3, 1, 1),
+                ])],
+            "wmo");
+
     private static WorldSceneNode PlacementNode(
+        Matrix4x4? transform = null,
         Vector3? groupOneMin = null,
         Vector3? groupOneMax = null)
     {
         WorldSceneNode placement = new(
             "wmo",
             WorldSceneNodeKind.WmoPlacement,
-            Matrix4x4.Identity,
+            transform ?? Matrix4x4.Identity,
             new Vector3(-1f, -2f, -2f),
             new Vector3(11f, 5f, 2f),
             boundsKnown: true);

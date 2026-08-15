@@ -43,7 +43,10 @@ public readonly record struct WmoRenderStats(
     int LiquidDrawCalls,
     int DoodadSubmissions,
     int VisibleGroupSubmissions,
-    int VisibleLiquidMeshes);
+    int VisibleLiquidMeshes,
+    int PortalTestedCount,
+    int PortalFallbackCount,
+    int PortalAdmittedGroupCount);
 
 /// <summary>
 /// Renders a WMO (World Map Object) using OpenGL.
@@ -78,15 +81,11 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
     private readonly List<GroupBuffers> _groups = new();
     private readonly List<(int groupBufferIndex, float distSq)> _transparentGroupSortScratch = new();
     private readonly FrustumCuller _groupFrustumCuller = new();
-    private readonly List<PortalNeighbor>[] _groupPortalNeighbors;
-    private readonly List<int>[] _groupPortalRefs;
-    private readonly Vector3[] _portalCenters;
-    private readonly (Vector3 Min, Vector3 Max)[] _groupBounds;
+    private readonly WmoPortalVisibilityGroup[] _portalVisibilityGroups;
+    private readonly WmoPortalVisibilityPortal[] _portalVisibilityPortals;
     private readonly bool[] _runtimeVisibleGroups;
     private readonly bool[] _frustumVisibleScratch;
     private readonly HashSet<int> _runtimeVisibleDoodadDefIndices = new();
-    private readonly Queue<(int GroupIndex, int Depth)> _visibilityQueue = new();
-    private readonly HashSet<int> _visibilityVisited = new();
     private readonly HashSet<string> _updatedDoodadModelsScratch = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<(int idx, float distSq)> _visibleDoodadsScratch = new();
     private readonly Dictionary<IModelRenderer, List<int>> _opaqueDoodadBatchGroups = new();
@@ -132,10 +131,6 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
     private int _currentVisibleLiquidMeshes;
     private const int DefaultDeferredDoodadLoads = 1;
     private const double DefaultDeferredDoodadBudgetMs = 2.0;
-    private const float GroupVisibilityBoundsPadding = 32f;
-    private const float NearRootFullVisibilityDistance = 192f;
-    private const float ExteriorPortalRevealDistance = 1024f;
-    private const float InteriorPortalRevealDistance = 3072f;
     private const int ExteriorPortalTraversalDepth = 1;
     private const int InteriorPortalTraversalDepth = 4;
 
@@ -146,6 +141,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
     public int PendingDoodadModelLoadCount => _pendingDoodadModelLoads.Count;
     public int PendingMaterialTextureLoadCount => _pendingMaterialTextureLoads.Count;
     public WmoRenderStats LastRenderStats { get; private set; }
+    public WmoPortalVisibilityDiagnostics LastPortalVisibilityDiagnostics { get; private set; } = new();
 
     /// <summary>
     /// Opaque WMO shells can be instanced when portal visibility cannot distinguish individual
@@ -201,17 +197,12 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
         _deferInitialDoodadLoads = deferInitialDoodadLoads;
         _deferInitialMaterialTextureLoads = deferInitialMaterialTextureLoads;
         _enableRuntimeGroupVisibility = enableRuntimeGroupVisibility;
-        _groupPortalNeighbors = new List<PortalNeighbor>[_wmo.Groups.Count];
-        _groupPortalRefs = new List<int>[_wmo.Groups.Count];
-        _portalCenters = new Vector3[_wmo.Portals.Count];
-        _groupBounds = new (Vector3 Min, Vector3 Max)[_wmo.Groups.Count];
-        for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
-            _groupBounds[groupIndex] = (_wmo.Groups[groupIndex].BoundsMin, _wmo.Groups[groupIndex].BoundsMax);
+
+        _portalVisibilityGroups = BuildPortalVisibilityGroups();
+        _portalVisibilityPortals = BuildPortalVisibilityPortals();
 
         _runtimeVisibleGroups = new bool[_wmo.Groups.Count];
         _frustumVisibleScratch = new bool[_wmo.Groups.Count];
-
-        InitializeGroupVisibilityData();
 
         InitShaders();
         InitLiquidShader();
@@ -678,7 +669,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
         _gl.Uniform3(_uLightColor, lc.X, lc.Y, lc.Z);
         _gl.Uniform3(_uAmbientColor, ac.X, ac.Y, ac.Z);
 
-        UpdateRuntimeVisibility(modelMatrix, view, proj, cp, fogEnd);
+        UpdateRuntimeVisibility(modelMatrix, view, proj, cp);
 
         if (_wireframe)
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
@@ -882,7 +873,12 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
             _currentLiquidDrawCalls,
             _currentDoodadSubmissions,
             _currentVisibleGroupSubmissions,
-            _currentVisibleLiquidMeshes);
+            _currentVisibleLiquidMeshes,
+            LastPortalVisibilityDiagnostics.TestedPortalCount,
+            LastPortalVisibilityDiagnostics.Mode == WmoPortalVisibilityMode.ConservativeFallback ? 1 : 0,
+            LastPortalVisibilityDiagnostics.Mode == WmoPortalVisibilityMode.ConservativeFallback
+                ? _runtimeVisibleGroups.Length
+                : LastPortalVisibilityDiagnostics.AdmittedGroupCount);
     }
 
     public unsafe void BeginGpuInstanceBatch(Matrix4x4 view, Matrix4x4 proj,
@@ -1159,7 +1155,12 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
             _currentLiquidDrawCalls,
             _currentDoodadSubmissions,
             _currentVisibleGroupSubmissions,
-            _currentVisibleLiquidMeshes);
+            _currentVisibleLiquidMeshes,
+            LastPortalVisibilityDiagnostics.TestedPortalCount,
+            LastPortalVisibilityDiagnostics.Mode == WmoPortalVisibilityMode.ConservativeFallback ? 1 : 0,
+            LastPortalVisibilityDiagnostics.Mode == WmoPortalVisibilityMode.ConservativeFallback
+                ? _runtimeVisibleGroups.Length
+                : LastPortalVisibilityDiagnostics.AdmittedGroupCount);
     }
 
     private void ResetRenderStats()
@@ -1172,6 +1173,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
         _currentDoodadSubmissions = 0;
         _currentVisibleGroupSubmissions = 0;
         _currentVisibleLiquidMeshes = 0;
+        LastPortalVisibilityDiagnostics = new();
         LastRenderStats = default;
     }
 
@@ -1599,85 +1601,49 @@ void main() {
         return shader;
     }
 
-    private void InitializeGroupVisibilityData()
+    private WmoPortalVisibilityGroup[] BuildPortalVisibilityGroups()
+        => _wmo.Groups
+            .Select((group, groupIndex) => new WmoPortalVisibilityGroup(
+                groupIndex,
+                group.Flags,
+                group.BoundsMin,
+                group.BoundsMax))
+            .ToArray();
+
+    private WmoPortalVisibilityPortal[] BuildPortalVisibilityPortals()
     {
-        var portalGroups = new Dictionary<ushort, HashSet<int>>();
-
-        for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
-        {
-            var group = _wmo.Groups[groupIndex];
-            var portalRefs = new List<int>();
-            _groupPortalRefs[groupIndex] = portalRefs;
-            _groupPortalNeighbors[groupIndex] = new List<PortalNeighbor>();
-
-            for (int offset = 0; offset < group.PortalCount; offset++)
-            {
-                int portalRefIndex = group.PortalStart + offset;
-                if ((uint)portalRefIndex >= (uint)_wmo.PortalRefs.Count)
-                    break;
-
-                portalRefs.Add(portalRefIndex);
-                ushort portalIndex = _wmo.PortalRefs[portalRefIndex].PortalIndex;
-                if (!portalGroups.TryGetValue(portalIndex, out var groups))
-                {
-                    groups = new HashSet<int>();
-                    portalGroups[portalIndex] = groups;
-                }
-
-                groups.Add(groupIndex);
-            }
-        }
-
+        var portals = new WmoPortalVisibilityPortal[_wmo.Portals.Count];
         for (int portalIndex = 0; portalIndex < _wmo.Portals.Count; portalIndex++)
         {
-            var portal = _wmo.Portals[portalIndex];
-            Vector3 center = Vector3.Zero;
-            int count = 0;
-
-            for (int vertexOffset = 0; vertexOffset < portal.Count; vertexOffset++)
+            WmoV14ToV17Converter.WmoPortal portal = _wmo.Portals[portalIndex];
+            var vertices = new List<Vector3>();
+            int startVertex = portal.StartVertex;
+            int vertexCount = portal.Count;
+            if (vertexCount >= 3 && startVertex <= _wmo.PortalVertices.Count - vertexCount)
             {
-                int vertexIndex = portal.StartVertex + vertexOffset;
-                if ((uint)vertexIndex >= (uint)_wmo.PortalVertices.Count)
-                    break;
-
-                center += _wmo.PortalVertices[vertexIndex];
-                count++;
+                vertices.AddRange(_wmo.PortalVertices.Skip(startVertex).Take(vertexCount));
             }
 
-            _portalCenters[portalIndex] = count > 0 ? center / count : Vector3.Zero;
+            WmoPortalVisibilityReference[] references = _wmo.PortalRefs
+                .Where(reference => reference.PortalIndex == portalIndex)
+                .Select(reference => new WmoPortalVisibilityReference(reference.GroupIndex, reference.Side))
+                .ToArray();
+            portals[portalIndex] = new WmoPortalVisibilityPortal(
+                portalIndex,
+                vertices,
+                new Vector3(portal.PlaneA, portal.PlaneB, portal.PlaneC),
+                portal.PlaneD,
+                references);
         }
 
-        for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
-        {
-            var neighbors = new HashSet<long>();
-            foreach (int portalRefIndex in _groupPortalRefs[groupIndex])
-            {
-                ushort portalIndex = _wmo.PortalRefs[portalRefIndex].PortalIndex;
-                if (!portalGroups.TryGetValue(portalIndex, out var groups))
-                    continue;
-
-                foreach (int neighborGroup in groups)
-                {
-                    if (neighborGroup == groupIndex)
-                        continue;
-
-                    long key = ((long)portalIndex << 32) | (uint)neighborGroup;
-                    if (!neighbors.Add(key))
-                        continue;
-
-                    _groupPortalNeighbors[groupIndex].Add(new PortalNeighbor(neighborGroup, portalIndex));
-                }
-            }
-        }
+        return portals;
     }
 
-    private void UpdateRuntimeVisibility(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, float fogEnd)
+    private void UpdateRuntimeVisibility(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos)
     {
         Array.Clear(_runtimeVisibleGroups, 0, _runtimeVisibleGroups.Length);
         Array.Clear(_frustumVisibleScratch, 0, _frustumVisibleScratch.Length);
         _runtimeVisibleDoodadDefIndices.Clear();
-        _visibilityQueue.Clear();
-        _visibilityVisited.Clear();
 
         if (_wmo.Groups.Count == 0)
             return;
@@ -1697,6 +1663,7 @@ void main() {
             for (int i = 0; i < _runtimeVisibleGroups.Length; i++)
                 _runtimeVisibleGroups[i] = true;
 
+            LastPortalVisibilityDiagnostics = WmoPortalVisibilityDiagnostics.CreateFallback("placement_transform_invalid");
             ApplyRuntimeVisibilityToBuffers();
             CollectVisibleDoodadDefs();
             return;
@@ -1705,121 +1672,29 @@ void main() {
         Vector3 localCameraPos = Vector3.Transform(cameraPos, inverseModel);
         _groupFrustumCuller.Update(view * proj);
 
-    float nearRootFullVisibilityDistance = ComputeNearRootFullVisibilityDistance(_wmo.BoundsMin, _wmo.BoundsMax, fogEnd);
-    float nearRootFullVisibilityDistanceSq = nearRootFullVisibilityDistance * nearRootFullVisibilityDistance;
-        bool anyExteriorGroups = false;
-        // Some client-era MOHD root bounds do not cover the playable interior even though the
-        // group bounds do. Treat containment in either root or group bounds as an inside-WMO
-        // state; otherwise portal traversal starts without a valid interior group and hides it.
-        bool cameraInsideRoot = WmoCameraVisibility.IsInsideRootOrGroup(
-            localCameraPos,
-            _wmo.BoundsMin,
-            _wmo.BoundsMax,
-            _groupBounds,
-            GroupVisibilityBoundsPadding);
-        float nearRootDistanceSq = DistanceSquaredPointToAabb(localCameraPos, _wmo.BoundsMin, _wmo.BoundsMax);
-    bool cameraNearRoot = nearRootDistanceSq <= nearRootFullVisibilityDistanceSq;
-        int nearestGroupIndex = -1;
-        float nearestGroupDistSq = float.MaxValue;
-
-        if (cameraInsideRoot || cameraNearRoot)
-        {
-            for (int groupIndex = 0; groupIndex < _runtimeVisibleGroups.Length; groupIndex++)
-                _runtimeVisibleGroups[groupIndex] = true;
-
-            ApplyRuntimeVisibilityToBuffers();
-            CollectVisibleDoodadDefs();
-            return;
-        }
-
         for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
         {
-            var group = _wmo.Groups[groupIndex];
-            if (IsExteriorGroup(group.Flags))
-                anyExteriorGroups = true;
-
-            TransformAabb(group.BoundsMin, group.BoundsMax, modelMatrix, out var worldMin, out var worldMax);
-            bool isFrustumVisible = _groupFrustumCuller.TestAABB(worldMin, worldMax);
-            _frustumVisibleScratch[groupIndex] = isFrustumVisible;
-
-            float distanceSq = DistanceSquaredPointToAabb(localCameraPos, group.BoundsMin, group.BoundsMax);
-            if (distanceSq < nearestGroupDistSq)
-            {
-                nearestGroupDistSq = distanceSq;
-                nearestGroupIndex = groupIndex;
-            }
-
-            if (cameraInsideRoot)
-            {
-                if (ContainsPointExpanded(localCameraPos, group.BoundsMin, group.BoundsMax, GroupVisibilityBoundsPadding))
-                    EnqueueVisibleGroup(_visibilityQueue, _visibilityVisited, groupIndex, 0);
-            }
-            else if (isFrustumVisible && IsExteriorGroup(group.Flags))
-            {
-                EnqueueVisibleGroup(_visibilityQueue, _visibilityVisited, groupIndex, 0);
-            }
+            TransformAabb(_wmo.Groups[groupIndex].BoundsMin, _wmo.Groups[groupIndex].BoundsMax,
+                modelMatrix, out Vector3 worldMin, out Vector3 worldMax);
+            _frustumVisibleScratch[groupIndex] = _groupFrustumCuller.TestAABB(worldMin, worldMax);
         }
 
-        if (_visibilityQueue.Count == 0)
+        // Native 0.5.3 uses transformed portal polygons and a recursively narrowed view volume.
+        // The pure evaluator mirrors that contract from decoded data and returns all groups when
+        // any required evidence is invalid, keeping the renderer fail-open for old WMO variants.
+        WmoPortalVisibilityDecision decision = WmoPortalVisibilityEvaluator.Evaluate(
+            _portalVisibilityGroups,
+            _portalVisibilityPortals,
+            localCameraPos,
+            groupIndex => (uint)groupIndex < (uint)_frustumVisibleScratch.Length
+                && _frustumVisibleScratch[groupIndex],
+            interiorMaximumDepth: InteriorPortalTraversalDepth,
+            exteriorMaximumDepth: ExteriorPortalTraversalDepth);
+        LastPortalVisibilityDiagnostics = decision.Diagnostics;
+        foreach (int groupIndex in decision.VisibleGroupIndices)
         {
-            if (nearestGroupDistSq <= nearRootFullVisibilityDistanceSq)
-            {
-                for (int groupIndex = 0; groupIndex < _runtimeVisibleGroups.Length; groupIndex++)
-                    _runtimeVisibleGroups[groupIndex] = true;
-
-                ApplyRuntimeVisibilityToBuffers();
-                CollectVisibleDoodadDefs();
-                return;
-            }
-
-            if (!cameraInsideRoot && !anyExteriorGroups)
-            {
-                for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
-                    _runtimeVisibleGroups[groupIndex] = _frustumVisibleScratch[groupIndex];
-
-                ApplyRuntimeVisibilityToBuffers();
-                CollectVisibleDoodadDefs();
-                return;
-            }
-
-            if (nearestGroupIndex >= 0)
-                EnqueueVisibleGroup(_visibilityQueue, _visibilityVisited, nearestGroupIndex, 0);
-        }
-
-        float portalRevealDistance = cameraInsideRoot
-            ? MathF.Max(InteriorPortalRevealDistance, MathF.Min(fogEnd, 5000f))
-            : MathF.Max(ExteriorPortalRevealDistance, MathF.Min(fogEnd * 0.4f, 1800f));
-        int maxTraversalDepth = cameraInsideRoot ? InteriorPortalTraversalDepth : ExteriorPortalTraversalDepth;
-        float portalRevealDistanceSq = portalRevealDistance * portalRevealDistance;
-
-        while (_visibilityQueue.Count > 0)
-        {
-            var (groupIndex, depth) = _visibilityQueue.Dequeue();
-            _runtimeVisibleGroups[groupIndex] = true;
-
-            if (depth >= maxTraversalDepth)
-                continue;
-
-            foreach (var neighbor in _groupPortalNeighbors[groupIndex])
-            {
-                int neighborGroupIndex = neighbor.GroupIndex;
-                if (_visibilityVisited.Contains(neighborGroupIndex))
-                    continue;
-
-                if (!ShouldTraversePortal(neighbor, modelMatrix, cameraPos, portalRevealDistanceSq, cameraInsideRoot))
-                    continue;
-
-                EnqueueVisibleGroup(_visibilityQueue, _visibilityVisited, neighborGroupIndex, depth + 1);
-            }
-        }
-
-        if (!cameraInsideRoot)
-        {
-            for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
-            {
-                if (_frustumVisibleScratch[groupIndex] && IsExteriorGroup(_wmo.Groups[groupIndex].Flags))
-                    _runtimeVisibleGroups[groupIndex] = true;
-            }
+            if ((uint)groupIndex < (uint)_runtimeVisibleGroups.Length)
+                _runtimeVisibleGroups[groupIndex] = true;
         }
 
         ApplyRuntimeVisibilityToBuffers();
@@ -1850,60 +1725,6 @@ void main() {
                     _runtimeVisibleDoodadDefIndices.Add(doodadRef);
             }
         }
-    }
-
-    private bool ShouldTraversePortal(PortalNeighbor neighbor, Matrix4x4 modelMatrix, Vector3 cameraPos,
-        float portalRevealDistanceSq, bool cameraInsideRoot)
-    {
-        int neighborGroupIndex = neighbor.GroupIndex;
-        bool neighborFrustumVisible = (uint)neighborGroupIndex < (uint)_frustumVisibleScratch.Length && _frustumVisibleScratch[neighborGroupIndex];
-        bool neighborExterior = IsExteriorGroup(_wmo.Groups[neighborGroupIndex].Flags);
-
-        ushort portalIndex = neighbor.PortalIndex;
-        if ((uint)portalIndex >= (uint)_portalCenters.Length)
-            return false;
-
-        Vector3 portalCenterWorld = Vector3.Transform(_portalCenters[portalIndex], modelMatrix);
-        float portalDistanceSq = Vector3.DistanceSquared(cameraPos, portalCenterWorld);
-        if (portalDistanceSq > portalRevealDistanceSq)
-            return false;
-
-        if (cameraInsideRoot)
-            return true;
-
-        return neighborFrustumVisible || neighborExterior;
-    }
-
-    private static void EnqueueVisibleGroup(Queue<(int GroupIndex, int Depth)> queue, HashSet<int> visited, int groupIndex, int depth)
-    {
-        if (visited.Add(groupIndex))
-            queue.Enqueue((groupIndex, depth));
-    }
-
-    private static bool ContainsPointExpanded(Vector3 point, Vector3 min, Vector3 max, float padding)
-    {
-        return point.X >= min.X - padding && point.X <= max.X + padding
-            && point.Y >= min.Y - padding && point.Y <= max.Y + padding
-            && point.Z >= min.Z - padding && point.Z <= max.Z + padding;
-    }
-
-    private static float ComputeNearRootFullVisibilityDistance(Vector3 min, Vector3 max, float fogEnd)
-    {
-        Vector3 extents = max - min;
-        float largestDimension = MathF.Max(extents.X, MathF.Max(extents.Y, extents.Z));
-        float scaledDistance = largestDimension * 0.75f;
-        float fogLimitedDistance = MathF.Max(NearRootFullVisibilityDistance, fogEnd * 0.75f);
-        return MathF.Max(NearRootFullVisibilityDistance, MathF.Min(scaledDistance, fogLimitedDistance));
-    }
-
-    private static bool IsExteriorGroup(uint flags) => (flags & 0x8) != 0;
-
-    private static float DistanceSquaredPointToAabb(Vector3 point, Vector3 min, Vector3 max)
-    {
-        float dx = point.X < min.X ? min.X - point.X : point.X > max.X ? point.X - max.X : 0f;
-        float dy = point.Y < min.Y ? min.Y - point.Y : point.Y > max.Y ? point.Y - max.Y : 0f;
-        float dz = point.Z < min.Z ? min.Z - point.Z : point.Z > max.Z ? point.Z - max.Z : 0f;
-        return dx * dx + dy * dy + dz * dz;
     }
 
     private static void TransformAabb(Vector3 min, Vector3 max, Matrix4x4 transform, out Vector3 outMin, out Vector3 outMax)
@@ -3449,8 +3270,6 @@ void main() {
         public bool RuntimeVisible = true;
         public bool IsVisible => ManualVisible && RuntimeVisible;
     }
-
-    private readonly record struct PortalNeighbor(int GroupIndex, ushort PortalIndex);
 
     private class DoodadInstance
     {

@@ -24,8 +24,10 @@ public sealed record WorldScenePortalVisibilityResult(
     WorldScenePortalVisibilityDiagnostics Diagnostics);
 
 /// <summary>
-/// Evaluates the graph-side reachable WMO groups for one placement. This is a diagnostic and
-/// traversal contract; the legacy renderer remains responsible for final group submission.
+/// Evaluates the graph-side reachable WMO groups for one placement. This remains a diagnostic
+/// traversal contract only; final WMO group submission is owned by
+/// <see cref="WmoPortalVisibilityEvaluator"/> so graph diagnostics cannot silently become a
+/// second renderer admission authority.
 /// </summary>
 public static class WorldScenePortalVisibilityEvaluator
 {
@@ -106,7 +108,7 @@ public static class WorldScenePortalVisibilityEvaluator
                     return Fallback(adapter, diagnostics, "portal_group_node_missing");
                 }
 
-                if (!visitedNodeIds.Add(destinationNode.Id))
+                if (visitedNodeIds.Contains(destinationNode.Id))
                     continue;
 
                 diagnostics.TestedPortalCount++;
@@ -123,13 +125,14 @@ public static class WorldScenePortalVisibilityEvaluator
                     return Fallback(adapter, diagnostics, child.FallbackReason ?? "portal_volume_fallback");
                 }
 
-                if (!destinationNode.BoundsKnown || child.Volume.IntersectsBounds(
+                if (destinationNode.BoundsKnown && !child.Volume.IntersectsBounds(
                         destinationNode.LocalBoundsMin,
                         destinationNode.LocalBoundsMax))
-                {
-                    visibleNodeIds.Add(destinationNode.Id);
-                    queue.Enqueue((destinationNode.Id, child.Volume));
-                }
+                    continue;
+
+                visitedNodeIds.Add(destinationNode.Id);
+                visibleNodeIds.Add(destinationNode.Id);
+                queue.Enqueue((destinationNode.Id, child.Volume));
             }
         }
 

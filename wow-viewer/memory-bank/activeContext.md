@@ -7,17 +7,23 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 151 Phase 1 on branch `151-portal-game-mode-surface`: implement
-  the bounded WMO portal visibility decision and focused tests from the recorded 0.5.3 Ghidra anchors.
-  Stop after the portal checkpoint before starting game-mode physics or the simple surface.
+- **Next implementation target:** Spec 151 Phase 2 on branch `151-portal-game-mode-surface`: add the
+  pure game-mode state/physics and character-head anchor after the completed portal checkpoint.
+  Preserve editor camera state and keep game mode opt-in.
 - **Performance planning target:** Spec 150 remains the broad Alpha 0.5.3 renderer evidence lane. Spec
   151 owns the first concrete portal-specific optimization; use its counters and fallback evidence to
   inform later repeated `profile-render` baselines. Do not infer a win from an interactive screenshot.
 - **Proof owner:** Focused PM4/audio contract tests and cross-platform viewer build pass; the user owns
   real-client region-camera, streaming, archive-provenance, and audible proof.
-- **Completed slice:** Checkpoint commit `3bfbbba4` contains the accumulated audio, AreaNumber,
-  Ghidra, and resident Zone/SubZone overlay work. Spec 149 now has an opt-in resident Zone/SubZone
-  overlay slice: Ghidra-backed
+- **Completed slice:** Checkpoint commits `3bfbbba4` (accumulated audio, AreaNumber, Ghidra, and
+  Zone/SubZone overlay work), `de41b183` (Spec Kit design pack), and the current portal phase commit
+  contain the work completed on this lane. Spec 151 Phase 1 now has a pure, fail-open WMO portal
+  decision using transformed portal polygons/clip volumes, source-side admission, bounded
+  depth/visit limits, renderer integration, and portal counters in `WmoRenderStats`; the old
+  center-distance/queue traversal scaffolding is removed. Focused portal/graph tests pass 16/16 and
+  the full solution Debug build passes with 0 errors. The graph evaluator is explicitly diagnostic;
+  the shared runtime decision owns final renderer admission. Spec 149 now has an opt-in resident
+  Zone/SubZone overlay slice: Ghidra-backed
   MCNK AreaNumber evidence, revisioned resident chunk enumeration, AreaTable-grouped footprint regions,
   distinct Zone/Subzone styling, projected labels, and unresolved-count diagnostics. Spec 148 now has a
   provenance-first world-simulator spec/plan/tasks pack;
@@ -26,23 +32,24 @@ the owning spec for requirements and proof; read a workstream only when the spec
   `ParentAreaNum` without half-word aliases; status-bar and terrain audio now consume the same
   resolved Zone/SubZone result; the runtime exposes non-playing diagnostic rows; the audio panel
   shows IDs, coordinates, path/source, decode/backend state, and terminal reason.
-- **Main unproven gap:** Spec 151's portal-volume final renderer admission, game-mode head anchor/
-  physics, simple-surface policy, and diagnostic budget remain unimplemented. Spec 149's PM4 region
+- **Main unproven gap:** Spec 151's game-mode head anchor/physics, simple-surface policy, and
+  diagnostic budget remain unimplemented. Portal admission is source-tested but still needs the
+  user-owned real-client visual/submission/FPS comparison. Spec 149's PM4 region
   bounds/focus, correlation UI retirement, focused area
   aggregation tests, MCNK/liquid environmental audio, MCSE tile/chunk coordinate normalization, and
   default-off per-trigger audio controls remain open. The area overlay is resident chunk coverage, not
   a proven complete polygon. ZoneMusic table indirection, exact `sounds.mpq` provenance, MIDI/DLS
   playback, and native MCSE callback installation remain separate proof gates. Spec 150 still lacks
   native renderer anchors, repeatable 0.5.3 baseline capture, and CPU/GPU attribution.
-- **Explicitly out of scope for the next slice:** Game-mode input/UI, simple-surface implementation,
+- **Explicitly out of scope for the next slice:** Simple-surface UI, logging-policy retirement,
   whole renderer rewrite, shader reconstruction, fake audio conversion, and claims of visual/FPS/
-  audible gains. These are later Spec 151 phases or separate proof gates.
+  audible gains. Game-mode input/UI follows the pure Phase 2 runtime-core checkpoint.
 
 ## Active spec lanes
 
 | Spec | State | Next handoff |
 |---|---|---|
-| 151 Portal-aware rendering/game mode/simple surface | Draft pack complete; Phase 1 ready | Implement shared bounded portal visibility decision and WMO final-admission tests from `research.md`; stop at the validation checkpoint. |
+| 151 Portal-aware rendering/game mode/simple surface | Phase 1 portal checkpoint implemented; Phase 2 open | Add pure game-mode state/physics and character-head anchor; preserve editor camera state and stop at the focused physics checkpoint. |
 | 149 PM4 region navigation/audio trigger controls | Draft pack; resident area overlay slice implemented, focused tests open | Add area aggregation tests, then implement contracts/caller audit and resident PM4 region list + double-click camera focus; retire correlation UI only after that checkpoint; gate audio triggers default-off. |
 | 150 Alpha 0.5.3 renderer performance | Draft evidence/planning pack complete; no source optimization started | Recover native world/terrain/object/resource/LOD anchors and run two repeated production `profile-render` baselines before choosing one owner. |
 | 148 Artifact world simulator runtime | Phase 1 diagnostics in progress; client contract correction landed | Add ZoneMusic indirection, then finish read/decode/source-stage coverage and user real-client inspection. |

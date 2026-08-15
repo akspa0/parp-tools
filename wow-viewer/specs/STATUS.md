@@ -7,7 +7,7 @@ task file are authoritative; this file only tells a new agent where to start.
 
 | Priority | Spec | State | Next bounded action |
 |---|---|---|---|
-| 1 | [151 Portal-aware rendering, game mode, and simple viewer surface](151-portal-game-mode-surface/spec.md) | Draft; Spec Kit research/plan/tasks complete, no source implementation started | Implement Phase 1 bounded WMO portal visibility decision and focused tests; use the recorded Ghidra anchors before touching game mode or UI |
+| 1 | [151 Portal-aware rendering, game mode, and simple viewer surface](151-portal-game-mode-surface/spec.md) | Implementing; Phase 1 portal checkpoint passes source proof | Implement Phase 2 pure game-mode state/physics and character-head anchor; preserve editor camera state and stop at the focused physics checkpoint |
 | 2 | [149 PM4 region navigation and audio trigger controls](149-pm4-region-audio-controls/spec.md) | Implementing; resident Zone/SubZone overlay slice wired, focused tests and PM4/audio stories open | Add area aggregation tests, then implement Phase 1 contracts/caller audit and validate region navigation before retiring correlation UI |
 | 3 | [150 Alpha 0.5.3 renderer performance](150-alpha-renderer-performance/spec.md) | Draft evidence/planning pack complete; Spec 151 now owns its first portal-specific implementation slice | Keep broad profiling planning here; use Spec 151 for the bounded portal optimization and later return to repeated `profile-render` baselines |
 | 4 | [148 Artifact world simulator runtime](148-world-simulator/spec.md) | Phase 1 audio diagnostics partially implemented; Alpha 0.5.3 MCSE and packed AreaNumber contracts landed | Add ZoneMusic row indirection, then finish source/read/decode coverage and user client inspection |

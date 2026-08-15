@@ -9,6 +9,21 @@ dotnet test I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter "Full
 dotnet build I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug
 ```
 
+## Phase 1 checkpoint evidence
+
+The bounded portal decision is implemented in the shared runtime and used by the WMO renderer.
+The focused structural proof is:
+
+```powershell
+dotnet test I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj `
+  -c Debug --no-build `
+  --filter "FullyQualifiedName~WmoPortalVisibilityDecisionTests|FullyQualifiedName~WorldScenePortalVisibilityEvaluatorTests"
+```
+
+Result on 2026-08-14: 16 passed, 0 failed. The full solution Debug build also passes with 0 errors.
+Existing repository warnings, including the Snappier advisory, remain. This is source-level proof;
+the user still owns real-client visual, submission-time, and FPS comparison.
+
 ## Controlled renderer comparison
 
 1. Use a persisted approved client root such as `H:\CLIENTS` and record the exact build/fingerprint.

@@ -7,6 +7,20 @@ belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
 ## 2026-08-14 — Spec 151 portal/game-mode/simple-surface planning
 
+## 2026-08-14 — Spec 151 Phase 1 bounded WMO portal visibility
+
+- Implemented the shared fail-open portal decision from the 0.5.3 Ghidra evidence: exterior seeds,
+  source-side plane admission, transformed portal polygons, recursively narrowed clip volumes, and
+  bounded depth/visit traversal. Invalid/missing geometry, singular placement transforms, boundary
+  cameras, and capacity overflow remain conservative rather than dropping WMO surfaces.
+- Replaced the WMO renderer's old center-distance/queue heuristic with one decision reused for group
+  geometry, doodad admission, and liquids. `WmoRenderStats` now carries portal-tested, fallback, and
+  admitted-group counters. The graph evaluator remains explicitly diagnostic and no longer marks a
+  destination visited before its portal volume is accepted.
+- Focused portal/graph tests pass 16/16 and the full solution Debug build passes with 0 errors.
+  Real-client WMO visual/submission/FPS comparison remains user-owned. Next bounded slice is Phase 2
+  pure game-mode state/physics and character-head anchoring; simple surface/logging work waits.
+
 - Checkpointed the accumulated prior work as `3bfbbba4` before opening branch
   `151-portal-game-mode-surface`.
 - Created the Spec Kit specification, Ghidra-backed research, data model, contracts, quickstart,
