@@ -7,7 +7,7 @@ belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
 ## 2026-08-14 — Spec 151 portal/game-mode/simple-surface planning
 
-## 2026-08-14 — Spec 151 Phase 1 bounded WMO portal visibility
+## 2026-08-14 — Spec 151 Phase 1 bounded WMO portal visibility (`c70e1945`)
 
 - Implemented the shared fail-open portal decision from the 0.5.3 Ghidra evidence: exterior seeds,
   source-side plane admission, transformed portal polygons, recursively narrowed clip volumes, and

@@ -16,7 +16,7 @@ the owning spec for requirements and proof; read a workstream only when the spec
 - **Proof owner:** Focused PM4/audio contract tests and cross-platform viewer build pass; the user owns
   real-client region-camera, streaming, archive-provenance, and audible proof.
 - **Completed slice:** Checkpoint commits `3bfbbba4` (accumulated audio, AreaNumber, Ghidra, and
-  Zone/SubZone overlay work), `de41b183` (Spec Kit design pack), and the current portal phase commit
+  Zone/SubZone overlay work), `de41b183` (Spec Kit design pack), and `c70e1945` (portal phase)
   contain the work completed on this lane. Spec 151 Phase 1 now has a pure, fail-open WMO portal
   decision using transformed portal polygons/clip volumes, source-side admission, bounded
   depth/visit limits, renderer integration, and portal counters in `WmoRenderStats`; the old
