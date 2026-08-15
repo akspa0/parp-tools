@@ -3410,8 +3410,33 @@ public partial class ViewerApp
                 + "explain it - the work is happening between or outside the timers.");
         }
 
+        // Submission efficiency. If most instances are unbatched, the cost is one draw call per
+        // object and no amount of allocation tuning will touch it - instancing is the fix.
+        if (ImGui.TreeNode("Submission efficiency (this frame)###FrameHistoryBatching"))
+        {
+            WorldRenderFrameStats live = _worldScene.LastRenderFrameStats;
+            int mdxOpaqueTotal = live.OpaqueBatchedMdxCount + live.OpaqueUnbatchedMdxCount;
+            int mdxTransparentTotal = live.TransparentBatchedMdxCount + live.TransparentUnbatchedMdxCount;
+
+            ImGui.Text($"MDX opaque:      batched {live.OpaqueBatchedMdxCount,6}  unbatched {live.OpaqueUnbatchedMdxCount,6}"
+                + (mdxOpaqueTotal > 0 ? $"   ({100.0 * live.OpaqueUnbatchedMdxCount / mdxOpaqueTotal:0.0}% unbatched)" : ""));
+            ImGui.Text($"MDX transparent: batched {live.TransparentBatchedMdxCount,6}  unbatched {live.TransparentUnbatchedMdxCount,6}"
+                + (mdxTransparentTotal > 0 ? $"   ({100.0 * live.TransparentUnbatchedMdxCount / mdxTransparentTotal:0.0}% unbatched)" : ""));
+            ImGui.Text($"WMO draw calls:  total {live.WmoDrawCallCount,6}  batched {live.WmoBatchDrawCallCount,6}  group-fallback {live.WmoGroupFallbackDrawCallCount,6}");
+            ImGui.Text($"WMO doodad submissions: {live.WmoDoodadSubmissionCount}   visible groups: {live.WmoVisibleGroupSubmissionCount}");
+
+            if (mdxOpaqueTotal > 0 && live.OpaqueUnbatchedMdxCount > live.OpaqueBatchedMdxCount)
+            {
+                ImGui.TextColored(new Vector4(1f, 0.55f, 0.2f, 1f),
+                    "Most opaque MDX are UNBATCHED: one draw call per instance.");
+            }
+            ImGui.TreePop();
+        }
+
         // Localise the unaccounted time to a region of Render(). Peaks are what matter: hitches are
         // transient, so a live reading will almost never land on the bad frame.
+        // Default-open: when unaccounted dominates, this is the only node that says where.
+        ImGui.SetNextItemOpen(unaccountedDominates, ImGuiCond.Once);
         if (ImGui.TreeNode("Unaccounted breakdown (peaks)###FrameHistoryRegions"))
         {
             ImGui.TextDisabled("Untimed time inside Render(), split by region. Peak since reset.");
