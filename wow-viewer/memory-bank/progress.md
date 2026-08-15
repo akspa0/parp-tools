@@ -2,6 +2,33 @@
 
 Last updated: 2026-08-15
 
+## 2026-08-15 — Renderer gallop diagnosed; Spec 153 opened, flattening lane suspended
+
+- Built the missing detector. `WorldRenderFrameStats` already produced `TotalCpuMs` plus 18 per-stage
+  timers every frame and the viewer discarded all of it — `LastRenderFrameStats` held one frame and
+  no history existed anywhere. Added `WorldRenderFrameHistory` (fixed-capacity ring, per-stage
+  percentiles, hitch marking, unaccounted time, region peaks, allocation-free recording asserted by
+  test) and an in-viewer panel under Utilities > Perf with an injected-stall self-check.
+- Diagnosed against real clients across four zones. **Four measured defects**, all recorded in
+  [Spec 153](../specs/153-renderer-hitch-and-batching/spec.md): a ~212 ms stall every ~47–50 frames
+  living entirely in the pass gap; 100% of opaque MDX submitting unbatched while WMO batches 198/198;
+  `SceneMaintenance` max 454.8 ms; and a deferred-load budget checked only between loads (58 ms vs
+  3.5 ms nominal).
+- Root structural cause of the invisibility: `WorldFramePasses` declares eleven passes and only
+  `PrepareObjectPhase` assigns no stage timer, so its cost could not appear in the stage table at all.
+- **The allocation-churn hypothesis was refuted by measurement** (median world-render CPU 0.33–8.58 ms;
+  traversal max 0.22 ms). Per Spec 152's own Phase 1 decision point, Phases 3–5 (flatten the scene
+  graph into retained draw lists, view modes) are suspended rather than continued on momentum. The
+  churn fixes that landed — traversal now allocation-free in steady state, diagnostics off the hot
+  path, opaque-pass buffers reused and pooled — are kept on their own merits.
+- Ruled out with evidence so they are not re-proposed: decoded-asset caching and LRU thrash
+  (`MaxMdxCached = 0`, unlimited; 554 models serve 18663 instances), scene-graph traversal, per-frame
+  diagnostic logging.
+- Stranglethorn Vale is now the standard benchmark scene; it exposed both defects where quieter zones
+  hid them. Baseline table recorded in the Spec 153 plan.
+- No renderer defect is fixed yet. Next bounded action is Spec 153 Phase 0: capture the
+  `PrepareObjectPhase` sub-probes to name the stall before proposing a fix.
+
 ## 2026-08-15 — Repair Utilities minimap routing after sidebar consolidation
 
 - Isolated the Utilities page selector from the shared Inspect/Scene/Experimental index. Legacy

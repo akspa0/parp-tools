@@ -7,18 +7,40 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** User-run visual/compact-window proof for the Spec 080 Phase 2E
-  IA. Check Scene for only Placements/LOD, Experimental > Terrain Lab for tiles plus chunk clipboard,
+**START HERE: Spec 153 — the renderer gallop is diagnosed with measurements. Fix it.**
+
+- **Next implementation target:** [Spec 153](../specs/153-renderer-hitch-and-batching/spec.md)
+  Phase 0 — fly Stranglethorn Vale and read Utilities > Perf > Frame history >
+  *Unaccounted breakdown*. The sub-probes for `AudioRuntime.Update` and
+  `EnsurePm4OverlayMatchesCameraWindow` are landed but **never captured**, so the ~212 ms periodic
+  stall is localised to the `PrepareObjectPhase` pass but not yet named to a call. If neither probe
+  matches the hitch magnitude, subdivide further — do **not** guess a fix.
+- **Can start immediately in parallel (all independent):** Spec 153 Phase 1 (give
+  `PrepareObjectPhase` a stage timer — it is the only one of eleven passes without one, which is why
+  a 200 ms stall hid for the entire investigation; add a test asserting passes == timers), Phase 3
+  (restore MDX batching — the largest dense-scene win), Phase 5 (enforce the deferred load budget),
+  and Spec 152 Phase 6 (per-era terrain lighting, fixes 1.0.0+ darkness).
+- **The measurement tool exists and works.** Utilities > Perf > Frame history: rolling per-frame
+  history, hitch detection with dominant-cause attribution, unaccounted time, region peaks,
+  submission batching counts, and an injected-stall self-check. Recording is allocation-free.
+  Use it for every before/after. **Benchmark scene: Stranglethorn Vale.**
+- **The hitching observation is no longer deferred and is no longer a mystery.** Four measured
+  defects, recorded in Spec 153 with numbers: (A) ~212 ms stall every ~47–50 frames, all of it in the
+  pass gap; (B) 100% of opaque MDX submit unbatched while WMO batches 198/198; (C) `SceneMaintenance`
+  max 454.8 ms; (D) load budget checked only between loads, 58 ms against 3.5 ms.
+- **Refuted, do not revive without new evidence:** the allocation-churn hypothesis. Median
+  world-render CPU is 0.33–8.58 ms and traversal maxes at 0.22 ms. Spec 152 Phases 3–5 (flatten the
+  scene graph into retained draw lists, view modes) are **suspended** because they rested on that
+  premise. Also ruled out with evidence: decoded-asset caching / LRU thrash (`MaxMdxCached = 0`,
+  unlimited; 554 models serve 18663 instances — nothing is re-decoded, the cost is submission).
+- **Detector lessons that made this possible:** p99 hides rare hitches (they land at p100 — use max
+  and over-threshold count); ranking stages by p99 buries a rare-but-huge stage (sort by max);
+  always report unaccounted time, or attribution names a 0.2 ms stage for a 350 ms frame.
+- **Lower-priority target:** User-run visual/compact-window proof for the Spec 080 Phase 2E IA.
+  Check Scene for only Placements/LOD, Experimental > Terrain Lab for tiles plus chunk clipboard,
   Inspect's dropdown for Archeology, MCNK/ADT, scene investigation, world context, animations, and
   actions, Utilities > Minimap for the restored route, and Navigator > World Maps for the Phase Map
   selector.
-- **Performance planning target:** Spec 150 remains the broad Alpha 0.5.3 renderer evidence lane. Spec
-  151 owns the first concrete portal-specific optimization; use its counters and fallback evidence to
-  inform later repeated `profile-render` baselines. Do not infer a win from an interactive screenshot.
-- **Deferred renderer observation:** The user reports camera movement hitching at nearly every move,
-  independent of fog settings, with suspected ADT/object rendering or residency regression. Do not
-  touch renderer, fog, ADT admission, object submission, or streaming during the sidebar pass; reopen
-  Spec 150 with repeated stage-attributed profiles.
 - **Deferred WMO/fog observation:** The supplied screenshot shows distant WMO content, including old
   Ironforge, still visible beyond the effective fog end while terrain has already been culled. Treat
   this as a concrete symptom, not a proven owner; reopen with WMO visibility/submission counters and
@@ -87,6 +109,8 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 | Spec | State | Next handoff |
 |---|---|---|
+| **153 Renderer hitch and MDX batching** | **Diagnosis complete with measurements; no fix started** | **Phase 0: capture Stranglethorn sub-probes to name the ~212 ms stall. Phases 1/3/5 independent, start any time.** |
+| 152 Renderer frame-time stability / per-era lighting | Detector landed and used; its Phase 1 gate refuted the allocation hypothesis so Phases 3–5 are suspended | Owns the measurement infrastructure (done) and Phase 6 per-era terrain lighting (independent, not started, fixes 1.0.0+ darkness). |
 | 151 Portal-aware rendering/game mode/simple surface | Phase 1 portal checkpoint implemented; Phase 2 open | Add pure game-mode state/physics and character-head anchor; preserve editor camera state and stop at the focused physics checkpoint. |
 | 104 Legacy M2/MDX rendering | 1.0.0 route complete; MDX material/effect shader checkpoint implemented with visual proof open | Validate shader compilation and translucent/reflective models against the configured client/build; keep full BLS parity separate. |
 | 149 PM4 region navigation/audio trigger controls | Draft pack; resident area overlay, MCNK liquid producer, coordinate normalization, and opt-in speaker-marker slices implemented | Add area aggregation/audio-control tests, then complete per-trigger toggles and ZoneMusic indirection; retire correlation UI only after the region checkpoint; keep world triggers default-off. |
