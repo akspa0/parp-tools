@@ -1,4 +1,5 @@
 using WowViewer.Core.Runtime.World;
+using WowViewer.Core.Runtime.World.SceneGraph;
 using Xunit;
 
 namespace WowViewer.Core.Tests;
@@ -203,6 +204,45 @@ public class WorldRenderFrameHistoryTests
 
         Assert.Equal(7.0, snapshot.Stages[WorldRenderStage.WmoSubmission].MedianMs, precision: 6);
         Assert.Equal(0.0, snapshot.Stages[WorldRenderStage.Liquid].MedianMs, precision: 6);
+    }
+
+    [Fact]
+    public void TraverseInto_DoesNotAllocateOnSteadyStateFrames()
+    {
+        // C1: the allocating Traverse overload builds two lists, a diagnostics object holding four
+        // dictionaries, and a result record PER GRAPH PER FRAME. ADT tiles are isolated into
+        // independent graphs, so the hot path paid that in proportion to the resident tile set.
+        WorldSceneGraph graph = SyntheticWorldWorkloadBuilder.Build(
+            new SyntheticWorldWorkloadDefinition
+            {
+                ResidentRegionCount = 4,
+                ChunksPerRegion = 16,
+                M2Placements = 32,
+            }).Graph;
+
+        var visible = new List<WorldSceneNode>();
+        var rejected = new List<WorldSceneNode>();
+        var diagnostics = new WorldSceneTraversalDiagnostics();
+
+        void RunBatch()
+        {
+            for (int i = 0; i < 200; i++)
+            {
+                WorldSceneTraversal.TraverseInto(
+                    graph, static _ => true, visible, rejected, diagnostics,
+                    collectDetailedDiagnostics: false);
+            }
+        }
+
+        // First batch absorbs one-time costs (buffer growth, first-call JIT/delegate caching).
+        RunBatch();
+
+        // Steady state must be exactly zero: any residue here would be per-frame churn.
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        RunBatch();
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0, allocated);
     }
 
     [Fact]

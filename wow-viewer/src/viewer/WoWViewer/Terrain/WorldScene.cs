@@ -1299,6 +1299,15 @@ public class WorldScene : ISceneRenderer
 
     private Vector3 _frameHistoryPreviousCameraPosition = new(float.NaN, float.NaN, float.NaN);
     private Vector3 _frameHistoryPreviousCameraForward = new(float.NaN, float.NaN, float.NaN);
+
+    // Per-frame scratch, reused rather than reallocated. Named scratch, not cache: they are rebuilt
+    // every frame by design, so calling them a cache would misrepresent their lifetime.
+    private readonly List<WorldSceneGraphBuildResult> _activeSceneGraphScratch = [];
+    private readonly HashSet<WorldSceneGraphBuildResult> _activeSceneGraphSetScratch =
+        new(ReferenceEqualityComparer.Instance);
+    private readonly List<WorldSceneNode> _sceneGraphVisibleNodeScratch = [];
+    private readonly List<WorldSceneNode> _sceneGraphRejectedNodeScratch = [];
+    private readonly WorldSceneTraversalDiagnostics _sceneGraphTraversalScratchDiagnostics = new();
     public string RendererOptimizationHint => WorldRenderOptimizationAdvisor.BuildHint(LastRenderFrameStats);
     public bool UseHierarchicalSceneTraversal
     {
@@ -9796,9 +9805,17 @@ public class WorldScene : ISceneRenderer
             return;
         }
 
-        List<WorldSceneGraphBuildResult> activeGraphs = EnumerateActiveSceneGraphs().ToList();
-        HashSet<WorldSceneGraphBuildResult> activeGraphSet =
-            new(activeGraphs, ReferenceEqualityComparer.Instance);
+        // Reused across frames and cleared in place. These were rebuilt every frame via LINQ plus a
+        // fresh HashSet, which allocated in proportion to the resident tile set on the hot path.
+        List<WorldSceneGraphBuildResult> activeGraphs = _activeSceneGraphScratch;
+        HashSet<WorldSceneGraphBuildResult> activeGraphSet = _activeSceneGraphSetScratch;
+        activeGraphs.Clear();
+        activeGraphSet.Clear();
+        foreach (WorldSceneGraphBuildResult activeGraph in EnumerateActiveSceneGraphs())
+        {
+            activeGraphs.Add(activeGraph);
+            activeGraphSet.Add(activeGraph);
+        }
 
         foreach ((string placementId, WorldScenePortalAdapterResult adapter) in _sceneGraphPortalAdapters)
         {
@@ -9816,18 +9833,24 @@ public class WorldScene : ISceneRenderer
 
         foreach (WorldSceneGraphBuildResult graphBuild in activeGraphs)
         {
-            WorldSceneTraversalResult traversal = WorldSceneTraversal.Traverse(
+            // Traverse into reused buffers. The allocating overload builds two lists, a diagnostics
+            // object with four dictionaries, and a result record per graph per frame, which scales
+            // with the resident tile set on the hot path.
+            WorldSceneTraversal.TraverseInto(
                 graphBuild.Graph,
                 IsSceneGraphNodeVisible,
+                _sceneGraphVisibleNodeScratch,
+                _sceneGraphRejectedNodeScratch,
+                _sceneGraphTraversalScratchDiagnostics,
                 node => node.Kind is WorldSceneNodeKind.M2Placement or WorldSceneNodeKind.WmoPlacement,
                 shouldEvaluateVisibility: static node =>
                     node.Kind != WorldSceneNodeKind.M2Placement
                     || node.Parent?.Kind != WorldSceneNodeKind.Chunk,
                 validateGraph: false,
                 collectDetailedDiagnostics: SceneGraphDetailedDiagnosticsEnabled);
-            _lastSceneGraphTraversalDiagnostics.Accumulate(traversal.Diagnostics);
+            _lastSceneGraphTraversalDiagnostics.Accumulate(_sceneGraphTraversalScratchDiagnostics);
 
-            foreach (WorldSceneNode node in traversal.VisibleNodes)
+            foreach (WorldSceneNode node in _sceneGraphVisibleNodeScratch)
             {
                 if (!graphBuild.PlacementsByNodeId.TryGetValue(node.Id, out WorldSceneGraphObjectPlacement placement)
                     || placement.IsSkybox)

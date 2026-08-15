@@ -58,6 +58,17 @@ public sealed class WorldSceneNode
 
     public IReadOnlyList<WorldSceneNode> Children => _children;
 
+    /// <summary>
+    /// The concrete child list, for hot-path iteration only.
+    /// <para>
+    /// Iterating <see cref="Children"/> goes through <see cref="IReadOnlyList{T}"/>, which boxes
+    /// <c>List&lt;T&gt;.Enumerator</c> onto the heap once per node. Traversal visits every node every
+    /// frame, so that is thousands of allocations per frame purely from the <c>foreach</c>. Using the
+    /// concrete type lets the compiler bind the struct enumerator instead.
+    /// </para>
+    /// </summary>
+    internal List<WorldSceneNode> ChildList => _children;
+
     public Matrix4x4 LocalTransform => _localTransform;
 
     public Matrix4x4 WorldTransform { get; private set; }

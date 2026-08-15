@@ -40,7 +40,27 @@ public sealed class WorldSceneTraversalDiagnostics
     /// The scalar counters remain valid; the per-kind dictionaries,
     /// <see cref="SkippedDescendantCount"/>, and the rejected-node list do not.
     /// </summary>
-    public bool DetailedCollectionEnabled { get; init; } = true;
+    public bool DetailedCollectionEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Return to the zero state so one instance can be reused across frames instead of allocating a
+    /// fresh diagnostics object (and its four dictionaries) per graph per frame.
+    /// </summary>
+    public void Reset()
+    {
+        VisitedNodeCount = 0;
+        IndividuallyTestedNodeCount = 0;
+        NonRejectableNodeCount = 0;
+        VisibleRenderableNodeCount = 0;
+        RejectedNodeCount = 0;
+        SkippedDescendantCount = 0;
+        MaxDepthReached = 0;
+        DeferredVisibilityTestCount = 0;
+        _individuallyTestedNodeCountsByKind.Clear();
+        _rejectedNodeCountsByKind.Clear();
+        _skippedDescendantCountsByKind.Clear();
+        _deferredVisibilityTestCountsByKind.Clear();
+    }
 
     public void Accumulate(WorldSceneTraversalDiagnostics other)
     {
@@ -82,8 +102,10 @@ public sealed class WorldSceneTraversalDiagnostics
         Dictionary<WorldSceneNodeKind, int> counts)
     {
         int descendantCount = 0;
-        foreach (WorldSceneNode child in node.Children)
+        List<WorldSceneNode> children = node.ChildList;
+        for (int i = 0; i < children.Count; i++)
         {
+            WorldSceneNode child = children[i];
             descendantCount++;
             Increment(counts, child.Kind);
             descendantCount += RecordDescendantKinds(child, counts);
@@ -142,6 +164,54 @@ public static class WorldSceneTraversal
         {
             DetailedCollectionEnabled = collectDetailedDiagnostics,
         };
+        TraverseInto(
+            graph,
+            isVisible,
+            visibleNodes,
+            rejectedNodes,
+            diagnostics,
+            includeNode,
+            shouldEvaluateVisibility,
+            validateGraph: false,
+            collectDetailedDiagnostics);
+        return new WorldSceneTraversalResult(visibleNodes, rejectedNodes, diagnostics);
+    }
+
+    /// <summary>
+    /// Traverse into caller-owned buffers, which are cleared first and reused across frames.
+    /// <para>
+    /// <see cref="Traverse"/> allocates two lists, a diagnostics object holding four dictionaries,
+    /// and a result record on every call. ADT tiles are isolated into independent graphs, so a
+    /// per-frame render loop pays that per graph per frame — allocation proportional to the resident
+    /// tile set. This overload exists so the hot path can own its buffers and allocate nothing.
+    /// </para>
+    /// </summary>
+    public static void TraverseInto(
+        WorldSceneGraph graph,
+        Func<WorldSceneNode, bool> isVisible,
+        List<WorldSceneNode> visibleNodes,
+        List<WorldSceneNode> rejectedNodes,
+        WorldSceneTraversalDiagnostics diagnostics,
+        Func<WorldSceneNode, bool>? includeNode = null,
+        Func<WorldSceneNode, bool>? shouldEvaluateVisibility = null,
+        bool validateGraph = false,
+        bool collectDetailedDiagnostics = true)
+    {
+        ArgumentNullException.ThrowIfNull(graph);
+        ArgumentNullException.ThrowIfNull(isVisible);
+        ArgumentNullException.ThrowIfNull(visibleNodes);
+        ArgumentNullException.ThrowIfNull(rejectedNodes);
+        ArgumentNullException.ThrowIfNull(diagnostics);
+
+        if (validateGraph)
+            graph.ValidateInvariants();
+        includeNode ??= static node => node.IsRenderable;
+
+        visibleNodes.Clear();
+        rejectedNodes.Clear();
+        diagnostics.Reset();
+        diagnostics.DetailedCollectionEnabled = collectDetailedDiagnostics;
+
         Visit(
             graph.Root,
             isVisible,
@@ -151,7 +221,6 @@ public static class WorldSceneTraversal
             rejectedNodes,
             diagnostics,
             collectDetailedDiagnostics);
-        return new WorldSceneTraversalResult(visibleNodes, rejectedNodes, diagnostics);
     }
 
     private static void Visit(
@@ -210,9 +279,12 @@ public static class WorldSceneTraversal
             diagnostics.VisibleRenderableNodeCount++;
         }
 
-        foreach (WorldSceneNode child in node.Children)
+        // Iterate the concrete list: foreach over IReadOnlyList<T> boxes the enumerator once per
+        // node, and traversal touches every node every frame.
+        List<WorldSceneNode> children = node.ChildList;
+        for (int i = 0; i < children.Count; i++)
             Visit(
-                child,
+                children[i],
                 isVisible,
                 includeNode,
                 shouldEvaluateVisibility,
