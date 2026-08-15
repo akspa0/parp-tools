@@ -26,10 +26,17 @@ public class WorldRenderFrameHistoryTests
         {
             WorldRenderStage.Terrain => stats with { Terrain = stageStats },
             WorldRenderStage.WmoSubmission => stats with { WmoSubmission = stageStats },
+            WorldRenderStage.WmoTransparentSubmission => stats with { WmoTransparentSubmission = stageStats },
+            WorldRenderStage.WmoVisibility => stats with { WmoVisibility = stageStats },
             WorldRenderStage.MdxOpaqueSubmission => stats with { MdxOpaqueSubmission = stageStats },
+            WorldRenderStage.MdxVisibility => stats with { MdxVisibility = stageStats },
             WorldRenderStage.DeferredAssetLoads => stats with { DeferredAssetLoads = stageStats },
             WorldRenderStage.SceneMaintenance => stats with { SceneMaintenance = stageStats },
-            _ => stats,
+            WorldRenderStage.Overlay => stats with { Overlay = stageStats },
+            // A silent fall-through would set no stage at all and quietly invalidate any test that
+            // relied on it, so fail loudly instead.
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(stage), stage, "Add this stage to the test helper before using it."),
         };
     }
 
@@ -49,6 +56,44 @@ public class WorldRenderFrameHistoryTests
         WorldRenderHitch hitch = Assert.Single(snapshot.Hitches);
         Assert.Equal(hitchAt, hitch.FrameIndex);
         Assert.Equal(hitchMs, hitch.TotalCpuMs, precision: 6);
+    }
+
+    [Fact]
+    public void HitchWithNoStageCost_IsReportedAsUnaccounted_NotAsATinyStage()
+    {
+        // The real defect: ~350ms frames whose largest instrumented stage was 0.2ms. Naming that
+        // stage points at the wrong place; the honest answer is that no timer covers the cost.
+        var history = new WorldRenderFrameHistory(capacity: 64);
+        for (int i = 0; i < 30; i++)
+            history.Record(FrameOf(1.0, WorldRenderStage.MdxVisibility, 0.2), cameraMoved: true);
+        history.Record(FrameOf(350.0, WorldRenderStage.MdxVisibility, 0.2), cameraMoved: true);
+
+        WorldRenderFrameHistorySnapshot snapshot = history.Snapshot(hitchThresholdMs: 33.0);
+
+        WorldRenderHitch hitch = Assert.Single(snapshot.Hitches);
+        Assert.True(hitch.IsDominatedByUnaccountedTime);
+        Assert.Equal(349.8, hitch.UnaccountedMs, precision: 4);
+        Assert.Contains("UNACCOUNTED", hitch.DominantCause);
+        Assert.Equal(349.8, snapshot.Unaccounted.MaxMs, precision: 4);
+    }
+
+    [Fact]
+    public void StagesByMaxDescending_SurfacesRareButHugeStage_ThatP99Hides()
+    {
+        // DeferredAssetLoads fires once in 200 frames at 46ms. Its p99 is ~0, so p99 ordering buries
+        // it below stages that are merely steadily small - which is how the old view hid it.
+        var history = new WorldRenderFrameHistory(capacity: 256);
+        for (int i = 0; i < 200; i++)
+            history.Record(FrameOf(1.0, WorldRenderStage.MdxVisibility, 0.3), cameraMoved: true);
+        history.Record(FrameOf(47.0, WorldRenderStage.DeferredAssetLoads, 46.5), cameraMoved: true);
+
+        WorldRenderFrameHistorySnapshot snapshot = history.Snapshot(hitchThresholdMs: 33.0);
+
+        WorldRenderStage worstByMax = snapshot.StagesByMaxDescending().First().Key;
+        WorldRenderStage worstByP99 = snapshot.StagesByP99Descending().First().Key;
+
+        Assert.Equal(WorldRenderStage.DeferredAssetLoads, worstByMax);
+        Assert.NotEqual(WorldRenderStage.DeferredAssetLoads, worstByP99);
     }
 
     [Fact]

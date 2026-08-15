@@ -3329,6 +3329,15 @@ public partial class ViewerApp
     private float _frameHistoryHitchThresholdMs = 33.3f;
     private readonly float[] _frameHistoryPlotBuffer = new float[240];
     private double _frameHistoryInjectStallMs = 250;
+    private bool _frameHistoryPaused;
+
+    private static double SumStageMaxima(WorldRenderFrameHistorySnapshot snapshot)
+    {
+        double sum = 0;
+        foreach (WorldRenderTimingDistribution dist in snapshot.Stages.Values)
+            sum += dist.MaxMs;
+        return sum;
+    }
 
     /// <summary>
     /// Frame timing over time, with hitches marked and attributed to a stage.
@@ -3347,8 +3356,13 @@ public partial class ViewerApp
 
         WorldRenderFrameHistory history = _worldScene.FrameHistory;
 
+        // Freeze so the numbers can be read and screenshotted. Recording continues regardless.
+        ImGui.Checkbox("Pause updates", ref _frameHistoryPaused);
+        ImGui.SameLine();
+        ImGui.TextDisabled("(recording continues)");
+
         double now = ImGui.GetTime();
-        if (_frameHistorySnapshot is null || now >= _frameHistoryNextRefreshSeconds)
+        if (_frameHistorySnapshot is null || (!_frameHistoryPaused && now >= _frameHistoryNextRefreshSeconds))
         {
             _frameHistorySnapshot = history.Snapshot(_frameHistoryHitchThresholdMs);
             _frameHistoryNextRefreshSeconds = now + 0.25;
@@ -3382,6 +3396,20 @@ public partial class ViewerApp
         ImGui.TextColored(hitchColor,
             $"Hitches over {_frameHistoryHitchThresholdMs:0.0} ms: {total.OverThresholdCount} of {snapshot.FrameCount} frames");
 
+        // Total minus the sum of every stage timer. If this is large, the cost is somewhere no timer
+        // covers, and the stage table below is not where to look.
+        WorldRenderTimingDistribution unaccounted = snapshot.Unaccounted;
+        bool unaccountedDominates = unaccounted.MaxMs > 1.0 && unaccounted.MaxMs > total.MaxMs * 0.5;
+        ImGui.TextColored(
+            unaccountedDominates ? new Vector4(1f, 0.55f, 0.2f, 1f) : new Vector4(0.7f, 0.7f, 0.7f, 1f),
+            $"UNACCOUNTED (not covered by any stage timer): median {unaccounted.MedianMs:0.00}  p99 {unaccounted.P99Ms:0.00}  max {unaccounted.MaxMs:0.00} ms");
+        if (unaccountedDominates)
+        {
+            ImGui.TextWrapped(
+                "Most of the hitch is NOT in any instrumented stage. The stage table below cannot "
+                + "explain it - the work is happening between or outside the timers.");
+        }
+
         // The real per-frame series, copied without allocating. This is live every UI frame even
         // though the statistics above refresh on a cadence.
         int plotCount = history.CopyRecentTotalMs(_frameHistoryPlotBuffer);
@@ -3398,26 +3426,41 @@ public partial class ViewerApp
                 new Vector2(0, 60f));
         }
 
-        if (snapshot.Hitches.Count > 0 && ImGui.TreeNode($"Recent hitches ({snapshot.Hitches.Count})"))
+        // Stable ImGui IDs via ###: the visible label carries a changing count, and ImGui derives the
+        // widget ID from the label, so a bare interpolated label collapses the node whenever the
+        // count ticks.
+        if (snapshot.Hitches.Count > 0
+            && ImGui.TreeNode($"Recent hitches ({snapshot.Hitches.Count})###FrameHistoryHitches"))
         {
             int shown = 0;
             for (int i = snapshot.Hitches.Count - 1; i >= 0 && shown < 12; i--, shown++)
             {
                 WorldRenderHitch hitch = snapshot.Hitches[i];
-                ImGui.Text($"frame {hitch.FrameIndex}: {hitch.TotalCpuMs:0.0} ms  <- {hitch.DominantStage} ({hitch.DominantStageMs:0.0} ms)");
+                if (hitch.IsDominatedByUnaccountedTime)
+                {
+                    ImGui.TextColored(new Vector4(1f, 0.55f, 0.2f, 1f),
+                        $"frame {hitch.FrameIndex}: {hitch.TotalCpuMs:0.0} ms  <- UNACCOUNTED ({hitch.UnaccountedMs:0.0} ms, no timer)");
+                }
+                else
+                {
+                    ImGui.Text($"frame {hitch.FrameIndex}: {hitch.TotalCpuMs:0.0} ms  <- {hitch.DominantStage} ({hitch.DominantStageMs:0.0} ms)");
+                }
             }
             ImGui.TreePop();
         }
 
-        if (ImGui.TreeNode("Stage cost (p99, worst first)"))
+        // Sorted by MAX, not p99. A stage that fires rarely but costs 300 ms has a near-zero p99, so
+        // p99 ordering hides precisely the thing a hitch hunt is looking for.
+        if (ImGui.TreeNode("Stage cost (max, worst first)###FrameHistoryStages"))
         {
             int shown = 0;
-            foreach ((WorldRenderStage stage, WorldRenderTimingDistribution dist) in snapshot.StagesByP99Descending())
+            foreach ((WorldRenderStage stage, WorldRenderTimingDistribution dist) in snapshot.StagesByMaxDescending())
             {
-                if (dist.MaxMs <= 0.0001 || shown++ >= 10)
+                if (dist.MaxMs <= 0.0001 || shown++ >= 12)
                     continue;
-                ImGui.Text($"{stage,-26} median {dist.MedianMs,6:0.00}  p99 {dist.P99Ms,6:0.00}  max {dist.MaxMs,6:0.00} ms");
+                ImGui.Text($"{stage,-26} median {dist.MedianMs,6:0.00}  p99 {dist.P99Ms,6:0.00}  max {dist.MaxMs,7:0.00} ms");
             }
+            ImGui.TextDisabled($"{"SUM of stage maxima",-26} {SumStageMaxima(snapshot),29:0.00} ms  vs total max {total.MaxMs:0.00} ms");
             ImGui.TreePop();
         }
 

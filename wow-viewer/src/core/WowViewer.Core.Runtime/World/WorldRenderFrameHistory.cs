@@ -39,12 +39,31 @@ public readonly record struct WorldRenderTimingDistribution(
     public static WorldRenderTimingDistribution Empty { get; } = new(0, 0, 0, 0, 0, 0, 0);
 }
 
-/// <summary>One frame that exceeded the hitch threshold, with the stage that dominated it.</summary>
+/// <summary>
+/// One frame that exceeded the hitch threshold.
+/// <para>
+/// <see cref="UnaccountedMs"/> is total frame time minus the sum of every instrumented stage. When
+/// it dominates, the cost is somewhere no stage timer covers, and naming a stage would be actively
+/// misleading — a 350 ms frame whose largest stage is 0.2 ms is not a story about that stage.
+/// </para>
+/// </summary>
 public readonly record struct WorldRenderHitch(
     long FrameIndex,
     double TotalCpuMs,
     WorldRenderStage DominantStage,
-    double DominantStageMs);
+    double DominantStageMs,
+    double UnaccountedMs)
+{
+    /// <summary>True when uninstrumented time exceeds the largest instrumented stage.</summary>
+    public bool IsDominatedByUnaccountedTime => UnaccountedMs > DominantStageMs;
+
+    /// <summary>Human-readable cause: either a stage name or an explicit "not instrumented".</summary>
+    public string DominantCause => IsDominatedByUnaccountedTime
+        ? "UNACCOUNTED (no stage timer covers it)"
+        : DominantStage.ToString();
+
+    public double DominantCauseMs => IsDominatedByUnaccountedTime ? UnaccountedMs : DominantStageMs;
+}
 
 /// <summary>
 /// A point-in-time read of the retained window. Allocation happens here, on demand, never on the
@@ -57,10 +76,21 @@ public sealed record WorldRenderFrameHistorySnapshot(
     double HitchThresholdMs,
     bool CameraMovedDuringWindow,
     WorldRenderTimingDistribution Total,
+    WorldRenderTimingDistribution Unaccounted,
     IReadOnlyDictionary<WorldRenderStage, WorldRenderTimingDistribution> Stages,
     IReadOnlyList<WorldRenderHitch> Hitches,
     double RecorderOverheadMsPerFrame)
 {
+    /// <summary>
+    /// Stages ordered by worst observed frame, not by p99.
+    /// <para>
+    /// Ranking by p99 structurally hides the profile a hitch hunt is looking for: a stage that is
+    /// rare (so its p99 is near zero) but enormous when it does fire. Sorting by max surfaces it.
+    /// </para>
+    /// </summary>
+    public IEnumerable<KeyValuePair<WorldRenderStage, WorldRenderTimingDistribution>> StagesByMaxDescending()
+        => Stages.OrderByDescending(static kvp => kvp.Value.MaxMs);
+
     /// <summary>
     /// A stationary window cannot demonstrate movement-induced behavior. Callers must not read a
     /// stationary result as evidence about the gallop.
@@ -91,6 +121,7 @@ public sealed class WorldRenderFrameHistory
     private readonly int _capacity;
     private readonly double[] _totalMs;
     private readonly double[] _stageMs;      // _capacity * StageCount, stride-indexed
+    private readonly double[] _unaccountedMs; // total minus the sum of all stages, per frame
     private readonly bool[] _cameraMoved;
     private readonly long[] _frameIndex;
     private readonly double[] _scratch;      // reused by percentile queries; never touched by Record
@@ -107,6 +138,7 @@ public sealed class WorldRenderFrameHistory
         _capacity = capacity;
         _totalMs = new double[capacity];
         _stageMs = new double[capacity * StageCount];
+        _unaccountedMs = new double[capacity];
         _cameraMoved = new bool[capacity];
         _frameIndex = new long[capacity];
         _scratch = new double[capacity];
@@ -156,6 +188,13 @@ public sealed class WorldRenderFrameHistory
         _stageMs[baseIndex + (int)WorldRenderStage.Overlay] = stats.Overlay.DurationMs;
         _stageMs[baseIndex + (int)WorldRenderStage.SceneMaintenance] = stats.SceneMaintenance.DurationMs;
 
+        // Uninstrumented remainder. If this dominates a hitch, the cost is somewhere no stage timer
+        // covers, and reporting the largest stage would point at the wrong place entirely.
+        double stageSum = 0;
+        for (int stage = 0; stage < StageCount; stage++)
+            stageSum += _stageMs[baseIndex + stage];
+        _unaccountedMs[slot] = Math.Max(0, stats.TotalCpuMs - stageSum);
+
         _next = slot + 1 == _capacity ? 0 : slot + 1;
         if (_count < _capacity)
             _count++;
@@ -204,6 +243,7 @@ public sealed class WorldRenderFrameHistory
             return new WorldRenderFrameHistorySnapshot(
                 0, 0, 0, hitchThresholdMs, false,
                 WorldRenderTimingDistribution.Empty,
+                WorldRenderTimingDistribution.Empty,
                 new Dictionary<WorldRenderStage, WorldRenderTimingDistribution>(),
                 Array.Empty<WorldRenderHitch>(),
                 RecorderOverheadMsPerFrame);
@@ -221,6 +261,8 @@ public sealed class WorldRenderFrameHistory
         }
 
         WorldRenderTimingDistribution total = Describe(_totalMs, 0, 1, oldest, hitchThresholdMs);
+        WorldRenderTimingDistribution unaccounted =
+            Describe(_unaccountedMs, 0, 1, oldest, hitchThresholdMs);
 
         var stages = new Dictionary<WorldRenderStage, WorldRenderTimingDistribution>(StageCount);
         for (int stage = 0; stage < StageCount; stage++)
@@ -251,7 +293,7 @@ public sealed class WorldRenderFrameHistory
             }
 
             hitches.Add(new WorldRenderHitch(
-                _frameIndex[slot], frameMs, (WorldRenderStage)dominant, dominantMs));
+                _frameIndex[slot], frameMs, (WorldRenderStage)dominant, dominantMs, _unaccountedMs[slot]));
         }
 
         return new WorldRenderFrameHistorySnapshot(
@@ -261,6 +303,7 @@ public sealed class WorldRenderFrameHistory
             hitchThresholdMs,
             cameraMoved,
             total,
+            unaccounted,
             stages,
             hitches,
             RecorderOverheadMsPerFrame);
