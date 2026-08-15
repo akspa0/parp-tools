@@ -3473,8 +3473,7 @@ public partial class ViewerApp
         LiquidRenderer? renderStatsLiquidRenderer = _terrainManager?.LiquidRenderer;
         ImGui.TextDisabled("World render CPU only. UI/layout/input/swap are not included.");
         ImGui.Text($"World CPU: {renderStats.TotalCpuMs:0.00} ms  Pending asset loads: {renderStats.PendingAssetLoadCount}");
-
-        DrawFrameHistoryContent();
+        ImGui.TextDisabled("Frame timing over time and hitch detection live on Utilities > Perf.");
 
         ImGui.Text($"Visible WMO: {renderStats.VisibleWmoCount}  Visible MDX: {renderStats.VisibleMdxCount}  Taxi actors: {renderStats.VisibleTaxiMdxCount}");
         ImGui.Text($"Object stream range: {_worldScene.ObjectStreamingRangeMultiplier:0.00}x");

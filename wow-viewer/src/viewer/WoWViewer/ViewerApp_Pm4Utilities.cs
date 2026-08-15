@@ -836,16 +836,28 @@ public partial class ViewerApp
         ImGui.End();
     }
 
+    /// <summary>
+    /// Utilities &gt; Perf. Frame timing over time is the primary content here: this is where anyone
+    /// chasing a stutter looks first. Memory/GC and asset counters stay on Runtime Stats so the two
+    /// pages do not duplicate each other.
+    /// </summary>
     private void DrawPerfContent()
     {
+        // Frame history first, and outside the terrain guard: frame timing is meaningful whenever a
+        // world is loaded, not only when a terrain renderer exists.
+        DrawFrameHistoryContent();
+
         var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
         if (terrainRenderer == null)
         {
-            ImGui.Text("No terrain loaded.");
+            if (_worldScene == null)
+                ImGui.TextDisabled("Load a world to see frame timing and terrain stats.");
             return;
         }
+
+        ImGui.Separator();
         ImGui.Text($"Chunks: {terrainRenderer.ChunksRendered} rendered, {terrainRenderer.ChunksCulled} culled");
-        ImGui.TextDisabled("Stats are for the last terrain Render() call.");
+        ImGui.TextDisabled("Chunk counts are for the last terrain Render() call.");
     }
 
     private void DrawPm4AlignmentWindow()

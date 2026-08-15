@@ -1,0 +1,39 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {
+      "WowViewer.Core.PM4/0.5.2": {
+        "dependencies": {
+          "WowViewer.Core": "0.5.2"
+        },
+        "runtime": {
+          "WowViewer.Core.PM4.dll": {}
+        }
+      },
+      "WowViewer.Core/0.5.2": {
+        "runtime": {
+          "WowViewer.Core.dll": {
+            "assemblyVersion": "0.5.2.0",
+            "fileVersion": "0.5.2.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "WowViewer.Core.PM4/0.5.2": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "WowViewer.Core/0.5.2": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}
