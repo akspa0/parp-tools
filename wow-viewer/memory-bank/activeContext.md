@@ -29,8 +29,9 @@ the owning spec for requirements and proof; read a workstream only when the spec
   provenance-first world-simulator spec/plan/tasks pack;
   MCSE emitters preserve raw/transformed positions and the proven Alpha 0.5.3 0x34-byte scheduler
   fields; shared Alpha AreaNumber resolution splits high/low `ushort` zone/subzone words and follows
-  `ParentAreaNum` without half-word aliases; status-bar and terrain audio now consume the same
-  resolved Zone/SubZone result; the runtime exposes non-playing diagnostic rows; the audio panel
+  `ParentAreaNum` without half-word aliases; the area contract now branches explicitly so 3.3.5+
+  direct AreaTable IDs cannot be captured by Alpha AreaNumber aliases; status-bar and terrain audio now
+  consume the same resolved Zone/SubZone result; the runtime exposes non-playing diagnostic rows; the audio panel
   shows IDs, coordinates, path/source, decode/backend state, and terminal reason.
 - **Main unproven gap:** Spec 151's game-mode head anchor/physics, simple-surface policy, and
   diagnostic budget remain unimplemented. Portal admission is source-tested but still needs the

@@ -31,13 +31,16 @@ public sealed class AlphaAreaAudioCatalog
 {
     private readonly Dictionary<(int ContinentId, AreaNumberParts AreaNumber), AlphaAreaRecord> _areasByContinentAreaNumber = [];
     private readonly Dictionary<AreaNumberParts, List<AlphaAreaRecord>> _areasByAreaNumber = [];
+    private readonly AreaIdentityLayout _identityLayout;
 
     public AlphaAreaAudioCatalog(
         IReadOnlyDictionary<int, AlphaAreaRecord> areas,
-        IReadOnlyDictionary<int, AlphaAreaMidiAmbience> midiAmbiences)
+        IReadOnlyDictionary<int, AlphaAreaMidiAmbience> midiAmbiences,
+        AreaIdentityLayout identityLayout = AreaIdentityLayout.PackedAreaNumber)
     {
         Areas = areas ?? throw new ArgumentNullException(nameof(areas));
         MidiAmbiences = midiAmbiences ?? throw new ArgumentNullException(nameof(midiAmbiences));
+        _identityLayout = identityLayout;
 
         foreach (AlphaAreaRecord area in Areas.Values)
         {
@@ -61,10 +64,17 @@ public sealed class AlphaAreaAudioCatalog
 
     public IReadOnlyDictionary<int, AlphaAreaMidiAmbience> MidiAmbiences { get; }
 
+    public AreaIdentityLayout IdentityLayout => _identityLayout;
+
     public AlphaAreaAudioBinding? TryResolve(int areaId, int? continentId = null)
     {
         if (areaId == 0)
             return null;
+
+        if (_identityLayout == AreaIdentityLayout.DirectAreaId)
+            return Areas.TryGetValue(areaId, out AlphaAreaRecord? directArea)
+                ? CreateBinding(directArea)
+                : null;
 
         // DBCTool defines Alpha MCNK.Unknown3 as AreaNumber with two 16-bit
         // components: high16=zone and low16=subzone. Keep the two halves as
@@ -120,10 +130,11 @@ public sealed class AlphaAreaAudioCatalog
 
             AlphaAreaRecord area = binding.Area;
             AlphaAreaAudioBinding? parent = null;
-            if (area.ParentAreaNumber != 0)
+            if (_identityLayout == AreaIdentityLayout.PackedAreaNumber
+                && area.ParentAreaNumber != 0)
                 parent = TryResolve(area.ParentAreaNumber, continentId);
 
-            if (parent is null && area.ParentAreaId != 0 && area.ParentAreaId != area.ParentAreaNumber)
+            if (parent is null && area.ParentAreaId != 0)
                 parent = TryResolve(area.ParentAreaId, continentId);
 
             binding = parent;

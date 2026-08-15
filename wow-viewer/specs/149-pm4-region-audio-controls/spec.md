@@ -222,7 +222,11 @@ resident tile changes without changing terrain, camera, lighting, or audio behav
 - **FR-016**: Explicit SoundEntries preview MUST remain a separate deliberate action and MUST NOT change
   world-trigger enablement or cause other trigger instances to start.
 - **FR-017**: Existing proven audio decoding, AreaNumber Zone/SubZone resolution, MCSE provenance,
-  MCNK flag/liquid decoding, and optional MIDI/DLS capability reporting MUST be reused. MCSE range
+  MCNK flag/liquid decoding, and optional MIDI/DLS capability reporting MUST be reused. Area identity
+  resolution MUST branch on the active client layout: Alpha 0.5.x MCNK values use packed
+  `AreaNumber` (`high16=Zone`, `low16=SubZone`) with map/continent qualification and
+  `ParentAreaNum`, while 3.3.5+ MCNK values use the direct `AreaTable.ID` and `ParentAreaID` path.
+  Standard direct IDs MUST NOT be reinterpreted through Alpha `AreaNumber` aliases. MCSE range
   evaluation MUST normalize its local position through the owning tile/chunk coordinate contract before
   comparing against the listener. Liquid/environment sound selection MUST use client-proven mappings or
   remain visibly unresolved; this feature MUST NOT invent a DLS pairing or claim unsupported audible

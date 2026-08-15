@@ -62,6 +62,11 @@ owner intact and remove only the workbench presentation.
   loading also retains raw MCNK flags and resolves MH2O liquid IDs into a basic family. This is enough
   to establish the producer seam, but client-proven SoundEntries selection for each legacy flag/liquid
   family remains an open mapping task rather than a reason to omit the rows.
+- Area identity is build-specific and must stay that way at every consumer. Alpha 0.5.x MCNK values
+  address `AreaTable` through packed `AreaNumber` words (`high16=Zone`, `low16=SubZone`) and
+  `ParentAreaNum`; 3.3.5+ MCNK values address the table through direct `ID`/`ParentAreaID` values.
+  The status bar, resident area overlay, and area-audio catalog now receive the same explicit layout
+  contract, so modern direct IDs cannot be captured by an Alpha-style `AreaNumber` alias.
 - The music audit found that `AreaTable.MIDIAmbience` is joined correctly to `AreaMIDIAmbiences` by
   `AlphaAreaAudioCatalogReader`, preserving day/night sequence paths, shared DLS path, and volume. The
   runtime deliberately reports those MIDI/DLS bindings as unsupported rather than guessing a PCM path.

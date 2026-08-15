@@ -2,6 +2,7 @@ using DBCD;
 using DBCD.Providers;
 using WowViewer.Core.Audio;
 using WowViewer.Core.IO.Files;
+using WowViewer.Core.World;
 
 namespace WowViewer.Core.IO.Dbc;
 
@@ -45,7 +46,10 @@ public sealed class AlphaAreaAudioCatalogReader
                 "AreaMIDIAmbiences",
                 buildVersion));
 
-        return new AlphaAreaAudioCatalog(ParseAreas(areaTable, buildVersion), midiAmbiences);
+        return new AlphaAreaAudioCatalog(
+            ParseAreas(areaTable, buildVersion),
+            midiAmbiences,
+            AreaIdentityLayoutResolver.FromBuild(buildVersion));
     }
 
     /// <summary>
@@ -68,7 +72,8 @@ public sealed class AlphaAreaAudioCatalogReader
         IDBCDStorage? areaMidi = TryLoadOptionalTable(dbcProvider, definitionsDirectory, "AreaMIDIAmbiences", buildVersion);
         return new AlphaAreaAudioCatalog(
             ParseAreas(areaTable, buildVersion),
-            areaMidi is null ? new Dictionary<int, AlphaAreaMidiAmbience>() : ParseMidiAmbiences(areaMidi));
+            areaMidi is null ? new Dictionary<int, AlphaAreaMidiAmbience>() : ParseMidiAmbiences(areaMidi),
+            AreaIdentityLayoutResolver.FromBuild(buildVersion));
     }
 
     private static IDBCDStorage? TryLoadOptionalTable(

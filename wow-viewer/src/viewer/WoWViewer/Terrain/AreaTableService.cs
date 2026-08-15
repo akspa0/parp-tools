@@ -11,6 +11,7 @@ namespace WoWViewer.Terrain;
 /// </summary>
 public class AreaTableService
 {
+    private readonly Dictionary<int, AreaEntry> _areasById = new();
     private readonly Dictionary<int, AreaEntry> _areas = new();
     private readonly Dictionary<(int MapId, AreaNumberParts AreaNumber), AreaEntry> _areasByMapAndNumber = new();
     private readonly Dictionary<AreaNumberParts, List<AreaEntry>> _areasByNumber = new();
@@ -30,6 +31,7 @@ public class AreaTableService
 
     public int Count => _primaryKeyCount;
     public string? LoadedBuild { get; private set; }
+    public AreaIdentityLayout IdentityLayout { get; private set; } = AreaIdentityLayout.DirectAreaId;
     public string? LoadedLocale { get; private set; }
     public string? NameColumn { get; private set; }
     public string? IdColumn { get; private set; }
@@ -42,6 +44,7 @@ public class AreaTableService
     /// </summary>
     public void Load(IDBCProvider dbcProvider, string dbdDir, string build)
     {
+        _areasById.Clear();
         _areas.Clear();
         _areasByMapAndNumber.Clear();
         _areasByNumber.Clear();
@@ -50,6 +53,7 @@ public class AreaTableService
         _fallbackAliasCount = 0;
         _fallbackAliasCollisions = 0;
         LoadedBuild = build;
+        IdentityLayout = AreaIdentityLayoutResolver.FromBuild(build);
 
         var dbdProvider = new FilesystemDBDProvider(dbdDir);
         var dbcd = new DBCD.DBCD(dbcProvider, dbdProvider);
@@ -177,9 +181,9 @@ public class AreaTableService
 
     /// <summary>
     /// Resolve a raw MCNK area value into native-style ZoneText/SubzoneText roles.
-    /// Standard-era values resolve by AreaTable ID; Alpha packed AreaNumber values resolve by
-    /// map-aware AreaNumber first. Map mismatch remains visible in the result instead of erasing
-    /// an otherwise valid table row.
+    /// The active build layout is authoritative: standard-era values resolve only by direct
+    /// AreaTable ID, while Alpha packed AreaNumber values resolve by map-aware AreaNumber first.
+    /// Map mismatch remains visible in the result instead of erasing an otherwise valid table row.
     /// </summary>
     public AreaLookupResult ResolveArea(int rawAreaId, int mapId)
     {
@@ -189,18 +193,26 @@ public class AreaTableService
         AreaEntry? entry = null;
         AreaContextSource source = AreaContextSource.DirectAreaId;
 
-        AreaNumberParts rawAreaNumber = AreaNumberParts.FromRaw(rawAreaId);
-        if (_areasByMapAndNumber.TryGetValue((mapId, rawAreaNumber), out var packedEntry))
+        if (IdentityLayout == AreaIdentityLayout.PackedAreaNumber)
         {
-            entry = packedEntry;
-            source = AreaContextSource.PackedAreaNumber;
+            AreaNumberParts rawAreaNumber = AreaNumberParts.FromRaw(rawAreaId);
+            if (_areasByMapAndNumber.TryGetValue((mapId, rawAreaNumber), out AreaEntry? packedEntry))
+            {
+                entry = packedEntry;
+                source = AreaContextSource.PackedAreaNumber;
+            }
+            else if (mapId < 0 && TryGetUniqueAreaNumber(rawAreaNumber, out packedEntry))
+            {
+                entry = packedEntry;
+                source = AreaContextSource.PackedAreaNumber;
+            }
+            else if (_areasById.TryGetValue(rawAreaId, out AreaEntry? alphaFallbackEntry))
+            {
+                entry = alphaFallbackEntry;
+                source = AreaContextSource.PackedAreaNumber;
+            }
         }
-        else if (mapId < 0 && TryGetUniqueAreaNumber(rawAreaNumber, out packedEntry))
-        {
-            entry = packedEntry;
-            source = AreaContextSource.PackedAreaNumber;
-        }
-        else if (_areas.TryGetValue(rawAreaId, out var directEntry))
+        else if (_areasById.TryGetValue(rawAreaId, out AreaEntry? directEntry))
         {
             entry = directEntry;
         }
@@ -240,7 +252,7 @@ public class AreaTableService
     public string DescribeLookup(int areaId, int mapId)
     {
         AreaLookupResult result = ResolveArea(areaId, mapId);
-        return $"[AreaTable] Lookup AreaId={areaId} MapId={mapId} source={result.Source} reason={result.Reason} zone='{result.ZoneText ?? ""}' subzone='{result.SubzoneText ?? ""}' canonicalId={result.CanonicalAreaId?.ToString() ?? "n/a"} {DescribeLoadContext()}";
+        return $"[AreaTable] Lookup RawArea={areaId} MapId={mapId} layout={IdentityLayout} source={result.Source} reason={result.Reason} zone='{result.ZoneText ?? ""}' subzone='{result.SubzoneText ?? ""}' canonicalId={result.CanonicalAreaId?.ToString() ?? "n/a"} {DescribeLoadContext()}";
     }
 
     private void RegisterAreaNumber(AreaEntry entry)
@@ -274,12 +286,13 @@ public class AreaTableService
 
     private AreaEntry? TryGetParent(AreaEntry entry)
     {
-        if (entry.ParentAreaNumber != 0
+        if (IdentityLayout == AreaIdentityLayout.PackedAreaNumber
+            && entry.ParentAreaNumber != 0
             && _areasByMapAndNumber.TryGetValue(
                 (entry.MapId, AreaNumberParts.FromRaw(entry.ParentAreaNumber)), out var packedParent))
             return packedParent;
 
-        if (entry.ParentAreaId != 0 && _areas.TryGetValue(entry.ParentAreaId, out var directParent))
+        if (entry.ParentAreaId != 0 && _areasById.TryGetValue(entry.ParentAreaId, out var directParent))
             return directParent;
 
         return null;
@@ -299,6 +312,7 @@ public class AreaTableService
 
     private void RegisterPrimary(int areaId, AreaEntry entry)
     {
+        _areasById[areaId] = entry;
         if (_areas.TryAdd(areaId, entry))
         {
             _primaryKeyCount++;

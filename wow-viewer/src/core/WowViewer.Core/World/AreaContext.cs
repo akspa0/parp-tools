@@ -23,6 +23,25 @@ public readonly record struct AreaNumberParts(ushort Zone, ushort Subzone)
     }
 }
 
+/// <summary>
+/// Describes how the active client's MCNK area field addresses AreaTable rows.
+/// Alpha 0.5.x stores a packed AreaNumber; 3.3.5 and later store the direct AreaTable ID.
+/// </summary>
+public enum AreaIdentityLayout
+{
+    DirectAreaId,
+    PackedAreaNumber,
+}
+
+public static class AreaIdentityLayoutResolver
+{
+    public static AreaIdentityLayout FromBuild(string? build)
+        => !string.IsNullOrWhiteSpace(build)
+            && build.StartsWith("0.5.", StringComparison.OrdinalIgnoreCase)
+            ? AreaIdentityLayout.PackedAreaNumber
+            : AreaIdentityLayout.DirectAreaId;
+}
+
 public enum AreaResolutionReason
 {
     Resolved,

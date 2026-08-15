@@ -34,6 +34,7 @@ public sealed class WorldAudioRuntime : IDisposable
     private AL? _al;
     private AlphaSoundEntriesCatalog? _soundEntries;
     private AlphaAreaAudioCatalog? _areaAudioCatalog;
+    private AreaIdentityLayout _areaIdentityLayout = AreaIdentityLayout.DirectAreaId;
     private uint? _previewSource;
     private string? _previewPath;
     private float _previewBaseGain = 1f;
@@ -54,6 +55,8 @@ public sealed class WorldAudioRuntime : IDisposable
     public string LastDiagnostic { get; private set; } = "No audio diagnostic yet.";
 
     public string AreaMusicStatus { get; private set; } = "Area music metadata not loaded.";
+
+    public AreaIdentityLayout AreaIdentityLayout => _areaIdentityLayout;
 
     public bool BackendReady => _al is not null;
 
@@ -89,7 +92,8 @@ public sealed class WorldAudioRuntime : IDisposable
         StopAll();
         _soundEntries = null;
         _areaAudioCatalog = null;
-        AreaMusicStatus = $"Area music metadata not loaded for {buildVersion}.";
+        _areaIdentityLayout = AreaIdentityLayoutResolver.FromBuild(buildVersion);
+        AreaMusicStatus = $"Area music metadata not loaded for {buildVersion} ({_areaIdentityLayout}).";
         _loggedNoBackend = false;
 
         try
@@ -101,7 +105,7 @@ public sealed class WorldAudioRuntime : IDisposable
             {
                 _areaAudioCatalog = new AlphaAreaAudioCatalogReader()
                     .Load(dbcProvider, definitionsDirectory, buildVersion);
-                AreaMusicStatus = $"AreaTable/AreaMIDIAmbiences loaded: {_areaAudioCatalog.Areas.Count} areas.";
+                AreaMusicStatus = $"AreaTable/AreaMIDIAmbiences loaded: {_areaAudioCatalog.Areas.Count} areas ({_areaIdentityLayout}).";
             }
             catch (Exception ex)
             {
@@ -810,19 +814,25 @@ public sealed class WorldAudioRuntime : IDisposable
             return;
         }
 
-        int areaNumber = areaLookup is
-            { Source: AreaContextSource.PackedAreaNumber, AreaNumber: int resolvedAreaNumber }
-            ? resolvedAreaNumber
-            : areaId;
-        AreaNumberParts areaNumberParts = AreaNumberParts.FromRaw(areaNumber);
+        bool packedAreaNumber = _areaIdentityLayout == AreaIdentityLayout.PackedAreaNumber;
+        int areaKey = packedAreaNumber
+            ? areaLookup is { Source: AreaContextSource.PackedAreaNumber, AreaNumber: int resolvedAreaNumber }
+                ? resolvedAreaNumber
+                : areaId
+            : areaLookup?.CanonicalAreaId ?? areaId;
         AlphaAreaAudioBinding? binding = _areaAudioCatalog.TryResolveWithParents(
-            areaNumber,
+            areaKey,
             continentId >= 0 ? continentId : null);
         if (binding is null)
         {
             StopAreaMusic();
-            AreaMusicStatus = areaNumber != 0
-                ? $"AreaNumber 0x{areaNumberParts.Raw:X8} (zone={areaNumberParts.Zone}, subzone={areaNumberParts.Subzone}) has no DBC music assignment (continent={continentId})."
+            string areaIdentity = packedAreaNumber
+                ? areaKey != 0
+                    ? $"AreaNumber 0x{AreaNumberParts.FromRaw(areaKey).Raw:X8} (zone={AreaNumberParts.FromRaw(areaKey).Zone}, subzone={AreaNumberParts.FromRaw(areaKey).Subzone})"
+                    : "No terrain/WMO area"
+                : areaKey != 0 ? $"AreaID {areaKey}" : "No terrain/WMO area";
+            AreaMusicStatus = areaKey != 0
+                ? $"{areaIdentity} has no DBC music assignment (continent={continentId})."
                 : "No terrain/WMO area is active for music resolution.";
             return;
         }
@@ -833,7 +843,15 @@ public sealed class WorldAudioRuntime : IDisposable
                 ? $"{primaryText} [{zoneText}]"
                 : primaryText
             : $"Area {binding.Area.Id}";
-        areaLabel += $" (AreaNumber=0x{areaNumberParts.Raw:X8}, zone={areaNumberParts.Zone}, subzone={areaNumberParts.Subzone})";
+        if (packedAreaNumber)
+        {
+            AreaNumberParts areaNumberParts = AreaNumberParts.FromRaw(areaKey);
+            areaLabel += $" (AreaNumber=0x{areaNumberParts.Raw:X8}, zone={areaNumberParts.Zone}, subzone={areaNumberParts.Subzone})";
+        }
+        else
+        {
+            areaLabel += $" (AreaID={areaKey})";
+        }
         bool night = gameTime < 0.25f || gameTime >= 0.75f;
         int soundEntryId = binding.Area.ZoneMusicId;
         if (soundEntryId <= 0)

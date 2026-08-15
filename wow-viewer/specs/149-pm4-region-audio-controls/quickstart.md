@@ -8,12 +8,14 @@ backend has been proven.
 From `I:/parp/parp-tools`:
 
 ```powershell
-dotnet test I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter 'FullyQualifiedName~Pm4Region|FullyQualifiedName~AudioTrigger|FullyQualifiedName~WorldAudioRuntime' --no-restore --verbosity minimal
+dotnet test I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter 'FullyQualifiedName~Pm4Region|FullyQualifiedName~AudioTrigger|FullyQualifiedName~WorldAudioRuntime|FullyQualifiedName~AreaIdentityLayout|FullyQualifiedName~AlphaAreaAudioCatalog|FullyQualifiedName~AreaNumberParts' --no-restore --verbosity minimal
 dotnet build I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --no-restore --verbosity minimal
 ```
 
 The exact filter may be narrowed to the final test class names after implementation. A passing build or
-focused test is source proof only; it is not visual, streaming, or audible proof.
+focused test is source proof only; it is not visual, streaming, or audible proof. The area-layout tests
+must pass for both the Alpha packed path and the 3.3.5+ direct-ID path, including a collision where a
+modern direct ID numerically matches an Alpha-style `AreaNumber`.
 
 ## User-run PM4 proof
 

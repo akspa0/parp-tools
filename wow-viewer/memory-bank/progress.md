@@ -5,6 +5,17 @@ Last updated: 2026-08-14
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-14 — Dual-era AreaTable identity routing
+
+- Restored an explicit build-selected area identity contract: Alpha 0.5.x uses packed MCNK
+  `AreaNumber` high/low Zone/SubZone words with `ParentAreaNum`, while 3.3.5+ uses direct
+  `AreaTable.ID` and `ParentAreaID` values.
+- Applied the same layout to the status-bar/overlay `AreaTableService`, the area-audio catalog reader,
+  and `WorldAudioRuntime`. Modern direct IDs now resolve through primary IDs only, so compatibility
+  aliases cannot steal a row that numerically resembles a packed Alpha AreaNumber.
+- Added collision and parent-path regression tests. Focused area/audio tests pass 13/13; full Debug
+  build and real-client dual-era visual/audio proof remain pending.
+
 ## 2026-08-14 — Spec 151 portal/game-mode/simple-surface planning
 
 ## 2026-08-14 — Spec 151 Phase 1 bounded WMO portal visibility (`c70e1945`)
