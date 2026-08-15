@@ -106,6 +106,10 @@ stops and remains disabled while the camera moves.
 5. **Given** a map/client replacement or viewer restart, **when** audio state is initialized, **then**
    trigger enablement returns to off unless a later, explicitly specified persistence feature changes
    that policy.
+6. **Given** resident MCSE and/or MCNK audio records, **when** the user enables the 3D sound-emitter
+   marker toggle, **then** each finite normalized emitter position is shown as a source-colored pin in
+   the world without probing files or starting playback; disabling the toggle submits no marker
+   geometry.
 
 ### User Story 4 - Inspect resident zone and subzone boundaries (Priority: P2)
 
@@ -243,6 +247,10 @@ resident tile changes without changing terrain, camera, lighting, or audio behav
   resident chunk set or map changes, and submit no geometry or labels while disabled.
 - **FR-022**: Missing or unresolved AreaTable values MUST remain visible as an explicit unresolved count
   or diagnostic state and MUST NOT produce guessed text, colors, or camera targets.
+- **FR-023**: The viewer MUST provide an opt-in 3D speaker-marker overlay for every finite resident
+  MCSE and MCNK/liquid emitter position, using the normalized renderer position and source-distinct
+  colors. Marker rendering MUST use the cached resident snapshot, MUST submit no geometry while
+  disabled, and MUST not probe files, enable world triggers, or start playback.
 
 ### Key Entities
 
@@ -258,6 +266,9 @@ resident tile changes without changing terrain, camera, lighting, or audio behav
 - **AreaOverlayRegion**: A resolved resident Zone or SubZone group with a map-aware key, display name,
   deterministic color, finite aggregate bounds, label position, and the resident chunk-footprint cells
   that support the visualization.
+- **AudioEmitterMarker**: A resident MCSE or MCNK/liquid trigger projected from its normalized renderer
+  position into the opt-in 3D speaker overlay, retaining source kind and sound/liquid identity for
+  color/inspection without owning playback.
 
 ## Success Criteria
 
@@ -289,6 +300,9 @@ resident tile changes without changing terrain, camera, lighting, or audio behav
 - **SC-009**: On a resident fixture with multiple AreaTable values, enabling the overlay produces one
   finite labeled region per resolved Zone/SubZone group, with different Zone/SubZone styling, and a
   tile unload removes its cells without retaining stale labels. Disabled overlay submission is zero.
+- **SC-010**: On a resident fixture with MCSE and/or MCNK/liquid records, enabling speaker markers
+  submits one finite source-colored 3D pin per resident emitter from the normalized world position;
+  with the toggle disabled, marker submission is zero and OpenAL/file-probe state is unchanged.
 
 ## Assumptions
 

@@ -3479,6 +3479,7 @@ public class WorldScene : ISceneRenderer
     private WorldAudioRuntime? _audioRuntime;
     private AreaLookupResult? _currentAreaLookup;
     private bool _audioMuted;
+    private bool _showAudioEmitterMarkers;
     public string AudioStatus => _audioRuntime?.Status ?? "Audio runtime not configured.";
     public string AudioLastDiagnostic => _audioRuntime?.LastDiagnostic ?? "Audio runtime not configured.";
     public string AreaMusicStatus => _audioRuntime?.AreaMusicStatus ?? "Area music runtime not configured.";
@@ -3492,8 +3493,20 @@ public class WorldScene : ISceneRenderer
     public bool AudioWorldTriggersEnabled => _audioRuntime?.WorldTriggersEnabled ?? false;
     public IReadOnlyList<AudioTriggerDiagnostic> AudioEmitterDiagnostics
         => _audioRuntime?.EmitterDiagnostics ?? Array.Empty<AudioTriggerDiagnostic>();
+    public IReadOnlyList<TerrainSoundEmitter> AudioEmitterMarkers
+        => _audioRuntime?.ResidentEmitters ?? Array.Empty<TerrainSoundEmitter>();
     public IReadOnlyList<int> ResidentAudioSoundEntryIds
         => _audioRuntime?.ResidentSoundEntryIds ?? Array.Empty<int>();
+
+    /// <summary>
+    /// Opt-in world-space speaker markers. This affects only the debug overlay;
+    /// it never enables playback or probes audio files.
+    /// </summary>
+    public bool ShowAudioEmitterMarkers
+    {
+        get => _showAudioEmitterMarkers;
+        set => _showAudioEmitterMarkers = value;
+    }
 
     public bool TryPreviewAudioSoundEntry(uint soundEntryId, bool loop, out string reason)
         => _audioRuntime?.TryPlaySoundEntry(soundEntryId, loop, out reason) ??
@@ -10209,6 +10222,8 @@ public class WorldScene : ISceneRenderer
         double poiTaxiMs = 0;
         int areaTriggerPreparedCount = 0;
         double areaTriggersMs = 0;
+        int audioEmitterMarkerPreparedCount = 0;
+        double audioEmitterMarkersMs = 0;
 
         bool continuedPastTerrain = WorldFramePassCoordinator.Execute(
             new WorldFramePassOptions(_objectsVisible, _wmosVisible, _doodadsVisible),
@@ -11466,6 +11481,35 @@ public class WorldScene : ISceneRenderer
                     }
                 }
 
+                audioEmitterMarkersMs = MeasureDurationMs(() =>
+                {
+                    if (!_showAudioEmitterMarkers || _audioRuntime is null)
+                        return;
+
+                    foreach (TerrainSoundEmitter emitter in _audioRuntime.ResidentEmitters)
+                    {
+                        Vector3 position = emitter.Position;
+                        if (!float.IsFinite(position.X)
+                            || !float.IsFinite(position.Y)
+                            || !float.IsFinite(position.Z))
+                            continue;
+
+                        Vector3 color = emitter.TriggerKind switch
+                        {
+                            AudioTriggerKind.McnkLiquid when emitter.LiquidFamily >= 0
+                                => new Vector3(0.15f, 0.8f, 1.0f),
+                            AudioTriggerKind.McnkLiquid
+                                => new Vector3(0.7f, 0.35f, 1.0f),
+                            _ => new Vector3(1.0f, 0.62f, 0.12f)
+                        };
+
+                        float pinHeight = emitter.TriggerKind == AudioTriggerKind.McnkLiquid ? 24f : 20f;
+                        float headSize = emitter.TriggerKind == AudioTriggerKind.McnkLiquid ? 4.5f : 4f;
+                        _bbRenderer.BatchPin(position, pinHeight, headSize, color);
+                        audioEmitterMarkerPreparedCount++;
+                    }
+                });
+
                 _gl.LineWidth(5.0f);
                 _bbRenderer.FlushBatch(view, proj);
                 _gl.LineWidth(1.0f);
@@ -11528,6 +11572,13 @@ public class WorldScene : ISceneRenderer
                         areaTriggerPreparedCount,
                         areaTriggerPreparedCount,
                         _bbRenderer != null && _showAreaTriggers ? "not_cached" : "disabled");
+                    frame.SetOverlayOwner(
+                        WorldOverlayOwners.AudioEmitters,
+                        audioEmitterMarkersMs,
+                        _bbRenderer != null && _showAudioEmitterMarkers,
+                        audioEmitterMarkerPreparedCount,
+                        audioEmitterMarkerPreparedCount,
+                        _bbRenderer != null && _showAudioEmitterMarkers ? "not_cached" : "disabled");
 
                     double accountedOverlayMs = frame.OverlayOwnerDurationSum;
                     double otherOverlayMs = Math.Max(0, overlayElapsedMs - accountedOverlayMs);

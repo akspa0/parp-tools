@@ -167,6 +167,17 @@ verify its footprint and label contribution disappear without a stale whole-map 
 **Checkpoint**: User Story 4 is independently demonstrable as an honest resident-footprint inspection
 overlay and does not affect terrain, camera, lighting, or audio.
 
+## Phase 4B: Resident audio speaker markers (Priority: P2)
+
+**Goal**: Make the normalized positions of resident MCSE and legacy MCNK/liquid emitters visible as an
+opt-in 3D diagnostic overlay without coupling visualization to playback.
+
+- [x] T038 [US3] Add a cached resident-emitter snapshot in
+  wow-viewer/src/viewer/WoWViewer/Audio/WorldAudioRuntime.cs, forward it through WorldScene,
+  expose an off-by-default audio-panel toggle, and render source-colored pins through the existing
+  BoundingBoxRenderer batch. Keep markers bounded to resident tiles and independent of audio file
+  probing, world-trigger enablement, and OpenAL source state.
+
 ## Phase 5: Cross-cutting validation and handoff
 
 **Purpose**: Validate the combined feature and prepare the user-owned runtime proof without claiming it
@@ -215,7 +226,8 @@ from compilation alone.
 3. Remove matching UI only after the region path works and the caller boundary is known.
 4. Implement and validate MCNK/liquid and normalized-MCSE trigger production, then default-off audio
    controls including area music gating.
-5. Run focused source proof, then hand off real-client visual/streaming/audible proof to the user.
+5. Add opt-in resident speaker markers from the normalized emitter snapshot without changing playback.
+6. Run focused source proof, then hand off real-client visual/streaming/audible proof to the user.
 
 ## Notes
 
@@ -234,6 +246,10 @@ from compilation alone.
   audible or visual real-client proof.
 - T019 is implemented: resident MCNK/MCLQ/MH2O liquid state now produces inspectable candidates;
   exact-build `SoundWaterType` resolves supported rows and leaves missing mappings unresolved.
+- T038 is implemented: the audio runtime now publishes a residency-change-only snapshot of normalized
+  MCSE/MCNK emitter records. WorldScene exposes an opt-in, default-off 3D speaker overlay that uses
+  the existing batched pin renderer with amber MCSE, cyan MCNK water, and purple MCNK environment
+  markers. Marker rendering does not probe files, enable playback, or create OpenAL sources.
 - Alpha MCLQ preserves its packed 9x9 vertex records and 8x8 tile flags. Camera rotation no longer
   rebuilds residency, terrain keeps one capped unload-hysteresis ring, and WMO frustum-visible groups
   are admitted after portal evaluation to avoid spotty interiors.

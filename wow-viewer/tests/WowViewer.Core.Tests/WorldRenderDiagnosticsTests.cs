@@ -54,6 +54,7 @@ public sealed class WorldRenderDiagnosticsTests
             WorldOverlayOwnerFrameStats.Disabled(WorldOverlayOwners.Pm4Nodes),
             WorldOverlayOwnerFrameStats.Disabled(WorldOverlayOwners.PoiTaxi),
             WorldOverlayOwnerFrameStats.Disabled(WorldOverlayOwners.AreaTriggers),
+            WorldOverlayOwnerFrameStats.Disabled(WorldOverlayOwners.AudioEmitters),
             WorldOverlayOwnerFrameStats.Disabled(WorldOverlayOwners.OtherOverlay),
         ];
         WorldRenderFrameStats stats = WorldRenderFrameStats.Empty with

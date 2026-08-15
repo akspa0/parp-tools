@@ -2,6 +2,16 @@
 
 Last updated: 2026-08-14
 
+## 2026-08-14 — Resident audio speaker-marker overlay
+
+- Added a residency-change-only normalized emitter snapshot to WorldAudioRuntime and forwarded it
+  through WorldScene.
+- Added an off-by-default Audio-panel toggle that renders one source-colored 3D pin per finite
+  resident MCSE/MCNK emitter through the existing batched overlay: amber MCSE, cyan MCNK water, and
+  purple MCNK environment.
+- Marker rendering does not probe audio files, enable world triggers, or create OpenAL sources.
+  Focused diagnostics/build proof and user-owned visual/audible proof remain pending.
+
 ## 2026-08-14 — Spatial audio emitter coordinate correction
 
 - Added the shared `TerrainCoordinateTransform` contract. Alpha and standard MCSE records retain

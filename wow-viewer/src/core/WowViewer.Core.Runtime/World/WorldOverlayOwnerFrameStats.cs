@@ -31,6 +31,7 @@ public static class WorldOverlayOwners
     public const string Pm4Nodes = "pm4_nodes";
     public const string PoiTaxi = "poi_taxi";
     public const string AreaTriggers = "area_triggers";
+    public const string AudioEmitters = "audio_emitters";
     public const string OtherOverlay = "other_overlay";
 
     public static IReadOnlyList<string> All { get; } =
@@ -43,6 +44,7 @@ public static class WorldOverlayOwners
         Pm4Nodes,
         PoiTaxi,
         AreaTriggers,
+        AudioEmitters,
         OtherOverlay,
     ];
 }

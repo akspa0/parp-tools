@@ -25,6 +25,7 @@ public sealed class WorldAudioRuntime : IDisposable
     private readonly Dictionary<EmitterKey, ActiveEmitter> _active = [];
     private readonly HashSet<EmitterKey> _heardInRange = [];
     private readonly HashSet<string> _diagnosticKeys = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<TerrainSoundEmitter> _residentEmitterSnapshot = Array.Empty<TerrainSoundEmitter>();
     private IReadOnlyList<AudioTriggerDiagnostic> _emitterDiagnostics = Array.Empty<AudioTriggerDiagnostic>();
     private long _nextDiagnosticRefreshTimestamp;
 
@@ -70,7 +71,14 @@ public sealed class WorldAudioRuntime : IDisposable
 
     public bool IsMuted { get; private set; }
 
-    public int ResidentEmitterCount => _tileEmitters.Values.Sum(static emitters => emitters.Count);
+    public int ResidentEmitterCount => _residentEmitterSnapshot.Count;
+
+    /// <summary>
+    /// Snapshot of the normalized resident emitter records for non-audio
+    /// visualization. This is rebuilt only when tile residency changes so the
+    /// renderer does not enumerate all emitter lists every frame.
+    /// </summary>
+    public IReadOnlyList<TerrainSoundEmitter> ResidentEmitters => _residentEmitterSnapshot;
 
     public int ActiveEmitterCount => _active.Count;
 
@@ -87,8 +95,7 @@ public sealed class WorldAudioRuntime : IDisposable
     public int ResolvedSoundWaterTypeCount => _soundWaterTypes?.Entries.Count ?? 0;
 
     public IReadOnlyList<int> ResidentSoundEntryIds
-        => _tileEmitters.Values
-            .SelectMany(static emitters => emitters)
+        => _residentEmitterSnapshot
             .Select(ResolveResidentSoundEntryId)
             .Where(static id => id > 0 && id <= int.MaxValue)
             .Select(static id => (int)id)
@@ -298,7 +305,10 @@ public sealed class WorldAudioRuntime : IDisposable
     {
         ThrowIfDisposed();
         lock (_tileEmittersLock)
+        {
             _tileEmitters[(tileX, tileY)] = emitters ?? Array.Empty<TerrainSoundEmitter>();
+            _residentEmitterSnapshot = BuildResidentEmitterSnapshotLocked();
+        }
         InvalidateEmitterDiagnostics();
     }
 
@@ -308,7 +318,10 @@ public sealed class WorldAudioRuntime : IDisposable
             return;
 
         lock (_tileEmittersLock)
+        {
             _tileEmitters.Remove((tileX, tileY));
+            _residentEmitterSnapshot = BuildResidentEmitterSnapshotLocked();
+        }
         foreach (EmitterKey key in _active.Keys.Where(key => key.TileX == tileX && key.TileY == tileY).ToArray())
             StopEmitter(key);
         _heardInRange.RemoveWhere(key => key.TileX == tileX && key.TileY == tileY);
@@ -487,6 +500,13 @@ public sealed class WorldAudioRuntime : IDisposable
     {
         Interlocked.Exchange(ref _nextDiagnosticRefreshTimestamp, 0L);
     }
+
+    private IReadOnlyList<TerrainSoundEmitter> BuildResidentEmitterSnapshotLocked()
+        => _tileEmitters
+            .OrderBy(static pair => pair.Key.TileY)
+            .ThenBy(static pair => pair.Key.TileX)
+            .SelectMany(static pair => pair.Value)
+            .ToArray();
 
     private void RefreshEmitterDiagnosticsIfDue()
     {
@@ -820,7 +840,10 @@ public sealed class WorldAudioRuntime : IDisposable
         try { _context?.Dispose(); } catch { }
         _context = null;
         lock (_tileEmittersLock)
+        {
             _tileEmitters.Clear();
+            _residentEmitterSnapshot = Array.Empty<TerrainSoundEmitter>();
+        }
         _disposed = true;
     }
 

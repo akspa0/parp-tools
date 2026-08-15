@@ -37,6 +37,13 @@ public partial class ViewerApp
             scene.SetAudioWorldTriggersEnabled(worldTriggersEnabled);
         ImGui.TextDisabled("Off by default: resident rows remain inspectable, but looping world samples do not start automatically.");
 
+        bool showEmitterMarkers = scene.ShowAudioEmitterMarkers;
+        if (ImGui.Checkbox("Show 3D sound-emitter markers", ref showEmitterMarkers))
+            scene.ShowAudioEmitterMarkers = showEmitterMarkers;
+        ImGui.TextDisabled("Amber = MCSE speaker; cyan = MCNK water; purple = MCNK environment. Markers never start audio.");
+        if (showEmitterMarkers)
+            ImGui.Text($"Visible resident markers: {scene.AudioEmitterMarkers.Count}");
+
         if (scene.AudioBackendReady)
             ImGui.TextColored(new System.Numerics.Vector4(0.45f, 0.9f, 0.55f, 1f), "OpenAL backend ready");
         else
