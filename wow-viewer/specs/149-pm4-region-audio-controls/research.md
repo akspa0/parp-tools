@@ -80,6 +80,40 @@ owner intact and remove only the workbench presentation.
   client's `ZoneMusicIdle`/`PlayMusic` scheduling path until the row indirection and scheduler contract
   are implemented or explicitly reported as unsupported.
 
+### Legacy MCNK liquid/audio implementation evidence
+
+- The shared `McnkFlagDecoder` is the single raw-flag owner: `0x04` is river/water, `0x08` is ocean,
+  `0x10` is magma, and `0x20` is slime. The viewer now projects a resident MCNK liquid candidate
+  from those flags or from decoded MCLQ/MH2O liquid presence even when the map contains no MCSE rows.
+- The Alpha MCLQ path now preserves the 81 packed vertex words/heights and 64 tile flags. The prior
+  Alpha adapter flattened the payload to a uniform surface, which was inconsistent with the existing
+  repository extractors' 8-byte vertex records and is a likely cause of the reported 0.5.3 liquid
+  rendering corruption. This is repository-lineage evidence, not a new native-client proof claim.
+- `SoundWaterType.dbd` is available for both `0.5.3.3368` and `3.3.5.12340` with `SoundType`,
+  `SoundSubtype`, and a typed `SoundEntries::ID` field. The runtime now loads the exact active-build
+  table and resolves MCNK candidates through `(liquid family, subtype)`; it never invents a
+  `SoundEntries` ID. The current `0x04 -> subtype 4`, `0x08 -> subtype 8`, and magma/slime/water
+  `-> subtype 0` selection is a conservative implementation inference from the decoded flag names
+  and DBD subtype values. It remains visible as diagnostic metadata until direct native callback
+  evidence proves the mapping.
+- MCNK candidates are resident and inspectable but world-trigger playback is default-off. Missing
+  `SoundWaterType` rows remain unresolved rather than starting a guessed resource; explicit
+  SoundEntries preview remains independent.
+
+### Streaming/WMO smoothness guard
+
+- Camera rotation no longer invalidates the terrain residency lease. It is a frustum concern, not a
+  reason to rebuild the detailed/retained tile sets, so mouse-look does not churn tile placement and
+  WMO admission.
+- Terrain unload now has one extra camera-centered hysteresis ring, capped by the existing maximum
+  retained radius. The parsed tile cache was already persistent; retaining the GPU mesh/placement
+  lease across one boundary is the part that prevents a neighbor/interior from disappearing while its
+  replacement is still loading.
+- WMO portal traversal remains fail-open for correctness: groups whose transformed bounds are in the
+  camera frustum are unioned back into the renderer's runtime-visible group set, and the scene graph
+  does not apply a second portal cull. This keeps connected/interior groups from becoming spotty when
+  portal evidence or clip volumes disagree.
+
 ## Decisions
 
 1. **Aggregate MSHD regions from resident decoded objects.** The first implementation lists the current

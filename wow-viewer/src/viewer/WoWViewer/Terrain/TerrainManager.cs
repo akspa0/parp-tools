@@ -58,6 +58,7 @@ public class TerrainManager : ISceneRenderer
     public const int MinRetainedTileRadius = 1;
     private const int DefaultRetainedTileRadius = 2;
     public const int MaxRetainedTileRadius = 3;
+    private const int UnloadHysteresisRadius = 1;
     public const int MaxManualDetailedTileCount = MaxDetailedTileCount;
     public const float DirectionalTileFovDegrees = 45f;
     private const int MaxGpuUploadsPerFrame = 6;
@@ -90,7 +91,6 @@ public class TerrainManager : ISceneRenderer
     private Vector3 _cameraPos;
     private Vector3 _lastCameraPos;
     private Vector2 _cameraHeading;
-    private Vector2 _lastSelectedHeading;
     private readonly List<(int tileX, int tileY)> _lastSelectedTiles = new(MaxDetailedTileCount);
     private readonly List<(int tileX, int tileY)> _lastRetainedTiles = new(49);
     private bool _disposed;
@@ -516,22 +516,10 @@ public class TerrainManager : ISceneRenderer
             out int targetRetainedTileRadius);
         _effectiveDetailedTileCount = targetDetailedTileCount;
 
-        // Re-evaluate when the camera crosses a tile boundary, the requested
-        // budget changes, or the camera turns far enough to change admission.
-        if (tileX == _lastCameraTileX
-            && tileY == _lastCameraTileY
-            && detailedTileCandidateRadius == _lastDetailedTileCandidateRadius
-            && targetDetailedTileCount == _lastTargetDetailedTileCount
-            && targetRetainedTileRadius == _lastTargetRetainedTileRadius
-            && Vector2.DistanceSquared(_cameraHeading, _lastSelectedHeading) <= 1e-4f)
-            return;
-
-        _lastCameraTileX = tileX;
-        _lastCameraTileY = tileY;
-        _lastDetailedTileCandidateRadius = detailedTileCandidateRadius;
-        _lastTargetDetailedTileCount = targetDetailedTileCount;
-        _lastTargetRetainedTileRadius = targetRetainedTileRadius;
-
+        // The active render list follows the camera heading every frame, but
+        // this is only an admission-list update. It must not rebuild the
+        // residency lease or unload/reload terrain while the user is looking
+        // around inside one tile.
         float yaw = _cameraHeading.LengthSquared() > 1e-4f
             ? MathF.Atan2(_cameraHeading.Y, _cameraHeading.X) * (180f / MathF.PI)
             : 0f;
@@ -544,7 +532,24 @@ public class TerrainManager : ISceneRenderer
         _lastSelectedTiles.Clear();
         foreach (DirectionalTileCoord selected in selectedTiles.Take(targetDetailedTileCount))
             _lastSelectedTiles.Add((selected.TileX, selected.TileY));
-        _lastSelectedHeading = _cameraHeading;
+
+        // Re-evaluate the residency lease when the camera crosses a tile
+        // boundary or a budget changes. Camera rotation is a render/frustum
+        // concern, not a reason to tear down and rebuild neighboring terrain
+        // and WMO placements; using heading here made ordinary mouse motion
+        // churn the loaded set and produced visible frame-to-frame popping.
+        if (tileX == _lastCameraTileX
+            && tileY == _lastCameraTileY
+            && detailedTileCandidateRadius == _lastDetailedTileCandidateRadius
+            && targetDetailedTileCount == _lastTargetDetailedTileCount
+            && targetRetainedTileRadius == _lastTargetRetainedTileRadius)
+            return;
+
+        _lastCameraTileX = tileX;
+        _lastCameraTileY = tileY;
+        _lastDetailedTileCandidateRadius = detailedTileCandidateRadius;
+        _lastTargetDetailedTileCount = targetDetailedTileCount;
+        _lastTargetRetainedTileRadius = targetRetainedTileRadius;
 
         _lastRetainedTiles.Clear();
         foreach (DirectionalTileCoord retained in _cameraTileWindowSelector.GetTiles(cameraPos, targetRetainedTileRadius))
@@ -574,9 +579,18 @@ public class TerrainManager : ISceneRenderer
         foreach (var tile in _capturePreloadTiles)
             desiredTiles.Add(tile);
 
+        // Keep one extra camera-centered ring GPU-resident beyond the active
+        // object/terrain lease. Crossing a tile boundary should promote an
+        // already-uploaded neighbor, not synchronously unload the old ring
+        // while its replacement is still in the background/upload queues.
+        // Parsed data was already cached, but retaining the mesh and placement
+        // lease is what prevents visible interior popping during traversal.
         var unloadKeepTiles = new HashSet<(int, int)>();
-        foreach (var retained in _lastRetainedTiles)
-            unloadKeepTiles.Add(retained);
+        int unloadKeepRadius = Math.Min(
+            MaxRetainedTileRadius,
+            targetRetainedTileRadius + UnloadHysteresisRadius);
+        foreach (DirectionalTileCoord retained in _cameraTileWindowSelector.GetTiles(cameraPos, unloadKeepRadius))
+            unloadKeepTiles.Add((retained.TileX, retained.TileY));
 
         foreach (var selected in _lastSelectedTiles)
             unloadKeepTiles.Add(selected);

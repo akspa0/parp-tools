@@ -7,14 +7,16 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-- **Next implementation target:** Spec 151 Phase 2 on branch `151-portal-game-mode-surface`: add the
-  pure game-mode state/physics and character-head anchor after the completed portal checkpoint.
-  Preserve editor camera state and keep game mode opt-in.
+- **Next implementation target:** Finish the bounded Spec 149 legacy-water audio/control checkpoint
+  and user-run smooth-camera proof on branch `151-portal-game-mode-surface`; then return to Spec 151
+  Phase 2 for the pure game-mode state/physics and character-head anchor. Preserve editor camera state
+  and keep game mode opt-in.
 - **Performance planning target:** Spec 150 remains the broad Alpha 0.5.3 renderer evidence lane. Spec
   151 owns the first concrete portal-specific optimization; use its counters and fallback evidence to
   inform later repeated `profile-render` baselines. Do not infer a win from an interactive screenshot.
 - **Proof owner:** Focused PM4/audio contract tests and cross-platform viewer build pass; the user owns
-  real-client region-camera, streaming, archive-provenance, and audible proof.
+  real-client region-camera, streaming, archive-provenance, and audible proof. The current camera
+  slice updates active tiles on mouse-look without reopening the residency lease.
 - **Completed slice:** Checkpoint commits `3bfbbba4` (accumulated audio, AreaNumber, Ghidra, and
   Zone/SubZone overlay work), `de41b183` (Spec Kit design pack), and `c70e1945` (portal phase)
   contain the work completed on this lane. Spec 151 Phase 1 now has a pure, fail-open WMO portal
@@ -37,9 +39,10 @@ the owning spec for requirements and proof; read a workstream only when the spec
   diagnostic budget remain unimplemented. Portal admission is source-tested but still needs the
   user-owned real-client visual/submission/FPS comparison. Spec 149's PM4 region
   bounds/focus, correlation UI retirement, focused area
-  aggregation tests, MCNK/liquid environmental audio, MCSE tile/chunk coordinate normalization, and
-  default-off per-trigger audio controls remain open. The area overlay is resident chunk coverage, not
-  a proven complete polygon. ZoneMusic table indirection, exact `sounds.mpq` provenance, MIDI/DLS
+  aggregation tests, MCSE tile/chunk coordinate normalization, and default-off per-trigger audio
+  controls remain open. MCNK/liquid environmental audio now has a source-level producer and exact
+  SoundWaterType resolver, pending runtime proof. The area overlay is resident chunk coverage, not a
+  proven complete polygon. ZoneMusic table indirection, exact `sounds.mpq` provenance, MIDI/DLS
   playback, and native MCSE callback installation remain separate proof gates. Spec 150 still lacks
   native renderer anchors, repeatable 0.5.3 baseline capture, and CPU/GPU attribution.
 - **Explicitly out of scope for the next slice:** Simple-surface UI, logging-policy retirement,
@@ -51,7 +54,7 @@ the owning spec for requirements and proof; read a workstream only when the spec
 | Spec | State | Next handoff |
 |---|---|---|
 | 151 Portal-aware rendering/game mode/simple surface | Phase 1 portal checkpoint implemented; Phase 2 open | Add pure game-mode state/physics and character-head anchor; preserve editor camera state and stop at the focused physics checkpoint. |
-| 149 PM4 region navigation/audio trigger controls | Draft pack; resident area overlay slice implemented, focused tests open | Add area aggregation tests, then implement contracts/caller audit and resident PM4 region list + double-click camera focus; retire correlation UI only after that checkpoint; gate audio triggers default-off. |
+| 149 PM4 region navigation/audio trigger controls | Draft pack; resident area overlay and MCNK liquid producer slices implemented, focused tests partly open | Add area aggregation/audio-control tests, then complete per-trigger toggles and ZoneMusic indirection; retire correlation UI only after the region checkpoint; keep world triggers default-off. |
 | 150 Alpha 0.5.3 renderer performance | Draft evidence/planning pack complete; no source optimization started | Recover native world/terrain/object/resource/LOD anchors and run two repeated production `profile-render` baselines before choosing one owner. |
 | 148 Artifact world simulator runtime | Phase 1 diagnostics in progress; client contract correction landed | Add ZoneMusic indirection, then finish read/decode/source-stage coverage and user real-client inspection. |
 | 147 Minimap/fog/doodad instancing | Phase 2 implemented; Phase 3/4 open | User-run minimap proof, then implement fog coverage and structured batching diagnostics. |

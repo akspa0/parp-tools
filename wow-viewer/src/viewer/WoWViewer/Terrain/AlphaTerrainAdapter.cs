@@ -3,6 +3,7 @@ using System.Numerics;
 using GillijimProject.WowFiles.Alpha;
 using WoWViewer.Logging;
 using WoWViewer.Rendering;
+using WowViewer.Core.Audio;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 
@@ -73,7 +74,11 @@ public sealed record TerrainSoundEmitter(
     ushort PlayInstancesMin = 0,
     ushort PlayInstancesMax = 0,
     ushort InterSoundGapMin = 0,
-    ushort InterSoundGapMax = 0);
+    ushort InterSoundGapMax = 0,
+    AudioTriggerKind TriggerKind = AudioTriggerKind.Mcse,
+    uint McnkFlags = 0,
+    int LiquidFamily = -1,
+    int SoundWaterSubtype = 0);
 
 public class AlphaTerrainAdapter : ITerrainAdapter
 {
@@ -259,7 +264,10 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                 }
                 var chunkData = ExtractChunkData(mcnk, tileX, tileY, tileIdx);
                 if (chunkData != null)
+                {
                     chunks.Add(chunkData);
+                    LegacyLiquidSoundEmitterFactory.Append(soundEmitters, chunkData);
+                }
             }
             catch (Exception ex)
             {
@@ -747,7 +755,10 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// Alpha 0.5.3: often inline payload referenced by ofsLiquid (no chunk header).
     /// Alpha 0.6.0: client code treats MCLQ as a normal chunk and uses payload at +8 (FourCC+size header).
     /// This method strips an MCLQ chunk header if present so decoding starts at the payload.
-    /// Each instance: 8 (min/max) + 648 (81 verts × 8) + 64 (16 tile floats) + 84 (flows) = 804 bytes.
+    /// The 0.5.3 extractor lineage stores 8-byte vertex records (packed
+    /// flow/depth word followed by height) and an 8×8 tile flag grid. Later
+    /// clients may append flow-vector state; it is not required to decode the
+    /// surface or create the environmental sound candidate.
     /// Liquid type determined from MCNK header flags bits 2-5.
     /// Up to 4 liquid instances per chunk (one per type).
     /// Returns the first valid liquid instance found, or null.
@@ -755,10 +766,11 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     private static LiquidChunkData? ExtractLiquid(byte[] mclqData, int mcnkFlags, int tileX, int tileY,
         int chunkX, int chunkY, Vector3 worldPos)
     {
-        // Alpha 0.5.3 MCLQ is NOT the 804-byte LK format with 81 vertex heights.
-        // Ghidra analysis (CChunkLiquid): just float height[2] (min/max) + flow data.
-        // The liquid surface is a flat plane at the specified height.
-        // Minimum data: 8 bytes (2 floats for min/max height).
+        // Minimum data is the height range. The legacy extractor format uses
+        // 81 records after it: a packed flow/depth word followed by the
+        // absolute vertex height, then 64 tile flags. Treating the packed word
+        // as a float was the source of the stretched/incorrect Alpha liquid
+        // surfaces.
         if (mclqData == null || mclqData.Length < 8)
             return null;
 
@@ -802,23 +814,41 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         if (MathF.Abs(liquidHeight) > 50000f)
             return null;
 
-        // Alpha MCLQ does not contain the later 81-vertex height grid. The bytes
-        // after min/max are flow state, so treating them as vertex heights turns
-        // arbitrary flow values into huge Z excursions and produces the stretched
-        // triangles visible whenever the camera is not looking straight down.
-        // Keep Alpha liquids planar at the decoded surface height. Later clients
-        // use StandardTerrainAdapter's profile-aware MCLQ decoder instead.
-        // Build flat 9×9 grid at the liquid height.
         var heights = new float[81];
-        Array.Fill(heights, liquidHeight);
+        var vertexData = new uint[81];
+        bool hasVertexHeights = mclqData.Length >= 8 + (81 * 8);
+        for (int vertex = 0; vertex < heights.Length; vertex++)
+        {
+            int offset = 8 + vertex * 8;
+            if (!hasVertexHeights || offset + 8 > mclqData.Length)
+            {
+                heights[vertex] = liquidHeight;
+                continue;
+            }
+
+            vertexData[vertex] = BitConverter.ToUInt32(mclqData, offset);
+            float vertexHeight = BitConverter.ToSingle(mclqData, offset + 4);
+            heights[vertex] = float.IsFinite(vertexHeight) && MathF.Abs(vertexHeight) <= 50000f
+                ? vertexHeight
+                : liquidHeight;
+        }
+
+        byte[]? tileFlags = null;
+        const int tileFlagsOffset = 8 + (81 * 8);
+        if (mclqData.Length >= tileFlagsOffset + 64)
+        {
+            tileFlags = new byte[64];
+            Buffer.BlockCopy(mclqData, tileFlagsOffset, tileFlags, 0, tileFlags.Length);
+        }
 
         return new LiquidChunkData
         {
             MinHeight = minHeight,
             MaxHeight = maxHeight,
             Heights = heights,
-            VertexData = new uint[81],
+            VertexData = vertexData,
             TileGrid = new float[16],
+            TileFlags = tileFlags,
             Type = liquidType,
             WorldPosition = worldPos,
             TileX = tileX,

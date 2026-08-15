@@ -3488,6 +3488,8 @@ public class WorldScene : ISceneRenderer
     public int ResidentAudioEmitterCount => _audioRuntime?.ResidentEmitterCount ?? 0;
     public int ActiveAudioEmitterCount => _audioRuntime?.ActiveEmitterCount ?? 0;
     public int ResolvedAudioSoundEntryCount => _audioRuntime?.ResolvedSoundEntryCount ?? 0;
+    public int ResolvedAudioSoundWaterTypeCount => _audioRuntime?.ResolvedSoundWaterTypeCount ?? 0;
+    public bool AudioWorldTriggersEnabled => _audioRuntime?.WorldTriggersEnabled ?? false;
     public IReadOnlyList<AudioTriggerDiagnostic> AudioEmitterDiagnostics
         => _audioRuntime?.EmitterDiagnostics ?? Array.Empty<AudioTriggerDiagnostic>();
     public IReadOnlyList<int> ResidentAudioSoundEntryIds
@@ -3511,6 +3513,8 @@ public class WorldScene : ISceneRenderer
     }
 
     public void SetAudioEmitterGain(float gain) => _audioRuntime?.SetEmitterGain(gain);
+
+    public void SetAudioWorldTriggersEnabled(bool enabled) => _audioRuntime?.SetWorldTriggersEnabled(enabled);
 
     /// <summary>
     /// Supplies the same Zone/SubZone resolution used by the viewer status bar
@@ -9837,15 +9841,10 @@ public class WorldScene : ISceneRenderer
 
     private bool IsSceneGraphNodeVisible(WorldSceneNode node)
     {
-        if (node.Kind == WorldSceneNodeKind.WmoGroup
-            && node.Parent is not null
-            && _sceneGraphPortalVisibility.TryGetValue(node.Parent.Id, out WorldScenePortalVisibilityResult? portalVisibility)
-            && !portalVisibility.Diagnostics.FallbackRequired
-            && !portalVisibility.VisibleNodeIds.Contains(node.Id, StringComparer.Ordinal))
-        {
-            return false;
-        }
-
+        // Scene-graph traversal is a placement/object admission pass. WmoRenderer
+        // owns the authoritative group portal decision and fails open for groups
+        // in the camera frustum; applying graph portal results here as a second
+        // culler caused spotty interiors when the two volumes disagreed.
         return _frustumCuller.TestAABB(node.WorldBoundsMin, node.WorldBoundsMax);
     }
 

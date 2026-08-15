@@ -33,6 +33,7 @@ public sealed class WorldAudioRuntime : IDisposable
     private AudioContext? _context;
     private AL? _al;
     private AlphaSoundEntriesCatalog? _soundEntries;
+    private SoundWaterTypeCatalog? _soundWaterTypes;
     private AlphaAreaAudioCatalog? _areaAudioCatalog;
     private AreaIdentityLayout _areaIdentityLayout = AreaIdentityLayout.DirectAreaId;
     private uint? _previewSource;
@@ -44,6 +45,7 @@ public sealed class WorldAudioRuntime : IDisposable
     private Vector3 _listenerPosition;
     private bool _disposed;
     private bool _loggedNoBackend;
+    private bool _worldTriggersEnabled;
 
     public WorldAudioRuntime(IDataSource dataSource)
     {
@@ -76,11 +78,19 @@ public sealed class WorldAudioRuntime : IDisposable
 
     public int ResolvedSoundEntryCount => _soundEntries?.Entries.Count ?? 0;
 
+    /// <summary>
+    /// Spatial MCSE/MCNK world triggers are opt-in so a looping client sample
+    /// cannot interrupt inspection merely because a tile became resident.
+    /// </summary>
+    public bool WorldTriggersEnabled => _worldTriggersEnabled;
+
+    public int ResolvedSoundWaterTypeCount => _soundWaterTypes?.Entries.Count ?? 0;
+
     public IReadOnlyList<int> ResidentSoundEntryIds
         => _tileEmitters.Values
             .SelectMany(static emitters => emitters)
-            .Select(static emitter => emitter.SoundNameId)
-            .Where(static id => id <= int.MaxValue)
+            .Select(ResolveResidentSoundEntryId)
+            .Where(static id => id > 0 && id <= int.MaxValue)
             .Select(static id => (int)id)
             .Distinct()
             .OrderBy(static id => id)
@@ -90,7 +100,9 @@ public sealed class WorldAudioRuntime : IDisposable
     {
         ThrowIfDisposed();
         StopAll();
+        _worldTriggersEnabled = false;
         _soundEntries = null;
+        _soundWaterTypes = null;
         _areaAudioCatalog = null;
         _areaIdentityLayout = AreaIdentityLayoutResolver.FromBuild(buildVersion);
         AreaMusicStatus = $"Area music metadata not loaded for {buildVersion} ({_areaIdentityLayout}).";
@@ -100,6 +112,17 @@ public sealed class WorldAudioRuntime : IDisposable
         {
             _soundEntries = new AlphaSoundEntriesCatalogReader()
                 .Load(dbcProvider, definitionsDirectory, buildVersion);
+
+            try
+            {
+                _soundWaterTypes = new AlphaSoundWaterTypeCatalogReader()
+                    .Load(dbcProvider, definitionsDirectory, buildVersion);
+            }
+            catch (Exception ex)
+            {
+                ViewerLog.Info(ViewerLog.Category.General,
+                    $"[Audio] SoundWaterType unavailable for {buildVersion}: {ex.Message}");
+            }
 
             try
             {
@@ -137,7 +160,7 @@ public sealed class WorldAudioRuntime : IDisposable
             AL al = AL.GetApi();
             _context = context;
             _al = al;
-            Status = $"OpenAL ready ({libraryName}); SoundEntries={_soundEntries.Entries.Count}; WAV/OGG/MP3 decoders available; MIDI+DLS pair renderer pending.";
+            Status = $"OpenAL ready ({libraryName}); SoundEntries={_soundEntries.Entries.Count}; SoundWaterType={_soundWaterTypes?.Entries.Count ?? 0}; WAV/OGG/MP3 decoders available; MIDI+DLS pair renderer pending.";
             LastDiagnostic = Status;
             ViewerLog.Important(ViewerLog.Category.General, $"[Audio] {Status}");
         }
@@ -162,6 +185,25 @@ public sealed class WorldAudioRuntime : IDisposable
     {
         EmitterGain = Math.Clamp(gain, 0f, 2f);
         ApplyActiveGains();
+    }
+
+    public void SetWorldTriggersEnabled(bool enabled)
+    {
+        if (_worldTriggersEnabled == enabled)
+            return;
+
+        _worldTriggersEnabled = enabled;
+        if (!enabled)
+        {
+            foreach (EmitterKey key in _active.Keys.ToArray())
+                StopEmitter(key);
+            _heardInRange.Clear();
+        }
+
+        LastDiagnostic = enabled
+            ? "MCSE/MCNK world triggers enabled."
+            : "MCSE/MCNK world triggers disabled; resident rows remain inspectable.";
+        InvalidateEmitterDiagnostics();
     }
 
     public void SetMuted(bool muted)
@@ -315,51 +357,61 @@ public sealed class WorldAudioRuntime : IDisposable
             return;
         }
 
-        UpdateAreaMusic(areaId, gameTime, continentId, areaLookup);
+        if (_worldTriggersEnabled)
+            UpdateAreaMusic(areaId, gameTime, continentId, areaLookup);
+        else
+        {
+            StopAreaMusic();
+            AreaMusicStatus = "World triggers disabled; area music is not started.";
+        }
 
         HashSet<EmitterKey> inRange = [];
         KeyValuePair<(int TileX, int TileY), IReadOnlyList<TerrainSoundEmitter>>[] tileSnapshot;
         lock (_tileEmittersLock)
             tileSnapshot = _tileEmitters.ToArray();
 
-        foreach (KeyValuePair<(int TileX, int TileY), IReadOnlyList<TerrainSoundEmitter>> pair in tileSnapshot)
+        if (_worldTriggersEnabled)
         {
-            int tileX = pair.Key.TileX;
-            int tileY = pair.Key.TileY;
-            IReadOnlyList<TerrainSoundEmitter> emitters = pair.Value;
-            for (int index = 0; index < emitters.Count; index++)
+            foreach (KeyValuePair<(int TileX, int TileY), IReadOnlyList<TerrainSoundEmitter>> pair in tileSnapshot)
             {
-                TerrainSoundEmitter emitter = emitters[index];
-                EmitterKey key = new(tileX, tileY, index);
-                if (!_soundEntries.TryResolve(emitter.SoundNameId, out AlphaSoundEntry? soundEntry))
-                    continue;
-
-                float maxDistance = FirstPositive(emitter.CutoffDistance, emitter.MaxDistance, soundEntry.DistanceCutoff, soundEntry.MaxDistance, 100f);
-                float minDistance = Math.Clamp(FirstPositive(emitter.MinDistance, soundEntry.MinDistance, 0f), 0f, maxDistance);
-                float distance = Vector3.Distance(listenerPosition, emitter.Position);
-                if (distance > maxDistance)
-                    continue;
-
-                inRange.Add(key);
-                float gain = soundEntry.Volume * Attenuation(distance, minDistance, maxDistance);
-                if (!_heardInRange.Contains(key))
+                int tileX = pair.Key.TileX;
+                int tileY = pair.Key.TileY;
+                IReadOnlyList<TerrainSoundEmitter> emitters = pair.Value;
+                for (int index = 0; index < emitters.Count; index++)
                 {
-                    TryStartEmitter(key, emitter, soundEntry, minDistance, maxDistance, gain);
-                    _heardInRange.Add(key);
-                }
+                    TerrainSoundEmitter emitter = emitters[index];
+                    EmitterKey key = new(tileX, tileY, index);
+                    uint soundEntryId = ResolveResidentSoundEntryId(emitter);
+                    if (soundEntryId == 0 || !_soundEntries.TryResolve(soundEntryId, out AlphaSoundEntry? soundEntry))
+                        continue;
 
-                if (_active.TryGetValue(key, out ActiveEmitter? active))
-                {
-                    try
+                    float maxDistance = FirstPositive(emitter.CutoffDistance, emitter.MaxDistance, soundEntry.DistanceCutoff, soundEntry.MaxDistance, 100f);
+                    float minDistance = Math.Clamp(FirstPositive(emitter.MinDistance, soundEntry.MinDistance, 0f), 0f, maxDistance);
+                    float distance = Vector3.Distance(listenerPosition, emitter.Position);
+                    if (distance > maxDistance)
+                        continue;
+
+                    inRange.Add(key);
+                    float gain = soundEntry.Volume * Attenuation(distance, minDistance, maxDistance);
+                    if (!_heardInRange.Contains(key))
                     {
-                        active.BaseGain = gain;
-                        _al.SetSourceProperty(active.Source, SourceVector3.Position, emitter.Position);
-                        _al.SetSourceProperty(active.Source, SourceFloat.Gain, gain * EffectiveMasterGain * EmitterGain);
+                        TryStartEmitter(key, emitter, soundEntry, minDistance, maxDistance, gain);
+                        _heardInRange.Add(key);
                     }
-                    catch (Exception ex)
+
+                    if (_active.TryGetValue(key, out ActiveEmitter? active))
                     {
-                        DisableBackend($"emitter update failed: {ex.Message}");
-                        return;
+                        try
+                        {
+                            active.BaseGain = gain;
+                            _al.SetSourceProperty(active.Source, SourceVector3.Position, emitter.Position);
+                            _al.SetSourceProperty(active.Source, SourceFloat.Gain, gain * EffectiveMasterGain * EmitterGain);
+                        }
+                        catch (Exception ex)
+                        {
+                            DisableBackend($"emitter update failed: {ex.Message}");
+                            return;
+                        }
                     }
                 }
             }
@@ -454,16 +506,17 @@ public sealed class WorldAudioRuntime : IDisposable
     {
         string backendStatus = _al is null ? Status : "OpenAL ready";
         EmitterKey key = new(tileX, tileY, index);
-        if (_soundEntries is null || !_soundEntries.TryResolve(emitter.SoundNameId, out AlphaSoundEntry? soundEntry))
+        uint soundEntryId = ResolveResidentSoundEntryId(emitter);
+        if (_soundEntries is null || soundEntryId == 0 || !_soundEntries.TryResolve(soundEntryId, out AlphaSoundEntry? soundEntry))
         {
             return new AudioTriggerDiagnostic(
-                AudioTriggerKind.Mcse,
+                emitter.TriggerKind,
                 tileX,
                 tileY,
                 emitter.ChunkX,
                 emitter.ChunkY,
                 emitter.SoundPointId,
-                emitter.SoundNameId,
+                soundEntryId,
                 emitter.RawPosition,
                 emitter.Position,
                 "TerrainSoundEmitter.RawPosition -> renderer world",
@@ -481,7 +534,12 @@ public sealed class WorldAudioRuntime : IDisposable
                 "Not attempted",
                 backendStatus,
                 AudioTriggerTerminalState.UnresolvedSoundEntry,
-                $"SoundEntries {emitter.SoundNameId} is not present in the active schema.");
+                emitter.TriggerKind == AudioTriggerKind.McnkLiquid
+                    ? $"MCNK liquid family={emitter.LiquidFamily} flags=0x{emitter.McnkFlags:X8} subtype={emitter.SoundWaterSubtype} has no SoundWaterType mapping in the active build."
+                    : $"SoundEntries {soundEntryId} is not present in the active schema.",
+                emitter.McnkFlags,
+                emitter.LiquidFamily,
+                emitter.SoundWaterSubtype);
         }
 
         string[] candidatePaths = soundEntry.EnumerateVirtualPaths().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -613,6 +671,11 @@ public sealed class WorldAudioRuntime : IDisposable
             terminalState = AudioTriggerTerminalState.OutOfRange;
             detail = $"Distance {distance:F1} exceeds max {maxDistance:F1}.";
         }
+        else if (!_worldTriggersEnabled)
+        {
+            terminalState = AudioTriggerTerminalState.Disabled;
+            detail = "World triggers are disabled; resident metadata is inspectable but playback is blocked.";
+        }
         else if (IsMuted)
         {
             terminalState = AudioTriggerTerminalState.Muted;
@@ -680,17 +743,16 @@ public sealed class WorldAudioRuntime : IDisposable
         float? minDistance = null,
         float? maxDistance = null,
         float? distance = null,
-        bool? inRange = null
-        )
+        bool? inRange = null)
     {
         return new AudioTriggerDiagnostic(
-            AudioTriggerKind.Mcse,
+            emitter.TriggerKind,
             tileX,
             tileY,
             chunkX,
             chunkY,
             emitter.SoundPointId,
-            emitter.SoundNameId,
+            soundEntryId > 0 ? (uint)soundEntryId : emitter.SoundNameId,
             emitter.RawPosition,
             emitter.Position,
             "TerrainSoundEmitter.RawPosition -> renderer world",
@@ -708,7 +770,10 @@ public sealed class WorldAudioRuntime : IDisposable
             decodeStatus,
             backendStatus,
             terminalState,
-            detail);
+            detail,
+            emitter.McnkFlags,
+            emitter.LiquidFamily,
+            emitter.SoundWaterSubtype);
     }
 
     private string DescribeResourceSource(string virtualPath)
@@ -1042,6 +1107,18 @@ public sealed class WorldAudioRuntime : IDisposable
             LastDiagnostic = message;
             ViewerLog.Info(ViewerLog.Category.General, message);
         }
+    }
+
+    private uint ResolveResidentSoundEntryId(TerrainSoundEmitter emitter)
+    {
+        if (emitter.TriggerKind != AudioTriggerKind.McnkLiquid)
+            return emitter.SoundNameId;
+
+        return _soundWaterTypes is not null
+            && emitter.LiquidFamily >= 0
+            && _soundWaterTypes.TryResolve(emitter.LiquidFamily, emitter.SoundWaterSubtype, out SoundWaterTypeEntry? waterEntry)
+            ? (uint)waterEntry.SoundId
+            : 0u;
     }
 
     private void ApplyActiveGains()

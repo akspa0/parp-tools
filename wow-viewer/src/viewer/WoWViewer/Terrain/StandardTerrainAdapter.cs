@@ -782,7 +782,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                         ViewerLog.Trace($"[Terrain] {sb}");
                 }
 
-                chunks.Add(new TerrainChunkData
+                TerrainChunkData chunkData = new()
                 {
                     McinIndex = ci,
                     TileX = tileX,
@@ -801,7 +801,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     AreaId = (int)mcnk.Header.AreaId,
                     McnkFlags = (int)mcnkFlagsRaw,
                     AlphaSourceFlags = (int)alphaSourceFlagsRaw
-                });
+                };
+                chunks.Add(chunkData);
+                LegacyLiquidSoundEmitterFactory.Append(result.SoundEmitters, chunkData);
 
                 LastLoadedChunkPositions.Add(new Vector3(worldX, worldY, 0f));
             }
@@ -1719,6 +1721,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
             if (matchingChunk != null && matchingChunk.Liquid == null)
             {
                 matchingChunk.Liquid = liquid;
+                LegacyLiquidSoundEmitterFactory.Append(result.SoundEmitters, matchingChunk);
                 liquidCount++;
             }
         }

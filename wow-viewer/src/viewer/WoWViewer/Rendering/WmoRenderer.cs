@@ -1697,6 +1697,19 @@ void main() {
                 _runtimeVisibleGroups[groupIndex] = true;
         }
 
+        // Portal traversal is a conservative optimization, never the final
+        // correctness culler. A group whose transformed bounds are in the
+        // camera frustum must remain drawable even when portal winding,
+        // incomplete exterior flags, or an old-build portal edge disagrees.
+        // Connected groups admitted by the portal walk remain visible too.
+        for (int groupIndex = 0; groupIndex < _frustumVisibleScratch.Length; groupIndex++)
+        {
+            if (!_frustumVisibleScratch[groupIndex])
+                continue;
+
+            _runtimeVisibleGroups[groupIndex] = true;
+        }
+
         ApplyRuntimeVisibilityToBuffers();
         CollectVisibleDoodadDefs();
     }

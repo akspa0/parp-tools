@@ -30,7 +30,12 @@ public partial class ViewerApp
         ImGui.TextWrapped($"Area music: {scene.AreaMusicStatus}");
         ImGui.Text(scene.AudioMuted ? "Output: MUTED" : "Output: ON");
         ImGui.Text($"Resident emitters: {scene.ResidentAudioEmitterCount}  |  Active: {scene.ActiveAudioEmitterCount}");
-        ImGui.Text($"SoundEntries rows: {scene.ResolvedAudioSoundEntryCount}");
+        ImGui.Text($"SoundEntries rows: {scene.ResolvedAudioSoundEntryCount}  |  SoundWaterType rows: {scene.ResolvedAudioSoundWaterTypeCount}");
+
+        bool worldTriggersEnabled = scene.AudioWorldTriggersEnabled;
+        if (ImGui.Checkbox("Enable MCSE/MCNK world triggers", ref worldTriggersEnabled))
+            scene.SetAudioWorldTriggersEnabled(worldTriggersEnabled);
+        ImGui.TextDisabled("Off by default: resident rows remain inspectable, but looping world samples do not start automatically.");
 
         if (scene.AudioBackendReady)
             ImGui.TextColored(new System.Numerics.Vector4(0.45f, 0.9f, 0.55f, 1f), "OpenAL backend ready");
@@ -39,7 +44,7 @@ public partial class ViewerApp
 
         ImGui.Separator();
         ImGui.Text("Emitter diagnostics");
-        ImGui.TextDisabled("This inspects current resident MCSE records without starting audio sources.");
+        ImGui.TextDisabled("This inspects resident MCSE and MCNK liquid/environment records without starting audio sources.");
         if (ImGui.Button("Refresh decisions"))
             scene.RefreshAudioEmitterDiagnostics(probeFiles: false);
         ImGui.SameLine();
@@ -57,13 +62,14 @@ public partial class ViewerApp
                     AudioTriggerTerminalState.Active or AudioTriggerTerminalState.Ready
                         => new System.Numerics.Vector4(0.45f, 0.9f, 0.55f, 1f),
                     AudioTriggerTerminalState.OutOfRange or AudioTriggerTerminalState.Muted
+                        or AudioTriggerTerminalState.Disabled
                         => new System.Numerics.Vector4(0.85f, 0.8f, 0.35f, 1f),
                     _ => new System.Numerics.Vector4(1f, 0.45f, 0.35f, 1f)
                 };
 
                 ImGui.TextColored(
                     color,
-                    $"{diagnostic.TerminalState}  SoundPoint={diagnostic.SoundPointId} SoundName={diagnostic.SoundNameId}");
+                    $"{diagnostic.TerminalState}  {diagnostic.TriggerKind}  SoundPoint={diagnostic.SoundPointId} SoundName={diagnostic.SoundNameId}");
                 ImGui.Text(
                     $"Tile=({diagnostic.TileX},{diagnostic.TileY}) Chunk=({diagnostic.ChunkX},{diagnostic.ChunkY}) " +
                     $"Distance={diagnostic.DistanceToListener:F1}/{diagnostic.MaxDistance:F1}");
@@ -73,6 +79,8 @@ public partial class ViewerApp
                 ImGui.TextWrapped(
                     $"Profile={diagnostic.CoordinateProfile}  Source={diagnostic.ResourceSource}  " +
                     $"Read={(diagnostic.BytesRead ? "yes" : "no")}  Decode={diagnostic.DecodeStatus}");
+                if (diagnostic.TriggerKind == AudioTriggerKind.McnkLiquid)
+                    ImGui.TextWrapped($"MCNK flags=0x{diagnostic.McnkFlags:X8}  LiquidFamily={diagnostic.LiquidFamily}  SoundSubtype={diagnostic.SoundWaterSubtype}");
                 if (!string.IsNullOrWhiteSpace(diagnostic.SelectedVirtualPath))
                     ImGui.TextWrapped($"Path: {diagnostic.SelectedVirtualPath}");
                 ImGui.TextWrapped($"Backend={diagnostic.BackendStatus}  {diagnostic.Detail}");
@@ -145,6 +153,6 @@ public partial class ViewerApp
             scene.SetAudioEmitterGain(_audioEmitterGain);
 
         ImGui.Separator();
-        ImGui.TextDisabled("Automatic MCSE playback is bounded to loaded tiles. DBC ZoneMusic is resolved from the active area; MIDI/DLS synthesis and Play + Video audio remain separate work.");
+        ImGui.TextDisabled("World triggers are bounded to loaded tiles and opt-in. DBC ZoneMusic is resolved from the active area; MIDI/DLS synthesis and Play + Video audio remain separate work.");
     }
 }

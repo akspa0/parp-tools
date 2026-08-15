@@ -108,7 +108,7 @@ stop/no-restart behavior.
   owning tile/chunk origin and existing renderer axis convention before range checks or OpenAL placement;
   preserve raw/local values for diagnostics in `AlphaTerrainAdapter`, `StandardTerrainAdapter`, and the
   audio runtime seam.
-- [ ] T019 [US3] Project decoded `TerrainChunkData.McnkFlags` and `LiquidChunkData` into bounded MCNK
+- [x] T019 [US3] Project decoded `TerrainChunkData.McnkFlags` and `LiquidChunkData` into bounded MCNK
   environmental/liquid trigger candidates, preserving raw liquid identity when available and leaving
   an explicit unresolved mapping diagnostic when no client-proven SoundEntries row exists.
 - [ ] T020a [US3] Add a build-aware `ZoneMusic` reader/model and resolver so `AreaTable.ZoneMusic`
@@ -222,3 +222,15 @@ from compilation alone.
 - Do not implement player-height, walking/running, jumping, collision, or game mode under these tasks.
 - Do not infer MIDI/DLS playback or native MCSE callback support from this UI/runtime policy change.
 - Do not delete shared PM4 research code without the T005 caller audit.
+
+## Implementation checkpoint — 2026-08-14
+
+- T019 is implemented: resident MCNK/MCLQ/MH2O liquid state now produces inspectable candidates;
+  exact-build `SoundWaterType` resolves supported rows and leaves missing mappings unresolved.
+- Alpha MCLQ preserves its packed 9x9 vertex records and 8x8 tile flags. Camera rotation no longer
+  rebuilds residency, terrain keeps one capped unload-hysteresis ring, and WMO frustum-visible groups
+  are admitted after portal evaluation to avoid spotty interiors.
+- T020/T022/T024 remain open for per-trigger enablement, explicit disabled diagnostics, ZoneMusic row
+  indirection, and focused runtime control tests. The active tile list now follows mouse-look without
+  reopening the streaming lease; focused catalog/flag/audio contract tests pass 53/53. These source
+  changes do not constitute visual, FPS, or audible real-client proof.

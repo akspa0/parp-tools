@@ -5,6 +5,22 @@ Last updated: 2026-08-14
 This is a short newest-first implementation ledger. It is not a changelog or archive. Older detail
 belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 
+## 2026-08-14 — MCNK liquid audio and camera residency stability checkpoint
+
+- Projected resident MCNK flags/MCLQ/MH2O liquid state into typed environmental audio candidates.
+  Exact-build `SoundWaterType` rows resolve `(liquid family, subtype)` to `SoundEntries` IDs without
+  inventing IDs; world-trigger playback remains default-off and unresolved mappings stay visible.
+- Corrected the Alpha MCLQ handoff to preserve 81 packed vertex records and 64 tile flags instead of
+  flattening the surface. Standard MH2O liquid assignment replaces the provisional MCNK candidate for
+  the same chunk rather than duplicating it.
+- Removed camera-heading-driven residency churn, added one capped unload-hysteresis ring, and kept WMO
+  group rendering fail-open for transformed frustum-visible groups after portal evaluation. These are
+  source-level smoothness/correctness changes; user real-client visual/FPS/audio proof is still open.
+- Active render tiles now follow mouse-look without reopening the streaming lease; focused catalog,
+  flag, and audio contract tests pass 53/53. Viewer project build passes with 0 errors; the full
+  solution build also passes with 0 errors. Full-suite test completion, focused PM4/area coverage,
+  per-trigger toggles, ZoneMusic indirection, and runtime proof remain.
+
 ## 2026-08-14 — Dual-era AreaTable identity routing
 
 - Restored an explicit build-selected area identity contract: Alpha 0.5.x uses packed MCNK

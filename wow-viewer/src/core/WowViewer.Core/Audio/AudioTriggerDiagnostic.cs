@@ -6,6 +6,7 @@ namespace WowViewer.Core.Audio;
 public enum AudioTriggerKind
 {
     Mcse,
+    McnkLiquid,
     ZoneMusic,
     AreaAmbience,
     Unknown
@@ -15,6 +16,7 @@ public enum AudioTriggerKind
 public enum AudioTriggerTerminalState
 {
     NotResident,
+    Disabled,
     UnresolvedSoundEntry,
     MissingResource,
     ReadFailed,
@@ -58,4 +60,7 @@ public sealed record AudioTriggerDiagnostic(
     string DecodeStatus,
     string BackendStatus,
     AudioTriggerTerminalState TerminalState,
-    string Detail);
+    string Detail,
+    uint McnkFlags = 0,
+    int LiquidFamily = -1,
+    int SoundWaterSubtype = 0);
