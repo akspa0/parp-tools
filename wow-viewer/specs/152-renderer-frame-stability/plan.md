@@ -2,6 +2,21 @@
 
 **Branch**: `v0.5.3-dev` | **Date**: 2026-08-15 | **Spec**: [spec.md](spec.md)
 
+> **STATUS 2026-08-15 — the Phase 1 decision point fired, and it refuted this plan's premise.**
+>
+> Phase 0 shipped and the detector found the defects. They are **not** allocation-shaped: median
+> world-render CPU measured 0.33–8.58 ms, and the hitches are a periodic ~212 ms stall inside the one
+> pass with no stage timer (`PrepareObjectPhase`) plus a sustained cost from **100% unbatched MDX
+> submission**. Scene-graph traversal measured 0.22 ms max.
+>
+> Per this plan's own Phase 1 gate — *"if the hypothesis is refuted, Phase 3 is re-planned against the
+> real cause before any flattening work begins"* — **Phases 3, 4 and 5 are suspended.** The measured
+> defects and their fixes now live in
+> [Spec 153](../153-renderer-hitch-and-batching/spec.md).
+>
+> Still owned here: Phase 0 (measurement infrastructure, landed), Phase 2 churn work (landed, and
+> worth keeping on its own merits), and Phase 6 per-era terrain lighting (independent, not started).
+
 ## Summary
 
 v0.5.3 makes the renderer render properly. Three defects share one root: the renderer treats the
