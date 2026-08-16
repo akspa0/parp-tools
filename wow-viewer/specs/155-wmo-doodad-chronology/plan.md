@@ -6,16 +6,18 @@
 
 ## Summary
 
-Every world object and model in a build makes claims that assets exist. Collect those claims, resolve
-each against what the build actually contains, and compare the result against what the listfiles name.
-The disagreement is the deliverable.
+Every world object and model in a build makes claims that assets exist. Collect those claims across the
+**entire corpus**, resolve each against what the build actually contains, and compare the result
+against what the listfiles name. The disagreement is the deliverable.
 
 Delivered by extending the inspection tooling. Every reader involved already exists — world-object
 doodad and texture tables, model texture tables, the archive catalogue that already resolves per-asset
-containers. What is added is per-asset reference reporting, corpus-wide sweeping, and the comparison.
+containers. What is added is corpus-wide sweeping, resolution, and the comparison.
 
-The Mt. Hyjal effect objects are a known-true instance of the thing being hunted, so the sweep is gated
-on flagging them without being told where to look.
+**This is a corpus job from the first phase.** The value is in the missing assets nobody has catalogued,
+which only a full sweep can surface. Known instances such as the Mt. Hyjal effect objects are useful
+afterwards as a sanity read on output that already exists — they are not targets, and no phase is gated
+on locating any individual object.
 
 ## Technical Context
 
@@ -129,54 +131,39 @@ and the archive layer; nothing depends on it. Deliberately **not** in `Core.Anim
 Each phase ends validated, not merely coded. **Phases 1–3 are the MVP** that answers the driving
 question; 4–7 build on it.
 
-### Phase 0 — Locate the control and map what is readable (research)
+### Phase 0 — Map what can be swept (research)
 
-Nothing is built until the positive control is known to be reachable.
+Short, and it does not hunt for individual objects.
 
-1. Identify which staged build(s) contain the Mt. Hyjal effect objects, and their asset paths.
-2. Confirm that build's model route reads today. **If it does not, the control cannot fire and the
-   whole plan is gated here** — say so rather than proceeding.
-3. Record, per staged build, which model route applies and whether it reads, cross-referencing Spec 154.
-4. Confirm the archive catalogue enumerates 532 world objects for the earliest build.
-5. Establish how a presence probe distinguishes "absent" from "present but unreadable" — these must not
+1. Record, per staged build, which model route applies and whether it reads, cross-referencing Spec 154.
+2. Confirm the archive catalogue enumerates 532 world objects for the earliest build.
+3. Establish how a presence probe distinguishes "absent" from "present but unreadable" — these must not
    collapse.
-6. Establish whether the listfile index is usable as the catalogued set per build, and record its
+4. Establish whether the listfile index is usable as the catalogued set per build, and record its
    coverage against what the catalogue enumerates.
 
-**Exit gate**: the control is located and reachable, and every staged build is marked readable or
-blocked for models. No "assumed" entries.
+**Exit gate**: every staged build is marked sweepable or blocked, per asset kind. No "assumed" entries.
 
-### Phase 1 — US1: references from one asset
+### Phase 1 — US1: sweep the full corpus of a build
+
+The corpus sweep is the product. Single-asset reporting falls out of the same extraction and exists as
+a debugging view, not as a milestone.
 
 1. Define the reference record: referencing asset, reference kind, target path, resolution outcome.
-2. Extract doodad references from one world object, reusing the existing reader.
-3. Extract texture references from one world object, reusing the existing readers.
-4. Extract texture references from one model on the Alpha route.
-5. Extract texture references from one model on a readable `MD20` route.
-6. Resolve one reference to present, absent, or unreadable.
-7. Add a thin command reporting one asset's references and their outcomes.
-8. **Validate against the Mt. Hyjal objects**: the missing texture reference must appear as absent.
-9. Unit-test the resolution outcome mapping, including the unreadable case.
+2. Extract doodad and texture references from a world object, reusing the existing readers.
+3. Extract texture references from a model, on every route Phase 0 marked readable.
+4. Resolve a reference to present, absent, or unreadable.
+5. Enumerate the world-object and model corpora from the archive catalogue.
+6. Sweep every world object and every model in a build, accumulating references.
+7. Continue past any individual unreadable asset, recording it.
+8. Report examined counts per asset kind, plus unreadable counts and blocked routes.
+9. Add thin commands: sweep a build, and dump one asset's references.
+10. Unit-test the resolution outcome mapping, including the unreadable case.
 
-**Exit gate**: pointing the command at the control objects reports the missing texture. SC-003 shape is
-in place for a single asset.
+**Exit gate**: SC-002, SC-003, SC-007 met. A full build sweeps end to end, reporting 532 world objects
+and 5,545 models for the earliest build, with no single asset able to abort it.
 
-### Phase 2 — US2: sweep a whole build
-
-1. Enumerate the world-object corpus from the archive catalogue.
-2. Enumerate the model corpus, scoped to routes Phase 0 marked readable.
-3. Sweep world objects, accumulating references.
-4. Sweep models, accumulating references.
-5. Continue past any individual unreadable asset, recording it.
-6. Report examined counts per asset kind, plus skipped and unreadable counts.
-7. Record blocked model routes as blocked, distinctly from zero findings.
-8. Add a thin sweep command over a configured root.
-9. **Validate: an untargeted sweep of the control build flags the Mt. Hyjal objects.**
-
-**Exit gate**: SC-001, SC-002, SC-007 met. The sweep finds the control without being aimed at it, and
-reports 532 world objects for the earliest build.
-
-### Phase 3 — US3: the three-set comparison
+### Phase 2 — US3: the three-set comparison
 
 1. Assemble the catalogued set per build from the listfile index.
 2. Assemble the present set from the archive layer, independently of the catalogue.
@@ -191,18 +178,18 @@ reports 532 world objects for the earliest build.
 **Exit gate**: SC-004, SC-005 met. Every referenced asset lands in exactly one category, and nothing is
 called missing merely because a listfile omitted it.
 
-### Phase 4 — US4: candidate matches
+### Phase 3 — US4: candidate matches
 
 1. Define candidate evidence: the nature of the difference between a missing path and a present asset.
 2. Search present assets and orphans for near matches.
 3. Report all candidates for a reference; never choose.
 4. Verify every candidate is present in the same build.
-5. Report the candidate result for the Mt. Hyjal texture specifically.
+5. Report candidate coverage across the whole missing population, not per hand-picked case.
 6. Unit-test that a candidate from another build or a non-existent path is rejected.
 
 **Exit gate**: SC-006 met.
 
-### Phase 5 — US5: cross-build chronology
+### Phase 4 — US5: cross-build chronology
 
 1. Assemble per-build asset sets from the sweeps.
 2. Derive introduction windows bounded by named builds.
@@ -212,7 +199,7 @@ called missing merely because a listfile omitted it.
 
 **Exit gate**: SC-008 met.
 
-### Phase 6 — US6: repair
+### Phase 5 — US6: repair
 
 1. Keep analysis and repair in separate paths so no analysis can mutate.
 2. Apply a repair only for an unambiguous single candidate.
@@ -223,7 +210,7 @@ called missing merely because a listfile omitted it.
 
 **Exit gate**: SC-009, SC-010 met.
 
-### Phase 7 — US7: conversion capability survey
+### Phase 6 — US7: conversion capability survey
 
 1. Exercise each conversion operation against real staged data.
 2. Record outcome per operation per build, naming what failed where it failed.

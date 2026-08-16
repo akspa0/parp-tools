@@ -18,20 +18,22 @@ actually ships.**
 This feature builds that comparison, delivered through the existing inspection tooling, which already
 reads every format involved and needs analysis surfaces rather than new readers.
 
-### The signal is visible in-world, and there is a known instance
+### The phenomenon, and why it is worth sweeping for
 
 The real engine draws an untextured object **bright neon green**. This holds in at least every
 pre-alpha and beta Vanilla build. A missing texture is therefore not a silent defect — it is a
 recognisable artifact, and the corresponding reference is recoverable from the data.
 
-Two effect objects on the side of Mt. Hyjal are the worked example. They appear as green smoke because
-their water-spray texture is missing. The objects became well known when Classic launched in 2018 and
-explorers found them exactly where they had been claimed to be. Inspecting them in this project's own
-viewer showed the cause: the texture reference resolves to nothing.
+Two effect objects on the side of Mt. Hyjal are the illustration. They appear as green smoke because
+their water-spray texture is missing. They became well known when Classic launched in 2018 and
+explorers found them exactly where they had been claimed to be, and inspecting them in this project's
+own viewer showed the cause directly: the texture reference resolves to nothing.
 
-**This makes the Mt. Hyjal objects a positive control for the entire feature.** A sweep that does not
-flag them is broken, whatever else it reports. This project has been caught before reporting null
-results from detectors that could not have seen the thing; a known-true instance removes that risk.
+**Those two objects are known. The point of this feature is everything that is not.** One anecdote
+became famous because someone happened to walk past it; there is no reason to think it is rare, and no
+way to find the rest by walking. Only a full-corpus sweep can say how large the missing-asset
+population actually is. Known instances are useful afterwards as a sanity read on a report that already
+exists — nothing here is scoped around finding a particular object.
 
 ### Three sets, not two
 
@@ -67,41 +69,18 @@ feature exists to measure — but it must not be mistaken for the corpus itself 
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - See what one asset references and whether it resolves (Priority: P1)
-
-Someone inspects a single world object or model and gets every reference it makes — the doodads a world
-object places, the textures a world object's materials use, the textures a model draws with — each
-marked as resolving or not.
-
-**Why this priority**: It is the foundation every sweep is built from, and it is independently useful
-immediately: it is the manual diagnosis that identified the Mt. Hyjal objects, made repeatable.
-
-**Independent Test**: Inspect the Mt. Hyjal effect objects and confirm the missing water-spray texture
-reference is reported as unresolved.
-
-**Acceptance Scenarios**:
-
-1. **Given** a world object, **When** it is inspected, **Then** every doodad it references is listed.
-2. **Given** a world object, **When** it is inspected, **Then** every texture its materials reference is
-   listed.
-3. **Given** a model, **When** it is inspected, **Then** every texture it references is listed.
-4. **Given** any reference, **When** it is reported, **Then** it carries whether it resolves to a
-   readable asset in that build.
-5. **Given** the Mt. Hyjal effect objects, **When** they are inspected, **Then** the unresolved
-   water-spray texture reference appears.
-
----
-
-### User Story 2 - Sweep every world object and every model in a build (Priority: P2)
+### User Story 1 - Sweep every world object and every model in a build (Priority: P1)
 
 Someone points the tooling at a build and gets the complete reference ledger for it — every world
-object and every model, every reference each makes, and whether each resolves.
+object and every model, every reference each makes, and whether each resolves. Reporting the references
+of a single asset falls out of the same extraction and is available as a debugging view.
 
 **Why this priority**: The whole premise is that there are many unknown missing assets. One-at-a-time
-inspection cannot find what nobody knows to look for; only a sweep can.
+inspection cannot find what nobody knows to look for; only a full sweep can, and the size of the
+missing population is itself the first thing worth knowing.
 
-**Independent Test**: Sweep the earliest staged build, confirm the examined counts match its actual
-contents, and confirm the Mt. Hyjal objects appear in the results without having been targeted.
+**Independent Test**: Sweep the earliest staged build end to end and confirm the examined counts match
+its actual contents — 532 world objects and 5,545 models — with every reference carrying an outcome.
 
 **Acceptance Scenarios**:
 
@@ -111,20 +90,22 @@ contents, and confirm the Mt. Hyjal objects appear in the results without having
    examined, so an under-counted sweep is visible rather than silent.
 3. **Given** a build packaging world objects as per-asset containers, **When** it is swept, **Then** all
    532 are examined, not the one an internal-listfile index would name.
-4. **Given** a sweep of the build containing them, **When** it completes, **Then** the Mt. Hyjal effect
-   objects are flagged **without having been named in advance**.
-5. **Given** an asset that cannot be read at all, **When** the sweep encounters it, **Then** it is
+4. **Given** an asset that cannot be read at all, **When** the sweep encounters it, **Then** it is
    recorded as unreadable and the sweep continues.
+5. **Given** a swept build, **When** results are reported, **Then** the count of unresolved references
+   is stated, so the scale of the missing-asset population is visible immediately.
+6. **Given** a single asset, **When** its references are dumped, **Then** the same extraction reports
+   its doodad and texture references with their outcomes.
 
 ---
 
-### User Story 3 - Compare what the data expects against what the catalogue names (Priority: P3)
+### User Story 2 - Compare what the data expects against what the catalogue names (Priority: P2)
 
 Someone gets, for one build, the disagreement between what the game data references, what the listfiles
 name, and what the build actually contains — including assets that ship but nothing references.
 
 **Why this priority**: This is the headline deliverable and the thing that has never been produced. It
-is P3 only because it is a function of US1 and US2 being complete.
+sits behind the sweep only because it is a function of the sweep being complete.
 
 **Independent Test**: Produce the comparison for one build and confirm every referenced asset lands in
 exactly one category, with orphans listed separately.
@@ -144,7 +125,7 @@ exactly one category, with orphans listed separately.
 
 ---
 
-### User Story 4 - Find the asset that was probably meant (Priority: P4)
+### User Story 3 - Find the asset that was probably meant (Priority: P3)
 
 For each missing reference, someone learns whether the build contains an asset that is plausibly the
 intended one — an orphan with a near-identical name, a differing extension, a moved path, a spelling or
@@ -168,12 +149,13 @@ candidate is an asset verified present in that same build, with the nature of th
    build** — never drawn from another build and never invented.
 4. **Given** several plausible candidates, **When** they are reported, **Then** all are listed and none
    is silently chosen.
-5. **Given** the Mt. Hyjal missing texture, **When** candidates are sought, **Then** the result states
-   whether a plausible water-spray texture exists in that build.
+5. **Given** the full missing-reference population of a build, **When** candidate matching runs,
+   **Then** it reports how many have no candidate, one, or several — coverage across the population,
+   not a per-case verdict.
 
 ---
 
-### User Story 5 - Date assets across builds (Priority: P5)
+### User Story 4 - Date assets across builds (Priority: P4)
 
 Someone gets, across the staged builds, the window in which each asset first appears, and where it
 happens, when it disappears.
@@ -200,7 +182,7 @@ an introduction window bounded by named builds.
 
 ---
 
-### User Story 6 - Repair broken references, on purpose and reversibly (Priority: P6)
+### User Story 5 - Repair broken references, on purpose and reversibly (Priority: P5)
 
 Someone can have missing references repointed at assets that genuinely exist in that build, with a full
 record of what changed and the ability to undo it.
@@ -223,7 +205,7 @@ confirm the original state can be restored exactly.
 
 ---
 
-### User Story 7 - Know what the conversion tools can actually do (Priority: P7)
+### User Story 6 - Know what the conversion tools can actually do (Priority: P6)
 
 Someone gets a straight statement of which conversion operations currently work, which are broken, and
 how each compares to the maturity of terrain reading — before any parity is promised.
@@ -318,10 +300,12 @@ then compare that record against what the tools claim to do.
 
 ### Measurable Outcomes
 
-- **SC-001**: The Mt. Hyjal effect objects are flagged by an untargeted sweep of the build containing
-  them. A sweep that does not flag them is failed, regardless of what else it reports.
-- **SC-002**: A sweep reports examining 532 world objects for the earliest staged build; a run reporting
-  1 indicates the internal-listfile index was used instead of the data-access layer and is a failure.
+- **SC-001**: A sweep of a build examines its entire corpus — every world object and every model on a
+  readable route — and reports the total count of unresolved references, so the size of the
+  missing-asset population is known rather than estimated.
+- **SC-002**: A sweep reports examining 532 world objects and 5,545 models for the earliest staged
+  build; a run reporting 1 world object indicates the internal-listfile index was used instead of the
+  data-access layer and is a failure.
 - **SC-003**: 100% of references found by a sweep carry a resolution outcome; none is unclassified.
 - **SC-004**: 100% of referenced assets are classified into exactly one of the four categories, with
   per-category counts reported.

@@ -57,11 +57,12 @@ beside it:
 
 ## Validation
 
-- **The positive control gates the whole contract.** An untargeted sweep of the build containing the
-  Mt. Hyjal effect objects must surface them. A sweep that does not is failed regardless of its counts,
-  because a detector that cannot find a known instance cannot be trusted on unknown ones.
-- A sweep reporting one world object for the earliest staged build indicates the internal-listfile index
-  was used instead of the archive access layer.
+- A sweep must cover the whole corpus. Reporting one world object for the earliest staged build
+  indicates the internal-listfile index was used instead of the archive access layer.
+- Known missing-asset instances, such as the Mt. Hyjal effect objects, are a useful sanity read on a
+  completed report — if a sweep of their build does not contain them, something is wrong with coverage.
+  This is a check performed **on output that already exists**; it is not a target, and no work is
+  scoped around locating any individual object.
 
 ## Non-goals
 

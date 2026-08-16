@@ -44,21 +44,17 @@ thing this plan refuses to do.
 the same error shape as a documented tool that did not exist and a corpus reported as 1 of 532. The
 contracts make it structurally unrepresentable rather than relying on discipline.
 
-## 4. Where is the positive control? — OPEN
+## 4. Scale of the missing-asset population — UNKNOWN, and this is the point
 
-The Mt. Hyjal effect objects render as green smoke because their water-spray texture is missing; the
-engine paints untextured geometry neon green in at least every pre-alpha and beta Vanilla build. They
-were confirmed in-world by explorers after Classic launched in 2018, and this project's viewer showed
-the missing texture reference directly.
+Nobody knows how many references in any build resolve to nothing. The Mt. Hyjal effect objects are one
+instance that became famous because a person happened to walk past it; that is not a sampling method,
+and there is no reason to treat it as rare.
 
-Still to establish:
+The first sweep answers this. It is not a research question to settle before building — it is the
+output of Phase 1, and the count of unresolved references is the headline number.
 
-- Which staged build or builds contain them.
-- Their asset paths, and whether they are world objects or models.
-- The exact reference that fails to resolve.
-- **Whether that build's model route reads today.** If it does not, the control cannot fire, and the
-  plan is gated here rather than proceeding to build a sweep whose success criterion cannot be
-  evaluated.
+Known instances are a sanity read on a finished report, not a target. Nothing in this plan is scoped
+around locating a particular object, and no phase is gated on one.
 
 ## 5. Presence probe semantics — OPEN
 

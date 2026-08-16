@@ -51,15 +51,15 @@ side of the comparison.
 | World object | Material textures |
 | Model | Textures |
 
-## Positive control
+## Sanity read, not a target
 
-The Mt. Hyjal effect objects render as green smoke because their water-spray texture is missing — the
-engine paints untextured geometry neon green in at least every pre-alpha and beta Vanilla build. They
-were confirmed in-world by explorers after Classic launched in 2018.
+The engine paints untextured geometry neon green in at least every pre-alpha and beta Vanilla build, so
+a missing texture shows up in-world. The Mt. Hyjal effect objects are the known example — green smoke
+on the mountainside, confirmed by explorers after Classic launched in 2018.
 
-**An untargeted sweep of the build containing them must flag them.** A sweep that does not is failed
-regardless of what else it reports. Phase 0 locates them and confirms that build's model route reads
-today; if it does not, the control cannot fire and the plan is gated there.
+They are useful **after** a sweep, as a spot-check that coverage is sane. They are not a target and no
+phase is gated on them. The whole point is the population nobody has ever counted; a sweep's headline
+number is how many references resolve to nothing.
 
 ## Model route readability
 
