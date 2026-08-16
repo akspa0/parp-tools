@@ -1,4 +1,5 @@
 using System.Numerics;
+using WowViewer.Core.Runtime.World.Visibility;
 
 namespace WoWViewer.Rendering;
 
@@ -11,6 +12,9 @@ public interface IGpuInstancedWmoRenderer
     bool SupportsGpuInstancedOpaque { get; }
 
     WmoRenderStats LastRenderStats { get; }
+
+    /// <summary>Group admission accounting for the most recent submission. See Spec 151.</summary>
+    WmoAdmissionTally LastGroupAdmission { get; }
 
     void BeginGpuInstanceBatch(
         Matrix4x4 view,

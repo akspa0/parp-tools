@@ -68,6 +68,65 @@ dependency is introduced.
 5. Treat runtime visual/FPS/audio proof against `H:\CLIENTS` as user-owned. Build and focused tests
    can establish structural correctness only.
 
+## Group Admission Instrumentation (2026-08-15)
+
+The Stormwind capture taken after the Spec 153 fixes made `WmoSubmission` the measured owner of the
+remaining hitching: p99 154.10 / max 161.3 ms against a 0.71 ms median, with all 592 recent hitches
+attributing to it, 7512 visible groups, 80484 draw calls, and 80200 of those calls correctly
+batched. No counter said which rule admitted the 7512. That counter now exists.
+
+### What was added
+
+- `WowViewer.Core.Runtime.World.Visibility.WmoAdmissionTally` / `WmoAdmissionStats` — a pure,
+  allocation-free accumulator over two layers: which placements entered the visible set, and which
+  groups inside them were submitted and on whose authority.
+- `WorldObjectVisibilityCollector.CollectVisibleWmos` gained a `ref WmoAdmissionTally` overload that
+  records the rule for every placement. The admission decisions are unchanged; a test asserts the
+  two overloads produce identical cull counts and identical visible sets.
+- `WmoRenderer.UpdateRuntimeVisibility` records a per-group rule: runtime-visibility-disabled,
+  placement-transform-invalid, portal-conservative-fallback, portal-only, frustum-only, or both.
+  `EndGpuInstanceBatch` records its own rule because that path never consults runtime visibility.
+- `WorldRenderFrameStats.WmoAdmission` carries it to Utilities > Perf > "WMO admission (this frame)".
+
+### Source findings that motivated the counter shape — magnitudes NOT yet measured
+
+These are read off the source and are verifiable by inspection. What share of the 7512 each accounts
+for is exactly what the capture must decide; none of them is credited with the cost yet.
+
+1. **Portal culling cannot reject a group.** `UpdateRuntimeVisibility` computes the portal decision,
+   then unconditionally unions it with raw frustum visibility, so the final set is
+   `portal ∪ frustum`. A conservative fallback additionally admits every group by construction. The
+   `AdmittedByFrustum` and `AdmittedByPortalFallback` counters separate these two.
+2. **WMO placements are never rejected by the frustum.** The WorldScene call sites pass
+   `IgnoreVisionConeCulling: true`, and the only frustum-rejecting branch in `CollectVisibleWmos` is
+   guarded by `!IgnoreFrustumCulling && !IgnoreVisionConeCulling`. Placement admission is therefore
+   distance, max-view-distance, and projected size only. This is the shape of the reported
+   "old Ironforge visible beyond the fog plane" symptom, since `ComputeWmoCullDistance` returns
+   `max(1600, fogEnd + 256) * multiplier` capped at 8192.
+3. **Group admission is evaluated twice per placement per frame.** `RenderWithTransform` calls
+   `UpdateRuntimeVisibility` on both the opaque and the transparent pass, so portal traversal and the
+   per-group AABB transform both run twice. `GroupPlacementEvaluations` makes this visible instead of
+   hiding it inside the group totals.
+4. **`VisibleGroupSubmissions` counts both passes.** It is incremented in the opaque loop and again in
+   the transparent loop, so the recorded 7512 is a submission count, not a distinct-group count. The
+   existing counter is left alone so the recorded capture stays comparable; the new counters are
+   pass-scoped and state which they are.
+
+### How to read the panel
+
+`MeanGroupsAdmittedPerPlacement` plus `MaxGroupsAdmittedInOnePlacement` and `WorstPlacementModelKey`
+separate "one enormous WMO" from "many ordinary WMOs" without a per-placement dump.
+`DominantGroupAdmissionRule` names the rule to act on. If `PortalFallbackEvaluations` is non-zero the
+panel shows the first fallback reason, which is the thing to fix before any admission logic changes:
+while a fallback fires, portal culling is not reducing anything.
+
+### Proof state
+
+Source proof and 11 focused core tests only. Full solution Debug build passes with 0 errors; the core
+suite failure set is byte-identical to the pre-change baseline (the same 9 unrelated failures) with
++11 passing. **Nothing here is measured** — the user-owned Stormwind capture is what turns these
+counters into a diagnosis, and no admission rule may change before it is read.
+
 ## Open Research Boundaries
 
 - The exact semantic of the native group flag tested by `StabPortals` remains inferred. The first

@@ -34,6 +34,27 @@ public static class WorldObjectVisibilityCollector
         Func<string, bool> isAssetReady,
         Action<string, float> queuePendingAsset)
     {
+        WmoAdmissionTally ignored = default;
+        return CollectVisibleWmos(frame, instances, context, shouldHideInstance, isBoundsVisible,
+            isAssetReady, queuePendingAsset, ref ignored);
+    }
+
+    /// <summary>
+    /// Collects visible WMO placements and records which rule admitted or rejected each one.
+    /// The admission decisions are identical to the overload without a tally; only the accounting
+    /// is added. Note that hidden and not-yet-resident placements are deliberately absent from the
+    /// returned cull count, which is why the tally counts them under their own rules.
+    /// </summary>
+    public static int CollectVisibleWmos(
+        WorldVisibilityFrame frame,
+        IReadOnlyList<WorldObjectInstance> instances,
+        WorldObjectVisibilityContext context,
+        Func<WorldObjectInstance, bool> shouldHideInstance,
+        Func<Vector3, Vector3, bool> isBoundsVisible,
+        Func<string, bool> isAssetReady,
+        Action<string, float> queuePendingAsset,
+        ref WmoAdmissionTally tally)
+    {
         int culledCount = 0;
         float wmoCullDistance = ComputeWmoCullDistance(context.FogEnd, context.ObjectStreamingRangeMultiplier);
 
@@ -41,7 +62,10 @@ public static class WorldObjectVisibilityCollector
         {
             WorldObjectInstance inst = instances[i];
             if (shouldHideInstance(inst))
+            {
+                tally.RecordPlacement(WmoPlacementAdmissionRule.RejectedHiddenByUniqueId);
                 continue;
+            }
 
             float boundsDistSq = DistanceSquaredPointToAabb(context.CameraPosition, inst.BoundsMin, inst.BoundsMax);
             float centerDistanceSq = Vector3.DistanceSquared(context.CameraPosition, inst.PlacementPosition);
@@ -64,18 +88,21 @@ public static class WorldObjectVisibilityCollector
                 && loadConeFactor < MinOffFrustumConeFactor)
             {
                 culledCount++;
+                tally.RecordPlacement(WmoPlacementAdmissionRule.RejectedOffFrustumAndCone);
                 continue;
             }
 
             if (!context.IgnoreDistanceCulling && boundsDistSq > coneCullDistanceSq)
             {
                 culledCount++;
+                tally.RecordPlacement(WmoPlacementAdmissionRule.RejectedDistance);
                 continue;
             }
 
             if (!context.IgnoreMaxViewDistanceCulling && centerDistanceSq > MaxWorldObjectViewDistanceSq)
             {
                 culledCount++;
+                tally.RecordPlacement(WmoPlacementAdmissionRule.RejectedMaxViewDistance);
                 continue;
             }
 
@@ -83,6 +110,7 @@ public static class WorldObjectVisibilityCollector
                 && ShouldCullByProjectedSize(context, projectedFraction, centerDistanceSq, isWmo: true))
             {
                 culledCount++;
+                tally.RecordPlacement(WmoPlacementAdmissionRule.RejectedProjectedSize);
                 continue;
             }
 
@@ -91,9 +119,11 @@ public static class WorldObjectVisibilityCollector
                 if (ShouldQueuePendingAsset(context, frustumVisible, loadConeFactor, projectedFraction, centerDistanceSq, isWmo: true))
                     queuePendingAsset(inst.ModelKey, ComputeLoadPriorityScore(centerDistanceSq, loadConeFactor));
 
+                tally.RecordPlacement(WmoPlacementAdmissionRule.RejectedAssetNotReady);
                 continue;
             }
 
+            tally.RecordPlacement(WmoPlacementAdmissionRule.Admitted);
             frame.VisibleWmos.Add(new WorldVisibleWmoEntry(inst, centerDistanceSq));
         }
 

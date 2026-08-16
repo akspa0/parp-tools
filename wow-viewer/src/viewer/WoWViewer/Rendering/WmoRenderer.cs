@@ -11,6 +11,7 @@ using Silk.NET.OpenGL;
 using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Runtime.World;
 using WowViewer.Core.Runtime.World.SceneGraph;
+using WowViewer.Core.Runtime.World.Visibility;
 using WowViewer.Core.Wmo;
 using WowViewer.Core.IO.Converters;
 
@@ -85,6 +86,8 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
     private readonly WmoPortalVisibilityPortal[] _portalVisibilityPortals;
     private readonly bool[] _runtimeVisibleGroups;
     private readonly bool[] _frustumVisibleScratch;
+    private readonly bool[] _portalVisibleScratch;
+    private WmoAdmissionTally _groupAdmission;
     private readonly HashSet<int> _runtimeVisibleDoodadDefIndices = new();
     private readonly HashSet<string> _updatedDoodadModelsScratch = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<(int idx, float distSq)> _visibleDoodadsScratch = new();
@@ -142,6 +145,13 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
     public int PendingMaterialTextureLoadCount => _pendingMaterialTextureLoads.Count;
     public WmoRenderStats LastRenderStats { get; private set; }
     public WmoPortalVisibilityDiagnostics LastPortalVisibilityDiagnostics { get; private set; } = new();
+
+    /// <summary>
+    /// Group admission accounting for the most recent submission, recording which rule admitted each
+    /// group rather than only how many were admitted. Spec 151 instrumentation; read it before
+    /// changing any admission rule.
+    /// </summary>
+    public WmoAdmissionTally LastGroupAdmission => _groupAdmission;
 
     /// <summary>
     /// Opaque WMO shells can be instanced when portal visibility cannot distinguish individual
@@ -203,6 +213,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
 
         _runtimeVisibleGroups = new bool[_wmo.Groups.Count];
         _frustumVisibleScratch = new bool[_wmo.Groups.Count];
+        _portalVisibleScratch = new bool[_wmo.Groups.Count];
 
         InitShaders();
         InitLiquidShader();
@@ -940,6 +951,25 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
 
         try
         {
+            // The instanced shell never consults runtime group visibility: every manually visible
+            // group is submitted once per instance. Recorded per instance so the counts line up
+            // with VisibleGroupSubmissions instead of quietly under-reporting by the batch factor.
+            for (uint instance = 0; instance < instanceCount; instance++)
+            {
+                int admittedInPlacement = 0;
+                foreach (GroupBuffers gb in _groups)
+                {
+                    bool admitted = gb.ManualVisible;
+                    _groupAdmission.RecordGroup(admitted
+                        ? WmoGroupAdmissionRule.GpuInstancedShell
+                        : WmoGroupAdmissionRule.None);
+                    if (admitted)
+                        admittedInPlacement++;
+                }
+
+                _groupAdmission.RecordGroupPlacementEvaluation(admittedInPlacement, _modelDir, null);
+            }
+
             foreach (GroupBuffers gb in _groups)
             {
                 if (!gb.ManualVisible)
@@ -1175,6 +1205,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
         _currentVisibleLiquidMeshes = 0;
         LastPortalVisibilityDiagnostics = new();
         LastRenderStats = default;
+        _groupAdmission.Reset();
     }
 
     private void ApplySurfaceCulling()
@@ -1643,7 +1674,9 @@ void main() {
     {
         Array.Clear(_runtimeVisibleGroups, 0, _runtimeVisibleGroups.Length);
         Array.Clear(_frustumVisibleScratch, 0, _frustumVisibleScratch.Length);
+        Array.Clear(_portalVisibleScratch, 0, _portalVisibleScratch.Length);
         _runtimeVisibleDoodadDefIndices.Clear();
+        _groupAdmission.Reset();
 
         if (_wmo.Groups.Count == 0)
             return;
@@ -1651,8 +1684,12 @@ void main() {
         if (!_enableRuntimeGroupVisibility)
         {
             for (int groupIndex = 0; groupIndex < _runtimeVisibleGroups.Length; groupIndex++)
+            {
                 _runtimeVisibleGroups[groupIndex] = true;
+                _groupAdmission.RecordGroup(WmoGroupAdmissionRule.RuntimeVisibilityDisabled);
+            }
 
+            _groupAdmission.RecordGroupPlacementEvaluation(_runtimeVisibleGroups.Length, _modelDir, null);
             ApplyRuntimeVisibilityToBuffers();
             CollectVisibleDoodadDefs();
             return;
@@ -1661,9 +1698,14 @@ void main() {
         if (!Matrix4x4.Invert(modelMatrix, out var inverseModel))
         {
             for (int i = 0; i < _runtimeVisibleGroups.Length; i++)
+            {
                 _runtimeVisibleGroups[i] = true;
+                _groupAdmission.RecordGroup(WmoGroupAdmissionRule.PlacementTransformInvalid);
+            }
 
             LastPortalVisibilityDiagnostics = WmoPortalVisibilityDiagnostics.CreateFallback("placement_transform_invalid");
+            _groupAdmission.RecordGroupPlacementEvaluation(
+                _runtimeVisibleGroups.Length, _modelDir, LastPortalVisibilityDiagnostics.FallbackReason);
             ApplyRuntimeVisibilityToBuffers();
             CollectVisibleDoodadDefs();
             return;
@@ -1694,7 +1736,10 @@ void main() {
         foreach (int groupIndex in decision.VisibleGroupIndices)
         {
             if ((uint)groupIndex < (uint)_runtimeVisibleGroups.Length)
+            {
                 _runtimeVisibleGroups[groupIndex] = true;
+                _portalVisibleScratch[groupIndex] = true;
+            }
         }
 
         // Portal traversal is a conservative optimization, never the final
@@ -1709,6 +1754,32 @@ void main() {
 
             _runtimeVisibleGroups[groupIndex] = true;
         }
+
+        // Accounting only — the decisions above are unchanged. A conservative fallback admits every
+        // group by construction, so it is recorded as its own rule instead of being credited to the
+        // portal walk that did not actually run.
+        bool portalFallback = decision.Diagnostics.Mode == WmoPortalVisibilityMode.ConservativeFallback;
+        int admittedInPlacement = 0;
+        for (int groupIndex = 0; groupIndex < _runtimeVisibleGroups.Length; groupIndex++)
+        {
+            bool byPortal = _portalVisibleScratch[groupIndex];
+            bool byFrustum = _frustumVisibleScratch[groupIndex];
+            WmoGroupAdmissionRule rule = (portalFallback && byPortal, byPortal, byFrustum) switch
+            {
+                (true, _, _) => WmoGroupAdmissionRule.PortalFallback,
+                (_, true, true) => WmoGroupAdmissionRule.PortalAndFrustum,
+                (_, true, false) => WmoGroupAdmissionRule.Portal,
+                (_, false, true) => WmoGroupAdmissionRule.Frustum,
+                _ => WmoGroupAdmissionRule.None,
+            };
+
+            _groupAdmission.RecordGroup(rule);
+            if (rule != WmoGroupAdmissionRule.None)
+                admittedInPlacement++;
+        }
+
+        _groupAdmission.RecordGroupPlacementEvaluation(
+            admittedInPlacement, _modelDir, portalFallback ? decision.Diagnostics.FallbackReason : null);
 
         ApplyRuntimeVisibilityToBuffers();
         CollectVisibleDoodadDefs();

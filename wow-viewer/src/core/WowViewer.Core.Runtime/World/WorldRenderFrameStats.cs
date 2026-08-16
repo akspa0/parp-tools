@@ -1,3 +1,5 @@
+using WowViewer.Core.Runtime.World.Visibility;
+
 namespace WowViewer.Core.Runtime.World;
 
 public readonly record struct WorldRenderStageStats(double DurationMs, int VisibleCount = 0, int SubmittedCount = 0);
@@ -45,6 +47,17 @@ public readonly record struct WorldRenderFrameStats(
 {
     public IReadOnlyList<WorldOverlayOwnerFrameStats> OverlayOwners { get; init; } =
         Array.Empty<WorldOverlayOwnerFrameStats>();
+
+    /// <summary>
+    /// Which rules admitted this frame's WMO placements and groups. Spec 151 instrumentation:
+    /// submission counts alone cannot say why a scene admitted the geometry it did.
+    /// </summary>
+    /// <remarks>
+    /// Left to the struct default rather than initialised from <see cref="WmoAdmissionStats.Empty"/>:
+    /// the frame history asserts allocation-free recording, and a static property initialiser puts a
+    /// lazy class-constructor check on a path that runs every frame.
+    /// </remarks>
+    public WmoAdmissionStats WmoAdmission { get; init; }
 
     public static WorldRenderFrameStats Empty { get; } = new(
         0,

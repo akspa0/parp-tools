@@ -3440,6 +3440,14 @@ public partial class ViewerApp
             ImGui.TreePop();
         }
 
+        // Spec 151. WmoSubmission is the measured owner of the remaining hitching, and submission
+        // counts alone cannot say why a scene admitted the geometry it did. This names the rule.
+        if (ImGui.TreeNode("WMO admission (this frame)###FrameHistoryWmoAdmission"))
+        {
+            DrawWmoAdmissionCounters(_worldScene.LastRenderFrameStats.WmoAdmission);
+            ImGui.TreePop();
+        }
+
         // Localise the unaccounted time to a region of Render(). Peaks are what matter: hitches are
         // transient, so a live reading will almost never land on the bad frame.
         // Default-open: when unaccounted dominates, this is the only node that says where.
@@ -3543,6 +3551,67 @@ public partial class ViewerApp
             }
             ImGui.TextDisabled($"Recorder overhead: {snapshot.RecorderOverheadMsPerFrame * 1000.0:0.00} us/frame");
             ImGui.TreePop();
+        }
+    }
+
+    /// <summary>
+    /// Spec 151 group-admission instrumentation. Reports which rule admitted or rejected WMO
+    /// placements and groups. This is diagnostic only; it changes no admission decision.
+    /// </summary>
+    private static void DrawWmoAdmissionCounters(WmoAdmissionStats admission)
+    {
+        ImGui.TextDisabled("Two layers: which placements entered the visible set, then which groups");
+        ImGui.TextDisabled("inside them were submitted and on whose authority.");
+        ImGui.Separator();
+
+        ImGui.Text($"Placements: considered {admission.PlacementsConsidered,6}  admitted {admission.PlacementsAdmitted,6}");
+        ImGui.Text($"  rejected  hidden {admission.PlacementsRejectedHidden,5}  off-frustum+cone {admission.PlacementsRejectedOffFrustumAndCone,5}"
+            + $"  distance {admission.PlacementsRejectedDistance,5}");
+        ImGui.Text($"            max-view {admission.PlacementsRejectedMaxViewDistance,5}  projected-size {admission.PlacementsRejectedProjectedSize,5}"
+            + $"  not-resident {admission.PlacementsRejectedAssetNotReady,5}");
+
+        ImGui.Separator();
+        ImGui.Text($"Groups: considered {admission.GroupsConsidered,6}  admitted {admission.GroupsAdmitted,6}  rejected {admission.GroupsRejected,6}");
+        ImGui.Text($"Placement evaluations: {admission.GroupPlacementEvaluations,5}"
+            + $"   mean admitted/placement {admission.MeanGroupsAdmittedPerPlacement,8:0.0}"
+            + $"   worst {admission.MaxGroupsAdmittedInOnePlacement,6}");
+        if (!string.IsNullOrEmpty(admission.WorstPlacementModelKey))
+            ImGui.TextDisabled($"  worst placement: {admission.WorstPlacementModelKey}");
+
+        ImGui.Separator();
+        ImGui.Text("Admitted by rule:");
+        DrawRule("runtime visibility disabled", admission.AdmittedByRuntimeVisibilityDisabled);
+        DrawRule("placement transform invalid", admission.AdmittedByPlacementTransformInvalid);
+        DrawRule("portal conservative fallback", admission.AdmittedByPortalFallback);
+        DrawRule("portal traversal only", admission.AdmittedByPortal);
+        DrawRule("frustum union only", admission.AdmittedByFrustum);
+        DrawRule("portal + frustum", admission.AdmittedByPortalAndFrustum);
+        DrawRule("gpu-instanced shell", admission.AdmittedByGpuInstancedShell);
+
+        if (admission.PortalFallbackEvaluations > 0)
+        {
+            ImGui.TextColored(new Vector4(1f, 0.55f, 0.2f, 1f),
+                $"Portal fallback fired on {admission.PortalFallbackEvaluations} of {admission.GroupPlacementEvaluations} evaluations"
+                + $" (first reason: {admission.FirstPortalFallbackReason ?? "unknown"})");
+            ImGui.TextWrapped(
+                "A conservative fallback admits every group in the placement. While it fires, portal "
+                + "culling is not reducing anything and the reason above is the thing to fix.");
+        }
+
+        if (admission.DominantGroupAdmissionRule == WmoGroupAdmissionRule.Frustum
+            || admission.DominantGroupAdmissionRule == WmoGroupAdmissionRule.PortalAndFrustum)
+        {
+            ImGui.TextColored(new Vector4(1f, 0.55f, 0.2f, 1f),
+                "Most groups are admitted by the post-portal frustum union, which never rejects.");
+        }
+
+        void DrawRule(string label, int count)
+        {
+            double share = admission.GroupsAdmitted == 0 ? 0d : 100.0 * count / admission.GroupsAdmitted;
+            if (count == 0)
+                ImGui.TextDisabled($"  {label,-30} {count,8}");
+            else
+                ImGui.Text($"  {label,-30} {count,8}   ({share:0.0}%)");
         }
     }
 

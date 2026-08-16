@@ -984,6 +984,12 @@ public class WorldScene : ISceneRenderer
         public int WmoDoodadSubmissionCount { get; set; }
         public int WmoVisibleGroupSubmissionCount { get; set; }
 
+        /// <summary>
+        /// Spec 151 admission accounting: which rule admitted each WMO placement and each group.
+        /// Accumulated across every placement and submission pass in the frame.
+        /// </summary>
+        public WmoAdmissionTally WmoAdmission;
+
         public double DeferredAssetLoadMs { get; set; }
         public double TaxiActorUpdateMs { get; set; }
         public double LightingMs { get; set; }
@@ -1023,6 +1029,7 @@ public class WorldScene : ISceneRenderer
             WmoLiquidDrawCallCount = 0;
             WmoDoodadSubmissionCount = 0;
             WmoVisibleGroupSubmissionCount = 0;
+            WmoAdmission.Reset();
             DeferredAssetLoadMs = 0;
             TaxiActorUpdateMs = 0;
             LightingMs = 0;
@@ -1130,6 +1137,7 @@ public class WorldScene : ISceneRenderer
                 new WorldRenderStageStats(PrepareObjectPhaseMs))
             {
                 OverlayOwners = OverlayOwners.ToArray(),
+                WmoAdmission = WmoAdmission.ToStats(),
             };
         }
     }
@@ -8795,7 +8803,7 @@ public class WorldScene : ISceneRenderer
         return ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
     }
 
-    private static void AccumulateWmoRenderStats(WorldRenderFrame frame, WmoRenderStats stats)
+    private static void AccumulateWmoRenderStats(WorldRenderFrame frame, WmoRenderStats stats, in WmoAdmissionTally admission)
     {
         frame.WmoDrawCallCount += stats.DrawCalls;
         frame.WmoBatchDrawCallCount += stats.BatchDrawCalls;
@@ -8804,6 +8812,7 @@ public class WorldScene : ISceneRenderer
         frame.WmoLiquidDrawCallCount += stats.LiquidDrawCalls;
         frame.WmoDoodadSubmissionCount += stats.DoodadSubmissions;
         frame.WmoVisibleGroupSubmissionCount += stats.VisibleGroupSubmissions;
+        frame.WmoAdmission.Add(admission);
     }
 
     private void TrackPendingVisibleLoad(Dictionary<string, float> pendingLoads, string modelKey, float distanceSq)
@@ -10053,7 +10062,8 @@ public class WorldScene : ISceneRenderer
                 inst => ShouldHideObjectInstanceByUniqueId(inst),
                 (min, max) => _frustumCuller.TestAABB(min, max),
                 modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
-                (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore));
+                (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore),
+                ref frame.WmoAdmission);
             return;
         }
 
@@ -10093,7 +10103,8 @@ public class WorldScene : ISceneRenderer
                     inst => ShouldHideObjectInstanceByUniqueId(inst),
                     (min, max) => _frustumCuller.TestAABB(min, max),
                     modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
-                    (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore));
+                    (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore),
+                    ref frame.WmoAdmission);
                 continue;
             }
 
@@ -10112,7 +10123,8 @@ public class WorldScene : ISceneRenderer
                     inst => ShouldHideObjectInstanceByUniqueId(inst),
                     (min, max) => _frustumCuller.TestAABB(min, max),
                     modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
-                    (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore));
+                    (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore),
+                    ref frame.WmoAdmission);
             }
         }
 
@@ -10125,7 +10137,8 @@ public class WorldScene : ISceneRenderer
                 inst => ShouldHideObjectInstanceByUniqueId(inst),
                 (min, max) => _frustumCuller.TestAABB(min, max),
                 modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
-                (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore));
+                (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore),
+                ref frame.WmoAdmission);
         }
     }
 
@@ -10749,7 +10762,7 @@ public class WorldScene : ISceneRenderer
                             renderer.RenderWithTransform(visible.Instance.Transform, view, proj, WmoRenderPass.Opaque,
                                 fogColor, objectFogStart, objectFogEnd, cameraPos,
                                 lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-                            AccumulateWmoRenderStats(frame, renderer.LastRenderStats);
+                            AccumulateWmoRenderStats(frame, renderer.LastRenderStats, renderer.LastGroupAdmission);
                         }
 
                         foreach (WorldObjectPassCoordinator.WorldWmoOpaqueBatch batch in wmoBatchPlan.Batches)
@@ -10795,7 +10808,7 @@ public class WorldScene : ISceneRenderer
                                     });
                             }
 
-                            AccumulateWmoRenderStats(frame, gpuRenderer.LastRenderStats);
+                            AccumulateWmoRenderStats(frame, gpuRenderer.LastRenderStats, gpuRenderer.LastGroupAdmission);
                         }
 
                         foreach (WmoOpaqueDoodadBatchItem item in wmoDoodadUnbatched)
@@ -11010,7 +11023,7 @@ public class WorldScene : ISceneRenderer
                                         lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
                                 });
                                 frame.WmoTransparentSubmissionMs += wmoTransparentMs;
-                                AccumulateWmoRenderStats(frame, renderer.LastRenderStats);
+                                AccumulateWmoRenderStats(frame, renderer.LastRenderStats, renderer.LastGroupAdmission);
                                 continue;
                             }
 
