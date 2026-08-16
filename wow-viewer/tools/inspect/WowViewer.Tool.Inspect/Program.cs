@@ -50,6 +50,9 @@ switch (area)
 	case "assets":
 		WowViewer.Tool.Inspect.AssetReferenceCommandSupport.Run(tail);
 		break;
+	case "wtf":
+		WowViewer.Tool.Inspect.WtfCommandSupport.Run(tail);
+		break;
 	case "audio":
 		RunAudio(tail);
 		break;
