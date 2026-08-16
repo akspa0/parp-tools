@@ -2,6 +2,47 @@
 
 Last updated: 2026-08-15
 
+## 2026-08-15 — v0.5.2.1 released; renderer owner moves to WMO group admission
+
+- **Shipped v0.5.2.1** (commit `975d0c79`, tag `v0.5.2.1`, branch `v0.5.3-dev`, release workflow
+  green with all four self-contained builds attached). Out-of-band patch because v0.5.2 shipped with
+  known, unresolved frame-pacing jank. Added `wow-viewer/CHANGELOG.md` and
+  `docs/releases/v0.5.2.1.md`; bumped both csproj files and `ViewerApp.ViewerProductName`; updated
+  both READMEs. The unfixed Stormwind WMO problem is documented as a **known issue** with real
+  numbers rather than left for users to discover.
+- **Phase 2 — the periodic stall was named by capture, then fixed.** `PrepareObjectPhase` peak
+  283.47 ms of which `AudioRuntime.Update` was **283.46 ms** (PM4 overlay 0.12, remainder ~0), so no
+  subdivision was needed. The cost was not audio: `RefreshEmitterDiagnosticsIfDue` rebuilt an
+  `AudioTriggerDiagnostic` per resident emitter (5565) on a **wall-clock 250 ms** timer on the render
+  thread — explaining why the "every 47–50 frames" interval drifted with framerate — and it ran
+  whether or not anything displayed the result. A second, movement-triggered copy: `RemoveTile`
+  rebuilt the list synchronously on streaming eviction. Gated the rebuild on
+  `NoteEmitterDiagnosticsObserved()`; eviction now invalidates only.
+- **Audio scoped to the camera tile.** `WorldAudioRuntime.Update` consulted no tile information at
+  all and scanned every resident tile. It now takes `TerrainManager.CameraTileX/Y` (passed in, never
+  re-derived) within `AudibleTileRadius`. Tile keying was investigated and **cleared** as a cause.
+- **MCSE coordinate frame: measured, not guessed.** MCSE emitters read as permanently out of range
+  while water-derived ones work. `ConvertSoundPosition` does `chunkCorner - local` on an unevidenced
+  comment; the Ghidra work proved the 0x34 field layout, not the frame. Added `McseFrameEvidence`
+  (raw min/max per axis, chunk/tile/beyond counts, explicit "inconclusive" verdict on a mixed sample)
+  rather than switching frames on a hunch. Still open.
+- **Confirmed by the Stranglethorn capture:** unaccounted median 0.05 / p99 0.16 ms and pass gap
+  259–314 → 9.45 ms (Phase 1); **526 batched / 3 unbatched** from 0/312 with `MdxOpaqueSubmission`
+  p99 30.75 → 14.12 ms (Phase 3). SC-002/003/006 met. Frame p99 barely moved (259.70 → 246.62), so
+  Phase 3 was explicitly **not** credited with fixing the gallop.
+- **Confirmed by the Stormwind capture (2048 frames):** `PrepareObjectPhase` max **283.4 → 2.5 ms**
+  and gone from the hitch list; `SceneMaintenance` max **454.5 → 3.9 ms**; unaccounted median 0.02 /
+  p99 0.11 ms; median frame 17.40 → 6.98 ms.
+- **New measured owner: `WmoSubmission`** — p99 154.10 / max 161.3 ms against a 0.71 ms median, and
+  **all 592 recent hitches** attribute to it at 153–157 ms. Stormwind submits **all districts at
+  once**: 7512 visible groups, 80484 draw calls, 15852 doodad submissions. **An admission problem,
+  not batching** — 80200 of 80484 calls are correctly batched. Belongs to Spec 151; first step is to
+  instrument group admission (considered / admitted / rejected + which rule) before changing logic.
+- **Spec 153 Phase 4 is likely moot** — written against `SceneMaintenance` max 454.8 ms, which no
+  longer reproduces. Re-measure before implementing. **Phase 5 step 2 still owed:**
+  `DeferredAssetLoads` max 442.9 ms in Stormwind against a 3.5 ms budget; the admission policy
+  bounded the additive overshoot but the single-load residual needs decode off the render thread.
+
 ## 2026-08-15 — Spec 153 Phases 1/3/5 implemented (source proof only, nothing measured)
 
 - **Phase 1 (FR-001, SC-006).** `PrepareObjectPhase` now has a stage timer and appears in the stage
