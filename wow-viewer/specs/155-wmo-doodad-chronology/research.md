@@ -44,7 +44,62 @@ thing this plan refuses to do.
 the same error shape as a documented tool that did not exist and a corpus reported as 1 of 532. The
 contracts make it structurally unrepresentable rather than relying on discipline.
 
-## 4. Scale of the missing-asset population — UNKNOWN, and this is the point
+## 4. Scale of the missing-asset population — MEASURED (2026-08-16)
+
+First full sweep, `0.5.3.3368`, via `assets sweep`:
+
+| | |
+|---|---|
+| World objects examined | 492 |
+| Models examined | 5,545 |
+| References collected | 22,025 |
+| Resolved via extension substitution | 1,433 |
+| Unresolved references | 4 |
+| **Distinct missing assets** | **3** |
+| Referencing assets unreadable | 1 |
+| Report complete | **false** |
+
+### The three missing assets
+
+| Asset | Referenced by |
+|---|---|
+| `DUNGEONS\TEXTURES\LAVA\BURNINGSTEPPSLAVA02.BLP` | `World\wmo\Blackrock.wmo` |
+| `ITEM\GROUNDOBJECTS\GOAXE01.MDX` | `World\wmo\OrcBarracks.wmo` |
+| `WORLD\...\TROLLRUINSBASINWALL02\TROLLRUINSBASINWALL02.MDL` | world object doodad reference |
+
+The first is a **missing lava texture** in Blackrock — the same class as the Mt. Hyjal effect objects,
+found without being looked for.
+
+### Extension substitution: the false positive that would have buried them
+
+**Decision**: Resolution attempts the shipped compiled extension when an authored source extension does
+not resolve, and records the substitution rather than hiding it.
+
+**Rationale**: The first sweep reported **366** distinct missing assets. 364 were `.MDL` references —
+and 363 of those have a `.MDX` present in the same build. Authored references name the source format;
+the client loads the compiled one. Reporting them as missing would have produced a 366-entry list in
+which the 3 real findings were 0.8% of the noise. After accounting for substitution the count is 3, and
+1,433 references are reported as substitution-resolved, which is itself a fact about how the data was
+authored.
+
+**Alternatives considered**: Treating every unresolved reference as missing. Rejected by the data
+above. Silently resolving substitutions without recording them was also rejected — the substitution
+count is a finding, not an implementation detail.
+
+### One unreadable asset
+
+`World\wmo\OilPlatform.wmo` fails with a chunk overrun at offset 10592. Its references are therefore
+**unknown, not absent**, and the report is marked incomplete because of it. This is a reader defect
+worth its own investigation; it is recorded rather than swallowed.
+
+### Corpus count note
+
+The sweep examined **492** world objects where the loose tree holds 532 per-asset containers. The
+difference is not yet explained and must be before SC-002 is claimed — the containers may include
+non-world-object assets, or enumeration may be dropping some. **Do not treat 492 as confirming the
+corpus is fully enumerated.**
+
+## 5. Why a full sweep, not a hunt for known instances
 
 Nobody knows how many references in any build resolve to nothing. The Mt. Hyjal effect objects are one
 instance that became famous because a person happened to walk past it; that is not a sampling method,

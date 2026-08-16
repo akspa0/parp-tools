@@ -47,6 +47,9 @@ switch (area)
 	case "archive":
 		RunArchive(tail);
 		break;
+	case "assets":
+		WowViewer.Tool.Inspect.AssetReferenceCommandSupport.Run(tail);
+		break;
 	case "audio":
 		RunAudio(tail);
 		break;
