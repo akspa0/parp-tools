@@ -7,6 +7,7 @@ using WoWViewer.Rendering;
 using Silk.NET.OpenGL;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.Runtime.M2;
+using WowViewer.Core.Runtime.World;
 using WowViewer.Core.IO.Converters;
 using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.IO.M2Era1121;
@@ -642,6 +643,12 @@ public class WorldAssetManager : IDisposable
             _priorityWmoLoads.Enqueue(normalizedKey);
     }
 
+    /// <summary>
+    /// Cost-aware admission for deferred loads (Spec 153 FR-008). Public so diagnostics can read the
+    /// deferral and oversized-admission counts — the fix has to be observable to be believed.
+    /// </summary>
+    public DeferredLoadBudget LoadBudget { get; } = new();
+
     public int ProcessPendingLoads(int maxLoads = 2, double maxBudgetMs = 6.0)
     {
         if (maxLoads <= 0 || maxBudgetMs <= 0)
@@ -650,7 +657,15 @@ public class WorldAssetManager : IDisposable
         var stopwatch = Stopwatch.StartNew();
         int loadsCompleted = 0;
 
-        while (loadsCompleted < maxLoads && stopwatch.Elapsed.TotalMilliseconds < maxBudgetMs)
+        // Loads actually performed, as distinct from queue entries discarded as already-cached. A
+        // frame that has only skipped cache hits has paid nothing and still has its whole budget.
+        int loadsStarted = 0;
+
+        // The budget is now consulted *before* starting each load rather than only between them.
+        // The old `elapsed < budget` condition would happily begin a 55 ms load with 0.1 ms of
+        // budget left, which is how a 3.5 ms budget produced a 58.1 ms stage.
+        while (loadsCompleted < maxLoads
+            && LoadBudget.CanStartAnotherLoad(stopwatch.Elapsed.TotalMilliseconds, maxBudgetMs, loadsStarted))
         {
             if (!TryDequeuePendingLoad(out bool isMdx, out string? key) || string.IsNullOrWhiteSpace(key))
                 break;
@@ -666,6 +681,7 @@ public class WorldAssetManager : IDisposable
                     continue;
                 }
 
+                double loadStartedMs = stopwatch.Elapsed.TotalMilliseconds;
                 var renderer = LoadMdxModel(key);
                 _mdxModels[key] = renderer;
                 ApplyObjectWireframePreference(renderer);
@@ -674,11 +690,14 @@ public class WorldAssetManager : IDisposable
                     TouchLru(_mdxLru, _mdxLruMap, key);
                 }
                 EvictMdxIfNeeded();
+                LoadBudget.RecordLoad(DeferredLoadKind.Mdx, stopwatch.Elapsed.TotalMilliseconds - loadStartedMs);
+                loadsStarted++;
             }
             else
             {
                 if (!_wmoModels.TryGetValue(key, out var cachedRenderer))
                 {
+                    double loadStartedMs = stopwatch.Elapsed.TotalMilliseconds;
                     var renderer = LoadWmoModel(key);
                     _wmoModels[key] = renderer;
                     ApplyObjectWireframePreference(renderer);
@@ -687,6 +706,8 @@ public class WorldAssetManager : IDisposable
                         TouchLru(_wmoLru, _wmoLruMap, key);
                     }
                     EvictWmoIfNeeded();
+                    LoadBudget.RecordLoad(DeferredLoadKind.Wmo, stopwatch.Elapsed.TotalMilliseconds - loadStartedMs);
+                    loadsStarted++;
                 }
             }
 

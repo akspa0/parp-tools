@@ -7,19 +7,71 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-**START HERE: Spec 153 — the renderer gallop is diagnosed with measurements. Fix it.**
+**START HERE: Spec 153 — the stall is NAMED and Phase 2 is written. Re-capture Stranglethorn to confirm.**
 
-- **Next implementation target:** [Spec 153](../specs/153-renderer-hitch-and-batching/spec.md)
-  Phase 0 — fly Stranglethorn Vale and read Utilities > Perf > Frame history >
-  *Unaccounted breakdown*. The sub-probes for `AudioRuntime.Update` and
-  `EnsurePm4OverlayMatchesCameraWindow` are landed but **never captured**, so the ~212 ms periodic
-  stall is localised to the `PrepareObjectPhase` pass but not yet named to a call. If neither probe
-  matches the hitch magnitude, subdivide further — do **not** guess a fix.
-- **Can start immediately in parallel (all independent):** Spec 153 Phase 1 (give
-  `PrepareObjectPhase` a stage timer — it is the only one of eleven passes without one, which is why
-  a 200 ms stall hid for the entire investigation; add a test asserting passes == timers), Phase 3
-  (restore MDX batching — the largest dense-scene win), Phase 5 (enforce the deferred load budget),
-  and Spec 152 Phase 6 (per-era terrain lighting, fixes 1.0.0+ darkness).
+- **Defect A is `AudioRuntime.Update`, and it was never audio.** Captured 2026-08-15 in Stranglethorn:
+  `PrepareObjectPhase` peak 283.47 ms of which `AudioRuntime.Update` was **283.46 ms**; PM4 overlay
+  window 0.12 ms; unprobed remainder ~0. The cost is `RefreshEmitterDiagnosticsIfDue` rebuilding an
+  `AudioTriggerDiagnostic` per resident emitter (5565 of them) four times a second on the render
+  thread — a wall-clock 250 ms period, which is why the frame interval drifted with framerate.
+  **It is a diagnostics surface, and it ran whether or not anything displayed it.** A second,
+  movement-triggered copy: `RemoveTile` rebuilt the whole list *synchronously* on streaming eviction.
+- **Next action is a re-capture, not more code.** Both stalls are fixed (Phase 2 below) but
+  **unmeasured**. Re-capture checklist is in
+  [Spec 153 research.md](../specs/153-renderer-hitch-and-batching/research.md): with the audio panel
+  closed, `PrepareObjectPhase` max should collapse from 283.4 to ~0 and p99 from 221.59 to ~0; the
+  "Recent hitches" list should stop reading `<- PrepareObjectPhase`; cross tile boundaries
+  deliberately because the `RemoveTile` stall was movement-triggered; and confirm Utilities > Audio
+  still populates. SC-001 needs the periodic pattern *absent*, not smaller.
+- **Landed this session (source proof only, no measurement):**
+  - *Phase 1 (FR-001, SC-006)* — `PrepareObjectPhase` now has a stage timer and appears in the stage
+    table; its cost is out of the unaccounted pass gap. `WorldFramePassInstrumentation` declares
+    pass → stage ownership and a reflection test fails the build if any pass has no timer, any stage
+    is unowned, or a stage is double-counted. `StageCount` 18 → 19.
+  - *Phase 3 (FR-004/005/006)* — the MDX batching cause was **not** a capability gap: the planner
+    predicate in `PlanVisibleMdxPasses` was a literal `return true`, routing 100% unbatched by
+    construction. It now consumes `IModelRenderer.RequiresUnbatchedWorldRender`, the same contract
+    the WMO doodad path already used. GPU instancing stays off (`SupportsGpuInstancedOpaque` is
+    still `false`); the win is begin-once/submit-many state. `_wireframe` was added to
+    `RequiresUnbatchedWorldRender` — it was the one genuine visual divergence between the batched and
+    unbatched paths. Revertible live via `WorldScene.MdxOpaqueBatchingEnabled`.
+  - *Phase 5 (FR-008)* — `DeferredLoadBudget` (core, pure, 9 tests) learns per-kind load cost and is
+    consulted **before** each load instead of only between them. **Partial by design:** it removes
+    the additive overshoot but a single synchronous load bigger than the whole budget still costs
+    what it costs, counted as `OversizedAdmissionCount`. SC-005 is not claimed; closing it needs
+    decode off the render thread (plan Phase 5 step 2).
+  - *Phase 2 (FR-003, SC-001) — written after the capture named its target, unmeasured.* The
+    diagnostics rebuild is now gated on `NoteEmitterDiagnosticsObserved()`, which only the audio
+    panel calls, so `Update` does no diagnostics work when nothing displays it; and the eager
+    synchronous rebuild in `RemoveTile` is removed (invalidate alone is sufficient). Audio playback
+    never reads that list, so gating it cannot change what is audible. Deliberately **not** done:
+    making `BuildEmitterDiagnostic` cheaper — with the gate in place that cost is only paid by
+    someone who opened the panel, and it is a separate change with its own before/after.
+- **Confirmed by the same capture:** Phase 1 works (unaccounted median 0.05 / p99 0.16 ms; pass gap
+  peak 259–314 → 9.45 ms; hitches now name a stage). Phase 3 works (**526 batched / 3 unbatched**,
+  from 0/312; `MdxOpaqueSubmission` p99 30.75 → 14.12 ms, median 2.03 → 0.01). **SC-002/003/006 met.**
+- **Do not credit Phase 3 with fixing the gallop.** Frame p99 barely moved (259.70 → 246.62) because
+  the periodic stall was never the MDX cost — the exact confusion the plan's risk table warned about.
+- **Audio emitters: scoped to the camera tile; the MCSE coordinate frame is now MEASURED, not fixed.**
+  User report: only water-triggered emitters behave, every MCSE emitter reads out of range wherever
+  the camera goes. `Update` consulted **no tile information at all** — it scanned every resident tile.
+  It now takes `TerrainManager.CameraTileX/Y` (passed in, never re-derived) and considers only tiles
+  within `WorldAudioRuntime.AudibleTileRadius` (1); the diagnostics panel uses the same window.
+  **Tile keying was checked and cleared** — `AddTile`/`RemoveTile`/`EmitterKey` all agree with
+  `OnTileLoaded`; scanning every tile just made it look like a keying fault.
+  **The out-of-range cause is NOT settled.** `AlphaTerrainAdapter.ConvertSoundPosition` does
+  `chunkCorner - local` on the strength of an unevidenced comment ("Alpha MCSE stores a chunk-local
+  C3Vector"); the Ghidra work proved the 0x34 *field layout*, not the frame. If it is not chunk-local,
+  every MCSE emitter lands tens of thousands of units off-map — which also explains why MCNK liquid
+  rows work, since they derive from the renderer's own `chunk.WorldPosition`. New `McseFrameEvidence`
+  reports raw min/max per axis and chunk/tile/beyond counts with an explicit verdict at the top of
+  Utilities > Audio. **Read that line before touching the transform**; it says "inconclusive" rather
+  than picking a winner on a mixed sample. No viewer test assembly exists, so this is source proof only.
+- **Named remaining owners of movement jank, in measured priority order:** (1) re-capture Phase 2;
+  (2) **Phase 4 — `SceneMaintenance` max 454.5 ms**, now the largest single stage observation, gate
+  is open; (3) **Phase 5 step 2 — decode off the render thread**, since `DeferredAssetLoads` p99
+  14.31 / max 103.1 ms against a 3.5 ms budget proves admission policy alone cannot meet SC-005.
+  Spec 152 Phase 6 (per-era terrain lighting, fixes 1.0.0+ darkness) remains independent, not started.
 - **The measurement tool exists and works.** Utilities > Perf > Frame history: rolling per-frame
   history, hitch detection with dominant-cause attribution, unaccounted time, region peaks,
   submission batching counts, and an injected-stall self-check. Recording is allocation-free.
@@ -109,7 +161,7 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 | Spec | State | Next handoff |
 |---|---|---|
-| **153 Renderer hitch and MDX batching** | **Diagnosis complete with measurements; no fix started** | **Phase 0: capture Stranglethorn sub-probes to name the ~212 ms stall. Phases 1/3/5 independent, start any time.** |
+| **153 Renderer hitch and MDX batching** | **Phases 1/3/5 implemented, source-proven, UNMEASURED; Phases 0/2/4 open** | **Run the Stranglethorn capture protocol in `research.md`: name the ~212 ms stall, and take the MDX-batching before/after. No fix may be credited before it.** |
 | 152 Renderer frame-time stability / per-era lighting | Detector landed and used; its Phase 1 gate refuted the allocation hypothesis so Phases 3–5 are suspended | Owns the measurement infrastructure (done) and Phase 6 per-era terrain lighting (independent, not started, fixes 1.0.0+ darkness). |
 | 151 Portal-aware rendering/game mode/simple surface | Phase 1 portal checkpoint implemented; Phase 2 open | Add pure game-mode state/physics and character-head anchor; preserve editor camera state and stop at the focused physics checkpoint. |
 | 104 Legacy M2/MDX rendering | 1.0.0 route complete; MDX material/effect shader checkpoint implemented with visual proof open | Validate shader compilation and translucent/reflective models against the configured client/build; keep full BLS parity separate. |

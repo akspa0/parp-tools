@@ -134,7 +134,7 @@ public partial class ViewerApp : IDisposable
         public Vector3 EditedPosition { get; set; }
     }
 
-    private const string ViewerProductName = "WoWViewer v0.5.2";
+    private const string ViewerProductName = "WoWViewer v0.5.2.1";
     private const string ViewerAboutPopupTitle = "About WoWViewer";
     private static readonly MethodInfo? ImGuiControllerWindowResizedMethod =
         typeof(ImGuiController).GetMethod("WindowResized", BindingFlags.Instance | BindingFlags.NonPublic);

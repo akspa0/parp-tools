@@ -4,7 +4,8 @@
 
 **Created**: 2026-08-15
 
-**Status**: Draft — diagnosis complete, fixes not started
+**Status**: Phases 1, 3 and 5 implemented (source-proven, unmeasured). Phase 0 capture open; Phases 2
+and 4 gated behind it. See [research.md](research.md) for what landed and the capture protocol.
 
 **Input**: Spec 152 built the detector and used it. This spec owns the defects the detector found.
 

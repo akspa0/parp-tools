@@ -1,4 +1,4 @@
-# WoWViewer v0.5.2
+# WoWViewer v0.5.2.1
 
 The active viewer, format-tool, and data-harvester project inside `parp-tools`.
 It is a .NET 10 desktop viewer for inspecting staged World of Warcraft client data,
@@ -6,8 +6,20 @@ terrain, WMO/M2/MDX placements, minimap inputs, and capture paths.
 
 ## Current release truth
 
-v0.5.2 is the current application release line. The About box, Windows build,
-cross-platform build, and shared project identity report `0.5.2`.
+v0.5.2.1 is the current application release line. The About box, Windows build,
+cross-platform build, and shared project identity report `0.5.2.1`.
+
+**v0.5.2.1 is an out-of-band patch for frame pacing.** v0.5.2 shipped with a known,
+unresolved rendering jank: periodic hitches and jagged frame pacing while moving. The
+cause turned out to be an audio *diagnostics* rebuild running on the render thread four
+times a second whether or not anything displayed it, plus opaque MDX drawing one call per
+instance because a route planner returned a hardcoded `true`. Both are fixed. See
+[docs/releases/v0.5.2.1.md](docs/releases/v0.5.2.1.md) for the measurements.
+
+**Known issue:** dense WMO interiors are still slow. Stormwind submits all districts at
+once (7,512 visible groups, 80,484 draw calls) rather than the district the camera is in.
+That is a WMO group *admission* problem, it is **not fixed in this release**, and it is
+the next thing being worked on.
 
 The viewer is functional but not feature-complete across every client era. Runtime
 claims below distinguish implemented routes from visual/client proof that is still
@@ -21,8 +33,8 @@ attached to each tagged release on the
 required. Native file dialogs are Windows-only — on Linux and macOS, load content
 with `--game-path`, `--build`, and `--world`.
 
-See [docs/releases/v0.5.2.md](docs/releases/v0.5.2.md) for what changed in this
-release.
+See [docs/releases/v0.5.2.1.md](docs/releases/v0.5.2.1.md) for what changed in this
+release, and [docs/releases/v0.5.2.md](docs/releases/v0.5.2.md) for the v0.5.2 line.
 
 ## Current viewer surfaces
 
@@ -132,7 +144,9 @@ configured `--game-path`, `--build`, and `--world` arguments.
 
 ## Documentation
 
-- [Release notes](docs/releases/v0.5.2.md)
+- [Changelog](CHANGELOG.md)
+- [Release notes — v0.5.2.1 (current)](docs/releases/v0.5.2.1.md)
+- [Release notes — v0.5.2](docs/releases/v0.5.2.md)
 - [Viewer user guide](docs/WoWViewer/USERGUIDE.md)
 - [CLI tools](docs/CLI-TOOLS.md)
 - [Alpha audio catalog: what it is and how to inspect it](docs/architecture/alpha-audio-catalog.md)

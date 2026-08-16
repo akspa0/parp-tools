@@ -44,9 +44,18 @@ exposed both defects where Un'goro did not.
 
 ---
 
+## Status (2026-08-15)
+
+Phases 1, 3 and 5 are implemented and source-proven; none is measured. Phase 0 is open and user-run —
+its capture protocol and a results table live in [research.md](research.md). Phases 2 and 4 remain
+gated exactly as sequenced below.
+
+---
+
 ## Phase 0 — Name the periodic stall
 
-**Gate to enter**: none. Sub-probes are already landed and unread.
+**Gate to enter**: none. Sub-probes are already landed and unread. A fourth row —
+`other (unprobed remainder)` — was added by Phase 1, which is what decides acceptance scenario 2.
 
 **Work**
 

@@ -27,9 +27,31 @@ public sealed class WorldAudioRuntime : IDisposable
     private readonly HashSet<string> _diagnosticKeys = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<TerrainSoundEmitter> _residentEmitterSnapshot = Array.Empty<TerrainSoundEmitter>();
     private IReadOnlyList<AudioTriggerDiagnostic> _emitterDiagnostics = Array.Empty<AudioTriggerDiagnostic>();
+    private McseFrameEvidence _mcseFrameEvidence = McseFrameEvidence.Empty;
     private long _nextDiagnosticRefreshTimestamp;
+    private long _diagnosticsObservedUntilTimestamp;
+    private int _listenerTileX = -1;
+    private int _listenerTileY = -1;
+
+    /// <summary>
+    /// Tiles either side of the listener's own tile that may still contribute audible emitters.
+    /// <para>
+    /// Only audio near the camera matters, so scanning every resident tile (33 tiles / 5565 emitters
+    /// in Stranglethorn) was pure cost. A radius of 1 keeps the listener's tile plus its ring, which
+    /// is what an emitter cutoff can reach across a 533-unit tile edge; set it to 0 for a strict
+    /// current-tile-only scope, at the cost of audio popping at tile boundaries.
+    /// </para>
+    /// </summary>
+    public const int AudibleTileRadius = 1;
 
     private static long DiagnosticRefreshIntervalTicks => Math.Max(1L, Stopwatch.Frequency / 4L);
+
+    /// <summary>
+    /// How long an observation keeps the periodic diagnostics refresh alive. Longer than a UI frame
+    /// so a momentary hitch does not stop refreshing the panel someone is reading, short enough that
+    /// closing it stops the work almost immediately.
+    /// </summary>
+    private static long DiagnosticsObservationWindowTicks => Math.Max(1L, Stopwatch.Frequency);
 
     private AudioContext? _context;
     private AL? _al;
@@ -83,6 +105,43 @@ public sealed class WorldAudioRuntime : IDisposable
     public int ActiveEmitterCount => _active.Count;
 
     public IReadOnlyList<AudioTriggerDiagnostic> EmitterDiagnostics => _emitterDiagnostics;
+
+    /// <summary>
+    /// What frame the resident MCSE positions are actually in, measured rather than assumed. Read
+    /// this before changing <c>ConvertSoundPosition</c>.
+    /// </summary>
+    public McseFrameEvidence McseFrame => _mcseFrameEvidence;
+
+    /// <summary>
+    /// Signals that a surface is currently displaying <see cref="EmitterDiagnostics"/>, and brings
+    /// the list up to date if it is stale.
+    /// <para>
+    /// Spec 153 Defect A. Rebuilding the diagnostics enumerates every resident emitter and builds a
+    /// record per emitter — measured at a 283 ms peak with 5565 residents, four times a second, on
+    /// the render thread, <em>whether or not anything was reading the result</em>. It was the
+    /// dominant cause of the periodic stall: <c>PrepareObjectPhase</c> peaked at 283.47 ms of which
+    /// <c>AudioRuntime.Update</c> was 283.46 ms.
+    /// </para>
+    /// <para>
+    /// Consumers call this each time they render. The periodic refresh then runs only inside that
+    /// observation window, which keeps camera-relative fields (distance, in-range) live for a viewer
+    /// who is actually looking, and costs nothing for one who is not. Audio playback does not read
+    /// this list, so gating it cannot affect what is audible.
+    /// </para>
+    /// </summary>
+    public void NoteEmitterDiagnosticsObserved()
+    {
+        if (_disposed)
+            return;
+
+        Interlocked.Exchange(
+            ref _diagnosticsObservedUntilTimestamp,
+            Stopwatch.GetTimestamp() + DiagnosticsObservationWindowTicks);
+
+        // Refresh here rather than waiting for the next frame, so opening the panel never shows a
+        // list left stale by a tile eviction that happened while nobody was watching.
+        RefreshEmitterDiagnosticsIfDue();
+    }
 
     public int ResolvedSoundEntryCount => _soundEntries?.Entries.Count ?? 0;
 
@@ -327,8 +386,13 @@ public sealed class WorldAudioRuntime : IDisposable
         foreach (EmitterKey key in _active.Keys.Where(key => key.TileX == tileX && key.TileY == tileY).ToArray())
             StopEmitter(key);
         _heardInRange.RemoveWhere(key => key.TileX == tileX && key.TileY == tileY);
+
+        // Invalidate only. Rebuilding here walked every remaining resident emitter synchronously,
+        // and RemoveTile fires on streaming eviction — so this was a stall triggered by crossing a
+        // tile boundary, which is precisely when the renderer could least afford it. Marking the
+        // list stale is sufficient: any consumer refreshes it on read, and audio playback does not
+        // read it at all (Spec 153 Defect A / US2 scenario 3).
         InvalidateEmitterDiagnostics();
-        RefreshEmitterDiagnostics();
     }
 
     public void Update(
@@ -337,12 +401,16 @@ public sealed class WorldAudioRuntime : IDisposable
         int areaId = 0,
         float gameTime = 0.5f,
         int continentId = -1,
-        AreaLookupResult? areaLookup = null)
+        AreaLookupResult? areaLookup = null,
+        int listenerTileX = -1,
+        int listenerTileY = -1)
     {
         if (_disposed)
             return;
 
         _listenerPosition = listenerPosition;
+        _listenerTileX = listenerTileX;
+        _listenerTileY = listenerTileY;
         if (_al is null || _soundEntries is null)
         {
             RefreshEmitterDiagnosticsIfDue();
@@ -385,13 +453,22 @@ public sealed class WorldAudioRuntime : IDisposable
         lock (_tileEmittersLock)
             tileSnapshot = _tileEmitters.ToArray();
 
+        int scannedEmitterCount = 0;
         if (_worldTriggersEnabled)
         {
             foreach (KeyValuePair<(int TileX, int TileY), IReadOnlyList<TerrainSoundEmitter>> pair in tileSnapshot)
             {
                 int tileX = pair.Key.TileX;
                 int tileY = pair.Key.TileY;
+
+                // Only the listener's tile and its ring can be audible. Scanning every resident tile
+                // was both wasted work and misleading — it made "in range" a question about the
+                // whole streamed world rather than about where the camera actually is.
+                if (!IsWithinAudibleTileWindow(tileX, tileY))
+                    continue;
+
                 IReadOnlyList<TerrainSoundEmitter> emitters = pair.Value;
+                scannedEmitterCount += emitters.Count;
                 for (int index = 0; index < emitters.Count; index++)
                 {
                     TerrainSoundEmitter emitter = emitters[index];
@@ -462,7 +539,26 @@ public sealed class WorldAudioRuntime : IDisposable
             StopEmitter(key);
 
         _heardInRange.RemoveWhere(key => !inRange.Contains(key));
+        ScannedEmitterCount = scannedEmitterCount;
+        InRangeEmitterCount = inRange.Count;
         RefreshEmitterDiagnosticsIfDue();
+    }
+
+    /// <summary>Emitters actually considered last frame, after the tile window. Compare with the resident total.</summary>
+    public int ScannedEmitterCount { get; private set; }
+
+    /// <summary>Emitters that passed the distance test last frame. Zero everywhere is a placement bug, not a range setting.</summary>
+    public int InRangeEmitterCount { get; private set; }
+
+    private bool IsWithinAudibleTileWindow(int tileX, int tileY)
+    {
+        // Tile unknown (no camera yet, or a caller that does not supply one): fall back to the old
+        // unscoped behaviour rather than silently going quiet.
+        if (_listenerTileX < 0 || _listenerTileY < 0)
+            return true;
+
+        return Math.Abs(tileX - _listenerTileX) <= AudibleTileRadius
+            && Math.Abs(tileY - _listenerTileY) <= AudibleTileRadius;
     }
 
     /// <summary>
@@ -484,6 +580,12 @@ public sealed class WorldAudioRuntime : IDisposable
         {
             int tileX = pair.Key.TileX;
             int tileY = pair.Key.TileY;
+
+            // Same window as playback. Listing every streamed tile made the panel a report about the
+            // world rather than about the camera, and made the rebuild proportional to view distance.
+            if (!IsWithinAudibleTileWindow(tileX, tileY))
+                continue;
+
             IReadOnlyList<TerrainSoundEmitter> emitters = pair.Value;
             for (int index = 0; index < emitters.Count; index++)
             {
@@ -493,6 +595,7 @@ public sealed class WorldAudioRuntime : IDisposable
         }
 
         _emitterDiagnostics = diagnostics;
+        _mcseFrameEvidence = McseFrameEvidence.Measure(tileSnapshot, IsWithinAudibleTileWindow);
         Interlocked.Exchange(
             ref _nextDiagnosticRefreshTimestamp,
             Stopwatch.GetTimestamp() + DiagnosticRefreshIntervalTicks);
@@ -513,6 +616,13 @@ public sealed class WorldAudioRuntime : IDisposable
     private void RefreshEmitterDiagnosticsIfDue()
     {
         long now = Stopwatch.GetTimestamp();
+
+        // Nobody is displaying the list, so building it would be pure cost. This check is the fix
+        // for Spec 153 Defect A: the rebuild is a diagnostics surface, and it was running on the
+        // render thread four times a second regardless of whether any surface was open.
+        if (now >= Interlocked.Read(ref _diagnosticsObservedUntilTimestamp))
+            return;
+
         if (now < Interlocked.Read(ref _nextDiagnosticRefreshTimestamp))
             return;
 

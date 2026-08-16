@@ -2,7 +2,7 @@
 
 Preservation, conversion, analysis, and visualization tooling for World of Warcraft game data.
 
-**Current viewer release line**: `v0.5.2`
+**Current viewer release line**: `v0.5.2.1`
 **Active project**: `wow-viewer/`
 
 The repository also contains `gillijimproject_refactor/` — a legacy codebase that is **read-only reference**. All new code, features, tools, tests, and fixes go in `wow-viewer/`.
@@ -19,7 +19,7 @@ A .NET 10 toolkit for WoW format analysis, terrain reconstruction, PM4-based obj
 
 Prebuilt, self-contained viewer binaries for **Windows x64, Linux x64, macOS arm64, and macOS x64** are attached to every tagged release on the [releases page](https://github.com/akspa0/parp-tools/releases). No .NET install is required.
 
-Native file dialogs are Windows-only; on Linux and macOS load content with `--game-path`, `--build`, and `--world`. See the [v0.5.2 release notes](wow-viewer/docs/releases/v0.5.2.md) for what changed.
+Native file dialogs are Windows-only; on Linux and macOS load content with `--game-path`, `--build`, and `--world`. See the [v0.5.2.1 release notes](wow-viewer/docs/releases/v0.5.2.1.md) for what changed — it is an out-of-band patch for the frame-pacing jank that shipped in v0.5.2.
 
 ### Quick Start
 
@@ -65,6 +65,7 @@ wow-viewer/
 
 - [WoWViewer README](wow-viewer/README.md) — viewer app overview and quick start
 - [User Guide](wow-viewer/docs/WoWViewer/USERGUIDE.md) — controls, UI layout, and common workflows
+- [Release Notes — v0.5.2.1](wow-viewer/docs/releases/v0.5.2.1.md) — frame-pacing patch (current)
 - [Release Notes — v0.5.2](wow-viewer/docs/releases/v0.5.2.md) — what changed since v0.5.1
 - [CLI Tools Guide](wow-viewer/docs/CLI-TOOLS.md) — advanced usage for all CLI tools
 - [Spec Status](wow-viewer/specs/STATUS.md) — the current-spec router

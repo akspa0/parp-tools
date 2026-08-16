@@ -1002,6 +1002,7 @@ public class WorldScene : ISceneRenderer
         public double MdxTransparentSubmissionMs { get; set; }
         public double OverlayMs { get; set; }
         public double SceneMaintenanceMs { get; set; }
+        public double PrepareObjectPhaseMs { get; set; }
         public List<WorldOverlayOwnerFrameStats> OverlayOwners { get; } = new(WorldOverlayOwners.All.Count);
 
         public void Reset()
@@ -1040,6 +1041,7 @@ public class WorldScene : ISceneRenderer
             MdxTransparentSubmissionMs = 0;
             OverlayMs = 0;
             SceneMaintenanceMs = 0;
+            PrepareObjectPhaseMs = 0;
             OverlayOwners.Clear();
             foreach (string ownerId in WorldOverlayOwners.All)
                 OverlayOwners.Add(WorldOverlayOwnerFrameStats.Disabled(ownerId));
@@ -1124,7 +1126,8 @@ public class WorldScene : ISceneRenderer
                 new WorldRenderStageStats(MdxTransparentSortMs, ObjectPasses.TransparentVisibleMdxRoutes.Count),
                 new WorldRenderStageStats(MdxTransparentSubmissionMs, ObjectPasses.TransparentVisibleMdxRoutes.Count, TransparentBatchedMdxCount + TransparentUnbatchedMdxCount),
                 new WorldRenderStageStats(OverlayMs),
-                new WorldRenderStageStats(SceneMaintenanceMs))
+                new WorldRenderStageStats(SceneMaintenanceMs),
+                new WorldRenderStageStats(PrepareObjectPhaseMs))
             {
                 OverlayOwners = OverlayOwners.ToArray(),
             };
@@ -1340,6 +1343,18 @@ public class WorldScene : ISceneRenderer
     /// </summary>
     public bool SceneGraphDetailedDiagnosticsEnabled { get; set; }
 
+    /// <summary>
+    /// Spec 153 US3. Routes opaque MDX that declare themselves batchable through the shared
+    /// begin-once/submit-many path instead of a full per-instance state setup per draw.
+    /// <para>
+    /// Kept as a runtime switch so a before/after capture can be taken on one flight without a
+    /// rebuild, and so the fix is revertible in place if the measured effect does not clear the
+    /// noise floor (FR-010, FR-011). Turning it off restores the previous 100%-unbatched behaviour
+    /// exactly.
+    /// </para>
+    /// </summary>
+    public bool MdxOpaqueBatchingEnabled { get; set; } = true;
+
     private Vector3 _frameHistoryPreviousCameraPosition = new(float.NaN, float.NaN, float.NaN);
     private Vector3 _frameHistoryPreviousCameraForward = new(float.NaN, float.NaN, float.NaN);
 
@@ -1357,9 +1372,10 @@ public class WorldScene : ISceneRenderer
     public double RenderEpiloguePeakMs { get; private set; }
 
     /// <summary>
-    /// PrepareObjectPhase is the one pass in <see cref="WorldFramePasses"/> with no stage timer, so
-    /// all of its cost lands in the pass gap. These sub-probes attribute it. Peaks are retained
-    /// because the suspected work (PM4 overlay window changes, audio residency) is periodic.
+    /// PrepareObjectPhase now has its own stage timer (Spec 153 FR-001), so its cost no longer hides
+    /// in the pass gap. <see cref="ObjectPhasePrepareMs"/> is that same measurement; the sub-probes
+    /// below attribute its internals. Peaks are retained because the suspected work (PM4 overlay
+    /// window changes, audio residency) is periodic and a live reading almost never lands on it.
     /// </summary>
     public double ObjectPhasePrepareMs { get; private set; }
     public double ObjectPhasePreparePeakMs { get; private set; }
@@ -3629,6 +3645,24 @@ public class WorldScene : ISceneRenderer
 
     public void RefreshAudioEmitterDiagnostics(bool probeFiles)
         => _audioRuntime?.RefreshEmitterDiagnostics(probeFiles);
+
+    /// <summary>
+    /// Call once per render of any surface that displays <see cref="AudioEmitterDiagnostics"/>.
+    /// Without it the list is not kept current, because the periodic rebuild is gated on someone
+    /// actually reading it — see <see cref="WorldAudioRuntime.NoteEmitterDiagnosticsObserved"/> for
+    /// why (Spec 153 Defect A).
+    /// </summary>
+    public void NoteAudioEmitterDiagnosticsObserved()
+        => _audioRuntime?.NoteEmitterDiagnosticsObserved();
+
+    /// <summary>Measured coordinate frame of resident MCSE positions. See <see cref="McseFrameEvidence"/>.</summary>
+    public McseFrameEvidence AudioMcseFrame => _audioRuntime?.McseFrame ?? McseFrameEvidence.Empty;
+
+    /// <summary>Emitters considered by the last audio update, after the camera-tile window.</summary>
+    public int AudioScannedEmitterCount => _audioRuntime?.ScannedEmitterCount ?? 0;
+
+    /// <summary>Emitters that passed the distance test on the last audio update.</summary>
+    public int AudioInRangeEmitterCount => _audioRuntime?.InRangeEmitterCount ?? 0;
 
     public void SetAudioMasterGain(float gain) => _audioRuntime?.SetMasterGain(gain);
 
@@ -8728,11 +8762,18 @@ public class WorldScene : ISceneRenderer
             frame.Visibility,
             visible =>
             {
-                // Keep world MDX on the established per-instance RenderWithTransform
-                // contract until the shared/GPU batch paths have visual parity proof for
-                // every direct MDX and adapted M2 material route. WMO shell/doodad batching
-                // remains independent of this fallback.
-                return true;
+                // Spec 153 Defect B. This predicate used to `return true` unconditionally, so 100%
+                // of opaque MDX took the per-instance RenderWithTransform route while WMO batched
+                // 198/198 — the batching machinery was present and inert.
+                //
+                // The renderer already declares whether it can be batched, and the WMO-internal
+                // doodad path has consumed that declaration all along. Use the same contract here
+                // instead of overriding it at the planner.
+                if (!MdxOpaqueBatchingEnabled)
+                    return true;
+
+                IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
+                return renderer == null || renderer.RequiresUnbatchedWorldRender;
             });
 
         WorldObjectPassCoordinator.PlanTransparentMdxRoutes(
@@ -10280,7 +10321,7 @@ public class WorldScene : ISceneRenderer
             + frame.WmoVisibilityMs + frame.WmoSubmissionMs + frame.WmoTransparentSubmissionMs
             + frame.MdxAnimationMs + frame.MdxVisibilityMs + frame.MdxOpaqueSubmissionMs
             + frame.LiquidMs + frame.MdxTransparentSortMs + frame.MdxTransparentSubmissionMs
-            + frame.OverlayMs;
+            + frame.OverlayMs + frame.PrepareObjectPhaseMs;
 
         RenderPrologueMs = Math.Max(0, preCoordinatorMs - timedPrologue);
         RenderPassGapMs = Math.Max(0, (postCoordinatorMs - preCoordinatorMs) - timedInCoordinator);
@@ -10582,6 +10623,11 @@ public class WorldScene : ISceneRenderer
                 },
                 () =>
                 {
+                    // FR-001: this pass previously had no stage timer, so everything below it —
+                    // including the periodic stall — landed in the unaccounted pass gap. The timer
+                    // spans the whole pass; the sub-probes inside it attribute the parts.
+                    long objectPhaseStart = Stopwatch.GetTimestamp();
+
                     // One-time render diagnostic
                     if (!_renderDiagPrinted)
                     {
@@ -10608,10 +10654,8 @@ public class WorldScene : ISceneRenderer
                     _hasLastRenderedCameraPosition = true;
                     int audioAreaId = _terrainManager.Renderer.GetChunkInfoAt(cameraPos.X, cameraPos.Y)?.AreaId ?? 0;
 
-                    // Sub-probes: PrepareObjectPhase has no stage timer, so everything here lands in
-                    // the pass gap. Both of these do periodic residency work and are prime suspects.
-                    long objectPhaseStart = Stopwatch.GetTimestamp();
-
+                    // Sub-probes inside the timed pass. Both do periodic residency work and are the
+                    // prime suspects for the ~212 ms recurring stall.
                     long audioStart = Stopwatch.GetTimestamp();
                     _audioRuntime?.Update(
                         cameraPos,
@@ -10619,7 +10663,12 @@ public class WorldScene : ISceneRenderer
                         audioAreaId,
                         lighting.GameTime,
                         _mapId,
-                        _currentAreaLookup);
+                        _currentAreaLookup,
+                        // Only audio near the camera matters. Pass the terrain manager's own camera
+                        // tile rather than re-deriving it here, so the audio window can never drift
+                        // out of agreement with the tile the renderer considers current.
+                        _terrainManager.CameraTileX,
+                        _terrainManager.CameraTileY);
                     AudioRuntimeUpdateMs = TicksToMs(Stopwatch.GetTimestamp() - audioStart);
                     AudioRuntimeUpdatePeakMs = Math.Max(AudioRuntimeUpdatePeakMs, AudioRuntimeUpdateMs);
 
@@ -10627,9 +10676,6 @@ public class WorldScene : ISceneRenderer
                     EnsurePm4OverlayMatchesCameraWindow(cameraPos);
                     Pm4OverlayWindowMs = TicksToMs(Stopwatch.GetTimestamp() - pm4Start);
                     Pm4OverlayWindowPeakMs = Math.Max(Pm4OverlayWindowPeakMs, Pm4OverlayWindowMs);
-
-                    ObjectPhasePrepareMs = TicksToMs(Stopwatch.GetTimestamp() - objectPhaseStart);
-                    ObjectPhasePreparePeakMs = Math.Max(ObjectPhasePreparePeakMs, ObjectPhasePrepareMs);
 
                     // Update frustum planes for culling
                     var vp = view * proj;
@@ -10647,6 +10693,10 @@ public class WorldScene : ISceneRenderer
                     WmoCulledCount = 0;
                     MdxRenderedCount = 0;
                     MdxCulledCount = 0;
+
+                    ObjectPhasePrepareMs = TicksToMs(Stopwatch.GetTimestamp() - objectPhaseStart);
+                    ObjectPhasePreparePeakMs = Math.Max(ObjectPhasePreparePeakMs, ObjectPhasePrepareMs);
+                    frame.PrepareObjectPhaseMs = ObjectPhasePrepareMs;
                 },
                 () =>
                 {

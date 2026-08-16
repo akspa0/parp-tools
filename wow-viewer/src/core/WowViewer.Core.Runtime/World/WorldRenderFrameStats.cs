@@ -40,7 +40,8 @@ public readonly record struct WorldRenderFrameStats(
     WorldRenderStageStats MdxTransparentSort,
     WorldRenderStageStats MdxTransparentSubmission,
     WorldRenderStageStats Overlay,
-    WorldRenderStageStats SceneMaintenance)
+    WorldRenderStageStats SceneMaintenance,
+    WorldRenderStageStats PrepareObjectPhase)
 {
     public IReadOnlyList<WorldOverlayOwnerFrameStats> OverlayOwners { get; init; } =
         Array.Empty<WorldOverlayOwnerFrameStats>();
@@ -66,6 +67,7 @@ public readonly record struct WorldRenderFrameStats(
         0,
         0,
         0,
+        new WorldRenderStageStats(0),
         new WorldRenderStageStats(0),
         new WorldRenderStageStats(0),
         new WorldRenderStageStats(0),

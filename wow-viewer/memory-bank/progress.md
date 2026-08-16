@@ -2,6 +2,42 @@
 
 Last updated: 2026-08-15
 
+## 2026-08-15 — Spec 153 Phases 1/3/5 implemented (source proof only, nothing measured)
+
+- **Phase 1 (FR-001, SC-006).** `PrepareObjectPhase` now has a stage timer and appears in the stage
+  table, so its cost — including the ~212 ms stall — is no longer part of the unaccounted pass gap.
+  `WorldRenderStage` gained the value, `StageCount` went 18 → 19, and the pass-gap subtraction in
+  `RecordRenderRegionBreakdown` includes it so the region breakdown and stage table agree instead of
+  double-counting. New `WorldFramePassInstrumentation` declares pass → stage ownership; a reflection
+  test fails if any `WorldFramePasses` member has no timer, any stage is unowned, or a stage is
+  claimed twice. The Perf panel gained an `other (unprobed remainder)` row, which is what decides
+  Phase 0's "subdivide rather than guess" branch.
+- **Phase 3 (FR-004/005/006).** The MDX batching cause was found and it was not a capability gap:
+  `WorldScene.PlanVisibleMdxPasses` passed `PlanOpaqueMdxRoutes` a `requiresUnbatchedRender`
+  predicate whose whole body was `return true`, so the planner routed 100% of opaque MDX to the
+  fallback by construction while WMO — which reads the renderer's own declaration — batched 198/198.
+  The predicate now consumes `IModelRenderer.RequiresUnbatchedWorldRender`, the same contract the
+  WMO-internal doodad path already used. GPU instancing stays held out
+  (`MdxRenderer.SupportsGpuInstancedOpaque` is still `false`); the win is `BeginBatch` once per
+  renderer instead of a full state setup per draw, with submission order unchanged. Found and fixed
+  the one real visual divergence between the two paths: `RenderInstance` ignores `_wireframe` while
+  `RenderWithTransform` honours it, so `_wireframe` is now part of `RequiresUnbatchedWorldRender`
+  (which also corrects the WMO doodad path). Live-revertible via `WorldScene.MdxOpaqueBatchingEnabled`,
+  exposed as a checkbox so the before/after is one flight rather than two builds.
+- **Phase 5 (FR-008).** New pure `DeferredLoadBudget` learns per-kind (MDX/WMO) load cost via EWMA
+  plus a decaying high-water mark, and `WorldAssetManager.ProcessPendingLoads` consults it **before**
+  each load rather than only between them — the old `elapsed < budget` condition would start a 55 ms
+  load with 0.1 ms of a 3.5 ms budget left. **Deliberately partial:** the first load of a frame is
+  always admitted so an oversized asset cannot starve, and that admission is counted in
+  `OversizedAdmissionCount`. SC-005 is *not* claimed; a synchronous load larger than the whole budget
+  still costs what it costs, and closing that needs decode off the render thread (plan Phase 5 step 2).
+- Solution builds with 0 errors. Core suite: 9 failures before these changes and the same 9 after,
+  all pre-existing and unrelated; net +15 passing tests.
+- **Nothing is measured.** Every SC still needs the user-owned Stranglethorn before/after. Phase 0's
+  capture protocol and an empty results table are in
+  [Spec 153 research.md](../specs/153-renderer-hitch-and-batching/research.md); Phases 2 and 4 stay
+  gated behind it.
+
 ## 2026-08-15 — Renderer gallop diagnosed; Spec 153 opened, flattening lane suspended
 
 - Built the missing detector. `WorldRenderFrameStats` already produced `TotalCpuMs` plus 18 per-stage

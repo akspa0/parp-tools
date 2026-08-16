@@ -1,4 +1,5 @@
 using ImGuiNET;
+using WoWViewer.Audio;
 using WoWViewer.Terrain;
 using WowViewer.Core.Audio;
 
@@ -60,8 +61,31 @@ public partial class ViewerApp
         if (ImGui.Button("Probe current emitters"))
             scene.RefreshAudioEmitterDiagnostics(probeFiles: true);
 
+        // This panel is the only consumer of the diagnostics list, and the rebuild is gated on being
+        // observed — it cost a 283 ms render-thread stall four times a second when it was
+        // unconditional. Declaring the read here is what keeps the rows live while the panel is up.
+        scene.NoteAudioEmitterDiagnosticsObserved();
         IReadOnlyList<AudioTriggerDiagnostic> diagnostics = scene.AudioEmitterDiagnostics;
-        ImGui.Text($"Resident trigger rows: {diagnostics.Count}");
+        ImGui.Text($"Trigger rows near camera: {diagnostics.Count}"
+            + $"   (scanned {scene.AudioScannedEmitterCount}, in range {scene.AudioInRangeEmitterCount})");
+        ImGui.TextDisabled($"Scoped to the camera tile +/-{WorldAudioRuntime.AudibleTileRadius}; distant streamed tiles are not audible and are not listed.");
+
+        // Settles whether MCSE positions are actually chunk-local, which is what ConvertSoundPosition
+        // assumes without evidence. If they are not, every MCSE emitter is thrown off-map and reads
+        // as permanently out of range, while MCNK liquid rows keep working because their positions
+        // never pass through that transform.
+        McseFrameEvidence frame = scene.AudioMcseFrame;
+        if (frame.SampleCount > 0)
+        {
+            bool frameLooksWrong = frame.WithinChunkBounds < frame.SampleCount;
+            ImGui.TextColored(
+                frameLooksWrong ? new System.Numerics.Vector4(1f, 0.55f, 0.2f, 1f)
+                                : new System.Numerics.Vector4(0.45f, 0.9f, 0.55f, 1f),
+                $"MCSE frame: {frame.Verdict}");
+            ImGui.TextDisabled(
+                $"raw X [{frame.MinX:0.#}..{frame.MaxX:0.#}]  Y [{frame.MinY:0.#}..{frame.MaxY:0.#}]  Z [{frame.MinZ:0.#}..{frame.MaxZ:0.#}]"
+                + $"   chunk edge {McseFrameEvidence.ChunkEdge:0.##}, tile edge {McseFrameEvidence.TileEdge:0.##}");
+        }
         if (ImGui.BeginChild("##audio_emitter_diagnostics", new System.Numerics.Vector2(0f, 250f), true))
         {
             foreach (AudioTriggerDiagnostic diagnostic in diagnostics)

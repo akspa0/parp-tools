@@ -24,6 +24,13 @@ public enum WorldRenderStage
     MdxTransparentSubmission = 15,
     Overlay = 16,
     SceneMaintenance = 17,
+
+    /// <summary>
+    /// Object-phase preparation: camera resolution, audio residency, PM4 overlay window, frustum
+    /// update, opaque GL state. Added because it was the one pass in <c>WorldFramePasses</c> with no
+    /// timer, so a ~212 ms periodic stall sat in the unaccounted pass gap for an entire investigation.
+    /// </summary>
+    PrepareObjectPhase = 18,
 }
 
 /// <summary>Distribution of one timing series across the retained window.</summary>
@@ -115,7 +122,7 @@ public sealed record WorldRenderFrameHistorySnapshot(
 /// </summary>
 public sealed class WorldRenderFrameHistory
 {
-    public const int StageCount = 18;
+    public const int StageCount = 19;
     public const int DefaultCapacity = 2048;
 
     private readonly int _capacity;
@@ -187,6 +194,7 @@ public sealed class WorldRenderFrameHistory
         _stageMs[baseIndex + (int)WorldRenderStage.MdxTransparentSubmission] = stats.MdxTransparentSubmission.DurationMs;
         _stageMs[baseIndex + (int)WorldRenderStage.Overlay] = stats.Overlay.DurationMs;
         _stageMs[baseIndex + (int)WorldRenderStage.SceneMaintenance] = stats.SceneMaintenance.DurationMs;
+        _stageMs[baseIndex + (int)WorldRenderStage.PrepareObjectPhase] = stats.PrepareObjectPhase.DurationMs;
 
         // Uninstrumented remainder. If this dominates a hitch, the cost is somewhere no stage timer
         // covers, and reporting the largest stage would point at the wrong place entirely.

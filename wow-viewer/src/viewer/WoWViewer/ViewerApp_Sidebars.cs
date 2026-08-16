@@ -3430,6 +3430,13 @@ public partial class ViewerApp
                 ImGui.TextColored(new Vector4(1f, 0.55f, 0.2f, 1f),
                     "Most opaque MDX are UNBATCHED: one draw call per instance.");
             }
+
+            // Same-flight before/after for Spec 153 US3. Off reproduces the recorded 100%-unbatched
+            // baseline exactly, so the comparison does not depend on reflying the route.
+            bool mdxBatching = _worldScene.MdxOpaqueBatchingEnabled;
+            if (ImGui.Checkbox("Opaque MDX batching (Spec 153 US3)", ref mdxBatching))
+                _worldScene.MdxOpaqueBatchingEnabled = mdxBatching;
+            ImGui.TextDisabled("Off = per-instance state setup per draw (the recorded baseline).");
             ImGui.TreePop();
         }
 
@@ -3444,13 +3451,20 @@ public partial class ViewerApp
             ImGui.Text($"{"Pass gap (between stage timers)",-32} now {_worldScene.RenderPassGapMs,7:0.00}  peak {_worldScene.RenderPassGapPeakMs,8:0.00} ms");
             ImGui.Text($"{"Epilogue (after passes)",-32} now {_worldScene.RenderEpilogueMs,7:0.00}  peak {_worldScene.RenderEpiloguePeakMs,8:0.00} ms");
 
-            // PrepareObjectPhase is the only pass with no stage timer, so its whole cost sits in the
-            // pass gap above. These attribute it.
+            // PrepareObjectPhase now has its own stage timer (it appears in the stage table), so it
+            // is no longer part of the pass gap. These sub-probes attribute its internals, which is
+            // what names the periodic stall.
             ImGui.Separator();
-            ImGui.TextDisabled("Inside the pass gap: PrepareObjectPhase (the untimed pass)");
+            ImGui.TextDisabled("Inside PrepareObjectPhase (now timed; also in the stage table)");
             ImGui.Text($"{"  PrepareObjectPhase total",-32} now {_worldScene.ObjectPhasePrepareMs,7:0.00}  peak {_worldScene.ObjectPhasePreparePeakMs,8:0.00} ms");
             ImGui.Text($"{"    AudioRuntime.Update",-32} now {_worldScene.AudioRuntimeUpdateMs,7:0.00}  peak {_worldScene.AudioRuntimeUpdatePeakMs,8:0.00} ms");
             ImGui.Text($"{"    PM4 overlay window",-32} now {_worldScene.Pm4OverlayWindowMs,7:0.00}  peak {_worldScene.Pm4OverlayWindowPeakMs,8:0.00} ms");
+            // The residual is the rest of the pass: render-diag scan, camera extraction,
+            // GetChunkInfoAt, frustum update, GL state. If the stall lives here, neither sub-probe
+            // will match it and the pass must be subdivided further rather than a fix guessed.
+            double objectPhaseResidualNow = Math.Max(0,
+                _worldScene.ObjectPhasePrepareMs - _worldScene.AudioRuntimeUpdateMs - _worldScene.Pm4OverlayWindowMs);
+            ImGui.Text($"{"    other (unprobed remainder)",-32} now {objectPhaseResidualNow,7:0.00}       (peak: subdivide)");
             if (ImGui.Button("Reset region peaks"))
                 _worldScene.ResetRenderRegionPeaks();
             ImGui.TreePop();

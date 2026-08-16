@@ -184,7 +184,11 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     public Vector3 BoundsMax => _effectiveBoundsMax;
     public bool IsM2AdapterModel => _isM2AdapterModel;
     public bool HasTransparentWorldPass => !_forceM2SolidDebug && ComputeHasTransparentWorldPass();
-    public bool RequiresUnbatchedWorldRender => _particleEmitters.Count > 0 || _mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0;
+    // `_wireframe` is honoured by RenderWithTransform's polygon-mode switch but not by the shared
+    // BeginBatch state, so a wireframe-flagged model would silently draw filled on the batch path.
+    // Declaring it here keeps batched output visually equivalent to unbatched output (FR-006)
+    // rather than making the batch path a second, subtly different renderer.
+    public bool RequiresUnbatchedWorldRender => _wireframe || _particleEmitters.Count > 0 || _mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0;
     // The GPU-instanced MDX shader is held out until it has portable compile and visual
     // parity proof. Keep every MDX variant on the established CPU/state path meanwhile.
     public bool SupportsGpuInstancedOpaque => false;
