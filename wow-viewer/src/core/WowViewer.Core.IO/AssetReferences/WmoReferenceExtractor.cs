@@ -1,3 +1,4 @@
+using WowViewer.Core.Chunks;
 using WowViewer.Core.IO.Chunked;
 using WowViewer.Core.IO.Wmo;
 using WowViewer.Core.Wmo;
@@ -9,15 +10,15 @@ namespace WowViewer.Core.IO.AssetReferences;
 /// materials name.
 /// </summary>
 /// <remarks>
-/// The existing summary readers report counts, not paths, so this reads the same chunks through the
-/// same shared root-chunk helpers rather than duplicating any parsing. MODN and MOTX are both
-/// null-terminated string blobs; MODD entries index into MODN by byte offset.
+/// Every byte of record decoding here belongs to an existing reader: <see cref="WmoDoodadDetailReader"/>
+/// owns MODD/MODN placement decoding and <see cref="WmoMaterialDetailReader"/> owns MOMT/MOTX material
+/// decoding — the same readers the viewer already uses. This class does not parse either chunk itself.
+/// The only thing it does directly is check which top-level chunks are present, via the same
+/// <see cref="WmoRootReaderCommon"/> chunk table those readers are built on, because a world object with
+/// no doodads or no materials is an ordinary state and neither reader tolerates a missing required chunk.
 /// </remarks>
 public static class WmoReferenceExtractor
 {
-    private const int ModdEntrySize = 40;
-    private const uint ModdNameOffsetMask = 0x00FFFFFFu;
-
     /// <summary>
     /// Extracts every doodad and texture path named by a world object root file.
     /// Returns paths as authored, without normalisation, so a case or separator difference stays
@@ -28,84 +29,67 @@ public static class WmoReferenceExtractor
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
+        stream.Position = 0;
         (uint? _, IReadOnlyList<ChunkSpan> chunks) = WmoRootReaderCommon.ReadRootChunks(stream, sourcePath);
+
         List<(AssetReferenceKind, string)> references = [];
 
-        AddDoodadNames(stream, chunks, references);
-        AddTextureNames(stream, chunks, references);
+        if (HasChunk(chunks, WmoChunkIds.Modd) && HasChunk(chunks, WmoChunkIds.Modn))
+            AddDoodadNames(stream, sourcePath, references);
+
+        if (HasChunk(chunks, WmoChunkIds.Mohd) && HasChunk(chunks, WmoChunkIds.Momt))
+            AddTextureNames(stream, sourcePath, references);
+
         return references;
     }
 
-    private static void AddDoodadNames(
-        Stream stream,
-        IReadOnlyList<ChunkSpan> chunks,
-        List<(AssetReferenceKind, string)> references)
+    private static void AddDoodadNames(Stream stream, string sourcePath, List<(AssetReferenceKind, string)> references)
     {
-        // A world object with no doodads is ordinary, so both chunks are optional here even though
-        // the summary reader requires them.
-        byte[]? modn = WmoRootReaderCommon.TryReadChunkPayload(stream, chunks, WmoChunkIds.Modn);
-        byte[]? modd = WmoRootReaderCommon.TryReadChunkPayload(stream, chunks, WmoChunkIds.Modd);
-        if (modn is null || modd is null || modd.Length < ModdEntrySize)
-            return;
+        stream.Position = 0;
+        IReadOnlyList<WmoDoodadPlacementDetail> placements = WmoDoodadDetailReader.ReadPlacements(stream, sourcePath);
 
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
-        int entryCount = modd.Length / ModdEntrySize;
-        for (int index = 0; index < entryCount; index++)
+        foreach (WmoDoodadPlacementDetail placement in placements)
         {
-            uint nameOffset = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(
-                modd.AsSpan(index * ModdEntrySize, 4)) & ModdNameOffsetMask;
-            string name = WmoRootReaderCommon.ResolveStringAtOffset(modn, nameOffset);
-            if (name.Length == 0 || !seen.Add(name))
+            if (placement.ModelPath.Length == 0 || !seen.Add(placement.ModelPath))
                 continue;
 
-            references.Add((AssetReferenceKind.PlacedDoodad, name));
+            references.Add((AssetReferenceKind.PlacedDoodad, placement.ModelPath));
         }
     }
 
-    private static void AddTextureNames(
-        Stream stream,
-        IReadOnlyList<ChunkSpan> chunks,
-        List<(AssetReferenceKind, string)> references)
+    private static void AddTextureNames(Stream stream, string sourcePath, List<(AssetReferenceKind, string)> references)
     {
-        byte[]? motx = WmoRootReaderCommon.TryReadChunkPayload(stream, chunks, WmoChunkIds.Motx);
-        if (motx is null || motx.Length == 0)
-            return;
+        stream.Position = 0;
+        IReadOnlyList<WmoMaterialDetail> materials = WmoMaterialDetailReader.Read(stream, sourcePath);
 
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
-        foreach (string entry in EnumerateNullTerminatedStrings(motx))
+        foreach (WmoMaterialDetail material in materials)
         {
-            if (!seen.Add(entry))
-                continue;
-
-            references.Add((AssetReferenceKind.WorldObjectTexture, entry));
+            AddTextureName(material.Texture1Name, seen, references);
+            AddTextureName(material.Texture2Name, seen, references);
+            AddTextureName(material.Texture3Name, seen, references);
         }
     }
 
-    /// <summary>
-    /// Walks a null-terminated string blob. Padding runs of zeroes produce no entries, and a final
-    /// unterminated run is still yielded so a truncated table does not silently lose its last name.
-    /// </summary>
-    private static IEnumerable<string> EnumerateNullTerminatedStrings(byte[] payload)
+    private static void AddTextureName(string name, HashSet<string> seen, List<(AssetReferenceKind, string)> references)
     {
-        int start = -1;
-        for (int index = 0; index < payload.Length; index++)
+        // A material's unused texture slots resolve to an empty string, which is a real authored
+        // state (no texture bound), not a reference to a missing empty path.
+        if (string.IsNullOrEmpty(name) || !seen.Add(name))
+            return;
+
+        references.Add((AssetReferenceKind.WorldObjectTexture, name));
+    }
+
+    private static bool HasChunk(IReadOnlyList<ChunkSpan> chunks, FourCC chunkId)
+    {
+        foreach (ChunkSpan chunk in chunks)
         {
-            if (payload[index] != 0)
-            {
-                if (start < 0)
-                    start = index;
-
-                continue;
-            }
-
-            if (start >= 0)
-            {
-                yield return System.Text.Encoding.UTF8.GetString(payload, start, index - start);
-                start = -1;
-            }
+            if (chunk.Header.Id == chunkId)
+                return true;
         }
 
-        if (start >= 0)
-            yield return System.Text.Encoding.UTF8.GetString(payload, start, payload.Length - start);
+        return false;
     }
 }
