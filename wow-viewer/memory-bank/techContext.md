@@ -23,7 +23,7 @@
 | `WowViewer.Tool.Converter` | CLI format converter (ADT/WDT round-trip) | `tools/converter/` |
 | `WowViewer.Tool.Harvest` | CLI terrain tensor harvester | `tools/harvest/` |
 | `WowViewer.Tool.Capture` | CLI headless validation capture | `tools/capture/` |
-| `WowViewer.Tool.AnimFarm` | CLI M2 animation pose farm (new, partial) | `tools/animfarm/` |
+| ~~`WowViewer.Tool.AnimFarm`~~ | **Does not exist.** Spec 053 stopped after Phase 0-1; only the loader layer in `Core.Anim` was built. `tools/animfarm/` is an empty solution folder with zero commits. | — |
 | Data harvester (Python) | V16/V18 dataset building, model training/inference | `data-harvester/` |
 
 ## Format Readers

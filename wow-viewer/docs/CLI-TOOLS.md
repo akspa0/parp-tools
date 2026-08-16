@@ -209,25 +209,30 @@ dotnet run --project tools/validation-capture -c Debug -- capture --gpu-viewer-s
 
 ---
 
-## 5. M2 Animation Pose Farm (`WowViewer.Tool.AnimFarm`)
+## 5. M2 Animation Pose Farm (`WowViewer.Tool.AnimFarm`) — NOT IMPLEMENTED
 
-Extracts bone animation keyframes from M2/MDX models as BVH motion files + normalized pose clip JSON sidecars.
+> **This tool does not exist.** Verified 2026-08-15: `tools/animfarm/` has no project (the solution
+> carries an empty folder entry), `git log` shows zero commits ever touching that path, and no
+> `*AnimFarm*`, `*Bvh*`, or `*PoseClip*` file has been added on any branch. Every command below is a
+> design sketch from archived Spec 053, which stopped after Phase 0-1 (commit `0691e894`).
+>
+> **What does exist** is the loader layer only: `WowViewer.Core.Anim` holds `M2PoseSourceLoader`,
+> `MdxPoseSourceLoader`, `M2AnimationPoseSource`, `MdxAnimationPoseSource`, and `PathNormalizer`.
+> Nothing extracts bone tracks, builds BVH, or writes pose clips. The named types in the
+> `systemPatterns.md` pipeline diagram (`M2SequenceAliasResolver`, `M2BoneTrackStreamExtractor`,
+> `BvhDocumentBuilder`, `BvhDocumentWriter`, `PoseClipBuilder`, `PoseLibraryIndexBuilder`) are not in
+> `src/` or `tests/`.
+>
+> For skeleton and sequence data today, use `mdx inspect` / `mdx export-json` (§ MDX) — those are real
+> and were verified against 0.5.3 `Creature\HighElf\*.mdx`. The M2 side has era defects; see below.
+
+The sketch below is retained as the design target, not as runnable commands:
 
 ```powershell
-# Single model dump (BVH + pose clip + manifest)
+# NOT RUNNABLE — no such project
 dotnet run --project tools/animfarm -c Debug -- dump --input <path/to/model.m2> --output <outdir>
-
-# Skeleton introspection (no animation)
 dotnet run --project tools/animfarm -c Debug -- skeleton --input <path/to/model.m2> --output <outdir>
-
-# Batch mode (requires listfile cache)
 dotnet run --project tools/animfarm -c Debug -- batch --client-root <staged> --cache-key <build> --output <outdir> --include "creature/orc/.*"
-
-# With FBX output (instead of BVH)
-dotnet run --project tools/animfarm -c Debug -- dump --input <model.m2> --output <outdir> --with-fbx --with-bvh false
-
-# Limit batch for testing
-dotnet run --project tools/animfarm -c Debug -- batch --client-root <staged> --cache-key <build> --output <outdir> --limit 10
 ```
 
 ### Output Structure (dump mode)
