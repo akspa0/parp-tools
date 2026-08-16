@@ -7,20 +7,31 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-**START HERE: WMO group admission in dense interiors. Spec 153 is shipped as v0.5.2.1; the renderer
-owner has moved.**
+**START HERE: read the new WMO admission counters on a real Stormwind flight, then pick the rule to
+fix. The instrumentation landed; the measurement has not been taken.**
 
+- **Next bounded action, user-owned:** fly Stormwind, open Utilities > Perf > **"WMO admission (this
+  frame)"**, and record the numbers into
+  [Spec 151 research.md](../specs/151-portal-game-mode-surface/research.md). The panel names the
+  dominant rule. **Do not change an admission rule before that reading exists.**
 - **Confirmed by the Stormwind capture (2048 frames), taken after the Spec 153 fixes:**
   `PrepareObjectPhase` max **283.4 → 2.5 ms** and gone from the hitch list; `SceneMaintenance` max
   **454.5 → 3.9 ms**; unaccounted median 0.02 / p99 0.11 ms; median frame 17.40 → 6.98 ms.
-- **New owner: `WmoSubmission`** — p99 154.10 / max 161.3 ms with a median of 0.71 ms, and **all 592
+- **Owner: `WmoSubmission`** — p99 154.10 / max 161.3 ms with a median of 0.71 ms, and **all 592
   recent hitches** read `<- WmoSubmission` at 153–157 ms. Stormwind submits **all districts at once**:
   7512 visible groups, 80484 draw calls, 15852 doodad submissions. **This is an admission problem,
-  not batching** — 80200 of 80484 calls are correctly batched. Belongs to **Spec 151**
-  (portal-aware rendering), needs its own slice. **First step is instrumentation, not logic:** count
-  groups considered / admitted / rejected and by which rule, before changing any admission code.
-  That ordering has now paid off twice in a row. Suspect group-to-group visibility data the client
-  uses and this renderer does not read.
+  not batching** — 80200 of 80484 calls are correctly batched.
+- **Instrumentation shipped (source proof + 11 core tests, nothing measured).** `WmoAdmissionTally` /
+  `WmoAdmissionStats` in `Core.Runtime/World/Visibility` count placements and groups by admitting
+  rule; `CollectVisibleWmos` has a `ref` overload proven identical to the old one; `WmoRenderer`
+  records the per-group rule; the Perf panel displays both layers. Four **source** findings drove the
+  counter shape, all with magnitudes still unmeasured: portal culling **cannot reject** a group
+  (the decision is unioned with raw frustum visibility); WMO placements are **never rejected by the
+  frustum** (`IgnoreVisionConeCulling: true` also disables the only frustum branch), which is the
+  shape of the old-Ironforge-past-fog symptom; group admission is evaluated **twice per placement per
+  frame** (opaque + transparent); and the recorded 7512 is a **submission** count spanning both
+  passes, not distinct groups. Detail in Spec 151 `research.md`.
+- Still suspect group-to-group visibility data the client uses and this renderer does not read.
 - **Spec 153 Phase 4 may be moot** — it was written against `SceneMaintenance` max 454.8 ms, which no
   longer reproduces (3.9 ms). Re-measure on a route that forces `_instancesDirty` before implementing.
 - **Spec 153 Phase 5 step 2 still owed:** `DeferredAssetLoads` max 442.9 ms in Stormwind against a
@@ -145,8 +156,8 @@ tables are in [Spec 153 research.md](../specs/153-renderer-hitch-and-batching/re
   Scene selector now contains only Placements and LOD, while Utilities keeps an isolated page index
   so Inspect/Scene page selection cannot hide or misroute the Minimap page.
 - **Main unproven gap:** **WMO group admission is measured as the renderer's dominant remaining cost
-  but its cause is not diagnosed** — Stormwind admits 7512 groups / 80484 draw calls and no counter
-  yet says which admission rule let them through. That instrumentation is the next bounded action.
+  but its cause is still not diagnosed** — the counters that name the admitting rule now exist and
+  have never been read on a real flight. Reading them is the next bounded action.
   The MCSE coordinate frame is also open: measured, verdict not yet read on real data.
   The sidebar slice still needs user-owned visual proof at normal and compact
   window sizes, including selected-context transitions and legacy caller reachability. The time-of-day
@@ -174,11 +185,12 @@ tables are in [Spec 153 research.md](../specs/153-renderer-hitch-and-batching/re
 
 | Spec | State | Next handoff |
 |---|---|---|
-| **151 Portal-aware rendering / WMO group admission** | **NEW PRIORITY 1 — measured owner of the remaining hitching** | **Stormwind: 7512 visible groups / 80484 draw calls, all 592 hitches are `WmoSubmission`. Instrument group admission (considered/admitted/rejected + rule) before changing logic.** |
+| **151 Portal-aware rendering / WMO group admission** | **PRIORITY 1 — instrumentation shipped, measurement owed** | **Fly Stormwind, read Utilities > Perf > "WMO admission (this frame)", record it in Spec 151 `research.md`. Only then pick the rule to change.** |
 | 153 Renderer hitch and MDX batching | Phases 1/2/3/5 shipped as v0.5.2.1 and confirmed by capture; Phase 4 likely moot | Re-measure `SceneMaintenance` before implementing Phase 4; Phase 5 step 2 (decode off the render thread) still owed |
 | 152 Renderer frame-time stability / per-era lighting | Detector landed and used; its Phase 1 gate refuted the allocation hypothesis so Phases 3–5 are suspended | Owns the measurement infrastructure (done) and Phase 6 per-era terrain lighting (independent, not started, fixes 1.0.0+ darkness). |
 | 151 Portal-aware rendering/game mode/simple surface | Phase 1 portal checkpoint implemented; Phase 2 open | Add pure game-mode state/physics and character-head anchor; preserve editor camera state and stop at the focused physics checkpoint. |
-| 104 Legacy M2/MDX rendering | 1.0.0 route complete; MDX material/effect shader checkpoint implemented with visual proof open | Validate shader compilation and translucent/reflective models against the configured client/build; keep full BLS parity separate. |
+| **154 M2 reader era parity (1.x–3.0.1)** | **NEW — spec drafted, not planned** | Run US1 first: survey every staged build before touching a reader. Three measured defects; the "4.0.0 works" premise is contradicted by measurement and must be resolved, not assumed. |
+| 104 Legacy M2/MDX rendering | 1.0.0 route complete; MDX material/effect shader checkpoint implemented with visual proof open | Validate shader compilation and translucent/reflective models against the configured client/build; keep full BLS parity separate. **Blocked in part by Spec 154** — M2 bone reading is broken outside the Alpha and late-3.x routes. |
 | 149 PM4 region navigation/audio trigger controls | Draft pack; resident area overlay, MCNK liquid producer, coordinate normalization, and opt-in speaker-marker slices implemented | Add area aggregation/audio-control tests, then complete per-trigger toggles and ZoneMusic indirection; retire correlation UI only after the region checkpoint; keep world triggers default-off. |
 | 150 Alpha 0.5.3 renderer performance | Draft evidence/planning pack complete; no source optimization started | Recover native world/terrain/object/resource/LOD anchors and run two repeated production `profile-render` baselines before choosing one owner. |
 | 148 Artifact world simulator runtime | Phase 1 diagnostics in progress; client contract correction landed | Add ZoneMusic indirection, then finish read/decode/source-stage coverage and user real-client inspection. |

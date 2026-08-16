@@ -2,6 +2,34 @@
 
 Last updated: 2026-08-15
 
+## 2026-08-15 — Spec 151 WMO admission instrumentation (source proof only, nothing measured)
+
+- Built the counter that was missing. `WmoAdmissionTally` / `WmoAdmissionStats` in
+  `Core.Runtime/World/Visibility` record **two layers**: which WMO placements entered the visible set
+  and why, and which groups inside them were submitted **and on whose authority** — runtime-visibility
+  disabled, placement-transform invalid, portal conservative fallback, portal only, frustum only,
+  both, or GPU-instanced shell. Surfaced at Utilities > Perf > "WMO admission (this frame)".
+- `CollectVisibleWmos` gained a `ref` overload; a test asserts it produces identical cull counts and
+  identical visible sets to the original, so the accounting cannot be blamed for a behaviour change.
+  It also counts the two rules the old `WmoCulledCount` never reported at all — hidden-by-uniqueId
+  and asset-not-resident both `continue`d without incrementing it.
+- **Four source findings, all with magnitudes unmeasured.** Portal culling **cannot reject** a group:
+  `UpdateRuntimeVisibility` unions the portal decision with raw frustum visibility, and a conservative
+  fallback admits everything by construction. WMO placements are **never rejected by the frustum**,
+  because the call sites pass `IgnoreVisionConeCulling: true` and the only frustum-rejecting branch is
+  guarded by `!IgnoreFrustumCulling && !IgnoreVisionConeCulling` — the same shape as the
+  old-Ironforge-past-fog symptom. Group admission is evaluated **twice per placement per frame**
+  (opaque + transparent both call `UpdateRuntimeVisibility`). And the recorded 7512 is a
+  **submission** count spanning both passes, not distinct groups; the old counter is left untouched so
+  the recorded capture stays comparable.
+- Solution builds with 0 errors. Core suite failure set is **byte-identical to the pre-change
+  baseline** (same 9 unrelated failures), +11 passing. Verified by stashing the change and diffing the
+  failure names, after an allocation-free-recording regression showed up and was fixed: the new frame
+  stats field had been initialised from a static property, putting a lazy class-constructor check on a
+  path the frame history asserts allocates nothing.
+- **Nothing is measured.** The user-owned Stormwind flight is what turns these counters into a
+  diagnosis. No admission rule may change before that reading exists.
+
 ## 2026-08-15 — v0.5.2.1 released; renderer owner moves to WMO group admission
 
 - **Shipped v0.5.2.1** (commit `975d0c79`, tag `v0.5.2.1`, branch `v0.5.3-dev`, release workflow
