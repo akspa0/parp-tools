@@ -7,7 +7,33 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 ## Current handoff
 
-**START HERE: Spec 153 — the stall is NAMED and Phase 2 is written. Re-capture Stranglethorn to confirm.**
+**START HERE: WMO group admission in dense interiors. Spec 153 is shipped as v0.5.2.1; the renderer
+owner has moved.**
+
+- **Confirmed by the Stormwind capture (2048 frames), taken after the Spec 153 fixes:**
+  `PrepareObjectPhase` max **283.4 → 2.5 ms** and gone from the hitch list; `SceneMaintenance` max
+  **454.5 → 3.9 ms**; unaccounted median 0.02 / p99 0.11 ms; median frame 17.40 → 6.98 ms.
+- **New owner: `WmoSubmission`** — p99 154.10 / max 161.3 ms with a median of 0.71 ms, and **all 592
+  recent hitches** read `<- WmoSubmission` at 153–157 ms. Stormwind submits **all districts at once**:
+  7512 visible groups, 80484 draw calls, 15852 doodad submissions. **This is an admission problem,
+  not batching** — 80200 of 80484 calls are correctly batched. Belongs to **Spec 151**
+  (portal-aware rendering), needs its own slice. **First step is instrumentation, not logic:** count
+  groups considered / admitted / rejected and by which rule, before changing any admission code.
+  That ordering has now paid off twice in a row. Suspect group-to-group visibility data the client
+  uses and this renderer does not read.
+- **Spec 153 Phase 4 may be moot** — it was written against `SceneMaintenance` max 454.8 ms, which no
+  longer reproduces (3.9 ms). Re-measure on a route that forces `_instancesDirty` before implementing.
+- **Spec 153 Phase 5 step 2 still owed:** `DeferredAssetLoads` max 442.9 ms in Stormwind against a
+  3.5 ms budget. The admission policy bounded the additive overshoot; the single-load residual needs
+  decode off the render thread.
+- **Released:** v0.5.2.1 (commit `975d0c79`, tag `v0.5.2.1`, branch `v0.5.3-dev`). Version bumped in
+  both csproj files and `ViewerApp.ViewerProductName`; `wow-viewer/CHANGELOG.md` added;
+  `docs/releases/v0.5.2.1.md` is what the release workflow publishes; both READMEs updated and the
+  Stormwind WMO issue is documented as a known issue rather than left for users to discover.
+
+---
+
+**Spec 153 detail (shipped) — the stall was NAMED, then fixed.**
 
 - **Defect A is `AudioRuntime.Update`, and it was never audio.** Captured 2026-08-15 in Stranglethorn:
   `PrepareObjectPhase` peak 283.47 ms of which `AudioRuntime.Update` was **283.46 ms**; PM4 overlay
@@ -161,7 +187,8 @@ the owning spec for requirements and proof; read a workstream only when the spec
 
 | Spec | State | Next handoff |
 |---|---|---|
-| **153 Renderer hitch and MDX batching** | **Phases 1/3/5 implemented, source-proven, UNMEASURED; Phases 0/2/4 open** | **Run the Stranglethorn capture protocol in `research.md`: name the ~212 ms stall, and take the MDX-batching before/after. No fix may be credited before it.** |
+| **151 Portal-aware rendering / WMO group admission** | **NEW PRIORITY 1 — measured owner of the remaining hitching** | **Stormwind: 7512 visible groups / 80484 draw calls, all 592 hitches are `WmoSubmission`. Instrument group admission (considered/admitted/rejected + rule) before changing logic.** |
+| 153 Renderer hitch and MDX batching | Phases 1/2/3/5 shipped as v0.5.2.1 and confirmed by capture; Phase 4 likely moot | Re-measure `SceneMaintenance` before implementing Phase 4; Phase 5 step 2 (decode off the render thread) still owed |
 | 152 Renderer frame-time stability / per-era lighting | Detector landed and used; its Phase 1 gate refuted the allocation hypothesis so Phases 3–5 are suspended | Owns the measurement infrastructure (done) and Phase 6 per-era terrain lighting (independent, not started, fixes 1.0.0+ darkness). |
 | 151 Portal-aware rendering/game mode/simple surface | Phase 1 portal checkpoint implemented; Phase 2 open | Add pure game-mode state/physics and character-head anchor; preserve editor camera state and stop at the focused physics checkpoint. |
 | 104 Legacy M2/MDX rendering | 1.0.0 route complete; MDX material/effect shader checkpoint implemented with visual proof open | Validate shader compilation and translucent/reflective models against the configured client/build; keep full BLS parity separate. |
