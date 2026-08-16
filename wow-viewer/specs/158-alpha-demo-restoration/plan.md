@@ -6,14 +6,15 @@
 
 ## Summary
 
-Six independently-shippable capabilities, in priority order: read a real WTF file's statements (US1 —
+Seven independently-shippable capabilities, in priority order: read a real WTF file's statements (US1 —
 **already delivered** by Spec 159's `WowViewer.Core.IO.Wtf` library, adopted here rather than rebuilt);
-execute worldport/teleport commands found in one (US2); a real, measured Alt+P keybind for the existing
-performance overlay (US3 — de-risked by Spec 159's direct read of `WTF\DefaultBindings.wtf`); attach the
-camera to a character model's bone (US4); equip a torch that casts a real dynamic point light (US5, split
-into two sub-phases — M2 attachment-point parsing and dynamic lighting — because they are very different
-sizes and risks); and replaying a captured investor demo (US6, explicitly blocked on Spec 159 finding a
-real source file).
+execute worldport/teleport commands found in one (US2); browse WTF files as a clickable index of
+explorable waypoints (US3 — the payoff of the WTF lane, turning a corpus of location commands into a
+usable frame of reference); a real, measured Alt+P keybind for the existing performance overlay (US4 —
+de-risked by Spec 159's direct read of `WTF\DefaultBindings.wtf`); attach the camera to a character
+model's bone (US5); equip a torch that casts a real dynamic point light (US6, split into two sub-phases —
+M2 attachment-point parsing and dynamic lighting — because they are very different sizes and risks); and
+replaying a captured investor demo (US7, explicitly blocked on Spec 159 finding a real source file).
 
 ## Technical Context
 
@@ -46,7 +47,7 @@ real source file).
 | III. Real-Data Validation | US1/US3 already validated against real 0.5.3.3368/2.0.0.5610 data via Spec 159. US2/US4/US5 require validation against real staged clients and real loaded models before being called done — planned explicitly per phase below | PASS (pending per-phase execution) |
 | Format Reader/Writer Ownership | M2Era100 attachment parsing **fills in** `M2Era100ModelReader.cs`'s already-documented, not-yet-implemented offsets (`M2Era100Constants.cs:143-147`) — this is completing an existing reader, not duplicating one. WTF line classification reuses Spec 159's `WtfLineClassifier` unmodified for statement recognition; this plan adds *execution* of already-classified lines, not a second parser | PASS |
 | Terrain Alpha Risk Area | Dynamic lighting (US5) touches shading, but only adds a point-light contribution — it must not alter MCAL decode, alpha packing, or existing shader blending paths. Flagged for explicit regression check against the pre-regression baseline | CONDITIONAL — checked in Phase 5b |
-| One Phase at a Time | Seven phases below (0 through 6, with 5 split into 5a/5b), each with its own validation gate | PASS |
+| One Phase at a Time | Eight phases below (0 through 6, with 2b inserted and 5 split into 5a/5b), each with its own validation gate | PASS |
 | Bite-Sized Plans | Each phase capped at ≤10 steps | PASS |
 | No Client Path Assumptions | All builds referenced via `--archive-root`/configured root, never hardcoded | PASS |
 | Core.Anim exclusion | No phase below touches `WowViewer.Core.Anim` | PASS |
@@ -100,6 +101,7 @@ src/core/WowViewer.Core.Renderer/
 src/viewer/WoWViewer/
 ├── ViewerApp_CameraFollow.cs             # NEW partial — attach/detach camera to a model's bone
 ├── ViewerApp_WtfCommands.cs              # NEW partial — run a WTF file's commands against the scene
+├── ViewerApp_WtfExplorer.cs              # NEW partial — WTF tab: files, waypoints, click-to-travel
 ├── ViewerKeyBindings.cs                  # EXTEND — Alt+P → ui.toggle_perf_overlay
 └── ViewerApp.cs                          # EXTEND — Alt+P edge-detected toggle (mirrors existing
                                            #           Ctrl/Shift modifier-check pattern at :1305-1344)
@@ -184,7 +186,29 @@ cover this.
 
 ---
 
-### Phase 3 (US3) — Alt+P keybind
+### Phase 2b (US3) — WTF explorer tab and waypoint index
+
+The payoff phase for the WTF lane: turn parsed location commands into a browsable, clickable index of
+places worth exploring. Depends on Phase 2's dispatcher; independent of everything after it.
+
+1. Define a `WtfWaypoint` view model: source file, source build, command kind (worldport/teleport),
+   target map (when present), position — enough to satisfy FR-018's traceability requirement.
+2. Extend the WTF sweep surface to accept a **folder** of collected WTF files spanning builds, not only a
+   single build's archive/loose surface (FR-020) — the user may hold a collection covering builds up
+   through ~8.x, and it must be usable without staging each client.
+3. Build the waypoint index: for each discovered file, extract every `PortCommandCandidate` line as a
+   waypoint. Files with zero waypoints stay listed (FR-019) — an empty result is a visible result.
+4. `ViewerApp_WtfExplorer.cs`: a tab listing files, their waypoints, and source/build provenance.
+5. Selecting a waypoint dispatches it through Phase 2's existing `WtfCommandDispatcher` — no second
+   execution path.
+6. Real-data validation: point the tab at a real folder/build, confirm listing and traceability; confirm
+   a same-map waypoint repositions without a map load and a cross-map waypoint loads first.
+
+**Exit gate**: SC-007 met, demonstrated live in the viewer.
+
+---
+
+### Phase 3 (US4) — Alt+P keybind
 
 Already de-risked: the binding's real target action name (`TOGGLEPERFORMANCEDISPLAY`) and modifier
 (`ALT-P`) are both confirmed from real 0.5.3.3368 data (Spec 159), not assumed.
@@ -202,7 +226,7 @@ this project's standard, must be exercised in the actual app, not unit-tested al
 
 ---
 
-### Phase 4 (US4) — Camera attached to a character model's bone
+### Phase 4 (US5) — Camera attached to a character model's bone
 
 1. Define `CameraFollowTarget` (`WowViewer.Core.Runtime/World/`): a reference to a placed model instance
    + bone index/KeyBoneId, with a method to resolve the bone's current world transform.
@@ -226,7 +250,7 @@ this project's standard, must be exercised in the actual app, not unit-tested al
 
 ---
 
-### Phase 5a (US5, part 1) — M2Era100 attachment-point parsing
+### Phase 5a (US6, part 1) — M2Era100 attachment-point parsing
 
 The format is already fully documented; this phase completes an existing reader, it does not design a
 new format.
@@ -252,7 +276,7 @@ for other future attachment consumers) independent of Phase 5b ever landing.
 
 ---
 
-### Phase 5b (US5, part 2) — Dynamic point-light rendering
+### Phase 5b (US6, part 2) — Dynamic point-light rendering
 
 The largest, riskiest phase in this spec — genuinely new rendering infrastructure where today there is
 none (`TerrainShader.cs` has exactly one static directional light).
@@ -284,7 +308,7 @@ recorded with its baseline commit cited, per the constitution's explicit require
 
 ---
 
-### Phase 6 (US6) — Explicitly not started
+### Phase 6 (US7) — Explicitly not started
 
 No code. This phase exists in the plan only to state, in the same place every other phase's status
 lives, that it remains blocked on Spec 159 locating a real source file (per spec.md's Scope Note and

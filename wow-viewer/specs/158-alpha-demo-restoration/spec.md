@@ -62,12 +62,12 @@ immediately useful against real files available right now, and is ready the mome
 (the community file-list catalogs thousands of `WTF\<name>.wtf` entries across all WoW versions
 generally, e.g. `WTF\AhnQiraj.wtf` — a possible future lead, not a confirmed or accessible source today).
 So this spec builds the general capability (User Stories 1–2) and keeps the specific "replay a captured
-investor demo" experience as its own story (User Story 6), stated plainly as blocked on a source that
+investor demo" experience as its own story (User Story 7), stated plainly as blocked on a source that
 does not currently exist in this project's possession, rather than silently dropped or silently promised.
 If a real source file surfaces later — from the user's own records, a community archive, or anywhere else
-— User Story 6 needs nothing rebuilt, only that file.
+— User Story 7 needs nothing rebuilt, only that file.
 
-The camera-follow and torchlight stories (User Stories 4–5) are independent of the WTF/command work —
+The camera-follow and torchlight stories (User Stories 5–6) are independent of the WTF/command work —
 they deliver "we have never seen the torches in action" regardless of whether any demo file is ever
 found, using a character model and its own attachment/lighting-relevant data that already exists in
 staged clients today.
@@ -130,7 +130,42 @@ attempted.
 
 ---
 
-### User Story 3 - Toggle the performance overlay with Alt+P (Priority: P2)
+### User Story 3 - Browse WTF files and jump to the places they name (Priority: P2)
+
+A user opens a WTF tab in the viewer, sees every WTF file discovered across a build (or across a folder
+of collected WTF files spanning many builds), and sees the locations each one names as a list of
+explorable waypoints. Clicking one jumps the camera there — loading a different map first if the command
+names one. The result is a browsable frame of reference built out of the locations Blizzard's own
+developers marked, rather than coordinates a person has to find by wandering.
+
+**Why this priority**: This is the actual payoff behind the WTF work — "a good frame of reference from
+the data that already exists in the client data files." Story 2 makes a single command executable; this
+story is what makes a corpus of them *useful*, by turning them into a browsable, clickable index of
+places worth looking at. It sits at P2 rather than P1 only because it needs Story 2's execution
+mechanics underneath it.
+
+**Independent Test**: Point the tab at a folder of WTF files (or a staged build), confirm every file and
+every location it names is listed, and confirm clicking a location moves the camera there — including the
+cross-map case, which must load the target map first.
+
+**Acceptance Scenarios**:
+
+1. **Given** a folder or build containing WTF files, **When** the tab is opened, **Then** every discovered
+   file is listed, with the locations it names shown as selectable waypoints.
+2. **Given** a listed waypoint whose command names a map, **When** the user selects it, **Then** that map
+   is loaded if needed and the camera moves to the named position.
+3. **Given** a listed waypoint whose command names no map, **When** the user selects it, **Then** the
+   camera moves to that position on the currently loaded map, with no map load attempted.
+4. **Given** a WTF file containing no location commands at all (a pure settings file), **When** the tab
+   lists it, **Then** it appears with zero waypoints rather than being hidden — an empty result is
+   visible, not silently filtered away.
+5. **Given** waypoints collected from files spanning multiple builds, **When** they are listed, **Then**
+   each waypoint shows which file and which build it came from, so a location is always traceable to its
+   source.
+
+---
+
+### User Story 4 - Toggle the performance overlay with Alt+P (Priority: P2)
 
 A user presses Alt+P and the existing performance overlay (frame stats, perf graph) appears or
 disappears, exactly as it does today from its toolbar buttons — matching the keybind the real 2001-era
@@ -152,7 +187,7 @@ disappears. Confirm every other keybind (including the existing bare "P") behave
 
 ---
 
-### User Story 4 - Attach the camera to a character model (Priority: P3)
+### User Story 5 - Attach the camera to a character model (Priority: P3)
 
 A user selects a loaded, animating character model and switches the camera to follow it — the camera
 tracks a specific point on the model (e.g. its head or eye position) every frame, moving and turning with
@@ -176,7 +211,7 @@ perceptible drift or lag. Switch back to free-fly; confirm normal camera control
 
 ---
 
-### User Story 5 - Equip a torch that casts real light (Priority: P3)
+### User Story 6 - Equip a torch that casts real light (Priority: P3)
 
 A user equips a torch (or similar lit item) onto a character model — attached at the model's hand, using
 the model's own attachment data — and the torch visibly lights up nearby terrain and objects as it moves,
@@ -207,7 +242,7 @@ though the two together are what reproduces the referenced screenshot most direc
 
 ---
 
-### User Story 6 - Replay a captured investor demo (Priority: P4 — blocked)
+### User Story 7 - Replay a captured investor demo (Priority: P4 — blocked)
 
 A user loads a real captured `demo*.wtf` file and watches the viewer step through the same sequence of
 worldport/teleport commands and setting changes an early-Alpha investor demo would have shown.
@@ -284,9 +319,17 @@ built in Stories 1–2 unmodified.
   MUST combine with, not replace or break, any existing static lighting already present in the scene.
 - **FR-015**: Removing or un-equipping a light-emitting item MUST remove its light contribution
   immediately, with no residual glow.
-- **FR-016**: This feature MUST NOT claim or require that a real `demo*.wtf` file exists — that capability
-  (User Story 6) is explicitly blocked on finding one and MUST be reported as such, not delivered as if
-  data were available when it is not.
+- **FR-016**: This feature MUST NOT claim or require that a real location-command WTF file exists — that
+  capability (User Story 7) is explicitly blocked on finding one and MUST be reported as such, not
+  delivered as if data were available when it is not.
+- **FR-017**: System MUST present discovered WTF files and the locations they name as a browsable list in
+  the viewer, with each location selectable to move the camera there.
+- **FR-018**: A listed location MUST record which file and which build it came from, so any waypoint is
+  traceable to its source.
+- **FR-019**: A WTF file containing no location commands MUST still be listed, showing zero waypoints —
+  never hidden or silently filtered out.
+- **FR-020**: The WTF browser MUST accept a folder of collected WTF files spanning multiple builds, not
+  only the WTF surface of a single currently-loaded build.
 
 ### Key Entities
 
@@ -309,6 +352,9 @@ built in Stories 1–2 unmodified.
   the file's plain-text contents exactly, spot-checked against the raw file.
 - **SC-002**: A worldport command changes both the loaded map and the camera's position; a teleport
   command changes only the camera's position on the map already loaded, and never triggers a map load.
+- **SC-007**: A user can open the WTF tab, see every discovered file and the locations it names, and click
+  a location to arrive there — including a cross-map location, which loads its target map first. Files
+  with no locations still appear, showing zero waypoints.
 - **SC-003**: Alt+P toggles the performance overlay with no other observable side effect, matching the
   existing toolbar toggle exactly.
 - **SC-004**: A camera following a model's bone stays visually attached to it throughout a played
@@ -317,7 +363,7 @@ built in Stories 1–2 unmodified.
   brightening moves with the character with no observable lag, in a scene dim enough for the effect to be
   clearly visible (recreating the referenced 2001 screenshot's conditions).
 - **SC-006**: No part of this feature is delivered by claiming a `demo*.wtf` file exists when it does not
-  — User Story 6 is explicitly reported as blocked-on-data rather than silently omitted or silently
+  — User Story 7 is explicitly reported as blocked-on-data rather than silently omitted or silently
   marked done.
 
 ## Assumptions
