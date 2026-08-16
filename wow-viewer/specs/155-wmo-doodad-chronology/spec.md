@@ -1,4 +1,4 @@
-# Feature Specification: WMO Doodad Inventory and Asset Chronology
+# Feature Specification: Asset Reference Inventory — Expected vs Catalogued vs Present
 
 **Feature Branch**: `v0.5.3-dev` (this repository keeps specs on the active dev branch)
 
@@ -6,116 +6,180 @@
 
 **Status**: Draft
 
-**Input**: User description: "take inventory of every doodad in every wmo, to determine the order in which each object was introduced into the game… per-build… and across many builds… to keep track of objects through the years or missing objects or objects with incorrect names that just don't load because they don't exist… We should offer the ability to fixup old data or broken data in that way, as part of our conversion tools, which need to be made to work again, properly."
+**Input**: User description: "take inventory of every doodad in every wmo… a way to log the doodads loaded in wmo's, and then a way to analyze all wmo's, and then also a way to analyze all mdx or m2 files as well, for texture data that may or may not exist… We need an inventory of what the game data expects exists, versus what the listfiles provide, as we believe there are a lot of missing assets that no one knows about, which may have related data in the existing data corpus, which could be used to patch things back into full function."
 
 ## Context
 
-There is no accurate record of which art assets entered the game when. `uniqueId` is the chronology of
-record for **world layout**, but it is a doodad-placement clock and does not date the assets
-themselves. What every WMO references, tracked across builds, is the other available signal — and it
-additionally exposes references that resolve to nothing, which are silently invisible in a running
-client.
+Game data is full of references: a world object names the doodads it places, a world object names the
+textures its materials use, a model names the textures it draws with. Each reference is a claim that
+some asset exists. **Nobody has ever compared the full set of those claims against what the game
+actually ships.**
+
+This feature builds that comparison, delivered through the existing inspection tooling, which already
+reads every format involved and needs analysis surfaces rather than new readers.
+
+### The signal is visible in-world, and there is a known instance
+
+The real engine draws an untextured object **bright neon green**. This holds in at least every
+pre-alpha and beta Vanilla build. A missing texture is therefore not a silent defect — it is a
+recognisable artifact, and the corresponding reference is recoverable from the data.
+
+Two effect objects on the side of Mt. Hyjal are the worked example. They appear as green smoke because
+their water-spray texture is missing. The objects became well known when Classic launched in 2018 and
+explorers found them exactly where they had been claimed to be. Inspecting them in this project's own
+viewer showed the cause: the texture reference resolves to nothing.
+
+**This makes the Mt. Hyjal objects a positive control for the entire feature.** A sweep that does not
+flag them is broken, whatever else it reports. This project has been caught before reporting null
+results from detectors that could not have seen the thing; a known-true instance removes that risk.
+
+### Three sets, not two
+
+The interesting output is not a list — it is the disagreement between three sets:
+
+- **Expected** — every asset the game data references.
+- **Catalogued** — every asset the listfiles name.
+- **Present** — every asset actually readable from the build.
+
+| Catalogued | Present | Meaning |
+|---|---|---|
+| yes | yes | Working reference; nothing to report |
+| yes | no | The catalogue claims an asset the build does not contain |
+| no | yes | Catalogue gap — the asset is there but unnamed by any listfile |
+| no | no | **Missing asset.** The Mt. Hyjal case |
+
+And separately: **present but never referenced** — assets the game ships and nothing uses. These are
+orphans, and they are the donor pool for repair, because a missing reference and an unreferenced asset
+that resembles it are very often the same asset under a changed name.
 
 ### Measured grounding (2026-08-16, staged clients)
 
-| Build | Files known | WMO packaging | Corpus size |
+| Build | Files catalogued | World objects | Models |
 |---|---|---|---|
-| 0.5.3.3368 | 42,765 | One per-asset container per WMO under the loose `World` tree | 532 |
-| 3.0.1.8303 | 131,106 | Ordinary entries inside packaged archives | 9,711 |
+| 0.5.3.3368 | 42,765 | 532, as per-asset containers under the loose `World` tree | 5,545 |
+| 3.0.1.8303 | 131,106 | 9,711, as packaged archive entries | 17,296 |
 
-**The corpus is already readable, and the existing data-access layer already handles both shapes.**
-The archive catalogue scans the loose tree for per-asset containers, the data source maps a container
-back to the logical asset path it holds, the native archive service knows these are listfile-less
-single-file archives and already de-duplicates their double registration so enumeration does not emit
-each WMO twice, and the V14 converter documents that it handles per-asset containers automatically.
-The viewer reads this data today. **Nothing about corpus access needs to be invented.**
-
-**One surface does not see them, and that is a usage trap, not a defect.** Building an index cache from
-archive *internal listfiles* returns a single WMO for the earliest build, because per-asset containers
-carry no internal listfile by design. That surface answers "what does this archive's listfile declare",
-which is a different question from "what world objects does this build contain". Choosing it for corpus
-enumeration would under-count 532 as 1 and produce a timeline dating every asset later than it arrived,
-while looking authoritative.
-
-**Consequences that shape this feature:**
-
-- The inventory is built on the existing data-access layer, which already resolves both packaging
-  shapes. It is not built on the listfile index.
-- Where a build keeps its world objects, and how they are packaged, is **build-dependent**; the two
-  staged shapes above already differ. The feature reports what it found rather than assuming a layout.
-- "This asset does not exist" is the feature's most dangerous claim. It must rest on a failed lookup
-  through the data-access layer against what the build actually contains — never on absence from an
-  index, which is exactly the trap above in its most damaging form.
+Packaging differs by build and the existing data-access layer already handles both. One caution
+carries forward: **archive internal listfiles are the "catalogued" set, not the "present" set.**
+Per-asset containers carry no internal listfile, so an index built from them names one world object for
+the earliest build rather than 532. That is precisely the catalogue-versus-present distinction this
+feature exists to measure — but it must not be mistaken for the corpus itself when sweeping.
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - Inventory every doodad reference and say which resolve (Priority: P1)
+### User Story 1 - See what one asset references and whether it resolves (Priority: P1)
 
-Someone gets, for one build, every doodad reference made by every world object in that build, each
-marked as resolving to a real asset or not — with the corpus taken from the data-access layer that
-already reads this data, and its size reported so the reader can see it is complete.
+Someone inspects a single world object or model and gets every reference it makes — the doodads a world
+object places, the textures a world object's materials use, the textures a model draws with — each
+marked as resolving or not.
 
-**Why this priority**: This is the inventory itself and the direct source of the missing-asset finding.
-It stands alone: even with no chronology, a per-build list of references that resolve to nothing is
-immediately useful. Corpus access is not a precondition to build — it exists — but the reported corpus
-size is the reader's check that the right surface was used, so it is part of this story rather than a
-separate one.
+**Why this priority**: It is the foundation every sweep is built from, and it is independently useful
+immediately: it is the manual diagnosis that identified the Mt. Hyjal objects, made repeatable.
 
-**Independent Test**: Produce the inventory for one build, confirm the reported corpus size matches
-what the build holds (532 for the earliest staged build, not 1), and confirm every reference carries a
-resolution outcome with none left unclassified.
+**Independent Test**: Inspect the Mt. Hyjal effect objects and confirm the missing water-spray texture
+reference is reported as unresolved.
 
 **Acceptance Scenarios**:
 
-1. **Given** a build's world objects, **When** the inventory runs, **Then** every doodad reference from
-   every object is recorded with the object that made it.
-2. **Given** any build, **When** the inventory runs, **Then** it reports how many world objects it
-   examined and how they were packaged, so an under-counted corpus is visible rather than silent.
-3. **Given** a build packaging world objects as per-asset containers, **When** the inventory runs,
-   **Then** all of them are examined — the earliest staged build yields 532, not 1.
-4. **Given** a reference, **When** it is resolved, **Then** the outcome distinguishes "found",
-   "not found", and "could not be checked" — the third is never silently merged into the second.
-5. **Given** a reference absent from an index but present in the build's actual contents, **When** it
-   is resolved, **Then** it is reported as found.
-6. **Given** the same object appearing in more than one build, **When** inventories are compared,
-   **Then** its references can be compared across those builds.
+1. **Given** a world object, **When** it is inspected, **Then** every doodad it references is listed.
+2. **Given** a world object, **When** it is inspected, **Then** every texture its materials reference is
+   listed.
+3. **Given** a model, **When** it is inspected, **Then** every texture it references is listed.
+4. **Given** any reference, **When** it is reported, **Then** it carries whether it resolves to a
+   readable asset in that build.
+5. **Given** the Mt. Hyjal effect objects, **When** they are inspected, **Then** the unresolved
+   water-spray texture reference appears.
 
 ---
 
-### User Story 2 - Separate what never shipped from what was misnamed (Priority: P2)
+### User Story 2 - Sweep every world object and every model in a build (Priority: P2)
 
-For each reference that resolves to nothing, someone learns whether the build contains a near-match
-that is plausibly the intended asset, or whether nothing resembling it exists.
+Someone points the tooling at a build and gets the complete reference ledger for it — every world
+object and every model, every reference each makes, and whether each resolves.
 
-**Why this priority**: This is what converts a list of broken references into something actionable, and
-it is the precondition for any repair. It also carries the feature's main false-positive risk, so it is
-specified before repair rather than alongside it.
+**Why this priority**: The whole premise is that there are many unknown missing assets. One-at-a-time
+inspection cannot find what nobody knows to look for; only a sweep can.
 
-**Independent Test**: Run classification over one build's unresolved references and confirm each is
-labelled, with the evidence for any near-match stated and inspectable.
+**Independent Test**: Sweep the earliest staged build, confirm the examined counts match its actual
+contents, and confirm the Mt. Hyjal objects appear in the results without having been targeted.
 
 **Acceptance Scenarios**:
 
-1. **Given** an unresolved reference with no plausible match, **When** it is classified, **Then** it is
-   labelled as having no candidate.
-2. **Given** an unresolved reference where a real asset in the same build differs only in spelling,
-   punctuation, casing, extension, or path, **When** it is classified, **Then** the candidate is
-   reported with the nature of the difference.
-3. **Given** any candidate, **When** it is reported, **Then** it is an asset that exists **in that same
-   build** — never one drawn from a different build or invented.
+1. **Given** a build, **When** it is swept, **Then** every world object and every model in it is
+   examined.
+2. **Given** a sweep, **When** it completes, **Then** it reports how many assets of each kind it
+   examined, so an under-counted sweep is visible rather than silent.
+3. **Given** a build packaging world objects as per-asset containers, **When** it is swept, **Then** all
+   532 are examined, not the one an internal-listfile index would name.
+4. **Given** a sweep of the build containing them, **When** it completes, **Then** the Mt. Hyjal effect
+   objects are flagged **without having been named in advance**.
+5. **Given** an asset that cannot be read at all, **When** the sweep encounters it, **Then** it is
+   recorded as unreadable and the sweep continues.
+
+---
+
+### User Story 3 - Compare what the data expects against what the catalogue names (Priority: P3)
+
+Someone gets, for one build, the disagreement between what the game data references, what the listfiles
+name, and what the build actually contains — including assets that ship but nothing references.
+
+**Why this priority**: This is the headline deliverable and the thing that has never been produced. It
+is P3 only because it is a function of US1 and US2 being complete.
+
+**Independent Test**: Produce the comparison for one build and confirm every referenced asset lands in
+exactly one category, with orphans listed separately.
+
+**Acceptance Scenarios**:
+
+1. **Given** a swept build, **When** the comparison runs, **Then** every referenced asset is classified
+   as working, catalogue-claims-but-absent, catalogue-gap, or missing.
+2. **Given** an asset present in the build but named by no listfile, **When** it is classified, **Then**
+   it is reported as a catalogue gap and **not** as missing.
+3. **Given** an asset the listfiles name but the build does not contain, **When** it is classified,
+   **Then** it is reported as such and not conflated with an asset nothing references.
+4. **Given** assets present but referenced by nothing, **When** the comparison runs, **Then** they are
+   listed as orphans.
+5. **Given** the comparison for a build, **When** it is reported, **Then** counts per category are
+   stated, so the scale of the missing-asset population is visible.
+
+---
+
+### User Story 4 - Find the asset that was probably meant (Priority: P4)
+
+For each missing reference, someone learns whether the build contains an asset that is plausibly the
+intended one — an orphan with a near-identical name, a differing extension, a moved path, a spelling or
+casing drift.
+
+**Why this priority**: This converts the inventory into something repairable, and it is where the
+"related data already in the corpus" idea is tested. It carries the feature's main false-positive risk,
+so it is specified before any repair happens.
+
+**Independent Test**: Run candidate matching over one build's missing references and confirm each
+candidate is an asset verified present in that same build, with the nature of the difference stated.
+
+**Acceptance Scenarios**:
+
+1. **Given** a missing reference with no plausible candidate, **When** it is classified, **Then** it is
+   reported as having none.
+2. **Given** a missing reference where a present asset differs only in spelling, punctuation, casing,
+   extension, or path, **When** it is classified, **Then** that candidate is reported with the nature of
+   the difference.
+3. **Given** any candidate, **When** it is reported, **Then** it is verified present **in that same
+   build** — never drawn from another build and never invented.
 4. **Given** several plausible candidates, **When** they are reported, **Then** all are listed and none
    is silently chosen.
+5. **Given** the Mt. Hyjal missing texture, **When** candidates are sought, **Then** the result states
+   whether a plausible water-spray texture exists in that build.
 
 ---
 
-### User Story 3 - Date each asset across builds (Priority: P3)
+### User Story 5 - Date assets across builds (Priority: P5)
 
-Someone gets, across the staged builds, the window in which each asset first appears and — where it
-happens — when it disappears.
+Someone gets, across the staged builds, the window in which each asset first appears, and where it
+happens, when it disappears.
 
-**Why this priority**: This is the driving goal. It sits behind the inventory only because it is a
-function of the inventory being complete: a timeline built over an under-counted corpus is worse than
-no timeline, because it looks authoritative while dating every asset later than it arrived.
+**Why this priority**: Valuable and originally the driving goal, but it depends on the per-build ledger
+being complete, and the missing-asset finding delivers value without it.
 
 **Independent Test**: Produce the timeline across at least three builds and confirm every asset carries
 an introduction window bounded by named builds.
@@ -124,51 +188,28 @@ an introduction window bounded by named builds.
 
 1. **Given** an asset present in one build and absent from an earlier one, **When** the timeline is
    built, **Then** its introduction is recorded as a window bounded by those two named builds.
-2. **Given** an asset present in an earlier build and absent later, **When** the timeline is built,
-   **Then** the disappearance is recorded as its own fact, not as an error.
-3. **Given** any timeline entry, **When** it is reported, **Then** it names the builds the claim rests
-   on and states that its granularity is between-build.
-4. **Given** two builds separated by only a patch increment, **When** they are compared, **Then** they
-   are treated as two distinct artifacts and neither stands in for the other.
+2. **Given** an asset present earlier and absent later, **When** the timeline is built, **Then** the
+   disappearance is recorded as its own fact.
+3. **Given** any timeline entry, **When** it is reported, **Then** it names the builds it rests on and
+   states that its granularity is between-build.
+4. **Given** two builds separated only by a patch increment, **When** they are compared, **Then** they
+   are treated as distinct artifacts and neither stands in for the other.
+5. **Given** a reference that is missing in one build and resolves in another, **When** the timeline is
+   built, **Then** that is recorded — an asset that arrived late is distinguishable from one that never
+   shipped.
 
 ---
 
-### User Story 4 - Test whether ordering within a file dates assets more finely (Priority: P4)
+### User Story 6 - Repair broken references, on purpose and reversibly (Priority: P6)
 
-Someone learns whether the order in which doodads appear inside a world object's own tables carries
-introduction chronology — and gets a straight answer, including "it does not".
-
-**Why this priority**: A finer-grained clock than between-build would be valuable, but it is a
-hypothesis, and US3 supplies the ground truth to test it against. Reporting a within-file chronology
-before testing it would be asserting a clock nobody has checked.
-
-**Independent Test**: Take assets whose introduction window is already known from US3, check whether
-within-file ordering predicts that known order at better than chance, and report the result either way.
-
-**Acceptance Scenarios**:
-
-1. **Given** assets with known introduction windows, **When** within-file ordering is tested against
-   them, **Then** the test reports agreement, disagreement, or no relationship.
-2. **Given** the test finds no relationship, **When** it is reported, **Then** the null result is
-   recorded as a finding and within-file ordering is not used for chronology.
-3. **Given** the test is run, **When** it is reported, **Then** it states whether it could have
-   detected the relationship had one existed — a test that could not have seen the effect is not
-   evidence of its absence.
-4. **Given** the test finds a relationship, **When** any chronology uses it, **Then** that chronology
-   states it rests on the finer-grained signal and cites the validation.
-
----
-
-### User Story 5 - Repair broken references, on purpose and reversibly (Priority: P5)
-
-Someone can have broken references repointed at assets that genuinely exist in that build, with a full
+Someone can have missing references repointed at assets that genuinely exist in that build, with a full
 record of what changed and the ability to undo it.
 
-**Why this priority**: The payoff, but it modifies data, so it comes last and only after classification
-is trustworthy.
+**Why this priority**: The payoff, but it modifies data, so it comes last and only once candidate
+matching is trustworthy.
 
-**Independent Test**: Repair a set of references, confirm each change is recorded with its evidence,
-and confirm the original state can be restored exactly.
+**Independent Test**: Repair a set of references, confirm each change is recorded with its evidence, and
+confirm the original state can be restored exactly.
 
 **Acceptance Scenarios**:
 
@@ -177,30 +218,28 @@ and confirm the original state can be restored exactly.
    reference, the replacement, and the evidence for the match.
 3. **Given** a repair is applied, **When** it is undone, **Then** the data returns to its exact prior
    state.
-4. **Given** an unresolved reference with no candidate, **When** repair runs, **Then** it is left
+4. **Given** a missing reference with no candidate or several, **When** repair runs, **Then** it is left
    untouched and reported.
-5. **Given** several candidates, **When** repair runs, **Then** it does not choose silently.
 
 ---
 
-### User Story 6 - Know what the conversion tools can actually do (Priority: P6)
+### User Story 7 - Know what the conversion tools can actually do (Priority: P7)
 
 Someone gets a straight statement of which conversion operations currently work, which are broken, and
 how each compares to the maturity of terrain reading — before any parity is promised.
 
-**Why this priority**: "Make them work again properly" cannot be scoped until the current state is
-known. This project has already been burned by a documented tool that did not exist and by a "working"
-route that measurement falsified; establishing the baseline first is the cheap way not to repeat it.
+**Why this priority**: "Make them work properly again" cannot be scoped before the current state is
+known. This project has twice been caught by a capability that was documented or assumed but not real.
 
 **Independent Test**: Run each conversion operation against real staged data and record the outcome,
 then compare that record against what the tools claim to do.
 
 **Acceptance Scenarios**:
 
-1. **Given** each conversion operation, **When** it is exercised against real data, **Then** its
-   outcome is recorded with the build it was run against.
-2. **Given** an operation that fails, **When** it is recorded, **Then** the record states what failed
-   rather than only that it failed.
+1. **Given** each conversion operation, **When** it is exercised against real data, **Then** its outcome
+   is recorded with the build it ran against.
+2. **Given** an operation that fails, **When** it is recorded, **Then** the record states what failed,
+   not only that it failed.
 3. **Given** the survey is complete, **When** parity work is scoped, **Then** it targets recorded
    defects rather than assumed ones.
 4. **Given** any documented capability, **When** it is compared against the survey, **Then**
@@ -208,67 +247,70 @@ then compare that record against what the tools claim to do.
 
 ### Edge Cases
 
-- A build whose world objects are packaged in a way no other build uses.
-- A build where the index and the actual contents disagree — which is already the measured case.
-- A reference that resolves in one build and not in another; this is data, not an error.
-- An asset present under two different paths in the same build.
-- A reference that resolves only because a supplemental index claims it, with nothing actually present.
-- An object referenced by nothing, and an object referencing nothing.
-- Assets renamed between builds, which appear as one disappearance and one introduction unless
-  recognised; the timeline must not present a rename as a new asset without saying it cannot tell.
-- Case-insensitive path collisions, where two references differ only in case and both resolve.
-- A build in which the same asset is referenced by hundreds of objects — the inventory must scale
-  without conflating references with assets.
+- An asset intentionally missing to produce an in-game effect. The inventory reports the fact; it does
+  not decide intent, and repair must never assume a missing asset is a defect.
+- A reference that resolves only because a listfile names it, with nothing actually readable behind it.
+- The same asset present under two paths differing only in case.
+- A reference using a different extension than the asset actually shipped with.
+- An asset referenced by hundreds of objects — references and assets must never be conflated in counts.
+- A build where the catalogue is far smaller than what is present, which is already the measured case.
+- A model or world object that cannot be read at all; it must not abort a sweep.
+- Renames across builds, which appear as one disappearance plus one introduction unless recognised. The
+  timeline must say it cannot tell rather than manufacture an introduction.
+- Assets referenced by data outside world objects and models, which this feature does not sweep and must
+  not implicitly claim are unreferenced.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-- **FR-001**: The system MUST obtain each build's world-object corpus through the existing data-access
-  layer, which already resolves both per-asset containers and packaged archive entries. It MUST NOT
-  derive the corpus from archive internal listfiles, which do not describe per-asset containers.
-- **FR-002**: The system MUST report how many world objects it examined and how they were packaged, so
-  that an under-counted corpus is visible in the output rather than silent.
-- **FR-003**: The system MUST NOT assume any build's storage layout from another build's layout.
-- **FR-003**: The system MUST record every doodad reference made by every world object in a build,
-  attributed to the object that made it.
-- **FR-004**: The system MUST resolve each reference against what the build actually contains, and MUST
-  NOT conclude absence from an index alone.
-- **FR-005**: The system MUST distinguish "found", "not found", and "could not be checked", and MUST
-  never merge the third into the second.
-- **FR-006**: The system MUST classify each unresolved reference as having no candidate, one candidate,
-  or several, and MUST state the evidence for any candidate.
-- **FR-007**: A candidate MUST be an asset present in the same build. The system MUST NOT propose an
-  asset from another build or one that does not exist.
-- **FR-008**: The system MUST express asset introduction as a window bounded by two named builds, and
+- **FR-001**: The system MUST report, for a single world object, every doodad and every texture it
+  references.
+- **FR-002**: The system MUST report, for a single model, every texture it references.
+- **FR-003**: The system MUST sweep every world object and every model in a build.
+- **FR-004**: The system MUST obtain the corpus through the data-access layer that already resolves both
+  per-asset containers and packaged archive entries, and MUST NOT derive it from archive internal
+  listfiles.
+- **FR-005**: The system MUST report how many assets of each kind it examined, so an under-counted sweep
+  is visible rather than silent.
+- **FR-006**: The system MUST classify each referenced asset as working, catalogue-claims-but-absent,
+  catalogue-gap, or missing — treating "named by a listfile" and "readable from the build" as separate
+  facts that are never merged.
+- **FR-007**: The system MUST report assets that are present but referenced by nothing.
+- **FR-008**: The system MUST propose candidate matches for missing references only from assets verified
+  present in the same build, MUST state the nature of the difference, and MUST list all candidates
+  rather than choosing.
+- **FR-009**: The system MUST continue a sweep when an individual asset cannot be read, recording it as
+  unreadable.
+- **FR-010**: The system MUST express asset introduction as a window bounded by two named builds and
   MUST state the granularity of any chronology claim.
-- **FR-009**: The system MUST validate the within-file ordering hypothesis against between-build
-  ground truth before any chronology relies on it, MUST report a null result as a finding, and MUST
-  state whether the test could have detected the effect.
-- **FR-010**: The system MUST treat each build as a distinct artifact. A finding for one build MUST NOT
-  be recorded as a finding for any other, including the adjacent patch.
-- **FR-011**: The system MUST NOT modify any data unless repair is explicitly requested.
-- **FR-012**: Every repair MUST record the original reference, the replacement, and the evidence, and
+- **FR-011**: The system MUST treat each build as a distinct artifact; a finding for one build MUST NOT
+  be recorded as a finding for another, including the adjacent patch.
+- **FR-012**: The system MUST NOT modify any data unless repair is explicitly requested.
+- **FR-013**: Every repair MUST record the original reference, the replacement, and the evidence, and
   MUST be reversible to the exact prior state.
-- **FR-013**: The system MUST leave untouched, and report, any unresolved reference it cannot repair
+- **FR-014**: The system MUST leave untouched, and report, any missing reference it cannot repair
   unambiguously.
-- **FR-014**: The system MUST record the current working state of each conversion operation against
-  real data before parity work is scoped.
-- **FR-015**: Every record the system produces MUST carry the build identity it came from.
-- **FR-016**: Records MUST contain paths, outcomes, and provenance only — never client file content.
+- **FR-015**: The system MUST record the current working state of each conversion operation against real
+  data before parity work is scoped.
+- **FR-016**: Every record MUST carry the build identity it came from, and MUST contain paths, outcomes,
+  and provenance only — never client file content.
 
 ### Key Entities
 
 - **Build identity**: The specific client an observation came from, carried by every record.
-- **Corpus discovery**: For one build, where its world objects live, how they are packaged, how many
-  were found, and any disagreement between the build's index and its actual contents.
-- **World object**: One WMO in one build, with the doodad references it makes.
-- **Doodad reference**: One reference from one object to one asset, with its resolution outcome.
-- **Asset**: A referenced art file, tracked across builds by path.
-- **Resolution outcome**: Found, not found, or not checkable — plus how it was determined.
-- **Candidate match**: A real asset in the same build proposed for an unresolved reference, with the
+- **Referencing asset**: One world object or model in one build.
+- **Reference**: One claim by a referencing asset that some asset exists, with its kind — placed doodad,
+  world-object texture, or model texture.
+- **Referenced asset**: The target, tracked across builds by path.
+- **Catalogue entry**: An asset named by a listfile. Naming is not existence.
+- **Presence**: Whether an asset is actually readable from the build, determined independently of the
+  catalogue.
+- **Reference classification**: Working, catalogue-claims-but-absent, catalogue-gap, or missing.
+- **Orphan**: An asset present in a build and referenced by nothing swept.
+- **Candidate match**: A present asset in the same build proposed for a missing reference, with the
   nature of the difference.
-- **Introduction window**: The bounded interval, named by two builds, in which an asset first appears.
+- **Introduction window**: The interval, named by two builds, in which an asset first appears.
 - **Repair record**: Original, replacement, evidence, and what is needed to reverse it.
 - **Conversion capability record**: One operation, one build, what happened.
 
@@ -276,42 +318,44 @@ then compare that record against what the tools claim to do.
 
 ### Measurable Outcomes
 
-- **SC-001**: The inventory reports examining **532** world objects for the earliest staged build, and
-  a count matching actual contents for every other staged build. A run reporting **1** for the earliest
-  build indicates the listfile index was used instead of the data-access layer and is a failure.
-- **SC-002**: 100% of doodad references in a surveyed build carry a resolution outcome; none is
-  unclassified.
-- **SC-003**: Zero references are reported missing solely because an index omitted them.
-- **SC-004**: 100% of unresolved references are classified as having no candidate, one, or several.
-- **SC-005**: Every proposed candidate is verified present in the same build; zero candidates reference
-  a non-existent or cross-build asset.
-- **SC-006**: Every asset in the timeline carries an introduction window bounded by two named builds,
-  and every chronology claim states its granularity.
-- **SC-007**: The within-file ordering hypothesis has a recorded result — including, if that is the
-  answer, that no relationship was found and that the test had the power to find one.
-- **SC-008**: Zero data is modified when repair is not requested.
-- **SC-009**: 100% of applied repairs are reversible to the exact prior state, demonstrated by
-  restoring and comparing.
-- **SC-010**: Every conversion operation has a recorded outcome against real data before any parity
+- **SC-001**: The Mt. Hyjal effect objects are flagged by an untargeted sweep of the build containing
+  them. A sweep that does not flag them is failed, regardless of what else it reports.
+- **SC-002**: A sweep reports examining 532 world objects for the earliest staged build; a run reporting
+  1 indicates the internal-listfile index was used instead of the data-access layer and is a failure.
+- **SC-003**: 100% of references found by a sweep carry a resolution outcome; none is unclassified.
+- **SC-004**: 100% of referenced assets are classified into exactly one of the four categories, with
+  per-category counts reported.
+- **SC-005**: Zero assets are reported missing solely because a listfile omitted them.
+- **SC-006**: Every proposed candidate is verified present in the same build; zero candidates reference a
+  non-existent or cross-build asset.
+- **SC-007**: A sweep completes over a full build without a single unreadable asset aborting it.
+- **SC-008**: Every asset in the timeline carries an introduction window bounded by two named builds.
+- **SC-009**: Zero data is modified when repair is not requested.
+- **SC-010**: 100% of applied repairs are reversible to the exact prior state, demonstrated by restoring
+  and comparing.
+- **SC-011**: Every conversion operation has a recorded outcome against real data before any parity
   claim is made.
-- **SC-011**: Every record names the build it came from.
+- **SC-012**: Every record names the build it came from.
 
 ## Assumptions
 
+- Delivery is through the existing inspection tooling. The readers for world objects, their doodad and
+  texture tables, and model texture tables already exist and are reused, not reimplemented; what is
+  added is per-asset reporting, corpus-wide sweeping, and the comparison.
 - The staged client library is the source of truth. No client data enters the repository; records carry
-  paths, outcomes, and provenance only.
-- Client roots are runtime configuration and are never baked into source.
-- Existing readers are reused, not reimplemented. The world-object and doodad readers, the world
-  name-table reader, and the format converters already exist and are the canonical owners of their
-  formats.
-- **`uniqueId` is out of scope as a chronology source here.** It is the world-layout clock and dates
-  placements, not assets. This feature is the independent signal; correlating the two is separate work.
-- Asset introduction is dated **between builds**. Finer granularity is available only if US5 validates
-  it, and is not assumed.
-- A rename cannot in general be distinguished from a removal plus an introduction. Where the system
-  cannot tell, it must say so rather than pick.
-- Texture, sound, and other asset classes are out of scope; this feature is doodad references from
-  world objects. The same method may extend later, but nothing here assumes it.
+  paths, outcomes, and provenance only. Client roots stay runtime configuration.
+- **A missing asset is a finding, not a defect.** Some are deliberate, producing in-game effects. The
+  Mt. Hyjal objects are the reason this distinction is written down rather than assumed away.
+- The neon-green rendering of untextured objects is treated as established for pre-alpha and beta
+  Vanilla builds and is used as the in-world corroboration of a missing texture, not as a detection
+  method — detection is from the data.
+- **`uniqueId` is out of scope as a chronology source.** It dates placements, not assets. Correlating
+  the two is separate work.
+- Asset introduction is dated between builds. Finer granularity is not assumed and is not claimed.
+- A rename cannot in general be distinguished from a removal plus an introduction; where the system
+  cannot tell, it says so.
+- Sound and other asset classes are out of scope. The same method may extend later; nothing here
+  assumes it.
+- Orphan detection is bounded by what is swept. An asset referenced only from data this feature does not
+  read would appear as an orphan, and the reports state that limit.
 - Repair operates on data the operator owns and has chosen to modify. It is never part of analysis.
-- The number of staged builds available bounds timeline resolution; the timeline states which builds it
-  rests on and does not interpolate between them.
