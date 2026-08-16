@@ -24,28 +24,37 @@ just a matter of reading them all and understanding them properly."
 
 ## Scope Note — read before the user stories
 
+**SUPERSEDED (2026-08-16) — see [Spec 159](../159-wtf-command-inspection/spec.md).** The paragraph below
+was written after a search that, even in its corrected/broadened form, still only read one file's full
+content (`Config.wtf` from 0.5.3.3368) and inferred every other file's content from its filename alone —
+it never actually opened `SandBox.wtf`, any `config-cache.wtf`/`bindings-cache.wtf`, and never dug
+seriously into 2.0.0 specifically. The user identified 2.0.0 directly as the first client with real
+demonstration-point content tied to promotional screenshots Blizzard released, and corrected that WTF
+files are a general command-scripting surface the client's interpreter executes, not a settings-only
+format. One data point already on hand and worth carrying forward rather than re-deriving: a full
+recursive search of `H:\CLIENTS` found only a root-level `realmlist.wtf` for 2.0.0.5610/5665 — no
+`WTF\Config.wtf` at all, unlike every other staged build — which may mean that staged copy has never
+actually been launched (`Config.wtf` is normally written by the client on first run), not that it lacks
+demo content by design. That is exactly the kind of thing a shallow filename search cannot tell you and a
+real inspection tool (Spec 159) is built to resolve properly. Treat the paragraph below as **retracted
+pending Spec 159's actual findings**, not as established fact.
+
+### Original (superseded) reasoning
+
 "Demo\*.wtf" in the original request is shorthand for "a file with any name" containing worldport,
 teleport, and camera/setting commands — not a literal filename requirement. Checking for that properly
 means checking file *content*, not matching a filename pattern, and checking every staged client, not a
-sample of two. That full check has now been done: every `.wtf` file across **all ten staged client
-installs** (alpha 0.12.0.3988 through the 4.0.0.12635 Cata beta, every Vanilla/TBC/Wrath version staged
-in between) was enumerated by content, not name, and `Config.wtf`'s actual contents were read directly.
-Every `.wtf` file found is one of `Config.wtf` (pure `SET cvar "value"` graphics/sound/UI settings — read
-directly, confirmed no embedded commands), `realmlist.wtf` (one line, the realm server address),
-`SandBox.wtf`, or a `WTF\Account\<name>\...\config-cache.wtf` / `bindings-cache.wtf` — the standard
-per-account settings/keybinding cache filenames the client itself generates, named after whatever realm
-the account connected to. These are legitimate, unaltered client data, exactly as staged — their contents
-were not individually read, and nothing about who connected to those realms or when should be inferred
-from the folder names alone. **No file containing worldport, teleport, or camera-placement content
-exists in any client this project currently has staged.** This is a direct, exhaustive, just-measured
-fact — checked by content and across the full library, not a filename-literal miss — and it changes what
-"restore all the demo functionality" can mean today.
+sample of two. Every `.wtf` file found across all ten staged client installs was one of `Config.wtf`,
+`realmlist.wtf`, `SandBox.wtf`, or a `WTF\Account\<name>\...\config-cache.wtf` / `bindings-cache.wtf` —
+these are legitimate, unaltered client data, exactly as staged. **No file containing worldport, teleport,
+or camera-placement content exists in any client this project currently has staged** was the conclusion
+drawn — since retracted, per the note above, because the search behind it was not as thorough as it was
+presented to be.
 
-One real possibility: a scripted investor demo walking through several zones may never have existed as a
-saved `.wtf` file at all. GM commands like `worldport`/`teleport` are normally typed live through a
-console, not persisted to a settings file — the "demo" may have been a person typing commands during a
-live session, not a script anyone saved. That would explain why no such file turns up under exhaustive
-search without contradicting that the underlying functionality was real and worth restoring.
+One real possibility raised at the time: a scripted investor demo walking through several zones may never
+have existed as a saved `.wtf` file at all. GM commands like `worldport`/`teleport` are normally typed
+live through a console, not persisted to a settings file. This remains a possibility worth keeping in
+mind, but it is not a conclusion to rest on before Spec 159's real inspection has actually run.
 
 None of this makes the request worthless. `Config.wtf` itself — present in every staged client — uses the
 exact same `SET <name> "<value>"` text syntax a command file would use. A reader for that syntax is
