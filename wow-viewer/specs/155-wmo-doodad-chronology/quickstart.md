@@ -35,7 +35,7 @@ zero entries and reports success.
 
 The listfile index is the **catalogued** set. It is *not* the corpus.
 
-For the earliest staged build it names **one** world object; the build contains **532**, stored as
+For the earliest staged build it names **one** world object; the build contains **492**, stored as
 per-asset containers under the loose `World` tree. Enumerating the corpus from that index would sweep
 one object, find almost no references, and report almost nothing missing — while looking like a clean
 result.

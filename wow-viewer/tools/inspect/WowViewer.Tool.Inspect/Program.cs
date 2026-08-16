@@ -104,6 +104,9 @@ static void RunArchive(string[] args)
 		case "build-listfile-cache":
 			RunArchiveBuildListfileCache(tail);
 			break;
+		case "scan-wmo-containers":
+			WowViewer.Tool.Inspect.ArchiveWmoContainerAuditCommandSupport.Run(tail);
+			break;
 		default:
 			Console.Error.WriteLine($"Unknown archive command '{command}'.");
 			ShowArchiveUsage();
@@ -7738,6 +7741,7 @@ static void ShowArchiveUsage()
 {
 	Console.WriteLine("Archive commands:");
 	Console.WriteLine("  archive build-listfile-cache --archive-root <game|data dir> --cache-key <client-build> [--listfile <listfile.txt>] [--cache-dir <directory>]");
+	Console.WriteLine("  archive scan-wmo-containers --archive-root <game dir>");
 }
 
 static void ShowBlpUsage()

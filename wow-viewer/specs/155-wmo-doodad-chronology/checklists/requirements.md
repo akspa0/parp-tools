@@ -43,7 +43,7 @@ The viewer reads this data today.
 The real finding is much smaller: **building an index cache from archive internal listfiles is the
 wrong surface for corpus enumeration**, because per-asset containers carry no internal listfile by
 design. That surface answers "what does this archive's listfile declare", not "what world objects does
-this build contain". Choosing it returns 1 instead of 532.
+this build contain". Choosing it returns 1 instead of 492.
 
 Corrections applied: corpus discovery is no longer a user story — the inventory (was P2) is now P1 and
 absorbs corpus reporting as a self-check; every story moved up one priority; FR-001 now requires the

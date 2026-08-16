@@ -58,13 +58,13 @@ that resembles it are very often the same asset under a changed name.
 
 | Build | Files catalogued | World objects | Models |
 |---|---|---|---|
-| 0.5.3.3368 | 42,765 | 532, as per-asset containers under the loose `World` tree | 5,545 |
+| 0.5.3.3368 | 42,765 | 492, as per-asset containers under the loose `World` tree | 5,545 |
 | 3.0.1.8303 | 131,106 | 9,711, as packaged archive entries | 17,296 |
 
 Packaging differs by build and the existing data-access layer already handles both. One caution
 carries forward: **archive internal listfiles are the "catalogued" set, not the "present" set.**
 Per-asset containers carry no internal listfile, so an index built from them names one world object for
-the earliest build rather than 532. That is precisely the catalogue-versus-present distinction this
+the earliest build rather than 492. That is precisely the catalogue-versus-present distinction this
 feature exists to measure — but it must not be mistaken for the corpus itself when sweeping.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -80,7 +80,7 @@ inspection cannot find what nobody knows to look for; only a full sweep can, and
 missing population is itself the first thing worth knowing.
 
 **Independent Test**: Sweep the earliest staged build end to end and confirm the examined counts match
-its actual contents — 532 world objects and 5,545 models — with every reference carrying an outcome.
+its actual contents — 492 world objects and 5,545 models — with every reference carrying an outcome.
 
 **Acceptance Scenarios**:
 
@@ -89,7 +89,7 @@ its actual contents — 532 world objects and 5,545 models — with every refere
 2. **Given** a sweep, **When** it completes, **Then** it reports how many assets of each kind it
    examined, so an under-counted sweep is visible rather than silent.
 3. **Given** a build packaging world objects as per-asset containers, **When** it is swept, **Then** all
-   532 are examined, not the one an internal-listfile index would name.
+   492 are examined, not the one an internal-listfile index would name.
 4. **Given** an asset that cannot be read at all, **When** the sweep encounters it, **Then** it is
    recorded as unreadable and the sweep continues.
 5. **Given** a swept build, **When** results are reported, **Then** the count of unresolved references
@@ -303,7 +303,7 @@ then compare that record against what the tools claim to do.
 - **SC-001**: A sweep of a build examines its entire corpus — every world object and every model on a
   readable route — and reports the total count of unresolved references, so the size of the
   missing-asset population is known rather than estimated.
-- **SC-002**: A sweep reports examining 532 world objects and 5,545 models for the earliest staged
+- **SC-002**: A sweep reports examining 492 world objects and 5,545 models for the earliest staged
   build; a run reporting 1 world object indicates the internal-listfile index was used instead of the
   data-access layer and is a failure.
 - **SC-003**: 100% of references found by a sweep carry a resolution outcome; none is unclassified.

@@ -13,7 +13,7 @@ enumeration does not emit each world object twice. The V14 converter documents t
 per-asset containers automatically. The viewer reads this data today.
 
 **Alternatives considered**: Building the corpus from the listfile index cache. **Measured and
-rejected** — it names one world object for the earliest staged build against an actual 532, because
+rejected** — it names one world object for the earliest staged build against an actual 492, because
 per-asset containers carry no internal listfile by design. That surface answers "what does this
 archive's listfile declare", which is a different question, and it is retained for exactly that role as
 the catalogued set.
@@ -22,7 +22,7 @@ the catalogued set.
 
 | Build | Catalogued | World objects | Models | Model route |
 |---|---|---|---|---|
-| 0.5.3.3368 | 42,765 | 532 (per-asset containers, loose tree) | 5,545 | Alpha `MDLX` — reads |
+| 0.5.3.3368 | 42,765 | 492 (per-asset containers, loose tree) | 5,545 | Alpha `MDLX` — reads |
 | 3.0.1.8303 | 131,106 | 9,711 (packaged entries) | 17,296 | `MD20 0x107` — **blocked** |
 
 ## 3. Model readability is build-dependent and partly blocked
@@ -41,7 +41,7 @@ useful work is available now. Deferring would also leave the control unexercised
 thing this plan refuses to do.
 
 **This is the plan's most dangerous failure mode.** "Could not check" rendering as "nothing missing" is
-the same error shape as a documented tool that did not exist and a corpus reported as 1 of 532. The
+the same error shape as a documented tool that did not exist and a corpus reported as 1 of 492. The
 contracts make it structurally unrepresentable rather than relying on discipline.
 
 ## 4. Scale of the missing-asset population — MEASURED (2026-08-16)
@@ -92,12 +92,29 @@ count is a finding, not an implementation detail.
 **unknown, not absent**, and the report is marked incomplete because of it. This is a reader defect
 worth its own investigation; it is recorded rather than swallowed.
 
-### Corpus count note
+### Corpus count note — RESOLVED (2026-08-16)
 
-The sweep examined **492** world objects where the loose tree holds 532 per-asset containers. The
-difference is not yet explained and must be before SC-002 is claimed — the containers may include
-non-world-object assets, or enumeration may be dropping some. **Do not treat 492 as confirming the
-corpus is fully enumerated.**
+The sweep examined **492** world objects. Earlier drafts of this document cited "532" as the loose
+tree's true per-asset container count and treated 492 as an unexplained shortfall against it. That 532
+figure was never produced by any tool in this project — it predates the `assets`/`archive` CLI surface
+existing at all and most likely originated in the manual `H:\CLIENTS` filesystem poking this spec's own
+`checklists/requirements.md` already records as a corrected error. It should not have been carried into
+this table without being re-derived, and it does not survive verification.
+
+`archive scan-wmo-containers --archive-root "H:/CLIENTS/Vanilla/0.x/0_5_3_3368/World of Warcraft"` was
+added specifically to settle this: it calls `MpqArchiveCatalog.ScanWmoMpqArchives` (the exact production
+scan the sweep already uses, unmodified) and separately walks the entire game root for
+`*.wmo.mpq`/`*.WMO.MPQ` with no directory scoping at all, then diffs the two sets. Result:
+
+| | |
+|---|---|
+| Scoped production scan (7 candidate directories) | 492 |
+| Unscoped whole-root walk | 492 raw files, 492 distinct virtual paths |
+| Containers the scoped scan missed | **0** |
+
+The two independent methods agree exactly. **492 is the verified, complete count of per-asset WMO
+containers in 0.5.3.3368.** SC-002 is met for this build. The "532" figure is retracted; it does not
+appear elsewhere in this document as of this correction.
 
 ## 5. Why a full sweep, not a hunt for known instances
 

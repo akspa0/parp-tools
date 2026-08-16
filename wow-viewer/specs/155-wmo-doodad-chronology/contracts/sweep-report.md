@@ -7,7 +7,7 @@ The header for one build's sweep. **Its primary job is to make incompleteness im
 The dangerous output of this feature is not a wrong answer, it is a confident empty one. A build whose
 models cannot be read finds no texture references and therefore reports no missing textures — which
 reads exactly like a healthy build. The same shape has already bitten this project twice: a documented
-tool that did not exist, and a corpus reported as 1 when it was 532.
+tool that did not exist, and a corpus reported as 1 when it was 492.
 
 So coverage is not a footnote on the results. It is a required part of them, and a consumer cannot
 read the findings without also receiving the limits.
@@ -29,7 +29,7 @@ read the findings without also receiving the limits.
 ```json
 {
   "build": { "version": "0.5.3", "buildNumber": "3368", "rootLabel": "<configured root>" },
-  "worldObjectsExamined": 532,
+  "worldObjectsExamined": 492,
   "modelsExamined": 5545,
   "assetsUnreadable": { "count": 0, "paths": [] },
   "routesBlocked": [],

@@ -47,7 +47,7 @@ target; it is an offline corpus job.
 - **"Could not check" must never render as "nothing missing."**
 
 **Scale/Scope**: Largest staged build is roughly 9,700 world objects and 17,300 models. The earliest is
-532 world objects and 5,545 models.
+492 world objects and 5,545 models.
 
 ## Constitution Check
 
@@ -136,7 +136,7 @@ question; 4–7 build on it.
 Short, and it does not hunt for individual objects.
 
 1. Record, per staged build, which model route applies and whether it reads, cross-referencing Spec 154.
-2. Confirm the archive catalogue enumerates 532 world objects for the earliest build.
+2. Confirm the archive catalogue enumerates 492 world objects for the earliest build.
 3. Establish how a presence probe distinguishes "absent" from "present but unreadable" — these must not
    collapse.
 4. Establish whether the listfile index is usable as the catalogued set per build, and record its
@@ -160,7 +160,7 @@ a debugging view, not as a milestone.
 9. Add thin commands: sweep a build, and dump one asset's references.
 10. Unit-test the resolution outcome mapping, including the unreadable case.
 
-**Exit gate**: SC-002, SC-003, SC-007 met. A full build sweeps end to end, reporting 532 world objects
+**Exit gate**: SC-002, SC-003, SC-007 met. A full build sweeps end to end, reporting 492 world objects
 and 5,545 models for the earliest build, with no single asset able to abort it.
 
 ### Phase 2 — US3: the three-set comparison
