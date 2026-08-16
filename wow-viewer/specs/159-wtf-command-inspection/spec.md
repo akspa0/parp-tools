@@ -38,6 +38,44 @@ scripting surface the client's command interpreter reads and executes — not a 
 distinct from commands. `SET name "value"` is the most common statement shape, not the only one the
 format supports. This spec's job is to find out, from real data, what else is actually there.
 
+**A second, more consequential correction landed after this spec's first draft.** The `.wtf` files this
+project needs are not only loose files on disk — Blizzard shipped `.wtf` files packed inside the game's
+own data MPQs (`misc.mpq` in 0.5.3, later `interface.mpq` and others), exactly like every other game
+asset. Every search up to this point had only walked the loose filesystem, which cannot see archive-packed
+content at all — the same blind spot Spec 155 already hit once and fixed for the WMO corpus. Using this
+project's existing archive-catalog tooling (the same layer Spec 155's `AssetReferenceSweeper` already
+uses) instead of the filesystem, `WTF\DefaultBindings.wtf` was found packed inside 0.5.3.3368's archives
+and read directly:
+
+```text
+bind ALT-P TOGGLEPERFORMANCEDISPLAY
+bind ALT-O TOGGLEPERFORMANCEVALUES
+bind CTRL-P RESETPERFORMANCEVALUES
+bind CTRL-R TOGGLEFPS
+bind CTRL-Y TOGGLESTATS
+bind CTRL-Q TOGGLETRIS
+bind CTRL-W TOGGLEPORTALS
+bind CTRL-E TOGGLECOLLISION
+bind CTRL-T TOGGLECOLLISIONDISPLAY
+bind ALT-B TOGGLEPLAYERBOUNDS
+```
+
+This is real, measured, direct confirmation of the exact Alt+P binding Spec 158 assumed from memory
+(`TOGGLEPERFORMANCEDISPLAY`), plus a whole family of real dev-facing debug toggles (FPS, stats, triangle
+count, portal visualization, collision, player bounds) neither spec had accounted for. `bind` statements
+are a second real statement shape alongside `SET` — confirming the "general scripting surface" framing
+above from actual data, not just the user's description of it.
+
+The same check repeated identically against 2.0.0.5610 (using the corrected archive-based method) found
+only the same `WTF\DefaultBindings.wtf` and `realmlist.wtf` — nothing else *named* in that build's
+catalogued internal listfile. This does **not** mean the demonstration-point content isn't there. It means
+a name-filtered search of an archive's already-catalogued listfile cannot find a file whose name was never
+catalogued in the first place — structurally the identical trap Spec 155 solved once already (the 0.5.3
+WMO corpus reporting "1 of 532" from its internal listfile alone). The user described the files as "not
+named that way" — a non-obvious name is exactly the case a listfile-name search is blind to. Finding an
+unlisted archive entry needs a different technique than listing what's already named, and that gap is
+this spec's real remaining work, not a reason to conclude the file doesn't exist.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - See every distinct kind of line real WTF files actually contain (Priority: P1)
@@ -74,27 +112,32 @@ three it turns out to be.
 
 ---
 
-### User Story 2 - Sweep the full client tree, not just the WTF folder (Priority: P1)
+### User Story 2 - Sweep archive-packed WTF files, not just loose ones (Priority: P1)
 
-A user runs the sweep against a build and every `.wtf` file anywhere in that build's file tree is found
-and included — not only files under a `WTF\` subfolder. (`realmlist.wtf` already sits directly in the
-client root in several staged builds, not under `WTF\` — confirming a folder-scoped search would miss
-real files.)
+A user runs the sweep against a build and every `.wtf` file the build's data actually contains is found
+and included — whether it sits loose on disk or is packed inside one of the build's own data archives.
+(`WTF\DefaultBindings.wtf` is packed inside 0.5.3.3368's archives and does not exist as a loose file
+anywhere in that build's staged directory at all — a filesystem-only search cannot see it, and did not,
+across two earlier passes at this spec.)
 
-**Why this priority**: Tied with Story 1 as foundational — a sweep that only looks in the expected folder
-repeats exactly the scoping mistake already made once with this feature (searching by an assumed location
-instead of the real file tree), and would risk missing the demonstration-point files entirely if they
-turn out to live somewhere other than `WTF\`.
+**Why this priority**: Tied with Story 1 as foundational, and the single most consequential lesson learned
+while drafting this spec — every WTF search up to this point found nothing until an archive-based search
+was actually run, because real content genuinely is not all loose. A sweep that only walks the filesystem
+would miss content already confirmed to exist, in the very first build checked this way.
 
-**Independent Test**: Run the sweep against a build with a known `.wtf` file outside the `WTF\` folder
-(any Vanilla/TBC/Wrath build with a root-level `realmlist.wtf` — several are already staged); confirm
-that file appears in the sweep's results, not only files under `WTF\`.
+**Independent Test**: Run the sweep against 0.5.3.3368; confirm `WTF\DefaultBindings.wtf` appears in the
+results with its real content (including its `bind ALT-P TOGGLEPERFORMANCEDISPLAY` line) correctly read
+and classified, even though the file does not exist as a loose file anywhere in that build's staged
+directory tree.
 
 **Acceptance Scenarios**:
 
-1. **Given** a build with `.wtf` files both inside and outside its `WTF\` folder, **When** it is swept,
-   **Then** all of them appear in the results, with their real location recorded.
-2. **Given** a build whose file tree the sweep has not been told to expect any particular structure for,
+1. **Given** a build whose `.wtf` content is packed inside its data archives, **When** it is swept,
+   **Then** those files are found and read, not only files loose on disk.
+2. **Given** a `.wtf` file that exists loose (e.g. a user-generated `Config.wtf`) and one that only exists
+   packed inside an archive (e.g. `DefaultBindings.wtf`), **When** the build is swept, **Then** both are
+   reported, each correctly attributed to where it actually came from.
+3. **Given** a build whose file tree the sweep has not been told to expect any particular structure for,
    **When** it is swept, **Then** it still finds every `.wtf` file present — the sweep does not assume a
    fixed folder layout.
 
@@ -129,6 +172,38 @@ result, not an omission).
 
 ---
 
+### User Story 4 - Test a candidate name against a build's archives directly (Priority: P2)
+
+A user supplies one or more candidate file names — a guess at what a piece of content might actually be
+called — and finds out immediately whether that name resolves to real content inside a build's archives,
+independent of whether that name appears in any catalogued listfile at all.
+
+**Why this priority**: The real, open gap this spec's own research surfaced, not a hypothetical one:
+2.0.0.5610's catalogued internal listfile names only `DefaultBindings.wtf` and `realmlist.wtf`, yet the
+user is confident real demonstration-point content exists there under some other, unknown name. A sweep
+that only reports what a listfile already names would reproduce, for unnamed content, the exact "1 of
+532" listfile-incompleteness trap Spec 155 already hit and fixed for WMO — except here the content's name
+isn't merely under-catalogued, it may not be catalogued anywhere, so listing known files can never surface
+it no matter how completely the corpus is enumerated. Testing a specific candidate name is a different
+capability from sweeping known files, and does not block Stories 1–3.
+
+**Independent Test**: Supply a candidate name already confirmed present (`WTF\DefaultBindings.wtf`) and
+confirm it resolves. Supply a candidate name confirmed absent (a made-up name); confirm it correctly
+reports as not found rather than a false positive. This is testable today without knowing any real
+unlisted name in advance.
+
+**Acceptance Scenarios**:
+
+1. **Given** a candidate name that matches real content in a build's archives, **When** it is tested,
+   **Then** the content is read and classified exactly as if it had been found through the normal sweep.
+2. **Given** a candidate name that does not match anything in a build's archives, **When** it is tested,
+   **Then** it is reported as not found — never a false match.
+3. **Given** a list of many candidate names, **When** they are tested against a build, **Then** each
+   result is reported individually, so a large batch of guesses (e.g. zone names, promotional-screenshot
+   locations) can be worked through without hand-testing one at a time.
+
+---
+
 ### Edge Cases
 
 - A `.wtf` file that is empty, or contains only blank lines: reported as zero recognized and zero
@@ -149,10 +224,11 @@ result, not an omission).
 
 ### Functional Requirements
 
-- **FR-001**: System MUST enumerate every `.wtf` file anywhere in a build's file tree, not scoped to any
-  assumed subfolder location.
-- **FR-002**: System MUST classify every non-blank line of every found file as either a recognized
-  `SET <name> "<value>"` statement or an unrecognized line.
+- **FR-001**: System MUST enumerate every `.wtf` file a build actually contains — loose on disk or packed
+  inside the build's own data archives — not scoped to any assumed subfolder location and not scoped to
+  the filesystem alone.
+- **FR-002**: System MUST classify every non-blank line of every found file as a recognized
+  `SET <name> "<value>"` statement, a recognized `bind <KEY> <ACTION>` statement, or an unrecognized line.
 - **FR-003**: System MUST report unrecognized lines with their exact original text, not a summary,
   truncation, or paraphrase.
 - **FR-004**: System MUST report, per file and in aggregate per build, the count of recognized versus
@@ -165,24 +241,32 @@ result, not an omission).
 - **FR-008**: When the same unrecognized line shape recurs many times, System MUST make each distinct
   shape visible without requiring a reader to scroll through every repetition, while never suppressing a
   shape that appears only once.
+- **FR-009**: System MUST let a user test one or more candidate file names directly against a build's
+  archives, independent of whether that name is named in any catalogued listfile, and report whether each
+  candidate resolves to real content.
+- **FR-010**: A candidate-name test that resolves MUST be read and classified through the same line
+  classification as FR-002, not reported as a bare yes/no.
 
 ### Key Entities
 
 - **WTF Line**: one non-blank line from a WTF file — its exact original text, and its classification
   (recognized SET statement with parsed name/value, or unrecognized).
-- **WTF File Survey**: one file's results — its real path, which build it came from, and its lines'
-  classifications.
-- **Build WTF Survey**: one build's aggregated results — every WTF file found in its full tree, combined
-  recognized/unrecognized counts, and the distinct unrecognized line shapes seen, deduplicated for
-  readability without losing any shape that appears only once.
+- **WTF File Survey**: one file's results — its real path (loose disk path or archive-internal virtual
+  path), which build it came from, whether it was found via the normal sweep or a candidate-name test, and
+  its lines' classifications.
+- **Build WTF Survey**: one build's aggregated results — every WTF file found across both loose and
+  archive-packed sources, combined recognized/unrecognized counts, and the distinct unrecognized line
+  shapes seen, deduplicated for readability without losing any shape that appears only once.
+- **Candidate Name Probe**: one user-supplied guess at a file's real name, the build it was tested
+  against, and whether it resolved to real content.
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
-- **SC-001**: A sweep of any staged build finds every `.wtf` file in that build's entire tree, including
-  at least one file outside the `WTF\` folder in a build known to have one (e.g. a root-level
-  `realmlist.wtf`).
+- **SC-001**: A sweep of 0.5.3.3368 finds `WTF\DefaultBindings.wtf` and correctly classifies its real
+  `bind`-statement content, even though that file exists only packed inside the build's archives and not
+  as a loose file anywhere in the staged directory tree.
 - **SC-002**: Every non-blank line in every found file is classified; none are silently dropped from the
   report.
 - **SC-003**: Unrecognized lines appear in the report with their real, exact text — a reader can see
@@ -191,15 +275,19 @@ result, not an omission).
   already-checked 0.5.3.3368/1.0.0.3980, with directly comparable reports across all of them.
 - **SC-005**: 2.0.0.5610's real findings are recorded and explicitly compared against Spec 158's earlier,
   now-superseded conclusion — the correction is evidenced in the record, not just stated.
+- **SC-006**: A user can test a specific candidate file name against a build's archives and get a real
+  resolved-or-not answer, without that name needing to already appear in any catalogued listfile.
 
 ## Assumptions
 
 - This spec covers reading and classifying WTF content only. Executing any recognized command (worldport,
   teleport, or anything else discovered) remains Spec 158's scope, informed by this spec's real findings
   rather than assumed syntax.
-- The recognized-statement grammar is deliberately minimal (`SET name "value"` only) so this tool's job
-  stays "reliably tell recognized from not," not "guess at every possible command's grammar up front." A
-  broader grammar can be added once real unrecognized-line shapes are actually seen.
+- The recognized-statement grammar covers exactly two shapes confirmed from real data: `SET name "value"`
+  and `bind KEY ACTION` (confirmed via `WTF\DefaultBindings.wtf`'s real content, including the `bind ALT-P
+  TOGGLEPERFORMANCEDISPLAY` line). It is deliberately not broader than that, so this tool's job stays
+  "reliably tell recognized from not," not "guess at every possible command's grammar up front." A wider
+  grammar can be added once more real unrecognized-line shapes are actually seen.
 - No file is skipped because its build is outside this project's supported pre-4.0.0 era — the sweep
   itself is inspection, not the command-execution work Spec 158 gates at 4.0.0; seeing what a later build
   contains is informative even where executing it would not be in scope.

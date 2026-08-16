@@ -107,6 +107,9 @@ static void RunArchive(string[] args)
 		case "scan-wmo-containers":
 			WowViewer.Tool.Inspect.ArchiveWmoContainerAuditCommandSupport.Run(tail);
 			break;
+		case "read-text":
+			WowViewer.Tool.Inspect.ArchiveReadTextCommandSupport.Run(tail);
+			break;
 		default:
 			Console.Error.WriteLine($"Unknown archive command '{command}'.");
 			ShowArchiveUsage();
