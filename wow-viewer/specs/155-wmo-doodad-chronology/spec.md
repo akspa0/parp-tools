@@ -18,82 +18,71 @@ client.
 
 ### Measured grounding (2026-08-16, staged clients)
 
-| Build | Files known | WMO corpus as currently enumerated | Actual WMO corpus |
+| Build | Files known | WMO packaging | Corpus size |
 |---|---|---|---|
-| 0.5.3.3368 | 42,765 | **1** | **532** |
-| 3.0.1.8303 | 131,106 | 9,711 | 9,711 |
+| 0.5.3.3368 | 42,765 | One per-asset container per WMO under the loose `World` tree | 532 |
+| 3.0.1.8303 | 131,106 | Ordinary entries inside packaged archives | 9,711 |
 
-**The oldest build's WMO corpus is under-reported by roughly 500×.** In 0.5.3 each WMO is its own
-single-file archive container under the client's loose `World` tree — 532 of them, named
-`<name>.wmo.MPQ` — while the WMO name table lives in the monolithic world-definition file's name-table
-chunk, which the Alpha reader already consumes. The current enumeration path walks packaged archive
-contents and surfaces exactly one `.wmo`. That 532-file gap is the same 532 the enumeration already
-reports as "known only from a supplemental source" without recognising what they are.
+**The corpus is already readable, and the existing data-access layer already handles both shapes.**
+The archive catalogue scans the loose tree for per-asset containers, the data source maps a container
+back to the logical asset path it holds, the native archive service knows these are listfile-less
+single-file archives and already de-duplicates their double registration so enumeration does not emit
+each WMO twice, and the V14 converter documents that it handles per-asset containers automatically.
+The viewer reads this data today. **Nothing about corpus access needs to be invented.**
+
+**One surface does not see them, and that is a usage trap, not a defect.** Building an index cache from
+archive *internal listfiles* returns a single WMO for the earliest build, because per-asset containers
+carry no internal listfile by design. That surface answers "what does this archive's listfile declare",
+which is a different question from "what world objects does this build contain". Choosing it for corpus
+enumeration would under-count 532 as 1 and produce a timeline dating every asset later than it arrived,
+while looking authoritative.
 
 **Consequences that shape this feature:**
 
-- An inventory built on the current enumeration would report the earliest build as having almost no
-  WMO doodads, and the resulting chronology would be confidently wrong — every asset would appear to
-  be introduced later than it was.
-- Where a build keeps its WMOs, and how they are packaged, is **build-dependent**. The feature must
-  discover the corpus per build rather than assume a layout.
-- "This asset does not exist" is the feature's most dangerous claim. It must never rest on absence
-  from an index; it must rest on a failed lookup against what the build actually contains.
+- The inventory is built on the existing data-access layer, which already resolves both packaging
+  shapes. It is not built on the listfile index.
+- Where a build keeps its world objects, and how they are packaged, is **build-dependent**; the two
+  staged shapes above already differ. The feature reports what it found rather than assuming a layout.
+- "This asset does not exist" is the feature's most dangerous claim. It must rest on a failed lookup
+  through the data-access layer against what the build actually contains — never on absence from an
+  index, which is exactly the trap above in its most damaging form.
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - Enumerate the real corpus for a build (Priority: P1)
-
-Someone points the system at a build and receives the complete set of world objects that build
-contains, wherever and however they are stored, with a count they can trust.
-
-**Why this priority**: Everything downstream is a function of this set. The measured 1-versus-532
-failure means the current answer is not merely incomplete, it is wrong by two orders of magnitude on
-the build that matters most for chronology. No inventory, no missing-asset report, and no timeline can
-be believed until this is correct.
-
-**Independent Test**: Enumerate the earliest staged build and confirm 532 world objects, not 1. Repeat
-on a later build and confirm the count matches its packaged contents.
-
-**Acceptance Scenarios**:
-
-1. **Given** a build storing world objects as individual containers in a loose tree, **When** the
-   corpus is enumerated, **Then** every one is found and the count matches what the build holds.
-2. **Given** a build storing world objects inside packaged archives, **When** the corpus is
-   enumerated, **Then** every one is found.
-3. **Given** any build, **When** enumeration completes, **Then** the record states where the objects
-   were found and how they were packaged — the discovery is reported, not assumed.
-4. **Given** a build whose index disagrees with what is actually present, **When** enumeration
-   completes, **Then** the discrepancy is reported rather than silently resolved in favour of either.
-
----
-
-### User Story 2 - Inventory every doodad reference and say which resolve (Priority: P2)
+### User Story 1 - Inventory every doodad reference and say which resolve (Priority: P1)
 
 Someone gets, for one build, every doodad reference made by every world object in that build, each
-marked as resolving to a real asset or not.
+marked as resolving to a real asset or not — with the corpus taken from the data-access layer that
+already reads this data, and its size reported so the reader can see it is complete.
 
 **Why this priority**: This is the inventory itself and the direct source of the missing-asset finding.
 It stands alone: even with no chronology, a per-build list of references that resolve to nothing is
-immediately useful.
+immediately useful. Corpus access is not a precondition to build — it exists — but the reported corpus
+size is the reader's check that the right surface was used, so it is part of this story rather than a
+separate one.
 
-**Independent Test**: Produce the inventory for one build and confirm every reference carries a
-resolution outcome, with no reference left unclassified.
+**Independent Test**: Produce the inventory for one build, confirm the reported corpus size matches
+what the build holds (532 for the earliest staged build, not 1), and confirm every reference carries a
+resolution outcome with none left unclassified.
 
 **Acceptance Scenarios**:
 
 1. **Given** a build's world objects, **When** the inventory runs, **Then** every doodad reference from
    every object is recorded with the object that made it.
-2. **Given** a reference, **When** it is resolved, **Then** the outcome distinguishes "found",
+2. **Given** any build, **When** the inventory runs, **Then** it reports how many world objects it
+   examined and how they were packaged, so an under-counted corpus is visible rather than silent.
+3. **Given** a build packaging world objects as per-asset containers, **When** the inventory runs,
+   **Then** all of them are examined — the earliest staged build yields 532, not 1.
+4. **Given** a reference, **When** it is resolved, **Then** the outcome distinguishes "found",
    "not found", and "could not be checked" — the third is never silently merged into the second.
-3. **Given** a reference that is absent from the build's index but present in the build's actual
-   contents, **When** it is resolved, **Then** it is reported as found.
-4. **Given** the same object appearing in more than one build, **When** inventories are compared,
+5. **Given** a reference absent from an index but present in the build's actual contents, **When** it
+   is resolved, **Then** it is reported as found.
+6. **Given** the same object appearing in more than one build, **When** inventories are compared,
    **Then** its references can be compared across those builds.
 
 ---
 
-### User Story 3 - Separate what never shipped from what was misnamed (Priority: P3)
+### User Story 2 - Separate what never shipped from what was misnamed (Priority: P2)
 
 For each reference that resolves to nothing, someone learns whether the build contains a near-match
 that is plausibly the intended asset, or whether nothing resembling it exists.
@@ -119,14 +108,14 @@ labelled, with the evidence for any near-match stated and inspectable.
 
 ---
 
-### User Story 4 - Date each asset across builds (Priority: P4)
+### User Story 3 - Date each asset across builds (Priority: P3)
 
 Someone gets, across the staged builds, the window in which each asset first appears and — where it
 happens — when it disappears.
 
-**Why this priority**: This is the driving goal. It is P4 rather than P1 only because it is a function
-of US1 and US2 being correct; a timeline built on a corpus that is 500× under-counted is worse than no
-timeline, because it looks authoritative.
+**Why this priority**: This is the driving goal. It sits behind the inventory only because it is a
+function of the inventory being complete: a timeline built over an under-counted corpus is worse than
+no timeline, because it looks authoritative while dating every asset later than it arrived.
 
 **Independent Test**: Produce the timeline across at least three builds and confirm every asset carries
 an introduction window bounded by named builds.
@@ -144,16 +133,16 @@ an introduction window bounded by named builds.
 
 ---
 
-### User Story 5 - Test whether ordering within a file dates assets more finely (Priority: P5)
+### User Story 4 - Test whether ordering within a file dates assets more finely (Priority: P4)
 
 Someone learns whether the order in which doodads appear inside a world object's own tables carries
 introduction chronology — and gets a straight answer, including "it does not".
 
 **Why this priority**: A finer-grained clock than between-build would be valuable, but it is a
-hypothesis, and US4 supplies the ground truth to test it against. Reporting a within-file chronology
+hypothesis, and US3 supplies the ground truth to test it against. Reporting a within-file chronology
 before testing it would be asserting a clock nobody has checked.
 
-**Independent Test**: Take assets whose introduction window is already known from US4, check whether
+**Independent Test**: Take assets whose introduction window is already known from US3, check whether
 within-file ordering predicts that known order at better than chance, and report the result either way.
 
 **Acceptance Scenarios**:
@@ -170,7 +159,7 @@ within-file ordering predicts that known order at better than chance, and report
 
 ---
 
-### User Story 6 - Repair broken references, on purpose and reversibly (Priority: P6)
+### User Story 5 - Repair broken references, on purpose and reversibly (Priority: P5)
 
 Someone can have broken references repointed at assets that genuinely exist in that build, with a full
 record of what changed and the ability to undo it.
@@ -194,7 +183,7 @@ and confirm the original state can be restored exactly.
 
 ---
 
-### User Story 7 - Know what the conversion tools can actually do (Priority: P7)
+### User Story 6 - Know what the conversion tools can actually do (Priority: P6)
 
 Someone gets a straight statement of which conversion operations currently work, which are broken, and
 how each compares to the maturity of terrain reading — before any parity is promised.
@@ -235,9 +224,12 @@ then compare that record against what the tools claim to do.
 
 ### Functional Requirements
 
-- **FR-001**: The system MUST discover each build's world-object corpus from the build itself, and MUST
-  report where the objects were found and how they were packaged.
-- **FR-002**: The system MUST NOT assume any build's storage layout from another build's layout.
+- **FR-001**: The system MUST obtain each build's world-object corpus through the existing data-access
+  layer, which already resolves both per-asset containers and packaged archive entries. It MUST NOT
+  derive the corpus from archive internal listfiles, which do not describe per-asset containers.
+- **FR-002**: The system MUST report how many world objects it examined and how they were packaged, so
+  that an under-counted corpus is visible in the output rather than silent.
+- **FR-003**: The system MUST NOT assume any build's storage layout from another build's layout.
 - **FR-003**: The system MUST record every doodad reference made by every world object in a build,
   attributed to the object that made it.
 - **FR-004**: The system MUST resolve each reference against what the build actually contains, and MUST
@@ -284,8 +276,9 @@ then compare that record against what the tools claim to do.
 
 ### Measurable Outcomes
 
-- **SC-001**: Corpus enumeration finds **532** world objects in the earliest staged build, against the
-  **1** currently reported, and matches actual contents on every other staged build.
+- **SC-001**: The inventory reports examining **532** world objects for the earliest staged build, and
+  a count matching actual contents for every other staged build. A run reporting **1** for the earliest
+  build indicates the listfile index was used instead of the data-access layer and is a failure.
 - **SC-002**: 100% of doodad references in a surveyed build carry a resolution outcome; none is
   unclassified.
 - **SC-003**: Zero references are reported missing solely because an index omitted them.

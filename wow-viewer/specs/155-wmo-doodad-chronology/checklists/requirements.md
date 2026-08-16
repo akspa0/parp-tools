@@ -31,21 +31,30 @@
 
 ## Validation Notes
 
-**The finding that reordered the spec.** The request was "inventory every doodad in every WMO". The
-first thing measurement showed is that the corpus itself cannot currently be enumerated: the earliest
-staged build holds **532** world objects and the existing enumeration reports **1**. Inventory was
-therefore demoted from P1 to P2 and corpus discovery promoted, because an inventory over a 500×
-under-counted corpus would have produced a confident, wrong timeline in which every asset appeared to
-arrive later than it did. SC-001 pins the 1-versus-532 gap as the first thing to close.
+**Iteration 1 drew the wrong conclusion and it has been corrected.** The first draft claimed the WMO
+corpus "cannot currently be enumerated", promoted corpus discovery to P1, and set SC-001 as closing a
+500× enumeration defect. **That was wrong.** The capability exists and is deliberate: the archive
+catalogue scans the loose tree for per-asset containers, the data source maps a container back to the
+logical asset path it holds, the native archive service explicitly identifies these as listfile-less
+single-file archives and already de-duplicates their double registration so enumeration does not emit
+each WMO twice, and the V14 converter documents that it handles per-asset containers automatically.
+The viewer reads this data today.
 
-**How that gap was established, and the caveat it carries.** The 532 count was taken by direct
-inspection of the build's own tree rather than through the project's inspection tooling — because the
-tooling is the thing under test here, and it reports 1. A raw count is legitimate as the ground truth a
-tool is measured against, but it is *not* a substitute for the tooling and must not become the
-feature's method. FR-001 requires discovery to be a reported capability of the system, and the planning
-phase should route every subsequent observation through the inspection surface, extending it where it
-comes up short. The 532 figure itself should be re-derived through that surface once it exists; until
-then it is an external check, not a product of the system.
+The real finding is much smaller: **building an index cache from archive internal listfiles is the
+wrong surface for corpus enumeration**, because per-asset containers carry no internal listfile by
+design. That surface answers "what does this archive's listfile declare", not "what world objects does
+this build contain". Choosing it returns 1 instead of 532.
+
+Corrections applied: corpus discovery is no longer a user story — the inventory (was P2) is now P1 and
+absorbs corpus reporting as a self-check; every story moved up one priority; FR-001 now requires the
+data-access layer and forbids deriving the corpus from listfiles; FR-002 requires the examined count to
+be reported so an under-count is visible rather than silent; SC-001 reframed from "close a defect" to
+"a run reporting 1 means the wrong surface was used".
+
+**The lesson worth keeping**: the trap is real even though the defect was not. A plan that reaches for
+the index cache because it is the convenient enumeration surface would produce a timeline dating every
+asset later than it arrived, while looking authoritative. That is why FR-001/FR-002 and SC-001 survive
+in corrected form rather than being deleted.
 
 **Zero [NEEDS CLARIFICATION] markers.** Every candidate ambiguity had either a defensible default or a
 measurable answer:
