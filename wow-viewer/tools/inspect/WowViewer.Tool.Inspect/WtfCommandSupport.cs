@@ -35,8 +35,8 @@ public static class WtfCommandSupport
     private static void ShowUsage()
     {
         Console.WriteLine("WTF commands:");
-        Console.WriteLine("  wtf sweep --archive-root <game dir> --build <label>");
-        Console.WriteLine("  wtf probe --archive-root <game dir> --build <label> --name <candidate1> [--name <candidate2> ...]");
+        Console.WriteLine("  wtf sweep --archive-root <game dir> --build <label> [--listfile <listfile.txt>]");
+        Console.WriteLine("  wtf probe --archive-root <game dir> --build <label> (--name <candidate> ... | --names-file <list.txt>) [--found-only] [--listfile <listfile.txt>]");
     }
 
     private static void RunSweep(string[] args)
@@ -50,7 +50,7 @@ public static class WtfCommandSupport
             return;
         }
 
-        WtfSweeper sweeper = CreateSweeper(archiveRoot);
+        WtfSweeper sweeper = CreateSweeper(archiveRoot, GetOption(args, "--listfile", "--listfile"));
         WtfBuildSurvey survey = sweeper.Sweep(buildLabel);
         PrintSurvey(survey);
     }
@@ -60,27 +60,58 @@ public static class WtfCommandSupport
         string? archiveRoot = GetOption(args, "--archive-root", "-r");
         string? buildLabel = GetOption(args, "--build", "-b");
         List<string> candidates = GetAllOptions(args, "--name", "-n");
+
+        // A real candidate list (e.g. every WTF\ name in the community listfile) is thousands of
+        // entries — far past what repeated --name flags can carry.
+        string? namesFile = GetOption(args, "--names-file", "-f");
+        if (!string.IsNullOrWhiteSpace(namesFile))
+        {
+            if (!File.Exists(namesFile))
+            {
+                Console.Error.WriteLine($"Error: names file '{namesFile}' does not exist.");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            foreach (string line in File.ReadLines(namesFile))
+            {
+                string trimmed = line.Trim();
+                if (trimmed.Length > 0)
+                    candidates.Add(trimmed);
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(archiveRoot) || string.IsNullOrWhiteSpace(buildLabel) || candidates.Count == 0)
         {
-            Console.Error.WriteLine("Error: wtf probe requires --archive-root, --build, and at least one --name.");
+            Console.Error.WriteLine("Error: wtf probe requires --archive-root, --build, and at least one --name or a --names-file.");
             Environment.ExitCode = 1;
             return;
         }
 
-        WtfSweeper sweeper = CreateSweeper(archiveRoot);
+        bool foundOnly = args.Any(static a => string.Equals(a, "--found-only", StringComparison.OrdinalIgnoreCase));
+        WtfSweeper sweeper = CreateSweeper(archiveRoot, GetOption(args, "--listfile", "--listfile"));
         Console.WriteLine($"BUILD: {buildLabel}");
+        Console.WriteLine($"Candidates tested: {candidates.Count}");
+
+        int foundCount = 0;
         foreach (string candidate in candidates)
         {
             WtfCandidateProbeResult result = sweeper.ProbeCandidate(candidate);
             if (!result.Resolved)
             {
-                Console.WriteLine($"  NOT FOUND: {candidate}");
+                if (!foundOnly)
+                    Console.WriteLine($"  NOT FOUND: {candidate}");
+
                 continue;
             }
 
+            foundCount++;
             Console.WriteLine($"  FOUND ({result.Survey!.Source}): {candidate}");
             PrintFile(result.Survey, indent: "    ");
         }
+
+        Console.WriteLine();
+        Console.WriteLine($"RESOLVED: {foundCount} of {candidates.Count}");
     }
 
     private static void PrintSurvey(WtfBuildSurvey survey)
@@ -117,9 +148,11 @@ public static class WtfCommandSupport
             $"({file.RecognizedCount} recognized, {file.UnrecognizedCount} unrecognized)");
     }
 
-    private static WtfSweeper CreateSweeper(string archiveRoot)
+    private static WtfSweeper CreateSweeper(string archiveRoot, string? listfilePath)
     {
-        ArchiveCatalogSession session = ArchiveCatalogSessionCache.GetOrCreate([archiveRoot]);
+        ArchiveCatalogSession session = ArchiveCatalogSessionCache.GetOrCreate(
+            [archiveRoot],
+            new ArchiveCatalogBootstrapOptions(ExternalListfilePath: listfilePath));
         return new WtfSweeper(session);
     }
 
