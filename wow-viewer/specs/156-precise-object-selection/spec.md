@@ -1,4 +1,4 @@
-# Feature Specification: Precise Object Selection — Real Geometry Picking and a World-Space Cursor
+# Feature Specification: Precise Object Selection, PM4 Match Confirmation, and a World-Space Cursor
 
 **Feature Branch**: `156-precise-object-selection`
 
@@ -27,11 +27,21 @@ and already rendered every frame. Testing a click against that mesh directly del
 selection for every object" actually means, without depending on the unsolved correlation problem at
 all. This spec leads with that path (User Story 1) and scopes the PM4-specific angle to where it already
 works today — the PM4 overlay's own objects, which are not placements and carry no correlation
-dependency (User Story 2). Extending PM4 identity to regular placements is recorded as explicitly
-out of scope (see Assumptions) rather than silently promised.
+dependency (User Story 2). Extending PM4 identity to regular placements *automatically* is recorded as
+explicitly out of scope (see Assumptions) rather than silently promised.
 
-The second half of the request — the mouse as a world-space object — is independent of both of the
-above and is scoped as its own user story (User Story 3).
+That is not the only way to attack the correlation problem, though. Automatic matching being unsolved
+does not mean a *human* can't tell two objects are the same the moment picking is reliable enough to
+trust which two things were actually clicked — and every one of those human judgments is a labeled data
+point the automatic matchers in specs 046/065 never had. User Story 3 turns that into a durable,
+queryable library: confirm a PM4 object and a real placement are the same thing, and it's recorded for
+good — both as one fewer object left to identify, and as a growing reference set future matching work
+can be measured against or built from. This is explicitly *not* the same thing as FR-009's prohibition
+on automatic/silent correlation — it is a separate, always-explicit, always-evidenced human action, kept
+distinct from the live picking mechanism throughout this spec.
+
+The mouse-as-a-world-space-object half of the request is independent of all of the above and is scoped
+as its own user story (User Story 4).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -97,7 +107,52 @@ object's actual surface in turn; confirm each click selects the correct object.
 
 ---
 
-### User Story 3 - See exactly where the cursor is in the world (Priority: P3)
+### User Story 3 - Confirm a PM4 object's real identity, and keep a growing library of what's known (Priority: P3)
+
+While inspecting the scene, a user who can see that a specific PM4 object and a specific real placement
+(a WMO or an M2/MDX doodad) are clearly the same object — because their position, footprint, and shape
+line up once actually looked at side by side — explicitly confirms that match. The confirmation is
+recorded permanently: which PM4 object (tile, CK24, part), which real placement (build, tile,
+UniqueId/asset path), when, and why the user is confident. Confirmed matches accumulate into a library
+that answers, for any PM4 object, whether it's already been identified and what to — and surfaces other
+PM4 objects that share a confirmed object's geometry fingerprint as candidates worth reviewing next,
+without ever confirming them automatically.
+
+**Why this priority**: This is the user's second explicit goal for this spec, not a stretch add-on:
+build real ground truth for the correlation problem specs 046/065 measured as unsolved, by capturing
+what a human can already tell just by looking. Every confirmed match is simultaneously one fewer object
+to figure out later and a labeled reference point future matching work can be measured against or built
+from. Ordered after Stories 1 and 2 because a confirmation is only as trustworthy as the click that
+produced it, and precise picking is what removes the ambiguity a box-based click leaves about which
+object was actually meant.
+
+**Independent Test**: Works with today's existing (box-based) selection, without needing Stories 1 or 2
+built first. Select any PM4 object and any placement a user is confident represents the same real
+object, confirm the match through whatever UI this story adds, restart the viewer, and verify the
+confirmation is still there and answers a lookup for that PM4 object. Confirming and retracting a match
+work standalone; the library is only more trustworthy to build once Stories 1 and 2 exist, not dependent
+on them existing.
+
+**Acceptance Scenarios**:
+
+1. **Given** a PM4 object selected and a real placement selected that the user believes are the same
+   object, **When** the user confirms the match, **Then** the pairing (PM4 identity, placement identity,
+   confirmation evidence, timestamp) is recorded durably and survives a restart.
+2. **Given** a PM4 object that has already been confirmed-matched, **When** the user selects it or looks
+   it up, **Then** its confirmed match is shown rather than treated as unknown.
+3. **Given** a confirmed match that was made in error, **When** the user retracts it, **Then** the
+   retraction is recorded (not silently deleted without trace) and the object returns to
+   unconfirmed/candidate status.
+4. **Given** two objects that are merely near each other or share a tile, **When** nothing has been
+   explicitly confirmed, **Then** they are never auto-confirmed — confirmation is always an explicit user
+   action, never inferred from proximity or any matcher's score alone.
+5. **Given** a confirmed match exists for one instance of an asset, **When** another PM4 object elsewhere
+   in the corpus shares that confirmed object's geometry fingerprint, **Then** the library surfaces it as
+   a candidate for review, and a human still confirms or rejects it individually.
+
+---
+
+### User Story 4 - See exactly where the cursor is in the world (Priority: P4)
 
 While moving the mouse over the 3D scene, the user sees a marker rendered as a real object in the world —
 with correct depth and correct occlusion by nearer geometry — at the point their cursor currently
@@ -105,14 +160,15 @@ intersects the world, so they can see where a click will land before they click,
 would be hidden behind a hill or wall in the real game client.
 
 **Why this priority**: Valuable on its own and independently testable, but it is a visualization/feedback
-improvement layered on top of picking, not a fix to selection accuracy itself — Stories 1 and 2 are what
-actually make selection precise. Ordered after them because it depends on nothing they add (it can track
-terrain today) but delivers most of its value once precise object surfaces exist to track in Story 1.
+improvement layered on top of picking and identification, not a fix to selection accuracy or a
+contribution to the match library — Stories 1 through 3 are where this spec's substance lives. Ordered
+last because it depends on nothing the others add (it can track terrain today) but delivers most of its
+value once precise object surfaces exist to track in Story 1.
 
 **Independent Test**: Move the mouse across varied terrain (a slope, a cliff edge) with no other change
 applied; confirm a visible marker appears at the terrain point under the cursor, moves with the cursor,
 and disappears behind the terrain when the geometry would occlude that point from the current camera
-angle. This does not require Stories 1 or 2 to be built first.
+angle. This does not require Stories 1 through 3 to be built first.
 
 **Acceptance Scenarios**:
 
@@ -152,6 +208,14 @@ angle. This does not require Stories 1 or 2 to be built first.
   becoming newly visible through picking, not a new defect this feature introduces.
 - The world-space cursor marker while the camera itself is moving/rotating: the marker must update to
   the new ray's hit point every frame, never lag a frame behind or show a stale position.
+- A user attempts to confirm a match for a PM4 object (or placement) that already has a *different*
+  confirmed match: the existing confirmation is not silently overwritten — the conflict is surfaced so
+  the user chooses which is correct, and the losing confirmation's history is retained, not erased.
+- Two different users (or the same user on different occasions) confirm the same pairing independently:
+  this reinforces confidence in the match rather than being treated as a conflict.
+- A candidate surfaced from a shared geometry fingerprint (Acceptance Scenario 5 of User Story 3) turns
+  out to be a coincidental resemblance, not the same asset: rejecting it must be as durable and visible
+  a record as confirming one, so the same false candidate is not resurfaced as new every session.
 
 ## Requirements *(mandatory)*
 
@@ -180,12 +244,29 @@ angle. This does not require Stories 1 or 2 to be built first.
 - **FR-008**: The world-space cursor marker MUST track real terrain-surface hit points at minimum; once
   User Story 1 is delivered, it MUST also track precise object-surface hit points using that same
   hit-test path rather than a separate one.
-- **FR-009**: System MUST NOT attempt to resolve PM4 object identity to ADT MDDF/MODF placement identity
-  as part of this feature. Precise PM4-derived geometry applies only within the PM4 overlay's own object
-  identity (User Story 2); it MUST NOT be presented as, or silently become, the selection volume for a
-  regular scene object.
+- **FR-009**: System MUST NOT automatically or silently resolve PM4 object identity to ADT MDDF/MODF
+  placement identity, and MUST NOT substitute PM4-derived geometry as the live selection volume for a
+  regular scene object. Explicit, human-confirmed correlation between a PM4 object and a placement is a
+  separate, in-scope capability (User Story 3, FR-011 through FR-016) that produces a recorded match, and
+  never changes how the regular object is picked.
 - **FR-010**: This feature MUST NOT change selection behavior for any object or state it does not cover
   (e.g. objects using the bounding-volume fallback keep exactly today's behavior).
+- **FR-011**: System MUST let a user explicitly record that a specific PM4 object and a specific real
+  placement are confirmed to be the same real-world object, capturing both identities, when the
+  confirmation was made, and the user's stated reason for confidence.
+- **FR-012**: A confirmed match MUST NOT be inferred automatically from proximity, shared tile membership,
+  or any matcher's score alone — confirmation is always an explicit user action.
+- **FR-013**: System MUST let a user retract a previously confirmed match; the retraction MUST be
+  recorded as its own event rather than erasing the original confirmation without trace.
+- **FR-014**: The confirmed-match library MUST be queryable by PM4 object identity (tile, CK24, part) to
+  answer whether it is already known and to what, without re-deriving the answer.
+- **FR-015**: When a confirmed match exists for a PM4 object, System MUST reuse that object's
+  already-computed geometry fingerprint (the existing correlation extractor, not a new one) to surface
+  other unconfirmed PM4 objects sharing that fingerprint as review candidates — candidates only, never
+  auto-confirmed.
+- **FR-016**: The confirmed-match library MUST persist across sessions and MUST NOT store client asset
+  bytes — only identifiers, paths, and provenance, consistent with this project's existing
+  no-client-data-in-repository constraint.
 
 ### Key Entities
 
@@ -199,6 +280,12 @@ angle. This does not require Stories 1 or 2 to be built first.
   produced it, or no-hit.
 - **World Cursor Marker**: the rendered representation of the most recent Hit Result, positioned and
   depth-tested as a real scene object rather than a screen-space overlay.
+- **Confirmed Match**: a durable, evidenced record pairing one PM4 object identity (tile, CK24, part)
+  with one real placement identity (build, ADT/tile, MDDF or MODF, UniqueId or equivalent, asset path);
+  carries who/when/why it was confirmed and its current status (confirmed or retracted).
+- **Match Candidate**: a suggested, unconfirmed pairing surfaced for human review — from simple signals
+  (shared tile, position proximity) or from a shared geometry fingerprint with an already-confirmed
+  match; never itself a Confirmed Match until a user acts on it.
 
 ## Success Criteria *(mandatory)*
 
@@ -216,9 +303,16 @@ angle. This does not require Stories 1 or 2 to be built first.
   after this feature ships, consistent with this project's existing frame-pacing standards.
 - **SC-005**: No selection behavior changes for objects in the bounding-volume-fallback state (unloaded
   or failed assets) — confirmed unchanged before/after.
-- **SC-006**: Regular (non-overlay) placed objects never acquire a PM4-sourced selection volume through
-  this feature — confirmed by inspection that no code path resolves a regular placement to a PM4 CK24
-  identity.
+- **SC-006**: Regular (non-overlay) placed objects never acquire a PM4-sourced selection *volume* through
+  this feature's picking mechanism — confirmed by inspection that no code path substitutes PM4 geometry
+  for a regular object's hit-test bounds. (Explicit, human-confirmed identity correlation is a separate,
+  opt-in capability — User Story 3 — and does not change how regular objects are picked.)
+- **SC-007**: A user can confirm a PM4-object-to-placement match and retrieve that confirmation after
+  restarting the viewer.
+- **SC-008**: Retracting a confirmed match, or rejecting a surfaced candidate, leaves an auditable record
+  of that action rather than a silent deletion.
+- **SC-009**: No match is ever recorded as confirmed without an explicit user action — confirmed by
+  inspection that no code path writes a Confirmed Match from a score or proximity threshold alone.
 
 ## Assumptions
 
@@ -234,11 +328,25 @@ angle. This does not require Stories 1 or 2 to be built first.
   header-box overshoot) but not a complete fix for a limb mid-swing. Which of these is achievable is a
   planning-phase question; this spec accepts either as satisfying User Story 1 provided the chosen
   behavior is stated plainly, not silently assumed to be current-pose.
-- Extending PM4-derived precision to regular (non-overlay) placed objects generally — the literal "for
-  every object" phrasing of the original request — is out of scope for this feature. It requires solving
-  CK24-to-MDDF/MODF correlation, currently measured at 1.3% top-1 precision (specs 046, 065), and is not
-  attempted here. This spec should not be read as declining that goal — only as recording that it is not
-  achievable by this feature as scoped, and pointing at the specific unsolved problem that blocks it.
+- Extending PM4-derived precision to regular (non-overlay) placed objects' *picking mechanism*
+  generally — the literal "for every object" phrasing of the original request, read as "use PM4 geometry
+  as the live selection volume" — is out of scope for this feature. It would require solving
+  CK24-to-MDDF/MODF correlation automatically, currently measured at 1.3% top-1 precision (specs 046,
+  065), and this feature does not attempt that. User Story 3 pursues the same underlying goal — knowing
+  which PM4 object is which real object — through explicit human confirmation instead, which needs no
+  automatic solution first and produces evidence future automatic-matching work can use.
+- The confirmed-match library (User Story 3) is a growing research/data artifact, not a claim that
+  automatic PM4-to-placement matching is solved by this feature. Whether accumulated confirmed matches
+  meaningfully improve the existing matcher's precision is a downstream empirical question for future
+  work, not a promised outcome measured here — this spec is responsible for the library existing, being
+  queryable, and being trustworthy (always explicit, always evidenced, always retractable), not for
+  automatic matching accuracy.
+- The confirmed-match library's storage format and location are planning-phase decisions; this spec only
+  requires that it persists across sessions, is queryable by PM4 object identity, and never stores client
+  asset bytes — identifiers, paths, and provenance only, matching this project's existing convention for
+  every other generated record (e.g. Spec 155's sweep reports).
+- Geometry fingerprints for surfacing match candidates (FR-015) reuse the existing correlation extractor
+  as-is; this feature does not modify or improve the fingerprint algorithm itself.
 - Sound, taxi nodes, area POIs, and liquid-body selection (all already handled by separate paths in the
   existing click-selection flow) are unaffected by this feature.
 - "World-space cursor marker" means a rendered indicator of the current hit point, not a change to how
