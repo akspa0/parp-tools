@@ -102,6 +102,15 @@ public sealed record SweepReport
 
     public int ModelsExamined { get; init; }
 
+    /// <summary>
+    /// WMO group files (the <c>Name_NNN.wmo</c> convention) found alongside root files in the corpus
+    /// and excluded from <see cref="WorldObjectsExamined"/> — they carry geometry, not root-level
+    /// references, so sweeping them would always fail and would misreport as unreadable assets. Kept
+    /// as its own count so the corpus accounting stays fully explained rather than presenting a smaller
+    /// examined number with no stated reason.
+    /// </summary>
+    public int WorldObjectGroupFilesExcluded { get; init; }
+
     public int AssetsUnreadable => Results.Count(static r => r.State == ReferencingAssetState.Unreadable);
 
     public IEnumerable<AssetReference> AllReferences => Results.SelectMany(static r => r.References);

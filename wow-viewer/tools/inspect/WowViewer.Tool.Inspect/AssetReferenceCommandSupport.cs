@@ -116,7 +116,8 @@ public static class AssetReferenceCommandSupport
     {
         Console.WriteLine();
         Console.WriteLine($"BUILD:            {report.Build.Label}");
-        Console.WriteLine($"World objects:    {report.WorldObjectsExamined}");
+        Console.WriteLine($"World objects:    {report.WorldObjectsExamined}" +
+            (report.WorldObjectGroupFilesExcluded > 0 ? $"  (+{report.WorldObjectGroupFilesExcluded} WMO group files excluded)" : ""));
         Console.WriteLine($"Models:           {report.ModelsExamined}");
         Console.WriteLine($"References:       {report.ReferenceCount}");
         Console.WriteLine($"  via extension substitution: {report.SubstitutedReferenceCount}");
@@ -163,6 +164,7 @@ public static class AssetReferenceCommandSupport
         {
             build = new { label = report.Build.Label, rootLabel = report.Build.RootLabel },
             worldObjectsExamined = report.WorldObjectsExamined,
+            worldObjectGroupFilesExcluded = report.WorldObjectGroupFilesExcluded,
             modelsExamined = report.ModelsExamined,
             referenceCount = report.ReferenceCount,
             unresolvedReferenceCount = report.UnresolvedReferenceCount,

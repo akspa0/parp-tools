@@ -116,6 +116,61 @@ The two independent methods agree exactly. **492 is the verified, complete count
 containers in 0.5.3.3368.** SC-002 is met for this build. The "532" figure is retracted; it does not
 appear elsewhere in this document as of this correction.
 
+## 4a. Blocked-route detection, and the three 3.0.1 builds — MEASURED (2026-08-16)
+
+Two implementation gaps flagged as open in the prior entry are now closed:
+
+**`RouteBlocked` is now real, not just a type.** `ModelRouteClassifier` classifies a model's era from its
+header (reusing `M2ModelReaderDispatcher.DetectEra`, no new decoding) *before* attempting a full parse.
+An era Spec 154 measured broken (MD20 0x102-0x107 via the dispatcher's own refusal; MD20 0x100 Era100
+layout; MD20 0x109+) is recorded as `RouteBlocked` and never attempted; an era Spec 154 never measured
+either way stays `Unknown` and is attempted normally rather than guessed into either bucket. Blocked
+models are aggregated once per route into `SweepReport.BlockedRoutes`, not reported as thousands of
+identical per-asset failures.
+
+**WMO group files were being swept as if they were roots.** First sweep of 3.0.1.8303 reported "World
+objects: 9711, Unreadable: 8331" — a 86% failure rate that looked like a corpus-wide reader defect. It
+wasn't: 8,107 of those were WMO *group* files (`Name_000.wmo`, `Name_001.wmo`, ... — the established
+convention this project's own `WmoV14ToV17Converter`/`WmoV17ToV14Converter` already write group paths
+with), which carry geometry, not root-level MODD/MOTX references, and were correctly detected as
+`WmoGroup` by `WowFileDetector` and then wrongly reported as unreadable roots. `Sweep()` now excludes
+them from the root corpus via `AssetReferenceSweeper.IsWmoGroupFile` before attempting anything, and
+`SweepReport.WorldObjectGroupFilesExcluded` records the exclusion so the corpus accounting stays fully
+explained rather than just presenting a smaller number. This does not apply to 0.5.3.3368 (Alpha's v14
+format has no separate group files — geometry is embedded in the single per-asset container) and its
+sweep is unaffected (492, 0 excluded).
+
+| | 3.0.1.8303 | 3.0.1.8334 | 3.0.1.8391 |
+|---|---|---|---|
+| World objects (roots) examined | 1,604 | 1,616 | 1,633 |
+| WMO group files excluded | 8,107 | 8,147 | 8,206 |
+| Models examined | 17,296 | 17,358 | 17,513 |
+| References collected | 42,519 | 42,787 | 43,091 |
+| Resolved via extension substitution | 22,502 | 22,655 | 22,782 |
+| Unresolved references | 1,323 | 1,317 | 1,302 |
+| Distinct missing assets | 286 | 286 | 286 |
+| Unreadable | 224 | 362 | 563 |
+| Blocked routes | 1 (MD20 0x102-0x107, all 17,296/17,358/17,513 models) | 1 | 1 |
+| Report complete | false | false | false |
+
+**Blocked route confirms Spec 154 exactly.** Every model in all three builds classifies as MD20
+0x102-0x107 and is blocked — these builds have zero model-texture references available by design, not
+by defect. `ModelsExamined` counts them; `BlockedRoutes` says why none were actually read.
+
+**Unreadable count rises 8303 → 8334 → 8391 despite being the "same" patch.** Not yet explained — this
+is exactly the class of adjacent-patch difference this spec's own constraints warn about (three separate
+3.0.1 builds, never assumed identical). Flagged, not investigated further here.
+
+**What "unreadable" actually is, on inspection**: mostly *models*, not world objects — `unreadableAssets`
+mixes both kinds. The dominant pattern in 8303 is real M2 files failing with "has a non-finite
+bones[N].pivot.y value" (NaN/Infinity bone pivot data), concentrated in Wrath-era creature/doodad content
+(`Item\ObjectComponents\HEAD\...`, `World\Expansion02\Doodads\...`). This is an M2-reader-robustness
+question distinct from Spec 154's era-routing findings and is out of this spec's scope — recorded, not
+chased. One genuine WMO-side failure was found:
+`World\wmo\Kalimdor\CollidableDoodads\Hyjal\WorldTreeRoots\WorldTreeRoots01.wmo` — "MOMT payload size 0
+is not compatible with inferred entry size 0," a malformed materials chunk, unrelated to the group-file
+issue above.
+
 ## 5. Why a full sweep, not a hunt for known instances
 
 Nobody knows how many references in any build resolve to nothing. The Mt. Hyjal effect objects are one
