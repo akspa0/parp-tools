@@ -9,6 +9,14 @@ public enum WtfLineKind
     /// <summary><c>bind KEY ACTION</c> — a keybinding, confirmed real via WTF\DefaultBindings.wtf.</summary>
     Bind,
 
+    /// <summary>
+    /// A bareword keyword followed by 3-4 numeric arguments shaped like a teleport (3 args: x, y, z) or
+    /// worldport (4 args: mapId, x, y, z) command, per the user's description: teleport has no map
+    /// identifier, worldport does. Flagged whether or not the keyword is literally "teleport"/"worldport"
+    /// — file and command naming in this era is not assumed to be standard.
+    /// </summary>
+    PortCommandCandidate,
+
     /// <summary>Did not match any recognized statement shape. The finding this tool exists to surface.</summary>
     Unrecognized,
 }
@@ -18,7 +26,23 @@ public enum WtfLineKind
 /// text — an unrecognized line's real syntax is the entire point of sweeping, so it is never paraphrased
 /// or dropped.
 /// </summary>
-public sealed record WtfLine(string RawText, WtfLineKind Kind, string? Name = null, string? Value = null);
+/// <param name="NumericArgs">For <see cref="WtfLineKind.PortCommandCandidate"/>, the parsed numeric
+/// arguments in order (map ID first, if present).</param>
+/// <param name="HasMapIdArg">For a port-command candidate: true if a leading small integer (a plausible
+/// Map.dbc ID) precedes the coordinate triple — worldport-shaped. False if there are exactly three
+/// numeric arguments and no such leading integer — teleport-shaped.</param>
+/// <param name="CoordinatesPlausible">For a port-command candidate: true if the position arguments fall
+/// within WoW's known world-coordinate bounds (roughly ±17066.67 for a 64x64 ADT tile grid, generously
+/// widened here) — a coincidental run of numbers outside that range is far less likely to be a real
+/// coordinate.</param>
+public sealed record WtfLine(
+    string RawText,
+    WtfLineKind Kind,
+    string? Name = null,
+    string? Value = null,
+    IReadOnlyList<double>? NumericArgs = null,
+    bool? HasMapIdArg = null,
+    bool? CoordinatesPlausible = null);
 
 /// <summary>Where a WTF file's bytes actually came from.</summary>
 public enum WtfFileSource
