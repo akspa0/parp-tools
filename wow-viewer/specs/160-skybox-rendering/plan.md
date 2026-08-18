@@ -31,9 +31,12 @@ existing in-repo LIT, WMO, M2/MDX, and BLP readers. No new dependencies.
 **Storage**: N/A — reads client data through the configured runtime data source; no new on-disk
 artifacts.
 
-**Testing**: xUnit under `tests/`, for source resolution, provenance, band mapping, classification,
-and interior selection. Rendering correctness is not unit-testable and is validated by user-run
-real-client proof.
+**Testing**: xUnit under `tests/` for source resolution, provenance, band mapping, classification,
+and interior selection. **Rendering correctness is validated by automated capture and pixel diff** —
+the viewer's startup capture automation (`--capture-shot`/`--capture-no-ui`/`--exit-after-capture`)
+and the headless `profile-render` production-scene profiler. Two automation gaps are closed in
+Phase 0 first: a `--time-of-day` pin, and camera motion in `profile-render` (whose camera is
+currently resolved once and reused for every sampled frame).
 
 **Target Platform**: Windows desktop viewer (`src/viewer/WoWViewer`).
 
@@ -57,7 +60,7 @@ formats, no new readers, no new profiler.
 |---|---|---|
 | I. Repo Independence | **PASS** | All work inside `wow-viewer/`. No external project or path references. |
 | II. Library-First | **PASS with a required constraint** | Sky source resolution, provenance, band mapping, and classification are **library** concerns and land in `src/core/WowViewer.Core.Runtime/` and `src/core/WowViewer.Core.IO/`. `WorldScene.cs` is already ~15k lines; it gets wiring and draw-order only, no resolution logic. Recorded as a gate on every phase, not an aspiration. |
-| III. Real-Data Validation | **PASS** | Every user story's acceptance is real-client visual proof against a configured build, user-run. Build/test success is explicitly not accepted as rendering proof. |
+| III. Real-Data Validation | **PASS** | Every user story's acceptance is real-client proof against a configured build, produced by automated capture + pixel diff. Build/test success is still not accepted as rendering proof — a rendered image is. |
 | IV. Per-Signal Reporting | **N/A** | No model or training work in this spec. |
 | V. Streaming-First Dataset Pipeline | **N/A** | No dataset work in this spec. |
 | VI. No Client Path Assumptions | **PASS** | Model discovery probes relative paths *inside* the configured data source. No machine-local root enters source or portable docs. Build identity and root are reported with validation evidence. |
@@ -97,7 +100,7 @@ specs/160-skybox-rendering/
 ├── plan.md              # This file
 ├── research.md          # Phase 0 output — R1-R7
 ├── data-model.md        # Phase 1 output — entities and state
-├── quickstart.md        # Phase 1 output — validation commands (user-run)
+├── quickstart.md        # Phase 1 output — automated capture + diff commands
 ├── contracts/
 │   ├── sky-resolution.md    # Source selection + provenance contract
 │   ├── sky-gradient.md      # Band ordering and dome mapping contract
@@ -153,18 +156,22 @@ the gate that keeps the fix from accreting further into `WorldScene.cs`.
 ## Phases
 
 Each phase ends in validation. Per Constitution "One Phase at a Time", a phase is **not done when
-coded — it is done when validated**. Real-client visual proof is user-run; commands are prepared in
-[quickstart.md](./quickstart.md).
+coded — it is done when validated**. Rendering proof is produced by automated capture; commands are
+in [quickstart.md](./quickstart.md).
 
-### Phase 0 — Baseline and provenance scaffold
+### Phase 0 — Automation gaps, baseline, and provenance scaffold
 
 **Why first**: FR-022 requires a budget measured against a pre-change baseline. Once any sky code
 changes, that baseline is unrecoverable. This follows the project's established "prove the detector
-before you use it" pattern.
+before you use it" pattern — and here the detector itself needs two fixes before it can be trusted.
+
+0a. Add a `--time-of-day` startup pin so day-cycle and time-scrub tests are reproducible.
+0b. Add camera motion to `profile-render`, whose camera is currently resolved **once** and reused for
+    every sampled frame, and emit per-stage p50/p99/max plus `CameraMovedDuringWindow`.
 
 1. Capture the pre-change frame-cost baseline for `WorldRenderStage.Sky` and
-   `WorldRenderStage.SkyboxBackdrop` (p50/p99/max), on a moving camera so the window is
-   movement-valid, on at least one dense and one sparse map. **User-run.**
+   `WorldRenderStage.SkyboxBackdrop` (p50/p99/max), with camera motion so the window is
+   movement-valid, on at least one dense and one sparse map.
 2. Record the baseline, build identity, configured root, and map set in `contracts/frame-budget.md`,
    and set the FR-022 budget as a delta plus an absolute ceiling.
 3. Add `SkyProvenance` — the source, record identity, and authored-vs-fallback flag for one resolved
@@ -177,7 +184,7 @@ before you use it" pattern.
    draws fields from two sources.
 7. Surface provenance in the viewer's diagnostics readout (FR-003).
 
-**Validation**: baseline recorded with build identity; resolver unit tests pass including the
+**Validation**: automation gaps closed; baseline recorded with build identity; resolver unit tests pass including the
 no-mixing assertion; provenance visible in the UI for a real map. Nothing rendered has changed yet —
 that is expected and is the point.
 
@@ -201,7 +208,7 @@ before this lands.
 **Validation**: change an authored sky colour in client data, reload, and confirm the rendered sky
 changes (SC-001 — currently 0% of such changes are visible). Scrub time of day and confirm the sky
 follows authored samples. Confirm a no-profile map renders the fallback and *says* it is the
-fallback. **User-run.**
+fallback. 
 
 ---
 
@@ -223,7 +230,7 @@ Depends on Phase 0 (model reference + provenance). Independent of Phase 1 (resea
 
 **Validation**: model visible at midday; continuous across a full day sweep with no threshold
 pop (SC-002); appearance advances when time is scrubbed; world geometry never occluded; a deliberately
-broken model path still renders a sky (SC-007). **User-run.**
+broken model path still renders a sky (SC-007). 
 
 ---
 
@@ -244,7 +251,7 @@ Depends on Phase 1 — until authored colour survives, band changes are invisibl
 6. Unit-test band ordering and short-band-set handling.
 
 **Validation**: change one mid-sky band in isolation and confirm the change appears in that band's
-region while zenith and horizon hold (SC-003); inspect band boundaries for seams. **User-run.**
+region while zenith and horizon hold (SC-003); inspect band boundaries for seams. 
 
 ---
 
@@ -266,7 +273,7 @@ Depends on Phase 2 — needs a working model path underneath.
 
 **Validation**: enter a WMO that declares a skybox and confirm the sky changes; leave and confirm it
 reverts; cross the boundary repeatedly and confirm no flicker; enter a WMO with an unresolvable
-declared name and confirm the outdoor sky persists with the reference reported. **User-run.**
+declared name and confirm the outdoor sky persists with the reference reported. 
 
 ---
 
@@ -285,14 +292,14 @@ visible defect.
    non-sky asset whose filename contains a keyword is not.
 
 **Validation**: confirm both directions against real client data, and confirm the fallback path
-reports itself on a build with no declaration source. **User-run.**
+reports itself on a build with no declaration source. 
 
 ---
 
 ### Phase 6 — Non-regression and documentation
 
 1. Re-capture `Sky` and `SkyboxBackdrop` distributions on the Phase 0 maps with a moving camera and
-   compare against the recorded budget (FR-022, SC-008). **User-run.**
+   compare against the recorded budget (FR-022, SC-008). 
 2. Confirm hitch attribution shows no new sky-attributed hitches.
 3. Confirm that with sky rendering disabled, sky evaluation and sky draw cost measure zero
    (FR-023, SC-009).
