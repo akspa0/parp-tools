@@ -87,6 +87,54 @@ faster build coverage. Both are legitimate sources; v50 work should prefer the S
 **What has NOT changed**: hardcoding a machine-local client path in source is still forbidden, every
 build must be fingerprinted, and the Data Policy below still governs distribution.
 
+### VII. Blizzard Containers Are Inputs, Never Outputs
+
+**MPQ, CASC, and every other Blizzard storage, archive, or distribution container are read-only
+inputs. No tool in this repo writes, repacks, patches, or emits one — ever.** Where this project
+stores data of its own, it stores it in **Zarr v3**.
+
+**The line is the storage layer, not the content layer.** This principle governs *containers*, not
+*file formats*:
+
+| Layer | Examples | Policy |
+|---|---|---|
+| Container / storage / distribution | MPQ, CASC, TACT, patch archives | **Read only. Never written.** |
+| Client content formats | ADT, WDT, WMO, M2/MDX, BLP, DBC/DB2 | **Read and written**, as loose files |
+| This project's own storage | datasets, journals, datastores, caches | **Zarr v3** |
+
+Writing ADT or DBC is not a violation — those are the client's content language, and refusing to
+write them would make the project's output unusable. Wrapping that output in an MPQ is a violation.
+
+**Rationale**: Blizzard's container formats are too restrictive to build on — they impose limits,
+semantics, and patch-chain behaviour this project has no reason to inherit, and every one of those
+constraints would propagate into everything downstream. Zarr has already proven itself here across
+the dataset pipeline (Principle V) and is the substrate this project actually wants: chunked,
+compressed, self-describing, inspectable, and not owned by anyone else.
+
+**Consequences worth stating**, because they are easy to erode one convenience at a time:
+
+- Editor output is loose files in an output directory. There is no "package it into a patch MPQ"
+  step, however convenient that would be for testing.
+- Reading a container is unrestricted — the patch chain must be resolved *correctly*, which is a
+  separate and demanding requirement (see spec 165).
+- A future CASC data source is a **reader**. It never gains a writing counterpart.
+- "Export to MPQ so the client can load it" is the exact request this principle exists to refuse.
+  If client-loadable packaging is ever genuinely needed, it is a constitution amendment, not a
+  feature.
+
+**Added 2026-08-19 (v2.1.0).**
+
+- **Rationale for the addition**: stated directly by the user — *"I just don't want to end up using
+  any of Blizzard's storage tech in my outputs, as they are too restrictive, and Zarr already proved
+  its usecase perfectly for me."* Until now this was true only by accident: specs 161-165 each
+  excluded MPQ/CASC writing as a *scoping* decision, which protected nothing beyond those specs.
+  Recorded here so it governs every future spec instead.
+- **Approved by**: the user, 2026-08-19, in session, explicitly, including where the line falls
+  (containers prohibited, content formats written directly).
+- **Migration**: **none required.** Verified in the same session that no MPQ or CASC writer exists
+  anywhere in `src/` or `tools/` — every archive code path is reader-side. This principle codifies
+  existing practice and prevents drift rather than correcting anything.
+
 ## Safety Constraints
 
 ### Read-Only Reference Codebase
@@ -131,7 +179,9 @@ Every plan must be decomposed into steps small enough for ANY LLM model to imple
 
 - **C# / .NET 10**: Core libraries, tools, converters, inspectors
 - **Python 3.11+ / uv**: Dataset building, training, inference, validation
-- **Zarr v3**: Dataset storage (one store per client build)
+- **Zarr v3**: This project's storage substrate (see Principle VII). Harvested datasets are one
+  store per client build; the client-content datastore of spec 165 holds multiple builds in one
+  content-addressed store
 - **Parquet**: Index and metadata files
 - **Silk.NET.OpenGL**: Current rendering backend (Vulkan/WebGL are future)
 - **PyTorch**: Model training and inference
@@ -145,9 +195,19 @@ Bring Your Own Data. Do not distribute proprietary client data, harvested corpor
 
 This constitution supersedes all other development practices when conflicts arise. Amendments require: (1) documented rationale, (2) user approval, (3) migration plan for affected code. The workspace `AGENTS.md` at repo root is the authoritative policy source for scope, safety, and repo boundaries.
 
-**Version**: 2.0.0 | **Ratified**: 2026-05-18 | **Last Amended**: 2026-08-02
+**Version**: 2.1.0 | **Ratified**: 2026-05-18 | **Last Amended**: 2026-08-19
 
 ### Amendment log
+
+- **2.1.0** (2026-08-19) — Principle VII added: Blizzard containers (MPQ/CASC/TACT) are read-only
+  inputs and are never written; this project stores its own data in Zarr v3. MINOR rather than MAJOR
+  because no existing principle is retired or redefined and no code changes — a session check
+  confirmed no MPQ or CASC writer exists, so the principle codifies current practice. The line is
+  drawn at the container layer: client *content* formats (ADT/WDT/WMO/M2/BLP/DBC/DB2) are still
+  written directly as loose files. Requested and approved by the user in session, including the
+  placement of that line. Technology Stack corrected in the same pass — it read "Zarr v3: Dataset
+  storage (one store per client build)", which spec 165 supersedes with a multi-build
+  content-addressed client-content datastore.
 
 - **2.0.0** (2026-08-02) — Principle IV replaced. The V14 residual-model-chain prohibition ("no
   monolithic models, no multi-task training, no shared weights") is **retired**: the architecture it
