@@ -2183,6 +2183,9 @@ static void RunPm4(string[] args)
 		case "connective-geometry":
 			RunPm4ConnectiveGeometry(tail);
 			break;
+		case "msur-window":
+			RunPm4MsurWindow(tail);
+			break;
 		case "bounds-audit":
 			RunPm4BoundsAudit(tail);
 			break;
@@ -6304,6 +6307,107 @@ static void RunPm4ConnectiveGeometry(string[] args)
 	PrintPm4ConnectiveGeometryReport(report);
 }
 
+static void RunPm4MsurWindow(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 file or directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (HasFlag(args, "--describe") && File.Exists(input))
+	{
+		Pm4MsurWindowContentReport contents = Pm4MsurWindowAnalyzer.DescribeWindowContents(input);
+		Console.WriteLine("WowViewer.Tool.Inspect PM4 MSUR window-contents diagnostic");
+		Console.WriteLine($"Input: {contents.SourcePath}");
+		Console.WriteLine($"MSUR={contents.SurfaceCount} MSLK={contents.MslkCount} non-empty windows={contents.Windows}");
+		Console.WriteLine($"  windows with a constant MSLK.RefIndex      = {contents.ConstantRefIndexWindows}");
+		Console.WriteLine($"  windows with a constant MSLK.GroupObjectId = {contents.ConstantGroupObjectIdWindows}");
+		Console.WriteLine("  top (MSLK.RefIndex - owning MSUR index) deltas:");
+		foreach (Pm4MsurWindowDelta delta in contents.TopRefIndexDeltas)
+			Console.WriteLine($"    delta={delta.Delta,-10} entries={delta.Count}");
+		Console.WriteLine("  sample windows (RefIndex/GroupObjectId/TypeFlags):");
+		foreach (string sample in contents.SampleWindows)
+			Console.WriteLine(sample);
+		return;
+	}
+
+	Pm4MsurWindowReport report = File.Exists(input)
+		? Pm4MsurWindowAnalyzer.AnalyzeFile(input)
+		: Pm4MsurWindowAnalyzer.AnalyzeDirectory(input);
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	PrintPm4MsurWindowReport(report);
+}
+
+static void PrintPm4MsurWindowReport(Pm4MsurWindowReport report)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 MSUR running-window report");
+	Console.WriteLine($"Input: {report.InputDirectory}");
+	Console.WriteLine($"Files: {report.FileCount}, non-empty={report.NonEmptyFileCount}");
+	Console.WriteLine();
+
+	PrintPm4RunningWindow(report.MsviWindow);
+	PrintPm4RunningWindow(report.MslkWindow);
+	PrintPm4RunningWindow(report.MscnWindow);
+	PrintPm4RunningWindow(report.WrongLengthIndexCount);
+	PrintPm4RunningWindow(report.WrongLengthGroupKey);
+
+	double roundTripFraction = report.RoundTripEntries > 0
+		? (double)report.RoundTripFits / report.RoundTripEntries
+		: 0d;
+	Console.WriteLine("Round trip MSUR[i] window -> MSLK[j].RefIndex == i:");
+	Console.WriteLine($"  MSLK entries in windows = {report.RoundTripEntries}");
+	Console.WriteLine($"  entries naming owner    = {report.RoundTripFits} ({roundTripFraction:P4})");
+	Console.WriteLine($"  files agreeing exactly  = {report.RoundTripFilesExact}/{report.NonEmptyFileCount}");
+	Console.WriteLine();
+
+	long nonSelfEdges = report.AdjacencyEdges - report.AdjacencySelfEdges;
+	double reciprocity = nonSelfEdges > 0 ? (double)report.AdjacencyReciprocated / nonSelfEdges : 0d;
+	double wallFraction = report.AdjacencyEdges > 0
+		? (double)report.AdjacencyEdgesWithWallGeometry / report.AdjacencyEdges
+		: 0d;
+	Console.WriteLine("Adjacency reading (MSLK.RefIndex names a NEIGHBOUR surface, not an owner):");
+	Console.WriteLine($"  distinct edges          = {report.AdjacencyEdges}");
+	Console.WriteLine($"  self edges (i -> i)     = {report.AdjacencySelfEdges}");
+	Console.WriteLine($"  reciprocated            = {report.AdjacencyReciprocated}/{nonSelfEdges} ({reciprocity:P2})");
+	Console.WriteLine($"  edges with wall geometry= {report.AdjacencyEdgesWithWallGeometry} ({wallFraction:P2})");
+	Console.WriteLine();
+
+	Console.WriteLine("Read the hypothesis ONLY against the controls: the positive control must fit");
+	Console.WriteLine("near 100% (harness works) and both negative controls must fit far lower");
+	Console.WriteLine("(the chain test discriminates). Otherwise this measurement is uninformative.");
+}
+
+static void PrintPm4RunningWindow(Pm4RunningWindowResult result)
+{
+	Console.WriteLine($"{result.Name}:");
+	Console.WriteLine($"  consecutive pairs       = {result.Pairs}");
+	Console.WriteLine($"  chain fits              = {result.Fits} ({result.FitFraction:P4})");
+	Console.WriteLine($"  misses within one CK24  = {result.MissesWithinCk24}");
+	Console.WriteLine($"  misses at CK24 boundary = {result.MissesAtCk24Boundary}");
+	Console.WriteLine($"  sum of window lengths   = {result.SumOfCounts}");
+	Console.WriteLine($"  max window end          = {result.MaxWindowEnd}");
+	Console.WriteLine($"  target stream entries   = {result.StreamCount}");
+	Console.WriteLine($"  windows out of range    = {result.OutOfRangeWindows}");
+	Console.WriteLine($"  stream coverage         = {result.CoveredCount}/{result.StreamCount} ({result.StreamCoverage:P2})");
+	Console.WriteLine();
+}
+
 static void PrintPm4ConnectiveGeometryReport(Pm4ConnectiveGeometryReport report)
 {
 	Console.WriteLine("WowViewer.Tool.Inspect PM4 connective-geometry report");
@@ -7902,6 +8006,7 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 audit-directory --input <directory>");
 	Console.WriteLine("  pm4 cross-tile --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 bond-stats --input <directory> [--output <report.json>]");
+	Console.WriteLine("  pm4 msur-window --input <file.pm4|directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
 	Console.WriteLine("  pm4 correlate-models --input <file.pm4> --placements <file.adt> --archive-root <dir> [--output <report.json>] [--pm4-vpath <archive-path>] [--adt-vpath <archive-path>]");
 	Console.WriteLine("  pm4 sweep-correlate --map-dir <directory> --archive-root <dir> [--output <summary.csv>] [--limit <n>]");
