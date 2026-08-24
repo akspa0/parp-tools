@@ -13964,7 +13964,7 @@ void main() {
 
         ImGui.TextColored(new Vector4(0.72f, 0.78f, 0.90f, 1.0f), $"World: ({info.WorldPosition.X:F1}, {info.WorldPosition.Y:F1}, {info.WorldPosition.Z:F1})");
 
-        if (info.Pm4ObjectKey.HasValue)
+        if (info.Pm4ObjectKey.HasValue && ShouldShowHoveredPm4MatchCandidates())
             DrawHoveredPm4MatchCandidates(info.Pm4ObjectKey.Value);
 
         ImGui.Separator();

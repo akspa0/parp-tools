@@ -46,6 +46,7 @@ public partial class ViewerApp
         Adt,
         Wmo,
         M2,
+        Pm4,
     }
 
     private VisualInvestigationMode _visualInvestigationMode = VisualInvestigationMode.Auto;
@@ -828,9 +829,24 @@ public partial class ViewerApp
             VisualInvestigationMode.Wmo => info.SceneObjectType == ObjectType.Wmo || string.Equals(info.AssetKind, "WMO", StringComparison.OrdinalIgnoreCase),
             VisualInvestigationMode.M2 => info.SceneObjectType == ObjectType.Mdx || string.Equals(info.AssetKind, "MDX", StringComparison.OrdinalIgnoreCase),
             VisualInvestigationMode.Adt => false,
+            VisualInvestigationMode.Pm4 => info.Pm4ObjectKey.HasValue,
             _ => true,
         };
     }
+
+    /// <summary>
+    /// Whether the hover overlay may show PM4 asset-match candidates.
+    /// </summary>
+    /// <remarks>
+    /// Gated to the explicit PM4 investigation mode. These candidates come from the geometric
+    /// fingerprint matcher, whose measured precision is P@1 = 1.3% (specs 046/065), so surfacing
+    /// them on every hover put a mostly-wrong answer in front of the user constantly. They stay
+    /// available when PM4 identity is what is being investigated, and are silent otherwise.
+    /// Note that object identity now has a far better route than fingerprinting - MSUR._0x1C is the
+    /// producing placement's Z, which resolves the asset outright (see `pm4 object-library`).
+    /// </remarks>
+    private bool ShouldShowHoveredPm4MatchCandidates()
+        => _visualInvestigationMode == VisualInvestigationMode.Pm4;
 
     private bool TryGetTerrainChunkInspectionTarget(bool preferHoveredChunk, out TerrainRenderer.TerrainChunkInfo info, out bool usingHoveredChunk)
     {
