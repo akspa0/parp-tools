@@ -903,6 +903,68 @@ public partial class ViewerApp
     /// Unresolved objects are still listed, labelled by value - an outliner that hides what it
     /// cannot name is not an inventory.
     /// </remarks>
+    private Pm4SceneFacts? _pm4SceneFacts;
+
+    /// <summary>
+    /// Live PM4 measurements for the loaded scene, so the corpus findings are checkable here.
+    /// </summary>
+    private void DrawPm4SceneFacts()
+    {
+        if (_worldScene == null)
+        {
+            ImGui.TextDisabled("Load a world to measure PM4 objects.");
+            return;
+        }
+
+        if (ImGui.Button("Measure loaded PM4##Pm4Facts"))
+            _pm4SceneFacts = _worldScene.BuildPm4SceneFacts();
+        ImGui.SameLine();
+        ImGui.TextDisabled("counts every visible PM4 object; respects the class filters above");
+
+        if (_pm4SceneFacts is not { } f)
+            return;
+
+        ImGui.Separator();
+        ImGui.TextUnformatted($"objects {f.Objects}    with a placement height {f.ObjectsWithHeight}    without {f.ObjectsWithoutHeight}");
+        ImGui.TextUnformatted($"resolved to a placed asset: {f.ObjectsResolvedToAsset}");
+        ImGui.Separator();
+
+        // The cross-check: MSUR._0x00 == 0x03 and MSUR._0x1C == 0 are unrelated fields that pick out
+        // the same objects. Corpus-wide they disagree once in 1,929.
+        if (f.ClassHeightDisagreements == 0)
+        {
+            ImGui.TextColored(new Vector4(0.45f, 0.9f, 0.5f, 1f),
+                "class and height agree on every object");
+        }
+        else
+        {
+            ImGui.TextColored(new Vector4(1.0f, 0.7f, 0.25f, 1f),
+                $"{f.ClassHeightDisagreements} object(s) where class and height DISAGREE");
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.BeginTooltip();
+                ImGui.TextUnformatted("Class 0x03 should never carry a placement height, and every");
+                ImGui.TextUnformatted("other class should always carry one. Corpus-wide these two");
+                ImGui.TextUnformatted("unrelated fields disagree on 1 object in 1,929.");
+                ImGui.TextUnformatted("Anything counted here is worth inspecting directly.");
+                ImGui.EndTooltip();
+            }
+        }
+
+        ImGui.Separator();
+        ImGui.TextDisabled("surface class      with height   without");
+        foreach (Pm4SceneClassFact c in f.Classes)
+        {
+            bool expectedDoodad = c.SurfaceClass == 0x03;
+            bool clean = expectedDoodad ? c.WithHeight == 0 : c.WithoutHeight == 0;
+            Vector4 colour = clean
+                ? new Vector4(0.72f, 0.76f, 0.84f, 1f)
+                : new Vector4(1.0f, 0.7f, 0.25f, 1f);
+            TextColoredUnformatted(colour, $"  0x{c.SurfaceClass:X2}{(expectedDoodad ? " (doodad)" : "")}".PadRight(20)
+                + $"{c.WithHeight,10}   {c.WithoutHeight,7}");
+        }
+    }
+
     private void DrawPm4Outliner()
     {
         if (_worldScene == null)
@@ -924,6 +986,10 @@ public partial class ViewerApp
         // behind it changes.
         _pm4OutlineCache ??= _worldScene.BuildPm4Outline();
         IReadOnlyList<Pm4OutlineRegion> regions = _pm4OutlineCache;
+
+        if (ImGui.CollapsingHeader("Scene measurements##Pm4Facts"))
+            DrawPm4SceneFacts();
+        ImGui.Separator();
         int totalObjects = regions.Sum(static r => r.ObjectCount);
         int totalNamed = regions.Sum(static r => r.NamedObjectCount);
         ImGui.TextDisabled($"{regions.Count} regions | {totalObjects} objects | {totalNamed} resolved to an asset");

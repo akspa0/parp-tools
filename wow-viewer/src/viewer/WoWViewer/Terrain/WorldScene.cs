@@ -14388,6 +14388,51 @@ public class WorldScene : ISceneRenderer
             /// sized for that, and an unresolved object is labelled by its value rather than being
             /// hidden.</para>
             /// </remarks>
+            /// <summary>
+            /// Live measurements over the loaded PM4 objects, so the corpus findings can be checked
+            /// against whatever is on screen instead of taken on trust.
+            /// </summary>
+            /// <remarks>
+            /// The one worth watching is the agreement between two unrelated fields:
+            /// <c>MSUR._0x00 == 0x03</c> marks a doodad surface, and <c>MSUR._0x1C == 0</c> means no
+            /// placement height was recorded. Corpus-wide they pick out the SAME objects, with a
+            /// single exception in 1,929. Any object where they disagree is either a genuine edge
+            /// case or a decode error, and is worth looking at directly - so it is counted here
+            /// rather than averaged away.
+            /// </remarks>
+            public Pm4SceneFacts BuildPm4SceneFacts()
+            {
+                var classCounts = new Dictionary<byte, (int withHeight, int withoutHeight)>();
+                int objects = 0, withHeight = 0, resolved = 0, disagreements = 0;
+
+                foreach (((int tileX, int tileY, uint ck24, int objectPart) key, Pm4OverlayObject obj, Pm4ObjectDebugInfo debug)
+                    in EnumerateVisiblePm4OverlayDebugObjects())
+                {
+                    objects++;
+                    bool hasHeight = debug.Ck24 != 0;
+                    if (hasHeight)
+                        withHeight++;
+
+                    byte cls = debug.DominantGroupKey;
+                    (int w, int wo) = classCounts.GetValueOrDefault(cls);
+                    classCounts[cls] = hasHeight ? (w + 1, wo) : (w, wo + 1);
+
+                    // 0x03 should never carry a height; every other class should always carry one.
+                    if ((cls == 0x03) == hasHeight)
+                        disagreements++;
+
+                    if (TryResolvePm4Asset(debug.Ck24, debug.BoundsMin, debug.BoundsMax, out _, out _, out _))
+                        resolved++;
+                }
+
+                List<Pm4SceneClassFact> classes = classCounts
+                    .Select(kv => new Pm4SceneClassFact(kv.Key, kv.Value.withHeight, kv.Value.withoutHeight))
+                    .OrderByDescending(static c => c.WithHeight + c.WithoutHeight)
+                    .ToList();
+
+                return new Pm4SceneFacts(objects, withHeight, objects - withHeight, resolved, disagreements, classes);
+            }
+
             public IReadOnlyList<Pm4OutlineRegion> BuildPm4Outline(float zTolerance = 0.05f)
             {
                 var byRegion = new Dictionary<uint, Dictionary<(int tileX, int tileY), List<Pm4OutlineObject>>>();
@@ -15984,3 +16029,15 @@ public sealed record Pm4OutlineRegion(
     IReadOnlyList<Pm4OutlineTile> Tiles,
     int ObjectCount,
     int NamedObjectCount);
+
+/// <summary>One surface class in the loaded scene, split by whether its objects carry a height.</summary>
+public sealed record Pm4SceneClassFact(byte SurfaceClass, int WithHeight, int WithoutHeight);
+
+/// <summary>Live PM4 measurements over the loaded scene.</summary>
+public sealed record Pm4SceneFacts(
+    int Objects,
+    int ObjectsWithHeight,
+    int ObjectsWithoutHeight,
+    int ObjectsResolvedToAsset,
+    int ClassHeightDisagreements,
+    IReadOnlyList<Pm4SceneClassFact> Classes);
