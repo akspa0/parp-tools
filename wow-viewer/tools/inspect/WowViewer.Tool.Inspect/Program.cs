@@ -6469,6 +6469,8 @@ static void RunPm4ZeroBucket(string[] args)
 		Console.WriteLine($"  SURFACE vertical extent      = mean {b.MeanSurfaceZSpan:F2}  max {b.MaxSurfaceZSpan:F1}");
 		Console.WriteLine($"    surfaces taller than 5      = {b.SurfacesTallerThan5Fraction:P2}");
 		Console.WriteLine($"    surfaces taller than 20     = {b.SurfacesTallerThan20Fraction:P2}");
+		Console.WriteLine($"    of TALL surfaces, vertical  = {b.TallSurfacesVerticalFraction:P2}");
+		Console.WriteLine($"    of SHORT surfaces, vertical = {b.ShortSurfacesVerticalFraction:P2}");
 		Console.WriteLine();
 	}
 	Console.WriteLine("  A low links-per-distinct-GroupId in one population and not the other means");

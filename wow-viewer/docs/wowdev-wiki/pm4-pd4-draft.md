@@ -194,11 +194,51 @@ normalised position −0.037).
 **Consequences.** Every "CK24" slice is a slice of a float; the nickname's "type" byte is the float's
 **exponent band**, which is why a tile appears to have only ~4 "types". Grouping by the value works
 only because distinct placements sit at distinct heights, and it **must collide for two objects at
-equal height**. `0x1C == 0` (`0.0f`) is the per-tile remainder, not an object.
+equal height**. `0x1C == 0` (`0.0f`) is not an object: it is the unattributed bucket, described in 5a.
 
 The field carries **no X or Y**. A full per-object placement is `(placement.X, placement.Y, 0x1C)`,
 where X and Y come from the joined `MODF`/`MDDF` record and `0x1C` is both the join key and the
 authored Z.
+
+---
+
+## 5a. The `0x1C == 0` bucket is vertically stretched
+
+The two populations `0x1C` splits are not just "attributed" and "unattributed" — they have
+**different geometry**. Measured over 502 files, per-surface vertical extent (world units, the Z
+range of one `MSUR`'s own vertices):
+
+| | `0x1C == 0` | `0x1C != 0` |
+|---|---|---|
+| mean surface vertical extent | **2.51** | 1.09 |
+| max | **122.7** | 60.6 |
+| surfaces taller than 5 | **12.00%** | 3.65% |
+| surfaces taller than 20 | **1.38%** | **0.03%** |
+
+The last row is the sharp one: a surface spanning more than 20 world units vertically is **46 times**
+more common in the unattributed bucket. A walkable floor quad does not span 122 units of height, so
+the bucket is not simply "the floors nobody joined to a placement".
+
+**Reported in-client behaviour.** Objects standing over water, ice, or an open pit — docks are the
+clearest case — have collision that runs from the top of the object all the way down to the surface
+beneath it, regardless of the object's actual shape. The stated purpose is to stop a player from
+getting *behind* or *underneath* such an object: an icy waterfall meant to read as solid permafrost
+should not be walk-through-able from the side. This is an observation from playing the maps, recorded
+here as the leading explanation, not a decode.
+
+**What the data supports, and what it does not.** If the stretch were a vertical *skirt* sealing an
+underside, tall surfaces should be vertical. They skew that way but not decisively: of surfaces taller
+than 5, **21.85%** are non-Z-dominant, against **9.86%** of short surfaces — a real 2.2x enrichment,
+leaving roughly four out of five tall surfaces still Z-dominant, i.e. **steep ramps and cliff faces**
+rather than walls. PM4 already has dedicated vertical geometry in `MSPV`/`MSPI` (0% Z-dominant), and
+the unattributed bucket carries a wall quad on 40.69% of its links. So the sealing function is most
+likely served by `MSPV` walls, with the stretched `MSUR` polygons being steep terrain-following
+collision alongside them.
+
+**Consequence for anyone generating these files.** The unattributed bucket is not a bag of leftover
+floor quads. It contains geometry whose vertical extent is a deliberate property, so an exporter that
+emits only flat walkable surfaces per model will not reproduce it. Testable prediction: stretched
+surfaces should concentrate near liquid volumes and terrain holes.
 
 ---
 

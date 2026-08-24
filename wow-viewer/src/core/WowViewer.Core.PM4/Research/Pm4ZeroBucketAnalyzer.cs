@@ -1,3 +1,4 @@
+using System.Numerics;
 using WowViewer.Core.PM4.Models;
 using WowViewer.Core.PM4.Services;
 
@@ -89,6 +90,21 @@ public static class Pm4ZeroBucketAnalyzer
                             if (span > bucket.SurfaceZSpanMax) bucket.SurfaceZSpanMax = span;
                             if (span > 5.0) bucket.SurfacesTallerThan5++;
                             if (span > 20.0) bucket.SurfacesTallerThan20++;
+
+                            // A barrier skirt sealing the underside of a dock would be VERTICAL:
+                            // tall and not Z-dominant. A tall floor would be a steep ramp instead.
+                            Vector3 n = s.Normal;
+                            bool zDominant = MathF.Abs(n.Z) >= MathF.Abs(n.X) && MathF.Abs(n.Z) >= MathF.Abs(n.Y);
+                            if (span > 5.0)
+                            {
+                                bucket.TallSurfaces++;
+                                if (!zDominant) bucket.TallAndVertical++;
+                            }
+                            else
+                            {
+                                bucket.ShortSurfaces++;
+                                if (!zDominant) bucket.ShortAndVertical++;
+                            }
                         }
                         if (z < bucket.ZMin) bucket.ZMin = z;
                         if (z > bucket.ZMax) bucket.ZMax = z;
@@ -141,6 +157,10 @@ public static class Pm4ZeroBucketAnalyzer
         public double SurfaceZSpanMax;
         public long SurfacesTallerThan5;
         public long SurfacesTallerThan20;
+        public long TallSurfaces;
+        public long TallAndVertical;
+        public long ShortSurfaces;
+        public long ShortAndVertical;
 
         public Pm4BucketResult ToResult() => new(
             Name, Surfaces, Links, DistinctGroups, FilesPresent,
@@ -155,7 +175,9 @@ public static class Pm4ZeroBucketAnalyzer
             SurfaceZSpanCount == 0 ? 0 : SurfaceZSpanSum / SurfaceZSpanCount,
             SurfaceZSpanMax,
             SurfaceZSpanCount == 0 ? 0 : (double)SurfacesTallerThan5 / SurfaceZSpanCount,
-            SurfaceZSpanCount == 0 ? 0 : (double)SurfacesTallerThan20 / SurfaceZSpanCount);
+            SurfaceZSpanCount == 0 ? 0 : (double)SurfacesTallerThan20 / SurfaceZSpanCount,
+            TallSurfaces == 0 ? 0 : (double)TallAndVertical / TallSurfaces,
+            ShortSurfaces == 0 ? 0 : (double)ShortAndVertical / ShortSurfaces);
     }
 }
 
@@ -176,7 +198,9 @@ public sealed record Pm4BucketResult(
     double MeanSurfaceZSpan,
     double MaxSurfaceZSpan,
     double SurfacesTallerThan5Fraction,
-    double SurfacesTallerThan20Fraction);
+    double SurfacesTallerThan20Fraction,
+    double TallSurfacesVerticalFraction,
+    double ShortSurfacesVerticalFraction);
 
 public sealed record Pm4ZeroBucketReport(
     string InputDirectory,
