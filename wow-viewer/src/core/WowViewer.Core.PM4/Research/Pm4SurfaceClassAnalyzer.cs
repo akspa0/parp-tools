@@ -99,12 +99,52 @@ public static class Pm4SurfaceClassAnalyzer
             }
         }
 
+        // Object-level view: the viewer filters and colours by an object's DOMINANT class, so the
+        // surface-level table above does not describe what a user actually sees. This counts whole
+        // objects instead, split by whether they carry a placement height.
+        var objDominant = new Dictionary<(byte cls, bool hasHeight), int>();
+        foreach (string path in Directory
+            .EnumerateFiles(resolved, "*.pm4", SearchOption.TopDirectoryOnly)
+            .OrderBy(Path.GetFileName))
+        {
+            Pm4KnownChunkSet c = Pm4ResearchReader.ReadFile(path).KnownChunks;
+            if (c.Msur.Count == 0)
+                continue;
+
+            var perObject = new Dictionary<uint, Dictionary<byte, int>>();
+            foreach (Pm4MsurEntry s2 in c.Msur)
+            {
+                if (!perObject.TryGetValue(s2.PackedParams, out var counts))
+                {
+                    counts = [];
+                    perObject[s2.PackedParams] = counts;
+                }
+                counts[s2.GroupKey] = counts.GetValueOrDefault(s2.GroupKey) + 1;
+            }
+
+            foreach ((uint raw, var counts) in perObject)
+            {
+                byte dominant = counts.OrderByDescending(static kv => kv.Value).First().Key;
+                var key = (dominant, raw != 0);
+                objDominant[key] = objDominant.GetValueOrDefault(key) + 1;
+            }
+        }
+
+        List<Pm4ClassObjectCount> objectCounts = objDominant
+            .GroupBy(static kv => kv.Key.cls)
+            .Select(g => new Pm4ClassObjectCount(
+                g.Key,
+                g.Where(static x => x.Key.hasHeight).Sum(static x => x.Value),
+                g.Where(static x => !x.Key.hasHeight).Sum(static x => x.Value)))
+            .OrderByDescending(static x => x.ObjectsWithHeight + x.ObjectsWithoutHeight)
+            .ToList();
+
         List<Pm4SurfaceClassResult> results = byValue.Values
             .OrderByDescending(static a => a.Surfaces)
             .Select(static a => a.ToResult())
             .ToList();
 
-        return new Pm4SurfaceClassReport(resolved, files, results);
+        return new Pm4SurfaceClassReport(resolved, files, results, objectCounts);
     }
 
     private sealed class ClassAccumulator(byte value)
@@ -140,7 +180,10 @@ public sealed record Pm4SurfaceClassResult(
     double MeanNormalisedHeightInObject,
     double ZeroPopulationFraction);
 
+public sealed record Pm4ClassObjectCount(byte Value, int ObjectsWithHeight, int ObjectsWithoutHeight);
+
 public sealed record Pm4SurfaceClassReport(
     string InputDirectory,
     int Files,
-    IReadOnlyList<Pm4SurfaceClassResult> Classes);
+    IReadOnlyList<Pm4SurfaceClassResult> Classes,
+    IReadOnlyList<Pm4ClassObjectCount> ObjectCounts);

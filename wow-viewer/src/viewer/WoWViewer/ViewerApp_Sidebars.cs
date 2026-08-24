@@ -1198,12 +1198,25 @@ public partial class ViewerApp
         if (_worldScene?.SelectedPm4ObjectKey is not { } key)
             return;
 
-        ImGui.Text($"PM4 tile ({key.tileX}, {key.tileY})  CK24 0x{key.ck24:X6}  part {key.objectPart}");
         if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debug))
         {
-            ImGui.TextDisabled($"Type 0x{debug.Ck24Type:X2}  Object {debug.Ck24ObjectId}  Region {debug.MshdRegionId}");
-            ImGui.TextDisabled($"Group 0x{debug.DominantGroupKey:X2}  Attr 0x{debug.DominantAttributeMask:X2}  MSCN {debug.DominantMscnRefIndex}");
-            ImGui.TextDisabled($"MSLK group 0x{debug.LinkGroupObjectId:X8}  refs {debug.LinkedPositionRefCount}");
+            // Lead with what identifies the object. "Type" and "Object" used to appear here as
+            // Ck24Type and Ck24ObjectId, which are the EXPONENT BAND and MANTISSA BYTES of the
+            // placement-Z float - they name nothing, and showing "Type 0x00" beside a real class
+            // byte invited reading 0x00 as a surface class. Surface classes are 0x03 and 0x10-0x15;
+            // 0x00 never occurs.
+            float z = BitConverter.UInt32BitsToSingle(debug.Ck24 << 8);
+            ImGui.TextUnformatted(debug.Ck24 == 0
+                ? $"PM4 object   tile ({key.tileX}, {key.tileY})   no placement height"
+                : $"PM4 object   tile ({key.tileX}, {key.tileY})   placement Z {z:F3}");
+
+            ImGui.TextDisabled($"Surface class 0x{debug.DominantGroupKey:X2} (dominant)   Region {debug.MshdRegionId}   MSCN {debug.DominantMscnRefIndex}");
+            ImGui.TextDisabled($"MSLK adjacency records: {debug.DominantAttributeMask}   MSLK group 0x{debug.LinkGroupObjectId:X8}   MPRL refs {debug.LinkedPositionRefCount}");
+            ImGui.TextDisabled($"Raw MSUR._0x1C slice 0x{debug.Ck24:X6}   viewer part {key.objectPart}");
+        }
+        else
+        {
+            ImGui.Text($"PM4 tile ({key.tileX}, {key.tileY})   part {key.objectPart}");
         }
     }
 

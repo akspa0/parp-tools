@@ -6368,6 +6368,15 @@ static void RunPm4SurfaceClass(string[] args)
 	Console.WriteLine("  Z-dominant + high in object             = roof.");
 	Console.WriteLine("  NOT Z-dominant                          = wall.");
 	Console.WriteLine("  Values that separate on these axes are a surface CLASS; values that do not are an opaque key.");
+	Console.WriteLine();
+	Console.WriteLine("Whole OBJECTS by dominant class - this is what the viewer filters and colours by:");
+	Console.WriteLine("  value   withHeight  withoutHeight     total   share with a height");
+	foreach (Pm4ClassObjectCount o in r.ObjectCounts)
+	{
+		int total = o.ObjectsWithHeight + o.ObjectsWithoutHeight;
+		double share = total == 0 ? 0 : (double)o.ObjectsWithHeight / total;
+		Console.WriteLine($"   0x{o.Value:X2}   {o.ObjectsWithHeight,10}   {o.ObjectsWithoutHeight,13}   {total,7}   {share,10:P1}");
+	}
 }
 
 static void RunPm4ZeroBucket(string[] args)
