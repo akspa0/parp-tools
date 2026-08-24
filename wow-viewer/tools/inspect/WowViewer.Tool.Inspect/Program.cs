@@ -2207,6 +2207,9 @@ static void RunPm4(string[] args)
 		case "miss-anatomy":
 			RunPm4MissAnatomy(tail);
 			break;
+		case "mshd-dump":
+			RunPm4MshdDump(tail);
+			break;
 		case "bounds-audit":
 			RunPm4BoundsAudit(tail);
 			break;
@@ -6331,6 +6334,69 @@ static void RunPm4ConnectiveGeometry(string[] args)
 	}
 
 	PrintPm4ConnectiveGeometryReport(report);
+}
+
+static void RunPm4MshdDump(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string dir = WowViewer.Core.PM4.Services.Pm4CoordinateService.ResolveMapDirectory(input);
+	Console.WriteLine("file,tileA,tileB,f00,f04,f08,msur,mslk,mscn,msvt,mspv,mprl,mprr,bytes,spanX,spanY,msvtX,msvtY,mspvX,mspvY,mscnX,mscnY");
+	foreach (string path in Directory.EnumerateFiles(dir, "*.pm4", SearchOption.TopDirectoryOnly).OrderBy(Path.GetFileName))
+	{
+		var doc = WowViewer.Core.PM4.Services.Pm4ResearchReader.ReadFile(path);
+		var k = doc.KnownChunks;
+		if (k.Mshd is null)
+			continue;
+
+		string name = Path.GetFileNameWithoutExtension(path);
+		var m = System.Text.RegularExpressions.Regex.Match(name, @"_(\d+)_(\d+)$");
+		string a = m.Success ? m.Groups[1].Value : "-1";
+		string b = m.Success ? m.Groups[2].Value : "-1";
+		long bytes = new FileInfo(path).Length;
+		// Extents across every point stream, for testing whether the header fields are clamped
+		// world-unit spans rather than counts.
+		float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+		void Acc(IReadOnlyList<System.Numerics.Vector3> pts)
+		{
+			foreach (System.Numerics.Vector3 v in pts)
+			{
+				if (v.X < minX) minX = v.X;
+				if (v.X > maxX) maxX = v.X;
+				if (v.Y < minY) minY = v.Y;
+				if (v.Y > maxY) maxY = v.Y;
+			}
+		}
+		(double sx, double sy) Span(IReadOnlyList<System.Numerics.Vector3> pts)
+		{
+			if (pts.Count == 0) return (0, 0);
+			float aX = float.MaxValue, aY = float.MaxValue, bX = float.MinValue, bY = float.MinValue;
+			foreach (System.Numerics.Vector3 v in pts)
+			{
+				if (v.X < aX) aX = v.X;
+				if (v.X > bX) bX = v.X;
+				if (v.Y < aY) aY = v.Y;
+				if (v.Y > bY) bY = v.Y;
+			}
+			return (bX - aX, bY - aY);
+		}
+		Acc(k.Msvt); Acc(k.Mspv); Acc(k.Mscn);
+		double spanX = maxX > minX ? maxX - minX : 0;
+		double spanY = maxY > minY ? maxY - minY : 0;
+		var (vx, vy) = Span(k.Msvt);
+		var (px, py) = Span(k.Mspv);
+		var (cx2, cy2) = Span(k.Mscn);
+
+		Console.WriteLine($"{name},{a},{b},{k.Mshd.Field00},{k.Mshd.Field04},{k.Mshd.Field08}," +
+			$"{k.Msur.Count},{k.Mslk.Count},{k.Mscn.Count},{k.Msvt.Count},{k.Mspv.Count},{k.Mprl.Count},{k.Mprr.Count},{bytes}," +
+			$"{spanX:F3},{spanY:F3},{vx:F3},{vy:F3},{px:F3},{py:F3},{cx2:F3},{cy2:F3}");
+	}
 }
 
 static void RunPm4MissAnatomy(string[] args)

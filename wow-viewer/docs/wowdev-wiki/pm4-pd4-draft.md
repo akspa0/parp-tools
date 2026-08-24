@@ -302,9 +302,9 @@ table is the honest accounting of the rest, so a reader can tell a result from a
 | chunk | field | status | note |
 |---|---|---|---|
 | `MVER` | word | PARTIAL | low byte = version; **not** a build or size (measured). High byte `0x30` on PM4 UNKNOWN |
-| `MSHD` | `0x00` | UNKNOWN | 155 distinct values, top 534 in 289 of 502 files |
-| `MSHD` | `0x04` | UNKNOWN | often called a region id; 227 distinct, `== 1` in 140/502. **All tile-coordinate readings eliminated** (packed XY 0/502, low byte as tile X or Y 1/502) |
-| `MSHD` | `0x08` | UNKNOWN | 152 distinct, top 534; equals `0x00` in 233/502 |
+| `MSHD` | `0x00` | PARTIAL | a **clamped world-unit span**, not a count — see below |
+| `MSHD` | `0x04` | PARTIAL | `== 1` marks a tile with **no surfaces**: 140 of 193 empty tiles, **0 of 309** tiles with geometry. Otherwise 207 distinct values over 309 geometry tiles, 62 shared by more than one tile. **All tile-coordinate readings eliminated** (packed XY 0/502, low byte as tile X or Y 1/502) |
+| `MSHD` | `0x08` | PARTIAL | the companion span on the other axis — see below |
 | `MSHD` | `0x0C`–`0x1C` | **MEASURED** | **zero in 502/502 files** — five reserved fields, not five mysteries |
 | `MSPV` | positions | MEASURED | wall vertices |
 | `MSPI` | indices | MEASURED | 2,418,205 fits, 0 misses into `MSPV` |
@@ -325,6 +325,23 @@ table is the honest accounting of the rest, so a reader can tell a result from a
 | `MDSF` | both indices | MEASURED | 2,684 fits, 0 misses; links a surface to a destruction state |
 | `MDOS`, `MDBH`, `MDBI`, `MDBF` | | PARTIAL | destructible-building payload; `MDBF` holds filenames. Present on essentially one tile in this corpus, so treat as unrepresentative. Note what `MDSF` + `MDOS` amount to together: a **per-surface destruction state**, i.e. a mechanism for swapping which surfaces are walkable as world state changes — the navmesh side of destructible buildings, which is era-appropriate for Cataclysm |
 | `MCRC` (PD4) | word | UNKNOWN | zero in the reference file |
+
+### `MSHD.0x00` and `0x08` are clamped spans, not counts
+
+Both are capped at **534**, which is `ceil(533.333)` — the tile size in world units — and they
+saturate there on 27.5% of tiles with geometry and 76.2% of empty ones. Against the tile's geometry
+extents they correlate **crossed**, in exactly the axis order PM4 uses elsewhere (`MSVT.X` pairs with
+`MDDF.rawY`):
+
+| | vs X extent | vs Y extent |
+|---|---|---|
+| `0x00` | +0.406 | **+0.780** |
+| `0x08` | **+0.847** | +0.385 |
+
+So they are world-unit spans of the tile's content, clamped to the tile. They are **not** the extent
+of any point stream in the file: against `MSCN`, `MSPV` or `MSVT` individually the median difference
+runs +42 to +96 units and only about 2.4% of tiles land within 3 units. Whatever they measure is
+related to the tile's occupied span but is not a bounding box of the geometry as stored.
 
 Counting fields rather than chunks, rather more is unknown than known. In particular **`MSHD`'s three
 live fields, all six `MPRL` unknowns, and the whole of `MPRR`** have no decoded meaning, and the
