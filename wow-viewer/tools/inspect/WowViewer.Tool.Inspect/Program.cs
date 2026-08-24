@@ -2201,6 +2201,9 @@ static void RunPm4(string[] args)
 		case "merge-bias":
 			RunPm4MergeBias(tail);
 			break;
+		case "mscn-nature":
+			RunPm4MscnNature(tail);
+			break;
 		case "bounds-audit":
 			RunPm4BoundsAudit(tail);
 			break;
@@ -6325,6 +6328,45 @@ static void RunPm4ConnectiveGeometry(string[] args)
 	}
 
 	PrintPm4ConnectiveGeometryReport(report);
+}
+
+static void RunPm4MscnNature(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (HasFlag(args, "--grid"))
+	{
+		Pm4GridSnapReport g = Pm4MscnNatureAnalyzer.AnalyzeGridSnap(input);
+		Console.WriteLine("WowViewer.Tool.Inspect PM4 MSCN lattice test");
+		Console.WriteLine($"Input: {g.InputDirectory}  files={g.Files}  MSCN={g.MscnPoints}  MSVT={g.MsvtPoints}  epsilon={g.Epsilon}");
+		Console.WriteLine();
+		Console.WriteLine("Fraction of coordinates landing on a multiple of each step:");
+		Console.WriteLine("  step            MSCN       MSVT (control)");
+		foreach (Pm4GridSnapRow r in g.Rows)
+			Console.WriteLine($"  {r.Step,12:F5}  {r.MscnSnappedFraction,8:P3}   {r.MsvtSnappedFraction,8:P3}");
+		Console.WriteLine();
+		Console.WriteLine("  MSCN snapping far above MSVT would mean the node network sits on a lattice");
+		Console.WriteLine("  that the surface mesh does not. Comparable numbers mean no lattice.");
+		return;
+	}
+
+	Pm4MscnNatureReport r2 = Pm4MscnNatureAnalyzer.AnalyzeDirectory(input);
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 MSCN nature");
+	Console.WriteLine($"Input: {r2.InputDirectory}  files={r2.Files}");
+	Console.WriteLine($"  MSCN={r2.MscnPoints}  MSVT={r2.MsvtPoints}  MSPV={r2.MspvPoints}  MSUR={r2.MsurSurfaces}");
+	Console.WriteLine($"  MSCN per surface = {r2.MscnPerSurface:F3}  (per-file range {r2.MinMscnPerSurface:F2}..{r2.MaxMscnPerSurface:F2})");
+	Console.WriteLine($"  MSCN / MSVT = {r2.MscnPerMsvt:F3}   MSCN / MSPV = {r2.MscnPerMspv:F3}");
+	Console.WriteLine();
+	Console.WriteLine("Coincidence at 0.25 units:");
+	Console.WriteLine($"  MSCN on a floor vertex (MSVT) = {r2.MscnCoincidentWithMsvt} ({r2.MscnCoincidentWithMsvtFraction:P2})");
+	Console.WriteLine($"  MSCN on a wall vertex  (MSPV) = {r2.MscnCoincidentWithMspv} ({r2.MscnCoincidentWithMspvFraction:P2})");
+	Console.WriteLine($"  MSCN on neither               = {r2.MscnCoincidentWithNeither} ({r2.MscnCoincidentWithNeitherFraction:P2})");
 }
 
 static void RunPm4MergeBias(string[] args)

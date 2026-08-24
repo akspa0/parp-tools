@@ -205,6 +205,29 @@ index* into MSCN, which is a separate relation and still measures 511,891 fits /
 can be true: `_0x18` is a window start in `MSLK`, and MSCN is reached by some other route. Which
 route is the open question.
 
+**Nodes are their own points, not mesh vertices.** At a 0.25-unit tolerance, only **13.69%** of MSCN
+points coincide with a floor vertex (`MSVT`) and **11.53%** with a wall vertex (`MSPV`); **85.09%
+coincide with neither**. So MSCN is a separate point set living in the mesh's frame, not a re-listing
+of mesh geometry.
+
+**Population is steady per surface.** **2.591** MSCN points per `MSUR` surface corpus-wide, and the
+per-file figure stays inside **1.00 .. 3.58** across 309 files. For scale: MSCN 1,342,410 against
+MSVT 1,134,074 and MSPV 1,261,769 — comparable in size to both meshes while overlapping neither.
+Note that MSCN's count sits close to `MSLK`'s 1,273,335 (ratio 1.054), which is a lead worth testing
+rather than a decoded relationship.
+
+**They are NOT on a lattice.** A snap test against candidate steps drawn from WoW's terrain
+subdivision (tile 533.33, chunk 33.33, cell 8.33 and 4.17, plus 2.08 / 1.0 / 0.5 / 0.25) shows MSCN
+landing on multiples at **0.287% / 0.345% / 0.506% / 0.732% / 1.167% / 2.133% / 4.119% / 8.402%** —
+against an `MSVT` control of **0.428% / 0.487% / 0.652% / 0.873% / 1.315% / 2.160% / 4.077% /
+8.418%**. The two streams are indistinguishable, and both sit at the rate chance predicts (`2ε/step`:
+8% expected vs 8.40% observed at step 0.25, 2% vs 2.13% at step 1.0). Any reading in which nodes are
+snapped to a regular grid is eliminated.
+
+Taken together: a **pre-baked node graph** of roughly two to three freely-positioned nodes per
+walkable polygon, shared between neighbouring objects, in the same frame as the mesh but independent
+of its vertices.
+
 Open: which stream indexes MSCN, and what a shared node means precisely (a portal, a weld point, a
 tile seam).
 
