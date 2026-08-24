@@ -342,7 +342,16 @@ public partial class ViewerApp
 
             if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
             {
-                ImGui.TextDisabled($"Type=0x{debugInfo.Ck24Type:X2} ObjId={debugInfo.Ck24ObjectId} Surfaces={debugInfo.SurfaceCount}");
+                // MSUR._0x1C is the producing placement's Z as an IEEE-754 float, not a packed key
+                // (bit-exact for 93.58% of objects; see docs/wowdev-wiki/pm4-pd4-draft.md). Show it
+                // as a height, and show the resolved placement where the object library can name it.
+                // The stored Ck24 is the top 24 bits, so this reconstruction carries ~0.003%
+                // relative error and is displayed as approximate.
+                float placementZ = BitConverter.UInt32BitsToSingle(debugInfo.Ck24 << 8);
+                ImGui.TextColored(new Vector4(0.55f, 0.85f, 0.55f, 1f),
+                    $"Placement Z ~= {placementZ:F3}   (MSUR._0x1C as float; 'CK24' is a slice of it)");
+                ImGui.TextDisabled($"Surfaces={debugInfo.SurfaceCount}  bounds Z {debugInfo.BoundsMin.Z:F2}..{debugInfo.BoundsMax.Z:F2}  centre ({debugInfo.Center.X:F1}, {debugInfo.Center.Y:F1}, {debugInfo.Center.Z:F1})");
+                ImGui.TextDisabled($"Raw slice 0x{debugInfo.Ck24:X6} (exponent band 0x{debugInfo.Ck24Type:X2} - NOT a type)");
                 ImGui.TextDisabled($"MSHD F00={debugInfo.MshdField00} Region={debugInfo.MshdRegionId} F08={debugInfo.MshdField08}");
                 ImGui.TextDisabled($"Group=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} MscnRef={debugInfo.DominantMscnRefIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
                 ImGui.TextDisabled($"MSLKGroup=0x{debugInfo.LinkGroupObjectId:X8} Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
