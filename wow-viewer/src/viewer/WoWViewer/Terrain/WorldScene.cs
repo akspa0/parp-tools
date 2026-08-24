@@ -11241,11 +11241,16 @@ public class WorldScene : ISceneRenderer
                     });
                 }
 
-                // Placement-Z markers: a flat box at Z = MSUR._0x1C-as-float under each object.
+                // Placement-Z markers: a flat slab at Z = MSUR._0x1C-as-float under each object.
                 if (_showPm4PlacementZPlane && _showPm4Overlay && _bbRenderer != null && _pm4TileObjects.Count > 0)
                 {
                     pm4BoundsMs += MeasureDurationMs(() =>
                     {
+                        Matrix4x4 markerTransform = BuildPm4OverlayTransformMatrix();
+                        bool applyMarkerTransform = _pm4OverlayTranslation != Vector3.Zero
+                            || _pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
+                            || _pm4OverlayScale != Vector3.One;
+
                         foreach (var tileEntry in _pm4TileObjects)
                         {
                             foreach (Pm4OverlayObject obj in tileEntry.Value)
@@ -11253,18 +11258,32 @@ public class WorldScene : ISceneRenderer
                                 if (!ShouldRenderPm4Object(obj))
                                     continue;
 
-                                float z = BitConverter.UInt32BitsToSingle(obj.Ck24 << 8);
-                                bool absent = obj.Ck24 == 0;
+                                // Objects with no recorded height would all stack at world Z=0 -
+                                // thousands per tile, which drowns the display and shows nothing.
+                                // Their absence IS the finding; it does not need 3,000 boxes.
+                                if (obj.Ck24 == 0)
+                                    continue;
 
-                                // A thin slab spanning the object's footprint, at the height the
-                                // field claims. Orange where the value is absent, green where it is
-                                // present - so a sunken orange slab reads as "no height recorded",
-                                // not as "this object is at zero".
-                                Vector3 min = new(obj.BoundsMin.X, obj.BoundsMin.Y, z - 0.15f);
-                                Vector3 max = new(obj.BoundsMax.X, obj.BoundsMax.Y, z + 0.15f);
-                                _bbRenderer.BatchBoxMinMax(min, max, absent
-                                    ? new Vector3(0.95f, 0.55f, 0.20f)
-                                    : new Vector3(0.35f, 0.95f, 0.45f));
+                                var markerKey = (tileEntry.Key.tileX, tileEntry.Key.tileY, obj.Ck24, obj.ObjectPartId);
+                                Matrix4x4 objTransform = BuildPm4ObjectTransform(markerKey, applyMarkerTransform, markerTransform, out bool applyObj);
+
+                                Vector3 bMin = obj.BoundsMin;
+                                Vector3 bMax = obj.BoundsMax;
+                                if (applyObj)
+                                    TransformBounds(bMin, bMax, objTransform, out bMin, out bMax);
+
+                                // A SMALL marker at the object's centre, deliberately not the size of
+                                // the object. An earlier version spanned the object's XY footprint,
+                                // which made every marker look like the object's bounding box and
+                                // invited reading _0x1C as encoded bounds. Only the HEIGHT here comes
+                                // from the data; any width would come from geometry we already have,
+                                // so the marker carries no width worth showing.
+                                float z = BitConverter.UInt32BitsToSingle(obj.Ck24 << 8);
+                                Vector3 centre = (bMin + bMax) * 0.5f;
+                                const float MarkerHalfWidth = 1.25f;
+                                Vector3 min = new(centre.X - MarkerHalfWidth, centre.Y - MarkerHalfWidth, z - 0.1f);
+                                Vector3 max = new(centre.X + MarkerHalfWidth, centre.Y + MarkerHalfWidth, z + 0.1f);
+                                _bbRenderer.BatchBoxMinMax(min, max, new Vector3(0.35f, 0.95f, 0.45f));
                                 pm4BoundsPreparedCount++;
                             }
                         }

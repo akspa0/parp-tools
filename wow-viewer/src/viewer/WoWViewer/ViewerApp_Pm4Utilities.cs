@@ -163,9 +163,10 @@ public partial class ViewerApp
         if (ImGui.IsItemHovered())
         {
             ImGui.BeginTooltip();
-            ImGui.TextUnformatted("Flat slab at the object's placement height.");
-            ImGui.TextUnformatted("Green = height recorded, should sit at the object's base.");
-            ImGui.TextUnformatted("Orange = no height recorded, drops to world Z=0.");
+            ImGui.TextUnformatted("Small marker at each object's placement height.");
+            ImGui.TextUnformatted("Only the HEIGHT comes from the data; position is the object's centre.");
+            ImGui.TextUnformatted("It should sit at the base of the object.");
+            ImGui.TextUnformatted("Objects with no recorded height are skipped.");
             ImGui.EndTooltip();
         }
 
