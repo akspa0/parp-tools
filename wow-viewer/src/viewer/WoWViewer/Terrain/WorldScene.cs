@@ -73,18 +73,37 @@ using WowViewer.Core.World;
 
 namespace WoWViewer.Terrain;
 
+/// <summary>
+/// What the PM4 overlay colours objects by.
+/// </summary>
+/// <remarks>
+/// Four modes were removed on 2026-08-24 because each grouped by a measured misreading:
+/// <c>Ck24Type</c> is the EXPONENT BAND of the placement-Z float, <c>Ck24ObjectId</c> its MANTISSA
+/// bytes, <c>Ck24TypeVsTypeFlags</c> a cross-tab of that exponent band, and <c>AttributeMask</c> is
+/// the LENGTH of a surface's MSLK window - so it coloured objects by how many neighbours they have.
+/// None of them named a property of an object. See docs/wowdev-wiki/pm4-pd4-draft.md.
+/// </remarks>
 public enum Pm4OverlayColorMode
 {
-    Ck24Type,
-    Ck24ObjectId,
-    Ck24Key,
+    /// <summary>MSUR._0x1C as a float: the producing placement's Z. Groups WMO objects; every doodad surface is 0.</summary>
+    PlacementZ,
+
+    /// <summary>Placed (carries a placement height) versus doodad collision (does not).</summary>
+    Population,
+
     Tile,
     MshdRegionId,
+
+    /// <summary>Surfaces per object - a size bucket, not an identity.</summary>
+    SurfaceCount,
+
+    /// <summary>MSUR._0x00. Unmeasured: 100% pure across only 9 corpus values, so it separates nothing.</summary>
     GroupKey,
-    AttributeMask,
+
     Height,
+
+    /// <summary>MSLK._0x00. Partial: observed buckets, not corpus-closed.</summary>
     TypeFlags,
-    Ck24TypeVsTypeFlags,
 }
 
 public readonly struct Pm4ObjectDebugInfo
@@ -1200,7 +1219,7 @@ public class WorldScene : ISceneRenderer
     // coplanar, and not one of 598,790 faces has Z as its dominant normal. The viewer has never
     // drawn them, so half the decoded geometry has been invisible.
     private bool _pm4ShowPathWalls = true;
-    private Pm4OverlayColorMode _pm4ColorMode = Pm4OverlayColorMode.Ck24ObjectId;
+    private Pm4OverlayColorMode _pm4ColorMode = Pm4OverlayColorMode.PlacementZ;
     private Vector3 _pm4OverlayTranslation = Vector3.Zero;
     private Vector3 _pm4OverlayRotationDegrees = Vector3.Zero;
     private Vector3 _pm4OverlayScale = Vector3.One;
@@ -13481,9 +13500,13 @@ public class WorldScene : ISceneRenderer
         string detail;
         if (obj.Ck24 == 0)
         {
-            title = "M2 doodad collision (no placement height)";
+            // Say only what is measured. _0x1C == 0 means NO PLACEMENT HEIGHT was recorded - that is
+            // the certain part. The population is dominated by doodad collision (its geometric
+            // components match an MDDF placement within 24 units 95.1% of the time), but 95.1% is
+            // not 100%, so labelling every individual object "M2" asserts more than the evidence.
+            title = "No placement height (unattributed surfaces)";
             detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   region {obj.MshdRegionId}   surfaces {obj.SurfaceCount}"
-                + "   MSUR._0x1C = 0.0 - doodad collision; identified by connectivity, matched to MDDF spatially";
+                + "   MSUR._0x1C = 0.0 - population is mostly M2 doodad collision (95.1% of components match MDDF); grouped by connectivity";
         }
         else if (resolved)
         {
@@ -13755,15 +13778,16 @@ public class WorldScene : ISceneRenderer
     {
         return _pm4ColorMode switch
         {
-            Pm4OverlayColorMode.Ck24ObjectId => ColorFromSeed(obj.Ck24ObjectId),
-            Pm4OverlayColorMode.Ck24Key => ColorFromSeed(obj.Ck24),
+            Pm4OverlayColorMode.PlacementZ => ColorFromSeed(obj.Ck24),
+            Pm4OverlayColorMode.Population => obj.Ck24 == 0
+                ? new Vector3(0.95f, 0.55f, 0.20f)
+                : new Vector3(0.30f, 0.70f, 0.95f),
             Pm4OverlayColorMode.Tile => ColorFromSeed((uint)HashCode.Combine(tileKey.tileX, tileKey.tileY)),
             Pm4OverlayColorMode.MshdRegionId => ColorFromSeed(obj.MshdRegionId),
+            Pm4OverlayColorMode.SurfaceCount => ColorFromSeed((uint)obj.SurfaceCount),
             Pm4OverlayColorMode.GroupKey => ColorFromSeed(obj.DominantGroupKey),
-            Pm4OverlayColorMode.AttributeMask => ColorFromSeed(obj.DominantAttributeMask),
             Pm4OverlayColorMode.Height => ColorFromHeight(obj.Center.Z),
             Pm4OverlayColorMode.TypeFlags => BlendTypeFlagColors(obj.DistinctTypeFlags),
-            Pm4OverlayColorMode.Ck24TypeVsTypeFlags => GetCk24TypeVsTypeFlagsColor(obj.Ck24Type, obj.DistinctTypeFlags),
             _ => GetPm4TypeColor(obj.Ck24Type)
         };
     }
@@ -14002,36 +14026,6 @@ public class WorldScene : ISceneRenderer
                         typeFlagEntries);
                 }
 
-                if (_pm4ColorMode == Pm4OverlayColorMode.Ck24TypeVsTypeFlags)
-                {
-                    int matchCount = 0;
-                    int noTypeFlagsCount = 0;
-                    int untypedCount = 0;
-                    int mismatchCount = 0;
-                    foreach (((int tileX, int tileY) _, Pm4OverlayObject obj) in EnumerateVisiblePm4OverlayObjects())
-                    {
-                        uint mask = obj.DistinctTypeFlags;
-                        if (mask == 0) { noTypeFlagsCount++; continue; }
-                        if (obj.Ck24Type == 0) { untypedCount++; continue; }
-                        if ((mask & (1u << obj.Ck24Type)) != 0) { matchCount++; }
-                        else { mismatchCount++; }
-                    }
-                    var entries = new List<Pm4ColorLegendEntry>();
-                    if (matchCount > 0)
-                        entries.Add(new Pm4ColorLegendEntry("CK24Type matches TypeFlag", new Vector3(0.10f, 0.85f, 0.20f), matchCount, false));
-                    if (untypedCount > 0)
-                        entries.Add(new Pm4ColorLegendEntry("CK24Type=0 (untyped carrier)", new Vector3(1.00f, 0.95f, 0.10f), untypedCount, false));
-                    if (mismatchCount > 0)
-                        entries.Add(new Pm4ColorLegendEntry("CK24Type != any TypeFlag", new Vector3(1.00f, 0.15f, 0.15f), mismatchCount, false));
-                    if (noTypeFlagsCount > 0)
-                        entries.Add(new Pm4ColorLegendEntry("No TypeFlags data", new Vector3(0.25f, 0.25f, 0.25f), noTypeFlagsCount, false));
-                    return new Pm4ColorLegendInfo(
-                        _pm4ColorMode,
-                        isContinuous: false,
-                        "Green = CK24 high byte matches a TypeFlag. Red = no match (anomaly). Yellow = CK24Type=0 carrier object.",
-                        entries.Count,
-                        entries);
-                }
 
                 if (_pm4ColorMode == Pm4OverlayColorMode.Tile)
                 {
@@ -14423,13 +14417,13 @@ public class WorldScene : ISceneRenderer
     {
         return mode switch
         {
-            Pm4OverlayColorMode.Ck24ObjectId => obj.Ck24ObjectId,
-            Pm4OverlayColorMode.Ck24Key      => obj.Ck24,
-            Pm4OverlayColorMode.MshdRegionId => obj.MshdRegionId,
-            Pm4OverlayColorMode.GroupKey     => obj.DominantGroupKey,
-            Pm4OverlayColorMode.AttributeMask=> obj.DominantAttributeMask,
-            Pm4OverlayColorMode.TypeFlags    => obj.DistinctTypeFlags,
-            _ => obj.Ck24Type   // fallback = Ck24Type
+            Pm4OverlayColorMode.PlacementZ   => obj.Ck24,
+            Pm4OverlayColorMode.Population    => obj.Ck24 == 0 ? 0u : 1u,
+            Pm4OverlayColorMode.MshdRegionId  => obj.MshdRegionId,
+            Pm4OverlayColorMode.SurfaceCount  => (uint)obj.SurfaceCount,
+            Pm4OverlayColorMode.GroupKey      => obj.DominantGroupKey,
+            Pm4OverlayColorMode.TypeFlags     => obj.DistinctTypeFlags,
+            _ => obj.Ck24
         };
     }
 
@@ -14450,26 +14444,19 @@ public class WorldScene : ISceneRenderer
     {
         return mode switch
         {
-            Pm4OverlayColorMode.Ck24Type       => $"CK24 type 0x{value:X2}",
-            Pm4OverlayColorMode.Ck24ObjectId   => $"CK24 obj {value} (0x{value:X4})",
-            Pm4OverlayColorMode.Ck24Key        => $"CK24 0x{value:X6}",
+            Pm4OverlayColorMode.PlacementZ     => value == 0
+                ? "no placement height (doodad collision)"
+                : $"placement Z {BitConverter.UInt32BitsToSingle(value << 8):F2}",
+            Pm4OverlayColorMode.Population     => value == 0 ? "doodad collision (no placement height)" : "placed object (has placement height)",
             Pm4OverlayColorMode.MshdRegionId   => $"MSHD region {value}",
-            Pm4OverlayColorMode.GroupKey       => $"GroupKey 0x{value:X2}",
-            Pm4OverlayColorMode.AttributeMask  => FormatAttributeMaskLabel((byte)value),
+            Pm4OverlayColorMode.SurfaceCount   => $"{value} surfaces",
+            Pm4OverlayColorMode.GroupKey       => $"MSUR._0x00 = 0x{value:X2} (unmeasured; 9 values corpus-wide)",
             Pm4OverlayColorMode.TypeFlags      => ((byte)value) switch
             {
                 0x03 => "TypeFlags 0x03 — M2 top surfaces",
                 0x10 => "TypeFlags 0x10 — interior WMO floors",
                 0x12 => "TypeFlags 0x12 — exterior WMO solids",
                 _ => $"TypeFlags 0x{value:X2} — unknown",
-            },
-            Pm4OverlayColorMode.Ck24TypeVsTypeFlags => value switch
-            {
-                0 => "CK24Type matches TypeFlag",
-                1 => "No TypeFlags data",
-                2 => "CK24Type=0 carrier",
-                3 => "CK24Type != TypeFlag (anomaly)",
-                _ => $"unknown ({value})",
             },
             _ => value.ToString(CultureInfo.InvariantCulture)
         };
@@ -14479,19 +14466,14 @@ public class WorldScene : ISceneRenderer
     {
         return mode switch
         {
-            Pm4OverlayColorMode.Ck24ObjectId  => ColorFromSeed(value),
-            Pm4OverlayColorMode.Ck24Key       => ColorFromSeed(value),
+            Pm4OverlayColorMode.PlacementZ    => ColorFromSeed(value),
+            Pm4OverlayColorMode.Population    => value == 0
+                ? new Vector3(0.95f, 0.55f, 0.20f)
+                : new Vector3(0.30f, 0.70f, 0.95f),
             Pm4OverlayColorMode.MshdRegionId  => ColorFromSeed(value),
+            Pm4OverlayColorMode.SurfaceCount  => ColorFromSeed(value),
             Pm4OverlayColorMode.GroupKey      => ColorFromSeed(value),
-            Pm4OverlayColorMode.AttributeMask => ColorFromSeed(value),
             Pm4OverlayColorMode.TypeFlags     => GetTypeFlagColor((byte)value),
-            Pm4OverlayColorMode.Ck24TypeVsTypeFlags => value switch
-            {
-                0 => new Vector3(0.10f, 0.85f, 0.20f),
-                1 => new Vector3(0.25f, 0.25f, 0.25f),
-                2 => new Vector3(1.00f, 0.95f, 0.10f),
-                _ => new Vector3(1.00f, 0.15f, 0.15f),
-            },
             _ => GetPm4TypeColor((byte)value)  // fallback (Ck24Type uses GetPm4TypeColor)
         };
     }

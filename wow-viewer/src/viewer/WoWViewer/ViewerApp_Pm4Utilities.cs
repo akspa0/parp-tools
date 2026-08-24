@@ -2469,16 +2469,14 @@ public partial class ViewerApp
     {
         return mode switch
         {
-            Pm4OverlayColorMode.Ck24Type => "CK24 Type",
-            Pm4OverlayColorMode.Ck24ObjectId => "CK24 ObjectId",
-            Pm4OverlayColorMode.Ck24Key => "CK24 Key",
+            Pm4OverlayColorMode.PlacementZ => "Placement Z (MSUR._0x1C as float)",
+            Pm4OverlayColorMode.Population => "Population: placed vs doodad",
             Pm4OverlayColorMode.Tile => "Tile",
-            Pm4OverlayColorMode.MshdRegionId => "MSHD RegionId",
-            Pm4OverlayColorMode.GroupKey => "Group Key",
-            Pm4OverlayColorMode.AttributeMask => "Attribute Mask",
+            Pm4OverlayColorMode.MshdRegionId => "MSHD RegionId (partial)",
+            Pm4OverlayColorMode.SurfaceCount => "Surface count",
+            Pm4OverlayColorMode.GroupKey => "MSUR._0x00 (unmeasured)",
             Pm4OverlayColorMode.Height => "Height",
-            Pm4OverlayColorMode.TypeFlags => "TypeFlags",
-            Pm4OverlayColorMode.Ck24TypeVsTypeFlags => "CK24Type vs TypeFlags",
+            Pm4OverlayColorMode.TypeFlags => "MSLK._0x00 TypeFlags (partial)",
             _ => mode.ToString(),
         };
     }
