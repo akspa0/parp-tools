@@ -13900,6 +13900,23 @@ void main() {
         _worldScene.UpdateHoveredAssetInfo(view, proj, localX, localY, vpW, vpH);
     }
 
+    /// <summary>
+    /// Coloured text that is NOT run through printf formatting.
+    /// </summary>
+    /// <remarks>
+    /// <c>ImGui.Text</c> and <c>ImGui.TextColored</c> treat their argument as a format string, so a
+    /// '%' arriving from data - an asset path, a percentage in a detail line - is read as a
+    /// conversion specifier and prints garbage pulled off the stack. A tooltip reading
+    /// "95.135345743157f" where "95.1%" was written is exactly that. Any string that comes from data
+    /// rather than from a literal must go through here.
+    /// </remarks>
+    private static void TextColoredUnformatted(Vector4 color, string text)
+    {
+        ImGui.PushStyleColor(ImGuiCol.Text, color);
+        ImGui.TextUnformatted(text ?? string.Empty);
+        ImGui.PopStyleColor();
+    }
+
     private void DrawSceneHoverAssetOverlay()
     {
         if (_visualInvestigationMode == VisualInvestigationMode.Adt)
@@ -13954,19 +13971,19 @@ void main() {
         }
 
         ImGui.SetWindowFontScale(1.22f);
-        ImGui.TextColored(GetHoveredAssetTitleColor(info), info.DisplayName);
+        TextColoredUnformatted(GetHoveredAssetTitleColor(info), info.DisplayName);
         ImGui.SetWindowFontScale(1.0f);
-        ImGui.TextColored(new Vector4(1.0f, 0.91f, 0.56f, 1.0f), info.AssetKind);
+        TextColoredUnformatted(new Vector4(1.0f, 0.91f, 0.56f, 1.0f), info.AssetKind);
 
         if (!string.IsNullOrWhiteSpace(info.SourcePath))
         {
             ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + 340f);
-            ImGui.TextColored(new Vector4(0.54f, 0.84f, 0.52f, 1.0f), info.SourcePath);
+            TextColoredUnformatted(new Vector4(0.54f, 0.84f, 0.52f, 1.0f), info.SourcePath);
             ImGui.PopTextWrapPos();
         }
 
         if (!string.IsNullOrWhiteSpace(info.DetailLine))
-            ImGui.TextColored(new Vector4(0.86f, 0.88f, 0.94f, 1.0f), info.DetailLine);
+            TextColoredUnformatted(new Vector4(0.86f, 0.88f, 0.94f, 1.0f), info.DetailLine);
 
         ImGui.Separator();
 

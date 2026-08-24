@@ -163,13 +163,9 @@ public partial class ViewerApp
         if (ImGui.IsItemHovered())
         {
             ImGui.BeginTooltip();
-            ImGui.Text("Draws a flat slab at MSUR._0x1C read as a Z height.");
-            ImGui.TextDisabled("GREEN = a height is recorded. It should sit at the BASE of the object;");
-            ImGui.TextDisabled("if it floats or sinks, the placement-Z reading is wrong for that object.");
-            ImGui.TextDisabled("ORANGE = the value is 0, so the slab drops to world Z=0, usually far");
-            ImGui.TextDisabled("below the geometry. Measured: 98.7% of that population sits nowhere");
-            ImGui.TextDisabled("near zero (mean Z 120.2), which is why 0 reads as an ABSENT value");
-            ImGui.TextDisabled("rather than an object placed at zero.");
+            ImGui.TextUnformatted("Flat slab at the object's placement height.");
+            ImGui.TextUnformatted("Green = height recorded, should sit at the object's base.");
+            ImGui.TextUnformatted("Orange = no height recorded, drops to world Z=0.");
             ImGui.EndTooltip();
         }
 
@@ -242,11 +238,11 @@ public partial class ViewerApp
                 _worldScene.SetPm4SurfaceClassVisible(cls, visible);
             if (ImGui.IsItemHovered())
             {
+                // TextUnformatted, not Text: these strings carry '%' from measured figures and
+                // ImGui.Text would read it as a printf conversion specifier.
                 ImGui.BeginTooltip();
-                ImGui.Text(Pm4SurfaceClassTooltips[cls]);
-                ImGui.TextDisabled("Filters by the object's DOMINANT class - the overlay carries one");
-                ImGui.TextDisabled("class per object, not per surface, so this cannot isolate a single");
-                ImGui.TextDisabled("surface class within one object.");
+                ImGui.TextUnformatted(Pm4SurfaceClassTooltips[cls]);
+                ImGui.TextUnformatted("Filters by the object's dominant class; cannot isolate one class within an object.");
                 ImGui.EndTooltip();
             }
         }

@@ -13533,35 +13533,25 @@ public class WorldScene : ISceneRenderer
         // height otherwise. The old label led with the raw 24-bit slice and a viewer-generated part
         // number, neither of which names anything: the slice is the top three bytes of a float and
         // the part id is an artefact of how the current overlay split the tile.
-        // _0x1C == 0 is 0.0f - no placement HEIGHT was recorded. This is NOT a remainder: it is
-        // M2 doodad collision, and it is the larger half of the format by file coverage (186,060
-        // surfaces across 283 of 309 files, against 332,032 across 201 for the placed population).
-        // Geometric components of it land within 24 units of an MDDF doodad placement 95.1% of the
-        // time. No stored field identifies WHICH doodad - MSLK.GroupObjectId is near-unique per link
-        // (1.62 links per distinct value) and groups nothing - so objects here are recovered by
-        // connectivity and matched to MDDF spatially, which is why the split-by-connectivity toggle
-        // exists.
+        // A hover tooltip answers "what is this", nothing more. Evidence and provenance belong in
+        // the inspect panel, and a '%' in any of these strings would be eaten by ImGui's printf
+        // formatting, so keep them short and symbol-free.
         string title;
         string detail;
         if (obj.Ck24 == 0)
         {
-            // Say only what is measured. _0x1C == 0 means NO PLACEMENT HEIGHT was recorded - that is
-            // the certain part. The population is dominated by doodad collision (its geometric
-            // components match an MDDF placement within 24 units 95.1% of the time), but 95.1% is
-            // not 100%, so labelling every individual object "M2" asserts more than the evidence.
-            title = "No placement height (unattributed surfaces)";
-            detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   region {obj.MshdRegionId}   surfaces {obj.SurfaceCount}"
-                + "   MSUR._0x1C = 0.0 - population is mostly M2 doodad collision (95.1% of components match MDDF); grouped by connectivity";
+            title = "PM4 doodad collision";
+            detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   {obj.SurfaceCount} surfaces";
         }
         else if (resolved)
         {
             title = $"{System.IO.Path.GetFileName(assetName)}  #{uniqueId}";
-            detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   region {obj.MshdRegionId}   surfaces {obj.SurfaceCount}   placement Z {placementZ:F3}";
+            detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   {obj.SurfaceCount} surfaces   Z {placementZ:F1}";
         }
         else
         {
-            title = $"PM4 object @ Z {placementZ:F2}";
-            detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   region {obj.MshdRegionId}   surfaces {obj.SurfaceCount}   placement Z {placementZ:F3}   (no placement resolved)";
+            title = $"PM4 object   Z {placementZ:F1}";
+            detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   {obj.SurfaceCount} surfaces";
         }
 
         return new HoveredAssetInfo(
