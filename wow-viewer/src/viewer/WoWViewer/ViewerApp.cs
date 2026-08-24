@@ -13820,11 +13820,19 @@ void main() {
                 ? "n/a"
                 : $"{debugInfo.NearestPositionRefDistance:F2}";
 
+            // Identity first, raw slices last. MSUR._0x1C is the producing placement's Z read as a
+            // float (see docs/wowdev-wiki/pm4-pd4-draft.md), so that height plus the tile is what
+            // actually names this object. "CK24" is the top three bytes of that float and its
+            // "type" byte is the float's exponent band; both stay below for cross-referencing older
+            // reports, not as identity.
+            float selectedPlacementZ = BitConverter.UInt32BitsToSingle(debugInfo.Ck24 << 8);
+
             _selectedObjectInfo =
                 $"PM4 Object\n" +
-                $"Tile: ({debugInfo.TileX}, {debugInfo.TileY})\n" +
-                $"CK24: 0x{debugInfo.Ck24:X6} (type=0x{debugInfo.Ck24Type:X2}, obj={debugInfo.Ck24ObjectId}, viewerPart={debugInfo.ObjectPartId})\n" +
-                $"Viewer Part: assigned during the current overlay build after viewer-side splitting; not a raw PM4 field\n" +
+                $"Identity: {(debugInfo.Ck24 == 0 ? "TILE REMAINDER - no placement height recorded" : $"placement Z {selectedPlacementZ:F3}")} on tile ({debugInfo.TileX}, {debugInfo.TileY})\n" +
+                $"Region: {debugInfo.MshdRegionId}\n" +
+                $"Raw MSUR._0x1C slice: 0x{debugInfo.Ck24:X6}  (exponent band 0x{debugInfo.Ck24Type:X2}, NOT a type)\n" +
+                $"Viewer Part: {debugInfo.ObjectPartId} - assigned during the current overlay build after viewer-side splitting; not a raw PM4 field\n" +
                 $"MSLK Group: 0x{debugInfo.LinkGroupObjectId:X8}\n" +
                 $"Linked MPRL refs: {debugInfo.LinkedPositionRefCount}\n" +
                 $"Surfaces: {debugInfo.SurfaceCount}\n" +

@@ -13469,13 +13469,29 @@ public class WorldScene : ISceneRenderer
         // height otherwise. The old label led with the raw 24-bit slice and a viewer-generated part
         // number, neither of which names anything: the slice is the top three bytes of a float and
         // the part id is an artefact of how the current overlay split the tile.
-        string title = resolved
-            ? $"{System.IO.Path.GetFileName(assetName)}  #{uniqueId}"
-            : $"PM4 object @ Z {placementZ:F2}";
-
-        string detail = resolved
-            ? $"tile ({objectKey.tileX}, {objectKey.tileY})   region {obj.MshdRegionId}   surfaces {obj.SurfaceCount}   placement Z {placementZ:F3}"
-            : $"tile ({objectKey.tileX}, {objectKey.tileY})   region {obj.MshdRegionId}   surfaces {obj.SurfaceCount}   placement Z {placementZ:F3}   (no placement resolved)";
+        // _0x1C == 0 is 0.0f, i.e. NO placement height was recorded - it is the tile remainder,
+        // not an object with id zero. That is why this bucket is enormous and why the viewer has to
+        // split it by connectivity or MSCN reference to get anything object-shaped out of it: there
+        // is no placement identity in it to group by. Grouping by the value was never going to work
+        // here, because the value is a height and every unattributed surface shares 0.
+        string title;
+        string detail;
+        if (obj.Ck24 == 0)
+        {
+            title = "Tile remainder (no placement)";
+            detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   region {obj.MshdRegionId}   surfaces {obj.SurfaceCount}"
+                + "   MSUR._0x1C = 0.0 - unattributed surfaces; split by connectivity to separate them";
+        }
+        else if (resolved)
+        {
+            title = $"{System.IO.Path.GetFileName(assetName)}  #{uniqueId}";
+            detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   region {obj.MshdRegionId}   surfaces {obj.SurfaceCount}   placement Z {placementZ:F3}";
+        }
+        else
+        {
+            title = $"PM4 object @ Z {placementZ:F2}";
+            detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   region {obj.MshdRegionId}   surfaces {obj.SurfaceCount}   placement Z {placementZ:F3}   (no placement resolved)";
+        }
 
         return new HoveredAssetInfo(
             "PM4",
