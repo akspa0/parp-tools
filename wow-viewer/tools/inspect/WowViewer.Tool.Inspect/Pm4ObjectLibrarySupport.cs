@@ -51,7 +51,9 @@ internal static class Pm4ObjectLibrarySupport
         int? UniqueId,
         float? MatchDelta,
         float? PosX, float? PosY, float? PosZ,
-        float? RotX, float? RotY, float? RotZ);
+        float? RotX, float? RotY, float? RotZ,
+        float? ModfBoundsMinZ,
+        float? ModfBoundsMaxZ);
 
     internal sealed record AssetSummary(
         string AssetPath,
@@ -90,16 +92,16 @@ internal static class Pm4ObjectLibrarySupport
             string pm4Name = Path.GetFileName(pm4Path);
             string? adtPath = Pm4PlacementZSupport.FindCompanionAdt(pm4Path, adtRoot);
 
-            List<(string Kind, string Path, int UniqueId, Vector3 Pos, Vector3 Rot)> candidates = [];
+            List<(string Kind, string Path, int UniqueId, Vector3 Pos, Vector3 Rot, Vector3? BMin, Vector3? BMax)> candidates = [];
             if (adtPath is not null)
             {
                 try
                 {
                     AdtPlacementCatalog cat = AdtPlacementReader.Read(adtPath);
                     foreach (AdtWorldModelPlacement w in cat.WorldModelPlacements)
-                        candidates.Add(("WMO", w.ModelPath, w.UniqueId, w.Position, w.Rotation));
+                        candidates.Add(("WMO", w.ModelPath, w.UniqueId, w.Position, w.Rotation, w.BoundsMin, w.BoundsMax));
                     foreach (AdtModelPlacement m in cat.ModelPlacements)
-                        candidates.Add(("M2", m.ModelPath, m.UniqueId, m.Position, m.Rotation));
+                        candidates.Add(("M2", m.ModelPath, m.UniqueId, m.Position, m.Rotation, null, null));
                     filesPaired++;
                 }
                 catch (Exception ex) when (ex is IOException or InvalidDataException or NotSupportedException)
@@ -158,6 +160,7 @@ internal static class Pm4ObjectLibrarySupport
                 string? kind = null, asset = null;
                 int? uid = null;
                 float? delta = null, px = null, py = null, pz = null, rx = null, ry = null, rz = null;
+                float? bminz = null, bmaxz = null;
 
                 if (raw == 0)
                 {
@@ -191,6 +194,7 @@ internal static class Pm4ObjectLibrarySupport
                             uid = best.UniqueId;
                             px = best.Pos.X; py = best.Pos.Y; pz = best.Pos.Z;
                             rx = best.Rot.X; ry = best.Rot.Y; rz = best.Rot.Z;
+                            bminz = best.BMin?.Z; bmaxz = best.BMax?.Z;
                         }
                         else
                         {
@@ -224,7 +228,7 @@ internal static class Pm4ObjectLibrarySupport
                     tileX, tileY,
                     $"map{tileX}_{tileY}.blp",
                     u, v, u * MinimapPixels, v * MinimapPixels,
-                    st, kind, asset, uid, delta, px, py, pz, rx, ry, rz));
+                    st, kind, asset, uid, delta, px, py, pz, rx, ry, rz, bminz, bmaxz));
             }
         }
 
