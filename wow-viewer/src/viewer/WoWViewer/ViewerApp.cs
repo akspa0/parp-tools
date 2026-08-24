@@ -13829,7 +13829,7 @@ void main() {
 
             _selectedObjectInfo =
                 $"PM4 Object\n" +
-                $"Identity: {(debugInfo.Ck24 == 0 ? "TILE REMAINDER - no placement height recorded" : $"placement Z {selectedPlacementZ:F3}")} on tile ({debugInfo.TileX}, {debugInfo.TileY})\n" +
+                $"Identity: {(debugInfo.Ck24 == 0 ? "M2 DOODAD COLLISION - no placement height recorded" : $"placement Z {selectedPlacementZ:F3}")} on tile ({debugInfo.TileX}, {debugInfo.TileY})\n" +
                 $"Region: {debugInfo.MshdRegionId}\n" +
                 $"Raw MSUR._0x1C slice: 0x{debugInfo.Ck24:X6}  (exponent band 0x{debugInfo.Ck24Type:X2}, NOT a type)\n" +
                 $"Viewer Part: {debugInfo.ObjectPartId} - assigned during the current overlay build after viewer-side splitting; not a raw PM4 field\n" +

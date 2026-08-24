@@ -13469,18 +13469,21 @@ public class WorldScene : ISceneRenderer
         // height otherwise. The old label led with the raw 24-bit slice and a viewer-generated part
         // number, neither of which names anything: the slice is the top three bytes of a float and
         // the part id is an artefact of how the current overlay split the tile.
-        // _0x1C == 0 is 0.0f, i.e. NO placement height was recorded - it is the tile remainder,
-        // not an object with id zero. That is why this bucket is enormous and why the viewer has to
-        // split it by connectivity or MSCN reference to get anything object-shaped out of it: there
-        // is no placement identity in it to group by. Grouping by the value was never going to work
-        // here, because the value is a height and every unattributed surface shares 0.
+        // _0x1C == 0 is 0.0f - no placement HEIGHT was recorded. This is NOT a remainder: it is
+        // M2 doodad collision, and it is the larger half of the format by file coverage (186,060
+        // surfaces across 283 of 309 files, against 332,032 across 201 for the placed population).
+        // Geometric components of it land within 24 units of an MDDF doodad placement 95.1% of the
+        // time. No stored field identifies WHICH doodad - MSLK.GroupObjectId is near-unique per link
+        // (1.62 links per distinct value) and groups nothing - so objects here are recovered by
+        // connectivity and matched to MDDF spatially, which is why the split-by-connectivity toggle
+        // exists.
         string title;
         string detail;
         if (obj.Ck24 == 0)
         {
-            title = "Tile remainder (no placement)";
+            title = "M2 doodad collision (no placement height)";
             detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   region {obj.MshdRegionId}   surfaces {obj.SurfaceCount}"
-                + "   MSUR._0x1C = 0.0 - unattributed surfaces; split by connectivity to separate them";
+                + "   MSUR._0x1C = 0.0 - doodad collision; identified by connectivity, matched to MDDF spatially";
         }
         else if (resolved)
         {

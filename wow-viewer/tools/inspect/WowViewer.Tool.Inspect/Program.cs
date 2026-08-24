@@ -2210,6 +2210,9 @@ static void RunPm4(string[] args)
 		case "mshd-dump":
 			RunPm4MshdDump(tail);
 			break;
+		case "zero-bucket":
+			RunPm4ZeroBucket(tail);
+			break;
 		case "bounds-audit":
 			RunPm4BoundsAudit(tail);
 			break;
@@ -6334,6 +6337,38 @@ static void RunPm4ConnectiveGeometry(string[] args)
 	}
 
 	PrintPm4ConnectiveGeometryReport(report);
+}
+
+static void RunPm4ZeroBucket(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4ZeroBucketReport r = Pm4ZeroBucketAnalyzer.AnalyzeDirectory(input);
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 zero-bucket comparison");
+	Console.WriteLine($"Input: {r.InputDirectory}  files={r.Files}");
+	Console.WriteLine();
+	Console.WriteLine("  population                                   surfaces       links  distinctGroupIds");
+	foreach (Pm4BucketResult b in new[] { r.Zero, r.Placed })
+		Console.WriteLine($"  {b.Name,-42} {b.Surfaces,10} {b.Links,11} {b.DistinctGroupObjectIds,17}");
+	Console.WriteLine();
+	foreach (Pm4BucketResult b in new[] { r.Zero, r.Placed })
+	{
+		Console.WriteLine($"{b.Name}:");
+		Console.WriteLine($"  files containing it          = {b.FilesPresent}");
+		Console.WriteLine($"  links per surface            = {b.LinksPerSurface:F3}");
+		Console.WriteLine($"  links per distinct GroupId   = {b.LinksPerDistinctGroup:F3}");
+		Console.WriteLine($"  links carrying a wall quad   = {b.WallFraction:P2}");
+		Console.WriteLine($"  links whose GroupId is 0     = {b.ZeroGroupIdFraction:P2}");
+		Console.WriteLine();
+	}
+	Console.WriteLine("  A low links-per-distinct-GroupId in one population and not the other means");
+	Console.WriteLine("  GroupObjectId is carrying identity THERE - the comparison is the evidence.");
 }
 
 static void RunPm4MshdDump(string[] args)
