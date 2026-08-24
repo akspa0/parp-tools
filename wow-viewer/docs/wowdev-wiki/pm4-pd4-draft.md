@@ -178,6 +178,14 @@ Three independent confirmations that do not rely on the ADT join:
 3. Instances of one model share an identical `value − bboxMinZ` offset to three decimals
    (6.03/6.03; −10.11/−10.11; 0.372/0.374/0.374) — the model's origin-to-floor distance.
 
+**It is not a packed vector.** The byte grouping invites reading `AA BB CC` as a quantised XYZ, but
+byte-level correlation against object geometry is noise: `BB` and `CC` score |r| < 0.06 against every
+axis and every extent, while the whole word as a float scores **0.997** against centre Z. The one
+non-trivial byte correlation, `AA` at -0.529 against centre Z, is the float's **exponent** tracking
+magnitude - evidence for the float reading, not against it. Decisively, **904 of 904** matched
+objects have the whole 32 bits equal the placement's `Position.Z` to within 1e-6; bits identical to a
+float in another file cannot also carry X and Y.
+
 **It is not a bounding box.** It coincides with the mesh bbox min in 3 of 904 objects, with max in
 **0**, and with centre in **0**. It sits *below* the bbox 57.41% of the time and *inside* it 42.59%,
 **never above** — the signature of a model origin at or beneath the walkable floor (median
