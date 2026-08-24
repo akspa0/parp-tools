@@ -13408,13 +13408,80 @@ public class WorldScene : ISceneRenderer
                 body.BodyKey);
     }
 
-    private static HoveredAssetInfo BuildHoveredPm4Info(Pm4OverlayObject obj, Vector3 worldPosition, (int tileX, int tileY, uint ck24, int objectPart) objectKey)
+    /// <summary>
+    /// Resolves a PM4 object to the placed asset that produced it.
+    /// </summary>
+    /// <remarks>
+    /// The join key is the object's own <c>MSUR._0x1C</c> read as a float, which equals the
+    /// producing placement's Z, combined with the placement standing inside the object's horizontal
+    /// footprint. The stored <c>Ck24</c> is the top 24 bits of that float, so the reconstruction
+    /// carries roughly 0.003% relative error and the tolerance is sized for it.
+    /// </remarks>
+    private bool TryResolvePm4Asset(
+        uint ck24,
+        Vector3 boundsMin,
+        Vector3 boundsMax,
+        out string? assetName,
+        out int uniqueId,
+        out float placementZ,
+        float zTolerance = 0.05f)
     {
+        placementZ = BitConverter.UInt32BitsToSingle(ck24 << 8);
+        assetName = null;
+        uniqueId = 0;
+        if (ck24 == 0)
+            return false;
+
+        float best = float.MaxValue;
+        foreach (ObjectInstance inst in _wmoInstances)
+        {
+            Vector3 p = inst.PlacementPosition;
+            if (p.X < boundsMin.X - 1f || p.X > boundsMax.X + 1f
+                || p.Y < boundsMin.Y - 1f || p.Y > boundsMax.Y + 1f)
+            {
+                continue;
+            }
+
+            float delta = MathF.Abs(placementZ - p.Z);
+            if (delta < best)
+            {
+                best = delta;
+                assetName = string.IsNullOrEmpty(inst.ModelName) ? inst.ModelPath : inst.ModelName;
+                uniqueId = inst.UniqueId;
+            }
+        }
+
+        if (best <= zTolerance)
+            return true;
+
+        assetName = null;
+        uniqueId = 0;
+        return false;
+    }
+
+    private HoveredAssetInfo BuildHoveredPm4Info(Pm4OverlayObject obj, Vector3 worldPosition, (int tileX, int tileY, uint ck24, int objectPart) objectKey)
+    {
+        bool resolved = TryResolvePm4Asset(
+            obj.Ck24, obj.BoundsMin, obj.BoundsMax,
+            out string? assetName, out int uniqueId, out float placementZ);
+
+        // Identify the object by the placement that produced it where possible, and by its placement
+        // height otherwise. The old label led with the raw 24-bit slice and a viewer-generated part
+        // number, neither of which names anything: the slice is the top three bytes of a float and
+        // the part id is an artefact of how the current overlay split the tile.
+        string title = resolved
+            ? $"{System.IO.Path.GetFileName(assetName)}  #{uniqueId}"
+            : $"PM4 object @ Z {placementZ:F2}";
+
+        string detail = resolved
+            ? $"tile ({objectKey.tileX}, {objectKey.tileY})   region {obj.MshdRegionId}   surfaces {obj.SurfaceCount}   placement Z {placementZ:F3}"
+            : $"tile ({objectKey.tileX}, {objectKey.tileY})   region {obj.MshdRegionId}   surfaces {obj.SurfaceCount}   placement Z {placementZ:F3}   (no placement resolved)";
+
         return new HoveredAssetInfo(
             "PM4",
-            $"CK24 0x{obj.Ck24:X6} part={obj.ObjectPartId}",
+            title,
             obj.SourcePath,
-            $"type=0x{obj.Ck24Type:X2} obj={obj.Ck24ObjectId} region={obj.MshdRegionId} mslk=0x{obj.LinkGroupObjectId:X8} surfaces={obj.SurfaceCount}",
+            detail,
             worldPosition,
             0,
                 objectKey,
@@ -14261,38 +14328,11 @@ public class WorldScene : ISceneRenderer
                 foreach (((int tileX, int tileY, uint ck24, int objectPart) key, Pm4OverlayObject obj, Pm4ObjectDebugInfo debug)
                     in EnumerateVisiblePm4OverlayDebugObjects())
                 {
-                    float placementZ = BitConverter.UInt32BitsToSingle(debug.Ck24 << 8);
-
-                    string? assetName = null;
-                    int? uniqueId = null;
-                    float bestDelta = float.MaxValue;
-
-                    if (debug.Ck24 != 0)
-                    {
-                        foreach (ObjectInstance inst in _wmoInstances)
-                        {
-                            Vector3 p = inst.PlacementPosition;
-                            if (p.X < debug.BoundsMin.X - 1f || p.X > debug.BoundsMax.X + 1f
-                                || p.Y < debug.BoundsMin.Y - 1f || p.Y > debug.BoundsMax.Y + 1f)
-                            {
-                                continue;
-                            }
-
-                            float delta = MathF.Abs(placementZ - p.Z);
-                            if (delta < bestDelta)
-                            {
-                                bestDelta = delta;
-                                assetName = string.IsNullOrEmpty(inst.ModelName) ? inst.ModelPath : inst.ModelName;
-                                uniqueId = inst.UniqueId;
-                            }
-                        }
-                    }
-
-                    if (bestDelta > zTolerance)
-                    {
-                        assetName = null;
-                        uniqueId = null;
-                    }
+                    bool ok = TryResolvePm4Asset(
+                        debug.Ck24, debug.BoundsMin, debug.BoundsMax,
+                        out string? assetName, out int resolvedUniqueId, out float placementZ, zTolerance);
+                    int? uniqueId = ok ? resolvedUniqueId : null;
+                    float? bestDelta = ok ? 0f : null;
 
                     if (!byRegion.TryGetValue(debug.MshdRegionId, out var tiles))
                     {
@@ -14318,7 +14358,7 @@ public class WorldScene : ISceneRenderer
                         debug.Center,
                         assetName,
                         uniqueId,
-                        assetName is null ? null : bestDelta));
+                        bestDelta));
                 }
 
                 return byRegion
