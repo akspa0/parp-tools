@@ -2204,6 +2204,9 @@ static void RunPm4(string[] args)
 		case "mscn-nature":
 			RunPm4MscnNature(tail);
 			break;
+		case "miss-anatomy":
+			RunPm4MissAnatomy(tail);
+			break;
 		case "bounds-audit":
 			RunPm4BoundsAudit(tail);
 			break;
@@ -6328,6 +6331,38 @@ static void RunPm4ConnectiveGeometry(string[] args)
 	}
 
 	PrintPm4ConnectiveGeometryReport(report);
+}
+
+static void RunPm4MissAnatomy(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4MissAnatomyReport r = Pm4MissAnatomyAnalyzer.AnalyzeDirectory(input);
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 out-of-range value anatomy");
+	Console.WriteLine($"Input: {r.InputDirectory}  files={r.Files}");
+	Console.WriteLine();
+	foreach (Pm4MissResult m in new[] { r.MslkRefIndex, r.MsurMscnSingleIndex, r.MslkGroupObjectId })
+	{
+		Console.WriteLine($"{m.Name}:");
+		Console.WriteLine($"  total={m.Total}  fits={m.Fits}  misses={m.Misses} ({m.MissFraction:P3})");
+		Console.WriteLine($"  distinct miss values     = {m.DistinctMissValues}");
+		Console.WriteLine($"  == 0xFFFF                = {m.Equals0xFFFF}");
+		Console.WriteLine($"  == 0xFFFFFFFF            = {m.Equals0xFFFFFFFF}");
+		Console.WriteLine($"  within 16 past array end = {m.WithinSixteenPastEnd} ({m.WithinSixteenFraction:P2})");
+		Console.WriteLine($"  more than 256 past end   = {m.FarPastEnd} ({m.FarPastEndFraction:P2})");
+		Console.WriteLine("  top miss values:");
+		foreach (Pm4ValueFrequency v in m.TopMissValues)
+			Console.WriteLine($"    {v.Value,-22} x{v.Count}");
+		Console.WriteLine();
+	}
+	Console.WriteLine("  One repeated value = a sentinel. A tight band past the array end = a header or");
+	Console.WriteLine("  reserved block. A broad spread = the field is not an index into that chunk.");
 }
 
 static void RunPm4MscnNature(string[] args)

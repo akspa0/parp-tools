@@ -199,11 +199,21 @@ test scores 10 / 1,876 and is eliminated, so the frame is not in question.)
 Prior art describes MSCN as the per-object **exterior boundary**, which is consistent with all of the
 above and is not contradicted by anything measured here.
 
-**What changed and what did not.** §3.1 eliminates `MSUR._0x18` as a *window* into MSCN — the windows
-tile `MSLK` exactly and overrun MSCN 6,240 times. That does **not** eliminate a per-surface *single
-index* into MSCN, which is a separate relation and still measures 511,891 fits / 6,201 misses. Both
-can be true: `_0x18` is a window start in `MSLK`, and MSCN is reached by some other route. Which
-route is the open question.
+**The single-index reading of `_0x18` into MSCN is also eliminated.** It appears to hold at
+511,891 fits / 6,201 misses, but that fit is an artefact of array size: `MSCN` (1,342,410) is
+*larger* than `MSLK` (1,273,335), so almost any valid `MSLK` offset is automatically inside `MSCN`
+by coincidence. Dissecting the 6,201 misses settles it — they are **5,158 distinct values** with
+**no** `0xFFFF` or `0xFFFFFFFF` sentinel, only 5.26% landing within 16 entries past the array end,
+and **50.25% more than 256 past it**. A genuine index overflows rarely and in a tight band; this is
+broad scatter, the signature of a field being read against the wrong chunk.
+
+So MSCN currently has **no known index consumer at all**. Whatever reaches it does so by a route not
+yet found, and that is the central open question about this chunk.
+
+(The same dissection disposes of two other supposed relations. `MSLK.RefIndex` read as an index into
+`MSUR` misses 4,553 times across **2,996 distinct values**, 86.65% of them more than 256 past the
+end — those entries are simply not surface indices. `MSLK`'s group/object field read against `MSUR`
+misses **38.6%** of the time across **32,481 distinct values** and is plainly not an index into it.)
 
 **Nodes are their own points, not mesh vertices.** At a 0.25-unit tolerance, only **13.69%** of MSCN
 points coincide with a floor vertex (`MSVT`) and **11.53%** with a wall vertex (`MSPV`); **85.09%
@@ -266,7 +276,7 @@ table is the honest accounting of the rest, so a reader can tell a result from a
 | `MSHD` | `0x0C`–`0x1C` | **MEASURED** | **zero in 502/502 files** — five reserved fields, not five mysteries |
 | `MSPV` | positions | MEASURED | wall vertices |
 | `MSPI` | indices | MEASURED | 2,418,205 fits, 0 misses into `MSPV` |
-| `MSCN` | positions | PARTIAL | node graph: 2.591/surface, 85% off-mesh, not a lattice, not normals. **Which stream indexes it is UNKNOWN** |
+| `MSCN` | positions | PARTIAL | node graph: 2.591/surface, 85% off-mesh, not a lattice, not normals. **No known index consumer** - the `_0x18` single-index reading is eliminated as an array-size artefact |
 | `MSLK` | `MspiFirstIndex`/`Count` | MEASURED | wall-quad window; negative = open passage |
 | `MSLK` | `RefIndex` | MEASURED | neighbouring surface, 98.76% reciprocal |
 | `MSLK` | `_0x00` type flags | PARTIAL | observed buckets, not corpus-closed |
