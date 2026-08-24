@@ -249,6 +249,46 @@ a per-entry list for any known chunk. Value range tests are weak and non-discrim
 non-self domain `MSVI` at 67.6% / 79.0%) and are **bound tests only** — a value in range never proves
 ownership.
 
+## 7a. State of knowledge, field by field
+
+Most of this format is still undecoded. The sections above describe the parts that are measured; this
+table is the honest accounting of the rest, so a reader can tell a result from an assumption.
+
+**MEASURED** = corpus-wide evidence with a control. **PARTIAL** = real evidence, not closed.
+**UNKNOWN** = no evidence; any name given to it is a placeholder.
+
+| chunk | field | status | note |
+|---|---|---|---|
+| `MVER` | word | PARTIAL | low byte = version; **not** a build or size (measured). High byte `0x30` on PM4 UNKNOWN |
+| `MSHD` | `0x00` | UNKNOWN | 155 distinct values, top 534 in 289 of 502 files |
+| `MSHD` | `0x04` | UNKNOWN | often called a region id; 227 distinct, `== 1` in 140/502. **All tile-coordinate readings eliminated** (packed XY 0/502, low byte as tile X or Y 1/502) |
+| `MSHD` | `0x08` | UNKNOWN | 152 distinct, top 534; equals `0x00` in 233/502 |
+| `MSHD` | `0x0C`–`0x1C` | **MEASURED** | **zero in 502/502 files** — five reserved fields, not five mysteries |
+| `MSPV` | positions | MEASURED | wall vertices |
+| `MSPI` | indices | MEASURED | 2,418,205 fits, 0 misses into `MSPV` |
+| `MSCN` | positions | PARTIAL | node graph: 2.591/surface, 85% off-mesh, not a lattice, not normals. **Which stream indexes it is UNKNOWN** |
+| `MSLK` | `MspiFirstIndex`/`Count` | MEASURED | wall-quad window; negative = open passage |
+| `MSLK` | `RefIndex` | MEASURED | neighbouring surface, 98.76% reciprocal |
+| `MSLK` | `_0x00` type flags | PARTIAL | observed buckets, not corpus-closed |
+| `MSLK` | `_0x04` | UNKNOWN | commonly named a group/object id; the name asserts more than the evidence |
+| `MSLK` | subtype, link id, system flag | UNKNOWN | three fields, no evidence |
+| `MSVT` | positions | MEASURED | floor vertices |
+| `MSVI` | indices | MEASURED | 1,930,146 fits, 0 misses |
+| `MSUR` | `0x01`, `0x02`, `0x14`, `0x18`, `0x1C`, normal | MEASURED | see §3-§5 |
+| `MSUR` | `0x10` | PARTIAL | behaves as a signed plane distance |
+| `MSUR` | `0x00` | UNKNOWN | one byte, no evidence |
+| `MPRL` | position | PARTIAL | the **only permuted chunk** in the file — its axis order differs from `MSVT`/`MSPV`/`MSCN` |
+| `MPRL` | 6 further fields | UNKNOWN | |
+| `MPRR` | everything | UNKNOWN | structure only (§7) |
+| `MDSF` | both indices | MEASURED | 2,684 fits, 0 misses; links a surface to a destruction state |
+| `MDOS`, `MDBH`, `MDBI`, `MDBF` | | PARTIAL | destructible-building payload; `MDBF` holds filenames. Present on essentially one tile in this corpus, so treat as unrepresentative |
+| `MCRC` (PD4) | word | UNKNOWN | zero in the reference file |
+
+Counting fields rather than chunks, rather more is unknown than known. In particular **`MSHD`'s three
+live fields, all six `MPRL` unknowns, and the whole of `MPRR`** have no decoded meaning, and the
+index consumer for `MSCN` is missing. A reader should treat the geometry and adjacency story as
+solid and the header and per-record metadata as open.
+
 ## 8. Reproducing these figures
 
 ```
