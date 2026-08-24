@@ -66,6 +66,30 @@ public static class Pm4ZeroBucketAnalyzer
                         bucket.ZSum += z;
                         bucket.ZCount++;
                         if (Math.Abs(z) < 1.0) bucket.NearZeroZ++;
+
+                        // Vertical extent of the surface ITSELF. A floor is flat; a polygon smeared
+                        // down a slope is tall. This is the direct test of "geometry stretched
+                        // through all Z", and it must be measured per SURFACE - an object's bbox
+                        // cannot show it, and the zero population has no per-object bbox at all
+                        // because every unattributed surface on the tile shares one key.
+                        float zlo = float.MaxValue, zhi = float.MinValue;
+                        for (long v2 = vs; v2 < ve; v2++)
+                        {
+                            uint vi2 = c.Msvi[(int)v2];
+                            if (vi2 >= c.Msvt.Count) continue;
+                            float zz = c.Msvt[(int)vi2].Z;
+                            if (zz < zlo) zlo = zz;
+                            if (zz > zhi) zhi = zz;
+                        }
+                        if (zhi > zlo)
+                        {
+                            double span = zhi - zlo;
+                            bucket.SurfaceZSpanSum += span;
+                            bucket.SurfaceZSpanCount++;
+                            if (span > bucket.SurfaceZSpanMax) bucket.SurfaceZSpanMax = span;
+                            if (span > 5.0) bucket.SurfacesTallerThan5++;
+                            if (span > 20.0) bucket.SurfacesTallerThan20++;
+                        }
                         if (z < bucket.ZMin) bucket.ZMin = z;
                         if (z > bucket.ZMax) bucket.ZMax = z;
                     }
@@ -112,6 +136,11 @@ public static class Pm4ZeroBucketAnalyzer
         public long NearZeroZ;
         public double ZMin = double.MaxValue;
         public double ZMax = double.MinValue;
+        public double SurfaceZSpanSum;
+        public long SurfaceZSpanCount;
+        public double SurfaceZSpanMax;
+        public long SurfacesTallerThan5;
+        public long SurfacesTallerThan20;
 
         public Pm4BucketResult ToResult() => new(
             Name, Surfaces, Links, DistinctGroups, FilesPresent,
@@ -122,7 +151,11 @@ public static class Pm4ZeroBucketAnalyzer
             ZCount == 0 ? 0 : ZSum / ZCount,
             ZCount == 0 ? 0 : ZMin,
             ZCount == 0 ? 0 : ZMax,
-            ZCount == 0 ? 0 : (double)NearZeroZ / ZCount);
+            ZCount == 0 ? 0 : (double)NearZeroZ / ZCount,
+            SurfaceZSpanCount == 0 ? 0 : SurfaceZSpanSum / SurfaceZSpanCount,
+            SurfaceZSpanMax,
+            SurfaceZSpanCount == 0 ? 0 : (double)SurfacesTallerThan5 / SurfaceZSpanCount,
+            SurfaceZSpanCount == 0 ? 0 : (double)SurfacesTallerThan20 / SurfaceZSpanCount);
     }
 }
 
@@ -139,7 +172,11 @@ public sealed record Pm4BucketResult(
     double MeanSurfaceZ,
     double MinSurfaceZ,
     double MaxSurfaceZ,
-    double NearZeroZFraction);
+    double NearZeroZFraction,
+    double MeanSurfaceZSpan,
+    double MaxSurfaceZSpan,
+    double SurfacesTallerThan5Fraction,
+    double SurfacesTallerThan20Fraction);
 
 public sealed record Pm4ZeroBucketReport(
     string InputDirectory,
