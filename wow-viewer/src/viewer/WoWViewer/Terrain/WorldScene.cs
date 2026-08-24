@@ -1197,6 +1197,7 @@ public class WorldScene : ISceneRenderer
     private bool _showPm4SolidOverlay = true;
     private bool _showPm4ObjectBounds;
     private bool _showPm4Ck24Bounds;
+    private bool _showPm4PlacementZPlane;
     private bool _pm4OverlayIgnoreDepth;
     private bool _pm4FlipAllObjectsY;
     private bool _showPm4PositionRefs;
@@ -1790,6 +1791,20 @@ public class WorldScene : ISceneRenderer
     public bool ShowPm4SolidOverlay { get => _showPm4SolidOverlay; set => _showPm4SolidOverlay = value; }
     public bool ShowPm4ObjectBounds { get => _showPm4ObjectBounds; set => _showPm4ObjectBounds = value; }
     public bool ShowPm4Ck24Bounds { get => _showPm4Ck24Bounds; set => _showPm4Ck24Bounds = value; }
+
+    /// <summary>
+    /// Draws a flat marker at each object's <c>MSUR._0x1C</c> read as a Z height, so the claim that
+    /// the field is the producing placement's Z can be checked by eye rather than taken on trust.
+    /// </summary>
+    /// <remarks>
+    /// What to look for. For an object that carries a value, the marker should sit at the BASE of
+    /// the object - that is the claim, and if it floats or sinks the claim is wrong for that object.
+    /// For an object whose value is 0, the marker drops to world Z = 0, typically far below its
+    /// geometry: measured, 98.7% of that population has surface centroids nowhere near zero
+    /// (range -656.4..596.2, mean 120.2, only 1.329% within one unit of zero). That visible gap IS
+    /// the evidence that 0 is an absent value rather than a real placement height.
+    /// </remarks>
+    public bool ShowPm4PlacementZPlane { get => _showPm4PlacementZPlane; set => _showPm4PlacementZPlane = value; }
     public bool Pm4OverlayIgnoreDepth { get => _pm4OverlayIgnoreDepth; set => _pm4OverlayIgnoreDepth = value; }
     public bool Pm4FlipAllObjectsY
     {
@@ -11226,6 +11241,36 @@ public class WorldScene : ISceneRenderer
                     });
                 }
 
+                // Placement-Z markers: a flat box at Z = MSUR._0x1C-as-float under each object.
+                if (_showPm4PlacementZPlane && _showPm4Overlay && _bbRenderer != null && _pm4TileObjects.Count > 0)
+                {
+                    pm4BoundsMs += MeasureDurationMs(() =>
+                    {
+                        foreach (var tileEntry in _pm4TileObjects)
+                        {
+                            foreach (Pm4OverlayObject obj in tileEntry.Value)
+                            {
+                                if (!ShouldRenderPm4ObjectType(obj.Ck24Type))
+                                    continue;
+
+                                float z = BitConverter.UInt32BitsToSingle(obj.Ck24 << 8);
+                                bool absent = obj.Ck24 == 0;
+
+                                // A thin slab spanning the object's footprint, at the height the
+                                // field claims. Orange where the value is absent, green where it is
+                                // present - so a sunken orange slab reads as "no height recorded",
+                                // not as "this object is at zero".
+                                Vector3 min = new(obj.BoundsMin.X, obj.BoundsMin.Y, z - 0.15f);
+                                Vector3 max = new(obj.BoundsMax.X, obj.BoundsMax.Y, z + 0.15f);
+                                _bbRenderer.BatchBoxMinMax(min, max, absent
+                                    ? new Vector3(0.95f, 0.55f, 0.20f)
+                                    : new Vector3(0.35f, 0.95f, 0.45f));
+                                pm4BoundsPreparedCount++;
+                            }
+                        }
+                    });
+                }
+
                 // CK24-level bounding boxes: one merged box per CK24 object across all sub-objects.
                 if (_showPm4Ck24Bounds && _showPm4Overlay && _pm4TileObjects.Count > 0)
                 {
@@ -11822,10 +11867,10 @@ public class WorldScene : ISceneRenderer
                     frame.SetOverlayOwner(
                         WorldOverlayOwners.Pm4Bounds,
                         pm4BoundsMs,
-                        _bbRenderer != null && _showPm4Overlay && (_showPm4ObjectBounds || _showPm4Ck24Bounds),
+                        _bbRenderer != null && _showPm4Overlay && (_showPm4ObjectBounds || _showPm4Ck24Bounds || _showPm4PlacementZPlane),
                         pm4BoundsPreparedCount,
                         pm4BoundsPreparedCount,
-                        _bbRenderer != null && _showPm4Overlay && (_showPm4ObjectBounds || _showPm4Ck24Bounds) ? "not_cached" : "disabled");
+                        _bbRenderer != null && _showPm4Overlay && (_showPm4ObjectBounds || _showPm4Ck24Bounds || _showPm4PlacementZPlane) ? "not_cached" : "disabled");
                     frame.SetOverlayOwner(
                         WorldOverlayOwners.Pm4GeometryPrepare,
                         pm4GeometryPrepareMs,

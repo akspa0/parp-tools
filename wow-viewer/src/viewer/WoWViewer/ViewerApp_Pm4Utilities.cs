@@ -157,6 +157,22 @@ public partial class ViewerApp
         if (ImGui.Checkbox("PM4 CK24 Bounds", ref showPm4Ck24Bounds))
             _worldScene.ShowPm4Ck24Bounds = showPm4Ck24Bounds;
 
+        bool showPlacementZ = _worldScene.ShowPm4PlacementZPlane;
+        if (ImGui.Checkbox("Placement Z markers", ref showPlacementZ))
+            _worldScene.ShowPm4PlacementZPlane = showPlacementZ;
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.BeginTooltip();
+            ImGui.Text("Draws a flat slab at MSUR._0x1C read as a Z height.");
+            ImGui.TextDisabled("GREEN = a height is recorded. It should sit at the BASE of the object;");
+            ImGui.TextDisabled("if it floats or sinks, the placement-Z reading is wrong for that object.");
+            ImGui.TextDisabled("ORANGE = the value is 0, so the slab drops to world Z=0, usually far");
+            ImGui.TextDisabled("below the geometry. Measured: 98.7% of that population sits nowhere");
+            ImGui.TextDisabled("near zero (mean Z 120.2), which is why 0 reads as an ABSENT value");
+            ImGui.TextDisabled("rather than an object placed at zero.");
+            ImGui.EndTooltip();
+        }
+
         bool showPm4Refs = _worldScene.ShowPm4PositionRefs;
         if (ImGui.Checkbox("PM4 MPRL Refs", ref showPm4Refs))
             _worldScene.ShowPm4PositionRefs = showPm4Refs;

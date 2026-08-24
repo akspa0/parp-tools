@@ -6365,6 +6365,8 @@ static void RunPm4ZeroBucket(string[] args)
 		Console.WriteLine($"  links per distinct GroupId   = {b.LinksPerDistinctGroup:F3}");
 		Console.WriteLine($"  links carrying a wall quad   = {b.WallFraction:P2}");
 		Console.WriteLine($"  links whose GroupId is 0     = {b.ZeroGroupIdFraction:P2}");
+		Console.WriteLine($"  surface centroid Z           = {b.MinSurfaceZ:F1} .. {b.MaxSurfaceZ:F1}  (mean {b.MeanSurfaceZ:F1})");
+		Console.WriteLine($"  surfaces sitting at |Z| < 1  = {b.NearZeroZFraction:P3}");
 		Console.WriteLine();
 	}
 	Console.WriteLine("  A low links-per-distinct-GroupId in one population and not the other means");

@@ -46,6 +46,30 @@ public static class Pm4ZeroBucketAnalyzer
                 HashSet<uint> groups = s.PackedParams == 0 ? zeroGroups : placedGroups;
 
                 bucket.Surfaces++;
+
+                // Where does this surface actually SIT in Z? If _0x1C is a placement height, the
+                // zero population would be geometry at world Z ~= 0. If instead it sits at arbitrary
+                // heights, 0.0 cannot be its height and is an absent value.
+                long vs = s.MsviFirstIndex;
+                long ve = vs + s.IndexCount;
+                if (ve <= c.Msvi.Count && s.IndexCount > 0)
+                {
+                    double zsum = 0; int zn = 0;
+                    for (long v = vs; v < ve; v++)
+                    {
+                        uint vi = c.Msvi[(int)v];
+                        if (vi < c.Msvt.Count) { zsum += c.Msvt[(int)vi].Z; zn++; }
+                    }
+                    if (zn > 0)
+                    {
+                        double z = zsum / zn;
+                        bucket.ZSum += z;
+                        bucket.ZCount++;
+                        if (Math.Abs(z) < 1.0) bucket.NearZeroZ++;
+                        if (z < bucket.ZMin) bucket.ZMin = z;
+                        if (z > bucket.ZMax) bucket.ZMax = z;
+                    }
+                }
                 long start = s._0x18;
                 long end = start + s.AttributeMask;
                 if (end > c.Mslk.Count)
@@ -83,13 +107,22 @@ public static class Pm4ZeroBucketAnalyzer
         public long ZeroGroupLinks;
         public long DistinctGroups;
         public int FilesPresent;
+        public double ZSum;
+        public long ZCount;
+        public long NearZeroZ;
+        public double ZMin = double.MaxValue;
+        public double ZMax = double.MinValue;
 
         public Pm4BucketResult ToResult() => new(
             Name, Surfaces, Links, DistinctGroups, FilesPresent,
             Surfaces == 0 ? 0 : (double)Links / Surfaces,
             DistinctGroups == 0 ? 0 : (double)Links / DistinctGroups,
             Links == 0 ? 0 : (double)LinksWithWall / Links,
-            Links == 0 ? 0 : (double)ZeroGroupLinks / Links);
+            Links == 0 ? 0 : (double)ZeroGroupLinks / Links,
+            ZCount == 0 ? 0 : ZSum / ZCount,
+            ZCount == 0 ? 0 : ZMin,
+            ZCount == 0 ? 0 : ZMax,
+            ZCount == 0 ? 0 : (double)NearZeroZ / ZCount);
     }
 }
 
@@ -102,7 +135,11 @@ public sealed record Pm4BucketResult(
     double LinksPerSurface,
     double LinksPerDistinctGroup,
     double WallFraction,
-    double ZeroGroupIdFraction);
+    double ZeroGroupIdFraction,
+    double MeanSurfaceZ,
+    double MinSurfaceZ,
+    double MaxSurfaceZ,
+    double NearZeroZFraction);
 
 public sealed record Pm4ZeroBucketReport(
     string InputDirectory,
