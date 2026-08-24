@@ -9933,7 +9933,7 @@ void main() {
         if (!string.IsNullOrWhiteSpace(overlayBuildHint) && !string.Equals(_dbcBuild, overlayBuildHint, StringComparison.OrdinalIgnoreCase))
         {
             ViewerLog.Important(ViewerLog.Category.MpqData,
-                $"Loose overlay at '{normalizedRoot}' hints build {overlayBuildHint} from PM4 files, but the active base client build is {_dbcBuild ?? "unknown"}. If PM4-linked objects do not match, load a {overlayBuildHint} base client instead.");
+                $"Loose overlay at '{normalizedRoot}' carries PM4 of a format version associated with the {overlayBuildHint} era (the PM4 MVER word is a format version, NOT a build read from the file), but the active base client build is {_dbcBuild ?? "unknown"}. If PM4-linked objects do not match, try a {overlayBuildHint} base client.");
             _statusMessage = $"Attached loose map overlay: {normalizedRoot} (PM4 hint {overlayBuildHint}; current base {_dbcBuild ?? "unknown"})";
         }
         else
@@ -9956,6 +9956,17 @@ void main() {
                 return null;
 
             var pm4 = CorePm4DocumentReader.ReadFile(pm4Path);
+
+            // PM4 MVER is a FORMAT VERSION WORD, not a client build number. Measured 2026-08-23:
+            // the value is a constant 12304 (0x3010) across corpus files spanning a 20x size range
+            // (63,628 to 1,267,923 bytes) with identical 32-byte MSHD, so it is neither a size nor
+            // any content-derived quantity. Pm4VersionFormatter reads it as version 16 in the low
+            // byte with an undecoded 0x30 high byte; PD4 by comparison stores 0x0030 (version 48).
+            // That 12304 also happens to read like the real client build 4.0.1.12304 is a
+            // coincidence of digits, and treating it as one is what put a false build in the status
+            // bar. The mapping below is retained only as an ERA heuristic for picking a base client
+            // - it says "files of this format version belong to this era", never "this file came
+            // from that build". Do not present it as read from the file.
             return pm4.Version switch
             {
                 11927 => "4.0.0.11927",

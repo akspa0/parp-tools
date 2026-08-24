@@ -242,7 +242,7 @@ internal static partial class Pm4PlacementZSupport
     /// (<c>development_1_0.adt</c>). Cataclysm-era corpora split placements into <c>_obj0.adt</c>;
     /// 3.3.5-era ones keep them in the monolithic ADT, so both spellings are tried.
     /// </summary>
-    private static string? FindCompanionAdt(string pm4Path, string adtDirectory)
+    internal static string? FindCompanionAdt(string pm4Path, string adtDirectory)
     {
         string fileName = Path.GetFileNameWithoutExtension(pm4Path);
         Match match = TilePattern().Match(fileName + ".pm4");

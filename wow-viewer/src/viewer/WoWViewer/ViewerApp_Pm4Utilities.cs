@@ -860,6 +860,129 @@ public partial class ViewerApp
         ImGui.TextDisabled("Chunk counts are for the last terrain Render() call.");
     }
 
+    // -- PM4 outliner: Region -> Tile -> Object -------------------------------
+    private string _pm4OutlinerFilter = string.Empty;
+    private bool _pm4OutlinerNamedOnly;
+    private IReadOnlyList<Pm4OutlineRegion>? _pm4OutlineCache;
+
+    /// <summary>
+    /// Hierarchical PM4 scene graph, grouped by MSHD region.
+    /// </summary>
+    /// <remarks>
+    /// Objects are labelled by the placed asset that produced them where that resolves, which is
+    /// possible because MSUR._0x1C is the producing placement's Z rather than an opaque key.
+    /// Unresolved objects are still listed, labelled by value - an outliner that hides what it
+    /// cannot name is not an inventory.
+    /// </remarks>
+    private void DrawPm4Outliner()
+    {
+        if (_worldScene == null)
+        {
+            ImGui.TextDisabled("Load a world to use the PM4 outliner.");
+            return;
+        }
+
+        ImGui.SetNextItemWidth(240f);
+        ImGui.InputText("Filter##Pm4Outliner", ref _pm4OutlinerFilter, 128);
+        ImGui.SameLine();
+        ImGui.Checkbox("Named only##Pm4Outliner", ref _pm4OutlinerNamedOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Refresh##Pm4Outliner"))
+            _pm4OutlineCache = null;
+
+        // Built on demand and cached: the asset resolve is O(objects x WMO instances), which is far
+        // too much to repeat every frame. Cleared by InvalidatePm4DerivedReports when the PM4 data
+        // behind it changes.
+        _pm4OutlineCache ??= _worldScene.BuildPm4Outline();
+        IReadOnlyList<Pm4OutlineRegion> regions = _pm4OutlineCache;
+        int totalObjects = regions.Sum(static r => r.ObjectCount);
+        int totalNamed = regions.Sum(static r => r.NamedObjectCount);
+        ImGui.TextDisabled($"{regions.Count} regions | {totalObjects} objects | {totalNamed} resolved to an asset");
+        ImGui.Separator();
+
+        string filter = _pm4OutlinerFilter.Trim();
+        bool hasFilter = filter.Length > 0;
+
+        if (!ImGui.BeginChild("##Pm4OutlinerTree", Vector2.Zero, true))
+        {
+            ImGui.EndChild();
+            return;
+        }
+
+        foreach (Pm4OutlineRegion region in regions)
+        {
+            if (!ImGui.TreeNodeEx(
+                    $"Region {region.RegionId}##pm4region{region.RegionId}",
+                    ImGuiTreeNodeFlags.SpanAvailWidth))
+            {
+                continue;
+            }
+
+            ImGui.SameLine();
+            ImGui.TextDisabled($"  {region.ObjectCount} objects / {region.Tiles.Count} tiles / {region.NamedObjectCount} named");
+
+            foreach (Pm4OutlineTile tile in region.Tiles)
+            {
+                var shown = tile.Objects
+                    .Where(o => !_pm4OutlinerNamedOnly || o.AssetName is not null)
+                    .Where(o => !hasFilter
+                        || (o.AssetName?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false)
+                        || $"0x{o.Ck24:X6}".Contains(filter, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (shown.Count == 0)
+                    continue;
+
+                if (!ImGui.TreeNodeEx(
+                        $"Tile ({tile.TileX}, {tile.TileY})##pm4tile{region.RegionId}_{tile.TileX}_{tile.TileY}",
+                        ImGuiTreeNodeFlags.SpanAvailWidth))
+                {
+                    continue;
+                }
+
+                ImGui.SameLine();
+                ImGui.TextDisabled($"  {shown.Count} objects");
+
+                foreach (Pm4OutlineObject obj in shown)
+                {
+                    string label = obj.AssetName is not null
+                        ? $"{System.IO.Path.GetFileName(obj.AssetName)}  #{obj.UniqueId}"
+                        : $"(unresolved) z={obj.PlacementZ:F3}  0x{obj.Ck24:X6}";
+
+                    bool selected = _worldScene.SelectedPm4ObjectKey.HasValue
+                        && _worldScene.SelectedPm4ObjectKey.Value.Equals(obj.Key);
+
+                    if (ImGui.Selectable(
+                            $"{label}##pm4obj{region.RegionId}_{obj.Key.tileX}_{obj.Key.tileY}_{obj.Ck24}_{obj.Key.objectPart}",
+                            selected))
+                    {
+                        _worldScene.SelectPm4Object(obj.Key);
+                    }
+
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text(obj.AssetName ?? "(no asset resolved)");
+                        ImGui.TextDisabled($"placement Z = {obj.PlacementZ:F4}   surfaces = {obj.SurfaceCount}");
+                        ImGui.TextDisabled($"CK24 slice 0x{obj.Ck24:X6}  type 0x{obj.Ck24Type:X2}  part {obj.Key.objectPart}");
+                        if (obj.MatchDelta.HasValue)
+                            ImGui.TextDisabled($"asset match delta = {obj.MatchDelta.Value:F4}");
+                        ImGui.EndTooltip();
+                    }
+
+                    if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                        FocusCameraOnBounds(obj.BoundsMin, obj.BoundsMax);
+                }
+
+                ImGui.TreePop();
+            }
+
+            ImGui.TreePop();
+        }
+
+        ImGui.EndChild();
+    }
+
     private void DrawPm4AlignmentWindow()
     {
         if (_worldScene == null)
@@ -1868,6 +1991,7 @@ public partial class ViewerApp
         _hoveredPm4ObjectMatchKey = null;
         _hoveredPm4ObjectMatchCacheMaxMatches = -1;
         _pm4WmoCorrelationReport = null;
+        _pm4OutlineCache = null;
     }
 
     private void EnsurePm4WmoCorrelationReportLoaded()

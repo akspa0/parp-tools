@@ -4992,6 +4992,9 @@ public partial class ViewerApp
             case Pm4BottomTab.Alignment:
                 DrawPm4AlignmentWindow();
                 break;
+            case Pm4BottomTab.Outliner:
+                DrawPm4Outliner();
+                break;
         }
     }
 

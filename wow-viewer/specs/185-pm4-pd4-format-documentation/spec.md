@@ -74,6 +74,19 @@ is not recorded anywhere. The user's standing read — "some sort of range recor
 range records" — is consistent with fixed-size records and has never been tested against this
 constraint.
 
+### MVER is a format version, not a build and not a size
+
+Measured 2026-08-23. The PM4 `MVER` payload is a constant `10 30 00 00` (12304 / 0x3010) across
+corpus files spanning a 20x size range, every one with an identical 32-byte MSHD - so it is neither a
+size nor any content-derived quantity. PD4 stores `30 00 00 00` (48 / 0x0030). Under a consistent
+byte0 reading that is PM4 v16 and PD4 v48, with PM4's `0x30` high byte **undecoded**.
+
+The viewer had been mapping the raw word to the client build string `4.0.1.12304` and printing
+"hints build ... from PM4 files" in the status bar. 12304 resembling that real build is a coincidence
+of digits. The mapping survives as an **era heuristic** for choosing a base client; the message no
+longer claims a build was read from the file. A proposed "PM4 3.30 / PD4 3.31" reading was tested
+against the raw bytes and does not reproduce under any byte-swap or uint16-pair interpretation.
+
 ### PD4 has no documentation at all in this repo
 
 PD4 is the **per-model** form of the same format: object-local coordinates, no placement, no tile

@@ -14239,6 +14239,105 @@ public class WorldScene : ISceneRenderer
                 }
             }
 
+            /// <summary>
+            /// Builds the PM4 scene graph as Region -> Tile -> Object, for an outliner view.
+            /// </summary>
+            /// <remarks>
+            /// Objects are named by the placed asset that produced them wherever that can be
+            /// resolved. The key is <c>MSUR._0x1C</c> read as a float, which equals the producing
+            /// placement's Z (measured 2026-08-23 at 93.58% against a 2.10% control), combined with
+            /// the placement standing inside the object's horizontal footprint.
+            ///
+            /// <para>The stored <c>Ck24</c> is the top 24 bits of that float, so the low mantissa
+            /// byte is not available here and the reconstructed value carries roughly 0.003%
+            /// relative error - about 0.001 units at typical heights. The match tolerance below is
+            /// sized for that, and an unresolved object is labelled by its value rather than being
+            /// hidden.</para>
+            /// </remarks>
+            public IReadOnlyList<Pm4OutlineRegion> BuildPm4Outline(float zTolerance = 0.05f)
+            {
+                var byRegion = new Dictionary<uint, Dictionary<(int tileX, int tileY), List<Pm4OutlineObject>>>();
+
+                foreach (((int tileX, int tileY, uint ck24, int objectPart) key, Pm4OverlayObject obj, Pm4ObjectDebugInfo debug)
+                    in EnumerateVisiblePm4OverlayDebugObjects())
+                {
+                    float placementZ = BitConverter.UInt32BitsToSingle(debug.Ck24 << 8);
+
+                    string? assetName = null;
+                    int? uniqueId = null;
+                    float bestDelta = float.MaxValue;
+
+                    if (debug.Ck24 != 0)
+                    {
+                        foreach (ObjectInstance inst in _wmoInstances)
+                        {
+                            Vector3 p = inst.PlacementPosition;
+                            if (p.X < debug.BoundsMin.X - 1f || p.X > debug.BoundsMax.X + 1f
+                                || p.Y < debug.BoundsMin.Y - 1f || p.Y > debug.BoundsMax.Y + 1f)
+                            {
+                                continue;
+                            }
+
+                            float delta = MathF.Abs(placementZ - p.Z);
+                            if (delta < bestDelta)
+                            {
+                                bestDelta = delta;
+                                assetName = string.IsNullOrEmpty(inst.ModelName) ? inst.ModelPath : inst.ModelName;
+                                uniqueId = inst.UniqueId;
+                            }
+                        }
+                    }
+
+                    if (bestDelta > zTolerance)
+                    {
+                        assetName = null;
+                        uniqueId = null;
+                    }
+
+                    if (!byRegion.TryGetValue(debug.MshdRegionId, out var tiles))
+                    {
+                        tiles = [];
+                        byRegion[debug.MshdRegionId] = tiles;
+                    }
+
+                    var tileKey = (key.tileX, key.tileY);
+                    if (!tiles.TryGetValue(tileKey, out var list))
+                    {
+                        list = [];
+                        tiles[tileKey] = list;
+                    }
+
+                    list.Add(new Pm4OutlineObject(
+                        key,
+                        debug.Ck24,
+                        debug.Ck24Type,
+                        placementZ,
+                        debug.SurfaceCount,
+                        debug.BoundsMin,
+                        debug.BoundsMax,
+                        debug.Center,
+                        assetName,
+                        uniqueId,
+                        assetName is null ? null : bestDelta));
+                }
+
+                return byRegion
+                    .Select(r => new Pm4OutlineRegion(
+                        r.Key,
+                        r.Value
+                            .OrderBy(static t => t.Key.tileX).ThenBy(static t => t.Key.tileY)
+                            .Select(t => new Pm4OutlineTile(
+                                t.Key.tileX,
+                                t.Key.tileY,
+                                t.Value.OrderByDescending(static o => o.SurfaceCount).ToList()))
+                            .ToList(),
+                        r.Value.Sum(static t => t.Value.Count),
+                        r.Value.Sum(static t => t.Value.Count(static o => o.AssetName is not null))))
+                    .OrderByDescending(static r => r.ObjectCount)
+                    .ThenBy(static r => r.RegionId)
+                    .ToList();
+            }
+
             private IEnumerable<((int tileX, int tileY, uint ck24, int objectPart) key, Pm4OverlayObject obj, Pm4ObjectDebugInfo debug)> EnumerateVisiblePm4OverlayDebugObjects()
             {
                 foreach (((int tileX, int tileY) tileKey, Pm4OverlayObject obj) in EnumerateVisiblePm4OverlayObjects())
@@ -15731,3 +15830,27 @@ public readonly record struct SceneObjectPickHit(
 {
     public string KindLabel => ObjectType == ObjectType.Wmo ? "WMO" : "MDX";
 }
+
+/// <summary>One node of the PM4 outliner: a placed object, or an unresolved object group.</summary>
+public sealed record Pm4OutlineObject(
+    (int tileX, int tileY, uint ck24, int objectPart) Key,
+    uint Ck24,
+    byte Ck24Type,
+    float PlacementZ,
+    int SurfaceCount,
+    System.Numerics.Vector3 BoundsMin,
+    System.Numerics.Vector3 BoundsMax,
+    System.Numerics.Vector3 Center,
+    string? AssetName,
+    int? UniqueId,
+    float? MatchDelta);
+
+/// <summary>A tile's worth of PM4 objects inside one MSHD region.</summary>
+public sealed record Pm4OutlineTile(int TileX, int TileY, IReadOnlyList<Pm4OutlineObject> Objects);
+
+/// <summary>One MSHD region, the top level of the PM4 outliner.</summary>
+public sealed record Pm4OutlineRegion(
+    uint RegionId,
+    IReadOnlyList<Pm4OutlineTile> Tiles,
+    int ObjectCount,
+    int NamedObjectCount);

@@ -1482,6 +1482,9 @@ static void RunMap(string[] args)
 		case "uniqueid-report":
 			RunMapUniqueIdReport(tail);
 			break;
+		case "mccv-stats":
+			AdtMccvStatsSupport.Run(tail);
+			break;
 		case "generate-blank":
 			RunMapGenerateBlank(tail);
 			break;
@@ -2191,6 +2194,12 @@ static void RunPm4(string[] args)
 			break;
 		case "placement-z":
 			RunPm4PlacementZ(tail);
+			break;
+		case "object-library":
+			RunPm4ObjectLibrary(tail);
+			break;
+		case "merge-bias":
+			RunPm4MergeBias(tail);
 			break;
 		case "bounds-audit":
 			RunPm4BoundsAudit(tail);
@@ -6316,6 +6325,95 @@ static void RunPm4ConnectiveGeometry(string[] args)
 	}
 
 	PrintPm4ConnectiveGeometryReport(report);
+}
+
+static void RunPm4MergeBias(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4MergeBiasReport r = Pm4MergeBiasAnalyzer.AnalyzeDirectory(input);
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 MSCN nature + surface subdivision bias");
+	Console.WriteLine($"Input: {r.InputDirectory}  files={r.FilesWithSurfaces}");
+	Console.WriteLine();
+	Console.WriteLine("MSCN vector lengths (unit length would mean normals):");
+	Console.WriteLine($"  points            = {r.MscnPoints}");
+	Console.WriteLine($"  length ~= 1.0     = {r.MscnUnitLengthPoints} ({r.MscnUnitLengthFraction:P4})");
+	Console.WriteLine($"  length min/mean/max = {r.MscnLengthMin:F3} / {r.MscnLengthMean:F3} / {r.MscnLengthMax:F3}");
+	Console.WriteLine();
+	Console.WriteLine($"Surface subdivision bias over {r.ObjectsMeasured} objects (>=8 surfaces each).");
+	Console.WriteLine("  +1 = all surfaces on the high side of the object, 0 = balanced:");
+	Console.WriteLine($"  count bias along X = {r.SurfaceCountBiasX:+0.0000;-0.0000}  (sd {r.SurfaceCountBiasXStdDev:F4})");
+	Console.WriteLine($"  count bias along Y = {r.SurfaceCountBiasY:+0.0000;-0.0000}  (sd {r.SurfaceCountBiasYStdDev:F4})");
+	Console.WriteLine($"  AREA bias along X  = {r.SurfaceAreaBiasX:+0.0000;-0.0000}  (sd {r.SurfaceAreaBiasXStdDev:F4})  [control]");
+	Console.WriteLine();
+	Console.WriteLine("  Read count bias against the area control: a count bias with a near-zero area");
+	Console.WriteLine("  bias means one side is cut into MORE, SMALLER pieces covering the same ground -");
+	Console.WriteLine("  the signature of a scan-ordered greedy merge, not of an asymmetric object.");
+}
+
+static void RunPm4ObjectLibrary(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? adtDir = GetOption(args, "--adt-dir");
+	string? output = GetOption(args, "--output", "-o");
+	string? tolText = GetOption(args, "--tolerance");
+	float tolerance = float.TryParse(tolText, out float t) ? t : 0.001f;
+	int topAssets = int.TryParse(GetOption(args, "--top"), out int tk) ? tk : 25;
+
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4ObjectLibrarySupport.LibraryReport report = Pm4ObjectLibrarySupport.Build(input, adtDir, tolerance);
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? dir = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(dir))
+			Directory.CreateDirectory(dir);
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+	}
+
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 object library");
+	Console.WriteLine($"PM4 dir: {report.Pm4Directory}");
+	Console.WriteLine($"ADT dir: {report.AdtDirectory}");
+	Console.WriteLine($"PM4 files scanned={report.Pm4FilesScanned} with companion ADT={report.Pm4FilesWithCompanionAdt}");
+	Console.WriteLine($"PM4 objects total={report.TotalObjects}  distinct mapped assets={report.DistinctAssets}");
+	Console.WriteLine($"match tolerance = {tolerance}");
+	Console.WriteLine();
+
+	Console.WriteLine("Every object is accounted for under exactly one status:");
+	foreach (Pm4ValueFrequency s in report.StatusCounts)
+	{
+		double pct = report.TotalObjects == 0 ? 0 : (double)s.Count / report.TotalObjects;
+		Console.WriteLine($"  {s.Value,-28} {s.Count,6}  ({pct,7:P2})");
+	}
+	Console.WriteLine();
+
+	Console.WriteLine($"Assets by instance count (top {topAssets} of {report.DistinctAssets}):");
+	Console.WriteLine("  instances  tiles  surfaces(min..max/mean)  kind  asset");
+	foreach (Pm4ObjectLibrarySupport.AssetSummary a in report.Assets.Take(topAssets))
+	{
+		Console.WriteLine(
+			$"  {a.InstanceCount,9}  {a.DistinctPm4Files,5}  {a.MinSurfaceCount,6}..{a.MaxSurfaceCount,-6}{a.MeanSurfaceCount,7:F1}  " +
+			$"{a.AssetKind,-3}   {a.AssetPath}");
+	}
+	Console.WriteLine();
+	int repeated = report.Assets.Count(static a => a.InstanceCount > 1);
+	Console.WriteLine($"Assets placed more than once: {repeated} of {report.DistinctAssets}");
+	Console.WriteLine("  (one source model with several recorded outputs is the strongest generation test:");
+	Console.WriteLine("   the same input must reproduce every one of them)");
 }
 
 static void RunPm4PlacementZ(string[] args)

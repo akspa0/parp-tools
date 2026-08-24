@@ -1,5 +1,15 @@
 namespace WowViewer.Core.PM4.Services;
 
+/// <summary>
+/// Formats the PM4/PD4 <c>MVER</c> word.
+/// </summary>
+/// <remarks>
+/// The word is a FORMAT VERSION, not a client build and not a size. Measured 2026-08-23: it is a
+/// constant 12304 (0x3010) across corpus files spanning a 20x size range, with an identical 32-byte
+/// MSHD in every one - so it varies with neither file size nor chunk content. The low byte carries
+/// the version (0x10 = 16 for these PM4s, 0x30 = 48 for the WoD PD4); the 0x30 HIGH byte on PM4 is
+/// undecoded and should not be presented as meaning anything yet.
+/// </remarks>
 public static class Pm4VersionFormatter
 {
     public static string Format(uint rawVersion)

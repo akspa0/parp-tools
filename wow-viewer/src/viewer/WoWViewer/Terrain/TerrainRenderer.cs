@@ -1491,9 +1491,13 @@ void main() {
         result = mix(result, c3.rgb * lighting, a3);
     }
 
+    // MCCV is a BGRA CImVector whose RGB multiplies terrain colour, 127 being neutral.
+    // The fourth byte is NOT an opacity and must not gate the tint: Blizzard tiles store
+    // alpha 255 while fan-painted tiles store 0, so the old strength term discarded all of
+    // the latter's paint. Removing it is a no-op where alpha is 255, since mix(x, y, 1) == y.
+    // Keep this source pure ASCII - GLSL rejects non-ASCII bytes even inside comments.
     vec3 tintColor = clamp(vVertexColor.rgb * 2.0, 0.0, 2.0);
-    float tintStrength = clamp(vVertexColor.a * 2.0 - 1.0, 0.0, 1.0);
-    vec3 vertexTint = (uUseMccv == 1) ? mix(vec3(1.0), tintColor, tintStrength) : vec3(1.0);
+    vec3 vertexTint = (uUseMccv == 1) ? tintColor : vec3(1.0);
     result *= vertexTint;
 
     float dist = length(vWorldPos - uCameraPos);
@@ -1711,9 +1715,13 @@ void main() {
         result = mix(result, c3.rgb * lighting, a3);
     }
 
+    // MCCV is a BGRA CImVector whose RGB multiplies terrain colour, 127 being neutral.
+    // The fourth byte is NOT an opacity and must not gate the tint: Blizzard tiles store
+    // alpha 255 while fan-painted tiles store 0, so the old strength term discarded all of
+    // the latter's paint. Removing it is a no-op where alpha is 255, since mix(x, y, 1) == y.
+    // Keep this source pure ASCII - GLSL rejects non-ASCII bytes even inside comments.
     vec3 tintColor = clamp(vVertexColor.rgb * 2.0, 0.0, 2.0);
-    float tintStrength = clamp(vVertexColor.a * 2.0 - 1.0, 0.0, 1.0);
-    vec3 vertexTint = (uUseMccv == 1) ? mix(vec3(1.0), tintColor, tintStrength) : vec3(1.0);
+    vec3 vertexTint = (uUseMccv == 1) ? tintColor : vec3(1.0);
     result *= vertexTint;
 
     float dist = length(vWorldPos - uCameraPos);
