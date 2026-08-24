@@ -130,6 +130,31 @@ public static class Pm4MprrAnalyzer
             .Select(static kv => new Pm4ValueFrequency(kv.Key.ToString(), kv.Value))
             .ToList();
 
+        // Residue of the run length modulo 4. The truncated top-16 histogram shows only
+        // 3, 7, 11, 15, 19, ... — i.e. length == 3 (mod 4), which means run + its terminating
+        // sentinel occupies a whole number of 4-entry (16-byte) blocks. Truncating the histogram
+        // hides whether that holds across every distinct length, so the residue is summarised over
+        // ALL of them here rather than eyeballed from the visible rows.
+        var residueTotals = new long[4];
+        long distinctLengths = 0;
+        int maxRunLength = 0;
+        foreach ((int length, int count) in runLengths)
+        {
+            distinctLengths++;
+            residueTotals[((length % 4) + 4) % 4] += count;
+            if (length > maxRunLength)
+                maxRunLength = length;
+        }
+
+        long residueTotal = residueTotals[0] + residueTotals[1] + residueTotals[2] + residueTotals[3];
+        IReadOnlyList<Pm4MprrRunLengthResidue> residues = Enumerable
+            .Range(0, 4)
+            .Select(r => new Pm4MprrRunLengthResidue(
+                r,
+                residueTotals[r],
+                residueTotal == 0 ? 0d : (double)residueTotals[r] / residueTotal))
+            .ToList();
+
         return new Pm4MprrReport(
             resolvedDirectory,
             filesWithMprr,
@@ -143,7 +168,11 @@ public static class Pm4MprrAnalyzer
             value2,
             structural,
             lengths,
+            residues,
+            distinctLengths,
+            maxRunLength,
             [
+                "Run length mod 4 is summarised over ALL distinct lengths, not just the top-16 rows.",
                 "Value1/Value2 fits are BOUND tests only: a value in range does not prove the domain owns it.",
                 "The run-count match is structural — if the sentinel-delimited run count equals a chunk's entry count file after file, MPRR is a per-entry list for that chunk.",
                 "Sentinel is Value1 == 0xFFFF, already modelled by Pm4MprrEntry.IsSentinel."

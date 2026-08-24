@@ -237,10 +237,15 @@ specific measurement that would settle it.
   chained, out of range, and stream coverage — not as a fraction alone.
 - **FR-003**: The conformance check MUST be demonstrated to separate real files from the current
   generator's output before any of its scores are used as acceptance evidence.
-- **FR-004**: Ground-truth pairing MUST admit a pair only when identity is forced by counting, and
-  MUST count and report every case rejected as ambiguous.
+- **FR-004**: Ground-truth pairing MUST admit a pair only when identity is established by an exact
+  key carried in the data or forced by counting, and MUST count and report every case rejected as
+  ambiguous.
+- **FR-004a**: Pairing SHOULD use the surface record's stored placement height, which was measured on
+  2026-08-23 to equal the producing placement's Z **bit-exactly** for 844 of 950 objects (88.84%)
+  against a rotated-correspondence control of 2.26%. Combined with horizontal footprint containment
+  it yields the source model's filename directly.
 - **FR-005**: Ground-truth pairing MUST NOT use geometric similarity or fingerprint scoring to
-  establish identity.
+  establish identity. An exact stored value is not similarity scoring and is admitted by FR-004a.
 - **FR-006**: Generation MUST merge coplanar adjacent collidable faces into single polygons rather
   than emitting one polygon per source triangle.
 - **FR-007**: Generation MUST emit, per surface, a contiguous run of adjacency records such that the
@@ -308,7 +313,15 @@ specific measurement that would settle it.
 - The tile-level structures (placement lists, destructible payloads, the largest undecoded stream)
   are out of scope for generation in this spec and are addressed only by the gap report.
 - The two reference PD4 files remain unpaired unless their source model becomes available; the lane
-  does not block on obtaining it.
+  does not block on obtaining it, and no longer needs to — see below.
+- **Ground truth is no longer the binding constraint.** When this spec was written, pairs were
+  expected to come only from tiles where counting forces the answer. On 2026-08-23 the surface
+  record's stored placement height was shown to equal the producing placement's Z bit-exactly,
+  yielding **886 WMO-matched objects with their source filenames** on the 3.3.5 corpus at
+  `test_data/WoWMuseum/335-dev/World/Maps/development`. Plan against that supply, not the scarce one.
+- That corpus keeps placements in **monolithic** ADTs; the `_obj0.adt` spelling the core helper looks
+  for is Cataclysm-era and finds nothing there. Pairing must try both spellings, and PM4 tile names
+  are zero-padded where ADT names are not.
 - Existing decode confidence levels travel with any claim reused here — in particular, surface
   grouping into whole objects is explicitly not a confirmed identity and is not treated as one.
 - Real-client proof and any long corpus-wide sweep beyond read-only inspection are user-run.

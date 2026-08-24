@@ -476,4 +476,13 @@ public sealed record Pm4MprrReport(
     IReadOnlyList<Pm4MprrDomainFit> Value2DomainFits,
     IReadOnlyList<Pm4MprrRunCountMatch> RunCountMatches,
     IReadOnlyList<Pm4ValueFrequency> RunLengthHistogram,
+    IReadOnlyList<Pm4MprrRunLengthResidue> RunLengthResidues,
+    long DistinctRunLengths,
+    int MaxRunLength,
     IReadOnlyList<string> Notes);
+
+/// <summary>
+/// Share of MPRR runs whose length has a given residue modulo 4, summed over every distinct run
+/// length rather than the truncated histogram rows.
+/// </summary>
+public sealed record Pm4MprrRunLengthResidue(int Residue, long Runs, double Fraction);

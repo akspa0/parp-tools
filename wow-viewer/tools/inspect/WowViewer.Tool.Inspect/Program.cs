@@ -2186,6 +2186,12 @@ static void RunPm4(string[] args)
 		case "msur-window":
 			RunPm4MsurWindow(tail);
 			break;
+		case "adjacency-components":
+			RunPm4AdjacencyComponents(tail);
+			break;
+		case "placement-z":
+			RunPm4PlacementZ(tail);
+			break;
 		case "bounds-audit":
 			RunPm4BoundsAudit(tail);
 			break;
@@ -5722,6 +5728,11 @@ static void RunPm4Mprr(string[] args)
 		Console.WriteLine($"  len={bucket.Value,-6} runs={bucket.Count}");
 	Console.WriteLine();
 
+	Console.WriteLine($"Run length mod 4 (all {report.DistinctRunLengths} distinct lengths, max={report.MaxRunLength}):");
+	foreach (Pm4MprrRunLengthResidue residue in report.RunLengthResidues)
+		Console.WriteLine($"  len%4=={residue.Residue}  runs={residue.Runs,-12} {residue.Fraction:P4}");
+	Console.WriteLine();
+
 	foreach (string note in report.Notes)
 		Console.WriteLine($"  - {note}");
 }
@@ -6305,6 +6316,165 @@ static void RunPm4ConnectiveGeometry(string[] args)
 	}
 
 	PrintPm4ConnectiveGeometryReport(report);
+}
+
+static void RunPm4PlacementZ(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? adtDir = GetOption(args, "--adt-dir");
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4PlacementZReport report = Pm4PlacementZSupport.Run(input, adtDir);
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? dir = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(dir))
+			Directory.CreateDirectory(dir);
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 MSUR._0x1C vs ADT placement Z");
+	Console.WriteLine($"Input: {report.InputDirectory}");
+	Console.WriteLine($"PM4 files={report.Pm4Files} paired={report.PairedFiles} unpaired={report.UnpairedFiles}");
+	Console.WriteLine($"Objects={report.Objects} with a placement inside their footprint={report.ObjectsWithCandidates}");
+	Console.WriteLine($"  matched to WMO placements={report.WmoMatches}  to M2 placements={report.M2Matches}");
+	Console.WriteLine();
+
+	Console.WriteLine("|float - placementZ| within tolerance      REAL            CONTROL (correspondence rotated)");
+	for (int i = 0; i < report.RealBuckets.Count; i++)
+	{
+		Pm4PlacementZBucket r = report.RealBuckets[i];
+		Pm4PlacementZBucket c = report.ControlBuckets[i];
+		Console.WriteLine($"  <= {r.Tolerance,-8:F3}   {r.Count,8} ({r.Fraction,7:P2})   {c.Count,8} ({c.Fraction,7:P2})");
+	}
+	Console.WriteLine();
+	Console.WriteLine($"  median |delta| REAL    = {report.MedianAbsDelta:F6}");
+	Console.WriteLine($"  median |delta| CONTROL = {report.ControlMedianAbsDelta:F6}");
+	Console.WriteLine();
+
+	Console.WriteLine("Samples:");
+	foreach (Pm4PlacementZMatch m in report.Samples)
+		Console.WriteLine($"  {m.Pm4Path}  0x{m.Raw:X8}={m.AsFloat,10:F4}  {m.PlacementKind,-3} z={m.PlacementZ,10:F4}  delta={m.Delta,10:F4}  {Path.GetFileName(m.ModelPath)}");
+}
+
+static void RunPm4AdjacencyComponents(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 file or directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (HasFlag(args, "--surface-z"))
+	{
+		Pm4SurfaceZReport z = Pm4AdjacencyComponentAnalyzer.AnalyzeSurfaceZ(input);
+		Console.WriteLine("WowViewer.Tool.Inspect PM4 MSUR._0x1C as-float vs geometry");
+		Console.WriteLine($"Input: {z.InputDirectory}");
+		Console.WriteLine($"Files={z.FilesWithSurfaces} objects={z.Objects} zero-valued={z.ZeroValuedObjects} sampled={z.Sampled}");
+		Console.WriteLine();
+		Console.WriteLine("Correlation of the float against object geometry:");
+		Console.WriteLine($"  vs bbox min Z          = {z.CorrelationWithMinZ:F6}");
+		Console.WriteLine($"  vs bbox max Z          = {z.CorrelationWithMaxZ:F6}");
+		Console.WriteLine($"  vs bbox mid Z          = {z.CorrelationWithMidZ:F6}");
+		Console.WriteLine($"  vs bbox min X (control)= {z.CorrelationWithMinX:F6}");
+		Console.WriteLine($"  vs surface count (control) = {z.CorrelationWithSurfaceCount:F6}");
+		Console.WriteLine();
+		Console.WriteLine($"  stddev(value - minZ) / stddev(value) = {z.OffsetSpreadRatio:F6}");
+		Console.WriteLine("    (a value that IS a height in this frame loses nearly all variance when");
+		Console.WriteLine("     the object's own floor is subtracted; a key would not)");
+		Console.WriteLine();
+		Console.WriteLine("High-byte population (a uniform 32-bit key cannot concentrate here):");
+		foreach (Pm4ValueFrequency b in z.HighByteBands)
+			Console.WriteLine($"  {b.Value}  surfaces={b.Count}");
+		return;
+	}
+
+	if (HasFlag(args, "--packed") && File.Exists(input))
+	{
+		Pm4PackedParamsReport packed = Pm4AdjacencyComponentAnalyzer.DescribePackedParams(input);
+		Console.WriteLine("WowViewer.Tool.Inspect PM4 MSUR._0x1C raw-value diagnostic");
+		Console.WriteLine($"Input: {packed.SourcePath}");
+		Console.WriteLine($"Surfaces={packed.SurfaceCount} distinct raw values={packed.DistinctRawValues}");
+		Console.WriteLine($"  slice (P>>8)&0xFFFFFF  -> {packed.DistinctCurrentSlice} distinct   [current reading]");
+		Console.WriteLine($"  slice  P    &0xFFFFFF  -> {packed.DistinctLowAlignedSlice} distinct   [low-aligned rival]");
+		Console.WriteLine($"  the two slices induce the SAME partition of surfaces: {packed.SlicesInduceSamePartition}");
+		Console.WriteLine();
+		Console.WriteLine("  raw          asFloat    surfaces   sizeX   sizeY   sizeZ   min corner");
+		foreach (Pm4PackedParamsValue v in packed.Values)
+		{
+			Console.WriteLine(
+				$"  {v.Hex}  {v.AsFloat,9:F4}  {v.SurfaceCount,7}  " +
+				$"{v.SizeX,7:F2} {v.SizeY,7:F2} {v.SizeZ,7:F2}   min=({v.MinX,8:F2},{v.MinY,8:F2},{v.MinZ,7:F2})");
+		}
+		return;
+	}
+
+	Pm4AdjacencyComponentReport report = File.Exists(input)
+		? Pm4AdjacencyComponentAnalyzer.AnalyzeFile(input)
+		: Pm4AdjacencyComponentAnalyzer.AnalyzeDirectory(input);
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 adjacency-component report");
+	Console.WriteLine($"Input: {report.InputDirectory}");
+	Console.WriteLine($"Files: {report.FileCount}, non-empty={report.NonEmptyFileCount}");
+	Console.WriteLine();
+
+	Console.WriteLine("Components of the stored MSUR adjacency graph (no geometry, no epsilon):");
+	Console.WriteLine($"  surfaces               = {report.Surfaces}");
+	Console.WriteLine($"  components             = {report.Components}");
+	Console.WriteLine($"  singleton components   = {report.SingletonComponents}");
+	Console.WriteLine($"  CK24 groups            = {report.Ck24Groups}");
+	Console.WriteLine();
+
+	Console.WriteLine("Component vs CK24 (purity and distinctness are only meaningful together):");
+	Console.WriteLine($"  pure components        = {report.PureComponents} ({report.PureFraction:P2})");
+	Console.WriteLine($"  distinct components    = {report.DistinctComponents} ({report.DistinctFraction:P2})");
+	Console.WriteLine();
+
+	Console.WriteLine("Edges:");
+	Console.WriteLine($"  distinct edges         = {report.Edges}");
+	Console.WriteLine($"  crossing a CK24 border = {report.CrossCk24Edges} ({report.CrossCk24Fraction:P2})");
+	Console.WriteLine($"  non-reciprocated       = {report.NonReciprocatedEdges}");
+	Console.WriteLine($"    of those, cross-CK24 = {report.NonReciprocatedCrossCk24}");
+	Console.WriteLine($"    of those, target 0   = {report.NonReciprocatedTargetZero}");
+	Console.WriteLine();
+
+	Console.WriteLine("CK24 slice cardinalities (PackedParams = [Type:8][High:8][Low:8][trailer:8]):");
+	Console.WriteLine($"  distinct CK24          = {report.DistinctCk24Values}");
+	Console.WriteLine($"  distinct Type   (AA)   = {report.DistinctCk24TypeValues}");
+	Console.WriteLine($"  distinct HighByte (BB) = {report.DistinctCk24HighByteValues}");
+	Console.WriteLine($"  distinct LowByte  (CC) = {report.DistinctCk24LowByteValues}");
+	Console.WriteLine($"  distinct ObjectId (BBCC) = {report.DistinctCk24ObjectIdValues}");
+	Console.WriteLine($"  distinct trailer byte  = {report.DistinctPackedTrailerValues}");
+	Console.WriteLine();
+
+	Console.WriteLine("Component size histogram (top):");
+	foreach (Pm4ValueFrequency bucket in report.ComponentSizeHistogram)
+		Console.WriteLine($"  size={bucket.Value,-8} components={bucket.Count}");
 }
 
 static void RunPm4MsurWindow(string[] args)
@@ -8007,6 +8177,7 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 cross-tile --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 bond-stats --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 msur-window --input <file.pm4|directory> [--output <report.json>]");
+	Console.WriteLine("  pm4 adjacency-components --input <file.pm4|directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
 	Console.WriteLine("  pm4 correlate-models --input <file.pm4> --placements <file.adt> --archive-root <dir> [--output <report.json>] [--pm4-vpath <archive-path>] [--adt-vpath <archive-path>]");
 	Console.WriteLine("  pm4 sweep-correlate --map-dir <directory> --archive-root <dir> [--output <summary.csv>] [--limit <n>]");
