@@ -2216,6 +2216,9 @@ static void RunPm4(string[] args)
 		case "surface-class":
 			RunPm4SurfaceClass(tail);
 			break;
+		case "field-sweep":
+			RunPm4FieldSweep(tail);
+			break;
 		case "bounds-audit":
 			RunPm4BoundsAudit(tail);
 			break;
@@ -6340,6 +6343,33 @@ static void RunPm4ConnectiveGeometry(string[] args)
 	}
 
 	PrintPm4ConnectiveGeometryReport(report);
+}
+
+static void RunPm4FieldSweep(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4FieldSweepReport r = Pm4FieldSweepAnalyzer.AnalyzeDirectory(input);
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 field sweep (behaviour, not name)");
+	Console.WriteLine($"Input: {r.InputDirectory}  files={r.Files}");
+	Console.WriteLine();
+	Console.WriteLine("  field                                 records  distinct   ratio    zero floatish  shape");
+	foreach (Pm4FieldSweepResult f in r.Fields)
+	{
+		string distinct = f.DistinctValues < 0 ? ">200k" : f.DistinctValues.ToString();
+		Console.WriteLine($"  {f.Name,-34}{f.Total,11}{distinct,10}{f.DistinctRatio,8:F3}{f.ZeroFraction,8:P0}{f.FloatLikeFraction,9:P0}  {f.Shape}");
+	}
+	Console.WriteLine();
+	Console.WriteLine("  CONTROLS must come out right or nothing else here is worth reading:");
+	Console.WriteLine("    MSUR._0x02 should read as a small ENUM (it is a window length)");
+	Console.WriteLine("    MSUR._0x1C should read as FLOAT-like");
+	Console.WriteLine("    MSLK._0x04 should read as NEAR-UNIQUE");
 }
 
 static void RunPm4SurfaceClass(string[] args)

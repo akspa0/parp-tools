@@ -338,14 +338,20 @@ table is the honest accounting of the rest, so a reader can tell a result from a
 | `MSLK` | `RefIndex` | MEASURED | neighbouring surface, 98.76% reciprocal |
 | `MSLK` | `_0x00` type flags | PARTIAL | observed buckets, not corpus-closed |
 | `MSLK` | `_0x04` | UNKNOWN | commonly named a group/object id; the name asserts more than the evidence |
-| `MSLK` | subtype, link id, system flag | UNKNOWN | three fields, no evidence |
+| `MSLK` | `SystemFlag` | **MEASURED** | **constant 32768 (0x8000)** across 486,819 records - no information content |
+| `MSLK` | `_0x02` | **MEASURED** | **constant 0** - real padding |
+| `MSLK` | `_0x01` subtype | PARTIAL | enumerated, 19 values, 25% zero |
+| `MSLK` | `LinkId` | PARTIAL | 138 distinct over 486,819 records - too few to be an id, not an index |
 | `MSVT` | positions | MEASURED | floor vertices |
 | `MSVI` | indices | MEASURED | 1,930,146 fits, 0 misses |
 | `MSUR` | `0x01`, `0x02`, `0x14`, `0x18`, `0x1C`, normal | MEASURED | see §3-§5 |
 | `MSUR` | `0x10` | PARTIAL | behaves as a signed plane distance |
-| `MSUR` | `0x00` | UNKNOWN | one byte, no evidence |
+| `MSUR` | `0x00` | **MEASURED** | surface class - `0x03` marks doodad surfaces (100.0% carry no placement height); `0x10`-`0x15` are placed, stratified by height inside the object |
+| `MSUR` | `0x03` | **MEASURED** | **constant 0** - real padding |
 | `MPRL` | position | PARTIAL | the **only permuted chunk** in the file — its axis order differs from `MSVT`/`MSPV`/`MSCN` |
-| `MPRL` | 6 further fields | UNKNOWN | |
+| `MPRL` | `Unk02`, `Unk06` | **MEASURED** | **constant 65535 and 32768** across 54,295 records |
+| `MPRL` | `Unk14`, `Unk16` | PARTIAL | enumerated, 14 and 2 values |
+| `MPRL` | `Unk00`, `Unk04` | PARTIAL | index-like; `Unk04` is the most structured unknown in the format (3,932 values, 0.278 per-file distinct ratio) |
 | `MPRR` | everything | UNKNOWN | structure only (§7) |
 | `MDSF` | both indices | MEASURED | 2,684 fits, 0 misses; links a surface to a destruction state |
 | `MDOS`, `MDBH`, `MDBI`, `MDBF` | | PARTIAL | destructible-building payload; `MDBF` holds filenames. Present on essentially one tile in this corpus, so treat as unrepresentative. Note what `MDSF` + `MDOS` amount to together: a **per-surface destruction state**, i.e. a mechanism for swapping which surfaces are walkable as world state changes — the navmesh side of destructible buildings, which is era-appropriate for Cataclysm |
