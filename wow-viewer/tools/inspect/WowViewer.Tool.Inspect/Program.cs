@@ -2213,6 +2213,9 @@ static void RunPm4(string[] args)
 		case "zero-bucket":
 			RunPm4ZeroBucket(tail);
 			break;
+		case "surface-class":
+			RunPm4SurfaceClass(tail);
+			break;
 		case "bounds-audit":
 			RunPm4BoundsAudit(tail);
 			break;
@@ -6337,6 +6340,34 @@ static void RunPm4ConnectiveGeometry(string[] args)
 	}
 
 	PrintPm4ConnectiveGeometryReport(report);
+}
+
+static void RunPm4SurfaceClass(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4SurfaceClassReport r = Pm4SurfaceClassAnalyzer.AnalyzeDirectory(input);
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 MSUR._0x00 surface-class test");
+	Console.WriteLine($"Input: {r.InputDirectory}  files={r.Files}");
+	Console.WriteLine();
+	Console.WriteLine("  value  surfaces   Zdominant   facingUp  facingDown   meanNz   heightInObject   inZeroPop");
+	foreach (Pm4SurfaceClassResult c in r.Classes)
+	{
+		Console.WriteLine(
+			$"   0x{c.Value:X2}  {c.Surfaces,9}   {c.ZDominantFraction,8:P1}   {c.FacingUpFraction,8:P1}   {c.FacingDownFraction,8:P1}   " +
+			$"{c.MeanNormalZ,+7:F3}   {c.MeanNormalisedHeightInObject,13:F3}   {c.ZeroPopulationFraction,8:P1}");
+	}
+	Console.WriteLine();
+	Console.WriteLine("  Z-dominant + facing up + low in object  = floor.");
+	Console.WriteLine("  Z-dominant + high in object             = roof.");
+	Console.WriteLine("  NOT Z-dominant                          = wall.");
+	Console.WriteLine("  Values that separate on these axes are a surface CLASS; values that do not are an opaque key.");
 }
 
 static void RunPm4ZeroBucket(string[] args)

@@ -230,19 +230,26 @@ public partial class ViewerApp
         if (ImGui.Button("Export Report"))
             ExportPm4OverlayReport();
 
-        bool showType40 = _worldScene.ShowPm4Type40;
-        if (ImGui.Checkbox("CK24 0x40", ref showType40))
-            _worldScene.ShowPm4Type40 = showType40;
-
-        ImGui.SameLine();
-        bool showType80 = _worldScene.ShowPm4Type80;
-        if (ImGui.Checkbox("CK24 0x80", ref showType80))
-            _worldScene.ShowPm4Type80 = showType80;
-
-        ImGui.SameLine();
-        bool showTypeOther = _worldScene.ShowPm4TypeOther;
-        if (ImGui.Checkbox("CK24 Other", ref showTypeOther))
-            _worldScene.ShowPm4TypeOther = showTypeOther;
+        // Surface classes, keyed by MSUR._0x00. Measured 2026-08-24 over 309 files with
+        // `pm4 surface-class`; labels carry what each value actually separates. The old
+        // "CK24 0x40 / 0x80 / Other" checkboxes filtered by Ck24Type, which is the EXPONENT BAND of
+        // the placement-Z float - i.e. they filtered by height octave - so they are gone.
+        ImGui.TextDisabled("Surface class (MSUR._0x00)");
+        foreach ((byte cls, string label) in Pm4SurfaceClassLabels)
+        {
+            bool visible = _worldScene.IsPm4SurfaceClassVisible(cls);
+            if (ImGui.Checkbox(label, ref visible))
+                _worldScene.SetPm4SurfaceClassVisible(cls, visible);
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.BeginTooltip();
+                ImGui.Text(Pm4SurfaceClassTooltips[cls]);
+                ImGui.TextDisabled("Filters by the object's DOMINANT class - the overlay carries one");
+                ImGui.TextDisabled("class per object, not per surface, so this cannot isolate a single");
+                ImGui.TextDisabled("surface class within one object.");
+                ImGui.EndTooltip();
+            }
+        }
 
         Pm4OverlayColorMode colorMode = _worldScene.Pm4ColorMode;
         if (ImGui.BeginCombo("PM4 Color", GetPm4ColorModeLabel(colorMode)))
@@ -2480,6 +2487,29 @@ public partial class ViewerApp
 
         return value < 0f ? magnitude : -magnitude;
     }
+
+    /// <summary>MSUR._0x00 values seen corpus-wide, with what each was measured to separate.</summary>
+    private static readonly (byte Value, string Label)[] Pm4SurfaceClassLabels =
+    [
+        (0x03, "0x03  doodad surfaces"),
+        (0x10, "0x10  lowest floors"),
+        (0x11, "0x11  floors"),
+        (0x12, "0x12  floors (most common)"),
+        (0x13, "0x13  floors (upper)"),
+        (0x14, "0x14  highest / angled"),
+        (0x15, "0x15  lowest (rare)"),
+    ];
+
+    private static readonly Dictionary<byte, string> Pm4SurfaceClassTooltips = new()
+    {
+        [0x03] = "184,356 surfaces. 100.0% carry NO placement height - this is the doodad marker, and a second identifier for the M2 population independent of the Z field.",
+        [0x10] = "87,243 surfaces. Sits lowest inside its object (0.291 of its Z extent). 95.3% Z-dominant, 92.9% up-facing.",
+        [0x11] = "13,493 surfaces. 0.402 height in object, 95.2% Z-dominant.",
+        [0x12] = "161,359 surfaces, the most common placed class. 0.474 height in object, 91.8% Z-dominant.",
+        [0x13] = "71,293 surfaces. 0.427 height in object, 93.3% Z-dominant.",
+        [0x14] = "105 surfaces. Highest in its object (0.624) and the ONLY class that is mostly not Z-dominant (38.1%) - the closest thing to a non-floor here.",
+        [0x15] = "243 surfaces. Lowest of all (0.161) and almost perfectly flat: 99.2% Z-dominant, 99.6% up-facing.",
+    };
 
     private static string GetPm4ColorModeLabel(Pm4OverlayColorMode mode)
     {

@@ -11214,7 +11214,7 @@ public class WorldScene : ISceneRenderer
 
                         foreach (Pm4OverlayObject obj in objects)
                         {
-                            if (!ShouldRenderPm4ObjectType(obj.Ck24Type))
+                            if (!ShouldRenderPm4Object(obj))
                                 continue;
 
                             var objectKey = (tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId);
@@ -11250,7 +11250,7 @@ public class WorldScene : ISceneRenderer
                         {
                             foreach (Pm4OverlayObject obj in tileEntry.Value)
                             {
-                                if (!ShouldRenderPm4ObjectType(obj.Ck24Type))
+                                if (!ShouldRenderPm4Object(obj))
                                     continue;
 
                                 float z = BitConverter.UInt32BitsToSingle(obj.Ck24 << 8);
@@ -14358,7 +14358,7 @@ public class WorldScene : ISceneRenderer
                     for (int i = 0; i < objects.Count; i++)
                     {
                         Pm4OverlayObject obj = objects[i];
-                        if (ShouldRenderPm4ObjectType(obj.Ck24Type))
+                        if (ShouldRenderPm4Object(obj))
                             yield return (tileEntry.Key, obj);
                     }
                 }
@@ -14710,6 +14710,41 @@ public class WorldScene : ISceneRenderer
             _ => _showPm4TypeOther
         };
     }
+
+    /// <summary>
+    /// Per-surface-class visibility, keyed by <c>MSUR._0x00</c>.
+    /// </summary>
+    /// <remarks>
+    /// Measured 2026-08-24 with `pm4 surface-class` over 309 files. The field is a genuine surface
+    /// class, and the cleanest result is that <b>0x03 is the doodad marker</b>: 100.0% of its 184,356
+    /// surfaces carry no placement height, while every other class is ~99.5% in the placed
+    /// population. It is therefore a second, independent identifier for the M2 population.
+    ///
+    /// <para>The remaining classes stratify by height inside their own object rather than into
+    /// roof/wall/floor: 0x10 sits lowest at 0.291 of the object's Z extent, 0x13 at 0.427, 0x12 at
+    /// 0.474, 0x14 highest at 0.624. All are Z-dominant and up-facing (82-99%), because MSUR holds
+    /// FLOORS - walls live in MSPV/MSPI, so no MSUR class is a wall.</para>
+    ///
+    /// <para>Filtering is by the object's DOMINANT class, since the overlay carries one class per
+    /// object rather than per surface. That separates doodads from placed objects and low-floor from
+    /// high-floor objects, but it cannot isolate one surface class WITHIN a single object - that
+    /// needs per-surface class carried through the overlay build.</para>
+    /// </remarks>
+    private readonly HashSet<byte> _pm4HiddenSurfaceClasses = [];
+
+    public bool IsPm4SurfaceClassVisible(byte surfaceClass) => !_pm4HiddenSurfaceClasses.Contains(surfaceClass);
+
+    public void SetPm4SurfaceClassVisible(byte surfaceClass, bool visible)
+    {
+        if (visible)
+            _pm4HiddenSurfaceClasses.Remove(surfaceClass);
+        else
+            _pm4HiddenSurfaceClasses.Add(surfaceClass);
+    }
+
+    private bool ShouldRenderPm4Object(Pm4OverlayObject obj)
+        => ShouldRenderPm4ObjectType(obj.Ck24Type)
+           && !_pm4HiddenSurfaceClasses.Contains(obj.DominantGroupKey);
 
     private Matrix4x4 BuildPm4OverlayTransformMatrix()
     {
