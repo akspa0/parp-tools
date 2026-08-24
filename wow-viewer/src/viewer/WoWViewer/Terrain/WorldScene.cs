@@ -1198,6 +1198,7 @@ public class WorldScene : ISceneRenderer
     private bool _showPm4ObjectBounds;
     private bool _showPm4Ck24Bounds;
     private bool _showPm4PlacementZPlane;
+    private bool _showPm4PlacementZForAllObjects;
     private bool _pm4OverlayIgnoreDepth;
     private bool _pm4FlipAllObjectsY;
     private bool _showPm4PositionRefs;
@@ -1805,6 +1806,16 @@ public class WorldScene : ISceneRenderer
     /// the evidence that 0 is an absent value rather than a real placement height.
     /// </remarks>
     public bool ShowPm4PlacementZPlane { get => _showPm4PlacementZPlane; set => _showPm4PlacementZPlane = value; }
+
+    /// <summary>
+    /// Draw a placement-Z marker for EVERY placed object rather than only the selected one.
+    /// </summary>
+    /// <remarks>
+    /// Off by default and worth leaving off. The marker answers "does this object's recorded height
+    /// sit at its base", which is a question about one object; drawing a thousand at once produces a
+    /// field of identical cubes that answers nothing and hides the geometry underneath.
+    /// </remarks>
+    public bool ShowPm4PlacementZForAllObjects { get => _showPm4PlacementZForAllObjects; set => _showPm4PlacementZForAllObjects = value; }
     public bool Pm4OverlayIgnoreDepth { get => _pm4OverlayIgnoreDepth; set => _pm4OverlayIgnoreDepth = value; }
     public bool Pm4FlipAllObjectsY
     {
@@ -11258,11 +11269,23 @@ public class WorldScene : ISceneRenderer
                                 if (!ShouldRenderPm4Object(obj))
                                     continue;
 
-                                // Objects with no recorded height would all stack at world Z=0 -
-                                // thousands per tile, which drowns the display and shows nothing.
-                                // Their absence IS the finding; it does not need 3,000 boxes.
+                                // No recorded height means there is nothing to mark; those objects
+                                // would all stack at world Z=0 and say nothing.
                                 if (obj.Ck24 == 0)
                                     continue;
+
+                                // Follow the selection unless explicitly asked for all of them. The
+                                // marker answers a question about ONE object, and a thousand cubes
+                                // at once answers none of them while hiding the geometry.
+                                var thisKey = (tileEntry.Key.tileX, tileEntry.Key.tileY, obj.Ck24, obj.ObjectPartId);
+                                if (!_showPm4PlacementZForAllObjects)
+                                {
+                                    if (!_selectedPm4ObjectGroupKey.HasValue
+                                        || !IsPm4ObjectInGroup(_selectedPm4ObjectGroupKey.Value, thisKey))
+                                    {
+                                        continue;
+                                    }
+                                }
 
                                 var markerKey = (tileEntry.Key.tileX, tileEntry.Key.tileY, obj.Ck24, obj.ObjectPartId);
                                 Matrix4x4 objTransform = BuildPm4ObjectTransform(markerKey, applyMarkerTransform, markerTransform, out bool applyObj);

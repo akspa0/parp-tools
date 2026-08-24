@@ -163,11 +163,24 @@ public partial class ViewerApp
         if (ImGui.IsItemHovered())
         {
             ImGui.BeginTooltip();
-            ImGui.TextUnformatted("Small marker at each object's placement height.");
-            ImGui.TextUnformatted("Only the HEIGHT comes from the data; position is the object's centre.");
-            ImGui.TextUnformatted("It should sit at the base of the object.");
-            ImGui.TextUnformatted("Objects with no recorded height are skipped.");
+            ImGui.TextUnformatted("Marker at the SELECTED object's placement height.");
+            ImGui.TextUnformatted("It should sit at the base of that object.");
+            ImGui.TextUnformatted("Only the height comes from the data; position is the object's centre.");
             ImGui.EndTooltip();
+        }
+
+        if (showPlacementZ)
+        {
+            ImGui.SameLine();
+            bool allZ = _worldScene.ShowPm4PlacementZForAllObjects;
+            if (ImGui.Checkbox("all objects##Pm4PlacementZAll", ref allZ))
+                _worldScene.ShowPm4PlacementZForAllObjects = allZ;
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.BeginTooltip();
+                ImGui.TextUnformatted("Draws one for every placed object. Expect a field of cubes.");
+                ImGui.EndTooltip();
+            }
         }
 
         bool showPm4Refs = _worldScene.ShowPm4PositionRefs;
