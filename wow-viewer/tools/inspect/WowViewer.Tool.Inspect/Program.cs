@@ -6347,7 +6347,7 @@ static void RunPm4MshdDump(string[] args)
 	}
 
 	string dir = WowViewer.Core.PM4.Services.Pm4CoordinateService.ResolveMapDirectory(input);
-	Console.WriteLine("file,tileA,tileB,f00,f04,f08,msur,mslk,mscn,msvt,mspv,mprl,mprr,bytes,spanX,spanY,msvtX,msvtY,mspvX,mspvY,mscnX,mscnY");
+	Console.WriteLine("file,tileA,tileB,f00,f04,f08,msur,mslk,mscn,msvt,mspv,mprl,mprr,bytes,spanX,spanY,msvtX,msvtY,mspvX,mspvY,mscnX,mscnY,minX,maxX,minY,maxY");
 	foreach (string path in Directory.EnumerateFiles(dir, "*.pm4", SearchOption.TopDirectoryOnly).OrderBy(Path.GetFileName))
 	{
 		var doc = WowViewer.Core.PM4.Services.Pm4ResearchReader.ReadFile(path);
@@ -6395,7 +6395,9 @@ static void RunPm4MshdDump(string[] args)
 
 		Console.WriteLine($"{name},{a},{b},{k.Mshd.Field00},{k.Mshd.Field04},{k.Mshd.Field08}," +
 			$"{k.Msur.Count},{k.Mslk.Count},{k.Mscn.Count},{k.Msvt.Count},{k.Mspv.Count},{k.Mprl.Count},{k.Mprr.Count},{bytes}," +
-			$"{spanX:F3},{spanY:F3},{vx:F3},{vy:F3},{px:F3},{py:F3},{cx2:F3},{cy2:F3}");
+			$"{spanX:F3},{spanY:F3},{vx:F3},{vy:F3},{px:F3},{py:F3},{cx2:F3},{cy2:F3}," +
+			$"{(minX == float.MaxValue ? 0 : minX):F3},{(maxX == float.MinValue ? 0 : maxX):F3}," +
+			$"{(minY == float.MaxValue ? 0 : minY):F3},{(maxY == float.MinValue ? 0 : maxY):F3}");
 	}
 }
 
