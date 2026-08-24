@@ -7,6 +7,20 @@ figure it produced, so an editor can re-run it.
 (`6or_garrison_workshop_v3_snow`, WoD). Placement ground truth is the companion split `_obj0.adt`
 set. All figures measured 2026-08-23/24 through this project's canonical reader — no hand-parsing.
 
+**Provenance and dating.** These are **server-side** files: they never shipped to players and are not
+read by the game client. The PM4 corpus is understood to date from around September 2010, during the
+Cataclysm beta, and to have reached the public through the streaming beta client — which staged raw
+map data on disk and deleted it once assembly finished, with an interruption leaving part of it
+behind. That account is first-hand and second-hand testimony rather than anything verifiable from the
+files, and is recorded here only because the **dating** matters for reading them; nothing below
+depends on it. What the files themselves support is a 4.x-era origin: the companion ADTs are the
+Cataclysm split form, and the format version is consistent across all 616.
+
+Being server-side data explains a good deal of what follows. Nothing here is laid out for fast client
+consumption or for human editing — index streams are packed to tile exactly, per-record metadata is
+dense, and several fields carry more than one thing at a time. Fields that look malformed usually
+turn out to be a different reading rather than an error (see §1a).
+
 **Scope note**: this draft *corrects* two things the wiki currently states. Both corrections are
 measured, and both are called out explicitly rather than silently substituted.
 
@@ -52,9 +66,15 @@ The PM4 value is **constant across the corpus** — verified on files spanning a
 neither a size nor any content-derived quantity.
 
 Read consistently from byte 0, that is **PM4 = version 16**, **PD4 = version 48**. PM4's `0x30` high
-byte is **undecoded**; it should not be assigned a meaning yet. Note that 12304 resembles the real
-client build `4.0.1.12304` — this is a coincidence of digits and the word must not be read as a
-build number.
+byte is **undecoded**; it should not be assigned a meaning yet.
+
+12304 resembles the real client build `4.0.1.12304`, which is roughly contemporary with this corpus,
+so the build reading deserves a proper answer rather than dismissal. Constancy alone does **not**
+settle it — a build stamp would also be constant if every file came from one build, which here it
+plausibly did. What settles it is **PD4**: it carries **48**. No WoW build number is 48. A field that
+holds 48 in one file of the family cannot be a build stamp in another, so the word is a format
+version. The digit resemblance in PM4 is then a coincidence, but the reason is PD4, not the
+resemblance itself.
 
 ---
 
@@ -291,7 +311,7 @@ table is the honest accounting of the rest, so a reader can tell a result from a
 | `MPRL` | 6 further fields | UNKNOWN | |
 | `MPRR` | everything | UNKNOWN | structure only (§7) |
 | `MDSF` | both indices | MEASURED | 2,684 fits, 0 misses; links a surface to a destruction state |
-| `MDOS`, `MDBH`, `MDBI`, `MDBF` | | PARTIAL | destructible-building payload; `MDBF` holds filenames. Present on essentially one tile in this corpus, so treat as unrepresentative |
+| `MDOS`, `MDBH`, `MDBI`, `MDBF` | | PARTIAL | destructible-building payload; `MDBF` holds filenames. Present on essentially one tile in this corpus, so treat as unrepresentative. Note what `MDSF` + `MDOS` amount to together: a **per-surface destruction state**, i.e. a mechanism for swapping which surfaces are walkable as world state changes — the navmesh side of destructible buildings, which is era-appropriate for Cataclysm |
 | `MCRC` (PD4) | word | UNKNOWN | zero in the reference file |
 
 Counting fields rather than chunks, rather more is unknown than known. In particular **`MSHD`'s three
