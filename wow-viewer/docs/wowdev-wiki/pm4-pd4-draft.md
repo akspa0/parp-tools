@@ -341,7 +341,7 @@ table is the honest accounting of the rest, so a reader can tell a result from a
 | `MSLK` | `SystemFlag` | **MEASURED** | **constant 32768 (0x8000)** across 486,819 records - no information content |
 | `MSLK` | `_0x02` | **MEASURED** | **constant 0** - real padding |
 | `MSLK` | `_0x01` subtype | PARTIAL | enumerated, 19 values, 25% zero |
-| `MSLK` | `LinkId` | PARTIAL | 138 distinct over 486,819 records - too few to be an id, not an index |
+| `MSLK` | `LinkId` | **MEASURED** | **a tile address**: `0xFFFF0000 \| (tileY << 8) \| tileX`. High 16 bits are `0xFFFF` in 305/305 files. Names the tile a link's target lives in - 82.5% this tile, 17.5% an adjacent one, **0% any more distant tile** |
 | `MSVT` | positions | MEASURED | floor vertices |
 | `MSVI` | indices | MEASURED | 1,930,146 fits, 0 misses |
 | `MSUR` | `0x01`, `0x02`, `0x14`, `0x18`, `0x1C`, normal | MEASURED | see §3-§5 |
