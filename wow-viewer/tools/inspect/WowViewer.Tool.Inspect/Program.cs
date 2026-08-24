@@ -6375,6 +6375,23 @@ static void RunPm4MscnNature(string[] args)
 		return;
 	}
 
+	if (HasFlag(args, "--order"))
+	{
+		Pm4SpatialOrderReport o = Pm4MscnNatureAnalyzer.AnalyzeSpatialOrder(input);
+		Console.WriteLine("WowViewer.Tool.Inspect PM4 spatial-order test");
+		Console.WriteLine($"Input: {o.InputDirectory}  files={o.Files}");
+		Console.WriteLine();
+		Console.WriteLine("  stream            locality ratio   ascending X");
+		foreach (Pm4SpatialOrderResult x in new[] { o.Mscn, o.Msvt, o.Mspv })
+			Console.WriteLine($"  {x.Name,-18} {x.LocalityRatio,12:F4}   {x.AscendingXFraction,10:P2}");
+		Console.WriteLine();
+		Console.WriteLine("  Locality ratio = mean distance between CONSECUTIVE entries divided by the");
+		Console.WriteLine("  mean distance between random pairs in the same file. An acceleration");
+		Console.WriteLine("  structure stores points in spatial order and scores far below 1; a list");
+		Console.WriteLine("  accumulated while walking objects scores like the mesh streams beside it.");
+		return;
+	}
+
 	if (HasFlag(args, "--grid"))
 	{
 		Pm4GridSnapReport g = Pm4MscnNatureAnalyzer.AnalyzeGridSnap(input);

@@ -128,6 +128,90 @@ public static class Pm4MscnNatureAnalyzer
         return r <= eps ? 1 : 0;
     }
 
+    /// <summary>
+    /// Tests whether a point stream is stored in SPATIAL ORDER, which is what an acceleration
+    /// structure looks like and what an append-as-you-go list does not.
+    /// </summary>
+    /// <remarks>
+    /// If MSCN is a lookup map for steering a query to the right neighbourhood, consecutive entries
+    /// should be spatially close - tree traversal order, Morton order or a grid sweep all produce
+    /// that. If it is simply accumulated while walking objects, consecutive entries are close only
+    /// as far as the objects were, which the mesh streams share. So MSVT and MSPV are measured
+    /// identically as controls: the claim needs MSCN to be MORE ordered than they are, not merely
+    /// ordered.
+    ///
+    /// The baseline is the mean distance between randomly chosen pairs from the same file, using a
+    /// fixed seed so the figure is reproducible. Locality is reported as the ratio of consecutive
+    /// distance to that baseline - lower means more spatially ordered.
+    /// </remarks>
+    public static Pm4SpatialOrderReport AnalyzeSpatialOrder(string inputDirectory, int maxFiles = 80)
+    {
+        string resolved = Pm4CoordinateService.ResolveMapDirectory(inputDirectory);
+        var rng = new Random(20260824);
+        var mscn = new OrderAccumulator("MSCN");
+        var msvt = new OrderAccumulator("MSVT (control)");
+        var mspv = new OrderAccumulator("MSPV (control)");
+        int files = 0;
+
+        foreach (string path in Directory
+            .EnumerateFiles(resolved, "*.pm4", SearchOption.TopDirectoryOnly)
+            .OrderBy(Path.GetFileName))
+        {
+            if (files >= maxFiles)
+                break;
+
+            Pm4KnownChunkSet c = Pm4ResearchReader.ReadFile(path).KnownChunks;
+            if (c.Mscn.Count < 64)
+                continue;
+
+            files++;
+            mscn.Observe(c.Mscn, rng);
+            msvt.Observe(c.Msvt, rng);
+            mspv.Observe(c.Mspv, rng);
+        }
+
+        return new Pm4SpatialOrderReport(resolved, files, mscn.ToResult(), msvt.ToResult(), mspv.ToResult());
+    }
+
+    private sealed class OrderAccumulator(string name)
+    {
+        private readonly List<double> _locality = [];
+        private readonly List<double> _monotoneX = [];
+        public string Name { get; } = name;
+
+        public void Observe(IReadOnlyList<System.Numerics.Vector3> pts, Random rng)
+        {
+            if (pts.Count < 64)
+                return;
+
+            double consecutive = 0;
+            int inc = 0;
+            for (int i = 0; i + 1 < pts.Count; i++)
+            {
+                consecutive += Vector3.Distance(pts[i], pts[i + 1]);
+                if (pts[i + 1].X >= pts[i].X)
+                    inc++;
+            }
+            consecutive /= pts.Count - 1;
+
+            double random = 0;
+            const int samples = 4000;
+            for (int i = 0; i < samples; i++)
+                random += Vector3.Distance(pts[rng.Next(pts.Count)], pts[rng.Next(pts.Count)]);
+            random /= samples;
+
+            if (random > 1e-6)
+                _locality.Add(consecutive / random);
+            _monotoneX.Add((double)inc / (pts.Count - 1));
+        }
+
+        public Pm4SpatialOrderResult ToResult() => new(
+            Name,
+            _locality.Count,
+            _locality.Count == 0 ? 0 : _locality.Average(),
+            _monotoneX.Count == 0 ? 0 : _monotoneX.Average());
+    }
+
     private static Dictionary<(int, int, int), List<int>> BuildGrid(IReadOnlyList<Vector3> pts)
     {
         var grid = new Dictionary<(int, int, int), List<int>>();
@@ -194,3 +278,12 @@ public sealed record Pm4GridSnapReport(
     long MsvtPoints,
     float Epsilon,
     IReadOnlyList<Pm4GridSnapRow> Rows);
+
+public sealed record Pm4SpatialOrderResult(string Name, int Files, double LocalityRatio, double AscendingXFraction);
+
+public sealed record Pm4SpatialOrderReport(
+    string InputDirectory,
+    int Files,
+    Pm4SpatialOrderResult Mscn,
+    Pm4SpatialOrderResult Msvt,
+    Pm4SpatialOrderResult Mspv);

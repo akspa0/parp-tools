@@ -227,8 +227,20 @@ by coincidence. Dissecting the 6,201 misses settles it — they are **5,158 dist
 and **50.25% more than 256 past it**. A genuine index overflows rarely and in a tight band; this is
 broad scatter, the signature of a field being read against the wrong chunk.
 
-So MSCN currently has **no known index consumer at all**. Whatever reaches it does so by a route not
-yet found, and that is the central open question about this chunk.
+So MSCN currently has **no known index consumer at all**, and every candidate inside the file has now
+been eliminated. The reading this most supports is that **the consumer is external** — these are
+server-side files, and nothing requires the thing that reads MSCN to be another chunk.
+
+One version of that is testable and does **not** hold: MSCN is *not stored as a spatial acceleration
+structure*. Measuring the mean distance between consecutive entries against the mean distance between
+random pairs in the same file gives MSCN **0.1578**, against **0.1088** for `MSVT` and **0.0779** for
+`MSPV`. MSCN is spatially local, but *less* so than both mesh streams — and a tree, Morton or grid
+ordering would be markedly *more* ordered than a mesh accumulated object by object, not less. Nor is
+it axis-sorted (50.77% ascending X, i.e. chance; `MSPV` by contrast is 73.01%). MSCN is written in
+the same object-walk order as the geometry.
+
+That distinction is worth keeping separate: the data may still *be* a lookup map that a consumer
+indexes when it loads, but it is not shipped pre-ordered as one.
 
 (The same dissection disposes of two other supposed relations. `MSLK.RefIndex` read as an index into
 `MSUR` misses 4,553 times across **2,996 distinct values**, 86.65% of them more than 256 past the
