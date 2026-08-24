@@ -299,6 +299,23 @@ a per-entry list for any known chunk. Value range tests are weak and non-discrim
 non-self domain `MSVI` at 67.6% / 79.0%) and are **bound tests only** — a value in range never proves
 ownership.
 
+## 6a. The three point streams are not copies of each other
+
+`MSVT`, `MSPV` and `MSCN` are near-identical in size — 373,517 / 368,323 / 387,163 over 60 files,
+within 5% — which invites reading them as parallel copies of one geometry carrying different
+attributes. Coincidence at 0.25 units says otherwise:
+
+| | | |
+|---|---|---|
+| MSVT on MSPV | 32.58% | MSPV on MSVT **43.15%** |
+| MSVT on MSCN | 25.05% | MSCN on MSVT 15.76% |
+| MSPV on MSCN | 19.46% | MSCN on MSPV 11.84% |
+
+Copies would share nearly all their points; unrelated sets almost none. The measured 12–43% is
+structural sharing. The strongest pair follows from §4: a wall quad stands on a blocked adjacency
+edge between two floor surfaces, so **43% of wall vertices land on floor vertices** — they share the
+junction line by construction rather than by duplication.
+
 ## 7a. State of knowledge, field by field
 
 Most of this format is still undecoded. The sections above describe the parts that are measured; this

@@ -6520,6 +6520,23 @@ static void RunPm4MscnNature(string[] args)
 		return;
 	}
 
+	if (HasFlag(args, "--overlap"))
+	{
+		Pm4StreamOverlapReport o = Pm4MscnNatureAnalyzer.AnalyzeStreamOverlap(input);
+		Console.WriteLine("WowViewer.Tool.Inspect PM4 stream-overlap test");
+		Console.WriteLine($"Input: {o.InputDirectory}  files={o.Files}");
+		Console.WriteLine($"  MSVT={o.MsvtPoints}  MSPV={o.MspvPoints}  MSCN={o.MscnPoints}");
+		Console.WriteLine();
+		Console.WriteLine("  Share of one stream's points coinciding with another (0.25 units):");
+		Console.WriteLine($"    MSVT on MSPV = {o.MsvtOnMspv,7:P2}      MSPV on MSVT = {o.MspvOnMsvt,7:P2}");
+		Console.WriteLine($"    MSVT on MSCN = {o.MsvtOnMscn,7:P2}      MSCN on MSVT = {o.MscnOnMsvt,7:P2}");
+		Console.WriteLine($"    MSPV on MSCN = {o.MspvOnMscn,7:P2}      MSCN on MSPV = {o.MscnOnMspv,7:P2}");
+		Console.WriteLine();
+		Console.WriteLine("  Parallel COPIES of one geometry would share most of their points.");
+		Console.WriteLine("  Distinct roles touch only where they meet.");
+		return;
+	}
+
 	if (HasFlag(args, "--order"))
 	{
 		Pm4SpatialOrderReport o = Pm4MscnNatureAnalyzer.AnalyzeSpatialOrder(input);

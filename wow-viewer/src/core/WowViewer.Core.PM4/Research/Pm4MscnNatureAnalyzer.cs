@@ -212,6 +212,69 @@ public static class Pm4MscnNatureAnalyzer
             _monotoneX.Count == 0 ? 0 : _monotoneX.Average());
     }
 
+    /// <summary>
+    /// Pairwise coincidence between the three point streams, testing whether PM4 carries parallel
+    /// COPIES of one geometry with different attributes attached, or three distinct point sets.
+    /// </summary>
+    /// <remarks>
+    /// The streams are comparable in size and share a frame, which is what a "two or three copies
+    /// that interchange properties" reading would predict. Copies would share most of their points.
+    /// Distinct roles - a floor mesh, a wall mesh, a node graph - would touch only where they meet.
+    /// The rate separates those, and it is reported in BOTH directions because the streams differ in
+    /// size and a one-way percentage would hide that.
+    /// </remarks>
+    public static Pm4StreamOverlapReport AnalyzeStreamOverlap(string inputDirectory, int maxFiles = 60)
+    {
+        string resolved = Pm4CoordinateService.ResolveMapDirectory(inputDirectory);
+        long msvt = 0, mspv = 0, mscn = 0;
+        long vtInPv = 0, pvInVt = 0, vtInCn = 0, cnInVt = 0, pvInCn = 0, cnInPv = 0;
+        int files = 0;
+
+        foreach (string path in Directory
+            .EnumerateFiles(resolved, "*.pm4", SearchOption.TopDirectoryOnly)
+            .OrderBy(Path.GetFileName))
+        {
+            if (files >= maxFiles)
+                break;
+
+            Pm4KnownChunkSet c = Pm4ResearchReader.ReadFile(path).KnownChunks;
+            if (c.Msvt.Count == 0 || c.Mspv.Count == 0)
+                continue;
+
+            files++;
+            msvt += c.Msvt.Count; mspv += c.Mspv.Count; mscn += c.Mscn.Count;
+
+            var gVt = BuildGrid(c.Msvt);
+            var gPv = BuildGrid(c.Mspv);
+            var gCn = BuildGrid(c.Mscn);
+
+            foreach (Vector3 p in c.Msvt)
+            {
+                if (NearAny(gPv, c.Mspv, p)) vtInPv++;
+                if (c.Mscn.Count > 0 && NearAny(gCn, c.Mscn, p)) vtInCn++;
+            }
+            foreach (Vector3 p in c.Mspv)
+            {
+                if (NearAny(gVt, c.Msvt, p)) pvInVt++;
+                if (c.Mscn.Count > 0 && NearAny(gCn, c.Mscn, p)) pvInCn++;
+            }
+            foreach (Vector3 p in c.Mscn)
+            {
+                if (NearAny(gVt, c.Msvt, p)) cnInVt++;
+                if (NearAny(gPv, c.Mspv, p)) cnInPv++;
+            }
+        }
+
+        return new Pm4StreamOverlapReport(
+            resolved, files, msvt, mspv, mscn,
+            msvt == 0 ? 0 : (double)vtInPv / msvt,
+            mspv == 0 ? 0 : (double)pvInVt / mspv,
+            msvt == 0 ? 0 : (double)vtInCn / msvt,
+            mscn == 0 ? 0 : (double)cnInVt / mscn,
+            mspv == 0 ? 0 : (double)pvInCn / mspv,
+            mscn == 0 ? 0 : (double)cnInPv / mscn);
+    }
+
     private static Dictionary<(int, int, int), List<int>> BuildGrid(IReadOnlyList<Vector3> pts)
     {
         var grid = new Dictionary<(int, int, int), List<int>>();
@@ -287,3 +350,16 @@ public sealed record Pm4SpatialOrderReport(
     Pm4SpatialOrderResult Mscn,
     Pm4SpatialOrderResult Msvt,
     Pm4SpatialOrderResult Mspv);
+
+public sealed record Pm4StreamOverlapReport(
+    string InputDirectory,
+    int Files,
+    long MsvtPoints,
+    long MspvPoints,
+    long MscnPoints,
+    double MsvtOnMspv,
+    double MspvOnMsvt,
+    double MsvtOnMscn,
+    double MscnOnMsvt,
+    double MspvOnMscn,
+    double MscnOnMspv);
