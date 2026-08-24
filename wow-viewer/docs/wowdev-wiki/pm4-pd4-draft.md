@@ -31,6 +31,18 @@ object-local frame.
 
 ---
 
+## 1a. How to read "misses" in these chunks
+
+A recurring pattern across PM4: a relationship that looks like a partly-broken index is usually a
+**mixed population** rather than a failing one. `MPRR` interleaves `0xFFFF` sentinels with its data.
+`MSUR._0x1C` looked like a key with odd byte structure until it was read as a float. `MSUR._0x18`
+looked like a partial index into one chunk until it was read as a window into another, where it
+partitions the stream exactly.
+
+So when a bounds test reports "fits N, misses M", the M are worth characterising before they are
+called errors — they are often sentinels, out-of-band markers, or a second record kind sharing the
+stream. Several of the open questions below are stated as populations for exactly this reason.
+
 ## 2. `MVER` is a format version, not a build
 
 The PM4 `MVER` payload is `10 30 00 00` (12304 / `0x3010`); PD4 is `30 00 00 00` (48 / `0x0030`).
@@ -162,32 +174,57 @@ authored Z.
 
 ---
 
-## 6. `MSCN` is not normals
+## 6. `MSCN` — a per-object node network, shared between objects
 
-**0 of 1,342,410** points have unit length. Lengths run 238.7 – 44,773.7, mean 26,566.9 — the
-magnitudes of distance-from-origin coordinates, not direction vectors. `MSCN` holds **positions**.
+`MSCN` holds **positions**, in the same coordinate frame as `MSVT` and `MSPV` (all three share axis
+order and overlapping ranges; `MPRL` is the only permuted chunk in the file). The viewer draws them
+at the correct object locations using the plain canonical transform.
 
-With the `_0x18 → MSCN` reading eliminated (§3.1), `MSCN` currently has **no decoded index
-relationship**. Its role is open.
+**It is not normals.** 0 of 1,342,410 points have unit length; lengths run 238.7 – 44,773.7, mean
+26,566.9 — coordinate magnitudes, not direction vectors. A reading of MSCN as normals, or as ray
+directions for navmesh generation, is eliminated.
 
----
+**It is per-object.** 1,886 of 1,895 object groups carry MSCN — only 9 do not.
 
-## 7. `MPRR` — undecoded, but structurally constrained
+**Objects share MSCN nodes with each other.** **1,214** of those 1,886 groups (64.4%) reference MSCN
+nodes that another group also references. MSCN is therefore not a private per-object vertex list; it
+is a **node network the objects index into**, and node reuse is where objects meet.
+
+**MSCN frequently extends beyond the object's own mesh.** Comparing each group's MSCN bounds against
+its `MSVT` bounds: **1,162 fit inside, 724 do not**. Those 724 are objects whose node set reaches
+outside their own surface geometry — the expected shape for connective or boundary nodes, and the
+population to look at for objects spanning more than one tile. (The XY-swapped variant of the same
+test scores 10 / 1,876 and is eliminated, so the frame is not in question.)
+
+Prior art describes MSCN as the per-object **exterior boundary**, which is consistent with all of the
+above and is not contradicted by anything measured here.
+
+**What changed and what did not.** §3.1 eliminates `MSUR._0x18` as a *window* into MSCN — the windows
+tile `MSLK` exactly and overrun MSCN 6,240 times. That does **not** eliminate a per-surface *single
+index* into MSCN, which is a separate relation and still measures 511,891 fits / 6,201 misses. Both
+can be true: `_0x18` is a window start in `MSLK`, and MSCN is reached by some other route. Which
+route is the open question.
+
+Open: which stream indexes MSCN, and what a shared node means precisely (a portal, a weld point, a
+tile seam).
+
+## 7. `MPRR` — sentinel-delimited range records
 
 `MPRR` is a flat array of `uint16` pairs delimited by a sentinel (`Value1 == 0xFFFF`): 13,978,231
-non-sentinel entries in **3,171,410** runs across 502 files.
+non-sentinel entries in **3,171,410** runs across 502 files. The working description is **range
+records** — runs that delimit a span of something — and the structure supports that shape even though
+the referent is undecoded.
 
-**99.9843% of runs have length ≡ 3 (mod 4)** — measured over all **246** distinct run lengths, max
-5019. Residues 0 and 2 are **empty**; the only 497 exceptions are residue 1. So a run plus its
-terminating sentinel always occupies a whole number of 4-entry (16-byte) blocks, and 75.5% are the
-minimal single block.
+**Runs are block-quantised.** **99.9843% of runs have length ≡ 3 (mod 4)**, measured over all **246**
+distinct run lengths, max 5019. Residues 0 and 2 are **empty**; the only 497 exceptions are residue 1.
+A run plus its terminating sentinel therefore always occupies a whole number of 4-entry (16-byte)
+blocks, and 75.5% are the minimal single block (3 data entries + 1 sentinel). **Any candidate reading
+must reproduce that quantisation.**
 
-Any candidate reading must satisfy that quantisation. Ruled out so far: the run count matches **no**
-chunk's entry count (best 4/502 = 0.8%), so it is not a per-entry list for any known chunk. Value
-range tests are weak and non-discriminating (best non-self domain `MSVI` at 67.6% / 79.0%) and are
-**bound tests only** — a value in range does not prove ownership.
-
----
+Eliminated so far: the run count matches **no** chunk's entry count (best 4/502 = 0.8%), so it is not
+a per-entry list for any known chunk. Value range tests are weak and non-discriminating (best
+non-self domain `MSVI` at 67.6% / 79.0%) and are **bound tests only** — a value in range never proves
+ownership.
 
 ## 8. Reproducing these figures
 
@@ -205,7 +242,10 @@ pm4 merge-bias         --input <dir>                  # §6
 ## 9. Open questions
 
 - `MSUR._0x00`, and `MSUR._0x10`'s exact convention.
-- `MSCN`'s role, now that its only claimed index consumer is gone.
+- Which stream indexes `MSCN`, and what a shared node denotes (portal, weld, tile seam). Its role is
+  partly known - per-object, shared between 1,214 groups, often reaching outside the owning mesh -
+  and it is the 724 groups whose nodes exceed their own mesh bounds that should be characterised
+  first.
 - `MPRR` entirely, under the 4n+3 constraint.
 - `MVER`'s `0x30` high byte on PM4.
 - The 34.4% of `MSLK` entries with no adjacency component link, and the 1.24% of edges that do not
