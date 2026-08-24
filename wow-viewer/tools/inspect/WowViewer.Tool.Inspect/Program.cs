@@ -2219,6 +2219,9 @@ static void RunPm4(string[] args)
 		case "field-sweep":
 			RunPm4FieldSweep(tail);
 			break;
+		case "vertical-stacks":
+			RunPm4VerticalStacks(tail);
+			break;
 		case "bounds-audit":
 			RunPm4BoundsAudit(tail);
 			break;
@@ -6343,6 +6346,32 @@ static void RunPm4ConnectiveGeometry(string[] args)
 	}
 
 	PrintPm4ConnectiveGeometryReport(report);
+}
+
+static void RunPm4VerticalStacks(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 file or directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4VerticalStackReport r = Pm4VerticalStackAnalyzer.Analyze(input);
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 vertical-stack test");
+	Console.WriteLine($"Input: {r.Input}  files={r.FilesScanned}");
+	Console.WriteLine($"  objects with a placement height : {r.ObjectsTotal}");
+	Console.WriteLine($"  stacks (same footprint, different height) : {r.Stacks}");
+	Console.WriteLine($"  objects belonging to a stack    : {r.ObjectsInStacks} ({r.ObjectsInStacksFraction:P2})");
+	Console.WriteLine();
+	Console.WriteLine("  stack size histogram:");
+	foreach (Pm4ValueFrequency v in r.StackSizes)
+		Console.WriteLine($"    {v.Value} members: {v.Count} stacks");
+	Console.WriteLine();
+	Console.WriteLine("  samples:");
+	foreach (Pm4VerticalStackSample x in r.Samples)
+		Console.WriteLine($"    {x.File,-22} {x.Members} members  Z {x.MinZ:F2}..{x.MaxZ:F2}  spread {x.ZSpread:F2}   [{x.Heights}]");
 }
 
 static void RunPm4FieldSweep(string[] args)
