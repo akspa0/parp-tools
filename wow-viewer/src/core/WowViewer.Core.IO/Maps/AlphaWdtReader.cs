@@ -218,6 +218,11 @@ public static class AlphaWdtReader
         bool[,] holes = new bool[16, 16];
         ushort[,] holeFullMasks = new ushort[16, 16];
         int[,] mcnkFlags16 = new int[16, 16];
+
+        // Area ids survive the alpha format but were never read back, so a tile round-tripped through
+        // an alpha WDT lost them silently. Alpha keeps areaid at header 0x38, one slot along from LK,
+        // because it carries an extra offset/size pair earlier in the header.
+        int[,] areaIds = new int[16, 16];
         List<AlphaLiquidChunk> liquidChunks = [];
         List<AlphaModelPlacement> modelPlacements = [];
         List<AlphaWorldModelPlacement> worldModelPlacements = [];
@@ -232,7 +237,7 @@ public static class AlphaWdtReader
             activeChunkCount++;
 
             if (!TryParseMcnk(container, mcnkOffset, textureNameList,
-                    heightmap, alphaPack, normalXyz, alphaPackShadow, texIds, layerMask, holes, holeFullMasks, mcnkFlags16, liquidChunks,
+                    heightmap, alphaPack, normalXyz, alphaPackShadow, texIds, layerMask, holes, holeFullMasks, mcnkFlags16, areaIds, liquidChunks,
                     ref hasHeight, ref hasAlpha, ref hasNormals, ref hasShadow, ref totalMcshBytes))
                 continue;
         }
@@ -292,7 +297,8 @@ public static class AlphaWdtReader
             mcshShadowMask1024: hasShadow ? alphaPackShadow : null,
             holeFullMasks: holeFullMasks,
             rawChunks: rawChunks,
-            mcnkFlags16: mcnkFlags16);
+            mcnkFlags16: mcnkFlags16,
+            areaIds: areaIds);
 
         return true;
     }
@@ -446,6 +452,7 @@ public static class AlphaWdtReader
         float[,] heightmap, float[,,] alphaPack, float[,,] normalXyz, float[,] alphaPackShadow,
         int[,,] texIds, bool[,,] layerMask, bool[,] holes, ushort[,] holeFullMasks,
         int[,] mcnkFlags16,
+        int[,] areaIds,
         List<AlphaLiquidChunk> liquidChunks, ref bool hasHeight, ref bool hasAlpha,
         ref bool hasNormals, ref bool hasShadow, ref int totalMcshBytes)
     {
@@ -476,6 +483,9 @@ public static class AlphaWdtReader
         // Previously only liquid chunks retained these (via AlphaLiquidChunk.McnkFlags), leaving
         // the mcnk_flags_16 dataset signal permanently zero-filled for Alpha builds (Spec 112 T005).
         mcnkFlags16[indexY, indexX] = (int)flags;
+
+        // Indexed [x, y], matching how AlphaTileData reads it back out when building LK chunks.
+        areaIds[indexX, indexY] = BitConverter.ToInt32(container, headerOffset + 0x38);
 
         int cx = indexX, cy = indexY;
         int chunkDataBase = mcnkOffset + ChunkHeaderSize + McnkHeaderSize;

@@ -42,6 +42,9 @@ public static class LkToAlphaConverter
         bool[,,] layerMask = new bool[16, 16, 4];
         bool[,] holes = new bool[16, 16];
         int[,] areaIds = new int[16, 16];
+
+        // Indexed [y, x] to match how AlphaWdtReader fills it and how AlphaTileData exposes it.
+        int[,] mcnkFlags16 = new int[16, 16];
         ushort[,] holeFullMasks = new ushort[16, 16];
         float[,,]? mccvRgb = new float[257, 257, 3];
         byte[,,]? mclvLighting = new byte[257, 257, 4];
@@ -76,6 +79,7 @@ public static class LkToAlphaConverter
                 areaIds[cx, cy] = areaIdMapper is null
                     ? chunk.AreaId
                     : areaIdMapper.MapAreaIdToAlpha(chunk.AreaId, sourceMapDirectory);
+                mcnkFlags16[cy, cx] = chunk.Flags;
 
                 if (chunk.MccvColors is { Length: >= 580 })
                 {
@@ -165,6 +169,10 @@ public static class LkToAlphaConverter
             mcshShadowMask256: shadowMask256,
             mcshShadowMask1024: hasShadow ? shadowMask1024 : null,
             areaIds: areaIds,
+            // Carry every chunk's MCNK flags, not just the liquid ones. Previously flags reached the
+            // alpha side only through a liquid chunk, so a bit like 0x40 (has_mccv) on a dry chunk had
+            // nowhere to travel and was silently dropped on the way out.
+            mcnkFlags16: mcnkFlags16,
             mfboFlightBounds: adt.MfboFlightBounds,
             mccvRgb: hasMccv ? mccvRgb : null,
             mclvLightingBytes: hasMclv ? mclvLighting : null,

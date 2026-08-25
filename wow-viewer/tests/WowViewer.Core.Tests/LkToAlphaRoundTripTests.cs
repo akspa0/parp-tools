@@ -336,7 +336,9 @@ public sealed class LkToAlphaRoundTripTests
             Assert.NotNull(alphaRoundTrip.AreaIds);
             Assert.Equal(500, alphaRoundTrip.AreaIds![2, 1]);
 
-            LkAdtData lkRoundTrip = AlphaToLkConverter.ConvertTile(alphaRoundTrip, 0, 0);
+            // The mapper built above was never handed to the converter, so this asserted a crosswalk
+            // the code was never given. AlphaToLkConverter now takes one, mirroring LkToAlphaConverter.
+            LkAdtData lkRoundTrip = AlphaToLkConverter.ConvertTile(alphaRoundTrip, 0, 0, mapper);
             LkMcnkData roundTripChunk = lkRoundTrip.Chunks[(1 * 16) + 2];
 
             Assert.Equal(77, roundTripChunk.AreaId);

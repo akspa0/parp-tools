@@ -191,6 +191,13 @@ public static class AlphaWdtWriter
         uint flags = liquidChunk is not null ? NormalizeAlphaLiquidFlags(liquidChunk.McnkFlags) : 0u;
         if (mcshRaw.Length > 0) flags |= 0x01;
 
+        // Flags used to arrive only via a liquid chunk, so anything set on a dry chunk - 0x40 for
+        // vertex colours being the obvious one - had no route out and vanished. Preserve the bits the
+        // tile carries, minus the liquid and shadow bits that are derived above from the actual
+        // payload rather than trusted from the source.
+        if (tile.McnkFlags16 != null && cy < tile.McnkFlags16.GetLength(0) && cx < tile.McnkFlags16.GetLength(1))
+            flags |= (uint)tile.McnkFlags16[cy, cx] & ~0x3Fu;
+
         float radius = CalculateRadius(heights);
 
         int chunkDataSize = cursor;
@@ -217,7 +224,14 @@ public static class AlphaWdtWriter
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x2C), mcalRaw.Length);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x30), mcshRaw.Length > 0 ? offsShadow : 0);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x34), mcshRaw.Length);
-        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x38), 0);
+        // 0x38 is areaid. This was hardcoded to zero, so every tile written through an alpha WDT came
+        // back with its area ids erased - the format carries the field, nothing was putting it there.
+        int areaId = tile.AreaIds != null
+            && cx < tile.AreaIds.GetLength(0)
+            && cy < tile.AreaIds.GetLength(1)
+                ? tile.AreaIds[cx, cy]
+                : 0;
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x38), areaId);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x3C), nMapObjRefs);
         ushort holeMaskValue = 0;
         if (tile.HoleFullMasks != null && cx < tile.HoleFullMasks.GetLength(0) && cy < tile.HoleFullMasks.GetLength(1))
@@ -596,6 +610,13 @@ public static class AlphaWdtWriter
                 continue;
             }
 
+            // Nothing left to drop, so try moving a doodad reference to a neighbouring chunk instead.
+            // Trimming only ever considered WMO refs, which means a chunk carrying a dense cluster of
+            // doodads and no WMOs had no way to shed anything and simply threw. Reassigning ownership
+            // to an adjacent chunk keeps the placement in the tile - the alternative is losing it.
+            if (TryReassignDoodadToNeighbour(chunkIndex, cx, cy, refsByChunk, fixedPayloadSizesByChunk))
+                continue;
+
             break;
         }
 
@@ -605,6 +626,61 @@ public static class AlphaWdtWriter
             throw new InvalidDataException(
                 $"Alpha MCNK ({tileX},{tileY}) chunk ({cx},{cy}) payload size {payloadSize} exceeds the client limit {AlphaClientMaxMcnkPayloadSize - 1}. Doodads={placementRefs.DoodadIndices.Count}, WMOs={placementRefs.MapObjIndices.Count}.");
         }
+    }
+
+    /// <summary>
+    /// Hands one doodad reference from an over-budget chunk to an adjacent chunk that has room.
+    /// </summary>
+    /// <remarks>
+    /// The alpha client caps an MCNK payload, and a chunk holding a tight cluster of doodads can
+    /// exceed it on references alone. The reference says which chunk OWNS the placement, not where the
+    /// model stands, so moving it to a neighbour changes bookkeeping rather than the world - and the
+    /// neighbour is by definition the adjacent 33-yard cell, so the doodad is still found by anything
+    /// searching the area.
+    ///
+    /// <para>Neighbours are tried nearest-first and the move only happens if the receiving chunk stays
+    /// under budget afterwards, so this cannot push the problem sideways into another overflow. Returns
+    /// false when no neighbour can take one, which leaves the caller to fail loudly rather than
+    /// silently drop a placement.</para>
+    /// </remarks>
+    private static bool TryReassignDoodadToNeighbour(
+        int chunkIndex,
+        int cx,
+        int cy,
+        AlphaPlacementRefs[] refsByChunk,
+        int[] fixedPayloadSizesByChunk)
+    {
+        AlphaPlacementRefs source = refsByChunk[chunkIndex];
+        if (source.DoodadIndices.Count == 0)
+            return false;
+
+        ReadOnlySpan<(int Dx, int Dy)> neighbours =
+        [
+            (1, 0), (0, 1), (-1, 0), (0, -1),
+            (1, 1), (-1, 1), (1, -1), (-1, -1),
+        ];
+
+        foreach ((int dx, int dy) in neighbours)
+        {
+            int nx = cx + dx, ny = cy + dy;
+            if ((uint)nx >= 16 || (uint)ny >= 16)
+                continue;
+
+            int neighbourIndex = (ny * 16) + nx;
+            AlphaPlacementRefs target = refsByChunk[neighbourIndex];
+
+            int projected = EstimateMcnkPayloadSize(fixedPayloadSizesByChunk[neighbourIndex], target) + sizeof(uint);
+            if (projected >= AlphaClientMaxMcnkPayloadSize)
+                continue;
+
+            int last = source.DoodadIndices.Count - 1;
+            int placementIndex = source.DoodadIndices[last];
+            source.DoodadIndices.RemoveAt(last);
+            target.DoodadIndices.Add(placementIndex);
+            return true;
+        }
+
+        return false;
     }
 
     private static int[] BuildFixedPayloadSizesByChunk(AlphaTileData tile)

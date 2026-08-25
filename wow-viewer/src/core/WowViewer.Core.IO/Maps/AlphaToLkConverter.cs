@@ -1,4 +1,5 @@
 using System.Numerics;
+using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Maps;
@@ -104,7 +105,12 @@ public static class AlphaToLkConverter
         }
     }
 
-    public static LkAdtData ConvertTile(AlphaTileData tile, int tileX, int tileY)
+    /// <param name="areaIdMapper">
+    /// Crosswalk from alpha area ids to LK ones. Optional, and when omitted the raw alpha id is kept.
+    /// Mirrors <see cref="LkToAlphaConverter.ConvertTile"/>, which has always accepted one for the
+    /// outbound trip - without the same on the way back a round trip could not reverse the mapping.
+    /// </param>
+    public static LkAdtData ConvertTile(AlphaTileData tile, int tileX, int tileY, AreaIdMapper? areaIdMapper = null)
     {
         ArgumentNullException.ThrowIfNull(tile);
 
@@ -134,7 +140,7 @@ public static class AlphaToLkConverter
         {
             for (int cx = 0; cx < ChunksPerTile; cx++)
             {
-                chunks.Add(BuildChunkData(tile, cx, cy, tileX, tileY, textureNames, modelPlacements, worldModelPlacements));
+                chunks.Add(BuildChunkData(tile, cx, cy, tileX, tileY, textureNames, modelPlacements, worldModelPlacements, areaIdMapper));
             }
         }
 
@@ -158,7 +164,8 @@ public static class AlphaToLkConverter
         AlphaTileData tile, int cx, int cy, int tileX, int tileY,
         List<string> textureNames,
         List<LkMddfEntry> modelPlacements,
-        List<LkModfEntry> worldModelPlacements)
+        List<LkModfEntry> worldModelPlacements,
+        AreaIdMapper? areaIdMapper)
     {
         int chunkAlphaSourceSize = tile.McalAlphaPack != null
             ? tile.McalAlphaPack.GetLength(0) / 16
@@ -191,9 +198,22 @@ public static class AlphaToLkConverter
         if (shadowMap != null)
             mcnkFlags |= 0x01u;
 
-        int areaId = tile.AreaIds != null && cy < tile.AreaIds.GetLength(0) && cx < tile.AreaIds.GetLength(1)
-            ? tile.AreaIds[cy, cx]
+        // Bits the alpha header carried that are not re-derived above. Liquid and shadow come from the
+        // payload actually present, so only the remainder is taken from the stored flags.
+        if (tile.McnkFlags16 != null && cy < tile.McnkFlags16.GetLength(0) && cx < tile.McnkFlags16.GetLength(1))
+            mcnkFlags |= (uint)tile.McnkFlags16[cy, cx] & ~0x3Fu;
+
+        // Indexed [cx, cy]. This read them [cy, cx], transposed against every other user of the array
+        // - AlphaTileData, LkToAlphaConverter and AlphaWdtWriter all index [x, y] - so a chunk picked
+        // up its neighbour's area id, and only chunks on the diagonal came out right.
+        int rawAreaId = tile.AreaIds != null && cx < tile.AreaIds.GetLength(0) && cy < tile.AreaIds.GetLength(1)
+            ? tile.AreaIds[cx, cy]
             : 0;
+
+        // Alpha and LK number their areas differently, so a crosswalk is needed to carry one to the
+        // other. LkToAlphaConverter has always taken a mapper for the outbound trip; this direction
+        // did not, which made the return leg unable to reverse it.
+        int areaId = areaIdMapper is null ? rawAreaId : areaIdMapper.MapAreaId(rawAreaId);
 
         int nLayers = 0;
         for (int l = 0; l < 4; l++)
