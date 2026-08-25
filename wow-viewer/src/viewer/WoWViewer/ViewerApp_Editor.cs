@@ -119,8 +119,9 @@ public partial class ViewerApp
 
         ImGui.Separator();
 
-        // PM4/Museum reconciliation (Spec 176 Phases 3-4)
-        DrawReconciliationPanel();
+        // PM4/Museum reconciliation lives in ONE place: Experimental > PM4 > Reconcile, next to the
+        // other PM4 surfaces. Drawing it here too duplicated the panel and its preview state.
+        ImGui.TextDisabled("PM4/Museum reconciliation: see Experimental > PM4 > Reconcile.");
     }
 
     private void DrawPlacementAuthoringPanel()

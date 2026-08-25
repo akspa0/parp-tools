@@ -3,9 +3,8 @@ using WowViewer.Core.Maps;
 namespace WowViewer.Core.Editor.Operations;
 
 /// <summary>
-/// The single production path for placement writes. This is the sole caller of
-/// <c>AdtPlacementWriter</c>, retiring <c>ViewerApp</c>'s parallel translation-only staging
-/// implementation (Spec 167 SC-003).
+/// The single production path for placement moves, delegating to <see cref="AdtPlacementEditor"/> —
+/// the one owner of placement mutation in Core.IO (Specs 167 SC-003 and 176 FR-007).
 /// </summary>
 public interface IPlacementWriteService
 {

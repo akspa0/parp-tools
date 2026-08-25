@@ -111,6 +111,29 @@ public class AdtPlacementEditorTests
     }
 
     [Fact]
+    public void Move_world_model_translates_bounds_with_position()
+    {
+        byte[] source = BuildSyntheticAdt(withWmo: true);
+
+        AdtPlacementCatalog before = Read(source);
+        AdtWorldModelPlacement original = before.WorldModelPlacements[0];
+        var delta = new Vector3(10f, -5f, 2f);
+
+        var move = new AdtPlacementMoveEdit(
+            AdtPlacementKind.WorldModel,
+            0,
+            original.UniqueId,
+            original.Position + delta);
+
+        AdtPlacementCatalog after = Read(AdtPlacementEditor.Apply(source, SourcePath, [move]).Bytes);
+
+        Assert.Equal(original.Position + delta, after.WorldModelPlacements[0].Position);
+        // Stale bounds would break frustum/portal culling for the moved WMO.
+        Assert.Equal(original.BoundsMin + delta, after.WorldModelPlacements[0].BoundsMin);
+        Assert.Equal(original.BoundsMax + delta, after.WorldModelPlacements[0].BoundsMax);
+    }
+
+    [Fact]
     public void Unaffected_chunks_are_byte_preserved()
     {
         byte[] source = BuildSyntheticAdt(withWmo: false);

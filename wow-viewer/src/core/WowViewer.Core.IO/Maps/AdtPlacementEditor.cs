@@ -142,7 +142,12 @@ public static class AdtPlacementEditor
         else
         {
             var row = FindWmo(wmos, edit.EntryIndex, edit.UniqueId);
+            Vector3 delta = edit.NewPosition - row.Position;
             row.Position = edit.NewPosition;
+            // A MODF move must carry its bounds along — stale bounds break frustum/portal culling
+            // for the moved WMO (parity with the retired in-place placement writer).
+            row.BoundsMin += delta;
+            row.BoundsMax += delta;
         }
     }
 

@@ -2,6 +2,19 @@
 
 Last updated: 2026-08-25
 
+## 2026-08-25 — Spec 176 dedupe: one placement-write owner, one reconciliation surface
+
+- **`AdtPlacementWriter` and `AdtPlacementEditTransaction` are deleted.** `PlacementWriteService`
+  (the 167 bridge's write path) now delegates to `AdtPlacementEditor`, which becomes the single
+  owner of placement mutation in Core.IO. Before deleting, parity was restored: a MODF move in
+  `AdtPlacementEditor.ApplyMove` now translates the row's bounds by the move delta (the old writer
+  did this; stale bounds would break frustum/portal culling for the moved WMO). The writer test's
+  bounds assertion was ported into `AdtPlacementEditorTests.Move_world_model_translates_bounds_with_position`.
+  `AdtPlacementKind` moved to its own `Core/Maps/AdtPlacementKind.cs`.
+- **One reconciliation surface.** The duplicate panel draw in the Editor workbench tab was removed;
+  PM4/Museum reconciliation lives only at Experimental > PM4 > Reconcile.
+- Proof: full solution Debug build 0 errors; 80/80 focused `WowViewer.Core.Editor.Tests` pass.
+
 ## 2026-08-25 — Spec 176 Reconcile tab in the PM4 workbench; freezing Match tab retired
 
 - **The old "Match" bottom tab is retired.** Clicking it built `BuildPm4ObjectMatchReport` over every

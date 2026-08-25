@@ -11,11 +11,8 @@ public sealed class PlacementWriteService : IPlacementWriteService
         ArgumentNullException.ThrowIfNull(sourceBytes);
         ArgumentNullException.ThrowIfNull(operation);
 
-        var reference = new AdtPlacementReference(operation.Kind, operation.EntryIndex, operation.UniqueId);
-        var move = new AdtPlacementMove(reference, operation.NewPosition);
-        var transaction = new AdtPlacementEditTransaction(sourcePath, [move]);
-
-        return AdtPlacementWriter.ApplyTransaction(sourceBytes, sourcePath, transaction);
+        var move = new AdtPlacementMoveEdit(operation.Kind, operation.EntryIndex, operation.UniqueId, operation.NewPosition);
+        return AdtPlacementEditor.Apply(sourceBytes, sourcePath, [move]).Bytes;
     }
 
     public byte[] ApplyMove(string sourcePath, PlacementMoveOperation operation)
