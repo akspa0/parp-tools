@@ -2240,6 +2240,9 @@ static void RunPm4(string[] args)
 		case "restore-placements":
 			RunPm4RestorePlacements(tail);
 			break;
+		case "mslk-node-id":
+			RunPm4MslkNodeId(tail);
+			break;
 		case "surface-class":
 			RunPm4SurfaceClass(tail);
 			break;
@@ -6463,6 +6466,43 @@ static void RunPm4SurfaceClass(string[] args)
 		double share = total == 0 ? 0 : (double)o.ObjectsWithHeight / total;
 		Console.WriteLine($"   0x{o.Value:X2}   {o.ObjectsWithHeight,10}   {o.ObjectsWithoutHeight,13}   {total,7}   {share,10:P1}");
 	}
+}
+
+static void RunPm4MslkNodeId(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4MslkNodeIdReport r = Pm4MslkNodeIdSupport.Analyze(input);
+	Console.WriteLine("WowViewer.Tool.Inspect MSLK._0x04 - what is it actually?");
+	Console.WriteLine($"Files={r.Files}  records={r.Records}  max value seen={r.MaxValueSeen}");
+	Console.WriteLine();
+	Console.WriteLine($"  mean per-file distinct ratio      = {r.MeanPerFileDistinctRatio:P2}   (1.00 = a per-record id)");
+	Console.WriteLine($"  equals its own array index        = {r.EqualsOwnIndexFraction:P2}   (high = carries no information)");
+	Console.WriteLine($"  files where it is a dense 0..N-1  = {r.DensePermutationFileFraction:P2}");
+	Console.WriteLine($"  value < record count              = {r.WithinRecordCountFraction:P2}");
+	Console.WriteLine();
+	Console.WriteLine($"  Is RefIndex naming a NODE ID or an ARRAY POSITION? (n={r.RefIndexTested})");
+	Console.WriteLine($"    RefIndex found in the _0x04 value set = {r.RefIndexInNodeIdSetFraction:P2}");
+	Console.WriteLine($"    RefIndex within 0..recordCount        = {r.RefIndexWithinRecordCountFraction:P2}");
+	Console.WriteLine();
+	Console.WriteLine($"  Group-key test: records sharing a value");
+	Console.WriteLine($"    groups of exactly one              = {r.SingletonGroupFraction:P2}   (high = NOT a group key)");
+	Console.WriteLine($"    size histogram: {string.Join(", ", r.GroupSizes.Select(static x => $"{x.Value}x{x.Count}"))}");
+	Console.WriteLine();
+	Console.WriteLine($"  PAIR structure - is a shared value an EDGE id? (pairs={r.PairsTested})");
+	Console.WriteLine($"    the two records are ADJACENT in the array  = {r.PairsAdjacentFraction:P2}");
+	Console.WriteLine($"    they share the same RefIndex               = {r.PairsSameRefIndexFraction:P2}  (control {r.ControlSameRefIndexFraction:P2})");
+	Console.WriteLine($"    they point at each other                   = {r.PairsPointAtEachOtherFraction:P2}");
+	Console.WriteLine($"    they share TypeFlags                       = {r.PairsSameTypeFlagsFraction:P2}");
+	Console.WriteLine();
+	foreach (string s2 in r.Samples)
+		Console.WriteLine($"  {s2}");
 }
 
 static void RunPm4RestorePlacements(string[] args)

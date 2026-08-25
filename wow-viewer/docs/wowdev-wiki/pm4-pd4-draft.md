@@ -506,7 +506,7 @@ table is the honest accounting of the rest, so a reader can tell a result from a
 | `MSLK` | `MspiFirstIndex`/`Count` | MEASURED | wall-quad window; negative = open passage |
 | `MSLK` | `RefIndex` | MEASURED | neighbouring surface, 98.76% reciprocal |
 | `MSLK` | `_0x00` type flags | PARTIAL | observed buckets, not corpus-closed |
-| `MSLK` | `_0x04` | UNKNOWN | commonly named a group/object id; the name asserts more than the evidence |
+| `MSLK` | `_0x04` | PARTIAL | **a group key whose groups are tiny** - 283,066 groups of exactly two against 250,192 singletons over 830,233 records, which is where the "near-unique" reading came from: 250,192 + 283,066 gives a distinct ratio of ~0.65 against the 0.676 measured. Values are always below the record count; they equal their own array index 0.21% of the time. **Not** an edge id joining half-edges - paired records are adjacent 7.11% of the time, share a `RefIndex` 0.38% (control 0.01%), and point at each other **0.08%**. Paired records share `TypeFlags` **99.82%** of the time. What a pair denotes is open |
 | `MSLK` | `SystemFlag` | **MEASURED** | **constant 32768 (0x8000)** across 486,819 records - no information content |
 | `MSLK` | `_0x02` | **MEASURED** | **constant 0** - real padding |
 | `MSLK` | `_0x01` subtype | PARTIAL | enumerated, 19 values, 25% zero |
