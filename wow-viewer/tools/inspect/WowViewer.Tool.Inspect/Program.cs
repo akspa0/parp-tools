@@ -2237,6 +2237,9 @@ static void RunPm4(string[] args)
 		case "generate-placements":
 			RunPm4GeneratePlacements(tail);
 			break;
+		case "restore-placements":
+			RunPm4RestorePlacements(tail);
+			break;
 		case "surface-class":
 			RunPm4SurfaceClass(tail);
 			break;
@@ -6459,6 +6462,55 @@ static void RunPm4SurfaceClass(string[] args)
 		int total = o.ObjectsWithHeight + o.ObjectsWithoutHeight;
 		double share = total == 0 ? 0 : (double)o.ObjectsWithHeight / total;
 		Console.WriteLine($"   0x{o.Value:X2}   {o.ObjectsWithHeight,10}   {o.ObjectsWithoutHeight,13}   {total,7}   {share,10:P1}");
+	}
+}
+
+static void RunPm4RestorePlacements(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? adtDir = GetOption(args, "--adt-dir");
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input) || string.IsNullOrWhiteSpace(adtDir))
+	{
+		Console.Error.WriteLine("Error: --input and --adt-dir are required. --output writes files; omit it to report only.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4AdtPatchReport r = Pm4AdtPatchSupport.Run(input, adtDir, output);
+
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 placement restoration");
+	Console.WriteLine($"PM4: {r.Pm4Directory}");
+	Console.WriteLine($"ADT: {r.AdtDirectory}");
+	Console.WriteLine();
+	Console.WriteLine("WHAT CAN BE RESTORED");
+	Console.WriteLine($"  tiles examined                          = {r.TilesExamined}");
+	Console.WriteLine($"  tiles where PM4 knows objects the tile does not = {r.TilesRestorable}");
+	Console.WriteLine($"    ... of those, with NO terrain          = {r.RestorableWithoutTerrain}");
+	Console.WriteLine($"    ... of those, with NO placements at all= {r.RestorableWithNoPlacementsAtAll}");
+	Console.WriteLine($"  objects recoverable                     = {r.MissingObjectsTotal}");
+	Console.WriteLine($"  ... that get a named candidate          = {r.NameableObjects}");
+	Console.WriteLine();
+
+	if (string.IsNullOrWhiteSpace(output))
+	{
+		Console.WriteLine("  Report only. Pass --output <dir> to write _obj0.adt files.");
+	}
+	else
+	{
+		Console.WriteLine($"  files written                          = {r.FilesWritten}  -> {output}");
+		Console.WriteLine($"  read back and verified                 = {r.RoundTripChecked}");
+		Console.WriteLine($"  round-trip FAILURES                    = {r.RoundTripFailed}");
+		if (r.RoundTripFailed > 0)
+			Console.WriteLine("  A failure means the file does not read back as what was written. Do not use it.");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine("Top restorable tiles:");
+	Console.WriteLine("  tile                    terrain  existing  pm4Objects  missing  nameable");
+	foreach (Pm4RestorableTile t in r.Tiles.Take(20))
+	{
+		Console.WriteLine($"  {t.Tile,-22} {(t.HasTerrain ? "yes" : "NO"),7} {t.ExistingPlacements,9} {t.Pm4Objects,11} {t.MissingObjects,8} {t.NameableObjects,9}");
 	}
 }
 
