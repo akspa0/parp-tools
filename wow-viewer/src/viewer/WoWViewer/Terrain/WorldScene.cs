@@ -1197,6 +1197,8 @@ public class WorldScene : ISceneRenderer
     private bool _showPm4SolidOverlay = true;
     private bool _showPm4ObjectBounds;
     private bool _showPm4Ck24Bounds;
+    private bool _showPm4GeneratedPlacements;
+    private bool _pm4GeneratedPlacementsTerrainlessOnly = true;
     private bool _showPm4PlacementZPlane;
     private bool _showPm4PlacementZForAllObjects;
     private bool _pm4OverlayIgnoreDepth;
@@ -1805,6 +1807,36 @@ public class WorldScene : ISceneRenderer
     /// (range -656.4..596.2, mean 120.2, only 1.329% within one unit of zero). That visible gap IS
     /// the evidence that 0 is an absent value rather than a real placement height.
     /// </remarks>
+    /// <summary>
+    /// Draw the placements recovered from PM4 geometry by <c>pm4 generate-placements</c>.
+    /// </summary>
+    /// <remarks>
+    /// These are boxes the file itself never carried: position and extents derived from the navmesh,
+    /// with an asset name that is a ranked guess. Colour is confidence, so a firm identification and a
+    /// shrug do not look alike. Defaults to showing only tiles with no surviving terrain, since on a
+    /// tile that still has its ADT the real placements are already drawn and these merely double them.
+    /// </remarks>
+    public bool ShowPm4GeneratedPlacements
+    {
+        get => _showPm4GeneratedPlacements;
+        set
+        {
+            _showPm4GeneratedPlacements = value;
+            if (value)
+                Pm4GeneratedPlacements.EnsureLoaded();
+        }
+    }
+
+    public bool Pm4GeneratedPlacementsTerrainlessOnly
+    {
+        get => _pm4GeneratedPlacementsTerrainlessOnly;
+        set => _pm4GeneratedPlacementsTerrainlessOnly = value;
+    }
+
+    public int Pm4GeneratedPlacementCount => Pm4GeneratedPlacements.Count;
+
+    public string? Pm4GeneratedPlacementSource => Pm4GeneratedPlacements.SourcePath;
+
     public bool ShowPm4PlacementZPlane { get => _showPm4PlacementZPlane; set => _showPm4PlacementZPlane = value; }
 
     /// <summary>
@@ -11388,6 +11420,24 @@ public class WorldScene : ISceneRenderer
                         pm4BoundsPreparedCount++;
                     }
                     });
+                }
+
+                if (_showPm4GeneratedPlacements)
+                {
+                    foreach (Pm4GeneratedPlacements.RecoveredBox box in Pm4GeneratedPlacements.Boxes)
+                    {
+                        if (_pm4GeneratedPlacementsTerrainlessOnly && !box.OnTileWithoutTerrain)
+                            continue;
+
+                        // Green where the shape match is tight, amber where it is loose. A recovered
+                        // name is a guess and the colour has to say so without a label being read.
+                        Vector3 color = box.Score <= 0.05 ? new Vector3(0.35f, 0.95f, 0.45f)
+                            : box.Score <= 0.15 ? new Vector3(0.75f, 0.95f, 0.40f)
+                            : new Vector3(0.98f, 0.75f, 0.30f);
+
+                        _bbRenderer.BatchBoxMinMax(box.Min, box.Max, color);
+                        pm4BoundsPreparedCount++;
+                    }
                 }
 
                 _bbRenderer.FlushBatch(view, proj);

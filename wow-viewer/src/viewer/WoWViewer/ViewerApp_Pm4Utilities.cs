@@ -157,6 +157,37 @@ public partial class ViewerApp
         if (ImGui.Checkbox("PM4 CK24 Bounds", ref showPm4Ck24Bounds))
             _worldScene.ShowPm4Ck24Bounds = showPm4Ck24Bounds;
 
+        bool showRecovered = _worldScene.ShowPm4GeneratedPlacements;
+        if (ImGui.Checkbox("Recovered placements", ref showRecovered))
+            _worldScene.ShowPm4GeneratedPlacements = showRecovered;
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.BeginTooltip();
+            ImGui.TextUnformatted("Placements rebuilt from PM4 geometry, for tiles that have none.");
+            ImGui.TextUnformatted("Position and size are derived; the asset name is a ranked guess.");
+            ImGui.TextUnformatted("Green = tight shape match, amber = loose.");
+            int count = _worldScene.Pm4GeneratedPlacementCount;
+            ImGui.TextUnformatted(count > 0
+                ? $"{count} loaded."
+                : "None loaded - run: pm4 generate-placements");
+            ImGui.EndTooltip();
+        }
+
+        if (showRecovered)
+        {
+            ImGui.SameLine();
+            bool terrainlessOnly = _worldScene.Pm4GeneratedPlacementsTerrainlessOnly;
+            if (ImGui.Checkbox("Terrain-less tiles only", ref terrainlessOnly))
+                _worldScene.Pm4GeneratedPlacementsTerrainlessOnly = terrainlessOnly;
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.BeginTooltip();
+                ImGui.TextUnformatted("Tiles that still have an ADT already draw their real placements.");
+                ImGui.TextUnformatted("Turn this off to compare recovered boxes against those.");
+                ImGui.EndTooltip();
+            }
+        }
+
         bool showPlacementZ = _worldScene.ShowPm4PlacementZPlane;
         if (ImGui.Checkbox("Placement Z markers", ref showPlacementZ))
             _worldScene.ShowPm4PlacementZPlane = showPlacementZ;

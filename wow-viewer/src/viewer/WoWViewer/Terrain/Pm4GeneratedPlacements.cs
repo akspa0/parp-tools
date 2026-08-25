@@ -36,6 +36,16 @@ internal static class Pm4GeneratedPlacements
 
     private readonly record struct Entry(string Asset, double Score, Vector3 Centre);
 
+    /// <summary>
+    /// Every recovered placement, for drawing. Boxes are in ADT placement space, the same space the
+    /// PM4 overlay bounds use, so they need no further transform.
+    /// </summary>
+    public static IReadOnlyList<RecoveredBox> Boxes => BoxList;
+
+    public readonly record struct RecoveredBox(Vector3 Min, Vector3 Max, string Asset, double Score, bool OnTileWithoutTerrain);
+
+    private static readonly List<RecoveredBox> BoxList = [];
+
     public static int Count { get; private set; }
 
     public static string? SourcePath { get; private set; }
@@ -51,6 +61,7 @@ internal static class Pm4GeneratedPlacements
 
         _attempted = true;
         ByKey.Clear();
+        BoxList.Clear();
         Count = 0;
         SourcePath = null;
 
@@ -69,6 +80,8 @@ internal static class Pm4GeneratedPlacements
             {
                 if (!TryProp(tile, "placements", out JsonElement rows))
                     continue;
+
+                bool noTerrain = TryProp(tile, "hasTerrain", out JsonElement ht) && ht.ValueKind == JsonValueKind.False;
 
                 foreach (JsonElement row in rows.EnumerateArray())
                 {
@@ -101,6 +114,7 @@ internal static class Pm4GeneratedPlacements
                     }
 
                     list.Add(new Entry(asset, score, centre));
+                    BoxList.Add(new RecoveredBox(ReadXyz(lo), ReadXyz(hi), asset, score, noTerrain));
                     Count++;
                 }
             }
