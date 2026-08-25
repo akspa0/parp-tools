@@ -2225,6 +2225,9 @@ static void RunPm4(string[] args)
 		case "mscn-chain":
 			RunPm4MscnChain(tail);
 			break;
+		case "mprl-anchor":
+			RunPm4MprlAnchor(tail);
+			break;
 		case "surface-class":
 			RunPm4SurfaceClass(tail);
 			break;
@@ -6448,6 +6451,45 @@ static void RunPm4SurfaceClass(string[] args)
 		double share = total == 0 ? 0 : (double)o.ObjectsWithHeight / total;
 		Console.WriteLine($"   0x{o.Value:X2}   {o.ObjectsWithHeight,10}   {o.ObjectsWithoutHeight,13}   {total,7}   {share,10:P1}");
 	}
+}
+
+static void RunPm4MprlAnchor(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? adtDir = GetOption(args, "--adt-dir");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4MprlAnchorReport r = Pm4MprlAnchorSupport.Analyze(input, adtDir);
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 MPRL anchor / terrain-contact test");
+	Console.WriteLine($"Files={r.Files}  with MODF={r.FilesWithModf}  MPRL points={r.MprlTotal}  objects={r.ObjectsTotal}  MODF rows={r.ModfTotal}");
+	Console.WriteLine($"  files where MPRL count == object count = {r.FilesWhereMprlCountEqualsObjectCount:P2}");
+	Console.WriteLine($"  files where MPRL count == MODF count   = {r.FilesWhereMprlCountEqualsModfCount:P2}");
+	Console.WriteLine();
+	Console.WriteLine($"1. Terrain contact - does MPRL height land inside the cell terrain range? (n={r.ContactTested} per permutation)");
+	Console.WriteLine("  permutation            inside      control        median miss");
+	for (int i = 0; i < r.ContactHits.Count; i++)
+	{
+		double share = r.ContactTested == 0 ? 0 : (double)r.ContactHits[i].Count / r.ContactTested;
+		double ctl = r.ContactTested == 0 ? 0 : (double)r.ContactControl[i].Count / r.ContactTested;
+		Console.WriteLine($"  {r.ContactHits[i].Value,-20} {share,9:P2} {ctl,12:P2} {r.ContactMiss[i].MedianAbsError,18:F3}");
+	}
+	Console.WriteLine();
+	Console.WriteLine($"2. Does MPRL carry the _0x1C float? (bit-exact, {r.FloatComparisons} points)");
+	foreach (var h in r.RawHits) Console.WriteLine($"  {h.Value,-28} {h.Count,8}");
+	foreach (var h in r.FlippedHits) Console.WriteLine($"  {h.Value,-28} {h.Count,8}");
+	foreach (var h in r.ControlHits) Console.WriteLine($"  {h.Value,-28} {h.Count,8}");
+	Console.WriteLine();
+	Console.WriteLine("3. Component pairing against MODF position (best first):");
+	foreach (Pm4ErrorStat e in r.ComponentPairings.Take(5))
+		Console.WriteLine($"  {e.Name,-30} {e.Count,7} median {e.MedianAbsError,10:F3}  p90 {e.P90AbsError,10:F3}  within1 {e.FractionWithin1,7:P1}");
+	Console.WriteLine();
+	foreach (Pm4ErrorStat e in new[] { r.NearestModf, r.NearestControl })
+		Console.WriteLine($"  {e.Name,-44} median {e.MedianAbsError,10:F3}  within1 {e.FractionWithin1,7:P1}");
 }
 
 static void RunPm4MscnChain(string[] args)

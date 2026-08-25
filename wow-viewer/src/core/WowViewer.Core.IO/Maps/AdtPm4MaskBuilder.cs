@@ -162,7 +162,12 @@ public static class AdtPm4MaskBuilder
                     if (mprlEntry.Unk16 != 0)
                         continue;
 
-                    Vector3 worldPos = Pm4CoordinateService.MprlToAdtPlacement(mprlEntry.Position);
+                    // Deliberately NOT MprlToAdtPlacement. This builder works in a corner-relative
+                    // space (tileX * TileSize), not the MapOrigin-relative placement space that
+                    // method returns, and it reads .X/.Z as the horizontal pair. Routing it through
+                    // the corrected transform would silently move every mask. Left on the raw
+                    // components so behaviour is unchanged; this space is still unverified.
+                    Vector3 worldPos = mprlEntry.Position;
                     if (!IsWithinTile(worldPos, tileX, tileY))
                         continue;
 
