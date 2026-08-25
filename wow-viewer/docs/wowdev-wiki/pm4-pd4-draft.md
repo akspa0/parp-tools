@@ -329,12 +329,43 @@ against an `MSVT` control of **0.428% / 0.487% / 0.652% / 0.873% / 1.315% / 2.16
 8% expected vs 8.40% observed at step 0.25, 2% vs 2.13% at step 1.0). Any reading in which nodes are
 snapped to a regular grid is eliminated.
 
-Taken together: a **pre-baked node graph** of roughly two to three freely-positioned nodes per
-walkable polygon, shared between neighbouring objects, in the same frame as the mesh but independent
-of its vertices.
+### Correction: `MSCN` is ORDERED, and the order is the connectivity
 
-Open: which stream indexes MSCN, and what a shared node means precisely (a portal, a weld point, a
-tile seam).
+Everything above tests the point SET. None of it tests the point ORDER, and the order carries the
+structure. Over 287 files and 1,342,247 points, the distance between **consecutive array entries** has
+a median of **4.417** against **161.247** for a random pair drawn from the same file - 37 times tighter
+than chance. `MSCN` is a **polyline**, not a cloud.
+
+That also disposes of the open question above. Nothing indexes `MSCN` because nothing needs to: an
+ordered chain is its own edge list.
+
+The chain closes into **short rings**. Scanning forward from each point for a return to within 0.5
+units in at most 64 steps succeeds for **6.09%** of starts, against **1.79%** on a shuffled copy of the
+same points - a shuffle preserves the point set and destroys only the order, so it isolates ordering as
+the thing being measured. Real ring lengths decay from three (3x7731, 4x3308, 5x2103, 6x1431, 7x1002),
+while the shuffled control is flat across every length (170, 165, 161, 159, 157), which is what chance
+produces.
+
+And the rings lie **on the mesh, held off it by about a unit**:
+
+| | median | within 1.0 |
+|---|---|---|
+| `MSCN` to nearest `MSVT` vertex | **1.245** | 41.7% |
+| `MSCN` to nearest `MSPV` vertex | 1.809 | 33.9% |
+| control: random point to nearest `MSVT` | 50.188 | 0.1% |
+
+Forty times closer than chance, but not coincident - a consistent standoff rather than a copy.
+
+**Leading reading, not yet proven: a navmesh contour set.** Chained, closing into short rings, lying on
+the walkable surface but inset by a roughly constant distance, at two to three points per walkable
+polygon - that is the signature of a walkable region eroded by an agent radius, which is what a navmesh
+builder emits as its contour stage. A test that would settle it: contour points must hug the BOUNDARY
+of a walkable region rather than its interior.
+
+**Not doodad sets.** Tested directly against 58,876 real `MDDF` rows: nearest `MSCN` point to a doodad
+has a median of 10.5 units with 15.1% inside one unit, against a random-point control of 25.2 units and
+3.3%. The enrichment is real but small, and reflects doodads and collision geometry occupying the same
+places; a doodad list would sit at zero.
 
 ## 7. `MPRR` — sentinel-delimited range records
 

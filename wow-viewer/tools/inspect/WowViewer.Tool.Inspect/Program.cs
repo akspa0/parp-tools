@@ -2222,6 +2222,9 @@ static void RunPm4(string[] args)
 		case "modf-recovery":
 			RunPm4ModfRecovery(tail);
 			break;
+		case "mscn-chain":
+			RunPm4MscnChain(tail);
+			break;
 		case "surface-class":
 			RunPm4SurfaceClass(tail);
 			break;
@@ -6445,6 +6448,49 @@ static void RunPm4SurfaceClass(string[] args)
 		double share = total == 0 ? 0 : (double)o.ObjectsWithHeight / total;
 		Console.WriteLine($"   0x{o.Value:X2}   {o.ObjectsWithHeight,10}   {o.ObjectsWithoutHeight,13}   {total,7}   {share,10:P1}");
 	}
+}
+
+static void RunPm4MscnChain(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? adtDir = GetOption(args, "--adt-dir");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	float eps = float.TryParse(GetOption(args, "--epsilon"), out float e) ? e : 0.5f;
+	Pm4MscnChainReport r = Pm4MscnChainSupport.Analyze(input, adtDir, eps);
+
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 MSCN chain / loop / doodad test");
+	Console.WriteLine($"PM4: {r.Pm4Directory}");
+	Console.WriteLine($"Files with MSCN={r.Files}  with doodads={r.FilesWithDoodads}  MSCN points={r.MscnTotal}  MDDF rows={r.DoodadsTotal}");
+	Console.WriteLine();
+	Console.WriteLine("1. Is MSCN a CHAIN? (distance between array neighbours, world units)");
+	Console.WriteLine("  measure                                 n      median        p90         max   within 1.0");
+	foreach (Pm4ErrorStat s2 in new[] { r.Consecutive, r.RandomPair })
+		Console.WriteLine($"  {s2.Name,-38} {s2.Count,6} {s2.MedianAbsError,11:F3} {s2.P90AbsError,10:F3} {s2.MaxAbsError,11:F1} {s2.FractionWithin1,12:P1}");
+	Console.WriteLine();
+	Console.WriteLine($"2. Does the chain CLOSE into loops? (return within {r.Epsilon} in <= {r.MaxLoop} steps)");
+	Console.WriteLine($"  starts tested          = {r.LoopStartsTested}");
+	Console.WriteLine($"  closed, real order     = {r.LoopsFound}  ({r.LoopFraction:P2})");
+	Console.WriteLine($"  closed, SHUFFLED order = {r.ShuffledLoopsFound}  ({r.ShuffledLoopFraction:P2})");
+	Console.WriteLine($"  real loop lengths     : {string.Join(", ", r.LoopLengths.Select(static x => $"{x.Value}x{x.Count}"))}");
+	Console.WriteLine($"  shuffled loop lengths : {string.Join(", ", r.ShuffledLoopLengths.Select(static x => $"{x.Value}x{x.Count}"))}");
+	Console.WriteLine();
+	Console.WriteLine("3. Do MSCN points sit on DOODADS? (horizontal distance to the nearest MSCN point)");
+	Console.WriteLine("  measure                                 n      median        p90         max   within 1.0");
+	foreach (Pm4ErrorStat s2 in new[] { r.NearestXy, r.NearestYx, r.NearestFlipped, r.NearestControl })
+		Console.WriteLine($"  {s2.Name,-38} {s2.Count,6} {s2.MedianAbsError,11:F3} {s2.P90AbsError,10:F3} {s2.MaxAbsError,11:F1} {s2.FractionWithin1,12:P1}");
+	Console.WriteLine();
+	Console.WriteLine("  A real doodad link beats the control. MSCN is dense, so being NEAR a doodad is free.");
+	Console.WriteLine();
+	Console.WriteLine("4. If the rings are not doodads, are they MESH OUTLINES?");
+	Console.WriteLine("  measure                                 n      median        p90         max   within 1.0");
+	foreach (Pm4ErrorStat s2 in new[] { r.NearestMsvt, r.NearestMspv, r.NearestMeshControl })
+		Console.WriteLine($"  {s2.Name,-38} {s2.Count,6} {s2.MedianAbsError,11:F3} {s2.P90AbsError,10:F3} {s2.MaxAbsError,11:F1} {s2.FractionWithin1,12:P1}");
 }
 
 static void RunPm4ModfRecovery(string[] args)
