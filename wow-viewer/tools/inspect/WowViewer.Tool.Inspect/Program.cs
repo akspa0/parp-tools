@@ -2219,6 +2219,9 @@ static void RunPm4(string[] args)
 		case "linkid-order":
 			RunPm4LinkIdOrder(tail);
 			break;
+		case "modf-recovery":
+			RunPm4ModfRecovery(tail);
+			break;
 		case "surface-class":
 			RunPm4SurfaceClass(tail);
 			break;
@@ -6441,6 +6444,50 @@ static void RunPm4SurfaceClass(string[] args)
 		int total = o.ObjectsWithHeight + o.ObjectsWithoutHeight;
 		double share = total == 0 ? 0 : (double)o.ObjectsWithHeight / total;
 		Console.WriteLine($"   0x{o.Value:X2}   {o.ObjectsWithHeight,10}   {o.ObjectsWithoutHeight,13}   {total,7}   {share,10:P1}");
+	}
+}
+
+static void RunPm4ModfRecovery(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? adtDir = GetOption(args, "--adt-dir");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4ModfRecoveryReport r = Pm4ModfRecoverySupport.Analyze(input, adtDir);
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 -> MODF recovery");
+	Console.WriteLine($"PM4: {r.Pm4Directory}");
+	Console.WriteLine($"ADT: {r.AdtDirectory}");
+	Console.WriteLine($"Files paired={r.FilesPaired}  no placement adt={r.FilesNoAdt}");
+	Console.WriteLine($"PM4 objects={r.Pm4ObjectsTotal}  matched to a MODF row={r.Pm4ObjectsMatched}  MODF rows available={r.ModfRowsTotal}");
+	Console.WriteLine();
+	Console.WriteLine("Position - which PM4 axis answers to which MODF axis (abs error, world units):");
+	Console.WriteLine("  pairing                                 n      median        p90         max   within 1.0");
+	foreach (Pm4ErrorStat e in new[] { r.XvsX, r.XvsY, r.YvsX, r.YvsY, r.ControlX, r.ControlY })
+		Console.WriteLine($"  {e.Name,-38} {e.Count,6} {e.MedianAbsError,11:F3} {e.P90AbsError,10:F3} {e.MaxAbsError,11:F1} {e.FractionWithin1,12:P1}");
+	Console.WriteLine();
+	Console.WriteLine("Bounding box - is MODF's box the same box the PM4 geometry occupies?");
+	Console.WriteLine("  measure                                 n      median        p90         max   within 1.0");
+	foreach (Pm4ErrorStat e in new[] { r.BoundsMin, r.BoundsMax, r.ControlBoundsMin })
+		Console.WriteLine($"  {e.Name,-38} {e.Count,6} {e.MedianAbsError,11:F3} {e.P90AbsError,10:F3} {e.MaxAbsError,11:F1} {e.FractionWithin1,12:P1}");
+	Console.WriteLine($"  both corners within 1.0 unit: {r.BoundsWithin1Fraction:P2} of {r.BoundsCompared}");
+	Console.WriteLine();
+	Console.WriteLine("Bounding box, per axis:");
+	Console.WriteLine("  axis                                    n      median        p90         max   within 1.0");
+	foreach (Pm4ErrorStat e in r.BoundsPerAxis)
+		Console.WriteLine($"  {e.Name,-38} {e.Count,6} {e.MedianAbsError,11:F3} {e.P90AbsError,10:F3} {e.MaxAbsError,11:F1} {e.FractionWithin1,12:P1}");
+	Console.WriteLine();
+	Console.WriteLine("Samples:");
+	foreach (Pm4ModfRecoverySample s in r.Samples)
+	{
+		Console.WriteLine($"  {s.File}  {Path.GetFileName(s.ModelPath)}");
+		Console.WriteLine($"    pm4 centre  ({s.Pm4Centre.X,10:F2},{s.Pm4Centre.Y,10:F2},{s.Pm4Centre.Z,9:F2})   MODF pos    ({s.ModfPosition.X,10:F2},{s.ModfPosition.Y,10:F2},{s.ModfPosition.Z,9:F2})");
+		Console.WriteLine($"    pm4 min     ({s.Pm4Min.X,10:F2},{s.Pm4Min.Y,10:F2},{s.Pm4Min.Z,9:F2})   MODF min    ({s.ModfBoundsMin.X,10:F2},{s.ModfBoundsMin.Y,10:F2},{s.ModfBoundsMin.Z,9:F2})");
+		Console.WriteLine($"    pm4 max     ({s.Pm4Max.X,10:F2},{s.Pm4Max.Y,10:F2},{s.Pm4Max.Z,9:F2})   MODF max    ({s.ModfBoundsMax.X,10:F2},{s.ModfBoundsMax.Y,10:F2},{s.ModfBoundsMax.Z,9:F2})");
 	}
 }
 
