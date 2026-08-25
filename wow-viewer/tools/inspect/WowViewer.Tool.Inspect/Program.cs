@@ -2231,6 +2231,9 @@ static void RunPm4(string[] args)
 		case "terrain-recovery":
 			RunPm4TerrainRecovery(tail);
 			break;
+		case "asset-scoring":
+			RunPm4AssetScoring(tail);
+			break;
 		case "surface-class":
 			RunPm4SurfaceClass(tail);
 			break;
@@ -6453,6 +6456,47 @@ static void RunPm4SurfaceClass(string[] args)
 		int total = o.ObjectsWithHeight + o.ObjectsWithoutHeight;
 		double share = total == 0 ? 0 : (double)o.ObjectsWithHeight / total;
 		Console.WriteLine($"   0x{o.Value:X2}   {o.ObjectsWithHeight,10}   {o.ObjectsWithoutHeight,13}   {total,7}   {share,10:P1}");
+	}
+}
+
+static void RunPm4AssetScoring(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? adtDir = GetOption(args, "--adt-dir");
+	if (string.IsNullOrWhiteSpace(input) || string.IsNullOrWhiteSpace(adtDir))
+	{
+		Console.Error.WriteLine("Error: --input and --adt-dir are both required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4AssetScoringReport r = Pm4AssetScoringSupport.Analyze(input, adtDir);
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 candidate-asset scoring (shape only, position ignored)");
+	Console.WriteLine($"Assets in library = {r.AssetsInLibrary}   objects scored = {r.ObjectsScored}");
+	Console.WriteLine();
+	Console.WriteLine("How often does the true asset rank near the top?");
+	Console.WriteLine($"  top-1   = {r.Top1:P2}");
+	Console.WriteLine($"  top-3   = {r.Top3:P2}");
+	Console.WriteLine($"  top-5   = {r.Top5:P2}");
+	Console.WriteLine($"  top-10  = {r.Top10:P2}");
+	Console.WriteLine();
+	Console.WriteLine("Controls - a shape score has to beat both of these to be worth anything:");
+	Console.WriteLine($"  random ranking, expected top-1        = {r.RandomTop1Expectation:P2}");
+	Console.WriteLine($"  most-common-asset guess, top-1        = {r.FrequencyTop1:P2}");
+	Console.WriteLine($"  five-most-common guess, top-5         = {r.FrequencyTop5:P2}");
+	Console.WriteLine();
+	Console.WriteLine($"  median rank of the true asset = {r.TrueRank.MedianAbsError:F1}   p90 = {r.TrueRank.P90AbsError:F1}   worst = {r.TrueRank.MaxAbsError:F0}");
+	Console.WriteLine();
+	Console.WriteLine("Systematic bias - PM4 boxes hold only collision geometry, so they should run small:");
+	foreach (Pm4ErrorStat e in new[] { r.HorizontalBias, r.HeightBias })
+		Console.WriteLine($"  {e.Name,-38} median {e.MedianAbsError,9:F3}  p90 {e.P90AbsError,9:F3}");
+	Console.WriteLine();
+	Console.WriteLine("Samples:");
+	foreach (Pm4AssetScoringSample s2 in r.Samples)
+	{
+		Console.WriteLine($"  {s2.File}  true={s2.TrueAsset}  rank={s2.Rank}");
+		Console.WriteLine($"    pm4 shape ({s2.ObservedShape.X,7:F1},{s2.ObservedShape.Y,7:F1},{s2.ObservedShape.Z,7:F1})   modf shape ({s2.TruthShape.X,7:F1},{s2.TruthShape.Y,7:F1},{s2.TruthShape.Z,7:F1})");
+		Console.WriteLine($"    top 3: {s2.TopThree}");
 	}
 }
 
