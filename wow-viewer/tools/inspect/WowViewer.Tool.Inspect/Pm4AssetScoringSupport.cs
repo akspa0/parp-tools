@@ -117,6 +117,97 @@ internal static class Pm4AssetScoringSupport
             }
         }
 
+        // Held-out TILE cross-validation. Leave-one-out above answers "can shape identify an asset we
+        // have seen elsewhere"; this answers the question that actually matters for restoration, which
+        // is whether a library carries to a tile contributing nothing to it. Folds are by tile, so no
+        // object is ever scored against a library its own tile helped build.
+        const int folds = 5;
+        var shapesByFold = new Dictionary<string, List<Vector3>[]>(StringComparer.OrdinalIgnoreCase);
+        var objectsByFold = new List<(string Asset, Vector3 Shape)>[folds];
+        for (int f = 0; f < folds; f++)
+            objectsByFold[f] = [];
+
+        var tileFold = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        int nextFold = 0;
+
+        foreach ((string asset, Vector3 shape, Pm4MatchedContext ctx) in EnumerateMatchedObjects(resolved, adtDirectory))
+        {
+            if (!tileFold.TryGetValue(ctx.File, out int fold))
+            {
+                fold = nextFold++ % folds;
+                tileFold[ctx.File] = fold;
+            }
+
+            if (!shapesByFold.TryGetValue(asset, out List<Vector3>[]? perFold))
+            {
+                perFold = new List<Vector3>[folds];
+                for (int f = 0; f < folds; f++)
+                    perFold[f] = [];
+                shapesByFold[asset] = perFold;
+            }
+
+            perFold[fold].Add(shape);
+            objectsByFold[fold].Add((asset, shape));
+        }
+
+        long hScored = 0, hTop1 = 0, hTop3 = 0, hTop5 = 0, hTop10 = 0, hUnfindable = 0;
+        long hFindableScored = 0, hFindableTop1 = 0, hFindableTop5 = 0;
+        var hRank = new Stat();
+
+        for (int f = 0; f < folds; f++)
+        {
+            // Library from every OTHER fold.
+            var foldLibrary = new Dictionary<string, Vector3>(StringComparer.OrdinalIgnoreCase);
+            foreach ((string asset, List<Vector3>[] perFold) in shapesByFold)
+            {
+                var pooled = new List<Vector3>();
+                for (int g = 0; g < folds; g++)
+                {
+                    if (g != f)
+                        pooled.AddRange(perFold[g]);
+                }
+
+                Vector3? median = MedianShape(pooled, null);
+                if (median is Vector3 m)
+                    foldLibrary[asset] = m;
+            }
+
+            if (foldLibrary.Count == 0)
+                continue;
+
+            List<string> foldAssets = [.. foldLibrary.Keys];
+
+            foreach ((string trueName, Vector3 observed) in objectsByFold[f])
+            {
+                hScored++;
+
+                // An asset seen ONLY in the held-out tile cannot be found at any rank. Counting these
+                // as ordinary misses would hide the real limit, so they are reported separately.
+                bool findable = foldLibrary.ContainsKey(trueName);
+                if (!findable)
+                {
+                    hUnfindable++;
+                    continue;
+                }
+
+                var ranked = new List<(string Name, double Score)>(foldAssets.Count);
+                foreach (string asset in foldAssets)
+                    ranked.Add((asset, ShapeDistance(observed, foldLibrary[asset])));
+
+                ranked.Sort(static (a, b) => a.Score.CompareTo(b.Score));
+                int rank = ranked.FindIndex(r => r.Name.Equals(trueName, StringComparison.OrdinalIgnoreCase));
+                if (rank < 0)
+                    continue;
+
+                hRank.Add(rank + 1);
+                hFindableScored++;
+                if (rank < 1) { hTop1++; hFindableTop1++; }
+                if (rank < 3) hTop3++;
+                if (rank < 5) { hTop5++; hFindableTop5++; }
+                if (rank < 10) hTop10++;
+            }
+        }
+
         return new Pm4AssetScoringReport(
             resolved, adtDirectory, assets.Count, scored,
             scored == 0 ? 0 : (double)top1 / scored,
@@ -129,7 +220,18 @@ internal static class Pm4AssetScoringSupport
             rankStat.ToResult("rank of the true asset"),
             shapeBias.ToResult("PM4 larger-horizontal minus MODF"),
             heightBias.ToResult("PM4 height minus MODF"),
-            samples);
+            samples,
+            folds,
+            hScored,
+            hScored == 0 ? 0 : (double)hTop1 / hScored,
+            hScored == 0 ? 0 : (double)hTop3 / hScored,
+            hScored == 0 ? 0 : (double)hTop5 / hScored,
+            hScored == 0 ? 0 : (double)hTop10 / hScored,
+            hScored == 0 ? 0 : (double)hUnfindable / hScored,
+            hFindableScored,
+            hFindableScored == 0 ? 0 : (double)hFindableTop1 / hFindableScored,
+            hFindableScored == 0 ? 0 : (double)hFindableTop5 / hFindableScored,
+            hRank.ToResult("held-out rank of the true asset"));
     }
 
     private readonly record struct Pm4MatchedContext(string File, Vector3 TruthShape);
@@ -315,4 +417,15 @@ internal sealed record Pm4AssetScoringReport(
     Pm4ErrorStat TrueRank,
     Pm4ErrorStat HorizontalBias,
     Pm4ErrorStat HeightBias,
-    IReadOnlyList<Pm4AssetScoringSample> Samples);
+    IReadOnlyList<Pm4AssetScoringSample> Samples,
+    int HoldoutFolds,
+    long HoldoutScored,
+    double HoldoutTop1,
+    double HoldoutTop3,
+    double HoldoutTop5,
+    double HoldoutTop10,
+    double HoldoutUnfindableFraction,
+    long HoldoutFindableScored,
+    double HoldoutFindableTop1,
+    double HoldoutFindableTop5,
+    Pm4ErrorStat HoldoutRank);

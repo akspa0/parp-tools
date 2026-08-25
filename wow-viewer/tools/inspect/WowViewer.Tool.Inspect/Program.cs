@@ -6487,6 +6487,16 @@ static void RunPm4AssetScoring(string[] args)
 	Console.WriteLine();
 	Console.WriteLine($"  median rank of the true asset = {r.TrueRank.MedianAbsError:F1}   p90 = {r.TrueRank.P90AbsError:F1}   worst = {r.TrueRank.MaxAbsError:F0}");
 	Console.WriteLine();
+	Console.WriteLine($"HELD-OUT TILE cross-validation ({r.HoldoutFolds} folds, no object scored against a library its own tile built):");
+	Console.WriteLine($"  objects scored = {r.HoldoutScored}");
+	Console.WriteLine($"  top-1  = {r.HoldoutTop1:P2}");
+	Console.WriteLine($"  top-3  = {r.HoldoutTop3:P2}");
+	Console.WriteLine($"  top-5  = {r.HoldoutTop5:P2}");
+	Console.WriteLine($"  top-10 = {r.HoldoutTop10:P2}");
+	Console.WriteLine($"  asset absent from the library entirely (unfindable at any rank) = {r.HoldoutUnfindableFraction:P2}");
+	Console.WriteLine($"  ... of the {r.HoldoutFindableScored} that WERE findable: top-1 = {r.HoldoutFindableTop1:P2}, top-5 = {r.HoldoutFindableTop5:P2}");
+	Console.WriteLine($"  median held-out rank = {r.HoldoutRank.MedianAbsError:F1}   p90 = {r.HoldoutRank.P90AbsError:F1}");
+	Console.WriteLine();
 	Console.WriteLine("Systematic bias - PM4 boxes hold only collision geometry, so they should run small:");
 	foreach (Pm4ErrorStat e in new[] { r.HorizontalBias, r.HeightBias })
 		Console.WriteLine($"  {e.Name,-38} median {e.MedianAbsError,9:F3}  p90 {e.P90AbsError,9:F3}");

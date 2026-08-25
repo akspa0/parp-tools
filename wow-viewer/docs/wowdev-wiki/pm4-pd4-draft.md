@@ -562,6 +562,7 @@ pm4 mscn-chain         --input <dir> --adt-dir <dir>  # §6 correction, §6b
 pm4 mprl-anchor        --input <dir> --adt-dir <dir>  # §6c
 pm4 terrain-recovery   --input <dir> --adt-dir <dir>  # §6c terrain samples
 pm4 modf-recovery      --input <dir> --adt-dir <dir>  # §6d
+pm4 asset-scoring      --input <dir> --adt-dir <dir>  # candidate-asset matching by shape
 pm4 zero-bucket        --input <dir>                  # §5a
 pm4 stretch-locality   --input <dir> --adt-dir <dir>  # §5a
 ```
