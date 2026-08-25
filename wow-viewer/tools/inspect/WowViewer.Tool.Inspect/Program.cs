@@ -6470,9 +6470,15 @@ static void RunPm4AssetScoring(string[] args)
 		return;
 	}
 
-	Pm4AssetScoringReport r = Pm4AssetScoringSupport.Analyze(input, adtDir);
+	string? libDirs = GetOption(args, "--library-dir");
+	List<string> extra = string.IsNullOrWhiteSpace(libDirs)
+		? []
+		: [.. libDirs.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
+
+	Pm4AssetScoringReport r = Pm4AssetScoringSupport.Analyze(input, adtDir, extra);
 	Console.WriteLine("WowViewer.Tool.Inspect PM4 candidate-asset scoring (shape only, position ignored)");
-	Console.WriteLine($"Assets in library = {r.AssetsInLibrary}   objects scored = {r.ObjectsScored}");
+	Console.WriteLine($"Assets in library = {r.AssetsInLibrary} (from PM4: {r.AssetsFromPm4}, added by extra sources: {r.AssetsInLibrary - r.AssetsFromPm4})");
+	Console.WriteLine($"Extra library shapes pooled = {r.ExtraLibraryShapes}   objects scored = {r.ObjectsScored}");
 	Console.WriteLine();
 	Console.WriteLine("How often does the true asset rank near the top?");
 	Console.WriteLine($"  top-1   = {r.Top1:P2}");

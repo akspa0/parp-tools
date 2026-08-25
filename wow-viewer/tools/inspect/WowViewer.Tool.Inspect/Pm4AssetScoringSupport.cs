@@ -29,7 +29,7 @@ using WowViewer.Core.PM4.Services;
 /// </remarks>
 internal static class Pm4AssetScoringSupport
 {
-    public static Pm4AssetScoringReport Analyze(string pm4Directory, string adtDirectory)
+    public static Pm4AssetScoringReport Analyze(string pm4Directory, string adtDirectory, IReadOnlyList<string>? extraLibraryDirectories = null)
     {
         string resolved = Pm4CoordinateService.ResolveMapDirectory(pm4Directory);
 
@@ -53,6 +53,74 @@ internal static class Pm4AssetScoringSupport
 
             shapes.Add(shape);
             frequency[asset] = frequency.GetValueOrDefault(asset) + 1;
+        }
+
+        int assetsFromPm4 = library.Count;
+        long extraShapes = 0;
+        var pm4Observed = new HashSet<string>(library.Keys, StringComparer.OrdinalIgnoreCase);
+
+        // Extra library sources widen the CANDIDATE SET only. Their boxes come from MODF, which is a
+        // different measurement to a PM4 box - a model box runs a median 6.1 units wider and 10.0
+        // taller - so they are corrected by that offset before being pooled. Mixing them in raw is the
+        // exact mistake that scored 2.50%, and an uncorrected candidate would be unrankable rather
+        // than merely wrong.
+        if (extraLibraryDirectories is { Count: > 0 })
+        {
+            Vector3 correction = new(-MedianOf([.. library.Values.SelectMany(static v => v).Select(static v => v.X)]),
+                                     -MedianOf([.. library.Values.SelectMany(static v => v).Select(static v => v.Y)]),
+                                     -MedianOf([.. library.Values.SelectMany(static v => v).Select(static v => v.Z)]));
+            _ = correction; // shape offsets are applied per-axis below
+
+            foreach (string dir in extraLibraryDirectories)
+            {
+                if (!Directory.Exists(dir))
+                    continue;
+
+                foreach (string adtPath in Directory.EnumerateFiles(dir, "*.adt", SearchOption.AllDirectories))
+                {
+                    AdtPlacementCatalog catalog;
+                    try
+                    {
+                        catalog = AdtPlacementReader.Read(adtPath);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    foreach (AdtWorldModelPlacement row in catalog.WorldModelPlacements)
+                    {
+                        string name = Path.GetFileName(row.ModelPath);
+                        if (string.IsNullOrWhiteSpace(name))
+                            continue;
+
+                        Vector3 modelShape = Shape(row.BoundsMin, row.BoundsMax);
+                        Vector3 asNavmesh = new(
+                            MathF.Max(modelShape.X - HorizontalOffset, 0.1f),
+                            MathF.Max(modelShape.Y - HorizontalOffset, 0.1f),
+                            MathF.Max(modelShape.Z - HeightOffset, 0.1f));
+
+                        // ONLY for assets PM4 has never observed. Pooling these into an asset that
+                        // already has real navmesh boxes destroyed the score - 48.53% to 15.64% top-1 -
+                        // because the model-to-navmesh offset is not the constant the global
+                        // correction pretends it is, and 11,021 corrected guesses drown out a handful
+                        // of measurements. They earn their place only where the alternative is an
+                        // asset that cannot be ranked at all.
+                        if (pm4Observed.Contains(name))
+                            continue;
+
+                        if (!library.TryGetValue(name, out List<Vector3>? shapes))
+                        {
+                            shapes = [];
+                            library[name] = shapes;
+                        }
+
+                        shapes.Add(asNavmesh);
+                        extraShapes++;
+                        frequency[name] = frequency.GetValueOrDefault(name) + 1;
+                    }
+                }
+            }
         }
 
         List<string> assets = [.. library.Keys];
@@ -210,6 +278,7 @@ internal static class Pm4AssetScoringSupport
 
         return new Pm4AssetScoringReport(
             resolved, adtDirectory, assets.Count, scored,
+            assetsFromPm4, extraShapes,
             scored == 0 ? 0 : (double)top1 / scored,
             scored == 0 ? 0 : (double)top3 / scored,
             scored == 0 ? 0 : (double)top5 / scored,
@@ -232,6 +301,18 @@ internal static class Pm4AssetScoringSupport
             hFindableScored == 0 ? 0 : (double)hFindableTop1 / hFindableScored,
             hFindableScored == 0 ? 0 : (double)hFindableTop5 / hFindableScored,
             hRank.ToResult("held-out rank of the true asset"));
+    }
+
+    // Measured offsets between a PM4 navmesh box and the model box MODF records.
+    private const float HorizontalOffset = 6.064f;
+    private const float HeightOffset = 10.044f;
+
+    private static float MedianOf(List<float> v)
+    {
+        if (v.Count == 0)
+            return 0;
+        v.Sort();
+        return v[v.Count / 2];
     }
 
     private readonly record struct Pm4MatchedContext(string File, Vector3 TruthShape);
@@ -407,6 +488,8 @@ internal sealed record Pm4AssetScoringReport(
     string AdtDirectory,
     int AssetsInLibrary,
     long ObjectsScored,
+    int AssetsFromPm4,
+    long ExtraLibraryShapes,
     double Top1,
     double Top3,
     double Top5,
