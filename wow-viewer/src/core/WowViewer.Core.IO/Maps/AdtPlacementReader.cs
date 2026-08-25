@@ -112,6 +112,13 @@ public static class AdtPlacementReader
             float bbMaxY = ReadSingle(entry[52..56]);
             ushort flags = BinaryPrimitives.ReadUInt16LittleEndian(entry[56..58]);
 
+            // The record does not end at flags. doodadSet names which of the WMO's own doodad sets
+            // this placement draws - the props that ship attached to the model instead of as separate
+            // MDDF rows - and dropping it is why a placed WMO can never show them.
+            ushort doodadSet = BinaryPrimitives.ReadUInt16LittleEndian(entry[58..60]);
+            ushort nameSet = BinaryPrimitives.ReadUInt16LittleEndian(entry[60..62]);
+            ushort scale = BinaryPrimitives.ReadUInt16LittleEndian(entry[62..64]);
+
             placements.Add(new AdtWorldModelPlacement(
                 checked((int)nameId),
                 ResolveNameViaXid(nameId, xidEntries, stringBlock),
@@ -120,7 +127,10 @@ public static class AdtPlacementReader
                 new Vector3(rotX, rotY, rotZ),
                 new Vector3(MapOrigin - bbMaxY, MapOrigin - bbMaxX, bbMinZ),
                 new Vector3(MapOrigin - bbMinY, MapOrigin - bbMinX, bbMaxZ),
-                flags));
+                flags,
+                doodadSet,
+                nameSet,
+                scale));
         }
 
         return placements;

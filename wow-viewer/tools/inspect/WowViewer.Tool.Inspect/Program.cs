@@ -6522,6 +6522,10 @@ static void RunPm4ModfRecovery(string[] args)
 		Console.WriteLine($"  {e.Name,-38} {e.Count,6} {e.MedianAbsError,11:F3} {e.P90AbsError,10:F3} {e.MaxAbsError,11:F1} {e.FractionWithin1,12:P1}");
 	Console.WriteLine($"  both corners within 1.0 unit: {r.BoundsWithin1Fraction:P2} of {r.BoundsCompared}");
 	Console.WriteLine();
+	Console.WriteLine("WMO doodad sets - props attached to the model, not separate MDDF rows:");
+	Console.WriteLine($"  placements naming a non-zero doodad set = {r.PlacementsWithNonZeroDoodadSet:P2}");
+	Console.WriteLine($"  set index histogram: {string.Join(", ", r.DoodadSetHistogram.Select(static x => $"set{x.Value}x{x.Count}"))}");
+	Console.WriteLine();
 	Console.WriteLine("Bounding box, per axis:");
 	Console.WriteLine("  axis                                    n      median        p90         max   within 1.0");
 	foreach (Pm4ErrorStat e in r.BoundsPerAxis)

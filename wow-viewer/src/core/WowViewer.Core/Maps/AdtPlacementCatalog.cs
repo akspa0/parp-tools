@@ -18,6 +18,11 @@ public sealed record AdtModelPlacement(
     Vector3 Rotation,
     float Scale);
 
+/// <param name="DoodadSet">
+/// Index of the WMO's own doodad set to draw with this placement - the rocks and props that come
+/// draped on the model rather than as separate MDDF rows. Read but not yet acted on: nothing in the
+/// world render path loads WMO doodads, so a placement whose set is non-zero still shows bare.
+/// </param>
 public sealed record AdtWorldModelPlacement(
     int NameId,
     string ModelPath,
@@ -26,4 +31,7 @@ public sealed record AdtWorldModelPlacement(
     Vector3 Rotation,
     Vector3 BoundsMin,
     Vector3 BoundsMax,
-    ushort Flags);
+    ushort Flags,
+    ushort DoodadSet = 0,
+    ushort NameSet = 0,
+    ushort Scale = 0);

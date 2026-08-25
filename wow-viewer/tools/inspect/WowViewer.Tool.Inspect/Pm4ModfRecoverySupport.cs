@@ -45,6 +45,8 @@ internal static class Pm4ModfRecoverySupport
         var bMaxX = new ErrorAccumulator(); var bMaxY = new ErrorAccumulator(); var bMaxZ = new ErrorAccumulator();
         var ctlMinZ = new ErrorAccumulator();
         long boundsCompared = 0, boundsWithin1 = 0;
+        long placementsWithDoodadSet = 0, placementsTotalSeen = 0;
+        var doodadSetHistogram = new Dictionary<ushort, long>();
 
         var samples = new List<Pm4ModfRecoverySample>();
 
@@ -80,6 +82,14 @@ internal static class Pm4ModfRecoverySupport
 
             filesPaired++;
             modfRowsTotal += modf.Count;
+
+            foreach (AdtWorldModelPlacement row in modf)
+            {
+                placementsTotalSeen++;
+                if (row.DoodadSet != 0)
+                    placementsWithDoodadSet++;
+                doodadSetHistogram[row.DoodadSet] = doodadSetHistogram.GetValueOrDefault(row.DoodadSet) + 1;
+            }
 
             // One PM4 object per distinct placement height, with the box its geometry occupies.
             var lo = new Dictionary<uint, Vector3>();
@@ -181,6 +191,9 @@ internal static class Pm4ModfRecoverySupport
             ctlBoundsMin.ToResult("CONTROL |pm4 min - wrong row BoundsMin|"),
             boundsCompared,
             boundsCompared == 0 ? 0 : (double)boundsWithin1 / boundsCompared,
+            placementsTotalSeen == 0 ? 0 : (double)placementsWithDoodadSet / placementsTotalSeen,
+            [.. doodadSetHistogram.OrderByDescending(static kv => kv.Value).Take(8)
+                .Select(static kv => new Pm4ValueFrequency(kv.Key.ToString(), (int)kv.Value))],
             [
                 bMinX.ToResult("BoundsMin.X"), bMinY.ToResult("BoundsMin.Y"), bMinZ.ToResult("BoundsMin.Z"),
                 bMaxX.ToResult("BoundsMax.X"), bMaxY.ToResult("BoundsMax.Y"), bMaxZ.ToResult("BoundsMax.Z"),
@@ -246,5 +259,7 @@ internal sealed record Pm4ModfRecoveryReport(
     Pm4ErrorStat ControlBoundsMin,
     long BoundsCompared,
     double BoundsWithin1Fraction,
+    double PlacementsWithNonZeroDoodadSet,
+    IReadOnlyList<Pm4ValueFrequency> DoodadSetHistogram,
     IReadOnlyList<Pm4ErrorStat> BoundsPerAxis,
     IReadOnlyList<Pm4ModfRecoverySample> Samples);
