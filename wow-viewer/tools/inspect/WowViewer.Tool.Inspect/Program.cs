@@ -2234,6 +2234,9 @@ static void RunPm4(string[] args)
 		case "asset-scoring":
 			RunPm4AssetScoring(tail);
 			break;
+		case "generate-placements":
+			RunPm4GeneratePlacements(tail);
+			break;
 		case "surface-class":
 			RunPm4SurfaceClass(tail);
 			break;
@@ -6457,6 +6460,41 @@ static void RunPm4SurfaceClass(string[] args)
 		double share = total == 0 ? 0 : (double)o.ObjectsWithHeight / total;
 		Console.WriteLine($"   0x{o.Value:X2}   {o.ObjectsWithHeight,10}   {o.ObjectsWithoutHeight,13}   {total,7}   {share,10:P1}");
 	}
+}
+
+static void RunPm4GeneratePlacements(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? adtDir = GetOption(args, "--adt-dir");
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input) || string.IsNullOrWhiteSpace(adtDir) || string.IsNullOrWhiteSpace(output))
+	{
+		Console.Error.WriteLine("Error: --input, --adt-dir and --output are all required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	double threshold = double.TryParse(GetOption(args, "--threshold"), out double t) ? t : 0.25;
+	Pm4PlacementGenerationReport r = Pm4PlacementGeneratorSupport.Generate(input, adtDir, output, threshold);
+
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 placement generation");
+	Console.WriteLine($"PM4: {r.Pm4Directory}");
+	Console.WriteLine($"Library assets = {r.LibraryAssets}   naming threshold = {r.ConfidenceThreshold}");
+	Console.WriteLine();
+	Console.WriteLine($"Tiles emitted                     = {r.Tiles}");
+	Console.WriteLine($"  with surviving terrain          = {r.TilesWithTerrain}");
+	Console.WriteLine($"  WITHOUT terrain                 = {r.TilesWithoutTerrain}");
+	Console.WriteLine($"  already had placement data      = {r.TilesWithExistingPlacements}");
+	Console.WriteLine();
+	Console.WriteLine($"Objects emitted                   = {r.ObjectsTotal}");
+	Console.WriteLine($"  named with a confident candidate= {r.ObjectsNamed} ({(r.ObjectsTotal == 0 ? 0 : (double)r.ObjectsNamed / r.ObjectsTotal):P2})");
+	Console.WriteLine($"  written as missingwmo.wmo       = {r.ObjectsUnknown} ({(r.ObjectsTotal == 0 ? 0 : (double)r.ObjectsUnknown / r.ObjectsTotal):P2})");
+	Console.WriteLine();
+	Console.WriteLine($"  {r.JsonPath}");
+	Console.WriteLine($"  {r.CsvPath}");
+	Console.WriteLine();
+	Console.WriteLine("  Every row carries its top-5 candidates and a score, so a name is never mistaken");
+	Console.WriteLine("  for a fact. Position and extents are derived from the PM4 and are not guesses.");
 }
 
 static void RunPm4AssetScoring(string[] args)
