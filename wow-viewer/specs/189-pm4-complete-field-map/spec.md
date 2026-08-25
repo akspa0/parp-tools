@@ -48,8 +48,8 @@ the boxes we find are mistakes, but are likely some sort of id in a node graph s
 | `LinkId` | tile address, `(second << 8) \| first`, 98.74% vs 0.31% control | MEASURED |
 | `SystemFlag` | constant 32768 across 486,819 records | MEASURED |
 | `_0x02` | constant 0 | MEASURED |
-| `_0x00` "TypeFlags" | **ENUM, 10 values** | **UNKNOWN — what the 10 values MEAN** |
-| `_0x01` "Subtype" | **ENUM, 19 values, 25% zero** | **UNKNOWN — what the 19 values MEAN** |
+| `_0x00` "TypeFlags" | **bitfield; bit 0 = carries no geometry** (0.0% vs 100.0%, no exceptions) | MEASURED |
+| `_0x01` "Subtype" | **not a taxonomy** — 19 values that separate on nothing; counts decay like a counter | MEASURED as not-a-category; what it counts is open |
 | `_0x04` "GroupObjectId" | **a group key with TINY groups**: 283,066 pairs, 250,192 singletons | PARTIAL — grouping confirmed, what a pair MEANS is open |
 
 **Tested 2026-08-25, and the first reading was wrong in an instructive way.** `_0x04` was recorded as
@@ -61,8 +61,17 @@ The half-edge reading is refuted: of the 283,066 pairs, 7.11% are adjacent in th
 `RefIndex` against a 0.01% control, and **0.08%** point at each other. They are not two ends of an edge.
 What they do share is `TypeFlags`, at **99.82%**.
 
-Still open: what a pair means. The obvious next test is whether one member carries a wall window
-(`MspiFirstIndex >= 0`) while the other carries an anchor (`< 0`).
+That test has since been run and refuted: over 283,066 pairs, 77.09% are two anchors, 22.91% are two
+wall records, and one-of-each is **0.00%**. A pair never binds geometry to an anchor — which follows
+from the shared `TypeFlags`, now that bit 0 is known to decide anchor-vs-geometry. What a pair denotes
+remains open.
+
+`_0x00` and `_0x01` are settled enough to move off the unknown list. `_0x00` is a bitfield whose bit 0
+means "no geometry", splitting 443,882 records at 0.0% carries-wall from 386,351 at 100.0% with no
+exceptions; only 10 of 32 combinations appear, and bits 1 and 2 never co-occur. `_0x01` is the more
+useful negative result: its 19 values are statistically identical on every geometric measure and each
+co-occurs with all 10 `_0x00` values, so it is not a category at all. Its counts decay like a counter.
+What it counts is the open question, and reading it as an enum was the error.
 
 ### `MPRL`
 

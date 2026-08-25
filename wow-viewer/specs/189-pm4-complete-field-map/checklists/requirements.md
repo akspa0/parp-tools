@@ -16,10 +16,14 @@ Every line is a claim about the data, so every line needs a measurement and a co
       singletons); the "near-unique" reading is an artefact of small groups.
 - [x] Half-edge / edge-id reading refuted — pairs point at each other 0.08% of the time.
 - [x] Paired records share `TypeFlags` 99.82%.
-- [ ] What a PAIR denotes. First test: does one member carry a wall window (`MspiFirstIndex >= 0`)
-      while the other carries an anchor (`< 0`)?
-- [ ] `_0x00` TypeFlags — what its 10 values mean, characterised against geometry.
-- [ ] `_0x01` Subtype — what its 19 values mean; 25% zero needs explaining, not rounding off.
+- [x] Pair is NOT geometry-bound-to-anchor — one-of-each is 0.00% over 283,066 pairs.
+- [ ] What a PAIR denotes, given both members are always the same kind.
+- [x] `_0x00` TypeFlags — a bitfield; bit 0 means "carries no geometry" (0.0% vs 100.0%, no
+      exceptions). Bits 1 and 2 never co-occur.
+- [ ] What bits 1/2 select between, and what bits 3/4 modify.
+- [x] `_0x01` Subtype — NOT a taxonomy. All 19 values statistically identical on geometry; counts
+      decay like a counter.
+- [ ] What `_0x01` counts. Sequence within a group and hierarchy depth are the candidates.
 - [ ] The 34.4% of entries with no adjacency component link.
 - [ ] The 1.24% of edges that do not reciprocate — cross-tile neighbours is the obvious candidate and
       is untested.

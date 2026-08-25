@@ -2243,6 +2243,9 @@ static void RunPm4(string[] args)
 		case "mslk-node-id":
 			RunPm4MslkNodeId(tail);
 			break;
+		case "mslk-values":
+			RunPm4MslkValues(tail);
+			break;
 		case "surface-class":
 			RunPm4SurfaceClass(tail);
 			break;
@@ -6465,6 +6468,42 @@ static void RunPm4SurfaceClass(string[] args)
 		int total = o.ObjectsWithHeight + o.ObjectsWithoutHeight;
 		double share = total == 0 ? 0 : (double)o.ObjectsWithHeight / total;
 		Console.WriteLine($"   0x{o.Value:X2}   {o.ObjectsWithHeight,10}   {o.ObjectsWithoutHeight,13}   {total,7}   {share,10:P1}");
+	}
+}
+
+static void RunPm4MslkValues(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4MslkValueReport r = Pm4MslkValueSupport.Analyze(input);
+	Console.WriteLine("WowViewer.Tool.Inspect MSLK enumerated values, characterised by geometry");
+	Console.WriteLine($"Files={r.Files}");
+	Console.WriteLine();
+	Console.WriteLine("MSLK._0x00 TypeFlags:");
+	PrintMslkValues(r.TypeFlags);
+	Console.WriteLine();
+	Console.WriteLine("MSLK._0x01 Subtype:");
+	PrintMslkValues(r.Subtypes);
+	Console.WriteLine();
+	Console.WriteLine($"What is a _0x04 PAIR? (n={r.Pairs})");
+	Console.WriteLine($"  both members carry a wall window     = {r.PairBothWallFraction:P2}");
+	Console.WriteLine($"  both members are anchors (no window)  = {r.PairBothAnchorFraction:P2}");
+	Console.WriteLine($"  one of each                           = {r.PairOneEachFraction:P2}");
+	Console.WriteLine($"  members share Subtype                 = {r.PairSameSubtypeFraction:P2}");
+}
+
+static void PrintMslkValues(IReadOnlyList<Pm4MslkValueResult> values)
+{
+	Console.WriteLine("  value   records  carriesWall  meanWinLen   meanZext  tallerThanWide  subtypes  types");
+	foreach (Pm4MslkValueResult v in values)
+	{
+		Console.WriteLine($"  {v.Value,-6} {v.Records,9} {v.CarriesWindowFraction,12:P1} {v.MeanWindowLength,11:F2} {v.MeanZExtent,10:F2} {v.TallerThanWideFraction,15:P1} {v.DistinctSubtypes,9} {v.DistinctTypeFlags,6}");
 	}
 }
 
