@@ -2,6 +2,17 @@
 
 Last updated: 2026-08-25
 
+## 2026-08-25 — Spec 176: in-app cross-platform path picker replaces typed paths
+
+- **No more typing paths, no native dialogs.** New [`ImGuiPathPicker`](../../src/viewer/WoWViewer/
+  ImGuiPathPicker.cs): an in-app ImGui modal built exclusively on BCL filesystem APIs
+  (`Directory.EnumerateDirectories/Files`), so browsing behaves identically on every platform —
+  the WinForms STA dialogs used elsewhere remain Windows-only and are untouched here.
+- The Reconcile panel's PM4 guide / Museum ADT / Output dir rows each gained a Browse button
+  (file mode filtered to .pm4/.adt; folder mode for output). Manual text entry still works.
+- Proof: WoWViewer compiles with 0 errors (final copy step blocked only by the user's running
+  viewer instance); 81/81 focused editor tests unaffected.
+
 ## 2026-08-25 — Spec 176 review UX: real confidences, bulk accept, already-aligned reporting
 
 - **Align proposals no longer hardcode confidence 0.00.** `ConfidenceFromResidual` maps the position

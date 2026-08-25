@@ -291,9 +291,9 @@ public partial class ViewerApp
                 : "No PM4/_obj0 pair found on disk for the camera tile.";
         }
 
-        ImGui.InputText("PM4 guide", ref _reconciliationPm4Path, 512);
-        ImGui.InputText("Museum ADT", ref _reconciliationMuseumPath, 512);
-        ImGui.InputText("Output dir", ref _reconciliationOutputDir, 512);
+        DrawReconciliationPathField("PM4 guide", () => _reconciliationPm4Path, v => _reconciliationPm4Path = v, "Select PM4 guide", pickFolder: false, ".pm4");
+        DrawReconciliationPathField("Museum ADT", () => _reconciliationMuseumPath, v => _reconciliationMuseumPath = v, "Select Museum ADT", pickFolder: false, ".adt");
+        DrawReconciliationPathField("Output dir", () => _reconciliationOutputDir, v => _reconciliationOutputDir = v, "Select output folder", pickFolder: true, filterExtension: null);
         ImGui.InputText("Build fingerprint", ref _reconciliationBuildFingerprint, 128);
 
         if (ImGui.Button("Preview"))
@@ -361,6 +361,34 @@ public partial class ViewerApp
             ApplyAcceptedReconciliation();
         }
         ImGui.EndDisabled();
+
+        // The picker modal must be driven every frame its host surface is visible.
+        ImGuiPathPicker.Instance.Draw();
+    }
+
+    /// <summary>One path row: editable text plus an in-app Browse button (no native dialogs).</summary>
+    private void DrawReconciliationPathField(
+        string label,
+        Func<string> getPath,
+        Action<string> setPath,
+        string pickerTitle,
+        bool pickFolder,
+        string? filterExtension)
+    {
+        string path = getPath();
+        ImGui.InputText(label, ref path, 512);
+        setPath(path);
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton($"Browse##{label}"))
+        {
+            ImGuiPathPicker.Instance.Open(
+                pickerTitle,
+                pickFolder,
+                path,
+                filterExtension,
+                picked => setPath(picked));
+        }
     }
 
     private void RunReconciliationPreview()
