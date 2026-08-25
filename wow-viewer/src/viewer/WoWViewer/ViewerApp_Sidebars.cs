@@ -4399,6 +4399,9 @@ public partial class ViewerApp
                 case WorkbenchTab.Experimental:
                     DrawExperimentalSubTabContent();
                     break;
+                case WorkbenchTab.Editor:
+                    DrawEditorContent();
+                    break;
             }
         }
         ImGui.EndChild();
@@ -4999,8 +5002,9 @@ public partial class ViewerApp
             case Pm4BottomTab.Info:
                 DrawPm4InfoPanelContent();
                 break;
-            case Pm4BottomTab.Match:
-                DrawPm4ObjectMatchWindow();
+            case Pm4BottomTab.Reconcile:
+                PrefillReconciliationPathsFromScene();
+                DrawReconciliationPanel();
                 break;
             case Pm4BottomTab.Alignment:
                 DrawPm4AlignmentWindow();

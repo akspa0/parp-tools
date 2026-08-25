@@ -1,9 +1,29 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-08-15
+Last updated: 2026-08-25
 
 This file is the interchange for the next agent. It records only the current routing state. Read
 the owning spec for requirements and proof; read a workstream only when the spec links it.
+
+**Editor Platform lane (2026-08-25).** The editor dependency chain for Spec 176 is implemented
+library-first and tested: `src/core/WowViewer.Core.Editor/` (166 plugin host, 167 bridge contracts +
+operations-as-data, 168 session/undo/save policy, 173 asset-integrity gate), `AdtPlacementEditor` in
+`WowViewer.Core.IO/Maps` (175 placement authoring + 176 Phase 2 name-table/ID mutation; ID allocation
+now keeps an original-catalog high-water mark so substitute delete+add continues the chronology),
+and `Pm4ReconciliationEngine` + `Pm4ReconciliationInputAdapter` in `WowViewer.Core.PM4/Reconciliation`
+(176 Phases 1–2: real guide observations from `Pm4ObjectSegmentBuilder`, canonical world→placement
+composition, MSUR `_0x1C` height signal validated against the segment Z span, bounds-containment
+association with explicit Conflict for competing placements, scorer candidates over a labelled
+Museum self-corpus). The **viewer shell runs the real pipeline**: the Editor workbench destination's
+reconciliation panel parses the actual PM4 guide and Museum ADT, and Apply goes through
+`ReconciliationApplyService` — source-hash staleness refusal, session write guards, JSON provenance
+sidecar (FR-016), and undoable `ReconciliationApplyOperation` restoring prior output bytes. 79 focused
+`WowViewer.Core.Editor.Tests` pass; the full solution builds 0 errors. Known gaps: proposals are not
+yet drawn as in-scene overlays (Phase 3 step 3), the P1 cross-tile/cross-era transfer story is
+untouched, and one pre-existing real-corpus test (`Pm4RegionObjectGrouperTests`, local development
+corpus) fails independently of this lane. Real Museum/PM4 visual + independent-reader proof remains
+user-owned; no runtime/visual claim is made from compilation. See Specs 166–168, 173, 175, 176 and
+`progress.md`.
 
 ## Current handoff
 

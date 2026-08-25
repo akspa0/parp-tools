@@ -13046,7 +13046,19 @@ void main() {
                 if (sourceBytes == null)
                     throw new InvalidOperationException($"The source ADT could not be read from the current data source: {sourcePath}");
 
-                throw new NotSupportedException("AdtPlacement editing requires legacy WoWRollback module."); byte[] updatedBytes = new byte[0];
+                // Apply every staged move through the library-first placement editor, which rebuilds
+                // only the placement/name-table chunks and preserves all other bytes.
+                var placementEdits = new List<AdtPlacementEdit>(edits.Count);
+                foreach (StagedPlacementEdit edit in edits)
+                {
+                    placementEdits.Add(new AdtPlacementMoveEdit(
+                        edit.Key.ObjectType == Terrain.ObjectType.Wmo ? AdtPlacementKind.WorldModel : AdtPlacementKind.Model,
+                        edit.Key.EntryIndex,
+                        edit.Key.UniqueId,
+                        edit.EditedPosition));
+                }
+
+                byte[] updatedBytes = AdtPlacementEditor.Apply(sourceBytes, sourcePath, placementEdits).Bytes;
 
                 string? outputDirectory = Path.GetDirectoryName(outputPath);
                 if (!string.IsNullOrWhiteSpace(outputDirectory))

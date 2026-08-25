@@ -1,0 +1,244 @@
+openapi: 3.1.0
+info:
+  title: PM4-Guided Reconciliation Command Contract
+  version: 0.1.0
+  description: >-
+    Transport-neutral command shapes for the editor bridge. These paths describe the in-process
+    application service boundary; this feature does not require an HTTP server or make MCP a core
+    dependency. PM4 and client files are read-only inputs. Output is loose ADT/WDT content plus a
+    provenance sidecar.
+servers:
+  - url: https://local.invalid
+    description: Placeholder for schema tooling only; not a runtime endpoint.
+paths:
+  /reconciliation/previews:
+    post:
+      operationId: createReconciliationPreview
+      summary: Build a side-effect-free PM4/Museum preview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreviewRequest'
+      responses:
+        '200':
+          description: Immutable proposals and diagnostics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconciliationPreview'
+        '409':
+          description: PM4/ADT companion or build identity conflict
+  /reconciliation/previews/{previewId}/decisions:
+    post:
+      operationId: recordReviewDecision
+      summary: Record an explicit accept or reject decision
+      parameters:
+        - $ref: '#/components/parameters/PreviewId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionRequest'
+      responses:
+        '200':
+          description: Decision recorded without writing client content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewDecision'
+        '409':
+          description: Proposal is stale, ambiguous, unsupported, or conflicts with another decision
+  /reconciliation/batches/validate:
+    post:
+      operationId: validateReconciliationBatch
+      summary: Validate accepted decisions before writing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRequest'
+      responses:
+        '200':
+          description: Validation result and planned writes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationResult'
+        '422':
+          description: Refused because an invariant or supported-era rule failed
+  /reconciliation/batches/{batchId}/apply:
+    post:
+      operationId: applyReconciliationBatch
+      summary: Atomically write accepted placement edits and clones
+      parameters:
+        - $ref: '#/components/parameters/BatchId'
+      responses:
+        '200':
+          description: Applied editor operation and provenance report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyResult'
+        '409':
+          description: Source changed, ID/name collision appeared, or atomic commit failed
+  /reconciliation/batches/{batchId}/undo:
+    post:
+      operationId: undoReconciliationBatch
+      summary: Undo the applied editor operation
+      parameters:
+        - $ref: '#/components/parameters/BatchId'
+      responses:
+        '200':
+          description: Prior placement/name-table state restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UndoResult'
+        '409':
+          description: Undo refused because the output was modified by another operation
+components:
+  parameters:
+    PreviewId:
+      name: previewId
+      in: path
+      required: true
+      schema:
+        type: string
+    BatchId:
+      name: batchId
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    Vector3:
+      type: object
+      required: [x, y, z]
+      properties:
+        x: { type: number }
+        y: { type: number }
+        z: { type: number }
+    PreviewRequest:
+      type: object
+      required: [pm4Paths, museumPaths, outputDirectory, buildFingerprint]
+      properties:
+        pm4Paths:
+          type: array
+          items: { type: string }
+        museumPaths:
+          type: array
+          items: { type: string }
+        outputDirectory: { type: string }
+        buildFingerprint: { type: string }
+        targetTileCoordinates:
+          type: array
+          items: { type: string }
+    ReconciliationPreview:
+      type: object
+      required: [previewId, sourceHashes, proposals]
+      properties:
+        previewId: { type: string }
+        sourceHashes:
+          type: object
+          additionalProperties: { type: string }
+        proposals:
+          type: array
+          items:
+            $ref: '#/components/schemas/Proposal'
+        diagnostics:
+          type: array
+          items: { type: string }
+    Proposal:
+      type: object
+      required: [proposalId, action, status, confidence, evidence]
+      properties:
+        proposalId: { type: string }
+        action:
+          type: string
+          enum: [align, substitute, clone]
+        status:
+          type: string
+          enum: [review-required, unsupported, conflict, accepted, rejected]
+        guideId: { type: string }
+        placementId: { type: string }
+        assetId: { type: string }
+        proposedPosition: { $ref: '#/components/schemas/Vector3' }
+        proposedRotation: { $ref: '#/components/schemas/Vector3' }
+        proposedScale: { $ref: '#/components/schemas/Vector3' }
+        residual:
+          type: object
+          additionalProperties: { type: number }
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        evidence:
+          type: array
+          items: { type: string }
+    DecisionRequest:
+      type: object
+      required: [proposalId, disposition]
+      properties:
+        proposalId: { type: string }
+        disposition:
+          type: string
+          enum: [accept, reject]
+        reason: { type: string }
+        reviewer: { type: string }
+    ReviewDecision:
+      allOf:
+        - $ref: '#/components/schemas/DecisionRequest'
+        - type: object
+          required: [decisionId, createdUtc]
+          properties:
+            decisionId: { type: string }
+            createdUtc: { type: string, format: date-time }
+    BatchRequest:
+      type: object
+      required: [batchId, previewId, acceptedProposalIds]
+      properties:
+        batchId: { type: string }
+        previewId: { type: string }
+        acceptedProposalIds:
+          type: array
+          items: { type: string }
+    ValidationResult:
+      type: object
+      required: [batchId, valid, plannedWrites, refusals]
+      properties:
+        batchId: { type: string }
+        valid: { type: boolean }
+        plannedWrites:
+          type: array
+          items: { type: string }
+        refusals:
+          type: array
+          items: { type: string }
+        allocatedIds:
+          type: object
+          additionalProperties: { type: integer }
+    ApplyResult:
+      type: object
+      required: [batchId, outputPaths, reportPath, outputHashes]
+      properties:
+        batchId: { type: string }
+        outputPaths:
+          type: array
+          items: { type: string }
+        reportPath: { type: string }
+        outputHashes:
+          type: object
+          additionalProperties: { type: string }
+    UndoResult:
+      type: object
+      required: [batchId, undone, restoredPaths]
+      properties:
+        batchId: { type: string }
+        undone: { type: boolean }
+        restoredPaths:
+          type: array
+          items: { type: string }

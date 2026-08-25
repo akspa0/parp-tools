@@ -5,6 +5,7 @@ using System.Globalization;
 using ImGuiNET;
 using WoWViewer.Logging;
 using WoWViewer.Terrain;
+using WoWViewer.Workbench;
 using MslkEntry = WowViewer.Core.PM4.Models.Pm4MslkEntry;
 
 namespace WoWViewer;
@@ -1200,10 +1201,11 @@ public partial class ViewerApp
             if (ImGui.Button("Export PM4 OBJ Set"))
                 ExportPm4ObjectsObjSet();
             ImGui.SameLine();
-            if (ImGui.Button("PM4 Object Match"))
+            if (ImGui.Button("Reconcile Tile"))
             {
-                _showPm4ObjectMatchWindow = true;
-                EnsurePm4ObjectMatchReportLoaded();
+                // The old corpus-wide object-match report froze the render thread on whole-map
+                // loads; the Reconcile tab runs the Spec 176 tile-scoped pipeline instead.
+                _activePm4TabIndex = (int)Pm4BottomTab.Reconcile;
             }
             ImGui.SameLine();
             if (ImGui.Button("Dump PM4/WMO Correlation JSON"))
@@ -1778,10 +1780,11 @@ public partial class ViewerApp
         if (ImGui.Button("Export PM4 OBJ Set"))
             ExportPm4ObjectsObjSet();
         ImGui.SameLine();
-        if (ImGui.Button("PM4 Object Match"))
+        if (ImGui.Button("Reconcile Tile"))
         {
-            _showPm4ObjectMatchWindow = true;
-            EnsurePm4ObjectMatchReportLoaded();
+            // The old corpus-wide object-match report froze the render thread on whole-map
+            // loads; the Reconcile tab runs the Spec 176 tile-scoped pipeline instead.
+            _activePm4TabIndex = (int)Pm4BottomTab.Reconcile;
         }
         ImGui.SameLine();
         if (ImGui.Button("Dump PM4/WMO Correlation JSON"))

@@ -35,6 +35,7 @@
     <ProjectReference Include="..\..\..\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj" />
     <ProjectReference Include="..\..\..\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj" />
     <ProjectReference Include="..\..\..\src\core\WowViewer.Core.PM4\WowViewer.Core.PM4.csproj" />
+    <ProjectReference Include="..\..\..\src\core\WowViewer.Core.Editor\WowViewer.Core.Editor.csproj" />
     <ProjectReference Include="..\..\..\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
     <ProjectReference Include="..\..\..\libs\ModernWoWTools\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
     <ProjectReference Include="..\..\..\libs\WoW-Tools\GillijimProject\gillijimproject-csharp.csproj" />

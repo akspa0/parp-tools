@@ -12,4 +12,5 @@ public enum WorkbenchTab
     Scene = 2,
     Utilities = 3,
     Experimental = 4,
+    Editor = 5,
 }

@@ -2516,6 +2516,7 @@ public class WorldScene : ISceneRenderer
         int placementsWithNearCandidates = 0;
 
         List<Pm4WmoCorrelationPlacement> placementReports = _tileWmoInstances
+            .Where(tileEntry => IsTileWithinPm4MatchRadius((tileEntry.Key.Item1, tileEntry.Key.Item2)))
             .OrderBy(static kvp => kvp.Key.Item1)
             .ThenBy(static kvp => kvp.Key.Item2)
             .SelectMany(tileEntry => tileEntry.Value
@@ -2775,6 +2776,32 @@ public class WorldScene : ISceneRenderer
         });
     }
 
+    /// <summary>
+    /// Legacy match/correlation reports are scoped to this many tiles around the camera tile; an
+    /// unscoped build walked every loaded tile and froze the render thread on whole-map loads.
+    /// </summary>
+    internal const int Pm4MatchCameraTileRadius = 1;
+
+    /// <summary>The camera-anchor tile, or null when the camera is outside the 64x64 grid.</summary>
+    internal (int tileX, int tileY)? GetPm4CameraTile()
+    {
+        Vector3 anchor = GetPm4LoadAnchorCameraPosition();
+        int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - anchor.X) / WoWConstants.ChunkSize);
+        int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - anchor.Y) / WoWConstants.ChunkSize);
+        if ((uint)tileX >= 64u || (uint)tileY >= 64u)
+            return null;
+
+        return (tileX, tileY);
+    }
+
+    private bool IsTileWithinPm4MatchRadius((int tileX, int tileY) candidate)
+    {
+        (int tileX, int tileY)? center = GetPm4CameraTile();
+        return !center.HasValue
+            || (Math.Abs(candidate.tileX - center.Value.tileX) <= Pm4MatchCameraTileRadius
+                && Math.Abs(candidate.tileY - center.Value.tileY) <= Pm4MatchCameraTileRadius);
+    }
+
     internal Pm4ObjectMatchReport BuildPm4ObjectMatchReport(int maxMatchesPerObject = 8)
     {
         EnsurePm4OverlayMatchesCameraWindow(GetPm4LoadAnchorCameraPosition());
@@ -2844,7 +2871,7 @@ public class WorldScene : ISceneRenderer
     {
         List<Pm4ObjectMatchState> states = new(_pm4ObjectLookup.Count);
 
-        foreach (var tileEntry in _pm4TileObjects)
+        foreach (var tileEntry in _pm4TileObjects.Where(tileEntry => IsTileWithinPm4MatchRadius(tileEntry.Key)))
         {
             foreach (Pm4OverlayObject obj in tileEntry.Value)
             {
@@ -14951,7 +14978,7 @@ public class WorldScene : ISceneRenderer
         Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
         var inputs = new List<CorePm4CorrelationGeometryInput>(_pm4ObjectLookup.Count);
 
-        foreach (var tileEntry in _pm4TileObjects)
+        foreach (var tileEntry in _pm4TileObjects.Where(tileEntry => IsTileWithinPm4MatchRadius(tileEntry.Key)))
         {
             foreach (Pm4OverlayObject obj in tileEntry.Value)
             {

@@ -1,6 +1,100 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-15
+Last updated: 2026-08-25
+
+## 2026-08-25 — Spec 176 Reconcile tab in the PM4 workbench; freezing Match tab retired
+
+- **The old "Match" bottom tab is retired.** Clicking it built `BuildPm4ObjectMatchReport` over every
+  loaded tile × every placement synchronously on the render thread — the reported whole-map freeze.
+  `Pm4BottomTab.Match` is now `Reconcile`, hosting the Spec 176 reconciliation panel (real
+  PM4-driven preview + guarded apply with provenance sidecar and undo). Both former "PM4 Object
+  Match" buttons now switch to the Reconcile sub-tab instead of building the corpus report.
+- **Legacy correlation/match reports are camera-scoped.** `BuildPm4ObjectMatchStates`,
+  `BuildPm4CorrelationObjectStates`, and the `_tileWmoInstances` walk in
+  `BuildPm4WmoPlacementCorrelationReport` now filter to tiles within
+  `Pm4MatchCameraTileRadius` (1) of the camera tile via the new `WorldScene.GetPm4CameraTile()`, so
+  the surviving Correlation tab can no longer walk a whole loaded map.
+- **Paths prefill from the scene.** Opening Reconcile (or pressing its new "Use Camera Tile" button)
+  derives `<map>_<Ytile>_<Xtile>_obj0.adt` and `<map>_<Ytile:D2>_<Xtile:D2>.pm4` from the session map
+  directory (`TryResolveCurrentMapDirectory`) and camera tile, using the measured filename convention
+  (first number bounds Y — verified against the coordinate service's worked example). Preview →
+  accept → Apply Accepted writes the fixed ADT plus `.reconciliation.json` provenance beside it.
+- Proof: WoWViewer project builds 0 errors; 79/79 focused editor tests still pass. Runtime freeze
+  relief and prefill correctness on a real map are user-owned visual checks.
+
+## 2026-08-25 — Spec 176 real PM4-driven preview + hardened apply (skeleton replaced)
+
+- **The reconciliation preview no longer fabricates guides from the Museum's own placements.**
+  `RunReconciliationPreview` now parses the actual PM4 guide with `Pm4ObjectSegmentBuilder`, converts
+  each segment to a placement-space observation via `Pm4ReconciliationInputAdapter` (canonical
+  `(MapOrigin - world.Y, MapOrigin - world.X, world.Z)` composition; min/max recomputed after the
+  reflection; MSUR `_0x1C` height signal taken as the median of values finite and inside the segment
+  Z span ±50, else null), and associates placements by tolerance-expanded bounds containment:
+  none → clone path, exactly one → align/substitute by kind, more than one → `Conflict` proposal
+  naming every competitor (FR-014). Candidates come from the existing `Pm4AssetMatchScorer` over a
+  labelled Museum self-corpus (`museum-self-corpus` + `fallback-placement-bounds` tags; WMO MODF
+  bounds, M2 ±2 fallback box).
+- **Apply is hardened** through new core owners: `ReconciliationApplyService` refuses an empty batch,
+  a stale source hash, or any non-actionable proposal; align → move, substitute → delete+add of the
+  candidate asset, clone → add, all via the existing `AdtPlacementEditor`. The viewer resolves output
+  paths through `EditorSession.ResolveOutputPath` (protected roots + MPQ refusal), writes a JSON
+  provenance sidecar (FR-016: batch id, source hashes, decisions, allocations, output hash), and
+  records an undoable `ReconciliationApplyOperation` whose reverse restores prior output bytes
+  byte-identically — or removes output + sidecar when the apply created them.
+- **Defect fixed in `AdtPlacementEditor`:** ID allocation restarted from the post-delete max, so a
+  substitute's delete+add pair allocated id 1 on a tile whose chronology reached 77. Allocation now
+  keeps a high-water mark captured from the original catalog.
+- Proof: full solution Debug build 0 errors; **79/79 focused `WowViewer.Core.Editor.Tests` pass**
+  (adapter conversion/height/snapshots/self-corpus/candidate mapping, tile association semantics,
+  apply round-trips incl. substitute ID continuity and staleness refusal, operation reverse
+  semantics). One pre-existing failure noted independently: `Pm4RegionObjectGrouperTests`
+  ("Non-empty region 0 should have objects") over the local development corpus — untouched by this
+  work. Remaining gaps: in-scene proposal overlay (Phase 3 step 3), P1 cross-tile/cross-era transfer,
+  user-owned real Museum/PM4 visual + independent-reader proof.
+
+## 2026-08-25 — Editor Platform foundation + Spec 176 reconciliation core (library-first, tested)
+
+- Stood up the Editor Platform as a new `WowViewer.Core.Editor` library (added to the solution) and
+  implemented the dependency chain the Spec 176 plan gates on, all library-first so the runtime never
+  references an editor type and the viewer stays buildable with the editor removed.
+- **166 plugin host**: `EditorHost` + registry, deterministic build-version/era model
+  (`EditorBuildVersion`/`EditorBuildEraRange`/`EraHandlerResolver`), lifecycle with fault containment
+  (faulted plugins are not retried every frame), duplicate-identity startup failure, and a reference
+  plugin.
+- **167 bridge**: renderer-free scene snapshot (`EditorSceneSnapshot`), operations-as-data
+  (`EditorOperation`/`PlacementMoveOperation`), and `PlacementWriteService` — the sole production caller
+  of `AdtPlacementWriter` (retires `ViewerApp`'s parallel staging; removal of its 112 refs remains a
+  viewer-shell step).
+- **168 session**: cross-plugin undo/redo, aggregated dirty state, and write-safety policy (protected
+  roots, MPQ refusal, output-dir resolution).
+- **173 integrity gate**: validate-on-read verdicts, refuse-on-unverified/quarantined, re-read verify,
+  and mandatory provenance. The modernwow census (FR-007) and real 384-group WMO merge (FR-008) are
+  user-owned corpus gates.
+- **175 placement authoring**: `AdtPlacementEditor` in `WowViewer.Core.IO/Maps` — move/rotate/scale/add/
+  delete plus deterministic non-colliding ID allocation and MMDX/MMID/MWMO/MWID name-table merge/index
+  remap, rebuilding only placement+name-table chunks and copying all other chunks byte-identically.
+- **176 Phase 1**: reconciliation models + `Pm4ReconciliationEngine` in `WowViewer.Core.PM4/
+  Reconciliation` — deterministic align/substitute/clone proposals with explicit
+  `ReviewRequired`/`Conflict` status, residual/evidence records, and never a proximity-as-certainty
+  claim.
+- Proof: full solution Debug build 0 errors; 58 focused `WowViewer.Core.Editor.Tests` pass (plugin host,
+  era resolution, bridge write-service round-trip, session, integrity gate, placement editor round-trip,
+  reconciliation). Remaining is the viewer shell (editor destination, bridge adapter, PM4/Museum overlay
+  preview, save/reload provenance UI) plus user-owned real-client/corpus proof — no runtime/visual claim
+  is made from compilation.
+
+## 2026-08-25 — Spec 176 PM4-guided Museum placement repair planning
+
+- Expanded the existing object-transfer spec into a reviewed PM4-guided workflow: preserve the Museum
+  placements as the editable source, use PM4 as a read-only guide, preview alignment/substitution/clone
+  proposals, require explicit decisions, and save loose ADT/WDT outputs with provenance.
+- Created the Spec Kit planning pack: research, data model, transport-neutral OpenAPI command shapes,
+  quickstart, and a dependency-gated implementation plan. The design reuses the existing PM4 scorer,
+  replacement synthesizer, coordinate service, ADT placement catalog, and writers; it adds no parser,
+  serializer, model-training lane, or automatic identity claim.
+- Proof level: planning/source inspection only. Real Museum/PM4 visual alignment, independent-reader
+  reload, and output-write proof remain user-owned future gates. The local Spec Kit agent-context updater
+  is absent from this checkout, so no generated agent file was changed.
 
 ## 2026-08-15 — Spec 151 WMO admission instrumentation (source proof only, nothing measured)
 
