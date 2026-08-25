@@ -77,6 +77,9 @@ switch (area)
 	case "pm4":
 		RunPm4(tail);
 		break;
+	case "adt":
+		RunAdt(tail);
+		break;
 	case "pd4":
 		RunPd4(tail);
 		break;
@@ -6560,6 +6563,65 @@ static void PrintMprlEnum(IReadOnlyList<Pm4MprlEnumResult> values)
 	Console.WriteLine("    value      count   meanHeight    minHeight    maxHeight");
 	foreach (Pm4MprlEnumResult v in values.Take(16))
 		Console.WriteLine($"    {v.Value,-8} {v.Count,8} {v.MeanHeight,12:F2} {v.MinHeight,12:F2} {v.MaxHeight,12:F2}");
+}
+
+static void RunAdt(string[] args)
+{
+	string? area = args.FirstOrDefault();
+	string[] tail = args.Length > 1 ? args[1..] : [];
+
+	switch (area)
+	{
+		case "validate":
+			RunAdtValidate(tail);
+			break;
+		default:
+			Console.Error.WriteLine("Usage: adt validate --input <file.adt|directory>");
+			Environment.ExitCode = 1;
+			break;
+	}
+}
+
+static void RunAdtValidate(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: --input is required (an .adt file or a directory of them).");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	bool verbose = args.Contains("--verbose") || args.Contains("-v");
+	AdtValidateReport r = AdtValidateSupport.Validate(input);
+
+	Console.WriteLine("WowViewer.Tool.Inspect ADT structural validation");
+	Console.WriteLine($"Input: {r.Input}");
+	Console.WriteLine($"  files={r.Files}   passed={r.Passed}   FAILED={r.Failed}");
+	Console.WriteLine();
+	Console.WriteLine("Walked strictly as offset + 8 + size, no padding assumed and no recovery attempted -");
+	Console.WriteLine("the contract a client relies on. Real ADTs have no odd-sized chunks at all.");
+	Console.WriteLine();
+
+	foreach (AdtFileResult f in r.Results.Where(static x => !x.Ok))
+		Console.WriteLine($"  FAIL  {f.File,-34} chunks={f.Chunks,4} odd={f.OddSizedChunks,3} mcnk={f.McnkCount,4}  {f.Detail}");
+
+	if (verbose)
+	{
+		foreach (AdtFileResult f in r.Results.Where(static x => x.Ok))
+			Console.WriteLine($"  ok    {f.File,-34} chunks={f.Chunks,4} odd={f.OddSizedChunks,3} mcnk={f.McnkCount,4}  {f.Detail}");
+	}
+	else if (r.Passed > 0)
+	{
+		AdtFileResult sample = r.Results.First(static x => x.Ok);
+		Console.WriteLine($"  ok    {sample.File,-34} chunks={sample.Chunks,4} odd={sample.OddSizedChunks,3} mcnk={sample.McnkCount,4}  {sample.Detail}");
+		Console.WriteLine($"        top-level chunks: {string.Join(" ", sample.TopLevelChunks)}");
+		if (r.Passed > 1)
+			Console.WriteLine($"        ... and {r.Passed - 1} more passing (--verbose to list)");
+	}
+
+	if (r.Failed > 0)
+		Environment.ExitCode = 1;
 }
 
 static void RunPm4MslkValues(string[] args)

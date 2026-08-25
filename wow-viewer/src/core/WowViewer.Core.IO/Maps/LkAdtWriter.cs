@@ -610,26 +610,25 @@ public static class LkAdtWriter
     }
 
     /// <summary>
-    /// Writes one chunk, padding an odd payload to an even length and COUNTING the pad in the size.
+    /// Writes one chunk: tag, payload length, payload. No padding, because real ADTs do not pad.
     /// </summary>
     /// <remarks>
-    /// This used to emit the pad byte without including it in the declared size, which desynchronises
-    /// any reader that walks chunks sequentially by <c>offset + 8 + size</c> - it lands one byte short
-    /// and reads the next tag as garbage. Measured against a real ADT from the corpus: 260 chunks and
-    /// not one of them has an odd size, so Blizzard keeps payloads even rather than padding outside the
-    /// length. Files written the old way parsed only if the reader happened to guess the same padding
-    /// rule, and a client walking MCNKs would not.
+    /// This has been wrong twice, in opposite directions, and the measurement that settles it is worth
+    /// keeping. It originally appended a zero byte for odd payloads WITHOUT counting it in the declared
+    /// size, which desynchronises any reader walking <c>offset + 8 + size</c>: it lands a byte short and
+    /// reads the next tag as garbage. The first attempt to fix that counted the pad instead, which
+    /// parses but inserts a byte real files do not contain.
     ///
-    /// <para>The extra byte is a zero appended to the payload, which is harmless for the string blocks
-    /// this affects since they are already null-terminated.</para>
+    /// <para>Neither is right. Across 1,225 ADTs in the development corpus, odd-sized chunks are
+    /// ordinary - one <c>_tex0</c> file alone has 107 of them - and every one of those files walks
+    /// strictly to completion. So the size field is simply the true payload length, odd or even, and
+    /// nothing is padded. The earlier claim that real ADTs have no odd-sized chunks came from looking at
+    /// a single file.</para>
     /// </remarks>
     private static void WriteDataChunk(BinaryWriter bw, string tag, byte[] payload)
     {
-        bool pad = (payload.Length & 1) != 0;
         bw.Write(FourCC.FromString(tag).ToFileBytes());
-        bw.Write(payload.Length + (pad ? 1 : 0));
+        bw.Write(payload.Length);
         bw.Write(payload);
-        if (pad)
-            bw.Write((byte)0);
     }
 }
