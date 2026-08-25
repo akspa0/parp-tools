@@ -2228,6 +2228,9 @@ static void RunPm4(string[] args)
 		case "mprl-anchor":
 			RunPm4MprlAnchor(tail);
 			break;
+		case "terrain-recovery":
+			RunPm4TerrainRecovery(tail);
+			break;
 		case "surface-class":
 			RunPm4SurfaceClass(tail);
 			break;
@@ -6451,6 +6454,42 @@ static void RunPm4SurfaceClass(string[] args)
 		double share = total == 0 ? 0 : (double)o.ObjectsWithHeight / total;
 		Console.WriteLine($"   0x{o.Value:X2}   {o.ObjectsWithHeight,10}   {o.ObjectsWithoutHeight,13}   {total,7}   {share,10:P1}");
 	}
+}
+
+static void RunPm4TerrainRecovery(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? adtDir = GetOption(args, "--adt-dir");
+	if (string.IsNullOrWhiteSpace(input) || string.IsNullOrWhiteSpace(adtDir))
+	{
+		Console.Error.WriteLine("Error: --input and --adt-dir are both required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4TerrainRecoveryReport r = Pm4TerrainRecoverySupport.Analyze(input, adtDir);
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 terrain recovery");
+	Console.WriteLine($"Tiles scored = {r.Tiles}");
+	Console.WriteLine();
+	Console.WriteLine("Step 1 - MCVT vertex order, resolved from ADT self-consistency (no PM4 involved):");
+	Console.WriteLine("  ordering                                    overlaps");
+	foreach (Pm4ValueFrequency v in r.VertexOrderScores)
+		Console.WriteLine($"  {v.Value,-42} {v.Count,9}");
+	Console.WriteLine($"  resolved = {r.ResolvedOrder}   (clean separation: {r.OrderResolved})");
+	if (!r.OrderResolved)
+	{
+		Console.WriteLine("  No ordering separates cleanly - the heightmap below is not trustworthy.");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine("Step 2 - how close are PM4 height sources to the real terrain?");
+	Console.WriteLine("  source                                       n      median        p90         max   within 1.0");
+	foreach (Pm4ErrorStat e in new[] { r.MprlError, r.ObjectError, r.ControlError })
+		Console.WriteLine($"  {e.Name,-38} {e.Count,8} {e.MedianAbsError,11:F3} {e.P90AbsError,10:F3} {e.MaxAbsError,11:F1} {e.FractionWithin1,12:P1}");
+	Console.WriteLine();
+	Console.WriteLine("Step 3 - coverage. Accuracy over a sliver of a tile does not reconstruct terrain.");
+	Console.WriteLine($"  MPRL samples   = {r.MprlSamples,9}   tile cells holding at least one = {r.CellsWithMprlFraction:P2}");
+	Console.WriteLine($"  object samples = {r.ObjectSamples,9}   tile cells holding at least one = {r.CellsWithObjectFraction:P2}");
 }
 
 static void RunPm4MprlAnchor(string[] args)
