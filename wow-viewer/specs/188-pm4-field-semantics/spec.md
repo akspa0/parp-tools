@@ -229,6 +229,27 @@ settled — the window length, the float, the near-unique link id — without be
   spec 185 and its evidence rules.
 - Long corpus sweeps and any real-session viewer checks are user-run.
 
+
+## Resolved since this spec was written (2026-08-24)
+
+Recorded here so the spec stays factual about what is still open. Each is corpus-wide with a control,
+and reproducible from the commands listed in the PM4/PD4 wiki draft under "Reproducing these figures".
+
+| field / question | outcome |
+|---|---|
+| `MSLK.LinkId` byte order | **MEASURED.** A tile address packed **reversed** relative to the filename: `(second << 8) \| first`. 98.74% over 1,248,682 links with diagonal tiles excluded, against a mismatched-tile control of 0.31%; the filename order scores 0.00% |
+| `MSCN` structure | **MEASURED.** An ordered chain, not a cloud - consecutive entries a median 4.417 apart against 161.247 for a random same-file pair. Closes into short rings above a shuffled control. Sits a median 1.245 off the nearest `MSVT` vertex. "Which stream indexes MSCN" is closed: nothing does, because an ordered chain is its own edge list |
+| `MSCN` as doodad data | **REFUTED.** Against 58,876 real `MDDF` rows, nearest-point median 10.5u / 15.1% within 1u, against a random control of 25.2u / 3.3%. Note this used MDDF; WMO-attached props come from `MODS`/`MODD` and were not tested |
+| `MPRL` axis permutation | **MEASURED.** Height is component `Y`, horizontal pair is `Z` then `X`. Only order of six putting the height inside the cell's terrain range: 89.38% of 69,659 points, median miss 0.000, control 19.27%. `MprlToAdtPlacement` had been returning the vector unchanged and is fixed |
+| `MPRL` as an object anchor | **REFUTED.** 178,588 points against 1,598 objects; counts match in 0.00% of files. It is a contact contour, not a per-object pin |
+| `MPRL` carrying `_0x1C` | **REFUTED.** 114 bit-exact collisions out of 178,588 against a control of 6 - 0.064%, coincidence |
+| `_0x1C == 0` stretch cause | **REFUTED at cell granularity.** Tall surfaces are over liquid 26.13% against 29.07% for short ones. A per-vertex version of the claim is untested |
+| `MODF` reconstruction | **MEASURED.** 99.6% of objects identify their row; `Position.X/Y` to ~1.5u, `BoundsMax.Z` to 0.028u. `MODF`'s box is a world-space AABB, so it can be written without knowing rotation |
+
+Still open from the original scope: `MSUR._0x10`'s convention, `MPRL.Unk00`/`Unk04`, `MSLK._0x04`,
+and doodad-population identity - which remains the case that has no stored key, so it still needs
+splitting by adjacency component rather than by a join.
+
 ## Out of Scope
 
 - Renaming code fields — spec 185 FR-003 owns that, and this spec supplies evidence to it.

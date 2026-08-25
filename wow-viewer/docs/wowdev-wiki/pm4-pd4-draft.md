@@ -257,7 +257,7 @@ open.
 
 ---
 
-## 6. `MSCN` — a per-object node network, shared between objects
+## 6. `MSCN` — an ordered chain of points lying just off the mesh
 
 `MSCN` holds **positions**, in the same coordinate frame as `MSVT` and `MSPV` (all three share axis
 order and overlapping ranges; `MPRL` is the only permuted chunk in the file). The viewer draws them
@@ -367,6 +367,106 @@ has a median of 10.5 units with 15.1% inside one unit, against a random-point co
 3.3%. The enrichment is real but small, and reflects doodads and collision geometry occupying the same
 places; a doodad list would sit at zero.
 
+## 6a. The three point streams are not copies of each other
+
+`MSVT`, `MSPV` and `MSCN` are near-identical in size — 373,517 / 368,323 / 387,163 over 60 files,
+within 5% — which invites reading them as parallel copies of one geometry carrying different
+attributes. Coincidence at 0.25 units says otherwise:
+
+| | | |
+|---|---|---|
+| MSVT on MSPV | 32.58% | MSPV on MSVT **43.15%** |
+| MSVT on MSCN | 25.05% | MSCN on MSVT 15.76% |
+| MSPV on MSCN | 19.46% | MSCN on MSPV 11.84% |
+
+Copies would share nearly all their points; unrelated sets almost none. The measured 12–43% is
+structural sharing. The strongest pair follows from §4: a wall quad stands on a blocked adjacency
+edge between two floor surfaces, so **43% of wall vertices land on floor vertices** — they share the
+junction line by construction rather than by duplication.
+
+## 6b. `MSCN` is not doodad data
+
+Worth stating separately, because the chain-and-ring structure invites the reading that `MSCN` links
+sets of props. Tested directly against **58,876 real `MDDF` rows** across 161 tiles: the nearest
+`MSCN` point to a doodad has a median distance of **10.5** units with 15.1% inside one unit, against a
+random-point control of **25.2** units and 3.3%. The enrichment is real but small, and it is what
+co-location produces - doodads and collision geometry occupy the same places. A doodad list would sit
+at zero. The axis pairing was confirmed rather than assumed; the crossed pairings score 6,700 and
+35,780 units.
+
+Note also that WMO-attached doodads are not `MDDF` rows at all - they come from the WMO's own
+`MODS`/`MODD` chunks - so this test says nothing about them either way.
+
+---
+
+## 6c. `MPRL` marks where a model meets the ground
+
+Each `MPRL` point is a **terrain contact**: a position on the ground at the footprint of a placed
+model. The component order given in the ledger was measured by exactly this property - the height
+component lands inside the cell's own terrain height range 89.38% of the time with a median miss of
+zero, and no other component order comes close.
+
+**It is not an anchor, and it does not carry `_0x1C`.** Both readings fail:
+
+- **Counts.** 178,588 `MPRL` points against 1,598 objects, and the point count equals the object count
+  in **0.00%** of files and the `MODF` row count in **0.00%**. It is far denser than one point per
+  placement - a contour, not a pin.
+- **The float.** Bit-exact over 178,588 points, only **114** `MPRL.Y` values collide with their own
+  file's `_0x1C` set, against a control of 6. That is 0.064%, which is coincidence. Every other
+  component, and every origin-flipped form, scores **0**.
+
+What is true is geometric rather than encoded: a building meets the ground near its placement height
+because of where it stands. Measured against the terrain beneath each object's own footprint, a
+placement Z is a **poor** ground estimate - median error 5.267 units, only 20.5% within one unit.
+
+### Recovering terrain height from `MPRL`
+
+Because the points are contacts, they are terrain height samples at known positions, which matters on
+tiles whose ADT mesh no longer exists. Scored against 105 tiles that still have mesh:
+
+| source | n | median error | p90 | within 1.0 |
+|---|---|---|---|---|
+| `MPRL` height | 69,648 | **0.202** | 1.457 | **80.8%** |
+| object placement Z | 517 | 5.267 | 109.2 | 20.5% |
+| control: terrain elsewhere in tile | 69,648 | 28.192 | 131.4 | 7.7% |
+
+The limit is **coverage, not accuracy**. `MPRL` puts a sample in **9.51%** of a tile's 256 cells and
+objects in 1.59%, both clustered where structures are. So terrain near buildings is recoverable to a
+fifth of a unit and open ground is not sampled at all: these are high-confidence control points for
+constraining or checking a reconstruction, not a reconstruction on their own.
+
+---
+
+## 6d. Reconstructing an `MODF` row from a PM4
+
+Since `_0x1C` is bit-identical to `MODF.Position.Z`, an object already names a specific placement row.
+Over 132 paired tiles and 1,061 objects, **99.6%** matched one. What else the geometry yields:
+
+| field | recoverability |
+|---|---|
+| `Position.Z` | **exact** - it is the join key |
+| `Position.X` / `.Y` | median 1.4-1.6 units, p90 ~21 (control 76/63) |
+| `BoundsMax.Z` | median **0.028** units, 62.5% within 1 |
+| other bounds axes | median 2.7-3.7 units |
+| `Rotation`, `NameId`, `UniqueId`, `Flags`, `DoodadSet` | not recovered |
+
+The axes are **not** swapped here: X-to-X scores 1.574 and Y-to-Y 1.397, against 4,932 and 4,931 for
+the crossed pairings.
+
+Two things shape that table. `MODF`'s bounding box is the **world-space AABB of the already-placed,
+already-rotated model**, which is why `BoundsMax.Z` lands on the nose - the highest walkable surface is
+the top of the box - and it means a valid box can be written **without knowing the rotation at all**.
+The horizontal axes miss by a couple of units because a PM4 holds only collision-relevant geometry, so
+its box is a subset: overhangs and roofs that carry no walkable surface never appear. `Position` misses
+for a different reason - `MODF.Position` is the model **origin**, not the box centre - and that offset
+is a per-asset constant, so it is learnable from assets placed more than once.
+
+`MDDF` is a harder problem and not symmetric with this one. Doodads live in the `_0x1C == 0` bucket,
+which is not split per-instance by the key, so recovering doodad rows means splitting that bucket by
+adjacency component first; there is no free join to lean on.
+
+---
+
 ## 7. `MPRR` — sentinel-delimited range records
 
 `MPRR` is a flat array of `uint16` pairs delimited by a sentinel (`Value1 == 0xFFFF`): 13,978,231
@@ -385,23 +485,6 @@ a per-entry list for any known chunk. Value range tests are weak and non-discrim
 non-self domain `MSVI` at 67.6% / 79.0%) and are **bound tests only** — a value in range never proves
 ownership.
 
-## 6a. The three point streams are not copies of each other
-
-`MSVT`, `MSPV` and `MSCN` are near-identical in size — 373,517 / 368,323 / 387,163 over 60 files,
-within 5% — which invites reading them as parallel copies of one geometry carrying different
-attributes. Coincidence at 0.25 units says otherwise:
-
-| | | |
-|---|---|---|
-| MSVT on MSPV | 32.58% | MSPV on MSVT **43.15%** |
-| MSVT on MSCN | 25.05% | MSCN on MSVT 15.76% |
-| MSPV on MSCN | 19.46% | MSCN on MSPV 11.84% |
-
-Copies would share nearly all their points; unrelated sets almost none. The measured 12–43% is
-structural sharing. The strongest pair follows from §4: a wall quad stands on a blocked adjacency
-edge between two floor surfaces, so **43% of wall vertices land on floor vertices** — they share the
-junction line by construction rather than by duplication.
-
 ## 7a. State of knowledge, field by field
 
 Most of this format is still undecoded. The sections above describe the parts that are measured; this
@@ -419,7 +502,7 @@ table is the honest accounting of the rest, so a reader can tell a result from a
 | `MSHD` | `0x0C`–`0x1C` | **MEASURED** | **zero in 502/502 files** — five reserved fields, not five mysteries |
 | `MSPV` | positions | MEASURED | wall vertices |
 | `MSPI` | indices | MEASURED | 2,418,205 fits, 0 misses into `MSPV` |
-| `MSCN` | positions | PARTIAL | node graph: 2.591/surface, 85% off-mesh, not a lattice, not normals. **No known index consumer** - the `_0x18` single-index reading is eliminated as an array-size artefact |
+| `MSCN` | positions | **MEASURED** | an **ordered chain**: consecutive entries sit a median 4.417 apart against 161.247 for a random same-file pair. Closes into short rings (6.09% of starts return within 0.5 in <=64 steps, against 1.79% shuffled; lengths decay from 3 while the shuffled control is flat). Lies a median 1.245 from the nearest `MSVT` vertex (control 50.188) - near, consistently offset, not coincident. Nothing indexes it because an ordered chain is its own edge list. Leading reading: a **navmesh contour**, unproven. NOT doodad data (§6b) |
 | `MSLK` | `MspiFirstIndex`/`Count` | MEASURED | wall-quad window; negative = open passage |
 | `MSLK` | `RefIndex` | MEASURED | neighbouring surface, 98.76% reciprocal |
 | `MSLK` | `_0x00` type flags | PARTIAL | observed buckets, not corpus-closed |
@@ -434,7 +517,7 @@ table is the honest accounting of the rest, so a reader can tell a result from a
 | `MSUR` | `0x10` | PARTIAL | behaves as a signed plane distance |
 | `MSUR` | `0x00` | **MEASURED** | surface class - `0x03` marks doodad surfaces (100.0% carry no placement height); `0x10`-`0x15` are placed, stratified by height inside the object |
 | `MSUR` | `0x03` | **MEASURED** | **constant 0** - real padding |
-| `MPRL` | position | PARTIAL | the **only permuted chunk** in the file — its axis order differs from `MSVT`/`MSPV`/`MSCN` |
+| `MPRL` | position | **MEASURED** | the **only permuted chunk**, and the permutation is now known: height is component **Y**, horizontal pair is **Z then X**, so ADT placement space is `(MapOrigin - p.Z, MapOrigin - p.X, p.Y)`. Of the six component orders, only this one puts the height inside the terrain range of the cell it sits over - **89.38%** of 69,659 points, median miss **0.000**, against a wrong-cell control of 19.27%; the other five score 0.00%-0.25%. The points mark where a placed model **meets the ground** (§6c) |
 | `MPRL` | `Unk02`, `Unk06` | **MEASURED** | **constant 65535 and 32768** across 54,295 records |
 | `MPRL` | `Unk14`, `Unk16` | PARTIAL | enumerated, 14 and 2 values |
 | `MPRL` | `Unk00`, `Unk04` | PARTIAL | index-like; `Unk04` is the most structured unknown in the format (3,932 values, 0.278 per-file distinct ratio) |
@@ -474,18 +557,39 @@ pm4 placement-z        --input <dir>                  # §5
 pm4 object-library     --input <dir> --output x.json  # §5
 pm4 mprr               --input <dir>                  # §7
 pm4 merge-bias         --input <dir>                  # §6
+pm4 linkid-order       --input <dir>                  # §7a, MSLK.LinkId byte order
+pm4 mscn-chain         --input <dir> --adt-dir <dir>  # §6 correction, §6b
+pm4 mprl-anchor        --input <dir> --adt-dir <dir>  # §6c
+pm4 terrain-recovery   --input <dir> --adt-dir <dir>  # §6c terrain samples
+pm4 modf-recovery      --input <dir> --adt-dir <dir>  # §6d
+pm4 zero-bucket        --input <dir>                  # §5a
+pm4 stretch-locality   --input <dir> --adt-dir <dir>  # §5a
 ```
+
+`--adt-dir` wants the directory holding the tiles' ADTs. Two traps there, both of which produce a
+clean-looking null rather than an error. A corpus can mix monolithic and split tiles, and for split
+ones the root file may exist but be **zero bytes** with the content in `_obj0`/`_tex0`; and `MCNK`
+terrain lives only in a monolithic file or a non-empty root, never in an `_obj0`. So the file that
+carries a tile's placements is often not the file that carries its terrain.
 
 ---
 
 ## 9. Open questions
 
-- `MSUR._0x00`, and `MSUR._0x10`'s exact convention.
-- Which stream indexes `MSCN`, and what a shared node denotes (portal, weld, tile seam). Its role is
-  partly known - per-object, shared between 1,214 groups, often reaching outside the owning mesh -
-  and it is the 724 groups whose nodes exceed their own mesh bounds that should be characterised
-  first.
+- `MSUR._0x10`'s exact convention.
+- Whether `MSCN`'s rings are navmesh contours. The test that would settle it: contour points must hug
+  the **boundary** of a walkable region rather than its interior, so measure distance to the nearest
+  `MSUR` surface edge against distance to its interior. ("Which stream indexes `MSCN`" is closed -
+  nothing does, because an ordered chain needs no index.)
+- What sets the vertical extent of the stretched `_0x1C == 0` surfaces. The over-water reading is
+  refuted at cell granularity (§5a); a per-vertex version is not.
 - `MPRR` entirely, under the 4n+3 constraint.
 - `MVER`'s `0x30` high byte on PM4.
+- `MPRL.Unk00` and `Unk04`, still the most structured unknowns in the format.
 - The 34.4% of `MSLK` entries with no adjacency component link, and the 1.24% of edges that do not
   reciprocate (cross-tile neighbours are the obvious candidate, untested).
+- Rotation, for placement reconstruction (§6d). Assets placed more than once can be registered against
+  each other, which gives relative rotation; pinning it absolutely needs one instance with a known
+  `MODF` row.
+- Whether `MSUR` floor surfaces sitting at ground level are a further terrain-height source. They are
+  far denser than `MPRL` and would lift the 9.51% coverage in §6c. Untested.
