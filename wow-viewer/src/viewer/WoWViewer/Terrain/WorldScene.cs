@@ -13560,6 +13560,17 @@ public class WorldScene : ISceneRenderer
         if (best <= zTolerance)
             return true;
 
+        // Nothing in the scene placed this object, which on a tile whose ADT is gone is the normal
+        // case rather than a failure. Fall back to the recovered-name side-car if one is present.
+        // The name is a guess and is marked as one by the caller; a unique id is not invented.
+        Pm4GeneratedPlacements.EnsureLoaded();
+        if (Pm4GeneratedPlacements.TryResolve(ck24, boundsMin, boundsMax, out string? inferred, out double inferredScore))
+        {
+            assetName = $"{inferred} (inferred {inferredScore:F2})";
+            uniqueId = 0;
+            return true;
+        }
+
         assetName = null;
         uniqueId = 0;
         return false;

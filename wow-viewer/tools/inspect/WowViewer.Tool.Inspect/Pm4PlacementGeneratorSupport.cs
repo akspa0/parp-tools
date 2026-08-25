@@ -141,7 +141,11 @@ internal static class Pm4PlacementGeneratorSupport
         string jsonPath = Path.Combine(outputDirectory, "pm4-generated-placements.json");
         File.WriteAllText(jsonPath, JsonSerializer.Serialize(
             new { generated = DateTime.UtcNow.ToString("O"), source = resolved, tiles = tilesOut },
-            new JsonSerializerOptions { WriteIndented = true }));
+            new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            }));
 
         // A flat CSV too - the JSON is for tooling, this is for looking at.
         string csvPath = Path.Combine(outputDirectory, "pm4-generated-placements.csv");
