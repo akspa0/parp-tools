@@ -37,9 +37,11 @@ public class ReconciliationTileProposalTests
     [Fact]
     public void Placement_inside_guide_bounds_produces_align()
     {
+        // Offset from the guide centre so the placement is associated but not already aligned.
+        Vector3 offsetPosition = GuideCenter + new Vector3(12f, 0f, 0f);
         var proposals = Pm4ReconciliationEngine.BuildTileProposals(
             [Guide()],
-            [Placement(77)],
+            [Placement(77, position: offsetPosition)],
             new Dictionary<string, IReadOnlyList<ReconciliationCandidate>>());
 
         ReconciliationProposal proposal = Assert.Single(proposals);
@@ -47,6 +49,23 @@ public class ReconciliationTileProposalTests
         Assert.Equal(ProposalStatus.ReviewRequired, proposal.Status);
         Assert.Equal(GuideCenter, proposal.ProposedPosition);
         Assert.True(proposal.Residual.ContainsKey("position"));
+        Assert.InRange(proposal.Confidence, 0.0, 1.0);
+        Assert.True(proposal.Confidence > 0.0, "align confidence must be derived from the residual, not hardcoded to zero");
+    }
+
+    [Fact]
+    public void Placement_already_at_guide_position_is_reported_as_already_aligned()
+    {
+        var proposals = Pm4ReconciliationEngine.BuildTileProposals(
+            [Guide()],
+            [Placement(77)],
+            new Dictionary<string, IReadOnlyList<ReconciliationCandidate>>());
+
+        ReconciliationProposal proposal = Assert.Single(proposals);
+        Assert.Equal(ProposalStatus.AlreadyAligned, proposal.Status);
+        Assert.Equal(1.0, proposal.Confidence);
+        // Accepting an already-aligned proposal must be a no-op on position.
+        Assert.Equal(GuideCenter, proposal.ProposedPosition);
     }
 
     [Fact]

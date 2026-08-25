@@ -24,6 +24,18 @@ public static class Pm4ReconciliationEngine
 {
     public const double DefaultAmbiguityWindow = 0.03;
 
+    /// <summary>Position residual (world units) at or below which an aligned placement is reported
+    /// as <see cref="ProposalStatus.AlreadyAligned"/> instead of proposing a no-op move.</summary>
+    public const double AlreadyAlignedResidualThreshold = 0.5;
+
+    /// <summary>
+    /// Maps a position residual to a display confidence: 1.0 at zero residual, falling off with a
+    /// 25-unit scale. This is a proximity-derived SORTING signal only — it never grants mutation
+    /// rights and is always accompanied by the raw residual in the evidence (FR-012).
+    /// </summary>
+    public static double ConfidenceFromResidual(double residual)
+        => Math.Exp(-Math.Max(0, residual) / 25.0);
+
     public static IReadOnlyList<ReconciliationProposal> BuildProposals(
         Pm4GuideObservation guide,
         PlacementSnapshot? existing,
@@ -91,7 +103,22 @@ public static class Pm4ReconciliationEngine
 
             if (associated.Count == 1)
             {
-                proposals.AddRange(BuildProposals(guide, associated[0], candidates, ambiguityWindow));
+                PlacementSnapshot existing = associated[0];
+
+                // An existing placement already at the guide position is a result, not work:
+                // report it as already aligned instead of proposing a no-op move.
+                if (guide.ExpectedAssetKind == ExpectedAssetKind.Unknown
+                    || guide.ExpectedAssetKind == existing.Identity.Kind)
+                {
+                    double positionResidual = Vector3.Distance(guide.Position, existing.Position);
+                    if (positionResidual <= AlreadyAlignedResidualThreshold)
+                    {
+                        proposals.Add(BuildAlreadyAlignedProposal(guide, existing));
+                        continue;
+                    }
+                }
+
+                proposals.AddRange(BuildProposals(guide, existing, candidates, ambiguityWindow));
                 continue;
             }
 
@@ -165,6 +192,29 @@ public static class Pm4ReconciliationEngine
             ProposalStatus.Conflict);
     }
 
+    private static ReconciliationProposal BuildAlreadyAlignedProposal(Pm4GuideObservation guide, PlacementSnapshot existing)
+    {
+        var evidence = new List<ReconciliationEvidence>(guide.Evidence)
+        {
+            new("already-aligned", 1.0, $"existing placement sits within {AlreadyAlignedResidualThreshold:0.#} world units of the guide position"),
+        };
+
+        return new ReconciliationProposal(
+            BuildProposalId(guide, existing.Identity, ReconciliationAction.Align, candidate: null, existing.Position),
+            guide.Guide,
+            existing.Identity,
+            existing,
+            ReconciliationAction.Align,
+            Candidate: null,
+            ProposedPosition: existing.Position,
+            ProposedRotation: existing.Rotation,
+            ProposedScale: existing.Scale,
+            new Dictionary<string, double>(),
+            Confidence: 1.0,
+            evidence,
+            ProposalStatus.AlreadyAligned);
+    }
+
     private static ReconciliationProposal BuildAlignProposal(Pm4GuideObservation guide, PlacementSnapshot existing)
     {
         double positionResidual = Vector3.Distance(guide.Position, existing.Position);
@@ -177,6 +227,7 @@ public static class Pm4ReconciliationEngine
         {
             new("placement-kind", 1.0, "guide ExpectedAssetKind matches existing placement kind"),
             new("position-residual", positionResidual, "distance between guide and existing placement"),
+            new("alignment-confidence", ConfidenceFromResidual(positionResidual), "display-only sorting signal derived from the position residual (25-unit scale); never grants mutation rights"),
         };
 
         return new ReconciliationProposal(
@@ -190,7 +241,7 @@ public static class Pm4ReconciliationEngine
             ProposedRotation: existing.Rotation,
             ProposedScale: existing.Scale,
             residual,
-            Confidence: 0.0,
+            Confidence: ConfidenceFromResidual(positionResidual),
             evidence,
             ProposalStatus.ReviewRequired);
     }

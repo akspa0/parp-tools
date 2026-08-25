@@ -316,19 +316,51 @@ public partial class ViewerApp
         if (_reconciliationProposals.Count == 0)
             return;
 
-        ImGui.Separator();
-        ImGui.Text($"{_reconciliationProposals.Count} proposal(s)");
+        int reviewable = _reconciliationProposals.Count(p => p.Status == ProposalStatus.ReviewRequired);
+        int conflicts = _reconciliationProposals.Count(p => p.Status == ProposalStatus.Conflict);
+        int alreadyAligned = _reconciliationProposals.Count(p => p.Status == ProposalStatus.AlreadyAligned);
+        int accepted = _reconciliationProposals.Count(p =>
+            _reconciliationDecisions.TryGetValue(p.ProposalId, out ReviewDisposition d) && d == ReviewDisposition.Accept);
 
+        ImGui.Separator();
+        ImGui.Text(
+            $"{_reconciliationProposals.Count} proposal(s): {reviewable} reviewable, {conflicts} conflict, {alreadyAligned} already aligned, {accepted} accepted.");
+
+        // Bulk review: every reviewable proposal needs an explicit decision, so offer one click for
+        // the common case instead of hundreds of individual headers.
+        if (reviewable > 0)
+        {
+            if (ImGui.Button("Accept all reviewable"))
+            {
+                foreach (ReconciliationProposal proposal in _reconciliationProposals)
+                {
+                    if (proposal.Status == ProposalStatus.ReviewRequired)
+                        _reconciliationDecisions[proposal.ProposalId] = ReviewDisposition.Accept;
+                }
+            }
+
+            ImGui.SameLine();
+        }
+
+        if (_reconciliationDecisions.Count > 0 && ImGui.Button("Clear decisions"))
+            _reconciliationDecisions.Clear();
+
+        ImGui.Separator();
+
+        ImGui.BeginChild("##ReconciliationProposals", new Vector2(0, -ImGui.GetFrameHeightWithSpacing()), border: false);
         foreach (ReconciliationProposal proposal in _reconciliationProposals)
         {
             DrawReconciliationProposal(proposal);
         }
 
-        ImGui.Separator();
-        if (ImGui.Button("Apply Accepted"))
+        ImGui.EndChild();
+
+        ImGui.BeginDisabled(accepted == 0);
+        if (ImGui.Button($"Apply Accepted ({accepted})"))
         {
             ApplyAcceptedReconciliation();
         }
+        ImGui.EndDisabled();
     }
 
     private void RunReconciliationPreview()
@@ -406,22 +438,53 @@ public partial class ViewerApp
             _ => "?",
         };
 
-        string status = proposal.Status switch
-        {
-            ProposalStatus.ReviewRequired => "Review required",
-            ProposalStatus.Conflict => "Conflict",
-            ProposalStatus.Unsupported => "Unsupported",
-            _ => proposal.Status.ToString(),
-        };
+        bool isAccepted = _reconciliationDecisions.TryGetValue(proposal.ProposalId, out ReviewDisposition d) && d == ReviewDisposition.Accept;
+        bool isRejected = _reconciliationDecisions.TryGetValue(proposal.ProposalId, out ReviewDisposition d2) && d2 == ReviewDisposition.Reject;
+        string decisionMark = isAccepted ? "[ACCEPTED] " : isRejected ? "[rejected] " : string.Empty;
 
-        if (ImGui.CollapsingHeader($"{action} {proposal.ProposalId} ({status})"))
+        double positionResidual = proposal.Residual.GetValueOrDefault("position");
+        string summary = $"{decisionMark}{action,-10} {proposal.Status,-14} conf {proposal.Confidence:F2}  id {proposal.ProposalId[..8]}";
+        if (proposal.Residual.Count > 0)
+            summary += $"  Δpos {positionResidual:F1}";
+
+        ImGui.PushID(proposal.ProposalId);
+
+        bool canDecide = proposal.Status == ProposalStatus.ReviewRequired;
+        if (canDecide)
+        {
+            if (ImGui.SmallButton(isAccepted ? "Accepted" : "Accept"))
+                _reconciliationDecisions[proposal.ProposalId] = ReviewDisposition.Accept;
+            ImGui.SameLine();
+            if (ImGui.SmallButton(isRejected ? "Rejected" : "Reject"))
+                _reconciliationDecisions[proposal.ProposalId] = ReviewDisposition.Reject;
+            ImGui.SameLine();
+        }
+        else if (proposal.Status == ProposalStatus.AlreadyAligned)
+        {
+            ImGui.TextDisabled("[ok] ");
+            ImGui.SameLine();
+        }
+        else
+        {
+            ImGui.TextDisabled("[!]    ");
+            ImGui.SameLine();
+        }
+
+        ImGui.TextUnformatted(summary);
+
+        if (proposal.Status == ProposalStatus.Conflict || proposal.Candidate != null)
+        {
+            string? detail = proposal.Candidate is not null
+                ? $"candidate {proposal.Candidate.AssetPath}"
+                : string.Join("; ", proposal.Evidence.Where(e => e.Signal.StartsWith("association-competitor", StringComparison.Ordinal)).Select(e => e.Source));
+            if (!string.IsNullOrWhiteSpace(detail))
+                ImGui.TextDisabled($"        {detail}");
+        }
+
+        if (ImGui.TreeNode("Details"))
         {
             ImGui.TextDisabled($"Guide: {proposal.Guide.GuideId}");
             ImGui.TextDisabled($"Proposed position: ({proposal.ProposedPosition.X:F1}, {proposal.ProposedPosition.Y:F1}, {proposal.ProposedPosition.Z:F1})");
-            ImGui.TextDisabled($"Confidence: {proposal.Confidence:F3}");
-
-            if (proposal.Candidate != null)
-                ImGui.TextDisabled($"Candidate: {proposal.Candidate.AssetPath} (score {proposal.Candidate.Score:F3})");
 
             if (proposal.Residual.Count > 0)
             {
@@ -437,20 +500,10 @@ public partial class ViewerApp
                     ImGui.TextDisabled($"  {evidence.Signal}: {evidence.Value:F3} ({evidence.Source})");
             }
 
-            bool canAccept = proposal.Status == ProposalStatus.ReviewRequired;
-            if (canAccept)
-            {
-                if (ImGui.Button($"Accept##{proposal.ProposalId}"))
-                    _reconciliationDecisions[proposal.ProposalId] = ReviewDisposition.Accept;
-                ImGui.SameLine();
-                if (ImGui.Button($"Reject##{proposal.ProposalId}"))
-                    _reconciliationDecisions[proposal.ProposalId] = ReviewDisposition.Reject;
-            }
-            else
-            {
-                ImGui.TextDisabled("This proposal cannot be accepted automatically.");
-            }
+            ImGui.TreePop();
         }
+
+        ImGui.PopID();
     }
 
     private void ApplyAcceptedReconciliation()

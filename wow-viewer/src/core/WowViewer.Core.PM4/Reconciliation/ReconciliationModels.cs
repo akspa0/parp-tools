@@ -23,6 +23,10 @@ public enum ProposalStatus
     Conflict,
     Accepted,
     Rejected,
+
+    /// <summary>The existing placement already sits at the guide position within tolerance;
+    /// accepting would be a no-op. Shown so silence is never mistaken for an unreviewed gap.</summary>
+    AlreadyAligned,
 }
 
 public enum CandidateStatus

@@ -2,6 +2,21 @@
 
 Last updated: 2026-08-25
 
+## 2026-08-25 — Spec 176 review UX: real confidences, bulk accept, already-aligned reporting
+
+- **Align proposals no longer hardcode confidence 0.00.** `ConfidenceFromResidual` maps the position
+  residual to `exp(-d/25)` (1.0 at zero, 25-unit scale), recorded as display-only sorting evidence —
+  it never grants mutation rights (FR-012). Clone/substitute keep the scorer's own score.
+- **Already-aligned placements are a result, not noise.** A kind-compatible placement within 0.5
+  world units of its guide emits an `AlreadyAligned` proposal (confidence 1.0, accepting is a no-op)
+  instead of a pointless move proposal — this was most of the wall of 0.00-confidence aligns.
+- **The review list is usable.** Replacing per-proposal collapsing headers: a status summary line
+  (reviewable / conflict / already aligned / accepted counts), an "Accept all reviewable" bulk
+  button, compact rows with inline Accept/Reject, conflict competitors and candidate paths inline,
+  details behind a TreeNode, and "Apply Accepted (n)" disabled until something is accepted.
+- Proof: WoWViewer builds 0 errors; **81/81** focused editor tests pass (align confidence derived
+  from residual; already-aligned no-op semantics covered).
+
 ## 2026-08-25 — Spec 176: authored placement edits now save through the existing staged-save queue
 
 - **Answer to "is there a save button": yes, and now from both surfaces.** The pre-existing staged-
