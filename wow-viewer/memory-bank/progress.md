@@ -2,6 +2,24 @@
 
 Last updated: 2026-08-25
 
+## 2026-08-25 — Spec 176: authored placement edits now save through the existing staged-save queue
+
+- **Answer to "is there a save button": yes, and now from both surfaces.** The pre-existing staged-
+  placement save queue (`SaveStagedPlacementEdits`, per-source output targets, "Save Current Source" /
+  "Save All Pending") already wrote edited ADTs via `AdtPlacementEditor` — but only moves, and only
+  from Scene > Placements. A parallel staging dictionary briefly added in the Editor tab was removed
+  before commit; instead the Editor tab's authoring panel now upserts into the SAME queue via
+  `StageAuthoringPlacementEdit` and renders `DrawPlacementSaveQueueActions` inline, so its Save
+  buttons work right there.
+- **The queue covers all authoring edits now**: `StagedPlacementEdit` gained `EditedRotation`,
+  `EditedScale`, and `Deleted`; the save loop emits move+rotate+scale (or delete) per row. Repeated
+  edits to one row collapse to the latest state, preserving earlier field edits.
+- **Source-path bug fixed in passing**: the authoring panel had staged operations against
+  `selected.ModelPath` (the asset path), not the tile's ADT. It now resolves the real source via
+  `WorldScene.TryGetSelectedPlacementSourceData`, matching the legacy queue's data-source reads.
+- Proof: WoWViewer builds 0 errors; 80/80 focused editor tests pass. End-to-end save of an authored
+  edit on a real map remains user-owned visual proof.
+
 ## 2026-08-25 — Spec 176 dedupe: one placement-write owner, one reconciliation surface
 
 - **`AdtPlacementWriter` and `AdtPlacementEditTransaction` are deleted.** `PlacementWriteService`

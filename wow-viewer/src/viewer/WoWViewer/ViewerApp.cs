@@ -132,6 +132,9 @@ public partial class ViewerApp : IDisposable
         public string SourcePath { get; init; } = string.Empty;
         public Vector3 OriginalPosition { get; set; }
         public Vector3 EditedPosition { get; set; }
+        public Vector3? EditedRotation { get; set; }
+        public float? EditedScale { get; set; }
+        public bool Deleted { get; set; }
     }
 
     private const string ViewerProductName = "WoWViewer v0.5.2.1";
@@ -13046,16 +13049,26 @@ void main() {
                 if (sourceBytes == null)
                     throw new InvalidOperationException($"The source ADT could not be read from the current data source: {sourcePath}");
 
-                // Apply every staged move through the library-first placement editor, which rebuilds
+                // Apply every staged edit through the library-first placement editor, which rebuilds
                 // only the placement/name-table chunks and preserves all other bytes.
                 var placementEdits = new List<AdtPlacementEdit>(edits.Count);
                 foreach (StagedPlacementEdit edit in edits)
                 {
-                    placementEdits.Add(new AdtPlacementMoveEdit(
-                        edit.Key.ObjectType == Terrain.ObjectType.Wmo ? AdtPlacementKind.WorldModel : AdtPlacementKind.Model,
-                        edit.Key.EntryIndex,
-                        edit.Key.UniqueId,
-                        edit.EditedPosition));
+                    AdtPlacementKind kind = edit.Key.ObjectType == Terrain.ObjectType.Wmo
+                        ? AdtPlacementKind.WorldModel
+                        : AdtPlacementKind.Model;
+
+                    if (edit.Deleted)
+                    {
+                        placementEdits.Add(new AdtPlacementDeleteEdit(kind, edit.Key.EntryIndex, edit.Key.UniqueId));
+                        continue;
+                    }
+
+                    placementEdits.Add(new AdtPlacementMoveEdit(kind, edit.Key.EntryIndex, edit.Key.UniqueId, edit.EditedPosition));
+                    if (edit.EditedRotation.HasValue)
+                        placementEdits.Add(new AdtPlacementRotateEdit(kind, edit.Key.EntryIndex, edit.Key.UniqueId, edit.EditedRotation.Value));
+                    if (edit.EditedScale.HasValue)
+                        placementEdits.Add(new AdtPlacementScaleEdit(kind, edit.Key.EntryIndex, edit.Key.UniqueId, edit.EditedScale.Value));
                 }
 
                 byte[] updatedBytes = AdtPlacementEditor.Apply(sourceBytes, sourcePath, placementEdits).Bytes;
@@ -13193,6 +13206,45 @@ void main() {
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Upserts one authored placement edit (move/rotate/scale/delete) into the shared staged-save
+    /// queue from any authoring surface. Repeated edits to the same row collapse into the latest
+    /// state; earlier field values are preserved so a rotate after a move keeps both.
+    /// </summary>
+    private void StageAuthoringPlacementEdit(
+        Terrain.ObjectType objectType,
+        ObjectInstance selected,
+        string sourcePath,
+        Vector3? position = null,
+        Vector3? rotation = null,
+        float? scale = null,
+        bool delete = false)
+    {
+        PlacementEditKey key = CreatePlacementEditKey(objectType, selected);
+        if (!_stagedPlacementEdits.TryGetValue(key, out StagedPlacementEdit? edit))
+        {
+            edit = new StagedPlacementEdit
+            {
+                Key = key,
+                SourcePath = sourcePath,
+                OriginalPosition = selected.PlacementPosition,
+                EditedPosition = selected.PlacementPosition,
+            };
+            _stagedPlacementEdits[key] = edit;
+        }
+
+        if (position.HasValue)
+            edit.EditedPosition = position.Value;
+        if (rotation.HasValue)
+            edit.EditedRotation = rotation.Value;
+        if (scale.HasValue)
+            edit.EditedScale = scale.Value;
+        edit.Deleted = delete;
+
+        if (!string.IsNullOrWhiteSpace(sourcePath) && !_placementSaveTargetsBySourcePath.ContainsKey(sourcePath))
+            _placementSaveTargetsBySourcePath[sourcePath] = BuildProjectManagedPlacementOutputPath(sourcePath);
     }
 
     private void UpsertSelectedPlacementEdit()

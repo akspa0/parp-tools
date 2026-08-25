@@ -127,7 +127,13 @@ public partial class ViewerApp
     private void DrawPlacementAuthoringPanel()
     {
         ImGui.Text("Placement Authoring");
-        ImGui.TextDisabled("Move/rotate/scale/add/delete selected ADT placements. Changes are staged as undoable editor operations.");
+        ImGui.TextDisabled("Move/rotate/scale/delete selected ADT placements. Edits join the existing staged-placement save queue.");
+
+        // The save queue (per-source output targets, Save Current Source / Save All Pending) is the
+        // ONE save path for authored placement edits — shared with Scene > Placements.
+        DrawPlacementSaveQueueActions(includeCurrentSourceSave: true);
+
+        ImGui.Separator();
 
         if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
         {
@@ -142,14 +148,31 @@ public partial class ViewerApp
             return;
         }
 
+        if (!_worldScene.TryGetSelectedPlacementSourceData(out string sourcePath, out _))
+        {
+            ImGui.TextDisabled("The selected placement source ADT could not be resolved from the current data source.");
+            return;
+        }
+
         ImGui.TextDisabled($"Tile ({selected.TileX}, {selected.TileY})  Entry {selected.PlacementEntryIndex}  UniqueId {selected.UniqueId}");
+        ImGui.TextDisabled($"Source: {sourcePath}");
 
         Vector3 position = selected.PlacementPosition;
         if (ImGui.InputFloat3("Position", ref position, "%.3f"))
         {
             if (_worldScene.TryUpdateSelectedPlacementPosition(position, out string error))
             {
-                StagePlacementMove(selected, position);
+                StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, position: position);
+                RecordAuthoringSessionOperation(
+                    new PlacementMoveOperation(
+                        $"move-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",
+                        "placement.authoring",
+                        sourcePath,
+                        AuthoringPlacementKind(),
+                        selected.PlacementEntryIndex,
+                        selected.UniqueId,
+                        selected.PlacementPosition,
+                        position));
             }
             else
             {
@@ -160,106 +183,57 @@ public partial class ViewerApp
         Vector3 rotation = selected.PlacementRotation;
         if (ImGui.InputFloat3("Rotation", ref rotation, "%.3f"))
         {
-            StagePlacementRotate(selected, rotation);
+            StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, rotation: rotation);
+            RecordAuthoringSessionOperation(
+                new PlacementRotateOperation(
+                    $"rotate-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",
+                    "placement.authoring",
+                    sourcePath,
+                    AuthoringPlacementKind(),
+                    selected.PlacementEntryIndex,
+                    selected.UniqueId,
+                    selected.PlacementRotation,
+                    rotation));
         }
 
         float scale = selected.PlacementScale;
         if (ImGui.InputFloat("Scale", ref scale, 0.01f))
         {
-            StagePlacementScale(selected, scale);
+            StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, scale: scale);
+            RecordAuthoringSessionOperation(
+                new PlacementScaleOperation(
+                    $"scale-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",
+                    "placement.authoring",
+                    sourcePath,
+                    AuthoringPlacementKind(),
+                    selected.PlacementEntryIndex,
+                    selected.UniqueId,
+                    selected.PlacementScale,
+                    scale));
         }
 
         if (ImGui.Button("Delete Placement"))
         {
-            StagePlacementDelete(selected);
+            StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, delete: true);
+            RecordAuthoringSessionOperation(
+                new PlacementDeleteOperation(
+                    $"delete-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",
+                    "placement.authoring",
+                    sourcePath,
+                    AuthoringPlacementKind(),
+                    selected.PlacementEntryIndex,
+                    selected.UniqueId));
         }
     }
 
-    private void StagePlacementMove(ObjectInstance selected, Vector3 newPosition)
-    {
-        if (_editorSession == null)
-            return;
-
-        AdtPlacementKind kind = _worldScene?.SelectedObjectType == Terrain.ObjectType.Wmo
+    private AdtPlacementKind AuthoringPlacementKind()
+        => _worldScene?.SelectedObjectType == Terrain.ObjectType.Wmo
             ? AdtPlacementKind.WorldModel
             : AdtPlacementKind.Model;
 
-        var operation = new PlacementMoveOperation(
-            $"move-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",
-            "placement.authoring",
-            selected.ModelPath,
-            kind,
-            selected.PlacementEntryIndex,
-            selected.UniqueId,
-            selected.PlacementPosition,
-            newPosition);
+    private void RecordAuthoringSessionOperation(EditorOperation operation)
+        => _editorSession?.RecordApplied(operation);
 
-        _editorSession.RecordApplied(operation);
-    }
-
-    private void StagePlacementRotate(ObjectInstance selected, Vector3 newRotation)
-    {
-        if (_editorSession == null)
-            return;
-
-        AdtPlacementKind kind = _worldScene?.SelectedObjectType == Terrain.ObjectType.Wmo
-            ? AdtPlacementKind.WorldModel
-            : AdtPlacementKind.Model;
-
-        var operation = new PlacementRotateOperation(
-            $"rotate-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",
-            "placement.authoring",
-            selected.ModelPath,
-            kind,
-            selected.PlacementEntryIndex,
-            selected.UniqueId,
-            selected.PlacementRotation,
-            newRotation);
-
-        _editorSession.RecordApplied(operation);
-    }
-
-    private void StagePlacementScale(ObjectInstance selected, float newScale)
-    {
-        if (_editorSession == null)
-            return;
-
-        AdtPlacementKind kind = _worldScene?.SelectedObjectType == Terrain.ObjectType.Wmo
-            ? AdtPlacementKind.WorldModel
-            : AdtPlacementKind.Model;
-
-        var operation = new PlacementScaleOperation(
-            $"scale-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",
-            "placement.authoring",
-            selected.ModelPath,
-            kind,
-            selected.PlacementEntryIndex,
-            selected.UniqueId,
-            selected.PlacementScale,
-            newScale);
-
-        _editorSession.RecordApplied(operation);
-    }
-
-    private void StagePlacementDelete(ObjectInstance selected)
-    {
-        if (_editorSession == null)
-            return;
-
-        AdtPlacementKind kind = _worldScene?.SelectedObjectType == Terrain.ObjectType.Wmo
-            ? AdtPlacementKind.WorldModel
-            : AdtPlacementKind.Model;
-
-        var operation = new PlacementDeleteOperation(
-            $"delete-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",
-            "placement.authoring",
-            selected.ModelPath,
-            kind,
-            selected.PlacementEntryIndex,
-            selected.UniqueId);
-
-        _editorSession.RecordApplied(operation);
-    }
 
     /// <summary>
     /// Prefills the reconciliation paths from the live scene: the current session map directory and
