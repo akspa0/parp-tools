@@ -7,21 +7,29 @@ using WowViewer.Core.PM4.Models;
 using WowViewer.Core.PM4.Services;
 
 /// <summary>
-/// Reports which tiles can have their object placements restored from PM4 data, and writes those
-/// placements as standalone <c>_obj0.adt</c> files.
+/// Reports which tiles can have their object placements restored from PM4 data, and writes them as
+/// complete monolithic WotLK ADTs.
 /// </summary>
 /// <remarks>
-/// <b>Nothing is ever written over a source file.</b> Output goes to a separate directory, and the
-/// files written are placement-only: <c>MVER</c>, the name tables, <c>MDDF</c> and <c>MODF</c>. They
-/// carry no terrain, so no amount of getting this wrong can damage a heightmap.
+/// <b>Nothing is ever written over a source file.</b> Output goes to a separate directory.
 ///
-/// <para>The <c>MODF</c> layout here is written as the mirror of <see cref="AdtPlacementReader"/>,
-/// field for field, and every file written is read back through that reader and compared against what
-/// went in. A writer checked only by eye is a writer that silently produces plausible rubbish, so the
-/// round-trip is part of the operation rather than a separate test.</para>
+/// <para>An earlier version wrote placement-only <c>_obj0.adt</c> files. That was wrong for the actual
+/// use: a split-file <c>_obj0</c> needs the rest of its family to mean anything, and outside this
+/// viewer essentially nothing reads one. Testing happens on a 3.3.5 client, so the output has to be a
+/// whole monolithic ADT with every chunk that format requires. <see cref="BlankAdtFactory"/> supplies
+/// a complete base tile and <see cref="LkAdtWriter"/> emits it, so the chunk set is whatever a real
+/// ADT has rather than whatever this file remembered to write.</para>
 ///
-/// <para>Rotation is not recovered, and is written as zero rather than guessed. Unique ids are
-/// synthesised from a high base so they cannot collide with ids in surviving files.</para>
+/// <para><b>Only tiles with no surviving terrain are written.</b> A blank base replaces terrain with a
+/// flat sheet, which costs nothing on a tile that has none and would destroy a tile that still has its
+/// own. Restoring placements onto surviving terrain needs a reader for the existing ADT, which does not
+/// exist in this repo yet; those tiles are reported and skipped rather than quietly flattened.</para>
+///
+/// <para>Every file written is read back through the real <see cref="AdtPlacementReader"/> and compared
+/// against what went in. A writer checked only by eye produces plausible rubbish, so the round-trip is
+/// part of the operation rather than a separate test.</para>
+///
+/// <para>Rotation is not recovered and is written as zero rather than guessed.</para>
 /// </remarks>
 internal static class Pm4AdtPatchSupport
 {
@@ -41,7 +49,7 @@ internal static class Pm4AdtPatchSupport
             Directory.CreateDirectory(outputDirectory);
 
         var tiles = new List<Pm4RestorableTile>();
-        int written = 0, roundTripChecked = 0, roundTripFailed = 0;
+        int written = 0, roundTripChecked = 0, roundTripFailed = 0, skippedHasTerrain = 0;
         int nextUniqueId = SyntheticUniqueIdBase;
 
         // Library learned from tiles that still have placements, so names can be proposed elsewhere.
@@ -63,6 +71,8 @@ internal static class Pm4AdtPatchSupport
                 continue;
 
             string stem = Path.GetFileNameWithoutExtension(pm4Path);
+            int underscore = stem.IndexOf('_');
+            string mapName = underscore > 0 ? stem[..underscore] : stem;
             int existingPlacements = CountExistingPlacements(pm4Path, adtDirectory);
             bool hasTerrain = HasTerrain(pm4Path, adtDirectory, tFirst, tSecond);
 
@@ -90,13 +100,20 @@ internal static class Pm4AdtPatchSupport
             if (string.IsNullOrWhiteSpace(outputDirectory) || !restorable || rows.Count == 0)
                 continue;
 
-            string outPath = Path.Combine(outputDirectory, $"{stem}_obj0.adt");
-            byte[] bytes = BuildObj0(rows, ref nextUniqueId);
-            File.WriteAllBytes(outPath, bytes);
+            // A blank base flattens terrain, so it is only safe where there is none to lose.
+            if (hasTerrain)
+            {
+                skippedHasTerrain++;
+                continue;
+            }
+
+            string outPath = Path.Combine(outputDirectory, $"{stem}.adt");
+            AdtPlacementCatalog catalog = BuildCatalog(rows, ref nextUniqueId);
+            LkAdtData blank = BlankAdtFactory.CreateBlank(mapName, tFirst, tSecond);
+            LkAdtData populated = BlankAdtFactory.WithPlacements(blank, catalog);
+            LkAdtWriter.Write(outPath, populated);
             written++;
 
-            // Read it back through the real reader and compare. A writer nobody checks is a writer
-            // that produces plausible rubbish.
             roundTripChecked++;
             if (!VerifyRoundTrip(outPath, rows))
                 roundTripFailed++;
@@ -110,83 +127,50 @@ internal static class Pm4AdtPatchSupport
             tiles.Count(static t => t.Restorable && t.ExistingPlacements == 0),
             tiles.Sum(static t => t.MissingObjects),
             tiles.Where(static t => t.Restorable).Sum(static t => t.NameableObjects),
-            written, roundTripChecked, roundTripFailed,
+            written, roundTripChecked, roundTripFailed, skippedHasTerrain,
             [.. tiles.Where(static t => t.Restorable).OrderByDescending(static t => t.MissingObjects)]);
     }
 
     private readonly record struct PatchRow(string Asset, Vector3 Min, Vector3 Max, float PlacementZ, double Score);
 
     /// <summary>
-    /// Builds a placement-only ADT: version, name tables, an empty doodad list and the world-model
-    /// placements. Chunk tags are written reversed, which is how they sit on disk.
+    /// Turns recovered rows into a placement catalog the ADT factory can consume.
     /// </summary>
-    private static byte[] BuildObj0(List<PatchRow> rows, ref int nextUniqueId)
+    /// <remarks>
+    /// Positions and extents go in as ADT placement space, which is what the catalog carries and what
+    /// the factory expects, so no coordinate maths happens here at all. Unique ids come from a high
+    /// base so they cannot collide with ids in surviving files.
+    /// </remarks>
+    private static AdtPlacementCatalog BuildCatalog(List<PatchRow> rows, ref int nextUniqueId)
     {
-        List<string> names = [.. rows.Select(static r =>
-            r.Asset.Equals(Unknown, StringComparison.OrdinalIgnoreCase) ? UnknownPath : ResolveWmoPath(r.Asset))
+        List<string> names = [.. rows
+            .Select(static r => r.Asset.Equals(Unknown, StringComparison.OrdinalIgnoreCase) ? UnknownPath : ResolveWmoPath(r.Asset))
             .Distinct(StringComparer.OrdinalIgnoreCase)];
 
-        var nameOffsets = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var mwmo = new List<byte>();
-        foreach (string name in names)
+        var placements = new List<AdtWorldModelPlacement>(rows.Count);
+        foreach (PatchRow row in rows)
         {
-            nameOffsets[name] = mwmo.Count;
-            mwmo.AddRange(Encoding.ASCII.GetBytes(name));
-            mwmo.Add(0);
-        }
-
-        byte[] mwid = new byte[names.Count * 4];
-        for (int i = 0; i < names.Count; i++)
-            BinaryPrimitives.WriteInt32LittleEndian(mwid.AsSpan(i * 4, 4), nameOffsets[names[i]]);
-
-        byte[] modf = new byte[rows.Count * ModfEntrySize];
-        for (int i = 0; i < rows.Count; i++)
-        {
-            PatchRow row = rows[i];
             string path = row.Asset.Equals(Unknown, StringComparison.OrdinalIgnoreCase) ? UnknownPath : ResolveWmoPath(row.Asset);
             int nameId = names.FindIndex(n => n.Equals(path, StringComparison.OrdinalIgnoreCase));
 
-            Vector3 position = new((row.Min.X + row.Max.X) * 0.5f, (row.Min.Y + row.Max.Y) * 0.5f, row.PlacementZ);
-            Span<byte> e = modf.AsSpan(i * ModfEntrySize, ModfEntrySize);
-
-            BinaryPrimitives.WriteUInt32LittleEndian(e[0..4], (uint)Math.Max(nameId, 0));
-            BinaryPrimitives.WriteUInt32LittleEndian(e[4..8], unchecked((uint)nextUniqueId++));
-
-            // Mirror of AdtPlacementReader: it reads rawX, rawZ, rawY at 8/12/16 and forms
-            // (MapOrigin - rawY, MapOrigin - rawX, rawZ), so the inverse swaps X and Y back.
-            WriteSingle(e[8..12], Pm4CoordinateService.MapOrigin - position.Y);
-            WriteSingle(e[12..16], position.Z);
-            WriteSingle(e[16..20], Pm4CoordinateService.MapOrigin - position.X);
-
-            // Rotation is not recovered. Zero is honest; a guess would not be.
-            WriteSingle(e[20..24], 0f);
-            WriteSingle(e[24..28], 0f);
-            WriteSingle(e[28..32], 0f);
-
-            WriteSingle(e[32..36], Pm4CoordinateService.MapOrigin - row.Max.Y);
-            WriteSingle(e[36..40], row.Min.Z);
-            WriteSingle(e[40..44], Pm4CoordinateService.MapOrigin - row.Max.X);
-            WriteSingle(e[44..48], Pm4CoordinateService.MapOrigin - row.Min.Y);
-            WriteSingle(e[48..52], row.Max.Z);
-            WriteSingle(e[52..56], Pm4CoordinateService.MapOrigin - row.Min.X);
-
-            BinaryPrimitives.WriteUInt16LittleEndian(e[56..58], 0);
-            BinaryPrimitives.WriteUInt16LittleEndian(e[58..60], 0);
-            BinaryPrimitives.WriteUInt16LittleEndian(e[60..62], 0);
-            BinaryPrimitives.WriteUInt16LittleEndian(e[62..64], 0);
+            placements.Add(new AdtWorldModelPlacement(
+                Math.Max(nameId, 0),
+                path,
+                nextUniqueId++,
+                new Vector3((row.Min.X + row.Max.X) * 0.5f, (row.Min.Y + row.Max.Y) * 0.5f, row.PlacementZ),
+                Vector3.Zero,
+                row.Min,
+                row.Max,
+                0));
         }
 
-        using var ms = new MemoryStream();
-        using var bw = new BinaryWriter(ms);
-        WriteChunk(bw, "MVER", BitConverter.GetBytes(18));
-        WriteChunk(bw, "MMDX", []);
-        WriteChunk(bw, "MMID", []);
-        WriteChunk(bw, "MWMO", [.. mwmo]);
-        WriteChunk(bw, "MWID", mwid);
-        WriteChunk(bw, "MDDF", []);
-        WriteChunk(bw, "MODF", modf);
-        bw.Flush();
-        return ms.ToArray();
+        return new AdtPlacementCatalog(
+            string.Empty,
+            MapFileKind.Adt,
+            [],
+            names,
+            [],
+            placements);
     }
 
     private static bool VerifyRoundTrip(string path, List<PatchRow> rows)
@@ -434,4 +418,5 @@ internal sealed record Pm4AdtPatchReport(
     int FilesWritten,
     int RoundTripChecked,
     int RoundTripFailed,
+    int SkippedBecauseTerrainWouldBeLost,
     IReadOnlyList<Pm4RestorableTile> Tiles);

@@ -2249,6 +2249,9 @@ static void RunPm4(string[] args)
 		case "mprl-values":
 			RunPm4MprlValues(tail);
 			break;
+		case "rotation-fit":
+			RunPm4RotationFit(tail);
+			break;
 		case "surface-class":
 			RunPm4SurfaceClass(tail);
 			break;
@@ -6474,6 +6477,46 @@ static void RunPm4SurfaceClass(string[] args)
 	}
 }
 
+static void RunPm4RotationFit(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? adtDir = GetOption(args, "--adt-dir");
+	if (string.IsNullOrWhiteSpace(input) || string.IsNullOrWhiteSpace(adtDir))
+	{
+		Console.Error.WriteLine("Error: --input and --adt-dir are both required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4RotationFitReport r = Pm4RotationFitSupport.Analyze(input, adtDir);
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 rotation recovery by MPRL footprint fitting");
+	Console.WriteLine($"Files={r.Files}  objects with footprint points={r.ObjectsWithFootprintPoints}");
+	Console.WriteLine($"assets placed more than once={r.AssetsWithMultipleInstances}  pairs fitted={r.PairsFitted}");
+	Console.WriteLine();
+	Console.WriteLine("Fitted RELATIVE angle between two placements of the same asset, scored against");
+	Console.WriteLine("the difference of their recorded rotations. Which component is the yaw is measured.");
+	Console.WriteLine();
+	Console.WriteLine("  scored against                                n      median        p90         max   within 10deg");
+	foreach (Pm4ErrorStat e in new[] { r.AgainstRotationX, r.AgainstRotationY, r.AgainstRotationZ, r.Control })
+		Console.WriteLine($"  {e.Name,-44} {e.Count,6} {e.MedianAbsError,10:F2} {e.P90AbsError,10:F2} {e.MaxAbsError,10:F1} {e.FractionWithin1,13:P1}");
+	Console.WriteLine();
+	Console.WriteLine();
+	Console.WriteLine("  DETECTOR POWER - could this test have worked at all?");
+	Console.WriteLine($"    mean footprint points per instance = {r.MeanPointsPerInstance:F1}");
+	foreach (Pm4ErrorStat e in new[] { r.TrueDelta, r.FittedAngles })
+		Console.WriteLine($"    {e.Name,-44} median {e.MedianAbsError,8:F2}  p90 {e.P90AbsError,8:F2}");
+	Console.WriteLine($"    pairs whose rotations actually DIFFER by >5deg = {r.RotatedPairs} of {r.PairsFitted}");
+	if (r.RotatedPairs > 0)
+		Console.WriteLine($"    {r.RotatedOnly.Name,-44} median {r.RotatedOnly.MedianAbsError,8:F2}  within10 {r.RotatedOnly.FractionWithin1:P1}");
+	else
+		Console.WriteLine("    NONE. This corpus cannot test rotation recovery - there is no rotation to recover.");
+	Console.WriteLine("    If the true differences cluster near zero while the fitted angles scatter,");
+	Console.WriteLine("    the FITTER failed and the hypothesis was never actually tested.");
+	Console.WriteLine();
+	Console.WriteLine("  A blind fit averages 90deg error, so only a median well below that means anything.");
+	Console.WriteLine("  The control fits against an unrelated asset and must do notably worse.");
+}
+
 static void RunPm4MprlValues(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
@@ -6625,7 +6668,8 @@ static void RunPm4RestorePlacements(string[] args)
 	}
 	else
 	{
-		Console.WriteLine($"  files written                          = {r.FilesWritten}  -> {output}");
+		Console.WriteLine($"  monolithic LK ADTs written             = {r.FilesWritten}  -> {output}");
+		Console.WriteLine($"  skipped (has terrain a blank base would flatten) = {r.SkippedBecauseTerrainWouldBeLost}");
 		Console.WriteLine($"  read back and verified                 = {r.RoundTripChecked}");
 		Console.WriteLine($"  round-trip FAILURES                    = {r.RoundTripFailed}");
 		if (r.RoundTripFailed > 0)

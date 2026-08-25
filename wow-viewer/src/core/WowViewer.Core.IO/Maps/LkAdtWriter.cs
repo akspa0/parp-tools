@@ -609,12 +609,27 @@ public static class LkAdtWriter
         writePayload(bw);
     }
 
+    /// <summary>
+    /// Writes one chunk, padding an odd payload to an even length and COUNTING the pad in the size.
+    /// </summary>
+    /// <remarks>
+    /// This used to emit the pad byte without including it in the declared size, which desynchronises
+    /// any reader that walks chunks sequentially by <c>offset + 8 + size</c> - it lands one byte short
+    /// and reads the next tag as garbage. Measured against a real ADT from the corpus: 260 chunks and
+    /// not one of them has an odd size, so Blizzard keeps payloads even rather than padding outside the
+    /// length. Files written the old way parsed only if the reader happened to guess the same padding
+    /// rule, and a client walking MCNKs would not.
+    ///
+    /// <para>The extra byte is a zero appended to the payload, which is harmless for the string blocks
+    /// this affects since they are already null-terminated.</para>
+    /// </remarks>
     private static void WriteDataChunk(BinaryWriter bw, string tag, byte[] payload)
     {
+        bool pad = (payload.Length & 1) != 0;
         bw.Write(FourCC.FromString(tag).ToFileBytes());
-        bw.Write(payload.Length);
+        bw.Write(payload.Length + (pad ? 1 : 0));
         bw.Write(payload);
-        if ((payload.Length & 1) != 0)
+        if (pad)
             bw.Write((byte)0);
     }
 }
