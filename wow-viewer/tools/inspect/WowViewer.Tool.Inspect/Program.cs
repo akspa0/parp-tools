@@ -2213,6 +2213,12 @@ static void RunPm4(string[] args)
 		case "zero-bucket":
 			RunPm4ZeroBucket(tail);
 			break;
+		case "stretch-locality":
+			RunPm4StretchLocality(tail);
+			break;
+		case "linkid-order":
+			RunPm4LinkIdOrder(tail);
+			break;
 		case "surface-class":
 			RunPm4SurfaceClass(tail);
 			break;
@@ -6436,6 +6442,68 @@ static void RunPm4SurfaceClass(string[] args)
 		double share = total == 0 ? 0 : (double)o.ObjectsWithHeight / total;
 		Console.WriteLine($"   0x{o.Value:X2}   {o.ObjectsWithHeight,10}   {o.ObjectsWithoutHeight,13}   {total,7}   {share,10:P1}");
 	}
+}
+
+static void RunPm4LinkIdOrder(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4LinkIdOrderReport r = Pm4LinkIdOrderSupport.Analyze(input);
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 LinkId tile-address order");
+	Console.WriteLine($"Input: {r.InputDirectory}  files={r.Files}");
+	Console.WriteLine($"Links scored = {r.LinksScored}   diagonal links skipped = {r.DiagonalLinksSkipped}   low16 == 0 = {r.Low16ZeroCount}");
+	Console.WriteLine();
+	Console.WriteLine("  decode of (LinkId & 0xFFFF)          real tile     control tile");
+	Console.WriteLine($"  hi=first  lo=second  (XX_YY)   {r.FirstSecondFraction,12:P2} {r.ControlFirstSecondFraction,16:P2}");
+	Console.WriteLine($"  hi=second lo=first   (YY_XX)   {r.SecondFirstFraction,12:P2} {r.ControlSecondFirstFraction,16:P2}");
+	Console.WriteLine();
+	Console.WriteLine("  Tiles whose two numbers are equal cannot tell the two apart and are excluded.");
+	Console.WriteLine("  The control scores the same decode against an unrelated tile, so a real match");
+	Console.WriteLine("  has to beat it rather than merely be non-zero.");
+}
+
+static void RunPm4StretchLocality(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? adtDir = GetOption(args, "--adt-dir");
+	if (string.IsNullOrWhiteSpace(input) || string.IsNullOrWhiteSpace(adtDir))
+	{
+		Console.Error.WriteLine("Error: --input (PM4 directory) and --adt-dir are both required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	float tall = float.TryParse(GetOption(args, "--tall"), out float t) ? t : 5f;
+	Pm4StretchLocalityReport r = Pm4StretchLocalitySupport.Analyze(input, adtDir, tall);
+
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 stretch locality");
+	Console.WriteLine($"PM4: {r.Pm4Directory}");
+	Console.WriteLine($"ADT: {r.AdtDirectory}");
+	Console.WriteLine($"Files paired={r.FilesPaired}  skipped(no terrain adt)={r.FilesSkippedNoAdt}  skipped(no grid)={r.FilesSkippedNoGrid}");
+	Console.WriteLine();
+	Console.WriteLine("Cell frame - both sides binned from stated world positions, so this is an OUTPUT:");
+	Console.WriteLine($"  chunks checked                = {r.ChunksIndexChecked}");
+	Console.WriteLine($"  col == 15 - MCNK.IndexY       = {r.ColEqualsFlippedIndexYFraction:P2}");
+	Console.WriteLine($"  row == 15 - MCNK.IndexX       = {r.RowEqualsFlippedIndexXFraction:P2}");
+	Console.WriteLine($"  surfaces off grid             = {r.SurfacesOffGrid}");
+	Console.WriteLine($"  surfaces on an absent cell    = {r.SurfacesOnMissingCell}");
+	Console.WriteLine();
+	Console.WriteLine($"What lies under a stretched surface (tall = vertical extent > {r.TallThreshold}):");
+	Console.WriteLine($"  tall surfaces  = {r.TallSurfaces}");
+	Console.WriteLine($"  short surfaces = {r.ShortSurfaces}");
+	Console.WriteLine();
+	Console.WriteLine("  measure                        tall      short      base rate");
+	Console.WriteLine($"  over a LIQUID cell       {r.TallOverLiquidFraction,10:P2} {r.ShortOverLiquidFraction,10:P2} {r.BaseLiquidCellFraction,14:P2}");
+	Console.WriteLine($"  over a HOLE cell         {r.TallOverHoleFraction,10:P2} {r.ShortOverHoleFraction,10:P2} {r.BaseHoleCellFraction,14:P2}");
+	Console.WriteLine();
+	Console.WriteLine("  Tall-vs-short is measured within the same tiles, so tile composition is controlled for.");
+	Console.WriteLine("  The prediction is tall > short; the base rate says what a tile offers by chance.");
 }
 
 static void RunPm4ZeroBucket(string[] args)
