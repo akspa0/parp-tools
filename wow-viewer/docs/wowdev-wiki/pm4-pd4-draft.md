@@ -235,10 +235,25 @@ the unattributed bucket carries a wall quad on 40.69% of its links. So the seali
 likely served by `MSPV` walls, with the stretched `MSUR` polygons being steep terrain-following
 collision alongside them.
 
+**The over-water reading was tested, and it does not hold.** Binning these surfaces and the ADT's
+`MCNK` cells into one frame - verified exactly, `col == 15 - IndexY` and `row == 15 - IndexX` at
+100.00% over 71,680 chunks with nothing off-grid - gives:
+
+| | tall (extent > 5) | short | base rate |
+|---|---|---|---|
+| over a liquid cell | 26.13% | 29.07% | 14.42% |
+| over a hole cell | 0.52% | 0.42% | 0.11% |
+
+Tall surfaces are **not** more likely to sit over water; marginally less. What is real is that the
+bucket *as a whole* sits over liquid at roughly twice the base rate, so this collision does cluster
+near water - tallness simply adds nothing on top of that. Binning is by surface centroid at 33-unit
+cell granularity, so an overhanging skirt whose centroid lands on the shore cell would not register;
+the coarse claim is refuted, a per-vertex version is not.
+
 **Consequence for anyone generating these files.** The unattributed bucket is not a bag of leftover
 floor quads. It contains geometry whose vertical extent is a deliberate property, so an exporter that
-emits only flat walkable surfaces per model will not reproduce it. Testable prediction: stretched
-surfaces should concentrate near liquid volumes and terrain holes.
+emits only flat walkable surfaces per model will not reproduce it. What sets that extent is still
+open.
 
 ---
 
@@ -381,7 +396,7 @@ table is the honest accounting of the rest, so a reader can tell a result from a
 | `MSLK` | `SystemFlag` | **MEASURED** | **constant 32768 (0x8000)** across 486,819 records - no information content |
 | `MSLK` | `_0x02` | **MEASURED** | **constant 0** - real padding |
 | `MSLK` | `_0x01` subtype | PARTIAL | enumerated, 19 values, 25% zero |
-| `MSLK` | `LinkId` | **MEASURED** | **a tile address**: `0xFFFF0000 \| (tileY << 8) \| tileX`. High 16 bits are `0xFFFF` in 305/305 files. Names the tile a link's target lives in - 82.5% this tile, 17.5% an adjacent one, **0% any more distant tile** |
+| `MSLK` | `LinkId` | **MEASURED** | **a tile address**, packed **reversed** relative to the filename: `0xFFFF0000 \| (second << 8) \| first` for `<map>_<first>_<second>`. Stated as X and Y this is `(tileY << 8) \| tileX`, but that phrasing is the trap - readers whose tile parser calls the FIRST number X will get it backwards, so it is given by filename position here. Scored over 1,248,682 links in 305 files with diagonal tiles excluded (a tile whose two numbers are equal cannot separate the hypotheses): **98.74%** against a mismatched-tile control of **0.31%**; the filename order scores **0.00%**. High 16 bits are `0xFFFF` in 305/305 files. Names the tile a link's target lives in - 82.5% this tile, 17.5% an adjacent one, **0% any more distant tile** |
 | `MSVT` | positions | MEASURED | floor vertices |
 | `MSVI` | indices | MEASURED | 1,930,146 fits, 0 misses |
 | `MSUR` | `0x01`, `0x02`, `0x14`, `0x18`, `0x1C`, normal | MEASURED | see §3-§5 |
