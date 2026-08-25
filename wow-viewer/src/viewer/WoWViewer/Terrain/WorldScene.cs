@@ -11429,6 +11429,12 @@ public class WorldScene : ISceneRenderer
                         if (_pm4GeneratedPlacementsTerrainlessOnly && !box.OnTileWithoutTerrain)
                             continue;
 
+                        // Never box an object that is already there. This overlay exists to show what
+                        // is MISSING; drawing a cage around a WMO the scene has already placed and
+                        // named adds nothing and buries the geometry underneath it.
+                        if (HasRealPlacementInside(box.Min, box.Max))
+                            continue;
+
                         // Green where the shape match is tight, amber where it is loose. A recovered
                         // name is a guess and the colour has to say so without a label being read.
                         Vector3 color = box.Score <= 0.05 ? new Vector3(0.35f, 0.95f, 0.45f)
@@ -13573,6 +13579,25 @@ public class WorldScene : ISceneRenderer
     /// footprint. The stored <c>Ck24</c> is the top 24 bits of that float, so the reconstruction
     /// carries roughly 0.003% relative error and the tolerance is sized for it.
     /// </remarks>
+    /// <summary>
+    /// True when the scene already has a placed WMO standing inside these bounds.
+    /// </summary>
+    private bool HasRealPlacementInside(Vector3 boundsMin, Vector3 boundsMax)
+    {
+        foreach (ObjectInstance inst in _wmoInstances)
+        {
+            Vector3 p = inst.PlacementPosition;
+            if (p.X >= boundsMin.X - 1f && p.X <= boundsMax.X + 1f
+                && p.Y >= boundsMin.Y - 1f && p.Y <= boundsMax.Y + 1f
+                && p.Z >= boundsMin.Z - 1f && p.Z <= boundsMax.Z + 1f)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private bool TryResolvePm4Asset(
         uint ck24,
         Vector3 boundsMin,
