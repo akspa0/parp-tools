@@ -194,20 +194,18 @@ public static class Pm4ObjectPositionDecoder
         // Compute world bounds from the sub-object's local bounds.
         Pm4Bounds3 worldBounds = subObj.Bounds ?? new Pm4Bounds3(Vector3.Zero, Vector3.Zero);
 
-        // Compute mean heading from MPRL entries.
-        float mprlHeadingMean = 0f;
-        if (subObj.PositionRefs.Count > 0)
-        {
-            float sumSin = 0f;
-            float sumCos = 0f;
-            foreach (Pm4MprlEntry mprl in subObj.PositionRefs)
-            {
-                float angle = mprl.Unk04 * (2f * MathF.PI / 65536f);
-                sumSin += MathF.Sin(angle);
-                sumCos += MathF.Cos(angle);
-            }
-            mprlHeadingMean = MathF.Atan2(sumSin, sumCos) * (180f / MathF.PI);
-        }
+        // MPRL.Unk04 is NOT a heading, and this used to treat it as one - reading it as a 16-bit
+        // angle via Unk04 * 2*pi/65536 and averaging per object. Two measurements refute that.
+        //
+        // A 16-bit angle uses its whole range; Unk04 spans 0..38317 over 141,218 records and never
+        // approaches 65535. And it behaves as a spatial GROUP key instead: points sharing a value sit
+        // a median 1.62 world units apart against 170.99 for random groups of the same size from the
+        // same file - about 105 times tighter than chance. It says which footprint a terrain-contact
+        // point belongs to.
+        //
+        // No heading is emitted rather than a fabricated one. Rotation is genuinely not recovered
+        // from PM4 yet, and a plausible wrong number is worse than an absent one.
+        const float mprlHeadingMean = 0f;
 
         return new Pm4DecodedObjectPlacement(
             regionId,

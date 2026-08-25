@@ -2246,6 +2246,9 @@ static void RunPm4(string[] args)
 		case "mslk-values":
 			RunPm4MslkValues(tail);
 			break;
+		case "mprl-values":
+			RunPm4MprlValues(tail);
+			break;
 		case "surface-class":
 			RunPm4SurfaceClass(tail);
 			break;
@@ -6469,6 +6472,51 @@ static void RunPm4SurfaceClass(string[] args)
 		double share = total == 0 ? 0 : (double)o.ObjectsWithHeight / total;
 		Console.WriteLine($"   0x{o.Value:X2}   {o.ObjectsWithHeight,10}   {o.ObjectsWithoutHeight,13}   {total,7}   {share,10:P1}");
 	}
+}
+
+static void RunPm4MprlValues(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4MprlValueReport r = Pm4MprlValueSupport.Analyze(input);
+	Console.WriteLine("WowViewer.Tool.Inspect MPRL unknown fields");
+	Console.WriteLine($"Files={r.Files}");
+	Console.WriteLine();
+	Console.WriteLine("  field          total       min        max   groups/file   groupSizes");
+	foreach (Pm4MprlFieldResult f in new[] { r.Unk00, r.Unk04, r.Unk14, r.Unk16 })
+	{
+		Console.WriteLine($"  {f.Name,-14} {f.Total,7} {f.Min,9} {f.Max,10} {f.MeanGroupsPerFile,13:F1}   {string.Join(", ", f.GroupSizes.Take(5).Select(static x => $"{x.Value}x{x.Count}"))}");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine("  IS Unk04 A 16-BIT ANGLE? An angle scaled by 2*pi/65536 uses the whole range.");
+	Console.WriteLine($"    Unk04 observed range = {r.Unk04.Min}..{r.Unk04.Max}  (an angle would reach ~65535)");
+	Console.WriteLine();
+	Console.WriteLine("  ARE THE GROUPS SPATIALLY COHERENT? (median mean-pairwise distance, world units)");
+	foreach (Pm4MprlFieldResult f in new[] { r.Unk00, r.Unk04 })
+	{
+		double ratio = f.MedianControlGroupDistance <= 0 ? 0 : f.MedianWithinGroupDistance / f.MedianControlGroupDistance;
+		Console.WriteLine($"    {f.Name,-14} within={f.MedianWithinGroupDistance,8:F2}   control={f.MedianControlGroupDistance,8:F2}   ratio={ratio,6:F3}");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine("  Unk14 values by height:");
+	PrintMprlEnum(r.ByUnk14);
+	Console.WriteLine("  Unk16 values by height:");
+	PrintMprlEnum(r.ByUnk16);
+}
+
+static void PrintMprlEnum(IReadOnlyList<Pm4MprlEnumResult> values)
+{
+	Console.WriteLine("    value      count   meanHeight    minHeight    maxHeight");
+	foreach (Pm4MprlEnumResult v in values.Take(16))
+		Console.WriteLine($"    {v.Value,-8} {v.Count,8} {v.MeanHeight,12:F2} {v.MinHeight,12:F2} {v.MaxHeight,12:F2}");
 }
 
 static void RunPm4MslkValues(string[] args)

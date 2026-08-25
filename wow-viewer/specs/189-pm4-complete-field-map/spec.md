@@ -79,14 +79,17 @@ What it counts is the open question, and reading it as an enum was the error.
 |---|---|---|
 | position | height is `Y`, horizontal pair `Z` then `X`; terrain contact | MEASURED |
 | `Unk02` / `Unk06` | constant 65535 / 32768 | MEASURED |
-| `Unk00` | index-like, 95 distinct, 5% zero | UNKNOWN |
-| `Unk04` | **index-like, 3,932 distinct, 0.278 per-file ratio** | **UNKNOWN — most structured unknown in the format** |
-| `Unk14` | enum, 14 values, 24% zero | UNKNOWN |
-| `Unk16` | enum, 2 values, 69% zero | UNKNOWN |
+| `Unk00` | ~1.0 distinct value per FILE — a per-tile value, not per-point | PARTIAL — what it identifies is open |
+| `Unk04` | **footprint group id**: within-group spread 1.62 vs control 170.99 | **MEASURED** |
+| `Unk14` | small counter from zero, plus a `0xFFFF` sentinel | MEASURED as a counter; what it counts is open |
+| `Unk16` | binary; `0x3FFF` marks exactly the same 39,367 records as `Unk14 == 0xFFFF` | MEASURED — redundant sentinel |
 
-`Unk04` carries a live wrong assumption: `Pm4ObjectPositionDecoder` converts it to a heading with
-`Unk04 * 2π/65536` and feeds that into object placement. The sweep says it is index-like, not angular.
-That conversion has no evidence behind it and is running in production code.
+`Unk04` carried a live wrong assumption, now removed. `Pm4ObjectPositionDecoder` converted it to a
+heading with `Unk04 * 2π/65536` and fed that into object placement. Two measurements refute it: the
+observed range is 0..38317 where a 16-bit angle would reach ~65535, and the field behaves as a spatial
+group key, with points sharing a value sitting 1.62 units apart against a 170.99 control. The decoder
+now emits no heading at all, because rotation is genuinely unrecovered and a plausible wrong number is
+worse than an absent one.
 
 ### `MSUR`
 
@@ -148,5 +151,5 @@ That conversion has no evidence behind it and is running in production code.
 
 | site | dependency | risk |
 |---|---|---|
-| `Pm4ObjectPositionDecoder` | `MPRL.Unk04` as a heading, `* 2π/65536` | sweep says index-like, not angular |
+| ~~`Pm4ObjectPositionDecoder`~~ | ~~`MPRL.Unk04` as a heading~~ | **RESOLVED 2026-08-25** — refuted and removed |
 | `AdtPm4MaskBuilder` | corner-relative coordinate space, `.X`/`.Z` horizontal | space never verified |
