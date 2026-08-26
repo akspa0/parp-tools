@@ -361,9 +361,6 @@ public partial class ViewerApp
             ApplyAcceptedReconciliation();
         }
         ImGui.EndDisabled();
-
-        // The picker modal must be driven every frame its host surface is visible.
-        ImGuiPathPicker.Instance.Draw();
     }
 
     /// <summary>One path row: editable text plus an in-app Browse button (no native dialogs).</summary>

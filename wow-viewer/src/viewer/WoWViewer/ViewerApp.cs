@@ -1585,6 +1585,9 @@ var seq = animator.Sequences[animator.CurrentSequence];
         if (HasImGuiContext())
         {
             DrawUI();
+            // The in-app path picker is a global modal: drive it every frame so it works from any
+            // surface, independent of which panel opened it.
+            ImGuiPathPicker.Instance.Draw();
             _imGui.Render();
         }
 

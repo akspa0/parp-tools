@@ -2,6 +2,16 @@
 
 Last updated: 2026-08-25
 
+## 2026-08-25 — Spec 176: path picker made global + Browse actually opens
+
+- **Bug fixed: Browse did nothing.** The picker modal was driven at the end of the Reconcile panel,
+  after an early `return` when no preview had run, so the modal was never rendered on first open.
+  The picker is now driven globally every frame in `OnRender` (right before `_imGui.Render()`), so
+  it works from any surface and any panel state.
+- The picker is a reusable global modal (`ImGuiPathPicker.Instance`), so any future surface can
+  call `Open(...)` and get the same cross-platform browser.
+- Proof: WoWViewer builds 0 errors; 81/81 focused editor tests unaffected.
+
 ## 2026-08-25 — Spec 176: in-app cross-platform path picker replaces typed paths
 
 - **No more typing paths, no native dialogs.** New [`ImGuiPathPicker`](../../src/viewer/WoWViewer/
