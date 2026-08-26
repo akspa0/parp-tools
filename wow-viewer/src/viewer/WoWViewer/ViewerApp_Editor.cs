@@ -47,6 +47,12 @@ public partial class ViewerApp
     private readonly Dictionary<string, string> _reconciliationSourceAdtByProposalId = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _reconciliationSourceHashByAdt = new(StringComparer.OrdinalIgnoreCase);
 
+    // Review-list UI state: the docked sidebar cannot be relied on to scroll, so the proposal list
+    // is filtered and paginated instead.
+    private int _reconciliationListFilter;
+    private int _reconciliationListPage;
+    private const int ReconciliationListPageSize = 50;
+
     private static readonly JsonSerializerOptions ReconciliationJsonOptions = new() { WriteIndented = true };
 
     private void EnsureEditorHost()
@@ -243,34 +249,22 @@ public partial class ViewerApp
     private void DrawReconciliationPanel()
     {
         ImGui.Text("PM4/Museum Reconciliation");
-        ImGui.TextDisabled("Processes the PM4 tiles already loaded in the scene against their placement ADTs. Nothing is written during preview.");
+        ImGui.TextDisabled("Processes every PM4 tile on disk for the current map against its placement ADTs — not just tiles streamed around the camera. Nothing is written during preview.");
 
-        // Everything is discerned from the loaded scene — the user never types or browses a path.
-        // The loaded PM4 tiles ARE the guide; their placement ADTs are derived from the map name.
+        // Everything is discerned from the loaded session — the user never types or browses a path.
+        // The whole map's PM4 corpus on disk IS the guide; placement ADTs are derived per tile.
         string? mapName = GetCurrentSessionMapName();
         string? mapDirectory = TryResolveCurrentMapDirectory(preferLooseOverlay: true);
-        IReadOnlyList<(int TileX, int TileY)> loadedPm4Tiles = _worldScene?.LoadedPm4Tiles ?? [];
 
-        if (string.IsNullOrWhiteSpace(mapName) || string.IsNullOrWhiteSpace(mapDirectory) || loadedPm4Tiles.Count == 0)
+        if (string.IsNullOrWhiteSpace(mapName) || string.IsNullOrWhiteSpace(mapDirectory))
         {
-            ImGui.TextDisabled("Load a map with PM4 overlay tiles to reconcile. The loaded PM4 tiles and their placement ADTs are detected automatically.");
+            ImGui.TextDisabled("Load a map to reconcile. Its PM4 tiles and their placement ADTs are detected automatically from the map directory.");
             return;
         }
 
-        // Resolve the placement ADT for each loaded PM4 tile (first number bounds Y, unpadded).
-        var resolved = new List<(int TileX, int TileY, string Pm4Path, string AdtPath)>();
-        foreach ((int tileX, int tileY) in loadedPm4Tiles)
+        if (!TryCollectReconciliationPairs(mapName, mapDirectory!, out List<(int TileX, int TileY, string Pm4Path, string AdtPath)> resolved) || resolved.Count == 0)
         {
-            string pm4Path = Path.Combine(mapDirectory, $"{mapName}_{tileY:D2}_{tileX:D2}.pm4");
-            if (!File.Exists(pm4Path))
-                continue;
-            if (TryResolvePlacementAdtPath(mapDirectory, mapName, tileX, tileY, out string adtPath))
-                resolved.Add((tileX, tileY, pm4Path, adtPath));
-        }
-
-        if (resolved.Count == 0)
-        {
-            ImGui.TextDisabled($"No PM4/placement-ADT pairs found on disk for the {loadedPm4Tiles.Count} loaded PM4 tile(s) under {mapDirectory}.");
+            ImGui.TextDisabled($"No PM4/placement-ADT pairs found on disk under {mapDirectory}.");
             return;
         }
 
@@ -344,10 +338,57 @@ public partial class ViewerApp
 
         ImGui.Separator();
 
-        ImGui.BeginChild("##ReconciliationProposals", new Vector2(0, -ImGui.GetFrameHeightWithSpacing()), border: false);
+        // The proposals list can be thousands of rows and the docked sidebar does not reliably
+        // scroll, so review is driven by filters plus pagination instead of raw scrolling.
+        var filtered = new List<ReconciliationProposal>(_reconciliationProposals.Count);
         foreach (ReconciliationProposal proposal in _reconciliationProposals)
         {
-            DrawReconciliationProposal(proposal);
+            bool include = _reconciliationListFilter switch
+            {
+                1 => proposal.Status == ProposalStatus.ReviewRequired,
+                2 => proposal.Status == ProposalStatus.Conflict,
+                3 => proposal.Status == ProposalStatus.AlreadyAligned,
+                _ => true,
+            };
+            if (include)
+                filtered.Add(proposal);
+        }
+
+        if (ImGui.SmallButton("All##reconfilter"))
+            _reconciliationListFilter = 0;
+        ImGui.SameLine();
+        if (ImGui.SmallButton($"Reviewable ({reviewable})##reconfilter"))
+            _reconciliationListFilter = 1;
+        ImGui.SameLine();
+        if (ImGui.SmallButton($"Conflicts ({conflicts})##reconfilter"))
+            _reconciliationListFilter = 2;
+        ImGui.SameLine();
+        if (ImGui.SmallButton($"Aligned ({alreadyAligned})##reconfilter"))
+            _reconciliationListFilter = 3;
+
+        int pageCount = Math.Max(1, (filtered.Count + ReconciliationListPageSize - 1) / ReconciliationListPageSize);
+        if (_reconciliationListPage >= pageCount)
+            _reconciliationListPage = pageCount - 1;
+
+        ImGui.BeginDisabled(_reconciliationListPage == 0);
+        if (ImGui.SmallButton("< Prev##reconpage"))
+            _reconciliationListPage--;
+        ImGui.EndDisabled();
+        ImGui.SameLine();
+        ImGui.TextDisabled($"page {_reconciliationListPage + 1}/{pageCount} — {filtered.Count} shown");
+        ImGui.SameLine();
+        ImGui.BeginDisabled(_reconciliationListPage >= pageCount - 1);
+        if (ImGui.SmallButton("Next >##reconpage"))
+            _reconciliationListPage++;
+        ImGui.EndDisabled();
+
+        int pageStart = _reconciliationListPage * ReconciliationListPageSize;
+        int pageEnd = Math.Min(filtered.Count, pageStart + ReconciliationListPageSize);
+
+        ImGui.BeginChild("##ReconciliationProposals", new Vector2(0, -ImGui.GetFrameHeightWithSpacing()), border: false);
+        for (int index = pageStart; index < pageEnd; index++)
+        {
+            DrawReconciliationProposal(filtered[index]);
         }
 
         ImGui.EndChild();
@@ -460,36 +501,56 @@ public partial class ViewerApp
         }
     }
 
-    /// <summary>Resolves the placement ADT for every loaded PM4 tile from the scene (no user input).</summary>
+    /// <summary>Resolves every PM4/placement-ADT pair on disk for the current map (no user input,
+    /// no dependence on which tiles the scene has streamed around the camera).</summary>
     private bool TryResolveReconciliationPairs(out List<(int TileX, int TileY, string Pm4Path, string AdtPath)> pairs)
     {
         pairs = [];
         string? mapName = GetCurrentSessionMapName();
         string? mapDirectory = TryResolveCurrentMapDirectory(preferLooseOverlay: true);
-        IReadOnlyList<(int TileX, int TileY)> loadedPm4Tiles = _worldScene?.LoadedPm4Tiles ?? [];
 
-        if (string.IsNullOrWhiteSpace(mapName) || string.IsNullOrWhiteSpace(mapDirectory) || loadedPm4Tiles.Count == 0)
+        if (string.IsNullOrWhiteSpace(mapName) || string.IsNullOrWhiteSpace(mapDirectory))
         {
-            _reconciliationStatus = "Load a map with PM4 overlay tiles to reconcile.";
+            _reconciliationStatus = "Load a map so its directory can be located for reconciliation.";
             return false;
         }
 
-        foreach ((int tileX, int tileY) in loadedPm4Tiles)
+        if (!TryCollectReconciliationPairs(mapName, mapDirectory!, out pairs) || pairs.Count == 0)
         {
-            string pm4Path = Path.Combine(mapDirectory, $"{mapName}_{tileY:D2}_{tileX:D2}.pm4");
-            if (!File.Exists(pm4Path))
-                continue;
-            if (TryResolvePlacementAdtPath(mapDirectory, mapName, tileX, tileY, out string adtPath))
-                pairs.Add((tileX, tileY, pm4Path, adtPath));
-        }
-
-        if (pairs.Count == 0)
-        {
-            _reconciliationStatus = $"No PM4/placement-ADT pairs found on disk for the {loadedPm4Tiles.Count} loaded PM4 tile(s).";
+            _reconciliationStatus = $"No PM4/placement-ADT pairs found on disk under {mapDirectory}.";
             return false;
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Enumerates every <c>{map}_*.pm4</c> file in the map directory and pairs it with its
+    /// placement ADT (split <c>_obj0.adt</c> preferred, monolithic root ADT as fallback). This
+    /// covers the entire map at once rather than only the tiles the viewer has loaded.
+    /// </summary>
+    private static bool TryCollectReconciliationPairs(
+        string mapName,
+        string mapDirectory,
+        out List<(int TileX, int TileY, string Pm4Path, string AdtPath)> pairs)
+    {
+        pairs = [];
+        var seenTiles = new HashSet<(int, int)>();
+
+        foreach (string pm4Path in Directory.EnumerateFiles(mapDirectory, $"{mapName}_*.pm4"))
+        {
+            if (!Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int tileX, out int tileY))
+                continue;
+
+            if (!seenTiles.Add((tileX, tileY)))
+                continue;
+
+            if (TryResolvePlacementAdtPath(mapDirectory, mapName, tileX, tileY, out string adtPath))
+                pairs.Add((tileX, tileY, pm4Path, adtPath));
+        }
+
+        pairs.Sort(static (a, b) => (a.TileY, a.TileX).CompareTo((b.TileY, b.TileX)));
+        return pairs.Count > 0;
     }
 
     /// <summary>

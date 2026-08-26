@@ -94,10 +94,45 @@ public static class Pm4ReconciliationEngine
                     : [];
 
             List<PlacementSnapshot> associated = AssociatePlacements(guide, placements, options);
+            Pm4GuideObservation effectiveGuide = guide;
+
+            if (associated.Count > 1)
+            {
+                // Positional association alone is ambiguous in dense tiles. First try narrowing by
+                // the scorer's asset-path agreement; if that leaves a tie, select the placement
+                // nearest the guide centre. Every proposal is human-reviewed before any write, so
+                // a rare wrong nearest-pick costs one Reject click — whereas emitting a conflict
+                // for every dense-cluster guide buries the operator under thousands of dead rows.
+                int positionalCount = associated.Count;
+                List<PlacementSnapshot> narrowed = DisambiguateByCandidateAsset(associated, candidates);
+                double nearestDistance;
+                string resolutionSignal;
+                if (narrowed.Count == 1)
+                {
+                    associated = narrowed;
+                    nearestDistance = Vector3.Distance(effectiveGuide.Position, narrowed[0].Position);
+                    resolutionSignal = "association-resolved-by-candidate";
+                }
+                else
+                {
+                    PlacementSnapshot nearest = SelectNearestPlacement(guide.Position, associated);
+                    nearestDistance = Vector3.Distance(guide.Position, nearest.Position);
+                    associated = [nearest];
+                    resolutionSignal = "association-nearest-selected";
+                }
+
+                effectiveGuide = guide with
+                {
+                    Evidence = [.. guide.Evidence, new ReconciliationEvidence(
+                        resolutionSignal,
+                        nearestDistance,
+                        $"{positionalCount} placements inside the guide bounds resolved to entry {associated[0].Identity.EntryIndex} '{associated[0].Identity.AssetPath}' (distance {nearestDistance:F1})")],
+                };
+            }
 
             if (associated.Count == 0)
             {
-                proposals.AddRange(BuildProposals(guide, existing: null, candidates, ambiguityWindow));
+                proposals.AddRange(BuildProposals(effectiveGuide, existing: null, candidates, ambiguityWindow));
                 continue;
             }
 
@@ -107,22 +142,22 @@ public static class Pm4ReconciliationEngine
 
                 // An existing placement already at the guide position is a result, not work:
                 // report it as already aligned instead of proposing a no-op move.
-                if (guide.ExpectedAssetKind == ExpectedAssetKind.Unknown
-                    || guide.ExpectedAssetKind == existing.Identity.Kind)
+                if (effectiveGuide.ExpectedAssetKind == ExpectedAssetKind.Unknown
+                    || effectiveGuide.ExpectedAssetKind == existing.Identity.Kind)
                 {
-                    double positionResidual = Vector3.Distance(guide.Position, existing.Position);
+                    double positionResidual = Vector3.Distance(effectiveGuide.Position, existing.Position);
                     if (positionResidual <= AlreadyAlignedResidualThreshold)
                     {
-                        proposals.Add(BuildAlreadyAlignedProposal(guide, existing));
+                        proposals.Add(BuildAlreadyAlignedProposal(effectiveGuide, existing));
                         continue;
                     }
                 }
 
-                proposals.AddRange(BuildProposals(guide, existing, candidates, ambiguityWindow));
+                proposals.AddRange(BuildProposals(effectiveGuide, existing, candidates, ambiguityWindow));
                 continue;
             }
 
-            proposals.Add(BuildAssociationConflictProposal(guide, associated, options));
+            proposals.Add(BuildAssociationConflictProposal(effectiveGuide, associated, options));
         }
 
         return proposals;
@@ -157,6 +192,59 @@ public static class Pm4ReconciliationEngine
 
         return associated;
     }
+
+    /// <summary>
+    /// Narrows a positional association tie using the scorer's candidate list: only placements
+    /// whose asset path appears among the <see cref="CandidateStatus.Matched"/> candidates survive.
+    /// Returns the input unchanged when the candidates carry no matching signal or would narrow to
+    /// more than one placement (still ambiguous) — a conflict is then the honest output.
+    /// </summary>
+    private static List<PlacementSnapshot> DisambiguateByCandidateAsset(
+        IReadOnlyList<PlacementSnapshot> associated,
+        IReadOnlyList<ReconciliationCandidate> candidates)
+    {
+        var matchedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (ReconciliationCandidate candidate in candidates)
+        {
+            if (candidate.Status == CandidateStatus.Matched)
+                matchedPaths.Add(NormalizeAssetPath(candidate.AssetPath));
+        }
+
+        if (matchedPaths.Count == 0)
+            return [.. associated];
+
+        List<PlacementSnapshot> narrowed = associated
+            .Where(p => matchedPaths.Contains(NormalizeAssetPath(p.Identity.AssetPath)))
+            .ToList();
+
+        return narrowed.Count == 1 ? narrowed : [.. associated];
+    }
+
+    /// <summary>
+    /// Deterministic tie-break for positional association: the placement closest to the guide
+    /// centre, with uniqueId ordering as a stable tie-break for equidistant rows.
+    /// </summary>
+    private static PlacementSnapshot SelectNearestPlacement(Vector3 guidePosition, IReadOnlyList<PlacementSnapshot> associated)
+    {
+        PlacementSnapshot best = associated[0];
+        double bestDistance = Vector3.Distance(guidePosition, best.Position);
+        for (int index = 1; index < associated.Count; index++)
+        {
+            PlacementSnapshot candidate = associated[index];
+            double distance = Vector3.Distance(guidePosition, candidate.Position);
+            if (distance < bestDistance
+                || (distance == bestDistance && candidate.Identity.UniqueId < best.Identity.UniqueId))
+            {
+                best = candidate;
+                bestDistance = distance;
+            }
+        }
+
+        return best;
+    }
+
+    private static string NormalizeAssetPath(string path)
+        => path.Replace('/', '\\').Trim();
 
     private static ReconciliationProposal BuildAssociationConflictProposal(
         Pm4GuideObservation guide,

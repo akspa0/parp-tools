@@ -118,19 +118,50 @@ public class ReconciliationTileProposalTests
     }
 
     [Fact]
-    public void Two_placements_inside_bounds_is_an_association_conflict()
+    public void Two_placements_inside_bounds_resolve_to_the_nearest_for_review()
     {
+        Vector3 nearPosition = GuideCenter + new Vector3(3f, 0f, 0f);
+        Vector3 farPosition = GuideCenter + new Vector3(8f, 0f, 0f);
         var proposals = Pm4ReconciliationEngine.BuildTileProposals(
             [Guide()],
-            [Placement(77), Placement(78, entryIndex: 1)],
+            [Placement(78, position: farPosition, entryIndex: 1), Placement(77, position: nearPosition)],
             new Dictionary<string, IReadOnlyList<ReconciliationCandidate>>());
 
+        // Dense-cluster ties no longer emit dead conflicts: the nearest placement is selected and
+        // surfaced as a reviewable align, with the resolution recorded in the evidence.
         ReconciliationProposal proposal = Assert.Single(proposals);
-        Assert.Equal(ProposalStatus.Conflict, proposal.Status);
+        Assert.Equal(ProposalStatus.ReviewRequired, proposal.Status);
+        Assert.NotNull(proposal.ExistingPlacement);
+        Assert.Equal(77, proposal.ExistingPlacement!.UniqueId);
+        Assert.Contains(proposal.Evidence, e => e.Signal == "association-nearest-selected");
+    }
 
-        int competitorCount = proposal.Evidence.Count(e => e.Signal == "association-competitor");
-        Assert.Equal(2, competitorCount);
-        Assert.Contains(proposal.Evidence, e => e.Signal == "association-ambiguous");
+    [Fact]
+    public void Candidate_asset_agreement_narrows_a_positional_tie()
+    {
+        // Both placements sit inside the bounds, but only one matches the scorer's candidate path;
+        // that agreement must win over plain nearest-distance selection.
+        Vector3 nearWrongAsset = GuideCenter + new Vector3(1f, 0f, 0f);
+        Vector3 fartherRightAsset = GuideCenter + new Vector3(6f, 0f, 0f);
+        var wrongAsset = Placement(77, position: nearWrongAsset) with
+        {
+            Identity = Placement(77, position: nearWrongAsset).Identity with { AssetPath = "wrong.mdx" },
+        };
+        var rightAsset = Placement(78, position: fartherRightAsset, entryIndex: 1) with
+        {
+            Identity = Placement(78, position: fartherRightAsset, entryIndex: 1).Identity with { AssetPath = "wmo:a.asset" },
+        };
+
+        var candidates = new Dictionary<string, IReadOnlyList<ReconciliationCandidate>>
+        {
+            ["guide-1"] = [Candidate("wmo:a", 0.9d)],
+        };
+
+        var proposals = Pm4ReconciliationEngine.BuildTileProposals([Guide()], [wrongAsset, rightAsset], candidates);
+
+        ReconciliationProposal proposal = Assert.Single(proposals);
+        Assert.Contains(proposal.Evidence, e => e.Signal == "association-resolved-by-candidate");
+        Assert.Equal(78, proposal.ExistingPlacement!.UniqueId);
     }
 
     [Fact]
