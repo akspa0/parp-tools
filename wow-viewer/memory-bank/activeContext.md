@@ -1,6 +1,15 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
+
+**Spec 190 lane (2026-08-26).** US1 generation slice implemented and tested:
+`RosettaTilesetGenerator` + `RosettaTextPainter` in `WowViewer.Core.IO/Maps`, `rosetta-generate`
+command in `WowViewer.Tool.Inspect`. Deterministic designkit-style layout (footprint-sized cells,
+occupied-tile skip), asset names rasterized into MCCV vertex colors via a 5x7 bitmap font, tiles
+built on `BlankAdtFactory` and written by `LkAdtWriter`; manifest JSON beside the tiles. 5 focused
+tests pass; solution builds clean. Spec: [190-rosetta-calibration-corpus](../specs/190-rosetta-calibration-corpus/spec.md).
+Next: user runs the enumeration against a configured client root (user-owned), then US2 reference-
+library builder. Offline-only remains binding.
 
 This file is the interchange for the next agent. It records only the current routing state. Read
 the owning spec for requirements and proof; read a workstream only when the spec links it.

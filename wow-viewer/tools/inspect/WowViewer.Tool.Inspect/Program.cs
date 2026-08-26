@@ -86,6 +86,9 @@ switch (area)
 	case "wmo":
 		RunWmo(tail);
 		break;
+	case "rosetta-generate":
+		RunRosettaGenerate(tail);
+		break;
 	default:
 		Console.Error.WriteLine($"Unknown inspect area '{area}'.");
 		ShowUsage();
@@ -7370,6 +7373,152 @@ static void RunPm4ObjectLibrary(string[] args)
 	Console.WriteLine($"Assets placed more than once: {repeated} of {report.DistinctAssets}");
 	Console.WriteLine("  (one source model with several recorded outputs is the strongest generation test:");
 	Console.WriteLine("   the same input must reproduce every one of them)");
+}
+
+static void RunRosettaGenerate(string[] args)
+{
+	string? clientRoot = GetOption(args, "--client-root");
+	string? mapName = GetOption(args, "--map-name") ?? "Development";
+	string? output = GetOption(args, "--output", "-o");
+	string? existingMapDir = GetOption(args, "--existing-map-dir");
+	int startX = int.TryParse(GetOption(args, "--start-x"), out int sx) ? sx : 24;
+	int startY = int.TryParse(GetOption(args, "--start-y"), out int sy) ? sy : 24;
+	int maxAssets = int.TryParse(GetOption(args, "--max-assets"), out int ma) ? ma : 0;
+
+	if (string.IsNullOrWhiteSpace(clientRoot) || string.IsNullOrWhiteSpace(output))
+	{
+		Console.Error.WriteLine("Error: --client-root and --output are required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	var occupiedTiles = new HashSet<(int X, int Y)>();
+
+	void CollectOccupiedTiles(string directory)
+	{
+		if (!Directory.Exists(directory))
+			return;
+
+		foreach (string file in Directory.GetFiles(directory, "*.adt"))
+		{
+			string name = Path.GetFileNameWithoutExtension(file);
+			string[] parts = name.Split('_');
+			if (parts.Length >= 3 && int.TryParse(parts[^2], out int ex) && int.TryParse(parts[^1], out int ey))
+				occupiedTiles.Add((ex, ey));
+		}
+	}
+
+	// Never overwrite: tiles already present in the reference map directory or in the output
+	// directory are treated as occupied before layout begins.
+	CollectOccupiedTiles(existingMapDir ?? string.Empty);
+	CollectOccupiedTiles(output);
+
+	using var catalog = new NativeMpqService();
+	catalog.LoadArchives([clientRoot]);
+
+	IReadOnlyList<string> known = catalog.ExtractInternalListfiles();
+	if (known.Count == 0)
+		known = catalog.GetAllKnownFiles();
+
+	var assetPaths = known
+		.Where(static p =>
+		{
+			string ext = Path.GetExtension(p);
+			return ext is ".mdx" or ".mdl" or ".wmo";
+		})
+		.OrderBy(static p => p, StringComparer.Ordinal)
+		.ToList();
+
+	Console.WriteLine($"Rosetta generate: {assetPaths.Count} candidate assets under {clientRoot}");
+
+	var entries = new List<RosettaAssetEntry>();
+	var exclusions = new List<(string Path, string Reason)>();
+	foreach (string path in assetPaths)
+	{
+		if (maxAssets > 0 && entries.Count >= maxAssets)
+			break;
+
+		byte[]? bytes = catalog.ReadFile(path);
+		if (bytes is null)
+		{
+			exclusions.Add((path, "unreadable from archive"));
+			continue;
+		}
+
+		string ext = Path.GetExtension(path);
+		try
+		{
+			using var ms = new MemoryStream(bytes, writable: false);
+			if (ext == ".wmo")
+			{
+				WmoSummary summary = WmoSummaryReader.Read(ms, path);
+				entries.Add(new RosettaAssetEntry(path, RosettaAssetKind.WorldModel, summary.BoundsMin, summary.BoundsMax));
+			}
+			else
+			{
+				MdxSummary summary = MdxSummaryReader.Read(ms, path);
+				if (summary.BoundsMin is not { } bmin || summary.BoundsMax is not { } bmax)
+				{
+					exclusions.Add((path, "no model bounds"));
+					continue;
+				}
+				entries.Add(new RosettaAssetEntry(path, RosettaAssetKind.Model, bmin, bmax));
+			}
+		}
+		catch (Exception ex)
+		{
+			exclusions.Add((path, $"read failed: {ex.Message}"));
+		}
+	}
+
+	var options = new RosettaGeneratorOptions(mapName, StartTileX: startX, StartTileY: startY);
+	RosettaGenerationResult result = RosettaTilesetGenerator.Generate(entries, options, occupiedTiles);
+
+	Directory.CreateDirectory(output);
+	foreach (RosettaTilePlan tile in result.Tiles)
+	{
+		string adtPath = Path.Combine(output, $"{mapName}_{tile.TileX}_{tile.TileY}.adt");
+		if (File.Exists(adtPath))
+			throw new InvalidOperationException(
+				$"Refusing to overwrite existing tile {adtPath}. The layout should have skipped it; " +
+				"delete the file or choose a different --output.");
+
+		byte[] adtBytes = LkAdtWriter.Build(tile.AdtData);
+		File.WriteAllBytes(adtPath, adtBytes);
+	}
+
+	var manifest = new
+	{
+		spec = "190-rosetta-calibration-corpus",
+		map = mapName,
+		clientRoot,
+		generatedUtc = DateTime.UtcNow.ToString("o"),
+		options = new { options.StartTileX, options.StartTileY, options.CellMarginMeters, options.MinCellSize, options.MaxCellSize },
+		tileCount = result.Tiles.Count,
+		placementCount = result.Placements.Count,
+		exclusionCount = exclusions.Count + result.Exclusions.Count,
+		placements = result.Placements.Select(static p => new
+		{
+			asset = p.Asset.AssetPath,
+			kind = p.Asset.Kind.ToString(),
+			p.TileX,
+			p.TileY,
+			position = new[] { p.WorldPosition.X, p.WorldPosition.Y, p.WorldPosition.Z },
+			p.CellSize,
+			label = p.LabelText,
+			p.UniqueId,
+		}),
+		exclusions = exclusions.Select(static e => new { asset = e.Path, reason = e.Reason })
+			.Concat(result.Exclusions.Select(static e => new { asset = e.Asset.AssetPath, reason = e.Reason })),
+	};
+
+	string manifestPath = Path.Combine(output, "rosetta-manifest.json");
+	File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
+
+	Console.WriteLine($"Tiles written: {result.Tiles.Count} -> {output}");
+	Console.WriteLine($"Placements:    {result.Placements.Count}");
+	Console.WriteLine($"Exclusions:    {exclusions.Count + result.Exclusions.Count}");
+	Console.WriteLine($"Manifest:      {manifestPath}");
 }
 
 static void RunPm4PlacementZ(string[] args)
