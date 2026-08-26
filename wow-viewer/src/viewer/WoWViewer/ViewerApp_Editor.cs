@@ -293,7 +293,31 @@ public partial class ViewerApp
 
         DrawReconciliationPathField("PM4 guide", () => _reconciliationPm4Path, v => _reconciliationPm4Path = v, "Select PM4 guide", pickFolder: false, ".pm4");
         DrawReconciliationPathField("Museum ADT", () => _reconciliationMuseumPath, v => _reconciliationMuseumPath = v, "Select Museum ADT", pickFolder: false, ".adt");
-        DrawReconciliationPathField("Output dir", () => _reconciliationOutputDir, v => _reconciliationOutputDir = v, "Select output folder", pickFolder: true, filterExtension: null);
+
+        // Output folder: auto-generate a timestamped project folder so the user never has to pick
+        // one. Browse is only a fallback for a custom location.
+        string effectiveOutputDir = string.IsNullOrWhiteSpace(_reconciliationOutputDir)
+            ? DescribeEditorProjectOutputDirectory()
+            : _reconciliationOutputDir;
+        ImGui.InputText("Output dir", ref _reconciliationOutputDir, 512);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("New folder"))
+        {
+            _reconciliationOutputDir = EnsureEditorProjectOutputDirectory(forceNew: true);
+            _reconciliationStatus = $"Created new output folder: {_reconciliationOutputDir}";
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Browse##Output dir"))
+        {
+            ImGuiPathPicker.Instance.Open(
+                "Select output folder",
+                pickFolder: true,
+                _reconciliationOutputDir,
+                filterExtension: null,
+                picked => _reconciliationOutputDir = picked);
+        }
+        ImGui.TextDisabled($"Will write to: {effectiveOutputDir}");
+
         ImGui.InputText("Build fingerprint", ref _reconciliationBuildFingerprint, 128);
 
         if (ImGui.Button("Preview"))
@@ -567,8 +591,10 @@ public partial class ViewerApp
                     _reconciliationGuideHash,
                     string.IsNullOrWhiteSpace(_reconciliationBuildFingerprint) ? "unspecified" : _reconciliationBuildFingerprint);
 
+            // Auto-generate a timestamped project output folder when none is set, so the user never
+            // has to pick one. A custom folder (via Browse) is honored when provided.
             string outputDir = string.IsNullOrWhiteSpace(_reconciliationOutputDir)
-                ? _editorProjectOutputDir
+                ? EnsureEditorProjectOutputDirectory(forceNew: false)
                 : _reconciliationOutputDir;
             if (string.IsNullOrWhiteSpace(outputDir))
             {

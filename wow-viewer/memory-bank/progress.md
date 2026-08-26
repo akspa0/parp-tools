@@ -2,6 +2,15 @@
 
 Last updated: 2026-08-25
 
+## 2026-08-25 — Spec 176: auto-generated timestamped output folder (no picking required)
+
+- The Reconcile panel no longer requires an output folder. A "New folder" button calls the existing
+  `EnsureEditorProjectOutputDirectory(forceNew: true)` to create a timestamped folder under the
+  project output root (`output/projects/<map>/<yyyyMMdd_HHmmss>`), and the apply path falls back to
+  `EnsureEditorProjectOutputDirectory(forceNew: false)` when none is set — so Apply Accepted always
+  has a destination. Browse remains for a custom location; the panel shows the effective path.
+- Proof: WoWViewer builds 0 errors; 81/81 focused editor tests unaffected.
+
 ## 2026-08-25 — Spec 176: path picker made global + Browse actually opens
 
 - **Bug fixed: Browse did nothing.** The picker modal was driven at the end of the Reconcile panel,
