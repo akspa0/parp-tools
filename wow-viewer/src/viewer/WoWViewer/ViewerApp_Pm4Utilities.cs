@@ -503,14 +503,27 @@ public partial class ViewerApp
                     ImGui.SameLine();
                     if (ImGui.Button("Shape Search", new Vector2(120f, 28f)))
                     {
-                        var fallback = Pm4WmoGroupMatchService.SearchWmoByShape(
+                        // Mine the map's own placement ADTs first (split _obj0 and monolithic LK
+                        // root files alike — the Museum corpus is hand-made ground truth about
+                        // what fits), then fall back to raw client WMO geometry.
+                        var adtMatches = GetCurrentSessionMapName() is { Length: > 0 } shapeMapName
+                            ? Pm4WmoGroupMatchService.SearchAdtPlacementsByShape(
+                                clientRoot, shapeMapName, debugInfo.BoundsMin, debugInfo.BoundsMax)
+                            : Array.Empty<Pm4WmoFallbackCandidate>();
+                        var clientMatches = Pm4WmoGroupMatchService.SearchWmoByShape(
                             clientRoot, debugInfo.BoundsMin, debugInfo.BoundsMax);
+                        var merged = adtMatches
+                            .Concat(clientMatches)
+                            .GroupBy(c => c.ModelPath, StringComparer.OrdinalIgnoreCase)
+                            .Select(g => g.First())
+                            .ToList();
+
                         _pm4WmoGroupMatchResult = _pm4WmoGroupMatchResult != null
                             ? new Pm4WmoMatchResult(
                                 _pm4WmoGroupMatchResult.HasAdtData,
                                 _pm4WmoGroupMatchResult.Placements,
-                                fallback)
-                            : new Pm4WmoMatchResult(false, Array.Empty<Pm4WmoPlacementResult>(), fallback);
+                                merged)
+                            : new Pm4WmoMatchResult(false, Array.Empty<Pm4WmoPlacementResult>(), merged);
                     }
 
                     if (!string.IsNullOrWhiteSpace(_pm4WmoMatchStatus))

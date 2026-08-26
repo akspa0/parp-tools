@@ -63,25 +63,38 @@ public static class Pm4WmoGroupMatchService
     {
         try
         {
-            string adtObjPath = Path.Combine(clientRoot, "world", "maps", mapName, $"{tileX}_{tileY}_obj0.adt");
-            if (!File.Exists(adtObjPath))
+            string mapDirectory = Path.Combine(clientRoot, "world", "maps", mapName);
+            string adtObjPath = Path.Combine(mapDirectory, $"{tileX}_{tileY}_obj0.adt");
+            string adtRootPath = Path.Combine(mapDirectory, $"{tileX}_{tileY}.adt");
+            if (!File.Exists(adtObjPath) && !File.Exists(adtRootPath))
             {
                 return new Pm4WmoMatchResult(
                     HasAdtData: false,
                     Placements: Array.Empty<Pm4WmoPlacementResult>(),
                     FallbackCandidates: Array.Empty<Pm4WmoFallbackCandidate>(),
-                    ErrorMessage: $"_obj0.adt not found at: {adtObjPath}");
+                    ErrorMessage: $"No placement ADT found (tried '{Path.GetFileName(adtObjPath)}' and '{Path.GetFileName(adtRootPath)}') under: {mapDirectory}");
             }
 
-            AdtPlacementCatalog catalog = AdtPlacementReader.Read(adtObjPath);
-            var wmoPlacements = catalog.WorldModelPlacements;
+            // Split-format corpora carry placements in _obj0.adt; monolithic LK ADTs (including the
+            // hand-made Museum tiles) carry MDDF/MODF in the root file. Read whichever exist and
+            // merge so both layouts feed the matcher identically.
+            var wmoPlacements = new List<AdtWorldModelPlacement>();
+            foreach (string adtPath in new[] { adtObjPath, adtRootPath })
+            {
+                if (!File.Exists(adtPath))
+                    continue;
+
+                AdtPlacementCatalog catalog = AdtPlacementReader.Read(adtPath);
+                wmoPlacements.AddRange(catalog.WorldModelPlacements);
+            }
+
             if (wmoPlacements.Count == 0)
             {
                 return new Pm4WmoMatchResult(
                     HasAdtData: true,
                     Placements: Array.Empty<Pm4WmoPlacementResult>(),
                     FallbackCandidates: Array.Empty<Pm4WmoFallbackCandidate>(),
-                    ErrorMessage: "No WMO placements found in _obj0.adt.");
+                    ErrorMessage: "No WMO placements found in the tile's placement ADT(s).");
             }
 
             var results = new List<Pm4WmoPlacementResult>();
@@ -237,6 +250,87 @@ public static class Pm4WmoGroupMatchService
                     relPath, fileName,
                     summary.BoundsMin, summary.BoundsMax,
                     volRatio, fpRatio, spanRatio, combined), combined));
+            }
+        }
+        catch
+        {
+            // If enumeration fails, return what we have
+        }
+
+        return candidates
+            .OrderByDescending(c => c.score)
+            .Take(maxCandidates)
+            .Select(c => c.candidate)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Scans every placement ADT of the map (split <c>_obj0.adt</c> and monolithic root LK files
+    /// alike) for WMO placements whose world bounds match the selected PM4 object's shape. This
+    /// mines the hand-made Museum corpus for likely candidates — sampled ground truth about what
+    /// "sorta fits" — instead of relying only on raw client WMO geometry.
+    /// </summary>
+    public static IReadOnlyList<Pm4WmoFallbackCandidate> SearchAdtPlacementsByShape(
+        string clientRoot,
+        string mapName,
+        Vector3 pm4BoundsMin,
+        Vector3 pm4BoundsMax,
+        int maxCandidates = 10)
+    {
+        string mapDirectory = Path.Combine(clientRoot, "world", "maps", mapName);
+        if (!Directory.Exists(mapDirectory))
+            return Array.Empty<Pm4WmoFallbackCandidate>();
+
+        Vector3 pm4Size = pm4BoundsMax - pm4BoundsMin;
+        float pm4Volume = pm4Size.X * pm4Size.Y * pm4Size.Z;
+        float pm4Footprint = pm4Size.X * pm4Size.Y;
+        float pm4SpanSum = pm4Size.X + pm4Size.Y + pm4Size.Z;
+        if (pm4Volume <= 0f || pm4Footprint <= 0f)
+            return Array.Empty<Pm4WmoFallbackCandidate>();
+
+        var candidates = new List<(Pm4WmoFallbackCandidate candidate, float score)>();
+        try
+        {
+            foreach (string adtFile in Directory.EnumerateFiles(mapDirectory, "*.adt", SearchOption.TopDirectoryOnly))
+            {
+                string fileName = Path.GetFileName(adtFile);
+                if (fileName.EndsWith("_tex0.adt", StringComparison.OrdinalIgnoreCase)
+                    || fileName.EndsWith("_lod.adt", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                AdtPlacementCatalog catalog;
+                try
+                {
+                    catalog = AdtPlacementReader.Read(adtFile);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                foreach (AdtWorldModelPlacement placement in catalog.WorldModelPlacements)
+                {
+                    Vector3 size = placement.BoundsMax - placement.BoundsMin;
+                    float volume = size.X * size.Y * size.Z;
+                    float footprint = size.X * size.Y;
+                    float spanSum = size.X + size.Y + size.Z;
+                    if (volume <= 0f || footprint <= 0f)
+                        continue;
+
+                    float volRatio = Math.Min(pm4Volume, volume) / Math.Max(pm4Volume, volume);
+                    float fpRatio = Math.Min(pm4Footprint, footprint) / Math.Max(pm4Footprint, footprint);
+                    float spanRatio = Math.Min(pm4SpanSum, spanSum) / Math.Max(pm4SpanSum, spanSum);
+                    float combined = volRatio * 0.4f + fpRatio * 0.35f + spanRatio * 0.25f;
+                    if (combined < 0.1f)
+                        continue;
+
+                    candidates.Add((new Pm4WmoFallbackCandidate(
+                        placement.ModelPath,
+                        Path.GetFileNameWithoutExtension(placement.ModelPath),
+                        placement.BoundsMin,
+                        placement.BoundsMax,
+                        volRatio, fpRatio, spanRatio, combined), combined));
+                }
             }
         }
         catch
