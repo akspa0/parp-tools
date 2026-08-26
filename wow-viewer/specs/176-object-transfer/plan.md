@@ -8,6 +8,23 @@
 
 **Dependency gate**: Implementation starts only after Specs 166, 167, 168, 173, and 175 have their focused checkpoints. This feature consumes the editor host/bridge/session and placement-authoring seams; it does not create a parallel editor surface while those owners are still absent.
 
+## Implementation status (2026-08-26)
+
+| Phase | State | Evidence |
+|---|---|---|
+| 0 Discovery / contract lock | Done | research.md, data-model.md, OpenAPI, this plan |
+| 1 Pure proposal engine | Done | `Pm4ReconciliationEngine` + adapter; 81 focused editor tests include residual confidence + `AlreadyAligned` |
+| 2 Placement transaction / IDs / name tables | Done | `AdtPlacementEditor` is the sole Core.IO mutation owner; `AdtPlacementWriter` deleted; MODF bounds translate with moves |
+| 3 Editor bridge + viewport preview | Partial | Reconcile tab live; review list + bulk accept live; **no in-scene overlay**; preview still on the render thread |
+| 4 Save / reload / provenance | Partial | Apply writes loose ADT + `.reconciliation.json` and records undo; real-client reload/independent-reader proof is user-owned |
+| 5 Quality gate / handoff | Open | Focused editor tests pass; full-suite / visual / independent-reader gates remain |
+
+**Committed through `6fa1adbb`.** Last landed UX: timestamped project output folder (`output/projects/<map>/<yyyyMMdd_HHmmss>`), residual-derived align confidence, `AlreadyAligned` no-op reporting, shared staged-save queue for authored edits.
+
+**Uncommitted WIP (does not compile):** scene-discerned PM4/`_obj0.adt` pairs from `WorldScene.LoadedPm4Tiles`. `PrefillReconciliationPathsFromScene` was removed while [`ViewerApp_Sidebars.cs`](../../src/viewer/WoWViewer/ViewerApp_Sidebars.cs) still calls it. Do not treat that working-tree slice as shipped.
+
+**Next bounded implementation slice (one concern):** make the Reconcile tab compile with scene-discerned inputs — delete the leftover `PrefillReconciliationPathsFromScene()` call, delete unused `DrawReconciliationPathField`, drop unused path fields, then `dotnet build` the viewer. After that: in-scene overlay, then user-owned visual proof.
+
 ## Summary
 
 Deliver a reviewed PM4-guided repair workflow for Museum map placements. The viewer loads a PM4 guide and its paired ADT/WDT placement catalog, reuses the existing PM4 object matcher to produce explainable alignment/substitution/clone proposals, shows those proposals immediately in the viewport, and applies only explicit user decisions through the existing placement and format writers. PM4 files and source game files remain read-only; accepted changes are staged as one undoable editor operation and saved as loose ADT/WDT outputs with a provenance sidecar.

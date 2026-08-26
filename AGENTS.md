@@ -16,6 +16,51 @@ For `wow-viewer` work, read in this order:
 
 Use Spec Kit for non-trivial work: specify → plan → tasks → implement one validated phase at a
 time. If the request is a small fix, use the existing spec/checklist when one applies.
+6.  # 6. Absolute agent-routing rule
+
+**NEVER USE TERRA.**
+
+The final routing rule is:
+
+## If using Codex
+
+- **Luna at max effort** owns implementation.
+
+- **Sol at high or extra-high effort** owns planning/review.
+
+- Sol returns findings/review, not implementation.
+
+- Luna remediates findings.
+
+- Never route implementation, planning, exploration, or review to Terra.
+
+Typical loop:
+
+    Luna implements.
+
+    Run focused verification.
+
+    At integration checkpoint run full affected-scope gates.
+
+    Self-check against done-when.
+
+    Sol reviews current base-to-head diff + done-when criteria.
+
+    CHANGES REQUIRED → Luna remediates → focused verification → return to review.
+
+    BLOCKED → stop and report.
+
+    PASS → create/update PR if authorized, then stop for operator decision.
+
+    Do not self-merge.
+
+    If six review cycles fail to converge, stop and report to the operator.
+
+Sol should normally be extra-high for final acceptance review and high/extra-high
+
+for task planning according to task risk.
+
+If using Claude, use Sonnet Sub-agents in place of Luna with Opus taking over for Sol. If using Deepseek or other llm, use subagents in place of Luna and Sol.
 
 ## Sub-agents
 

@@ -105,9 +105,9 @@ An immutable, side-effect-free suggestion shown in the viewport.
 | `ProposedRotation` | Vector3 | Finite and target-era expressible |
 | `ProposedScale` | Vector3/float | Finite and target-era expressible |
 | `Residual` | map<string,double> | Position/footprint/height residuals; finite |
-| `Confidence` | double | Presentation value only; never an implicit approval |
+| `Confidence` | double | Presentation/sorting value only; never an implicit approval. Align uses `exp(-positionResidual/25)`; clone/substitute keep the scorer score. |
 | `Evidence` | list | Signals, values, versions, and provenance paths |
-| `Status` | enum | `ReviewRequired`, `Unsupported`, `Conflict`, `Accepted`, `Rejected` |
+| `Status` | enum | `ReviewRequired`, `Unsupported`, `Conflict`, `AlreadyAligned`, `Accepted`, `Rejected` |
 
 An align proposal retains the existing asset path. A substitute proposal changes only the asset reference.
 A clone proposal allocates a new target ID during apply, not during preview.

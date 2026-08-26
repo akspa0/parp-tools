@@ -2,7 +2,7 @@
 
 **Feature Branch**: `176-object-transfer`
 **Created**: 2026-08-19
-**Status**: Draft
+**Status**: Implementing — Phases 1–2 and a usable Reconcile apply loop are source-proven; in-scene overlay, P1 transfer, and real-client proof remain
 **Epic**: [Editor Platform](../epic-editor-platform/epic.md) — **read the epic first**.
 **Depends on**: [175](../175-placement-authoring/spec.md).
 

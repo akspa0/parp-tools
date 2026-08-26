@@ -1,16 +1,15 @@
 # Research: PM4-Guided Object Transfer and Museum Placement Repair
 
-> **Dependency checkpoint (2026-08-25, Phase 0).** The gate specs 166/167/168/173/175 now have their
-> library-first core with passing focused tests, so Phase 0 was unblocked and Phases 1–2 were executed.
-> Implemented seams: [`WowViewer.Core.Editor`](../../src/core/WowViewer.Core.Editor/) holds the plugin
-> host, the editor↔runtime bridge contracts (`EditorSceneSnapshot`, operations-as-data), the session, and
-> the asset-integrity gate; [`AdtPlacementEditor`](../../src/core/WowViewer.Core.IO/Maps/AdtPlacementEditor.cs)
-> is the placement mutation surface (move/rotate/scale/add/delete + non-colliding ID allocation +
-> MMDX/MMID/MWMO/MWID name-table merge); [`Pm4ReconciliationEngine`](../../src/core/WowViewer.Core.PM4/Reconciliation/Pm4ReconciliationEngine.cs)
-> is the deterministic, side-effect-free proposal engine (align/substitute/clone with
-> `ReviewRequired`/`Conflict`). Remaining deps are viewer-shell adapters (bridge adapter, PM4/Museum
-> overlay preview, save/reload provenance UI) and the user-owned real-client/corpus gates; those are not
-> claimed from compilation.
+> **Implementation checkpoint (2026-08-26).** Phases 0–2 and a usable Phase 3/4 apply loop are
+> source-proven. `AdtPlacementEditor` is the sole Core.IO placement-mutation owner (the in-place
+> writer is deleted). The PM4 workbench **Reconcile** tab hosts preview/review/apply; the freezing
+> Match tab is retired. Align confidence is residual-derived; already-aligned placements report
+> `AlreadyAligned` instead of a no-op move. Output defaults to
+> `output/projects/<map>/<yyyyMMdd_HHmmss>`. **Uncommitted WIP** (does not compile): scene-discerned
+> PM4/`_obj0.adt` pairs from `WorldScene.LoadedPm4Tiles` — `PrefillReconciliationPathsFromScene` was
+> removed while `ViewerApp_Sidebars.cs` still calls it. Remaining planned work: finish that compile,
+> in-scene proposal overlay (Phase 3 step 3), off-thread preview, P1 cross-tile/cross-era transfer,
+> and user-owned real-client/independent-reader proof.
 
 **Date:** 2026-08-25
 **Feature:** [176-object-transfer](spec.md)

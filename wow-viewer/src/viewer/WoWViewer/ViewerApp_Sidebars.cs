@@ -5003,7 +5003,6 @@ public partial class ViewerApp
                 DrawPm4InfoPanelContent();
                 break;
             case Pm4BottomTab.Reconcile:
-                PrefillReconciliationPathsFromScene();
                 DrawReconciliationPanel();
                 break;
             case Pm4BottomTab.Alignment:

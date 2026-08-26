@@ -1594,6 +1594,10 @@ public class WorldScene : ISceneRenderer
     public int Pm4LoadedFiles => _pm4LoadedFiles;
     public int Pm4ObjectCount => _pm4ObjectCount;
 
+    /// <summary>The tile coordinates of every PM4 currently loaded into the overlay.</summary>
+    public IReadOnlyList<(int TileX, int TileY)> LoadedPm4Tiles
+        => _pm4TileObjects.Keys.Select(static k => (TileX: k.tileX, TileY: k.tileY)).OrderBy(static t => t.TileX).ThenBy(static t => t.TileY).ToArray();
+
     public bool LoadLoosePm4File(string filePath)
     {
         if (!File.Exists(filePath))

@@ -42,6 +42,11 @@ public partial class ViewerApp
     private string? _reconciliationSourceHash;
     private string? _reconciliationGuideHash;
 
+    // Per-proposal source mapping captured during preview so apply can write every accepted action
+    // (including clones, which carry no ExistingPlacement) back to the ADT it was previewed against.
+    private readonly Dictionary<string, string> _reconciliationSourceAdtByProposalId = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _reconciliationSourceHashByAdt = new(StringComparer.OrdinalIgnoreCase);
+
     private static readonly JsonSerializerOptions ReconciliationJsonOptions = new() { WriteIndented = true };
 
     private void EnsureEditorHost()
@@ -235,88 +240,54 @@ public partial class ViewerApp
         => _editorSession?.RecordApplied(operation);
 
 
-    /// <summary>
-    /// Prefills the reconciliation paths from the live scene: the current session map directory and
-    /// camera tile. PM4 filenames are <c><map>_<Ytile:D2>_<Xtile:D2>.pm4</c> while
-    /// the placement ADT is <c><map>_<Ytile>_<Xtile>_obj0.adt</c> — the measured
-    /// filename convention on <see cref="Pm4CoordinateService"/> (first number bounds Y).
-    /// </summary>
-    internal void PrefillReconciliationPathsFromScene()
-    {
-        bool museumMissing = string.IsNullOrWhiteSpace(_reconciliationMuseumPath) || !File.Exists(_reconciliationMuseumPath);
-        bool pm4Missing = string.IsNullOrWhiteSpace(_reconciliationPm4Path) || !File.Exists(_reconciliationPm4Path);
-        if (!museumMissing && !pm4Missing)
-            return;
-
-        string? mapName = GetCurrentSessionMapName();
-        if (string.IsNullOrWhiteSpace(mapName))
-            return;
-
-        string? mapDirectory = TryResolveCurrentMapDirectory(preferLooseOverlay: true);
-        if (string.IsNullOrWhiteSpace(mapDirectory) || !Directory.Exists(mapDirectory))
-            return;
-
-        (int tileX, int tileY)? cameraTile = _worldScene?.GetPm4CameraTile();
-        if (cameraTile is null)
-            return;
-
-        if (museumMissing)
-        {
-            string museumPath = Path.Combine(mapDirectory, $"{mapName}_{cameraTile.Value.tileY}_{cameraTile.Value.tileX}_obj0.adt");
-            if (File.Exists(museumPath))
-                _reconciliationMuseumPath = museumPath;
-        }
-
-        if (pm4Missing)
-        {
-            string pm4Path = Path.Combine(mapDirectory, $"{mapName}_{cameraTile.Value.tileY:D2}_{cameraTile.Value.tileX:D2}.pm4");
-            if (File.Exists(pm4Path))
-                _reconciliationPm4Path = pm4Path;
-        }
-    }
-
     private void DrawReconciliationPanel()
     {
         ImGui.Text("PM4/Museum Reconciliation");
-        ImGui.TextDisabled("Preview alignment/substitution/clone proposals from a PM4 guide against the Museum placement catalog. Nothing is written during preview.");
+        ImGui.TextDisabled("Processes the PM4 tiles already loaded in the scene against their placement ADTs. Nothing is written during preview.");
 
-        ImGui.SameLine();
-        if (ImGui.Button("Use Camera Tile"))
+        // Everything is discerned from the loaded scene — the user never types or browses a path.
+        // The loaded PM4 tiles ARE the guide; their placement ADTs are derived from the map name.
+        string? mapName = GetCurrentSessionMapName();
+        string? mapDirectory = TryResolveCurrentMapDirectory(preferLooseOverlay: true);
+        IReadOnlyList<(int TileX, int TileY)> loadedPm4Tiles = _worldScene?.LoadedPm4Tiles ?? [];
+
+        if (string.IsNullOrWhiteSpace(mapName) || string.IsNullOrWhiteSpace(mapDirectory) || loadedPm4Tiles.Count == 0)
         {
-            _reconciliationPm4Path = string.Empty;
-            _reconciliationMuseumPath = string.Empty;
-            PrefillReconciliationPathsFromScene();
-            _reconciliationStatus = File.Exists(_reconciliationPm4Path) && File.Exists(_reconciliationMuseumPath)
-                ? "Prefilled paths for the camera tile."
-                : "No PM4/_obj0 pair found on disk for the camera tile.";
+            ImGui.TextDisabled("Load a map with PM4 overlay tiles to reconcile. The loaded PM4 tiles and their placement ADTs are detected automatically.");
+            return;
         }
 
-        DrawReconciliationPathField("PM4 guide", () => _reconciliationPm4Path, v => _reconciliationPm4Path = v, "Select PM4 guide", pickFolder: false, ".pm4");
-        DrawReconciliationPathField("Museum ADT", () => _reconciliationMuseumPath, v => _reconciliationMuseumPath = v, "Select Museum ADT", pickFolder: false, ".adt");
+        // Resolve the placement ADT for each loaded PM4 tile (first number bounds Y, unpadded).
+        var resolved = new List<(int TileX, int TileY, string Pm4Path, string AdtPath)>();
+        foreach ((int tileX, int tileY) in loadedPm4Tiles)
+        {
+            string pm4Path = Path.Combine(mapDirectory, $"{mapName}_{tileY:D2}_{tileX:D2}.pm4");
+            if (!File.Exists(pm4Path))
+                continue;
+            if (TryResolvePlacementAdtPath(mapDirectory, mapName, tileX, tileY, out string adtPath))
+                resolved.Add((tileX, tileY, pm4Path, adtPath));
+        }
 
-        // Output folder: auto-generate a timestamped project folder so the user never has to pick
-        // one. Browse is only a fallback for a custom location.
+        if (resolved.Count == 0)
+        {
+            ImGui.TextDisabled($"No PM4/placement-ADT pairs found on disk for the {loadedPm4Tiles.Count} loaded PM4 tile(s) under {mapDirectory}.");
+            return;
+        }
+
+        ImGui.TextDisabled($"Map: {mapName}  |  {resolved.Count} PM4 tile(s) with placement ADTs detected.");
+        foreach ((int tileX, int tileY, string pm4Path, string adtPath) in resolved)
+            ImGui.TextDisabled($"  ({tileX},{tileY})  {Path.GetFileName(pm4Path)}  +  {Path.GetFileName(adtPath)}");
+
+        // Output folder: auto-generate a timestamped project folder; never ask the user.
         string effectiveOutputDir = string.IsNullOrWhiteSpace(_reconciliationOutputDir)
             ? DescribeEditorProjectOutputDirectory()
             : _reconciliationOutputDir;
-        ImGui.InputText("Output dir", ref _reconciliationOutputDir, 512);
-        ImGui.SameLine();
-        if (ImGui.SmallButton("New folder"))
+        ImGui.TextDisabled($"Will write to: {effectiveOutputDir}");
+        if (ImGui.SmallButton("New output folder"))
         {
             _reconciliationOutputDir = EnsureEditorProjectOutputDirectory(forceNew: true);
             _reconciliationStatus = $"Created new output folder: {_reconciliationOutputDir}";
         }
-        ImGui.SameLine();
-        if (ImGui.SmallButton("Browse##Output dir"))
-        {
-            ImGuiPathPicker.Instance.Open(
-                "Select output folder",
-                pickFolder: true,
-                _reconciliationOutputDir,
-                filterExtension: null,
-                picked => _reconciliationOutputDir = picked);
-        }
-        ImGui.TextDisabled($"Will write to: {effectiveOutputDir}");
 
         ImGui.InputText("Build fingerprint", ref _reconciliationBuildFingerprint, 128);
 
@@ -332,6 +303,8 @@ public partial class ViewerApp
             _reconciliationDecisions.Clear();
             _reconciliationSourceHash = null;
             _reconciliationGuideHash = null;
+            _reconciliationSourceAdtByProposalId.Clear();
+            _reconciliationSourceHashByAdt.Clear();
             _reconciliationStatus = "Preview cleared.";
         }
 
@@ -414,67 +387,127 @@ public partial class ViewerApp
 
     private void RunReconciliationPreview()
     {
-        _reconciliationStatus = "Preview requires a PM4 guide and a Museum ADT.";
-        if (string.IsNullOrWhiteSpace(_reconciliationPm4Path) || string.IsNullOrWhiteSpace(_reconciliationMuseumPath))
+        _reconciliationStatus = "Preview requires loaded PM4 tiles and their placement ADTs.";
+        if (!TryResolveReconciliationPairs(out List<(int TileX, int TileY, string Pm4Path, string AdtPath)> pairs))
             return;
-
-        if (!File.Exists(_reconciliationPm4Path) || !File.Exists(_reconciliationMuseumPath))
-        {
-            _reconciliationStatus = "One of the configured paths does not exist.";
-            return;
-        }
 
         try
         {
-            if (!Pm4CoordinateService.TryParseTileCoordinates(_reconciliationPm4Path, out int tileX, out int tileY))
-            {
-                _reconciliationStatus = "Could not parse tile coordinates from the PM4 guide filename.";
-                return;
-            }
-
-            // 1. Parse the real PM4 guide into object segments (existing segment builder owner).
-            IReadOnlyList<Pm4BuiltObjectSegment> segments = Pm4ObjectSegmentBuilder.Build(_reconciliationPm4Path);
-            if (segments.Count == 0)
-            {
-                _reconciliationStatus = "The PM4 guide produced no usable object segments (no MSUR surfaces with indexable geometry).";
-                return;
-            }
-
-            // 2. Read the Museum placement catalog and fingerprint the source bytes.
-            byte[] museumBytes = File.ReadAllBytes(_reconciliationMuseumPath);
-            AdtPlacementCatalog catalog = AdtPlacementReader.Read(_reconciliationMuseumPath);
-
             string fingerprint = string.IsNullOrWhiteSpace(_reconciliationBuildFingerprint)
                 ? "unspecified"
                 : _reconciliationBuildFingerprint;
-            string mapName = Path.GetFileNameWithoutExtension(_reconciliationMuseumPath);
+            string mapName = GetCurrentSessionMapName() ?? "map";
 
-            // 3. Score segments against the labelled Museum self-corpus (no archive access).
-            var corpus = Pm4ReconciliationInputAdapter.BuildSelfCorpusReferences(catalog, $"{tileX}_{tileY}", fingerprint);
-            IReadOnlyList<Pm4SegmentMatchResult> matchResults = Pm4AssetMatchScorer.ScoreSegments(segments, corpus);
+            var allProposals = new List<ReconciliationProposal>();
+            int totalSegments = 0;
+            int totalPlacements = 0;
+            int totalCorpus = 0;
+            _reconciliationSourceAdtByProposalId.Clear();
+            _reconciliationSourceHashByAdt.Clear();
 
-            // 4. Build guide observations, placement snapshots, and candidate lists.
-            var guides = Pm4ReconciliationInputAdapter.BuildGuideObservations(
-                matchResults, _reconciliationPm4Path, fingerprint, mapName, tileX, tileY);
-            var snapshots = Pm4ReconciliationInputAdapter.BuildPlacementSnapshots(
-                catalog, mapName, tileX, tileY, fingerprint);
-            var candidatesByGuide = Pm4ReconciliationInputAdapter.BuildCandidatesByGuideId(matchResults);
+            foreach ((int tileX, int tileY, string pm4Path, string adtPath) in pairs)
+            {
+                // 1. Parse the real PM4 guide into object segments (existing segment builder owner).
+                IReadOnlyList<Pm4BuiltObjectSegment> segments = Pm4ObjectSegmentBuilder.Build(pm4Path);
+                if (segments.Count == 0)
+                    continue;
 
-            // 5. Build the proposal set (side-effect free).
-            _reconciliationProposals = Pm4ReconciliationEngine.BuildTileProposals(guides, snapshots, candidatesByGuide);
+                // 2. Read the placement catalog and fingerprint the source bytes.
+                byte[] museumBytes = File.ReadAllBytes(adtPath);
+                AdtPlacementCatalog catalog = AdtPlacementReader.Read(adtPath);
+                _reconciliationSourceHashByAdt[adtPath] = ReconciliationApplyService.ComputeSha256Hex(museumBytes);
+
+                // 3. Score segments against the labelled Museum self-corpus (no archive access).
+                var corpus = Pm4ReconciliationInputAdapter.BuildSelfCorpusReferences(catalog, $"{tileX}_{tileY}", fingerprint);
+                IReadOnlyList<Pm4SegmentMatchResult> matchResults = Pm4AssetMatchScorer.ScoreSegments(segments, corpus);
+
+                // 4. Build guide observations, placement snapshots, and candidate lists.
+                var guides = Pm4ReconciliationInputAdapter.BuildGuideObservations(
+                    matchResults, pm4Path, fingerprint, mapName, tileX, tileY);
+                var snapshots = Pm4ReconciliationInputAdapter.BuildPlacementSnapshots(
+                    catalog, mapName, tileX, tileY, fingerprint);
+                var candidatesByGuide = Pm4ReconciliationInputAdapter.BuildCandidatesByGuideId(matchResults);
+
+                // 5. Build the proposal set (side-effect free), mapping every proposal — including
+                // clones, which carry no ExistingPlacement — back to this tile's placement ADT.
+                IReadOnlyList<ReconciliationProposal> tileProposals =
+                    Pm4ReconciliationEngine.BuildTileProposals(guides, snapshots, candidatesByGuide);
+                foreach (ReconciliationProposal proposal in tileProposals)
+                    _reconciliationSourceAdtByProposalId[proposal.ProposalId] = adtPath;
+                allProposals.AddRange(tileProposals);
+
+                totalSegments += segments.Count;
+                totalPlacements += snapshots.Count;
+                totalCorpus += corpus.Count;
+            }
+
+            _reconciliationProposals = allProposals;
             _reconciliationDecisions.Clear();
 
-            // 6. Record source fingerprints so apply can refuse stale previews.
-            _reconciliationSourceHash = ReconciliationApplyService.ComputeSha256Hex(museumBytes);
-            _reconciliationGuideHash = ReconciliationApplyService.ComputeSha256Hex(File.ReadAllBytes(_reconciliationPm4Path));
+            // 6. Record source fingerprints so apply can refuse stale previews (first pair).
+            (_, _, string firstPm4, string firstAdt) = pairs[0];
+            _reconciliationSourceHash = _reconciliationSourceHashByAdt.TryGetValue(firstAdt, out string? firstHash)
+                ? firstHash
+                : ReconciliationApplyService.ComputeSha256Hex(File.ReadAllBytes(firstAdt));
+            _reconciliationGuideHash = ReconciliationApplyService.ComputeSha256Hex(File.ReadAllBytes(firstPm4));
 
             _reconciliationStatus =
-                $"Previewed {_reconciliationProposals.Count} proposal(s) from {segments.Count} PM4 object(s) against {snapshots.Count} placement(s) ({corpus.Count} self-corpus assets).";
+                $"Previewed {_reconciliationProposals.Count} proposal(s) from {totalSegments} PM4 object(s) across {pairs.Count} tile(s) against {totalPlacements} placement(s) ({totalCorpus} self-corpus assets).";
         }
         catch (Exception ex)
         {
             _reconciliationStatus = $"Preview failed: {ex.Message}";
         }
+    }
+
+    /// <summary>Resolves the placement ADT for every loaded PM4 tile from the scene (no user input).</summary>
+    private bool TryResolveReconciliationPairs(out List<(int TileX, int TileY, string Pm4Path, string AdtPath)> pairs)
+    {
+        pairs = [];
+        string? mapName = GetCurrentSessionMapName();
+        string? mapDirectory = TryResolveCurrentMapDirectory(preferLooseOverlay: true);
+        IReadOnlyList<(int TileX, int TileY)> loadedPm4Tiles = _worldScene?.LoadedPm4Tiles ?? [];
+
+        if (string.IsNullOrWhiteSpace(mapName) || string.IsNullOrWhiteSpace(mapDirectory) || loadedPm4Tiles.Count == 0)
+        {
+            _reconciliationStatus = "Load a map with PM4 overlay tiles to reconcile.";
+            return false;
+        }
+
+        foreach ((int tileX, int tileY) in loadedPm4Tiles)
+        {
+            string pm4Path = Path.Combine(mapDirectory, $"{mapName}_{tileY:D2}_{tileX:D2}.pm4");
+            if (!File.Exists(pm4Path))
+                continue;
+            if (TryResolvePlacementAdtPath(mapDirectory, mapName, tileX, tileY, out string adtPath))
+                pairs.Add((tileX, tileY, pm4Path, adtPath));
+        }
+
+        if (pairs.Count == 0)
+        {
+            _reconciliationStatus = $"No PM4/placement-ADT pairs found on disk for the {loadedPm4Tiles.Count} loaded PM4 tile(s).";
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Resolves the placement ADT for one tile: prefers the split-format <c>_obj0.adt</c> when it
+    /// exists, otherwise falls back to the monolithic root <c>{map}_{y}_{x}.adt</c>, which carries
+    /// its own MDDF/MODF rows. Both forms are supported by AdtPlacementReader/Editor.
+    /// </summary>
+    private static bool TryResolvePlacementAdtPath(string mapDirectory, string mapName, int tileX, int tileY, out string adtPath)
+    {
+        string obj0Path = Path.Combine(mapDirectory, $"{mapName}_{tileY}_{tileX}_obj0.adt");
+        if (File.Exists(obj0Path))
+        {
+            adtPath = obj0Path;
+            return true;
+        }
+
+        adtPath = Path.Combine(mapDirectory, $"{mapName}_{tileY}_{tileX}.adt");
+        return File.Exists(adtPath);
     }
 
     private void DrawReconciliationProposal(ReconciliationProposal proposal)
@@ -557,8 +590,14 @@ public partial class ViewerApp
 
     private void ApplyAcceptedReconciliation()
     {
+        // The reconcile tab does not route through DrawEditorContent, so the editor host may never
+        // have been created when this panel is the first editor surface the user touches.
+        EnsureEditorHost();
         if (_editorSession == null)
+        {
+            _reconciliationStatus = "Editor session could not be initialized; cannot apply reconciliation edits.";
             return;
+        }
 
         var accepted = _reconciliationProposals
             .Where(p => _reconciliationDecisions.TryGetValue(p.ProposalId, out ReviewDisposition d) && d == ReviewDisposition.Accept)
@@ -570,7 +609,7 @@ public partial class ViewerApp
             return;
         }
 
-        if (_reconciliationSourceHash == null)
+        if (_reconciliationSourceHashByAdt.Count == 0)
         {
             _reconciliationStatus = "Run a preview first; the apply validates against the preview's source fingerprints.";
             return;
@@ -578,19 +617,6 @@ public partial class ViewerApp
 
         try
         {
-            // Stage the edited bytes and the provenance report in memory; the service refuses a
-            // stale source, an empty batch, or any proposal that is not actionable.
-            byte[] sourceBytes = File.ReadAllBytes(_reconciliationMuseumPath);
-            (AdtPlacementEditResult result, ReconciliationProvenanceReport report) =
-                ReconciliationApplyService.ApplyAccepted(
-                    accepted,
-                    sourceBytes,
-                    _reconciliationMuseumPath,
-                    _reconciliationSourceHash,
-                    _reconciliationPm4Path,
-                    _reconciliationGuideHash,
-                    string.IsNullOrWhiteSpace(_reconciliationBuildFingerprint) ? "unspecified" : _reconciliationBuildFingerprint);
-
             // Auto-generate a timestamped project output folder when none is set, so the user never
             // has to pick one. A custom folder (via Browse) is honored when provided.
             string outputDir = string.IsNullOrWhiteSpace(_reconciliationOutputDir)
@@ -602,29 +628,71 @@ public partial class ViewerApp
                 return;
             }
 
-            // Resolve through the session so protected roots and container paths are refused.
-            string fullPath = Path.GetFullPath(Path.Combine(outputDir, Path.GetFileName(_reconciliationMuseumPath)));
-            string outputPath = _editorSession.ResolveOutputPath(fullPath);
-            string reportPath = outputPath + ".reconciliation.json";
+            Directory.CreateDirectory(outputDir);
+            _editorSession.OutputDirectory = outputDir;
 
-            byte[]? priorBytes = File.Exists(outputPath) ? File.ReadAllBytes(outputPath) : null;
-            string reportJson = JsonSerializer.Serialize(report, ReconciliationJsonOptions);
+            // Group accepted proposals by their previewed source ADT. The mapping was captured at
+            // preview time per tile, so clone proposals (which carry no ExistingPlacement) land in
+            // the same group as the align/substitute proposals of their tile.
+            var bySource = accepted
+                .GroupBy(
+                    p => _reconciliationSourceAdtByProposalId.TryGetValue(p.ProposalId, out string? mapped)
+                        ? mapped
+                        : p.ExistingPlacement?.SourcePath ?? string.Empty,
+                    StringComparer.OrdinalIgnoreCase)
+                .Where(g => !string.IsNullOrWhiteSpace(g.Key))
+                .ToList();
 
-            var operation = new ReconciliationApplyOperation(
-                $"reconciliation-{report.BatchId}",
-                "pm4.reconciliation",
-                _reconciliationMuseumPath,
-                outputPath,
-                reportPath,
-                priorBytes,
-                result.Bytes,
-                reportJson);
+            if (bySource.Count == 0)
+            {
+                _reconciliationStatus = "Accepted proposals could not be mapped to a source ADT; re-run the preview.";
+                return;
+            }
 
-            MaterializeReconciliationOutput(operation);
-            _editorSession.RecordApplied(operation);
+            int appliedCount = 0;
+            foreach (IGrouping<string, ReconciliationProposal> group in bySource)
+            {
+                string sourceAdt = group.Key;
+                byte[] sourceBytes = File.ReadAllBytes(sourceAdt);
+                string expectedHash = _reconciliationSourceHashByAdt.TryGetValue(sourceAdt, out string? previewedHash)
+                    ? previewedHash
+                    : ReconciliationApplyService.ComputeSha256Hex(sourceBytes);
+
+                (AdtPlacementEditResult result, ReconciliationProvenanceReport report) =
+                    ReconciliationApplyService.ApplyAccepted(
+                        group.ToList(),
+                        sourceBytes,
+                        sourceAdt,
+                        expectedHash,
+                        sourceAdt,
+                        _reconciliationGuideHash,
+                        string.IsNullOrWhiteSpace(_reconciliationBuildFingerprint) ? "unspecified" : _reconciliationBuildFingerprint);
+
+                // Resolve through the session so protected roots and container paths are refused.
+                string fullPath = Path.GetFullPath(Path.Combine(outputDir, Path.GetFileName(sourceAdt)));
+                string outputPath = _editorSession.ResolveOutputPath(fullPath);
+                string reportPath = outputPath + ".reconciliation.json";
+
+                byte[]? priorBytes = File.Exists(outputPath) ? File.ReadAllBytes(outputPath) : null;
+                string reportJson = JsonSerializer.Serialize(report, ReconciliationJsonOptions);
+
+                var operation = new ReconciliationApplyOperation(
+                    $"apply-{report.BatchId}",
+                    "pm4.reconciliation",
+                    sourceAdt,
+                    outputPath,
+                    reportPath,
+                    priorBytes,
+                    result.Bytes,
+                    reportJson);
+
+                MaterializeReconciliationOutput(operation);
+                _editorSession.RecordApplied(operation);
+                appliedCount += group.Count();
+            }
 
             _reconciliationStatus =
-                $"Applied {accepted.Count} accepted proposal(s) to {outputPath} (report: {Path.GetFileName(reportPath)}).";
+                $"Applied {appliedCount} accepted proposal(s) across {bySource.Count} ADT file(s). Output written under {outputDir}.";
         }
         catch (Exception ex)
         {

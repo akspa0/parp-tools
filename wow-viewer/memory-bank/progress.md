@@ -1,122 +1,26 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
-## 2026-08-25 — Spec 176: auto-generated timestamped output folder (no picking required)
+## 2026-08-26 — Spec 176 session: Reconcile apply loop landed; scene-discern left uncompiled
 
-- The Reconcile panel no longer requires an output folder. A "New folder" button calls the existing
-  `EnsureEditorProjectOutputDirectory(forceNew: true)` to create a timestamped folder under the
-  project output root (`output/projects/<map>/<yyyyMMdd_HHmmss>`), and the apply path falls back to
-  `EnsureEditorProjectOutputDirectory(forceNew: false)` when none is set — so Apply Accepted always
-  has a destination. Browse remains for a custom location; the panel shows the effective path.
-- Proof: WoWViewer builds 0 errors; 81/81 focused editor tests unaffected.
-
-## 2026-08-25 — Spec 176: path picker made global + Browse actually opens
-
-- **Bug fixed: Browse did nothing.** The picker modal was driven at the end of the Reconcile panel,
-  after an early `return` when no preview had run, so the modal was never rendered on first open.
-  The picker is now driven globally every frame in `OnRender` (right before `_imGui.Render()`), so
-  it works from any surface and any panel state.
-- The picker is a reusable global modal (`ImGuiPathPicker.Instance`), so any future surface can
-  call `Open(...)` and get the same cross-platform browser.
-- Proof: WoWViewer builds 0 errors; 81/81 focused editor tests unaffected.
-
-## 2026-08-25 — Spec 176: in-app cross-platform path picker replaces typed paths
-
-- **No more typing paths, no native dialogs.** New [`ImGuiPathPicker`](../../src/viewer/WoWViewer/
-  ImGuiPathPicker.cs): an in-app ImGui modal built exclusively on BCL filesystem APIs
-  (`Directory.EnumerateDirectories/Files`), so browsing behaves identically on every platform —
-  the WinForms STA dialogs used elsewhere remain Windows-only and are untouched here.
-- The Reconcile panel's PM4 guide / Museum ADT / Output dir rows each gained a Browse button
-  (file mode filtered to .pm4/.adt; folder mode for output). Manual text entry still works.
-- Proof: WoWViewer compiles with 0 errors (final copy step blocked only by the user's running
-  viewer instance); 81/81 focused editor tests unaffected.
-
-## 2026-08-25 — Spec 176 review UX: real confidences, bulk accept, already-aligned reporting
-
-- **Align proposals no longer hardcode confidence 0.00.** `ConfidenceFromResidual` maps the position
-  residual to `exp(-d/25)` (1.0 at zero, 25-unit scale), recorded as display-only sorting evidence —
-  it never grants mutation rights (FR-012). Clone/substitute keep the scorer's own score.
-- **Already-aligned placements are a result, not noise.** A kind-compatible placement within 0.5
-  world units of its guide emits an `AlreadyAligned` proposal (confidence 1.0, accepting is a no-op)
-  instead of a pointless move proposal — this was most of the wall of 0.00-confidence aligns.
-- **The review list is usable.** Replacing per-proposal collapsing headers: a status summary line
-  (reviewable / conflict / already aligned / accepted counts), an "Accept all reviewable" bulk
-  button, compact rows with inline Accept/Reject, conflict competitors and candidate paths inline,
-  details behind a TreeNode, and "Apply Accepted (n)" disabled until something is accepted.
-- Proof: WoWViewer builds 0 errors; **81/81** focused editor tests pass (align confidence derived
-  from residual; already-aligned no-op semantics covered).
-
-## 2026-08-25 — Spec 176: authored placement edits now save through the existing staged-save queue
-
-- **Answer to "is there a save button": yes, and now from both surfaces.** The pre-existing staged-
-  placement save queue (`SaveStagedPlacementEdits`, per-source output targets, "Save Current Source" /
-  "Save All Pending") already wrote edited ADTs via `AdtPlacementEditor` — but only moves, and only
-  from Scene > Placements. A parallel staging dictionary briefly added in the Editor tab was removed
-  before commit; instead the Editor tab's authoring panel now upserts into the SAME queue via
-  `StageAuthoringPlacementEdit` and renders `DrawPlacementSaveQueueActions` inline, so its Save
-  buttons work right there.
-- **The queue covers all authoring edits now**: `StagedPlacementEdit` gained `EditedRotation`,
-  `EditedScale`, and `Deleted`; the save loop emits move+rotate+scale (or delete) per row. Repeated
-  edits to one row collapse to the latest state, preserving earlier field edits.
-- **Source-path bug fixed in passing**: the authoring panel had staged operations against
-  `selected.ModelPath` (the asset path), not the tile's ADT. It now resolves the real source via
-  `WorldScene.TryGetSelectedPlacementSourceData`, matching the legacy queue's data-source reads.
-- Proof: WoWViewer builds 0 errors; 80/80 focused editor tests pass. End-to-end save of an authored
-  edit on a real map remains user-owned visual proof.
-
-## 2026-08-25 — Spec 176 dedupe: one placement-write owner, one reconciliation surface
-
-- **`AdtPlacementWriter` and `AdtPlacementEditTransaction` are deleted.** `PlacementWriteService`
-  (the 167 bridge's write path) now delegates to `AdtPlacementEditor`, which becomes the single
-  owner of placement mutation in Core.IO. Before deleting, parity was restored: a MODF move in
-  `AdtPlacementEditor.ApplyMove` now translates the row's bounds by the move delta (the old writer
-  did this; stale bounds would break frustum/portal culling for the moved WMO). The writer test's
-  bounds assertion was ported into `AdtPlacementEditorTests.Move_world_model_translates_bounds_with_position`.
-  `AdtPlacementKind` moved to its own `Core/Maps/AdtPlacementKind.cs`.
-- **One reconciliation surface.** The duplicate panel draw in the Editor workbench tab was removed;
-  PM4/Museum reconciliation lives only at Experimental > PM4 > Reconcile.
-- Proof: full solution Debug build 0 errors; 80/80 focused `WowViewer.Core.Editor.Tests` pass.
-
-## 2026-08-25 — Spec 176 Reconcile tab in the PM4 workbench; freezing Match tab retired
-
-- **The old "Match" bottom tab is retired.** Clicking it built `BuildPm4ObjectMatchReport` over every
-  loaded tile × every placement synchronously on the render thread — the reported whole-map freeze.
-  `Pm4BottomTab.Match` is now `Reconcile`, hosting the Spec 176 reconciliation panel (real
-  PM4-driven preview + guarded apply with provenance sidecar and undo). Both former "PM4 Object
-  Match" buttons now switch to the Reconcile sub-tab instead of building the corpus report.
-- **Legacy correlation/match reports are camera-scoped.** `BuildPm4ObjectMatchStates`,
-  `BuildPm4CorrelationObjectStates`, and the `_tileWmoInstances` walk in
-  `BuildPm4WmoPlacementCorrelationReport` now filter to tiles within
-  `Pm4MatchCameraTileRadius` (1) of the camera tile via the new `WorldScene.GetPm4CameraTile()`, so
-  the surviving Correlation tab can no longer walk a whole loaded map.
-- **Paths prefill from the scene.** Opening Reconcile (or pressing its new "Use Camera Tile" button)
-  derives `<map>_<Ytile>_<Xtile>_obj0.adt` and `<map>_<Ytile:D2>_<Xtile:D2>.pm4` from the session map
-  directory (`TryResolveCurrentMapDirectory`) and camera tile, using the measured filename convention
-  (first number bounds Y — verified against the coordinate service's worked example). Preview →
-  accept → Apply Accepted writes the fixed ADT plus `.reconciliation.json` provenance beside it.
-- Proof: WoWViewer project builds 0 errors; 79/79 focused editor tests still pass. Runtime freeze
-  relief and prefill correctness on a real map are user-owned visual checks.
+- **Landed (commits `89a8eebe`…`6fa1adbb`).** Real PM4-guided preview + guarded apply; Reconcile tab
+  replaces the freezing Match tab; `AdtPlacementEditor` is the only Core.IO placement writer (MODF
+  bounds translate with moves); authored edits share the staged-save queue; align confidence is
+  `exp(-d/25)` and already-aligned rows report `AlreadyAligned`; output defaults to
+  `output/projects/<map>/<yyyyMMdd_HHmmss>`. Last green proof: viewer/solution Debug 0 errors; **81/81**
+  focused `WowViewer.Core.Editor.Tests`.
+- **Uncommitted, does not compile:** scene-discerned PM4/`_obj0.adt` pairs from
+  `WorldScene.LoadedPm4Tiles`. Prefill helper was deleted while Sidebars still calls it. Next code
+  step is Spec 176 **T001**, not more UX.
+- **Still open:** in-scene overlay, off-thread preview, P1 transfer, user-owned reload/visual proof.
+  Durable detail lives in `specs/176-object-transfer/` (`plan.md`, `tasks.md`, `quickstart.md`).
 
 ## 2026-08-25 — Spec 176 real PM4-driven preview + hardened apply (skeleton replaced)
 
-- **The reconciliation preview no longer fabricates guides from the Museum's own placements.**
-  `RunReconciliationPreview` now parses the actual PM4 guide with `Pm4ObjectSegmentBuilder`, converts
-  each segment to a placement-space observation via `Pm4ReconciliationInputAdapter` (canonical
-  `(MapOrigin - world.Y, MapOrigin - world.X, world.Z)` composition; min/max recomputed after the
-  reflection; MSUR `_0x1C` height signal taken as the median of values finite and inside the segment
-  Z span ±50, else null), and associates placements by tolerance-expanded bounds containment:
-  none → clone path, exactly one → align/substitute by kind, more than one → `Conflict` proposal
-  naming every competitor (FR-014). Candidates come from the existing `Pm4AssetMatchScorer` over a
-  labelled Museum self-corpus (`museum-self-corpus` + `fallback-placement-bounds` tags; WMO MODF
-  bounds, M2 ±2 fallback box).
-- **Apply is hardened** through new core owners: `ReconciliationApplyService` refuses an empty batch,
-  a stale source hash, or any non-actionable proposal; align → move, substitute → delete+add of the
-  candidate asset, clone → add, all via the existing `AdtPlacementEditor`. The viewer resolves output
-  paths through `EditorSession.ResolveOutputPath` (protected roots + MPQ refusal), writes a JSON
-  provenance sidecar (FR-016: batch id, source hashes, decisions, allocations, output hash), and
-  records an undoable `ReconciliationApplyOperation` whose reverse restores prior output bytes
-  byte-identically — or removes output + sidecar when the apply created them.
+- Preview parses the real PM4 guide (`Pm4ObjectSegmentBuilder` + `Pm4ReconciliationInputAdapter`);
+  apply goes through `ReconciliationApplyService` + provenance sidecar + undo. ID allocation keeps
+  an original-catalog high-water mark so substitute delete+add continues the tile chronology.
 - **Defect fixed in `AdtPlacementEditor`:** ID allocation restarted from the post-delete max, so a
   substitute's delete+add pair allocated id 1 on a tile whose chronology reached 77. Allocation now
   keeps a high-water mark captured from the original catalog.
@@ -138,9 +42,8 @@ Last updated: 2026-08-25
   (faulted plugins are not retried every frame), duplicate-identity startup failure, and a reference
   plugin.
 - **167 bridge**: renderer-free scene snapshot (`EditorSceneSnapshot`), operations-as-data
-  (`EditorOperation`/`PlacementMoveOperation`), and `PlacementWriteService` — the sole production caller
-  of `AdtPlacementWriter` (retires `ViewerApp`'s parallel staging; removal of its 112 refs remains a
-  viewer-shell step).
+  (`EditorOperation`/`PlacementMoveOperation`), and `PlacementWriteService` now delegating to
+  `AdtPlacementEditor` (the in-place writer is deleted).
 - **168 session**: cross-plugin undo/redo, aggregated dirty state, and write-safety policy (protected
   roots, MPQ refusal, output-dir resolution).
 - **173 integrity gate**: validate-on-read verdicts, refuse-on-unverified/quarantined, re-read verify,
