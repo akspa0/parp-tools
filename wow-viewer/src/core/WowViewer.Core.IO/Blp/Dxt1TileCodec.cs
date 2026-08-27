@@ -120,7 +120,7 @@ public static class Dxt1TileCodec
     // This is a simple but valid encoder: per block it picks the min and max colours as endpoints
     // and assigns each pixel the nearest of the four interpolated colours.
 
-    private static byte[] EncodeDxt1(byte[] rgba, int width, int height)
+    internal static byte[] EncodeDxt1(byte[] rgba, int width, int height)
     {
         int blocksX = Math.Max(1, (width + 3) / 4);
         int blocksY = Math.Max(1, (height + 3) / 4);

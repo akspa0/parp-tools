@@ -5428,10 +5428,20 @@ static string? TryFindDefaultListfilePath()
 		if (File.Exists(Path.Combine(current.FullName, "WowViewer.slnx")))
 		{
 			string candidate = Path.Combine(current.FullName, "libs", "wowdev", "wow-listfile", "listfile.txt");
-			return File.Exists(candidate) ? candidate : null;
+			if (File.Exists(candidate)) return candidate;
 		}
 
 		current = current.Parent;
+	}
+
+	string[] rootCandidates =
+	[
+		Path.Combine(Environment.CurrentDirectory, "wow-viewer", "libs", "wowdev", "wow-listfile", "listfile.txt"),
+		Path.Combine(Environment.CurrentDirectory, "libs", "wowdev", "wow-listfile", "listfile.txt"),
+	];
+	foreach (string cand in rootCandidates)
+	{
+		if (File.Exists(cand)) return cand;
 	}
 
 	return null;
@@ -7493,6 +7503,13 @@ static void RunRosettaGenerate(string[] args)
 		return;
 	}
 
+	if (!Directory.Exists(clientRoot))
+	{
+		Console.Error.WriteLine($"Error: client root directory does not exist: '{clientRoot}'");
+		Environment.ExitCode = 1;
+		return;
+	}
+
 	// Everything the viewer needs lives under World\Maps\{mapName}\ and every file inside is named
 	// from the SAME map name: {mapName}_{tileY}_{tileX}.adt, {mapName}.wdt, {mapName}.wdl. The
 	// folder name, tile prefix, and WDT name must never disagree — a mismatched mix is exactly
@@ -7551,13 +7568,29 @@ static void RunRosettaGenerate(string[] args)
 	using var catalog = new NativeMpqService();
 	catalog.LoadArchives([clientRoot]);
 
-	IReadOnlyList<string> known = catalog.ExtractInternalListfiles();
-	if (known.Count == 0)
-		known = catalog.GetAllKnownFiles();
+	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	if (!string.IsNullOrWhiteSpace(listfilePath) && File.Exists(listfilePath))
+	{
+		try
+		{
+			catalog.LoadListfile(listfilePath);
+		}
+		catch { }
+	}
 
-	// The client's own contents decide its era: 0.5.3 ships .mdx/.mdl, post-alpha clients ship .m2.
-	// Making the operator name the era when the archive already answers it is the wrong end of the
-	// tool - and getting it wrong is a hard error, so guessing costs a full re-run.
+	IReadOnlyList<string> known = catalog.ListFiles("*")
+		.Concat(catalog.GetAllKnownFiles())
+		.Where(catalog.FileExists)
+		.Distinct(StringComparer.OrdinalIgnoreCase)
+		.ToList();
+
+	if (known.Count == 0)
+	{
+		Console.Error.WriteLine($"Error: no game data or archives found under '{clientRoot}'. Ensure --client-root points to a valid client installation.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
 	int alphaModelCount = known.Count(static p =>
 	{
 		string ext = Path.GetExtension(p).ToLowerInvariant();
@@ -7565,28 +7598,16 @@ static void RunRosettaGenerate(string[] args)
 	});
 	int postAlphaModelCount = known.Count(static p => Path.GetExtension(p).Equals(".m2", StringComparison.OrdinalIgnoreCase));
 
-    string detectedFormat = alphaModelCount > postAlphaModelCount ? "alpha" : "lk";
-	string format = requestedFormat ?? detectedFormat;
+	string detectedFormat = alphaModelCount > postAlphaModelCount ? "alpha" : "lk";
+	string format = (requestedFormat ?? detectedFormat).ToLowerInvariant();
 	bool alphaOutput = format == "alpha";
 
-	if (requestedFormat is null)
-	{
-		Console.WriteLine($"Client era:    {format}  [detected: {alphaModelCount} .mdx/.mdl, {postAlphaModelCount} .m2]");
-	}
-	else if (requestedFormat != detectedFormat)
-	{
-		Console.WriteLine($"Warning: --format {requestedFormat} was requested but this client looks like "
-			+ $"'{detectedFormat}' ({alphaModelCount} .mdx/.mdl, {postAlphaModelCount} .m2). Honouring the request.");
-	}
-
-	// Model container by era. Admitting the wrong one would put unloadable names into MDNM/MMDX.
 	string[] modelExtensions = alphaOutput ? [".mdx", ".mdl"] : [".m2"];
 	var assetPaths = known
 		.Where(p =>
 		{
 			string ext = Path.GetExtension(p).ToLowerInvariant();
-			return modelExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase)
-				|| ext == ".wmo";
+			return ext == ".wmo" || modelExtensions.Contains(ext);
 		})
 		.Distinct(StringComparer.OrdinalIgnoreCase)
 		.OrderBy(static p => p, StringComparer.OrdinalIgnoreCase)
@@ -7615,10 +7636,11 @@ static void RunRosettaGenerate(string[] args)
 			continue;
 		}
 
+		string ext = Path.GetExtension(path).ToLowerInvariant();
 		try
 		{
 			using var stream = new MemoryStream(bytes, writable: false);
-			if (path.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
+			if (ext == ".wmo")
 			{
 				if (path.Contains('_', StringComparison.OrdinalIgnoreCase)
 					&& !path.EndsWith("_lod0.wmo", StringComparison.OrdinalIgnoreCase))
@@ -7643,14 +7665,15 @@ static void RunRosettaGenerate(string[] args)
 
 				entries.Add(new RosettaAssetEntry(path, RosettaAssetKind.WorldModel, summary.BoundsMin, summary.BoundsMax));
 			}
-			else if (path.EndsWith(".m2", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
+			else if (ext.Equals(".m2", StringComparison.OrdinalIgnoreCase))
 			{
-				var document = M2ModelReaderDispatcher.Read(stream, path);
-				Vector3 bmin = document.BoundsMin;
-				Vector3 bmax = document.BoundsMax;
-				if (!float.IsFinite(bmin.X) || !float.IsFinite(bmax.X)
-					|| !float.IsFinite(bmin.Y) || !float.IsFinite(bmax.Y)
-					|| !float.IsFinite(bmin.Z) || !float.IsFinite(bmax.Z))
+				M2ModelDocument document = M2ModelReaderDispatcher.Read(stream, path);
+				entries.Add(new RosettaAssetEntry(path, RosettaAssetKind.Model, document.BoundsMin, document.BoundsMax));
+			}
+			else
+			{
+				MdxSummary summary = MdxSummaryReader.Read(stream, path);
+				if (summary.BoundsMin is not { } bmin || summary.BoundsMax is not { } bmax)
 				{
 					exclusions.Add((path, "no model bounds"));
 					continue;
@@ -7670,10 +7693,8 @@ static void RunRosettaGenerate(string[] args)
 			$"Error: no {(alphaOutput ? "alpha-era" : "post-alpha")} assets found under {clientRoot}. "
 			+ $"--format {format} admits {string.Join('/', modelExtensions)} models and "
 			+ $"{(alphaOutput ? "v14" : "v17+")} world models; this root offered {wrongEraModels} models of the other "
-			+ $"container and {wrongEraWmos} world models of the other version. "
-			+ (requestedFormat is null
-				? "Point --client-root at a matching client."
-				: $"Drop --format (it is detected from the client) or pass --format {detectedFormat}."));
+			+ $"container and {wrongEraWmos} world models of the other version. Point --client-root at a "
+			+ $"{(alphaOutput ? "0.5.3-era" : "post-alpha")} client.");
 		Environment.ExitCode = 1;
 		return;
 	}
@@ -7816,6 +7837,16 @@ static void RunRosettaGenerate(string[] args)
 					$"Refusing to overwrite existing alpha WDT {alphaWdtPath}. Choose a clean --output.");
 
 			File.WriteAllBytes(alphaWdtPath, AlphaWdtWriter.Build(map.MapName, alphaTiles));
+		}
+
+		// Render and write 256x256 minimap BLP files for every generated tile.
+		string minimapDir = Path.Combine(outputRoot, "Textures", "Minimap", map.MapName);
+		Directory.CreateDirectory(minimapDir);
+		foreach (RosettaTilePlan tile in map.Tiles)
+		{
+			string minimapPath = Path.Combine(minimapDir, $"map{tile.TileY:D2}_{tile.TileX:D2}.blp");
+			byte[] blpBytes = RosettaMinimapPainter.RenderTileBlp(tile, tile.Pedestals, tile.AlphaCanvas);
+			File.WriteAllBytes(minimapPath, blpBytes);
 		}
 
 		// Copy PM4 guides alongside so the PM4 pipeline can consume the same output folder.

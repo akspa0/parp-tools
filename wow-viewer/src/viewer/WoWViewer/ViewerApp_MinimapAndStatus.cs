@@ -317,15 +317,20 @@ public partial class ViewerApp
                     : _statusMessage.Replace(Environment.NewLine, " ").Trim();
 
             string leftText = string.Empty;
-            if (_terrainManager != null || _vlmTerrainManager != null)
+            if (hasRuntimeScene)
             {
                 var pos = _camera.Position;
                 float wowX = WoWConstants.MapOrigin - pos.Y;
                 float wowY = WoWConstants.MapOrigin - pos.X;
                 float wowZ = pos.Z;
+                int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - pos.X) / WoWConstants.ChunkSize);
+                int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - pos.Y) / WoWConstants.ChunkSize);
+                string tileText = (tileX is >= 0 and < 64 && tileY is >= 0 and < 64)
+                    ? $"Tile: {tileY:D2}_{tileX:D2}"
+                    : "Tile: --";
                 float facingDegrees = GetWorldFacingDegrees(_camera.Yaw);
                 string facingLabel = GetWorldFacingLabel(facingDegrees);
-                leftText = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})  Facing: {facingDegrees:F1}° {facingLabel ?? string.Empty}";
+                leftText = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})  {tileText}  Facing: {facingDegrees:F1}° {facingLabel ?? string.Empty}";
             }
 
             float rightWidth = GetImGuiTextWidth(rightStatusText) + 8f;

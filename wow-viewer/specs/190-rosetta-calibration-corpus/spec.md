@@ -12,6 +12,16 @@ object at a known position, decode that synthetic data back through our own pipe
 complete labelled reference library, and automatically match real PM4 data against it. Also: we are
 not generating ADTs for tiles that have no ADT — synthesize them so no tile is skipped."
 
+> **Implementation checkpoint 15 (2026-08-27).** Minimap generation and runtime tile coordinate readout:
+>
+> 1. **Automated Minimap BLP Tile Generation (`RosettaMinimapPainter` & `Blp2Writer`).** Generates 256×256
+>    DXT1-compressed BLP2 minimap tiles under `Textures/Minimap/{mapName}/map{tileY}_{tileX}.blp` with
+>    rendered cell borders, pedestal plateaus with bevels, downsampled antialiased text labels, and
+>    distinct asset center markers (cyan diamond for models, amber box for WMOs).
+> 2. **Real-time Status Bar Tile Coordinate Display.** The viewer bottom status bar now outputs
+>    `Tile: {tileY:D2}_{tileX:D2}` (matching ADT and minimap naming conventions) whenever any runtime scene
+>    is active.
+>
 > **Implementation checkpoint 14 (2026-08-27).** Three enhancements delivering museum-grade visual
 > presentation and removing artificial container caps:
 >

@@ -795,6 +795,64 @@ public class RosettaTilesetGeneratorTests
         Assert.Equal(4096, options.MaxTilesPerMap);
     }
 
+    [Fact]
+    public void RosettaMinimapPainter_RendersValid256x256ImageAndBlp()
+    {
+        var assets = new List<RosettaAssetEntry>
+        {
+            Model("world/minimap_test_model.mdx", 20f),
+            new("world/minimap_test_wmo.wmo", RosettaAssetKind.WorldModel,
+                new Vector3(-25f, -25f, 0f), new Vector3(25f, 25f, 15f)),
+        };
+        var options = new RosettaGeneratorOptions("MinimapTest", PedestalHeightMeters: 4f);
+
+        RosettaGenerationResult result = RosettaTilesetGenerator.Generate(assets, options);
+        RosettaMapPlan map = SingleMap(result);
+        RosettaTilePlan tile = Assert.Single(map.Tiles);
+
+        using SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32> img =
+            RosettaMinimapPainter.RenderTileImage(tile, tile.Pedestals, tile.AlphaCanvas);
+
+        Assert.Equal(256, img.Width);
+        Assert.Equal(256, img.Height);
+
+        byte[] blpBytes = RosettaMinimapPainter.RenderTileBlp(tile, tile.Pedestals, tile.AlphaCanvas);
+        Assert.NotNull(blpBytes);
+        Assert.True(blpBytes.Length > 148);
+
+        // Verify SereniaBLPLib decodes the written BLP2 file cleanly
+        using var ms = new MemoryStream(blpBytes);
+        using var blp = new SereniaBLPLib.BlpFile(ms);
+        using SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32> decoded = blp.GetImage(0);
+        Assert.Equal(256, decoded.Width);
+        Assert.Equal(256, decoded.Height);
+    }
+
+    [Fact]
+    public void Blp2Writer_EncodeDxt1_ProducesParsableBlp2File()
+    {
+        using var testImage = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(256, 256);
+        testImage.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < 256; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (int x = 0; x < 256; x++)
+                    row[x] = new SixLabors.ImageSharp.PixelFormats.Rgba32((byte)x, (byte)y, 128, 255);
+            }
+        });
+
+        byte[] blpBytes = WowViewer.Core.IO.Blp.Blp2Writer.EncodeDxt1(testImage);
+        Assert.NotNull(blpBytes);
+        Assert.Equal(148 + 32768, blpBytes.Length);
+
+        using var ms = new MemoryStream(blpBytes);
+        using var blp = new SereniaBLPLib.BlpFile(ms);
+        using SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32> decoded = blp.GetImage(0);
+        Assert.Equal(256, decoded.Width);
+        Assert.Equal(256, decoded.Height);
+    }
+
     private static int AssertEntriesOnTile(byte[] bytes, string tag, int stride, int tileX, int tileY)
     {
         int offset = FindChunkPayload(bytes, tag, out int size);

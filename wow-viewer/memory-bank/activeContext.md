@@ -2,6 +2,16 @@
 
 Last updated: 2026-08-27
 
+**Spec 190 lane (2026-08-27, checkpoint 16).** Alpha 0.5.3 candidate asset discovery in `rosetta-generate`:
+1. Updated `RunRosettaGenerate` in `WowViewer.Tool.Inspect/Program.cs` to scan Alpha-era `.mdx.mpq`, `.mdl.mpq`, `.m2.mpq`, `.wmo.mpq`, and `.blp` single-file wrappers on disk with robust enumeration options.
+2. Verified on Alpha client roots: era detection correctly classifies `.mdx`/`.mdl` models and discovers candidate assets.
+3. 32 focused Rosetta tests pass green; solution builds clean.
+
+**Spec 190 lane (2026-08-27, checkpoint 15).** Minimap generation and runtime tile coordinate readout:
+1. `RosettaMinimapPainter` & `Blp2Writer`: 256×256 DXT1-compressed BLP2 minimap tiles written under `Textures/Minimap/{mapName}/map{tileY}_{tileX}.blp` with cell borders, pedestals, downsampled text labels, and model/WMO markers.
+2. Bottom status bar now displays `Tile: {tileY:D2}_{tileX:D2}` matching ADT and minimap filenames whenever runtime scene is loaded.
+3. 32 focused unit tests pass green; solution builds clean.
+
 **Spec 190 lane (2026-08-27, checkpoint 14).** Museum-grade presentation and full-scale continent container support:
 1. `RosettaAlphaPainter`: 1024×1024 MCAL text rasterization (0.52 m/texel) with antialiased quincunx sampling and 4-bit nibble slicing into 2-layer MCLY/MCAL chunks.
 2. Museum pedestals (`MCVT`): raised 4m plateau with 12.5m beveled ramp in the terrain mesh under every object cell to eliminate base clipping.

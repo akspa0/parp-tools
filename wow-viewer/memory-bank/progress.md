@@ -2,6 +2,21 @@
 
 Last updated: 2026-08-27
 
+## 2026-08-27 — Spec 190 Checkpoint 16: Alpha 0.5.3 client asset discovery
+
+- **Landed:**
+  - **Rosetta Asset Discovery for Alpha Clients (`RunRosettaGenerate`):** Added robust filesystem scanning in `Program.cs` for Alpha-era single-file wrapper archives (`.mdx.mpq`, `.mdl.mpq`, `.m2.mpq`, `.wmo.mpq`, `.blp`).
+  - **Era Detection:** Correctly identifies Alpha clients with `.mdx`/`.mdl` assets, avoiding false-positive `"lk"` classification.
+  - **32/32 unit tests pass green in `RosettaTilesetGeneratorTests`.** Full solution compiles with 0 errors.
+
+## 2026-08-27 — Spec 190 Checkpoint 15: Minimap generation, status bar tile readout & v0.5.2.2 bump
+
+- **Landed:**
+  - **Rosetta Minimap Tile Generator (`RosettaMinimapPainter` & `Blp2Writer`):** 256×256 DXT1-compressed BLP2 minimap tiles generated under `Textures/Minimap/{mapName}/map{tileY}_{tileX}.blp` with rendered cell borders, pedestal plateaus with bevels, downsampled antialiased text labels, and model/WMO markers.
+  - **Status Bar Tile Readout:** Bottom status bar now displays `Tile: {tileY:D2}_{tileX:D2}` (matching ADT and minimap filenames) whenever any runtime scene is active.
+  - **Version bumped to `v0.5.2.2`** across `Version.props`, `WoWViewer.csproj`, `WoWViewer.CrossPlatform.csproj`, `ViewerApp.cs`, `CHANGELOG.md`, and READMEs.
+  - **32/32 unit tests pass green in `RosettaTilesetGeneratorTests`.** Full solution compiles with 0 errors.
+
 ## 2026-08-27 — Spec 190 Phase 1: MCAL text painting, museum pedestals, and full-map Alpha WDT
 
 - **Landed (Phase 1 / US1 complete):**

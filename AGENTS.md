@@ -1,123 +1,112 @@
-# Workspace Instructions
+# Workspace Instructions & Multi-LLM Routing Guide
 
 These instructions apply to `I:/parp/parp-tools` and its active projects. Keep this file
-operational and short. Historical findings belong in specs, architecture notes, or the memory-bank
-workstream files—not here.
+operational, clear, and actionable across all LLM models and agent harnesses (Codex, Claude,
+Gemini, DeepSeek, ChatGPT, OpenCode, Copilot).
 
-## Start here
+---
+
+## 1. Start Here
 
 For `wow-viewer` work, read in this order:
 
-1. `wow-viewer/AGENTS.md`
-2. `wow-viewer/specs/STATUS.md`
-3. `wow-viewer/memory-bank/activeContext.md`
-4. The selected spec's `spec.md`, `plan.md`, and `tasks.md`
-5. Only the linked research/workstream files needed for the current task
+1. `wow-viewer/specs/STATUS.md`
+2. `wow-viewer/memory-bank/activeContext.md`
+3. The selected spec's `spec.md`, `plan.md`, and `tasks.md`
+4. Only the linked research/workstream files needed for the current task
 
-Use Spec Kit for non-trivial work: specify → plan → tasks → implement one validated phase at a
-time. If the request is a small fix, use the existing spec/checklist when one applies.
-6.  # 6. Absolute agent-routing rule
+Use **Spec Kit / Specify** for all design and implementation planning: **specify (`spec.md`) → plan (`plan.md`) → tasks (`tasks.md`) → implement one validated phase at a time**. All feature specifications, architecture plans, and task breakdowns live under `wow-viewer/specs/<spec-id>/`, **never in memory-bank**. If the request is a small fix, use the existing spec/checklist when one applies.
 
-**NEVER USE TERRA.**
+---
 
-The final routing rule is:
+## 2. Multi-LLM Model & Agent Routing Matrix
 
-## If using Codex
+### General Rule: NEVER USE TERRA
+Never route implementation, planning, exploration, or review to Terra.
 
-- **Luna at max effort** owns implementation.
+### Model-Specific Routing Profiles
 
-- **Sol at high or extra-high effort** owns planning/review.
+| LLM Family / Ecosystem | Planning & Review Role | Implementation & Sub-Agent Role | Recommended Effort / Parameters |
+|---|---|---|---|
+| **Codex / OpenAI** | **Sol** (Planning / Review) | **Luna** (Implementation) | Sol at **High / Extra-High**; Luna at **Extra-High / Max**. Sol returns review findings only; Luna remediates. |
+| **Anthropic Claude** | **Claude Opus** (Master Architecture & Guidance) | **Claude Sonnet** (Sub-agents & Implementation) | Opus provides global plan/review; Sonnet sub-agents run focused slices. |
+| **Google Gemini** | **Gemini 3.7 Flash** | **Gemini 3.7 Flash** | Use **High Effort / Thinking High** across all Gemini primary tasks and subagents. |
+| **DeepSeek** | **DeepSeek Pro / Reasoner (v4 via OpenRouter)** | **DeepSeek Flash (v4 via OpenRouter)** | DeepSeek Pro v4 owns architectural planning & review; DeepSeek Flash v4 executes implementation & sub-agents. |
 
-- Sol returns findings/review, not implementation.
+### Hybrid / Cross-Model Workflow
+When operating across multiple tools or models:
+1. **Plan & Specify**: Plan with **DeepSeek Pro (v4)**, **Claude Opus**, or **Sol High**.
+2. **Execute & Remediate**: Implement separately with **DeepSeek Flash (v4)**, **Luna (Max)**, **Claude Sonnet**, **Gemini 3.7 Flash (High)**, or **ChatGPT/Codex**.
+3. **Review & Gate**: Review against the plan before closing the phase or passing to the operator.
 
-- Luna remediates findings.
+### Codex / Standard Review Loop
+```text
+[Planning] Sol (High/Extra-High) -> plan.md / tasks.md
+    ↓
+[Implementation] Luna (Max) implements phase
+    ↓
+[Focused Verification] Run unit/integration tests for changed owner
+    ↓
+[Scope Gate] Run affected project test suites
+    ↓
+[Review] Sol reviews diff + done-when criteria
+    ↓
+CHANGES REQUIRED → Luna remediates → focused verification → re-review (max 6 cycles)
+BLOCKED          → Stop and report to operator
+PASS             → Report completion / await operator approval (Do not self-merge)
+```
 
-- Never route implementation, planning, exploration, or review to Terra.
+---
 
-Typical loop:
-
-    Luna implements.
-
-    Run focused verification.
-
-    At integration checkpoint run full affected-scope gates.
-
-    Self-check against done-when.
-
-    Sol reviews current base-to-head diff + done-when criteria.
-
-    CHANGES REQUIRED → Luna remediates → focused verification → return to review.
-
-    BLOCKED → stop and report.
-
-    PASS → create/update PR if authorized, then stop for operator decision.
-
-    Do not self-merge.
-
-    If six review cycles fail to converge, stop and report to the operator.
-
-Sol should normally be extra-high for final acceptance review and high/extra-high
-
-for task planning according to task risk.
-
-If using Claude, use Sonnet Sub-agents in place of Luna with Opus taking over for Sol. If using Deepseek or other llm, use subagents in place of Luna and Sol.
-
-## Sub-agents
+## 3. Sub-Agent Execution Guidelines
 
 - Use sub-agents by default for independent, safely parallelizable discovery, analysis, focused
   verification, or bounded implementation slices. Look for these opportunities before starting
   the main work, and run independent slices in parallel when that improves throughput.
-- Give every sub-agent an explicit question or deliverable and a clearly bounded read/write scope.
-  Do not assign overlapping write sets or unrelated repository cleanup.
-- Keep the critical path with the primary agent: select and interpret the spec, make architecture
-  decisions, resolve conflicts, review and integrate patches, own final validation and commits,
-  and perform all user-owned runtime or heavy-work handoffs.
-- Sub-agents may return findings, patches, and focused test results. The primary agent must inspect
-  their changes and evidence before integration or reporting completion.
-- Do not delegate training, GPU/heavy jobs, broad harvests, long captures, billed operations, or
-  real-client visual/FPS/audio proof. Prepare those commands for the user instead.
+- **Disjoint Scopes**: Give each sub-agent an explicit question or deliverable and a strictly bounded
+  read/write scope. Never assign overlapping write sets or broad, unfocused repository cleanup.
+- **Critical Path**: The primary agent retains the critical path: architecture decisions, spec interpretation,
+  conflict resolution, reviewing/integrating sub-agent patches, and final user handoffs.
+- **Verification of Work**: Inspect sub-agent code and evidence before integrating or claiming completion.
+- **Operator-Owned Operations**: Never delegate training, GPU/heavy jobs, broad harvests, long captures,
+  billed operations, or real-client visual/FPS/audio proof to sub-agents. Prepare commands for the user.
 
-## Ownership and safety
+---
 
-- All new code, tests, tools, and docs for the viewer go under `wow-viewer/`.
-- `gillijimproject_refactor/` is read-only reference code unless the user explicitly requests a
-  bounded legacy hotfix.
-- Do not rewrite or duplicate existing game-file readers. Extend shared `WowViewer.Core.*` owners
-  only when the current contract lacks the required behavior.
-- Preserve unrelated dirty worktree changes. Stage named files only; never use broad staging.
-- Do not delete, reset, or overwrite user data without explicit approval and verified targets.
-- Do not claim runtime, visual, FPS, GPU, audible, or real-client proof from compilation or unit
-  tests alone.
+## 4. Code Ownership & Architectural Boundaries
 
-## Execution boundaries
+- **Core Library First**:
+  - Shared data models: `wow-viewer/src/core/WowViewer.Core/`
+  - Shared format I/O: `wow-viewer/src/core/WowViewer.Core.IO/`
+  - Runtime/M2/world contracts: `wow-viewer/src/core/WowViewer.Core.Runtime/`
+  - PM4 algorithms: `wow-viewer/src/core/WowViewer.Core.PM4/`
+  - Editor contracts & operations: `wow-viewer/src/core/WowViewer.Core.Editor/`
+  - Viewer shell and rendering: `wow-viewer/src/viewer/WoWViewer/`
+  - CLI tools (thin wrappers only): `wow-viewer/tools/`
+  - C# tests: `wow-viewer/tests/`
+  - Python ML/data tooling: `wow-viewer/data-harvester/`
+- **Do Not Touch Working Format Readers**:
+  - Do NOT modify or break existing MPQ readers (`MpqArchiveCatalog.cs`, `NativeMpqService.cs`), ADT readers, WMO readers, or M2/MDX readers unless explicitly instructed by the operator for a verified format bug.
+  - `gillijimproject_refactor/` is read-only reference code unless explicitly requested by the user for a bounded legacy fix.
+  - `AlphaWdtWriter.cs` remains frozen unless a proven compatibility regression requires reopening.
+- **Maintain Clear Separation**: Keep UI out of core libraries. Maintain the Alpha vs Standard terrain adapter separation.
 
-- The user runs training, GPU jobs, data harvests, long/heavy/billed runs, and real-client visual
-  proof. Prepare exact commands and stop before launching those operations.
-- Read-only inspection, focused tests, and quick builds are allowed when needed to implement safely.
-- Client roots are runtime configuration. `H:\CLIENTS` is an approved library; never hardcode a
-  machine-local client path into source or portable docs. Record the exact build/root/fingerprint
-  for validation.
-- Python work belongs under `wow-viewer/data-harvester/`, uses its `uv` environment, and must not
-  be launched from the repository root when package imports depend on that project.
-- Every command handed to the user must be PowerShell 7 compatible: use backticks for continuation,
-  PowerShell variables, and no bash heredocs, `export`, `/tmp`, or POSIX-only command syntax.
+---
 
-## Code ownership
+## 5. Execution Boundaries & Environment
 
-- Shared data models: `wow-viewer/src/core/WowViewer.Core/`
-- Shared format I/O: `wow-viewer/src/core/WowViewer.Core.IO/`
-- Runtime/M2/world contracts: `wow-viewer/src/core/WowViewer.Core.Runtime/`
-- PM4: `wow-viewer/src/core/WowViewer.Core.PM4/`
-- Viewer shell and rendering: `wow-viewer/src/viewer/WoWViewer/`
-- CLI tools: `wow-viewer/tools/`
-- C# tests: `wow-viewer/tests/`
-- Python ML/data tooling: `wow-viewer/data-harvester/`
+- **User-Owned Runs**: The operator runs training, GPU jobs, data harvests, long/heavy/billed operations, and real-client visual proof. Prepare exact commands and stop before execution.
+- **Client Roots**: Client roots are runtime configuration. `H:\CLIENTS` is an approved local library path; never hardcode machine-local client paths into source code or portable tests/documentation. Record exact build/root/fingerprint for validation.
+- **Python Environment**: Python work belongs under `wow-viewer/data-harvester/` and uses its `uv` environment. Do not launch Python from the repository root when package imports depend on that project.
+- **PowerShell 7 Syntax**: Every command handed to the user must be PowerShell 7 compatible:
+  - Use backticks (`` ` ``) for line continuation.
+  - Use PowerShell variables and parameter quoting.
+  - Do NOT use bash heredocs (`<<EOF`), `export`, `/tmp`, or POSIX-only syntax.
+- **Worktree Safety**: Preserve unrelated dirty worktree changes. Stage named files only; never use broad destructive git resets or staging.
 
-Keep readers library-first, tools thin, and UI out of core libraries. Maintain existing Alpha vs
-Standard terrain adapter separation. Keep `AlphaWdtWriter.cs` frozen unless explicitly reopened by
-the user or a proven compatibility regression requires it.
+---
 
-## Validation
+## 6. Validation Commands
 
 Preferred viewer checks:
 
@@ -126,23 +115,33 @@ dotnet build I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug
 dotnet test I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug
 ```
 
-Use focused tests for the changed owner first. For real-client checks, state the configured client
-root, build, and proof level. Do not use the legacy `MdxViewer` as the active viewer test target.
+Focused test checks (e.g. for Rosetta or Core):
 
-## Documentation and continuity
+```powershell
+dotnet test I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~Rosetta"
+```
 
-- Specs are the source of truth for feature behavior and phase order.
-- `wow-viewer/memory-bank/activeContext.md` is a short dashboard: active lanes, next task, proof
-  owner, main gap, and out-of-scope items.
-- `wow-viewer/memory-bank/progress.md` is a short newest-first ledger: one compact entry per
-  completed session or phase. Move durable findings to a workstream file.
-- Keep `coding_standards.md`, `data-paths.md`, `projectbrief.md`, `systemPatterns.md`, and
-  `techContext.md` stable; change them only when a durable rule changes.
-- Archive superseded detail under `wow-viewer/memory-bank/archive/` and index it in that archive's
-  README. Do not delete negative results that prevent repeated mistakes.
-- Update the relevant spec and continuity dashboard in the same pass as non-trivial code changes.
+Never claim runtime, visual, FPS, GPU, audible, or real-client proof from compilation or unit tests alone.
 
-## Communication
+---
 
-Lead with the result. State what changed, what was validated, what remains user-owned, and the next
-bounded step. Do not bury an unresolved proof gap under a long history recap.
+## 7. Documentation & Continuity
+
+- **Spec Kit / Specify (`wow-viewer/specs/<spec-id>/`)**: All feature specs, technical design plans, and actionable task breakdowns are authored exclusively in Spec Kit format:
+  - `spec.md`: User requirements, user stories, acceptance criteria, and constraints.
+  - `plan.md`: Technical design, architectural decisions, file changes, and phase roadmap.
+  - `tasks.md`: Fine-grained task checklist ordered by phase with verification gates.
+  - `specs/STATUS.md`: Central registry and status ledger of all active and completed specs.
+- **Memory Bank Role (Dashboard & History Only — NOT for Implementation Plans)**:
+  - `wow-viewer/memory-bank/activeContext.md`: Compact live operational dashboard (active lanes, next task, proof owner, main gap, out-of-scope items).
+  - `wow-viewer/memory-bank/progress.md`: Newest-first historical ledger (one compact entry per completed session or phase). Move durable findings to a research or workstream file.
+- Update the relevant spec (`tasks.md`) and continuity dashboard (`activeContext.md`) in the same pass as non-trivial code changes.
+- Archive superseded detail under `wow-viewer/memory-bank/archive/` and index it in README.
+
+---
+
+## 8. Communication Style
+
+- **Lead with the result**: State what changed, what was validated, what remains user-owned, and the exact next bounded step.
+- Do not bury unresolved proof gaps under long retrospectives.
+- Format file and symbol references as clickable markdown links (`file:///...`).
