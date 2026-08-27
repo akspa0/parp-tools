@@ -153,15 +153,17 @@ public static class RosettaTextPainter
     /// throws away the quincunx's half-pixel offset — that is what made the first painted runs look
     /// chewed.
     /// </remarks>
-    private static void PaintLabel(byte[]?[] painted, RosettaLabel label, float chunkSizeMeters)
+    /// <summary>
+    /// Flattens a run of text into one ink mask per font-pixel column: bit <c>r</c> set means glyph
+    /// row <c>r</c> is ink. Shared with <see cref="RosettaAlphaPainter"/> so both the vertex-colour
+    /// and texture-alpha paths render the same letterforms.
+    /// </summary>
+    public static List<int> BuildColumnMasks(string text)
     {
-        float pixel = label.PixelMeters;
-        if (pixel <= 0f || label.Text.Length == 0)
-            return;
+        ArgumentNullException.ThrowIfNull(text);
 
-        // Flatten the run to one column-mask per font pixel column: bit r set means row r is ink.
-        var columns = new List<int>(label.Text.Length * CharAdvanceColumns);
-        foreach (char c in label.Text)
+        var columns = new List<int>(text.Length * CharAdvanceColumns);
+        foreach (char c in text)
         {
             if (!Glyphs.TryGetValue(char.ToUpperInvariant(c), out int[]? rows))
             {
@@ -185,6 +187,17 @@ public static class RosettaTextPainter
             for (int i = 0; i < GlyphSpacingColumns; i++)
                 columns.Add(0);
         }
+
+        return columns;
+    }
+
+    private static void PaintLabel(byte[]?[] painted, RosettaLabel label, float chunkSizeMeters)
+    {
+        float pixel = label.PixelMeters;
+        if (pixel <= 0f || label.Text.Length == 0)
+            return;
+
+        List<int> columns = BuildColumnMasks(label.Text);
 
         float half = pixel / 2f;
         // A vertex can pick up ink from up to half a font pixel away in each direction.
@@ -212,11 +225,11 @@ public static class RosettaTextPainter
     }
 
     /// <summary>
-    /// Fraction of the sample box covered by lit font pixels. Exact rather than supersampled: the
-    /// overlap of two axis-aligned rectangles is a closed form.
+    /// Fraction of the sample box covered by lit font pixels, in the run's own coordinate space.
+    /// Exact rather than supersampled: the overlap of two axis-aligned rectangles is a closed form.
     /// </summary>
-    private static float SampleCoverage(
-        List<int> columns, float originU, float originV, float pixel,
+    public static float SampleCoverage(
+        IReadOnlyList<int> columns, float originU, float originV, float pixel,
         float su0, float sv0, float su1, float sv1)
     {
         int colStart = Math.Max(0, (int)MathF.Floor((su0 - originU) / pixel));

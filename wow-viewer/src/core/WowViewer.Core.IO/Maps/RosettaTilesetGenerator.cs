@@ -40,7 +40,11 @@ public sealed record RosettaGeneratorOptions(
     bool GroupByDesignkit = true,
     int KitDepth = 0,
     int MaxTilesPerMap = 4096,
-    string GroundTexture = @"tileset\ocean\westfallseafloor.blp")
+    string GroundTexture = @"tileset\ocean\westfallseafloor.blp",
+    string InkTexture = @"tileset\generic\black.blp",
+    float PedestalHeightMeters = 4f,
+    float PedestalBevelMeters = 12.5f,
+    int LabelFontTexels = 6)
 {
     public const float TileSize = 533.33333f;
     public const int ChunksPerTileAxis = 16;
@@ -54,6 +58,15 @@ public sealed record RosettaGeneratorOptions(
 
     /// <summary>Cell edge used for assets too large for the standard cell: one whole tile.</summary>
     public const int OversizeCellChunks = ChunksPerTileAxis;
+
+    /// <summary>
+    /// Layer-1 texture the painted label is blended in with. Like the ground texture it must be a
+    /// path the target client ships, and it wants to contrast with the ground.
+    /// </summary>
+    public const string DefaultInkTexture = @"tileset\generic\black.blp";
+
+    /// <summary>Label font pixel measured in MCAL texels; 6 gives ~3.1 m pixels, 14 characters a line.</summary>
+    public const int DefaultLabelFontTexels = 6;
 
     /// <summary>
     /// Layer-0 terrain texture every generated tile references. It has to be a path the TARGET
@@ -75,6 +88,10 @@ public sealed record RosettaGeneratorOptions(
         ArgumentOutOfRangeException.ThrowIfNegative(StartTileX);
         ArgumentOutOfRangeException.ThrowIfNegative(StartTileY);
         ArgumentException.ThrowIfNullOrWhiteSpace(GroundTexture);
+        ArgumentException.ThrowIfNullOrWhiteSpace(InkTexture);
+        ArgumentOutOfRangeException.ThrowIfNegative(PedestalHeightMeters);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(PedestalBevelMeters);
+        ArgumentOutOfRangeException.ThrowIfLessThan(LabelFontTexels, 1);
         ArgumentOutOfRangeException.ThrowIfNegative(KitDepth);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(MaxTilesPerMap);
         if (MaxTilesPerMap > TilesPerAxis * TilesPerAxis)
@@ -109,12 +126,22 @@ public sealed record RosettaPlacementRecord(
 /// materialising them all before writing any exhausts memory. Call
 /// <see cref="RosettaTilesetGenerator.BuildTileAdt"/> per tile, write it, and let it go.
 /// </summary>
+/// <param name="AlphaCanvas">
+/// Tile-wide MCAL canvas carrying the painted labels at 1024x1024 (see
+/// <see cref="RosettaAlphaPainter"/>), or null when nothing was painted.
+/// </param>
+/// <param name="Pedestals">Object-band rectangles raised into a plinth by the height field.</param>
 public sealed record RosettaTilePlan(
     int TileX,
     int TileY,
     IReadOnlyList<RosettaPlacementRecord> Placements,
     IReadOnlyList<RosettaMccvRect> Rects,
-    IReadOnlyList<RosettaLabel> Labels);
+    IReadOnlyList<RosettaLabel> Labels,
+    byte[]? AlphaCanvas,
+    IReadOnlyList<RosettaPedestal> Pedestals);
+
+/// <summary>A raised platform under one cell's object, in tile canvas space.</summary>
+public sealed record RosettaPedestal(float U0, float V0, float U1, float V1, float Height);
 
 public sealed record RosettaExcludedAsset(RosettaAssetEntry Asset, string Reason);
 
@@ -146,7 +173,8 @@ public sealed record RosettaMapPlan(
     int BlockOriginX,
     int BlockOriginY,
     int BlockSide,
-    string GroundTexture);
+    string GroundTexture,
+    string InkTexture);
 
 public sealed record RosettaGenerationResult(
     string MapName,
@@ -571,7 +599,7 @@ public static class RosettaTilesetGenerator
 
         return new RosettaMapPlan(
             mapName, tiles, placements, designkits, block.OriginX, block.OriginY, block.Side,
-            options.GroundTexture);
+            options.GroundTexture, options.InkTexture);
     }
 
     /// <summary>
@@ -730,10 +758,11 @@ public static class RosettaTilesetGenerator
             float cellU = (cellIndex % cls.CellsPerAxis) * cls.CellSize;
             float cellV = (cellIndex / cls.CellsPerAxis) * cls.CellSize;
 
-            // The extension is dead weight on a 10-character line — every asset in a cell is either
-            // a model or a world model and the plate tint already says which, so spend those
-            // characters on the name instead.
-            string labelText = SanitizeLabel(asset.AssetPath, stripExtension: true);
+            // Keep the extension. It is the asset TYPE, which is the one thing a painted label has
+            // to carry that the name alone does not - .MDX vs .WMO changes what the cell even is.
+            // Middle-elision puts it at the surviving tail, so it shows even on a clipped name; the
+            // plate tint is a redundant cue, not a replacement.
+            string labelText = SanitizeLabel(asset.AssetPath);
             IReadOnlyList<string> lines = WrapLabel(labelText, charsPerLine, cls.LabelBandChunks);
 
             uniqueId++;

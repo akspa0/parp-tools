@@ -7469,17 +7469,16 @@ static void RunRosettaGenerate(string[] args)
 	// One run = one era = one container. There is no "both": an alpha WDT that names .m2 models and
 	// v17 world models describes assets the alpha client does not have, and an LK map that names v14
 	// world models describes assets the LK client does not have. The output format therefore decides
-	// which assets are admitted at all, and a client root that cannot supply them is an error.
-	string format = (GetOption(args, "--format") ?? "lk").ToLowerInvariant();
-	if (format is not ("lk" or "alpha"))
+	// which assets are admitted at all. It is OPTIONAL: the client root already says which era it is,
+	// so it is detected below and only has to be passed to override that.
+	string? requestedFormat = GetOption(args, "--format")?.ToLowerInvariant();
+	if (requestedFormat is not (null or "lk" or "alpha"))
 	{
-		Console.Error.WriteLine($"Error: --format must be lk or alpha (got '{format}'). One run targets one era; "
-			+ "run twice against the matching client roots if you want both containers.");
+		Console.Error.WriteLine($"Error: --format must be lk or alpha (got '{requestedFormat}'). One run targets one "
+			+ "era; run twice against the matching client roots if you want both containers.");
 		Environment.ExitCode = 1;
 		return;
 	}
-
-	bool alphaOutput = format == "alpha";
 	// Optional. When not given, one is picked out of the client's own listfile below; a hard-coded
 	// default is exactly how the corpus ended up naming a texture the client does not ship.
 	string? requestedGroundTexture = GetOption(args, "--ground-texture");
@@ -7568,8 +7567,31 @@ static void RunRosettaGenerate(string[] args)
 	if (known.Count == 0)
 		known = catalog.GetAllKnownFiles();
 
-	// Model container by era: 0.5.3 ships .mdx/.mdl, post-alpha clients ship .m2. Admitting the
-	// wrong one would put unloadable names into MDNM/MMDX.
+	// The client's own contents decide its era: 0.5.3 ships .mdx/.mdl, post-alpha clients ship .m2.
+	// Making the operator name the era when the archive already answers it is the wrong end of the
+	// tool - and getting it wrong is a hard error, so guessing costs a full re-run.
+	int alphaModelCount = known.Count(static p =>
+	{
+		string ext = Path.GetExtension(p).ToLowerInvariant();
+		return ext is ".mdx" or ".mdl";
+	});
+	int postAlphaModelCount = known.Count(static p => Path.GetExtension(p).Equals(".m2", StringComparison.OrdinalIgnoreCase));
+
+    string detectedFormat = alphaModelCount > postAlphaModelCount ? "alpha" : "lk";
+	string format = requestedFormat ?? detectedFormat;
+	bool alphaOutput = format == "alpha";
+
+	if (requestedFormat is null)
+	{
+		Console.WriteLine($"Client era:    {format}  [detected: {alphaModelCount} .mdx/.mdl, {postAlphaModelCount} .m2]");
+	}
+	else if (requestedFormat != detectedFormat)
+	{
+		Console.WriteLine($"Warning: --format {requestedFormat} was requested but this client looks like "
+			+ $"'{detectedFormat}' ({alphaModelCount} .mdx/.mdl, {postAlphaModelCount} .m2). Honouring the request.");
+	}
+
+	// Model container by era. Admitting the wrong one would put unloadable names into MDNM/MMDX.
 	string[] modelExtensions = alphaOutput ? [".mdx", ".mdl"] : [".m2"];
 	var assetPaths = known
 		.Where(p =>
@@ -7659,8 +7681,10 @@ static void RunRosettaGenerate(string[] args)
 			$"Error: no {(alphaOutput ? "alpha-era" : "post-alpha")} assets found under {clientRoot}. "
 			+ $"--format {format} admits {string.Join('/', modelExtensions)} models and "
 			+ $"{(alphaOutput ? "v14" : "v17+")} world models; this root offered {wrongEraModels} models of the other "
-			+ $"container and {wrongEraWmos} world models of the other version. Point --client-root at a "
-			+ $"{(alphaOutput ? "0.5.3-era" : "post-alpha")} client.");
+			+ $"container and {wrongEraWmos} world models of the other version. "
+			+ (requestedFormat is null
+				? "Point --client-root at a matching client."
+				: $"Drop --format (it is detected from the client) or pass --format {detectedFormat}."));
 		Environment.ExitCode = 1;
 		return;
 	}
@@ -9340,7 +9364,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect pm4 audit --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 audit-directory --input <directory>");
 	Console.WriteLine("  wowviewer-inspect pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
-	Console.WriteLine("  wowviewer-inspect rosetta-generate --client-root <game dir> --output <dir> [--map-name <name>] [--format lk|alpha] [--ground-texture <path.blp>] [--start-x <n>] [--start-y <n>] [--cell-chunks 1|2|4|8|16] [--label-band-chunks <n>] [--no-cell-borders] [--overwrite] [--no-designkit-grouping] [--kit-depth <n>] [--max-tiles-per-map <n>] [--max-assets <n>] [--existing-map-dir <dir>] [--pm4-dir <dir>]");
+	Console.WriteLine("  wowviewer-inspect rosetta-generate --client-root <game dir> --output <dir> [--map-name <name>] [--format lk|alpha (default: detected from client)] [--ground-texture <path.blp>] [--start-x <n>] [--start-y <n>] [--cell-chunks 1|2|4|8|16] [--label-band-chunks <n>] [--no-cell-borders] [--overwrite] [--no-designkit-grouping] [--kit-depth <n>] [--max-tiles-per-map <n>] [--max-assets <n>] [--existing-map-dir <dir>] [--pm4-dir <dir>]");
 }
 
 static Pm4SegmentExportFile AssertSinglePm4ExportFile(Pm4SegmentExportRun exportRun, string input)

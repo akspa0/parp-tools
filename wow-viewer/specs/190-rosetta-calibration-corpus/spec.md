@@ -12,6 +12,29 @@ object at a known position, decode that synthetic data back through our own pipe
 complete labelled reference library, and automatically match real PM4 data against it. Also: we are
 not generating ADTs for tiles that have no ADT — synthesize them so no tile is skipped."
 
+> **Implementation checkpoint 13 (2026-08-26).** Two corrections, both of the same kind: the tool
+> asking the operator for something it already knew, and dropping something the operator needed.
+>
+> 1. **`--format` is detected from the client.** Pointing at the 0.5.3 root without the flag failed
+>    with *"no post-alpha assets found ... this root offered 5545 models of the other container"* —
+>    the tool had counted the evidence and still demanded to be told. It now counts `.mdx`/`.mdl`
+>    against `.m2` in the listfile and picks the era, printing
+>    `Client era: alpha [detected: 5545 .mdx/.mdl, 0 .m2]`. An explicit `--format` still wins but
+>    warns when it contradicts the client, and the refusal message now ends with the actual fix
+>    (`Drop --format (it is detected from the client) or pass --format alpha`) instead of telling the
+>    operator to go find a different client.
+> 2. **Filename extensions are back in painted labels.** Checkpoint 7 stripped them to buy four
+>    characters, on the reasoning that the plate tint already encodes model-vs-world-model. Wrong
+>    trade: the extension is the asset TYPE, which is the one thing the label must carry that the
+>    name alone does not. Middle-elision puts it on the surviving tail, so it shows even on a clipped
+>    name — `HumanMalePirateSwashbuckler_Ghost.mdx` paints as
+>    `HUMANMALEP / IRATE-KLER / _GHOST.MDX`. The plate tint stays as a redundant cue.
+>
+> Verified: the operator's exact command (alpha client, no `--format`, no `--ground-texture`) runs
+> clean — era detected, texture auto-selected, 400 assets across 231 tiles. The post-alpha client
+> still detects as `lk` (`0 .mdx/.mdl, 25833 .m2`). 26 Rosetta tests pass; the pre-existing unrelated
+> Core.Tests failures are unchanged.
+>
 > **Implementation checkpoint 12 (2026-08-26).** Re-running into a used output folder crashed on an
 > unhandled `InvalidOperationException` after minutes of archive scanning, because occupied-tile
 > collection only looked at the base map folder while multi-map output writes `{MapName}00`,
