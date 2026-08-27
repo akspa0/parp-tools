@@ -5,10 +5,12 @@ This folder is the viewer-facing guide layer for the current `wow-viewer` app.
 ## Read order
 
 1. [Viewer README](../../README.md)
-2. [USERGUIDE.md](USERGUIDE.md)
-3. [CLI-TOOLS.md](../CLI-TOOLS.md)
-4. [Release notes — v0.5.2](../releases/v0.5.2.md)
-5. [Spec 080 — UI consolidation](../../specs/080-wow-ui-consolidation/spec.md)
+2. [Desktop app README](../../src/viewer/WoWViewer/README.md)
+3. [USERGUIDE.md](USERGUIDE.md)
+4. [CLI tooling README](../../tools/README.md)
+5. [Expanded CLI reference](../CLI-TOOLS.md)
+6. [Release notes — v0.5.2](../releases/v0.5.2.md)
+7. [Spec 080 — UI consolidation](../../specs/080-wow-ui-consolidation/spec.md)
 
 ## Current viewer truth
 
@@ -16,6 +18,7 @@ This folder is the viewer-facing guide layer for the current `wow-viewer` app.
 - Start with staged client roots only.
 - Legacy `MdxViewer` is a reference/compatibility lane, not the primary app.
 - The current UI doc lane is Spec 080; Spec 145 owns the surrounding shell work.
+- Command-line tooling is documented from `tools/README.md`; this folder stays viewer-facing.
 
 ## What this folder should contain
 

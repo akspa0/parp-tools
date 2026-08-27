@@ -18,16 +18,26 @@ An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
 
 ### 2. Shared Core Libraries (`src/core`)
 - **`WowViewer.Core`**: Data contracts, vertex/index buffers, terrain tensor layouts, and coordinate transformations.
-- **`WowViewer.Core.IO`**: Zero-allocation binary readers and writers for ADT, WDT, WDL, WMO (v14/v17), M2 (all eras), MDX, BLP, LIT, and MPQ archives.
+- **`WowViewer.Core.IO`**: Binary readers and writers for ADT, WDT, WDL, WMO (v14/v17), supported-era M2/MDX layouts, BLP, LIT, and MPQ archives.
 - **`WowViewer.Core.PM4`**: Deep PM4 chunk decoding (MSCN, MSPV, MSUR, MSHD, MSLK), geometry segment construction, and signature extractors.
 - **`WowViewer.Core.Runtime`**: M2 animation evaluators, bone matrices, and skin profile resolvers.
 - **`WowViewer.Core.Editor`**: Transactional placement manipulation, history stacks, ID allocation with high-water marks, and provenance metadata tracking.
 
 ### 3. CLI Tools (`tools/`)
 - **`wowviewer-inspect` (`tools/inspect`)**: Comprehensive format inspector, PM4 segment exporter, audio analyzer, and Rosetta Calibration Corpus generator (`rosetta-generate`).
-- **`wowviewer-converter` (`tools/converter`)**: Lossless bidirectional converter between Alpha monolithic WDT maps and modern LK ADT/WDT directories.
+- **`wowviewer-converter` (`tools/converter`)**: Bidirectional converter between Alpha monolithic WDT maps and modern LK ADT/WDT directories.
 - **`wowviewer-harvest` (`tools/harvest`)**: High-throughput extraction of terrain tensors (elevation, normals, alpha masks) into Zarr/NPZ archives and synthetic minimap images.
 - **`wowviewer-capture` (`tools/capture`) & `validation-capture`**: Automated headless camera renders and regression visual captures.
+
+---
+
+## Documentation Map
+
+- **[Core libraries](src/core/README.md)**: Ownership boundaries for shared models, I/O, runtime, PM4, editor, renderer, and curation code.
+- **[Desktop viewer](src/viewer/WoWViewer/README.md)**: App launch, UI surfaces, and viewer-specific proof gates.
+- **[CLI tooling](tools/README.md)**: Canonical single-document index for all command-line projects.
+- **[Desktop user guide](docs/WoWViewer/USERGUIDE.md)**: End-user controls and workflows.
+- **[Spec status router](specs/STATUS.md)**: Current SpecKit lanes, implementation state, and next bounded actions.
 
 ---
 
@@ -106,25 +116,25 @@ See the **[Desktop Viewer User Guide](docs/WoWViewer/USERGUIDE.md)** for a full 
 | `pm4 inspect` | `WowViewer.Tool.Inspect` | Dump and audit PM4 MSCN/MSPV/MSUR geometry and linkages |
 | `rosetta-generate` | `WowViewer.Tool.Inspect` | Generate synthetic museum calibration maps with MCAL text and pedestals |
 | `map inspect` | `WowViewer.Tool.Inspect` | Analyze ADT/WDT terrain chunks, layers, and bounding boxes |
-| `alpha-to-lk` | `WowViewer.Tool.Converter` | Convert 0.5.3 monolithic WDT maps into modern LK ADT/WDT files |
-| `lk-to-alpha` | `WowViewer.Tool.Converter` | Convert modern LK ADT maps into 0.5.3 monolithic WDT containers |
+| `convert-alpha-to-lk` | `WowViewer.Tool.Converter` | Convert 0.5.3 monolithic WDT maps into modern LK ADT/WDT files |
+| `convert-lk-to-alpha` | `WowViewer.Tool.Converter` | Convert modern LK ADT maps into 0.5.3 monolithic WDT containers |
 | `harvest-map` | `WowViewer.Tool.Harvest` | Extract terrain height, normals, and texture layers into tensor stores |
 | `synthetic-minimap`| `WowViewer.Tool.Harvest` | Compose high-fidelity minimap images directly from raw terrain data |
 
-See the **[CLI Tools Reference Guide](docs/CLI-TOOLS.md)** for syntax, options, and examples.
+See the **[CLI tooling README](tools/README.md)** for the canonical tool index, current command paths, safety boundaries, and examples. The older **[expanded CLI reference](docs/CLI-TOOLS.md)** remains available for deeper historical command notes.
 
 ---
 
 ## Client Era Support Matrix
 
-| Client Era | Version | Support Status | Key Implemented Features |
+| Client Era | Version | Current State | Key Implemented Features / Notes |
 |---|---|---|---|
-| **Alpha** | 0.5.3 – 0.5.5 | **Fully Supported** | Monolithic WDTs, v14 WMO monoliths, MDX/MDL models, 2880-unit world clock, Alpha audio catalog |
-| **Early Beta** | 0.6.x – 0.10.x | **Supported** | Split ADT/WDT transition format, chunked early models, prototype map layouts |
-| **Classic** | 1.12.1 | **Fully Supported** | Standard ADTs with MCCV/MCLY/MCAL, v17 WMOs, 2004-era M2 structures, AreaTable routing |
-| **TBC** | 2.4.3 | **Fully Supported** | Embedded skin profiles, expanded WMO materials, multi-layer liquid chunks |
-| **WotLK** | 3.3.5a | **Fully Supported** | Reference LK format, separated M2 `.skin` files, full PM4 object matching, WDL terrain horizons |
-| **Cataclysm** | 4.0.0 – 4.3.4 | **Supported** | V20/V21 chunk updates, modern liquid headers, Cataclysm-era PM4 models |
+| **Alpha** | 0.5.3 - 0.5.5 | **Implemented with active proof gates** | Monolithic WDTs, v14 WMO monoliths, MDX/MDL models, 2880-unit world clock, Alpha audio catalog; Rosetta minimap visual proof remains operator-owned |
+| **Early Beta** | 0.6.x - 0.10.x | **Partial / research** | Split ADT/WDT transition format, chunked early models, prototype map layouts |
+| **Classic** | 1.12.1 | **Implemented surfaces, proof-gated** | Standard ADTs with MCCV/MCLY/MCAL, v17 WMOs, 2004-era M2 structures, AreaTable routing |
+| **TBC** | 2.4.3 | **Implemented surfaces, proof-gated** | Embedded skin profiles, expanded WMO materials, multi-layer liquid chunks |
+| **WotLK** | 3.3.5a | **Primary reference era** | Reference LK terrain format, separated M2 `.skin` files, PM4 analysis workflows, WDL terrain horizons |
+| **Cataclysm** | 4.0.0 - 4.3.4 | **Partial / research** | V20/V21 chunk updates, modern liquid headers, Cataclysm-era PM4 models |
 
 ---
 
@@ -133,3 +143,4 @@ See the **[CLI Tools Reference Guide](docs/CLI-TOOLS.md)** for syntax, options, 
 1. **Library-First Architecture**: Format readers/writers (`WowViewer.Core.IO`), domain algorithms, and edit policies live strictly in `src/core/` and contain no UI or viewer dependencies.
 2. **Configuration vs Code**: Client paths are runtime configuration (`--game-path` or UI selections). Machine-local absolute paths are never hardcoded in source.
 3. **Non-Destructive Storage**: Placement modifications and conversions write to designated output paths (`output/projects/...`) with source-hash verification and JSON provenance sidecars.
+4. **Base Tooling Preservation**: New generators, probes, captures, and experiments layer above proven readers, writers, terrain loading, camera, and renderer paths unless an explicit spec reopens a base compatibility bug.

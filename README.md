@@ -16,7 +16,7 @@ Preservation, conversion, reverse engineering, analysis, and 3D visualization to
 `parp-tools` is an end-to-end suite for exploring, reconstructing, and analyzing World of Warcraft game assets across multiple historical client eras (Alpha 0.5.3 through Cataclysm 4.0.x):
 
 - **Interactive 3D World Viewer (`WoWViewer`)**: High-performance multi-platform desktop viewer supporting streaming terrain, interior WMO portal culling, M2/MDX skeletal animations, directional lighting/fog, positional OpenAL audio emitters, camera path authoring, and PM4 placement reconciliation.
-- **Format Inspection & Analysis CLI (`wowviewer-inspect`)**: Comprehensive tools to inspect, dump, and audit M2, MDX, BLP, WMO, ADT, WDT, LIT, and PM4 files directly from MPQ archives or disk.
+- **Format Inspection & Analysis CLI (`wowviewer-inspect`)**: Comprehensive tools to inspect, dump, and audit M2, MDX, BLP, WMO, ADT, WDT, LIT, and PM4 files directly from MPQ archives or disk. The canonical CLI index is [`wow-viewer/tools/README.md`](wow-viewer/tools/README.md).
 - **Rosetta Calibration Corpus Generator (`rosetta-generate`)**: Generates synthetic, fully-labeled ADT/WDT maps placing every client model on an elevation-modulated pedestal with high-resolution antialiased MCAL/MCLY terrain labels for exact PM4 geometry calibration.
 - **Format Conversion (`wowviewer-converter`)**: Bidirectional format conversion between pre-release Alpha monolithic WDT containers and modern Wrath of the Lich King (LK) ADT/WDT terrain files.
 - **Dataset Harvester (`data-harvester` & `wowviewer-harvest`)**: High-throughput extraction of terrain elevation, normals, textures, alpha blending layers, liquids, and synthesized minimap shards into Zarr and NPZ tensor formats for machine learning pipelines.
@@ -49,6 +49,17 @@ parp-tools/
 │   └── specs/                      # Feature specifications and implementation task plans
 └── gillijimproject_refactor/       # Read-only legacy reference codebase
 ```
+
+---
+
+## Documentation Map
+
+- **[WoWViewer project README](wow-viewer/README.md)**: Main active project overview.
+- **[Core libraries README](wow-viewer/src/core/README.md)**: Library ownership, boundaries, and validation.
+- **[Desktop viewer README](wow-viewer/src/viewer/WoWViewer/README.md)**: App launch, UI surfaces, and viewer proof boundaries.
+- **[CLI tooling README](wow-viewer/tools/README.md)**: Single entry point for inspect, convert, harvest, capture, validation, WDL, minimap, and enrichment tools.
+- **[Expanded CLI reference](wow-viewer/docs/CLI-TOOLS.md)**: Historical detailed command reference.
+- **[Spec status router](wow-viewer/specs/STATUS.md)**: Active SpecKit lanes and next bounded actions.
 
 ---
 
@@ -85,7 +96,7 @@ dotnet run --project wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug -
 ```powershell
 # Inspect an M2 or MDX model
 dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- `
-  m2 inspect --input "Creature/Arthas/Arthas.m2"
+  m2 inspect --archive-root "H:\CLIENTS\World of Warcraft 3.3.5a" --virtual-path "Creature\Arthas\Arthas.m2"
 
 # Inspect PM4 chunks and connectivity
 dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- `
@@ -111,32 +122,33 @@ dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.T
 ```powershell
 # Convert Alpha 0.5.3 monolithic WDT to modern LK ADTs
 dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug -- `
-  alpha-to-lk --input "World/Maps/Kalimdor/Kalimdor.wdt" --output "output/converted/Kalimdor_LK"
+  convert-alpha-to-lk --input "World\Maps\Kalimdor\Kalimdor.wdt" --output "output\converted\Kalimdor_LK"
 
 # Convert modern LK ADTs to an Alpha monolithic WDT
 dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug -- `
-  lk-to-alpha --input "World/Maps/Development/Development.wdt" --output "output/converted/Development_Alpha"
+  convert-lk-to-alpha --input "output\converted\Development_LK" --output "output\converted\Development_Alpha.wdt"
 ```
 
 ---
 
 ## Client Era Support Matrix
 
-| Client Era | Version | Support Status | Key Features / Notes |
+| Client Era | Version | Current State | Key Features / Notes |
 |---|---|---|---|
-| **Alpha** | 0.5.3 – 0.5.5 | **Fully Supported** | Monolithic WDTs, v14 WMO monoliths, MDX/MDL models, 2880-unit world clock, Alpha audio catalog |
-| **Early Beta** | 0.6.x – 0.10.x | **Supported** | Split ADT/WDT transition format, chunked early models, prototype map layouts |
-| **Classic** | 1.12.1 | **Fully Supported** | Standard ADTs with MCCV/MCLY/MCAL, v17 WMOs, 2004-era M2 structures, AreaTable routing |
-| **TBC** | 2.4.3 | **Fully Supported** | Embedded skin profiles, expanded WMO materials, multi-layer liquid chunks |
-| **WotLK** | 3.3.5a | **Fully Supported** | Reference LK format, separated M2 `.skin` files, full PM4 object matching, WDL terrain horizons |
-| **Cataclysm** | 4.0.0 – 4.3.4 | **Supported** | V20/V21 chunk updates, modern liquid headers, Cataclysm-era PM4 models |
+| **Alpha** | 0.5.3 - 0.5.5 | **Implemented with active proof gates** | Monolithic WDTs, v14 WMO monoliths, MDX/MDL models, 2880-unit world clock, Alpha audio catalog; Rosetta minimap visual proof remains operator-owned |
+| **Early Beta** | 0.6.x - 0.10.x | **Partial / research** | Split ADT/WDT transition format, chunked early models, prototype map layouts |
+| **Classic** | 1.12.1 | **Implemented surfaces, proof-gated** | Standard ADTs with MCCV/MCLY/MCAL, v17 WMOs, 2004-era M2 structures, AreaTable routing |
+| **TBC** | 2.4.3 | **Implemented surfaces, proof-gated** | Embedded skin profiles, expanded WMO materials, multi-layer liquid chunks |
+| **WotLK** | 3.3.5a | **Primary reference era** | Reference LK terrain format, separated M2 `.skin` files, PM4 analysis workflows, WDL terrain horizons |
+| **Cataclysm** | 4.0.0 - 4.3.4 | **Partial / research** | V20/V21 chunk updates, modern liquid headers, Cataclysm-era PM4 models |
 
 ---
 
 ## Detailed Documentation
 
 - **[Desktop Viewer User Guide](wow-viewer/docs/WoWViewer/USERGUIDE.md)**: In-depth manual covering viewer UI, navigation controls, camera-path authoring, audio emitter debugging, and the Spec 176 PM4 Reconciliation panel.
-- **[CLI Tools Reference Guide](wow-viewer/docs/CLI-TOOLS.md)**: Exhaustive command reference for `wowviewer-inspect`, `wowviewer-converter`, `wowviewer-harvest`, and dataset workflows.
+- **[CLI Tooling README](wow-viewer/tools/README.md)**: Canonical single-document entry point for all `wow-viewer/tools/` command-line projects.
+- **[Expanded CLI Reference](wow-viewer/docs/CLI-TOOLS.md)**: Longer historical command reference for `wowviewer-inspect`, `wowviewer-converter`, `wowviewer-harvest`, and dataset workflows.
 - **[Feature Specifications & Status](wow-viewer/specs/STATUS.md)**: Specification kit tracking active architecture specs, plans, and task lists.
 - **[Memory Bank Dashboard](wow-viewer/memory-bank/activeContext.md)**: Current workstream focus, execution lanes, and progress ledger.
 

@@ -1,7 +1,10 @@
 # CLI Tools Comprehensive Reference Guide
 
 **Toolkit**: `wow-viewer/tools/`  
-**Execution Pattern**: `dotnet run --project wow-viewer/tools/<tool-dir>/<project>.csproj -c Debug -- <command> [options]`
+**Execution Pattern**: `dotnet run --project wow-viewer/tools/<tool-dir>/<project>/<project>.csproj -c Debug -- <command> [options]`
+
+> [!IMPORTANT]
+> The canonical current CLI entry point is [`../tools/README.md`](../tools/README.md). This file is the expanded historical command reference and can include older workflow notes; prefer the tooling README for current project paths, boundaries, and safety rules.
 
 ---
 
@@ -215,24 +218,24 @@ dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug --
 
 **Project**: `wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj`
 
-### Alpha WDT → LK Format (`alpha-to-lk`)
+### Alpha WDT → LK Format (`convert-alpha-to-lk`)
 Converts pre-release Alpha 0.5.3 monolithic WDT maps into standard modern Wrath of the Lich King (LK) ADT files, standalone WDT headers, and WDL terrain horizon files.
 
 ```powershell
-dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter -c Debug -- `
-  alpha-to-lk `
+dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug -- `
+  convert-alpha-to-lk `
   --input "H:\CLIENTS\WoW-0.5.3.3368-Client\World\Maps\Kalimdor\Kalimdor.wdt" `
   --output "output/converted/Kalimdor_LK"
 ```
 
-### LK Format → Alpha WDT (`lk-to-alpha`)
+### LK Format → Alpha WDT (`convert-lk-to-alpha`)
 Converts standard modern ADT/WDT directories into an Alpha 0.5.3 monolithic WDT container with embedded MCNK terrain, MCVT heightmaps, and MCAL alpha blending.
 
 ```powershell
-dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter -c Debug -- `
-  lk-to-alpha `
-  --input "output/rosetta_lk/World/Maps/RosettaLK/RosettaLK.wdt" `
-  --output "output/converted/RosettaAlpha_Monolith"
+dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug -- `
+  convert-lk-to-alpha `
+  --input "output/rosetta_lk/World/Maps/RosettaLK" `
+  --output "output/converted/RosettaAlpha_Monolith.wdt"
 ```
 
 ---
