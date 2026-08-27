@@ -1,6 +1,6 @@
 # WoWViewer Toolkit (`wow-viewer`)
 
-The primary development and runtime workspace for `parp-tools`. This project provides a library-first .NET 10 architecture for parsing, inspecting, rendering, and reconciling World of Warcraft client data across all eras from Alpha 0.5.3 to Cataclysm 4.0.x.
+The primary development and runtime workspace for `parp-tools`. This project provides a library-first .NET 10 architecture for parsing, inspecting, rendering, and reconciling World of Warcraft client data across the active project eras, primarily Alpha 0.5.3 through WotLK 3.3.5a.
 
 ---
 
@@ -134,7 +134,8 @@ See the **[CLI tooling README](tools/README.md)** for the canonical tool index, 
 | **Classic** | 1.12.1 | **Implemented surfaces, proof-gated** | Standard ADTs with MCCV/MCLY/MCAL, v17 WMOs, 2004-era M2 structures, AreaTable routing |
 | **TBC** | 2.4.3 | **Implemented surfaces, proof-gated** | Embedded skin profiles, expanded WMO materials, multi-layer liquid chunks |
 | **WotLK** | 3.3.5a | **Primary reference era** | Reference LK terrain format, separated M2 `.skin` files, PM4 analysis workflows, WDL terrain horizons |
-| **Cataclysm** | 4.0.0 - 4.3.4 | **Partial / research** | V20/V21 chunk updates, modern liquid headers, Cataclysm-era PM4 models |
+
+Later client terrain formats are outside the current project scope unless a future spec explicitly reopens that lane.
 
 ---
 

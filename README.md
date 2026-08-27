@@ -13,7 +13,7 @@ Preservation, conversion, reverse engineering, analysis, and 3D visualization to
 
 ## What is parp-tools?
 
-`parp-tools` is an end-to-end suite for exploring, reconstructing, and analyzing World of Warcraft game assets across multiple historical client eras (Alpha 0.5.3 through Cataclysm 4.0.x):
+`parp-tools` is an end-to-end suite for exploring, reconstructing, and analyzing World of Warcraft game assets across the project's active client eras, primarily Alpha 0.5.3 through WotLK 3.3.5a:
 
 - **Interactive 3D World Viewer (`WoWViewer`)**: High-performance multi-platform desktop viewer supporting streaming terrain, interior WMO portal culling, M2/MDX skeletal animations, directional lighting/fog, positional OpenAL audio emitters, camera path authoring, and PM4 placement reconciliation.
 - **Format Inspection & Analysis CLI (`wowviewer-inspect`)**: Comprehensive tools to inspect, dump, and audit M2, MDX, BLP, WMO, ADT, WDT, LIT, and PM4 files directly from MPQ archives or disk. The canonical CLI index is [`wow-viewer/tools/README.md`](wow-viewer/tools/README.md).
@@ -140,7 +140,8 @@ dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter/WowView
 | **Classic** | 1.12.1 | **Implemented surfaces, proof-gated** | Standard ADTs with MCCV/MCLY/MCAL, v17 WMOs, 2004-era M2 structures, AreaTable routing |
 | **TBC** | 2.4.3 | **Implemented surfaces, proof-gated** | Embedded skin profiles, expanded WMO materials, multi-layer liquid chunks |
 | **WotLK** | 3.3.5a | **Primary reference era** | Reference LK terrain format, separated M2 `.skin` files, PM4 analysis workflows, WDL terrain horizons |
-| **Cataclysm** | 4.0.0 - 4.3.4 | **Partial / research** | V20/V21 chunk updates, modern liquid headers, Cataclysm-era PM4 models |
+
+Later client terrain formats are outside the current project scope unless a future spec explicitly reopens that lane.
 
 ---
 
