@@ -1,150 +1,147 @@
 # parp-tools
 
-Preservation, conversion, analysis, and visualization tooling for World of Warcraft game data.
+Preservation, conversion, reverse engineering, analysis, and 3D visualization tooling for World of Warcraft client data.
 
-**Current viewer release line**: `v0.5.2.1`
-**Active project**: `wow-viewer/`
+**Current Release Line**: `v0.5.2.2`  
+**Primary Project Directory**: `wow-viewer/`  
+**Target Runtime**: .NET 10 (`net10.0`) & Python 3.12+ (`uv`)
 
-The repository also contains `gillijimproject_refactor/` — a legacy codebase that is **read-only reference**. All new code, features, tools, tests, and fixes go in `wow-viewer/`.
+> [!NOTE]
+> `gillijimproject_refactor/` is a legacy read-only reference codebase. All active development, features, tools, tests, and documentation live under [`wow-viewer/`](wow-viewer/).
 
 ---
 
-## Active Project: `wow-viewer/`
+## What is parp-tools?
 
-A .NET 10 toolkit for WoW format analysis, terrain reconstruction, PM4-based object matching, and ML dataset generation. Includes a full-featured 3D world viewer (`WoWViewer`), CLI format tools, and a Python ML pipeline.
+`parp-tools` is an end-to-end suite for exploring, reconstructing, and analyzing World of Warcraft game assets across multiple historical client eras (Alpha 0.5.3 through Cataclysm 4.0.x):
 
-**Support range**: Alpha 0.5.3 through Cataclysm-era 4.0.x, with client-era differences called out in the support table below. Rendering and FPS claims remain build/map-specific and require real-client validation.
+- **Interactive 3D World Viewer (`WoWViewer`)**: High-performance multi-platform desktop viewer supporting streaming terrain, interior WMO portal culling, M2/MDX skeletal animations, directional lighting/fog, positional OpenAL audio emitters, camera path authoring, and PM4 placement reconciliation.
+- **Format Inspection & Analysis CLI (`wowviewer-inspect`)**: Comprehensive tools to inspect, dump, and audit M2, MDX, BLP, WMO, ADT, WDT, LIT, and PM4 files directly from MPQ archives or disk.
+- **Rosetta Calibration Corpus Generator (`rosetta-generate`)**: Generates synthetic, fully-labeled ADT/WDT maps placing every client model on an elevation-modulated pedestal with high-resolution antialiased MCAL/MCLY terrain labels for exact PM4 geometry calibration.
+- **Format Conversion (`wowviewer-converter`)**: Bidirectional format conversion between pre-release Alpha monolithic WDT containers and modern Wrath of the Lich King (LK) ADT/WDT terrain files.
+- **Dataset Harvester (`data-harvester` & `wowviewer-harvest`)**: High-throughput extraction of terrain elevation, normals, textures, alpha blending layers, liquids, and synthesized minimap shards into Zarr and NPZ tensor formats for machine learning pipelines.
 
-### Download
+---
 
-Prebuilt, self-contained viewer binaries for **Windows x64, Linux x64, macOS arm64, and macOS x64** are attached to every tagged release on the [releases page](https://github.com/akspa0/parp-tools/releases). No .NET install is required.
+## Project Structure
 
-Native file dialogs are Windows-only; on Linux and macOS load content with `--game-path`, `--build`, and `--world`. See the [v0.5.2.1 release notes](wow-viewer/docs/releases/v0.5.2.1.md) for what changed — it is an out-of-band patch for the frame-pacing jank that shipped in v0.5.2.
+```
+parp-tools/
+├── wow-viewer/                     # Active .NET 10 solution and Python ML toolchain
+│   ├── src/
+│   │   ├── core/                   # Core shared libraries
+│   │   │   ├── WowViewer.Core/          # Domain models, tensors, and memory layouts
+│   │   │   ├── WowViewer.Core.IO/       # Pure format readers & writers (M2, WMO, ADT, WDT, BLP, MPQ)
+│   │   │   ├── WowViewer.Core.PM4/      # PM4 chunk decoding, linkage, & reconciliation
+│   │   │   ├── WowViewer.Core.Runtime/  # M2 scene graph, skins, and animation runtime
+│   │   │   └── WowViewer.Core.Editor/   # Placement authoring, undo/redo sessions, and change tracking
+│   │   └── viewer/
+│   │       └── WoWViewer/               # Cross-platform desktop 3D viewer (Silk.NET / OpenGL / ImGui)
+│   ├── tools/                      # Standalone CLI tools
+│   │   ├── inspect/                     # wowviewer-inspect: multi-format analysis & rosetta generator
+│   │   ├── converter/                   # wowviewer-converter: Alpha ↔ LK map format converter
+│   │   ├── harvest/                     # wowviewer-harvest: terrain tensor extractor & minimap composer
+│   │   ├── capture/                     # Headless validation and golden frame capture
+│   │   └── validation-capture/          # Visual screenshot and regression capture
+│   ├── data-harvester/             # Python ML dataset builder and training workflows (uv)
+│   ├── tests/                      # xUnit test suites (Core, Editor, IO, PM4)
+│   ├── docs/                       # Architecture notes, user guides, and reference specs
+│   └── specs/                      # Feature specifications and implementation task plans
+└── gillijimproject_refactor/       # Read-only legacy reference codebase
+```
 
-### Quick Start
+---
 
+## Quick Start
+
+### 1. Prerequisites
+- **.NET 10 SDK** (v10.0.100 or newer)
+- **PowerShell 7** (`pwsh`)
+- *(Optional for ML)* **Python 3.12+** with [`uv`](https://github.com/astral-sh/uv)
+
+### 2. Building the Solution
 ```powershell
-# Build everything
+# Build entire solution in Debug configuration
 dotnet build wow-viewer/WowViewer.slnx -c Debug
 
-# Run the viewer
-dotnet run --project wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug -- <client-root> <map-name>
-
-# Run CLI tools
-dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- m2 inspect --input <model.m2>
-dotnet run --project wow-viewer/tools/animfarm/WowViewer.Tool.AnimFarm -c Debug -- dump --input <model.m2> --output <dir>
-```
-
-### Project Structure
-
-```
-wow-viewer/
-├── src/
-│   ├── core/              # Shared libraries
-│   │   ├── WowViewer.Core/          # Data models
-│   │   ├── WowViewer.Core.IO/       # Format readers/writers
-│   │   ├── WowViewer.Core.PM4/      # PM4 chunk analysis
-│   │   ├── WowViewer.Core.Runtime/  # M2 rendering pipeline
-│   │   └── WowViewer.Core.Anim/     # M2 animation pose extraction
-│   └── viewer/
-│       └── WoWViewer/               # 3D world viewer app
-├── tools/                 # CLI tools
-│   ├── inspect/           # Format inspector
-│   ├── converter/         # Format converter
-│   ├── harvest/           # Terrain tensor harvest (NPZ/Zarr)
-│   ├── capture/           # Headless validation capture
-│   └── animfarm/          # M2 animation pose farm
-├── tests/                 # xUnit tests
-├── data-harvester/        # Python ML pipeline
-├── docs/                  # Architecture docs + guides
-├── specs/                 # Feature specifications
-└── memory-bank/           # Session continuity
-```
-
-### Key Documentation
-
-- [WoWViewer README](wow-viewer/README.md) — viewer app overview and quick start
-- [User Guide](wow-viewer/docs/WoWViewer/USERGUIDE.md) — controls, UI layout, and common workflows
-- [Release Notes — v0.5.2.1](wow-viewer/docs/releases/v0.5.2.1.md) — frame-pacing patch (current)
-- [Release Notes — v0.5.2](wow-viewer/docs/releases/v0.5.2.md) — what changed since v0.5.1
-- [CLI Tools Guide](wow-viewer/docs/CLI-TOOLS.md) — advanced usage for all CLI tools
-- [Spec Status](wow-viewer/specs/STATUS.md) — the current-spec router
-- [Plans Overview](wow-viewer/docs/PLANS-OVERVIEW.md) — summary of remaining specs
-- [Memory Bank](wow-viewer/memory-bank/activeContext.md) — current focus and status
-- [Architecture Docs](wow-viewer/docs/architecture/) — PM4 semantics, render plans, model specs
-
-### What's Implemented
-
-- **Terrain**: Alpha monolithic WDT, early split ADTs, LK/Cataclysm ADTs, WDL/WL* and minimap routes, bounded camera-centered streaming
-- **WMO**: V14/V17 parsing, rendering, portal-aware visibility, placement inspection, doodad batching, and round-trip conversion paths
-- **M2/MDX**: Classic/era-specific M2 profiles, embedded early-M2 route, MDLX/MDX routes, material/light parity work, animation extraction, and BVH export; cross-era visual proof is incomplete
-- **PM4**: Full decode with solved coordinate frames, wall-mesh geometry, per-doodad identity, per-file caching, MSCN/MSPV visualization, WMO group matching
-- **BLP**: Pixel decode, summary inspection, pure-C# DXT1 codec
-- **DBC/DB2**: Crosswalk generation and lookup, dual-era AreaTable identity routing
-- **Lighting**: LIT profile decode with DBC fallback, native Alpha 0.5.3 time-of-day clock
-- **Audio**: OpenAL runtime for positional MCSE/MCNK emitters, `SoundEntries` preview, Alpha-area audio catalog inspection
-- **Camera**: Path authoring, cross-era `.m2` camera import, native M2 export, capture automation
-- **ML Datasets**: v50/v60 terrain tensor extraction into Zarr, synthesized minimaps, and model training pipeline
-
-### Build & Test
-
-```powershell
-# Build
-dotnet build wow-viewer/WowViewer.slnx -c Debug
-
-# Run all tests
+# Run all unit tests
 dotnet test wow-viewer/WowViewer.slnx -c Debug
+```
 
-# Run specific test project
-dotnet test wow-viewer/tests/WowViewer.Core.Anim.Tests/ -c Debug
+### 3. Launching the 3D Desktop Viewer
+```powershell
+# Launch viewer UI
+dotnet run --project wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug
 
-# Run specific test category
-dotnet test wow-viewer/tests/WowViewer.Core.PM4.Tests/ -c Debug --filter "FullyQualifiedName~Pm4PerFileCache"
+# Launch directly into a specific client root and world
+dotnet run --project wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug -- `
+  --game-path "H:\CLIENTS\World of Warcraft 3.3.5a" `
+  --world "World\Maps\Azeroth\Azeroth.wdt"
+```
+
+### 4. Running CLI Tools
+
+#### Inspect Model / Map / PM4 Assets
+```powershell
+# Inspect an M2 or MDX model
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- `
+  m2 inspect --input "Creature/Arthas/Arthas.m2"
+
+# Inspect PM4 chunks and connectivity
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- `
+  pm4 inspect --input "World/Maps/Azeroth/Azeroth_32_48.pm4"
+
+# Survey all WDT maps in a client archive
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- `
+  map inspect --archive-root "H:\CLIENTS\WoW-0.5.3.3368-Client"
+```
+
+#### Generate a Rosetta Calibration Corpus
+Generates synthetic, labeled calibration ADT/WDT tiles containing museum display plinths and high-resolution MCAL antialiased text labels for every model:
+```powershell
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- `
+  rosetta-generate `
+  --client-root "H:\CLIENTS\WoW-0.5.3.3368-Client" `
+  --output "output/rosetta_alpha" `
+  --map-name "RosettaAlpha" `
+  --pedestal-height 4.0
+```
+
+#### Convert Between Alpha and Modern Map Formats
+```powershell
+# Convert Alpha 0.5.3 monolithic WDT to modern LK ADTs
+dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug -- `
+  alpha-to-lk --input "World/Maps/Kalimdor/Kalimdor.wdt" --output "output/converted/Kalimdor_LK"
+
+# Convert modern LK ADTs to an Alpha monolithic WDT
+dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug -- `
+  lk-to-alpha --input "World/Maps/Development/Development.wdt" --output "output/converted/Development_Alpha"
 ```
 
 ---
 
-## Legacy: `gillijimproject_refactor/`
+## Client Era Support Matrix
 
-**Read-only reference.** This subtree contains the earlier `MdxViewer` and `WoWMapConverter` codebases that served as the foundation for the current `wow-viewer/` project. No new code, features, or bugfixes should be written here.
-
-What `gillijimproject_refactor` is good for:
-
-- **Reference implementation**: How the legacy viewer loaded terrain, WMOs, and MDX models
-- **Test data**: `test_data/development/` — development map split ADTs and PM4 files
-- **Memory bank (archived)**: Historical context at `gillijimproject_refactor/memory-bank/` — the active memory bank has moved to `wow-viewer/memory-bank/`
-
-What `gillijimproject_refactor` is NOT:
-
-- A development target: all active work is in `wow-viewer/`
-- A place for new code: see RULE 1 in `AGENTS.md`
+| Client Era | Version | Support Status | Key Features / Notes |
+|---|---|---|---|
+| **Alpha** | 0.5.3 – 0.5.5 | **Fully Supported** | Monolithic WDTs, v14 WMO monoliths, MDX/MDL models, 2880-unit world clock, Alpha audio catalog |
+| **Early Beta** | 0.6.x – 0.10.x | **Supported** | Split ADT/WDT transition format, chunked early models, prototype map layouts |
+| **Classic** | 1.12.1 | **Fully Supported** | Standard ADTs with MCCV/MCLY/MCAL, v17 WMOs, 2004-era M2 structures, AreaTable routing |
+| **TBC** | 2.4.3 | **Fully Supported** | Embedded skin profiles, expanded WMO materials, multi-layer liquid chunks |
+| **WotLK** | 3.3.5a | **Fully Supported** | Reference LK format, separated M2 `.skin` files, full PM4 object matching, WDL terrain horizons |
+| **Cataclysm** | 4.0.0 – 4.3.4 | **Supported** | V20/V21 chunk updates, modern liquid headers, Cataclysm-era PM4 models |
 
 ---
 
-## Supported Game Versions and proof boundary
+## Detailed Documentation
 
-| Version | Era | Support |
-|---------|-----|---------|
-| 0.5.3 | Alpha | Terrain/WMO/MDX/BLP/DBC routes; MDX visual coverage is not fully release-proven |
-| 0.6.0–0.10.x | Alpha/pre-release | Early terrain and chunked-model routes with partial client-specific coverage |
-| 1.12.1 | Vanilla | Era-specific M2 route; broad in-viewer visual proof remains incomplete |
-| 2.x | TBC | Profiled embedded-native M2 route implemented; material/visibility proof pending |
-| 3.0.x | WotLK transition | Profiled early-M2 route implemented; visual coverage provisional |
-| 3.3.5 | WotLK | Strongest current late-client terrain/WMO/M2/PM4 path |
-| 4.0.0+ | Cataclysm | ADT/WMO/PM4 and terrain reconstruction paths; client-specific rendering/performance partial |
+- **[Desktop Viewer User Guide](wow-viewer/docs/WoWViewer/USERGUIDE.md)**: In-depth manual covering viewer UI, navigation controls, camera-path authoring, audio emitter debugging, and the Spec 176 PM4 Reconciliation panel.
+- **[CLI Tools Reference Guide](wow-viewer/docs/CLI-TOOLS.md)**: Exhaustive command reference for `wowviewer-inspect`, `wowviewer-converter`, `wowviewer-harvest`, and dataset workflows.
+- **[Feature Specifications & Status](wow-viewer/specs/STATUS.md)**: Specification kit tracking active architecture specs, plans, and task lists.
+- **[Memory Bank Dashboard](wow-viewer/memory-bank/activeContext.md)**: Current workstream focus, execution lanes, and progress ledger.
 
-## Branches and releases
+---
 
-- `main` — **Current trunk.** Brought up to the v0.5.2 release line on 2026-08-15; it had previously
-  lagged behind the working branches. New work branches from here.
-- Releases are cut by pushing a `v*` tag. That triggers
-  [`wowviewer-release.yml`](.github/workflows/wowviewer-release.yml), which builds all four platforms
-  and publishes a GitHub Release using `wow-viewer/docs/releases/<tag>.md` as the notes — add that
-  file before tagging.
-- `main-pre-v0.5.2` — Snapshot of the previous `main` tip, kept for history.
-- `v0.4.9`, `v0.4.5` — Older release branches from the legacy MdxViewer era.
-- Numbered branches (e.g. `151-portal-game-mode-surface`) are per-spec working branches.
+## License & Safety Notice
 
-## Disclaimer
-
-This project is not an official Blizzard Entertainment product and is not affiliated with or endorsed by Blizzard Entertainment or World of Warcraft.
+This tooling is intended strictly for historical preservation, data analysis, and format interoperability research. Do not distribute copyrighted client data or commercial game assets.

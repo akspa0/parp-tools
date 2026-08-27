@@ -1,240 +1,247 @@
-# WoWViewer User Guide
+# WoWViewer Comprehensive User Guide
 
-Covers the current app (v0.5.2) only.
+**Application Version**: `v0.5.2.2`  
+**Platform Support**: Windows x64, Linux x64, macOS (Apple Silicon arm64 / Intel x64)
 
-## Start
+`WoWViewer` is an interactive 3D desktop application for inspecting, analyzing, rendering, and reconciling World of Warcraft client data from pre-release Alpha 0.5.3 through Cataclysm 4.0.x.
 
-### From a release build
+---
 
-Download the archive for your platform from the [releases page](https://github.com/akspa0/parp-tools/releases),
-unzip it, and run `ParpToolsWoWViewer`. The builds are self-contained — no .NET install needed.
+## Table of Contents
+1. [Getting Started](#1-getting-started)
+2. [Command-Line Launch Arguments](#2-command-line-launch-arguments)
+3. [User Interface Overview](#3-user-interface-overview)
+4. [Camera Controls and Shortcuts](#4-camera-controls-and-shortcuts)
+5. [World Viewing and Streaming](#5-world-viewing-and-streaming)
+6. [Camera Path Studio](#6-camera-path-studio)
+7. [Audio System and Positional Emitters](#7-audio-system-and-positional-emitters)
+8. [Lighting, Atmosphere, and Time of Day](#8-lighting-atmosphere-and-time-of-day)
+9. [PM4 Object Reconciliation Workbench (Spec 176)](#9-pm4-object-reconciliation-workbench-spec-176)
+10. [Troubleshooting and FAQ](#10-troubleshooting-and-faq)
 
-Native file dialogs are Windows-only. On Linux and macOS, point the viewer at content with
-`--game-path`, `--build`, and `--world` instead of using the open dialogs.
+---
 
-### From source
+## 1. Getting Started
 
+### Using Prebuilt Binaries
+1. Download the self-contained archive for your platform from the [GitHub Releases Page](https://github.com/akspa0/parp-tools/releases).
+2. Extract the archive into any directory. No .NET runtime installation is required.
+3. Run `ParpToolsWoWViewer` (or `ParpToolsWoWViewer.exe` on Windows).
+
+> [!NOTE]
+> Native OS open-file dialogs are supported on Windows. On Linux and macOS, launch content using the `--game-path`, `--build`, and `--world` CLI options.
+
+### Running from Source
+Ensure [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) is installed:
 ```powershell
-cd wow-viewer
-dotnet run --project .\src\viewer\WoWViewer\WoWViewer.csproj -c Debug
+# Clone and build
+git clone https://github.com/akspa0/parp-tools.git
+cd parp-tools/wow-viewer
+dotnet build WowViewer.slnx -c Debug
+
+# Launch viewer
+dotnet run --project src/viewer/WoWViewer/WoWViewer.csproj -c Debug
 ```
 
-### Normal startup flow
+### Setting Up Client Data
+`WoWViewer` reads game archives directly from game folders containing MPQ files or loose directory structures:
+1. In the viewer, click **Open Client** in the top-left Navigator bar.
+2. Select your game root (e.g. `H:\CLIENTS\World of Warcraft 3.3.5a` or `H:\CLIENTS\WoW-0.5.3.3368-Client`).
+3. Select the detected client build from the **Build** dropdown.
+4. Expand **World Maps** in the Navigator to load any world (e.g. `Azeroth`, `Kalimdor`, `Development`).
 
-1. Open a staged game folder.
-2. Pick the explicit build.
-3. Load a world from the left Navigator sidebar.
-4. Use the right workbench for inspection, scene, utility, and experimental surfaces.
+---
 
-## Client roots
+## 2. Command-Line Launch Arguments
 
-- The configured client library (e.g. `H:\CLIENTS`) is the approved data source.
-- `output/tmp/wowarchive-clients/` is optional staging and may be pruned.
-- Client roots are passed as CLI arguments or chosen in the UI, never hardcoded in source.
+You can pass command-line arguments to automate startup or load specific worlds directly:
 
-## Launch flags
+| Argument | Description | Example |
+|---|---|---|
+| `--game-path <path>` | Path to staged game directory or MPQ archive root | `--game-path "H:\CLIENTS\WoW 3.3.5a"` |
+| `--build <version>` | Pin the specific build version | `--build "3.3.5.12340"` |
+| `--world <path>` | Virtual path or file path to WDT/ADT map | `--world "World\Maps\Azeroth\Azeroth.wdt"` |
+| `--listfile <path>` | Supply an external custom listfile | `--listfile "listfile.csv"` |
+| `--loose-map-overlay <dir>` | Overlay loose ADT/WDT files onto MPQ archives | `--loose-map-overlay "C:\LooseMaps"` |
+| `--full-load` | Disable bounded streaming and load entire map into memory | `--full-load` |
+| `--verbose` | Enable debug logging to console and log window | `--verbose` |
+| `--capture-shot <name>` | Automatically take a screenshot after startup | `--capture-shot "stormwind_entrance"` |
+| `--capture-output <dir>` | Directory to save captured screenshots | `--capture-output "output/captures"` |
+| `--capture-after-frames <n>` | Frame delay before triggering screenshot | `--capture-after-frames 60` |
+| `--exit-after-capture` | Terminate application immediately after capture | `--exit-after-capture` |
 
-| Flag | Purpose |
-|---|---|
-| `--verbose` | Keep detailed logging on |
-| `--game-path <clientRoot>` | Open a staged client directly |
-| `--build <buildVersion>` | Pin the build on startup |
-| `--world <path-or-virtual-path>` | Open a world or asset after startup |
-| `--listfile <path>` | Supply an explicit listfile |
-| `--loose-map-overlay <dir>` | Overlay loose map files on the staged client |
-| `--full-load` / `--partial-load` | Override the default bounded tile admission |
-| `--capture-shot <name>` | Queue a saved shot |
-| `--capture-output <dir>` | Override the capture root |
-| `--capture-after-frames <n>` | Delay the queued capture by n frames |
-| `--exit-after-capture` | Close after the queued capture |
+---
 
-`--full-load` bypasses normal camera-based streaming and loads the whole map. It exists for stress
-and capture work; it is not the normal path and will use far more memory.
+## 3. User Interface Overview
 
-## Navigating the UI
-
-The shell is a left Navigator sidebar, a 3D viewport, a bottom action/status bar, and a right
-workbench.
-
-- **Left Navigator** owns all loading: sources, files, world maps, and the Phase Map selector.
-- **Right workbench** has five destinations, each with its own page dropdown:
-
-| Destination | Contains |
-|---|---|
-| **Quick** | Common toggles for the loaded scene |
-| **Inspect** | Context, Scene Investigation, MCNK / ADT, World Context, Archeology, Animations, Actions |
-| **Scene** | Placements, LOD |
-| **Utilities** | Minimap, Audio, Capture, Log Viewer, Perf, Asset Catalog, Taxi |
-| **Experimental** | Terrain Lab, PM4, Converters, Population |
-
-- **Bottom bar** keeps scene toggles, the area/subzone readout, and the `AUDIO: ON` / `AUDIO: MUTED`
-  button.
-- **Help > Keyboard Shortcuts** lists global bindings plus the ones for the active page.
-
-## Keyboard shortcuts
-
-Global:
-
-| Input | Action |
-|---|---|
-| `W A S D` | Move the free-fly camera (hold `Shift` to boost) |
-| `Q` / `E` | Move vertically |
-| right mouse drag | Look |
-| `Tab` | Show or hide viewer chrome |
-| `I` | Show or hide the right workbench |
-| `M` | Toggle the fullscreen minimap (terrain loaded) |
-| `P` | Focus PM4 tools when available |
-| triple-click same minimap tile | Teleport the camera |
-
-Inspect page:
-
-| Input | Action |
-|---|---|
-| `Left` / `Right` / `Space` | Step or play the loaded model animation |
-
-Capture page (camera-path authoring is scoped to this page, so these keys are inert elsewhere):
-
-| Input | Action |
-|---|---|
-| `K` | Add a camera-path key at the playhead |
-| `U` | Update the selected key |
-| `Delete` | Delete the selected key |
-| `Space` | Play or pause the path |
-| `Left` / `Right` | Select previous or next key |
-| `Ctrl+Left` / `Ctrl+Right` | Retime the selected key |
-| `Ctrl+Up` / `Ctrl+Down` | Nudge the playhead |
-| `Home` / `End` | Jump to path start or end |
-| `Z` / `X` | Roll the camera (hold `Shift` for a larger step) |
-| `Ctrl+S` | Save the path as JSON |
-| `Ctrl+E` | Export the path as native M2 |
-
-## World viewing
-
-### Terrain streaming
-
-The viewer streams a bounded set of ADTs around the camera rather than loading a whole map:
-
-- A **retained window** keeps a camera-centered square resident (radius 2 by default, 3 maximum).
-- A **directional selector** picks which tiles get detailed geometry — it protects the largest
-  complete camera-centered square the budget allows (3×3 from 9 tiles, 5×5 at 25), then spends the
-  rest forward.
-- Distance admission measures the nearest point on a tile's bounds, so standing at a tile edge does
-  not drop that tile.
-
-If terrain seems to be missing, raise the tile budget before assuming a load failure. Retained
-neighbors keep their WDL low-detail underlay until detailed terrain actually submits.
-
-### Time of day
-
-Alpha 0.5.3 lighting runs on the native world clock — 2,880 units per cycle, 24 real minutes. It
-advances automatically. Moving the time slider freezes the clock at that value until you resume it.
-Light DBC, LIT, sky, and audio all read the same value each frame.
-
-### WMO interiors
-
-WMO visibility uses portal traversal from the camera's group. Interiors are entered when the camera
-is inside any group's local bounds. The decision is deliberately fail-open: broken geometry or a
-boundary camera keeps surfaces drawn rather than dropping them, so expect over-draw before
-under-draw.
-
-### Audio
-
-Audio is under **Utilities > Audio**. Playback needs OpenAL; if the native library is absent the
-viewer reports it and continues without sound.
-
-- Resident MCSE / MCNK emitters play positionally as tiles stream in and release on unload.
-- Preview any resident `SoundEntries` ID at the camera, with master and emitter gain controls.
-- An off-by-default marker overlay draws one 3D pin per resident emitter: amber MCSE, cyan MCNK
-  water, purple MCNK environment.
-- The bottom-bar `AUDIO` button mutes everything through the master bus.
-- **Automatic ZoneMusic playback is muted by policy.** Resolution and diagnostics are still shown;
-  the row indirection is not yet proven, so it does not auto-play. MIDI and DLS are reported as
-  unsupported rather than guessed.
-
-## Synthesized minimap export
-
-**Utilities > Minimap → Synthesized Terrain Minimap Export** composes terrain-only minimap PNGs
-directly from the client's BLP textures plus MCLY/MCAL/MCNR/MCSH data. It does not read a shipped
-minimap image.
-
-| Control | Purpose |
-|---|---|
-| Client root | Staged client directory |
-| Map name | Map directory name (e.g. `Kalimdor`) |
-| Time of day | Hour + minute; controls sun elevation. Default 12:00 (noon, full-bright) |
-| Tile resolution | Per-tile PNG resolution (default 256) |
-| Write per-tile PNGs | Emit one terrain-only PNG per tile |
-| Write one stitched map PNG | Emit one stitched whole-map PNG |
-| Include WMO geometry | Composite placed WMOs onto tiles (experimental, needs headless GL, default off) |
-| Bake MCSH shadows | Preview the client's baked MCSH map; normal output omits it as a separate signal |
-
-The solar bearing stays fixed north-west and only elevation cycles with time of day, matching the
-traced 0.5.3.3368 client. That is why changing the time changes brightness and contrast, not shadow
-direction. The sun is *frozen* at the requested time — synthetic output never advances a live clock,
-and the manifest records `timeOfDayMode=frozen`. Map LIT and Light DBC profiles belong to the viewer
-and are deliberately never applied here.
-
-Terrain renders with Lambert hillshading. Analytic cast shadows are an addition the original client
-never had and default off for the Alpha era. Output lands in
-`output/synthesized-minimaps/<map>/tod-<time>/` with a `synthesis-manifest.json`.
-
-Equivalent CLI:
-
-```powershell
-WowViewer.Tool.Harvest synthetic-minimap `
-  --client-root <clientRoot> --map Kalimdor --output-dir <dir> `
-  --time-hours 1800 --per-tile --whole-map
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  WoWViewer                                                     [_][□][X]    │
+├──────────────┬───────────────────────────────────────────────┬──────────────┤
+│  NAVIGATOR   │                                               │  WORKBENCH   │
+│  (Left Bar)  │               3D VIEWPORT                     │  (Right Bar) │
+│              │                                               │              │
+│ • Sources    │  [WASD + Mouse Look Camera]                   │ Destinations:│
+│ • Build Pick │                                               │ • Quick      │
+│ • File Tree  │  [Bounded Terrain Residency Ring: Radius 2-3] │ • Inspect    │
+│ • World Maps │                                               │ • Scene      │
+│ • Phase Maps │  [Dynamic Lighting, Sky, Fog, Audio Emitters] │ • Utilities  │
+│              │                                               │ • Experiment │
+├──────────────┴───────────────────────────────────────────────┴──────────────┤
+│ [Scene Toggles]   [Subzone / Area Readout]   [Audio: ON/MUTED]   [FPS / ms] │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-See [CLI-TOOLS.md](../CLI-TOOLS.md) for the full flag set, including `--authored-reference`,
-`--match-time`, `--tile-list`, and `--score`.
+### 1. Left Navigator Sidebar
+- **Sources & Builds**: Switch active client archives and select build definitions.
+- **File Explorer**: Browse virtual paths inside MPQs (models, textures, sounds, databases).
+- **World Maps**: One-click loading of all terrain maps discovered in the client.
+- **Phase Map Selector**: Filter phased content for Cataclysm and later expansions.
 
-## Camera paths and capture
+### 2. Bottom Status and Action Bar
+- **Scene Toggles**: Quick buttons for Terrain, WMOs, M2 Doodads, Liquids, Wireframe, Portals.
+- **Location Readout**: Displays the current `AreaTable` Zone and Subzone name.
+- **Master Audio Button**: Toggle master sound output (`AUDIO: ON` / `AUDIO: MUTED`).
+- **Performance Readout**: Real-time FPS, frame time (ms), and draw call statistics.
 
-**Utilities > Capture** owns both capture automation and camera paths.
+### 3. Right Workbench Destinations
+The right sidebar contains five primary destinations, each with specialized tool pages:
 
-- Author keys from the current camera, or import from loose and in-client `.m2` camera assets
-  (MD20 `0x100` early and `0x109+` modern layouts are both supported).
-- Save as JSON — position, target, timing, FOV, and roll are preserved — or export as native M2.
-- Path preload is bounded to the swept tile footprint along the path plus the configured radius. It
-  is not a whole-map residency guarantee.
+#### **Quick**
+- Scene visibility switches, fast wireframe toggles, and performance summary.
 
-## PM4 work
+#### **Inspect**
+- **Context**: Information about the currently hovered or selected terrain vertex, model, or WMO.
+- **Scene Investigation**: Deep hierarchy of resident ADT tiles, chunks, and submeshes.
+- **MCNK / ADT**: Raw chunk headers, layer masks, shadow maps, and vertex height grids.
+- **World Context**: Map properties, bounds, and global flags.
+- **Archeology / Animations**: M2 skeletal animation player with sequence selection, scrubbing, speed control, and bone transform displays.
+- **Actions**: Trigger manual garbage collection and reload current scene.
 
-**Experimental > PM4** provides overlay inspection, the scene graph tree, region-aware selection and
-export, and the wall-mesh toggle. PM4 coordinate frames are solved and confirmed as of v0.5.2, so
-tiles align without per-object fitting.
+#### **Scene**
+- **Placements**: Searchable list of all placed models (`MDDF`) and world models (`MODF`) on active tiles.
+- **LOD**: Level-of-detail thresholds and distance cull distances.
 
-## Troubleshooting
+#### **Utilities**
+- **Minimap**: Interactive 2D map view with camera tracking and triple-click teleportation.
+- **Audio**: Resident emitter list, `SoundEntries` preview player, gain sliders, and 3D emitter pins.
+- **Capture**: Screenshot capture and Camera Path Authoring Studio.
+- **Log Viewer**: Filterable application log stream with export capability.
+- **Perf Profiler**: GPU and CPU frame breakdown.
+- **Asset Catalog**: Global index of all enumerated client assets.
+- **Taxi Paths**: Flight master trajectory visualization.
 
-### Viewer opens but the map does not load
+#### **Experimental**
+- **PM4 Reconciliation**: Full Spec 176 PM4 guide matching, visual diffing, and ADT patching.
+- **Terrain Lab**: Tensor extraction and normal/heightmap experiment workbench.
+- **Converters**: On-the-fly Alpha $\leftrightarrow$ LK format converter.
+- **Population**: Procedural doodad scatter testing.
 
-- Verify the staged client root.
-- Verify the chosen build matches the staged data.
-- Check console/log output with `--verbose`, or use Utilities > Log Viewer.
+---
 
-### Nearby terrain or buildings pop in and out
+## 4. Camera Controls and Shortcuts
 
-- Raise the retained radius and detail tile budget in the streaming controls.
-- This class of bug was heavily reworked in v0.5.2; if it still reproduces, note the tile
-  coordinates and camera heading — that is the useful report.
+### Global Navigation
+| Key / Input | Action |
+|---|---|
+| `W` / `A` / `S` / `D` | Move camera forward, left, backward, right |
+| `Q` / `E` | Move camera vertically down / up |
+| **Right Mouse Button + Drag** | Look around (first-person mouse look) |
+| **Shift (Hold)** | Camera speed boost ($3\times$) |
+| **Mouse Wheel** | Adjust camera base movement speed |
+| `Tab` | Toggle UI chrome visibility (fullscreen mode) |
+| `I` | Toggle right Workbench sidebar |
+| `M` | Toggle fullscreen Minimap overlay |
+| `P` | Jump directly to PM4 Reconciliation tab |
+| **Triple-Click on Minimap** | Teleport camera instantly to clicked tile |
 
-### No sound
+---
 
-- Confirm OpenAL is available; the Audio page reports backend status.
-- Confirm the `AUDIO` bottom-bar button is not muted.
-- ZoneMusic does not auto-play by design.
+## 5. World Viewing and Streaming
 
-### Capture flow fails
+### Bounded Tile Admission
+To ensure smooth frame rates and bounded memory usage, `WoWViewer` streams terrain using a camera-centered residency ring:
+- **Inner Ring (Radius 2)**: 25 ADT tiles kept resident around the camera.
+- **Directional Lookahead**: Additional tiles are prioritized in the forward view frustum.
+- **WDL Underlay**: Distant horizons outside the high-detail ring render low-detail WDL terrain meshes, preventing abrupt popping.
 
-- Verify the output path exists.
-- Verify startup flags point at staged data.
-- Verify the saved shot name exists before using `--capture-shot`.
+---
 
-## Related docs
+## 6. Camera Path Studio
 
-- [Viewer README](../../README.md)
-- [Release notes — v0.5.2](../releases/v0.5.2.md)
-- [CLI tools](../CLI-TOOLS.md)
-- [Documentation status](../DOCUMENTATION-STATUS.md)
-- [Alpha audio catalog](../architecture/alpha-audio-catalog.md)
+Located under **Utilities > Capture**, the Camera Path Studio lets you author smooth cinematic fly-throughs, record viewpoints, and export native WoW camera assets.
+
+### Camera Path Keybindings (Active when Capture page is open)
+| Key | Action |
+|---|---|
+| `K` | Insert camera keyframe at current playhead position and orientation |
+| `U` | Update selected keyframe to current camera pose |
+| `Delete` | Delete selected keyframe |
+| `Space` | Play / Pause camera path animation |
+| `Left` / `Right` Arrow | Select previous / next keyframe |
+| `Ctrl + Left` / `Ctrl + Right` | Retime selected keyframe |
+| `Z` / `X` | Roll camera counter-clockwise / clockwise |
+| `Home` / `End` | Jump to start / end of path |
+| `Ctrl + S` | Save camera path as portable `.json` project |
+| `Ctrl + E` | Export camera path as a native `.m2` model |
+
+---
+
+## 7. Audio System and Positional Emitters
+
+Located under **Utilities > Audio**, the OpenAL audio engine renders true 3D spatialized sound:
+- **Positional Emitters**: As ADT tiles stream in, sound emitters declared in `MCSE` chunks and `MCNK` liquid flags are automatically registered.
+- **3D Emitter Pins**: Enable visual pins in the viewport to see emitter positions:
+  - 🟡 **Amber**: Positional sound effect (`MCSE`).
+  - 🔵 **Cyan**: Liquid / water sound emitter.
+  - 🟣 **Purple**: Ambient environmental emitter.
+- **SoundEntries Previewer**: Search and audition any sound effect in `SoundEntries.dbc`.
+
+---
+
+## 8. Lighting, Atmosphere, and Time of Day
+
+- **Alpha 0.5.3 World Clock**: The Alpha client advances on a 2,880-unit world cycle (24 real minutes). The lighting engine synchronizes terrain vertex lighting, ambient colors, directional sun/moon vectors, and skybox palettes.
+- **Time Slider**: Located in **Quick** and **Inspect > World Context**, dragging the slider freezes the clock at a specific time of day for photography and inspection.
+- **LIT & DBC Fallback**: Evaluates `.lit` lighting files when present, with automatic fallback to `Light.dbc` and `LightParams.dbc`.
+
+---
+
+## 9. PM4 Object Reconciliation Workbench (Spec 176)
+
+Located under **Experimental > PM4**:
+
+```
+ ┌────────────────────────────────────────────────────────┐
+ │ PM4 Guide: World\Maps\Development\Development_32_48.pm4 │
+ │ Companion ADT: Development_32_48_obj0.adt              │
+ ├────────────────────────────────────────────────────────┤
+ │ [1. Parse PM4 Guide] ──> [2. Run Geometric Alignment]  │
+ │                                                        │
+ │ Proposals:                                             │
+ │ • Seg 0x14A: Move HumanMale.m2 (+2.4m, rot: 45°)      │
+ │ • Seg 0x14B: Substitute Unknown -> GoldMine.wmo       │
+ │                                                        │
+ │ [Preview Overlay]   [Apply Guarded Patch]   [Undo]     │
+ └────────────────────────────────────────────────────────┘
+```
+
+### Step-by-Step Workflow:
+1. **Load Companion Files**: Select the target PM4 guide and its corresponding `_obj0.adt` tile.
+2. **Review Alignments**: The reconciliation engine compares PM4 convex hulls and bounding surfaces (`MSUR`, `MSPV`, `MSCN`) against placed objects in the ADT.
+3. **Inspect Confidence**: Each proposed placement displays an alignment confidence score (`exp(-d/25)`).
+4. **Guarded Apply**: Click **Apply** to write changes to `output/projects/<map>/<timestamp>/`. The operation verifies file hashes, creates a JSON provenance sidecar, and registers an undo step.
+5. **Undo / Redo**: Press `Ctrl+Z` in the editor or click **Undo** to restore the previous state immediately.
+
+---
+
+## 10. Troubleshooting and FAQ
+
+### Q: Why is terrain black or missing textures?
+**A**: Ensure your client root points to the folder containing the `Data` directory (or loose `World\` folders). If the client uses MPQ archives, verify `ArchiveCatalog` has enumerated the listfiles.
+
+### Q: Why are some dense city interiors slow?
+**A**: In release `v0.5.2.2`, large multi-district WMOs (such as Stormwind) submit all interior groups simultaneously. Optimize performance by reducing the view distance slider in **Quick > LOD**.
+
+### Q: Audio reports "OpenAL soft library missing"?
+**A**: Ensure `soft_oal.dll` (Windows) or `libopenal.so` (Linux) / `libopenal.dylib` (macOS) is present in the application folder. The viewer continues normally with audio disabled if the library is not found.

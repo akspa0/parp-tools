@@ -1,340 +1,300 @@
-# Advanced CLI Usage Guide — wow-viewer Tools
+# CLI Tools Comprehensive Reference Guide
 
-This guide covers all CLI tools in `wow-viewer/tools/`. Format: `dotnet run --project <project> -c Debug -- <command> [args]`.
-
----
-
-## 1. Format Inspector (`WowViewer.Tool.Inspect`)
-
-General-purpose format inspection. Supports M2, MDX, BLP, ADT/WDT, WMO, PM4, archive/listfile operations.
-
-### M2 Models
-
-```powershell
-# Basic inspect
-dotnet run --project tools/inspect -c Debug -- m2 inspect --input Creature/Orc/Orc.m2
-
-# With skin profile
-dotnet run --project tools/inspect -c Debug -- m2 inspect --input Creature/Orc/Orc.m2 --profile-index 0
-
-# Virtual file from staged client
-dotnet run --project tools/inspect -c Debug -- m2 inspect --archive-root <staged> --virtual-path Creature/Orc/Orc.m2
-```
-
-### MDX Models
-
-```powershell
-dotnet run --project tools/inspect -c Debug -- mdx inspect --input <file.mdx>
-dotnet run --project tools/inspect -c Debug -- mdx export-json --input <file.mdx> --output report.json
-```
-
-### PM4 Files
-
-```powershell
-# Inspect all chunks
-dotnet run --project tools/inspect -c Debug -- pm4 inspect --input <file.pm4>
-
-# Export asset signals (corpus for matching)
-dotnet run --project tools/inspect -c Debug -- pm4 export-asset-signals --archive-root <staged> --seed-placements <tile_obj0.adt> --kind all --output corpus.json
-
-# Match assets against corpus
-dotnet run --project tools/inspect -c Debug -- pm4 match-assets --input <file.pm4> --asset-corpus corpus.json --output report.json
-```
-
-### WMO / ADT / BLP / Audio
-
-```powershell
-dotnet run --project tools/inspect -c Debug -- wmo inspect --input <file.wmo>
-dotnet run --project tools/inspect -c Debug -- map inspect --input <tile_00_00.adt>
-dotnet run --project tools/inspect -c Debug -- blp inspect --input <file.blp>
-dotnet run --project tools/inspect -c Debug -- audio alpha-area --archive-root <client-root> --build 0.5.3.3368 --limit 20
-```
-
-`audio alpha-area` inspects the earliest-client area ambience catalog. It joins
-`AreaTable.dbc` to `AreaMIDIAmbiences.dbc`, then checks the referenced day/night
-and underwater MIDI sequences plus DLS bank in the loose client files and MPQ
-archives. It reports metadata and asset provenance; it does not play audio.
-Use `--area-id <id>` or `--search <text>` to narrow the report. See the
-[Alpha audio catalog guide](architecture/alpha-audio-catalog.md) for the data
-model and the playback boundary.
-
-### Archive / Listfile
-
-```powershell
-# Build listfile cache (required before batch operations)
-dotnet run --project tools/inspect -c Debug -- archive build-listfile-cache --archive-root <staged-client> --cache-key <build-name>
-
-# Listfile cache lives at output/cache/archive-listfiles/<sanitized-key>.json
-```
+**Toolkit**: `wow-viewer/tools/`  
+**Execution Pattern**: `dotnet run --project wow-viewer/tools/<tool-dir>/<project>.csproj -c Debug -- <command> [options]`
 
 ---
 
-## 2. Format Converter (`WowViewer.Tool.Converter`)
+## Table of Contents
+1. [Format Inspector (`wowviewer-inspect`)](#1-format-inspector-wowviewer-inspect)
+   - [Rosetta Calibration Corpus Generator (`rosetta-generate`)](#rosetta-calibration-corpus-generator-rosetta-generate)
+   - [M2 & MDX Model Inspection](#m2--mdx-model-inspection)
+   - [PM4 Geometry & Reconciliation Tools](#pm4-geometry--reconciliation-tools)
+   - [Terrain & Map Inspection (`map inspect`)](#terrain--map-inspection-map-inspect)
+   - [WMO World Model Inspection](#wmo-world-model-inspection)
+   - [BLP Texture Inspection](#blp-texture-inspection)
+   - [Lighting Inspection (`lit` & `light`)](#lighting-inspection-lit--light)
+   - [Audio Catalog Inspection (`audio alpha-area`)](#audio-catalog-inspection-audio-alpha-area)
+   - [Archive & Listfile Caching](#archive--listfile-caching)
+2. [Format Converter (`wowviewer-converter`)](#2-format-converter-wowviewer-converter)
+   - [Alpha WDT → LK Format (`alpha-to-lk`)](#alpha-wdt--lk-format-alpha-to-lk)
+   - [LK Format → Alpha WDT (`lk-to-alpha`)](#lk-format--alpha-wdt-lk-to-alpha)
+3. [Terrain Tensor Harvester (`wowviewer-harvest`)](#3-terrain-tensor-harvester-wowviewer-harvest)
+   - [Harvesting Maps to NPZ / Zarr](#harvesting-maps-to-npz--zarr)
+   - [Synthesizing Minimaps (`synthetic-minimap`)](#synthesizing-minimaps-synthetic-minimap)
+   - [Streaming Pipe to Python (`harvest-stream`)](#streaming-pipe-to-python-harvest-stream)
+4. [Python ML Toolchain (`data-harvester`)](#4-python-ml-toolchain-data-harvester)
+
+---
+
+## 1. Format Inspector (`wowviewer-inspect`)
+
+**Project**: `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj`
+
+### Rosetta Calibration Corpus Generator (`rosetta-generate`)
+Generates synthetic, fully-labeled ADT and WDT map tiles placing every enumerable model/WMO on a museum pedestal with high-resolution antialiased MCAL/MCLY terrain labels.
 
 ```powershell
-# Alpha WDT → LK (modern) format
-dotnet run --project tools/converter -c Debug -- alpha-to-lk --input <alpha.wdt> --output <dir>
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  rosetta-generate `
+  --client-root "H:\CLIENTS\WoW-0.5.3.3368-Client" `
+  --output "output/rosetta_alpha" `
+  --map-name "RosettaAlpha" `
+  --pedestal-height 4.0 `
+  --pedestal-bevel 12.5 `
+  --ground-texture "tileset\ocean\westfallseafloor.blp" `
+  --ink-texture "tileset\generic\black.blp"
+```
 
-# LK WDT → Alpha format
-dotnet run --project tools/converter -c Debug -- lk-to-alpha --input <lk.wdt> --output <dir>
+#### Options Reference:
+| Option | Default | Description |
+|---|---|---|
+| `--client-root <dir>` | *(Required)* | Root directory containing client MPQ archives or loose files |
+| `--output <dir>` | *(Required)* | Output root directory where `World\Maps\<MapName>\` is created |
+| `--map-name <name>` | `Development` | Map identifier for generated WDT/ADTs |
+| `--format <lk\|alpha>` | *Auto-detected* | Target era: `alpha` (monolithic WDT) or `lk` (standalone ADT files) |
+| `--ground-texture <path>` | *Auto-selected* | Layer 0 base terrain texture (e.g. `tileset\ocean\westfallseafloor.blp`) |
+| `--ink-texture <path>` | `tileset\generic\black.blp` | Layer 1 text ink texture for MCAL antialiased labels |
+| `--pedestal-height <m>` | `4.0` | Museum plinth elevation in meters above terrain floor |
+| `--pedestal-bevel <m>` | `12.5` | Width of the transition bevel ramp in meters |
+| `--cell-chunks <1\|2\|4\|8\|16>` | `4` | Width/height of each grid cell in ADT chunks (4 chunks = 133.3m) |
+| `--label-band-chunks <n>` | `1` | Number of chunks reserved for the label band along cell bottom |
+| `--no-cell-borders` | `false` | Disables vertex border outlines around cells |
+| `--no-designkit-grouping` | `false` | Disables grouping assets by folder/kit |
+| `--kit-depth <n>` | `0` | Coarsens kit grouping (e.g. `1` groups all `creature\*` into one kit) |
+| `--max-tiles-per-map <n>` | `4096` | Max tiles allowed before splitting into `<MapName>00`, `<MapName>01` |
+| `--max-assets <n>` | `0` (all) | Limit total assets placed (useful for quick smoke testing) |
+| `--existing-map-dir <dir>` | `null` | Reference map directory to reserve occupied tile coordinates |
+| `--pm4-dir <dir>` | `null` | Directory containing PM4 guides to copy alongside output tiles |
+| `--overwrite` | `false` | Overwrites existing output folders without prompting |
+
+---
+
+### M2 & MDX Model Inspection
+
+```powershell
+# Inspect M2 header, bounding box, sequence count, bones, attachments
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  m2 inspect --input "Creature/Arthas/Arthas.m2"
+
+# Inspect M2 with a specific skin profile
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  m2 inspect --input "Creature/Arthas/Arthas.m2" --profile-index 0
+
+# Sample an animated pose at sequence 2, time 500ms and export golden JSON
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  m2 inspect --input "Creature/Murloc/Murloc.m2" `
+  --sequence-index 2 --time-ms 500 --golden-output "output/murloc_pose.json"
+
+# Inspect an Alpha-era MDX model
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  mdx inspect --input "World/Generic/Human/PassiveDoodads/Beds/Bed01.mdx"
+
+# Export full MDX document tree (geometry, materials, bones, collision) to JSON
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  mdx export-json --input "Creature/Wolf/Wolf.mdx" --output "wolf_report.json" `
+  --include-geometry --include-collision --include-hit-test
 ```
 
 ---
 
-## 3. Terrain Tensor Harvester (`WowViewer.Tool.Harvest`)
-
-Extracts terrain tensors (height, normals, textures, alpha, liquids) from staged game clients into NPZ or Zarr stores, and composes synthesized minimaps. Feeds the v50/v60 dataset and training pipeline.
-
-Run the tool with no arguments to print the authoritative command list — it is the source of truth if this guide drifts.
+### PM4 Geometry & Reconciliation Tools
 
 ```powershell
-# Single map from loose files
-dotnet run --project tools/harvest -c Debug -- harvest-map --input-dir <adt_dir> --minimap-root <dir> --output <shard.npz>
+# Inspect PM4 chunk inventory (MSCN, MSPV, MSUR, MSHD, MSLK)
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  pm4 inspect --input "World/Maps/Azeroth/Azeroth_32_48.pm4"
 
-# Map from staged MPQ client
-dotnet run --project tools/harvest -c Debug -- harvest-map-mpq --client-root <staged> --map-name <map> --output <shard.npz>
+# Export geometry segments and object clusters from PM4
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  pm4 export-segments --input "World/Maps/Azeroth/Azeroth_32_48.pm4" --output "segments.json"
 
-# Full dataset build (Zarr store)
-dotnet run --project tools/harvest -c Debug -- harvest-dataset --client-root <staged> --builds <build1,build2> --output <zarr-store>
+# Export asset reference signal corpus from seed ADT placements
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  pm4 export-asset-signals `
+  --archive-root "H:\CLIENTS\World of Warcraft 3.3.5a" `
+  --seed-placements "World/Maps/Azeroth/Azeroth_32_48_obj0.adt" `
+  --kind all --output "corpus.json"
+
+# Match PM4 segments against reference asset corpus
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  pm4 match-assets `
+  --input "World/Maps/Azeroth/Azeroth_32_48.pm4" `
+  --asset-corpus "corpus.json" --output "match_report.json"
 ```
 
-### V22 stream seam (Spec 086)
+---
 
-Preferred operator path: use the Python builder as the single entrypoint and let it call the C# harvester for you.
+### Terrain & Map Inspection (`map inspect`)
+
+```powershell
+# Inspect single ADT tile or WDT file from disk
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  map inspect --input "World/Maps/Azeroth/Azeroth_32_48.adt"
+
+# Survey and summarize every WDT map discovered inside a client MPQ archive
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  map inspect --archive-root "H:\CLIENTS\WoW-0.5.3.3368-Client"
+
+# Generate a blank valid ADT tile (for terrain authoring or repair)
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  map generate-blank --tile-x 32 --tile-y 48 --map-name "TestMap" --format lk `
+  --texture "tileset\grass\greensward.blp" --output-dir "output/blank_maps"
+```
+
+---
+
+### WMO World Model Inspection
+
+```powershell
+# Inspect WMO root header, group count, materials, and bounding boxes
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  wmo inspect --input "World/wmo/Dungeon/AZ_Subway/Subway.wmo"
+
+# Dump internal light definitions (MOLT chunks)
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  wmo inspect --input "World/wmo/Dungeon/AZ_Subway/Subway.wmo" --dump-lights
+```
+
+---
+
+### BLP Texture Inspection
+
+```powershell
+# Inspect image dimensions, mipmap levels, and compression format (DXT1/DXT3/DXT5/Raw)
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  blp inspect --input "tileset/ocean/westfallseafloor.blp"
+
+# Read directly from an MPQ client archive via virtual path
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  blp inspect --archive-root "H:\CLIENTS\World of Warcraft 3.3.5a" `
+  --virtual-path "tileset/ocean/westfallseafloor.blp"
+```
+
+---
+
+### Lighting Inspection (`lit` & `light`)
+
+```powershell
+# Inspect Alpha .lit lighting file
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  lit inspect --input "World/Maps/Kalimdor/Kalimdor.lit"
+
+# Evaluate lighting parameters at specific times of day (0.0 = midnight, 0.5 = noon)
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  lit profile --input "World/Maps/Kalimdor/Kalimdor.lit" `
+  --game-time 0.0,0.25,0.5,0.75 --output "lighting_profile.json"
+```
+
+---
+
+### Audio Catalog Inspection (`audio alpha-area`)
+
+```powershell
+# Inspect Alpha 0.5.3 AreaMIDIAmbiences catalog and join against AreaTable.dbc
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  audio alpha-area --archive-root "H:\CLIENTS\WoW-0.5.3.3368-Client" `
+  --build "0.5.3.3368" --limit 20
+```
+
+---
+
+### Archive & Listfile Caching
+
+```powershell
+# Build fast JSON listfile cache from an archive directory
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- `
+  archive build-listfile-cache `
+  --archive-root "H:\CLIENTS\World of Warcraft 3.3.5a" `
+  --cache-key "3.3.5.12340"
+```
+
+---
+
+## 2. Format Converter (`wowviewer-converter`)
+
+**Project**: `wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj`
+
+### Alpha WDT → LK Format (`alpha-to-lk`)
+Converts pre-release Alpha 0.5.3 monolithic WDT maps into standard modern Wrath of the Lich King (LK) ADT files, standalone WDT headers, and WDL terrain horizon files.
+
+```powershell
+dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter -c Debug -- `
+  alpha-to-lk `
+  --input "H:\CLIENTS\WoW-0.5.3.3368-Client\World\Maps\Kalimdor\Kalimdor.wdt" `
+  --output "output/converted/Kalimdor_LK"
+```
+
+### LK Format → Alpha WDT (`lk-to-alpha`)
+Converts standard modern ADT/WDT directories into an Alpha 0.5.3 monolithic WDT container with embedded MCNK terrain, MCVT heightmaps, and MCAL alpha blending.
+
+```powershell
+dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter -c Debug -- `
+  lk-to-alpha `
+  --input "output/rosetta_lk/World/Maps/RosettaLK/RosettaLK.wdt" `
+  --output "output/converted/RosettaAlpha_Monolith"
+```
+
+---
+
+## 3. Terrain Tensor Harvester (`wowviewer-harvest`)
+
+**Project**: `wow-viewer/tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harvest.csproj`
+
+### Harvesting Maps to NPZ / Zarr
+
+```powershell
+# Harvest single map from loose ADT folder
+dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest -c Debug -- `
+  harvest-map --input-dir "C:\Extracted\World\Maps\Azeroth" --output "output/tensors/Azeroth.npz"
+
+# Harvest map directly from MPQ client archives
+dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest -c Debug -- `
+  harvest-map-mpq --client-root "H:\CLIENTS\World of Warcraft 3.3.5a" `
+  --map-name "Azeroth" --output "output/tensors/Azeroth.npz"
+
+# Build complete multi-build Zarr dataset
+dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest -c Debug -- `
+  harvest-dataset --client-root "H:\CLIENTS\World of Warcraft 3.3.5a" `
+  --builds "3.3.5.12340" --output "output/datasets/warcraft_terrain.zarr"
+```
+
+### Synthesizing Minimaps (`synthetic-minimap`)
+Composes paired terrain and liquid minimap images directly from raw ADT elevation, vertex colors, and alpha blend layers without requiring shipped minimap graphics.
+
+```powershell
+dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest -c Debug -- `
+  synthetic-minimap `
+  --input-dir "C:\Extracted\World\Maps\Azeroth" `
+  --output-dir "output/synthetic_minimaps/Azeroth"
+```
+
+### Streaming Pipe to Python (`harvest-stream`)
+Streams binary V22 tile blobs to standard output for direct consumption by Python data pipelines.
+
+```powershell
+cmd /c "dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest -c Debug -- harvest-stream --stream-profile v22 --client-root ""H:\CLIENTS\World of Warcraft 3.3.5a"" --map Azeroth --limit 10 1> output\tmp\v22_stream.bin 2> output\tmp\v22_stream.log"
+```
+
+---
+
+## 4. Python ML Toolchain (`data-harvester`)
+
+Located in `wow-viewer/data-harvester/`, this Python environment manages dataset generation and ML training workflows.
 
 ```powershell
 cd wow-viewer/data-harvester
-uv run python scripts/build_v22_dataset.py harvest-build --client-root ../../output/tmp/wowarchive-clients/3_3_5_12340 --map Azeroth --limit 1 --output ../output/datasets/v22/3_3_5_12340_smoke.zarr
 
-uv run python scripts/inspect_v22_dataset.py summary --store ../output/datasets/v22/3_3_5_12340_smoke.zarr
-uv run python scripts/inspect_v22_dataset.py tile --store ../output/datasets/v22/3_3_5_12340_smoke.zarr --tile-index 0 --output-json ../output/tmp/v22_tile_0.json
-```
+# Build V22 Zarr dataset from game client in a single command
+uv run python scripts/build_v22_dataset.py harvest-build `
+  --client-root "H:\CLIENTS\World of Warcraft 3.3.5a" `
+  --map Azeroth --limit 50 --output "../output/datasets/v22/Azeroth_sample.zarr"
 
-Low-level seam (still supported): `harvest-stream` is a **binary stdout producer**, not a direct dataset writer. It emits raw V22 tile blobs to standard output and can still be redirected to a file before the Python Zarr writer consumes it.
+# Inspect dataset summary
+uv run python scripts/inspect_v22_dataset.py summary `
+  --store "../output/datasets/v22/Azeroth_sample.zarr"
 
-```powershell
-# 1. Emit the raw V22 stream to a file (stdout redirected)
-cmd /c "dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest -c Debug -- harvest-stream --stream-profile v22 --client-root output/tmp/wowarchive-clients/3_3_5_12340 --map Azeroth --limit 1 1> output\tmp\v22_stream.bin 2> output\tmp\v22_stream.log"
-
-# 2. Build the V22 Zarr store from that stream
-cd wow-viewer/data-harvester
-uv run python scripts/build_v22_dataset.py build --stream ../output/tmp/v22_stream.bin --output ../output/datasets/v22/3_3_5_12340_smoke.zarr
-
-# 3. Inspect the resulting store
-uv run python scripts/inspect_v22_dataset.py summary --store ../output/datasets/v22/3_3_5_12340_smoke.zarr
-uv run python scripts/inspect_v22_dataset.py tile --store ../output/datasets/v22/3_3_5_12340_smoke.zarr --tile-index 0 --output-json ../output/tmp/v22_tile_0.json
-```
-
-Notes:
-
-- Use `--limit`, **not** `--tile-limit`, on `harvest-stream`.
-- `harvest-stream` does **not** write `--output`; stdout redirection is the transport seam.
-- `build_v22_dataset.py harvest-build` is now the canonical single-command operator path.
-- `build_v22_dataset.py build` remains the low-level "I already have a stream file" entrypoint.
-
-### Map discovery
-
-`discover-maps` lists terrain-trainable maps from a staged client using WDT summary plus tile probe
-checks. Prefer it over hardcoding map names — it emits JSON that downstream builders parse.
-
-```powershell
-dotnet run --project tools/harvest -c Debug -- discover-maps --client-root <staged>
-```
-
-### Synthesized minimaps (`synthetic-minimap`)
-
-Composes paired terrain-only and `_liquid` minimaps directly from client tiles. It does **not** read
-a shipped minimap image.
-
-```powershell
-dotnet run --project tools/harvest -c Debug -- synthetic-minimap `
-  --client-root <staged> --map Kalimdor --output-dir <dir> `
-  --time-hours 1800 --per-tile --whole-map
-```
-
-| Option | Purpose |
-| --- | --- |
-| `--time-hours <HHmm\|HH:mm\|decimal>` | Frozen sun position; default 12:00 |
-| `--per-tile` / `--whole-map` | Emit per-tile PNGs and/or one stitched map PNG |
-| `--tile-x` / `--tile-y <0..63>` | Render one occupied tile |
-| `--tile-list "x,y;x,y;..."` | Render a bounded tile set |
-| `--limit <n>` | Cap emitted terrain/`_liquid` PNG pairs |
-| `--detail` | Mip-filtered real BLP texels, for 1024+ super-resolution targets |
-| `--authored-reference` | Require and emit the real client minimap plus a side-by-side comparison |
-| `--match-time` | With `--authored-reference`, infer each tile's best-matching hour from authored shading |
-| `--score` | Score output against the authored minimap |
-| `--cast-shadows` / `--no-cast-shadows` | Explicitly enable/disable analytic cast shadows |
-| `--bake-mcsh` | Exceptional-history preview of the client's baked MCSH map |
-| `--include-wmos` | Composite placed WMO geometry (experimental, needs headless GL) |
-| `--measure-sun` / `--light-overlay` | Lighting diagnostics |
-
-Behavior worth knowing before you interpret output:
-
-- One achromatic global light at the frozen `--time-hours` value, shaded in linear space. Map LIT and
-  Light DBC profiles belong to the viewer and are **never** applied to minimap generation. The
-  manifest records `timeOfDayMode=frozen`.
-- The solar bearing is fixed north-west; only elevation cycles with time. Changing the time changes
-  brightness and contrast, not shadow direction.
-- Terrain renders with Lambert hillshading. Analytic cast shadows are an **addition the original
-  client never had** and default OFF for the Alpha era.
-- Normal RGB omits the client's baked MCSH map — that is a separate signal, not shading.
-
-### Lighting diagnostics without a client
-
-```powershell
-# Light a synthetic hill at 06:00-18:00, write compass-marked PNGs. No client needed.
-# Use this to tell a wrong lighting model apart from wrongly-oriented terrain data.
-dotnet run --project tools/harvest -c Debug -- sun-diagnostic --output-dir <dir>
-
-# Deterministic fully-supervised terrain control corpus (height_257 + terrain_shadow_256)
-dotnet run --project tools/harvest -c Debug -- control-corpus --output-dir <dir>
-```
-
----
-
-## 4. Headless Validation Capture (`WowViewer.Tool.ValidationCapture`)
-
-Captures rendered terrain + object frames from the WoWViewer renderer in headless mode. Used for object-mask ground truth generation.
-
-```powershell
-# GPU-viewer-style capture
-dotnet run --project tools/validation-capture -c Debug -- capture --gpu-viewer-style --client-root <staged> --map <map> --tile <x_y> --output <dir>
-
-# Real scene dry run (debug diagnostics)
-dotnet run --project tools/validation-capture -c Debug -- capture --real-scene-dry-run --client-root <staged> --map <map> --tile <x_y>
-
-# Batch capture with all variants (primary, noliquids, noobjects, objectsonly)
-dotnet run --project tools/validation-capture -c Debug -- capture --gpu-viewer-style --client-root <staged> --map <map> --tile <x_y> --variants all
-```
-
----
-
-## 5. M2 Animation Pose Farm (`WowViewer.Tool.AnimFarm`) — NOT IMPLEMENTED
-
-> **This tool does not exist.** Verified 2026-08-15: `tools/animfarm/` has no project (the solution
-> carries an empty folder entry), `git log` shows zero commits ever touching that path, and no
-> `*AnimFarm*`, `*Bvh*`, or `*PoseClip*` file has been added on any branch. Every command below is a
-> design sketch from archived Spec 053, which stopped after Phase 0-1 (commit `0691e894`).
->
-> **What does exist** is the loader layer only: `WowViewer.Core.Anim` holds `M2PoseSourceLoader`,
-> `MdxPoseSourceLoader`, `M2AnimationPoseSource`, `MdxAnimationPoseSource`, and `PathNormalizer`.
-> Nothing extracts bone tracks, builds BVH, or writes pose clips. The named types in the
-> `systemPatterns.md` pipeline diagram (`M2SequenceAliasResolver`, `M2BoneTrackStreamExtractor`,
-> `BvhDocumentBuilder`, `BvhDocumentWriter`, `PoseClipBuilder`, `PoseLibraryIndexBuilder`) are not in
-> `src/` or `tests/`.
->
-> For skeleton and sequence data today, use `mdx inspect` / `mdx export-json` (§ MDX) — those are real
-> and were verified against 0.5.3 `Creature\HighElf\*.mdx`. The M2 side has era defects; see below.
-
-The sketch below is retained as the design target, not as runnable commands:
-
-```powershell
-# NOT RUNNABLE — no such project
-dotnet run --project tools/animfarm -c Debug -- dump --input <path/to/model.m2> --output <outdir>
-dotnet run --project tools/animfarm -c Debug -- skeleton --input <path/to/model.m2> --output <outdir>
-dotnet run --project tools/animfarm -c Debug -- batch --client-root <staged> --cache-key <build> --output <outdir> --include "creature/orc/.*"
-```
-
-### Output Structure (dump mode)
-
-```
-<output>/
-├── manifest.json              # Bone hierarchy + sequence list + source hash
-├── <sequenceName>.bvh         # BVH motion file per non-alias sequence
-├── clip.<sequenceName>.poseclip.json  # Mixamo-normalized pose clip per sequence
-└── (future: .fbx files)
-```
-
-### Output Structure (batch mode)
-
-```
-<output>/
-├── Creature/
-│   └── Orc/
-│       ├── Orc.m2/
-│       │   ├── manifest.json
-│       │   ├── Stand.bvh
-│       │   ├── Walk.bvh
-│       │   ├── Run.bvh
-│       │   ├── clip.Stand.poseclip.json
-│       │   └── clip.Walk.poseclip.json
-│       └── OrcFemale.m2/
-│           └── ...
-├── library.index.json          # Top-level index: tags, paths, summary stats
-└── errors.jsonl                # Per-model errors (JSON lines)
-```
-
----
-
-## 6. General CLI Patterns
-
-All tools follow consistent conventions:
-
-| Flag | Alias | Description |
-|------|-------|-------------|
-| `--input` | `-i` | Input file path |
-| `--output` | `-o` | Output directory/file path |
-| `--archive-root` | `-r` | Staged game client root |
-| `--virtual-path` | `-v` | Virtual path within archive |
-| `--listfile` | `-l` | External listfile path |
-| `--cache-key` | `-k` | Listfile cache key (build name) |
-| `--cache-dir` | `-d` | Listfile cache directory |
-| `--help` | `-h` | Tool-specific usage |
-| `--include` | | Regex filter (batch modes) |
-| `--exclude` | | Regex filter (batch modes) |
-| `--limit` | | Max items (test mode) |
-| `--quiet` | | Suppress stderr progress |
-
----
-
-## 7. Common Workflows
-
-### Inspect a model → export animation → load in Blender
-
-```powershell
-# 1. Inspect the model
-dotnet run --project tools/inspect -c Debug -- m2 inspect --input <model.m2> --sequence-index 0 --time-ms 1000
-
-# 2. Farm animations
-dotnet run --project tools/animfarm -c Debug -- dump --input <model.m2> --output <anim-out>
-
-# 3. Open <anim-out>/Stand.bvh in Blender with File > Import > BVH
-```
-
-### Build a pose library from a staged client
-
-```powershell
-# 1. Build listfile cache
-dotnet run --project tools/inspect -c Debug -- archive build-listfile-cache --archive-root <staged> --cache-key <build>
-
-# 2. Batch farm, filtering to creatures
-dotnet run --project tools/animfarm -c Debug -- batch --client-root <staged> --cache-key <build> --output <pose-lib> --include "creature/.*"
-
-# 3. Query library index
-python -c "import json; d=json.load(open('<pose-lib>/library.index.json')); print([c for c in d['clips'] if 'walk' in c['tags']])"
-```
-
-### Compare PM4 objects across tiles
-
-```powershell
-# 1. Export asset signals from two tiles
-dotnet run --project tools/inspect -c Debug -- pm4 export-asset-signals --seed-placements <tile1_obj0.adt> --kind m2 --output tile1.json
-dotnet run --project tools/inspect -c Debug -- pm4 export-asset-signals --seed-placements <tile2_obj0.adt> --kind m2 --output tile2.json
-
-# 2. Match each tile's objects against the other's corpus
-dotnet run --project tools/inspect -c Debug -- pm4 match-assets --input <tile1.pm4> --asset-corpus tile2.json --output match.json
-```
-
-### Harvest terrain tensors for ML
-
-```powershell
-# 1. Verify the dataset pipeline
-dotnet run --project tools/harvest -c Debug -- harvest-map-mpq --client-root <staged> --map-name Azeroth_30_48 --output test.npz --dry-run
-
-# 2. Full harvest (adds to Zarr store)
-dotnet run --project tools/harvest -c Debug -- harvest-map-mpq --client-root <staged> --map-name Azeroth_30_48 --output test.npz
-
-# 3. Train model (Python)
-cd data-harvester
-uv run python scripts/train_v18.py --dataset <zarr-store> --epochs 100
+# Dump single tile tensor metadata to JSON
+uv run python scripts/inspect_v22_dataset.py tile `
+  --store "../output/datasets/v22/Azeroth_sample.zarr" --tile-index 0 --output-json "tile_0.json"
 ```

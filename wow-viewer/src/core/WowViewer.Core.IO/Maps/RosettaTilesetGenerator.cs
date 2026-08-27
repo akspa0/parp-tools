@@ -530,6 +530,8 @@ public static class RosettaTilesetGenerator
         var placementsByTile = new SortedDictionary<(int X, int Y), List<RosettaPlacementRecord>>();
         var labelsByTile = new Dictionary<(int X, int Y), List<RosettaLabel>>();
         var rectsByTile = new Dictionary<(int X, int Y), List<RosettaMccvRect>>();
+        var pedestalsByTile = new Dictionary<(int X, int Y), List<RosettaPedestal>>();
+        var alphaCanvasByTile = new Dictionary<(int X, int Y), byte[]>();
         var placements = new List<RosettaPlacementRecord>(cells.Count);
 
         foreach (LayoutCell cell in cells)
@@ -542,17 +544,20 @@ public static class RosettaTilesetGenerator
                 placementsByTile[key] = list;
                 labelsByTile[key] = [];
                 rectsByTile[key] = [];
+                pedestalsByTile[key] = [];
+                alphaCanvasByTile[key] = RosettaAlphaPainter.CreateCanvas();
             }
 
             float centerU = cell.CellU + (cell.CellSize / 2f);
             float centerV = cell.CellV + (cell.ObjectBandSize / 2f);
+            float placementZ = options.PedestalHeightMeters;
 
             // Canvas/file coords, and the renderer coords the viewer derives from them.
             var raw = new Vector3(
                 (tileY * RosettaGeneratorOptions.TileSize) + centerU,
                 (tileX * RosettaGeneratorOptions.TileSize) + centerV,
-                0f);
-            var renderer = new Vector3(MapOrigin - raw.Y, MapOrigin - raw.X, 0f);
+                placementZ);
+            var renderer = new Vector3(MapOrigin - raw.Y, MapOrigin - raw.X, placementZ);
 
             var record = new RosettaPlacementRecord(
                 cell.Asset, tileX, tileY, raw, renderer,
@@ -561,12 +566,41 @@ public static class RosettaTilesetGenerator
             list.Add(record);
             placements.Add(record);
 
+            if (options.PedestalHeightMeters > 0f)
+            {
+                pedestalsByTile[key].Add(new RosettaPedestal(
+                    cell.CellU, cell.CellV, cell.CellU + cell.CellSize, cell.CellV + cell.ObjectBandSize,
+                    options.PedestalHeightMeters));
+            }
+
+            // Draw text into 1024x1024 MCAL canvas (0.52m / texel)
+            byte[] canvas = alphaCanvasByTile[key];
+            float pixel = cell.LabelPixelMeters;
+            float bandV0 = cell.CellV + cell.ObjectBandSize;
+            float lineAdvance = RosettaAlphaPainter.LineAdvanceMeters(pixel);
+            for (int line = 0; line < cell.LabelLines.Count; line++)
+            {
+                string text = cell.LabelLines[line];
+                if (text.Length == 0)
+                    continue;
+
+                float width = RosettaAlphaPainter.MeasureWidthMeters(text, pixel);
+                float inset = MathF.Floor(MathF.Max(0f, (cell.CellSize - width) / 2f) / pixel) * pixel;
+                RosettaAlphaPainter.DrawText(
+                    canvas, text, cell.CellU + inset, bandV0 + (line * lineAdvance),
+                    pixel, ink: 255, RosettaGeneratorOptions.ChunkSize);
+            }
+
             AppendCellPaint(cell, labelsByTile[key], rectsByTile[key], options.PaintCellBorders);
         }
 
         var tiles = new List<RosettaTilePlan>(placementsByTile.Count);
         foreach ((var key, List<RosettaPlacementRecord> tilePlacements) in placementsByTile)
-            tiles.Add(new RosettaTilePlan(key.X, key.Y, tilePlacements, rectsByTile[key], labelsByTile[key]));
+        {
+            tiles.Add(new RosettaTilePlan(
+                key.X, key.Y, tilePlacements, rectsByTile[key], labelsByTile[key],
+                alphaCanvasByTile[key], pedestalsByTile[key]));
+        }
 
         // One index entry per (kit, map). A kit contributes several layout parts here — its standard
         // cells and its oversize cells are laid out separately — but those are an implementation
@@ -606,7 +640,12 @@ public static class RosettaTilesetGenerator
     /// Builds one planned tile's painted, placement-carrying LK ADT. Deliberately on demand: the
     /// caller writes each tile and drops it, which is what keeps a full-client corpus inside memory.
     /// </summary>
-    public static LkAdtData BuildTileAdt(string mapName, RosettaTilePlan tile, string? groundTexture = null)
+    public static LkAdtData BuildTileAdt(
+        string mapName,
+        RosettaTilePlan tile,
+        string? groundTexture = null,
+        string? inkTexture = null,
+        float pedestalBevelMeters = 12.5f)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(mapName);
         ArgumentNullException.ThrowIfNull(tile);
@@ -617,11 +656,24 @@ public static class RosettaTilesetGenerator
         IReadOnlyList<RosettaMccvRect> rects = tile.Rects;
         IReadOnlyList<RosettaLabel> labels = tile.Labels;
 
-        LkAdtData blank = string.IsNullOrWhiteSpace(groundTexture)
-            ? BlankAdtFactory.CreateBlank(mapName, tileX, tileY)
-            : BlankAdtFactory.CreateBlank(mapName, tileX, tileY, groundTexture);
+        string effectiveGround = string.IsNullOrWhiteSpace(groundTexture)
+            ? RosettaGeneratorOptions.DefaultGroundTexture
+            : groundTexture;
+        string effectiveInk = string.IsNullOrWhiteSpace(inkTexture)
+            ? RosettaGeneratorOptions.DefaultInkTexture
+            : inkTexture;
+
+        LkAdtData blank = BlankAdtFactory.CreateBlank(mapName, tileX, tileY, effectiveGround);
         IReadOnlyList<LkMcnkData> paintedChunks = RosettaTextPainter.PaintTile(
             blank.Chunks, rects, labels, RosettaGeneratorOptions.ChunkSize);
+
+        byte[][]? chunkAlphaMaps = tile.AlphaCanvas is not null
+            ? RosettaAlphaPainter.SliceToChunks(tile.AlphaCanvas)
+            : null;
+        bool hasAnyAlpha = chunkAlphaMaps is not null && chunkAlphaMaps.Any(static a => a.Length > 0);
+        List<string> textureNames = hasAnyAlpha
+            ? [effectiveGround, effectiveInk]
+            : [effectiveGround];
 
         var mddf = new List<LkMddfEntry>();
         var modf = new List<LkModfEntry>();
@@ -668,6 +720,17 @@ public static class RosettaTilesetGenerator
         for (int i = 0; i < paintedChunks.Count; i++)
         {
             LkMcnkData c = paintedChunks[i];
+            int cx = i % 16;
+            int cy = i / 16;
+
+            float[] chunkHeights = CreateChunkHeights(cx, cy, tile.Pedestals, pedestalBevelMeters);
+
+            byte[]? chunkAlpha = chunkAlphaMaps?[i];
+            bool chunkHasAlpha = chunkAlpha is { Length: > 0 };
+            IReadOnlyList<LkMclyEntry> layers = chunkHasAlpha
+                ? [new LkMclyEntry(TextureId: 0, Flags: 0, AlphaOffset: 0, EffectId: 0), new LkMclyEntry(TextureId: 1, Flags: 0, AlphaOffset: 0, EffectId: 0)]
+                : [new LkMclyEntry(TextureId: 0, Flags: 0, AlphaOffset: 0, EffectId: 0)];
+
             finalChunks[i] = new LkMcnkData
             {
                 IndexX = c.IndexX,
@@ -677,15 +740,15 @@ public static class RosettaTilesetGenerator
                 // consumer that trusts the flag - and this corpus exists to be consumed.
                 Flags = c.MccvColors is not null ? c.Flags | McnkHasMccvFlag : c.Flags,
                 AreaId = c.AreaId,
-                NLayers = c.NLayers,
+                NLayers = layers.Count,
                 HoleMask = c.HoleMask,
                 BaseHeight = c.BaseHeight,
-                Heights = c.Heights,
+                Heights = chunkHeights,
                 Normals = c.Normals,
                 ShadowMap = c.ShadowMap,
-                AlphaMapData = c.AlphaMapData,
-                AlphaMapSize = c.AlphaMapSize,
-                Layers = c.Layers,
+                AlphaMapData = chunkHasAlpha ? chunkAlpha : null,
+                AlphaMapSize = chunkHasAlpha ? chunkAlpha!.Length : 0,
+                Layers = layers,
                 DoodadRefs = mddfRefsByChunk.TryGetValue(i, out List<int>? dr) ? dr : [],
                 WorldModelRefs = modfRefsByChunk.TryGetValue(i, out List<int>? wr) ? wr : [],
                 LiquidData = c.LiquidData,
@@ -702,7 +765,7 @@ public static class RosettaTilesetGenerator
             MapName = blank.MapName,
             TileX = blank.TileX,
             TileY = blank.TileY,
-            TextureNames = blank.TextureNames,
+            TextureNames = textureNames,
             ModelNames = modelNames,
             WorldModelNames = wmoNames,
             ModelPlacements = mddf,
@@ -711,6 +774,53 @@ public static class RosettaTilesetGenerator
             MhdrFlags = blank.MhdrFlags,
             MfboFlightBounds = blank.MfboFlightBounds,
         };
+    }
+
+    private static float[] CreateChunkHeights(
+        int cx, int cy, IReadOnlyList<RosettaPedestal> pedestals, float bevelMeters = 12.5f)
+    {
+        float chunkSize = RosettaGeneratorOptions.ChunkSize;
+        var heights = new float[145];
+        if (pedestals.Count == 0)
+            return heights;
+
+        int idx = 0;
+        for (int row = 0; row < 17; row++)
+        {
+            bool isInner = (row & 1) != 0;
+            int cols = isInner ? 8 : 9;
+            int r = row / 2;
+            for (int col = 0; col < cols; col++)
+            {
+                float u = (cx * chunkSize) + ((isInner ? col + 0.5f : col) * (chunkSize / 8f));
+                float v = (cy * chunkSize) + ((isInner ? r + 0.5f : r) * (chunkSize / 8f));
+
+                float h = 0f;
+                for (int pIdx = 0; pIdx < pedestals.Count; pIdx++)
+                {
+                    RosettaPedestal p = pedestals[pIdx];
+                    if (u < p.U0 || u > p.U1 || v < p.V0 || v > p.V1)
+                        continue;
+
+                    float distLeft = u - p.U0;
+                    float distRight = p.U1 - u;
+                    float distTop = v - p.V0;
+                    float distBottom = p.V1 - v;
+                    float edgeDist = MathF.Min(MathF.Min(distLeft, distRight), MathF.Min(distTop, distBottom));
+
+                    float pedH = (bevelMeters > 0f && edgeDist < bevelMeters)
+                        ? p.Height * (edgeDist / bevelMeters)
+                        : p.Height;
+
+                    if (pedH > h)
+                        h = pedH;
+                }
+
+                heights[idx++] = h;
+            }
+        }
+
+        return heights;
     }
 
     /// <summary>

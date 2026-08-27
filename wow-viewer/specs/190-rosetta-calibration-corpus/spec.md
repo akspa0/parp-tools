@@ -12,6 +12,19 @@ object at a known position, decode that synthetic data back through our own pipe
 complete labelled reference library, and automatically match real PM4 data against it. Also: we are
 not generating ADTs for tiles that have no ADT — synthesize them so no tile is skipped."
 
+> **Implementation checkpoint 14 (2026-08-27).** Three enhancements delivering museum-grade visual
+> presentation and removing artificial container caps:
+>
+> 1. **MCAL/MCLY texture layer text painting (`RosettaAlphaPainter`).** Because Alpha WDT lacks MCCV
+>    vertex colors, text is rasterized into an uncompressed 4-bit MCAL alpha layer (Layer 1 with ink
+>    texture, e.g. `tileset\generic\black.blp`). At 64×64 texels/chunk (1024×1024 per tile), resolution
+>    is 0.52 m/texel (8× finer than MCCV), rendering crisp, legible labels across both Alpha and LK.
+> 2. **Museum pedestal heightfields (`MCVT`).** Objects sit on a raised, beveled plateau
+>    (`PedestalHeightMeters = 4f`, `PedestalBevelMeters = 12.5f`) in the terrain mesh to prevent
+>    base clipping and provide clean museum-grade display plinths.
+> 3. **Removal of 512-tile Alpha WDT limit.** `AlphaWdtWriter` has no architectural limit and easily
+>    handles 900+ tile continent maps (like Kalimdor). The default tile cap is unified to 4096.
+>
 > **Implementation checkpoint 13 (2026-08-26).** Two corrections, both of the same kind: the tool
 > asking the operator for something it already knew, and dropping something the operator needed.
 >

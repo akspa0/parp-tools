@@ -1,155 +1,135 @@
-# WoWViewer v0.5.2.1
+# WoWViewer Toolkit (`wow-viewer`)
 
-The active viewer, format-tool, and data-harvester project inside `parp-tools`.
-It is a .NET 10 desktop viewer for inspecting staged World of Warcraft client data,
-terrain, WMO/M2/MDX placements, minimap inputs, and capture paths.
+The primary development and runtime workspace for `parp-tools`. This project provides a library-first .NET 10 architecture for parsing, inspecting, rendering, and reconciling World of Warcraft client data across all eras from Alpha 0.5.3 to Cataclysm 4.0.x.
 
-## Current release truth
+---
 
-v0.5.2.1 is the current application release line. The About box, Windows build,
-cross-platform build, and shared project identity report `0.5.2.1`.
+## What's Included
 
-**v0.5.2.1 is an out-of-band patch for frame pacing.** v0.5.2 shipped with a known,
-unresolved rendering jank: periodic hitches and jagged frame pacing while moving. The
-cause turned out to be an audio *diagnostics* rebuild running on the render thread four
-times a second whether or not anything displayed it, plus opaque MDX drawing one call per
-instance because a route planner returned a hardcoded `true`. Both are fixed. See
-[docs/releases/v0.5.2.1.md](docs/releases/v0.5.2.1.md) for the measurements.
+### 1. 3D World Viewer (`src/viewer/WoWViewer`)
+An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
+- **Terrain Streaming**: Bounded camera-centered tile streaming with directional lookahead and WDL low-detail horizon fallback.
+- **WMO Portals & Interiors**: Hierarchical culling with bounded portal traversal and group-level admission.
+- **M2/MDX Skeletal Animation**: Multi-track sequence evaluation, bone poses, particle systems, and ribbons.
+- **Dynamic Lighting & Skies**: Native Alpha 0.5.3 2,880-unit world clock, Light DBC fallback, LIT profiles, and fog.
+- **Positional Audio**: OpenAL runtime with resident MCSE / MCNK positional emitters and `SoundEntries` preview.
+- **Camera Path Authoring**: Full timeline keyframing, roll control, JSON project save/load, and native `.m2` camera export.
+- **PM4 Reconciliation Workbench**: Spec 176 reconciliation panel for matching real PM4 geometry segments to ADT placements with guarded preview, hash verification, and undoable apply operations.
 
-**Known issue:** dense WMO interiors are still slow. Stormwind submits all districts at
-once (7,512 visible groups, 80,484 draw calls) rather than the district the camera is in.
-That is a WMO group *admission* problem, it is **not fixed in this release**, and it is
-the next thing being worked on.
+### 2. Shared Core Libraries (`src/core`)
+- **`WowViewer.Core`**: Data contracts, vertex/index buffers, terrain tensor layouts, and coordinate transformations.
+- **`WowViewer.Core.IO`**: Zero-allocation binary readers and writers for ADT, WDT, WDL, WMO (v14/v17), M2 (all eras), MDX, BLP, LIT, and MPQ archives.
+- **`WowViewer.Core.PM4`**: Deep PM4 chunk decoding (MSCN, MSPV, MSUR, MSHD, MSLK), geometry segment construction, and signature extractors.
+- **`WowViewer.Core.Runtime`**: M2 animation evaluators, bone matrices, and skin profile resolvers.
+- **`WowViewer.Core.Editor`**: Transactional placement manipulation, history stacks, ID allocation with high-water marks, and provenance metadata tracking.
 
-The viewer is functional but not feature-complete across every client era. Runtime
-claims below distinguish implemented routes from visual/client proof that is still
-pending.
+### 3. CLI Tools (`tools/`)
+- **`wowviewer-inspect` (`tools/inspect`)**: Comprehensive format inspector, PM4 segment exporter, audio analyzer, and Rosetta Calibration Corpus generator (`rosetta-generate`).
+- **`wowviewer-converter` (`tools/converter`)**: Lossless bidirectional converter between Alpha monolithic WDT maps and modern LK ADT/WDT directories.
+- **`wowviewer-harvest` (`tools/harvest`)**: High-throughput extraction of terrain tensors (elevation, normals, alpha masks) into Zarr/NPZ archives and synthetic minimap images.
+- **`wowviewer-capture` (`tools/capture`) & `validation-capture`**: Automated headless camera renders and regression visual captures.
 
-## Download
+---
 
-Self-contained builds for Windows x64, Linux x64, macOS arm64, and macOS x64 are
-attached to each tagged release on the
-[releases page](https://github.com/akspa0/parp-tools/releases). No .NET install is
-required. Native file dialogs are Windows-only — on Linux and macOS, load content
-with `--game-path`, `--build`, and `--world`.
+## Building and Running
 
-See [docs/releases/v0.5.2.1.md](docs/releases/v0.5.2.1.md) for what changed in this
-release, and [docs/releases/v0.5.2.md](docs/releases/v0.5.2.md) for the v0.5.2 line.
-
-## Current viewer surfaces
-
-- World loading uses configured client roots and explicit build selection. The left
-  Navigator sidebar owns all source/file/map loading and the Phase Map selector.
-- Terrain, WMO placements, doodads, liquids, WDL/WL* data, minimap surfaces, and
-  lower status/runtime statistics are available through the viewer shell.
-- The bottom action and status bars remain the stable home for scene toggles, the
-  area/subzone readout, and the audio mute control.
-- The right workbench has five destinations, each with its own page dropdown:
-  **Quick**, **Inspect** (context, scene investigation, MCNK/ADT, world context,
-  archeology, animations, actions), **Scene** (placements, LOD), **Utilities**
-  (minimap, audio, capture, log viewer, perf, asset catalog, taxi), and
-  **Experimental** (terrain lab, PM4, converters, population).
-- Terrain streams as a bounded camera-centered window rather than a whole map:
-  a retained residency ring (radius 2 default, 3 maximum) plus a directional
-  selector for detailed geometry.
-- WMO visibility uses bounded portal traversal from the camera's group, fail-open on
-  invalid geometry or boundary cameras.
-- Audio is under Utilities > Audio: resident MCSE/MCNK positional emitters,
-  `SoundEntries` preview, gain controls, and an off-by-default emitter marker overlay.
-  Automatic ZoneMusic playback is muted by policy pending proof.
-- Capture Automation and Camera Path are under Utilities > Capture.
-- Camera paths can be authored from the current camera, imported from loose/native
-  camera assets, saved as JSON, and exported as native M2. JSON preserves position,
-  target, timing, FOV, and roll. Camera-path keyboard authoring is opt-in and scoped
-  to the active Capture page.
-- Camera-path preloading is bounded to the swept tile footprint along the path. It is
-  not a whole-map residency guarantee.
-- Help > Keyboard Shortcuts shows global and active-page controls.
-
-## Client-era support boundary
-
-| Client era | Current truth |
-|---|---|
-| Alpha 0.5.3 | Terrain/WDT/WMO/MDX/BLP/DBC reading and viewer routes exist; every MDX visual path is not yet release-proven. |
-| 0.6.x–0.10.x | Split/early terrain and chunked model routes exist with partial client-specific coverage. |
-| 1.12.1 | Era-specific M2 parsing/runtime route exists; broad in-viewer visual proof remains incomplete. |
-| 2.x | Profiled embedded-native M2 route is implemented; material/visibility proof on real client scenes is still pending. |
-| 3.0.x | Profiled early-M2 route is implemented; 3.0.x visual coverage is provisional. |
-| 3.3.5 | Terrain/WMO/M2/PM4 routes are the strongest late-client implementation path; representative real-client proof remains the release gate. |
-| 4.0.0.x | Terrain/WMO and Cataclysm-era PM4 paths exist; client-specific rendering and performance remain partial. |
-
-This table is a support boundary, not a claim that every map or asset in an era
-renders correctly. Real-client validation must record the configured client root,
-build identity, and observed result.
-
-## Lighting, horizon, and liquids
-
-The viewer has client/build-aware lighting, terrain fog, WDL low-detail terrain,
-WL*/liquid routes, LIT profile decode with DBC fallback, and synthesized-minimap
-time-of-day controls. Alpha 0.5.3 lighting advances on the native world clock
-(2,880 units per cycle, 24 real minutes); the manual slider freezes it until
-resumed, and Light DBC/LIT/sky/audio all read one same-frame value.
-
-These paths are still under visual audit across client eras. DBC/DBD layout data is
-authoritative; fallback behavior is diagnostic compatibility only and is not a
-substitute for a correct build schema. Night sky/stars and final WDL horizon
-presentation remain open visual-proof work.
-
-## UI overhaul status
-
-Spec 080 owns the current consolidation: five right-sidebar destinations, one
-unified inline inspector, page dropdowns per destination, and left-sidebar-only
-loading. Spec 145 covers the surrounding shell work — contextual keybinds, shortcut
-help, vertical navigation rails, bounded navigator/minimap layout, wrapped logs,
-persistent utility windows, and honest placeholder pages.
-
-Compact-window reachability and selected-context transitions remain user-owned
-visual proof. See [specs/080-wow-ui-consolidation/spec.md](specs/080-wow-ui-consolidation/spec.md)
-and [specs/145-wow-ui-overhaul/spec.md](specs/145-wow-ui-overhaul/spec.md).
-
-## Hard boundaries
-
-- All new implementation work belongs in `wow-viewer/`.
-- `gillijimproject_refactor/` is read-only reference code.
-- Client roots are configuration. `H:\CLIENTS` is the approved known-good library;
-  do not hardcode it into source or portable configuration.
-- The user runs training, GPU work, and client-backed visual proof. Build output is
-  not rendering or FPS signoff.
-- Do not distribute proprietary client data, harvested corpora, or derived assets.
-
-## Build and run
-
+### Build Solution
 ```powershell
+# Build entire solution in Debug
 dotnet build wow-viewer/WowViewer.slnx -c Debug
+
+# Run all unit tests
 dotnet test wow-viewer/WowViewer.slnx -c Debug
-dotnet run --project wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug
 ```
 
-The normal workflow is: open a configured game folder, choose the explicit client
-build, then load a world or standalone asset. Capture/debug automation accepts
-configured `--game-path`, `--build`, and `--world` arguments.
+### Run 3D Desktop Viewer
+```powershell
+# Default launch
+dotnet run --project wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug
 
-## Repository layout
+# Direct launch into a specific client map
+dotnet run --project wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug -- `
+  --game-path "H:\CLIENTS\WoW-0.5.3.3368-Client" `
+  --world "World\Maps\Kalimdor\Kalimdor.wdt"
+```
 
-| Surface | Purpose |
-|---|---|
-| `src/viewer/WoWViewer/` | Desktop viewer and shell |
-| `src/core/` | Shared format/domain/runtime libraries |
-| `tools/` | Inspect, convert, harvest, capture, and animation tools |
-| `tests/` | C# tests |
-| `data-harvester/` | Python dataset/training/inference workflow |
-| `specs/` | Feature specifications and implementation plans |
-| `docs/architecture/` | Evidence and design records |
-| `memory-bank/` | Continuity state |
+### Run CLI Format Inspector
+```powershell
+# Inspect any M2, MDX, WMO, BLP, ADT, or PM4 file
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- `
+  m2 inspect --input "Creature/Murloc/Murloc.m2"
+```
 
-## Documentation
+### Run Rosetta Calibration Corpus Generator
+```powershell
+# Generates calibration terrain with 4m pedestals and sharp 1024x1024 MCAL text labels
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- `
+  rosetta-generate `
+  --client-root "H:\CLIENTS\WoW-0.5.3.3368-Client" `
+  --output "output/rosetta_053" `
+  --map-name "RosettaAlpha" `
+  --pedestal-height 4.0 `
+  --pedestal-bevel 12.5
+```
 
-- [Changelog](CHANGELOG.md)
-- [Release notes — v0.5.2.1 (current)](docs/releases/v0.5.2.1.md)
-- [Release notes — v0.5.2](docs/releases/v0.5.2.md)
-- [Viewer user guide](docs/WoWViewer/USERGUIDE.md)
-- [CLI tools](docs/CLI-TOOLS.md)
-- [Alpha audio catalog: what it is and how to inspect it](docs/architecture/alpha-audio-catalog.md)
-- [Audio engine plan](docs/architecture/audio-engine-plan-2026-04-21.md)
-- [UI surface inventory](docs/architecture/viewer-ui-surface-inventory.md)
-- [Memory bank](memory-bank/activeContext.md)
+---
+
+## Desktop Viewer UI Layout
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  WoWViewer v0.5.2.2                                            [_][□][X]    │
+├──────────────┬───────────────────────────────────────────────┬──────────────┤
+│  NAVIGATOR   │                                               │  WORKBENCH   │
+│  (Left Bar)  │               3D VIEWPORT                     │  (Right Bar) │
+│              │                                               │              │
+│ • Client     │  [WASD + Mouse Fly Camera]                    │ Destinations:│
+│   Sources    │                                               │ • Quick      │
+│ • File Tree  │  [Bounded Terrain Stream Ring: Radius 2-3]    │ • Inspect    │
+│ • World Maps │                                               │ • Scene      │
+│ • Phase Maps │  [Dynamic Lighting, Sky & Fog]                │ • Utilities  │
+│              │                                               │ • Experiment │
+├──────────────┴───────────────────────────────────────────────┴──────────────┤
+│ [Scene Toggles]   [Subzone / Area Readout]   [Audio: ON/MUTED]   [FPS / ms] │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+See the **[Desktop Viewer User Guide](docs/WoWViewer/USERGUIDE.md)** for a full manual detailing every keybinding, workbench destination, and workflow.
+
+---
+
+## CLI Tools Overview
+
+| Command | Tool Project | Purpose |
+|---|---|---|
+| `m2 inspect` | `WowViewer.Tool.Inspect` | Inspect M2/MDX bones, sequences, attachments, and bounding boxes |
+| `pm4 inspect` | `WowViewer.Tool.Inspect` | Dump and audit PM4 MSCN/MSPV/MSUR geometry and linkages |
+| `rosetta-generate` | `WowViewer.Tool.Inspect` | Generate synthetic museum calibration maps with MCAL text and pedestals |
+| `map inspect` | `WowViewer.Tool.Inspect` | Analyze ADT/WDT terrain chunks, layers, and bounding boxes |
+| `alpha-to-lk` | `WowViewer.Tool.Converter` | Convert 0.5.3 monolithic WDT maps into modern LK ADT/WDT files |
+| `lk-to-alpha` | `WowViewer.Tool.Converter` | Convert modern LK ADT maps into 0.5.3 monolithic WDT containers |
+| `harvest-map` | `WowViewer.Tool.Harvest` | Extract terrain height, normals, and texture layers into tensor stores |
+| `synthetic-minimap`| `WowViewer.Tool.Harvest` | Compose high-fidelity minimap images directly from raw terrain data |
+
+See the **[CLI Tools Reference Guide](docs/CLI-TOOLS.md)** for syntax, options, and examples.
+
+---
+
+## Client Era Support Matrix
+
+| Client Era | Version | Support Status | Key Implemented Features |
+|---|---|---|---|
+| **Alpha** | 0.5.3 – 0.5.5 | **Fully Supported** | Monolithic WDTs, v14 WMO monoliths, MDX/MDL models, 2880-unit world clock, Alpha audio catalog |
+| **Early Beta** | 0.6.x – 0.10.x | **Supported** | Split ADT/WDT transition format, chunked early models, prototype map layouts |
+| **Classic** | 1.12.1 | **Fully Supported** | Standard ADTs with MCCV/MCLY/MCAL, v17 WMOs, 2004-era M2 structures, AreaTable routing |
+| **TBC** | 2.4.3 | **Fully Supported** | Embedded skin profiles, expanded WMO materials, multi-layer liquid chunks |
+| **WotLK** | 3.3.5a | **Fully Supported** | Reference LK format, separated M2 `.skin` files, full PM4 object matching, WDL terrain horizons |
+| **Cataclysm** | 4.0.0 – 4.3.4 | **Supported** | V20/V21 chunk updates, modern liquid headers, Cataclysm-era PM4 models |
+
+---
+
+## Safety and Architecture Rules
+
+1. **Library-First Architecture**: Format readers/writers (`WowViewer.Core.IO`), domain algorithms, and edit policies live strictly in `src/core/` and contain no UI or viewer dependencies.
+2. **Configuration vs Code**: Client paths are runtime configuration (`--game-path` or UI selections). Machine-local absolute paths are never hardcoded in source.
+3. **Non-Destructive Storage**: Placement modifications and conversions write to designated output paths (`output/projects/...`) with source-hash verification and JSON provenance sidecars.

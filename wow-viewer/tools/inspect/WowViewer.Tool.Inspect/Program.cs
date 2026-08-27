@@ -7482,6 +7482,9 @@ static void RunRosettaGenerate(string[] args)
 	// Optional. When not given, one is picked out of the client's own listfile below; a hard-coded
 	// default is exactly how the corpus ended up naming a texture the client does not ship.
 	string? requestedGroundTexture = GetOption(args, "--ground-texture");
+	string? requestedInkTexture = GetOption(args, "--ink-texture");
+	float pedestalHeight = float.TryParse(GetOption(args, "--pedestal-height"), out float ph) ? ph : 4f;
+	float pedestalBevel = float.TryParse(GetOption(args, "--pedestal-bevel"), out float pb) ? pb : 12.5f;
 
 	if (string.IsNullOrWhiteSpace(clientRoot) || string.IsNullOrWhiteSpace(output))
 	{
@@ -7498,67 +7501,52 @@ static void RunRosettaGenerate(string[] args)
 	string outputRoot = Path.GetFullPath(output);
 	string MapRootFor(string name) => Path.Combine(outputRoot, "World", "Maps", name);
 
-	// Pre-flight BEFORE the archives are scanned and the layout is computed. A previous run of the
-	// same map name lives in {output}\World\Maps\{mapName}NN, and every map re-anchors at the start
-	// tile, so its tile names collide with this run's by construction. Finding that out only when the
-	// first file is about to be written wastes minutes and exits on a stack trace.
-	string mapsRoot = Path.Combine(Path.GetFullPath(output), "World", "Maps");
-	string[] priorRuns = Directory.Exists(mapsRoot)
-		? [.. Directory.GetDirectories(mapsRoot)
+	// Multi-map pre-flight: check whether any target map folder already exists with tiles.
+	// Done before scanning the archive so a collision is an immediate refusal, not a wasted multi-minute run.
+	if (!overwrite && Directory.Exists(outputRoot))
+	{
+		string[] existingMapDirs = Directory.GetDirectories(Path.Combine(outputRoot, "World", "Maps"))
 			.Where(d =>
 			{
 				string name = Path.GetFileName(d);
 				return name.StartsWith(mapName, StringComparison.OrdinalIgnoreCase)
-					&& (name.Length == mapName.Length || name[mapName.Length..].All(char.IsDigit));
+					&& Directory.EnumerateFiles(d).Any();
 			})
-			.Where(static d => Directory.EnumerateFiles(d, "*.adt").Any() || Directory.EnumerateFiles(d, "*.wdt").Any())
-			.OrderBy(static d => d, StringComparer.Ordinal)]
-		: [];
+			.ToArray();
 
-	if (priorRuns.Length > 0)
-	{
-		if (!overwrite)
+		if (existingMapDirs.Length > 0)
 		{
 			Console.Error.WriteLine(
-				$"Error: {priorRuns.Length} folder(s) under {mapsRoot} already hold a '{mapName}' run:");
-			foreach (string dir in priorRuns.Take(5))
-				Console.Error.WriteLine($"  {dir}");
-			if (priorRuns.Length > 5)
-				Console.Error.WriteLine($"  ... and {priorRuns.Length - 5} more");
-			Console.Error.WriteLine("Pass --overwrite to replace them, or use a different --output / --map-name.");
+				$"Error: output already contains generated map folders for '{mapName}' " +
+				$"({string.Join(", ", existingMapDirs.Select(Path.GetFileName))}). " +
+				"Pass --overwrite to replace them, choose a different --map-name, or point to a clean --output.");
 			Environment.ExitCode = 1;
 			return;
 		}
-
-		foreach (string dir in priorRuns)
-		{
-			Console.WriteLine($"Overwriting previous run: {dir}");
-			Directory.Delete(dir, recursive: true);
-		}
 	}
 
-	var occupiedTiles = new HashSet<(int X, int Y)>();
-
-    void CollectOccupiedTiles(string directory)
+	// An existing map directory can be used to reserve tile coordinates (e.g. when expanding an existing map).
+	// This only applies to explicit external maps (--existing-map-dir), not our own output.
+	HashSet<(int X, int Y)>? occupiedTiles = null;
+	if (!string.IsNullOrWhiteSpace(existingMapDir))
 	{
-		if (!Directory.Exists(directory))
-			return;
-
-		foreach (string file in Directory.GetFiles(directory, "*.adt"))
+		occupiedTiles = [];
+		if (Directory.Exists(existingMapDir))
 		{
-			// Viewer file convention: {map}_{tileY}_{tileX}.adt — first number is the column
-			// (tileY), second is the row (tileX).
-			string name = Path.GetFileNameWithoutExtension(file);
-			string[] parts = name.Split('_');
-			if (parts.Length >= 3 && int.TryParse(parts[^2], out int first) && int.TryParse(parts[^1], out int second))
-				occupiedTiles.Add((second, first));
+			foreach (string file in Directory.GetFiles(existingMapDir, "*.adt"))
+			{
+				string fileName = Path.GetFileNameWithoutExtension(file);
+				int lastUnderscore = fileName.LastIndexOf('_');
+				int secondLast = lastUnderscore > 0 ? fileName.LastIndexOf('_', lastUnderscore - 1) : -1;
+				if (secondLast >= 0
+					&& int.TryParse(fileName.Substring(secondLast + 1, lastUnderscore - secondLast - 1), out int tileY)
+					&& int.TryParse(fileName.Substring(lastUnderscore + 1), out int tileX))
+				{
+					occupiedTiles.Add((tileX, tileY));
+				}
+			}
 		}
 	}
-
-	// Only a REFERENCE map reserves tiles. This run's own output folders were either empty or just
-	// cleared above, and every generated map re-anchors at the start tile anyway, so treating them
-	// as occupied would push each map off its own block for no reason.
-	CollectOccupiedTiles(existingMapDir ?? string.Empty);
 
 	using var catalog = new NativeMpqService();
 	catalog.LoadArchives([clientRoot]);
@@ -7597,9 +7585,11 @@ static void RunRosettaGenerate(string[] args)
 		.Where(p =>
 		{
 			string ext = Path.GetExtension(p).ToLowerInvariant();
-			return ext == ".wmo" || modelExtensions.Contains(ext);
+			return modelExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase)
+				|| ext == ".wmo";
 		})
-		.OrderBy(static p => p, StringComparer.Ordinal)
+		.Distinct(StringComparer.OrdinalIgnoreCase)
+		.OrderBy(static p => p, StringComparer.OrdinalIgnoreCase)
 		.ToList();
 
 	int wrongEraModels = known.Count(p =>
@@ -7625,18 +7615,24 @@ static void RunRosettaGenerate(string[] args)
 			continue;
 		}
 
-		string ext = Path.GetExtension(path).ToLowerInvariant();
 		try
 		{
-			using var ms = new MemoryStream(bytes, writable: false);
-			if (ext == ".wmo")
+			using var stream = new MemoryStream(bytes, writable: false);
+			if (path.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
 			{
-				WmoSummary summary = WmoSummaryReader.Read(ms, path);
+				if (path.Contains('_', StringComparison.OrdinalIgnoreCase)
+					&& !path.EndsWith("_lod0.wmo", StringComparison.OrdinalIgnoreCase))
+				{
+					exclusions.Add((path, "WMO group or sub-asset"));
+					continue;
+				}
+
+				WmoSummary summary = WmoSummaryReader.Read(stream, path);
 
 				// WMO root version is the era tell: v14 is the alpha monolith (root and groups in one
 				// file), v17 is the split post-alpha form. Mixing them produces a map that names world
 				// models the target client cannot open.
-				bool isAlphaWmo = summary.Version is <= 14;
+				bool isAlphaWmo = summary.Version <= 14;
 				if (isAlphaWmo != alphaOutput)
 				{
 					wrongEraWmos++;
@@ -7647,15 +7643,14 @@ static void RunRosettaGenerate(string[] args)
 
 				entries.Add(new RosettaAssetEntry(path, RosettaAssetKind.WorldModel, summary.BoundsMin, summary.BoundsMax));
 			}
-			else if (ext.Equals(".m2", StringComparison.OrdinalIgnoreCase))
+			else if (path.EndsWith(".m2", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
 			{
-				M2ModelDocument document = M2ModelReaderDispatcher.Read(ms, path);
-				entries.Add(new RosettaAssetEntry(path, RosettaAssetKind.Model, document.BoundsMin, document.BoundsMax));
-			}
-			else
-			{
-				MdxSummary summary = MdxSummaryReader.Read(ms, path);
-				if (summary.BoundsMin is not { } bmin || summary.BoundsMax is not { } bmax)
+				var document = M2ModelReaderDispatcher.Read(stream, path);
+				Vector3 bmin = document.BoundsMin;
+				Vector3 bmax = document.BoundsMax;
+				if (!float.IsFinite(bmin.X) || !float.IsFinite(bmax.X)
+					|| !float.IsFinite(bmin.Y) || !float.IsFinite(bmax.Y)
+					|| !float.IsFinite(bmin.Z) || !float.IsFinite(bmax.Z))
 				{
 					exclusions.Add((path, "no model bounds"));
 					continue;
@@ -7667,12 +7662,6 @@ static void RunRosettaGenerate(string[] args)
 		{
 			exclusions.Add((path, $"read failed: {ex.Message}"));
 		}
-	}
-
-	if (alphaOutput && !maxTilesGiven)
-	{
-		maxTilesPerMap = 512;
-		Console.WriteLine($"Note: --format {format} caps a map at {maxTilesPerMap} tiles (the alpha WDT is built whole in memory). Override with --max-tiles-per-map.");
 	}
 
 	if (entries.Count == 0)
@@ -7713,7 +7702,10 @@ static void RunRosettaGenerate(string[] args)
 		return;
 	}
 
+	string inkTexture = requestedInkTexture ?? RosettaGeneratorOptions.DefaultInkTexture;
+
 	Console.WriteLine($"Ground texture: {groundTexture}  [{groundTextureOrigin}]");
+	Console.WriteLine($"Ink texture:    {inkTexture}");
 
 	Console.WriteLine($"Era admission ({format}): {entries.Count} assets kept, "
 		+ $"{wrongEraModels} wrong-container models and {wrongEraWmos} wrong-version world models rejected.");
@@ -7728,7 +7720,10 @@ static void RunRosettaGenerate(string[] args)
 		GroupByDesignkit: !noKits,
 		KitDepth: kitDepth,
 		MaxTilesPerMap: maxTilesPerMap,
-		GroundTexture: groundTexture);
+		GroundTexture: groundTexture,
+		InkTexture: inkTexture,
+		PedestalHeightMeters: pedestalHeight,
+		PedestalBevelMeters: pedestalBevel);
 
 	RosettaGenerationResult result;
 	try
@@ -7777,7 +7772,7 @@ static void RunRosettaGenerate(string[] args)
 						"delete the file or choose a different --output.");
 
 				// Build, write, drop. Holding every tile's ADT would exhaust memory on a full corpus.
-				File.WriteAllBytes(adtPath, LkAdtWriter.Build(RosettaTilesetGenerator.BuildTileAdt(map.MapName, tile, map.GroundTexture)));
+				File.WriteAllBytes(adtPath, LkAdtWriter.Build(RosettaTilesetGenerator.BuildTileAdt(map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters)));
 				writtenTiles.Add((tile.TileX, tile.TileY));
 			}
 
@@ -7812,7 +7807,7 @@ static void RunRosettaGenerate(string[] args)
 			foreach (RosettaTilePlan tile in map.Tiles)
 			{
 				alphaTiles[(tile.TileX, tile.TileY)] = LkToAlphaConverter.ConvertTile(
-					RosettaTilesetGenerator.BuildTileAdt(map.MapName, tile, map.GroundTexture), tile.TileX, tile.TileY);
+					RosettaTilesetGenerator.BuildTileAdt(map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters), tile.TileX, tile.TileY);
 			}
 
 			alphaWdtPath = Path.Combine(alphaRoot, $"{map.MapName}.wdt");
@@ -9364,7 +9359,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect pm4 audit --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 audit-directory --input <directory>");
 	Console.WriteLine("  wowviewer-inspect pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
-	Console.WriteLine("  wowviewer-inspect rosetta-generate --client-root <game dir> --output <dir> [--map-name <name>] [--format lk|alpha (default: detected from client)] [--ground-texture <path.blp>] [--start-x <n>] [--start-y <n>] [--cell-chunks 1|2|4|8|16] [--label-band-chunks <n>] [--no-cell-borders] [--overwrite] [--no-designkit-grouping] [--kit-depth <n>] [--max-tiles-per-map <n>] [--max-assets <n>] [--existing-map-dir <dir>] [--pm4-dir <dir>]");
+	Console.WriteLine("  wowviewer-inspect rosetta-generate --client-root <game dir> --output <dir> [--map-name <name>] [--format lk|alpha (default: detected from client)] [--ground-texture <path.blp>] [--ink-texture <path.blp>] [--pedestal-height <meters>] [--pedestal-bevel <meters>] [--start-x <n>] [--start-y <n>] [--cell-chunks 1|2|4|8|16] [--label-band-chunks <n>] [--no-cell-borders] [--overwrite] [--no-designkit-grouping] [--kit-depth <n>] [--max-tiles-per-map <n>] [--max-assets <n>] [--existing-map-dir <dir>] [--pm4-dir <dir>]");
 }
 
 static Pm4SegmentExportFile AssertSinglePm4ExportFile(Pm4SegmentExportRun exportRun, string input)

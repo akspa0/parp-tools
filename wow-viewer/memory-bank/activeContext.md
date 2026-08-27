@@ -1,6 +1,12 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
+
+**Spec 190 lane (2026-08-27, checkpoint 14).** Museum-grade presentation and full-scale continent container support:
+1. `RosettaAlphaPainter`: 1024×1024 MCAL text rasterization (0.52 m/texel) with antialiased quincunx sampling and 4-bit nibble slicing into 2-layer MCLY/MCAL chunks.
+2. Museum pedestals (`MCVT`): raised 4m plateau with 12.5m beveled ramp in the terrain mesh under every object cell to eliminate base clipping.
+3. Removed artificial 512-tile Alpha WDT limitation: unified 4096-tile capacity across both Alpha and LK generation.
+4. CLI options: `--ink-texture`, `--pedestal-height`, `--pedestal-bevel`. 30 focused unit tests pass.
 
 **Spec 190 lane (2026-08-26, checkpoint 5).** Stride-scatter reverted to CONTIGUOUS row-major tile
 fill from the start tile (operator rejected scattered tiles; the full ~14k-asset corpus covers the

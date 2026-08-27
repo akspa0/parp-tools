@@ -3,6 +3,23 @@
 Release notes for each tagged version live in [`docs/releases/`](docs/releases/) and are what the
 GitHub Release publishes. This file is the index and the short version.
 
+## v0.5.2.2 — 2026-08-27
+
+Maintenance, Calibration, and Spec Kit release.
+
+### Added
+- **Rosetta Calibration Corpus Generator (`rosetta-generate`)**:
+  - High-resolution $1024 \times 1024$ MCAL/MCLY terrain text rasterization (`RosettaAlphaPainter`) with antialiased quincunx sampling and 4-bit nibble slicing into 2-layer chunk blocks.
+  - Museum pedestal heightfield generation (`MCVT`): 4m elevated plinth with 12.5m linear bevel ramp under each model cell to eliminate base clipping.
+  - Full-continent Alpha WDT support: removed artificial 512-tile limit, unlocking full $64 \times 64$ (4096) tile single-map generation.
+  - Added CLI options `--ink-texture`, `--pedestal-height`, `--pedestal-bevel`, and automated era auto-detection.
+- **Documentation Overhaul**:
+  - Complete rewrite of root `README.md`, `wow-viewer/README.md`, `USERGUIDE.md`, and `CLI-TOOLS.md`.
+
+### Fixed
+- **`SampleCoverage` in `RosettaTextPainter`**: Normalized overlap area by arbitrary sample bounding box area `(su1 - su0) * (sv1 - sv0)` for sub-meter texel accuracy.
+- **`AdtPlacementEditor` Chronology**: Maintained high-water marks on ID allocations across delete-and-substitute operations.
+
 ## v0.5.2.1 — 2026-08-15
 
 Out-of-band patch. **v0.5.2 shipped with known, unresolved rendering jank**; this fixes the causes

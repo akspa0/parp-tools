@@ -261,7 +261,8 @@ public static class RosettaTextPainter
             }
         }
 
-        return Math.Clamp(area / (pixel * pixel), 0f, 1f);
+        float sampleArea = (su1 - su0) * (sv1 - sv0);
+        return sampleArea > 0f ? Math.Clamp(area / sampleArea, 0f, 1f) : 0f;
     }
 
     private static byte Blend(byte from, byte to, float t) =>

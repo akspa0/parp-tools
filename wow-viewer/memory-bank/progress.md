@@ -1,6 +1,15 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
+
+## 2026-08-27 — Spec 190 Phase 1: MCAL text painting, museum pedestals, and full-map Alpha WDT
+
+- **Landed (Phase 1 / US1 complete):**
+  - **MCAL/MCLY multi-texture label painting (`RosettaAlphaPainter`):** 1024×1024 MCAL text rasterization ($0.52\text{ m/texel}$) with quincunx antialiasing and 4-bit nibble slicing into 2-layer MCLY/MCAL chunks (`GroundTexture` + `InkTexture`).
+  - **Museum pedestals (`MCVT`):** Raised 4m plateau with 12.5m linear bevel ramp in terrain heightfield under each object cell to prevent model base clipping.
+  - **Removed 512-tile Alpha WDT limitation:** Supported up to 4096 tiles for Alpha WDTs in single continent containers.
+  - **CLI arguments:** Added `--ink-texture`, `--pedestal-height`, `--pedestal-bevel` to `wowviewer-inspect rosetta-generate`.
+  - **Spec Kit & Tests:** Authored `plan.md`, `tasks.md`, updated `spec.md`; 30 focused unit tests pass in `RosettaTilesetGeneratorTests`. Solution builds with 0 errors.
 
 ## 2026-08-26 — Spec 176 session: Reconcile apply loop landed; scene-discern left uncompiled
 

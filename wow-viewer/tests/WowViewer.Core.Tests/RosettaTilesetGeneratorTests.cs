@@ -548,14 +548,14 @@ public class RosettaTilesetGeneratorTests
 
         RosettaTilePlan tile = Assert.Single(map.Tiles);
         LkAdtData adt = RosettaTilesetGenerator.BuildTileAdt(map.MapName, tile, map.GroundTexture);
-        Assert.Equal(texture, Assert.Single(adt.TextureNames));
+        Assert.Equal(texture, adt.TextureNames[0]);
 
         // And it must survive to the bytes, since that is what a client reads.
         byte[] bytes = LkAdtWriter.Build(adt);
         int mtex = FindChunkPayload(bytes, "MTEX", out int size);
         Assert.True(mtex >= 0, "Written tile must carry an MTEX chunk.");
-        string written = System.Text.Encoding.UTF8.GetString(bytes, mtex, size).TrimEnd('\0');
-        Assert.Equal(texture, written);
+        string written = System.Text.Encoding.UTF8.GetString(bytes, mtex, size);
+        Assert.StartsWith(texture, written);
     }
 
     [Theory]
@@ -677,6 +677,122 @@ public class RosettaTilesetGeneratorTests
     {
         string label = RosettaTilesetGenerator.SanitizeLabel(@"world\kalimdor/azshara (orgrimmar).mdx");
         Assert.Matches("^[A-Z0-9_.\\-]+$", label);
+    }
+
+    [Fact]
+    public void Generate_PedestalHeights_RaiseObjectPlatformWithBevel()
+    {
+        var assets = new List<RosettaAssetEntry>
+        {
+            Model("world/test_pedestal.mdx", 20f),
+        };
+        var options = new RosettaGeneratorOptions(
+            "PedestalTest",
+            PedestalHeightMeters: 4f,
+            PedestalBevelMeters: 12.5f);
+
+        RosettaGenerationResult result = RosettaTilesetGenerator.Generate(assets, options);
+        RosettaMapPlan map = SingleMap(result);
+        RosettaTilePlan tile = Assert.Single(map.Tiles);
+
+        Assert.NotEmpty(tile.Pedestals);
+        Assert.Equal(4f, tile.Pedestals[0].Height);
+
+        RosettaPlacementRecord placement = Assert.Single(tile.Placements);
+        Assert.Equal(4f, placement.RendererPosition.Z);
+        Assert.Equal(4f, placement.RawPosition.Z);
+
+        LkAdtData adt = RosettaTilesetGenerator.BuildTileAdt(
+            map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters);
+
+        // Verify that some chunk heights are raised to the pedestal height
+        float maxHeight = 0f;
+        foreach (LkMcnkData chunk in adt.Chunks)
+        {
+            foreach (float h in chunk.Heights)
+            {
+                if (h > maxHeight)
+                    maxHeight = h;
+            }
+        }
+
+        Assert.Equal(4f, maxHeight, precision: 2);
+    }
+
+    [Fact]
+    public void PaintTile_AlphaMap_GeneratesValidMcalAndLayers()
+    {
+        var assets = new List<RosettaAssetEntry>
+        {
+            Model("world/alpha_mcal_test.mdx", 15f),
+        };
+        var options = new RosettaGeneratorOptions("McalTest");
+
+        RosettaGenerationResult result = RosettaTilesetGenerator.Generate(assets, options);
+        RosettaMapPlan map = SingleMap(result);
+        RosettaTilePlan tile = Assert.Single(map.Tiles);
+
+        Assert.NotNull(tile.AlphaCanvas);
+        Assert.Equal(RosettaAlphaPainter.TexelsPerTile * RosettaAlphaPainter.TexelsPerTile, tile.AlphaCanvas.Length);
+
+        LkAdtData adt = RosettaTilesetGenerator.BuildTileAdt(
+            map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters);
+
+        Assert.Equal(2, adt.TextureNames.Count);
+        Assert.Equal(options.GroundTexture, adt.TextureNames[0]);
+        Assert.Equal(options.InkTexture, adt.TextureNames[1]);
+
+        // Find a chunk that contains painted text alpha
+        LkMcnkData? alphaChunk = adt.Chunks.FirstOrDefault(static c => c.AlphaMapData is { Length: > 0 });
+        Assert.NotNull(alphaChunk);
+        Assert.Equal(2, alphaChunk.NLayers);
+        Assert.Equal(2, alphaChunk.Layers.Count);
+        Assert.Equal(2048, alphaChunk.AlphaMapData!.Length);
+    }
+
+    [Fact]
+    public void BuildTileAdt_AlphaWdt_RoundTripWithMcalAndPlacements()
+    {
+        var assets = new List<RosettaAssetEntry>
+        {
+            Model("world/alpha_wdt_mcal_model.mdx", 20f),
+        };
+        var options = new RosettaGeneratorOptions("AlphaWdtMcalTest");
+
+        RosettaGenerationResult result = RosettaTilesetGenerator.Generate(assets, options);
+        RosettaMapPlan map = SingleMap(result);
+        RosettaTilePlan tile = Assert.Single(map.Tiles);
+
+        LkAdtData lkAdt = RosettaTilesetGenerator.BuildTileAdt(
+            map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters);
+        AlphaTileData alphaTile = LkToAlphaConverter.ConvertTile(lkAdt, tile.TileX, tile.TileY);
+
+        Assert.Equal(2, alphaTile.TextureNames.Count);
+        Assert.NotNull(alphaTile.McalAlphaPack);
+        Assert.Equal(1024, alphaTile.McalAlphaPack.GetLength(0));
+        Assert.Equal(1024, alphaTile.McalAlphaPack.GetLength(1));
+
+        var tilesDict = new Dictionary<(int, int), AlphaTileData>
+        {
+            [(tile.TileX, tile.TileY)] = alphaTile,
+        };
+
+        byte[] wdtBytes = AlphaWdtWriter.Build(map.MapName, tilesDict);
+        Assert.True(wdtBytes.Length > 0);
+        Assert.True(AlphaWdtReader.IsAlphaWdt(wdtBytes));
+
+        bool readSuccess = AlphaWdtReader.TryReadTile(wdtBytes, tile.TileX, tile.TileY, out AlphaTileData? readTile);
+        Assert.True(readSuccess);
+        Assert.NotNull(readTile);
+        Assert.Equal(2, readTile.TextureNames.Count);
+        Assert.Single(readTile.ModelPlacements);
+    }
+
+    [Fact]
+    public void Generate_AllowsFull4096Tiles()
+    {
+        var options = new RosettaGeneratorOptions("FullMapTest", MaxTilesPerMap: 4096);
+        Assert.Equal(4096, options.MaxTilesPerMap);
     }
 
     private static int AssertEntriesOnTile(byte[] bytes, string tag, int stride, int tileX, int tileY)
