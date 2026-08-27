@@ -673,50 +673,6 @@ public class RosettaTilesetGeneratorTests
     }
 
     [Fact]
-    public void GeneratedAlphaWdt_WritesCellLocalFileAxesForClient()
-    {
-        var assets = new List<RosettaAssetEntry>
-        {
-            Model("world/kit/bench_00.mdx", 10f),
-            Model("world/kit/tree_01.mdx", 12f),
-            new("world/kit/hut_02.wmo", RosettaAssetKind.WorldModel,
-                new Vector3(-40f, -30f, -5f), new Vector3(40f, 30f, 30f)),
-        };
-
-        RosettaGenerationResult result = RosettaTilesetGenerator.Generate(
-            assets, new RosettaGeneratorOptions("AlphaAxes", StartTileX: 12, StartTileY: 34, GroupByDesignkit: false));
-        RosettaMapPlan map = SingleMap(result);
-        RosettaTilePlan tile = Assert.Single(map.Tiles);
-
-        AlphaTileData alphaTile = LkToAlphaConverter.ConvertTile(
-            RosettaTilesetGenerator.BuildTileAdt(map.MapName, tile), tile.TileX, tile.TileY);
-
-        byte[] wdtBytes = AlphaWdtWriter.Build(
-            map.MapName,
-            new Dictionary<(int tileX, int tileY), AlphaTileData>
-            {
-                [(tile.TileX, tile.TileY)] = alphaTile,
-            });
-        RosettaAlphaWdtPlacementPatcher.PatchPlacementFileAxes(wdtBytes, map.Tiles);
-
-        var expectedById = tile.Placements.ToDictionary(static p => p.UniqueId);
-
-        int mddf = FindAlphaTileSubchunkPayload(wdtBytes, tile.TileX, tile.TileY, 0x0C, "MDDF", out int mddfSize);
-        Assert.Equal(2 * 36, mddfSize);
-        for (int offset = mddf; offset < mddf + mddfSize; offset += 36)
-        {
-            int uniqueId = BinaryPrimitives.ReadInt32LittleEndian(wdtBytes.AsSpan(offset + 4));
-            AssertAlphaClientFilePosition(wdtBytes, offset, expectedById[uniqueId]);
-        }
-
-        int modf = FindAlphaTileSubchunkPayload(wdtBytes, tile.TileX, tile.TileY, 0x14, "MODF", out int modfSize);
-        Assert.Equal(64, modfSize);
-        int wmoUniqueId = BinaryPrimitives.ReadInt32LittleEndian(wdtBytes.AsSpan(modf + 4));
-        AssertAlphaClientFilePosition(wdtBytes, modf, expectedById[wmoUniqueId]);
-        AssertAlphaClientWmoBounds(wdtBytes, modf, expectedById[wmoUniqueId]);
-    }
-
-    [Fact]
     public void SanitizeLabel_MapsUnsupportedCharacters()
     {
         string label = RosettaTilesetGenerator.SanitizeLabel(@"world\kalimdor/azshara (orgrimmar).mdx");
@@ -948,62 +904,6 @@ public class RosettaTilesetGeneratorTests
         return count;
     }
 
-    private static void AssertAlphaClientFilePosition(byte[] bytes, int offset, RosettaPlacementRecord placement)
-    {
-        Vector3 expected = RosettaTilesetGenerator.GetAlphaClientFilePosition(placement);
-        float fileX = BinaryPrimitives.ReadSingleLittleEndian(bytes.AsSpan(offset + 8));
-        float fileY = BinaryPrimitives.ReadSingleLittleEndian(bytes.AsSpan(offset + 12));
-        float fileZ = BinaryPrimitives.ReadSingleLittleEndian(bytes.AsSpan(offset + 16));
-
-        Assert.Equal(expected.X, fileX, precision: 2);
-        Assert.Equal(expected.Y, fileY, precision: 2);
-        Assert.Equal(expected.Z, fileZ, precision: 2);
-        Assert.InRange(fileX, placement.TileX * TileSize, (placement.TileX + 1) * TileSize);
-        Assert.InRange(fileZ, placement.TileY * TileSize, (placement.TileY + 1) * TileSize);
-
-        (float centerU, float centerV) = RosettaTilesetGenerator.GetObjectBandCenter(placement);
-        Assert.Equal(centerU, fileX - (placement.TileX * TileSize), precision: 2);
-        Assert.Equal(centerV, fileZ - (placement.TileY * TileSize), precision: 2);
-    }
-
-    private static void AssertAlphaClientWmoBounds(byte[] bytes, int offset, RosettaPlacementRecord placement)
-    {
-        Vector3 expected = RosettaTilesetGenerator.GetAlphaClientFilePosition(placement);
-        float extentU = MathF.Abs(placement.Asset.BoundsMax.X - placement.Asset.BoundsMin.X);
-        float extentV = MathF.Abs(placement.Asset.BoundsMax.Y - placement.Asset.BoundsMin.Y);
-        float half = MathF.Max(extentU, extentV) / 2f;
-        float minY = expected.Y + MathF.Min(placement.Asset.BoundsMin.Z, 0f);
-        float maxY = expected.Y + MathF.Max(placement.Asset.BoundsMax.Z, 0f);
-
-        Assert.Equal(expected.X + half, BinaryPrimitives.ReadSingleLittleEndian(bytes.AsSpan(offset + 0x20)), precision: 2);
-        Assert.Equal(maxY, BinaryPrimitives.ReadSingleLittleEndian(bytes.AsSpan(offset + 0x24)), precision: 2);
-        Assert.Equal(expected.Z + half, BinaryPrimitives.ReadSingleLittleEndian(bytes.AsSpan(offset + 0x28)), precision: 2);
-        Assert.Equal(expected.X - half, BinaryPrimitives.ReadSingleLittleEndian(bytes.AsSpan(offset + 0x2C)), precision: 2);
-        Assert.Equal(minY, BinaryPrimitives.ReadSingleLittleEndian(bytes.AsSpan(offset + 0x30)), precision: 2);
-        Assert.Equal(expected.Z - half, BinaryPrimitives.ReadSingleLittleEndian(bytes.AsSpan(offset + 0x34)), precision: 2);
-    }
-
-    private static int FindAlphaTileSubchunkPayload(
-        byte[] wdt,
-        int tileX,
-        int tileY,
-        int mhdrFieldOffset,
-        string tag,
-        out int size)
-    {
-        int mainPayloadOffset = 12 + 8 + 128 + 8;
-        int tileOffset = BinaryPrimitives.ReadInt32LittleEndian(wdt.AsSpan(mainPayloadOffset + (((tileY * 64) + tileX) * 16)));
-        Assert.True(tileOffset > 0, $"Alpha WDT MAIN entry for tile ({tileX},{tileY}) must point at an embedded tile.");
-
-        int mhdrDataOffset = tileOffset + 8;
-        int relativeOffset = BinaryPrimitives.ReadInt32LittleEndian(wdt.AsSpan(mhdrDataOffset + mhdrFieldOffset));
-        int chunkOffset = mhdrDataOffset + relativeOffset;
-
-        Assert.Equal(tag, ReadChunkId(wdt, chunkOffset));
-        size = BinaryPrimitives.ReadInt32LittleEndian(wdt.AsSpan(chunkOffset + 4));
-        return chunkOffset + 8;
-    }
-
     private static int ToMinimapPixel(float meters)
         => Math.Clamp(
             (int)(meters / TileSize * RosettaMinimapPainter.MinimapResolution),
@@ -1044,16 +944,5 @@ public class RosettaTilesetGeneratorTests
         }
 
         return -1;
-    }
-
-    private static string ReadChunkId(byte[] data, int offset)
-    {
-        return new string(new[]
-        {
-            (char)data[offset + 3],
-            (char)data[offset + 2],
-            (char)data[offset + 1],
-            (char)data[offset]
-        });
     }
 }

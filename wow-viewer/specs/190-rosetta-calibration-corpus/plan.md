@@ -71,7 +71,6 @@ This plan details the implementation across 4 phases:
 - [x] Multi-texture layer painting via `RosettaAlphaPainter` (`MCLY` + `MCAL` 4-bit uncompressed nibble maps, 1024×1024 resolution) for sharp labels in Alpha WDT and LK formats.
 - [x] Museum pedestal mesh generation in `MCVT` heightmap (flat raised plateau with beveled slope).
 - [x] Remove 512-tile Alpha WDT limitation, allowing continent-scale maps up to 4096 tiles.
-- [x] Alpha 0.5.3 Rosetta WDT placement bytes are corrected by a Rosetta-owned post-write patcher; LK and the protected Alpha writer remain unchanged.
 - [x] Synthetic minimap model/WMO pins render at the object band center used by the generated placements.
 - [x] Complete focused test coverage in `RosettaTilesetGeneratorTests.cs`.
 

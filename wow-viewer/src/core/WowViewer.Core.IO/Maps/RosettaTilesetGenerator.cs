@@ -785,16 +785,6 @@ public static class RosettaTilesetGenerator
             placement.CellV + (placement.ObjectBandSize / 2f));
     }
 
-    public static Vector3 GetAlphaClientFilePosition(RosettaPlacementRecord placement)
-    {
-        ArgumentNullException.ThrowIfNull(placement);
-        (float u, float v) = GetObjectBandCenter(placement);
-        return new Vector3(
-            (placement.TileX * RosettaGeneratorOptions.TileSize) + u,
-            placement.RendererPosition.Z,
-            (placement.TileY * RosettaGeneratorOptions.TileSize) + v);
-    }
-
     private static float[] CreateChunkHeights(
         int cx, int cy, IReadOnlyList<RosettaPedestal> pedestals, float bevelMeters = 12.5f)
     {

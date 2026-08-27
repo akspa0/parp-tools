@@ -2,6 +2,14 @@
 
 Last updated: 2026-08-27
 
+## 2026-08-27 — Spec 190 Checkpoint 17 correction: minimap-only fix
+
+- **Corrected:**
+  - The previous Alpha Rosetta placement-axis commit treated generated Alpha WDT placement bytes as the defect. That was incorrect: the operator report was about new minimap tooling, not the written map bytes.
+  - Removed the Rosetta Alpha WDT post-write MDDF/MODF coordinate patcher, removed the manifest `alphaClientFilePosition` claim, and restored `rosetta-generate --format alpha` to direct `AlphaWdtWriter.Build(...)` output.
+  - Kept the valid minimap fix: `RosettaMinimapPainter` places synthetic model/WMO pins at the object-band center used by generated placements, not the whole label cell center.
+  - **33/33 focused Rosetta tests pass.** Full solution compiles with 0 errors. Real 0.5.3 minimap visual proof remains operator-owned.
+
 ## 2026-08-27 — Spec 190 Checkpoint 16: Alpha 0.5.3 client asset discovery
 
 - **Landed:**

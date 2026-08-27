@@ -2,12 +2,12 @@
 
 Last updated: 2026-08-27
 
-**Spec 190 lane (2026-08-27, checkpoint 17).** Alpha Rosetta placement-axis correction and synthetic minimap pin alignment:
-1. `rosetta-generate --format alpha` now post-patches only its generated monolithic 0.5.3 WDT bytes: MDDF/MODF positions are written as tileX-local file X and tileY-local file Z, with WMO bounds projected through the same Rosetta-only path.
-2. `AlphaWdtWriter.cs` and the map renderer/terrain adapter/scene-loading/culling base remain untouched.
-3. `RosettaMinimapPainter` now places model/WMO pins at the object-band center used by `RosettaTilesetGenerator`, not the whole label cell center.
+**Spec 190 lane (2026-08-27, checkpoint 17).** Correction: Alpha Rosetta map bytes were not the proven defect; the retained fix is minimap-only.
+1. `rosetta-generate --format alpha` writes the monolithic map bytes directly from `AlphaWdtWriter.Build(...)`; no Rosetta post-write MDDF/MODF coordinate mutation remains.
+2. `RosettaMinimapPainter` now places model/WMO pins at the object-band center used by `RosettaTilesetGenerator`, not the whole label cell center.
+3. No map renderer, terrain adapter, scene-loading, culling, protected writer, or generated map placement byte contract was changed.
 4. Noggit3 evidence: its minimap is WDL horizon-derived and skips WDL object chunks; no accessible Noggit/Noggit-Red per-object minimap denylist or classifier was found in this pass.
-5. 34 focused Rosetta tests pass, including direct Alpha WDT MDDF/MODF byte-axis checks and a minimap marker pixel regression. Real 0.5.3 client visual proof remains operator-owned.
+5. 33 focused Rosetta tests pass, including a minimap marker pixel regression. Real 0.5.3 client visual proof remains operator-owned.
 
 **Spec 190 lane (2026-08-27, checkpoint 16).** Alpha 0.5.3 candidate asset discovery in `rosetta-generate`:
 1. Updated `RunRosettaGenerate` in `WowViewer.Tool.Inspect/Program.cs` to scan Alpha-era `.mdx.mpq`, `.mdl.mpq`, `.m2.mpq`, `.wmo.mpq`, and `.blp` single-file wrappers on disk with robust enumeration options.

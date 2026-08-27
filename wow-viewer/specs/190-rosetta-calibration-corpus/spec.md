@@ -12,32 +12,27 @@ object at a known position, decode that synthetic data back through our own pipe
 complete labelled reference library, and automatically match real PM4 data against it. Also: we are
 not generating ADTs for tiles that have no ADT — synthesize them so no tile is skipped."
 
-> **Implementation checkpoint 16 (2026-08-27).** Alpha 0.5.3 placement axes and synthetic minimap
-> marker correction:
+> **Implementation checkpoint 17 (2026-08-27).** Correction to checkpoint 16: the Alpha WDT bytes
+> were not the proven defect. The reported mismatch was in new minimap tooling.
 >
-> 1. **Alpha Rosetta placement bytes are now tested against tile-local file axes.**
->    `rosetta-generate --format alpha` uses a Rosetta-owned post-write WDT patcher after the protected
->    `AlphaWdtWriter.Build(...)` call. It writes MDDF/MODF coordinates as
->    `fileX = tileX * TileSize + objectBandCenterU` and `fileZ = tileY * TileSize + objectBandCenterV`,
->    so off-diagonal tiles no longer rely on a reader/writer self-round-trip that can hide transposed
->    axes. `AlphaWdtWriter.cs` itself remains unchanged.
-> 2. **No base renderer, terrain-loading, or protected writer code changed.** This checkpoint
->    deliberately leaves the map renderer, terrain adapters, scene loading, visibility/cull policy, and
->    shared Alpha writer behavior untouched; the correction is isolated to Alpha Rosetta generation
->    postprocessing plus regression tests.
-> 3. **Synthetic minimap pins now target the object band center.** `RosettaMinimapPainter` places the
+> 1. **Removed the mistaken Alpha WDT byte mutation.** `rosetta-generate --format alpha` again writes
+>    the monolithic map bytes directly from `AlphaWdtWriter.Build(...)`; there is no Rosetta post-write
+>    MDDF/MODF coordinate patch and no manifest field claiming alternate Alpha client file positions.
+> 2. **The retained fix is minimap-only.** `RosettaMinimapPainter` places the
 >    cyan model marker and amber WMO marker at the same upper-band center used by the generated
 >    placement, instead of the whole text cell center. The minimap marker is still a synthetic locator,
 >    not rendered MDX/WMO geometry.
+> 3. **No base renderer, terrain-loading, protected writer, or generated map byte contract changed.**
+>    New tooling must layer over the proven base implementation unless a separate evidence-backed spec
+>    explicitly reopens that base.
 > 4. **Noggit reference check did not reveal a per-object minimap denylist.** Noggit3's minimap widget
 >    consumes WDL horizon data, and its horizon loader skips WDL object chunks (`MWMO`, `MWID`, `MODF`)
 >    while deriving the minimap from `height_17`. The object visibility logic found in `ModelInstance`
 >    is normal 3D distance/frustum/projected-size culling, not a minimap object classifier. No accessible
 >    Noggit/Noggit-Red asset denylist or "do not draw on minimap" table was found in this pass.
 >
-> Verified: 34 focused `RosettaTilesetGeneratorTests` pass, including direct MDDF/MODF byte reads from
-> the generated Alpha WDT and a minimap marker pixel regression. Real 0.5.3 client visual proof remains
-> operator-owned.
+> Verified: 33 focused `RosettaTilesetGeneratorTests` pass, including the minimap marker pixel
+> regression. Real 0.5.3 client visual proof remains operator-owned.
 >
 > **Implementation checkpoint 15 (2026-08-27).** Minimap generation and runtime tile coordinate readout:
 >
