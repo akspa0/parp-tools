@@ -7836,7 +7836,9 @@ static void RunRosettaGenerate(string[] args)
 				throw new InvalidOperationException(
 					$"Refusing to overwrite existing alpha WDT {alphaWdtPath}. Choose a clean --output.");
 
-			File.WriteAllBytes(alphaWdtPath, AlphaWdtWriter.Build(map.MapName, alphaTiles));
+			byte[] alphaWdtBytes = AlphaWdtWriter.Build(map.MapName, alphaTiles);
+			RosettaAlphaWdtPlacementPatcher.PatchPlacementFileAxes(alphaWdtBytes, map.Tiles);
+			File.WriteAllBytes(alphaWdtPath, alphaWdtBytes);
 		}
 
 		// Render and write 256x256 minimap BLP files for every generated tile.
@@ -7911,7 +7913,15 @@ static void RunRosettaGenerate(string[] args)
 				p.TileY,
 				rawPosition = new[] { p.RawPosition.X, p.RawPosition.Y, p.RawPosition.Z },
 				rendererPosition = new[] { p.RendererPosition.X, p.RendererPosition.Y, p.RendererPosition.Z },
+				alphaClientFilePosition = alphaOutput
+					? new[] {
+						RosettaTilesetGenerator.GetAlphaClientFilePosition(p).X,
+						RosettaTilesetGenerator.GetAlphaClientFilePosition(p).Y,
+						RosettaTilesetGenerator.GetAlphaClientFilePosition(p).Z,
+					}
+					: null,
 				p.CellSize,
+				p.ObjectBandSize,
 				cellU = p.CellU,
 				cellV = p.CellV,
 				label = p.LabelText,

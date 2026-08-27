@@ -115,6 +115,7 @@ public sealed record RosettaPlacementRecord(
     float CellU,
     float CellV,
     float CellSize,
+    float ObjectBandSize,
     string LabelText,
     IReadOnlyList<string> LabelLines,
     float LabelPixelMeters,
@@ -561,7 +562,7 @@ public static class RosettaTilesetGenerator
 
             var record = new RosettaPlacementRecord(
                 cell.Asset, tileX, tileY, raw, renderer,
-                cell.CellU, cell.CellV, cell.CellSize,
+                cell.CellU, cell.CellV, cell.CellSize, cell.ObjectBandSize,
                 cell.LabelText, cell.LabelLines, cell.LabelPixelMeters, cell.UniqueId);
             list.Add(record);
             placements.Add(record);
@@ -774,6 +775,24 @@ public static class RosettaTilesetGenerator
             MhdrFlags = blank.MhdrFlags,
             MfboFlightBounds = blank.MfboFlightBounds,
         };
+    }
+
+    public static (float U, float V) GetObjectBandCenter(RosettaPlacementRecord placement)
+    {
+        ArgumentNullException.ThrowIfNull(placement);
+        return (
+            placement.CellU + (placement.CellSize / 2f),
+            placement.CellV + (placement.ObjectBandSize / 2f));
+    }
+
+    public static Vector3 GetAlphaClientFilePosition(RosettaPlacementRecord placement)
+    {
+        ArgumentNullException.ThrowIfNull(placement);
+        (float u, float v) = GetObjectBandCenter(placement);
+        return new Vector3(
+            (placement.TileX * RosettaGeneratorOptions.TileSize) + u,
+            placement.RendererPosition.Z,
+            (placement.TileY * RosettaGeneratorOptions.TileSize) + v);
     }
 
     private static float[] CreateChunkHeights(

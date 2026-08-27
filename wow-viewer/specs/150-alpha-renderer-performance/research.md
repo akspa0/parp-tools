@@ -101,6 +101,40 @@ record fallback counts/reasons, and compare the same scene before and after.
 | 0.5.3 Ghidra program | Open, read-only; renderer anchors not yet recorded | Native evidence source |
 | User screenshot | 23 FPS / 41.2 ms interactive frame | Motivation only, not benchmark |
 
+## Source inspection - apparent Alpha MDX/WMO unload versus later WMO/M2 persistence (2026-08-27)
+
+The renderer does not currently select a separate terrain/object streaming policy for Alpha 0.5.3
+terrain maps. `WorldScene.ResolveTerrainAssetLoadPolicy` returns the normal streaming policy for all
+non-WMO-only terrain adapters. That policy queues up to 12 new MDX and 6 new WMO loads per frame,
+then lets the shared deferred loader process up to 4 loads inside a 3.5 ms nominal budget. The
+renderer cache limits are also not the source of an apparent unload: `WorldAssetManager` has
+`MaxMdxCached = 0` and `MaxWmoCached = 0`, so parsed model renderers are not LRU-evicted during
+navigation. Only raw file bytes are bounded.
+
+The visible lifetime comes from the tile residency and object admission layers. `TerrainManager`
+removes GPU tile meshes and fires `OnTileUnloaded` once a tile leaves the retained window plus one
+extra hysteresis ring; `WorldScene.OnTileUnloaded` then removes that tile's MDX/WMO placement lists
+and rebuilds the flat object lists. Re-entry uses cached parsed tile data, but the placement is not
+eligible for visibility while its tile is outside the active/resident lease.
+
+The likely user-visible era difference is therefore admission/backend behavior, not actual renderer
+disposal. Alpha MDX/MDL models that are not M2-family containers load through direct `MdxRenderer`,
+defer their textures, and are culled by the MDX object path, including camera-cone, distance,
+projected-size, and small-doodad rules. Later 3.3.5+ `.m2` models go through the M2 adapter/runtime
+route; runtime-backend M2s currently report `RequiresUnbatchedWorldRender` unless backed by the
+legacy renderer, so submission can differ. WMO placement admission also differs from MDX: current
+WMO collection deliberately ignores vision-cone culling, and WMO group visibility unions portal
+admission with raw group-frustum visibility, so a frustum-visible group cannot be rejected by portal
+state. That behavior matches the already-recorded dense-WMO symptom where WMO content persists past
+the effective terrain/fog admission.
+
+Next measurement: do not change a culling rule yet. Use the existing Perf panel to record, in the
+same Alpha 0.5.3 flight, `LastFrameRetainedTileCount`, `TileUnloadEventCount`, WMO admission
+dominant rule, visible/cull counts for WMO and MDX, pending deferred-load counts, and M2 route
+decisions for any models that appear to pop. If the report shows actual tile-unload churn, tune the
+retained/hysteresis lease. If tiles remain resident while Alpha MDX vanishes, instrument MDX
+admission with the same per-rule accounting that Spec 151 added for WMO.
+
 ## Open proof gates
 
 - Exact 0.5.3 native renderer functions and state/resource strategy remain to be recovered in Ghidra.

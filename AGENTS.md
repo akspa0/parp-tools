@@ -89,6 +89,10 @@ PASS             → Report completion / await operator approval (Do not self-me
   - Do NOT modify or break existing MPQ readers (`MpqArchiveCatalog.cs`, `NativeMpqService.cs`), ADT readers, WMO readers, or M2/MDX readers unless explicitly instructed by the operator for a verified format bug.
   - `gillijimproject_refactor/` is read-only reference code unless explicitly requested by the user for a bounded legacy fix.
   - `AlphaWdtWriter.cs` remains frozen unless a proven compatibility regression requires reopening.
+- **Layer New Tooling Above Proven Base Tooling**:
+  - When building new generators, inspectors, experiments, game-mode slices, or SpecKit features on top of existing renderer/editor/format behavior, preserve the existing base implementation by default even when new evidence suggests it may be incomplete or disagree with synthetic output.
+  - Prefer opt-in adapters, writer modes, probes, manifests, and regression tests for new tooling. Do not change shared renderer, camera, terrain-loading, editor, or format-reader behavior merely to make new tooling pass.
+  - If the base implementation itself appears wrong, open or route to a separate explicit spec with evidence and user approval. Treat future player-model camera/game-mode work as a new layer beside the editor tooling, not as an implicit rewrite of the current editor base.
 - **Maintain Clear Separation**: Keep UI out of core libraries. Maintain the Alpha vs Standard terrain adapter separation.
 
 ---

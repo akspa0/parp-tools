@@ -122,8 +122,7 @@ public static class RosettaMinimapPainter
         // 4. Render Placement Pins (Cyan dot for M2, Orange box for WMO)
         foreach (RosettaPlacementRecord placement in tile.Placements)
         {
-            float centerU = placement.CellU + (placement.CellSize / 2f);
-            float centerV = placement.CellV + (placement.CellSize / 2f);
+            (float centerU, float centerV) = RosettaTilesetGenerator.GetObjectBandCenter(placement);
             int cx = Math.Clamp((int)(centerU / TileWorldSize * MinimapResolution), 0, MinimapResolution - 1);
             int cy = Math.Clamp((int)(centerV / TileWorldSize * MinimapResolution), 0, MinimapResolution - 1);
 
