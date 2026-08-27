@@ -74,7 +74,11 @@ public sealed class WdtSummaryReaderTests
         WriteUInt32(mainData, 0, 128);
         WriteUInt32(mainData, 16, 256);
 
-        byte[] mphdData = new byte[32];
+        // Alpha MPHD is NOT the LK flags struct - AlphaWdtWriter.PatchMphd writes
+        // [0]=mdxNameCount+1, [4]=mdnmOffset, [8]=wmoNameCount+1, [12]=monmOffset. This fixture
+        // uses that real layout: 3 MDX names and 1 WMO name below.
+        byte[] mphdData = new byte[128];
+        WriteUInt32(mphdData, 0, 4);
         WriteUInt32(mphdData, 8, 2);
 
         byte[] bytes =
@@ -91,7 +95,10 @@ public sealed class WdtSummaryReaderTests
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, "alpha.wdt");
         WdtSummary summary = WdtSummaryReader.Read(stream, fileSummary);
 
-        Assert.True(summary.IsWmoBased);
+        // A map that HAS terrain tiles is a terrain map. Reading LK flag bits out of the alpha MPHD
+        // previously called this WMO-based, because the low bit of the model count sits where the LK
+        // wmo-based flag would be - which told the terrain adapter there was no terrain to draw.
+        Assert.False(summary.IsWmoBased);
         Assert.Equal(2, summary.TilesWithData);
         Assert.Equal(16, summary.MainCellSizeBytes);
         Assert.Equal(3, summary.DoodadNameCount);
@@ -99,6 +106,32 @@ public sealed class WdtSummaryReaderTests
         Assert.Equal(0, summary.DoodadPlacementCount);
         Assert.Equal(2, summary.WorldModelPlacementCount);
         Assert.Null(summary.MainFlags);
+    }
+
+    [Fact]
+    public void Read_AlphaWmoOnlyWdtBuffer_IsWmoBased()
+    {
+        // The alpha form of a WMO-only map: no terrain tile carries data, and a world model is named.
+        byte[] mainData = new byte[64 * 64 * 16];
+        byte[] mphdData = new byte[128];
+        WriteUInt32(mphdData, 8, 2);
+
+        byte[] bytes =
+        [
+            .. CreateChunk("MVER", CreateUInt32Payload(18)),
+            .. CreateChunk("MPHD", mphdData),
+            .. CreateChunk("MAIN", mainData),
+            .. CreateChunk("MONM", CreateStringBlock("alpha_world.wmo")),
+            .. CreateChunk("MODF", new byte[64]),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, "alpha_wmo.wdt");
+        WdtSummary summary = WdtSummaryReader.Read(stream, fileSummary);
+
+        Assert.True(summary.IsWmoBased);
+        Assert.Equal(0, summary.TilesWithData);
+        Assert.Equal(1, summary.WorldModelNameCount);
     }
 
     [Fact]

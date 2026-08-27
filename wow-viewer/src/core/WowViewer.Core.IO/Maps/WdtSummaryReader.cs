@@ -36,21 +36,41 @@ public static class WdtSummaryReader
         byte[] mainData = MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Main) ?? [];
         int mainCellSize = InferMainCellSize(mainData);
 
+        int tilesWithData = CountTilesWithData(mainData);
+        int doodadNameCount = MapSummaryReaderCommon.CountStringEntries(
+            MapSummaryReaderCommon.ReadFirstAvailableChunkPayload(stream, fileSummary, [MapChunkIds.Mdnm, MapChunkIds.Mmdx]));
+        int worldModelNameCount = MapSummaryReaderCommon.CountStringEntries(
+            MapSummaryReaderCommon.ReadFirstAvailableChunkPayload(stream, fileSummary, [MapChunkIds.Monm, MapChunkIds.Mwmo]));
+
         return new WdtSummary(
             fileSummary.SourcePath,
-            isWmoBased: IsWmoBased(mphdData),
-            tilesWithData: CountTilesWithData(mainData),
+            isWmoBased: IsWmoBased(mphdData, mainCellSize, tilesWithData, worldModelNameCount),
+            tilesWithData: tilesWithData,
             totalTiles: WdtTileCount,
             mainCellSizeBytes: mainCellSize,
-            doodadNameCount: MapSummaryReaderCommon.CountStringEntries(MapSummaryReaderCommon.ReadFirstAvailableChunkPayload(stream, fileSummary, [MapChunkIds.Mdnm, MapChunkIds.Mmdx])),
-            worldModelNameCount: MapSummaryReaderCommon.CountStringEntries(MapSummaryReaderCommon.ReadFirstAvailableChunkPayload(stream, fileSummary, [MapChunkIds.Monm, MapChunkIds.Mwmo])),
+            doodadNameCount: doodadNameCount,
+            worldModelNameCount: worldModelNameCount,
             doodadPlacementCount: MapSummaryReaderCommon.CountPlacements(MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Mddf), MddfEntrySize),
             worldModelPlacementCount: MapSummaryReaderCommon.CountPlacements(MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Modf), ModfEntrySize),
             mainFlags: ReadMainFlagsSummary(mainData, mainCellSize));
     }
 
-    private static bool IsWmoBased(byte[] mphdData)
+    /// <summary>
+    /// Whether the map is a single world model rather than terrain.
+    /// </summary>
+    /// <remarks>
+    /// The alpha MPHD is NOT the LK flags struct: its first fields are the MDX name count, the MDNM
+    /// offset, the WMO name count and the MONM offset (see <c>AlphaWdtWriter.PatchMphd</c>). Reading
+    /// LK flags out of it makes any alpha map with an ODD model count report as WMO-based, because
+    /// the low bit of that count lands where the LK wmo-based flag would be. Alpha carries no such
+    /// flag, so decide it structurally: a WMO-only map has no terrain tiles and does name a world
+    /// model. The alpha 16-byte MAIN cell is what tells the two layouts apart.
+    /// </remarks>
+    private static bool IsWmoBased(byte[] mphdData, int mainCellSize, int tilesWithData, int worldModelNameCount)
     {
+        if (mainCellSize == AlphaMainCellSize)
+            return tilesWithData == 0 && worldModelNameCount > 0;
+
         if (mphdData.Length >= 12 && BinaryPrimitives.ReadUInt32LittleEndian(mphdData.AsSpan(8, 4)) == 2)
             return true;
 

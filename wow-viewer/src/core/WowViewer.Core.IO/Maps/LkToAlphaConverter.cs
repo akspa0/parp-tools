@@ -36,8 +36,22 @@ public static class LkToAlphaConverter
 
         float[,] heightmap = new float[TileHeightmapSize, TileHeightmapSize];
         float[,,] normalXyz = new float[TileHeightmapSize, TileHeightmapSize, 3];
-        float[,,] alphaPack = new float[1024, 1024, 4];
-        float[,] shadowMask1024 = new float[1024, 1024];
+        // 16 MB and 4 MB respectively. Allocate them only when the source actually carries alpha or
+        // shadow data: a single-layer tile with neither (every synthetic tile, and plenty of real
+        // ones) otherwise retains 20 MB of zeroes per tile, which puts a hard ceiling on how many
+        // tiles a caller can hold at once.
+        bool sourceHasAlpha = false;
+        bool sourceHasShadow = false;
+        foreach (LkMcnkData probe in adt.Chunks)
+        {
+            if (probe.AlphaMapData is { Length: > 0 })
+                sourceHasAlpha = true;
+            if (probe.ShadowMap is { Length: > 0 })
+                sourceHasShadow = true;
+        }
+
+        float[,,]? alphaPack = sourceHasAlpha ? new float[1024, 1024, 4] : null;
+        float[,]? shadowMask1024 = sourceHasShadow ? new float[1024, 1024] : null;
         int[,,] texIds = new int[16, 16, 4];
         bool[,,] layerMask = new bool[16, 16, 4];
         bool[,] holes = new bool[16, 16];
@@ -73,7 +87,8 @@ public static class LkToAlphaConverter
                 InjectChunkHeights(heightmap, chunk, tileBaseHeight, cx, cy);
                 InjectChunkNormals(normalXyz, chunk, cx, cy);
                 InjectChunkAlpha(alphaPack, chunk, adt.TextureNames, texIds, layerMask, cx, cy);
-                InjectChunkShadow(shadowMask1024, chunk, cx, cy);
+                if (shadowMask1024 is not null)
+                    InjectChunkShadow(shadowMask1024, chunk, cx, cy);
                 holes[cx, cy] = chunk.HoleMask != 0;
                 holeFullMasks[cx, cy] = (ushort)(chunk.HoleMask & 0xFFFF);
                 areaIds[cx, cy] = areaIdMapper is null
@@ -139,6 +154,9 @@ public static class LkToAlphaConverter
                 {
                     if (layerMask[cx, cy, l]) hasAlpha = true;
                 }
+                if (shadowMask1024 is null)
+                    continue;
+
                 for (int y = 0; y < 64; y++)
                 {
                     for (int x = 0; x < 64; x++)
@@ -149,8 +167,8 @@ public static class LkToAlphaConverter
             }
         }
 
-        float[,,]? alphaPack256 = hasAlpha ? DownsampleAlphaPack(alphaPack) : null;
-        float[,]? shadowMask256 = hasShadow ? DownsampleShadowMask(shadowMask1024) : null;
+        float[,,]? alphaPack256 = hasAlpha && alphaPack is not null ? DownsampleAlphaPack(alphaPack) : null;
+        float[,]? shadowMask256 = hasShadow && shadowMask1024 is not null ? DownsampleShadowMask(shadowMask1024) : null;
 
         FillHeightmapGaps(heightmap);
 
@@ -168,6 +186,8 @@ public static class LkToAlphaConverter
             mcnrNormalXyz: normalXyz,
             mcshShadowMask256: shadowMask256,
             mcshShadowMask1024: hasShadow ? shadowMask1024 : null,
+            // ReSharper disable once RedundantArgumentDefaultValue -- keeps the 256 downsample paired
+            // with its 1024 source above.
             areaIds: areaIds,
             // Carry every chunk's MCNK flags, not just the liquid ones. Previously flags reached the
             // alpha side only through a liquid chunk, so a bit like 0x40 (has_mccv) on a dry chunk had
@@ -313,7 +333,7 @@ public static class LkToAlphaConverter
         }
     }
 
-    private static void InjectChunkAlpha(float[,,] alphaPack, LkMcnkData chunk,
+    private static void InjectChunkAlpha(float[,,]? alphaPack, LkMcnkData chunk,
         IReadOnlyList<string> textureNames, int[,,] texIds, bool[,,] layerMask, int cx, int cy)
     {
         if (chunk.Layers == null || chunk.Layers.Count == 0) return;

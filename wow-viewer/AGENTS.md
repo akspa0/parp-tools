@@ -39,6 +39,8 @@ start a later phase until the current phase has focused validation.
   into source or portable docs. Report root, build, and fingerprint for validation.
 - Preserve unrelated dirty changes. Do not use destructive git commands or broad staging.
 - Build/test proof is not runtime/rendering/performance/audio proof.
+- Do not use placeholder comments. Write out the full implementation logic even if it is repetitive. 
+- Output only the git diff patch format for each specific function.
 
 ## Ownership map
 

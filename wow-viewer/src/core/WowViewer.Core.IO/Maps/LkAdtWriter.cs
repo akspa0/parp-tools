@@ -300,7 +300,8 @@ public static class LkAdtWriter
         if (chunk.DoodadRefs.Count > 0 || chunk.WorldModelRefs.Count > 0)
         {
             mcrfOffset = (int)ms.Position;
-            int mcrfSize = 4 + chunk.DoodadRefs.Count * 4 + chunk.WorldModelRefs.Count * 4;
+            // Payload = nDoodadRefs + nWorldModelRefs counts followed by both index arrays.
+            int mcrfSize = 8 + chunk.DoodadRefs.Count * 4 + chunk.WorldModelRefs.Count * 4;
             bw.Write(FourCC.FromString("MCRF").ToFileBytes());
             bw.Write(mcrfSize);
             bw.Write(chunk.DoodadRefs.Count);

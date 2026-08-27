@@ -2,14 +2,38 @@
 
 Last updated: 2026-08-26
 
-**Spec 190 lane (2026-08-26).** US1 generation slice implemented and tested:
-`RosettaTilesetGenerator` + `RosettaTextPainter` in `WowViewer.Core.IO/Maps`, `rosetta-generate`
-command in `WowViewer.Tool.Inspect`. Deterministic designkit-style layout (footprint-sized cells,
-occupied-tile skip), asset names rasterized into MCCV vertex colors via a 5x7 bitmap font, tiles
-built on `BlankAdtFactory` and written by `LkAdtWriter`; manifest JSON beside the tiles. 5 focused
-tests pass; solution builds clean. Spec: [190-rosetta-calibration-corpus](../specs/190-rosetta-calibration-corpus/spec.md).
-Next: user runs the enumeration against a configured client root (user-owned), then US2 reference-
-library builder. Offline-only remains binding.
+**Spec 190 lane (2026-08-26, checkpoint 5).** Stride-scatter reverted to CONTIGUOUS row-major tile
+fill from the start tile (operator rejected scattered tiles; the full ~14k-asset corpus covers the
+map naturally). New CI alignment proof: every placement decoded with the viewer's rule
+`(M − rawY, M − rawX)` must land inside its tile's ChunkCorner bounds. Smoke: 400 assets → 74
+contiguous tiles, 345 placements, 2,578 exclusions (WMO group files). 8 focused tests pass.
+
+**Spec 190 lane (2026-08-26, checkpoint 4).** Output is a self-consistent standalone map under
+`{output}/World/Maps/{mapName}/` — folder, tile prefix (`{map}_{tileY}_{tileX}.adt`), WDT, and WDL
+all derive from one map name; mismatches are refused. Tiles spread across the whole 64×64 grid on a
+stride grid (tile count measured first). Smoke-verified on `C:\WoW4-data\WoW-12025`: 14,029
+candidates, 60 placements, 7 tiles at stride-25, WDT parses via `map inspect`. 7 focused tests pass.
+The "objects horizontal vs ADTs vertical" report came from pre-fix outputs (old transposing naming).
+Next: user runs the current binary into a fresh output and confirms objects sit on their tiles.
+
+**Spec 190 lane (2026-08-26, checkpoint 3).** Second real run root cause: the viewer loads
+`{map}_{tileY}_{tileX}.adt` (column first) while the generator wrote `{tileX}_{tileY}` — every tile
+loaded transposed, so terrain showed as a strip and objects landed on nonexistent tiles. Fixed file
+naming, occupied-tile parsing, WDT/WDL tuple convention (MAIN read at `tileX*64+tileY`), whole-map
+row-major layout spread, and label shrink-to-fit (overflow was the "nonsense" text). 7 focused tests
+pass. Next: user re-run into a FRESH output dir, confirm objects render + labels legible.
+
+**Spec 190 lane (2026-08-26, checkpoint 2).** First real run exposed three defects, all fixed and
+tested: (1) placements invisible — raw MDDF/MODF coords must be `rawX = tileY*T + u`,
+`rawY = tileX*T + v` because the viewer decodes `(M − rawY, M − rawX)`; (2) MCCV text scrambled —
+vertex layout is interleaved 9-8 rows, not row-major 17×17; painter now mirrors the mesh builder;
+(3) `LkAdtWriter` MCRF declared size was `4+…` instead of `8+…`, desyncing chunks carrying refs.
+Output is now a standalone map (`{map}.wdt` with MCCV flag, flat `{map}.wdl`, optional `--pm4-dir`
+PM4 copies); existing files never overwritten. 5 focused tests pass; solution builds clean; 9
+pre-existing unrelated Core.Tests failures remain. Spec:
+[190-rosetta-calibration-corpus](../specs/190-rosetta-calibration-corpus/spec.md). Next: user re-runs
+`rosetta-generate` into a fresh output dir and confirms objects render + labels legible (user-owned),
+then US2 reference-library builder.
 
 This file is the interchange for the next agent. It records only the current routing state. Read
 the owning spec for requirements and proof; read a workstream only when the spec links it.
