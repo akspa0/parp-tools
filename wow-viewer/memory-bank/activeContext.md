@@ -2,6 +2,12 @@
 
 Last updated: 2026-08-27
 
+**Spec 190 lane (2026-08-28, checkpoint 23).** Painted terrain grid lines and cell perimeter demarcation:
+1. Added `DrawRectOutline` and `DrawLine` to `RosettaAlphaPainter` and updated `BuildTileAlphaCanvas` to paint 1.2m perimeter borders and 1.0m object/label divider lines onto the 1024×1024 MCAL canvas.
+2. Updated `FillRect` with `Math.Max` for seamless non-destructive alpha blending across overlapping lines and text.
+3. Connected `options.PaintCellBorders` through `BuildTileAdt` in both LK and Alpha generation pipelines.
+4. 39 focused Rosetta tests pass green.
+
 **Spec 190 lane (2026-08-28, checkpoint 22).** Streaming tile generation and writing to eliminate out-of-memory crashes:
 1. Added streaming `AlphaWdtWriter.Write` directly to `FileStream`, writing tiles one-by-one to disk and patching the 64 KB `MAIN` table and `MPHD` offsets at the end.
 2. Made 1024×1024 text and checkers canvas generation on-demand via `BuildTileAlphaCanvas` and `BuildTileCheckersCanvas`, avoiding gigabytes of canvas allocations across all planned tiles in memory.

@@ -69,8 +69,45 @@ public static class RosettaAlphaPainter
         {
             int row = y * TexelsPerTile;
             for (int x = minX; x <= maxX; x++)
-                canvas[row + x] = value;
+                canvas[row + x] = Math.Max(canvas[row + x], value);
         }
+    }
+
+    /// <summary>Draws a straight line with the given line width in meters.</summary>
+    public static void DrawLine(
+        byte[] canvas, float u0, float v0, float u1, float v1, float lineWidthMeters, byte ink, float chunkSizeMeters)
+    {
+        ArgumentNullException.ThrowIfNull(canvas);
+        if (lineWidthMeters <= 0f)
+            return;
+
+        float half = lineWidthMeters / 2f;
+        float minU = MathF.Min(u0, u1) - half;
+        float maxU = MathF.Max(u0, u1) + half;
+        float minV = MathF.Min(v0, v1) - half;
+        float maxV = MathF.Max(v0, v1) + half;
+
+        FillRect(canvas, minU, minV, maxU, maxV, ink, chunkSizeMeters);
+    }
+
+    /// <summary>Draws the outline border of a rectangle with the given line width in meters.</summary>
+    public static void DrawRectOutline(
+        byte[] canvas, float u0, float v0, float u1, float v1, float lineWidthMeters, byte ink, float chunkSizeMeters)
+    {
+        ArgumentNullException.ThrowIfNull(canvas);
+        if (u1 <= u0 || v1 <= v0 || lineWidthMeters <= 0f)
+            return;
+
+        float half = lineWidthMeters / 2f;
+
+        // Top edge
+        FillRect(canvas, u0 - half, v0 - half, u1 + half, v0 + half, ink, chunkSizeMeters);
+        // Bottom edge
+        FillRect(canvas, u0 - half, v1 - half, u1 + half, v1 + half, ink, chunkSizeMeters);
+        // Left edge
+        FillRect(canvas, u0 - half, v0 - half, u0 + half, v1 + half, ink, chunkSizeMeters);
+        // Right edge
+        FillRect(canvas, u1 - half, v0 - half, u1 + half, v1 + half, ink, chunkSizeMeters);
     }
 
     /// <summary>

@@ -850,6 +850,37 @@ public class RosettaTilesetGeneratorTests
     }
 
     [Fact]
+    public void PaintTile_AlphaMap_PaintsCellBordersAndGridLines()
+    {
+        var assets = new List<RosettaAssetEntry>
+        {
+            Model("doodads/bench.mdx", 5f),
+        };
+        var options = new RosettaGeneratorOptions("GridLinesTest", PaintCellBorders: true);
+
+        RosettaGenerationResult result = RosettaTilesetGenerator.Generate(assets, options);
+        RosettaMapPlan map = SingleMap(result);
+        RosettaTilePlan tile = Assert.Single(map.Tiles);
+
+        // 1. With PaintCellBorders = true
+        byte[] canvasWithBorders = RosettaTilesetGenerator.BuildTileAlphaCanvas(tile, paintCellBorders: true);
+        int litWithBorders = canvasWithBorders.Count(static b => b > 0);
+
+        // 2. With PaintCellBorders = false
+        byte[] canvasWithoutBorders = RosettaTilesetGenerator.BuildTileAlphaCanvas(tile, paintCellBorders: false);
+        int litWithoutBorders = canvasWithoutBorders.Count(static b => b > 0);
+
+        Assert.True(litWithBorders > litWithoutBorders, "Expected cell borders to paint additional grid line texels onto the terrain canvas.");
+
+        // 3. Verify corner and edge texels of the cell are painted
+        RosettaPlacementRecord placement = Assert.Single(tile.Placements);
+        float texelSize = RosettaAlphaPainter.TexelSize(RosettaGeneratorOptions.ChunkSize);
+        int borderX = Math.Clamp((int)MathF.Floor(placement.CellU / texelSize), 0, RosettaAlphaPainter.TexelsPerTile - 1);
+        int borderY = Math.Clamp((int)MathF.Floor(placement.CellV / texelSize), 0, RosettaAlphaPainter.TexelsPerTile - 1);
+        Assert.True(canvasWithBorders[(borderY * RosettaAlphaPainter.TexelsPerTile) + borderX] > 0, "Expected cell perimeter border line to be lit.");
+    }
+
+    [Fact]
     public void Generate_AllowsFull4096Tiles()
     {
         var options = new RosettaGeneratorOptions("FullMapTest", MaxTilesPerMap: 4096);

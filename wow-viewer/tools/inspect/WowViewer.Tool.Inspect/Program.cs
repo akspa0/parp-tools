@@ -7801,7 +7801,7 @@ static void RunRosettaGenerate(string[] args)
 				}
 
 				// Build, write, drop. Holding every tile's ADT would exhaust memory on a full corpus.
-				File.WriteAllBytes(adtPath, LkAdtWriter.Build(RosettaTilesetGenerator.BuildTileAdt(map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters, map.CheckersTexture)));
+				File.WriteAllBytes(adtPath, LkAdtWriter.Build(RosettaTilesetGenerator.BuildTileAdt(map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters, map.CheckersTexture, options.PaintCellBorders)));
 				writtenTiles.Add((tile.TileX, tile.TileY));
 			}
 
@@ -7869,7 +7869,7 @@ static void RunRosettaGenerate(string[] args)
 				{
 					RosettaTilePlan tile = tilePlansByCoord[(tileX, tileY)];
 					LkAdtData lkAdt = RosettaTilesetGenerator.BuildTileAdt(
-						map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters, map.CheckersTexture);
+						map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters, map.CheckersTexture, options.PaintCellBorders);
 					return LkToAlphaConverter.ConvertTile(lkAdt, tile.TileY, tile.TileX);
 				},
 				allMdxNames,

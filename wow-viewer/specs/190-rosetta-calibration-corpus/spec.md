@@ -12,6 +12,18 @@ object at a known position, decode that synthetic data back through our own pipe
 complete labelled reference library, and automatically match real PM4 data against it. Also: we are
 not generating ADTs for tiles that have no ADT — synthesize them so no tile is skipped."
 
+> **Implementation checkpoint 23 (2026-08-28).** Painted terrain grid lines and cell perimeter demarcation.
+>
+> 1. **Terrain cell perimeter grid lines.** Added `DrawRectOutline` and `DrawLine` to `RosettaAlphaPainter` and updated
+>    `BuildTileAlphaCanvas` to paint 1.2m cell perimeter boundary lines and a 1.0m horizontal divider line separating
+>    the 3D object exhibit area from the label plate into the 1024×1024 MCAL Layer 2 canvas.
+> 2. **Multi-layer MCAL non-destructive blending.** Updated `FillRect` to use `Math.Max` so overlapping lines and corners
+>    blend seamlessly without clearing text ink.
+> 3. **Integrated CLI & generator support.** Connected `options.PaintCellBorders` through `BuildTileAdt` across both LK
+>    and Alpha generation pipelines.
+>
+> Verified: 39 focused `RosettaTilesetGeneratorTests` pass green.
+>
 > **Implementation checkpoint 22 (2026-08-28).** Streaming tile generation and writing to eliminate out-of-memory crashes.
 >
 > 1. **Streaming Alpha WDT writer (`AlphaWdtWriter.Write`).** Added streaming overload to `AlphaWdtWriter` that writes

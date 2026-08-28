@@ -642,13 +642,34 @@ public static class RosettaTilesetGenerator
     }
 
     /// <summary>
-    /// Builds the 1024x1024 MCAL Layer 1 text canvas on-demand for a single tile.
+    /// Builds the 1024x1024 MCAL Layer 1 text and grid canvas on-demand for a single tile.
     /// </summary>
-    public static byte[] BuildTileAlphaCanvas(RosettaTilePlan tile)
+    public static byte[] BuildTileAlphaCanvas(RosettaTilePlan tile, bool paintCellBorders = true)
     {
         ArgumentNullException.ThrowIfNull(tile);
 
         byte[] canvas = RosettaAlphaPainter.CreateCanvas();
+
+        if (paintCellBorders)
+        {
+            foreach (RosettaPlacementRecord placement in tile.Placements)
+            {
+                float u0 = placement.CellU;
+                float v0 = placement.CellV;
+                float u1 = placement.CellU + placement.CellSize;
+                float v1 = placement.CellV + placement.CellSize;
+                float bandV0 = placement.CellV + placement.ObjectBandSize;
+
+                // 1.2m grid line around the cell perimeter
+                RosettaAlphaPainter.DrawRectOutline(
+                    canvas, u0, v0, u1, v1, lineWidthMeters: 1.2f, ink: 220, RosettaGeneratorOptions.ChunkSize);
+
+                // 1.0m grid line separating object exhibit area from the label plate
+                RosettaAlphaPainter.DrawLine(
+                    canvas, u0, bandV0, u1, bandV0, lineWidthMeters: 1.0f, ink: 200, RosettaGeneratorOptions.ChunkSize);
+            }
+        }
+
         foreach (RosettaPlacementRecord placement in tile.Placements)
         {
             if (placement.LabelLines.Count == 0)
@@ -710,7 +731,8 @@ public static class RosettaTilesetGenerator
         string? groundTexture = null,
         string? inkTexture = null,
         float pedestalBevelMeters = 12.5f,
-        string? checkersTexture = null)
+        string? checkersTexture = null,
+        bool paintCellBorders = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(mapName);
         ArgumentNullException.ThrowIfNull(tile);
@@ -735,7 +757,7 @@ public static class RosettaTilesetGenerator
         IReadOnlyList<LkMcnkData> paintedChunks = RosettaTextPainter.PaintTile(
             blank.Chunks, rects, labels, RosettaGeneratorOptions.ChunkSize);
 
-        byte[]? alphaCanvas = tile.AlphaCanvas ?? (tilePlacements.Any(static p => p.LabelLines.Count > 0) ? BuildTileAlphaCanvas(tile) : null);
+        byte[]? alphaCanvas = tile.AlphaCanvas ?? (tilePlacements.Count > 0 ? BuildTileAlphaCanvas(tile, paintCellBorders) : null);
         byte[]? checkersCanvas = tile.CheckersCanvas ?? (tile.Pedestals is { Count: > 0 } ? BuildTileCheckersCanvas(tile, pedestalBevelMeters) : null);
 
         byte[][]? chunkLabelMaps = alphaCanvas is not null
