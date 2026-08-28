@@ -40,11 +40,13 @@ public sealed record RosettaGeneratorOptions(
     bool GroupByDesignkit = true,
     int KitDepth = 0,
     int MaxTilesPerMap = 4096,
-    string GroundTexture = @"tileset\ocean\westfallseafloor.blp",
+    string GroundTexture = @"tileset\westfall\westfallsand.blp",
     string InkTexture = @"tileset\generic\black.blp",
-    float PedestalHeightMeters = 4f,
+    string CheckersTexture = @"tileset\generic\checkers.blp",
+    float PedestalHeightMeters = -10f,
     float PedestalBevelMeters = 12.5f,
-    int LabelFontTexels = 6)
+    int LabelFontTexels = 6,
+    bool PaintCheckersOnPedestals = true)
 {
     public const float TileSize = 533.33333f;
     public const int ChunksPerTileAxis = 16;
@@ -65,6 +67,11 @@ public sealed record RosettaGeneratorOptions(
     /// </summary>
     public const string DefaultInkTexture = @"tileset\generic\black.blp";
 
+    /// <summary>
+    /// Diagnostic checkered texture painted under objects on the indented pedestal floor.
+    /// </summary>
+    public const string DefaultCheckersTexture = @"tileset\generic\checkers.blp";
+
     /// <summary>Label font pixel measured in MCAL texels; 6 gives ~3.1 m pixels, 14 characters a line.</summary>
     public const int DefaultLabelFontTexels = 6;
 
@@ -73,7 +80,7 @@ public sealed record RosettaGeneratorOptions(
     /// client actually ships, which is why it is a setting rather than a constant: the whole point
     /// of era-gating this generator is that a tile must not name assets that do not exist.
     /// </summary>
-    public const string DefaultGroundTexture = @"tileset\ocean\westfallseafloor.blp";
+    public const string DefaultGroundTexture = @"tileset\westfall\westfallsand.blp";
 
     /// <summary>Throws if the settings cannot produce a uniform chunk-aligned grid.</summary>
     public void Validate()
@@ -89,7 +96,6 @@ public sealed record RosettaGeneratorOptions(
         ArgumentOutOfRangeException.ThrowIfNegative(StartTileY);
         ArgumentException.ThrowIfNullOrWhiteSpace(GroundTexture);
         ArgumentException.ThrowIfNullOrWhiteSpace(InkTexture);
-        ArgumentOutOfRangeException.ThrowIfNegative(PedestalHeightMeters);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(PedestalBevelMeters);
         ArgumentOutOfRangeException.ThrowIfLessThan(LabelFontTexels, 1);
         ArgumentOutOfRangeException.ThrowIfNegative(KitDepth);
@@ -132,6 +138,7 @@ public sealed record RosettaPlacementRecord(
 /// <see cref="RosettaAlphaPainter"/>), or null when nothing was painted.
 /// </param>
 /// <param name="Pedestals">Object-band rectangles raised into a plinth by the height field.</param>
+/// <param name="CheckersCanvas">Tile-wide alpha canvas for diagnostic checkers pad under objects.</param>
 public sealed record RosettaTilePlan(
     int TileX,
     int TileY,
@@ -139,7 +146,8 @@ public sealed record RosettaTilePlan(
     IReadOnlyList<RosettaMccvRect> Rects,
     IReadOnlyList<RosettaLabel> Labels,
     byte[]? AlphaCanvas,
-    IReadOnlyList<RosettaPedestal> Pedestals);
+    IReadOnlyList<RosettaPedestal> Pedestals,
+    byte[]? CheckersCanvas = null);
 
 /// <summary>A raised platform under one cell's object, in tile canvas space.</summary>
 public sealed record RosettaPedestal(float U0, float V0, float U1, float V1, float Height);
@@ -175,7 +183,8 @@ public sealed record RosettaMapPlan(
     int BlockOriginY,
     int BlockSide,
     string GroundTexture,
-    string InkTexture);
+    string InkTexture,
+    string CheckersTexture = RosettaGeneratorOptions.DefaultCheckersTexture);
 
 public sealed record RosettaGenerationResult(
     string MapName,
@@ -340,7 +349,22 @@ public static class RosettaTilesetGenerator
         var kits = new List<KitLayout>(byKit.Count);
         foreach ((string kit, List<RosettaAssetEntry> kitAssets) in byKit)
         {
-            kitAssets.Sort(static (a, b) => string.CompareOrdinal(a.AssetPath, b.AssetPath));
+            // Museum exhibit curation:
+            // 1. Models (creatures, doodads, props) first, then WorldModels (buildings, structures)
+            // 2. Ordered by exhibit footprint size (smallest displays to largest displays)
+            kitAssets.Sort(static (a, b) =>
+            {
+                if (a.Kind != b.Kind)
+                    return a.Kind.CompareTo(b.Kind);
+
+                float extentA = MathF.Max(MathF.Abs(a.BoundsMax.X - a.BoundsMin.X), MathF.Abs(a.BoundsMax.Y - a.BoundsMin.Y));
+                float extentB = MathF.Max(MathF.Abs(b.BoundsMax.X - b.BoundsMin.X), MathF.Abs(b.BoundsMax.Y - b.BoundsMin.Y));
+
+                if (MathF.Abs(extentA - extentB) > 2.0f)
+                    return extentA.CompareTo(extentB);
+
+                return string.Compare(a.AssetPath, b.AssetPath, StringComparison.OrdinalIgnoreCase);
+            });
 
             var standard = new GridClass(options.CellChunks, options.LabelBandChunks);
             GridClass oversize = options.CellChunks >= RosettaGeneratorOptions.OversizeCellChunks
@@ -532,7 +556,6 @@ public static class RosettaTilesetGenerator
         var labelsByTile = new Dictionary<(int X, int Y), List<RosettaLabel>>();
         var rectsByTile = new Dictionary<(int X, int Y), List<RosettaMccvRect>>();
         var pedestalsByTile = new Dictionary<(int X, int Y), List<RosettaPedestal>>();
-        var alphaCanvasByTile = new Dictionary<(int X, int Y), byte[]>();
         var placements = new List<RosettaPlacementRecord>(cells.Count);
 
         foreach (LayoutCell cell in cells)
@@ -546,7 +569,6 @@ public static class RosettaTilesetGenerator
                 labelsByTile[key] = [];
                 rectsByTile[key] = [];
                 pedestalsByTile[key] = [];
-                alphaCanvasByTile[key] = RosettaAlphaPainter.CreateCanvas();
             }
 
             float centerU = cell.CellU + (cell.CellSize / 2f);
@@ -567,29 +589,11 @@ public static class RosettaTilesetGenerator
             list.Add(record);
             placements.Add(record);
 
-            if (options.PedestalHeightMeters > 0f)
+            if (options.PedestalHeightMeters != 0f)
             {
                 pedestalsByTile[key].Add(new RosettaPedestal(
                     cell.CellU, cell.CellV, cell.CellU + cell.CellSize, cell.CellV + cell.ObjectBandSize,
                     options.PedestalHeightMeters));
-            }
-
-            // Draw text into 1024x1024 MCAL canvas (0.52m / texel)
-            byte[] canvas = alphaCanvasByTile[key];
-            float pixel = cell.LabelPixelMeters;
-            float bandV0 = cell.CellV + cell.ObjectBandSize;
-            float lineAdvance = RosettaAlphaPainter.LineAdvanceMeters(pixel);
-            for (int line = 0; line < cell.LabelLines.Count; line++)
-            {
-                string text = cell.LabelLines[line];
-                if (text.Length == 0)
-                    continue;
-
-                float width = RosettaAlphaPainter.MeasureWidthMeters(text, pixel);
-                float inset = MathF.Floor(MathF.Max(0f, (cell.CellSize - width) / 2f) / pixel) * pixel;
-                RosettaAlphaPainter.DrawText(
-                    canvas, text, cell.CellU + inset, bandV0 + (line * lineAdvance),
-                    pixel, ink: 255, RosettaGeneratorOptions.ChunkSize);
             }
 
             AppendCellPaint(cell, labelsByTile[key], rectsByTile[key], options.PaintCellBorders);
@@ -600,7 +604,7 @@ public static class RosettaTilesetGenerator
         {
             tiles.Add(new RosettaTilePlan(
                 key.X, key.Y, tilePlacements, rectsByTile[key], labelsByTile[key],
-                alphaCanvasByTile[key], pedestalsByTile[key]));
+                AlphaCanvas: null, pedestalsByTile[key], CheckersCanvas: null));
         }
 
         // One index entry per (kit, map). A kit contributes several layout parts here — its standard
@@ -634,7 +638,66 @@ public static class RosettaTilesetGenerator
 
         return new RosettaMapPlan(
             mapName, tiles, placements, designkits, block.OriginX, block.OriginY, block.Side,
-            options.GroundTexture, options.InkTexture);
+            options.GroundTexture, options.InkTexture, options.CheckersTexture);
+    }
+
+    /// <summary>
+    /// Builds the 1024x1024 MCAL Layer 1 text canvas on-demand for a single tile.
+    /// </summary>
+    public static byte[] BuildTileAlphaCanvas(RosettaTilePlan tile)
+    {
+        ArgumentNullException.ThrowIfNull(tile);
+
+        byte[] canvas = RosettaAlphaPainter.CreateCanvas();
+        foreach (RosettaPlacementRecord placement in tile.Placements)
+        {
+            if (placement.LabelLines.Count == 0)
+                continue;
+
+            float pixel = placement.LabelPixelMeters;
+            float bandV0 = placement.CellV + placement.ObjectBandSize;
+            float lineAdvance = RosettaAlphaPainter.LineAdvanceMeters(pixel);
+            for (int line = 0; line < placement.LabelLines.Count; line++)
+            {
+                string text = placement.LabelLines[line];
+                if (text.Length == 0)
+                    continue;
+
+                float width = RosettaAlphaPainter.MeasureWidthMeters(text, pixel);
+                float inset = MathF.Floor(MathF.Max(0f, (placement.CellSize - width) / 2f) / pixel) * pixel;
+                RosettaAlphaPainter.DrawText(
+                    canvas, text, placement.CellU + inset, bandV0 + (line * lineAdvance),
+                    pixel, ink: 255, RosettaGeneratorOptions.ChunkSize);
+            }
+        }
+        return canvas;
+    }
+
+    /// <summary>
+    /// Builds the 1024x1024 MCAL checkers canvas on-demand for a single tile.
+    /// </summary>
+    public static byte[] BuildTileCheckersCanvas(RosettaTilePlan tile, float pedestalBevelMeters = 12.5f)
+    {
+        ArgumentNullException.ThrowIfNull(tile);
+
+        byte[] canvas = RosettaAlphaPainter.CreateCanvas();
+        if (tile.Pedestals is { Count: > 0 })
+        {
+            foreach (RosettaPlacementRecord placement in tile.Placements)
+            {
+                float insetU = MathF.Min(pedestalBevelMeters, placement.CellSize * 0.25f);
+                float insetV = MathF.Min(pedestalBevelMeters, placement.ObjectBandSize * 0.25f);
+                RosettaAlphaPainter.FillRect(
+                    canvas,
+                    placement.CellU + insetU,
+                    placement.CellV + insetV,
+                    placement.CellU + placement.CellSize - insetU,
+                    placement.CellV + placement.ObjectBandSize - insetV,
+                    value: 255,
+                    RosettaGeneratorOptions.ChunkSize);
+            }
+        }
+        return canvas;
     }
 
     /// <summary>
@@ -646,7 +709,8 @@ public static class RosettaTilesetGenerator
         RosettaTilePlan tile,
         string? groundTexture = null,
         string? inkTexture = null,
-        float pedestalBevelMeters = 12.5f)
+        float pedestalBevelMeters = 12.5f,
+        string? checkersTexture = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(mapName);
         ArgumentNullException.ThrowIfNull(tile);
@@ -663,18 +727,42 @@ public static class RosettaTilesetGenerator
         string effectiveInk = string.IsNullOrWhiteSpace(inkTexture)
             ? RosettaGeneratorOptions.DefaultInkTexture
             : inkTexture;
+        string effectiveCheckers = string.IsNullOrWhiteSpace(checkersTexture)
+            ? RosettaGeneratorOptions.DefaultCheckersTexture
+            : checkersTexture;
 
         LkAdtData blank = BlankAdtFactory.CreateBlank(mapName, tileX, tileY, effectiveGround);
         IReadOnlyList<LkMcnkData> paintedChunks = RosettaTextPainter.PaintTile(
             blank.Chunks, rects, labels, RosettaGeneratorOptions.ChunkSize);
 
-        byte[][]? chunkAlphaMaps = tile.AlphaCanvas is not null
-            ? RosettaAlphaPainter.SliceToChunks(tile.AlphaCanvas)
+        byte[]? alphaCanvas = tile.AlphaCanvas ?? (tilePlacements.Any(static p => p.LabelLines.Count > 0) ? BuildTileAlphaCanvas(tile) : null);
+        byte[]? checkersCanvas = tile.CheckersCanvas ?? (tile.Pedestals is { Count: > 0 } ? BuildTileCheckersCanvas(tile, pedestalBevelMeters) : null);
+
+        byte[][]? chunkLabelMaps = alphaCanvas is not null
+            ? RosettaAlphaPainter.SliceToChunks(alphaCanvas)
             : null;
-        bool hasAnyAlpha = chunkAlphaMaps is not null && chunkAlphaMaps.Any(static a => a.Length > 0);
-        List<string> textureNames = hasAnyAlpha
-            ? [effectiveGround, effectiveInk]
-            : [effectiveGround];
+        byte[][]? chunkCheckersMaps = checkersCanvas is not null
+            ? RosettaAlphaPainter.SliceToChunks(checkersCanvas)
+            : null;
+
+        bool hasAnyCheckers = chunkCheckersMaps is not null && chunkCheckersMaps.Any(static a => a.Length > 0);
+        bool hasAnyLabel = chunkLabelMaps is not null && chunkLabelMaps.Any(static a => a.Length > 0);
+
+        var textureNames = new List<string> { effectiveGround };
+        int checkersTexId = -1;
+        int labelTexId = -1;
+
+        if (hasAnyCheckers)
+        {
+            checkersTexId = textureNames.Count;
+            textureNames.Add(effectiveCheckers);
+        }
+
+        if (hasAnyLabel)
+        {
+            labelTexId = textureNames.Count;
+            textureNames.Add(effectiveInk);
+        }
 
         var mddf = new List<LkMddfEntry>();
         var modf = new List<LkModfEntry>();
@@ -726,19 +814,43 @@ public static class RosettaTilesetGenerator
 
             float[] chunkHeights = CreateChunkHeights(cx, cy, tile.Pedestals, pedestalBevelMeters);
 
-            byte[]? chunkAlpha = chunkAlphaMaps?[i];
-            bool chunkHasAlpha = chunkAlpha is { Length: > 0 };
-            IReadOnlyList<LkMclyEntry> layers = chunkHasAlpha
-                ? [new LkMclyEntry(TextureId: 0, Flags: 0, AlphaOffset: 0, EffectId: 0), new LkMclyEntry(TextureId: 1, Flags: 0, AlphaOffset: 0, EffectId: 0)]
-                : [new LkMclyEntry(TextureId: 0, Flags: 0, AlphaOffset: 0, EffectId: 0)];
+            byte[]? chunkCheckers = chunkCheckersMaps?[i];
+            byte[]? chunkLabel = chunkLabelMaps?[i];
+            bool hasChunkCheckers = chunkCheckers is { Length: > 0 } && checkersTexId >= 0;
+            bool hasChunkLabel = chunkLabel is { Length: > 0 } && labelTexId >= 0;
+
+            var layers = new List<LkMclyEntry>
+            {
+                new(TextureId: 0, Flags: 0, AlphaOffset: 0, EffectId: 0)
+            };
+
+            byte[]? combinedAlpha = null;
+
+            if (hasChunkCheckers && hasChunkLabel)
+            {
+                layers.Add(new LkMclyEntry(TextureId: (uint)checkersTexId, Flags: 0, AlphaOffset: 0, EffectId: 0));
+                layers.Add(new LkMclyEntry(TextureId: (uint)labelTexId, Flags: 0, AlphaOffset: (uint)chunkCheckers!.Length, EffectId: 0));
+                combinedAlpha = new byte[chunkCheckers.Length + chunkLabel!.Length];
+                chunkCheckers.CopyTo(combinedAlpha, 0);
+                chunkLabel.CopyTo(combinedAlpha, chunkCheckers.Length);
+            }
+            else if (hasChunkCheckers)
+            {
+                layers.Add(new LkMclyEntry(TextureId: (uint)checkersTexId, Flags: 0, AlphaOffset: 0, EffectId: 0));
+                combinedAlpha = chunkCheckers;
+            }
+            else if (hasChunkLabel)
+            {
+                layers.Add(new LkMclyEntry(TextureId: (uint)labelTexId, Flags: 0, AlphaOffset: 0, EffectId: 0));
+                combinedAlpha = chunkLabel;
+            }
+
+            bool chunkHasAlpha = combinedAlpha is { Length: > 0 };
 
             finalChunks[i] = new LkMcnkData
             {
                 IndexX = c.IndexX,
                 IndexY = c.IndexY,
-                // 0x40 = has_mccv. The readers here locate MCCV by scanning sub-chunk FourCCs,
-                // but a tile that carries vertex paint without advertising it is a trap for any
-                // consumer that trusts the flag - and this corpus exists to be consumed.
                 Flags = c.MccvColors is not null ? c.Flags | McnkHasMccvFlag : c.Flags,
                 AreaId = c.AreaId,
                 NLayers = layers.Count,
@@ -747,8 +859,8 @@ public static class RosettaTilesetGenerator
                 Heights = chunkHeights,
                 Normals = c.Normals,
                 ShadowMap = c.ShadowMap,
-                AlphaMapData = chunkHasAlpha ? chunkAlpha : null,
-                AlphaMapSize = chunkHasAlpha ? chunkAlpha!.Length : 0,
+                AlphaMapData = chunkHasAlpha ? combinedAlpha : null,
+                AlphaMapSize = chunkHasAlpha ? combinedAlpha!.Length : 0,
                 Layers = layers,
                 DoodadRefs = mddfRefsByChunk.TryGetValue(i, out List<int>? dr) ? dr : [],
                 WorldModelRefs = modfRefsByChunk.TryGetValue(i, out List<int>? wr) ? wr : [],
@@ -821,7 +933,9 @@ public static class RosettaTilesetGenerator
                         ? p.Height * (edgeDist / bevelMeters)
                         : p.Height;
 
-                    if (pedH > h)
+                    if (p.Height > 0f && pedH > h)
+                        h = pedH;
+                    else if (p.Height < 0f && pedH < h)
                         h = pedH;
                 }
 

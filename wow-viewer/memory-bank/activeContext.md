@@ -2,6 +2,39 @@
 
 Last updated: 2026-08-27
 
+**Spec 190 lane (2026-08-28, checkpoint 22).** Streaming tile generation and writing to eliminate out-of-memory crashes:
+1. Added streaming `AlphaWdtWriter.Write` directly to `FileStream`, writing tiles one-by-one to disk and patching the 64 KB `MAIN` table and `MPHD` offsets at the end.
+2. Made 1024×1024 text and checkers canvas generation on-demand via `BuildTileAlphaCanvas` and `BuildTileCheckersCanvas`, avoiding gigabytes of canvas allocations across all planned tiles in memory.
+3. Updated `RosettaMinimapPainter` to render downsampled text on-demand.
+4. Cleanly handled `--overwrite` across all output files (Alpha WDT, LK ADT/WDT/WDL, and minimap BLPs).
+5. Verified on 0.5.3 client: 1,720 tiles, 11,663 placements, 920 MB monolithic WDT written smoothly without OOM.
+6. 38 focused Rosetta tests pass green.
+
+**Spec 190 lane (2026-08-28, checkpoint 21).** Diagnostic `checkers.blp` texturing on indented terrain floors:
+1. Painted `tileset\generic\checkers.blp` under objects on the indented pedestal floor via `CheckersCanvas`, replicating authentic Blizzard model testing terrain.
+2. Supported 3-layer MCNK structures in `BuildTileAdt` (Layer 0: Sand, Layer 1: Checkers pad under object, Layer 2: Handwriting ink label) with concatenated MCAL chunks and correct offsets.
+3. Added `ResolveCheckersTexture` in `Program.cs` and `--checkers-texture` CLI option.
+4. Rendered matching checkered pattern on pedestal plateaus in `RosettaMinimapPainter`.
+5. 38 focused Rosetta tests pass green.
+
+**Spec 190 lane (2026-08-28, checkpoint 20).** Museum exhibit layout, handwriting font, compact cells & Westfall sand:
+1. `rosetta-generate` defaults to `CellChunks = 4, LabelBandChunks = 1`, packing 16 cells per tile (133.33m cells with 100m object area) so small objects don't waste empty space.
+2. Museum curation ordering: Models sorted by size (smallest -> largest) first, followed by WorldModels sorted by size.
+3. Added 5x7 cursive handwriting font in `RosettaTextPainter` supporting uppercase ('A'-'Z'), lowercase ('a'-'z'), digits, and punctuation, baked into the 1024x1024 MCAL Layer 1 texture map.
+4. Set default ground texture to `tileset\westfall\westfallsand.blp` and prioritized Westfall/Westwood sand auto-selection.
+5. 37 focused Rosetta tests pass green.
+
+**Spec 190 lane (2026-08-27, checkpoint 19).** Negative pedestal height support (sunken object viewing dips):
+1. Enabled negative pedestal heights (`PedestalHeightMeters = -10f` default; e.g. `-10.0`, `-20.0`) in `RosettaGeneratorOptions` and `Program.cs` to give sunken viewing dips with beveled ramps for WMOs whose origins sit below the mesh.
+2. Updated `CreateChunkHeights` to compute sunken dips when `p.Height < 0` with bevel ramp scaling.
+3. 34 focused Rosetta tests pass green, including `Generate_PedestalHeights_NegativeSunkenDipWithBevel`.
+
+**Spec 190 lane (2026-08-27, checkpoint 18).** Alpha WDT MCAL/MCLY tile transform alignment:
+1. `rosetta-generate --format alpha` in `Program.cs` now passes `(tile.TileY, tile.TileX)` to `AlphaWdtWriter.Build`, using the exact same coordinate transform as `LkWdtWriter.Write` and `RosettaMinimapPainter` (`map{tileY}_{tileX}.blp`).
+2. No protected format readers or writers were modified; `AlphaWdtWriter.cs` and `AlphaWdtReader.cs` remain completely untouched.
+3. MCAL/MCLY texture layers now align with the correct map tiles and minimap tiles.
+4. 33 focused Rosetta tests pass green, all 17 LkToAlpha tests pass green. Real 0.5.3 client visual proof remains operator-owned.
+
 **Spec 190 lane (2026-08-27, checkpoint 17).** Correction: Alpha Rosetta map bytes were not the proven defect; the retained fix is minimap-only.
 1. `rosetta-generate --format alpha` writes the monolithic map bytes directly from `AlphaWdtWriter.Build(...)`; no Rosetta post-write MDDF/MODF coordinate mutation remains.
 2. `RosettaMinimapPainter` now places model/WMO pins at the object-band center used by `RosettaTilesetGenerator`, not the whole label cell center.

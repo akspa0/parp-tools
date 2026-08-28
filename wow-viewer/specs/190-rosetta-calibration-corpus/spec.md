@@ -12,6 +12,67 @@ object at a known position, decode that synthetic data back through our own pipe
 complete labelled reference library, and automatically match real PM4 data against it. Also: we are
 not generating ADTs for tiles that have no ADT — synthesize them so no tile is skipped."
 
+> **Implementation checkpoint 22 (2026-08-28).** Streaming tile generation and writing to eliminate out-of-memory crashes.
+>
+> 1. **Streaming Alpha WDT writer (`AlphaWdtWriter.Write`).** Added streaming overload to `AlphaWdtWriter` that writes
+>    tiles one-by-one directly into a `FileStream`, keeping only one tile's data in memory at a time and patching the 64 KB
+>    `MAIN` index and `MPHD` offsets upon completion.
+> 2. **On-demand canvas generation.** Optimized `BuildMap` and `BuildTileAdt` so 1024×1024 MCAL text and checkers canvases
+>    are generated and sliced transiently per-tile via `BuildTileAlphaCanvas` and `BuildTileCheckersCanvas`, rather than
+>    allocating gigabytes of canvas buffers across all planned tiles upfront.
+> 3. **Streaming minimap renderer.** Updated `RosettaMinimapPainter` to render downsampled text on-demand without holding
+>    pre-rendered canvases for the entire corpus.
+> 4. **Safe file overwriting.** Handled `--overwrite` cleanly across all output files (Alpha WDT, LK ADT/WDT/WDL, and minimap BLPs).
+> 5. **End-to-end verified on 0.5.3 client.** Successfully generated full `RosettaAlpha` map (1,720 tiles, 11,663 placements,
+>    920 MB monolithic WDT, 1,720 minimap BLPs) with minimal, flat memory footprint.
+>
+> Verified: 38 focused `RosettaTilesetGeneratorTests` pass green, full client generation completes cleanly.
+>
+> **Implementation checkpoint 21 (2026-08-28).** Diagnostic `checkers.blp` texturing on indented terrain floors.
+>
+> 1. **Diagnostic `checkers.blp` testing pads.** Painted `tileset\generic\checkers.blp` under objects on the indented
+>    pedestal floor via `CheckersCanvas`, mirroring authentic Blizzard development/testing terrain techniques.
+> 2. **Multi-layer MCAL chunk blending.** Supported 3-layer MCNK structures in `BuildTileAdt` (Layer 0: Sand,
+>    Layer 1: Checkers pad under object, Layer 2: Handwriting ink label) with concatenated MCAL chunks and correct offsets.
+> 3. **Automatic checkers texture resolution.** Added `ResolveCheckersTexture` in `Program.cs` and CLI option `--checkers-texture`.
+> 4. **Minimap checkers pattern.** Rendered matching checkered pattern on pedestal plateaus in `RosettaMinimapPainter`.
+>
+> Verified: 38 focused `RosettaTilesetGeneratorTests` pass green.
+>
+> **Implementation checkpoint 20 (2026-08-28).** Museum exhibit layout, handwriting font, compact cells & Westfall sand.
+>
+> 1. **Compact 4-chunk museum cells.** Set CLI default to `CellChunks = 4, LabelBandChunks = 1` in `rosetta-generate`,
+>    increasing cell density from 4 to 16 cells per tile so small MDX/M2 objects do not waste large 266m areas.
+> 2. **Museum exhibition ordering.** Grouped assets by kind (Models first, then WorldModels) and sorted by exhibit
+>    footprint size (smallest to largest) with alphabetical grouping within size tiers.
+> 3. **Handwriting / cursive script font.** Added full 5x7 cursive handwriting font table to `RosettaTextPainter`
+>    covering uppercase ('A'-'Z'), lowercase ('a'-'z'), digits ('0'-'9'), and punctuation, baked into the 1024×1024 MCAL Layer 1 texture.
+> 4. **Westfall/Westwood sand base texture.** Updated default ground texture to `tileset\westfall\westfallsand.blp` and
+>    prioritized Westfall/Westwood sand in `ResolveGroundTexture`.
+>
+> Verified: 37 focused `RosettaTilesetGeneratorTests` pass green.
+>
+> **Implementation checkpoint 19 (2026-08-27).** Negative pedestal height support (sunken object viewing dips).
+>
+> 1. **Enabled negative pedestal heights (`PedestalHeightMeters = -10f` default).** Allowed negative
+>    height values (e.g. `-10.0`, `-20.0`) in `RosettaGeneratorOptions` and `Program.cs` so object viewing
+>    cells sink into the terrain mesh with beveled ramps, exposing the full bounding mass of WMOs whose
+>    local origin/feet sit below ground.
+> 2. **Mesh height computation (`CreateChunkHeights`).** Updated `CreateChunkHeights` to sink heights
+>    toward negative values when `p.Height < 0` with proper bevel scaling.
+>
+> Verified: 34 focused `RosettaTilesetGeneratorTests` pass including new `Generate_PedestalHeights_NegativeSunkenDipWithBevel`.
+>
+> **Implementation checkpoint 18 (2026-08-27).** Alpha WDT MCAL/MCLY tile transform alignment.
+>
+> 1. **Aligned Alpha tile dictionary keys in `Program.cs`.** `rosetta-generate --format alpha` now passes
+>    `(tile.TileY, tile.TileX)` to `AlphaWdtWriter.Build`, using the exact same coordinate transform
+>    as `LkWdtWriter.Write` and `RosettaMinimapPainter` (`map{tileY}_{tileX}.blp`).
+> 2. **Base writers and readers remain untouched.** No protected format readers or writers were mutated.
+> 3. **MCAL/MCLY texture layers now land on the exact correct tiles.**
+>
+> Verified: 33 focused `RosettaTilesetGeneratorTests` pass, all 17 `LkToAlphaRoundTripTests` pass.
+>
 > **Implementation checkpoint 17 (2026-08-27).** Correction to checkpoint 16: the Alpha WDT bytes
 > were not the proven defect. The reported mismatch was in new minimap tooling.
 >

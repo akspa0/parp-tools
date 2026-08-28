@@ -720,6 +720,46 @@ public class RosettaTilesetGeneratorTests
     }
 
     [Fact]
+    public void Generate_PedestalHeights_NegativeSunkenDipWithBevel()
+    {
+        var assets = new List<RosettaAssetEntry>
+        {
+            Model("world/test_sunken.mdx", 20f),
+        };
+        var options = new RosettaGeneratorOptions(
+            "SunkenTest",
+            PedestalHeightMeters: -10f,
+            PedestalBevelMeters: 12.5f);
+
+        RosettaGenerationResult result = RosettaTilesetGenerator.Generate(assets, options);
+        RosettaMapPlan map = SingleMap(result);
+        RosettaTilePlan tile = Assert.Single(map.Tiles);
+
+        Assert.NotEmpty(tile.Pedestals);
+        Assert.Equal(-10f, tile.Pedestals[0].Height);
+
+        RosettaPlacementRecord placement = Assert.Single(tile.Placements);
+        Assert.Equal(-10f, placement.RendererPosition.Z);
+        Assert.Equal(-10f, placement.RawPosition.Z);
+
+        LkAdtData adt = RosettaTilesetGenerator.BuildTileAdt(
+            map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters);
+
+        // Verify that some chunk heights are sunken to the negative pedestal height
+        float minHeight = 0f;
+        foreach (LkMcnkData chunk in adt.Chunks)
+        {
+            foreach (float h in chunk.Heights)
+            {
+                if (h < minHeight)
+                    minHeight = h;
+            }
+        }
+
+        Assert.Equal(-10f, minHeight, precision: 2);
+    }
+
+    [Fact]
     public void PaintTile_AlphaMap_GeneratesValidMcalAndLayers()
     {
         var assets = new List<RosettaAssetEntry>
@@ -732,22 +772,24 @@ public class RosettaTilesetGeneratorTests
         RosettaMapPlan map = SingleMap(result);
         RosettaTilePlan tile = Assert.Single(map.Tiles);
 
-        Assert.NotNull(tile.AlphaCanvas);
-        Assert.Equal(RosettaAlphaPainter.TexelsPerTile * RosettaAlphaPainter.TexelsPerTile, tile.AlphaCanvas.Length);
+        byte[] alphaCanvas = RosettaTilesetGenerator.BuildTileAlphaCanvas(tile);
+        Assert.NotNull(alphaCanvas);
+        Assert.Equal(RosettaAlphaPainter.TexelsPerTile * RosettaAlphaPainter.TexelsPerTile, alphaCanvas.Length);
 
         LkAdtData adt = RosettaTilesetGenerator.BuildTileAdt(
-            map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters);
+            map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters, options.CheckersTexture);
 
-        Assert.Equal(2, adt.TextureNames.Count);
+        Assert.Equal(3, adt.TextureNames.Count);
         Assert.Equal(options.GroundTexture, adt.TextureNames[0]);
-        Assert.Equal(options.InkTexture, adt.TextureNames[1]);
+        Assert.Equal(options.CheckersTexture, adt.TextureNames[1]);
+        Assert.Equal(options.InkTexture, adt.TextureNames[2]);
 
-        // Find a chunk that contains painted text alpha
+        // Find a chunk that contains painted alpha
         LkMcnkData? alphaChunk = adt.Chunks.FirstOrDefault(static c => c.AlphaMapData is { Length: > 0 });
         Assert.NotNull(alphaChunk);
-        Assert.Equal(2, alphaChunk.NLayers);
-        Assert.Equal(2, alphaChunk.Layers.Count);
-        Assert.Equal(2048, alphaChunk.AlphaMapData!.Length);
+        Assert.True(alphaChunk.NLayers >= 2);
+        Assert.True(alphaChunk.Layers.Count >= 2);
+        Assert.True(alphaChunk.AlphaMapData!.Length >= 2048);
     }
 
     [Fact]
@@ -764,10 +806,10 @@ public class RosettaTilesetGeneratorTests
         RosettaTilePlan tile = Assert.Single(map.Tiles);
 
         LkAdtData lkAdt = RosettaTilesetGenerator.BuildTileAdt(
-            map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters);
+            map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters, options.CheckersTexture);
         AlphaTileData alphaTile = LkToAlphaConverter.ConvertTile(lkAdt, tile.TileX, tile.TileY);
 
-        Assert.Equal(2, alphaTile.TextureNames.Count);
+        Assert.Equal(3, alphaTile.TextureNames.Count);
         Assert.NotNull(alphaTile.McalAlphaPack);
         Assert.Equal(1024, alphaTile.McalAlphaPack.GetLength(0));
         Assert.Equal(1024, alphaTile.McalAlphaPack.GetLength(1));
@@ -784,8 +826,27 @@ public class RosettaTilesetGeneratorTests
         bool readSuccess = AlphaWdtReader.TryReadTile(wdtBytes, tile.TileX, tile.TileY, out AlphaTileData? readTile);
         Assert.True(readSuccess);
         Assert.NotNull(readTile);
-        Assert.Equal(2, readTile.TextureNames.Count);
+        Assert.Equal(3, readTile.TextureNames.Count);
         Assert.Single(readTile.ModelPlacements);
+    }
+
+    [Fact]
+    public void PaintTile_CheckersAlpha_CoversPedestalIndentationPad()
+    {
+        var assets = new List<RosettaAssetEntry>
+        {
+            Model("doodads/chest.mdx", 5f),
+        };
+        var options = new RosettaGeneratorOptions("CheckersPadTest", PedestalHeightMeters: -10f, PedestalBevelMeters: 10f);
+
+        RosettaGenerationResult result = RosettaTilesetGenerator.Generate(assets, options);
+        RosettaMapPlan map = SingleMap(result);
+        RosettaTilePlan tile = Assert.Single(map.Tiles);
+
+        byte[] checkersCanvas = RosettaTilesetGenerator.BuildTileCheckersCanvas(tile, options.PedestalBevelMeters);
+        Assert.NotNull(checkersCanvas);
+        int litTexels = checkersCanvas.Count(static b => b == 255);
+        Assert.True(litTexels > 0, "Expected non-zero filled texels on the checkers alpha pad.");
     }
 
     [Fact]
@@ -879,6 +940,72 @@ public class RosettaTilesetGeneratorTests
         using SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32> decoded = blp.GetImage(0);
         Assert.Equal(256, decoded.Width);
         Assert.Equal(256, decoded.Height);
+    }
+
+    [Fact]
+    public void Generate_MuseumExhibitOrdering_SortsModelsBeforeWorldModelsAndSmallToLarge()
+    {
+        var assets = new List<RosettaAssetEntry>
+        {
+            new("doodads/large_building.wmo", RosettaAssetKind.WorldModel, new Vector3(-60f, -60f, 0f), new Vector3(60f, 60f, 40f)),
+            Model("doodads/small_potion.mdx", 2f),
+            Model("doodads/huge_dragon.mdx", 40f),
+            Model("doodads/medium_human.mdx", 6f),
+            new("doodads/small_hut.wmo", RosettaAssetKind.WorldModel, new Vector3(-20f, -20f, 0f), new Vector3(20f, 20f, 15f)),
+        };
+
+        RosettaGenerationResult result = RosettaTilesetGenerator.Generate(
+            assets, new RosettaGeneratorOptions("MuseumTest", GroupByDesignkit: false, CellChunks: 4, LabelBandChunks: 1));
+
+        // Museum ordering must place Models first (potion -> human -> dragon), then WorldModels (hut -> building)
+        Assert.Equal(5, result.Placements.Count);
+        Assert.Equal("doodads/small_potion.mdx", result.Placements[0].Asset.AssetPath);
+        Assert.Equal("doodads/medium_human.mdx", result.Placements[1].Asset.AssetPath);
+        Assert.Equal("doodads/huge_dragon.mdx", result.Placements[2].Asset.AssetPath);
+        Assert.Equal("doodads/small_hut.wmo", result.Placements[3].Asset.AssetPath);
+        Assert.Equal("doodads/large_building.wmo", result.Placements[4].Asset.AssetPath);
+    }
+
+    [Fact]
+    public void Generate_CompactCellLayout_PacksSixteenCellsPerTile()
+    {
+        var assets = Enumerable.Range(0, 16)
+            .Select(i => Model($"items/gem_{i:D2}.mdx", 4f))
+            .ToList();
+
+        RosettaGenerationResult result = RosettaTilesetGenerator.Generate(
+            assets, new RosettaGeneratorOptions("CompactTest", GroupByDesignkit: false, CellChunks: 4, LabelBandChunks: 1));
+
+        RosettaMapPlan map = SingleMap(result);
+        RosettaTilePlan tile = Assert.Single(map.Tiles);
+        Assert.Equal(16, tile.Placements.Count);
+        foreach (RosettaPlacementRecord placement in tile.Placements)
+        {
+            Assert.Equal(TileSize / 4f, placement.CellSize, 2);
+            Assert.Equal((TileSize / 4f) * (3f / 4f), placement.ObjectBandSize, 2);
+        }
+    }
+
+    [Fact]
+    public void RosettaTextPainter_HandwritingFont_RendersBothUpperAndLowercaseGlyphs()
+    {
+        string sampleText = "Creature/Murloc_01.mdx";
+        List<int> masks = RosettaTextPainter.BuildColumnMasks(sampleText);
+        Assert.NotEmpty(masks);
+        Assert.Equal(sampleText.Length * RosettaTextPainter.CharAdvanceColumns, masks.Count);
+
+        // Every character must contribute lit ink columns
+        for (int i = 0; i < sampleText.Length; i++)
+        {
+            int charStart = i * RosettaTextPainter.CharAdvanceColumns;
+            bool hasInk = false;
+            for (int col = 0; col < RosettaTextPainter.GlyphColumns; col++)
+            {
+                if (masks[charStart + col] != 0)
+                    hasInk = true;
+            }
+            Assert.True(hasInk, $"Character '{sampleText[i]}' at index {i} produced no ink mask.");
+        }
     }
 
     private static int AssertEntriesOnTile(byte[] bytes, string tag, int stride, int tileX, int tileY)

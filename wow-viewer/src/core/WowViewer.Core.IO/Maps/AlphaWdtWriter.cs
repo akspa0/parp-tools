@@ -35,6 +35,61 @@ public static class AlphaWdtWriter
     private const float TileWorldSize = 533.33333f;
     private const float ChunkWorldSize = TileWorldSize / 16f;
 
+    /// <summary>
+    /// Streams an Alpha 0.5.3 monolithic WDT directly to a file on disk, generating and writing tiles
+    /// one-by-one via <paramref name="tileProvider"/> to keep memory footprint minimal.
+    /// </summary>
+    public static void Write(
+        string filePath,
+        string mapName,
+        IReadOnlyList<(int tileX, int tileY)> tileKeys,
+        Func<int, int, AlphaTileData> tileProvider,
+        IReadOnlyList<string> allMdxNames,
+        IReadOnlyList<string> allWmoNames)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        ArgumentNullException.ThrowIfNull(tileKeys);
+        ArgumentNullException.ThrowIfNull(tileProvider);
+
+        using var fs = new FileStream(filePath, FileMode.Create, FileAccess.ReadWrite, FileShare.None, 65536);
+        using var bw = new BinaryWriter(fs, Encoding.ASCII, leaveOpen: true);
+
+        WriteChunk(bw, "MVER", 4, w => w.Write(18));
+
+        long mphdPosition = fs.Position;
+        WriteChunk(bw, "MPHD", MphdAlphaSize, static w => w.Write(new byte[MphdAlphaSize]));
+
+        long mainPosition = fs.Position;
+        byte[] mainData = BuildMainPayload();
+        WriteChunk(bw, "MAIN", mainData.Length, w => w.Write(mainData));
+
+        long mdnmStart = fs.Position;
+        byte[] mdnmData = BuildStringTable(allMdxNames);
+        WriteDataChunk(bw, "MDNM", mdnmData);
+
+        long monmStart = fs.Position;
+        byte[] monmData = BuildStringTable(allWmoNames);
+        WriteDataChunk(bw, "MONM", monmData);
+
+        PatchMphd(fs, mphdPosition, allMdxNames, mdnmStart, allWmoNames, monmStart);
+
+        var mdxNameIndex = BuildNameIndex(allMdxNames);
+        var wmoNameIndex = BuildNameIndex(allWmoNames);
+
+        foreach (var (tileX, tileY) in tileKeys.OrderBy(t => t.tileY * TilesPerAxis + t.tileX))
+        {
+            AlphaTileData tile = tileProvider(tileX, tileY);
+
+            int tileOffset = (int)fs.Position;
+            int tileHeaderSize = WriteTileData(bw, tile, tileX, tileY, allMdxNames, allWmoNames, mdxNameIndex, wmoNameIndex);
+            PatchMainEntry(mainData, tileY * TilesPerAxis + tileX, tileOffset, tileHeaderSize);
+        }
+
+        PatchMainPayload(fs, mainPosition, mainData);
+
+        bw.Flush();
+    }
+
     public static byte[] Build(string mapName, Dictionary<(int tileX, int tileY), AlphaTileData> tiles)
     {
         ArgumentNullException.ThrowIfNull(tiles);
@@ -48,7 +103,7 @@ public static class AlphaWdtWriter
         WriteChunk(bw, "MPHD", MphdAlphaSize, static w => w.Write(new byte[MphdAlphaSize]));
 
         long mainPosition = ms.Position;
-        byte[] mainData = BuildMainPayload(tiles);
+        byte[] mainData = BuildMainPayload();
         WriteChunk(bw, "MAIN", mainData.Length, w => w.Write(mainData));
 
         IReadOnlyList<string> allMdxNames = CollectMdxNames(tiles);
@@ -1230,6 +1285,12 @@ public static class AlphaWdtWriter
         return MathF.Sqrt(horizontalRadius * horizontalRadius + (heightRange / 2) * (heightRange / 2));
     }
 
+    private static byte[] BuildMainPayload()
+    {
+        byte[] data = new byte[TilesPerAxis * TilesPerAxis * MainEntrySize];
+        return data;
+    }
+
     private static byte[] BuildMainPayload(Dictionary<(int tileX, int tileY), AlphaTileData> tiles)
     {
         byte[] data = new byte[TilesPerAxis * TilesPerAxis * MainEntrySize];
@@ -1243,29 +1304,29 @@ public static class AlphaWdtWriter
         BinaryPrimitives.WriteInt32LittleEndian(mainData.AsSpan(entryOffset + 4), size);
     }
 
-    private static void PatchMainPayload(MemoryStream ms, long mainPosition, byte[] mainData)
+    private static void PatchMainPayload(Stream stream, long mainPosition, byte[] mainData)
     {
-        long pos = ms.Position;
-        ms.Position = mainPosition + ChunkHeaderSize;
-        ms.Write(mainData, 0, mainData.Length);
-        ms.Position = pos;
+        long pos = stream.Position;
+        stream.Position = mainPosition + ChunkHeaderSize;
+        stream.Write(mainData, 0, mainData.Length);
+        stream.Position = pos;
     }
 
-    private static void PatchMphd(MemoryStream ms, long mphdPosition,
+    private static void PatchMphd(Stream stream, long mphdPosition,
         IReadOnlyList<string> mdxNames, long mdnmStart,
         IReadOnlyList<string> wmoNames, long monmStart)
     {
-        long pos = ms.Position;
-        ms.Position = mphdPosition + ChunkHeaderSize;
+        long pos = stream.Position;
+        stream.Position = mphdPosition + ChunkHeaderSize;
 
         byte[] mphdData = new byte[MphdAlphaSize];
         BinaryPrimitives.WriteInt32LittleEndian(mphdData.AsSpan(0), mdxNames.Count > 0 ? mdxNames.Count + 1 : 0);
         BinaryPrimitives.WriteInt32LittleEndian(mphdData.AsSpan(4), (int)mdnmStart);
         BinaryPrimitives.WriteInt32LittleEndian(mphdData.AsSpan(8), wmoNames.Count > 0 ? wmoNames.Count + 1 : 0);
         BinaryPrimitives.WriteInt32LittleEndian(mphdData.AsSpan(12), (int)monmStart);
-        ms.Write(mphdData, 0, mphdData.Length);
+        stream.Write(mphdData, 0, mphdData.Length);
 
-        ms.Position = pos;
+        stream.Position = pos;
     }
 
     private static void WriteMcinOffsets(BinaryWriter bw, int[] offsets, List<byte[]> mcnkDataList, long mcinStart)

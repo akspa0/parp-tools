@@ -65,14 +65,15 @@ public static class RosettaMinimapPainter
                     }
                 }
 
-                // Flat top plateau (inset by ~2 pixels)
+                // Flat top plateau with diagnostic checkered pattern
                 int insetX = Math.Min(2, (px1 - px0) / 4);
                 int insetY = Math.Min(2, (py1 - py0) / 4);
                 for (int y = py0 + insetY; y <= py1 - insetY; y++)
                 {
                     for (int x = px0 + insetX; x <= px1 - insetX; x++)
                     {
-                        image[x, y] = ColorPedestalFlat;
+                        bool checker = (((x - (px0 + insetX)) / 3) + ((y - (py0 + insetY)) / 3)) % 2 == 0;
+                        image[x, y] = checker ? ColorPedestalFlat : ColorPedestalBevel;
                     }
                 }
 
@@ -85,7 +86,34 @@ public static class RosettaMinimapPainter
         }
 
         // 3. Render Text from downsampled 1024x1024 MCAL canvas
-        if (alphaCanvas != null && alphaCanvas.Length >= RosettaAlphaPainter.TexelsPerTile * RosettaAlphaPainter.TexelsPerTile)
+        byte[]? effectiveCanvas = alphaCanvas;
+        if (effectiveCanvas == null && tile.Placements.Any(static p => p.LabelLines.Count > 0))
+        {
+            effectiveCanvas = RosettaAlphaPainter.CreateCanvas();
+            foreach (RosettaPlacementRecord placement in tile.Placements)
+            {
+                if (placement.LabelLines.Count == 0)
+                    continue;
+
+                float pixel = placement.LabelPixelMeters;
+                float bandV0 = placement.CellV + placement.ObjectBandSize;
+                float lineAdvance = RosettaAlphaPainter.LineAdvanceMeters(pixel);
+                for (int line = 0; line < placement.LabelLines.Count; line++)
+                {
+                    string text = placement.LabelLines[line];
+                    if (text.Length == 0)
+                        continue;
+
+                    float width = RosettaAlphaPainter.MeasureWidthMeters(text, pixel);
+                    float inset = MathF.Floor(MathF.Max(0f, (placement.CellSize - width) / 2f) / pixel) * pixel;
+                    RosettaAlphaPainter.DrawText(
+                        effectiveCanvas, text, placement.CellU + inset, bandV0 + (line * lineAdvance),
+                        pixel, ink: 255, RosettaGeneratorOptions.ChunkSize);
+                }
+            }
+        }
+
+        if (effectiveCanvas != null && effectiveCanvas.Length >= RosettaAlphaPainter.TexelsPerTile * RosettaAlphaPainter.TexelsPerTile)
         {
             int factor = RosettaAlphaPainter.TexelsPerTile / MinimapResolution; // 1024 / 256 = 4
 
@@ -101,7 +129,7 @@ public static class RosettaMinimapPainter
                         int rowOffset = (srcY0 + dy) * RosettaAlphaPainter.TexelsPerTile;
                         for (int dx = 0; dx < factor; dx++)
                         {
-                            sum += alphaCanvas[rowOffset + srcX0 + dx];
+                            sum += effectiveCanvas[rowOffset + srcX0 + dx];
                         }
                     }
 

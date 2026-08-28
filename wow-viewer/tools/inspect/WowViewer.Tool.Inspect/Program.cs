@@ -7458,10 +7458,10 @@ static void RunRosettaGenerate(string[] args)
 	// the far edge of each cell are reserved for the painted name (one chunk == one text line).
 	int cellChunks = int.TryParse(GetOption(args, "--cell-chunks"), out int cc)
 		? cc
-		: RosettaGeneratorOptions.DefaultCellChunks;
+		: 4;
 	int labelBandChunks = int.TryParse(GetOption(args, "--label-band-chunks"), out int lbc)
 		? lbc
-		: RosettaGeneratorOptions.DefaultLabelBandChunks;
+		: 1;
 	bool noBorders = args.Contains("--no-cell-borders", StringComparer.OrdinalIgnoreCase);
 	// A client's asset folders ARE designkits, so that is the grouping unit: one kit never straddles
 	// a tile boundary or a map, which is what makes the index able to say where a kit lives.
@@ -7493,7 +7493,7 @@ static void RunRosettaGenerate(string[] args)
 	// default is exactly how the corpus ended up naming a texture the client does not ship.
 	string? requestedGroundTexture = GetOption(args, "--ground-texture");
 	string? requestedInkTexture = GetOption(args, "--ink-texture");
-	float pedestalHeight = float.TryParse(GetOption(args, "--pedestal-height"), out float ph) ? ph : 4f;
+	float pedestalHeight = float.TryParse(GetOption(args, "--pedestal-height"), out float ph) ? ph : -10f;
 	float pedestalBevel = float.TryParse(GetOption(args, "--pedestal-bevel"), out float pb) ? pb : 12.5f;
 
 	if (string.IsNullOrWhiteSpace(clientRoot) || string.IsNullOrWhiteSpace(output))
@@ -7724,9 +7724,12 @@ static void RunRosettaGenerate(string[] args)
 	}
 
 	string inkTexture = requestedInkTexture ?? RosettaGeneratorOptions.DefaultInkTexture;
+	string? requestedCheckersTexture = GetOption(args, "--checkers-texture");
+	string checkersTexture = ResolveCheckersTexture(known, requestedCheckersTexture);
 
 	Console.WriteLine($"Ground texture: {groundTexture}  [{groundTextureOrigin}]");
 	Console.WriteLine($"Ink texture:    {inkTexture}");
+	Console.WriteLine($"Checkers:       {checkersTexture}");
 
 	Console.WriteLine($"Era admission ({format}): {entries.Count} assets kept, "
 		+ $"{wrongEraModels} wrong-container models and {wrongEraWmos} wrong-version world models rejected.");
@@ -7743,6 +7746,7 @@ static void RunRosettaGenerate(string[] args)
 		MaxTilesPerMap: maxTilesPerMap,
 		GroundTexture: groundTexture,
 		InkTexture: inkTexture,
+		CheckersTexture: checkersTexture,
 		PedestalHeightMeters: pedestalHeight,
 		PedestalBevelMeters: pedestalBevel);
 
@@ -7788,12 +7792,16 @@ static void RunRosettaGenerate(string[] args)
 				// column first, row second.
 				string adtPath = Path.Combine(thisMapRoot, $"{map.MapName}_{tile.TileY}_{tile.TileX}.adt");
 				if (File.Exists(adtPath))
-					throw new InvalidOperationException(
-						$"Refusing to overwrite existing tile {adtPath}. The layout should have skipped it; " +
-						"delete the file or choose a different --output.");
+				{
+					if (!overwrite)
+						throw new InvalidOperationException(
+							$"Refusing to overwrite existing tile {adtPath}. The layout should have skipped it; " +
+							"delete the file or choose a different --output.");
+					File.Delete(adtPath);
+				}
 
 				// Build, write, drop. Holding every tile's ADT would exhaust memory on a full corpus.
-				File.WriteAllBytes(adtPath, LkAdtWriter.Build(RosettaTilesetGenerator.BuildTileAdt(map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters)));
+				File.WriteAllBytes(adtPath, LkAdtWriter.Build(RosettaTilesetGenerator.BuildTileAdt(map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters, map.CheckersTexture)));
 				writtenTiles.Add((tile.TileX, tile.TileY));
 			}
 
@@ -7801,10 +7809,14 @@ static void RunRosettaGenerate(string[] args)
 			// LkWdtWriter writes MAIN[y*64+x] for tuple (x, y); the viewer reads MAIN[tileX*64+tileY], so
 			// the tuples must be passed transposed: (tileY, tileX).
 			wdtPath = Path.Combine(thisMapRoot, $"{map.MapName}.wdt");
+			if (File.Exists(wdtPath) && overwrite)
+				File.Delete(wdtPath);
 			if (!File.Exists(wdtPath))
 				LkWdtWriter.Write(wdtPath, [.. writtenTiles.Select(static t => (t.tileY, t.tileX))], new LkWdtWriteOptions { HasMccv = true });
 
 			string wdlPath = Path.Combine(thisMapRoot, $"{map.MapName}.wdl");
+			if (File.Exists(wdlPath) && overwrite)
+				File.Delete(wdlPath);
 			if (!File.Exists(wdlPath))
 			{
 				var wdlTiles = map.Tiles.Select(static t =>
@@ -7821,22 +7833,47 @@ static void RunRosettaGenerate(string[] args)
 		if (alphaOutput)
 		{
 			// The 0.5.3 alpha container is monolithic: one WDT with every tile embedded, no ADTs.
+			// Stream and write each tile one-by-one directly to disk to prevent OOM.
 			string alphaRoot = thisMapRoot;
 			Directory.CreateDirectory(alphaRoot);
 
-			var alphaTiles = new Dictionary<(int tileX, int tileY), AlphaTileData>(map.Tiles.Count);
-			foreach (RosettaTilePlan tile in map.Tiles)
-			{
-				alphaTiles[(tile.TileX, tile.TileY)] = LkToAlphaConverter.ConvertTile(
-					RosettaTilesetGenerator.BuildTileAdt(map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters), tile.TileX, tile.TileY);
-			}
-
 			alphaWdtPath = Path.Combine(alphaRoot, $"{map.MapName}.wdt");
 			if (File.Exists(alphaWdtPath))
-				throw new InvalidOperationException(
-					$"Refusing to overwrite existing alpha WDT {alphaWdtPath}. Choose a clean --output.");
+			{
+				if (!overwrite)
+					throw new InvalidOperationException(
+						$"Refusing to overwrite existing alpha WDT {alphaWdtPath}. Choose a clean --output or pass --overwrite.");
+				File.Delete(alphaWdtPath);
+			}
 
-			File.WriteAllBytes(alphaWdtPath, AlphaWdtWriter.Build(map.MapName, alphaTiles));
+			// Collect unique model/wmo names from placements across all tiles for MDNM / MONM header
+			var allMdxNames = map.Placements
+				.Where(static p => p.Asset.Kind == RosettaAssetKind.Model)
+				.Select(static p => p.Asset.AssetPath)
+				.Distinct(StringComparer.OrdinalIgnoreCase)
+				.ToList();
+			var allWmoNames = map.Placements
+				.Where(static p => p.Asset.Kind == RosettaAssetKind.WorldModel)
+				.Select(static p => p.Asset.AssetPath)
+				.Distinct(StringComparer.OrdinalIgnoreCase)
+				.ToList();
+
+			var tilePlansByCoord = map.Tiles.ToDictionary(static t => (t.TileX, t.TileY));
+			var tileKeys = map.Tiles.Select(static t => (t.TileX, t.TileY)).ToList();
+
+			AlphaWdtWriter.Write(
+				alphaWdtPath,
+				map.MapName,
+				tileKeys,
+				(tileX, tileY) =>
+				{
+					RosettaTilePlan tile = tilePlansByCoord[(tileX, tileY)];
+					LkAdtData lkAdt = RosettaTilesetGenerator.BuildTileAdt(
+						map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters, map.CheckersTexture);
+					return LkToAlphaConverter.ConvertTile(lkAdt, tile.TileY, tile.TileX);
+				},
+				allMdxNames,
+				allWmoNames);
 		}
 
 		// Render and write 256x256 minimap BLP files for every generated tile.
@@ -7845,6 +7882,8 @@ static void RunRosettaGenerate(string[] args)
 		foreach (RosettaTilePlan tile in map.Tiles)
 		{
 			string minimapPath = Path.Combine(minimapDir, $"map{tile.TileY:D2}_{tile.TileX:D2}.blp");
+			if (File.Exists(minimapPath) && overwrite)
+				File.Delete(minimapPath);
 			byte[] blpBytes = RosettaMinimapPainter.RenderTileBlp(tile, tile.Pedestals, tile.AlphaCanvas);
 			File.WriteAllBytes(minimapPath, blpBytes);
 		}
@@ -8018,11 +8057,8 @@ static string? ResolveGroundTexture(
 		return RosettaGeneratorOptions.DefaultGroundTexture;
 	}
 
-	// Deterministic auto-pick. Specular/normal companions are not ground textures. Prefer flat,
-	// low-contrast surfaces - a seafloor or marble reads far better under painted MCCV labels than a
-	// busy grass or gravel tile, and those are what the ADT creator used - then fall back through
-	// plain bases to ordinal-first, so the choice never depends on enumeration order.
-	string[] tiers = ["seafloor", "marble", "sand", "dirtbase", "dirt", "rockbase", "rock", "base"];
+	// Prefer low-contrast sandy/earthy museum exhibition surfaces: Westfall/Westwood sand/dirt.
+	string[] tiers = ["westfallsand", "westfall", "westwood", "sand", "seafloor", "marble", "dirtbase", "dirt", "rockbase", "rock", "base"];
 	List<string> blps = [.. known
 		.Where(static p => p.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
 		.Where(static p => !p.EndsWith("_s.blp", StringComparison.OrdinalIgnoreCase))
@@ -8044,6 +8080,25 @@ static string? ResolveGroundTexture(
 
 	origin = "auto-selected from client (first available)";
 	return pool.Count > 0 ? pool[0] : null;
+}
+
+static string ResolveCheckersTexture(
+	IReadOnlyList<string> known,
+	string? requested)
+{
+	if (!string.IsNullOrWhiteSpace(requested))
+		return requested;
+
+	if (known.Contains(RosettaGeneratorOptions.DefaultCheckersTexture))
+		return RosettaGeneratorOptions.DefaultCheckersTexture;
+
+	string? hit = known.FirstOrDefault(static p =>
+		p.EndsWith(".blp", StringComparison.OrdinalIgnoreCase) &&
+		p.Contains("checkers", StringComparison.OrdinalIgnoreCase));
+	if (hit is not null)
+		return hit;
+
+	return RosettaGeneratorOptions.DefaultCheckersTexture;
 }
 
 static void RunPm4PlacementZ(string[] args)
